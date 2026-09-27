@@ -20,6 +20,7 @@ module Ark.Std
   ( StdError (..)
   , std
   , fnv1a64
+  , hexText
   , textOfId
   , idOfText
   ) where
@@ -147,6 +148,10 @@ fnv1a64 :: B.ByteString -> Word64
 fnv1a64 = B.foldl' step 0xcbf29ce484222325
   where
     step h b = (h `xor` fromIntegral b) * 0x00000100000001b3
+
+-- | Bytes as lowercase hex, two digits each; what 'Hex' computes.
+hexText :: B.ByteString -> Text
+hexText = T.pack . concatMap hexByte . B.unpack
 
 hexByte :: Word8 -> String
 hexByte w = [digit (w `shiftR` 4), digit (w .&. 0x0f)]

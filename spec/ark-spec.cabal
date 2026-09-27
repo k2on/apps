@@ -33,6 +33,8 @@ library
     Ark.Store
     Ark.Eval
     Ark.Verify
+    Ark.Log
+    Ark.Peer
 
 executable ark-vectors
   import:           shared

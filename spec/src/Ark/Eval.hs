@@ -28,7 +28,9 @@ module Ark.Eval
   , Fault (..)
   , Args
   , apply
+  , applyClosure
   , query
+  , queryClosure
   , evalHelper
   ) where
 
@@ -43,6 +45,7 @@ import qualified Data.Map.Strict as M
 import Data.Text (Text)
 import qualified Data.Text as T
 
+import Ark.Hash (Closure (..), closure)
 import Ark.IR
 import Ark.Schema
 import qualified Ark.Std as Std
@@ -92,7 +95,11 @@ data Stop
   | Halt Fault
 
 data Env = Env
-  { envMod :: Module
+  { envSchema :: Schema
+  , -- | The helpers in reach: a closure's, never a module's, so that an
+    -- entry replays against the helper versions its function was hashed
+    -- with.
+    envHelpers :: [Function]
   , envKind :: FnKind
   , envCtx :: Ctx
   , envArgs :: Args
@@ -122,13 +129,22 @@ verdict = halt . Verdict
 -- Outer 'Left' is a bug; inner 'Left' is the verdict; 'Right' is the store
 -- after the mutator and the changes it made, in order. On a verdict the
 -- store is unchanged — the whole entry rolls back, as one transaction.
+--
+-- 'apply' finds the function in a module by name and runs its current
+-- closure; 'applyClosure' runs a closure directly, which is how an entry
+-- replays: by the hash it recorded, whatever the module says now.
 apply :: Module -> Text -> Ctx -> Args -> Args -> Store -> Either EvalError (Either Refusal (Store, [Change]))
 apply m name ctx autos args st = do
   fn <- function m name
+  applyClosure (modSchema m) (closure m fn) ctx autos args st
+
+applyClosure :: Schema -> Closure -> Ctx -> Args -> Args -> Store -> Either EvalError (Either Refusal (Store, [Change]))
+applyClosure sch (Closure fn helpers) ctx autos args st = do
+  let name = fnName fn
   unless (fnKind fn == Mutator) (Left (WrongKind name (fnKind fn)))
   mapM_ (\(a, _) -> unless (M.member a autos) (Left (MissingAuto a))) (fnAutos fn)
   mapM_ (\(a, _) -> unless (M.member a args) (Left (MissingArg a))) (fnArgs fn)
-  let env = Env m Mutator ctx args autos M.empty
+  let env = Env sch helpers Mutator ctx args autos M.empty
   case runState (runExceptT (block env (fnBody fn))) (St st []) of
     (Right _, St st' chs) -> Right (Right (st', reverse chs))
     (Left (Returned _), St st' chs) -> Right (Right (st', reverse chs))
@@ -141,9 +157,14 @@ apply m name ctx autos args st = do
 query :: Module -> Text -> Args -> Store -> Either Fault Value
 query m name args st = do
   fn <- either (Left . Bug) Right (function m name)
+  queryClosure (modSchema m) (closure m fn) args st
+
+queryClosure :: Schema -> Closure -> Args -> Store -> Either Fault Value
+queryClosure sch (Closure fn helpers) args st = do
+  let name = fnName fn
   unless (fnKind fn == Query) (Left (Bug (WrongKind name (fnKind fn))))
   mapM_ (\(a, _) -> unless (M.member a args) (Left (Bug (MissingArg a)))) (fnArgs fn)
-  let env = Env m Query (Ctx "" "") args M.empty M.empty
+  let env = Env sch helpers Query (Ctx "" "") args M.empty M.empty
   case fst (runState (runExceptT (block env (fnBody fn))) (St st [])) of
     Right _ -> Left (Bug (NoReturn name))
     Left (Returned (Just v)) -> Right v
@@ -154,7 +175,8 @@ query m name args st = do
 evalHelper :: Module -> Text -> [Value] -> Either Fault Value
 evalHelper m name vals = do
   fn <- either (Left . Bug) Right (function m name)
-  let env = Env m Helper (Ctx "" "") M.empty M.empty M.empty
+  let Closure _ helpers = closure m fn
+      env = Env (modSchema m) helpers Helper (Ctx "" "") M.empty M.empty M.empty
       st0 = St (S.empty (modSchema m)) []
   case fst (runState (runExceptT (call env fn vals)) st0) of
     Right v -> Right v
@@ -263,7 +285,9 @@ eval env = \case
     pure (VBool (cmp op x y))
   ECall name es -> do
     vals <- mapM (eval env) es
-    fn <- either bug pure (function (envMod env) name)
+    fn <- case [h | h <- envHelpers env, fnName h == name] of
+      (h : _) -> pure h
+      [] -> bug (UnknownFunction name)
     unless (fnKind fn == Helper) (bug (WrongKind name (fnKind fn)))
     call env fn vals
   EStd f es -> do
@@ -372,7 +396,7 @@ cmp op a b = case op of
 select :: Env -> Plan -> Run [Value]
 select env p = do
   st <- lift (gets stStore)
-  tbl <- maybe (bug (UnknownTable (pTable p))) pure (lookupTable (modSchema (envMod env)) (pTable p))
+  tbl <- maybe (bug (UnknownTable (pTable p))) pure (lookupTable (envSchema env) (pTable p))
   keep <- maybe (pure (const True)) (predicate env) (pFilter p)
   let admitted = filter keep (S.scan st (pTable p))
       ordered = sortBy (orderBy (pOrder p)) admitted

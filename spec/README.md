@@ -26,17 +26,17 @@ maps, a rebase is recomputing a value. What it must be is exact.
 | 5 | `Ark.Std`, `Ark.Std.Unicode` | the standard library's semantics; the three pinned Unicode tables, generated from UCD 16.0.0 by `tools/GenUnicode.hs` |
 | 6 | `Ark.Eval` | what generated code must mean: `apply`, `query`, evaluation order, checked arithmetic, `select` |
 | 7 | `Ark.Encode` | the module as a value (its wire and storage form) and alpha-normalisation |
-| 8 | `Ark.Hash`, `Ark.Sha256` | the state hash and the function hash; SHA-256 itself, so the spec imports nothing |
+| 8 | `Ark.Hash`, `Ark.Sha256` | the state hash; closures and the function hash, which covers the helpers a function reaches; SHA-256 itself, so the spec imports nothing |
 | 9 | `Ark.Verify` | what a module must satisfy before anything runs, generates from or hashes it |
+| 10 | `Ark.Log` | an entry; a scope's log with the facts kept beside each entry; snapshots, the horizon, the state at any retained sequence from facts alone |
+| 11 | `Ark.Peer` | the replica: pending intents, the optimistic view, the rebase, applying by intent or by facts, divergence detection; the authority: sequencing, dedupe, verdicts, compaction, retirement, adoption of a scope; `localCommit`, the serverless peer |
 
 Not yet written, in the order they are needed (see `docs/arkdb.md`,
 Part 3, for the design each one implements):
 
 | § | module | what it will define |
 |---|---|---|
-| 10 | `Ark.Log` | an entry; a scope's log; the facts kept beside each entry; snapshots and the horizon |
-| 11 | `Ark.Peer` | the log machine every peer runs: pending intents, the overlay, the rebase, applying by intent or by facts; the authority role: sequencing, dedupe, verdicts, fan-out; adoption of a scope |
-| 12 | `Ark.Protocol` | the frames, as values, and the state machine that sends and receives them |
+| 12 | `Ark.Protocol` | the frames, as values, and the state machine that sends and receives them, including fan-out to many replicas and the `Need`/`Facts`/`Snapshot`/`Verify` exchanges |
 | 13 | `Ark.View` | incremental views: source, filter, join, take, tally; patches; `Rebuilt` |
 | 14 | `Ark.Live` | rooms, frames, `keep`, the second-`Hello` rule |
 | 15 | `Ark.Sim` | the seeded simulation that emits `rebase/` vectors |
@@ -69,6 +69,7 @@ caught by it.
 | `verify/` | a module and whether it verifies | §9 |
 | `eval/` | a module, a store, an entry; the changes, the rows, the hash | §6, §8 |
 | `hash/` | a store and its hash | §8 |
+| `rebase/` | a scripted session of replicas and an authority: the mutations, the deliveries, the expected view and confirmed hashes at each step | §10, §11 |
 
 ## Requirements that are not functions
 

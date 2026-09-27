@@ -26,6 +26,7 @@ module Ark.Encode
   , tyValue
   , normalize
   , normalizeModule
+  , calls
   ) where
 
 import Data.Map.Strict (Map)
@@ -51,14 +52,15 @@ int = VInt . fromIntegral
 list :: (a -> Value) -> [a] -> Value
 list f = VList . map f
 
--- | The whole module.
+-- | The whole module. Functions are carried without their dependency
+-- hashes here, because the module carries the helpers themselves.
 toValue :: Module -> Value
 toValue m =
   node
     "module"
     [ ("spec", int (modSpec m))
     , ("schema", schemaValue (modSchema m))
-    , ("functions", list functionValue (modFunctions m))
+    , ("functions", list (functionValue M.empty) (modFunctions m))
     , ("live", list (\(n, t) -> node "frame" [("name", txt n), ("ty", tyValue t)]) (modLive m))
     ]
 
@@ -91,12 +93,17 @@ tyValue = \case
   TList t -> node "list" [("of", tyValue t)]
   TStruct fs -> node "struct" [("fields", VStruct (M.map tyValue fs))]
 
--- | One function, as normalised. Names are not carried.
-functionValue :: Function -> Value
-functionValue fn0 =
+-- | One function, as normalised, together with the hashes of the helpers
+-- it calls — so that a function's hash moves when a helper it depends on
+-- changes, and an entry that names a hash names a whole meaning and not
+-- only a body. The caller supplies each called helper's hash
+-- ('Ark.Hash.closure' computes them recursively). Names are not carried.
+functionValue :: Map Text Value -> Function -> Value
+functionValue deps fn0 =
   node
     "fn"
     [ ("name", txt (fnName fn))
+    , ("deps", VStruct deps)
     , ("kind", txt (kind (fnKind fn)))
     , ("scope", maybe VNull txt (fnScope fn))
     , ("autos", list auto (fnAutos fn))
@@ -367,3 +374,45 @@ renumberPred ren next = \case
        in (q' : qs', n2)
     go n [] = ([], n)
     go n (q : qs) = let (q', n1) = renumberPred ren n q; (qs', n2) = go n1 qs in (q' : qs', n2)
+
+-- | The names of the helpers an expression tree calls, directly.
+calls :: Function -> [Text]
+calls fn = nubOrd (concatMap stmtCalls (fnBody fn))
+  where
+    nubOrd = M.keys . M.fromList . map (\x -> (x, ()))
+    stmtCalls = \case
+      SLet _ e -> exprCalls e
+      SIf c a b -> exprCalls c ++ concatMap stmtCalls a ++ concatMap stmtCalls b
+      SFor _ xs b -> exprCalls xs ++ concatMap stmtCalls b
+      SPut _ e -> exprCalls e
+      SDelete _ ks -> concatMap exprCalls ks
+      SRefuse e -> exprCalls e
+      SReturn me -> maybe [] exprCalls me
+    exprCalls = \case
+      ECall n es -> n : concatMap exprCalls es
+      EField e _ -> exprCalls e
+      EStruct fs -> concatMap exprCalls (M.elems fs)
+      EList es -> concatMap exprCalls es
+      ESome e -> exprCalls e
+      EMatch e _ a b -> concatMap exprCalls [e, a, b]
+      EIf c a b -> concatMap exprCalls [c, a, b]
+      EOp _ es -> concatMap exprCalls es
+      ECmp _ a b -> exprCalls a ++ exprCalls b
+      EStd _ es -> concatMap exprCalls es
+      EMap xs _ b -> exprCalls xs ++ exprCalls b
+      EFilter xs _ b -> exprCalls xs ++ exprCalls b
+      EAny xs _ b -> exprCalls xs ++ exprCalls b
+      EAll xs _ b -> exprCalls xs ++ exprCalls b
+      ESortBy xs _ k -> exprCalls xs ++ exprCalls k
+      EFold xs z _ _ b -> concatMap exprCalls [xs, z, b]
+      ESelect p -> planCalls p
+      EGet _ ks -> concatMap exprCalls ks
+      EExists _ ks -> concatMap exprCalls ks
+      _ -> []
+    planCalls p = maybe [] predCalls (pFilter p) ++ concatMap (planCalls . rPlan) (pRelated p)
+    predCalls = \case
+      PCmp _ _ e -> exprCalls e
+      PIn _ es -> concatMap exprCalls es
+      PAll ps -> concatMap predCalls ps
+      PAny ps -> concatMap predCalls ps
+      PNot q -> predCalls q

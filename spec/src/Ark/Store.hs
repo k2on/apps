@@ -38,6 +38,9 @@ module Ark.Store
   , put
   , delete
   , changeTable
+  , applyChange
+  , applyChanges
+  , merge
   , rows
   , tableNames
   ) where
@@ -227,3 +230,33 @@ noChild st tbl k rel =
       | any (\r -> M.lookup (relColumn rel) r == Just kv) (scan st (relChild rel)) ->
           Left (StillReferenced (tName tbl) (relChild rel))
     _ -> Right ()
+
+-- | §4.5 Apply a change as a fact.
+--
+-- A 'Change' an authority recorded is the effect an entry had, so applying
+-- it needs no constraint check — the constraints held when the authority
+-- applied the intent, and this is that same write arriving as a row.
+-- This is the second way to apply an entry (§6 of the design), and the
+-- one a peer takes for an entry whose function it does not hold. It is
+-- deliberately raw: a fact is not re-judged.
+applyChange :: Store -> Change -> Store
+applyChange st ch = case ch of
+  Add t row -> insert t row
+  Edit t _ row -> insert t row
+  Remove t row -> case lookupTable (stSchema st) t of
+    Just tbl -> st {stTables = M.adjust (M.delete (keyOf tbl row)) t (stTables st)}
+    Nothing -> st
+  where
+    insert t row = case lookupTable (stSchema st) t of
+      Just tbl -> st {stTables = M.insertWith M.union t (M.singleton (keyOf tbl row) row) (stTables st)}
+      Nothing -> st
+
+applyChanges :: Store -> [Change] -> Store
+applyChanges = foldl applyChange
+
+-- | The rows of two stores over one schema, together. A peer holds one
+-- store per scope it replicates, each with rows only in that scope's
+-- tables; a query that reads across scopes reads their merge. Where both
+-- hold a table, the left one wins, which never arises between scopes.
+merge :: Store -> Store -> Store
+merge a b = a {stTables = M.unionWith M.union (stTables a) (stTables b)}
