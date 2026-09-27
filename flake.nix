@@ -152,19 +152,20 @@
             '';
           });
 
-          # Google publishes an Android SDK for x86_64 Linux and for macOS
-          # and nothing else, so those are the systems that can host this
-          # build; every other Linux gets the x86_64-linux derivation below
-          # (see the end of this file) and a builder to run it on.
-          androidHost = pkgs.stdenv.hostPlatform.isDarwin || pkgs.stdenv.hostPlatform.system == "x86_64-linux";
-
-          # The Android SDK: platform 35 and its build tools, from nixpkgs
-          # (patched to run from the store; Google's own downloads would not).
-          android = pkgs.androidenv.composeAndroidPackages {
-            platformVersions = [ "35" ];
-            buildToolsVersions = [ "35.0.0" ];
-          };
-          sdkRoot = "${android.androidsdk}/libexec/android-sdk";
+          # The Android SDK the APK is built with. Google ships one for
+          # x86_64 Linux and for macOS; on Linux the SDK is assembled by hand
+          # instead (nix/android-sdk.nix) — the platform and build-tools jars
+          # from Google's zips, and aapt2, the one native tool AGP runs, from
+          # Debian's package for the host (nix/aapt2.nix) — so an ARM Linux
+          # builds the phone natively. macOS takes nixpkgs' androidenv.
+          aapt2 = pkgs.callPackage ./nix/aapt2.nix { stdenv = pkgs.clangStdenv; };
+          androidSdk = pkgs.callPackage ./nix/android-sdk.nix { inherit aapt2; };
+          sdkRoot =
+            if pkgs.stdenv.hostPlatform.isLinux then "${androidSdk}/${androidSdk.root}"
+            else "${(pkgs.androidenv.composeAndroidPackages {
+              platformVersions = [ "35" ];
+              buildToolsVersions = [ "35.0.0" ];
+            }).androidsdk}/libexec/android-sdk";
 
           # The phone: gradle over the SDK, the Kotlin runtime and client as a
           # composite build, and the generated domain — assembled offline from
@@ -181,7 +182,7 @@
             # too — a read-only one ends the build with no task run and no
             # message. The whole unpacked tree is writable instead.
             postUnpack = "chmod -R u+w source";
-            nativeBuildInputs = [ pkgs.gradle pkgs.jdk21 android.androidsdk ];
+            nativeBuildInputs = [ pkgs.gradle pkgs.jdk21 ];
             mitmCache = pkgs.gradle.fetchDeps {
               pkg = final.finalPackage;
               data = ./harken/android/deps.json;
@@ -227,9 +228,12 @@
             harken-desktop = crate { pname = "harken-desktop"; };
             arkdb-swift = swift;
             default = ark-spec;
-          } // lib.optionalAttrs androidHost {
             inherit harken-apk;
             harken-apk-deps = harken-apk.mitmCache.updateScript;
+          } // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+            # The two pieces an ARM Linux needed, on their own.
+            inherit aapt2;
+            android-sdk = androidSdk;
           };
 
           checks = {
@@ -300,13 +304,7 @@
       outputs = forAll perSystem;
     in
     {
-      # A Linux that Google ships no SDK for builds the phone as an
-      # x86_64-linux derivation: `nix build .#harken-apk` there needs a
-      # builder for that system (`--builders 'ssh://box x86_64-linux'`, or
-      # `extra-platforms` with binfmt on a 4 KiB-page kernel).
-      packages = lib.mapAttrs (system: o: o.packages // lib.optionalAttrs (!(o.packages ? harken-apk)) {
-        inherit (outputs.x86_64-linux.packages) harken-apk harken-apk-deps;
-      }) outputs;
+      packages = lib.mapAttrs (_: o: o.packages) outputs;
       checks = lib.mapAttrs (_: o: o.checks) outputs;
       devShells = lib.mapAttrs (_: o: o.devShells) outputs;
     };

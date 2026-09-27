@@ -27,39 +27,50 @@ From the repository root, with nothing but nix:
     nix build .#harken-apk            # result/harken-debug.apk
     adb install result/harken-debug.apk
 
-That is gradle over nixpkgs' Android SDK (platform 35, build-tools 35.0.0)
-with the app's whole Maven graph — AGP, Compose, the Kotlin plugins, OkHttp —
-recorded in `deps.json` and replayed offline, the way nixpkgs builds every
-gradle project; the Kotlin runtime and client come in through the composite
-build as they do on a laptop. A new dependency moves that file:
+That is gradle over an SDK the flake assembles itself (`nix/android-sdk.nix`):
+the platform 35 and build-tools 35.0.0 zips from Google, which are jars and
+scripts, and `aapt2` — the one native program AGP runs for `assembleDebug`
+(d8, apksigner and the rest are Java) — compiled from the Android sources
+for whatever machine is building (`nix/aapt2.nix`). The app's whole Maven
+graph — AGP, Compose, the Kotlin plugins, OkHttp — is recorded in
+`deps.json` and replayed offline, the way nixpkgs builds every gradle
+project; the Kotlin runtime and client come in through the composite build
+as they do on a laptop. A new dependency moves that file:
 
     nix run .#harken-apk-deps         # re-records deps.json; needs the network
 
-Four things the derivation says, each found by the build refusing without
-them. `buildToolsVersion = "35.0.0"` in `app/build.gradle.kts`, because AGP
-8.7 otherwise asks for its own default 34.0.0 and tries to *install* it into
-a read-only SDK. `android.aapt2FromMavenOverride`, because the aapt2 AGP
-fetches from Maven is an unpatched binary that cannot run from the store,
-where the SDK's copy can. The whole unpacked tree made writable, because
-stdenv unlocks only the source root and gradle writes `.gradle/` and
-`build/` inside the included build at `../../kotlin` too — read-only, the
-build *ends* after loading settings with no task run and no message, which
-is the least helpful failure in this file. And a writable `HOME`, because
-AGP keeps its state and the debug keystore under `~/.android` and the
-builder has none; that one at least says so. The APK is signed with the debug key every
+**Why aapt2 is compiled here, and how.** Google ships the SDK's native tools
+for x86_64 Linux and macOS only, so an ARM Linux machine has no `aapt2` to
+run — and the newest one anybody else prebuilds for aarch64 glibc, Debian's,
+is Android 14's and cannot read platform 35's `android.jar`, whose resource
+table is in Android 15's format. `nix/aapt2.nix` builds it at the
+`platform-tools-35.0.2` tag: sparse checkouts of `frameworks/base`
+(tools/aapt2, libs/androidfw) and `system/core` from GitHub's aosp-mirror,
+Debian's source tarball of the same release for the libraries whose
+repositories the mirror lacks (libbase, liblog, libziparchive, incfs's
+`map_ptr`, the native headers, fmtlib), and nixpkgs' protobuf 3.21, libpng,
+expat and zlib. `nix/aapt2/CMakeLists.txt` compiles the host source lists
+the Android build files name, with clang: Android's own toolchain, and the
+one that accepts C11 `atomic_int` in C++ where gcc needs Debian's patch.
+Two things glibc's libstdc++ wanted that Android's libc++ did not: a
+prelude that includes `<cstring>`, `<cstdint>` and `<limits>` ahead of
+androidfw and aapt2, and Debian's one-hunk patch giving incfs's `map_ptr`
+iterator the decrement `std::lower_bound` uses. About two hundred files,
+a few minutes, once. The same recipe is what the x86_64 build uses, which
+is where it was tested; the aarch64 build differs by nothing but the
+compiler's target.
+
+Three more things the derivation says so that AGP stays inside the store:
+`buildToolsVersion = "35.0.0"` in `app/build.gradle.kts`, because AGP 8.7
+otherwise asks for its own default 34.0.0 and tries to *install* it;
+`android.aapt2FromMavenOverride`, pointing at the aapt2 above rather than
+the x86_64 one AGP would fetch from Maven; the whole unpacked tree made
+writable, because stdenv unlocks only the source root and gradle writes
+`.gradle/` and `build/` inside the included build at `../../kotlin` too —
+read-only, the build *ends* after loading settings with no task run and no
+message; and a writable `HOME`, because AGP keeps its state and the debug
+keystore under `~/.android`. The APK is signed with the debug key every
 Android toolchain shares: it installs anywhere and belongs nowhere public.
-
-**On an ARM Linux machine the same command needs a builder.** Google ships
-the SDK's native tools — aapt2, zipalign — for x86_64 Linux and for macOS
-only, so the flake defines `harken-apk` as an x86_64-linux derivation on
-every other Linux, and nix has to be given somewhere to run it:
-
-    nix build .#harken-apk --builders 'ssh://box x86_64-linux'
-
-or a local `extra-platforms = x86_64-linux` through binfmt, which works on
-a 4 KiB-page kernel and corrupts itself on a 16 KiB one (Asahi). macOS
-builds it natively. This is the same fact the old harken met with the NDK,
-one layer down; the reasoning is in that repository's notes.
 
 With Android Studio (Ladybug or later) or a command-line SDK with platform 35
 and build-tools 35.0.0, plus JDK 17 or 21, the same project builds directly:
