@@ -217,10 +217,15 @@ data SchemaError
   | RefAcrossScopes TableName TableName
   | RefToCompositeKey TableName TableName
   | RefTypeMismatch TableName FieldName Ty Ty
-  | IdColumnWithoutRef TableName FieldName
-  | -- | An id-typed column must either be a key of its own table
-    -- (@TId self@) or a reference; an id naming a table it does not
-    -- reference is a declaration the store could not hold to.
+  | -- | An id-typed column must be a key of its own table (@TId self@), a
+    -- reference within its scope, or name a table in /another/ scope —
+    -- the unchecked cross-scope reference the design allows (a playlist
+    -- item naming a track in the library scope). An id naming a table in
+    -- its own scope without a reference is a declaration the store could
+    -- not hold to.
+    IdColumnWithoutRef TableName FieldName
+  | -- | A reference column's id type names a table other than the one it
+    -- references.
     IdNamesWrongTable TableName FieldName
   deriving (Eq, Show)
 
@@ -247,6 +252,7 @@ checkSchema sch =
            , TId of' <- [colTy c]
            , not (isRef t (colName c))
            , not (of' == tName t && colName c `elem` tKey t)
+           , tableScope sch of' == Just scope || tableScope sch of' == Nothing
            ]
     has t c = isJust (column t c)
     isRef t c = any ((== c) . refColumn) (tRefs t)
