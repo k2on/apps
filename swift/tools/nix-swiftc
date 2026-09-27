@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# swiftc as this platform's nix devshell needs it, for SwiftPM's SWIFT_EXEC.
+#
+# Two quirks, both of nixpkgs' Swift 5.8 on x86_64-linux:
+#  - the wrapper reports x86_64-pc-linux-gnu, and the standard library's
+#    modules were built for x86_64-unknown-linux-gnu, so `_Concurrency` is
+#    not found until the target is said explicitly;
+#  - the wrapper's clang finds no resource headers (stddef.h) when
+#    building Foundation's C modules, so the toolchain's own are pointed at.
+#
+# `-modulewrap` and `-frontend` must stay the first argument (the nix
+# wrapper dispatches on it), so the flags go after them.
+set -eu
+REAL="${ARKDB_REAL_SWIFTC:-$(command -v swiftc)}"
+# The unwrapped toolchain the nix wrapper execs: `prog=/nix/store/…-swift-5.8/bin/swiftc`.
+ROOT="$(sed -n 's/^prog=\(.*\)\/bin\/swiftc$/\1/p' "$REAL" 2>/dev/null | head -1)"
+INCLUDE="${ROOT:+$ROOT/lib/lldb/clang/include}"
+if [ -z "$INCLUDE" ] || [ ! -f "$INCLUDE/stddef.h" ]; then
+  INCLUDE="$(find "${ROOT:-/nix/store}" -maxdepth 6 -path '*/clang/include/stddef.h' 2>/dev/null | head -1)"
+  INCLUDE="${INCLUDE%/stddef.h}"
+fi
+FLAGS=(-target x86_64-unknown-linux-gnu)
+if [ -n "$INCLUDE" ]; then FLAGS+=(-Xcc "-I$INCLUDE"); fi
+case "${1:-}" in
+  -modulewrap) exec "$REAL" "$@" ;;
+  -frontend) shift; exec "$REAL" -frontend "${FLAGS[@]}" "$@" ;;
+  *) exec "$REAL" "${FLAGS[@]}" "$@" ;;
+esac

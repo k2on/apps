@@ -1,0 +1,422 @@
+//! §7.2 A module from a value: the inverse of [`super::encode`]
+//! (`Ark.Decode`). Strict about shape — an unknown tag, a missing field or
+//! a field of the wrong type is a [`DecodeError`] naming the path — and
+//! lenient about nothing. A decoded function's `names` is empty.
+
+use std::collections::BTreeMap;
+
+use crate::hash::Closure;
+use crate::ir::{Auto, CmpOp, Expr, FnKind, Function, Module, Op, Plan, Pred, Related, StdFn, Stmt, Sym};
+use crate::schema::{Column, Dir, Index, Ref, Relation, Schema, Scope, Table, Ty};
+use crate::value::{FieldName, Value};
+
+/// Where in the module the shape was wrong, and how.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DecodeError {
+    pub path: Vec<String>,
+    pub what: String,
+}
+
+impl std::fmt::Display for DecodeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.path.join("/"), self.what)
+    }
+}
+
+impl std::error::Error for DecodeError {}
+
+type D<T> = Result<T, DecodeError>;
+type Fields = BTreeMap<FieldName, Value>;
+
+fn err<T>(here: &[&str], what: impl Into<String>) -> D<T> {
+    Err(DecodeError {
+        path: here.iter().map(|s| s.to_string()).collect(),
+        what: what.into(),
+    })
+}
+
+/// The whole module (`Ark.Decode.fromValue`).
+pub fn module_from_value(v: &Value) -> D<Module> {
+    let fs = tagged(&["module"], "module", v)?;
+    let spec = int(&["module", "spec"], field(&fs, "spec")?)?;
+    let schema = schema_from_value(field(&fs, "schema")?)?;
+    let functions = list(&["module", "functions"], function_from_value, field(&fs, "functions")?)?;
+    let live = list(
+        &["module", "live"],
+        |x| {
+            let fs = tagged(&["frame"], "frame", x)?;
+            let n = text(&["frame", "name"], field(&fs, "name")?)?;
+            let t = ty_from_value(field(&fs, "ty")?)?;
+            Ok((n, t))
+        },
+        field(&fs, "live")?,
+    )?;
+    Ok(Module {
+        spec,
+        schema,
+        functions,
+        live,
+    })
+}
+
+/// A closure as an authority stores or sends one: `{ t: "closure", fn,
+/// helpers }` (`Ark.Decode.closureFromValue`).
+pub fn closure_from_value(v: &Value) -> D<Closure> {
+    let fs = tagged(&["closure"], "closure", v)?;
+    let function = function_from_value(field(&fs, "fn")?)?;
+    let helpers = list(&["closure", "helpers"], function_from_value, field(&fs, "helpers")?)?;
+    Ok(Closure { function, helpers })
+}
+
+pub fn schema_from_value(v: &Value) -> D<Schema> {
+    let scopes = list(&["schema"], scope, v)?;
+    Ok(Schema { scopes })
+}
+
+fn scope(x: &Value) -> D<Scope> {
+    let fs = tagged(&["scope"], "scope", x)?;
+    let name = text(&["scope", "name"], field(&fs, "name")?)?;
+    let tables = list(&["scope", &name], table, field(&fs, "tables")?)?;
+    Ok(Scope { name, tables })
+}
+
+fn table(x: &Value) -> D<Table> {
+    let fs = tagged(&["table"], "table", x)?;
+    let name = text(&["table", "name"], field(&fs, "name")?)?;
+    let here = |k: &'static str| vec!["table", name.as_str(), k];
+    let columns = list(&here("columns"), column, field(&fs, "columns")?)?;
+    let key = list(&here("key"), |k| text(&here("key"), k), field(&fs, "key")?)?;
+    let indexes = list(&here("indexes"), index, field(&fs, "indexes")?)?;
+    let refs = list(&here("refs"), reference, field(&fs, "refs")?)?;
+    Ok(Table {
+        name,
+        columns,
+        key,
+        indexes,
+        refs,
+    })
+}
+
+fn column(x: &Value) -> D<Column> {
+    let fs = tagged(&["column"], "column", x)?;
+    let name = text(&["column", "name"], field(&fs, "name")?)?;
+    let ty = ty_from_value(field(&fs, "ty")?)?;
+    let nullable = bool(&["column", &name, "nullable"], field(&fs, "nullable")?)?;
+    Ok(Column { name, ty, nullable })
+}
+
+fn index(x: &Value) -> D<Index> {
+    let fs = tagged(&["index"], "index", x)?;
+    let columns = list(&["index", "columns"], |c| text(&["index", "columns"], c), field(&fs, "columns")?)?;
+    let unique = bool(&["index", "unique"], field(&fs, "unique")?)?;
+    Ok(Index { columns, unique })
+}
+
+fn reference(x: &Value) -> D<Ref> {
+    let fs = tagged(&["ref"], "ref", x)?;
+    let column = text(&["ref", "column"], field(&fs, "column")?)?;
+    let table = text(&["ref", "table"], field(&fs, "table")?)?;
+    Ok(Ref { column, table })
+}
+
+pub fn ty_from_value(v: &Value) -> D<Ty> {
+    let (t, fs) = tagged_any(&["ty"], v)?;
+    Ok(match t.as_str() {
+        "bool" => Ty::Bool,
+        "int" => Ty::Int,
+        "text" => Ty::Text,
+        "bytes" => Ty::Bytes,
+        "id" => Ty::Id(text(&["ty", "id"], field(&fs, "table")?)?),
+        "enum" => Ty::Enum(list(&["ty", "enum"], |x| text(&["ty", "enum"], x), field(&fs, "variants")?)?),
+        "option" => Ty::Option(Box::new(ty_from_value(field(&fs, "of")?)?)),
+        "list" => Ty::List(Box::new(ty_from_value(field(&fs, "of")?)?)),
+        "struct" => {
+            let m = struct_map(&["ty", "struct"], field(&fs, "fields")?)?;
+            let mut out = BTreeMap::new();
+            for (k, v) in m {
+                out.insert(k.clone(), ty_from_value(v)?);
+            }
+            Ty::Struct(out)
+        }
+        other => return err(&["ty"], format!("unknown type tag {other}")),
+    })
+}
+
+pub fn function_from_value(v: &Value) -> D<Function> {
+    let fs = tagged(&["fn"], "fn", v)?;
+    let name = text(&["fn", "name"], field(&fs, "name")?)?;
+    let here: Vec<&str> = vec!["fn", &name];
+    let kind_path = [here.as_slice(), &["kind"]].concat();
+    let kind = match text(&kind_path, field(&fs, "kind")?)?.as_str() {
+        "mutator" => FnKind::Mutator,
+        "query" => FnKind::Query,
+        "helper" => FnKind::Helper,
+        other => return err(&here, format!("unknown kind {other}")),
+    };
+    let scope_path = [here.as_slice(), &["scope"]].concat();
+    let scope = optional(|x| text(&scope_path, x), field(&fs, "scope")?)?;
+    let autos = list(&[here.as_slice(), &["autos"]].concat(), auto, field(&fs, "autos")?)?;
+    let args = list(&[here.as_slice(), &["args"]].concat(), arg, field(&fs, "args")?)?;
+    let ret = optional(ty_from_value, field(&fs, "ret")?)?;
+    let body = list(&[here.as_slice(), &["body"]].concat(), |x| stmt(&here, x), field(&fs, "body")?)?;
+    Ok(Function {
+        name,
+        kind,
+        scope,
+        autos,
+        args,
+        ret,
+        body,
+        names: BTreeMap::new(),
+    })
+}
+
+fn auto(x: &Value) -> D<(String, Auto)> {
+    let (t, fs) = tagged_any(&["auto"], x)?;
+    let n = text(&["auto", "name"], field(&fs, "name")?)?;
+    match t.as_str() {
+        "new_id" => {
+            let tb = text(&["auto", &n], field(&fs, "table")?)?;
+            Ok((n, Auto::NewId(tb)))
+        }
+        "now" => Ok((n, Auto::Now)),
+        other => err(&["auto", &n], format!("unknown auto {other}")),
+    }
+}
+
+fn arg(x: &Value) -> D<(String, Ty)> {
+    let fs = tagged(&["arg"], "arg", x)?;
+    let n = text(&["arg", "name"], field(&fs, "name")?)?;
+    let t = ty_from_value(field(&fs, "ty")?)?;
+    Ok((n, t))
+}
+
+fn stmt(here: &[&str], v: &Value) -> D<Stmt> {
+    let (t, fs) = tagged_any(here, v)?;
+    let p: Vec<&str> = [here, &[t.as_str()]].concat();
+    Ok(match t.as_str() {
+        "let" => Stmt::Let(sym(&p, field(&fs, "sym")?)?, expr(&p, field(&fs, "e")?)?),
+        "if" => Stmt::If(
+            expr(&p, field(&fs, "c")?)?,
+            list(&p, |x| stmt(&p, x), field(&fs, "then")?)?,
+            list(&p, |x| stmt(&p, x), field(&fs, "else")?)?,
+        ),
+        "for" => Stmt::For(
+            sym(&p, field(&fs, "sym")?)?,
+            expr(&p, field(&fs, "in")?)?,
+            list(&p, |x| stmt(&p, x), field(&fs, "body")?)?,
+        ),
+        "put" => Stmt::Put(text(&p, field(&fs, "table")?)?, expr(&p, field(&fs, "row")?)?),
+        "delete" => Stmt::Delete(text(&p, field(&fs, "table")?)?, list(&p, |x| expr(&p, x), field(&fs, "key")?)?),
+        "refuse" => Stmt::Refuse(expr(&p, field(&fs, "e")?)?),
+        "return" => Stmt::Return(optional(|x| expr(&p, x), field(&fs, "e")?)?),
+        other => return err(here, format!("unknown statement {other}")),
+    })
+}
+
+fn expr(here: &[&str], v: &Value) -> D<Expr> {
+    let (t, fs) = tagged_any(here, v)?;
+    let p: Vec<&str> = [here, &[t.as_str()]].concat();
+    let e = |k: &str| -> D<Box<Expr>> { Ok(Box::new(expr(&p, field(&fs, k)?)?)) };
+    let s = |k: &str| -> D<Sym> { sym(&p, field(&fs, k)?) };
+    let es = |k: &str| -> D<Vec<Expr>> { list(&p, |x| expr(&p, x), field(&fs, k)?) };
+    Ok(match t.as_str() {
+        "lit" => Expr::Lit(field(&fs, "v")?.clone()),
+        "arg" => Expr::Arg(text(&p, field(&fs, "name")?)?),
+        "auto" => Expr::Auto(text(&p, field(&fs, "name")?)?),
+        "var" => Expr::Var(s("sym")?),
+        "ctx_user" => Expr::CtxUser,
+        "ctx_session" => Expr::CtxSession,
+        "field" => Expr::Field(e("e")?, text(&p, field(&fs, "name")?)?),
+        "struct" => {
+            let m = struct_map(&p, field(&fs, "fields")?)?;
+            let mut out = BTreeMap::new();
+            for (k, v) in m {
+                out.insert(k.clone(), expr(&p, v)?);
+            }
+            Expr::Struct(out)
+        }
+        "list" => Expr::List(es("items")?),
+        "some" => Expr::Some(e("e")?),
+        "none" => Expr::None(ty_from_value(field(&fs, "ty")?)?),
+        "match" => Expr::Match(e("e")?, s("sym")?, e("some")?, e("none")?),
+        "ife" => Expr::If(e("c")?, e("then")?, e("else")?),
+        "op" => {
+            let name = text(&p, field(&fs, "op")?)?;
+            let op = Op::parse(&name).ok_or_else(|| DecodeError {
+                path: strings(&p),
+                what: format!("unknown operator {name}"),
+            })?;
+            Expr::Op(op, es("args")?)
+        }
+        "cmp" => Expr::Cmp(cmp_op(&p, field(&fs, "op")?)?, e("l")?, e("r")?),
+        "call" => Expr::Call(text(&p, field(&fs, "fn")?)?, es("args")?),
+        "std" => {
+            let name = text(&p, field(&fs, "fn")?)?;
+            let f = StdFn::parse(&name).ok_or_else(|| DecodeError {
+                path: strings(&p),
+                what: format!("unknown standard function {name}"),
+            })?;
+            Expr::Std(f, es("args")?)
+        }
+        "map" => Expr::Map(e("in")?, s("sym")?, e("body")?),
+        "filter" => Expr::Filter(e("in")?, s("sym")?, e("body")?),
+        "any" => Expr::Any(e("in")?, s("sym")?, e("body")?),
+        "all" => Expr::All(e("in")?, s("sym")?, e("body")?),
+        "sort_by" => Expr::SortBy(e("in")?, s("sym")?, e("key")?),
+        "fold" => Expr::Fold(e("in")?, e("init")?, s("acc")?, s("sym")?, e("body")?),
+        "select" => Expr::Select(Box::new(plan(&p, field(&fs, "plan")?)?)),
+        "get" => Expr::Get(text(&p, field(&fs, "table")?)?, es("key")?),
+        "exists" => Expr::Exists(text(&p, field(&fs, "table")?)?, es("key")?),
+        other => return err(here, format!("unknown expression {other}")),
+    })
+}
+
+fn plan(here: &[&str], v: &Value) -> D<Plan> {
+    let fs = tagged(here, "plan", v)?;
+    let table = text(here, field(&fs, "table")?)?;
+    let inner: Vec<&str> = [here, &[table.as_str()]].concat();
+    let filter = optional(|x| pred(&inner, x), field(&fs, "filter")?)?;
+    let order = list(
+        here,
+        |x| {
+            let fs = tagged(here, "by", x)?;
+            let c = text(here, field(&fs, "column")?)?;
+            let d = match text(here, field(&fs, "dir")?)?.as_str() {
+                "asc" => Dir::Asc,
+                "desc" => Dir::Desc,
+                other => return err(here, format!("unknown direction {other}")),
+            };
+            Ok((c, d))
+        },
+        field(&fs, "order")?,
+    )?;
+    let limit = optional(|x| int(here, x), field(&fs, "limit")?)?;
+    let related = list(
+        here,
+        |x| {
+            let fs = tagged(here, "related", x)?;
+            let name = text(here, field(&fs, "name")?)?;
+            let parent = text(here, field(&fs, "parent")?)?;
+            let child = text(here, field(&fs, "child")?)?;
+            let column = text(here, field(&fs, "column")?)?;
+            let sub: Vec<&str> = [here, &[name.as_str()]].concat();
+            let pl = plan(&sub, field(&fs, "plan")?)?;
+            Ok(Related {
+                name,
+                relation: Relation { parent, child, column },
+                plan: pl,
+            })
+        },
+        field(&fs, "related")?,
+    )?;
+    Ok(Plan {
+        table,
+        filter,
+        order,
+        limit,
+        related,
+    })
+}
+
+fn pred(here: &[&str], v: &Value) -> D<Pred> {
+    let (t, fs) = tagged_any(here, v)?;
+    Ok(match t.as_str() {
+        "pcmp" => Pred::Cmp(
+            text(here, field(&fs, "column")?)?,
+            cmp_op(here, field(&fs, "op")?)?,
+            expr(here, field(&fs, "e")?)?,
+        ),
+        "pin" => Pred::In(text(here, field(&fs, "column")?)?, list(here, |x| expr(here, x), field(&fs, "items")?)?),
+        "pall" => Pred::All(list(here, |x| pred(here, x), field(&fs, "items")?)?),
+        "pany" => Pred::Any(list(here, |x| pred(here, x), field(&fs, "items")?)?),
+        "pnot" => Pred::Not(Box::new(pred(here, field(&fs, "e")?)?)),
+        other => return err(here, format!("unknown predicate {other}")),
+    })
+}
+
+fn cmp_op(here: &[&str], v: &Value) -> D<CmpOp> {
+    let name = text(here, v)?;
+    CmpOp::parse(&name).ok_or_else(|| DecodeError {
+        path: strings(here),
+        what: format!("unknown comparison {name}"),
+    })
+}
+
+// Primitives ------------------------------------------------------------
+
+fn strings(here: &[&str]) -> Vec<String> {
+    here.iter().map(|s| s.to_string()).collect()
+}
+
+fn tagged(here: &[&str], want: &str, v: &Value) -> D<Fields> {
+    let (t, fs) = tagged_any(here, v)?;
+    if t == want {
+        Ok(fs)
+    } else {
+        err(here, format!("expected {want}, found {t}"))
+    }
+}
+
+fn tagged_any(here: &[&str], v: &Value) -> D<(String, Fields)> {
+    match v {
+        Value::Struct(fs) => match fs.get("t") {
+            Some(Value::Text(t)) => Ok((t.clone(), fs.clone())),
+            _ => err(here, "a node needs a text tag \"t\""),
+        },
+        _ => err(here, "expected a struct"),
+    }
+}
+
+fn field<'a>(fs: &'a Fields, k: &str) -> D<&'a Value> {
+    fs.get(k).ok_or_else(|| DecodeError {
+        path: vec![k.to_string()],
+        what: "missing field".into(),
+    })
+}
+
+fn optional<T>(f: impl FnOnce(&Value) -> D<T>, v: &Value) -> D<Option<T>> {
+    match v {
+        Value::Null => Ok(None),
+        other => Ok(Some(f(other)?)),
+    }
+}
+
+fn list<T>(here: &[&str], f: impl Fn(&Value) -> D<T>, v: &Value) -> D<Vec<T>> {
+    match v {
+        Value::List(xs) => xs.iter().map(f).collect(),
+        _ => err(here, "expected a list"),
+    }
+}
+
+fn struct_map<'a>(here: &[&str], v: &'a Value) -> D<&'a Fields> {
+    match v {
+        Value::Struct(m) => Ok(m),
+        _ => err(here, "expected a struct"),
+    }
+}
+
+fn text(here: &[&str], v: &Value) -> D<String> {
+    match v {
+        Value::Text(t) => Ok(t.clone()),
+        _ => err(here, "expected text"),
+    }
+}
+
+fn int(here: &[&str], v: &Value) -> D<i64> {
+    match v {
+        Value::Int(n) => Ok(*n),
+        _ => err(here, "expected an int"),
+    }
+}
+
+fn bool(here: &[&str], v: &Value) -> D<bool> {
+    match v {
+        Value::Bool(b) => Ok(*b),
+        _ => err(here, "expected a bool"),
+    }
+}
+
+fn sym(here: &[&str], v: &Value) -> D<Sym> {
+    int(here, v)
+}

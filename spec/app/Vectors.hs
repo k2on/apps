@@ -166,25 +166,31 @@ demo out = do
       step st k = case apply m "add_to_playlist" ctx autos (args k) st of
         Right (Right (st', chs)) -> (st', chs)
         other -> error ("apply: " ++ show other)
+      -- The function as verified: orders completed. Hashing the authored
+      -- form gave a hash no entry ever names, which two runtimes caught.
+      verifiedAdd = maybe (error "add_to_playlist") id (lookupFunction m "add_to_playlist")
       (st1, ch1) = step st0 7
       (st2, ch2) = step st1 9
       (st3, ch3) = step st2 7 -- already there: a no-op
+      (st4, ch4) = step st3 11 -- lands third: which is only true reading pos DESCENDING
   write
     (out ++ "/eval/add-to-playlist.json")
     ( obj
         [ ("module", json (toValue m))
         , ("function", quoted "add_to_playlist")
-        , ("function_hash", quoted (hex (functionHash (closure m addToPlaylist))))
+        , ("function_hash", quoted (hex (functionHash (closure m verifiedAdd))))
         , ("store_before", json (storeValue st0))
         , ("ctx", json (VStruct (M.fromList [("user", VText "alice"), ("session", VText "session-1")])))
         , ("autos", json (VStruct autos))
-        , ("steps", "[" ++ intercalate "," [stepJson (args 7) ch1 st1, stepJson (args 9) ch2 st2, stepJson (args 7) ch3 st3] ++ "]")
+        , ("steps", "[" ++ intercalate "," [stepJson (args 7) ch1 st1, stepJson (args 9) ch2 st2, stepJson (args 7) ch3 st3, stepJson (args 11) ch4 st4] ++ "]")
         ]
     )
-  write (out ++ "/hash/demo-state.json") (obj [("store", json (storeValue st3)), ("hash", quoted (hex (stateHash st3)))])
-  putStrLn ("  function hash " ++ hex (functionHash (closure m addToPlaylist)))
-  putStrLn ("  state hash    " ++ hex (stateHash st3))
-  putStrLn ("  changes       " ++ map toLower (show (length ch1, length ch2, length ch3)))
+  -- A state hash depends on the schema's table order, so the vector
+  -- carries the module the store belongs to.
+  write (out ++ "/hash/demo-state.json") (obj [("module", json (toValue m)), ("store", json (storeValue st4)), ("hash", quoted (hex (stateHash st4)))])
+  putStrLn ("  function hash " ++ hex (functionHash (closure m verifiedAdd)))
+  putStrLn ("  state hash    " ++ hex (stateHash st4))
+  putStrLn ("  changes       " ++ map toLower (show (length ch1, length ch2, length ch3, length ch4)))
   where
     stepJson a chs st =
       obj

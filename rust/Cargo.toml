@@ -1,0 +1,11 @@
+[workspace]
+resolver = "2"
+members = ["ark"]
+
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+sha2 = { version = "0.10", default-features = false }
+serde_json = "1"

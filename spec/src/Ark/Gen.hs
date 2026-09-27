@@ -114,12 +114,12 @@ generate t name whole m =
           arm fn = (hashOf fn, fnName fn)
        in case t of
             Rust ->
-              [ "pub fn apply(fn_hash: &str, db: &mut dyn Store, ctx: &Ctx, autos: &Args, args: &Args) -> Result<(), Fault> {"
+              [ "pub fn apply(fn_hash: &str, db: &mut Db, ctx: &Ctx, autos: &Args, args: &Args) -> Result<(), Fault> {"
               , "    match fn_hash {"
               ]
                 ++ ["        \"" <> h <> "\" => " <> ident t n <> "(db, ctx, autos, args)," | (h, n) <- map arm mutators]
                 ++ [ "        _ => Err(Fault::bug(format!(\"unknown function {fn_hash}\")))," , "    }", "}", ""
-                   , "pub fn query(name: &str, db: &mut dyn Store, args: &Args) -> Result<Value, Fault> {"
+                   , "pub fn query(name: &str, db: &Db, args: &Args) -> Result<Value, Fault> {"
                    , "    match name {"
                    ]
                 ++ ["        \"" <> fnName fn <> "\" => " <> ident t (fnName fn) <> "(db, args)," | fn <- queries]
@@ -177,8 +177,8 @@ functionCode t fn = [sig] ++ map ("    " <>) (body ++ tailReturn) ++ [closeBrace
       _ -> []
     params = [(ident t n, ty) | (n, ty) <- fnArgs fn]
     sig = case (t, fnKind fn) of
-      (Rust, Mutator) -> "pub fn " <> ident t (fnName fn) <> "(db: &mut dyn Store, ctx: &Ctx, autos: &Args, args: &Args) -> Result<(), Fault> {"
-      (Rust, Query) -> "pub fn " <> ident t (fnName fn) <> "(db: &mut dyn Store, args: &Args) -> Result<Value, Fault> {"
+      (Rust, Mutator) -> "pub fn " <> ident t (fnName fn) <> "(db: &mut Db, ctx: &Ctx, autos: &Args, args: &Args) -> Result<(), Fault> {"
+      (Rust, Query) -> "pub fn " <> ident t (fnName fn) <> "(db: &Db, args: &Args) -> Result<Value, Fault> {"
       (Rust, Helper) -> "pub fn " <> ident t (fnName fn) <> "(" <> T.intercalate ", " [p <> ": Value" | (p, _) <- params] <> ") -> Result<Value, Fault> {"
       (Swift, Mutator) -> "public static func " <> ident t (fnName fn) <> "(_ db: Store, _ ctx: Ctx, _ autos: Args, _ args: Args) throws {"
       (Swift, Query) -> "public static func " <> ident t (fnName fn) <> "(_ db: Store, _ args: Args) throws -> Value {"

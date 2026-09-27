@@ -97,7 +97,11 @@ One file per module, named after it (`harken_gen.rs`, `HarkenGen.swift`,
 3. one function per helper: `fn slug(a: Value) -> Value` (positional
    arguments, may fault);
 4. one function per mutator: `fn add_to_playlist(db, ctx, autos, args)`
-   (Rust `-> Result<(), Fault>`, Swift/Kotlin `throws`/plain);
+   (Rust `-> Result<(), Fault>`, Swift/Kotlin `throws`/plain). In Rust
+   `db` is `&mut Db` for a mutator and `&Db` for a query: `ark::gen::Db` is
+   an overlay over a store that records the transaction, so a body that
+   faults commits nothing (`ark::gen::run_mutator`); Swift and Kotlin pass
+   the `Store` protocol/interface and the runtime's `Db` conforms to it;
 5. one function per query: `fn library(db, args) -> Value`;
 6. `apply(fnHashHex, db, ctx, autos, args)`: a `match` / `switch` / `when`
    over every mutator's closure hash (lowercase hex), calling it; an
