@@ -84,6 +84,63 @@ ctx: Ctx, autos: Args, args: Args)`) resolves against this module.
   (`UnknownFunction "f"`, `MissingArg "a"`, `TypeError "expected Int, got …"`)
   but are not held byte-exact: a vector never expects a bug.
 
+## Added beside the contract: a transaction for generated code, and `ark-client`
+
+Three additions to `ark-runtime`, none of them changing anything the
+contract or the vectors already pinned:
+
+- **`TransactionStore`** (`Transaction.kt`): the `Store` a generated mutator
+  writes through when it runs in place of the interpreter — GENERATED.md's
+  "overlay over a store that records the transaction, so a body that faults
+  commits nothing". It is backed by a *fork* of the base, not a diff, for the
+  reason `Eval.applyClosure` works on a fork: every constraint is decided in
+  `MemoryStore.write`, once, and a diff store would decide them a second
+  time against a merged picture. `TransactionStore.run(base) { db -> … }`
+  is the mirror of `applyClosure`: `Eval.Applied.Ok(store, changes)`, or
+  `Refused` on a `Fault.Refuse`, with a `Fault.Bug` propagating.
+- **`Replica.mutateWith(i, ctx, fh, autos, args) { db -> … }`** beside
+  `mutate`: the body runs through a `TransactionStore` over the optimistic
+  store and the entry is recorded exactly as `mutate` records one. The
+  replica must still hold the closure `fh` names, because a rebase replays
+  pending intents through the interpreter (§11.6).
+- **`Client.mutateWith(scope, …)`**, the same one frame up, pushing the entry
+  when linked.
+
+`ark-client` (package `dev.arkdb.client`) is the peer around the machine:
+
+- `Link` — a `Transport` driving a `Client`: on open `connected()`, frames
+  sent as `Canon.encode(msg.toValue())`, received through
+  `Protocol.serverFromValue(Canon.decode(bytes))` into `recv`; reconnect
+  with backoff 500 ms doubling to 30 s, reset by a connection that opened;
+  a `Denied` stops it. `pump()` is the only place the machine is touched,
+  from the caller's timer.
+- `WebSocketTransport` over OkHttp 4.12 (resolved through the proxy), and
+  `InMemoryTransport` + `LocalHub`: an in-process authority host (hello,
+  push, need_facts, verify, fan-out) carrying the very same frame bytes,
+  which is what the tests run the `Link` over.
+- `Session` — the replicas (one per scope, `Whole`), the `Client`, a `Link`
+  when there is a server and an `Authority` per scope when there is not
+  (`localCommit` after every mutation, §3.10), and one canonical-CBOR file
+  per scope (confirmed store, cursor, pending, and alone the log, written
+  temp-and-rename). `mutate(name, args)` runs the **interpreter**;
+  `mutateWith(name, args) { db -> Gen.f(db, ctx, autos, args) }` runs the
+  **generated body**; both draw autos the same way (a random id per `NewId`,
+  the clock per `Now`) and record the same entry. `query(name, args)` is
+  `Eval.queryClosure` over the merged view; `read { db -> … }` hands the
+  same store to a generated query. A change listener is called after every
+  mutation and every frame that moved a view; `verify()`, `status`.
+- Its tests (`gradle :ark-client:clientTests`, part of `check`), on the demo
+  module: a peer alone creating and adding and restarting to the same hash
+  (and refusing a store that is not its log's); two peers through the hub
+  with the offline add landing last after the rebase, one of them authoring
+  through generated code; the link's backoff and denial; generated code
+  against the interpreter, same entries, same changes, same hash, same
+  refusal; and the transaction committing nothing on a fault.
+
+Alone, the authority is rebuilt on open by `Authority.adopt` over the log the
+peer kept, which replays every intent and checks the hash; a store that
+does not match its own log is refused there rather than trusted.
+
 ## Not covered
 
 - `rebase/fleet-seed-7.json` is skipped by the runner: replaying it needs
