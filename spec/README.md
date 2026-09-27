@@ -36,14 +36,22 @@ maps, a rebase is recomputing a value. What it must be is exact.
 | 14 | `Ark.Live` | rooms per account over opaque frames: arrive, speak, depart; a snapshot kept when a room empties; a repeated hello is paging |
 | 15 | `Ark.Sim` | the seeded fleet: a server, clients, a network that reorders, duplicates and drops; partition, heal, step, settle |
 
-Everything the design in `docs/arkdb.md` Part 3 names is now written. What
-is not in this package is not specification: the generators (`arkc`, in
-`../arkc`), the runtimes, and the apps are held to it.
+| 16 | `Ark.Print` | the printable, diagnostic form of a module — what `arkc print` writes and a diff shows; not canonical |
+| 17 | `Ark.Compat` | `arkc check`: the additive-only rule between two modules, and re-verifying retained closures against a new schema |
+| 18 | `Ark.Gen` | `arkc gen`: one emitter over the IR, three spellings — Rust, Swift, Kotlin — over the library `GENERATED.md` names |
+| — | `Ark.Demo` | the two-table domain every vector and every runtime's first test is built on |
+
+Everything the design in `docs/arkdb.md` Part 3 names is written, and so is
+the toolchain: `arkc` (`app/Arkc.hs`) verifies, prints, hashes, checks and
+generates from a `.ark` file, which is a module's canonical CBOR. The
+runtimes (`../rust`, `../swift`, `../kotlin`) and the apps are held to this
+package by the vectors and by `GENERATED.md`.
 
 ## Building
 
     nix build ..#ark-spec            # from this directory; the flake is the repository's
     nix run ..#vectors -- vectors/   # regenerate the vectors
+    nix run ..#arkc -- gen rust m.ark out/ --name Harken
     nix develop ..#spec              # a shell with GHC and cabal
 
 Only GHC's boot libraries are used, so `ghc --make -isrc app/Vectors.hs`

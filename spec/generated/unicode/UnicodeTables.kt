@@ -33,8 +33,9 @@ object UnicodeTables {
 
     /**
      * `Alphabetic` (DerivedCoreProperties.txt) or a general category of
-     * `Nd`, `Nl` or `No` (UnicodeData.txt) - Rust's `char::is_alphanumeric`,
-     * pinned to this Unicode version rather than to the JVM's.
+     * `Nd`, `Nl` or `No` (UnicodeData.txt) - the definition of Rust's
+     * `char::is_alphanumeric`, pinned to this Unicode version rather than
+     * to the JVM's.
      */
     fun isAlphanumeric(cp: Int): Boolean = inRanges(ALPHANUMERIC, cp)
 
@@ -226,7 +227,7 @@ object UnicodeTables {
         "2CEB0,2EBE0,2EBF0,2EE5D,2F800,2FA1D,30000,3134A,31350,323AF"
     )
 
-    /** 1460 mappings, sorted by source code point. */
+    /** 1460 mappings, sorted by source. */
     private val LOWER: IntArray = parse(
         "0041,0061,0042,0062,0043,0063,0044,0064,0045,0065,0046,0066,0047," +
         "0067,0048,0068,0049,0069,004A,006A,004B,006B,004C,006C,004D,006D," +

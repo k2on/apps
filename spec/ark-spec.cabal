@@ -40,9 +40,19 @@ library
     Ark.Live
     Ark.Protocol
     Ark.Sim
+    Ark.Gen
+    Ark.Demo
+    Ark.Compat
+    Ark.Print
 
 executable ark-vectors
   import:           shared
   hs-source-dirs:   app
   main-is:          Vectors.hs
+  build-depends:    ark-spec, directory
+
+executable arkc
+  import:           shared
+  hs-source-dirs:   app
+  main-is:          Arkc.hs
   build-depends:    ark-spec, directory

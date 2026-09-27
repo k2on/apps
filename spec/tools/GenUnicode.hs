@@ -61,7 +61,8 @@ main = do
   args <- getArgs
   case args of
     [dir, out] -> generate dir out Haskell
-    [dir, out, name] | Just target <- lookup name targets -> generate dir out target
+    [dir, out, name]
+      | Just target <- lookup name targets -> generate dir out target
     _ -> do
       hPutStrLn stderr
         "usage: GenUnicode <ucd-directory> <output> [haskell|rust|swift|kotlin]"
@@ -71,7 +72,8 @@ main = do
 data Target = Haskell | Rust | Swift | Kotlin
 
 targets :: [(String, Target)]
-targets = [("haskell", Haskell), ("rust", Rust), ("swift", Swift), ("kotlin", Kotlin)]
+targets =
+  [("haskell", Haskell), ("rust", Rust), ("swift", Swift), ("kotlin", Kotlin)]
 
 generate :: FilePath -> FilePath -> Target -> IO ()
 generate dir out target = do
@@ -481,8 +483,9 @@ renderSwift white alnum lower = unlines $
   , "  }"
   , ""
   , "  /// `Alphabetic` (DerivedCoreProperties.txt) or a general category of"
-  , "  /// `Nd`, `Nl` or `No` (UnicodeData.txt) - Rust's `char::is_alphanumeric`,"
-  , "  /// pinned to this Unicode version rather than to the platform's ICU."
+  , "  /// `Nd`, `Nl` or `No` (UnicodeData.txt) - the definition of Rust's"
+  , "  /// `char::is_alphanumeric`, pinned to this Unicode version rather than"
+  , "  /// to the platform's ICU."
   , "  public static func isAlphanumeric(_ c: Unicode.Scalar) -> Bool {"
   , "    return inRanges(alphanumeric, c.value)"
   , "  }"
@@ -492,7 +495,9 @@ renderSwift white alnum lower = unlines $
   , "  ///"
   , "  /// Simple, not full: SpecialCasing.txt is not consulted, so U+0130"
   , "  /// becomes U+0069, one code point, as the spec has it."
-  , "  public static func toLowerSimple(_ c: Unicode.Scalar) -> Unicode.Scalar {"
+  , "  public static func toLowerSimple(_ c: Unicode.Scalar)"
+  , "    -> Unicode.Scalar"
+  , "  {"
   , "    guard let i = floorIndex(lower, c.value), lower[2 * i] == c.value,"
   , "          let to = Unicode.Scalar(lower[2 * i + 1])"
   , "    else { return c }"
@@ -562,8 +567,9 @@ renderKotlin white alnum lower = unlines $
   , ""
   , "    /**"
   , "     * `Alphabetic` (DerivedCoreProperties.txt) or a general category of"
-  , "     * `Nd`, `Nl` or `No` (UnicodeData.txt) - Rust's `char::is_alphanumeric`,"
-  , "     * pinned to this Unicode version rather than to the JVM's."
+  , "     * `Nd`, `Nl` or `No` (UnicodeData.txt) - the definition of Rust's"
+  , "     * `char::is_alphanumeric`, pinned to this Unicode version rather than"
+  , "     * to the JVM's."
   , "     */"
   , "    fun isAlphanumeric(cp: Int): Boolean = inRanges(ALPHANUMERIC, cp)"
   , ""
@@ -615,7 +621,7 @@ renderKotlin white alnum lower = unlines $
   ] ++ chunks (flat alnum) ++
   [ "    )"
   , ""
-  , "    /** " ++ show (length lower) ++ " mappings, sorted by source code point. */"
+  , "    /** " ++ show (length lower) ++ " mappings, sorted by source. */"
   , "    private val LOWER: IntArray = parse("
   ] ++ chunks (flat lower) ++
   [ "    )"

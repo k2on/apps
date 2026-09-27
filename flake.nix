@@ -27,6 +27,12 @@
           runtimeInputs = [ ark-spec ];
           text = ''exec ark-vectors "$@"'';
         };
+        # The toolchain: verify, print, hash, check, gen.
+        arkc = pkgs.writeShellApplication {
+          name = "arkc";
+          runtimeInputs = [ ark-spec ];
+          text = ''exec arkc "$@"'';
+        };
         default = ark-spec;
       });
 

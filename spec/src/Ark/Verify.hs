@@ -206,7 +206,19 @@ stmt g = \case
     mutating
     inScope g tbl
     t <- table g tbl
-    expect g ("put " <> tbl) (rowTy t) e
+    -- A put may leave nullable columns out (they are written as None), so
+    -- the struct is checked field by field against the row type: every
+    -- field it has must be a column of the right type, and every
+    -- non-nullable column must be there. This is what lets a table grow a
+    -- nullable column after the mutators writing it were hashed.
+    got <- infer g (Just (rowTy t)) e
+    case (rowTy t, got) of
+      (TStruct want, TStruct have) -> do
+        mapM_ (\(k, ty) -> case M.lookup k want of
+                  Nothing -> err (UnknownColumn tbl k)
+                  Just w -> unless (w == ty) (err (TypeMismatch ("put " <> tbl <> "." <> k) w ty))) (M.toList have)
+        mapM_ (\c -> unless (colNullable c || M.member (colName c) have) (err (TypeMismatch ("put " <> tbl) (rowTy t) got))) (tColumns t)
+      _ -> err (TypeMismatch ("put " <> tbl) (rowTy t) got)
     pure g
   SDelete tbl ks -> do
     mutating

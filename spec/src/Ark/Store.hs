@@ -126,12 +126,16 @@ exists st t k = isJust (get st t k)
 scan :: Store -> TableName -> [Row]
 scan st t = M.elems (rows st t)
 
--- | §4.3 Write a full row.
+-- | §4.3 Write a row.
 --
--- In order: the table must exist; the row must be exactly the table's
--- columns with values of their types ('wellTyped'); no non-nullable column
--- may be 'VNull'; every unique index must stay unique against every
--- /other/ row; every reference must find its parent. Then:
+-- In order: the table must exist; the row must be the table's columns with
+-- values of their types ('wellTyped') — __a nullable column may be
+-- omitted and is then 'VNull'__, which is what lets a column be added to a
+-- table after a mutator that writes it was hashed (§3.2 of the design:
+-- the schema is additive-only, and a retained body must go on running);
+-- no non-nullable column may be 'VNull' or absent; every unique index must
+-- stay unique against every /other/ row; every reference must find its
+-- parent. Then:
 --
 -- * a row whose key is new is an 'Add';
 -- * a row equal to what is there is __no change at all__ — a rescan that
@@ -139,8 +143,9 @@ scan st t = M.elems (rows st t)
 --   is not woken for a write that moved nothing;
 -- * anything else is an 'Edit' carrying both versions.
 put :: Store -> TableName -> Row -> Either Refusal (Store, Maybe Change)
-put st tn row = do
+put st tn row0 = do
   tbl <- maybe (Left (NoSuchTable tn)) Right (lookupTable (stSchema st) tn)
+  let row = complete tbl row0
   wellTyped tbl row
   let k = keyOf tbl row
       here = rows st tn
@@ -166,6 +171,11 @@ delete st tn k = do
       mapM_ (noChild st tbl k) (childrenOf (stSchema st) tn)
       let st' = st {stTables = M.adjust (M.delete k) tn (stTables st)}
       pure (st', Just (Remove tn row))
+
+-- | Fill in every nullable column the row left out, as 'VNull'. The
+-- stored row is always full; what may be partial is what a mutator wrote.
+complete :: Table -> Row -> Row
+complete tbl row = foldr (\c acc -> if colNullable c then M.insertWith (\_ old -> old) (colName c) VNull acc else acc) row (tColumns tbl)
 
 -- A row is exactly the table's columns, each holding a value of the
 -- column's type ('VNull' only where nullable).
