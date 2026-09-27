@@ -23,13 +23,32 @@ pub enum Event {
 /// The peer's handle on the thread.
 pub struct Link {
     pub events: Receiver<Event>,
-    outgoing: Sender<Vec<u8>>,
+    outgoing: Option<Sender<Vec<u8>>>,
+    thread: Option<thread::JoinHandle<()>>,
 }
 
 impl Link {
     /// Queue a frame; dropped if the thread is gone.
     pub fn send(&self, frame: Vec<u8>) {
-        let _ = self.outgoing.send(frame);
+        if let Some(out) = &self.outgoing {
+            let _ = out.send(frame);
+        }
+    }
+
+    /// Close the socket properly: the thread notices the peer is gone at
+    /// its next slice and sends a Close. Waits a little for it, never
+    /// long — a connect attempt in flight is not worth holding the exit for.
+    pub fn shutdown(mut self) {
+        drop(self.outgoing.take());
+        if let Some(t) = self.thread.take() {
+            let deadline = std::time::Instant::now() + Duration::from_millis(500);
+            while !t.is_finished() && std::time::Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(10));
+            }
+            if t.is_finished() {
+                let _ = t.join();
+            }
+        }
     }
 }
 
@@ -41,13 +60,14 @@ const READ_SLICE: Duration = Duration::from_millis(50);
 pub fn spawn(url: String) -> Link {
     let (ev_tx, ev_rx) = channel();
     let (out_tx, out_rx) = channel::<Vec<u8>>();
-    thread::Builder::new()
+    let thread = thread::Builder::new()
         .name("harken-net".into())
         .spawn(move || run(&url, &ev_tx, &out_rx))
         .expect("spawn the network thread");
     Link {
         events: ev_rx,
-        outgoing: out_tx,
+        outgoing: Some(out_tx),
+        thread: Some(thread),
     }
 }
 
@@ -78,9 +98,23 @@ fn run(url: &str, events: &Sender<Event>, outgoing: &Receiver<Vec<u8>>) {
                 }
             }
         }
-        thread::sleep(backoff);
+        if !sleep_unless_gone(backoff, outgoing) {
+            return;
+        }
         backoff = (backoff * 2).min(LAST_BACKOFF);
     }
+}
+
+// The backoff, in slices, cut short when the peer has gone; `false` then.
+fn sleep_unless_gone(d: Duration, outgoing: &Receiver<Vec<u8>>) -> bool {
+    let deadline = std::time::Instant::now() + d;
+    while std::time::Instant::now() < deadline {
+        if let Err(TryRecvError::Disconnected) = outgoing.try_recv() {
+            return false;
+        }
+        thread::sleep(READ_SLICE);
+    }
+    true
 }
 
 // One connection, until it drops; the reason it did.

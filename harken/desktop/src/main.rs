@@ -68,6 +68,9 @@ fn main() {
     let mut terminal = ratatui::init();
     let outcome = run(&mut terminal, &mut app, link.as_ref());
     ratatui::restore();
+    if let Some(link) = link {
+        link.shutdown();
+    }
     if let Err(e) = outcome {
         eprintln!("{e}");
         std::process::exit(1);

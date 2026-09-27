@@ -20,7 +20,7 @@ expect; each line below is a candidate contract amendment.
 | `v.asText()` | `v.as_text()` → `&str` |
 | `v.asList()` | `v.as_list()` → `Vec<Value>` (owned, so `for x in xs.as_list()` binds a `Value`) |
 | `v.field("k")` | `v.field("k")` → `Value` (owned) |
-| `Fault.refuse(t)`, `Fault.bug(t)` | `Fault::refuse(t)`, `Fault::bug(t)`; a fault is `Err(Fault)` |
+| `Fault.refuse(t)`, `Fault.bug(t)` | `Fault::refuse(t)` (`t: impl Reason` — a `&str`, a `String` or a text `Value`), `Fault::bug(t)`; a fault is `Err(Fault)` |
 | `Ops.add(a,b)` … `Ops.neg(a)` | `Ops::add(a, b)?` … `Ops::neg(a)?`, by value, `Result<Value, Fault>` |
 | `Ops.mod(a,b)` | `Ops::r#mod(a, b)?` — `mod` is a keyword |
 | `Ops.cmp(CmpOp.Lt, a, b)` | `Ops::cmp(CmpOp::Lt, a, b)` → `Value` (cannot fault, no `?`) |

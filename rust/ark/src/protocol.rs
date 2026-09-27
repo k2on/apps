@@ -786,10 +786,10 @@ pub struct Identity {
 }
 
 /// What a token proves; asked once, at `Hello`.
-pub type Authenticate = Box<dyn Fn(Option<&str>) -> Option<Identity>>;
+pub type Authenticate = Box<dyn Fn(Option<&str>) -> Option<Identity> + Send + Sync>;
 
 /// May this identity receive this scope? The scope-level read rule.
-pub type Access = Box<dyn Fn(&Identity, &str) -> bool>;
+pub type Access = Box<dyn Fn(&Identity, &str) -> bool + Send + Sync>;
 
 /// Dev auth: anyone is whoever they say, and the token is their name.
 pub fn trusting() -> Authenticate {

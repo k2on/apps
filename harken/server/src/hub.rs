@@ -1,12 +1,12 @@
 //! The one `ark::protocol::Server` machine, and the thread it lives on.
 //!
-//! The machine is sans-io and single-owner. Its authenticator is a
-//! `Box<dyn Fn>` with no `Send` bound, so it cannot be shared with tokio's
-//! tasks behind a mutex; instead one thread owns it and every transport —
-//! a WebSocket handler, the scanner's in-process peer, `/healthz` — talks
-//! to it through a [`HubHandle`]. That thread is also where each scope's
-//! log is written after a batch of appends, so a disk write never sits on
-//! the reactor.
+//! The machine is sans-io and single-owner. It could sit behind a mutex —
+//! its callbacks are `Send + Sync` — but a mutex held across a disk write
+//! stalls every handler waiting on it; instead one thread owns it and every
+//! transport — a WebSocket handler, the scanner's in-process peer,
+//! `/healthz` — talks to it through a [`HubHandle`]. That thread is also
+//! where each scope's log is written after a batch of appends, so a disk
+//! write never sits on the reactor.
 //!
 //! A connection is a [`ConnId`] and a sender: every frame the machine
 //! queues for that connection goes down the sender to whatever writes the
