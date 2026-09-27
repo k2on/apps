@@ -1,0 +1,4 @@
+{
+  "store": {"playlist":[{"id":{"$id":"00000000-0000-0000-0000-000000000001"},"name":"Favorites","user_id":"alice"}],"playlist_item":[{"added_ms":{"$int":"1577836800000"},"media_id":{"$bytes":"07"},"playlist_id":{"$id":"00000000-0000-0000-0000-000000000001"},"pos":{"$int":"1"},"user_id":"alice"},{"added_ms":{"$int":"1577836800000"},"media_id":{"$bytes":"09"},"playlist_id":{"$id":"00000000-0000-0000-0000-000000000001"},"pos":{"$int":"2"},"user_id":"alice"}]},
+  "hash": "2806ef26365808f3b0d04b27a7c4080f99200c3637047190ac3433054574c14d"
+}

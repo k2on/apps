@@ -1,0 +1,27 @@
+{
+  "module": {"functions":[{"args":[{"name":"playlist_id","t":"arg","ty":{"t":"id","table":"playlist"}},{"name":"media_id","t":"arg","ty":{"t":"bytes"}}],"autos":[{"name":"added_ms","t":"now"}],"body":[{"e":{"key":[{"name":"playlist_id","t":"arg"}],"t":"exists","table":"playlist"},"sym":{"$int":"0"},"t":"let"},{"c":{"args":[{"sym":{"$int":"0"},"t":"var"}],"op":"not","t":"op"},"else":[],"t":"if","then":[{"e":null,"t":"return"}]},{"e":{"key":[{"name":"playlist_id","t":"arg"},{"name":"media_id","t":"arg"}],"t":"exists","table":"playlist_item"},"sym":{"$int":"1"},"t":"let"},{"c":{"sym":{"$int":"1"},"t":"var"},"else":[],"t":"if","then":[{"e":null,"t":"return"}]},{"e":{"plan":{"filter":{"column":"playlist_id","e":{"name":"playlist_id","t":"arg"},"op":"eq","t":"pcmp"},"limit":{"$int":"1"},"order":[{"column":"pos","dir":"desc","t":"by"},{"column":"playlist_id","dir":"asc","t":"by"},{"column":"media_id","dir":"asc","t":"by"}],"related":[],"t":"plan","table":"playlist_item"},"t":"select"},"sym":{"$int":"2"},"t":"let"},{"e":{"args":[{"e":{"args":[{"sym":{"$int":"2"},"t":"var"}],"fn":"First","t":"std"},"none":{"t":"none","ty":{"t":"int"}},"some":{"e":{"e":{"sym":{"$int":"3"},"t":"var"},"name":"pos","t":"field"},"t":"some"},"sym":{"$int":"3"},"t":"match"},{"t":"lit","v":{"$int":"0"}}],"fn":"UnwrapOr","t":"std"},"sym":{"$int":"4"},"t":"let"},{"row":{"fields":{"added_ms":{"name":"added_ms","t":"auto"},"media_id":{"name":"media_id","t":"arg"},"playlist_id":{"name":"playlist_id","t":"arg"},"pos":{"args":[{"sym":{"$int":"4"},"t":"var"},{"t":"lit","v":{"$int":"1"}}],"op":"add","t":"op"},"user_id":{"t":"ctx_user"}},"t":"struct"},"t":"put","table":"playlist_item"}],"kind":"mutator","name":"add_to_playlist","ret":null,"scope":"playlists","t":"fn"}],"live":[],"schema":[{"name":"playlists","t":"scope","tables":[{"columns":[{"name":"id","nullable":false,"t":"column","ty":{"t":"id","table":"playlist"}},{"name":"name","nullable":false,"t":"column","ty":{"t":"text"}},{"name":"user_id","nullable":false,"t":"column","ty":{"t":"text"}}],"indexes":[],"key":["id"],"name":"playlist","refs":[],"t":"table"},{"columns":[{"name":"playlist_id","nullable":false,"t":"column","ty":{"t":"id","table":"playlist"}},{"name":"media_id","nullable":false,"t":"column","ty":{"t":"bytes"}},{"name":"pos","nullable":false,"t":"column","ty":{"t":"int"}},{"name":"added_ms","nullable":false,"t":"column","ty":{"t":"int"}},{"name":"user_id","nullable":false,"t":"column","ty":{"t":"text"}}],"indexes":[],"key":["playlist_id","media_id"],"name":"playlist_item","refs":[{"column":"playlist_id","t":"ref","table":"playlist"}],"t":"table"}]}],"spec":{"$int":"1"},"t":"module"},
+  "function": "add_to_playlist",
+  "function_hash": "13dff9079d9ece64c040dd3ca76f8961b1ac7a920d2d621b138f8e3437f9b28a",
+  "store_before": {"playlist":[{"id":{"$id":"00000000-0000-0000-0000-000000000001"},"name":"Favorites","user_id":"alice"}],"playlist_item":[]},
+  "ctx": {"session":"session-1","user":"alice"},
+  "autos": {"added_ms":{"$int":"1577836800000"}},
+  "steps": [{
+  "args": {"media_id":{"$bytes":"07"},"playlist_id":{"$id":"00000000-0000-0000-0000-000000000001"}},
+  "changes": [{"row":{"added_ms":{"$int":"1577836800000"},"media_id":{"$bytes":"07"},"playlist_id":{"$id":"00000000-0000-0000-0000-000000000001"},"pos":{"$int":"1"},"user_id":"alice"},"t":"add","table":"playlist_item"}],
+  "store_after": {"playlist":[{"id":{"$id":"00000000-0000-0000-0000-000000000001"},"name":"Favorites","user_id":"alice"}],"playlist_item":[{"added_ms":{"$int":"1577836800000"},"media_id":{"$bytes":"07"},"playlist_id":{"$id":"00000000-0000-0000-0000-000000000001"},"pos":{"$int":"1"},"user_id":"alice"}]},
+  "hash_after": "49ef9fb25fad853be7f3f86986cf781704d2b2ced9ba6fac4491546b6a2f7b32"
+}
+,{
+  "args": {"media_id":{"$bytes":"09"},"playlist_id":{"$id":"00000000-0000-0000-0000-000000000001"}},
+  "changes": [{"row":{"added_ms":{"$int":"1577836800000"},"media_id":{"$bytes":"09"},"playlist_id":{"$id":"00000000-0000-0000-0000-000000000001"},"pos":{"$int":"2"},"user_id":"alice"},"t":"add","table":"playlist_item"}],
+  "store_after": {"playlist":[{"id":{"$id":"00000000-0000-0000-0000-000000000001"},"name":"Favorites","user_id":"alice"}],"playlist_item":[{"added_ms":{"$int":"1577836800000"},"media_id":{"$bytes":"07"},"playlist_id":{"$id":"00000000-0000-0000-0000-000000000001"},"pos":{"$int":"1"},"user_id":"alice"},{"added_ms":{"$int":"1577836800000"},"media_id":{"$bytes":"09"},"playlist_id":{"$id":"00000000-0000-0000-0000-000000000001"},"pos":{"$int":"2"},"user_id":"alice"}]},
+  "hash_after": "2806ef26365808f3b0d04b27a7c4080f99200c3637047190ac3433054574c14d"
+}
+,{
+  "args": {"media_id":{"$bytes":"07"},"playlist_id":{"$id":"00000000-0000-0000-0000-000000000001"}},
+  "changes": [],
+  "store_after": {"playlist":[{"id":{"$id":"00000000-0000-0000-0000-000000000001"},"name":"Favorites","user_id":"alice"}],"playlist_item":[{"added_ms":{"$int":"1577836800000"},"media_id":{"$bytes":"07"},"playlist_id":{"$id":"00000000-0000-0000-0000-000000000001"},"pos":{"$int":"1"},"user_id":"alice"},{"added_ms":{"$int":"1577836800000"},"media_id":{"$bytes":"09"},"playlist_id":{"$id":"00000000-0000-0000-0000-000000000001"},"pos":{"$int":"2"},"user_id":"alice"}]},
+  "hash_after": "2806ef26365808f3b0d04b27a7c4080f99200c3637047190ac3433054574c14d"
+}
+]
+}

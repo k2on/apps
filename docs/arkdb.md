@@ -883,7 +883,8 @@ language keeps its native build; nix wraps the Rust half and CI.
 
 ```
 arkdb/
-  spec/         SPEC.md · unicode/ (the three pinned tables and their generator) · vectors/
+  spec/         the specification as a Haskell program (see spec/README.md): one module per
+                section, the pinned Unicode tables and their generator, and the vectors it emits
   rust/         ark (runtime) · ark-store-sqlite · ark-store-mem · ark-server (axum)
                 · ark-builder (the Rust frontend) · arkc · ark-testkit
   swift/        Package.swift: ArkDB (runtime), ArkBuilder, ArkConformance
