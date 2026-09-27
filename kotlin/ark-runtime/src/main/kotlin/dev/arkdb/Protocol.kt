@@ -322,6 +322,14 @@ public class Client(public val schema: Schema, public val token: String?) {
         return e
     }
 
+    /** `mutate`, with generated code for the body; see `Replica.mutateWith`. */
+    public fun mutateWith(scope: String, i: Id, ctx: Ctx, fh: FnHash, autos: Args, args: Args, body: (Store) -> Unit): Entry {
+        val (r, _) = scopes[scope] ?: throw Fault.Refuse(Refusal.Refused("not holding scope $scope"))
+        val e = r.mutateWith(i, ctx, fh, autos, args, body)
+        emit(ClientMsg.Push(scope, listOf(e)))
+        return e
+    }
+
     /** §12.2 A frame from the server. */
     public fun recv(m: ServerMsg) {
         when (m) {

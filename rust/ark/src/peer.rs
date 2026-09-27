@@ -15,7 +15,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::db::run_mutator;
 use crate::eval::{apply_closure, Args, Ctx};
+use crate::fault::Fault;
 use crate::hash::{state_hash, Closure, FnHash};
 use crate::log::{Entry, Facts, Log, Page, Seq};
 use crate::schema::{Schema, ScopeName};
@@ -113,6 +115,44 @@ impl Replica {
         let mut view = self.view.clone();
         match apply_closure(&self.schema, c, ctx, autos, args, &mut view) {
             Err(bug) => Err(Refusal::Refused(bug_text(&bug))),
+            Ok(Err(refusal)) => Err(refusal),
+            Ok(Ok(chs)) => {
+                let e = Entry {
+                    id,
+                    actor: ctx.user.clone(),
+                    session: ctx.session.clone(),
+                    fn_hash: fh.clone(),
+                    args: args.clone(),
+                    autos: autos.clone(),
+                };
+                self.view = view;
+                self.pending.push(e.clone());
+                self.changes.extend(chs);
+                Ok(e)
+            }
+        }
+    }
+
+    /// §11.2 again, with the body supplied: `mutate` for a peer whose
+    /// authoring code is generated rather than interpreted. The body runs as
+    /// one transaction over the optimistic store (`run_mutator`), and the
+    /// entry is recorded under the hash, autos and arguments given, exactly
+    /// as `mutate` records one — so a rebase replays it through the closure
+    /// that hash names. Holding that closure is not required to author; a
+    /// pending intent whose closure is not held is dropped at the next
+    /// replay, as `mutate` would have refused it up front.
+    pub fn mutate_with(
+        &mut self,
+        id: Id,
+        ctx: &Ctx,
+        fh: &FnHash,
+        autos: &Args,
+        args: &Args,
+        body: impl FnOnce(&mut crate::db::Db) -> Result<(), Fault>,
+    ) -> Result<Entry, Refusal> {
+        let mut view = self.view.clone();
+        match run_mutator(&mut view, body) {
+            Err(bug) => Err(Refusal::Refused(format!("bug: {bug}"))),
             Ok(Err(refusal)) => Err(refusal),
             Ok(Ok(chs)) => {
                 let e = Entry {
@@ -469,5 +509,90 @@ pub fn local_commit(a: &mut Authority, r: &mut Replica) {
             Sequenced::Duplicate(n) => r.ack(&e.id, n),
             Sequenced::Rejected(why) => r.reject(&e.id, why),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::*;
+    use crate::db::Db;
+    use crate::gen::{Ops, Std};
+    use crate::hash::closures;
+    use crate::ir::{module_from_value, Module};
+    use crate::value::Value;
+
+    fn demo() -> Module {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../spec/vectors/module/demo.json");
+        let json: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let bytes = crate::value::decode_hex(json["bytes"].as_str().unwrap()).unwrap();
+        module_from_value(&crate::canon::decode(&bytes).unwrap()).unwrap()
+    }
+
+    // `create_playlist` as `arkc gen rust` writes it.
+    fn create_playlist(db: &mut Db, ctx: &Ctx, autos: &Args, args: &Args) -> Result<(), Fault> {
+        if (Std::is_empty(Std::trim(Ops::arg(args, "name"))?)?).as_bool() {
+            return Err(Fault::refuse(Value::text("a playlist needs a name")));
+        }
+        let v0: Value = db.exists("playlist", vec![Ops::arg(autos, "id")]);
+        if (v0).as_bool() {
+            return Ok(());
+        }
+        db.put(
+            "playlist",
+            Value::record(vec![
+                ("id".to_string(), Ops::arg(autos, "id")),
+                ("name".to_string(), Std::trim(Ops::arg(args, "name"))?),
+                ("user_id".to_string(), Value::text(ctx.user.clone())),
+            ]),
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn mutate_with_records_what_mutate_records_and_the_replay_agrees() {
+        let m = demo();
+        let bodies = closures(&m);
+        let fh = bodies.keys().find(|h| bodies[*h].function.name == "create_playlist").unwrap().clone();
+        let ctx = Ctx::new("alice", "dev");
+        let autos = Args::from([("id".to_string(), Value::id_hex("00000000-0000-0000-0000-000000000001"))]);
+        let args = Args::from([("name".to_string(), Value::text("  Favorites "))]);
+
+        let mut slow = Replica::open(
+            m.schema.clone(),
+            "playlists",
+            bodies.clone(),
+            MemoryStore::empty(m.schema.clone()),
+            0,
+            vec![],
+        );
+        let mut fast = slow.clone();
+        let e1 = slow.mutate([1; 16], &ctx, &fh, &autos, &args).unwrap();
+        let e2 = fast
+            .mutate_with([1; 16], &ctx, &fh, &autos, &args, |db| create_playlist(db, &ctx, &autos, &args))
+            .unwrap();
+        assert_eq!(e1, e2, "the entry is recorded under the given hash, autos and args");
+        assert_eq!(slow.view, fast.view);
+        assert_eq!(slow.pending, fast.pending);
+        assert_eq!(slow.take_changes(), fast.take_changes());
+
+        // A refusal records nothing.
+        let blank = Args::from([("name".to_string(), Value::text("  "))]);
+        let why = fast
+            .mutate_with([2; 16], &ctx, &fh, &autos, &blank, |db| create_playlist(db, &ctx, &autos, &blank))
+            .unwrap_err();
+        assert_eq!(why, Refusal::Refused("a playlist needs a name".into()));
+        assert_eq!(fast.pending.len(), 1);
+        assert_eq!(fast.take_changes(), Changes::Applied(vec![]));
+
+        // The rebase replays the recorded entry through the closure the
+        // hash names, and lands where the generated body did.
+        let mut a = Authority::new(m.schema.clone(), "playlists", bodies);
+        local_commit(&mut a, &mut fast);
+        assert!(fast.pending.is_empty());
+        assert_eq!(fast.cursor, 1);
+        assert_eq!(fast.confirmed, slow.view);
+        assert_eq!(state_hash(&fast.confirmed), state_hash(&a.store));
     }
 }

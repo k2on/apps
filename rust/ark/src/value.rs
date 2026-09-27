@@ -262,6 +262,19 @@ impl Value {
     }
 }
 
+/// The text of a `Value::Text`, for a generated `Fault::refuse(Value::text(…))`:
+/// the emitter spells a refusal's reason as a value expression, and
+/// `Fault::refuse` takes anything `Into<String>`. Fatal on anything but a
+/// text, as `as_text` is.
+impl From<Value> for String {
+    fn from(v: Value) -> String {
+        match v {
+            Value::Text(t) => t,
+            other => panic!("String::from: expected Text, got {other:?} (a bug: a verified module never mismatches)"),
+        }
+    }
+}
+
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{self:?}")
@@ -325,5 +338,12 @@ mod tests {
             Value::id_hex("00000000-0000-0000-0000-000000000001"),
             Value::Id([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1])
         );
+    }
+
+    #[test]
+    fn a_text_value_is_a_string_for_refuse() {
+        let f = crate::fault::Fault::refuse(Value::text("a playlist needs a name"));
+        assert_eq!(f, crate::fault::Fault::Refuse("a playlist needs a name".into()));
+        assert_eq!(String::from(Value::text("x")), "x");
     }
 }

@@ -233,11 +233,13 @@ stmt c = \case
 expr :: Ctx' -> Expr -> Text
 expr c = \case
   ELit v -> literal t v
+  -- Rust's Value is owned and not Copy, so a name read twice is cloned;
+  -- the other two targets have reference semantics and need nothing.
   EArg a -> case cKind c of
-    Helper -> ident t a
+    Helper -> ident t a <> cloned
     _ -> "Ops" <> sep t <> "arg(args, " <> str t a <> ")"
   EAuto a -> "Ops" <> sep t <> "arg(autos, " <> str t a <> ")"
-  EVar x -> sym c x
+  EVar x -> sym c x <> cloned
   ECtxUser -> ctxField "user"
   ECtxSession -> ctxField "session"
   EField e f -> "(" <> expr c e <> ").field(" <> str t f <> ")"
@@ -276,6 +278,7 @@ expr c = \case
   EExists tbl ks -> "db.exists(" <> str t tbl <> ", " <> listOf t (map (expr c) ks) <> ")"
   where
     t = cTarget c
+    cloned = case t of Rust -> ".clone()"; _ -> ""
     ctxField f = case t of
       Rust -> "Value::text(ctx." <> f <> ".clone())"
       _ -> "Value.text(ctx." <> f <> ")"

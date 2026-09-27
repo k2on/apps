@@ -351,6 +351,33 @@ public struct Client {
         }
     }
 
+    /// `mutate` with the body supplied: authored by native code the caller
+    /// hands over rather than by what the replica holds (`Replica.mutateWith`).
+    public mutating func mutateWith(_ s: ScopeName, _ i: Id, _ ctx: Ctx, _ fh: FnHash, _ autos: Args, _ args: Args, _ apply: (MemoryStore) throws -> Eval.Outcome) -> Result<Entry, Refusal> {
+        guard var held = scopes[s] else { return .failure(.refused("not holding scope " + s)) }
+        switch held.replica.mutateWith(i, ctx, fh, autos, args, apply) {
+        case .failure(let why): return .failure(why)
+        case .success(let e):
+            scopes[s] = held
+            emit(.push(scope: s, entries: [e]))
+            return .success(e)
+        }
+    }
+
+    /// Work on one held replica in place — what a peer that is its own
+    /// authority needs for `localCommit`. `nil` for a scope not held.
+    public mutating func withReplica<T>(_ s: ScopeName, _ body: (inout Replica) throws -> T) rethrows -> T? {
+        guard var held = scopes[s] else { return nil }
+        let r = try body(&held.replica)
+        scopes[s] = held
+        return r
+    }
+
+    /// What a view of a scope is told, and the slate wiped (`Replica.takeChanges`).
+    public mutating func takeChanges(_ s: ScopeName) -> Changes? {
+        return withReplica(s) { $0.takeChanges() }
+    }
+
     /// §12.2 A frame from the server.
     public mutating func recv(_ m: ServerMsg) {
         switch m {
@@ -381,7 +408,7 @@ public struct Client {
             for (t, vs) in rows {
                 for v in vs { if case .record(let row) = v { st.applyChange(.add(t, row)) } }
             }
-            let r = Replica.open(held.replica.schema, s, held.replica.bodies, st, n, held.replica.pending)
+            let r = Replica.open(held.replica.schema, s, held.replica.bodies, st, n, held.replica.pending, applier: held.replica.applier)
             scopes[s] = Held(replica: r, mode: held.mode)
         case .ack(let s, let ids, let ns):
             guard var held = scopes[s] else { return }

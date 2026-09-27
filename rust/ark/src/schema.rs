@@ -268,7 +268,10 @@ fn per_table(sch: &Schema, scope: &str, t: &Table, errs: &mut Vec<SchemaError>) 
         if let Ty::Id(of) = &c.ty {
             let is_ref = t.refs.iter().any(|r| r.column == c.name);
             let is_own_key = *of == t.name && t.key.contains(&c.name);
-            if !is_ref && !is_own_key {
+            // An id naming a table in another scope is the unchecked
+            // cross-scope reference the design allows (Ark.Schema §2.3).
+            let other_scope = matches!(sch.table_scope(of), Some(s) if s != scope);
+            if !is_ref && !is_own_key && !other_scope {
                 errs.push(SchemaError::IdColumnWithoutRef(tn(), c.name.clone()));
             }
         }

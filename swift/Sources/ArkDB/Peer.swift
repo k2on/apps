@@ -19,6 +19,23 @@ public enum Changes: Equatable {
     case rebuilt
 }
 
+/// How a replica applies an intent through native code — generated code —
+/// rather than through the interpreter. `knows` says whether the code has
+/// the function a hash names; `apply` runs it — given the entry's author,
+/// its autos and arguments and the store to apply against — and answers the
+/// outcome, the store passed untouched (`Eval.applyBody` is how one is
+/// written over a generated `apply`). A hash the code does not know falls
+/// through to the closure the replica holds, so a peer generated with
+/// `--only` still replays every other entry by intent. Additive: a replica
+/// with no applier is exactly the spec's.
+public struct Applier {
+    public var knows: (FnHash) -> Bool
+    public var apply: (FnHash, Ctx, Args, Args, MemoryStore) throws -> Eval.Outcome
+    public init(knows: @escaping (FnHash) -> Bool, apply: @escaping (FnHash, Ctx, Args, Args, MemoryStore) throws -> Eval.Outcome) {
+        self.knows = knows; self.apply = apply
+    }
+}
+
 /// §11 One peer's copy of one scope: a confirmed store at a cursor, the
 /// pending intents, and the optimistic view they produce on top. The view
 /// is always `replay(confirmed) then replay(pending)`.
@@ -44,21 +61,51 @@ public struct Replica {
     public private(set) var diverged: [Seq]
     var rebuilt: Bool
     var changes: [Change] // oldest first
+    /// Native code to apply intents through, consulted before `bodies`.
+    public var applier: Applier? = nil
 
     /// §11.1 Open a replica from what was durable; pending replays on top.
-    public static func open(_ schema: Schema, _ scope: ScopeName, _ bodies: [FnHash: Closure], _ confirmed: MemoryStore, _ cursor: Seq, _ pending: [Entry]) -> Replica {
+    public static func open(_ schema: Schema, _ scope: ScopeName, _ bodies: [FnHash: Closure], _ confirmed: MemoryStore, _ cursor: Seq, _ pending: [Entry], applier: Applier? = nil) -> Replica {
         var r = Replica(scope: scope, schema: schema, bodies: bodies, confirmed: confirmed, cursor: cursor, pending: pending,
-                        view: confirmed, inbox: [:], rejections: [], diverged: [], rebuilt: true, changes: [])
+                        view: confirmed, inbox: [:], rejections: [], diverged: [], rebuilt: true, changes: [], applier: applier)
         r.replay()
         return r
+    }
+
+    /// Whether this replica can apply an entry naming this function, by
+    /// native code or by a held closure.
+    public func knows(_ fh: FnHash) -> Bool { return canApply(fh) }
+
+    /// Apply a function to a store: through the applier when it knows the
+    /// hash, else through the closure held for it; `nil` when neither does.
+    func applyFunction(_ fh: FnHash, _ ctx: Ctx, _ autos: Args, _ args: Args, _ st: MemoryStore) throws -> Eval.Outcome? {
+        if let a = applier, a.knows(fh) { return try a.apply(fh, ctx, autos, args, st) }
+        guard let c = bodies[fh] else { return nil }
+        return try Eval.applyClosure(schema, c, ctx, autos, args, st)
+    }
+
+    /// Whether either the applier or a held closure can run this function.
+    func canApply(_ fh: FnHash) -> Bool {
+        return bodies[fh] != nil || (applier?.knows(fh) ?? false)
     }
 
     /// §11.2 Author an intent: apply it forward into the view, and if it is
     /// not refused, record it as pending. A refusal changes nothing.
     public mutating func mutate(_ id: Id, _ ctx: Ctx, _ fh: FnHash, _ autos: Args, _ args: Args) -> Result<Entry, Refusal> {
-        guard let c = bodies[fh] else { return .failure(.refused("unknown function " + Hex.encode(fh))) }
+        return author(id, ctx, fh, autos, args) { r, st in try r.applyFunction(fh, ctx, autos, args, st) }
+    }
+
+    /// §11.2 with the body supplied: the same authoring, applied by native
+    /// code the caller hands over (a generated mutator run through
+    /// `Eval.applyBody`) rather than by what the replica holds.
+    public mutating func mutateWith(_ id: Id, _ ctx: Ctx, _ fh: FnHash, _ autos: Args, _ args: Args, _ apply: (MemoryStore) throws -> Eval.Outcome) -> Result<Entry, Refusal> {
+        return author(id, ctx, fh, autos, args) { _, st in try apply(st) }
+    }
+
+    mutating func author(_ id: Id, _ ctx: Ctx, _ fh: FnHash, _ autos: Args, _ args: Args, _ run: (Replica, MemoryStore) throws -> Eval.Outcome?) -> Result<Entry, Refusal> {
         do {
-            switch try Eval.applyClosure(schema, c, ctx, autos, args, view) {
+            guard let outcome = try run(self, view) else { return .failure(.refused("unknown function " + Hex.encode(fh))) }
+            switch outcome {
             case .refused(let why): return .failure(why)
             case .applied(let v, let chs):
                 let e = Entry(id: id, actor: ctx.user, session: ctx.session, fn: fh, args: args, autos: autos)
@@ -115,7 +162,7 @@ public struct Replica {
     public var needs: [Seq] {
         return inbox.keys.sorted().filter { n in
             guard let e = inbox[n]?.entry, inbox[n]?.facts == nil else { return false }
-            return bodies[e.fn] == nil || diverged.contains(n)
+            return !canApply(e.fn) || diverged.contains(n)
         }
     }
 
@@ -169,8 +216,9 @@ public struct Replica {
     /// One entry against the confirmed store: by intent when the closure is
     /// held, by facts otherwise; both when both are present, comparing them.
     func applyOne(_ n: Seq, _ e: Entry, _ mf: Facts?) -> (MemoryStore, [Change], Bool)? {
-        if let c = bodies[e.fn], !diverged.contains(n) {
-            let outcome = try? Eval.applyClosure(schema, c, Ctx(user: e.actor, session: e.session), e.autos, e.args, confirmed)
+        if canApply(e.fn), !diverged.contains(n) {
+            // A bug thrown here (`nil`) is treated as the closure disagreeing.
+            let outcome = (try? applyFunction(e.fn, Ctx(user: e.actor, session: e.session), e.autos, e.args, confirmed)) ?? nil
             if case .applied(let st2, let chs)? = outcome {
                 if let f = mf, f != chs { return (confirmed.applying(f), f, true) }
                 return (st2, chs, false)
@@ -190,12 +238,12 @@ public struct Replica {
         changes = []
         var kept: [Entry] = []
         for e in pending {
-            guard let c = bodies[e.fn] else {
-                rejections.append(Rejection(id: e.id, why: .refused("no closure for a pending intent")))
-                continue
-            }
             do {
-                switch try Eval.applyClosure(schema, c, Ctx(user: e.actor, session: e.session), e.autos, e.args, view) {
+                guard let outcome = try applyFunction(e.fn, Ctx(user: e.actor, session: e.session), e.autos, e.args, view) else {
+                    rejections.append(Rejection(id: e.id, why: .refused("no closure for a pending intent")))
+                    continue
+                }
+                switch outcome {
                 case .applied(let v, _):
                     view = v
                     kept.append(e)
@@ -235,6 +283,21 @@ public struct Authority {
         self.bodies = bodies
         self.log = Log(schema: schema)
         self.store = MemoryStore(schema: schema)
+    }
+
+    /// §3.10 An authority resuming from a snapshot: the log stands on it —
+    /// its sequence is the horizon and the head, so the next entry is
+    /// `seq + 1` — and the state at the head is the snapshot's rows. This is
+    /// how a peer that is its own authority reopens without replaying from
+    /// zero: the snapshot is the replica's confirmed store at its cursor.
+    public init(_ schema: Schema, _ scope: ScopeName, _ bodies: [FnHash: Closure], from snapshot: Snapshot) {
+        self.schema = schema
+        self.scope = scope
+        self.bodies = bodies
+        var l = Log(schema: schema)
+        l.base = snapshot
+        self.log = l
+        self.store = snapshot.store.clone()
     }
 
     /// §11.7 Sequence an intent: dedupe by id, apply to the head state, and

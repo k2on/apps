@@ -626,6 +626,31 @@ impl Client {
         Ok(e)
     }
 
+    /// `mutate`, with the body supplied: for a peer whose authoring code is
+    /// generated rather than interpreted (`Replica::mutate_with`). One more
+    /// argument than `mutate`, which is the body.
+    #[allow(clippy::too_many_arguments)]
+    pub fn mutate_with(
+        &mut self,
+        scope: &str,
+        id: Id,
+        ctx: &Ctx,
+        fh: &FnHash,
+        autos: &Args,
+        args: &Args,
+        body: impl FnOnce(&mut crate::db::Db) -> Result<(), crate::fault::Fault>,
+    ) -> Result<Entry, Refusal> {
+        let Some((r, _)) = self.scopes.get_mut(scope) else {
+            return Err(Refusal::Refused(format!("not holding scope {scope}")));
+        };
+        let e = r.mutate_with(id, ctx, fh, autos, args, body)?;
+        self.emit(ClientMsg::Push {
+            scope: scope.into(),
+            entries: vec![e.clone()],
+        });
+        Ok(e)
+    }
+
     /// §12.2 A frame from the server.
     pub fn recv(&mut self, msg: ServerMsg) {
         match msg {

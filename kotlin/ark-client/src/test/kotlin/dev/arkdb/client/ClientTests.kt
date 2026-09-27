@@ -1,0 +1,368 @@
+// ark-client's tests, as a plain `main` like the runtime's conformance
+// runner: the demo module (spec/vectors/module/demo.json), a peer alone, two
+// peers through an in-process authority over the in-memory transport — the
+// same `Link` and the same frame bytes a socket would carry — and generated
+// code against the interpreter.
+package dev.arkdb.client
+
+import demo.gen.DemoGen
+import dev.arkdb.Changes
+import dev.arkdb.Hash
+import dev.arkdb.Hex
+import dev.arkdb.Id
+import dev.arkdb.Plan
+import dev.arkdb.Row
+import dev.arkdb.Store
+import dev.arkdb.Value
+import java.io.File
+import kotlin.system.exitProcess
+
+object ClientTests {
+    class Failed(message: String) : AssertionError(message)
+
+    private fun check(cond: Boolean, what: () -> String) {
+        if (!cond) throw Failed(what())
+    }
+
+    private fun <T> eq(got: T, want: T, what: String) {
+        if (got != want) throw Failed("$what:\n  got  $got\n  want $want")
+    }
+
+    private var failures = 0
+
+    private fun test(name: String, body: () -> Unit) {
+        try {
+            body()
+            println("  ok    $name")
+        } catch (t: Throwable) {
+            failures += 1
+            println("  FAIL  $name\n        ${t.toString().lines().joinToString("\n        ")}")
+            if (t !is Failed) t.stackTrace.take(8).forEach { println("          at $it") }
+        }
+    }
+
+    // Deterministic autos: ids count up, the clock steps, so two sessions
+    // given one source each author byte-identical entries.
+    class Counting(start: Int = 1) : AutoSource {
+        var n = start
+        var clock = 1_700_000_000_000L
+
+        override fun newId(table: String): Id = Id(ByteArray(16).also { it[14] = (n shr 8).toByte(); it[15] = n.toByte() }).also { n += 1 }
+
+        override fun now(): Long = clock.also { clock += 1000 }
+    }
+
+    private fun tempDir(name: String): File {
+        val f = File.createTempFile("ark-$name-", "")
+        f.delete()
+        f.mkdirs()
+        return f
+    }
+
+    private fun rowsOf(s: Session, table: String): List<Value> = s.read { db -> db.select(Plan.from(table)).asList() }
+
+    private fun posOf(db: Store, pid: Id, k: Int): Value {
+        val row = db.get("playlist_item", listOf(Value.id(pid), Value.bytesHex("%02x".format(k))))
+        return if (row is Row) row["pos"] else Value.VNull
+    }
+
+    private fun hashOf(s: Session, scope: String): String = Hex.encode(s.client.replica(scope)!!.verifyAt().second)
+
+    @JvmStatic
+    fun main(argv: Array<String>) {
+        val demo = File(argv.getOrNull(0) ?: "../spec/vectors/module/demo.json")
+        check(demo.isFile) { "no demo module vector at ${demo.absolutePath}" }
+        // The vector's `bytes` field is the module's canonical CBOR; no JSON
+        // parser is needed to lift a hex string out of it.
+        val hex = Regex("\"bytes\"\\s*:\\s*\"([0-9a-f]+)\"").find(demo.readText())?.groupValues?.get(1)
+            ?: throw Failed("no bytes in ${demo.path}")
+        eq(hex, DemoGen.MODULE_BYTES, "the generated Kotlin carries the vector's module bytes")
+        val module = Session.moduleOfHex(hex)
+        eq(Hex.encode(Hash.moduleHash(module)), DemoGen.MODULE_HASH, "module hash")
+        val scope = "playlists"
+
+        test("alone: a session creates a playlist, adds an item, and restarts with the same hash") {
+            val dir = tempDir("alone")
+            val autos = Counting()
+            val a = Session.open(dir, module, "eve", autos = autos)
+            eq(a.status.serverless, true, "serverless")
+            val changes = ArrayList<Map<String, Changes>>()
+            a.onChange { changes.add(it) }
+            val made = a.mutate("create_playlist", DemoGen.createPlaylistArgs("  Road  "))
+            check(made is Outcome.Applied) { "create_playlist: $made" }
+            val pid = (made as Outcome.Applied).entry.autos.getValue("id").asId()
+            eq(a.status.scopes.single().cursor, 1L, "alone, the intent is sequenced at once")
+            eq(a.status.pending, 0, "nothing stays pending")
+            eq(rowsOf(a, "playlist").single().field("name"), Value.text("Road") as Value, "trimmed")
+            val added = a.mutate("add_to_playlist", DemoGen.addToPlaylistArgs(pid, byteArrayOf(5)))
+            check(added is Outcome.Applied) { "add_to_playlist: $added" }
+            eq(a.read { posOf(it, pid, 5) }, Value.int(1) as Value, "the first item is at pos 1")
+            eq(a.status.scopes.single().cursor, 2L, "two entries")
+            check(changes.isNotEmpty() && changes.all { it.containsKey(scope) }) { "the listener heard both mutations: $changes" }
+            eq(a.verify(), listOf(Triple(scope, 2L, true)), "the authority agrees with its own replica")
+            val refused = a.mutate("create_playlist", DemoGen.createPlaylistArgs("   "))
+            eq(refused, Outcome.Refused("a playlist needs a name") as Outcome, "a refusal is surfaced")
+            eq(a.status.scopes.single().cursor, 2L, "a refusal sequences nothing")
+            val h = hashOf(a, scope)
+            a.close()
+            check(File(dir, "$scope.replica").isFile) { "the scope was written down" }
+            check(!File(dir, "$scope.replica.tmp").exists()) { "no temp file is left behind" }
+
+            val b = Session.open(dir, module, "eve", autos = Counting(100))
+            eq(hashOf(b, scope), h, "restarted with the same hash")
+            eq(b.status.scopes.single().cursor, 2L, "and the same cursor")
+            eq(b.sessionId, a.sessionId, "and the same device id")
+            eq(b.verify(), listOf(Triple(scope, 2L, true)), "the adopted authority agrees")
+            val more = b.mutate("add_to_playlist", DemoGen.addToPlaylistArgs(pid, byteArrayOf(6)))
+            check(more is Outcome.Applied) { "after a restart the peer still authors: $more" }
+            eq(b.read { posOf(it, pid, 6) }, Value.int(2) as Value, "and continues the sequence")
+            eq(b.status.scopes.single().cursor, 3L, "sequenced at 3")
+            b.close()
+            val c = Session.open(dir, module, "eve", autos = Counting(200))
+            eq(hashOf(c, scope), hashOf(b, scope), "a second restart")
+            c.close()
+        }
+
+        test("alone: a store that does not match its log is refused on open") {
+            val dir = tempDir("tamper")
+            val a = Session.open(dir, module, "eve", autos = Counting())
+            a.mutate("create_playlist", DemoGen.createPlaylistArgs("Road"))
+            a.close()
+            // Rewrite the file with the log kept and the confirmed store emptied.
+            val d = Durable.readScope(module.schema, dir, scope)!!
+            Durable.writeScope(dir, DurableScope(scope, d.cursor, dev.arkdb.MemoryStore(module.schema), d.pending, d.log))
+            val err = try {
+                Session.open(dir, module, "eve", autos = Counting())
+                null
+            } catch (e: IllegalStateException) {
+                e
+            }
+            check(err != null) { "opened a scope whose store is not its log's" }
+        }
+
+        test("two peers through an authority: alice adds alone, bob adds meanwhile, alice rebases and lands last") {
+            val hub = LocalHub(module)
+            val ta = InMemoryTransport(hub)
+            val tb = InMemoryTransport(hub)
+            val dirA = tempDir("alice")
+            val dirB = tempDir("bob")
+            val alice = Session.open(dirA, module, "alice", "mem://hub", Counting(1), ta)
+            val bob = Session.open(dirB, module, "bob", "mem://hub", Counting(1000), tb)
+            eq(alice.status.serverless, false, "not serverless")
+            alice.pump()
+            bob.pump()
+            check(alice.status.linked && bob.status.linked) { "both linked: ${alice.status} ${bob.status}" }
+            eq(hub.handled.count { it == "Hello" }, 2, "two hellos")
+
+            val made = alice.mutate("create_playlist", DemoGen.createPlaylistArgs(" Favorites "))
+            val pid = (made as Outcome.Applied).entry.autos.getValue("id").asId()
+            eq(alice.status.pending, 1, "pending until pumped")
+            alice.pump()
+            eq(alice.status.pending, 0, "acked")
+            eq(alice.status.scopes.single().cursor, 1L, "alice at 1")
+            bob.pump()
+            eq(bob.status.scopes.single().cursor, 1L, "bob at 1")
+            eq(rowsOf(bob, "playlist").single().field("name"), Value.text("Favorites") as Value, "bob sees the playlist")
+            eq(hashOf(alice, scope), hashOf(bob, scope), "agree after step 1")
+
+            // alice goes dark
+            ta.online = false
+            alice.pump()
+            check(!alice.status.linked) { "alice is offline: ${alice.status}" }
+            val bobChanges = ArrayList<Changes>()
+            bob.onChange { m -> m[scope]?.let { bobChanges.add(it) } }
+            // bob's first add goes through the interpreter and his second through the
+            // generated body, so an entry generated code authored crosses the wire and
+            // is sequenced by an authority that replays it with the interpreter.
+            val r1 = bob.mutate("add_to_playlist", DemoGen.addToPlaylistArgs(pid, byteArrayOf(1)))
+            check(r1 is Outcome.Applied) { "bob adds 1: $r1" }
+            bob.pump()
+            val r2 = bob.mutateWith("add_to_playlist", DemoGen.addToPlaylistArgs(pid, byteArrayOf(2))) { db -> DemoGen.addToPlaylist(db, ctx, autos, args) }
+            check(r2 is Outcome.Applied) { "bob adds 2 through generated code: $r2" }
+            bob.pump()
+            eq(bob.client.replica(scope)!!.diverged.size, 0, "the authority's facts agree with what generated code wrote")
+            eq(bob.status.scopes.single().cursor, 3L, "bob at 3")
+            eq(bob.read { posOf(it, pid, 1) }, Value.int(1) as Value, "bob's first")
+            eq(bob.read { posOf(it, pid, 2) }, Value.int(2) as Value, "bob's second")
+            check(bobChanges.all { it is Changes.Applied }) { "bob's own confirmed intents cost no rebuild: $bobChanges" }
+
+            val aliceChanges = ArrayList<Changes>()
+            alice.onChange { m -> m[scope]?.let { aliceChanges.add(it) } }
+            val a9 = alice.mutate("add_to_playlist", DemoGen.addToPlaylistArgs(pid, byteArrayOf(9)))
+            check(a9 is Outcome.Applied) { "alice adds 9 alone: $a9" }
+            eq(alice.read { posOf(it, pid, 9) }, Value.int(1) as Value, "alone, alice's track is first on her view")
+            eq(alice.status.pending, 1, "one pending while dark")
+            check(aliceChanges.single() is Changes.Applied) { "a local mutation reports its changes" }
+            alice.pump()
+            eq(alice.status.pending, 1, "still pending: nothing to push to")
+
+            // …and is written down with it pending, so a restart while dark keeps the edit
+            alice.close()
+            val alice2 = Session.open(dirA, module, "alice", "mem://hub", Counting(50), ta)
+            eq(alice2.status.pending, 1, "the pending intent survived the restart")
+            eq(alice2.read { posOf(it, pid, 9) }, Value.int(1) as Value, "and is replayed on the view")
+            // Opening reports one `Rebuilt` (the replay from what was durable); take it, so
+            // that the rebuild asserted below can only be the rebase's.
+            check(alice2.takeChanges()[scope] is Changes.Rebuilt) { "opening reports a rebuild" }
+            alice2.onChange { m -> m[scope]?.let { aliceChanges.add(it) } }
+            aliceChanges.clear()
+
+            // alice comes back: the link reconnects on the next pump once the backoff has passed
+            ta.online = true
+            alice2.pump()
+            var turns = 0
+            while (!alice2.status.linked && turns < 200) {
+                Thread.sleep(10)
+                alice2.pump()
+                turns += 1
+            }
+            check(alice2.status.linked) { "alice reconnected: ${alice2.status}" }
+            alice2.pump()
+            bob.pump()
+            eq(alice2.status.pending, 0, "alice's intent was pushed and acked")
+            eq(alice2.status.scopes.single().cursor, 4L, "alice at 4")
+            eq(bob.status.scopes.single().cursor, 4L, "bob at 4")
+            eq(alice2.read { posOf(it, pid, 9) }, Value.int(3) as Value, "after the rebase alice's track is third")
+            eq(bob.read { posOf(it, pid, 9) }, Value.int(3) as Value, "and bob agrees")
+            eq(hashOf(alice2, scope), hashOf(bob, scope), "one hash")
+            eq(aliceChanges.count { it is Changes.Rebuilt }, 1, "the rebase was reported as a rebuild, once: $aliceChanges")
+            eq(alice2.client.replica(scope)!!.diverged.size, 0, "alice's replay agreed with the facts")
+            eq(hub.authorities.getValue(scope).log.headSeq, 4L, "the authority's head")
+
+            // verify over the wire
+            alice2.verify()
+            alice2.pump()
+            eq(alice2.takeAgreed(), listOf(Triple(scope, 4L, true)), "the authority agrees with alice")
+
+            // the frame path: every frame that crossed decodes as the protocol's
+            check(ta.frames.isNotEmpty() && ta.frames.any { it.first == "client" } && ta.frames.any { it.first == "server" }) { "frames crossed both ways" }
+            val tags = ta.frames.map { (who, bytes) ->
+                val v = dev.arkdb.Canon.decode(bytes)
+                if (who == "client") dev.arkdb.Protocol.clientFromValue(v)::class.simpleName else dev.arkdb.Protocol.serverFromValue(v)::class.simpleName
+            }
+            check("Hello" in tags && "Push" in tags && "Batch" in tags && "Ack" in tags && "Verify" in tags && "Agree" in tags) { "the frames seen: $tags" }
+
+            alice2.close()
+            bob.close()
+            val alice3 = Session.open(dirA, module, "alice", "mem://hub", Counting(70), ta)
+            eq(hashOf(alice3, scope), hashOf(bob, scope), "restarted from the directory with the same hash")
+            alice3.close()
+        }
+
+        test("the link: backoff doubles from 500 ms to 30 s, a denied peer stops reconnecting") {
+            var now = 0L
+            val hub = LocalHub(module)
+            val t = InMemoryTransport(hub)
+            t.online = false
+            val client = dev.arkdb.Client(module.schema, "alice")
+            client.subscribe(dev.arkdb.Mode.Whole, dev.arkdb.Replica.open(module.schema, scope, Hash.closures(module), dev.arkdb.MemoryStore(module.schema), 0, emptyList()))
+            val link = Link(client, t) { now }
+            link.connect()
+            link.pump()
+            eq(link.retryIn(), 500L, "first backoff")
+            now += 499
+            link.pump()
+            eq(link.retryIn(), 1L, "not yet")
+            now += 1
+            link.pump()
+            eq(link.retryIn(), 1000L, "doubled")
+            now += 1000
+            link.pump()
+            eq(link.retryIn(), 2000L, "doubled again")
+            for (i in 0 until 10) {
+                now += link.retryIn()!!
+                link.pump()
+            }
+            eq(link.retryIn(), 30_000L, "capped at 30 s")
+            t.online = true
+            now += 30_000
+            link.pump()
+            check(link.linked) { "connected" }
+            eq(link.retryIn(), null, "no retry while linked")
+            link.pump()
+            t.online = false
+            link.pump()
+            check(!link.linked) { "dropped" }
+            eq(link.retryIn(), 500L, "a connection that opened reset the backoff")
+
+            // denied: the hub turns away a peer with no token
+            val nobody = dev.arkdb.Client(module.schema, null)
+            nobody.subscribe(dev.arkdb.Mode.Whole, dev.arkdb.Replica.open(module.schema, scope, Hash.closures(module), dev.arkdb.MemoryStore(module.schema), 0, emptyList()))
+            t.online = true
+            val l2 = Link(nobody, t) { now }
+            l2.connect()
+            l2.pump()
+            l2.pump()
+            eq(nobody.denied, "not signed in", "denied")
+            check(!l2.enabled && l2.retryIn() == null) { "a denied peer stops reconnecting" }
+            eq(hub.connections, 0, "and its connection is closed")
+        }
+
+        test("generated code and the interpreter author the same entries and reach the same state") {
+            val byInterp = Session.open(tempDir("interp"), module, "eve", autos = Counting())
+            val byGen = Session.open(tempDir("gen"), module, "eve", autos = Counting())
+            val chI = ArrayList<Changes>()
+            val chG = ArrayList<Changes>()
+            byInterp.onChange { m -> m[scope]?.let { chI.add(it) } }
+            byGen.onChange { m -> m[scope]?.let { chG.add(it) } }
+
+            val r1 = byInterp.mutate("create_playlist", DemoGen.createPlaylistArgs(" Road "))
+            val g1 = byGen.mutateWith("create_playlist", DemoGen.createPlaylistArgs(" Road ")) { db -> DemoGen.createPlaylist(db, ctx, autos, args) }
+            eq(g1, r1, "the same entry")
+            val pid = (r1 as Outcome.Applied).entry.autos.getValue("id").asId()
+            for (k in listOf(3, 1, 2)) {
+                val r = byInterp.mutate("add_to_playlist", DemoGen.addToPlaylistArgs(pid, byteArrayOf(k.toByte())))
+                val g = byGen.mutateWith("add_to_playlist", DemoGen.addToPlaylistArgs(pid, byteArrayOf(k.toByte()))) { db -> DemoGen.apply(hash.hex, db, ctx, autos, args) }
+                eq(g, r, "the same entry for $k")
+            }
+            eq(chG, chI, "the same changes reported")
+            eq(hashOf(byGen, scope), hashOf(byInterp, scope), "the same hash")
+            eq(byGen.read { it.scan("playlist_item") }, byInterp.read { it.scan("playlist_item") }, "the same rows")
+            // a refusal from generated code is the same verdict
+            val rr = byInterp.mutate("create_playlist", DemoGen.createPlaylistArgs(" "))
+            val gr = byGen.mutateWith("create_playlist", DemoGen.createPlaylistArgs(" ")) { db -> DemoGen.createPlaylist(db, ctx, autos, args) }
+            eq(gr, rr, "the same refusal")
+            eq(gr, Outcome.Refused("a playlist needs a name") as Outcome, "and it is the mutator's text")
+            eq(byGen.status.scopes.single().cursor, 4L, "a refusal sequences nothing")
+            // and a body that bugs is refused rather than propagated
+            val bug = byGen.mutateWith("create_playlist", DemoGen.createPlaylistArgs("x")) { _ -> throw dev.arkdb.Fault.bug("deliberate") }
+            check(bug is Outcome.Refused && (bug as Outcome.Refused).reason.startsWith("bug:")) { "a bug is surfaced: $bug" }
+            eq(byGen.status.scopes.single().cursor, 4L, "and sequences nothing")
+            byInterp.close()
+            byGen.close()
+        }
+
+        test("a TransactionStore commits nothing when the body faults") {
+            val st = dev.arkdb.MemoryStore(module.schema)
+            val pid = Id(ByteArray(16).also { it[15] = 1 })
+            val ok = dev.arkdb.TransactionStore.run(st) { db ->
+                DemoGen.createPlaylist(db, dev.arkdb.Ctx("eve", "s"), mapOf("id" to Value.id(pid)), DemoGen.createPlaylistArgs("Road"))
+            }
+            check(ok is dev.arkdb.Eval.Applied.Ok && ok.changes.size == 1) { "one add: $ok" }
+            check(st.isEmpty) { "the base is untouched" }
+            val committed = (ok as dev.arkdb.Eval.Applied.Ok).store
+            val refused = dev.arkdb.TransactionStore.run(committed) { db ->
+                db.put("playlist", Value.record("id" to Value.id(Id(ByteArray(16).also { it[15] = 2 })), "name" to Value.text("x"), "user_id" to Value.text("e")))
+                throw dev.arkdb.Fault.refuse("no")
+            }
+            check(refused is dev.arkdb.Eval.Applied.Refused) { "refused: $refused" }
+            eq(committed.scan("playlist").size, 1, "the write before the refusal did not land")
+            val tx = dev.arkdb.TransactionStore(committed)
+            tx.commit()
+            val late = try {
+                tx.put("playlist", Value.record("id" to Value.id(pid), "name" to Value.text("y"), "user_id" to Value.text("e")))
+                null
+            } catch (e: dev.arkdb.Fault.Bug) {
+                e
+            }
+            check(late != null) { "a write after commit is a bug" }
+        }
+
+        println()
+        if (failures > 0) {
+            println("$failures failed")
+            exitProcess(1)
+        }
+        println("all passed")
+    }
+}

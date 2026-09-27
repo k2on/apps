@@ -1,0 +1,24 @@
+[package]
+name = "harken-server"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "harken's sync server: hosts every scope of an .ark module as an authority over one WebSocket, keeps each log on disk, and authors tracks from a media directory"
+workspace = "../../rust"
+
+[[bin]]
+name = "harken-server"
+path = "src/main.rs"
+
+[dependencies]
+ark = { path = "../../rust/ark" }
+anyhow = "1"
+axum = { version = "0.7", features = ["ws"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+rand = "0.9"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal"] }
+tower-http = { version = "0.5", features = ["fs"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio-tungstenite = "0.24"

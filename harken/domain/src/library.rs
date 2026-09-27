@@ -19,11 +19,7 @@ pub fn library(m: &mut ModuleBuilder) {
         let known = b.exists("track", [id.clone()]);
         b.if_(known, |b| b.ret());
         let file = b.let_("file", file.trim());
-        let same = b.select(
-            Plan::from("track")
-                .filter(Pred::cmp("file", CmpOp::Eq, file.clone()))
-                .limit(1),
-        );
+        let same = b.select(Plan::from("track").filter(Pred::cmp("file", CmpOp::Eq, file.clone())).limit(1));
         b.if_(file.is_empty().not().and(same.len().gt(0)), |b| b.ret());
         b.put(
             "track",

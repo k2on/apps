@@ -23,12 +23,7 @@ pub fn playlists(m: &mut ModuleBuilder) {
         b.if_(mine.len().gt(0), |b| b.ret());
         b.put(
             "playlist",
-            record([
-                ("id", id),
-                ("name", name),
-                ("user_id", ctx_user()),
-                ("created_ms", created_ms),
-            ]),
+            record([("id", id), ("name", name), ("user_id", ctx_user()), ("created_ms", created_ms)]),
         );
     });
 
@@ -49,12 +44,7 @@ pub fn playlists(m: &mut ModuleBuilder) {
                 .order_by("pos", Dir::Desc)
                 .limit(1),
         );
-        let pos = b.let_(
-            "pos",
-            last.first()
-                .map_some(|row| row.field("pos"))
-                .unwrap_or(0),
-        );
+        let pos = b.let_("pos", last.first().map_some(|row| row.field("pos")).unwrap_or(0));
         b.put(
             "playlist_item",
             record([

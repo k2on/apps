@@ -1,0 +1,18 @@
+[package]
+name = "harken-desktop"
+workspace = "../../rust"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "harken's terminal peer: ratatui over the ark runtime and the generated Rust domain, alone or against a server."
+
+[[bin]]
+name = "harken-desktop"
+path = "src/main.rs"
+
+[dependencies]
+ark = { path = "../../rust/ark" }
+ratatui = "0.29"
+crossterm = "0.28"
+tungstenite = "0.26"
+rand = "0.8"

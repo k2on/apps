@@ -92,7 +92,31 @@ public class Replica private constructor(
         } catch (b: Fault.Bug) {
             throw Fault.Refuse(Refusal.Refused("bug: ${b.text}"))
         }
-        return when (applied) {
+        return record(i, ctx, fh, autos, args, applied)
+    }
+
+    /**
+     * §11.2 with generated code standing in for the interpreter: `body` is
+     * the generated function for `fh`, run through a `TransactionStore` over
+     * the optimistic store. The entry records the hash exactly as `mutate`
+     * does, and the replica must still hold the closure, because a rebase
+     * replays pending intents through the interpreter (§11.6) — the two are
+     * held to agree by the conformance suite.
+     */
+    public fun mutateWith(i: Id, ctx: Ctx, fh: FnHash, autos: Args, args: Args, body: (Store) -> Unit): Entry {
+        if (fh !in bodies) throw Fault.Refuse(Refusal.Refused("unknown function ${fh.hex}"))
+        val applied = try {
+            TransactionStore.run(view, body)
+        } catch (b: Fault.Bug) {
+            throw Fault.Refuse(Refusal.Refused("bug: ${b.text}"))
+        }
+        return record(i, ctx, fh, autos, args, applied)
+    }
+
+    // What both ways of authoring share: a verdict is thrown and changes
+    // nothing; otherwise the entry is pending and the view has moved.
+    private fun record(i: Id, ctx: Ctx, fh: FnHash, autos: Args, args: Args, applied: Eval.Applied): Entry =
+        when (applied) {
             is Eval.Applied.Refused -> throw Fault.Refuse(applied.refusal)
             is Eval.Applied.Ok -> {
                 val e = Entry(i, ctx.user, ctx.session, fh, args, autos)
@@ -102,7 +126,6 @@ public class Replica private constructor(
                 e
             }
         }
-    }
 
     /** §11.3 A confirmed entry arrives, at its sequence. */
     public fun receive(n: Seq, e: Entry) {

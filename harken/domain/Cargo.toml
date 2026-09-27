@@ -1,5 +1,6 @@
 [package]
 name = "harken-domain"
+workspace = "../../rust"
 version = "0.1.0"
 edition = "2021"
 description = "harken's domain, authored through ark-builder; emits harken.ark"
