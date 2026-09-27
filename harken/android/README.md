@@ -49,6 +49,18 @@ AGP keeps its state and the debug keystore under `~/.android` and the
 builder has none; that one at least says so. The APK is signed with the debug key every
 Android toolchain shares: it installs anywhere and belongs nowhere public.
 
+**On an ARM Linux machine the same command needs a builder.** Google ships
+the SDK's native tools — aapt2, zipalign — for x86_64 Linux and for macOS
+only, so the flake defines `harken-apk` as an x86_64-linux derivation on
+every other Linux, and nix has to be given somewhere to run it:
+
+    nix build .#harken-apk --builders 'ssh://box x86_64-linux'
+
+or a local `extra-platforms = x86_64-linux` through binfmt, which works on
+a 4 KiB-page kernel and corrupts itself on a 16 KiB one (Asahi). macOS
+builds it natively. This is the same fact the old harken met with the NDK,
+one layer down; the reasoning is in that repository's notes.
+
 With Android Studio (Ladybug or later) or a command-line SDK with platform 35
 and build-tools 35.0.0, plus JDK 17 or 21, the same project builds directly:
 

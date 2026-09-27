@@ -101,13 +101,16 @@
             src = only [ "swift" "spec/vectors" ];
             sourceRoot = "source/swift";
             nativeBuildInputs = [ pkgs.swift pkgs.swiftpm ];
-            # Foundation as a build input, so its rpath reaches every binary
-            # SwiftPM links — the manifest it compiles and runs included.
-            buildInputs = [ pkgs.swiftPackages.Foundation pkgs.swiftPackages.Dispatch ];
+            # On Linux, Foundation and Dispatch are packages of their own and
+            # go in as build inputs so their rpath reaches every binary SwiftPM
+            # links — the manifest it compiles and runs included. On Darwin
+            # they are the system's and the attributes are null.
+            buildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.swiftPackages.Foundation pkgs.swiftPackages.Dispatch ];
             swiftpmBuildConfig = "debug";
-            # What swift/tools/swift.sh sets in the devshell: the manifest
-            # SwiftPM compiles and runs has no rpath for libdispatch.
-            preBuild = ''
+            # What swift/tools/swift.sh sets in the devshell, Linux only: the
+            # target and header quirks of nixpkgs' Swift 5.8, and the manifest
+            # SwiftPM compiles and runs having no rpath for libdispatch.
+            preBuild = lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
               export SWIFT_EXEC="$PWD/tools/nix-swiftc"
               export ARKDB_SWIFTC_INCLUDE=
               chmod +x tools/nix-swiftc
@@ -148,6 +151,12 @@
               cp ark-runtime/build/libs/*.jar ark-client/build/libs/*.jar $out/lib/
             '';
           });
+
+          # Google publishes an Android SDK for x86_64 Linux and for macOS
+          # and nothing else, so those are the systems that can host this
+          # build; every other Linux gets the x86_64-linux derivation below
+          # (see the end of this file) and a builder to run it on.
+          androidHost = pkgs.stdenv.hostPlatform.isDarwin || pkgs.stdenv.hostPlatform.system == "x86_64-linux";
 
           # The Android SDK: platform 35 and its build tools, from nixpkgs
           # (patched to run from the store; Google's own downloads would not).
@@ -212,14 +221,15 @@
         {
           packages = {
             inherit ark-spec arkc vectors harken-domain;
-            inherit harken-apk;
-            harken-apk-deps = harken-apk.mitmCache.updateScript;
             arkdb-kotlin = kotlin;
             kotlin-deps = kotlin.mitmCache.updateScript;
             harken-server = crate { pname = "harken-server"; };
             harken-desktop = crate { pname = "harken-desktop"; };
             arkdb-swift = swift;
             default = ark-spec;
+          } // lib.optionalAttrs androidHost {
+            inherit harken-apk;
+            harken-apk-deps = harken-apk.mitmCache.updateScript;
           };
 
           checks = {
@@ -290,7 +300,13 @@
       outputs = forAll perSystem;
     in
     {
-      packages = lib.mapAttrs (_: o: o.packages) outputs;
+      # A Linux that Google ships no SDK for builds the phone as an
+      # x86_64-linux derivation: `nix build .#harken-apk` there needs a
+      # builder for that system (`--builders 'ssh://box x86_64-linux'`, or
+      # `extra-platforms` with binfmt on a 4 KiB-page kernel).
+      packages = lib.mapAttrs (system: o: o.packages // lib.optionalAttrs (!(o.packages ? harken-apk)) {
+        inherit (outputs.x86_64-linux.packages) harken-apk harken-apk-deps;
+      }) outputs;
       checks = lib.mapAttrs (_: o: o.checks) outputs;
       devShells = lib.mapAttrs (_: o: o.devShells) outputs;
     };
