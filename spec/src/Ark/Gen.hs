@@ -288,7 +288,7 @@ plan :: Ctx' -> Plan -> Text
 plan c p =
   "Plan" <> sep t <> "from(" <> str t (pTable p) <> ")"
     <> maybe "" (\f -> ".filter(" <> predicate c f <> ")") (pFilter p)
-    <> T.concat [".order_by(" <> str t col <> ", " <> dirName t d <> ")" | (col, d) <- pOrder p]
+    <> T.concat ["." <> orderBy <> "(" <> str t col <> ", " <> dirName t d <> ")" | (col, d) <- pOrder p]
     <> maybe "" (\n -> ".limit(" <> T.pack (show n) <> ")") (pLimit p)
     <> T.concat
       [ ".related(" <> str t (rName r) <> ", " <> str t (relParent (rRelation r)) <> ", " <> str t (relChild (rRelation r)) <> ", " <> str t (relColumn (rRelation r)) <> ", " <> plan c (rPlan r) <> ")"
@@ -296,6 +296,7 @@ plan c p =
       ]
   where
     t = cTarget c
+    orderBy = case t of Rust -> "order_by"; _ -> "orderBy"
 
 predicate :: Ctx' -> Pred -> Text
 predicate c = \case
@@ -429,8 +430,16 @@ asBool :: Target -> Text
 asBool Rust = ".as_bool()"
 asBool _ = ".asBool()"
 
+-- | A @Value@ constructor call. Kotlin cannot spell @null@ as a function
+-- name without backticks, so there it is @Value.`null`()@ — the one
+-- deviation the Kotlin runtime records.
 valueCtor :: Target -> Text -> [Text] -> Text
-valueCtor t name args = "Value" <> sep t <> name <> "(" <> T.intercalate ", " args <> ")"
+valueCtor t name args = "Value" <> sep t <> name' <> "(" <> T.intercalate ", " args <> ")"
+  where
+    name' = case (t, name) of
+      (Kotlin, "null") -> "`null`"
+      (Rust, n) -> snake n
+      (_, n) -> n
 
 listOf :: Target -> [Text] -> Text
 listOf Rust xs = "vec![" <> T.intercalate ", " xs <> "]"

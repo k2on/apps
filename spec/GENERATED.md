@@ -25,6 +25,10 @@ is the call surface (`<fn>Args(...)`), the ids, and the module constants.
 | a fallible closure `\x -> e` | `\|v3\| -> Result<Value, Fault> { Ok(e) }` | `{ v3 in e }` | `{ v3 -> e }` |
 | string literal | `"…"` | `"…"` | `"…"` |
 
+Two forced spellings: Kotlin writes `Value.\`null\`()` because `null` is a
+keyword, and Rust writes `Ops::r#mod` and `Ops::match_opt` for the same
+reason; Rust snake-cases every name (`bytes_hex`, `order_by`, `unwrap_or`).
+
 A fault is `Fault`, with two constructors that are never conflated:
 `Fault.refuse(text)` is a verdict, `Fault.bug(text)` is a bug. In Rust a
 fault is `Err(Fault)`; in Swift and Kotlin it is thrown.
