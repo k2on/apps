@@ -6,7 +6,10 @@
 -- arkc hash    m.ark               the module hash and every function's hash
 -- arkc print   m.ark               the diagnostic text form (what a diff shows)
 -- arkc check   old.ark new.ark     log compatibility: every break, or nothing
--- arkc gen     rust|swift|kotlin  m.ark  OUTDIR  [--name Name]
+-- arkc gen     rust|swift|kotlin  m.ark  OUTDIR  [--name Name] [--only f,g,h]
+--                                  --only: generate only these functions (and
+--                                  the helpers they reach); a peer applies the
+--                                  rest by facts
 -- arkc demo    OUT.ark             write the demo module (for the runtimes' first test)
 -- @
 --
@@ -60,19 +63,24 @@ main = do
         "swift" -> pure Swift
         "kotlin" -> pure Kotlin
         other -> die ("unknown target " ++ other)
-      let name = case rest of
-            ["--name", n] -> T.pack n
-            _ -> "Ark"
-      m <- load path
+      let opts = pairs rest
+          name = maybe "Ark" T.pack (lookup "--name" opts)
+          only = fmap (T.splitOn "," . T.pack) (lookup "--only" opts)
+      whole <- load path
+      let m = maybe whole (`restrict` whole) only
       createDirectoryIfMissing True out
       let file = out ++ "/" ++ targetFileName t name
-      TIO.writeFile file (generate t name m)
-      putStrLn file
+      TIO.writeFile file (generate t name whole m)
+      putStrLn (file ++ "  " ++ show (length (modFunctions m)) ++ " of " ++ show (length (modFunctions whole)) ++ " functions")
     ["demo", out] -> do
       m <- either (die . show) pure (verify demoModule)
       B.writeFile out (encode (toValue m))
       putStrLn (out ++ "  " ++ hex (moduleHash m) ++ "  " ++ show (M.size (closures m)) ++ " functions")
-    _ -> die "usage: arkc verify M | print M | hash M | check OLD NEW | gen rust|swift|kotlin M OUTDIR [--name N] | demo OUT"
+    _ -> die "usage: arkc verify M | print M | hash M | check OLD NEW | gen rust|swift|kotlin M OUTDIR [--name N] [--only f,g] | demo OUT"
+
+pairs :: [String] -> [(String, String)]
+pairs (k : v : rest) = (k, v) : pairs rest
+pairs _ = []
 
 -- | Read, decode and verify a module; anything wrong is fatal and named.
 load :: FilePath -> IO Module

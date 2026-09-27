@@ -77,6 +77,15 @@ CmpOp.Eq, v)`, `Pred.inList(col, [v…])`, `Pred.all([p…])`, `Pred.any([p…])
 
 **Ctx** — `ctx.user`, `ctx.session` as `Value.text`.
 
+## Only what a peer calls
+
+`arkc gen … --only create_playlist,add_to_playlist,library` emits those
+functions and the helpers they reach, and a dispatch that knows only those.
+A peer built from it applies every other entry by facts, which the
+authority keeps beside each entry, and ends in the same state — so a phone
+that never authors `add_track` carries no code for it and still shows every
+track. The module bytes and hash are always the whole module's.
+
 ## The generated file
 
 One file per module, named after it (`harken_gen.rs`, `HarkenGen.swift`,

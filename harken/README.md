@@ -9,8 +9,10 @@ recordings, the listening session, Home Assistant and sign-in stay in the
 old harken until the stack has earned them.
 
 ```
-domain/    the domain, authored in Rust through ark-builder; emits harken.ark and,
-           through arkc, generated Rust, Swift and Kotlin
+domain/    the domain, authored in Rust through ark-builder, one file per concern
+           (schema, library, playlists, queries); emits harken.ark and, through
+           arkc, generated Rust, Swift and Kotlin — the server's with everything,
+           each client's with only what it calls
 server/    axum: hosts the `library` and `playlists` scopes, dev auth, a scanner
            that authors tracks from a directory, /media
 desktop/   a terminal peer in Rust over the generated Rust
@@ -65,6 +67,15 @@ one store; the join is a map lookup on an id.
 
 No live section yet: the listening session is the next thing to port and
 the first real use of `live`.
+
+**Clients are generated with `--only`.** `add_track` is authored by the
+scanner and by nothing on a phone or the desktop, so their generated code
+does not contain it: `arkc gen swift harken.ark … --only
+create_playlist,add_to_playlist,remove_from_playlist,library,playlists,playlist_items`
+(the list is `CLIENT_FUNCTIONS` in `domain/src/main.rs`). Tracks still
+arrive, because a replica that does not hold an entry's function applies
+the facts the server kept beside it and ends in the same state
+(docs/arkdb.md §3.8). Only the server is generated with everything.
 
 ## What each program does
 
