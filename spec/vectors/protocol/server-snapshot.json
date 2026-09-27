@@ -1,0 +1,4 @@
+{
+  "frame": {"hash":{"$bytes":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"},"rows":{"playlist_item":[{"added_ms":{"$int":"1577836800000"},"media_id":{"$bytes":"07"},"playlist_id":{"$id":"00000000-0000-0000-0000-000000000001"},"pos":{"$int":"1"},"user_id":"alice"}]},"scope":"playlists","seq":{"$int":"2"},"t":"snapshot"},
+  "bytes": "a5617468736e617073686f74637365710264686173685820cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd64726f7773a16d706c61796c6973745f6974656d81a563706f730167757365725f696465616c6963656861646465645f6d731b0000016f5e66e800686d656469615f696441076b706c61796c6973745f6964d82550000000000000000000000000000000016573636f706569706c61796c69737473"
+}

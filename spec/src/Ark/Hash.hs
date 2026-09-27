@@ -9,6 +9,7 @@ module Ark.Hash
   , Closure (..)
   , closure
   , closures
+  , closureValue
   , stateHash
   , functionHash
   , moduleHash
@@ -56,6 +57,19 @@ closure m fn = Closure (normalize fn) [normalize h | h <- modFunctions m, fnName
       | otherwise = case lookupFunction m n of
           Just h -> go (n : seen) (calls h ++ ns)
           Nothing -> go seen ns
+
+-- | A closure as a value, as an authority sends one: @{ t: "closure", fn,
+-- helpers }@, each function in its normalised form. 'Ark.Decode.closureFromValue'
+-- reads it back.
+closureValue :: Closure -> Value
+closureValue (Closure fn helpers) =
+  VStruct
+    ( M.fromList
+        [ ("t", VText "closure")
+        , ("fn", functionValue M.empty fn)
+        , ("helpers", VList (map (functionValue M.empty) helpers))
+        ]
+    )
 
 -- | Every function of a module, by the hash of its closure.
 closures :: Module -> Map FnHash Closure

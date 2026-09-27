@@ -227,6 +227,7 @@ exec env = \case
     v <- traverse (eval env) me
     throwError (Returned v)
   where
+    record :: Store -> Maybe Change -> Run ()
     record st' ch = lift (modify' (\s -> s {stStore = st', stChanges = maybe id (:) ch (stChanges s)}))
 
 mutating :: Env -> Run ()

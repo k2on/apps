@@ -41,6 +41,7 @@ module Ark.Peer
   , ack
   , reject
   , needs
+  , retry
   , takeChanges
   , verifyAt
 
@@ -215,6 +216,11 @@ needs r =
   , isNothing (ibFacts ib)
   , not (M.member (eFn e) (rBodies r)) || n `elem` rDiverged r
   ]
+
+-- | Try the inbox again — after closures arrived, or facts, or anything
+-- else that might let the next entry through.
+retry :: Replica -> Replica
+retry = advance
 
 -- | What a view is told, and the slate wiped.
 takeChanges :: Replica -> (Changes, Replica)

@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE LambdaCase #-}
 -- | Emits the conformance vectors, and in doing so runs the whole
 -- specification end to end on a small domain: build a module, verify it,
 -- apply a mutator, hash the result.
@@ -19,18 +20,22 @@ import System.Directory (createDirectoryIfMissing)
 import System.Environment (getArgs)
 import System.IO (IOMode (WriteMode), hPutStr, hSetEncoding, stdout, utf8, withFile)
 
-import Ark.Canon (encode)
+import Ark.Canon (decode, encode)
+import Ark.Decode (fromValue)
 import Ark.Encode (toValue)
 import Ark.Eval
 import Ark.Hash
 import Ark.IR
 import Ark.Log
 import Ark.Peer
+import Ark.Protocol
 import Ark.Schema
 import Ark.Std (textOfId)
-import Ark.Store (Change, Store)
+import Ark.Store (Store)
 import qualified Ark.Store as S
+import Ark.Sim
 import Ark.Value
+import qualified Ark.View as V
 import Ark.Verify
 
 main :: IO ()
@@ -40,11 +45,15 @@ main = do
   let out = case args of
         (d : _) -> d
         [] -> "vectors"
-  mapM_ (createDirectoryIfMissing True . ((out ++ "/") ++)) ["codec", "codec/falsify", "order", "hash", "eval", "verify", "rebase"]
+  mapM_ (createDirectoryIfMissing True . ((out ++ "/") ++)) ["codec", "codec/falsify", "order", "hash", "eval", "verify", "rebase", "protocol", "module", "views"]
   codecVectors out
   orderVectors out
   demo out
   rebase out
+  moduleVectors out
+  protocolVectors out
+  simVectors out
+  viewVectors out
   putStrLn "vectors written"
 
 -- JSON, with the wrappers README.md describes ---------------------------
@@ -280,12 +289,6 @@ demo out = do
 storeValue :: Store -> Value
 storeValue st = VStruct (M.fromList [(t, VList (map VStruct (M.elems (S.rows st t)))) | t <- S.tableNames st])
 
-changeValue :: Change -> Value
-changeValue = \c -> case c of
-  S.Add t r -> VStruct (M.fromList [("t", VText "add"), ("table", VText t), ("row", VStruct r)])
-  S.Remove t r -> VStruct (M.fromList [("t", VText "remove"), ("table", VText t), ("row", VStruct r)])
-  S.Edit t o n -> VStruct (M.fromList [("t", VText "edit"), ("table", VText t), ("old", VStruct o), ("new", VStruct n)])
-
 
 -- rebase/: three peers and an authority, then the roads not taken ---------
 
@@ -396,7 +399,7 @@ rebase out = do
     (out ++ "/rebase/three-peers.json")
     ( obj
         [ ("module", json (toValue m))
-        , ("entries", json (VList [entryValue n e | (n, (e, _)) <- M.toList (lEntries (aLog auth4))]))
+        , ("entries", json (VList [entryWithSeq n e | (n, (e, _)) <- M.toList (lEntries (aLog auth4))]))
         , ("facts", json (VList [VList (map changeValue f) | (_, (_, f)) <- M.toList (lEntries (aLog auth4))]))
         , ("alice_alone_pos_of_9", json (VInt 1))
         , ("alice_after_rebase_pos_of_9", json (VInt 3))
@@ -406,15 +409,205 @@ rebase out = do
     )
   putStrLn ("  final hash    " ++ hex (stateHash (aStore auth4)))
   where
-    entryValue n e =
-      VStruct
-        ( M.fromList
-            [ ("seq", VInt n)
-            , ("id", VId (eId e))
-            , ("actor", VText (eActor e))
-            , ("session", VText (eSession e))
-            , ("fn", VBytes (eFn e))
-            , ("args", VStruct (eArgs e))
-            , ("autos", VStruct (eAutos e))
+    entryWithSeq n e = case entryValue e of
+      VStruct m -> VStruct (M.insert "seq" (VInt n) m)
+      other -> other
+
+-- module/: the module as bytes, and back --------------------------------
+
+moduleVectors :: FilePath -> IO ()
+moduleVectors out = do
+  putStrLn "module/"
+  m <- either (error . show) pure (verify demoModule)
+  let v = toValue m
+      bytes = encode v
+  case decode bytes >>= either (error . show) Right . fromValue of
+    Right m' | m' == m {modFunctions = map (\f -> f {fnNames = M.empty}) (modFunctions m)} -> pure ()
+    Right _ -> error "module: decode . encode is not the identity"
+    Left e -> error ("module: " ++ show e)
+  write (out ++ "/module/demo.json") (obj [("module", json v), ("bytes", quoted (hex bytes)), ("hash", quoted (hex (moduleHash m)))])
+
+-- protocol/: every frame, as bytes, and back ------------------------------
+
+protocolVectors :: FilePath -> IO ()
+protocolVectors out = do
+  putStrLn "protocol/"
+  m <- either (error . show) pure (verify demoModule)
+  let idN k = maybe (error "id") id (mkId (B.pack (replicate 15 0 ++ [k])))
+      hAdd = head [h | (h, c) <- M.toList (closures m), fnName (cFn c) == "add_to_playlist"]
+      entry = Entry (idN 9) "alice" "alice-dev" hAdd (M.fromList [("playlist_id", VId (idN 1)), ("media_id", VBytes (B.pack [7]))]) (M.fromList [("added_ms", VInt 1577836800000)])
+      row = M.fromList [("playlist_id", VId (idN 1)), ("media_id", VBytes (B.pack [7])), ("pos", VInt 1), ("added_ms", VInt 1577836800000), ("user_id", VText "alice")]
+      clientFrames =
+        [ ("hello", Hello [Subscription "playlists" 4 Whole, Subscription "library" 0 ByFacts] (Just "tok") 1)
+        , ("push", Push "playlists" [entry])
+        , ("need_facts", NeedFacts "playlists" [2, 3])
+        , ("need_closures", NeedClosures [hAdd])
+        , ("verify", Verify "playlists" 4 (B.replicate 32 0xab))
+        , ("say", Say (B.pack [1, 2, 3]))
+        ]
+      serverFrames =
+        [ ("batch", Batch "playlists" [(5, entry, Nothing), (6, entry, Just [S.Add "playlist_item" row])] True)
+        , ("facts", FactsFor "playlists" [(2, [S.Add "playlist_item" row, S.Remove "playlist_item" row])])
+        , ("snapshot", SnapshotOf "playlists" 2 (B.replicate 32 0xcd) (M.fromList [("playlist_item", [VStruct row])]))
+        , ("ack", Ack "playlists" [idN 9] [5])
+        , ("reject", Reject "playlists" (idN 9) "a playlist needs a name")
+        , ("denied", Denied "not signed in")
+        , ("closures", Closures [(hAdd, closures m M.! hAdd)])
+        , ("agree", Agree "playlists" 4 (B.replicate 32 0xab) True)
+        , ("heard", Heard (B.pack [4, 5]))
+        ]
+  mapM_
+    (\(name, f) -> do
+      let v = clientValue f
+      case decode (encode v) >>= either (error . show) Right . clientFromValue of
+        Right f' | f' == f -> pure ()
+        other -> error ("protocol client " ++ name ++ ": " ++ show other)
+      write (out ++ "/protocol/client-" ++ name ++ ".json") (obj [("frame", json v), ("bytes", quoted (hex (encode v)))]))
+    clientFrames
+  mapM_
+    (\(name, f) -> do
+      let v = serverValue f
+      case decode (encode v) >>= either (error . show) Right . serverFromValue of
+        Right f' | sameFrame f' f -> pure ()
+        other -> error ("protocol server " ++ name ++ ": " ++ show other)
+      write (out ++ "/protocol/server-" ++ name ++ ".json") (obj [("frame", json v), ("bytes", quoted (hex (encode v)))]))
+    serverFrames
+  where
+    -- Closures decode with empty symbol names, so compare through their values.
+    sameFrame (Closures a) (Closures b) = map fst a == map fst b && map (closureValue . snd) a == map (closureValue . snd) b
+    sameFrame a b = a == b
+
+-- rebase/: the fleet ---------------------------------------------------
+
+-- | A seeded fleet of three over the demo domain: adds, partitions, heals
+-- and two hundred random deliveries with duplicates and drops; then
+-- settle, and every replica must hash as the authority does.
+simVectors :: FilePath -> IO ()
+simVectors out = do
+  putStrLn "rebase/ (fleet)"
+  m <- either (error . show) pure (verify demoModule)
+  let sch = modSchema m
+      bodies = closures m
+      hashOf name = head [h | (h, c) <- M.toList bodies, fnName (cFn c) == name]
+      hCreate = hashOf "create_playlist"
+      hAdd = hashOf "add_to_playlist"
+      idOf :: Int -> IdBytes
+      idOf k = maybe (error "id") id (mkId (B.pack [fromIntegral (k `div` 256), fromIntegral (k `mod` 256)] <> B.replicate 14 0))
+      pid = idOf 1
+      now = M.fromList [("added_ms", VInt 1577836800000)]
+      sim0 = newSim sch bodies ["playlists"] 3 7
+      -- one playlist, created by peer 0 and delivered to all
+      sim1 = settle (simMutate sim0 0 "playlists" (idOf 1000) hCreate (M.fromList [("id", VId pid)]) (M.fromList [("name", VText "Fleet")]))
+      -- a scripted mess: adds from everyone, a partition, more adds, random deliveries
+      script = concat [[Add' i k | i <- [0 .. 2]] | k <- [1 .. 4]] ++ [Part 2] ++ [Add' 2 k | k <- [5 .. 7]] ++ [Add' 0 8, Add' 1 9] ++ replicate 60 Step ++ [Part 0] ++ [Add' 1 10, Add' 0 11] ++ replicate 60 Step ++ [Heal 0, Heal 2] ++ replicate 80 Step
+      run (sim, n) op = case op of
+        Add' i k -> (simMutate sim i "playlists" (idOf (2000 + n)) hAdd now (M.fromList [("playlist_id", VId pid), ("media_id", VBytes (B.pack [fromIntegral i, fromIntegral k]))]), n + 1)
+        Part i -> (partition sim i, n)
+        Heal i -> (heal sim i, n)
+        Step -> (step sim, n)
+      (sim2, _) = foldl run (sim1, 0 :: Int) script
+      sim3 = settle sim2
+      clients = clientHashes sim3
+      (headN, serverHash) = case serverHashes sim3 of
+        [(_, n, h)] -> (n, h)
+        other -> error ("fleet: expected one scope, saw " ++ show (length other))
+  if all (\(_, _, n, h) -> n == headN && h == serverHash) clients then pure () else error ("fleet did not converge: " ++ show (map (\(i, _, n, h) -> (i, n, hex h)) clients) ++ " vs " ++ hex serverHash)
+  if quiet sim3 then pure () else error "fleet: something still pending after settle"
+  let rejected = [(i, rj) | (i, c) <- M.toList (simClients sim3), (r, _) <- M.elems (clScopes c), rj <- rRejections r]
+  if null rejected then pure () else error ("fleet: rejections: " ++ show rejected)
+  if headN >= 12 then pure () else error ("fleet: too few entries landed: " ++ show headN)
+  let a = svScopes (simServer sim3) M.! "playlists"
+      items = S.rows (aStore a) "playlist_item"
+  putStrLn ("  " ++ show (M.size items) ++ " items on the playlist after " ++ show headN ++ " entries; hash " ++ hex serverHash)
+  write
+    (out ++ "/rebase/fleet-seed-7.json")
+    ( obj
+        [ ("module", json (toValue m))
+        , ("clients", json (VInt 3))
+        , ("seed", json (VInt 7))
+        , ("script", json (VList (map opValue script)))
+        , ("expected_head", json (VInt headN))
+        , ("expected_hash", quoted (hex serverHash))
+        , ("final_store", json (storeValue (aStore a)))
+        ]
+    )
+  where
+    opValue = \case
+      Add' i k -> VStruct (M.fromList [("t", VText "add"), ("peer", VInt (fromIntegral i)), ("media", VBytes (B.pack [fromIntegral i, fromIntegral k]))])
+      Part i -> VStruct (M.fromList [("t", VText "partition"), ("peer", VInt (fromIntegral i))])
+      Heal i -> VStruct (M.fromList [("t", VText "heal"), ("peer", VInt (fromIntegral i))])
+      Step -> VStruct (M.fromList [("t", VText "step")])
+
+data Op = Add' Int Int | Part Int | Heal Int | Step
+
+-- views/: a maintained plan through the three-peer scenario's facts --------
+
+-- | The playlist's items, ordered by position, limited to two, maintained
+-- through every change the fleet scenario produced; and the same with the
+-- playlist's items hanging beneath the playlist row. The patches are what
+-- a screen splices; the contract is that the rows equal a fresh hydrate
+-- after every step.
+viewVectors :: FilePath -> IO ()
+viewVectors out = do
+  putStrLn "views/"
+  m <- either (error . show) pure (verify demoModule)
+  let sch = modSchema m
+      idN k = maybe (error "id") id (mkId (B.pack (replicate 15 0 ++ [k])))
+      pid = idN 1
+      now = M.fromList [("added_ms", VInt 1577836800000)]
+      hashOf name = head [h | (h, c) <- M.toList (closures m), fnName (cFn c) == name]
+      -- a straight sequence of entries on one authority: create, add 1..4, remove one, add 5
+      a0 = authority sch "playlists" (closures m)
+      addE k eid = Entry (idN eid) "alice" "dev" (hashOf "add_to_playlist") (M.fromList [("playlist_id", VId pid), ("media_id", VBytes (B.pack [k]))]) now
+      entries =
+        [ Entry (idN 100) "alice" "dev" (hashOf "create_playlist") (M.fromList [("name", VText "Viewed")]) (M.fromList [("id", VId pid)])
+        , addE 1 101, addE 2 102, addE 3 103, addE 4 104
+        ]
+      (aN, factsList) = foldl (\(a, fs) e -> case sequenceEntry a e of (a', Appended _ f) -> (a', fs ++ [f]); other -> error ("view seq: " ++ show other)) (a0, []) entries
+      -- a delete written by hand as a fact, then another add, to exercise a refill
+      removeFirst = [S.Remove "playlist_item" (head (M.elems (S.rows (aStore aN) "playlist_item")))]
+      (aM, moreFacts) = case sequenceEntry aN {aStore = S.applyChanges (aStore aN) removeFirst} (addE 5 105) of
+        (a', Appended _ f) -> (a', [removeFirst, f])
+        other -> error ("view seq 2: " ++ show other)
+      allFacts = factsList ++ moreFacts
+      plans =
+        [ ("top-two-by-pos", V.ViewPlan "playlist_item" (Just (V.FCmp "playlist_id" Eq (VId pid))) [("pos", Asc)] (Just 2) [])
+        , ("playlist-with-items", V.ViewPlan "playlist" Nothing [("name", Asc)] Nothing [("items", Relation "playlist" "playlist_item" "playlist_id", V.ViewPlan "playlist_item" Nothing [("pos", Desc)] (Just 3) [])])
+        ]
+      run vp =
+        let step (st, view, acc) facts =
+              let (st', view', patches) = foldl (\(s, v, ps) ch -> let s' = S.applyChange s ch; (v', p) = V.push sch s' ch v in (s', v', ps ++ p)) (st, view, []) facts
+               in if V.contract sch vp st' view' then (st', view', acc ++ [(patches, V.rows view')]) else error "view contract broken"
+            st0 = S.empty sch
+            (_, _, steps) = foldl step (st0, V.hydrate sch vp st0, []) allFacts
+         in steps
+  mapM_
+    (\(name, vp) -> do
+      let steps = run vp
+      -- The top-level plan must show a removal and the refill after it; the
+      -- nested one must show a child change surfacing as an update of its
+      -- parent.
+      let ok = case name of
+            "top-two-by-pos" -> any (\(ps, _) -> any isRemove ps) steps && any (\(ps, _) -> length ps >= 2) steps
+            _ -> any (\(ps, _) -> any isUpdate ps) steps
+      if ok then pure () else error ("view " ++ name ++ ": the patches do not show what the plan is for")
+      write
+        (out ++ "/views/" ++ name ++ ".json")
+        ( obj
+            [ ("module", json (toValue m))
+            , ("plan", quoted (show vp))
+            , ("changes", json (VList [VList (map changeValue f) | f <- allFacts]))
+            , ("steps", "[" ++ intercalate "," [obj [("patches", json (VList (map patchValue ps))), ("rows", json (VList rows))] | (ps, rows) <- steps] ++ "]")
             ]
-        )
+        ))
+    plans
+  putStrLn ("  " ++ show (length allFacts) ++ " changes through " ++ show (length plans) ++ " plans; " ++ show (aM == aM))
+  where
+    isRemove V.Remove {} = True
+    isRemove _ = False
+    isUpdate V.Update {} = True
+    isUpdate _ = False
+    patchValue = \case
+      V.Insert i n -> VStruct (M.fromList [("t", VText "insert"), ("at", VInt (fromIntegral i)), ("node", n)])
+      V.Remove i -> VStruct (M.fromList [("t", VText "remove"), ("at", VInt (fromIntegral i))])
+      V.Update i n -> VStruct (M.fromList [("t", VText "update"), ("at", VInt (fromIntegral i)), ("node", n)])

@@ -29,24 +29,25 @@ maps, a rebase is recomputing a value. What it must be is exact.
 | 8 | `Ark.Hash`, `Ark.Sha256` | the state hash; closures and the function hash, which covers the helpers a function reaches; SHA-256 itself, so the spec imports nothing |
 | 9 | `Ark.Verify` | what a module must satisfy before anything runs, generates from or hashes it |
 | 10 | `Ark.Log` | an entry; a scope's log with the facts kept beside each entry; snapshots, the horizon, the state at any retained sequence from facts alone |
-| 11 | `Ark.Peer` | the replica: pending intents, the optimistic view, the rebase, applying by intent or by facts, divergence detection; the authority: sequencing, dedupe, verdicts, compaction, retirement, adoption of a scope; `localCommit`, the serverless peer |
+| 11 | `Ark.Peer` | the replica: pending intents, the optimistic view, the rebase, applying by intent or by facts, divergence detection; the authority: sequencing, dedupe, verdicts, compaction, retirement of closures no retained entry names, adoption of a scope; `localCommit`, the serverless peer |
+| 7.2 | `Ark.Decode` | a module, a closure, a schema or a type from its value: the inverse of `Ark.Encode`, strict about shape |
+| 12 | `Ark.Protocol` | the frames as values and their encodings; the client machine (subscriptions, hello, push, pages, facts, snapshots, closures, verify) and the server machine (authenticate once, hold every entry to its identity, sequence, fan out a page at a time, rooms) |
+| 13 | `Ark.View` | incremental views over a plan: hydrate, push, patches, refill under a limit, child changes as parent updates, the correctness contract; a maintained count is a view's length |
+| 14 | `Ark.Live` | rooms per account over opaque frames: arrive, speak, depart; a snapshot kept when a room empties; a repeated hello is paging |
+| 15 | `Ark.Sim` | the seeded fleet: a server, clients, a network that reorders, duplicates and drops; partition, heal, step, settle |
 
-Not yet written, in the order they are needed (see `docs/arkdb.md`,
-Part 3, for the design each one implements):
-
-| § | module | what it will define |
-|---|---|---|
-| 12 | `Ark.Protocol` | the frames, as values, and the state machine that sends and receives them, including fan-out to many replicas and the `Need`/`Facts`/`Snapshot`/`Verify` exchanges |
-| 13 | `Ark.View` | incremental views: source, filter, join, take, tally; patches; `Rebuilt` |
-| 14 | `Ark.Live` | rooms, frames, `keep`, the second-`Hello` rule |
-| 15 | `Ark.Sim` | the seeded simulation that emits `rebase/` vectors |
+Everything the design in `docs/arkdb.md` Part 3 names is now written. What
+is not in this package is not specification: the generators (`arkc`, in
+`../arkc`), the runtimes, and the apps are held to it.
 
 ## Building
 
-    cabal build && cabal run ark-vectors -- vectors/
+    nix build ..#ark-spec            # from this directory; the flake is the repository's
+    nix run ..#vectors -- vectors/   # regenerate the vectors
+    nix develop ..#spec              # a shell with GHC and cabal
 
-or, with nix, `nix build` / `nix develop`. Without either, `ghc --make
--isrc app/Vectors.hs` is enough; only boot libraries are used.
+Only GHC's boot libraries are used, so `ghc --make -isrc app/Vectors.hs`
+inside that shell is also enough.
 
 ## The vectors
 
@@ -69,7 +70,10 @@ caught by it.
 | `verify/` | a module and whether it verifies | §9 |
 | `eval/` | a module, a store, an entry; the changes, the rows, the hash | §6, §8 |
 | `hash/` | a store and its hash | §8 |
-| `rebase/` | a scripted session of replicas and an authority: the mutations, the deliveries, the expected view and confirmed hashes at each step | §10, §11 |
+| `rebase/` | `three-peers`: a scripted session of replicas and an authority, asserted step by step; `fleet-seed-N`: a seeded simulation's script and the hash every replica must reach after settle | §10, §11, §15 |
+| `module/` | a module as a value, its canonical bytes, its hash; decode of encode is the identity | §7 |
+| `protocol/` | every frame as a value and its bytes; decode of encode is the identity | §12 |
+| `views/` | a plan, initial rows, a change list, expected patches and rows | §13 |
 
 ## Requirements that are not functions
 
