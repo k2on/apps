@@ -15,7 +15,12 @@
       lib = nixpkgs.lib;
       systems = [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ];
       forAll = f: lib.genAttrs systems (system:
-        f (import nixpkgs { inherit system; overlays = [ rust-overlay.overlays.default ]; }));
+        f (import nixpkgs {
+          inherit system;
+          overlays = [ rust-overlay.overlays.default ];
+          # The Android SDK is unfree, and its licence is accepted here once.
+          config = { allowUnfree = true; android_sdk.accept_license = true; };
+        }));
 
       # A source tree that is only the named directories of this repository,
       # so that a prose edit under docs/ is not an input to a compile. Build
@@ -143,10 +148,72 @@
               cp ark-runtime/build/libs/*.jar ark-client/build/libs/*.jar $out/lib/
             '';
           });
+
+          # The Android SDK: platform 35 and its build tools, from nixpkgs
+          # (patched to run from the store; Google's own downloads would not).
+          android = pkgs.androidenv.composeAndroidPackages {
+            platformVersions = [ "35" ];
+            buildToolsVersions = [ "35.0.0" ];
+          };
+          sdkRoot = "${android.androidsdk}/libexec/android-sdk";
+
+          # The phone: gradle over the SDK, the Kotlin runtime and client as a
+          # composite build, and the generated domain — assembled offline from
+          # a recorded Maven graph (harken/android/deps.json; `nix run
+          # .#harken-apk-deps` re-records it). Debug-signed, like any
+          # assembleDebug; it installs anywhere and belongs nowhere public.
+          harken-apk = pkgs.stdenv.mkDerivation (final: {
+            pname = "harken-apk";
+            version = "0.1.0";
+            src = only [ "harken/android" "harken/domain/gen/kotlin" "kotlin" ];
+            sourceRoot = "source/harken/android";
+            # stdenv makes only the source root writable, and gradle writes
+            # `.gradle/` and `build/` inside the included build at ../../kotlin
+            # too — a read-only one ends the build with no task run and no
+            # message. The whole unpacked tree is writable instead.
+            postUnpack = "chmod -R u+w source";
+            nativeBuildInputs = [ pkgs.gradle pkgs.jdk21 android.androidsdk ];
+            mitmCache = pkgs.gradle.fetchDeps {
+              pkg = final.finalPackage;
+              data = ./harken/android/deps.json;
+            };
+            __darwinAllowLocalNetworking = true;
+            ANDROID_HOME = sdkRoot;
+            ANDROID_SDK_ROOT = sdkRoot;
+            gradleFlags = [
+              "-Dorg.gradle.java.home=${pkgs.jdk21.home}"
+              # The Kotlin build asks for a JDK 21 toolchain; this is the one,
+              # and gradle is not to go looking for or downloading another.
+              "-Porg.gradle.java.installations.auto-detect=false"
+              "-Porg.gradle.java.installations.auto-download=false"
+              "-Porg.gradle.java.installations.paths=${pkgs.jdk21.home}"
+              # AGP would fetch its own aapt2 from Maven, an unpatched binary
+              # that cannot run here; the SDK's is patched and can.
+              "-Pandroid.aapt2FromMavenOverride=${sdkRoot}/build-tools/35.0.0/aapt2"
+            ];
+            # AGP keeps its own state (analytics settings, the debug keystore it
+            # signs with) under ~/.android, and the builder has no home.
+            preBuild = ''
+              export HOME="$TMPDIR/home" ANDROID_USER_HOME="$TMPDIR/home/.android"
+              mkdir -p "$ANDROID_USER_HOME"
+            '';
+            gradleBuildTask = ":app:assembleDebug";
+            # The recording runs the same assemble rather than resolving every
+            # configuration: AGP's androidTest classpaths cannot be resolved
+            # in isolation, and what the build fetches is the whole graph.
+            gradleUpdateTask = ":app:assembleDebug";
+            doCheck = false;
+            installPhase = ''
+              mkdir -p $out
+              cp app/build/outputs/apk/debug/app-debug.apk $out/harken-debug.apk
+            '';
+          });
         in
         {
           packages = {
             inherit ark-spec arkc vectors harken-domain;
+            inherit harken-apk;
+            harken-apk-deps = harken-apk.mitmCache.updateScript;
             arkdb-kotlin = kotlin;
             kotlin-deps = kotlin.mitmCache.updateScript;
             harken-server = crate { pname = "harken-server"; };

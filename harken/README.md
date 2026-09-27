@@ -106,6 +106,7 @@ Everything is `nix`, from the repository root:
     nix build .#harken-desktop
     nix build .#arkdb-swift      # the Swift runtime and client, with their tests
     nix build .#arkdb-kotlin     # the Kotlin runtime and client, with their tests
+    nix build .#harken-apk       # the Android app, debug-signed, from a recorded Maven graph
     nix flake check              # all of it, plus: fmt, clippy and every Rust test;
                                  # the vectors; harken.ark and gen/ against the tree
 
@@ -117,10 +118,10 @@ changes, copy the check's answer into the tree:
 
     nix build .#harken-domain && cp -r result/harken.ark result/gen harken/domain/
 
-The phones are built by their own toolchains — Xcode over `ios/project.yml`,
-the Android SDK over `android/` — from the Swift and Kotlin packages the
-flake builds; each `README.md` says how, and that neither has been run on a
-device from here.
+The Android app is a nix build like the rest (`android/README.md` says what
+the derivation pins and how its Maven graph is re-recorded); the iOS app is
+Xcode over `ios/project.yml`, since nothing but a Mac can build one. Neither
+has been run on a device from here.
 
 ## Running it
 

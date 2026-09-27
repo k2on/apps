@@ -7,6 +7,9 @@ plugins {
 android {
     namespace = "dev.harken.android"
     compileSdk = 35
+    // Said explicitly, because AGP otherwise asks for its own default (34.0.0)
+    // and installs it into the SDK — which, under nix, is a read-only store path.
+    buildToolsVersion = "35.0.0"
 
     defaultConfig {
         applicationId = "dev.harken.android"
@@ -39,7 +42,7 @@ android {
         getByName("main") {
             // The generated domain, referenced where arkc writes it — never copied.
             // Regenerate with:
-            //   nix run /home/user/apps#arkc -- gen kotlin harken/domain/harken.ark \
+            //   nix run .#arkc -- gen kotlin harken/domain/harken.ark \
             //     harken/domain/gen/kotlin --name Harken \
             //     --only create_playlist,add_to_playlist,remove_from_playlist,library,playlists,playlist_items
             kotlin.srcDir("../../domain/gen/kotlin")

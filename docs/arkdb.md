@@ -883,9 +883,10 @@ language keeps its native build tool — cabal, cargo, SwiftPM, gradle — and
 nix drives every one of them: `nix flake check` is the spec's vectors, every
 runtime against them, the Rust workspace's lint and tests, and harken's
 module and generated code against what the tree holds; `nix build` is any
-program. Gradle's Maven graph is recorded (`kotlin/deps.json`, re-recorded
-by `nix run .#kotlin-deps`) and replayed offline, so no build reaches the
-network but the one that fetches sources.
+program, the Android APK included. Gradle's Maven graphs are recorded
+(`kotlin/deps.json` and `harken/android/deps.json`, re-recorded by
+`nix run .#kotlin-deps` and `.#harken-apk-deps`) and replayed offline, so no
+build reaches the network but the ones that fetch sources.
 
 ```
 apps/
@@ -902,7 +903,7 @@ apps/
     server/       axum: every scope of harken.ark as an authority, dev auth, the scanner
     desktop/      ratatui over ark and the generated Rust
     ios/          SwiftUI over ArkDBClient and the generated Swift (xcodegen)
-    android/      Compose over ark-client and the generated Kotlin (gradle composite)
+    android/      Compose over ark-client and the generated Kotlin; nix build .#harken-apk
   flake.nix       all of the above, as packages, checks and shells
 ```
 

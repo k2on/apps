@@ -26,12 +26,13 @@ output in three spellings; and one command holds all of it:
 
     nix flake check                 # the vectors, the three runtimes, the Rust
                                     # workspace, harken's module and generated code
-    nix build .#harken-server       # or harken-desktop, harken-domain, arkdb-swift,
-                                    # arkdb-kotlin, ark-spec
+    nix build .#harken-server       # or harken-desktop, harken-domain, harken-apk,
+                                    # arkdb-swift, arkdb-kotlin, ark-spec
     nix run .#arkc -- verify harken/domain/harken.ark
     nix develop .#spec              # or .#rust, .#swift, .#kotlin
 
-What is not verified from here: the iOS and Android apps have not been
-built for or run on a device — the runtimes, the client libraries and the
-generated domain under them have, and each app's `README.md` says exactly
-where the seen part ends.
+What is not verified from here: neither phone app has been run on a device.
+The Android one is assembled by nix, so its code compiles; the iOS one has
+not met a compiler. The runtimes, the client libraries and the generated
+domain under both have been exercised, and each app's `README.md` says
+exactly where the seen part ends.

@@ -7,9 +7,10 @@ describes: an exact replica of the `library` and `playlists` scopes, running
 the same generated code the server and the desktop run, with nothing
 crossing a bridge.
 
-**Unverified on a device.** The container this was written in has no Android
-SDK, so this project has never been assembled, installed or run. What *has*
-been verified is everything under it: `ark-runtime` and `ark-client` build
+**Assembled, not run.** `nix build .#harken-apk` compiles every Kotlin file
+here and produces the APK, so the Compose code is at least what the compiler
+accepts; nothing in the container this was written in can install or run
+it. What *has* been exercised is everything under it: `ark-runtime` and `ark-client` build
 and pass their tests under `gradle build` (JVM 21), `HarkenGen.kt` compiles
 against them, and a JVM smoke test made exactly the calls `Model.kt` makes
 — open a session, `create_playlist`, `add_to_playlist`, `remove_from_playlist`
@@ -21,8 +22,35 @@ Expect the first build on a real machine to want small fixes.
 
 ## Building
 
-You need Android Studio (Ladybug or later) or a command-line Android SDK with
-platform 35 and build-tools, plus JDK 17 or 21.
+From the repository root, with nothing but nix:
+
+    nix build .#harken-apk            # result/harken-debug.apk
+    adb install result/harken-debug.apk
+
+That is gradle over nixpkgs' Android SDK (platform 35, build-tools 35.0.0)
+with the app's whole Maven graph — AGP, Compose, the Kotlin plugins, OkHttp —
+recorded in `deps.json` and replayed offline, the way nixpkgs builds every
+gradle project; the Kotlin runtime and client come in through the composite
+build as they do on a laptop. A new dependency moves that file:
+
+    nix run .#harken-apk-deps         # re-records deps.json; needs the network
+
+Four things the derivation says, each found by the build refusing without
+them. `buildToolsVersion = "35.0.0"` in `app/build.gradle.kts`, because AGP
+8.7 otherwise asks for its own default 34.0.0 and tries to *install* it into
+a read-only SDK. `android.aapt2FromMavenOverride`, because the aapt2 AGP
+fetches from Maven is an unpatched binary that cannot run from the store,
+where the SDK's copy can. The whole unpacked tree made writable, because
+stdenv unlocks only the source root and gradle writes `.gradle/` and
+`build/` inside the included build at `../../kotlin` too — read-only, the
+build *ends* after loading settings with no task run and no message, which
+is the least helpful failure in this file. And a writable `HOME`, because
+AGP keeps its state and the debug keystore under `~/.android` and the
+builder has none; that one at least says so. The APK is signed with the debug key every
+Android toolchain shares: it installs anywhere and belongs nowhere public.
+
+With Android Studio (Ladybug or later) or a command-line SDK with platform 35
+and build-tools 35.0.0, plus JDK 17 or 21, the same project builds directly:
 
     cd harken/android
     gradle assembleDebug          # or open the directory in Android Studio
