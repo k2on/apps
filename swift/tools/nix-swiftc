@@ -14,8 +14,11 @@ set -eu
 REAL="${ARKDB_REAL_SWIFTC:-$(command -v swiftc)}"
 # The unwrapped toolchain the nix wrapper execs: `prog=/nix/store/…-swift-5.8/bin/swiftc`.
 ROOT="$(sed -n 's/^prog=\(.*\)\/bin\/swiftc$/\1/p' "$REAL" 2>/dev/null | head -1)"
-INCLUDE="${ROOT:+$ROOT/lib/lldb/clang/include}"
-if [ -z "$INCLUDE" ] || [ ! -f "$INCLUDE/stddef.h" ]; then
+# Under a derivation the clang wrapper finds its own headers, and pointing
+# at the toolchain's as well redefines every builtin module; the flake sets
+# ARKDB_SWIFTC_INCLUDE to nothing there, and the devshell leaves it unset.
+INCLUDE="${ARKDB_SWIFTC_INCLUDE-${ROOT:+$ROOT/lib/lldb/clang/include}}"
+if [ -z "${ARKDB_SWIFTC_INCLUDE+set}" ] && { [ -z "$INCLUDE" ] || [ ! -f "$INCLUDE/stddef.h" ]; }; then
   INCLUDE="$(find "${ROOT:-/nix/store}" -maxdepth 6 -path '*/clang/include/stddef.h' 2>/dev/null | head -1)"
   INCLUDE="${INCLUDE%/stddef.h}"
 fi

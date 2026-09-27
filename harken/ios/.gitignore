@@ -1,0 +1,5 @@
+# xcodegen's outputs; `xcodegen generate` writes both.
+Harken.xcodeproj/
+Harken/Info.plist
+xcuserdata/
+.build/

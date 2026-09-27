@@ -19,8 +19,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ark::canon;
-use ark::db::run_mutator;
-use ark::eval::{apply_closure, Args, Ctx};
+use ark::eval::{Args, Ctx};
 use ark::gen::Db;
 use ark::hash::{closures, module_hash, Closure, FnHash};
 use ark::ir::decode::module_from_value;
@@ -31,7 +30,7 @@ use ark::protocol::{Client, Mode, ServerMsg};
 use ark::schema::{Schema, ScopeName};
 use ark::value::{decode_hex, hex, Id, Value};
 
-use crate::domain::{self, gen, Call};
+use crate::domain::{gen, Call};
 use crate::storage::{self, Durable};
 
 /// How the peer is opened.
@@ -296,7 +295,9 @@ impl Peer {
     // The generated body and the interpreter, over copies of the optimistic
     // store: same verdict, same changes, same store afterwards.
     #[cfg(debug_assertions)]
-    fn check_agreement(&mut self, scope: &str, fh: &FnHash, body: domain::Body, ctx: &Ctx, autos: &Args, args: &Args) {
+    fn check_agreement(&mut self, scope: &str, fh: &FnHash, body: crate::domain::Body, ctx: &Ctx, autos: &Args, args: &Args) {
+        use ark::db::run_mutator;
+        use ark::eval::apply_closure;
         let Some(r) = self.replica(scope) else { return };
         let Some(closure) = self.bodies.get(fh) else { return };
         let mut slow_store = r.view.clone();

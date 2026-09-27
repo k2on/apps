@@ -31,7 +31,7 @@ platform 35 and build-tools, plus JDK 17 or 21.
 The domain must have been generated first, because the app references it by
 source directory rather than copying it:
 
-    nix run /home/user/apps#arkc -- gen kotlin harken/domain/harken.ark \
+    nix run .#arkc -- gen kotlin harken/domain/harken.ark \
         harken/domain/gen/kotlin --name Harken \
         --only create_playlist,add_to_playlist,remove_from_playlist,library,playlists,playlist_items
 

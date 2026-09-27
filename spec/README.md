@@ -53,6 +53,9 @@ package by the vectors and by `GENERATED.md`.
     nix run ..#vectors -- vectors/   # regenerate the vectors
     nix run ..#arkc -- gen rust m.ark out/ --name Harken
     nix develop ..#spec              # a shell with GHC and cabal
+    nix flake check ..               # the vectors are what the spec writes; every
+                                     # runtime passes them; harken's module and
+                                     # generated code are what arkc writes
 
 Only GHC's boot libraries are used, so `ghc --make -isrc app/Vectors.hs`
 inside that shell is also enough.

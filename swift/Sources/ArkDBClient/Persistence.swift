@@ -58,10 +58,12 @@ public enum ReplicaFile {
         try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         let tmp = url.deletingLastPathComponent().appendingPathComponent("." + url.lastPathComponent + ".tmp")
         try Data(bytes).write(to: tmp)
-        if fm.fileExists(atPath: url.path) {
-            _ = try fm.replaceItemAt(url, withItemAt: tmp)
-        } else {
-            try fm.moveItem(at: tmp, to: url)
+        // rename(2) replaces the target atomically on every platform this
+        // runs on; FileManager's move refuses an existing destination.
+        if rename(tmp.path, url.path) != 0 {
+            let err = errno
+            try? fm.removeItem(at: tmp)
+            throw SessionError.io("rename \(url.lastPathComponent): errno \(err)")
         }
     }
 

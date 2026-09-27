@@ -117,3 +117,66 @@ non-zero on any failure) because the `swift` devshell carries no XCTest.
 The library target uses Foundation alone and no Linux-only API, so it
 compiles for iOS as it stands; the `UnicodeTables.swift` it embeds is the
 spec's, unchanged.
+
+## `ArkDBClient`, and what it added to `ArkDB`
+
+`ArkDBClient` is the second library target: everything an app needs around
+the sans-io machines, Foundation only (plus `FoundationNetworking` on
+Linux, behind `#if canImport`).
+
+- **`Link`** drives a `Client` over a `LinkTransport`: dials on `connect()`,
+  says `connected()` when the socket opens, sends every queued frame as
+  binary `Canon.encode(Wire.clientValue(m))`, decodes every binary frame
+  through `Canon.decode` and `Wire.serverFromValue` into `recv`, and
+  reconnects with backoff (0.5 s doubling to 30 s). Everything happens on
+  `pump(now:)`, which a timer calls every 50 ms; the transport's threads
+  only queue events. `WebSocketTransport` is `URLSessionWebSocketTask`; on
+  this Linux Foundation only the `async` `send`/`receive` are public (the
+  completion-handler pair is internal), so both run in a `Task`, which is
+  also fine on Apple platforms. `MemoryExchange.dial` is the other
+  transport: an `InProcessServer` — `Ark.Protocol`'s server machine without
+  live rooms (`trusting` dev auth, hello/push/need_facts/verify, fan-out) —
+  reached through in-memory transports, so the tests run the whole protocol
+  as bytes with no socket.
+- **`Session`** owns one `Client` with a whole replica per scope; with no
+  server, an `Authority` per scope and `localCommit` after every mutation
+  (§3.10). Each scope is one file `<dir>/<scope>.replica` of canonical CBOR
+  — confirmed store, cursor, pending — written whole to a temp file and
+  `rename(2)`d. `mutate(name:args:)` finds the function by name, draws its
+  autos (a random 16-byte id per `NewId`, the clock in ms for `Now`), and
+  applies through the generated code when a `Generated` was given and has
+  the hash, else the interpreter; `mutate(name:args:body:)` takes the
+  generated body itself. `query(name:args:)` runs over the merged views;
+  `run { db in … }` hands the merged view to a generated query. Subscribers
+  hear `Changes` (`.applied` / `.rebuilt`) per scope after every mutate and
+  every pump. `verify()`, `status`, `goOffline()`/`goOnline()`.
+- A directory keeps the mode it was opened with (`"alone"` or `"server"`):
+  the sequences mean different things, and opening it the other way is
+  `SessionError.modeMismatch`. Adopting a lone peer's log into a server
+  (§3.10) is not built, as the design says.
+
+Added to `ArkDB` for it, all additive:
+
+- `TransactionStore: Store` (Transaction.swift) — the overlay generated code
+  writes through: a copy-on-write clone of a base `MemoryStore` that records
+  its changes and the store's last structured refusal; `commit()` is the
+  working store. `Eval.applyBody(base) { db in … }` runs a native body as
+  one transaction and answers `Eval.Outcome`, the shape `applyClosure` has
+  for code rather than IR — the Swift `ark::gen::Db` / `run_mutator`.
+- `Applier` and `Replica.applier` — `knows(hash)` and `apply(...)`,
+  consulted before the held closures in `mutate`, `applyOne` and `replay`,
+  so a replica with generated code replays every entry the code has through
+  it and the rest through the interpreter. `Replica.open` takes it as a
+  trailing default; a replica with none is exactly the spec's.
+  `Replica.mutateWith` / `Client.mutateWith` author with a body supplied.
+- `Client.withReplica`, `Client.takeChanges(scope)`; the snapshot path
+  carries the applier over.
+- `Authority.init(_:_:_:from:)` — a log standing on a snapshot, so a peer
+  that is its own authority reopens at its cursor rather than from zero.
+
+The tests' `DemoGen.swift` is now the generated fixture (`arkc demo`, then
+`arkc gen swift … --name Demo`) rather than a transcription, and the eval
+vectors run through it; the client tests run a session alone (interpreter
+and generated), the link's backoff and codecs, a denial, and two sessions
+converging through the in-process authority — A adds alone, B adds
+meanwhile, A rebases and its item lands last.

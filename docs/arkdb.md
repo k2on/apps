@@ -879,24 +879,40 @@ not testing the thing.
 ### 3.17 Repository layout
 
 One repository, because the vectors and the runtimes move together. Each
-language keeps its native build; nix wraps the Rust half and CI.
+language keeps its native build tool — cabal, cargo, SwiftPM, gradle — and
+nix drives every one of them: `nix flake check` is the spec's vectors, every
+runtime against them, the Rust workspace's lint and tests, and harken's
+module and generated code against what the tree holds; `nix build` is any
+program. Gradle's Maven graph is recorded (`kotlin/deps.json`, re-recorded
+by `nix run .#kotlin-deps`) and replayed offline, so no build reaches the
+network but the one that fetches sources.
 
 ```
-arkdb/
-  spec/         the specification as a Haskell program (see spec/README.md): one module per
-                section, the pinned Unicode tables and their generator, and the vectors it emits
-  rust/         ark (runtime) · ark-store-sqlite · ark-store-mem · ark-server (axum)
-                · ark-builder (the Rust frontend) · arkc · ark-testkit
-  swift/        Package.swift: ArkDB (runtime), ArkBuilder, ArkConformance
-  kotlin/       settings.gradle.kts: ark-runtime (jvm + android), ark-builder, ark-conformance
-  ts/           later: the browser runtime and builder
+apps/
+  spec/           the specification as a Haskell program (see spec/README.md): one
+                  module per section, the pinned Unicode tables and their generator,
+                  arkc, and the vectors ark-vectors emits
+  rust/           ark (the runtime: value, canon, store, eval, hash, verify, log, peer,
+                  view, live, protocol, sim) · ark-builder (the Rust frontend)
+  swift/          Package.swift: ArkDB (the runtime) · ArkDBClient (a session over it:
+                  link, persistence, an in-process authority) · ArkDBTests (the vectors)
+  kotlin/         settings.gradle.kts: ark-runtime · ark-client (the same shell)
+  harken/         the app, one directory per program (harken/README.md):
+    domain/       the domain as a builder program; harken.ark and gen/{rust,swift,kotlin}
+    server/       axum: every scope of harken.ark as an authority, dev auth, the scanner
+    desktop/      ratatui over ark and the generated Rust
+    ios/          SwiftUI over ArkDBClient and the generated Swift (xcodegen)
+    android/      Compose over ark-client and the generated Kotlin (gradle composite)
+  flake.nix       all of the above, as packages, checks and shells
 ```
 
 An app depends on one runtime package and on `arkc` at build time, and
 carries its domain as a builder program in whichever language it is written
 plus the module and generated code that program produces. The two native
 harken apps this repository (`k2on/apps`) is for depend on `swift/` and
-`kotlin/`; the harken server and desktop on `rust/ark`.
+`kotlin/`; the harken server and desktop on `rust/ark`. The Swift and
+Kotlin *builders* are not written yet: today every domain is authored in
+Rust, and the other two languages receive it.
 
 ### 3.18 The path for harken
 

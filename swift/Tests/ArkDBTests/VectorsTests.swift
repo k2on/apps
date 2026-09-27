@@ -278,29 +278,9 @@ func protocolVectors() throws {
 
 // MARK: - eval/
 
-/// `add_to_playlist` exactly as `arkc gen swift` spells it against this
-/// library (the coordinator's transcript), so that the contract's names are
-/// compiled and run here, not only the interpreter.
-enum DemoGen {
-    public static func addToPlaylist(_ db: Store, _ ctx: Ctx, _ autos: Args, _ args: Args) throws {
-        let v0 = db.exists("playlist", [Ops.arg(args, "playlist_id")])
-        if Ops.not(v0).asBool() { return }
-        let v1 = db.exists("playlist_item", [Ops.arg(args, "playlist_id"), Ops.arg(args, "media_id")])
-        if (v1).asBool() { return }
-        let v2 = db.select(Plan.from("playlist_item").filter(Pred.cmp("playlist_id", CmpOp.eq, Ops.arg(args, "playlist_id"))).orderBy("pos", Dir.desc).orderBy("playlist_id", Dir.asc).orderBy("media_id", Dir.asc).limit(1))
-        let v4 = try Std.unwrapOr(try Ops.match(try Std.first(v2), { v3 in (v3).field("pos") }, { Value.null() }), Value.int(0))
-        try db.put("playlist_item", Value.record([("added_ms", Ops.arg(autos, "added_ms")), ("media_id", Ops.arg(args, "media_id")), ("playlist_id", Ops.arg(args, "playlist_id")), ("pos", try Ops.add(v4, Value.int(1))), ("user_id", Value.text(ctx.user))]))
-    }
-
-    public static func createPlaylist(_ db: Store, _ ctx: Ctx, _ autos: Args, _ args: Args) throws {
-        if (try Std.isEmpty(try Std.trim(Ops.arg(args, "name")))).asBool() {
-            throw Fault.refuse(Value.text("a playlist needs a name"))
-        }
-        let v0 = db.exists("playlist", [Ops.arg(autos, "id")])
-        if (v0).asBool() { return }
-        try db.put("playlist", Value.record([("id", Ops.arg(autos, "id")), ("name", try Std.trim(Ops.arg(args, "name"))), ("user_id", Value.text(ctx.user))]))
-    }
-}
+// `DemoGen` — `add_to_playlist` and `create_playlist` exactly as `arkc gen
+// swift` writes them — is the generated fixture in `DemoGen.swift`, so that
+// the contract's names are compiled and run here, not only the interpreter.
 
 /// A function with the verifier's appended key-column order stripped from
 /// every plan: the form a builder authored, which `completeOrders` extends.
@@ -811,6 +791,7 @@ struct VectorsTests {
             try viewVectors()
             try rebaseVectors()
             storeRules(m.schema)
+            try clientTests()
         } catch {
             failed += 1
             print("FAIL: \(error)")

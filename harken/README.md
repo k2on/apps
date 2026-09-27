@@ -11,10 +11,11 @@ old harken until the stack has earned them.
 ```
 domain/    the domain, authored in Rust through ark-builder, one file per concern
            (schema, library, playlists, queries); emits harken.ark and, through
-           arkc, generated Rust, Swift and Kotlin — the server's with everything,
-           each client's with only what it calls
-server/    axum: hosts the `library` and `playlists` scopes, dev auth, a scanner
-           that authors tracks from a directory, /media
+           arkc, generated Rust, Swift and Kotlin, each client's with only
+           what it calls
+server/    axum: hosts the `library` and `playlists` scopes from harken.ark
+           itself, through the interpreter; dev auth; a scanner that authors
+           tracks from a directory; /media
 desktop/   a terminal peer in Rust over the generated Rust
 ios/       SwiftUI over the Swift runtime and the generated Swift
 android/   Compose over the Kotlin runtime and the generated Kotlin
@@ -72,10 +73,14 @@ the first real use of `live`.
 scanner and by nothing on a phone or the desktop, so their generated code
 does not contain it: `arkc gen swift harken.ark … --only
 create_playlist,add_to_playlist,remove_from_playlist,library,playlists,playlist_items`
-(the list is `CLIENT_FUNCTIONS` in `domain/src/main.rs`). Tracks still
-arrive, because a replica that does not hold an entry's function applies
-the facts the server kept beside it and ends in the same state
-(docs/arkdb.md §3.8). Only the server is generated with everything.
+(the list is `CLIENT_FUNCTIONS` in `domain/src/main.rs`, and the flake's
+`clientFunctions`). Tracks still arrive, because a replica that does not
+hold an entry's function applies the facts the server kept beside it — or,
+holding the whole module's bytes as every generated file does, replays the
+entry through the interpreter — and ends in the same state (docs/arkdb.md
+§3.8). The server is generated with nothing: it loads `harken.ark` and
+applies every intent through the module's own closures, so a domain change
+reaches it by rebuilding the module and not the binary.
 
 ## What each program does
 
@@ -93,11 +98,42 @@ the facts the server kept beside it and ends in the same state
 
 ## Building
 
-Everything is `nix`:
+Everything is `nix`, from the repository root:
 
-    nix run .#arkc -- gen rust  harken/domain/harken.ark harken/domain/gen/rust  --name Harken
-    nix build .#harken-domain         # emits harken.ark and the three generated files
+    nix build .#harken-domain    # harken.ark and the three generated files, as
+                                 # the domain program and arkc write them today
     nix build .#harken-server
     nix build .#harken-desktop
-    nix develop .#swift               # then swift build in ios/
-    nix develop .#kotlin              # then gradle in android/
+    nix build .#arkdb-swift      # the Swift runtime and client, with their tests
+    nix build .#arkdb-kotlin     # the Kotlin runtime and client, with their tests
+    nix flake check              # all of it, plus: fmt, clippy and every Rust test;
+                                 # the vectors; harken.ark and gen/ against the tree
+
+`harken/domain/harken.ark` and `harken/domain/gen/` are committed and
+checked rather than regenerated on every build, because three programs
+reference the generated files in place (`desktop/src/domain.rs`,
+`ios/project.yml`, `android/app/build.gradle.kts`). When `domain/src`
+changes, copy the check's answer into the tree:
+
+    nix build .#harken-domain && cp -r result/harken.ark result/gen harken/domain/
+
+The phones are built by their own toolchains — Xcode over `ios/project.yml`,
+the Android SDK over `android/` — from the Swift and Kotlin packages the
+flake builds; each `README.md` says how, and that neither has been run on a
+device from here.
+
+## Running it
+
+    nix build .#harken-server .#harken-desktop -o result
+    mkdir -p media/music/Bach/Goldberg && cp *.mp3 media/music/Bach/Goldberg/
+    ./result/bin/harken-server --module harken/domain/harken.ark --media ./media
+    ./result-1/bin/harken-desktop --server ws://127.0.0.1:8787/sync --user alice
+    ./result-1/bin/harken-desktop --server ws://127.0.0.1:8787/sync --user bob
+
+The scanner authors a track per file as the `library` account; both
+desktops receive them as facts, since neither holds `add_track`. Make a
+playlist on one and add to it on the other. Then stop the server, add on
+both sides, and start it again: each peer's offline additions land after
+what the other's did, in the order the authority sequenced them, and both
+show one list. A desktop started with no `--server` is its own authority
+and never needs one.

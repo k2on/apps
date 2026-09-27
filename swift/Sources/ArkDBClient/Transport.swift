@@ -55,7 +55,6 @@ public final class WebSocketTransport: NSObject, LinkTransport, URLSessionWebSoc
         lock.lock()
         self.events = events
         let config = URLSessionConfiguration.default
-        config.waitsForConnectivity = false
         let s = URLSession(configuration: config, delegate: self, delegateQueue: nil)
         let t = s.webSocketTask(with: url)
         session = s
@@ -80,12 +79,8 @@ public final class WebSocketTransport: NSObject, LinkTransport, URLSessionWebSoc
         Task { [weak self] in
             while true {
                 do {
-                    let m = try await t.receive()
-                    switch m {
-                    case .data(let d): self?.emit(.frame([UInt8](d)))
-                    case .string: break // the protocol is binary; a text frame is not ours
-                    @unknown default: break
-                    }
+                    // The protocol is binary; a text frame is not ours and is dropped.
+                    if case .data(let d) = try await t.receive() { self?.emit(.frame([UInt8](d))) }
                 } catch {
                     self?.emit(.closed("\(error)"))
                     return
