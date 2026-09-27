@@ -3,9 +3,16 @@
 A design for the successor to Petros. Three parts: what Petros is and what
 harken does with it, what the compiled-domain-over-FFI approach costs now that
 the phone is becoming two native apps, and the architecture of a system in
-which the domain is *data* rather than a binary — authored in Rust, Swift or
-Kotlin, carried in one specified encoding, and executed by a runtime in each
-language that is held to one conformance suite.
+which the domain is *data* rather than a binary — authored through a builder
+in Rust, Swift or Kotlin, carried in one specified encoding, compiled to
+native source for every language, and run by a runtime in each language that
+is held to one conformance suite. A local peer with no server is the ordinary
+case of it, not a mode; a server is a peer that sequences a log for others.
+
+This is the second revision of Part 3. The first made mutator bodies an
+*interpreted* language and a single global log; this one compiles them to
+native source instead, splits the database into scopes, carries facts beside
+intents, and makes authority a role. Parts 1 and 2 are unchanged.
 
 Nothing here is built. It is the shape of the thing, the reasons, and the
 order to build it in — the same kind of document `docs/decisions.md` and
@@ -237,756 +244,753 @@ wrong tool for it.
 
 ### The thesis
 
-**The domain is data.** A mutation or a query is not compiled code that a
-peer links or loads; it is a value in a small, total, statically typed
-language — Ark IR — carried in one canonical encoding, verified by a checker,
-and executed by a runtime in whichever language the peer is written in. The
-host language is a *frontend*: a Rust function decorated `#[ark::mutation]`
-does not run on a phone, it *emits* an Ark function, and the Swift and Kotlin
-runtimes execute that. A Swift function decorated `@ArkMutation` emits the
-same kind of thing, and a Rust server can run it.
+**The domain is a program in Ark IR, and nobody runs the IR.** A mutation or
+a query is authored through a *builder* — a typed library in Rust, Swift or
+Kotlin whose calls construct an IR tree rather than execute anything — and
+emitted as data at build time. `arkc` verifies the IR and generates native
+source from it for every language: Rust for the server and the desktop,
+Swift for iOS, Kotlin for Android. A function authored with the Swift builder
+runs on the Rust server as generated Rust; one authored with the Rust builder
+runs on the phone as generated Swift. The generated code is what runs
+everywhere; the builder is a compile-time tool; there is no interpreter, no
+wasm and no FFI.
 
-Everything else follows from that, and most of Petros survives it:
+**The log is intents, and every peer that holds a scope whole is an exact
+replica of it.** That is Petros's model, kept because it is the only one
+under which a peer that has never met a server is a first-class citizen: its
+history is intents, so it can be adopted, verified and rebased later. What
+is added around it is what a fleet of native apps needs from a sync system:
 
-| kept from Petros, unchanged in meaning | dropped | changed |
+- **facts, retained beside the log**, so a peer that cannot apply an entry
+  (an old build, a partial holder) takes its effects instead and ends in the
+  same state;
+- **scopes**, so the unit of replication is the unit of transaction and
+  partial sync and authorization have a grain;
+- **snapshots**, so nothing replays from sequence one and retention has a
+  horizon;
+- **authority as a role**, so "server" is a thing a peer does for a scope,
+  and a peer alone does it for itself.
+
+| kept from Petros | dropped | changed |
 |---|---|---|
-| intents, not facts; `apply` reads to decide | SQLite as a requirement; Diesel; SQL anywhere | the store is an interface with an ordered-KV shape, and SQLite is one backend of it |
-| append-only totally ordered log; `replay(confirmed) then replay(pending)` | the savepoint rebase | the rebase is an in-memory overlay the store spec defines |
-| all non-determinism in `fill_auto`, once, at origin | wasm, wasmi, the guest ABI | the module a peer receives is Ark IR, not machine code |
-| `Ctx { user, session }`, actor held to the login that pushed it | UniFFI, `ubrn`, Expo, `petros-js` | one runtime per language, no bridge |
-| typed writes that report `Change`; queries as data; trees via declared relationships | `tables!` reading `schema.sql` through SQLite | the schema is declared in the same IR and codegen emits row types for every language |
-| incremental views: source/filter/join/take/tally, `Rebuilt` after a rebase | `Changes::Rebuilt` as the only answer after a rollback | still the answer; but views are spec'd so every runtime maintains them natively |
-| sans-io client and server state machines; deterministic simulation | | the simulation's vectors are part of the spec and run against every runtime |
-| three lifetimes: log, live room, frame; rooms per account; snapshot on empty | | live frame types are declared in the module, so they are generated everywhere |
-| server pings; token in `Hello`; `Denied`; server as the only OIDC client | | |
-| "the log freezes arguments, not meaning" as a hazard | the discipline as the only defence | **entries name the function that authored them by hash, and the server keeps every function it ever accepted** |
+| intents, not facts, as the log; `apply` reads to decide | SQLite as a requirement; Diesel; SQL anywhere | the store is an ordered-KV interface; SQLite is one backend |
+| `replay(confirmed) then replay(pending)`; the rebase as the whole concurrency story | the savepoint | an in-memory overlay the store spec defines |
+| all non-determinism in `fill_auto`, once, at origin | wasm, wasmi, the guest ABI; UniFFI, `ubrn`, Expo, `petros-js` | the domain is generated native source in every language |
+| `Ctx { user, session }`; entries held to the login that pushed them | `#[mutation]`, `peer!`, `tables!` as proc macros | builders that emit IR; `arkc gen` emits the row types and the call surface |
+| typed writes that report `Change`; queries as data; trees via declared references | | `Change`s are *kept* on the authority and are the facts a peer may take |
+| incremental views; `Rebuilt` after a rebase | | views are in the spec so every runtime maintains them natively |
+| sans-io machines; the deterministic simulation | one global log | scopes, each a log with its own sequence, authority and snapshots |
+| three lifetimes; rooms per account; one socket; server pings | | live frame types declared in the module, generated everywhere |
+| server as the only OIDC client | | |
+| "the log freezes arguments, not meaning" as a hazard | | entries name their function by hash; versions are retained above the horizon |
 
 ### The layers
 
 ```
-  ┌──────────────────────────────────────────────────────────────────────────┐
-  │  frontends       Rust #[ark::mutation]   Swift @ArkMutation   Kotlin ark { }   │
-  │                  each emits ───────────────────────────────┐             │
-  ├────────────────────────────────────────────────────────────▼─────────────┤
-  │  Ark module  (canonical CBOR, content-addressed)                          │
-  │     schema · functions (mutators, queries) · live types · min spec        │
-  ├──────────────────────────────────────────────────────────────────────────┤
-  │  arkc            verify · hash · check (log compat) · gen {rust,swift,kotlin,ts} · vectors   │
-  ├──────────────────────────────────────────────────────────────────────────┤
-  │  runtime, one per language, all held to ark-spec/vectors                 │
-  │     codec · verifier · evaluator · stdlib · store (layered) · views       │
-  │     · peer (client state machine) · server core · live rooms · protocol  │
-  ├──────────────────────────────────────────────────────────────────────────┤
-  │  backends        sqlite-as-btree · memory · (later) lmdb, indexeddb       │
-  │  transports      URLSession / OkHttp / tungstenite / axum — thin           │
-  └──────────────────────────────────────────────────────────────────────────┘
+  ┌───────────────────────────────────────────────────────────────────────────┐
+  │  builders (compile time)   Rust  ·  Swift  ·  Kotlin   — typed, symmetric │
+  │      each emits ───────────────────────────────┐                          │
+  ├────────────────────────────────────────────────▼──────────────────────────┤
+  │  Ark module (canonical CBOR, content-addressed)                           │
+  │     scopes · schema · functions (mutators, queries, helpers) · live types │
+  ├───────────────────────────────────────────────────────────────────────────┤
+  │  arkc      verify · hash · check · gen {rust,swift,kotlin} · vectors      │
+  │      generates ────────────────────────────────┐                          │
+  ├────────────────────────────────────────────────▼──────────────────────────┤
+  │  generated domain code, per language: row types, apply fns, queries,      │
+  │  call surface, live types — ordinary source, compiled into the program    │
+  ├───────────────────────────────────────────────────────────────────────────┤
+  │  runtime, one per language, all held to spec/vectors                      │
+  │     codec · std (pinned) · store (layered, scoped) · views · peer         │
+  │     (log machine, authority role) · live · protocol                       │
+  ├───────────────────────────────────────────────────────────────────────────┤
+  │  backends   sqlite-as-btree · memory · (later) lmdb, indexeddb            │
+  │  transports URLSession · OkHttp · tungstenite · axum — thin               │
+  └───────────────────────────────────────────────────────────────────────────┘
 ```
-
-The spec is the middle three rows. A backend and a transport are each
-implementation's business, provided the store behaves as specified.
 
 ### 3.1 Values and the canonical encoding
 
-The value model is small on purpose, because every type is a type three
-evaluators have to agree about to the byte.
+Small on purpose, because every type is one three generated codebases have
+to agree about to the byte.
 
 | type | notes |
 |---|---|
 | `Null` | only as the absent case of `Option<T>` |
 | `Bool` | |
-| `Int` | signed 64-bit. Arithmetic is *checked*; overflow is a refusal, not a wrap. `wrapping_*` is not offered; a hash is a stdlib function |
-| `Text` | valid UTF-8. **Compared by code point** (= UTF-8 byte order), never by locale, never by canonical equivalence. Swift's `String ==` treats `é` and `e◌́` as equal; Kotlin compares UTF-16 units, which misorders astral characters. Both runtimes compare bytes explicitly, and the vectors include a canonically-equivalent pair and a U+1F3B5 |
+| `Int` | signed 64-bit; arithmetic is *checked* and overflow is a refusal |
+| `Text` | valid UTF-8; **compared by code point**, never by locale or canonical equivalence. Generated Swift compares UTF-8 bytes explicitly, since Swift's `==` treats `é` and `e◌́` as equal; generated Kotlin does too, since UTF-16 order misplaces astral characters. The vectors include both traps |
 | `Bytes` | |
-| `Id<table>` | 16 bytes; CBOR tag 37 (UUID). The table is a *type*, not a runtime tag: the encoding is the same 16 bytes Petros writes today |
-| `List<T>` | |
-| `Struct` | named, ordered fields; a row type or a query result type |
-| `Option<T>` | `Null` or `T`; a nullable column is one |
-| `Enum` | fieldless, for live frames and arguments (`Kind::Phone`); encoded as its name |
+| `Id<table>` | 16 bytes, CBOR tag 37; the table is a type and the bytes are Petros's |
+| `List<T>`, `Struct`, `Option<T>`, `Enum` (fieldless) | |
 
-**No floats.** Petros already forbids them in control flow; Ark forbids them
-in the model. A gain is an `Int` in millibels, a position is milliseconds.
-If a float type is ever needed it is a spec version bump with a defined
-canonical NaN and no equality in the IR, and that is a decision for the day a
-domain needs one rather than a slot left open.
+No floats; a gain is an `Int` in millibels. One total order over all values
+(type rank, then within type; lists and structs lexicographically), because
+`ORDER BY`, index keys and the state hash all need it. **Encoding is RFC 8949
+§4.2.1 deterministic CBOR** with the mapping above, internally tagged maps
+with `"t"` where Petros has them, and a **state hash** — SHA-256 over the
+canonical encoding of every table's rows in key order — that is a spec'd
+quantity rather than a testkit convenience, because §3.8 exchanges it.
 
-**One total order over all values**, needed for `ORDER BY`, index keys and
-the state hash: by type rank first (`Null < Bool < Int < Text < Bytes < Id <
-Enum < List < Struct`), then within a type as above; lists and structs
-lexicographically. Every runtime implements the one comparison and the
-vectors pin it.
+### 3.2 Scopes and the schema
 
-**Encoding: RFC 8949 §4.2.1 core deterministic CBOR**, plus the type mapping
-above. Petros chose CBOR for compactness and self-description; Ark keeps it
-and adds *determinism*, which is what makes a hash of a value meaningful:
-shortest-form integers, definite lengths, map keys sorted by their encoded
-bytes, no indefinite strings, no duplicate keys. Libraries exist in every
-language; the spec only forbids what the RFC leaves optional. A runtime that
-emits non-canonical bytes fails the codec vectors before it does anything
-else. Internally tagged maps with `"t"` stay, for the reason `decisions.md`
-gives: adding a field is compatible and a tag is a name rather than a
-position.
+A **scope** is the unit of everything: one append-only intent log with its
+own sequence, its own authority, its own snapshots, its own access rule. A
+table belongs to exactly one scope. A mutator belongs to exactly one scope
+and may read and write only that scope's tables; the verifier refuses one
+that looks sideways. That constraint is what makes partial sync sound under
+intents (§3.11), and it is the one modelling decision this design imposes:
+a reference across scopes is an id that is not checked at write time, and
+the query layer joins across scopes at read time. harken with a `library`
+scope and a scope per person's playlists loses the `exists(media)` check in
+`add_to_playlist` and draws a missing track as unavailable. A single scope
+is exactly Petros today, and splitting one later is a migration, so the
+choice is made early.
 
-**A state hash is specified**, not a testkit convenience: SHA-256 over the
-canonical encoding of `[table_name, [rows in primary-key order]]` for every
-table in name order. That is what lets a Swift phone and a Rust server say
-whether they agree, in production, which Petros cannot do today (§3.6,
-`Verify`).
-
-### 3.2 The schema
-
-A schema is a value in the module, not SQL text. It says what `tables!` used
-to ask SQLite:
+The schema is a value in the module:
 
 ```
+Scope { name, tables: [Table] }
 Table { name, columns: [Column { name, ty, nullable }], key: [column],
         indexes: [Index { columns, unique }], refs: [Ref { column, table }] }
 ```
 
-From it every runtime derives what Petros derives from `PRAGMA
-foreign_key_list`: a primary key is `Id<self>` if it is 16 bytes; a `Ref`
-column is `Id<that table>`; both directions of every reference are
-relationships (`Song.playlist_item` down, `PlaylistItem.song` up), and
-reading down keeps a childless parent while reading up drops an orphan. The
-names are the same, because the rule producing them is in the spec rather
-than in a proc macro.
+`arkc gen` derives from it what `tables!` derives from SQLite's pragmas, for
+every language: row structs, typed column handles, `key`, and both
+directions of every reference as a relationship (reading down keeps a
+childless parent, reading up drops an orphan). The generated code enforces,
+as deterministic refusals and identically everywhere, not-null, unique
+indexes and same-scope references; a backend is never asked what a reference
+is. A schema is additive-only; a column is *retired* (reads as its default,
+writes dropped) rather than removed; a change to a live column is a rebuild
+from snapshot plus replay, as `SCHEMA_VERSION` is today.
 
-What the *evaluator* enforces, identically everywhere, as a deterministic
-refusal: not-null, unique indexes, and references on `put`. Petros leans on
-SQLite's `foreign_keys = ON` for the last of those and treats the result as a
-verdict; Ark cannot lean on a backend it does not require, so the check is in
-the spec, and a backend is never asked to know what a reference is.
+### 3.3 Ark IR
 
-A schema is additive-only across versions, and a column can be *retired*
-(reads as its default, writes are dropped) rather than removed, because
-functions already in the log may name it — see §3.7. An app's tables are still
-a function of the log, so a change to a live column's type is still a rebuild
-and a replay, exactly as `SCHEMA_VERSION` does today.
-
-### 3.3 Ark IR: functions
-
-A module carries two kinds of function. Both are typed, both are verified,
-and the verifier is part of the spec: a runtime executes only a module that
-passed it, and the module's hash is of the verified form.
-
-**A mutator** is `(ctx, autos, args) -> ()` with an effect list. Its body is
-a statement list in a deliberately small imperative core:
+A module carries mutators, queries and pure **helpers** (harken's `slug`,
+`key_part`, `work_key`, `art_to_write` are helpers), all typed, all verified.
+The verifier is part of the spec and a module's hash is of its verified,
+alpha-normalised form — names an author chose travel in a side table that is
+not hashed, so the same function authored in two languages with different
+local names is the same function.
 
 ```
-stmt ::= let x = expr
+stmt ::= let x = expr                      -- x is a symbol; reads are lets, so a select runs once
        | if expr { stmts } else { stmts }
-       | for x in expr { stmts }          -- over a List; finite by construction
-       | put(table, expr)                 -- reports Add | Edit{old,new}; refuses on constraint
-       | delete(table, key-expr)          -- reports Remove; a missing row is a no-op
-       | refuse(expr: Text)               -- the deterministic verdict, ends the mutator
+       | for x in expr { stmts }           -- over a List; finite by construction
+       | put(table, expr)                  -- reports Add | Edit; refuses on constraint
+       | delete(table, key)                -- reports Remove; a missing row is a no-op
+       | refuse(expr: Text)
        | return
+expr ::= literal | $arg | x | ctx.user | ctx.session | e.field | Struct { … }
+       | op(e, e) | call(helper, …) | std.f(…)
+       | select(plan) | get(table, key) | exists(table, key)
+       | map/filter/first/fold/… over lists ; match over Option
+plan ::= from(table) filter(pred) order(cols) take(n) related(rel, plan)
 ```
 
-There is no `while`, no recursion and no user-defined function that can call
-itself; every mutator terminates, which is what lets a server run untrusted
-modules from an app with no timeout to tune. Autos are declared in the
-signature by type exactly as Petros classifies parameters — `NewId<T>`, `Now`
-— and a mutator may declare more than one `NewId`, since the one-uuid limit
-was `fill_auto`'s and not the log's. The natural-key guidance harken arrived
-at (an album is keyed by its name because two offline peers agree on a name
-without being told) is unchanged and still the better design; it is simply no
-longer forced.
+No `while`, no recursion (helpers may call helpers declared before them),
+no I/O, no clock, no floats, every `select` in a mutator totally ordered
+(the verifier appends the key as a tie-break), checked arithmetic. A
+**query** is a *plan* — maintainable, §3.13 — followed by a pure *shape*
+over its rows; harken's sixteen queries all split that way today.
 
-**A query** is `(args) -> T` and has two stages, named because they are
-maintained differently:
+**The standard library is the only escape hatch, and admission is an exact
+definition plus vectors.** Text (`trim`, `concat`, `lower`, `is_alnum`,
+`chars`, `split_once`, `starts_with`, `len`), int (`min`, `max`, `clamp`),
+hash (`fnv1a64`, `sha256`), id and list operations — what `functions.rs`
+uses, checked line by line. Because the IR is *compiled* rather than
+interpreted, admitting a function costs one mapping per target generator
+plus its implementation in each language's pinned `ArkStd`, not a new
+evaluator case in three interpreters; so the library may grow at the pace
+the vectors can hold it. Unicode is still the trap: `lower` and `is_alnum`
+key the log through `slug`, and Rust, ICU-on-iOS and ICU-on-Android disagree
+at the edges. The spec pins a Unicode version and ships the three tables it
+needs (White_Space, Alphabetic ∪ Numeric, simple lowercase) as data; every
+`ArkStd` embeds them and none calls the platform.
 
-- the **plan**: `from(table)`, `filter(pred)`, `order(cols)`, `take(n)`,
-  `related(rel, plan)` — Petros's `Plan` and `Pipeline`, unchanged. This is
-  what a view maintains incrementally.
-- the **shape**: a pure expression over the plan's rows — `map`, `filter`,
-  `group_by`, `lookup` (an in-memory index of a second plan, which is what
-  harken's `track_details` builds by hand with `BTreeMap`s), `sort_by`,
-  `first`, `count`, struct construction. Re-run over the maintained rows on
-  every change; cheap because it never touches the store.
+### 3.4 Authoring: builders, and going from any language to any other
 
-harken's sixteen queries all fit that split today: `library()` is a plan
-with one `related`; `album()` is a plan plus a `lookup` and a `sort_by`;
-`track_details()` is a plan plus three `lookup`s. The split is also the
-honest statement of what is maintained: the plan is O(changed), the shape is
-O(rows in view), and a query author can see which stage a line is in.
+There are no macros. A builder is an ordinary library in each language whose
+calls construct IR; an author writes an ordinary function against it; a
+build step runs that function and writes the module. The technique is old
+and well-trodden — LINQ expression trees, Exposed and Slick, JAX tracing,
+Petros's own `Song::all().filter(Song::done.eq(false))`, which already builds
+a `Plan` this way. Ark extends it from plans to statements.
 
-**Expressions** are the usual pure core — literals, arguments, locals, field
-access, comparison and boolean operators, checked `Int` arithmetic, `Option`
-handling (`is_some`, `unwrap_or`, `match`), list operations, and calls into
-the standard library. A `select(plan)` expression is how a mutator reads;
-`get(table, key)` and `exists(table, key)` are the point lookups.
+The three things a builder has to get right, and each language's answer:
 
-**The standard library is the whole of the escape hatch, and there is no
-other.** Anything a mutator can compute is in the spec with an exact
-definition and vectors. From reading `functions.rs`, v1 needs:
+- **Typed symbols.** An argument, a `let`, a loop variable and a `ctx` field
+  are `Expr<T>` values, not host values. `Expr<Int> + 1` builds an add;
+  `Expr<Bool>` is not `Bool`, so a host `if` cannot accidentally branch on
+  one. Rust overloads `+ - * !` and uses `.eq()` for comparison, as Diesel
+  does; Kotlin overloads the arithmetic and uses infix `eq`; Swift can
+  overload `==` to return `Expr<Bool>`.
+- **Control flow as combinators.** `if_(cond, |b| …).else_(|b| …)`,
+  `for_each(rows, |r, b| …)` in Rust; result-builder components `If(cond)
+  { … }` and `ForEach(rows) { r in … }` in Swift; `iff(cond) { … }` and
+  `forEach(rows) { r -> … }` in Kotlin. The closure receives the bound
+  symbol, which is how a loop variable gets its scope.
+- **Reads are statements.** `select`, `get` and `exists` bind through
+  `let`, so a host-level reuse of an `Expr` never runs a query twice; every
+  other expression is pure and may be inlined freely.
 
-- text: `trim`, `is_empty`, `concat`, `len` (code points), `starts_with`,
-  `split_once`, `lower`, `is_alnum`, `chars`, `text_of(int)`, `hex(bytes)`
-- int: `min`, `max`, `clamp`, `abs`
-- hash: `fnv1a64(bytes) -> Int` (harken's `key_part` fallback) and
-  `sha256(bytes) -> Bytes`
-- id: `id_of(text)`, `text_of(id)`, `nil`
-- list: `map`, `filter`, `first`, `last`, `len`, `any`, `all`, `sort_by`,
-  `fold`, `group_by`, `lookup`, `contains`
-
-**And two of those are where three runtimes would silently disagree.**
-`lower` and `is_alnum` are Unicode operations; Rust's `char::to_lowercase`,
-Swift's `lowercased()` (ICU) and Kotlin's `lowercase()` (ICU, a different
-version per OS release) do not agree on every code point, and harken's
-`slug` — which keys every work, movement and recording in the log — is built
-on both. SQLite's own answer is instructive: its `lower()` is ASCII-only
-unless compiled with ICU, precisely to be the same everywhere. Ark takes the
-other route with the same goal: **the spec pins a Unicode version and ships
-the three tables it needs** (White_Space for `trim`, Alphabetic ∪ Numeric for
-`is_alnum`, the simple lowercase mapping for `lower`) as data in the spec
-repository; every runtime embeds them and none calls the platform. The
-tables are conformance-tested like everything else, and moving the Unicode
-version is a spec version bump. Anything a runtime cannot promise to compute
-identically is not in the library; that is the test for admission.
-
-**Determinism rules**, restated for the IR and now *checkable* by the
-verifier rather than kept by convention: no clock, no randomness, no I/O,
-no floats, every `select` in a mutator has a total order (the verifier adds
-the primary key as a tie-break when the author did not), iteration is only
-over lists, and integer arithmetic is checked. `history.rs`'s hazard is
-addressed separately (§3.7); these rules address everything else.
-
-#### A worked example
-
-`add_to_playlist`, authored in Rust with the frontend (§3.4). This is
-harken's function almost line for line — the frontend accepts a subset of
-Rust and this is inside it:
+One function, three builders. Column handles and row constructors
+(`PlaylistItem.pos`, `PlaylistItem.row(...)`) are generated from the schema
+by `arkc gen` for the *authoring* language first; schema and functions are
+two build steps, as they are in every code-generating system.
 
 ```rust
-#[ark::mutation]
-pub fn add_to_playlist(db: &Db, ctx: &Ctx, added_ms: Now,
-                       playlist_id: Id<Playlist>, media_id: Id<Media>) {
-    if !db.exists(Playlist::key(playlist_id)) { return; }
-    if !db.exists(Media::key(media_id)) { return; }
-    if db.exists(PlaylistItem::key(playlist_id, media_id)) { return; }
-    let last = db.select(PlaylistItem::all()
-                         .filter(PlaylistItem::playlist_id.eq(playlist_id))
-                         .order_by(PlaylistItem::pos.desc()).limit(1))
-                 .first().map(|r| r.pos).unwrap_or(0);
-    db.put(PlaylistItem { playlist_id, media_id, pos: last + 1, added_ms, user_id: ctx.user.id });
+// Rust
+pub fn add_to_playlist(f: &mut Mutator) {
+    let added_ms    = f.now("added_ms");
+    let playlist_id = f.arg::<Id<Playlist>>("playlist_id");
+    let media_id    = f.arg::<Id<Media>>("media_id");
+    let b = f.body();
+    b.if_(b.exists(PlaylistItem::key((playlist_id, media_id))), |b| b.ret());
+    let last = b.let_("last",
+        b.select(PlaylistItem::all().filter(PlaylistItem::playlist_id.eq(playlist_id))
+                 .order_by(PlaylistItem::pos.desc()).limit(1))
+         .first().map(|r| r.pos).unwrap_or(0));
+    b.put(PlaylistItem::row().playlist_id(playlist_id).media_id(media_id)
+          .pos(last + 1).added_ms(added_ms).user_id(b.ctx().user()));
 }
 ```
-
-What it emits, in the printable form `arkc` uses for diffs and for the
-successor of `mutations.txt` (the canonical form is CBOR; this is its
-diagnostic rendering):
-
-```
-mutation add_to_playlist(added_ms: Now, playlist_id: Id(playlist), media_id: Id(media))
-  if not exists(playlist, [playlist_id]) { return }
-  if not exists(media, [media_id]) { return }
-  if exists(playlist_item, [playlist_id, media_id]) { return }
-  let last = unwrap_or(map(first(select(from playlist_item
-                                          where playlist_id = $playlist_id
-                                          order pos desc, media_id asc limit 1)), .pos), 0)
-  put(playlist_item, { playlist_id: $playlist_id, media_id: $media_id,
-                       pos: checked_add(last, 1), added_ms: $added_ms, user_id: ctx.user })
-```
-
-Note the verifier added `media_id asc` to the order: a `LIMIT 1` over a
-non-total order is exactly the kind of thing two backends answer differently.
-
-What a Swift app calls, generated by `arkc gen swift`:
 
 ```swift
-extension Harken {
-    /// Put a track on a playlist. A no-op if either is missing or it is already there.
-    public func addToPlaylist(playlist: Id<Playlist>, media: Id<Media>) throws
+// Swift
+let addToPlaylist = Mutator("add_to_playlist", scope: .playlists) { f in
+    let addedMs    = f.now("added_ms")
+    let playlistId = f.arg(Id<Playlist>.self, "playlist_id")
+    let mediaId    = f.arg(Id<Media>.self, "media_id")
+    If(exists(PlaylistItem.key(playlistId, mediaId))) { Return() }
+    Let("last", select(PlaylistItem.all.filter(PlaylistItem.playlistId == playlistId)
+                       .orderBy(PlaylistItem.pos.desc).limit(1)).first.map { $0.pos } ?? 0) { last in
+        Put(PlaylistItem.row(playlistId: playlistId, mediaId: mediaId, pos: last + 1,
+                             addedMs: addedMs, userId: ctx.user))
+    }
 }
 ```
 
-The body is not in the Swift; the Swift runtime evaluates the IR the module
-carries. The doc comment travels, the argument types are branded, and there
-is no JSON, no `bigint` and no string-typed id anywhere in the path.
-
-`create_playlist`'s per-person uniqueness refusal is the same shape with a
-`select … where user_id = ctx.user and name = $name` and a `return` if it is
-non-empty; `add_song`'s `art_to_write` is a `let` with a `match` over an
-`Option<Text>`; `add_all_to_playlist` is a `for` over a `select`. Nothing in
-harken's ten mutators needs more than the statement list above and the
-library listed. That was checked against `functions.rs` rather than assumed,
-and it is the reason the library is the size it is.
-
-### 3.4 Authoring in each language, and `arkc`
-
-"Queries and mutators can be defined in whatever language you want" means
-each language has a **frontend** that produces Ark IR, and the IR is the
-program. Three frontends, and they are not equally easy, which is worth
-saying plainly:
-
-- **Rust: a proc macro over a Rust subset.** `#[ark::mutation]` and
-  `#[ark::query]` parse the function body with `syn` and translate `let`,
-  `if`/`else`, `for`, `match` over `Option`, `return`, method calls on the
-  generated row and query types, and the operators, into IR. Anything
-  outside the subset is a compile error naming the construct ("`while` is
-  not Ark; iterate a list"). Row types, column constants and relationships
-  come from `ark::schema!`, which is `tables!` without SQLite: the schema is
-  written in the same DSL, and the macro generates the Rust from it. This is
-  the frontend harken's domain is ported to, and it is the reference.
-- **Swift: a macro over a Swift subset.** Swift 5.9 macros see the syntax
-  tree, so `@ArkMutation` is the same translation over the same subset;
-  `@ArkSchema` generates the row structs. Result builders were considered
-  and rejected: a body written as `If(cond) { … }` is a second dialect to
-  learn, and the point is that a domain author writes the language they know.
-- **Kotlin: a builder DSL, with KSP generating the typed surface.** Kotlin
-  has no stable macro system; a compiler plugin is the only way to translate
-  a body and it breaks across compiler versions. So the Kotlin frontend is
-  `mutation("add_to_playlist") { … }` with lambdas-with-receivers, and it is
-  more verbose than the other two. Kotlin *runs* Ark as well as anything;
-  *authoring* in it is the weakest of the three, and a team should know that
-  before choosing where the domain lives.
-
-**The emit step is a build step.** A frontend produces a `.ark` module when
-its crate, package or module is built: `cargo run --bin emit`, a SwiftPM
-plugin, a Gradle task. What comes out is identical whichever frontend made
-it, which is the property the conformance suite holds for frontends too:
-the same function authored in each language must hash to the same bytes.
-That is a *stronger* statement than "they behave the same", and it is
-checkable by a file compare.
-
-**`arkc`** is one CLI, in Rust, that does everything that is about a module
-rather than about running one:
-
-| command | what |
-|---|---|
-| `arkc verify m.ark` | type-check, determinism rules, totality; prints the module hash |
-| `arkc print m.ark` | the diagnostic text form; what a diff shows |
-| `arkc check old.ark new.ark` | log compatibility (§3.7): every function in the old surface still present, arguments never retyped or retabled, schema additive |
-| `arkc gen rust\|swift\|kotlin\|ts m.ark out/` | row types, branded ids, typed call surface with doc comments, query result types, live frame types, and the module embedded as a resource |
-| `arkc vectors` | runs the conformance vectors against the Rust reference and, with `--fuzz`, generates new ones (§3.11) |
-
-`arkc gen` is the successor of `petros-codegen`, and the difference in kind
-is that it reads a typed module rather than a text section: it can generate
-a Swift `enum Kind { case computer, phone, speaker }` from the live section
-and a `struct Item` from a query's result type, where today those are
-mirrored by hand.
-
-**Transpiling bodies to native source is deliberately not v1.** `arkc gen`
-could emit a Swift body per function and let a runtime skip the interpreter.
-It is not done first because the interpreter is what the versioning story
-needs anyway (a peer must be able to run a function it received over the
-wire), because an interpreted mutator at harken's scale is well under a
-millisecond (§3.14), and because a transpiler is a fourth implementation to
-hold to the vectors. It is the right optimisation later and the vectors are
-what would prove it.
-
-### 3.5 The store: layered, backend-agnostic, no SQL in the spec
-
-The store the evaluator runs against is an interface, and the spec defines
-its semantics rather than its file format:
-
-```
-get(table, key) -> Option<Row>
-scan(table, index, lo, hi, dir, limit, after) -> [Row]     -- sorted by the index, seekable
-put(table, row) -> Change | Refusal                         -- enforces not-null, unique, refs
-delete(table, key) -> Option<Change>
+```kotlin
+// Kotlin
+val addToPlaylist = mutator("add_to_playlist", Scope.Playlists) {
+    val addedMs    = now("added_ms")
+    val playlistId = arg<Id<Playlist>>("playlist_id")
+    val mediaId    = arg<Id<Media>>("media_id")
+    iff(exists(PlaylistItem.key(playlistId, mediaId))) { ret() }
+    val last = let("last", select(PlaylistItem.all.filter(PlaylistItem.playlistId eq playlistId)
+                                  .orderBy(PlaylistItem.pos.desc).limit(1)).first().map { it.pos }.orElse(0))
+    put(PlaylistItem.row(playlistId = playlistId, mediaId = mediaId, pos = last + 1,
+                         addedMs = addedMs, userId = ctx.user))
+}
 ```
 
-That is Petros's five-method `Store` with `fetch(plan)` replaced by `scan`
-over a declared index — the evaluator compiles a plan to index scans itself,
-so a backend never sees a filter. A backend is an **ordered key-value store
-with atomic batch commit**, which is what every candidate already is:
-SQLite's B-tree, LMDB, LevelDB, IndexedDB, a `BTreeMap`.
+Kotlin reads best of the three, which reverses the first revision's
+asymmetry: builder DSLs with lambdas-with-receivers are the thing Kotlin is
+good at, and Compose, Gradle and Exposed are all this shape. Rust is the
+noisiest because closures over a block builder are the only way to scope a
+symbol without a macro. That is the honest ordering, and none of the three
+is second-class.
 
-**SQLite stays, as a B-tree and not as a database.** The recommended durable
-backend on iOS, Android and the desktop is SQLite with two tables — rows
-keyed by `(table_id, canonical key bytes)` holding the canonical row, and
-index entries keyed by `(index_id, canonical index key bytes)` — because it
-is on every device already, its durability story is understood, and its
-`synchronous`/WAL knobs are the ones Petros already measured. What changes
-is that the domain never sees SQL, the spec never mentions it, and swapping
-it for LMDB on a server is one file. "We can ditch SQL" is answered by
-ditching the *dependency on SQL semantics* — collation, `NULL` comparison,
-the planner — which is where the cross-language hazards were, while keeping
-the storage engine that is not the problem.
+**All three emit the same bytes.** The `frontend/` vectors (§3.16) hold a
+function authored in each builder and assert one hash, after
+alpha-normalisation. That is the test that "you can go from Swift or Kotlin
+to Rust": authorship leaves no trace in the module, so the generator does
+not know or care which builder made it.
 
-**The rebase without a savepoint.** A client's store is *layered*:
+**What comes out the other end** is ordinary source. From any of the three
+above, `arkc gen rust` writes:
 
-```
-   reads:  overlay (pending)  →  base (confirmed, durable)
-   confirmed entry arrives:   drop the overlay; apply confirmed into base in one batch;
-                              re-run every still-pending intent into a fresh overlay
-   ack:                       remove the intent from the pending queue; if the queue is
-                              empty, drop the overlay (the base already has it)
-```
-
-The overlay is an in-memory map of `(table, key) → Option<Row>` plus shadow
-index entries; a read consults it first and falls through. It is exactly what
-`SAVEPOINT pending … ROLLBACK TO pending` did, expressed as a data structure
-any backend can sit under, and it keeps Petros's two properties: pending
-intents are committed durably (a system table in the base, written in the
-same batch as nothing else, so a tap is one fsync), and the optimistic state
-never is. A mutation still costs the same at pending depth 400 as at 5
-because a local write applies forward into the overlay and does not replay.
-`Rebuilt` is still what a view is told after a rebase, for the same reason:
-dropping an overlay reports nothing.
-
-The server's store has no overlay; it applies each pushed intent into a
-transaction on its base and commits or discards it with the verdict.
-
-### 3.6 The log and the wire
-
-The protocol is Petros's, written down as a specification instead of a Rust
-enum, with three additions. Frames are canonical CBOR maps tagged `"t"`.
-
-```
-Entry     { id: Id, seq?: Int, actor: Text, session: Text, fn: Bytes(32), args: Struct, autos: Struct }
-
-client →  Hello   { since: Seq, token?: Text, spec: Int, module?: Bytes(32) }
-          Push    { entries: [Entry] }
-          Say     { say: Bytes }                      -- live, opaque to the engine
-          Need    { fns: [Bytes(32)] }                -- functions this peer lacks
-          Verify  { seq: Seq, hash: Bytes(32) }       -- "this is my state at seq"
-
-server →  Batch   { entries: [Entry], has_more: Bool }
-          Ack     { ids: [Id], seqs: [Seq] }
-          Reject  { id: Id, reason: Text }
-          Denied  { reason: Text }                    -- nothing follows; socket closes
-          Heard   { hear: Bytes }
-          Module  { hash: Bytes(32), fns: [Function], schema: Schema }   -- answer to Need, or offered on Hello
-          Agree   { seq: Seq, hash: Bytes(32), ok: Bool }
+```rust
+pub fn add_to_playlist(db: &mut impl Store, ctx: &Ctx, added_ms: i64,
+                       playlist_id: Id<Playlist>, media_id: Id<Media>) -> Result<(), Refusal> {
+    if db.exists::<PlaylistItem>(&PlaylistItem::key((playlist_id, media_id)))? { return Ok(()); }
+    let last = db.select(PlaylistItem::all().filter(PlaylistItem::playlist_id.eq(playlist_id))
+                         .order_by(PlaylistItem::pos.desc()).then_by(PlaylistItem::media_id.asc()).limit(1))?
+                 .first().map(|r| r.pos).unwrap_or(0);
+    db.put(&PlaylistItem { playlist_id, media_id, pos: std::checked_add(last, 1)?,
+                           added_ms, user_id: ctx.user.clone() })?;
+    Ok(())
+}
 ```
 
-The additions:
+and `arkc gen swift` writes the same function as a Swift method on the
+generated `Harken` domain type, with the same tie-break and the same checked
+add, calling `ArkStd` for anything the spec pins. The generated code is
+idiomatic enough to read and to step through in a debugger, which is what
+"converted back into those languages" buys and an interpreter never could;
+it is never edited, and it is regenerated from the module on every build.
+The author's own language gets generated code too: a Rust-authored domain
+runs on the server as generated Rust, not by running the builder.
 
-- **`fn` on the entry is a hash of the function that authored it**, not a
-  verb name. `args` and `autos` are the two halves Petros already keeps
-  apart. Replay looks the function up by hash (§3.7).
-- **`Need`/`Module`** is how a function body reaches a peer that has never
-  seen it: a phone that installed last month replays an entry authored by a
-  verb added yesterday by asking for it. The server's `Hello` reply offers
-  the current module hash, and a peer that lacks any function in a `Batch`
-  asks before applying. This is the "server hands the module out" step
-  `decisions.md` names as the one that closes the older-client problem, and
-  it is cheap because a module is kilobytes of IR rather than a megabyte of
-  wasm.
-- **`Verify`/`Agree`** is the state hash (§3.1) exchanged on request. A peer
-  that has caught up to `seq` may say what it holds; a server that disagrees
-  says so. Petros can only find divergence in a test. Ark can find it in a
-  house, name the sequence number it appeared at, and — because every
-  function is content-addressed — say which function two runtimes evaluate
-  differently. That is the production half of the conformance suite.
+**The verifier catches what a host type system cannot.** A loop variable
+used outside its closure is an unbound symbol; a select bound in one branch
+and read in another is the same; a helper calling a helper declared after it
+is a cycle. The builders make these hard to write and the verifier refuses
+them anyway, because a module may arrive from anywhere.
 
-Everything else is as it was: `seq = head + 1`, dedupe by entry id, the
-server applies before it appends so a `Reject` is a verdict, fan-out is
-"everything above your cursor, 256 at a time", `Heard` is taken before the
-rebase, identity is asked once at `Hello` and every pushed entry is held to
-it, the server pings and no client has to. `spec` in `Hello` is the runtime's
-spec version, and a server whose module needs a newer one answers `Denied`
-with a reason a client shows as "update required" — the handshake Petros
-deferred, now about the runtime alone rather than the app.
+**`arkc`** is one CLI, in Rust: `verify`, `print` (the diagnostic text form,
+what a diff shows and what replaces `mutations.txt`), `check` (§3.12),
+`gen rust|swift|kotlin`, `vectors` (§3.16). Each language's build invokes it:
+a `build.rs`, a SwiftPM plugin, a Gradle task.
 
-Batching, `APPLY_CHUNK`, and the cursor semantics are carried over and are
-part of the protocol vectors.
+### 3.5 What generated code runs against
 
-### 3.7 Versioning: the log freezes meaning too
+Each language ships one runtime package, and the generated domain code calls
+exactly two things in it: the **store** (§3.6) through `select`, `get`,
+`exists`, `put`, `delete`, and **`ArkStd`**, the pinned standard library.
+Everything else in the runtime — the peer, the protocol, views, live rooms —
+sees the domain only through two generated entry points:
 
-This is the one place Ark is not a translation of Petros but a repair.
+```
+apply(scope, fn_hash, ctx, autos, args, store) -> Result<Changes, Refusal>
+fill_auto(fn_hash, auto_ctx) -> autos
+```
 
-**Every function is content-addressed.** Its hash is SHA-256 of its
-canonical, verified encoding. A module is a map from name to hash plus the
-bodies. An entry records the hash of the function that authored it.
+`apply` dispatches on the function hash to the generated function of that
+*version* (§3.12). A runtime knows nothing about any domain; harken's
+generated code is a package the app links beside the runtime.
 
-**The server keeps every function it has ever accepted**, by hash, in a
-system table beside the log. A module install adds bodies and never removes
-one — the same permanence rule the log has, now applied to what the log
-*means*. Bodies are small; harken's whole domain is a few tens of kilobytes
-of IR.
+### 3.6 The store: layered, scoped, backend-agnostic
 
-**Replay runs the function that authored the entry.** A peer replaying
-sequence 1 today runs the `add_song` of the day sequence 1 was written, not
-today's. `tests/history.rs` — two peers on one log ending at `[1,2,3]` and
-`[10,20,30]` — cannot happen, because both peers run the same body for the
-same entry by construction, and neither has to have been built at any
-particular time. The discipline "a verb's meaning is immutable; add a verb"
-becomes a fact rather than a rule: editing a function *is* adding a
-function, and the old one is still there under its old hash for the entries
-that name it.
+```
+get(scope, table, key) -> Option<Row>
+scan(scope, table, index, lo, hi, dir, limit, after) -> [Row]     -- sorted, seekable
+put(scope, table, row) -> Change | Refusal
+delete(scope, table, key) -> Option<Change>
+commit(batch)                                                     -- atomic
+```
 
-What that costs, and how it is bounded:
+Petros's five methods with `fetch(plan)` replaced by `scan` over a declared
+index: the generated code compiles a plan to scans, so a backend never sees
+a filter, a `NULL` comparison or a collation. A backend is an ordered
+key-value store with atomic batch commit — SQLite's B-tree, LMDB,
+IndexedDB, a `BTreeMap`. **SQLite stays as the default durable backend on
+every device, as a B-tree and not as a database**: rows keyed by `(scope,
+table, canonical key bytes)`, index entries keyed the same way, no SQL
+above the two statements that read and write them. What leaves is the
+dependency on SQL *semantics*, which is where the cross-language hazards
+were.
 
-- **The schema must stay readable by every historical body.** A function
-  from last year names columns; if today's schema dropped one, that body
-  cannot run. So the schema is additive-only, a column is *retired* rather
-  than removed (it reads as its default and a write to it is dropped), and
-  `arkc check` type-checks *every accepted body* against a proposed schema
-  before the server will install it. `check-log` compared a text surface;
-  this is a compiler pass over the log's whole vocabulary, and it refuses a
-  deploy that would strand an entry.
-- **A schema change that changes a live column's meaning is still a
-  rebuild.** Tables are a function of the log; `schema_version` moves and
-  every peer replays into fresh tables. Unchanged from Petros, and every
-  peer does it — including the phone, whose runtime is not a different kind
-  of thing any more.
-- **Two runtimes disagreeing about one body is the remaining hazard**, and
-  it is the one the conformance suite and `Verify` exist for. It is a
-  smaller hazard than today's: it can only come from a runtime bug in a
-  spec'd operation, never from a domain edit.
+**The rebase is an overlay.** Confirmed state lives in the base; pending
+intents apply forward into an in-memory overlay per scope; reads consult the
+overlay first. A confirmed entry arriving drops the overlay, applies to the
+base in one batch, and re-runs the still-pending intents into a fresh
+overlay. Pending intents are themselves committed in the base (one fsync per
+tap, as today), the optimistic state never is, a tap costs the same at
+pending depth 400 as at 5, and a view is told `Rebuilt` after a rebase
+because dropping an overlay reports nothing.
 
-There is a second, quieter consequence. A verb missing from `peer!` was
-invisible because the schema line and the dispatch were two lists. In Ark
-there is one list: a module's functions *are* what can apply, the call
-surface is generated from them, and there is no way to declare a function
-the evaluator cannot find.
+### 3.7 Scopes as logs
 
-### 3.8 Views, in every language
+Each scope is one append-only log: `seq` per scope, an authority per scope,
+snapshots per scope. A peer holds any set of scopes, each in one of two
+ways:
 
-Petros's incremental views are kept whole — `Source`, `Filter`, `Join`,
-`Take` with a per-partition bound that refills by seeking, `Tally` — and
-moved from "a Rust crate" to "a section of the spec", because a query's plan
-is IR and a native app is exactly the caller that wants to hold a
-maintained list and drive a `List`/`LazyColumn` from `Insert{at}`,
-`Remove{at}`, `Update{at}` patches without crossing anything. The phone
-gets what the desktop has today, natively, and `library_update()` as a
-bridge type disappears.
+- **whole**, in which case it replays intents and is an exact replica, may
+  author into the scope, and can verify its state hash against anyone;
+- **as a projection** (§3.11), in which case it receives facts for the rows
+  it asked for, may still author intents (its optimistic preview is
+  approximate and the authority's answer wins), and does not claim exactness.
 
-Two things the spec says that the crate only tested:
+A mutator's scope is declared; the verifier holds it to that scope's
+tables. Two mutators in two scopes are two entries in two logs, and there is
+no cross-scope transaction — which is the price of being able to replicate
+one scope without the other, and the reason the split is a domain decision
+rather than a default.
 
-- **The correctness contract**: after any sequence of changes, a view's
-  rows equal a re-run of its plan. The view vectors are exactly that —
-  plan, initial rows, change list, expected patches, expected final rows.
-- **The work contract**: a push costs O(changed), and a `Take` refill is a
-  seek, not a scan. `docs/ivm.md` found three bugs that only a pull counter
-  could see; the spec states the bound and each runtime's own tests measure
-  it, because a vector cannot count another implementation's reads.
+### 3.8 Intents and facts: one log, two ways to apply it
 
-A view is fed by the peer after every applied entry and every local
-mutation, and told `Rebuilt` after a rebase. The `shape` stage of a query
-(§3.3) is re-run over the view's rows when they change, so a screen that
-wants harken's `Item` — a row plus its playlist membership plus a derived
-`on_playlist` — subscribes to one thing.
+The authority applies each pushed intent in a transaction, and the generated
+`put`/`delete` report exactly which rows changed. Petros computes those
+`Change`s and discards them once views are settled. **Ark keeps them, beside
+the entry:**
 
-### 3.9 Live rooms
+```
+log[scope]: (seq, Entry { id, actor, session, fn: hash, args, autos }, facts: [Change])
+```
 
-Unchanged in design: a room per account, held in the server's memory, the
-app's machine deciding what a frame means, `keep` for the one row worth
-writing when a room empties, frames dropped while unlinked, a second `Hello`
-on a connection is paging and not a departure. What changes is that a
-module's **live section declares the frame types** (`Say`, `Hear`, and the
-structs and enums inside them), so `arkc gen` emits them for every language
-and `mobile/src/listening.ts`'s hand-written `Listener` and `Doing` do not
-have a successor. The state machine each device runs (`elsewhere`,
-`output_here`, the 1100 ms drift rule) is app code and stays app code — but
-it can be written *once* as a pure Ark query over a `Session` struct if an
-app wants one definition, which is how harken should do it given that it
-has already written it twice.
+A peer receiving `Batch` gets the entries. For each one it does one of two
+things, and the state is the same either way, because the facts *are* what
+exact replay produced:
 
-The engine still never looks inside a frame, so none of the log's
-permanence rules bind one.
+- it knows `fn` — its generated code has that function version — so it
+  **replays the intent**, exactly;
+- it does not — an older build meeting a new verb, a build from before a fix
+  shipped under a new hash — so it asks `Facts { scope, seqs }` and
+  **applies the rows**.
 
-### 3.10 Sign-in
+Both paths leave the peer an exact replica, because applying an entry's
+facts is applying its effect. A peer that took facts for sequence 4127 can
+still replay 4128 by intent, since it starts from the right base. So an old
+client is never "update required": it applies by facts what it cannot apply
+by intent, keeps authoring every verb it does know, and shows the new verb's
+effects. The same mechanism is the cure for divergence: `Verify` finds it,
+and the peer resyncs from the last snapshot plus facts rather than being
+reinstalled.
 
-`petros-auth`'s design is kept and its client half becomes a section of the
-spec, because a Swift and a Kotlin client each have to implement it: open
-`{server}/auth/login?redirect=R`, receive a single-use `code`, `POST
-/auth/exchange` for `Login { token, session, user, expires_ms }`, put the
-token in every `Hello`. Three HTTP calls and a URL scheme. The server
-remains the only OpenID Connect client, the dev mode remains, and `Denied`
-remains how a stale token is learned about.
+**Frames**, canonical CBOR, tagged `"t"`:
 
-### 3.11 The conformance suite
+```
+Entry    { id, seq?, actor, session, fn: Bytes(32), args, autos }
 
-The spec is a document; the vectors are what make it binding. They live in
-`spec/vectors/`, are generated by the Rust reference and reviewed like code,
-and every runtime carries a `conformance` test target that walks the tree.
-A runtime's version states the spec version it passes, and CI in every
-runtime pins the vectors by revision.
+client → Hello    { scopes: [{ scope, since: Seq, mode: whole | projection(plan) }], token?, spec: Int }
+         Push     { scope, entries: [Entry] }
+         Facts    { scope, seqs: [Seq] }                 -- entries I cannot replay
+         Snapshot { scope }                              -- I am below the horizon; start me over
+         Verify   { scope, seq, hash }
+         Say      { say: Bytes }
 
-| directory | one vector is | what it holds |
+server → Batch    { scope, entries: [Entry], has_more }
+         Facts    { scope, facts: [(Seq, [Change])] }
+         Snapshot { scope, seq, hash, rows: …, has_more }
+         Ack      { scope, ids, seqs } · Reject { id, reason } · Denied { reason }
+         Agree    { scope, seq, hash, ok }
+         Heard    { hear: Bytes }
+```
+
+Everything else is Petros: `seq = head + 1` per scope, dedupe by entry id,
+the authority applies before it appends so a `Reject` is a verdict, fan-out
+is everything above a peer's cursor per scope, `Heard` is taken before the
+rebase, identity once at `Hello`, the server pings.
+
+**What Replicache and Zero do here, and how this differs.** Both are the
+facts-down model, and it is worth being exact about it because this design
+borrows its rebase from them. In Replicache the client runs a *speculative*
+mutator against a local store, pushes the mutation by name and arguments, and
+the server runs its own implementation against the real database; `pull`
+returns a patch of row-level `put`/`del` operations computed from the
+server's *state* (the cookie or client-view-record strategies), plus which
+mutation ids have been processed, and the client discards its speculative
+state, applies the patch, and re-runs unacknowledged mutations on top. Zero's
+custom mutators are the same shape with a query layer under them: a mutator
+runs on the client optimistically and on the server in a database
+transaction via the push endpoint, `zero-cache` replicates the database,
+computes each client's active queries incrementally, and streams changed
+rows to the client, which reconciles. Rocicorp call it server reconciliation
+and are candid that the client's mutator need not match the server's: the
+server's result wins, and that tolerance is what makes their permissions,
+validation and "just change the server logic" story easy.
+
+Three consequences of that model, and where Ark stands on each:
+
+- **Their source of truth is the materialised database; the mutation is a
+  transient request.** Nothing keeps intents once processed, so there is no
+  log to compact, no history to replay, no per-entry versioning, and an old
+  client is fine because it only ever receives rows. Ark's source of truth
+  is the intent log, and facts are *derived* from it and retained only above
+  the snapshot horizon. Above the horizon Ark pays what they never pay —
+  retained entries, retained facts, retained function versions. Below it,
+  Ark is in their position: a snapshot is state, and history under it is
+  gone. The horizon is the dial between local-first exactness and their
+  steady state.
+- **Their clients are never exact, and it does not matter to them; Ark's
+  whole-scope peers are exact, and that is the point.** Exactness is what
+  makes a peer with no server a first-class holder of a scope whose history
+  can later be adopted and *verified* by an authority — replay the intents,
+  match the hash — and what makes two peers able to check they agree. A
+  Replicache or Zero client cannot be an authority for anything, because
+  the truth is the server's database and the client only ever had a
+  speculation and a copy. That is the capability the user asked for, and it
+  is the one their model structurally cannot offer.
+- **Their partial sync is row-level and query-driven; Ark's is scope-level
+  for exact peers and query-driven only for projections.** Zero's model is
+  strictly more flexible about *which rows* a client holds, because
+  facts-down does not care what the client can compute. Ark buys exactness
+  with a coarser grain, and recovers Zero's grain in facts mode: a
+  projection subscription *is* a query the authority maintains with the same
+  view machinery the spec already has (§3.13), streaming facts for its rows.
+  In that mode an Ark peer is a Zero client, and the two designs meet.
+
+On the "two paths to test": Replicache and Zero also have two — the
+speculative apply on the client and the authoritative apply on the server —
+and they resolve the disagreement by fiat. Ark's two paths are held to
+*agree*, and the test is cheap for a reason worth stating: the facts are the
+recorded output of the intent path, so the `eval/` vectors assert that
+applying an entry's facts to the prior state yields the same hash as
+replaying it, which is one extra line per vector rather than a second
+engine. The storage cost is comparable to theirs or smaller: Replicache's
+client-view-record strategy keeps per-client, per-row version metadata, and
+`zero-cache` keeps a full replica of the database plus each client's query
+state; Ark keeps `Change`s above the horizon, which for harken is kilobytes
+per day.
+
+### 3.9 Snapshots and the horizon
+
+A snapshot of a scope at `seq` is its rows and their state hash. It is what
+a new device starts from, what a peer below the horizon restarts from, and
+what a schema rebuild replays forward from. Because every whole-scope peer
+replays exactly, a snapshot is **verifiable**: any peer with the log can
+reproduce the hash, and an authority adopting a peer's scope (§3.10) proves
+the claimed snapshot by replaying to it.
+
+The **horizon** is the oldest sequence the authority still serves. Below it
+go entries, their facts, and every function version no retained entry names
+— so "every version compiled in forever" becomes "every version above the
+horizon", and `arkc gen` emits only those. How far back the horizon sits is
+the authority's policy: far enough that every peer it expects to see can
+catch up by tail, and no further. A peer that has been away longer takes a
+snapshot and keeps its pending intents, which replay on top as they always
+did. This is Petros's "no compaction" item closed, and it interacts with
+§3.12 exactly as `decisions.md` predicted it would.
+
+### 3.10 Authority is a role
+
+Every peer runs the same log machine; **the authority of a scope is the peer
+that sequences it**. A server is a peer that does this for scopes it hosts,
+for others. A peer with no server does it for its own scopes: it sequences
+its own intents, keeps its own log, snapshots itself, and never replays from
+zero on open. It is not offline, not in a mode, not "pending forever"; it is
+a database with one replica.
+
+When such a peer later meets a server, one of two things happens, both
+already in the design:
+
+- **A scope the server has never seen is adopted whole.** The peer sends its
+  log (or its snapshot and tail); the server replays every intent through
+  its own generated code and checks the hash the peer claimed. A peer cannot
+  smuggle rows it did not derive — this is the property only exact replicas
+  have, and the reason intents rather than facts are the log. The server
+  becomes the authority; the peer becomes a whole-scope replica of it with
+  nothing pending.
+- **A scope the server already holds takes the local entries as pending
+  intents.** They rebase onto the server's log through the ordinary path at
+  unusual depth, and refusals come back as verdicts, as they would for any
+  offline edit.
+
+Handing authority *back* — a server going away and a peer resuming
+sequencing — is the same step in reverse and is deliberately not built
+first. Authority transfer between two live peers is a protocol with a
+fencing token, and nothing in harken needs it yet.
+
+### 3.11 Authorization and partial sync
+
+Two grains, and they line up with the two ways of holding a scope:
+
+- **Scope grain.** Who may *receive* a scope whole is a rule at its
+  authority, checked at `Hello`. Who may *write* is inside the generated
+  mutator via `ctx.user`, as today, plus a scope-level write rule at the
+  authority. harken: everyone signed in receives `library`; a person
+  receives their own playlist scope and nobody else's.
+- **Row grain, in facts mode.** A projection is a plan the authority
+  maintains for that peer and streams facts for; the plan can carry a
+  predicate the peer did not write (a permission rule), which is how
+  row-level read authorization is expressed and the only place it can be —
+  a peer holding a filtered subset cannot replay intents against it, so it
+  does not.
+
+This is the "no authorisation, no partial sync" item from `decisions.md`
+closed, at the grain the intent model can honestly support, with the finer
+grain available in the mode that does not claim exactness.
+
+### 3.12 Versioning: functions by hash, retained above the horizon
+
+Every function's hash is SHA-256 of its verified, alpha-normalised canonical
+form; an entry records the hash of the function that authored it; `apply`
+dispatches on that hash to the generated function of that version. Editing
+a function *is* adding a function, and the old one stays under its old hash
+for the entries that name it. `tests/history.rs` — two builds replaying one
+log to two states — cannot happen between peers that both hold the version,
+and a peer that does not hold it takes facts (§3.8) rather than guessing.
+
+What bounds it: an authority drops a version once no entry above the
+horizon names it, and `arkc gen` emits only the versions the module's
+retention list carries, so a phone compiles the functions it may meet and
+not the history of the domain. What constrains the schema: additive-only,
+retire rather than remove, and `arkc check old.ark new.ark` type-checks
+every *retained* function against the proposed schema and refuses a change
+that would strand an entry — `check-log` as a compiler pass over the log's
+live vocabulary rather than a text diff.
+
+And the quiet consequence: there is one list. A module's functions are what
+can apply, the call surface is generated from them, and a verb that reaches
+the surface but not the dispatch — `set_artwork`'s two commits — has no
+place to exist.
+
+### 3.13 Views
+
+Petros's incremental views — source, filter, join, `Take` with a
+per-partition bound refilled by seeking, `Tally` — move from a Rust crate to
+a section of the spec, because a query's plan is data and a native app is
+exactly the caller that wants to drive a `List` or `LazyColumn` from
+`Insert{at}` / `Remove{at}` / `Update{at}` without crossing anything. Fed by
+the peer after every applied entry and every local mutation; told `Rebuilt`
+after a rebase; the query's *shape* re-run over the view's rows when they
+move. The correctness contract (rows equal a re-run) is in the vectors; the
+work contract (O(changed), refills are seeks) is stated and each runtime
+measures it, because a vector cannot count another implementation's reads.
+The same machinery, run at an authority over a projection's plan, is what
+streams a projection its facts (§3.11).
+
+### 3.14 Live rooms
+
+Unchanged: a room per account in the authority's memory, the app's machine
+deciding what a frame means, `keep` for the one row worth writing when a
+room empties, frames dropped while unlinked, a second `Hello` is paging. The
+module's live section **declares the frame types**, so `arkc gen` emits
+them in every language and the hand-mirrored `Listener` and `Doing` in
+`mobile/src/listening.ts` have no successor. The per-device state machine
+(`elsewhere`, `output_here`, the 1100 ms drift) is app code and can be
+written once as a pure Ark helper over a `Session` struct if an app wants
+one definition — harken has already written it twice.
+
+### 3.15 Sign-in
+
+Kept from `petros-auth` and written into the spec's client section because
+two native clients now implement it: open `{server}/auth/login?redirect=R`,
+receive a single-use code, `POST /auth/exchange` for `Login { token,
+session, user, expires_ms }`, put the token in every `Hello`. The server is
+the only OpenID Connect client; dev mode remains; `Denied` is how a stale
+token is learned about. A peer with no server has no sign-in and an `actor`
+it chose, which is what Petros's `Trusting` already means.
+
+### 3.16 The conformance suite
+
+The vectors are what make the spec binding. They live in `spec/vectors/`,
+are generated by the Rust reference and reviewed like code, and every
+runtime carries a `conformance` target that walks the tree. **Generated
+domain code is under test too**: each `eval/` vector's module is run through
+`arkc gen` for the language under test, compiled, and executed — so the
+suite checks the generator, `ArkStd` and the store together, which is the
+only combination that ships.
+
+| directory | one vector is | holds |
 |---|---|---|
-| `codec/` | a value in diagnostic JSON and its canonical bytes as hex, both ways | RFC 8949 determinism, tag 37, the type mapping; a non-canonical input that must be *refused* |
-| `order/` | a list of values and their sorted order | the total order; UTF-8 vs UTF-16 vs canonical-equivalence traps |
-| `stdlib/` | a call, its arguments, its result or its refusal | every library function; the Unicode tables at their pinned version; checked-arithmetic overflow |
-| `verify/` | a module and whether it verifies, with the error | typing, determinism rules, totality, order tie-break insertion |
-| `eval/` | schema, functions, initial rows, an entry with ctx and autos, expected changes and final rows or the refusal text | the evaluator; harken's ten mutators are the first real ones; `fill_auto` from a fixed seed |
-| `views/` | a plan, initial rows, a change list, the expected patch list and final rows | §3.8's correctness contract, including per-partition `Take` refills and `Child` placement |
-| `rebase/` | a seeded scripted session: mutations, partitions, heals, deliveries with duplicates and drops, expected state hash at settle | Petros's simulation tests, made portable; a Swift peer and a Rust server in one run |
-| `protocol/` | a frame sequence into a peer or server and the frames and state out | `Hello`/`Batch` paging, dedupe re-acks, `Denied`, `Need`/`Module`, `Verify`/`Agree` |
-| `hash/` | a set of tables and the expected state hash | §3.1, so `Verify` means one thing everywhere |
-| `frontend/` | the same function in each language's source and the one hash it must emit | §3.4's property, per frontend |
+| `codec/` | a value, its canonical bytes; a non-canonical input to refuse | RFC 8949 determinism, tag 37, the type mapping |
+| `order/` | values and their sorted order | the total order; UTF-8 vs UTF-16 vs canonical equivalence |
+| `std/` | a call, its result or refusal | every library function; the pinned Unicode tables; checked overflow |
+| `verify/` | a module, whether it verifies, the error | typing, scope rule, totality, tie-break insertion, unbound symbols |
+| `frontend/` | the same function authored in each builder | **one hash** — the proof that any language reaches any other |
+| `eval/` | schema, functions, prior rows, an entry, expected changes and rows or refusal; `fill_auto` from a seed | the generated code; **and** that applying the recorded facts yields the same hash as replaying |
+| `views/` | plan, rows, changes, expected patches and rows | the maintenance contract |
+| `rebase/` | a seeded scripted session across peers and scopes with partitions, duplicates and drops; expected hashes at settle | Petros's simulation, portable; a Swift peer and a Rust authority in one run |
+| `protocol/` | frames in, frames and state out | paging, dedupe re-acks, `Denied`, `Facts`, `Snapshot`, `Verify`/`Agree`, adoption of a local scope |
+| `hash/` | tables, expected state hash | `Verify` means one thing everywhere |
 
-Vectors are JSON with `{"$bytes": hex}`, `{"$id": uuid}` and `{"$int": "…"}`
-wrappers where JSON cannot say the thing, and every vector carries the
-expected canonical bytes so a runtime is tested on encoding as well as on
-meaning.
+**Differential fuzzing** is the second half: `arkc vectors --fuzz` generates
+random modules over random schemas and random sessions, evaluates them on
+the reference, and emits vectors; a nightly job in each runtime pulls the
+day's batch through `gen`, compile and run. Every vector directory carries a
+falsification check — a deliberately wrong expected answer the runner must
+reject — because this repository's history has three tests that passed by
+not testing the thing.
 
-**Differential fuzzing is the second half.** `arkc vectors --fuzz` generates
-random modules over random schemas and random entry sequences, evaluates
-them on the reference, and emits vectors; a nightly job in each runtime
-pulls the day's batch. Three hand-written evaluators agreeing on a curated
-suite is a start; three evaluators agreeing on ten thousand programs nobody
-wrote is the thing that justifies putting a mutator authored on a phone into
-a log a server replays. The lesson from `docs/ivm.md` and the three vacuous
-tests in `decisions.md` applies to the vectors themselves: every vector
-directory has a *falsification* check — a deliberately wrong reference
-answer that the runner must reject — so a runner that passes by not reading
-the expected value is caught.
+### 3.17 Repository layout
 
-### 3.12 Repository layout
-
-One repository, because the vectors and the runtimes move together and a
-spec change that is not accompanied by a runtime change is a spec change
-nobody tested. Each language keeps its native build; nix wraps the Rust
-half and CI.
+One repository, because the vectors and the runtimes move together. Each
+language keeps its native build; nix wraps the Rust half and CI.
 
 ```
 arkdb/
-  spec/
-    SPEC.md                  numbered sections: values, encoding, order, schema, IR, stdlib,
-                             store semantics, log and protocol, views, live, sign-in, hashing
-    unicode/                 the three pinned tables, generated from UCD, with the generator
-    vectors/                 §3.11
-  rust/
-    ark/                     the runtime: codec, ir, verify, eval, stdlib, store (layered),
-                             views, peer, server core, live, protocol
-    ark-store-sqlite/        SQLite as a B-tree
-    ark-store-mem/           BTreeMap, for tests and the browser
-    ark-server/              axum: the handler, the hub, `exchange`, the module store, auth
-    ark-macros/              the Rust frontend and `ark::schema!`
-    arkc/                    the CLI
-    ark-testkit/             `Sim<A>` over the runtime; emits `rebase/` vectors
-  swift/
-    Package.swift            ArkDB (codec, eval, store, views, peer), ArkMacros, ArkConformance
-  kotlin/
-    settings.gradle.kts      ark-runtime (jvm + android), ark-ksp, ark-conformance
-  ts/                        later: the browser runtime, same shape, for a web client
+  spec/         SPEC.md · unicode/ (the three pinned tables and their generator) · vectors/
+  rust/         ark (runtime) · ark-store-sqlite · ark-store-mem · ark-server (axum)
+                · ark-builder (the Rust frontend) · arkc · ark-testkit
+  swift/        Package.swift: ArkDB (runtime), ArkBuilder, ArkConformance
+  kotlin/       settings.gradle.kts: ark-runtime (jvm + android), ark-builder, ark-conformance
+  ts/           later: the browser runtime and builder
 ```
 
-An app — the two native harken apps this repository (`k2on/apps`) is for —
-depends on `swift/` or `kotlin/` as a package, on `arkc` as a build tool,
-and carries its domain as a Rust crate that emits a module, or authors it in
-the app's language. The desktop and the server depend on `rust/ark`.
+An app depends on one runtime package and on `arkc` at build time, and
+carries its domain as a builder program in whichever language it is written
+plus the module and generated code that program produces. The two native
+harken apps this repository (`k2on/apps`) is for depend on `swift/` and
+`kotlin/`; the harken server and desktop on `rust/ark`.
 
-### 3.13 The path for harken
+### 3.18 The path for harken
 
-In order, each step leaving something that runs:
-
-1. **Spec and Rust runtime, with vectors from day one.** Port Petros's
-   tests as vectors before porting its code: `wire.rs` becomes a `codec/`
-   and `protocol/` vector, `converge.rs` becomes `rebase/`, the ivm tests
-   become `views/`, `history.rs` becomes an `eval/` vector that *passes*
-   because two bodies with two hashes are two functions. The Rust runtime is
-   Petros minus Diesel, SQL, wasm and UniFFI, plus the evaluator and the
-   overlay store; roughly the size of Petros today. `arkc verify`,
-   `print`, `check` and `gen rust` land with it.
-2. **harken's domain as Ark-in-Rust.** `functions.rs` under
-   `#[ark::mutation]`/`#[ark::query]` and `schema.sql` as `ark::schema!`.
-   The port is the test of the Rust frontend's subset and of the standard
-   library's coverage; anything that does not fit is either a library
-   addition with vectors or a sign the function was doing something a
-   mutator should not. The server moves to `ark-server`, the desktop to
-   `rust/ark`. **The log starts fresh.** harken is "still alpha" by its own
-   CLAUDE.md, and a Petros log can in principle be imported (entries are
-   CBOR maps; a verb name maps to the ported body's hash) but the replay
-   would have to be proven identical, and that proof costs more than the
-   library it would save.
-3. **The Swift runtime and the iOS app.** `swift/` to the vectors, then
-   `arkc gen swift` over harken's module, then a SwiftUI app in `k2on/apps`
-   over a maintained view and the generated call surface. No bridge, no
-   `.so`, no Expo. This is the first moment two runtimes share a log, and
-   `Verify` goes in at the same time so that any disagreement is a number
-   on a debug screen rather than a picker that is mysteriously empty.
+1. **Spec, vectors and the Rust runtime**, vectors first: `wire.rs` becomes
+   `codec/` and `protocol/`, `converge.rs` becomes `rebase/`, the ivm tests
+   `views/`, and `history.rs` an `eval/` vector that passes because two
+   bodies are two hashes. The runtime is Petros minus Diesel, SQL, wasm and
+   UniFFI, plus scopes, retained facts, snapshots, the overlay store and the
+   authority role. `arkc verify`, `print`, `check`, `gen rust` land with it.
+2. **The Rust builder and harken's domain through it.** `functions.rs`
+   rewritten against `ark-builder`; `schema.sql` as a schema program. Two
+   scopes, `library` and per-person `playlists`, decided now because they
+   cannot be split later; `add_to_playlist` loses its cross-scope check.
+   The server moves to `ark-server`, the desktop to `rust/ark` with
+   generated Rust. **The log starts fresh**, for the reason the first
+   revision gave.
+3. **The Swift runtime and the iOS app**, in this repository: `swift/` to
+   the vectors, `arkc gen swift` over harken's module, a SwiftUI app over a
+   maintained view and the generated call surface. `Verify` goes in with it,
+   so the first disagreement between two runtimes is a number rather than
+   an empty picker.
 4. **The Kotlin runtime and the Android app.** Same shape, Compose.
-   `mobile/` retires; with it go `ubrn`, the gradle state layer, the Maven
-   recording and the qemu wrapping, because none of them were about the
-   app.
-5. **Afterwards, as they earn it:** a Swift frontend so a domain can be
-   authored where an app is; transpiled bodies where a profile says the
-   interpreter is the cost; checkpoints (a signed state hash and a snapshot
-   at `seq`, which is the compaction Petros never built and which `Verify`
-   already gives the vocabulary for); the browser runtime.
+   `mobile/` retires, and with it `ubrn`, the gradle state layer, the Maven
+   recording and the qemu wrapping.
+5. **The Swift and Kotlin builders**, proved by `frontend/` vectors against
+   harken's own functions: the same module from three sources.
+6. **As they earn it:** projections and row-level rules; authority handoff;
+   the browser runtime; whatever the profile says about generated code.
 
-### 3.14 Risks, stated as risks
+### 3.19 Risks, stated as risks
 
-- **Three evaluators are three chances to diverge, and divergence is
-  silent.** The whole design rests on the vectors, the fuzzer and `Verify`
-  being taken seriously from the first commit rather than added. A runtime
-  that ships before it passes the suite is a Petros with more languages.
-- **The IR's ceiling is real.** A mutator that needs date arithmetic, a
-  regular expression, or a Unicode operation outside the three pinned
-  tables cannot have it until the spec does, and the spec should be slow to
-  grant it. That is the correct trade for the log's sake; it will still
-  feel like a wall the first time somebody hits it. harken's current
-  nineteen functions do not.
-- **Interpreted performance on a phone is estimated, not measured.** Petros
-  measured 0.027 ms for a linked mutation and 0.39 ms through wasmi, with
-  the interpreter a minority of the second number. A tree-walking evaluator
-  over an in-memory overlay with SQLite underneath should land between
-  those; the number that actually matters is one fsync, which nothing here
-  changes. The first Swift milestone includes the latency table Petros
-  keeps, at pending depth 5 and 400.
-- **The Rust frontend is a language subset with a proc macro as its
-  compiler**, and the error messages for "that is not Ark" decide whether
-  authoring feels like Rust or like fighting a linter. Budget for them.
-- **Kotlin authoring is second-class** (§3.4). If the domain will ever be
-  written on the Android side, that is the moment to fund a compiler plugin
-  and accept its maintenance.
-- **A content-addressed function store grows forever**, like the log. It
-  grows by kilobytes per deploy, and it is what makes the log replayable,
-  so it is the right thing to grow; but a body can never be deleted, and
-  `arkc check` refusing a schema change because of a body from two years
-  ago will happen and should be understood in advance as the mechanism
-  working.
-- **Static typing in the IR must be sound enough that `arkc gen` never
-  lies.** A generated Swift signature that disagrees with what the evaluator
-  accepts is the `bigint` problem back in a suit. The verifier is part of
-  the spec for this reason and gets its own vector directory.
-- **Not verified here: any of it.** This is a design written against two
-  codebases read closely and one set of measurements taken by their
-  authors. The first prototype that runs an `eval/` vector through a Swift
-  evaluator will move something in this document, and should.
+- **Three generated codebases from one IR is three chances to diverge, and
+  divergence is silent.** The vectors, the fuzzer and `Verify` are the whole
+  answer, and the design assumes they exist from the first commit. What is
+  better than the first revision: divergence is now *recoverable* (facts,
+  snapshot) rather than a reinstall.
+- **The generator is a compiler with three backends, and it is the largest
+  novel piece.** Idiomatic output, readable names, and error messages from
+  the verifier decide whether authoring feels like the language or like a
+  linter. Budget for it as the main cost.
+- **Scopes are a modelling constraint with no escape.** The first mutator
+  that wants to read across scopes will find a wall; the answer is one
+  scope or an unchecked reference, decided per domain and early.
+- **The IR's ceiling still exists**, though compilation makes it cheap to
+  raise: a new `std` function is a mapping per generator and an
+  implementation per `ArkStd`, with vectors. It should still be raised
+  slowly; everything in it is in the log forever.
+- **Retention above the horizon is a real cost** — entries, facts, function
+  versions — and the horizon policy is a knob somebody has to set. It is
+  smaller than what Replicache's CVR or `zero-cache`'s replica keep, and it
+  is bounded, but it is not nothing.
+- **Authority transfer is deferred**, and a serverless peer that later wants
+  a server *and* wants to stay able to work alone will want it. The
+  adoption step is enough for harken; the handoff is a protocol to design
+  when a domain needs it.
+- **Performance of generated code is not the risk it was**: it is native.
+  The floor is one fsync per tap, and the numbers Petros keeps at pending
+  depth 5 and 400 come back as the first Swift milestone's table.
+- **Not verified here: any of it.** The first `eval/` vector that runs
+  through generated Swift will move something in this document, and should.
 
-### 3.15 Decisions, one paragraph each
+### 3.20 Decisions, one paragraph each
 
-- **The domain is an IR, not a binary, because sameness across languages is
-  the requirement and compilation is the wrong tool for it.** Two `apply`s
-  in two languages diverge silently; one `apply` compiled twice diverges
-  less often and just as silently; one IR with three evaluators held to one
-  suite diverges only by a runtime bug, which a suite can find and a hash
-  can name.
-- **The IR is total and typed so the server can run it from anyone.** No
-  loops that do not terminate, no I/O, no floats, checked arithmetic, every
-  order total. A verifier is in the spec and a module's hash is of its
-  verified form.
-- **The standard library is the only escape hatch, admission requires an
-  exact definition and vectors, and Unicode is pinned as data.** Because
-  `slug` keys the log and three platforms' ICUs do not agree.
-- **Functions are content-addressed and entries name them, so the log
-  freezes meaning.** `history.rs` becomes impossible rather than
-  discouraged. The server keeps every body forever; the schema is
-  additive-only and type-checked against all of them.
-- **The module travels over the wire.** `Need`/`Module` is what lets a
-  phone replay an entry authored by a verb it has never seen, and it is why
-  the interpreter comes before the transpiler.
-- **The state hash is specified and exchanged.** `Verify`/`Agree` turns
-  "the picker is empty" into "we disagree since seq 4127 about
-  `add_song@3f9c…`".
-- **The store is an ordered KV with batch commit, layered for the rebase;
-  SQLite is a backend and not a dependency.** SQL semantics leave the spec;
-  the storage engine that was never the problem stays on the devices that
-  have it.
-- **Views are in the spec because the native app is the caller that most
-  wants them.** The phone gets what the desktop has, without a bridge.
-- **Queries have a plan and a shape, named, because they are maintained
-  differently and an author should see which is which.**
-- **The Rust frontend is a Rust subset under a proc macro; Swift the same
-  under a macro; Kotlin a builder DSL.** The IR is symmetric; the
-  ergonomics are not, and saying so is cheaper than discovering it.
-- **The same function in every frontend must hash to the same bytes.**
-  A file compare is a stronger test than a behavioural one and costs
-  nothing.
+- **The domain is an IR authored through builders and compiled to native
+  source; nobody runs the IR.** Sameness across languages is the
+  requirement; a compiler from one description to three targets, held to
+  one suite, is the tool for it, and native code is what a native app runs.
+- **Builders, not macros, and the three are symmetric.** A builder is an
+  ordinary typed library in each language; authorship leaves no trace in
+  the module; the `frontend/` vectors hold one hash across all three. Kotlin
+  authors as well as anyone, because builder DSLs are what Kotlin does well.
+- **Intents are the log, because only intents can be adopted, verified and
+  rebased later.** A peer with no server is a database with one replica,
+  not a client in a mode.
+- **Facts are retained beside the log and are the fallback, not the
+  truth.** A peer applies by intent when it can and by facts when it
+  cannot, and ends in the same state. Old clients age gracefully;
+  divergence heals.
+- **Scopes are the unit of transaction and of replication.** That is what
+  makes partial sync sound under intents, and it is a modelling constraint
+  accepted with open eyes.
+- **Snapshots are verifiable and the horizon bounds everything.** Above it,
+  local-first exactness costs retention; below it, the design is in
+  Replicache's and Zero's steady state.
+- **Authority is a role.** A server is a peer that sequences for others.
+- **Functions are content-addressed and entries name them.** The log
+  freezes meaning; versions live above the horizon and nowhere else.
+- **The store is an ordered KV with batch commit, layered per scope;
+  SQLite is a backend and not a dependency.**
+- **The standard library is the only escape hatch and Unicode is pinned as
+  data.** Compilation makes admission cheap; permanence makes it slow.
+- **Views and live frame types are in the spec**, so the native app gets
+  what the desktop has, from one declaration.
 - **One repository, native builds per language, vectors pinned by
-  revision.** A spec change without a runtime change is untested by
-  definition.
-- **harken's log starts fresh.** By its own account it is alpha, and an
-  import is a proof nobody needs yet.
-- **Everything Petros got right is kept by name**: intents, the total
-  order, `fill_auto` at origin, `Ctx`, typed writes that report changes,
-  trees from declared references, `Rebuilt`, sans-io machines, the
-  simulation, three lifetimes, one socket, the server as the only OIDC
-  client, the server pinging. The point of a successor is to keep the
-  decisions and change the substrate they were paying for.
+  revision.**
+- **harken's log starts fresh and its scopes are chosen now.**
+- **Everything Petros got right is kept by name.** The point of a successor
+  is to keep the decisions and change the substrate they were paying for.
