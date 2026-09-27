@@ -1,0 +1,12 @@
+[package]
+name = "harken-domain"
+version = "0.1.0"
+edition = "2021"
+description = "harken's domain, authored through ark-builder; emits harken.ark"
+
+[[bin]]
+name = "harken-domain"
+path = "src/main.rs"
+
+[dependencies]
+ark-builder = { path = "../../rust/ark-builder" }
