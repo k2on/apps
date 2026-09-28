@@ -1,8 +1,11 @@
 import SwiftUI
 import ArkDB
 
-/// Every track, by artist, album and title — the `library` query. A swipe
-/// or the button puts a track on the selected playlist.
+/// Everything in the library, in the order it was added — the `library`
+/// query, read against the selected playlist, so each row knows whether it
+/// is on it. The row's button puts a track on that playlist or takes it
+/// off; its menu does the same for any playlist (`playlists_of` ticks
+/// them). With no playlist at all, adding makes "Favorites" first.
 struct LibraryView: View {
     @EnvironmentObject private var model: Model
 
@@ -10,19 +13,11 @@ struct LibraryView: View {
         NavigationStack {
             Group {
                 if model.tracks.isEmpty {
-                    ContentUnavailableView("No tracks yet", systemImage: "music.note",
-                                           description: Text("Tracks arrive from the server's scanner. Alone, the library stays empty."))
+                    ContentUnavailableView("Nothing here yet", systemImage: "music.note",
+                                           description: Text(emptyReason))
                 } else {
                     List(model.tracks) { track in
                         TrackRow(track: track)
-                            .swipeActions(edge: .leading) {
-                                if let pid = model.selectedPlaylist {
-                                    Button { model.add(track, to: pid) } label: {
-                                        Label("Add", systemImage: "plus")
-                                    }
-                                    .tint(.green)
-                                }
-                            }
                     }
                 }
             }
@@ -49,6 +44,12 @@ struct LibraryView: View {
             }
         }
     }
+
+    private var emptyReason: String {
+        if model.settings.alone { return "The library arrives from a server's scanner; alone, it stays empty." }
+        if model.status?.signedIn == false { return "Sign in (Settings) to sync the library. Playlists made meanwhile are kept." }
+        return "The library arrives from the server's scanner."
+    }
 }
 
 struct TrackRow: View {
@@ -59,22 +60,43 @@ struct TrackRow: View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text(track.title)
-                Text([track.artist, track.album].compactMap { $0 }.joined(separator: " · "))
+                Text(track.creator)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if let pid = model.selectedPlaylist, let why = model.caption(for: track, on: pid) {
+                    Text(why)
+                        .font(.caption2)
+                        .foregroundStyle(why.hasPrefix("not saved") ? .red : .secondary)
+                }
             }
             Spacer()
             Text(track.duration)
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
-            if let pid = model.selectedPlaylist {
-                Button {
-                    model.add(track, to: pid)
-                } label: {
-                    Image(systemName: "plus.circle")
+            Button {
+                if let pid = model.selectedPlaylist, track.playlistPos != nil {
+                    model.remove(track, from: pid)
+                } else {
+                    model.add(track)
                 }
-                .buttonStyle(.borderless)
-                .accessibilityLabel("Add to playlist")
+            } label: {
+                Image(systemName: track.playlistPos != nil ? "checkmark.circle.fill" : "plus.circle")
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel(track.playlistPos != nil ? "Take off the playlist" : "Add to playlist")
+        }
+        .contextMenu {
+            let on = model.playlistsOf(track)
+            ForEach(model.playlists) { p in
+                Button {
+                    model.toggle(track, on: p.id)
+                } label: {
+                    if on.contains(p.id) {
+                        Label(p.name, systemImage: "checkmark")
+                    } else {
+                        Text(p.name)
+                    }
+                }
             }
         }
     }

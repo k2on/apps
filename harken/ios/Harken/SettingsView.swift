@@ -2,59 +2,88 @@ import SwiftUI
 import ArkDB
 import ArkDBClient
 
-/// The server, the name, and whether to work alone; and what the session
-/// says about itself. Applying reopens the session against the new answers.
+/// Who is signed in, the server, and whether to work alone; what the
+/// session says about itself; and where every change this phone made
+/// stands, with the reason beside any the server would not keep.
 struct SettingsView: View {
     @EnvironmentObject private var model: Model
     @State private var draft = Model.Settings.defaults
+    @State private var name = ""
 
     var body: some View {
         NavigationStack {
             Form {
+                Section("Account") {
+                    if let who = model.user {
+                        row("Signed in as", who)
+                        Button("Sign out") { model.signOut() }
+                        Text("What you made and has not synced stays yours, and goes when you sign in again.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        TextField("Name", text: $name)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        Button("Sign in") { model.signIn(as: name) }
+                            .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                        Text("Not signed in: everything works and is kept on this phone, and nothing is sent anywhere. Signing in makes it yours and syncs it. Dev auth: the name is the login.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 Section("Server") {
                     TextField("ws://host:port/sync", text: $draft.server)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
                         .disabled(draft.alone)
-                    TextField("User name", text: $draft.user)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
                     Toggle("Work alone", isOn: $draft.alone)
                     Text(draft.alone
-                         ? "No server: this phone sequences its own log and never replays from zero on open. Tracks only arrive from a server, so the library stays empty."
-                         : "Dev auth: the name is the login, and the server calls every login \"dev\".")
+                         ? "No server: this phone sequences its own log. Songs only arrive from a server, so the library stays empty."
+                         : "The server this phone syncs with once somebody signs in.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Button("Apply") { model.apply(draft) }
-                        .disabled(draft == model.settings || draft.user.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .disabled(draft == model.settings)
                 }
                 Section("Session") {
                     if let st = model.status {
-                        row("Link", st.alone ? "alone" : (st.linked ? "linked" : st.link))
-                        ForEach(st.cursors.keys.sorted(), id: \.self) { scope in
-                            row("Cursor · \(scope)", "\(st.cursors[scope] ?? 0)")
-                        }
-                        row("Pending", "\(st.pending)")
-                        row("Rejections", "\(st.rejections)")
+                        row("Link", st.alone ? "alone" : (!st.signedIn ? "signed out" : (st.linked ? "linked" : st.link)))
+                        row("Cursor", "\(st.cursor)")
+                        row("Not synced", "\(st.pending)")
+                        row("Not saved", "\(st.rejections)")
                         if let d = st.denied { row("Denied", d) }
-                        if let a = st.lastAgree { row("Last agree", "\(a.scope) @ \(a.seq): \(a.ok ? "ok" : "DIVERGED")") }
+                        if let a = st.lastAgree { row("Last agree", "\(a.seq): \(a.ok ? "ok" : "DIVERGED")") }
                     } else {
                         Text("No session").foregroundStyle(.secondary)
                     }
                     if let n = model.note { row("Note", n) }
                     Button("Verify against the authority") { model.verify() }
-                    if !(model.status?.alone ?? true) {
-                        if model.status?.linked ?? false {
+                    if let st = model.status, !st.alone, st.signedIn {
+                        if st.linked {
                             Button("Go offline") { model.goOffline() }
                         } else {
                             Button("Go online") { model.goOnline() }
                         }
                     }
                 }
+                Section("Changes") {
+                    if model.changes.isEmpty {
+                        Text("Nothing changed on this phone yet").foregroundStyle(.secondary)
+                    }
+                    ForEach(model.changes) { c in
+                        let why = model.caption(for: c)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(c.what)
+                            Text(why)
+                                .font(.caption)
+                                .foregroundStyle(why.hasPrefix("not saved") ? .red : .secondary)
+                        }
+                    }
+                }
                 Section("Domain") {
-                    row("Module", String(Harken.moduleHash.prefix(16)) + "…")
-                    row("Native", Harken.procedureNames.joined(separator: ", "))
+                    row("Module", String(Phone.moduleHash.prefix(16)) + "…")
+                    row("Native", Phone.procedureNames.joined(separator: ", "))
                 }
             }
             .navigationTitle("Settings")

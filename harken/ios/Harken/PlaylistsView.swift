@@ -1,9 +1,10 @@
 import SwiftUI
 import ArkDB
 
-/// The playlists, by name — the `playlists` query. Tapping one opens it and
-/// makes it the one the library adds to; `+` names a new one, which is
-/// `create_playlist`.
+/// The person's playlists, in the order they were made — the `playlists`
+/// query. Tapping one opens it and makes it the one the library adds to;
+/// `+` names a new one, which is `create_playlist`. A name they already
+/// have is kept and numbered by the log ("Favorites (1)"), not refused.
 struct PlaylistsView: View {
     @EnvironmentObject private var model: Model
     @State private var naming = false
@@ -19,7 +20,14 @@ struct PlaylistsView: View {
                     List(model.playlists) { p in
                         NavigationLink(value: p) {
                             HStack {
-                                Text(p.name)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(p.name)
+                                    if let why = model.caption(forPlaylist: p.id) {
+                                        Text(why)
+                                            .font(.caption2)
+                                            .foregroundStyle(why.hasPrefix("not saved") ? .red : .secondary)
+                                    }
+                                }
                                 Spacer()
                                 if p.id == model.selectedPlaylist {
                                     Image(systemName: "checkmark")
@@ -59,7 +67,8 @@ struct PlaylistsView: View {
 /// Names a new playlist. What is wrong with the name is said under the
 /// field as it is typed, by `create_playlist`'s own input checks through the
 /// form validator — the same words the mutation would refuse with — and
-/// Create is off while there is something to say.
+/// Create is off while there is something to say. A name already taken is
+/// not something to say: the log numbers it.
 struct NewPlaylistSheet: View {
     @Binding var name: String
     let problem: (String) -> String?

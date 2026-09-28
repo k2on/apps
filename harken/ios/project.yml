@@ -3,7 +3,7 @@
 #
 # One target, one package: the Swift runtime, its client library and the
 # authoring vocabulary from ../../swift, and harken's domain — authored in
-# Swift, as `arkc gen swift --only …` prints it — from ../domain/gen/swift,
+# Swift, as `arkc gen swift --only …` prints it (flake.nix clientFunctions) — from ../domain/gen/swift,
 # referenced in place (never copied: a copy is a second thing to keep in
 # step with the domain it spells).
 name: Harken
