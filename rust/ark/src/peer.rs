@@ -223,6 +223,26 @@ impl Replica {
         }
     }
 
+    /// §11.2b Somebody signs in on a peer that has been used without an
+    /// account (`Ark.Peer.signIn`): every pending intent authored as
+    /// [`Ctx::nobody`] becomes theirs, under this login, and the view is
+    /// replayed so every row those intents wrote says who they now say.
+    /// Nothing but this peer has seen them — one authored as nobody can
+    /// never have been accepted — so rewriting them is safe. Intents of
+    /// anybody else are untouched; an older login of the same person is
+    /// the server's question ([`crate::protocol::Server::with_owns`]). One
+    /// the replay now refuses is dropped with its reason, as any rebase
+    /// does.
+    pub fn sign_in(&mut self, who: &Ctx) {
+        for e in &mut self.pending {
+            if e.actor.is_empty() && e.session.is_empty() {
+                e.actor = who.user.clone();
+                e.session = who.session.clone();
+            }
+        }
+        self.replay();
+    }
+
     /// §11.5 A verdict against this peer's own intent: it is dropped, the
     /// verdict is kept for the app to show, and the view is rebuilt.
     pub fn reject(&mut self, id: &Id, why: Refusal) {

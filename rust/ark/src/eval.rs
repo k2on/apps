@@ -41,6 +41,18 @@ pub struct Ctx {
 }
 
 impl Ctx {
+    /// §11.2a Who authors before anyone has signed in (`Ark.Peer.nobody`):
+    /// an empty user and session. No server accepts an entry authored as
+    /// nobody; [`crate::peer::Replica::sign_in`] makes it somebody's.
+    pub fn nobody() -> Ctx {
+        Ctx::new("", "")
+    }
+
+    /// Whether this is [`Ctx::nobody`].
+    pub fn is_nobody(&self) -> bool {
+        self.user.is_empty() && self.session.is_empty()
+    }
+
     pub fn new(user: impl Into<String>, session: impl Into<String>) -> Ctx {
         Ctx {
             user: user.into(),

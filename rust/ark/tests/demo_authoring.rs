@@ -403,3 +403,84 @@ fn a_push_is_held_to_its_login_and_every_refusal_says_why() {
         "playlist: another row has the same user_id, name"
     );
 }
+
+/// §11.2b A peer used for a while with no account, then signed in: all of
+/// it is pushed as the person who signed in and accepted, and the rows say
+/// whose they are. Pushed without signing in, every entry is refused.
+#[test]
+fn work_done_before_signing_in_becomes_the_signers() {
+    use ark::live::Silent;
+    use ark::peer::{Authority, Replica};
+    use ark::protocol::{open_access, trusting, Client, Mode, Server, ServerMsg};
+
+    let m = module();
+    let built = m.build();
+    let sch = built.schema.clone();
+    let bodies = ark::hash::closures(built);
+    let (create, _) = m.procedure("create_playlist").unwrap();
+    let (add, _) = m.procedure("add_to_playlist").unwrap();
+    let pid = idv(30);
+    let raw = |k: u8| match idv(k) {
+        Value::Id(b) => b,
+        _ => unreachable!(),
+    };
+    let mut local = Replica::open(sch.clone(), bodies.clone(), MemoryStore::empty(sch.clone()), 0, vec![]);
+    let nobody = eval::Ctx::nobody();
+    local
+        .mutate(
+            raw(31),
+            &nobody,
+            &create,
+            &args([("id", pid.clone())]),
+            &args([("name", Value::text("Offline"))]),
+        )
+        .unwrap();
+    for k in 0..10u8 {
+        let track = Value::text(format!("t{k}"));
+        local
+            .mutate(
+                raw(32 + k),
+                &nobody,
+                &add,
+                &args([]),
+                &args([("playlist_id", pid.clone()), ("track_id", track)]),
+            )
+            .unwrap();
+    }
+    assert_eq!(local.pending.len(), 11);
+
+    // Everything the client says reaches the server; what came back.
+    let run = |mut client: Client| {
+        let mut sv = Server::open(trusting(), open_access(), Silent, Authority::new(sch.clone(), bodies.clone()));
+        client.connected();
+        for f in client.take_outgoing() {
+            sv.recv(7, f);
+        }
+        let out: Vec<ServerMsg> = sv.take_outgoing().into_iter().map(|(_, f)| f).collect();
+        let acked: usize = out.iter().map(|f| if let ServerMsg::Ack { ids, .. } = f { ids.len() } else { 0 }).sum();
+        let refused: Vec<String> = out
+            .iter()
+            .filter_map(|f| {
+                if let ServerMsg::Reject { reason, .. } = f {
+                    Some(reason.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        (acked, refused, sv)
+    };
+
+    let mut signed = Client::open(local.clone(), Mode::Whole, None);
+    signed.sign_in(&eval::Ctx::new("alice", "dev"), Some("alice".into()));
+    let owner = signed.replica.view.get("playlist", std::slice::from_ref(&pid)).unwrap()["user_id"].clone();
+    assert_eq!(owner, Value::text("alice"), "the optimistic view already says whose it is");
+    let (acked, refused, sv) = run(signed);
+    assert_eq!((acked, refused), (11, vec![]));
+    let owners: Vec<Value> = sv.authority.store.scan("playlist").into_iter().map(|r| r["user_id"].clone()).collect();
+    assert_eq!(owners, vec![Value::text("alice")]);
+
+    let (acked, refused, _) = run(Client::open(local, Mode::Whole, Some("alice".into())));
+    assert_eq!((acked, refused.len()), (0, 11));
+    assert!(refused.iter().all(|r| r == "not yours"));
+}

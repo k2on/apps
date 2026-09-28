@@ -501,6 +501,15 @@ impl Client {
         }
     }
 
+    /// Somebody signed in (`Ark.Protocol.clientSignIn`): the token every
+    /// later `Hello` carries, and every intent authored before anyone had
+    /// signed in made theirs ([`Replica::sign_in`]). Call it before
+    /// [`Client::connected`]; the first `Hello` after it pushes all of it.
+    pub fn sign_in(&mut self, who: &Ctx, token: Option<String>) {
+        self.replica.sign_in(who);
+        self.token = token;
+    }
+
     fn hello(&self) -> ClientMsg {
         ClientMsg::Hello {
             sub: Subscription {
@@ -756,6 +765,12 @@ impl<M: Machine> Server<M> {
         match msg {
             ClientMsg::Hello { sub, token, .. } => match (self.auth)(token.as_deref()) {
                 None => self.send(
+                    c,
+                    ServerMsg::Denied {
+                        reason: "not signed in".into(),
+                    },
+                ),
+                Some(who) if who.user.is_empty() => self.send(
                     c,
                     ServerMsg::Denied {
                         reason: "not signed in".into(),
