@@ -37,6 +37,24 @@ are **read-only references**: nothing is ever committed there.
 - **The phones** keep working on the new domain: their Swift and Kotlin are
   `arkc gen … --only` of it, and their bridges follow the renamed tables.
 
+## Signing in, decided
+
+- **Re-login is the server's question.** An entry carries the login it was
+  authored under. A person who signs in again pushes entries from the
+  older login; the server accepts them when that person owns that login
+  (`Server::with_owns`, wired by `ark-server`'s `.auth(..)` to
+  `ark-auth`'s session store). Nothing is rewritten.
+- **Using an app without an account, then signing in, just works.** Before
+  anyone signs in a peer authors as `Ctx::nobody()` and keeps its work
+  pending and on disk, connecting to nothing. Signing in re-stamps every
+  intent authored as nobody with the new login (`Replica::sign_in`,
+  `Ark.Peer.signIn`) and connects; the server sees ordinary entries of the
+  person who signed in. Rewriting is safe because nobody else has seen them.
+- **Every rejected change says why, per item.** A `Reject` carries a
+  sentence (`refusal_text`): the domain's own message word for word, or a
+  constraint named in one. A client keeps a standing per entry (pending,
+  confirmed, rejected with that sentence) and the screen shows it.
+
 ## Layout: shared code, and apps that use it
 
 ```
