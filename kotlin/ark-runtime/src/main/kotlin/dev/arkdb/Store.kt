@@ -169,16 +169,6 @@ public class MemoryStore(override val schema: Schema) : Store {
         return s
     }
 
-    /** The rows of two stores over one schema, together; where both hold a table, this one wins. */
-    public fun merge(other: MemoryStore): MemoryStore {
-        val s = fork()
-        for ((t, rows) in other.tables) {
-            val m = s.rowsMut(t)
-            for ((k, r) in rows) if (!m.containsKey(k)) m[k] = r
-        }
-        return s
-    }
-
     /** The store as the vectors write it: every table of the schema, its rows in key order. */
     public fun toValue(): Value = Value.VStruct(tableNames.associateWith { t -> Value.VList(scan(t)) })
 

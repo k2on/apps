@@ -3,7 +3,7 @@
 //
 // Kotlin stdlib only. No java.nio.file, no JVM-only APIs beyond
 // java.util, java.io, java.lang.reflect (the authoring vocabulary reads a
-// row's, a scope's and an input's class) and java.security.MessageDigest,
+// row's, the tables' and an input's class) and java.security.MessageDigest,
 // so the same source compiles for Android.
 plugins {
     kotlin("jvm")

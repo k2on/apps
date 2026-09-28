@@ -28,7 +28,7 @@ public sealed class Fault(message: String) : Exception(message) {
  * §4.2 A refusal is a verdict about a write, reached identically by every
  * replica; it travels in the same channel as a mutator's own `refuse` and a
  * mutator body propagates it. `text` is what a peer shows: the mutator's own
- * text for `Refused`, and the spec's printed form for a constraint.
+ * text for `Refused`, and a sentence naming a constraint (§12.5).
  */
 public sealed class Refusal {
     public data class NoSuchTable(val table: String) : Refusal()
@@ -39,14 +39,11 @@ public sealed class Refusal {
     public data class StillReferenced(val table: String, val child: String) : Refusal()
     public data class Refused(val reason: String) : Refusal()
 
-    /** The text a peer shows for this verdict. */
+    /** The text a peer shows for this verdict: the sentence a `Reject` carries (`Protocol.refusalText`). */
     public val text: String
-        get() = when (this) {
-            is Refused -> reason
-            else -> show()
-        }
+        get() = Protocol.refusalText(this)
 
-    /** The refusal as Haskell's `show` prints it, which is how a server's `Reject` names one. */
+    /** The refusal as Haskell's `show` prints it, for a vector to compare. */
     public fun show(): String = when (this) {
         is NoSuchTable -> "NoSuchTable ${HsShow.text(table)}"
         is MalformedRow -> "MalformedRow ${HsShow.text(table)} ${HsShow.text(what)}"

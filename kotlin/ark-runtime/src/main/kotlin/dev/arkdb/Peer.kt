@@ -20,9 +20,8 @@ public sealed class Changes {
     }
 }
 
-/** One peer's copy of one scope. */
+/** One peer's copy of the log. */
 public class Replica private constructor(
-    public val scope: String,
     public val schema: Schema,
     bodies: Map<FnHash, Closure>,
     confirmed: MemoryStore,
@@ -42,7 +41,7 @@ public class Replica private constructor(
     public var natives: Map<FnHash, Procedure> = natives
         private set
 
-    /** The confirmed store: the scope exactly as the authority had it at `cursor`. */
+    /** The confirmed store: the state exactly as the authority had it at `cursor`. */
     public var confirmed: MemoryStore = confirmed
         private set
 
@@ -62,6 +61,9 @@ public class Replica private constructor(
     /** Verdicts against this peer's own intents, newest last. */
     public val rejections: MutableList<Pair<Id, Refusal>> = ArrayList()
 
+    /** This peer's own intents the log confirmed, with the sequence each landed at, newest last. */
+    public val confirmedOwn: MutableList<Pair<Id, Seq>> = ArrayList()
+
     /** Sequences at which this peer's replay disagreed with the authority's facts. */
     public val diverged: MutableList<Seq> = ArrayList()
 
@@ -72,14 +74,13 @@ public class Replica private constructor(
         /** §11.1 Open a replica from what was durable; the pending intents are replayed on top. */
         public fun open(
             sch: Schema,
-            scope: String,
             bodies: Map<FnHash, Closure>,
             confirmed: MemoryStore,
             cursor: Seq,
             pending: List<Entry>,
             natives: Map<FnHash, Procedure> = emptyMap(),
         ): Replica {
-            val r = Replica(scope, sch, bodies, confirmed, cursor, pending, natives)
+            val r = Replica(sch, bodies, confirmed, cursor, pending, natives)
             r.replay()
             return r
         }
@@ -206,6 +207,7 @@ public class Replica private constructor(
             val e = ib.entry ?: break
             val step = applyOne(n, e, ib.facts) ?: break
             val ownNext = pending.firstOrNull()?.id == e.id
+            if (pending.any { it.id == e.id }) confirmedOwn.add(e.id to n)
             confirmed = step.store
             cursor = n
             inbox.remove(n)
@@ -289,15 +291,14 @@ public sealed class AdoptError : Exception() {
     public object HashDiffers : AdoptError()
 }
 
-/** The peer that sequences a scope. */
+/** The peer that sequences the log. */
 public class Authority(
-    public val scope: String,
     public val schema: Schema,
     bodies: Map<FnHash, Closure>,
     /** Procedures this authority runs natively, by hash; the interpreter runs the rest. */
     public val natives: Map<FnHash, Procedure> = emptyMap(),
 ) {
-    /** Every closure ever accepted for this scope, by hash. */
+    /** Every closure ever accepted, by hash. */
     public var bodies: Map<FnHash, Closure> = bodies
         private set
 
@@ -343,19 +344,18 @@ public class Authority(
 
     public companion object {
         /**
-         * §11.8 Adopt a scope a peer sequenced alone: replay every intent from
+         * §11.8 Adopt a log a peer sequenced alone: replay every intent from
          * the beginning, holding each to the facts the peer recorded.
          */
         public fun adopt(
             sch: Schema,
-            scope: String,
             bodies: Map<FnHash, Closure>,
             l: Log,
             natives: Map<FnHash, Procedure> = emptyMap(),
         ): Authority {
             if (l.horizon != 0L || !l.base.store.isEmpty) throw AdoptError.NotFromTheBeginning
             if (!l.contiguous) throw AdoptError.Gap
-            val a = Authority(scope, sch, bodies, natives)
+            val a = Authority(sch, bodies, natives)
             for ((n, ef) in l.entries) {
                 val (e, recorded) = ef
                 when (val s = a.sequenceEntry(e)) {

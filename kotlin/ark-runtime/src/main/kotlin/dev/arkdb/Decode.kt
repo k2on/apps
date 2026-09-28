@@ -24,7 +24,6 @@ public object Decode {
                 val rn = text(listOf("router", "name"), field(rfs, "name"))
                 Router(
                     rn,
-                    text(listOf("router", rn, "scope"), field(rfs, "scope")),
                     list(listOf("router", rn, "uses"), field(rfs, "uses")) { text(listOf("router", rn, "uses"), it) },
                 )
             }
@@ -40,13 +39,7 @@ public object Decode {
         return Closure(fn, hs)
     }
 
-    public fun schemaFromValue(v: Value): Schema = Schema(
-        list(listOf("schema"), v) { x ->
-            val fs = tagged(listOf("scope"), "scope", x)
-            val n = text(listOf("scope", "name"), field(fs, "name"))
-            Scope(n, list(listOf("scope", n), field(fs, "tables")) { table(it) })
-        },
-    )
+    public fun schemaFromValue(v: Value): Schema = Schema(list(listOf("schema"), v) { table(it) })
 
     private fun table(x: Value): Table {
         val fs = tagged(listOf("table"), "table", x)
@@ -103,7 +96,6 @@ public object Decode {
             "provide" -> FnKind.Provide
             else -> bad(here, "unknown kind $ks")
         }
-        val sc = optional(field(fs, "scope")) { text(here + "scope", it) }
         val router = fs["router"]?.let { r -> optional(r) { text(here + "router", it) } }
         val uses = fs["uses"]?.let { u -> list(here + "uses", u) { text(here + "uses", it) } } ?: emptyList()
         val autos = list(here + "autos", field(fs, "autos")) { x ->
@@ -138,7 +130,7 @@ public object Decode {
         } ?: emptyList()
         val ret = optional(field(fs, "ret")) { tyFromValue(it) }
         val body = list(here + "body", field(fs, "body")) { stmt(here, it) }
-        return Function(n, k, sc, autos, input, ret, body, emptyMap(), router, uses, refine)
+        return Function(n, k, autos, input, ret, body, emptyMap(), router, uses, refine)
     }
 
     private fun check(here: List<String>, v: Value): Check {

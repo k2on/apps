@@ -60,7 +60,7 @@ public class FieldSpec<V : Data> internal constructor(
     /** List: at least one element. */
     public fun nonEmpty(): FieldSpec<V> = and(Checker.NonEmpty(null))
 
-    /** Id: a row with that key exists in the procedure's scope. */
+    /** Id: a row with that key exists. */
     public fun exists(): FieldSpec<V> = and(Checker.Exists(null))
 
     /** Any: the closure, over the field's value, holds. */

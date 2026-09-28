@@ -19,25 +19,23 @@ public object Encode {
         "functions" to list(m.functions) { functionValue(emptyMap(), it) },
         "live" to list(m.live) { (n, t) -> node("frame", "name" to txt(n), "ty" to tyValue(t)) },
         "routers" to list(m.routers) { r ->
-            node("router", "name" to txt(r.name), "scope" to txt(r.scope), "uses" to list(r.uses) { txt(it) })
+            node("router", "name" to txt(r.name), "uses" to list(r.uses) { txt(it) })
         },
     )
 
-    public fun schemaValue(sch: Schema): Value = list(sch.scopes) { s ->
-        node("scope", "name" to txt(s.name), "tables" to list(s.tables) { t ->
-            node(
-                "table",
-                "name" to txt(t.name),
-                "columns" to list(t.columns) { c ->
-                    node("column", "name" to txt(c.name), "ty" to tyValue(c.ty), "nullable" to Value.VBool(c.nullable))
-                },
-                "key" to list(t.key) { txt(it) },
-                "indexes" to list(t.indexes) { i ->
-                    node("index", "columns" to list(i.columns) { txt(it) }, "unique" to Value.VBool(i.unique))
-                },
-                "refs" to list(t.refs) { r -> node("ref", "column" to txt(r.column), "table" to txt(r.table)) },
-            )
-        })
+    public fun schemaValue(sch: Schema): Value = list(sch.tables) { t ->
+        node(
+            "table",
+            "name" to txt(t.name),
+            "columns" to list(t.columns) { c ->
+                node("column", "name" to txt(c.name), "ty" to tyValue(c.ty), "nullable" to Value.VBool(c.nullable))
+            },
+            "key" to list(t.key) { txt(it) },
+            "indexes" to list(t.indexes) { i ->
+                node("index", "columns" to list(i.columns) { txt(it) }, "unique" to Value.VBool(i.unique))
+            },
+            "refs" to list(t.refs) { r -> node("ref", "column" to txt(r.column), "table" to txt(r.table)) },
+        )
     }
 
     public fun tyValue(t: Ty): Value = when (t) {
@@ -63,7 +61,6 @@ public object Encode {
             "name" to txt(fn.name),
             "deps" to Value.VStruct(deps),
             "kind" to txt(kindName(fn.kind)),
-            "scope" to (fn.scope?.let { txt(it) } ?: Value.VNull),
             "router" to (fn.router?.let { txt(it) } ?: Value.VNull),
             "uses" to list(fn.uses) { txt(it) },
             "autos" to list(fn.autos) { (n, a) ->
@@ -180,7 +177,7 @@ public object Encode {
 
     /**
      * Symbols renumbered 0, 1, 2… in the order their binders are met walking
-     * the body top to bottom, left to right, binders before the scopes they
+     * the body top to bottom, left to right, binders before the bodies they
      * open. Free symbols are left as they are.
      */
     public fun normalize(fn: Function): Function {

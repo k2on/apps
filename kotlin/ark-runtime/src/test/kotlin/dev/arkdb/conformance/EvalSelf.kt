@@ -21,7 +21,6 @@ import dev.arkdb.Refusal
 import dev.arkdb.Router
 import dev.arkdb.SPEC_VERSION
 import dev.arkdb.Schema
-import dev.arkdb.Scope
 import dev.arkdb.StdFn
 import dev.arkdb.Stmt
 import dev.arkdb.Table
@@ -36,17 +35,12 @@ object EvalSelf {
 
     private val sch = Schema(
         listOf(
-            Scope(
-                "s",
-                listOf(
-                    Table(
-                        "t",
-                        listOf(Column("id", Ty.TInt, false), Column("name", Ty.TText, false), Column("n", Ty.TInt, false)),
-                        listOf("id"),
-                        listOf(Index(listOf("name"), true)),
-                        emptyList(),
-                    ),
-                ),
+            Table(
+                "t",
+                listOf(Column("id", Ty.TInt, false), Column("name", Ty.TText, false), Column("n", Ty.TInt, false)),
+                listOf("id"),
+                listOf(Index(listOf("name"), true)),
+                emptyList(),
             ),
         ),
     )
@@ -60,7 +54,7 @@ object EvalSelf {
         ret: Ty? = null,
         refine: List<Pair<Expr, String?>> = emptyList(),
     ) = Function(
-        name, kind, "s", emptyList(), input, ret, body, emptyMap(),
+        name, kind, emptyList(), input, ret, body, emptyMap(),
         router = if (kind == FnKind.Mutator || kind == FnKind.Query) "r" else null, uses = uses, refine = refine,
     )
 
@@ -87,7 +81,7 @@ object EvalSelf {
             fn("was", FnKind.Query, listOf("id" to Field(Ty.TInt, emptyList())),
                 listOf(Stmt.Return(Expr.Std(StdFn.IsSome, listOf(Expr.Provided("same"))))), uses = listOf("gate", "same"), ret = Ty.TBool),
         )
-        Verify.verify(Module(SPEC_VERSION, sch, fns, emptyList(), listOf(Router("r", "s", listOf("gate", "same")))))
+        Verify.verify(Module(SPEC_VERSION, sch, fns, emptyList(), listOf(Router("r", listOf("gate", "same")))))
     }
 
     private fun c(name: String) = Hash.closure(module, module.lookupFunction(name)!!)

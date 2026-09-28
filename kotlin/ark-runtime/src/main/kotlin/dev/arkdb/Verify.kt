@@ -8,15 +8,12 @@ public object Verify {
         public data class BadSchema(val error: SchemaError) : VerifyError()
         public data class DuplicateFunction(val name: String) : VerifyError()
         public data class DuplicateRouter(val name: String) : VerifyError()
-        /** A router whose scope is not in the schema, or whose uses are not middleware of that scope. */
+        /** A router whose uses are not all middleware. */
         public data class BadRouter(val router: String, val what: String) : VerifyError()
         public data class In(val function: String, val complaint: Complaint) : VerifyError()
     }
 
     public sealed class Complaint {
-        public object MutatorWithoutScope : Complaint()
-        public data class UnknownScope(val scope: String) : Complaint()
-        public object ScopeOnNonMutator : Complaint()
         public object AutosOnNonMutator : Complaint()
         public object ReturnTypeOnMutator : Complaint()
         public object NoReturnType : Complaint()
@@ -33,7 +30,6 @@ public object Verify {
         public object ReadInHelper : Complaint()
         public object WriteOutsideMutator : Complaint()
         public object RefuseOutsideMutator : Complaint()
-        public data class OutOfScope(val table: String) : Complaint()
         public data class UnknownTable(val table: String) : Complaint()
         public data class UnknownColumn(val table: String, val column: String) : Complaint()
         public data class UnknownHelper(val name: String) : Complaint()
@@ -49,12 +45,10 @@ public object Verify {
         public object ProcedureWithoutRouter : Complaint()
         public data class UnknownRouter(val router: String) : Complaint()
         public data class RouterOnNonProcedure(val router: String) : Complaint()
-        public data class ScopeIsNotRouters(val scope: String?, val router: String) : Complaint()
         public data class UsesNotOnRouter(val uses: List<String>) : Complaint()
         public data class UsesOnNonProcedure(val uses: List<String>) : Complaint()
         public data class NotMiddleware(val name: String) : Complaint()
         public data class MiddlewareInput(val middleware: String, val field: String) : Complaint()
-        public data class ExistsAcrossScopes(val field: String, val table: String) : Complaint()
         public data class OnNotUnique(val table: String, val columns: List<String>) : Complaint()
         public data class NotProvided(val name: String) : Complaint()
         public data class BadCheck(val field: String, val what: String) : Complaint()
@@ -84,10 +78,9 @@ public object Verify {
         if (rdups.isNotEmpty()) throw VerifyFailed(rnames.filter { it in rdups }.distinct().map { VerifyError.DuplicateRouter(it) })
         val rerrors = m.routers.flatMap { r ->
             val out = ArrayList<VerifyError>()
-            if (m.schema.scopeOf(r.scope) == null) out.add(VerifyError.BadRouter(r.name, "unknown scope ${r.scope}"))
             for (u in r.uses) {
                 val f = m.lookupFunction(u)
-                if (f == null || !f.kind.isMiddleware || f.scope != r.scope) out.add(VerifyError.BadRouter(r.name, "$u is not middleware of ${r.scope}"))
+                if (f == null || !f.kind.isMiddleware) out.add(VerifyError.BadRouter(r.name, "$u is not middleware"))
             }
             out
         }
@@ -111,7 +104,6 @@ public object Verify {
             FnKind.Mutator, FnKind.Query -> {
                 val rn = fn.router ?: err(Complaint.ProcedureWithoutRouter)
                 val r = m.lookupRouter(rn) ?: err(Complaint.UnknownRouter(rn))
-                if (fn.scope != r.scope) err(Complaint.ScopeIsNotRouters(fn.scope, rn))
                 if (!subsequence(fn.uses, r.uses)) err(Complaint.UsesNotOnRouter(fn.uses))
                 if (fn.kind == FnKind.Mutator && fn.ret != null) err(Complaint.ReturnTypeOnMutator)
                 if (fn.kind == FnKind.Query && fn.ret == null) err(Complaint.NoReturnType)
@@ -119,7 +111,7 @@ public object Verify {
                 // Every middleware it runs reads fields this input has, at their types.
                 for (u in fn.uses) {
                     val mw = m.lookupFunction(u) ?: err(Complaint.NotMiddleware(u))
-                    if (!mw.kind.isMiddleware || mw.scope != fn.scope) err(Complaint.NotMiddleware(u))
+                    if (!mw.kind.isMiddleware) err(Complaint.NotMiddleware(u))
                     for ((n, f) in mw.input) {
                         val mine = fn.input.firstOrNull { it.first == n }?.second
                         if (mine == null || mine.ty != f.ty) err(Complaint.MiddlewareInput(u, n))
@@ -127,8 +119,6 @@ public object Verify {
                 }
             }
             FnKind.Guard, FnKind.Provide -> {
-                val scope = fn.scope ?: err(Complaint.MutatorWithoutScope)
-                if (sch.scopeOf(scope) == null) err(Complaint.UnknownScope(scope))
                 fn.router?.let { err(Complaint.RouterOnNonProcedure(it)) }
                 if (fn.uses.isNotEmpty()) err(Complaint.UsesOnNonProcedure(fn.uses))
                 if (fn.autos.isNotEmpty()) err(Complaint.AutosOnNonMutator)
@@ -136,14 +126,12 @@ public object Verify {
                 if (fn.kind == FnKind.Provide && fn.ret == null) err(Complaint.NoReturnType)
             }
             FnKind.Helper -> {
-                if (fn.scope != null) err(Complaint.ScopeOnNonMutator)
                 fn.router?.let { err(Complaint.RouterOnNonProcedure(it)) }
                 if (fn.uses.isNotEmpty()) err(Complaint.UsesOnNonProcedure(fn.uses))
                 if (fn.autos.isNotEmpty()) err(Complaint.AutosOnNonMutator)
                 if (fn.ret == null) err(Complaint.NoReturnType)
             }
         }
-        fn.scope?.let { if (sch.scopeOf(it) == null) err(Complaint.UnknownScope(it)) }
         val argNames = fn.args.map { it.first } + fn.autos.map { it.first }
         val dupArgs = argNames.groupingBy { it }.eachCount().filter { it.value > 1 }.keys
         if (dupArgs.isNotEmpty()) throw Complained(argNames.filter { it in dupArgs }.map { Complaint.DuplicateName(it) })
@@ -177,7 +165,7 @@ public object Verify {
                 is Check.NonEmpty -> t is Ty.TList
                 is Check.Exists -> {
                     val tbl = (t as? Ty.TId)?.table
-                    if (tbl != null && g.schema.tableScope(tbl) != g.fn.scope) err(Complaint.ExistsAcrossScopes(name, tbl))
+                    if (tbl != null) table(g, tbl)
                     tbl != null
                 }
                 is Check.Refine -> {
@@ -282,7 +270,6 @@ public object Verify {
             }
             is Stmt.Delete -> {
                 mutating()
-                inScope(g, s.table)
                 keyed(g, s.table, s.key)
                 return g
             }
@@ -305,15 +292,10 @@ public object Verify {
         }
     }
 
-    private fun inScope(g: G, tbl: String) {
-        if (g.kind != FnKind.Helper && g.fn.scope != null && g.schema.tableScope(tbl) != g.fn.scope) err(Complaint.OutOfScope(tbl))
-    }
-
     // A written row: every field it has a column of the right type, every
     // non-nullable column there; `on` empty or a declared unique index.
     private fun write(g: G, tbl: String, row: Expr, on: List<String>) {
         if (g.kind != FnKind.Mutator) err(Complaint.WriteOutsideMutator)
-        inScope(g, tbl)
         val t = table(g, tbl)
         if (on.isNotEmpty() && t.indexes.none { it.unique && it.columns == on } && on != t.key) err(Complaint.OnNotUnique(tbl, on))
         rowOf(g, tbl, row)
@@ -339,7 +321,6 @@ public object Verify {
     private fun table(g: G, tbl: String): Table = g.schema.lookupTable(tbl) ?: err(Complaint.UnknownTable(tbl))
 
     private fun keyed(g: G, tbl: String, ks: List<Expr>) {
-        inScope(g, tbl)
         val t = table(g, tbl)
         val want = t.keyTy
         if (want.size != ks.size) err(Complaint.KeyArity(tbl, want.size, ks.size))
@@ -502,7 +483,6 @@ public object Verify {
 
     // §9.2 The type of a plan's rows.
     private fun planTy(g: G, p: IR.Plan): Ty {
-        inScope(g, p.table)
         val t = table(g, p.table)
         fun col(c: String): Column = t.column(c) ?: err(Complaint.UnknownColumn(t.name, c))
         fun predOk(q: IR.Pred) {

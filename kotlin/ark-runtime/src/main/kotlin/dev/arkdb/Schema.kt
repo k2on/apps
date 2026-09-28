@@ -1,4 +1,5 @@
-// §2 Scopes and the schema (Ark.Schema).
+// §2 The schema (Ark.Schema): one set of tables, and one log. Every
+// reference is checked, and any function may read any table.
 package dev.arkdb
 
 import java.util.SortedMap
@@ -75,25 +76,13 @@ public data class Table(
     public fun keyOf(row: Row): List<Value> = key.map { row[it] }
 }
 
-public data class Scope(val name: String, val tables: List<Table>)
-
-public data class Schema(val scopes: List<Scope>) {
-    public fun lookupTable(n: String): Table? {
-        for (sc in scopes) for (t in sc.tables) if (t.name == n) return t
-        return null
-    }
-
-    /** The scope a table is in. */
-    public fun tableScope(n: String): String? = scopes.firstOrNull { sc -> sc.tables.any { it.name == n } }?.name
-
-    public fun scopeOf(n: String): Scope? = scopes.firstOrNull { it.name == n }
-
-    /** Every table, in schema order. */
-    public val tables: List<Table> get() = scopes.flatMap { it.tables }
+/** The tables, in declaration order — which is also the order a state hash walks them. */
+public data class Schema(val tables: List<Table>) {
+    public fun lookupTable(n: String): Table? = tables.firstOrNull { it.name == n }
 
     /** §2.2 Every relationship: each reference read both ways. */
     public val relations: List<Relation>
-        get() = scopes.flatMap { sc -> sc.tables.flatMap { t -> t.refs.map { r -> Relation(r.table, t.name, r.column) } } }
+        get() = tables.flatMap { t -> t.refs.map { r -> Relation(r.table, t.name, r.column) } }
 
     /** The relationships reaching down from a table. */
     public fun childrenOf(parent: String): List<Relation> = relations.filter { it.parent == parent }
@@ -110,7 +99,6 @@ public enum class Dir { Asc, Desc }
 
 /** §2.3 Well-formedness. */
 public sealed class SchemaError {
-    public data class DuplicateScope(val scope: String) : SchemaError()
     public data class DuplicateTable(val table: String) : SchemaError()
     public data class DuplicateColumn(val table: String, val column: String) : SchemaError()
     public data class NoKey(val table: String) : SchemaError()
@@ -120,7 +108,6 @@ public sealed class SchemaError {
     public data class UnknownIndexColumn(val table: String, val column: String) : SchemaError()
     public data class UnknownRefColumn(val table: String, val column: String) : SchemaError()
     public data class UnknownRefTable(val table: String, val ref: String) : SchemaError()
-    public data class RefAcrossScopes(val table: String, val ref: String) : SchemaError()
     public data class RefToCompositeKey(val table: String, val ref: String) : SchemaError()
     public data class RefTypeMismatch(val table: String, val column: String, val want: Ty, val got: Ty) : SchemaError()
     public data class IdColumnWithoutRef(val table: String, val column: String) : SchemaError()
@@ -129,12 +116,10 @@ public sealed class SchemaError {
 
 public fun checkSchema(sch: Schema): List<SchemaError> {
     val out = ArrayList<SchemaError>()
-    val scopes = sch.scopes
-    val tables = scopes.flatMap { sc -> sc.tables.map { sc.name to it } }
-    for (n in dups(scopes.map { it.name })) out.add(SchemaError.DuplicateScope(n))
-    val dupTables = dups(tables.map { it.second.name })
-    for ((_, t) in tables) if (t.name in dupTables) out.add(SchemaError.DuplicateTable(t.name))
-    for ((scope, t) in tables) {
+    val tables = sch.tables
+    val dupTables = dups(tables.map { it.name })
+    for (t in tables) if (t.name in dupTables) out.add(SchemaError.DuplicateTable(t.name))
+    for (t in tables) {
         for (c in dups(t.columns.map { it.name })) out.add(SchemaError.DuplicateColumn(t.name, c))
         if (t.key.isEmpty()) out.add(SchemaError.NoKey(t.name))
         for (k in t.key) if (t.column(k) == null) out.add(SchemaError.UnknownKeyColumn(t.name, k))
@@ -151,7 +136,6 @@ public fun checkSchema(sch: Schema): List<SchemaError> {
                 c == null -> out.add(SchemaError.UnknownRefColumn(t.name, r.column))
                 p == null -> out.add(SchemaError.UnknownRefTable(t.name, r.table))
                 else -> {
-                    if (sch.tableScope(r.table) != scope) out.add(SchemaError.RefAcrossScopes(t.name, r.table))
                     val kt = p.keyTy
                     if (kt.size == 1) {
                         val pk = kt[0]
@@ -165,14 +149,11 @@ public fun checkSchema(sch: Schema): List<SchemaError> {
                 }
             }
         }
-        // An id column must be a key of its own table, a reference within its
-        // scope, or name a table in another scope (the unchecked cross-scope
-        // reference the design allows).
+        // An id column must be a key of its own table or a reference.
         for (c in t.columns) {
             val ct = c.ty
             if (ct is Ty.TId && t.refs.none { it.column == c.name } && !(ct.table == t.name && c.name in t.key)) {
-                val named = sch.tableScope(ct.table)
-                if (named == scope || named == null) out.add(SchemaError.IdColumnWithoutRef(t.name, c.name))
+                out.add(SchemaError.IdColumnWithoutRef(t.name, c.name))
             }
         }
     }

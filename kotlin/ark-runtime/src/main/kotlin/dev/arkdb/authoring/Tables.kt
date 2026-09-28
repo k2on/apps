@@ -1,4 +1,4 @@
-// AUTHORING.md §2.3 and §2.5: rows, scopes, tables and their queries. A
+// AUTHORING.md §2.3 and §2.5: rows, the module's tables, and their queries. A
 // table is `db.<table>`, a `Table<Row>`; a row class declares its columns
 // once in its companion's `columns()`, and its constructor takes them in
 // that order.
@@ -46,11 +46,13 @@ public interface Row<K : Key> : Data {
     }
 }
 
-/** A scope: a class whose constructor takes its tables. Its companion is a `Scope.Of` naming it. */
-public interface Scope {
-    public interface Of {
-        public val NAME: String
-    }
+/**
+ * The module's tables: a class whose constructor takes them, in the
+ * schema's order. A module has one; every router of it is over the same
+ * class. A companion is optional, and when written is a `Tables.Of`.
+ */
+public interface Tables {
+    public interface Of
 }
 
 /** A column of `T` holding a `V`. */
@@ -285,13 +287,8 @@ internal class RowInfo<T : Row<*>> private constructor(val cls: Class<T>) {
     }
 }
 
-/** What a scope class is: its name and its tables, in constructor order. */
-internal class ScopeInfo(val cls: Class<*>) {
-    val name: String by lazy {
-        (cls.getField("Companion").get(null) as? Scope.Of)?.NAME
-            ?: throw Fault.bug("authoring: ${cls.name}'s companion is not a Scope.Of")
-    }
-
+/** What the tables class is: its tables, in constructor order. */
+internal class TablesInfo(val cls: Class<*>) {
     private val ctor: Constructor<*> by lazy {
         cls.constructors.firstOrNull { c -> c.genericParameterTypes.all { it is ParameterizedType && it.rawType == Table::class.java } }
             ?: throw Fault.bug("authoring: ${cls.name} needs a constructor of its tables")
@@ -301,7 +298,7 @@ internal class ScopeInfo(val cls: Class<*>) {
         ctor.genericParameterTypes.map { t -> RowInfo.of((t as ParameterizedType).actualTypeArguments[0] as Class<*>) }
     }
 
-    val scope: dev.arkdb.Scope by lazy { dev.arkdb.Scope(name, rows.map { it.table }) }
+    val tables: KList<dev.arkdb.Table> by lazy { rows.map { it.table } }
 
     /** The value a body's `db` is. */
     val instance: Any by lazy { ctor.newInstance(*rows.map { Table<Row<*>>(it) }.toTypedArray()) }

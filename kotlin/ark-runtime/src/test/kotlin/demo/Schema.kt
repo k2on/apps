@@ -7,11 +7,7 @@ import dev.arkdb.authoring.List
 class Demo(
     val playlist: Table<Playlist>,
     val item: Table<Item>,
-) : Scope {
-    companion object : Scope.Of {
-        override val NAME = "demo"
-    }
-}
+) : Tables
 
 class Playlist(
     val id: Id<Playlist>,

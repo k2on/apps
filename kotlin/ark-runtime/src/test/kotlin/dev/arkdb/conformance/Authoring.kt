@@ -56,6 +56,7 @@ object Authoring {
             }
         }
         test("authoring/demo: native agrees with the interpreter on every procedure") { demoAgreement(demo) }
+        test("protocol/server: a push is held to its login and every refusal says why") { heldToItsLogin(demo) }
         test("authoring/harken: the printed domain builds, emits and verifies") {
             val h = harken.gen.module()
             val ir = Decode.fromValue(Canon.decode(h.emit()))
@@ -205,6 +206,68 @@ object Authoring {
         eq(p.answer("playlists", nobody, emptyMap(), st), Eval.Answer.Refused(dev.arkdb.Refusal.Refused("sign in first")) as Eval.Answer, "a query refused by its guard")
         val lib = (p.answer("library", alice, emptyMap(), st) as Eval.Answer.Ok).value
         eq(lib.asList().map { it.field("title") }, listOf(Value.text("T2"), Value.text("T3"), Value.text("T1")), "the library by artist, then album (null first)")
+    }
+
+    /**
+     * §12.3 and §12.5 on a real authority: an entry is held to the login
+     * that pushed it unless the server knows the user owns the older one,
+     * another user's entry is refused whatever the server knows, and every
+     * refusal reaches the author as a sentence a screen can show.
+     */
+    private fun heldToItsLogin(m: dev.arkdb.authoring.Module) {
+        val ir = m.ir
+        val bodies = Hash.closures(ir)
+        val create = bodies.entries.single { it.value.fn.name == "create_playlist" }.key
+        // A token is "user:session".
+        val auth = dev.arkdb.Authenticate { tok ->
+            tok?.split(':')?.takeIf { it.size == 2 }?.let { (u, s) -> dev.arkdb.Identity(u, s) }
+        }
+        fun serve(owns: Boolean): dev.arkdb.Server {
+            val sv = dev.arkdb.Server(auth, { true }, dev.arkdb.Authority(ir.schema, bodies))
+            return if (owns) sv.withOwns { user, session -> user == "alice" && session == "old" } else sv
+        }
+        fun entry(k: kotlin.Int, actor: String, session: String, name: String) = dev.arkdb.Entry(
+            (idN(k) as Value.VId).value, actor, session, create, mapOf("name" to Value.text(name)), mapOf("id" to idN(k)),
+        )
+        // The verdict each entry got, in order: its sequence, or the reason.
+        fun push(owns: Boolean, entries: List<dev.arkdb.Entry>): List<Any> {
+            val sv = serve(owns)
+            sv.recv(1, dev.arkdb.ClientMsg.Hello(dev.arkdb.Subscription(0, dev.arkdb.Mode.Whole), "alice:new", SPEC_VERSION))
+            sv.takeOutgoing()
+            sv.recv(1, dev.arkdb.ClientMsg.Push(entries))
+            return sv.takeOutgoing().flatMap { (_, f) ->
+                when (f) {
+                    is dev.arkdb.ServerMsg.Ack -> f.seqs
+                    is dev.arkdb.ServerMsg.Reject -> listOf(f.reason)
+                    else -> emptyList()
+                }
+            }
+        }
+        // Authored offline under an older login, pushed after signing in again.
+        eq(push(false, listOf(entry(1, "alice", "old", "Mix"))), listOf<Any>("not yours"), "an older login, unowned")
+        eq(push(true, listOf(entry(1, "alice", "old", "Mix"))), listOf<Any>(1L), "an older login the user owns")
+        // Owning a session is only ever about the connection's own user.
+        eq(push(true, listOf(entry(1, "bob", "old", "Mix"))), listOf<Any>("not yours"), "another user's entry")
+        // The login pushing is always its own.
+        eq(push(false, listOf(entry(1, "alice", "new", "Mix"))), listOf<Any>(1L), "the connection's own login")
+        // A refusal is the author's own sentence; a constraint's is named in one.
+        eq(
+            push(false, listOf(entry(1, "alice", "new", "   "), entry(2, "alice", "new", "Mix"), entry(3, "alice", "new", "Mix"))),
+            listOf<Any>("a playlist needs a name", 1L, 2L),
+            "a duplicate under insert .on writes nothing and is still sequenced, not refused",
+        )
+        eq(
+            dev.arkdb.Protocol.refusalText(dev.arkdb.Refusal.UniqueViolation("playlist", listOf("user_id", "name"))),
+            "playlist: another row has the same user_id, name",
+            "a constraint, as a sentence",
+        )
+        eq(dev.arkdb.Refusal.MissingParent("item", "playlist_id", "playlist").text, "item.playlist_id names no playlist", "a refusal's text is that sentence")
+        // A hello that proves nothing, and a push before any hello.
+        val sv = serve(false)
+        sv.recv(2, dev.arkdb.ClientMsg.Hello(dev.arkdb.Subscription(0, dev.arkdb.Mode.Whole), null, SPEC_VERSION))
+        sv.recv(3, dev.arkdb.ClientMsg.Push(listOf(entry(1, "alice", "new", "Mix"))))
+        eq(sv.takeOutgoing(), listOf<kotlin.Pair<Long, dev.arkdb.ServerMsg>>(2L to dev.arkdb.ServerMsg.Denied("not signed in"), 3L to dev.arkdb.ServerMsg.Denied("hello first")), "denied")
+        eq(sv.authority.log.headSeq, 0L, "and nothing sequenced")
     }
 
     private fun selfRefusals() {

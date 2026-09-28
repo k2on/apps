@@ -1,128 +1,99 @@
-// An in-process authority host, and the transport that reaches it without a
-// socket. The runtime carries the client machine only; this is the server
-// half a test needs — hello, push, need_facts, verify, and fan-out — written
-// against `Authority` and `Log`, and small enough to read as the protocol's
-// §12 server rules. It is not the production server, which is Rust.
+// An in-process server, and the transport that reaches it without a
+// socket: the runtime's sans-io `Server` (the spec's §12 server — one
+// authority, identity asked once at `Hello`, every push held to it, and
+// fan-out after every message) with connections numbered and delivered to
+// in-process. It is what a test needs; it is not the production server,
+// which is Rust.
 package dev.arkdb.client
 
+import dev.arkdb.Authenticate
 import dev.arkdb.Authority
 import dev.arkdb.Canon
 import dev.arkdb.ClientMsg
 import dev.arkdb.Closure
+import dev.arkdb.ConnId
 import dev.arkdb.FnHash
 import dev.arkdb.Hash
+import dev.arkdb.Identity
 import dev.arkdb.Module
-import dev.arkdb.Page
 import dev.arkdb.Protocol
-import dev.arkdb.Sequenced
+import dev.arkdb.Server
 import dev.arkdb.ServerMsg
 
-public class LocalHub(public val module: Module) {
+public class LocalHub(
+    public val module: Module,
+    /**
+     * What a token proves. By default dev auth, where a token names who is
+     * asking: `"alice"` is alice under the session `"dev"` (the spec's
+     * `trusting`), `"alice:phone"` is alice under the session `"phone"`,
+     * and no token is nobody.
+     */
+    authenticate: Authenticate = dev,
+    /** May this identity receive the log? */
+    access: (Identity) -> Boolean = { true },
+) {
     private val bodies: Map<FnHash, Closure> = Hash.closures(module)
 
-    /** One authority per scope of the module's schema. */
-    public val authorities: Map<String, Authority> =
-        module.schema.scopes.associate { it.name to Authority(it.name, module.schema, bodies) }
+    /** The authority for the log. */
+    public val authority: Authority = Authority(module.schema, bodies)
 
-    private inner class Conn(val deliver: (ServerMsg) -> Unit) {
-        /** The sequence each subscribed scope has been sent up to. */
-        val sentUpTo = HashMap<String, Long>()
-        var token: String? = null
+    /** The server machine every connection talks to. */
+    public val server: Server = Server(authenticate, access, authority)
+
+    public companion object {
+        public val dev: Authenticate = Authenticate { tok ->
+            when {
+                tok == null -> null
+                ':' in tok -> Identity(tok.substringBefore(':'), tok.substringAfter(':'))
+                else -> Identity(tok, "dev")
+            }
+        }
+    }
+
+    /** Install the sessions a user owns (`Server.withOwns`): an entry authored under an older login of the same user is then accepted. */
+    public fun withOwns(f: (user: String, session: String) -> Boolean): LocalHub {
+        server.withOwns(f)
+        return this
+    }
+
+    private class Conn(val deliver: (ServerMsg) -> Unit) {
         var closed = false
     }
 
-    private val conns = ArrayList<Conn>()
+    private val conns = java.util.TreeMap<ConnId, Conn>()
+    private var next: ConnId = 1
 
     /** Frames the hub has handled, by tag, for a test to read. */
     public val handled: MutableList<String> = ArrayList()
 
     /** The number of live connections. */
-    public val connections: Int get() = conns.count { !it.closed }
+    public val connections: Int get() = conns.values.count { !it.closed }
 
     /** Attach, and get back both directions plus a way to close. */
     public fun connect(deliver: (ServerMsg) -> Unit): Pair<(ClientMsg) -> Unit, () -> Unit> {
+        val id = next++
         val c = Conn(deliver)
-        conns.add(c)
-        val send: (ClientMsg) -> Unit = { m -> if (!c.closed) handle(c, m) }
-        return send to { c.closed = true }
-    }
-
-    private fun handle(c: Conn, m: ClientMsg) {
-        handled.add(m::class.simpleName ?: "?")
-        when (m) {
-            is ClientMsg.Hello -> {
-                // Dev auth: a token is a name, and no token is nobody.
-                if (m.token == null) {
-                    c.deliver(ServerMsg.Denied("not signed in"))
-                    c.closed = true
-                    return
-                }
-                c.token = m.token
-                for (s in m.subs) {
-                    val a = authorities[s.scope] ?: continue
-                    c.sentUpTo[s.scope] = s.since
-                    page(c, a)
-                }
-            }
-            is ClientMsg.Push -> {
-                val a = authorities[m.scope] ?: return
-                val acked = ArrayList<Pair<dev.arkdb.Id, Long>>()
-                for (e in m.entries) {
-                    // The login that pushes an entry is the one it was authored under.
-                    if (c.token != null && e.actor != c.token) {
-                        c.deliver(ServerMsg.Reject(m.scope, e.id, "not yours"))
-                        continue
-                    }
-                    when (val s = a.sequenceEntry(e)) {
-                        is Sequenced.Appended -> acked.add(e.id to s.seq)
-                        is Sequenced.Duplicate -> acked.add(e.id to s.seq)
-                        is Sequenced.Rejected -> c.deliver(ServerMsg.Reject(m.scope, e.id, s.refusal.text))
-                    }
-                }
-                if (acked.isNotEmpty()) c.deliver(ServerMsg.Ack(m.scope, acked.map { it.first }, acked.map { it.second }))
-                // Fan out: everyone subscribed, the author included, gets what
-                // is above their cursor. The author's own entry comes back as
-                // a duplicate delivery its replica ignores.
-                for (o in conns) if (!o.closed && m.scope in o.sentUpTo) page(o, a)
-            }
-            is ClientMsg.NeedFacts -> {
-                val a = authorities[m.scope] ?: return
-                val items = m.seqs.mapNotNull { n -> a.log.entries[n]?.let { n to it.second } }
-                c.deliver(ServerMsg.FactsFor(m.scope, items))
-            }
-            is ClientMsg.NeedClosures -> {
-                c.deliver(ServerMsg.Closures(m.hashes.mapNotNull { h -> bodies[h]?.let { h to it } }))
-            }
-            is ClientMsg.Verify -> {
-                val a = authorities[m.scope] ?: return
-                val st = a.log.stateAt(m.seq)
-                val ok = st != null && Hash.stateHash(st).contentEquals(m.hash)
-                c.deliver(ServerMsg.Agree(m.scope, m.seq, m.hash, ok))
-            }
-            is ClientMsg.Say -> {
-                for (o in conns) if (!o.closed && o !== c && o.token == c.token) o.deliver(ServerMsg.Heard(m.frame))
+        conns[id] = c
+        val send: (ClientMsg) -> Unit = { m ->
+            if (!c.closed) {
+                handled.add(m::class.simpleName ?: "?")
+                server.recv(id, m)
+                flush()
             }
         }
-    }
-
-    // Everything above the connection's cursor for a scope, a page at a time
-    // (the client says hello again for the rest), or the snapshot.
-    private fun page(c: Conn, a: Authority) {
-        val cursor = c.sentUpTo[a.scope] ?: return
-        when (val p = a.page(cursor, Protocol.BATCH_LIMIT)) {
-            is Page.Entries -> {
-                if (p.items.isEmpty()) return
-                c.deliver(ServerMsg.Batch(a.scope, p.items, p.hasMore))
-                c.sentUpTo[a.scope] = p.items.last().first
-            }
-            is Page.BelowHorizon -> {
-                val sn = p.snapshot
-                val rows = sn.store.tableNames.associateWith { t -> sn.store.scan(t).map { it as dev.arkdb.Value } }
-                c.deliver(ServerMsg.SnapshotOf(a.scope, sn.seq, sn.hash, rows))
-                c.sentUpTo[a.scope] = sn.seq
-                page(c, a)
+        val close = {
+            if (!c.closed) {
+                c.closed = true
+                conns.remove(id)
+                server.disconnect(id)
             }
         }
+        return send to close
+    }
+
+    // What the server queued, to each connection still open, in order.
+    private fun flush() {
+        for ((to, m) in server.takeOutgoing()) conns[to]?.let { if (!it.closed) it.deliver(m) }
     }
 }
 

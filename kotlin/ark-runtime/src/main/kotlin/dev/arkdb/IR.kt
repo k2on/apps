@@ -4,7 +4,7 @@ package dev.arkdb
 import java.util.SortedMap
 
 /** The version of this specification a module was written against. */
-public const val SPEC_VERSION: Int = 2
+public const val SPEC_VERSION: Int = 3
 
 public data class Module(
     val spec: Int,
@@ -13,7 +13,7 @@ public data class Module(
     val functions: List<Function>,
     /** §3.9 The live section: the frame types an app's realtime channel carries. */
     val live: List<Pair<String, Ty>>,
-    /** §1.1 (AUTHORING.md) The routers: each a scope and the middleware every procedure on it runs. */
+    /** §1.1 (AUTHORING.md) The routers: each a named group of procedures and the middleware declared on it. */
     val routers: List<Router> = emptyList(),
 ) {
     public fun lookupFunction(n: String): Function? = functions.firstOrNull { it.name == n }
@@ -25,11 +25,10 @@ public data class Module(
 }
 
 /**
- * A router: the scope every procedure on it reads and writes, and the
- * middleware declared on it, in declaration order, by function name (the
+ * A router: a named group of procedures, and the middleware declared on it, in declaration order, by function name (the
  * union of its procedures' `uses`).
  */
-public data class Router(val name: String, val scope: String, val uses: List<String>)
+public data class Router(val name: String, val uses: List<String>)
 
 /**
  * `Guard` runs before the body and may refuse; `Provide` does the same and
@@ -62,7 +61,7 @@ public sealed class Check {
     public data class MaxLen(val n: Int, override val why: String?) : Check()
     public data class Range(val lo: Long?, val hi: Long?, override val why: String?) : Check()
     public data class NonEmpty(override val why: String?) : Check()
-    /** Id: a row with that key exists in the procedure's scope. */
+    /** Id: a row with that key exists. */
     public data class Exists(override val why: String?) : Check()
     /** Any: the expression, over `Expr.Arg <this field>`, is true. */
     public data class Refine(val e: Expr, override val why: String?) : Check()
@@ -82,8 +81,6 @@ public typealias Sym = Int
 public data class Function(
     val name: String,
     val kind: FnKind,
-    /** A mutator's, query's, guard's or provide's scope; a procedure's is its router's. */
-    val scope: String?,
     val autos: List<Pair<String, Auto>>,
     /** The input, field by field, each with its checks; a middleware's names the fields it reads. */
     val input: List<Pair<String, Field>>,

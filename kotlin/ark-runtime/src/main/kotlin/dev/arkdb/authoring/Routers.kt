@@ -59,7 +59,7 @@ internal class Middleware(
 }
 
 /** A mutation or a query on a router. */
-public class Route<S : Scope> internal constructor(
+public class Route<S : Tables> internal constructor(
     internal val name: String,
     internal val kind: FnKind,
     internal val input: InputInfo<*>?,
@@ -68,7 +68,7 @@ public class Route<S : Scope> internal constructor(
 )
 
 /** The middleware a procedure is built on, oldest first; `Router` is the chain with none. */
-public open class Chain<S : Scope> internal constructor(private val root: Router<S>?, internal val uses: KList<Middleware>) {
+public open class Chain<S : Tables> internal constructor(private val root: Router<S>?, internal val uses: KList<Middleware>) {
     @Suppress("UNCHECKED_CAST")
     internal val router: Router<S> get() = root ?: (this as Router<S>)
 
@@ -109,7 +109,7 @@ public open class Chain<S : Scope> internal constructor(private val root: Router
 }
 
 /** A chain whose last provide hands the body a `P`. */
-public class Provides<S : Scope, P : Data> internal constructor(internal val router: Router<S>, internal val uses: KList<Middleware>) {
+public class Provides<S : Tables, P : Data> internal constructor(internal val router: Router<S>, internal val uses: KList<Middleware>) {
     public fun guard(name: String, f: (Ctx, S) -> Effect): Provides<S, P> {
         @Suppress("UNCHECKED_CAST")
         val mw = Middleware(name, false, null) { c, db, _ -> f(c, db as S) }
@@ -134,7 +134,7 @@ public class Provides<S : Scope, P : Data> internal constructor(internal val rou
 }
 
 /** A chain with an input type. */
-public class Takes<S : Scope, I : Input> internal constructor(
+public class Takes<S : Tables, I : Input> internal constructor(
     internal val router: Router<S>,
     internal val uses: KList<Middleware>,
     internal val input: InputInfo<*>,
@@ -151,7 +151,7 @@ public class Takes<S : Scope, I : Input> internal constructor(
 }
 
 /** A chain with an input type whose last provide hands the body a `P`. */
-public class TakesProvided<S : Scope, I : Input, P : Data> internal constructor(
+public class TakesProvided<S : Tables, I : Input, P : Data> internal constructor(
     internal val router: Router<S>,
     internal val uses: KList<Middleware>,
     internal val input: InputInfo<*>,
@@ -167,10 +167,10 @@ public class TakesProvided<S : Scope, I : Input, P : Data> internal constructor(
     }
 }
 
-/** A router over scope `S`: its middleware, as declared, and its routes. */
-public class Router<S : Scope> @PublishedApi internal constructor(internal val name: String, scopeClass: Class<*>) :
+/** A router over the tables `S`: its middleware, as declared, and its routes. */
+public class Router<S : Tables> @PublishedApi internal constructor(internal val name: String, tablesClass: Class<*>) :
     Chain<S>(null, emptyList()) {
-    internal val scope: ScopeInfo = ScopeInfo(scopeClass)
+    internal val tables: TablesInfo = TablesInfo(tablesClass)
     internal val middleware = ArrayList<Middleware>()
     internal val routes = ArrayList<Route<S>>()
 
@@ -189,8 +189,8 @@ public class Router<S : Scope> @PublishedApi internal constructor(internal val n
 
 }
 
-/** `router<Playlists>("playlists")`. */
-public inline fun <reified S : Scope> router(name: String): Router<S> = Router(name, S::class.java)
+/** `router<Harken>("playlists")`. */
+public inline fun <reified S : Tables> router(name: String): Router<S> = Router(name, S::class.java)
 
 // The module ------------------------------------------------------------------------
 
@@ -216,15 +216,23 @@ public class Module(vararg routers: Router<*>) {
     }
 
     private fun build(): dev.arkdb.Module {
-        val scopes = LinkedHashMap<String, dev.arkdb.Scope>()
-        for (r in routers) scopes.getOrPut(r.scope.name) { r.scope.scope }
+        // A module has one set of tables: every router is over the same class.
+        val first = routers.firstOrNull()
+        for (r in routers) {
+            if (first != null && r.tables.cls != first.tables.cls) {
+                throw Fault.bug(
+                    "authoring: router ${first.name} is over ${first.tables.cls.name} and router ${r.name} over " +
+                        "${r.tables.cls.name}: a module has one set of tables",
+                )
+            }
+        }
         val fns = ArrayList<Function>()
         for (r in routers) {
             for (mw in r.middleware) fns.add(emitMiddleware(r, mw))
             for (route in r.routes) fns.add(emitRoute(r, route))
         }
-        val rs = routers.map { r -> dev.arkdb.Router(r.name, r.scope.name, r.middleware.map { it.name }) }
-        return dev.arkdb.Module(SPEC_VERSION, IrSchema(scopes.values.toList()), fns, emptyList(), rs)
+        val rs = routers.map { r -> dev.arkdb.Router(r.name, r.middleware.map { it.name }) }
+        return dev.arkdb.Module(SPEC_VERSION, IrSchema(first?.tables?.tables ?: emptyList()), fns, emptyList(), rs)
     }
 
     private fun emitCtx(): Ctx = Ctx(Text(Term.E(Expr.CtxUser), Kind.TEXT), Text(Term.E(Expr.CtxSession), Kind.TEXT))
@@ -235,7 +243,7 @@ public class Module(vararg routers: Router<*>) {
             val input = mw.input?.ir(e, checks = false)?.first ?: emptyList()
             var ret: Kind? = null
             val body = e.block {
-                val v = mw.body(emitCtx(), r.scope.instance, mw.input?.make { Term.E(Expr.Arg(it)) })
+                val v = mw.body(emitCtx(), r.tables.instance, mw.input?.make { Term.E(Expr.Arg(it)) })
                 if (mw.provide) {
                     val d = v as Data
                     ret = kindOf(d)
@@ -246,7 +254,6 @@ public class Module(vararg routers: Router<*>) {
             Function(
                 mw.name,
                 if (mw.provide) FnKind.Provide else FnKind.Guard,
-                r.scope.name,
                 e.autos.toList().map { it.first to it.second },
                 input,
                 ret?.ty,
@@ -270,7 +277,7 @@ public class Module(vararg routers: Router<*>) {
                 val provided = provider?.let { p ->
                     (p.provided ?: throw Fault.bug("authoring: ${p.name} is used before it is declared")).make(Term.E(Expr.Provided(p.name)))
                 }
-                val v = route.body(emitCtx(), r.scope.instance, given, provided)
+                val v = route.body(emitCtx(), r.tables.instance, given, provided)
                 if (route.kind == FnKind.Query) {
                     val d = v as Data
                     ret = kindOf(d)
@@ -280,7 +287,6 @@ public class Module(vararg routers: Router<*>) {
             Function(
                 route.name,
                 route.kind,
-                r.scope.name,
                 e.autos.toList().map { it.first to it.second },
                 input,
                 ret?.ty,
@@ -314,7 +320,7 @@ internal class NativeProcedure(
             val run = Run.current()
             val checked = route.input?.check(args, st) ?: args
             val c = Ctx(Text(Term.N(Value.VText(ctx.user)), Kind.TEXT), Text(Term.N(Value.VText(ctx.session)), Kind.TEXT))
-            val db = router.scope.instance
+            val db = router.tables.instance
             var provided: Any? = null
             for (mw in route.uses) {
                 val given = mw.input?.make { Term.N(checked.getValue(it)) }

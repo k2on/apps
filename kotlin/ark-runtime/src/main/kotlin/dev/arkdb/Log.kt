@@ -1,10 +1,10 @@
-// §10 The log (Ark.Log): one scope's history, entries with their facts,
+// §10 The log (Ark.Log): the module's history, entries with their facts,
 // standing on a snapshot.
 package dev.arkdb
 
 import java.util.TreeMap
 
-/** A position in one scope's log. The first entry is 1; 0 is "nothing". */
+/** A position in the log. The first entry is 1; 0 is "nothing". */
 public typealias Seq = Long
 
 /** An intent, as recorded. The sequence is the key it is stored under, never a field. */
@@ -17,7 +17,7 @@ public data class Entry(
     val autos: Args,
 )
 
-/** The state of a scope at a sequence, and its hash. */
+/** The state at a sequence, and its hash. */
 public class Snapshot(public val seq: Seq, public val store: MemoryStore, public val hash: ByteArray) {
     public companion object {
         public fun of(n: Seq, st: MemoryStore): Snapshot = Snapshot(n, st, Hash.stateHash(st))

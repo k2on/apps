@@ -1,23 +1,24 @@
-// §12 The protocol (Ark.Protocol): the frames as values, and the client
-// machine. The server machine is not here.
+// §12 The protocol (Ark.Protocol): the frames as values, and the two
+// state machines around them — a `Client` holding a replica of the log, and
+// a `Server` holding its authority and the connections it has identified.
+// Both are sans-io: a transport feeds them frames and drains what they
+// queue, and nothing here knows what a socket is.
 package dev.arkdb
 
-import java.util.TreeMap
-
-/** How a client holds a scope: replaying intents, or fed the facts. */
+/** How a client holds the log: replaying intents, or fed the facts. */
 public enum class Mode { Whole, ByFacts }
 
-public data class Subscription(val scope: String, val since: Seq, val mode: Mode)
+/** Where a connection starts: the last sequence applied, and how it holds the log. */
+public data class Subscription(val since: Seq, val mode: Mode)
 
 public sealed class ClientMsg {
-    public data class Hello(val subs: List<Subscription>, val token: String?, val spec: Int) : ClientMsg()
-    public data class Push(val scope: String, val entries: List<Entry>) : ClientMsg()
-    public data class NeedFacts(val scope: String, val seqs: List<Seq>) : ClientMsg()
+    public data class Hello(val sub: Subscription, val token: String?, val spec: Int) : ClientMsg()
+    public data class Push(val entries: List<Entry>) : ClientMsg()
+    public data class NeedFacts(val seqs: List<Seq>) : ClientMsg()
     public data class NeedClosures(val hashes: List<FnHash>) : ClientMsg()
-    public class Verify(public val scope: String, public val seq: Seq, public val hash: ByteArray) : ClientMsg() {
-        override fun equals(other: Any?): Boolean =
-            other is Verify && scope == other.scope && seq == other.seq && hash.contentEquals(other.hash)
-        override fun hashCode(): Int = scope.hashCode() * 31 + seq.hashCode()
+    public class Verify(public val seq: Seq, public val hash: ByteArray) : ClientMsg() {
+        override fun equals(other: Any?): Boolean = other is Verify && seq == other.seq && hash.contentEquals(other.hash)
+        override fun hashCode(): Int = seq.hashCode() * 31 + hash.contentHashCode()
     }
     public class Say(public val frame: ByteArray) : ClientMsg() {
         override fun equals(other: Any?): Boolean = other is Say && frame.contentEquals(other.frame)
@@ -28,26 +29,29 @@ public sealed class ClientMsg {
 }
 
 public sealed class ServerMsg {
-    public data class Batch(val scope: String, val items: List<Triple<Seq, Entry, Facts?>>, val hasMore: Boolean) : ServerMsg()
-    public data class FactsFor(val scope: String, val items: List<Pair<Seq, Facts>>) : ServerMsg()
+    public data class Batch(val items: List<Triple<Seq, Entry, Facts?>>, val hasMore: Boolean) : ServerMsg()
+    public data class FactsFor(val items: List<Pair<Seq, Facts>>) : ServerMsg()
     public class SnapshotOf(
-        public val scope: String,
         public val seq: Seq,
         public val stateHash: ByteArray,
         public val rows: Map<String, List<Value>>,
     ) : ServerMsg() {
-        override fun equals(other: Any?): Boolean = other is SnapshotOf && scope == other.scope && seq == other.seq &&
+        override fun equals(other: Any?): Boolean = other is SnapshotOf && seq == other.seq &&
             stateHash.contentEquals(other.stateHash) && rows == other.rows
-        override fun hashCode(): Int = scope.hashCode() * 31 + rows.hashCode()
+        override fun hashCode(): Int = seq.hashCode() * 31 + rows.hashCode()
     }
-    public data class Ack(val scope: String, val ids: List<Id>, val seqs: List<Seq>) : ServerMsg()
-    public data class Reject(val scope: String, val id: Id, val reason: String) : ServerMsg()
+    public data class Ack(val ids: List<Id>, val seqs: List<Seq>) : ServerMsg()
+    /**
+     * A verdict against one entry, with the reason every replica would
+     * reach: what a screen shows beside the item that did not happen.
+     */
+    public data class Reject(val id: Id, val reason: String) : ServerMsg()
     public data class Denied(val reason: String) : ServerMsg()
     public data class Closures(val items: List<Pair<FnHash, Closure>>) : ServerMsg()
-    public class Agree(public val scope: String, public val seq: Seq, public val hash: ByteArray, public val ok: Boolean) : ServerMsg() {
-        override fun equals(other: Any?): Boolean = other is Agree && scope == other.scope && seq == other.seq &&
+    public class Agree(public val seq: Seq, public val hash: ByteArray, public val ok: Boolean) : ServerMsg() {
+        override fun equals(other: Any?): Boolean = other is Agree && seq == other.seq &&
             hash.contentEquals(other.hash) && ok == other.ok
-        override fun hashCode(): Int = scope.hashCode() * 31 + seq.hashCode()
+        override fun hashCode(): Int = seq.hashCode() * 31 + hash.contentHashCode()
     }
     public class Heard(public val frame: ByteArray) : ServerMsg() {
         override fun equals(other: Any?): Boolean = other is Heard && frame.contentEquals(other.frame)
@@ -86,30 +90,21 @@ public object Protocol {
     public fun clientValue(m: ClientMsg): Value = when (m) {
         is ClientMsg.Hello -> node(
             "hello",
-            "scopes" to Value.VList(
-                m.subs.map { s ->
-                    node(
-                        "sub",
-                        "scope" to Value.VText(s.scope),
-                        "since" to int(s.since),
-                        "mode" to Value.VText(if (s.mode == Mode.Whole) "whole" else "facts"),
-                    )
-                },
-            ),
+            "since" to int(m.sub.since),
+            "mode" to Value.VText(if (m.sub.mode == Mode.Whole) "whole" else "facts"),
             "token" to (m.token?.let { Value.VText(it) } ?: Value.VNull),
             "spec" to int(m.spec.toLong()),
         )
-        is ClientMsg.Push -> node("push", "scope" to Value.VText(m.scope), "entries" to Value.VList(m.entries.map { entryValue(it) }))
-        is ClientMsg.NeedFacts -> node("need_facts", "scope" to Value.VText(m.scope), "seqs" to Value.VList(m.seqs.map { int(it) }))
+        is ClientMsg.Push -> node("push", "entries" to Value.VList(m.entries.map { entryValue(it) }))
+        is ClientMsg.NeedFacts -> node("need_facts", "seqs" to Value.VList(m.seqs.map { int(it) }))
         is ClientMsg.NeedClosures -> node("need_closures", "hashes" to Value.VList(m.hashes.map { Value.VBytes(it.bytes) }))
-        is ClientMsg.Verify -> node("verify", "scope" to Value.VText(m.scope), "seq" to int(m.seq), "hash" to Value.VBytes(m.hash))
+        is ClientMsg.Verify -> node("verify", "seq" to int(m.seq), "hash" to Value.VBytes(m.hash))
         is ClientMsg.Say -> node("say", "say" to Value.VBytes(m.frame))
     }
 
     public fun serverValue(m: ServerMsg): Value = when (m) {
         is ServerMsg.Batch -> node(
             "batch",
-            "scope" to Value.VText(m.scope),
             "items" to Value.VList(
                 m.items.map { (n, e, f) ->
                     Value.record("seq" to int(n), "entry" to entryValue(e), "facts" to (f?.let { factsValue(it) } ?: Value.VNull))
@@ -119,23 +114,20 @@ public object Protocol {
         )
         is ServerMsg.FactsFor -> node(
             "facts",
-            "scope" to Value.VText(m.scope),
             "items" to Value.VList(m.items.map { (n, f) -> Value.record("seq" to int(n), "facts" to factsValue(f)) }),
         )
         is ServerMsg.SnapshotOf -> node(
             "snapshot",
-            "scope" to Value.VText(m.scope),
             "seq" to int(m.seq),
             "hash" to Value.VBytes(m.stateHash),
             "rows" to Value.VStruct(m.rows.mapValues { Value.VList(it.value) }),
         )
         is ServerMsg.Ack -> node(
             "ack",
-            "scope" to Value.VText(m.scope),
             "ids" to Value.VList(m.ids.map { Value.VId(it) }),
             "seqs" to Value.VList(m.seqs.map { int(it) }),
         )
-        is ServerMsg.Reject -> node("reject", "scope" to Value.VText(m.scope), "id" to Value.VId(m.id), "reason" to Value.VText(m.reason))
+        is ServerMsg.Reject -> node("reject", "id" to Value.VId(m.id), "reason" to Value.VText(m.reason))
         is ServerMsg.Denied -> node("denied", "reason" to Value.VText(m.reason))
         is ServerMsg.Closures -> node(
             "closures",
@@ -143,7 +135,6 @@ public object Protocol {
         )
         is ServerMsg.Agree -> node(
             "agree",
-            "scope" to Value.VText(m.scope),
             "seq" to int(m.seq),
             "hash" to Value.VBytes(m.hash),
             "ok" to Value.VBool(m.ok),
@@ -201,22 +192,21 @@ public object Protocol {
         val m = struct(v)
         return when (val t = text(need(m, "t"))) {
             "hello" -> ClientMsg.Hello(
-                list(need(m, "scopes")) { x ->
-                    val sm = struct(x)
-                    val md = when (val ms = text(need(sm, "mode"))) {
+                Subscription(
+                    int64(need(m, "since")),
+                    when (val ms = text(need(m, "mode"))) {
                         "whole" -> Mode.Whole
                         "facts" -> Mode.ByFacts
                         else -> bad("unknown mode $ms")
-                    }
-                    Subscription(text(need(sm, "scope")), int64(need(sm, "since")), md)
-                },
+                    },
+                ),
                 need(m, "token").let { if (it is Value.VNull) null else text(it) },
                 Math.toIntExact(int64(need(m, "spec"))),
             )
-            "push" -> ClientMsg.Push(text(need(m, "scope")), list(need(m, "entries")) { entryFromValue(it) })
-            "need_facts" -> ClientMsg.NeedFacts(text(need(m, "scope")), list(need(m, "seqs")) { int64(it) })
+            "push" -> ClientMsg.Push(list(need(m, "entries")) { entryFromValue(it) })
+            "need_facts" -> ClientMsg.NeedFacts(list(need(m, "seqs")) { int64(it) })
             "need_closures" -> ClientMsg.NeedClosures(list(need(m, "hashes")) { FnHash(bytes(it)) })
-            "verify" -> ClientMsg.Verify(text(need(m, "scope")), int64(need(m, "seq")), bytes(need(m, "hash")))
+            "verify" -> ClientMsg.Verify(int64(need(m, "seq")), bytes(need(m, "hash")))
             "say" -> ClientMsg.Say(bytes(need(m, "say")))
             else -> bad("unknown client frame $t")
         }
@@ -226,7 +216,6 @@ public object Protocol {
         val m = struct(v)
         return when (val t = text(need(m, "t"))) {
             "batch" -> ServerMsg.Batch(
-                text(need(m, "scope")),
                 list(need(m, "items")) { x ->
                     val im = struct(x)
                     Triple(
@@ -238,20 +227,18 @@ public object Protocol {
                 bool(need(m, "has_more")),
             )
             "facts" -> ServerMsg.FactsFor(
-                text(need(m, "scope")),
                 list(need(m, "items")) { x ->
                     val im = struct(x)
                     int64(need(im, "seq")) to list(need(im, "facts")) { changeFromValue(it) }
                 },
             )
             "snapshot" -> ServerMsg.SnapshotOf(
-                text(need(m, "scope")),
                 int64(need(m, "seq")),
                 bytes(need(m, "hash")),
                 struct(need(m, "rows")).mapValues { list(it.value) { v -> v } },
             )
-            "ack" -> ServerMsg.Ack(text(need(m, "scope")), list(need(m, "ids")) { ident(it) }, list(need(m, "seqs")) { int64(it) })
-            "reject" -> ServerMsg.Reject(text(need(m, "scope")), ident(need(m, "id")), text(need(m, "reason")))
+            "ack" -> ServerMsg.Ack(list(need(m, "ids")) { ident(it) }, list(need(m, "seqs")) { int64(it) })
+            "reject" -> ServerMsg.Reject(ident(need(m, "id")), text(need(m, "reason")))
             "denied" -> ServerMsg.Denied(text(need(m, "reason")))
             "closures" -> ServerMsg.Closures(
                 list(need(m, "items")) { x ->
@@ -259,17 +246,38 @@ public object Protocol {
                     FnHash(bytes(need(im, "hash"))) to Decode.closureFromValue(need(im, "closure"))
                 },
             )
-            "agree" -> ServerMsg.Agree(text(need(m, "scope")), int64(need(m, "seq")), bytes(need(m, "hash")), bool(need(m, "ok")))
+            "agree" -> ServerMsg.Agree(int64(need(m, "seq")), bytes(need(m, "hash")), bool(need(m, "ok")))
             "heard" -> ServerMsg.Heard(bytes(need(m, "hear")))
             else -> bad("unknown server frame $t")
         }
     }
+    /**
+     * §12.5 The reason a `Reject` carries: a mutator's own refusal is its
+     * text, word for word, because that is what an author wrote for a
+     * person to read; the store's constraint refusals are named in a
+     * sentence.
+     */
+    public fun refusalText(r: Refusal): String = when (r) {
+        is Refusal.Refused -> r.reason
+        is Refusal.NoSuchTable -> "no table ${r.table}"
+        is Refusal.MalformedRow -> "${r.table}: ${r.what}"
+        is Refusal.NotNull -> "${r.table}.${r.column} may not be empty"
+        is Refusal.UniqueViolation -> "${r.table}: another row has the same ${r.columns.joinToString(", ")}"
+        is Refusal.MissingParent -> "${r.table}.${r.column} names no ${r.parent}"
+        is Refusal.StillReferenced -> "${r.table}: still referenced by ${r.child}"
+    }
 }
 
-/** A peer's end of one connection: its replicas, and what it has queued. */
-public class Client(public val schema: Schema, public val token: String?) {
-    /** The scopes held, in scope order, each with the mode it is held in. */
-    public val scopes: TreeMap<String, Pair<Replica, Mode>> = TreeMap(CodePointOrder)
+/** A peer's end of one connection: its replica of the log, and what it has queued. */
+public class Client(replica: Replica, public val mode: Mode, token: String?) {
+    public val schema: Schema = replica.schema
+
+    /** The replica, as opened from what was durable; a snapshot replaces it. */
+    public var replica: Replica = replica
+        private set
+
+    /** What the next `Hello` proves the login with. Takes effect on the next connection. */
+    public var token: String? = token
 
     public var linked: Boolean = false
         private set
@@ -284,28 +292,28 @@ public class Client(public val schema: Schema, public val token: String?) {
     public var denied: String? = null
         private set
 
-    public val agreed: MutableList<Triple<String, Seq, Boolean>> = ArrayList()
-
-    /** Hold a scope, with the replica as opened from what was durable. */
-    public fun subscribe(mode: Mode, r: Replica) {
-        scopes[r.scope] = r to mode
-    }
-
-    public fun replica(scope: String): Replica? = scopes[scope]?.first
+    /** The authority's answers to `verifyAll`, oldest first: the sequence asked about, and whether it agreed. */
+    public val agreed: MutableList<Pair<Seq, Boolean>> = ArrayList()
 
     // Unlinked, nothing is queued; `connected` says it all again.
     private fun emit(m: ClientMsg) {
         if (linked) out.add(m)
     }
 
-    /** §12.1 A connection opened: hello for every scope at its cursor, then everything pending. */
+    private fun hello(): ClientMsg = ClientMsg.Hello(Subscription(replica.cursor, mode), token, SPEC_VERSION)
+
+    /**
+     * §12.1 A connection opened: say hello at the cursor, then push
+     * everything pending. What was queued before is dropped, since the
+     * hello resends it all.
+     */
     public fun connected() {
         linked = true
         epoch += 1
         out.clear()
         heard.clear()
-        emit(ClientMsg.Hello(scopes.map { (s, rm) -> Subscription(s, rm.first.cursor, rm.second) }, token, SPEC_VERSION))
-        for ((s, rm) in scopes) if (rm.first.pending.isNotEmpty()) emit(ClientMsg.Push(s, rm.first.pending))
+        emit(hello())
+        if (replica.pending.isNotEmpty()) emit(ClientMsg.Push(replica.pending))
     }
 
     public fun disconnected() {
@@ -314,16 +322,20 @@ public class Client(public val schema: Schema, public val token: String?) {
         heard.clear()
     }
 
-    /** Author an intent into a scope and push it if linked. Throws `Fault.Refuse`. */
-    public fun mutate(scope: String, i: Id, ctx: Ctx, fh: FnHash, autos: Args, args: Args): Entry {
-        val (r, _) = scopes[scope] ?: throw Fault.Refuse(Refusal.Refused("not holding scope $scope"))
-        val e = r.mutate(i, ctx, fh, autos, args)
-        emit(ClientMsg.Push(scope, listOf(e)))
+    /**
+     * Author an intent and push it if linked. Throws `Fault.Refuse`: the
+     * optimistic verdict, on the state this peer has; the authority's may
+     * differ, and arrives as a `Reject` with its own reason.
+     */
+    public fun mutate(i: Id, ctx: Ctx, fh: FnHash, autos: Args, args: Args): Entry {
+        val e = replica.mutate(i, ctx, fh, autos, args)
+        emit(ClientMsg.Push(listOf(e)))
         return e
     }
 
     /** §12.2 A frame from the server. */
     public fun recv(m: ServerMsg) {
+        val r = replica
         when (m) {
             is ServerMsg.Heard -> heard.add(m.frame)
             is ServerMsg.Denied -> {
@@ -332,52 +344,39 @@ public class Client(public val schema: Schema, public val token: String?) {
                 out.clear()
             }
             is ServerMsg.Batch -> {
-                val (r, md) = scopes[m.scope] ?: return
                 for ((n, e, f) in m.items) if (f != null) r.receiveWith(n, e, f) else r.receive(n, e)
                 val needs = r.needs()
-                if (needs.isNotEmpty()) emit(ClientMsg.NeedFacts(m.scope, needs))
-                if (m.hasMore) emit(ClientMsg.Hello(listOf(Subscription(m.scope, r.cursor, md)), token, SPEC_VERSION))
+                if (needs.isNotEmpty()) emit(ClientMsg.NeedFacts(needs))
+                if (m.hasMore) emit(hello())
             }
-            is ServerMsg.FactsFor -> {
-                val (r, _) = scopes[m.scope] ?: return
-                for ((n, f) in m.items) r.receiveFacts(n, f)
-            }
+            is ServerMsg.FactsFor -> for ((n, f) in m.items) r.receiveFacts(n, f)
             is ServerMsg.SnapshotOf -> {
                 // Below the horizon: the confirmed store is replaced by the
                 // snapshot and the cursor moves to it; pending replays on top.
-                val (r, md) = scopes[m.scope] ?: return
                 val st = MemoryStore.of(schema, m.rows)
-                scopes[m.scope] = Replica.open(r.schema, m.scope, r.bodies, st, m.seq, r.pending, r.natives) to md
+                val next = Replica.open(r.schema, r.bodies, st, m.seq, r.pending, r.natives)
+                next.rejections.addAll(r.rejections)
+                next.confirmedOwn.addAll(r.confirmedOwn)
+                replica = next
             }
-            is ServerMsg.Ack -> {
-                val (r, _) = scopes[m.scope] ?: return
-                for ((i, n) in m.ids.zip(m.seqs)) r.ack(i, n)
-            }
-            is ServerMsg.Reject -> {
-                val (r, _) = scopes[m.scope] ?: return
-                r.reject(m.id, Refusal.Refused(m.reason))
-            }
+            is ServerMsg.Ack -> for ((i, n) in m.ids.zip(m.seqs)) r.ack(i, n)
+            is ServerMsg.Reject -> r.reject(m.id, Refusal.Refused(m.reason))
             is ServerMsg.Closures -> {
-                // New closures may unblock entries waiting in an inbox.
-                val more = m.items.toMap()
-                for ((r, _) in scopes.values) {
-                    r.learn(more)
-                    r.retry()
-                }
+                // New closures may unblock entries waiting in the inbox.
+                r.learn(m.items.toMap())
+                r.retry()
             }
-            is ServerMsg.Agree -> agreed.add(Triple(m.scope, m.seq, m.ok))
+            is ServerMsg.Agree -> agreed.add(m.seq to m.ok)
         }
     }
 
     /** A live frame; dropped while unlinked, never queued. */
     public fun say(frame: ByteArray): Unit = emit(ClientMsg.Say(frame))
 
-    /** Ask the authority whether it agrees with every replica's confirmed state. */
+    /** Ask the authority whether it agrees with the replica's confirmed state. */
     public fun verifyAll() {
-        for ((s, rm) in scopes) {
-            val (n, h) = rm.first.verifyAt()
-            emit(ClientMsg.Verify(s, n, h))
-        }
+        val (n, h) = replica.verifyAt()
+        emit(ClientMsg.Verify(n, h))
     }
 
     public fun takeOutgoing(): List<ClientMsg> {
@@ -390,5 +389,166 @@ public class Client(public val schema: Schema, public val token: String?) {
         val h = heard.toList()
         heard.clear()
         return h
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The server
+
+/** Who a connection is: the user, and the login (one login on one device). Every entry it pushes is held to both. */
+public data class Identity(val user: String, val session: String)
+
+/** What a token proves. The server asks this once, at `Hello`, and never looks at a token again. */
+public fun interface Authenticate {
+    public fun identify(token: String?): Identity?
+
+    public companion object {
+        /** Dev auth: anyone is whoever they say, and the token is their name. */
+        public val trusting: Authenticate = Authenticate { tok -> Identity(tok ?: "anonymous", "dev") }
+    }
+}
+
+/** A connection, as the transport numbers it. */
+public typealias ConnId = Long
+
+/**
+ * The server's end of every connection (`Ark.Protocol.Server`): the
+ * authority for the log, the connections it has identified, and what it
+ * has queued for each. The rules are the spec's §12.3–12.5:
+ *
+ * - identity is asked once, at `Hello`; a hello that proves nothing is
+ *   answered `Denied`, and so is one the access rule turns away;
+ * - every pushed entry is held to the connection's identity: its actor is
+ *   the user, and its session is the connection's own or one `owns` says
+ *   the same user holds — otherwise it is rejected "not yours";
+ * - the authority applies before it appends, so a `Reject` is a verdict,
+ *   and its reason is `Protocol.refusalText`;
+ * - after every message every connection is sent every entry above what it
+ *   has been sent, a page at a time, or the snapshot below the horizon.
+ *
+ * The live room is the account's: a `Say` is heard by the user's other
+ * connections, and touches nothing else.
+ */
+public class Server(
+    private val auth: Authenticate,
+    /** May this identity receive the log? The read rule. */
+    private val access: (Identity) -> Boolean,
+    public val authority: Authority,
+) {
+    /**
+     * Does this user own this session? A session outlives its token: an
+     * entry authored offline under one login and pushed after the same
+     * person signs in again carries the old session, and is still theirs.
+     * Only ever asked about the connection's own user. By default, no.
+     */
+    private var owns: (String, String) -> Boolean = { _, _ -> false }
+
+    public class Conn(public val who: Identity, public val mode: Mode, sent: Seq) {
+        /** The sequence the connection has been sent up to (not what it has applied). */
+        public var sent: Seq = sent
+            internal set
+    }
+
+    private val conns = java.util.TreeMap<ConnId, Conn>()
+    private val out = ArrayList<Pair<ConnId, ServerMsg>>()
+
+    /** The connections that have said hello, by id. */
+    public val connections: Map<ConnId, Conn> get() = conns
+
+    /** Install the sessions a user owns, which the authenticator's session store knows and the engine does not. */
+    public fun withOwns(f: (user: String, session: String) -> Boolean): Server {
+        owns = f
+        return this
+    }
+
+    private fun send(c: ConnId, m: ServerMsg) {
+        out.add(c to m)
+    }
+
+    /** §12.3 A frame from a connection. */
+    public fun recv(c: ConnId, msg: ClientMsg) {
+        if (msg is ClientMsg.Hello) {
+            val who = auth.identify(msg.token)
+            when {
+                who == null -> send(c, ServerMsg.Denied("not signed in"))
+                !access(who) -> send(c, ServerMsg.Denied("not allowed"))
+                else -> {
+                    // A second Hello on one connection is the log paging, and
+                    // says where to continue from.
+                    conns[c] = Conn(who, msg.sub.mode, msg.sub.since)
+                    fanout()
+                }
+            }
+            return
+        }
+        val conn = conns[c]
+        if (conn == null) {
+            send(c, ServerMsg.Denied("hello first"))
+            return
+        }
+        when (msg) {
+            is ClientMsg.Hello -> Unit
+            is ClientMsg.Push -> {
+                val acks = ArrayList<Pair<Id, Seq>>()
+                for (e in msg.entries) {
+                    if (e.actor != conn.who.user || (e.session != conn.who.session && !owns(e.actor, e.session))) {
+                        send(c, ServerMsg.Reject(e.id, "not yours"))
+                        continue
+                    }
+                    when (val s = authority.sequenceEntry(e)) {
+                        is Sequenced.Appended -> acks.add(e.id to s.seq)
+                        is Sequenced.Duplicate -> acks.add(e.id to s.seq)
+                        is Sequenced.Rejected -> send(c, ServerMsg.Reject(e.id, Protocol.refusalText(s.refusal)))
+                    }
+                }
+                if (acks.isNotEmpty()) send(c, ServerMsg.Ack(acks.map { it.first }, acks.map { it.second }))
+                fanout()
+            }
+            is ClientMsg.NeedFacts -> {
+                val items = msg.seqs.mapNotNull { n -> authority.log.entries[n]?.let { n to it.second } }
+                send(c, ServerMsg.FactsFor(items))
+            }
+            is ClientMsg.NeedClosures ->
+                send(c, ServerMsg.Closures(msg.hashes.mapNotNull { h -> authority.bodies[h]?.let { h to it } }))
+            is ClientMsg.Verify -> {
+                val st = authority.log.stateAt(msg.seq)
+                send(c, ServerMsg.Agree(msg.seq, msg.hash, st != null && Hash.stateHash(st).contentEquals(msg.hash)))
+            }
+            is ClientMsg.Say -> {
+                for ((o, oc) in conns) if (o != c && oc.who.user == conn.who.user) send(o, ServerMsg.Heard(msg.frame))
+            }
+        }
+    }
+
+    /** A connection closed: its cursor is forgotten. */
+    public fun disconnect(c: ConnId) {
+        conns.remove(c)
+    }
+
+    // §12.4 Fan-out: every connection, everything above what it has been
+    // sent, a page at a time; a snapshot for one below the horizon.
+    private fun fanout() {
+        for ((c, conn) in conns) {
+            if (conn.sent >= authority.log.headSeq) continue
+            when (val p = authority.page(conn.sent, Protocol.BATCH_LIMIT)) {
+                is Page.BelowHorizon -> {
+                    val sn = p.snapshot
+                    val rows = sn.store.tableNames.associateWith { t -> sn.store.scan(t).map { it as Value } }
+                    send(c, ServerMsg.SnapshotOf(sn.seq, sn.hash, rows))
+                    conn.sent = sn.seq
+                }
+                is Page.Entries -> {
+                    val items = p.items.map { (n, e, f) -> Triple(n, e, if (conn.mode == Mode.ByFacts) f else null) }
+                    send(c, ServerMsg.Batch(items, p.hasMore))
+                    conn.sent = maxOf(conn.sent, p.items.maxOfOrNull { it.first } ?: conn.sent)
+                }
+            }
+        }
+    }
+
+    public fun takeOutgoing(): List<Pair<ConnId, ServerMsg>> {
+        val o = out.toList()
+        out.clear()
+        return o
     }
 }

@@ -44,7 +44,6 @@ import dev.arkdb.Replica
 import dev.arkdb.Row
 import dev.arkdb.SPEC_VERSION
 import dev.arkdb.Schema
-import dev.arkdb.Scope
 import dev.arkdb.Sequenced
 import dev.arkdb.ServerMsg
 import dev.arkdb.Std
@@ -85,14 +84,13 @@ object Conformance {
     /** The vectors predate spec 2 (see `run`). */
     private var legacy = false
 
-    /** A spec-1 module as spec 2 would say it: one router per scope, each mutator on its scope's. */
+    /** A spec-1 module as later specs say it: one router, every mutator on it. */
     fun upgrade(m: Module): Module {
         if (m.spec >= SPEC_VERSION) return m
-        val routers = m.schema.scopes.map { dev.arkdb.Router(it.name, it.name, emptyList()) }
         return m.copy(
             spec = SPEC_VERSION,
-            routers = routers,
-            functions = m.functions.map { f -> if (f.kind == dev.arkdb.FnKind.Mutator) f.copy(router = f.scope) else f },
+            routers = listOf(dev.arkdb.Router("main", emptyList())),
+            functions = m.functions.map { f -> if (f.kind == dev.arkdb.FnKind.Mutator) f.copy(router = "main") else f },
         )
     }
 
@@ -416,7 +414,7 @@ object Conformance {
         }
         refused("a put with an unknown column", m.copy(functions = m.functions.map { if (it.name == add.name) it.copy(body = extraBody) else it }))
         // A read inside a helper.
-        val helper = add.copy(name = "peek", kind = dev.arkdb.FnKind.Helper, scope = null, router = null, autos = emptyList(), ret = Ty.TBool,
+        val helper = add.copy(name = "peek", kind = dev.arkdb.FnKind.Helper, router = null, autos = emptyList(), ret = Ty.TBool,
             body = listOf(Stmt.Let(0, Expr.Exists("playlist", listOf(Expr.Arg("playlist_id")))), Stmt.Return(Expr.Var(0))))
         refused("a read in a helper", m.copy(functions = listOf(helper) + m.functions))
         // A refuse outside a mutator.
@@ -518,10 +516,49 @@ object Conformance {
     private fun rebase(f: File) {
         when (f.name) {
             "three-peers.json" -> threePeers(f)
-            else -> {
-                skipped.add("rebase/${f.name}: a seeded fleet needs the server machine and Ark.Sim, which this runtime does not carry")
+            else -> fleet(f)
+        }
+    }
+
+    // A seeded fleet (Ark.Sim): the server machine and every client, through
+    // a scheduler that loses, repeats and reorders frames, then settles.
+    private fun fleet(f: File) {
+        val v = read(f)
+        val m = Decode.fromValue(v.field("module"))
+        val bodies = Hash.closures(m)
+        fun hashOf(name: String) = bodies.entries.single { it.value.fn.name == name }.key
+        fun idOf(k: Int): Id = Id(ByteArray(16).also { it[0] = (k / 256).toByte(); it[1] = (k % 256).toByte() })
+        val pid = idOf(1)
+        val sim = Sim(m.schema, bodies, v.field("clients").asInt().toInt(), v.field("seed").asInt())
+        sim.mutate(0, idOf(1000), hashOf("create_playlist"), mapOf("id" to Value.id(pid)), mapOf("name" to Value.text("Fleet")))
+        sim.settle()
+        var n = 0
+        for (op in v.field("script").asList()) {
+            when (val t = op.field("t").asText()) {
+                "add" -> {
+                    val args = mapOf("playlist_id" to Value.id(pid), "track_id" to op.field("track"))
+                    sim.mutate(op.field("peer").asInt().toInt(), idOf(2000 + n), hashOf("add_to_playlist"), emptyMap(), args)
+                    n += 1
+                }
+                "partition" -> sim.partition(op.field("peer").asInt().toInt())
+                "heal" -> sim.heal(op.field("peer").asInt().toInt())
+                "step" -> sim.step()
+                else -> throw AssertionError("unknown op $t")
             }
         }
+        sim.settle()
+        val head = v.field("expected_head").asInt()
+        val hash = v.field("expected_hash").asText()
+        val (n0, h0) = sim.serverHash()
+        eq(n0, head, "the server's head")
+        eq(Hex.encode(h0), hash, "the server's hash")
+        for ((i, cn, ch) in sim.clientHashes()) eq(cn to Hex.encode(ch), head to hash, "client $i")
+        check(sim.quiet()) { "nothing in flight or pending" }
+        for ((i, c) in sim.clients) {
+            eq(c.replica.rejections.toList(), emptyList<Pair<Id, dev.arkdb.Refusal>>(), "client $i: no rejections")
+            eq(c.replica.diverged.toList(), emptyList<Long>(), "client $i: no divergence")
+        }
+        eq(sim.server.authority.store.toValue(), v.field("final_store"), "the authority's final store")
     }
 
     private fun posOf(st: Store, k: Int): Value {
@@ -535,7 +572,6 @@ object Conformance {
         val v = read(f)
         val m = Decode.fromValue(v.field("module"))
         val sch = m.schema
-        val scope = m.schema.scopes.single().name
         val bodies = Hash.closures(m)
         // A spec-1 vector's entries name spec-1 hashes: renamed to this
         // module's, by which function's input their arguments are.
@@ -553,7 +589,7 @@ object Conformance {
         fun hashOf(r: Replica) = Hex.encode(r.verifyAt().second)
 
         // (a) An authority replays the entries in order and lands on the final hash.
-        val auth = Authority(scope, sch, bodies)
+        val auth = Authority(sch, bodies)
         for ((i, se) in entries.withIndex()) {
             val (n, e) = se
             val s = auth.sequenceEntry(e)
@@ -569,7 +605,7 @@ object Conformance {
         check(auth.log.contiguous) { "the log is contiguous" }
 
         // (b) A replica with no closures at all applies by facts.
-        val carol = Replica.open(sch, scope, emptyMap(), MemoryStore(sch), 0, emptyList())
+        val carol = Replica.open(sch, emptyMap(), MemoryStore(sch), 0, emptyList())
         eq(carol.takeChanges(), Changes.Rebuilt as Changes, "a freshly opened replica reports a rebuild once")
         for ((n, e) in entries) carol.receive(n, e)
         eq(carol.needs(), entries.map { it.first }, "without closures carol asks for every entry's facts")
@@ -581,11 +617,11 @@ object Conformance {
         eq(carol.takeChanges(), Changes.Applied(facts.flatten()) as Changes, "with nothing pending the changes are the facts")
 
         // (c) A replica with the closures replays by intent, out of order, and agrees.
-        val frank = Replica.open(sch, scope, bodies, MemoryStore(sch), 0, emptyList())
+        val frank = Replica.open(sch, bodies, MemoryStore(sch), 0, emptyList())
         for ((n, e) in entries.reversed()) frank.receive(n, e)
         eq(hashOf(frank), finalHash, "frank replays by intent, delivered in reverse")
         check(frank.needs().isEmpty() && frank.diverged.isEmpty()) { "frank needs nothing" }
-        val grace = Replica.open(sch, scope, bodies, MemoryStore(sch), 0, emptyList())
+        val grace = Replica.open(sch, bodies, MemoryStore(sch), 0, emptyList())
         for ((i, se) in entries.withIndex()) grace.receiveWith(se.first, se.second, facts[i])
         eq(hashOf(grace), finalHash, "grace replays and compares")
         check(grace.diverged.isEmpty()) { "grace's replay agreed with the facts" }
@@ -596,13 +632,13 @@ object Conformance {
         val e3 = entries[2].second
         val e9 = entries[3].second
         check(e1.actor == "alice" && e2.actor == "bob" && e3.actor == "bob" && e9.actor == "alice") { "the scenario's authors" }
-        val auth2 = Authority(scope, sch, bodies)
+        val auth2 = Authority(sch, bodies)
         fun push(e: Entry): Pair<Long, Facts> = when (val s = auth2.sequenceEntry(e)) {
             is Sequenced.Appended -> s.seq to s.facts
             else -> throw Failed("push: $s")
         }
-        val alice = Replica.open(sch, scope, bodies, MemoryStore(sch), 0, emptyList())
-        val bob = Replica.open(sch, scope, bodies, MemoryStore(sch), 0, emptyList())
+        val alice = Replica.open(sch, bodies, MemoryStore(sch), 0, emptyList())
+        val bob = Replica.open(sch, bodies, MemoryStore(sch), 0, emptyList())
         val a1 = alice.mutate(e1.id, Ctx(e1.actor, e1.session), e1.fn, e1.autos, e1.args)
         eq(a1, e1, "alice authors the vector's first entry")
         val (s1, _) = push(a1)
@@ -663,14 +699,14 @@ object Conformance {
             }
         }
         val wrong = addClosure.copy(fn = addClosure.fn.copy(body = wrongBody))
-        val dave = Replica.open(sch, scope, bodies + (hAdd to wrong), MemoryStore(sch), 0, emptyList())
+        val dave = Replica.open(sch, bodies + (hAdd to wrong), MemoryStore(sch), 0, emptyList())
         for ((i, se) in entries.withIndex()) dave.receiveWith(se.first, se.second, facts[i])
         eq(dave.diverged.toList(), listOf(2L, 3L, 4L), "a divergent runtime is detected")
         eq(hashOf(dave), finalHash, "and healed by the facts")
 
         // (f) eve has no server: her own authority, then adoption.
-        val eve = Replica.open(sch, scope, bodies, MemoryStore(sch), 0, emptyList())
-        val eveAuth = Authority(scope, sch, bodies)
+        val eve = Replica.open(sch, bodies, MemoryStore(sch), 0, emptyList())
+        val eveAuth = Authority(sch, bodies)
         val hCreate = bodies.entries.first { it.value.fn.name == "create_playlist" }.key
         val eveCtx = Ctx("eve", "eve-session")
         eve.mutate(idN(201), eveCtx, hCreate, mapOf("id" to Value.id(idN(2))), mapOf("name" to Value.text("Road")))
@@ -678,15 +714,15 @@ object Conformance {
         Authority.localCommit(eveAuth, eve)
         check(eve.cursor == 2L && eve.pending.isEmpty() && eve.view == eve.confirmed) { "alone, eve confirms her own intents" }
         eqBytes(eve.verifyAt().second, Hash.stateHash(eveAuth.store), "and her state is her authority's")
-        val adopted = Authority.adopt(sch, scope, bodies, eveAuth.log)
-        eqBytes(Hash.stateHash(adopted.store), eve.verifyAt().second, "a server adopts her scope by replaying it")
+        val adopted = Authority.adopt(sch, bodies, eveAuth.log)
+        eqBytes(Hash.stateHash(adopted.store), eve.verifyAt().second, "a server adopts her log by replaying it")
         val tampered = Log(sch)
         for ((n, ef) in eveAuth.log.entries) {
             val (e, fs) = ef
             tampered.append(e, if (n == 2L) fs.map { c -> if (c is Change.Add) Change.Add(c.table, Value.VStruct(c.row.fields + ("pos" to Value.int(99)))) else c } else fs)
         }
         val adoptErr = try {
-            Authority.adopt(sch, scope, bodies, tampered)
+            Authority.adopt(sch, bodies, tampered)
             null
         } catch (e: dev.arkdb.AdoptError) {
             e
@@ -713,32 +749,30 @@ object Conformance {
         check(auth.log.seqOf(e1.id) == 1L) { "ids are kept below the horizon" }
 
         // (h) the client machine over the same entries
-        clientMachine(sch, scope, bodies, entries, facts, finalHash, below as Page.BelowHorizon)
+        clientMachine(sch, bodies, entries, facts, finalHash, below as Page.BelowHorizon)
     }
 
     private fun clientMachine(
         sch: Schema,
-        scope: String,
         bodies: Map<FnHash, dev.arkdb.Closure>,
         entries: List<Pair<Long, Entry>>,
         facts: List<Facts>,
         finalHash: String,
         snapshot: Page.BelowHorizon,
     ) {
-        // A whole-scope client: hello, a batch without facts, and it replays.
-        val whole = Client(sch, "tok")
-        whole.subscribe(Mode.Whole, Replica.open(sch, scope, bodies, MemoryStore(sch), 0, emptyList()))
+        // A whole client: hello, a batch without facts, and it replays.
+        val whole = Client(Replica.open(sch, bodies, MemoryStore(sch), 0, emptyList()), Mode.Whole, "tok")
         check(whole.takeOutgoing().isEmpty()) { "nothing is queued while unlinked" }
         whole.connected()
-        eq(whole.takeOutgoing(), listOf<ClientMsg>(ClientMsg.Hello(listOf(Subscription(scope, 0, Mode.Whole)), "tok", SPEC_VERSION)), "hello on connect")
-        whole.recv(ServerMsg.Batch(scope, entries.map { (n, e) -> Triple(n, e, null) }, false))
-        check(whole.takeOutgoing().isEmpty()) { "a whole-scope client needs no facts" }
-        eq(Hex.encode(whole.replica(scope)!!.verifyAt().second), finalHash, "the whole-scope client's hash")
+        eq(whole.takeOutgoing(), listOf<ClientMsg>(ClientMsg.Hello(Subscription(0, Mode.Whole), "tok", SPEC_VERSION)), "hello on connect")
+        whole.recv(ServerMsg.Batch(entries.map { (n, e) -> Triple(n, e, null) }, false))
+        check(whole.takeOutgoing().isEmpty()) { "a whole client needs no facts" }
+        eq(Hex.encode(whole.replica.verifyAt().second), finalHash, "the whole client's hash")
         whole.verifyAll()
         val out = whole.takeOutgoing()
         check(out.size == 1 && out[0] is ClientMsg.Verify && (out[0] as ClientMsg.Verify).seq == 4L) { "verifyAll asks about the cursor: $out" }
-        whole.recv(ServerMsg.Agree(scope, 4, Hex.decode(finalHash), true))
-        eq(whole.agreed.toList(), listOf(Triple(scope, 4L, true)), "agree is recorded")
+        whole.recv(ServerMsg.Agree(4, Hex.decode(finalHash), true))
+        eq(whole.agreed.toList(), listOf(4L to true), "agree is recorded")
         whole.recv(ServerMsg.Heard(byteArrayOf(1, 2)))
         eq(whole.takeHeard().map { Hex.encode(it) }, listOf("0102"), "heard frames are taken in order")
         whole.say(byteArrayOf(9))
@@ -748,60 +782,56 @@ object Conformance {
         check(whole.takeOutgoing().isEmpty()) { "say is dropped while unlinked" }
 
         // A facts-mode client with no closures asks for facts and reaches the same state.
-        val byFacts = Client(sch, null)
-        byFacts.subscribe(Mode.ByFacts, Replica.open(sch, scope, emptyMap(), MemoryStore(sch), 0, emptyList()))
+        val byFacts = Client(Replica.open(sch, emptyMap(), MemoryStore(sch), 0, emptyList()), Mode.ByFacts, null)
         byFacts.connected()
         byFacts.takeOutgoing()
-        byFacts.recv(ServerMsg.Batch(scope, entries.map { (n, e) -> Triple(n, e, null) }, true))
+        byFacts.recv(ServerMsg.Batch(entries.map { (n, e) -> Triple(n, e, null) }, true))
         val asked = byFacts.takeOutgoing()
-        eq(asked, listOf(ClientMsg.NeedFacts(scope, entries.map { it.first }), ClientMsg.Hello(listOf(Subscription(scope, 0, Mode.ByFacts)), null, SPEC_VERSION)), "need facts, then hello for the rest")
-        byFacts.recv(ServerMsg.FactsFor(scope, entries.mapIndexed { i, (n, _) -> n to facts[i] }))
-        eq(Hex.encode(byFacts.replica(scope)!!.verifyAt().second), finalHash, "the facts-mode client's hash")
+        eq(asked, listOf(ClientMsg.NeedFacts(entries.map { it.first }), ClientMsg.Hello(Subscription(0, Mode.ByFacts), null, SPEC_VERSION)), "need facts, then hello for the rest")
+        byFacts.recv(ServerMsg.FactsFor(entries.mapIndexed { i, (n, _) -> n to facts[i] }))
+        eq(Hex.encode(byFacts.replica.verifyAt().second), finalHash, "the facts-mode client's hash")
 
         // A client below the horizon is sent the snapshot and continues from it.
-        val late = Client(sch, null)
-        late.subscribe(Mode.Whole, Replica.open(sch, scope, bodies, MemoryStore(sch), 0, emptyList()))
+        val late = Client(Replica.open(sch, bodies, MemoryStore(sch), 0, emptyList()), Mode.Whole, null)
         late.connected()
         late.takeOutgoing()
         val sn = snapshot.snapshot
         val rows = sn.store.tableNames.associateWith { t -> sn.store.scan(t).map { it as Value } }
-        late.recv(ServerMsg.SnapshotOf(scope, sn.seq, sn.hash, rows))
-        eq(late.replica(scope)!!.cursor, 2L, "the cursor moves to the snapshot")
-        late.recv(ServerMsg.Batch(scope, entries.filter { it.first > 2 }.map { (n, e) -> Triple(n, e, null) }, false))
-        eq(Hex.encode(late.replica(scope)!!.verifyAt().second), finalHash, "from the snapshot to the head")
+        late.recv(ServerMsg.SnapshotOf(sn.seq, sn.hash, rows))
+        eq(late.replica.cursor, 2L, "the cursor moves to the snapshot")
+        late.recv(ServerMsg.Batch(entries.filter { it.first > 2 }.map { (n, e) -> Triple(n, e, null) }, false))
+        eq(Hex.encode(late.replica.verifyAt().second), finalHash, "from the snapshot to the head")
 
         // A client that pushes: its own entry comes back as an ack; a reject drops one.
-        val pusher = Client(sch, null)
-        pusher.subscribe(Mode.Whole, Replica.open(sch, scope, bodies, MemoryStore(sch), 0, emptyList()))
+        val pusher = Client(Replica.open(sch, bodies, MemoryStore(sch), 0, emptyList()), Mode.Whole, null)
         pusher.connected()
         pusher.takeOutgoing()
         val e1 = entries[0].second
-        val mine = pusher.mutate(scope, e1.id, Ctx(e1.actor, e1.session), e1.fn, e1.autos, e1.args)
-        eq(pusher.takeOutgoing(), listOf<ClientMsg>(ClientMsg.Push(scope, listOf(mine))), "a mutation is pushed")
+        val mine = pusher.mutate(e1.id, Ctx(e1.actor, e1.session), e1.fn, e1.autos, e1.args)
+        eq(pusher.takeOutgoing(), listOf<ClientMsg>(ClientMsg.Push(listOf(mine))), "a mutation is pushed")
         val e2 = entries[1].second
-        pusher.mutate(scope, e2.id, Ctx(e2.actor, e2.session), e2.fn, e2.autos, e2.args)
-        pusher.recv(ServerMsg.Reject(scope, e2.id, "not yours"))
-        eq(pusher.replica(scope)!!.rejections.map { it.second }, listOf<Refusal>(Refusal.Refused("not yours")), "a reject is kept for the app")
-        eq(pusher.replica(scope)!!.pending.map { it.id }, listOf(e1.id), "the rejected intent is dropped")
-        pusher.recv(ServerMsg.Ack(scope, listOf(e1.id), listOf(1)))
-        eq(pusher.replica(scope)!!.cursor, 1L, "an ack confirms the intent")
-        check(pusher.replica(scope)!!.pending.isEmpty()) { "nothing pending after the ack" }
+        pusher.mutate(e2.id, Ctx(e2.actor, e2.session), e2.fn, e2.autos, e2.args)
+        pusher.recv(ServerMsg.Reject(e2.id, "not yours"))
+        eq(pusher.replica.rejections.map { it.second }, listOf<Refusal>(Refusal.Refused("not yours")), "a reject is kept for the app")
+        eq(pusher.replica.pending.map { it.id }, listOf(e1.id), "the rejected intent is dropped")
+        pusher.recv(ServerMsg.Ack(listOf(e1.id), listOf(1)))
+        eq(pusher.replica.cursor, 1L, "an ack confirms the intent")
+        check(pusher.replica.pending.isEmpty()) { "nothing pending after the ack" }
         pusher.disconnected()
         pusher.connected()
-        eq(pusher.takeOutgoing(), listOf<ClientMsg>(ClientMsg.Hello(listOf(Subscription(scope, 1, Mode.Whole)), null, SPEC_VERSION)), "reconnect says hello at the cursor")
+        eq(pusher.takeOutgoing(), listOf<ClientMsg>(ClientMsg.Hello(Subscription(1, Mode.Whole), null, SPEC_VERSION)), "reconnect says hello at the cursor")
         pusher.recv(ServerMsg.Denied("not signed in"))
         eq(pusher.denied, "not signed in", "denied is recorded")
         check(!pusher.linked) { "denied unlinks" }
 
         // Closures arriving unblock an inbox.
-        val learner = Client(sch, null)
-        learner.subscribe(Mode.Whole, Replica.open(sch, scope, emptyMap(), MemoryStore(sch), 0, emptyList()))
+        val learner = Client(Replica.open(sch, emptyMap(), MemoryStore(sch), 0, emptyList()), Mode.Whole, null)
         learner.connected()
         learner.takeOutgoing()
-        learner.recv(ServerMsg.Batch(scope, entries.map { (n, e) -> Triple(n, e, null) }, false))
-        eq(learner.replica(scope)!!.cursor, 0L, "without closures nothing applies")
+        learner.recv(ServerMsg.Batch(entries.map { (n, e) -> Triple(n, e, null) }, false))
+        eq(learner.replica.cursor, 0L, "without closures nothing applies")
         learner.recv(ServerMsg.Closures(bodies.toList()))
-        eq(Hex.encode(learner.replica(scope)!!.verifyAt().second), finalHash, "closures unblock the inbox")
+        eq(Hex.encode(learner.replica.verifyAt().second), finalHash, "closures unblock the inbox")
     }
 
     // self checks -------------------------------------------------------------
@@ -809,17 +839,12 @@ object Conformance {
     private fun storeComplete() {
         val sch = Schema(
             listOf(
-                Scope(
-                    "s",
-                    listOf(
-                        Table(
-                            "t",
-                            listOf(Column("id", Ty.TInt, false), Column("name", Ty.TText, false), Column("note", Ty.TText, true)),
-                            listOf("id"),
-                            listOf(dev.arkdb.Index(listOf("note"), true)),
-                            emptyList(),
-                        ),
-                    ),
+                Table(
+                    "t",
+                    listOf(Column("id", Ty.TInt, false), Column("name", Ty.TText, false), Column("note", Ty.TText, true)),
+                    listOf("id"),
+                    listOf(dev.arkdb.Index(listOf("note"), true)),
+                    emptyList(),
                 ),
             ),
         )
