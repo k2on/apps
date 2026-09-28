@@ -33,13 +33,24 @@ public func table<R: Row>() -> Table<R> {
     return Table()
 }
 
-/// Which tables a scope's `open()` made, while a schema is being read.
+/// Which tables a scope's `open()` made, while a schema is being read —
+/// per thread, so that a body opening its `db` elsewhere records nothing.
 enum TableRecording {
-    static let lock = NSLock()
-    static var tables: [ArkDB.Table]? = nil
+    final class Box { var tables: [ArkDB.Table] = [] }
+    static let key = "arkdb.authoring.tables"
 
     static func note(_ t: ArkDB.Table) {
-        tables?.append(t)
+        (Thread.current.threadDictionary[key] as? Box)?.tables.append(t)
+    }
+
+    static func record(_ body: () -> Void) -> [ArkDB.Table] {
+        let d = Thread.current.threadDictionary
+        let outer = d[key]
+        let b = Box()
+        d[key] = b
+        body()
+        d[key] = outer
+        return b.tables
     }
 }
 
@@ -61,13 +72,7 @@ enum RowSchema {
 
     /// A scope's tables, in the order its `open()` makes them.
     static func scope<S: Scope>(_ s: S.Type) -> ArkDB.Scope {
-        TableRecording.lock.lock()
-        defer { TableRecording.lock.unlock() }
-        TableRecording.tables = []
-        _ = S.open()
-        let ts = TableRecording.tables ?? []
-        TableRecording.tables = nil
-        return ArkDB.Scope(S.NAME, tables: ts)
+        return ArkDB.Scope(S.NAME, tables: TableRecording.record { _ = S.open() })
     }
 
     static func make<S: Scope>(_ s: S.Type) -> S { return S.open() }
