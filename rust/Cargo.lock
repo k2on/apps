@@ -1637,6 +1637,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "harken-iced"
+version = "0.1.0"
+dependencies = [
+ "ark-auth",
+ "ark-client",
+ "arkui",
+ "harken-domain",
+ "iced",
+ "js-sys",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "harken-server"
 version = "0.1.0"
 dependencies = [

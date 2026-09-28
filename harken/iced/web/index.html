@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>harken</title>
+    <!-- Generated from `branding/`, and it carries both themes itself: a tab
+         strip is light or dark and the page is never told which. That is also
+         why the splash below can draw it as an ordinary <img> — an SVG loaded
+         that way still resolves its own `prefers-color-scheme`, so the mark is
+         the right gold on either page without this file naming a colour. -->
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <style>
+      /* iced picks light or dark from the system; the page behind it has to
+         agree, or a dark window is loaded over a white flash and the boot
+         line is black on black. `color-scheme` makes the default canvas and
+         text follow the same preference the app is reading. */
+      /* One duration and one curve for the whole reveal, because the splash's
+         fade and the app's zoom are one gesture and tuning them apart is what
+         made the zoom invisible twice. `ease-out` cubic: still travelling at
+         half-way, which is what makes a slow settle legible where an ease-out
+         quint (90% done in a quarter of its duration) is a jump. */
+      :root {
+        --reveal: 1400ms;
+        --ease: cubic-bezier(0.22, 1, 0.36, 1);
+      }
+      html, body {
+        margin: 0;
+        height: 100%;
+        color-scheme: light dark;
+        font-family: system-ui, sans-serif;
+        /* A transform counts toward scrollable overflow, so the canvas at 1.2
+           is 20% wider and taller than the window for the length of the
+           reveal — which is a scrollbar down each edge that appears on load
+           and goes again a second later. The page is one canvas and never
+           scrolls; iced draws its own bars inside it. */
+        overflow: hidden;
+      }
+      /* iced appends its canvas to <body> and sizes it to 100%. */
+      canvas { display: block; }
+
+      /* The splash covers the canvas rather than the canvas starting
+         invisible, so a wasm module that never resolves leaves a page saying
+         "loading" instead of a blank one saying nothing. `Canvas` is the CSS
+         system colour `color-scheme` above already resolves — the one
+         background this file can name without writing down a colour that
+         belongs to `branding/`. */
+      #boot {
+        position: fixed;
+        inset: 0;
+        z-index: 1;
+        display: grid;
+        place-items: center;
+        background: Canvas;
+        transition: opacity var(--reveal) var(--ease);
+      }
+      #boot img {
+        width: 96px;
+        height: 96px;
+        animation: settle 420ms var(--ease) both;
+      }
+      /* The splash only fades. It has been sitting still on the page for a
+         second or two, so giving it a transform at the moment it goes means
+         starting that transform *somewhere* — and any value but 1 is the mark
+         jumping before it leaves. The movement belongs to the thing arriving. */
+      #boot.done {
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      /* The app settles *out* of the screen rather than growing into it, from
+         1.2 to 1, while the splash dissolves through it over the same window
+         and the same curve. A fade alone reads as a picture being turned up;
+         the scale is what makes it an arrival.
+
+         **Out rather than in**, which is not only taste. Coming *from* below 1
+         means the page's own ground is visible around the canvas for the whole
+         reveal — a rectangle with a seam at its edge — and how big that border
+         is is a number to tune. From 1.2 the canvas overfills the window
+         throughout and the only thing on screen is the app. */
+      canvas.arriving {
+        animation: arrive var(--reveal) var(--ease) both,
+                   focus var(--reveal) linear both;
+        will-change: transform, filter;
+      }
+      /* **The blur is what stops it shimmering, and the shimmer was not the
+         curve's fault.** A CSS transform scales the canvas's *already
+         rasterized* bitmap, so at 1.2 the browser is magnifying it 20% and
+         resampling on a grid that slides every frame — which on a screen made
+         of one-pixel zebra rows and text antialiasing is a fizz of pixels
+         crawling about. No easing fixes that; it is the resample, not the
+         motion. A blur that resolves turns the artifact into the point: the
+         softness of a magnified bitmap and the shimmer of a moving sample
+         grid are the same thing, and under a blur they read as an image
+         coming into focus.
+
+         **It runs the whole length of the scale, and it decays more slowly
+         than the scale does.** Two attempts either side of that are worth
+         keeping, because both were wrong in a way that looked principled.
+
+         Given a short curve of its own it was gone by 520ms and the remaining
+         880ms was a crisp bitmap being resampled — the tail crawls, which is
+         where the trouble actually is. Made *proportional* to the travel still
+         to come, by sharing the scale's own curve, it was exactly right early
+         and useless late: measured at 1440×900 it tracked a tenth of how far
+         the edge of the canvas had left to move, 6.3px at 63px to go and
+         0.04px at 0.44px. A tenth of nothing is nothing, so the tail came out
+         crisp again.
+
+         Then a **floor** — 0.6px held flat until the motion stopped and
+         cleared over the last 56ms — which fixed the crawl and introduced a
+         worse thing: the whole screen snapping into focus at the end. A
+         settle's one job is to arrive without a moment in it, and that was a
+         moment. Anything that *holds* has to stop holding somewhere.
+
+         So it glides. The stops are hand-placed and run at `linear`: the first
+         five track the settle's own deceleration, and from there it runs down
+         to nothing across the entire tail — 0.8px at 600ms, 0.5px at 840ms,
+         0.25px at 1120ms, gone at 1400ms. That is slower than the scale's own
+         decay, which is the point: there is still softness where the crawl is,
+         and it reaches zero at the instant the motion does, with no step in it
+         anywhere.
+
+         **And it ends at `none`, not at `blur(0)`.** They look identical and
+         are not: `blur(0)` keeps the element on the filter rasterization path,
+         so dropping the class afterwards changes how the canvas is rastered in
+         one frame — a crispness pop at the end of a settle whose whole job is
+         to not have one. Interpolating to `none` lands on the resting value,
+         so removing the class is a no-op. */
+      @keyframes focus {
+        0%   { filter: blur(9px); }
+        7%   { filter: blur(6.3px); }
+        14%  { filter: blur(4.2px); }
+        21%  { filter: blur(2.7px); }
+        30%  { filter: blur(1.5px); }
+        43%  { filter: blur(0.8px); }
+        60%  { filter: blur(0.5px); }
+        80%  { filter: blur(0.25px); }
+        100% { filter: none; }
+      }
+      /* **The canvas does not fade.** It did, opposite the splash, which
+         sounds like a cross-dissolve and is not one: two half-transparent
+         layers over the page means the splash's background hides nothing from
+         the first frame, so what you watch is a washed-out app with a gold
+         mark dissolving on it rather than a screen coming off. The splash is
+         opaque and goes; the app is simply there underneath, and the only
+         thing it does is scale. */
+      @keyframes arrive {
+        from { transform: scale(1.2); }
+        to   { transform: none; }
+      }
+      @keyframes settle {
+        from { opacity: 0; transform: scale(0.94); }
+        to   { opacity: 1; transform: none; }
+      }
+
+      /* **There is deliberately no `prefers-reduced-motion` rule.** There was,
+         and it suppressed the scale outright — which is what that preference
+         is for when the motion is parallax, or large, or repeats. This is a
+         one-shot settle of twenty percent over a second on page load, and the
+         call here is that it stays. It is worth knowing how it was found: the
+         zoom was reported invisible three times running while every
+         measurement said it worked, because every measurement was taken at the
+         browser default and the machine looking at it was not. An instrument
+         pointed somewhere other than where the complaint is will agree with
+         you all day.
+      */
+    </style>
+  </head>
+  <body>
+    <div id="boot"><img src="favicon.svg" alt="harken" /></div>
+    <script type="module">
+      // `?v=dev` is rewritten to the build's store hash by `iced/nix/web.nix`,
+      // and it is on both files because a browser holding the last build never
+      // asks about either: with no `Cache-Control` and a `Last-Modified` of
+      // 1970 — which is what every file in the nix store carries — the module
+      // and the wasm are heuristically fresh for years and a reload does not
+      // revalidate a subresource. A new page naming URLs the cache has never
+      // seen is the one thing that reaches it; the server's validator
+      // (`harken_server::web`) is what keeps the next cache honest. The wasm
+      // is named here rather than left to the glue, which derives it from
+      // its own URL with the query dropped.
+      import init from "./pkg/harken-iced.js?v=dev";
+      // The wasm module's `start` runs the app; take the splash down once it
+      // has, and not before — the canvas is painting underneath the whole
+      // time, so this is a reveal rather than a load.
+      await init({ module_or_path: new URL("pkg/harken-iced_bg.wasm?v=dev", document.baseURI) });
+
+      const boot = document.getElementById("boot");
+      // A transform on a canvas moves the box winit reads the pointer out of,
+      // so the class is dropped the moment the animation is over and clicks
+      // land exactly where they did before. Nobody is clicking during it.
+      const arrive = (canvas) => {
+        canvas.classList.add("arriving");
+        // Two animations run on it; the transform's is the long one, so the
+        // class comes off when *that* ends rather than on the first to finish.
+        canvas.addEventListener("animationend", (e) => {
+          if (e.animationName === "arrive") canvas.classList.remove("arriving");
+        });
+      };
+      // `transitionend` does not fire when the transition is suppressed —
+      // reduced motion, a background tab — so the timeout is the one that has
+      // to be there, and whichever lands first wins. It is read off `--reveal`
+      // rather than written down: at a fixed 800ms it was *shorter* than the
+      // fade the moment that went to a second, so it cut the splash off at 2%
+      // opacity — which is invisible, and would not have been at 200ms.
+      const dismiss = () => {
+        if (!boot) return;
+        const reveal = parseFloat(getComputedStyle(boot).transitionDuration) * 1000;
+        boot.classList.add("done");
+        boot.addEventListener("transitionend", () => boot.remove(), { once: true });
+        setTimeout(() => boot.remove(), (reveal || 1000) + 400);
+      };
+
+      // The keyboard only reaches the app while its canvas has the focus, and
+      // a freshly loaded page focuses <body> — so `j` did nothing at all until
+      // something had been clicked. iced gives the canvas `tabindex=0`, so it
+      // can take focus; it just has to be told to. Focused on arrival and
+      // again whenever the window comes back, which is what a reader who
+      // alt-tabs away and types `j` expects.
+      const grab = () => document.querySelector("canvas")?.focus();
+      addEventListener("focus", grab);
+
+      // Once, on the canvas — the window `focus` listener above must not
+      // replay the animation every time somebody alt-tabs back.
+      // **Two frames before it starts.** `init()` resolves at the app's busiest
+      // moment — iced is opening the database, hydrating the view and decoding
+      // covers — and a settle that begins there is competing for the frames it
+      // is made of. Two `requestAnimationFrame`s put it after iced has painted
+      // at least once, which costs about 30ms of splash and buys the animation
+      // calmer water.
+      const ready = (canvas) => {
+        grab();
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            arrive(canvas);
+            dismiss();
+          }),
+        );
+      };
+
+      // The canvas is appended by the wasm module, so it may not exist yet on
+      // the first try. One observer, disconnected as soon as it has one.
+      const canvas = document.querySelector("canvas");
+      if (canvas) {
+        ready(canvas);
+      } else {
+        const watch = new MutationObserver(() => {
+          const late = document.querySelector("canvas");
+          if (late) {
+            ready(late);
+            watch.disconnect();
+          }
+        });
+        watch.observe(document.body, { childList: true });
+      }
+    </script>
+  </body>
+</html>
