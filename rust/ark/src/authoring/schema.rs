@@ -14,9 +14,33 @@ use super::cx::{self, H};
 use super::raw;
 use super::values::{Bool, Data, List, Opt};
 
-/// A scope: a struct of the [`Table`]s it holds, and its name.
+/// A scope: a struct of the [`Table`]s it holds, and its name. `open`
+/// builds it with a [`table`] per field; the order the fields are written
+/// there is the schema's order of the scope's tables.
 pub trait Scope: Sized + 'static {
     const NAME: &'static str;
+    fn open() -> Self;
+}
+
+thread_local! {
+    static RECORDING: std::cell::RefCell<Option<Vec<IrTable>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// A table of a scope, in [`Scope::open`]: `playlist: table()`.
+pub fn table<T: Row>() -> Table<T> {
+    RECORDING.with(|r| {
+        if let Some(ts) = r.borrow_mut().as_mut() {
+            ts.push(table_of::<T>());
+        }
+    });
+    Table { _t: PhantomData }
+}
+
+/// A scope's tables, in the order its `open` writes them.
+pub(crate) fn tables_of<S: Scope>() -> Vec<IrTable> {
+    let prev = RECORDING.with(|r| r.borrow_mut().replace(Vec::new()));
+    let _ = S::open();
+    RECORDING.with(|r| std::mem::replace(&mut *r.borrow_mut(), prev)).unwrap_or_default()
 }
 
 /// A row of a table: the struct, its table's name, its key's shape, and its
@@ -45,10 +69,7 @@ impl<T: Row> Data for T {
         let names = row_names::<T>();
         let hs: Vec<H> = if cx::emitting() {
             let base = cx::expr(h);
-            names
-                .iter()
-                .map(|n| cx::e(Expr::Field(Box::new(base.clone()), n.clone())))
-                .collect()
+            names.iter().map(|n| cx::e(Expr::Field(Box::new(base.clone()), n.clone()))).collect()
         } else {
             let v = cx::value(h);
             names
@@ -61,11 +82,15 @@ impl<T: Row> Data for T {
                 })
                 .collect()
         };
+        cx::remember(&hs, h);
         raw::assemble(&hs, T::NAME)
     }
     fn to_h(&self) -> H {
         let names = row_names::<T>();
         let hs = raw::disassemble(self, names.len(), T::NAME);
+        if let Some(h) = cx::origin(&hs) {
+            return h;
+        }
         if cx::emitting() {
             cx::e(Expr::Struct(names.into_iter().zip(hs).map(|(n, h)| (n, cx::expr(h))).collect()))
         } else {
@@ -439,10 +464,6 @@ pub struct Table<T> {
     _t: PhantomData<fn() -> T>,
 }
 
-fn touch<T: Row>() {
-    cx::touch(table_of::<T>);
-}
-
 fn key_values(hs: &[H]) -> Vec<Value> {
     hs.iter().map(|h| cx::value(*h)).collect()
 }
@@ -476,7 +497,6 @@ fn row_of(h: H) -> Option<crate::store::Row> {
 impl<T: Row> Table<T> {
     /// `EGet t k`, bound: the row under the key, if any.
     pub fn get(&self, key: T::Key) -> Opt<T> {
-        touch::<T>();
         let ks = key.handles();
         if cx::emitting() {
             return Opt::from_h(cx::bind(Expr::Get(T::NAME.into(), ks.iter().map(|h| cx::expr(*h)).collect())));
@@ -490,7 +510,6 @@ impl<T: Row> Table<T> {
 
     /// `EExists t k`, bound.
     pub fn exists(&self, key: T::Key) -> Bool {
-        touch::<T>();
         let ks = key.handles();
         if cx::emitting() {
             return Bool::from_h(cx::bind(Expr::Exists(T::NAME.into(), ks.iter().map(|h| cx::expr(*h)).collect())));
@@ -503,7 +522,6 @@ impl<T: Row> Table<T> {
     }
 
     fn query(&self) -> Query<T> {
-        touch::<T>();
         Query {
             plan: Plan::from(T::NAME),
             _t: PhantomData,
@@ -538,21 +556,18 @@ impl<T: Row> Table<T> {
     /// `SInsert t row []`: write the row unless one has its key; `.on(cols)`
     /// matches on a unique index instead.
     pub fn insert(&self, row: T) -> Write<T> {
-        touch::<T>();
         Write::new(WriteKind::Insert, row.to_h())
     }
 
     /// `SUpsert t row []`: write the row; `.on(cols)` keeps the key of a
     /// row matching on a unique index.
     pub fn upsert(&self, row: T) -> Write<T> {
-        touch::<T>();
         Write::new(WriteKind::Upsert, row.to_h())
     }
 
     /// `SUpdate t k row new`: the row under the key replaced by `f` of it;
     /// nothing when there is none.
     pub fn update(&self, key: T::Key, f: impl FnOnce(T) -> T) -> Effect {
-        touch::<T>();
         let ks = key.handles();
         if cx::emitting() {
             let k: Vec<Expr> = ks.iter().map(|h| cx::expr(*h)).collect();
@@ -576,7 +591,6 @@ impl<T: Row> Table<T> {
 
     /// `SDelete t k`.
     pub fn delete(&self, key: T::Key) -> Effect {
-        touch::<T>();
         let ks = key.handles();
         if cx::emitting() {
             cx::stmt(Stmt::Delete(T::NAME.into(), ks.iter().map(|h| cx::expr(*h)).collect()));
@@ -664,11 +678,16 @@ impl<T: Row> Query<T> {
         List::from_h(self.pull())
     }
 
-    /// `SLet s (ESelect plan{limit = 1})` and `EStd First [EVar s]`.
+    /// `SLet s (ESelect plan{limit = 1})`, `SLet s' (EStd First [EVar s])`,
+    /// and the value `EVar s'`.
     pub fn first(mut self) -> Opt<T> {
         self.plan.limit = Some(1);
         let rows = self.pull();
-        List::<T>::from_h(rows).first()
+        let first = List::<T>::from_h(rows).first();
+        if cx::emitting() {
+            return Opt::from_h(cx::bind(cx::expr(first.to_h())));
+        }
+        first
     }
 }
 

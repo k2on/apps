@@ -94,6 +94,7 @@ fn bug_text(e: &EvalError) -> String {
 
 type Applied = Result<Result<Vec<Change>, Refusal>, EvalError>;
 
+#[allow(clippy::too_many_arguments)]
 /// Apply an entry's function by its hash: natively when a procedure is
 /// held, through the closure otherwise; `None` when neither is.
 fn run(
@@ -326,7 +327,16 @@ impl Replica {
         };
         if self.can_apply(&e.fn_hash) && !self.diverged.contains(&n) {
             let mut st = self.confirmed.clone();
-            return match run(&self.schema, &self.bodies, &self.natives, &e.fn_hash, &ctx_of(e), &e.autos, &e.args, &mut st) {
+            return match run(
+                &self.schema,
+                &self.bodies,
+                &self.natives,
+                &e.fn_hash,
+                &ctx_of(e),
+                &e.autos,
+                &e.args,
+                &mut st,
+            ) {
                 Some(Ok(Ok(chs))) => match mf {
                     Some(f) if *f != chs => by_facts(f, true),
                     _ => Some((st, chs, false)),
@@ -353,7 +363,16 @@ impl Replica {
         let mut kept = Vec::with_capacity(pending.len());
         for e in pending {
             let mut view = self.view.clone();
-            match run(&self.schema, &self.bodies, &self.natives, &e.fn_hash, &ctx_of(&e), &e.autos, &e.args, &mut view) {
+            match run(
+                &self.schema,
+                &self.bodies,
+                &self.natives,
+                &e.fn_hash,
+                &ctx_of(&e),
+                &e.autos,
+                &e.args,
+                &mut view,
+            ) {
                 None => self.rejections.push((e.id, Refusal::Refused("no closure for a pending intent".into()))),
                 Some(Ok(Ok(_))) => {
                     self.view = view;
@@ -435,7 +454,16 @@ impl Authority {
             return Sequenced::Duplicate(n);
         }
         let mut st = self.store.clone();
-        match run(&self.schema, &self.bodies, &self.natives, &e.fn_hash, &ctx_of(e), &e.autos, &e.args, &mut st) {
+        match run(
+            &self.schema,
+            &self.bodies,
+            &self.natives,
+            &e.fn_hash,
+            &ctx_of(e),
+            &e.autos,
+            &e.args,
+            &mut st,
+        ) {
             None => Sequenced::Rejected(Refusal::Refused(format!("unknown function {}", hex(&e.fn_hash)))),
             Some(Err(bug)) => Sequenced::Rejected(Refusal::Refused(bug_text(&bug))),
             Some(Ok(Err(why))) => Sequenced::Rejected(why),

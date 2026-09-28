@@ -9,7 +9,7 @@ use crate::ir::{Auto, CmpOp, Expr, Op, StdFn};
 use crate::schema::Ty;
 use crate::value::Value;
 
-use super::cx::{self, Node, H};
+use super::cx::{self, H};
 use super::schema::Row;
 
 /// A type of the vocabulary: what it is in the IR, and how it is carried.
@@ -347,7 +347,11 @@ impl<T: Data> Data for Opt<T> {
 /// `ESome x`.
 pub fn some<T: Data>(x: impl Into<T>) -> Opt<T> {
     let h = x.into().to_h();
-    Opt::from_h(cx::op(&[h], |mut es| Expr::Some(Box::new(es.pop().expect("one"))), |mut vs| Ok(vs.pop().expect("one"))))
+    Opt::from_h(cx::op(
+        &[h],
+        |mut es| Expr::Some(Box::new(es.pop().expect("one"))),
+        |mut vs| Ok(vs.pop().expect("one")),
+    ))
 }
 
 /// `ENone`, at `T`.
@@ -541,7 +545,12 @@ impl<T: Data> List<T> {
         std1(StdFn::Reverse, self.0)
     }
 
-    fn each<U: Data>(self, f: &mut dyn FnMut(T) -> H, mk: impl FnOnce(Box<Expr>, crate::ir::Sym, Box<Expr>) -> Expr, native: impl FnOnce(Vec<(Value, Value)>) -> Value) -> U {
+    fn each<U: Data>(
+        self,
+        f: &mut dyn FnMut(T) -> H,
+        mk: impl FnOnce(Box<Expr>, crate::ir::Sym, Box<Expr>) -> Expr,
+        native: impl FnOnce(Vec<(Value, Value)>) -> Value,
+    ) -> U {
         if cx::emitting() {
             let xs = cx::expr(self.0);
             let x = cx::fresh();
@@ -561,7 +570,9 @@ impl<T: Data> List<T> {
 
     /// `EMap`.
     pub fn map<U: Data>(self, mut f: impl FnMut(T) -> U) -> List<U> {
-        self.each(&mut |x| f(x).to_h(), Expr::Map, |ps| Value::List(ps.into_iter().map(|(_, r)| r).collect()))
+        self.each(&mut |x| f(x).to_h(), Expr::Map, |ps| {
+            Value::List(ps.into_iter().map(|(_, r)| r).collect())
+        })
     }
     /// `EFilter`.
     pub fn filter(self, mut f: impl FnMut(T) -> Bool) -> List<T> {
@@ -571,11 +582,15 @@ impl<T: Data> List<T> {
     }
     /// `EAny`.
     pub fn any(self, mut f: impl FnMut(T) -> Bool) -> Bool {
-        self.each(&mut |x| f(x).0, Expr::Any, |ps| Value::Bool(ps.iter().any(|(_, r)| *r == Value::Bool(true))))
+        self.each(&mut |x| f(x).0, Expr::Any, |ps| {
+            Value::Bool(ps.iter().any(|(_, r)| *r == Value::Bool(true)))
+        })
     }
     /// `EAll`.
     pub fn all(self, mut f: impl FnMut(T) -> Bool) -> Bool {
-        self.each(&mut |x| f(x).0, Expr::All, |ps| Value::Bool(ps.iter().all(|(_, r)| *r == Value::Bool(true))))
+        self.each(&mut |x| f(x).0, Expr::All, |ps| {
+            Value::Bool(ps.iter().all(|(_, r)| *r == Value::Bool(true)))
+        })
     }
     /// `ESortBy`: stable, by the key under the one order of values.
     pub fn sort_by<K: Data>(self, mut f: impl FnMut(T) -> K) -> List<T> {
@@ -632,12 +647,12 @@ pub fn pick<T: Data>(c: Bool, a: impl Into<T>, b: impl Into<T>) -> T {
 // The context ----------------------------------------------------------------
 
 /// Who authored the entry, and the non-determinism it was given.
+#[non_exhaustive]
 pub struct Ctx {
     /// `ECtxUser`: the user the authority verified.
     pub user: Text,
     /// `ECtxSession`: the login the entry was authored under.
     pub session: Text,
-    _private: (),
 }
 
 impl Ctx {
@@ -646,14 +661,12 @@ impl Ctx {
             Ctx {
                 user: Text(cx::e(Expr::CtxUser)),
                 session: Text(cx::e(Expr::CtxSession)),
-                _private: (),
             }
         } else {
             let (u, s) = cx::native(|n| (n.ctx.user.clone(), n.ctx.session.clone()));
             Ctx {
                 user: Text(cx::lit(Value::Text(u))),
                 session: Text(cx::lit(Value::Text(s))),
-                _private: (),
             }
         }
     }
@@ -683,12 +696,4 @@ impl Ctx {
     pub fn new_id<T: Row>(&self, name: &str) -> Id<T> {
         Id::from_h(self.auto(name, Auto::NewId(T::NAME.into())))
     }
-}
-
-pub(crate) fn text_h(t: &Text) -> H {
-    t.0
-}
-
-pub(crate) fn node_of_value(v: Value) -> H {
-    cx::node(Node::V(v))
 }

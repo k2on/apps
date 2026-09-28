@@ -23,11 +23,12 @@
 //! | [`authoring`] | `spec/AUTHORING.md`: the vocabulary a domain is written in, run `Emit` or `Native` |
 //!
 //! A domain is written once, in Rust, in the vocabulary of
-//! `spec/AUTHORING.md` ([`authoring`]): run under `Emit` it is the module
-//! (the `.ark` every runtime verifies and hashes), run under `Native` it
-//! applies entries directly, and [`eval`] is what both mean. Nothing is
-//! generated into this crate's private shape any more; `GENERATED.md` and
-//! the prelude it named are retired.
+//! `spec/AUTHORING.md` — the contract, read it first — through
+//! [`authoring`]: run under `Emit` it is the module (the `.ark` every
+//! runtime verifies and hashes), run under `Native` it applies entries
+//! directly, and [`eval`] is what both mean. Nothing is generated into this
+//! crate's private shape any more: `GENERATED.md`, `GENERATED-RUST.md` and
+//! the prelude they named are retired, and so is `ark-builder`.
 //!
 //! No async, no sockets: every machine here is sans-io, and a transport is
 //! a loop around one. The one `unsafe` is in [`authoring`], and says why.

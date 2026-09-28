@@ -134,7 +134,7 @@ pub trait Store {
         self.get(table, key).is_some()
     }
 
-    /// `db.get` as GENERATED.md has it: the row, or `Null`.
+    /// The row under a key as a value, or `Null`.
     fn get_value(&self, table: &str, key: &[Value]) -> Value {
         self.get(table, key).map(Value::Struct).unwrap_or(Value::Null)
     }

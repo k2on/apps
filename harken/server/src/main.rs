@@ -10,7 +10,7 @@ use harken_server::{start, Config};
 const USAGE: &str =
     "usage: harken-server [--module PATH] [--data DIR] [--listen ADDR] [--media DIR]
 
-  --module PATH   the .ark module to host          (HARKEN_MODULE; required)
+  --module PATH   an .ark module to host instead of harken's own  (HARKEN_MODULE; optional)
   --data DIR      where each scope's log is kept    (HARKEN_DATA; default ./harken-data)
   --listen ADDR   host:port to serve on             (HARKEN_LISTEN; default 127.0.0.1:8787)
   --media DIR     media root: scanned, served at /media  (HARKEN_MEDIA; optional)";
@@ -36,9 +36,6 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Option<Config>> {
             other => bail!("unknown flag {other}\n{USAGE}"),
         }
     }
-    let Some(module) = module else {
-        bail!("no module: pass --module or set HARKEN_MODULE\n{USAGE}");
-    };
     Ok(Some(Config {
         module,
         data: data.unwrap_or_else(|| PathBuf::from("harken-data")),

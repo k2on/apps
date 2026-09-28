@@ -12,5 +12,5 @@ cd "$(dirname "$0")"
 VECTORS="${1:-$(pwd)/../spec/vectors}"
 rm -rf out test.jar
 kotlinc ark-runtime/src/main/kotlin -d out
-kotlinc ark-runtime/src/test/kotlin -cp out -include-runtime -d test.jar
+kotlinc ark-runtime/src/test/kotlin ../harken/domain/gen/kotlin -cp out -include-runtime -d test.jar
 exec java -cp "out:test.jar" dev.arkdb.conformance.Conformance "$VECTORS"

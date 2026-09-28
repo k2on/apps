@@ -1,22 +1,27 @@
 # harken for Android
 
 Compose over the Kotlin runtime (`kotlin/ark-runtime`), the Kotlin client
-(`kotlin/ark-client`) and the generated domain
-(`domain/gen/kotlin/HarkenGen.kt`). It is the phone the top-level README
-describes: an exact replica of the `library` and `playlists` scopes, running
-the same generated code the server and the desktop run, with nothing
-crossing a bridge.
+(`kotlin/ark-client`) and harken's domain written in the authoring
+vocabulary (`domain/gen/kotlin/{Schema,Library,Playlists,Module}.kt`,
+package `harken.gen` — see `spec/AUTHORING.md`). It is the phone the
+top-level README describes: an exact replica of the `library` and
+`playlists` scopes that runs the domain **natively, in Kotlin** — the same
+program that, run under Emit, is the module the server and the desktop hold
+by hash — with nothing crossing a bridge and no code generated into a
+private shape.
 
 **Assembled, not run.** `nix build .#harken-apk` compiles every Kotlin file
 here and produces the APK, so the Compose code is at least what the compiler
 accepts; nothing in the container this was written in can install or run
-it. What *has* been exercised is everything under it: `ark-runtime` and `ark-client` build
-and pass their tests under `gradle build` (JVM 21), `HarkenGen.kt` compiles
-against them, and a JVM smoke test made exactly the calls `Model.kt` makes
-— open a session, `create_playlist`, `add_to_playlist`, `remove_from_playlist`
-through the generated bodies, the three queries through `HarkenGen.query`, a
-refusal surfaced, both scopes verified against the peer's own authority. The
-Compose and navigation code is written against the current stable APIs
+it. What *has* been exercised is everything under it: `ark-runtime` and
+`ark-client` build and pass their tests under `gradle build` (JVM 21); the
+four domain files compile in the runtime's tests, emit a module that
+verifies, and every procedure of them — `create_playlist`,
+`add_to_playlist`, `remove_from_playlist`, `library`, `playlists`,
+`playlist_items`, with the `signed_in` guard and the `owned` provide in
+front — is run natively and by the interpreter over its emitted IR and
+must agree, refusals included (`kotlin/ark-runtime/src/test/.../Authoring.kt`).
+The Compose and navigation code is written against the current stable APIs
 (Compose BOM 2024.12.01, Material 3, Navigation 2.8) and checked by reading.
 Expect the first build on a real machine to want small fixes.
 
@@ -79,19 +84,29 @@ and build-tools 35.0.0, plus JDK 17 or 21, the same project builds directly:
     gradle assembleDebug          # or open the directory in Android Studio
     adb install app/build/outputs/apk/debug/app-debug.apk
 
-The domain must have been generated first, because the app references it by
-source directory rather than copying it:
+The domain is referenced by source directory rather than copied:
+`app/build.gradle.kts` adds `../../domain/gen/kotlin`. Those four files are
+what `arkc gen kotlin` prints from `harken.ark` — the line-for-line Kotlin
+spelling of `domain/src/{schema,library,playlists,module}.rs` — with only
+what the phone calls:
 
     nix run .#arkc -- gen kotlin harken/domain/harken.ark \
-        harken/domain/gen/kotlin --name Harken \
+        harken/domain/gen/kotlin --package harken.gen \
         --only create_playlist,add_to_playlist,remove_from_playlist,library,playlists,playlist_items
 
-`app/build.gradle.kts` adds `../../domain/gen/kotlin` as a source directory.
-The generated `object HarkenGen` (package `harken.gen`) carries the whole
-module's bytes (`MODULE_BYTES`, `add_track` included, so the replica can
-replay the server's entries by intent), the three mutators the phone
-authors, the three queries, `apply`, `query` and the typed `<name>Args`
-builders. Regenerate it whenever `domain/` changes; never edit it.
+So `Library.kt` has the `library` query and no `add_track`: the scanner's
+entries arrive as facts, which the replica applies without running
+anything. The schema is always whole. `harken.gen.module()` is a
+`dev.arkdb.authoring.Module`; `Session.open(dir, module(), user, url)`
+emits it once for the IR the replicas hash and verify against, and hands
+the session its `procedures()` to run natively. Never edit the four files
+by hand once the printer writes them; regenerate.
+
+The app is built for JVM 21 (`compileOptions`, `jvmTarget`), as the
+runtime is: the domain calls the vocabulary's inline functions
+(`router<S>()`, `col<T, V>()`, `ctx.newId(..)`), and Kotlin refuses to
+inline bytecode built for a newer JVM than its caller. D8 accepts Java 21
+class files.
 
 ### How the runtime gets in
 
@@ -137,20 +152,28 @@ pending count):
   reopens it. A status block prints each scope's cursor, pending, rejections
   and divergences, and a button asks the authority to verify.
 
-Every mutation goes through `Session.mutateWith`, so it is the **generated**
-code that computes the optimistic change:
+Every mutation and every query goes through the session by name, and the
+session runs the procedure **natively**: the replica holds
+`module().procedures()` by the hash an entry names, so the optimistic
+apply, the rebase's replay, and a peer alone sequencing its own entries all
+run the Kotlin body directly. The interpreter runs only what arrives that
+the phone has no procedure for:
 
 ```kotlin
-session.mutateWith("add_to_playlist", HarkenGen.addToPlaylistArgs(pid, tid)) { db ->
-    HarkenGen.addToPlaylist(db, ctx, autos, args)
-}
+session.mutate("add_to_playlist", mapOf("playlist_id" to Value.id(pid), "track_id" to Value.id(tid)))
+session.query("playlist_items", mapOf("playlist_id" to Value.id(pid)))
 ```
 
 The entry recorded is byte-identical to what the interpreter would record,
-and `kotlin/ark-client`'s tests hold the two to the same changes and the same
-hash on the demo module. A rebase, though, replays pending intents through
-the interpreter (the runtime's `Replica` does), which is why the module bytes
-travel with the app.
+and `kotlin/ark-client`'s tests hold a native session and an interpreted
+one to the same entries, changes and hash on the demo module.
+
+The **new-playlist dialog** checks the name as it is typed with the form
+validator — `Session.check("create_playlist", input)`, which runs
+`create_playlist`'s own input checks (`trim`, `min(1).why("a playlist
+needs a name")`, `max(120)`) — and shows the message under the field; the
+button is enabled exactly when the mutation would accept the name. A query
+the `signed_in` guard refuses draws as an empty list.
 
 `Model.kt` is one `AndroidViewModel` around a `Session`: it pumps it every
 50 ms from `viewModelScope` (so every call into the session is on the main

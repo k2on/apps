@@ -1,33 +1,41 @@
-//! The generated domain, included from exactly one place, and the names the
-//! screens use for it: harken's tables `track`, `playlist` and
-//! `playlist_item`; its queries `library`, `playlists` and `playlist_items`;
-//! its mutators `create_playlist`, `add_to_playlist` and
-//! `remove_from_playlist`, each reached through the typed `*_args` builder
-//! so that no field name is spelled here. `add_track` is the scanner's and
-//! is deliberately not offered as a [`Call`]; a peer alone authors it by
-//! intent through the module's own closure (`Peer::author_by_intent`).
+//! harken's domain as the screens use it: its tables `track`, `playlist`
+//! and `playlist_item`; its queries `library`, `playlists` and
+//! `playlist_items`, run natively over a scope's optimistic store; its
+//! mutators `create_playlist`, `add_to_playlist` and `remove_from_playlist`
+//! as [`Call`]s the peer authors through harken's own procedures
+//! (`harken_domain::module()`). `add_track` is the scanner's and is
+//! deliberately not offered as a [`Call`]; a peer alone authors it by name
+//! (`Peer::author_by_intent`).
 
-#[rustfmt::skip]
-#[path = "../../domain/gen/rust/harken_gen.rs"]
-pub mod gen;
+use std::collections::BTreeMap;
 
-use ark::gen::{Args, Ctx, Db, Fault, Id, Value};
+use ark::authoring::Procedure;
+use ark::eval::{Args, Ctx};
+use ark::hash::FnHash;
+use ark::store::MemoryStore;
+use ark::value::{Id, Value};
 
-/// The scope the tracks live in.
-pub const LIBRARY: &str = "library";
-/// The scope the playlists live in.
-pub const PLAYLISTS: &str = "playlists";
+pub use harken_domain::{LIBRARY, PLAYLISTS};
 
-/// A generated mutator: `fn(db, ctx, autos, args)`.
-pub type Body = fn(&mut Db, &Ctx, &Args, &Args) -> Result<(), Fault>;
-
-/// One call of a generated mutator: which function, into which scope, with
-/// which arguments, and the generated body that applies it.
+/// One call of a mutator: which, into which scope, with which input. The
+/// procedure that applies it is harken's own, run natively.
 pub struct Call {
     pub name: &'static str,
     pub scope: &'static str,
     pub args: Args,
-    pub body: Body,
+}
+
+/// A scope's optimistic store as the queries read it: the store, who is
+/// asking, and the procedures.
+pub struct Db<'a> {
+    pub store: &'a MemoryStore,
+    pub ctx: &'a Ctx,
+    pub procs: &'a BTreeMap<String, (FnHash, Procedure)>,
+}
+
+fn query(db: &Db, name: &str, args: Args) -> Result<Value, String> {
+    let (_, p) = db.procs.get(name).ok_or_else(|| format!("no procedure {name}"))?;
+    p.query(db.ctx, &args, db.store).map_err(|e| format!("{name}: {e:?}"))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -87,41 +95,46 @@ fn item_of(row: &Value) -> Item {
     }
 }
 
-// -- reads: the generated queries, over the `library` and `playlists` stores
+// -- reads: harken's queries, over the `library` and `playlists` stores
 
 /// `library()`: every track, by artist, album, title, id.
-pub fn library(db: &Db) -> Result<Vec<Track>, Fault> {
-    Ok(gen::library(db, &Args::new())?.as_list().iter().map(track_of).collect())
+pub fn library(db: &Db) -> Result<Vec<Track>, String> {
+    Ok(query(db, "library", Args::new())?.as_list().iter().map(track_of).collect())
 }
 
-/// `playlists()`: every playlist, by name.
-pub fn playlists(db: &Db) -> Result<Vec<Playlist>, Fault> {
-    Ok(gen::playlists(db, &Args::new())?.as_list().iter().map(playlist_of).collect())
+/// `playlists()`: the asker's playlists, by name.
+pub fn playlists(db: &Db) -> Result<Vec<Playlist>, String> {
+    Ok(query(db, "playlists", Args::new())?.as_list().iter().map(playlist_of).collect())
 }
 
 /// `playlist_items(playlist_id)`: the items of one playlist, by position.
-pub fn playlist_items(db: &Db, playlist_id: Id) -> Result<Vec<Item>, Fault> {
+pub fn playlist_items(db: &Db, playlist_id: Id) -> Result<Vec<Item>, String> {
     let args = Args::from([("playlist_id".to_string(), Value::id(playlist_id))]);
-    Ok(gen::playlist_items(db, &args)?.as_list().iter().map(item_of).collect())
+    Ok(query(db, "playlist_items", args)?.as_list().iter().map(item_of).collect())
 }
 
-// -- writes: the generated mutators, each with its typed argument builder
+// -- writes: harken's mutators, each with its input
 
 pub fn create_playlist(name: String) -> Call {
     Call {
         name: "create_playlist",
         scope: PLAYLISTS,
-        args: gen::create_playlist_args(name),
-        body: gen::create_playlist,
+        args: Args::from([("name".to_string(), Value::text(name))]),
     }
+}
+
+fn on_playlist(playlist_id: Id, track_id: Id) -> Args {
+    Args::from([
+        ("playlist_id".to_string(), Value::id(playlist_id)),
+        ("track_id".to_string(), Value::id(track_id)),
+    ])
 }
 
 pub fn add_to_playlist(playlist_id: Id, track_id: Id) -> Call {
     Call {
         name: "add_to_playlist",
         scope: PLAYLISTS,
-        args: gen::add_to_playlist_args(playlist_id, track_id),
-        body: gen::add_to_playlist,
+        args: on_playlist(playlist_id, track_id),
     }
 }
 
@@ -130,8 +143,7 @@ pub fn remove_from_playlist(playlist_id: Id, track_id: Id) -> Option<Call> {
     Some(Call {
         name: "remove_from_playlist",
         scope: PLAYLISTS,
-        args: gen::remove_from_playlist_args(playlist_id, track_id),
-        body: gen::remove_from_playlist,
+        args: on_playlist(playlist_id, track_id),
     })
 }
 

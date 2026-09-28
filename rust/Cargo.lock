@@ -23,14 +23,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ark-builder"
-version = "0.1.0"
-dependencies = [
- "ark",
- "serde_json",
-]
-
-[[package]]
 name = "async-trait"
 version = "0.1.92"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -397,6 +389,7 @@ version = "0.1.0"
 dependencies = [
  "ark",
  "crossterm",
+ "harken-domain",
  "rand 0.8.8",
  "ratatui",
  "tungstenite 0.26.2",
@@ -406,7 +399,7 @@ dependencies = [
 name = "harken-domain"
 version = "0.1.0"
 dependencies = [
- "ark-builder",
+ "ark",
 ]
 
 [[package]]
@@ -417,6 +410,7 @@ dependencies = [
  "ark",
  "axum",
  "futures-util",
+ "harken-domain",
  "rand 0.9.5",
  "tempfile",
  "tokio",

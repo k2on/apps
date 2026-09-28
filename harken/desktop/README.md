@@ -1,7 +1,7 @@
 # harken-desktop
 
-A terminal peer for harken on ArkDB: ratatui over the `ark` runtime and the
-Rust that `arkc gen rust` writes from `harken.ark`. It holds the `library`
+A terminal peer for harken on ArkDB: ratatui over the `ark` runtime and
+harken's own domain (`harken-domain`), run natively. It holds the `library`
 and `playlists` scopes whole, shows the library and the playlists, and adds
 to and removes from a playlist with the keyboard — against a server, or
 alone with no network at all.
@@ -16,8 +16,8 @@ alone with no network at all.
                    and speaks on /sync); without one the peer is its own authority
     --user NAME    who you are; dev auth makes a name a login (default $USER)
     --data DIR     the database (default $XDG_DATA_HOME/harken-desktop/<user>)
-    --module PATH  a .ark to load instead of the one the generated code embeds;
-                   it must be the module the build was generated from
+    --module PATH  a .ark to load instead of harken's own; its functions run
+                   natively where their hashes are harken's, interpreted otherwise
 
 Take two peers to one server, kill the server or one peer's network, add to a
 playlist on both sides, bring it back: the offline add lands *after* what
@@ -49,41 +49,30 @@ mutation, or the server's `Reject`.
 
 ## What path a mutation takes
 
-Authoring runs the **generated code**: `domain.rs` includes
-`harken/domain/gen/rust/harken_gen.rs` from one place, and every `n`, `a`
-and `d` builds its arguments with the typed `create_playlist_args` /
-`add_to_playlist_args` / `remove_from_playlist_args` and runs the generated
-body as one transaction over the optimistic store, through
-`Client::mutate_with` → `Replica::mutate_with` → `ark::gen::run_mutator`.
-The entry it records names the closure's hash from `gen::FUNCTIONS`, with
-the autos the module's function declares — a fresh random 16-byte id per
-`NewId`, the clock per `Now` — drawn once here and frozen.
+Every replica and every authority here holds harken's procedures
+(`harken_domain::module().procedures()`, through `Replica::hold` and
+`Authority::hold`). So authoring — `n`, `a`, `d` build a `Call` of the
+procedure's name and input, and `Peer::call` authors it through
+`Client::mutate` — runs the domain's own Rust over the optimistic store,
+and so does every replay: the rebase after a confirmed entry lands, the
+authority a peer alone is for, a peer receiving an entry. The entry names
+the procedure's hash, with the autos its function declares — a fresh random
+16-byte id per `NewId`, the clock per `Now` — drawn once here and frozen.
+An entry naming a function this build has no procedure for replays through
+the interpreter over its closure, or is applied by facts.
 
-Every **replay** runs the interpreter: the rebase after a confirmed entry
-lands, an authority sequencing an entry, a peer receiving one, all go
-through `apply_closure` over the closure the module carries. So a mutation
-is applied twice in its life, once by each path, which is the property the
-`eval/` vectors hold; and in a debug build every authoring call also runs
-the interpreter beside the generated body over copies of the store and
-asserts the same verdict, the same changes and the same store
-(`Peer::check_agreement`; `Peer::agreement_checks` counts them).
+In a debug build every authoring call also runs the interpreter beside the
+procedure over copies of the store and asserts the same verdict, the same
+changes and the same store (`Procedure::agrees`;
+`Peer::agreement_checks` counts them).
 
-Reads run the generated queries — `gen::library`, `gen::playlists`,
-`gen::playlist_items` — over each scope's optimistic store, re-run whenever
+Reads run harken's queries natively over each scope's optimistic store, as
+the peer's user (`playlists()` is the caller's), re-run whenever
 `take_changes` reports movement. The screen joins items to tracks itself,
 because the two live in different scopes and a query reads one store.
 
-`add_track` is the scanner's: the client is generated with `--only` and
-carries no code for it, and tracks arrive from the server as entries the
-peer holds the closure for (the module bytes are the whole module) and so
-replays. A peer alone has no scanner, so `t` authors `add_track` **by
-intent through the interpreter** (`Peer::author_by_intent`) — the one
-mutation here that does not go through generated code, offered only to a
-peer alone.
-
-`mutate_with` on `Replica` and `Client`, and `From<Value> for String` (what
-lets the emitter's `Fault::refuse(Value::text(…))` compile), are additive
-changes to `rust/ark`, each with a test.
+`add_track` is the scanner's and the screens do not offer it; a peer alone
+has no scanner, so `t` authors it by name (`Peer::author_by_intent`).
 
 ## Persistence
 

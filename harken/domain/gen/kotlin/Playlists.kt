@@ -8,7 +8,7 @@ class CreatePlaylist(
     val name: Text,
 ) : Input {
     companion object : Input.Of<CreatePlaylist> {
-        override fun schema(): Schema<CreatePlaylist> = obj(field("name", text().trim().min(1, "a playlist needs a name").max(120)))
+        override fun schema(): Schema<CreatePlaylist> = obj(field("name", text().trim().min(1).why("a playlist needs a name").max(120)))
     }
 }
 

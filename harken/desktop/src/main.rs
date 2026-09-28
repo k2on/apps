@@ -15,7 +15,7 @@ const USAGE: &str = "harken-desktop [--server ws://host:port/sync] [--user NAME]
   --server   the sync server; without one the peer is its own authority
   --user     who you are (dev auth: a name is a login); default $USER
   --data     where the database lives; default $XDG_DATA_HOME/harken-desktop/<user>
-  --module   a .ark to load instead of the module the generated code embeds";
+  --module   a .ark to load instead of harken's own module";
 
 fn default_data(user: &str) -> PathBuf {
     let base = std::env::var_os("XDG_DATA_HOME")

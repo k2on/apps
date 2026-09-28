@@ -236,9 +236,15 @@ public class Text internal constructor(term: Term, kind: Kind) : Val(term, kind)
     public fun len(): Int = std(Kind.KInt, StdFn.TextLen, this) as Int
     public fun startsWith(p: Text): Bool = std(Kind.KBool, StdFn.StartsWith, this, p) as Bool
     public fun startsWith(p: String): Bool = startsWith(lit(p))
-    public fun splitOnce(p: Text): Opt<Split> = std(Kind.KOpt(Kind.KSplit), StdFn.SplitOnce, this, p) as Opt<Split>
+    public fun splitOnce(p: Text): Opt<Split> {
+        @Suppress("UNCHECKED_CAST")
+        return std(Kind.KOpt(Kind.KSplit), StdFn.SplitOnce, this, p) as Opt<Split>
+    }
     public fun splitOnce(p: String): Opt<Split> = splitOnce(lit(p))
-    public fun chars(): List<Text> = std(Kind.KList(Kind.TEXT), StdFn.Chars, this) as List<Text>
+    public fun chars(): List<Text> {
+        @Suppress("UNCHECKED_CAST")
+        return std(Kind.KList(Kind.TEXT), StdFn.Chars, this) as List<Text>
+    }
     public fun isAlnum(): Bool = std(Kind.KBool, StdFn.IsAlnum, this) as Bool
     public fun utf8(): Bytes = std(Kind.KBytes, StdFn.Utf8, this) as Bytes
     public fun fnv1a64(): Int = std(Kind.KInt, StdFn.Fnv1a64, this) as Int

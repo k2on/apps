@@ -1,8 +1,10 @@
-//! harken's sync server, on the `ark` runtime and nothing generated.
+//! harken's sync server, on the `ark` runtime and harken's own domain.
 //!
-//! One `.ark` module is loaded; every scope of it is hosted as an
-//! `ark::peer::Authority` inside one `ark::protocol::Server`, applying
-//! through the module's closures (`ark::hash::closures`). The machine runs
+//! The module is `harken_domain::module()` — its bytes are `emit()`, and
+//! its procedures run natively — or, with `--module`, an `.ark` file, whose
+//! functions are applied natively where this build holds a procedure with
+//! the same hash and through the interpreter otherwise. Every scope is
+//! hosted as an `ark::peer::Authority` inside one `ark::protocol::Server`. The machine runs
 //! on a thread of its own ([`hub`]); axum speaks the protocol to it over a
 //! WebSocket at `/sync`, each scope's log is written to disk after every
 //! append ([`persist`]), and a media directory is authored into the library
@@ -22,6 +24,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use ark::authoring::Procedure;
 use ark::canon;
 use ark::hash::{closures, Closure, FnHash};
 use ark::ir::{module_from_value, Module};
@@ -50,29 +53,49 @@ pub const PING_EVERY: Duration = Duration::from_secs(20);
 pub const PINGS_UNANSWERED: u32 = 3;
 
 /// The module, and what the server needs of it: every function's closure
-/// by hash, and the hash by name.
+/// by hash, the hash by name, and the procedures it runs natively.
 #[derive(Clone, Debug)]
 pub struct Domain {
     pub module: Module,
     pub closures: BTreeMap<FnHash, Closure>,
     pub by_name: BTreeMap<String, FnHash>,
+    /// harken's own procedures whose hashes this module names: applied
+    /// natively, everything else through its closure.
+    pub natives: Vec<(FnHash, Procedure)>,
 }
 
 impl Domain {
-    /// A module from the canonical CBOR of an `.ark` file.
-    pub fn from_bytes(bytes: &[u8]) -> Result<Domain> {
-        let v = canon::decode(bytes).context("the module is not canonical CBOR")?;
-        let module = module_from_value(&v).context("the module does not decode")?;
+    /// harken's module, as this build authors it: every procedure native.
+    pub fn harken() -> Domain {
+        let m = harken_domain::module();
+        Domain::of(m.build().clone(), m.procedures())
+    }
+
+    fn of(module: Module, procedures: Vec<(FnHash, Procedure)>) -> Domain {
         let closures = closures(&module);
         let by_name = closures
             .iter()
             .map(|(h, c)| (c.function.name.clone(), h.clone()))
             .collect();
-        Ok(Domain {
+        let natives = procedures
+            .into_iter()
+            .filter(|(h, _)| closures.contains_key(h))
+            .collect();
+        Domain {
             module,
             closures,
             by_name,
-        })
+            natives,
+        }
+    }
+
+    /// A module from the canonical CBOR of an `.ark` file, verified.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Domain> {
+        let v = canon::decode(bytes).context("the module is not canonical CBOR")?;
+        let module = module_from_value(&v).context("the module does not decode")?;
+        let module = ark::verify::verify(&module)
+            .map_err(|es| anyhow::anyhow!("the module does not verify: {es:?}"))?;
+        Ok(Domain::of(module, harken_domain::module().procedures()))
     }
 
     pub fn load(path: &Path) -> Result<Domain> {
@@ -99,6 +122,7 @@ pub fn open_hub(domain: &Domain, data: &Path) -> Result<Hub> {
     let mut server = Server::open(trusting(), open_access(), Silent);
     for scope in domain.scopes() {
         let mut a = Authority::new(schema.clone(), &scope, domain.closures.clone());
+        a.hold(domain.natives.iter().cloned());
         if let Some(log) = persist::load(data, &scope, schema)? {
             a.store = log
                 .state_at(log.head_seq())
@@ -113,7 +137,8 @@ pub fn open_hub(domain: &Domain, data: &Path) -> Result<Hub> {
 
 #[derive(Clone, Debug)]
 pub struct Config {
-    pub module: PathBuf,
+    /// An `.ark` file to host instead of harken's own module.
+    pub module: Option<PathBuf>,
     pub data: PathBuf,
     /// `host:port`; port 0 takes an ephemeral one, reported in [`Running::addr`].
     pub listen: String,
@@ -147,11 +172,19 @@ impl Running {
 /// Load the module, host its scopes, bind, and serve. The scanner runs
 /// beside the listener when a media directory is set.
 pub async fn start(config: Config) -> Result<Running> {
-    let domain = Domain::load(&config.module)?;
+    let domain = match &config.module {
+        Some(p) => Domain::load(p)?,
+        None => Domain::harken(),
+    };
     eprintln!(
-        "harken-server: module {} ({} functions, scopes {})",
-        config.module.display(),
+        "harken-server: module {} ({} functions, {} native, scopes {})",
+        config
+            .module
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "harken (built in)".into()),
         domain.module.functions.len(),
+        domain.natives.len(),
         domain.scopes().join(", ")
     );
     eprintln!("harken-server: *** DEV AUTH: anyone is whoever they say. A token is a name, nothing is checked, every scope is open. ***");

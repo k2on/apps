@@ -8,7 +8,7 @@ class CreatePlaylist(
     val name: Text,
 ) : Input {
     companion object : Input.Of<CreatePlaylist> {
-        override fun schema(): Schema<CreatePlaylist> = obj(field("name", text().trim().min(1, "a playlist needs a name")))
+        override fun schema(): Schema<CreatePlaylist> = obj(field("name", text().trim().min(1).why("a playlist needs a name")))
     }
 }
 
@@ -40,7 +40,7 @@ fun demo(): Router<Demo> {
                 .insert(Playlist(id = ctx.newId("id"), name = input.name, userId = ctx.user))
                 .on(Playlist.userId, Playlist.name)
         },
-        demo.input<AddToPlaylist>().mutation("add_to_playlist") { ctx, db, input ->
+        demo.input<AddToPlaylist>().mutation("add_to_playlist") { _, db, input ->
             val item = db.item.filter(Item.playlistId.eq(input.playlistId)).orderBy(Item.pos.desc()).first()
             db.item.insert(
                 Item(
@@ -50,7 +50,7 @@ fun demo(): Router<Demo> {
                 ),
             )
         },
-        demo.input<PlaylistId>().query("items") { ctx, db, input ->
+        demo.input<PlaylistId>().query("items") { _, db, input ->
             db.item.filter(Item.playlistId.eq(input.playlistId)).orderBy(Item.pos.asc()).all()
         },
     )

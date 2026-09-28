@@ -1,36 +1,36 @@
 //! The peer, headless: the engine's [`Client`] holding one replica per
 //! scope, the [`Authority`] it is for each of them when there is no server,
-//! the files they are kept in, and the one way a mutation is authored — the
-//! generated function, run through `Client::mutate_with`. No terminal and
-//! no socket: the screens draw what is here and the transport moves the
-//! frames `take_outgoing` hands out and `recv_frame` takes in.
+//! the files they are kept in, and the one way a mutation is authored —
+//! harken's own procedure, by name. No terminal and no socket: the screens
+//! draw what is here and the transport moves the frames `take_outgoing`
+//! hands out and `recv_frame` takes in.
 //!
-//! What path a mutation takes: **authoring runs the generated code**
-//! (`gen::create_playlist` and friends, as one transaction over the
-//! optimistic store, through `ark::gen::run_mutator`); the entry it records
-//! names the closure's hash, so **every replay — the rebase after a
-//! confirmed entry lands, an authority sequencing it, a peer receiving it —
-//! runs the interpreter** over the closure the module carries. In a debug
-//! build every authoring call also runs the interpreter beside the generated
-//! body and asserts the two produce the same changes and the same store.
+//! What path a mutation takes: every replica and authority here **holds
+//! harken's procedures** (`harken_domain::module().procedures()`), so
+//! authoring, the rebase after a confirmed entry lands, sequencing alone and
+//! receiving an entry all run the domain's own Rust natively; an entry
+//! naming a function this build has no procedure for replays through the
+//! interpreter over its closure, or arrives as facts. In a debug build every
+//! authoring call also runs the interpreter beside the procedure over copies
+//! of the store and asserts the same verdict, changes and store.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use ark::authoring::Procedure;
 use ark::canon;
 use ark::eval::{Args, Ctx};
-use ark::gen::Db;
-use ark::hash::{closures, module_hash, Closure, FnHash};
+use ark::hash::{closures, Closure, FnHash};
 use ark::ir::decode::module_from_value;
 use ark::ir::{Auto, Function, Module};
 use ark::log::{snapshot_of, Log, Seq};
 use ark::peer::{local_commit, Authority, Changes, Replica};
 use ark::protocol::{Client, Mode, ServerMsg};
 use ark::schema::{Schema, ScopeName};
-use ark::value::{decode_hex, hex, Id, Value};
+use ark::value::{Id, Value};
 
-use crate::domain::{gen, Call};
+use crate::domain::{Call, Db};
 use crate::storage::{self, Durable};
 
 /// How the peer is opened.
@@ -40,7 +40,8 @@ pub struct Config {
     pub server: Option<String>,
     pub user: String,
     pub data: PathBuf,
-    /// A module file to load instead of the one the generated code embeds.
+    /// A module file to load instead of harken's own; its functions run
+    /// natively where their hashes are harken's, and interpreted otherwise.
     pub module: Option<PathBuf>,
 }
 
@@ -61,6 +62,8 @@ pub struct Peer {
     pub module: Module,
     schema: Schema,
     bodies: BTreeMap<FnHash, Closure>,
+    /// harken's procedures this module names, by function name.
+    procs: BTreeMap<String, (FnHash, Procedure)>,
     pub client: Client,
     /// One per scope when alone; empty when a server sequences for us.
     authorities: BTreeMap<ScopeName, Authority>,
@@ -71,18 +74,19 @@ pub struct Peer {
     written: BTreeMap<ScopeName, (Seq, Vec<Id>)>,
     rejections_seen: usize,
     pub last_refusal: Option<String>,
-    /// How many times the generated body and the interpreter were compared.
+    /// How many times a procedure and the interpreter were compared.
     pub agreement_checks: u64,
 }
 
-/// The module: from a file, or the bytes the generated code embeds.
+/// The module: from a file, verified, or harken's own as this build emits it.
 pub fn load_module(path: Option<&Path>) -> Result<Module, String> {
-    let bytes = match path {
-        Some(p) => std::fs::read(p).map_err(|e| format!("{}: {e}", p.display()))?,
-        None => decode_hex(gen::MODULE_BYTES).ok_or("MODULE_BYTES is not hex")?,
+    let Some(p) = path else {
+        return Ok(harken_domain::module().build().clone());
     };
+    let bytes = std::fs::read(p).map_err(|e| format!("{}: {e}", p.display()))?;
     let v = canon::decode(&bytes).map_err(|e| format!("module: {e}"))?;
-    module_from_value(&v).map_err(|e| format!("module: {e}"))
+    let m = module_from_value(&v).map_err(|e| format!("module: {e}"))?;
+    ark::verify::verify(&m).map_err(|es| format!("module does not verify: {es:?}"))
 }
 
 fn now_ms() -> i64 {
@@ -93,34 +97,18 @@ fn fresh_id() -> Id {
     rand::random::<[u8; 16]>()
 }
 
-/// The hash the generated code records for a function, by name.
-fn generated_hash(name: &str) -> Result<FnHash, String> {
-    let (_, h) = gen::FUNCTIONS
-        .iter()
-        .find(|(n, _)| *n == name)
-        .ok_or_else(|| format!("no generated function {name}"))?;
-    decode_hex(h).ok_or_else(|| format!("{name}: hash is not hex"))
-}
-
 impl Peer {
     pub fn open(cfg: Config) -> Result<Peer, String> {
         let module = load_module(cfg.module.as_deref())?;
-        if cfg.module.is_some() && hex(&module_hash(&module)) != gen::MODULE_HASH {
-            return Err(format!(
-                "the module at {} is {}, but this build's generated code is from {}",
-                cfg.module.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
-                hex(&module_hash(&module)),
-                gen::MODULE_HASH
-            ));
-        }
         let schema = module.schema.clone();
         let bodies = closures(&module);
-        for (name, _) in gen::FUNCTIONS {
-            let h = generated_hash(name)?;
-            if !bodies.contains_key(&h) {
-                return Err(format!("generated {name} names a closure the module does not carry"));
-            }
-        }
+        let procs: BTreeMap<String, (FnHash, Procedure)> = harken_domain::module()
+            .procedures()
+            .into_iter()
+            .filter(|(h, _)| bodies.contains_key(h))
+            .map(|(h, p)| (p.name().to_string(), (h, p)))
+            .collect();
+        let natives: Vec<(FnHash, Procedure)> = procs.values().cloned().collect();
         let ctx = Ctx::new(cfg.user.clone(), "dev");
         let mut client = Client::open(schema.clone(), Some(cfg.user.clone()));
         let mut authorities = BTreeMap::new();
@@ -133,30 +121,25 @@ impl Peer {
                 // is the confirmed store as a snapshot at the cursor — the
                 // horizon — with nothing above it yet (docs §3.9, §3.10).
                 let Durable { confirmed, cursor, .. } = &d;
-                authorities.insert(
-                    sc.name.clone(),
-                    Authority {
-                        scope: sc.name.clone(),
-                        schema: schema.clone(),
-                        bodies: bodies.clone(),
-                        log: Log {
-                            base: snapshot_of(*cursor, confirmed.clone()),
-                            entries: BTreeMap::new(),
-                            ids: BTreeMap::new(),
-                        },
-                        store: confirmed.clone(),
-                    },
-                );
+                let mut a = Authority::new(schema.clone(), &sc.name, bodies.clone());
+                a.log = Log {
+                    base: snapshot_of(*cursor, confirmed.clone()),
+                    entries: BTreeMap::new(),
+                    ids: BTreeMap::new(),
+                };
+                a.store = confirmed.clone();
+                a.hold(natives.iter().cloned());
+                authorities.insert(sc.name.clone(), a);
             }
-            client.subscribe(
-                Mode::Whole,
-                Replica::open(schema.clone(), &sc.name, bodies.clone(), d.confirmed, d.cursor, d.pending),
-            );
+            let mut r = Replica::open(schema.clone(), &sc.name, bodies.clone(), d.confirmed, d.cursor, d.pending);
+            r.hold(natives.iter().cloned());
+            client.subscribe(Mode::Whole, r);
         }
         let mut peer = Peer {
             module,
             schema,
             bodies,
+            procs,
             client,
             authorities,
             data: cfg.data,
@@ -200,9 +183,13 @@ impl Peer {
         self.client.scopes.get(scope).map(|(r, _)| r)
     }
 
-    /// The optimistic store of a scope, as generated queries read it.
+    /// The optimistic store of a scope, as the queries read it.
     pub fn db(&self, scope: &str) -> Option<Db<'_>> {
-        self.replica(scope).map(|r| Db::new(&r.view))
+        self.replica(scope).map(|r| Db {
+            store: &r.view,
+            ctx: &self.ctx,
+            procs: &self.procs,
+        })
     }
 
     /// The cursor and confirmed-state hash of a scope, as `Verify` claims it.
@@ -225,25 +212,23 @@ impl Peer {
             .collect()
     }
 
-    /// Author a mutation through its generated body.
+    /// Author a mutation through harken's procedure.
     pub fn call(&mut self, c: Call) -> Result<(), String> {
-        let f = self
-            .module
-            .lookup_function(c.name)
-            .ok_or_else(|| format!("the module has no function {}", c.name))?;
-        if f.scope.as_deref() != Some(c.scope) {
+        let (fh, p) = self
+            .procs
+            .get(c.name)
+            .cloned()
+            .ok_or_else(|| format!("this build has no procedure {} the module carries", c.name))?;
+        if p.function().scope.as_deref() != Some(c.scope) {
             return Err(format!("{} is not a mutator of scope {}", c.name, c.scope));
         }
-        let fh = generated_hash(c.name)?;
-        let autos = Self::autos_for(f);
+        let autos = Self::autos_for(p.function());
         let ctx = self.ctx.clone();
-        let Call { scope, args, body, .. } = c;
+        let Call { scope, args, .. } = c;
         #[cfg(debug_assertions)]
-        self.check_agreement(scope, &fh, body, &ctx, &autos, &args);
+        self.check_agreement(scope, &p, &ctx, &autos, &args);
         let id = fresh_id();
-        let outcome = self
-            .client
-            .mutate_with(scope, id, &ctx, &fh, &autos, &args, |db| body(db, &ctx, &autos, &args));
+        let outcome = self.client.mutate(scope, id, &ctx, &fh, &autos, &args);
         match outcome {
             Ok(_) => {
                 self.commit_alone(scope);
@@ -259,10 +244,10 @@ impl Peer {
         }
     }
 
-    /// Author a mutation the generated code does not contain — one the
-    /// module still carries, such as harken's `add_track`, which only a
-    /// scanner authors — through the interpreter. What a test or a peer
-    /// alone uses to put something in the library.
+    /// Author any mutation the module carries by name — such as harken's
+    /// `add_track`, which only a scanner authors and the screens do not
+    /// offer — natively where this build holds its procedure. What a test
+    /// or a peer alone uses to put something in the library.
     pub fn author_by_intent(&mut self, name: &str, args: Args) -> Result<(), String> {
         let f = self
             .module
@@ -292,20 +277,14 @@ impl Peer {
         }
     }
 
-    // The generated body and the interpreter, over copies of the optimistic
+    // The procedure and the interpreter, over copies of the optimistic
     // store: same verdict, same changes, same store afterwards.
     #[cfg(debug_assertions)]
-    fn check_agreement(&mut self, scope: &str, fh: &FnHash, body: crate::domain::Body, ctx: &Ctx, autos: &Args, args: &Args) {
-        use ark::db::run_mutator;
-        use ark::eval::apply_closure;
+    fn check_agreement(&mut self, scope: &str, p: &Procedure, ctx: &Ctx, autos: &Args, args: &Args) {
         let Some(r) = self.replica(scope) else { return };
-        let Some(closure) = self.bodies.get(fh) else { return };
-        let mut slow_store = r.view.clone();
-        let mut fast_store = r.view.clone();
-        let slow = apply_closure(&self.schema, closure, ctx, autos, args, &mut slow_store).map_err(|e| e.to_string());
-        let fast = run_mutator(&mut fast_store, |db| body(db, ctx, autos, args));
-        assert_eq!(slow, fast, "the generated body and the interpreter disagree on a mutation");
-        assert_eq!(slow_store, fast_store, "the generated body and the interpreter leave different stores");
+        if let Err(why) = p.agrees(ctx, autos, args, &r.view) {
+            panic!("a procedure and the interpreter disagree: {why}");
+        }
         self.agreement_checks += 1;
     }
 

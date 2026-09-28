@@ -1,4 +1,4 @@
-// §6 Evaluation (Ark.Eval): what generated code must mean, as an
+// §6 Evaluation (Ark.Eval): what a native procedure must mean, as an
 // interpreter of IR closures. Evaluation order is part of the meaning.
 package dev.arkdb
 

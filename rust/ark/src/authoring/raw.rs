@@ -44,7 +44,7 @@ use super::cx::H;
 /// If `T` is not exactly `hs.len()` handles.
 pub(crate) fn assemble<T>(hs: &[H], what: &str) -> T {
     assert!(
-        size_of::<T>() == hs.len() * size_of::<H>() && align_of::<T>() <= align_of::<H>(),
+        size_of::<T>() == std::mem::size_of_val(hs) && align_of::<T>() <= align_of::<H>(),
         "{what}: {} is {} bytes, not {} values of the vocabulary; a row, a scope or an input is a struct of the vocabulary's values and nothing else, one per declared column or field",
         std::any::type_name::<T>(),
         size_of::<T>(),

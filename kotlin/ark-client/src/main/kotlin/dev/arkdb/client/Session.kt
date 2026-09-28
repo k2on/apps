@@ -29,6 +29,7 @@ import dev.arkdb.Id
 import dev.arkdb.MemoryStore
 import dev.arkdb.Mode
 import dev.arkdb.Module
+import dev.arkdb.Procedure
 import dev.arkdb.Replica
 import dev.arkdb.Seq
 import dev.arkdb.Store
@@ -62,14 +63,12 @@ public sealed class Outcome {
     public data class Refused(val reason: String) : Outcome()
 }
 
-/** One mutation as it is being authored: what a generated body needs beside the store. */
-public class Mutation internal constructor(
-    public val name: String,
-    public val scope: String,
-    public val hash: FnHash,
-    public val ctx: Ctx,
-    public val autos: Args,
-    public val args: Args,
+/** One mutation as it is being authored: its function, scope and hash, and the autos drawn for it. */
+private class Mutation(
+    val name: String,
+    val scope: String,
+    val hash: FnHash,
+    val autos: Args,
 )
 
 public data class ScopeStatus(val scope: String, val cursor: Seq, val pending: Int, val rejections: Int, val diverged: Int)
@@ -96,11 +95,19 @@ public class Session private constructor(
     private val autoSource: AutoSource,
     transport: Transport?,
     clock: () -> Long,
+    procedures: List<Pair<FnHash, Procedure>>,
 ) {
     public val schema = module.schema
 
     /** Every function of the module, by the hash an entry names it by. */
     public val bodies: Map<FnHash, Closure> = Hash.closures(module)
+
+    /**
+     * The procedures this peer runs natively (AUTHORING.md §3), by the same
+     * hashes: what it authors and what it replays is applied by them; the
+     * interpreter runs only what arrives with no native procedure.
+     */
+    public val natives: Map<FnHash, Procedure> = procedures.toMap()
 
     private val byName: Map<String, Pair<FnHash, Closure>> = bodies.entries.associate { (h, c) -> c.fn.name to (h to c) }
 
@@ -138,9 +145,9 @@ public class Session private constructor(
         for (sc in schema.scopes) {
             val d = Durable.readScope(schema, dir, sc.name)
             val r = if (d == null) {
-                Replica.open(schema, sc.name, bodies, MemoryStore(schema), 0, emptyList())
+                Replica.open(schema, sc.name, bodies, MemoryStore(schema), 0, emptyList(), natives)
             } else {
-                Replica.open(schema, sc.name, bodies, d.confirmed, d.cursor, d.pending)
+                Replica.open(schema, sc.name, bodies, d.confirmed, d.cursor, d.pending, natives)
             }
             client.subscribe(Mode.Whole, r)
             if (auths != null) {
@@ -148,9 +155,9 @@ public class Session private constructor(
                 // kept, which replays every intent and checks the hash — so a
                 // store that does not match the log it claims is refused here.
                 val a = if (d?.log == null) {
-                    Authority(sc.name, schema, bodies)
+                    Authority(sc.name, schema, bodies, natives)
                 } else {
-                    Authority.adopt(schema, sc.name, bodies, d.asLog(schema))
+                    Authority.adopt(schema, sc.name, bodies, d.asLog(schema), natives)
                 }
                 if (!Hash.stateHash(a.store).contentEquals(Hash.stateHash(r.confirmed))) {
                     throw IllegalStateException("scope ${sc.name}: the durable store is not the state of its own log")
@@ -173,6 +180,8 @@ public class Session private constructor(
          * Open (or create) a session in `dir`. With a `serverUrl` the peer is
          * a replica of that server's scopes; without one it is its own
          * authority. `transport` replaces the WebSocket, for a test.
+         * `procedures` are run natively; every other function of `module`
+         * by the interpreter.
          */
         public fun open(
             dir: File,
@@ -182,10 +191,22 @@ public class Session private constructor(
             autos: AutoSource = AutoSource.Default,
             transport: Transport? = null,
             clock: () -> Long = System::currentTimeMillis,
+            procedures: List<Pair<FnHash, Procedure>> = emptyList(),
         ): Session {
             dir.mkdirs()
-            return Session(dir, module, user, serverUrl, autos, transport, clock)
+            return Session(dir, module, user, serverUrl, autos, transport, clock, procedures)
         }
+
+        /** Open a session over an authored domain: its emitted module, and every procedure of it run natively. */
+        public fun open(
+            dir: File,
+            domain: dev.arkdb.authoring.Module,
+            user: String,
+            serverUrl: String? = null,
+            autos: AutoSource = AutoSource.Default,
+            transport: Transport? = null,
+            clock: () -> Long = System::currentTimeMillis,
+        ): Session = open(dir, domain.ir, user, serverUrl, autos, transport, clock, domain.procedures())
 
         /** The module from its canonical bytes, as `MODULE_BYTES` carries them. */
         public fun moduleOf(bytes: ByteArray): Module = Decode.fromValue(Canon.decode(bytes))
@@ -207,32 +228,20 @@ public class Session private constructor(
                 is Auto.Now -> Value.int(autoSource.now())
             }
         }
-        return Mutation(name, scope, h, ctx, autos, emptyMap())
-    }
-
-    /** Author an intent through the interpreter: the module's closure for `name`. */
-    public fun mutate(name: String, args: Args): Outcome {
-        val m = prepare(name)
-        return author(m, args) { id -> client.mutate(m.scope, id, ctx, m.hash, m.autos, args) }
+        return Mutation(name, scope, h, autos)
     }
 
     /**
-     * Author an intent through generated code: `body` is the generated
-     * function for `name`, given the transaction store and, as its receiver,
-     * the context and autos the entry will carry. The entry is the same as
-     * `mutate` would record; only what computed it differs.
+     * Author an intent: the procedure `name`, natively when this session
+     * holds it and through the interpreter otherwise — the entry recorded is
+     * the same either way.
      */
-    public fun mutateWith(name: String, args: Args, body: Mutation.(Store) -> Unit): Outcome {
-        val m0 = prepare(name)
-        val m = Mutation(m0.name, m0.scope, m0.hash, m0.ctx, m0.autos, args)
-        return author(m, args) { id -> client.mutateWith(m.scope, id, ctx, m.hash, m.autos, args) { db -> m.body(db) } }
-    }
-
-    private fun author(m: Mutation, args: Args, run: (Id) -> Entry): Outcome {
+    public fun mutate(name: String, args: Args): Outcome {
+        val m = prepare(name)
         val r = client.replica(m.scope) ?: return Outcome.Refused("not holding scope ${m.scope}")
         val rejectionsBefore = r.rejections.size
         val entry = try {
-            run(autoSource.entryId())
+            client.mutate(m.scope, autoSource.entryId(), ctx, m.hash, m.autos, args)
         } catch (f: Fault.Refuse) {
             return Outcome.Refused(f.refusal.text)
         }
@@ -249,6 +258,16 @@ public class Session private constructor(
         return Outcome.Applied(entry)
     }
 
+    /**
+     * §1.3 (AUTHORING.md) The form validator: `name`'s input checks over
+     * whatever of the input a form has so far, against the store queries
+     * read. Each failing field's message, and the normalised values.
+     */
+    public fun check(name: String, partial: Args): Eval.Checked {
+        val (_, c) = byName[name] ?: throw IllegalArgumentException("no function $name in the module")
+        return Eval.check(schema, c, partial, store(), ctx)
+    }
+
     // Reading -----------------------------------------------------------------
 
     /** The store a query reads: every scope's optimistic view, together. */
@@ -260,14 +279,21 @@ public class Session private constructor(
         return m
     }
 
-    /** Run a query of the module by name, through the interpreter. */
-    public fun query(name: String, args: Args = emptyMap()): Value {
-        val (_, c) = byName[name] ?: throw IllegalArgumentException("no function $name in the module")
+    /**
+     * Ask a query of the module by name, as this peer's user: natively when
+     * held, through the interpreter otherwise. A check or a middleware may
+     * refuse it.
+     */
+    public fun ask(name: String, args: Args = emptyMap()): Eval.Answer {
+        val (h, c) = byName[name] ?: throw IllegalArgumentException("no function $name in the module")
         if (c.fn.kind != FnKind.Query) throw IllegalArgumentException("$name is not a query")
-        return Eval.queryClosure(schema, c, args, store())
+        return natives[h]?.query(schema, ctx, args, store()) ?: Eval.queryClosure(schema, c, ctx, args, store())
     }
 
-    /** Read through the merged view, for a generated query. */
+    /** `ask`, with a refusal thrown as `Fault.Refuse`. */
+    public fun query(name: String, args: Args = emptyMap()): Value = ask(name, args).orThrow()
+
+    /** Read the merged view directly. */
     public fun <T> read(f: (Store) -> T): T = f(store())
 
     // The loop ----------------------------------------------------------------

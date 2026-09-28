@@ -144,8 +144,8 @@ fn hash() {
         assert_eq!(hex(&state_hash(&st)), v["hash"].as_str().unwrap(), "{}", p.display());
         // Falsify: a store with one row fewer hashes differently.
         let mut less = st.clone();
-        let row = less.scan("playlist_item").remove(0);
-        less.apply_change(&Change::Remove("playlist_item".into(), row));
+        let row = less.scan("item").remove(0);
+        less.apply_change(&Change::Remove("item".into(), row));
         assert_ne!(hex(&state_hash(&less)), v["hash"].as_str().unwrap());
     }
 }
@@ -181,6 +181,13 @@ fn verify() {
         );
         assert!(check_schema(&m.schema).is_empty());
         assert_eq!(m.spec, ark::ir::SPEC_VERSION);
+        let verified = ark::verify::verify(&m).unwrap_or_else(|es| panic!("{}: {es:?}", p.display()));
+        assert_eq!(
+            module_value(&verified),
+            module_value(&m),
+            "{}: a verified module is its own verified form",
+            p.display()
+        );
         // Every function of a verified module hashes, and its closure runs.
         assert_eq!(closures(&m).len(), m.functions.len());
     }
@@ -215,6 +222,10 @@ fn protocol() {
 fn eval() {
     for p in files("eval") {
         let v = read(&p);
+        if v.get("cases").is_some() {
+            eval_cases(&p, &v);
+            continue;
+        }
         let m = module_of(&v["module"]);
         let name = v["function"].as_str().unwrap();
         let f = m.lookup_function(name).expect("the function");
@@ -283,6 +294,53 @@ fn eval() {
     }
 }
 
+// eval/ with `cases`: the input checks as verdicts, and the form validator.
+fn eval_cases(p: &Path, v: &serde_json::Value) {
+    let m = module_of(&v["module"]);
+    let bodies = closures(&m);
+    let by_name = |n: &str| bodies.values().find(|c| c.function.name == n).unwrap_or_else(|| panic!("{n}"));
+    let ctx = match v.get("ctx") {
+        Some(c) => {
+            let c = value(c);
+            Ctx::new(c.field("user").as_text(), c.field("session").as_text())
+        }
+        None => Ctx::new("alice", "session-1"),
+    };
+    let store_key = if v.get("store_before").is_some() { "store_before" } else { "store" };
+    let st = MemoryStore::from_value(m.schema.clone(), &value(&v[store_key]));
+    for case in v["cases"].as_array().unwrap() {
+        let name = case["name"].as_str().unwrap();
+        let c = by_name(case["function"].as_str().unwrap());
+        if let Some(refused) = case.get("refused") {
+            let autos = args_of(&value(&case["autos"]));
+            let a = args_of(&value(&case["args"]));
+            let mut s2 = st.clone();
+            let got = ark::eval::apply_closure(&m.schema, c, &ctx, &autos, &a, &mut s2).unwrap_or_else(|e| panic!("{name}: bug {e:?}"));
+            match (refused.as_str(), got) {
+                (None, Ok(_)) => {}
+                (Some(want), Err(ark::store::Refusal::Refused(t))) => assert_eq!(t, want, "{}: {name}", p.display()),
+                (want, got) => panic!("{}: {name}: wanted {want:?}, got {got:?}", p.display()),
+            }
+        } else {
+            let input = args_of(&value(&case["input"]));
+            let got = ark::eval::check(&m.schema, c, &ctx, &input, &st).unwrap_or_else(|e| panic!("{name}: bug {e:?}"));
+            let want: Vec<(String, String)> = case["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|x| (x["field"].as_str().unwrap().to_string(), x["message"].as_str().unwrap().to_string()))
+                .collect();
+            assert_eq!(got.messages, want, "{}: {name} messages", p.display());
+            assert_eq!(
+                Value::Struct(got.values),
+                value(&case["normalised"]),
+                "{}: {name} normalised",
+                p.display()
+            );
+        }
+    }
+}
+
 // views/ ------------------------------------------------------------------
 
 fn pid() -> Id {
@@ -295,7 +353,7 @@ fn pid() -> Id {
 fn view_plan(name: &str) -> ViewPlan {
     match name {
         "top-two-by-pos" => ViewPlan {
-            table: "playlist_item".into(),
+            table: "item".into(),
             filter: Some(Filter::Cmp("playlist_id".into(), CmpOp::Eq, Value::Id(pid()))),
             order: vec![("pos".into(), Dir::Asc)],
             limit: Some(2),
@@ -307,14 +365,14 @@ fn view_plan(name: &str) -> ViewPlan {
             order: vec![("name".into(), Dir::Asc)],
             limit: None,
             related: vec![(
-                "items".into(),
+                "item".into(),
                 Relation {
                     parent: "playlist".into(),
-                    child: "playlist_item".into(),
+                    child: "item".into(),
                     column: "playlist_id".into(),
                 },
                 ViewPlan {
-                    table: "playlist_item".into(),
+                    table: "item".into(),
                     filter: None,
                     order: vec![("pos".into(), Dir::Desc)],
                     limit: Some(3),
@@ -374,6 +432,9 @@ fn views() {
 
 // rebase/three-peers ---------------------------------------------------------
 
+/// The demo's one scope.
+const SCOPE: &str = "demo";
+
 fn entries_of(v: &serde_json::Value) -> Vec<(Seq, Entry)> {
     value(&v["entries"])
         .as_list()
@@ -411,7 +472,7 @@ fn rebase_three_peers() {
 
     // The transcript through an authority: every entry lands at its
     // sequence with its facts, and the head hashes as claimed.
-    let mut auth = Authority::new(sch.clone(), "playlists", bodies.clone());
+    let mut auth = Authority::new(sch.clone(), SCOPE, bodies.clone());
     for ((n, e), f) in entries.iter().zip(&facts) {
         match auth.sequence_entry(e) {
             Sequenced::Appended(got, got_facts) => {
@@ -425,7 +486,7 @@ fn rebase_three_peers() {
     assert_eq!(auth.store.store_value(), value(&v["final_store"]));
 
     // A whole replica reaches it by replaying intents.
-    let mut whole = Replica::open(sch.clone(), "playlists", bodies.clone(), MemoryStore::empty(sch.clone()), 0, vec![]);
+    let mut whole = Replica::open(sch.clone(), SCOPE, bodies.clone(), MemoryStore::empty(sch.clone()), 0, vec![]);
     for (n, e) in entries.iter().rev() {
         whole.receive(*n, e.clone()); // out of order: the inbox holds them
     }
@@ -434,7 +495,7 @@ fn rebase_three_peers() {
     assert!(whole.diverged.is_empty());
 
     // A replica with no closures at all reaches it by facts alone.
-    let mut facts_only = Replica::open(sch.clone(), "playlists", BTreeMap::new(), MemoryStore::empty(sch.clone()), 0, vec![]);
+    let mut facts_only = Replica::open(sch.clone(), SCOPE, BTreeMap::new(), MemoryStore::empty(sch.clone()), 0, vec![]);
     for (n, e) in &entries {
         facts_only.receive(*n, e.clone());
     }
@@ -449,16 +510,16 @@ fn rebase_three_peers() {
     let h_create = hash_of(&bodies, "create_playlist");
     let h_add = hash_of(&bodies, "add_to_playlist");
     let ctx = |who: &str| Ctx::new(who, format!("{who}-session"));
-    let now: Args = Args::from([("added_ms".to_string(), Value::int(1577836800000))]);
+    let now: Args = Args::new();
     let add_args = |k: u8| {
         Args::from([
             ("playlist_id".to_string(), Value::Id(pid())),
-            ("media_id".to_string(), Value::bytes(vec![k])),
+            ("track_id".to_string(), Value::text(format!("t{k}"))),
         ])
     };
     let pos_of = |r: &Replica, k: u8| {
         r.view
-            .get("playlist_item", &[Value::Id(pid()), Value::bytes(vec![k])])
+            .get("item", &[Value::Id(pid()), Value::text(format!("t{k}"))])
             .and_then(|row| row.get("pos").cloned())
     };
     let push = |a: &mut Authority, e: &Entry| match a.sequence_entry(e) {
@@ -466,8 +527,8 @@ fn rebase_three_peers() {
         other => panic!("push: {other:?}"),
     };
 
-    let mut auth = Authority::new(sch.clone(), "playlists", bodies.clone());
-    let fresh = || Replica::open(sch.clone(), "playlists", bodies.clone(), MemoryStore::empty(sch.clone()), 0, vec![]);
+    let mut auth = Authority::new(sch.clone(), SCOPE, bodies.clone());
+    let fresh = || Replica::open(sch.clone(), SCOPE, bodies.clone(), MemoryStore::empty(sch.clone()), 0, vec![]);
     let (mut alice, mut bob) = (fresh(), fresh());
     // step 1: alice creates the playlist; everybody sees it
     let e1 = alice
@@ -544,14 +605,13 @@ fn rebase_three_peers() {
     let mut wrong = bodies.clone();
     let body = &mut wrong.get_mut(&h_add).unwrap().function.body;
     for s in body.iter_mut() {
-        if let ark::ir::Stmt::Put(_, ark::ir::Expr::Struct(fs)) = s {
-            fs.insert(
-                "pos".into(),
-                ark::ir::Expr::Op(ark::ir::Op::Add, vec![ark::ir::Expr::Var(4), ark::ir::Expr::Lit(Value::int(2))]),
-            );
+        if let ark::ir::Stmt::Insert(_, ark::ir::Expr::Struct(fs), _) = s {
+            if let Some(ark::ir::Expr::Op(ark::ir::Op::Add, args)) = fs.get_mut("pos") {
+                args[1] = ark::ir::Expr::Lit(Value::int(2));
+            }
         }
     }
-    let mut dave = Replica::open(sch.clone(), "playlists", wrong, MemoryStore::empty(sch.clone()), 0, vec![]);
+    let mut dave = Replica::open(sch.clone(), SCOPE, wrong, MemoryStore::empty(sch.clone()), 0, vec![]);
     for ((n, e), f) in entries.iter().zip(&facts) {
         dave.receive_with(*n, e.clone(), f.clone());
     }
@@ -559,7 +619,7 @@ fn rebase_three_peers() {
     assert_eq!(hex(&dave.verify_at().1), final_hash, "and healed by the facts");
     // eve has no server: she is her own authority, and later hands the scope over
     let mut eve = fresh();
-    let mut eve_auth = Authority::new(sch.clone(), "playlists", bodies.clone());
+    let mut eve_auth = Authority::new(sch.clone(), SCOPE, bodies.clone());
     eve.mutate(
         id_n(201),
         &ctx("eve"),
@@ -575,7 +635,7 @@ fn rebase_three_peers() {
         &now,
         &Args::from([
             ("playlist_id".to_string(), Value::Id(id_n(2))),
-            ("media_id".to_string(), Value::bytes(vec![5])),
+            ("track_id".to_string(), Value::text("t5")),
         ]),
     )
     .unwrap();
@@ -585,7 +645,7 @@ fn rebase_three_peers() {
         "alone, eve confirms her own intents"
     );
     assert_eq!(eve.verify_at().1, state_hash(&eve_auth.store), "and her state is her authority's");
-    let adopted = Authority::adopt(sch.clone(), "playlists", bodies.clone(), &eve_auth.log).expect("a server adopts her scope by replaying it");
+    let adopted = Authority::adopt(sch.clone(), SCOPE, bodies.clone(), &eve_auth.log).expect("a server adopts her scope by replaying it");
     assert_eq!(state_hash(&adopted.store), eve.verify_at().1);
     let mut tampered = eve_auth.log.clone();
     for c in &mut tampered.entries.get_mut(&2).unwrap().1 {
@@ -594,7 +654,7 @@ fn rebase_three_peers() {
         }
     }
     assert_eq!(
-        Authority::adopt(sch.clone(), "playlists", bodies.clone(), &tampered).err(),
+        Authority::adopt(sch.clone(), SCOPE, bodies.clone(), &tampered).err(),
         Some(AdoptError::FactsDiffer(2)),
         "a log whose facts were touched is refused"
     );
@@ -636,13 +696,13 @@ fn rebase_fleet() {
             id
         };
         let pid = id_of(1);
-        let now: Args = Args::from([("added_ms".to_string(), Value::int(1577836800000))]);
+        let now: Args = Args::new();
         let clients = value(&v["clients"]).as_int();
         let seed = value(&v["seed"]).as_int() as u64;
-        let mut sim = Sim::new(sch, bodies, &["playlists".to_string()], clients, seed);
+        let mut sim = Sim::new(sch, bodies, &[SCOPE.to_string()], clients, seed);
         sim.mutate(
             0,
-            "playlists",
+            SCOPE,
             id_of(1000),
             &h_create,
             &Args::from([("id".to_string(), Value::Id(pid))]),
@@ -654,8 +714,8 @@ fn rebase_fleet() {
             match op.field("t").as_text() {
                 "add" => {
                     let peer = op.field("peer").as_int();
-                    let args = Args::from([("playlist_id".to_string(), Value::Id(pid)), ("media_id".to_string(), op.field("media"))]);
-                    sim.mutate(peer, "playlists", id_of(2000 + n), &h_add, &now, &args);
+                    let args = Args::from([("playlist_id".to_string(), Value::Id(pid)), ("track_id".to_string(), op.field("track"))]);
+                    sim.mutate(peer, SCOPE, id_of(2000 + n), &h_add, &now, &args);
                     n += 1;
                 }
                 "partition" => sim.partition(op.field("peer").as_int()),
@@ -682,6 +742,6 @@ fn rebase_fleet() {
                 assert!(r.diverged.is_empty());
             }
         }
-        assert_eq!(sim.server.scopes["playlists"].store.store_value(), value(&v["final_store"]));
+        assert_eq!(sim.server.scopes[SCOPE].store.store_value(), value(&v["final_store"]));
     }
 }

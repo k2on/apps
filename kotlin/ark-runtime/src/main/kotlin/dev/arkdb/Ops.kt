@@ -1,4 +1,4 @@
-// The operators generated code calls (Ark.Eval §6.4, §6.5): checked
+// The operators native procedures call (Ark.Eval §6.4, §6.5): checked
 // arithmetic, comparison under the total order, the list combinators.
 package dev.arkdb
 

@@ -3,11 +3,15 @@ name = "harken-domain"
 workspace = "../../rust"
 version = "0.1.0"
 edition = "2021"
-description = "harken's domain, authored through ark-builder; emits harken.ark"
+description = "harken's domain, authored in the vocabulary of spec/AUTHORING.md: emitted, it is harken.ark; run natively, it applies entries"
+
+[lib]
+name = "harken_domain"
+path = "src/lib.rs"
 
 [[bin]]
 name = "harken-domain"
 path = "src/main.rs"
 
 [dependencies]
-ark-builder = { path = "../../rust/ark-builder" }
+ark = { path = "../../rust/ark" }

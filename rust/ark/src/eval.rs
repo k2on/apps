@@ -469,7 +469,12 @@ pub fn check(sch: &Schema, c: &Closure, ctx: &Ctx, partial: &Args, store: &dyn S
         let values = &out.values;
         let mut refine = |e: &Expr, v: &Value| -> Result<bool, EvalFault> {
             let mut local = values.clone();
-            local.extend(partial.iter().filter(|(k, _)| !values.contains_key(*k)).map(|(k, v)| (k.clone(), v.clone())));
+            local.extend(
+                partial
+                    .iter()
+                    .filter(|(k, _)| !values.contains_key(*k))
+                    .map(|(k, v)| (k.clone(), v.clone())),
+            );
             local.insert(n.clone(), v.clone());
             let env = Env {
                 schema: sch,
@@ -659,7 +664,7 @@ fn exec(st: &mut St, env: &mut Env, s: &Stmt) -> Run<()> {
             if let Some(old) = st.store.get(t, &key) {
                 let row = strct(eval(st, &env.bind(*x, Value::Struct(old)), e)?)?;
                 let r = store::update(st.store, t, &key, row);
-            wrote(st, r)?;
+                wrote(st, r)?;
             }
         }
         Stmt::Delete(t, ks) => {

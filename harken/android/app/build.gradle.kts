@@ -25,13 +25,16 @@ android {
         }
     }
 
+    // 21, as the runtime is: the domain calls the authoring vocabulary's
+    // inline functions (`router<S>()`, `col<T, V>()`, `ctx.newId(..)`), and
+    // Kotlin will not inline bytecode built for a newer JVM than the caller.
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
     }
 
     kotlinOptions {
-        jvmTarget = "17"
+        jvmTarget = "21"
     }
 
     buildFeatures {
@@ -40,10 +43,11 @@ android {
 
     sourceSets {
         getByName("main") {
-            // The generated domain, referenced where arkc writes it — never copied.
-            // Regenerate with:
+            // harken's domain in the authoring vocabulary, as `arkc gen kotlin`
+            // prints it (package harken.gen), referenced where it is written —
+            // never copied. The phone's print carries only what it calls:
             //   nix run .#arkc -- gen kotlin harken/domain/harken.ark \
-            //     harken/domain/gen/kotlin --name Harken \
+            //     harken/domain/gen/kotlin --package harken.gen \
             //     --only create_playlist,add_to_playlist,remove_from_playlist,library,playlists,playlist_items
             kotlin.srcDir("../../domain/gen/kotlin")
         }

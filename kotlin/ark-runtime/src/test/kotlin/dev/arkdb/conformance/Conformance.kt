@@ -299,6 +299,7 @@ object Conformance {
 
     private fun eval(f: File) {
         val v = read(f)
+        if (v.asStruct().has("cases")) return evalCases(v)
         val m = Decode.fromValue(v.field("module"))
         val name = v.field("function").asText()
         val fn = m.lookupFunction(name) ?: throw Failed("no function $name")
@@ -328,6 +329,33 @@ object Conformance {
             val byName = Eval.apply(m, name, ctx, autos, args, st)
             eq(byName, applied, "step $i by name")
             st = applied.store
+        }
+    }
+
+    // Cases, each from the vector's one store: an apply that lands or is
+    // refused with a message, or the form validator's answer on a partial input.
+    private fun evalCases(v: Value) {
+        val m = Decode.fromValue(v.field("module"))
+        val form = v.asStruct().has("store")
+        val st = storeOf(m.schema, if (form) v.field("store") else v.field("store_before"))
+        for (case in v.field("cases").asList()) {
+            val name = case.field("name").asText()
+            val fn = m.lookupFunction(case.field("function").asText()) ?: throw Failed("$name: no function")
+            val c = Hash.closure(m, fn)
+            if (form) {
+                val got = Eval.check(m.schema, c, argsOf(case.field("input")), st)
+                val want = case.field("messages").asList().map { it.field("field").asText() to it.field("message").asText() }
+                eq(got.messages, want, "$name: messages")
+                eq(Value.VStruct(got.values), case.field("normalised"), "$name: normalised")
+            } else {
+                val applied = Eval.applyClosure(m.schema, c, ctxOf(v.field("ctx")), argsOf(case.field("autos")), argsOf(case.field("args")), st)
+                val refused = case.field("refused")
+                if (refused is Value.VNull) {
+                    check(applied is Eval.Applied.Ok) { "$name: refused: $applied" }
+                } else {
+                    eq(applied, Eval.Applied.Refused(Refusal.Refused(refused.asText())) as Eval.Applied, "$name: refusal")
+                }
+            }
         }
     }
 
@@ -369,9 +397,9 @@ object Conformance {
         // A put whose `pos` is text: `add_to_playlist`'s row no longer types.
         val add = m.lookupFunction("add_to_playlist")!!
         val badBody = add.body.map { s ->
-            val row = (s as? Stmt.Upsert)?.row
-            if (s is Stmt.Upsert && row is Expr.Struct) {
-                Stmt.Upsert(s.table, Expr.Struct(row.fields + ("pos" to Expr.Lit(Value.VText("nine")))), s.on)
+            val row = (s as? Stmt.Insert)?.row
+            if (s is Stmt.Insert && row is Expr.Struct) {
+                Stmt.Insert(s.table, Expr.Struct(row.fields + ("pos" to Expr.Lit(Value.VText("nine")))), s.on)
             } else {
                 s
             }
@@ -379,9 +407,9 @@ object Conformance {
         refused("a put with a column of the wrong type", m.copy(functions = m.functions.map { if (it.name == add.name) it.copy(body = badBody) else it }))
         // An unknown column in a put.
         val extraBody = add.body.map { s ->
-            val row = (s as? Stmt.Upsert)?.row
-            if (s is Stmt.Upsert && row is Expr.Struct) {
-                Stmt.Upsert(s.table, Expr.Struct(row.fields + ("bogus" to Expr.Lit(Value.VInt(1)))), s.on)
+            val row = (s as? Stmt.Insert)?.row
+            if (s is Stmt.Insert && row is Expr.Struct) {
+                Stmt.Insert(s.table, Expr.Struct(row.fields + ("bogus" to Expr.Lit(Value.VInt(1)))), s.on)
             } else {
                 s
             }
@@ -412,13 +440,13 @@ object Conformance {
     // The two plans the vectors were made from, rebuilt by hand; the vector's
     // `plan` string (Haskell's `show`) pins that the rebuild is the right one.
     private fun viewPlan(name: String): Plan = when (name) {
-        "top-two-by-pos" -> Plan.from("playlist_item")
+        "top-two-by-pos" -> Plan.from("item")
             .filter(Pred.cmp("playlist_id", CmpOp.Eq, Value.id(pid)))
             .orderBy("pos", Dir.Asc)
             .limit(2)
         "playlist-with-items" -> Plan.from("playlist")
             .orderBy("name", Dir.Asc)
-            .related("items", "playlist", "playlist_item", "playlist_id", Plan.from("playlist_item").orderBy("pos", Dir.Desc).limit(3))
+            .related("item", "playlist", "item", "playlist_id", Plan.from("item").orderBy("pos", Dir.Desc).limit(3))
         else -> throw Failed("no hand-built plan for the view vector $name")
     }
 
@@ -497,7 +525,7 @@ object Conformance {
     }
 
     private fun posOf(st: Store, k: Int): Value {
-        val row = st.get("playlist_item", listOf(Value.id(pid), Value.bytesHex("%02x".format(k))))
+        val row = st.get("item", listOf(Value.id(pid), Value.text("t$k")))
         return if (row is Row) row["pos"] else Value.VNull
     }
 
@@ -507,7 +535,7 @@ object Conformance {
         val v = read(f)
         val m = Decode.fromValue(v.field("module"))
         val sch = m.schema
-        val scope = "playlists"
+        val scope = m.schema.scopes.single().name
         val bodies = Hash.closures(m)
         // A spec-1 vector's entries name spec-1 hashes: renamed to this
         // module's, by which function's input their arguments are.
@@ -625,11 +653,11 @@ object Conformance {
         val hAdd = bodies.entries.first { it.value.fn.name == "add_to_playlist" }.key
         val addClosure = bodies.getValue(hAdd)
         val wrongBody = addClosure.fn.body.map { s ->
-            val row = (s as? Stmt.Upsert)?.row
-            if (s is Stmt.Upsert && row is Expr.Struct) {
+            val row = (s as? Stmt.Insert)?.row
+            if (s is Stmt.Insert && row is Expr.Struct) {
                 val fs = row.fields.toMutableMap()
-                fs["pos"] = Expr.Op(Op.Add, listOf(Expr.Var(4), Expr.Lit(Value.VInt(2))))
-                Stmt.Upsert(s.table, Expr.Struct(fs), s.on)
+                fs["pos"] = Expr.Op(Op.Add, listOf(fs.getValue("pos"), Expr.Lit(Value.VInt(1))))
+                Stmt.Insert(s.table, Expr.Struct(fs), s.on)
             } else {
                 s
             }
@@ -646,7 +674,7 @@ object Conformance {
         val hCreate = bodies.entries.first { it.value.fn.name == "create_playlist" }.key
         val eveCtx = Ctx("eve", "eve-session")
         eve.mutate(idN(201), eveCtx, hCreate, mapOf("id" to Value.id(idN(2))), mapOf("name" to Value.text("Road")))
-        eve.mutate(idN(202), eveCtx, hAdd, e9.autos, mapOf("playlist_id" to Value.id(idN(2)), "media_id" to Value.bytesHex("05")))
+        eve.mutate(idN(202), eveCtx, hAdd, e9.autos, mapOf("playlist_id" to Value.id(idN(2)), "track_id" to Value.text("t5")))
         Authority.localCommit(eveAuth, eve)
         check(eve.cursor == 2L && eve.pending.isEmpty() && eve.view == eve.confirmed) { "alone, eve confirms her own intents" }
         eqBytes(eve.verifyAt().second, Hash.stateHash(eveAuth.store), "and her state is her authority's")

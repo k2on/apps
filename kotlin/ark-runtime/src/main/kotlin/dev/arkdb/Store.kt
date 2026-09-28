@@ -29,7 +29,7 @@ public sealed class Change {
 public typealias Facts = List<Change>
 
 /**
- * The interface generated code writes through (Ark.Store, Ark.Eval §6.6).
+ * The interface a procedure writes through (Ark.Store, Ark.Eval §6.6).
  * `select` is generic over `scan` and `schema`, so any implementation gets
  * exactly `Ark.Eval.select`'s nodes.
  */

@@ -115,7 +115,7 @@ pub fn is_null(v: &Value) -> bool {
     matches!(v, Value::Null)
 }
 
-// The constructors and accessors GENERATED.md names, in snake case. The
+// Constructors and accessors, in snake case. The
 // accessors fail fatally on a type mismatch: a verified module never
 // mismatches, so a mismatch is a bug in a generator and not a fault.
 impl Value {

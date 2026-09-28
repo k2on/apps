@@ -187,12 +187,16 @@ mod tests {
     use ark::value::Value;
 
     fn demo() -> Domain {
-        Domain::from_bytes(include_bytes!("../tests/fixtures/demo.ark")).unwrap()
+        Domain::harken()
     }
 
     fn author(a: &mut Authority, d: &Domain, id: [u8; 16], name: &str, ctx: &Ctx) {
         let fh = d.by_name["create_playlist"].clone();
-        let autos = [("id".to_string(), Value::Id(id))].into();
+        let autos = [
+            ("id".to_string(), Value::Id(id)),
+            ("created_ms".to_string(), Value::int(1)),
+        ]
+        .into();
         let args = [("name".to_string(), Value::text(name))].into();
         let e = ark::log::Entry {
             id,
@@ -209,6 +213,7 @@ mod tests {
     fn a_log_survives_the_file_and_a_damaged_one_is_refused() {
         let d = demo();
         let mut a = Authority::new(d.module.schema.clone(), "playlists", d.closures.clone());
+        a.hold(d.natives.iter().cloned());
         let ctx = Ctx::new("alice", "dev");
         author(&mut a, &d, [1; 16], "Road trip", &ctx);
         author(&mut a, &d, [2; 16], "Focus", &ctx);

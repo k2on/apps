@@ -80,7 +80,7 @@ impl App {
         app
     }
 
-    /// Re-run the generated queries and rebuild both panes.
+    /// Re-run the queries and rebuild both panes.
     pub fn reload(&mut self) {
         self.playlists = match self.peer.db(domain::PLAYLISTS) {
             Some(db) => domain::playlists(&db).unwrap_or_default(),

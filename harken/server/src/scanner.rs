@@ -208,17 +208,16 @@ pub async fn scan(hub: &HubHandle, domain: &Domain, media: &Path) -> Result<Repo
 
     let schema = domain.module.schema.clone();
     let mut client = Client::open(schema.clone(), Some(USER.into()));
-    client.subscribe(
-        Mode::Whole,
-        Replica::open(
-            schema.clone(),
-            &scope,
-            domain.closures.clone(),
-            MemoryStore::empty(schema),
-            0,
-            vec![],
-        ),
+    let mut replica = Replica::open(
+        schema.clone(),
+        &scope,
+        domain.closures.clone(),
+        MemoryStore::empty(schema),
+        0,
+        vec![],
     );
+    replica.hold(domain.natives.iter().cloned());
+    client.subscribe(Mode::Whole, replica);
     let conn = hub.connect_local().await?;
     client.connected();
     pump(hub, conn, &mut client).await?;

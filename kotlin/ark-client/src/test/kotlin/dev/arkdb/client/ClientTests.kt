@@ -1,11 +1,12 @@
 // ark-client's tests, as a plain `main` like the runtime's conformance
-// runner: the demo module (spec/vectors/module/demo.json), a peer alone, two
-// peers through an in-process authority over the in-memory transport — the
-// same `Link` and the same frame bytes a socket would carry — and generated
-// code against the interpreter.
+// runner: the demo domain authored in Kotlin (whose emitted module is
+// spec/vectors/module/demo.json), a peer alone, two peers through an
+// in-process authority over the in-memory transport — the same `Link` and
+// the same frame bytes a socket would carry — and native procedures against
+// the interpreter.
 package dev.arkdb.client
 
-import demo.gen.DemoGen
+import dev.arkdb.Args
 import dev.arkdb.Changes
 import dev.arkdb.Hash
 import dev.arkdb.Hex
@@ -62,45 +63,50 @@ object ClientTests {
     private fun rowsOf(s: Session, table: String): List<Value> = s.read { db -> db.select(Plan.from(table)).asList() }
 
     private fun posOf(db: Store, pid: Id, k: Int): Value {
-        val row = db.get("playlist_item", listOf(Value.id(pid), Value.bytesHex("%02x".format(k))))
+        val row = db.get("item", listOf(Value.id(pid), Value.text("t$k")))
         return if (row is Row) row["pos"] else Value.VNull
     }
+
+    private fun create(name: String): Args = mapOf("name" to Value.text(name))
+
+    private fun add(pid: Id, k: Int): Args = mapOf("playlist_id" to Value.id(pid), "track_id" to Value.text("t$k"))
 
     private fun hashOf(s: Session, scope: String): String = Hex.encode(s.client.replica(scope)!!.verifyAt().second)
 
     @JvmStatic
     fun main(argv: Array<String>) {
-        val demo = File(argv.getOrNull(0) ?: "../spec/vectors/module/demo.json")
-        check(demo.isFile) { "no demo module vector at ${demo.absolutePath}" }
+        val vector = File(argv.getOrNull(0) ?: "../spec/vectors/module/demo.json")
+        check(vector.isFile) { "no demo module vector at ${vector.absolutePath}" }
         // The vector's `bytes` field is the module's canonical CBOR; no JSON
         // parser is needed to lift a hex string out of it.
-        val hex = Regex("\"bytes\"\\s*:\\s*\"([0-9a-f]+)\"").find(demo.readText())?.groupValues?.get(1)
-            ?: throw Failed("no bytes in ${demo.path}")
-        eq(hex, DemoGen.MODULE_BYTES, "the generated Kotlin carries the vector's module bytes")
+        val hex = Regex("\"bytes\"\\s*:\\s*\"([0-9a-f]+)\"").find(vector.readText())?.groupValues?.get(1)
+            ?: throw Failed("no bytes in ${vector.path}")
+        val domain = demo.module()
+        eq(Hex.encode(domain.emit()), hex, "the authored demo emits the vector's module bytes")
         val module = Session.moduleOfHex(hex)
-        eq(Hex.encode(Hash.moduleHash(module)), DemoGen.MODULE_HASH, "module hash")
-        val scope = "playlists"
+        eq(module, domain.ir, "and decodes to its IR")
+        val scope = "demo"
 
         test("alone: a session creates a playlist, adds an item, and restarts with the same hash") {
             val dir = tempDir("alone")
             val autos = Counting()
-            val a = Session.open(dir, module, "eve", autos = autos)
+            val a = Session.open(dir, domain, "eve", autos = autos)
             eq(a.status.serverless, true, "serverless")
             val changes = ArrayList<Map<String, Changes>>()
             a.onChange { changes.add(it) }
-            val made = a.mutate("create_playlist", DemoGen.createPlaylistArgs("  Road  "))
+            val made = a.mutate("create_playlist", create("  Road  "))
             check(made is Outcome.Applied) { "create_playlist: $made" }
             val pid = (made as Outcome.Applied).entry.autos.getValue("id").asId()
             eq(a.status.scopes.single().cursor, 1L, "alone, the intent is sequenced at once")
             eq(a.status.pending, 0, "nothing stays pending")
             eq(rowsOf(a, "playlist").single().field("name"), Value.text("Road") as Value, "trimmed")
-            val added = a.mutate("add_to_playlist", DemoGen.addToPlaylistArgs(pid, byteArrayOf(5)))
+            val added = a.mutate("add_to_playlist", add(pid, 5))
             check(added is Outcome.Applied) { "add_to_playlist: $added" }
             eq(a.read { posOf(it, pid, 5) }, Value.int(1) as Value, "the first item is at pos 1")
             eq(a.status.scopes.single().cursor, 2L, "two entries")
             check(changes.isNotEmpty() && changes.all { it.containsKey(scope) }) { "the listener heard both mutations: $changes" }
             eq(a.verify(), listOf(Triple(scope, 2L, true)), "the authority agrees with its own replica")
-            val refused = a.mutate("create_playlist", DemoGen.createPlaylistArgs("   "))
+            val refused = a.mutate("create_playlist", create("   "))
             eq(refused, Outcome.Refused("a playlist needs a name") as Outcome, "a refusal is surfaced")
             eq(a.status.scopes.single().cursor, 2L, "a refusal sequences nothing")
             val h = hashOf(a, scope)
@@ -108,31 +114,31 @@ object ClientTests {
             check(File(dir, "$scope.replica").isFile) { "the scope was written down" }
             check(!File(dir, "$scope.replica.tmp").exists()) { "no temp file is left behind" }
 
-            val b = Session.open(dir, module, "eve", autos = Counting(100))
+            val b = Session.open(dir, domain, "eve", autos = Counting(100))
             eq(hashOf(b, scope), h, "restarted with the same hash")
             eq(b.status.scopes.single().cursor, 2L, "and the same cursor")
             eq(b.sessionId, a.sessionId, "and the same device id")
             eq(b.verify(), listOf(Triple(scope, 2L, true)), "the adopted authority agrees")
-            val more = b.mutate("add_to_playlist", DemoGen.addToPlaylistArgs(pid, byteArrayOf(6)))
+            val more = b.mutate("add_to_playlist", add(pid, 6))
             check(more is Outcome.Applied) { "after a restart the peer still authors: $more" }
             eq(b.read { posOf(it, pid, 6) }, Value.int(2) as Value, "and continues the sequence")
             eq(b.status.scopes.single().cursor, 3L, "sequenced at 3")
             b.close()
-            val c = Session.open(dir, module, "eve", autos = Counting(200))
+            val c = Session.open(dir, domain, "eve", autos = Counting(200))
             eq(hashOf(c, scope), hashOf(b, scope), "a second restart")
             c.close()
         }
 
         test("alone: a store that does not match its log is refused on open") {
             val dir = tempDir("tamper")
-            val a = Session.open(dir, module, "eve", autos = Counting())
-            a.mutate("create_playlist", DemoGen.createPlaylistArgs("Road"))
+            val a = Session.open(dir, domain, "eve", autos = Counting())
+            a.mutate("create_playlist", create("Road"))
             a.close()
             // Rewrite the file with the log kept and the confirmed store emptied.
             val d = Durable.readScope(module.schema, dir, scope)!!
             Durable.writeScope(dir, DurableScope(scope, d.cursor, dev.arkdb.MemoryStore(module.schema), d.pending, d.log))
             val err = try {
-                Session.open(dir, module, "eve", autos = Counting())
+                Session.open(dir, domain, "eve", autos = Counting())
                 null
             } catch (e: IllegalStateException) {
                 e
@@ -146,15 +152,15 @@ object ClientTests {
             val tb = InMemoryTransport(hub)
             val dirA = tempDir("alice")
             val dirB = tempDir("bob")
-            val alice = Session.open(dirA, module, "alice", "mem://hub", Counting(1), ta)
-            val bob = Session.open(dirB, module, "bob", "mem://hub", Counting(1000), tb)
+            val alice = Session.open(dirA, domain, "alice", "mem://hub", Counting(1), ta)
+            val bob = Session.open(dirB, domain, "bob", "mem://hub", Counting(1000), tb)
             eq(alice.status.serverless, false, "not serverless")
             alice.pump()
             bob.pump()
             check(alice.status.linked && bob.status.linked) { "both linked: ${alice.status} ${bob.status}" }
             eq(hub.handled.count { it == "Hello" }, 2, "two hellos")
 
-            val made = alice.mutate("create_playlist", DemoGen.createPlaylistArgs(" Favorites "))
+            val made = alice.mutate("create_playlist", create(" Favorites "))
             val pid = (made as Outcome.Applied).entry.autos.getValue("id").asId()
             eq(alice.status.pending, 1, "pending until pumped")
             alice.pump()
@@ -171,16 +177,15 @@ object ClientTests {
             check(!alice.status.linked) { "alice is offline: ${alice.status}" }
             val bobChanges = ArrayList<Changes>()
             bob.onChange { m -> m[scope]?.let { bobChanges.add(it) } }
-            // bob's first add goes through the interpreter and his second through the
-            // generated body, so an entry generated code authored crosses the wire and
-            // is sequenced by an authority that replays it with the interpreter.
-            val r1 = bob.mutate("add_to_playlist", DemoGen.addToPlaylistArgs(pid, byteArrayOf(1)))
+            // bob's adds run natively, cross the wire, and are sequenced by an
+            // authority that replays them with the interpreter.
+            val r1 = bob.mutate("add_to_playlist", add(pid, 1))
             check(r1 is Outcome.Applied) { "bob adds 1: $r1" }
             bob.pump()
-            val r2 = bob.mutateWith("add_to_playlist", DemoGen.addToPlaylistArgs(pid, byteArrayOf(2))) { db -> DemoGen.addToPlaylist(db, ctx, autos, args) }
-            check(r2 is Outcome.Applied) { "bob adds 2 through generated code: $r2" }
+            val r2 = bob.mutate("add_to_playlist", add(pid, 2))
+            check(r2 is Outcome.Applied) { "bob adds 2: $r2" }
             bob.pump()
-            eq(bob.client.replica(scope)!!.diverged.size, 0, "the authority's facts agree with what generated code wrote")
+            eq(bob.client.replica(scope)!!.diverged.size, 0, "the authority's facts agree with what the native procedure wrote")
             eq(bob.status.scopes.single().cursor, 3L, "bob at 3")
             eq(bob.read { posOf(it, pid, 1) }, Value.int(1) as Value, "bob's first")
             eq(bob.read { posOf(it, pid, 2) }, Value.int(2) as Value, "bob's second")
@@ -188,7 +193,7 @@ object ClientTests {
 
             val aliceChanges = ArrayList<Changes>()
             alice.onChange { m -> m[scope]?.let { aliceChanges.add(it) } }
-            val a9 = alice.mutate("add_to_playlist", DemoGen.addToPlaylistArgs(pid, byteArrayOf(9)))
+            val a9 = alice.mutate("add_to_playlist", add(pid, 9))
             check(a9 is Outcome.Applied) { "alice adds 9 alone: $a9" }
             eq(alice.read { posOf(it, pid, 9) }, Value.int(1) as Value, "alone, alice's track is first on her view")
             eq(alice.status.pending, 1, "one pending while dark")
@@ -198,7 +203,7 @@ object ClientTests {
 
             // …and is written down with it pending, so a restart while dark keeps the edit
             alice.close()
-            val alice2 = Session.open(dirA, module, "alice", "mem://hub", Counting(50), ta)
+            val alice2 = Session.open(dirA, domain, "alice", "mem://hub", Counting(50), ta)
             eq(alice2.status.pending, 1, "the pending intent survived the restart")
             eq(alice2.read { posOf(it, pid, 9) }, Value.int(1) as Value, "and is replayed on the view")
             // Opening reports one `Rebuilt` (the replay from what was durable); take it, so
@@ -244,7 +249,7 @@ object ClientTests {
 
             alice2.close()
             bob.close()
-            val alice3 = Session.open(dirA, module, "alice", "mem://hub", Counting(70), ta)
+            val alice3 = Session.open(dirA, domain, "alice", "mem://hub", Counting(70), ta)
             eq(hashOf(alice3, scope), hashOf(bob, scope), "restarted from the directory with the same hash")
             alice3.close()
         }
@@ -298,64 +303,63 @@ object ClientTests {
             eq(hub.connections, 0, "and its connection is closed")
         }
 
-        test("generated code and the interpreter author the same entries and reach the same state") {
+        test("native procedures and the interpreter author the same entries and reach the same state") {
             val byInterp = Session.open(tempDir("interp"), module, "eve", autos = Counting())
-            val byGen = Session.open(tempDir("gen"), module, "eve", autos = Counting())
+            val byNative = Session.open(tempDir("native"), domain, "eve", autos = Counting())
+            check(byInterp.natives.isEmpty() && byNative.natives.size == 3) { "one runs nothing natively, the other everything" }
             val chI = ArrayList<Changes>()
-            val chG = ArrayList<Changes>()
+            val chN = ArrayList<Changes>()
             byInterp.onChange { m -> m[scope]?.let { chI.add(it) } }
-            byGen.onChange { m -> m[scope]?.let { chG.add(it) } }
+            byNative.onChange { m -> m[scope]?.let { chN.add(it) } }
 
-            val r1 = byInterp.mutate("create_playlist", DemoGen.createPlaylistArgs(" Road "))
-            val g1 = byGen.mutateWith("create_playlist", DemoGen.createPlaylistArgs(" Road ")) { db -> DemoGen.createPlaylist(db, ctx, autos, args) }
-            eq(g1, r1, "the same entry")
+            val r1 = byInterp.mutate("create_playlist", create(" Road "))
+            val n1 = byNative.mutate("create_playlist", create(" Road "))
+            eq(n1, r1, "the same entry")
             val pid = (r1 as Outcome.Applied).entry.autos.getValue("id").asId()
-            for (k in listOf(3, 1, 2)) {
-                val r = byInterp.mutate("add_to_playlist", DemoGen.addToPlaylistArgs(pid, byteArrayOf(k.toByte())))
-                val g = byGen.mutateWith("add_to_playlist", DemoGen.addToPlaylistArgs(pid, byteArrayOf(k.toByte()))) { db -> DemoGen.apply(hash.hex, db, ctx, autos, args) }
-                eq(g, r, "the same entry for $k")
+            for (k in listOf(3, 1, 2, 1)) {
+                val r = byInterp.mutate("add_to_playlist", add(pid, k))
+                val n = byNative.mutate("add_to_playlist", add(pid, k))
+                eq(n, r, "the same entry for $k")
             }
-            eq(chG, chI, "the same changes reported")
-            eq(hashOf(byGen, scope), hashOf(byInterp, scope), "the same hash")
-            eq(byGen.read { it.scan("playlist_item") }, byInterp.read { it.scan("playlist_item") }, "the same rows")
-            // a refusal from generated code is the same verdict
-            val rr = byInterp.mutate("create_playlist", DemoGen.createPlaylistArgs(" "))
-            val gr = byGen.mutateWith("create_playlist", DemoGen.createPlaylistArgs(" ")) { db -> DemoGen.createPlaylist(db, ctx, autos, args) }
-            eq(gr, rr, "the same refusal")
-            eq(gr, Outcome.Refused("a playlist needs a name") as Outcome, "and it is the mutator's text")
-            eq(byGen.status.scopes.single().cursor, 4L, "a refusal sequences nothing")
-            // and a body that bugs is refused rather than propagated
-            val bug = byGen.mutateWith("create_playlist", DemoGen.createPlaylistArgs("x")) { _ -> throw dev.arkdb.Fault.bug("deliberate") }
-            check(bug is Outcome.Refused && (bug as Outcome.Refused).reason.startsWith("bug:")) { "a bug is surfaced: $bug" }
-            eq(byGen.status.scopes.single().cursor, 4L, "and sequences nothing")
+            eq(chN, chI, "the same changes reported")
+            eq(hashOf(byNative, scope), hashOf(byInterp, scope), "the same hash")
+            eq(byNative.read { it.scan("item") }, byInterp.read { it.scan("item") }, "the same rows")
+            eq(byNative.query("items", mapOf("playlist_id" to Value.id(pid))), byInterp.query("items", mapOf("playlist_id" to Value.id(pid))), "the same query answer")
+            eq(byNative.query("items", mapOf("playlist_id" to Value.id(pid))).asList().map { it.field("track_id") }, listOf("t3", "t1", "t2").map { Value.text(it) }, "in pos order")
+            // a refusal is the same verdict
+            val rr = byInterp.mutate("create_playlist", create(" "))
+            val nr = byNative.mutate("create_playlist", create(" "))
+            eq(nr, rr, "the same refusal")
+            eq(nr, Outcome.Refused("a playlist needs a name") as Outcome, "and it is the check's message")
+            val missing = Id(ByteArray(16).also { it[15] = 99 })
+            eq(byNative.mutate("add_to_playlist", add(missing, 1)), Outcome.Refused("playlist_id: no such playlist") as Outcome, "exists, by its default message")
+            eq(byNative.status.scopes.single().cursor, 5L, "a refusal sequences nothing")
             byInterp.close()
-            byGen.close()
+            byNative.close()
         }
 
-        test("a TransactionStore commits nothing when the body faults") {
-            val st = dev.arkdb.MemoryStore(module.schema)
-            val pid = Id(ByteArray(16).also { it[15] = 1 })
-            val ok = dev.arkdb.TransactionStore.run(st) { db ->
-                DemoGen.createPlaylist(db, dev.arkdb.Ctx("eve", "s"), mapOf("id" to Value.id(pid)), DemoGen.createPlaylistArgs("Road"))
+        test("the form validator: what a dialog shows under a field") {
+            val s = Session.open(tempDir("form"), domain, "eve", autos = Counting())
+            val blank = s.check("create_playlist", create("   "))
+            eq(blank.messages, listOf("name" to "a playlist needs a name"), "a blank name")
+            eq(blank.values["name"], Value.text("") as Value?, "trimmed")
+            eq(s.check("create_playlist", create(" Mix ")).ok, true, "a good name")
+            eq(s.check("add_to_playlist", mapOf("track_id" to Value.text(""))).messages, listOf("track_id" to "track_id: at least 1 characters"), "a partial input")
+            s.close()
+        }
+
+        test("a native procedure that bugs is refused, and sequences nothing") {
+            val real = domain.procedures()
+            val (h, create) = real.first { it.second.name == "create_playlist" }
+            val broken = object : dev.arkdb.Procedure by create {
+                override fun apply(sch: dev.arkdb.Schema, ctx: dev.arkdb.Ctx, autos: Args, args: Args, st: dev.arkdb.MemoryStore): dev.arkdb.Eval.Applied =
+                    throw dev.arkdb.Fault.bug("deliberate")
             }
-            check(ok is dev.arkdb.Eval.Applied.Ok && ok.changes.size == 1) { "one add: $ok" }
-            check(st.isEmpty) { "the base is untouched" }
-            val committed = (ok as dev.arkdb.Eval.Applied.Ok).store
-            val refused = dev.arkdb.TransactionStore.run(committed) { db ->
-                db.put("playlist", Value.record("id" to Value.id(Id(ByteArray(16).also { it[15] = 2 })), "name" to Value.text("x"), "user_id" to Value.text("e")))
-                throw dev.arkdb.Fault.refuse("no")
-            }
-            check(refused is dev.arkdb.Eval.Applied.Refused) { "refused: $refused" }
-            eq(committed.scan("playlist").size, 1, "the write before the refusal did not land")
-            val tx = dev.arkdb.TransactionStore(committed)
-            tx.commit()
-            val late = try {
-                tx.put("playlist", Value.record("id" to Value.id(pid), "name" to Value.text("y"), "user_id" to Value.text("e")))
-                null
-            } catch (e: dev.arkdb.Fault.Bug) {
-                e
-            }
-            check(late != null) { "a write after commit is a bug" }
+            val s = Session.open(tempDir("bug"), module, "eve", autos = Counting(), procedures = listOf(h to broken))
+            val out = s.mutate("create_playlist", create("x"))
+            check(out is Outcome.Refused && out.reason.startsWith("bug:")) { "a bug is surfaced: $out" }
+            eq(s.status.scopes.single().cursor, 0L, "and sequences nothing")
+            s.close()
         }
 
         println()

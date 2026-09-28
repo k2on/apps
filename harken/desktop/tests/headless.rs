@@ -76,7 +76,7 @@ fn alone_a_playlist_is_made_filled_and_survives_a_restart() {
         "by artist, album, title"
     );
 
-    // The generated mutators, through the generated code.
+    // harken's mutators, through its own procedures.
     p.call(domain::create_playlist("  Favorites ".into())).unwrap();
     let pls = playlists(&p);
     assert_eq!(pls.len(), 1);
@@ -100,10 +100,7 @@ fn alone_a_playlist_is_made_filled_and_survives_a_restart() {
     assert_eq!(st.pending, 0, "alone, nothing stays pending");
     assert_eq!(st.cursors, vec![(LIBRARY.into(), 3), (PLAYLISTS.into(), 5)]);
     if cfg!(debug_assertions) {
-        assert_eq!(
-            p.agreement_checks, 6,
-            "every generated call, the refused one too, was held to the interpreter"
-        );
+        assert_eq!(p.agreement_checks, 6, "every call, the refused one too, was held to the interpreter");
     }
     let before: BTreeMap<String, (i64, Vec<u8>)> = p.scopes().into_iter().map(|s| (s.clone(), p.verify_at(&s).unwrap())).collect();
     assert!(data.join("library.cbor").is_file());
@@ -140,7 +137,9 @@ impl Net {
         let bodies = closures(&module);
         let mut server = Server::open(trusting(), open_access(), Silent);
         for sc in &module.schema.scopes {
-            server.host(Authority::new(module.schema.clone(), &sc.name, bodies.clone()));
+            let mut a = Authority::new(module.schema.clone(), &sc.name, bodies.clone());
+            a.hold(harken_domain::module().procedures());
+            server.host(a);
         }
         Net {
             server,

@@ -1,7 +1,7 @@
-//! Two peers over real sockets against the demo module, and a restart on
-//! the same data directory.
+//! Two peers over real sockets against harken's own module (hosted with
+//! its procedures native), and a restart on the same data directory.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 use ark::canon;
@@ -22,13 +22,9 @@ const SCOPE: &str = "playlists";
 /// nothing more to say.
 const IDLE: Duration = Duration::from_millis(300);
 
-fn demo() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/demo.ark")
-}
-
 async fn serve(data: &Path) -> Running {
     start(Config {
-        module: demo(),
+        module: None,
         data: data.to_path_buf(),
         listen: "127.0.0.1:0".into(),
         media: None,
@@ -52,17 +48,16 @@ impl Peer {
             .expect("the socket opens");
         let schema = domain.module.schema.clone();
         let mut client = Client::open(schema.clone(), Some(name.into()));
-        client.subscribe(
-            Mode::Whole,
-            Replica::open(
-                schema.clone(),
-                SCOPE,
-                domain.closures.clone(),
-                MemoryStore::empty(schema),
-                0,
-                vec![],
-            ),
+        let mut replica = Replica::open(
+            schema.clone(),
+            SCOPE,
+            domain.closures.clone(),
+            MemoryStore::empty(schema),
+            0,
+            vec![],
         );
+        replica.hold(domain.natives.iter().cloned());
+        client.subscribe(Mode::Whole, replica);
         client.connected();
         Peer {
             ws,
@@ -137,7 +132,7 @@ async fn healthz(running: &Running) -> String {
 
 #[tokio::test]
 async fn two_peers_agree_and_a_restart_serves_the_same_log() {
-    let domain = Domain::load(&demo()).unwrap();
+    let domain = Domain::harken();
     let data = tempfile::tempdir().unwrap();
     let running = serve(data.path()).await;
 
@@ -152,7 +147,7 @@ async fn two_peers_agree_and_a_restart_serves_the_same_log() {
         &domain,
         11,
         "create_playlist",
-        args([("id", Value::Id(playlist))]),
+        args([("id", Value::Id(playlist)), ("created_ms", Value::int(1))]),
         args([("name", Value::text("  Road trip "))]),
     );
     a.mutate(
@@ -162,7 +157,7 @@ async fn two_peers_agree_and_a_restart_serves_the_same_log() {
         args([("added_ms", Value::int(1_700_000_000_000))]),
         args([
             ("playlist_id", Value::Id(playlist)),
-            ("media_id", Value::bytes(vec![9, 9, 9])),
+            ("track_id", Value::Id([9; 16])),
         ]),
     );
     assert_eq!(a.replica().pending.len(), 2);
@@ -218,7 +213,7 @@ async fn two_peers_agree_and_a_restart_serves_the_same_log() {
         &domain,
         13,
         "create_playlist",
-        args([("id", Value::Id([2; 16]))]),
+        args([("id", Value::Id([2; 16])), ("created_ms", Value::int(2))]),
         args([("name", Value::text("Focus"))]),
     );
     c.pump().await;
@@ -230,7 +225,7 @@ async fn two_peers_agree_and_a_restart_serves_the_same_log() {
 
 #[tokio::test]
 async fn a_frame_that_is_not_the_protocol_closes_the_socket_and_nothing_else() {
-    let domain = Domain::load(&demo()).unwrap();
+    let domain = Domain::harken();
     let data = tempfile::tempdir().unwrap();
     let running = serve(data.path()).await;
     let mut good = Peer::connect(&running, &domain, "alice").await;
@@ -258,7 +253,7 @@ async fn a_frame_that_is_not_the_protocol_closes_the_socket_and_nothing_else() {
         &domain,
         14,
         "create_playlist",
-        args([("id", Value::Id([3; 16]))]),
+        args([("id", Value::Id([3; 16])), ("created_ms", Value::int(3))]),
         args([("name", Value::text("Still here"))]),
     );
     good.pump().await;

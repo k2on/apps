@@ -8,12 +8,13 @@ import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import dev.arkdb.Fault
 import dev.arkdb.Id
 import dev.arkdb.Value
 import dev.arkdb.client.Outcome
 import dev.arkdb.client.Session
 import dev.arkdb.client.Status
-import harken.gen.HarkenGen
+import harken.gen.module as harkenDomain
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -112,6 +113,15 @@ class Model(app: Application) : AndroidViewModel(app) {
 
     private var session: Session? = null
 
+    /**
+     * harken's domain as the printed Kotlin authors it
+     * (`domain/gen/kotlin`): emitted once for the module the replicas hash
+     * and verify against, and run natively for everything this phone
+     * authors and replays. What it does not carry (`add_track`) arrives as
+     * facts.
+     */
+    private val domain by lazy { harkenDomain() }
+
     init {
         open()
         viewModelScope.launch {
@@ -135,21 +145,28 @@ class Model(app: Application) : AndroidViewModel(app) {
     private fun open() {
         val app = getApplication<Application>()
         val st = _settings.value
-        val module = Session.moduleOfHex(HarkenGen.MODULE_BYTES)
         val safeUser = st.user.replace(Regex("[^A-Za-z0-9_.-]"), "_")
         val dir = File(app.filesDir, "ark/$safeUser/${if (st.workAlone) "alone" else "server"}")
-        val s = Session.open(dir, module, st.user, if (st.workAlone) null else st.serverUrl)
+        val s = Session.open(dir, domain, st.user, if (st.workAlone) null else st.serverUrl)
         s.onChange { refresh() }
         session = s
         _status.value = s.status
         refresh()
     }
 
-    /** Re-read the three lists from the merged view; called after every change the session reports. */
+    // A query's answer, or nothing when it is refused (signed out, a playlist
+    // that is not this person's): a screen draws an empty list, not an error.
+    private fun ask(s: Session, name: String, args: Map<String, Value> = emptyMap()): List<Value> = try {
+        s.query(name, args).asList()
+    } catch (f: Fault.Refuse) {
+        emptyList()
+    }
+
+    /** Re-read the three lists through the procedures, natively; called after every change the session reports. */
     private fun refresh() {
         val s = session ?: return
-        val lib = s.read { db -> HarkenGen.query("library", db, mapOf()).asList().map { Track.of(it) } }
-        val pls = s.read { db -> HarkenGen.query("playlists", db, mapOf()).asList().map { Playlist.of(it) } }
+        val lib = ask(s, "library").map { Track.of(it) }
+        val pls = ask(s, "playlists").map { Playlist.of(it) }
         _library.value = lib
         _playlists.value = pls
         // A playlist the rebase dropped (a duplicate that lost) is no longer selected.
@@ -159,7 +176,7 @@ class Model(app: Application) : AndroidViewModel(app) {
             emptyList()
         } else {
             val byId = lib.associateBy { it.id }
-            s.read { db -> HarkenGen.query("playlist_items", db, mapOf("playlist_id" to Value.id(sel))).asList() }
+            ask(s, "playlist_items", mapOf("playlist_id" to Value.id(sel)))
                 .map { row ->
                     val tid = row.field("track_id").asId()
                     PlaylistRow(row.field("playlist_id").asId(), tid, row.field("pos").asInt(), byId[tid])
@@ -178,10 +195,18 @@ class Model(app: Application) : AndroidViewModel(app) {
         if (o is Outcome.Refused) _notice.value = o.reason
     }
 
-    /** Every mutation runs the generated code, through `mutateWith`; the entry is the same one the interpreter would record. */
+    /**
+     * What the form validator says of a name as it is typed: the message
+     * `create_playlist`'s own checks would refuse it with, or null. The same
+     * checks the mutation runs, so the dialog cannot disagree with it.
+     */
+    fun playlistNameProblem(name: String): String? =
+        session?.check("create_playlist", mapOf("name" to Value.text(name)))?.messageFor("name")
+
+    /** Every mutation runs its procedure natively; the entry is the one the interpreter would record. */
     fun createPlaylist(name: String) {
         val s = session ?: return
-        outcome(s.mutateWith("create_playlist", HarkenGen.createPlaylistArgs(name)) { db -> HarkenGen.createPlaylist(db, ctx, autos, args) })
+        outcome(s.mutate("create_playlist", mapOf("name" to Value.text(name))))
     }
 
     fun addToPlaylist(trackId: Id, playlistId: Id? = _selected.value) {
@@ -190,12 +215,12 @@ class Model(app: Application) : AndroidViewModel(app) {
             _notice.value = "make a playlist first"
             return
         }
-        outcome(s.mutateWith("add_to_playlist", HarkenGen.addToPlaylistArgs(pid, trackId)) { db -> HarkenGen.addToPlaylist(db, ctx, autos, args) })
+        outcome(s.mutate("add_to_playlist", mapOf("playlist_id" to Value.id(pid), "track_id" to Value.id(trackId))))
     }
 
     fun removeFromPlaylist(playlistId: Id, trackId: Id) {
         val s = session ?: return
-        outcome(s.mutateWith("remove_from_playlist", HarkenGen.removeFromPlaylistArgs(playlistId, trackId)) { db -> HarkenGen.removeFromPlaylist(db, ctx, autos, args) })
+        outcome(s.mutate("remove_from_playlist", mapOf("playlist_id" to Value.id(playlistId), "track_id" to Value.id(trackId))))
     }
 
     fun verify() {

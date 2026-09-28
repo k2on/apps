@@ -75,6 +75,7 @@ struct RouteDecl {
 struct Core {
     name: String,
     scope: &'static str,
+    tables: fn() -> Vec<IrTable>,
     middleware: RefCell<Vec<MwDecl>>,
     routes: RefCell<Vec<RouteDecl>>,
 }
@@ -104,6 +105,7 @@ pub fn router<S: Scope>(name: &str) -> Router<S> {
         core: Rc::new(Core {
             name: name.into(),
             scope: S::NAME,
+            tables: super::schema::tables_of::<S>,
             middleware: RefCell::new(vec![]),
             routes: RefCell::new(vec![]),
         }),
@@ -113,7 +115,7 @@ pub fn router<S: Scope>(name: &str) -> Router<S> {
 }
 
 fn scope_value<S: Scope>() -> S {
-    raw::assemble(&[], S::NAME)
+    S::open()
 }
 
 impl<S: Scope, P> Router<S, P> {
@@ -173,7 +175,7 @@ impl<S: Scope, P> Router<S, P> {
 
     /// The router, with these procedures on it.
     pub fn routes(&self, rs: impl Routes<S>) -> Router<S> {
-        self.core.routes.borrow_mut().extend(rs.decls());
+        self.core.routes.borrow_mut().extend(rs.decls().into_iter().map(|RouteDeclBox(d)| d));
         Router {
             core: self.core.clone(),
             chain: vec![],
@@ -291,7 +293,14 @@ impl<S: Scope, I: Input, A: Data, B: Data> Proc<S, I, (A, B)> {
     /// A mutator: `|ctx, db, input, a, b| effect`.
     pub fn mutation<R: IntoEffect>(&self, name: &str, f: impl Fn(&Ctx, &S, I, A, B) -> R + Send + Sync + 'static) -> Route<S> {
         let body: BodyRun = Arc::new(move |ins, ps| {
-            f(&Ctx::current(), &scope_value::<S>(), input_of::<I>(ins), A::from_h(ps[0]), B::from_h(ps[1])).into_effect();
+            f(
+                &Ctx::current(),
+                &scope_value::<S>(),
+                input_of::<I>(ins),
+                A::from_h(ps[0]),
+                B::from_h(ps[1]),
+            )
+            .into_effect();
             None
         });
         self.route(name, FnKind::Mutator, None, body)
@@ -299,7 +308,16 @@ impl<S: Scope, I: Input, A: Data, B: Data> Proc<S, I, (A, B)> {
     /// A query: `|ctx, db, input, a, b| value`.
     pub fn query<T: Data>(&self, name: &str, f: impl Fn(&Ctx, &S, I, A, B) -> T + Send + Sync + 'static) -> Route<S> {
         let body: BodyRun = Arc::new(move |ins, ps| {
-            Some(f(&Ctx::current(), &scope_value::<S>(), input_of::<I>(ins), A::from_h(ps[0]), B::from_h(ps[1])).to_h())
+            Some(
+                f(
+                    &Ctx::current(),
+                    &scope_value::<S>(),
+                    input_of::<I>(ins),
+                    A::from_h(ps[0]),
+                    B::from_h(ps[1]),
+                )
+                .to_h(),
+            )
         });
         self.route(name, FnKind::Query, Some(T::ty()), body)
     }
@@ -342,14 +360,6 @@ routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8);
 routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9);
 routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
 routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11);
-
-impl<S> Extend<RouteDeclBox> for Vec<RouteDecl> {
-    fn extend<T: IntoIterator<Item = RouteDeclBox>>(&mut self, iter: T) {
-        for RouteDeclBox(d) in iter {
-            self.push(d);
-        }
-    }
-}
 
 // ---------------------------------------------------------------------------
 // The module
@@ -464,12 +474,14 @@ fn build(cores: &[Rc<Core>]) -> Result<Built, Vec<String>> {
     let mut errors: Vec<String> = Vec::new();
     let mut functions: Vec<Function> = Vec::new();
     let mut routers: Vec<ir::Router> = Vec::new();
-    let mut touched: Vec<(String, IrTable)> = Vec::new();
-    let mut scopes: Vec<String> = Vec::new();
+    let mut scopes: Vec<IrScope> = Vec::new();
     let mut decls: Vec<(String, RouteDecl, Vec<MwDecl>)> = Vec::new();
     for core in cores {
-        if !scopes.iter().any(|s| s == core.scope) {
-            scopes.push(core.scope.into());
+        if !scopes.iter().any(|s| s.name == core.scope) {
+            scopes.push(IrScope {
+                name: core.scope.into(),
+                tables: (core.tables)(),
+            });
         }
         let mws = core.middleware.borrow().clone();
         routers.push(ir::Router {
@@ -478,21 +490,19 @@ fn build(cores: &[Rc<Core>]) -> Result<Built, Vec<String>> {
             uses: mws.iter().map(|m| m.name.clone()).collect(),
         });
         for mw in &mws {
-            let (f, t, es) = emit_middleware(core, mw);
+            let (f, es) = emit_middleware(core, mw);
             functions.push(f);
-            touched.extend(t);
             errors.extend(es);
         }
         for r in core.routes.borrow().iter() {
-            let (f, t, es) = emit_route(core, r);
+            let (f, es) = emit_route(core, r);
             functions.push(f);
-            touched.extend(t);
             errors.extend(es);
             let chain = r.chain.iter().filter_map(|n| mws.iter().find(|m| m.name == *n).cloned()).collect();
             decls.push((core.scope.into(), r.clone(), chain));
         }
     }
-    let schema = schema_of(&scopes, &touched, &mut errors);
+    let schema = Schema { scopes };
     if !errors.is_empty() {
         return Err(errors);
     }
@@ -532,60 +542,22 @@ fn named(mut m: ir::Module) -> ir::Module {
     m
 }
 
-// The scopes in the order the routers name them; in each, the tables its
-// functions touched, in the order they were first touched, parents before
-// children. A table touched from two scopes is an error.
-fn schema_of(scopes: &[String], touched: &[(String, IrTable)], errors: &mut Vec<String>) -> Schema {
-    let mut home: BTreeMap<String, String> = BTreeMap::new();
-    for (s, t) in touched {
-        match home.get(&t.name) {
-            Some(h) if h != s => errors.push(format!("the table {} is used from the scopes {h} and {s}; a table is in one scope", t.name)),
-            _ => {
-                home.insert(t.name.clone(), s.clone());
-            }
-        }
-    }
-    let mut out = Vec::new();
-    for s in scopes {
-        let mut pending: Vec<IrTable> = Vec::new();
-        for (sc, t) in touched {
-            if sc == s && !pending.iter().any(|x| x.name == t.name) {
-                pending.push(t.clone());
-            }
-        }
-        let mut placed: Vec<IrTable> = Vec::new();
-        while !pending.is_empty() {
-            let names: Vec<String> = pending.iter().map(|t| t.name.clone()).collect();
-            let i = pending
-                .iter()
-                .position(|t| t.refs.iter().all(|r| r.table == t.name || !names.contains(&r.table)))
-                .unwrap_or(0);
-            placed.push(pending.remove(i));
-        }
-        out.push(IrScope {
-            name: s.clone(),
-            tables: placed,
-        });
-    }
-    Schema { scopes: out }
-}
+type Emitted = (Function, Vec<String>);
 
-type Emitted = (Function, Vec<(String, IrTable)>, Vec<String>);
-
-fn finish(name: &str, cx: Cx) -> (Vec<(String, ir::Auto)>, ir::Block, Vec<(String, IrTable)>, Vec<String>) {
+fn finish(name: &str, cx: Cx) -> (Vec<(String, ir::Auto)>, ir::Block, Vec<String>) {
     let mut em = cx.into_emit();
     let body = em.body();
     let errors = em.errors.iter().map(|e| format!("{name}: {e}")).collect();
-    (em.autos, body, em.touched, errors)
+    (em.autos, body, errors)
 }
 
 fn emit_middleware(core: &Core, mw: &MwDecl) -> Emitted {
-    let (ret, cx) = cx::run(Cx::emit(core.scope), || {
+    let (ret, cx) = cx::run(Cx::emit(), || {
         let lookup = |n: &str| cx::e(Expr::Arg(n.into()));
         let r = (mw.run)(&lookup);
         r.map(cx::expr)
     });
-    let (autos, mut body, touched, errors) = finish(&mw.name, cx);
+    let (autos, mut body, errors) = finish(&mw.name, cx);
     if let Some(e) = ret {
         body.push(Stmt::Return(Some(e)));
     }
@@ -602,7 +574,7 @@ fn emit_middleware(core: &Core, mw: &MwDecl) -> Emitted {
         body,
         names: BTreeMap::new(),
     };
-    (f, touched, errors)
+    (f, errors)
 }
 
 fn emit_route(core: &Core, r: &RouteDecl) -> Emitted {
@@ -614,7 +586,7 @@ fn emit_route(core: &Core, r: &RouteDecl) -> Emitted {
             .cloned()
             .collect()
     };
-    let ((input, refine, ret), cx) = cx::run(Cx::emit(core.scope), || {
+    let ((input, refine, ret), cx) = cx::run(Cx::emit(), || {
         let ins: Vec<H> = r.input.fields.iter().map(|(n, _, _)| cx::e(Expr::Arg(n.clone()))).collect();
         let mut input = Vec::with_capacity(r.input.fields.len());
         for (n, ty, checks) in &r.input.fields {
@@ -630,12 +602,17 @@ fn emit_route(core: &Core, r: &RouteDecl) -> Emitted {
             }
             input.push((n.clone(), Field { ty: ty.clone(), checks: out }));
         }
-        let refine: Vec<(Expr, Option<String>)> = r.input.refine.iter().map(|(f, why)| (cx::in_expr(|| cx::expr(f(&ins))), why.clone())).collect();
+        let refine: Vec<(Expr, Option<String>)> = r
+            .input
+            .refine
+            .iter()
+            .map(|(f, why)| (cx::in_expr(|| cx::expr(f(&ins))), why.clone()))
+            .collect();
         let prov: Vec<H> = provides.iter().map(|n| cx::e(Expr::Provided(n.clone()))).collect();
         let ret = (r.body)(&ins, &prov).map(cx::expr);
         (input, refine, ret)
     });
-    let (autos, mut body, touched, errors) = finish(&r.name, cx);
+    let (autos, mut body, errors) = finish(&r.name, cx);
     if let Some(e) = ret {
         body.push(Stmt::Return(Some(e)));
     }
@@ -652,7 +629,7 @@ fn emit_route(core: &Core, r: &RouteDecl) -> Emitted {
         body,
         names: BTreeMap::new(),
     };
-    (f, touched, errors)
+    (f, errors)
 }
 
 // ---------------------------------------------------------------------------
@@ -687,6 +664,9 @@ impl PartialEq for Procedure {
 impl Eq for Procedure {}
 
 type Outcome<T> = Result<(Vec<Change>, T), EvalFault>;
+
+/// What applying a mutator comes to: the changes, the verdict, or a bug.
+pub type Applied = Result<Result<Vec<Change>, Refusal>, EvalError>;
 
 impl Procedure {
     pub fn name(&self) -> &str {
@@ -753,6 +733,35 @@ impl Procedure {
         v.ok_or_else(|| EvalFault::Bug(EvalError::NoReturn(self.name().into())))
     }
 
+    /// Hold this procedure to the interpreter on one entry: run it natively
+    /// and through `apply_closure` on the closure it emitted, each over its
+    /// own copy of `store`, and compare the verdicts, the changes and the
+    /// stores afterwards. What a peer may run in debug builds, and what the
+    /// agreement tests run on every procedure.
+    pub fn agrees(&self, ctx: &eval::Ctx, autos: &Args, args: &Args, store: &crate::store::MemoryStore) -> Result<Applied, String> {
+        let mut native_store = store.clone();
+        let mut ir_store = store.clone();
+        let native = self.apply(ctx, autos, args, &mut native_store);
+        let ir = eval::apply_closure(&self.0.schema, &self.0.closure, ctx, autos, args, &mut ir_store);
+        if native != ir {
+            return Err(format!("{}: native {native:?}, interpreted {ir:?}", self.name()));
+        }
+        if native_store != ir_store {
+            return Err(format!("{}: the stores differ afterwards", self.name()));
+        }
+        Ok(native)
+    }
+
+    /// [`Procedure::agrees`] for a query: the same value or the same fault.
+    pub fn agrees_on_query(&self, ctx: &eval::Ctx, args: &Args, store: &dyn Store) -> Result<Result<Value, EvalFault>, String> {
+        let native = self.query(ctx, args, store);
+        let ir = eval::query_closure(&self.0.schema, &self.0.closure, ctx, args, store);
+        if native != ir {
+            return Err(format!("{}: native {native:?}, interpreted {ir:?}", self.name()));
+        }
+        Ok(native)
+    }
+
     /// §1.3 The form validator over a partial input.
     pub fn check(&self, ctx: &eval::Ctx, partial: &Args, store: &dyn Store) -> Result<Checked, EvalError> {
         eval::check(&self.0.schema, &self.0.closure, ctx, partial, store)
@@ -783,10 +792,10 @@ impl Procedure {
                     Ok(r == Value::Bool(true))
                 };
                 match eval::check_field_with(n, field, checked[n].clone(), &exists, &mut refine)? {
-                    Ok(v) => {
+                    (v, None) => {
                         checked.insert(n.clone(), v);
                     }
-                    Err(msg) => return Err(EvalFault::Verdict(Refusal::Refused(msg))),
+                    (_, Some(msg)) => return Err(EvalFault::Verdict(Refusal::Refused(msg))),
                 }
             }
             let ins: Vec<H> = fields.iter().map(|(n, _, _)| cx::lit(checked[n].clone())).collect();

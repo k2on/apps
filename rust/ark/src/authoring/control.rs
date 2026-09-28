@@ -16,7 +16,9 @@ fn taken(c: Bool) -> Option<bool> {
     match cx::value(c.to_h()) {
         Value::Bool(b) => Some(b),
         other => {
-            cx::halt(crate::eval::EvalFault::Bug(crate::eval::EvalError::TypeError(format!("a condition is a Bool, not {other:?}"))));
+            cx::halt(crate::eval::EvalFault::Bug(crate::eval::EvalError::TypeError(format!(
+                "a condition is a Bool, not {other:?}"
+            ))));
             None
         }
     }

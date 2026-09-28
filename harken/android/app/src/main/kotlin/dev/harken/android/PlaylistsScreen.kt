@@ -69,6 +69,7 @@ fun PlaylistsScreen(model: Model, onOpen: (Id) -> Unit) {
 
     if (naming) {
         NamePlaylistDialog(
+            problem = model::playlistNameProblem,
             onDismiss = { naming = false },
             onCreate = { name ->
                 naming = false
@@ -78,18 +79,34 @@ fun PlaylistsScreen(model: Model, onOpen: (Id) -> Unit) {
     }
 }
 
+/**
+ * The name, checked as it is typed by `create_playlist`'s own input checks
+ * (the form validator): the message under the field is the one the
+ * mutation would refuse with, so the two cannot disagree. Nothing is shown
+ * until something has been typed.
+ */
 @Composable
-fun NamePlaylistDialog(onDismiss: () -> Unit, onCreate: (String) -> Unit) {
+fun NamePlaylistDialog(problem: (String) -> String?, onDismiss: () -> Unit, onCreate: (String) -> Unit) {
     var name by remember { mutableStateOf("") }
+    var touched by remember { mutableStateOf(false) }
+    val message = problem(name)
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("New playlist") },
         text = {
-            OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, singleLine = true)
+            OutlinedTextField(
+                value = name,
+                onValueChange = {
+                    name = it
+                    touched = true
+                },
+                label = { Text("Name") },
+                singleLine = true,
+                isError = touched && message != null,
+                supportingText = { if (touched && message != null) Text(message) },
+            )
         },
-        // `create_playlist` trims and refuses an empty name itself; the
-        // button only stops an obviously blank tap from becoming a refusal.
-        confirmButton = { TextButton(onClick = { onCreate(name) }, enabled = name.isNotBlank()) { Text("Create") } },
+        confirmButton = { TextButton(onClick = { onCreate(name) }, enabled = message == null) { Text("Create") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }

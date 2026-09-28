@@ -28,7 +28,11 @@ fn the_module_verifies_and_is_the_committed_file() {
     let bytes = m.emit();
     let decoded = ark::ir::module_from_value(&ark::canon::decode(&bytes).unwrap()).unwrap();
     let verified = ark::verify::verify(&decoded).unwrap_or_else(|es| panic!("{es:?}"));
-    assert_eq!(ark::ir::module_value(&verified), ark::ir::module_value(&decoded), "emit is already the verified form");
+    assert_eq!(
+        ark::ir::module_value(&verified),
+        ark::ir::module_value(&decoded),
+        "emit is already the verified form"
+    );
     let names: Vec<&str> = decoded.functions.iter().map(|f| f.name.as_str()).collect();
     assert_eq!(
         names,
@@ -48,6 +52,13 @@ fn the_module_verifies_and_is_the_committed_file() {
     assert_eq!(add.uses, ["signed_in", "owned"]);
     assert_eq!(decoded.lookup_function("create_playlist").unwrap().uses, ["signed_in"]);
     assert_eq!(decoded.lookup_router("playlists").unwrap().uses, ["signed_in", "owned"]);
+    // §6: a provide returns `or_refuse`'s value whole, `EStd Unwrap [EVar s]`.
+    let owned = decoded.lookup_function("owned").unwrap();
+    assert!(
+        matches!(owned.body.last(), Some(ark::ir::Stmt::Return(Some(ark::ir::Expr::Std(ark::ir::StdFn::Unwrap, xs)))) if matches!(xs[..], [ark::ir::Expr::Var(_)])),
+        "{:?}",
+        owned.body.last()
+    );
     let committed = std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("harken.ark")).unwrap();
     assert!(
         committed == bytes,
@@ -116,7 +127,11 @@ fn track(title: &str, artist: &str, album: Option<&str>, ms: i64, file: &str) ->
 }
 
 fn now(k: u8) -> Args {
-    args([("id", id(k)), ("added_ms", Value::int(1_000 + k as i64)), ("created_ms", Value::int(2_000 + k as i64))])
+    args([
+        ("id", id(k)),
+        ("added_ms", Value::int(1_000 + k as i64)),
+        ("created_ms", Value::int(2_000 + k as i64)),
+    ])
 }
 
 #[test]
@@ -128,9 +143,24 @@ fn every_procedure_agrees_with_the_interpreter() {
     let nobody = Ctx::new("", "x");
 
     // library: add_track and its checks.
-    assert_eq!(r.step("add_track", &scanner, now(1), track(" Air ", "Bach", Some(" Suite 3 "), 300_000, "bach/air.flac")), Ok(1));
-    assert_eq!(r.step("add_track", &scanner, now(2), track("Aria", "Bach", None, 250_000, "bach/aria.flac")), Ok(1));
-    assert_eq!(r.step("add_track", &scanner, now(3), track("Air", "Bach", None, 1, "bach/air.flac")), Ok(0), "a rescan is a no-op");
+    assert_eq!(
+        r.step(
+            "add_track",
+            &scanner,
+            now(1),
+            track(" Air ", "Bach", Some(" Suite 3 "), 300_000, "bach/air.flac")
+        ),
+        Ok(1)
+    );
+    assert_eq!(
+        r.step("add_track", &scanner, now(2), track("Aria", "Bach", None, 250_000, "bach/aria.flac")),
+        Ok(1)
+    );
+    assert_eq!(
+        r.step("add_track", &scanner, now(3), track("Air", "Bach", None, 1, "bach/air.flac")),
+        Ok(0),
+        "a rescan is a no-op"
+    );
     assert_eq!(
         r.step("add_track", &scanner, now(4), track("  ", "X", None, 1, "x.flac")),
         Err("a track needs a title".into())
@@ -145,17 +175,34 @@ fn every_procedure_agrees_with_the_interpreter() {
     );
     let lib = r.query("library", &alice, args([])).unwrap();
     let titles: Vec<Value> = lib.as_list().iter().map(|t| t.field("title")).collect();
-    assert_eq!(titles, vec![Value::text("Aria"), Value::text("Air")], "by artist, album (None first), title");
-    assert_eq!(lib.as_list()[1].field("album"), Value::text("Suite 3"), "an optional field is trimmed when Some");
+    assert_eq!(
+        titles,
+        vec![Value::text("Aria"), Value::text("Air")],
+        "by artist, album (None first), title"
+    );
+    assert_eq!(
+        lib.as_list()[1].field("album"),
+        Value::text("Suite 3"),
+        "an optional field is trimmed when Some"
+    );
 
     // playlists: the guard, the provide, the three writes.
     assert_eq!(
         r.step("create_playlist", &nobody, now(10), args([("name", Value::text("Mine"))])),
         Err("sign in first".into())
     );
-    assert_eq!(r.step("create_playlist", &alice, now(11), args([("name", Value::text("  Favorites "))])), Ok(1));
-    assert_eq!(r.step("create_playlist", &alice, now(12), args([("name", Value::text("Favorites"))])), Ok(0));
-    assert_eq!(r.step("create_playlist", &bob, now(13), args([("name", Value::text("Favorites"))])), Ok(1));
+    assert_eq!(
+        r.step("create_playlist", &alice, now(11), args([("name", Value::text("  Favorites "))])),
+        Ok(1)
+    );
+    assert_eq!(
+        r.step("create_playlist", &alice, now(12), args([("name", Value::text("Favorites"))])),
+        Ok(0)
+    );
+    assert_eq!(
+        r.step("create_playlist", &bob, now(13), args([("name", Value::text("Favorites"))])),
+        Ok(1)
+    );
     assert_eq!(
         r.step("create_playlist", &alice, now(14), args([("name", Value::text("   "))])),
         Err("a playlist needs a name".into())
@@ -170,12 +217,18 @@ fn every_procedure_agrees_with_the_interpreter() {
     assert_eq!(r.step("add_to_playlist", &alice, at(21), on(11, 1)), Ok(1));
     assert_eq!(r.step("add_to_playlist", &alice, at(22), on(11, 1)), Ok(0), "already there");
     assert_eq!(r.step("add_to_playlist", &alice, at(23), on(13, 1)), Err("not your playlist".into()));
-    assert_eq!(r.step("add_to_playlist", &alice, at(24), on(99, 1)), Err("playlist_id: no such playlist".into()));
+    assert_eq!(
+        r.step("add_to_playlist", &alice, at(24), on(99, 1)),
+        Err("playlist_id: no such playlist".into())
+    );
     assert_eq!(r.step("add_to_playlist", &nobody, at(25), on(11, 1)), Err("sign in first".into()));
     let items = r.query("playlist_items", &alice, args([("playlist_id", id(11))])).unwrap();
     let pos: Vec<(Value, Value)> = items.as_list().iter().map(|i| (i.field("track_id"), i.field("pos"))).collect();
     assert_eq!(pos, vec![(id(2), Value::int(1)), (id(1), Value::int(2))]);
-    assert_eq!(r.query("playlist_items", &bob, args([("playlist_id", id(11))])), Err("not your playlist".into()));
+    assert_eq!(
+        r.query("playlist_items", &bob, args([("playlist_id", id(11))])),
+        Err("not your playlist".into())
+    );
     assert_eq!(r.step("remove_from_playlist", &bob, now(0), on(11, 2)), Err("not your playlist".into()));
     assert_eq!(r.step("remove_from_playlist", &alice, now(0), on(11, 2)), Ok(1));
     assert_eq!(r.step("remove_from_playlist", &alice, now(0), on(11, 2)), Ok(0));

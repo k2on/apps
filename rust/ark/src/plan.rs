@@ -1,4 +1,4 @@
-//! The plan builder GENERATED.md names: `Plan::from(table).filter(pred)
+//! A plan builder for tests and hand-written IR: `Plan::from(table).filter(pred)
 //! .order_by(col, Dir::Asc).limit(n).related(name, parent, child, column,
 //! child_plan)` and `Pred::cmp`, `in_list`, `all`, `any`, `not`. Right-hand
 //! sides are `Value`s, already evaluated, carried as literals.

@@ -1,5 +1,5 @@
 // The plan a runtime executes and a view maintains: Ark.IR.Plan with every
-// right-hand side already evaluated (Ark.View.ViewPlan). Generated code
+// right-hand side already evaluated (Ark.View.ViewPlan). A native query
 // builds one through these builders and hands it to `Store.select`.
 package dev.arkdb
 

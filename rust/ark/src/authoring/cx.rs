@@ -8,8 +8,7 @@ use std::cell::RefCell;
 
 use crate::eval::{self, EvalError, EvalFault};
 use crate::ir::{Auto, Block, CmpOp, Expr, Op, StdFn, Stmt, Sym};
-use crate::schema::Table;
-use crate::stdlib::{self, StdError, Args};
+use crate::stdlib::{self, Args, StdError};
 use crate::store::{Change, Refusal};
 use crate::value::Value;
 
@@ -31,10 +30,6 @@ pub(crate) struct Emit {
     next: Sym,
     pub(crate) autos: Vec<(String, Auto)>,
     pub(crate) errors: Vec<String>,
-    /// The scope of the function being emitted, and every table it touched
-    /// in it: how the schema learns which scope a table is in.
-    pub(crate) scope: String,
-    pub(crate) touched: Vec<(String, Table)>,
     /// How deep in expression closures (`map`, `filter`, a check…) the run
     /// is: no statement may be written there.
     in_expr: usize,
@@ -55,21 +50,24 @@ pub(crate) enum Mode {
 pub(crate) struct Cx {
     pub(crate) mode: Mode,
     nodes: Vec<Node>,
+    /// Rows taken apart into their fields, by those fields' handles: a row
+    /// given back unchanged is the term it came from, not a struct rebuilt
+    /// field by field (§6: `or_refuse`'s value is `EStd Unwrap [EVar s]`).
+    origins: std::collections::HashMap<Vec<u32>, H>,
 }
 
 impl Cx {
-    pub(crate) fn emit(scope: &str) -> Cx {
+    pub(crate) fn emit() -> Cx {
         Cx {
             mode: Mode::Emit(Emit {
                 blocks: vec![vec![]],
                 next: 0,
                 autos: vec![],
                 errors: vec![],
-                scope: scope.into(),
-                touched: vec![],
                 in_expr: 0,
             }),
             nodes: vec![],
+            origins: std::collections::HashMap::new(),
         }
     }
 
@@ -82,6 +80,7 @@ impl Cx {
                 changes: vec![],
             }),
             nodes: vec![],
+            origins: std::collections::HashMap::new(),
         }
     }
 
@@ -157,6 +156,19 @@ pub(crate) fn node(n: Node) -> H {
     with(|cx| push(cx, n))
 }
 
+/// Remember that these field handles are the row `origin` taken apart.
+pub(crate) fn remember(fields: &[H], origin: H) {
+    with(|cx| {
+        cx.origins.insert(fields.iter().map(|h| h.0).collect(), origin);
+    })
+}
+
+/// The row these field handles were taken from, if they are exactly its
+/// fields, unchanged.
+pub(crate) fn origin(fields: &[H]) -> Option<H> {
+    with(|cx| cx.origins.get(&fields.iter().map(|h| h.0).collect::<Vec<u32>>()).copied())
+}
+
 /// A literal: the same node in both modes.
 pub(crate) fn lit(v: Value) -> H {
     node(Node::V(v))
@@ -180,18 +192,6 @@ pub(crate) fn value(h: H) -> Value {
     with(|cx| match &cx.nodes[h.0 as usize] {
         Node::V(v) => v.clone(),
         Node::E(x) => panic!("a Native value that is an expression: {x:?}"),
-    })
-}
-
-/// Emit: record an authoring error, reported by `Module::build`.
-pub(crate) fn error(msg: String) {
-    with(|cx| match &mut cx.mode {
-        Mode::Emit(em) => em.errors.push(msg),
-        Mode::Native(n) => {
-            if n.halt.is_none() {
-                n.halt = Some(EvalFault::Bug(EvalError::TypeError(msg)));
-            }
-        }
     })
 }
 
@@ -345,23 +345,10 @@ pub(crate) fn in_expr<R>(f: impl FnOnce() -> R) -> R {
 pub(crate) fn auto(name: &str, a: Auto) {
     emit_mut(|em| {
         if em.autos.iter().any(|(n, _)| n == name) {
-            em.errors.push(format!("the auto {name:?} is drawn twice; each ctx.now/ctx.new_id name is drawn once"));
+            em.errors
+                .push(format!("the auto {name:?} is drawn twice; each ctx.now/ctx.new_id name is drawn once"));
         } else {
             em.autos.push((name.into(), a));
-        }
-    })
-}
-
-/// Record that the function being emitted touched a table.
-pub(crate) fn touch(t: impl FnOnce() -> Table) {
-    if !emitting() {
-        return;
-    }
-    let tbl = t();
-    emit_mut(|em| {
-        if !em.touched.iter().any(|(_, x)| x.name == tbl.name) {
-            let scope = em.scope.clone();
-            em.touched.push((scope, tbl));
         }
     })
 }

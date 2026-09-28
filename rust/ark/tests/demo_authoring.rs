@@ -17,7 +17,10 @@ pub struct Demo {
 impl Scope for Demo {
     const NAME: &str = "demo";
     fn open() -> Self {
-        Demo { playlist: table(), item: table() }
+        Demo {
+            playlist: table(),
+            item: table(),
+        }
     }
 }
 
@@ -86,9 +89,7 @@ pub struct AddToPlaylist {
 }
 impl Input for AddToPlaylist {
     fn schema() -> Object<Self> {
-        object()
-            .field("playlist_id", id::<Playlist>().exists())
-            .field("track_id", text().min(1))
+        object().field("playlist_id", id::<Playlist>().exists()).field("track_id", text().min(1))
     }
 }
 
@@ -106,7 +107,11 @@ pub fn demo() -> Router<Demo> {
     demo.routes((
         demo.input::<CreatePlaylist>().mutation("create_playlist", |ctx, db, input| {
             db.playlist
-                .insert(Playlist { id: ctx.new_id("id"), name: input.name, user_id: ctx.user })
+                .insert(Playlist {
+                    id: ctx.new_id("id"),
+                    name: input.name,
+                    user_id: ctx.user,
+                })
                 .on((Playlist::user_id, Playlist::name))
         }),
         demo.input::<AddToPlaylist>().mutation("add_to_playlist", |_ctx, db, input| {
@@ -145,7 +150,11 @@ fn the_demo_emits_a_module_that_verifies_and_decodes_to_itself() {
     let m = module();
     let built = m.build();
     let again = ark::verify::verify(built).unwrap();
-    assert_eq!(ark::ir::module_value(&again), ark::ir::module_value(built), "emit returns the verified form");
+    assert_eq!(
+        ark::ir::module_value(&again),
+        ark::ir::module_value(built),
+        "emit returns the verified form"
+    );
     let back = ark::ir::module_from_value(&ark::canon::decode(&m.emit()).unwrap()).unwrap();
     assert_eq!(ark::ir::module_value(&back), ark::ir::module_value(built));
     let names: Vec<&str> = built.functions.iter().map(|f| f.name.as_str()).collect();
@@ -153,8 +162,14 @@ fn the_demo_emits_a_module_that_verifies_and_decodes_to_itself() {
     let add = built.lookup_function("add_to_playlist").unwrap();
     // §6: `.first()` is a bound select of one row, then `EStd First` of it, bound.
     assert!(matches!(&add.body[0], ark::ir::Stmt::Let(0, ark::ir::Expr::Select(p)) if p.limit == Some(1)));
-    assert!(matches!(&add.body[1], ark::ir::Stmt::Let(1, ark::ir::Expr::Std(ark::ir::StdFn::First, _))));
-    assert_eq!(built.schema.scopes[0].tables.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(), ["playlist", "item"]);
+    assert!(matches!(
+        &add.body[1],
+        ark::ir::Stmt::Let(1, ark::ir::Expr::Std(ark::ir::StdFn::First, _))
+    ));
+    assert_eq!(
+        built.schema.scopes[0].tables.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
+        ["playlist", "item"]
+    );
 }
 
 fn idv(k: u8) -> Value {
@@ -219,7 +234,10 @@ fn native_agrees_with_the_interpreter_on_every_procedure() {
     assert!(checked.messages.is_empty());
     assert_eq!(checked.values["name"], Value::text("x"));
     let checked = add.check(&alice, &args([("playlist_id", idv(7))]), &st).unwrap();
-    assert_eq!(checked.messages, vec![("playlist_id".to_string(), "playlist_id: no such playlist".to_string())]);
+    assert_eq!(
+        checked.messages,
+        vec![("playlist_id".to_string(), "playlist_id: no such playlist".to_string())]
+    );
 }
 
 /// The agreement check is a real check: a body that reads the host's own
@@ -242,7 +260,12 @@ fn a_body_that_reads_the_host_disagrees_and_is_caught() {
     let mut st = MemoryStore::empty(m.build().schema.clone());
     st.apply_change(&ark::store::Change::Add(
         "playlist".into(),
-        [("id".to_string(), idv(1)), ("name".to_string(), Value::text("P")), ("user_id".to_string(), Value::text("a"))].into(),
+        [
+            ("id".to_string(), idv(1)),
+            ("name".to_string(), Value::text("P")),
+            ("user_id".to_string(), Value::text("a")),
+        ]
+        .into(),
     ));
     let ctx = eval::Ctx::new("a", "s");
     let why = p.agrees(&ctx, &args([]), &args([("playlist_id", idv(1)), ("track_id", Value::text("t"))]), &st);
@@ -282,7 +305,10 @@ fn the_verifier_refuses_what_v2_forbids() {
     m.functions[2].body.insert(0, Stmt::Let(9, Expr::Provided("owned".into())));
     assert_eq!(refused(&m), vec![Complaint::NotProvided("owned".into())]);
     let mut m = good.clone();
-    m.functions[2].body.insert(0, Stmt::Delete("item".into(), vec![Expr::Arg("playlist_id".into()), Expr::Lit(Value::text("t"))]));
+    m.functions[2].body.insert(
+        0,
+        Stmt::Delete("item".into(), vec![Expr::Arg("playlist_id".into()), Expr::Lit(Value::text("t"))]),
+    );
     assert_eq!(refused(&m), vec![Complaint::WriteOutsideMutator]);
     assert!(verify(&good).is_ok());
 }

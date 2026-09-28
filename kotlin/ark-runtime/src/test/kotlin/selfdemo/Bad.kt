@@ -29,3 +29,16 @@ fun readInMap(): Module {
         ),
     )
 }
+
+fun onLate(): Module {
+    val r = router<Demo>("demo")
+    return Module(
+        r.routes(
+            r.input<PlaylistId>().mutation("m") { ctx, db, input ->
+                val w = db.playlist.insert(Playlist(id = input.playlistId, name = ctx.user, userId = ctx.user))
+                db.playlist.exists(input.playlistId)
+                w.on(Playlist.userId, Playlist.name)
+            },
+        ),
+    )
+}

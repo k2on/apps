@@ -201,7 +201,9 @@ pub fn verify_function(m: &Module, i: usize, f: &Function) -> Result<(), Vec<Com
     let sch = &m.schema;
     match f.kind {
         FnKind::Mutator | FnKind::Query => {
-            let Some(rn) = &f.router else { return err(Complaint::UnknownRouter(None)) };
+            let Some(rn) = &f.router else {
+                return err(Complaint::UnknownRouter(None));
+            };
             let Some(r) = m.lookup_router(rn) else {
                 return err(Complaint::UnknownRouter(Some(rn.clone())));
             };
@@ -284,7 +286,12 @@ pub fn verify_function(m: &Module, i: usize, f: &Function) -> Result<(), Vec<Com
             }
         }
     }
-    let names: Vec<String> = f.input.iter().map(|(n, _)| n.clone()).chain(f.autos.iter().map(|(n, _)| n.clone())).collect();
+    let names: Vec<String> = f
+        .input
+        .iter()
+        .map(|(n, _)| n.clone())
+        .chain(f.autos.iter().map(|(n, _)| n.clone()))
+        .collect();
     if let Some(d) = duplicates(names.into_iter()).into_iter().next() {
         return err(Complaint::DuplicateName(d));
     }
@@ -426,8 +433,20 @@ fn block(g: &G, b: &Block) -> Check_<()> {
 }
 
 fn stmt<'a>(g: &G<'a>, s: &Stmt) -> Check_<G<'a>> {
-    let read_ok = || if g.kind == FnKind::Helper { err(Complaint::ReadInHelper) } else { Ok(()) };
-    let mutating = || if g.kind != FnKind::Mutator { err(Complaint::WriteOutsideMutator) } else { Ok(()) };
+    let read_ok = || {
+        if g.kind == FnKind::Helper {
+            err(Complaint::ReadInHelper)
+        } else {
+            Ok(())
+        }
+    };
+    let mutating = || {
+        if g.kind != FnKind::Mutator {
+            err(Complaint::WriteOutsideMutator)
+        } else {
+            Ok(())
+        }
+    };
     match s {
         Stmt::Let(x, e) => {
             let t = match e {
@@ -775,7 +794,9 @@ fn plan_ty(g: &G, p: &Plan) -> Check_<Ty> {
             return err(Complaint::UnknownColumn(t.name.clone(), c.clone()));
         }
     }
-    let Ty::Struct(mut fields) = t.row_ty() else { unreachable!("a row type is a struct") };
+    let Ty::Struct(mut fields) = t.row_ty() else {
+        unreachable!("a row type is a struct")
+    };
     for r in &p.related {
         let rel = &r.relation;
         if !(rel.parent == p.table && g.schema().children_of(&p.table).contains(rel)) {

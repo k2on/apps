@@ -107,7 +107,7 @@ async fn a_directory_becomes_tracks_once() {
         std::fs::write(full, b"").unwrap();
     }
     let config = Config {
-        module,
+        module: Some(module),
         data: data.path().to_path_buf(),
         listen: "127.0.0.1:0".into(),
         media: Some(media.path().to_path_buf()),

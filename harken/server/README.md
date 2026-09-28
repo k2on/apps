@@ -1,28 +1,29 @@
 # harken-server
 
-The sync server, on the `ark` runtime and nothing generated. It loads one
-`.ark` module, hosts every scope in it as an `ark::peer::Authority` inside
+The sync server, on the `ark` runtime and harken's own domain. It hosts
+every scope of `harken_domain::module()` as an `ark::peer::Authority` inside
 one `ark::protocol::Server`, and applies every pushed intent through the
-module's own closures (`ark::hash::closures`). Two scopes for harken —
-`library` and `playlists` — and it would host a module with twenty the same
-way.
+domain's procedures, natively (`module().procedures()`, held by each
+authority). With `--module` it hosts an `.ark` file instead, verified:
+functions whose hashes are harken's run natively, the rest through the
+module's closures in the interpreter. Two scopes for harken — `library` and
+`playlists` — and it would host a module with twenty the same way.
 
 ## Running
 
 ```
-harken-server --module harken/domain/harken.ark --data ./harken-data \
-              --listen 127.0.0.1:8787 --media /srv/media
+harken-server --data ./harken-data --listen 127.0.0.1:8787 --media /srv/media
 ```
 
-Every flag is also an environment variable: `HARKEN_MODULE` (required),
-`HARKEN_DATA` (default `./harken-data`), `HARKEN_LISTEN` (default
-`127.0.0.1:8787`), `HARKEN_MEDIA` (optional). Until `harken.ark` is built,
-the demo module works: `nix run .#arkc -- demo /tmp/demo.ark`.
+Every flag is also an environment variable: `HARKEN_MODULE` (optional; an
+`.ark` to host instead of harken's own), `HARKEN_DATA` (default
+`./harken-data`), `HARKEN_LISTEN` (default `127.0.0.1:8787`), `HARKEN_MEDIA`
+(optional).
 
 From the repository root, through nix:
 
 ```
-cd rust && nix develop ../#rust -c cargo run -p harken-server -- --module ../harken/domain/harken.ark
+cd rust && nix develop ../#rust -c cargo run -p harken-server
 cd rust && nix develop ../#rust -c cargo test -p harken-server
 ```
 

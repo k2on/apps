@@ -1,9 +1,10 @@
-// `ark-runtime`: the library generated Kotlin compiles against (see
-// spec/GENERATED.md), held to spec/vectors by the conformance runner.
+// `ark-runtime`: the Kotlin runtime and its authoring vocabulary
+// (spec/AUTHORING.md), held to spec/vectors by the conformance runner.
 //
 // Kotlin stdlib only. No java.nio.file, no JVM-only APIs beyond
-// java.util, java.io and java.security.MessageDigest, so the same source
-// compiles for Android.
+// java.util, java.io, java.lang.reflect (the authoring vocabulary reads a
+// row's, a scope's and an input's class) and java.security.MessageDigest,
+// so the same source compiles for Android.
 plugins {
     kotlin("jvm")
 }

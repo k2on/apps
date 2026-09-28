@@ -45,28 +45,43 @@ public class FieldSpec<V : Data> internal constructor(
     public fun trim(): FieldSpec<V> = and(Checker.Trim)
 
     /** Text: at least `n` code points. */
-    public fun min(n: KInt, why: String? = null): FieldSpec<V> = and(Checker.MinLen(n, why))
+    public fun min(n: KInt): FieldSpec<V> = and(Checker.MinLen(n, null))
 
     /** Text: at most `n` code points. */
-    public fun max(n: KInt, why: String? = null): FieldSpec<V> = and(Checker.MaxLen(n, why))
+    public fun max(n: KInt): FieldSpec<V> = and(Checker.MaxLen(n, null))
 
     /** Int: `lo <= v <= hi`. */
-    public fun range(lo: Long, hi: Long, why: String? = null): FieldSpec<V> = and(Checker.Range(lo, hi, why))
+    public fun range(lo: Long, hi: Long): FieldSpec<V> = and(Checker.Range(lo, hi, null))
 
-    public fun atLeast(lo: Long, why: String? = null): FieldSpec<V> = and(Checker.Range(lo, null, why))
+    public fun atLeast(lo: Long): FieldSpec<V> = and(Checker.Range(lo, null, null))
 
-    public fun atMost(hi: Long, why: String? = null): FieldSpec<V> = and(Checker.Range(null, hi, why))
+    public fun atMost(hi: Long): FieldSpec<V> = and(Checker.Range(null, hi, null))
 
     /** List: at least one element. */
-    public fun nonEmpty(why: String? = null): FieldSpec<V> = and(Checker.NonEmpty(why))
+    public fun nonEmpty(): FieldSpec<V> = and(Checker.NonEmpty(null))
 
     /** Id: a row with that key exists in the procedure's scope. */
-    public fun exists(why: String? = null): FieldSpec<V> = and(Checker.Exists(why))
+    public fun exists(): FieldSpec<V> = and(Checker.Exists(null))
 
     /** Any: the closure, over the field's value, holds. */
-    public fun refine(f: (V) -> Bool, why: String? = null): FieldSpec<V> {
+    public fun refine(f: (V) -> Bool): FieldSpec<V> {
         @Suppress("UNCHECKED_CAST")
-        return and(Checker.Refine(f as (Data) -> Bool, why))
+        return and(Checker.Refine(f as (Data) -> Bool, null))
+    }
+
+    /** The message of the check just before, in place of its default. */
+    public fun why(message: String): FieldSpec<V> {
+        val last = checks.lastOrNull() ?: throw Fault.bug("authoring: .why(..) with no check before it")
+        val c = when (last) {
+            is Checker.Trim -> throw Fault.bug("authoring: trim cannot fail, so it has no message")
+            is Checker.MinLen -> Checker.MinLen(last.n, message)
+            is Checker.MaxLen -> Checker.MaxLen(last.n, message)
+            is Checker.Range -> Checker.Range(last.lo, last.hi, message)
+            is Checker.NonEmpty -> Checker.NonEmpty(message)
+            is Checker.Exists -> Checker.Exists(message)
+            is Checker.Refine -> Checker.Refine(last.f, message)
+        }
+        return FieldSpec(kind, checks.dropLast(1) + c)
     }
 }
 
@@ -102,7 +117,13 @@ public class Schema<I : Input> internal constructor(
     internal val refines: KList<Pair<(I) -> Bool, String?>>,
 ) {
     /** A check over the whole input, run after every field's. */
-    public fun refine(f: (I) -> Bool, why: String? = null): Schema<I> = Schema(fields, refines + (f to why))
+    public fun refine(f: (I) -> Bool): Schema<I> = Schema(fields, refines + (f to null))
+
+    /** The message of the refinement just before, in place of the default. */
+    public fun why(message: String): Schema<I> {
+        val last = refines.lastOrNull() ?: throw Fault.bug("authoring: .why(..) with no refine before it")
+        return Schema(fields, refines.dropLast(1) + (last.first to message))
+    }
 }
 
 /** `obj(field(..), field(..))`: an input's schema. */

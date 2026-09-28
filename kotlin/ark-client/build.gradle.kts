@@ -23,6 +23,10 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }
 
+// The demo domain the runtime's tests author (AUTHORING.md Appendix B) is
+// the module these tests open sessions over.
+sourceSets["test"].kotlin.srcDir(project(":ark-runtime").file("src/test/kotlin/demo"))
+
 // The client's tests are a plain `main`, like the runtime's conformance
 // runner, so that they need no test framework on the classpath.
 val clientTests by tasks.registering(JavaExec::class) {

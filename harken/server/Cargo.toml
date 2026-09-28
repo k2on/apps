@@ -3,7 +3,7 @@ name = "harken-server"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "harken's sync server: hosts every scope of an .ark module as an authority over one WebSocket, keeps each log on disk, and authors tracks from a media directory"
+description = "harken's sync server: hosts every scope of harken's module (or an .ark file) as an authority over one WebSocket, applying entries natively through the domain's own procedures, keeps each log on disk, and authors tracks from a media directory"
 workspace = "../../rust"
 
 [[bin]]
@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 ark = { path = "../../rust/ark" }
+harken-domain = { path = "../domain" }
 anyhow = "1"
 axum = { version = "0.7", features = ["ws"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }

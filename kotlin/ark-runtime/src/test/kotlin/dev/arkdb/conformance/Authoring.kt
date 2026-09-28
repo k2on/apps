@@ -75,6 +75,23 @@ object Authoring {
             File(System.getProperty("java.io.tmpdir"), "ark-kotlin-harken.json").writeText(Encode.toValue(ir).show())
         }
         test("authoring/harken: native agrees with the interpreter on every procedure") { harkenAgreement(harken.gen.module()) }
+        // The phone's print against the whole module the Rust domain emits:
+        // every procedure it carries must hash as that module's does, or the
+        // phone's entries name functions the server has never seen.
+        val ark = File(root, "../../harken/domain/harken.ark")
+        val whole = if (ark.isFile) Decode.fromValue(Canon.decode(ark.readBytes())) else null
+        if (whole == null || whole.spec < SPEC_VERSION) {
+            skipped.add("authoring/harken: harken.ark is ${if (whole == null) "missing" else "spec ${whole.spec}"}; the phone's hashes are not compared with it")
+        } else {
+            test("authoring/harken: every procedure the phone carries hashes as harken.ark's") {
+                val phone = harken.gen.module().ir
+                eq(phone.schema, whole.schema, "the schema is whole")
+                for (fn in phone.functions) {
+                    val theirs = whole.lookupFunction(fn.name) ?: throw Failed("harken.ark has no ${fn.name}")
+                    eq(Hash.functionHash(Hash.closure(phone, fn)).hex, Hash.functionHash(Hash.closure(whole, theirs)).hex, "${fn.name}'s hash")
+                }
+            }
+        }
         test("authoring/self: a repeated auto, a statement in an expression, .on after something else") { selfRefusals() }
     }
 
@@ -204,5 +221,6 @@ object Authoring {
         }
         fails("an auto drawn twice") { selfdemo.twice().ir }
         fails("a read inside map's closure") { selfdemo.readInMap().ir }
+        fails(".on after another statement") { selfdemo.onLate().ir }
     }
 }
