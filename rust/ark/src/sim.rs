@@ -12,7 +12,7 @@ use crate::live::{ConnId, Silent};
 use crate::log::Seq;
 use crate::peer::{Authority, Replica};
 use crate::protocol::{open_access, trusting, Client, ClientMsg, Mode, Server, ServerMsg};
-use crate::schema::{Schema, ScopeName};
+use crate::schema::Schema;
 use crate::store::MemoryStore;
 use crate::value::Id;
 
@@ -42,23 +42,14 @@ fn ctx_of(i: i64) -> Ctx {
 }
 
 impl Sim {
-    /// A fleet: a trusting server hosting the given scopes, and `n` clients
-    /// each holding every scope whole, all connected.
-    pub fn new(sch: Schema, bodies: BTreeMap<FnHash, Closure>, scopes: &[ScopeName], n: i64, seed: u64) -> Sim {
-        let mut server = Server::open(trusting(), open_access(), Silent);
-        for s in scopes {
-            server.host(Authority::new(sch.clone(), s, bodies.clone()));
-        }
+    /// A fleet: a trusting server that is the log's authority, and `n`
+    /// clients each holding the log whole, all connected.
+    pub fn new(sch: Schema, bodies: BTreeMap<FnHash, Closure>, n: i64, seed: u64) -> Sim {
+        let server = Server::open(trusting(), open_access(), Silent, Authority::new(sch.clone(), bodies.clone()));
         let clients = (0..n)
             .map(|i| {
-                let mut c = Client::open(sch.clone(), Some(name(i)));
-                for s in scopes {
-                    c.subscribe(
-                        Mode::Whole,
-                        Replica::open(sch.clone(), s, bodies.clone(), MemoryStore::empty(sch.clone()), 0, vec![]),
-                    );
-                }
-                (i, c)
+                let r = Replica::open(sch.clone(), bodies.clone(), MemoryStore::empty(sch.clone()), 0, vec![]);
+                (i, Client::open(r, Mode::Whole, Some(name(i))))
             })
             .collect();
         let mut sim = Sim {
@@ -77,9 +68,9 @@ impl Sim {
     }
 
     /// A client authors an intent. A refusal by its own view is dropped.
-    pub fn mutate(&mut self, i: i64, scope: &str, eid: Id, fh: &FnHash, autos: &Args, args: &Args) {
+    pub fn mutate(&mut self, i: i64, eid: Id, fh: &FnHash, autos: &Args, args: &Args) {
         let Some(c) = self.clients.get_mut(&i) else { return };
-        if c.mutate(scope, eid, &ctx_of(i), fh, autos, args).is_ok() {
+        if c.mutate(eid, &ctx_of(i), fh, autos, args).is_ok() {
             self.flush_client(i);
         }
     }
@@ -227,29 +218,24 @@ impl Sim {
     pub fn quiet(&self) -> bool {
         self.to_server.values().all(|ms| ms.is_empty())
             && self.to_client.values().all(|ms| ms.is_empty())
-            && self.clients.values().all(|c| c.scopes.values().all(|(r, _)| r.pending.is_empty()))
+            && self.clients.values().all(|c| c.replica.pending.is_empty())
     }
 
-    /// Each client's confirmed hash per scope.
-    pub fn client_hashes(&self) -> Vec<(i64, ScopeName, Seq, Vec<u8>)> {
+    /// Each client's confirmed sequence and hash.
+    pub fn client_hashes(&self) -> Vec<(i64, Seq, Vec<u8>)> {
         self.clients
             .iter()
-            .flat_map(|(i, c)| {
-                c.scopes.iter().map(move |(s, (r, _))| {
-                    let (n, h) = r.verify_at();
-                    (*i, s.clone(), n, h)
-                })
+            .map(|(i, c)| {
+                let (n, h) = c.replica.verify_at();
+                (*i, n, h)
             })
             .collect()
     }
 
-    /// The server's hash per scope, at the head.
-    pub fn server_hashes(&self) -> Vec<(ScopeName, Seq, Vec<u8>)> {
-        self.server
-            .scopes
-            .iter()
-            .map(|(s, a)| (s.clone(), a.log.head_seq(), state_hash(&a.store)))
-            .collect()
+    /// The server's hash, at the head.
+    pub fn server_hash(&self) -> (Seq, Vec<u8>) {
+        let a = &self.server.authority;
+        (a.log.head_seq(), state_hash(&a.store))
     }
 
     fn roll(&mut self) -> u64 {

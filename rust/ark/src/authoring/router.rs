@@ -12,14 +12,14 @@ use crate::canon;
 use crate::eval::{self, Args, Checked, EvalError, EvalFault};
 use crate::hash::{closure, function_hash, module_hash, Closure, FnHash};
 use crate::ir::{self, Check, Expr, Field, FnKind, Function, Stmt, SPEC_VERSION};
-use crate::schema::{Schema, Scope as IrScope, Table as IrTable, Ty};
+use crate::schema::{Schema, Table as IrTable, Ty};
 use crate::store::{Change, Overlay, Refusal, Store};
 use crate::value::{hex, Value};
 
 use super::cx::{self, Cx, H};
 use super::input::{CheckSpec, Input};
 use super::raw;
-use super::schema::{IntoEffect, Scope};
+use super::schema::{IntoEffect, Tables};
 use super::values::{Ctx, Data};
 
 type MwRun = Arc<dyn Fn(&dyn Fn(&str) -> H) -> Option<H> + Send + Sync>;
@@ -74,13 +74,15 @@ struct RouteDecl {
 
 struct Core {
     name: String,
-    scope: &'static str,
+    /// The Rust type of the tables, so that a module whose routers are
+    /// over two different ones is refused rather than half-described.
+    over: &'static str,
     tables: fn() -> Vec<IrTable>,
     middleware: RefCell<Vec<MwDecl>>,
     routes: RefCell<Vec<RouteDecl>>,
 }
 
-/// A router over scope `S`, or a middleware chain built on one: every
+/// A router over the tables `S`, or a middleware chain built on one: every
 /// `guard` and `provide` returns a router that runs it, and `P` is what
 /// the provides so far hand a body, in order.
 pub struct Router<S, P = ()> {
@@ -100,11 +102,11 @@ impl<S, P> Clone for Router<S, P> {
 }
 
 /// A router named `name`, over `S`.
-pub fn router<S: Scope>(name: &str) -> Router<S> {
+pub fn router<S: Tables>(name: &str) -> Router<S> {
     Router {
         core: Rc::new(Core {
             name: name.into(),
-            scope: S::NAME,
+            over: std::any::type_name::<S>(),
             tables: super::schema::tables_of::<S>,
             middleware: RefCell::new(vec![]),
             routes: RefCell::new(vec![]),
@@ -114,11 +116,11 @@ pub fn router<S: Scope>(name: &str) -> Router<S> {
     }
 }
 
-fn scope_value<S: Scope>() -> S {
+fn tables_value<S: Tables>() -> S {
     S::open()
 }
 
-impl<S: Scope, P> Router<S, P> {
+impl<S: Tables, P> Router<S, P> {
     fn extend<Q>(&self, mw: MwDecl) -> Router<S, Q> {
         let name = mw.name.clone();
         self.core.middleware.borrow_mut().push(mw);
@@ -141,7 +143,7 @@ impl<S: Scope, P> Router<S, P> {
             ret: None,
             run: Arc::new(move |_| {
                 let ctx = Ctx::current();
-                f(&ctx, &scope_value::<S>()).into_effect();
+                f(&ctx, &tables_value::<S>()).into_effect();
                 None
             }),
         })
@@ -160,7 +162,7 @@ impl<S: Scope, P> Router<S, P> {
                 let hs: Vec<H> = names.iter().map(|n| lookup(n)).collect();
                 let j: J = raw::assemble(&hs, &label);
                 let ctx = Ctx::current();
-                Some(f(&ctx, &scope_value::<S>(), &j).to_h())
+                Some(f(&ctx, &tables_value::<S>(), &j).to_h())
             }),
         })
     }
@@ -184,7 +186,7 @@ impl<S: Scope, P> Router<S, P> {
     }
 }
 
-impl<S: Scope> Router<S, ()> {
+impl<S: Tables> Router<S, ()> {
     /// A provide: runs before the body and hands it a value, or refuses.
     pub fn provide<J: Input, T: Data>(&self, name: &str, f: impl Fn(&Ctx, &S, &J) -> T + Send + Sync + 'static) -> Router<S, (T,)> {
         self.provide_as(name, f)
@@ -199,7 +201,7 @@ impl<S: Scope> Router<S, ()> {
     }
 }
 
-impl<S: Scope, A: Data> Router<S, (A,)> {
+impl<S: Tables, A: Data> Router<S, (A,)> {
     /// A second provide.
     pub fn provide<J: Input, T: Data>(&self, name: &str, f: impl Fn(&Ctx, &S, &J) -> T + Send + Sync + 'static) -> Router<S, (A, T)> {
         self.provide_as(name, f)
@@ -214,7 +216,7 @@ impl<S: Scope, A: Data> Router<S, (A,)> {
     }
 }
 
-impl<S: Scope, A: Data, B: Data> Router<S, (A, B)> {
+impl<S: Tables, A: Data, B: Data> Router<S, (A, B)> {
     /// A mutator with no input.
     pub fn mutation<R: IntoEffect>(&self, name: &str, f: impl Fn(&Ctx, &S, (), A, B) -> R + Send + Sync + 'static) -> Route<S> {
         self.input::<()>().mutation(name, f)
@@ -241,7 +243,7 @@ fn input_of<I: Input>(hs: &[H]) -> I {
     raw::assemble(hs, std::any::type_name::<I>())
 }
 
-impl<S: Scope, I: Input, P> Proc<S, I, P> {
+impl<S: Tables, I: Input, P> Proc<S, I, P> {
     fn route(&self, name: &str, kind: FnKind, ret: Option<Ty>, body: BodyRun) -> Route<S> {
         Route {
             decl: RouteDecl {
@@ -257,45 +259,45 @@ impl<S: Scope, I: Input, P> Proc<S, I, P> {
     }
 }
 
-impl<S: Scope, I: Input> Proc<S, I, ()> {
+impl<S: Tables, I: Input> Proc<S, I, ()> {
     /// A mutator: `|ctx, db, input| effect`.
     pub fn mutation<R: IntoEffect>(&self, name: &str, f: impl Fn(&Ctx, &S, I) -> R + Send + Sync + 'static) -> Route<S> {
         let body: BodyRun = Arc::new(move |ins, _| {
-            f(&Ctx::current(), &scope_value::<S>(), input_of::<I>(ins)).into_effect();
+            f(&Ctx::current(), &tables_value::<S>(), input_of::<I>(ins)).into_effect();
             None
         });
         self.route(name, FnKind::Mutator, None, body)
     }
     /// A query: `|ctx, db, input| value`.
     pub fn query<T: Data>(&self, name: &str, f: impl Fn(&Ctx, &S, I) -> T + Send + Sync + 'static) -> Route<S> {
-        let body: BodyRun = Arc::new(move |ins, _| Some(f(&Ctx::current(), &scope_value::<S>(), input_of::<I>(ins)).to_h()));
+        let body: BodyRun = Arc::new(move |ins, _| Some(f(&Ctx::current(), &tables_value::<S>(), input_of::<I>(ins)).to_h()));
         self.route(name, FnKind::Query, Some(T::ty()), body)
     }
 }
 
-impl<S: Scope, I: Input, A: Data> Proc<S, I, (A,)> {
+impl<S: Tables, I: Input, A: Data> Proc<S, I, (A,)> {
     /// A mutator: `|ctx, db, input, provided| effect`.
     pub fn mutation<R: IntoEffect>(&self, name: &str, f: impl Fn(&Ctx, &S, I, A) -> R + Send + Sync + 'static) -> Route<S> {
         let body: BodyRun = Arc::new(move |ins, ps| {
-            f(&Ctx::current(), &scope_value::<S>(), input_of::<I>(ins), A::from_h(ps[0])).into_effect();
+            f(&Ctx::current(), &tables_value::<S>(), input_of::<I>(ins), A::from_h(ps[0])).into_effect();
             None
         });
         self.route(name, FnKind::Mutator, None, body)
     }
     /// A query: `|ctx, db, input, provided| value`.
     pub fn query<T: Data>(&self, name: &str, f: impl Fn(&Ctx, &S, I, A) -> T + Send + Sync + 'static) -> Route<S> {
-        let body: BodyRun = Arc::new(move |ins, ps| Some(f(&Ctx::current(), &scope_value::<S>(), input_of::<I>(ins), A::from_h(ps[0])).to_h()));
+        let body: BodyRun = Arc::new(move |ins, ps| Some(f(&Ctx::current(), &tables_value::<S>(), input_of::<I>(ins), A::from_h(ps[0])).to_h()));
         self.route(name, FnKind::Query, Some(T::ty()), body)
     }
 }
 
-impl<S: Scope, I: Input, A: Data, B: Data> Proc<S, I, (A, B)> {
+impl<S: Tables, I: Input, A: Data, B: Data> Proc<S, I, (A, B)> {
     /// A mutator: `|ctx, db, input, a, b| effect`.
     pub fn mutation<R: IntoEffect>(&self, name: &str, f: impl Fn(&Ctx, &S, I, A, B) -> R + Send + Sync + 'static) -> Route<S> {
         let body: BodyRun = Arc::new(move |ins, ps| {
             f(
                 &Ctx::current(),
-                &scope_value::<S>(),
+                &tables_value::<S>(),
                 input_of::<I>(ins),
                 A::from_h(ps[0]),
                 B::from_h(ps[1]),
@@ -311,7 +313,7 @@ impl<S: Scope, I: Input, A: Data, B: Data> Proc<S, I, (A, B)> {
             Some(
                 f(
                     &Ctx::current(),
-                    &scope_value::<S>(),
+                    &tables_value::<S>(),
                     input_of::<I>(ins),
                     A::from_h(ps[0]),
                     B::from_h(ps[1]),
@@ -323,7 +325,7 @@ impl<S: Scope, I: Input, A: Data, B: Data> Proc<S, I, (A, B)> {
     }
 }
 
-/// A tuple of routes of one scope.
+/// A tuple of routes of one router.
 pub trait Routes<S> {
     #[doc(hidden)]
     fn decls(self) -> Vec<RouteDeclBox>;
@@ -360,6 +362,18 @@ routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8);
 routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9);
 routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
 routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11);
+routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12);
+routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);
+routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
+routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16);
+routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17);
+routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18);
+routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19);
+routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20);
+routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21);
+routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22);
+routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23);
 
 // ---------------------------------------------------------------------------
 // The module
@@ -474,24 +488,25 @@ fn build(cores: &[Rc<Core>]) -> Result<Built, Vec<String>> {
     let mut errors: Vec<String> = Vec::new();
     let mut functions: Vec<Function> = Vec::new();
     let mut routers: Vec<ir::Router> = Vec::new();
-    let mut scopes: Vec<IrScope> = Vec::new();
-    let mut decls: Vec<(String, RouteDecl, Vec<MwDecl>)> = Vec::new();
+    let mut decls: Vec<(RouteDecl, Vec<MwDecl>)> = Vec::new();
+    let tables = cores.first().map(|c| (c.tables)()).unwrap_or_default();
+    if let Some(first) = cores.first() {
+        for core in cores.iter().filter(|c| c.over != first.over) {
+            errors.push(format!(
+                "router {} is over {} and router {} over {}: a module has one set of tables",
+                first.name, first.over, core.name, core.over
+            ));
+        }
+    }
     let prev = super::helper::begin();
     for core in cores {
-        if !scopes.iter().any(|s| s.name == core.scope) {
-            scopes.push(IrScope {
-                name: core.scope.into(),
-                tables: (core.tables)(),
-            });
-        }
         let mws = core.middleware.borrow().clone();
         routers.push(ir::Router {
             name: core.name.clone(),
-            scope: core.scope.into(),
             uses: mws.iter().map(|m| m.name.clone()).collect(),
         });
         for mw in &mws {
-            let (f, es) = emit_middleware(core, mw);
+            let (f, es) = emit_middleware(mw);
             functions.extend(super::helper::drain());
             functions.push(f);
             errors.extend(es);
@@ -502,11 +517,11 @@ fn build(cores: &[Rc<Core>]) -> Result<Built, Vec<String>> {
             functions.push(f);
             errors.extend(es);
             let chain = r.chain.iter().filter_map(|n| mws.iter().find(|m| m.name == *n).cloned()).collect();
-            decls.push((core.scope.into(), r.clone(), chain));
+            decls.push((r.clone(), chain));
         }
     }
     super::helper::end(prev);
-    let schema = Schema { scopes };
+    let schema = Schema { tables };
     if !errors.is_empty() {
         return Err(errors);
     }
@@ -521,7 +536,7 @@ fn build(cores: &[Rc<Core>]) -> Result<Built, Vec<String>> {
     let module = named(module);
     let procedures = decls
         .into_iter()
-        .map(|(_, route, middleware)| {
+        .map(|(route, middleware)| {
             let f = module.lookup_function(&route.name).expect("emitted above");
             let c = closure(&module, f);
             let h = function_hash(&c);
@@ -555,7 +570,7 @@ fn finish(name: &str, cx: Cx) -> (Vec<(String, ir::Auto)>, ir::Block, Vec<String
     (em.autos, body, errors)
 }
 
-fn emit_middleware(core: &Core, mw: &MwDecl) -> Emitted {
+fn emit_middleware(mw: &MwDecl) -> Emitted {
     let (ret, cx) = cx::run(Cx::emit(), || {
         let lookup = |n: &str| cx::e(Expr::Arg(n.into()));
         let r = (mw.run)(&lookup);
@@ -568,7 +583,6 @@ fn emit_middleware(core: &Core, mw: &MwDecl) -> Emitted {
     let f = Function {
         name: mw.name.clone(),
         kind: mw.kind,
-        scope: Some(core.scope.into()),
         router: None,
         uses: vec![],
         autos,
@@ -623,7 +637,6 @@ fn emit_route(core: &Core, r: &RouteDecl) -> Emitted {
     let f = Function {
         name: r.name.clone(),
         kind: r.kind,
-        scope: Some(core.scope.into()),
         router: Some(core.name.clone()),
         uses: r.chain.clone(),
         autos,

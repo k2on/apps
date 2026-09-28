@@ -432,9 +432,6 @@ fn views() {
 
 // rebase/three-peers ---------------------------------------------------------
 
-/// The demo's one scope.
-const SCOPE: &str = "demo";
-
 fn entries_of(v: &serde_json::Value) -> Vec<(Seq, Entry)> {
     value(&v["entries"])
         .as_list()
@@ -472,7 +469,7 @@ fn rebase_three_peers() {
 
     // The transcript through an authority: every entry lands at its
     // sequence with its facts, and the head hashes as claimed.
-    let mut auth = Authority::new(sch.clone(), SCOPE, bodies.clone());
+    let mut auth = Authority::new(sch.clone(), bodies.clone());
     for ((n, e), f) in entries.iter().zip(&facts) {
         match auth.sequence_entry(e) {
             Sequenced::Appended(got, got_facts) => {
@@ -486,7 +483,7 @@ fn rebase_three_peers() {
     assert_eq!(auth.store.store_value(), value(&v["final_store"]));
 
     // A whole replica reaches it by replaying intents.
-    let mut whole = Replica::open(sch.clone(), SCOPE, bodies.clone(), MemoryStore::empty(sch.clone()), 0, vec![]);
+    let mut whole = Replica::open(sch.clone(), bodies.clone(), MemoryStore::empty(sch.clone()), 0, vec![]);
     for (n, e) in entries.iter().rev() {
         whole.receive(*n, e.clone()); // out of order: the inbox holds them
     }
@@ -495,7 +492,7 @@ fn rebase_three_peers() {
     assert!(whole.diverged.is_empty());
 
     // A replica with no closures at all reaches it by facts alone.
-    let mut facts_only = Replica::open(sch.clone(), SCOPE, BTreeMap::new(), MemoryStore::empty(sch.clone()), 0, vec![]);
+    let mut facts_only = Replica::open(sch.clone(), BTreeMap::new(), MemoryStore::empty(sch.clone()), 0, vec![]);
     for (n, e) in &entries {
         facts_only.receive(*n, e.clone());
     }
@@ -527,8 +524,8 @@ fn rebase_three_peers() {
         other => panic!("push: {other:?}"),
     };
 
-    let mut auth = Authority::new(sch.clone(), SCOPE, bodies.clone());
-    let fresh = || Replica::open(sch.clone(), SCOPE, bodies.clone(), MemoryStore::empty(sch.clone()), 0, vec![]);
+    let mut auth = Authority::new(sch.clone(), bodies.clone());
+    let fresh = || Replica::open(sch.clone(), bodies.clone(), MemoryStore::empty(sch.clone()), 0, vec![]);
     let (mut alice, mut bob) = (fresh(), fresh());
     // step 1: alice creates the playlist; everybody sees it
     let e1 = alice
@@ -611,15 +608,15 @@ fn rebase_three_peers() {
             }
         }
     }
-    let mut dave = Replica::open(sch.clone(), SCOPE, wrong, MemoryStore::empty(sch.clone()), 0, vec![]);
+    let mut dave = Replica::open(sch.clone(), wrong, MemoryStore::empty(sch.clone()), 0, vec![]);
     for ((n, e), f) in entries.iter().zip(&facts) {
         dave.receive_with(*n, e.clone(), f.clone());
     }
     assert_eq!(dave.diverged, vec![2, 3, 4], "a divergent runtime is detected");
     assert_eq!(hex(&dave.verify_at().1), final_hash, "and healed by the facts");
-    // eve has no server: she is her own authority, and later hands the scope over
+    // eve has no server: she is her own authority, and later hands the log over
     let mut eve = fresh();
-    let mut eve_auth = Authority::new(sch.clone(), SCOPE, bodies.clone());
+    let mut eve_auth = Authority::new(sch.clone(), bodies.clone());
     eve.mutate(
         id_n(201),
         &ctx("eve"),
@@ -645,7 +642,7 @@ fn rebase_three_peers() {
         "alone, eve confirms her own intents"
     );
     assert_eq!(eve.verify_at().1, state_hash(&eve_auth.store), "and her state is her authority's");
-    let adopted = Authority::adopt(sch.clone(), SCOPE, bodies.clone(), &eve_auth.log).expect("a server adopts her scope by replaying it");
+    let adopted = Authority::adopt(sch.clone(), bodies.clone(), &eve_auth.log).expect("a server adopts her log by replaying it");
     assert_eq!(state_hash(&adopted.store), eve.verify_at().1);
     let mut tampered = eve_auth.log.clone();
     for c in &mut tampered.entries.get_mut(&2).unwrap().1 {
@@ -654,7 +651,7 @@ fn rebase_three_peers() {
         }
     }
     assert_eq!(
-        Authority::adopt(sch.clone(), SCOPE, bodies.clone(), &tampered).err(),
+        Authority::adopt(sch.clone(), bodies.clone(), &tampered).err(),
         Some(AdoptError::FactsDiffer(2)),
         "a log whose facts were touched is refused"
     );
@@ -699,10 +696,9 @@ fn rebase_fleet() {
         let now: Args = Args::new();
         let clients = value(&v["clients"]).as_int();
         let seed = value(&v["seed"]).as_int() as u64;
-        let mut sim = Sim::new(sch, bodies, &[SCOPE.to_string()], clients, seed);
+        let mut sim = Sim::new(sch, bodies, clients, seed);
         sim.mutate(
             0,
-            SCOPE,
             id_of(1000),
             &h_create,
             &Args::from([("id".to_string(), Value::Id(pid))]),
@@ -715,7 +711,7 @@ fn rebase_fleet() {
                 "add" => {
                     let peer = op.field("peer").as_int();
                     let args = Args::from([("playlist_id".to_string(), Value::Id(pid)), ("track_id".to_string(), op.field("track"))]);
-                    sim.mutate(peer, SCOPE, id_of(2000 + n), &h_add, &now, &args);
+                    sim.mutate(peer, id_of(2000 + n), &h_add, &now, &args);
                     n += 1;
                 }
                 "partition" => sim.partition(op.field("peer").as_int()),
@@ -727,21 +723,17 @@ fn rebase_fleet() {
         sim.settle();
         let expected_head = value(&v["expected_head"]).as_int();
         let expected_hash = v["expected_hash"].as_str().unwrap();
-        let server = sim.server_hashes();
-        assert_eq!(server.len(), 1);
-        let (_, head, hash) = &server[0];
-        assert_eq!(*head, expected_head, "{}: the head", p.display());
-        assert_eq!(hex(hash), expected_hash, "{}: the server's hash", p.display());
-        for (i, _, n, h) in sim.client_hashes() {
+        let (head, hash) = sim.server_hash();
+        assert_eq!(head, expected_head, "{}: the head", p.display());
+        assert_eq!(hex(&hash), expected_hash, "{}: the server's hash", p.display());
+        for (i, n, h) in sim.client_hashes() {
             assert_eq!((n, hex(&h)), (expected_head, expected_hash.to_string()), "{}: client {i}", p.display());
         }
         assert!(sim.quiet());
         for c in sim.clients.values() {
-            for (r, _) in c.scopes.values() {
-                assert!(r.rejections.is_empty());
-                assert!(r.diverged.is_empty());
-            }
+            assert!(c.replica.rejections.is_empty());
+            assert!(c.replica.diverged.is_empty());
         }
-        assert_eq!(sim.server.scopes[SCOPE].store.store_value(), value(&v["final_store"]));
+        assert_eq!(sim.server.authority.store.store_value(), value(&v["final_store"]));
     }
 }

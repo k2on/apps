@@ -14,8 +14,7 @@ pub struct Demo {
     pub playlist: Table<Playlist>,
     pub item: Table<Item>,
 }
-impl Scope for Demo {
-    const NAME: &str = "demo";
+impl Tables for Demo {
     fn open() -> Self {
         Demo {
             playlist: table(),
@@ -167,7 +166,7 @@ fn the_demo_emits_a_module_that_verifies_and_decodes_to_itself() {
         ark::ir::Stmt::Let(1, ark::ir::Expr::Std(ark::ir::StdFn::First, _))
     ));
     assert_eq!(
-        built.schema.scopes[0].tables.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
+        built.schema.tables.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
         ["playlist", "item"]
     );
 }
@@ -311,4 +310,96 @@ fn the_verifier_refuses_what_v2_forbids() {
     );
     assert_eq!(refused(&m), vec![Complaint::WriteOutsideMutator]);
     assert!(verify(&good).is_ok());
+}
+
+/// §12.3 and §12.5 on a real authority: an entry is held to the login that
+/// pushed it unless the server knows the user owns the older one, another
+/// user's entry is refused whatever the server knows, and every refusal
+/// reaches the author as a sentence a screen can show.
+#[test]
+fn a_push_is_held_to_its_login_and_every_refusal_says_why() {
+    use ark::live::Silent;
+    use ark::log::Entry;
+    use ark::peer::Authority;
+    use ark::protocol::{open_access, ClientMsg, Identity, Mode, Server, ServerMsg, Subscription};
+
+    let m = module();
+    let built = m.build();
+    let bodies = ark::hash::closures(built);
+    let (create, _) = m.procedure("create_playlist").unwrap();
+    let serve = |owns: bool| {
+        let auth: ark::protocol::Authenticate = Box::new(|tok| {
+            let (user, session) = tok?.split_once(':')?;
+            Some(Identity {
+                user: user.into(),
+                session: session.into(),
+            })
+        });
+        let sv = Server::open(auth, open_access(), Silent, Authority::new(built.schema.clone(), bodies.clone()));
+        if owns {
+            sv.with_owns(Box::new(|user, session| user == "alice" && session == "old"))
+        } else {
+            sv
+        }
+    };
+    let hello = |tok: &str| ClientMsg::Hello {
+        sub: Subscription { since: 0, mode: Mode::Whole },
+        token: Some(tok.into()),
+        spec: ark::ir::SPEC_VERSION,
+    };
+    let entry = |k: u8, actor: &str, session: &str, name: &str| Entry {
+        id: match idv(k) {
+            Value::Id(b) => b,
+            _ => unreachable!(),
+        },
+        actor: actor.into(),
+        session: session.into(),
+        fn_hash: create.clone(),
+        args: args([("name", Value::text(name))]),
+        autos: args([("id", idv(k))]),
+    };
+    // The verdict each entry got, in order: Ok(seq) or Err(reason).
+    let verdicts = |sv: &mut Server<Silent>| -> Vec<Result<i64, String>> {
+        sv.take_outgoing()
+            .into_iter()
+            .flat_map(|(_, f)| match f {
+                ServerMsg::Ack { seqs, .. } => seqs.into_iter().map(Ok).collect(),
+                ServerMsg::Reject { reason, .. } => vec![Err(reason)],
+                _ => vec![],
+            })
+            .collect()
+    };
+    let push = |owns: bool, entries: Vec<Entry>| {
+        let mut sv = serve(owns);
+        sv.recv(1, hello("alice:new"));
+        sv.take_outgoing();
+        sv.recv(1, ClientMsg::Push { entries });
+        verdicts(&mut sv)
+    };
+    let not_yours = || Err("not yours".to_string());
+
+    // Authored offline under an older login, pushed after signing in again.
+    assert_eq!(push(false, vec![entry(1, "alice", "old", "Mix")]), vec![not_yours()]);
+    assert_eq!(push(true, vec![entry(1, "alice", "old", "Mix")]), vec![Ok(1)]);
+    // Owning a session is only ever about the connection's own user.
+    assert_eq!(push(true, vec![entry(1, "bob", "old", "Mix")]), vec![not_yours()]);
+    // The login pushing is always its own.
+    assert_eq!(push(false, vec![entry(1, "alice", "new", "Mix")]), vec![Ok(1)]);
+    // A refusal is the author's own sentence; a constraint's is named in one.
+    assert_eq!(
+        push(
+            false,
+            vec![
+                entry(1, "alice", "new", "   "),
+                entry(2, "alice", "new", "Mix"),
+                entry(3, "alice", "new", "Mix")
+            ]
+        ),
+        vec![Err("a playlist needs a name".to_string()), Ok(1), Ok(2)],
+        "a duplicate under insert .on writes nothing and is still sequenced, not refused"
+    );
+    assert_eq!(
+        ark::protocol::refusal_text(&Refusal::UniqueViolation("playlist".into(), vec!["user_id".into(), "name".into()])),
+        "playlist: another row has the same user_id, name"
+    );
 }

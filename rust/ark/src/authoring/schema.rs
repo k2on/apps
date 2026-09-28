@@ -1,5 +1,5 @@
 //! §2.3 and §2.5 Tables: a row is a struct with its columns said once in
-//! [`Row::columns`], a scope is a struct of [`Table`]s, and `db.<table>` is
+//! [`Row::columns`], the module's tables are a struct of [`Table`]s, and `db.<table>` is
 //! how a body reads and writes one.
 
 use std::marker::PhantomData;
@@ -14,11 +14,11 @@ use super::cx::{self, H};
 use super::raw;
 use super::values::{Bool, Data, List, Opt};
 
-/// A scope: a struct of the [`Table`]s it holds, and its name. `open`
+/// The module's tables: a struct of the [`Table`]s it holds. `open`
 /// builds it with a [`table`] per field; the order the fields are written
-/// there is the schema's order of the scope's tables.
-pub trait Scope: Sized + 'static {
-    const NAME: &'static str;
+/// there is the schema's order. Every router of a module is over the same
+/// one.
+pub trait Tables: Sized + 'static {
     fn open() -> Self;
 }
 
@@ -26,7 +26,7 @@ thread_local! {
     static RECORDING: std::cell::RefCell<Option<Vec<IrTable>>> = const { std::cell::RefCell::new(None) };
 }
 
-/// A table of a scope, in [`Scope::open`]: `playlist: table()`.
+/// A table of the module, in [`Tables::open`]: `playlist: table()`.
 pub fn table<T: Row>() -> Table<T> {
     RECORDING.with(|r| {
         if let Some(ts) = r.borrow_mut().as_mut() {
@@ -36,8 +36,8 @@ pub fn table<T: Row>() -> Table<T> {
     Table { _t: PhantomData }
 }
 
-/// A scope's tables, in the order its `open` writes them.
-pub(crate) fn tables_of<S: Scope>() -> Vec<IrTable> {
+/// The tables, in the order `open` writes them.
+pub(crate) fn tables_of<S: Tables>() -> Vec<IrTable> {
     let prev = RECORDING.with(|r| r.borrow_mut().replace(Vec::new()));
     let _ = S::open();
     RECORDING.with(|r| std::mem::replace(&mut *r.borrow_mut(), prev)).unwrap_or_default()
@@ -531,7 +531,7 @@ orders_tuple!(0, 1, 2, 3, 4, 5);
 
 // Tables -------------------------------------------------------------------------
 
-/// `db.<table>`: one table of the scope a body runs over.
+/// `db.<table>`: one table of the module.
 pub struct Table<T> {
     _t: PhantomData<fn() -> T>,
 }

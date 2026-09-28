@@ -1,4 +1,4 @@
-//! §9 Verification, as `Ark.Verify` defines it, at spec version 2.
+//! §9 Verification, as `Ark.Verify` defines it, at spec version 3.
 //!
 //! What a module must satisfy before anything runs it or hashes it. A
 //! builder ([`crate::authoring`]) makes most of these hard to write; the
@@ -12,16 +12,16 @@
 //! right-hand side of a `let` and never in a helper; a helper called only
 //! by functions declared after it; every plan's order made total):
 //!
-//! - routers: names unique, the scope exists, `uses` names middleware of
-//!   that scope; a procedure is on a router, its scope is the router's and
-//!   its `uses` is a subsequence of the router's (`UsesNotOnRouter`);
-//! - middleware: names a scope, no router, no uses, no autos, input without
+//! - routers: names unique, `uses` names middleware; a procedure is on a
+//!   router and its `uses` is a subsequence of the router's
+//!   (`UsesNotOnRouter`);
+//! - middleware: no router, no uses, no autos, input without
 //!   checks; every procedure using it has its input fields at its types;
 //!   declared before any procedure using it;
-//! - a procedure reads and writes its router's scope only; only a mutator
-//!   writes; a refusal anywhere but a helper;
-//! - input: checks fit their field's type; `exists` names an id of the
-//!   procedure's scope (`ExistsAcrossScopes`); refinements are Bool;
+//! - any function but a helper may read any table; only a mutator writes;
+//!   a refusal anywhere but a helper;
+//! - input: checks fit their field's type; `exists` names an id of a table
+//!   that exists; refinements are Bool;
 //! - `insert`/`upsert` `on` is empty or a declared unique index (`OnNotUnique`);
 //! - `provided` names a `Provide` the procedure uses.
 
@@ -29,7 +29,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::ir::normalize::normalize;
 use crate::ir::{Auto, Block, Check, Expr, FnKind, Function, Module, Op, Plan, Pred, StdFn, Stmt, Sym, SPEC_VERSION};
-use crate::schema::{check_schema, Dir, Schema, SchemaError, ScopeName, Table, Ty};
+use crate::schema::{check_schema, Dir, Schema, SchemaError, Table, Ty};
 use crate::value::{FieldName, TableName, Value};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -54,17 +54,13 @@ impl std::error::Error for VerifyError {}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RouterComplaint {
-    UnknownScope(ScopeName),
-    /// A name in `uses` that is no guard or provide of the router's scope.
+    /// A name in `uses` that is no guard or provide.
     NotMiddleware(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Complaint {
     // v1
-    MutatorWithoutScope,
-    UnknownScope(ScopeName),
-    ScopeOnHelper,
     AutosOnNonMutator,
     ReturnTypeOnMutator,
     NoReturnType,
@@ -82,7 +78,6 @@ pub enum Complaint {
     ReadInHelper,
     WriteOutsideMutator,
     RefuseInHelper,
-    OutOfScope(TableName),
     UnknownTable(TableName),
     UnknownColumn(TableName, FieldName),
     UnknownHelper(String),
@@ -98,8 +93,6 @@ pub enum Complaint {
     // v2
     /// A procedure with no router, or a router that does not exist.
     UnknownRouter(Option<String>),
-    /// A procedure's scope is not its router's.
-    ScopeNotRouters(Option<ScopeName>, ScopeName),
     /// A router on something that is not a procedure.
     RouterOnNonProcedure,
     /// Uses on something that is not a procedure.
@@ -114,8 +107,6 @@ pub enum Complaint {
     ChecksOnMiddleware,
     /// Field, check: a check that does not fit the field's type.
     CheckOnWrongType(String, String),
-    /// Field: an `exists` on an id of a table outside the procedure's scope.
-    ExistsAcrossScopes(String),
     /// Table, columns: an `on` that is not a declared unique index.
     OnNotUnique(TableName, Vec<FieldName>),
     /// `provided` of a middleware the procedure does not use as a provide.
@@ -146,13 +137,8 @@ pub fn verify(m0: &Module) -> Result<Module, Vec<VerifyError>> {
     }
     let mut errs = Vec::new();
     for r in &m.routers {
-        if m.schema.scope_of(&r.scope).is_none() {
-            errs.push(VerifyError::InRouter(r.name.clone(), RouterComplaint::UnknownScope(r.scope.clone())));
-        }
         for u in &r.uses {
-            let ok = m
-                .lookup_function(u)
-                .is_some_and(|f| f.kind.is_middleware() && f.scope.as_deref() == Some(r.scope.as_str()));
+            let ok = m.lookup_function(u).is_some_and(|f| f.kind.is_middleware());
             if !ok {
                 errs.push(VerifyError::InRouter(r.name.clone(), RouterComplaint::NotMiddleware(u.clone())));
             }
@@ -207,12 +193,6 @@ pub fn verify_function(m: &Module, i: usize, f: &Function) -> Result<(), Vec<Com
             let Some(r) = m.lookup_router(rn) else {
                 return err(Complaint::UnknownRouter(Some(rn.clone())));
             };
-            if f.scope.as_deref() != Some(r.scope.as_str()) {
-                return err(Complaint::ScopeNotRouters(f.scope.clone(), r.scope.clone()));
-            }
-            if sch.scope_of(&r.scope).is_none() {
-                return err(Complaint::UnknownScope(r.scope.clone()));
-            }
             if !is_subsequence(&f.uses, &r.uses) {
                 return err(Complaint::UsesNotOnRouter(f.uses.clone()));
             }
@@ -243,10 +223,6 @@ pub fn verify_function(m: &Module, i: usize, f: &Function) -> Result<(), Vec<Com
             }
         }
         FnKind::Guard | FnKind::Provide => {
-            let Some(s) = &f.scope else { return err(Complaint::MutatorWithoutScope) };
-            if sch.scope_of(s).is_none() {
-                return err(Complaint::UnknownScope(s.clone()));
-            }
             if f.router.is_some() {
                 return err(Complaint::RouterOnNonProcedure);
             }
@@ -266,9 +242,6 @@ pub fn verify_function(m: &Module, i: usize, f: &Function) -> Result<(), Vec<Com
             }
         }
         FnKind::Helper => {
-            if f.scope.is_some() {
-                return err(Complaint::ScopeOnHelper);
-            }
             if f.router.is_some() {
                 return err(Complaint::RouterOnNonProcedure);
             }
@@ -338,8 +311,8 @@ pub fn verify_function(m: &Module, i: usize, f: &Function) -> Result<(), Vec<Com
                 Check::NonEmpty(_) => matches!(inner, Ty::List(_)),
                 Check::Exists(_) => match &inner {
                     Ty::Id(t) => {
-                        if sch.table_scope(t) != f.scope.as_deref() {
-                            return err(Complaint::ExistsAcrossScopes(n.clone()));
+                        if sch.lookup_table(t).is_none() {
+                            return err(Complaint::UnknownTable(t.clone()));
                         }
                         true
                     }
@@ -481,7 +454,6 @@ fn stmt<'a>(g: &G<'a>, s: &Stmt) -> Check_<G<'a>> {
         }
         Stmt::Insert(t, e, on) | Stmt::Upsert(t, e, on) => {
             mutating()?;
-            in_scope(g, t)?;
             let tbl = table(g, t)?;
             row_fits(g, tbl, e)?;
             if !on.is_empty() {
@@ -555,21 +527,12 @@ fn row_fits(g: &G, tbl: &Table, e: &Expr) -> Check_<()> {
     }
 }
 
-fn in_scope(g: &G, t: &str) -> Check_<()> {
-    if g.kind != FnKind::Helper && g.schema().table_scope(t) != g.f.scope.as_deref() {
-        err(Complaint::OutOfScope(t.into()))
-    } else {
-        Ok(())
-    }
-}
-
 fn table<'a>(g: &G<'a>, t: &str) -> Check_<&'a Table> {
     g.m.schema.lookup_table(t).map_or_else(|| err(Complaint::UnknownTable(t.into())), Ok)
 }
 
 // A key expression list matches the table's key columns in number and type.
 fn keyed(g: &G, t: &str, ks: &[Expr]) -> Check_<()> {
-    in_scope(g, t)?;
     let tbl = table(g, t)?;
     let want = tbl.key_ty();
     if want.len() != ks.len() {
@@ -784,7 +747,6 @@ fn lit(want: Option<&Ty>, v: &Value) -> Check_<Ty> {
 /// §9.2 The type of a plan's rows: the table's columns, plus a list field
 /// per relationship read beneath.
 fn plan_ty(g: &G, p: &Plan) -> Check_<Ty> {
-    in_scope(g, &p.table)?;
     let t = table(g, &p.table)?;
     if let Some(f) = &p.filter {
         pred_ok(g, t, f)?;

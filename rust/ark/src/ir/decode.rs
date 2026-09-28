@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 use crate::hash::Closure;
 use crate::ir::{Auto, Check, CmpOp, Expr, Field, FnKind, Function, Module, Op, Plan, Pred, Related, Router, StdFn, Stmt, Sym};
-use crate::schema::{Column, Dir, Index, Ref, Relation, Schema, Scope, Table, Ty};
+use crate::schema::{Column, Dir, Index, Ref, Relation, Schema, Table, Ty};
 use crate::value::{FieldName, Value};
 
 /// Where in the module the shape was wrong, and how.
@@ -66,9 +66,8 @@ pub fn router_from_value(v: &Value) -> D<Router> {
     let fs = tagged(&["router"], "router", v)?;
     let name = text(&["router", "name"], field(&fs, "name")?)?;
     let here = |k: &'static str| vec!["router", name.as_str(), k];
-    let scope = text(&here("scope"), field(&fs, "scope")?)?;
     let uses = list(&here("uses"), |x| text(&here("uses"), x), field(&fs, "uses")?)?;
-    Ok(Router { name, scope, uses })
+    Ok(Router { name, uses })
 }
 
 /// A closure as an authority stores or sends one: `{ t: "closure", fn,
@@ -81,15 +80,8 @@ pub fn closure_from_value(v: &Value) -> D<Closure> {
 }
 
 pub fn schema_from_value(v: &Value) -> D<Schema> {
-    let scopes = list(&["schema"], scope, v)?;
-    Ok(Schema { scopes })
-}
-
-fn scope(x: &Value) -> D<Scope> {
-    let fs = tagged(&["scope"], "scope", x)?;
-    let name = text(&["scope", "name"], field(&fs, "name")?)?;
-    let tables = list(&["scope", &name], table, field(&fs, "tables")?)?;
-    Ok(Scope { name, tables })
+    let tables = list(&["schema"], table, v)?;
+    Ok(Schema { tables })
 }
 
 fn table(x: &Value) -> D<Table> {
@@ -165,7 +157,6 @@ pub fn function_from_value(v: &Value) -> D<Function> {
         None => return err(&here, format!("unknown kind {kind_text}")),
     };
     let p = |k: &'static str| [here.as_slice(), &[k]].concat();
-    let scope = optional(|x| text(&p("scope"), x), field(&fs, "scope")?)?;
     let router = optional(|x| text(&p("router"), x), field(&fs, "router")?)?;
     let uses = list(&p("uses"), |x| text(&p("uses"), x), field(&fs, "uses")?)?;
     let autos = list(&p("autos"), auto, field(&fs, "autos")?)?;
@@ -184,7 +175,6 @@ pub fn function_from_value(v: &Value) -> D<Function> {
     Ok(Function {
         name,
         kind,
-        scope,
         router,
         uses,
         autos,

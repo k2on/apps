@@ -112,7 +112,6 @@ pub fn helper<P: Params, R: Data>(name: &'static str, params: P, body: impl Body
         let f = Function {
             name: name.into(),
             kind: FnKind::Helper,
-            scope: None,
             router: None,
             uses: vec![],
             autos: vec![],

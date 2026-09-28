@@ -1,4 +1,4 @@
-//! §10 The log, as `Ark.Log` defines it: one scope's history, an
+//! §10 The log, as `Ark.Log` defines it: the module's history, an
 //! append-only sequence of entries, each an intent with what applying it
 //! changed kept beside it, standing on a snapshot.
 //!
@@ -16,7 +16,7 @@ use crate::schema::Schema;
 use crate::store::{Change, MemoryStore, Store};
 use crate::value::Id;
 
-/// A position in one scope's log. The first entry is 1; 0 is "nothing".
+/// A position in the log. The first entry is 1; 0 is "nothing".
 pub type Seq = i64;
 
 /// An intent, as recorded (`Ark.Log.Entry`). The sequence is not a field:
@@ -38,7 +38,7 @@ pub struct Entry {
 /// What applying an entry changed, in order.
 pub type Facts = Vec<Change>;
 
-/// The state of a scope at a sequence, and its hash.
+/// The state at a sequence, and its hash.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Snapshot {
     pub seq: Seq,

@@ -1,6 +1,6 @@
 //! §11 The peer, as `Ark.Peer` defines it: the log machine every peer runs
-//! per scope ([`Replica`]), and the authority role a peer takes for a scope
-//! it sequences ([`Authority`]). Both are sans-io.
+//! ([`Replica`]), and the authority role a peer takes for the log it
+//! sequences ([`Authority`]). Both are sans-io.
 //!
 //! A replica's view is always `replay(confirmed) then replay(pending)`.
 //! Confirmed state moves only forward; the only thing ever undone is the
@@ -26,17 +26,16 @@ pub use crate::authoring::Procedure;
 use crate::eval::{apply_closure, Args, Ctx, EvalError};
 use crate::hash::{state_hash, Closure, FnHash};
 use crate::log::{Entry, Facts, Log, Page, Seq};
-use crate::schema::{Schema, ScopeName};
+use crate::schema::Schema;
 use crate::store::{Change, MemoryStore, Refusal, Store};
 use crate::value::{hex, Id};
 
 // ---------------------------------------------------------------------
 // A replica
 
-/// One peer's copy of one scope (`Ark.Peer.Replica`).
+/// One peer's copy of the log (`Ark.Peer.Replica`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Replica {
-    pub scope: ScopeName,
     pub schema: Schema,
     /// The closures this peer can run: its module's, plus any it was sent.
     /// Keyed by the hash an entry names.
@@ -44,7 +43,7 @@ pub struct Replica {
     /// The procedures this peer runs natively, by the same hash; preferred
     /// over the closure when both are held.
     pub natives: BTreeMap<FnHash, Procedure>,
-    /// The confirmed store: the scope exactly as the authority had it at
+    /// The confirmed store: the tables exactly as the authority had them at
     /// `cursor`. Durable; moves only forward.
     pub confirmed: MemoryStore,
     pub cursor: Seq,
@@ -124,9 +123,8 @@ fn hold(bodies: &mut BTreeMap<FnHash, Closure>, natives: &mut BTreeMap<FnHash, P
 impl Replica {
     /// §11.1 Open a replica from what was durable: the confirmed store and
     /// cursor, and the pending intents, which are replayed on top.
-    pub fn open(schema: Schema, scope: &str, bodies: BTreeMap<FnHash, Closure>, confirmed: MemoryStore, cursor: Seq, pending: Vec<Entry>) -> Replica {
+    pub fn open(schema: Schema, bodies: BTreeMap<FnHash, Closure>, confirmed: MemoryStore, cursor: Seq, pending: Vec<Entry>) -> Replica {
         let mut r = Replica {
-            scope: scope.into(),
             schema,
             bodies,
             natives: BTreeMap::new(),
@@ -264,7 +262,7 @@ impl Replica {
     }
 
     /// This replica's claim: its cursor and the hash of its confirmed state
-    /// there. What `Verify { scope, seq, hash }` carries.
+    /// there. What `Verify { seq, hash }` carries.
     pub fn verify_at(&self) -> (Seq, Vec<u8>) {
         (self.cursor, state_hash(&self.confirmed))
     }
@@ -389,12 +387,11 @@ impl Replica {
 // ---------------------------------------------------------------------
 // An authority
 
-/// The peer that sequences a scope (`Ark.Peer.Authority`).
+/// The peer that sequences the log (`Ark.Peer.Authority`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Authority {
-    pub scope: ScopeName,
     pub schema: Schema,
-    /// Every closure ever accepted for this scope, by hash.
+    /// Every closure ever accepted, by hash.
     pub bodies: BTreeMap<FnHash, Closure>,
     /// The procedures this authority runs natively, by the same hash.
     pub natives: BTreeMap<FnHash, Procedure>,
@@ -430,9 +427,8 @@ pub enum AdoptError {
 }
 
 impl Authority {
-    pub fn new(schema: Schema, scope: &str, bodies: BTreeMap<FnHash, Closure>) -> Authority {
+    pub fn new(schema: Schema, bodies: BTreeMap<FnHash, Closure>) -> Authority {
         Authority {
-            scope: scope.into(),
             log: Log::empty(schema.clone()),
             store: MemoryStore::empty(schema.clone()),
             schema,
@@ -500,17 +496,17 @@ impl Authority {
         self.natives.retain(|h, _| current.contains(h) || named.contains(h));
     }
 
-    /// §11.8 Adopt a scope a peer sequenced alone: replay every intent from
+    /// §11.8 Adopt a log a peer sequenced alone: replay every intent from
     /// the beginning through this authority's own closures, holding each to
     /// the facts the peer recorded, and become its authority.
-    pub fn adopt(schema: Schema, scope: &str, bodies: BTreeMap<FnHash, Closure>, l: &Log) -> Result<Authority, AdoptError> {
+    pub fn adopt(schema: Schema, bodies: BTreeMap<FnHash, Closure>, l: &Log) -> Result<Authority, AdoptError> {
         if l.horizon() != 0 || !l.base.store.is_empty() {
             return Err(AdoptError::NotFromTheBeginning);
         }
         if !l.contiguous() {
             return Err(AdoptError::Gap);
         }
-        let mut a = Authority::new(schema, scope, bodies);
+        let mut a = Authority::new(schema, bodies);
         for (n, (e, recorded)) in &l.entries {
             match a.sequence_entry(e) {
                 Sequenced::Appended(n2, facts) => {

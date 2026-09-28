@@ -202,7 +202,7 @@ impl<X: Data> FieldB<List<X>> {
 }
 
 impl<T: Row> FieldB<Id<T>> {
-    /// A row with this key exists in the procedure's scope.
+    /// A row with this key exists.
     pub fn exists(self) -> Self {
         self.check(Check::Exists(None))
     }

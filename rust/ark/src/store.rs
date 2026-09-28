@@ -530,7 +530,7 @@ impl Store for Overlay<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::{Column, Scope};
+    use crate::schema::Column;
 
     fn schema() -> Schema {
         let col = |n: &str, ty: Ty, nullable: bool| Column {
@@ -539,31 +539,28 @@ mod tests {
             nullable,
         };
         Schema {
-            scopes: vec![Scope {
-                name: "s".into(),
-                tables: vec![
-                    Table {
-                        name: "p".into(),
-                        columns: vec![col("id", Ty::Int, false), col("name", Ty::Text, true)],
-                        key: vec!["id".into()],
-                        indexes: vec![Index {
-                            columns: vec!["name".into()],
-                            unique: true,
-                        }],
-                        refs: vec![],
-                    },
-                    Table {
-                        name: "c".into(),
-                        columns: vec![col("id", Ty::Int, false), col("p_id", Ty::Int, true)],
-                        key: vec!["id".into()],
-                        indexes: vec![],
-                        refs: vec![Ref {
-                            column: "p_id".into(),
-                            table: "p".into(),
-                        }],
-                    },
-                ],
-            }],
+            tables: vec![
+                Table {
+                    name: "p".into(),
+                    columns: vec![col("id", Ty::Int, false), col("name", Ty::Text, true)],
+                    key: vec!["id".into()],
+                    indexes: vec![Index {
+                        columns: vec!["name".into()],
+                        unique: true,
+                    }],
+                    refs: vec![],
+                },
+                Table {
+                    name: "c".into(),
+                    columns: vec![col("id", Ty::Int, false), col("p_id", Ty::Int, true)],
+                    key: vec!["id".into()],
+                    indexes: vec![],
+                    refs: vec![Ref {
+                        column: "p_id".into(),
+                        table: "p".into(),
+                    }],
+                },
+            ],
         }
     }
 

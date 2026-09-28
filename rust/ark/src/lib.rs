@@ -7,7 +7,7 @@
 //! |---|---|
 //! | [`value`] | `Ark.Value`: the eight values and the one total order |
 //! | [`canon`] | `Ark.Canon`: deterministic CBOR, strict decoder |
-//! | [`schema`] | `Ark.Schema`: scopes, tables, relations, well-formedness |
+//! | [`schema`] | `Ark.Schema`: tables, relations, well-formedness |
 //! | [`ir`] | `Ark.IR`, `Ark.Encode`, `Ark.Decode`: the IR, as a value and back |
 //! | [`store`] | `Ark.Store`: get, scan, put, delete; constraints as refusals |
 //! | [`stdlib`] | `Ark.Std`: the standard library over pinned Unicode tables |

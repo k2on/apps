@@ -2,16 +2,16 @@
 //!
 //! A module carries a schema, routers, functions and the types of its live
 //! frames. A function is a procedure on a router (a mutator or a query),
-//! a middleware of a scope (a guard or a provide) or a helper, with a body
+//! a middleware (a guard or a provide) or a helper, with a body
 //! in a small imperative core over a pure expression language. A domain
 //! is written in the vocabulary of `spec/AUTHORING.md` ([`crate::authoring`]
 //! here); run under `Emit` it yields this IR, run under `Native` it applies
 //! entries directly, and [`crate::eval`] is what both mean. Three
 //! properties are designed in: total (no loops but `for` over a list, no
-//! recursion), deterministic (no clock, no randomness, no I/O, no floats),
-//! scoped (a mutator touches one scope).
+//! recursion), and deterministic (no clock, no randomness, no I/O, no
+//! floats).
 //!
-//! Spec version 2 (`spec/AUTHORING.md` §1): routers and middleware, an
+//! Spec version 3 (`spec/AUTHORING.md` §1; version 2 had scopes): routers and middleware, an
 //! input schema with checks in place of bare arguments, `insert`/`upsert`/
 //! `update` in place of `put`, and `provided`.
 //!
@@ -26,7 +26,7 @@ pub mod normalize;
 
 use std::collections::BTreeMap;
 
-use crate::schema::{Dir, Relation, Schema, ScopeName, Ty};
+use crate::schema::{Dir, Relation, Schema, Ty};
 use crate::value::{FieldName, TableName, Value};
 
 pub use crate::hash::{closure, closures, function_hash, module_hash, Closure, FnHash};
@@ -38,7 +38,7 @@ pub use normalize::{normalize, normalize_module};
 pub type SpecVersion = i64;
 
 /// The version this crate implements (`Ark.IR.specVersion`).
-pub const SPEC_VERSION: SpecVersion = 2;
+pub const SPEC_VERSION: SpecVersion = 3;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Module {
@@ -47,8 +47,8 @@ pub struct Module {
     /// In declaration order; a helper may be called only by functions after
     /// it, which is what makes every call graph a DAG.
     pub functions: Vec<Function>,
-    /// §1.1 The routers: each names the scope every procedure on it reads
-    /// and writes, and the middleware it may use.
+    /// §1.1 The routers: groups of procedures, each naming the middleware
+    /// it may use.
     pub routers: Vec<Router>,
     /// §3.9 The live section: the frame types an app's realtime channel
     /// carries, by name.
@@ -67,12 +67,10 @@ impl Module {
     }
 }
 
-/// §1.1 A router: a group of procedures over one scope, sharing middleware.
+/// §1.1 A router: a group of procedures sharing middleware.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Router {
     pub name: String,
-    /// The scope every procedure on it reads and writes.
-    pub scope: ScopeName,
     /// Its middleware, in order, by function name. A procedure's own
     /// [`Function::uses`] is the chain it runs, in this order.
     pub uses: Vec<String>,
@@ -80,10 +78,10 @@ pub struct Router {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FnKind {
-    /// Writes: takes a context and autos, reads and writes one scope, may
+    /// Writes: takes a context and autos, reads and writes any table, may
     /// refuse.
     Mutator,
-    /// Reads: takes arguments, may select from any scope, returns a value.
+    /// Reads: takes arguments, may select from any table, returns a value.
     Query,
     /// Pure: no store access, no refusal, returns a value.
     Helper,
@@ -143,10 +141,6 @@ pub enum Auto {
 pub struct Function {
     pub name: String,
     pub kind: FnKind,
-    /// The scope a procedure or a middleware reads and writes; `None` for
-    /// helpers. A procedure's is its router's, and the verifier holds the
-    /// two equal.
-    pub scope: Option<ScopeName>,
     /// The router a procedure is on; `None` for helpers and middleware.
     pub router: Option<String>,
     /// The middleware a procedure runs before its body, in order: a
@@ -203,7 +197,7 @@ pub enum Check {
     Range(Option<i64>, Option<i64>, Option<String>),
     /// List: at least one element.
     NonEmpty(Option<String>),
-    /// Id: a row with that key exists in the procedure's scope.
+    /// Id: a row with that key exists.
     Exists(Option<String>),
     /// Any: the expression, over `Arg <this field>`, is true.
     Refine(Expr, Option<String>),

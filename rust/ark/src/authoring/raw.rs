@@ -2,12 +2,12 @@
 //! nothing else.
 //!
 //! **A struct of the vocabulary's values, built and taken apart by
-//! position.** A domain declares its rows, scopes and inputs as ordinary
+//! position.** A domain declares its rows, tables and inputs as ordinary
 //! structs with no derive (`spec/AUTHORING.md` §2.5), and the builder has to
 //! hand a body a `Playlist` it never saw constructed and read back the one
 //! a body wrote. Swift and Kotlin reflect; Rust cannot, so every value type
 //! of the vocabulary is one [`H`] (`#[repr(transparent)]` over a `u32`) and
-//! a row, a scope or an input is read as the array of its fields' handles
+//! a row, the tables or an input is read as the array of its fields' handles
 //! in declaration order. What makes that sound, and what is checked:
 //!
 //! - the size of the struct is exactly `n` handles (checked on every call,
@@ -45,7 +45,7 @@ use super::cx::H;
 pub(crate) fn assemble<T>(hs: &[H], what: &str) -> T {
     assert!(
         size_of::<T>() == std::mem::size_of_val(hs) && align_of::<T>() <= align_of::<H>(),
-        "{what}: {} is {} bytes, not {} values of the vocabulary; a row, a scope or an input is a struct of the vocabulary's values and nothing else, one per declared column or field",
+        "{what}: {} is {} bytes, not {} values of the vocabulary; a row, the tables or an input is a struct of the vocabulary's values and nothing else, one per declared column or field",
         std::any::type_name::<T>(),
         size_of::<T>(),
         hs.len()

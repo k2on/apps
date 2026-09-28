@@ -1,15 +1,14 @@
-//! §2 Scopes and the schema, as `Ark.Schema` defines them.
+//! §2 The schema, as `Ark.Schema` defines them.
 //!
 //! A schema is a value in the module, not DDL: which tables exist, their
 //! columns and key, which indexes are unique, and which columns reference
-//! which table. A scope is the unit of everything — one log, one authority,
-//! one access rule — and a reference never crosses one.
+//! which table. A module has one set of tables and one log, so every
+//! reference is checked and any function may read any table
+//! (`docs/scopes.md` says what spec version 2's scopes were).
 
 use std::collections::BTreeMap;
 
 use crate::value::{FieldName, TableName, Value};
-
-pub type ScopeName = String;
 
 /// §2.1 The static types of the IR (`Ark.Schema.Ty`).
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -62,15 +61,11 @@ pub struct Table {
     pub refs: Vec<Ref>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Scope {
-    pub name: ScopeName,
-    pub tables: Vec<Table>,
-}
-
+/// The tables, in declaration order — which is also the order a state
+/// hash walks them.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Schema {
-    pub scopes: Vec<Scope>,
+    pub tables: Vec<Table>,
 }
 
 /// Ascending or descending, for an order.
@@ -81,32 +76,19 @@ pub enum Dir {
 }
 
 impl Schema {
-    /// A schema with no scopes.
+    /// A schema with no tables.
     pub fn empty() -> Schema {
-        Schema { scopes: vec![] }
+        Schema { tables: vec![] }
     }
 
     /// Every table, in schema order.
     pub fn tables(&self) -> impl Iterator<Item = &Table> {
-        self.scopes.iter().flat_map(|s| s.tables.iter())
+        self.tables.iter()
     }
 
     /// `Ark.Schema.lookupTable`.
     pub fn lookup_table(&self, name: &str) -> Option<&Table> {
         self.tables().find(|t| t.name == name)
-    }
-
-    /// The scope a table is in (`Ark.Schema.tableScope`).
-    pub fn table_scope(&self, name: &str) -> Option<&str> {
-        self.scopes
-            .iter()
-            .find(|s| s.tables.iter().any(|t| t.name == name))
-            .map(|s| s.name.as_str())
-    }
-
-    /// `Ark.Schema.scopeOf`.
-    pub fn scope_of(&self, name: &str) -> Option<&Scope> {
-        self.scopes.iter().find(|s| s.name == name)
     }
 
     /// §2.2 Every relationship in a schema (`Ark.Schema.relations`).
@@ -181,7 +163,6 @@ pub struct Relation {
 /// §2.3 Why a schema is not well-formed (`Ark.Schema.SchemaError`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SchemaError {
-    DuplicateScope(ScopeName),
     DuplicateTable(TableName),
     DuplicateColumn(TableName, FieldName),
     NoKey(TableName),
@@ -191,7 +172,6 @@ pub enum SchemaError {
     UnknownIndexColumn(TableName, FieldName),
     UnknownRefColumn(TableName, FieldName),
     UnknownRefTable(TableName, TableName),
-    RefAcrossScopes(TableName, TableName),
     RefToCompositeKey(TableName, TableName),
     /// Table, column, wanted, found.
     RefTypeMismatch(TableName, FieldName, Ty, Ty),
@@ -212,24 +192,19 @@ fn dups(names: impl Iterator<Item = String>) -> Vec<String> {
 /// Every rule a schema breaks, in the spec's order (`checkSchema`).
 pub fn check_schema(sch: &Schema) -> Vec<SchemaError> {
     let mut errs = Vec::new();
-    for n in dups(sch.scopes.iter().map(|s| s.name.clone())) {
-        errs.push(SchemaError::DuplicateScope(n));
-    }
     let dup_tables = dups(sch.tables().map(|t| t.name.clone()));
     for t in sch.tables() {
         if dup_tables.contains(&t.name) {
             errs.push(SchemaError::DuplicateTable(t.name.clone()));
         }
     }
-    for scope in &sch.scopes {
-        for t in &scope.tables {
-            per_table(sch, &scope.name, t, &mut errs);
-        }
+    for t in &sch.tables {
+        per_table(sch, t, &mut errs);
     }
     errs
 }
 
-fn per_table(sch: &Schema, scope: &str, t: &Table, errs: &mut Vec<SchemaError>) {
+fn per_table(sch: &Schema, t: &Table, errs: &mut Vec<SchemaError>) {
     let tn = || t.name.clone();
     for c in dups(t.columns.iter().map(|c| c.name.clone())) {
         errs.push(SchemaError::DuplicateColumn(tn(), c));
@@ -262,30 +237,24 @@ fn per_table(sch: &Schema, scope: &str, t: &Table, errs: &mut Vec<SchemaError>) 
         }
     }
     for r in &t.refs {
-        per_ref(sch, scope, t, r, errs);
+        per_ref(sch, t, r, errs);
     }
     for c in &t.columns {
         if let Ty::Id(of) = &c.ty {
             let is_ref = t.refs.iter().any(|r| r.column == c.name);
             let is_own_key = *of == t.name && t.key.contains(&c.name);
-            // An id naming a table in another scope is the unchecked
-            // cross-scope reference the design allows (Ark.Schema §2.3).
-            let other_scope = matches!(sch.table_scope(of), Some(s) if s != scope);
-            if !is_ref && !is_own_key && !other_scope {
+            if !is_ref && !is_own_key {
                 errs.push(SchemaError::IdColumnWithoutRef(tn(), c.name.clone()));
             }
         }
     }
 }
 
-fn per_ref(sch: &Schema, scope: &str, t: &Table, r: &Ref, errs: &mut Vec<SchemaError>) {
+fn per_ref(sch: &Schema, t: &Table, r: &Ref, errs: &mut Vec<SchemaError>) {
     match (t.column(&r.column), sch.lookup_table(&r.table)) {
         (None, _) => errs.push(SchemaError::UnknownRefColumn(t.name.clone(), r.column.clone())),
         (_, None) => errs.push(SchemaError::UnknownRefTable(t.name.clone(), r.table.clone())),
         (Some(c), Some(p)) => {
-            if sch.table_scope(&r.table) != Some(scope) {
-                errs.push(SchemaError::RefAcrossScopes(t.name.clone(), r.table.clone()));
-            }
             let key_ty = p.key_ty();
             if key_ty.len() == 1 {
                 let want = match &key_ty[0] {
@@ -322,28 +291,25 @@ mod tests {
     #[test]
     fn a_reference_is_two_relations_and_checks_its_type() {
         let sch = Schema {
-            scopes: vec![Scope {
-                name: "s".into(),
-                tables: vec![
-                    Table {
-                        name: "p".into(),
-                        columns: vec![col("id", Ty::Id("p".into()))],
-                        key: vec!["id".into()],
-                        indexes: vec![],
-                        refs: vec![],
-                    },
-                    Table {
-                        name: "c".into(),
-                        columns: vec![col("id", Ty::Int), col("p_id", Ty::Int)],
-                        key: vec!["id".into()],
-                        indexes: vec![],
-                        refs: vec![Ref {
-                            column: "p_id".into(),
-                            table: "p".into(),
-                        }],
-                    },
-                ],
-            }],
+            tables: vec![
+                Table {
+                    name: "p".into(),
+                    columns: vec![col("id", Ty::Id("p".into()))],
+                    key: vec!["id".into()],
+                    indexes: vec![],
+                    refs: vec![],
+                },
+                Table {
+                    name: "c".into(),
+                    columns: vec![col("id", Ty::Int), col("p_id", Ty::Int)],
+                    key: vec!["id".into()],
+                    indexes: vec![],
+                    refs: vec![Ref {
+                        column: "p_id".into(),
+                        table: "p".into(),
+                    }],
+                },
+            ],
         };
         assert_eq!(sch.children_of("p").len(), 1);
         assert_eq!(sch.parent_of("c")[0].column, "p_id");

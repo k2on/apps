@@ -47,68 +47,50 @@ pub fn module_value(m: &Module) -> Value {
     )
 }
 
-/// §1.1 A router (`{"t":"router","name","scope","uses"}`).
+/// §1.1 A router (`{"t":"router","name","uses"}`).
 pub fn router_value(r: &Router) -> Value {
-    node(
-        "router",
-        vec![("name", txt(&r.name)), ("scope", txt(&r.scope)), ("uses", list(|u| txt(u), &r.uses))],
-    )
+    node("router", vec![("name", txt(&r.name)), ("uses", list(|u| txt(u), &r.uses))])
 }
 
 pub fn schema_value(sch: &Schema) -> Value {
-    list(
-        |s| {
-            node(
-                "scope",
-                vec![
-                    ("name", txt(&s.name)),
-                    (
-                        "tables",
-                        list(
-                            |t| {
-                                node(
-                                    "table",
-                                    vec![
-                                        ("name", txt(&t.name)),
-                                        (
-                                            "columns",
-                                            list(
-                                                |c| {
-                                                    node(
-                                                        "column",
-                                                        vec![("name", txt(&c.name)), ("ty", ty_value(&c.ty)), ("nullable", Value::Bool(c.nullable))],
-                                                    )
-                                                },
-                                                &t.columns,
-                                            ),
-                                        ),
-                                        ("key", list(|k| txt(k), &t.key)),
-                                        (
-                                            "indexes",
-                                            list(
-                                                |i| {
-                                                    node(
-                                                        "index",
-                                                        vec![("columns", list(|c| txt(c), &i.columns)), ("unique", Value::Bool(i.unique))],
-                                                    )
-                                                },
-                                                &t.indexes,
-                                            ),
-                                        ),
-                                        (
-                                            "refs",
-                                            list(|r| node("ref", vec![("column", txt(&r.column)), ("table", txt(&r.table))]), &t.refs),
-                                        ),
-                                    ],
-                                )
-                            },
-                            &s.tables,
-                        ),
-                    ),
-                ],
-            )
-        },
-        &sch.scopes,
+    list(table_value, &sch.tables)
+}
+
+fn table_value(t: &crate::schema::Table) -> Value {
+    node(
+        "table",
+        vec![
+            ("name", txt(&t.name)),
+            (
+                "columns",
+                list(
+                    |c| {
+                        node(
+                            "column",
+                            vec![("name", txt(&c.name)), ("ty", ty_value(&c.ty)), ("nullable", Value::Bool(c.nullable))],
+                        )
+                    },
+                    &t.columns,
+                ),
+            ),
+            ("key", list(|k| txt(k), &t.key)),
+            (
+                "indexes",
+                list(
+                    |i| {
+                        node(
+                            "index",
+                            vec![("columns", list(|c| txt(c), &i.columns)), ("unique", Value::Bool(i.unique))],
+                        )
+                    },
+                    &t.indexes,
+                ),
+            ),
+            (
+                "refs",
+                list(|r| node("ref", vec![("column", txt(&r.column)), ("table", txt(&r.table))]), &t.refs),
+            ),
+        ],
     )
 }
 
@@ -139,7 +121,6 @@ pub fn function_value(deps: &BTreeMap<String, Value>, fn0: &Function) -> Value {
             ("name", txt(&f.name)),
             ("deps", Value::Struct(deps.clone())),
             ("kind", txt(f.kind.name())),
-            ("scope", f.scope.as_deref().map(txt).unwrap_or(Value::Null)),
             ("router", f.router.as_deref().map(txt).unwrap_or(Value::Null)),
             ("uses", list(|u| txt(u), &f.uses)),
             (

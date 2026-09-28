@@ -2,12 +2,13 @@
 //!
 //! The frames two peers exchange, as values (so that [`crate::canon`] is
 //! their wire form), and the two state machines around them: a [`Client`]
-//! holding replicas of the scopes it subscribes to, and a [`Server`]
-//! holding authorities for the scopes it hosts, the connections it has
-//! identified, and the live rooms. Both are sans-io.
+//! holding a replica of the log, and a [`Server`] holding its authority,
+//! the connections it has identified, and the live rooms. Both are sans-io.
 //!
-//! Identity is asked once, at `Hello`; every pushed entry is held to it.
-//! The authority applies before it appends, so a `Reject` is a verdict.
+//! Identity is asked once, at `Hello`; every pushed entry is held to it (or
+//! to an older login of the same user, where [`Server::with_owns`] says
+//! so). The authority applies before it appends, so a `Reject` is a
+//! verdict, and it carries a sentence a person can read ([`refusal_text`]).
 //! After every message the server sends every connection every entry above
 //! what it has been sent, a page at a time. A page carries facts for a peer
 //! that asked to be fed by facts, and not for one that replays.
@@ -21,14 +22,14 @@ use crate::ir::encode::closure_value;
 use crate::live::{self, ConnId, Machine, Rooms};
 use crate::log::{Entry, Facts, Page, Seq};
 use crate::peer::{Authority, Replica, Sequenced};
-use crate::schema::{Schema, ScopeName};
+use crate::schema::Schema;
 use crate::store::{Change, MemoryStore, Refusal, Row, Store};
 use crate::value::{FieldName, Id, TableName, Value};
 
 // ---------------------------------------------------------------------
 // Frames
 
-/// How a client holds a scope: `Whole` replays intents and is exact;
+/// How a client holds the log: `Whole` replays intents and is exact;
 /// `ByFacts` is fed the facts of every entry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
@@ -38,7 +39,6 @@ pub enum Mode {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Subscription {
-    pub scope: ScopeName,
     /// The cursor: the last sequence applied.
     pub since: Seq,
     pub mode: Mode,
@@ -46,56 +46,33 @@ pub struct Subscription {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ClientMsg {
-    Hello {
-        subs: Vec<Subscription>,
-        token: Option<String>,
-        spec: i64,
-    },
-    Push {
-        scope: ScopeName,
-        entries: Vec<Entry>,
-    },
-    NeedFacts {
-        scope: ScopeName,
-        seqs: Vec<Seq>,
-    },
-    NeedClosures {
-        hashes: Vec<FnHash>,
-    },
-    Verify {
-        scope: ScopeName,
-        seq: Seq,
-        hash: Vec<u8>,
-    },
-    Say {
-        frame: Vec<u8>,
-    },
+    Hello { sub: Subscription, token: Option<String>, spec: i64 },
+    Push { entries: Vec<Entry> },
+    NeedFacts { seqs: Vec<Seq> },
+    NeedClosures { hashes: Vec<FnHash> },
+    Verify { seq: Seq, hash: Vec<u8> },
+    Say { frame: Vec<u8> },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ServerMsg {
     Batch {
-        scope: ScopeName,
         items: Vec<(Seq, Entry, Option<Facts>)>,
         has_more: bool,
     },
     FactsFor {
-        scope: ScopeName,
         items: Vec<(Seq, Facts)>,
     },
     SnapshotOf {
-        scope: ScopeName,
         seq: Seq,
         hash: Vec<u8>,
         rows: BTreeMap<TableName, Vec<Value>>,
     },
     Ack {
-        scope: ScopeName,
         ids: Vec<Id>,
         seqs: Vec<Seq>,
     },
     Reject {
-        scope: ScopeName,
         id: Id,
         reason: String,
     },
@@ -106,7 +83,6 @@ pub enum ServerMsg {
         items: Vec<(FnHash, Closure)>,
     },
     Agree {
-        scope: ScopeName,
         seq: Seq,
         hash: Vec<u8>,
         ok: bool,
@@ -170,46 +146,22 @@ impl ClientMsg {
     /// The frame as a value; its wire form is `canon::encode` of this.
     pub fn to_value(&self) -> Value {
         match self {
-            ClientMsg::Hello { subs, token, spec } => node(
+            ClientMsg::Hello { sub, token, spec } => node(
                 "hello",
                 vec![
-                    (
-                        "scopes",
-                        Value::List(
-                            subs.iter()
-                                .map(|s| {
-                                    node(
-                                        "sub",
-                                        vec![
-                                            ("scope", txt(&s.scope)),
-                                            ("since", int(s.since)),
-                                            ("mode", txt(if s.mode == Mode::Whole { "whole" } else { "facts" })),
-                                        ],
-                                    )
-                                })
-                                .collect(),
-                        ),
-                    ),
+                    ("since", int(sub.since)),
+                    ("mode", txt(if sub.mode == Mode::Whole { "whole" } else { "facts" })),
                     ("token", token.as_deref().map(txt).unwrap_or(Value::Null)),
                     ("spec", int(*spec)),
                 ],
             ),
-            ClientMsg::Push { scope, entries } => node(
-                "push",
-                vec![("scope", txt(scope)), ("entries", Value::List(entries.iter().map(entry_value).collect()))],
-            ),
-            ClientMsg::NeedFacts { scope, seqs } => node(
-                "need_facts",
-                vec![("scope", txt(scope)), ("seqs", Value::List(seqs.iter().map(|n| int(*n)).collect()))],
-            ),
+            ClientMsg::Push { entries } => node("push", vec![("entries", Value::List(entries.iter().map(entry_value).collect()))]),
+            ClientMsg::NeedFacts { seqs } => node("need_facts", vec![("seqs", Value::List(seqs.iter().map(|n| int(*n)).collect()))]),
             ClientMsg::NeedClosures { hashes } => node(
                 "need_closures",
                 vec![("hashes", Value::List(hashes.iter().map(|h| Value::Bytes(h.clone())).collect()))],
             ),
-            ClientMsg::Verify { scope, seq, hash } => node(
-                "verify",
-                vec![("scope", txt(scope)), ("seq", int(*seq)), ("hash", Value::Bytes(hash.clone()))],
-            ),
+            ClientMsg::Verify { seq, hash } => node("verify", vec![("seq", int(*seq)), ("hash", Value::Bytes(hash.clone()))]),
             ClientMsg::Say { frame } => node("say", vec![("say", Value::Bytes(frame.clone()))]),
         }
     }
@@ -220,7 +172,7 @@ impl ClientMsg {
         let t = text(need(m, "t")?)?;
         Ok(match t.as_str() {
             "hello" => ClientMsg::Hello {
-                subs: list(sub, need(m, "scopes")?)?,
+                sub: sub(m)?,
                 token: match need(m, "token")? {
                     Value::Null => None,
                     x => Some(text(x)?),
@@ -228,18 +180,15 @@ impl ClientMsg {
                 spec: int64(need(m, "spec")?)?,
             },
             "push" => ClientMsg::Push {
-                scope: text(need(m, "scope")?)?,
                 entries: list(entry_from_value, need(m, "entries")?)?,
             },
             "need_facts" => ClientMsg::NeedFacts {
-                scope: text(need(m, "scope")?)?,
                 seqs: list(int64, need(m, "seqs")?)?,
             },
             "need_closures" => ClientMsg::NeedClosures {
                 hashes: list(bytes, need(m, "hashes")?)?,
             },
             "verify" => ClientMsg::Verify {
-                scope: text(need(m, "scope")?)?,
                 seq: int64(need(m, "seq")?)?,
                 hash: bytes(need(m, "hash")?)?,
             },
@@ -251,15 +200,13 @@ impl ClientMsg {
     }
 }
 
-fn sub(x: &Value) -> Result<Subscription, DecodeError> {
-    let m = strct_of(x)?;
+fn sub(m: &BTreeMap<FieldName, Value>) -> Result<Subscription, DecodeError> {
     let mode = match text(need(m, "mode")?)?.as_str() {
         "whole" => Mode::Whole,
         "facts" => Mode::ByFacts,
         other => return bad(format!("unknown mode {other}")),
     };
     Ok(Subscription {
-        scope: text(need(m, "scope")?)?,
         since: int64(need(m, "since")?)?,
         mode,
     })
@@ -269,10 +216,9 @@ impl ServerMsg {
     /// The frame as a value.
     pub fn to_value(&self) -> Value {
         match self {
-            ServerMsg::Batch { scope, items, has_more } => node(
+            ServerMsg::Batch { items, has_more } => node(
                 "batch",
                 vec![
-                    ("scope", txt(scope)),
                     (
                         "items",
                         Value::List(
@@ -291,25 +237,21 @@ impl ServerMsg {
                     ("has_more", Value::Bool(*has_more)),
                 ],
             ),
-            ServerMsg::FactsFor { scope, items } => node(
+            ServerMsg::FactsFor { items } => node(
                 "facts",
-                vec![
-                    ("scope", txt(scope)),
-                    (
-                        "items",
-                        Value::List(
-                            items
-                                .iter()
-                                .map(|(n, f)| strct(vec![("seq", int(*n)), ("facts", facts_value(f))]))
-                                .collect(),
-                        ),
+                vec![(
+                    "items",
+                    Value::List(
+                        items
+                            .iter()
+                            .map(|(n, f)| strct(vec![("seq", int(*n)), ("facts", facts_value(f))]))
+                            .collect(),
                     ),
-                ],
+                )],
             ),
-            ServerMsg::SnapshotOf { scope, seq, hash, rows } => node(
+            ServerMsg::SnapshotOf { seq, hash, rows } => node(
                 "snapshot",
                 vec![
-                    ("scope", txt(scope)),
                     ("seq", int(*seq)),
                     ("hash", Value::Bytes(hash.clone())),
                     (
@@ -318,15 +260,14 @@ impl ServerMsg {
                     ),
                 ],
             ),
-            ServerMsg::Ack { scope, ids, seqs } => node(
+            ServerMsg::Ack { ids, seqs } => node(
                 "ack",
                 vec![
-                    ("scope", txt(scope)),
                     ("ids", Value::List(ids.iter().map(|i| Value::Id(*i)).collect())),
                     ("seqs", Value::List(seqs.iter().map(|n| int(*n)).collect())),
                 ],
             ),
-            ServerMsg::Reject { scope, id, reason } => node("reject", vec![("scope", txt(scope)), ("id", Value::Id(*id)), ("reason", txt(reason))]),
+            ServerMsg::Reject { id, reason } => node("reject", vec![("id", Value::Id(*id)), ("reason", txt(reason))]),
             ServerMsg::Denied { reason } => node("denied", vec![("reason", txt(reason))]),
             ServerMsg::Closures { items } => node(
                 "closures",
@@ -340,14 +281,9 @@ impl ServerMsg {
                     ),
                 )],
             ),
-            ServerMsg::Agree { scope, seq, hash, ok } => node(
+            ServerMsg::Agree { seq, hash, ok } => node(
                 "agree",
-                vec![
-                    ("scope", txt(scope)),
-                    ("seq", int(*seq)),
-                    ("hash", Value::Bytes(hash.clone())),
-                    ("ok", Value::Bool(*ok)),
-                ],
+                vec![("seq", int(*seq)), ("hash", Value::Bytes(hash.clone())), ("ok", Value::Bool(*ok))],
             ),
             ServerMsg::Heard { frame } => node("heard", vec![("hear", Value::Bytes(frame.clone()))]),
         }
@@ -359,7 +295,6 @@ impl ServerMsg {
         let t = text(need(m, "t")?)?;
         Ok(match t.as_str() {
             "batch" => ServerMsg::Batch {
-                scope: text(need(m, "scope")?)?,
                 items: list(
                     |x| {
                         let m = strct_of(x)?;
@@ -374,7 +309,6 @@ impl ServerMsg {
                 has_more: boolean(need(m, "has_more")?)?,
             },
             "facts" => ServerMsg::FactsFor {
-                scope: text(need(m, "scope")?)?,
                 items: list(
                     |x| {
                         let m = strct_of(x)?;
@@ -384,7 +318,6 @@ impl ServerMsg {
                 )?,
             },
             "snapshot" => ServerMsg::SnapshotOf {
-                scope: text(need(m, "scope")?)?,
                 seq: int64(need(m, "seq")?)?,
                 hash: bytes(need(m, "hash")?)?,
                 rows: {
@@ -396,12 +329,10 @@ impl ServerMsg {
                 },
             },
             "ack" => ServerMsg::Ack {
-                scope: text(need(m, "scope")?)?,
                 ids: list(ident, need(m, "ids")?)?,
                 seqs: list(int64, need(m, "seqs")?)?,
             },
             "reject" => ServerMsg::Reject {
-                scope: text(need(m, "scope")?)?,
                 id: ident(need(m, "id")?)?,
                 reason: text(need(m, "reason")?)?,
             },
@@ -418,7 +349,6 @@ impl ServerMsg {
                 )?,
             },
             "agree" => ServerMsg::Agree {
-                scope: text(need(m, "scope")?)?,
                 seq: int64(need(m, "seq")?)?,
                 hash: bytes(need(m, "hash")?)?,
                 ok: boolean(need(m, "ok")?)?,
@@ -526,12 +456,13 @@ pub fn change_from_value(v: &Value) -> D<Change> {
 // ---------------------------------------------------------------------
 // The client
 
-/// A peer's end of one connection: its replicas, and what it has queued
-/// (`Ark.Protocol.Client`).
+/// A peer's end of one connection: its replica of the log, and what it has
+/// queued (`Ark.Protocol.Client`).
 #[derive(Clone, Debug)]
 pub struct Client {
     pub schema: Schema,
-    pub scopes: BTreeMap<ScopeName, (Replica, Mode)>,
+    pub replica: Replica,
+    pub mode: Mode,
     pub token: Option<String>,
     pub linked: bool,
     /// Counts connections, so a live room that has never heard of this
@@ -542,14 +473,17 @@ pub struct Client {
     /// Oldest first.
     pub heard: Vec<Vec<u8>>,
     pub denied: Option<String>,
-    pub agreed: Vec<(ScopeName, Seq, bool)>,
+    pub agreed: Vec<(Seq, bool)>,
 }
 
 impl Client {
-    pub fn open(schema: Schema, token: Option<String>) -> Client {
+    /// A client over the replica as opened from what was durable
+    /// (`Ark.Protocol.openClient`).
+    pub fn open(replica: Replica, mode: Mode, token: Option<String>) -> Client {
         Client {
-            schema,
-            scopes: BTreeMap::new(),
+            schema: replica.schema.clone(),
+            replica,
+            mode,
             token,
             linked: false,
             epoch: 0,
@@ -560,11 +494,6 @@ impl Client {
         }
     }
 
-    /// Hold a scope, with the replica as opened from what was durable.
-    pub fn subscribe(&mut self, mode: Mode, r: Replica) {
-        self.scopes.insert(r.scope.clone(), (r, mode));
-    }
-
     // Unlinked: nothing is queued; `connected` says it all again.
     fn emit(&mut self, m: ClientMsg) {
         if self.linked {
@@ -572,38 +501,29 @@ impl Client {
         }
     }
 
-    /// §12.1 A connection opened: say hello for every scope at its cursor,
-    /// then push everything pending. What was queued before is dropped.
+    fn hello(&self) -> ClientMsg {
+        ClientMsg::Hello {
+            sub: Subscription {
+                since: self.replica.cursor,
+                mode: self.mode,
+            },
+            token: self.token.clone(),
+            spec: crate::ir::SPEC_VERSION,
+        }
+    }
+
+    /// §12.1 A connection opened: say hello at the cursor, then push
+    /// everything pending. What was queued before is dropped.
     pub fn connected(&mut self) {
         self.linked = true;
         self.epoch += 1;
         self.out.clear();
         self.heard.clear();
-        let subs = self
-            .scopes
-            .iter()
-            .map(|(s, (r, md))| Subscription {
-                scope: s.clone(),
-                since: r.cursor,
-                mode: *md,
-            })
-            .collect();
-        self.emit(ClientMsg::Hello {
-            subs,
-            token: self.token.clone(),
-            spec: crate::ir::SPEC_VERSION,
-        });
-        let pushes: Vec<ClientMsg> = self
-            .scopes
-            .iter()
-            .filter(|(_, (r, _))| !r.pending.is_empty())
-            .map(|(s, (r, _))| ClientMsg::Push {
-                scope: s.clone(),
-                entries: r.pending.clone(),
-            })
-            .collect();
-        for p in pushes {
-            self.emit(p);
+        let hello = self.hello();
+        self.emit(hello);
+        if !self.replica.pending.is_empty() {
+            let entries = self.replica.pending.clone();
+            self.emit(ClientMsg::Push { entries });
         }
     }
 
@@ -613,25 +533,18 @@ impl Client {
         self.heard.clear();
     }
 
-    /// Author an intent into a scope and push it if linked.
-    pub fn mutate(&mut self, scope: &str, id: Id, ctx: &Ctx, fh: &FnHash, autos: &Args, args: &Args) -> Result<Entry, Refusal> {
-        let Some((r, _)) = self.scopes.get_mut(scope) else {
-            return Err(Refusal::Refused(format!("not holding scope {scope}")));
-        };
-        let e = r.mutate(id, ctx, fh, autos, args)?;
-        self.emit(ClientMsg::Push {
-            scope: scope.into(),
-            entries: vec![e.clone()],
-        });
+    /// Author an intent and push it if linked. A refusal here is the
+    /// optimistic verdict, on the state this peer has; the authority's may
+    /// differ, and arrives as a `Reject` with its own reason.
+    pub fn mutate(&mut self, id: Id, ctx: &Ctx, fh: &FnHash, autos: &Args, args: &Args) -> Result<Entry, Refusal> {
+        let e = self.replica.mutate(id, ctx, fh, autos, args)?;
+        self.emit(ClientMsg::Push { entries: vec![e.clone()] });
         Ok(e)
     }
 
-    /// Hold native procedures in every replica (and in any subscribed
-    /// later, through [`Replica::hold`] on the replica given).
+    /// Hold native procedures in the replica.
     pub fn hold(&mut self, procs: &[(FnHash, crate::authoring::Procedure)]) {
-        for (r, _) in self.scopes.values_mut() {
-            r.hold(procs.iter().cloned());
-        }
+        self.replica.hold(procs.iter().cloned());
     }
 
     /// §12.2 A frame from the server.
@@ -643,8 +556,8 @@ impl Client {
                 self.linked = false;
                 self.out.clear();
             }
-            ServerMsg::Batch { scope, items, has_more } => {
-                let Some((r, md)) = self.scopes.get_mut(&scope) else { return };
+            ServerMsg::Batch { items, has_more } => {
+                let r = &mut self.replica;
                 for (n, e, mf) in items {
                     match mf {
                         Some(f) => r.receive_with(n, e, f),
@@ -652,40 +565,24 @@ impl Client {
                     }
                 }
                 let needs = r.needs();
-                let (cursor, md) = (r.cursor, *md);
                 if !needs.is_empty() {
-                    self.emit(ClientMsg::NeedFacts {
-                        scope: scope.clone(),
-                        seqs: needs,
-                    });
+                    self.emit(ClientMsg::NeedFacts { seqs: needs });
                 }
                 if has_more {
-                    let token = self.token.clone();
-                    self.emit(ClientMsg::Hello {
-                        subs: vec![Subscription {
-                            scope,
-                            since: cursor,
-                            mode: md,
-                        }],
-                        token,
-                        spec: crate::ir::SPEC_VERSION,
-                    });
+                    let hello = self.hello();
+                    self.emit(hello);
                 }
             }
-            ServerMsg::FactsFor { scope, items } => {
-                if let Some((r, _)) = self.scopes.get_mut(&scope) {
-                    for (n, f) in items {
-                        r.receive_facts(n, f);
-                    }
+            ServerMsg::FactsFor { items } => {
+                for (n, f) in items {
+                    self.replica.receive_facts(n, f);
                 }
             }
             // Below the horizon: the confirmed store is replaced by the
             // snapshot and the cursor moves to it; pending intents are kept
             // and replay on top.
-            ServerMsg::SnapshotOf { scope, seq, rows, .. } => {
-                let schema = self.schema.clone();
-                let Some((r, _)) = self.scopes.get_mut(&scope) else { return };
-                let mut st = MemoryStore::empty(schema);
+            ServerMsg::SnapshotOf { seq, rows, .. } => {
+                let mut st = MemoryStore::empty(self.schema.clone());
                 for (t, vs) in rows {
                     for v in vs {
                         if let Value::Struct(row) = v {
@@ -693,34 +590,27 @@ impl Client {
                         }
                     }
                 }
-                let mut opened = Replica::open(r.schema.clone(), &scope, r.bodies.clone(), st, seq, r.pending.clone());
+                let r = &self.replica;
+                let mut opened = Replica::open(r.schema.clone(), r.bodies.clone(), st, seq, r.pending.clone());
                 opened.natives = r.natives.clone();
-                *r = opened;
+                self.replica = opened;
             }
-            ServerMsg::Ack { scope, ids, seqs } => {
-                if let Some((r, _)) = self.scopes.get_mut(&scope) {
-                    for (i, n) in ids.iter().zip(seqs) {
-                        r.ack(i, n);
-                    }
+            ServerMsg::Ack { ids, seqs } => {
+                for (i, n) in ids.iter().zip(seqs) {
+                    self.replica.ack(i, n);
                 }
             }
-            ServerMsg::Reject { scope, id, reason } => {
-                if let Some((r, _)) = self.scopes.get_mut(&scope) {
-                    r.reject(&id, Refusal::Refused(reason));
-                }
-            }
-            // New closures may unblock entries waiting in an inbox, so every
-            // replica is asked to try again. A received closure replaces one
-            // already held under its hash (the spec's left-biased union).
+            ServerMsg::Reject { id, reason } => self.replica.reject(&id, Refusal::Refused(reason)),
+            // New closures may unblock entries waiting in the inbox. A
+            // received closure replaces one already held under its hash
+            // (the spec's left-biased union).
             ServerMsg::Closures { items } => {
-                for (r, _) in self.scopes.values_mut() {
-                    for (h, c) in &items {
-                        r.bodies.insert(h.clone(), c.clone());
-                    }
-                    r.retry();
+                for (h, c) in items {
+                    self.replica.bodies.insert(h, c);
                 }
+                self.replica.retry();
             }
-            ServerMsg::Agree { scope, seq, ok, .. } => self.agreed.push((scope, seq, ok)),
+            ServerMsg::Agree { seq, ok, .. } => self.agreed.push((seq, ok)),
         }
     }
 
@@ -729,24 +619,11 @@ impl Client {
         self.emit(ClientMsg::Say { frame });
     }
 
-    /// Ask the authority whether it agrees with every replica's confirmed
+    /// Ask the authority whether it agrees with the replica's confirmed
     /// state.
     pub fn verify_all(&mut self) {
-        let claims: Vec<ClientMsg> = self
-            .scopes
-            .iter()
-            .map(|(s, (r, _))| {
-                let (n, h) = r.verify_at();
-                ClientMsg::Verify {
-                    scope: s.clone(),
-                    seq: n,
-                    hash: h,
-                }
-            })
-            .collect();
-        for c in claims {
-            self.emit(c);
-        }
+        let (seq, hash) = self.replica.verify_at();
+        self.emit(ClientMsg::Verify { seq, hash });
     }
 
     pub fn take_outgoing(&mut self) -> Vec<ClientMsg> {
@@ -772,8 +649,12 @@ pub struct Identity {
 /// What a token proves; asked once, at `Hello`.
 pub type Authenticate = Box<dyn Fn(Option<&str>) -> Option<Identity> + Send + Sync>;
 
-/// May this identity receive this scope? The scope-level read rule.
-pub type Access = Box<dyn Fn(&Identity, &str) -> bool + Send + Sync>;
+/// May this identity receive the log? The read rule.
+pub type Access = Box<dyn Fn(&Identity) -> bool + Send + Sync>;
+
+/// Does this user own this session? Asked only about the connection's own
+/// user, of an entry whose session is not the connection's.
+pub type Owns = Box<dyn Fn(&str, &str) -> bool + Send + Sync>;
 
 /// Dev auth: anyone is whoever they say, and the token is their name.
 pub fn trusting() -> Authenticate {
@@ -785,23 +666,40 @@ pub fn trusting() -> Authenticate {
     })
 }
 
-/// Everyone may read every scope.
+/// Everyone who signed in may read the log.
 pub fn open_access() -> Access {
-    Box::new(|_, _| true)
+    Box::new(|_| true)
+}
+
+/// §12.5 The reason a `Reject` carries (`Ark.Protocol.refusalText`): a
+/// mutator's own refusal is its text, word for word, because that is what
+/// an author wrote for a person to read; the store's constraint refusals
+/// are named in a sentence.
+pub fn refusal_text(r: &Refusal) -> String {
+    match r {
+        Refusal::Refused(t) => t.clone(),
+        Refusal::NoSuchTable(t) => format!("no table {t}"),
+        Refusal::MalformedRow(t, why) => format!("{t}: {why}"),
+        Refusal::NotNull(t, c) => format!("{t}.{c} may not be empty"),
+        Refusal::UniqueViolation(t, cs) => format!("{t}: another row has the same {}", cs.join(", ")),
+        Refusal::MissingParent(t, c, p) => format!("{t}.{c} names no {p}"),
+        Refusal::StillReferenced(t, child) => format!("{t}: still referenced by {child}"),
+    }
 }
 
 struct Conn {
     who: Identity,
-    /// Per scope: the mode, and the sequence the connection has been sent
-    /// up to.
-    scopes: BTreeMap<ScopeName, (Mode, Seq)>,
+    mode: Mode,
+    /// The sequence the connection has been sent up to.
+    sent: Seq,
 }
 
 /// An authority's end of every connection (`Ark.Protocol.Server`).
 pub struct Server<M: Machine> {
     auth: Authenticate,
+    owns: Owns,
     access: Access,
-    pub scopes: BTreeMap<ScopeName, Authority>,
+    pub authority: Authority,
     conns: BTreeMap<ConnId, Conn>,
     machine: M,
     pub rooms: Rooms<M::State>,
@@ -810,11 +708,14 @@ pub struct Server<M: Machine> {
 }
 
 impl<M: Machine> Server<M> {
-    pub fn open(auth: Authenticate, access: Access, machine: M) -> Server<M> {
+    /// A server that is the authority for the log (`openServer`). By
+    /// default an entry must carry the connection's own session.
+    pub fn open(auth: Authenticate, access: Access, machine: M, authority: Authority) -> Server<M> {
         Server {
             auth,
+            owns: Box::new(|_, _| false),
             access,
-            scopes: BTreeMap::new(),
+            authority,
             conns: BTreeMap::new(),
             machine,
             rooms: Rooms::new(),
@@ -822,9 +723,13 @@ impl<M: Machine> Server<M> {
         }
     }
 
-    /// Host a scope: become its authority.
-    pub fn host(&mut self, a: Authority) {
-        self.scopes.insert(a.scope.clone(), a);
+    /// Install the sessions a user owns, which the authenticator's session
+    /// store knows and the engine does not (`withOwns`). With it, an entry
+    /// authored offline under one login and pushed after the same person
+    /// signed in again is still theirs.
+    pub fn with_owns(mut self, owns: Owns) -> Server<M> {
+        self.owns = owns;
+        self
     }
 
     fn send(&mut self, c: ConnId, m: ServerMsg) {
@@ -849,63 +754,63 @@ impl<M: Machine> Server<M> {
             return;
         }
         match msg {
-            ClientMsg::Hello { subs, token, .. } => match (self.auth)(token.as_deref()) {
+            ClientMsg::Hello { sub, token, .. } => match (self.auth)(token.as_deref()) {
                 None => self.send(
                     c,
                     ServerMsg::Denied {
                         reason: "not signed in".into(),
                     },
                 ),
+                Some(who) if !(self.access)(&who) => self.send(
+                    c,
+                    ServerMsg::Denied {
+                        reason: "not allowed".into(),
+                    },
+                ),
                 Some(who) => {
-                    let scopes = subs
-                        .iter()
-                        .filter(|s| (self.access)(&who, &s.scope) && self.scopes.contains_key(&s.scope))
-                        .map(|s| (s.scope.clone(), (s.mode, s.since)))
-                        .collect();
+                    // A second Hello on one connection is the log paging,
+                    // and says where to continue from; the room already has
+                    // this peer, and arriving again changes nothing.
                     let peer = live::Peer {
                         conn: c,
                         room: who.user.clone(),
                         who: who.session.clone(),
                     };
-                    self.conns.insert(c, Conn { who, scopes });
+                    self.conns.insert(
+                        c,
+                        Conn {
+                            who,
+                            mode: sub.mode,
+                            sent: sub.since,
+                        },
+                    );
                     let post = live::arrive(&self.machine, &mut self.rooms, peer);
                     self.deliver(post);
                     self.fanout();
                 }
             },
-            ClientMsg::Push { scope, entries } => {
+            ClientMsg::Push { entries } => {
                 let who = self.conns[&c].who.clone();
-                if !self.scopes.contains_key(&scope) {
-                    self.send(
-                        c,
-                        ServerMsg::Denied {
-                            reason: format!("unknown scope {scope}"),
-                        },
-                    );
-                    return;
-                }
                 let mut acks: Vec<(Id, Seq)> = Vec::new();
                 for e in &entries {
-                    if e.actor != who.user || e.session != who.session {
+                    let theirs = e.actor == who.user && (e.session == who.session || (self.owns)(&e.actor, &e.session));
+                    if !theirs {
                         self.send(
                             c,
                             ServerMsg::Reject {
-                                scope: scope.clone(),
                                 id: e.id,
                                 reason: "not yours".into(),
                             },
                         );
                         continue;
                     }
-                    let a = self.scopes.get_mut(&scope).expect("checked above");
-                    match a.sequence_entry(e) {
+                    match self.authority.sequence_entry(e) {
                         Sequenced::Appended(n, _) | Sequenced::Duplicate(n) => acks.push((e.id, n)),
                         Sequenced::Rejected(why) => self.send(
                             c,
                             ServerMsg::Reject {
-                                scope: scope.clone(),
                                 id: e.id,
-                                reason: why.to_string(),
+                                reason: refusal_text(&why),
                             },
                         ),
                     }
@@ -914,7 +819,6 @@ impl<M: Machine> Server<M> {
                     self.send(
                         c,
                         ServerMsg::Ack {
-                            scope,
                             ids: acks.iter().map(|(i, _)| *i).collect(),
                             seqs: acks.iter().map(|(_, n)| *n).collect(),
                         },
@@ -922,24 +826,23 @@ impl<M: Machine> Server<M> {
                 }
                 self.fanout();
             }
-            ClientMsg::NeedFacts { scope, seqs } => {
-                if let Some(a) = self.scopes.get(&scope) {
-                    let items = seqs.iter().filter_map(|n| a.log.entries.get(n).map(|(_, f)| (*n, f.clone()))).collect();
-                    self.send(c, ServerMsg::FactsFor { scope, items });
-                }
+            ClientMsg::NeedFacts { seqs } => {
+                let items = seqs
+                    .iter()
+                    .filter_map(|n| self.authority.log.entries.get(n).map(|(_, f)| (*n, f.clone())))
+                    .collect();
+                self.send(c, ServerMsg::FactsFor { items });
             }
             ClientMsg::NeedClosures { hashes } => {
                 let items = hashes
                     .iter()
-                    .filter_map(|h| self.scopes.values().find_map(|a| a.bodies.get(h)).map(|cl| (h.clone(), cl.clone())))
+                    .filter_map(|h| self.authority.bodies.get(h).map(|cl| (h.clone(), cl.clone())))
                     .collect();
                 self.send(c, ServerMsg::Closures { items });
             }
-            ClientMsg::Verify { scope, seq, hash } => {
-                if let Some(a) = self.scopes.get(&scope) {
-                    let ok = a.log.state_at(seq).map(|st| state_hash(&st)) == Some(hash.clone());
-                    self.send(c, ServerMsg::Agree { scope, seq, hash, ok });
-                }
+            ClientMsg::Verify { seq, hash } => {
+                let ok = self.authority.log.state_at(seq).map(|st| state_hash(&st)) == Some(hash.clone());
+                self.send(c, ServerMsg::Agree { seq, hash, ok });
             }
             ClientMsg::Say { frame } => {
                 let post = live::speak(&self.machine, &mut self.rooms, c, &frame);
@@ -948,65 +851,58 @@ impl<M: Machine> Server<M> {
         }
     }
 
-    /// A connection closed: the room hears it, the cursors are forgotten.
+    /// A connection closed: the room hears it, the cursor is forgotten.
     pub fn disconnect(&mut self, c: ConnId) {
         let post = live::depart(&self.machine, &mut self.rooms, c);
         self.conns.remove(&c);
         self.deliver(post);
     }
 
-    /// §12.4 Fan-out: every connection, every scope it holds, everything
-    /// above what it has been sent, a page at a time; a snapshot for one
-    /// below the horizon. Run after every message.
+    /// §12.4 Fan-out: every connection, everything above what it has been
+    /// sent, a page at a time; a snapshot for one below the horizon. Run
+    /// after every message.
     fn fanout(&mut self) {
-        let conns: Vec<ConnId> = self.conns.keys().copied().collect();
-        for c in conns {
-            let scopes: Vec<(ScopeName, Mode, Seq)> = self.conns[&c].scopes.iter().map(|(s, (md, sent))| (s.clone(), *md, *sent)).collect();
-            for (s, md, sent) in scopes {
-                let Some(a) = self.scopes.get(&s) else { continue };
-                if sent >= a.log.head_seq() {
-                    continue;
+        let conns: Vec<(ConnId, Mode, Seq)> = self.conns.iter().map(|(c, cn)| (*c, cn.mode, cn.sent)).collect();
+        for (c, md, sent) in conns {
+            let a = &self.authority;
+            if sent >= a.log.head_seq() {
+                continue;
+            }
+            let (msg, advanced) = match a.page(sent, BATCH_LIMIT) {
+                Page::BelowHorizon(sn) => {
+                    let rows = sn
+                        .store
+                        .table_names()
+                        .into_iter()
+                        .map(|t| (t.clone(), sn.store.scan(&t).into_iter().map(Value::Struct).collect()))
+                        .collect();
+                    (
+                        ServerMsg::SnapshotOf {
+                            seq: sn.seq,
+                            hash: sn.hash.clone(),
+                            rows,
+                        },
+                        sn.seq,
+                    )
                 }
-                let (msg, advanced) = match a.page(sent, BATCH_LIMIT) {
-                    Page::BelowHorizon(sn) => {
-                        let rows = sn
-                            .store
-                            .table_names()
-                            .into_iter()
-                            .map(|t| (t.clone(), sn.store.scan(&t).into_iter().map(Value::Struct).collect()))
-                            .collect();
-                        (
-                            ServerMsg::SnapshotOf {
-                                scope: s.clone(),
-                                seq: sn.seq,
-                                hash: sn.hash.clone(),
-                                rows,
-                            },
-                            sn.seq,
-                        )
-                    }
-                    Page::Entries(items, more) => {
-                        let last = items.iter().map(|(n, _, _)| *n).max().unwrap_or(sent).max(sent);
-                        let with_facts = items
-                            .into_iter()
-                            .map(|(n, e, f)| (n, e, if md == Mode::ByFacts { Some(f) } else { None }))
-                            .collect();
-                        (
-                            ServerMsg::Batch {
-                                scope: s.clone(),
-                                items: with_facts,
-                                has_more: more,
-                            },
-                            last,
-                        )
-                    }
-                };
-                self.send(c, msg);
-                if let Some(conn) = self.conns.get_mut(&c) {
-                    if let Some(entry) = conn.scopes.get_mut(&s) {
-                        entry.1 = advanced;
-                    }
+                Page::Entries(items, more) => {
+                    let last = items.iter().map(|(n, _, _)| *n).max().unwrap_or(sent).max(sent);
+                    let with_facts = items
+                        .into_iter()
+                        .map(|(n, e, f)| (n, e, if md == Mode::ByFacts { Some(f) } else { None }))
+                        .collect();
+                    (
+                        ServerMsg::Batch {
+                            items: with_facts,
+                            has_more: more,
+                        },
+                        last,
+                    )
                 }
+            };
+            self.send(c, msg);
+            if let Some(conn) = self.conns.get_mut(&c) {
+                conn.sent = advanced;
             }
         }
     }

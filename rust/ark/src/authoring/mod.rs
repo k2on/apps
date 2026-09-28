@@ -1,7 +1,7 @@
 //! Authoring: the vocabulary of `spec/AUTHORING.md`, in Rust.
 //!
-//! A domain is written once against this module — a scope is a struct of
-//! [`Table`]s, a row a struct with its [`Row::columns`], an input a struct
+//! A domain is written once against this module — its tables are a struct
+//! of [`Table`]s, a row a struct with its [`Row::columns`], an input a struct
 //! with its [`Input::schema`], and every procedure a closure on a
 //! [`Router`] — and the same text runs two ways:
 //!
@@ -27,7 +27,7 @@
 //! - `.min(n)` / `.max(n)` and the rest take no message; `.why("…")` after a
 //!   check gives it one (Rust has no overloading by arity, so
 //!   `.min(n, "why")` beside `.min(n)` cannot be one method).
-//! - A scope says its tables in [`Scope::open`], one [`table`] per field:
+//! - The tables are said in [`Tables::open`], one [`table`] per field:
 //!   the order written there is the schema's order.
 //! - Natively, a method's operands are values before the call: `a.and(b)`,
 //!   `pick(c, a, b)` and `opt.map_or(d, f)` have computed `b` or `d`
@@ -50,6 +50,6 @@ pub use input::{bool_, bytes, enum_, id, int, object, opt, text, FieldB, Input, 
 pub use router::{evaluate, router, Applied, Module, Proc, Procedure, Route, Router, Routers, Routes};
 pub use schema::{
     col, columns, fields, rel, table, table_of, Col, Cols, ColumnOf, Columns, Effect, Fields, IntoEffect, Key, Order, Orders, Pred, Query, Record,
-    Rel, Row, Scope, Table, Write,
+    Rel, Row, Table, Tables, Write,
 };
 pub use values::{concat, id_of_text, list, nil_id, none, pick, some, Bool, Bytes, Ctx, Data, Id, Int, List, ListOf, Opt, Text};

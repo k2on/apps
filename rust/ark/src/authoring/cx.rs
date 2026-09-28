@@ -14,7 +14,7 @@ use crate::value::Value;
 
 /// A value of the vocabulary: an index into the arena of the run in
 /// progress. Every value type is one of these, which is what lets rows,
-/// scopes and inputs be plain structs (see `raw`).
+/// tables and inputs be plain structs (see `raw`).
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(transparent)]
