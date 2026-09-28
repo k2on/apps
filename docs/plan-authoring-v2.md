@@ -65,11 +65,23 @@ step 2 lands. `spec/GENERATED.md` and `spec/generated/` are stale.
 
 - **The two workflow files cannot be pushed from here.** Both the git
   token and the GitHub connector lack the `workflow` scope, so any commit
-  containing `.github/workflows/apk.yml` or `pages.yml` is rejected. They
-  are complete and sit in the working tree, kept out of `git status` by
-  `.git/info/exclude`. The user has to push them (or grant the scope);
-  say so plainly in the final report rather than retrying. Their content
-  is reviewed and belongs with step 5's integration.
+  that creates *or updates* a file under `.github/workflows/` is rejected
+  (probed against the user's own `ci.yaml`: refused). The finished files
+  are committed as `.github/pending-workflows/{apk,pages}.yml`; moving
+  them into `.github/workflows/` is one `git mv` the user runs, or a
+  token with the scope. The working-tree copies under `.github/workflows/`
+  are kept out of `git status` by `.git/info/exclude`. Say so plainly in
+  the final report rather than retrying.
+- **A `git reset --hard` reverted the agents' uncommitted edits once**
+  (to the wip snapshot `08af367`); each agent was told which files and
+  asked to re-apply and to commit its own files by path from then on.
+  Never `reset --hard` or `checkout --` in this tree while agents run; to
+  take a remote commit, `git fetch` and `git merge --ff-only`.
+- **Known Rust builder bug** (found by the Swift agent comparing emits):
+  a provider's `or_refuse` value must be returned whole, `SReturn (EStd
+  Unwrap [EVar s])`, not rebuilt field by field. Sent to the Rust agent;
+  `harken.ark` must be regenerated after the fix. Swift's demo emit already
+  equals `spec/vectors/module/demo.json` byte for byte.
 - **Late contract changes** landed after the agents' briefs: `.why("…")`
   gives a check its message (no `.min(n, "why")`), and a scope's tables
   are declared by `fn open() -> Self { Playlists { playlist: table(),
