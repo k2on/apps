@@ -1,0 +1,101 @@
+# The browser peer, published at https://k2on.github.io/apps/harken/.
+#
+# `nix build .#harken-web` is the whole build; what this file adds is a
+# landing page above it and the two GitHub Pages actions. The repository's
+# Pages source must be "GitHub Actions" (Settings → Pages).
+#
+# The nix store is kept between runs by nix-community/cache-nix-action, which
+# puts it in GitHub's ordinary actions cache: free for a public repository,
+# 10 GB per repository, shared with apk.yml. Not magic-nix-cache: it rode
+# GitHub's legacy cache API, which GitHub turned off in early 2025, and
+# Determinate's successor (FlakeHub Cache) needs an account. Everything but
+# the wasm-bindgen CLI (compiled from crates.io at the locked version, a few
+# minutes) is substituted from cache.nixos.org anyway, so the cache is worth
+# that CLI and the Rust toolchain; the devshell is made a gc root below so
+# the collection before saving keeps both.
+name: pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+  # cache-nix-action deletes the caches it superseded.
+  actions: write
+
+# One deployment at a time; a run in flight finishes before the next starts.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: DeterminateSystems/nix-installer-action@main
+
+      - uses: nix-community/cache-nix-action@v6
+        with:
+          # The key names what the store was built from; a miss restores
+          # the newest cache with the same prefix and builds the difference.
+          primary-key: nix-web-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock', 'rust/Cargo.lock') }}
+          restore-prefixes-first-match: nix-web-${{ runner.os }}-
+          # Collect garbage before saving, down to this, so the cache holds
+          # what is rooted and not every intermediate ever fetched.
+          gc-max-store-size-linux: 2G
+          purge: true
+          purge-prefixes: nix-web-${{ runner.os }}-
+          purge-created: 0
+          purge-primary-key: never
+
+      - name: Keep the build's tools
+        run: nix develop .#harken-web --profile "$RUNNER_TEMP/harken-web-shell" --command true
+
+      - name: Build the browser peer
+        run: nix build .#harken-web --print-build-logs
+
+      - name: Assemble the site
+        run: |
+          mkdir -p _site/harken
+          cp -r result/. _site/harken/
+          chmod -R u+w _site
+          cat > _site/index.html <<'HTML'
+          <!doctype html>
+          <html lang="en">
+          <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>apps</title>
+          <style>body{font:16px/1.5 system-ui,sans-serif;max-width:40em;margin:4em auto;padding:0 1em;color-scheme:light dark}</style></head>
+          <body>
+          <h1>apps</h1>
+          <p>ArkDB is a local-first sync engine whose domain is written once and
+          runs natively in Rust, Swift and Kotlin; harken, a music library with
+          playlists, is the first app on it. <a href="harken/">harken/</a> is its
+          browser peer — the same engine compiled to wasm, applying every entry
+          through the interpreter over the module it embeds. Open it
+          <em>alone</em> to run it entirely in this tab, or point it at a harken
+          server. The source is at
+          <a href="https://github.com/k2on/apps">github.com/k2on/apps</a>.</p>
+          </body>
+          </html>
+          HTML
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
