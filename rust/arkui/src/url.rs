@@ -57,7 +57,11 @@ mod tests {
     /// Falsified by adding `b'#'` to the unreserved set: the `%23` goes.
     #[test]
     fn the_awkward_characters_in_a_name_are_escaped() {
-        assert_eq!(encoded("Boléro #1 & 2.mp3"), "Bol%C3%A9ro%20%231%20%26%202.mp3", "a raw # ends the request mid-name");
+        assert_eq!(
+            encoded("Boléro #1 & 2.mp3"),
+            "Bol%C3%A9ro%20%231%20%26%202.mp3",
+            "a raw # ends the request mid-name"
+        );
         assert_eq!(decode(&encoded("Boléro / Pavane #1")), "Boléro / Pavane #1");
     }
 }

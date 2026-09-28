@@ -68,12 +68,12 @@ mod tests {
 
     /// The two ends, taken off the two ways, and nothing touched that fits.
     ///
-    /// Falsified by swapping `tail` and `middle` in the assertions' calls:
-    /// both fail, naming the string each one would have drawn.
+    /// Falsified by making `middle` keep only its head (`let head = keep`):
+    /// the first assertion names the `Prelude No. 14 in F-sh…` it drew.
     #[test]
     fn a_sentence_loses_its_end_and_a_name_its_middle() {
         let name = "Prelude No. 14 in F-sharp minor, BWV 859";
-        assert_eq!(middle(name, 21), "Prelude No\u{2026}, BWV 859");
+        assert_eq!(middle(name, 21), "Prelude No\u{2026}r, BWV 859");
         assert_eq!(tail("Go to Goldberg Variations, BWV 988", 20), "Go to Goldberg Vari\u{2026}");
         assert_eq!(middle(name, 200), name, "what fits is left alone");
         assert_eq!(tail(name, 200), name);
