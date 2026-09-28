@@ -957,9 +957,9 @@ apps/
   harken/         the app, one directory per program (harken/README.md):
     domain/       the domain, written once in Rust (src/); harken.ark, its emit; and
                   gen/{swift,kotlin}, arkc's print of it for the phones
-    server/       axum: harken.ark's log as an authority, applied natively
-    desktop/      ratatui over ark and the domain's native procedures
-    web/          the browser peer: ark compiled to wasm, published to GitHub Pages
+    server/       ark-server with harken's scanner, listening desk and house bridge
+    iced/         the desktop and browser client on arkui and ark-client; its demo
+                  build is published to GitHub Pages
     ios/          SwiftUI over ArkDBClient and the printed Swift domain (xcodegen)
     android/      Compose over ark-client and the printed Kotlin; nix build .#harken-apk
   flake.nix       all of the above, as packages, checks and shells
@@ -967,8 +967,8 @@ apps/
 
 An app depends on one runtime package, and carries its domain as source in
 the vocabulary of whichever language it is written in, plus the module that
-source emits. The harken server, desktop and browser peer depend on
-`rust/ark` and link the Rust domain; the two native phone apps depend on
+source emits. The harken server and its desktop and browser client depend on
+`rust/ark` (through `ark-server` and `ark-client`) and link the Rust domain; the two native phone apps depend on
 `swift/` and `kotlin/` and compile `arkc`'s print of the same module, which
 `nix flake check` holds to a byte-for-byte round trip.
 

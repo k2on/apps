@@ -23,9 +23,14 @@ natively in Rust, Swift and Kotlin — and harken, the first app on it.
   `ArkDBClient`, a session over them.
 - `kotlin/` — `ark-runtime` (with `dev.arkdb.authoring`) and `ark-client`,
   the same in Kotlin.
-- `harken/` — the app: `domain/`, `server/`, `desktop/`, `web/`, `ios/`,
-  `android/`. `harken/README.md` says what each is and how to run them
-  together; `web/` is the peer published at
+- `rust/` also holds what every app shares: `ark-client` (a peer:
+  persistence, the link, live rooms, maintained views, signing in later),
+  `ark-server` (the authority over a socket, live-room relay, the web
+  build), `ark-auth` (dev auth and OpenID Connect) and `arkui` (the iced
+  components, the vim keyboard, theming).
+- `harken/` — the app: `domain/`, `server/`, `iced/` (desktop and browser),
+  `ios/`, `android/`. `harken/README.md` says what each is and how to run
+  them together; the browser demo is published at
   <https://k2on.github.io/apps/harken/>.
 
 Every runtime passes the same vectors and runs every procedure natively,
@@ -35,13 +40,15 @@ Swift and Kotlin are `arkc`'s print of it; and one command holds all of it:
     nix flake check                 # the vectors, the three runtimes, the Rust
                                     # workspace, harken's module and the round
                                     # trip of its three domains
-    nix build .#harken-server       # or harken-desktop, harken-web, harken-domain,
-                                    # harken-apk, arkdb-swift, arkdb-kotlin, ark-spec
+    nix build .#harken-server       # or harken-iced, harken-web, harken-web-server,
+                                    # harken-domain, harken-apk, arkdb-swift,
+                                    # arkdb-kotlin, ark-spec
     nix run .#arkc -- verify harken/domain/harken.ark
     nix develop .#spec              # or .#rust, .#swift, .#kotlin
 
 What is not verified from here: neither phone app has been run on a device,
-and the browser peer has been driven in headless Chromium only. The Android
+no desktop window has been opened, and the browser client has been drawn in
+headless Chromium only. The Android
 app is assembled by nix, so its code compiles. Of the iOS app, the printed
 domain and the bridge the screens call through compile and run on Linux as
 a test target; the SwiftUI views have not met a compiler. The runtimes, the
