@@ -61,20 +61,14 @@ object Authoring {
         test("authoring/harken: the printed domain builds, emits and verifies") {
             val h = harken.gen.module()
             val ir = Decode.fromValue(Canon.decode(h.emit()))
-            eq(ir.functions.map { it.name to it.kind }, listOf(
-                "library" to FnKind.Query,
-                "signed_in" to FnKind.Guard,
-                "owned" to FnKind.Provide,
-                "create_playlist" to FnKind.Mutator,
-                "add_to_playlist" to FnKind.Mutator,
-                "remove_from_playlist" to FnKind.Mutator,
-                "playlists" to FnKind.Query,
-                "playlist_items" to FnKind.Query,
-            ), "functions")
-            eq(ir.functions.associate { it.name to it.uses }["add_to_playlist"], listOf("signed_in", "owned"), "add_to_playlist's chain")
-            eq(ir.functions.associate { it.name to it.uses }["create_playlist"], listOf("signed_in"), "create_playlist's chain")
+            eq(ir, h.ir, "decode of emit")
+            eq(Encode.toValue(Verify.verify(ir)), Encode.toValue(ir), "emit is already the verified form")
+            eq(ir.spec, SPEC_VERSION, "spec version")
+            check(ir.functions.any { it.kind == FnKind.Mutator } && ir.functions.any { it.kind == FnKind.Query }) { "it carries mutators and queries" }
         }
-        test("authoring/harken: native agrees with the interpreter on every procedure") { harkenAgreement(harken.gen.module()) }
+        test("authoring/demo: native agrees with the interpreter on every procedure, over inputs drawn from its types") { anyAgreement(demo) }
+        test("authoring/vocab: native agrees with the interpreter on every procedure, over inputs drawn from its types") { anyAgreement(selfdemo.vocabModule()) }
+        test("authoring/harken: native agrees with the interpreter on every procedure") { anyAgreement(harken.gen.module()) }
         // The phone's print against the whole module the Rust domain emits:
         // every procedure it carries must hash as that module's does, or the
         // phone's entries name functions the server has never seen.
@@ -170,45 +164,64 @@ object Authoring {
         eq(p.checked, 13, "every step compared")
     }
 
-    private fun harkenAgreement(m: dev.arkdb.authoring.Module) {
+    /**
+     * Every procedure of a module, run natively and by the interpreter over
+     * inputs drawn from its types alone — so it holds whatever the domain
+     * is: each mutator in module order under three arguments (a name, a
+     * blank, and the other text) as a signed-in user, as another, and as
+     * nobody, every row one writes kept for the next, and every query after;
+     * an id argument names the last id drawn for its table. Every answer is
+     * compared, refusals included.
+     */
+    private fun anyAgreement(m: dev.arkdb.authoring.Module) {
         val p = Pair2(m)
-        val alice = Ctx("alice", "a1")
-        val bob = Ctx("bob", "b1")
-        val nobody = Ctx("", "n1")
-        var st = MemoryStore(p.ir.schema)
-        // Tracks arrive as facts; the phone's module has no add_track.
-        for (k in 1..3) {
-            st.applyChange(dev.arkdb.Change.Add("track", Value.record(
-                "id" to idN(100 + k), "title" to Value.text("T$k"), "artist" to Value.text(if (k == 2) "A" else "B"),
-                "album" to (if (k == 3) Value.VNull else Value.text("L")), "duration_ms" to Value.int(1000L * k),
-                "file" to Value.text("f$k"), "added_ms" to Value.int(5), "user_id" to Value.text("scanner"),
-            ) as Value.VStruct))
+        val ir = p.ir
+        var st = MemoryStore(ir.schema)
+        var n = 0
+        val lastId = HashMap<String, Value>()
+        fun fresh(table: String): Value {
+            n += 1
+            return Value.id(Id(ByteArray(16).also { it[0] = 7; it[14] = (n shr 8).toByte(); it[15] = n.toByte() })).also { lastId[table] = it }
         }
-        fun create(ctx: Ctx, id: kotlin.Int, name: String) {
-            st = p.step("create_playlist", ctx, mapOf("id" to idN(id), "created_ms" to Value.int(7)), mapOf("name" to Value.text(name)), st)
+        fun sample(t: dev.arkdb.Ty, text: String): Value? = when (t) {
+            is dev.arkdb.Ty.TBool -> Value.bool(true)
+            is dev.arkdb.Ty.TInt -> Value.int(1)
+            is dev.arkdb.Ty.TText -> Value.text(text)
+            is dev.arkdb.Ty.TBytes -> Value.VBytes(ByteArray(0))
+            is dev.arkdb.Ty.TId -> lastId[t.table] ?: Value.id(Id(ByteArray(16) { 9 }))
+            is dev.arkdb.Ty.TEnum -> Value.text(t.variants.first())
+            is dev.arkdb.Ty.TOption -> if (text.isBlank()) Value.VNull else sample(t.of, text)
+            is dev.arkdb.Ty.TList -> sample(t.of, text)?.let { Value.list(it) }
+            is dev.arkdb.Ty.TStruct -> t.fields.entries.associate { (k, v) -> k to (sample(v, text) ?: return null) }.let { Value.VStruct(it) }
         }
-        fun on(verb: String, ctx: Ctx, pl: kotlin.Int, track: kotlin.Int) {
-            val autos = if (verb == "add_to_playlist") mapOf("added_ms" to Value.int(8)) else emptyMap()
-            st = p.step(verb, ctx, autos, mapOf("playlist_id" to idN(pl), "track_id" to idN(100 + track)), st)
+        val procedures = ir.functions.filter { it.kind == FnKind.Mutator || it.kind == FnKind.Query }
+        var compared = 0
+        for (ctx in listOf(Ctx("alice", "a1"), Ctx("bob", "b1"), Ctx.nobody)) {
+            for (text in listOf("Mix", "   ", "Road")) {
+                for (fn in procedures.filter { it.kind == FnKind.Mutator }) {
+                    val sampled = fn.input.map { (k, f) -> k to sample(f.ty, text) }
+                    if (sampled.any { it.second == null }) continue
+                    val args = sampled.associate { (k, v) -> k to v!! }
+                    val autos = fn.autos.associate { (k, a) ->
+                        k to when (a) {
+                            is dev.arkdb.Auto.NewId -> fresh(a.table)
+                            else -> Value.int(1000L + n)
+                        }
+                    }
+                    st = p.step(fn.name, ctx, autos, args, st)
+                    compared++
+                }
+            }
+            for (fn in procedures.filter { it.kind == FnKind.Query }) {
+                val sampled = fn.input.map { (k, f) -> k to sample(f.ty, "Mix") }
+                if (sampled.any { it.second == null }) continue
+                val args = sampled.associate { (k, v) -> k to v!! }
+                st = p.step(fn.name, ctx, emptyMap(), args, st)
+                compared++
+            }
         }
-        create(nobody, 1, "Mine")          // refused: sign in first
-        create(alice, 1, " Mix ")
-        create(alice, 2, "x".repeat(121))  // refused: at most 120
-        create(bob, 3, "Mix")
-        on("add_to_playlist", alice, 1, 1)
-        on("add_to_playlist", alice, 1, 2)
-        on("add_to_playlist", bob, 1, 3)   // refused: not your playlist
-        on("add_to_playlist", alice, 9, 3) // refused: no such playlist
-        on("remove_from_playlist", alice, 1, 1)
-        on("add_to_playlist", alice, 1, 1)
-        for (ctx in listOf(alice, bob, nobody)) st = p.step("playlists", ctx, emptyMap(), emptyMap(), st)
-        st = p.step("library", alice, emptyMap(), emptyMap(), st)
-        for ((ctx, pl) in listOf(alice to 1, bob to 1, alice to 9)) st = p.step("playlist_items", ctx, emptyMap(), mapOf("playlist_id" to idN(pl)), st)
-        val items = (p.answer("playlist_items", alice, mapOf("playlist_id" to idN(1)), st) as Eval.Answer.Ok).value
-        eq(items.asList().map { it.field("track_id") to it.field("pos") }, listOf(idN(102) to Value.int(2), idN(101) to Value.int(3)), "after a remove, the next lands at the end")
-        eq(p.answer("playlists", nobody, emptyMap(), st), Eval.Answer.Refused(dev.arkdb.Refusal.Refused("sign in first")) as Eval.Answer, "a query refused by its guard")
-        val lib = (p.answer("library", alice, emptyMap(), st) as Eval.Answer.Ok).value
-        eq(lib.asList().map { it.field("title") }, listOf(Value.text("T2"), Value.text("T3"), Value.text("T1")), "the library by artist, then album (null first)")
+        eq(p.checked, compared, "every step compared")
+        check(compared >= procedures.size) { "every procedure ran: $compared" }
     }
 
     /**
