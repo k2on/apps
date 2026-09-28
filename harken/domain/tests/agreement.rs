@@ -1,26 +1,16 @@
 //! harken's domain against itself: the module it emits verifies and is the
 //! committed `harken.ark`, and every procedure run natively agrees with the
 //! interpreter over its own emit — verdicts, changes, stores and values —
-//! step after step over one evolving store.
+//! step after step over one evolving store, every procedure at least once.
 
-use std::collections::BTreeMap;
+mod common;
+
 use std::path::Path;
 
-use ark::authoring::Procedure;
-use ark::eval::{Args, Ctx};
-use ark::store::{MemoryStore, Refusal, Store};
+use ark::ir::{Expr, FnKind, Stmt, StdFn};
 use ark::value::Value;
+use common::{args, track, Lib, Song};
 use harken_domain::module;
-
-fn args<const N: usize>(pairs: [(&str, Value); N]) -> Args {
-    pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect()
-}
-
-fn id(k: u8) -> Value {
-    let mut b = [0u8; 16];
-    b[15] = k;
-    Value::Id(b)
-}
 
 #[test]
 fn the_module_verifies_and_is_the_committed_file() {
@@ -37,25 +27,81 @@ fn the_module_verifies_and_is_the_committed_file() {
     assert_eq!(
         names,
         [
-            "add_track",
+            "work_title",
+            "slug",
+            "key_part",
+            "work_key",
+            "work_id",
+            "movement_key",
+            "recording_key",
+            "recording_id",
+            "credited_as",
+            "movement_id",
+            "add_song",
+            "describe_work",
+            "describe_recording",
+            "describe_person",
+            "credit_recording",
+            "remove_media",
+            "library_entry",
             "library",
+            "albums",
+            "artists",
+            "credited",
+            "joined",
+            "performers",
+            "track_details",
+            "album",
+            "artist",
+            "tracks_on",
+            "composers",
+            "work_summary",
+            "works",
+            "work",
+            "recordings",
+            "credits",
+            "recording",
             "signed_in",
             "owned",
             "create_playlist",
             "add_to_playlist",
+            "add_all_to_playlist",
             "remove_from_playlist",
             "playlists",
-            "playlist_items"
-        ]
+            "playlists_of",
+            "playlist",
+        ],
+        "a helper sits immediately before the first function that calls it"
     );
-    let add = decoded.lookup_function("add_to_playlist").unwrap();
-    assert_eq!(add.uses, ["signed_in", "owned"]);
+    // Helpers are pure and say what they are; each is called by name.
+    let slug = decoded.lookup_function("slug").unwrap();
+    assert_eq!(slug.kind, FnKind::Helper);
+    assert_eq!((slug.scope.as_deref(), slug.router.as_deref()), (None, None));
+    assert_eq!(slug.arg_types(), [("text".to_string(), ark::schema::Ty::Text)]);
+    let key_part = decoded.lookup_function("key_part").unwrap();
+    assert!(
+        ark::ir::calls(key_part).contains(&"slug".to_string()),
+        "key_part calls slug: {:?}",
+        ark::ir::calls(key_part)
+    );
+    // A record is a struct type that is no table's row.
+    let albums = decoded.lookup_function("albums").unwrap();
+    let Some(ark::schema::Ty::List(entry)) = &albums.ret else { panic!("{:?}", albums.ret) };
+    let ark::schema::Ty::Struct(fields) = &**entry else { panic!("{entry:?}") };
+    assert_eq!(fields.keys().collect::<Vec<_>>(), ["art", "creator", "name", "tracks"]);
+    // One auto per name, however often a body reads it.
+    let add = decoded.lookup_function("add_song").unwrap();
+    let autos: Vec<&str> = add.autos.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(autos, ["id", "added_ms"]);
+
+    assert_eq!(decoded.lookup_function("add_to_playlist").unwrap().uses, ["signed_in", "owned"]);
     assert_eq!(decoded.lookup_function("create_playlist").unwrap().uses, ["signed_in"]);
     assert_eq!(decoded.lookup_router("playlists").unwrap().uses, ["signed_in", "owned"]);
+    assert!(decoded.lookup_router("library").unwrap().uses.is_empty());
     // §6: a provide returns `or_refuse`'s value whole, `EStd Unwrap [EVar s]`.
     let owned = decoded.lookup_function("owned").unwrap();
     assert!(
-        matches!(owned.body.last(), Some(ark::ir::Stmt::Return(Some(ark::ir::Expr::Std(ark::ir::StdFn::Unwrap, xs)))) if matches!(xs[..], [ark::ir::Expr::Var(_)])),
+        matches!(owned.body.last(), Some(Stmt::Return(Some(Expr::Std(StdFn::Unwrap, xs)))) if matches!(xs[..], [Expr::Var(_)])),
         "{:?}",
         owned.body.last()
     );
@@ -66,175 +112,162 @@ fn the_module_verifies_and_is_the_committed_file() {
     );
 }
 
-struct Run {
-    procs: BTreeMap<String, Procedure>,
-    library: MemoryStore,
-    playlists: MemoryStore,
-}
-
-impl Run {
-    fn new() -> Run {
-        let m = module();
-        let schema = m.build().schema.clone();
-        Run {
-            procs: m.procedures().into_iter().map(|(_, p)| (p.name().to_string(), p)).collect(),
-            library: MemoryStore::empty(schema.clone()),
-            playlists: MemoryStore::empty(schema),
-        }
-    }
-
-    fn store(&mut self, name: &str) -> &mut MemoryStore {
-        if self.procs[name].function().scope.as_deref() == Some("library") {
-            &mut self.library
-        } else {
-            &mut self.playlists
-        }
-    }
-
-    /// Both ways over copies, compared; then applied for the next step.
-    fn step(&mut self, name: &str, ctx: &Ctx, autos: Args, a: Args) -> Result<usize, String> {
-        let p = self.procs[name].clone();
-        let st = self.store(name).clone();
-        let out = p.agrees(ctx, &autos, &a, &st).unwrap_or_else(|e| panic!("{e}"));
-        let _ = p.apply(ctx, &autos, &a, self.store(name));
-        match out {
-            Ok(Ok(chs)) => Ok(chs.len()),
-            Ok(Err(Refusal::Refused(t))) => Err(t),
-            Ok(Err(other)) => Err(other.to_string()),
-            Err(bug) => panic!("{name}: bug {bug:?}"),
-        }
-    }
-
-    fn query(&mut self, name: &str, ctx: &Ctx, a: Args) -> Result<Value, String> {
-        let p = self.procs[name].clone();
-        let st = self.store(name).clone();
-        match p.agrees_on_query(ctx, &a, &st).unwrap_or_else(|e| panic!("{e}")) {
-            Ok(v) => Ok(v),
-            Err(ark::eval::EvalFault::Verdict(Refusal::Refused(t))) => Err(t),
-            Err(other) => panic!("{name}: {other:?}"),
-        }
-    }
-}
-
-fn track(title: &str, artist: &str, album: Option<&str>, ms: i64, file: &str) -> Args {
-    args([
-        ("title", Value::text(title)),
-        ("artist", Value::text(artist)),
-        ("album", Value::opt(album.map(Value::text))),
-        ("duration_ms", Value::int(ms)),
-        ("file", Value::text(file)),
-    ])
-}
-
-fn now(k: u8) -> Args {
-    args([
-        ("id", id(k)),
-        ("added_ms", Value::int(1_000 + k as i64)),
-        ("created_ms", Value::int(2_000 + k as i64)),
-    ])
-}
-
+/// Every procedure, natively and through the interpreter, over one store
+/// that grows through the whole library shape: refusals, no-ops, the
+/// classical chain, pop, playlists, removal.
 #[test]
 fn every_procedure_agrees_with_the_interpreter() {
-    let mut r = Run::new();
-    let scanner = Ctx::new("library", "scan");
-    let alice = Ctx::new("alice", "a");
-    let bob = Ctx::new("bob", "b");
-    let nobody = Ctx::new("", "x");
-
-    // library: add_track and its checks.
+    let mut c = Lib::new();
+    let favs = c.playlist("alice", "Favorites");
+    let evening = c.playlist("alice", "Evening");
+    let bobs = c.playlist("bob", "Favorites");
+    for (i, (performer, file)) in [("Kimiko Ishizaka", "k"), ("", "x"), ("Glenn Gould", "g")].into_iter().enumerate() {
+        for no in 1..=3 {
+            let title = ["Aria", "Variatio 1", "Variatio 2"][no as usize - 1];
+            c.add(Song {
+                album_art: ["", "cover.jpg", ""][i],
+                artist_art: ["bach.jpg", "", "bach2.jpg"][i],
+                bpm: 60 * no,
+                ..track(
+                    title,
+                    "Johann Sebastian Bach",
+                    "Goldberg Variations",
+                    "BWV 988",
+                    performer,
+                    &format!("music/{file}{no}.mp3"),
+                    no,
+                    ["Goldberg Variations", "", ""][i],
+                    [no, 0, no][i],
+                )
+            });
+        }
+    }
+    c.add(Song {
+        part: "Suite No. 2",
+        track: 4,
+        file: "music/h.mp3".into(),
+        ..Song::new("Air", "George Frideric Handel", "Water Music")
+    });
+    c.add(Song {
+        file: "music/p.mp3".into(),
+        ..Song::new("Low Tide", "The Quiet Hours", "")
+    });
+    c.add(Song::new("Hand-typed", "", ""));
+    assert_eq!(c.mutate("alice", "add_song", Song::new("", "x", "").args()), Err("a song needs a title".into()));
+    // The same file again is nothing at all.
     assert_eq!(
-        r.step(
-            "add_track",
-            &scanner,
-            now(1),
-            track(" Air ", "Bach", Some(" Suite 3 "), 300_000, "bach/air.flac")
+        c.mutate(
+            "alice",
+            "add_song",
+            Song {
+                file: "music/p.mp3".into(),
+                ..Song::new("Other", "Y", "Z")
+            }
+            .args()
         ),
-        Ok(1)
-    );
-    assert_eq!(
-        r.step("add_track", &scanner, now(2), track("Aria", "Bach", None, 250_000, "bach/aria.flac")),
-        Ok(1)
-    );
-    assert_eq!(
-        r.step("add_track", &scanner, now(3), track("Air", "Bach", None, 1, "bach/air.flac")),
-        Ok(0),
-        "a rescan is a no-op"
-    );
-    assert_eq!(
-        r.step("add_track", &scanner, now(4), track("  ", "X", None, 1, "x.flac")),
-        Err("a track needs a title".into())
-    );
-    assert_eq!(
-        r.step("add_track", &scanner, now(5), track("T", "X", None, -1, "y.flac")),
-        Err("duration_ms: at least 0".into())
-    );
-    assert_eq!(
-        r.step("add_track", &scanner, now(6), track("T", "X", None, 1, "")),
-        Err("file: at least 1 characters".into())
-    );
-    let lib = r.query("library", &alice, args([])).unwrap();
-    let titles: Vec<Value> = lib.as_list().iter().map(|t| t.field("title")).collect();
-    assert_eq!(
-        titles,
-        vec![Value::text("Aria"), Value::text("Air")],
-        "by artist, album (None first), title"
-    );
-    assert_eq!(
-        lib.as_list()[1].field("album"),
-        Value::text("Suite 3"),
-        "an optional field is trimmed when Some"
-    );
-
-    // playlists: the guard, the provide, the three writes.
-    assert_eq!(
-        r.step("create_playlist", &nobody, now(10), args([("name", Value::text("Mine"))])),
-        Err("sign in first".into())
-    );
-    assert_eq!(
-        r.step("create_playlist", &alice, now(11), args([("name", Value::text("  Favorites "))])),
-        Ok(1)
-    );
-    assert_eq!(
-        r.step("create_playlist", &alice, now(12), args([("name", Value::text("Favorites"))])),
         Ok(0)
     );
+
+    let lib = c.library(favs);
+    assert_eq!(lib.len(), 12);
+    let ids: Vec<Value> = lib.iter().map(|r| r.field("id")).collect();
+    let on = |p, m: &Value| args([("playlist_id", Value::Id(p)), ("media_id", m.clone())]);
+    for id in ids.iter().step_by(3) {
+        c.mutate("alice", "add_to_playlist", on(favs, id)).unwrap();
+    }
+    assert_eq!(c.mutate("bob", "add_to_playlist", on(favs, &ids[0])), Err("not your playlist".into()));
     assert_eq!(
-        r.step("create_playlist", &bob, now(13), args([("name", Value::text("Favorites"))])),
-        Ok(1)
-    );
-    assert_eq!(
-        r.step("create_playlist", &alice, now(14), args([("name", Value::text("   "))])),
-        Err("a playlist needs a name".into())
-    );
-    assert_eq!(
-        r.step("create_playlist", &alice, now(15), args([("name", Value::text("x".repeat(121)))])),
-        Err("name: at most 120 characters".into())
-    );
-    let on = |p: u8, t: u8| args([("playlist_id", id(p)), ("track_id", id(t))]);
-    let at = |k: u8| args([("added_ms", Value::int(k as i64))]);
-    assert_eq!(r.step("add_to_playlist", &alice, at(20), on(11, 2)), Ok(1));
-    assert_eq!(r.step("add_to_playlist", &alice, at(21), on(11, 1)), Ok(1));
-    assert_eq!(r.step("add_to_playlist", &alice, at(22), on(11, 1)), Ok(0), "already there");
-    assert_eq!(r.step("add_to_playlist", &alice, at(23), on(13, 1)), Err("not your playlist".into()));
-    assert_eq!(
-        r.step("add_to_playlist", &alice, at(24), on(99, 1)),
+        c.mutate("alice", "add_to_playlist", on([9; 16], &ids[0])),
         Err("playlist_id: no such playlist".into())
     );
-    assert_eq!(r.step("add_to_playlist", &nobody, at(25), on(11, 1)), Err("sign in first".into()));
-    let items = r.query("playlist_items", &alice, args([("playlist_id", id(11))])).unwrap();
-    let pos: Vec<(Value, Value)> = items.as_list().iter().map(|i| (i.field("track_id"), i.field("pos"))).collect();
-    assert_eq!(pos, vec![(id(2), Value::int(1)), (id(1), Value::int(2))]);
+    c.mutate("alice", "add_all_to_playlist", args([("playlist_id", Value::Id(evening))])).unwrap();
+    c.mutate("bob", "add_all_to_playlist", args([("playlist_id", Value::Id(bobs))])).unwrap();
+    c.mutate("alice", "remove_from_playlist", on(evening, &ids[1])).unwrap();
+    assert_eq!(c.mutate("", "remove_from_playlist", on(evening, &ids[1])), Err("sign in first".into()));
+
+    let bach = args([("composer", Value::text("Johann Sebastian Bach"))]);
+    let work = c.list("works", bach.clone())[0].field("id");
+    let takes = c.list("recordings", args([("work_id", work.clone())]));
+    assert_eq!(takes.len(), 3, "three performers of one work: Ishizaka, Gould, and the composer's own line");
+    let rid = takes[0].field("id");
+    c.mutate(
+        "alice",
+        "credit_recording",
+        args([
+            ("recording_id", rid.clone()),
+            ("person_name", Value::text("Kimiko Ishizaka")),
+            ("role", Value::text("soloist")),
+            ("instrument", Value::text("Piano")),
+            ("pos", Value::int(1)),
+        ]),
+    )
+    .unwrap();
+    c.mutate(
+        "alice",
+        "describe_work",
+        args([
+            ("id", work.clone()),
+            ("opus", Value::text("")),
+            ("key_sig", Value::text("G Major")),
+            ("form", Value::text("Variations")),
+            ("period", Value::text("Baroque")),
+            ("composed", Value::int(1741)),
+            ("art", Value::text("")),
+        ]),
+    )
+    .unwrap();
+    c.mutate(
+        "alice",
+        "describe_recording",
+        args([
+            ("id", rid.clone()),
+            ("recorded", Value::int(2012)),
+            ("venue", Value::text("")),
+            ("label", Value::text("")),
+            ("licence", Value::text("CC0")),
+            ("art", Value::text("")),
+        ]),
+    )
+    .unwrap();
+    c.mutate(
+        "alice",
+        "describe_person",
+        args([
+            ("name", Value::text("Johann Sebastian Bach")),
+            ("sort_name", Value::text("Bach, Johann Sebastian")),
+            ("born", Value::int(1685)),
+            ("died", Value::int(1750)),
+            ("art", Value::text("")),
+        ]),
+    )
+    .unwrap();
+
+    for q in ["albums", "artists", "track_details", "composers", "playlists"] {
+        c.query("alice", q, args([])).unwrap();
+    }
+    let with_favs = |k: &str, v: Value| args([("playlist_id", Value::Id(favs)), (k, v)]);
+    c.list("album", with_favs("name", Value::text("Goldberg Variations")));
+    c.list("artist", with_favs("name", Value::text("Johann Sebastian Bach")));
+    c.list("recording", with_favs("id", rid.clone()));
+    c.list("work", args([("id", work.clone())]));
+    c.list("credits", args([("recording_id", rid.clone())]));
+    c.list("playlists_of", args([("media_id", ids[0].clone())]));
+    c.list("playlist", args([("playlist_id", Value::Id(evening))]));
     assert_eq!(
-        r.query("playlist_items", &bob, args([("playlist_id", id(11))])),
+        c.query("bob", "playlist", args([("playlist_id", Value::Id(evening))])),
         Err("not your playlist".into())
     );
-    assert_eq!(r.step("remove_from_playlist", &bob, now(0), on(11, 2)), Err("not your playlist".into()));
-    assert_eq!(r.step("remove_from_playlist", &alice, now(0), on(11, 2)), Ok(1));
-    assert_eq!(r.step("remove_from_playlist", &alice, now(0), on(11, 2)), Ok(0));
-    let mine = r.query("playlists", &alice, args([])).unwrap();
-    assert_eq!(mine.as_list().len(), 1);
-    assert_eq!(mine.as_list()[0].field("name"), Value::text("Favorites"));
-    assert_eq!(r.query("playlists", &nobody, args([])), Err("sign in first".into()));
-    assert_eq!(r.playlists.scan("playlist_item").len(), 1);
+
+    // Removal, which touches both sides of the library.
+    for id in &ids[..4] {
+        c.mutate("alice", "remove_media", args([("id", id.clone())])).unwrap();
+    }
+    assert_eq!(c.library(favs).len(), 8);
+    for q in ["albums", "artists", "track_details", "composers"] {
+        c.query("alice", q, args([])).unwrap();
+    }
+    c.list("works", bach);
+
+    let procedures: std::collections::BTreeSet<String> = c.procs.keys().cloned().collect();
+    assert_eq!(*c.called.borrow(), procedures, "every procedure was run both ways");
 }
