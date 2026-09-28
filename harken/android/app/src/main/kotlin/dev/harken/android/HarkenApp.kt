@@ -1,6 +1,7 @@
 // Navigation: three tabs — Library, Playlists, Settings — and the one page
 // pushed over them, a playlist. A snackbar carries refusals and rejections;
-// the top bar says whether the peer is linked, alone, pending or turned away.
+// the top bar says whether the peer is signed out, linked, alone, not synced
+// or turned away.
 package dev.harken.android
 
 import androidx.compose.foundation.layout.padding
@@ -42,12 +43,16 @@ object Routes {
 }
 
 /** One line about the peer, for the top bar. */
-fun statusLine(s: Status?): String = when {
-    s == null -> "opening…"
-    s.denied != null -> "turned away: ${s.denied}"
-    s.serverless -> "alone" + if (s.pending > 0) ", ${s.pending} pending" else ""
-    s.linked -> "linked" + if (s.pending > 0) ", ${s.pending} pending" else ""
-    else -> "offline" + (s.retryInMs?.let { ", retry in ${(it + 999) / 1000}s" } ?: "") + if (s.pending > 0) ", ${s.pending} pending" else ""
+fun statusLine(s: Status?, signedIn: Boolean): String {
+    val pend = if (s != null && s.pending > 0) ", ${s.pending} not synced" else ""
+    return when {
+        s == null -> "opening…"
+        s.denied != null -> "turned away: ${s.denied}"
+        s.serverless -> "alone$pend"
+        !signedIn -> "signed out$pend"
+        s.linked -> "linked$pend"
+        else -> "offline" + (s.retryInMs?.let { ", retry in ${(it + 999) / 1000}s" } ?: "") + pend
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -57,6 +62,7 @@ fun HarkenApp(model: Model) {
     val snackbar = remember { SnackbarHostState() }
     val notice by model.notice.collectAsStateWithLifecycle()
     val status by model.status.collectAsStateWithLifecycle()
+    val settings by model.settings.collectAsStateWithLifecycle()
 
     LaunchedEffect(notice) {
         val n = notice ?: return@LaunchedEffect
@@ -71,7 +77,7 @@ fun HarkenApp(model: Model) {
         topBar = {
             TopAppBar(
                 title = { Text("Harken") },
-                actions = { Text(statusLine(status), modifier = Modifier.padding(end = 16.dp)) },
+                actions = { Text(statusLine(status, settings.user != null), modifier = Modifier.padding(end = 16.dp)) },
             )
         },
         snackbarHost = { SnackbarHost(snackbar) },

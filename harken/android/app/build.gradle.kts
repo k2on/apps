@@ -48,7 +48,7 @@ android {
             // never copied. The phone's print carries only what it calls:
             //   nix run .#arkc -- gen kotlin harken/domain/harken.ark \
             //     harken/domain/gen/kotlin --package harken.gen \
-            //     --only create_playlist,add_to_playlist,remove_from_playlist,library,playlists,playlist_items
+            //     --name Harken --only <clientFunctions in flake.nix>
             kotlin.srcDir("../../domain/gen/kotlin")
         }
     }

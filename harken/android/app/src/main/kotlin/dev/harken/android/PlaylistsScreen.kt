@@ -1,6 +1,8 @@
-// The playlists, by name, and a dialog that names a new one. Creating one
-// does not select it: the row appears when `create_playlist` has applied,
-// which is at once — the view is optimistic — and a tap selects it.
+// The person's playlists in the order they were made, and a dialog that
+// names a new one. Creating one does not select it: the row appears when
+// `create_playlist` has applied, which is at once — the view is optimistic —
+// and a tap selects it. A name the person already has is not refused: the
+// log keeps the new playlist and calls it "Name (1)".
 package dev.harken.android
 
 import androidx.compose.foundation.clickable
@@ -38,6 +40,7 @@ import dev.arkdb.Id
 fun PlaylistsScreen(model: Model, onOpen: (Id) -> Unit) {
     val playlists by model.playlists.collectAsStateWithLifecycle()
     val selected by model.selected.collectAsStateWithLifecycle()
+    val standings by model.standings.collectAsStateWithLifecycle()
     var naming by remember { mutableStateOf(false) }
 
     Box(Modifier.fillMaxSize()) {
@@ -54,7 +57,7 @@ fun PlaylistsScreen(model: Model, onOpen: (Id) -> Unit) {
                     ) {
                         Column(Modifier.weight(1f)) {
                             Text(p.name, style = MaterialTheme.typography.bodyLarge)
-                            Text(p.userId, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            model.captionForPlaylist(p.id, standings)?.let { Caption(it) }
                         }
                         if (p.id == selected) Icon(Icons.Default.Check, contentDescription = "Selected", tint = MaterialTheme.colorScheme.primary)
                     }

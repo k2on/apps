@@ -4,8 +4,8 @@ Compose over the Kotlin runtime (`kotlin/ark-runtime`), the Kotlin client
 (`kotlin/ark-client`) and harken's domain written in the authoring
 vocabulary (`domain/gen/kotlin/{Schema,Library,Playlists,Module}.kt`,
 package `harken.gen` — see `spec/AUTHORING.md`). It is the phone the
-top-level README describes: an exact replica of the `library` and
-`playlists` scopes that runs the domain **natively, in Kotlin** — the same
+top-level README describes: an exact replica of the log that runs the
+domain **natively, in Kotlin** — the same
 program that, run under Emit, is the module the server and the desktop hold
 by hash — with nothing crossing a bridge and no code generated into a
 private shape.
@@ -13,17 +13,21 @@ private shape.
 **Assembled, not run.** `nix build .#harken-apk` compiles every Kotlin file
 here and produces the APK, so the Compose code is at least what the compiler
 accepts; nothing in the container this was written in can install or run
-it. What *has* been exercised is everything under it: `ark-runtime` and
-`ark-client` build and pass their tests under `gradle build` (JVM 21); the
-four domain files compile in the runtime's tests, emit a module that
-verifies, and every procedure of them — `create_playlist`,
-`add_to_playlist`, `remove_from_playlist`, `library`, `playlists`,
-`playlist_items`, with the `signed_in` guard and the `owned` provide in
-front — is run natively and by the interpreter over its emitted IR and
+it, and no phone has run it. What *has* been exercised is everything under
+it: `ark-runtime` and `ark-client` build and pass their tests under `gradle
+build` (JVM 21); the four domain files compile in the runtime's tests, emit
+a module that verifies, every procedure of them hashes as `harken.ark`'s,
+and each is run natively and by the interpreter over its emitted IR and
 must agree, refusals included (`kotlin/ark-runtime/src/test/.../Authoring.kt`).
-The Compose and navigation code is written against the current stable APIs
-(Compose BOM 2024.12.01, Material 3, Navigation 2.8) and checked by reading.
-Expect the first build on a real machine to want small fixes.
+`Phone.kt`, the part of the app below the screens, has no Android in it;
+it was compiled off the phone with the domain and driven once by hand
+against a `LocalHub` running the whole of `harken.ark` (a scanner authoring
+`add_song`, a signed-out phone signing in, a second and a third device, a
+re-login) — a scratch program, not a committed test, since the app's build
+has no test dependencies recorded. The Compose and navigation code is
+written against the current stable APIs (Compose BOM 2024.12.01, Material
+3, Navigation 2.8) and checked by reading and by the compiler. Expect the
+first run on a real phone to want small fixes.
 
 ## Building
 
@@ -88,15 +92,16 @@ The domain is referenced by source directory rather than copied:
 `app/build.gradle.kts` adds `../../domain/gen/kotlin`. Those four files are
 what `arkc gen kotlin` prints from `harken.ark` — the line-for-line Kotlin
 spelling of `domain/src/{schema,library,playlists,module}.rs` — with only
-what the phone calls:
+what the phone calls (`clientFunctions` in `flake.nix`):
 
     nix run .#arkc -- gen kotlin harken/domain/harken.ark \
-        harken/domain/gen/kotlin --package harken.gen \
-        --only create_playlist,add_to_playlist,remove_from_playlist,library,playlists,playlist_items
+        harken/domain/gen/kotlin --package harken.gen --name Harken \
+        --only create_playlist,add_to_playlist,remove_from_playlist,library,playlists,playlists_of,playlist \
+        --fmt "ktfmt --kotlinlang-style"
 
-So `Library.kt` has the `library` query and no `add_track`: the scanner's
-entries arrive as facts, which the replica applies without running
-anything. The schema is always whole. `harken.gen.module()` is a
+So `Library.kt` has the `library` query and no `add_song`: the scanner's
+entries arrive with what the server sends for them, which the replica
+applies without running anything. The schema is always whole. `harken.gen.module()` is a
 `dev.arkdb.authoring.Module`; `Session.open(dir, module(), user, url)`
 emits it once for the IR the replicas hash and verify against, and hands
 the session its `procedures()` to run natively. Never edit the four files
@@ -130,27 +135,46 @@ Two things to know if the build objects:
 ## What it does
 
 Four screens under one `Scaffold`, with a bottom bar and a status line in the
-top bar (`linked`, `offline, retry in 4s`, `alone`, `turned away: …`, and the
-pending count):
+top bar (`signed out`, `linked`, `offline, retry in 4s`, `alone`, `turned
+away: …`, and how many changes are not synced yet):
 
-- **Library** — every track, by artist, album, title. A `+` per row puts the
-  track on the *selected* playlist. Tracks arrive from the server's scanner
-  as facts (this build carries no `add_track`); alone, the library is empty
-  and the screen says so.
-- **Playlists** — every playlist by name; a `+` opens a dialog to name a new
-  one (`create_playlist` trims and refuses a blank; a second playlist of the
-  same name for the same person is a no-op, not a duplicate). Tapping one
-  selects it and opens it.
-- **Playlist** — its items in `pos` order, each joined to its track by the
-  model (the two are in different scopes, so a query reads one store and the
-  join is a map lookup). Swipe left, or the trash button, removes one. An item
-  whose track has not arrived is drawn as `unavailable`.
-- **Settings** — the server URL (`ws://…/sync`; `10.0.2.2` reaches the
-  emulator's host), the user (dev auth: a name is a login), and **work
-  alone**, which opens the session with no server so the phone sequences its
-  own playlists (docs/arkdb.md §3.10). Applying closes the session and
-  reopens it. A status block prints each scope's cursor, pending, rejections
-  and divergences, and a button asks the authority to verify.
+- **It works with nobody signed in.** The first launch opens the session
+  with no user (`Session.open(dir, module, null, url)`): everything is
+  authored as nobody, applied, written down, and nothing is sent anywhere.
+  Signing in (Settings → Account; dev auth, a name is a login) makes all of
+  it that person's (`Session.signIn`) and syncs it; the app then opens as
+  them on every launch. Signing out reopens with nobody over the same
+  replica — one directory per server, not per person, because the log is
+  the server's — and whatever that person left pending stays theirs and
+  goes when they sign in again: the server accepts an entry authored under
+  an older login of the same person.
+- **Library** — everything, in the order it was added (`library`, read
+  against the selected playlist so each row knows whether it is on it). The
+  row's button puts it on the selected playlist or takes it off; its menu
+  lists every playlist, ticked by `playlists_of`, each a toggle. Songs arrive
+  from the server's scanner (this build carries no `add_song`); alone or
+  signed out, the library is empty and the screen says why.
+- **Playlists** — the person's playlists in the order they were made
+  (`playlists`); a `+` opens a dialog to name a new one (`create_playlist`
+  trims and refuses a blank; a name the person already has is kept and
+  numbered by the log, "Favorites (1)"). Tapping one selects it and opens it.
+- **Playlist** — its contents in playlist order (`playlist`, which answers
+  with the library's own rows). Swipe left, or the trash button, removes one.
+- **Favorites.** The app makes a default "Favorites" only for somebody with
+  no playlist at all, and only once it knows: alone at once; signed in after
+  the link has been up two seconds, so the log has arrived; signed out, on
+  the first add with no playlist to add to — not on opening, so that signing
+  in later on a second device does not hand the person a "Favorites (1)".
+- **Where every change stands.** Each change this phone makes is kept with
+  its entry id, and `Session.statusOf` says where it is: under a playlist or
+  an item, *not synced yet* while pending, nothing once confirmed, and *not
+  saved:* followed by the server's own sentence when it was rejected. The
+  newest rejection is also a snackbar, and Settings lists every change.
+- **Settings** — the account; the server URL (`ws://…/sync`; `10.0.2.2`
+  reaches the emulator's host) and **work alone**, which opens the session
+  with no server so the phone sequences its own log; applying closes the
+  session and reopens it. A status block prints the cursor, what is not
+  synced, not saved and diverged, and a button asks the authority to verify.
 
 Every mutation and every query goes through the session by name, and the
 session runs the procedure **natively**: the replica holds
@@ -160,8 +184,8 @@ run the Kotlin body directly. The interpreter runs only what arrives that
 the phone has no procedure for:
 
 ```kotlin
-session.mutate("add_to_playlist", mapOf("playlist_id" to Value.id(pid), "track_id" to Value.id(tid)))
-session.query("playlist_items", mapOf("playlist_id" to Value.id(pid)))
+session.mutate("add_to_playlist", mapOf("playlist_id" to Value.id(pid), "media_id" to Value.id(mid)))
+session.query("playlist", mapOf("playlist_id" to Value.id(pid)))
 ```
 
 The entry recorded is byte-identical to what the interpreter would record,
@@ -173,20 +197,29 @@ validator — `Session.check("create_playlist", input)`, which runs
 `create_playlist`'s own input checks (`trim`, `min(1).why("a playlist
 needs a name")`, `max(120)`) — and shows the message under the field; the
 button is enabled exactly when the mutation would accept the name. A query
-the `signed_in` guard refuses draws as an empty list.
+the `owned` middleware refuses (a playlist that is not this person's) draws
+as an empty list.
 
-`Model.kt` is one `AndroidViewModel` around a `Session`: it pumps it every
-50 ms from `viewModelScope` (so every call into the session is on the main
-thread, the session's contract), re-reads the three lists on the session's
-change listener, and turns refusals and rejections into a snackbar. State
-lives under `filesDir/ark/<user>/<alone|server>/` as one canonical-CBOR file
-per scope — confirmed store, cursor, pending intents, and, alone, the log the
-phone sequenced — written to a temp file and renamed.
+`Phone.kt` is the domain as the screens see it, with no Android in it:
+the rows as data classes, each query and mutation by name, the default
+playlist's rule, and the caption a standing earns. `Model.kt` is one
+`AndroidViewModel` around a `Session`: it pumps it every 50 ms from
+`viewModelScope` (so every call into the session is on the main thread, the
+session's contract), re-reads the lists on the session's change listener,
+re-reads where each change stands on every pump, and turns refusals and
+rejections into a snackbar. State lives under
+`filesDir/ark/<server-…|alone>/` — confirmed store, cursor, pending
+intents, verdicts, and, alone, the log the phone sequenced — written to a
+temp file and renamed.
 
 ## Not here yet
 
-- Sign-in: dev auth only; the token on the socket is the user's name.
-- Playback: `track.file` is shown, not played.
+- Sign-in: dev auth only; the token on the socket is the user's name and
+  the login is `dev`. OpenID Connect (what `ark-auth` does for the desktop
+  and the page) has no phone flow here yet.
+- Playback: a track's `file` is known, not played.
+- Albums, artists, composers and works: the domain has them; the phone
+  carries only the procedures its four screens call.
 - Adopting a phone's own log into a server it later meets (§3.10) is not in
   the client machine; switching from alone to a server starts a fresh
   replica directory.

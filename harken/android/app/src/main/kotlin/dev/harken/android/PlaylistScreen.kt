@@ -1,7 +1,6 @@
-// One playlist: its items in `pos` order, each joined to its track by the
-// model, and a swipe (or the trash button) that removes one. An item whose
-// track has not arrived is drawn as unavailable rather than hidden — it is
-// on the list, whatever this replica knows about the track.
+// One playlist: its contents in playlist order (the `playlist` query, which
+// answers with the library's own rows), and a swipe (or the trash button)
+// that removes one. What is no longer in the library is not on it.
 package dev.harken.android
 
 import androidx.compose.foundation.background
@@ -38,6 +37,7 @@ import dev.arkdb.Id
 fun PlaylistScreen(model: Model, id: Id, onBack: () -> Unit) {
     val items by model.items.collectAsStateWithLifecycle()
     val playlists by model.playlists.collectAsStateWithLifecycle()
+    val standings by model.standings.collectAsStateWithLifecycle()
     val playlist = playlists.firstOrNull { it.id == id }
 
     Column(Modifier.fillMaxSize()) {
@@ -47,7 +47,7 @@ fun PlaylistScreen(model: Model, id: Id, onBack: () -> Unit) {
             Text("${items.size}", style = MaterialTheme.typography.labelLarge)
         }
         if (playlist == null) {
-            // A duplicate that lost the rebase, or a stale route.
+            // Rejected by the server, or a stale route.
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("This playlist is no longer here.", style = MaterialTheme.typography.bodyMedium)
             }
@@ -57,11 +57,11 @@ fun PlaylistScreen(model: Model, id: Id, onBack: () -> Unit) {
             }
         } else {
             LazyColumn(Modifier.fillMaxSize()) {
-                items(items, key = { it.trackId.hex }) { row ->
+                items(items, key = { it.id.hex }) { t ->
                     val state = rememberSwipeToDismissBoxState(
                         confirmValueChange = { v ->
                             if (v == SwipeToDismissBoxValue.EndToStart) {
-                                model.removeFromPlaylist(id, row.trackId)
+                                model.removeFromPlaylist(id, t)
                                 true
                             } else {
                                 false
@@ -78,7 +78,7 @@ fun PlaylistScreen(model: Model, id: Id, onBack: () -> Unit) {
                             ) { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer) }
                         },
                     ) {
-                        ItemRow(row, onRemove = { model.removeFromPlaylist(id, row.trackId) })
+                        ItemRow(t, model.captionFor(t, id, standings), onRemove = { model.removeFromPlaylist(id, t) })
                     }
                     HorizontalDivider()
                 }
@@ -88,27 +88,18 @@ fun PlaylistScreen(model: Model, id: Id, onBack: () -> Unit) {
 }
 
 @Composable
-fun ItemRow(row: PlaylistRow, onRemove: () -> Unit) {
-    val t = row.track
+fun ItemRow(t: Track, caption: String?, onRemove: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("${row.pos}", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(end = 12.dp))
+        Text(t.playlistPos?.toString() ?: "", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(end = 12.dp))
         Column(Modifier.weight(1f)) {
-            if (t == null) {
-                Text("unavailable", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(row.trackId.text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            } else {
-                Text(t.title, style = MaterialTheme.typography.bodyLarge)
-                Text(
-                    listOfNotNull(t.artist.ifEmpty { null }, t.album).joinToString(" — "),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            Text(t.title, style = MaterialTheme.typography.bodyLarge)
+            Text(t.creator, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (caption != null) Caption(caption)
         }
-        if (t != null) Text(clock(t.durationMs), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 8.dp))
+        Text(clock(t.durationMs), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 8.dp))
         IconButton(onClick = onRemove) { Icon(Icons.Default.Delete, contentDescription = "Remove from playlist") }
     }
 }
