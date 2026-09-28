@@ -38,10 +38,12 @@ data Router = Router
 ```
 
 A procedure runs the chain it was built from and not every middleware its
-router declares: in harken `create_playlist` is `signed_in.input(..)` and
+router declares: if `create_playlist` is `signed_in.input(..)` and
 `add_to_playlist` is `owned.input(..)` where `owned` was built on
-`signed_in`, so the first has `fnUses = ["signed_in"]` and the second
-`["signed_in", "owned"]`. `rtUses` is the union in declaration order and a
+`signed_in`, the first has `fnUses = ["signed_in"]` and the second
+`["signed_in", "owned"]`. (harken itself has no `signed_in`: a peer used
+before anyone signs in authors as nobody, and the server never hears from
+an unsigned peer, so the guard would only refuse work done offline.) `rtUses` is the union in declaration order and a
 procedure's `fnUses` must be a subsequence of it (verifier: `UsesNotOnRouter`).
 
 A router is a group of procedures and the middleware chains built on them;
