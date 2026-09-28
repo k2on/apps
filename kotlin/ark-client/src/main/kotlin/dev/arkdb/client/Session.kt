@@ -115,7 +115,7 @@ public data class Status(
 public class Session private constructor(
     public val dir: File,
     public val module: Module,
-    public val user: String,
+    user: String?,
     public val serverUrl: String?,
     private val autoSource: AutoSource,
     transport: Transport?,
@@ -141,9 +141,15 @@ public class Session private constructor(
     /** The device this is: one id per directory, kept across opens. */
     public val sessionId: String
 
-    /** Who authors, and under which login: the entry's actor and session. */
+    /** Who authors, and under which login: the entry's actor and session; `Ctx.nobody` until somebody signs in. */
     public var ctx: Ctx
         private set
+
+    /** Who authors: the user signed in, or empty while nobody is. */
+    public val user: String get() = ctx.user
+
+    /** Whether somebody is signed in; until then everything authored is nobody's, pending, and said to no server. */
+    public val signedIn: Boolean get() = !ctx.isNobody
 
     public val client: Client
 
@@ -178,8 +184,11 @@ public class Session private constructor(
         }
         // Alone, a peer authors under its device; linked, under the login it
         // proves — `"dev"` by default, which is what the spec's `trusting`
-        // makes of a token that is a name.
-        ctx = Ctx(user, login ?: if (serverUrl == null) sessionId else "dev")
+        // makes of a token that is a name. Signed out, as nobody.
+        if (user == null && serverUrl == null) {
+            throw IllegalArgumentException("a session alone is its own authority, and somebody has to be signed in to it")
+        }
+        ctx = if (user == null) Ctx.nobody else Ctx(user, login ?: if (serverUrl == null) sessionId else "dev")
         val d = Durable.readReplica(schema, dir)
         val r = if (d == null) {
             Replica.open(schema, bodies, MemoryStore(schema), 0, emptyList(), natives)
@@ -191,7 +200,10 @@ public class Session private constructor(
             verdictsWritten = verdicts.size
             persisted = d.cursor to d.pending.map { it.id }
         }
-        client = Client(r, Mode.Whole, if (serverUrl == null) null else token ?: user)
+        client = Client(r, Mode.Whole, null)
+        // What was authored before anyone signed in, on this device, is the
+        // signer's (`Client.signIn`); signed out, nothing is said to a server.
+        if (serverUrl != null && user != null) client.signIn(ctx, token ?: user)
         authority = if (serverUrl != null) {
             null
         } else {
@@ -211,7 +223,7 @@ public class Session private constructor(
         link = if (serverUrl == null) {
             null
         } else {
-            Link(client, transport ?: WebSocketTransport(serverUrl), clock).also { it.connect() }
+            Link(client, transport ?: WebSocketTransport(serverUrl), clock).also { if (signedIn) it.connect() else it.disconnect() }
         }
         persist()
     }
@@ -224,12 +236,15 @@ public class Session private constructor(
          * `procedures` are run natively; every other function of `module`
          * by the interpreter. `login` is the session entries are authored
          * under and `token` what the `Hello` proves it with; by default the
-         * token is `user` and the login `"dev"`, which is dev auth.
+         * token is `user` and the login `"dev"`, which is dev auth. A null
+         * `user` (with a `serverUrl`) opens it signed out: everything is
+         * authored as `Ctx.nobody`, kept pending and written down, and no
+         * connection is made until `signIn`.
          */
         public fun open(
             dir: File,
             module: Module,
-            user: String,
+            user: String?,
             serverUrl: String? = null,
             autos: AutoSource = AutoSource.Default,
             transport: Transport? = null,
@@ -246,7 +261,7 @@ public class Session private constructor(
         public fun open(
             dir: File,
             domain: dev.arkdb.authoring.Module,
-            user: String,
+            user: String?,
             serverUrl: String? = null,
             autos: AutoSource = AutoSource.Default,
             transport: Transport? = null,
@@ -262,15 +277,21 @@ public class Session private constructor(
     }
 
     /**
-     * Author under this login from now on, proving it with `token` on the
-     * next connection, which starts now. Intents already pending keep the
-     * session they were authored under; a server that knows the user owns
-     * it (`Server.withOwns`) accepts them, and one that does not rejects
-     * them "not yours".
+     * Somebody signs in: `user` under the login `login`, proven with `token`
+     * on the next connection, which starts now. Everything authored while
+     * nobody was signed in becomes theirs (`Client.signIn`: re-stamped, the
+     * view replayed) and is written down before anything is said; the
+     * first `Hello` pushes it. Intents pending under an older login of
+     * anybody keep it: a server that knows the user owns it
+     * (`Server.withOwns`) accepts them, and one that does not rejects them
+     * "not yours" — which `statusOf` then says.
      */
-    public fun signIn(login: String, token: String?) {
+    public fun signIn(user: String, login: String = "dev", token: String? = user) {
+        require(user.isNotEmpty()) { "somebody signs in: the user is not empty" }
         ctx = Ctx(user, login)
-        client.token = token
+        client.signIn(ctx, token)
+        settle()
+        persist()
         link?.let {
             it.disconnect()
             it.connect()

@@ -271,7 +271,7 @@ object ClientTests {
                 eq(e1.session, "old", "authored under the old login")
                 eq(a.statusOf(e1.id), ItemState.Pending as ItemState, "pending while offline")
                 // Signed in again; the next intent is the new login's, the first keeps its own.
-                a.signIn("new", "alice:new")
+                a.signIn("alice", "new", "alice:new")
                 val e2 = (a.mutate("create_playlist", create("Mix")) as Outcome.Applied).entry
                 eq(e2.session, "new", "authored under the new login")
                 t.online = true
@@ -299,6 +299,63 @@ object ClientTests {
             }
             eq(run(owns = false), listOf(ItemState.Rejected("not yours"), ItemState.Confirmed(1)), "an older login the server does not know is the user's")
             eq(run(owns = true), listOf(ItemState.Confirmed(1), ItemState.Confirmed(2)), "an older login the user owns")
+        }
+
+        test("signed out, then signed in: everything authored as nobody syncs as the signer's, each item's standing kept") {
+            var now = 0L
+            val hub = LocalHub(module)
+            // alice already has a "Mix", made on another device.
+            val other = Session.open(tempDir("other"), domain, "alice", "mem://hub", Counting(1000), InMemoryTransport(hub), { now })
+            other.pump()
+            val theirs = (other.mutate("create_playlist", create("Mix")) as Outcome.Applied).entry
+            other.pump()
+            eq(other.statusOf(theirs.id), ItemState.Confirmed(1) as ItemState, "the other device's Mix is in the log")
+
+            val t = InMemoryTransport(hub)
+            val dir = tempDir("signed-out")
+            val a = Session.open(dir, domain, null, "mem://hub", Counting(1), t, { now })
+            check(!a.signedIn && a.ctx == dev.arkdb.Ctx.nobody) { "signed out: ${a.ctx}" }
+            a.pump()
+            check(!a.status.linked) { "no connection while signed out: ${a.status}" }
+            eq(hub.connections, 1, "only the other device is connected")
+            val mix = (a.mutate("create_playlist", create("Mix")) as Outcome.Applied).entry
+            val mixId = mix.autos.getValue("id").asId()
+            val addToMix = (a.mutate("add_to_playlist", add(mixId, 1)) as Outcome.Applied).entry
+            val road = (a.mutate("create_playlist", create("Road")) as Outcome.Applied).entry
+            val addToRoad = (a.mutate("add_to_playlist", add(road.autos.getValue("id").asId(), 2)) as Outcome.Applied).entry
+            val mine = listOf(mix, addToMix, road, addToRoad)
+            check(mine.all { it.actor == "" && it.session == "" }) { "authored as nobody" }
+            eq(rowsOf(a, "playlist").map { it.field("user_id") }, listOf(Value.text(""), Value.text("")), "on the view, as nobody's")
+            a.close()
+
+            // Kept, pending, across a restart while still signed out.
+            val b = Session.open(dir, domain, null, "mem://hub", Counting(100), t, { now })
+            eq(b.status.pending, 4, "all four pending after a restart")
+            eq(mine.map { b.statusOf(it.id) }, List(4) { ItemState.Pending }, "each one pending")
+            b.pump()
+            check(!b.status.linked) { "still no connection" }
+
+            // Signed in: re-stamped, written down, connected, pushed.
+            b.signIn("alice")
+            check(b.replica.pending.all { it.actor == "alice" && it.session == "dev" }) { "re-stamped: ${b.replica.pending}" }
+            eq(rowsOf(b, "playlist").map { it.field("user_id") }.toSet(), setOf(Value.text("alice") as Value), "the view says whose they are")
+            eq(Durable.readReplica(module.schema, dir)!!.pending.map { it.actor }.toSet(), setOf("alice"), "written down re-stamped")
+            b.pump()
+            b.pump()
+            check(b.status.linked) { "connected: ${b.status}" }
+            eq(b.status.pending, 0, "every intent answered")
+            eq(
+                mine.map { b.statusOf(it.id) },
+                listOf(ItemState.Confirmed(2), ItemState.Rejected("playlist_id: no such playlist"), ItemState.Confirmed(3), ItemState.Confirmed(4)),
+                "a second Mix is the first one (insert .on), so adding to the one only this device knew is refused, and says why",
+            )
+            eq(hub.authority.store.scan("playlist").map { it["name"] to it["user_id"] }.toSet(), setOf("Mix", "Road").map { Value.text(it) as Value to Value.text("alice") as Value }.toSet(), "the server's rows are alice's")
+            eq(hashOf(b), Hex.encode(Hash.stateHash(hub.authority.store)), "and the replica agrees with the server")
+            b.close()
+            other.close()
+            val c = Session.open(dir, domain, "alice", "mem://hub", Counting(200), t, { now })
+            eq(c.statusOf(addToMix.id), ItemState.Rejected("playlist_id: no such playlist") as ItemState, "the reason, after another restart")
+            c.close()
         }
 
         test("the link: backoff doubles from 500 ms to 30 s, a denied peer stops reconnecting") {

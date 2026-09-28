@@ -57,6 +57,7 @@ object Authoring {
         }
         test("authoring/demo: native agrees with the interpreter on every procedure") { demoAgreement(demo) }
         test("protocol/server: a push is held to its login and every refusal says why") { heldToItsLogin(demo) }
+        test("protocol/server: work done before signing in becomes the signer's") { signedInLater(demo) }
         test("authoring/harken: the printed domain builds, emits and verifies") {
             val h = harken.gen.module()
             val ir = Decode.fromValue(Canon.decode(h.emit()))
@@ -268,6 +269,56 @@ object Authoring {
         sv.recv(3, dev.arkdb.ClientMsg.Push(listOf(entry(1, "alice", "new", "Mix"))))
         eq(sv.takeOutgoing(), listOf<kotlin.Pair<Long, dev.arkdb.ServerMsg>>(2L to dev.arkdb.ServerMsg.Denied("not signed in"), 3L to dev.arkdb.ServerMsg.Denied("hello first")), "denied")
         eq(sv.authority.log.headSeq, 0L, "and nothing sequenced")
+    }
+
+    /**
+     * §11.2b A peer used for a while with no account, then signed in: all of
+     * it is pushed as the person who signed in and accepted, and the rows
+     * say whose they are. Pushed without signing in, every entry is refused.
+     */
+    private fun signedInLater(m: dev.arkdb.authoring.Module) {
+        val ir = m.ir
+        val sch = ir.schema
+        val bodies = Hash.closures(ir)
+        fun hashOf(name: String) = bodies.entries.single { it.value.fn.name == name }.key
+        val pid = idN(30)
+        fun raw(k: kotlin.Int) = (idN(k) as Value.VId).value
+        fun authored(): dev.arkdb.Replica {
+            val local = dev.arkdb.Replica.open(sch, bodies, MemoryStore(sch), 0, emptyList())
+            local.mutate(raw(31), Ctx.nobody, hashOf("create_playlist"), mapOf("id" to pid), mapOf("name" to Value.text("Offline")))
+            for (k in 0 until 10) {
+                local.mutate(raw(32 + k), Ctx.nobody, hashOf("add_to_playlist"), emptyMap(), mapOf("playlist_id" to pid, "track_id" to Value.text("t$k")))
+            }
+            eq(local.pending.size, 11, "eleven pending")
+            return local
+        }
+        // Everything the client says reaches the server; what came back.
+        fun run(client: dev.arkdb.Client): Triple<kotlin.Int, kotlin.collections.List<String>, dev.arkdb.Server> {
+            val sv = dev.arkdb.Server(dev.arkdb.Authenticate.trusting, { true }, dev.arkdb.Authority(sch, bodies))
+            client.connected()
+            for (f in client.takeOutgoing()) sv.recv(7, f)
+            val out = sv.takeOutgoing().map { it.second }
+            val acked = out.sumOf { (it as? dev.arkdb.ServerMsg.Ack)?.ids?.size ?: 0 }
+            val refused = out.mapNotNull { (it as? dev.arkdb.ServerMsg.Reject)?.reason }
+            return Triple(acked, refused, sv)
+        }
+        val signed = dev.arkdb.Client(authored(), dev.arkdb.Mode.Whole, null)
+        signed.signIn(Ctx("alice", "dev"), "alice")
+        val owner = (signed.replica.view.get("playlist", listOf(pid)) as Value.VStruct)["user_id"]
+        eq(owner, Value.text("alice") as Value, "the optimistic view already says whose it is")
+        check(signed.replica.pending.all { it.actor == "alice" && it.session == "dev" }) { "every intent re-stamped" }
+        val (acked, refused, sv) = run(signed)
+        eq(acked to refused, 11 to emptyList<String>(), "all eleven accepted")
+        eq(sv.authority.store.scan("playlist").map { it["user_id"] }, listOf(Value.text("alice") as Value), "the playlist is alice's")
+
+        val (acked2, refused2, _) = run(dev.arkdb.Client(authored(), dev.arkdb.Mode.Whole, "alice"))
+        eq(acked2 to refused2.size, 0 to 11, "unsigned, all eleven are refused")
+        check(refused2.all { it == "not yours" }) { "each one not yours: $refused2" }
+
+        // A hello that proves nobody is not signed in.
+        val nobodyServer = dev.arkdb.Server({ _ -> dev.arkdb.Identity("", "") }, { true }, dev.arkdb.Authority(sch, bodies))
+        nobodyServer.recv(1, dev.arkdb.ClientMsg.Hello(dev.arkdb.Subscription(0, dev.arkdb.Mode.Whole), "x", SPEC_VERSION))
+        eq(nobodyServer.takeOutgoing(), listOf<kotlin.Pair<Long, dev.arkdb.ServerMsg>>(1L to dev.arkdb.ServerMsg.Denied("not signed in")), "nobody is denied")
     }
 
     private fun selfRefusals() {

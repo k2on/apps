@@ -16,6 +16,10 @@ kotlin` prints the authoring form itself. `ark-client` is a peer's shell:
 the socket, the pump, the file, and `Session` — one replica of the log,
 and, for every intent it authored, `statusOf(id)`: pending, confirmed at a
 sequence, or rejected with the server's reason (`Protocol.refusalText`).
+A session may be opened signed out (`user = null`): it authors as
+`Ctx.nobody`, keeps everything pending and written down, and connects to
+nothing until `signIn`, which makes all of it the signer's
+(`Replica.signIn`) and pushes it.
 Its `LocalHub` is the runtime's `Server` in process, for tests.
 
     nix develop ..#kotlin -c gradle --no-daemon build     # from kotlin/

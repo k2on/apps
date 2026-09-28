@@ -300,6 +300,17 @@ public class Client(replica: Replica, public val mode: Mode, token: String?) {
         if (linked) out.add(m)
     }
 
+    /**
+     * Somebody signed in (`Ark.Protocol.clientSignIn`): the token every later
+     * `Hello` carries, and every intent authored before anyone had signed in
+     * made theirs (`Replica.signIn`). Call it before `connected`; the first
+     * `Hello` after it pushes all of it.
+     */
+    public fun signIn(who: Ctx, token: String?) {
+        replica.signIn(who)
+        this.token = token
+    }
+
     private fun hello(): ClientMsg = ClientMsg.Hello(Subscription(replica.cursor, mode), token, SPEC_VERSION)
 
     /**
@@ -416,8 +427,9 @@ public typealias ConnId = Long
  * authority for the log, the connections it has identified, and what it
  * has queued for each. The rules are the spec's §12.3–12.5:
  *
- * - identity is asked once, at `Hello`; a hello that proves nothing is
- *   answered `Denied`, and so is one the access rule turns away;
+ * - identity is asked once, at `Hello`; a hello that proves nothing, or
+ *   proves nobody (an empty user), is answered `Denied`, and so is one the
+ *   access rule turns away;
  * - every pushed entry is held to the connection's identity: its actor is
  *   the user, and its session is the connection's own or one `owns` says
  *   the same user holds — otherwise it is rejected "not yours";
@@ -471,6 +483,8 @@ public class Server(
             val who = auth.identify(msg.token)
             when {
                 who == null -> send(c, ServerMsg.Denied("not signed in"))
+                // Nobody is not an identity: no entry of theirs is ever accepted.
+                who.user == Ctx.nobody.user -> send(c, ServerMsg.Denied("not signed in"))
                 !access(who) -> send(c, ServerMsg.Denied("not allowed"))
                 else -> {
                     // A second Hello on one connection is the log paging, and

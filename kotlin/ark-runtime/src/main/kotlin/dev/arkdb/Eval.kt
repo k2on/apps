@@ -3,7 +3,19 @@
 package dev.arkdb
 
 /** Who authored an entry: the user the authority verified, and the login it was authored under. */
-public data class Ctx(val user: String, val session: String)
+public data class Ctx(val user: String, val session: String) {
+    /** Whether this is `nobody`. */
+    public val isNobody: Boolean get() = user.isEmpty() && session.isEmpty()
+
+    public companion object {
+        /**
+         * §11.2a Who authors before anyone has signed in (`Ark.Peer.nobody`):
+         * an empty user and session. No server accepts an entry authored as
+         * nobody; `Replica.signIn` makes it somebody's.
+         */
+        public val nobody: Ctx = Ctx("", "")
+    }
+}
 
 public object Eval {
     /** The answer to applying a mutator: the store after it with its changes, or the verdict. */

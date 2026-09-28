@@ -166,6 +166,24 @@ public class Replica private constructor(
         receive(n, e)
     }
 
+    /**
+     * §11.2b Somebody signs in on a peer that has been used without an
+     * account (`Ark.Peer.signIn`): every pending intent authored as
+     * `Ctx.nobody` becomes theirs, under this login, and the view is
+     * replayed so every row those intents wrote says who they now say.
+     * Nothing but this peer has seen them — one authored as nobody can never
+     * have been accepted — so rewriting them is safe. Intents of anybody
+     * else are untouched; an older login of the same person is the server's
+     * question (`Server.withOwns`). One the replay now refuses is dropped
+     * with its reason, as any rebase does.
+     */
+    public fun signIn(who: Ctx) {
+        pending = pending.map { e ->
+            if (e.actor == Ctx.nobody.user && e.session == Ctx.nobody.session) e.copy(actor = who.user, session = who.session) else e
+        }
+        replay()
+    }
+
     /** §11.5 A verdict against this peer's own intent: dropped, kept for the app, the view rebuilt. */
     public fun reject(i: Id, why: Refusal) {
         pending = pending.filter { it.id != i }
