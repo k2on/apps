@@ -116,11 +116,12 @@ impl Lib {
     pub fn playlist(&mut self, user: &str, name: &str) -> Id {
         self.mutate(user, "create_playlist", args([("name", Value::text(name))]))
             .unwrap_or_else(|e| panic!("{e}"));
+        // The newest of theirs: a name they already had is numbered.
         self.query(user, "playlists", args([]))
             .unwrap()
             .as_list()
             .into_iter()
-            .find(|p| p.field("name") == Value::text(name))
+            .max_by_key(|p| p.field("pos").as_int())
             .expect("the playlist just made")
             .field("id")
             .as_id()

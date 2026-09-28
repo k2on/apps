@@ -4,6 +4,13 @@
 //! nothing special. It is ordered, so adding reads `MAX(pos) + 1`, which is
 //! what makes the rebase visible: add while offline and it lands after
 //! whatever arrived while you were away.
+//!
+//! Anybody may make one, including nobody: a peer used before anyone has
+//! signed in authors as `Ctx::nobody()` (user `""`), its playlists are
+//! nobody's and `owned` lets nobody at them, and signing in makes that
+//! work the signer's (`Replica::sign_in`). A server hears no one who has
+//! not signed in, so there is no guard: it could refuse nothing that ever
+//! reaches the log, and would only refuse a person their own work offline.
 use ark::authoring::*;
 
 use crate::library::library_entry;
@@ -75,32 +82,65 @@ impl Input for PlaylistInput {
     }
 }
 
+/// A name with a number after it: "Favorites (1)".
+pub fn numbered(name: Text, n: Int) -> Text {
+    helper("numbered", (("name", name), ("n", n)), |name: Text, n: Int| {
+        concat(list([name, " (".into(), n.to_text(), ")".into()]))
+    })
+}
+
+/// The smallest n from 1 whose "name (n)" is none of these names. The
+/// names are one person's, so distinct: each one's rank among them is one
+/// of 1..len, and of len names at least one is not a numbered one when the
+/// plain name is taken, so the answer is always among the ranks.
+pub fn free_number(names: List<Text>, name: Text) -> Int {
+    helper("free_number", (("names", names), ("name", name)), |names: List<Text>, name: Text| {
+        names.fold(names.len().add(1), |acc: Int, x| {
+            pick(
+                names.contains(numbered(name, names.filter(|x_2| x_2.le(x)).len())),
+                acc,
+                acc.min(names.filter(|x_2| x_2.le(x)).len()),
+            )
+        })
+    })
+}
+
+/// What a new playlist is called, among a person's other playlists: the
+/// name asked for, or when they already have one of that name, the first
+/// "name (n)" they do not have.
+pub fn playlist_name(names: List<Text>, name: Text) -> Text {
+    helper("playlist_name", (("names", names), ("name", name)), |names: List<Text>, name: Text| {
+        pick(names.contains(name), numbered(name, free_number(names, name)), name)
+    })
+}
+
 pub fn playlists() -> Router<Harken> {
     let playlists = router::<Harken>("playlists");
-    let signed_in = playlists.guard("signed_in", |ctx, _db| when(ctx.user.is_empty(), || refuse("sign in first")));
-    let owned = signed_in.provide("owned", |ctx, db, input: &Owned| {
+    let owned = playlists.provide("owned", |ctx, db, input: &Owned| {
         db.playlist
             .get((input.playlist_id,))
             .filter(|row| row.user_id.eq(ctx.user))
             .or_refuse("not your playlist")
     });
     playlists.routes((
-        // Make a playlist, after every other. The same name from the same
-        // person is a no-op: every client makes a default playlist before it
-        // has seen the log, so a second device's "Favorites" must not be a
-        // second one — and it is decided here, where every peer replaying
-        // reaches the same answer. By person, not by library; case is kept.
-        signed_in.input::<CreatePlaylist>().mutation("create_playlist", |ctx, db, input| {
+        // Make a playlist, after every other. Every client makes a default
+        // playlist before it has seen the log — a second device, or one used
+        // before anybody signed in — so a name that person already has is
+        // not refused and not dropped: the new playlist keeps its id, and
+        // what is on it, as "Favorites (1)". Decided here, from the rows at
+        // apply time, so every peer replaying reaches the same name in log
+        // order; by person, not by library; case is kept. The same entry
+        // twice is one playlist: its id is the key.
+        playlists.input::<CreatePlaylist>().mutation("create_playlist", |ctx, db, input| {
             let playlist = db.playlist.order_by(Playlist::pos.desc()).first();
-            db.playlist
-                .insert(Playlist {
-                    id: ctx.new_id("id"),
-                    name: input.name,
-                    pos: playlist.map_or(0, |row| row.pos).add(1),
-                    created_ms: ctx.now("created_ms"),
-                    user_id: ctx.user,
-                })
-                .on((Playlist::user_id, Playlist::name))
+            let playlist_2 = db.playlist.filter(Playlist::user_id.eq(ctx.user)).all();
+            db.playlist.insert(Playlist {
+                id: ctx.new_id("id"),
+                name: playlist_name(playlist_2.map(|row| row.name), input.name),
+                pos: playlist.map_or(0, |row| row.pos).add(1),
+                created_ms: ctx.now("created_ms"),
+                user_id: ctx.user,
+            })
         }),
         // Put something on a playlist, at the end of it. A playlist holds an
         // item once, so adding one already there keeps its place; something
@@ -151,12 +191,12 @@ pub fn playlists() -> Router<Harken> {
                 db.playlist_item.delete((playlist.id, input.media_id))
             }),
         // The caller's playlists, in the order they were made.
-        signed_in.query("playlists", |ctx, db, _input: ()| {
+        playlists.query("playlists", |ctx, db, _input: ()| {
             db.playlist.filter(Playlist::user_id.eq(ctx.user)).order_by(Playlist::pos.asc()).all()
         }),
         // Which of the caller's playlists a track is on: what makes a
         // playlist sheet a toggle rather than a one-way door.
-        signed_in.input::<PlaylistsOf>().query("playlists_of", |ctx, db, input| {
+        playlists.input::<PlaylistsOf>().query("playlists_of", |ctx, db, input| {
             let playlist_item = db.playlist_item.filter(PlaylistItem::media_id.eq(input.media_id)).all();
             db.playlist
                 .filter(Playlist::user_id.eq(ctx.user))

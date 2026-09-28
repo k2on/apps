@@ -61,8 +61,10 @@ fn the_module_verifies_and_is_the_committed_file() {
             "recordings",
             "credits",
             "recording",
-            "signed_in",
             "owned",
+            "numbered",
+            "free_number",
+            "playlist_name",
             "create_playlist",
             "add_to_playlist",
             "add_all_to_playlist",
@@ -98,9 +100,9 @@ fn the_module_verifies_and_is_the_committed_file() {
     let autos: Vec<&str> = add.autos.iter().map(|(n, _)| n.as_str()).collect();
     assert_eq!(autos, ["id", "added_ms"]);
 
-    assert_eq!(decoded.lookup_function("add_to_playlist").unwrap().uses, ["signed_in", "owned"]);
-    assert_eq!(decoded.lookup_function("create_playlist").unwrap().uses, ["signed_in"]);
-    assert_eq!(decoded.lookup_router("playlists").unwrap().uses, ["signed_in", "owned"]);
+    assert_eq!(decoded.lookup_function("add_to_playlist").unwrap().uses, ["owned"]);
+    assert!(decoded.lookup_function("create_playlist").unwrap().uses.is_empty());
+    assert_eq!(decoded.lookup_router("playlists").unwrap().uses, ["owned"]);
     assert!(decoded.lookup_router("library").unwrap().uses.is_empty());
     // §6: a provide returns `or_refuse`'s value whole, `EStd Unwrap [EVar s]`.
     let owned = decoded.lookup_function("owned").unwrap();
@@ -190,8 +192,14 @@ fn every_procedure_agrees_with_the_interpreter() {
     c.mutate("alice", "add_all_to_playlist", args([("playlist_id", Value::Id(evening))]))
         .unwrap();
     c.mutate("bob", "add_all_to_playlist", args([("playlist_id", Value::Id(bobs))])).unwrap();
+    // A name alice already has: numbered, and a playlist of its own.
+    let favs_1 = c.playlist("alice", "Favorites");
+    c.mutate("alice", "add_to_playlist", on(favs_1, &ids[2])).unwrap();
     c.mutate("alice", "remove_from_playlist", on(evening, &ids[1])).unwrap();
-    assert_eq!(c.mutate("", "remove_from_playlist", on(evening, &ids[1])), Err("sign in first".into()));
+    assert_eq!(
+        c.mutate("", "remove_from_playlist", on(evening, &ids[1])),
+        Err("not your playlist".into())
+    );
 
     let bach = args([("composer", Value::text("Johann Sebastian Bach"))]);
     let work = c.list("works", bach.clone())[0].field("id");

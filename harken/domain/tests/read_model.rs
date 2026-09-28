@@ -56,32 +56,51 @@ fn library_and_a_playlist_agree_with_what_apply_wrote() {
     assert_eq!(on(&c).len(), 1);
     // Somebody else's playlist is not theirs to change.
     assert_eq!(c.mutate("bob", "add_to_playlist", add(&first)), Err("not your playlist".into()));
-    assert_eq!(c.mutate("", "add_to_playlist", add(&first)), Err("sign in first".into()));
+    assert_eq!(c.mutate("", "add_to_playlist", add(&first)), Err("not your playlist".into()));
 }
 
+/// A name a person already has is not refused and not dropped: the new
+/// playlist keeps its own id and is numbered, with the smallest free n.
 #[test]
-fn one_person_cannot_have_two_playlists_of_one_name() {
+fn a_second_playlist_of_one_name_is_numbered() {
     let mut c = Lib::new();
-    let names = |c: &Lib| texts(&c.query("alice", "playlists", args([])).unwrap().as_list(), "name");
-    c.mutate("alice", "create_playlist", args([("name", Value::text("Favorites"))])).unwrap();
-    assert_eq!(c.mutate("alice", "create_playlist", args([("name", Value::text("Favorites"))])), Ok(0));
+    let names = |c: &Lib, who: &str| texts(&c.query(who, "playlists", args([])).unwrap().as_list(), "name");
+    let make = |c: &mut Lib, who: &str, name: &str| c.mutate(who, "create_playlist", args([("name", Value::text(name))]));
+    make(&mut c, "alice", "Favorites").unwrap();
+    assert_eq!(make(&mut c, "alice", "Favorites"), Ok(1), "a second playlist, not nothing");
     // …and the shape a second client's would arrive in if somebody typed it.
-    assert_eq!(
-        c.mutate("alice", "create_playlist", args([("name", Value::text("  Favorites  "))])),
-        Ok(0)
-    );
-    assert_eq!(names(&c), ["Favorites"], "one, whoever asked twice");
+    make(&mut c, "alice", "  Favorites  ").unwrap();
+    assert_eq!(names(&c, "alice"), ["Favorites", "Favorites (1)", "Favorites (2)"]);
 
-    // It is the name that collides and not the verb.
-    c.mutate("alice", "create_playlist", args([("name", Value::text("Gym"))])).unwrap();
-    assert_eq!(names(&c), ["Favorites", "Gym"]);
-    // Case is not folded: a name is what somebody typed.
-    c.mutate("alice", "create_playlist", args([("name", Value::text("favorites"))])).unwrap();
-    assert_eq!(names(&c), ["Favorites", "Gym", "favorites"]);
+    // The smallest number free, not one more than the largest.
+    make(&mut c, "alice", "Mix (2)").unwrap();
+    make(&mut c, "alice", "Mix").unwrap();
+    make(&mut c, "alice", "Mix").unwrap();
+    make(&mut c, "alice", "Mix").unwrap();
     assert_eq!(
-        c.mutate("alice", "create_playlist", args([("name", Value::text("   "))])),
-        Err("a playlist needs a name".into())
+        names(&c, "alice")[3..],
+        ["Mix (2)", "Mix", "Mix (1)", "Mix (3)"],
+        "(1) was free, then (2) was taken"
     );
+    // Case is not folded: a name is what somebody typed.
+    make(&mut c, "alice", "favorites").unwrap();
+    assert_eq!(names(&c, "alice").last().map(String::as_str), Some("favorites"));
+
+    // The same entry twice is one playlist, not "(3)".
+    let autos = c.autos("create_playlist");
+    let gym = args([("name", Value::text("Gym"))]);
+    assert_eq!(c.mutate_with("alice", "create_playlist", autos.clone(), gym.clone()), Ok(1));
+    assert_eq!(c.mutate_with("alice", "create_playlist", autos, gym), Ok(0));
+    assert_eq!(names(&c, "alice").iter().filter(|n| n.starts_with("Gym")).count(), 1);
+
+    // Somebody else's names are not in the way; nobody (before signing in)
+    // makes playlists like anybody else.
+    make(&mut c, "bob", "Favorites").unwrap();
+    assert_eq!(names(&c, "bob"), ["Favorites"]);
+    make(&mut c, "", "Favorites").unwrap();
+    make(&mut c, "", "Favorites").unwrap();
+    assert_eq!(names(&c, ""), ["Favorites", "Favorites (1)"]);
+    assert_eq!(make(&mut c, "alice", "   "), Err("a playlist needs a name".into()));
 }
 
 /// …and the rule is about a person, not about the library: Bob's

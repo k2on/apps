@@ -29,35 +29,42 @@ use crate::module;
 pub const ITEMS: &str = "playlist_item";
 
 /// The plan a client maintains for `library(playlist_id)`: the query's own
-/// two reads, the playlist's entries hung beneath each media row.
+/// reads of the media and of the playlist's entries, the entries hung
+/// beneath each media row. `playlist_id` is the playlist as `playlists`
+/// lists it; the query itself also resolves another id of the same
+/// playlist (a same-name playlist made on another device), which a plan
+/// fixed to one id cannot.
 ///
 /// # Panics
 ///
-/// If the emitted `library` query is no longer two reads followed by the
-/// map this reads it as — a change to the query that this file must follow.
+/// If the emitted `library` query no longer reads `playlist_item` and then
+/// `media` — a change to the query that this file must follow.
 pub fn library_plan(playlist_id: Id) -> ViewPlan {
     let m = module();
     let f = m.build().lookup_function("library").expect("the library query");
-    let plans: Vec<&ark::ir::Plan> = f
-        .body
-        .iter()
-        .filter_map(|s| match s {
-            Stmt::Let(_, Expr::Select(p)) => Some(&**p),
-            _ => None,
-        })
-        .collect();
-    let [items, media] = plans[..] else {
-        panic!("library is two reads, the playlist's entries and then the media: {:?}", f.body)
+    let read = |table: &str| -> ark::ir::Plan {
+        f.body
+            .iter()
+            .find_map(|s| match s {
+                Stmt::Let(_, Expr::Select(p)) if p.table == table => Some((**p).clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("library reads {table}: {:?}", f.body))
     };
-    let mut args = |e: &Expr| -> Result<Value, String> {
+    let mut items = read("playlist_item");
+    items.filter = Some(ark::ir::Pred::Cmp(
+        "playlist_id".into(),
+        ark::ir::CmpOp::Eq,
+        Expr::Lit(Value::Id(playlist_id)),
+    ));
+    let mut lit = |e: &Expr| -> Result<Value, String> {
         match e {
             Expr::Lit(v) => Ok(v.clone()),
-            Expr::Arg(a) if a == "playlist_id" => Ok(Value::Id(playlist_id)),
             other => Err(format!("{other:?}")),
         }
     };
-    let items = view::eval_plan(items, &mut args).expect("the entries' plan reads only the playlist id");
-    let mut media = view::eval_plan(media, &mut args).expect("the media plan reads nothing");
+    let items = view::eval_plan(&items, &mut lit).expect("the entries' plan, pinned to the playlist");
+    let mut media = view::eval_plan(&read("media"), &mut lit).expect("the media plan reads nothing");
     media.related.push((
         ITEMS.into(),
         Relation {

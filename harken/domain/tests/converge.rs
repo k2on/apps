@@ -22,10 +22,10 @@ struct Fleet {
 }
 
 impl Fleet {
-    fn new(seed: u64) -> Fleet {
+    fn new(seed: u64, n: i64) -> Fleet {
         let m = module();
         let procs: BTreeMap<String, (FnHash, Procedure)> = m.procedures().into_iter().map(|(h, p)| (p.name().to_string(), (h, p))).collect();
-        let mut sim = Sim::new(m.build().schema.clone(), ark::hash::closures(m.build()), 3, seed);
+        let mut sim = Sim::new(m.build().schema.clone(), ark::hash::closures(m.build()), n, seed);
         sim.server.authority.hold(m.procedures());
         sim.clients.get_mut(&0).unwrap().replica.hold(m.procedures());
         // Client 2 is peer-0's second device: the same person, another login.
@@ -45,6 +45,12 @@ impl Fleet {
     /// Author on client `i` as `user`; a refusal by the client's own view
     /// is dropped, as a screen would show it and move on.
     fn mutate(&mut self, i: i64, user: &str, name: &str, a: Args) {
+        let _ = self.mutate_as(i, &Ctx::new(user, "dev"), name, a);
+    }
+
+    /// Author on client `i` as `ctx`, and answer the entry's first fresh id
+    /// (a new row's), if it drew one.
+    fn mutate_as(&mut self, i: i64, ctx: &Ctx, name: &str, a: Args) -> Option<Id> {
         let (fh, p) = self.procs[name].clone();
         let autos: Args = p
             .function()
@@ -59,14 +65,21 @@ impl Fleet {
                 (n, v)
             })
             .collect();
+        let made = p
+            .function()
+            .autos
+            .iter()
+            .find(|(_, k)| matches!(k, Auto::NewId(_)))
+            .map(|(n, _)| autos[n].as_id());
         let eid = self.fresh();
         let c = self.sim.clients.get_mut(&i).unwrap();
-        if c.mutate(eid, &Ctx::new(user, "dev"), &fh, &autos, &a).is_ok() {
+        if c.mutate(eid, ctx, &fh, &autos, &a).is_ok() {
             let out = c.take_outgoing();
             if self.sim.conn.contains_key(&i) {
                 self.sim.to_server.entry(i).or_default().extend(out);
             }
         }
+        made
     }
 
     /// What client `i` shows, as `user`: its optimistic view.
@@ -103,7 +116,7 @@ fn song(title: &str) -> Args {
 
 #[test]
 fn the_domain_converges_when_peers_go_dark_and_come_back() {
-    let mut f = Fleet::new(19);
+    let mut f = Fleet::new(19, 3);
     let user = |i: i64| if i == 2 { "peer-0".to_string() } else { format!("peer-{i}") };
     for round in 0..3 {
         for i in 0..3 {
@@ -167,4 +180,87 @@ fn the_domain_converges_when_peers_go_dark_and_come_back() {
     let places: Vec<i64> = on.iter().map(|r| r.field("playlist_pos").as_int()).collect();
     assert_eq!(on.len(), 17, "every item once, though both devices added every one");
     assert_eq!(places, (1..=17).collect::<Vec<_>>(), "every position on the playlist distinct, in order");
+}
+
+/// Two devices of one person each make "Favorites" while apart, and a
+/// third peer used by nobody makes one too and then signs in as that
+/// person: after sync there are three playlists, named in log order
+/// "Favorites", "Favorites (1)", "Favorites (2)", each still holding what
+/// was put on it under its own id. Another person's "Favorites" is theirs
+/// and plain.
+#[test]
+fn same_named_playlists_made_apart_are_numbered_in_log_order() {
+    let mut f = Fleet::new(23, 4);
+    for k in 0..6 {
+        f.mutate(0, "peer-0", "add_song", song(&format!("t{k}")));
+    }
+    f.sim.settle();
+    let none = Value::Id([0; 16]);
+    let lib = f.query(1, "peer-1", "library", [("playlist_id".to_string(), none)].into());
+    let ids: Vec<Value> = lib.iter().map(|r| r.field("id")).collect();
+    assert_eq!(ids.len(), 6);
+
+    for i in 0..3 {
+        f.sim.partition(i);
+    }
+    let me = |i: i64| if i == 1 { Ctx::nobody() } else { Ctx::new("peer-0", "dev") };
+    let mut made = BTreeMap::new();
+    for i in 0..3 {
+        let fav = f
+            .mutate_as(i, &me(i), "create_playlist", [("name".to_string(), Value::text("Favorites"))].into())
+            .expect("a playlist id");
+        let on = f.query(i, &me(i).user, "playlists", Args::new());
+        assert_eq!(on.len(), 1, "apart, each device sees only its own");
+        assert_eq!(on[0].field("name"), Value::text("Favorites"), "and calls it what it was called");
+        for k in [2 * i, 2 * i + 1] {
+            let media = ids[k as usize].clone();
+            f.mutate_as(
+                i,
+                &me(i),
+                "add_to_playlist",
+                [("playlist_id".to_string(), Value::Id(fav)), ("media_id".to_string(), media)].into(),
+            );
+        }
+        made.insert(fav, vec![format!("t{}", 2 * i), format!("t{}", 2 * i + 1)]);
+    }
+    f.mutate(3, "peer-3", "create_playlist", [("name".to_string(), Value::text("Favorites"))].into());
+    // The peer nobody had signed in on: its work becomes peer-0's.
+    f.sim
+        .clients
+        .get_mut(&1)
+        .unwrap()
+        .sign_in(&Ctx::new("peer-0", "dev"), Some("peer-0".into()));
+    f.sim.settle();
+
+    let server = f.sim.server_hash();
+    for (i, n, h) in f.sim.client_hashes() {
+        assert_eq!((n, h), server, "client {i} disagrees with the server");
+    }
+    for i in 0..4 {
+        assert!(
+            f.sim.clients[&i].replica.rejections.is_empty(),
+            "client {i}: {:?}",
+            f.sim.clients[&i].replica.rejections
+        );
+    }
+    let mine = f.query(1, "peer-0", "playlists", Args::new());
+    assert_eq!(
+        texts(&mine, "name"),
+        ["Favorites", "Favorites (1)", "Favorites (2)"],
+        "numbered in log order"
+    );
+    for p in &mine {
+        let id = p.field("id");
+        let on = f.query(2, "peer-0", "playlist", [("playlist_id".to_string(), id.clone())].into());
+        assert_eq!(texts(&on, "title"), made[&id.as_id()], "{:?} keeps what was put on it", p.field("name"));
+    }
+    assert_eq!(
+        texts(&f.query(3, "peer-3", "playlists", Args::new()), "name"),
+        ["Favorites"],
+        "another person's names are theirs"
+    );
+}
+
+fn texts(rows: &[Value], field: &str) -> Vec<String> {
+    rows.iter().map(|r| r.field(field).as_text().to_string()).collect()
 }
