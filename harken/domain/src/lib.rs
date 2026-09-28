@@ -31,6 +31,3 @@ pub mod schema;
 pub mod view;
 
 pub use module::module;
-
-/// The one scope every table is in, while the engine still has scopes.
-pub const SCOPE: &str = "harken";

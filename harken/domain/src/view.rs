@@ -76,7 +76,11 @@ pub fn entry_of(node: &Value) -> Value {
     let Value::Struct(m) = node else {
         return node.clone();
     };
-    let mut out: BTreeMap<String, Value> = m.iter().filter(|(k, _)| k.as_str() != ITEMS).map(|(k, v)| (k.clone(), v.clone())).collect();
+    let mut out: BTreeMap<String, Value> = m
+        .iter()
+        .filter(|(k, _)| k.as_str() != ITEMS)
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
     let pos = match m.get(ITEMS) {
         Some(Value::List(xs)) => xs.first().map(|x| x.field("pos")).unwrap_or(Value::Null),
         _ => Value::Null,

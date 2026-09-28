@@ -253,7 +253,11 @@ pub struct AlbumsEntry {
 }
 impl Record for AlbumsEntry {
     fn fields() -> Fields<Self> {
-        fields().field("art", text()).field("creator", text()).field("name", text()).field("tracks", int())
+        fields()
+            .field("art", text())
+            .field("creator", text())
+            .field("name", text())
+            .field("tracks", int())
     }
 }
 
@@ -378,7 +382,11 @@ pub struct CreditsEntry {
 }
 impl Record for CreditsEntry {
     fn fields() -> Fields<Self> {
-        fields().field("instrument", text()).field("name", text()).field("pos", int()).field("role", text())
+        fields()
+            .field("instrument", text())
+            .field("name", text())
+            .field("pos", int())
+            .field("role", text())
     }
 }
 
@@ -391,7 +399,11 @@ pub fn work_title(work_title: Text, album: Text, catalogue: Text, part: Text) ->
         "work_title",
         (("work_title", work_title), ("album", album), ("catalogue", catalogue), ("part", part)),
         |work_title: Text, album: Text, catalogue: Text, part: Text| {
-            pick(work_title.is_empty().and(catalogue.is_empty().not().or(part.is_empty().not())), album, work_title)
+            pick(
+                work_title.is_empty().and(catalogue.is_empty().not().or(part.is_empty().not())),
+                album,
+                work_title,
+            )
         },
     )
 }
@@ -419,7 +431,11 @@ pub fn slug(text: Text) -> Text {
 /// and every such name in one key would be one band.
 pub fn key_part(text: Text) -> Text {
     helper("key_part", ("text", text), |text: Text| {
-        pick(slug(text).is_empty(), concat(list(["x".into(), text.trim().fnv1a64().to_text()])), slug(text))
+        pick(
+            slug(text).is_empty(),
+            concat(list(["x".into(), text.trim().fnv1a64().to_text()])),
+            slug(text),
+        )
     })
 }
 
@@ -427,9 +443,17 @@ pub fn key_part(text: Text) -> Text {
 /// — the catalogue number where there is one. The composer is in it because
 /// catalogue numbers are per composer: `Op. 23` belongs to everybody.
 pub fn work_key(composer: Text, catalogue: Text, title: Text) -> Text {
-    helper("work_key", (("composer", composer), ("catalogue", catalogue), ("title", title)), |composer: Text, catalogue: Text, title: Text| {
-        concat(list([key_part(composer), "/".into(), key_part(pick(catalogue.is_empty(), title, catalogue))]))
-    })
+    helper(
+        "work_key",
+        (("composer", composer), ("catalogue", catalogue), ("title", title)),
+        |composer: Text, catalogue: Text, title: Text| {
+            concat(list([
+                key_part(composer),
+                "/".into(),
+                key_part(pick(catalogue.is_empty(), title, catalogue)),
+            ]))
+        },
+    )
 }
 
 /// The key of the work a track is of, or none: a work needs a title and a
@@ -457,7 +481,9 @@ pub fn movement_key(work_id: Text, no: Int) -> Text {
 
 /// The key of a recording: what it is a recording *of*, and by whom.
 pub fn recording_key(of: Text, who: Text) -> Text {
-    helper("recording_key", (("of", of), ("who", who)), |of: Text, who: Text| concat(list([of, "@".into(), key_part(who)])))
+    helper("recording_key", (("of", of), ("who", who)), |of: Text, who: Text| {
+        concat(list([of, "@".into(), key_part(who)]))
+    })
 }
 
 /// The key of the recording a track is part of. Every track has one: where
@@ -466,7 +492,13 @@ pub fn recording_key(of: Text, who: Text) -> Text {
 pub fn recording_id(work_id: Opt<Text>, album: Text, title: Text, artist: Text, performer: Text) -> Text {
     helper(
         "recording_id",
-        (("work_id", work_id), ("album", album), ("title", title), ("artist", artist), ("performer", performer)),
+        (
+            ("work_id", work_id),
+            ("album", album),
+            ("title", title),
+            ("artist", artist),
+            ("performer", performer),
+        ),
         |work_id: Opt<Text>, album: Text, title: Text, artist: Text, performer: Text| {
             recording_key(
                 work_id.unwrap_or(concat(list([key_part(album), "/".into(), key_part(title)]))),
@@ -500,18 +532,22 @@ pub fn movement_id(work_id: Opt<Text>, movement_no: Int, track: Int) -> Opt<Text
 
 /// A media row as a list renders it, read against one playlist's entries.
 pub fn library_entry(media: Media, items: List<PlaylistItem>) -> LibraryEntry {
-    helper("library_entry", (("media", media), ("items", items)), |media: Media, items: List<PlaylistItem>| LibraryEntry {
-        added_ms: media.added_ms,
-        creator: media.creator,
-        duration_ms: media.duration_ms,
-        file: media.file,
-        id: media.id,
-        kind: media.kind,
-        playlist_pos: items.filter(|row| row.media_id.eq(media.id)).first().map(|row| row.pos),
-        pos: media.pos,
-        title: media.title,
-        user_id: media.user_id,
-    })
+    helper(
+        "library_entry",
+        (("media", media), ("items", items)),
+        |media: Media, items: List<PlaylistItem>| LibraryEntry {
+            added_ms: media.added_ms,
+            creator: media.creator,
+            duration_ms: media.duration_ms,
+            file: media.file,
+            id: media.id,
+            kind: media.kind,
+            playlist_pos: items.filter(|row| row.media_id.eq(media.id)).first().map(|row| row.pos),
+            pos: media.pos,
+            title: media.title,
+            user_id: media.user_id,
+        },
+    )
 }
 
 /// The credits worth drawing: the real ones (`pos` from 1) where a recording
@@ -532,23 +568,31 @@ pub fn joined(names: List<Text>) -> Text {
 /// Who played one recording, as the one string a column draws: its credits
 /// in billing order, the composer (who is on the work) left out.
 pub fn performers(credits: List<Credit>, recording_id: Text) -> Text {
-    helper("performers", (("credits", credits), ("recording_id", recording_id)), |credits: List<Credit>, recording_id: Text| {
-        joined(
-            credited(credits.filter(|row| row.recording_id.eq(recording_id).and(row.role.ne("composer"))))
-                .sort_by(|row| row.person_name)
-                .sort_by(|row| row.pos)
-                .map(|row| row.person_name),
-        )
-    })
+    helper(
+        "performers",
+        (("credits", credits), ("recording_id", recording_id)),
+        |credits: List<Credit>, recording_id: Text| {
+            joined(
+                credited(credits.filter(|row| row.recording_id.eq(recording_id).and(row.role.ne("composer"))))
+                    .sort_by(|row| row.person_name)
+                    .sort_by(|row| row.pos)
+                    .map(|row| row.person_name),
+            )
+        },
+    )
 }
 
 /// How many of these songs are movements among these.
 pub fn tracks_on(songs: List<Song>, movements: List<Movement>) -> Int {
-    helper("tracks_on", (("songs", songs), ("movements", movements)), |songs: List<Song>, movements: List<Movement>| {
-        songs
-            .filter(|row| row.movement_id.map_or(false, |x| movements.any(|row_2| row_2.id.eq(x))))
-            .len()
-    })
+    helper(
+        "tracks_on",
+        (("songs", songs), ("movements", movements)),
+        |songs: List<Song>, movements: List<Movement>| {
+            songs
+                .filter(|row| row.movement_id.map_or(false, |x| movements.any(|row_2| row_2.id.eq(x))))
+                .len()
+        },
+    )
 }
 
 /// A work, with how much of it the library holds.
@@ -597,33 +641,44 @@ pub fn library() -> Router<Harken> {
                 // picture; nothing (or the same picture) replaces nothing.
                 when(input.album.is_empty().not(), || {
                     let album = db.album.get((input.album,));
-                    when(album.map_or(true, |row| input.album_art.is_empty().not().and(row.art.ne(input.album_art))), || {
-                        db.album.upsert(Album {
-                            name: input.album,
-                            label: album.map_or("", |row| row.label),
-                            released: album.map_or(0, |row| row.released),
-                            art: input.album_art,
-                            added_ms: ctx.now("added_ms"),
-                            user_id: ctx.user,
-                        })
-                    })
+                    when(
+                        album.map_or(true, |row| input.album_art.is_empty().not().and(row.art.ne(input.album_art))),
+                        || {
+                            db.album.upsert(Album {
+                                name: input.album,
+                                label: album.map_or("", |row| row.label),
+                                released: album.map_or(0, |row| row.released),
+                                art: input.album_art,
+                                added_ms: ctx.now("added_ms"),
+                                user_id: ctx.user,
+                            })
+                        },
+                    )
                 });
                 when(input.artist.is_empty().not(), || {
                     let person = db.person.get((input.artist,));
-                    when(person.map_or(true, |row| input.artist_art.is_empty().not().and(row.art.ne(input.artist_art))), || {
-                        db.person.upsert(Person {
-                            name: input.artist,
-                            sort_name: person.map_or("", |row| row.sort_name),
-                            born: person.map_or(0, |row| row.born),
-                            died: person.map_or(0, |row| row.died),
-                            art: input.artist_art,
-                            added_ms: person.map_or(ctx.now("added_ms"), |row| row.added_ms),
-                            user_id: person.map_or(ctx.user, |row| row.user_id),
-                        })
-                    })
+                    when(
+                        person.map_or(true, |row| input.artist_art.is_empty().not().and(row.art.ne(input.artist_art))),
+                        || {
+                            db.person.upsert(Person {
+                                name: input.artist,
+                                sort_name: person.map_or("", |row| row.sort_name),
+                                born: person.map_or(0, |row| row.born),
+                                died: person.map_or(0, |row| row.died),
+                                art: input.artist_art,
+                                added_ms: person.map_or(ctx.now("added_ms"), |row| row.added_ms),
+                                user_id: person.map_or(ctx.user, |row| row.user_id),
+                            })
+                        },
+                    )
                 });
                 when(
-                    work_id(input.artist, input.catalogue, work_title(input.work_title, input.album, input.catalogue, input.part)).is_some(),
+                    work_id(
+                        input.artist,
+                        input.catalogue,
+                        work_title(input.work_title, input.album, input.catalogue, input.part),
+                    )
+                    .is_some(),
                     || {
                         let work = db.work.get((work_key(
                             input.artist,
@@ -631,7 +686,11 @@ pub fn library() -> Router<Harken> {
                             work_title(input.work_title, input.album, input.catalogue, input.part),
                         ),));
                         db.work.upsert(Work {
-                            id: work_key(input.artist, input.catalogue, work_title(input.work_title, input.album, input.catalogue, input.part)),
+                            id: work_key(
+                                input.artist,
+                                input.catalogue,
+                                work_title(input.work_title, input.album, input.catalogue, input.part),
+                            ),
                             composer: input.artist,
                             title: work_title(input.work_title, input.album, input.catalogue, input.part),
                             catalogue: input.catalogue,
@@ -645,15 +704,27 @@ pub fn library() -> Router<Harken> {
                             user_id: work.map_or(ctx.user, |row| row.user_id),
                         });
                         let movement = db.movement.get((movement_key(
-                            work_key(input.artist, input.catalogue, work_title(input.work_title, input.album, input.catalogue, input.part)),
+                            work_key(
+                                input.artist,
+                                input.catalogue,
+                                work_title(input.work_title, input.album, input.catalogue, input.part),
+                            ),
                             pick(input.movement_no.eq(0), input.track, input.movement_no),
                         ),));
                         db.movement.upsert(Movement {
                             id: movement_key(
-                                work_key(input.artist, input.catalogue, work_title(input.work_title, input.album, input.catalogue, input.part)),
+                                work_key(
+                                    input.artist,
+                                    input.catalogue,
+                                    work_title(input.work_title, input.album, input.catalogue, input.part),
+                                ),
                                 pick(input.movement_no.eq(0), input.track, input.movement_no),
                             ),
-                            work_id: work_key(input.artist, input.catalogue, work_title(input.work_title, input.album, input.catalogue, input.part)),
+                            work_id: work_key(
+                                input.artist,
+                                input.catalogue,
+                                work_title(input.work_title, input.album, input.catalogue, input.part),
+                            ),
                             no: pick(input.movement_no.eq(0), input.track, input.movement_no),
                             title: input.title,
                             part: input.part,
@@ -664,13 +735,21 @@ pub fn library() -> Router<Harken> {
                 );
                 db.recording.insert(Recording {
                     id: recording_id(
-                        work_id(input.artist, input.catalogue, work_title(input.work_title, input.album, input.catalogue, input.part)),
+                        work_id(
+                            input.artist,
+                            input.catalogue,
+                            work_title(input.work_title, input.album, input.catalogue, input.part),
+                        ),
                         input.album,
                         input.title,
                         input.artist,
                         input.performer,
                     ),
-                    work_id: work_id(input.artist, input.catalogue, work_title(input.work_title, input.album, input.catalogue, input.part)),
+                    work_id: work_id(
+                        input.artist,
+                        input.catalogue,
+                        work_title(input.work_title, input.album, input.catalogue, input.part),
+                    ),
                     recorded: 0.into(),
                     venue: "".into(),
                     label: "".into(),
@@ -683,7 +762,11 @@ pub fn library() -> Router<Harken> {
                 // string standing in until `credit_recording` says who is who.
                 when(
                     credited_as(
-                        work_id(input.artist, input.catalogue, work_title(input.work_title, input.album, input.catalogue, input.part)),
+                        work_id(
+                            input.artist,
+                            input.catalogue,
+                            work_title(input.work_title, input.album, input.catalogue, input.part),
+                        ),
                         input.artist,
                         input.performer,
                     )
@@ -692,7 +775,11 @@ pub fn library() -> Router<Harken> {
                     || {
                         db.person.insert(Person {
                             name: credited_as(
-                                work_id(input.artist, input.catalogue, work_title(input.work_title, input.album, input.catalogue, input.part)),
+                                work_id(
+                                    input.artist,
+                                    input.catalogue,
+                                    work_title(input.work_title, input.album, input.catalogue, input.part),
+                                ),
                                 input.artist,
                                 input.performer,
                             ),
@@ -705,19 +792,32 @@ pub fn library() -> Router<Harken> {
                         });
                         db.credit.insert(Credit {
                             recording_id: recording_id(
-                                work_id(input.artist, input.catalogue, work_title(input.work_title, input.album, input.catalogue, input.part)),
+                                work_id(
+                                    input.artist,
+                                    input.catalogue,
+                                    work_title(input.work_title, input.album, input.catalogue, input.part),
+                                ),
                                 input.album,
                                 input.title,
                                 input.artist,
                                 input.performer,
                             ),
                             person_name: credited_as(
-                                work_id(input.artist, input.catalogue, work_title(input.work_title, input.album, input.catalogue, input.part)),
+                                work_id(
+                                    input.artist,
+                                    input.catalogue,
+                                    work_title(input.work_title, input.album, input.catalogue, input.part),
+                                ),
                                 input.artist,
                                 input.performer,
                             ),
                             role: pick(
-                                work_id(input.artist, input.catalogue, work_title(input.work_title, input.album, input.catalogue, input.part)).is_some(),
+                                work_id(
+                                    input.artist,
+                                    input.catalogue,
+                                    work_title(input.work_title, input.album, input.catalogue, input.part),
+                                )
+                                .is_some(),
                                 "performer",
                                 "artist",
                             ),
@@ -734,14 +834,22 @@ pub fn library() -> Router<Harken> {
                     disc: pick(input.disc.gt(0), input.disc.min(99), 1),
                     track: input.track.clamp(0, 999),
                     recording_id: recording_id(
-                        work_id(input.artist, input.catalogue, work_title(input.work_title, input.album, input.catalogue, input.part)),
+                        work_id(
+                            input.artist,
+                            input.catalogue,
+                            work_title(input.work_title, input.album, input.catalogue, input.part),
+                        ),
                         input.album,
                         input.title,
                         input.artist,
                         input.performer,
                     ),
                     movement_id: movement_id(
-                        work_id(input.artist, input.catalogue, work_title(input.work_title, input.album, input.catalogue, input.part)),
+                        work_id(
+                            input.artist,
+                            input.catalogue,
+                            work_title(input.work_title, input.album, input.catalogue, input.part),
+                        ),
                         input.movement_no,
                         input.track,
                     ),
@@ -755,7 +863,11 @@ pub fn library() -> Router<Harken> {
         library.input::<DescribeWork>().mutation("describe_work", |ctx, db, input| {
             let work = db.work.exists((input.id,));
             unless(work, || {
-                refuse(concat(list(["no work ".into(), input.id, "; a work exists because a song named it".into()])))
+                refuse(concat(list([
+                    "no work ".into(),
+                    input.id,
+                    "; a work exists because a song named it".into(),
+                ])))
             });
             db.work.update((input.id,), |row| Work {
                 id: row.id,
@@ -776,7 +888,11 @@ pub fn library() -> Router<Harken> {
         library.input::<DescribeRecording>().mutation("describe_recording", |ctx, db, input| {
             let recording = db.recording.exists((input.id,));
             unless(recording, || {
-                refuse(concat(list(["no recording ".into(), input.id, "; one exists because a song is part of it".into()])))
+                refuse(concat(list([
+                    "no recording ".into(),
+                    input.id,
+                    "; one exists because a song is part of it".into(),
+                ])))
             });
             db.recording.update((input.id,), |row| Recording {
                 id: row.id,
@@ -821,7 +937,9 @@ pub fn library() -> Router<Harken> {
                 added_ms: ctx.now("added_ms"),
                 user_id: ctx.user,
             });
-            let credit = db.credit.get((input.recording_id, input.person_name, pick(input.role.is_empty(), "artist", input.role)));
+            let credit = db
+                .credit
+                .get((input.recording_id, input.person_name, pick(input.role.is_empty(), "artist", input.role)));
             db.credit.upsert(Credit {
                 recording_id: input.recording_id,
                 person_name: input.person_name,
@@ -839,9 +957,6 @@ pub fn library() -> Router<Harken> {
             db.song.delete((input.id,));
             db.media.delete((input.id,))
         }),
-    ));
-    // TEMPORARY: routes_tuple! stops at 12.
-    library.routes((
         // The whole library, in the order things were added — every kind, one
         // list — read against a playlist. The one a client maintains
         // (`crate::view`).
@@ -857,10 +972,12 @@ pub fn library() -> Router<Harken> {
                 .all()
                 .map(|row| AlbumsEntry {
                     art: row.art,
-                    creator: song
-                        .filter(|row_2| row_2.album_name.eq(some(row.name)))
-                        .first()
-                        .map_or("", |row_2| media.filter(|row_3| row_3.id.eq(row_2.media_id)).first().map_or("", |row_3| row_3.creator)),
+                    creator: song.filter(|row_2| row_2.album_name.eq(some(row.name))).first().map_or("", |row_2| {
+                        media
+                            .filter(|row_3| row_3.id.eq(row_2.media_id))
+                            .first()
+                            .map_or("", |row_3| row_3.creator)
+                    }),
                     name: row.name,
                     tracks: song.filter(|row_2| row_2.album_name.eq(some(row.name))).len(),
                 })
@@ -871,7 +988,12 @@ pub fn library() -> Router<Harken> {
             let person = db.person.all();
             let media = db.media.order_by(Media::creator.asc()).all();
             media
-                .filter(|row| media.filter(|row_2| row_2.creator.eq(row.creator)).first().map_or(false, |row_2| row_2.id.eq(row.id)))
+                .filter(|row| {
+                    media
+                        .filter(|row_2| row_2.creator.eq(row.creator))
+                        .first()
+                        .map_or(false, |row_2| row_2.id.eq(row.id))
+                })
                 .map(|row| ArtistsEntry {
                     art: person.filter(|row_2| row_2.name.eq(row.creator)).first().map_or("", |row_2| row_2.art),
                     name: row.creator,
@@ -888,14 +1010,20 @@ pub fn library() -> Router<Harken> {
                 album: row.album_name.unwrap_or(""),
                 bpm: row.bpm,
                 catalogue: row.movement_id.map_or("", |x| {
-                    movement
-                        .filter(|row_2| row_2.id.eq(x))
-                        .first()
-                        .map_or("", |row_2| work.filter(|row_3| row_3.id.eq(row_2.work_id)).first().map_or("", |row_3| row_3.catalogue))
+                    movement.filter(|row_2| row_2.id.eq(x)).first().map_or("", |row_2| {
+                        work.filter(|row_3| row_3.id.eq(row_2.work_id))
+                            .first()
+                            .map_or("", |row_3| row_3.catalogue)
+                    })
                 }),
-                licence: recording.filter(|row_2| row_2.id.eq(row.recording_id)).first().map_or("", |row_2| row_2.licence),
+                licence: recording
+                    .filter(|row_2| row_2.id.eq(row.recording_id))
+                    .first()
+                    .map_or("", |row_2| row_2.licence),
                 media_id: row.media_id,
-                part: row.movement_id.map_or("", |x| movement.filter(|row_2| row_2.id.eq(x)).first().map_or("", |row_2| row_2.part)),
+                part: row
+                    .movement_id
+                    .map_or("", |x| movement.filter(|row_2| row_2.id.eq(x)).first().map_or("", |row_2| row_2.part)),
                 performer: performers(credit, row.recording_id),
                 track: row.track,
             })
@@ -912,7 +1040,11 @@ pub fn library() -> Router<Harken> {
                 .filter(|row| song.any(|row_2| row_2.media_id.eq(row.id)))
                 .sort_by(|row| row.title)
                 .sort_by(|row| song.filter(|row_2| row_2.media_id.eq(row.id)).first().map_or(0, |row_2| row_2.track))
-                .sort_by(|row| song.filter(|row_2| row_2.media_id.eq(row.id)).first().map_or(false, |row_2| row_2.track.eq(0)))
+                .sort_by(|row| {
+                    song.filter(|row_2| row_2.media_id.eq(row.id))
+                        .first()
+                        .map_or(false, |row_2| row_2.track.eq(0))
+                })
                 .sort_by(|row| {
                     song.filter(|row_2| row_2.media_id.eq(row.id)).first().map_or("", |row_2| {
                         row_2
@@ -1025,7 +1157,11 @@ pub fn library() -> Router<Harken> {
                             .map_or(0, |x| movement.filter(|row_3| row_3.id.eq(x)).first().map_or(0, |row_3| row_3.no))
                     })
                 })
-                .sort_by(|row| song.filter(|row_2| row_2.media_id.eq(row.id)).first().map_or(true, |row_2| row_2.movement_id.is_none()))
+                .sort_by(|row| {
+                    song.filter(|row_2| row_2.media_id.eq(row.id))
+                        .first()
+                        .map_or(true, |row_2| row_2.movement_id.is_none())
+                })
                 .map(|row| library_entry(row, playlist_item))
         }),
     ))

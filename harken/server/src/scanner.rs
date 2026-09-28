@@ -1,16 +1,16 @@
 //! The media directory as a peer: walk `MEDIA/music`, and author
-//! `add_track` for every audio file the library does not yet hold.
+//! `add_song` for every audio file the library does not yet hold.
 //!
 //! The scanner is an ordinary `ark::protocol::Client` holding the whole
-//! `library` scope, exchanged with the server machine directly — no socket,
+//! log, exchanged with the server machine directly — no socket,
 //! the shape of Petros's `Hub::exchange`. Every entry it authors therefore
 //! carries an actor and a session like anyone else's, is applied by the
 //! same closure, and is refused by the same verdicts.
 //!
 //! This is the one place non-determinism enters: a fresh id and the clock,
 //! drawn here for the autos and frozen in the entry. A file already in the
-//! library (by its path in `file`) is not authored again, and `add_track`
-//! refuses one that slipped through anyway.
+//! library (by its path in `file`) is not authored again, and `add_song`
+//! makes one that slipped through anyway a no-op.
 
 use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
@@ -28,14 +28,33 @@ use crate::hub::HubHandle;
 use crate::Domain;
 
 /// The mutator the scanner authors, and the user it authors as.
-pub const MUTATOR: &str = "add_track";
+pub const MUTATOR: &str = "add_song";
 pub const USER: &str = "library";
 /// The directory under the media root that holds music.
 pub const MUSIC: &str = "music";
 /// The table `file` is a column of, for the not-yet-held check.
-pub const TABLE: &str = "track";
+pub const TABLE: &str = "media";
 /// What counts as audio, by extension.
 pub const EXTENSIONS: [&str; 6] = ["mp3", "flac", "ogg", "m4a", "wav", "opus"];
+/// `add_song`'s arguments, and what the scanner says for each it does not
+/// read from the path (nothing: an empty text, a 0). Reading tags is later.
+pub const ARGS: [(&str, Value); 15] = [
+    ("title", Value::Null),
+    ("artist", Value::Null),
+    ("album", Value::Null),
+    ("duration_ms", Value::Int(0)),
+    ("file", Value::Null),
+    ("track", Value::Int(0)),
+    ("part", Value::Text(String::new())),
+    ("catalogue", Value::Text(String::new())),
+    ("performer", Value::Text(String::new())),
+    ("bpm", Value::Int(0)),
+    ("album_art", Value::Text(String::new())),
+    ("artist_art", Value::Text(String::new())),
+    ("disc", Value::Int(0)),
+    ("work_title", Value::Text(String::new())),
+    ("movement_no", Value::Int(0)),
+];
 /// Files authored per exchange with the hub.
 const BATCH: usize = 64;
 
@@ -154,7 +173,7 @@ pub struct Report {
 }
 
 /// Scan `media` and author what is new, through the hub. Says so and does
-/// nothing when the module has no `add_track`.
+/// nothing when the module has no `add_song`.
 pub async fn scan(hub: &HubHandle, domain: &Domain, media: &Path) -> Result<Report> {
     let Some(fh) = domain.by_name.get(MUTATOR) else {
         eprintln!("harken-server: scanner: the module has no {MUTATOR}; nothing to do");
@@ -164,11 +183,7 @@ pub async fn scan(hub: &HubHandle, domain: &Domain, media: &Path) -> Result<Repo
     if f.kind != FnKind::Mutator {
         bail!("{MUTATOR} is not a mutator");
     }
-    let scope = f
-        .scope
-        .clone()
-        .ok_or_else(|| anyhow!("{MUTATOR} names no scope"))?;
-    let wanted: BTreeSet<&str> = ["title", "artist", "album", "duration_ms", "file"].into();
+    let wanted: BTreeSet<&str> = ARGS.iter().map(|(n, _)| *n).collect();
     let declared: BTreeSet<&str> = f.input.iter().map(|(n, _)| n.as_str()).collect();
     if declared != wanted {
         bail!("{MUTATOR} takes {declared:?}; the scanner knows how to fill {wanted:?}");
@@ -180,7 +195,7 @@ pub async fn scan(hub: &HubHandle, domain: &Domain, media: &Path) -> Result<Repo
         ..Report::default()
     };
     let held: BTreeSet<String> = hub
-        .rows(&scope, TABLE)
+        .rows(TABLE)
         .await?
         .iter()
         .filter_map(|r| match r.get("file") {
@@ -207,17 +222,15 @@ pub async fn scan(hub: &HubHandle, domain: &Domain, media: &Path) -> Result<Repo
     }
 
     let schema = domain.module.schema.clone();
-    let mut client = Client::open(schema.clone(), Some(USER.into()));
     let mut replica = Replica::open(
         schema.clone(),
-        &scope,
         domain.closures.clone(),
         MemoryStore::empty(schema),
         0,
         vec![],
     );
     replica.hold(domain.natives.iter().cloned());
-    client.subscribe(Mode::Whole, replica);
+    let mut client = Client::open(replica, Mode::Whole, Some(USER.into()));
     let conn = hub.connect_local().await?;
     client.connected();
     pump(hub, conn, &mut client).await?;
@@ -240,25 +253,25 @@ pub async fn scan(hub: &HubHandle, domain: &Domain, media: &Path) -> Result<Repo
                     (name.clone(), v)
                 })
                 .collect();
-            let args: Args = [
-                ("title".to_string(), Value::text(found.title.clone())),
-                ("artist".to_string(), Value::text(found.artist.clone())),
-                (
-                    "album".to_string(),
-                    Value::opt(found.album.clone().map(Value::text)),
-                ),
-                ("duration_ms".to_string(), Value::int(0)),
-                ("file".to_string(), Value::text(found.file.clone())),
-            ]
-            .into();
-            match client.mutate(&scope, fresh_id(), &ctx, fh, &autos, &args) {
+            let mut args: Args = ARGS
+                .iter()
+                .map(|(n, v)| (n.to_string(), v.clone()))
+                .collect();
+            args.insert("title".into(), Value::text(found.title.clone()));
+            args.insert("artist".into(), Value::text(found.artist.clone()));
+            args.insert(
+                "album".into(),
+                Value::text(found.album.clone().unwrap_or_default()),
+            );
+            args.insert("file".into(), Value::text(found.file.clone()));
+            match client.mutate(fresh_id(), &ctx, fh, &autos, &args) {
                 Ok(_) => report.authored += 1,
                 Err(why) => report.refused.push((found.file.clone(), why.to_string())),
             }
         }
         pump(hub, conn, &mut client).await?;
     }
-    let replica = &client.scopes[&scope].0;
+    let replica = &client.replica;
     for (id, why) in &replica.rejections {
         report.authored -= 1;
         report.refused.push((ark::value::hex(id), why.to_string()));

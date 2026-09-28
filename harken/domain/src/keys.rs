@@ -48,18 +48,27 @@ mod tests {
 
     #[test]
     fn keys_are_names_every_peer_agrees_on() {
-        assert_eq!(work_key("Johann Sebastian Bach", "BWV 988", "Goldberg Variations"), "johann-sebastian-bach/bwv-988");
+        assert_eq!(
+            work_key("Johann Sebastian Bach", "BWV 988", "Goldberg Variations"),
+            "johann-sebastian-bach/bwv-988"
+        );
         assert_eq!(
             work_key("Johann Sebastian Bach", "", " Goldberg Variations "),
             "johann-sebastian-bach/goldberg-variations",
             "the title where there is no catalogue number"
         );
-        assert_eq!(key_part("Dvořák: Symphony No. 9, \"From the New World\"!"), "dvořák-symphony-no-9-from-the-new-world");
+        assert_eq!(
+            key_part("Dvořák: Symphony No. 9, \"From the New World\"!"),
+            "dvořák-symphony-no-9-from-the-new-world"
+        );
         assert_eq!(key_part("  --a  b--  "), "a-b", "no dash leads, trails or doubles");
         let bang = key_part("!!!");
         assert!(bang.starts_with('x') && bang.len() > 1, "{bang}");
         assert_ne!(bang, key_part("???"), "two names of no letters are two keys");
         assert_eq!(movement_key("johann-sebastian-bach/bwv-988", 3), "johann-sebastian-bach/bwv-988#3");
-        assert_eq!(recording_key("johann-sebastian-bach/bwv-988", "Kimiko Ishizaka"), "johann-sebastian-bach/bwv-988@kimiko-ishizaka");
+        assert_eq!(
+            recording_key("johann-sebastian-bach/bwv-988", "Kimiko Ishizaka"),
+            "johann-sebastian-bach/bwv-988@kimiko-ishizaka"
+        );
     }
 }

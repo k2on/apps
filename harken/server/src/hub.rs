@@ -5,7 +5,7 @@
 //! stalls every handler waiting on it; instead one thread owns it and every
 //! transport — a WebSocket handler, the scanner's in-process peer,
 //! `/healthz` — talks to it through a [`HubHandle`]. That thread is also
-//! where each scope's log is written after a batch of appends, so a disk
+//! where the log is written after a batch of appends, so a disk
 //! write never sits on the reactor.
 //!
 //! A connection is a [`ConnId`] and a sender: every frame the machine
@@ -32,35 +32,30 @@ pub struct Hub {
     local: BTreeMap<ConnId, Vec<ServerMsg>>,
     next_conn: ConnId,
     data: Option<PathBuf>,
-    /// The head of every scope as last written, so only a scope that
-    /// moved is rewritten.
-    heads: BTreeMap<String, Seq>,
+    /// The head as last written, so the log is rewritten only when it moved.
+    head: Seq,
 }
 
 /// What `/healthz` reports.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Health {
     pub connections: usize,
-    /// Every hosted scope and the head of its log.
-    pub heads: Vec<(String, Seq)>,
+    /// The head of the log.
+    pub head: Seq,
 }
 
 impl Hub {
-    /// Own a server whose authorities are already hosted. `data` is where
-    /// each scope's log is written; `None` keeps nothing.
+    /// Own a server with its authority. `data` is where the log is
+    /// written; `None` keeps nothing.
     pub fn new(server: Server<Silent>, data: Option<PathBuf>) -> Hub {
-        let heads = server
-            .scopes
-            .iter()
-            .map(|(s, a)| (s.clone(), a.log.head_seq()))
-            .collect();
+        let head = server.authority.log.head_seq();
         Hub {
             server,
             senders: BTreeMap::new(),
             local: BTreeMap::new(),
             next_conn: 1,
             data,
-            heads,
+            head,
         }
     }
 
@@ -118,12 +113,7 @@ impl Hub {
     pub fn health(&self) -> Health {
         Health {
             connections: self.senders.len() + self.local.len(),
-            heads: self
-                .server
-                .scopes
-                .iter()
-                .map(|(s, a)| (s.clone(), a.log.head_seq()))
-                .collect(),
+            head: self.server.authority.log.head_seq(),
         }
     }
 
@@ -131,15 +121,11 @@ impl Hub {
         self.server.identity(c).cloned()
     }
 
-    /// The rows of a table at the head of its scope, as the authority holds
+    /// The rows of a table at the head of the log, as the authority holds
     /// them.
-    pub fn rows(&self, scope: &str, table: &str) -> Vec<Row> {
+    pub fn rows(&self, table: &str) -> Vec<Row> {
         use ark::store::Store;
-        self.server
-            .scopes
-            .get(scope)
-            .map(|a| a.store.scan(table))
-            .unwrap_or_default()
+        self.server.authority.store.scan(table)
     }
 
     fn route(&mut self) {
@@ -155,17 +141,14 @@ impl Hub {
 
     fn persist(&mut self) {
         let Some(dir) = &self.data else { return };
-        for (name, a) in &self.server.scopes {
-            let head = a.log.head_seq();
-            if self.heads.get(name) == Some(&head) {
-                continue;
-            }
-            match crate::persist::save(dir, name, &a.log) {
-                Ok(()) => {
-                    self.heads.insert(name.clone(), head);
-                }
-                Err(e) => eprintln!("harken-server: could not write the log of {name}: {e:#}"),
-            }
+        let a = &self.server.authority;
+        let head = a.log.head_seq();
+        if self.head == head {
+            return;
+        }
+        match crate::persist::save(dir, crate::LOG, &a.log) {
+            Ok(()) => self.head = head,
+            Err(e) => eprintln!("harken-server: could not write the log: {e:#}"),
         }
     }
 }
@@ -178,7 +161,7 @@ enum Cmd {
     Exchange(ConnId, Vec<ClientMsg>, oneshot::Sender<Vec<ServerMsg>>),
     Health(oneshot::Sender<Health>),
     Identity(ConnId, oneshot::Sender<Option<Identity>>),
-    Rows(String, String, oneshot::Sender<Vec<Row>>),
+    Rows(String, oneshot::Sender<Vec<Row>>),
 }
 
 /// The async side's handle on the hub's thread. Cheap to clone; the thread
@@ -227,8 +210,8 @@ impl HubHandle {
                         Cmd::Identity(c, reply) => {
                             let _ = reply.send(hub.identity(c));
                         }
-                        Cmd::Rows(scope, table, reply) => {
-                            let _ = reply.send(hub.rows(&scope, &table));
+                        Cmd::Rows(table, reply) => {
+                            let _ = reply.send(hub.rows(&table));
                         }
                     }
                 }
@@ -280,7 +263,7 @@ impl HubHandle {
         self.ask(|r| Cmd::Identity(c, r)).await
     }
 
-    pub async fn rows(&self, scope: &str, table: &str) -> Result<Vec<Row>> {
-        self.ask(|r| Cmd::Rows(scope.into(), table.into(), r)).await
+    pub async fn rows(&self, table: &str) -> Result<Vec<Row>> {
+        self.ask(|r| Cmd::Rows(table.into(), r)).await
     }
 }

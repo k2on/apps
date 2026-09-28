@@ -171,7 +171,12 @@ pub fn playlists() -> Router<Harken> {
             db.media
                 .all()
                 .filter(|row| playlist_item.any(|row_2| row_2.media_id.eq(row.id)))
-                .sort_by(|row| playlist_item.filter(|row_2| row_2.media_id.eq(row.id)).first().map_or(0, |row_2| row_2.pos))
+                .sort_by(|row| {
+                    playlist_item
+                        .filter(|row_2| row_2.media_id.eq(row.id))
+                        .first()
+                        .map_or(0, |row_2| row_2.pos)
+                })
                 .map(|row| library_entry(row, playlist_item))
         }),
     ))

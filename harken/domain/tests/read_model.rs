@@ -20,7 +20,11 @@ fn library_and_a_playlist_agree_with_what_apply_wrote() {
         c.add(Song::new(t, a, ""));
     }
     let all = c.library(favs);
-    assert_eq!(texts(&all, "title"), ["Glue", "Opal", "Gosh"], "library order is pos, and pos counts up from MAX(pos)");
+    assert_eq!(
+        texts(&all, "title"),
+        ["Glue", "Opal", "Gosh"],
+        "library order is pos, and pos counts up from MAX(pos)"
+    );
     assert_eq!(all[0].field("creator"), Value::text("Bicep"));
     assert_eq!(all[0].field("user_id"), Value::text("alice"));
     assert_eq!(all[0].field("kind"), Value::text("song"));
@@ -51,10 +55,7 @@ fn library_and_a_playlist_agree_with_what_apply_wrote() {
     assert_eq!(c.library(favs).len(), 3);
     assert_eq!(on(&c).len(), 1);
     // Somebody else's playlist is not theirs to change.
-    assert_eq!(
-        c.mutate("bob", "add_to_playlist", add(&first)),
-        Err("not your playlist".into())
-    );
+    assert_eq!(c.mutate("bob", "add_to_playlist", add(&first)), Err("not your playlist".into()));
     assert_eq!(c.mutate("", "add_to_playlist", add(&first)), Err("sign in first".into()));
 }
 
@@ -65,7 +66,10 @@ fn one_person_cannot_have_two_playlists_of_one_name() {
     c.mutate("alice", "create_playlist", args([("name", Value::text("Favorites"))])).unwrap();
     assert_eq!(c.mutate("alice", "create_playlist", args([("name", Value::text("Favorites"))])), Ok(0));
     // …and the shape a second client's would arrive in if somebody typed it.
-    assert_eq!(c.mutate("alice", "create_playlist", args([("name", Value::text("  Favorites  "))])), Ok(0));
+    assert_eq!(
+        c.mutate("alice", "create_playlist", args([("name", Value::text("  Favorites  "))])),
+        Ok(0)
+    );
     assert_eq!(names(&c), ["Favorites"], "one, whoever asked twice");
 
     // It is the name that collides and not the verb.
@@ -113,7 +117,13 @@ fn albums_and_artists_group_the_library_and_select_it_back() {
     let albums = c.list("albums", args([]));
     let got: Vec<(String, String, i64)> = albums
         .iter()
-        .map(|a| (a.field("name").as_text().into(), a.field("creator").as_text().into(), a.field("tracks").as_int()))
+        .map(|a| {
+            (
+                a.field("name").as_text().into(),
+                a.field("creator").as_text().into(),
+                a.field("tracks").as_int(),
+            )
+        })
         .collect();
     assert_eq!(
         got,
@@ -148,7 +158,11 @@ fn albums_and_artists_group_the_library_and_select_it_back() {
     assert!(symphony[1].field("playlist_pos").is_null());
 
     // An album whose last track has gone is not an album any more.
-    let clair = c.library(favs).into_iter().find(|r| r.field("title") == Value::text("Clair de lune")).unwrap();
+    let clair = c
+        .library(favs)
+        .into_iter()
+        .find(|r| r.field("title") == Value::text("Clair de lune"))
+        .unwrap();
     c.mutate("alice", "remove_media", args([("id", clair.field("id"))])).unwrap();
     assert_eq!(texts(&c.list("albums", args([])), "name"), ["Bagatelles", "Symphony No. 5"]);
     assert_eq!(texts(&c.list("artists", args([])), "name"), ["Beethoven"]);
@@ -269,10 +283,7 @@ fn artwork_reaches_the_lists_it_is_drawn_on() {
 
     // The same picture again writes nothing at all: no album or person row
     // moves (media, song and the rest do).
-    let before = (
-        ark::store::Store::scan(&c.store, "album"),
-        ark::store::Store::scan(&c.store, "person"),
-    );
+    let before = (ark::store::Store::scan(&c.store, "album"), ark::store::Store::scan(&c.store, "person"));
     c.add(handel("music/b2.mp3", "https://example.com/thames.jpg", "https://example.com/denner.jpg"));
     assert_eq!(
         (ark::store::Store::scan(&c.store, "album"), ark::store::Store::scan(&c.store, "person")),
@@ -290,7 +301,11 @@ fn artwork_reaches_the_lists_it_is_drawn_on() {
     });
     let albums = c.list("albums", args([]));
     assert_eq!(texts(&albums, "name"), ["Suite bergamasque", "Water Music"]);
-    assert_eq!(texts(&albums, "art"), ["", "https://example.com/better.jpg"], "a record with no cover is still a record");
+    assert_eq!(
+        texts(&albums, "art"),
+        ["", "https://example.com/better.jpg"],
+        "a record with no cover is still a record"
+    );
 }
 
 /// One work, two performances of it: `works` says 1, `recordings` says 2.
@@ -318,15 +333,26 @@ fn one_work_holds_every_recording_of_it() {
     assert_eq!(texts(&composers, "name"), ["Johann Sebastian Bach"]);
     assert_eq!(ints(&composers, "works"), [1], "one work, however many recordings");
     assert_eq!(ints(&composers, "tracks"), [6]);
-    assert_eq!(texts(&composers, "sort_name"), ["Johann Sebastian Bach"], "the name, when nobody said how to sort it");
+    assert_eq!(
+        texts(&composers, "sort_name"),
+        ["Johann Sebastian Bach"],
+        "the name, when nobody said how to sort it"
+    );
 
     let works = c.list("works", args([("composer", Value::text("Johann Sebastian Bach"))]));
     assert_eq!(works.len(), 1, "two performances are not two works");
     assert_eq!(works[0].field("catalogue"), Value::text("BWV 988"));
-    assert_eq!(works[0].field("id"), Value::text(harken_domain::keys::work_key("Johann Sebastian Bach", "BWV 988", "")));
+    assert_eq!(
+        works[0].field("id"),
+        Value::text(harken_domain::keys::work_key("Johann Sebastian Bach", "BWV 988", ""))
+    );
     assert_eq!(ints(&works, "recordings"), [2]);
     assert_eq!(ints(&works, "tracks"), [6]);
-    assert_eq!(c.list("work", args([("id", works[0].field("id"))])), works, "one work by its key is the same summary");
+    assert_eq!(
+        c.list("work", args([("id", works[0].field("id"))])),
+        works,
+        "one work by its key is the same summary"
+    );
     assert!(c.list("work", args([("id", Value::text("nobody/nothing"))])).is_empty());
 
     let takes = c.list("recordings", args([("work_id", works[0].field("id"))]));
@@ -343,14 +369,35 @@ fn one_work_holds_every_recording_of_it() {
 fn a_pop_track_has_a_recording_and_no_work() {
     let mut c = Lib::new();
     let favs = c.playlist("alice", "Favorites");
-    c.add(track("Low Tide", "The Quiet Hours", "Northerly", "", "", "music/northerly/07.flac", 7, "", 0));
-    assert!(c.list("composers", args([])).is_empty(), "nobody wrote a work, so there is no composers page");
+    c.add(track(
+        "Low Tide",
+        "The Quiet Hours",
+        "Northerly",
+        "",
+        "",
+        "music/northerly/07.flac",
+        7,
+        "",
+        0,
+    ));
+    assert!(
+        c.list("composers", args([])).is_empty(),
+        "nobody wrote a work, so there is no composers page"
+    );
     assert_eq!(texts(&c.list("artists", args([])), "name"), ["The Quiet Hours"]);
     assert_eq!(c.list("albums", args([])).len(), 1);
-    assert_eq!(c.list("album", args([("playlist_id", Value::Id(favs)), ("name", Value::text("Northerly"))])).len(), 1);
+    assert_eq!(
+        c.list("album", args([("playlist_id", Value::Id(favs)), ("name", Value::text("Northerly"))]))
+            .len(),
+        1
+    );
 
     let details = c.list("track_details", args([]));
-    assert_eq!(details[0].field("performer"), Value::text("The Quiet Hours"), "the artist is a credit on a recording");
+    assert_eq!(
+        details[0].field("performer"),
+        Value::text("The Quiet Hours"),
+        "the artist is a credit on a recording"
+    );
     assert_eq!(details[0].field("catalogue"), Value::text(""), "no work, so no catalogue number");
     assert_eq!(details[0].field("album"), Value::text("Northerly"));
     assert_eq!(details[0].field("track"), Value::int(7));
@@ -377,12 +424,23 @@ fn a_track_number_is_not_a_movement_number() {
             movement,
         ));
     }
-    let record = c.list("album", args([("playlist_id", Value::Id(favs)), ("name", Value::text("Piano Favourites"))]));
-    assert_eq!(texts(&record, "title"), ["III. Presto", "I. Adagio"], "an album page is in the release's order");
+    let record = c.list(
+        "album",
+        args([("playlist_id", Value::Id(favs)), ("name", Value::text("Piano Favourites"))]),
+    );
+    assert_eq!(
+        texts(&record, "title"),
+        ["III. Presto", "I. Adagio"],
+        "an album page is in the release's order"
+    );
     let works = c.list("works", args([("composer", Value::text("Ludwig van Beethoven"))]));
     let takes = c.list("recordings", args([("work_id", works[0].field("id"))]));
     let in_the_work = c.list("recording", args([("playlist_id", Value::Id(favs)), ("id", takes[0].field("id"))]));
-    assert_eq!(texts(&in_the_work, "title"), ["I. Adagio", "III. Presto"], "a work page is in the work's order");
+    assert_eq!(
+        texts(&in_the_work, "title"),
+        ["I. Adagio", "III. Presto"],
+        "a work page is in the work's order"
+    );
 }
 
 /// The two readings that let an entry that names no work still say it has
@@ -398,7 +456,11 @@ fn an_entry_without_a_work_title_still_names_one() {
         ..Song::new("Variatio 12", "Johann Sebastian Bach", "Goldberg Variations")
     });
     let works = c.list("works", args([("composer", Value::text("Johann Sebastian Bach"))]));
-    assert_eq!(texts(&works, "title"), ["Goldberg Variations"], "a catalogue number means there is a work");
+    assert_eq!(
+        texts(&works, "title"),
+        ["Goldberg Variations"],
+        "a catalogue number means there is a work"
+    );
     assert_eq!(texts(&c.list("track_details", args([])), "catalogue"), ["BWV 988"]);
     // The movement number is the track number when the entry did not say.
     let movements = ark::store::Store::scan(&c.store, "movement");
@@ -482,7 +544,11 @@ fn a_lumped_performer_becomes_people_with_roles() {
     assert_eq!(
         credits
             .iter()
-            .map(|r| (r.field("name").as_text().to_string(), r.field("role").as_text().to_string(), r.field("pos").as_int()))
+            .map(|r| (
+                r.field("name").as_text().to_string(),
+                r.field("role").as_text().to_string(),
+                r.field("pos").as_int()
+            ))
             .collect::<Vec<_>>(),
         [
             ("London Symphony Orchestra".into(), "orchestra".into(), 1),
@@ -545,7 +611,10 @@ fn describing_fills_in_and_never_erases() {
     assert_eq!(work.field("period"), Value::text("Classical"), "the second pass said this");
     assert_eq!(work.field("form"), Value::text("Symphony"), "…and must not have erased this");
     let row = ark::store::Store::scan(&c.store, "work").remove(0);
-    assert_eq!((row["key_sig"].clone(), row["composed"].clone()), (Value::text("C Minor"), Value::int(1808)));
+    assert_eq!(
+        (row["key_sig"].clone(), row["composed"].clone()),
+        (Value::text("C Minor"), Value::int(1808))
+    );
     assert_eq!(
         describe(&mut c, &Value::text("nobody/nothing"), "", "", "", 0),
         Err("no work nobody/nothing; a work exists because a song named it".into())
@@ -570,8 +639,15 @@ fn describing_fills_in_and_never_erases() {
     recorded(&mut c, &rid, 1975, "CC BY 4.0").unwrap();
     recorded(&mut c, &rid, 0, "").unwrap();
     let take = &c.list("recordings", args([("work_id", id.clone())]))[0];
-    assert_eq!((take.field("recorded"), take.field("licence")), (Value::int(1975), Value::text("CC BY 4.0")));
-    assert_eq!(texts(&c.list("track_details", args([])), "licence"), ["CC BY 4.0"], "the licence reaches the table");
+    assert_eq!(
+        (take.field("recorded"), take.field("licence")),
+        (Value::int(1975), Value::text("CC BY 4.0"))
+    );
+    assert_eq!(
+        texts(&c.list("track_details", args([])), "licence"),
+        ["CC BY 4.0"],
+        "the licence reaches the table"
+    );
     assert_eq!(
         recorded(&mut c, &Value::text("x@y"), 1, ""),
         Err("no recording x@y; one exists because a song is part of it".into())
@@ -597,7 +673,11 @@ fn describing_fills_in_and_never_erases() {
     assert_eq!(texts(&composers, "sort_name"), ["Beethoven, Ludwig van"]);
     assert_eq!(ints(&composers, "born"), [1770]);
     person(&mut c, "Clara Schumann", "", 1819).unwrap();
-    assert_eq!(texts(&c.list("composers", args([])), "name"), ["Ludwig van Beethoven"], "a person is not a composer until a work is theirs");
+    assert_eq!(
+        texts(&c.list("composers", args([])), "name"),
+        ["Ludwig van Beethoven"],
+        "a person is not a composer until a work is theirs"
+    );
     assert_eq!(person(&mut c, "  ", "", 0), Err("a person needs a name".into()));
 }
 
@@ -638,8 +718,10 @@ fn the_whole_library_onto_a_playlist() {
         c.add(with(f, Song::new(t, "X", "")));
     }
     let b = c.library(favs)[1].field("id");
-    c.mutate("alice", "add_to_playlist", args([("playlist_id", Value::Id(favs)), ("media_id", b)])).unwrap();
-    c.mutate("alice", "add_all_to_playlist", args([("playlist_id", Value::Id(favs))])).unwrap();
+    c.mutate("alice", "add_to_playlist", args([("playlist_id", Value::Id(favs)), ("media_id", b)]))
+        .unwrap();
+    c.mutate("alice", "add_all_to_playlist", args([("playlist_id", Value::Id(favs))]))
+        .unwrap();
     let on = c.list("playlist", args([("playlist_id", Value::Id(favs))]));
     assert_eq!(texts(&on, "title"), ["B", "A", "C"]);
     assert_eq!(ints(&on, "playlist_pos"), [1, 2, 3]);

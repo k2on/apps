@@ -17,7 +17,6 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
-const SCOPE: &str = "playlists";
 /// How long a peer waits for another frame before deciding the server has
 /// nothing more to say.
 const IDLE: Duration = Duration::from_millis(300);
@@ -47,17 +46,15 @@ impl Peer {
             .await
             .expect("the socket opens");
         let schema = domain.module.schema.clone();
-        let mut client = Client::open(schema.clone(), Some(name.into()));
         let mut replica = Replica::open(
             schema.clone(),
-            SCOPE,
             domain.closures.clone(),
             MemoryStore::empty(schema),
             0,
             vec![],
         );
         replica.hold(domain.natives.iter().cloned());
-        client.subscribe(Mode::Whole, replica);
+        let mut client = Client::open(replica, Mode::Whole, Some(name.into()));
         client.connected();
         Peer {
             ws,
@@ -100,14 +97,14 @@ impl Peer {
     }
 
     fn replica(&self) -> &Replica {
-        &self.client.scopes[SCOPE].0
+        &self.client.replica
     }
 
     fn mutate(&mut self, domain: &Domain, id: u8, name: &str, autos: Args, args: Args) {
         let fh = &domain.by_name[name];
         let id = [id; 16];
         self.client
-            .mutate(SCOPE, id, &self.ctx, fh, &autos, &args)
+            .mutate(id, &self.ctx, fh, &autos, &args)
             .unwrap_or_else(|e| panic!("{name} refused: {e}"));
     }
 
@@ -157,7 +154,7 @@ async fn two_peers_agree_and_a_restart_serves_the_same_log() {
         args([("added_ms", Value::int(1_700_000_000_000))]),
         args([
             ("playlist_id", Value::Id(playlist)),
-            ("track_id", Value::Id([9; 16])),
+            ("media_id", Value::Id([9; 16])),
         ]),
     );
     assert_eq!(a.replica().pending.len(), 2);
@@ -185,18 +182,18 @@ async fn two_peers_agree_and_a_restart_serves_the_same_log() {
     b.client.verify_all();
     a.pump().await;
     b.pump().await;
-    assert_eq!(a.client.agreed, vec![(SCOPE.to_string(), 2, true)]);
-    assert_eq!(b.client.agreed, vec![(SCOPE.to_string(), 2, true)]);
+    assert_eq!(a.client.agreed, vec![(2, true)]);
+    assert_eq!(b.client.agreed, vec![(2, true)]);
 
     let health = healthz(&running).await;
     assert!(health.contains("connections 2"), "{health}");
-    assert!(health.contains("scope playlists head 2"), "{health}");
+    assert!(health.contains("head 2"), "{health}");
 
     // (2) Stop, start again on the same data, and a fresh peer catches up to the same hash.
     a.close().await;
     b.close().await;
     running.stop().await;
-    assert!(data.path().join("playlists.ark-log").is_file());
+    assert!(data.path().join("harken.ark-log").is_file());
 
     let running = serve(data.path()).await;
     let mut c = Peer::connect(&running, &domain, "carol").await;
@@ -205,8 +202,8 @@ async fn two_peers_agree_and_a_restart_serves_the_same_log() {
     assert_eq!(c.replica().verify_at(), claim);
     c.client.verify_all();
     c.pump().await;
-    assert_eq!(c.client.agreed, vec![(SCOPE.to_string(), 2, true)]);
-    assert!(healthz(&running).await.contains("scope playlists head 2"));
+    assert_eq!(c.client.agreed, vec![(2, true)]);
+    assert!(healthz(&running).await.contains("head 2\n"));
 
     // …and what is added after the restart lands on top of what was kept.
     c.mutate(

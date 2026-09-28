@@ -7,7 +7,7 @@ mod common;
 
 use std::path::Path;
 
-use ark::ir::{Expr, FnKind, Stmt, StdFn};
+use ark::ir::{Expr, FnKind, StdFn, Stmt};
 use ark::value::Value;
 use common::{args, track, Lib, Song};
 use harken_domain::module;
@@ -76,7 +76,7 @@ fn the_module_verifies_and_is_the_committed_file() {
     // Helpers are pure and say what they are; each is called by name.
     let slug = decoded.lookup_function("slug").unwrap();
     assert_eq!(slug.kind, FnKind::Helper);
-    assert_eq!((slug.scope.as_deref(), slug.router.as_deref()), (None, None));
+    assert_eq!(slug.router, None);
     assert_eq!(slug.arg_types(), [("text".to_string(), ark::schema::Ty::Text)]);
     let key_part = decoded.lookup_function("key_part").unwrap();
     assert!(
@@ -86,8 +86,12 @@ fn the_module_verifies_and_is_the_committed_file() {
     );
     // A record is a struct type that is no table's row.
     let albums = decoded.lookup_function("albums").unwrap();
-    let Some(ark::schema::Ty::List(entry)) = &albums.ret else { panic!("{:?}", albums.ret) };
-    let ark::schema::Ty::Struct(fields) = &**entry else { panic!("{entry:?}") };
+    let Some(ark::schema::Ty::List(entry)) = &albums.ret else {
+        panic!("{:?}", albums.ret)
+    };
+    let ark::schema::Ty::Struct(fields) = &**entry else {
+        panic!("{entry:?}")
+    };
     assert_eq!(fields.keys().collect::<Vec<_>>(), ["art", "creator", "name", "tracks"]);
     // One auto per name, however often a body reads it.
     let add = decoded.lookup_function("add_song").unwrap();
@@ -153,7 +157,10 @@ fn every_procedure_agrees_with_the_interpreter() {
         ..Song::new("Low Tide", "The Quiet Hours", "")
     });
     c.add(Song::new("Hand-typed", "", ""));
-    assert_eq!(c.mutate("alice", "add_song", Song::new("", "x", "").args()), Err("a song needs a title".into()));
+    assert_eq!(
+        c.mutate("alice", "add_song", Song::new("", "x", "").args()),
+        Err("a song needs a title".into())
+    );
     // The same file again is nothing at all.
     assert_eq!(
         c.mutate(
@@ -180,7 +187,8 @@ fn every_procedure_agrees_with_the_interpreter() {
         c.mutate("alice", "add_to_playlist", on([9; 16], &ids[0])),
         Err("playlist_id: no such playlist".into())
     );
-    c.mutate("alice", "add_all_to_playlist", args([("playlist_id", Value::Id(evening))])).unwrap();
+    c.mutate("alice", "add_all_to_playlist", args([("playlist_id", Value::Id(evening))]))
+        .unwrap();
     c.mutate("bob", "add_all_to_playlist", args([("playlist_id", Value::Id(bobs))])).unwrap();
     c.mutate("alice", "remove_from_playlist", on(evening, &ids[1])).unwrap();
     assert_eq!(c.mutate("", "remove_from_playlist", on(evening, &ids[1])), Err("sign in first".into()));
@@ -188,7 +196,11 @@ fn every_procedure_agrees_with_the_interpreter() {
     let bach = args([("composer", Value::text("Johann Sebastian Bach"))]);
     let work = c.list("works", bach.clone())[0].field("id");
     let takes = c.list("recordings", args([("work_id", work.clone())]));
-    assert_eq!(takes.len(), 3, "three performers of one work: Ishizaka, Gould, and the composer's own line");
+    assert_eq!(
+        takes.len(),
+        3,
+        "three performers of one work: Ishizaka, Gould, and the composer's own line"
+    );
     let rid = takes[0].field("id");
     c.mutate(
         "alice",

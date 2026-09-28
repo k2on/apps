@@ -38,12 +38,12 @@ async fn wait_for_head(running: &Running, want: i64) {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         let h = healthz(running).await;
-        if h.contains(&format!("scope library head {want}\n")) {
+        if h.contains(&format!("head {want}\n")) {
             return;
         }
         assert!(
             Instant::now() < deadline,
-            "the library never reached head {want}:\n{h}"
+            "the log never reached head {want}:\n{h}"
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
@@ -55,17 +55,16 @@ async fn library(running: &Running, domain: &Domain) -> MemoryStore {
         .await
         .unwrap();
     let schema = domain.module.schema.clone();
-    let mut client = Client::open(schema.clone(), Some("carol".into()));
-    client.subscribe(
-        Mode::Whole,
+    let mut client = Client::open(
         Replica::open(
             schema.clone(),
-            "library",
             domain.closures.clone(),
             MemoryStore::empty(schema),
             0,
             vec![],
         ),
+        Mode::Whole,
+        Some("carol".into()),
     );
     client.connected();
     for m in client.take_outgoing() {
@@ -79,7 +78,7 @@ async fn library(running: &Running, domain: &Domain) -> MemoryStore {
         client.recv(ServerMsg::from_value(&canon::decode(&b).unwrap()).unwrap());
     }
     let _ = ws.close(None).await;
-    client.scopes["library"].0.confirmed.clone()
+    client.replica.confirmed.clone()
 }
 
 #[tokio::test]
@@ -89,8 +88,8 @@ async fn a_directory_becomes_tracks_once() {
         return;
     };
     let domain = Domain::load(&module).unwrap();
-    if !domain.by_name.contains_key("add_track") {
-        eprintln!("skipping: the module has no add_track");
+    if !domain.by_name.contains_key("add_song") {
+        eprintln!("skipping: the module has no add_song");
         return;
     }
     let data = tempfile::tempdir().unwrap();
@@ -116,14 +115,16 @@ async fn a_directory_becomes_tracks_once() {
     let running = start(config.clone()).await.unwrap();
     wait_for_head(&running, 3).await;
     let lib = library(&running, &domain).await;
+    let songs = lib.scan("song");
     let mut tracks: Vec<(String, String, Value)> = lib
-        .scan("track")
+        .scan("media")
         .into_iter()
         .map(|r| {
+            let song = songs.iter().find(|s| s["media_id"] == r["id"]).unwrap();
             (
                 r["file"].as_text().to_string(),
-                r["artist"].as_text().to_string(),
-                r["album"].clone(),
+                r["creator"].as_text().to_string(),
+                song["album_name"].clone(),
             )
         })
         .collect();
@@ -145,7 +146,7 @@ async fn a_directory_becomes_tracks_once() {
         ]
     );
     let title = lib
-        .scan("track")
+        .scan("media")
         .into_iter()
         .find(|r| r["file"].as_text() == "music/Bach/air.mp3")
         .unwrap();
@@ -158,7 +159,7 @@ async fn a_directory_becomes_tracks_once() {
     let running = start(config).await.unwrap();
     wait_for_head(&running, 3).await;
     tokio::time::sleep(Duration::from_millis(500)).await;
-    assert!(healthz(&running).await.contains("scope library head 3\n"));
+    assert!(healthz(&running).await.contains("head 3\n"));
     assert_eq!(library(&running, &domain).await, lib);
     running.stop().await;
 }

@@ -11,7 +11,7 @@ const USAGE: &str =
     "usage: harken-server [--module PATH] [--data DIR] [--listen ADDR] [--media DIR]
 
   --module PATH   an .ark module to host instead of harken's own  (HARKEN_MODULE; optional)
-  --data DIR      where each scope's log is kept    (HARKEN_DATA; default ./harken-data)
+  --data DIR      where the log is kept             (HARKEN_DATA; default ./harken-data)
   --listen ADDR   host:port to serve on             (HARKEN_LISTEN; default 127.0.0.1:8787)
   --media DIR     media root: scanned, served at /media  (HARKEN_MEDIA; optional)";
 

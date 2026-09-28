@@ -629,15 +629,13 @@ mod tests {
                     output: Some("d".into()),
                     moving: Some("k".into()),
                     devices: vec![device("d", true), device("k", false)],
-                    queue: vec![track("Air")],
-                    at: 0,
+                    queue: vec![track("Air"), track("Gigue")],
+                    at: 1,
                     playing: true,
                     position_ms: 12,
                 },
             },
-            Hear::State {
-                session: Session::default(),
-            },
+            Hear::State { session: Session::default() },
         ];
         for hear in hears {
             let bytes = hear.encode();
@@ -668,7 +666,10 @@ mod tests {
             url("http://h", "music/Boléro & co/no #1.mp3"),
             "http://h/media/music/Bol%C3%A9ro%20%26%20co/no%20%231.mp3"
         );
-        assert_eq!(url("http://h", "https://upload.wikimedia.org/x.mp3"), "https://upload.wikimedia.org/x.mp3");
+        assert_eq!(
+            url("http://h", "https://upload.wikimedia.org/x.mp3"),
+            "https://upload.wikimedia.org/x.mp3"
+        );
         assert_eq!(url("http://h", ""), "", "nothing to stream is not a URL");
     }
 

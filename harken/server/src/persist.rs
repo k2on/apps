@@ -212,7 +212,7 @@ mod tests {
     #[test]
     fn a_log_survives_the_file_and_a_damaged_one_is_refused() {
         let d = demo();
-        let mut a = Authority::new(d.module.schema.clone(), "playlists", d.closures.clone());
+        let mut a = Authority::new(d.module.schema.clone(), d.closures.clone());
         a.hold(d.natives.iter().cloned());
         let ctx = Ctx::new("alice", "dev");
         author(&mut a, &d, [1; 16], "Road trip", &ctx);

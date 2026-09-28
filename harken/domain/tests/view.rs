@@ -35,7 +35,15 @@ fn the_maintained_library_agrees_with_the_read_one() {
     };
 
     for (t, f) in [("Glue", "a"), ("Opal", "b"), ("Gosh", "c"), ("Air", "d")] {
-        step(&mut c, "add_song", Song { file: f.into(), ..Song::new(t, "X", "Y") }.args());
+        step(
+            &mut c,
+            "add_song",
+            Song {
+                file: f.into(),
+                ..Song::new(t, "X", "Y")
+            }
+            .args(),
+        );
     }
     let ids: Vec<Value> = c.library(favs).iter().map(|r| r.field("id")).collect();
     let on = |p, m: &Value| args([("playlist_id", Value::Id(p)), ("media_id", m.clone())]);
@@ -46,7 +54,15 @@ fn the_maintained_library_agrees_with_the_read_one() {
     step(&mut c, "remove_from_playlist", on(favs, &ids[2]));
     step(&mut c, "add_all_to_playlist", args([("playlist_id", Value::Id(favs))]));
     step(&mut c, "remove_media", args([("id", ids[0].clone())]));
-    step(&mut c, "add_song", Song { file: "e".into(), ..Song::new("Late", "Z", "") }.args());
+    step(
+        &mut c,
+        "add_song",
+        Song {
+            file: "e".into(),
+            ..Song::new("Late", "Z", "")
+        }
+        .args(),
+    );
     assert!(patched > 0);
 
     let items: Vec<Item> = shown.iter().map(Item::from_value).collect();

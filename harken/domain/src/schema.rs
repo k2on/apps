@@ -22,8 +22,7 @@ pub struct Harken {
     pub playlist: Table<Playlist>,
     pub playlist_item: Table<PlaylistItem>,
 }
-impl Scope for Harken {
-    const NAME: &str = "harken";
+impl Tables for Harken {
     fn open() -> Self {
         Harken {
             media: table(),

@@ -3,15 +3,15 @@
 //! The module is `harken_domain::module()` — its bytes are `emit()`, and
 //! its procedures run natively — or, with `--module`, an `.ark` file, whose
 //! functions are applied natively where this build holds a procedure with
-//! the same hash and through the interpreter otherwise. Every scope is
+//! the same hash and through the interpreter otherwise. The log is
 //! hosted as an `ark::peer::Authority` inside one `ark::protocol::Server`. The machine runs
 //! on a thread of its own ([`hub`]); axum speaks the protocol to it over a
-//! WebSocket at `/sync`, each scope's log is written to disk after every
+//! WebSocket at `/sync`, the log is written to disk after every
 //! append ([`persist`]), and a media directory is authored into the library
 //! by an in-process peer ([`scanner`]).
 //!
 //! Dev auth only: `ark::protocol::trusting` makes a token a name, and
-//! `open_access` lets everyone read every scope. The server says so at
+//! `open_access` lets everyone read the log. The server says so at
 //! startup, loudly, every time.
 
 pub mod hub;
@@ -103,35 +103,25 @@ impl Domain {
             .with_context(|| format!("reading the module {}", path.display()))?;
         Domain::from_bytes(&bytes).with_context(|| format!("loading the module {}", path.display()))
     }
-
-    /// The scopes the module declares, in schema order.
-    pub fn scopes(&self) -> Vec<String> {
-        self.module
-            .schema
-            .scopes
-            .iter()
-            .map(|s| s.name.clone())
-            .collect()
-    }
 }
 
-/// Host every scope of the module, each with the log it left on disk.
+/// The name the log is kept under on disk (`DATA/harken.ark-log`).
+pub const LOG: &str = "harken";
+
+/// Host the module's log, as it was left on disk.
 pub fn open_hub(domain: &Domain, data: &Path) -> Result<Hub> {
     std::fs::create_dir_all(data).with_context(|| format!("creating {}", data.display()))?;
     let schema = &domain.module.schema;
-    let mut server = Server::open(trusting(), open_access(), Silent);
-    for scope in domain.scopes() {
-        let mut a = Authority::new(schema.clone(), &scope, domain.closures.clone());
-        a.hold(domain.natives.iter().cloned());
-        if let Some(log) = persist::load(data, &scope, schema)? {
-            a.store = log
-                .state_at(log.head_seq())
-                .context("a loaded log has no state at its head")?;
-            a.log = log;
-        }
-        eprintln!("harken-server: hosting {scope} at seq {}", a.log.head_seq());
-        server.host(a);
+    let mut a = Authority::new(schema.clone(), domain.closures.clone());
+    a.hold(domain.natives.iter().cloned());
+    if let Some(log) = persist::load(data, LOG, schema)? {
+        a.store = log
+            .state_at(log.head_seq())
+            .context("a loaded log has no state at its head")?;
+        a.log = log;
     }
+    eprintln!("harken-server: hosting the log at seq {}", a.log.head_seq());
+    let server = Server::open(trusting(), open_access(), Silent, a);
     Ok(Hub::new(server, Some(data.to_path_buf())))
 }
 
@@ -177,7 +167,7 @@ pub async fn start(config: Config) -> Result<Running> {
         None => Domain::harken(),
     };
     eprintln!(
-        "harken-server: module {} ({} functions, {} native, scopes {})",
+        "harken-server: module {} ({} functions, {} native)",
         config
             .module
             .as_ref()
@@ -185,9 +175,8 @@ pub async fn start(config: Config) -> Result<Running> {
             .unwrap_or_else(|| "harken (built in)".into()),
         domain.module.functions.len(),
         domain.natives.len(),
-        domain.scopes().join(", ")
     );
-    eprintln!("harken-server: *** DEV AUTH: anyone is whoever they say. A token is a name, nothing is checked, every scope is open. ***");
+    eprintln!("harken-server: *** DEV AUTH: anyone is whoever they say. A token is a name, nothing is checked, the log is open to all. ***");
     let hub = {
         let (domain, data) = (domain.clone(), config.data.clone());
         HubHandle::spawn(move || open_hub(&domain, &data))?
@@ -239,13 +228,7 @@ pub async fn start(config: Config) -> Result<Running> {
 
 async fn healthz(State(hub): State<HubHandle>) -> Response {
     match hub.health().await {
-        Ok(h) => {
-            let mut text = format!("ok\nconnections {}\n", h.connections);
-            for (scope, head) in h.heads {
-                text.push_str(&format!("scope {scope} head {head}\n"));
-            }
-            text.into_response()
-        }
+        Ok(h) => format!("ok\nconnections {}\nhead {}\n", h.connections, h.head).into_response(),
         Err(e) => (
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
             format!("{e:#}\n"),
