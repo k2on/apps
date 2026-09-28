@@ -2,7 +2,7 @@
 -- | §17 Compatibility: what a module may become.
 --
 -- @arkc check old.ark new.ark@. The log is permanent and every retained
--- entry is replayed by every whole-scope peer, so a module is a promise to
+-- entry is replayed by every whole peer, so a module is a promise to
 -- bytes already on disk, and a proposed module is held to the one that
 -- made the promise. The answer is a list of 'Break's; an empty list is
 -- what lets a build through ('isAdditive').
@@ -48,7 +48,7 @@
 -- is named by the thing that would have been stranded.
 --
 -- 'check' is the half a text diff could do and the verifier cannot: the
--- schema, table by table, and every mutator's name, scope, arguments and
+-- schema, table by table, and every mutator's name, arguments and
 -- autos. Argument /order/ is not compared — arguments travel keyed by name
 -- ('Ark.Log.Entry') — and an auto added to a mutator is not a break,
 -- because autos are drawn by whichever runtime holds the function rather
@@ -99,15 +99,9 @@ data Break
   | -- | Mutator, auto. A 'Now' that became a 'NewId', or an id of another
     -- table: the frozen value would be read as something it is not.
     AutoChanged Text Text
-  | -- | A mutator moved to another scope: its entries are in one log and
-    -- would now be applied against another's tables.
-    ScopeChanged Text
   | -- | A table gone. Every retained entry that wrote to it is stranded,
     -- and the state hash at every retained sequence moves.
     TableRemoved TableName
-  | -- | A table in another scope now: its rows are in one log's snapshots
-    -- and would be another's.
-    TableMovedScope TableName
   | -- | Table, column. Retired, never removed: a retained body reads it and
     -- every retained row has it.
     ColumnRemoved TableName FieldName
@@ -166,12 +160,11 @@ checkRetained new = mapMaybe retained
 schemaBreaks :: Schema -> Schema -> [Break]
 schemaBreaks old new = concatMap perTable oldTables
   where
-    oldTables = [(sName sc, t) | sc <- schScopes old, t <- sTables sc]
-    perTable (scope, t) = case lookupTable new (tName t) of
+    oldTables = schTables old
+    perTable t = case lookupTable new (tName t) of
       Nothing -> [TableRemoved (tName t)]
       Just t' ->
-        [TableMovedScope (tName t) | tableScope new (tName t) /= Just scope]
-          ++ concatMap (perColumn t t') (tColumns t)
+        concatMap (perColumn t t') (tColumns t)
           ++ [ ColumnAddedNonNullable (tName t) (colName c)
              | c <- tColumns t'
              , not (colNullable c)
@@ -200,8 +193,7 @@ functionBreaks old new = concatMap perMutator [f | f <- modFunctions old, fnKind
       Just f' | fnKind f' == Mutator -> same f f'
       _ -> [FunctionRemoved (fnName f)]
     same f f' =
-      [ScopeChanged n | fnScope f /= fnScope f']
-        ++ concatMap perArg (fnArgs f)
+      concatMap perArg (fnArgs f)
         ++ [ ArgAdded n a
            | (a, t) <- fnArgs f'
            , a `notElem` map fst (fnArgs f)

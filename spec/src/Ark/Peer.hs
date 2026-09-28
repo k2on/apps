@@ -1,14 +1,14 @@
 {-# LANGUAGE OverloadedStrings #-}
 -- | §11 The peer.
 --
--- The log machine every peer runs, per scope, and the authority role a
--- peer takes for a scope it sequences. Both are pure: they take what
+-- The log machine every peer runs, and the authority role a peer takes
+-- when it sequences the log. Both are pure: they take what
 -- arrived and give back what follows, and a transport is a loop around
 -- them. Nothing here knows what a socket is, which is what makes the
 -- simulation ('Ark.Sim') and the vectors possible, and is Petros's own
 -- shape for Petros's own reason.
 --
--- __A replica__ ('Replica') holds one scope: a confirmed store at a
+-- __A replica__ ('Replica') holds the log: a confirmed store at a
 -- cursor, the intents it authored that no authority has answered yet, and
 -- the optimistic store those intents produce on top of the confirmed one.
 -- Its view is always @replay(confirmed) then replay(pending)@. Confirmed
@@ -16,7 +16,7 @@
 -- own pending, replayed on top when confirmed entries land. That is the
 -- rebase, and it is the whole concurrency story.
 --
--- __An authority__ ('Authority') sequences one scope: it applies each
+-- __An authority__ ('Authority') sequences the log: it applies each
 -- pushed intent in order to its own store, records the facts, appends,
 -- and answers with a verdict. "Server" is a peer doing this for others;
 -- a peer alone does it for itself ('localCommit'), and is then a database
@@ -72,7 +72,7 @@ import qualified Data.Text as T
 import Ark.Eval (Args, Ctx (..), applyClosure)
 import Ark.Hash (Closure (..), FnHash, stateHash)
 import Ark.Log
-import Ark.Schema (Schema, ScopeName)
+import Ark.Schema (Schema)
 import Ark.Std (hexText)
 import Ark.Store (Change, Refusal (..), Store)
 import qualified Ark.Store as S
@@ -81,14 +81,13 @@ import Ark.Value
 -- ---------------------------------------------------------------------
 -- A replica
 
--- | One peer's copy of one scope.
+-- | One peer's copy of the log.
 data Replica = Replica
-  { rScope :: ScopeName
-  , rSchema :: Schema
+  { rSchema :: Schema
   , -- | The closures this peer can run: its generated code's, plus any it
     -- was sent. Keyed by the hash an entry names.
     rBodies :: Map FnHash Closure
-  , -- | The confirmed store: the scope exactly as the authority had it at
+  , -- | The confirmed store: the state exactly as the authority had it at
     -- 'rCursor'. Durable; moves only forward.
     rConfirmed :: Store
   , rCursor :: Seq
@@ -128,12 +127,11 @@ data Changes = Applied [Change] | Rebuilt
 
 -- | §11.1 Open a replica from what was durable: the confirmed store and
 -- cursor, and the pending intents, which are replayed on top.
-open :: Schema -> ScopeName -> Map FnHash Closure -> Store -> Seq -> [Entry] -> Replica
-open sch scope bodies confirmed cursor pending =
+open :: Schema -> Map FnHash Closure -> Store -> Seq -> [Entry] -> Replica
+open sch bodies confirmed cursor pending =
   replay
     Replica
-      { rScope = scope
-      , rSchema = sch
+      { rSchema = sch
       , rBodies = bodies
       , rConfirmed = confirmed
       , rCursor = cursor
@@ -230,7 +228,7 @@ takeChanges r =
   )
 
 -- | This replica's claim: its cursor and the hash of its confirmed state
--- there. What @Verify { scope, seq, hash }@ carries.
+-- there. What @Verify { seq, hash }@ carries.
 verifyAt :: Replica -> (Seq, B.ByteString)
 verifyAt r = (rCursor r, stateHash (rConfirmed r))
 
@@ -313,11 +311,10 @@ replay r0 = go r0 {rView = rConfirmed r0, rRebuilt = True, rChanges = []} (rPend
 -- ---------------------------------------------------------------------
 -- An authority
 
--- | The peer that sequences a scope.
+-- | The peer that sequences the log.
 data Authority = Authority
-  { aScope :: ScopeName
-  , aSchema :: Schema
-  , -- | Every closure ever accepted for this scope, by hash: the current
+  { aSchema :: Schema
+  , -- | Every closure ever accepted, by hash: the current
     -- module's and every historical version a retained entry names.
     aBodies :: Map FnHash Closure
   , aLog :: Log
@@ -326,8 +323,8 @@ data Authority = Authority
   }
   deriving (Eq, Show)
 
-authority :: Schema -> ScopeName -> Map FnHash Closure -> Authority
-authority sch scope bodies = Authority scope sch bodies (emptyLog sch) (S.empty sch)
+authority :: Schema -> Map FnHash Closure -> Authority
+authority sch bodies = Authority sch bodies (emptyLog sch) (S.empty sch)
 
 -- | The answer to a pushed intent.
 data Sequenced
@@ -389,18 +386,18 @@ data AdoptError
     HashDiffers
   deriving (Eq, Show)
 
--- | §11.8 Adopt a scope a peer sequenced alone: replay every intent from
+-- | §11.8 Adopt a log a peer sequenced alone: replay every intent from
 -- the beginning through this authority's own closures, holding each to the
 -- facts the peer recorded, and become its authority. A peer cannot smuggle
 -- rows it did not derive — this is the property only exact replicas have,
 -- and the reason intents rather than facts are the log. The closures are
 -- supplied by the adopter (the peer may send its own; the adopter decides
 -- which it trusts).
-adopt :: Schema -> ScopeName -> Map FnHash Closure -> Log -> Either AdoptError Authority
-adopt sch scope bodies l = do
+adopt :: Schema -> Map FnHash Closure -> Log -> Either AdoptError Authority
+adopt sch bodies l = do
   if horizon l /= 0 || not (S.stTables (snStore (lBase l)) == M.empty) then Left NotFromTheBeginning else Right ()
   if contiguous l then Right () else Left Gap
-  let a0 = authority sch scope bodies
+  let a0 = authority sch bodies
   a <- foldlM' step a0 (M.toAscList (lEntries l))
   claimed <- maybe (Left HashDiffers) Right (stateAt l (headSeq l))
   if stateHash (aStore a) == stateHash claimed then Right a else Left HashDiffers

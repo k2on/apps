@@ -14,19 +14,19 @@
 --
 -- * the schema is well-formed ('Ark.Schema.checkSchema'), and the module's
 --   spec version is this one;
--- * function and router names are unique; a router names an existing
---   scope and uses only middleware of that scope;
--- * a mutator or query is on a router of its scope and runs a subsequence
+-- * function and router names are unique; a router uses only guards and
+--   providers;
+-- * a mutator or query is on a router and runs a subsequence
 --   of that router's middleware, each of which reads only input fields the
 --   procedure has, at the same types; a mutator returns nothing and a
 --   query returns on every path a value of its declared type;
--- * middleware names its scope, is on no router, runs no middleware, has
+-- * middleware is on no router, runs no middleware, has
 --   no autos and no checks; a guard returns nothing, a provider returns
 --   its declared type on every path;
--- * a helper names no scope, no router, no middleware, no autos, no
+-- * a helper names no router, no middleware, no autos, no
 --   checks, and returns on every path;
 -- * every check suits its field's type, an @exists@ check names a table
---   of the procedure's scope, and a refinement is a boolean over the input
+--   that exists, and a refinement is a boolean over the input
 --   alone;
 -- * the body is well-typed under the rules of 'infer', with no option of
 --   an option anywhere, and reads a provided value only from a provider
@@ -34,7 +34,7 @@
 -- * a read ('ESelect', 'EGet', 'EExists') appears only as the whole
 --   right-hand side of a 'SLet', never in a helper;
 -- * a write appears only in a mutator, a refusal never in a helper, and
---   every table a scoped function touches is in its scope;
+--   every table a function touches exists;
 -- * an @insert@ or @upsert@ that names columns names a declared unique
 --   index of its table;
 -- * a helper is called only by functions declared after it, so that the
@@ -75,10 +75,7 @@ data VerifyError
   deriving (Eq, Show)
 
 data Complaint
-  = NoScope
-  | UnknownScope ScopeName
-  | ScopeOnHelper
-  | AutosOnNonMutator
+  = AutosOnNonMutator
   | ReturnTypeOnMutator
   | NoReturnType
   | DuplicateName Text
@@ -89,24 +86,18 @@ data Complaint
     NoRouter
   | RouterOnNonProcedure
   | UnknownRouter Text
-  | -- | The function's scope is not its router's.
-    RouterScopeMismatch Text
   | -- | Middleware named that the router does not declare, or out of the
     -- router's order.
     UsesNotOnRouter [Text]
   | UsesOnNonProcedure
   | -- | A name in @uses@ that is not a guard or provider.
     NotMiddleware Text
-  | -- | Middleware of another scope.
-    MiddlewareScopeMismatch Text
   | -- | Middleware, field: the procedure lacks the field, or has it at
     -- another type.
     MiddlewareInputMismatch Text Text
   | ChecksOutsideProcedure
   | -- | Check, field type: a check that does not suit the type it is on.
     BadCheck Text Ty
-  | -- | An @exists@ on an id of a table outside the procedure's scope.
-    ExistsAcrossScopes TableName
   | UnknownProvided Text
   | -- | A provided value read where none exists yet: in a check or a
     -- refinement.
@@ -124,7 +115,6 @@ data Complaint
   | ReadInHelper
   | WriteOutsideMutator
   | RefuseInHelper
-  | OutOfScope TableName
   | UnknownTable TableName
   | UnknownColumn TableName FieldName
   | UnknownHelper Text
@@ -167,13 +157,11 @@ verify m0 = do
     es -> Left es
   where
     router m r =
-      [BadRouter (rtName r) (UnknownScope (rtScope r)) | isNothing (scopeOf (modSchema m) (rtScope r))]
-        ++ concat
+      concat
           [ case lookupFunction m u of
               Nothing -> [BadRouter (rtName r) (NotMiddleware u)]
               Just f
                 | not (isMiddleware f) -> [BadRouter (rtName r) (NotMiddleware u)]
-                | fnScope f /= Just (rtScope r) -> [BadRouter (rtName r) (MiddlewareScopeMismatch u)]
                 | otherwise -> []
           | u <- rtUses r
           ]
@@ -189,11 +177,8 @@ verifyFunction m i fn = either (Left . map (In (fnName fn))) Right $ do
   let sch = modSchema m
   case fnKind fn of
     k | k == Mutator || k == Query -> do
-      scope <- maybe (Left [NoScope]) Right (fnScope fn)
-      unless (isJust (scopeOf sch scope)) (Left [UnknownScope scope])
       r <- maybe (Left [NoRouter]) Right (fnRouter fn)
-      forM_ (lookupRouter m r) $ \rt -> do
-        unless (rtScope rt == scope) (Left [RouterScopeMismatch r])
+      forM_ (lookupRouter m r) $ \rt ->
         unless (fnUses fn `isSubsequenceOf` rtUses rt) (Left [UsesNotOnRouter (fnUses fn)])
       case fnUses fn \\ nub (fnUses fn) of
         [] -> Right ()
@@ -202,7 +187,6 @@ verifyFunction m i fn = either (Left . map (In (fnName fn))) Right $ do
         Nothing -> Left [NotMiddleware u]
         Just mw -> do
           unless (isMiddleware mw) (Left [NotMiddleware u])
-          unless (fnScope mw == Just scope) (Left [MiddlewareScopeMismatch u])
           forM_ (fnArgs mw) $ \(a, t) -> unless (lookup a (fnArgs fn) == Just t) (Left [MiddlewareInputMismatch u a])
       if k == Mutator
         then when (isJust (fnRet fn)) (Left [ReturnTypeOnMutator])
@@ -210,15 +194,12 @@ verifyFunction m i fn = either (Left . map (In (fnName fn))) Right $ do
           unless (null (fnAutos fn)) (Left [AutosOnNonMutator])
           unless (isJust (fnRet fn)) (Left [NoReturnType])
     Helper -> do
-      when (isJust (fnScope fn)) (Left [ScopeOnHelper])
       plain
       unless (isJust (fnRet fn)) (Left [NoReturnType])
     Guard -> do
-      scoped sch
       plain
       when (isJust (fnRet fn)) (Left [ReturnTypeOnMutator])
     Provide -> do
-      scoped sch
       plain
       unless (isJust (fnRet fn)) (Left [NoReturnType])
   let argNames = map fst (fnInput fn) ++ map fst (fnAutos fn)
@@ -242,9 +223,6 @@ verifyFunction m i fn = either (Left . map (In (fnName fn))) Right $ do
   _ <- block g {gInChecks = False} (fnBody fn)
   when (fnKind fn `elem` [Query, Helper, Provide] && not (returns (fnBody fn))) (Left [MayNotReturn])
   where
-    scoped sch = do
-      scope <- maybe (Left [NoScope]) Right (fnScope fn)
-      unless (isJust (scopeOf sch scope)) (Left [UnknownScope scope])
     -- Neither middleware nor a helper is on a router, runs middleware,
     -- draws autos or checks its input.
     plain = do
@@ -298,9 +276,7 @@ checkOk g _ ty c = case (c, base) of
   (CMaxLen _ _, TText) -> Right ()
   (CRange _ _ _, TInt) -> Right ()
   (CNonEmpty _, TList _) -> Right ()
-  (CExists _, TId t) -> case fnScope (gFn g) of
-    Just s | tableScope (schema g) t == Just s -> Right ()
-    _ -> err (ExistsAcrossScopes t)
+  (CExists _, TId t) -> () <$ table g t
   (CRefine e _, _) -> expect g "refine" TBool e
   _ -> err (BadCheck (name c) ty)
   where
@@ -376,7 +352,6 @@ stmt g = \case
     readOk = when (kind g == Helper) (err ReadInHelper)
     write site tbl e on g' = do
       mutating
-      inScope g' tbl
       t <- table g' tbl
       unless (null on || Index on True `elem` tIndexes t) (err (OnNotUnique tbl on))
       rowOk site tbl g' e
@@ -402,18 +377,12 @@ rowOk site tbl g e = do
       mapM_ (\c -> unless (colNullable c || M.member (colName c) have) (err (TypeMismatch (site <> " " <> tbl) (rowTy t) got))) (tColumns t)
     _ -> err (TypeMismatch (site <> " " <> tbl) (rowTy t) got)
 
-inScope :: G -> TableName -> Check' ()
-inScope g tbl = case fnScope (gFn g) of
-  Just s | tableScope (schema g) tbl /= Just s -> err (OutOfScope tbl)
-  _ -> Right ()
-
 table :: G -> TableName -> Check' Table
 table g tbl = maybe (err (UnknownTable tbl)) Right (lookupTable (schema g) tbl)
 
 -- A key expression list matches the table's key columns in number and type.
 keyed :: G -> TableName -> [Expr] -> Check' ()
 keyed g tbl ks = do
-  inScope g tbl
   t <- table g tbl
   let want = keyTy t
   unless (length want == length ks) (err (KeyArity tbl (length want) (length ks)))
@@ -560,7 +529,6 @@ infer g want = \case
 -- a relationship must be one the schema declares between the two tables.
 planTy :: G -> Plan -> Check' Ty
 planTy g p = do
-  inScope g (pTable p)
   t <- table g (pTable p)
   maybe (Right ()) (predOk t) (pFilter p)
   mapM_ (\(c, _) -> col t c) (pOrder p)

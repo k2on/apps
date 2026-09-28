@@ -286,8 +286,8 @@ rebase out = do
       must what = either (\e -> error (what ++ ": " ++ show e)) id
       claim what ok = if ok then pure () else error ("rebase: " ++ what)
       -- an authority, and three replicas that hold the generated code
-      auth0 = authority sch "demo" bodies
-      fresh = open sch "demo" bodies (S.empty sch) 0 []
+      auth0 = authority sch bodies
+      fresh = open sch bodies (S.empty sch) 0 []
       alice0 = fresh
       bob0 = fresh
       -- the authority answers one pushed entry and both connected peers hear it
@@ -336,7 +336,7 @@ rebase out = do
       bob7 = receive bob6 s2 e2
   claim "a duplicate delivery is a no-op" (bob7 == bob6)
   let -- carol holds no generated code at all: she applies by facts
-      carol0 = open sch "demo" M.empty (S.empty sch) 0 []
+      carol0 = open sch M.empty (S.empty sch) 0 []
       carol1 = foldl (\r (n, e) -> receive r n e) carol0 [(s1, e1), (s2, e2), (s3, e3), (s9, e9)]
   claim "without closures carol asks for every entry's facts" (needs carol1 == [1, 2, 3, 4])
   let factsOf n = case M.lookup n (lEntries (aLog auth4)) of Just (_, f) -> f; Nothing -> error "no facts"
@@ -347,23 +347,23 @@ rebase out = do
       stepByTwo st = case st of
         SInsert t (EStruct fs) on -> SInsert t (EStruct (M.adjust (\e -> case e of EOp Add [a, _] -> EOp Add [a, ELit (VInt 2)]; other -> other) "pos" fs)) on
         other -> other
-      dave0 = open sch "demo" (M.insert hAdd wrong bodies) (S.empty sch) 0 []
+      dave0 = open sch (M.insert hAdd wrong bodies) (S.empty sch) 0 []
       dave1 = foldl (\r (n, e) -> receiveWith r n e (factsOf n)) dave0 [(s1, e1), (s2, e2), (s3, e3), (s9, e9)]
   claim "a divergent runtime is detected" (rDiverged dave1 == [2, 3, 4])
   claim "and healed by the facts" (verifyAt dave1 == verifyAt bob6)
-  let -- eve has no server: she is her own authority, and later hands the scope over
+  let -- eve has no server: she is her own authority, and later hands the log over
       eve0 = fresh
-      eveAuth0 = authority sch "demo" bodies
+      eveAuth0 = authority sch bodies
       (eve1, _) = must "eve creates" (mutate eve0 (idN 201) (ctx "eve") hCreate (M.fromList [("id", VId (idN 2))]) (M.fromList [("name", VText "Road")]))
       (eve2, _) = must "eve adds" (mutate eve1 (idN 202) (ctx "eve") hAdd now (M.fromList [("playlist_id", VId (idN 2)), ("track_id", VText "t5")]))
       (eveAuth1, eve3) = localCommit eveAuth0 eve2
   claim "alone, eve confirms her own intents" (rCursor eve3 == 2 && null (rPending eve3) && rView eve3 == rConfirmed eve3)
   claim "and her state is her authority's" (snd (verifyAt eve3) == stateHash (aStore eveAuth1))
-  let adopted = adopt sch "demo" bodies (aLog eveAuth1)
-  claim "a server adopts her scope by replaying it" (either (const False) (\a -> stateHash (aStore a) == snd (verifyAt eve3)) adopted)
+  let adopted = adopt sch bodies (aLog eveAuth1)
+  claim "a server adopts her log by replaying it" (either (const False) (\a -> stateHash (aStore a) == snd (verifyAt eve3)) adopted)
   let tampered = (aLog eveAuth1) {lEntries = M.adjust (\(e, f) -> (e, map bump f)) 2 (lEntries (aLog eveAuth1))}
       bump c = case c of S.Add t row -> S.Add t (M.insert "pos" (VInt 99) row); other -> other
-  claim "a log whose facts were touched is refused" (adopt sch "demo" bodies tampered == Left (FactsDiffer 2))
+  claim "a log whose facts were touched is refused" (adopt sch bodies tampered == Left (FactsDiffer 2))
   let -- compaction: the authority moves its horizon to 2
       auth5 = maybe (error "compact") id (compact auth4 2)
   claim "a peer at 0 is sent the snapshot" (case page auth5 0 10 of BelowHorizon sn -> snSeq sn == 2; _ -> False)
@@ -412,43 +412,44 @@ protocolVectors out = do
       entry = Entry (idN 9) "alice" "alice-dev" hAdd (M.fromList [("playlist_id", VId (idN 1)), ("track_id", VText "t7")]) M.empty
       row = M.fromList [("playlist_id", VId (idN 1)), ("track_id", VText "t7"), ("pos", VInt 1)]
       clientFrames =
-        [ ("hello", Hello [Subscription "demo" 4 Whole, Subscription "library" 0 ByFacts] (Just "tok") 2)
-        , ("push", Push "demo" [entry])
-        , ("need_facts", NeedFacts "demo" [2, 3])
+        [ ("hello", Hello (Subscription 4 Whole) (Just "tok") 3)
+        , ("hello-facts", Hello (Subscription 0 ByFacts) Nothing 3)
+        , ("push", Push [entry])
+        , ("need_facts", NeedFacts [2, 3])
         , ("need_closures", NeedClosures [hAdd])
-        , ("verify", Verify "demo" 4 (B.replicate 32 0xab))
+        , ("verify", Verify 4 (B.replicate 32 0xab))
         , ("say", Say (B.pack [1, 2, 3]))
         ]
       serverFrames =
-        [ ("batch", Batch "demo" [(5, entry, Nothing), (6, entry, Just [S.Add "item" row])] True)
-        , ("facts", FactsFor "demo" [(2, [S.Add "item" row, S.Remove "item" row])])
-        , ("snapshot", SnapshotOf "demo" 2 (B.replicate 32 0xcd) (M.fromList [("item", [VStruct row])]))
-        , ("ack", Ack "demo" [idN 9] [5])
-        , ("reject", Reject "demo" (idN 9) "a playlist needs a name")
+        [ ("batch", Batch [(5, entry, Nothing), (6, entry, Just [S.Add "item" row])] True)
+        , ("facts", FactsFor [(2, [S.Add "item" row, S.Remove "item" row])])
+        , ("snapshot", SnapshotOf 2 (B.replicate 32 0xcd) (M.fromList [("item", [VStruct row])]))
+        , ("ack", Ack [idN 9] [5])
+        , ("reject", Reject (idN 9) "a playlist needs a name")
         , ("denied", Denied "not signed in")
         , ("closures", Closures [(hAdd, closures m M.! hAdd)])
-        , ("agree", Agree "demo" 4 (B.replicate 32 0xab) True)
+        , ("agree", Agree 4 (B.replicate 32 0xab) True)
         , ("heard", Heard (B.pack [4, 5]))
         ]
-  -- The server keeps what a connection holds across a second Hello from the
-  -- same identity (the log paging one scope), and an entry from an older
-  -- session of the same user is accepted only where ownership is installed.
-  let other = Scope "other" [Table "note" [Column "id" (TId "note") False] ["id"] [] []]
-      sch2 = Schema (schScopes (modSchema m) ++ [other])
-      sv0 = foldl host (openServer trusting (\_ _ -> True) silent) [authority sch2 "demo" (closures m), authority sch2 "other" M.empty]
-      hello subs = Hello subs (Just "alice") 2
-      sv1 = serverRecv sv0 1 (hello [Subscription "demo" 0 Whole, Subscription "other" 0 Whole])
-      sv2 = serverRecv sv1 1 (hello [Subscription "demo" 5 Whole])
-      scopesOf sv = maybe [] (M.keys . cnScopes) (M.lookup 1 (svConns sv))
-  if scopesOf sv2 == ["demo", "other"] then pure () else error ("protocol: a paging Hello dropped scopes: " ++ show (scopesOf sv2))
+  -- An entry from an older session of the same user is accepted only where
+  -- ownership is installed; a stranger's never is.
+  let sv0 = openServer trusting (const True) silent (authority (modSchema m) (closures m))
+      sv2 = serverRecv sv0 1 (Hello (Subscription 0 Whole) (Just "alice") 3)
   let hCreate = head [h | (h, c) <- M.toList (closures m), fnName (cFn c) == "create_playlist"]
       old = Entry (idN 20) "alice" "alice-old" hCreate (M.fromList [("name", VText "Road")]) (M.fromList [("id", VId (idN 21))])
-      verdictOn sv = case fst (takeServerOutgoing (serverRecv (snd (takeServerOutgoing sv)) 1 (Push "demo" [old]))) of
-        [(1, Ack {})] -> "ack"
-        [(1, Reject _ _ why)] -> T.unpack why
+      verdictOn sv = case [msg | (1, msg) <- fst (takeServerOutgoing (serverRecv (snd (takeServerOutgoing sv)) 1 (Push [old]))), isVerdict msg] of
+        [Ack {}] -> "ack"
+        [Reject _ why] -> T.unpack why
         other' -> show other'
+      isVerdict = \case
+        Ack {} -> True
+        Reject {} -> True
+        _ -> False
   if verdictOn sv2 == "not yours" then pure () else error ("protocol: an older session was accepted with no ownership: " ++ verdictOn sv2)
   if verdictOn (withOwns (\u _ -> u == "alice") sv2) == "ack" then pure () else error ("protocol: an owned older session was refused: " ++ verdictOn (withOwns (\u _ -> u == "alice") sv2))
+  let bob = old {eActor = "bob"}
+      strangers = [msg | (1, msg) <- fst (takeServerOutgoing (serverRecv (snd (takeServerOutgoing (withOwns (\_ _ -> True) sv2))) 1 (Push [bob]))), isVerdict msg] == [Reject (eId bob) "not yours"]
+  if strangers then pure () else error "protocol: another user's entry was accepted"
   mapM_
     (\(name, f) -> do
       let v = clientValue f
@@ -488,30 +489,28 @@ simVectors out = do
       idOf k = maybe (error "id") id (mkId (B.pack [fromIntegral (k `div` 256), fromIntegral (k `mod` 256)] <> B.replicate 14 0))
       pid = idOf 1
       now = M.empty
-      sim0 = newSim sch bodies ["demo"] 3 7
+      sim0 = newSim sch bodies 3 7
       -- one playlist, created by peer 0 and delivered to all
-      sim1 = settle (simMutate sim0 0 "demo" (idOf 1000) hCreate (M.fromList [("id", VId pid)]) (M.fromList [("name", VText "Fleet")]))
+      sim1 = settle (simMutate sim0 0 (idOf 1000) hCreate (M.fromList [("id", VId pid)]) (M.fromList [("name", VText "Fleet")]))
       -- a scripted mess: adds from everyone, a partition, more adds, random deliveries
       script = concat [[Add' i k | i <- [0 .. 2]] | k <- [1 .. 4]] ++ [Part 2] ++ [Add' 2 k | k <- [5 .. 7]] ++ [Add' 0 8, Add' 1 9] ++ replicate 60 Step ++ [Part 0] ++ [Add' 1 10, Add' 0 11] ++ replicate 60 Step ++ [Heal 0, Heal 2] ++ replicate 80 Step
       run (sim, n) op = case op of
-        Add' i k -> (simMutate sim i "demo" (idOf (2000 + n)) hAdd now (M.fromList [("playlist_id", VId pid), ("track_id", VText (T.pack (show i ++ "-" ++ show k)))]), n + 1)
+        Add' i k -> (simMutate sim i (idOf (2000 + n)) hAdd now (M.fromList [("playlist_id", VId pid), ("track_id", VText (T.pack (show i ++ "-" ++ show k)))]), n + 1)
         Part i -> (partition sim i, n)
         Heal i -> (heal sim i, n)
         Step -> (step sim, n)
       (sim2, _) = foldl run (sim1, 0 :: Int) script
       sim3 = settle sim2
       clients = clientHashes sim3
-      (headN, serverHash) = case serverHashes sim3 of
-        [(_, n, h)] -> (n, h)
-        other -> error ("fleet: expected one scope, saw " ++ show (length other))
-  if all (\(_, _, n, h) -> n == headN && h == serverHash) clients then pure () else error ("fleet did not converge: " ++ show (map (\(i, _, n, h) -> (i, n, hex h)) clients) ++ " vs " ++ hex serverHash)
+      (headN, serverH) = serverHash sim3
+  if all (\(_, n, h) -> n == headN && h == serverH) clients then pure () else error ("fleet did not converge: " ++ show (map (\(i, n, h) -> (i, n, hex h)) clients) ++ " vs " ++ hex serverH)
   if quiet sim3 then pure () else error "fleet: something still pending after settle"
-  let rejected = [(i, rj) | (i, c) <- M.toList (simClients sim3), (r, _) <- M.elems (clScopes c), rj <- rRejections r]
+  let rejected = [(i, rj) | (i, c) <- M.toList (simClients sim3), rj <- rRejections (clReplica c)]
   if null rejected then pure () else error ("fleet: rejections: " ++ show rejected)
   if headN >= 12 then pure () else error ("fleet: too few entries landed: " ++ show headN)
-  let a = svScopes (simServer sim3) M.! "demo"
+  let a = svAuthority (simServer sim3)
       items = S.rows (aStore a) "item"
-  putStrLn ("  " ++ show (M.size items) ++ " items on the playlist after " ++ show headN ++ " entries; hash " ++ hex serverHash)
+  putStrLn ("  " ++ show (M.size items) ++ " items on the playlist after " ++ show headN ++ " entries; hash " ++ hex serverH)
   write
     (out ++ "/rebase/fleet-seed-7.json")
     ( obj
@@ -520,7 +519,7 @@ simVectors out = do
         , ("seed", json (VInt 7))
         , ("script", json (VList (map opValue script)))
         , ("expected_head", json (VInt headN))
-        , ("expected_hash", quoted (hex serverHash))
+        , ("expected_hash", quoted (hex serverH))
         , ("final_store", json (storeValue (aStore a)))
         ]
     )
@@ -550,7 +549,7 @@ viewVectors out = do
       now = M.empty
       hashOf name = head [h | (h, c) <- M.toList (closures m), fnName (cFn c) == name]
       -- a straight sequence of entries on one authority: create, add 1..4, remove one, add 5
-      a0 = authority sch "demo" (closures m)
+      a0 = authority sch (closures m)
       addE k eid = Entry (idN eid) "alice" "dev" (hashOf "add_to_playlist") (M.fromList [("playlist_id", VId pid), ("track_id", VText (T.pack ("t" ++ show (k :: Int))))]) now
       entries =
         [ Entry (idN 100) "alice" "dev" (hashOf "create_playlist") (M.fromList [("name", VText "Viewed")]) (M.fromList [("id", VId pid)])

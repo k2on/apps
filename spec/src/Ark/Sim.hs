@@ -10,7 +10,7 @@
 -- the same hashes.
 --
 -- What it holds, after 'settle': every client's confirmed state hashes
--- equal to the server's for every scope, and nothing pending anywhere.
+-- equal to the server's, and nothing pending anywhere.
 -- Petros's test suite found three vacuous tests by falsifying this kind of
 -- claim; the emitter that writes these vectors asserts it before writing.
 module Ark.Sim
@@ -23,7 +23,7 @@ module Ark.Sim
   , step
   , settle
   , clientHashes
-  , serverHashes
+  , serverHash
   , quiet
   , lcg
   ) where
@@ -43,7 +43,7 @@ import qualified Ark.Live as L
 import Ark.Log (Seq, headSeq)
 import Ark.Peer
 import Ark.Protocol
-import Ark.Schema (Schema, ScopeName)
+import Ark.Schema (Schema)
 import qualified Ark.Store as S
 import Ark.Value
 
@@ -63,17 +63,13 @@ data Sim = Sim
 silent :: L.Machine ()
 silent = L.Machine (\_ _ s -> (s, L.Post [] False)) (\_ _ _ s -> (s, L.Post [] False)) (\_ _ s -> (s, L.Post [] False)) (const Nothing) (const ())
 
--- | A fleet: a trusting server hosting the given scopes, and @n@ clients
--- each holding every scope whole, all connected.
-newSim :: Schema -> Map FnHash Closure -> [ScopeName] -> Int -> Word64 -> Sim
-newSim sch bodies scopes n seed = foldl heal sim0 [0 .. n - 1]
+-- | A fleet: a trusting server that is the log's authority, and @n@
+-- clients each holding it whole, all connected.
+newSim :: Schema -> Map FnHash Closure -> Int -> Word64 -> Sim
+newSim sch bodies n seed = foldl heal sim0 [0 .. n - 1]
   where
-    server = foldl (\sv s -> host sv (authority sch s bodies)) (openServer trusting (\_ _ -> True) silent) scopes
-    client i =
-      foldl
-        (\c s -> subscribe c Whole (open sch s bodies (S.empty sch) 0 []))
-        (openClient sch (Just (name i)))
-        scopes
+    server = openServer trusting (const True) silent (authority sch bodies)
+    client i = openClient (open sch bodies (S.empty sch) 0 []) Whole (Just (name i))
     sim0 =
       Sim
         { simServer = server
@@ -90,10 +86,10 @@ name i = T.pack ("peer-" ++ show i)
 
 -- | A client authors an intent. A refusal by its own view is dropped, as
 -- it would be in an app.
-simMutate :: Sim -> Int -> ScopeName -> IdBytes -> FnHash -> Args -> Args -> Sim
-simMutate sim i s eid fh autos args = case M.lookup i (simClients sim) of
+simMutate :: Sim -> Int -> IdBytes -> FnHash -> Args -> Args -> Sim
+simMutate sim i eid fh autos args = case M.lookup i (simClients sim) of
   Nothing -> sim
-  Just c -> case clientMutate c s eid (ctxOf i) fh autos args of
+  Just c -> case clientMutate c eid (ctxOf i) fh autos args of
     Left _ -> sim
     Right (c', _) -> flushClient i (sim {simClients = M.insert i c' (simClients sim)})
 
@@ -203,17 +199,15 @@ quiet :: Sim -> Bool
 quiet sim =
   all null (M.elems (simToServer sim))
     && all null (M.elems (simToClient sim))
-    && and [null (rPending r) | c <- M.elems (simClients sim), (r, _) <- M.elems (clScopes c)]
+    && and [null (rPending (clReplica c)) | c <- M.elems (simClients sim)]
 
--- | Each client's confirmed hash per scope.
-clientHashes :: Sim -> [(Int, ScopeName, Seq, B.ByteString)]
-clientHashes sim = [(i, s, fst (verifyAt r), snd (verifyAt r)) | (i, c) <- M.toList (simClients sim), (s, (r, _)) <- M.toList (clScopes c)]
+-- | Each client's confirmed hash.
+clientHashes :: Sim -> [(Int, Seq, B.ByteString)]
+clientHashes sim = [(i, fst (verifyAt r), snd (verifyAt r)) | (i, c) <- M.toList (simClients sim), let r = clReplica c]
 
--- | The server's hash per scope, at the head.
-serverHashes :: Sim -> [(ScopeName, Seq, B.ByteString)]
-serverHashes sim = [(s, headOf a, stateHash (aStore a)) | (s, a) <- M.toList (svScopes (simServer sim))]
-  where
-    headOf a = headSeq (aLog a)
+-- | The server's hash, at the head.
+serverHash :: Sim -> (Seq, B.ByteString)
+serverHash sim = let a = svAuthority (simServer sim) in (headSeq (aLog a), stateHash (aStore a))
 
 roll :: Sim -> (Word64, Sim)
 roll sim = let s' = lcg (simSeed sim) in (s' `shiftR` 11, sim {simSeed = s'})

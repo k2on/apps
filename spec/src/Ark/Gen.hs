@@ -64,13 +64,17 @@ targetName = \case
   Swift -> "swift"
   Kotlin -> "kotlin"
 
-newtype Options = Options
+data Options = Options
   { -- | The Kotlin package the files declare.
     optPackage :: Text
+  , -- | The name of the module's one struct of tables, which a body's @db@
+    -- is and every router is over (harken's is @Harken@). The module does
+    -- not carry it.
+    optName :: Text
   }
 
 defaultOptions :: Options
-defaultOptions = Options "domain"
+defaultOptions = Options "domain" "Tables"
 
 -- | §18.1 Only what a peer calls.
 --
@@ -141,46 +145,40 @@ layout = T.unlines . go
 -- §18.2 The schema --------------------------------------------------------
 
 schemaFile :: Target -> Options -> Module -> Text
-schemaFile t opts m = layout (header t opts : map (scopeItem t) scopes ++ [rowItem t sch tbl | sc <- scopes, tbl <- sTables sc])
+schemaFile t opts m = layout (header t opts : tablesItem t (optName opts) tables : [rowItem t sch tbl | tbl <- tables])
   where
     sch = modSchema m
-    scopes = schScopes sch
+    tables = schTables sch
 
-scopeItem :: Target -> Scope -> [Text]
-scopeItem t sc = case t of
+-- | The module's one struct of tables: what a body's @db@ is, in the order
+-- the schema declares them, which @open()@ says once because no host can
+-- enumerate a struct's fields.
+tablesItem :: Target -> Text -> [Table] -> [Text]
+tablesItem t name tables = case t of
   Rust ->
     ["pub struct " <> name <> " {"]
-      ++ ["    pub " <> tName tb <> ": Table<" <> pascal (tName tb) <> ">," | tb <- sTables sc]
+      ++ ["    pub " <> tName tb <> ": Table<" <> pascal (tName tb) <> ">," | tb <- tables]
       ++ [ "}"
-         , "impl Scope for " <> name <> " {"
-         , "    const NAME: &str = " <> str t (sName sc) <> ";"
+         , "impl Tables for " <> name <> " {"
          , "    fn open() -> Self {"
-         , "        " <> name <> " { " <> commas [tName tb <> ": table()" | tb <- sTables sc] <> " }"
+         , "        " <> name <> " { " <> commas [tName tb <> ": table()" | tb <- tables] <> " }"
          , "    }"
          , "}"
          ]
   Swift ->
     ["public struct " <> name <> " {"]
-      ++ ["    public var " <> camel (tName tb) <> ": Table<" <> pascal (tName tb) <> ">" | tb <- sTables sc]
+      ++ ["    public var " <> camel (tName tb) <> ": Table<" <> pascal (tName tb) <> ">" | tb <- tables]
       ++ [ "}"
-         , "extension " <> name <> ": Scope {"
-         , "    public static let NAME = " <> str t (sName sc)
+         , "extension " <> name <> ": Tables {"
          , "    public static func open() -> Self {"
-         , "        " <> name <> "(" <> commas [camel (tName tb) <> ": table()" | tb <- sTables sc] <> ")"
+         , "        " <> name <> "(" <> commas [camel (tName tb) <> ": table()" | tb <- tables] <> ")"
          , "    }"
          , "}"
          ]
   Kotlin ->
     ["class " <> name <> "("]
-      ++ ["    val " <> camel (tName tb) <> ": Table<" <> pascal (tName tb) <> ">," | tb <- sTables sc]
-      ++ [ ") : Scope {"
-         , "    companion object : Scope.Of {"
-         , "        override val NAME = " <> str t (sName sc)
-         , "    }"
-         , "}"
-         ]
-  where
-    name = pascal (sName sc)
+      ++ ["    val " <> camel (tName tb) <> ": Table<" <> pascal (tName tb) <> ">," | tb <- tables]
+      ++ [") : Tables"]
 
 rowItem :: Target -> Schema -> Table -> [Text]
 rowItem t sch tbl = case t of
@@ -323,7 +321,7 @@ routerFile t opts m r = do
     procedures = fns
     middlewares = [fn | u <- rtUses r, Just fn <- [lookupFunction m u]]
     rv = ident t (rtName r)
-    scopeTy = pascal (rtScope r)
+    scopeTy = optName opts
     open = case t of
       Rust -> "pub fn " <> rtName r <> "() -> Router<" <> scopeTy <> "> {"
       Swift -> "public func " <> camel (rtName r) <> "() -> Router<" <> scopeTy <> "> {"
@@ -432,7 +430,7 @@ closure t ps typed b = case t of
   Kotlin -> "{ " <> commas ps <> " -> " <> renderBody t b <> " }"
 
 -- The procedure's input type, and a middleware's: named after the
--- function, with @Input@ appended where that would be a scope's or a row's
+-- function, with @Input@ appended where that would be a row's
 -- name.
 inputTypeName :: Module -> Function -> Text
 inputTypeName m fn
@@ -440,7 +438,7 @@ inputTypeName m fn
   | otherwise = base
   where
     base = pascal (fnName fn)
-    taken = [pascal (sName sc) | sc <- schScopes (modSchema m)] ++ [pascal (tName tb) | sc <- schScopes (modSchema m), tb <- sTables sc]
+    taken = [pascal (tName tb) | tb <- schTables (modSchema m)]
 
 -- The provided value's parameter name: the table its row is of, else the
 -- middleware's name.
@@ -451,7 +449,7 @@ providedName m _ u = fromMaybe u $ do
   tableOfTy (modSchema m) (case ty of TList x -> x; x -> x)
 
 tableOfTy :: Schema -> Ty -> Maybe TableName
-tableOfTy sch ty = tName <$> find (\tb -> rowTy tb == ty) [tb | sc <- schScopes sch, tb <- sTables sc]
+tableOfTy sch ty = tName <$> find (\tb -> rowTy tb == ty) (schTables sch)
 
 inputItem :: Target -> Module -> Function -> [[Text]]
 inputItem t m fn
@@ -934,7 +932,7 @@ expr cx = \case
   EGet _ _ -> Left "a read outside a let"
   EExists _ _ -> Left "a read outside a let"
   where
-    allTables = [tb | sc <- schScopes (modSchema (cxMod cx)), tb <- sTables sc]
+    allTables = schTables (modSchema (cxMod cx))
     unary m a = (\a' -> SMethod a' m []) <$> expr cx a
     elemTy xs = case tyOf cx xs of
       Just (TList e) -> Just e

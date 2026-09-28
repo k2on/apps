@@ -53,9 +53,8 @@ fromValue v = do
     router x = do
       fs <- tagged ["router"] "router" x
       n <- field fs "name" >>= text ["router", "name"]
-      sc <- field fs "scope" >>= text ["router", n, "scope"]
       uses <- field fs "uses" >>= list ["router", n, "uses"] (text ["router", n, "uses"])
-      pure (Router n sc uses)
+      pure (Router n uses)
     frame x = do
       fs <- tagged ["frame"] "frame" x
       n <- field fs "name" >>= text ["frame", "name"]
@@ -72,13 +71,8 @@ closureFromValue v = do
   pure (Closure fn hs)
 
 schemaFromValue :: Value -> D Schema
-schemaFromValue v = Schema <$> list ["schema"] scope v
+schemaFromValue v = Schema <$> list ["schema"] table v
   where
-    scope x = do
-      fs <- tagged ["scope"] "scope" x
-      n <- field fs "name" >>= text ["scope", "name"]
-      ts <- field fs "tables" >>= list ["scope", n] table
-      pure (Scope n ts)
     table x = do
       fs <- tagged ["table"] "table" x
       n <- field fs "name" >>= text ["table", "name"]
@@ -133,7 +127,6 @@ functionFromValue v = do
     "guard" -> pure Guard
     "provide" -> pure Provide
     other -> Left (DecodeError here ("unknown kind " <> other))
-  sc <- field fs "scope" >>= optional (text (here ++ ["scope"]))
   rt <- field fs "router" >>= optional (text (here ++ ["router"]))
   uses <- field fs "uses" >>= list (here ++ ["uses"]) (text (here ++ ["uses"]))
   autos <- field fs "autos" >>= list (here ++ ["autos"]) auto
@@ -141,7 +134,7 @@ functionFromValue v = do
   refine <- field fs "refine" >>= list (here ++ ["refine"]) (refinement here)
   ret <- field fs "ret" >>= optional tyFromValue
   body <- field fs "body" >>= list (here ++ ["body"]) (stmt here)
-  pure (Function n k sc rt uses autos input refine ret body M.empty)
+  pure (Function n k rt uses autos input refine ret body M.empty)
   where
     auto x = do
       (t, fs) <- taggedAny ["auto"] x

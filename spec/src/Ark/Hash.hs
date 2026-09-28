@@ -90,8 +90,8 @@ closures m = M.fromList [(functionHash c, c) | fn <- modFunctions m, let c = clo
 -- to a schema moves the hash — which is right, because the schema is part
 -- of what two replicas must agree on.
 --
--- This is what @Verify { scope, seq, hash }@ carries and what a snapshot
--- claims. Two whole-scope replicas at the same sequence must agree on it
+-- This is what @Verify { seq, hash }@ carries and what a snapshot
+-- claims. Two whole replicas at the same sequence must agree on it
 -- exactly; that is the definition of exact replication in this design.
 stateHash :: Store -> B.ByteString
 stateHash st =

@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 -- | The demo domain every vector and every runtime's first test is built
--- on: one scope, a playlist and its items, and the three procedures
+-- on: a playlist and its items, and the three procedures
 -- @spec/AUTHORING.md@ Appendix B writes out in the vocabulary. Small enough
 -- to read in a minute, and shaped like the real thing: a trimmed and
 -- checked input, a fresh id, an existence check, an insert that a second
@@ -25,34 +25,31 @@ import Ark.IR
 import Ark.Schema
 import Ark.Value
 
--- | One scope, @demo@: @playlist(id, name, user_id)@ unique on
+-- | Two tables: @playlist(id, name, user_id)@ unique on
 -- @(user_id, name)@, and @item(playlist_id -> playlist, track_id, pos)@
 -- keyed by @(playlist_id, track_id)@ and unique on @(playlist_id, pos)@.
 demoSchema :: Schema
 demoSchema =
   Schema
-    [ Scope
-        "demo"
-        [ Table
-            "playlist"
-            [Column "id" (TId "playlist") False, Column "name" TText False, Column "user_id" TText False]
-            ["id"]
-            [Index ["user_id", "name"] True]
-            []
-        , Table
-            "item"
-            [ Column "playlist_id" (TId "playlist") False
-            , Column "track_id" TText False
-            , Column "pos" TInt False
-            ]
-            ["playlist_id", "track_id"]
-            [Index ["playlist_id", "pos"] True]
-            [Ref "playlist_id" "playlist"]
+    [ Table
+        "playlist"
+        [Column "id" (TId "playlist") False, Column "name" TText False, Column "user_id" TText False]
+        ["id"]
+        [Index ["user_id", "name"] True]
+        []
+    , Table
+        "item"
+        [ Column "playlist_id" (TId "playlist") False
+        , Column "track_id" TText False
+        , Column "pos" TInt False
         ]
+        ["playlist_id", "track_id"]
+        [Index ["playlist_id", "pos"] True]
+        [Ref "playlist_id" "playlist"]
     ]
 
 demoRouter :: Router
-demoRouter = Router "demo" "demo" []
+demoRouter = Router "demo" []
 
 -- | @create_playlist@: a trimmed, non-empty name; a fresh id; an insert
 -- that lands once per @(user_id, name)@.
@@ -67,7 +64,6 @@ createPlaylist =
   Function
     { fnName = "create_playlist"
     , fnKind = Mutator
-    , fnScope = Just "demo"
     , fnRouter = Just "demo"
     , fnUses = []
     , fnAutos = [("id", NewId "playlist")]
@@ -99,7 +95,6 @@ addToPlaylist =
   Function
     { fnName = "add_to_playlist"
     , fnKind = Mutator
-    , fnScope = Just "demo"
     , fnRouter = Just "demo"
     , fnUses = []
     , fnAutos = []
@@ -147,7 +142,6 @@ items =
   Function
     { fnName = "items"
     , fnKind = Query
-    , fnScope = Just "demo"
     , fnRouter = Just "demo"
     , fnUses = []
     , fnAutos = []

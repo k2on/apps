@@ -44,7 +44,6 @@ module Ark.Store
   , changeTable
   , applyChange
   , applyChanges
-  , merge
   , rows
   , tableNames
   ) where
@@ -116,7 +115,7 @@ rows :: Store -> TableName -> Map Key Row
 rows st t = fromMaybe M.empty (M.lookup t (stTables st))
 
 tableNames :: Store -> [TableName]
-tableNames st = [tName t | sc <- schScopes (stSchema st), t <- sTables sc]
+tableNames st = map tName (schTables (stSchema st))
 
 get :: Store -> TableName -> Key -> Maybe Row
 get st t k = M.lookup k (rows st t)
@@ -317,10 +316,3 @@ applyChange st ch = case ch of
 
 applyChanges :: Store -> [Change] -> Store
 applyChanges = foldl applyChange
-
--- | The rows of two stores over one schema, together. A peer holds one
--- store per scope it replicates, each with rows only in that scope's
--- tables; a query that reads across scopes reads their merge. Where both
--- hold a table, the left one wins, which never arises between scopes.
-merge :: Store -> Store -> Store
-merge a b = a {stTables = M.unionWith M.union (stTables a) (stTables b)}

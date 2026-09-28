@@ -17,8 +17,8 @@
 -- the IR has a spelling (nothing falls back to @show@), and a diff of two
 -- prints is a diff of two modules.
 --
--- The shape, informally: the spec version, the schema as one @scope@ block
--- per scope with a @table@ line per table, the live frame types, and then
+-- The shape, informally: the spec version, the schema as a @table@ line per
+-- table, the routers, the live frame types, and then
 -- one function per block — its signature on the first line, its statements
 -- indented two spaces per level beneath it. Arguments are @$name@, autos
 -- @\@name@, provided values @#name@, locals their author's name or @v<n>@
@@ -63,21 +63,17 @@ printModule m =
         ++ [map router (modRouters m)]
         ++ [T.lines (printFunction f) | f <- modFunctions m]
     live n t = "live " <> n <> ": " <> printTy t
-    router r = "router " <> rtName r <> " in " <> rtScope r <> (if null (rtUses r) then "" else " uses " <> commas (rtUses r))
+    router r = "router " <> rtName r <> (if null (rtUses r) then "" else " uses " <> commas (rtUses r))
 
 -- The schema ------------------------------------------------------------
 
--- | The schema: one block per scope, one line per table, no trailing
--- newline.
+-- | The schema: one line per table, no trailing newline.
 printSchema :: Schema -> Text
 printSchema = T.intercalate "\n" . schemaLines
 
 schemaLines :: Schema -> [Text]
-schemaLines (Schema scopes) = concatMap scope scopes
+schemaLines (Schema tables) = map table tables
   where
-    scope s
-      | null (sTables s) = ["scope " <> sName s <> " {}"]
-      | otherwise = ("scope " <> sName s <> " {") : map ((indent 1 <>) . table) (sTables s) ++ ["}"]
     table t =
       T.unwords
         ( ["table " <> tName t <> "(" <> commas (map col (tColumns t)) <> ")"]
@@ -142,8 +138,8 @@ type Names = Map Sym Text
 -- | One function: its signature, then any whole-input refinements, then
 -- its body indented beneath it, no trailing newline. Autos come before
 -- the input in the signature, each as @name: Now@ or @name: NewId(table)@;
--- an input field is @name: Ty@ followed by its checks; the scope follows
--- as @in scope@, the router as @on router@, the middleware as @uses a, b@
+-- an input field is @name: Ty@ followed by its checks; the router follows
+-- as @on router@, the middleware as @uses a, b@
 -- and a result type as @-> Ty@.
 printFunction :: Function -> Text
 printFunction fn = T.intercalate "\n" (sig : refines ++ block (fnNames fn) 1 (fnBody fn))
@@ -155,7 +151,6 @@ printFunction fn = T.intercalate "\n" (sig : refines ++ block (fnNames fn) 1 (fn
         <> "("
         <> commas (map auto (fnAutos fn) ++ map field (fnInput fn))
         <> ")"
-        <> maybe "" (" in " <>) (fnScope fn)
         <> maybe "" (" on " <>) (fnRouter fn)
         <> (if null (fnUses fn) then "" else " uses " <> commas (fnUses fn))
         <> maybe "" ((" -> " <>) . printTy) (fnRet fn)

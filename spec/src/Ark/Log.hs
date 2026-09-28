@@ -1,12 +1,12 @@
 {-# LANGUAGE OverloadedStrings #-}
 -- | §10 The log.
 --
--- One scope's history: an append-only sequence of entries, each an intent
+-- The module's history: an append-only sequence of entries, each an intent
 -- with what applying it changed kept beside it, standing on a snapshot.
 --
 -- __An entry is an intent.__ It records who authored it, the function by
 -- hash, the arguments, and the autos the originating peer drew. It is
--- what the authority sequences and what a whole-scope peer replays; it is
+-- what the authority sequences and what a whole peer replays; it is
 -- the only thing that can be adopted, verified and rebased later, which is
 -- why it and not the rows is the log.
 --
@@ -61,7 +61,7 @@ import Ark.Store (Change, Store)
 import qualified Ark.Store as S
 import Ark.Value
 
--- | A position in one scope's log. The first entry is 1; 0 is "nothing".
+-- | A position in the log. The first entry is 1; 0 is "nothing".
 type Seq = Int64
 
 -- | An intent, as recorded. The sequence is not a field: it is the key an
@@ -80,9 +80,9 @@ data Entry = Entry
 -- | What applying an entry changed, in order.
 type Facts = [Change]
 
--- | The state of a scope at a sequence, and its hash. Verifiable: any
+-- | The state at a sequence, and its hash. Verifiable: any
 -- peer holding the entries up to 'snSeq' can reproduce 'snHash', and an
--- authority adopting a scope does exactly that.
+-- authority adopting a log does exactly that.
 data Snapshot = Snapshot
   { snSeq :: Seq
   , snStore :: Store

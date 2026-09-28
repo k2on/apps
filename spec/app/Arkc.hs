@@ -16,6 +16,7 @@
 -- arkc demo      OUT               write the demo module
 --
 -- OPTIONS: --only f,g   print only these procedures and what they reach
+--          --name N     the struct of tables every router is over
 --          --package p  the Kotlin package (default "domain")
 --          --fmt CMD    run CMD over the printed files (a formatter: the
 --                       canonical text is its output)
@@ -93,7 +94,7 @@ main = do
       m <- either (die . show) pure (verify demoModule)
       B.writeFile out (encode (toValue m))
       putStrLn (out ++ "  " ++ hex (moduleHash m) ++ "  " ++ show (M.size (closures m)) ++ " functions")
-    _ -> die "usage: arkc verify M | print M | hash M | check OLD NEW | gen LANG M OUTDIR [--only f,g] [--package p] [--fmt CMD] | roundtrip LANG M SRCDIR [...] | demo OUT"
+    _ -> die "usage: arkc verify M | print M | hash M | check OLD NEW | gen LANG M OUTDIR [--only f,g] [--package p] [--name T] [--fmt CMD] | roundtrip LANG M SRCDIR [...] | demo OUT"
 
 -- Print a module's authoring form into a directory, format it, and name
 -- the files written.
@@ -106,7 +107,7 @@ gen target path out rest = do
     other -> die ("unknown target " ++ other)
   let opts = pairs rest
       only = fmap (T.splitOn "," . T.pack) (lookup "--only" opts)
-      options = Options (maybe "domain" T.pack (lookup "--package" opts))
+      options = Options (maybe "domain" T.pack (lookup "--package" opts)) (maybe "Tables" T.pack (lookup "--name" opts))
   whole <- load path
   let m = maybe whole (`restrict` whole) only
   fs <- either (die . T.unpack) pure (files t options m)

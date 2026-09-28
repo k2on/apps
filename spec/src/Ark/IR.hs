@@ -19,8 +19,8 @@
 -- * __deterministic__: no clock, no randomness, no I/O and no floats exist
 --   in the language; the only non-determinism a mutator sees arrives in its
 --   'fnAutos', chosen once at the originating peer and frozen in the log.
--- * __scoped__: a router names one scope and every procedure on it reads
---   and writes only that scope's tables.
+-- * __whole__: a module has one set of tables and one log; any function
+--   may read any table, and every reference is checked (@docs/scopes.md@).
 --
 -- Local variables are 'Sym's — small integers assigned in order of
 -- binding — so that two authors' choices of names never reach the hash of
@@ -66,10 +66,12 @@ import Ark.Value
 -- "update required". It is about the runtime alone, never about the app.
 type SpecVersion = Int
 
--- | Version 2: routers, middleware, input schemas with checks, and the
--- three table writes (@insert@, @upsert@, @update@) in place of @put@.
+-- | Version 3: one log and one set of tables — scopes are gone
+-- (@docs/scopes.md@). Version 2 brought routers, middleware, input schemas
+-- with checks, and the three table writes (@insert@, @upsert@, @update@)
+-- in place of @put@.
 specVersion :: SpecVersion
-specVersion = 2
+specVersion = 3
 
 data Module = Module
   { modSpec :: SpecVersion
@@ -88,16 +90,16 @@ data Module = Module
   }
   deriving (Eq, Show)
 
--- | §3.10 A router: a scope, and the middleware declared on it.
+-- | §3.10 A router: a named group of procedures, and the middleware
+-- declared on it.
 --
--- A procedure belongs to one router and inherits its scope. What a
+-- A procedure belongs to one router. What a
 -- procedure /runs/ before its body is its own 'fnUses' — the chain it was
 -- built from, a subsequence of the router's 'rtUses' — so that
 -- @signed_in.mutation(..)@ and @owned.mutation(..)@ on one router run
 -- different chains, as tRPC's builders do.
 data Router = Router
   { rtName :: Text
-  , rtScope :: ScopeName
   , -- | Every middleware function declared on this router, in declaration
     -- order, by name.
     rtUses :: [Text]
@@ -106,9 +108,9 @@ data Router = Router
 
 data FnKind
   = -- | Writes. Takes a context and autos; reads and writes its router's
-    -- scope; may 'SRefuse'. Its effect is what the log records.
+    -- tables; may 'SRefuse'. Its effect is what the log records.
     Mutator
-  | -- | Reads. Takes an input; may 'ESelect' from its router's scope;
+  | -- | Reads. Takes an input; may 'ESelect' from any table;
     -- returns a value; may refuse (a check or a guard) but cannot write.
     -- Not in the log, so not held to permanence.
     Query
@@ -116,7 +118,7 @@ data FnKind
     -- is where a domain's @slug@ and @art_to_write@ live.
     Helper
   | -- | Middleware that runs before a procedure's body and may refuse; it
-    -- returns nothing. Reads its scope; writes nothing.
+    -- returns nothing. Reads any table; writes nothing.
     Guard
   | -- | Middleware that runs before a procedure's body, may refuse, and
     -- returns a value of its 'fnRet', which the body reads as
@@ -158,7 +160,7 @@ data Check
     CRange (Maybe Int) (Maybe Int) (Maybe Text)
   | -- | List: at least one element.
     CNonEmpty (Maybe Text)
-  | -- | Id: a row with that key exists, in the procedure's scope.
+  | -- | Id: a row with that key exists.
     CExists (Maybe Text)
   | -- | Any type: the expression, over @EArg <this field>@, is true.
     CRefine Expr (Maybe Text)
@@ -167,9 +169,6 @@ data Check
 data Function = Function
   { fnName :: Text
   , fnKind :: FnKind
-  , -- | The scope: a procedure's is its router's; middleware names its
-    -- own; 'Nothing' for a helper.
-    fnScope :: Maybe ScopeName
   , -- | The router a mutator or query is on; 'Nothing' otherwise.
     fnRouter :: Maybe Text
   , -- | The middleware this procedure runs before its body, in order; a

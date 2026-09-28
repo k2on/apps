@@ -1,4 +1,4 @@
 {
-  "frame": {"hash":{"$bytes":"abababababababababababababababababababababababababababababababab"},"ok":true,"scope":"demo","seq":{"$int":"4"},"t":"agree"},
-  "bytes": "a56174656167726565626f6bf5637365710464686173685820abababababababababababababababababababababababababababababababab6573636f70656464656d6f"
+  "frame": {"hash":{"$bytes":"abababababababababababababababababababababababababababababababab"},"ok":true,"seq":{"$int":"4"},"t":"agree"},
+  "bytes": "a46174656167726565626f6bf5637365710464686173685820abababababababababababababababababababababababababababababababab"
 }

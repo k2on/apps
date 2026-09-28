@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
--- | §2 Scopes and the schema.
+-- | §2 The schema.
 --
 -- A schema is a value in the module, not DDL. It says what Petros's
 -- @tables!@ used to ask SQLite: which tables exist, their columns and key,
@@ -7,29 +7,22 @@
 -- it a runtime derives, identically in every language, the row types, the
 -- key type, and both directions of every reference as a relationship.
 --
--- A __scope__ is the unit of everything: one append-only intent log with
--- its own sequence, its own authority, its own snapshots and its own access
--- rule. A table belongs to exactly one scope, and a mutator ('Ark.IR') may
--- read and write only the tables of its own scope. That constraint is what
--- makes replicating one scope without another sound under intents, and it
--- is the one modelling decision this design imposes: a reference across
--- scopes is an id nobody checks at write time.
+-- A module has one set of tables and one log. (Spec version 2 split them
+-- into /scopes/, each its own log; @docs/scopes.md@ says what those were
+-- for and why they are gone.) So every reference is checked, and any
+-- function may read any table.
 module Ark.Schema
   ( Ty (..)
-  , ScopeName
   , Column (..)
   , Index (..)
   , Ref (..)
   , Table (..)
-  , Scope (..)
   , Schema (..)
   , Relation (..)
   , Dir (..)
   , SchemaError (..)
   , isScalar
   , lookupTable
-  , tableScope
-  , scopeOf
   , column
   , columnTy
   , rowTy
@@ -48,8 +41,6 @@ import Data.Maybe (isJust, mapMaybe)
 import Data.Text (Text)
 
 import Ark.Value
-
-type ScopeName = Text
 
 -- | §2.1 Types.
 --
@@ -105,7 +96,7 @@ data Index = Index
 -- column, and the child column's type must be that column's type; where
 -- the parent is keyed by an id the child column is @'TId' refTable@, which
 -- is how a column comes to name the table it identifies (Petros: "an id
--- knows what it identifies"). Both tables must be in one scope.
+-- knows what it identifies").
 data Ref = Ref
   { refColumn :: FieldName
   , refTable :: TableName
@@ -121,13 +112,9 @@ data Table = Table
   }
   deriving (Eq, Show)
 
-data Scope = Scope
-  { sName :: ScopeName
-  , sTables :: [Table]
-  }
-  deriving (Eq, Show)
-
-newtype Schema = Schema {schScopes :: [Scope]}
+-- | The tables, in declaration order — which is also the order a state
+-- hash walks them.
+newtype Schema = Schema {schTables :: [Table]}
   deriving (Eq, Show)
 
 -- | Ascending or descending, for an order.
@@ -135,15 +122,7 @@ data Dir = Asc | Desc
   deriving (Eq, Ord, Show)
 
 lookupTable :: Schema -> TableName -> Maybe Table
-lookupTable sch n = find ((== n) . tName) (concatMap sTables (schScopes sch))
-
--- | The scope a table is in.
-tableScope :: Schema -> TableName -> Maybe ScopeName
-tableScope sch n =
-  sName <$> find (any ((== n) . tName) . sTables) (schScopes sch)
-
-scopeOf :: Schema -> ScopeName -> Maybe Scope
-scopeOf sch n = find ((== n) . sName) (schScopes sch)
+lookupTable sch n = find ((== n) . tName) (schTables sch)
 
 column :: Table -> FieldName -> Maybe Column
 column t n = find ((== n) . colName) (tColumns t)
@@ -188,8 +167,7 @@ data Relation = Relation
 relations :: Schema -> [Relation]
 relations sch =
   [ Relation (refTable r) (tName t) (refColumn r)
-  | sc <- schScopes sch
-  , t <- sTables sc
+  | t <- schTables sch
   , r <- tRefs t
   ]
 
@@ -204,8 +182,7 @@ parentOf sch c = filter ((== c) . relChild) (relations sch)
 -- | §2.3 Well-formedness. A module whose schema fails any of these is
 -- refused by the verifier before anything else is looked at.
 data SchemaError
-  = DuplicateScope ScopeName
-  | DuplicateTable TableName
+  = DuplicateTable TableName
   | DuplicateColumn TableName FieldName
   | NoKey TableName
   | UnknownKeyColumn TableName FieldName
@@ -214,15 +191,11 @@ data SchemaError
   | UnknownIndexColumn TableName FieldName
   | UnknownRefColumn TableName FieldName
   | UnknownRefTable TableName TableName
-  | RefAcrossScopes TableName TableName
   | RefToCompositeKey TableName TableName
   | RefTypeMismatch TableName FieldName Ty Ty
-  | -- | An id-typed column must be a key of its own table (@TId self@), a
-    -- reference within its scope, or name a table in /another/ scope —
-    -- the unchecked cross-scope reference the design allows (a playlist
-    -- item naming a track in the library scope). An id naming a table in
-    -- its own scope without a reference is a declaration the store could
-    -- not hold to.
+  | -- | An id-typed column must be a key of its own table (@TId self@) or
+    -- a reference. An id naming a table without a reference is a
+    -- declaration the store could not hold to.
     IdColumnWithoutRef TableName FieldName
   | -- | A reference column's id type names a table other than the one it
     -- references.
@@ -231,38 +204,34 @@ data SchemaError
 
 checkSchema :: Schema -> [SchemaError]
 checkSchema sch =
-  dupScopes ++ dupTables ++ concatMap perTable tables
+  dupTables ++ concatMap perTable tables
   where
-    scopes = schScopes sch
-    tables = [(sName sc, t) | sc <- scopes, t <- sTables sc]
-    dupScopes = [DuplicateScope n | n <- dups (map sName scopes)]
-    dupTables = [DuplicateTable (tName t) | t <- dups' (map snd tables)]
+    tables = schTables sch
+    dupTables = [DuplicateTable (tName t) | t <- dups' tables]
     dups xs = [x | (x, n) <- M.toList (M.fromListWith (+) [(x, 1 :: Int) | x <- xs]), n > 1]
     dups' ts = [t | t <- ts, tName t `elem` dups (map tName ts)]
-    perTable (scope, t) =
+    perTable t =
       [DuplicateColumn (tName t) c | c <- dups (map colName (tColumns t))]
         ++ [NoKey (tName t) | null (tKey t)]
         ++ [UnknownKeyColumn (tName t) k | k <- tKey t, not (has t k)]
         ++ [NullableKey (tName t) k | k <- tKey t, Just c <- [column t k], colNullable c]
         ++ [NonScalarColumn (tName t) (colName c) | c <- tColumns t, not (isScalar (colTy c))]
         ++ [UnknownIndexColumn (tName t) c | ix <- tIndexes t, c <- ixColumns ix, not (has t c)]
-        ++ concatMap (perRef scope t) (tRefs t)
+        ++ concatMap (perRef t) (tRefs t)
         ++ [ IdColumnWithoutRef (tName t) (colName c)
            | c <- tColumns t
            , TId of' <- [colTy c]
            , not (isRef t (colName c))
            , not (of' == tName t && colName c `elem` tKey t)
-           , tableScope sch of' == Just scope || tableScope sch of' == Nothing
            ]
     has t c = isJust (column t c)
     isRef t c = any ((== c) . refColumn) (tRefs t)
-    perRef scope t r =
+    perRef t r =
       case (column t (refColumn r), lookupTable sch (refTable r)) of
         (Nothing, _) -> [UnknownRefColumn (tName t) (refColumn r)]
         (_, Nothing) -> [UnknownRefTable (tName t) (refTable r)]
         (Just c, Just p) ->
-          [RefAcrossScopes (tName t) (refTable r) | tableScope sch (refTable r) /= Just scope]
-            ++ case keyTy p of
+          case keyTy p of
               [pk] ->
                 let want = case pk of
                       TId _ -> TId (refTable r)

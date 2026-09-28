@@ -68,12 +68,11 @@ toValue m =
     , ("live", list (\(n, t) -> node "frame" [("name", txt n), ("ty", tyValue t)]) (modLive m))
     ]
   where
-    router r = node "router" [("name", txt (rtName r)), ("scope", txt (rtScope r)), ("uses", list txt (rtUses r))]
+    router r = node "router" [("name", txt (rtName r)), ("uses", list txt (rtUses r))]
 
 schemaValue :: Schema -> Value
-schemaValue (Schema scopes) = list scope scopes
+schemaValue (Schema tables) = list table tables
   where
-    scope s = node "scope" [("name", txt (sName s)), ("tables", list table (sTables s))]
     table t =
       node
         "table"
@@ -112,7 +111,6 @@ functionValue deps fn0 =
     [ ("name", txt (fnName fn))
     , ("deps", VStruct deps)
     , ("kind", txt (kind (fnKind fn)))
-    , ("scope", maybe VNull txt (fnScope fn))
     , ("router", maybe VNull txt (fnRouter fn))
     , ("uses", list txt (fnUses fn))
     , ("autos", list auto (fnAutos fn))
