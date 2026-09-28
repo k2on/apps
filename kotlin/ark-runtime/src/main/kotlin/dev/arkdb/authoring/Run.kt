@@ -223,3 +223,14 @@ public fun refuse(why: String): Effect {
     (run as Emitting).stmt(Stmt.Refuse(Expr.Lit(Value.VText(why))))
     return Effect.DONE
 }
+
+/** `SRefuse msg`: refused with a message computed from the entry, as Rust's and Swift's `refuse` take. */
+public fun refuse(why: Text): Effect {
+    val run = Run.current()
+    if (run.native) {
+        run.flush()
+        throw Fault.refuse(valueOf(why))
+    }
+    (run as Emitting).stmt(Stmt.Refuse(exprOf(why)))
+    return Effect.DONE
+}
