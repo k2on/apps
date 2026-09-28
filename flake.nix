@@ -43,7 +43,7 @@
 
       # The Rust workspace is `rust/`, and harken's four crates join it from
       # `harken/` by path, so both trees are the source of every Rust build.
-      rustDirs = [ "rust" "harken/domain" "harken/server" ];
+      rustDirs = [ "rust" "harken/domain" "harken/server" "harken/iced" ];
 
       # The wasm-bindgen CLI must be the exact version of the `wasm-bindgen`
       # crate the workspace locked, or the glue it writes does not match the
@@ -83,10 +83,13 @@
             doCheck = false;
           } // removeAttrs args [ "pname" "flags" ]);
 
-          # The browser peer: `harken/web` compiled to wasm32, bound by
-          # wasm-bindgen, its page bundled by esbuild — one static directory.
-          # The toolchain is the workspace's with the wasm target added, and
-          # the CLI is built from the crate at the version the lockfile names.
+          # The browser peer: `harken/iced` compiled to wasm32 and bound by
+          # wasm-bindgen, beside its page — one static directory. The same
+          # crate as the desktop; `demo` is the seeded library with no
+          # server that Pages publishes, and without it the page signs in
+          # against the server it is served from. The toolchain is the
+          # workspace's with the wasm target added, and the CLI is built from
+          # the crate at the version the lockfile names.
           wasmRust = rust.override { targets = [ "wasm32-unknown-unknown" ]; };
           wasmPlatform = pkgs.makeRustPlatform { cargo = wasmRust; rustc = wasmRust; };
           wasm-bindgen-cli = pkgs.wasm-bindgen-cli.override ({
@@ -94,40 +97,53 @@
             version = wasmBindgenVersion;
           } // (wasmBindgenHashes.${wasmBindgenVersion}
             or (throw "flake.nix: no hashes for wasm-bindgen ${wasmBindgenVersion}; add them to wasmBindgenHashes")));
-          harken-web = wasmPlatform.buildRustPackage {
-            pname = "harken-web";
+          icedWeb = { pname, demo }: wasmPlatform.buildRustPackage {
+            inherit pname;
             version = "0.1.0";
             src = only rustDirs;
             sourceRoot = "source/rust";
             cargoLock.lockFile = ./rust/Cargo.lock;
-            nativeBuildInputs = [ wasm-bindgen-cli pkgs.binaryen pkgs.esbuild pkgs.typescript ];
-            # Not cargoBuildHook: it targets the host, and this crate is only
-            # ever the wasm. The type check is what says the page calls
-            # exports the module has, against the `.d.ts` wasm-bindgen wrote.
+            nativeBuildInputs = [ wasm-bindgen-cli pkgs.binaryen ];
+            # Not cargoBuildHook: it targets the host, and this is the wasm.
             buildPhase = ''
               runHook preBuild
-              cargo build --release --offline --frozen -p harken-web --target wasm32-unknown-unknown
-              wasm-bindgen --target web --out-dir pkg --out-name harken_web \
-                target/wasm32-unknown-unknown/release/harken_web.wasm
+              cargo build --release --offline --frozen -p harken-iced \
+                ${lib.optionalString demo "--features demo"} --target wasm32-unknown-unknown
+              wasm-bindgen --target web --no-typescript --out-dir pkg \
+                target/wasm32-unknown-unknown/release/harken-iced.wasm
               wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int \
-                -o pkg/harken_web_bg.wasm pkg/harken_web_bg.wasm
-              # The page, writable, with the glue beside app.ts so tsc resolves
-              # `./harken_web.js` to the `.d.ts` this build just wrote.
-              cp -r --no-preserve=mode ../harken/web page
-              cp pkg/harken_web.d.ts pkg/harken_web.js page/src/
-              (cd page && tsc -p .)
-              esbuild page/src/app.ts --bundle --format=esm --target=es2022 \
-                --external:./harken_web.js --outfile=pkg/app.js
+                --enable-sign-ext --enable-mutable-globals --enable-reference-types \
+                -o pkg/harken-iced_bg.wasm pkg/harken-iced_bg.wasm
               runHook postBuild
             '';
+            # The page names the module and the wasm with `?v=dev`; this
+            # output's own hash replaces it, so a browser holding an older
+            # build is sent URLs its cache has never seen (harken/iced/web).
             installPhase = ''
               runHook preInstall
               mkdir -p $out
-              cp pkg/app.js pkg/harken_web.js pkg/harken_web_bg.wasm $out/
-              cp page/index.html page/style.css $out/
+              cp -r pkg $out/
+              cp ../harken/iced/web/index.html ../harken/iced/web/favicon.svg $out/
+              substituteInPlace $out/index.html --replace-fail "v=dev" "v=$(basename $out | cut -c1-32)"
               runHook postInstall
             '';
             doCheck = false;
+          };
+          # What GitHub Pages publishes.
+          harken-web = icedWeb { pname = "harken-web"; demo = true; };
+          # What harken-server serves as its web directory.
+          harken-web-server = icedWeb { pname = "harken-web-server"; demo = false; };
+
+          # The desktop window. winit and wgpu open the display and the GPU
+          # by dlopen at run time, so the libraries go on the library path.
+          harken-iced = crate {
+            pname = "harken-iced";
+            nativeBuildInputs = [ pkgs.makeWrapper ];
+            postFixup = lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
+              wrapProgram $out/bin/harken-iced --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath (with pkgs; [
+                wayland libxkbcommon vulkan-loader libGL xorg.libX11 xorg.libXcursor xorg.libXi xorg.libXrandr
+              ])}
+            '';
           };
 
           # The specification and arkc, one Haskell package: `ark-spec` holds
@@ -302,7 +318,7 @@
             # `nix run .#harken-serve [ADDR]`: the dev server, anyone is
             # whoever they say.
             harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { harken-server = crate { pname = "harken-server"; }; };
-            inherit harken-web;
+            inherit harken-web harken-web-server harken-iced;
             arkdb-swift = swift;
             default = ark-spec;
             inherit harken-apk;
@@ -328,6 +344,11 @@
               preCheck = ''
                 cargo fmt --all --check
                 cargo clippy --workspace --all-targets --offline -- -D warnings
+                cargo clippy -p harken-iced --features demo --all-targets --offline -- -D warnings
+              '';
+              # The client's demo is a feature, so its tests are a second run.
+              postCheck = ''
+                cargo test -p harken-iced --features demo --offline
               '';
               installPhase = "touch $out";
             };
@@ -373,10 +394,10 @@
               packages = [ pkgs.kotlin pkgs.gradle pkgs.jdk21 ];
             };
             # What `nix build .#harken-web` builds with, for doing it by hand
-            # (harken/web/README.md); pages.yml also keeps it as a gc root so
+            # (harken/iced/README.md); pages.yml also keeps it as a gc root so
             # the cached store holds the wasm-bindgen CLI it compiled.
             harken-web = pkgs.mkShell {
-              packages = [ wasmRust wasm-bindgen-cli pkgs.binaryen pkgs.esbuild pkgs.typescript ];
+              packages = [ wasmRust wasm-bindgen-cli pkgs.binaryen ];
             };
             default = pkgs.mkShell {
               packages = [ pkgs.cabal-install rust pkgs.kotlin pkgs.jdk21 ];
