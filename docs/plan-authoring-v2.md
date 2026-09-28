@@ -63,15 +63,11 @@ step 2 lands. `spec/GENERATED.md` and `spec/generated/` are stale.
 
 ## Two things the previous session could not finish
 
-- **The two workflow files cannot be pushed from here.** Both the git
-  token and the GitHub connector lack the `workflow` scope, so any commit
-  that creates *or updates* a file under `.github/workflows/` is rejected
-  (probed against the user's own `ci.yaml`: refused). The finished files
-  are committed as `.github/pending-workflows/{apk,pages}.yml`; moving
-  them into `.github/workflows/` is one `git mv` the user runs, or a
-  token with the scope. The working-tree copies under `.github/workflows/`
-  are kept out of `git status` by `.git/info/exclude`. Say so plainly in
-  the final report rather than retrying.
+- **The two workflows are in place.** The user created
+  `.github/workflows/apk.yml` and `pages.yml` on GitHub from the parked
+  copies. This session's tokens still cannot create or update a file
+  under `.github/workflows/` (no `workflow` scope), so any later change to
+  them has to be handed to the user as a diff.
 - **A `git reset --hard` reverted the agents' uncommitted edits once**
   (to the wip snapshot `08af367`); each agent was told which files and
   asked to re-apply and to commit its own files by path from then on.
