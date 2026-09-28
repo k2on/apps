@@ -17,10 +17,6 @@
 // A row's columns are `pub const id: Col<..>` beside its fields, named as
 // the fields are: the canonical spelling, not a Rust constant's.
 #![allow(non_upper_case_globals)]
-// A write mid-body is a statement: it is made when it is dropped at the
-// `;`. `Write` asks to be used so that `.on(..)` is said before that, and
-// the domain's bodies write several rows each.
-#![allow(unused_must_use)]
 
 pub mod keys;
 pub mod library;

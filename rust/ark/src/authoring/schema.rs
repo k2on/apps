@@ -796,7 +796,6 @@ enum WriteKind {
 /// An insert or an upsert, written when it is finished: returned from a
 /// body or a `when`, or dropped at the end of its statement — so `.on(..)`
 /// can still be said after it.
-#[must_use = "a write is made when it is returned or dropped; say .on(..) before that"]
 pub struct Write<T: Row> {
     kind: WriteKind,
     row: H,
