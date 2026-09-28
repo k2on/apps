@@ -49,7 +49,7 @@ rust/                       the shared Rust crates (one cargo workspace; apps jo
   ark-auth/                 who a peer is: sessions, OIDC, login/exchange, the
                             desktop's loopback flow and the page's redirect flow
   arkui/                    the ui: iced components, the vim keyboard, theming,
-                            icons (Lucide, vendored), the typeface (Inter), routing
+                            the glyph table and icon widget, routing
 swift/, kotlin/             the shared phone runtimes (exist)
 harken/                     an app: domain/, server/, iced/, ios/, android/
 ```
@@ -94,6 +94,11 @@ coordinator (the main session) first.
 **Phase 3 — coordinator**: `flake.nix` (`harken-web` is the iced demo —
 the Pages workflow builds that attribute and cannot be edited from here;
 `harken-iced`, `harken-server`, checks), `nix flake check`, docs, push.
+
+Icons and the typeface are out of scope (the user's call): arkui carries
+harken's existing generated glyph table as it is, with no vendored icon set,
+no normalisation and no geometry test; text is iced's bundled face (the
+`fira-sans` feature, because a browser with no embedded font draws no text).
 
 ## Rules every agent keeps
 
