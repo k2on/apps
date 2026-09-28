@@ -1,0 +1,680 @@
+//! The peer: one replica per scope of an app's module, persisted; the
+//! engine's `Client` around them; a local authority per scope when there is
+//! no server; the link to the server when there is one; and what a screen
+//! does — mutate, query, check, hold a view.
+
+use std::collections::BTreeMap;
+
+use ark::canon;
+use ark::eval::{self, Args, Checked, Ctx, EvalFault};
+use ark::log::{snapshot_of, Log, Seq};
+use ark::peer::{local_commit, Authority, Replica};
+use ark::protocol::{Client, ClientMsg, Mode, ServerMsg};
+use ark::schema::{Schema, ScopeName};
+use ark::store::{MemoryStore, Refusal};
+use ark::value::{Id, Value};
+
+use crate::autos::Autos;
+use crate::link::{platform_dial, Dial, Link, State, Timing};
+use crate::storage::{BoxStorage, Memory, ReplicaFile};
+use crate::view::View;
+use crate::{Domain, Error};
+
+/// How a peer is opened.
+#[derive(Clone, Debug)]
+pub struct Options {
+    /// Who authors: the entry's actor. Under `ark-auth` the login's
+    /// `user.id`; under the engine's dev `trusting`, the token.
+    pub user: String,
+    /// The login it authors under: `Login::session`, or `"dev"` under
+    /// `trusting`. The server holds every pushed entry to both.
+    pub session: String,
+    /// What the `Hello` proves the login with.
+    pub token: Option<String>,
+    /// No server: this peer is the authority for every scope, and nothing
+    /// stays pending (the demo, a peer working alone).
+    pub alone: bool,
+    pub autos: Autos,
+    pub timing: Timing,
+}
+
+impl Options {
+    /// A peer that syncs with a server, as `user` under `session`, proving
+    /// it with `token`.
+    pub fn server(user: impl Into<String>, session: impl Into<String>, token: Option<String>) -> Options {
+        Options {
+            user: user.into(),
+            session: session.into(),
+            token,
+            alone: false,
+            autos: Autos::system(),
+            timing: Timing::default(),
+        }
+    }
+
+    /// Dev auth (`ark::protocol::trusting`): the token is the name and the
+    /// session is `"dev"`.
+    pub fn dev(user: impl Into<String>) -> Options {
+        let user = user.into();
+        Options::server(user.clone(), "dev", Some(user))
+    }
+
+    /// A peer that is its own authority.
+    pub fn alone(user: impl Into<String>) -> Options {
+        Options {
+            alone: true,
+            ..Options::server(user, "local", None)
+        }
+    }
+
+    pub fn with_autos(mut self, autos: Autos) -> Options {
+        self.autos = autos;
+        self
+    }
+
+    pub fn with_timing(mut self, timing: Timing) -> Options {
+        self.timing = timing;
+        self
+    }
+}
+
+/// A verdict against one of this peer's own intents: it will never be in
+/// the log.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Rejection {
+    pub id: Id,
+    pub reason: String,
+}
+
+/// What the rows have done since the last ask, per scope: the changes to a
+/// scope's optimistic store, or `Rebuilt` — a rebase rolled it back and
+/// replayed on top, which no list of changes describes, so a view re-reads.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Changes {
+    pub scopes: BTreeMap<ScopeName, ark::peer::Changes>,
+}
+
+impl Changes {
+    /// Nothing moved anywhere.
+    pub fn is_empty(&self) -> bool {
+        self.scopes.is_empty()
+    }
+
+    /// Whether this scope moved at all.
+    pub fn moved(&self, scope: &str) -> bool {
+        self.scopes.contains_key(scope)
+    }
+
+    /// Whether any scope was rebuilt.
+    pub fn rebuilt(&self) -> bool {
+        self.scopes.values().any(|c| matches!(c, ark::peer::Changes::Rebuilt))
+    }
+}
+
+/// What one [`Peer::pump`] came to.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Pumped {
+    /// A frame arrived (the log, an ack, a live frame).
+    pub moved: bool,
+    /// The socket opened, and `Hello` went out.
+    pub opened: bool,
+    /// The socket that was open went, and why. The link dials again.
+    pub dropped: Option<String>,
+    /// The server turned this login away. The link stops; a new token and
+    /// [`Peer::reconnect`] are the way back. Nothing pending is lost.
+    pub denied: Option<String>,
+    /// Verdicts that arrived.
+    pub rejected: usize,
+    /// Something went wrong that is worth a status line: a frame that did
+    /// not decode, a replica that could not be written.
+    pub note: Option<String>,
+}
+
+/// Everything a status line or a debug screen shows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Status {
+    pub user: String,
+    pub session: String,
+    pub alone: bool,
+    /// The engine is linked: the socket is open and `Hello` was said.
+    pub linked: bool,
+    /// The link in a word: `alone`, `offline`, `idle`, `connecting`, `open`,
+    /// `waiting`.
+    pub link: String,
+    pub url: Option<String>,
+    /// Connections opened.
+    pub opens: u64,
+    /// The connection count the engine keeps: what a live room compares.
+    pub epoch: i64,
+    pub cursors: BTreeMap<ScopeName, Seq>,
+    pub pending: usize,
+    pub diverged: usize,
+    pub denied: Option<String>,
+    pub last_close: Option<String>,
+    /// Live frames received, decoded or not.
+    pub heard_frames: u64,
+    pub bad_frames: u64,
+}
+
+/// One peer of an app. See the crate docs for the shape.
+pub struct Peer {
+    domain: Domain,
+    schema: Schema,
+    client: Client,
+    authorities: BTreeMap<ScopeName, Authority>,
+    storage: BoxStorage,
+    ctx: Ctx,
+    autos: Autos,
+    timing: Timing,
+    alone: bool,
+    written: BTreeMap<ScopeName, (Seq, Vec<Id>)>,
+    link: Option<Link>,
+    rejections: Vec<Rejection>,
+    heard_frames: u64,
+    bad_frames: u64,
+}
+
+impl std::fmt::Debug for Peer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Peer").field("ctx", &self.ctx).field("alone", &self.alone).field("link", &self.link).finish()
+    }
+}
+
+fn mode_word(alone: bool) -> &'static str {
+    if alone {
+        "alone"
+    } else {
+        "server"
+    }
+}
+
+impl Peer {
+    /// Open every scope of the module from `storage` (or empty), replay
+    /// what was pending on top, and — alone — sequence it. No socket yet:
+    /// [`Peer::connect`] dials.
+    pub fn open(domain: Domain, storage: BoxStorage, opts: Options) -> Result<Peer, Error> {
+        let schema = domain.module().schema.clone();
+        let mut client = Client::open(schema.clone(), opts.token.clone());
+        let mut authorities = BTreeMap::new();
+        let mut written = BTreeMap::new();
+        let natives = domain.native_list();
+        for scope in domain.scopes() {
+            let key = ReplicaFile::key(&scope);
+            let (confirmed, cursor, pending) = match storage.load(&key)? {
+                Some(bytes) => {
+                    let f = ReplicaFile::decode(&bytes, &schema)?;
+                    if f.mode != mode_word(opts.alone) {
+                        return Err(Error::ModeMismatch {
+                            was: f.mode,
+                            now: mode_word(opts.alone).into(),
+                        });
+                    }
+                    (f.confirmed, f.cursor, f.pending)
+                }
+                None => (MemoryStore::empty(schema.clone()), 0, vec![]),
+            };
+            written.insert(scope.clone(), (cursor, pending.iter().map(|e| e.id).collect()));
+            if opts.alone {
+                let mut a = Authority::new(schema.clone(), &scope, domain.closures().clone());
+                a.log = Log {
+                    base: snapshot_of(cursor, confirmed.clone()),
+                    entries: BTreeMap::new(),
+                    ids: BTreeMap::new(),
+                };
+                a.store = confirmed.clone();
+                a.hold(natives.iter().cloned());
+                authorities.insert(scope.clone(), a);
+            }
+            let mut r = Replica::open(schema.clone(), &scope, domain.closures().clone(), confirmed, cursor, pending);
+            r.hold(natives.iter().cloned());
+            client.subscribe(Mode::Whole, r);
+        }
+        let mut peer = Peer {
+            domain,
+            schema,
+            client,
+            authorities,
+            storage,
+            ctx: Ctx::new(opts.user, opts.session),
+            autos: opts.autos,
+            timing: opts.timing,
+            alone: opts.alone,
+            written,
+            link: None,
+            rejections: vec![],
+            heard_frames: 0,
+            bad_frames: 0,
+        };
+        // Alone, whatever a previous run left pending is sequenced now.
+        peer.commit_alone();
+        peer.collect_rejections();
+        peer.persist()?;
+        // Opening replayed pending on top of confirmed: a view hydrates from
+        // here, so that `Rebuilt` is nobody's news.
+        let _ = peer.take_changes();
+        Ok(peer)
+    }
+
+    /// In memory: nothing survives the peer. Tests and the demo.
+    pub fn open_memory(domain: Domain, opts: Options) -> Result<Peer, Error> {
+        Peer::open(domain, Box::new(Memory::new()), opts)
+    }
+
+    /// A directory of replica files (`<scope>.replica`).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn open_path(domain: Domain, dir: impl Into<std::path::PathBuf>, opts: Options) -> Result<Peer, Error> {
+        Peer::open(domain, Box::new(crate::storage::Dir(dir.into())), opts)
+    }
+
+    /// The browser's `localStorage`, under keys starting `ark:{name}:`.
+    #[cfg(target_arch = "wasm32")]
+    pub fn open_local(domain: Domain, name: &str, opts: Options) -> Result<Peer, Error> {
+        let prefix = format!("ark:{name}:");
+        Peer::open(domain, Box::new(crate::storage::Local { prefix }), opts)
+    }
+
+    pub fn domain(&self) -> &Domain {
+        &self.domain
+    }
+
+    pub fn schema(&self) -> &Schema {
+        &self.schema
+    }
+
+    /// Who this peer authors as.
+    pub fn ctx(&self) -> &Ctx {
+        &self.ctx
+    }
+
+    pub fn is_alone(&self) -> bool {
+        self.alone
+    }
+
+    /// Author under this login from now on (entries already pending keep
+    /// the session they were authored under).
+    pub fn set_session(&mut self, session: impl Into<String>) {
+        self.ctx.session = session.into();
+    }
+
+    /// What the next `Hello` proves the login with. Say [`Peer::reconnect`]
+    /// for it to be said now.
+    pub fn set_token(&mut self, token: Option<String>) {
+        self.client.token = token;
+    }
+
+    // -- a screen's side ------------------------------------------------------
+
+    /// Author an intent by name: its autos drawn here, once, frozen in the
+    /// entry; applied to the optimistic store natively (or through the
+    /// interpreter); kept durable as pending; pushed if linked. The entry's
+    /// id, or the refusal — a refusal changes nothing and records nothing.
+    pub fn mutate(&mut self, name: &str, args: Args) -> Result<Id, Error> {
+        let (fh, f) = self.domain.mutator(name)?;
+        let (fh, f) = (fh.clone(), f.clone());
+        let scope = f.scope.clone().expect("a mutator has a scope");
+        let autos = self.autos.draw(&f);
+        let id = self.autos.new_id();
+        self.client.mutate(&scope, id, &self.ctx, &fh, &autos, &args).map_err(Error::Refused)?;
+        self.commit_alone();
+        self.collect_rejections();
+        self.persist()?;
+        Ok(id)
+    }
+
+    /// Run a query by name over its scope's optimistic store, as this
+    /// peer's user.
+    pub fn query(&self, name: &str, args: &Args) -> Result<Value, Error> {
+        let (fh, f) = self.domain.query(name)?;
+        let store = self.scope_store(f.scope.as_deref().expect("a query has a scope"))?;
+        let out = match self.domain.natives().get(fh) {
+            Some(p) => p.query(&self.ctx, args, store),
+            None => eval::query_closure(&self.schema, &self.domain.closures()[fh], &self.ctx, args, store),
+        };
+        out.map_err(|e| match e {
+            EvalFault::Verdict(r) => Error::Refused(r),
+            EvalFault::Bug(b) => Error::Bug(format!("{name}: {b:?}")),
+        })
+    }
+
+    /// The form validator (`spec/AUTHORING.md` §1.3) over a partial input
+    /// to a mutator or query: a message per failing field, and the values
+    /// as the checks normalised them. Nothing is written.
+    pub fn check(&self, name: &str, partial: &Args) -> Result<Checked, Error> {
+        let (fh, f) = self.domain.function(name).ok_or_else(|| Error::UnknownFunction(name.into()))?;
+        let scope = f.scope.as_deref().ok_or_else(|| Error::NotA(name.into(), "procedure"))?;
+        let store = self.scope_store(scope)?;
+        eval::check(&self.schema, &self.domain.closures()[fh], &self.ctx, partial, store).map_err(|b| Error::Bug(format!("{name}: {b:?}")))
+    }
+
+    /// A query held as a list and kept up to date: see [`View`].
+    pub fn view(&self, name: &str, args: Args) -> Result<View, Error> {
+        View::open(self, name, args)
+    }
+
+    /// A scope's optimistic store — `confirmed` with `pending` replayed —
+    /// which every query reads.
+    pub fn store(&self, scope: &str) -> Option<&MemoryStore> {
+        self.client.scopes.get(scope).map(|(r, _)| &r.view)
+    }
+
+    pub(crate) fn scope_store(&self, scope: &str) -> Result<&MemoryStore, Error> {
+        self.store(scope).ok_or_else(|| Error::Bug(format!("no replica of scope {scope}")))
+    }
+
+    /// A scope's replica, to look at.
+    pub fn replica(&self, scope: &str) -> Option<&Replica> {
+        self.client.scopes.get(scope).map(|(r, _)| r)
+    }
+
+    /// What moved since the last ask, per scope. Hand it to every
+    /// [`View::update`].
+    pub fn take_changes(&mut self) -> Changes {
+        let mut out = Changes::default();
+        for (s, (r, _)) in self.client.scopes.iter_mut() {
+            match r.take_changes() {
+                ark::peer::Changes::Applied(chs) if chs.is_empty() => {}
+                c => {
+                    out.scopes.insert(s.clone(), c);
+                }
+            }
+        }
+        out
+    }
+
+    /// Verdicts against this peer's intents since the last ask.
+    pub fn take_rejections(&mut self) -> Vec<Rejection> {
+        self.collect_rejections();
+        std::mem::take(&mut self.rejections)
+    }
+
+    /// Intents authored here and not yet answered, over every scope.
+    pub fn pending_len(&self) -> usize {
+        self.client.scopes.values().map(|(r, _)| r.pending.len()).sum()
+    }
+
+    /// The last confirmed sequence of a scope.
+    pub fn cursor(&self, scope: &str) -> Option<Seq> {
+        self.replica(scope).map(|r| r.cursor)
+    }
+
+    /// Ask the authority whether it agrees with every scope's confirmed
+    /// state; the answers arrive in [`Peer::agreed`]. Alone, at once.
+    pub fn verify(&mut self) {
+        if !self.alone {
+            self.client.verify_all();
+            return;
+        }
+        for (s, (r, _)) in &self.client.scopes {
+            let (n, h) = r.verify_at();
+            let ok = self.authorities.get(s).and_then(|a| a.log.state_at(n)).map(|st| ark::hash::state_hash(&st)) == Some(h);
+            self.client.agreed.push((s.clone(), n, ok));
+        }
+    }
+
+    /// Every `(scope, seq, agreed)` the authority has answered.
+    pub fn agreed(&self) -> &[(ScopeName, Seq, bool)] {
+        &self.client.agreed
+    }
+
+    // -- the live channel -------------------------------------------------------
+
+    /// Say a frame to this account's room. Dropped, not queued, while
+    /// unlinked: "pause" is not worth saying on Friday.
+    pub fn say(&mut self, frame: Vec<u8>) {
+        self.client.say(frame);
+    }
+
+    /// Say an ArkDB value, as its canonical CBOR.
+    pub fn say_value(&mut self, v: &Value) {
+        self.say(canon::encode(v));
+    }
+
+    /// What the room said since the last ask. Never durable: a frame is
+    /// about now, and a reconnect clears what was not taken.
+    pub fn heard(&mut self) -> Vec<Vec<u8>> {
+        self.client.take_heard()
+    }
+
+    /// [`Peer::heard`], each decoded as canonical CBOR; a frame that does
+    /// not decode is dropped (a newer peer's sentence) and counted.
+    pub fn heard_values(&mut self) -> Vec<Value> {
+        let mut out = vec![];
+        for f in self.heard() {
+            match canon::decode(&f) {
+                Ok(v) => out.push(v),
+                Err(_) => self.bad_frames += 1,
+            }
+        }
+        out
+    }
+
+    /// How many connections this peer has had: a live room that has never
+    /// heard of this device is one whose epoch this peer has not introduced
+    /// itself on.
+    pub fn epoch(&self) -> i64 {
+        self.client.epoch
+    }
+
+    /// Whether the engine is linked: the socket is open and `Hello` said.
+    pub fn linked(&self) -> bool {
+        self.client.linked
+    }
+
+    // -- the socket ---------------------------------------------------------------
+
+    /// Dial the server's sync socket (`ws://host/sync`) and keep it up:
+    /// every [`Peer::pump`] moves frames, and a drop dials again with a
+    /// backoff. Replaces any link there was.
+    pub fn connect(&mut self, url: &str) {
+        let dial = platform_dial(&self.timing);
+        self.connect_with(url, dial);
+    }
+
+    /// [`Peer::connect`] over a transport of the caller's.
+    pub fn connect_with(&mut self, url: &str, dial: Dial) {
+        self.disconnect();
+        self.client.denied = None;
+        self.link = Some(Link::new(url, dial, self.timing.clone()));
+    }
+
+    /// Go offline: close the socket and stop dialling. Everything authored
+    /// meanwhile is pending, durable, and pushed on the next connection.
+    pub fn disconnect(&mut self) {
+        if let Some(link) = &mut self.link {
+            link.stop("offline");
+        }
+        if self.client.linked {
+            self.client.disconnected();
+        }
+    }
+
+    /// Dial again after [`Peer::disconnect`] or a denial — with a new token,
+    /// usually.
+    pub fn reconnect(&mut self) {
+        self.client.denied = None;
+        if let Some(link) = &mut self.link {
+            if link.is_open() {
+                link.stop("reconnecting");
+                self.client.disconnected();
+            }
+            link.resume();
+        }
+    }
+
+    /// The link, if [`Peer::connect`] made one.
+    pub fn link(&self) -> Option<&Link> {
+        self.link.as_ref()
+    }
+
+    /// One turn of the link: dial if due, hand the engine what arrived,
+    /// send what it queued, and write whatever moved. Call it on a tick
+    /// (fifty milliseconds is what the clients here use).
+    pub fn pump(&mut self) -> Pumped {
+        let mut p = Pumped::default();
+        let Some(link) = &mut self.link else {
+            return p;
+        };
+        let polled = link.poll();
+        if polled.opened {
+            self.client.connected();
+            p.opened = true;
+        }
+        for f in polled.frames {
+            p.moved = true;
+            if let Err(e) = self.recv_frame(&f) {
+                p.note = Some(e.to_string());
+            }
+        }
+        if let Some(why) = polled.closed {
+            self.client.disconnected();
+            p.dropped = Some(why);
+        }
+        if let Some(reason) = self.client.denied.clone() {
+            if let Some(link) = &mut self.link {
+                if link.state() != &State::Idle {
+                    link.stop(&format!("denied: {reason}"));
+                    p.denied = Some(reason);
+                }
+            }
+        }
+        let frames = self.take_outgoing_frames();
+        if let Some(link) = &mut self.link {
+            for f in frames {
+                link.send(f);
+            }
+        }
+        let before = self.rejections.len();
+        self.collect_rejections();
+        p.rejected = self.rejections.len() - before;
+        if let Err(e) = self.persist() {
+            p.note = Some(e.to_string());
+        }
+        p
+    }
+
+    /// Why the server last turned this login away, until a reconnect.
+    pub fn denied(&self) -> Option<&str> {
+        self.client.denied.as_deref()
+    }
+
+    // -- sans-io: for a transport of the caller's own ---------------------------
+
+    /// A connection opened: `Hello` for every scope, then everything pending.
+    pub fn connected(&mut self) {
+        self.client.connected();
+    }
+
+    /// The connection is gone; what was queued is dropped.
+    pub fn disconnected(&mut self) {
+        self.client.disconnected();
+    }
+
+    /// A message from the server.
+    pub fn recv(&mut self, msg: ServerMsg) {
+        if matches!(msg, ServerMsg::Heard { .. }) {
+            self.heard_frames += 1;
+        }
+        self.client.recv(msg);
+    }
+
+    /// A binary frame from the server: canonical CBOR of a `ServerMsg`.
+    pub fn recv_frame(&mut self, bytes: &[u8]) -> Result<(), Error> {
+        let msg = canon::decode(bytes)
+            .map_err(|e| e.to_string())
+            .and_then(|v| ServerMsg::from_value(&v).map_err(|e| e.to_string()))
+            .map_err(|e| {
+                self.bad_frames += 1;
+                Error::Corrupt(format!("a frame from the server: {e}"))
+            })?;
+        self.recv(msg);
+        Ok(())
+    }
+
+    /// What the engine queued, oldest first. Empty while unlinked.
+    pub fn take_outgoing(&mut self) -> Vec<ClientMsg> {
+        self.client.take_outgoing()
+    }
+
+    /// [`Peer::take_outgoing`], each as its wire bytes.
+    pub fn take_outgoing_frames(&mut self) -> Vec<Vec<u8>> {
+        self.client.take_outgoing().iter().map(|m| canon::encode(&m.to_value())).collect()
+    }
+
+    /// Write every scope whose cursor or pending moved since it was last
+    /// written. `mutate` and `pump` call it; a caller driving the sans-io
+    /// half by hand calls it after `recv`.
+    pub fn persist(&mut self) -> Result<(), Error> {
+        for (name, (r, _)) in &self.client.scopes {
+            let now = (r.cursor, r.pending.iter().map(|e| e.id).collect::<Vec<Id>>());
+            if self.written.get(name) == Some(&now) {
+                continue;
+            }
+            let file = ReplicaFile {
+                scope: name.clone(),
+                mode: mode_word(self.alone).into(),
+                cursor: r.cursor,
+                confirmed: r.confirmed.clone(),
+                pending: r.pending.clone(),
+            };
+            self.storage.save(&ReplicaFile::key(name), &file.encode())?;
+            self.written.insert(name.clone(), now);
+        }
+        Ok(())
+    }
+
+    pub fn status(&self) -> Status {
+        let link = match (&self.link, self.alone) {
+            (_, true) => "alone",
+            (None, false) => "offline",
+            (Some(l), false) => match l.state() {
+                State::Idle => "idle",
+                State::Connecting => "connecting",
+                State::Open => "open",
+                State::Waiting(_) => "waiting",
+            },
+        };
+        Status {
+            user: self.ctx.user.clone(),
+            session: self.ctx.session.clone(),
+            alone: self.alone,
+            linked: self.client.linked,
+            link: link.into(),
+            url: self.link.as_ref().map(|l| l.url().to_string()),
+            opens: self.link.as_ref().map_or(0, |l| l.opens),
+            epoch: self.client.epoch,
+            cursors: self.client.scopes.iter().map(|(s, (r, _))| (s.clone(), r.cursor)).collect(),
+            pending: self.pending_len(),
+            diverged: self.client.scopes.values().map(|(r, _)| r.diverged.len()).sum(),
+            denied: self.client.denied.clone(),
+            last_close: self.link.as_ref().and_then(|l| l.last_close.clone()),
+            heard_frames: self.heard_frames,
+            bad_frames: self.bad_frames,
+        }
+    }
+
+    // -- inside -------------------------------------------------------------------
+
+    fn commit_alone(&mut self) {
+        for (scope, a) in &mut self.authorities {
+            if let Some((r, _)) = self.client.scopes.get_mut(scope) {
+                local_commit(a, r);
+            }
+        }
+    }
+
+    fn collect_rejections(&mut self) {
+        for (r, _) in self.client.scopes.values_mut() {
+            for (id, why) in std::mem::take(&mut r.rejections) {
+                self.rejections.push(Rejection {
+                    id,
+                    reason: refusal_text(&why),
+                });
+            }
+        }
+    }
+}
+
+/// A verdict as a person reads it.
+pub fn refusal_text(r: &Refusal) -> String {
+    eval::refusal_text(r)
+}

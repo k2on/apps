@@ -9,9 +9,6 @@ description = "A Rust peer on ArkDB, for any app's module: replicas persisted on
 default = ["tls"]
 # `wss://` natively (rustls with ring). The browser brings its own TLS.
 tls = ["tungstenite/rustls-tls-webpki-roots", "dep:rustls"]
-# The demo module of spec/AUTHORING.md Appendix B, as `ark_client::demo`:
-# what this crate's and ark-server's tests run against. No app ships it.
-demo = []
 
 [dependencies]
 ark = { path = "../ark" }
@@ -28,5 +25,4 @@ wasm-bindgen = "0.2"
 web-sys = { version = "0.3", features = ["BinaryType", "CloseEvent", "ErrorEvent", "MessageEvent", "Storage", "WebSocket", "Window"] }
 
 [dev-dependencies]
-ark-client = { path = ".", features = ["demo"] }
 tempfile = "3"
