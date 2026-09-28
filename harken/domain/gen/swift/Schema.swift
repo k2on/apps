@@ -17,7 +17,10 @@ public struct Playlists {
 extension Playlists: Scope {
     public static let NAME = "playlists"
     public static func open() -> Self {
-        Playlists(playlist: table(), playlistItem: table())
+        Playlists(
+            playlist: table(),
+            playlistItem: table()
+        )
     }
 }
 

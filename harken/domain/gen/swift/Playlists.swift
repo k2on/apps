@@ -15,9 +15,7 @@ public struct OnPlaylist {
 }
 extension OnPlaylist: Input {
     public static var schema: Object<Self> {
-        object()
-            .field("playlist_id", id(Playlist.self).exists())
-            .field("track_id", id(Track.self))
+        object().field("playlist_id", id(Playlist.self).exists()).field("track_id", id(Track.self))
     }
 }
 
@@ -68,10 +66,7 @@ public func playlists() -> Router<Playlists> {
             db.playlistItem.delete(playlist.id, input.trackId)
         },
         signedIn.query("playlists") { ctx, db, _ in
-            db.playlist
-                .filter(Playlist.userId.eq(ctx.user))
-                .orderBy(Playlist.name.asc())
-                .all()
+            db.playlist.filter(Playlist.userId.eq(ctx.user)).orderBy(Playlist.name.asc()).all()
         },
         owned.input(PlaylistId.self).query("playlist_items") { _, db, _, playlist in
             db.playlistItem
