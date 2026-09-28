@@ -43,6 +43,7 @@ module Ark.Protocol
     -- * The client
   , Client (..)
   , openClient
+  , clientSignIn
   , connected
   , disconnected
   , clientMutate
@@ -316,6 +317,14 @@ data Client = Client
 openClient :: Replica -> Mode -> Maybe Text -> Client
 openClient r md tok = Client (rSchema r) r md tok False 0 [] [] Nothing []
 
+-- | Somebody signed in: the token every later 'Hello' carries, and every
+-- intent authored before anyone had signed in made theirs ('signIn'). A
+-- peer used without an account has been saying nothing to any server —
+-- 'connected' is only called once there is a token — so what it authored
+-- is pending, and the first 'Hello' after this pushes all of it.
+clientSignIn :: Ctx -> Maybe Text -> Client -> Client
+clientSignIn who tok c = c {clReplica = signIn who (clReplica c), clToken = tok}
+
 emit :: ClientMsg -> Client -> Client
 emit m c
   | clLinked c = c {clOut = m : clOut c}
@@ -444,6 +453,7 @@ serverRecv sv0 c msg = case msg of
   Hello (Subscription since md) tok _ -> case svAuth sv0 tok of
     Nothing -> send c (Denied "not signed in") sv0
     Just who
+      | idUser who == ctxUser nobody -> send c (Denied "not signed in") sv0
       | not (svAccess sv0 who) -> send c (Denied "not allowed") sv0
       | otherwise ->
           -- A second Hello on one connection is the log paging, and says

@@ -34,6 +34,8 @@ module Ark.Peer
   , Inbox (..)
   , Changes (..)
   , open
+  , nobody
+  , signIn
   , mutate
   , receive
   , receiveFacts
@@ -158,6 +160,30 @@ mutate r i ctx fh autos args = do
     Right (Right (view', chs)) ->
       let e = Entry i (ctxUser ctx) (ctxSession ctx) fh args autos
        in Right (r {rView = view', rPending = rPending r ++ [e], rChanges = reverse chs ++ rChanges r}, e)
+
+-- | §11.2a Who authors before anyone has signed in: an empty user and an
+-- empty session. No authenticator names this identity (a server refuses a
+-- 'Hello' that proves it), so an entry authored as 'nobody' is never
+-- accepted as it stands; it is pending until 'signIn' makes it someone's.
+nobody :: Ctx
+nobody = Ctx "" ""
+
+-- | §11.2b Somebody signs in on a peer that has been used without an
+-- account: every pending intent authored as 'nobody' becomes theirs, under
+-- this login, and the view is replayed from the confirmed store so that
+-- every row those intents wrote says who they now say. It is safe to
+-- rewrite them because nothing but this peer has ever seen them: an entry
+-- is only rewritten while it is pending, and one authored as 'nobody' could
+-- not have been pushed. Intents authored as anybody else are untouched;
+-- an older login of the same person is the server's question ('withOwns').
+-- An intent the replay now refuses — somebody's own playlist already has
+-- that name — is dropped and its reason recorded, as any rebase does.
+signIn :: Ctx -> Replica -> Replica
+signIn who r = replay r {rPending = map stamp (rPending r)}
+  where
+    stamp e
+      | eActor e == ctxUser nobody && eSession e == ctxSession nobody = e {eActor = ctxUser who, eSession = ctxSession who}
+      | otherwise = e
 
 -- | §11.3 A confirmed entry arrives, at its sequence. It waits in the
 -- inbox until everything before it has been applied and it can be applied

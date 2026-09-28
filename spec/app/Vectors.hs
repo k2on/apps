@@ -450,6 +450,31 @@ protocolVectors out = do
   let bob = old {eActor = "bob"}
       strangers = [msg | (1, msg) <- fst (takeServerOutgoing (serverRecv (snd (takeServerOutgoing (withOwns (\_ _ -> True) sv2))) 1 (Push [bob]))), isVerdict msg] == [Reject (eId bob) "not yours"]
   if strangers then pure () else error "protocol: another user's entry was accepted"
+  -- A peer used for a while with no account, then signed in: everything it
+  -- authored as nobody is pushed as the person who signed in, every entry
+  -- is accepted, and the rows say who they belong to.
+  let hAddP = head [h | (h, c) <- M.toList (closures m), fnName (cFn c) == "add_to_playlist"]
+      pidL = idN 30
+      authorAll r0 =
+        foldl
+          (\r (i, fh, autos, args) -> either (error . show) fst (mutate r (idN i) nobody fh autos args))
+          r0
+          ( (31, hCreate, M.fromList [("id", VId pidL)], M.fromList [("name", VText "Offline")])
+              : [(32 + k, hAddP, M.empty, M.fromList [("playlist_id", VId pidL), ("track_id", VText (T.pack ("t" ++ show k)))]) | k <- [0 .. 9]]
+          )
+      local = authorAll (open (modSchema m) (closures m) (S.empty (modSchema m)) 0 [])
+      signedIn = connected (clientSignIn (Ctx "alice" "dev") (Just "alice") (openClient local Whole Nothing))
+      (sent, _) = takeOutgoing signedIn
+      svEnd = foldl (\sv f -> serverRecv sv 7 f) sv0 sent
+      verdicts = [msg | (7, msg) <- fst (takeServerOutgoing svEnd), isVerdict msg]
+      acked = sum [length ids | Ack ids _ <- verdicts]
+      owners = [M.lookup "user_id" row | row <- M.elems (S.rows (aStore (svAuthority svEnd)) "playlist")]
+      unsigned = [msg | (7, msg) <- fst (takeServerOutgoing (foldl (\sv f -> serverRecv sv 7 f) sv0 (fst (takeOutgoing (connected (openClient local Whole Nothing)))))), isVerdict msg]
+  if acked == 11 && null [() | Reject {} <- verdicts] then pure () else error ("protocol: a signed-in peer's offline work was not all accepted: " ++ show verdicts)
+  if owners == [Just (VText "alice")] then pure () else error ("protocol: the offline playlist belongs to " ++ show owners)
+  if all (\case Reject _ why -> why == "not yours"; _ -> False) unsigned && length unsigned == 11
+    then pure ()
+    else error ("protocol: work authored as nobody was accepted without signing in: " ++ show unsigned)
   mapM_
     (\(name, f) -> do
       let v = clientValue f
