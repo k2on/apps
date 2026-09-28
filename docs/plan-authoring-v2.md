@@ -214,11 +214,15 @@ line each:
 - Kotlin (`a4a2f26c2d868f6db`): `kotlin/` IR v2 + `dev.arkdb.authoring`,
   harken's domain in Kotlin, the Android app; `nix build .#harken-apk`
   must still pass.
-- Web (`a633c23831fbfd1b9`): `harken/web` (Rust→wasm peer + TS UI),
-  `packages.harken-web`, `.github/workflows/pages.yml` deploying to
-  `k2on.github.io/apps/harken`, `.github/workflows/apk.yml`. It is the
-  only agent allowed to edit `flake.nix`; it was waiting on a nix build
-  when it last reported.
+- Web (`a633c23831fbfd1b9`): **finished.** `harken/web` (Rust→wasm peer +
+  TS UI), `packages.harken-web` and `devShells.harken-web` in `flake.nix`,
+  the two workflows. Verified end to end in headless Chromium against the
+  pre-rewrite engine (alone, against a server, offline and back). Left for
+  step 5: regenerate `harken/domain/harken.ark` once the Rust domain
+  builds, then `cargo test -p harken-web` and `nix build .#harken-web`;
+  `harken/desktop/src/peer.rs` needs `natives: BTreeMap::new()` on the
+  `Authority` it builds, as `harken/web/src/lib.rs` now has. Neither
+  workflow has run on GitHub (see the scope note above).
 
 Decisions already sent to them (all also in AUTHORING.md): per-procedure
 `uses`; the §6 lowerings; `Unwrap`/`or_refuse`; derived names; the

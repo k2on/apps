@@ -195,8 +195,9 @@ fn args_of(f: &Function, input: &str) -> Result<Args, String> {
         return Err("input is a JSON object".into());
     };
     let mut args = Args::new();
-    for (name, ty) in &f.args {
-        let v = match o.get(name) {
+    for (name, field) in &f.input {
+        let ty = &field.ty;
+        let v = match o.get(name.as_str()) {
             Some(x) => value_of(ty, x).map_err(|e| format!("{}: {name}: {e}", f.name))?,
             None if matches!(ty, Ty::Option(_)) => Value::Null,
             None => return Err(format!("{}: missing argument {name}", f.name)),
@@ -270,6 +271,7 @@ impl Peer {
                         scope: sc.name.clone(),
                         schema: schema.clone(),
                         bodies: bodies.clone(),
+                        natives: BTreeMap::new(),
                         log: Log {
                             base: snapshot_of(d.cursor, d.confirmed.clone()),
                             entries: BTreeMap::new(),
