@@ -64,7 +64,7 @@
       # What a phone carries of harken's domain: the procedures it calls, and
       # nothing the scanner alone authors (harken/README.md). The Swift and
       # Kotlin domains are `arkc gen … --only` these.
-      clientFunctions = "create_playlist,add_to_playlist,remove_from_playlist,library,playlists,playlist_items";
+      clientFunctions = "create_playlist,add_to_playlist,remove_from_playlist,library,playlists,playlist";
 
       perSystem = pkgs:
         let

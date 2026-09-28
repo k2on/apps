@@ -176,23 +176,8 @@ verifyFunction :: Module -> Int -> Function -> Either [VerifyError] ()
 verifyFunction m i fn = either (Left . map (In (fnName fn))) Right $ do
   let sch = modSchema m
   case fnKind fn of
-    k | k == Mutator || k == Query -> do
-      r <- maybe (Left [NoRouter]) Right (fnRouter fn)
-      forM_ (lookupRouter m r) $ \rt ->
-        unless (fnUses fn `isSubsequenceOf` rtUses rt) (Left [UsesNotOnRouter (fnUses fn)])
-      case fnUses fn \\ nub (fnUses fn) of
-        [] -> Right ()
-        ds -> Left (map DuplicateName ds)
-      forM_ (fnUses fn) $ \u -> case lookupFunction m u of
-        Nothing -> Left [NotMiddleware u]
-        Just mw -> do
-          unless (isMiddleware mw) (Left [NotMiddleware u])
-          forM_ (fnArgs mw) $ \(a, t) -> unless (lookup a (fnArgs fn) == Just t) (Left [MiddlewareInputMismatch u a])
-      if k == Mutator
-        then when (isJust (fnRet fn)) (Left [ReturnTypeOnMutator])
-        else do
-          unless (null (fnAutos fn)) (Left [AutosOnNonMutator])
-          unless (isJust (fnRet fn)) (Left [NoReturnType])
+    Mutator -> procedure Mutator
+    Query -> procedure Query
     Helper -> do
       plain
       unless (isJust (fnRet fn)) (Left [NoReturnType])
@@ -225,6 +210,23 @@ verifyFunction m i fn = either (Left . map (In (fnName fn))) Right $ do
   where
     -- Neither middleware nor a helper is on a router, runs middleware,
     -- draws autos or checks its input.
+    procedure k = do
+      r <- maybe (Left [NoRouter]) Right (fnRouter fn)
+      forM_ (lookupRouter m r) $ \rt ->
+        unless (fnUses fn `isSubsequenceOf` rtUses rt) (Left [UsesNotOnRouter (fnUses fn)])
+      case fnUses fn \\ nub (fnUses fn) of
+        [] -> Right ()
+        ds -> Left (map DuplicateName ds)
+      forM_ (fnUses fn) $ \u -> case lookupFunction m u of
+        Nothing -> Left [NotMiddleware u]
+        Just mw -> do
+          unless (isMiddleware mw) (Left [NotMiddleware u])
+          forM_ (fnArgs mw) $ \(a, t) -> unless (lookup a (fnArgs fn) == Just t) (Left [MiddlewareInputMismatch u a])
+      if k == Mutator
+        then when (isJust (fnRet fn)) (Left [ReturnTypeOnMutator])
+        else do
+          unless (null (fnAutos fn)) (Left [AutosOnNonMutator])
+          unless (isJust (fnRet fn)) (Left [NoReturnType])
     plain = do
       when (isJust (fnRouter fn)) (Left [RouterOnNonProcedure])
       unless (null (fnUses fn)) (Left [UsesOnNonProcedure])
