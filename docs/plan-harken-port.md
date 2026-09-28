@@ -50,6 +50,13 @@ are **read-only references**: nothing is ever committed there.
   intent authored as nobody with the new login (`Replica::sign_in`,
   `Ark.Peer.signIn`) and connects; the server sees ordinary entries of the
   person who signed in. Rewriting is safe because nobody else has seen them.
+- **A playlist name that is already taken is renamed, not refused.**
+  Creating "Favorites" when that person already has one keeps the new
+  playlist under its own id and names it "Favorites (1)" (then "(2)", the
+  smallest free number), decided in `create_playlist` by the server's
+  order, so work done offline or on another device is never dropped. A
+  client makes its default "Favorites" only when that person has no
+  playlist at all.
 - **Every rejected change says why, per item.** A `Reject` carries a
   sentence (`refusal_text`): the domain's own message word for word, or a
   constraint named in one. A client keeps a standing per entry (pending,
