@@ -1,0 +1,40 @@
+[package]
+name = "arkui"
+version = "0.1.0"
+description = "The ui every app here shares: iced components, the vim keyboard, theming, the glyph table, routing."
+edition.workspace = true
+license.workspace = true
+
+# Knows nothing about any domain. An app supplies its palette, its routes, its
+# messages and its screens; this supplies the parts of a window that are the
+# same in every one of them.
+
+[dependencies]
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# `smol` gives iced a timer and an executor on the desktop; a browser already
+# has both. `svg` is every glyph and the derived square, `image` a fetched
+# picture, `advanced` the scroll operation that keeps a keyboard cursor on
+# screen. `fira-sans` is the typeface: with no embedded font iced asks the
+# system, and wasm has no font access, so a browser draws no text at all.
+iced = { version = "0.14", features = ["smol", "svg", "image", "advanced", "fira-sans"] }
+# Decoding a picture on the thread that fetched it, so the renderer is handed
+# pixels at the size they are drawn rather than a megapixel JPEG to decode
+# inside a frame. iced's own `image` feature already puts this crate in the
+# lockfile.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+# Fetching a picture, blocking, on a thread of its own: there is no async
+# runtime on the desktop and one picture is not a reason to start one.
+ureq = { version = "2", default-features = false, features = ["tls"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# WebGL rather than WebGPU, for reach. Without it wgpu finds no backend and
+# the software fallback cannot have the canvas WebGL already claimed.
+iced = { version = "0.14", features = ["webgl", "svg", "image", "advanced", "fira-sans"] }
+# The address bar: reading the fragment and writing it through the history.
+web-sys = { version = "0.3", features = ["Window", "History", "Location"] }
+wasm-bindgen = "0.2"
+# The browser half of the picture fetch: a promise from the snippet in
+# `images.rs`, awaited, and the `Uint8Array` it resolves to copied out.
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"

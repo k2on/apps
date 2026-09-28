@@ -57,16 +57,88 @@ pub fn table_of<T: Row>() -> IrTable {
     T::columns().table(T::NAME)
 }
 
-fn row_names<T: Row>() -> Vec<String> {
-    T::columns().cols.into_iter().map(|c| c.name).collect()
+/// A struct of the vocabulary's values that is not necessarily a row of a
+/// table: what a query or a helper builds and returns (`TStruct`). Its
+/// fields are said once, in [`Record::fields`], in declaration order —
+/// which, for a record, is alphabetical in the canonical form, because the
+/// IR's struct type is a map and cannot carry another order. Every row is
+/// a record ([`Row::columns`] says its fields).
+///
+/// ```ignore
+/// pub struct AlbumsEntry {
+///     pub art: Text,
+///     pub name: Text,
+///     pub tracks: Int,
+/// }
+/// impl Record for AlbumsEntry {
+///     fn fields() -> Fields<Self> {
+///         fields().field("art", text()).field("name", text()).field("tracks", int())
+///     }
+/// }
+/// ```
+pub trait Record: Sized + 'static {
+    fn fields() -> Fields<Self>;
 }
 
-impl<T: Row> Data for T {
+/// A record's fields, by name and type, in declaration order.
+pub struct Fields<R> {
+    pub(crate) fields: Vec<(String, Ty)>,
+    _r: PhantomData<fn() -> R>,
+}
+
+/// A record with no fields yet.
+pub fn fields<R>() -> Fields<R> {
+    Fields {
+        fields: vec![],
+        _r: PhantomData,
+    }
+}
+
+impl<R> Fields<R> {
+    /// The next field, of the type the field builder names (`text()`,
+    /// `int()`, `opt(..)`, `id::<T>()`, …); a record's fields carry no checks.
+    ///
+    /// # Panics
+    ///
+    /// When the builder carries a check: a check belongs to an input.
+    pub fn field<V: Data>(mut self, name: &str, f: super::input::FieldB<V>) -> Self {
+        assert!(f.checks.is_empty(), "{name}: a record's field carries no checks");
+        self.fields.push((name.into(), f.ty));
+        self
+    }
+}
+
+impl<T: Row> Record for T {
+    fn fields() -> Fields<Self> {
+        let cols = T::columns();
+        Fields {
+            fields: cols
+                .cols
+                .into_iter()
+                .map(|c| {
+                    let ty = c.column_ty();
+                    (c.name, ty)
+                })
+                .collect(),
+            _r: PhantomData,
+        }
+    }
+}
+
+fn record_names<T: Record>() -> Vec<String> {
+    T::fields().fields.into_iter().map(|(n, _)| n).collect()
+}
+
+fn record_what<T: Record>() -> &'static str {
+    std::any::type_name::<T>()
+}
+
+impl<T: Record> Data for T {
     fn ty() -> Ty {
-        table_of::<T>().row_ty()
+        Ty::Struct(T::fields().fields.into_iter().collect())
     }
     fn from_h(h: H) -> Self {
-        let names = row_names::<T>();
+        let names = record_names::<T>();
         let hs: Vec<H> = if cx::emitting() {
             let base = cx::expr(h);
             names.iter().map(|n| cx::e(Expr::Field(Box::new(base.clone()), n.clone()))).collect()
@@ -83,11 +155,11 @@ impl<T: Row> Data for T {
                 .collect()
         };
         cx::remember(&hs, h);
-        raw::assemble(&hs, T::NAME)
+        raw::assemble(&hs, record_what::<T>())
     }
     fn to_h(&self) -> H {
-        let names = row_names::<T>();
-        let hs = raw::disassemble(self, names.len(), T::NAME);
+        let names = record_names::<T>();
+        let hs = raw::disassemble(self, names.len(), record_what::<T>());
         if let Some(h) = cx::origin(&hs) {
             return h;
         }

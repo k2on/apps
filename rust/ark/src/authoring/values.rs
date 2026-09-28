@@ -697,3 +697,15 @@ impl Ctx {
         Id::from_h(self.auto(name, Auto::NewId(T::NAME.into())))
     }
 }
+
+impl<T: Data> Opt<T> {
+    /// `ECmp Eq`: an option is flat, so `none` equals only `none` and
+    /// `some(x)` equals `some(x)`.
+    pub fn eq(self, b: impl Into<Opt<T>>) -> Bool {
+        Bool(cx::cmp_op(CmpOp::Eq, self.0, b.into().0))
+    }
+    /// `ECmp Ne`.
+    pub fn ne(self, b: impl Into<Opt<T>>) -> Bool {
+        Bool(cx::cmp_op(CmpOp::Ne, self.0, b.into().0))
+    }
+}

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["ark", "../harken/desktop", "../harken/domain", "../harken/server", "../harken/web"]
+members = ["ark", "arkui", "../harken/desktop", "../harken/domain", "../harken/server", "../harken/web"]
 
 [workspace.package]
 edition = "2021"

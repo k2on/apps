@@ -330,6 +330,16 @@ pub(crate) fn block<R>(f: impl FnOnce() -> R) -> (R, Block) {
     (r, b)
 }
 
+/// Record `f` as the body of a function of its own inside the run in
+/// progress (a helper's): a block of its own, with statements allowed
+/// again even when called from inside an expression closure.
+pub(crate) fn detached<R>(f: impl FnOnce() -> R) -> (R, Block) {
+    let depth = emit_mut(|em| std::mem::replace(&mut em.in_expr, 0));
+    let r = block(f);
+    emit_mut(|em| em.in_expr = depth);
+    r
+}
+
 /// Run an expression closure: no statement may be written inside it.
 pub(crate) fn in_expr<R>(f: impl FnOnce() -> R) -> R {
     if !emitting() {

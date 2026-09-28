@@ -476,6 +476,7 @@ fn build(cores: &[Rc<Core>]) -> Result<Built, Vec<String>> {
     let mut routers: Vec<ir::Router> = Vec::new();
     let mut scopes: Vec<IrScope> = Vec::new();
     let mut decls: Vec<(String, RouteDecl, Vec<MwDecl>)> = Vec::new();
+    let prev = super::helper::begin();
     for core in cores {
         if !scopes.iter().any(|s| s.name == core.scope) {
             scopes.push(IrScope {
@@ -491,17 +492,20 @@ fn build(cores: &[Rc<Core>]) -> Result<Built, Vec<String>> {
         });
         for mw in &mws {
             let (f, es) = emit_middleware(core, mw);
+            functions.extend(super::helper::drain());
             functions.push(f);
             errors.extend(es);
         }
         for r in core.routes.borrow().iter() {
             let (f, es) = emit_route(core, r);
+            functions.extend(super::helper::drain());
             functions.push(f);
             errors.extend(es);
             let chain = r.chain.iter().filter_map(|n| mws.iter().find(|m| m.name == *n).cloned()).collect();
             decls.push((core.scope.into(), r.clone(), chain));
         }
     }
+    super::helper::end(prev);
     let schema = Schema { scopes };
     if !errors.is_empty() {
         return Err(errors);
@@ -630,6 +634,22 @@ fn emit_route(core: &Core, r: &RouteDecl) -> Emitted {
         names: BTreeMap::new(),
     };
     (f, errors)
+}
+
+/// Run pure vocabulary natively, outside any procedure: the value `f`
+/// computes, or the refusal (or bug) it reached. What lets a host compute
+/// what a helper computes — a derived key, say — with the helper's own
+/// definition rather than a copy of it. There is no store: a read inside
+/// panics, as a read outside a procedure does.
+pub fn evaluate<T: Data>(f: impl FnOnce() -> T) -> Result<Value, EvalFault> {
+    let (out, _) = cx::run(Cx::native(eval::Ctx::default(), Args::new()), || {
+        let h = f().to_h();
+        match cx::native(|n| n.halt.clone()) {
+            Some(fault) => Err(fault),
+            None => Ok(cx::value(h)),
+        }
+    });
+    out
 }
 
 // ---------------------------------------------------------------------------
