@@ -60,6 +60,33 @@ pub fn normalize_module(m: &Module) -> Module {
     }
 }
 
+/// Every symbol a function binds — in its checks, its refinements and its
+/// body — in order, without repeats.
+pub fn binders(f: &Function) -> Vec<Sym> {
+    let mut out: Vec<Sym> = Vec::new();
+    let mut add = |xs: Vec<Sym>| {
+        for x in xs {
+            if !out.contains(&x) {
+                out.push(x);
+            }
+        }
+    };
+    for (_, fd) in &f.input {
+        for c in &fd.checks {
+            if let Check::Refine(e, _) = c {
+                add(expr_binders(e));
+            }
+        }
+    }
+    for (e, _) in &f.refine {
+        add(expr_binders(e));
+    }
+    for s in &f.body {
+        add(stmt_binders(s));
+    }
+    out
+}
+
 fn renumber_block(ren: &Ren, next: Sym, blk: &Block) -> (Block, Ren) {
     let mut ren = ren.clone();
     let mut next = next;

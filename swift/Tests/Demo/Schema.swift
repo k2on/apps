@@ -6,6 +6,9 @@ public struct Demo {
 }
 extension Demo: Scope {
     public static let NAME = "demo"
+    public static func open() -> Self {
+        Demo(playlist: table(), item: table())
+    }
 }
 
 public struct Playlist {

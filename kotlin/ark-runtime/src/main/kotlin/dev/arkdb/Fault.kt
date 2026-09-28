@@ -2,8 +2,8 @@
 //
 // `Refuse` is a verdict — a deterministic fact about an entry that every
 // replica reaches (an explicit refuse, a constraint, an overflow).
-// `Bug` is a bug — a module the verifier would have refused, or generated
-// code that disagrees with Ark.Eval. They are never conflated.
+// `Bug` is a bug — a module the verifier would have refused, or a native
+// procedure that disagrees with Ark.Eval. They are never conflated.
 package dev.arkdb
 
 public sealed class Fault(message: String) : Exception(message) {

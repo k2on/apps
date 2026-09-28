@@ -10,7 +10,7 @@ public struct Ctx: Equatable {
 /// Arguments (or autos) by name.
 public typealias Args = [String: Value]
 
-/// §6 The interpreter of IR closures: what generated code must mean, and
+/// §6 The interpreter of IR closures: what a native procedure must mean, and
 /// what a peer runs for a closure it was sent. Exactly `Ark.Eval`.
 ///
 /// A `Refusal` is a verdict; a `Fault.bug` is a bug — a module the verifier
@@ -120,7 +120,7 @@ public enum Eval {
             })
             switch r {
             case .ok(let v): args[nf.name] = v
-            case .failed(let msg): throw Stop.verdict(.refused(msg))
+            case .failed(_, let msg): throw Stop.verdict(.refused(msg))
             }
         }
         for r in fn.refine {
@@ -152,7 +152,9 @@ public enum Eval {
                 })
                 switch r {
                 case .ok(let v): values[nf.name] = v
-                case .failed(let msg): messages.append((nf.name, msg))
+                case .failed(let v, let msg):
+                    values[nf.name] = v
+                    messages.append((nf.name, msg))
                 }
             }
             if fn.input.allSatisfy({ partial[$0.name] != nil }) {

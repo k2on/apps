@@ -18,15 +18,29 @@ extension Row {
     public var repr: Repr { return structRepr(take(self)) }
 }
 
-/// A scope: a struct of tables, in order, and its name.
-public protocol Scope: Decodable {
+/// A scope: a struct of tables and its name. `open()` makes one — every
+/// table `table()` — and the order it opens them in is the scope's table
+/// order in the schema: no host can enumerate a struct's fields, so a
+/// scope says them once, there (AUTHORING.md §2.5).
+public protocol Scope {
     static var NAME: String { get }
+    static func open() -> Self
 }
 
-/// What a scope's struct is made of.
-protocol AnyTable: Decodable {
-    init()
-    static var table: ArkDB.Table { get }
+/// A table of a scope, as `open()` makes it.
+public func table<R: Row>() -> Table<R> {
+    TableRecording.note(RowSchema.table(R.self))
+    return Table()
+}
+
+/// Which tables a scope's `open()` made, while a schema is being read.
+enum TableRecording {
+    static let lock = NSLock()
+    static var tables: [ArkDB.Table]? = nil
+
+    static func note(_ t: ArkDB.Table) {
+        tables?.append(t)
+    }
 }
 
 enum RowSchema {
@@ -45,54 +59,18 @@ enum RowSchema {
         return t
     }
 
-    /// A scope's tables, in the order its struct declares them.
+    /// A scope's tables, in the order its `open()` makes them.
     static func scope<S: Scope>(_ s: S.Type) -> ArkDB.Scope {
-        let recorder = TableRecorder()
-        do {
-            _ = try S(from: recorder)
-        } catch {
-            fatalError("ArkAuthoring: \(S.self) is not a struct of tables: \(error)")
-        }
-        return ArkDB.Scope(S.NAME, tables: recorder.tables)
+        TableRecording.lock.lock()
+        defer { TableRecording.lock.unlock() }
+        TableRecording.tables = []
+        _ = S.open()
+        let ts = TableRecording.tables ?? []
+        TableRecording.tables = nil
+        return ArkDB.Scope(S.NAME, tables: ts)
     }
 
-    static func make<S: Scope>(_ s: S.Type) -> S {
-        do {
-            return try S(from: Building(source: ByName { t, _ in t.init(repr: .v(.null)) }))
-        } catch {
-            fatalError("ArkAuthoring: \(S.self) is not a struct of tables: \(error)")
-        }
-    }
-}
-
-/// Records each table a scope's decoding asks for.
-final class TableRecorder: Decoder {
-    var tables: [ArkDB.Table] = []
-    var codingPath: [CodingKey] { return [] }
-    var userInfo: [CodingUserInfoKey: Any] { return [:] }
-    func container<Key: CodingKey>(keyedBy type: Key.Type) throws -> KeyedDecodingContainer<Key> {
-        return KeyedDecodingContainer(RecorderKeyed<Key>(owner: self))
-    }
-    func unkeyedContainer() throws -> UnkeyedDecodingContainer { throw CodingFailure(what: "unkeyed") }
-    func singleValueContainer() throws -> SingleValueDecodingContainer { throw CodingFailure(what: "single") }
-}
-
-struct RecorderKeyed<K: CodingKey>: KeyedDecodingContainerProtocol {
-    typealias Key = K
-    let owner: TableRecorder
-    var codingPath: [CodingKey] { return [] }
-    var allKeys: [K] { return [] }
-    func contains(_ key: K) -> Swift.Bool { return true }
-    func decodeNil(forKey key: K) throws -> Swift.Bool { return false }
-    func decode<T: Decodable>(_ type: T.Type, forKey key: K) throws -> T {
-        guard let tb = type as? AnyTable.Type else { throw CodingFailure(what: "\(key.stringValue) is not a Table") }
-        owner.tables.append(tb.table)
-        return tb.init() as! T
-    }
-    func nestedContainer<NK: CodingKey>(keyedBy type: NK.Type, forKey key: K) throws -> KeyedDecodingContainer<NK> { throw CodingFailure(what: "nested") }
-    func nestedUnkeyedContainer(forKey key: K) throws -> UnkeyedDecodingContainer { throw CodingFailure(what: "nested") }
-    func superDecoder() throws -> Decoder { throw CodingFailure(what: "super") }
-    func superDecoder(forKey key: K) throws -> Decoder { throw CodingFailure(what: "super") }
+    static func make<S: Scope>(_ s: S.Type) -> S { return S.open() }
 }
 
 /// A column of a row type, by its IR name: `static let userId = col<Playlist, Text>("user_id")`.
@@ -333,10 +311,8 @@ func write(_ stmt: @autoclosure () -> Stmt, _ native: (Native) -> Void) -> Effec
 }
 
 /// A table of a scope: `db.playlist`.
-public struct Table<R: Row>: AnyTable {
-    public init() {}
-    public init(from decoder: Decoder) throws { self.init() }
-    static var table: ArkDB.Table { return RowSchema.table(R.self) }
+public struct Table<R: Row> {
+    init() {}
 
     var query: Query<R> { return Query(plan: Plan(table: R.NAME)) }
 

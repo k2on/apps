@@ -1,9 +1,10 @@
 import Foundation
 
-/// What one field's checks came to: the normalised value, or a message.
+/// What one field's checks came to: the normalised value, or the value as
+/// far as the checks got and the first failure's message.
 public enum FieldCheck: Equatable {
     case ok(Value)
-    case failed(String)
+    case failed(Value, String)
 }
 
 /// §1.3 (AUTHORING.md) The checks on one input field, as the interpreter,
@@ -64,21 +65,21 @@ public enum Checks {
             case .trim:
                 if case .text = v { v = (try? Std.trim(v)) ?? v }
             case .minLen(let n, _):
-                if case .text(let t) = v, t.unicodeScalars.count < n { return .failed(message(name, c)) }
+                if case .text(let t) = v, t.unicodeScalars.count < n { return .failed(v, message(name, c)) }
             case .maxLen(let n, _):
-                if case .text(let t) = v, t.unicodeScalars.count > n { return .failed(message(name, c)) }
+                if case .text(let t) = v, t.unicodeScalars.count > n { return .failed(v, message(name, c)) }
             case .range(let lo, let hi, _):
                 if case .int(let x) = v {
-                    if let l = lo, x < Int64(l) { return .failed(message(name, c)) }
-                    if let h = hi, x > Int64(h) { return .failed(message(name, c)) }
+                    if let l = lo, x < Int64(l) { return .failed(v, message(name, c)) }
+                    if let h = hi, x > Int64(h) { return .failed(v, message(name, c)) }
                 }
             case .nonEmpty:
-                if case .list(let xs) = v, xs.isEmpty { return .failed(message(name, c)) }
+                if case .list(let xs) = v, xs.isEmpty { return .failed(v, message(name, c)) }
             case .exists:
                 let tb = idTable(f.ty) ?? ""
-                if !(try exists(tb, v)) { return .failed(message(name, c, table: tb)) }
+                if !(try exists(tb, v)) { return .failed(v, message(name, c, table: tb)) }
             case .refine(let e, _):
-                if !(try refine(e, v)) { return .failed(message(name, c)) }
+                if !(try refine(e, v)) { return .failed(v, message(name, c)) }
             }
         }
         return .ok(v)

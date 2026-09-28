@@ -5,6 +5,9 @@ public struct Library {
 }
 extension Library: Scope {
     public static let NAME = "library"
+    public static func open() -> Self {
+        Library(track: table())
+    }
 }
 
 public struct Playlists {
@@ -13,6 +16,9 @@ public struct Playlists {
 }
 extension Playlists: Scope {
     public static let NAME = "playlists"
+    public static func open() -> Self {
+        Playlists(playlist: table(), playlistItem: table())
+    }
 }
 
 public struct Track {

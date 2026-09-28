@@ -51,7 +51,7 @@ public enum Refusal: Error, Equatable {
     public var fault: Fault { return .refuse(text) }
 }
 
-/// §4 The store, as generated code sees it (`Ark.Store`, `Ark.Eval` §6.6).
+/// §4 The store, as the interpreter and a native procedure read it (`Ark.Store`, `Ark.Eval` §6.6).
 public protocol Store: AnyObject {
     var schema: Schema { get }
     /// The row, or null.
@@ -71,7 +71,7 @@ public protocol Store: AnyObject {
 }
 
 /// The store as a value: a map of maps, exactly `Ark.Store`. A class so
-/// that generated code can write through it; `clone()` is how the peer
+/// that a procedure can write through it; `clone()` is how the peer
 /// keeps a confirmed store apart from the view built on it (the tables are
 /// copy-on-write, so a clone costs nothing until one is written).
 public final class MemoryStore: Store {

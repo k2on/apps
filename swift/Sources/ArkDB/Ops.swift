@@ -1,6 +1,6 @@
 import Foundation
 
-/// The operators generated code calls (`Ark.Eval` §6.4, §6.5): checked
+/// The operators the interpreter and the authoring vocabulary call (`Ark.Eval` §6.4, §6.5): checked
 /// arithmetic with the spec's fault texts, comparison under the total order,
 /// and the list forms with faulting closures.
 public enum Ops {

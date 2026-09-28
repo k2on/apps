@@ -51,7 +51,6 @@ struct BuildingKeyed<K: CodingKey>: KeyedDecodingContainerProtocol {
     func contains(_ key: K) -> Swift.Bool { return true }
     func decodeNil(forKey key: K) throws -> Swift.Bool { return false }
     func decode<T: Decodable>(_ type: T.Type, forKey key: K) throws -> T {
-        if let tb = type as? AnyTable.Type { return tb.init() as! T }
         guard let tt = type as? Term.Type else { throw CodingFailure(what: "\(key.stringValue) is not a vocabulary type") }
         return source.term(tt, snake(key.stringValue)) as! T
     }

@@ -5,7 +5,7 @@ public struct CreatePlaylist {
 }
 extension CreatePlaylist: Input {
     public static var schema: Object<Self> {
-        object().field("name", text().trim().min(1, "a playlist needs a name").max(120))
+        object().field("name", text().trim().min(1).why("a playlist needs a name").max(120))
     }
 }
 

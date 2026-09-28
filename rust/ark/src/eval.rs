@@ -274,6 +274,7 @@ fn checked_input(st: &mut St, sch: &Schema, c: &Closure, ctx: &Ctx, args0: &Args
         let exists = |t: &str, k: &Value| st.store.exists(t, std::slice::from_ref(k));
         let checked = {
             let store_exists = exists;
+            let empty_store = crate::store::MemoryStore::empty(sch.clone());
             let mut refine = |e: &Expr, v: &Value| -> Result<bool, EvalFault> {
                 let mut local = args.clone();
                 local.insert(n.clone(), v.clone());
@@ -288,7 +289,7 @@ fn checked_input(st: &mut St, sch: &Schema, c: &Closure, ctx: &Ctx, args0: &Args
                     locals: BTreeMap::new(),
                 };
                 let mut empty = St {
-                    store: &mut Overlay::new(&crate::store::MemoryStore::empty(sch.clone())),
+                    store: &mut Overlay::new(&empty_store),
                     changes: vec![],
                 };
                 pure_bool(&mut empty, &env, e)
@@ -296,10 +297,10 @@ fn checked_input(st: &mut St, sch: &Schema, c: &Closure, ctx: &Ctx, args0: &Args
             check_field(n, fd, v, &store_exists, &mut refine)?
         };
         match checked {
-            Ok(v) => {
+            (v, None) => {
                 args.insert(n.clone(), v);
             }
-            Err(msg) => return Err(EvalFault::Verdict(Refusal::Refused(msg))),
+            (_, Some(msg)) => return Err(EvalFault::Verdict(Refusal::Refused(msg))),
         }
     }
     for (e, why) in &f.refine {
@@ -364,10 +365,10 @@ fn message(field: &str, check: &Check, ty: &Ty) -> String {
     given.cloned().unwrap_or_else(|| default_message(field, check, ty))
 }
 
-/// §1.3 One field's checks, in order, over its value: `Ok(Ok(v))` with the
-/// value as normalised (a `trim` rewrites it for every later check and for
-/// the body), `Ok(Err(message))` for the first check that fails, `Err` for
-/// a fault. A field of an option type is checked only when it is `Some`.
+/// §1.3 One field's checks, in order, over its value: the value as
+/// normalised so far (a `trim` rewrites it for every later check and for
+/// the body) and the message of the first check that fails, if one does;
+/// `Err` for a fault. A field of an option type is checked only when it is `Some`.
 /// `exists` answers whether a row of that table has that key; `refine`
 /// evaluates a refinement over the value as it stands. Shared by the
 /// interpreter, a native procedure and the form validator.
@@ -377,7 +378,7 @@ pub fn check_field(
     value: Value,
     exists: &dyn Fn(&str, &Value) -> bool,
     refine: &mut dyn FnMut(&Expr, &Value) -> Result<bool, EvalFault>,
-) -> Result<Result<Value, String>, EvalFault> {
+) -> Result<(Value, Option<String>), EvalFault> {
     check_field_with(name, field, value, exists, &mut |i, v| match &field.checks[i] {
         Check::Refine(e, _) => refine(e, v),
         _ => Ok(true),
@@ -392,9 +393,9 @@ pub fn check_field_with(
     value: Value,
     exists: &dyn Fn(&str, &Value) -> bool,
     refine: &mut dyn FnMut(usize, &Value) -> Result<bool, EvalFault>,
-) -> Result<Result<Value, String>, EvalFault> {
+) -> Result<(Value, Option<String>), EvalFault> {
     if value.is_null() && matches!(field.ty, Ty::Option(_)) {
-        return Ok(Ok(value));
+        return Ok((value, None));
     }
     let bad = |what: &str| EvalFault::Bug(EvalError::TypeError(format!("{name}: {what}")));
     let mut v = value;
@@ -433,10 +434,10 @@ pub fn check_field_with(
             Check::Refine(_, _) => refine(i, &v)?,
         };
         if !ok {
-            return Ok(Err(message(name, c, &field.ty)));
+            return Ok((v, Some(message(name, c, &field.ty))));
         }
     }
-    Ok(Ok(v))
+    Ok((v, None))
 }
 
 /// What the form validator says about a partial input: a message per field
@@ -487,13 +488,13 @@ pub fn check(sch: &Schema, c: &Closure, ctx: &Ctx, partial: &Args, store: &dyn S
             pure_bool(&mut st, &env, e)
         };
         match check_field(n, fd, v.clone(), &exists, &mut refine) {
-            Ok(Ok(v2)) => {
+            Ok((v2, None)) => {
                 out.values.insert(n.clone(), v2);
             }
-            Ok(Err(msg)) => {
+            Ok((v2, Some(msg))) => {
                 all = false;
                 out.messages.push((n.clone(), msg));
-                out.values.insert(n.clone(), v.clone());
+                out.values.insert(n.clone(), v2);
             }
             Err(EvalFault::Verdict(r)) => {
                 all = false;
@@ -643,25 +644,29 @@ fn exec(st: &mut St, env: &mut Env, s: &Stmt) -> Run<()> {
         Stmt::Insert(t, e, on) => {
             mutating(env)?;
             let row = strct(eval(st, env, e)?)?;
-            wrote(st, store::insert(st.store, t, row, on))?;
+            let r = store::insert(st.store, t, row, on);
+            wrote(st, r)?;
         }
         Stmt::Upsert(t, e, on) => {
             mutating(env)?;
             let row = strct(eval(st, env, e)?)?;
-            wrote(st, store::upsert(st.store, t, row, on))?;
+            let r = store::upsert(st.store, t, row, on);
+            wrote(st, r)?;
         }
         Stmt::Update(t, ks, x, e) => {
             mutating(env)?;
             let key = eval_many(st, env, ks)?;
             if let Some(old) = st.store.get(t, &key) {
                 let row = strct(eval(st, &env.bind(*x, Value::Struct(old)), e)?)?;
-                wrote(st, store::update(st.store, t, &key, row))?;
+                let r = store::update(st.store, t, &key, row);
+            wrote(st, r)?;
             }
         }
         Stmt::Delete(t, ks) => {
             mutating(env)?;
             let key = eval_many(st, env, ks)?;
-            wrote(st, st.store.delete(t, &key))?;
+            let r = st.store.delete(t, &key);
+            wrote(st, r)?;
         }
         Stmt::Refuse(e) => {
             if env.kind == FnKind::Helper {

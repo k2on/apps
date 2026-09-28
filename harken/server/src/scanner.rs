@@ -169,7 +169,7 @@ pub async fn scan(hub: &HubHandle, domain: &Domain, media: &Path) -> Result<Repo
         .clone()
         .ok_or_else(|| anyhow!("{MUTATOR} names no scope"))?;
     let wanted: BTreeSet<&str> = ["title", "artist", "album", "duration_ms", "file"].into();
-    let declared: BTreeSet<&str> = f.args.iter().map(|(n, _)| n.as_str()).collect();
+    let declared: BTreeSet<&str> = f.input.iter().map(|(n, _)| n.as_str()).collect();
     if declared != wanted {
         bail!("{MUTATOR} takes {declared:?}; the scanner knows how to fill {wanted:?}");
     }

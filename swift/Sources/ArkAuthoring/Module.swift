@@ -169,7 +169,7 @@ extension Native {
                         let r = Checks.field(f.name, Field(f.ty, checks: [k]), v, exists: { t, key in n.store.getRow(t, [key]) != nil }, refine: { _, _ in true })
                         switch r {
                         case .ok(let v2): v = v2
-                        case .failed(let msg): n.refuse(.refused(msg))
+                        case .failed(_, let msg): n.refuse(.refused(msg))
                         }
                     case .refine(let p, let why):
                         if n.value(p(.v(v))) != .bool(true) {
