@@ -351,15 +351,17 @@ pub(crate) fn in_expr<R>(f: impl FnOnce() -> R) -> R {
     r
 }
 
-/// Register an auto by name; a repeated name is an error.
+/// Register an auto by name. Naming it again is reading the same frozen
+/// value again — `ctx.now("added_ms")` in three rows of one entry is one
+/// time — so a repeated name of the same kind is that auto; a repeated
+/// name of another kind is an error.
 pub(crate) fn auto(name: &str, a: Auto) {
-    emit_mut(|em| {
-        if em.autos.iter().any(|(n, _)| n == name) {
-            em.errors
-                .push(format!("the auto {name:?} is drawn twice; each ctx.now/ctx.new_id name is drawn once"));
-        } else {
-            em.autos.push((name.into(), a));
-        }
+    emit_mut(|em| match em.autos.iter().find(|(n, _)| n == name) {
+        Some((_, had)) if *had == a => {}
+        Some((_, had)) => em
+            .errors
+            .push(format!("the auto {name:?} is drawn as {had:?} and again as {a:?}; one name is one auto")),
+        None => em.autos.push((name.into(), a)),
     })
 }
 

@@ -49,7 +49,7 @@ pub use helper::{helper, Body, Params};
 pub use input::{bool_, bytes, enum_, id, int, object, opt, text, FieldB, Input, Object, Variants};
 pub use router::{evaluate, router, Applied, Module, Proc, Procedure, Route, Router, Routers, Routes};
 pub use schema::{
-    col, columns, fields, rel, table, table_of, Col, Cols, ColumnOf, Columns, Effect, Fields, IntoEffect, Key, Order, Orders, Pred, Query, Record, Rel, Row, Scope, Table,
-    Write,
+    col, columns, fields, rel, table, table_of, Col, Cols, ColumnOf, Columns, Effect, Fields, IntoEffect, Key, Order, Orders, Pred, Query, Record,
+    Rel, Row, Scope, Table, Write,
 };
 pub use values::{concat, id_of_text, list, nil_id, none, pick, some, Bool, Bytes, Ctx, Data, Id, Int, List, ListOf, Opt, Text};
