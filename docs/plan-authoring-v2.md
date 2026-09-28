@@ -1,5 +1,12 @@
 # Plan: finish authoring v2 (routers, checks, printers) and the harken work
 
+**Status: done.** Every step below has landed on `main`. At the last commit
+`nix flake check` passes on x86_64-linux (the vectors, the Rust workspace
+with fmt and clippy, Swift 446 checks, Kotlin 52, and harken's three-way
+round trip), and `nix build .#harken-web` and `.#harken-apk` build. What
+remains unverified is listed in the root `README.md`. The rest of this file
+is the plan as it was followed, kept for the record.
+
 Written so that a session on any model can pick this up mid-way. Read
 `spec/AUTHORING.md` first — it is the contract every step below serves —
 then this file top to bottom. Nothing here asks for a design decision;
