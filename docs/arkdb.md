@@ -11,8 +11,10 @@ case of it, not a mode; a server is a peer that sequences a log for others.
 
 This is the second revision of Part 3. The first made mutator bodies an
 *interpreted* language and a single global log; this one compiles them to
-native source instead, splits the database into scopes, carries facts beside
-intents, and makes authority a role. Parts 1 and 2 are unchanged.
+native source instead, carries facts beside intents, and makes authority a
+role. It also split the database into scopes, which spec version 3 removed
+again (`docs/scopes.md` records them): a module has one log, as in Petros.
+Parts 1 and 2 are unchanged.
 
 Nothing here is built. It is the shape of the thing, the reasons, and the
 order to build it in — the same kind of document `docs/decisions.md` and
@@ -255,7 +257,7 @@ runs on the phone as generated Swift. The generated code is what runs
 everywhere; the builder is a compile-time tool; there is no interpreter, no
 wasm and no FFI.
 
-**The log is intents, and every peer that holds a scope whole is an exact
+**The log is intents, and every peer that holds the log whole is an exact
 replica of it.** That is Petros's model, kept because it is the only one
 under which a peer that has never met a server is a first-class citizen: its
 history is intents, so it can be adopted, verified and rebased later. What
@@ -264,12 +266,15 @@ is added around it is what a fleet of native apps needs from a sync system:
 - **facts, retained beside the log**, so a peer that cannot apply an entry
   (an old build, a partial holder) takes its effects instead and ends in the
   same state;
-- **scopes**, so the unit of replication is the unit of transaction and
-  partial sync and authorization have a grain;
 - **snapshots**, so nothing replays from sequence one and retention has a
   horizon;
-- **authority as a role**, so "server" is a thing a peer does for a scope,
+- **authority as a role**, so "server" is a thing a peer does for a log,
   and a peer alone does it for itself.
+
+A module has one log, with one sequence and one authority, as Petros has:
+every reference between tables is checked and any function may read or write
+any table. A design that split it into several logs was built and removed;
+`docs/scopes.md` says what it bought and what a return to it must answer.
 
 | kept from Petros | dropped | changed |
 |---|---|---|
@@ -279,7 +284,7 @@ is added around it is what a fleet of native apps needs from a sync system:
 | `Ctx { user, session }`; entries held to the login that pushed them | `#[mutation]`, `peer!`, `tables!` as proc macros | builders that emit IR; `arkc gen` emits the row types and the call surface |
 | typed writes that report `Change`; queries as data; trees via declared references | | `Change`s are *kept* on the authority and are the facts a peer may take |
 | incremental views; `Rebuilt` after a rebase | | views are in the spec so every runtime maintains them natively |
-| sans-io machines; the deterministic simulation | one global log | scopes, each a log with its own sequence, authority and snapshots |
+| sans-io machines; the deterministic simulation; one log per module | | the log has snapshots and a horizon (§3.9) |
 | three lifetimes; rooms per account; one socket; server pings | | live frame types declared in the module, generated everywhere |
 | server as the only OIDC client | | |
 | "the log freezes arguments, not meaning" as a hazard | | entries name their function by hash; versions are retained above the horizon |
@@ -292,7 +297,7 @@ is added around it is what a fleet of native apps needs from a sync system:
   │      each emits ───────────────────────────────┐                          │
   ├────────────────────────────────────────────────▼──────────────────────────┤
   │  Ark module (canonical CBOR, content-addressed)                           │
-  │     scopes · schema · functions (mutators, queries, helpers) · live types │
+  │     schema · functions (mutators, queries, helpers) · live types          │
   ├───────────────────────────────────────────────────────────────────────────┤
   │  arkc      verify · hash · check · gen {rust,swift,kotlin} · vectors      │
   │      generates ────────────────────────────────┐                          │
@@ -301,7 +306,7 @@ is added around it is what a fleet of native apps needs from a sync system:
   │  call surface, live types — ordinary source, compiled into the program    │
   ├───────────────────────────────────────────────────────────────────────────┤
   │  runtime, one per language, all held to spec/vectors                      │
-  │     codec · std (pinned) · store (layered, scoped) · views · peer         │
+  │     codec · std (pinned) · store (layered) · views · peer                 │
   │     (log machine, authority role) · live · protocol                       │
   ├───────────────────────────────────────────────────────────────────────────┤
   │  backends   sqlite-as-btree · memory · (later) lmdb, indexeddb            │
@@ -327,10 +332,12 @@ store still holds. What replaced the generator, and why:
   its native procedures to the interpreter over their own emit, so what
   runs is what was written and what was written is what the log names.
 - **Routers and middleware, as tRPC has them.** A procedure hangs off a
-  router that owns a scope, and off the middleware chain it was built from:
+  router, which is a group of procedures and names no tables, and off the
+  middleware chain it was built from: `router::<Harken>("playlists")`, then
   `signed_in.input::<CreatePlaylist>().mutation(…)`, `owned.query(…)`, with
-  a provider handing the body the row it found. A guard's refusal is the
-  procedure's.
+  a provider handing the body the row it found. `Harken` is the module's one
+  `Tables` type, the struct of every table a body's `db` is. A guard's
+  refusal is the procedure's.
 - **An input is a schema, and the schema is a form's validation.** Each
   field carries its checks — trim, length, range, non-empty, *exists* —
   and a failing check is a refusal with a message every runtime spells the
@@ -352,9 +359,10 @@ store still holds. What replaced the generator, and why:
   still over the normalised IR, now with the middleware it runs among its
   dependencies, so editing a guard re-hashes every procedure behind it.
 
-Spec version 2 is this contract. What follows describes version 1 where
-the two differ; `spec/AUTHORING.md` is authoritative for authoring, and
-the modules under `spec/src/Ark/` for everything.
+Spec version 3 is this contract: version 2 without scopes
+(`docs/scopes.md`). What follows describes version 1 where they differ;
+`spec/AUTHORING.md` is authoritative for authoring, and the modules under
+`spec/src/Ark/` for everything.
 
 ### 3.1 Values and the canonical encoding
 
@@ -379,25 +387,19 @@ with `"t"` where Petros has them, and a **state hash** — SHA-256 over the
 canonical encoding of every table's rows in key order — that is a spec'd
 quantity rather than a testkit convenience, because §3.8 exchanges it.
 
-### 3.2 Scopes and the schema
+### 3.2 The schema
 
-A **scope** is the unit of everything: one append-only intent log with its
-own sequence, its own authority, its own snapshots, its own access rule. A
-table belongs to exactly one scope. A mutator belongs to exactly one scope
-and may read and write only that scope's tables; the verifier refuses one
-that looks sideways. That constraint is what makes partial sync sound under
-intents (§3.11), and it is the one modelling decision this design imposes:
-a reference across scopes is an id that is not checked at write time, and
-the query layer joins across scopes at read time. harken with a `library`
-scope and a scope per person's playlists loses the `exists(media)` check in
-`add_to_playlist` and draws a missing track as unavailable. A single scope
-is exactly Petros today, and splitting one later is a migration, so the
-choice is made early.
+A module has one set of tables and one append-only intent log over them,
+with one sequence, one authority, one snapshot series and one access rule.
+Every reference between tables is checked, and any mutator, query or helper
+may read and write any table, so `add_to_playlist` keeps the
+`exists(media)` check it has in Petros. (Spec version 2 split the tables
+into scopes, each its own log; `docs/scopes.md` says why they are gone.)
 
 The schema is a value in the module:
 
 ```
-Scope { name, tables: [Table] }
+Schema { tables: [Table] }
 Table { name, columns: [Column { name, ty, nullable }], key: [column],
         indexes: [Index { columns, unique }], refs: [Ref { column, table }] }
 ```
@@ -407,7 +409,7 @@ every language: row structs, typed column handles, `key`, and both
 directions of every reference as a relationship (reading down keeps a
 childless parent, reading up drops an orphan). The generated code enforces,
 as deterministic refusals and identically everywhere, not-null, unique
-indexes and same-scope references; a backend is never asked what a reference
+indexes and references; a backend is never asked what a reference
 is. A schema is additive-only; a column is *retired* (reads as its default,
 writes dropped) rather than removed; a change to a live column is a rebuild
 from snapshot plus replay, as `SCHEMA_VERSION` is today.
@@ -477,7 +479,7 @@ The three things a builder has to get right, and each language's answer:
   `for_each(rows, |r, b| …)` in Rust; result-builder components `If(cond)
   { … }` and `ForEach(rows) { r in … }` in Swift; `iff(cond) { … }` and
   `forEach(rows) { r -> … }` in Kotlin. The closure receives the bound
-  symbol, which is how a loop variable gets its scope.
+  symbol, which is how a loop variable gets its binding.
 - **Reads are statements.** `select`, `get` and `exists` bind through
   `let`, so a host-level reuse of an `Expr` never runs a query twice; every
   other expression is pure and may be inlined freely.
@@ -506,7 +508,7 @@ pub fn add_to_playlist(f: &mut Mutator) {
 
 ```swift
 // Swift
-let addToPlaylist = Mutator("add_to_playlist", scope: .playlists) { f in
+let addToPlaylist = Mutator("add_to_playlist") { f in
     let addedMs    = f.now("added_ms")
     let playlistId = f.arg(Id<Playlist>.self, "playlist_id")
     let mediaId    = f.arg(Id<Media>.self, "media_id")
@@ -521,7 +523,7 @@ let addToPlaylist = Mutator("add_to_playlist", scope: .playlists) { f in
 
 ```kotlin
 // Kotlin
-val addToPlaylist = mutator("add_to_playlist", Scope.Playlists) {
+val addToPlaylist = mutator("add_to_playlist") {
     val addedMs    = now("added_ms")
     val playlistId = arg<Id<Playlist>>("playlist_id")
     val mediaId    = arg<Id<Media>>("media_id")
@@ -536,7 +538,7 @@ val addToPlaylist = mutator("add_to_playlist", Scope.Playlists) {
 Kotlin reads best of the three, which reverses the first revision's
 asymmetry: builder DSLs with lambdas-with-receivers are the thing Kotlin is
 good at, and Compose, Gradle and Exposed are all this shape. Rust is the
-noisiest because closures over a block builder are the only way to scope a
+noisiest because closures over a block builder are the only way to bind a
 symbol without a macro. That is the honest ordering, and none of the three
 is second-class.
 
@@ -591,7 +593,7 @@ Everything else in the runtime — the peer, the protocol, views, live rooms —
 sees the domain only through two generated entry points:
 
 ```
-apply(scope, fn_hash, ctx, autos, args, store) -> Result<Changes, Refusal>
+apply(fn_hash, ctx, autos, args, store) -> Result<Changes, Refusal>
 fill_auto(fn_hash, auto_ctx) -> autos
 ```
 
@@ -599,14 +601,14 @@ fill_auto(fn_hash, auto_ctx) -> autos
 *version* (§3.12). A runtime knows nothing about any domain; harken's
 generated code is a package the app links beside the runtime.
 
-### 3.6 The store: layered, scoped, backend-agnostic
+### 3.6 The store: layered, backend-agnostic
 
 ```
-get(scope, table, key) -> Option<Row>
-scan(scope, table, index, lo, hi, dir, limit, after) -> [Row]     -- sorted, seekable
-put(scope, table, row) -> Change | Refusal
-delete(scope, table, key) -> Option<Change>
-commit(batch)                                                     -- atomic
+get(table, key) -> Option<Row>
+scan(table, index, lo, hi, dir, limit, after) -> [Row]     -- sorted, seekable
+put(table, row) -> Change | Refusal
+delete(table, key) -> Option<Change>
+commit(batch)                                              -- atomic
 ```
 
 Petros's five methods with `fetch(plan)` replaced by `scan` over a declared
@@ -614,14 +616,14 @@ index: the generated code compiles a plan to scans, so a backend never sees
 a filter, a `NULL` comparison or a collation. A backend is an ordered
 key-value store with atomic batch commit — SQLite's B-tree, LMDB,
 IndexedDB, a `BTreeMap`. **SQLite stays as the default durable backend on
-every device, as a B-tree and not as a database**: rows keyed by `(scope,
-table, canonical key bytes)`, index entries keyed the same way, no SQL
+every device, as a B-tree and not as a database**: rows keyed by `(table,
+canonical key bytes)`, index entries keyed the same way, no SQL
 above the two statements that read and write them. What leaves is the
 dependency on SQL *semantics*, which is where the cross-language hazards
 were.
 
 **The rebase is an overlay.** Confirmed state lives in the base; pending
-intents apply forward into an in-memory overlay per scope; reads consult the
+intents apply forward into an in-memory overlay; reads consult the
 overlay first. A confirmed entry arriving drops the overlay, applies to the
 base in one batch, and re-runs the still-pending intents into a fresh
 overlay. Pending intents are themselves committed in the base (one fsync per
@@ -629,23 +631,22 @@ tap, as today), the optimistic state never is, a tap costs the same at
 pending depth 400 as at 5, and a view is told `Rebuilt` after a rebase
 because dropping an overlay reports nothing.
 
-### 3.7 Scopes as logs
+### 3.7 The log
 
-Each scope is one append-only log: `seq` per scope, an authority per scope,
-snapshots per scope. A peer holds any set of scopes, each in one of two
-ways:
+A module is one append-only log: one `seq`, one authority, one snapshot
+series, and one cursor per peer. A peer holds it in one of two ways:
 
 - **whole**, in which case it replays intents and is an exact replica, may
-  author into the scope, and can verify its state hash against anyone;
+  author into the log, and can verify its state hash against anyone;
 - **as a projection** (§3.11), in which case it receives facts for the rows
   it asked for, may still author intents (its optimistic preview is
   approximate and the authority's answer wins), and does not claim exactness.
 
-A mutator's scope is declared; the verifier holds it to that scope's
-tables. Two mutators in two scopes are two entries in two logs, and there is
-no cross-scope transaction — which is the price of being able to replicate
-one scope without the other, and the reason the split is a domain decision
-rather than a default.
+Any mutator may read and write any table, and one entry is one transaction
+over all of them. The cost is that a whole peer holds everything, as in
+Petros: there is no partial replication of an exact replica, no per-person
+log and no second authority. `docs/scopes.md` records the design that had
+those, and the questions a return to it must answer.
 
 ### 3.8 Intents and facts: one log, two ways to apply it
 
@@ -655,7 +656,7 @@ The authority applies each pushed intent in a transaction, and the generated
 the entry:**
 
 ```
-log[scope]: (seq, Entry { id, actor, session, fn: hash, args, autos }, facts: [Change])
+log: (seq, Entry { id, actor, session, fn: hash, args, autos }, facts: [Change])
 ```
 
 A peer receiving `Batch` gets the entries. For each one it does one of two
@@ -665,7 +666,7 @@ exact replay produced:
 - it knows `fn` — its generated code has that function version — so it
   **replays the intent**, exactly;
 - it does not — an older build meeting a new verb, a build from before a fix
-  shipped under a new hash — so it asks `Facts { scope, seqs }` and
+  shipped under a new hash — so it asks `Facts { seqs }` and
   **applies the rows**.
 
 Both paths leave the peer an exact replica, because applying an entry's
@@ -682,25 +683,27 @@ reinstalled.
 ```
 Entry    { id, seq?, actor, session, fn: Bytes(32), args, autos }
 
-client → Hello    { scopes: [{ scope, since: Seq, mode: whole | projection(plan) }], token?, spec: Int }
-         Push     { scope, entries: [Entry] }
-         Facts    { scope, seqs: [Seq] }                 -- entries I cannot replay
-         Snapshot { scope }                              -- I am below the horizon; start me over
-         Verify   { scope, seq, hash }
+client → Hello    { since: Seq, mode: whole | projection(plan), token?, spec: Int }
+         Push     { entries: [Entry] }
+         Facts    { seqs: [Seq] }                 -- entries I cannot replay
+         Snapshot {}                              -- I am below the horizon; start me over
+         Verify   { seq, hash }
          Say      { say: Bytes }
 
-server → Batch    { scope, entries: [Entry], has_more }
-         Facts    { scope, facts: [(Seq, [Change])] }
-         Snapshot { scope, seq, hash, rows: …, has_more }
-         Ack      { scope, ids, seqs } · Reject { id, reason } · Denied { reason }
-         Agree    { scope, seq, hash, ok }
+server → Batch    { entries: [Entry], has_more }
+         Facts    { facts: [(Seq, [Change])] }
+         Snapshot { seq, hash, rows: …, has_more }
+         Ack      { ids, seqs } · Reject { id, reason } · Denied { reason }
+         Agree    { seq, hash, ok }
          Heard    { hear: Bytes }
 ```
 
-Everything else is Petros: `seq = head + 1` per scope, dedupe by entry id,
-the authority applies before it appends so a `Reject` is a verdict, fan-out
-is everything above a peer's cursor per scope, `Heard` is taken before the
-rebase, identity once at `Hello`, the server pings.
+A `Hello` carries one subscription, and no other frame names anything
+narrower than the log. Everything else is Petros: `seq = head + 1`, dedupe
+by entry id, the authority applies before it appends so a `Reject` is a
+verdict (its `reason` a sentence a screen can show beside the item), fan-out
+is everything above a peer's cursor, `Heard` is taken before the rebase,
+identity once at `Hello`, the server pings.
 
 **What Replicache and Zero do here, and how this differs.** Both are the
 facts-down model, and it is worth being exact about it because this design
@@ -733,21 +736,22 @@ Three consequences of that model, and where Ark stands on each:
   gone. The horizon is the dial between local-first exactness and their
   steady state.
 - **Their clients are never exact, and it does not matter to them; Ark's
-  whole-scope peers are exact, and that is the point.** Exactness is what
-  makes a peer with no server a first-class holder of a scope whose history
+  whole peers are exact, and that is the point.** Exactness is what
+  makes a peer with no server a first-class holder of a log whose history
   can later be adopted and *verified* by an authority — replay the intents,
   match the hash — and what makes two peers able to check they agree. A
   Replicache or Zero client cannot be an authority for anything, because
   the truth is the server's database and the client only ever had a
   speculation and a copy. That is the capability the user asked for, and it
   is the one their model structurally cannot offer.
-- **Their partial sync is row-level and query-driven; Ark's is scope-level
-  for exact peers and query-driven only for projections.** Zero's model is
-  strictly more flexible about *which rows* a client holds, because
-  facts-down does not care what the client can compute. Ark buys exactness
-  with a coarser grain, and recovers Zero's grain in facts mode: a
-  projection subscription *is* a query the authority maintains with the same
-  view machinery the spec already has (§3.13), streaming facts for its rows.
+- **Their partial sync is row-level and query-driven; Ark has none for
+  exact peers, which hold the whole log, and is query-driven only for
+  projections.** Zero's model is strictly more flexible about *which rows* a
+  client holds, because facts-down does not care what the client can
+  compute. Ark buys exactness by holding everything, and recovers Zero's
+  grain in facts mode: a projection subscription *is* a query the authority
+  maintains with the same view machinery the spec already has (§3.13),
+  streaming facts for its rows.
   In that mode an Ark peer is a Zero client, and the two designs meet.
 
 On the "two paths to test": Replicache and Zero also have two — the
@@ -765,11 +769,11 @@ per day.
 
 ### 3.9 Snapshots and the horizon
 
-A snapshot of a scope at `seq` is its rows and their state hash. It is what
+A snapshot of the log at `seq` is the rows and their state hash. It is what
 a new device starts from, what a peer below the horizon restarts from, and
-what a schema rebuild replays forward from. Because every whole-scope peer
+what a schema rebuild replays forward from. Because every whole peer
 replays exactly, a snapshot is **verifiable**: any peer with the log can
-reproduce the hash, and an authority adopting a peer's scope (§3.10) proves
+reproduce the hash, and an authority adopting a peer's log (§3.10) proves
 the claimed snapshot by replaying to it.
 
 The **horizon** is the oldest sequence the authority still serves. Below it
@@ -784,24 +788,24 @@ did. This is Petros's "no compaction" item closed, and it interacts with
 
 ### 3.10 Authority is a role
 
-Every peer runs the same log machine; **the authority of a scope is the peer
-that sequences it**. A server is a peer that does this for scopes it hosts,
-for others. A peer with no server does it for its own scopes: it sequences
-its own intents, keeps its own log, snapshots itself, and never replays from
-zero on open. It is not offline, not in a mode, not "pending forever"; it is
-a database with one replica.
+Every peer runs the same log machine; **the authority of a log is the peer
+that sequences it**. A server is a peer that does this for the logs it
+hosts, for others. A peer with no server does it for its own log: it
+sequences its own intents, keeps its own log, snapshots itself, and never
+replays from zero on open. It is not offline, not in a mode, not "pending
+forever"; it is a database with one replica.
 
 When such a peer later meets a server, one of two things happens, both
 already in the design:
 
-- **A scope the server has never seen is adopted whole.** The peer sends its
+- **A log the server has never seen is adopted whole.** The peer sends its
   log (or its snapshot and tail); the server replays every intent through
   its own generated code and checks the hash the peer claimed. A peer cannot
   smuggle rows it did not derive — this is the property only exact replicas
   have, and the reason intents rather than facts are the log. The server
-  becomes the authority; the peer becomes a whole-scope replica of it with
+  becomes the authority; the peer becomes a whole replica of it with
   nothing pending.
-- **A scope the server already holds takes the local entries as pending
+- **A log the server already holds takes the local entries as pending
   intents.** They rebase onto the server's log through the ordinary path at
   unusual depth, and refusals come back as verdicts, as they would for any
   offline edit.
@@ -813,13 +817,16 @@ fencing token, and nothing in harken needs it yet.
 
 ### 3.11 Authorization and partial sync
 
-Two grains, and they line up with the two ways of holding a scope:
+Two grains, and they line up with the two ways of holding the log:
 
-- **Scope grain.** Who may *receive* a scope whole is a rule at its
-  authority, checked at `Hello`. Who may *write* is inside the generated
-  mutator via `ctx.user`, as today, plus a scope-level write rule at the
-  authority. harken: everyone signed in receives `library`; a person
-  receives their own playlist scope and nobody else's.
+- **Log grain.** Who may *receive* the log is one rule at its authority,
+  over the whole log, checked at `Hello`. Who may *write* is inside the
+  generated mutator via `ctx.user`, as today; every entry is held to the
+  login that pushed it, and an authority may also accept one authored under
+  an older login of the same user. harken: everyone signed in receives
+  everything, and whose playlist a write may touch is the mutator's
+  question. Read authorization finer than the whole log, for an exact
+  replica, is what the removed design was for (`docs/scopes.md`).
 - **Row grain, in facts mode.** A projection is a plan the authority
   maintains for that peer and streams facts for; the plan can carry a
   predicate the peer did not write (a permission rule), which is how
@@ -827,9 +834,9 @@ Two grains, and they line up with the two ways of holding a scope:
   a peer holding a filtered subset cannot replay intents against it, so it
   does not.
 
-This is the "no authorisation, no partial sync" item from `decisions.md`
-closed, at the grain the intent model can honestly support, with the finer
-grain available in the mode that does not claim exactness.
+This closes the "no authorisation" half of the "no authorisation, no
+partial sync" item from `decisions.md` at the coarsest grain, the whole log,
+and leaves partial sync to the mode that does not claim exactness.
 
 ### 3.12 Versioning: functions by hash, retained above the horizon
 
@@ -907,12 +914,12 @@ only combination that ships.
 | `codec/` | a value, its canonical bytes; a non-canonical input to refuse | RFC 8949 determinism, tag 37, the type mapping |
 | `order/` | values and their sorted order | the total order; UTF-8 vs UTF-16 vs canonical equivalence |
 | `std/` | a call, its result or refusal | every library function; the pinned Unicode tables; checked overflow |
-| `verify/` | a module, whether it verifies, the error | typing, scope rule, totality, tie-break insertion, unbound symbols |
+| `verify/` | a module, whether it verifies, the error | typing, router uses, totality, tie-break insertion, unbound symbols |
 | `frontend/` | the same function authored in each builder | **one hash** — the proof that any language reaches any other |
 | `eval/` | schema, functions, prior rows, an entry, expected changes and rows or refusal; `fill_auto` from a seed | the generated code; **and** that applying the recorded facts yields the same hash as replaying |
 | `views/` | plan, rows, changes, expected patches and rows | the maintenance contract |
-| `rebase/` | a seeded scripted session across peers and scopes with partitions, duplicates and drops; expected hashes at settle | Petros's simulation, portable; a Swift peer and a Rust authority in one run |
-| `protocol/` | frames in, frames and state out | paging, dedupe re-acks, `Denied`, `Facts`, `Snapshot`, `Verify`/`Agree`, adoption of a local scope |
+| `rebase/` | a seeded scripted session across peers with partitions, duplicates and drops; expected hashes at settle | Petros's simulation, portable; a Swift peer and a Rust authority in one run |
+| `protocol/` | frames in, frames and state out | paging, dedupe re-acks, `Denied`, `Facts`, `Snapshot`, `Verify`/`Agree`, adoption of a local log |
 | `hash/` | tables, expected state hash | `Verify` means one thing everywhere |
 
 **Differential fuzzing** is the second half: `arkc vectors --fuzz` generates
@@ -950,7 +957,7 @@ apps/
   harken/         the app, one directory per program (harken/README.md):
     domain/       the domain, written once in Rust (src/); harken.ark, its emit; and
                   gen/{swift,kotlin}, arkc's print of it for the phones
-    server/       axum: every scope of harken.ark as an authority, applied natively
+    server/       axum: harken.ark's log as an authority, applied natively
     desktop/      ratatui over ark and the domain's native procedures
     web/          the browser peer: ark compiled to wasm, published to GitHub Pages
     ios/          SwiftUI over ArkDBClient and the printed Swift domain (xcodegen)
@@ -971,12 +978,11 @@ source emits. The harken server, desktop and browser peer depend on
    `codec/` and `protocol/`, `converge.rs` becomes `rebase/`, the ivm tests
    `views/`, and `history.rs` an `eval/` vector that passes because two
    bodies are two hashes. The runtime is Petros minus Diesel, SQL, wasm and
-   UniFFI, plus scopes, retained facts, snapshots, the overlay store and the
+   UniFFI, plus retained facts, snapshots, the overlay store and the
    authority role. `arkc verify`, `print`, `check`, `gen rust` land with it.
 2. **The Rust builder and harken's domain through it.** `functions.rs`
-   rewritten against `ark-builder`; `schema.sql` as a schema program. Two
-   scopes, `library` and per-person `playlists`, decided now because they
-   cannot be split later; `add_to_playlist` loses its cross-scope check.
+   rewritten against `ark-builder`; `schema.sql` as a schema program. One
+   log, as today, so `add_to_playlist` keeps its `exists(media)` check.
    The server moves to `ark-server`, the desktop to `rust/ark` with
    generated Rust. **The log starts fresh**, for the reason the first
    revision gave.
@@ -1004,9 +1010,11 @@ source emits. The harken server, desktop and browser peer depend on
   novel piece.** Idiomatic output, readable names, and error messages from
   the verifier decide whether authoring feels like the language or like a
   linter. Budget for it as the main cost.
-- **Scopes are a modelling constraint with no escape.** The first mutator
-  that wants to read across scopes will find a wall; the answer is one
-  scope or an unchecked reference, decided per domain and early.
+- **Every exact peer holds everything.** One log means no partial
+  replication, no per-person log and no read rule finer than the whole log
+  for a peer that replays; a large library, or data one person should not
+  receive, is where that shows first. `docs/scopes.md` records the design
+  that answered it and the questions a return to it must settle.
 - **The IR's ceiling still exists**, though compilation makes it cheap to
   raise: a new `std` function is a mapping per generator and an
   implementation per `ArkStd`, with vectors. It should still be raised
@@ -1042,23 +1050,23 @@ source emits. The harken server, desktop and browser peer depend on
   truth.** A peer applies by intent when it can and by facts when it
   cannot, and ends in the same state. Old clients age gracefully;
   divergence heals.
-- **Scopes are the unit of transaction and of replication.** That is what
-  makes partial sync sound under intents, and it is a modelling constraint
-  accepted with open eyes.
+- **One log per module.** One sequence, one authority, every reference
+  checked, any function over any table. The partitioned design, and what it
+  would take to bring back, is in `docs/scopes.md`.
 - **Snapshots are verifiable and the horizon bounds everything.** Above it,
   local-first exactness costs retention; below it, the design is in
   Replicache's and Zero's steady state.
 - **Authority is a role.** A server is a peer that sequences for others.
 - **Functions are content-addressed and entries name them.** The log
   freezes meaning; versions live above the horizon and nowhere else.
-- **The store is an ordered KV with batch commit, layered per scope;
-  SQLite is a backend and not a dependency.**
+- **The store is an ordered KV with batch commit, layered under an
+  overlay; SQLite is a backend and not a dependency.**
 - **The standard library is the only escape hatch and Unicode is pinned as
   data.** Compilation makes admission cheap; permanence makes it slow.
 - **Views and live frame types are in the spec**, so the native app gets
   what the desktop has, from one declaration.
 - **One repository, native builds per language, vectors pinned by
   revision.**
-- **harken's log starts fresh and its scopes are chosen now.**
+- **harken's log starts fresh.**
 - **Everything Petros got right is kept by name.** The point of a successor
   is to keep the decisions and change the substrate they were paying for.
