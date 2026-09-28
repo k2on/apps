@@ -32,6 +32,7 @@ import qualified Data.ByteString as B
 import Data.Char (toLower)
 import qualified Data.Map.Strict as M
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import qualified Data.Text.IO as TIO
 import Numeric (showHex)
 import System.Directory (createDirectoryIfMissing, doesFileExist, getTemporaryDirectory, removeDirectoryRecursive)
@@ -83,8 +84,8 @@ main = do
         if not present
           then pure [name ++ ": not in " ++ src]
           else do
-            a <- TIO.readFile file
-            b <- TIO.readFile theirs
+            a <- readUtf8 file
+            b <- readUtf8 theirs
             pure (compareText name (uncomment a) (uncomment b))
       removeIfThere out
       case concat diffs of
@@ -114,7 +115,7 @@ gen target path out rest = do
   createDirectoryIfMissing True out
   written <- forM fs $ \(name, text) -> do
     let file = out ++ "/" ++ name
-    TIO.writeFile file text
+    B.writeFile file (TE.encodeUtf8 text)
     pure file
   forM_ (lookup "--fmt" opts) $ \cmd -> callCommand (cmd ++ concatMap (\f -> " '" ++ f ++ "'") written)
   pure written
@@ -155,3 +156,9 @@ die s = hPutStrLn stderr ("arkc: " ++ s) >> exitFailure
 
 hex :: B.ByteString -> String
 hex = concatMap (\w -> let s = showHex w "" in if length s == 1 then '0' : s else s) . B.unpack
+
+-- Source files are UTF-8 whatever the locale says: a build sandbox has no
+-- locale, and GHC would otherwise decode a comment's em dash as ASCII and
+-- fail.
+readUtf8 :: FilePath -> IO T.Text
+readUtf8 path = TE.decodeUtf8 <$> B.readFile path
