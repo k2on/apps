@@ -46,9 +46,16 @@ fromValue v = do
   spec <- field fs "spec" >>= int ["module", "spec"]
   sch <- field fs "schema" >>= schemaFromValue
   fns <- field fs "functions" >>= list ["module", "functions"] functionFromValue
+  routers <- field fs "routers" >>= list ["module", "routers"] router
   live <- field fs "live" >>= list ["module", "live"] frame
-  pure (Module (fromIntegral spec) sch fns live)
+  pure (Module (fromIntegral spec) sch fns routers live)
   where
+    router x = do
+      fs <- tagged ["router"] "router" x
+      n <- field fs "name" >>= text ["router", "name"]
+      sc <- field fs "scope" >>= text ["router", n, "scope"]
+      uses <- field fs "uses" >>= list ["router", n, "uses"] (text ["router", n, "uses"])
+      pure (Router n sc uses)
     frame x = do
       fs <- tagged ["frame"] "frame" x
       n <- field fs "name" >>= text ["frame", "name"]
@@ -123,13 +130,18 @@ functionFromValue v = do
     "mutator" -> pure Mutator
     "query" -> pure Query
     "helper" -> pure Helper
+    "guard" -> pure Guard
+    "provide" -> pure Provide
     other -> Left (DecodeError here ("unknown kind " <> other))
   sc <- field fs "scope" >>= optional (text (here ++ ["scope"]))
+  rt <- field fs "router" >>= optional (text (here ++ ["router"]))
+  uses <- field fs "uses" >>= list (here ++ ["uses"]) (text (here ++ ["uses"]))
   autos <- field fs "autos" >>= list (here ++ ["autos"]) auto
-  args <- field fs "args" >>= list (here ++ ["args"]) arg
+  input <- field fs "input" >>= list (here ++ ["input"]) (inputField here)
+  refine <- field fs "refine" >>= list (here ++ ["refine"]) (refinement here)
   ret <- field fs "ret" >>= optional tyFromValue
   body <- field fs "body" >>= list (here ++ ["body"]) (stmt here)
-  pure (Function n k sc autos args ret body M.empty)
+  pure (Function n k sc rt uses autos input refine ret body M.empty)
   where
     auto x = do
       (t, fs) <- taggedAny ["auto"] x
@@ -138,11 +150,32 @@ functionFromValue v = do
         "new_id" -> (\tb -> (n, NewId tb)) <$> (field fs "table" >>= text ["auto", n])
         "now" -> pure (n, Now)
         other -> Left (DecodeError ["auto", n] ("unknown auto " <> other))
-    arg x = do
-      fs <- tagged ["arg"] "arg" x
-      n <- field fs "name" >>= text ["arg", "name"]
+    inputField here x = do
+      fs <- tagged ["field"] "field" x
+      n <- field fs "name" >>= text ["field", "name"]
       t <- field fs "ty" >>= tyFromValue
-      pure (n, t)
+      cs <- field fs "checks" >>= list (here ++ [n]) (checkFromValue (here ++ [n]))
+      pure (n, Field t cs)
+    refinement here x = do
+      fs <- tagged here "refine" x
+      e <- field fs "e" >>= expr (here ++ ["refine"])
+      why <- field fs "why" >>= optional (text here)
+      pure (e, why)
+
+checkFromValue :: [Text] -> Value -> D Check
+checkFromValue here v = do
+  (t, fs) <- taggedAny here v
+  let why = field fs "why" >>= optional (text here)
+      n = field fs "n" >>= int here
+  case t of
+    "trim" -> pure CTrim
+    "min_len" -> CMinLen <$> (fromIntegral <$> n) <*> why
+    "max_len" -> CMaxLen <$> (fromIntegral <$> n) <*> why
+    "range" -> CRange <$> (field fs "lo" >>= optional (fmap fromIntegral . int here)) <*> (field fs "hi" >>= optional (fmap fromIntegral . int here)) <*> why
+    "non_empty" -> CNonEmpty <$> why
+    "exists" -> CExists <$> why
+    "refine" -> CRefine <$> (field fs "e" >>= expr here) <*> why
+    other -> Left (DecodeError here ("unknown check " <> other))
 
 stmt :: [Text] -> Value -> D Stmt
 stmt here v = do
@@ -152,7 +185,9 @@ stmt here v = do
     "let" -> SLet <$> (field fs "sym" >>= sym p) <*> (field fs "e" >>= expr p)
     "if" -> SIf <$> (field fs "c" >>= expr p) <*> (field fs "then" >>= list p (stmt p)) <*> (field fs "else" >>= list p (stmt p))
     "for" -> SFor <$> (field fs "sym" >>= sym p) <*> (field fs "in" >>= expr p) <*> (field fs "body" >>= list p (stmt p))
-    "put" -> SPut <$> (field fs "table" >>= text p) <*> (field fs "row" >>= expr p)
+    "insert" -> SInsert <$> (field fs "table" >>= text p) <*> (field fs "row" >>= expr p) <*> (field fs "on" >>= list p (text p))
+    "upsert" -> SUpsert <$> (field fs "table" >>= text p) <*> (field fs "row" >>= expr p) <*> (field fs "on" >>= list p (text p))
+    "update" -> SUpdate <$> (field fs "table" >>= text p) <*> (field fs "key" >>= list p (expr p)) <*> (field fs "sym" >>= sym p) <*> (field fs "row" >>= expr p)
     "delete" -> SDelete <$> (field fs "table" >>= text p) <*> (field fs "key" >>= list p (expr p))
     "refuse" -> SRefuse <$> (field fs "e" >>= expr p)
     "return" -> SReturn <$> (field fs "e" >>= optional (expr p))
@@ -171,6 +206,7 @@ expr here v = do
     "var" -> EVar <$> s "sym"
     "ctx_user" -> pure ECtxUser
     "ctx_session" -> pure ECtxSession
+    "provided" -> EProvided <$> (field fs "fn" >>= text p)
     "field" -> EField <$> e "e" <*> (field fs "name" >>= text p)
     "struct" -> EStruct <$> (field fs "fields" >>= structMap p >>= traverse (expr p))
     "list" -> EList <$> (field fs "items" >>= list p (expr p))

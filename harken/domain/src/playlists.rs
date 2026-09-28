@@ -1,67 +1,91 @@
 //! The playlists scope: what a person does on any device, offline or not.
-use ark_builder::*;
+use ark::authoring::*;
 
-pub fn playlists(m: &mut ModuleBuilder) {
-    // Make a playlist. Trims; refuses an empty name; a no-op if this person
-    // already has one by that name — decided in apply, so a second device's
-    // default playlist is not a duplicate.
-    m.mutator("create_playlist", "playlists", |f| {
-        let id = f.new_id("id", "playlist");
-        let created_ms = f.now("created_ms");
-        let name = f.arg("name", Ty::Text);
-        let b = f.body();
-        let name = b.let_("name", name.trim());
-        b.if_(name.is_empty(), |b| b.refuse("a playlist needs a name"));
-        let known = b.exists("playlist", [id.clone()]);
-        b.if_(known, |b| b.ret());
-        let mine = b.select(
-            Plan::from("playlist")
-                .filter(Pred::cmp("user_id", CmpOp::Eq, ctx_user()))
-                .filter(Pred::cmp("name", CmpOp::Eq, name.clone()))
-                .limit(1),
-        );
-        b.if_(mine.len().gt(0), |b| b.ret());
-        b.put(
-            "playlist",
-            record([("id", id), ("name", name), ("user_id", ctx_user()), ("created_ms", created_ms)]),
-        );
-    });
+use crate::schema::*;
 
-    // Put a track on a playlist, after everything already on it — which is
-    // what makes the rebase visible.
-    m.mutator("add_to_playlist", "playlists", |f| {
-        let added_ms = f.now("added_ms");
-        let playlist_id = f.arg("playlist_id", Ty::id("playlist"));
-        let track_id = f.arg("track_id", Ty::id("track"));
-        let b = f.body();
-        let has_playlist = b.exists("playlist", [playlist_id.clone()]);
-        b.if_(has_playlist.not(), |b| b.ret());
-        let already = b.exists("playlist_item", [playlist_id.clone(), track_id.clone()]);
-        b.if_(already, |b| b.ret());
-        let last = b.select(
-            Plan::from("playlist_item")
-                .filter(Pred::cmp("playlist_id", CmpOp::Eq, playlist_id.clone()))
-                .order_by("pos", Dir::Desc)
-                .limit(1),
-        );
-        let pos = b.let_("pos", last.first().map_some(|row| row.field("pos")).unwrap_or(0));
-        b.put(
-            "playlist_item",
-            record([
-                ("playlist_id", playlist_id),
-                ("track_id", track_id),
-                ("pos", pos.add(1)),
-                ("added_ms", added_ms),
-                ("user_id", ctx_user()),
-            ]),
-        );
-    });
+pub struct CreatePlaylist {
+    pub name: Text,
+}
+impl Input for CreatePlaylist {
+    fn schema() -> Object<Self> {
+        object().field("name", text().trim().min(1, "a playlist needs a name").max(120))
+    }
+}
 
-    // Take a track off a playlist. The track stays in the library.
-    m.mutator("remove_from_playlist", "playlists", |f| {
-        let playlist_id = f.arg("playlist_id", Ty::id("playlist"));
-        let track_id = f.arg("track_id", Ty::id("track"));
-        let b = f.body();
-        b.delete("playlist_item", [playlist_id, track_id]);
+pub struct OnPlaylist {
+    pub playlist_id: Id<Playlist>,
+    pub track_id: Id<Track>,
+}
+impl Input for OnPlaylist {
+    fn schema() -> Object<Self> {
+        object()
+            .field("playlist_id", id::<Playlist>().exists())
+            .field("track_id", id::<Track>())
+    }
+}
+
+pub struct PlaylistId {
+    pub playlist_id: Id<Playlist>,
+}
+impl Input for PlaylistId {
+    fn schema() -> Object<Self> {
+        object().field("playlist_id", id::<Playlist>().exists())
+    }
+}
+
+pub fn playlists() -> Router<Playlists> {
+    let playlists = router::<Playlists>("playlists");
+    let signed_in = playlists.guard("signed_in", |ctx, _db| when(ctx.user.is_empty(), || refuse("sign in first")));
+    let owned = signed_in.provide("owned", |ctx, db, input: &PlaylistId| {
+        db.playlist
+            .get((input.playlist_id,))
+            .filter(|row| row.user_id.eq(ctx.user))
+            .or_refuse("not your playlist")
     });
+    playlists.routes((
+        // Trims; refuses an empty name; a second one by the same person
+        // with the same name is a no-op, so a second device's default
+        // playlist is not a duplicate and the first keeps its id.
+        signed_in.input::<CreatePlaylist>().mutation("create_playlist", |ctx, db, input| {
+            db.playlist
+                .insert(Playlist {
+                    id: ctx.new_id("id"),
+                    name: input.name,
+                    user_id: ctx.user,
+                    created_ms: ctx.now("created_ms"),
+                })
+                .on((Playlist::user_id, Playlist::name))
+        }),
+        // After everything already on it, which is what makes the rebase
+        // visible: add while offline and it lands after what arrived.
+        owned.input::<OnPlaylist>().mutation("add_to_playlist", |ctx, db, input, playlist| {
+            let playlist_item = db
+                .playlist_item
+                .filter(PlaylistItem::playlist_id.eq(playlist.id))
+                .order_by(PlaylistItem::pos.desc())
+                .first();
+            db.playlist_item.insert(PlaylistItem {
+                playlist_id: playlist.id,
+                track_id: input.track_id,
+                pos: playlist_item.map_or(0, |row| row.pos).add(1),
+                added_ms: ctx.now("added_ms"),
+                user_id: ctx.user,
+            })
+        }),
+        owned.input::<OnPlaylist>().mutation("remove_from_playlist", |_ctx, db, input, playlist| {
+            db.playlist_item.delete((playlist.id, input.track_id))
+        }),
+        signed_in.query("playlists", |ctx, db, _input: ()| {
+            db.playlist
+                .filter(Playlist::user_id.eq(ctx.user))
+                .order_by(Playlist::name.asc())
+                .all()
+        }),
+        owned.input::<PlaylistId>().query("playlist_items", |_ctx, db, _input, playlist| {
+            db.playlist_item
+                .filter(PlaylistItem::playlist_id.eq(playlist.id))
+                .order_by((PlaylistItem::pos.asc(), PlaylistItem::track_id.asc()))
+                .all()
+        }),
+    ))
 }

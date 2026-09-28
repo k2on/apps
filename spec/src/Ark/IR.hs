@@ -1,13 +1,15 @@
 {-# LANGUAGE OverloadedStrings #-}
 -- | §3 Ark IR.
 --
--- The program a domain is. A module carries a schema, functions and the
--- types of its live frames. A function is a mutator, a query or a helper;
--- its body is a statement list in a deliberately small imperative core over
--- a pure expression language. Nobody runs this IR in production: a builder
--- in Rust, Swift or Kotlin constructs it, 'Ark.Verify' checks it, and a
--- generator writes native source from it. This module defines what that
--- source must mean, and 'Ark.Eval' is the meaning.
+-- The program a domain is. A module carries a schema, routers, functions
+-- and the types of its live frames. A function is a mutator, a query, a
+-- helper, or a piece of middleware (a guard or a provider); its body is a
+-- statement list in a deliberately small imperative core over a pure
+-- expression language. Nobody writes this IR by hand: a domain is written
+-- in Rust, Swift or Kotlin against one vocabulary (@spec/AUTHORING.md@),
+-- running that program under @Emit@ yields this, 'Ark.Verify' checks it,
+-- and running the same program under @Native@ must agree with 'Ark.Eval'
+-- over it — which is the meaning.
 --
 -- Three properties are designed in rather than checked afterwards:
 --
@@ -17,7 +19,8 @@
 -- * __deterministic__: no clock, no randomness, no I/O and no floats exist
 --   in the language; the only non-determinism a mutator sees arrives in its
 --   'fnAutos', chosen once at the originating peer and frozen in the log.
--- * __scoped__: a mutator names one scope and touches only its tables.
+-- * __scoped__: a router names one scope and every procedure on it reads
+--   and writes only that scope's tables.
 --
 -- Local variables are 'Sym's — small integers assigned in order of
 -- binding — so that two authors' choices of names never reach the hash of
@@ -25,9 +28,12 @@
 -- part of the canonical form.
 module Ark.IR
   ( Module (..)
+  , Router (..)
   , Function (..)
   , FnKind (..)
   , Auto (..)
+  , Field (..)
+  , Check (..)
   , Sym
   , Block
   , Stmt (..)
@@ -41,6 +47,10 @@ module Ark.IR
   , SpecVersion
   , specVersion
   , lookupFunction
+  , lookupRouter
+  , fnArgs
+  , isProcedure
+  , isMiddleware
   ) where
 
 import Data.List (find)
@@ -56,8 +66,10 @@ import Ark.Value
 -- "update required". It is about the runtime alone, never about the app.
 type SpecVersion = Int
 
+-- | Version 2: routers, middleware, input schemas with checks, and the
+-- three table writes (@insert@, @upsert@, @update@) in place of @put@.
 specVersion :: SpecVersion
-specVersion = 1
+specVersion = 2
 
 data Module = Module
   { modSpec :: SpecVersion
@@ -65,6 +77,9 @@ data Module = Module
   , -- | In declaration order. A helper may be called only by functions
     -- after it in this list, which is what makes every call graph a DAG.
     modFunctions :: [Function]
+  , -- | §3.10 Routers, in declaration order. Every mutator and query is on
+    -- exactly one.
+    modRouters :: [Router]
   , -- | §3.9 The live section: the frame types an app's realtime channel
     -- carries, by name. Declared here so that every runtime generates them;
     -- the engine never looks inside a frame and none of the log's rules
@@ -73,17 +88,40 @@ data Module = Module
   }
   deriving (Eq, Show)
 
+-- | §3.10 A router: a scope, and the middleware declared on it.
+--
+-- A procedure belongs to one router and inherits its scope. What a
+-- procedure /runs/ before its body is its own 'fnUses' — the chain it was
+-- built from, a subsequence of the router's 'rtUses' — so that
+-- @signed_in.mutation(..)@ and @owned.mutation(..)@ on one router run
+-- different chains, as tRPC's builders do.
+data Router = Router
+  { rtName :: Text
+  , rtScope :: ScopeName
+  , -- | Every middleware function declared on this router, in declaration
+    -- order, by name.
+    rtUses :: [Text]
+  }
+  deriving (Eq, Show)
+
 data FnKind
-  = -- | Writes. Takes a context and autos; reads and writes one scope;
-    -- may 'SRefuse'. Its effect is what the log records.
+  = -- | Writes. Takes a context and autos; reads and writes its router's
+    -- scope; may 'SRefuse'. Its effect is what the log records.
     Mutator
-  | -- | Reads. Takes arguments; may 'ESelect' from any scope the peer
-    -- holds; returns a value; cannot write or refuse. Not in the log, so
-    -- not held to permanence.
+  | -- | Reads. Takes an input; may 'ESelect' from its router's scope;
+    -- returns a value; may refuse (a check or a guard) but cannot write.
+    -- Not in the log, so not held to permanence.
     Query
   | -- | Pure. No store access at all, no refusal; returns a value. This
     -- is where a domain's @slug@ and @art_to_write@ live.
     Helper
+  | -- | Middleware that runs before a procedure's body and may refuse; it
+    -- returns nothing. Reads its scope; writes nothing.
+    Guard
+  | -- | Middleware that runs before a procedure's body, may refuse, and
+    -- returns a value of its 'fnRet', which the body reads as
+    -- 'EProvided' under the middleware's name.
+    Provide
   deriving (Eq, Show)
 
 -- | The non-determinism a mutator is allowed, by type. Each is one value,
@@ -96,24 +134,82 @@ data Auto
   | Now -- ^ milliseconds since the Unix epoch, as 'VInt'
   deriving (Eq, Show)
 
+-- | §3.11 One field of a function's input: its type and the checks that
+-- run on it, in order, before anything else does.
+data Field = Field
+  { fTy :: Ty
+  , fChecks :: [Check]
+  }
+  deriving (Eq, Show)
+
+-- | §3.11 A check on one input field. Every constructor but 'CTrim' carries
+-- an optional message; 'Nothing' means the default 'Ark.Eval.defaultMessage'
+-- gives. A failing check is a refusal with that message. On a 'TOption'
+-- field the checks run only when the value is present.
+data Check
+  = -- | Text: strip White_Space from both ends, before every later check
+    -- and before the body. Normalisation, not a test.
+    CTrim
+  | -- | Text: at least @n@ code points.
+    CMinLen Int (Maybe Text)
+  | -- | Text: at most @n@ code points.
+    CMaxLen Int (Maybe Text)
+  | -- | Int: @lo <= v <= hi@, either bound optional.
+    CRange (Maybe Int) (Maybe Int) (Maybe Text)
+  | -- | List: at least one element.
+    CNonEmpty (Maybe Text)
+  | -- | Id: a row with that key exists, in the procedure's scope.
+    CExists (Maybe Text)
+  | -- | Any type: the expression, over @EArg <this field>@, is true.
+    CRefine Expr (Maybe Text)
+  deriving (Eq, Show)
+
 data Function = Function
   { fnName :: Text
   , fnKind :: FnKind
-  , -- | The scope a mutator belongs to; 'Nothing' for queries and helpers.
+  , -- | The scope: a procedure's is its router's; middleware names its
+    -- own; 'Nothing' for a helper.
     fnScope :: Maybe ScopeName
+  , -- | The router a mutator or query is on; 'Nothing' otherwise.
+    fnRouter :: Maybe Text
+  , -- | The middleware this procedure runs before its body, in order; a
+    -- subsequence of its router's 'rtUses'. Empty for helpers and
+    -- middleware.
+    fnUses :: [Text]
   , fnAutos :: [(Text, Auto)]
-  , fnArgs :: [(Text, Ty)]
-  , -- | The result type of a query or helper; 'Nothing' for a mutator.
+  , -- | The input, field by field, in declaration order. For middleware,
+    -- the fields of the procedure's input it reads (the verifier requires
+    -- every procedure using it to have those fields at those types); for
+    -- a helper, its parameters, with no checks.
+    fnInput :: [(Text, Field)]
+  , -- | Checks over the whole input, after every field's own, each with
+    -- its optional message.
+    fnRefine :: [(Expr, Maybe Text)]
+  , -- | The result type of a query, helper or provider; 'Nothing' for a
+    -- mutator or guard.
     fnRet :: Maybe Ty
   , fnBody :: Block
   , -- | The author's names for symbols; not hashed, not required, only
-    -- for the printable form and for generated code to read well.
+    -- for the printable form and for the authoring form to read well.
     fnNames :: Map Sym Text
   }
   deriving (Eq, Show)
 
+-- | The input's names and types alone, which is all most rules need.
+fnArgs :: Function -> [(Text, Ty)]
+fnArgs fn = [(n, fTy f) | (n, f) <- fnInput fn]
+
+isProcedure :: Function -> Bool
+isProcedure fn = fnKind fn `elem` [Mutator, Query]
+
+isMiddleware :: Function -> Bool
+isMiddleware fn = fnKind fn `elem` [Guard, Provide]
+
 lookupFunction :: Module -> Text -> Maybe Function
 lookupFunction m n = find ((== n) . fnName) (modFunctions m)
+
+lookupRouter :: Module -> Text -> Maybe Router
+lookupRouter m n = find ((== n) . rtName) (modRouters m)
 
 -- | A local variable, alpha-normalised: the @n@th binding in a function,
 -- counting from 0 in evaluation order. 'Ark.Verify' renumbers.
@@ -131,23 +227,35 @@ data Stmt
   | SIf Expr Block Block
   | -- | Iterate a list, binding each element. Finite by construction.
     SFor Sym Expr Block
-  | -- | Write a full row. Reports an @Add@, an @Edit@, or nothing if the
-    -- row is already exactly that; refuses on a constraint. See
-    -- 'Ark.Store.put'.
-    SPut TableName Expr
+  | -- | Write a full row unless one matches: on the columns named, which
+    -- must be a declared unique index of the table, or on the key when
+    -- none are named. A match is a no-op reporting nothing; an insert
+    -- never edits. Otherwise reports an @Add@, or refuses on a
+    -- constraint. See 'Ark.Store.insertOn'.
+    SInsert TableName Expr [FieldName]
+  | -- | Write a full row; where one matches on the columns named (or the
+    -- key), keep the matching row's key columns and take the rest from
+    -- the new row. Reports @Add@, @Edit@ or nothing. @SUpsert t e []@ is
+    -- exactly a put. See 'Ark.Store.upsertOn'.
+    SUpsert TableName Expr [FieldName]
+  | -- | Rewrite the row at a key: the existing row is bound to the symbol
+    -- for the new row's expression, whose key columns are then the
+    -- existing ones. A missing row is a no-op. See 'Ark.Store.update'.
+    SUpdate TableName [Expr] Sym Expr
   | -- | Delete by key (a list of the key columns' values). A missing row is
     -- a no-op; a row another row references is a refusal.
     SDelete TableName [Expr]
-  | -- | End the mutator with a deterministic verdict. Every replica reaches
-    -- the same one, so it is a fact about the entry and not a failure.
+  | -- | End the function with a deterministic verdict. Every replica
+    -- reaches the same one, so it is a fact about the entry and not a
+    -- failure.
     SRefuse Expr
-  | -- | Leave the function. A mutator returns nothing; a query or helper
-    -- returns a value of its 'fnRet'.
+  | -- | Leave the function. A mutator or guard returns nothing; a query,
+    -- helper or provider returns a value of its 'fnRet'.
     SReturn (Maybe Expr)
   deriving (Eq, Show)
 
 -- | §3.2 Expressions. Pure, apart from the three reads, which the verifier
--- confines to 'SLet' in mutators and queries.
+-- confines to 'SLet' in everything but a helper.
 data Expr
   = ELit Value
   | EArg Text
@@ -157,6 +265,9 @@ data Expr
     ECtxUser
   | -- | The login the entry was authored under.
     ECtxSession
+  | -- | What a 'Provide' middleware of that name returned, before the body
+    -- ran.
+    EProvided Text
   | EField Expr FieldName
   | EStruct (Map FieldName Expr)
   | EList [Expr]
@@ -215,9 +326,9 @@ data CmpOp = Eq | Ne | Lt | Le | Gt | Ge
 data Plan = Plan
   { pTable :: TableName
   , pFilter :: Maybe Pred
-  , -- | The verifier makes every mutator's order total by appending the
-    -- key columns ascending, because a @limit 1@ over a partial order is
-    -- exactly the kind of thing two backends answer differently.
+  , -- | The verifier makes every order total by appending the key columns
+    -- ascending, because a @limit 1@ over a partial order is exactly the
+    -- kind of thing two backends answer differently.
     pOrder :: [(FieldName, Dir)]
   , pLimit :: Maybe Int
   , -- | Relationships to read beneath each row, each appearing as a field
@@ -282,4 +393,5 @@ data StdFn
   | Reverse
   | IsSome
   | UnwrapOr
+  | Unwrap -- ^ the value, or the refusal @unwrapped none@; what @or_refuse@ reads after its check
   deriving (Eq, Ord, Show, Enum, Bounded)

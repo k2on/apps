@@ -11,7 +11,6 @@ module Main (main) where
 
 import qualified Data.ByteString as B
 import Data.Char (toLower)
-import Data.Int (Int64)
 import Data.List (intercalate, sortBy)
 import qualified Data.Map.Strict as M
 import qualified Data.Text as T
@@ -161,8 +160,8 @@ demo out = do
       playlistRow = M.fromList [("id", VId pid), ("name", VText "Favorites"), ("user_id", VText "alice")]
       st0 = either (error . show) fst (S.put (S.empty demoSchema) "playlist" playlistRow)
       ctx = Ctx "alice" "session-1"
-      autos = M.fromList [("added_ms", VInt (1577836800000 :: Int64))]
-      args k = M.fromList [("playlist_id", VId pid), ("media_id", VBytes (B.pack [k]))]
+      autos = M.empty
+      args k = M.fromList [("playlist_id", VId pid), ("track_id", VText (T.pack ("t" ++ show k)))]
       step st k = case apply m "add_to_playlist" ctx autos (args k) st of
         Right (Right (st', chs)) -> (st', chs)
         other -> error ("apply: " ++ show other)
@@ -191,6 +190,57 @@ demo out = do
   putStrLn ("  function hash " ++ hex (functionHash (closure m verifiedAdd)))
   putStrLn ("  state hash    " ++ hex (stateHash st4))
   putStrLn ("  changes       " ++ map toLower (show (length ch1, length ch2, length ch3, length ch4)))
+  -- The checks, the middleware order and the form validator, as verdicts.
+  let cid = maybe (error "an id") id (mkId (B.pack (replicate 15 0 ++ [2])))
+      verdictOf name autos' args' st = case apply m name ctx autos' args' st of
+        Right (Left r) -> case r of
+          S.Refused t -> Just t
+          other -> Just (T.pack (show other))
+        Right (Right _) -> Nothing
+        Left e -> error ("apply " ++ T.unpack name ++ ": " ++ show e)
+      createAutos = M.fromList [("id", VId cid)]
+      cases =
+        [ ("trim-then-min", "create_playlist", createAutos, M.fromList [("name", VText "   ")], Just "a playlist needs a name")
+        , ("trimmed-name-lands", "create_playlist", createAutos, M.fromList [("name", VText "  Road  ")], Nothing)
+        , ("same-name-again-is-a-no-op", "create_playlist", createAutos, M.fromList [("name", VText "Favorites")], Nothing)
+        , ("exists-check-default-message", "add_to_playlist", M.empty, M.fromList [("playlist_id", VId cid), ("track_id", VText "t1")], Just "playlist_id: no such playlist")
+        , ("min-len-default-message", "add_to_playlist", M.empty, M.fromList [("playlist_id", VId pid), ("track_id", VText "")], Just "track_id: at least 1 characters")
+        ]
+  mapM_ (\(what, name, autos', args', want) -> if verdictOf name autos' args' st4 == want then pure () else error ("eval " ++ what ++ ": " ++ show (verdictOf name autos' args' st4))) cases
+  case apply m "create_playlist" ctx createAutos (M.fromList [("name", VText "  Road  ")]) st4 of
+    Right (Right (st', [S.Add "playlist" row])) | M.lookup "name" row == Just (VText "Road") && M.size (S.rows st' "playlist") == 2 -> pure ()
+    other -> error ("eval trimmed-name-lands: " ++ show (fmap (fmap snd) other))
+  case apply m "create_playlist" ctx createAutos (M.fromList [("name", VText "Favorites")]) st4 of
+    Right (Right (_, [])) -> pure ()
+    other -> error ("eval same-name-again: " ++ show (fmap (fmap snd) other))
+  write
+    (out ++ "/eval/checks.json")
+    ( obj
+        [ ("module", json (toValue m))
+        , ("store_before", json (storeValue st4))
+        , ("ctx", json (VStruct (M.fromList [("user", VText "alice"), ("session", VText "session-1")])))
+        , ("cases", "[" ++ intercalate "," [obj [("name", quoted what), ("function", quoted (T.unpack name)), ("autos", json (VStruct autos')), ("args", json (VStruct args')), ("refused", maybe "null" (quoted . T.unpack) want)] | (what, name, autos', args', want) <- cases] ++ "]")
+        ]
+    )
+  -- The form validator: every field's first failure, and the input as normalised.
+  let formCases =
+        [ ("empty-name", "create_playlist", M.fromList [("name", VText " ")])
+        , ("trimmed", "create_playlist", M.fromList [("name", VText " Mix ")])
+        , ("partial-input", "add_to_playlist", M.fromList [("track_id", VText "")])
+        , ("unknown-playlist", "add_to_playlist", M.fromList [("playlist_id", VId cid), ("track_id", VText "t")])
+        ]
+      form name args' = either (\e -> error ("check: " ++ show e)) id (check m name ctx args' st4)
+  if fst (form "create_playlist" (M.fromList [("name", VText " ")])) == [("name", "a playlist needs a name")] then pure () else error "check: empty name"
+  if snd (form "create_playlist" (M.fromList [("name", VText " Mix ")])) == M.fromList [("name", VText "Mix")] then pure () else error "check: trim"
+  if fst (form "add_to_playlist" (M.fromList [("track_id", VText "")])) == [("track_id", "track_id: at least 1 characters")] then pure () else error "check: partial"
+  write
+    (out ++ "/eval/form-check.json")
+    ( obj
+        [ ("module", json (toValue m))
+        , ("store", json (storeValue st4))
+        , ("cases", "[" ++ intercalate "," [obj [("name", quoted what), ("function", quoted (T.unpack name)), ("input", json (VStruct args')), ("messages", json (VList [VStruct (M.fromList [("field", VText f), ("message", VText w)]) | (f, w) <- fst (form name args')])), ("normalised", json (VStruct (snd (form name args'))))] | (what, name, args') <- formCases] ++ "]")
+        ]
+    )
   where
     stepJson a chs st =
       obj
@@ -221,13 +271,13 @@ rebase out = do
       idN k = maybe (error "id") id (mkId (B.pack (replicate 15 0 ++ [k])))
       pid = idN 1
       ctx who = Ctx who (who <> "-session")
-      now = M.fromList [("added_ms", VInt 1577836800000)]
-      addArgs k = M.fromList [("playlist_id", VId pid), ("media_id", VBytes (B.pack [k]))]
+      now = M.empty
+      addArgs k = M.fromList [("playlist_id", VId pid), ("track_id", VText (T.pack ("t" ++ show k)))]
       must what = either (\e -> error (what ++ ": " ++ show e)) id
       claim what ok = if ok then pure () else error ("rebase: " ++ what)
       -- an authority, and three replicas that hold the generated code
-      auth0 = authority sch "playlists" bodies
-      fresh = open sch "playlists" bodies (S.empty sch) 0 []
+      auth0 = authority sch "demo" bodies
+      fresh = open sch "demo" bodies (S.empty sch) 0 []
       alice0 = fresh
       bob0 = fresh
       -- the authority answers one pushed entry and both connected peers hear it
@@ -251,7 +301,7 @@ rebase out = do
       bob5 = ack bob4 (eId e3) s3
       (_, alice2') = takeChanges alice2 -- the ack rebuilt her view; a screen has drawn it since
       (alice3, e9) = must "alice adds 9 alone" (mutate alice2' (idN 109) (ctx "alice") hAdd now (addArgs 9))
-      posOf r k = M.lookup "pos" =<< S.get (rView r) "playlist_item" [VId pid, VBytes (B.pack [k])]
+      posOf r k = M.lookup "pos" =<< S.get (rView r) "item" [VId pid, VText (T.pack ("t" ++ show k))]
       (chA, alice3') = takeChanges alice3
   claim "alone, alice's track is first on her view" (posOf alice3 9 == Just (VInt 1))
   claim "a local mutation reports its changes, not a rebuild" (case chA of Applied [_] -> True; _ -> False)
@@ -276,7 +326,7 @@ rebase out = do
       bob7 = receive bob6 s2 e2
   claim "a duplicate delivery is a no-op" (bob7 == bob6)
   let -- carol holds no generated code at all: she applies by facts
-      carol0 = open sch "playlists" M.empty (S.empty sch) 0 []
+      carol0 = open sch "demo" M.empty (S.empty sch) 0 []
       carol1 = foldl (\r (n, e) -> receive r n e) carol0 [(s1, e1), (s2, e2), (s3, e3), (s9, e9)]
   claim "without closures carol asks for every entry's facts" (needs carol1 == [1, 2, 3, 4])
   let factsOf n = case M.lookup n (lEntries (aLog auth4)) of Just (_, f) -> f; Nothing -> error "no facts"
@@ -285,25 +335,25 @@ rebase out = do
   let -- dave's build of add_to_playlist is wrong: it steps by two. Facts catch it.
       wrong = (bodies M.! hAdd) {cFn = (cFn (bodies M.! hAdd)) {fnBody = map stepByTwo (fnBody (cFn (bodies M.! hAdd)))}}
       stepByTwo st = case st of
-        SPut t (EStruct fs) -> SPut t (EStruct (M.adjust (const (EOp Add [EVar 4, ELit (VInt 2)])) "pos" fs))
+        SInsert t (EStruct fs) on -> SInsert t (EStruct (M.adjust (\e -> case e of EOp Add [a, _] -> EOp Add [a, ELit (VInt 2)]; other -> other) "pos" fs)) on
         other -> other
-      dave0 = open sch "playlists" (M.insert hAdd wrong bodies) (S.empty sch) 0 []
+      dave0 = open sch "demo" (M.insert hAdd wrong bodies) (S.empty sch) 0 []
       dave1 = foldl (\r (n, e) -> receiveWith r n e (factsOf n)) dave0 [(s1, e1), (s2, e2), (s3, e3), (s9, e9)]
   claim "a divergent runtime is detected" (rDiverged dave1 == [2, 3, 4])
   claim "and healed by the facts" (verifyAt dave1 == verifyAt bob6)
   let -- eve has no server: she is her own authority, and later hands the scope over
       eve0 = fresh
-      eveAuth0 = authority sch "playlists" bodies
+      eveAuth0 = authority sch "demo" bodies
       (eve1, _) = must "eve creates" (mutate eve0 (idN 201) (ctx "eve") hCreate (M.fromList [("id", VId (idN 2))]) (M.fromList [("name", VText "Road")]))
-      (eve2, _) = must "eve adds" (mutate eve1 (idN 202) (ctx "eve") hAdd now (M.fromList [("playlist_id", VId (idN 2)), ("media_id", VBytes (B.pack [5]))]))
+      (eve2, _) = must "eve adds" (mutate eve1 (idN 202) (ctx "eve") hAdd now (M.fromList [("playlist_id", VId (idN 2)), ("track_id", VText "t5")]))
       (eveAuth1, eve3) = localCommit eveAuth0 eve2
   claim "alone, eve confirms her own intents" (rCursor eve3 == 2 && null (rPending eve3) && rView eve3 == rConfirmed eve3)
   claim "and her state is her authority's" (snd (verifyAt eve3) == stateHash (aStore eveAuth1))
-  let adopted = adopt sch "playlists" bodies (aLog eveAuth1)
+  let adopted = adopt sch "demo" bodies (aLog eveAuth1)
   claim "a server adopts her scope by replaying it" (either (const False) (\a -> stateHash (aStore a) == snd (verifyAt eve3)) adopted)
   let tampered = (aLog eveAuth1) {lEntries = M.adjust (\(e, f) -> (e, map bump f)) 2 (lEntries (aLog eveAuth1))}
       bump c = case c of S.Add t row -> S.Add t (M.insert "pos" (VInt 99) row); other -> other
-  claim "a log whose facts were touched is refused" (adopt sch "playlists" bodies tampered == Left (FactsDiffer 2))
+  claim "a log whose facts were touched is refused" (adopt sch "demo" bodies tampered == Left (FactsDiffer 2))
   let -- compaction: the authority moves its horizon to 2
       auth5 = maybe (error "compact") id (compact auth4 2)
   claim "a peer at 0 is sent the snapshot" (case page auth5 0 10 of BelowHorizon sn -> snSeq sn == 2; _ -> False)
@@ -349,25 +399,25 @@ protocolVectors out = do
   m <- either (error . show) pure (verify demoModule)
   let idN k = maybe (error "id") id (mkId (B.pack (replicate 15 0 ++ [k])))
       hAdd = head [h | (h, c) <- M.toList (closures m), fnName (cFn c) == "add_to_playlist"]
-      entry = Entry (idN 9) "alice" "alice-dev" hAdd (M.fromList [("playlist_id", VId (idN 1)), ("media_id", VBytes (B.pack [7]))]) (M.fromList [("added_ms", VInt 1577836800000)])
-      row = M.fromList [("playlist_id", VId (idN 1)), ("media_id", VBytes (B.pack [7])), ("pos", VInt 1), ("added_ms", VInt 1577836800000), ("user_id", VText "alice")]
+      entry = Entry (idN 9) "alice" "alice-dev" hAdd (M.fromList [("playlist_id", VId (idN 1)), ("track_id", VText "t7")]) M.empty
+      row = M.fromList [("playlist_id", VId (idN 1)), ("track_id", VText "t7"), ("pos", VInt 1)]
       clientFrames =
-        [ ("hello", Hello [Subscription "playlists" 4 Whole, Subscription "library" 0 ByFacts] (Just "tok") 1)
-        , ("push", Push "playlists" [entry])
-        , ("need_facts", NeedFacts "playlists" [2, 3])
+        [ ("hello", Hello [Subscription "demo" 4 Whole, Subscription "library" 0 ByFacts] (Just "tok") 2)
+        , ("push", Push "demo" [entry])
+        , ("need_facts", NeedFacts "demo" [2, 3])
         , ("need_closures", NeedClosures [hAdd])
-        , ("verify", Verify "playlists" 4 (B.replicate 32 0xab))
+        , ("verify", Verify "demo" 4 (B.replicate 32 0xab))
         , ("say", Say (B.pack [1, 2, 3]))
         ]
       serverFrames =
-        [ ("batch", Batch "playlists" [(5, entry, Nothing), (6, entry, Just [S.Add "playlist_item" row])] True)
-        , ("facts", FactsFor "playlists" [(2, [S.Add "playlist_item" row, S.Remove "playlist_item" row])])
-        , ("snapshot", SnapshotOf "playlists" 2 (B.replicate 32 0xcd) (M.fromList [("playlist_item", [VStruct row])]))
-        , ("ack", Ack "playlists" [idN 9] [5])
-        , ("reject", Reject "playlists" (idN 9) "a playlist needs a name")
+        [ ("batch", Batch "demo" [(5, entry, Nothing), (6, entry, Just [S.Add "item" row])] True)
+        , ("facts", FactsFor "demo" [(2, [S.Add "item" row, S.Remove "item" row])])
+        , ("snapshot", SnapshotOf "demo" 2 (B.replicate 32 0xcd) (M.fromList [("item", [VStruct row])]))
+        , ("ack", Ack "demo" [idN 9] [5])
+        , ("reject", Reject "demo" (idN 9) "a playlist needs a name")
         , ("denied", Denied "not signed in")
         , ("closures", Closures [(hAdd, closures m M.! hAdd)])
-        , ("agree", Agree "playlists" 4 (B.replicate 32 0xab) True)
+        , ("agree", Agree "demo" 4 (B.replicate 32 0xab) True)
         , ("heard", Heard (B.pack [4, 5]))
         ]
   mapM_
@@ -408,14 +458,14 @@ simVectors out = do
       idOf :: Int -> IdBytes
       idOf k = maybe (error "id") id (mkId (B.pack [fromIntegral (k `div` 256), fromIntegral (k `mod` 256)] <> B.replicate 14 0))
       pid = idOf 1
-      now = M.fromList [("added_ms", VInt 1577836800000)]
-      sim0 = newSim sch bodies ["playlists"] 3 7
+      now = M.empty
+      sim0 = newSim sch bodies ["demo"] 3 7
       -- one playlist, created by peer 0 and delivered to all
-      sim1 = settle (simMutate sim0 0 "playlists" (idOf 1000) hCreate (M.fromList [("id", VId pid)]) (M.fromList [("name", VText "Fleet")]))
+      sim1 = settle (simMutate sim0 0 "demo" (idOf 1000) hCreate (M.fromList [("id", VId pid)]) (M.fromList [("name", VText "Fleet")]))
       -- a scripted mess: adds from everyone, a partition, more adds, random deliveries
       script = concat [[Add' i k | i <- [0 .. 2]] | k <- [1 .. 4]] ++ [Part 2] ++ [Add' 2 k | k <- [5 .. 7]] ++ [Add' 0 8, Add' 1 9] ++ replicate 60 Step ++ [Part 0] ++ [Add' 1 10, Add' 0 11] ++ replicate 60 Step ++ [Heal 0, Heal 2] ++ replicate 80 Step
       run (sim, n) op = case op of
-        Add' i k -> (simMutate sim i "playlists" (idOf (2000 + n)) hAdd now (M.fromList [("playlist_id", VId pid), ("media_id", VBytes (B.pack [fromIntegral i, fromIntegral k]))]), n + 1)
+        Add' i k -> (simMutate sim i "demo" (idOf (2000 + n)) hAdd now (M.fromList [("playlist_id", VId pid), ("track_id", VText (T.pack (show i ++ "-" ++ show k)))]), n + 1)
         Part i -> (partition sim i, n)
         Heal i -> (heal sim i, n)
         Step -> (step sim, n)
@@ -430,8 +480,8 @@ simVectors out = do
   let rejected = [(i, rj) | (i, c) <- M.toList (simClients sim3), (r, _) <- M.elems (clScopes c), rj <- rRejections r]
   if null rejected then pure () else error ("fleet: rejections: " ++ show rejected)
   if headN >= 12 then pure () else error ("fleet: too few entries landed: " ++ show headN)
-  let a = svScopes (simServer sim3) M.! "playlists"
-      items = S.rows (aStore a) "playlist_item"
+  let a = svScopes (simServer sim3) M.! "demo"
+      items = S.rows (aStore a) "item"
   putStrLn ("  " ++ show (M.size items) ++ " items on the playlist after " ++ show headN ++ " entries; hash " ++ hex serverHash)
   write
     (out ++ "/rebase/fleet-seed-7.json")
@@ -447,7 +497,7 @@ simVectors out = do
     )
   where
     opValue = \case
-      Add' i k -> VStruct (M.fromList [("t", VText "add"), ("peer", VInt (fromIntegral i)), ("media", VBytes (B.pack [fromIntegral i, fromIntegral k]))])
+      Add' i k -> VStruct (M.fromList [("t", VText "add"), ("peer", VInt (fromIntegral i)), ("track", VText (T.pack (show i ++ "-" ++ show k)))])
       Part i -> VStruct (M.fromList [("t", VText "partition"), ("peer", VInt (fromIntegral i))])
       Heal i -> VStruct (M.fromList [("t", VText "heal"), ("peer", VInt (fromIntegral i))])
       Step -> VStruct (M.fromList [("t", VText "step")])
@@ -468,25 +518,25 @@ viewVectors out = do
   let sch = modSchema m
       idN k = maybe (error "id") id (mkId (B.pack (replicate 15 0 ++ [k])))
       pid = idN 1
-      now = M.fromList [("added_ms", VInt 1577836800000)]
+      now = M.empty
       hashOf name = head [h | (h, c) <- M.toList (closures m), fnName (cFn c) == name]
       -- a straight sequence of entries on one authority: create, add 1..4, remove one, add 5
-      a0 = authority sch "playlists" (closures m)
-      addE k eid = Entry (idN eid) "alice" "dev" (hashOf "add_to_playlist") (M.fromList [("playlist_id", VId pid), ("media_id", VBytes (B.pack [k]))]) now
+      a0 = authority sch "demo" (closures m)
+      addE k eid = Entry (idN eid) "alice" "dev" (hashOf "add_to_playlist") (M.fromList [("playlist_id", VId pid), ("track_id", VText (T.pack ("t" ++ show (k :: Int))))]) now
       entries =
         [ Entry (idN 100) "alice" "dev" (hashOf "create_playlist") (M.fromList [("name", VText "Viewed")]) (M.fromList [("id", VId pid)])
         , addE 1 101, addE 2 102, addE 3 103, addE 4 104
         ]
       (aN, factsList) = foldl (\(a, fs) e -> case sequenceEntry a e of (a', Appended _ f) -> (a', fs ++ [f]); other -> error ("view seq: " ++ show other)) (a0, []) entries
       -- a delete written by hand as a fact, then another add, to exercise a refill
-      removeFirst = [S.Remove "playlist_item" (head (M.elems (S.rows (aStore aN) "playlist_item")))]
+      removeFirst = [S.Remove "item" (head (M.elems (S.rows (aStore aN) "item")))]
       (aM, moreFacts) = case sequenceEntry aN {aStore = S.applyChanges (aStore aN) removeFirst} (addE 5 105) of
         (a', Appended _ f) -> (a', [removeFirst, f])
         other -> error ("view seq 2: " ++ show other)
       allFacts = factsList ++ moreFacts
       plans =
-        [ ("top-two-by-pos", V.ViewPlan "playlist_item" (Just (V.FCmp "playlist_id" Eq (VId pid))) [("pos", Asc)] (Just 2) [])
-        , ("playlist-with-items", V.ViewPlan "playlist" Nothing [("name", Asc)] Nothing [("items", Relation "playlist" "playlist_item" "playlist_id", V.ViewPlan "playlist_item" Nothing [("pos", Desc)] (Just 3) [])])
+        [ ("top-two-by-pos", V.ViewPlan "item" (Just (V.FCmp "playlist_id" Eq (VId pid))) [("pos", Asc)] (Just 2) [])
+        , ("playlist-with-items", V.ViewPlan "playlist" Nothing [("name", Asc)] Nothing [("item", Relation "playlist" "item" "playlist_id", V.ViewPlan "item" Nothing [("pos", Desc)] (Just 3) [])])
         ]
       run vp =
         let step (st, view, acc) facts =

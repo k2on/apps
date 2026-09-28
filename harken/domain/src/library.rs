@@ -1,38 +1,49 @@
-//! The library scope's one mutator. Only the server's scanner authors it;
-//! a client is generated without it and receives its entries as facts.
-use ark_builder::*;
+//! The library scope: what the scanner authors, and what every peer reads.
+use ark::authoring::*;
 
-pub fn library(m: &mut ModuleBuilder) {
-    // Put a track in the library. Refuses a blank title; a no-op if the id
-    // is known or a non-empty file already is — inside apply, so a rescan
-    // is idempotent wherever it happens.
-    m.mutator("add_track", "library", |f| {
-        let id = f.new_id("id", "track");
-        let added_ms = f.now("added_ms");
-        let title = f.arg("title", Ty::Text);
-        let artist = f.arg("artist", Ty::Text);
-        let album = f.arg("album", Ty::option(Ty::Text));
-        let duration_ms = f.arg("duration_ms", Ty::Int);
-        let file = f.arg("file", Ty::Text);
-        let b = f.body();
-        b.if_(title.trim().is_empty(), |b| b.refuse("a track needs a title"));
-        let known = b.exists("track", [id.clone()]);
-        b.if_(known, |b| b.ret());
-        let file = b.let_("file", file.trim());
-        let same = b.select(Plan::from("track").filter(Pred::cmp("file", CmpOp::Eq, file.clone())).limit(1));
-        b.if_(file.is_empty().not().and(same.len().gt(0)), |b| b.ret());
-        b.put(
-            "track",
-            record([
-                ("id", id),
-                ("title", title.trim()),
-                ("artist", artist.trim()),
-                ("album", album),
-                ("duration_ms", duration_ms),
-                ("file", file),
-                ("added_ms", added_ms),
-                ("user_id", ctx_user()),
-            ]),
-        );
-    });
+use crate::schema::*;
+
+pub struct AddTrack {
+    pub title: Text,
+    pub artist: Text,
+    pub album: Opt<Text>,
+    pub duration_ms: Int,
+    pub file: Text,
+}
+impl Input for AddTrack {
+    fn schema() -> Object<Self> {
+        object()
+            .field("title", text().trim().min(1, "a track needs a title"))
+            .field("artist", text().trim())
+            .field("album", opt(text().trim()))
+            .field("duration_ms", int().at_least(0))
+            .field("file", text().min(1))
+    }
+}
+
+pub fn library() -> Router<Library> {
+    let library = router::<Library>("library");
+    library.routes((
+        // Authored by the scanner for each file it finds. A second scan of
+        // the same file is a no-op inside apply, whichever peer scanned it.
+        library.input::<AddTrack>().mutation("add_track", |ctx, db, input| {
+            db.track
+                .insert(Track {
+                    id: ctx.new_id("id"),
+                    title: input.title,
+                    artist: input.artist,
+                    album: input.album,
+                    duration_ms: input.duration_ms,
+                    file: input.file,
+                    added_ms: ctx.now("added_ms"),
+                    user_id: ctx.user,
+                })
+                .on((Track::file,))
+        }),
+        library.query("library", |_ctx, db, _input: ()| {
+            db.track
+                .order_by((Track::artist.asc(), Track::album.asc(), Track::title.asc()))
+                .all()
+        }),
+    ))
 }

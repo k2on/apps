@@ -34,7 +34,6 @@ import Ark.Compat (check)
 import Ark.Decode (fromValue)
 import Ark.Demo (demoModule)
 import Ark.Encode (toValue)
-import Ark.Gen
 import Ark.Hash (closure, closures, functionHash, moduleHash)
 import Ark.IR
 import Ark.Print (printModule)
@@ -57,30 +56,11 @@ main = do
       m <- load path
       putStrLn ("module   " ++ hex (moduleHash m))
       mapM_ (\fn -> putStrLn (hex (functionHash (closure m fn)) ++ "  " ++ T.unpack (fnName fn))) (modFunctions m)
-    ("gen" : target : path : out : rest) -> do
-      t <- case map toLower target of
-        "rust" -> pure Rust
-        "swift" -> pure Swift
-        "kotlin" -> pure Kotlin
-        other -> die ("unknown target " ++ other)
-      let opts = pairs rest
-          name = maybe "Ark" T.pack (lookup "--name" opts)
-          only = fmap (T.splitOn "," . T.pack) (lookup "--only" opts)
-      whole <- load path
-      let m = maybe whole (`restrict` whole) only
-      createDirectoryIfMissing True out
-      let file = out ++ "/" ++ targetFileName t name
-      TIO.writeFile file (generate t name whole m)
-      putStrLn (file ++ "  " ++ show (length (modFunctions m)) ++ " of " ++ show (length (modFunctions whole)) ++ " functions")
     ["demo", out] -> do
       m <- either (die . show) pure (verify demoModule)
       B.writeFile out (encode (toValue m))
       putStrLn (out ++ "  " ++ hex (moduleHash m) ++ "  " ++ show (M.size (closures m)) ++ " functions")
-    _ -> die "usage: arkc verify M | print M | hash M | check OLD NEW | gen rust|swift|kotlin M OUTDIR [--name N] [--only f,g] | demo OUT"
-
-pairs :: [String] -> [(String, String)]
-pairs (k : v : rest) = (k, v) : pairs rest
-pairs _ = []
+    _ -> die "usage: arkc verify M | print M | hash M | check OLD NEW | demo OUT"
 
 -- | Read, decode and verify a module; anything wrong is fatal and named.
 load :: FilePath -> IO Module

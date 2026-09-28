@@ -40,7 +40,6 @@ library
     Ark.Live
     Ark.Protocol
     Ark.Sim
-    Ark.Gen
     Ark.Demo
     Ark.Compat
     Ark.Print

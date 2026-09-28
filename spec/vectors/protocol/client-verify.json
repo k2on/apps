@@ -1,4 +1,4 @@
 {
-  "frame": {"hash":{"$bytes":"abababababababababababababababababababababababababababababababab"},"scope":"playlists","seq":{"$int":"4"},"t":"verify"},
-  "bytes": "a4617466766572696679637365710464686173685820abababababababababababababababababababababababababababababababab6573636f706569706c61796c69737473"
+  "frame": {"hash":{"$bytes":"abababababababababababababababababababababababababababababababab"},"scope":"demo","seq":{"$int":"4"},"t":"verify"},
+  "bytes": "a4617466766572696679637365710464686173685820abababababababababababababababababababababababababababababababab6573636f70656464656d6f"
 }

@@ -52,6 +52,9 @@ int = VInt . fromIntegral
 list :: (a -> Value) -> [a] -> Value
 list f = VList . map f
 
+optText :: Maybe Text -> Value
+optText = maybe VNull txt
+
 -- | The whole module. Functions are carried without their dependency
 -- hashes here, because the module carries the helpers themselves.
 toValue :: Module -> Value
@@ -61,8 +64,11 @@ toValue m =
     [ ("spec", int (modSpec m))
     , ("schema", schemaValue (modSchema m))
     , ("functions", list (functionValue M.empty) (modFunctions m))
+    , ("routers", list router (modRouters m))
     , ("live", list (\(n, t) -> node "frame" [("name", txt n), ("ty", tyValue t)]) (modLive m))
     ]
+  where
+    router r = node "router" [("name", txt (rtName r)), ("scope", txt (rtScope r)), ("uses", list txt (rtUses r))]
 
 schemaValue :: Schema -> Value
 schemaValue (Schema scopes) = list scope scopes
@@ -94,10 +100,11 @@ tyValue = \case
   TStruct fs -> node "struct" [("fields", VStruct (M.map tyValue fs))]
 
 -- | One function, as normalised, together with the hashes of the helpers
--- it calls — so that a function's hash moves when a helper it depends on
--- changes, and an entry that names a hash names a whole meaning and not
--- only a body. The caller supplies each called helper's hash
--- ('Ark.Hash.closure' computes them recursively). Names are not carried.
+-- and middleware it depends on — so that a function's hash moves when a
+-- helper it calls or a guard it runs changes, and an entry that names a
+-- hash names a whole meaning and not only a body. The caller supplies
+-- each dependency's hash ('Ark.Hash.closure' computes them recursively).
+-- Names are not carried.
 functionValue :: Map Text Value -> Function -> Value
 functionValue deps fn0 =
   node
@@ -106,8 +113,11 @@ functionValue deps fn0 =
     , ("deps", VStruct deps)
     , ("kind", txt (kind (fnKind fn)))
     , ("scope", maybe VNull txt (fnScope fn))
+    , ("router", maybe VNull txt (fnRouter fn))
+    , ("uses", list txt (fnUses fn))
     , ("autos", list auto (fnAutos fn))
-    , ("args", list (\(n, t) -> node "arg" [("name", txt n), ("ty", tyValue t)]) (fnArgs fn))
+    , ("input", list field (fnInput fn))
+    , ("refine", list refine (fnRefine fn))
     , ("ret", maybe VNull tyValue (fnRet fn))
     , ("body", list stmt (fnBody fn))
     ]
@@ -116,15 +126,31 @@ functionValue deps fn0 =
     kind Mutator = "mutator"
     kind Query = "query"
     kind Helper = "helper"
+    kind Guard = "guard"
+    kind Provide = "provide"
     auto (n, NewId t) = node "new_id" [("name", txt n), ("table", txt t)]
     auto (n, Now) = node "now" [("name", txt n)]
+    field (n, f) = node "field" [("name", txt n), ("ty", tyValue (fTy f)), ("checks", list check (fChecks f))]
+    refine (e, why) = node "refine" [("e", expr e), ("why", optText why)]
+
+check :: Check -> Value
+check = \case
+  CTrim -> node "trim" []
+  CMinLen n why -> node "min_len" [("n", int n), ("why", optText why)]
+  CMaxLen n why -> node "max_len" [("n", int n), ("why", optText why)]
+  CRange lo hi why -> node "range" [("lo", maybe VNull int lo), ("hi", maybe VNull int hi), ("why", optText why)]
+  CNonEmpty why -> node "non_empty" [("why", optText why)]
+  CExists why -> node "exists" [("why", optText why)]
+  CRefine e why -> node "refine" [("e", expr e), ("why", optText why)]
 
 stmt :: Stmt -> Value
 stmt = \case
   SLet x e -> node "let" [("sym", int x), ("e", expr e)]
   SIf c a b -> node "if" [("c", expr c), ("then", list stmt a), ("else", list stmt b)]
   SFor x xs b -> node "for" [("sym", int x), ("in", expr xs), ("body", list stmt b)]
-  SPut t e -> node "put" [("table", txt t), ("row", expr e)]
+  SInsert t e on -> node "insert" [("table", txt t), ("row", expr e), ("on", list txt on)]
+  SUpsert t e on -> node "upsert" [("table", txt t), ("row", expr e), ("on", list txt on)]
+  SUpdate t ks x e -> node "update" [("table", txt t), ("key", list expr ks), ("sym", int x), ("row", expr e)]
   SDelete t ks -> node "delete" [("table", txt t), ("key", list expr ks)]
   SRefuse e -> node "refuse" [("e", expr e)]
   SReturn me -> node "return" [("e", maybe VNull expr me)]
@@ -137,6 +163,7 @@ expr = \case
   EVar x -> node "var" [("sym", int x)]
   ECtxUser -> node "ctx_user" []
   ECtxSession -> node "ctx_session" []
+  EProvided n -> node "provided" [("fn", txt n)]
   EField e f -> node "field" [("e", expr e), ("name", txt f)]
   EStruct fs -> node "struct" [("fields", VStruct (M.map expr fs))]
   EList es -> node "list" [("items", list expr es)]
@@ -190,15 +217,36 @@ predV = \case
 -- | §7.1 Alpha-normalisation.
 --
 -- Symbols are renumbered 0, 1, 2… in the order their binders are met
--- walking the body top to bottom, left to right, binders before the scopes
--- they open. The walk is the evaluation order of 'Ark.Eval', so the @n@th
--- binding executed in a straight-line body is symbol @n@. Free symbols
--- (a bug the verifier reports) are left as they are.
+-- walking the function top to bottom, left to right, binders before the
+-- scopes they open: first each input field's checks in field order, then
+-- the whole-input refinements, then the body. The walk is the evaluation
+-- order of 'Ark.Eval', so the @n@th binding executed in a straight-line
+-- body is symbol @n@. Free symbols (a bug the verifier reports) are left
+-- as they are.
 normalize :: Function -> Function
-normalize fn = fn {fnBody = body, fnNames = names}
+normalize fn = fn {fnInput = input', fnRefine = refine', fnBody = body, fnNames = names}
   where
-    (body, mapping) = renumberBlock M.empty 0 (fnBody fn)
+    (input', n1) = renumberInput (fnInput fn) 0
+    (refine', n2) = renumberRefine (fnRefine fn) n1
+    (body, mapping) = renumberBlock M.empty n2 (fnBody fn)
     names = M.fromList [(new, n) | (old, new) <- M.toList mapping, Just n <- [M.lookup old (fnNames fn)]]
+    renumberInput [] n = ([], n)
+    renumberInput ((name, Field t cs) : rest) n =
+      let (cs', n') = renumberChecks cs n
+          (rest', n'') = renumberInput rest n'
+       in ((name, Field t cs') : rest', n'')
+    renumberChecks [] n = ([], n)
+    renumberChecks (c : cs) n =
+      let (c', n') = case c of
+            CRefine e why -> let (e', k) = renumberExpr M.empty n e in (CRefine e' why, k)
+            other -> (other, n)
+          (cs', n'') = renumberChecks cs n'
+       in (c' : cs', n'')
+    renumberRefine [] n = ([], n)
+    renumberRefine ((e, why) : rest) n =
+      let (e', n') = renumberExpr M.empty n e
+          (rest', n'') = renumberRefine rest n'
+       in ((e', why) : rest', n'')
 
 normalizeModule :: Module -> Module
 normalizeModule m = m {modFunctions = map normalize (modFunctions m)}
@@ -230,7 +278,13 @@ renumberStmt ren next = \case
         ren' = M.insert x n1 ren
         (b', n2) = inner ren' (n1 + 1) b
      in (SFor n1 xs' b', ren, n2)
-  SPut t e -> let (e', n1) = renumberExpr ren next e in (SPut t e', ren, n1)
+  SInsert t e on -> let (e', n1) = renumberExpr ren next e in (SInsert t e' on, ren, n1)
+  SUpsert t e on -> let (e', n1) = renumberExpr ren next e in (SUpsert t e' on, ren, n1)
+  SUpdate t ks x e ->
+    let (ks', n1) = renumberMany ren next ks
+        ren' = M.insert x n1 ren
+        (e', n2) = renumberExpr ren' (n1 + 1) e
+     in (SUpdate t ks' n1 e', ren, n2)
   SDelete t ks -> let (ks', n1) = renumberMany ren next ks in (SDelete t ks', ren, n1)
   SRefuse e -> let (e', n1) = renumberExpr ren next e in (SRefuse e', ren, n1)
   SReturn me -> case me of
@@ -250,7 +304,9 @@ countBinders blk n = maximum (n : map (+ 1) (concatMap binders blk))
       SLet x e -> x : exprBinders e
       SIf c a b -> exprBinders c ++ concatMap binders a ++ concatMap binders b
       SFor x xs b -> x : exprBinders xs ++ concatMap binders b
-      SPut _ e -> exprBinders e
+      SInsert _ e _ -> exprBinders e
+      SUpsert _ e _ -> exprBinders e
+      SUpdate _ ks x e -> x : concatMap exprBinders ks ++ exprBinders e
       SDelete _ ks -> concatMap exprBinders ks
       SRefuse e -> exprBinders e
       SReturn me -> maybe [] exprBinders me
@@ -375,16 +431,23 @@ renumberPred ren next = \case
     go n [] = ([], n)
     go n (q : qs) = let (q', n1) = renumberPred ren n q; (qs', n2) = go n1 qs in (q' : qs', n2)
 
--- | The names of the helpers an expression tree calls, directly.
+-- | The names of the helpers a function calls, directly: in its checks,
+-- its refinements and its body. Middleware a procedure runs is 'fnUses',
+-- not a call.
 calls :: Function -> [Text]
-calls fn = nubOrd (concatMap stmtCalls (fnBody fn))
+calls fn = nubOrd (concatMap checkCalls (concatMap (fChecks . snd) (fnInput fn)) ++ concatMap (exprCalls . fst) (fnRefine fn) ++ concatMap stmtCalls (fnBody fn))
   where
     nubOrd = M.keys . M.fromList . map (\x -> (x, ()))
+    checkCalls = \case
+      CRefine e _ -> exprCalls e
+      _ -> []
     stmtCalls = \case
       SLet _ e -> exprCalls e
       SIf c a b -> exprCalls c ++ concatMap stmtCalls a ++ concatMap stmtCalls b
       SFor _ xs b -> exprCalls xs ++ concatMap stmtCalls b
-      SPut _ e -> exprCalls e
+      SInsert _ e _ -> exprCalls e
+      SUpsert _ e _ -> exprCalls e
+      SUpdate _ ks _ e -> concatMap exprCalls ks ++ exprCalls e
       SDelete _ ks -> concatMap exprCalls ks
       SRefuse e -> exprCalls e
       SReturn me -> maybe [] exprCalls me

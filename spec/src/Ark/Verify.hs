@@ -2,27 +2,41 @@
 {-# LANGUAGE LambdaCase #-}
 -- | §9 Verification.
 --
--- What a module must satisfy before anything runs it, generates from it or
--- hashes it. A builder makes most of these hard to write; the verifier
--- refuses them anyway, because a module may arrive from anywhere. Every
--- runtime executes only modules that verify, and a function's hash
+-- What a module must satisfy before anything runs it, prints it or hashes
+-- it. A builder makes most of these hard to write; the verifier refuses
+-- them anyway, because a module may arrive from anywhere. Every runtime
+-- executes only modules that verify, and a function's hash
 -- ('Ark.Hash.functionHash') is taken of the form 'verify' returns — orders
 -- completed, symbols renumbered — so that the hash is of the program as it
 -- will be run.
 --
--- The rules, each a constructor of 'VerifyError':
+-- The rules, each a constructor of 'VerifyError' or 'Complaint':
 --
 -- * the schema is well-formed ('Ark.Schema.checkSchema'), and the module's
 --   spec version is this one;
--- * function names are unique; a mutator names an existing scope and
---   returns nothing; a query or helper names no scope, declares no autos,
---   and returns on every path a value of its declared type;
+-- * function and router names are unique; a router names an existing
+--   scope and uses only middleware of that scope;
+-- * a mutator or query is on a router of its scope and runs a subsequence
+--   of that router's middleware, each of which reads only input fields the
+--   procedure has, at the same types; a mutator returns nothing and a
+--   query returns on every path a value of its declared type;
+-- * middleware names its scope, is on no router, runs no middleware, has
+--   no autos and no checks; a guard returns nothing, a provider returns
+--   its declared type on every path;
+-- * a helper names no scope, no router, no middleware, no autos, no
+--   checks, and returns on every path;
+-- * every check suits its field's type, an @exists@ check names a table
+--   of the procedure's scope, and a refinement is a boolean over the input
+--   alone;
 -- * the body is well-typed under the rules of 'infer', with no option of
---   an option anywhere;
+--   an option anywhere, and reads a provided value only from a provider
+--   the procedure runs;
 -- * a read ('ESelect', 'EGet', 'EExists') appears only as the whole
 --   right-hand side of a 'SLet', never in a helper;
--- * a write or a refusal appears only in a mutator, and every table a
---   mutator touches is in the mutator's scope;
+-- * a write appears only in a mutator, a refusal never in a helper, and
+--   every table a scoped function touches is in its scope;
+-- * an @insert@ or @upsert@ that names columns names a declared unique
+--   index of its table;
 -- * a helper is called only by functions declared after it, so that the
 --   call graph is acyclic and every function terminates;
 -- * every plan's order is made total by appending the table's key columns
@@ -33,13 +47,14 @@ module Ark.Verify
   , verify
   , verifyFunction
   , completeOrders
+  , providedTypes
   ) where
 
-import Control.Monad (foldM, unless, when, zipWithM_)
-import Data.List (nub, (\\))
+import Control.Monad (foldM, forM_, unless, when, zipWithM_)
+import Data.List (isSubsequenceOf, nub, (\\))
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
-import Data.Maybe (isJust)
+import Data.Maybe (isJust, isNothing)
 import Data.Text (Text)
 import qualified Data.Text as T
 
@@ -52,20 +67,53 @@ data VerifyError
   = BadSpecVersion SpecVersion
   | BadSchema SchemaError
   | DuplicateFunction Text
+  | DuplicateRouter Text
+  | -- | Router, then what is wrong with it.
+    BadRouter Text Complaint
   | -- | Function, then the complaint.
     In Text Complaint
   deriving (Eq, Show)
 
 data Complaint
-  = MutatorWithoutScope
+  = NoScope
   | UnknownScope ScopeName
-  | ScopeOnNonMutator
+  | ScopeOnHelper
   | AutosOnNonMutator
   | ReturnTypeOnMutator
   | NoReturnType
   | DuplicateName Text
   | UnknownAutoTable TableName
   | NestedOption
+  | -- | A procedure not on a router, or a router named by something that
+    -- is not a procedure.
+    NoRouter
+  | RouterOnNonProcedure
+  | UnknownRouter Text
+  | -- | The function's scope is not its router's.
+    RouterScopeMismatch Text
+  | -- | Middleware named that the router does not declare, or out of the
+    -- router's order.
+    UsesNotOnRouter [Text]
+  | UsesOnNonProcedure
+  | -- | A name in @uses@ that is not a guard or provider.
+    NotMiddleware Text
+  | -- | Middleware of another scope.
+    MiddlewareScopeMismatch Text
+  | -- | Middleware, field: the procedure lacks the field, or has it at
+    -- another type.
+    MiddlewareInputMismatch Text Text
+  | ChecksOutsideProcedure
+  | -- | Check, field type: a check that does not suit the type it is on.
+    BadCheck Text Ty
+  | -- | An @exists@ on an id of a table outside the procedure's scope.
+    ExistsAcrossScopes TableName
+  | UnknownProvided Text
+  | -- | A provided value read where none exists yet: in a check or a
+    -- refinement.
+    ProvidedInCheck
+  | -- | Table, columns: an @insert@ or @upsert@ @on@ columns that are not a
+    -- declared unique index.
+    OnNotUnique TableName [FieldName]
   | TypeMismatch Text Ty Ty -- ^ where, expected, actual
   | NotAStruct Text
   | NoSuchField FieldName
@@ -75,7 +123,7 @@ data Complaint
   | ReadNotBound
   | ReadInHelper
   | WriteOutsideMutator
-  | RefuseOutsideMutator
+  | RefuseInHelper
   | OutOfScope TableName
   | UnknownTable TableName
   | UnknownColumn TableName FieldName
@@ -92,7 +140,7 @@ data Complaint
   deriving (Eq, Show)
 
 -- | Verify a module. On success, the module as it is to be hashed and
--- generated from: orders completed and every function normalised.
+-- printed: orders completed and every function normalised.
 verify :: Module -> Either [VerifyError] Module
 verify m0 = do
   let m = completeOrders m0
@@ -105,26 +153,75 @@ verify m0 = do
   case names \\ nub names of
     [] -> Right ()
     ds -> Left (map DuplicateFunction (nub ds))
+  let rnames = map rtName (modRouters m)
+  case rnames \\ nub rnames of
+    [] -> Right ()
+    ds -> Left (map DuplicateRouter (nub ds))
+  case concatMap (router m) (modRouters m) of
+    [] -> Right ()
+    es -> Left es
   let checked = zipWith (\i fn -> verifyFunction m i fn) [0 ..] (modFunctions m)
-  case concat [es | Left es <- checked] of
+      placed = [In (fnName fn) (UnknownRouter r) | fn <- modFunctions m, Just r <- [fnRouter fn], isNothing (lookupRouter m r)]
+  case concat [es | Left es <- checked] ++ placed of
     [] -> Right m {modFunctions = map normalize (modFunctions m)}
     es -> Left es
+  where
+    router m r =
+      [BadRouter (rtName r) (UnknownScope (rtScope r)) | isNothing (scopeOf (modSchema m) (rtScope r))]
+        ++ concat
+          [ case lookupFunction m u of
+              Nothing -> [BadRouter (rtName r) (NotMiddleware u)]
+              Just f
+                | not (isMiddleware f) -> [BadRouter (rtName r) (NotMiddleware u)]
+                | fnScope f /= Just (rtScope r) -> [BadRouter (rtName r) (MiddlewareScopeMismatch u)]
+                | otherwise -> []
+          | u <- rtUses r
+          ]
+        ++ [BadRouter (rtName r) (DuplicateName u) | u <- rtUses r \\ nub (rtUses r)]
 
 -- | Verify the @i@th function of a module (its index decides which
--- helpers it may call).
+-- helpers it may call). A procedure's router is held to it only when the
+-- module has that router: 'Ark.Compat.checkRetained' verifies a closure
+-- against a later module whose routers may have been renamed, and a
+-- router is a grouping, not a meaning.
 verifyFunction :: Module -> Int -> Function -> Either [VerifyError] ()
 verifyFunction m i fn = either (Left . map (In (fnName fn))) Right $ do
   let sch = modSchema m
   case fnKind fn of
-    Mutator -> do
-      scope <- maybe (Left [MutatorWithoutScope]) Right (fnScope fn)
+    k | k == Mutator || k == Query -> do
+      scope <- maybe (Left [NoScope]) Right (fnScope fn)
       unless (isJust (scopeOf sch scope)) (Left [UnknownScope scope])
-      when (isJust (fnRet fn)) (Left [ReturnTypeOnMutator])
-    _ -> do
-      when (isJust (fnScope fn)) (Left [ScopeOnNonMutator])
-      unless (null (fnAutos fn)) (Left [AutosOnNonMutator])
+      r <- maybe (Left [NoRouter]) Right (fnRouter fn)
+      forM_ (lookupRouter m r) $ \rt -> do
+        unless (rtScope rt == scope) (Left [RouterScopeMismatch r])
+        unless (fnUses fn `isSubsequenceOf` rtUses rt) (Left [UsesNotOnRouter (fnUses fn)])
+      case fnUses fn \\ nub (fnUses fn) of
+        [] -> Right ()
+        ds -> Left (map DuplicateName ds)
+      forM_ (fnUses fn) $ \u -> case lookupFunction m u of
+        Nothing -> Left [NotMiddleware u]
+        Just mw -> do
+          unless (isMiddleware mw) (Left [NotMiddleware u])
+          unless (fnScope mw == Just scope) (Left [MiddlewareScopeMismatch u])
+          forM_ (fnArgs mw) $ \(a, t) -> unless (lookup a (fnArgs fn) == Just t) (Left [MiddlewareInputMismatch u a])
+      if k == Mutator
+        then when (isJust (fnRet fn)) (Left [ReturnTypeOnMutator])
+        else do
+          unless (null (fnAutos fn)) (Left [AutosOnNonMutator])
+          unless (isJust (fnRet fn)) (Left [NoReturnType])
+    Helper -> do
+      when (isJust (fnScope fn)) (Left [ScopeOnHelper])
+      plain
       unless (isJust (fnRet fn)) (Left [NoReturnType])
-  let argNames = map fst (fnArgs fn) ++ map fst (fnAutos fn)
+    Guard -> do
+      scoped sch
+      plain
+      when (isJust (fnRet fn)) (Left [ReturnTypeOnMutator])
+    Provide -> do
+      scoped sch
+      plain
+      unless (isJust (fnRet fn)) (Left [NoReturnType])
+  let argNames = map fst (fnInput fn) ++ map fst (fnAutos fn)
   case argNames \\ nub argNames of
     [] -> Right ()
     ds -> Left (map DuplicateName ds)
@@ -137,9 +234,28 @@ verifyFunction m i fn = either (Left . map (In (fnName fn))) Right $ do
           , gIndex = i
           , gFn = fn
           , gLocals = M.empty
+          , gProvided = providedTypes m fn
+          , gInChecks = True
           }
-  _ <- block g (fnBody fn)
-  when (fnKind fn /= Mutator && not (returns (fnBody fn))) (Left [MayNotReturn])
+  mapM_ (\(name, f) -> mapM_ (checkOk g name (fTy f)) (fChecks f)) (fnInput fn)
+  mapM_ (\(e, _) -> expect g "refine" TBool e) (fnRefine fn)
+  _ <- block g {gInChecks = False} (fnBody fn)
+  when (fnKind fn `elem` [Query, Helper, Provide] && not (returns (fnBody fn))) (Left [MayNotReturn])
+  where
+    scoped sch = do
+      scope <- maybe (Left [NoScope]) Right (fnScope fn)
+      unless (isJust (scopeOf sch scope)) (Left [UnknownScope scope])
+    -- Neither middleware nor a helper is on a router, runs middleware,
+    -- draws autos or checks its input.
+    plain = do
+      when (isJust (fnRouter fn)) (Left [RouterOnNonProcedure])
+      unless (null (fnUses fn)) (Left [UsesOnNonProcedure])
+      unless (null (fnAutos fn)) (Left [AutosOnNonMutator])
+      unless (all (null . fChecks . snd) (fnInput fn) && null (fnRefine fn)) (Left [ChecksOutsideProcedure])
+
+-- | The values a procedure's providers hand its body, by middleware name.
+providedTypes :: Module -> Function -> Map Text Ty
+providedTypes m fn = M.fromList [(u, t) | u <- fnUses fn, Just mw <- [lookupFunction m u], fnKind mw == Provide, Just t <- [fnRet mw]]
 
 -- The typing environment.
 data G = G
@@ -147,11 +263,15 @@ data G = G
   , gIndex :: Int
   , gFn :: Function
   , gLocals :: Map Sym Ty
+  , gProvided :: Map Text Ty
+  , -- | Inside a check or a refinement, where nothing has been provided
+    -- yet.
+    gInChecks :: Bool
   }
 
-type Check a = Either [Complaint] a
+type Check' a = Either [Complaint] a
 
-err :: Complaint -> Check a
+err :: Complaint -> Check' a
 err c = Left [c]
 
 schema :: G -> Schema
@@ -160,13 +280,39 @@ schema = modSchema . gMod
 kind :: G -> FnKind
 kind = fnKind . gFn
 
-noNestedOption :: Ty -> Check ()
+noNestedOption :: Ty -> Check' ()
 noNestedOption = \case
   TOption (TOption _) -> err NestedOption
   TOption t -> noNestedOption t
   TList t -> noNestedOption t
   TStruct fs -> mapM_ noNestedOption (M.elems fs)
   _ -> Right ()
+
+-- | §9.0 A check suits the type it is on: the option, if any, is looked
+-- through, since a check on an optional field runs when the value is
+-- present.
+checkOk :: G -> Text -> Ty -> Check -> Check' ()
+checkOk g _ ty c = case (c, base) of
+  (CTrim, TText) -> Right ()
+  (CMinLen _ _, TText) -> Right ()
+  (CMaxLen _ _, TText) -> Right ()
+  (CRange _ _ _, TInt) -> Right ()
+  (CNonEmpty _, TList _) -> Right ()
+  (CExists _, TId t) -> case fnScope (gFn g) of
+    Just s | tableScope (schema g) t == Just s -> Right ()
+    _ -> err (ExistsAcrossScopes t)
+  (CRefine e _, _) -> expect g "refine" TBool e
+  _ -> err (BadCheck (name c) ty)
+  where
+    base = case ty of TOption t -> t; t -> t
+    name = \case
+      CTrim -> "trim"
+      CMinLen {} -> "min_len"
+      CMaxLen {} -> "max_len"
+      CRange {} -> "range"
+      CNonEmpty {} -> "non_empty"
+      CExists {} -> "exists"
+      CRefine {} -> "refine"
 
 -- A block definitely returns when its last statement does, or is an
 -- @if@ both of whose branches do.
@@ -181,10 +327,10 @@ returns stmts = case last stmts of
 bindL :: Sym -> Ty -> G -> G
 bindL x t g = g {gLocals = M.insert x t (gLocals g)}
 
-block :: G -> Block -> Check G
+block :: G -> Block -> Check' G
 block = foldM stmt
 
-stmt :: G -> Stmt -> Check G
+stmt :: G -> Stmt -> Check' G
 stmt g = \case
   SLet x e -> do
     t <- case e of
@@ -202,31 +348,20 @@ stmt g = \case
     t <- infer g Nothing xs >>= elemOf "for"
     _ <- block (bindL x t g) body
     pure g
-  SPut tbl e -> do
+  SInsert tbl e on -> write "insert" tbl e on g
+  SUpsert tbl e on -> write "upsert" tbl e on g
+  SUpdate tbl ks x e -> do
     mutating
-    inScope g tbl
+    keyed g tbl ks
     t <- table g tbl
-    -- A put may leave nullable columns out (they are written as None), so
-    -- the struct is checked field by field against the row type: every
-    -- field it has must be a column of the right type, and every
-    -- non-nullable column must be there. This is what lets a table grow a
-    -- nullable column after the mutators writing it were hashed.
-    got <- infer g (Just (rowTy t)) e
-    case (rowTy t, got) of
-      (TStruct want, TStruct have) -> do
-        mapM_ (\(k, ty) -> case M.lookup k want of
-                  Nothing -> err (UnknownColumn tbl k)
-                  Just w -> unless (w == ty) (err (TypeMismatch ("put " <> tbl <> "." <> k) w ty))) (M.toList have)
-        mapM_ (\c -> unless (colNullable c || M.member (colName c) have) (err (TypeMismatch ("put " <> tbl) (rowTy t) got))) (tColumns t)
-      _ -> err (TypeMismatch ("put " <> tbl) (rowTy t) got)
+    rowOk "update" tbl (bindL x (rowTy t) g) e
     pure g
   SDelete tbl ks -> do
     mutating
-    inScope g tbl
     keyed g tbl ks
     pure g
   SRefuse e -> do
-    unless (kind g == Mutator) (err RefuseOutsideMutator)
+    when (kind g == Helper) (err RefuseInHelper)
     expect g "refuse" TText e
     pure g
   SReturn me -> do
@@ -239,16 +374,44 @@ stmt g = \case
   where
     mutating = unless (kind g == Mutator) (err WriteOutsideMutator)
     readOk = when (kind g == Helper) (err ReadInHelper)
+    write site tbl e on g' = do
+      mutating
+      inScope g' tbl
+      t <- table g' tbl
+      unless (null on || Index on True `elem` tIndexes t) (err (OnNotUnique tbl on))
+      rowOk site tbl g' e
+      pure g'
 
-inScope :: G -> TableName -> Check ()
-inScope g tbl =
-  when (kind g == Mutator && tableScope (schema g) tbl /= fnScope (gFn g)) (err (OutOfScope tbl))
+-- A write may leave nullable columns out (they are written as None), so
+-- the struct is checked field by field against the row type: every field
+-- it has must be a column of the right type, and every non-nullable
+-- column must be there. This is what lets a table grow a nullable column
+-- after the mutators writing it were hashed.
+rowOk :: Text -> TableName -> G -> Expr -> Check' ()
+rowOk site tbl g e = do
+  t <- table g tbl
+  got <- infer g (Just (rowTy t)) e
+  case (rowTy t, got) of
+    (TStruct want, TStruct have) -> do
+      mapM_
+        ( \(k, ty) -> case M.lookup k want of
+            Nothing -> err (UnknownColumn tbl k)
+            Just w -> unless (w == ty) (err (TypeMismatch (site <> " " <> tbl <> "." <> k) w ty))
+        )
+        (M.toList have)
+      mapM_ (\c -> unless (colNullable c || M.member (colName c) have) (err (TypeMismatch (site <> " " <> tbl) (rowTy t) got))) (tColumns t)
+    _ -> err (TypeMismatch (site <> " " <> tbl) (rowTy t) got)
 
-table :: G -> TableName -> Check Table
+inScope :: G -> TableName -> Check' ()
+inScope g tbl = case fnScope (gFn g) of
+  Just s | tableScope (schema g) tbl /= Just s -> err (OutOfScope tbl)
+  _ -> Right ()
+
+table :: G -> TableName -> Check' Table
 table g tbl = maybe (err (UnknownTable tbl)) Right (lookupTable (schema g) tbl)
 
 -- A key expression list matches the table's key columns in number and type.
-keyed :: G -> TableName -> [Expr] -> Check ()
+keyed :: G -> TableName -> [Expr] -> Check' ()
 keyed g tbl ks = do
   inScope g tbl
   t <- table g tbl
@@ -257,19 +420,19 @@ keyed g tbl ks = do
   zipWithM_ (expect g ("key of " <> tbl)) want ks
 
 -- | Check an expression against an expected type.
-expect :: G -> Text -> Ty -> Expr -> Check ()
+expect :: G -> Text -> Ty -> Expr -> Check' ()
 expect g site want e = do
   got <- infer g (Just want) e
   unless (got == want) (err (TypeMismatch site want got))
 
-elemOf :: Text -> Ty -> Check Ty
+elemOf :: Text -> Ty -> Check' Ty
 elemOf _ (TList t) = Right t
 elemOf site t = err (TypeMismatch site (TList t) t)
 
 -- | §9.1 Typing of expressions. The expected type, when known, is used
 -- only where an expression cannot be typed on its own: an empty list, a
 -- @None@ without its annotation, a nil id, a struct field of one of those.
-infer :: G -> Maybe Ty -> Expr -> Check Ty
+infer :: G -> Maybe Ty -> Expr -> Check' Ty
 infer g want = \case
   ELit v -> lit v
   EArg a -> maybe (err (UnknownArg a)) Right (lookup a (fnArgs (gFn g)))
@@ -280,6 +443,9 @@ infer g want = \case
   EVar x -> maybe (err (UnboundSymbol x)) Right (M.lookup x (gLocals g))
   ECtxUser -> Right TText
   ECtxSession -> Right TText
+  EProvided n
+    | gInChecks g -> err ProvidedInCheck
+    | otherwise -> maybe (err (UnknownProvided n)) Right (M.lookup n (gProvided g))
   EField e f -> do
     t <- infer g Nothing e
     case t of
@@ -392,7 +558,7 @@ infer g want = \case
 -- per relationship read beneath. Filter columns must exist and their
 -- right-hand sides must have the column's type; order columns must exist;
 -- a relationship must be one the schema declares between the two tables.
-planTy :: G -> Plan -> Check Ty
+planTy :: G -> Plan -> Check' Ty
 planTy g p = do
   inScope g (pTable p)
   t <- table g (pTable p)
@@ -419,7 +585,7 @@ planTy g p = do
       pure (rName r, ct)
 
 -- | §9.3 Signatures of the standard library.
-stdTy :: StdFn -> [Ty] -> Maybe Ty -> Check Ty
+stdTy :: StdFn -> [Ty] -> Maybe Ty -> Check' Ty
 stdTy f ts want = case (f, ts) of
   (Trim, [TText]) -> Right TText
   (IsEmpty, [TText]) -> Right TBool
@@ -453,6 +619,7 @@ stdTy f ts want = case (f, ts) of
   (Reverse, [TList t]) -> Right (TList t)
   (IsSome, [TOption _]) -> Right TBool
   (UnwrapOr, [TOption t, t']) | t == t' -> Right t
+  (Unwrap, [TOption t]) -> Right t
   _ -> err (StdMisuse (T.pack (show f ++ " applied to " ++ show ts)))
   where
     option (TOption _) = err NestedOption
@@ -472,7 +639,9 @@ completeOrders m = m {modFunctions = map fn (modFunctions m)}
       SLet x e -> SLet x (ex e)
       SIf c a b -> SIf (ex c) (map stmt' a) (map stmt' b)
       SFor x xs b -> SFor x (ex xs) (map stmt' b)
-      SPut t e -> SPut t (ex e)
+      SInsert t e on -> SInsert t (ex e) on
+      SUpsert t e on -> SUpsert t (ex e) on
+      SUpdate t ks x e -> SUpdate t (map ex ks) x (ex e)
       SDelete t ks -> SDelete t (map ex ks)
       SRefuse e -> SRefuse (ex e)
       SReturn me -> SReturn (fmap ex me)

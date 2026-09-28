@@ -1,27 +1,30 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase #-}
--- | §6 Evaluation: what generated code must mean.
+-- | §6 Evaluation: what a runtime's @Native@ must mean.
 --
--- Nobody interprets Ark IR in production; every runtime executes native
--- source a generator wrote from it. This module is what that source is
--- held to. An @eval/@ vector is a module, a store, an entry and this
--- function's answer; generated Rust, Swift and Kotlin must give the same
--- rows, the same changes and the same refusal text.
+-- Nobody interprets Ark IR in production; every runtime runs the domain
+-- as its author wrote it, in the author's language, and this module is
+-- what that program is held to. An @eval/@ vector is a module, a store, an
+-- entry and this function's answer; Rust, Swift and Kotlin must give the
+-- same rows, the same changes and the same refusal text.
 --
 -- Two kinds of failure are kept apart throughout, as Petros keeps
 -- @Rejected@ and @Sqlite@ apart. A 'Refusal' is a __verdict__: a
 -- deterministic fact about the entry that every replica reaches (an
--- explicit @refuse@, a constraint, an overflow). An 'EvalError' is a
--- __bug__: a module the verifier would have refused, or a generator that
--- disagrees with this file. A conformant runtime never reports the second
--- for a verified module, and a vector never expects one.
+-- explicit @refuse@, a failed check, a constraint, an overflow). An
+-- 'EvalError' is a __bug__: a module the verifier would have refused, or a
+-- runtime that disagrees with this file. A conformant runtime never
+-- reports the second for a verified module, and a vector never expects
+-- one.
 --
 -- __Evaluation order is part of the meaning__, because two faults can
--- race: 'And' and 'Or' short-circuit left to right, 'EIf' and 'EMatch'
--- evaluate only the taken arm, list elements and call arguments are
--- evaluated left to right, and a struct's fields are evaluated in field
--- name order. Every target language can be made to do exactly this, and
--- none does it by accident.
+-- race: a procedure runs its input checks field by field in declaration
+-- order, then its refinements, then each middleware in 'fnUses' order,
+-- then its body; 'And' and 'Or' short-circuit left to right, 'EIf' and
+-- 'EMatch' evaluate only the taken arm, list elements and call arguments
+-- are evaluated left to right, and a struct's fields are evaluated in
+-- field name order. Every target language can be made to do exactly this,
+-- and none does it by accident.
 module Ark.Eval
   ( Ctx (..)
   , EvalError (..)
@@ -32,9 +35,12 @@ module Ark.Eval
   , query
   , queryClosure
   , evalHelper
+  , check
+  , checkClosure
+  , defaultMessage
   ) where
 
-import Control.Monad (unless)
+import Control.Monad (foldM, unless)
 import Control.Monad.Except (ExceptT, catchError, runExceptT, throwError)
 import Control.Monad.State.Strict (State, gets, modify', runState)
 import Control.Monad.Trans.Class (lift)
@@ -70,13 +76,16 @@ data EvalError
   | WrongKind Text FnKind
   | MissingArg Text
   | MissingAuto Text
+  | MissingProvided Text
   | UnboundVar Sym
   | NoSuchField FieldName
   | TypeError Text
   | Arity Text
-  | -- | A helper or query fell off the end of its body without returning.
+  | -- | A helper, query or provider fell off the end of its body without
+    -- returning.
     NoReturn Text
-  | -- | A helper reached a read or a write, or a query a write.
+  | -- | A helper reached a read or a write, or anything but a mutator a
+    -- write.
     Impure Text
   | UnknownTable TableName
   | -- | A relationship whose parent key is not a single column.
@@ -96,14 +105,15 @@ data Stop
 
 data Env = Env
   { envSchema :: Schema
-  , -- | The helpers in reach: a closure's, never a module's, so that an
-    -- entry replays against the helper versions its function was hashed
-    -- with.
+  , -- | The helpers and middleware in reach: a closure's, never a
+    -- module's, so that an entry replays against the versions its
+    -- function was hashed with.
     envHelpers :: [Function]
   , envKind :: FnKind
   , envCtx :: Ctx
   , envArgs :: Args
   , envAutos :: Args
+  , envProvided :: Map Text Value
   , envLocals :: Map Sym Value
   }
 
@@ -144,28 +154,28 @@ applyClosure sch (Closure fn helpers) ctx autos args st = do
   unless (fnKind fn == Mutator) (Left (WrongKind name (fnKind fn)))
   mapM_ (\(a, _) -> unless (M.member a autos) (Left (MissingAuto a))) (fnAutos fn)
   mapM_ (\(a, _) -> unless (M.member a args) (Left (MissingArg a))) (fnArgs fn)
-  let env = Env sch helpers Mutator ctx args autos M.empty
-  case runState (runExceptT (block env (fnBody fn))) (St st []) of
+  let env = Env sch helpers Mutator ctx args autos M.empty M.empty
+  case runState (runExceptT (procedure env fn)) (St st []) of
     (Right _, St st' chs) -> Right (Right (st', reverse chs))
     (Left (Returned _), St st' chs) -> Right (Right (st', reverse chs))
     (Left (Halt (Verdict r)), _) -> Right (Left r)
     (Left (Halt (Bug e)), _) -> Left e
 
--- | §6.2 Run a query. A query never changes the store; a 'Verdict' here is
--- a fault such as an overflow, deterministic but not a log verdict, and a
--- caller shows it as an error rather than recording anything.
-query :: Module -> Text -> Args -> Store -> Either Fault Value
-query m name args st = do
+-- | §6.2 Run a query. A query never changes the store. A 'Verdict' here is
+-- a refusal — a failed check, a guard, an overflow — deterministic but not
+-- a log verdict, and a caller shows it rather than recording anything.
+query :: Module -> Text -> Ctx -> Args -> Store -> Either Fault Value
+query m name ctx args st = do
   fn <- either (Left . Bug) Right (function m name)
-  queryClosure (modSchema m) (closure m fn) args st
+  queryClosure (modSchema m) (closure m fn) ctx args st
 
-queryClosure :: Schema -> Closure -> Args -> Store -> Either Fault Value
-queryClosure sch (Closure fn helpers) args st = do
+queryClosure :: Schema -> Closure -> Ctx -> Args -> Store -> Either Fault Value
+queryClosure sch (Closure fn helpers) ctx args st = do
   let name = fnName fn
   unless (fnKind fn == Query) (Left (Bug (WrongKind name (fnKind fn))))
   mapM_ (\(a, _) -> unless (M.member a args) (Left (Bug (MissingArg a)))) (fnArgs fn)
-  let env = Env sch helpers Query (Ctx "" "") args M.empty M.empty
-  case fst (runState (runExceptT (block env (fnBody fn))) (St st [])) of
+  let env = Env sch helpers Query ctx args M.empty M.empty M.empty
+  case fst (runState (runExceptT (procedure env fn)) (St st [])) of
     Right _ -> Left (Bug (NoReturn name))
     Left (Returned (Just v)) -> Right v
     Left (Returned Nothing) -> Left (Bug (NoReturn name))
@@ -176,15 +186,138 @@ evalHelper :: Module -> Text -> [Value] -> Either Fault Value
 evalHelper m name vals = do
   fn <- either (Left . Bug) Right (function m name)
   let Closure _ helpers = closure m fn
-      env = Env (modSchema m) helpers Helper (Ctx "" "") M.empty M.empty M.empty
+      env = Env (modSchema m) helpers Helper (Ctx "" "") M.empty M.empty M.empty M.empty
       st0 = St (S.empty (modSchema m)) []
   case fst (runState (runExceptT (call env fn vals)) st0) of
     Right v -> Right v
     Left (Returned _) -> Left (Bug (NoReturn name))
     Left (Halt f) -> Left f
 
+-- | §6.7 The form validator: the same checks a procedure runs, over the
+-- fields that are present, reporting every field's first failure rather
+-- than stopping at one, and the input as the checks normalised it
+-- (trimmed). The whole-input refinements run only when every field is
+-- present. This is what a screen calls as somebody types, and it is
+-- defined here so that what a form says and what @apply@ refuses cannot
+-- disagree.
+check :: Module -> Text -> Ctx -> Args -> Store -> Either EvalError ([(Text, Text)], Args)
+check m name ctx args st = do
+  fn <- function m name
+  checkClosure (modSchema m) (closure m fn) ctx args st
+
+checkClosure :: Schema -> Closure -> Ctx -> Args -> Store -> Either EvalError ([(Text, Text)], Args)
+checkClosure sch (Closure fn helpers) ctx args st =
+  let env = Env sch helpers (fnKind fn) ctx args M.empty M.empty M.empty
+      go = do
+        (env', complaints) <- foldM field (env, []) [f | f@(n, _) <- fnInput fn, M.member n args]
+        whole <-
+          if all (\(n, _) -> M.member n args) (fnInput fn)
+            then refinements env' (fnRefine fn)
+            else pure []
+        pure (reverse complaints ++ whole, envArgs env')
+      field (env', acc) (n, f) = do
+        (v', failed) <- fieldChecks env' n f (envArgs env' M.! n)
+        let env'' = env' {envArgs = M.insert n v' (envArgs env')}
+        pure (env'', maybe acc (\why -> (n, why) : acc) failed)
+      refinements env' rs = concat <$> mapM (\(e, why) -> (\ok -> if ok then [] else [("", maybe "invalid" id why)]) <$> (eval env' e >>= bool)) rs
+   in case fst (runState (runExceptT go) (St st [])) of
+        Right r -> Right r
+        Left (Halt (Bug e)) -> Left e
+        Left (Halt (Verdict r)) -> Left (TypeError (T.pack ("a check refused outside the walk: " ++ show r)))
+        Left (Returned _) -> Left (NoReturn (fnName fn))
+
 function :: Module -> Text -> Either EvalError Function
 function m name = maybe (Left (UnknownFunction name)) Right (lookupFunction m name)
+
+-- §6.3 A procedure: checks, middleware, body ---------------------------
+
+-- Run a procedure's prelude and its body in the order §6 gives. The
+-- prelude's normalised arguments are what the middleware and the body
+-- read.
+procedure :: Env -> Function -> Run Env
+procedure env fn = do
+  env1 <- foldM (\e (n, f) -> do
+                   (v', failed) <- fieldChecks e n f (envArgs e M.! n)
+                   maybe (pure ()) (verdict . Refused) failed
+                   pure e {envArgs = M.insert n v' (envArgs e)})
+                env
+                (fnInput fn)
+  mapM_ (\(e, why) -> eval env1 e >>= bool >>= \ok -> unless ok (verdict (Refused (maybe "invalid" id why)))) (fnRefine fn)
+  env2 <- foldM middleware env1 (fnUses fn)
+  block env2 (fnBody fn)
+
+-- One field's checks, in order, over the value as the checks before left
+-- it: the normalised value and the first failure's message. An absent
+-- optional value is checked by nothing.
+fieldChecks :: Env -> Text -> Field -> Value -> Run (Value, Maybe Text)
+fieldChecks env name (Field ty checks) v0
+  | isNull v0 && isOption ty = pure (v0, Nothing)
+  | otherwise = go v0 checks
+  where
+    isOption (TOption _) = True
+    isOption _ = False
+    inner = case ty of TOption t -> t; t -> t
+    go v [] = pure (v, Nothing)
+    go v (c : cs) = case c of
+      CTrim -> text v >>= \t -> go (VText (Std.trim t)) cs
+      CMinLen n why -> text v >>= \t -> failing (T.length t < n) (message why (CMinLen n why)) v cs
+      CMaxLen n why -> text v >>= \t -> failing (T.length t > n) (message why (CMaxLen n why)) v cs
+      CRange lo hi why -> int v >>= \i -> failing (maybe False ((toInteger i <) . toInteger) lo || maybe False ((toInteger i >) . toInteger) hi) (message why c) v cs
+      CNonEmpty why -> list v >>= \xs -> failing (null xs) (message why c) v cs
+      CExists why -> do
+        st <- lift (gets stStore)
+        case inner of
+          TId t -> failing (not (S.exists st t [v])) (message why c) v cs
+          _ -> bug (TypeError ("exists on a non-id field " <> name))
+      CRefine e why -> do
+        ok <- eval env {envArgs = M.insert name v (envArgs env)} e >>= bool
+        failing (not ok) (message why c) v cs
+    failing bad why v cs = if bad then pure (v, Just why) else go v cs
+    message why c = maybe (defaultMessage name inner c) id why
+
+-- | §6.8 The message a check refuses with when its author gave none. Every
+-- runtime copies these exactly, since they may become a recorded verdict.
+defaultMessage :: Text -> Ty -> Check -> Text
+defaultMessage field ty = \case
+  CTrim -> field <> ": invalid"
+  CMinLen n _ -> field <> ": at least " <> tshow n <> " characters"
+  CMaxLen n _ -> field <> ": at most " <> tshow n <> " characters"
+  CRange (Just lo) (Just hi) _ -> field <> ": between " <> tshow lo <> " and " <> tshow hi
+  CRange (Just lo) Nothing _ -> field <> ": at least " <> tshow lo
+  CRange Nothing (Just hi) _ -> field <> ": at most " <> tshow hi
+  CRange Nothing Nothing _ -> field <> ": invalid"
+  CNonEmpty _ -> field <> ": at least one"
+  CExists _ -> field <> ": no such " <> (case ty of TId t -> t; _ -> "row")
+  CRefine _ _ -> field <> ": invalid"
+  where
+    tshow = T.pack . show
+
+-- Run one middleware of the procedure: a guard for its verdict, a provider
+-- for its value, which the body then reads as 'EProvided'. Middleware
+-- sees the procedure's normalised arguments and context, its own kind
+-- (so a write in it is a bug), and no locals.
+middleware :: Env -> Text -> Run Env
+middleware env name = do
+  mw <- case [h | h <- envHelpers env, fnName h == name] of
+    (h : _) -> pure h
+    [] -> bug (UnknownFunction name)
+  let env' = env {envKind = fnKind mw, envLocals = M.empty}
+  case fnKind mw of
+    Guard -> do
+      (block env' (fnBody mw) >> pure ())
+        `catchError` \case
+          Returned _ -> pure ()
+          other -> throwError other
+      pure env
+    Provide -> do
+      v <-
+        (block env' (fnBody mw) >> bug (NoReturn name))
+          `catchError` \case
+            Returned (Just v) -> pure v
+            Returned Nothing -> bug (NoReturn name)
+            other -> throwError other
+      pure env {envProvided = M.insert name v (envProvided env)}
+    k -> bug (WrongKind name k)
 
 -- §6.3 Statements -----------------------------------------------------
 
@@ -205,28 +338,41 @@ exec env = \case
     vs <- eval env xs >>= list
     mapM_ (\v -> block (bind x v env) body) vs
     pure env
-  SPut t e -> do
+  SInsert t e on -> do
     mutating env
     row <- eval env e >>= struct
     st <- lift (gets stStore)
-    case S.put st t row of
-      Left r -> verdict r
-      Right (st', ch) -> record st' ch >> pure env
+    written (S.insertOn st t on row)
+  SUpsert t e on -> do
+    mutating env
+    row <- eval env e >>= struct
+    st <- lift (gets stStore)
+    written (S.upsertOn st t on row)
+  SUpdate t ks x e -> do
+    mutating env
+    key <- mapM (eval env) ks
+    st <- lift (gets stStore)
+    case S.get st t key of
+      Nothing -> pure env
+      Just old -> do
+        row <- eval (bind x (VStruct old) env) e >>= struct
+        written (S.update st t key (const row))
   SDelete t ks -> do
     mutating env
     key <- mapM (eval env) ks
     st <- lift (gets stStore)
-    case S.delete st t key of
-      Left r -> verdict r
-      Right (st', ch) -> record st' ch >> pure env
+    written (S.delete st t key)
   SRefuse e -> do
-    unless (envKind env == Mutator) (bug (Impure "refuse outside a mutator"))
+    unless (envKind env /= Helper) (bug (Impure "refuse inside a helper"))
     t <- eval env e >>= text
     verdict (Refused t)
   SReturn me -> do
     v <- traverse (eval env) me
     throwError (Returned v)
   where
+    written = \case
+      Left r -> verdict r
+      Right (st', ch) -> record st' ch >> pure env
     record :: Store -> Maybe Change -> Run ()
     record st' ch = lift (modify' (\s -> s {stStore = st', stChanges = maybe id (:) ch (stChanges s)}))
 
@@ -249,6 +395,7 @@ eval env = \case
   EVar x -> maybe (bug (UnboundVar x)) pure (M.lookup x (envLocals env))
   ECtxUser -> pure (VText (ctxUser (envCtx env)))
   ECtxSession -> pure (VText (ctxSession (envCtx env)))
+  EProvided n -> maybe (bug (MissingProvided n)) pure (M.lookup n (envProvided env))
   EField e f -> do
     m <- eval env e >>= struct
     maybe (bug (NoSuchField f)) pure (M.lookup f m)
@@ -335,12 +482,12 @@ eval env = \case
     overflow = verdict (Refused "integer overflow")
 
 -- Call a helper: bind its arguments as a fresh environment, run its body,
--- and take what it returned. Helpers never see locals, autos, arguments
--- or the context of their caller.
+-- and take what it returned. Helpers never see locals, autos, arguments,
+-- provided values or the context of their caller.
 call :: Env -> Function -> [Value] -> Run Value
 call env fn vals = do
   unless (length vals == length (fnArgs fn)) (bug (Arity (fnName fn)))
-  let env' = env {envKind = Helper, envArgs = M.fromList (zip (map fst (fnArgs fn)) vals), envAutos = M.empty, envLocals = M.empty}
+  let env' = env {envKind = Helper, envArgs = M.fromList (zip (map fst (fnArgs fn)) vals), envAutos = M.empty, envProvided = M.empty, envLocals = M.empty}
   (block env' (fnBody fn) >> bug (NoReturn (fnName fn)))
     `catchError` \case
       Returned (Just v) -> pure v
@@ -478,4 +625,3 @@ filterM' f (x : xs) = do
 foldM' :: (b -> a -> Run b) -> b -> [a] -> Run b
 foldM' _ z [] = pure z
 foldM' f z (x : xs) = f z x >>= \z' -> foldM' f z' xs
-

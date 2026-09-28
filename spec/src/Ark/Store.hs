@@ -36,6 +36,10 @@ module Ark.Store
   , exists
   , scan
   , put
+  , insertOn
+  , upsertOn
+  , update
+  , matchOn
   , delete
   , changeTable
   , applyChange
@@ -158,6 +162,56 @@ put st tn row0 = do
     Just old
       | old == row -> (st, Nothing)
       | otherwise -> (st', Just (Edit tn old row))
+
+-- | The row a write would collide with: on the columns named, or on the
+-- key when none are. The projection is compared under 'compareValue', and
+-- a projection with a 'VNull' in it matches nothing, as 'unique' reads
+-- NULL. The columns named must be a declared unique index, which the
+-- verifier holds ('Ark.Verify.OnNotUnique'), so at most one row matches.
+matchOn :: Store -> Table -> [FieldName] -> Row -> Maybe Row
+matchOn st tbl on row
+  | null on = get st (tName tbl) (keyOf tbl row)
+  | any isNull mine = Nothing
+  | otherwise = case [r | r <- scan st (tName tbl), proj r == mine] of
+      (r : _) -> Just r
+      [] -> Nothing
+  where
+    proj r = [M.findWithDefault VNull c r | c <- on]
+    mine = proj (complete tbl row)
+
+-- | §4.3a Insert: write the row unless one matches on the columns named or
+-- on the key. A match is a no-op reporting nothing — an insert never
+-- edits, so @create_playlist@ authored twice from two devices lands once
+-- and the first keeps its id. Otherwise exactly 'put', which then reports
+-- an 'Add' or refuses on a constraint.
+insertOn :: Store -> TableName -> [FieldName] -> Row -> Either Refusal (Store, Maybe Change)
+insertOn st tn on row = do
+  tbl <- maybe (Left (NoSuchTable tn)) Right (lookupTable (stSchema st) tn)
+  case (matchOn st tbl on row, get st tn (keyOf tbl (complete tbl row))) of
+    (Nothing, Nothing) -> put st tn row
+    _ -> Right (st, Nothing)
+
+-- | §4.3b Upsert: write the row; where one matches on the columns named,
+-- keep the matching row's key columns and take the rest from the new row.
+-- With no columns named this is exactly 'put'. Reports 'Add', 'Edit' or
+-- nothing, as 'put' does.
+upsertOn :: Store -> TableName -> [FieldName] -> Row -> Either Refusal (Store, Maybe Change)
+upsertOn st tn on row = do
+  tbl <- maybe (Left (NoSuchTable tn)) Right (lookupTable (stSchema st) tn)
+  case matchOn st tbl on row of
+    Just old | not (null on) -> put st tn (M.union (M.fromList [(c, v) | c <- tKey tbl, Just v <- [M.lookup c old]]) row)
+    _ -> put st tn row
+
+-- | §4.3c Update: the row at a key, rewritten by a function of what is
+-- there. A missing row is a no-op. The new row's key columns are the
+-- existing ones whatever the function wrote, so an update never moves a
+-- row. Reports 'Edit' or nothing.
+update :: Store -> TableName -> Key -> (Row -> Row) -> Either Refusal (Store, Maybe Change)
+update st tn k f = do
+  tbl <- maybe (Left (NoSuchTable tn)) Right (lookupTable (stSchema st) tn)
+  case get st tn k of
+    Nothing -> Right (st, Nothing)
+    Just old -> put st tn (M.union (M.fromList (zip (tKey tbl) k)) (f old))
 
 -- | §4.4 Delete by key. A missing row is a no-op reporting nothing; a row
 -- that another row still references is a refusal, because a dangling

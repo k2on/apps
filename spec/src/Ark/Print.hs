@@ -21,8 +21,9 @@
 -- per scope with a @table@ line per table, the live frame types, and then
 -- one function per block — its signature on the first line, its statements
 -- indented two spaces per level beneath it. Arguments are @$name@, autos
--- @\@name@, locals their author's name or @v<n>@ where the author gave
--- none, and the context is @ctx.user@ and @ctx.session@. Symbols are
+-- @\@name@, provided values @#name@, locals their author's name or @v<n>@
+-- where the author gave none, and the context is @ctx.user@ and
+-- @ctx.session@. Symbols are
 -- printed as the function carries them; a caller who wants the numbering
 -- the hash saw normalises first ('Ark.Encode.normalize'), which also
 -- carries the names across.
@@ -59,8 +60,10 @@ printModule m =
       [["spec " <> tshow (modSpec m)]]
         ++ [schemaLines (modSchema m)]
         ++ [[live n t | (n, t) <- modLive m]]
+        ++ [map router (modRouters m)]
         ++ [T.lines (printFunction f) | f <- modFunctions m]
     live n t = "live " <> n <> ": " <> printTy t
+    router r = "router " <> rtName r <> " in " <> rtScope r <> (if null (rtUses r) then "" else " uses " <> commas (rtUses r))
 
 -- The schema ------------------------------------------------------------
 
@@ -136,28 +139,44 @@ quote t = "\"" <> T.concatMap esc t <> "\""
 -- | The author's names, by symbol.
 type Names = Map Sym Text
 
--- | One function: its signature, then its body indented beneath it, no
--- trailing newline. Autos come before arguments in the signature, each as
--- @name: Now@ or @name: NewId(table)@; a mutator's scope follows as
--- @in scope@ and a result type as @-> Ty@.
+-- | One function: its signature, then any whole-input refinements, then
+-- its body indented beneath it, no trailing newline. Autos come before
+-- the input in the signature, each as @name: Now@ or @name: NewId(table)@;
+-- an input field is @name: Ty@ followed by its checks; the scope follows
+-- as @in scope@, the router as @on router@, the middleware as @uses a, b@
+-- and a result type as @-> Ty@.
 printFunction :: Function -> Text
-printFunction fn = T.intercalate "\n" (sig : block (fnNames fn) 1 (fnBody fn))
+printFunction fn = T.intercalate "\n" (sig : refines ++ block (fnNames fn) 1 (fnBody fn))
   where
     sig =
       kind (fnKind fn)
         <> " "
         <> fnName fn
         <> "("
-        <> commas (map auto (fnAutos fn) ++ map arg (fnArgs fn))
+        <> commas (map auto (fnAutos fn) ++ map field (fnInput fn))
         <> ")"
         <> maybe "" (" in " <>) (fnScope fn)
+        <> maybe "" (" on " <>) (fnRouter fn)
+        <> (if null (fnUses fn) then "" else " uses " <> commas (fnUses fn))
         <> maybe "" ((" -> " <>) . printTy) (fnRet fn)
+    refines = [indent 1 <> "refine " <> expr (fnNames fn) pTop e <> why w | (e, w) <- fnRefine fn]
     kind Mutator = "mutation"
     kind Query = "query"
     kind Helper = "helper"
+    kind Guard = "guard"
+    kind Provide = "provide"
     auto (n, Now) = n <> ": Now"
     auto (n, NewId t) = n <> ": NewId(" <> t <> ")"
-    arg (n, t) = n <> ": " <> printTy t
+    field (n, Field t cs) = n <> ": " <> printTy t <> T.concat (map ((" " <>) . check) cs)
+    check = \case
+      CTrim -> "trim"
+      CMinLen n w -> "min(" <> tshow n <> ")" <> why w
+      CMaxLen n w -> "max(" <> tshow n <> ")" <> why w
+      CRange lo hi w -> "range(" <> maybe "" tshow lo <> ", " <> maybe "" tshow hi <> ")" <> why w
+      CNonEmpty w -> "non_empty" <> why w
+      CExists w -> "exists" <> why w
+      CRefine e w -> "refine(" <> expr (fnNames fn) pTop e <> ")" <> why w
+    why = maybe "" (\w -> " " <> quote w)
 
 sym :: Names -> Sym -> Text
 sym names x = M.findWithDefault ("v" <> tshow x) x names
@@ -173,7 +192,9 @@ stmt names d = \case
       : block names (d + 1) a
       ++ (if null b then [] else line "else" : block names (d + 1) b)
   SFor x xs b -> line ("for " <> sym names x <> " in " <> top xs) : block names (d + 1) b
-  SPut t e -> [line ("put(" <> t <> ", " <> top e <> ")")]
+  SInsert t e on -> [line ("insert(" <> commas ([t, top e] ++ [onList on | not (null on)]) <> ")")]
+  SUpsert t e on -> [line ("upsert(" <> commas ([t, top e] ++ [onList on | not (null on)]) <> ")")]
+  SUpdate t ks x e -> [line ("update(" <> commas (t : map top ks) <> ", " <> sym names x <> " -> " <> top e <> ")")]
   SDelete t ks -> [line ("delete(" <> commas (t : map top ks) <> ")")]
   SRefuse e -> [line ("refuse " <> top e)]
   SReturn Nothing -> [line "return"]
@@ -181,6 +202,7 @@ stmt names d = \case
   where
     line = (indent d <>)
     top = expr names pTop
+    onList on = "on " <> list on
 
 -- Expressions -----------------------------------------------------------
 
@@ -232,6 +254,7 @@ exprBody names = \case
   EVar x -> sym names x
   ECtxUser -> "ctx.user"
   ECtxSession -> "ctx.session"
+  EProvided n -> "#" <> n
   EField e f -> at pField e <> "." <> f
   EStruct fs -> struct [(k, at pTop v) | (k, v) <- M.toAscList fs]
   EList es -> list (map (at pTop) es)
@@ -325,6 +348,7 @@ stdName = \case
   Reverse -> "reverse"
   IsSome -> "is_some"
   UnwrapOr -> "unwrap_or"
+  Unwrap -> "unwrap"
 
 -- Plans -----------------------------------------------------------------
 

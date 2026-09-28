@@ -19,6 +19,7 @@
 module Ark.Std
   ( StdError (..)
   , std
+  , trim
   , fnv1a64
   , hexText
   , textOfId
@@ -53,7 +54,7 @@ data StdError
 std :: StdFn -> [Value] -> Either StdError Value
 std f args = case (f, args) of
   -- text --------------------------------------------------------------
-  (Trim, [VText t]) -> ok (VText (T.dropAround isWhiteSpace t))
+  (Trim, [VText t]) -> ok (VText (trim t))
   (IsEmpty, [VText t]) -> ok (VBool (T.null t))
   (Concat, [VList xs]) -> VText . T.concat <$> mapM text xs
   (Lower, [VText t]) -> ok (VText (T.map toLowerSimple t))
@@ -96,6 +97,8 @@ std f args = case (f, args) of
   (Reverse, [VList xs]) -> ok (VList (reverse xs))
   (IsSome, [v]) -> ok (VBool (not (isNull v)))
   (UnwrapOr, [VNull, d]) -> ok d
+  (Unwrap, [VNull]) -> Left (Fault "unwrapped none")
+  (Unwrap, [v]) -> ok v
   (UnwrapOr, [v, _]) -> ok v
   _ | length args /= arity f -> Left (Arity f (length args))
   _ -> Left (TypeMismatch f)
@@ -108,6 +111,10 @@ std f args = case (f, args) of
     safeHead [] = Nothing
 
 -- | How many arguments each function takes.
+-- | 'Trim' as a function of text, which the input checks apply directly.
+trim :: Text -> Text
+trim = T.dropAround isWhiteSpace
+
 arity :: StdFn -> Int
 arity f = case f of
   Trim -> 1
@@ -138,6 +145,7 @@ arity f = case f of
   Reverse -> 1
   IsSome -> 1
   UnwrapOr -> 2
+  Unwrap -> 1
 
 -- | FNV-1a, 64-bit: offset basis @0xcbf29ce484222325@, prime
 -- @0x00000100000001b3@, over the bytes in order. Harken's @key_part@ uses
