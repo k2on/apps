@@ -86,7 +86,7 @@ createPlaylist =
 -- | @add_to_playlist@: after everything already on the playlist, which is
 -- what makes the rebase visible.
 --
--- > demo.input::<AddToPlaylist>().mutation("add_to_playlist", |ctx, db, input| {
+-- > demo.input::<AddToPlaylist>().mutation("add_to_playlist", |_ctx, db, input| {
 -- >     let item = db.item.filter(Item::playlist_id.eq(input.playlist_id)).order_by(Item::pos.desc()).first();
 -- >     db.item.insert(Item {
 -- >         playlist_id: input.playlist_id,
@@ -139,7 +139,7 @@ addToPlaylist =
 
 -- | @items@: a playlist's items in position order.
 --
--- > demo.input::<PlaylistId>().query("items", |ctx, db, input| {
+-- > demo.input::<Items>().query("items", |_ctx, db, input| {
 -- >     db.item.filter(Item::playlist_id.eq(input.playlist_id)).order_by(Item::pos.asc()).all()
 -- > })
 items :: Function

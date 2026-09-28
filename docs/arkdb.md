@@ -309,6 +309,53 @@ is added around it is what a fleet of native apps needs from a sync system:
   └───────────────────────────────────────────────────────────────────────────┘
 ```
 
+### 3.0 Revision: one vocabulary, three spellings, and no generated code
+
+Sections 3.3 to 3.5 below describe the first build of this design, in which
+a domain was authored through builders, emitted as IR, and **generated**
+into native source for each runtime — a Rust-authored mutator ran on the
+phone as Swift that `arkc gen` had written. That is superseded, and the
+sections are kept because the reasoning about the IR, the hash and the
+store still holds. What replaced the generator, and why:
+
+- **Compiling Rust to Rust was the wrong shape.** A domain author wrote
+  builder calls that emitted IR, and then ran code generated from that IR
+  rather than what they wrote. Now a domain is written once, as ordinary
+  functions over a small typed vocabulary (`spec/AUTHORING.md`), and the
+  same program runs two ways behind one API: under *Emit* it records the
+  module, under *Native* it applies an entry directly. Every runtime holds
+  its native procedures to the interpreter over their own emit, so what
+  runs is what was written and what was written is what the log names.
+- **Routers and middleware, as tRPC has them.** A procedure hangs off a
+  router that owns a scope, and off the middleware chain it was built from:
+  `signed_in.input::<CreatePlaylist>().mutation(…)`, `owned.query(…)`, with
+  a provider handing the body the row it found. A guard's refusal is the
+  procedure's.
+- **An input is a schema, and the schema is a form's validation.** Each
+  field carries its checks — trim, length, range, non-empty, *exists* —
+  and a failing check is a refusal with a message every runtime spells the
+  same. `Eval.check` runs the same walk over a partial input and returns
+  every field's first message, so the new-playlist sheet on each phone
+  shows exactly what `create_playlist` would refuse with, in any language.
+- **Writes are an ORM's, and they match inside.** `db.playlist.insert(row)
+  .on((Playlist::user_id, Playlist::name))` writes unless a row matches on
+  a declared unique index, which is what makes a second device's default
+  playlist a no-op; `upsert` and `update` are its siblings, and `put` is
+  gone. The non-determinism is `ctx.now("added_ms")` and
+  `ctx.new_id("id")`, drawn once at the origin and frozen as before.
+- **The round trip is the property.** `arkc gen rust|swift|kotlin` prints a
+  module back as the source that emits it, in the vocabulary, with each
+  language's formatter owning its layout; `arkc roundtrip` holds a source to
+  that print. harken's domain is written once in Rust; the Swift and Kotlin
+  the phones compile *are* the print, restricted to what a phone carries;
+  and every procedure of all three hashes identically. A function's hash is
+  still over the normalised IR, now with the middleware it runs among its
+  dependencies, so editing a guard re-hashes every procedure behind it.
+
+Spec version 2 is this contract. What follows describes version 1 where
+the two differ; `spec/AUTHORING.md` is authoritative for authoring, and
+the modules under `spec/src/Ark/` for everything.
+
 ### 3.1 Values and the canonical encoding
 
 Small on purpose, because every type is one three generated codebases have
@@ -409,7 +456,7 @@ at the edges. The spec pins a Unicode version and ships the three tables it
 needs (White_Space, Alphabetic ∪ Numeric, simple lowercase) as data; every
 `ArkStd` embeds them and none calls the platform.
 
-### 3.4 Authoring: builders, and going from any language to any other
+### 3.4 Authoring: builders, and going from any language to any other (superseded by 3.0)
 
 There are no macros. A builder is an ordinary library in each language whose
 calls construct IR; an author writes an ordinary function against it; a
@@ -535,7 +582,7 @@ what a diff shows and what replaces `mutations.txt`), `check` (§3.12),
 `gen rust|swift|kotlin`, `vectors` (§3.16). Each language's build invokes it:
 a `build.rs`, a SwiftPM plugin, a Gradle task.
 
-### 3.5 What generated code runs against
+### 3.5 What generated code runs against (superseded by 3.0)
 
 Each language ships one runtime package, and the generated domain code calls
 exactly two things in it: the **store** (§3.6) through `select`, `get`,
@@ -881,8 +928,9 @@ not testing the thing.
 One repository, because the vectors and the runtimes move together. Each
 language keeps its native build tool — cabal, cargo, SwiftPM, gradle — and
 nix drives every one of them: `nix flake check` is the spec's vectors, every
-runtime against them, the Rust workspace's lint and tests, and harken's
-module and generated code against what the tree holds; `nix build` is any
+runtime against them, the Rust workspace's lint and tests, harken's module
+against what its Rust emits, and its three domains' round trip through
+`arkc` under each language's formatter; `nix build` is any
 program, the Android APK included. Gradle's Maven graphs are recorded
 (`kotlin/deps.json` and `harken/android/deps.json`, re-recorded by
 `nix run .#kotlin-deps` and `.#harken-apk-deps`) and replayed offline, so no
@@ -894,26 +942,28 @@ apps/
                   module per section, the pinned Unicode tables and their generator,
                   arkc, and the vectors ark-vectors emits
   rust/           ark (the runtime: value, canon, store, eval, hash, verify, log, peer,
-                  view, live, protocol, sim) · ark-builder (the Rust frontend)
-  swift/          Package.swift: ArkDB (the runtime) · ArkDBClient (a session over it:
-                  link, persistence, an in-process authority) · ArkDBTests (the vectors)
-  kotlin/         settings.gradle.kts: ark-runtime · ark-client (the same shell)
+                  view, live, protocol, sim, and ark::authoring, the vocabulary)
+  swift/          Package.swift: ArkDB (the runtime) · ArkAuthoring (the vocabulary) ·
+                  ArkDBClient (a session over them: link, persistence, an in-process
+                  authority) · ArkDBTests (the vectors, the demo, harken's phone domain)
+  kotlin/         settings.gradle.kts: ark-runtime (with dev.arkdb.authoring) · ark-client
   harken/         the app, one directory per program (harken/README.md):
-    domain/       the domain as a builder program; harken.ark and gen/{rust,swift,kotlin}
-    server/       axum: every scope of harken.ark as an authority, dev auth, the scanner
-    desktop/      ratatui over ark and the generated Rust
-    ios/          SwiftUI over ArkDBClient and the generated Swift (xcodegen)
-    android/      Compose over ark-client and the generated Kotlin; nix build .#harken-apk
+    domain/       the domain, written once in Rust (src/); harken.ark, its emit; and
+                  gen/{swift,kotlin}, arkc's print of it for the phones
+    server/       axum: every scope of harken.ark as an authority, applied natively
+    desktop/      ratatui over ark and the domain's native procedures
+    web/          the browser peer: ark compiled to wasm, published to GitHub Pages
+    ios/          SwiftUI over ArkDBClient and the printed Swift domain (xcodegen)
+    android/      Compose over ark-client and the printed Kotlin; nix build .#harken-apk
   flake.nix       all of the above, as packages, checks and shells
 ```
 
-An app depends on one runtime package and on `arkc` at build time, and
-carries its domain as a builder program in whichever language it is written
-plus the module and generated code that program produces. The two native
-harken apps this repository (`k2on/apps`) is for depend on `swift/` and
-`kotlin/`; the harken server and desktop on `rust/ark`. The Swift and
-Kotlin *builders* are not written yet: today every domain is authored in
-Rust, and the other two languages receive it.
+An app depends on one runtime package, and carries its domain as source in
+the vocabulary of whichever language it is written in, plus the module that
+source emits. The harken server, desktop and browser peer depend on
+`rust/ark` and link the Rust domain; the two native phone apps depend on
+`swift/` and `kotlin/` and compile `arkc`'s print of the same module, which
+`nix flake check` holds to a byte-for-byte round trip.
 
 ### 3.18 The path for harken
 

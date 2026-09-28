@@ -230,8 +230,9 @@ called.
 
 ### 2.5 Declarations
 
-Rust (the canonical layout `arkc gen rust` writes; one file per router, the
-schema in `schema.rs`, and `lib.rs` naming them):
+Rust (what `arkc gen rust` writes, after rustfmt; one file per router, the
+schema in `schema.rs`, the module in `module.rs`, and a `lib.rs` of the
+crate's own naming them):
 
 ```rust
 // schema.rs
@@ -242,7 +243,10 @@ pub struct Playlists {                       // a scope: its tables, in order
 impl Scope for Playlists {
     const NAME: &str = "playlists";
     fn open() -> Self {
-        Playlists { playlist: table(), playlist_item: table() }
+        Playlists {
+            playlist: table(),
+            playlist_item: table(),
+        }
     }
 }
 // `open()` is how a body's `db` is made, and the order its fields are
@@ -250,7 +254,12 @@ impl Scope for Playlists {
 // a struct's fields, so the scope says them once, here. Swift and Kotlin
 // spell the same constructor in their own declarations.
 
-pub struct Playlist { pub id: Id<Playlist>, pub name: Text, pub user_id: Text, pub created_ms: Int }
+pub struct Playlist {
+    pub id: Id<Playlist>,
+    pub name: Text,
+    pub user_id: Text,
+    pub created_ms: Int,
+}
 impl Row for Playlist {
     const NAME: &str = "playlist";
     type Key = (Id<Playlist>,);
@@ -269,16 +278,28 @@ impl Playlist {
     pub const name: Col<Self, Text> = col("name");
     pub const user_id: Col<Self, Text> = col("user_id");
     pub const created_ms: Col<Self, Int> = col("created_ms");
-    pub const items: Rel<Self, PlaylistItem> = rel("items");     // from PlaylistItem's .refs
+    pub const playlist_item: Rel<Self, PlaylistItem> = rel("playlist_item"); // from PlaylistItem's .refs
 }
 ```
 
-`columns()` also has `.bool`, `.bytes`, `.enum_(["a", "b"])`, `.nullable()`
-after a column, `.refs::<Parent>()` after an id column, `.index((..))`.
+`columns()` also has `.bool`, `.bytes`, `.enum_(Self::c, ["a", "b"])`,
+`.nullable()` after a column, `.refs::<Parent>()` after an id column,
+`.index((..))`.
 
 ```rust
 // playlists.rs
-pub struct CreatePlaylist { pub name: Text }
+pub struct Owned {                           // what `owned` reads of an input
+    pub playlist_id: Id<Playlist>,
+}
+impl Input for Owned {
+    fn schema() -> Object<Self> {
+        object().field("playlist_id", id::<Playlist>())
+    }
+}
+
+pub struct CreatePlaylist {
+    pub name: Text,
+}
 impl Input for CreatePlaylist {
     fn schema() -> Object<Self> {
         object().field("name", text().trim().min(1).why("a playlist needs a name").max(120))
@@ -288,14 +309,17 @@ impl Input for CreatePlaylist {
 pub fn playlists() -> Router<Playlists> {
     let playlists = router::<Playlists>("playlists");
     let signed_in = playlists.guard("signed_in", |ctx, _db| when(ctx.user.is_empty(), || refuse("sign in first")));
-    let owned = signed_in.provide("owned", |ctx, db, input: &OnPlaylist| {
-        db.playlist.get((input.playlist_id,)).filter(|row| row.user_id.eq(ctx.user)).or_refuse("not your playlist")
+    let owned = signed_in.provide("owned", |ctx, db, input: &Owned| {
+        db.playlist
+            .get((input.playlist_id,))
+            .filter(|row| row.user_id.eq(ctx.user))
+            .or_refuse("not your playlist")
     });
     playlists.routes((
         signed_in.input::<CreatePlaylist>().mutation("create_playlist", |ctx, db, input| { .. }),
-        owned.input::<OnPlaylist>().mutation("add_to_playlist", |ctx, db, input, playlist| { .. }),
-        owned.input::<OnPlaylist>().query("playlist_items", |ctx, db, input, playlist| { .. }),
-        signed_in.query("playlists", |ctx, db, _: ()| { .. }),
+        owned.input::<AddToPlaylist>().mutation("add_to_playlist", |ctx, db, input, playlist| { .. }),
+        signed_in.query("playlists", |ctx, db, _input: ()| { .. }),
+        owned.input::<PlaylistItems>().query("playlist_items", |_ctx, db, _input, playlist| { .. }),
     ))
 }
 ```
@@ -314,15 +338,18 @@ Vec<(FnHash, Procedure)>` for a runtime, and `module().hash()`.
 
 **harken's domain is written out in full in this form** in
 `harken/domain/src/{schema.rs,library.rs,playlists.rs,module.rs}`; those
-four files are the canonical Rust text the Rust builder must compile and
-`arkc gen rust` must reproduce, and the Swift and Kotlin printed files are
-their line-for-line spellings.
+four files are the canonical Rust text: the Rust builder compiles them,
+their `emit()` is `harken/domain/harken.ark`, and `arkc roundtrip rust`
+over that module reproduces them (comment-only lines aside).
 
 Swift and Kotlin are the same declarations with `struct`/`class`,
-`protocol`/`interface`, and `static let id = col<Playlist, Id<Playlist>>("id")`;
-`arkc gen swift` and `arkc gen kotlin` write them and the two runtimes'
-`Authoring` modules define them. The existing `GENERATED-*.md` files are
-retired with `GENERATED.md`.
+`extension … : Row`/`companion object : Row.Of`, and
+`static let id = col<Playlist, Id<Playlist>>("id")`/`val id = col<…>("id")`.
+`harken/domain/gen/{swift,kotlin}` are `arkc gen` of harken's module,
+restricted to what a phone carries; the two runtimes' authoring modules
+(`ArkAuthoring`, `dev.arkdb.authoring`) define the vocabulary they are
+written in. `GENERATED.md` and the `GENERATED-*.md` contracts are retired:
+nothing is generated for a runtime.
 
 ## 3. Native and Emit
 
@@ -350,18 +377,25 @@ procedure of the demo, and a peer may hold it at runtime in debug builds.
 ## 4. What `arkc` does now
 
 - `arkc verify m.ark`, `print`, `hash`, `check OLD NEW`: as before.
-- `arkc gen rust|swift|kotlin m.ark OUTDIR [--only f,g]`: writes the
-  authoring form — `schema.<ext>`, one file per router, and the module
-  file — in canonical formatting. `--only` keeps the named procedures and
-  whatever they reach; the schema is always whole.
-- `arkc roundtrip rust|swift|kotlin m.ark SRC_DIR`: gen into a temporary
-  directory and diff against `SRC_DIR`; exit 1 on any difference. This is
-  a nix check for every domain in this repository.
+- `arkc gen rust|swift|kotlin m.ark OUTDIR [--only f,g] [--package p]
+  [--fmt CMD]`: writes the authoring form — `schema.<ext>`, one file per
+  router, and the module file (`Schema.swift`, `Playlists.kt`… in Swift and
+  Kotlin). `--only` keeps the named procedures and whatever they reach,
+  and drops a router left with nothing; the schema is always whole.
+  `--package` is the Kotlin package. `--fmt` runs a formatter over the
+  files it wrote, which is what makes them canonical (§6, "Layout").
+- `arkc roundtrip rust|swift|kotlin m.ark SRC_DIR [same options]`: gen into
+  a temporary directory and compare with `SRC_DIR`, comment-only lines
+  removed from both; exit 1 at the first line that differs, naming it.
+  `nix flake check` runs it over harken's three domains (`checks.harken-domain`).
 
 ## 5. The checks that hold it together
 
 1. `emit` of each language's demo domain equals `spec/vectors/module/demo.json`'s bytes (the demo is authored in all three now).
-2. `arkc roundtrip <lang>` over each authored domain.
+2. `arkc roundtrip <lang>` over each authored domain: harken's Rust over the
+   whole module, its Swift and Kotlin over what a phone carries. (The three
+   runtimes' demos live in their test suites and are held by check 1; they
+   are not roundtripped.)
 3. `Native` versus `Ark.Eval` on every procedure of the demo, per runtime.
 4. The eval, verify and rebase vectors as before, regenerated at spec version 2.
 
@@ -442,6 +476,37 @@ type gains `pub const <child>: Rel<Self, Child> = rel("<child>")` — named
 `<child>_<col>` when the child references the parent through more than
 one column — and a plan's `Related.rName` is that name.
 
+**Input types are named after the function that declares them**, in
+PascalCase: `CreatePlaylist` for `create_playlist`, `Owned` for the `owned`
+provider's input. A name that is already a scope's or a row's gets `Input`
+appended. Two procedures with the same input fields still get a type each
+(`AddToPlaylist`, `RemoveFromPlaylist`): the module does not carry a type's
+name, so the print cannot know that an author shared one, and a type per
+procedure is also what reads best at a call site
+(`AddToPlaylist(playlist_id, track_id)` for `add_to_playlist`).
+
+**A binding is inlined exactly when its single use heads the next
+statement**: the receiver of the chain that statement builds, or the value
+the function returns. So a query's `let v = select(..); return v` prints as
+the chain ending in `.all()`, a provider's `get`, `filter` and `or_refuse`
+print as one chain, and a read used inside a row literal is a `let`
+(`let playlist_item = …first();` before the insert that reads it). The IR
+cannot record the choice — a host `let` emits nothing — and this is the
+rule the print makes it by; a canonical source follows it.
+
+**Layout is the formatter's.** The printer writes one logical line per
+statement and item, and one blank line between items (a struct and its
+`impl`s or extensions are one item); where lines break is decided by the
+language's formatter, whose output over the print *is* the canonical text:
+rustfmt under `harken/domain/rustfmt.toml`, swift-format under
+`harken/domain/.swift-format` (which respects the printer's breaks, so the
+Swift printer breaks a statement's chain before each call itself when it
+has two or more calls and runs past 100 columns, and puts each column of
+a row on a line of its own), and ktfmt in its kotlinlang style (which
+also drops an explicit `Int` or `List` import from a file that names
+neither). `arkc gen --fmt CMD` runs the formatter; `nix flake check` pins
+all three.
+
 **Files.** Rust: `use ark::authoring::*;` first in every file, then
 `use crate::schema::*;` in a router file, then the router functions a
 module file names. Swift: `import ArkAuthoring`. Kotlin: `package <p>`
@@ -454,7 +519,9 @@ class and positional arguments at a call, `orderBy` and `routes` as
 varargs, a scope and a row and an input as a class whose
 `companion object : Scope.Of` / `Row.Of<T>` / `Input.Of<T>` carries
 `NAME`, `columns()`, `schema()` and the column and relation constants; an
-unused closure parameter is `_`; the module file is
+unused closure parameter is `_`; a scope has no `open()`, because the
+Kotlin runtime reads a scope's, a row's and an input's fields from its
+constructor, in declaration order; the module file is
 `fun module(): Module = Module(library(), playlists())`. The Kotlin runtime's
 `dev.arkdb.authoring` is the reference for that spelling, and `arkc gen
 kotlin` writes it. `arkc roundtrip` removes comment-only lines
@@ -504,7 +571,8 @@ after any `trim` before it.
 vectors run: one scope `demo` with `playlist(id, name, user_id)` and
 `item(playlist_id → playlist, track_id: text, pos)`, unique
 `(playlist.user_id, playlist.name)` and `(item.playlist_id, item.pos)`.
-Written in Rust it is, exactly:
+Its router, as `arkc gen rust` prints it from `arkc demo` under the
+domain's rustfmt, is exactly:
 
 ```rust
 pub fn demo() -> Router<Demo> {
@@ -512,10 +580,14 @@ pub fn demo() -> Router<Demo> {
     demo.routes((
         demo.input::<CreatePlaylist>().mutation("create_playlist", |ctx, db, input| {
             db.playlist
-                .insert(Playlist { id: ctx.new_id("id"), name: input.name, user_id: ctx.user })
+                .insert(Playlist {
+                    id: ctx.new_id("id"),
+                    name: input.name,
+                    user_id: ctx.user,
+                })
                 .on((Playlist::user_id, Playlist::name))
         }),
-        demo.input::<AddToPlaylist>().mutation("add_to_playlist", |ctx, db, input| {
+        demo.input::<AddToPlaylist>().mutation("add_to_playlist", |_ctx, db, input| {
             let item = db.item.filter(Item::playlist_id.eq(input.playlist_id)).order_by(Item::pos.desc()).first();
             db.item.insert(Item {
                 playlist_id: input.playlist_id,
@@ -523,17 +595,46 @@ pub fn demo() -> Router<Demo> {
                 pos: item.map_or(0, |row| row.pos).add(1),
             })
         }),
-        demo.input::<PlaylistId>().query("items", |ctx, db, input| {
+        demo.input::<Items>().query("items", |_ctx, db, input| {
             db.item.filter(Item::playlist_id.eq(input.playlist_id)).order_by(Item::pos.asc()).all()
         }),
     ))
 }
-// Demo { playlist: Table<Playlist>, item: Table<Item> }, opened as
-//   Demo { playlist: table(), item: table() }
-// CreatePlaylist { name: text().trim().min(1).why("a playlist needs a name") }
-// AddToPlaylist  { playlist_id: id::<Playlist>().exists(), track_id: text().min(1) }
-// PlaylistId     { playlist_id: id::<Playlist>() }
 ```
 
-Every runtime authors this in its own language and holds `emit` of it to
-the vector's bytes; that is check 1 of §5.
+and its inputs:
+
+```rust
+pub struct CreatePlaylist {
+    pub name: Text,
+}
+impl Input for CreatePlaylist {
+    fn schema() -> Object<Self> {
+        object().field("name", text().trim().min(1).why("a playlist needs a name"))
+    }
+}
+
+pub struct AddToPlaylist {
+    pub playlist_id: Id<Playlist>,
+    pub track_id: Text,
+}
+impl Input for AddToPlaylist {
+    fn schema() -> Object<Self> {
+        object().field("playlist_id", id::<Playlist>().exists()).field("track_id", text().min(1))
+    }
+}
+
+pub struct Items {
+    pub playlist_id: Id<Playlist>,
+}
+impl Input for Items {
+    fn schema() -> Object<Self> {
+        object().field("playlist_id", id::<Playlist>())
+    }
+}
+```
+
+with the scope `Demo { playlist: Table<Playlist>, item: Table<Item> }`,
+opened as `Demo { playlist: table(), item: table() }`. A runtime's own
+demo may name its input types otherwise — a name reaches no byte — but its
+`emit` is held to the vector's bytes; that is check 1 of §5.

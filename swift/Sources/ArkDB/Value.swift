@@ -65,7 +65,7 @@ public indirect enum Value {
     case list([Value])
     case record([String: Value])
 
-    // Constructors, as GENERATED.md spells them ---------------------------
+    // Constructors ---------------------------------------------------------
 
     public static func null() -> Value { return .null }
 

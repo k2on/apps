@@ -21,13 +21,13 @@ maps, a rebase is recomputing a value. What it must be is exact.
 | 1 | `Ark.Value` | the eight run-time values and the one total order over them |
 | 1.3 | `Ark.Canon` | the canonical encoding: RFC 8949 §4.2.1 deterministic CBOR plus the mapping; the decoder that refuses anything else |
 | 2 | `Ark.Schema` | scopes, tables, columns, indexes, references; the derived relationships; well-formedness |
-| 3 | `Ark.IR` | the function language: mutators, queries, helpers; statements, expressions, plans, the standard library's names |
-| 4 | `Ark.Store` | the store as a value: `get`, `scan`, `put`, `delete`; constraints as refusals; what a write reports |
+| 3 | `Ark.IR` | the function language: mutators, queries, helpers, guards and providers; routers (§3.10); input fields and their checks (§3.11); statements — the three table writes among them — expressions, plans, the standard library's names |
+| 4 | `Ark.Store` | the store as a value: `get`, `scan`, `put`, `delete`, and the three writes a body makes of them — insert (§4.3a), upsert (§4.3b), update (§4.3c); constraints as refusals; what a write reports |
 | 5 | `Ark.Std`, `Ark.Std.Unicode` | the standard library's semantics; the three pinned Unicode tables, generated from UCD 16.0.0 by `tools/GenUnicode.hs` |
-| 6 | `Ark.Eval` | what generated code must mean: `apply`, `query`, evaluation order, checked arithmetic, `select` |
+| 6 | `Ark.Eval` | what a domain means, which every runtime's native procedures are held to: `apply`, `query`, evaluation order (checks, middleware, body), checked arithmetic, `select`; the form validator (§6.7) and the default messages (§6.8) |
 | 7 | `Ark.Encode` | the module as a value (its wire and storage form) and alpha-normalisation |
-| 8 | `Ark.Hash`, `Ark.Sha256` | the state hash; closures and the function hash, which covers the helpers a function reaches; SHA-256 itself, so the spec imports nothing |
-| 9 | `Ark.Verify` | what a module must satisfy before anything runs, generates from or hashes it |
+| 8 | `Ark.Hash`, `Ark.Sha256` | the state hash; closures and the function hash, which covers the helpers a function calls and the middleware it runs; SHA-256 itself, so the spec imports nothing |
+| 9 | `Ark.Verify` | what a module must satisfy before anything runs, prints or hashes it |
 | 10 | `Ark.Log` | an entry; a scope's log with the facts kept beside each entry; snapshots, the horizon, the state at any retained sequence from facts alone |
 | 11 | `Ark.Peer` | the replica: pending intents, the optimistic view, the rebase, applying by intent or by facts, divergence detection; the authority: sequencing, dedupe, verdicts, compaction, retirement of closures no retained entry names, adoption of a scope; `localCommit`, the serverless peer |
 | 7.2 | `Ark.Decode` | a module, a closure, a schema or a type from its value: the inverse of `Ark.Encode`, strict about shape |
@@ -38,24 +38,29 @@ maps, a rebase is recomputing a value. What it must be is exact.
 
 | 16 | `Ark.Print` | the printable, diagnostic form of a module — what `arkc print` writes and a diff shows; not canonical |
 | 17 | `Ark.Compat` | `arkc check`: the additive-only rule between two modules, and re-verifying retained closures against a new schema |
-| 18 | `Ark.Gen` | `arkc gen`: one emitter over the IR, three spellings — Rust, Swift, Kotlin — over the library `GENERATED.md` names |
-| — | `Ark.Demo` | the two-table domain every vector and every runtime's first test is built on |
+| 18 | `Ark.Gen` | `arkc gen` and `arkc roundtrip`: a module printed back as the source that emits it, in the vocabulary of `AUTHORING.md` — one decompiler, three spellings, each language's formatter owning its layout |
+| — | `Ark.Demo` | the two-table domain every vector and every runtime's first test is built on: `AUTHORING.md` Appendix B |
 
 Everything the design in `docs/arkdb.md` Part 3 names is written, and so is
-the toolchain: `arkc` (`app/Arkc.hs`) verifies, prints, hashes, checks and
-generates from a `.ark` file, which is a module's canonical CBOR. The
-runtimes (`../rust`, `../swift`, `../kotlin`) and the apps are held to this
-package by the vectors and by `GENERATED.md`.
+the toolchain: `arkc` (`app/Arkc.hs`) verifies, prints, hashes, checks, and
+prints back as source, a `.ark` file, which is a module's canonical CBOR.
+`AUTHORING.md` is the contract between this package, the three runtimes and
+every domain: the vocabulary a domain is written in, what each spelling
+emits, and the round trip. The runtimes (`../rust`, `../swift`, `../kotlin`)
+and the apps are held to this package by the vectors, by `emit` of each
+runtime's own demo equalling `vectors/module/demo.json`, and by
+`arkc roundtrip` over harken's domains.
 
 ## Building
 
     nix build ..#ark-spec            # from this directory; the flake is the repository's
     nix run ..#vectors -- vectors/   # regenerate the vectors
-    nix run ..#arkc -- gen rust m.ark out/ --name Harken
+    nix run ..#arkc -- gen rust m.ark out/ --fmt rustfmt
     nix develop ..#spec              # a shell with GHC and cabal
     nix flake check ..               # the vectors are what the spec writes; every
-                                     # runtime passes them; harken's module and
-                                     # generated code are what arkc writes
+                                     # runtime passes them; harken's module is
+                                     # what its Rust emits, and every authored
+                                     # domain roundtrips through arkc
 
 Only GHC's boot libraries are used, so `ghc --make -isrc app/Vectors.hs`
 inside that shell is also enough.

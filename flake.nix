@@ -61,8 +61,9 @@
         };
       };
 
-      # What a client of harken is generated with: the functions it calls,
-      # and nothing the scanner alone authors (harken/README.md).
+      # What a phone carries of harken's domain: the procedures it calls, and
+      # nothing the scanner alone authors (harken/README.md). The Swift and
+      # Kotlin domains are `arkc gen … --only` these.
       clientFunctions = "create_playlist,add_to_playlist,remove_from_playlist,library,playlists,playlist_items";
 
       perSystem = pkgs:
@@ -143,17 +144,23 @@
             text = ''exec ark-vectors "$@"'';
           };
 
-          # The binary that writes harken.ark, and the module and generated
-          # code it and arkc produce: what `harken/domain` must hold.
+          # The binary that writes harken.ark from the four canonical Rust
+          # files, and the module it writes.
           harken-domain-bin = crate { pname = "harken-domain"; };
           harken-domain = pkgs.runCommand "harken-domain" { nativeBuildInputs = [ harken-domain-bin ark-spec ]; } ''
-            mkdir -p $out/gen/rust $out/gen/swift $out/gen/kotlin
+            mkdir -p $out
             harken-domain $out/harken.ark
             arkc verify $out/harken.ark
-            for t in rust swift kotlin; do
-              arkc gen $t $out/harken.ark $out/gen/$t --name Harken --only ${clientFunctions}
-            done
           '';
+
+          # The formatter each language's canonical text is the output of:
+          # the Rust printer writes tokens, rustfmt breaks the lines, and the
+          # same for Swift and Kotlin (spec/AUTHORING.md §6).
+          fmt = {
+            rust = "rustfmt --edition 2021 --config-path ${./harken/domain/rustfmt.toml}";
+            swift = "swift-format format --in-place --configuration ${./harken/domain/.swift-format}";
+            kotlin = "ktfmt --kotlinlang-style";
+          };
 
           # The Swift runtime and client, with the conformance runner over the
           # vectors it is held to. The two flags the toolchain needs on this
@@ -161,7 +168,9 @@
           swift = pkgs.swiftPackages.stdenv.mkDerivation {
             pname = "arkdb-swift";
             version = "0.1.0";
-            src = only [ "swift" "spec/vectors" ];
+            # Two test targets compile harken's phone domain and the iOS
+            # bridge by symlink, and one holds their hashes to harken.ark.
+            src = only [ "swift" "spec/vectors" "harken/domain/gen/swift" "harken/ios/Harken/Rows.swift" "harken/domain/harken.ark" ];
             sourceRoot = "source/swift";
             nativeBuildInputs = [ pkgs.swift pkgs.swiftpm ];
             # On Linux, Foundation and Dispatch are packages of their own and
@@ -198,7 +207,9 @@
           kotlin = pkgs.stdenv.mkDerivation (final: {
             pname = "arkdb-kotlin";
             version = "0.1.0";
-            src = only [ "kotlin" "spec/vectors" ];
+            # The tests compile harken's phone domain and hash it against
+            # harken.ark.
+            src = only [ "kotlin" "spec/vectors" "harken/domain/gen/kotlin" "harken/domain/harken.ark" ];
             sourceRoot = "source/kotlin";
             nativeBuildInputs = [ pkgs.gradle pkgs.jdk21 ];
             mitmCache = pkgs.gradle.fetchDeps {
@@ -318,22 +329,16 @@
               '';
               installPhase = "touch $out";
             };
-            # What arkc wrote from harken.ark compiles against ark::gen and
-            # agrees with the interpreter on one mutator (harken/domain/gen-check).
-            harken-gen-check = rustPlatform.buildRustPackage {
-              pname = "harken-gen-check";
-              version = "0.1.0";
-              src = only rustDirs;
-              sourceRoot = "source/harken/domain/gen-check";
-              cargoLock.lockFile = ./harken/domain/gen-check/Cargo.lock;
-              doCheck = true;
-              installPhase = "touch $out";
-            };
-            # harken.ark and the three generated files are what the domain
-            # program and arkc write today.
-            harken-domain = pkgs.runCommand "check-harken-domain" { } ''
+            # harken.ark is what the four canonical Rust files emit, and every
+            # authored domain is arkc's print of it: the Rust files over the
+            # whole module, each phone's over what it carries.
+            harken-domain = pkgs.runCommand "check-harken-domain"
+              { nativeBuildInputs = [ ark-spec rust pkgs.swift-format pkgs.ktfmt ]; } ''
               diff ${harken-domain}/harken.ark ${./harken/domain/harken.ark}
-              diff -r ${harken-domain}/gen ${./harken/domain/gen}
+              m=${./harken/domain/harken.ark}
+              arkc roundtrip rust $m ${./harken/domain/src} --fmt "${fmt.rust}"
+              arkc roundtrip swift $m ${./harken/domain/gen/swift} --only ${clientFunctions} --fmt "${fmt.swift}"
+              arkc roundtrip kotlin $m ${./harken/domain/gen/kotlin} --only ${clientFunctions} --package harken.gen --fmt "${fmt.kotlin}"
               touch $out
             '';
             swift = swift;

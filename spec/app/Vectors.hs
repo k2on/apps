@@ -156,6 +156,16 @@ demo out = do
     Left es -> error ("the demo module does not verify: " ++ show es)
     Right m -> pure m
   write (out ++ "/verify/demo-ok.json") (obj [("module", json (toValue m)), ("verifies", "true")])
+  -- Two modules that must not verify, each a one-line edit of the demo: an
+  -- insert matched on columns that are not a declared unique index, and a
+  -- procedure running middleware its router does not declare.
+  let refused what m' want = case verify m' of
+        Left es | any want es -> pure ()
+        other -> error ("verify: " ++ what ++ " was not refused as it should be: " ++ take 300 (show other))
+      editing name f = demoModule {modFunctions = [if fnName fn == name then f fn else fn | fn <- modFunctions demoModule]}
+      onName = \fn -> fn {fnBody = [case st of SInsert t e _ -> SInsert t e ["name"]; other -> other | st <- fnBody fn]}
+  refused "an insert on columns that are no unique index" (editing "create_playlist" onName) (\case In _ (OnNotUnique _ _) -> True; _ -> False)
+  refused "a procedure running middleware its router lacks" (editing "items" (\fn -> fn {fnUses = ["nope"]})) (\case In _ (UsesNotOnRouter _) -> True; _ -> False)
   let pid = maybe (error "an id") id (mkId (B.pack (replicate 15 0 ++ [1])))
       playlistRow = M.fromList [("id", VId pid), ("name", VText "Favorites"), ("user_id", VText "alice")]
       st0 = either (error . show) fst (S.put (S.empty demoSchema) "playlist" playlistRow)

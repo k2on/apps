@@ -50,7 +50,7 @@ is held to `Eval` over its own `Emit` on every procedure of all three.
   input.trackId)`), typed by the row's `typealias Key` (`Id<Track>`, or a
   tuple), so a wrong order does not compile.
 - **Closures are trailing**: `.mutation("create_playlist") { ctx, db, input
-  in … }`; a provide annotates its input `{ (ctx, db, input: PlaylistId) in
+  in … }`; a provide annotates its input `{ (ctx, db, input: Owned) in
   … }`; a multi-statement body `return`s its effect.
 - **A stopped native body is inert.** The vocabulary does not `throw` (a
   domain file has no `try`), so a refusal under `Native` — `refuse`, a
