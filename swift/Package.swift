@@ -33,10 +33,12 @@ let package = Package(
         // authoring form in ../harken/domain/gen/swift (a link), compiled
         // here so that Linux proves it builds against ArkAuthoring.
         .target(name: "HarkenDomain", dependencies: ["ArkAuthoring"], path: "Tests/HarkenDomain"),
+        // The rest of the vocabulary, in one small domain the tests hold to Eval.
+        .target(name: "Kitchen", dependencies: ["ArkAuthoring"], path: "Tests/Kitchen"),
         // Everything below the iOS app's views: the same four domain files
         // and ../harken/ios/Harken/Rows.swift (links), so the phone's bridge
         // is compiled and driven on Linux.
         .target(name: "HarkenPhone", dependencies: ["ArkDB", "ArkDBClient", "ArkAuthoring"], path: "Tests/HarkenPhone"),
-        .executableTarget(name: "ArkDBTests", dependencies: ["ArkDB", "ArkDBClient", "ArkAuthoring", "ArkDemo", "HarkenDomain", "HarkenPhone"], path: "Tests/ArkDBTests"),
+        .executableTarget(name: "ArkDBTests", dependencies: ["ArkDB", "ArkDBClient", "ArkAuthoring", "ArkDemo", "HarkenDomain", "HarkenPhone", "Kitchen"], path: "Tests/ArkDBTests"),
     ]
 )

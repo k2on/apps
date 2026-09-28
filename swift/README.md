@@ -19,11 +19,13 @@ replica, which applies an entry natively when it holds its hash and
 through the interpreter (or the entry's facts) otherwise. Nothing is
 generated for this runtime any more.
 
-Two domains are authored here: the spec's demo (`Tests/Demo`, Appendix B),
-whose `emit()` the runner holds to `spec/vectors/module/demo.json` byte for
-byte, and harken's phone domain (`../harken/domain/gen/swift`, compiled as
-the `HarkenDomain` test target and, with the iOS bridge, as `HarkenPhone`).
-`Native` is held to `Eval` over its own `Emit` on every procedure of both.
+Three domains are authored here: the spec's demo (`Tests/Demo`, Appendix
+B), whose `emit()` the runner holds to `spec/vectors/module/demo.json` byte
+for byte; harken's phone domain (`../harken/domain/gen/swift`, compiled as
+the `HarkenDomain` test target and, with the iOS bridge, as `HarkenPhone`),
+whose procedure hashes it holds to `harken/domain/harken.ark` when that is
+a spec-2 module; and `Tests/Kitchen`, the rest of the vocabulary. `Native`
+is held to `Eval` over its own `Emit` on every procedure of all three.
 
 ## What is Swift's own
 
@@ -59,6 +61,10 @@ the `HarkenDomain` test target and, with the iOS bridge, as `HarkenPhone`).
 - **Writes wait one step for `.on`.** Natively an `insert`/`upsert` is made
   at the next operation (or at the end), so `.insert(row).on(cols)` means
   what it reads as.
+- **Two inference limits.** `fold`'s initial value needs its type when
+  the closure alone cannot give it (`.fold(Int(0)) { acc, row in … }`),
+  and an input with a field named `id` hides the `id(T.self)` builder in its
+  own `schema` (write `ArkAuthoring.id(T.self)` there).
 - **`Input.init(args:)` and `.args`** convert an input to and from an
   entry's arguments, for an app outside the domain's module.
 - Not verified: the expression type checker stays `arkc`'s; `Emit` leaves

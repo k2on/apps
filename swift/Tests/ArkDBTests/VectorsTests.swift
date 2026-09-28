@@ -768,6 +768,7 @@ struct VectorsTests {
             try rebaseVectors()
             storeRules(m.schema)
             try authoringTests(m)
+            try kitchenTests()
             try clientTests()
             try phoneTests()
         } catch {
