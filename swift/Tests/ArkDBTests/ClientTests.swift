@@ -2,15 +2,18 @@ import Foundation
 import ArkDB
 import ArkDBClient
 
-// ArkDBClient against the demo module: a session alone, a session over
-// generated code, the link's backoff, and two sessions converging through an
-// in-process authority. Same harness as the vectors: `check`, `run`.
+// ArkDBClient against the demo module as the Swift domain emits it: a
+// session alone through the interpreter and through the native procedures,
+// the link's backoff, and two sessions converging through an in-process
+// authority. Same harness as the vectors: `check`, `run`.
 
-func demoModule() throws -> (bytes: [UInt8], hash: String, module: Module) {
+/// The demo as the Swift domain emits it (Tests/Demo), with its native
+/// procedures and the vector's hash to hold it to.
+func demoModule() throws -> (bytes: [UInt8], hash: String, module: Module, procedures: [(FnHash, Procedure)]) {
     let obj = try loadJSON(vectors.appendingPathComponent("module").appendingPathComponent("demo.json"))
-    let bytes = try hexBytes(obj, "bytes")
-    let m = try Decode.fromValue(try Canon.decode(bytes))
-    return (bytes, try string(obj, "hash"), m)
+    let a = demoAuthored()
+    let m = try Decode.fromValue(try Canon.decode(a.bytes))
+    return (a.bytes, try string(obj, "hash"), m, a.procedures)
 }
 
 /// An empty directory under the temporary directory.
@@ -25,20 +28,18 @@ func rows(_ s: Session, _ table: String) throws -> [Value] {
     return try s.run { db in db.select(Plan.from(table)) }.asList()
 }
 
-/// A playlist item as the tests read it: which media, at which position.
+/// A playlist item as the tests read it: which track, at which position.
 struct Pos: Equatable, CustomStringConvertible {
-    let media: [UInt8]
+    let track: String
     let pos: Int64
-    init(_ media: [UInt8], _ pos: Int64) { self.media = media; self.pos = pos }
-    var description: String { return "\(media)@\(pos)" }
+    init(_ track: String, _ pos: Int64) { self.track = track; self.pos = pos }
+    var description: String { return "\(track)@\(pos)" }
 }
 
 func positions(_ s: Session) throws -> [Pos] {
-    return try s.run { db in db.select(Plan.from("playlist_item").orderBy("pos", Dir.asc)) }.asList()
-        .map { Pos($0.field("media_id").asBytes(), $0.field("pos").asInt()) }
+    return try s.run { db in db.select(Plan.from("item").orderBy("pos", Dir.asc)) }.asList()
+        .map { Pos($0.field("track_id").asText(), $0.field("pos").asInt()) }
 }
-
-let demoGenerated = Generated(functions: DemoGen.functions, apply: DemoGen.apply, query: DemoGen.query)
 
 // MARK: - a transport that never opens
 
@@ -70,11 +71,9 @@ final class Silent: LinkDriven {
 func clientTests() throws {
     let demo = try demoModule()
 
-    run("client/generated-demo-is-the-vector's-module") {
-        check("DemoGen.moduleHash is the module vector's hash", DemoGen.moduleHash == demo.hash)
-        check("DemoGen.moduleBytes are the module vector's bytes", Hex.decode(DemoGen.moduleBytes) == demo.bytes)
-        let hashes = Set(DemoGen.functions.compactMap { Hex.decode($0.1) })
-        check("every generated hash is a closure of the module", hashes == Set(Hash.closures(demo.module).keys))
+    run("client/authored-demo-is-the-vector's-module") {
+        check("the Swift demo's bytes hash to the module vector's hash", Hex.encode(Hash.moduleHash(demo.module)) == demo.hash)
+        check("every native procedure's hash is a closure of the module", Set(demo.procedures.map { $0.0 }) == Set(Hash.closures(demo.module).keys))
     }
 
     run("client/alone") {
@@ -82,25 +81,31 @@ func clientTests() throws {
         let s = try Session.open(directory: dir, module: demo.bytes, user: "alice", server: nil)
         var seen: [(ScopeName, Changes)] = []
         s.subscribe { seen.append(($0, $1)) }
-        check("the session stands alone", s.status.alone && !s.status.linked && s.status.cursors["playlists"] == 0)
+        check("the session stands alone", s.status.alone && !s.status.linked && s.status.cursors["demo"] == 0)
 
         let blank = s.mutate(name: "create_playlist", args: ["name": .text("   ")])
         check("a blank name is refused", blank == .refused("a playlist needs a name"), "\(blank.map { $0.text } ?? "nil")")
-        check("a refusal changes nothing", s.status.pending == 0 && seen.isEmpty && s.status.cursors["playlists"] == 0)
+        check("a refusal changes nothing", s.status.pending == 0 && seen.isEmpty && s.status.cursors["demo"] == 0)
         check("the refusal is the last note", s.lastNote == "refused: a playlist needs a name")
 
-        check("create_playlist", s.mutate(name: "create_playlist", args: DemoGen.createPlaylistArgs(name: "  Mine ")) == nil)
+        check("create_playlist", s.mutate(name: "create_playlist", args: createArgs("  Mine ")) == nil)
         let pls = try rows(s, "playlist")
         check("one playlist, trimmed", pls.count == 1 && pls.first?.field("name") == .text("Mine") && pls.first?.field("user_id") == .text("alice"))
-        check("sequenced at once", s.status.cursors["playlists"] == 1 && s.status.pending == 0)
+        check("sequenced at once", s.status.cursors["demo"] == 1 && s.status.pending == 0)
         guard let pid = pls.first?.field("id").asId() else { throw TestError("no playlist id") }
 
-        check("add_to_playlist", s.mutate(name: "add_to_playlist", args: DemoGen.addToPlaylistArgs(playlistId: pid, mediaId: [1, 2, 3])) == nil)
-        check("the item is at pos 1", try positions(s) == [Pos([1, 2, 3], 1)])
-        check("cursor 2, nothing pending", s.status.cursors["playlists"] == 2 && s.status.pending == 0)
-        let noop = s.mutate(name: "add_to_playlist", args: DemoGen.addToPlaylistArgs(playlistId: Id.nil_, mediaId: [7]))
+        check("add_to_playlist", s.mutate(name: "add_to_playlist", args: addArgs(pid, "t123")) == nil)
+        check("the item is at pos 1", try positions(s) == [Pos("t123", 1)])
+        check("cursor 2, nothing pending", s.status.cursors["demo"] == 2 && s.status.pending == 0)
+        let noop = s.mutate(name: "add_to_playlist", args: addArgs(pid, "t123"))
         let stillOne = try positions(s).count
-        check("a missing playlist is a no-op, not a refusal", noop == nil && s.status.cursors["playlists"] == 3 && stillOne == 1)
+        check("the same track again is a no-op, sequenced, not a refusal", noop == nil && s.status.cursors["demo"] == 3 && stillOne == 1)
+        let missing = s.mutate(name: "add_to_playlist", args: addArgs(Id.nil_, "t7"))
+        check("a missing playlist is refused by its exists check", missing == .refused("playlist_id: no such playlist") && s.status.cursors["demo"] == 3)
+        let form = try s.validate(name: "create_playlist", partial: ["name": .text("  ")])
+        check("the form validator says why, under the field", form.messages.count == 1 && form.messages[0].0 == "name" && form.messages[0].1 == "a playlist needs a name")
+        check("and trims", try s.validate(name: "create_playlist", partial: ["name": .text(" x ")]).values["name"] == .text("x"))
+        check("a query through the interpreter", try s.query(name: "items", args: ["playlist_id": .id(pid)]).asList().count == 1)
 
         let adds = seen.flatMap { pair -> [Change] in
             if case .applied(let cs) = pair.1 { return cs }
@@ -108,23 +113,23 @@ func clientTests() throws {
         }
         check("subscribers were told each add, as Applied", adds.count == 2
               && adds.contains { if case .add("playlist", _) = $0 { return true }; return false }
-              && adds.contains { if case .add("playlist_item", _) = $0 { return true }; return false }, "\(seen)")
+              && adds.contains { if case .add("item", _) = $0 { return true }; return false }, "\(seen)")
         check("nothing was reported as Rebuilt", !seen.contains { if case .rebuilt = $0.1 { return true }; return false })
 
         s.verify()
-        check("the authority here agrees", s.status.lastAgree == Agreement(scope: "playlists", seq: 3, ok: true))
+        check("the authority here agrees", s.status.lastAgree == Agreement(scope: "demo", seq: 3, ok: true))
 
-        guard let (n1, h1) = s.stateHash("playlists") else { throw TestError("no hash") }
+        guard let (n1, h1) = s.stateHash("demo") else { throw TestError("no hash") }
         s.close()
-        check("the replica file exists", FileManager.default.fileExists(atPath: dir.appendingPathComponent("playlists.replica").path))
+        check("the replica file exists", FileManager.default.fileExists(atPath: dir.appendingPathComponent("demo.replica").path))
 
         let s2 = try Session.open(directory: dir, module: demo.bytes, user: "alice", server: nil)
-        guard let (n2, h2) = s2.stateHash("playlists") else { throw TestError("no hash after reopen") }
+        guard let (n2, h2) = s2.stateHash("demo") else { throw TestError("no hash after reopen") }
         check("reopened at the same cursor with the same hash", n1 == n2 && h1 == h2 && n2 == 3, "\(n1) \(n2)")
-        check("the rows are back", try positions(s2) == [Pos([1, 2, 3], 1)] && (try rows(s2, "playlist")).count == 1)
-        let more = s2.mutate(name: "add_to_playlist", args: DemoGen.addToPlaylistArgs(playlistId: pid, mediaId: [4]))
+        check("the rows are back", try positions(s2) == [Pos("t123", 1)] && (try rows(s2, "playlist")).count == 1)
+        let more = s2.mutate(name: "add_to_playlist", args: addArgs(pid, "t4"))
         let two = try positions(s2)
-        check("and it goes on sequencing from there", more == nil && s2.status.cursors["playlists"] == 4 && two == [Pos([1, 2, 3], 1), Pos([4], 2)])
+        check("and it goes on sequencing from there", more == nil && s2.status.cursors["demo"] == 4 && two == [Pos("t123", 1), Pos("t4", 2)])
         s2.verify()
         check("the resumed authority agrees", s2.status.lastAgree?.ok == true)
         s2.close()
@@ -138,28 +143,26 @@ func clientTests() throws {
         check("a directory opened alone refuses to be opened against a server", mismatched)
     }
 
-    run("client/alone-generated") {
-        let dir = try freshDir("alone-generated")
-        let s = try Session.open(directory: dir, module: demo.bytes, user: "bob", server: nil, generated: demoGenerated)
-        check("generated create_playlist by name", s.mutate(name: "create_playlist", args: DemoGen.createPlaylistArgs(name: "Gen")) == nil)
-        let refused = s.mutate(name: "create_playlist", args: DemoGen.createPlaylistArgs(name: ""))
-        check("generated code refuses through Fault.refuse", refused == .refused("a playlist needs a name"), "\(refused.map { $0.text } ?? "nil")")
+    run("client/alone-native") {
+        let dir = try freshDir("alone-native")
+        let s = try Session.open(directory: dir, module: demo.bytes, procedures: demo.procedures, user: "bob", server: nil)
+        check("create_playlist natively, by name", s.mutate(name: "create_playlist", args: createArgs("Gen")) == nil)
+        let refused = s.mutate(name: "create_playlist", args: createArgs(""))
+        check("the native check refuses with the vector's text", refused == .refused("a playlist needs a name"), "\(refused.map { $0.text } ?? "nil")")
         guard let pid = try rows(s, "playlist").first?.field("id").asId() else { throw TestError("no playlist") }
-        let args = DemoGen.addToPlaylistArgs(playlistId: pid, mediaId: [9])
-        let r1 = s.mutate(name: "add_to_playlist", args: args) { db, ctx, autos in try DemoGen.addToPlaylist(db, ctx, autos, args) }
-        check("a generated body through mutate(name:args:body:)", r1 == nil, "\(r1.map { $0.text } ?? "nil")")
+        check("add_to_playlist natively", s.mutate(name: "add_to_playlist", args: addArgs(pid, "t9")) == nil)
         var told: [Changes] = []
         s.subscribe { told.append($1) }
-        let r2 = s.mutate(name: "add_to_playlist", args: args) { db, ctx, autos in try DemoGen.addToPlaylist(db, ctx, autos, args) }
-        check("the same item again is a no-op with nothing to report", r2 == nil && told.isEmpty)
-        check("the local authority — the interpreter — sequenced every entry the generated code authored",
-              s.status.cursors["playlists"] == 3 && s.status.pending == 0 && s.status.rejections == 0)
-        check("and the rows agree", try positions(s) == [Pos([9], 1)])
+        check("the same item again is a no-op with nothing to report", s.mutate(name: "add_to_playlist", args: addArgs(pid, "t9")) == nil && told.isEmpty)
+        check("the local authority — the interpreter — sequenced every entry the native procedures authored",
+              s.status.cursors["demo"] == 3 && s.status.pending == 0 && s.status.rejections == 0)
+        check("and the rows agree", try positions(s) == [Pos("t9", 1)])
+        check("a query natively", try s.query(name: "items", args: ["playlist_id": .id(pid)]).asList().map { $0.field("track_id") } == [.text("t9")])
         s.verify()
         check("verified", s.status.lastAgree?.ok == true)
         s.close()
-        let s2 = try Session.open(directory: dir, module: demo.bytes, user: "bob", server: nil, generated: demoGenerated)
-        check("reopened through generated replay", try positions(s2) == [Pos([9], 1)] && s2.status.cursors["playlists"] == 3)
+        let s2 = try Session.open(directory: dir, module: demo.bytes, procedures: demo.procedures, user: "bob", server: nil)
+        check("reopened through native replay", try positions(s2) == [Pos("t9", 1)] && s2.status.cursors["demo"] == 3)
         s2.close()
     }
 
@@ -204,7 +207,7 @@ func clientTests() throws {
         // A real exchange, driven by hand: the hello goes out as bytes and the
         // batch comes back as bytes, through Link's codecs.
         let ex = MemoryExchange()
-        ex.host(Authority(demo.module.schema, "playlists", Hash.closures(demo.module)))
+        ex.host(Authority(demo.module.schema, "demo", Hash.closures(demo.module)))
         final class Recorder: LinkDriven {
             var client: Client
             var received: [ServerMsg] = []
@@ -215,19 +218,19 @@ func clientTests() throws {
             func linkOutgoing() -> [ClientMsg] { return client.takeOutgoing() }
         }
         var c = Client(schema: demo.module.schema, token: "carol")
-        c.subscribe(.whole, Replica.open(demo.module.schema, "playlists", Hash.closures(demo.module), MemoryStore(schema: demo.module.schema), 0, []))
+        c.subscribe(.whole, Replica.open(demo.module.schema, "demo", Hash.closures(demo.module), MemoryStore(schema: demo.module.schema), 0, []))
         let rec = Recorder(c)
         let link = Link(url: URL(string: "mem://x")!, dial: ex.dial, driven: rec)
         link.connect()
         link.pump(); link.pump()
         check("open after two pumps", link.isOpen && rec.client.linked)
-        let fh = Hex.decode(DemoGen.functions[0].1)!
-        let r = rec.client.mutate("playlists", Id(bytes: [UInt8](repeating: 1, count: 16))!, Ctx(user: "carol", session: "dev"), fh,
+        let fh = Hash.functionHash(Hash.closure(demo.module, demo.module.lookupFunction("create_playlist")!))
+        let r = rec.client.mutate("demo", Id(bytes: [UInt8](repeating: 1, count: 16))!, Ctx(user: "carol", session: "dev"), fh,
                                   ["id": .id(Id(bytes: [UInt8](repeating: 2, count: 16))!)], ["name": .text("Bytes")])
         check("authored", r.isSuccess)
         link.pump(); link.pump()
         check("the ack came back as a frame", rec.received.contains { if case .ack = $0 { return true }; return false }, "\(rec.received.count)")
-        check("confirmed at 1", rec.client.scopes["playlists"]?.replica.cursor == 1 && rec.client.scopes["playlists"]?.replica.pending.isEmpty == true)
+        check("confirmed at 1", rec.client.scopes["demo"]?.replica.cursor == 1 && rec.client.scopes["demo"]?.replica.pending.isEmpty == true)
         check("no frame was undecodable", link.badFrames == 0 && ex.badFrames == 0)
         link.disconnect()
         check("disconnect tells the client", !rec.client.linked)
@@ -235,7 +238,7 @@ func clientTests() throws {
 
     run("client/denied") {
         let ex = MemoryExchange(server: InProcessServer(authenticate: { _ in nil }))
-        ex.host(Authority(demo.module.schema, "playlists", Hash.closures(demo.module)))
+        ex.host(Authority(demo.module.schema, "demo", Hash.closures(demo.module)))
         let s = try Session.open(directory: try freshDir("denied"), module: demo.bytes, user: "nobody", server: URL(string: "mem://x")!, dial: ex.dial)
         for _ in 0..<3 { s.pump() }
         check("the server's denial is the status", s.status.denied == "not signed in" && !s.status.linked, "\(s.status)")
@@ -245,10 +248,10 @@ func clientTests() throws {
 
     run("client/converge") {
         let ex = MemoryExchange()
-        ex.host(Authority(demo.module.schema, "playlists", Hash.closures(demo.module)))
+        ex.host(Authority(demo.module.schema, "demo", Hash.closures(demo.module)))
         let url = URL(string: "mem://exchange/sync")!
         let a = try Session.open(directory: try freshDir("converge-a"), module: demo.bytes, user: "alice", server: url, dial: ex.dial)
-        let b = try Session.open(directory: try freshDir("converge-b"), module: demo.bytes, user: "bob", server: url, generated: demoGenerated, dial: ex.dial)
+        let b = try Session.open(directory: try freshDir("converge-b"), module: demo.bytes, procedures: demo.procedures, user: "bob", server: url, dial: ex.dial)
         func settle() { for _ in 0..<6 { a.pump(); b.pump() } }
         settle()
         check("both linked", a.status.linked && b.status.linked && !a.status.alone, "\(a.status) \(b.status)")
@@ -258,10 +261,10 @@ func clientTests() throws {
         a.subscribe { aSeen.append($1) }
         b.subscribe { bSeen.append($1) }
 
-        check("A creates a playlist", a.mutate(name: "create_playlist", args: DemoGen.createPlaylistArgs(name: "Shared")) == nil)
+        check("A creates a playlist", a.mutate(name: "create_playlist", args: createArgs("Shared")) == nil)
         check("pending until acked", a.status.pending == 1)
         settle()
-        check("both at 1", a.status.cursors["playlists"] == 1 && b.status.cursors["playlists"] == 1 && a.status.pending == 0)
+        check("both at 1", a.status.cursors["demo"] == 1 && b.status.cursors["demo"] == 1 && a.status.pending == 0)
         check("B was told, as Applied", bSeen.contains { if case .applied(let cs) = $0 { return cs.contains { $0.table == "playlist" } }; return false })
         guard let pid = try rows(b, "playlist").first?.field("id").asId() else { throw TestError("B has no playlist") }
 
@@ -269,23 +272,23 @@ func clientTests() throws {
         a.pump()
         check("A is offline", !a.status.linked && a.status.link == "idle")
 
-        check("B adds meanwhile", b.mutate(name: "add_to_playlist", args: DemoGen.addToPlaylistArgs(playlistId: pid, mediaId: [1])) == nil)
+        check("B adds meanwhile", b.mutate(name: "add_to_playlist", args: addArgs(pid, "t1")) == nil)
         settle()
-        check("B's item is confirmed at 2", b.status.cursors["playlists"] == 2 && b.status.pending == 0)
-        check("A has not heard", a.status.cursors["playlists"] == 1)
+        check("B's item is confirmed at 2", b.status.cursors["demo"] == 2 && b.status.pending == 0)
+        check("A has not heard", a.status.cursors["demo"] == 1)
 
         aSeen = []
-        check("A adds alone", a.mutate(name: "add_to_playlist", args: DemoGen.addToPlaylistArgs(playlistId: pid, mediaId: [2])) == nil)
-        check("A's optimistic view puts it first", try positions(a) == [Pos([2], 1)] && a.status.pending == 1)
+        check("A adds alone", a.mutate(name: "add_to_playlist", args: addArgs(pid, "t2")) == nil)
+        check("A's optimistic view puts it first", try positions(a) == [Pos("t2", 1)] && a.status.pending == 1)
 
         a.goOnline()
         settle()
-        check("both at 3 with nothing pending", a.status.cursors["playlists"] == 3 && b.status.cursors["playlists"] == 3
+        check("both at 3 with nothing pending", a.status.cursors["demo"] == 3 && b.status.cursors["demo"] == 3
               && a.status.pending == 0 && b.status.pending == 0, "\(a.status) \(b.status)")
         let after = try positions(a)
-        check("A's item landed last", after == [Pos([1], 1), Pos([2], 2)], "\(after)")
-        check("B sees the same", try positions(b) == [Pos([1], 1), Pos([2], 2)])
-        check("the confirmed hashes agree", a.stateHash("playlists")! == b.stateHash("playlists")!)
+        check("A's item landed last", after == [Pos("t1", 1), Pos("t2", 2)], "\(after)")
+        check("B sees the same", try positions(b) == [Pos("t1", 1), Pos("t2", 2)])
+        check("the confirmed hashes agree", a.stateHash("demo")! == b.stateHash("demo")!)
         check("A was told to rebuild", aSeen.contains { if case .rebuilt = $0 { return true }; return false }, "\(aSeen)")
         check("no rejections", a.status.rejections == 0 && b.status.rejections == 0)
 
@@ -304,7 +307,7 @@ func clientTests() throws {
         a.close(); b.close()
         let a2 = try Session.open(directory: a.directory, module: demo.bytes, user: "alice", server: url, dial: ex.dial)
         let reopened = try positions(a2)
-        check("A reopens at 3 with the rows", a2.status.cursors["playlists"] == 3 && reopened == [Pos([1], 1), Pos([2], 2)])
+        check("A reopens at 3 with the rows", a2.status.cursors["demo"] == 3 && reopened == [Pos("t1", 1), Pos("t2", 2)])
         a2.close()
     }
 }

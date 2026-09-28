@@ -1,14 +1,25 @@
 import Foundation
 import ArkDB
 import ArkDBClient
+import ArkAuthoring
 
-// The domain as the screens see it: typed rows read out of the generated
-// queries, and the three mutations, each through its generated function.
-// Nothing here is SwiftUI, so this file compiles on Linux beside
-// `HarkenGen.swift` — which is how it was checked (see README.md).
+// The domain as the screens see it. `../domain/gen/swift` is harken's domain
+// in the authoring vocabulary (what `arkc gen swift --only …` prints), and is
+// compiled into this app: `module()` is that domain, `emit()` the module the
+// session opens, and `procedures()` every procedure as native Swift — so an
+// entry this phone authors, and every entry replayed from the log whose
+// function the phone has, runs as the Swift below `library()` and
+// `playlists()` rather than through an interpreter. Nothing here is SwiftUI,
+// so this file compiles on Linux beside the domain (see README.md).
+//
+// This file imports ArkDB and ArkAuthoring together, so the names both
+// define — `Id`, `Ctx`, `Module` — are written qualified, and the host's
+// `Int`/`Bool` are `Swift.Int`/`Swift.Bool` (the vocabulary's shadow them).
 
-struct Track: Identifiable, Hashable {
-    let id: Id
+/// A track as a screen draws it: read out of the `library` query's rows
+/// through the domain's own `Track` row type.
+struct LibraryTrack: Identifiable, Hashable {
+    let id: ArkDB.Id
     let title: String
     let artist: String
     let album: String?
@@ -16,42 +27,47 @@ struct Track: Identifiable, Hashable {
     let file: String
 
     init?(_ v: Value) {
-        guard case .record(let m) = v, case .id(let id)? = m["id"], case .text(let title)? = m["title"],
-              case .text(let artist)? = m["artist"], case .int(let d)? = m["duration_ms"], case .text(let file)? = m["file"] else { return nil }
+        let t = Track(repr: .v(v))
+        guard let id = t.id.raw, let title = t.title.string, let artist = t.artist.string,
+              let d = t.durationMs.int, let file = t.file.string else { return nil }
         self.id = id
         self.title = title
         self.artist = artist
-        if case .text(let a)? = m["album"] { album = a } else { album = nil }
+        album = t.album.get?.string
         durationMs = d
         self.file = file
     }
 
     var duration: String {
-        let s = Int(durationMs / 1000)
+        let s = Swift.Int(durationMs / 1000)
         return String(format: "%d:%02d", s / 60, s % 60)
     }
 }
 
-struct Playlist: Identifiable, Hashable {
-    let id: Id
+/// A playlist as a screen draws it.
+struct PlaylistSummary: Identifiable, Hashable {
+    let id: ArkDB.Id
     let name: String
     let userId: String
 
     init?(_ v: Value) {
-        guard case .record(let m) = v, case .id(let id)? = m["id"], case .text(let name)? = m["name"], case .text(let user)? = m["user_id"] else { return nil }
+        let p = Playlist(repr: .v(v))
+        guard let id = p.id.raw, let name = p.name.string, let user = p.userId.string else { return nil }
         self.id = id
         self.name = name
         self.userId = user
     }
 }
 
-struct PlaylistItem: Hashable {
-    let playlistId: Id
-    let trackId: Id
+/// An item of a playlist.
+struct PlaylistEntry: Hashable {
+    let playlistId: ArkDB.Id
+    let trackId: ArkDB.Id
     let pos: Int64
 
     init?(_ v: Value) {
-        guard case .record(let m) = v, case .id(let p)? = m["playlist_id"], case .id(let t)? = m["track_id"], case .int(let pos)? = m["pos"] else { return nil }
+        let i = PlaylistItem(repr: .v(v))
+        guard let p = i.playlistId.raw, let t = i.trackId.raw, let pos = i.pos.int else { return nil }
         playlistId = p
         trackId = t
         self.pos = pos
@@ -62,59 +78,75 @@ struct PlaylistItem: Hashable {
 /// arrived: the two are in different scopes, and a playlist item names a
 /// track across the boundary unchecked (harken/README.md).
 struct PlaylistRow: Identifiable, Hashable {
-    let item: PlaylistItem
-    let track: Track?
-    var id: Id { return item.trackId }
+    let item: PlaylistEntry
+    let track: LibraryTrack?
+    var id: ArkDB.Id { return item.trackId }
     var title: String { return track?.title ?? "(unavailable)" }
 }
 
-enum HarkenDomain {
-    /// The module the generated code was made from, as the session takes it.
-    static var moduleBytes: [UInt8] { return Hex.decode(HarkenGen.moduleBytes) ?? [] }
+enum Harken {
+    /// The domain, authored in Swift: `../domain/gen/swift`.
+    static let domain = module()
 
-    /// What tells the session to run intents through `HarkenGen` — its own
-    /// and every replayed one whose function the phone was generated with.
-    static let generated = Generated(functions: HarkenGen.functions, apply: HarkenGen.apply, query: HarkenGen.query)
+    /// The module the session opens: the domain's `emit()`.
+    static let moduleBytes: [UInt8] = domain.emit()
+
+    /// Every procedure the phone has, natively, by hash.
+    static let procedures: [(FnHash, Procedure)] = domain.procedures()
+
+    static var moduleHash: String { return Hex.encode(domain.hash) }
+    static var procedureNames: [String] { return procedures.map { $0.1.function.name } }
 
     static let scopes: [ScopeName] = ["library", "playlists"]
 
-    // MARK: reads, through the generated queries
+    // MARK: reads, through the domain's queries
 
-    static func library(_ s: Session) throws -> [Track] {
-        return try s.run { db in try HarkenGen.query("library", db, [:]) }.asList().compactMap(Track.init)
+    static func library(_ s: Session) throws -> [LibraryTrack] {
+        return try s.query(name: "library").asList().compactMap(LibraryTrack.init)
     }
 
-    static func playlists(_ s: Session) throws -> [Playlist] {
-        return try s.run { db in try HarkenGen.query("playlists", db, [:]) }.asList().compactMap(Playlist.init)
+    static func playlists(_ s: Session) throws -> [PlaylistSummary] {
+        return try s.query(name: "playlists").asList().compactMap(PlaylistSummary.init)
     }
 
-    static func items(_ s: Session, of playlist: Id) throws -> [PlaylistItem] {
-        return try s.run { db in try HarkenGen.query("playlist_items", db, ["playlist_id": .id(playlist)]) }.asList().compactMap(PlaylistItem.init)
+    static func items(_ s: Session, of playlist: ArkDB.Id) throws -> [PlaylistEntry] {
+        let input = PlaylistId(playlistId: ArkAuthoring.Id(playlist))
+        return try s.query(name: "playlist_items", args: input.args).asList().compactMap(PlaylistEntry.init)
     }
 
     /// The join a screen does itself: a map lookup on the track id.
-    static func rows(_ items: [PlaylistItem], _ tracks: [Track]) -> [PlaylistRow] {
-        var byId: [Id: Track] = [:]
+    static func rows(_ items: [PlaylistEntry], _ tracks: [LibraryTrack]) -> [PlaylistRow] {
+        var byId: [ArkDB.Id: LibraryTrack] = [:]
         for t in tracks { byId[t.id] = t }
         return items.map { PlaylistRow(item: $0, track: byId[$0.trackId]) }
     }
 
-    // MARK: writes, each through its generated mutator
+    // MARK: writes, each an input of the domain's own type
+
+    /// What the new-playlist form says about a name as it is typed: the
+    /// `create_playlist` input's own checks (trim, then at least one
+    /// character, at most 120), run by the form validator — the message the
+    /// mutation would refuse with, before it is attempted. Nil when the name
+    /// would pass.
+    static func nameProblem(_ s: Session, _ name: String) -> String? {
+        let input = CreatePlaylist(name: Text(name))
+        guard let (messages, _) = try? s.validate(name: "create_playlist", partial: input.args) else { return nil }
+        return messages.first?.1
+    }
 
     /// The session looks the function up by name for its scope, hash and
-    /// autos, and runs the generated body as one transaction over the view.
+    /// autos, and applies it natively through the procedure it holds.
     static func createPlaylist(_ s: Session, name: String) -> Refusal? {
-        let args = HarkenGen.createPlaylistArgs(name: name)
-        return s.mutate(name: "create_playlist", args: args) { db, ctx, autos in try HarkenGen.createPlaylist(db, ctx, autos, args) }
+        return s.mutate(name: "create_playlist", args: CreatePlaylist(name: Text(name)).args)
     }
 
-    static func addToPlaylist(_ s: Session, playlist: Id, track: Id) -> Refusal? {
-        let args = HarkenGen.addToPlaylistArgs(playlistId: playlist, trackId: track)
-        return s.mutate(name: "add_to_playlist", args: args) { db, ctx, autos in try HarkenGen.addToPlaylist(db, ctx, autos, args) }
+    static func addToPlaylist(_ s: Session, playlist: ArkDB.Id, track: ArkDB.Id) -> Refusal? {
+        let input = OnPlaylist(playlistId: ArkAuthoring.Id(playlist), trackId: ArkAuthoring.Id(track))
+        return s.mutate(name: "add_to_playlist", args: input.args)
     }
 
-    static func removeFromPlaylist(_ s: Session, playlist: Id, track: Id) -> Refusal? {
-        let args = HarkenGen.removeFromPlaylistArgs(playlistId: playlist, trackId: track)
-        return s.mutate(name: "remove_from_playlist", args: args) { db, ctx, autos in try HarkenGen.removeFromPlaylist(db, ctx, autos, args) }
+    static func removeFromPlaylist(_ s: Session, playlist: ArkDB.Id, track: ArkDB.Id) -> Refusal? {
+        let input = OnPlaylist(playlistId: ArkAuthoring.Id(playlist), trackId: ArkAuthoring.Id(track))
+        return s.mutate(name: "remove_from_playlist", args: input.args)
     }
 }

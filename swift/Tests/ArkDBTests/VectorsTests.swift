@@ -211,7 +211,7 @@ func hashVectors(_ schema: Schema) throws {
             wider.scopes[0].tables.append(Table("nothing", columns: [Column("id", .int)], key: ["id"]))
             check("an empty store hashes its tables' names", Hash.stateHash(empty) != Sha256.hash(Canon.encode(.list([]))))
             check("an empty table moves the hash", Hash.stateHash(MemoryStore(schema: wider)) != Hash.stateHash(empty))
-            check("empty demo store hash", Hex.encode(Hash.stateHash(empty)) == Sha256.hex(Canon.encode(.list([.list([.text("playlist"), .list([])]), .list([.text("playlist_item"), .list([])])]))))
+            check("empty demo store hash", Hex.encode(Hash.stateHash(empty)) == Sha256.hex(Canon.encode(.list(schema.tableNames.map { .list([.text($0), .list([])]) }))))
             print("NOTE [hash] empty demo-schema store hashes to \(Hex.encode(Hash.stateHash(empty)))")
             check("sha256 of empty input", Sha256.hex([]) == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
             check("sha256 of abc", Sha256.hex(Array("abc".utf8)) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
@@ -251,6 +251,10 @@ func verifyVectors() throws {
             let m = try Decode.fromValue(mv)
             let verifies = (obj["verifies"] as? Bool) ?? false
             check("the decoder accepts a module that verifies", verifies && Encode.toValue(m) == mv)
+            switch Verify.verify(m) {
+            case .success(let v): check("the v2 rules accept it, and it is already in verified form", verifies && v == m)
+            case .failure(let e): check("the v2 rules accept it", !verifies, e.description)
+            }
         }
     }
 }
@@ -278,136 +282,107 @@ func protocolVectors() throws {
 
 // MARK: - eval/
 
-// `DemoGen` — `add_to_playlist` and `create_playlist` exactly as `arkc gen
-// swift` writes them — is the generated fixture in `DemoGen.swift`, so that
-// the contract's names are compiled and run here, not only the interpreter.
-
-/// A function with the verifier's appended key-column order stripped from
-/// every plan: the form a builder authored, which `completeOrders` extends.
-func authoredForm(_ fn: Function, _ sch: Schema) -> Function {
-    func plan(_ p: Plan) -> Plan {
-        var q = p
-        if let tbl = sch.lookupTable(p.table) {
-            let suffix = tbl.key.map { OrderBy($0, .asc) }
-            if q.order.count >= suffix.count, Array(q.order.suffix(suffix.count)) == suffix {
-                q.order.removeLast(suffix.count)
-            }
-        }
-        q.related = q.related.map { var r = $0; r.plan = plan(r.plan); return r }
-        return q
-    }
-    func expr(_ e: Expr) -> Expr {
-        switch e {
-        case .select(let p): return .select(plan(p))
-        case .field(let x, let f): return .field(expr(x), f)
-        case .structOf(let fs): return .structOf(fs.mapValues(expr))
-        case .list(let es): return .list(es.map(expr))
-        case .some(let x): return .some(expr(x))
-        case .match(let x, let s, let a, let b): return .match(expr(x), s, expr(a), expr(b))
-        case .ife(let c, let a, let b): return .ife(expr(c), expr(a), expr(b))
-        case .op(let o, let es): return .op(o, es.map(expr))
-        case .cmp(let o, let a, let b): return .cmp(o, expr(a), expr(b))
-        case .call(let n, let es): return .call(n, es.map(expr))
-        case .std(let f, let es): return .std(f, es.map(expr))
-        case .map(let xs, let x, let b): return .map(expr(xs), x, expr(b))
-        case .filter(let xs, let x, let b): return .filter(expr(xs), x, expr(b))
-        case .any(let xs, let x, let b): return .any(expr(xs), x, expr(b))
-        case .all(let xs, let x, let b): return .all(expr(xs), x, expr(b))
-        case .sortBy(let xs, let x, let k): return .sortBy(expr(xs), x, expr(k))
-        case .fold(let xs, let z, let a, let x, let b): return .fold(expr(xs), expr(z), a, x, expr(b))
-        case .get(let t, let ks): return .get(t, ks.map(expr))
-        case .exists(let t, let ks): return .exists(t, ks.map(expr))
-        default: return e
-        }
-    }
-    func stmt(_ s: Stmt) -> Stmt {
-        switch s {
-        case .sLet(let x, let e): return .sLet(x, expr(e))
-        case .sIf(let c, let a, let b): return .sIf(expr(c), a.map(stmt), b.map(stmt))
-        case .sFor(let x, let xs, let b): return .sFor(x, expr(xs), b.map(stmt))
-        case .sPut(let t, let e): return .sPut(t, expr(e))
-        case .sDelete(let t, let ks): return .sDelete(t, ks.map(expr))
-        case .sRefuse(let e): return .sRefuse(expr(e))
-        case .sReturn(let me): return .sReturn(me.map(expr))
-        }
-    }
-    var f = fn
-    f.body = fn.body.map(stmt)
-    return f
-}
+// Every eval vector runs through the interpreter and through the Swift
+// demo's native procedure of the same hash (AuthoringTests.swift), which
+// must agree with it row for row and refusal for refusal.
 
 func evalVectors() throws {
     for f in try files(vectors.appendingPathComponent("eval")) {
         run("eval/" + f.lastPathComponent) {
             let obj = try loadJSON(f)
             let m = try Decode.fromValue(try value(obj, "module"))
-            let name = try string(obj, "function")
-            guard let fn = m.lookupFunction(name) else { throw TestError("no function \(name)") }
-            let c = Hash.closure(m, fn)
-            let fh = Hash.functionHash(c)
-            let wantHash = try string(obj, "function_hash")
-            check("closures(module) holds it under its hash", Hash.closures(m)[fh]?.fn.name == name)
-            if Hex.encode(fh) == wantHash {
-                check("function hash", true)
-            } else {
-                // The vector was written from the function as authored, before
-                // the verifier appended the key columns to its plan's order;
-                // the module in the same file, and every entry in protocol/
-                // and rebase/, carry the verified form's hash. Hold the vector
-                // to the authored form, and say so.
-                let authored = Hash.functionHash(Closure(fn: authoredForm(fn, m.schema), helpers: c.helpers))
-                check("function hash (of the function as authored, before completeOrders)", Hex.encode(authored) == wantHash, "verified form \(Hex.encode(fh)), authored form \(Hex.encode(authored)), vector \(wantHash)")
-                print("NOTE [eval] function_hash in the vector is of the authored function (plan order before the verifier appended the key columns); the verified module's hash is \(Hex.encode(fh)), which is what protocol/ and rebase/ carry")
-            }
-            let ctxV = try value(obj, "ctx")
-            let ctx = Ctx(user: ctxV.field("user").asText(), session: ctxV.field("session").asText())
-            let autos = try value(obj, "autos").asRecord()
-            guard let steps = obj["steps"] as? [[String: Any]] else { throw TestError("steps") }
-            // Through the interpreter.
-            var st = try storeOf(try value(obj, "store_before"), m.schema)
-            // Through the generated-code path, on a second store.
-            let gen = try storeOf(try value(obj, "store_before"), m.schema)
-            for (i, step) in steps.enumerated() {
-                let args = try value(step, "args").asRecord()
-                let wantChanges = try value(step, "changes")
-                let wantStore = try value(step, "store_after")
-                let wantHash = try string(step, "hash_after")
-                switch try Eval.applyClosure(m.schema, c, ctx, autos, args, st) {
-                case .refused(let r): check("step \(i) applies", false, r.text)
-                case .applied(let st2, let chs):
-                    check("step \(i) changes", Value.list(chs.map(Wire.changeValue)) == wantChanges, Value.list(chs.map(Wire.changeValue)).brief)
-                    check("step \(i) store_after", st2.asValue() == wantStore)
-                    check("step \(i) hash_after", Hex.encode(Hash.stateHash(st2)) == wantHash)
-                    check("step \(i) leaves the store it was given alone", st.asValue() != st2.asValue() || chs.isEmpty)
-                    st = st2
-                }
-                if name == "add_to_playlist" {
-                    try DemoGen.addToPlaylist(gen, ctx, autos, args)
-                    let chs = gen.takeReported()
-                    check("step \(i) generated-code changes", Value.list(chs.map(Wire.changeValue)) == wantChanges)
-                    check("step \(i) generated-code store", gen.asValue() == wantStore)
-                    check("step \(i) generated-code hash", Hex.encode(Hash.stateHash(gen)) == wantHash)
-                }
-            }
-            // The same module through `apply` by name, and a refusal through both paths.
-            let s0 = try storeOf(try value(obj, "store_before"), m.schema)
-            if case .applied(let s1, _) = try Eval.apply(m, "create_playlist", ctx, ["id": .id(Id(uuid: "00000000-0000-0000-0000-000000000002")!)], ["name": .text("  Road ")], s0) {
-                check("create_playlist trims", s1.get("playlist", [.id(Id(uuid: "00000000-0000-0000-0000-000000000002")!)]).field("name") == .text("Road"))
-            } else {
-                check("create_playlist applies", false)
-            }
-            if case .refused(let r) = try Eval.apply(m, "create_playlist", ctx, ["id": .id(Id.nil_)], ["name": .text("   ")], s0) {
-                check("an empty name is refused with the mutator's text", r == .refused("a playlist needs a name"))
-            } else {
-                check("an empty name is refused", false)
-            }
-            do {
-                try DemoGen.createPlaylist(s0, ctx, ["id": .id(Id.nil_)], ["name": .text("   ")])
-                check("generated code refuses an empty name", false)
-            } catch let e as Fault {
-                check("generated code refuses with the same text", e == .refuse("a playlist needs a name"), "\(e)")
-            }
+            if obj["steps"] != nil { try evalSteps(obj, m) }
+            if obj["cases"] != nil, obj["store_before"] != nil { try evalCases(obj, m) }
+            if obj["cases"] != nil, obj["store"] != nil { try formCases(obj, m) }
         }
+    }
+}
+
+func evalSteps(_ obj: [String: Any], _ m: Module) throws {
+    let name = try string(obj, "function")
+    guard let fn = m.lookupFunction(name) else { throw TestError("no function \(name)") }
+    let c = Hash.closure(m, fn)
+    let fh = Hash.functionHash(c)
+    check("function hash", Hex.encode(fh) == (try string(obj, "function_hash")), Hex.encode(fh))
+    check("closures(module) holds it under its hash", Hash.closures(m)[fh]?.fn.name == name)
+    let native = demoNatives()[fh]
+    check("the Swift demo has this procedure natively, under the vector's hash", native?.mutate != nil)
+    let ctxV = try value(obj, "ctx")
+    let ctx = Ctx(user: ctxV.field("user").asText(), session: ctxV.field("session").asText())
+    let autos = try value(obj, "autos").asRecord()
+    guard let steps = obj["steps"] as? [[String: Any]] else { throw TestError("steps") }
+    var st = try storeOf(try value(obj, "store_before"), m.schema)
+    var nst = try storeOf(try value(obj, "store_before"), m.schema)
+    for (i, step) in steps.enumerated() {
+        let args = try value(step, "args").asRecord()
+        let wantChanges = try value(step, "changes")
+        let wantStore = try value(step, "store_after")
+        let wantHash = try string(step, "hash_after")
+        switch try Eval.applyClosure(m.schema, c, ctx, autos, args, st) {
+        case .refused(let r): check("step \(i) applies", false, r.text)
+        case .applied(let st2, let chs):
+            check("step \(i) changes", Value.list(chs.map(Wire.changeValue)) == wantChanges, Value.list(chs.map(Wire.changeValue)).brief)
+            check("step \(i) store_after", st2.asValue() == wantStore)
+            check("step \(i) hash_after", Hex.encode(Hash.stateHash(st2)) == wantHash)
+            check("step \(i) leaves the store it was given alone", st.asValue() != st2.asValue() || chs.isEmpty)
+            st = st2
+        }
+        guard let run = native?.mutate else { continue }
+        switch try run(ctx, autos, args, nst) {
+        case .refused(let r): check("step \(i) applies natively", false, r.text)
+        case .applied(let st2, let chs):
+            check("step \(i) native changes", Value.list(chs.map(Wire.changeValue)) == wantChanges)
+            check("step \(i) native store", st2.asValue() == wantStore)
+            check("step \(i) native hash", Hex.encode(Hash.stateHash(st2)) == wantHash)
+            nst = st2
+        }
+    }
+}
+
+/// `eval/checks.json`: each case applied, refused with the vector's text or not.
+func evalCases(_ obj: [String: Any], _ m: Module) throws {
+    let ctxV = try value(obj, "ctx")
+    let ctx = Ctx(user: ctxV.field("user").asText(), session: ctxV.field("session").asText())
+    guard let cases = obj["cases"] as? [[String: Any]] else { throw TestError("cases") }
+    let natives = demoNatives()
+    for cs in cases {
+        let label = (cs["name"] as? String) ?? "?"
+        let name = try string(cs, "function")
+        guard let fn = m.lookupFunction(name) else { throw TestError("no function \(name)") }
+        let c = Hash.closure(m, fn)
+        let autos = try value(cs, "autos").asRecord()
+        let args = try value(cs, "args").asRecord()
+        let want = cs["refused"] as? String
+        let st = try storeOf(try value(obj, "store_before"), m.schema)
+        func verdict(_ o: Eval.Outcome) -> String? {
+            if case .refused(let r) = o { return r.text }
+            return nil
+        }
+        let got = verdict(try Eval.applyClosure(m.schema, c, ctx, autos, args, st))
+        check("\(label): interpreter", got == want, "\(got ?? "applied") vs \(want ?? "applied")")
+        if let run = natives[Hash.functionHash(c)]?.mutate {
+            let n = verdict(try run(ctx, autos, args, st))
+            check("\(label): native", n == want, "\(n ?? "applied") vs \(want ?? "applied")")
+        } else {
+            check("\(label): the demo has it natively", false)
+        }
+    }
+}
+
+/// `eval/form-check.json`: the form validator's messages and normalised input.
+func formCases(_ obj: [String: Any], _ m: Module) throws {
+    guard let cases = obj["cases"] as? [[String: Any]] else { throw TestError("cases") }
+    for cs in cases {
+        let label = (cs["name"] as? String) ?? "?"
+        let name = try string(cs, "function")
+        guard let fn = m.lookupFunction(name) else { throw TestError("no function \(name)") }
+        let st = try storeOf(try value(obj, "store"), m.schema)
+        let input = try value(cs, "input").asRecord()
+        let (msgs, vals) = try Eval.check(m.schema, Hash.closure(m, fn), input, st)
+        guard let wantMsgs = cs["messages"] as? [[String: Any]] else { throw TestError("messages") }
+        let want = wantMsgs.map { (($0["field"] as? String) ?? "", ($0["message"] as? String) ?? "") }
+        check("\(label): messages", msgs.map { "\($0.0): \($0.1)" } == want.map { "\($0.0): \($0.1)" }, "\(msgs)")
+        check("\(label): normalised", Value.record(vals) == (try value(cs, "normalised")))
     }
 }
 
@@ -416,10 +391,10 @@ func evalVectors() throws {
 func viewVectors() throws {
     let pid = Value.id(Id(uuid: "00000000-0000-0000-0000-000000000001")!)
     let plans: [String: ViewPlan] = [
-        "top-two-by-pos": ViewPlan(table: "playlist_item", filter: .fcmp("playlist_id", .eq, pid), order: [OrderBy("pos", .asc)], limit: 2, related: []),
+        "top-two-by-pos": ViewPlan(table: "item", filter: .fcmp("playlist_id", .eq, pid), order: [OrderBy("pos", .asc)], limit: 2, related: []),
         "playlist-with-items": ViewPlan(table: "playlist", filter: nil, order: [OrderBy("name", .asc)], limit: nil, related: [
-            ViewRelated(name: "items", relation: Relation(parent: "playlist", child: "playlist_item", column: "playlist_id"),
-                        plan: ViewPlan(table: "playlist_item", filter: nil, order: [OrderBy("pos", .desc)], limit: 3, related: [])),
+            ViewRelated(name: "item", relation: Relation(parent: "playlist", child: "item", column: "playlist_id"),
+                        plan: ViewPlan(table: "item", filter: nil, order: [OrderBy("pos", .desc)], limit: 3, related: [])),
         ]),
     ]
     for f in try files(vectors.appendingPathComponent("views")) {
@@ -453,10 +428,10 @@ func viewVectors() throws {
             // The same plan from an IR plan with literal right-hand sides.
             let irPlan: Plan
             if name == "top-two-by-pos" {
-                irPlan = Plan.from("playlist_item").filter(Pred.cmp("playlist_id", CmpOp.eq, pid)).orderBy("pos", Dir.asc).limit(2)
+                irPlan = Plan.from("item").filter(Pred.cmp("playlist_id", CmpOp.eq, pid)).orderBy("pos", Dir.asc).limit(2)
             } else {
                 irPlan = Plan.from("playlist").orderBy("name", Dir.asc)
-                    .related("items", "playlist", "playlist_item", "playlist_id", Plan.from("playlist_item").orderBy("pos", Dir.desc).limit(3))
+                    .related("item", "playlist", "item", "playlist_id", Plan.from("item").orderBy("pos", Dir.desc).limit(3))
             }
             let evaluated = try ViewPlan.evalPlan(irPlan) { e in
                 if case .lit(let v) = e { return v }
@@ -477,7 +452,7 @@ func rebaseVectors() throws {
         let m = try Decode.fromValue(try value(obj, "module"))
         let sch = m.schema
         let bodies = Hash.closures(m)
-        let scope = "playlists"
+        let scope = "demo"
         var entries: [(Seq, Entry)] = []
         for ev in try value(obj, "entries").asList() {
             let n = ev.field("seq").asInt()
@@ -537,15 +512,16 @@ func rebaseVectors() throws {
         alice.ack(e1.id, 1)
         check("after the ack nothing is pending", alice.pending.isEmpty && alice.cursor == 1)
         _ = alice.takeChanges()
-        func posOf(_ r: Replica, _ k: UInt8) -> Value {
-            let row = r.view.get("playlist_item", [pidV, .bytes([k])])
+        let track9 = e9.args["track_id"]!
+        func posOf(_ r: Replica, _ k: Value) -> Value {
+            let row = r.view.get("item", [pidV, k])
             return row.isNull() ? .null : row.field("pos")
         }
         switch alice.mutate(e9.id, Ctx(user: e9.actor, session: e9.session), e9.fn, e9.autos, e9.args) {
         case .failure(let r): check("alice adds 9 alone", false, r.text)
         case .success(let e): check("alice's second entry is the vector's", e == e9)
         }
-        check("alone, alice's track is first on her view", posOf(alice, 9) == (try value(obj, "alice_alone_pos_of_9")))
+        check("alone, alice's track is first on her view", posOf(alice, track9) == (try value(obj, "alice_alone_pos_of_9")))
         if case .applied(let chs) = alice.takeChanges() {
             check("a local mutation reports its changes, not a rebuild", chs.count == 1)
         } else {
@@ -554,7 +530,7 @@ func rebaseVectors() throws {
         alice.receive(2, e2)
         alice.receive(3, e3)
         check("the rebase is reported as a rebuild", alice.takeChanges() == .rebuilt)
-        check("after the rebase alice's track is third", posOf(alice, 9) == (try value(obj, "alice_after_rebase_pos_of_9")), posOf(alice, 9).brief)
+        check("after the rebase alice's track is third", posOf(alice, track9) == (try value(obj, "alice_after_rebase_pos_of_9")), posOf(alice, track9).brief)
         var bob3 = Replica.open(sch, scope, bodies, MemoryStore(schema: sch), 0, [])
         for (n, e) in entries.prefix(3) { bob3.receive(n, e) }
         check("alice's confirmed state is bob's", alice.verifyAt() == bob3.verifyAt())
@@ -574,9 +550,9 @@ func rebaseVectors() throws {
         let hAdd = e9.fn
         var wrong = bodies[hAdd]!
         wrong.fn.body = wrong.fn.body.map { s in
-            if case .sPut(let t, .structOf(var fs)) = s, fs["pos"] != nil {
-                fs["pos"] = .op(.add, [.variable(4), .lit(.int(2))])
-                return .sPut(t, .structOf(fs))
+            if case .sInsert(let t, .structOf(var fs), let on) = s, case .op(.add, let xs)? = fs["pos"] {
+                fs["pos"] = .op(.add, [xs[0], .lit(.int(2))])
+                return .sInsert(t, .structOf(fs), on)
             }
             return s
         }
@@ -593,7 +569,7 @@ func rebaseVectors() throws {
         let hCreate = e1.fn
         let id2 = Value.id(Id(uuid: "00000000-0000-0000-0000-000000000002")!)
         _ = eve.mutate(Id(uuid: "00000000-0000-0000-0000-0000000000c9")!, Ctx(user: "eve", session: "eve-session"), hCreate, ["id": id2], ["name": .text("Road")])
-        _ = eve.mutate(Id(uuid: "00000000-0000-0000-0000-0000000000ca")!, Ctx(user: "eve", session: "eve-session"), hAdd, e9.autos, ["playlist_id": id2, "media_id": .bytes([5])])
+        _ = eve.mutate(Id(uuid: "00000000-0000-0000-0000-0000000000ca")!, Ctx(user: "eve", session: "eve-session"), hAdd, e9.autos, ["playlist_id": id2, "track_id": .text("t5")])
         check("eve has two pending", eve.pending.count == 2)
         localCommit(&eveAuth, &eve)
         check("alone, eve confirms her own intents", eve.cursor == 2 && eve.pending.isEmpty && eve.view.sameRows(as: eve.confirmed))
@@ -630,7 +606,7 @@ func rebaseVectors() throws {
         client.connected()
         let outgoing = client.takeOutgoing()
         if outgoing.count == 1, case .hello(let subs, let tok, let spec) = outgoing[0] {
-            check("connected says hello", subs == [Subscription(scope: scope, since: 0, mode: .whole)] && tok == "tok" && spec == 1)
+            check("connected says hello", subs == [Subscription(scope: scope, since: 0, mode: .whole)] && tok == "tok" && spec == specVersion)
         } else {
             check("connected says hello", false, "\(outgoing.count) frames")
         }
@@ -684,7 +660,7 @@ func rebaseVectors() throws {
         pusher.recv(.reject(scope: scope, id: e9.id, reason: "not yours"))
         check("a reject drops the intent and keeps the verdict", pusher.scopes[scope]!.replica.pending.isEmpty && pusher.scopes[scope]!.replica.rejections.last?.why == .refused("not yours"))
         // A snapshot below the horizon replaces the confirmed store.
-        let snapRows: [TableName: [Value]] = ["playlist": auth5.store.scan("playlist").map { .record($0) }, "playlist_item": auth5.log.base.store.scan("playlist_item").map { .record($0) }]
+        let snapRows: [TableName: [Value]] = ["playlist": auth5.store.scan("playlist").map { .record($0) }, "item": auth5.log.base.store.scan("item").map { .record($0) }]
         pusher.recv(.snapshotOf(scope: scope, seq: 2, hash: auth5.log.base.hash, rows: snapRows))
         check("a snapshot moves the cursor to it", pusher.scopes[scope]!.replica.cursor == 2 && pusher.scopes[scope]!.replica.verifyAt().1 == auth5.log.base.hash)
         pusher.recv(.batch(scope: scope, items: [BatchItem(seq: 3, entry: e3, facts: nil), BatchItem(seq: 4, entry: e9, facts: nil)], hasMore: false))
@@ -791,7 +767,9 @@ struct VectorsTests {
             try viewVectors()
             try rebaseVectors()
             storeRules(m.schema)
+            try authoringTests(m)
             try clientTests()
+            try phoneTests()
         } catch {
             failed += 1
             print("FAIL: \(error)")

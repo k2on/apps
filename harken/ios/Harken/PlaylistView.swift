@@ -6,7 +6,7 @@ import ArkDB
 /// `remove_from_playlist`. Opening it makes it the playlist the library adds to.
 struct PlaylistView: View {
     @EnvironmentObject private var model: Model
-    let playlist: Playlist
+    let playlist: PlaylistSummary
 
     /// The rows for this playlist, whether or not it is the model's
     /// selection yet (it becomes so on appear).

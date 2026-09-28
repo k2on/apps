@@ -53,7 +53,7 @@ struct LibraryView: View {
 
 struct TrackRow: View {
     @EnvironmentObject private var model: Model
-    let track: Track
+    let track: LibraryTrack
 
     var body: some View {
         HStack {

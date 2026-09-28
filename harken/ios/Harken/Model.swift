@@ -7,13 +7,13 @@ import ArkDBClient
 /// the library, the playlists, and the selected playlist's items joined to
 /// their tracks — refreshed on the session's change notification.
 ///
-/// Every mutation goes through `HarkenDomain`, which runs the *generated*
-/// mutator inside `session.mutate(name:args:) { db, ctx, autos in … }`: the
-/// session looks the function up by name for its scope, hash and autos, runs
-/// the body as one transaction over the optimistic view, and records the
-/// entry. Reads go through `HarkenGen.query` inside `session.run`. The
-/// interpreter runs only what the phone was not generated with (`add_track`,
-/// which arrives from the server's scanner).
+/// Every mutation goes through `Harken` (Rows.swift) as an input of the
+/// domain's own type, `session.mutate(name:args:)`: the session looks the
+/// function up by name for its scope, hash and autos, applies it through
+/// the native procedure `module().procedures()` gave it — harken's domain,
+/// in Swift, from `../domain/gen/swift` — and records the entry. Reads are
+/// `session.query`, natively too. `add_track`, which the phone does not
+/// author, arrives from the server's scanner and is applied by its facts.
 @MainActor
 final class Model: ObservableObject {
     /// What the settings screen edits; kept in `UserDefaults`.
@@ -41,8 +41,8 @@ final class Model: ObservableObject {
     }
 
     @Published private(set) var settings: Settings
-    @Published private(set) var tracks: [Track] = []
-    @Published private(set) var playlists: [Playlist] = []
+    @Published private(set) var tracks: [LibraryTrack] = []
+    @Published private(set) var playlists: [PlaylistSummary] = []
     @Published var selectedPlaylist: Id? {
         didSet { if selectedPlaylist != oldValue { refreshItems() } }
     }
@@ -84,8 +84,8 @@ final class Model: ObservableObject {
             return
         }
         do {
-            let session = try Session.open(directory: directory(for: s), module: HarkenDomain.moduleBytes, user: s.user,
-                                           server: server, generated: HarkenDomain.generated)
+            let session = try Session.open(directory: directory(for: s), module: Harken.moduleBytes,
+                                           procedures: Harken.procedures, user: s.user, server: server)
             self.session = session
             subscription = session.subscribe { [weak self] _, _ in
                 // Called on the session's pump queue; the screens live on main.
@@ -127,8 +127,8 @@ final class Model: ObservableObject {
     func refresh() {
         guard let s = session else { return }
         do {
-            tracks = try HarkenDomain.library(s)
-            playlists = try HarkenDomain.playlists(s)
+            tracks = try Harken.library(s)
+            playlists = try Harken.playlists(s)
         } catch {
             note = "read failed: \(error)"
         }
@@ -143,7 +143,7 @@ final class Model: ObservableObject {
     private func refreshItems() {
         guard let s = session, let pid = selectedPlaylist else { items = []; return }
         do {
-            items = HarkenDomain.rows(try HarkenDomain.items(s, of: pid), tracks)
+            items = Harken.rows(try Harken.items(s, of: pid), tracks)
         } catch {
             note = "read failed: \(error)"
         }
@@ -154,27 +154,34 @@ final class Model: ObservableObject {
         if let d = status?.denied { note = "denied: \(d)" }
     }
 
-    var selected: Playlist? {
+    var selected: PlaylistSummary? {
         return playlists.first { $0.id == selectedPlaylist }
     }
 
-    // MARK: writing, each through the generated mutator
+    // MARK: writing, each through the domain's procedure
+
+    /// The `create_playlist` input's checks on a name being typed, for the
+    /// new-playlist sheet's inline message; nil when it would pass.
+    func nameProblem(_ name: String) -> String? {
+        guard let s = session else { return nil }
+        return Harken.nameProblem(s, name)
+    }
 
     func createPlaylist(named name: String) {
         guard let s = session else { return }
-        noteRefusal(HarkenDomain.createPlaylist(s, name: name))
+        noteRefusal(Harken.createPlaylist(s, name: name))
         refresh()
     }
 
-    func add(_ track: Track, to playlist: Id) {
+    func add(_ track: LibraryTrack, to playlist: Id) {
         guard let s = session else { return }
-        noteRefusal(HarkenDomain.addToPlaylist(s, playlist: playlist, track: track.id))
+        noteRefusal(Harken.addToPlaylist(s, playlist: playlist, track: track.id))
         refresh()
     }
 
     func remove(_ row: PlaylistRow) {
         guard let s = session else { return }
-        noteRefusal(HarkenDomain.removeFromPlaylist(s, playlist: row.item.playlistId, track: row.item.trackId))
+        noteRefusal(Harken.removeFromPlaylist(s, playlist: row.item.playlistId, track: row.item.trackId))
         refresh()
     }
 

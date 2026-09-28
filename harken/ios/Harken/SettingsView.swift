@@ -53,8 +53,8 @@ struct SettingsView: View {
                     }
                 }
                 Section("Domain") {
-                    row("Module", String(HarkenGen.moduleHash.prefix(16)) + "…")
-                    row("Generated", HarkenGen.functions.map { $0.0 }.joined(separator: ", "))
+                    row("Module", String(Harken.moduleHash.prefix(16)) + "…")
+                    row("Native", Harken.procedureNames.joined(separator: ", "))
                 }
             }
             .navigationTitle("Settings")

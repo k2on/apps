@@ -1,10 +1,11 @@
 # XcodeGen project for the iOS peer. `xcodegen generate` here writes
 # Harken.xcodeproj; nothing under it is committed.
 #
-# One target, one package: the Swift runtime and its client library from
-# ../../swift, and the generated domain from ../domain/gen/swift referenced
-# in place (never copied — `arkc gen swift` rewrites it on every domain
-# build, and a copy is a second thing to keep in step).
+# One target, one package: the Swift runtime, its client library and the
+# authoring vocabulary from ../../swift, and harken's domain — authored in
+# Swift, as `arkc gen swift --only …` prints it — from ../domain/gen/swift,
+# referenced in place (never copied: a copy is a second thing to keep in
+# step with the domain it spells).
 name: Harken
 options:
   bundleIdPrefix: dev.arkdb
@@ -21,12 +22,14 @@ targets:
     sources:
       - path: Harken
       - path: ../domain/gen/swift
-        name: Generated
+        name: Domain
     dependencies:
       - package: ArkDB
         product: ArkDB
       - package: ArkDB
         product: ArkDBClient
+      - package: ArkDB
+        product: ArkAuthoring
     info:
       path: Harken/Info.plist
       properties:

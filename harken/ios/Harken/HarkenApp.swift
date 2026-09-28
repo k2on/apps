@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// The iOS peer: SwiftUI over the Swift runtime (`ArkDB`), the client
-/// library around it (`ArkDBClient`) and the generated domain (`HarkenGen`).
+/// library around it (`ArkDBClient`) and harken's domain, authored in Swift
+/// (`../domain/gen/swift`, through `ArkAuthoring`).
 /// One `Model` for the app's life; every screen reads it.
 @main
 struct HarkenApp: App {
