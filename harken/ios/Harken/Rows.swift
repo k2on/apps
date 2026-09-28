@@ -110,7 +110,7 @@ enum Harken {
     }
 
     static func items(_ s: Session, of playlist: ArkDB.Id) throws -> [PlaylistEntry] {
-        let input = PlaylistId(playlistId: ArkAuthoring.Id(playlist))
+        let input = PlaylistItems(playlistId: ArkAuthoring.Id(playlist))
         return try s.query(name: "playlist_items", args: input.args).asList().compactMap(PlaylistEntry.init)
     }
 
@@ -141,12 +141,12 @@ enum Harken {
     }
 
     static func addToPlaylist(_ s: Session, playlist: ArkDB.Id, track: ArkDB.Id) -> Refusal? {
-        let input = OnPlaylist(playlistId: ArkAuthoring.Id(playlist), trackId: ArkAuthoring.Id(track))
+        let input = AddToPlaylist(playlistId: ArkAuthoring.Id(playlist), trackId: ArkAuthoring.Id(track))
         return s.mutate(name: "add_to_playlist", args: input.args)
     }
 
     static func removeFromPlaylist(_ s: Session, playlist: ArkDB.Id, track: ArkDB.Id) -> Refusal? {
-        let input = OnPlaylist(playlistId: ArkAuthoring.Id(playlist), trackId: ArkAuthoring.Id(track))
+        let input = RemoveFromPlaylist(playlistId: ArkAuthoring.Id(playlist), trackId: ArkAuthoring.Id(track))
         return s.mutate(name: "remove_from_playlist", args: input.args)
     }
 }

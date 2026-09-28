@@ -208,7 +208,7 @@ rowItem t sch tbl = case t of
          , "    public static let NAME = " <> str t (tName tbl)
          , "    public typealias Key = " <> (case keyCols of [k] -> keyTy k; ks -> "(" <> commas (map keyTy ks) <> ")")
          , "    public static func columns() -> Columns<Self> {"
-         , "        Columns<Self>()" <> T.concat (map colCall (tColumns tbl)) <> ".key(" <> commas (map self (tKey tbl)) <> ")" <> T.concat (map ixCall (tIndexes tbl))
+         , "        Columns<Self>()" <> T.concat ["\n            " <> seg | seg <- concatMap colSegs (tColumns tbl) ++ [".key(" <> commas (map self (tKey tbl)) <> ")"] ++ map ixCall (tIndexes tbl)]
          , "    }"
          , "}"
          , "extension " <> row <> " {"
@@ -242,10 +242,11 @@ rowItem t sch tbl = case t of
       Rust -> "Self::" <> c
       Swift -> "Self." <> camel c
       Kotlin -> camel c
-    colCall c =
-      "." <> method (colTy c) <> "(" <> self (colName c) <> variants (colTy c) <> ")"
-        <> (if colNullable c then ".nullable()" else "")
-        <> T.concat [refsCall (refTable r) | r <- tRefs tbl, refColumn r == colName c]
+    colCall = T.concat . colSegs
+    colSegs c =
+      ["." <> method (colTy c) <> "(" <> self (colName c) <> variants (colTy c) <> ")"]
+        ++ [".nullable()" | colNullable c]
+        ++ [refsCall (refTable r) | r <- tRefs tbl, refColumn r == colName c]
     method = \case
       TId _ -> "id"
       TText -> "text"
@@ -1112,21 +1113,36 @@ allExprs fn = concatMap sub (concatMap top (allStmts (fnBody fn)))
 
 renderBody :: Target -> B -> Text
 renderBody t (B items) = case items of
-  [IDo s] -> render t s
+  [IDo s] -> renderTop t s
   _ -> case t of
     Rust -> "{ " <> T.intercalate " " (zipWith (rustItem (length items)) [1 ..] items) <> " }"
     Swift -> "\n" <> T.intercalate "\n" (zipWith (swiftItem (length items)) [1 ..] items) <> "\n"
     Kotlin -> "\n" <> T.intercalate "\n" (map kotlinItem items) <> "\n"
   where
     rustItem n i = \case
-      ILet v s -> "let " <> ident t v <> " = " <> render t s <> ";"
-      IDo s -> render t s <> (if i == (n :: Int) then "" else ";")
+      ILet v s -> "let " <> ident t v <> " = " <> renderTop t s <> ";"
+      IDo s -> renderTop t s <> (if i == (n :: Int) then "" else ";")
     swiftItem n i = \case
-      ILet v s -> "let " <> ident t v <> " = " <> render t s
-      IDo s -> (if i == (n :: Int) then "return " else "") <> render t s
+      ILet v s -> "let " <> ident t v <> " = " <> renderTop t s
+      IDo s -> (if i == (n :: Int) then "return " else "") <> renderTop t s
     kotlinItem = \case
-      ILet v s -> "val " <> ident t v <> " = " <> render t s
-      IDo s -> render t s
+      ILet v s -> "val " <> ident t v <> " = " <> renderTop t s
+      IDo s -> renderTop t s
+
+-- | A statement's own expression. Swift's formatter keeps the breaks it is
+-- given, so a long chain is broken here, before each call, when it has
+-- more than one call and would run past a hundred columns; rustfmt and
+-- ktfmt decide this for themselves.
+renderTop :: Target -> S -> Text
+renderTop t s = case t of
+  Swift | length calls >= 2 && T.length flat > 100 -> render t base <> T.concat ["\n." <> methodName t m <> callArgs t as | (m, as) <- calls]
+  _ -> flat
+  where
+    flat = render t s
+    (base, calls) = parts s
+    parts = \case
+      SMethod r m as -> let (b, cs) = parts r in (b, cs ++ [(m, as)])
+      other -> (other, [])
 
 lambda :: Target -> [Text] -> B -> Text
 lambda t ps b = case t of

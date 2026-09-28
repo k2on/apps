@@ -69,7 +69,7 @@ where `Harken.moduleBytes` is `module().emit()` and `Harken.procedures` is
 
 **Every procedure runs as the Swift it is written in.** A mutation is an
 input of the domain's own type, `session.mutate(name: "add_to_playlist",
-args: OnPlaylist(playlistId: …, trackId: …).args)`: the session looks the
+args: AddToPlaylist(playlistId: …, trackId: …).args)`: the session looks the
 function up by name for its scope, hash and autos, draws the autos (a
 random 16-byte id per `NewId`, the clock in ms for `Now` — the only
 non-determinism, at origin), and the replica applies it through the native

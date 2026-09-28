@@ -2,7 +2,6 @@ package harken.gen
 
 import dev.arkdb.authoring.*
 import dev.arkdb.authoring.Int
-import dev.arkdb.authoring.List
 
 class Library(
     val track: Table<Track>,
@@ -33,18 +32,21 @@ class Track(
 ) : Row<Key1<Id<Track>>> {
     companion object : Row.Of<Track> {
         override val NAME = "track"
-        override fun columns(): Columns<Track> = columns<Track>()
-            .id(id)
-            .text(title)
-            .text(artist)
-            .text(album)
-            .nullable()
-            .int(durationMs)
-            .text(file)
-            .int(addedMs)
-            .text(userId)
-            .key(id)
-            .unique(file)
+
+        override fun columns(): Columns<Track> =
+            columns<Track>()
+                .id(id)
+                .text(title)
+                .text(artist)
+                .text(album)
+                .nullable()
+                .int(durationMs)
+                .text(file)
+                .int(addedMs)
+                .text(userId)
+                .key(id)
+                .unique(file)
+
         val id = col<Track, Id<Track>>("id")
         val title = col<Track, Text>("title")
         val artist = col<Track, Text>("artist")
@@ -64,13 +66,16 @@ class Playlist(
 ) : Row<Key1<Id<Playlist>>> {
     companion object : Row.Of<Playlist> {
         override val NAME = "playlist"
-        override fun columns(): Columns<Playlist> = columns<Playlist>()
-            .id(id)
-            .text(name)
-            .text(userId)
-            .int(createdMs)
-            .key(id)
-            .unique(userId, name)
+
+        override fun columns(): Columns<Playlist> =
+            columns<Playlist>()
+                .id(id)
+                .text(name)
+                .text(userId)
+                .int(createdMs)
+                .key(id)
+                .unique(userId, name)
+
         val id = col<Playlist, Id<Playlist>>("id")
         val name = col<Playlist, Text>("name")
         val userId = col<Playlist, Text>("user_id")
@@ -88,14 +93,17 @@ class PlaylistItem(
 ) : Row<Key2<Id<Playlist>, Id<Track>>> {
     companion object : Row.Of<PlaylistItem> {
         override val NAME = "playlist_item"
-        override fun columns(): Columns<PlaylistItem> = columns<PlaylistItem>()
-            .id(playlistId)
-            .refs<Playlist>()
-            .id(trackId)
-            .int(pos)
-            .int(addedMs)
-            .text(userId)
-            .key(playlistId, trackId)
+
+        override fun columns(): Columns<PlaylistItem> =
+            columns<PlaylistItem>()
+                .id(playlistId)
+                .refs<Playlist>()
+                .id(trackId)
+                .int(pos)
+                .int(addedMs)
+                .text(userId)
+                .key(playlistId, trackId)
+
         val playlistId = col<PlaylistItem, Id<Playlist>>("playlist_id")
         val trackId = col<PlaylistItem, Id<Track>>("track_id")
         val pos = col<PlaylistItem, Int>("pos")
