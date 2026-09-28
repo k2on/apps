@@ -336,9 +336,9 @@
               { nativeBuildInputs = [ ark-spec rust pkgs.swift-format pkgs.ktfmt ]; } ''
               diff ${harken-domain}/harken.ark ${./harken/domain/harken.ark}
               m=${./harken/domain/harken.ark}
-              arkc roundtrip rust $m ${./harken/domain/src} --fmt "${fmt.rust}"
-              arkc roundtrip swift $m ${./harken/domain/gen/swift} --only ${clientFunctions} --fmt "${fmt.swift}"
-              arkc roundtrip kotlin $m ${./harken/domain/gen/kotlin} --only ${clientFunctions} --package harken.gen --fmt "${fmt.kotlin}"
+              arkc roundtrip rust $m ${./harken/domain/src} --name Harken --fmt "${fmt.rust}"
+              arkc roundtrip swift $m ${./harken/domain/gen/swift} --only ${clientFunctions} --name Harken --fmt "${fmt.swift}"
+              arkc roundtrip kotlin $m ${./harken/domain/gen/kotlin} --only ${clientFunctions} --package harken.gen --name Harken --fmt "${fmt.kotlin}"
               touch $out
             '';
             swift = swift;
