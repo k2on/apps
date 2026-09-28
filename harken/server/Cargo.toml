@@ -3,7 +3,7 @@ name = "harken-server"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "harken's sync server: hosts every scope of harken's module (or an .ark file) as an authority over one WebSocket, applying entries natively through the domain's own procedures, keeps each log on disk, and authors tracks from a media directory"
+description = "harken's server on ark-server: the log with harken's procedures native, sign-in (ark-auth), a media directory authored as a peer, one listening session per account over live rooms, the house's speakers as devices, and the browser client"
 workspace = "../../rust"
 
 [[bin]]
@@ -12,14 +12,27 @@ path = "src/main.rs"
 
 [dependencies]
 ark = { path = "../../rust/ark" }
+# The scanner is an ark-client peer in this process; it dials the hub, never
+# a socket, so it needs no TLS.
+ark-client = { path = "../../rust/ark-client", default-features = false }
+ark-server = { path = "../../rust/ark-server" }
+ark-auth = { path = "../../rust/ark-auth", features = ["server"] }
 harken-domain = { path = "../domain" }
 anyhow = "1"
 axum = { version = "0.7", features = ["ws"] }
-futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
-rand = "0.9"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal"] }
-tower-http = { version = "0.5", features = ["fs"] }
+# `lofty` reads the tags out of a file — a scanner that guessed them from the
+# path would be wrong for every library not laid out the way it expected.
+# `notify` is the watch, so a file added after boot does not wait for a
+# rescan that may never come.
+lofty = "0.25"
+notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
+# Home Assistant, over its REST API: blocking, on a thread of its own. The
+# same ureq ark-auth talks to an identity provider with.
+ureq = { version = "2", default-features = false, features = ["tls", "json"] }
+serde_json = { workspace = true }
 
 [dev-dependencies]
+ark-auth = { path = "../../rust/ark-auth", features = ["server", "client"] }
 tempfile = "3"
-tokio-tungstenite = "0.24"
+ureq = { version = "2", default-features = false }

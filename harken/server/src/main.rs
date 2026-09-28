@@ -1,59 +1,44 @@
-//! `harken-server [--module PATH] [--data DIR] [--listen ADDR] [--media DIR]`,
-//! each also an environment variable: `HARKEN_MODULE`, `HARKEN_DATA`,
-//! `HARKEN_LISTEN` (default `127.0.0.1:8787`), `HARKEN_MEDIA`.
+//! `harken-server [ADDR]`, and everything else from the environment.
+//!
+//! ```text
+//! HARKEN_DEV_AUTH=1 harken-server              # 127.0.0.1:8787, state in the temp dir
+//! HARKEN_DEV_AUTH=1 harken-server 0.0.0.0:8787 # reachable from a phone on the same network
+//! HARKEN_OIDC_ISSUER=https://auth.example.com HARKEN_OIDC_CLIENT_ID=harken \
+//!   HARKEN_OIDC_CLIENT_SECRET_FILE=/run/credentials/harken.service/oidc-secret \
+//!   HARKEN_PUBLIC_URL=https://harken.example.com HARKEN_WEB=/path/to/harken-web \
+//!   HARKEN_DATA=/var/lib/harken HARKEN_MEDIA=/srv/media \
+//!   harken-server 127.0.0.1:8787               # what the NixOS module runs
+//! ```
+//!
+//! [`harken_server::Config::from_env`] lists every variable.
 
-use std::path::PathBuf;
-
-use anyhow::{bail, Result};
+use anyhow::Result;
 use harken_server::{start, Config};
 
-const USAGE: &str =
-    "usage: harken-server [--module PATH] [--data DIR] [--listen ADDR] [--media DIR]
+const USAGE: &str = "usage: harken-server [ADDR]   (default 127.0.0.1:8787)
 
-  --module PATH   an .ark module to host instead of harken's own  (HARKEN_MODULE; optional)
-  --data DIR      where the log is kept             (HARKEN_DATA; default ./harken-data)
-  --listen ADDR   host:port to serve on             (HARKEN_LISTEN; default 127.0.0.1:8787)
-  --media DIR     media root: scanned, served at /media  (HARKEN_MEDIA; optional)";
-
-fn parse(args: impl Iterator<Item = String>) -> Result<Option<Config>> {
-    let mut module = std::env::var_os("HARKEN_MODULE").map(PathBuf::from);
-    let mut data = std::env::var_os("HARKEN_DATA").map(PathBuf::from);
-    let mut listen = std::env::var("HARKEN_LISTEN").ok();
-    let mut media = std::env::var_os("HARKEN_MEDIA").map(PathBuf::from);
-    let mut args = args.peekable();
-    while let Some(flag) = args.next() {
-        if flag == "--help" || flag == "-h" {
-            return Ok(None);
-        }
-        let Some(value) = args.next() else {
-            bail!("{flag} needs a value\n{USAGE}");
-        };
-        match flag.as_str() {
-            "--module" => module = Some(value.into()),
-            "--data" => data = Some(value.into()),
-            "--listen" => listen = Some(value),
-            "--media" => media = Some(value.into()),
-            other => bail!("unknown flag {other}\n{USAGE}"),
-        }
-    }
-    Ok(Some(Config {
-        module,
-        data: data.unwrap_or_else(|| PathBuf::from("harken-data")),
-        listen: listen.unwrap_or_else(|| "127.0.0.1:8787".to_string()),
-        media,
-    }))
-}
+Everything else is the environment:
+  HARKEN_DEV_AUTH=1, or HARKEN_OIDC_ISSUER + HARKEN_OIDC_CLIENT_ID + HARKEN_OIDC_CLIENT_SECRET_FILE
+  HARKEN_DATA  HARKEN_PUBLIC_URL  HARKEN_REDIRECTS  HARKEN_MEDIA  HARKEN_WEB  HARKEN_WEB_MODULE
+  HARKEN_MODULE  HARKEN_HA_URL + HARKEN_HA_TOKEN_FILE + HARKEN_HA_PLAYERS  HARKEN_HA_MEDIA";
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let Some(config) = parse(std::env::args().skip(1))? else {
-        println!("{USAGE}");
-        return Ok(());
+    let mut args = std::env::args().skip(1);
+    let listen = match args.next() {
+        Some(a) if a == "--help" || a == "-h" => {
+            println!("{USAGE}");
+            return Ok(());
+        }
+        Some(a) => a,
+        None => "127.0.0.1:8787".into(),
     };
-    eprintln!("harken-server: data in {}", config.data.display());
-    let running = start(config).await?;
+    if let Some(extra) = args.next() {
+        anyhow::bail!("unexpected argument {extra}\n{USAGE}");
+    }
+    let server = start(Config::from_env(&listen)?).await?;
     tokio::signal::ctrl_c().await?;
     eprintln!("harken-server: stopping");
-    running.stop().await;
+    server.stop().await;
     Ok(())
 }

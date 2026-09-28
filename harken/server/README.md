@@ -1,91 +1,72 @@
 # harken-server
 
-The sync server, on the `ark` runtime and harken's own domain. It hosts
-every scope of `harken_domain::module()` as an `ark::peer::Authority` inside
-one `ark::protocol::Server`, and applies every pushed intent through the
-domain's procedures, natively (`module().procedures()`, held by each
-authority). With `--module` it hosts an `.ark` file instead, verified:
-functions whose hashes are harken's run natively, the rest through the
-module's closures in the interpreter. Two scopes for harken — `library` and
-`playlists` — and it would host a module with twenty the same way.
+harken's server, on `ark-server` and `ark-auth`. The log (hosted with
+harken's procedures native), the sync socket at `/sync`, `/healthz`, the
+sign-in routes under `/auth`, `/media` and the browser client's validator
+are the shared crates'; what is here is what only harken has:
+
+- **`library.rs`** — the media directory as a peer. `music/` under the root
+  is walked at start and the whole root is watched after; each audio file
+  whose path is not already a song is read with lofty and authored as
+  `add_song` by an `ark_client::Peer` in this process, dialling the hub
+  (no socket), signed in as the account `library`. A new *directory* is
+  walked (its tracks land before a watch on it exists); audio outside
+  `music/` is not a track; a removal is ignored (the log is permanent, and an
+  unplugged disk looks the same). The replica catches up with the log
+  before the first walk, so a restart authors nothing.
+- **`listening.rs`** — the `Desk`: one audio session per account, as an
+  `ark_server::Live` over live rooms. Exactly one output; the output
+  survives its socket; a command goes to the output, unless it cannot be
+  reached and the asker is audible and pressed something that means a
+  sound; a hand-off is one `Start` and reads *connecting* until the new
+  output reports; a room that empties is kept (paused, only its output,
+  away) and woken from on the next join, across restarts.
+- **`assistant.rs`** — Home Assistant's media players as devices. A pure
+  `Bridge` (who holds a speaker, what a command becomes, `SETTLE` polls of
+  grace after a hand-off, `LAPSE` polls before letting a playing speaker
+  go, the second taker releasing the first) and `ha`, the thread that
+  stands each speaker in every room somebody is listening in, drives the
+  six service calls, polls only what it holds, and says every hand-off,
+  release and pause out loud.
+- **`lib.rs`** — `Config` from the environment and `start`.
 
 ## Running
 
 ```
-harken-server --data ./harken-data --listen 127.0.0.1:8787 --media /srv/media
+HARKEN_DEV_AUTH=1 harken-server [127.0.0.1:8787]
 ```
 
-Every flag is also an environment variable: `HARKEN_MODULE` (optional; an
-`.ark` to host instead of harken's own), `HARKEN_DATA` (default
-`./harken-data`), `HARKEN_LISTEN` (default `127.0.0.1:8787`), `HARKEN_MEDIA`
-(optional).
+| variable | |
+|---|---|
+| `HARKEN_DATA` | the log, kept rooms, sessions, the scanner's replica (default: `$TMPDIR/harken-server`) |
+| `HARKEN_DEV_AUTH=1` | anyone is whoever they say — a laptop only, said loudly at start |
+| `HARKEN_OIDC_ISSUER`, `HARKEN_OIDC_CLIENT_ID`, `HARKEN_OIDC_CLIENT_SECRET_FILE` | all three or none; the secret is a file (a systemd credential); `HARKEN_OIDC_SCOPES` |
+| `HARKEN_PUBLIC_URL` | where a browser reaches this server (default `http://ADDR`) |
+| `HARKEN_REDIRECTS` | comma-separated prefixes a login may return to, besides loopback, `harken://` and the public URL |
+| `HARKEN_MEDIA` | the media root: `music/` is scanned, all of it served at `/media`, **unauthenticated** |
+| `HARKEN_WEB`, `HARKEN_WEB_MODULE` | the browser client, with the build as its validator; the module names the file whose change is a rebuild off the store |
+| `HARKEN_MODULE` | an `.ark` to host instead of harken's own |
+| `HARKEN_HA_URL`, `HARKEN_HA_TOKEN_FILE`, `HARKEN_HA_PLAYERS` | all three or none; players are `media_player.x[=Name]`, comma-separated |
+| `HARKEN_HA_MEDIA` | where a *speaker* fetches from (default: the public URL) |
 
-From the repository root, through nix:
+A server with neither a provider nor `HARKEN_DEV_AUTH=1` refuses to start.
+Nothing assumes a peer arrived signed in: a client used before anybody
+signed in dials nothing, and pushes its re-stamped work once somebody does;
+an entry authored under an older login of the same person is accepted
+(`Auth::owns`, through `.auth(..)`).
 
-```
-cd rust && nix develop ../#rust -c cargo run -p harken-server
-cd rust && nix develop ../#rust -c cargo test -p harken-server
-```
+`nix/module.nix` is the NixOS service (`services.harken`).
 
-## Endpoints
+## Tests
 
-- `GET /sync` — the protocol, over a WebSocket. Frames are binary: a client
-  frame is the canonical CBOR of `ClientMsg::to_value`, a server frame of
-  `ServerMsg::to_value`. Each connection is one `ConnId` for the machine;
-  the server pings every 20 s and closes a socket that leaves three
-  unanswered, so no client has to keep anything alive. A frame that is not
-  the protocol closes that socket and nothing else.
-- `GET /healthz` — plain text: `ok`, the connection count, and the head
-  sequence of every hosted scope.
-- `GET /media/*` — the media directory, when `--media` is set. **No
-  authentication**: anyone who can reach the port can fetch any file under
-  it. Bind to loopback or a LAN, or put something in front.
+`cargo test -p harken-server`: the desk's rules against a hub with standing
+devices (`tests/listening.rs`); the bridge the whole way round over real
+sockets against a stand-in Home Assistant (`tests/bridge.rs`); the scanner
+over real WAV files, tags written and read by lofty, and `/media` range
+requests (`tests/library.rs`); sign-in, signed-out and older-login work,
+restarts (`tests/server.rs`); the web validator through this server
+(`tests/web.rs`). Each was falsified once by breaking what it holds.
 
-## Dev auth, and it says so
-
-Identity is `ark::protocol::trusting`: the `token` in `Hello` is taken as
-the user's name and every login is the session `dev`; access is
-`open_access`, so everyone receives every scope. The server prints a line
-saying exactly that at every startup. There is no other mode yet.
-
-## Persistence
-
-Each scope's log is `DATA/<scope>.ark-log`: the canonical CBOR of
-
-```
-{ t: "log", scope,
-  base:    { seq, hash, rows: { table: [row…] } },     -- the snapshot it stands on
-  entries: [ { seq, entry, facts: [change…] } … ],     -- above the snapshot
-  ids:     [ { id, seq } … ] }                          -- every id ever sequenced
-```
-
-`entry` and `change` are the protocol's own encodings (`entry_value`,
-`change_value`), so a file carries exactly what a `Batch` frame does. The
-whole file is rewritten after every batch of appends — to a temporary file
-beside it, then renamed into place — and loaded at startup, where the
-snapshot's hash is recomputed and held to what was written and the entries
-must run without a gap; a damaged file is refused rather than served. A
-scope whose log never moved has no file. Whole-file rewrites are fine at
-harken's scale and are the thing to replace first if that changes.
-
-## The scanner
-
-With `--media`, the server walks `MEDIA/music` at startup for `mp3 flac ogg
-m4a wav opus` and authors `add_track` for every file whose path (relative
-to the media root, the same path `/media/` serves) is not yet in `track`:
-title from the file stem, artist from the directory the file is in,
-album from the directory above that when there are two under `music`,
-`duration_ms` 0. It is an ordinary in-process peer — an
-`ark::protocol::Client` holding `library` whole, exchanged with the server
-machine directly, no socket — authoring as the user `library`. The fresh id
-and the clock for the autos are drawn here and frozen in the entry, the one
-place non-determinism enters. A module with no `add_track` gets a line
-saying the scanner has nothing to do.
-
-## Shape
-
-`ark::protocol::Server` is sans-io and neither `Send` nor `Sync` (its
-authenticator is a `Box<dyn Fn>`), so it is built and lives on one thread
-(`hub.rs`); axum's handlers, the scanner and `/healthz` reach it through a
-channel handle. That thread also writes the logs, so a disk write never
-sits on the reactor.
+Not verified: a real Home Assistant or speaker (the stand-in is written from
+the REST API's documentation), a real OpenID Connect provider, the NixOS
+module on a machine, a TLS proxy in front.
