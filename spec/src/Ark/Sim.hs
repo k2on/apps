@@ -14,7 +14,8 @@
 -- Petros's test suite found three vacuous tests by falsifying this kind of
 -- claim; the emitter that writes these vectors asserts it before writing.
 module Ark.Sim
-  ( Sim (..)
+  ( silent
+  , Sim (..)
   , newSim
   , simMutate
   , partition

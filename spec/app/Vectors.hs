@@ -430,6 +430,25 @@ protocolVectors out = do
         , ("agree", Agree "demo" 4 (B.replicate 32 0xab) True)
         , ("heard", Heard (B.pack [4, 5]))
         ]
+  -- The server keeps what a connection holds across a second Hello from the
+  -- same identity (the log paging one scope), and an entry from an older
+  -- session of the same user is accepted only where ownership is installed.
+  let other = Scope "other" [Table "note" [Column "id" (TId "note") False] ["id"] [] []]
+      sch2 = Schema (schScopes (modSchema m) ++ [other])
+      sv0 = foldl host (openServer trusting (\_ _ -> True) silent) [authority sch2 "demo" (closures m), authority sch2 "other" M.empty]
+      hello subs = Hello subs (Just "alice") 2
+      sv1 = serverRecv sv0 1 (hello [Subscription "demo" 0 Whole, Subscription "other" 0 Whole])
+      sv2 = serverRecv sv1 1 (hello [Subscription "demo" 5 Whole])
+      scopesOf sv = maybe [] (M.keys . cnScopes) (M.lookup 1 (svConns sv))
+  if scopesOf sv2 == ["demo", "other"] then pure () else error ("protocol: a paging Hello dropped scopes: " ++ show (scopesOf sv2))
+  let hCreate = head [h | (h, c) <- M.toList (closures m), fnName (cFn c) == "create_playlist"]
+      old = Entry (idN 20) "alice" "alice-old" hCreate (M.fromList [("name", VText "Road")]) (M.fromList [("id", VId (idN 21))])
+      verdictOn sv = case fst (takeServerOutgoing (serverRecv (snd (takeServerOutgoing sv)) 1 (Push "demo" [old]))) of
+        [(1, Ack {})] -> "ack"
+        [(1, Reject _ _ why)] -> T.unpack why
+        other' -> show other'
+  if verdictOn sv2 == "not yours" then pure () else error ("protocol: an older session was accepted with no ownership: " ++ verdictOn sv2)
+  if verdictOn (withOwns (\u _ -> u == "alice") sv2) == "ack" then pure () else error ("protocol: an owned older session was refused: " ++ verdictOn (withOwns (\u _ -> u == "alice") sv2))
   mapM_
     (\(name, f) -> do
       let v = clientValue f

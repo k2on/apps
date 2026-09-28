@@ -59,7 +59,9 @@ module Ark.Protocol
   , Authenticate
   , trusting
   , Server (..)
+  , Conn (..)
   , openServer
+  , withOwns
   , host
   , serverRecv
   , disconnect
@@ -421,6 +423,11 @@ data Conn = Conn
 
 data Server s = Server
   { svAuth :: Authenticate
+  , -- | Does this user own this session? A session outlives its token: an
+    -- entry authored offline under one login and pushed after the same
+    -- person signs in again carries the old session, and is still theirs.
+    -- Only ever asked about the connection's own user. By default, no.
+    svOwns :: Text -> Text -> Bool
   , -- | May this identity receive this scope? The scope-level read rule.
     svAccess :: Identity -> ScopeName -> Bool
   , svScopes :: Map ScopeName Authority
@@ -431,7 +438,12 @@ data Server s = Server
   }
 
 openServer :: Authenticate -> (Identity -> ScopeName -> Bool) -> L.Machine s -> Server s
-openServer auth access m = Server auth access M.empty M.empty m L.emptyRooms []
+openServer auth access m = Server auth (\_ _ -> False) access M.empty M.empty m L.emptyRooms []
+
+-- | Install the sessions a user owns, which the authenticator's session
+-- store knows and the engine does not.
+withOwns :: (Text -> Text -> Bool) -> Server s -> Server s
+withOwns owns sv = sv {svOwns = owns}
 
 -- | Host a scope: become its authority.
 host :: Server s -> Authority -> Server s
@@ -447,7 +459,14 @@ serverRecv sv0 c msg = case msg of
     Nothing -> send c (Denied "not signed in") sv0
     Just who ->
       let allowed = [s | s <- subs, svAccess sv0 who (subScope s), M.member (subScope s) (svScopes sv0)]
-          conn = Conn who (M.fromList [(subScope s, (subMode s, subSince s)) | s <- allowed])
+          named = M.fromList [(subScope s, (subMode s, subSince s)) | s <- allowed]
+          -- A second Hello from the same identity on one connection is the
+          -- log paging one scope: it names that scope, and every other
+          -- scope the connection holds is kept. A different identity is a
+          -- new connection's worth of scopes.
+          conn = case M.lookup c (svConns sv0) of
+            Just old | cnWho old == who -> Conn who (M.union named (cnScopes old))
+            _ -> Conn who named
           sv1 = sv0 {svConns = M.insert c conn (svConns sv0)}
           (rooms, post) = L.arrive (svMachine sv1) (svRooms sv1) (L.Peer c (idUser who) (idSession who))
        in fanout (deliver post sv1 {svRooms = rooms})
@@ -459,7 +478,8 @@ serverRecv sv0 c msg = case msg of
        in fanout (if null acks then sv'' else send c (Ack s (map fst acks) (map snd acks)) sv'')
     where
       one conn (a, acks, sv) e
-        | eActor e /= idUser (cnWho conn) || eSession e /= idSession (cnWho conn) =
+        | eActor e /= idUser (cnWho conn)
+            || (eSession e /= idSession (cnWho conn) && not (svOwns sv0 (eActor e) (eSession e))) =
             (a, acks, send c (Reject s (eId e) "not yours") sv)
         | otherwise = case sequenceEntry a e of
             (a', Appended n _) -> (a', acks ++ [(eId e, n)], sv)
