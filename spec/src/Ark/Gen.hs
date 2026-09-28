@@ -34,7 +34,8 @@
 --
 -- A router file also carries the module's helpers and records ('records'),
 -- each in the file its first user is in ('homeOf'), and imports what it
--- names from another. Only Rust spells them yet (AUTHORING §2.5).
+-- names from another. Rust and Swift spell them; Kotlin not yet
+-- (AUTHORING §2.5).
 module Ark.Gen
   ( Target (..)
   , Options (..)
@@ -581,7 +582,24 @@ helperItem t m fn = case t of
       , "    helper(" <> commas [str t (fnName fn), params, "|" <> sig <> "| " <> renderBody t (B items)] <> ")"
       , "}"
       ]
+  Swift -> do
+    (items, _) <- block (newCx m fn) (fnBody fn)
+    let names = structNames m
+        ps = [(n, tyName names (fTy f)) | (n, f) <- fnInput fn]
+        ret = maybe "Void" (tyName names) (fnRet fn)
+        -- One expression is the closure's value; several need its type
+        -- said and a @return@, which Swift cannot infer.
+        header = commas [camel n | (n, _) <- ps] <> (if single items then "" else " -> " <> ret) <> " in "
+    pure
+      [ "public func " <> camel (fnName fn) <> "(" <> commas ["_ " <> camel n <> ": " <> ty | (n, ty) <- ps] <> ") -> " <> ret <> " {"
+      , "    helper(" <> commas (str t (fnName fn) : ["(" <> str t n <> ", " <> camel n <> ")" | (n, _) <- ps]) <> ") { " <> header <> renderBody t (B items) <> " }"
+      , "}"
+      ]
   _ -> Left ("a helper has no " <> targetName t <> " spelling yet: " <> fnName fn)
+  where
+    single = \case
+      [IDo _] -> True
+      _ -> False
 
 -- | §18.4 A record: a struct of the vocabulary's values and its
 -- @Record@ impl, the fields in the IR's order, which is alphabetical.
@@ -599,36 +617,59 @@ recordItem t m rc = case (t, recTy rc) of
            , "    }"
            , "}"
            ]
+  (Swift, TStruct fs) -> do
+    builders <- mapM (\(f, ty) -> (\b -> ".field(" <> str t f <> ", " <> b <> ")") <$> build ty) (M.toList fs)
+    pure $
+      ["public struct " <> recName rc <> " {"]
+        ++ ["    public var " <> camel f <> ": " <> tyName names ty | (f, ty) <- M.toList fs]
+        ++ [ "}"
+           , "extension " <> recName rc <> ": Record {"
+           , "    public static func fields() -> Fields<Self> {"
+           , "        Fields<Self>()" <> T.concat ["\n            " <> b | b <- builders]
+           , "    }"
+           , "}"
+           ]
   _ -> Left ("a record has no " <> targetName t <> " spelling yet: " <> recName rc)
   where
     names = structNames m
+    q = builder t (case recTy rc of TStruct fs -> M.keys fs; _ -> [])
     build = \case
-      TText -> Right "text()"
-      TInt -> Right "int()"
-      TBool -> Right "bool_()"
-      TBytes -> Right "bytes()"
-      TId x -> Right ("id::<" <> pascal x <> ">()")
-      TEnum _ -> Right "text()"
-      TOption x -> (\b -> "opt(" <> b <> ")") <$> build x
-      TList x -> (\b -> "list(" <> b <> ")") <$> build x
+      TText -> Right (q "text" <> "()")
+      TInt -> Right (q "int" <> "()")
+      TBool -> Right (if t == Rust then "bool_()" else q "bool" <> "()")
+      TBytes -> Right (q "bytes" <> "()")
+      TId x -> Right (if t == Rust then "id::<" <> pascal x <> ">()" else q "id" <> "(" <> pascal x <> ".self)")
+      TEnum _ -> Right (q "text" <> "()")
+      TOption x -> (\b -> q "opt" <> "(" <> b <> ")") <$> build x
+      TList x -> (\b -> q "list" <> "(" <> b <> ")") <$> build x
       other -> Left ("a record field of type " <> tyName names other <> " has no spelling")
+
+-- | A field builder's name, where a declaration's fields are these. In
+-- Swift a builder is called inside the type's own extension, where a
+-- field of the same name (@id@, @text@) hides the free function, so it is
+-- qualified by its module there: @ArkAuthoring.id(Media.self)@.
+builder :: Target -> [Text] -> Text -> Text
+builder t fields f
+  | t == Swift && f `elem` map camel fields = "ArkAuthoring." <> f
+  | otherwise = f
 
 fieldBuilder :: Target -> Module -> Function -> Text -> Field -> Text
 fieldBuilder t m fn n (Field ty cs) = str t n <> ", " <> go ty
   where
+    q = builder t (map fst (fnInput fn))
     go = \case
-      TOption inner -> "opt(" <> base inner <> checks <> ")"
+      TOption inner -> q "opt" <> "(" <> base inner <> checks <> ")"
       other -> base other <> checks
     base = \case
-      TText -> "text()"
-      TInt -> "int()"
-      TBool -> case t of Rust -> "bool_()"; _ -> "bool()"
-      TBytes -> "bytes()"
+      TText -> q "text" <> "()"
+      TInt -> q "int" <> "()"
+      TBool -> case t of Rust -> "bool_()"; _ -> q "bool" <> "()"
+      TBytes -> q "bytes" <> "()"
       TId x -> case t of
         Rust -> "id::<" <> pascal x <> ">()"
-        Swift -> "id(" <> pascal x <> ".self)"
+        Swift -> q "id" <> "(" <> pascal x <> ".self)"
         Kotlin -> "id<" <> pascal x <> ">()"
-      TList inner -> "list(" <> base inner <> ")"
+      TList inner -> q "list" <> "(" <> base inner <> ")"
       other -> "text() /* " <> T.pack (show other) <> " */"
     checks = T.concat (map check cs)
     check = \case
@@ -674,6 +715,9 @@ data S
     SCall Text [S]
   | -- | @none::<T>()@, with @T@ already spelled.
     SNone Text
+  | -- | A value whose type is written beside it where a language needs it:
+    -- @Text("")@ in Swift, the value alone elsewhere.
+    SAs Text S
   | -- | A struct literal: a row's or a record's, by its type's name.
     SRow Text [(FieldName, S)]
   | SList [S]
@@ -1072,7 +1116,12 @@ expr cx = \case
         (xn, cx2) = fresh cx1 (paramBase el)
         cxB = cx2 {cxSyms = M.insert acc (SName an) (M.insert x (SName xn) (cxSyms cx)), cxTys = maybe id (M.insert x) el (maybe id (M.insert acc) (tyOf cx z) (cxTys cx))}
     b' <- expr cxB b
-    pure (SMethod xs' "fold" [A z', LTyped [(an, tyName (cxNames cx) <$> tyOf cx z), (xn, Nothing)] (B [IDo b'])])
+    -- A literal start says its type in Swift (@Text("")@), which a
+    -- literal alone cannot.
+    let start = case (z', tyOf cx z) of
+          (SLit _, Just ty) -> SAs (tyName (cxNames cx) ty) z'
+          _ -> z'
+    pure (SMethod xs' "fold" [A start, LTyped [(an, tyName (cxNames cx) <$> tyOf cx z), (xn, Nothing)] (B [IDo b'])])
   ESelect _ -> Left "a read outside a let"
   EGet _ _ -> Left "a read outside a let"
   EExists _ _ -> Left "a read outside a let"
@@ -1336,6 +1385,9 @@ render :: Target -> S -> Text
 render t = \case
   SName n -> ident t n
   SLit v -> literal t v
+  SAs ty v -> case (t, v) of
+    (Swift, SLit _) -> ty <> "(" <> render t v <> ")"
+    _ -> render t v
   SInput f -> "input." <> ident t f
   SCtx f -> "ctx." <> f
   SAuto m n -> "ctx." <> ident t m <> "(" <> str t n <> ")"

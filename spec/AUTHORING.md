@@ -414,8 +414,53 @@ The rules `arkc gen rust` prints these by, each deterministic:
   (`let media = db.media.exists((input.media_id,));`); a closure parameter
   over a record is `row`, as over a row.
 
-Swift and Kotlin have no spelling of helpers or records yet: `arkc gen
-swift|kotlin` refuses a module that needs one, naming it.
+Swift (`arkc gen swift`) spells the same declarations, placed by the same
+rules; a Swift module is one namespace, so a file imports nothing but
+`ArkAuthoring`:
+
+```swift
+public struct LibraryEntry {
+    public var addedMs: Int
+    public var playlistPos: Opt<Int>
+    // … every field, alphabetically
+}
+extension LibraryEntry: Record {
+    public static func fields() -> Fields<Self> {
+        Fields<Self>()
+            .field("added_ms", int())
+            .field("playlist_pos", opt(int()))
+    }
+}
+
+public func movementKey(_ workId: Text, _ no: Int) -> Text {
+    helper("movement_key", ("work_id", workId), ("no", no)) { workId, no in
+        concat(list([workId, "#", no.toText()]))
+    }
+}
+```
+
+- **A helper** is `public func name(_ a: A, ..) -> R { helper("name", ("a", a), ..) { a, .. in body } }`:
+  unlabelled parameters, one `("a", a)` pair per parameter as its own
+  argument, and a trailing closure whose parameters are inferred. A body
+  of one expression is the closure's value; a longer one says its type
+  (`{ a, b -> R in … return v }`), which Swift cannot infer. A call is
+  `name(args)`.
+- **A record** is a struct with `extension Name: Record` and
+  `Fields<Self>()`, each `.field` on a line of its own as a row's columns
+  are; a record value is its memberwise initializer, `Name(f: v, ..)`, in
+  the same alphabetical order.
+- **A field builder is qualified** as `ArkAuthoring.id(Media.self)` where
+  the declaration it is called in has a field of the builder's name: the
+  schema is a static member of the type, where the field hides the free
+  function. This holds for an input's `schema` and a record's `fields()`
+  alike.
+- **A fold's literal start says its type**, `.fold(Text("")) { acc, x in
+  … }`, in place of Rust's typed accumulator. Literals need no `.into()`,
+  a nested pick no type (`pick(c, pick(d, "", a), b)`), and `x.isSome().not()`
+  stays as it is: Swift has no `isNone`.
+
+Kotlin has no spelling of helpers or records yet: `arkc gen kotlin`
+refuses a module that needs one, naming it.
 
 The module: `Module::new((library(), playlists()))` with helpers found by
 being called. `module().emit() -> ModuleBytes`, `module().procedures() ->
