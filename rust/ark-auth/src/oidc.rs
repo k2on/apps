@@ -88,27 +88,24 @@ pub fn read_secret(path: impl AsRef<std::path::Path>) -> Result<String, String> 
 
 impl Provider {
     /// [`Provider::discover`] with the secret read from a file.
-    pub fn discover_with_secret_file(issuer: &str, client_id: &str, secret_file: impl AsRef<std::path::Path>, scopes: &[&str]) -> Result<Self, String> {
+    pub fn discover_with_secret_file(
+        issuer: &str,
+        client_id: &str,
+        secret_file: impl AsRef<std::path::Path>,
+        scopes: &[&str],
+    ) -> Result<Self, String> {
         let secret = read_secret(secret_file)?;
         Provider::discover(issuer, client_id, &secret, scopes)
     }
 
     /// Read `{issuer}/.well-known/openid-configuration`. Blocking: call it at
     /// startup, or from a blocking task.
-    pub fn discover(
-        issuer: &str,
-        client_id: &str,
-        client_secret: &str,
-        scopes: &[&str],
-    ) -> Result<Self, String> {
+    pub fn discover(issuer: &str, client_id: &str, client_secret: &str, scopes: &[&str]) -> Result<Self, String> {
         let issuer = issuer.trim_end_matches('/').to_string();
         let url = format!("{issuer}/.well-known/openid-configuration");
         let found: Discovery = get_json(&url)?;
         if found.issuer.trim_end_matches('/') != issuer {
-            return Err(format!(
-                "{url} says its issuer is {}, not {issuer}",
-                found.issuer
-            ));
+            return Err(format!("{url} says its issuer is {}, not {issuer}", found.issuer));
         }
         Ok(Provider {
             issuer,
@@ -141,12 +138,7 @@ impl Provider {
     }
 
     /// Trade the code the provider sent back for who signed in. Blocking.
-    pub fn exchange(
-        &self,
-        code: &str,
-        challenge: &Challenge,
-        callback: &str,
-    ) -> Result<Account, String> {
+    pub fn exchange(&self, code: &str, challenge: &Challenge, callback: &str) -> Result<Account, String> {
         let form = [
             ("grant_type", "authorization_code"),
             ("code", code),
@@ -166,9 +158,7 @@ impl Provider {
         };
         // A provider that keeps the ID token small says the rest at userinfo.
         if account.name.is_empty() || account.email.is_empty() {
-            if let (Some(endpoint), Some(access)) =
-                (&self.found.userinfo_endpoint, &tokens.access_token)
-            {
+            if let (Some(endpoint), Some(access)) = (&self.found.userinfo_endpoint, &tokens.access_token) {
                 if let Ok(info) = get_json_bearer::<Claims>(endpoint, access) {
                     if account.name.is_empty() {
                         account.name = info.display_name();
@@ -184,10 +174,7 @@ impl Provider {
 
     fn check(&self, claims: &Claims, nonce: &str) -> Result<(), String> {
         if claims.iss.trim_end_matches('/') != self.issuer {
-            return Err(format!(
-                "the ID token is from {}, not {}",
-                claims.iss, self.issuer
-            ));
+            return Err(format!("the ID token is from {}, not {}", claims.iss, self.issuer));
         }
         if !claims.aud.contains(&self.client_id) {
             return Err("the ID token is not for this client".into());
@@ -235,10 +222,7 @@ struct Claims {
 
 impl Claims {
     fn display_name(&self) -> String {
-        self.name
-            .clone()
-            .or_else(|| self.preferred_username.clone())
-            .unwrap_or_default()
+        self.name.clone().or_else(|| self.preferred_username.clone()).unwrap_or_default()
     }
 }
 
@@ -268,10 +252,7 @@ pub(crate) fn base64url(bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
-        let n = chunk
-            .iter()
-            .enumerate()
-            .fold(0u32, |acc, (i, b)| acc | (*b as u32) << (16 - 8 * i));
+        let n = chunk.iter().enumerate().fold(0u32, |acc, (i, b)| acc | (*b as u32) << (16 - 8 * i));
         for i in 0..(chunk.len() + 1) {
             out.push(ALPHABET[((n >> (18 - 6 * i)) & 63) as usize] as char);
         }
@@ -307,9 +288,7 @@ fn base64url_decode(s: &str) -> Option<Vec<u8>> {
 // ----------------------------------------------------------------- transport
 
 fn agent() -> ureq::Agent {
-    ureq::AgentBuilder::new()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
+    ureq::AgentBuilder::new().timeout(std::time::Duration::from_secs(15)).build()
 }
 
 fn get_json<T: serde::de::DeserializeOwned>(url: &str) -> Result<T, String> {
@@ -333,10 +312,7 @@ fn get_json_bearer<T: serde::de::DeserializeOwned>(url: &str, token: &str) -> Re
     serde_json::from_str(&body).map_err(|e| format!("GET {url}: {e}"))
 }
 
-fn post_form<T: serde::de::DeserializeOwned>(
-    url: &str,
-    form: &[(&str, &str)],
-) -> Result<T, String> {
+fn post_form<T: serde::de::DeserializeOwned>(url: &str, form: &[(&str, &str)]) -> Result<T, String> {
     let body = agent()
         .post(url)
         .set("Accept", "application/json")
@@ -375,18 +351,13 @@ mod tests {
 
     #[test]
     fn claims_come_out_of_a_jwt_payload() {
-        let payload = base64url(
-            br#"{"iss":"https://p","sub":"42","aud":"harken","exp":4102444800,"nonce":"n","name":"A"}"#,
-        );
+        let payload = base64url(br#"{"iss":"https://p","sub":"42","aud":"harken","exp":4102444800,"nonce":"n","name":"A"}"#);
         let claims = decode_claims(&format!("h.{payload}.s")).unwrap();
         assert_eq!(claims.sub, "42");
         assert_eq!(claims.aud, ["harken"]);
         assert_eq!(claims.display_name(), "A");
         let many = base64url(br#"{"aud":["a","b"]}"#);
-        assert_eq!(
-            decode_claims(&format!("h.{many}.s")).unwrap().aud,
-            ["a", "b"]
-        );
+        assert_eq!(decode_claims(&format!("h.{many}.s")).unwrap().aud, ["a", "b"]);
     }
 
     #[test]
@@ -431,15 +402,7 @@ mod tests {
                 "n"
             )
             .is_err());
-        assert!(provider
-            .check(
-                &Claims {
-                    exp: 1,
-                    ..good_clone(&good)
-                },
-                "n"
-            )
-            .is_err());
+        assert!(provider.check(&Claims { exp: 1, ..good_clone(&good) }, "n").is_err());
     }
 
     fn good_clone(c: &Claims) -> Claims {

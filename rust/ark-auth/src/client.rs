@@ -23,11 +23,7 @@ pub fn login(server: &str, user: Option<&str>, open: impl FnOnce(&str)) -> Resul
 
     // Ask without following: a dev server answers with the code straight
     // away, and anything else is a page for a person.
-    let first = ureq::AgentBuilder::new()
-        .redirects(0)
-        .build()
-        .get(&url)
-        .call();
+    let first = ureq::AgentBuilder::new().redirects(0).build().get(&url).call();
     let code = match first {
         Ok(resp) if resp.status() / 100 == 3 => {
             let location = resp.header("Location").unwrap_or_default().to_string();
@@ -69,15 +65,10 @@ pub fn exchange(server: &str, code: &str) -> Result<Login, String> {
 /// Whether `token` still proves a login at `server`, and whose.
 pub fn whoami(server: &str, token: &str) -> Result<Option<Login>, String> {
     let url = format!("{}/auth/me", server.trim_end_matches('/'));
-    match ureq::get(&url)
-        .set("Authorization", &format!("Bearer {token}"))
-        .call()
-    {
+    match ureq::get(&url).set("Authorization", &format!("Bearer {token}")).call() {
         Ok(resp) => {
             let body = resp.into_string().map_err(|e| e.to_string())?;
-            serde_json::from_str(&body)
-                .map(Some)
-                .map_err(|e| format!("the login did not parse: {e}"))
+            serde_json::from_str(&body).map(Some).map_err(|e| format!("the login did not parse: {e}"))
         }
         Err(ureq::Error::Status(401, _)) => Ok(None),
         Err(e) => Err(format!("cannot reach {server}: {e}")),
@@ -105,9 +96,7 @@ fn wait_for_code(listener: &TcpListener) -> Result<String, String> {
             continue;
         }
         let path = line.split_whitespace().nth(1).unwrap_or("");
-        let code = path
-            .split_once('?')
-            .and_then(|(_, q)| query_value(q, "code"));
+        let code = path.split_once('?').and_then(|(_, q)| query_value(q, "code"));
         let (status, body) = match &code {
             Some(_) => ("200 OK", "signed in — you can close this tab"),
             None => ("404 Not Found", "nothing here"),

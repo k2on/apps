@@ -2,9 +2,9 @@
 //! A Rust peer on ArkDB, for any app's module.
 //!
 //! ```text
-//! Peer ─ one Replica per scope, persisted (a directory, localStorage, memory)
+//! Peer ─ the Replica of the log, persisted (a directory, localStorage, memory)
 //!      ─ ark::protocol::Client ── Link ── Transport (tungstenite thread | browser WebSocket)
-//!      ─ an Authority per scope when alone (no server)
+//!      ─ an Authority when alone (no server)
 //! ```
 //!
 //! A peer is opened over a [`Domain`] — an app's authored module and its
@@ -40,11 +40,12 @@ mod view;
 pub use autos::Autos;
 pub use domain::Domain;
 pub use link::Timing;
-pub use peer::{refusal_text, Changes, Options, Peer, Pumped, Rejection, Status};
+pub use peer::{refusal_text, Options, Peer, Pumped, Rejection, Standing, Status};
 pub use view::{diff, splice, Update, View};
 
 pub use ark;
 pub use ark::eval::{Args, Checked};
+pub use ark::peer::Changes;
 pub use ark::value::{Id, Value};
 pub use ark::view::Patch;
 
@@ -62,7 +63,10 @@ pub enum Error {
     Corrupt(String),
     /// The storage was last opened the other way — alone, or with a server —
     /// and its sequences mean something else under this one.
-    ModeMismatch { was: String, now: String },
+    ModeMismatch {
+        was: String,
+        now: String,
+    },
 }
 
 impl std::fmt::Display for Error {

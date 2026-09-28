@@ -34,11 +34,10 @@ pub fn take_code() -> Option<String> {
     let search = location.search().ok()?;
     let code = query_value(&search, "code")?;
     let clean = location.pathname().unwrap_or_default();
-    let _ = window.history().ok()?.replace_state_with_url(
-        &wasm_bindgen::JsValue::NULL,
-        "",
-        Some(&clean),
-    );
+    let _ = window
+        .history()
+        .ok()?
+        .replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(&clean));
     Some(code)
 }
 
@@ -50,9 +49,7 @@ pub async fn exchange(server: &str, code: &str) -> Result<Login, String> {
     init.set_method("POST");
     init.set_body(&wasm_bindgen::JsValue::from_str(&body));
     let headers = web_sys::Headers::new().map_err(js)?;
-    headers
-        .set("Content-Type", "application/json")
-        .map_err(js)?;
+    headers.set("Content-Type", "application/json").map_err(js)?;
     init.set_headers(&headers);
     let text = fetch_text(&url, &init).await?;
     serde_json::from_str(&text).map_err(|e| format!("the login did not parse: {e}"))
@@ -63,14 +60,10 @@ pub async fn whoami(server: &str, token: &str) -> Result<Option<Login>, String> 
     let url = format!("{}/auth/me", server.trim_end_matches('/'));
     let init = web_sys::RequestInit::new();
     let headers = web_sys::Headers::new().map_err(js)?;
-    headers
-        .set("Authorization", &format!("Bearer {token}"))
-        .map_err(js)?;
+    headers.set("Authorization", &format!("Bearer {token}")).map_err(js)?;
     init.set_headers(&headers);
     match fetch_text(&url, &init).await {
-        Ok(text) => serde_json::from_str(&text)
-            .map(Some)
-            .map_err(|e| format!("the login did not parse: {e}")),
+        Ok(text) => serde_json::from_str(&text).map(Some).map_err(|e| format!("the login did not parse: {e}")),
         Err(e) if e.starts_with("401") => Ok(None),
         Err(e) => Err(e),
     }

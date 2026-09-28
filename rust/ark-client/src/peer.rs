@@ -1,16 +1,16 @@
-//! The peer: one replica per scope of an app's module, persisted; the
-//! engine's `Client` around them; a local authority per scope when there is
-//! no server; the link to the server when there is one; and what a screen
-//! does — mutate, query, check, hold a view.
+//! The peer: the replica of an app's log, persisted; the engine's `Client`
+//! around it; a local authority when there is no server; the link to the
+//! server when there is one; and what a screen does — mutate, query, check,
+//! hold a view.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use ark::canon;
 use ark::eval::{self, Args, Checked, Ctx, EvalFault};
 use ark::log::{snapshot_of, Log, Seq};
-use ark::peer::{local_commit, Authority, Replica};
+use ark::peer::{local_commit, Authority, Changes, Replica};
 use ark::protocol::{Client, ClientMsg, Mode, ServerMsg};
-use ark::schema::{Schema, ScopeName};
+use ark::schema::Schema;
 use ark::store::{MemoryStore, Refusal};
 use ark::value::{Id, Value};
 
@@ -31,7 +31,7 @@ pub struct Options {
     pub session: String,
     /// What the `Hello` proves the login with.
     pub token: Option<String>,
-    /// No server: this peer is the authority for every scope, and nothing
+    /// No server: this peer is the authority for the log, and nothing
     /// stays pending (the demo, a peer working alone).
     pub alone: bool,
     pub autos: Autos,
@@ -86,29 +86,19 @@ pub struct Rejection {
     pub reason: String,
 }
 
-/// What the rows have done since the last ask, per scope: the changes to a
-/// scope's optimistic store, or `Rebuilt` — a rebase rolled it back and
-/// replayed on top, which no list of changes describes, so a view re-reads.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Changes {
-    pub scopes: BTreeMap<ScopeName, ark::peer::Changes>,
-}
-
-impl Changes {
-    /// Nothing moved anywhere.
-    pub fn is_empty(&self) -> bool {
-        self.scopes.is_empty()
-    }
-
-    /// Whether this scope moved at all.
-    pub fn moved(&self, scope: &str) -> bool {
-        self.scopes.contains_key(scope)
-    }
-
-    /// Whether any scope was rebuilt.
-    pub fn rebuilt(&self) -> bool {
-        self.scopes.values().any(|c| matches!(c, ark::peer::Changes::Rebuilt))
-    }
+/// Where one of this peer's own intents stands.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Standing {
+    /// Applied here, not yet answered by the authority.
+    Pending,
+    /// In the log.
+    Confirmed,
+    /// Never going to be in the log, and the reason every replica reaches:
+    /// what a screen shows beside the item that did not happen.
+    Rejected(String),
+    /// Not an intent this peer authored (in this run, or pending from the
+    /// last).
+    Unknown,
 }
 
 /// What one [`Peer::pump`] came to.
@@ -146,7 +136,8 @@ pub struct Status {
     pub opens: u64,
     /// The connection count the engine keeps: what a live room compares.
     pub epoch: i64,
-    pub cursors: BTreeMap<ScopeName, Seq>,
+    /// The last confirmed sequence.
+    pub cursor: Seq,
     pub pending: usize,
     pub diverged: usize,
     pub denied: Option<String>,
@@ -161,22 +152,30 @@ pub struct Peer {
     domain: Domain,
     schema: Schema,
     client: Client,
-    authorities: BTreeMap<ScopeName, Authority>,
+    authority: Option<Authority>,
     storage: BoxStorage,
     ctx: Ctx,
     autos: Autos,
     timing: Timing,
     alone: bool,
-    written: BTreeMap<ScopeName, (Seq, Vec<Id>)>,
+    written: (Seq, Vec<Id>),
     link: Option<Link>,
     rejections: Vec<Rejection>,
+    /// Every intent authored here this run or found pending at open.
+    authored: BTreeSet<Id>,
+    /// Every verdict, by intent, kept for [`Peer::standing`].
+    rejected: BTreeMap<Id, String>,
     heard_frames: u64,
     bad_frames: u64,
 }
 
 impl std::fmt::Debug for Peer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Peer").field("ctx", &self.ctx).field("alone", &self.alone).field("link", &self.link).finish()
+        f.debug_struct("Peer")
+            .field("ctx", &self.ctx)
+            .field("alone", &self.alone)
+            .field("link", &self.link)
+            .finish()
     }
 }
 
@@ -189,51 +188,48 @@ fn mode_word(alone: bool) -> &'static str {
 }
 
 impl Peer {
-    /// Open every scope of the module from `storage` (or empty), replay
-    /// what was pending on top, and — alone — sequence it. No socket yet:
-    /// [`Peer::connect`] dials.
+    /// Open the replica from `storage` (or empty), replay what was pending
+    /// on top, and — alone — sequence it. No socket yet: [`Peer::connect`]
+    /// dials.
     pub fn open(domain: Domain, storage: BoxStorage, opts: Options) -> Result<Peer, Error> {
         let schema = domain.module().schema.clone();
-        let mut client = Client::open(schema.clone(), opts.token.clone());
-        let mut authorities = BTreeMap::new();
-        let mut written = BTreeMap::new();
         let natives = domain.native_list();
-        for scope in domain.scopes() {
-            let key = ReplicaFile::key(&scope);
-            let (confirmed, cursor, pending) = match storage.load(&key)? {
-                Some(bytes) => {
-                    let f = ReplicaFile::decode(&bytes, &schema)?;
-                    if f.mode != mode_word(opts.alone) {
-                        return Err(Error::ModeMismatch {
-                            was: f.mode,
-                            now: mode_word(opts.alone).into(),
-                        });
-                    }
-                    (f.confirmed, f.cursor, f.pending)
+        let (confirmed, cursor, pending) = match storage.load(ReplicaFile::KEY)? {
+            Some(bytes) => {
+                let f = ReplicaFile::decode(&bytes, &schema)?;
+                if f.mode != mode_word(opts.alone) {
+                    return Err(Error::ModeMismatch {
+                        was: f.mode,
+                        now: mode_word(opts.alone).into(),
+                    });
                 }
-                None => (MemoryStore::empty(schema.clone()), 0, vec![]),
-            };
-            written.insert(scope.clone(), (cursor, pending.iter().map(|e| e.id).collect()));
-            if opts.alone {
-                let mut a = Authority::new(schema.clone(), &scope, domain.closures().clone());
-                a.log = Log {
-                    base: snapshot_of(cursor, confirmed.clone()),
-                    entries: BTreeMap::new(),
-                    ids: BTreeMap::new(),
-                };
-                a.store = confirmed.clone();
-                a.hold(natives.iter().cloned());
-                authorities.insert(scope.clone(), a);
+                (f.confirmed, f.cursor, f.pending)
             }
-            let mut r = Replica::open(schema.clone(), &scope, domain.closures().clone(), confirmed, cursor, pending);
-            r.hold(natives.iter().cloned());
-            client.subscribe(Mode::Whole, r);
-        }
+            None => (MemoryStore::empty(schema.clone()), 0, vec![]),
+        };
+        let written = (cursor, pending.iter().map(|e| e.id).collect());
+        let authored = pending.iter().map(|e| e.id).collect();
+        let authority = opts.alone.then(|| {
+            // The authority a peer alone is: its log is the confirmed store
+            // as a snapshot at the cursor, with nothing above it yet.
+            let mut a = Authority::new(schema.clone(), domain.closures().clone());
+            a.log = Log {
+                base: snapshot_of(cursor, confirmed.clone()),
+                entries: BTreeMap::new(),
+                ids: BTreeMap::new(),
+            };
+            a.store = confirmed.clone();
+            a.hold(natives.iter().cloned());
+            a
+        });
+        let mut r = Replica::open(schema.clone(), domain.closures().clone(), confirmed, cursor, pending);
+        r.hold(natives.iter().cloned());
+        let client = Client::open(r, Mode::Whole, opts.token.clone());
         let mut peer = Peer {
             domain,
             schema,
             client,
-            authorities,
+            authority,
             storage,
             ctx: Ctx::new(opts.user, opts.session),
             autos: opts.autos,
@@ -242,6 +238,8 @@ impl Peer {
             written,
             link: None,
             rejections: vec![],
+            authored,
+            rejected: BTreeMap::new(),
             heard_frames: 0,
             bad_frames: 0,
         };
@@ -260,7 +258,7 @@ impl Peer {
         Peer::open(domain, Box::new(Memory::new()), opts)
     }
 
-    /// A directory of replica files (`<scope>.replica`).
+    /// A directory, holding the file `replica`.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn open_path(domain: Domain, dir: impl Into<std::path::PathBuf>, opts: Options) -> Result<Peer, Error> {
         Peer::open(domain, Box::new(crate::storage::Dir(dir.into())), opts)
@@ -311,21 +309,20 @@ impl Peer {
     pub fn mutate(&mut self, name: &str, args: Args) -> Result<Id, Error> {
         let (fh, f) = self.domain.mutator(name)?;
         let (fh, f) = (fh.clone(), f.clone());
-        let scope = f.scope.clone().expect("a mutator has a scope");
         let autos = self.autos.draw(&f);
         let id = self.autos.new_id();
-        self.client.mutate(&scope, id, &self.ctx, &fh, &autos, &args).map_err(Error::Refused)?;
+        self.client.mutate(id, &self.ctx, &fh, &autos, &args).map_err(Error::Refused)?;
+        self.authored.insert(id);
         self.commit_alone();
         self.collect_rejections();
         self.persist()?;
         Ok(id)
     }
 
-    /// Run a query by name over its scope's optimistic store, as this
-    /// peer's user.
+    /// Run a query by name over the optimistic store, as this peer's user.
     pub fn query(&self, name: &str, args: &Args) -> Result<Value, Error> {
-        let (fh, f) = self.domain.query(name)?;
-        let store = self.scope_store(f.scope.as_deref().expect("a query has a scope"))?;
+        let (fh, _) = self.domain.query(name)?;
+        let store = self.store();
         let out = match self.domain.natives().get(fh) {
             Some(p) => p.query(&self.ctx, args, store),
             None => eval::query_closure(&self.schema, &self.domain.closures()[fh], &self.ctx, args, store),
@@ -340,9 +337,8 @@ impl Peer {
     /// to a mutator or query: a message per failing field, and the values
     /// as the checks normalised them. Nothing is written.
     pub fn check(&self, name: &str, partial: &Args) -> Result<Checked, Error> {
-        let (fh, f) = self.domain.function(name).ok_or_else(|| Error::UnknownFunction(name.into()))?;
-        let scope = f.scope.as_deref().ok_or_else(|| Error::NotA(name.into(), "procedure"))?;
-        let store = self.scope_store(scope)?;
+        let (fh, _) = self.domain.function(name).ok_or_else(|| Error::UnknownFunction(name.into()))?;
+        let store = self.store();
         eval::check(&self.schema, &self.domain.closures()[fh], &self.ctx, partial, store).map_err(|b| Error::Bug(format!("{name}: {b:?}")))
     }
 
@@ -351,34 +347,23 @@ impl Peer {
         View::open(self, name, args)
     }
 
-    /// A scope's optimistic store — `confirmed` with `pending` replayed —
-    /// which every query reads.
-    pub fn store(&self, scope: &str) -> Option<&MemoryStore> {
-        self.client.scopes.get(scope).map(|(r, _)| &r.view)
+    /// The optimistic store — `confirmed` with `pending` replayed — which
+    /// every query reads.
+    pub fn store(&self) -> &MemoryStore {
+        &self.client.replica.view
     }
 
-    pub(crate) fn scope_store(&self, scope: &str) -> Result<&MemoryStore, Error> {
-        self.store(scope).ok_or_else(|| Error::Bug(format!("no replica of scope {scope}")))
+    /// The replica, to look at.
+    pub fn replica(&self) -> &Replica {
+        &self.client.replica
     }
 
-    /// A scope's replica, to look at.
-    pub fn replica(&self, scope: &str) -> Option<&Replica> {
-        self.client.scopes.get(scope).map(|(r, _)| r)
-    }
-
-    /// What moved since the last ask, per scope. Hand it to every
+    /// What moved since the last ask: `Applied(changes)` to the optimistic
+    /// store, or `Rebuilt` — a rebase rolled it back and replayed pending on
+    /// top, which no list of changes describes. Hand it to every
     /// [`View::update`].
     pub fn take_changes(&mut self) -> Changes {
-        let mut out = Changes::default();
-        for (s, (r, _)) in self.client.scopes.iter_mut() {
-            match r.take_changes() {
-                ark::peer::Changes::Applied(chs) if chs.is_empty() => {}
-                c => {
-                    out.scopes.insert(s.clone(), c);
-                }
-            }
-        }
-        out
+        self.client.replica.take_changes()
     }
 
     /// Verdicts against this peer's intents since the last ask.
@@ -387,32 +372,49 @@ impl Peer {
         std::mem::take(&mut self.rejections)
     }
 
-    /// Intents authored here and not yet answered, over every scope.
+    /// Where one of this peer's intents stands: what a screen shows beside
+    /// the item it made.
+    pub fn standing(&self, id: &Id) -> Standing {
+        if let Some(why) = self.rejected.get(id) {
+            return Standing::Rejected(why.clone());
+        }
+        let r = &self.client.replica;
+        if let Some((_, why)) = r.rejections.iter().find(|(i, _)| i == id) {
+            return Standing::Rejected(refusal_text(why));
+        }
+        if r.pending.iter().any(|e| e.id == *id) {
+            Standing::Pending
+        } else if self.authored.contains(id) {
+            Standing::Confirmed
+        } else {
+            Standing::Unknown
+        }
+    }
+
+    /// Intents authored here and not yet answered.
     pub fn pending_len(&self) -> usize {
-        self.client.scopes.values().map(|(r, _)| r.pending.len()).sum()
+        self.client.replica.pending.len()
     }
 
-    /// The last confirmed sequence of a scope.
-    pub fn cursor(&self, scope: &str) -> Option<Seq> {
-        self.replica(scope).map(|r| r.cursor)
+    /// The last confirmed sequence.
+    pub fn cursor(&self) -> Seq {
+        self.client.replica.cursor
     }
 
-    /// Ask the authority whether it agrees with every scope's confirmed
-    /// state; the answers arrive in [`Peer::agreed`]. Alone, at once.
+    /// Ask the authority whether it agrees with the confirmed state; the
+    /// answer arrives in [`Peer::agreed`]. Alone, at once.
     pub fn verify(&mut self) {
-        if !self.alone {
+        let Some(a) = &self.authority else {
             self.client.verify_all();
             return;
-        }
-        for (s, (r, _)) in &self.client.scopes {
-            let (n, h) = r.verify_at();
-            let ok = self.authorities.get(s).and_then(|a| a.log.state_at(n)).map(|st| ark::hash::state_hash(&st)) == Some(h);
-            self.client.agreed.push((s.clone(), n, ok));
-        }
+        };
+        let (n, h) = self.client.replica.verify_at();
+        let ok = a.log.state_at(n).map(|st| ark::hash::state_hash(&st)) == Some(h);
+        self.client.agreed.push((n, ok));
     }
 
-    /// Every `(scope, seq, agreed)` the authority has answered.
-    pub fn agreed(&self) -> &[(ScopeName, Seq, bool)] {
+    /// Every `(seq, agreed)` the authority has answered.
+    pub fn agreed(&self) -> &[(Seq, bool)] {
         &self.client.agreed
     }
 
@@ -559,7 +561,7 @@ impl Peer {
 
     // -- sans-io: for a transport of the caller's own ---------------------------
 
-    /// A connection opened: `Hello` for every scope, then everything pending.
+    /// A connection opened: `Hello` at the cursor, then everything pending.
     pub fn connected(&mut self) {
         self.client.connected();
     }
@@ -600,25 +602,23 @@ impl Peer {
         self.client.take_outgoing().iter().map(|m| canon::encode(&m.to_value())).collect()
     }
 
-    /// Write every scope whose cursor or pending moved since it was last
+    /// Write the replica if its cursor or pending moved since it was last
     /// written. `mutate` and `pump` call it; a caller driving the sans-io
     /// half by hand calls it after `recv`.
     pub fn persist(&mut self) -> Result<(), Error> {
-        for (name, (r, _)) in &self.client.scopes {
-            let now = (r.cursor, r.pending.iter().map(|e| e.id).collect::<Vec<Id>>());
-            if self.written.get(name) == Some(&now) {
-                continue;
-            }
-            let file = ReplicaFile {
-                scope: name.clone(),
-                mode: mode_word(self.alone).into(),
-                cursor: r.cursor,
-                confirmed: r.confirmed.clone(),
-                pending: r.pending.clone(),
-            };
-            self.storage.save(&ReplicaFile::key(name), &file.encode())?;
-            self.written.insert(name.clone(), now);
+        let r = &self.client.replica;
+        let now = (r.cursor, r.pending.iter().map(|e| e.id).collect::<Vec<Id>>());
+        if self.written == now {
+            return Ok(());
         }
+        let file = ReplicaFile {
+            mode: mode_word(self.alone).into(),
+            cursor: r.cursor,
+            confirmed: r.confirmed.clone(),
+            pending: r.pending.clone(),
+        };
+        self.storage.save(ReplicaFile::KEY, &file.encode())?;
+        self.written = now;
         Ok(())
     }
 
@@ -642,9 +642,9 @@ impl Peer {
             url: self.link.as_ref().map(|l| l.url().to_string()),
             opens: self.link.as_ref().map_or(0, |l| l.opens),
             epoch: self.client.epoch,
-            cursors: self.client.scopes.iter().map(|(s, (r, _))| (s.clone(), r.cursor)).collect(),
+            cursor: self.client.replica.cursor,
             pending: self.pending_len(),
-            diverged: self.client.scopes.values().map(|(r, _)| r.diverged.len()).sum(),
+            diverged: self.client.replica.diverged.len(),
             denied: self.client.denied.clone(),
             last_close: self.link.as_ref().and_then(|l| l.last_close.clone()),
             heard_frames: self.heard_frames,
@@ -655,26 +655,22 @@ impl Peer {
     // -- inside -------------------------------------------------------------------
 
     fn commit_alone(&mut self) {
-        for (scope, a) in &mut self.authorities {
-            if let Some((r, _)) = self.client.scopes.get_mut(scope) {
-                local_commit(a, r);
-            }
+        if let Some(a) = &mut self.authority {
+            local_commit(a, &mut self.client.replica);
         }
     }
 
     fn collect_rejections(&mut self) {
-        for (r, _) in self.client.scopes.values_mut() {
-            for (id, why) in std::mem::take(&mut r.rejections) {
-                self.rejections.push(Rejection {
-                    id,
-                    reason: refusal_text(&why),
-                });
-            }
+        for (id, why) in std::mem::take(&mut self.client.replica.rejections) {
+            let reason = refusal_text(&why);
+            self.rejected.insert(id, reason.clone());
+            self.rejections.push(Rejection { id, reason });
         }
     }
 }
 
-/// A verdict as a person reads it.
+/// A verdict as a person reads it: a mutator's own refusal word for word,
+/// a constraint named in a sentence (`ark::protocol::refusal_text`).
 pub fn refusal_text(r: &Refusal) -> String {
-    eval::refusal_text(r)
+    ark::protocol::refusal_text(r)
 }

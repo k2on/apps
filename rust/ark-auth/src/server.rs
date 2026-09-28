@@ -11,12 +11,12 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use ark::protocol::{Authenticate, Identity};
 use axum::extract::{Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use ark::protocol::{Authenticate, Identity};
 use serde::Deserialize;
 use tower_http::cors::{Any, CorsLayer};
 
@@ -153,21 +153,12 @@ impl Auth {
 
     /// Sign `account` in and mint the code the redirect carries.
     fn finish(&self, account: &Account) -> Result<String, String> {
-        let login = self
-            .sessions()
-            .issue(account)
-            .map_err(|e| format!("could not record the session: {e}"))?;
+        let login = self.sessions().issue(account).map_err(|e| format!("could not record the session: {e}"))?;
         let code = random_token();
         let now = now_ms();
         let mut codes = self.codes.lock().unwrap_or_else(|e| e.into_inner());
         codes.retain(|_, c| now - c.issued_ms < CODE_TTL_MS);
-        codes.insert(
-            code.clone(),
-            Issued {
-                login,
-                issued_ms: now,
-            },
-        );
+        codes.insert(code.clone(), Issued { login, issued_ms: now });
         Ok(code)
     }
 
@@ -185,7 +176,7 @@ impl Auth {
 
     /// Whether `session` is or was `user`'s — live, expired or revoked. What
     /// the sync server asks of an entry authored under an earlier login of
-    /// the same person, once the engine asks it (see `owns_fn`).
+    /// the same person (see `owns_fn`).
     pub fn owns(&self, user: &str, session: &str) -> bool {
         self.sessions().owned_by(user, session)
     }
@@ -205,11 +196,10 @@ impl Auth {
         })
     }
 
-    /// [`Auth::owns`], shaped for the engine's ownership check
-    /// (`Fn(user, session) -> bool`), for when `ark::protocol::Server` takes
-    /// one: an entry authored offline under an earlier login of the same
-    /// person, pushed after signing in again.
-    pub fn owns_fn(self: &Arc<Self>) -> Box<dyn Fn(&str, &str) -> bool + Send + Sync> {
+    /// [`Auth::owns`], as the engine's ownership check
+    /// (`ark::protocol::Server::with_owns`): an entry authored offline under
+    /// an earlier login of the same person, pushed after signing in again.
+    pub fn owns_fn(self: &Arc<Self>) -> ark::protocol::Owns {
         let auth = self.clone();
         Box::new(move |user: &str, session: &str| auth.owns(user, session))
     }
@@ -227,12 +217,7 @@ pub fn router(auth: Arc<Auth>) -> Router {
         .route("/auth/exchange", post(exchange))
         .route("/auth/me", get(me))
         .route("/auth/logout", post(logout))
-        .layer(
-            CorsLayer::new()
-                .allow_origin(Any)
-                .allow_methods(Any)
-                .allow_headers(Any),
-        )
+        .layer(CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any))
         .with_state(auth)
 }
 
@@ -309,20 +294,12 @@ async fn callback(State(auth): State<Arc<Auth>>, Query(q): Query<CallbackQuery>)
         return bad("this server does not use a provider".into());
     };
     if let Some(error) = q.error {
-        return bad(format!(
-            "the provider refused: {error} {}",
-            q.error_description.unwrap_or_default()
-        ));
+        return bad(format!("the provider refused: {error} {}", q.error_description.unwrap_or_default()));
     }
     let (Some(code), Some(state)) = (q.code, q.state) else {
         return bad("the provider sent no code".into());
     };
-    let Some(pending) = auth
-        .pending
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .remove(&state)
-    else {
+    let Some(pending) = auth.pending.lock().unwrap_or_else(|e| e.into_inner()).remove(&state) else {
         return bad("this login was not started here, or took too long".into());
     };
     if now_ms() - pending.started_ms >= PENDING_TTL_MS {
@@ -332,10 +309,7 @@ async fn callback(State(auth): State<Arc<Auth>>, Query(q): Query<CallbackQuery>)
     // Two round trips to the provider, off the runtime.
     let provider = provider.clone();
     let callback = callback_url(&auth);
-    let exchanged = tokio::task::spawn_blocking(move || {
-        provider.exchange(&code, &pending.challenge, &callback)
-    })
-    .await;
+    let exchanged = tokio::task::spawn_blocking(move || provider.exchange(&code, &pending.challenge, &callback)).await;
     let account = match exchanged {
         Ok(Ok(account)) => account,
         Ok(Err(e)) => return failed(e),
@@ -356,11 +330,7 @@ struct Exchange {
 async fn exchange(State(auth): State<Arc<Auth>>, Json(body): Json<Exchange>) -> Response {
     match auth.redeem(&body.code) {
         Some(login) => Json(login).into_response(),
-        None => (
-            StatusCode::BAD_REQUEST,
-            "that code has been used, or has expired",
-        )
-            .into_response(),
+        None => (StatusCode::BAD_REQUEST, "that code has been used, or has expired").into_response(),
     }
 }
 
@@ -374,9 +344,7 @@ async fn me(State(auth): State<Arc<Auth>>, headers: HeaderMap) -> Response {
 
 /// End the session a bearer token proves.
 async fn logout(State(auth): State<Arc<Auth>>, headers: HeaderMap) -> Response {
-    let revoked = bearer(&headers)
-        .map(|t| auth.sessions().revoke(t).unwrap_or(false))
-        .unwrap_or(false);
+    let revoked = bearer(&headers).map(|t| auth.sessions().revoke(t).unwrap_or(false)).unwrap_or(false);
     if revoked {
         StatusCode::NO_CONTENT.into_response()
     } else {
@@ -385,12 +353,7 @@ async fn logout(State(auth): State<Arc<Auth>>, headers: HeaderMap) -> Response {
 }
 
 fn bearer(headers: &HeaderMap) -> Option<&str> {
-    headers
-        .get(header::AUTHORIZATION)?
-        .to_str()
-        .ok()?
-        .strip_prefix("Bearer ")
-        .map(str::trim)
+    headers.get(header::AUTHORIZATION)?.to_str().ok()?.strip_prefix("Bearer ").map(str::trim)
 }
 
 fn bad(why: String) -> Response {
@@ -403,10 +366,7 @@ fn failed(why: String) -> Response {
 
 /// Dev mode's provider: a text box.
 fn dev_form(redirect: &str) -> String {
-    let redirect = redirect
-        .replace('&', "&amp;")
-        .replace('"', "&quot;")
-        .replace('<', "&lt;");
+    let redirect = redirect.replace('&', "&amp;").replace('"', "&quot;").replace('<', "&lt;");
     format!(
         "<!doctype html><meta charset=utf-8><meta name=viewport content=\"width=device-width\">\
          <title>sign in</title>\

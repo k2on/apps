@@ -121,12 +121,27 @@ fn connect(url: &str, timing: &Timing) -> Result<WebSocket<MaybeTlsStream<TcpStr
         match TcpStream::connect_timeout(&addr, Duration::from_millis(timing.connect_timeout_ms)) {
             Ok(stream) => {
                 let _ = stream.set_nodelay(true);
-                return tungstenite::client_tls(url, stream).map(|(ws, _)| ws).map_err(|e| format!("{url}: {e}"));
+                return handshake(url, stream);
             }
             Err(e) => last = format!("{addr}: {e}"),
         }
     }
     Err(last)
+}
+
+#[cfg(feature = "tls")]
+fn handshake(url: &str, stream: TcpStream) -> Result<WebSocket<MaybeTlsStream<TcpStream>>, String> {
+    tungstenite::client_tls(url, stream).map(|(ws, _)| ws).map_err(|e| format!("{url}: {e}"))
+}
+
+#[cfg(not(feature = "tls"))]
+fn handshake(url: &str, stream: TcpStream) -> Result<WebSocket<MaybeTlsStream<TcpStream>>, String> {
+    if url.starts_with("wss://") {
+        return Err(format!("{url}: this build has no TLS (ark-client's `tls` feature)"));
+    }
+    tungstenite::client(url, MaybeTlsStream::Plain(stream))
+        .map(|(ws, _)| ws)
+        .map_err(|e| format!("{url}: {e}"))
 }
 
 fn set_slice(ws: &mut WebSocket<MaybeTlsStream<TcpStream>>) {

@@ -8,7 +8,6 @@ use ark::authoring::{self, Procedure};
 use ark::canon;
 use ark::hash::{closures, Closure, FnHash};
 use ark::ir::{module_from_value, FnKind, Function, Module};
-use ark::schema::ScopeName;
 
 use crate::Error;
 
@@ -82,11 +81,6 @@ impl Domain {
         self.0.natives.iter().map(|(h, p)| (h.clone(), p.clone())).collect()
     }
 
-    /// The scopes the module declares, in schema order.
-    pub fn scopes(&self) -> Vec<ScopeName> {
-        self.0.module.schema.scopes.iter().map(|s| s.name.clone()).collect()
-    }
-
     /// A function by name: its hash and its declaration.
     pub fn function(&self, name: &str) -> Option<(&FnHash, &Function)> {
         let h = self.0.by_name.get(name)?;
@@ -96,8 +90,8 @@ impl Domain {
     /// A mutator by name, or why it is not one.
     pub fn mutator(&self, name: &str) -> Result<(&FnHash, &Function), Error> {
         let (h, f) = self.function(name).ok_or_else(|| Error::UnknownFunction(name.into()))?;
-        match (f.kind, &f.scope) {
-            (FnKind::Mutator, Some(_)) => Ok((h, f)),
+        match f.kind {
+            FnKind::Mutator => Ok((h, f)),
             _ => Err(Error::NotA(name.into(), "mutator")),
         }
     }
@@ -105,8 +99,8 @@ impl Domain {
     /// A query by name, or why it is not one.
     pub fn query(&self, name: &str) -> Result<(&FnHash, &Function), Error> {
         let (h, f) = self.function(name).ok_or_else(|| Error::UnknownFunction(name.into()))?;
-        match (f.kind, &f.scope) {
-            (FnKind::Query, Some(_)) => Ok((h, f)),
+        match f.kind {
+            FnKind::Query => Ok((h, f)),
             _ => Err(Error::NotA(name.into(), "query")),
         }
     }

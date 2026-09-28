@@ -1,21 +1,20 @@
-//! Where a peer's replicas are kept between runs.
+//! Where a peer's replica is kept between runs.
 //!
-//! What is durable about one scope is the confirmed store at its cursor and
+//! What is durable about the log is the confirmed store at its cursor and
 //! the intents still pending — exactly what `Replica::open` takes, and
-//! nothing optimistic. It is one canonical-CBOR record per scope, the same
-//! record the Swift client writes (`ReplicaFile`), so a directory is
-//! readable by either:
+//! nothing optimistic. It is one canonical-CBOR record, the Swift client's
+//! `ReplicaFile` shape without the `scope` spec v3 removed:
 //!
 //! ```text
-//! { t: "replica", scope, mode: "server" | "alone", cursor,
+//! { t: "replica", mode: "server" | "alone", cursor,
 //!   confirmed: { table: [row…] }, pending: [entry…] }
 //! ```
 //!
 //! Three places to keep it: a directory natively ([`Dir`], written to a
 //! temporary name and renamed), the browser's `localStorage` in wasm
-//! ([`Local`], base64 under a key per scope), and memory ([`Memory`], for
-//! tests and the demo — cloneable, so a test can "reopen" from what a peer
-//! left behind).
+//! ([`Local`], base64 under a key), and memory ([`Memory`], for tests and
+//! the demo — cloneable, so a test can "reopen" from what a peer left
+//! behind).
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -30,7 +29,7 @@ use ark::value::Value;
 use crate::Error;
 
 /// A key-value place for a peer's files. `key` is a short file name such as
-/// `library.replica`.
+/// `replica`.
 pub trait Storage {
     fn load(&self, key: &str) -> Result<Option<Vec<u8>>, Error>;
     fn save(&mut self, key: &str, bytes: &[u8]) -> Result<(), Error>;
@@ -193,10 +192,9 @@ pub fn base64_decode(s: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// What is durable about one scope.
+/// What is durable about the log.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReplicaFile {
-    pub scope: String,
     /// `"server"` for a replica of an authority elsewhere, `"alone"` for one
     /// that is its own authority: the sequences mean different things.
     pub mode: String,
@@ -206,15 +204,12 @@ pub struct ReplicaFile {
 }
 
 impl ReplicaFile {
-    /// The key a scope is kept under.
-    pub fn key(scope: &str) -> String {
-        format!("{scope}.replica")
-    }
+    /// The key it is kept under.
+    pub const KEY: &'static str = "replica";
 
     pub fn encode(&self) -> Vec<u8> {
         canon::encode(&Value::record(vec![
             ("t", Value::text("replica")),
-            ("scope", Value::text(self.scope.clone())),
             ("mode", Value::text(self.mode.clone())),
             ("cursor", Value::Int(self.cursor)),
             ("confirmed", self.confirmed.store_value()),
@@ -242,18 +237,25 @@ impl ReplicaFile {
         };
         let mut confirmed = MemoryStore::empty(schema.clone());
         for (t, rows) in tables {
-            let Value::List(rs) = rows else { return Err(bad(&format!("rows of {t}"))) };
+            let Value::List(rs) = rows else {
+                return Err(bad(&format!("rows of {t}")));
+            };
             for r in rs {
-                let Value::Struct(row) = r else { return Err(bad(&format!("a row of {t}"))) };
+                let Value::Struct(row) = r else {
+                    return Err(bad(&format!("a row of {t}")));
+                };
                 confirmed.apply_change(&Change::Add(t.clone(), row.clone()));
             }
         }
         let Some(Value::List(ps)) = m.get("pending") else {
             return Err(bad("no pending"));
         };
-        let pending = ps.iter().map(entry_from_value).collect::<Result<Vec<_>, _>>().map_err(|e| bad(&e.to_string()))?;
+        let pending = ps
+            .iter()
+            .map(entry_from_value)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| bad(&e.to_string()))?;
         Ok(ReplicaFile {
-            scope: text("scope")?,
             mode: text("mode")?,
             cursor,
             confirmed,

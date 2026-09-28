@@ -1,13 +1,11 @@
 //! The demo module of `spec/AUTHORING.md` Appendix B, authored in the
-//! vocabulary exactly as `rust/ark/tests/demo_authoring.rs` has it: one scope
-//! `demo` with `playlist(id, name, user_id)` and `item(playlist_id →
+//! vocabulary exactly as `rust/ark/tests/demo_authoring.rs` has it: the tables
+//! `playlist(id, name, user_id)` and `item(playlist_id →
 //! playlist, track_id, pos)`, the mutators `create_playlist` and
 //! `add_to_playlist`, and the query `items`.
 //!
 //! What this crate's tests and `ark-server`'s run against — never an app's
 //! domain — and a small example of what an app hands [`crate::Domain::new`].
-
-#![allow(missing_docs)]
 
 use ark::authoring::*;
 
@@ -15,8 +13,7 @@ pub struct Demo {
     pub playlist: Table<Playlist>,
     pub item: Table<Item>,
 }
-impl Scope for Demo {
-    const NAME: &str = "demo";
+impl Tables for Demo {
     fn open() -> Self {
         Demo {
             playlist: table(),

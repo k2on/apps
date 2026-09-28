@@ -5,7 +5,7 @@
 //! whose body is a single `select` with no middleware — `db.t.filter(..)
 //! .order_by(..).all()` — is maintained incrementally by `ark::view`: the
 //! cost of a change is the rows it moved, whatever the size of the list.
-//! Any other query is re-run on a change to its scope and the difference
+//! Any other query is re-run on a change and the difference
 //! reported as patches, which is always correct and costs a query.
 //!
 //! `Changes::Rebuilt` — a rebase rolled the optimistic store back and
@@ -15,12 +15,12 @@
 
 use ark::eval::{Args, Ctx};
 use ark::ir::{Expr, Function, Plan, Stmt};
-use ark::schema::ScopeName;
+use ark::peer::Changes;
 use ark::store::{Change, MemoryStore, Store};
 use ark::value::Value;
 use ark::view::{self, Patch, ViewPlan};
 
-use crate::peer::{Changes, Peer};
+use crate::peer::Peer;
 use crate::Error;
 
 /// What an update did to the list.
@@ -41,7 +41,6 @@ enum How {
 /// A maintained query.
 pub struct View {
     name: String,
-    scope: ScopeName,
     args: Args,
     how: How,
     rows: Vec<Value>,
@@ -60,11 +59,10 @@ impl std::fmt::Debug for View {
 impl View {
     pub(crate) fn open(peer: &Peer, name: &str, args: Args) -> Result<View, Error> {
         let (_, f) = peer.domain().query(name)?;
-        let scope = f.scope.clone().expect("a query has a scope");
         let rows = list(name, peer.query(name, &args)?)?;
         let how = match plan_of(f, peer, &args) {
             Some(vp) => {
-                let v = view::hydrate(peer.schema(), &vp, peer.scope_store(&scope)?);
+                let v = view::hydrate(peer.schema(), &vp, peer.store());
                 // Held to the query itself: a plan this reading got wrong
                 // falls back to re-running, never to a wrong list.
                 if v.rows() == rows {
@@ -77,7 +75,6 @@ impl View {
         };
         Ok(View {
             name: name.into(),
-            scope,
             args,
             how,
             rows,
@@ -106,7 +103,7 @@ impl View {
     pub fn rehydrate(&mut self, peer: &Peer) -> Result<(), Error> {
         self.rows = list(&self.name, peer.query(&self.name, &self.args)?)?;
         if let How::Plan(v) = &mut self.how {
-            *v = view::hydrate(peer.schema(), &v.plan, peer.scope_store(&self.scope)?);
+            *v = view::hydrate(peer.schema(), &v.plan, peer.store());
         }
         Ok(())
     }
@@ -114,16 +111,15 @@ impl View {
     /// Bring the list up to date with what moved. `changes` is what
     /// [`Peer::take_changes`] returned, handed to every view in turn.
     pub fn update(&mut self, peer: &Peer, changes: &Changes) -> Result<Update, Error> {
-        let chs = match changes.scopes.get(&self.scope) {
-            None => return Ok(Update::Unchanged),
-            Some(ark::peer::Changes::Rebuilt) => {
+        let chs = match changes {
+            Changes::Rebuilt => {
                 self.rehydrate(peer)?;
                 return Ok(Update::Reset);
             }
-            Some(ark::peer::Changes::Applied(chs)) if chs.is_empty() => return Ok(Update::Unchanged),
-            Some(ark::peer::Changes::Applied(chs)) => chs,
+            Changes::Applied(chs) if chs.is_empty() => return Ok(Update::Unchanged),
+            Changes::Applied(chs) => chs,
         };
-        let store = peer.scope_store(&self.scope)?;
+        let store = peer.store();
         let patches = match &mut self.how {
             How::Plan(v) => push_all(peer, store, chs, v),
             How::Rerun => {

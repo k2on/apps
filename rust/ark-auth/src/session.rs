@@ -97,10 +97,7 @@ impl SessionStore {
 
     fn write(&self) -> Result<(), String> {
         let Some(path) = &self.path else { return Ok(()) };
-        let bytes = serde_json::to_vec_pretty(&File {
-            sessions: self.rows.clone(),
-        })
-        .map_err(|e| e.to_string())?;
+        let bytes = serde_json::to_vec_pretty(&File { sessions: self.rows.clone() }).map_err(|e| e.to_string())?;
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         }

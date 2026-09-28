@@ -7,11 +7,7 @@
 /// back to. `user` is honoured only by a server in dev mode, and is how a
 /// laptop runs two peers with two names and no browser.
 pub fn login_url(server: &str, redirect: &str, user: Option<&str>) -> String {
-    let mut url = format!(
-        "{}/auth/login?redirect={}",
-        server.trim_end_matches('/'),
-        percent_encode(redirect)
-    );
+    let mut url = format!("{}/auth/login?redirect={}", server.trim_end_matches('/'), percent_encode(redirect));
     if let Some(user) = user {
         url.push_str("&user=");
         url.push_str(&percent_encode(user));
@@ -45,9 +41,7 @@ pub fn percent_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char)
-            }
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
             _ => out.push_str(&format!("%{b:02X}")),
         }
     }
@@ -106,10 +100,7 @@ mod tests {
     #[test]
     fn socket_follows_the_scheme() {
         assert_eq!(socket_url("https://h.example"), "wss://h.example/sync");
-        assert_eq!(
-            socket_url("http://127.0.0.1:8787/"),
-            "ws://127.0.0.1:8787/sync"
-        );
+        assert_eq!(socket_url("http://127.0.0.1:8787/"), "ws://127.0.0.1:8787/sync");
         assert_eq!(socket_url("10.0.2.2:8787"), "ws://10.0.2.2:8787/sync");
     }
 
@@ -117,20 +108,14 @@ mod tests {
     fn a_query_value_round_trips() {
         let url = login_url("http://s", "harken://auth?x=1 2", Some("al ice"));
         let query = url.split('?').nth(1).unwrap();
-        assert_eq!(
-            query_value(query, "redirect").as_deref(),
-            Some("harken://auth?x=1 2")
-        );
+        assert_eq!(query_value(query, "redirect").as_deref(), Some("harken://auth?x=1 2"));
         assert_eq!(query_value(query, "user").as_deref(), Some("al ice"));
         assert_eq!(query_value(query, "missing"), None);
     }
 
     #[test]
     fn the_code_joins_whatever_query_there_is() {
-        assert_eq!(
-            with_code("harken://auth", "c d"),
-            "harken://auth?code=c%20d"
-        );
+        assert_eq!(with_code("harken://auth", "c d"), "harken://auth?code=c%20d");
         assert_eq!(with_code("http://x/?a=1", "c"), "http://x/?a=1&code=c");
     }
 }

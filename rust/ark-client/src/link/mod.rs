@@ -124,7 +124,11 @@ pub struct Link {
 
 impl std::fmt::Debug for Link {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Link").field("url", &self.url).field("state", &self.state).field("opens", &self.opens).finish()
+        f.debug_struct("Link")
+            .field("url", &self.url)
+            .field("state", &self.state)
+            .field("opens", &self.opens)
+            .finish()
     }
 }
 
@@ -320,7 +324,7 @@ mod tests {
         let p = l.poll_at(2000);
         assert_eq!(p.closed.as_deref(), Some("gone"));
         assert_eq!(l.state(), &State::Waiting(2500), "the backoff started over when it opened");
-        assert!(l.stop("offline") == false);
+        assert!(!l.stop("offline"), "it was not open");
         l.poll_at(99_999);
         assert_eq!(made.lock().unwrap().len(), 3, "a stopped link does not dial");
         l.resume();
