@@ -13,7 +13,7 @@ pub struct AddTrack {
 impl Input for AddTrack {
     fn schema() -> Object<Self> {
         object()
-            .field("title", text().trim().min(1, "a track needs a title"))
+            .field("title", text().trim().min(1).why("a track needs a title"))
             .field("artist", text().trim())
             .field("album", opt(text().trim()))
             .field("duration_ms", int().at_least(0))

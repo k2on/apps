@@ -9,6 +9,9 @@ pub struct Library {
 }
 impl Scope for Library {
     const NAME: &str = "library";
+    fn open() -> Self {
+        Library { track: table() }
+    }
 }
 
 /// What people make of it: playlists, and what is on them.
@@ -18,6 +21,9 @@ pub struct Playlists {
 }
 impl Scope for Playlists {
     const NAME: &str = "playlists";
+    fn open() -> Self {
+        Playlists { playlist: table(), playlist_item: table() }
+    }
 }
 
 pub struct Track {

@@ -61,6 +61,23 @@ compiles against v2 and is being replaced, not fixed). `flake.nix`'s
 `arkc gen … --name Harken --only …`, so `nix flake check` is red until
 step 2 lands. `spec/GENERATED.md` and `spec/generated/` are stale.
 
+## Two things the previous session could not finish
+
+- **The two workflow files cannot be pushed from here.** Both the git
+  token and the GitHub connector lack the `workflow` scope, so any commit
+  containing `.github/workflows/apk.yml` or `pages.yml` is rejected. They
+  are complete and sit in the working tree, kept out of `git status` by
+  `.git/info/exclude`. The user has to push them (or grant the scope);
+  say so plainly in the final report rather than retrying. Their content
+  is reviewed and belongs with step 5's integration.
+- **Late contract changes** landed after the agents' briefs: `.why("…")`
+  gives a check its message (no `.min(n, "why")`), and a scope's tables
+  are declared by `fn open() -> Self { Playlists { playlist: table(),
+  playlist_item: table() } }` in its `Scope` impl, whose field order is
+  the schema's table order. Both are in AUTHORING.md and in the canonical
+  `schema.rs`; the Rust agent has them, the Swift and Kotlin agents have
+  the first and need the second.
+
 ## Steps, in order
 
 ### 1. Message the agents (2 minutes)

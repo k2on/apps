@@ -239,7 +239,16 @@ pub struct Playlists {                       // a scope: its tables, in order
     pub playlist: Table<Playlist>,
     pub playlist_item: Table<PlaylistItem>,
 }
-impl Scope for Playlists { const NAME: &str = "playlists"; }
+impl Scope for Playlists {
+    const NAME: &str = "playlists";
+    fn open() -> Self {
+        Playlists { playlist: table(), playlist_item: table() }
+    }
+}
+// `open()` is how a body's `db` is made, and the order its fields are
+// written is the schema's table order for the scope: no host can enumerate
+// a struct's fields, so the scope says them once, here. Swift and Kotlin
+// spell the same constructor in their own declarations.
 
 pub struct Playlist { pub id: Id<Playlist>, pub name: Text, pub user_id: Text, pub created_ms: Int }
 impl Row for Playlist {
@@ -272,7 +281,7 @@ after a column, `.refs::<Parent>()` after an id column, `.index((..))`.
 pub struct CreatePlaylist { pub name: Text }
 impl Input for CreatePlaylist {
     fn schema() -> Object<Self> {
-        object().field("name", text().trim().min(1, "a playlist needs a name").max(120))
+        object().field("name", text().trim().min(1).why("a playlist needs a name").max(120))
     }
 }
 
@@ -293,9 +302,11 @@ pub fn playlists() -> Router<Playlists> {
 
 Field builders: `text()`, `int()`, `bool_()`, `bytes()`, `id::<T>()`,
 `enum_::<E>()`, `opt(f)`, `list(f)`; checks `.trim()`, `.min(n)`,
-`.max(n)`, `.min(n, "why")`, `.range(lo, hi)`, `.at_least(lo)`,
-`.at_most(hi)`, `.non_empty()`, `.exists()`, `.refine(|v| .., "why")`;
-and `object().refine(|input| .., "why")` over the whole input.
+`.max(n)`, `.range(lo, hi)`, `.at_least(lo)`, `.at_most(hi)`,
+`.non_empty()`, `.exists()`, `.refine(|v| ..)`; and `.why("…")` after any
+check but `.trim()` to give it its message (Rust cannot overload by arity,
+so this is the one spelling in every language); `object().refine(|input|
+..).why("…")` over the whole input.
 
 The module: `Module::new((library(), playlists()))` with helpers found by
 being called. `module().emit() -> ModuleBytes`, `module().procedures() ->
@@ -517,7 +528,9 @@ pub fn demo() -> Router<Demo> {
         }),
     ))
 }
-// CreatePlaylist { name: text().trim().min(1, "a playlist needs a name") }
+// Demo { playlist: Table<Playlist>, item: Table<Item> }, opened as
+//   Demo { playlist: table(), item: table() }
+// CreatePlaylist { name: text().trim().min(1).why("a playlist needs a name") }
 // AddToPlaylist  { playlist_id: id::<Playlist>().exists(), track_id: text().min(1) }
 // PlaylistId     { playlist_id: id::<Playlist>() }
 ```
