@@ -328,6 +328,95 @@ check but `.trim()` to give it its message (Rust cannot overload by arity,
 so this is the one spelling in every language); `object().refine(|input|
 ..).why("…")` over the whole input.
 
+A router file also declares the module's **helpers** and **records**, after
+its inputs and before the router function:
+
+```rust
+// library.rs
+pub struct LibraryEntry {                    // a record: what `library_entry` returns
+    pub added_ms: Int,
+    pub playlist_pos: Opt<Int>,
+    // … every field, alphabetically
+}
+impl Record for LibraryEntry {
+    fn fields() -> Fields<Self> {
+        fields().field("added_ms", int()).field("playlist_pos", opt(int())) // …
+    }
+}
+
+pub fn slug(text: Text) -> Text {            // a helper of one parameter
+    helper("slug", ("text", text), |text: Text| {
+        concat(text.chars().map(|x| pick(x.is_alnum(), x.lower(), " ")))
+            .trim()
+            .chars()
+            .fold("", |acc: Text, x| { .. })
+    })
+}
+
+pub fn movement_key(work_id: Text, no: Int) -> Text {
+    helper("movement_key", (("work_id", work_id), ("no", no)), |work_id: Text, no: Int| {
+        concat(list([work_id, "#".into(), no.to_text()]))
+    })
+}
+
+pub fn library_entry(media: Media, items: List<PlaylistItem>) -> LibraryEntry {
+    helper(
+        "library_entry",
+        (("media", media), ("items", items)),
+        |media: Media, items: List<PlaylistItem>| LibraryEntry { added_ms: media.added_ms, /* … */ },
+    )
+}
+```
+
+The rules `arkc gen rust` prints these by, each deterministic:
+
+- **A helper** is `pub fn name(a: A, ..) -> R { helper("name", PARAMS, |a: A, ..| body) }`:
+  `PARAMS` is the bare pair `("a", a)` for one parameter and a tuple of
+  pairs for several; the closure's parameters are the helper's, under the
+  same names and typed (a closure passed through a trait bound cannot have
+  them inferred). Inside the body a parameter is its bare name, where a
+  procedure's input is `input.f`. A call is `name(args)`.
+- **A record** is a struct type some function returns that is not a row.
+  It is named after the first function in module order whose result it
+  is, in PascalCase, with `Entry` appended when that result is a list of
+  it (`LibraryEntry` for the helper `library_entry`, `AlbumsEntry` for the
+  query `albums`, `WorkSummary` for the helper `work_summary`); a name
+  already a row's, an input's or an earlier record's gets `Record`
+  appended. Its fields, in the struct and in `fields()`, are in the IR's
+  order, which is alphabetical; a record literal is `Name { f: v, .. }` in
+  that order too, where a row literal keeps its table's column order.
+- **Where each goes.** A procedure is in its router's file, a middleware in
+  the file of the router that declares it, and a helper in the file of the
+  first function after it in module order that is not a helper — which is
+  its first caller's, since a helper is placed immediately before that
+  (§6). A record is declared in the file of the function that names it.
+  A file is: `use ark::authoring::*;`, then one `use` group of
+  `use crate::schema::*;` and a `use crate::<file>::<name>;` for every
+  helper its functions call and every record its text names that another
+  file declares (`use crate::library::library_entry;` in `playlists.rs`),
+  as rustfmt sorts them; then its inputs, its records and its helpers, each
+  in module order, and last the router.
+- **A literal is lifted with `.into()`** where the vocabulary takes exactly
+  a type rather than anything that converts to it: a row's or a record's
+  field (`kind: "song".into()`, `recorded: 0.into()`), a list's element
+  (`list(["no work ".into(), input.id])`), a helper's argument. Everywhere
+  else — a method's argument, `pick`, `some`, `map_or`'s default, `fold`'s
+  start, `refuse` — it is written bare.
+- **`pick::<T>(..)`** where a pick is passed straight to another `pick` or
+  to `some`: both take any value that converts, so nothing else would say
+  which `T` the inner one is (`pick(performer.is_empty(), pick::<Text>(work_id.is_some(), "", artist), performer)`).
+- **A fold's accumulator is typed** (`.fold("", |acc: Text, x| ..)`), for
+  the same reason: its start converts.
+- **`x.is_none()`** is how `not (is_some x)` prints, `is_none` being that
+  lowering; option comparisons are `.eq(some(v))`/`.ne(..)` like any other
+  (`Opt::eq`, `Opt::ne`).
+- **Names**: an `exists` read is named after its table like any other read
+  (`let media = db.media.exists((input.media_id,));`); a closure parameter
+  over a record is `row`, as over a row.
+
+Swift and Kotlin have no spelling of helpers or records yet: `arkc gen
+swift|kotlin` refuses a module that needs one, naming it.
+
 The module: `Module::new((library(), playlists()))` with helpers found by
 being called. `module().emit() -> ModuleBytes`, `module().procedures() ->
 Vec<(FnHash, Procedure)>` for a runtime, and `module().hash()`.
@@ -504,7 +593,8 @@ neither). `arkc gen --fmt CMD` runs the formatter; `nix flake check` pins
 all three.
 
 **Files.** Rust: `use ark::authoring::*;` first in every file, then
-`use crate::schema::*;` in a router file, then the router functions a
+`use crate::schema::*;` in a router file, with the helpers and records it
+takes from other router files beside it (§2.5), then the router functions a
 module file names. Swift: `import ArkAuthoring`. Kotlin: `package <p>`
 (`arkc gen kotlin … --package p`, default `domain`), a blank line, then
 `import dev.arkdb.authoring.*`, `import dev.arkdb.authoring.Int`,

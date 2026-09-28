@@ -31,6 +31,10 @@
 -- statement builds, or the value a function returns. That is the one
 -- choice the IR cannot record (a host @let@ emits nothing), and this rule
 -- is how it is made.
+--
+-- A router file also carries the module's helpers and records ('records'),
+-- each in the file its first user is in ('homeOf'), and imports what it
+-- names from another. Only Rust spells them yet (AUTHORING §2.5).
 module Ark.Gen
   ( Target (..)
   , Options (..)
@@ -42,10 +46,10 @@ module Ark.Gen
   ) where
 
 import Data.Char (isAlphaNum, toUpper)
-import Data.List (find, nub)
+import Data.List (find, nub, sort)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
-import Data.Maybe (fromMaybe, isJust, mapMaybe)
+import Data.Maybe (fromMaybe, isJust, listToMaybe, mapMaybe)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -303,6 +307,8 @@ routerFile :: Target -> Options -> Module -> Router -> Either Text (FilePath, Te
 routerFile t opts m r = do
   mws <- mapM (middleware t m r) middlewares
   procs <- mapM (procedure t m r) procedures
+  recs <- mapM (recordItem t m) [rc | rc <- records m, here (recFn rc)]
+  helps <- mapM (helperItem t m) helpers
   let inputs = concatMap (inputItem t m) (middlewares ++ procedures)
       body =
         [ open
@@ -312,11 +318,20 @@ routerFile t opts m r = do
           ++ [indent 1 (routesOpen)]
           ++ [indent 2 (p <> sep) | (p, sep) <- zip procs (replicate (length procs - 1) "," ++ [lastSep])]
           ++ [indent 1 routesClose, "}"]
+      items = inputs ++ recs ++ helps ++ [body]
+      -- What this file names that another file declares: the helpers its
+      -- functions call, and the records its text writes.
+      called = nub [c | fn <- middlewares ++ procedures ++ helpers, c <- calls fn]
+      helperImports = ["use crate::" <> h <> "::" <> c <> ";" | c <- called, not (here c), Just h <- [homeOf m c]]
+      recordImports = ["use crate::" <> h <> "::" <> recName rc <> ";" | rc <- records m, not (here (recFn rc)), Just h <- [homeOf m (recFn rc)], mentions (recName rc) (layout items)]
       imports = case t of
-        Rust -> [header t opts, ["use crate::schema::*;"]]
+        Rust -> [header t opts, sort (helperImports ++ recordImports ++ ["use crate::schema::*;"])]
         _ -> [header t opts]
-  pure (fileName t (rtName r), layout (imports ++ inputs ++ [body]))
+  pure (fileName t (rtName r), layout (imports ++ items))
   where
+    here n = homeOf m n == Just (rtName r)
+    helpers = [fn | fn <- modFunctions m, fnKind fn == Helper, here (fnName fn)]
+    mentions n txt = n `elem` T.split (\c -> not (isAlphaNum c || c == '_')) txt
     fns = [fn | fn <- modFunctions m, fnRouter fn == Just (rtName r)]
     procedures = fns
     middlewares = [fn | u <- rtUses r, Just fn <- [lookupFunction m u]]
@@ -451,6 +466,65 @@ providedName m _ u = fromMaybe u $ do
 tableOfTy :: Schema -> Ty -> Maybe TableName
 tableOfTy sch ty = tName <$> find (\tb -> rowTy tb == ty) (schTables sch)
 
+-- | §18.4 A record: a struct type that is not a row, which the module
+-- carries only as a type. It is named after the first function, in module
+-- order, whose result it is — the function's name in PascalCase, with
+-- @Entry@ appended when the result is a list of it — and declared in that
+-- function's file. A name already taken (a row's, an input's, an earlier
+-- record's) has @Record@ appended.
+data Rec = Rec
+  { recTy :: Ty
+  , recName :: Text
+  , recFn :: Text
+  }
+
+records :: Module -> [Rec]
+records m = reverse (foldl step [] (modFunctions m))
+  where
+    rows = map rowTy (schTables (modSchema m))
+    inputs = [inputTypeName m fn | fn <- modFunctions m, fnKind fn /= Helper, not (null (fnInput fn))]
+    step acc fn = case fnRet fn >>= structOf of
+      Just (ty, suffix)
+        | ty `notElem` rows && ty `notElem` map recTy acc ->
+            let base = pascal (fnName fn) <> suffix
+                taken = [pascal (tName tb) | tb <- schTables (modSchema m)] ++ inputs ++ map recName acc
+             in Rec ty (if base `elem` taken then base <> "Record" else base) (fnName fn) : acc
+      _ -> acc
+    structOf = \case
+      TList s@(TStruct _) -> Just (s, "Entry")
+      TOption s@(TStruct _) -> Just (s, "")
+      s@(TStruct _) -> Just (s, "")
+      _ -> Nothing
+
+-- | What every struct type is called: a row by its table, a record by
+-- 'records'.
+structNames :: Module -> [(Ty, Text)]
+structNames m = [(rowTy tb, pascal (tName tb)) | tb <- schTables (modSchema m)] ++ [(recTy r, recName r) | r <- records m]
+
+-- | A type as the vocabulary writes it, with its structs named.
+tyName :: [(Ty, Text)] -> Ty -> Text
+tyName names = \case
+  TOption x -> "Opt<" <> tyName names x <> ">"
+  TList x -> "List<" <> tyName names x <> ">"
+  s@(TStruct _) -> fromMaybe "Struct" (lookup s names)
+  other -> langTy Rust other
+
+-- | The router whose file a function is printed in: a procedure's own, a
+-- middleware's (the router that declares it), and a helper's the file of
+-- the first function after it in module order that is not a helper —
+-- which is where its first caller is, since a helper is placed
+-- immediately before that.
+homeOf :: Module -> Text -> Maybe Text
+homeOf m n = do
+  fn <- lookupFunction m n
+  case fnKind fn of
+    Helper -> case [f | f <- drop 1 (dropWhile ((/= n) . fnName) (modFunctions m)), fnKind f /= Helper] of
+      (f : _) -> homeOf m (fnName f)
+      [] -> rtName <$> listToMaybe (modRouters m)
+    _
+      | isMiddleware fn -> rtName <$> find (\r -> n `elem` rtUses r) (modRouters m)
+      | otherwise -> fnRouter fn
+
 inputItem :: Target -> Module -> Function -> [[Text]]
 inputItem t m fn
   | null (fnInput fn) = []
@@ -485,6 +559,59 @@ inputItem t m fn
         , "    }"
         , "}"
         ]
+
+-- | §18.4 A helper: an ordinary function of the vocabulary's types whose
+-- body is @helper(..)@ — its name, its parameters paired with their names
+-- (one parameter is a bare pair, several a tuple of pairs), and a closure
+-- over the same names, typed.
+helperItem :: Target -> Module -> Function -> Either Text [Text]
+helperItem t m fn = case t of
+  Rust -> do
+    (items, _) <- block (newCx m fn) (fnBody fn)
+    let names = structNames m
+        ps = [(n, tyName names (fTy f)) | (n, f) <- fnInput fn]
+        sig = commas [n <> ": " <> ty | (n, ty) <- ps]
+        pair n = "(" <> str t n <> ", " <> n <> ")"
+        params = case ps of
+          [(n, _)] -> pair n
+          _ -> "(" <> commas [pair n | (n, _) <- ps] <> ")"
+        ret = maybe "()" (tyName names) (fnRet fn)
+    pure
+      [ "pub fn " <> fnName fn <> "(" <> sig <> ") -> " <> ret <> " {"
+      , "    helper(" <> commas [str t (fnName fn), params, "|" <> sig <> "| " <> renderBody t (B items)] <> ")"
+      , "}"
+      ]
+  _ -> Left ("a helper has no " <> targetName t <> " spelling yet: " <> fnName fn)
+
+-- | §18.4 A record: a struct of the vocabulary's values and its
+-- @Record@ impl, the fields in the IR's order, which is alphabetical.
+recordItem :: Target -> Module -> Rec -> Either Text [Text]
+recordItem t m rc = case (t, recTy rc) of
+  (Rust, TStruct fs) -> do
+    builders <- mapM (\(f, ty) -> (\b -> ".field(" <> str t f <> ", " <> b <> ")") <$> build ty) (M.toList fs)
+    pure $
+      ["pub struct " <> recName rc <> " {"]
+        ++ ["    pub " <> f <> ": " <> tyName names ty <> "," | (f, ty) <- M.toList fs]
+        ++ [ "}"
+           , "impl Record for " <> recName rc <> " {"
+           , "    fn fields() -> Fields<Self> {"
+           , "        fields()" <> T.concat builders
+           , "    }"
+           , "}"
+           ]
+  _ -> Left ("a record has no " <> targetName t <> " spelling yet: " <> recName rc)
+  where
+    names = structNames m
+    build = \case
+      TText -> Right "text()"
+      TInt -> Right "int()"
+      TBool -> Right "bool_()"
+      TBytes -> Right "bytes()"
+      TId x -> Right ("id::<" <> pascal x <> ">()")
+      TEnum _ -> Right "text()"
+      TOption x -> (\b -> "opt(" <> b <> ")") <$> build x
+      TList x -> (\b -> "list(" <> b <> ")") <$> build x
+      other -> Left ("a record field of type " <> tyName names other <> " has no spelling")
 
 fieldBuilder :: Target -> Module -> Function -> Text -> Field -> Text
 fieldBuilder t m fn n (Field ty cs) = str t n <> ", " <> go ty
@@ -540,8 +667,15 @@ data S
   | SField S Text
   | SMethod S Text [Arg]
   | SFree Text [Arg]
-  | SNone Ty
-  | SRow TableName [(FieldName, S)]
+  | -- | A free vocabulary function with its type written: @pick::<Text>(..)@
+    -- in Rust, where nothing else would say which it is.
+    SFreeT Text Text [Arg]
+  | -- | A call to one of the module's helpers.
+    SCall Text [S]
+  | -- | @none::<T>()@, with @T@ already spelled.
+    SNone Text
+  | -- | A struct literal: a row's or a record's, by its type's name.
+    SRow Text [(FieldName, S)]
   | SList [S]
   | SDb TableName
   | SCol TableName FieldName
@@ -557,6 +691,9 @@ data Arg
     -- arguments elsewhere.
     Seq [S]
   | L [Text] B
+  | -- | A closure some of whose parameters are written with their type:
+    -- a fold's accumulator in Rust.
+    LTyped [(Text, Maybe Text)] B
   deriving (Show)
 
 newtype B = B [Item]
@@ -577,6 +714,8 @@ data Cx = Cx
   , cxOrRefuse :: Set.Set Sym
   , -- | Inside a field's refinement: that field, and what it is called.
     cxArg :: Maybe (Text, S)
+  , -- | What every struct type is called: the rows, then the records.
+    cxNames :: [(Ty, Text)]
   }
 
 newCx :: Module -> Function -> Cx
@@ -590,9 +729,11 @@ newCx m fn =
     , cxUses = symUses fn
     , cxOrRefuse = Set.empty
     , cxArg = Nothing
+    , cxNames = structNames m
     }
   where
-    provided = [providedName m fn u | u <- fnUses fn]
+    -- A helper's parameters are in scope under their own names.
+    provided = [providedName m fn u | u <- fnUses fn] ++ [n | fnKind fn == Helper, (n, _) <- fnInput fn]
 
 fresh :: Cx -> Text -> (Text, Cx)
 fresh cx base = (n, cx {cxScope = Set.insert n (cxScope cx)})
@@ -688,7 +829,7 @@ block cx = \case
     bindValue cx s (TOption . rowTy <$> table tb) tb (SMethod (SDb tb) "get" [Tup ks']) rest
   (SLet s (EExists tb ks) : rest) -> do
     ks' <- mapM (expr cx) ks
-    bindValue cx s (Just TBool) (tb <> "_exists") (SMethod (SDb tb) "exists" [Tup ks']) rest
+    bindValue cx s (Just TBool) tb (SMethod (SDb tb) "exists" [Tup ks']) rest
   (SLet s e : SIf (EStd IsSome [EVar s0]) [] [SRefuse (ELit (VText msg))] : rest)
     | s0 == s -> do
         e' <- expr cx e
@@ -782,7 +923,7 @@ rowLit cx tb = \case
       [] -> Right ()
       ks -> Left ("not columns of " <> tb <> ": " <> T.intercalate ", " ks)
     fields <- mapM (\c -> (,) c <$> expr cx (fs M.! c)) [c | c <- cols, M.member c fs]
-    pure (SRow tb fields)
+    pure (SRow (pascal tb) fields)
   other -> Left ("a write of something other than a row literal: " <> T.pack (take 80 (show other)))
 
 selectChain :: Cx -> Plan -> Text -> Either Text S
@@ -853,7 +994,9 @@ expr cx = \case
   ELit v -> Right (SLit v)
   EArg a -> case cxArg cx of
     Just (f, s) | f == a -> Right s
-    _ -> Right (SInput a)
+    _
+      | fnKind (cxFn cx) == Helper -> Right (SName a)
+      | otherwise -> Right (SInput a)
   EAuto a -> case lookup a (fnAutos (cxFn cx)) of
     Just (NewId _) -> Right (SAuto "new_id" a)
     Just Now -> Right (SAuto "now" a)
@@ -865,10 +1008,12 @@ expr cx = \case
   EField e f -> (`SField` f) <$> expr cx e
   EStruct fs -> case find (\tb -> M.keysSet (case rowTy tb of TStruct x -> x; _ -> M.empty) == M.keysSet fs) allTables of
     Just tb -> rowLit cx (tName tb) (EStruct fs)
-    Nothing -> Left "a struct that is not a row has no spelling"
+    Nothing -> case [n | (TStruct x, n) <- cxNames cx, M.keysSet x == M.keysSet fs] of
+      (n : _) -> SRow n <$> mapM (\(f, e) -> (,) f <$> expr cx e) (M.toList fs)
+      [] -> Left ("a struct no function returns has no name: " <> T.intercalate ", " (M.keys fs))
   EList es -> SList <$> mapM (expr cx) es
-  ESome e -> (\e' -> SFree "some" [A e']) <$> expr cx e
-  ENone ty -> Right (SNone ty)
+  ESome e -> (\e' -> SFree "some" [A e']) <$> pickArg e
+  ENone ty -> Right (SNone (tyName (cxNames cx) ty))
   EMatch o x a b -> do
     o' <- expr cx o
     let inner = case tyOf cx o of
@@ -889,8 +1034,8 @@ expr cx = \case
         pure (SMethod o' "map_or" [A b', L [xn] (B [IDo a'])])
   EIf c a b -> do
     c' <- expr cx c
-    a' <- expr cx a
-    b' <- expr cx b
+    a' <- pickArg a
+    b' <- pickArg b
     pure (SFree "pick" [A c', A a', A b'])
   EOp op es -> case (op, es) of
     (Neg, [a]) -> unary "neg" a
@@ -904,7 +1049,7 @@ expr cx = \case
     a' <- expr cx a
     b' <- expr cx b
     pure (SMethod a' (cmpName op) [A b'])
-  ECall n es -> SFree n . map A <$> mapM (expr cx) es
+  ECall n es -> SCall n <$> mapM (expr cx) es
   EStd f es -> do
     es' <- mapM (expr cx) es
     case (f, es, es') of
@@ -927,12 +1072,22 @@ expr cx = \case
         (xn, cx2) = fresh cx1 (paramBase el)
         cxB = cx2 {cxSyms = M.insert acc (SName an) (M.insert x (SName xn) (cxSyms cx)), cxTys = maybe id (M.insert x) el (maybe id (M.insert acc) (tyOf cx z) (cxTys cx))}
     b' <- expr cxB b
-    pure (SMethod xs' "fold" [A z', L [an, xn] (B [IDo b'])])
+    pure (SMethod xs' "fold" [A z', LTyped [(an, tyName (cxNames cx) <$> tyOf cx z), (xn, Nothing)] (B [IDo b'])])
   ESelect _ -> Left "a read outside a let"
   EGet _ _ -> Left "a read outside a let"
   EExists _ _ -> Left "a read outside a let"
   where
     allTables = schTables (modSchema (cxMod cx))
+    -- A pick passed straight to @pick@ or @some@, which take any value
+    -- that converts, says its type: nothing else would.
+    pickArg = \case
+      e@(EIf c a b) -> do
+        ty <- maybe (Left "a pick of a type the printer cannot tell") Right (tyOf cx e)
+        c' <- expr cx c
+        a' <- pickArg a
+        b' <- pickArg b
+        pure (SFreeT "pick" (tyName (cxNames cx) ty) [A c', A a', A b'])
+      e -> expr cx e
     unary m a = (\a' -> SMethod a' m []) <$> expr cx a
     elemTy xs = case tyOf cx xs of
       Just (TList e) -> Just e
@@ -1009,21 +1164,50 @@ tyOf cx = \case
   EField e f -> case tyOf cx e of
     Just (TStruct fs) -> M.lookup f fs
     _ -> Nothing
+  EStruct fs -> listToMaybe [ty | (ty@(TStruct x), _) <- cxNames cx, M.keysSet x == M.keysSet fs]
+  EList (e : _) -> TList <$> tyOf cx e
+  EList [] -> Nothing
   ESome e -> TOption <$> tyOf cx e
   ENone t -> Just (TOption t)
-  EMatch _ _ _ b -> tyOf cx b
-  EIf _ a _ -> tyOf cx a
+  EMatch o x a b -> case tyOf cx b of
+    Just t -> Just t
+    Nothing -> case tyOf cx o of
+      Just (TOption i) -> tyOf (bind x i) a
+      _ -> Nothing
+  EIf _ a b -> maybe (tyOf cx b) Just (tyOf cx a)
+  EOp op _ -> Just (if op `elem` [And, Or, Not] then TBool else TInt)
+  ECmp {} -> Just TBool
+  ECall n _ -> lookupFunction (cxMod cx) n >>= fnRet
   EStd f es -> case (f, es) of
     (First, [a]) -> listToOpt a
     (Last, [a]) -> listToOpt a
     (Unwrap, [a]) -> unOpt a
     (UnwrapOr, [a, _]) -> unOpt a
     (Reverse, [a]) -> tyOf cx a
+    (Chars, _) -> Just (TList TText)
+    (Sha256, _) -> Just TBytes
+    (Utf8, _) -> Just TBytes
+    (IdOfText, _) -> Nothing
+    (NilId, _) -> Nothing
+    (SplitOnce, _) -> Nothing
+    _
+      | f `elem` [Trim, Concat, Lower, TextOfInt, Hex, TextOfId] -> Just TText
+      | f `elem` [IsEmpty, IsAlnum, StartsWith, Contains, IsSome] -> Just TBool
+      | f `elem` [TextLen, Len, Min, Max, Clamp, Abs, Fnv1a64] -> Just TInt
+      | otherwise -> Nothing
+  EMap xs x b -> case tyOf cx xs of
+    Just (TList e) -> TList <$> tyOf (bind x e) b
     _ -> Nothing
   EFilter xs _ _ -> tyOf cx xs
   ESortBy xs _ _ -> tyOf cx xs
-  _ -> Nothing
+  EAny {} -> Just TBool
+  EAll {} -> Just TBool
+  EFold _ z _ _ _ -> tyOf cx z
+  ESelect p -> TList . rowTy <$> lookupTable (modSchema (cxMod cx)) (pTable p)
+  EGet tb _ -> TOption . rowTy <$> lookupTable (modSchema (cxMod cx)) tb
+  EExists _ _ -> Just TBool
   where
+    bind x t = cx {cxTys = M.insert x t (cxTys cx)}
     listToOpt a = case tyOf cx a of
       Just (TList t) -> Just (TOption t)
       _ -> Nothing
@@ -1156,19 +1340,25 @@ render t = \case
   SCtx f -> "ctx." <> f
   SAuto m n -> "ctx." <> ident t m <> "(" <> str t n <> ")"
   SField s f -> render t s <> "." <> ident t f
+  -- @x.is_some().not()@ is the one lowering of @x.is_none()@.
+  SMethod (SMethod s "is_some" []) "not" [] | t == Rust -> render t s <> ".is_none()"
   SMethod s m args -> render t s <> "." <> methodName t m <> callArgs t args
   SFree f args -> freeName t f <> freeArgs t f args
+  SFreeT f ty args -> case t of
+    Rust -> f <> "::<" <> ty <> ">" <> callArgs t args
+    _ -> freeName t f <> freeArgs t f args
+  SCall f args -> freeName t f <> "(" <> commas (map (lifted t) args) <> ")"
   SNone ty -> case t of
-    Rust -> "none::<" <> langTy t ty <> ">()"
-    Swift -> "none(" <> langTy t ty <> ".self)"
-    Kotlin -> "none<" <> langTy t ty <> ">()"
-  SRow tb fs -> case t of
-    Rust -> pascal tb <> " { " <> commas [f <> ": " <> render t v | (f, v) <- fs] <> " }"
-    Swift -> pascal tb <> "(" <> commas [ident t f <> ": " <> render t v | (f, v) <- fs] <> ")"
-    Kotlin -> pascal tb <> "(" <> commas [ident t f <> " = " <> render t v | (f, v) <- fs] <> ")"
+    Rust -> "none::<" <> ty <> ">()"
+    Swift -> "none(" <> ty <> ".self)"
+    Kotlin -> "none<" <> ty <> ">()"
+  SRow n fs -> case t of
+    Rust -> n <> " { " <> commas [f <> ": " <> lifted t v | (f, v) <- fs] <> " }"
+    Swift -> n <> "(" <> commas [ident t f <> ": " <> render t v | (f, v) <- fs] <> ")"
+    Kotlin -> n <> "(" <> commas [ident t f <> " = " <> render t v | (f, v) <- fs] <> ")"
   SList es -> case t of
     Kotlin -> "list(" <> commas (map (render t) es) <> ")"
-    _ -> "list([" <> commas (map (render t) es) <> "])"
+    _ -> "list([" <> commas (map (lifted t) es) <> "])"
   SDb tb -> "db." <> ident t tb
   SCol tb c -> pascal tb <> sep <> ident t c
   SRel tb r -> pascal tb <> sep <> ident t r
@@ -1176,6 +1366,16 @@ render t = \case
     sep = case t of
       Rust -> "::"
       _ -> "."
+
+-- | A value where the vocabulary takes exactly its type rather than
+-- anything that converts to it — a struct's field, a list's element, a
+-- helper's argument: a literal there is lifted with @.into()@ in Rust.
+lifted :: Target -> S -> Text
+lifted t = \case
+  SLit v | t == Rust -> case v of
+    VInt n | n < 0 -> "(" <> tshow n <> ").into()"
+    _ -> literal t v <> ".into()"
+  s -> render t s
 
 methodName :: Target -> Text -> Text
 methodName t m = case (t, m) of
@@ -1195,10 +1395,13 @@ callArgs :: Target -> [Arg] -> Text
 callArgs t args = case t of
   Rust -> "(" <> commas (concatMap (arg t) args) <> ")"
   _ -> case reverse args of
-    (L ps b : before) ->
+    (L ps b : before) -> trailing before ps b
+    (LTyped ps b : before) -> trailing before (map fst ps) b
+    _ -> "(" <> commas (concatMap (arg t) args) <> ")"
+  where
+    trailing before ps b =
       let rest = concatMap (arg t) (reverse before)
        in (if null rest then " " else "(" <> commas rest <> ") ") <> lambda t ps b
-    _ -> "(" <> commas (concatMap (arg t) args) <> ")"
 
 freeArgs :: Target -> Text -> [Arg] -> Text
 freeArgs t f args = case (t, f, args) of
@@ -1217,6 +1420,9 @@ arg t = \case
     (Rust, _) -> ["(" <> commas (map (render t) ss) <> ")"]
     _ -> map (render t) ss
   L ps b -> [lambda t ps b]
+  LTyped ps b -> case t of
+    Rust -> ["|" <> commas [ident t p <> maybe "" (": " <>) ty | (p, ty) <- ps] <> "| " <> renderBody t b]
+    _ -> [lambda t (map fst ps) b]
 
 literal :: Target -> Value -> Text
 literal t = \case
