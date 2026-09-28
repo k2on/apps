@@ -55,7 +55,20 @@ signed in dials nothing, and pushes its re-stamped work once somebody does;
 an entry authored under an older login of the same person is accepted
 (`Auth::owns`, through `.auth(..)`).
 
-`nix/module.nix` is the NixOS service (`services.harken`).
+## Nix
+
+- `nix/module.nix` — the NixOS service, `services.harken`: dev auth or an
+  OpenID Connect provider whose secret is a systemd credential, the media
+  directory made by tmpfiles and bound read-only, the state in
+  `StateDirectory` (`HARKEN_DATA=%S/harken`), the house with its token as a
+  credential, the assertion that a speaker is never handed a URL on this
+  machine, and the warning when it is handed a LAN URL this server is not
+  bound to. `web` defaults to null: which build a server should serve is the
+  flake's to say.
+- `nix/module-test.nix` — the module evaluated under each of those
+  configurations and held to its assertions, warning and unit, without
+  building a system.
+- `nix/serve.nix` — `harken-serve [ADDR]`, a dev-auth server.
 
 ## Tests
 
@@ -69,4 +82,5 @@ restarts (`tests/server.rs`); the web validator through this server
 
 Not verified: a real Home Assistant or speaker (the stand-in is written from
 the REST API's documentation), a real OpenID Connect provider, the NixOS
-module on a machine, a TLS proxy in front.
+module on a machine (it is evaluated, never booted), inotify on a real
+library of thousands of files, a TLS proxy in front.

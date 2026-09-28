@@ -37,8 +37,25 @@ async fn main() -> Result<()> {
         anyhow::bail!("unexpected argument {extra}\n{USAGE}");
     }
     let server = start(Config::from_env(&listen)?).await?;
-    tokio::signal::ctrl_c().await?;
+    stopped().await?;
     eprintln!("harken-server: stopping");
     server.stop().await;
     Ok(())
+}
+
+/// Ctrl-C on a laptop, or `SIGTERM` from systemd: either is a request to
+/// stop, answered by taking the scanner and the house off the hub first.
+#[cfg(unix)]
+async fn stopped() -> Result<()> {
+    let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    tokio::select! {
+        r = tokio::signal::ctrl_c() => r?,
+        _ = term.recv() => {}
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+async fn stopped() -> Result<()> {
+    Ok(tokio::signal::ctrl_c().await?)
 }

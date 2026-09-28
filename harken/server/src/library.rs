@@ -237,6 +237,9 @@ fn run(
         if let Some(why) = pumped.denied {
             eprintln!("harken-server: library: the hub turned the scanner away: {why}");
         }
+        // The scanner stands in its account's room like any signed-in peer;
+        // nothing is said there that it needs, so it is not kept.
+        drop(peer.heard());
         for r in peer.take_rejections() {
             eprintln!("harken-server: library: an entry was refused: {}", r.reason);
         }
