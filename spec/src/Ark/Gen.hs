@@ -34,7 +34,7 @@
 --
 -- A router file also carries the module's helpers and records ('records'),
 -- each in the file its first user is in ('homeOf'), and imports what it
--- names from another. Rust and Swift spell them; Kotlin not yet
+-- names from another, each spelt as its language's authoring layer has it
 -- (AUTHORING §2.5).
 module Ark.Gen
   ( Target (..)
@@ -595,7 +595,16 @@ helperItem t m fn = case t of
       , "    helper(" <> commas (str t (fnName fn) : ["(" <> str t n <> ", " <> camel n <> ")" | (n, _) <- ps]) <> ") { " <> header <> renderBody t (B items) <> " }"
       , "}"
       ]
-  _ -> Left ("a helper has no " <> targetName t <> " spelling yet: " <> fnName fn)
+  Kotlin -> do
+    (items, _) <- block (newCx m fn) (fnBody fn)
+    let names = structNames m
+        ps = [(n, tyName names (fTy f)) | (n, f) <- fnInput fn]
+        ret = maybe "Unit" (tyName names) (fnRet fn)
+    pure
+      [ "fun " <> camel (fnName fn) <> "(" <> commas [camel n <> ": " <> ty | (n, ty) <- ps] <> "): " <> ret <> " ="
+          <> " helper(" <> commas (str t (fnName fn) : [str t n <> " to " <> camel n | (n, _) <- ps]) <> ") { "
+          <> commas [camel n | (n, _) <- ps] <> " -> " <> renderBody t (B items) <> " }"
+      ]
   where
     single = \case
       [IDo _] -> True
@@ -629,6 +638,18 @@ recordItem t m rc = case (t, recTy rc) of
            , "    }"
            , "}"
            ]
+  (Kotlin, TStruct fs) -> do
+    builders <- mapM (\(f, ty) -> (\b -> ".field(" <> str t f <> ", " <> b <> ")") <$> build ty) (M.toList fs)
+    let n = recName rc
+    pure $
+      ["class " <> n <> "("]
+        ++ ["    val " <> camel f <> ": " <> tyName names ty <> "," | (f, ty) <- M.toList fs]
+        ++ [ ") : Record {"
+           , "    companion object : Record.Of<" <> n <> "> {"
+           , "        override fun fields(): Fields<" <> n <> "> = fields<" <> n <> ">()" <> T.concat builders
+           , "    }"
+           , "}"
+           ]
   _ -> Left ("a record has no " <> targetName t <> " spelling yet: " <> recName rc)
   where
     names = structNames m
@@ -638,7 +659,11 @@ recordItem t m rc = case (t, recTy rc) of
       TInt -> Right (q "int" <> "()")
       TBool -> Right (if t == Rust then "bool_()" else q "bool" <> "()")
       TBytes -> Right (q "bytes" <> "()")
-      TId x -> Right (if t == Rust then "id::<" <> pascal x <> ">()" else q "id" <> "(" <> pascal x <> ".self)")
+      TId x -> Right $ case t of
+        Rust -> "id::<" <> pascal x <> ">()"
+        Swift -> q "id" <> "(" <> pascal x <> ".self)"
+        Kotlin -> "id<" <> pascal x <> ">()"
+      s@(TStruct _) | t == Kotlin, Just n <- lookup s names -> Right ("record<" <> n <> ">()")
       TEnum _ -> Right (q "text" <> "()")
       TOption x -> (\b -> q "opt" <> "(" <> b <> ")") <$> build x
       TList x -> (\b -> q "list" <> "(" <> b <> ")") <$> build x
@@ -715,6 +740,8 @@ data S
     SCall Text [S]
   | -- | @none::<T>()@, with @T@ already spelled.
     SNone Text
+  | -- | A value lifted where its language needs it (@lit(..)@ in Kotlin).
+    SLift S
   | -- | A value whose type is written beside it where a language needs it:
     -- @Text("")@ in Swift, the value alone elsewhere.
     SAs Text S
@@ -1394,11 +1421,17 @@ render t = \case
   SField s f -> render t s <> "." <> ident t f
   -- @x.is_some().not()@ is the one lowering of @x.is_none()@.
   SMethod (SMethod s "is_some" []) "not" [] | t == Rust -> render t s <> ".is_none()"
+  -- Kotlin has no overload taking a bare literal for these: the value is
+  -- lifted with @lit(..)@.
+  SMethod s m args | t == Kotlin && m `elem` ["unwrap_or", "contains"] -> render t s <> "." <> methodName t m <> callArgs t (map liftArg args)
   SMethod s m args -> render t s <> "." <> methodName t m <> callArgs t args
+  SFree "pick" (c : branches) | t == Kotlin -> freeName t "pick" <> freeArgs t "pick" (c : map liftArg branches)
+  SFree "some" [A v@(SLit (VBool _))] | t == Kotlin -> "some(" <> lifted t v <> ")"
   SFree f args -> freeName t f <> freeArgs t f args
   SFreeT f ty args -> case t of
     Rust -> f <> "::<" <> ty <> ">" <> callArgs t args
-    _ -> freeName t f <> freeArgs t f args
+    _ -> render t (SFree f args)
+  SLift v -> lifted t v
   SCall f args -> freeName t f <> "(" <> commas (map (lifted t) args) <> ")"
   SNone ty -> case t of
     Rust -> "none::<" <> ty <> ">()"
@@ -1407,9 +1440,9 @@ render t = \case
   SRow n fs -> case t of
     Rust -> n <> " { " <> commas [f <> ": " <> lifted t v | (f, v) <- fs] <> " }"
     Swift -> n <> "(" <> commas [ident t f <> ": " <> render t v | (f, v) <- fs] <> ")"
-    Kotlin -> n <> "(" <> commas [ident t f <> " = " <> render t v | (f, v) <- fs] <> ")"
+    Kotlin -> n <> "(" <> commas [ident t f <> " = " <> lifted t v | (f, v) <- fs] <> ")"
   SList es -> case t of
-    Kotlin -> "list(" <> commas (map (render t) es) <> ")"
+    Kotlin -> "list(" <> commas (map (lifted t) es) <> ")"
     _ -> "list([" <> commas (map (lifted t) es) <> "])"
   SDb tb -> "db." <> ident t tb
   SCol tb c -> pascal tb <> sep <> ident t c
@@ -1418,15 +1451,20 @@ render t = \case
     sep = case t of
       Rust -> "::"
       _ -> "."
+    liftArg = \case
+      A v@(SLit _) -> A (SLift v)
+      a -> a
 
 -- | A value where the vocabulary takes exactly its type rather than
 -- anything that converts to it — a struct's field, a list's element, a
--- helper's argument: a literal there is lifted with @.into()@ in Rust.
+-- helper's argument: a literal there is lifted with @.into()@ in Rust and
+-- @lit(..)@ in Kotlin. Swift's literals convert themselves.
 lifted :: Target -> S -> Text
 lifted t = \case
   SLit v | t == Rust -> case v of
     VInt n | n < 0 -> "(" <> tshow n <> ").into()"
     _ -> literal t v <> ".into()"
+  SLit v | t == Kotlin -> "lit(" <> literal t v <> ")"
   s -> render t s
 
 methodName :: Target -> Text -> Text

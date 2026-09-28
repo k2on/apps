@@ -461,8 +461,49 @@ public func movementKey(_ workId: Text, _ no: Int) -> Text {
   a nested pick no type (`pick(c, pick(d, "", a), b)`), and `x.isSome().not()`
   stays as it is: Swift has no `isNone`.
 
-Kotlin has no spelling of helpers or records yet: `arkc gen kotlin`
-refuses a module that needs one, naming it.
+Kotlin (`arkc gen kotlin`) spells them as `dev.arkdb.authoring` has them,
+placed by the same rules; the files share a package, so they import
+nothing of each other's:
+
+```kotlin
+class LibraryEntry(
+    val addedMs: Int,
+    val playlistPos: Opt<Int>,
+    // … every field, alphabetically
+) : Record {
+    companion object : Record.Of<LibraryEntry> {
+        override fun fields(): Fields<LibraryEntry> =
+            fields<LibraryEntry>().field("added_ms", int()).field("playlist_pos", opt(int()))
+    }
+}
+
+fun movementKey(workId: Text, no: Int): Text =
+    helper("movement_key", "work_id" to workId, "no" to no) { workId, no ->
+        concat(list(workId, lit("#"), no.toText()))
+    }
+```
+
+- **A helper** is `fun name(a: A, ..): R = helper("name", "a" to a, ..) { a, .. -> body }`,
+  its parameters typed as written; a call is `name(args)`.
+- **A record** is a class whose constructor takes its fields, alphabetically,
+  with a `Record.Of` companion; a field of a record type is
+  `record<Name>()`, an id `id<T>()`. A record value is its constructor with
+  named arguments, `Name(f = v, ..)`, as a row's is.
+- **A literal is lifted with `lit(..)`** where Rust writes `.into()` — a
+  row's or a record's field, a list's element, a helper's argument — and
+  also where Kotlin has no overload for a bare one: either side of a
+  `pick`, `unwrapOr`'s default, `contains`'s element, and a `Bool` passed to
+  `some` (`pick(workId.isSome(), lit(""), artist)`, `albumName.unwrapOr(lit(""))`).
+  Everywhere else the vocabulary overloads on `String`, `Int` and `Boolean`
+  and a literal is written bare (`x.eq(" ")`, `.mapOr(false) { .. }`,
+  `.fold("") { acc, x -> .. }`, which needs no type for its accumulator).
+- A nested pick needs no type, and `x.isSome().not()` stays as it is: Kotlin
+  has no `isNone`. The tables class implements `Tables` and has no
+  companion (one is optional and names nothing).
+
+`refuse` takes a `String` in the Kotlin runtime, so a refusal whose message
+is computed (`refuse(concat(..))`, as harken's `describe_work` has) prints
+but does not compile there yet; everything else in harken's module does.
 
 The module: `Module::new((library(), playlists()))` with helpers found by
 being called. `module().emit() -> ModuleBytes`, `module().procedures() ->
