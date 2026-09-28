@@ -59,6 +59,18 @@ impl Options {
         Options::server(user.clone(), "dev", Some(user))
     }
 
+    /// A peer nobody has signed in on yet, for a server it will sync with
+    /// once somebody does. What it authors is authored as nobody
+    /// (`Ctx::nobody`), kept pending and durable — not committed, which is
+    /// the difference from [`Options::alone`] — and nothing is dialled.
+    /// [`Peer::sign_in`] makes all of it the signer's and connects.
+    ///
+    /// Opened over storage that has had a login, it authors as that login,
+    /// still offline: see [`Peer::sign_out`].
+    pub fn signed_out() -> Options {
+        Options::server("", "", None)
+    }
+
     /// A peer that is its own authority.
     pub fn alone(user: impl Into<String>) -> Options {
         Options {
@@ -126,10 +138,13 @@ pub struct Status {
     pub user: String,
     pub session: String,
     pub alone: bool,
+    /// Nobody is signed in: nothing is dialled. `user` is empty if nobody
+    /// ever was, or the login this peer goes on authoring as.
+    pub signed_out: bool,
     /// The engine is linked: the socket is open and `Hello` was said.
     pub linked: bool,
-    /// The link in a word: `alone`, `offline`, `idle`, `connecting`, `open`,
-    /// `waiting`.
+    /// The link in a word: `alone`, `signed out`, `offline`, `idle`,
+    /// `connecting`, `open`, `waiting`.
     pub link: String,
     pub url: Option<String>,
     /// Connections opened.
@@ -158,7 +173,11 @@ pub struct Peer {
     autos: Autos,
     timing: Timing,
     alone: bool,
-    written: (Seq, Vec<Id>),
+    /// Nobody is signed in, so nothing is dialled.
+    signed_out: bool,
+    /// What the file holds — cursor, pending, login — or `None` when it is
+    /// behind in a way those do not show (pending re-stamped by a sign-in).
+    written: Option<Written>,
     link: Option<Link>,
     rejections: Vec<Rejection>,
     /// Every intent authored here this run or found pending at open.
@@ -179,6 +198,8 @@ impl std::fmt::Debug for Peer {
     }
 }
 
+type Written = (Seq, Vec<Id>, Ctx);
+
 fn mode_word(alone: bool) -> &'static str {
     if alone {
         "alone"
@@ -194,7 +215,7 @@ impl Peer {
     pub fn open(domain: Domain, storage: BoxStorage, opts: Options) -> Result<Peer, Error> {
         let schema = domain.module().schema.clone();
         let natives = domain.native_list();
-        let (confirmed, cursor, pending) = match storage.load(ReplicaFile::KEY)? {
+        let (confirmed, cursor, pending, was) = match storage.load(ReplicaFile::KEY)? {
             Some(bytes) => {
                 let f = ReplicaFile::decode(&bytes, &schema)?;
                 if f.mode != mode_word(opts.alone) {
@@ -203,11 +224,11 @@ impl Peer {
                         now: mode_word(opts.alone).into(),
                     });
                 }
-                (f.confirmed, f.cursor, f.pending)
+                (f.confirmed, f.cursor, f.pending, Ctx::new(f.user, f.session))
             }
-            None => (MemoryStore::empty(schema.clone()), 0, vec![]),
+            None => (MemoryStore::empty(schema.clone()), 0, vec![], Ctx::nobody()),
         };
-        let written = (cursor, pending.iter().map(|e| e.id).collect());
+        let written = Some((cursor, pending.iter().map(|e| e.id).collect(), was.clone()));
         let authored = pending.iter().map(|e| e.id).collect();
         let authority = opts.alone.then(|| {
             // The authority a peer alone is: its log is the confirmed store
@@ -224,17 +245,31 @@ impl Peer {
         });
         let mut r = Replica::open(schema.clone(), domain.closures().clone(), confirmed, cursor, pending);
         r.hold(natives.iter().cloned());
-        let client = Client::open(r, Mode::Whole, opts.token.clone());
+        let mut client = Client::open(r, Mode::Whole, opts.token.clone());
+        // Who authors. Opened signed out over storage somebody has used, it
+        // is still them; opened with a login over work nobody authored, that
+        // work is the login's — the same as `sign_in`, whichever order the
+        // app did the two in.
+        let mut ctx = Ctx::new(opts.user, opts.session);
+        let signed_out = !opts.alone && ctx.is_nobody();
+        let mut written = written;
+        if signed_out {
+            ctx = was;
+        } else if !opts.alone && client.replica.pending.iter().any(|e| e.actor.is_empty() && e.session.is_empty()) {
+            client.sign_in(&ctx, opts.token.clone());
+            written = None;
+        }
         let mut peer = Peer {
             domain,
             schema,
             client,
             authority,
             storage,
-            ctx: Ctx::new(opts.user, opts.session),
+            ctx,
             autos: opts.autos,
             timing: opts.timing,
             alone: opts.alone,
+            signed_out,
             written,
             link: None,
             rejections: vec![],
@@ -286,6 +321,58 @@ impl Peer {
 
     pub fn is_alone(&self) -> bool {
         self.alone
+    }
+
+    /// Whether nobody is signed in: nothing is dialled until
+    /// [`Peer::sign_in`].
+    pub fn is_signed_out(&self) -> bool {
+        self.signed_out
+    }
+
+    /// Somebody signed in: `user` under `session`, proven with `token`.
+    /// Every intent still pending that was authored as nobody becomes
+    /// theirs, under this login, and the view is replayed so every row
+    /// those intents wrote says so; the ids [`Peer::mutate`] returned stay
+    /// the same, so [`Peer::standing`] then follows each to its fate. The
+    /// rewritten intents are written down before anything is said, and the
+    /// link — if [`Peer::connect`] made one — dials, so the next `Hello`
+    /// pushes all of it.
+    ///
+    /// Intents authored as somebody (before a [`Peer::sign_out`]) keep their
+    /// author: the server takes them if they are this person's under an
+    /// older login (`Auth::owns`), and refuses them as `not yours` if not.
+    pub fn sign_in(&mut self, user: impl Into<String>, session: impl Into<String>, token: Option<String>) -> Result<(), Error> {
+        if self.alone {
+            return Err(Error::Alone);
+        }
+        self.ctx = Ctx::new(user, session);
+        self.client.sign_in(&self.ctx, token);
+        self.signed_out = false;
+        self.collect_rejections();
+        self.written = None;
+        self.persist()?;
+        self.reconnect();
+        Ok(())
+    }
+
+    /// Nobody is signed in any more: the token is forgotten and the link
+    /// stops. The login is *not* forgotten — this peer goes on authoring as
+    /// that person, offline, and what it authors stays theirs: pushed when
+    /// they sign in again (under any login of theirs), refused if somebody
+    /// else does. Only work done before anyone ever signed in on a peer is
+    /// nobody's, because only that has never been anybody's.
+    pub fn sign_out(&mut self) {
+        if self.alone {
+            return;
+        }
+        self.signed_out = true;
+        self.client.token = None;
+        if let Some(link) = &mut self.link {
+            link.stop("signed out");
+        }
+        if self.client.linked {
+            self.client.disconnected();
+        }
     }
 
     /// Author under this login from now on (entries already pending keep
@@ -473,10 +560,17 @@ impl Peer {
     }
 
     /// [`Peer::connect`] over a transport of the caller's.
+    ///
+    /// Signed out, the link is kept and not dialled: [`Peer::sign_in`] is
+    /// what starts it.
     pub fn connect_with(&mut self, url: &str, dial: Dial) {
         self.disconnect();
         self.client.denied = None;
-        self.link = Some(Link::new(url, dial, self.timing.clone()));
+        let mut link = Link::new(url, dial, self.timing.clone());
+        if self.signed_out {
+            link.stop("signed out");
+        }
+        self.link = Some(link);
     }
 
     /// Go offline: close the socket and stop dialling. Everything authored
@@ -491,8 +585,11 @@ impl Peer {
     }
 
     /// Dial again after [`Peer::disconnect`] or a denial — with a new token,
-    /// usually.
+    /// usually. Signed out, nothing: [`Peer::sign_in`] is the way back.
     pub fn reconnect(&mut self) {
+        if self.signed_out {
+            return;
+        }
         self.client.denied = None;
         if let Some(link) = &mut self.link {
             if link.is_open() {
@@ -607,8 +704,8 @@ impl Peer {
     /// half by hand calls it after `recv`.
     pub fn persist(&mut self) -> Result<(), Error> {
         let r = &self.client.replica;
-        let now = (r.cursor, r.pending.iter().map(|e| e.id).collect::<Vec<Id>>());
-        if self.written == now {
+        let now = (r.cursor, r.pending.iter().map(|e| e.id).collect::<Vec<Id>>(), self.ctx.clone());
+        if self.written.as_ref() == Some(&now) {
             return Ok(());
         }
         let file = ReplicaFile {
@@ -616,15 +713,18 @@ impl Peer {
             cursor: r.cursor,
             confirmed: r.confirmed.clone(),
             pending: r.pending.clone(),
+            user: self.ctx.user.clone(),
+            session: self.ctx.session.clone(),
         };
         self.storage.save(ReplicaFile::KEY, &file.encode())?;
-        self.written = now;
+        self.written = Some(now);
         Ok(())
     }
 
     pub fn status(&self) -> Status {
         let link = match (&self.link, self.alone) {
             (_, true) => "alone",
+            (_, false) if self.signed_out => "signed out",
             (None, false) => "offline",
             (Some(l), false) => match l.state() {
                 State::Idle => "idle",
@@ -637,6 +737,7 @@ impl Peer {
             user: self.ctx.user.clone(),
             session: self.ctx.session.clone(),
             alone: self.alone,
+            signed_out: self.signed_out,
             linked: self.client.linked,
             link: link.into(),
             url: self.link.as_ref().map(|l| l.url().to_string()),
@@ -661,7 +762,13 @@ impl Peer {
     }
 
     fn collect_rejections(&mut self) {
+        // One intent can be refused twice: by this peer's own rebase, when a
+        // confirmed entry leaves it nothing to apply to, and then by the
+        // authority it had already been pushed to. It is one verdict.
         for (id, why) in std::mem::take(&mut self.client.replica.rejections) {
+            if self.rejected.contains_key(&id) {
+                continue;
+            }
             let reason = refusal_text(&why);
             self.rejected.insert(id, reason.clone());
             self.rejections.push(Rejection { id, reason });
@@ -673,4 +780,38 @@ impl Peer {
 /// a constraint named in a sentence (`ark::protocol::refusal_text`).
 pub fn refusal_text(r: &Refusal) -> String {
     ark::protocol::refusal_text(r)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::Storage;
+    use crate::{args, demo};
+    use ark::store::Store;
+
+    /// An app that reopens with the login rather than calling `sign_in`
+    /// gets the same answer: what nobody authored is the login's.
+    #[test]
+    fn opening_with_a_login_over_work_nobody_authored_makes_it_theirs() {
+        let disk = Memory::new();
+        let mut p = Peer::open(demo::domain(), Box::new(disk.clone()), Options::signed_out()).unwrap();
+        let id = p.mutate("create_playlist", args([("name", Value::text("Mine"))])).unwrap();
+        drop(p);
+        let p = Peer::open(demo::domain(), Box::new(disk.clone()), Options::server("bob", "s1", None)).unwrap();
+        assert_eq!(p.replica().pending[0].actor, "bob");
+        assert_eq!(p.replica().pending[0].session, "s1");
+        assert_eq!(p.store().scan("playlist")[0]["user_id"], Value::text("bob"));
+        assert_eq!(p.standing(&id), Standing::Pending);
+        drop(p);
+        // …and it was written down, not only replayed.
+        let f = ReplicaFile::decode(&disk.load(ReplicaFile::KEY).unwrap().unwrap(), &demo::domain().module().schema).unwrap();
+        assert_eq!((f.pending[0].actor.as_str(), f.user.as_str()), ("bob", "bob"));
+    }
+
+    #[test]
+    fn a_peer_alone_has_nobody_to_sign_in_to() {
+        let mut p = Peer::open_memory(demo::domain(), Options::alone("me")).unwrap();
+        assert_eq!(p.sign_in("alice", "s", None), Err(Error::Alone));
+        assert_eq!(p.ctx().user, "me");
+    }
 }

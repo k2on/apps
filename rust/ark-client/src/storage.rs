@@ -7,8 +7,14 @@
 //!
 //! ```text
 //! { t: "replica", mode: "server" | "alone", cursor,
-//!   confirmed: { table: [row…] }, pending: [entry…] }
+//!   confirmed: { table: [row…] }, pending: [entry…],
+//!   user, session }
 //! ```
+//!
+//! `user` and `session` are the login this peer last authored as — both
+//! empty while nobody has signed in on it — so a peer reopened signed out
+//! goes on authoring as whoever it was. A file written before they existed
+//! reads as nobody's.
 //!
 //! Three places to keep it: a directory natively ([`Dir`], written to a
 //! temporary name and renamed), the browser's `localStorage` in wasm
@@ -201,6 +207,9 @@ pub struct ReplicaFile {
     pub cursor: Seq,
     pub confirmed: MemoryStore,
     pub pending: Vec<Entry>,
+    /// The login last authored as; empty for nobody (`Ctx::nobody`).
+    pub user: String,
+    pub session: String,
 }
 
 impl ReplicaFile {
@@ -214,6 +223,8 @@ impl ReplicaFile {
             ("cursor", Value::Int(self.cursor)),
             ("confirmed", self.confirmed.store_value()),
             ("pending", Value::List(self.pending.iter().map(entry_value).collect())),
+            ("user", Value::text(self.user.clone())),
+            ("session", Value::text(self.session.clone())),
         ]))
     }
 
@@ -255,11 +266,18 @@ impl ReplicaFile {
             .map(entry_from_value)
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| bad(&e.to_string()))?;
+        let optional = |k: &str| match m.get(k) {
+            None => Ok(String::new()),
+            Some(Value::Text(t)) => Ok(t.clone()),
+            Some(_) => Err(bad(&format!("{k} is not text"))),
+        };
         Ok(ReplicaFile {
             mode: text("mode")?,
             cursor,
             confirmed,
             pending,
+            user: optional("user")?,
+            session: optional("session")?,
         })
     }
 }

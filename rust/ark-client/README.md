@@ -27,8 +27,9 @@ use ark::value::Value;
 // demo of spec/AUTHORING.md Appendix B, which the tests use.)
 let domain = Domain::new(&my_domain::module());
 
-// Who authors: the login from ark-auth — or `Options::dev(name)` against a
-// dev-auth server, or `Options::alone(name)` with no server at all.
+// Who authors: the login from ark-auth — or `Options::signed_out()` before
+// anybody has signed in, `Options::dev(name)` against a dev-auth server, or
+// `Options::alone(name)` with no server at all.
 let opts = Options::server(login.user.id, login.session, Some(login.token));
 let mut peer = Peer::open_path(domain, data_dir, opts)?;       // natively
 // let mut peer = Peer::open_local(domain, "myapp", opts)?;    // in a browser
@@ -64,10 +65,12 @@ if peer.epoch() != introduced_on { /* a new connection: say who you are again */
   them reproducible for tests.
 - **Persistence** is what `Replica::open` takes and nothing optimistic: the
   confirmed store, the cursor and the pending intents, one canonical-CBOR
-  record (the Swift client's `ReplicaFile` shape), written whole after every
-  mutate and every pump that moved it. A directory keeps the mode it was
-  opened with — alone or with a server — and refuses the other
-  (`Error::ModeMismatch`), because the sequences mean different things.
+  record (the Swift client's `ReplicaFile` shape, plus the login last
+  authored as), written whole after every mutate and every pump that moved
+  it. A directory keeps the mode it was opened with — alone or with a
+  server — and refuses the other (`Error::ModeMismatch`), because the
+  sequences mean different things. Signed out and signed in are the same
+  mode: one directory is opened either way.
   In a browser it is `localStorage`, base64 under `ark:<name>:replica`:
   synchronous, which iced's `boot` needs, and limited to the origin's quota
   of about five megabytes — a library of a few thousand rows fits. An app
@@ -94,6 +97,25 @@ if peer.epoch() != introduced_on { /* a new connection: say who you are again */
   `standing(&id)` answers, for any intent this peer authored, whether it is
   pending, confirmed, or rejected and why — what a screen shows beside the
   item that did not happen.
+- **Signed out**, nobody has signed in yet (`Options::signed_out()`): every
+  intent is authored as nobody (`Ctx::nobody`), stays pending and durable
+  across restarts — it is not committed, which is what makes it different
+  from alone — and nothing is dialled; `connect(url)` keeps the link idle.
+  `peer.sign_in(user, session, token)` makes every intent nobody authored
+  the signer's under that login, replays the view (rows say who they now
+  say before a byte is sent), writes it down, and dials; the ids `mutate`
+  returned are the same ids, so `standing(&id)` follows each to confirmed
+  or to the sentence the server refused it with. Opening the directory with
+  a login instead of calling `sign_in` does the same.
+
+  `peer.sign_out()` forgets the token and stops the link and **keeps the
+  login**: a peer somebody has used goes on authoring as them, offline, and
+  a reopen with `Options::signed_out()` does too. What they author then is
+  theirs — accepted when they sign in again under any login of theirs
+  (`Auth::owns`), refused as `not yours` if somebody else does. Only work
+  done before anyone ever signed in on a peer is given to whoever signs in,
+  because only that was never anybody's. (petros did the same for a denied
+  peer: its pending edits waited for the next login as the same person.)
 - **Alone**, the peer is its own authority: every intent is sequenced at
   once, nothing stays pending, and `verify` answers immediately.
 - **Sans-io**, for a transport of your own: `connected`, `disconnected`,
@@ -126,6 +148,7 @@ here.
 | `ServerMsg::Heard` counted by hand | `status().heard_frames`, `status().bad_frames` |
 | `petros::encode` / `decode` | `ark::canon::encode(&value)` / `decode` |
 | `transport::web::Link` vs `transport::ws::Link` by `cfg` | one `Peer::connect`; the platform's transport is chosen inside |
+| (nothing: a petros peer needed a login to author) | `Options::signed_out()`, then `peer.sign_in(user, session, token)`; `peer.sign_out()` |
 | the demo: a server-less peer whose seeded library stays pending | `Options::alone(name)`: its own authority, nothing pending, and a directory that says it was opened alone |
 
 ## Tested, and not
@@ -138,7 +161,14 @@ syncing over sockets, an offline edit rebased on reconnect (a `Rebuilt` and
 a `Reset` view), a view following the log patch by patch, pending intents
 and the confirmed store across a reopen of the directory, a mode mismatch
 refused, a peer alone, live frames relayed within an account, the sign-in
-token on the socket and a denial.
+token on the socket and a denial. Signing in late: fifty-one entries
+authored signed out, across a restart, all confirmed as the signer's with
+the playlist hers on the server, the directory then opened signed in, and
+work done after `sign_out` still hers across a restart and a new login;
+and the one entry the server's copy refused (its playlist was never made
+there) standing `Rejected("playlist_id: no such playlist")` while the rest
+are confirmed. An intent refused both by the peer's own rebase and by the
+authority it had been pushed to is reported once.
 
 Not verified: the wasm build in a browser. It compiles for
 `wasm32-unknown-unknown` (clippy clean) and nobody has opened a page with

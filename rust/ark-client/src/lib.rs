@@ -67,6 +67,9 @@ pub enum Error {
         was: String,
         now: String,
     },
+    /// Signing in on a peer that is its own authority: there is no server
+    /// to sign in to.
+    Alone,
 }
 
 impl std::fmt::Display for Error {
@@ -79,6 +82,7 @@ impl std::fmt::Display for Error {
             Error::Storage(s) => write!(f, "storage: {s}"),
             Error::Corrupt(s) => write!(f, "corrupt: {s}"),
             Error::ModeMismatch { was, now } => write!(f, "the storage was opened {was} before and {now} now"),
+            Error::Alone => write!(f, "a peer alone has no server to sign in to"),
         }
     }
 }
