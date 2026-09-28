@@ -43,7 +43,7 @@
 
       # The Rust workspace is `rust/`, and harken's four crates join it from
       # `harken/` by path, so both trees are the source of every Rust build.
-      rustDirs = [ "rust" "harken/domain" "harken/server" "harken/desktop" "harken/web" ];
+      rustDirs = [ "rust" "harken/domain" "harken/server" ];
 
       # The wasm-bindgen CLI must be the exact version of the `wasm-bindgen`
       # crate the workspace locked, or the glue it writes does not match the
@@ -299,7 +299,9 @@
             arkdb-kotlin = kotlin;
             kotlin-deps = kotlin.mitmCache.updateScript;
             harken-server = crate { pname = "harken-server"; };
-            harken-desktop = crate { pname = "harken-desktop"; };
+            # `nix run .#harken-serve [ADDR]`: the dev server, anyone is
+            # whoever they say.
+            harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { harken-server = crate { pname = "harken-server"; }; };
             inherit harken-web;
             arkdb-swift = swift;
             default = ark-spec;
@@ -343,6 +345,12 @@
             '';
             swift = swift;
             kotlin = kotlin;
+          } // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+            # The NixOS module, evaluated under the configurations that
+            # matter and held to its assertions, its warning and its unit.
+            harken-module = pkgs.callPackage ./harken/server/nix/module-test.nix {
+              module = import ./harken/server/nix/module.nix { packages = self.packages; };
+            };
           };
 
           devShells = {
@@ -382,5 +390,8 @@
       packages = lib.mapAttrs (_: o: o.packages) outputs;
       checks = lib.mapAttrs (_: o: o.checks) outputs;
       devShells = lib.mapAttrs (_: o: o.devShells) outputs;
+      # `services.harken`: the sync server, sign-in, /media and the
+      # browser client on one port.
+      nixosModules.default = import ./harken/server/nix/module.nix { packages = self.packages; };
     };
 }
