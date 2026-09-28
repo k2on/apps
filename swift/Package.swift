@@ -11,6 +11,11 @@ let package = Package(
     platforms: [.iOS(.v15), .macOS(.v12)],
     products: [
         .library(name: "ArkDB", targets: ["ArkDB"]),
+        // The authoring vocabulary (spec/AUTHORING.md): a domain written in
+        // Swift, emitted as a module or run natively. A module of its own
+        // because its `Bool`, `Int` and `Id<T>` shadow the standard
+        // library's and ArkDB's in every file that imports it.
+        .library(name: "ArkAuthoring", targets: ["ArkAuthoring"]),
         // Everything an app needs around the sans-io machines: the WebSocket
         // link, the session over the replicas, files, and an in-process
         // exchange for tests. Foundation (+ FoundationNetworking on Linux).
@@ -19,7 +24,15 @@ let package = Package(
     ],
     targets: [
         .target(name: "ArkDB", dependencies: [], path: "Sources/ArkDB"),
+        .target(name: "ArkAuthoring", dependencies: ["ArkDB"], path: "Sources/ArkAuthoring"),
         .target(name: "ArkDBClient", dependencies: ["ArkDB"], path: "Sources/ArkDBClient"),
-        .executableTarget(name: "ArkDBTests", dependencies: ["ArkDB", "ArkDBClient"], path: "Tests/ArkDBTests"),
+        // spec/AUTHORING.md Appendix B, authored in Swift: the text `arkc gen
+        // swift` prints for the demo module.
+        .target(name: "ArkDemo", dependencies: ["ArkAuthoring"], path: "Tests/Demo"),
+        // harken's domain as the phone is built with it — the printed
+        // authoring form in ../harken/domain/gen/swift (a link), compiled
+        // here so that Linux proves it builds against ArkAuthoring.
+        .target(name: "HarkenDomain", dependencies: ["ArkAuthoring"], path: "Tests/HarkenDomain"),
+        .executableTarget(name: "ArkDBTests", dependencies: ["ArkDB", "ArkDBClient", "ArkAuthoring", "ArkDemo", "HarkenDomain"], path: "Tests/ArkDBTests"),
     ]
 )

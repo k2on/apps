@@ -1,0 +1,18 @@
+[package]
+name = "harken-web"
+workspace = "../../rust"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "harken's browser peer: the ark runtime compiled to wasm, holding the library and playlists scopes, applying every entry through the interpreter over the module it embeds"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+ark = { path = "../../rust/ark" }
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+serde_json = { workspace = true }
+# The one source of randomness a browser has, for the fresh id an entry needs.
+getrandom = { version = "0.2", features = ["js"] }

@@ -178,6 +178,52 @@ public final class MemoryStore: Store {
         return .success(.add(tn, row))
     }
 
+    /// The row that matches `row` on the columns — the table's key when the
+    /// list is empty, otherwise a unique index's columns. A null in any of
+    /// them matches nothing, as a unique index reads a null.
+    public func matching(_ tn: TableName, _ row: Row, on: [FieldName]) -> Row? {
+        guard let tbl = schema.lookupTable(tn) else { return nil }
+        let full = MemoryStore.complete(tbl, row)
+        if on.isEmpty { return getRow(tn, tbl.keyOf(full)) }
+        let mine = on.map { full[$0] ?? .null }
+        if mine.contains(where: { $0.isNull() }) { return nil }
+        for r in scan(tn) where on.map({ r[$0] ?? .null }) == mine { return r }
+        return nil
+    }
+
+    /// §1.4 Write the row unless one matches on the columns or on the key:
+    /// a match is no change at all — an insert never edits; otherwise
+    /// exactly `tryPut`.
+    public func tryInsert(_ tn: TableName, _ row: Row, on: [FieldName]) -> Result<Change?, Refusal> {
+        guard let tbl = schema.lookupTable(tn) else { return .failure(.noSuchTable(tn)) }
+        if matching(tn, row, on: on) != nil { return .success(nil) }
+        if getRow(tn, tbl.keyOf(MemoryStore.complete(tbl, row))) != nil { return .success(nil) }
+        return tryPut(tn, row)
+    }
+
+    /// §1.4 Rewrite the row at a key with this one, keeping the key columns
+    /// whatever it says — an update never moves a row. A missing row is a
+    /// no-op.
+    public func tryUpdate(_ tn: TableName, _ key: [Value], _ row: Row) -> Result<Change?, Refusal> {
+        guard let tbl = schema.lookupTable(tn) else { return .failure(.noSuchTable(tn)) }
+        guard getRow(tn, key) != nil else { return .success(nil) }
+        var r = row
+        for (c, v) in zip(tbl.key, key) { r[c] = v }
+        return tryPut(tn, r)
+    }
+
+    /// §1.4 Write the row; if one matches on the columns, keep its key
+    /// columns and take the rest from the new row. With no columns this is
+    /// exactly `tryPut`.
+    public func tryUpsert(_ tn: TableName, _ row: Row, on: [FieldName]) -> Result<Change?, Refusal> {
+        guard let tbl = schema.lookupTable(tn) else { return .failure(.noSuchTable(tn)) }
+        if on.isEmpty { return tryPut(tn, row) }
+        guard let old = matching(tn, row, on: on) else { return tryPut(tn, row) }
+        var merged = row
+        for k in tbl.key { merged[k] = old[k] }
+        return tryPut(tn, merged)
+    }
+
     /// §4.4 Delete by key: a missing row is a no-op; a row another row still
     /// references is a refusal.
     public func tryDelete(_ tn: TableName, _ key: [Value]) -> Result<Change?, Refusal> {

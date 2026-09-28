@@ -18,6 +18,9 @@ public object Encode {
         "schema" to schemaValue(m.schema),
         "functions" to list(m.functions) { functionValue(emptyMap(), it) },
         "live" to list(m.live) { (n, t) -> node("frame", "name" to txt(n), "ty" to tyValue(t)) },
+        "routers" to list(m.routers) { r ->
+            node("router", "name" to txt(r.name), "scope" to txt(r.scope), "uses" to list(r.uses) { txt(it) })
+        },
     )
 
     public fun schemaValue(sch: Schema): Value = list(sch.scopes) { s ->
@@ -59,31 +62,57 @@ public object Encode {
             "fn",
             "name" to txt(fn.name),
             "deps" to Value.VStruct(deps),
-            "kind" to txt(
-                when (fn.kind) {
-                    FnKind.Mutator -> "mutator"
-                    FnKind.Query -> "query"
-                    FnKind.Helper -> "helper"
-                },
-            ),
+            "kind" to txt(kindName(fn.kind)),
             "scope" to (fn.scope?.let { txt(it) } ?: Value.VNull),
+            "router" to (fn.router?.let { txt(it) } ?: Value.VNull),
+            "uses" to list(fn.uses) { txt(it) },
             "autos" to list(fn.autos) { (n, a) ->
                 when (a) {
                     is Auto.NewId -> node("new_id", "name" to txt(n), "table" to txt(a.table))
                     is Auto.Now -> node("now", "name" to txt(n))
                 }
             },
-            "args" to list(fn.args) { (n, t) -> node("arg", "name" to txt(n), "ty" to tyValue(t)) },
+            "input" to list(fn.input) { (n, f) -> fieldValue(n, f) },
+            "refine" to list(fn.refine) { (e, why) -> node("refine", "e" to expr(e), "why" to opt(why)) },
             "ret" to (fn.ret?.let { tyValue(it) } ?: Value.VNull),
             "body" to list(fn.body) { stmt(it) },
         )
+    }
+
+    public fun kindName(k: FnKind): String = when (k) {
+        FnKind.Mutator -> "mutator"
+        FnKind.Query -> "query"
+        FnKind.Helper -> "helper"
+        FnKind.Guard -> "guard"
+        FnKind.Provide -> "provide"
+    }
+
+    private fun opt(s: String?): Value = s?.let { txt(it) } ?: Value.VNull
+
+    private fun optInt(n: Long?): Value = n?.let { Value.VInt(it) } ?: Value.VNull
+
+    public fun fieldValue(n: String, f: Field): Value =
+        node("field", "name" to txt(n), "ty" to tyValue(f.ty), "checks" to list(f.checks) { check(it) })
+
+    public fun check(c: Check): Value = when (c) {
+        is Check.Trim -> node("trim")
+        is Check.MinLen -> node("min_len", "n" to int(c.n), "why" to opt(c.why))
+        is Check.MaxLen -> node("max_len", "n" to int(c.n), "why" to opt(c.why))
+        is Check.Range -> node("range", "lo" to optInt(c.lo), "hi" to optInt(c.hi), "why" to opt(c.why))
+        is Check.NonEmpty -> node("non_empty", "why" to opt(c.why))
+        is Check.Exists -> node("exists", "why" to opt(c.why))
+        is Check.Refine -> node("refine", "e" to expr(c.e), "why" to opt(c.why))
     }
 
     private fun stmt(s: Stmt): Value = when (s) {
         is Stmt.Let -> node("let", "sym" to int(s.sym), "e" to expr(s.e))
         is Stmt.If -> node("if", "c" to expr(s.c), "then" to list(s.then) { stmt(it) }, "else" to list(s.els) { stmt(it) })
         is Stmt.For -> node("for", "sym" to int(s.sym), "in" to expr(s.over), "body" to list(s.body) { stmt(it) })
-        is Stmt.Put -> node("put", "table" to txt(s.table), "row" to expr(s.row))
+        is Stmt.Insert -> node("insert", "table" to txt(s.table), "row" to expr(s.row), "on" to list(s.on) { txt(it) })
+        is Stmt.Upsert -> node("upsert", "table" to txt(s.table), "row" to expr(s.row), "on" to list(s.on) { txt(it) })
+        is Stmt.Update -> node(
+            "update", "table" to txt(s.table), "key" to list(s.key) { expr(it) }, "sym" to int(s.sym), "row" to expr(s.row),
+        )
         is Stmt.Delete -> node("delete", "table" to txt(s.table), "key" to list(s.key) { expr(it) })
         is Stmt.Refuse -> node("refuse", "e" to expr(s.e))
         is Stmt.Return -> node("return", "e" to (s.e?.let { expr(it) } ?: Value.VNull))
@@ -118,6 +147,7 @@ public object Encode {
         is Expr.Select -> node("select", "plan" to plan(e.plan))
         is Expr.Get -> node("get", "table" to txt(e.table), "key" to list(e.key) { expr(it) })
         is Expr.Exists -> node("exists", "table" to txt(e.table), "key" to list(e.key) { expr(it) })
+        is Expr.Provided -> node("provided", "fn" to txt(e.fn))
     }
 
     private fun plan(p: IR.Plan): Value = node(
@@ -155,10 +185,30 @@ public object Encode {
      */
     public fun normalize(fn: Function): Function {
         val ren = HashMap<Sym, Sym>()
-        val (body, _) = renumberBlock(ren, 0, fn.body)
+        var next = 0
+        // One numbering covers the function: the input's checks, then the
+        // refinements, then the body (AUTHORING.md, Appendix A).
+        val input = fn.input.map { (n, f) ->
+            val checks = f.checks.map { c ->
+                if (c is Check.Refine) {
+                    val (e2, n2) = renumberExpr(HashMap(ren), next, c.e)
+                    next = n2
+                    Check.Refine(e2, c.why)
+                } else {
+                    c
+                }
+            }
+            n to Field(f.ty, checks)
+        }
+        val refine = fn.refine.map { (e, why) ->
+            val (e2, n2) = renumberExpr(HashMap(ren), next, e)
+            next = n2
+            e2 to why
+        }
+        val (body, _) = renumberBlock(ren, next, fn.body)
         val names = HashMap<Sym, String>()
         for ((old, new) in ren) fn.names[old]?.let { names[new] = it }
-        return fn.copy(body = body, names = names)
+        return fn.copy(input = input, refine = refine, body = body, names = names)
     }
 
     public fun normalizeModule(m: Module): Module = m.copy(functions = m.functions.map { normalize(it) })
@@ -197,9 +247,21 @@ public object Encode {
             val (b2, n2) = inner(ren2, n1 + 1, s.body)
             Stmt.For(n1, xs2, b2) to n2
         }
-        is Stmt.Put -> {
+        is Stmt.Insert -> {
             val (e2, n1) = renumberExpr(ren, next, s.row)
-            Stmt.Put(s.table, e2) to n1
+            Stmt.Insert(s.table, e2, s.on) to n1
+        }
+        is Stmt.Upsert -> {
+            val (e2, n1) = renumberExpr(ren, next, s.row)
+            Stmt.Upsert(s.table, e2, s.on) to n1
+        }
+        // The key, then the binder for the existing row, then the new row over it.
+        is Stmt.Update -> {
+            val (ks2, n1) = renumberMany(ren, next, s.key)
+            val ren2 = HashMap(ren)
+            ren2[s.sym] = n1
+            val (e2, n2) = renumberExpr(ren2, n1 + 1, s.row)
+            Stmt.Update(s.table, ks2, n1, e2) to n2
         }
         is Stmt.Delete -> {
             val (ks2, n1) = renumberMany(ren, next, s.key)
@@ -234,7 +296,9 @@ public object Encode {
         is Stmt.Let -> listOf(s.sym) + exprBinders(s.e)
         is Stmt.If -> exprBinders(s.c) + s.then.flatMap { binders(it) } + s.els.flatMap { binders(it) }
         is Stmt.For -> listOf(s.sym) + exprBinders(s.over) + s.body.flatMap { binders(it) }
-        is Stmt.Put -> exprBinders(s.row)
+        is Stmt.Insert -> exprBinders(s.row)
+        is Stmt.Upsert -> exprBinders(s.row)
+        is Stmt.Update -> listOf(s.sym) + s.key.flatMap { exprBinders(it) } + exprBinders(s.row)
         is Stmt.Delete -> s.key.flatMap { exprBinders(it) }
         is Stmt.Refuse -> exprBinders(s.e)
         is Stmt.Return -> s.e?.let { exprBinders(it) } ?: emptyList()
@@ -431,15 +495,27 @@ public object Encode {
 
     // Calls -----------------------------------------------------------------
 
-    /** The names of the helpers a function calls directly, each once, in code point order. */
-    public fun calls(fn: Function): List<String> =
-        fn.body.flatMap { stmtCalls(it) }.toSortedSet(CodePointOrder).toList()
+    /** The names of the helpers a function calls directly (checks and refinements included), each once, in code point order. */
+    public fun calls(fn: Function): List<String> {
+        val inChecks = fn.input.flatMap { (_, f) -> f.checks.flatMap { c -> if (c is Check.Refine) exprCalls(c.e) else emptyList() } }
+        val inRefine = fn.refine.flatMap { exprCalls(it.first) }
+        return (inChecks + inRefine + fn.body.flatMap { stmtCalls(it) }).toSortedSet(CodePointOrder).toList()
+    }
+
+    /**
+     * What a function's hash depends on by name: the helpers it calls and,
+     * for a procedure, the middleware it runs (AUTHORING.md §1.2), each once,
+     * in code point order.
+     */
+    public fun deps(fn: Function): List<String> = (calls(fn) + fn.uses).toSortedSet(CodePointOrder).toList()
 
     private fun stmtCalls(s: Stmt): List<String> = when (s) {
         is Stmt.Let -> exprCalls(s.e)
         is Stmt.If -> exprCalls(s.c) + s.then.flatMap { stmtCalls(it) } + s.els.flatMap { stmtCalls(it) }
         is Stmt.For -> exprCalls(s.over) + s.body.flatMap { stmtCalls(it) }
-        is Stmt.Put -> exprCalls(s.row)
+        is Stmt.Insert -> exprCalls(s.row)
+        is Stmt.Upsert -> exprCalls(s.row)
+        is Stmt.Update -> s.key.flatMap { exprCalls(it) } + exprCalls(s.row)
         is Stmt.Delete -> s.key.flatMap { exprCalls(it) }
         is Stmt.Refuse -> exprCalls(s.e)
         is Stmt.Return -> s.e?.let { exprCalls(it) } ?: emptyList()

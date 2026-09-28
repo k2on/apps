@@ -6,6 +6,8 @@ public enum SessionError: Error, CustomStringConvertible {
     case unknownFunction(String)
     case notAMutator(String)
     case notAQuery(String)
+    /// A query refused: a failed check, a guard, an overflow.
+    case refused(Refusal)
     case corrupt(String)
     case io(String)
     /// The directory was last opened the other way — with a server, or
@@ -18,37 +20,12 @@ public enum SessionError: Error, CustomStringConvertible {
         case .unknownFunction(let s): return "unknown function " + s
         case .notAMutator(let s): return s + " is not a mutator"
         case .notAQuery(let s): return s + " is not a query"
+        case .refused(let r): return "refused: " + r.text
         case .corrupt(let s): return "corrupt: " + s
         case .io(let s): return "io: " + s
         case .modeMismatch(let was, let now): return "the directory was opened \(was) before and \(now) now"
         }
     }
-}
-
-/// The generated domain, as the session needs to know it: which hashes the
-/// generated `apply` dispatches on, the `apply`, and the `query`. An app
-/// builds one from its `<Name>Gen` in a line each
-/// (`Generated(functions: HarkenGen.functions, apply: HarkenGen.apply, query: HarkenGen.query)`).
-/// With one present, every intent — authored here or replayed from the log —
-/// whose function the generated code has goes through that code over a
-/// `TransactionStore`; the interpreter runs only the rest, which a peer
-/// generated with `--only` still receives.
-public struct Generated {
-    public var functions: [(String, String)]
-    public var apply: (String, Store, Ctx, Args, Args) throws -> Void
-    public var query: (String, Store, Args) throws -> Value
-    let hashes: Set<[UInt8]>
-    let names: Set<String>
-
-    public init(functions: [(String, String)], apply: @escaping (String, Store, Ctx, Args, Args) throws -> Void, query: @escaping (String, Store, Args) throws -> Value) {
-        self.functions = functions
-        self.apply = apply
-        self.query = query
-        self.hashes = Set(functions.compactMap { Hex.decode($0.1) })
-        self.names = Set(functions.map { $0.0 })
-    }
-
-    public func knows(_ h: FnHash) -> Bool { return hashes.contains(h) }
 }
 
 /// What the authority last said about a scope's state.
@@ -94,7 +71,10 @@ public final class Session: LinkDriven {
     /// The scopes held, in name order.
     public let scopes: [ScopeName]
     public let server: URL?
-    private let generated: Generated?
+    /// The procedures this peer runs natively, by hash (`Module.procedures()`
+    /// of its authored domain); everything else through the interpreter,
+    /// or by facts.
+    private let natives: [FnHash: Procedure]
     private let closures: [FnHash: Closure]
     private var byName: [String: (Function, FnHash)] = [:]
     private var client: Client
@@ -116,8 +96,14 @@ public final class Session: LinkDriven {
     /// the directory (or empty), and either dial the server or stand as the
     /// authority for every scope. `session` is the login; under dev auth the
     /// server calls every login `"dev"` and the token is the user's name.
-    public static func open(directory: URL, module bytes: [UInt8], user: String, session: String = "dev",
-                            server: URL?, token: String? = nil, generated: Generated? = nil,
+    ///
+    /// `procedures` is the domain as native code — `module().procedures()`
+    /// of the authored domain whose `emit()` the bytes are. Every entry,
+    /// authored here or replayed from the log, whose function one of them
+    /// is runs natively; the rest through the interpreter, or by facts.
+    public static func open(directory: URL, module bytes: [UInt8], procedures: [(FnHash, Procedure)] = [],
+                            user: String, session: String = "dev",
+                            server: URL?, token: String? = nil,
                             dial: LinkDial? = nil) throws -> Session {
         let m: Module
         do {
@@ -126,25 +112,22 @@ public final class Session: LinkDriven {
             throw SessionError.badModule("\(error)")
         }
         return try Session(module: m, directory: directory, ctx: Ctx(user: user, session: session), server: server,
-                           token: token ?? user, generated: generated, dial: dial ?? WebSocketTransport.dial)
+                           token: token ?? user, procedures: procedures, dial: dial ?? WebSocketTransport.dial)
     }
 
-    init(module: Module, directory: URL, ctx: Ctx, server: URL?, token: String, generated: Generated?, dial: @escaping LinkDial) throws {
+    init(module: Module, directory: URL, ctx: Ctx, server: URL?, token: String, procedures: [(FnHash, Procedure)], dial: @escaping LinkDial) throws {
         self.module = module
         self.schema = module.schema
         self.directory = directory
         self.ctx = ctx
         self.server = server
-        self.generated = generated
+        var natives: [FnHash: Procedure] = [:]
+        for (h, p) in procedures { natives[h] = p }
+        self.natives = natives
         self.closures = Hash.closures(module)
         self.scopes = module.schema.scopes.map { $0.name }.sorted { compareText($0, $1) < 0 }
         self.client = Client(schema: module.schema, token: token)
         for (h, c) in closures { byName[c.fn.name] = (c.fn, h) }
-        let applier: Applier? = generated.map { g in
-            Applier(knows: { g.knows($0) }) { fh, ctx, autos, args, st in
-                try Eval.applyBody(st) { db in try g.apply(Hex.encode(fh), db, ctx, autos, args) }
-            }
-        }
         let mode = server == nil ? "alone" : "server"
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         for s in scopes {
@@ -159,7 +142,7 @@ public final class Session: LinkDriven {
                 cursor = c.cursor
                 pending = c.pending
             }
-            let r = Replica.open(schema, s, closures, confirmed, cursor, pending, applier: applier)
+            let r = Replica.open(schema, s, closures, confirmed, cursor, pending, natives: natives)
             client.subscribe(.whole, r)
             if server == nil {
                 authorities[s] = Authority(schema, s, closures, from: Snapshot(seq: cursor, store: confirmed))
@@ -256,33 +239,14 @@ public final class Session: LinkDriven {
     /// Author an intent by name: the function's autos are drawn here — a
     /// fresh random 16-byte id per `NewId`, the clock in milliseconds for
     /// `Now` — which is the only non-determinism there is, at origin, frozen
-    /// in the entry. Applied by the generated code when a `Generated` was
-    /// given and has the function, else by the interpreter. Returns the
-    /// refusal if there was one; a refusal changes nothing.
+    /// in the entry. Applied natively when the session holds the procedure,
+    /// else by the interpreter. Returns the refusal if there was one; a
+    /// refusal changes nothing. `args` is the input (`Input.args` of an
+    /// authored input struct).
     @discardableResult
     public func mutate(name: String, args: Args) -> Refusal? {
         return author(name, args) { fn, hash, autos in
-            if let g = self.generated, g.knows(hash) {
-                return self.client.mutateWith(fn.scope!, self.freshId(), self.ctx, hash, autos, args) { st in
-                    try Eval.applyBody(st) { db in try g.apply(Hex.encode(hash), db, self.ctx, autos, args) }
-                }
-            }
-            return self.client.mutate(fn.scope!, self.freshId(), self.ctx, hash, autos, args)
-        }
-    }
-
-    /// Author an intent whose body the caller supplies — a generated
-    /// mutator, as `session.mutate(name: "add_to_playlist", args: a) { db, ctx, autos in
-    /// try HarkenGen.addToPlaylist(db, ctx, autos, a) }`. The session looks the
-    /// function up by name for its scope, its hash and its autos, runs the
-    /// body as one transaction over the optimistic view, and records the
-    /// entry exactly as `mutate(name:args:)` would.
-    @discardableResult
-    public func mutate(name: String, args: Args, body: (Store, Ctx, Args) throws -> Void) -> Refusal? {
-        return author(name, args) { fn, hash, autos in
-            self.client.mutateWith(fn.scope!, self.freshId(), self.ctx, hash, autos, args) { st in
-                try Eval.applyBody(st) { db in try body(db, self.ctx, autos) }
-            }
+            self.client.mutate(fn.scope!, self.freshId(), self.ctx, hash, autos, args)
         }
     }
 
@@ -351,22 +315,38 @@ public final class Session: LinkDriven {
         return acc ?? MemoryStore(schema: schema)
     }
 
-    /// Run a query by name over the merged view: through the generated
-    /// `query` when it has the function, else through the interpreter.
-    public func query(name: String, args: Args) throws -> Value {
+    /// Run a query by name over the merged view, as this peer's user:
+    /// natively when the session holds the procedure, else through the
+    /// interpreter. A refusal — a failed check, a guard — is thrown as
+    /// `SessionError.refused`.
+    public func query(name: String, args: Args = [:]) throws -> Value {
         lock.lock(); defer { lock.unlock() }
         let st = mergedView()
-        if let g = generated, g.names.contains(name) {
-            return try g.query(name, st, args)
-        }
         guard let (fn, hash) = byName[name] else { throw SessionError.unknownFunction(name) }
         guard fn.kind == .query, let c = closures[hash] else { throw SessionError.notAQuery(name) }
-        return try Eval.queryClosure(schema, c, args, st)
+        let r: Result<Value, Refusal>
+        if let run = natives[hash]?.query {
+            r = try run(ctx, args, st)
+        } else {
+            r = try Eval.queryResult(schema, c, args, st, ctx: ctx)
+        }
+        switch r {
+        case .success(let v): return v
+        case .failure(let why): throw SessionError.refused(why)
+        }
     }
 
-    /// Read the merged view directly, as generated queries do
-    /// (`session.run { db in try HarkenGen.query("library", db, [:]) }`).
-    /// A write through this store is a bug: it reaches nothing durable.
+    /// The form validator (AUTHORING.md §1.3): a procedure's input checks
+    /// over the fields present, against the merged view — each failing
+    /// field's message, and the values as the checks normalised them.
+    public func validate(name: String, partial: Args) throws -> (messages: [(String, String)], values: Args) {
+        lock.lock(); defer { lock.unlock() }
+        guard let (_, hash) = byName[name], let c = closures[hash] else { throw SessionError.unknownFunction(name) }
+        return try Eval.check(schema, c, partial, mergedView(), ctx: ctx)
+    }
+
+    /// Read the merged view directly. A write through this store is a bug:
+    /// it reaches nothing durable.
     public func run<T>(_ body: (Store) throws -> T) throws -> T {
         lock.lock(); defer { lock.unlock() }
         return try body(mergedView())

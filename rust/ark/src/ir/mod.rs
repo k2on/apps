@@ -1,12 +1,19 @@
 //! §3 Ark IR, as `Ark.IR` defines it: the program a domain is.
 //!
-//! A module carries a schema, functions and the types of its live frames. A
-//! function is a mutator, a query or a helper, with a body in a small
-//! imperative core over a pure expression language. Nobody runs the IR in
-//! production; generated code is held to what [`crate::eval`] says it
-//! means. Three properties are designed in: total (no loops but `for` over
-//! a list, no recursion), deterministic (no clock, no randomness, no I/O,
-//! no floats), scoped (a mutator touches one scope).
+//! A module carries a schema, routers, functions and the types of its live
+//! frames. A function is a procedure on a router (a mutator or a query),
+//! a middleware of a scope (a guard or a provide) or a helper, with a body
+//! in a small imperative core over a pure expression language. A domain
+//! is written in the vocabulary of `spec/AUTHORING.md` ([`crate::authoring`]
+//! here); run under `Emit` it yields this IR, run under `Native` it applies
+//! entries directly, and [`crate::eval`] is what both mean. Three
+//! properties are designed in: total (no loops but `for` over a list, no
+//! recursion), deterministic (no clock, no randomness, no I/O, no floats),
+//! scoped (a mutator touches one scope).
+//!
+//! Spec version 2 (`spec/AUTHORING.md` §1): routers and middleware, an
+//! input schema with checks in place of bare arguments, `insert`/`upsert`/
+//! `update` in place of `put`, and `provided`.
 //!
 //! The submodules are §7: [`encode`] writes a module as a [`Value`],
 //! [`decode`] reads one back, [`normalize`] renumbers symbols. The closure
@@ -23,15 +30,15 @@ use crate::schema::{Dir, Relation, Schema, ScopeName, Ty};
 use crate::value::{FieldName, TableName, Value};
 
 pub use crate::hash::{closure, closures, function_hash, module_hash, Closure, FnHash};
-pub use decode::{closure_from_value, function_from_value, module_from_value, schema_from_value, ty_from_value, DecodeError};
-pub use encode::{calls, closure_value, function_value, module_value, schema_value, ty_value};
+pub use decode::{closure_from_value, function_from_value, module_from_value, router_from_value, schema_from_value, ty_from_value, DecodeError};
+pub use encode::{calls, check_value, closure_value, field_value, function_value, module_value, reaches, router_value, schema_value, ty_value};
 pub use normalize::{normalize, normalize_module};
 
 /// The version of this specification a module was written against.
 pub type SpecVersion = i64;
 
 /// The version this crate implements (`Ark.IR.specVersion`).
-pub const SPEC_VERSION: SpecVersion = 1;
+pub const SPEC_VERSION: SpecVersion = 2;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Module {
@@ -40,6 +47,9 @@ pub struct Module {
     /// In declaration order; a helper may be called only by functions after
     /// it, which is what makes every call graph a DAG.
     pub functions: Vec<Function>,
+    /// §1.1 The routers: each names the scope every procedure on it reads
+    /// and writes, and the middleware it may use.
+    pub routers: Vec<Router>,
     /// §3.9 The live section: the frame types an app's realtime channel
     /// carries, by name.
     pub live: Vec<(String, Ty)>,
@@ -50,6 +60,22 @@ impl Module {
     pub fn lookup_function(&self, name: &str) -> Option<&Function> {
         self.functions.iter().find(|f| f.name == name)
     }
+
+    /// `Ark.IR.lookupRouter`.
+    pub fn lookup_router(&self, name: &str) -> Option<&Router> {
+        self.routers.iter().find(|r| r.name == name)
+    }
+}
+
+/// §1.1 A router: a group of procedures over one scope, sharing middleware.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Router {
+    pub name: String,
+    /// The scope every procedure on it reads and writes.
+    pub scope: ScopeName,
+    /// Its middleware, in order, by function name. A procedure's own
+    /// [`Function::uses`] is the chain it runs, in this order.
+    pub uses: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,6 +87,46 @@ pub enum FnKind {
     Query,
     /// Pure: no store access, no refusal, returns a value.
     Helper,
+    /// §1.2 Middleware: runs before a procedure's body over the same store;
+    /// may refuse; returns nothing.
+    Guard,
+    /// §1.2 Middleware: runs before the body; may refuse; returns a value
+    /// the body reads as [`Expr::Provided`].
+    Provide,
+}
+
+impl FnKind {
+    /// The lowercase spelling `Ark.Encode` writes.
+    pub fn name(self) -> &'static str {
+        match self {
+            FnKind::Mutator => "mutator",
+            FnKind::Query => "query",
+            FnKind::Helper => "helper",
+            FnKind::Guard => "guard",
+            FnKind::Provide => "provide",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<FnKind> {
+        Some(match s {
+            "mutator" => FnKind::Mutator,
+            "query" => FnKind::Query,
+            "helper" => FnKind::Helper,
+            "guard" => FnKind::Guard,
+            "provide" => FnKind::Provide,
+            _ => return None,
+        })
+    }
+
+    /// A mutator or a query: something on a router that a caller invokes.
+    pub fn is_procedure(self) -> bool {
+        matches!(self, FnKind::Mutator | FnKind::Query)
+    }
+
+    /// A guard or a provide.
+    pub fn is_middleware(self) -> bool {
+        matches!(self, FnKind::Guard | FnKind::Provide)
+    }
 }
 
 /// The non-determinism a mutator is allowed, by type; drawn once at the
@@ -77,15 +143,70 @@ pub enum Auto {
 pub struct Function {
     pub name: String,
     pub kind: FnKind,
-    /// The scope a mutator belongs to; `None` for queries and helpers.
+    /// The scope a procedure or a middleware reads and writes; `None` for
+    /// helpers. A procedure's is its router's, and the verifier holds the
+    /// two equal.
     pub scope: Option<ScopeName>,
+    /// The router a procedure is on; `None` for helpers and middleware.
+    pub router: Option<String>,
+    /// The middleware a procedure runs before its body, in order: a
+    /// subsequence of its router's [`Router::uses`]. Empty for anything
+    /// that is not a procedure.
+    pub uses: Vec<String>,
     pub autos: Vec<(String, Auto)>,
-    pub args: Vec<(String, Ty)>,
-    /// The result type of a query or helper; `None` for a mutator.
+    /// §1.3 The input: each field's type and the checks run on it, in
+    /// order, before anything else. For a middleware, the fields of the
+    /// procedure's input it reads, by name and type.
+    pub input: Vec<(String, Field)>,
+    /// §1.3 Checks over the whole input, after the fields.
+    pub refine: Vec<(Expr, Option<String>)>,
+    /// The result type of a query, helper or provide; `None` for a mutator
+    /// or a guard.
     pub ret: Option<Ty>,
     pub body: Block,
     /// The author's names for symbols; not hashed, not required.
     pub names: BTreeMap<Sym, String>,
+}
+
+impl Function {
+    /// The input's fields by name and type alone, which is what a
+    /// middleware declares and what the old `args` were.
+    pub fn arg_types(&self) -> Vec<(String, Ty)> {
+        self.input.iter().map(|(n, f)| (n.clone(), f.ty.clone())).collect()
+    }
+}
+
+/// §1.3 One field of a procedure's input.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Field {
+    pub ty: Ty,
+    pub checks: Vec<Check>,
+}
+
+impl Field {
+    pub fn plain(ty: Ty) -> Field {
+        Field { ty, checks: vec![] }
+    }
+}
+
+/// §1.3 A check on one field. The message is `None` for the default
+/// (`crate::eval::default_message`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Check {
+    /// Text: normalise before every later check and before the body.
+    Trim,
+    /// Text: length in code points at least `n`.
+    MinLen(i64, Option<String>),
+    /// Text: length in code points at most `n`.
+    MaxLen(i64, Option<String>),
+    /// Int: `lo <= v <= hi`, either bound optional.
+    Range(Option<i64>, Option<i64>, Option<String>),
+    /// List: at least one element.
+    NonEmpty(Option<String>),
+    /// Id: a row with that key exists in the procedure's scope.
+    Exists(Option<String>),
+    /// Any: the expression, over `Arg <this field>`, is true.
+    Refine(Expr, Option<String>),
 }
 
 /// A local variable, alpha-normalised: the `n`th binding in a function.
@@ -101,8 +222,16 @@ pub enum Stmt {
     If(Expr, Block, Block),
     /// Iterate a list, binding each element.
     For(Sym, Expr, Block),
-    /// Write a full row; see `Ark.Store.put`.
-    Put(TableName, Expr),
+    /// §1.4 Write the row unless one matches on the columns (the table's
+    /// key when the list is empty, otherwise a declared unique index).
+    Insert(TableName, Expr, Vec<FieldName>),
+    /// §1.4 Write the row; if one matches on the columns, keep its key
+    /// columns and take the rest from the new row. `Upsert t e []` is the
+    /// old `Put t e`.
+    Upsert(TableName, Expr, Vec<FieldName>),
+    /// §1.4 The row under the key, bound to the symbol, replaced by the
+    /// expression; a no-op when absent.
+    Update(TableName, Vec<Expr>, Sym, Expr),
     /// Delete by key.
     Delete(TableName, Vec<Expr>),
     /// End the mutator with a deterministic verdict.
@@ -122,6 +251,8 @@ pub enum Expr {
     CtxUser,
     /// The login the entry was authored under.
     CtxSession,
+    /// §1.2 What the named `Provide` middleware returned.
+    Provided(String),
     Field(Box<Expr>, FieldName),
     Struct(BTreeMap<FieldName, Expr>),
     List(Vec<Expr>),
@@ -314,11 +445,14 @@ pub enum StdFn {
     Reverse,
     IsSome,
     UnwrapOr,
+    /// The option's value, or the refusal `unwrapped none`
+    /// (`spec/AUTHORING.md` §6: what `or_refuse` lowers to).
+    Unwrap,
 }
 
 impl StdFn {
     /// Every function, in the spec's order.
-    pub const ALL: [StdFn; 28] = [
+    pub const ALL: [StdFn; 29] = [
         StdFn::Trim,
         StdFn::IsEmpty,
         StdFn::Concat,
@@ -347,6 +481,7 @@ impl StdFn {
         StdFn::Reverse,
         StdFn::IsSome,
         StdFn::UnwrapOr,
+        StdFn::Unwrap,
     ];
 
     /// The constructor's `show` spelling, which is how a module names it.
@@ -380,6 +515,7 @@ impl StdFn {
             StdFn::Reverse => "Reverse",
             StdFn::IsSome => "IsSome",
             StdFn::UnwrapOr => "UnwrapOr",
+            StdFn::Unwrap => "Unwrap",
         }
     }
 

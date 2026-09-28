@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 use crate::hash::Closure;
 use crate::ir::normalize::normalize;
-use crate::ir::{Auto, Expr, FnKind, Function, Module, Plan, Pred, Related, Stmt};
+use crate::ir::{Auto, Check, Expr, Field, Function, Module, Plan, Pred, Related, Router, Stmt};
 use crate::schema::{Dir, Schema, Ty};
 use crate::value::{FieldName, Value};
 
@@ -41,8 +41,17 @@ pub fn module_value(m: &Module) -> Value {
             ("spec", int(m.spec)),
             ("schema", schema_value(&m.schema)),
             ("functions", list(|f| function_value(&BTreeMap::new(), f), &m.functions)),
+            ("routers", list(router_value, &m.routers)),
             ("live", list(|(n, t)| node("frame", vec![("name", txt(n)), ("ty", ty_value(t))]), &m.live)),
         ],
+    )
+}
+
+/// §1.1 A router (`{"t":"router","name","scope","uses"}`).
+pub fn router_value(r: &Router) -> Value {
+    node(
+        "router",
+        vec![("name", txt(&r.name)), ("scope", txt(&r.scope)), ("uses", list(|u| txt(u), &r.uses))],
     )
 }
 
@@ -120,22 +129,19 @@ pub fn ty_value(t: &Ty) -> Value {
     }
 }
 
-/// One function, normalised, with the hashes of the helpers it calls
-/// (`Ark.Encode.functionValue`). Names are not carried.
+/// One function, normalised, with the hashes of the helpers and middleware
+/// it reaches directly (`Ark.Encode.functionValue`). Names are not carried.
 pub fn function_value(deps: &BTreeMap<String, Value>, fn0: &Function) -> Value {
     let f = normalize(fn0);
-    let kind = match f.kind {
-        FnKind::Mutator => "mutator",
-        FnKind::Query => "query",
-        FnKind::Helper => "helper",
-    };
     node(
         "fn",
         vec![
             ("name", txt(&f.name)),
             ("deps", Value::Struct(deps.clone())),
-            ("kind", txt(kind)),
+            ("kind", txt(f.kind.name())),
             ("scope", f.scope.as_deref().map(txt).unwrap_or(Value::Null)),
+            ("router", f.router.as_deref().map(txt).unwrap_or(Value::Null)),
+            ("uses", list(|u| txt(u), &f.uses)),
             (
                 "autos",
                 list(
@@ -146,11 +152,44 @@ pub fn function_value(deps: &BTreeMap<String, Value>, fn0: &Function) -> Value {
                     &f.autos,
                 ),
             ),
-            ("args", list(|(n, t)| node("arg", vec![("name", txt(n)), ("ty", ty_value(t))]), &f.args)),
+            ("input", list(|(n, fd)| field_value(n, fd), &f.input)),
+            (
+                "refine",
+                list(|(e, why)| node("refine", vec![("e", expr(e)), ("why", why_value(why))]), &f.refine),
+            ),
             ("ret", f.ret.as_ref().map(ty_value).unwrap_or(Value::Null)),
             ("body", list(stmt, &f.body)),
         ],
     )
+}
+
+fn why_value(why: &Option<String>) -> Value {
+    why.as_deref().map(txt).unwrap_or(Value::Null)
+}
+
+fn opt_int(n: &Option<i64>) -> Value {
+    n.map(int).unwrap_or(Value::Null)
+}
+
+/// §1.3 One input field (`{"t":"field","name","ty","checks"}`).
+pub fn field_value(name: &str, f: &Field) -> Value {
+    node(
+        "field",
+        vec![("name", txt(name)), ("ty", ty_value(&f.ty)), ("checks", list(check_value, &f.checks))],
+    )
+}
+
+/// §1.3 One check.
+pub fn check_value(c: &Check) -> Value {
+    match c {
+        Check::Trim => node("trim", vec![]),
+        Check::MinLen(n, why) => node("min_len", vec![("n", int(*n)), ("why", why_value(why))]),
+        Check::MaxLen(n, why) => node("max_len", vec![("n", int(*n)), ("why", why_value(why))]),
+        Check::Range(lo, hi, why) => node("range", vec![("lo", opt_int(lo)), ("hi", opt_int(hi)), ("why", why_value(why))]),
+        Check::NonEmpty(why) => node("non_empty", vec![("why", why_value(why))]),
+        Check::Exists(why) => node("exists", vec![("why", why_value(why))]),
+        Check::Refine(e, why) => node("refine", vec![("e", expr(e)), ("why", why_value(why))]),
+    }
 }
 
 /// A closure as an authority sends one: `{ t: "closure", fn, helpers }`
@@ -170,7 +209,12 @@ fn stmt(s: &Stmt) -> Value {
         Stmt::Let(x, e) => node("let", vec![("sym", int(*x)), ("e", expr(e))]),
         Stmt::If(c, a, b) => node("if", vec![("c", expr(c)), ("then", list(stmt, a)), ("else", list(stmt, b))]),
         Stmt::For(x, xs, b) => node("for", vec![("sym", int(*x)), ("in", expr(xs)), ("body", list(stmt, b))]),
-        Stmt::Put(t, e) => node("put", vec![("table", txt(t)), ("row", expr(e))]),
+        Stmt::Insert(t, e, on) => node("insert", vec![("table", txt(t)), ("row", expr(e)), ("on", list(|c| txt(c), on))]),
+        Stmt::Upsert(t, e, on) => node("upsert", vec![("table", txt(t)), ("row", expr(e)), ("on", list(|c| txt(c), on))]),
+        Stmt::Update(t, ks, x, e) => node(
+            "update",
+            vec![("table", txt(t)), ("key", list(expr, ks)), ("sym", int(*x)), ("row", expr(e))],
+        ),
         Stmt::Delete(t, ks) => node("delete", vec![("table", txt(t)), ("key", list(expr, ks))]),
         Stmt::Refuse(e) => node("refuse", vec![("e", expr(e))]),
         Stmt::Return(me) => node("return", vec![("e", me.as_ref().map(expr).unwrap_or(Value::Null))]),
@@ -185,6 +229,7 @@ fn expr(e: &Expr) -> Value {
         Expr::Var(x) => node("var", vec![("sym", int(*x))]),
         Expr::CtxUser => node("ctx_user", vec![]),
         Expr::CtxSession => node("ctx_session", vec![]),
+        Expr::Provided(n) => node("provided", vec![("fn", txt(n))]),
         Expr::Field(e, f) => node("field", vec![("e", expr(e)), ("name", txt(f))]),
         Expr::Struct(fs) => node(
             "struct",
@@ -262,19 +307,43 @@ fn pred(p: &Pred) -> Value {
     }
 }
 
-/// The names of the helpers a function calls directly, sorted and without
-/// repeats (`Ark.Encode.calls`).
+/// The names of the helpers a function calls directly — in its checks,
+/// its refinements and its body — sorted and without repeats
+/// (`Ark.Encode.calls`). Middleware is not a call; see [`reaches`].
 pub fn calls(f: &Function) -> Vec<String> {
     let mut acc = std::collections::BTreeSet::new();
+    for (_, fd) in &f.input {
+        for c in &fd.checks {
+            if let Check::Refine(e, _) = c {
+                expr_calls(e, &mut acc);
+            }
+        }
+    }
+    for (e, _) in &f.refine {
+        expr_calls(e, &mut acc);
+    }
     for s in &f.body {
         stmt_calls(s, &mut acc);
     }
     acc.into_iter().collect()
 }
 
+/// Everything a function reaches directly by name: the helpers it calls and
+/// the middleware it uses, sorted and without repeats. What its hash
+/// depends on and what its closure carries.
+pub fn reaches(f: &Function) -> Vec<String> {
+    let mut acc: std::collections::BTreeSet<String> = calls(f).into_iter().collect();
+    acc.extend(f.uses.iter().cloned());
+    acc.into_iter().collect()
+}
+
 fn stmt_calls(s: &Stmt, acc: &mut std::collections::BTreeSet<String>) {
     match s {
-        Stmt::Let(_, e) | Stmt::Put(_, e) | Stmt::Refuse(e) => expr_calls(e, acc),
+        Stmt::Let(_, e) | Stmt::Insert(_, e, _) | Stmt::Upsert(_, e, _) | Stmt::Refuse(e) => expr_calls(e, acc),
+        Stmt::Update(_, ks, _, e) => {
+            ks.iter().for_each(|k| expr_calls(k, acc));
+            expr_calls(e, acc);
+        }
         Stmt::If(c, a, b) => {
             expr_calls(c, acc);
             a.iter().chain(b.iter()).for_each(|s| stmt_calls(s, acc));
@@ -312,7 +381,7 @@ fn expr_calls(e: &Expr, acc: &mut std::collections::BTreeSet<String>) {
         }
         Expr::Fold(xs, z, _, _, b) => [xs, z, b].iter().for_each(|e| expr_calls(e, acc)),
         Expr::Select(p) => plan_calls(p, acc),
-        Expr::Lit(_) | Expr::Arg(_) | Expr::Auto(_) | Expr::Var(_) | Expr::CtxUser | Expr::CtxSession | Expr::None(_) => {}
+        Expr::Lit(_) | Expr::Arg(_) | Expr::Auto(_) | Expr::Var(_) | Expr::CtxUser | Expr::CtxSession | Expr::Provided(_) | Expr::None(_) => {}
     }
 }
 

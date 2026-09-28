@@ -205,6 +205,61 @@ pub fn judge_put(st: &dyn Store, tn: &str, row0: Row) -> Result<Option<Change>, 
     })
 }
 
+/// §1.4 The row a write's column list matches, if any: the table's key
+/// when the list is empty, otherwise every listed column equal and none of
+/// them `Null` (a `Null` matches nothing, as a unique index has it).
+pub fn matching(st: &dyn Store, tbl: &Table, row: &Row, on: &[FieldName]) -> Option<Row> {
+    if on.is_empty() {
+        return st.get(&tbl.name, &tbl.key_of(row));
+    }
+    let want: Vec<&Value> = on.iter().map(|c| row.get(c).unwrap_or(&Value::Null)).collect();
+    if want.iter().any(|v| v.is_null()) {
+        return None;
+    }
+    st.scan(&tbl.name)
+        .into_iter()
+        .find(|r| on.iter().zip(&want).all(|(c, v)| r.get(c) == Some(*v)))
+}
+
+/// §1.4 `SInsert`: write the row unless one matches on the columns (the
+/// key when the list is empty). A match is no change and no refusal.
+pub fn insert(st: &mut dyn Store, tn: &str, row0: Row, on: &[FieldName]) -> Result<Option<Change>, Refusal> {
+    let tbl = st.schema().lookup_table(tn).cloned().ok_or_else(|| Refusal::NoSuchTable(tn.into()))?;
+    let row = complete(&tbl, row0);
+    if matching(st.as_store(), &tbl, &row, on).is_some() {
+        return Ok(None);
+    }
+    st.put(tn, row)
+}
+
+/// §1.4 `SUpsert`: write the row; if one matches on the columns, keep its
+/// key columns and take the rest from the new row. `upsert(t, row, [])` is
+/// exactly `put(t, row)`.
+pub fn upsert(st: &mut dyn Store, tn: &str, row0: Row, on: &[FieldName]) -> Result<Option<Change>, Refusal> {
+    let tbl = st.schema().lookup_table(tn).cloned().ok_or_else(|| Refusal::NoSuchTable(tn.into()))?;
+    let mut row = complete(&tbl, row0);
+    if let Some(old) = matching(st.as_store(), &tbl, &row, on) {
+        for k in &tbl.key {
+            if let Some(v) = old.get(k) {
+                row.insert(k.clone(), v.clone());
+            }
+        }
+    }
+    st.put(tn, row)
+}
+
+/// §1.4 `SUpdate`, once the new row has been computed from the old one: the
+/// row under `key` replaced by `row`. The replacement must keep the key;
+/// one that moves it is refused as a malformed row.
+pub fn update(st: &mut dyn Store, tn: &str, key: &[Value], row0: Row) -> Result<Option<Change>, Refusal> {
+    let tbl = st.schema().lookup_table(tn).cloned().ok_or_else(|| Refusal::NoSuchTable(tn.into()))?;
+    let row = complete(&tbl, row0);
+    if tbl.key_of(&row) != key {
+        return Err(Refusal::MalformedRow(tn.into(), "update changed the key".into()));
+    }
+    st.put(tn, row)
+}
+
 /// What `delete` would report, without writing.
 pub fn judge_delete(st: &dyn Store, tn: &str, k: &[Value]) -> Result<Option<Change>, Refusal> {
     let tbl = st.schema().lookup_table(tn).ok_or_else(|| Refusal::NoSuchTable(tn.into()))?;

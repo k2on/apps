@@ -9,19 +9,47 @@
 
 use std::collections::BTreeMap;
 
-use crate::ir::{Block, Expr, Function, Module, Plan, Pred, Stmt, Sym};
+use crate::ir::{Block, Check, Expr, Field, Function, Module, Plan, Pred, Stmt, Sym};
 
 type Ren = BTreeMap<Sym, Sym>;
 
 /// A function with its symbols renumbered in binding order and its names
 /// carried across to the new numbers.
 pub fn normalize(f: &Function) -> Function {
-    let (body, mapping) = renumber_block(&Ren::new(), 0, &f.body);
+    let mut next: Sym = 0;
+    let mut input = Vec::with_capacity(f.input.len());
+    for (n, fd) in &f.input {
+        let mut checks = Vec::with_capacity(fd.checks.len());
+        for c in &fd.checks {
+            checks.push(match c {
+                Check::Refine(e, why) => {
+                    let (e2, n2) = renumber_expr(&Ren::new(), next, e);
+                    next = n2;
+                    Check::Refine(e2, why.clone())
+                }
+                other => other.clone(),
+            });
+        }
+        input.push((n.clone(), Field { ty: fd.ty.clone(), checks }));
+    }
+    let mut refine = Vec::with_capacity(f.refine.len());
+    for (e, why) in &f.refine {
+        let (e2, n2) = renumber_expr(&Ren::new(), next, e);
+        next = n2;
+        refine.push((e2, why.clone()));
+    }
+    let (body, mapping) = renumber_block(&Ren::new(), next, &f.body);
     let names = mapping
         .iter()
         .filter_map(|(old, new)| f.names.get(old).map(|n| (*new, n.clone())))
         .collect();
-    Function { body, names, ..f.clone() }
+    Function {
+        input,
+        refine,
+        body,
+        names,
+        ..f.clone()
+    }
 }
 
 /// Every function of a module normalised.
@@ -68,9 +96,21 @@ fn renumber_stmt(ren: &Ren, next: Sym, s: &Stmt) -> (Stmt, Ren, Sym) {
             let (b2, n2) = inner(&ren2, n1 + 1, b);
             (Stmt::For(n1, xs2, b2), ren.clone(), n2)
         }
-        Stmt::Put(t, e) => {
+        Stmt::Insert(t, e, on) => {
             let (e2, n1) = renumber_expr(ren, next, e);
-            (Stmt::Put(t.clone(), e2), ren.clone(), n1)
+            (Stmt::Insert(t.clone(), e2, on.clone()), ren.clone(), n1)
+        }
+        Stmt::Upsert(t, e, on) => {
+            let (e2, n1) = renumber_expr(ren, next, e);
+            (Stmt::Upsert(t.clone(), e2, on.clone()), ren.clone(), n1)
+        }
+        // The key first, then the existing row's binder, then the new row.
+        Stmt::Update(t, ks, x, e) => {
+            let (ks2, n1) = renumber_many(ren, next, ks);
+            let mut ren2 = ren.clone();
+            ren2.insert(*x, n1);
+            let (e2, n2) = renumber_expr(&ren2, n1 + 1, e);
+            (Stmt::Update(t.clone(), ks2, n1, e2), ren.clone(), n2)
         }
         Stmt::Delete(t, ks) => {
             let (ks2, n1) = renumber_many(ren, next, ks);
@@ -125,7 +165,13 @@ fn stmt_binders(s: &Stmt) -> Vec<Sym> {
             v.extend(b.iter().flat_map(stmt_binders));
             v
         }
-        Stmt::Put(_, e) | Stmt::Refuse(e) => expr_binders(e),
+        Stmt::Insert(_, e, _) | Stmt::Upsert(_, e, _) | Stmt::Refuse(e) => expr_binders(e),
+        Stmt::Update(_, ks, x, e) => {
+            let mut v = vec![*x];
+            v.extend(ks.iter().flat_map(expr_binders));
+            v.extend(expr_binders(e));
+            v
+        }
         Stmt::Delete(_, ks) => ks.iter().flat_map(expr_binders).collect(),
         Stmt::Return(me) => me.as_ref().map(expr_binders).unwrap_or_default(),
     }
@@ -161,7 +207,7 @@ fn expr_binders(e: &Expr) -> Vec<Sym> {
             v
         }
         Expr::Select(p) => plan_binders(p),
-        Expr::Lit(_) | Expr::Arg(_) | Expr::Auto(_) | Expr::Var(_) | Expr::CtxUser | Expr::CtxSession | Expr::None(_) => vec![],
+        Expr::Lit(_) | Expr::Arg(_) | Expr::Auto(_) | Expr::Var(_) | Expr::CtxUser | Expr::CtxSession | Expr::Provided(_) | Expr::None(_) => vec![],
     }
 }
 
@@ -275,7 +321,7 @@ fn renumber_expr(ren: &Ren, next: Sym, e: &Expr) -> (Expr, Sym) {
             let (ks2, n) = renumber_many(ren, next, ks);
             (Expr::Exists(t.clone(), ks2), n)
         }
-        Expr::Lit(_) | Expr::Arg(_) | Expr::Auto(_) | Expr::CtxUser | Expr::CtxSession | Expr::None(_) => (e.clone(), next),
+        Expr::Lit(_) | Expr::Arg(_) | Expr::Auto(_) | Expr::CtxUser | Expr::CtxSession | Expr::Provided(_) | Expr::None(_) => (e.clone(), next),
     }
 }
 

@@ -25,7 +25,14 @@ public enum Decode {
             let t = try tyFromValue(try field(ffs, "ty"))
             return LiveFrame(n, t)
         }
-        return Module(spec: Int(spec), schema: sch, functions: fns, live: live)
+        let routers = try list(["module", "routers"], try field(fs, "routers")) { x -> Router in
+            let rfs = try tagged(["router"], "router", x)
+            let n = try text(["router", "name"], try field(rfs, "name"))
+            let sc = try text(["router", n, "scope"], try field(rfs, "scope"))
+            let us = try list(["router", n, "uses"], try field(rfs, "uses")) { try text(["router", n, "uses"], $0) }
+            return Router(name: n, scope: sc, uses: us)
+        }
+        return Module(spec: Int(spec), schema: sch, functions: fns, routers: routers, live: live)
     }
 
     /// A closure: `{ t: "closure", fn, helpers }`.
@@ -98,14 +105,11 @@ public enum Decode {
         let fs = try tagged(["fn"], "fn", v)
         let n = try text(["fn", "name"], try field(fs, "name"))
         let here = ["fn", n]
-        let k: FnKind
-        switch try text(here + ["kind"], try field(fs, "kind")) {
-        case "mutator": k = .mutator
-        case "query": k = .query
-        case "helper": k = .helper
-        case let other: throw ModuleDecodeError(here, "unknown kind " + other)
-        }
+        let kindText = try text(here + ["kind"], try field(fs, "kind"))
+        guard let k = FnKind(wireName: kindText) else { throw ModuleDecodeError(here, "unknown kind " + kindText) }
         let sc = try optional(try field(fs, "scope")) { try text(here + ["scope"], $0) }
+        let rt = try optional(try field(fs, "router")) { try text(here + ["router"], $0) }
+        let uses = try list(here + ["uses"], try field(fs, "uses")) { try text(here + ["uses"], $0) }
         let autos = try list(here + ["autos"], try field(fs, "autos")) { x -> NamedAuto in
             let (t, afs) = try taggedAny(["auto"], x)
             let an = try text(["auto", "name"], try field(afs, "name"))
@@ -115,15 +119,39 @@ public enum Decode {
             default: throw ModuleDecodeError(["auto", an], "unknown auto " + t)
             }
         }
-        let args = try list(here + ["args"], try field(fs, "args")) { x -> NamedArg in
-            let afs = try tagged(["arg"], "arg", x)
-            let an = try text(["arg", "name"], try field(afs, "name"))
-            let t = try tyFromValue(try field(afs, "ty"))
-            return NamedArg(an, t)
+        let input = try list(here + ["input"], try field(fs, "input")) { x -> NamedField in
+            let ffs = try tagged(here + ["field"], "field", x)
+            let fname = try text(here + ["field", "name"], try field(ffs, "name"))
+            let p = here + ["input", fname]
+            let t = try tyFromValue(try field(ffs, "ty"))
+            let cs = try list(p, try field(ffs, "checks")) { try check(p, $0) }
+            return NamedField(fname, Field(t, checks: cs))
+        }
+        let refine = try list(here + ["refine"], try field(fs, "refine")) { x -> Refine in
+            let rfs = try tagged(here + ["refine"], "refine", x)
+            return Refine(try expr(here + ["refine"], try field(rfs, "e")), try optional(try field(rfs, "why")) { try text(here + ["refine"], $0) })
         }
         let ret = try optional(try field(fs, "ret"), tyFromValue)
         let body = try list(here + ["body"], try field(fs, "body")) { try stmt(here, $0) }
-        return Function(name: n, kind: k, scope: sc, autos: autos, args: args, ret: ret, body: body, names: [:])
+        return Function(name: n, kind: k, scope: sc, router: rt, uses: uses, autos: autos, input: input, refine: refine, ret: ret, body: body, names: [:])
+    }
+
+    static func check(_ here: [String], _ v: Value) throws -> Check {
+        let (t, fs) = try taggedAny(here, v)
+        let p = here + [t]
+        func why() throws -> String? { return try optional(try field(fs, "why")) { try text(p, $0) } }
+        func n(_ k: String) throws -> Int { return Int(try int(p, try field(fs, k))) }
+        func optInt(_ k: String) throws -> Int? { return try optional(try field(fs, k)) { Int(try int(p, $0)) } }
+        switch t {
+        case "trim": return .trim
+        case "min_len": return .minLen(try n("n"), try why())
+        case "max_len": return .maxLen(try n("n"), try why())
+        case "range": return .range(try optInt("lo"), try optInt("hi"), try why())
+        case "non_empty": return .nonEmpty(try why())
+        case "exists": return .exists(try why())
+        case "refine": return .refine(try expr(p, try field(fs, "e")), try why())
+        default: throw ModuleDecodeError(here, "unknown check " + t)
+        }
     }
 
     static func stmt(_ here: [String], _ v: Value) throws -> Stmt {
@@ -138,7 +166,14 @@ public enum Decode {
         case "for":
             return .sFor(try sym(p, try field(fs, "sym")), try expr(p, try field(fs, "in")),
                          try list(p, try field(fs, "body")) { try stmt(p, $0) })
-        case "put": return .sPut(try text(p, try field(fs, "table")), try expr(p, try field(fs, "row")))
+        case "insert", "upsert":
+            let tb = try text(p, try field(fs, "table"))
+            let row = try expr(p, try field(fs, "row"))
+            let on = try list(p, try field(fs, "on")) { try text(p, $0) }
+            return t == "insert" ? .sInsert(tb, row, on) : .sUpsert(tb, row, on)
+        case "update":
+            return .sUpdate(try text(p, try field(fs, "table")), try list(p, try field(fs, "key")) { try expr(p, $0) },
+                            try sym(p, try field(fs, "sym")), try expr(p, try field(fs, "row")))
         case "delete": return .sDelete(try text(p, try field(fs, "table")), try list(p, try field(fs, "key")) { try expr(p, $0) })
         case "refuse": return .sRefuse(try expr(p, try field(fs, "e")))
         case "return": return .sReturn(try optional(try field(fs, "e")) { try expr(p, $0) })
@@ -159,6 +194,7 @@ public enum Decode {
         case "var": return .variable(try s("sym"))
         case "ctx_user": return .ctxUser
         case "ctx_session": return .ctxSession
+        case "provided": return .provided(try text(p, try field(fs, "fn")))
         case "field": return .field(try e("e"), try text(p, try field(fs, "name")))
         case "struct":
             let m = try structMap(p, try field(fs, "fields"))

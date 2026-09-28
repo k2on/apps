@@ -10,14 +10,20 @@
 //! replays and compares, and a disagreement is recorded in `diverged` and
 //! resolved in the authority's favour.
 //!
+//! An entry is applied by a native procedure when the peer holds one for
+//! its hash ([`crate::authoring::Procedure`], the domain's own code run
+//! `Native`), otherwise through the closure the hash names
+//! ([`crate::eval::apply_closure`]), otherwise by facts. The two are held to
+//! each other by the runtime's tests on every procedure; both are this
+//! file's "the closure is held".
+//!
 //! The stores here are [`MemoryStore`]s, as the spec's are: the optimistic
 //! view is a value recomputed on every rebase.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::db::run_mutator;
-use crate::eval::{apply_closure, Args, Ctx};
-use crate::fault::Fault;
+pub use crate::authoring::Procedure;
+use crate::eval::{apply_closure, Args, Ctx, EvalError};
 use crate::hash::{state_hash, Closure, FnHash};
 use crate::log::{Entry, Facts, Log, Page, Seq};
 use crate::schema::{Schema, ScopeName};
@@ -32,9 +38,12 @@ use crate::value::{hex, Id};
 pub struct Replica {
     pub scope: ScopeName,
     pub schema: Schema,
-    /// The closures this peer can run: its generated code's, plus any it
-    /// was sent. Keyed by the hash an entry names.
+    /// The closures this peer can run: its module's, plus any it was sent.
+    /// Keyed by the hash an entry names.
     pub bodies: BTreeMap<FnHash, Closure>,
+    /// The procedures this peer runs natively, by the same hash; preferred
+    /// over the closure when both are held.
+    pub natives: BTreeMap<FnHash, Procedure>,
     /// The confirmed store: the scope exactly as the authority had it at
     /// `cursor`. Durable; moves only forward.
     pub confirmed: MemoryStore,
@@ -79,8 +88,36 @@ fn ctx_of(e: &Entry) -> Ctx {
     }
 }
 
-fn bug_text(e: &crate::eval::EvalError) -> String {
+fn bug_text(e: &EvalError) -> String {
     format!("bug: {e:?}")
+}
+
+type Applied = Result<Result<Vec<Change>, Refusal>, EvalError>;
+
+/// Apply an entry's function by its hash: natively when a procedure is
+/// held, through the closure otherwise; `None` when neither is.
+fn run(
+    schema: &Schema,
+    bodies: &BTreeMap<FnHash, Closure>,
+    natives: &BTreeMap<FnHash, Procedure>,
+    fh: &FnHash,
+    ctx: &Ctx,
+    autos: &Args,
+    args: &Args,
+    store: &mut MemoryStore,
+) -> Option<Applied> {
+    if let Some(p) = natives.get(fh) {
+        return Some(p.apply(ctx, autos, args, store));
+    }
+    bodies.get(fh).map(|c| apply_closure(schema, c, ctx, autos, args, store))
+}
+
+/// Hold native procedures, and the closures they carry.
+fn hold(bodies: &mut BTreeMap<FnHash, Closure>, natives: &mut BTreeMap<FnHash, Procedure>, procs: impl IntoIterator<Item = (FnHash, Procedure)>) {
+    for (h, p) in procs {
+        bodies.entry(h.clone()).or_insert_with(|| p.closure().clone());
+        natives.insert(h, p);
+    }
 }
 
 impl Replica {
@@ -91,6 +128,7 @@ impl Replica {
             scope: scope.into(),
             schema,
             bodies,
+            natives: BTreeMap::new(),
             view: confirmed.clone(),
             confirmed,
             cursor,
@@ -109,14 +147,12 @@ impl Replica {
     /// and if it is not refused, record it as pending. A refusal changes
     /// nothing and records nothing.
     pub fn mutate(&mut self, id: Id, ctx: &Ctx, fh: &FnHash, autos: &Args, args: &Args) -> Result<Entry, Refusal> {
-        let Some(c) = self.bodies.get(fh) else {
-            return Err(Refusal::Refused(format!("unknown function {}", hex(fh))));
-        };
         let mut view = self.view.clone();
-        match apply_closure(&self.schema, c, ctx, autos, args, &mut view) {
-            Err(bug) => Err(Refusal::Refused(bug_text(&bug))),
-            Ok(Err(refusal)) => Err(refusal),
-            Ok(Ok(chs)) => {
+        match run(&self.schema, &self.bodies, &self.natives, fh, ctx, autos, args, &mut view) {
+            None => Err(Refusal::Refused(format!("unknown function {}", hex(fh)))),
+            Some(Err(bug)) => Err(Refusal::Refused(bug_text(&bug))),
+            Some(Ok(Err(refusal))) => Err(refusal),
+            Some(Ok(Ok(chs))) => {
                 let e = Entry {
                     id,
                     actor: ctx.user.clone(),
@@ -133,42 +169,16 @@ impl Replica {
         }
     }
 
-    /// §11.2 again, with the body supplied: `mutate` for a peer whose
-    /// authoring code is generated rather than interpreted. The body runs as
-    /// one transaction over the optimistic store (`run_mutator`), and the
-    /// entry is recorded under the hash, autos and arguments given, exactly
-    /// as `mutate` records one — so a rebase replays it through the closure
-    /// that hash names. Holding that closure is not required to author; a
-    /// pending intent whose closure is not held is dropped at the next
-    /// replay, as `mutate` would have refused it up front.
-    pub fn mutate_with(
-        &mut self,
-        id: Id,
-        ctx: &Ctx,
-        fh: &FnHash,
-        autos: &Args,
-        args: &Args,
-        body: impl FnOnce(&mut crate::db::Db) -> Result<(), Fault>,
-    ) -> Result<Entry, Refusal> {
-        let mut view = self.view.clone();
-        match run_mutator(&mut view, body) {
-            Err(bug) => Err(Refusal::Refused(format!("bug: {bug}"))),
-            Ok(Err(refusal)) => Err(refusal),
-            Ok(Ok(chs)) => {
-                let e = Entry {
-                    id,
-                    actor: ctx.user.clone(),
-                    session: ctx.session.clone(),
-                    fn_hash: fh.clone(),
-                    args: args.clone(),
-                    autos: autos.clone(),
-                };
-                self.view = view;
-                self.pending.push(e.clone());
-                self.changes.extend(chs);
-                Ok(e)
-            }
-        }
+    /// Hold native procedures (and the closures they carry): from here on
+    /// an entry naming one of their hashes — authored here, replayed on a
+    /// rebase, or confirmed — is applied natively.
+    pub fn hold(&mut self, procs: impl IntoIterator<Item = (FnHash, Procedure)>) {
+        hold(&mut self.bodies, &mut self.natives, procs);
+    }
+
+    /// Whether an entry naming this hash can be applied here by intent.
+    pub fn can_apply(&self, fh: &FnHash) -> bool {
+        self.natives.contains_key(fh) || self.bodies.contains_key(fh)
     }
 
     /// §11.3 A confirmed entry arrives, at its sequence; it waits in the
@@ -229,7 +239,7 @@ impl Replica {
         self.inbox
             .iter()
             .filter_map(|(n, ib)| match (&ib.entry, &ib.facts) {
-                (Some(e), None) if !self.bodies.contains_key(&e.fn_hash) || self.diverged.contains(n) => Some(*n),
+                (Some(e), None) if !self.can_apply(&e.fn_hash) || self.diverged.contains(n) => Some(*n),
                 _ => None,
             })
             .collect()
@@ -314,22 +324,22 @@ impl Replica {
             st.apply_changes(f);
             Some((st, f.clone(), diverged))
         };
-        match (self.bodies.get(&e.fn_hash), mf) {
-            (Some(c), _) if !self.diverged.contains(&n) => {
-                let mut st = self.confirmed.clone();
-                match apply_closure(&self.schema, c, &ctx_of(e), &e.autos, &e.args, &mut st) {
-                    Ok(Ok(chs)) => match mf {
-                        Some(f) if *f != chs => by_facts(f, true),
-                        _ => Some((st, chs, false)),
-                    },
-                    _ => match mf {
-                        Some(f) => by_facts(f, true),
-                        None => None,
-                    },
-                }
-            }
-            (_, Some(f)) => by_facts(f, false),
-            (_, None) => None,
+        if self.can_apply(&e.fn_hash) && !self.diverged.contains(&n) {
+            let mut st = self.confirmed.clone();
+            return match run(&self.schema, &self.bodies, &self.natives, &e.fn_hash, &ctx_of(e), &e.autos, &e.args, &mut st) {
+                Some(Ok(Ok(chs))) => match mf {
+                    Some(f) if *f != chs => by_facts(f, true),
+                    _ => Some((st, chs, false)),
+                },
+                _ => match mf {
+                    Some(f) => by_facts(f, true),
+                    None => None,
+                },
+            };
+        }
+        match mf {
+            Some(f) => by_facts(f, false),
+            None => None,
         }
     }
 
@@ -342,19 +352,15 @@ impl Replica {
         let pending = std::mem::take(&mut self.pending);
         let mut kept = Vec::with_capacity(pending.len());
         for e in pending {
-            match self.bodies.get(&e.fn_hash) {
+            let mut view = self.view.clone();
+            match run(&self.schema, &self.bodies, &self.natives, &e.fn_hash, &ctx_of(&e), &e.autos, &e.args, &mut view) {
                 None => self.rejections.push((e.id, Refusal::Refused("no closure for a pending intent".into()))),
-                Some(c) => {
-                    let mut view = self.view.clone();
-                    match apply_closure(&self.schema, c, &ctx_of(&e), &e.autos, &e.args, &mut view) {
-                        Ok(Ok(_)) => {
-                            self.view = view;
-                            kept.push(e);
-                        }
-                        Ok(Err(why)) => self.rejections.push((e.id, why)),
-                        Err(bug) => self.rejections.push((e.id, Refusal::Refused(bug_text(&bug)))),
-                    }
+                Some(Ok(Ok(_))) => {
+                    self.view = view;
+                    kept.push(e);
                 }
+                Some(Ok(Err(why))) => self.rejections.push((e.id, why)),
+                Some(Err(bug)) => self.rejections.push((e.id, Refusal::Refused(bug_text(&bug)))),
             }
         }
         self.pending = kept;
@@ -371,6 +377,8 @@ pub struct Authority {
     pub schema: Schema,
     /// Every closure ever accepted for this scope, by hash.
     pub bodies: BTreeMap<FnHash, Closure>,
+    /// The procedures this authority runs natively, by the same hash.
+    pub natives: BTreeMap<FnHash, Procedure>,
     pub log: Log,
     /// The state at the head of the log.
     pub store: MemoryStore,
@@ -410,7 +418,13 @@ impl Authority {
             store: MemoryStore::empty(schema.clone()),
             schema,
             bodies,
+            natives: BTreeMap::new(),
         }
+    }
+
+    /// Hold native procedures (and the closures they carry).
+    pub fn hold(&mut self, procs: impl IntoIterator<Item = (FnHash, Procedure)>) {
+        hold(&mut self.bodies, &mut self.natives, procs);
     }
 
     /// §11.7 Sequence an intent: dedupe by id, apply to the head state, and
@@ -420,14 +434,12 @@ impl Authority {
         if let Some(n) = self.log.seq_of(&e.id) {
             return Sequenced::Duplicate(n);
         }
-        let Some(c) = self.bodies.get(&e.fn_hash) else {
-            return Sequenced::Rejected(Refusal::Refused(format!("unknown function {}", hex(&e.fn_hash))));
-        };
         let mut st = self.store.clone();
-        match apply_closure(&self.schema, c, &ctx_of(e), &e.autos, &e.args, &mut st) {
-            Err(bug) => Sequenced::Rejected(Refusal::Refused(bug_text(&bug))),
-            Ok(Err(why)) => Sequenced::Rejected(why),
-            Ok(Ok(facts)) => {
+        match run(&self.schema, &self.bodies, &self.natives, &e.fn_hash, &ctx_of(e), &e.autos, &e.args, &mut st) {
+            None => Sequenced::Rejected(Refusal::Refused(format!("unknown function {}", hex(&e.fn_hash)))),
+            Some(Err(bug)) => Sequenced::Rejected(Refusal::Refused(bug_text(&bug))),
+            Some(Ok(Err(why))) => Sequenced::Rejected(why),
+            Some(Ok(Ok(facts))) => {
                 let n = self.log.append(e.clone(), facts.clone());
                 self.store = st;
                 Sequenced::Appended(n, facts)
@@ -457,6 +469,7 @@ impl Authority {
     pub fn retire(&mut self, current: &BTreeSet<FnHash>) {
         let named = self.log.named_hashes();
         self.bodies.retain(|h, _| current.contains(h) || named.contains(h));
+        self.natives.retain(|h, _| current.contains(h) || named.contains(h));
     }
 
     /// §11.8 Adopt a scope a peer sequenced alone: replay every intent from
@@ -509,90 +522,5 @@ pub fn local_commit(a: &mut Authority, r: &mut Replica) {
             Sequenced::Duplicate(n) => r.ack(&e.id, n),
             Sequenced::Rejected(why) => r.reject(&e.id, why),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::path::Path;
-
-    use super::*;
-    use crate::db::Db;
-    use crate::gen::{Ops, Std};
-    use crate::hash::closures;
-    use crate::ir::{module_from_value, Module};
-    use crate::value::Value;
-
-    fn demo() -> Module {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../spec/vectors/module/demo.json");
-        let json: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
-        let bytes = crate::value::decode_hex(json["bytes"].as_str().unwrap()).unwrap();
-        module_from_value(&crate::canon::decode(&bytes).unwrap()).unwrap()
-    }
-
-    // `create_playlist` as `arkc gen rust` writes it.
-    fn create_playlist(db: &mut Db, ctx: &Ctx, autos: &Args, args: &Args) -> Result<(), Fault> {
-        if (Std::is_empty(Std::trim(Ops::arg(args, "name"))?)?).as_bool() {
-            return Err(Fault::refuse(Value::text("a playlist needs a name")));
-        }
-        let v0: Value = db.exists("playlist", vec![Ops::arg(autos, "id")]);
-        if (v0).as_bool() {
-            return Ok(());
-        }
-        db.put(
-            "playlist",
-            Value::record(vec![
-                ("id".to_string(), Ops::arg(autos, "id")),
-                ("name".to_string(), Std::trim(Ops::arg(args, "name"))?),
-                ("user_id".to_string(), Value::text(ctx.user.clone())),
-            ]),
-        )?;
-        Ok(())
-    }
-
-    #[test]
-    fn mutate_with_records_what_mutate_records_and_the_replay_agrees() {
-        let m = demo();
-        let bodies = closures(&m);
-        let fh = bodies.keys().find(|h| bodies[*h].function.name == "create_playlist").unwrap().clone();
-        let ctx = Ctx::new("alice", "dev");
-        let autos = Args::from([("id".to_string(), Value::id_hex("00000000-0000-0000-0000-000000000001"))]);
-        let args = Args::from([("name".to_string(), Value::text("  Favorites "))]);
-
-        let mut slow = Replica::open(
-            m.schema.clone(),
-            "playlists",
-            bodies.clone(),
-            MemoryStore::empty(m.schema.clone()),
-            0,
-            vec![],
-        );
-        let mut fast = slow.clone();
-        let e1 = slow.mutate([1; 16], &ctx, &fh, &autos, &args).unwrap();
-        let e2 = fast
-            .mutate_with([1; 16], &ctx, &fh, &autos, &args, |db| create_playlist(db, &ctx, &autos, &args))
-            .unwrap();
-        assert_eq!(e1, e2, "the entry is recorded under the given hash, autos and args");
-        assert_eq!(slow.view, fast.view);
-        assert_eq!(slow.pending, fast.pending);
-        assert_eq!(slow.take_changes(), fast.take_changes());
-
-        // A refusal records nothing.
-        let blank = Args::from([("name".to_string(), Value::text("  "))]);
-        let why = fast
-            .mutate_with([2; 16], &ctx, &fh, &autos, &blank, |db| create_playlist(db, &ctx, &autos, &blank))
-            .unwrap_err();
-        assert_eq!(why, Refusal::Refused("a playlist needs a name".into()));
-        assert_eq!(fast.pending.len(), 1);
-        assert_eq!(fast.take_changes(), Changes::Applied(vec![]));
-
-        // The rebase replays the recorded entry through the closure the
-        // hash names, and lands where the generated body did.
-        let mut a = Authority::new(m.schema.clone(), "playlists", bodies);
-        local_commit(&mut a, &mut fast);
-        assert!(fast.pending.is_empty());
-        assert_eq!(fast.cursor, 1);
-        assert_eq!(fast.confirmed, slow.view);
-        assert_eq!(state_hash(&fast.confirmed), state_hash(&a.store));
     }
 }

@@ -23,6 +23,11 @@ dependencies {
     // Nothing. The runtime depends on the Kotlin stdlib alone.
 }
 
+// harken's domain as `arkc gen kotlin` prints it is compiled with the tests,
+// which proves it builds against the authoring vocabulary and runs its
+// procedures natively against the interpreter.
+sourceSets["test"].kotlin.srcDir(rootProject.file("../harken/domain/gen/kotlin"))
+
 // The conformance runner is a plain `main` rather than a JUnit suite, so
 // that it needs no test framework on the classpath and so that the
 // kotlinc fallback (`build.sh`) runs the very same code.

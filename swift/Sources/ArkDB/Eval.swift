@@ -38,6 +38,8 @@ public enum Eval {
         var args: Args
         var autos: Args
         var locals: [Sym: Value]
+        /// What each provide middleware returned, by its name.
+        var provided: [String: Value] = [:]
     }
 
     final class St {
@@ -56,14 +58,19 @@ public enum Eval {
 
     /// Run a closure against a store. The store passed is never written:
     /// the outcome carries a new one. Throws `Fault.bug` for a bug.
+    ///
+    /// AUTHORING.md §1.2: decode the input, run its checks (a failing one
+    /// is a refusal), run each middleware in the procedure's `uses` order
+    /// (a refusal stops there), then the body — all of it one transaction.
     public static func applyClosure(_ sch: Schema, _ c: Closure, _ ctx: Ctx, _ autos: Args, _ args: Args, _ st: MemoryStore) throws -> Outcome {
         let fn = c.fn
         guard fn.kind == .mutator else { throw Fault.bug("WrongKind \(fn.name)") }
         for a in fn.autos where autos[a.name] == nil { throw Fault.bug("MissingAuto \(a.name)") }
-        for a in fn.args where args[a.name] == nil { throw Fault.bug("MissingArg \(a.name)") }
-        let env = Env(schema: sch, helpers: c.helpers, kind: .mutator, ctx: ctx, args: args, autos: autos, locals: [:])
+        for a in fn.input where args[a.name] == nil { throw Fault.bug("MissingArg \(a.name)") }
+        let env0 = Env(schema: sch, helpers: c.helpers, kind: .mutator, ctx: ctx, args: args, autos: autos, locals: [:])
         let s = St(st.clone())
         do {
+            let env = try prelude(env0, fn, s)
             _ = try block(env, fn.body, s)
             return .applied(s.store, s.changes)
         } catch Stop.returned {
@@ -75,29 +82,128 @@ public enum Eval {
         }
     }
 
-    // MARK: §6.2 query
-
-    public static func query(_ m: Module, _ name: String, _ args: Args, _ st: MemoryStore) throws -> Value {
-        let fn = try function(m, name)
-        return try queryClosure(m.schema, Hash.closure(m, fn), args, st)
+    /// The input's checks and then the middleware, as every procedure runs
+    /// them before its body: the environment the body runs in — arguments
+    /// normalised, provided values bound.
+    static func prelude(_ env: Env, _ fn: Function, _ s: St) throws -> Env {
+        var e = env
+        e.args = try inputChecks(env, fn, s)
+        for name in fn.uses {
+            guard let mw = env.helpers.first(where: { $0.name == name }) else { throw Stop.bug("UnknownFunction \(name)") }
+            guard mw.kind.isMiddleware else { throw Stop.bug("WrongKind \(name)") }
+            let menv = Env(schema: env.schema, helpers: env.helpers, kind: mw.kind, ctx: env.ctx, args: e.args, autos: env.autos, locals: [:])
+            do {
+                _ = try block(menv, mw.body, s)
+                if mw.kind == .provide { throw Stop.bug("NoReturn \(name)") }
+            } catch Stop.returned(let v) {
+                if mw.kind == .provide {
+                    guard let v = v else { throw Stop.bug("NoReturn \(name)") }
+                    e.provided[name] = v
+                }
+            }
+        }
+        return e
     }
 
-    /// Run a query. A verdict here is a fault such as an overflow, thrown as
-    /// `Fault.refuse`; a bug as `Fault.bug`.
-    public static func queryClosure(_ sch: Schema, _ c: Closure, _ args: Args, _ st: MemoryStore) throws -> Value {
+    /// §1.3 Every field's checks in order, then the whole-input
+    /// refinements: the normalised arguments, or a verdict.
+    static func inputChecks(_ env: Env, _ fn: Function, _ s: St) throws -> Args {
+        var args = env.args
+        for nf in fn.input {
+            guard let v0 = args[nf.name] else { throw Stop.bug("MissingArg \(nf.name)") }
+            let r = try Checks.field(nf.name, nf.field, v0, exists: { t, k in s.store.getRow(t, [k]) != nil }, refine: { e, v in
+                var a = args
+                a[nf.name] = v
+                var renv = env
+                renv.args = a
+                return try bool(try eval(renv, e, s))
+            })
+            switch r {
+            case .ok(let v): args[nf.name] = v
+            case .failed(let msg): throw Stop.verdict(.refused(msg))
+            }
+        }
+        for r in fn.refine {
+            var renv = env
+            renv.args = args
+            if !(try bool(try eval(renv, r.expr, s))) { throw Stop.verdict(.refused(r.why ?? Checks.invalid)) }
+        }
+        return args
+    }
+
+    /// §1.3 The form validator: each present field's checks, trim first, and
+    /// the normalised values beside the messages (one per field, its first
+    /// failure). The whole-input refinements run only when every field is
+    /// present, and report under the field name "".
+    public static func check(_ sch: Schema, _ c: Closure, _ partial: Args, _ st: MemoryStore, ctx: Ctx = Ctx(user: "", session: "")) throws -> (messages: [(String, String)], values: Args) {
+        let fn = c.fn
+        let env = Env(schema: sch, helpers: c.helpers, kind: .query, ctx: ctx, args: partial, autos: [:], locals: [:])
+        let s = St(st)
+        var values = partial
+        var messages: [(String, String)] = []
+        do {
+            for nf in fn.input {
+                guard let v0 = partial[nf.name] else { continue }
+                let r = try Checks.field(nf.name, nf.field, v0, exists: { t, k in s.store.getRow(t, [k]) != nil }, refine: { e, v in
+                    var renv = env
+                    renv.args = values
+                    renv.args[nf.name] = v
+                    return try bool(try eval(renv, e, s))
+                })
+                switch r {
+                case .ok(let v): values[nf.name] = v
+                case .failed(let msg): messages.append((nf.name, msg))
+                }
+            }
+            if fn.input.allSatisfy({ partial[$0.name] != nil }) {
+                for r in fn.refine {
+                    var renv = env
+                    renv.args = values
+                    if !(try bool(try eval(renv, r.expr, s))) { messages.append(("", r.why ?? Checks.invalid)) }
+                }
+            }
+        } catch Stop.verdict(let r) {
+            messages.append(("", r.text))
+        } catch Stop.bug(let e) {
+            throw Fault.bug(e)
+        } catch Stop.returned {
+            throw Fault.bug("return inside a check")
+        }
+        return (messages, values)
+    }
+
+    // MARK: §6.2 query
+
+    public static func query(_ m: Module, _ name: String, _ args: Args, _ st: MemoryStore, ctx: Ctx = Ctx(user: "", session: "")) throws -> Value {
+        let fn = try function(m, name)
+        return try queryClosure(m.schema, Hash.closure(m, fn), args, st, ctx: ctx)
+    }
+
+    /// Run a query. A refusal — a failing check, a middleware's, an
+    /// overflow — is thrown as `Fault.refuse`; a bug as `Fault.bug`.
+    public static func queryClosure(_ sch: Schema, _ c: Closure, _ args: Args, _ st: MemoryStore, ctx: Ctx = Ctx(user: "", session: "")) throws -> Value {
+        switch try queryResult(sch, c, args, st, ctx: ctx) {
+        case .success(let v): return v
+        case .failure(let r): throw r.fault
+        }
+    }
+
+    /// Run a query: `Either Refusal Value`, a bug thrown as `Fault.bug`.
+    public static func queryResult(_ sch: Schema, _ c: Closure, _ args: Args, _ st: MemoryStore, ctx: Ctx = Ctx(user: "", session: "")) throws -> Result<Value, Refusal> {
         let fn = c.fn
         guard fn.kind == .query else { throw Fault.bug("WrongKind \(fn.name)") }
-        for a in fn.args where args[a.name] == nil { throw Fault.bug("MissingArg \(a.name)") }
-        let env = Env(schema: sch, helpers: c.helpers, kind: .query, ctx: Ctx(user: "", session: ""), args: args, autos: [:], locals: [:])
+        for a in fn.input where args[a.name] == nil { throw Fault.bug("MissingArg \(a.name)") }
+        let env0 = Env(schema: sch, helpers: c.helpers, kind: .query, ctx: ctx, args: args, autos: [:], locals: [:])
         let s = St(st)
         do {
+            let env = try prelude(env0, fn, s)
             _ = try block(env, fn.body, s)
             throw Fault.bug("NoReturn \(fn.name)")
         } catch Stop.returned(let v) {
             guard let v = v else { throw Fault.bug("NoReturn \(fn.name)") }
-            return v
+            return .success(v)
         } catch Stop.verdict(let r) {
-            throw r.fault
+            return .failure(r)
         } catch Stop.bug(let e) {
             throw Fault.bug(e)
         }
@@ -146,31 +252,45 @@ public enum Eval {
             let vs = try list(try eval(env, xs, s))
             for v in vs { _ = try block(bind(x, v, env), body, s) }
             return env
-        case .sPut(let t, let e):
+        case .sInsert(let t, let e, let on):
             try mutating(env)
             let row = try structOf(try eval(env, e, s))
-            switch s.store.tryPut(t, row) {
-            case .failure(let r): throw Stop.verdict(r)
-            case .success(let ch): if let c = ch { s.changes.append(c) }
-            }
+            try record(s, s.store.tryInsert(t, row, on: on))
+            return env
+        case .sUpsert(let t, let e, let on):
+            try mutating(env)
+            let row = try structOf(try eval(env, e, s))
+            try record(s, s.store.tryUpsert(t, row, on: on))
+            return env
+        case .sUpdate(let t, let ks, let x, let e):
+            try mutating(env)
+            var key: [Value] = []
+            for k in ks { key.append(try eval(env, k, s)) }
+            guard let old = s.store.getRow(t, key) else { return env }
+            let row = try structOf(try eval(bind(x, .record(old), env), e, s))
+            try record(s, s.store.tryUpdate(t, key, row))
             return env
         case .sDelete(let t, let ks):
             try mutating(env)
             var key: [Value] = []
             for k in ks { key.append(try eval(env, k, s)) }
-            switch s.store.tryDelete(t, key) {
-            case .failure(let r): throw Stop.verdict(r)
-            case .success(let ch): if let c = ch { s.changes.append(c) }
-            }
+            try record(s, s.store.tryDelete(t, key))
             return env
         case .sRefuse(let e):
-            guard env.kind == .mutator else { throw Stop.bug("Impure refuse outside a mutator") }
+            guard env.kind != .helper else { throw Stop.bug("Impure refuse inside a helper") }
             let t = try text(try eval(env, e, s))
             throw Stop.verdict(.refused(t))
         case .sReturn(let me):
             var v: Value? = nil
             if let e = me { v = try eval(env, e, s) }
             throw Stop.returned(v)
+        }
+    }
+
+    static func record(_ s: St, _ r: Result<Change?, Refusal>) throws {
+        switch r {
+        case .failure(let why): throw Stop.verdict(why)
+        case .success(let ch): if let c = ch { s.changes.append(c) }
         }
     }
 
@@ -204,6 +324,9 @@ public enum Eval {
             return v
         case .ctxUser: return .text(env.ctx.user)
         case .ctxSession: return .text(env.ctx.session)
+        case .provided(let n):
+            guard let v = env.provided[n] else { throw Stop.bug("NotProvided \(n)") }
+            return v
         case .field(let e, let f):
             let m = try structOf(try eval(env, e, s))
             guard let v = m[f] else { throw Stop.bug("NoSuchField \(f)") }
@@ -323,9 +446,9 @@ public enum Eval {
 
     /// Call a helper: a fresh environment of its arguments alone.
     static func call(_ env: Env, _ fn: Function, _ vals: [Value], _ s: St) throws -> Value {
-        guard vals.count == fn.args.count else { throw Stop.bug("Arity \(fn.name)") }
+        guard vals.count == fn.input.count else { throw Stop.bug("Arity \(fn.name)") }
         var args: Args = [:]
-        for (a, v) in zip(fn.args, vals) { args[a.name] = v }
+        for (a, v) in zip(fn.input, vals) { args[a.name] = v }
         let env2 = Env(schema: env.schema, helpers: env.helpers, kind: .helper, ctx: env.ctx, args: args, autos: [:], locals: [:])
         do {
             _ = try block(env2, fn.body, s)

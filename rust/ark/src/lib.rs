@@ -1,4 +1,4 @@
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 //! The ArkDB runtime, held to the specification in `spec/` (a Haskell
 //! program; `spec/README.md` is the index). Each module here mirrors the
 //! spec module it names and says, briefly, what the Haskell says.
@@ -11,7 +11,8 @@
 //! | [`ir`] | `Ark.IR`, `Ark.Encode`, `Ark.Decode`: the IR, as a value and back |
 //! | [`store`] | `Ark.Store`: get, scan, put, delete; constraints as refusals |
 //! | [`stdlib`] | `Ark.Std`: the standard library over pinned Unicode tables |
-//! | [`eval`] | `Ark.Eval`: the interpreter generated code must agree with |
+//! | [`eval`] | `Ark.Eval`: the interpreter every native procedure must agree with |
+//! | [`verify`] | `Ark.Verify`: what a module must satisfy before anything runs it |
 //! | [`hash`] | `Ark.Hash`: the state hash, closures, the function hash |
 //! | [`log`] | `Ark.Log`: entries, facts, snapshots, the horizon |
 //! | [`peer`] | `Ark.Peer`: the replica and the authority |
@@ -19,21 +20,25 @@
 //! | [`view`] | `Ark.View`: incremental views and their contract |
 //! | [`live`] | `Ark.Live`: rooms per account over opaque frames |
 //! | [`sim`] | `Ark.Sim`: the seeded fleet |
-//! | [`gen`] | the prelude generated code imports (GENERATED.md) |
+//! | [`authoring`] | `spec/AUTHORING.md`: the vocabulary a domain is written in, run `Emit` or `Native` |
+//!
+//! A domain is written once, in Rust, in the vocabulary of
+//! `spec/AUTHORING.md` ([`authoring`]): run under `Emit` it is the module
+//! (the `.ark` every runtime verifies and hashes), run under `Native` it
+//! applies entries directly, and [`eval`] is what both mean. Nothing is
+//! generated into this crate's private shape any more; `GENERATED.md` and
+//! the prelude it named are retired.
 //!
 //! No async, no sockets: every machine here is sans-io, and a transport is
-//! a loop around one.
+//! a loop around one. The one `unsafe` is in [`authoring`], and says why.
 
+pub mod authoring;
 pub mod canon;
-pub mod db;
 pub mod eval;
-pub mod fault;
-pub mod gen;
 pub mod hash;
 pub mod ir;
 pub mod live;
 pub mod log;
-pub mod ops;
 pub mod peer;
 pub mod plan;
 pub mod protocol;
@@ -44,4 +49,5 @@ pub mod stdlib;
 pub mod store;
 pub mod unicode_tables;
 pub mod value;
+pub mod verify;
 pub mod view;

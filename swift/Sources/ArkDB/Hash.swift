@@ -14,16 +14,25 @@ public struct Closure: Equatable {
 
 /// §8 The two hashes every runtime reproduces byte for byte.
 public enum Hash {
-    /// The closure of a function within a module.
+    /// What a function reaches directly: the helpers it calls and, for a
+    /// procedure, the middleware it runs (AUTHORING.md §1.2).
+    public static func reaches(_ fn: Function) -> [String] {
+        var out = Encode.calls(fn)
+        for u in fn.uses where !out.contains(u) { out.append(u) }
+        return out.sorted { compareText($0, $1) < 0 }
+    }
+
+    /// The closure of a function within a module: the function, and every
+    /// helper and middleware it reaches, in declaration order.
     public static func closure(_ m: Module, _ fn: Function) -> Closure {
         var seen: [String] = []
-        var todo = Encode.calls(fn)
+        var todo = reaches(fn)
         while let n = todo.first {
             todo.removeFirst()
             if seen.contains(n) { continue }
             if let h = m.lookupFunction(n) {
                 seen.append(n)
-                todo = Encode.calls(h) + todo
+                todo = reaches(h) + todo
             }
         }
         let helpers = m.functions.filter { seen.contains($0.name) }.map(Encode.normalize)
@@ -59,10 +68,12 @@ public enum Hash {
     }
 
     /// §8.2 The hash of a function: its normalised form, names excluded,
-    /// with the hashes of the helpers it calls directly.
+    /// with the hashes of the helpers it calls directly and of the
+    /// middleware it runs — so editing a middleware re-hashes every
+    /// procedure that uses it.
     public static func functionHash(_ c: Closure) -> FnHash {
         var deps: [String: Value] = [:]
-        for n in Encode.calls(c.fn) {
+        for n in reaches(c.fn) {
             if let h = c.helpers.first(where: { $0.name == n }) {
                 deps[n] = .bytes(functionHash(Closure(fn: h, helpers: c.helpers)))
             }

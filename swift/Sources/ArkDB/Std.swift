@@ -172,6 +172,12 @@ public enum Std {
         return a.isNull() ? d : a
     }
 
+    /// The option's value; `None` is the refusal "unwrapped none".
+    public static func unwrap(_ a: Value) throws -> Value {
+        if a.isNull() { throw Fault.refuse("unwrapped none") }
+        return a
+    }
+
     // MARK: dispatch, for the interpreter
 
     /// Apply a standard function to already-evaluated arguments.
@@ -206,6 +212,7 @@ public enum Std {
         case .reverse: return try reverse(args[0])
         case .isSome: return try isSome(args[0])
         case .unwrapOr: return try unwrapOr(args[0], args[1])
+        case .unwrap: return try unwrap(args[0])
         }
     }
 

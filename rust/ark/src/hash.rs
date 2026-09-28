@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use crate::canon::encode;
-use crate::ir::encode::{calls, function_value, module_value};
+use crate::ir::encode::{function_value, module_value, reaches};
 use crate::ir::normalize::{normalize, normalize_module};
 use crate::ir::{Function, Module};
 use crate::sha256::sha256;
@@ -15,9 +15,10 @@ use crate::value::Value;
 pub type FnHash = Vec<u8>;
 
 /// §8.3 A function with the helpers it was verified against: every helper
-/// the function reaches, in the version current when it was hashed, in
-/// declaration order — a complete program `apply_closure` runs without
-/// consulting any module.
+/// and middleware the function reaches, in the version current when it was
+/// hashed, in declaration order — a complete program `apply_closure` runs
+/// without consulting any module. A procedure runs its middleware in its
+/// own `uses` order, looked up here by name.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Closure {
     pub function: Function,
@@ -29,7 +30,7 @@ pub struct Closure {
 /// (`Ark.Hash.closure`).
 pub fn closure(m: &Module, f: &Function) -> Closure {
     let mut seen: Vec<String> = Vec::new();
-    let mut todo: Vec<String> = calls(f);
+    let mut todo: Vec<String> = reaches(f);
     todo.reverse();
     while let Some(n) = todo.pop() {
         if seen.contains(&n) {
@@ -37,7 +38,7 @@ pub fn closure(m: &Module, f: &Function) -> Closure {
         }
         if let Some(h) = m.lookup_function(&n) {
             seen.push(n);
-            let mut more = calls(h);
+            let mut more = reaches(h);
             more.reverse();
             todo.extend(more);
         }
@@ -79,11 +80,12 @@ pub fn state_hash(st: &dyn Store) -> Vec<u8> {
 }
 
 /// §8.2 The hash of a function: over its normalised canonical form, names
-/// excluded, together with the hashes of the helpers it calls directly —
-/// which cover theirs in turn.
+/// excluded, together with the hashes of the helpers it calls and the
+/// middleware it uses directly — which cover theirs in turn, so that
+/// editing a middleware re-hashes every procedure that runs it.
 pub fn function_hash(c: &Closure) -> FnHash {
     let mut deps = BTreeMap::new();
-    for n in calls(&c.function) {
+    for n in reaches(&c.function) {
         if let Some(h) = c.helpers.iter().find(|h| h.name == n) {
             deps.insert(
                 n,

@@ -326,11 +326,4 @@ mod tests {
             Value::Id([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1])
         );
     }
-
-    #[test]
-    fn a_text_value_is_a_string_for_refuse() {
-        let f = crate::fault::Fault::refuse(Value::text("a playlist needs a name"));
-        assert_eq!(f, crate::fault::Fault::Refuse("a playlist needs a name".into()));
-        assert_eq!(crate::fault::Fault::refuse(Value::Int(3)), crate::fault::Fault::Refuse("Int(3)".into()));
-    }
 }

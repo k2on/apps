@@ -322,14 +322,6 @@ public class Client(public val schema: Schema, public val token: String?) {
         return e
     }
 
-    /** `mutate`, with generated code for the body; see `Replica.mutateWith`. */
-    public fun mutateWith(scope: String, i: Id, ctx: Ctx, fh: FnHash, autos: Args, args: Args, body: (Store) -> Unit): Entry {
-        val (r, _) = scopes[scope] ?: throw Fault.Refuse(Refusal.Refused("not holding scope $scope"))
-        val e = r.mutateWith(i, ctx, fh, autos, args, body)
-        emit(ClientMsg.Push(scope, listOf(e)))
-        return e
-    }
-
     /** §12.2 A frame from the server. */
     public fun recv(m: ServerMsg) {
         when (m) {
@@ -355,7 +347,7 @@ public class Client(public val schema: Schema, public val token: String?) {
                 // snapshot and the cursor moves to it; pending replays on top.
                 val (r, md) = scopes[m.scope] ?: return
                 val st = MemoryStore.of(schema, m.rows)
-                scopes[m.scope] = Replica.open(r.schema, m.scope, r.bodies, st, m.seq, r.pending) to md
+                scopes[m.scope] = Replica.open(r.schema, m.scope, r.bodies, st, m.seq, r.pending, r.natives) to md
             }
             is ServerMsg.Ack -> {
                 val (r, _) = scopes[m.scope] ?: return

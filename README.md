@@ -18,16 +18,18 @@ natively in Rust, Swift and Kotlin — and harken, the first app on it.
   domain is authored through.
 - `swift/` — `ArkDB`, the Swift runtime, and `ArkDBClient`, a session over it.
 - `kotlin/` — `ark-runtime` and `ark-client`, the same two in Kotlin.
-- `harken/` — the app: `domain/`, `server/`, `desktop/`, `ios/`, `android/`.
-  `harken/README.md` says what each is and how to run them together.
+- `harken/` — the app: `domain/`, `server/`, `desktop/`, `web/`, `ios/`,
+  `android/`. `harken/README.md` says what each is and how to run them
+  together; `web/` is the peer published at
+  <https://k2on.github.io/apps/harken/>.
 
 Every runtime passes the same vectors; every generated file is one emitter's
 output in three spellings; and one command holds all of it:
 
     nix flake check                 # the vectors, the three runtimes, the Rust
                                     # workspace, harken's module and generated code
-    nix build .#harken-server       # or harken-desktop, harken-domain, harken-apk,
-                                    # arkdb-swift, arkdb-kotlin, ark-spec
+    nix build .#harken-server       # or harken-desktop, harken-web, harken-domain,
+                                    # harken-apk, arkdb-swift, arkdb-kotlin, ark-spec
     nix run .#arkc -- verify harken/domain/harken.ark
     nix develop .#spec              # or .#rust, .#swift, .#kotlin
 

@@ -54,7 +54,7 @@ public enum Ops {
     }
 
     /// The same arithmetic for the interpreter, by operator.
-    static func arith(_ op: Op, _ a: Value, _ b: Value) throws -> Value {
+    public static func arith(_ op: Op, _ a: Value, _ b: Value) throws -> Value {
         switch op {
         case .add: return try add(a, b)
         case .sub: return try sub(a, b)

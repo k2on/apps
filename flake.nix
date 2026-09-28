@@ -41,9 +41,25 @@
           !build && lib.any (d: under d || leadsTo d) dirs;
       };
 
-      # The Rust workspace is `rust/`, and harken's three crates join it from
+      # The Rust workspace is `rust/`, and harken's four crates join it from
       # `harken/` by path, so both trees are the source of every Rust build.
-      rustDirs = [ "rust" "harken/domain" "harken/server" "harken/desktop" ];
+      rustDirs = [ "rust" "harken/domain" "harken/server" "harken/desktop" "harken/web" ];
+
+      # The wasm-bindgen CLI must be the exact version of the `wasm-bindgen`
+      # crate the workspace locked, or the glue it writes does not match the
+      # module's imports and the page fails at load with a name nobody
+      # recognises. So the version is read out of the lockfile rather than
+      # written down, and the two hashes beside it are the only thing to move
+      # when the crate moves — a stale hash fails and prints the right one.
+      wasmBindgenVersion =
+        let lock = builtins.fromTOML (builtins.readFile ./rust/Cargo.lock);
+        in (lib.findFirst (p: p.name == "wasm-bindgen") (throw "rust/Cargo.lock has no wasm-bindgen") lock.package).version;
+      wasmBindgenHashes = {
+        "0.2.129" = {
+          hash = "sha256-pcecKQd7E8Opw6bkFoE569epUi7gh5qpQF1e5PJY6V8=";
+          cargoHash = "sha256-/uK14uPcftMFwlBx28Z1qHkm1edIWVVXi6hRRQRmYec=";
+        };
+      };
 
       # What a client of harken is generated with: the functions it calls,
       # and nothing the scanner alone authors (harken/README.md).
@@ -65,6 +81,53 @@
             cargoTestFlags = flags;
             doCheck = false;
           } // removeAttrs args [ "pname" "flags" ]);
+
+          # The browser peer: `harken/web` compiled to wasm32, bound by
+          # wasm-bindgen, its page bundled by esbuild — one static directory.
+          # The toolchain is the workspace's with the wasm target added, and
+          # the CLI is built from the crate at the version the lockfile names.
+          wasmRust = rust.override { targets = [ "wasm32-unknown-unknown" ]; };
+          wasmPlatform = pkgs.makeRustPlatform { cargo = wasmRust; rustc = wasmRust; };
+          wasm-bindgen-cli = pkgs.wasm-bindgen-cli.override ({
+            inherit rustPlatform;
+            version = wasmBindgenVersion;
+          } // (wasmBindgenHashes.${wasmBindgenVersion}
+            or (throw "flake.nix: no hashes for wasm-bindgen ${wasmBindgenVersion}; add them to wasmBindgenHashes")));
+          harken-web = wasmPlatform.buildRustPackage {
+            pname = "harken-web";
+            version = "0.1.0";
+            src = only rustDirs;
+            sourceRoot = "source/rust";
+            cargoLock.lockFile = ./rust/Cargo.lock;
+            nativeBuildInputs = [ wasm-bindgen-cli pkgs.binaryen pkgs.esbuild pkgs.typescript ];
+            # Not cargoBuildHook: it targets the host, and this crate is only
+            # ever the wasm. The type check is what says the page calls
+            # exports the module has, against the `.d.ts` wasm-bindgen wrote.
+            buildPhase = ''
+              runHook preBuild
+              cargo build --release --offline --frozen -p harken-web --target wasm32-unknown-unknown
+              wasm-bindgen --target web --out-dir pkg --out-name harken_web \
+                target/wasm32-unknown-unknown/release/harken_web.wasm
+              wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int \
+                -o pkg/harken_web_bg.wasm pkg/harken_web_bg.wasm
+              # The page, writable, with the glue beside app.ts so tsc resolves
+              # `./harken_web.js` to the `.d.ts` this build just wrote.
+              cp -r --no-preserve=mode ../harken/web page
+              cp pkg/harken_web.d.ts pkg/harken_web.js page/src/
+              (cd page && tsc -p .)
+              esbuild page/src/app.ts --bundle --format=esm --target=es2022 \
+                --external:./harken_web.js --outfile=pkg/app.js
+              runHook postBuild
+            '';
+            installPhase = ''
+              runHook preInstall
+              mkdir -p $out
+              cp pkg/app.js pkg/harken_web.js pkg/harken_web_bg.wasm $out/
+              cp page/index.html page/style.css $out/
+              runHook postInstall
+            '';
+            doCheck = false;
+          };
 
           # The specification and arkc, one Haskell package: `ark-spec` holds
           # the library and both executables.
@@ -226,6 +289,7 @@
             kotlin-deps = kotlin.mitmCache.updateScript;
             harken-server = crate { pname = "harken-server"; };
             harken-desktop = crate { pname = "harken-desktop"; };
+            inherit harken-web;
             arkdb-swift = swift;
             default = ark-spec;
             inherit harken-apk;
@@ -294,6 +358,12 @@
             };
             kotlin = pkgs.mkShell {
               packages = [ pkgs.kotlin pkgs.gradle pkgs.jdk21 ];
+            };
+            # What `nix build .#harken-web` builds with, for doing it by hand
+            # (harken/web/README.md); pages.yml also keeps it as a gc root so
+            # the cached store holds the wasm-bindgen CLI it compiled.
+            harken-web = pkgs.mkShell {
+              packages = [ wasmRust wasm-bindgen-cli pkgs.binaryen pkgs.esbuild pkgs.typescript ];
             };
             default = pkgs.mkShell {
               packages = [ pkgs.cabal-install rust pkgs.kotlin pkgs.jdk21 ];

@@ -17,7 +17,19 @@ public object Decode {
             val ffs = tagged(listOf("frame"), "frame", x)
             text(listOf("frame", "name"), field(ffs, "name")) to tyFromValue(field(ffs, "ty"))
         }
-        return Module(Math.toIntExact(spec), sch, fns, live)
+        // A spec-1 module has no routers; it reads as a spec-2 one with none.
+        val routers = fs["routers"]?.let { rv ->
+            list(listOf("module", "routers"), rv) { x ->
+                val rfs = tagged(listOf("router"), "router", x)
+                val rn = text(listOf("router", "name"), field(rfs, "name"))
+                Router(
+                    rn,
+                    text(listOf("router", rn, "scope"), field(rfs, "scope")),
+                    list(listOf("router", rn, "uses"), field(rfs, "uses")) { text(listOf("router", rn, "uses"), it) },
+                )
+            }
+        } ?: emptyList()
+        return Module(Math.toIntExact(spec), sch, fns, live, routers)
     }
 
     /** A closure as an authority stores or sends one: `{ t: "closure", fn, helpers }`. */
@@ -75,6 +87,10 @@ public object Decode {
         }
     }
 
+    /**
+     * One function. A spec-1 function (`"args"`, no `"input"`) reads as its
+     * spec-2 equivalent: each argument a field with no checks, no router.
+     */
     public fun functionFromValue(v: Value): Function {
         val fs = tagged(listOf("fn"), "fn", v)
         val n = text(listOf("fn", "name"), field(fs, "name"))
@@ -83,9 +99,13 @@ public object Decode {
             "mutator" -> FnKind.Mutator
             "query" -> FnKind.Query
             "helper" -> FnKind.Helper
+            "guard" -> FnKind.Guard
+            "provide" -> FnKind.Provide
             else -> bad(here, "unknown kind $ks")
         }
         val sc = optional(field(fs, "scope")) { text(here + "scope", it) }
+        val router = fs["router"]?.let { r -> optional(r) { text(here + "router", it) } }
+        val uses = fs["uses"]?.let { u -> list(here + "uses", u) { text(here + "uses", it) } } ?: emptyList()
         val autos = list(here + "autos", field(fs, "autos")) { x ->
             val (t, afs) = taggedAny(listOf("auto"), x)
             val an = text(listOf("auto", "name"), field(afs, "name"))
@@ -95,13 +115,47 @@ public object Decode {
                 else -> bad(listOf("auto", an), "unknown auto $t")
             }
         }
-        val args = list(here + "args", field(fs, "args")) { x ->
-            val afs = tagged(listOf("arg"), "arg", x)
-            text(listOf("arg", "name"), field(afs, "name")) to tyFromValue(field(afs, "ty"))
+        val input = if (fs.containsKey("input") || !fs.containsKey("args")) {
+            list(here + "input", field(fs, "input")) { x ->
+                val ffs = tagged(here + "field", "field", x)
+                val fnm = text(here + "field", field(ffs, "name"))
+                fnm to Field(
+                    tyFromValue(field(ffs, "ty")),
+                    list(here + fnm + "checks", field(ffs, "checks")) { check(here + fnm, it) },
+                )
+            }
+        } else {
+            list(here + "args", field(fs, "args")) { x ->
+                val afs = tagged(listOf("arg"), "arg", x)
+                text(listOf("arg", "name"), field(afs, "name")) to Field(tyFromValue(field(afs, "ty")), emptyList())
+            }
         }
+        val refine = fs["refine"]?.let { rv ->
+            list(here + "refine", rv) { x ->
+                val rfs = tagged(here + "refine", "refine", x)
+                expr(here + "refine", field(rfs, "e")) to optional(field(rfs, "why")) { text(here + "refine", it) }
+            }
+        } ?: emptyList()
         val ret = optional(field(fs, "ret")) { tyFromValue(it) }
         val body = list(here + "body", field(fs, "body")) { stmt(here, it) }
-        return Function(n, k, sc, autos, args, ret, body, emptyMap())
+        return Function(n, k, sc, autos, input, ret, body, emptyMap(), router, uses, refine)
+    }
+
+    private fun check(here: List<String>, v: Value): Check {
+        val (t, fs) = taggedAny(here, v)
+        val p = here + t
+        fun why(): String? = optional(field(fs, "why")) { text(p, it) }
+        fun n(): Int = Math.toIntExact(int(p, field(fs, "n")))
+        return when (t) {
+            "trim" -> Check.Trim
+            "min_len" -> Check.MinLen(n(), why())
+            "max_len" -> Check.MaxLen(n(), why())
+            "range" -> Check.Range(optional(field(fs, "lo")) { int(p, it) }, optional(field(fs, "hi")) { int(p, it) }, why())
+            "non_empty" -> Check.NonEmpty(why())
+            "exists" -> Check.Exists(why())
+            "refine" -> Check.Refine(expr(p, field(fs, "e")), why())
+            else -> bad(here, "unknown check $t")
+        }
     }
 
     private fun stmt(here: List<String>, v: Value): Stmt {
@@ -115,7 +169,16 @@ public object Decode {
                 list(p, field(fs, "else")) { stmt(p, it) },
             )
             "for" -> Stmt.For(sym(p, field(fs, "sym")), expr(p, field(fs, "in")), list(p, field(fs, "body")) { stmt(p, it) })
-            "put" -> Stmt.Put(text(p, field(fs, "table")), expr(p, field(fs, "row")))
+            "insert" -> Stmt.Insert(text(p, field(fs, "table")), expr(p, field(fs, "row")), columns(p, field(fs, "on")))
+            "upsert" -> Stmt.Upsert(text(p, field(fs, "table")), expr(p, field(fs, "row")), columns(p, field(fs, "on")))
+            "update" -> Stmt.Update(
+                text(p, field(fs, "table")),
+                list(p, field(fs, "key")) { expr(p, it) },
+                sym(p, field(fs, "sym")),
+                expr(p, field(fs, "row")),
+            )
+            // Spec 1's put is spec 2's upsert on the key.
+            "put" -> Stmt.Upsert(text(p, field(fs, "table")), expr(p, field(fs, "row")), emptyList())
             "delete" -> Stmt.Delete(text(p, field(fs, "table")), list(p, field(fs, "key")) { expr(p, it) })
             "refuse" -> Stmt.Refuse(expr(p, field(fs, "e")))
             "return" -> Stmt.Return(optional(field(fs, "e")) { expr(p, it) })
@@ -156,9 +219,12 @@ public object Decode {
             "select" -> Expr.Select(plan(p, field(fs, "plan")))
             "get" -> Expr.Get(text(p, field(fs, "table")), es("key"))
             "exists" -> Expr.Exists(text(p, field(fs, "table")), es("key"))
+            "provided" -> Expr.Provided(text(p, field(fs, "fn")))
             else -> bad(here, "unknown expression $t")
         }
     }
+
+    private fun columns(here: List<String>, v: Value): List<String> = list(here, v) { text(here, it) }
 
     private fun plan(here: List<String>, v: Value): IR.Plan {
         val fs = tagged(here, "plan", v)

@@ -30,16 +30,20 @@ public class FnHash(bytes: ByteArray) : Comparable<FnHash> {
 public data class Closure(val fn: Function, val helpers: List<Function>)
 
 public object Hash {
-    /** The closure of a function within a module: the function normalised, with the helpers it reaches. */
+    /**
+     * The closure of a function within a module: the function normalised,
+     * with the middleware it runs and the helpers it and they reach, in
+     * module order.
+     */
     public fun closure(m: Module, fn: Function): Closure {
         val reach = LinkedHashSet<String>()
-        val todo = ArrayDeque(Encode.calls(fn))
+        val todo = ArrayDeque(Encode.deps(fn))
         while (todo.isNotEmpty()) {
             val n = todo.removeFirst()
             if (n in reach) continue
             val h = m.lookupFunction(n) ?: continue
             reach.add(n)
-            todo.addAll(0, Encode.calls(h))
+            todo.addAll(0, Encode.deps(h))
         }
         return Closure(Encode.normalize(fn), m.functions.filter { it.name in reach }.map { Encode.normalize(it) })
     }
@@ -53,7 +57,7 @@ public object Hash {
         ),
     )
 
-    /** Every function of a module, by the hash of its closure, in module order. */
+    /** Every function of a module, by the hash of its closure, in module order (middleware and helpers included). */
     public fun closures(m: Module): Map<FnHash, Closure> {
         val out = LinkedHashMap<FnHash, Closure>()
         for (fn in m.functions) {
@@ -82,7 +86,7 @@ public object Hash {
      */
     public fun functionHash(c: Closure): FnHash {
         val deps = LinkedHashMap<String, Value>()
-        for (n in Encode.calls(c.fn)) {
+        for (n in Encode.deps(c.fn)) {
             val h = c.helpers.firstOrNull { it.name == n } ?: continue
             deps[n] = Value.VBytes(functionHash(Closure(h, c.helpers)).bytes)
         }

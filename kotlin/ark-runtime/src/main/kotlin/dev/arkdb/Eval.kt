@@ -12,6 +12,29 @@ public object Eval {
         public data class Refused(val refusal: Refusal) : Applied()
     }
 
+    /** The answer to a query: its value, or the refusal a check or a middleware gave. */
+    public sealed class Answer {
+        public data class Ok(val value: Value) : Answer()
+        public data class Refused(val refusal: Refusal) : Answer()
+
+        /** The value, or the refusal thrown as `Fault.Refuse`. */
+        public fun orThrow(): Value = when (this) {
+            is Ok -> value
+            is Refused -> throw Fault.Refuse(refusal)
+        }
+    }
+
+    /**
+     * §1.3 (AUTHORING.md) What the form validator says about a partial input:
+     * each failing field's first message, in input order (`""` names a
+     * whole-input refinement), and every present field's normalised value.
+     */
+    public data class Checked(val messages: List<Pair<String, String>>, val values: Args) {
+        public val ok: Boolean get() = messages.isEmpty()
+
+        public fun messageFor(field: String): String? = messages.firstOrNull { it.first == field }?.second
+    }
+
     // Why a block stopped: a return. Faults are thrown as `Fault`.
     private class Returned(val value: Value?) : RuntimeException(null, null, false, false)
 
@@ -23,8 +46,11 @@ public object Eval {
         val args: Args,
         val autos: Args,
         val locals: Map<Sym, Value>,
+        val provided: Map<String, Value> = emptyMap(),
     ) {
-        fun bind(x: Sym, v: Value): Env = Env(schema, helpers, kind, ctx, args, autos, locals + (x to v))
+        fun bind(x: Sym, v: Value): Env = Env(schema, helpers, kind, ctx, args, autos, locals + (x to v), provided)
+
+        fun withArgs(a: Args): Env = Env(schema, helpers, kind, ctx, a, autos, locals, provided)
     }
 
     private fun bug(text: String): Nothing = throw Fault.Bug(text)
@@ -38,14 +64,19 @@ public object Eval {
     public fun apply(m: Module, name: String, ctx: Ctx, autos: Args, args: Args, st: MemoryStore): Applied =
         applyClosure(m.schema, Hash.closure(m, function(m, name)), ctx, autos, args, st)
 
+    /**
+     * A mutator's closure: its input checked and normalised (§1.3), each
+     * middleware in its `uses` order (§1.2), then the body — all against one
+     * fork of the store, so a refusal anywhere leaves `st` untouched.
+     */
     public fun applyClosure(sch: Schema, c: Closure, ctx: Ctx, autos: Args, args: Args, st: MemoryStore): Applied {
         val fn = c.fn
         if (fn.kind != FnKind.Mutator) bug("WrongKind ${HsShow.text(fn.name)} ${fn.kind}")
         for ((a, _) in fn.autos) if (a !in autos) bug("MissingAuto ${HsShow.text(a)}")
-        for ((a, _) in fn.args) if (a !in args) bug("MissingArg ${HsShow.text(a)}")
-        val env = Env(sch, c.helpers, FnKind.Mutator, ctx, args, autos, emptyMap())
+        for ((a, _) in fn.input) if (a !in args) bug("MissingArg ${HsShow.text(a)}")
         val work = st.fork()
         try {
+            val env = prelude(Env(sch, c.helpers, FnKind.Mutator, ctx, args, autos, emptyMap()), fn, work)
             block(env, fn.body, work)
         } catch (r: Returned) {
             // a mutator's return ends it
@@ -55,19 +86,22 @@ public object Eval {
         return Applied.Ok(work, work.changes.toList())
     }
 
-    /** §6.2 Run a query; never changes the store. A `Fault.Refuse` here is a fault such as an overflow. */
-    public fun query(m: Module, name: String, args: Args, st: MemoryStore): Value =
-        queryClosure(m.schema, Hash.closure(m, function(m, name)), args, st)
+    /** §6.2 Run a query; never changes the store. A check, a middleware or a fault such as an overflow may refuse it. */
+    public fun query(m: Module, name: String, ctx: Ctx, args: Args, st: MemoryStore): Answer =
+        queryClosure(m.schema, Hash.closure(m, function(m, name)), ctx, args, st)
 
-    public fun queryClosure(sch: Schema, c: Closure, args: Args, st: MemoryStore): Value {
+    public fun queryClosure(sch: Schema, c: Closure, ctx: Ctx, args: Args, st: MemoryStore): Answer {
         val fn = c.fn
         if (fn.kind != FnKind.Query) bug("WrongKind ${HsShow.text(fn.name)} ${fn.kind}")
-        for ((a, _) in fn.args) if (a !in args) bug("MissingArg ${HsShow.text(a)}")
-        val env = Env(sch, c.helpers, FnKind.Query, Ctx("", ""), args, emptyMap(), emptyMap())
+        for ((a, _) in fn.input) if (a !in args) bug("MissingArg ${HsShow.text(a)}")
+        val work = st.fork()
         try {
-            block(env, fn.body, st.fork())
+            val env = prelude(Env(sch, c.helpers, FnKind.Query, ctx, args, emptyMap(), emptyMap()), fn, work)
+            block(env, fn.body, work)
         } catch (r: Returned) {
-            return r.value ?: bug("NoReturn ${HsShow.text(fn.name)}")
+            return Answer.Ok(r.value ?: bug("NoReturn ${HsShow.text(fn.name)}"))
+        } catch (f: Fault.Refuse) {
+            return Answer.Refused(f.refusal)
         }
         bug("NoReturn ${HsShow.text(fn.name)}")
     }
@@ -83,15 +117,138 @@ public object Eval {
     private fun function(m: Module, name: String): Function =
         m.lookupFunction(name) ?: bug("UnknownFunction ${HsShow.text(name)}")
 
+    // §1.3 Input checks, and §1.2 middleware ----------------------------------
+
+    /** The default message of a failing check (`Ark.Eval.defaultMessage`); `table` is the id's table, for `exists`. */
+    public fun defaultMessage(field: String, c: Check, table: String? = null): String = when (c) {
+        is Check.Trim -> "$field: invalid"
+        is Check.MinLen -> "$field: at least ${c.n} characters"
+        is Check.MaxLen -> "$field: at most ${c.n} characters"
+        is Check.Range -> when {
+            c.lo != null && c.hi != null -> "$field: between ${c.lo} and ${c.hi}"
+            c.lo != null -> "$field: at least ${c.lo}"
+            c.hi != null -> "$field: at most ${c.hi}"
+            else -> "$field: invalid"
+        }
+        is Check.NonEmpty -> "$field: at least one"
+        is Check.Exists -> "$field: no such ${table ?: "row"}"
+        is Check.Refine -> "$field: invalid"
+    }
+
+    /** The default message of a failing whole-input refinement. */
+    public const val DEFAULT_REFINE_MESSAGE: String = "invalid"
+
+    /** The table an id field names, through an option. */
+    public fun idTable(t: Ty): String? = when (t) {
+        is Ty.TId -> t.table
+        is Ty.TOption -> idTable(t.of)
+        else -> null
+    }
+
+    // One field's checks against its value: the value after any trims, or the
+    // message of the first check that failed. `None` passes untouched.
+    private fun checkField(env: Env, name: String, f: Field, v0: Value, st: Store): Pair<Value, String?> {
+        var v = v0
+        if (v is Value.VNull) return v to null
+        for (c in f.checks) {
+            val ok = when (c) {
+                is Check.Trim -> {
+                    v = Std.trim(v)
+                    true
+                }
+                is Check.MinLen -> textLen(v) >= c.n
+                is Check.MaxLen -> textLen(v) <= c.n
+                is Check.Range -> {
+                    val n = int(v)
+                    (c.lo == null || n >= c.lo) && (c.hi == null || n <= c.hi)
+                }
+                is Check.NonEmpty -> list(v).isNotEmpty()
+                is Check.Exists -> {
+                    val t = idTable(f.ty) ?: bug("TypeError ${HsShow.text("exists on a field that is not an id")}")
+                    bool(st.exists(t, listOf(v)))
+                }
+                is Check.Refine -> bool(eval(env.withArgs(env.args + (name to v)), c.e, st))
+            }
+            if (!ok) return v to (c.why ?: defaultMessage(name, c, idTable(f.ty)))
+        }
+        return v to null
+    }
+
+    private fun textLen(v: Value): Long = int(Std.textLen(v))
+
+    // Checks, then middleware: the environment the body runs in, with the
+    // input normalised and every provided value bound.
+    private fun prelude(env0: Env, fn: Function, st: Store): Env {
+        val args = LinkedHashMap(env0.args)
+        for ((name, f) in fn.input) {
+            val (v, why) = checkField(env0.withArgs(args), name, f, args.getValue(name), st)
+            if (why != null) verdict(Refusal.Refused(why))
+            args[name] = v
+        }
+        var env = env0.withArgs(args)
+        for ((e, why) in fn.refine) {
+            if (!bool(eval(env, e, st))) verdict(Refusal.Refused(why ?: DEFAULT_REFINE_MESSAGE))
+        }
+        val provided = LinkedHashMap<String, Value>()
+        for (u in fn.uses) {
+            val mw = env.helpers.firstOrNull { it.name == u } ?: bug("UnknownFunction ${HsShow.text(u)}")
+            if (!mw.kind.isMiddleware) bug("WrongKind ${HsShow.text(u)} ${mw.kind}")
+            val menv = Env(env.schema, env.helpers, mw.kind, env.ctx, args, emptyMap(), emptyMap(), provided.toMap())
+            try {
+                block(menv, mw.body, st)
+                if (mw.kind == FnKind.Provide) bug("NoReturn ${HsShow.text(mw.name)}")
+            } catch (r: Returned) {
+                if (mw.kind == FnKind.Provide) provided[u] = r.value ?: bug("NoReturn ${HsShow.text(mw.name)}")
+            }
+        }
+        env = Env(env.schema, env.helpers, env.kind, env.ctx, args, env.autos, env.locals, provided)
+        return env
+    }
+
+    /**
+     * §1.3 The form validator: every present field's checks, `trim` first
+     * where it is, and the whole-input refinements only when every field is
+     * present and passed. Nothing is written; `ctx` is only for a refinement
+     * that reads it.
+     */
+    public fun check(sch: Schema, c: Closure, partial: Args, st: Store, ctx: Ctx = Ctx("", "")): Checked {
+        val fn = c.fn
+        val work: Store = (st as? MemoryStore)?.fork() ?: st
+        val env = Env(sch, c.helpers, FnKind.Query, ctx, partial, emptyMap(), emptyMap())
+        val values = LinkedHashMap<String, Value>()
+        val messages = ArrayList<Pair<String, String>>()
+        for ((name, f) in fn.input) {
+            val v0 = partial[name] ?: continue
+            try {
+                val (v, why) = checkField(env.withArgs(partial + values), name, f, v0, work)
+                values[name] = v
+                if (why != null) messages.add(name to why)
+            } catch (r: Fault.Refuse) {
+                messages.add(name to r.refusal.text)
+            }
+        }
+        if (messages.isEmpty() && fn.input.all { it.first in values }) {
+            for ((e, why) in fn.refine) {
+                val ok = try {
+                    bool(eval(env.withArgs(values), e, work))
+                } catch (r: Fault.Refuse) {
+                    false
+                }
+                if (!ok) messages.add("" to (why ?: DEFAULT_REFINE_MESSAGE))
+            }
+        }
+        return Checked(messages, values)
+    }
+
     // §6.3 Statements -------------------------------------------------------
 
-    private fun block(env0: Env, stmts: List<Stmt>, st: MemoryStore): Env {
+    private fun block(env0: Env, stmts: List<Stmt>, st: Store): Env {
         var env = env0
         for (s in stmts) env = exec(env, s, st)
         return env
     }
 
-    private fun exec(env: Env, s: Stmt, st: MemoryStore): Env {
+    private fun exec(env: Env, s: Stmt, st: Store): Env {
         when (s) {
             is Stmt.Let -> return env.bind(s.sym, eval(env, s.e, st))
             is Stmt.If -> {
@@ -104,10 +261,20 @@ public object Eval {
                 for (v in vs) block(env.bind(s.sym, v), s.body, st)
                 return env
             }
-            is Stmt.Put -> {
+            is Stmt.Insert -> {
                 mutating(env)
-                val row = struct(eval(env, s.row, st))
-                st.put(s.table, row)
+                Writes.insert(st, s.table, struct(eval(env, s.row, st)), s.on)
+                return env
+            }
+            is Stmt.Upsert -> {
+                mutating(env)
+                Writes.upsert(st, s.table, struct(eval(env, s.row, st)), s.on)
+                return env
+            }
+            is Stmt.Update -> {
+                mutating(env)
+                val key = s.key.map { eval(env, it, st) }
+                Writes.update(st, s.table, key) { old -> struct(eval(env.bind(s.sym, old), s.row, st)) }
                 return env
             }
             is Stmt.Delete -> {
@@ -117,7 +284,9 @@ public object Eval {
                 return env
             }
             is Stmt.Refuse -> {
-                if (env.kind != FnKind.Mutator) bug("Impure ${HsShow.text("refuse outside a mutator")}")
+                if (env.kind != FnKind.Mutator && !env.kind.isMiddleware) {
+                    bug("Impure ${HsShow.text("refuse outside a mutator")}")
+                }
                 val t = text(eval(env, s.e, st))
                 verdict(Refusal.Refused(t))
             }
@@ -135,7 +304,7 @@ public object Eval {
 
     // §6.4 Expressions ------------------------------------------------------
 
-    private fun eval(env: Env, e: Expr, st: MemoryStore): Value = when (e) {
+    private fun eval(env: Env, e: Expr, st: Store): Value = when (e) {
         is Expr.Lit -> e.v
         is Expr.Arg -> env.args[e.name] ?: bug("MissingArg ${HsShow.text(e.name)}")
         is Expr.Auto -> env.autos[e.name] ?: bug("MissingAuto ${HsShow.text(e.name)}")
@@ -227,9 +396,10 @@ public object Eval {
             val key = e.key.map { eval(env, it, st) }
             st.exists(e.table, key)
         }
+        is Expr.Provided -> env.provided[e.fn] ?: bug("NotProvided ${HsShow.text(e.fn)}")
     }
 
-    private fun op(env: Env, e: Expr.Op, st: MemoryStore): Value {
+    private fun op(env: Env, e: Expr.Op, st: Store): Value {
         val es = e.args
         return when {
             e.op == Op.And && es.size == 2 -> {
@@ -263,9 +433,9 @@ public object Eval {
 
     // Call a helper: a fresh environment with its arguments and nothing of
     // its caller's; what it returned.
-    private fun call(env: Env, fn: Function, vals: List<Value>, st: MemoryStore): Value {
-        if (vals.size != fn.args.size) bug("Arity ${HsShow.text(fn.name)}")
-        val env2 = Env(env.schema, env.helpers, FnKind.Helper, env.ctx, fn.args.map { it.first }.zip(vals).toMap(), emptyMap(), emptyMap())
+    private fun call(env: Env, fn: Function, vals: List<Value>, st: Store): Value {
+        if (vals.size != fn.input.size) bug("Arity ${HsShow.text(fn.name)}")
+        val env2 = Env(env.schema, env.helpers, FnKind.Helper, env.ctx, fn.input.map { it.first }.zip(vals).toMap(), emptyMap(), emptyMap())
         try {
             block(env2, fn.body, st)
         } catch (r: Returned) {
@@ -279,7 +449,7 @@ public object Eval {
     // Scan, filter, sort stably, take, attach. A child plan runs once per
     // parent with the join column pinned, so its right-hand sides are
     // evaluated per parent and a child limit is per parent.
-    private fun select(env: Env, p: IR.Plan, st: MemoryStore): List<Value> {
+    private fun select(env: Env, p: IR.Plan, st: Store): List<Value> {
         val tbl = env.schema.lookupTable(p.table) ?: bug("UnknownTable ${HsShow.text(p.table)}")
         val keep = p.filter?.let { predicate(env, it, st) }
         val admitted = st.scan(p.table).filter { keep == null || keep.admits(it) }
@@ -288,7 +458,7 @@ public object Eval {
         return taken.map { attach(env, tbl, p.related, it, st) }
     }
 
-    private fun attach(env: Env, tbl: Table, rels: List<IR.Related>, row: Row, st: MemoryStore): Value {
+    private fun attach(env: Env, tbl: Table, rels: List<IR.Related>, row: Row, st: Store): Value {
         val key = tbl.keyOf(row)
         val pk = when {
             key.size == 1 -> key[0]
@@ -307,7 +477,7 @@ public object Eval {
     }
 
     // The right-hand sides of a filter are evaluated once, before the scan.
-    private fun predicate(env: Env, p: IR.Pred, st: MemoryStore): Pred = when (p) {
+    private fun predicate(env: Env, p: IR.Pred, st: Store): Pred = when (p) {
         is IR.Pred.Cmp -> Pred.Cmp(p.column, p.op, eval(env, p.e, st))
         is IR.Pred.In -> Pred.In(p.column, p.items.map { eval(env, it, st) })
         is IR.Pred.All -> Pred.All(p.items.map { predicate(env, it, st) })
@@ -321,7 +491,7 @@ public object Eval {
         return evalPlanIn(env, p, st)
     }
 
-    private fun evalPlanIn(env: Env, p: IR.Plan, st: MemoryStore): Plan = Plan(
+    private fun evalPlanIn(env: Env, p: IR.Plan, st: Store): Plan = Plan(
         p.table,
         p.filter?.let { predicate(env, it, st) },
         p.order,

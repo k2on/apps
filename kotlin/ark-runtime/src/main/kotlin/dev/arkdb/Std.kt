@@ -158,6 +158,9 @@ public object Std {
 
     public fun unwrapOr(v: Value, d: Value): Value = if (v.isNull()) d else v
 
+    /** The value of an option, or the refusal `unwrapped none` (AUTHORING.md §6). */
+    public fun unwrap(v: Value): Value = if (v.isNull()) throw Fault.refuse("unwrapped none") else v
+
     // By name, for the interpreter ----------------------------------------
 
     /** Apply a standard function to already-evaluated arguments; arity and type mismatches are bugs. */
@@ -192,6 +195,7 @@ public object Std {
             StdFn.Reverse -> reverse(args[0])
             StdFn.IsSome -> isSome(args[0])
             StdFn.UnwrapOr -> unwrapOr(args[0], args[1])
+            StdFn.Unwrap -> unwrap(args[0])
         }
     }
 

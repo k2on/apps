@@ -17,6 +17,9 @@ server/    axum: hosts the `library` and `playlists` scopes from harken.ark
            itself, through the interpreter; dev auth; a scanner that authors
            tracks from a directory; /media
 desktop/   a terminal peer in Rust over the generated Rust
+web/       a browser peer: the Rust runtime as wasm, applying every entry through
+           the interpreter over harken.ark, and a page over it; published to
+           GitHub Pages
 ios/       SwiftUI over the Swift runtime and the generated Swift
 android/   Compose over the Kotlin runtime and the generated Kotlin
 ```
@@ -104,6 +107,7 @@ Everything is `nix`, from the repository root:
                                  # the domain program and arkc write them today
     nix build .#harken-server
     nix build .#harken-desktop
+    nix build .#harken-web       # the browser peer, as a static directory
     nix build .#arkdb-swift      # the Swift runtime and client, with their tests
     nix build .#arkdb-kotlin     # the Kotlin runtime and client, with their tests
     nix build .#harken-apk       # the Android app, debug-signed, from a recorded Maven graph
@@ -122,6 +126,30 @@ The Android app is a nix build like the rest (`android/README.md` says what
 the derivation pins and how its Maven graph is re-recorded); the iOS app is
 Xcode over `ios/project.yml`, since nothing but a Mac can build one. Neither
 has been run on a device from here.
+
+The browser peer is `harken/web`: the same `ark` crate compiled to
+wasm32, bound by wasm-bindgen at the exact version `rust/Cargo.lock` names
+(the flake reads it out of the lockfile), and a page bundled by esbuild —
+`nix build .#harken-web` is `index.html`, `app.js`, `harken_web.js`,
+`harken_web_bg.wasm` and `style.css`. It embeds `harken.ark` and applies
+every entry through the interpreter, as the server does, and authors by
+name through the module's closures; alone it is its own authority and
+offers a few demo tracks, since nothing scans a library in a tab.
+`web/README.md` has its JS API, how to run it locally, and the follow-up:
+authoring through native procedures once the domain's new authoring API
+lands.
+
+Two workflows under `.github/workflows/` build from `main`:
+`pages.yml` runs `nix build .#harken-web` and publishes it under
+<https://k2on.github.io/apps/harken/> with a landing page above it;
+`apk.yml` runs `nix build .#harken-apk` on an x86_64 runner, uploads
+`harken-debug.apk` as the artifact `harken-debug-apk`, and on a `v*` tag
+attaches it to a GitHub release. Both install nix with
+`DeterminateSystems/nix-installer-action` and keep the store between runs
+in GitHub's actions cache with `nix-community/cache-nix-action` (free for
+a public repository; magic-nix-cache relied on a cache API GitHub has
+retired). Pages must be set to deploy from GitHub Actions in the
+repository's settings.
 
 ## Running it
 

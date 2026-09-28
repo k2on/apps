@@ -20,7 +20,31 @@ public enum Encode {
             ("schema", schemaValue(m.schema)),
             ("functions", .list(m.functions.map { functionValue([:], $0) })),
             ("live", .list(m.live.map { node("frame", [("name", txt($0.name)), ("ty", tyValue($0.ty))]) })),
+            ("routers", .list(m.routers.map(routerValue))),
         ])
+    }
+
+    public static func routerValue(_ r: Router) -> Value {
+        return node("router", [("name", txt(r.name)), ("scope", txt(r.scope)), ("uses", .list(r.uses.map(txt)))])
+    }
+
+    static func optText(_ s: String?) -> Value { return s.map(txt) ?? .null }
+
+    /// §1.3 One input field: its name, type and checks.
+    public static func fieldValue(_ f: NamedField) -> Value {
+        return node("field", [("name", txt(f.name)), ("ty", tyValue(f.ty)), ("checks", .list(f.field.checks.map(checkValue)))])
+    }
+
+    public static func checkValue(_ c: Check) -> Value {
+        switch c {
+        case .trim: return node("trim", [])
+        case .minLen(let n, let why): return node("min_len", [("n", int(n)), ("why", optText(why))])
+        case .maxLen(let n, let why): return node("max_len", [("n", int(n)), ("why", optText(why))])
+        case .range(let lo, let hi, let why): return node("range", [("lo", lo.map(int) ?? .null), ("hi", hi.map(int) ?? .null), ("why", optText(why))])
+        case .nonEmpty(let why): return node("non_empty", [("why", optText(why))])
+        case .exists(let why): return node("exists", [("why", optText(why))])
+        case .refine(let e, let why): return node("refine", [("e", expr(e)), ("why", optText(why))])
+        }
     }
 
     public static func schemaValue(_ sch: Schema) -> Value {
@@ -65,12 +89,7 @@ public enum Encode {
     /// Names are not carried.
     public static func functionValue(_ deps: [String: Value], _ fn0: Function) -> Value {
         let fn = normalize(fn0)
-        let kind: String
-        switch fn.kind {
-        case .mutator: kind = "mutator"
-        case .query: kind = "query"
-        case .helper: kind = "helper"
-        }
+        let kind = fn.kind.wireName
         func auto(_ a: NamedAuto) -> Value {
             switch a.auto {
             case .newId(let t): return node("new_id", [("name", txt(a.name)), ("table", txt(t))])
@@ -82,8 +101,11 @@ public enum Encode {
             ("deps", .record(deps)),
             ("kind", txt(kind)),
             ("scope", fn.scope.map(txt) ?? .null),
+            ("router", fn.router.map(txt) ?? .null),
+            ("uses", .list(fn.uses.map(txt))),
             ("autos", .list(fn.autos.map(auto))),
-            ("args", .list(fn.args.map { node("arg", [("name", txt($0.name)), ("ty", tyValue($0.ty))]) })),
+            ("input", .list(fn.input.map(fieldValue))),
+            ("refine", .list(fn.refine.map { node("refine", [("e", expr($0.expr)), ("why", optText($0.why))]) })),
             ("ret", fn.ret.map(tyValue) ?? .null),
             ("body", .list(fn.body.map(stmt))),
         ])
@@ -94,7 +116,9 @@ public enum Encode {
         case .sLet(let x, let e): return node("let", [("sym", int(x)), ("e", expr(e))])
         case .sIf(let c, let a, let b): return node("if", [("c", expr(c)), ("then", .list(a.map(stmt))), ("else", .list(b.map(stmt)))])
         case .sFor(let x, let xs, let b): return node("for", [("sym", int(x)), ("in", expr(xs)), ("body", .list(b.map(stmt)))])
-        case .sPut(let t, let e): return node("put", [("table", txt(t)), ("row", expr(e))])
+        case .sInsert(let t, let e, let on): return node("insert", [("table", txt(t)), ("row", expr(e)), ("on", .list(on.map(txt)))])
+        case .sUpsert(let t, let e, let on): return node("upsert", [("table", txt(t)), ("row", expr(e)), ("on", .list(on.map(txt)))])
+        case .sUpdate(let t, let ks, let x, let e): return node("update", [("table", txt(t)), ("key", .list(ks.map(expr))), ("sym", int(x)), ("row", expr(e))])
         case .sDelete(let t, let ks): return node("delete", [("table", txt(t)), ("key", .list(ks.map(expr)))])
         case .sRefuse(let e): return node("refuse", [("e", expr(e))])
         case .sReturn(let me): return node("return", [("e", me.map(expr) ?? .null)])
@@ -109,6 +133,7 @@ public enum Encode {
         case .variable(let x): return node("var", [("sym", int(x))])
         case .ctxUser: return node("ctx_user", [])
         case .ctxSession: return node("ctx_session", [])
+        case .provided(let f): return node("provided", [("fn", txt(f))])
         case .field(let x, let f): return node("field", [("e", expr(x)), ("name", txt(f))])
         case .structOf(let fs): return node("struct", [("fields", .record(fs.mapValues(expr)))])
         case .list(let es): return node("list", [("items", .list(es.map(expr)))])
@@ -165,14 +190,49 @@ public enum Encode {
 
     /// Symbols renumbered 0, 1, 2… in the order their binders are met,
     /// walking the body top to bottom, left to right.
+    ///
+    /// One numbering covers the function: every check's expression in
+    /// input order, then every refinement, then the body (AUTHORING.md,
+    /// Appendix A). A check's expression mentions no local, so each starts
+    /// from an empty renaming.
     public static func normalize(_ fn: Function) -> Function {
         var f = fn
-        let (body, mapping) = renumberBlock([:], 0, fn.body)
+        var next = 0
+        f.input = fn.input.map { nf in
+            var g = nf
+            g.field.checks = nf.field.checks.map { c in
+                guard case .refine(let e, let why) = c else { return c }
+                let (e2, n2) = renumberExpr([:], next, e)
+                next = n2
+                return .refine(e2, why)
+            }
+            return g
+        }
+        f.refine = fn.refine.map { r in
+            let (e2, n2) = renumberExpr([:], next, r.expr)
+            next = n2
+            return Refine(e2, r.why)
+        }
+        let (body, _) = renumberBlock([:], next, fn.body)
         f.body = body
+        // Names follow their binders: the same walk over both forms pairs
+        // every old symbol with its new number.
         var names: [Sym: String] = [:]
-        for (old, new) in mapping { if let n = fn.names[old] { names[new] = n } }
+        if !fn.names.isEmpty {
+            for (old, new) in zip(allBinders(fn), allBinders(f)) {
+                if let n = fn.names[old] { names[new] = n }
+            }
+        }
         f.names = names
         return f
+    }
+
+    /// Every binder of a function, in one fixed walk: checks, refinements, body.
+    static func allBinders(_ fn: Function) -> [Sym] {
+        var out: [Sym] = []
+        for nf in fn.input { for c in nf.field.checks { if case .refine(let e, _) = c { out += exprBinders(e) } } }
+        for r in fn.refine { out += exprBinders(r.expr) }
+        return out + fn.body.flatMap(binders)
     }
 
     public static func normalizeModule(_ m: Module) -> Module {
@@ -221,9 +281,19 @@ public enum Encode {
             r2[x] = n1
             let (b2, n2) = inner(r2, n1 + 1, b)
             return (.sFor(n1, xs2, b2), ren, n2)
-        case .sPut(let t, let e):
+        case .sInsert(let t, let e, let on):
             let (e2, n1) = renumberExpr(ren, next, e)
-            return (.sPut(t, e2), ren, n1)
+            return (.sInsert(t, e2, on), ren, n1)
+        case .sUpsert(let t, let e, let on):
+            let (e2, n1) = renumberExpr(ren, next, e)
+            return (.sUpsert(t, e2, on), ren, n1)
+        case .sUpdate(let t, let ks, let x, let e):
+            // The key, then the binder for the existing row, then the new row over it.
+            let (ks2, n1) = renumberMany(ren, next, ks)
+            var r2 = ren
+            r2[x] = n1
+            let (e2, n2) = renumberExpr(r2, n1 + 1, e)
+            return (.sUpdate(t, ks2, n1, e2), ren, n2)
         case .sDelete(let t, let ks):
             let (ks2, n1) = renumberMany(ren, next, ks)
             return (.sDelete(t, ks2), ren, n1)
@@ -249,7 +319,8 @@ public enum Encode {
         case .sLet(let x, let e): return [x] + exprBinders(e)
         case .sIf(let c, let a, let b): return exprBinders(c) + a.flatMap(binders) + b.flatMap(binders)
         case .sFor(let x, let xs, let b): return [x] + exprBinders(xs) + b.flatMap(binders)
-        case .sPut(_, let e): return exprBinders(e)
+        case .sInsert(_, let e, _), .sUpsert(_, let e, _): return exprBinders(e)
+        case .sUpdate(_, let ks, let x, let e): return [x] + ks.flatMap(exprBinders) + exprBinders(e)
         case .sDelete(_, let ks): return ks.flatMap(exprBinders)
         case .sRefuse(let e): return exprBinders(e)
         case .sReturn(let me): return me.map(exprBinders) ?? []
@@ -436,9 +507,12 @@ public enum Encode {
 
     // MARK: calls
 
-    /// The names of the helpers a function calls directly, sorted, unique.
+    /// The names of the helpers a function calls directly — in its checks,
+    /// its refinements and its body — sorted, unique.
     public static func calls(_ fn: Function) -> [String] {
         var seen = Set<String>()
+        for nf in fn.input { for c in nf.field.checks { if case .refine(let e, _) = c { for n in exprCalls(e) { seen.insert(n) } } } }
+        for r in fn.refine { for n in exprCalls(r.expr) { seen.insert(n) } }
         for s in fn.body { for n in stmtCalls(s) { seen.insert(n) } }
         return seen.sorted { compareText($0, $1) < 0 }
     }
@@ -448,7 +522,8 @@ public enum Encode {
         case .sLet(_, let e): return exprCalls(e)
         case .sIf(let c, let a, let b): return exprCalls(c) + a.flatMap(stmtCalls) + b.flatMap(stmtCalls)
         case .sFor(_, let xs, let b): return exprCalls(xs) + b.flatMap(stmtCalls)
-        case .sPut(_, let e): return exprCalls(e)
+        case .sInsert(_, let e, _), .sUpsert(_, let e, _): return exprCalls(e)
+        case .sUpdate(_, let ks, _, let e): return ks.flatMap(exprCalls) + exprCalls(e)
         case .sDelete(_, let ks): return ks.flatMap(exprCalls)
         case .sRefuse(let e): return exprCalls(e)
         case .sReturn(let me): return me.map(exprCalls) ?? []

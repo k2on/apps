@@ -327,7 +327,7 @@ public struct Client {
         out = []
         heardFrames = []
         let subs = scopeNames.map { Subscription(scope: $0, since: scopes[$0]!.replica.cursor, mode: scopes[$0]!.mode) }
-        emit(.hello(subs: subs, token: token, spec: 1))
+        emit(.hello(subs: subs, token: token, spec: specVersion))
         for s in scopeNames where !scopes[s]!.replica.pending.isEmpty {
             emit(.push(scope: s, entries: scopes[s]!.replica.pending))
         }
@@ -343,19 +343,6 @@ public struct Client {
     public mutating func mutate(_ s: ScopeName, _ i: Id, _ ctx: Ctx, _ fh: FnHash, _ autos: Args, _ args: Args) -> Result<Entry, Refusal> {
         guard var held = scopes[s] else { return .failure(.refused("not holding scope " + s)) }
         switch held.replica.mutate(i, ctx, fh, autos, args) {
-        case .failure(let why): return .failure(why)
-        case .success(let e):
-            scopes[s] = held
-            emit(.push(scope: s, entries: [e]))
-            return .success(e)
-        }
-    }
-
-    /// `mutate` with the body supplied: authored by native code the caller
-    /// hands over rather than by what the replica holds (`Replica.mutateWith`).
-    public mutating func mutateWith(_ s: ScopeName, _ i: Id, _ ctx: Ctx, _ fh: FnHash, _ autos: Args, _ args: Args, _ apply: (MemoryStore) throws -> Eval.Outcome) -> Result<Entry, Refusal> {
-        guard var held = scopes[s] else { return .failure(.refused("not holding scope " + s)) }
-        switch held.replica.mutateWith(i, ctx, fh, autos, args, apply) {
         case .failure(let why): return .failure(why)
         case .success(let e):
             scopes[s] = held
@@ -395,7 +382,7 @@ public struct Client {
             scopes[s] = held
             let needs = held.replica.needs
             if !needs.isEmpty { emit(.needFacts(scope: s, seqs: needs)) }
-            if more { emit(.hello(subs: [Subscription(scope: s, since: held.replica.cursor, mode: held.mode)], token: token, spec: 1)) }
+            if more { emit(.hello(subs: [Subscription(scope: s, since: held.replica.cursor, mode: held.mode)], token: token, spec: specVersion)) }
         case .factsFor(let s, let items):
             guard var held = scopes[s] else { return }
             for it in items { held.replica.receiveFacts(it.seq, it.facts) }
@@ -408,7 +395,7 @@ public struct Client {
             for (t, vs) in rows {
                 for v in vs { if case .record(let row) = v { st.applyChange(.add(t, row)) } }
             }
-            let r = Replica.open(held.replica.schema, s, held.replica.bodies, st, n, held.replica.pending, applier: held.replica.applier)
+            let r = Replica.open(held.replica.schema, s, held.replica.bodies, st, n, held.replica.pending, natives: held.replica.natives)
             scopes[s] = Held(replica: r, mode: held.mode)
         case .ack(let s, let ids, let ns):
             guard var held = scopes[s] else { return }

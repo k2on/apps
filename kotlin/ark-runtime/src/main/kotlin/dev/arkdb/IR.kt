@@ -4,7 +4,7 @@ package dev.arkdb
 import java.util.SortedMap
 
 /** The version of this specification a module was written against. */
-public const val SPEC_VERSION: Int = 1
+public const val SPEC_VERSION: Int = 2
 
 public data class Module(
     val spec: Int,
@@ -13,11 +13,60 @@ public data class Module(
     val functions: List<Function>,
     /** §3.9 The live section: the frame types an app's realtime channel carries. */
     val live: List<Pair<String, Ty>>,
+    /** §1.1 (AUTHORING.md) The routers: each a scope and the middleware every procedure on it runs. */
+    val routers: List<Router> = emptyList(),
 ) {
     public fun lookupFunction(n: String): Function? = functions.firstOrNull { it.name == n }
+
+    public fun lookupRouter(n: String): Router? = routers.firstOrNull { it.name == n }
+
+    /** The middleware a function runs, in order: its own `uses`, by name. */
+    public fun middlewareOf(fn: Function): List<Function> = fn.uses.mapNotNull { lookupFunction(it) }
 }
 
-public enum class FnKind { Mutator, Query, Helper }
+/**
+ * A router: the scope every procedure on it reads and writes, and the
+ * middleware declared on it, in declaration order, by function name (the
+ * union of its procedures' `uses`).
+ */
+public data class Router(val name: String, val scope: String, val uses: List<String>)
+
+/**
+ * `Guard` runs before the body and may refuse; `Provide` does the same and
+ * returns its `ret`, which the body reads as `Expr.Provided <name>`.
+ */
+public enum class FnKind {
+    Mutator, Query, Helper, Guard, Provide;
+
+    /** A guard or a provide. */
+    public val isMiddleware: Boolean get() = this == Guard || this == Provide
+
+    /** A mutator or a query: something on a router. */
+    public val isProcedure: Boolean get() = this == Mutator || this == Query
+}
+
+/** §1.3 One field of a procedure's input: its type and the checks run on it, in order. */
+public data class Field(val ty: Ty, val checks: List<Check>)
+
+/** A check on an input field; `why` is the message, `null` meaning the default (`Eval.defaultMessage`). */
+public sealed class Check {
+    /** The message when it fails; `null` means the default. */
+    public abstract val why: String?
+
+    /** Text: normalise before every later check and before the body. */
+    public object Trim : Check() {
+        override val why: String? get() = null
+        override fun toString(): String = "Trim"
+    }
+    public data class MinLen(val n: Int, override val why: String?) : Check()
+    public data class MaxLen(val n: Int, override val why: String?) : Check()
+    public data class Range(val lo: Long?, val hi: Long?, override val why: String?) : Check()
+    public data class NonEmpty(override val why: String?) : Check()
+    /** Id: a row with that key exists in the procedure's scope. */
+    public data class Exists(override val why: String?) : Check()
+    /** Any: the expression, over `Expr.Arg <this field>`, is true. */
+    public data class Refine(val e: Expr, override val why: String?) : Check()
+}
 
 /** The non-determinism a mutator is allowed, by type. */
 public sealed class Auto {
@@ -33,21 +82,37 @@ public typealias Sym = Int
 public data class Function(
     val name: String,
     val kind: FnKind,
+    /** A mutator's, query's, guard's or provide's scope; a procedure's is its router's. */
     val scope: String?,
     val autos: List<Pair<String, Auto>>,
-    val args: List<Pair<String, Ty>>,
+    /** The input, field by field, each with its checks; a middleware's names the fields it reads. */
+    val input: List<Pair<String, Field>>,
     val ret: Ty?,
     val body: List<Stmt>,
     /** The author's names for symbols; not hashed, not required. */
     val names: Map<Sym, String>,
-)
+    /** The router a procedure is on; null for helpers and middleware. */
+    val router: String? = null,
+    /** The middleware this procedure runs, in order: a subsequence of its router's `uses`; empty otherwise. */
+    val uses: List<String> = emptyList(),
+    /** Checks over the whole input, run after every field's. */
+    val refine: List<Pair<Expr, String?>> = emptyList(),
+) {
+    /** The input's names and types alone, as v1's `args` were. */
+    public val args: List<Pair<String, Ty>> get() = input.map { (n, f) -> n to f.ty }
+}
 
 /** §3.1 Statements. */
 public sealed class Stmt {
     public data class Let(val sym: Sym, val e: Expr) : Stmt()
     public data class If(val c: Expr, val then: List<Stmt>, val els: List<Stmt>) : Stmt()
     public data class For(val sym: Sym, val over: Expr, val body: List<Stmt>) : Stmt()
-    public data class Put(val table: String, val row: Expr) : Stmt()
+    /** Write the row unless one matches on the columns (the key when empty). */
+    public data class Insert(val table: String, val row: Expr, val on: List<String>) : Stmt()
+    /** Write the row; if one matches on the columns, keep its key columns and take the rest from the new row. */
+    public data class Upsert(val table: String, val row: Expr, val on: List<String>) : Stmt()
+    /** By key; the existing row is bound to `sym` in `row`; a no-op when absent. */
+    public data class Update(val table: String, val key: List<Expr>, val sym: Sym, val row: Expr) : Stmt()
     public data class Delete(val table: String, val key: List<Expr>) : Stmt()
     public data class Refuse(val e: Expr) : Stmt()
     public data class Return(val e: Expr?) : Stmt()
@@ -90,6 +155,8 @@ public sealed class Expr {
     public data class Select(val plan: IR.Plan) : Expr()
     public data class Get(val table: String, val key: List<Expr>) : Expr()
     public data class Exists(val table: String, val key: List<Expr>) : Expr()
+    /** What the `Provide` middleware of that name returned. */
+    public data class Provided(val fn: String) : Expr()
 }
 
 /** Arithmetic and boolean operators; the integer ones are checked. */
@@ -148,7 +215,9 @@ public enum class StdFn(public val arity: Int) {
     Min(2), Max(2), Clamp(3), Abs(1),
     Fnv1a64(1), Sha256(1),
     IdOfText(1), TextOfId(1), NilId(0), Utf8(1),
-    First(1), Last(1), Len(1), Contains(2), Reverse(1), IsSome(1), UnwrapOr(2);
+    First(1), Last(1), Len(1), Contains(2), Reverse(1), IsSome(1), UnwrapOr(2),
+    /** AUTHORING.md §6: the value, or the refusal `unwrapped none`. */
+    Unwrap(1);
 
     public companion object {
         public fun ofName(s: String): StdFn? = entries.firstOrNull { it.name == s }

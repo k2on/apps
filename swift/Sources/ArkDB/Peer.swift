@@ -19,20 +19,25 @@ public enum Changes: Equatable {
     case rebuilt
 }
 
-/// How a replica applies an intent through native code — generated code —
-/// rather than through the interpreter. `knows` says whether the code has
-/// the function a hash names; `apply` runs it — given the entry's author,
-/// its autos and arguments and the store to apply against — and answers the
-/// outcome, the store passed untouched (`Eval.applyBody` is how one is
-/// written over a generated `apply`). A hash the code does not know falls
-/// through to the closure the replica holds, so a peer generated with
-/// `--only` still replays every other entry by intent. Additive: a replica
-/// with no applier is exactly the spec's.
-public struct Applier {
-    public var knows: (FnHash) -> Bool
-    public var apply: (FnHash, Ctx, Args, Args, MemoryStore) throws -> Eval.Outcome
-    public init(knows: @escaping (FnHash) -> Bool, apply: @escaping (FnHash, Ctx, Args, Args, MemoryStore) throws -> Eval.Outcome) {
-        self.knows = knows; self.apply = apply
+/// A procedure a peer runs as native code — its domain, written in this
+/// language against the authoring vocabulary and run under `Native` — with
+/// the verified IR it emits. `Module.procedures()` of an authoring module
+/// hands a runtime these by function hash; a replica applies an entry
+/// through the native procedure when it holds one for the hash and through
+/// the closure (the interpreter), or the entry's facts, otherwise.
+public struct Procedure {
+    /// The function as `Emit` records it, verified and normalised.
+    public let function: Function
+    /// A mutator's body, natively: given the entry's author, its autos and
+    /// input and the store to apply against, the outcome — the store passed
+    /// untouched. Nil for a query.
+    public let mutate: ((Ctx, Args, Args, MemoryStore) throws -> Eval.Outcome)?
+    /// A query's body, natively: the value, or the refusal. Nil for a mutator.
+    public let query: ((Ctx, Args, MemoryStore) throws -> Result<Value, Refusal>)?
+
+    public init(function: Function, mutate: ((Ctx, Args, Args, MemoryStore) throws -> Eval.Outcome)?,
+                query: ((Ctx, Args, MemoryStore) throws -> Result<Value, Refusal>)?) {
+        self.function = function; self.mutate = mutate; self.query = query
     }
 }
 
@@ -61,45 +66,39 @@ public struct Replica {
     public private(set) var diverged: [Seq]
     var rebuilt: Bool
     var changes: [Change] // oldest first
-    /// Native code to apply intents through, consulted before `bodies`.
-    public var applier: Applier? = nil
+    /// Native procedures to apply intents through, by hash, consulted
+    /// before `bodies`.
+    public var natives: [FnHash: Procedure] = [:]
 
     /// §11.1 Open a replica from what was durable; pending replays on top.
-    public static func open(_ schema: Schema, _ scope: ScopeName, _ bodies: [FnHash: Closure], _ confirmed: MemoryStore, _ cursor: Seq, _ pending: [Entry], applier: Applier? = nil) -> Replica {
+    public static func open(_ schema: Schema, _ scope: ScopeName, _ bodies: [FnHash: Closure], _ confirmed: MemoryStore, _ cursor: Seq, _ pending: [Entry], natives: [FnHash: Procedure] = [:]) -> Replica {
         var r = Replica(scope: scope, schema: schema, bodies: bodies, confirmed: confirmed, cursor: cursor, pending: pending,
-                        view: confirmed, inbox: [:], rejections: [], diverged: [], rebuilt: true, changes: [], applier: applier)
+                        view: confirmed, inbox: [:], rejections: [], diverged: [], rebuilt: true, changes: [], natives: natives)
         r.replay()
         return r
     }
 
-    /// Whether this replica can apply an entry naming this function, by
-    /// native code or by a held closure.
+    /// Whether this replica can apply an entry naming this function, by a
+    /// native procedure or by a held closure.
     public func knows(_ fh: FnHash) -> Bool { return canApply(fh) }
 
-    /// Apply a function to a store: through the applier when it knows the
-    /// hash, else through the closure held for it; `nil` when neither does.
+    /// Apply a function to a store: natively when a procedure is held for
+    /// the hash, else through the closure held for it; `nil` when neither is.
     func applyFunction(_ fh: FnHash, _ ctx: Ctx, _ autos: Args, _ args: Args, _ st: MemoryStore) throws -> Eval.Outcome? {
-        if let a = applier, a.knows(fh) { return try a.apply(fh, ctx, autos, args, st) }
+        if let p = natives[fh], let run = p.mutate { return try run(ctx, autos, args, st) }
         guard let c = bodies[fh] else { return nil }
         return try Eval.applyClosure(schema, c, ctx, autos, args, st)
     }
 
-    /// Whether either the applier or a held closure can run this function.
+    /// Whether a native procedure or a held closure can run this function.
     func canApply(_ fh: FnHash) -> Bool {
-        return bodies[fh] != nil || (applier?.knows(fh) ?? false)
+        return bodies[fh] != nil || natives[fh]?.mutate != nil
     }
 
     /// §11.2 Author an intent: apply it forward into the view, and if it is
     /// not refused, record it as pending. A refusal changes nothing.
     public mutating func mutate(_ id: Id, _ ctx: Ctx, _ fh: FnHash, _ autos: Args, _ args: Args) -> Result<Entry, Refusal> {
         return author(id, ctx, fh, autos, args) { r, st in try r.applyFunction(fh, ctx, autos, args, st) }
-    }
-
-    /// §11.2 with the body supplied: the same authoring, applied by native
-    /// code the caller hands over (a generated mutator run through
-    /// `Eval.applyBody`) rather than by what the replica holds.
-    public mutating func mutateWith(_ id: Id, _ ctx: Ctx, _ fh: FnHash, _ autos: Args, _ args: Args, _ apply: (MemoryStore) throws -> Eval.Outcome) -> Result<Entry, Refusal> {
-        return author(id, ctx, fh, autos, args) { _, st in try apply(st) }
     }
 
     mutating func author(_ id: Id, _ ctx: Ctx, _ fh: FnHash, _ autos: Args, _ args: Args, _ run: (Replica, MemoryStore) throws -> Eval.Outcome?) -> Result<Entry, Refusal> {

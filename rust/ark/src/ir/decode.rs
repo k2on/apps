@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 
 use crate::hash::Closure;
-use crate::ir::{Auto, CmpOp, Expr, FnKind, Function, Module, Op, Plan, Pred, Related, StdFn, Stmt, Sym};
+use crate::ir::{Auto, Check, CmpOp, Expr, Field, FnKind, Function, Module, Op, Plan, Pred, Related, Router, StdFn, Stmt, Sym};
 use crate::schema::{Column, Dir, Index, Ref, Relation, Schema, Scope, Table, Ty};
 use crate::value::{FieldName, Value};
 
@@ -41,6 +41,7 @@ pub fn module_from_value(v: &Value) -> D<Module> {
     let spec = int(&["module", "spec"], field(&fs, "spec")?)?;
     let schema = schema_from_value(field(&fs, "schema")?)?;
     let functions = list(&["module", "functions"], function_from_value, field(&fs, "functions")?)?;
+    let routers = list(&["module", "routers"], router_from_value, field(&fs, "routers")?)?;
     let live = list(
         &["module", "live"],
         |x| {
@@ -55,8 +56,19 @@ pub fn module_from_value(v: &Value) -> D<Module> {
         spec,
         schema,
         functions,
+        routers,
         live,
     })
+}
+
+/// §1.1 A router.
+pub fn router_from_value(v: &Value) -> D<Router> {
+    let fs = tagged(&["router"], "router", v)?;
+    let name = text(&["router", "name"], field(&fs, "name")?)?;
+    let here = |k: &'static str| vec!["router", name.as_str(), k];
+    let scope = text(&here("scope"), field(&fs, "scope")?)?;
+    let uses = list(&here("uses"), |x| text(&here("uses"), x), field(&fs, "uses")?)?;
+    Ok(Router { name, scope, uses })
 }
 
 /// A closure as an authority stores or sends one: `{ t: "closure", fn,
@@ -147,27 +159,70 @@ pub fn function_from_value(v: &Value) -> D<Function> {
     let name = text(&["fn", "name"], field(&fs, "name")?)?;
     let here: Vec<&str> = vec!["fn", &name];
     let kind_path = [here.as_slice(), &["kind"]].concat();
-    let kind = match text(&kind_path, field(&fs, "kind")?)?.as_str() {
-        "mutator" => FnKind::Mutator,
-        "query" => FnKind::Query,
-        "helper" => FnKind::Helper,
-        other => return err(&here, format!("unknown kind {other}")),
+    let kind_text = text(&kind_path, field(&fs, "kind")?)?;
+    let kind = match FnKind::parse(&kind_text) {
+        Some(k) => k,
+        None => return err(&here, format!("unknown kind {kind_text}")),
     };
-    let scope_path = [here.as_slice(), &["scope"]].concat();
-    let scope = optional(|x| text(&scope_path, x), field(&fs, "scope")?)?;
-    let autos = list(&[here.as_slice(), &["autos"]].concat(), auto, field(&fs, "autos")?)?;
-    let args = list(&[here.as_slice(), &["args"]].concat(), arg, field(&fs, "args")?)?;
+    let p = |k: &'static str| [here.as_slice(), &[k]].concat();
+    let scope = optional(|x| text(&p("scope"), x), field(&fs, "scope")?)?;
+    let router = optional(|x| text(&p("router"), x), field(&fs, "router")?)?;
+    let uses = list(&p("uses"), |x| text(&p("uses"), x), field(&fs, "uses")?)?;
+    let autos = list(&p("autos"), auto, field(&fs, "autos")?)?;
+    let input = list(&p("input"), |x| input_field(&p("input"), x), field(&fs, "input")?)?;
+    let refine = list(
+        &p("refine"),
+        |x| {
+            let rp = p("refine");
+            let rs = tagged(&rp, "refine", x)?;
+            Ok((expr(&rp, field(&rs, "e")?)?, why(&rp, field(&rs, "why")?)?))
+        },
+        field(&fs, "refine")?,
+    )?;
     let ret = optional(ty_from_value, field(&fs, "ret")?)?;
-    let body = list(&[here.as_slice(), &["body"]].concat(), |x| stmt(&here, x), field(&fs, "body")?)?;
+    let body = list(&p("body"), |x| stmt(&here, x), field(&fs, "body")?)?;
     Ok(Function {
         name,
         kind,
         scope,
+        router,
+        uses,
         autos,
-        args,
+        input,
+        refine,
         ret,
         body,
         names: BTreeMap::new(),
+    })
+}
+
+fn why(here: &[&str], v: &Value) -> D<Option<String>> {
+    optional(|x| text(here, x), v)
+}
+
+fn input_field(here: &[&str], x: &Value) -> D<(String, Field)> {
+    let fs = tagged(here, "field", x)?;
+    let n = text(here, field(&fs, "name")?)?;
+    let p: Vec<&str> = [here, &[n.as_str()]].concat();
+    let ty = ty_from_value(field(&fs, "ty")?)?;
+    let checks = list(&p, |c| check(&p, c), field(&fs, "checks")?)?;
+    Ok((n, Field { ty, checks }))
+}
+
+fn check(here: &[&str], v: &Value) -> D<Check> {
+    let (t, fs) = tagged_any(here, v)?;
+    let p: Vec<&str> = [here, &[t.as_str()]].concat();
+    let w = || why(&p, field(&fs, "why")?);
+    let opt_int = |k: &str| optional(|x| int(&p, x), field(&fs, k)?);
+    Ok(match t.as_str() {
+        "trim" => Check::Trim,
+        "min_len" => Check::MinLen(int(&p, field(&fs, "n")?)?, w()?),
+        "max_len" => Check::MaxLen(int(&p, field(&fs, "n")?)?, w()?),
+        "range" => Check::Range(opt_int("lo")?, opt_int("hi")?, w()?),
+        "non_empty" => Check::NonEmpty(w()?),
+        "exists" => Check::Exists(w()?),
+        "refine" => Check::Refine(expr(&p, field(&fs, "e")?)?, w()?),
+        other => return err(here, format!("unknown check {other}")),
     })
 }
 
@@ -182,13 +237,6 @@ fn auto(x: &Value) -> D<(String, Auto)> {
         "now" => Ok((n, Auto::Now)),
         other => err(&["auto", &n], format!("unknown auto {other}")),
     }
-}
-
-fn arg(x: &Value) -> D<(String, Ty)> {
-    let fs = tagged(&["arg"], "arg", x)?;
-    let n = text(&["arg", "name"], field(&fs, "name")?)?;
-    let t = ty_from_value(field(&fs, "ty")?)?;
-    Ok((n, t))
 }
 
 fn stmt(here: &[&str], v: &Value) -> D<Stmt> {
@@ -206,7 +254,22 @@ fn stmt(here: &[&str], v: &Value) -> D<Stmt> {
             expr(&p, field(&fs, "in")?)?,
             list(&p, |x| stmt(&p, x), field(&fs, "body")?)?,
         ),
-        "put" => Stmt::Put(text(&p, field(&fs, "table")?)?, expr(&p, field(&fs, "row")?)?),
+        "insert" => Stmt::Insert(
+            text(&p, field(&fs, "table")?)?,
+            expr(&p, field(&fs, "row")?)?,
+            list(&p, |x| text(&p, x), field(&fs, "on")?)?,
+        ),
+        "upsert" => Stmt::Upsert(
+            text(&p, field(&fs, "table")?)?,
+            expr(&p, field(&fs, "row")?)?,
+            list(&p, |x| text(&p, x), field(&fs, "on")?)?,
+        ),
+        "update" => Stmt::Update(
+            text(&p, field(&fs, "table")?)?,
+            list(&p, |x| expr(&p, x), field(&fs, "key")?)?,
+            sym(&p, field(&fs, "sym")?)?,
+            expr(&p, field(&fs, "row")?)?,
+        ),
         "delete" => Stmt::Delete(text(&p, field(&fs, "table")?)?, list(&p, |x| expr(&p, x), field(&fs, "key")?)?),
         "refuse" => Stmt::Refuse(expr(&p, field(&fs, "e")?)?),
         "return" => Stmt::Return(optional(|x| expr(&p, x), field(&fs, "e")?)?),
@@ -227,6 +290,7 @@ fn expr(here: &[&str], v: &Value) -> D<Expr> {
         "var" => Expr::Var(s("sym")?),
         "ctx_user" => Expr::CtxUser,
         "ctx_session" => Expr::CtxSession,
+        "provided" => Expr::Provided(text(&p, field(&fs, "fn")?)?),
         "field" => Expr::Field(e("e")?, text(&p, field(&fs, "name")?)?),
         "struct" => {
             let m = struct_map(&p, field(&fs, "fields")?)?;

@@ -6,12 +6,10 @@
 //! nothing of the platform.
 //!
 //! The module is named `stdlib` rather than `std` so that `std::` paths in
-//! this crate stay unambiguous; the unit struct generated code calls is
-//! [`Std`], as GENERATED.md spells it (`Std::trim(a)?`).
+//! this crate stay unambiguous.
 
 use std::collections::BTreeMap;
 
-use crate::fault::Fault;
 use crate::ir::StdFn;
 use crate::sha256::sha256;
 use crate::unicode_tables::{is_alphanumeric, is_white_space, to_lower_simple};
@@ -24,16 +22,6 @@ pub enum StdError {
     Arity(StdFn, usize),
     TypeMismatch(StdFn),
     Fault(String),
-}
-
-impl From<StdError> for Fault {
-    fn from(e: StdError) -> Fault {
-        match e {
-            StdError::Arity(f, n) => Fault::bug(format!("{}/{n}: wrong number of arguments", f.show())),
-            StdError::TypeMismatch(f) => Fault::bug(format!("{}: type mismatch", f.show())),
-            StdError::Fault(t) => Fault::refuse(t),
-        }
-    }
 }
 
 /// Apply a standard function to already-evaluated arguments (`Ark.Std.std`).
@@ -108,6 +96,8 @@ pub fn std(f: StdFn, args: &[Value]) -> Result<Value, StdError> {
         (IsSome, [v]) => Ok(Bool(!v.is_null())),
         (UnwrapOr, [Null, d]) => Ok(d.clone()),
         (UnwrapOr, [v, _]) => Ok(v.clone()),
+        (Unwrap, [Null]) => Err(StdError::Fault("unwrapped none".into())),
+        (Unwrap, [v]) => Ok(v.clone()),
         _ => mismatch(),
     }
 }
@@ -142,80 +132,6 @@ pub fn id_of_text(t: &str) -> Option<Id> {
     bytes.as_slice().try_into().ok()
 }
 
-/// The standard library as GENERATED.md spells it: one associated function
-/// per [`StdFn`], each over `Value`s, each `Result<Value, Fault>`. A type
-/// mismatch or an arity error is a [`Fault::Bug`]; a deterministic fault
-/// (an overflow, crossed clamp bounds) is a [`Fault::Refuse`].
-pub struct Std;
-
-macro_rules! std_fn {
-    ($(#[$doc:meta])* $name:ident, $variant:ident, ($($arg:ident),*)) => {
-        $(#[$doc])*
-        pub fn $name($($arg: Value),*) -> Result<Value, Fault> {
-            Ok(std(StdFn::$variant, &[$($arg),*])?)
-        }
-    };
-}
-
-impl Std {
-    std_fn!(/// Strip White_Space from both ends.
-        trim, Trim, (a));
-    std_fn!(/// Whether a text is empty.
-        is_empty, IsEmpty, (a));
-    std_fn!(/// The concatenation of a list of texts.
-        concat, Concat, (a));
-    std_fn!(/// Simple lowercase mapping, code point by code point.
-        lower, Lower, (a));
-    std_fn!(/// Non-empty and every code point Alphabetic or numeric.
-        is_alnum, IsAlnum, (a));
-    std_fn!(/// The code points, each as a one-character text.
-        chars, Chars, (a));
-    std_fn!(/// The length in code points.
-        text_len, TextLen, (a));
-    std_fn!(/// Whether the first text starts with the second.
-        starts_with, StartsWith, (a, b));
-    std_fn!(/// Split at the first occurrence: `Some {before, after}` or `None`.
-        split_once, SplitOnce, (a, b));
-    std_fn!(/// Decimal, with a leading `-` for negatives.
-        text_of_int, TextOfInt, (a));
-    std_fn!(/// Lowercase hex, two digits per byte.
-        hex, Hex, (a));
-    std_fn!(/// The smaller int.
-        min, Min, (a, b));
-    std_fn!(/// The larger int.
-        max, Max, (a, b));
-    std_fn!(/// `x` held between `lo` and `hi`; faults when `lo > hi`.
-        clamp, Clamp, (x, lo, hi));
-    std_fn!(/// The absolute value; faults on `MIN`.
-        abs, Abs, (a));
-    std_fn!(/// FNV-1a of a text's UTF-8 bytes, the u64 reinterpreted as an int.
-        fnv1a64, Fnv1a64, (a));
-    std_fn!(/// SHA-256 of bytes, as 32 bytes.
-        sha256, Sha256, (a));
-    std_fn!(/// Parse 8-4-4-4-12 hex; `None` if not an id.
-        id_of_text, IdOfText, (a));
-    std_fn!(/// Canonical lowercase 8-4-4-4-12.
-        text_of_id, TextOfId, (a));
-    std_fn!(/// The all-zero id.
-        nil_id, NilId, ());
-    std_fn!(/// A text's UTF-8 bytes.
-        utf8, Utf8, (a));
-    std_fn!(/// The first element, or `None`.
-        first, First, (a));
-    std_fn!(/// The last element, or `None`.
-        last, Last, (a));
-    std_fn!(/// The length of a list.
-        len, Len, (a));
-    std_fn!(/// Whether a list holds a value equal to the second argument.
-        contains, Contains, (a, b));
-    std_fn!(/// The list reversed.
-        reverse, Reverse, (a));
-    std_fn!(/// Whether an option is `Some`.
-        is_some, IsSome, (a));
-    std_fn!(/// The option's value, or the default.
-        unwrap_or, UnwrapOr, (a, b));
-}
-
 /// Arguments (or autos) by name (`Ark.Eval.Args`).
 pub type Args = BTreeMap<String, Value>;
 
@@ -223,35 +139,41 @@ pub type Args = BTreeMap<String, Value>;
 mod tests {
     use super::*;
 
+    fn call(f: StdFn, args: &[Value]) -> Result<Value, StdError> {
+        std(f, args)
+    }
+
     #[test]
     fn unicode_goes_through_the_tables() {
-        assert_eq!(Std::trim(Value::text("\u{3000} a \u{85}")).unwrap(), Value::text("a"));
-        assert_eq!(Std::lower(Value::text("İ")).unwrap(), Value::text("i"));
-        assert_eq!(Std::is_alnum(Value::text("Ⅻ٣")).unwrap(), Value::bool(true));
-        assert_eq!(Std::is_alnum(Value::text("")).unwrap(), Value::bool(false));
+        assert_eq!(call(StdFn::Trim, &[Value::text("\u{3000} a \u{85}")]).unwrap(), Value::text("a"));
+        assert_eq!(call(StdFn::Lower, &[Value::text("İ")]).unwrap(), Value::text("i"));
+        assert_eq!(call(StdFn::IsAlnum, &[Value::text("Ⅻ٣")]).unwrap(), Value::bool(true));
+        assert_eq!(call(StdFn::IsAlnum, &[Value::text("")]).unwrap(), Value::bool(false));
     }
 
     #[test]
     fn hashes_and_ids() {
         assert_eq!(fnv1a64(b""), 0xcbf29ce484222325);
         assert_eq!(fnv1a64(b"a"), 0xaf63dc4c8601ec8c);
-        let id = Std::id_of_text(Value::text("00000000-0000-0000-0000-00000000000A")).unwrap();
-        assert_eq!(Std::text_of_id(id).unwrap(), Value::text("00000000-0000-0000-0000-00000000000a"));
-        assert_eq!(Std::id_of_text(Value::text("nope")).unwrap(), Value::Null);
+        let id = call(StdFn::IdOfText, &[Value::text("00000000-0000-0000-0000-00000000000A")]).unwrap();
+        assert_eq!(call(StdFn::TextOfId, &[id]).unwrap(), Value::text("00000000-0000-0000-0000-00000000000a"));
+        assert_eq!(call(StdFn::IdOfText, &[Value::text("nope")]).unwrap(), Value::Null);
     }
 
     #[test]
     fn faults_are_told_apart() {
-        assert_eq!(Std::abs(Value::int(i64::MIN)), Err(Fault::refuse("integer overflow")));
+        assert_eq!(call(StdFn::Abs, &[Value::int(i64::MIN)]), Err(StdError::Fault("integer overflow".into())));
         assert_eq!(
-            Std::clamp(Value::int(1), Value::int(2), Value::int(1)),
-            Err(Fault::refuse("clamp: lower bound above upper bound"))
+            call(StdFn::Clamp, &[Value::int(1), Value::int(2), Value::int(1)]),
+            Err(StdError::Fault("clamp: lower bound above upper bound".into()))
         );
-        assert!(matches!(Std::trim(Value::int(1)), Err(Fault::Bug(_))));
+        assert!(matches!(call(StdFn::Trim, &[Value::int(1)]), Err(StdError::TypeMismatch(_))));
         assert_eq!(
-            Std::split_once(Value::text("a=b=c"), Value::text("=")).unwrap(),
+            call(StdFn::SplitOnce, &[Value::text("a=b=c"), Value::text("=")]).unwrap(),
             Value::record(vec![("before", Value::text("a")), ("after", Value::text("b=c"))])
         );
-        assert_eq!(Std::split_once(Value::text("abc"), Value::text("")).unwrap(), Value::Null);
+        assert_eq!(call(StdFn::SplitOnce, &[Value::text("abc"), Value::text("")]).unwrap(), Value::Null);
+        assert_eq!(call(StdFn::Unwrap, &[Value::Null]), Err(StdError::Fault("unwrapped none".into())));
+        assert_eq!(call(StdFn::Unwrap, &[Value::int(3)]), Ok(Value::int(3)));
     }
 }

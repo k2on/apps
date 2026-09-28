@@ -28,9 +28,18 @@ public class Replica private constructor(
     confirmed: MemoryStore,
     cursor: Seq,
     pending: List<Entry>,
+    natives: Map<FnHash, Procedure>,
 ) {
     /** The closures this peer can run, keyed by the hash an entry names. */
     public var bodies: Map<FnHash, Closure> = bodies
+        private set
+
+    /**
+     * The procedures this peer runs natively, by the same hashes. An entry
+     * naming one is applied by it; one naming only a closure, by the
+     * interpreter; one naming neither, by its facts.
+     */
+    public var natives: Map<FnHash, Procedure> = natives
         private set
 
     /** The confirmed store: the scope exactly as the authority had it at `cursor`. */
@@ -68,8 +77,9 @@ public class Replica private constructor(
             confirmed: MemoryStore,
             cursor: Seq,
             pending: List<Entry>,
+            natives: Map<FnHash, Procedure> = emptyMap(),
         ): Replica {
-            val r = Replica(scope, sch, bodies, confirmed, cursor, pending)
+            val r = Replica(scope, sch, bodies, confirmed, cursor, pending, natives)
             r.replay()
             return r
         }
@@ -80,37 +90,36 @@ public class Replica private constructor(
         bodies = more + bodies.filterKeys { it !in more }
     }
 
+    /** Give the replica procedures to run natively (new ones win). */
+    public fun learnNatives(more: Map<FnHash, Procedure>) {
+        natives = more + natives.filterKeys { it !in more }
+    }
+
     /**
      * §11.2 Author an intent: apply it forward into the optimistic store and,
      * if it is not refused, record it as pending. Throws `Fault.Refuse` on a
-     * refusal, which changes nothing and records nothing.
+     * refusal, which changes nothing and records nothing. A procedure held
+     * natively computes it; otherwise the interpreter does, over the closure.
      */
     public fun mutate(i: Id, ctx: Ctx, fh: FnHash, autos: Args, args: Args): Entry {
-        val c = bodies[fh] ?: throw Fault.Refuse(Refusal.Refused("unknown function ${fh.hex}"))
+        if (!canRun(fh)) throw Fault.Refuse(Refusal.Refused("unknown function ${fh.hex}"))
         val applied = try {
-            Eval.applyClosure(schema, c, ctx, autos, args, view)
+            run(fh, ctx, autos, args, view)!!
         } catch (b: Fault.Bug) {
             throw Fault.Refuse(Refusal.Refused("bug: ${b.text}"))
         }
         return record(i, ctx, fh, autos, args, applied)
     }
 
-    /**
-     * §11.2 with generated code standing in for the interpreter: `body` is
-     * the generated function for `fh`, run through a `TransactionStore` over
-     * the optimistic store. The entry records the hash exactly as `mutate`
-     * does, and the replica must still hold the closure, because a rebase
-     * replays pending intents through the interpreter (§11.6) — the two are
-     * held to agree by the conformance suite.
-     */
-    public fun mutateWith(i: Id, ctx: Ctx, fh: FnHash, autos: Args, args: Args, body: (Store) -> Unit): Entry {
-        if (fh !in bodies) throw Fault.Refuse(Refusal.Refused("unknown function ${fh.hex}"))
-        val applied = try {
-            TransactionStore.run(view, body)
-        } catch (b: Fault.Bug) {
-            throw Fault.Refuse(Refusal.Refused("bug: ${b.text}"))
-        }
-        return record(i, ctx, fh, autos, args, applied)
+    /** Whether this replica can apply an entry naming `fh` by intent. */
+    public fun canRun(fh: FnHash): Boolean = fh in natives || fh in bodies
+
+    // One entry's intent against a store: natively when held, by the
+    // interpreter over the closure otherwise; null when neither is held.
+    private fun run(fh: FnHash, ctx: Ctx, autos: Args, args: Args, st: MemoryStore): Eval.Applied? {
+        natives[fh]?.let { return it.apply(schema, ctx, autos, args, st) }
+        val c = bodies[fh] ?: return null
+        return Eval.applyClosure(schema, c, ctx, autos, args, st)
     }
 
     // What both ways of authoring share: a verdict is thrown and changes
@@ -165,7 +174,7 @@ public class Replica private constructor(
 
     /** The sequences the replica is waiting on facts for. */
     public fun needs(): List<Seq> = inbox.entries.filter { (n, ib) ->
-        ib.entry != null && ib.facts == null && (ib.entry.fn !in bodies || n in diverged)
+        ib.entry != null && ib.facts == null && (!canRun(ib.entry.fn) || n in diverged)
     }.map { it.key }
 
     /** Try the inbox again. */
@@ -220,10 +229,9 @@ public class Replica private constructor(
     // One entry against the confirmed store: by intent when the closure is
     // held, by facts otherwise; both when both are present, comparing them.
     private fun applyOne(n: Seq, e: Entry, mf: Facts?): Step? {
-        val c = bodies[e.fn]
-        if (c != null && n !in diverged) {
+        if (canRun(e.fn) && n !in diverged) {
             val applied = try {
-                Eval.applyClosure(schema, c, Ctx(e.actor, e.session), e.autos, e.args, confirmed)
+                run(e.fn, Ctx(e.actor, e.session), e.autos, e.args, confirmed)
             } catch (b: Fault.Bug) {
                 null
             }
@@ -244,13 +252,12 @@ public class Replica private constructor(
         changes.clear()
         val kept = ArrayList<Entry>()
         for (e in pending) {
-            val c = bodies[e.fn]
-            if (c == null) {
+            if (!canRun(e.fn)) {
                 rejections.add(e.id to Refusal.Refused("no closure for a pending intent"))
                 continue
             }
             try {
-                when (val applied = Eval.applyClosure(schema, c, Ctx(e.actor, e.session), e.autos, e.args, view)) {
+                when (val applied = run(e.fn, Ctx(e.actor, e.session), e.autos, e.args, view)!!) {
                     is Eval.Applied.Ok -> {
                         view = applied.store
                         kept.add(e)
@@ -283,7 +290,13 @@ public sealed class AdoptError : Exception() {
 }
 
 /** The peer that sequences a scope. */
-public class Authority(public val scope: String, public val schema: Schema, bodies: Map<FnHash, Closure>) {
+public class Authority(
+    public val scope: String,
+    public val schema: Schema,
+    bodies: Map<FnHash, Closure>,
+    /** Procedures this authority runs natively, by hash; the interpreter runs the rest. */
+    public val natives: Map<FnHash, Procedure> = emptyMap(),
+) {
     /** Every closure ever accepted for this scope, by hash. */
     public var bodies: Map<FnHash, Closure> = bodies
         private set
@@ -297,9 +310,12 @@ public class Authority(public val scope: String, public val schema: Schema, bodi
     /** §11.7 Sequence an intent: dedupe by id, apply to the head state, append with the facts. */
     public fun sequenceEntry(e: Entry): Sequenced {
         log.seqOf(e.id)?.let { return Sequenced.Duplicate(it) }
-        val c = bodies[e.fn] ?: return Sequenced.Rejected(Refusal.Refused("unknown function ${e.fn.hex}"))
+        val native = natives[e.fn]
+        val c = bodies[e.fn]
+        if (native == null && c == null) return Sequenced.Rejected(Refusal.Refused("unknown function ${e.fn.hex}"))
         val applied = try {
-            Eval.applyClosure(schema, c, Ctx(e.actor, e.session), e.autos, e.args, store)
+            native?.apply(schema, Ctx(e.actor, e.session), e.autos, e.args, store)
+                ?: Eval.applyClosure(schema, c!!, Ctx(e.actor, e.session), e.autos, e.args, store)
         } catch (b: Fault.Bug) {
             return Sequenced.Rejected(Refusal.Refused("bug: ${b.text}"))
         }
@@ -330,10 +346,16 @@ public class Authority(public val scope: String, public val schema: Schema, bodi
          * §11.8 Adopt a scope a peer sequenced alone: replay every intent from
          * the beginning, holding each to the facts the peer recorded.
          */
-        public fun adopt(sch: Schema, scope: String, bodies: Map<FnHash, Closure>, l: Log): Authority {
+        public fun adopt(
+            sch: Schema,
+            scope: String,
+            bodies: Map<FnHash, Closure>,
+            l: Log,
+            natives: Map<FnHash, Procedure> = emptyMap(),
+        ): Authority {
             if (l.horizon != 0L || !l.base.store.isEmpty) throw AdoptError.NotFromTheBeginning
             if (!l.contiguous) throw AdoptError.Gap
-            val a = Authority(scope, sch, bodies)
+            val a = Authority(scope, sch, bodies, natives)
             for ((n, ef) in l.entries) {
                 val (e, recorded) = ef
                 when (val s = a.sequenceEntry(e)) {
