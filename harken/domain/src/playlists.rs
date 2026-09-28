@@ -18,9 +18,7 @@ pub struct OnPlaylist {
 }
 impl Input for OnPlaylist {
     fn schema() -> Object<Self> {
-        object()
-            .field("playlist_id", id::<Playlist>().exists())
-            .field("track_id", id::<Track>())
+        object().field("playlist_id", id::<Playlist>().exists()).field("track_id", id::<Track>())
     }
 }
 
@@ -76,10 +74,7 @@ pub fn playlists() -> Router<Playlists> {
             db.playlist_item.delete((playlist.id, input.track_id))
         }),
         signed_in.query("playlists", |ctx, db, _input: ()| {
-            db.playlist
-                .filter(Playlist::user_id.eq(ctx.user))
-                .order_by(Playlist::name.asc())
-                .all()
+            db.playlist.filter(Playlist::user_id.eq(ctx.user)).order_by(Playlist::name.asc()).all()
         }),
         owned.input::<PlaylistId>().query("playlist_items", |_ctx, db, _input, playlist| {
             db.playlist_item

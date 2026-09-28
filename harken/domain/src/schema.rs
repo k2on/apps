@@ -22,7 +22,10 @@ pub struct Playlists {
 impl Scope for Playlists {
     const NAME: &str = "playlists";
     fn open() -> Self {
-        Playlists { playlist: table(), playlist_item: table() }
+        Playlists {
+            playlist: table(),
+            playlist_item: table(),
+        }
     }
 }
 

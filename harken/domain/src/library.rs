@@ -41,9 +41,7 @@ pub fn library() -> Router<Library> {
                 .on((Track::file,))
         }),
         library.query("library", |_ctx, db, _input: ()| {
-            db.track
-                .order_by((Track::artist.asc(), Track::album.asc(), Track::title.asc()))
-                .all()
+            db.track.order_by((Track::artist.asc(), Track::album.asc(), Track::title.asc())).all()
         }),
     ))
 }
