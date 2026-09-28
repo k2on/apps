@@ -246,7 +246,7 @@ impl Tables for Harken {
 }
 // `open()` is how a body's `db` is made, and the order its fields are
 // written is the schema's table order: no host can enumerate a struct's
-// fields, so the tables say them once, here. `arkc gen --name Harken` names
+// fields, so the tables say them once, here. `arkc gen rust M OUTDIR --name Harken` names
 // the struct (default `Tables`). Swift and Kotlin
 // spell the same constructor in their own declarations.
 
@@ -721,7 +721,7 @@ impl Input for Items {
 ```
 
 with the tables `Demo { playlist: Table<Playlist>, item: Table<Item> }`
-(`arkc gen rust --name Demo`),
+(`arkc gen rust M OUTDIR --name Demo`),
 opened as `Demo { playlist: table(), item: table() }`. A runtime's own
 demo may name its input types otherwise — a name reaches no byte — but its
 `emit` is held to the vector's bytes; that is check 1 of §5.
