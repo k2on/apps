@@ -157,13 +157,103 @@ public func helper<A: Term, B: Term, R: Term>(_ name: String, _ p: String, _ q: 
     }
 }
 
+/// A helper called with its arguments named: the idiom a domain writes a
+/// helper in, as an ordinary function whose body is this call —
+///
+///     public func movementKey(_ workId: Text, _ no: Int) -> Text {
+///         helper("movement_key", ("work_id", workId), ("no", no)) { workId, no in
+///             concat(list([workId, "#", no.toText()]))
+///         }
+///     }
+///
+/// Under Emit it is `ECall name args`, and the first call in a module's
+/// emit records the helper itself — its body over `EArg`s of the named
+/// parameters — immediately before the first function that calls it;
+/// under Native it is the body, run on the values. The names are the
+/// helper's parameters in the IR (`fnInput`), in order. A helper reads
+/// nothing, writes nothing and refuses nothing.
+public func helper<A: Term, R: Term>(_ name: String, _ a: (String, A), _ body: (A) -> R) -> R {
+    switch Ambient.mode {
+    case .emit(let em):
+        emitHelper(em.collector, name, [NamedField(a.0, A.ty)], R.ty) { _ in body(A(repr: .e(.arg(a.0)))).repr }
+        return R(repr: .e(.call(name, [lift(a.1.repr)])))
+    case .native: return body(a.1)
+    }
+}
+
+/// A helper of 2 named arguments.
+public func helper<A: Term, B: Term, R: Term>(_ name: String, _ a: (String, A), _ b: (String, B), _ body: (A, B) -> R) -> R {
+    switch Ambient.mode {
+    case .emit(let em):
+        emitHelper(em.collector, name, [NamedField(a.0, A.ty), NamedField(b.0, B.ty)], R.ty) { _ in body(A(repr: .e(.arg(a.0))), B(repr: .e(.arg(b.0)))).repr }
+        return R(repr: .e(.call(name, [lift(a.1.repr), lift(b.1.repr)])))
+    case .native: return body(a.1, b.1)
+    }
+}
+
+/// A helper of 3 named arguments.
+public func helper<A: Term, B: Term, C: Term, R: Term>(_ name: String, _ a: (String, A), _ b: (String, B), _ c: (String, C), _ body: (A, B, C) -> R) -> R {
+    switch Ambient.mode {
+    case .emit(let em):
+        emitHelper(em.collector, name, [NamedField(a.0, A.ty), NamedField(b.0, B.ty), NamedField(c.0, C.ty)], R.ty) { _ in body(A(repr: .e(.arg(a.0))), B(repr: .e(.arg(b.0))), C(repr: .e(.arg(c.0)))).repr }
+        return R(repr: .e(.call(name, [lift(a.1.repr), lift(b.1.repr), lift(c.1.repr)])))
+    case .native: return body(a.1, b.1, c.1)
+    }
+}
+
+/// A helper of 4 named arguments.
+public func helper<A: Term, B: Term, C: Term, D: Term, R: Term>(_ name: String, _ a: (String, A), _ b: (String, B), _ c: (String, C), _ d: (String, D), _ body: (A, B, C, D) -> R) -> R {
+    switch Ambient.mode {
+    case .emit(let em):
+        emitHelper(em.collector, name, [NamedField(a.0, A.ty), NamedField(b.0, B.ty), NamedField(c.0, C.ty), NamedField(d.0, D.ty)], R.ty) { _ in body(A(repr: .e(.arg(a.0))), B(repr: .e(.arg(b.0))), C(repr: .e(.arg(c.0))), D(repr: .e(.arg(d.0)))).repr }
+        return R(repr: .e(.call(name, [lift(a.1.repr), lift(b.1.repr), lift(c.1.repr), lift(d.1.repr)])))
+    case .native: return body(a.1, b.1, c.1, d.1)
+    }
+}
+
+/// A helper of 5 named arguments.
+public func helper<A: Term, B: Term, C: Term, D: Term, E: Term, R: Term>(_ name: String, _ a: (String, A), _ b: (String, B), _ c: (String, C), _ d: (String, D), _ e: (String, E), _ body: (A, B, C, D, E) -> R) -> R {
+    switch Ambient.mode {
+    case .emit(let em):
+        emitHelper(em.collector, name, [NamedField(a.0, A.ty), NamedField(b.0, B.ty), NamedField(c.0, C.ty), NamedField(d.0, D.ty), NamedField(e.0, E.ty)], R.ty) { _ in body(A(repr: .e(.arg(a.0))), B(repr: .e(.arg(b.0))), C(repr: .e(.arg(c.0))), D(repr: .e(.arg(d.0))), E(repr: .e(.arg(e.0)))).repr }
+        return R(repr: .e(.call(name, [lift(a.1.repr), lift(b.1.repr), lift(c.1.repr), lift(d.1.repr), lift(e.1.repr)])))
+    case .native: return body(a.1, b.1, c.1, d.1, e.1)
+    }
+}
+
+/// A helper of 6 named arguments.
+public func helper<A: Term, B: Term, C: Term, D: Term, E: Term, F: Term, R: Term>(_ name: String, _ a: (String, A), _ b: (String, B), _ c: (String, C), _ d: (String, D), _ e: (String, E), _ f: (String, F), _ body: (A, B, C, D, E, F) -> R) -> R {
+    switch Ambient.mode {
+    case .emit(let em):
+        emitHelper(em.collector, name, [NamedField(a.0, A.ty), NamedField(b.0, B.ty), NamedField(c.0, C.ty), NamedField(d.0, D.ty), NamedField(e.0, E.ty), NamedField(f.0, F.ty)], R.ty) { _ in body(A(repr: .e(.arg(a.0))), B(repr: .e(.arg(b.0))), C(repr: .e(.arg(c.0))), D(repr: .e(.arg(d.0))), E(repr: .e(.arg(e.0))), F(repr: .e(.arg(f.0)))).repr }
+        return R(repr: .e(.call(name, [lift(a.1.repr), lift(b.1.repr), lift(c.1.repr), lift(d.1.repr), lift(e.1.repr), lift(f.1.repr)])))
+    case .native: return body(a.1, b.1, c.1, d.1, e.1, f.1)
+    }
+}
+
 func emitHelper(_ c: Collector, _ name: String, _ input: [NamedField], _ ret: Ty, _ body: (Emitter) -> Repr) {
     if c.helpers[name] != nil { return }
     let em = Emitter(c, .helper)
-    c.helpers[name] = Function(name: name, kind: .helper, scope: nil, autos: [], input: input, ret: ret, body: [])
+    c.helpers[name] = Function(name: name, kind: .helper, autos: [], input: input, ret: ret, body: [])
     let v = Ambient.with(.emit(em)) { body(em) }
     em.append(.sReturn(lift(v)))
-    let fn = Function(name: name, kind: .helper, scope: nil, autos: [], input: input, ret: ret, body: em.blocks[0].stmts, names: em.names)
+    let fn = Function(name: name, kind: .helper, autos: [], input: input, ret: ret, body: em.blocks[0].stmts, names: em.names)
     c.helpers[name] = fn
     c.ready.append(fn)
+}
+
+// MARK: - evaluate
+
+/// Run pure vocabulary natively, outside any procedure: the value `f`
+/// computes, or the refusal it reached; a bug is thrown. What lets a host
+/// compute what a helper computes — a derived key, say — with the helper's
+/// own definition rather than a copy of it. There is no store to read.
+public func evaluate<T: Term>(_ f: () -> T) throws -> Result<Value, Refusal> {
+    let n = Native(MemoryStore(schema: ArkDB.Schema(tables: [])), ArkDB.Ctx(user: "", session: ""), [:], writable: false)
+    let r = Ambient.with(.native(n)) { f().repr }
+    switch n.stop {
+    case .refused(let why)?: return .failure(why)
+    case .bug(let b)?: throw Fault.bug(b)
+    case nil: return .success(n.value(r))
+    }
 }

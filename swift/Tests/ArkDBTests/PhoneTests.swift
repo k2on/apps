@@ -30,14 +30,13 @@ func phoneTests() throws {
         let removed = Harken.removeFromPlaylist(s, playlist: pid, track: t1)
         check("remove one", try removed == nil && Harken.items(s, of: pid).map { $0.trackId } == [t2])
         check("adding to a playlist that is not there is refused", Harken.addToPlaylist(s, playlist: t1, track: t2) == .refused("playlist_id: no such playlist"))
-        check("everything the phone authored was sequenced by the interpreter too", s.status.pending == 0 && s.status.rejections == 0 && s.status.cursors["playlists"] == 5)
+        check("everything the phone authored was sequenced by the interpreter too", s.status.pending == 0 && s.status.rejections == 0 && s.status.cursor == 5)
         s.close()
     }
 
     run("phone/not-yours") {
         let m = try Decode.fromValue(try Canon.decode(Harken.moduleBytes))
-        let ex = MemoryExchange()
-        for sc in m.schema.scopes { ex.host(Authority(m.schema, sc.name, Hash.closures(m))) }
+        let ex = MemoryExchange(m)
         let url = URL(string: "mem://exchange/sync")!
         let a = try Session.open(directory: try freshDir("phone-a"), module: Harken.moduleBytes, procedures: Harken.procedures, user: "alice", server: url, dial: ex.dial)
         let b = try Session.open(directory: try freshDir("phone-b"), module: Harken.moduleBytes, procedures: Harken.procedures, user: "bob", server: url, dial: ex.dial)
@@ -52,8 +51,8 @@ func phoneTests() throws {
         check("nor read it", { do { _ = try Harken.items(b, of: pid); return false } catch SessionError.refused(let r) { return r == .refused("not your playlist") } catch { return false } }())
         check("alice can", Harken.addToPlaylist(a, playlist: pid, track: t) == nil)
         settle()
-        check("both confirmed at the same place", a.status.cursors == b.status.cursors && a.status.pending == 0, "\(a.status.cursors) \(b.status.cursors)")
-        check("the hashes agree", a.stateHash("playlists")! == b.stateHash("playlists")!)
+        check("both confirmed at the same place", a.status.cursor == b.status.cursor && a.status.pending == 0, "\(a.status.cursor) \(b.status.cursor)")
+        check("the hashes agree", a.stateHash() == b.stateHash())
         a.close(); b.close()
     }
 }

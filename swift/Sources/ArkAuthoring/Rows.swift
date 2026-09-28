@@ -1,7 +1,7 @@
 import Foundation
 import ArkDB
 
-// MARK: - §2.5 declarations: rows, scopes, columns
+// MARK: - §2.5 declarations: rows, the tables, columns
 
 /// A row of a table: a struct of terms, one property per column, with its
 /// table's name, its key's shape and its columns said once.
@@ -18,22 +18,57 @@ extension Row {
     public var repr: Repr { return structRepr(take(self)) }
 }
 
-/// A scope: a struct of tables and its name. `open()` makes one — every
-/// table `table()` — and the order it opens them in is the scope's table
-/// order in the schema: no host can enumerate a struct's fields, so a
-/// scope says them once, there (AUTHORING.md §2.5).
-public protocol Scope {
-    static var NAME: String { get }
+/// A record: a struct of the vocabulary's values that is not a row — what
+/// a query or a helper returns when no table has that shape. Its fields
+/// are said once, by IR name and type, in `fields()`; building one is
+/// `EStruct`, and its type is the `TStruct` of those fields.
+public protocol Record: Term, Codable {
+    static func fields() -> Fields<Self>
+}
+
+extension Record {
+    public static var ty: Ty {
+        var m: [FieldName: Ty] = [:]
+        for (n, t) in fields().fields { m[n] = t }
+        return .structOf(m)
+    }
+    public init(repr: Repr) { self = build(Self.self, Projection(base: repr)) }
+    public var repr: Repr { return structRepr(take(self)) }
+}
+
+/// A record's fields, by name and type, in declaration order:
+/// `Fields<Self>()` then one `.field` each.
+public struct Fields<R> {
+    var fields: [(FieldName, Ty)] = []
+
+    public init() {}
+
+    /// The next field, of the type the builder names (`text()`, `int()`,
+    /// `opt(…)`, `id(T.self)`, …). A record's fields carry no checks: a
+    /// check belongs to an input.
+    public func field<V: Term>(_ name: String, _ f: FieldBuilder<V>) -> Fields<R> {
+        precondition(f.checks.isEmpty, "ArkAuthoring: \(name): a record's field carries no checks")
+        var me = self
+        me.fields.append((name, V.ty))
+        return me
+    }
+}
+
+/// The module's tables: a struct of `Table`s. `open()` makes one — every
+/// table `table()` — and the order it opens them in is the schema's table
+/// order: no host can enumerate a struct's fields, so the tables say them
+/// once, there (AUTHORING.md §2.5).
+public protocol Tables {
     static func open() -> Self
 }
 
-/// A table of a scope, as `open()` makes it.
+/// A table of the module, as `open()` makes it.
 public func table<R: Row>() -> Table<R> {
     TableRecording.note(RowSchema.table(R.self))
     return Table()
 }
 
-/// Which tables a scope's `open()` made, while a schema is being read —
+/// Which tables a `Tables.open()` made, while a schema is being read —
 /// per thread, so that a body opening its `db` elsewhere records nothing.
 enum TableRecording {
     final class Box { var tables: [ArkDB.Table] = [] }
@@ -70,12 +105,12 @@ enum RowSchema {
         return t
     }
 
-    /// A scope's tables, in the order its `open()` makes them.
-    static func scope<S: Scope>(_ s: S.Type) -> ArkDB.Scope {
-        return ArkDB.Scope(S.NAME, tables: TableRecording.record { _ = S.open() })
+    /// The tables, in the order `open()` makes them.
+    static func tables<S: Tables>(_ s: S.Type) -> [ArkDB.Table] {
+        return TableRecording.record { _ = S.open() }
     }
 
-    static func make<S: Scope>(_ s: S.Type) -> S { return S.open() }
+    static func make<S: Tables>(_ s: S.Type) -> S { return S.open() }
 }
 
 /// A column of a row type, by its IR name: `static let userId = col<Playlist, Text>("user_id")`.
@@ -315,7 +350,7 @@ func write(_ stmt: @autoclosure () -> Stmt, _ native: (Native) -> Void) -> Effec
     }
 }
 
-/// A table of a scope: `db.playlist`.
+/// A table of the module: `db.playlist`.
 public struct Table<R: Row> {
     init() {}
 

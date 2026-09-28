@@ -31,12 +31,20 @@ final class RouteDecl {
 /// What every chain built from one `router(...)` shares.
 public final class RouterCore {
     let name: String
-    let scope: ArkDB.Scope
+    /// The Swift type of the tables, so that a module whose routers are
+    /// over two different ones is refused rather than half-described.
+    let over: ObjectIdentifier
+    let overName: String
+    let tables: () -> [ArkDB.Table]
     let makeDb: () -> Any
     var middleware: [MiddlewareDecl] = []
     var routes: [RouteDecl] = []
-    init(_ name: String, _ scope: ArkDB.Scope, _ makeDb: @escaping () -> Any) {
-        self.name = name; self.scope = scope; self.makeDb = makeDb
+    init<S: Tables>(_ name: String, _ s: S.Type) {
+        self.name = name
+        self.over = ObjectIdentifier(s)
+        self.overName = String(describing: s)
+        self.tables = { RowSchema.tables(S.self) }
+        self.makeDb = { RowSchema.make(S.self) }
     }
 
     func declare(_ m: MiddlewareDecl) {
@@ -56,15 +64,15 @@ public struct Route {
     let decl: RouteDecl
 }
 
-/// A router over scope `S`: `router(Playlists.self, "playlists")`.
-public func router<S: Scope>(_ s: S.Type, _ name: String) -> Router<S> {
-    return Router(core: RouterCore(name, RowSchema.scope(S.self), { RowSchema.make(S.self) }), chain: [])
+/// A router over the tables `S`: `router(Harken.self, "playlists")`.
+public func router<S: Tables>(_ s: S.Type, _ name: String) -> Router<S> {
+    return Router(core: RouterCore(name, S.self), chain: [])
 }
 
 func provided<P: Term>(_ ps: [Repr], _ i: Swift.Int) -> P { return P(repr: ps[i]) }
 
 /// A chain with no provided value.
-public struct Router<S: Scope>: AnyRouter {
+public struct Router<S: Tables>: AnyRouter {
     public let core: RouterCore
     let chain: [MiddlewareDecl]
 
@@ -103,7 +111,7 @@ public struct Router<S: Scope>: AnyRouter {
 }
 
 /// A chain whose body is handed one provided value.
-public struct Router1<S: Scope, P: Term>: AnyRouter {
+public struct Router1<S: Tables, P: Term>: AnyRouter {
     public let core: RouterCore
     let chain: [MiddlewareDecl]
 
@@ -131,7 +139,7 @@ public struct Router1<S: Scope, P: Term>: AnyRouter {
 }
 
 /// A chain whose body is handed two provided values, oldest first.
-public struct Router2<S: Scope, P: Term, Q: Term>: AnyRouter {
+public struct Router2<S: Tables, P: Term, Q: Term>: AnyRouter {
     public let core: RouterCore
     let chain: [MiddlewareDecl]
 
@@ -153,7 +161,7 @@ public struct Router2<S: Scope, P: Term, Q: Term>: AnyRouter {
 }
 
 /// A procedure with an input, on a chain with no provided value.
-public struct Proc<S: Scope, I: Input> {
+public struct Proc<S: Tables, I: Input> {
     let core: RouterCore
     let chain: [MiddlewareDecl]
 
@@ -167,7 +175,7 @@ public struct Proc<S: Scope, I: Input> {
 }
 
 /// A procedure with an input, on a chain with one provided value.
-public struct Proc1<S: Scope, I: Input, P: Term> {
+public struct Proc1<S: Tables, I: Input, P: Term> {
     let core: RouterCore
     let chain: [MiddlewareDecl]
 
@@ -181,7 +189,7 @@ public struct Proc1<S: Scope, I: Input, P: Term> {
 }
 
 /// A procedure with an input, on a chain with two provided values.
-public struct Proc2<S: Scope, I: Input, P: Term, Q: Term> {
+public struct Proc2<S: Tables, I: Input, P: Term, Q: Term> {
     let core: RouterCore
     let chain: [MiddlewareDecl]
 

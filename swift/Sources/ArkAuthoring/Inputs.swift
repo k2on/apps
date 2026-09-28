@@ -90,7 +90,7 @@ public struct FieldBuilder<V: Term> {
     public func atMost(_ hi: Swift.Int) -> FieldBuilder<V> { return with(.ir(.range(nil, hi, nil))) }
     /// List: at least one element.
     public func nonEmpty() -> FieldBuilder<V> { return with(.ir(.nonEmpty(nil))) }
-    /// Id: a row with that key exists in the procedure's scope.
+    /// Id: a row with that key exists.
     public func exists() -> FieldBuilder<V> { return with(.ir(.exists(nil))) }
     /// Any: the predicate holds of the value.
     public func refine(_ p: @escaping (V) -> Bool) -> FieldBuilder<V> {

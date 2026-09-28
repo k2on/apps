@@ -4,6 +4,9 @@ import Foundation
 public struct Rejection: Equatable {
     public var id: Id
     public var why: Refusal
+    public init(id: Id, why: Refusal) { self.id = id; self.why = why }
+    /// The sentence a screen shows beside the item (`refusalText`).
+    public var reason: String { return refusalText(why) }
 }
 
 /// Confirmed entries received and not yet applied.
@@ -41,7 +44,7 @@ public struct Procedure {
     }
 }
 
-/// §11 One peer's copy of one scope: a confirmed store at a cursor, the
+/// §11 One peer's copy of the log: a confirmed store at a cursor, the
 /// pending intents, and the optimistic view they produce on top. The view
 /// is always `replay(confirmed) then replay(pending)`.
 ///
@@ -49,11 +52,10 @@ public struct Procedure {
 /// immutable: every apply produces a new one, so a copy of a `Replica` is
 /// independent of the original.
 public struct Replica {
-    public var scope: ScopeName
     public var schema: Schema
     /// The closures this peer can run, keyed by the hash an entry names.
     public var bodies: [FnHash: Closure]
-    /// The confirmed store: the scope exactly as the authority had it at `cursor`.
+    /// The confirmed store: the state exactly as the authority had it at `cursor`.
     public private(set) var confirmed: MemoryStore
     public private(set) var cursor: Seq
     /// Intents authored here that no verdict has answered, in authoring order.
@@ -71,8 +73,8 @@ public struct Replica {
     public var natives: [FnHash: Procedure] = [:]
 
     /// §11.1 Open a replica from what was durable; pending replays on top.
-    public static func open(_ schema: Schema, _ scope: ScopeName, _ bodies: [FnHash: Closure], _ confirmed: MemoryStore, _ cursor: Seq, _ pending: [Entry], natives: [FnHash: Procedure] = [:]) -> Replica {
-        var r = Replica(scope: scope, schema: schema, bodies: bodies, confirmed: confirmed, cursor: cursor, pending: pending,
+    public static func open(_ schema: Schema, _ bodies: [FnHash: Closure], _ confirmed: MemoryStore, _ cursor: Seq, _ pending: [Entry], natives: [FnHash: Procedure] = [:]) -> Replica {
+        var r = Replica(schema: schema, bodies: bodies, confirmed: confirmed, cursor: cursor, pending: pending,
                         view: confirmed, inbox: [:], rejections: [], diverged: [], rebuilt: true, changes: [], natives: natives)
         r.replay()
         return r
@@ -118,6 +120,26 @@ public struct Replica {
         }
     }
 
+    /// §11.2b Somebody signs in on a peer that has been used without an
+    /// account: every pending intent authored as `Ctx.nobody` becomes
+    /// theirs, under this login, and the view is replayed from the
+    /// confirmed store so that every row those intents wrote says who they
+    /// now say. Safe because nothing but this peer has seen them: one
+    /// authored as nobody could not have been pushed. Intents authored as
+    /// anybody else are untouched (an older login of the same person is the
+    /// server's question, `withOwns`). One the replay now refuses is dropped
+    /// and its reason recorded, as any rebase does.
+    public mutating func signIn(_ who: Ctx) {
+        pending = pending.map { e in
+            guard e.actor == Ctx.nobody.user && e.session == Ctx.nobody.session else { return e }
+            var s = e
+            s.actor = who.user
+            s.session = who.session
+            return s
+        }
+        replay()
+    }
+
     /// §11.3 A confirmed entry arrives, at its sequence.
     public mutating func receive(_ n: Seq, _ e: Entry) {
         if n <= cursor { return }
@@ -155,6 +177,14 @@ public struct Replica {
         pending.removeAll { $0.id == i }
         rejections.append(Rejection(id: i, why: why))
         replay()
+    }
+
+    /// The verdicts recorded so far, and the list emptied: for a session
+    /// that keeps them beside the items they are about.
+    public mutating func takeRejections() -> [Rejection] {
+        let r = rejections
+        rejections = []
+        return r
     }
 
     /// The sequences the replica is waiting on facts for.
@@ -266,19 +296,18 @@ public enum Sequenced {
     case rejected(Refusal)
 }
 
-/// The peer that sequences a scope.
+/// The peer that sequences the log.
 public struct Authority {
-    public var scope: ScopeName
     public var schema: Schema
-    /// Every closure ever accepted for this scope, by hash.
+    /// Every closure ever accepted, by hash: the current module's and every
+    /// historical version a retained entry names.
     public var bodies: [FnHash: Closure]
     public private(set) var log: Log
     /// The state at the head of the log.
     public private(set) var store: MemoryStore
 
-    public init(_ schema: Schema, _ scope: ScopeName, _ bodies: [FnHash: Closure]) {
+    public init(_ schema: Schema, _ bodies: [FnHash: Closure]) {
         self.schema = schema
-        self.scope = scope
         self.bodies = bodies
         self.log = Log(schema: schema)
         self.store = MemoryStore(schema: schema)
@@ -289,9 +318,8 @@ public struct Authority {
     /// `seq + 1` — and the state at the head is the snapshot's rows. This is
     /// how a peer that is its own authority reopens without replaying from
     /// zero: the snapshot is the replica's confirmed store at its cursor.
-    public init(_ schema: Schema, _ scope: ScopeName, _ bodies: [FnHash: Closure], from snapshot: Snapshot) {
+    public init(_ schema: Schema, _ bodies: [FnHash: Closure], from snapshot: Snapshot) {
         self.schema = schema
-        self.scope = scope
         self.bodies = bodies
         var l = Log(schema: schema)
         l.base = snapshot

@@ -28,9 +28,8 @@ public enum Decode {
         let routers = try list(["module", "routers"], try field(fs, "routers")) { x -> Router in
             let rfs = try tagged(["router"], "router", x)
             let n = try text(["router", "name"], try field(rfs, "name"))
-            let sc = try text(["router", n, "scope"], try field(rfs, "scope"))
             let us = try list(["router", n, "uses"], try field(rfs, "uses")) { try text(["router", n, "uses"], $0) }
-            return Router(name: n, scope: sc, uses: us)
+            return Router(name: n, uses: us)
         }
         return Module(spec: Int(spec), schema: sch, functions: fns, routers: routers, live: live)
     }
@@ -72,13 +71,7 @@ public enum Decode {
             let rs = try list(["table", n, "refs"], try field(fs, "refs"), ref)
             return Table(n, columns: cs, key: k, indexes: ixs, refs: rs)
         }
-        func scope(_ x: Value) throws -> Scope {
-            let fs = try tagged(["scope"], "scope", x)
-            let n = try text(["scope", "name"], try field(fs, "name"))
-            let ts = try list(["scope", n], try field(fs, "tables"), table)
-            return Scope(n, tables: ts)
-        }
-        return Schema(scopes: try list(["schema"], v, scope))
+        return Schema(tables: try list(["schema"], v, table))
     }
 
     public static func tyFromValue(_ v: Value) throws -> Ty {
@@ -107,7 +100,6 @@ public enum Decode {
         let here = ["fn", n]
         let kindText = try text(here + ["kind"], try field(fs, "kind"))
         guard let k = FnKind(wireName: kindText) else { throw ModuleDecodeError(here, "unknown kind " + kindText) }
-        let sc = try optional(try field(fs, "scope")) { try text(here + ["scope"], $0) }
         let rt = try optional(try field(fs, "router")) { try text(here + ["router"], $0) }
         let uses = try list(here + ["uses"], try field(fs, "uses")) { try text(here + ["uses"], $0) }
         let autos = try list(here + ["autos"], try field(fs, "autos")) { x -> NamedAuto in
@@ -133,7 +125,7 @@ public enum Decode {
         }
         let ret = try optional(try field(fs, "ret"), tyFromValue)
         let body = try list(here + ["body"], try field(fs, "body")) { try stmt(here, $0) }
-        return Function(name: n, kind: k, scope: sc, router: rt, uses: uses, autos: autos, input: input, refine: refine, ret: ret, body: body, names: [:])
+        return Function(name: n, kind: k, router: rt, uses: uses, autos: autos, input: input, refine: refine, ret: ret, body: body, names: [:])
     }
 
     static func check(_ here: [String], _ v: Value) throws -> Check {

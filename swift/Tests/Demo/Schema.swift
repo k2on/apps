@@ -4,8 +4,7 @@ public struct Demo {
     public var playlist: Table<Playlist>
     public var item: Table<Item>
 }
-extension Demo: Scope {
-    public static let NAME = "demo"
+extension Demo: Tables {
     public static func open() -> Self {
         Demo(playlist: table(), item: table())
     }

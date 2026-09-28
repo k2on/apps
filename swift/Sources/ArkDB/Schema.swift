@@ -1,7 +1,5 @@
 import Foundation
 
-public typealias ScopeName = String
-
 /// §2.1 The static types of the IR, as `Ark.Schema.Ty`. `enum` and
 /// `struct` are Swift keywords, so those two cases are `enumOf` and
 /// `structOf`.
@@ -82,39 +80,69 @@ public struct Table: Equatable {
     }
 }
 
-public struct Scope: Equatable {
-    public var name: ScopeName
-    public var tables: [Table]
-    public init(_ name: ScopeName, tables: [Table]) { self.name = name; self.tables = tables }
-}
-
+/// §2 The schema: the module's one set of tables, in declaration order —
+/// which is also the order a state hash walks them. There is one log, so
+/// every reference is checked and any function may read any table.
 public struct Schema: Equatable {
-    public var scopes: [Scope]
-    public init(scopes: [Scope]) { self.scopes = scopes }
+    public var tables: [Table]
+    public init(tables: [Table]) { self.tables = tables }
 
     public func lookupTable(_ n: TableName) -> Table? {
-        for sc in scopes { for t in sc.tables where t.name == n { return t } }
-        return nil
-    }
-
-    /// The scope a table is in.
-    public func tableScope(_ n: TableName) -> ScopeName? {
-        return scopes.first { $0.tables.contains { $0.name == n } }?.name
-    }
-
-    public func scopeOf(_ n: ScopeName) -> Scope? {
-        return scopes.first { $0.name == n }
+        return tables.first { $0.name == n }
     }
 
     /// Every table, in schema order.
     public var tableNames: [TableName] {
-        return scopes.flatMap { $0.tables.map { $0.name } }
+        return tables.map { $0.name }
     }
 
     /// §2.2 Every relationship: one per reference.
     public var relations: [Relation] {
         var out: [Relation] = []
-        for sc in scopes { for t in sc.tables { for r in t.refs { out.append(Relation(parent: r.table, child: t.name, column: r.column)) } } }
+        for t in tables { for r in t.refs { out.append(Relation(parent: r.table, child: t.name, column: r.column)) } }
+        return out
+    }
+
+    /// §2.3 Well-formedness, as `Ark.Schema.checkSchema`: each complaint
+    /// names the `SchemaError` constructor and its table and column. A
+    /// module whose schema draws any is refused by the verifier.
+    public func problems() -> [String] {
+        var out: [String] = []
+        func dups(_ xs: [String]) -> [String] {
+            var n: [String: Int] = [:]
+            for x in xs { n[x, default: 0] += 1 }
+            return n.filter { $0.value > 1 }.keys.sorted { compareText($0, $1) < 0 }
+        }
+        let twice = Set(dups(tables.map { $0.name }))
+        for t in tables where twice.contains(t.name) { out.append("DuplicateTable \(t.name)") }
+        for t in tables {
+            let n = t.name
+            for c in dups(t.columns.map { $0.name }) { out.append("DuplicateColumn \(n) \(c)") }
+            if t.key.isEmpty { out.append("NoKey \(n)") }
+            for k in t.key where t.column(k) == nil { out.append("UnknownKeyColumn \(n) \(k)") }
+            for k in t.key where t.column(k)?.nullable == true { out.append("NullableKey \(n) \(k)") }
+            for c in t.columns where !c.ty.isScalar { out.append("NonScalarColumn \(n) \(c.name)") }
+            for ix in t.indexes { for c in ix.columns where t.column(c) == nil { out.append("UnknownIndexColumn \(n) \(c)") } }
+            for r in t.refs {
+                guard let c = t.column(r.column) else { out.append("UnknownRefColumn \(n) \(r.column)"); continue }
+                guard let p = lookupTable(r.table) else { out.append("UnknownRefTable \(n) \(r.table)"); continue }
+                let pk = p.key.compactMap { p.column($0)?.ty }
+                guard pk.count == 1, p.key.count == 1 else { out.append("RefToCompositeKey \(n) \(r.table)"); continue }
+                var want = pk[0]
+                if case .id = want { want = .id(r.table) }
+                if c.ty != want { out.append("RefTypeMismatch \(n) \(r.column)") }
+                if case .id(let of) = c.ty, of != r.table { out.append("IdNamesWrongTable \(n) \(r.column)") }
+            }
+            // An id column is its own table's key or a reference: an id
+            // naming a table with no reference is a declaration the store
+            // could not hold to.
+            for c in t.columns {
+                guard case .id(let of) = c.ty else { continue }
+                if t.refs.contains(where: { $0.column == c.name }) { continue }
+                if of == n && t.key.contains(c.name) { continue }
+                out.append("IdColumnWithoutRef \(n) \(c.name)")
+            }
+        }
         return out
     }
 

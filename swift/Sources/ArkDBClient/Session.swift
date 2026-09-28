@@ -20,7 +20,7 @@ public enum SessionError: Error, CustomStringConvertible {
         case .unknownFunction(let s): return "unknown function " + s
         case .notAMutator(let s): return s + " is not a mutator"
         case .notAQuery(let s): return s + " is not a query"
-        case .refused(let r): return "refused: " + r.text
+        case .refused(let r): return "refused: " + refusalText(r)
         case .corrupt(let s): return "corrupt: " + s
         case .io(let s): return "io: " + s
         case .modeMismatch(let was, let now): return "the directory was opened \(was) before and \(now) now"
@@ -28,12 +28,27 @@ public enum SessionError: Error, CustomStringConvertible {
     }
 }
 
-/// What the authority last said about a scope's state.
+/// What the authority last said about this peer's confirmed state.
 public struct Agreement: Equatable {
-    public var scope: ScopeName
     public var seq: Seq
     public var ok: Bool
-    public init(scope: ScopeName, seq: Seq, ok: Bool) { self.scope = scope; self.seq = seq; self.ok = ok }
+    public init(seq: Seq, ok: Bool) { self.seq = seq; self.ok = ok }
+}
+
+/// Where one of this peer's own intents stands: what a screen shows beside
+/// the item it made.
+public enum Standing: Equatable {
+    /// Applied here, not yet answered by the authority.
+    case pending
+    /// In the log.
+    case confirmed
+    /// Never going to be in the log, and the reason every replica reaches
+    /// (`refusalText`): the sentence to show beside the item that did not
+    /// happen.
+    case rejected(String)
+    /// Not an intent this peer authored (in this run, or pending from the
+    /// last).
+    case unknown
 }
 
 public struct SessionStatus: Equatable {
@@ -41,10 +56,13 @@ public struct SessionStatus: Equatable {
     public var linked: Bool
     /// This peer is its own authority (no server was given).
     public var alone: Bool
-    /// The last confirmed sequence, per scope.
-    public var cursors: [ScopeName: Seq]
-    /// Intents authored here that no verdict has answered, over every scope.
+    /// The last confirmed sequence.
+    public var cursor: Seq
+    /// Intents authored here that no verdict has answered.
     public var pending: Int
+    /// Somebody has signed in; until then every intent is authored as
+    /// `Ctx.nobody`, kept pending, and nothing is said to any server.
+    public var signedIn: Bool
     /// The server turned this peer away, and why.
     public var denied: String?
     /// The last `Agree` the authority sent.
@@ -55,11 +73,12 @@ public struct SessionStatus: Equatable {
     public var link: String
 }
 
-/// Everything an app needs around the sans-io machines: the replicas, one
-/// per scope held whole; the `Client` and the `Link` that drives it — or,
-/// with no server, an `Authority` per scope that sequences what this peer
-/// authors (docs/arkdb.md §3.10); the files under a directory that make it
-/// all durable; and the two things a screen does, `mutate` and `query`.
+/// Everything an app needs around the sans-io machines: the replica of the
+/// log; the `Client` and the `Link` that drives it — or, with no server, an
+/// `Authority` that sequences what this peer authors (docs/arkdb.md
+/// §3.10); the file under a directory that makes it durable; the two
+/// things a screen does, `mutate` and `query`; and where each intent it
+/// authored stands (`standing`).
 ///
 /// Thread-safe: every method takes one lock, and change subscribers are
 /// called after it is released, on whichever thread pumped or mutated.
@@ -67,9 +86,8 @@ public final class Session: LinkDriven {
     public let module: Module
     public let schema: Schema
     public let directory: URL
-    public let ctx: Ctx
-    /// The scopes held, in name order.
-    public let scopes: [ScopeName]
+    /// Who authors here: the login, or `Ctx.nobody` while signed out.
+    public private(set) var ctx: Ctx
     public let server: URL?
     /// The procedures this peer runs natively, by hash (`Module.procedures()`
     /// of its authored domain); everything else through the interpreter,
@@ -78,23 +96,29 @@ public final class Session: LinkDriven {
     private let closures: [FnHash: Closure]
     private var byName: [String: (Function, FnHash)] = [:]
     private var client: Client
-    private var authorities: [ScopeName: Authority] = [:]
+    private var authority: Authority?
     private var link: Link?
     private let lock = NSLock()
-    private var subscribers: [Int: (ScopeName, Changes) -> Void] = [:]
+    private var subscribers: [Int: (Changes) -> Void] = [:]
     private var nextSubscriber = 1
     private var timer: DispatchSourceTimer?
     private let queue = DispatchQueue(label: "arkdb.session")
-    private var persisted: [ScopeName: (Seq, Int)] = [:]
+    private var persisted: (Seq, Int) = (0, 0)
     private var rng = SystemRandomNumberGenerator()
+    /// Every intent authored here: this run's, and whatever was pending
+    /// when the last one ended.
+    private var authored: Set<Id> = []
+    /// Every verdict so far, in arrival order, and by id.
+    private var verdicts: [Rejection] = []
+    private var rejected: [Id: String] = [:]
     /// What happened last, for a status line: a refusal, a denial, a bug.
     public private(set) var lastNote: String?
 
     // MARK: opening
 
-    /// Open the session: decode the module, open every scope's replica from
-    /// the directory (or empty), and either dial the server or stand as the
-    /// authority for every scope. `session` is the login; under dev auth the
+    /// Open the session: decode the module, open the replica from the
+    /// directory (or empty), and either dial the server or stand as the
+    /// log's authority. `session` is the login; under dev auth the
     /// server calls every login `"dev"` and the token is the user's name.
     ///
     /// `procedures` is the domain as native code — `module().procedures()`
@@ -115,7 +139,23 @@ public final class Session: LinkDriven {
                            token: token ?? user, procedures: procedures, dial: dial ?? WebSocketTransport.dial)
     }
 
-    init(module: Module, directory: URL, ctx: Ctx, server: URL?, token: String, procedures: [(FnHash, Procedure)], dial: @escaping LinkDial) throws {
+    /// Open the session with nobody signed in: everything authored is
+    /// authored as `Ctx.nobody`, kept pending and written to the directory,
+    /// and no connection is made — alone, it is sequenced here as ever.
+    /// `signIn` makes all of it the signer's and connects.
+    public static func openSignedOut(directory: URL, module bytes: [UInt8], procedures: [(FnHash, Procedure)] = [],
+                                     server: URL?, dial: LinkDial? = nil) throws -> Session {
+        let m: Module
+        do {
+            m = try Decode.fromValue(try Canon.decode(bytes))
+        } catch {
+            throw SessionError.badModule("\(error)")
+        }
+        return try Session(module: m, directory: directory, ctx: .nobody, server: server,
+                           token: nil, procedures: procedures, dial: dial ?? WebSocketTransport.dial)
+    }
+
+    init(module: Module, directory: URL, ctx: Ctx, server: URL?, token: String?, procedures: [(FnHash, Procedure)], dial: @escaping LinkDial) throws {
         self.module = module
         self.schema = module.schema
         self.directory = directory
@@ -124,42 +164,45 @@ public final class Session: LinkDriven {
         var natives: [FnHash: Procedure] = [:]
         for (h, p) in procedures { natives[h] = p }
         self.natives = natives
-        self.closures = Hash.closures(module)
-        self.scopes = module.schema.scopes.map { $0.name }.sorted { compareText($0, $1) < 0 }
-        self.client = Client(schema: module.schema, token: token)
-        for (h, c) in closures { byName[c.fn.name] = (c.fn, h) }
+        let closures = Hash.closures(module)
+        self.closures = closures
         let mode = server == nil ? "alone" : "server"
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        for s in scopes {
-            let file = directory.appendingPathComponent(ReplicaFile.fileName(s))
-            var confirmed = MemoryStore(schema: schema)
-            var cursor: Seq = 0
-            var pending: [Entry] = []
-            if let bytes = try ReplicaFile.read(file) {
-                let c = try ReplicaFile.decode(bytes, schema: schema)
-                if c.mode != mode { throw SessionError.modeMismatch(was: c.mode, now: mode) }
-                confirmed = c.confirmed
-                cursor = c.cursor
-                pending = c.pending
-            }
-            let r = Replica.open(schema, s, closures, confirmed, cursor, pending, natives: natives)
-            client.subscribe(.whole, r)
-            if server == nil {
-                authorities[s] = Authority(schema, s, closures, from: Snapshot(seq: cursor, store: confirmed))
-            }
-            persisted[s] = (cursor, pending.count)
+        var confirmed = MemoryStore(schema: module.schema)
+        var cursor: Seq = 0
+        var pending: [Entry] = []
+        if let bytes = try ReplicaFile.read(directory.appendingPathComponent(ReplicaFile.fileName)) {
+            let c = try ReplicaFile.decode(bytes, schema: module.schema)
+            if c.mode != mode { throw SessionError.modeMismatch(was: c.mode, now: mode) }
+            confirmed = c.confirmed
+            cursor = c.cursor
+            pending = c.pending
         }
+        self.client = Client(Replica.open(module.schema, closures, confirmed, cursor, pending, natives: natives), .whole, token: token)
+        if server == nil {
+            self.authority = Authority(module.schema, closures, from: Snapshot(seq: cursor, store: confirmed))
+        }
+        self.persisted = (cursor, pending.count)
+        self.authored = Set(pending.map { $0.id })
+        for (h, c) in closures { byName[c.fn.name] = (c.fn, h) }
+        // Opened signed in over work done before anyone had: it is the
+        // signer's, as `signIn` would have made it.
+        if !ctx.isNobody && pending.contains(where: { $0.actor.isEmpty && $0.session.isEmpty }) {
+            client.signIn(ctx, token: token)
+            try persist()
+        }
+        collectRejections()
         if let url = server {
             let l = Link(url: url, dial: dial, driven: self)
             link = l
-            l.connect()
+            if !ctx.isNobody { l.connect() }
         } else {
             // Whatever was pending when the last run ended is sequenced now.
             commitAlone()
-            try persistAll()
+            try persist()
         }
         // Opening replays pending on top of confirmed: a Rebuilt, not a list.
-        for s in scopes { _ = client.takeChanges(s) }
+        _ = client.takeChanges()
     }
 
     deinit { stopPumping() }
@@ -177,6 +220,7 @@ public final class Session: LinkDriven {
     public func linkReceived(_ m: ServerMsg) {
         lock.lock()
         client.recv(m)
+        collectRejections()
         if case .denied(let why) = m { lastNote = "denied: " + why }
         lock.unlock()
     }
@@ -218,8 +262,33 @@ public final class Session: LinkDriven {
         t?.cancel()
     }
 
-    /// Ask for the connection again after `goOffline()`.
-    public func goOnline() { link?.connect() }
+    /// Ask for the connection again after `goOffline()`. Signed out,
+    /// there is nobody to connect as, and this does nothing.
+    public func goOnline() {
+        lock.lock()
+        let nobody = ctx.isNobody
+        lock.unlock()
+        if !nobody { link?.connect() }
+    }
+
+    /// Somebody signs in: every intent authored so far as nobody becomes
+    /// theirs, under this login (`Client.signIn`), the view is replayed so
+    /// the rows say whose they are, the file is written, and the link
+    /// connects — the first hello pushes all of it. Each entry keeps its
+    /// id, so `standing` goes on answering about it. `token` defaults to
+    /// the user's name, as dev auth reads one.
+    public func signIn(user: String, session: String = "dev", token: String? = nil) {
+        lock.lock()
+        ctx = Ctx(user: user, session: session)
+        client.signIn(ctx, token: token ?? user)
+        collectRejections()
+        commitAlone()
+        do { try persist() } catch { lastNote = "\(error)" }
+        let notes = collectChanges()
+        lock.unlock()
+        notify(notes)
+        link?.connect()
+    }
 
     /// Drop the connection and stop reconnecting; everything authored
     /// meanwhile is pending and pushes on the next `goOnline()`.
@@ -230,7 +299,7 @@ public final class Session: LinkDriven {
         stopPumping()
         link?.disconnect()
         lock.lock()
-        try? persistAll()
+        try? persist()
         lock.unlock()
     }
 
@@ -240,37 +309,40 @@ public final class Session: LinkDriven {
     /// fresh random 16-byte id per `NewId`, the clock in milliseconds for
     /// `Now` — which is the only non-determinism there is, at origin, frozen
     /// in the entry. Applied natively when the session holds the procedure,
-    /// else by the interpreter. Returns the refusal if there was one; a
-    /// refusal changes nothing. `args` is the input (`Input.args` of an
-    /// authored input struct).
+    /// else by the interpreter. Returns the entry's id, which `standing`
+    /// answers about, or the refusal; a refusal changes nothing. `args` is
+    /// the input (`Input.args` of an authored input struct).
     @discardableResult
-    public func mutate(name: String, args: Args) -> Refusal? {
-        return author(name, args) { fn, hash, autos in
-            self.client.mutate(fn.scope!, self.freshId(), self.ctx, hash, autos, args)
-        }
-    }
-
-    private func author(_ name: String, _ args: Args, _ run: (Function, FnHash, Args) -> Result<Entry, Refusal>) -> Refusal? {
+    public func author(name: String, args: Args) -> Result<Id, Refusal> {
         lock.lock()
-        guard let (fn, hash) = byName[name], fn.kind == .mutator, fn.scope != nil else {
+        guard let (fn, hash) = byName[name], fn.kind == .mutator else {
             lastNote = "no mutator named " + name
             lock.unlock()
-            return .refused("no mutator named " + name)
+            return .failure(.refused("no mutator named " + name))
         }
         let autos = drawAutos(fn)
-        var refusal: Refusal? = nil
-        switch run(fn, hash, autos) {
+        let result: Result<Id, Refusal>
+        switch client.mutate(freshId(), ctx, hash, autos, args) {
         case .failure(let why):
-            refusal = why
-            lastNote = "refused: " + why.text
-        case .success:
+            result = .failure(why)
+            lastNote = "refused: " + refusalText(why)
+        case .success(let e):
+            result = .success(e.id)
+            authored.insert(e.id)
             commitAlone()
-            do { try persistAll() } catch { lastNote = "\(error)" }
+            do { try persist() } catch { lastNote = "\(error)" }
         }
         let notes = collectChanges()
         lock.unlock()
         notify(notes)
-        return refusal
+        return result
+    }
+
+    /// `author`, for a caller that only wants the refusal, if there was one.
+    @discardableResult
+    public func mutate(name: String, args: Args) -> Refusal? {
+        if case .failure(let why) = author(name: name, args: args) { return why }
+        return nil
     }
 
     /// The autos a function declares, drawn now.
@@ -294,34 +366,33 @@ public final class Session: LinkDriven {
     /// With no server, this peer sequences its own intents: everything
     /// pending is committed and every answer delivered back, in order.
     private func commitAlone() {
-        guard server == nil else { return }
-        for s in scopes {
-            guard var a = authorities[s] else { continue }
-            client.withReplica(s) { r in localCommit(&a, &r) }
-            authorities[s] = a
+        guard server == nil, var a = authority else { return }
+        client.withReplica { r in localCommit(&a, &r) }
+        authority = a
+        collectRejections()
+    }
+
+    /// Move the replica's verdicts beside the ids they are about, with the
+    /// sentence each carries, so a screen can ask about any one of them.
+    private func collectRejections() {
+        for r in client.withReplica({ $0.takeRejections() }) {
+            rejected[r.id] = refusalText(r.why)
+            verdicts.append(r)
         }
     }
 
     // MARK: reading
 
-    /// The optimistic stores of every scope, as one: what a query reads.
-    /// Each scope's tables are its own, so the merge is a union.
-    private func mergedView() -> MemoryStore {
-        var acc: MemoryStore? = nil
-        for s in scopes {
-            guard let v = client.scopes[s]?.replica.view else { continue }
-            acc = acc.map { $0.merge(v) } ?? v
-        }
-        return acc ?? MemoryStore(schema: schema)
-    }
+    /// The optimistic store: what a query reads.
+    private var view: MemoryStore { return client.replica.view }
 
-    /// Run a query by name over the merged view, as this peer's user:
+    /// Run a query by name over the optimistic view, as this peer's user:
     /// natively when the session holds the procedure, else through the
     /// interpreter. A refusal — a failed check, a guard — is thrown as
     /// `SessionError.refused`.
     public func query(name: String, args: Args = [:]) throws -> Value {
         lock.lock(); defer { lock.unlock() }
-        let st = mergedView()
+        let st = view
         guard let (fn, hash) = byName[name] else { throw SessionError.unknownFunction(name) }
         guard fn.kind == .query, let c = closures[hash] else { throw SessionError.notAQuery(name) }
         let r: Result<Value, Refusal>
@@ -337,28 +408,28 @@ public final class Session: LinkDriven {
     }
 
     /// The form validator (AUTHORING.md §1.3): a procedure's input checks
-    /// over the fields present, against the merged view — each failing
+    /// over the fields present, against the optimistic view — each failing
     /// field's message, and the values as the checks normalised them.
     public func validate(name: String, partial: Args) throws -> (messages: [(String, String)], values: Args) {
         lock.lock(); defer { lock.unlock() }
         guard let (_, hash) = byName[name], let c = closures[hash] else { throw SessionError.unknownFunction(name) }
-        return try Eval.check(schema, c, partial, mergedView(), ctx: ctx)
+        return try Eval.check(schema, c, partial, view, ctx: ctx)
     }
 
-    /// Read the merged view directly. A write through this store is a bug:
+    /// Read the optimistic view directly. A write through this store is a bug:
     /// it reaches nothing durable.
     public func run<T>(_ body: (Store) throws -> T) throws -> T {
         lock.lock(); defer { lock.unlock() }
-        return try body(mergedView())
+        return try body(view)
     }
 
     // MARK: changes
 
     /// Be told what moved after every mutate and every frame: the changes to
-    /// a scope's optimistic view since last time, or that it was rebuilt
-    /// and a view must re-hydrate. Returns a token for `unsubscribe`.
+    /// the optimistic view since last time, or that it was rebuilt and a
+    /// view must re-hydrate. Returns a token for `unsubscribe`.
     @discardableResult
-    public func subscribe(_ f: @escaping (ScopeName, Changes) -> Void) -> Int {
+    public func subscribe(_ f: @escaping (Changes) -> Void) -> Int {
         lock.lock(); defer { lock.unlock() }
         let n = nextSubscriber
         nextSubscriber += 1
@@ -371,65 +442,48 @@ public final class Session: LinkDriven {
         subscribers[token] = nil
     }
 
-    private func collectChanges() -> [(ScopeName, Changes)] {
-        var out: [(ScopeName, Changes)] = []
-        for s in scopes {
-            guard let ch = client.takeChanges(s) else { continue }
-            if case .applied(let xs) = ch, xs.isEmpty { continue }
-            out.append((s, ch))
-        }
-        return out
+    private func collectChanges() -> Changes? {
+        let ch = client.takeChanges()
+        if case .applied(let xs) = ch, xs.isEmpty { return nil }
+        return ch
     }
 
-    private func notify(_ notes: [(ScopeName, Changes)]) {
-        if notes.isEmpty { return }
+    private func notify(_ note: Changes?) {
+        guard let ch = note else { return }
         lock.lock()
         let subs = Array(subscribers.values)
         lock.unlock()
-        for (s, ch) in notes { for f in subs { f(s, ch) } }
+        for f in subs { f(ch) }
     }
 
     // MARK: durability
 
-    private func contents(_ s: ScopeName) -> ReplicaFile.Contents? {
-        guard let r = client.scopes[s]?.replica else { return nil }
-        return ReplicaFile.Contents(scope: s, mode: server == nil ? "alone" : "server", cursor: r.cursor, confirmed: r.confirmed, pending: r.pending)
+    private func persist() throws {
+        let r = client.replica
+        let c = ReplicaFile.Contents(mode: server == nil ? "alone" : "server", cursor: r.cursor, confirmed: r.confirmed, pending: r.pending)
+        try ReplicaFile.write(ReplicaFile.encode(c), to: directory.appendingPathComponent(ReplicaFile.fileName))
+        persisted = (c.cursor, c.pending.count)
     }
 
-    private func persist(_ s: ScopeName) throws {
-        guard let c = contents(s) else { return }
-        try ReplicaFile.write(ReplicaFile.encode(c), to: directory.appendingPathComponent(ReplicaFile.fileName(s)))
-        persisted[s] = (c.cursor, c.pending.count)
-    }
-
-    private func persistAll() throws {
-        for s in scopes { try persist(s) }
-    }
-
-    /// Write a scope when its cursor or its pending queue moved since the
-    /// last write — which is what a frame from the server changes.
+    /// Write when the cursor or the pending queue moved since the last
+    /// write — which is what a frame from the server changes.
     private func persistIfMoved() throws {
-        for s in scopes {
-            guard let r = client.scopes[s]?.replica else { continue }
-            if let p = persisted[s], p.0 == r.cursor, p.1 == r.pending.count { continue }
-            try persist(s)
-        }
+        let r = client.replica
+        if persisted.0 == r.cursor && persisted.1 == r.pending.count { return }
+        try persist()
     }
 
     // MARK: verifying and status
 
-    /// Ask the authority whether it agrees with every scope's confirmed
-    /// state; the answer arrives as `status.lastAgree`. Alone, the answer is
+    /// Ask the authority whether it agrees with the confirmed state; the
+    /// answer arrives as `status.lastAgree`. Alone, the answer is
     /// immediate: the authority is here.
     public func verify() {
         lock.lock()
-        if server == nil {
-            for s in scopes {
-                guard let a = authorities[s], let r = client.scopes[s]?.replica else { continue }
-                let (n, h) = r.verifyAt()
-                let ok = a.log.stateAt(n).map { Hash.stateHash($0) == h } ?? false
-                localAgreements.append(Agreement(scope: s, seq: n, ok: ok))
-            }
+        if let a = authority {
+            let (n, h) = client.replica.verifyAt()
+            let ok = a.log.stateAt(n).map { Hash.stateHash($0) == h } ?? false
+            localAgreements.append(Agreement(seq: n, ok: ok))
         } else {
             client.verifyAll()
         }
@@ -438,32 +492,34 @@ public final class Session: LinkDriven {
 
     private var localAgreements: [Agreement] = []
 
-    /// The hash of a scope's confirmed state, and its cursor.
-    public func stateHash(_ scope: ScopeName) -> (Seq, [UInt8])? {
+    /// The hash of the confirmed state, and its cursor.
+    public func stateHash() -> (Seq, [UInt8]) {
         lock.lock(); defer { lock.unlock() }
-        return client.scopes[scope]?.replica.verifyAt()
+        return client.replica.verifyAt()
     }
 
-    /// Verdicts against this peer's own intents, over every scope.
+    /// Where one of this peer's intents stands: pending, confirmed, or
+    /// rejected with the sentence to show beside it.
+    public func standing(_ id: Id) -> Standing {
+        lock.lock(); defer { lock.unlock() }
+        if let why = rejected[id] { return .rejected(why) }
+        if client.replica.pending.contains(where: { $0.id == id }) { return .pending }
+        return authored.contains(id) ? .confirmed : .unknown
+    }
+
+    /// Verdicts against this peer's own intents, in the order they arrived;
+    /// each one's `reason` is the sentence a screen shows.
     public var rejections: [Rejection] {
         lock.lock(); defer { lock.unlock() }
-        return scopes.flatMap { client.scopes[$0]?.replica.rejections ?? [] }
+        return verdicts
     }
 
     public var status: SessionStatus {
         lock.lock(); defer { lock.unlock() }
-        var cursors: [ScopeName: Seq] = [:]
-        var pending = 0
-        var rejected = 0
-        for s in scopes {
-            guard let r = client.scopes[s]?.replica else { continue }
-            cursors[s] = r.cursor
-            pending += r.pending.count
-            rejected += r.rejections.count
-        }
+        let r = client.replica
         let agree: Agreement? = server == nil
             ? localAgreements.last
-            : client.agreed.last.map { Agreement(scope: $0.0, seq: $0.1, ok: $0.2) }
+            : client.agreed.last.map { Agreement(seq: $0.0, ok: $0.1) }
         let linkWord: String
         switch link?.state {
         case nil: linkWord = "alone"
@@ -472,7 +528,7 @@ public final class Session: LinkDriven {
         case .open?: linkWord = "open"
         case .waiting?: linkWord = "waiting"
         }
-        return SessionStatus(linked: client.linked, alone: server == nil, cursors: cursors, pending: pending,
-                             denied: client.denied, lastAgree: agree, rejections: rejected, link: linkWord)
+        return SessionStatus(linked: client.linked, alone: server == nil, cursor: r.cursor, pending: r.pending.count,
+                             signedIn: !ctx.isNobody, denied: client.denied, lastAgree: agree, rejections: verdicts.count, link: linkWord)
     }
 }

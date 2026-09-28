@@ -12,44 +12,41 @@ public struct VerifyError: Error, Equatable, CustomStringConvertible {
 /// Every complaint a module drew.
 public struct VerifyErrors: Error, Equatable, CustomStringConvertible {
     public var errors: [VerifyError]
+    public init(errors: [VerifyError]) { self.errors = errors }
     public var description: String { return errors.map { $0.description }.joined(separator: "; ") }
 }
 
-/// §9 The verifier's structural rules for spec version 2 (AUTHORING.md
-/// §1.5) and `completeOrders`. A runtime executes verified modules; this
+/// §9 The verifier's structural rules for spec version 3 (AUTHORING.md
+/// §1.5), the schema's well-formedness, and `completeOrders`. A runtime executes verified modules; this
 /// is what `Module.emit()` runs before it hands out bytes, and what a test
 /// holds a hand-built module to. The expression type checker stays
 /// `arkc`'s.
 public enum Verify {
-    /// Check the v2 rules, and on success the module as it is hashed and
+    /// Check the rules, and on success the module as it is hashed and
     /// sent: orders completed, every function normalised.
     public static func verify(_ m0: Module) -> Result<Module, VerifyErrors> {
         let m = completeOrders(m0)
         var errs: [VerifyError] = []
         func bad(_ s: String, _ c: String) { errs.append(VerifyError(s, c)) }
         if m.spec != specVersion { bad("module", "BadSpecVersion \(m.spec)") }
+        for p in m.schema.problems() { bad("schema", "BadSchema " + p) }
         var names = Set<String>()
         for f in m.functions {
             if names.contains(f.name) { bad(f.name, "DuplicateFunction") }
             names.insert(f.name)
         }
-        // Routers: names unique, scope exists, uses are middleware of that scope.
+        // Routers: names unique, uses are middleware.
         var rnames = Set<String>()
         for r in m.routers {
             if rnames.contains(r.name) { bad(r.name, "DuplicateRouter") }
             rnames.insert(r.name)
-            if m.schema.scopeOf(r.scope) == nil { bad(r.name, "UnknownScope \(r.scope)") }
-            for u in r.uses {
-                guard let mw = m.lookupFunction(u), mw.kind.isMiddleware else { bad(r.name, "NotMiddleware \(u)"); continue }
-                if mw.scope != r.scope { bad(r.name, "MiddlewareOfAnotherScope \(u)") }
-            }
+            for u in r.uses where !(m.lookupFunction(u)?.kind.isMiddleware ?? false) { bad(r.name, "NotMiddleware \(u)") }
         }
         for (i, f) in m.functions.enumerated() {
             let earlier = Set(m.functions[..<i].map { $0.name })
             switch f.kind {
             case .mutator, .query:
                 guard let rn = f.router, let r = m.lookupRouter(rn) else { bad(f.name, "NoRouter"); continue }
-                if f.scope != r.scope { bad(f.name, "ScopeNotRouters") }
                 if f.kind == .query && !f.autos.isEmpty { bad(f.name, "AutosOnNonMutator") }
                 if f.kind == .mutator && f.ret != nil { bad(f.name, "ReturnTypeOnMutator") }
                 if f.kind == .query && f.ret == nil { bad(f.name, "NoReturnType") }
@@ -65,19 +62,20 @@ public enum Verify {
                 let provides = Set(f.uses.filter { m.lookupFunction($0)?.kind == .provide })
                 for p in providedIn(f) where !provides.contains(p) { bad(f.name, "NotProvided \(p)") }
             case .guard_, .provide:
-                if f.router != nil || !f.uses.isEmpty { bad(f.name, "MiddlewareOnRouter") }
-                guard let sc = f.scope, m.schema.scopeOf(sc) != nil else { bad(f.name, "UnknownScope \(f.scope ?? "")"); continue }
+                if f.router != nil { bad(f.name, "RouterOnNonProcedure") }
+                if !f.uses.isEmpty { bad(f.name, "UsesOnNonProcedure") }
                 if f.kind == .provide && f.ret == nil { bad(f.name, "NoReturnType") }
                 if !providedIn(f).isEmpty { bad(f.name, "NotProvided") }
             case .helper:
-                if f.scope != nil || f.router != nil || !f.uses.isEmpty { bad(f.name, "ScopeOnHelper") }
+                if f.router != nil { bad(f.name, "RouterOnNonProcedure") }
+                if !f.uses.isEmpty { bad(f.name, "UsesOnNonProcedure") }
             }
-            // CExists only on an id of a table in the function's scope.
+            // CExists only on an id, of a table that exists.
             for nf in f.input {
                 for c in nf.field.checks {
                     guard case .exists = c else { continue }
                     guard let tb = Checks.idTable(nf.ty) else { bad(f.name, "ExistsOnNonId \(nf.name)"); continue }
-                    if m.schema.tableScope(tb) != f.scope { bad(f.name, "ExistsAcrossScopes \(nf.name)") }
+                    if m.schema.lookupTable(tb) == nil { bad(f.name, "UnknownTable \(tb)") }
                 }
             }
             // `.on` names a declared unique index.

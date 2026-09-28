@@ -70,8 +70,15 @@ final class Emitter {
         return blocks.removeLast().stmts
     }
 
+    /// Register an auto by name. Naming it again is reading the same frozen
+    /// value again — `ctx.now("added_ms")` in three rows of one entry is one
+    /// time — so a repeated name of the same kind is that auto; a repeated
+    /// name of another kind is a bug in the domain.
     func auto(_ name: String, _ a: Auto) {
-        precondition(!autos.contains { $0.name == name }, "ctx: the auto \"\(name)\" is drawn twice")
+        if let had = autos.first(where: { $0.name == name }) {
+            precondition(had.auto == a, "ctx: the auto \"\(name)\" is drawn as \(had.auto) and again as \(a); one name is one auto")
+            return
+        }
         autos.append(NamedAuto(name, a))
     }
 }

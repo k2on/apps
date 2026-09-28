@@ -347,17 +347,6 @@ public final class MemoryStore: Store {
         return .record(m)
     }
 
-    /// The rows of two stores over one schema, together; the left wins a table.
-    public func merge(_ other: MemoryStore) -> MemoryStore {
-        var ts = tables
-        for (t, rs) in other.tables {
-            var mine = ts[t] ?? [:]
-            for (k, r) in rs where mine[k] == nil { mine[k] = r }
-            ts[t] = mine
-        }
-        return MemoryStore(schema: schema, tables: ts)
-    }
-
     /// Whether two stores hold the same rows.
     public func sameRows(as other: MemoryStore) -> Bool {
         for t in Set(tables.keys).union(other.tables.keys) {

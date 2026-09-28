@@ -3,15 +3,16 @@ import ArkAuthoring
 // Everything in the vocabulary that neither the demo nor harken reaches —
 // update, upsert, delete by a composite key, forEach, ifElse, unless,
 // pick, a helper, fold, Opt.map, a list input, whole-input refine, opt
-// fields, isIn, with, limit — in one small domain. The tests hold its
+// fields, isIn, with, limit, helpers called with named arguments (one
+// calling another), a record, equality on options, and one auto named
+// twice — in one small domain. The tests hold its
 // Native to Eval over its own Emit, case by case.
 
 public struct Shelf {
     public var counter: Table<Counter>
     public var tag: Table<Tag>
 }
-extension Shelf: Scope {
-    public static let NAME = "shelf"
+extension Shelf: Tables {
     public static func open() -> Self {
         Shelf(counter: table(), tag: table())
     }
@@ -105,6 +106,53 @@ extension Named: Input {
 
 let double = helper("double", "x") { (x: Int) in x.mul(2) }
 
+/// What `summaries` lists: not a row of any table.
+public struct Summary {
+    public var name: Text
+    public var n: Int
+    public var noted: Bool
+    public var hi: Bool
+    public var first: Opt<Text>
+}
+extension Summary: Record {
+    public static func fields() -> Fields<Self> {
+        Fields<Self>()
+            .field("name", text())
+            .field("n", int())
+            .field("noted", bool())
+            .field("hi", bool())
+            .field("first", opt(text()))
+    }
+}
+
+/// A name as a key part: lowercased, spaces as dashes.
+public func slugOf(_ text: Text) -> Text {
+    helper("slug_of", ("text", text)) { text in
+        concat(text.trim().lower().chars().map { c in pick(c.eq(" "), "-", c) })
+    }
+}
+
+/// A tag's key under its counter: two named arguments, and a helper inside.
+public func labelKey(_ name: Text, _ label: Text) -> Text {
+    helper("label_key", ("name", name), ("label", label)) { name, label in
+        concat(list([slugOf(name), "/", slugOf(label)]))
+    }
+}
+
+/// A counter as `summaries` lists it, read against every tag: a helper
+/// returning a record, and equality on an option both ways.
+public func summarize(_ counter: Counter, _ tags: List<Tag>) -> Summary {
+    helper("summarize", ("counter", counter), ("tags", tags)) { counter, tags in
+        Summary(
+            name: counter.name,
+            n: counter.n,
+            noted: counter.note.ne(none(Text.self)).and(counter.note.ne(some("x"))),
+            hi: counter.note.eq(some("hi")),
+            first: tags.filter { row in row.counterId.eq(counter.id) }.first().map { row in labelKey(counter.name, row.label) }
+        )
+    }
+}
+
 public func kitchen() -> Router<Shelf> {
     let kitchen = router(Shelf.self, "kitchen")
     return kitchen.routes(
@@ -128,6 +176,15 @@ public func kitchen() -> Router<Shelf> {
         kitchen.query("total") { _, db, _ in
             let counters = db.counter.all()
             return counters.fold(Int(0)) { acc, row in acc.add(row.n) }.add(counters.filter { row in row.note.isSome() }.len())
+        },
+        kitchen.input(Named.self).mutation("stamp") { ctx, db, input in
+            let id: Id<Counter> = ctx.newId("id")
+            db.counter.insert(Counter(id: id, name: input.name, n: ctx.now("at"), note: none(Text.self))).on(Counter.name)
+            return db.tag.upsert(Tag(counterId: id, label: labelKey(input.name, " Stamped Here "), weight: ctx.now("at")))
+        },
+        kitchen.query("summaries") { _, db, _ in
+            let tags = db.tag.all()
+            return db.counter.orderBy(Counter.name.asc()).all().map { row in summarize(row, tags) }
         },
         kitchen.input(Named.self).query("named") { _, db, input in
             db.counter.filter(Counter.name.isIn(list([input.name, "b"]))).first().map { row in row.n }.unwrapOr(-1)

@@ -19,117 +19,117 @@ public func trusting(_ token: String?) -> Identity? {
 }
 
 /// §12.3 The server's end of the protocol, sans-io, as `Ark.Protocol`'s
-/// `Server` without live rooms: authorities for the scopes it hosts, a
-/// cursor per connection per scope, and fan-out after every message. Here
-/// so that two sessions can meet an authority in one process — the tests'
-/// network, and a way to run the protocol with no socket at all.
+/// `Server` without live rooms: the log's authority, one access rule, the
+/// sessions each user owns, a cursor per connection, and fan-out after
+/// every message. Here so that two sessions can meet an authority in one
+/// process — the tests' network, and a way to run the protocol with no
+/// socket at all.
 public final class InProcessServer {
     public typealias ConnId = Int
 
     struct Conn {
         var who: Identity
-        /// Per scope: the mode, and the sequence the connection has been sent up to.
-        var scopes: [ScopeName: (Mode, Seq)]
+        var mode: Mode
+        /// The sequence the connection has been sent up to (not what it has
+        /// applied — that is its own business).
+        var sent: Seq
     }
 
     public var authenticate: Authenticate
-    /// May this identity receive this scope? The scope-level read rule.
-    public var access: (Identity, ScopeName) -> Bool
-    public private(set) var scopes: [ScopeName: Authority] = [:]
+    /// May this identity receive the log? The read rule.
+    public var access: (Identity) -> Bool
+    /// Does this user own this session? A session outlives its token: an
+    /// entry authored offline under one login and pushed after the same
+    /// person signs in again carries the old session, and is still theirs.
+    /// Only ever asked about the connection's own user. By default, no.
+    public var owns: (String, String) -> Bool = { _, _ in false }
+    public private(set) var authority: Authority
     private var conns: [ConnId: Conn] = [:]
     private var out: [(ConnId, ServerMsg)] = []
 
-    public init(authenticate: @escaping Authenticate = trusting, access: @escaping (Identity, ScopeName) -> Bool = { _, _ in true }) {
+    /// A server that is the authority for the log.
+    public init(_ authority: Authority, authenticate: @escaping Authenticate = trusting, access: @escaping (Identity) -> Bool = { _ in true }) {
+        self.authority = authority
         self.authenticate = authenticate
         self.access = access
     }
 
-    /// Host a scope: become its authority.
-    public func host(_ a: Authority) { scopes[a.scope] = a }
-
-    /// The authority of a scope, to look at.
-    public func authority(_ s: ScopeName) -> Authority? { return scopes[s] }
+    /// Install the sessions a user owns, which the authenticator's session
+    /// store knows and the engine does not (`Ark.Protocol.withOwns`).
+    @discardableResult
+    public func withOwns(_ owns: @escaping (String, String) -> Bool) -> InProcessServer {
+        self.owns = owns
+        return self
+    }
 
     func send(_ c: ConnId, _ m: ServerMsg) { out.append((c, m)) }
 
     /// A frame from a connection.
     public func recv(_ c: ConnId, _ msg: ClientMsg) {
         switch msg {
-        case .hello(let subs, let tok, _):
-            guard let who = authenticate(tok) else { send(c, .denied(reason: "not signed in")); return }
-            var held: [ScopeName: (Mode, Seq)] = [:]
-            for s in subs where access(who, s.scope) && scopes[s.scope] != nil {
-                held[s.scope] = (s.mode, s.since)
-            }
-            conns[c] = Conn(who: who, scopes: held)
+        case .hello(let sub, let tok, _):
+            // Nobody (the empty user a peer authors as before anyone signs
+            // in) is not an identity any token proves.
+            guard let who = authenticate(tok), !who.user.isEmpty else { send(c, .denied(reason: "not signed in")); return }
+            guard access(who) else { send(c, .denied(reason: "not allowed")); return }
+            // A second hello on one connection is the log paging, and says
+            // where to continue from.
+            conns[c] = Conn(who: who, mode: sub.mode, sent: sub.since)
             fanout()
-        case .push(let s, let es):
+        case .push(let es):
             guard let conn = conns[c] else { send(c, .denied(reason: "hello first")); return }
-            guard var a = scopes[s] else { send(c, .denied(reason: "unknown scope " + s)); return }
             var ids: [Id] = []
             var seqs: [Seq] = []
             for e in es {
-                if e.actor != conn.who.user || e.session != conn.who.session {
-                    send(c, .reject(scope: s, id: e.id, reason: "not yours"))
+                if e.actor != conn.who.user || (e.session != conn.who.session && !owns(e.actor, e.session)) {
+                    send(c, .reject(id: e.id, reason: "not yours"))
                     continue
                 }
-                switch a.sequenceEntry(e) {
+                switch authority.sequenceEntry(e) {
                 case .appended(let n, _): ids.append(e.id); seqs.append(n)
                 case .duplicate(let n): ids.append(e.id); seqs.append(n)
-                case .rejected(let why): send(c, .reject(scope: s, id: e.id, reason: why.text))
+                case .rejected(let why): send(c, .reject(id: e.id, reason: refusalText(why)))
                 }
             }
-            scopes[s] = a
-            if !ids.isEmpty { send(c, .ack(scope: s, ids: ids, seqs: seqs)) }
+            if !ids.isEmpty { send(c, .ack(ids: ids, seqs: seqs)) }
             fanout()
-        case .needFacts(let s, let ns):
+        case .needFacts(let ns):
             guard conns[c] != nil else { send(c, .denied(reason: "hello first")); return }
-            guard let a = scopes[s] else { return }
             var items: [FactsItem] = []
-            for n in ns { if let it = a.log.entries[n] { items.append(FactsItem(seq: n, facts: it.facts)) } }
-            send(c, .factsFor(scope: s, items: items))
+            for n in ns { if let it = authority.log.entries[n] { items.append(FactsItem(seq: n, facts: it.facts)) } }
+            send(c, .factsFor(items: items))
         case .needClosures(let hs):
             guard conns[c] != nil else { send(c, .denied(reason: "hello first")); return }
-            var items: [ClosureItem] = []
-            for h in hs {
-                for a in scopes.values { if let cl = a.bodies[h] { items.append(ClosureItem(hash: h, closure: cl)); break } }
-            }
-            send(c, .closures(items: items))
-        case .verify(let s, let n, let h):
+            send(c, .closures(items: hs.compactMap { h in authority.bodies[h].map { ClosureItem(hash: h, closure: $0) } }))
+        case .verify(let n, let h):
             guard conns[c] != nil else { send(c, .denied(reason: "hello first")); return }
-            guard let a = scopes[s] else { return }
-            let ok = a.log.stateAt(n).map { Hash.stateHash($0) == h } ?? false
-            send(c, .agree(scope: s, seq: n, hash: h, ok: ok))
+            let ok = authority.log.stateAt(n).map { Hash.stateHash($0) == h } ?? false
+            send(c, .agree(seq: n, hash: h, ok: ok))
         case .say:
             // No live rooms here: a frame said into this server is heard by nobody.
             guard conns[c] != nil else { send(c, .denied(reason: "hello first")); return }
         }
     }
 
-    /// A connection closed: its cursors are forgotten.
+    /// A connection closed: its cursor is forgotten.
     public func disconnect(_ c: ConnId) { conns[c] = nil }
 
-    /// §12.4 Fan-out: every connection, every scope it holds, everything
-    /// above what it has been sent, a page at a time; a snapshot for one
-    /// below the horizon. Whole-mode batches carry no facts, as the spec's do.
+    /// §12.4 Fan-out: every connection, everything above what it has been
+    /// sent, a page at a time; a snapshot for one below the horizon.
+    /// Whole-mode batches carry no facts, as the spec's do.
     func fanout() {
         for c in conns.keys.sorted() {
-            guard let conn = conns[c] else { continue }
-            for s in conn.scopes.keys.sorted(by: { compareText($0, $1) < 0 }) {
-                guard let a = scopes[s], let (md, sent) = conn.scopes[s] else { continue }
-                if sent >= a.log.headSeq { continue }
-                switch a.page(sent, batchLimit) {
-                case .belowHorizon(let sn):
-                    var rows: [TableName: [Value]] = [:]
-                    for t in sn.store.tableNames { rows[t] = sn.store.scan(t).map { .record($0) } }
-                    send(c, .snapshotOf(scope: s, seq: sn.seq, hash: sn.hash, rows: rows))
-                    conns[c]?.scopes[s] = (md, sn.seq)
-                case .entries(let items, let more):
-                    let batch = items.map { BatchItem(seq: $0.0, entry: $0.1, facts: md == .byFacts ? $0.2 : nil) }
-                    let last = items.map { $0.0 }.max() ?? sent
-                    send(c, .batch(scope: s, items: batch, hasMore: more))
-                    conns[c]?.scopes[s] = (md, max(sent, last))
-                }
+            guard let conn = conns[c], conn.sent < authority.log.headSeq else { continue }
+            switch authority.page(conn.sent, batchLimit) {
+            case .belowHorizon(let sn):
+                var rows: [TableName: [Value]] = [:]
+                for t in sn.store.tableNames { rows[t] = sn.store.scan(t).map { .record($0) } }
+                send(c, .snapshotOf(seq: sn.seq, hash: sn.hash, rows: rows))
+                conns[c]?.sent = sn.seq
+            case .entries(let items, let more):
+                let batch = items.map { BatchItem(seq: $0.0, entry: $0.1, facts: conn.mode == .byFacts ? $0.2 : nil) }
+                send(c, .batch(items: batch, hasMore: more))
+                conns[c]?.sent = max(conn.sent, items.map { $0.0 }.max() ?? conn.sent)
             }
         }
     }
@@ -153,12 +153,12 @@ public final class MemoryExchange {
     /// Frames that were not a client frame, dropped.
     public private(set) var badFrames = 0
 
-    public init(server: InProcessServer = InProcessServer()) { self.server = server }
+    public init(server: InProcessServer) { self.server = server }
 
-    /// Host a scope on the exchange's server.
-    public func host(_ a: Authority) {
-        lock.lock(); defer { lock.unlock() }
-        server.host(a)
+    /// An exchange whose server is a new authority over the module's
+    /// closures, trusting whoever says hello.
+    public convenience init(_ module: Module) {
+        self.init(server: InProcessServer(Authority(module.schema, Hash.closures(module))))
     }
 
     /// The `LinkDial` a `Session` takes; the URL is ignored.

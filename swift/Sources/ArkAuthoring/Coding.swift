@@ -1,9 +1,8 @@
 import Foundation
 import ArkDB
 
-// Rows, inputs and scopes are ordinary Swift structs whose `Codable`
-// conformance the compiler synthesises (`Row`, `Input` and `Scope` refine
-// it). These coders are how the vocabulary builds one from a `Repr` and
+// Rows and inputs are ordinary Swift structs whose `Codable` conformance
+// the compiler synthesises (`Row` and `Input` refine it). These coders are how the vocabulary builds one from a `Repr` and
 // takes one apart again, field by field, with no reflection and nothing
 // the author writes: a property `userId` is the IR's field `user_id`.
 

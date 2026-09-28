@@ -1,6 +1,6 @@
 import Foundation
 
-/// A position in one scope's log. The first entry is 1; 0 is "nothing".
+/// A position in the log. The first entry is 1; 0 is "nothing".
 public typealias Seq = Int64
 
 /// §10 An intent, as recorded. The sequence is the key it is stored under
@@ -22,7 +22,7 @@ public struct Entry: Equatable {
 /// What applying an entry changed, in order.
 public typealias Facts = [Change]
 
-/// The state of a scope at a sequence, and its hash.
+/// The state at a sequence, and its hash.
 public struct Snapshot {
     public var seq: Seq
     public var store: MemoryStore
@@ -47,7 +47,7 @@ public enum Page {
     case belowHorizon(Snapshot)
 }
 
-/// One scope's history: a snapshot and the entries above it, each with the
+/// The module's history: a snapshot and the entries above it, each with the
 /// facts its application produced.
 public struct Log {
     public var base: Snapshot

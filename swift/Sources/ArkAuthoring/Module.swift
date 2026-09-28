@@ -84,20 +84,25 @@ enum Emission {
     static func module(_ routers: [RouterCore]) throws -> ArkDB.Module {
         let c = Collector()
         var functions: [Function] = []
-        var scopes: [ArkDB.Scope] = []
         var irRouters: [ArkDB.Router] = []
         func add(_ f: Function) {
             functions += c.ready
             c.ready = []
             functions.append(f)
         }
+        // One set of tables: every router is over the same `Tables` type.
+        if let first = routers.first {
+            for core in routers where core.over != first.over {
+                throw VerifyErrors(errors: [VerifyError(core.name, "TablesMismatch \(core.overName) \(first.overName)")])
+            }
+        }
+        let tables = routers.first?.tables() ?? []
         for core in routers {
-            if !scopes.contains(where: { $0.name == core.scope.name }) { scopes.append(core.scope) }
-            irRouters.append(ArkDB.Router(name: core.name, scope: core.scope.name, uses: core.middleware.map { $0.name }))
+            irRouters.append(ArkDB.Router(name: core.name, uses: core.middleware.map { $0.name }))
             for m in core.middleware { add(middleware(c, core, m)) }
             for d in core.routes { add(route(c, core, d)) }
         }
-        let m = ArkDB.Module(spec: specVersion, schema: ArkDB.Schema(scopes: scopes), functions: functions, routers: irRouters, live: [])
+        let m = ArkDB.Module(spec: specVersion, schema: ArkDB.Schema(tables: tables), functions: functions, routers: irRouters, live: [])
         switch Verify.verify(m) {
         case .success(let v): return v
         case .failure(let e): throw e
@@ -126,7 +131,7 @@ enum Emission {
             let r = m.run(Ctx(), core.makeDb(), m.input.arguments(nil))
             if m.kind == .provide, let r = r { em.append(.sReturn(lift(r))) }
         }
-        return Function(name: m.name, kind: m.kind, scope: core.scope.name, router: nil, uses: [], autos: em.autos,
+        return Function(name: m.name, kind: m.kind, router: nil, uses: [], autos: em.autos,
                         input: input, refine: [], ret: m.ret, body: em.blocks[0].stmts, names: em.names)
     }
 
@@ -142,7 +147,7 @@ enum Emission {
             let r = d.run(Ctx(), core.makeDb(), d.input.arguments(nil), provided)
             if d.kind == .query, let r = r { em.append(.sReturn(lift(r))) }
         }
-        return Function(name: d.name, kind: d.kind, scope: core.scope.name, router: core.name, uses: d.chain.map { $0.name },
+        return Function(name: d.name, kind: d.kind, router: core.name, uses: d.chain.map { $0.name },
                         autos: em.autos, input: input, refine: refine, ret: d.ret, body: em.blocks[0].stmts, names: em.names)
     }
 }

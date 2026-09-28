@@ -5,6 +5,14 @@ public struct Ctx: Equatable {
     public var user: String
     public var session: String
     public init(user: String, session: String) { self.user = user; self.session = session }
+
+    /// §11.2a Who authors before anyone has signed in (`Ark.Peer.nobody`):
+    /// an empty user and session. No server accepts an entry authored as
+    /// nobody; `Replica.signIn` makes it somebody's.
+    public static let nobody = Ctx(user: "", session: "")
+
+    /// Whether this is `nobody`.
+    public var isNobody: Bool { return user.isEmpty && session.isEmpty }
 }
 
 /// Arguments (or autos) by name.

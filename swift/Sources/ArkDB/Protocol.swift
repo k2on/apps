@@ -1,26 +1,26 @@
 import Foundation
 
-/// How a client holds a scope.
+/// How a client holds the log. `whole` replays intents and is exact;
+/// `byFacts` is fed the facts of every entry and needs no closure.
 public enum Mode: Equatable {
     case whole
     case byFacts
 }
 
 public struct Subscription: Equatable {
-    public var scope: ScopeName
     /// The cursor: the last sequence applied.
     public var since: Seq
     public var mode: Mode
-    public init(scope: ScopeName, since: Seq, mode: Mode) { self.scope = scope; self.since = since; self.mode = mode }
+    public init(since: Seq, mode: Mode) { self.since = since; self.mode = mode }
 }
 
 /// §12 The frames a client sends.
 public enum ClientMsg {
-    case hello(subs: [Subscription], token: String?, spec: Int)
-    case push(scope: ScopeName, entries: [Entry])
-    case needFacts(scope: ScopeName, seqs: [Seq])
+    case hello(sub: Subscription, token: String?, spec: Int)
+    case push(entries: [Entry])
+    case needFacts(seqs: [Seq])
     case needClosures(hashes: [FnHash])
-    case verify(scope: ScopeName, seq: Seq, hash: [UInt8])
+    case verify(seq: Seq, hash: [UInt8])
     case say(frame: [UInt8])
 }
 
@@ -45,15 +45,34 @@ public struct ClosureItem {
 
 /// §12 The frames a server sends.
 public enum ServerMsg {
-    case batch(scope: ScopeName, items: [BatchItem], hasMore: Bool)
-    case factsFor(scope: ScopeName, items: [FactsItem])
-    case snapshotOf(scope: ScopeName, seq: Seq, hash: [UInt8], rows: [TableName: [Value]])
-    case ack(scope: ScopeName, ids: [Id], seqs: [Seq])
-    case reject(scope: ScopeName, id: Id, reason: String)
+    case batch(items: [BatchItem], hasMore: Bool)
+    case factsFor(items: [FactsItem])
+    case snapshotOf(seq: Seq, hash: [UInt8], rows: [TableName: [Value]])
+    case ack(ids: [Id], seqs: [Seq])
+    /// A verdict against one entry, with the reason every replica would
+    /// reach (`refusalText`): what a screen shows beside the item that did
+    /// not happen.
+    case reject(id: Id, reason: String)
     case denied(reason: String)
     case closures(items: [ClosureItem])
-    case agree(scope: ScopeName, seq: Seq, hash: [UInt8], ok: Bool)
+    case agree(seq: Seq, hash: [UInt8], ok: Bool)
     case heard(frame: [UInt8])
+}
+
+/// §12.5 The reason a `reject` carries, as `Ark.Protocol.refusalText`: a
+/// mutator's own refusal is its text, word for word, because that is what
+/// an author wrote for a person to read; the store's constraint refusals
+/// are named in a sentence.
+public func refusalText(_ r: Refusal) -> String {
+    switch r {
+    case .refused(let t): return t
+    case .noSuchTable(let t): return "no table " + t
+    case .malformedRow(let t, let why): return t + ": " + why
+    case .notNull(let t, let c): return t + "." + c + " may not be empty"
+    case .uniqueViolation(let t, let cs): return t + ": another row has the same " + cs.joined(separator: ", ")
+    case .missingParent(let t, let c, let p): return t + "." + c + " names no " + p
+    case .stillReferenced(let t, let child): return t + ": still referenced by " + child
+    }
 }
 
 /// Entries per page.
@@ -93,41 +112,41 @@ public enum Wire {
 
     public static func clientValue(_ m: ClientMsg) -> Value {
         switch m {
-        case .hello(let subs, let tok, let spec):
+        case .hello(let sub, let tok, let spec):
             return node("hello", [
-                ("scopes", .list(subs.map { node("sub", [("scope", .text($0.scope)), ("since", int($0.since)), ("mode", .text($0.mode == .whole ? "whole" : "facts"))]) })),
+                ("since", int(sub.since)),
+                ("mode", .text(sub.mode == .whole ? "whole" : "facts")),
                 ("token", tok.map { .text($0) } ?? .null),
                 ("spec", int(spec)),
             ])
-        case .push(let s, let es): return node("push", [("scope", .text(s)), ("entries", .list(es.map(entryValue)))])
-        case .needFacts(let s, let ns): return node("need_facts", [("scope", .text(s)), ("seqs", .list(ns.map(int)))])
+        case .push(let es): return node("push", [("entries", .list(es.map(entryValue)))])
+        case .needFacts(let ns): return node("need_facts", [("seqs", .list(ns.map(int)))])
         case .needClosures(let hs): return node("need_closures", [("hashes", .list(hs.map { .bytes($0) }))])
-        case .verify(let s, let n, let h): return node("verify", [("scope", .text(s)), ("seq", int(n)), ("hash", .bytes(h))])
+        case .verify(let n, let h): return node("verify", [("seq", int(n)), ("hash", .bytes(h))])
         case .say(let f): return node("say", [("say", .bytes(f))])
         }
     }
 
     public static func serverValue(_ m: ServerMsg) -> Value {
         switch m {
-        case .batch(let s, let items, let more):
+        case .batch(let items, let more):
             return node("batch", [
-                ("scope", .text(s)),
                 ("items", .list(items.map { .record(["seq": int($0.seq), "entry": entryValue($0.entry), "facts": $0.facts.map(factsValue) ?? .null]) })),
                 ("has_more", .bool(more)),
             ])
-        case .factsFor(let s, let items):
-            return node("facts", [("scope", .text(s)), ("items", .list(items.map { .record(["seq": int($0.seq), "facts": factsValue($0.facts)]) }))])
-        case .snapshotOf(let s, let n, let h, let rows):
-            return node("snapshot", [("scope", .text(s)), ("seq", int(n)), ("hash", .bytes(h)), ("rows", .record(rows.mapValues { .list($0) }))])
-        case .ack(let s, let ids, let ns):
-            return node("ack", [("scope", .text(s)), ("ids", .list(ids.map { .id($0) })), ("seqs", .list(ns.map(int)))])
-        case .reject(let s, let i, let why):
-            return node("reject", [("scope", .text(s)), ("id", .id(i)), ("reason", .text(why))])
+        case .factsFor(let items):
+            return node("facts", [("items", .list(items.map { .record(["seq": int($0.seq), "facts": factsValue($0.facts)]) }))])
+        case .snapshotOf(let n, let h, let rows):
+            return node("snapshot", [("seq", int(n)), ("hash", .bytes(h)), ("rows", .record(rows.mapValues { .list($0) }))])
+        case .ack(let ids, let ns):
+            return node("ack", [("ids", .list(ids.map { .id($0) })), ("seqs", .list(ns.map(int)))])
+        case .reject(let i, let why):
+            return node("reject", [("id", .id(i)), ("reason", .text(why))])
         case .denied(let why): return node("denied", [("reason", .text(why))])
         case .closures(let cs):
             return node("closures", [("items", .list(cs.map { .record(["hash": .bytes($0.hash), "closure": Hash.closureValue($0.closure)]) }))])
-        case .agree(let s, let n, let h, let ok):
-            return node("agree", [("scope", .text(s)), ("seq", int(n)), ("hash", .bytes(h)), ("ok", .bool(ok))])
+        case .agree(let n, let h, let ok):
+            return node("agree", [("seq", int(n)), ("hash", .bytes(h)), ("ok", .bool(ok))])
         case .heard(let f): return node("heard", [("hear", .bytes(f))])
         }
     }
@@ -204,23 +223,20 @@ public enum Wire {
         let t = try text(try need(m, "t"))
         switch t {
         case "hello":
-            let subs = try list(try need(m, "scopes")) { x -> Subscription in
-                let sm = try structOf(x)
-                let md: Mode
-                switch try text(try need(sm, "mode")) {
-                case "whole": md = .whole
-                case "facts": md = .byFacts
-                case let other: throw bad("unknown mode " + other)
-                }
-                return Subscription(scope: try text(try need(sm, "scope")), since: try int64(try need(sm, "since")), mode: md)
+            let md: Mode
+            switch try text(try need(m, "mode")) {
+            case "whole": md = .whole
+            case "facts": md = .byFacts
+            case let other: throw bad("unknown mode " + other)
             }
+            let sub = Subscription(since: try int64(try need(m, "since")), mode: md)
             let tokV = try need(m, "token")
             let tok: String? = tokV.isNull() ? nil : try text(tokV)
-            return .hello(subs: subs, token: tok, spec: Int(try int64(try need(m, "spec"))))
-        case "push": return .push(scope: try text(try need(m, "scope")), entries: try list(try need(m, "entries"), entryFromValue))
-        case "need_facts": return .needFacts(scope: try text(try need(m, "scope")), seqs: try list(try need(m, "seqs"), int64))
+            return .hello(sub: sub, token: tok, spec: Int(try int64(try need(m, "spec"))))
+        case "push": return .push(entries: try list(try need(m, "entries"), entryFromValue))
+        case "need_facts": return .needFacts(seqs: try list(try need(m, "seqs"), int64))
         case "need_closures": return .needClosures(hashes: try list(try need(m, "hashes"), bytes))
-        case "verify": return .verify(scope: try text(try need(m, "scope")), seq: try int64(try need(m, "seq")), hash: try bytes(try need(m, "hash")))
+        case "verify": return .verify(seq: try int64(try need(m, "seq")), hash: try bytes(try need(m, "hash")))
         case "say": return .say(frame: try bytes(try need(m, "say")))
         default: throw bad("unknown client frame " + t)
         }
@@ -237,22 +253,22 @@ public enum Wire {
                 let f: Facts? = fv.isNull() ? nil : try list(fv, changeFromValue)
                 return BatchItem(seq: try int64(try need(im, "seq")), entry: try entryFromValue(try need(im, "entry")), facts: f)
             }
-            return .batch(scope: try text(try need(m, "scope")), items: items, hasMore: try bool(try need(m, "has_more")))
+            return .batch(items: items, hasMore: try bool(try need(m, "has_more")))
         case "facts":
             let items = try list(try need(m, "items")) { x -> FactsItem in
                 let im = try structOf(x)
                 return FactsItem(seq: try int64(try need(im, "seq")), facts: try list(try need(im, "facts"), changeFromValue))
             }
-            return .factsFor(scope: try text(try need(m, "scope")), items: items)
+            return .factsFor(items: items)
         case "snapshot":
             let rm = try structOf(try need(m, "rows"))
             var rows: [TableName: [Value]] = [:]
             for (k, x) in rm { rows[k] = try list(x) { $0 } }
-            return .snapshotOf(scope: try text(try need(m, "scope")), seq: try int64(try need(m, "seq")), hash: try bytes(try need(m, "hash")), rows: rows)
+            return .snapshotOf(seq: try int64(try need(m, "seq")), hash: try bytes(try need(m, "hash")), rows: rows)
         case "ack":
-            return .ack(scope: try text(try need(m, "scope")), ids: try list(try need(m, "ids"), ident), seqs: try list(try need(m, "seqs"), int64))
+            return .ack(ids: try list(try need(m, "ids"), ident), seqs: try list(try need(m, "seqs"), int64))
         case "reject":
-            return .reject(scope: try text(try need(m, "scope")), id: try ident(try need(m, "id")), reason: try text(try need(m, "reason")))
+            return .reject(id: try ident(try need(m, "id")), reason: try text(try need(m, "reason")))
         case "denied": return .denied(reason: try text(try need(m, "reason")))
         case "closures":
             let items = try list(try need(m, "items")) { x -> ClosureItem in
@@ -261,7 +277,7 @@ public enum Wire {
             }
             return .closures(items: items)
         case "agree":
-            return .agree(scope: try text(try need(m, "scope")), seq: try int64(try need(m, "seq")), hash: try bytes(try need(m, "hash")), ok: try bool(try need(m, "ok")))
+            return .agree(seq: try int64(try need(m, "seq")), hash: try bytes(try need(m, "hash")), ok: try bool(try need(m, "ok")))
         case "heard": return .heard(frame: try bytes(try need(m, "hear")))
         default: throw bad("unknown server frame " + t)
         }
@@ -270,17 +286,12 @@ public enum Wire {
 
 // MARK: - The client
 
-/// A scope a client holds: the replica and how it is fed.
-public struct Held {
-    public var replica: Replica
-    public var mode: Mode
-}
-
-/// A peer's end of one connection: its replicas, and what it has queued.
-/// Sans-io: a transport feeds it frames and drains what it queues.
+/// A peer's end of one connection: its replica of the log, and what it has
+/// queued. Sans-io: a transport feeds it frames and drains what it queues.
 public struct Client {
-    public var schema: Schema
-    public private(set) var scopes: [ScopeName: Held]
+    public var schema: Schema { return replica.schema }
+    public private(set) var replica: Replica
+    public private(set) var mode: Mode
     public var token: String?
     public private(set) var linked: Bool
     /// Counts connections, so a live room that has never heard of this
@@ -289,11 +300,12 @@ public struct Client {
     var out: [ClientMsg] // oldest first
     var heardFrames: [[UInt8]] // oldest first
     public private(set) var denied: String?
-    public private(set) var agreed: [(ScopeName, Seq, Bool)]
+    public private(set) var agreed: [(Seq, Bool)]
 
-    public init(schema: Schema, token: String?) {
-        self.schema = schema
-        self.scopes = [:]
+    /// A client over the replica as opened from what was durable.
+    public init(_ replica: Replica, _ mode: Mode, token: String?) {
+        self.replica = replica
+        self.mode = mode
         self.token = token
         self.linked = false
         self.epoch = 0
@@ -303,34 +315,39 @@ public struct Client {
         self.agreed = []
     }
 
-    public static func openClient(_ schema: Schema, _ token: String?) -> Client {
-        return Client(schema: schema, token: token)
+    public static func openClient(_ replica: Replica, _ mode: Mode, _ token: String?) -> Client {
+        return Client(replica, mode, token: token)
     }
 
-    /// The scopes in name order, which is the order the spec walks them.
-    var scopeNames: [ScopeName] { return scopes.keys.sorted { compareText($0, $1) < 0 } }
-
-    /// Hold a scope, with the replica as opened from what was durable.
-    public mutating func subscribe(_ mode: Mode, _ r: Replica) {
-        scopes[r.scope] = Held(replica: r, mode: mode)
+    /// Somebody signed in (`Ark.Protocol.clientSignIn`): the token every
+    /// later hello carries, and every intent authored before anyone had
+    /// signed in made theirs (`Replica.signIn`). A peer used without an
+    /// account has said nothing to any server — `connected` is only called
+    /// once there is a token — so what it authored is pending, and the
+    /// first hello after this pushes all of it.
+    public mutating func signIn(_ who: Ctx, token: String?) {
+        replica.signIn(who)
+        self.token = token
     }
 
     mutating func emit(_ m: ClientMsg) {
         if linked { out.append(m) }
     }
 
-    /// §12.1 A connection opened: hello for every scope at its cursor, then
-    /// push everything pending. What was queued before is dropped.
+    var hello: ClientMsg {
+        return .hello(sub: Subscription(since: replica.cursor, mode: mode), token: token, spec: specVersion)
+    }
+
+    /// §12.1 A connection opened: say hello at the cursor, then push
+    /// everything pending. What was queued before is dropped, since the
+    /// hello resends it all.
     public mutating func connected() {
         linked = true
         epoch += 1
         out = []
         heardFrames = []
-        let subs = scopeNames.map { Subscription(scope: $0, since: scopes[$0]!.replica.cursor, mode: scopes[$0]!.mode) }
-        emit(.hello(subs: subs, token: token, spec: specVersion))
-        for s in scopeNames where !scopes[s]!.replica.pending.isEmpty {
-            emit(.push(scope: s, entries: scopes[s]!.replica.pending))
-        }
+        emit(hello)
+        if !replica.pending.isEmpty { emit(.push(entries: replica.pending)) }
     }
 
     public mutating func disconnected() {
@@ -339,30 +356,27 @@ public struct Client {
         heardFrames = []
     }
 
-    /// Author an intent into a scope and push it if linked.
-    public mutating func mutate(_ s: ScopeName, _ i: Id, _ ctx: Ctx, _ fh: FnHash, _ autos: Args, _ args: Args) -> Result<Entry, Refusal> {
-        guard var held = scopes[s] else { return .failure(.refused("not holding scope " + s)) }
-        switch held.replica.mutate(i, ctx, fh, autos, args) {
+    /// Author an intent and push it if linked. A refusal here is the
+    /// optimistic verdict, on the state this peer has; the authority's may
+    /// differ, and arrives as a `reject` with its own reason.
+    public mutating func mutate(_ i: Id, _ ctx: Ctx, _ fh: FnHash, _ autos: Args, _ args: Args) -> Result<Entry, Refusal> {
+        switch replica.mutate(i, ctx, fh, autos, args) {
         case .failure(let why): return .failure(why)
         case .success(let e):
-            scopes[s] = held
-            emit(.push(scope: s, entries: [e]))
+            emit(.push(entries: [e]))
             return .success(e)
         }
     }
 
-    /// Work on one held replica in place — what a peer that is its own
-    /// authority needs for `localCommit`. `nil` for a scope not held.
-    public mutating func withReplica<T>(_ s: ScopeName, _ body: (inout Replica) throws -> T) rethrows -> T? {
-        guard var held = scopes[s] else { return nil }
-        let r = try body(&held.replica)
-        scopes[s] = held
-        return r
+    /// Work on the replica in place — what a peer that is its own authority
+    /// needs for `localCommit`.
+    public mutating func withReplica<T>(_ body: (inout Replica) throws -> T) rethrows -> T {
+        return try body(&replica)
     }
 
-    /// What a view of a scope is told, and the slate wiped (`Replica.takeChanges`).
-    public mutating func takeChanges(_ s: ScopeName) -> Changes? {
-        return withReplica(s) { $0.takeChanges() }
+    /// What a view is told, and the slate wiped (`Replica.takeChanges`).
+    public mutating func takeChanges() -> Changes {
+        return replica.takeChanges()
     }
 
     /// §12.2 A frame from the server.
@@ -374,47 +388,33 @@ public struct Client {
             denied = why
             linked = false
             out = []
-        case .batch(let s, let items, let more):
-            guard var held = scopes[s] else { return }
+        case .batch(let items, let more):
             for it in items {
-                if let f = it.facts { held.replica.receiveWith(it.seq, it.entry, f) } else { held.replica.receive(it.seq, it.entry) }
+                if let f = it.facts { replica.receiveWith(it.seq, it.entry, f) } else { replica.receive(it.seq, it.entry) }
             }
-            scopes[s] = held
-            let needs = held.replica.needs
-            if !needs.isEmpty { emit(.needFacts(scope: s, seqs: needs)) }
-            if more { emit(.hello(subs: [Subscription(scope: s, since: held.replica.cursor, mode: held.mode)], token: token, spec: specVersion)) }
-        case .factsFor(let s, let items):
-            guard var held = scopes[s] else { return }
-            for it in items { held.replica.receiveFacts(it.seq, it.facts) }
-            scopes[s] = held
-        case .snapshotOf(let s, let n, _, let rows):
+            let needs = replica.needs
+            if !needs.isEmpty { emit(.needFacts(seqs: needs)) }
+            if more { emit(hello) }
+        case .factsFor(let items):
+            for it in items { replica.receiveFacts(it.seq, it.facts) }
+        case .snapshotOf(let n, _, let rows):
             // Below the horizon: the confirmed store is replaced by the
             // snapshot and the cursor moves to it; pending replays on top.
-            guard let held = scopes[s] else { return }
-            let st = MemoryStore(schema: schema)
+            let st = MemoryStore(schema: replica.schema)
             for (t, vs) in rows {
                 for v in vs { if case .record(let row) = v { st.applyChange(.add(t, row)) } }
             }
-            let r = Replica.open(held.replica.schema, s, held.replica.bodies, st, n, held.replica.pending, natives: held.replica.natives)
-            scopes[s] = Held(replica: r, mode: held.mode)
-        case .ack(let s, let ids, let ns):
-            guard var held = scopes[s] else { return }
-            for (i, n) in zip(ids, ns) { held.replica.ack(i, n) }
-            scopes[s] = held
-        case .reject(let s, let i, let why):
-            guard var held = scopes[s] else { return }
-            held.replica.reject(i, .refused(why))
-            scopes[s] = held
+            replica = Replica.open(replica.schema, replica.bodies, st, n, replica.pending, natives: replica.natives)
+        case .ack(let ids, let ns):
+            for (i, n) in zip(ids, ns) { replica.ack(i, n) }
+        case .reject(let i, let why):
+            replica.reject(i, .refused(why))
         case .closures(let cs):
-            // New closures may unblock entries waiting in an inbox.
-            for s in scopeNames {
-                var held = scopes[s]!
-                for c in cs { held.replica.bodies[c.hash] = c.closure }
-                held.replica.retry()
-                scopes[s] = held
-            }
-        case .agree(let s, let n, _, let ok):
-            agreed.append((s, n, ok))
+            // New closures may unblock entries waiting in the inbox.
+            for c in cs { replica.bodies[c.hash] = c.closure }
+            replica.retry()
+        case .agree(let n, _, let ok):
+            agreed.append((n, ok))
         }
     }
 
@@ -423,12 +423,10 @@ public struct Client {
         emit(.say(frame: f))
     }
 
-    /// Ask the authority whether it agrees with every replica's confirmed state.
+    /// Ask the authority whether it agrees with the replica's confirmed state.
     public mutating func verifyAll() {
-        for s in scopeNames {
-            let (n, h) = scopes[s]!.replica.verifyAt()
-            emit(.verify(scope: s, seq: n, hash: h))
-        }
+        let (n, h) = replica.verifyAt()
+        emit(.verify(seq: n, hash: h))
     }
 
     public mutating func takeOutgoing() -> [ClientMsg] {

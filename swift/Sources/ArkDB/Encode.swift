@@ -25,7 +25,7 @@ public enum Encode {
     }
 
     public static func routerValue(_ r: Router) -> Value {
-        return node("router", [("name", txt(r.name)), ("scope", txt(r.scope)), ("uses", .list(r.uses.map(txt)))])
+        return node("router", [("name", txt(r.name)), ("uses", .list(r.uses.map(txt)))])
     }
 
     static func optText(_ s: String?) -> Value { return s.map(txt) ?? .null }
@@ -66,9 +66,7 @@ public enum Encode {
                 ("refs", .list(t.refs.map(ref))),
             ])
         }
-        return .list(sch.scopes.map { s in
-            node("scope", [("name", txt(s.name)), ("tables", .list(s.tables.map(table)))])
-        })
+        return .list(sch.tables.map(table))
     }
 
     public static func tyValue(_ t: Ty) -> Value {
@@ -100,7 +98,6 @@ public enum Encode {
             ("name", txt(fn.name)),
             ("deps", .record(deps)),
             ("kind", txt(kind)),
-            ("scope", fn.scope.map(txt) ?? .null),
             ("router", fn.router.map(txt) ?? .null),
             ("uses", .list(fn.uses.map(txt))),
             ("autos", .list(fn.autos.map(auto))),

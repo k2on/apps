@@ -215,8 +215,8 @@ func authoringTests(_ vectorModule: ArkDB.Module) throws {
         let hm = HarkenDomain.module()
         let m = try hm.ir()
         check("harken's phone domain verifies", Verify.verify(m).isSuccessV)
-        check("routers: library, playlists with its two middleware", m.routers == [ArkDB.Router(name: "library", scope: "library", uses: []),
-                                                                                  ArkDB.Router(name: "playlists", scope: "playlists", uses: ["signed_in", "owned"])])
+        check("routers: library, playlists with its two middleware", m.routers == [ArkDB.Router(name: "library", uses: []),
+                                                                                  ArkDB.Router(name: "playlists", uses: ["signed_in", "owned"])])
         check("function order: middleware first, then routes", m.functions.map { $0.name } == ["library", "signed_in", "owned", "create_playlist", "add_to_playlist", "remove_from_playlist", "playlists", "playlist_items"])
         check("each procedure runs the chain it was built from",
               m.lookupFunction("create_playlist")?.uses == ["signed_in"] && m.lookupFunction("add_to_playlist")?.uses == ["signed_in", "owned"]
@@ -307,8 +307,10 @@ func authoringTests(_ vectorModule: ArkDB.Module) throws {
             f.body = f.body.map { if case .sInsert(let t, let e, _) = $0 { return .sInsert(t, e, ["name"]) }; return $0 } } }.contains { $0.hasPrefix("OnNotUnique") })
         check("NotProvided", complaints { edit(&$0, "playlists") { $0.body.insert(.sLet(99, .provided("owned")), at: 0) } }.contains { $0.hasPrefix("NotProvided") })
         check("MiddlewareInput", complaints { edit(&$0, "playlist_items") { $0.input = [] } }.contains { $0.hasPrefix("MiddlewareInput") })
-        check("ExistsAcrossScopes", complaints { edit(&$0, "add_to_playlist") { f in
-            f.input = f.input.map { var x = $0; if x.name == "track_id" { x.field.checks = [.exists(nil)] }; return x } } }.contains { $0.hasPrefix("ExistsAcrossScopes") })
+        check("an exists check on an id of a table that is not there", complaints { edit(&$0, "add_to_playlist") { f in
+            f.input = f.input.map { var x = $0; if x.name == "track_id" { x.field = Field(.id("nowhere"), checks: [.exists(nil)]) }; return x } } }.contains("UnknownTable nowhere"))
+        check("an id column that is neither its table's key nor a reference", complaints {
+            $0.schema.tables[0].columns.append(Column("stray_id", .id($0.schema.tables[0].name))) }.contains { $0.hasPrefix("BadSchema IdColumnWithoutRef") })
         check("routers: a use that is not middleware", complaints { $0.routers[1].uses.append("playlists") }.contains { $0.hasPrefix("NotMiddleware") })
         check("the module as emitted draws no complaint", complaints { _ in }.isEmpty)
     }

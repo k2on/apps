@@ -2,9 +2,10 @@ import Foundation
 
 /// The version of this specification a module was written against.
 public typealias SpecVersion = Int
-/// Spec version 2: routers, middleware, input schemas and checks, and the
-/// three table writes in place of `put` (spec/AUTHORING.md §1).
-public let specVersion: SpecVersion = 2
+/// Spec version 3: one log and one set of tables. Version 2 brought
+/// routers, middleware, input schemas and checks, and the three table
+/// writes in place of `put` (spec/AUTHORING.md §1).
+public let specVersion: SpecVersion = 3
 
 /// A local variable, alpha-normalised: the `n`th binding in a function.
 public typealias Sym = Int
@@ -15,8 +16,8 @@ public struct Module: Equatable {
     public var schema: Schema
     /// In declaration order; a helper may be called only by functions after it.
     public var functions: [Function]
-    /// §1.1 The routers: each names its scope and the middleware declared
-    /// on it, in declaration order.
+    /// §1.1 The routers: each a name and the middleware declared on it, in
+    /// declaration order.
     public var routers: [Router]
     /// §3.9 The live section: frame types by name.
     public var live: [LiveFrame]
@@ -38,14 +39,13 @@ public struct Module: Equatable {
     }
 }
 
-/// §1.1 A router: a name, the scope every procedure on it reads and
-/// writes, and the middleware declared on it by function name, in
-/// declaration order. A procedure runs its own `uses`, a subsequence.
+/// §1.1 A router: a named group of procedures, and the middleware declared
+/// on it by function name, in declaration order. A procedure runs its own
+/// `uses`, a subsequence. It names no tables: any function may read any.
 public struct Router: Equatable {
     public var name: String
-    public var scope: ScopeName
     public var uses: [String]
-    public init(name: String, scope: ScopeName, uses: [String]) { self.name = name; self.scope = scope; self.uses = uses }
+    public init(name: String, uses: [String]) { self.name = name; self.uses = uses }
 }
 
 public struct LiveFrame: Equatable {
@@ -116,7 +116,7 @@ public indirect enum Check: Equatable {
     case range(Int?, Int?, String?)
     /// List: at least one element.
     case nonEmpty(String?)
-    /// Id: a row with that key exists in the procedure's scope.
+    /// Id: a row with that key exists.
     case exists(String?)
     /// Any: the expression, over `.arg(<this field>)`, is true.
     case refine(Expr, String?)
@@ -147,9 +147,6 @@ public struct Refine: Equatable {
 public struct Function: Equatable {
     public var name: String
     public var kind: FnKind
-    /// The scope a procedure (derived from its router) or a middleware
-    /// belongs to; nil for helpers.
-    public var scope: ScopeName?
     /// The router a procedure is on; nil for helpers and middleware.
     public var router: String?
     /// The middleware this procedure runs before its body, in order: a
@@ -167,8 +164,8 @@ public struct Function: Equatable {
     public var body: Block
     /// The author's names for symbols; not hashed, not required.
     public var names: [Sym: String]
-    public init(name: String, kind: FnKind, scope: ScopeName?, router: String? = nil, uses: [String] = [], autos: [NamedAuto], input: [NamedField], refine: [Refine] = [], ret: Ty?, body: Block, names: [Sym: String] = [:]) {
-        self.name = name; self.kind = kind; self.scope = scope; self.router = router; self.uses = uses; self.autos = autos
+    public init(name: String, kind: FnKind, router: String? = nil, uses: [String] = [], autos: [NamedAuto], input: [NamedField], refine: [Refine] = [], ret: Ty?, body: Block, names: [Sym: String] = [:]) {
+        self.name = name; self.kind = kind; self.router = router; self.uses = uses; self.autos = autos
         self.input = input; self.refine = refine; self.ret = ret; self.body = body; self.names = names
     }
 

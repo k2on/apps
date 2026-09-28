@@ -208,7 +208,7 @@ func hashVectors(_ schema: Schema) throws {
             // hash of an empty list.
             let empty = MemoryStore(schema: schema)
             var wider = schema
-            wider.scopes[0].tables.append(Table("nothing", columns: [Column("id", .int)], key: ["id"]))
+            wider.tables.append(Table("nothing", columns: [Column("id", .int)], key: ["id"]))
             check("an empty store hashes its tables' names", Hash.stateHash(empty) != Sha256.hash(Canon.encode(.list([]))))
             check("an empty table moves the hash", Hash.stateHash(MemoryStore(schema: wider)) != Hash.stateHash(empty))
             check("empty demo store hash", Hex.encode(Hash.stateHash(empty)) == Sha256.hex(Canon.encode(.list(schema.tableNames.map { .list([.text($0), .list([])]) }))))
@@ -252,8 +252,8 @@ func verifyVectors() throws {
             let verifies = (obj["verifies"] as? Bool) ?? false
             check("the decoder accepts a module that verifies", verifies && Encode.toValue(m) == mv)
             switch Verify.verify(m) {
-            case .success(let v): check("the v2 rules accept it, and it is already in verified form", verifies && v == m)
-            case .failure(let e): check("the v2 rules accept it", !verifies, e.description)
+            case .success(let v): check("the rules accept it, and it is already in verified form", verifies && v == m)
+            case .failure(let e): check("the rules accept it", !verifies, e.description)
             }
         }
     }
@@ -452,7 +452,6 @@ func rebaseVectors() throws {
         let m = try Decode.fromValue(try value(obj, "module"))
         let sch = m.schema
         let bodies = Hash.closures(m)
-        let scope = "demo"
         var entries: [(Seq, Entry)] = []
         for ev in try value(obj, "entries").asList() {
             let n = ev.field("seq").asInt()
@@ -465,7 +464,7 @@ func rebaseVectors() throws {
         check("four entries with their facts", entries.count == 4 && facts.count == 4)
 
         // The authority replays every entry in order and reaches the final hash.
-        var auth = Authority(sch, scope, bodies)
+        var auth = Authority(sch, bodies)
         for (i, (n, e)) in entries.enumerated() {
             switch auth.sequenceEntry(e) {
             case .appended(let got, let fs):
@@ -485,7 +484,7 @@ func rebaseVectors() throws {
         }
 
         // Bob: holds the code, receives every entry in order.
-        var bob = Replica.open(sch, scope, bodies, MemoryStore(schema: sch), 0, [])
+        var bob = Replica.open(sch, bodies, MemoryStore(schema: sch), 0, [])
         for (n, e) in entries { bob.receive(n, e) }
         check("bob reaches the final hash by replay", Hex.encode(bob.verifyAt().1) == finalHash)
         check("bob's cursor is 4", bob.cursor == 4)
@@ -494,7 +493,7 @@ func rebaseVectors() throws {
         check("a duplicate delivery is a no-op", bob.cursor == bobBefore.cursor && bob.inbox.isEmpty && bob.verifyAt().1 == bobBefore.verifyAt().1)
 
         // Carol: no code at all, applies by facts.
-        var carol = Replica.open(sch, scope, [:], MemoryStore(schema: sch), 0, [])
+        var carol = Replica.open(sch, [:], MemoryStore(schema: sch), 0, [])
         for (n, e) in entries { carol.receive(n, e) }
         check("without closures carol asks for every entry's facts", carol.needs == [1, 2, 3, 4], "\(carol.needs)")
         for (i, (n, _)) in entries.enumerated() { carol.receiveFacts(n, facts[i]) }
@@ -502,7 +501,7 @@ func rebaseVectors() throws {
 
         // Alice: the rebase, step by step, as the vector's numbers say.
         let e1 = entries[0].1, e2 = entries[1].1, e3 = entries[2].1, e9 = entries[3].1
-        var alice = Replica.open(sch, scope, bodies, MemoryStore(schema: sch), 0, [])
+        var alice = Replica.open(sch, bodies, MemoryStore(schema: sch), 0, [])
         switch alice.mutate(e1.id, Ctx(user: e1.actor, session: e1.session), e1.fn, e1.autos, e1.args) {
         case .failure(let r): check("alice creates", false, r.text)
         case .success(let e): check("alice's entry is the vector's", e == e1)
@@ -531,7 +530,7 @@ func rebaseVectors() throws {
         alice.receive(3, e3)
         check("the rebase is reported as a rebuild", alice.takeChanges() == .rebuilt)
         check("after the rebase alice's track is third", posOf(alice, track9) == (try value(obj, "alice_after_rebase_pos_of_9")), posOf(alice, track9).brief)
-        var bob3 = Replica.open(sch, scope, bodies, MemoryStore(schema: sch), 0, [])
+        var bob3 = Replica.open(sch, bodies, MemoryStore(schema: sch), 0, [])
         for (n, e) in entries.prefix(3) { bob3.receive(n, e) }
         check("alice's confirmed state is bob's", alice.verifyAt() == bob3.verifyAt())
         alice.receiveFacts(4, facts[3])
@@ -558,14 +557,14 @@ func rebaseVectors() throws {
         }
         var daveBodies = bodies
         daveBodies[hAdd] = wrong
-        var dave = Replica.open(sch, scope, daveBodies, MemoryStore(schema: sch), 0, [])
+        var dave = Replica.open(sch, daveBodies, MemoryStore(schema: sch), 0, [])
         for (i, (n, e)) in entries.enumerated() { dave.receiveWith(n, e, facts[i]) }
         check("a divergent runtime is detected", dave.diverged == [2, 3, 4], "\(dave.diverged)")
         check("and healed by the facts", Hex.encode(dave.verifyAt().1) == finalHash)
 
         // Eve has no server: she is her own authority.
-        var eve = Replica.open(sch, scope, bodies, MemoryStore(schema: sch), 0, [])
-        var eveAuth = Authority(sch, scope, bodies)
+        var eve = Replica.open(sch, bodies, MemoryStore(schema: sch), 0, [])
+        var eveAuth = Authority(sch, bodies)
         let hCreate = e1.fn
         let id2 = Value.id(Id(uuid: "00000000-0000-0000-0000-000000000002")!)
         _ = eve.mutate(Id(uuid: "00000000-0000-0000-0000-0000000000c9")!, Ctx(user: "eve", session: "eve-session"), hCreate, ["id": id2], ["name": .text("Road")])
@@ -576,7 +575,7 @@ func rebaseVectors() throws {
         check("and her state is her authority's", eve.verifyAt().1 == Hash.stateHash(eveAuth.store))
 
         // A refusal by the view is not recorded.
-        var frank = Replica.open(sch, scope, bodies, MemoryStore(schema: sch), 0, [])
+        var frank = Replica.open(sch, bodies, MemoryStore(schema: sch), 0, [])
         if case .failure(let why) = frank.mutate(Id.nil_, Ctx(user: "frank", session: "s"), hCreate, ["id": id2], ["name": .text(" ")]) {
             check("a refused intent is the mutator's verdict", why == .refused("a playlist needs a name"))
         } else {
@@ -601,27 +600,26 @@ func rebaseVectors() throws {
         check("ids are kept below the horizon", auth5.log.seqOf(e1.id) == 1)
 
         // The client machine over the same entries.
-        var client = Client.openClient(sch, "tok")
-        client.subscribe(.whole, Replica.open(sch, scope, bodies, MemoryStore(schema: sch), 0, []))
+        var client = Client.openClient(Replica.open(sch, bodies, MemoryStore(schema: sch), 0, []), .whole, "tok")
         client.connected()
         let outgoing = client.takeOutgoing()
-        if outgoing.count == 1, case .hello(let subs, let tok, let spec) = outgoing[0] {
-            check("connected says hello", subs == [Subscription(scope: scope, since: 0, mode: .whole)] && tok == "tok" && spec == specVersion)
+        if outgoing.count == 1, case .hello(let sub, let tok, let spec) = outgoing[0] {
+            check("connected says hello", sub == Subscription(since: 0, mode: .whole) && tok == "tok" && spec == specVersion)
         } else {
             check("connected says hello", false, "\(outgoing.count) frames")
         }
-        client.recv(.batch(scope: scope, items: entries.map { BatchItem(seq: $0.0, entry: $0.1, facts: nil) }, hasMore: false))
-        check("a whole client replays the batch", client.scopes[scope].map { Hex.encode($0.replica.verifyAt().1) } == finalHash)
+        client.recv(.batch(items: entries.map { BatchItem(seq: $0.0, entry: $0.1, facts: nil) }, hasMore: false))
+        check("a whole client replays the batch", Hex.encode(client.replica.verifyAt().1) == finalHash)
         check("and needs no facts", client.takeOutgoing().isEmpty)
         client.verifyAll()
         let verifyOut = client.takeOutgoing()
-        if verifyOut.count == 1, case .verify(let s, let n, let h) = verifyOut[0] {
-            check("verify carries the cursor and the hash", s == scope && n == 4 && Hex.encode(h) == finalHash)
+        if verifyOut.count == 1, case .verify(let n, let h) = verifyOut[0] {
+            check("verify carries the cursor and the hash", n == 4 && Hex.encode(h) == finalHash)
         } else {
             check("verify carries the cursor and the hash", false)
         }
-        client.recv(.agree(scope: scope, seq: 4, hash: Hex.decode(finalHash)!, ok: true))
-        check("agree is recorded", client.agreed.count == 1 && client.agreed[0].2)
+        client.recv(.agree(seq: 4, hash: Hex.decode(finalHash)!, ok: true))
+        check("agree is recorded", client.agreed.count == 1 && client.agreed[0].1)
         client.recv(.heard(frame: [1, 2, 3]))
         check("heard is taken", client.takeHeard() == [[1, 2, 3]])
         client.say([9])
@@ -631,49 +629,46 @@ func rebaseVectors() throws {
         check("say is dropped while unlinked", client.takeOutgoing().isEmpty)
 
         // A facts-mode client with no code asks for the facts and gets there.
-        var byFacts = Client.openClient(sch, nil)
-        byFacts.subscribe(.byFacts, Replica.open(sch, scope, [:], MemoryStore(schema: sch), 0, []))
+        var byFacts = Client.openClient(Replica.open(sch, [:], MemoryStore(schema: sch), 0, []), .byFacts, nil)
         byFacts.connected()
         _ = byFacts.takeOutgoing()
-        byFacts.recv(.batch(scope: scope, items: entries.map { BatchItem(seq: $0.0, entry: $0.1, facts: nil) }, hasMore: false))
+        byFacts.recv(.batch(items: entries.map { BatchItem(seq: $0.0, entry: $0.1, facts: nil) }, hasMore: false))
         let asks = byFacts.takeOutgoing()
-        if asks.count == 1, case .needFacts(let s, let ns) = asks[0] {
-            check("a client without the code asks for facts", s == scope && ns == [1, 2, 3, 4])
+        if asks.count == 1, case .needFacts(let ns) = asks[0] {
+            check("a client without the code asks for facts", ns == [1, 2, 3, 4])
         } else {
             check("a client without the code asks for facts", false, "\(asks.count)")
         }
-        byFacts.recv(.factsFor(scope: scope, items: entries.enumerated().map { FactsItem(seq: $0.element.0, facts: facts[$0.offset]) }))
-        check("and reaches the final hash", byFacts.scopes[scope].map { Hex.encode($0.replica.verifyAt().1) } == finalHash)
+        byFacts.recv(.factsFor(items: entries.enumerated().map { FactsItem(seq: $0.element.0, facts: facts[$0.offset]) }))
+        check("and reaches the final hash", Hex.encode(byFacts.replica.verifyAt().1) == finalHash)
 
         // A client with pending work that is pushed on connect, acked, and one rejected.
-        var pusher = Client.openClient(sch, "alice")
-        pusher.subscribe(.whole, Replica.open(sch, scope, bodies, MemoryStore(schema: sch), 0, []))
-        _ = pusher.mutate(scope, e1.id, Ctx(user: e1.actor, session: e1.session), e1.fn, e1.autos, e1.args)
+        var pusher = Client.openClient(Replica.open(sch, bodies, MemoryStore(schema: sch), 0, []), .whole, "alice")
+        _ = pusher.mutate(e1.id, Ctx(user: e1.actor, session: e1.session), e1.fn, e1.autos, e1.args)
         check("unlinked, nothing is queued", pusher.takeOutgoing().isEmpty)
         pusher.connected()
         let onConnect = pusher.takeOutgoing()
         check("connected pushes the pending intent after hello", onConnect.count == 2)
-        if onConnect.count == 2, case .push(let s, let es) = onConnect[1] { check("the push carries the entry", s == scope && es == [e1]) }
-        pusher.recv(.ack(scope: scope, ids: [e1.id], seqs: [1]))
-        check("an ack confirms it", pusher.scopes[scope]!.replica.cursor == 1 && pusher.scopes[scope]!.replica.pending.isEmpty)
-        _ = pusher.mutate(scope, e9.id, Ctx(user: e9.actor, session: e9.session), e9.fn, e9.autos, e9.args)
-        pusher.recv(.reject(scope: scope, id: e9.id, reason: "not yours"))
-        check("a reject drops the intent and keeps the verdict", pusher.scopes[scope]!.replica.pending.isEmpty && pusher.scopes[scope]!.replica.rejections.last?.why == .refused("not yours"))
+        if onConnect.count == 2, case .push(let es) = onConnect[1] { check("the push carries the entry", es == [e1]) }
+        pusher.recv(.ack(ids: [e1.id], seqs: [1]))
+        check("an ack confirms it", pusher.replica.cursor == 1 && pusher.replica.pending.isEmpty)
+        _ = pusher.mutate(e9.id, Ctx(user: e9.actor, session: e9.session), e9.fn, e9.autos, e9.args)
+        pusher.recv(.reject(id: e9.id, reason: "not yours"))
+        check("a reject drops the intent and keeps the verdict", pusher.replica.pending.isEmpty && pusher.replica.rejections.last?.why == .refused("not yours"))
         // A snapshot below the horizon replaces the confirmed store.
         let snapRows: [TableName: [Value]] = ["playlist": auth5.store.scan("playlist").map { .record($0) }, "item": auth5.log.base.store.scan("item").map { .record($0) }]
-        pusher.recv(.snapshotOf(scope: scope, seq: 2, hash: auth5.log.base.hash, rows: snapRows))
-        check("a snapshot moves the cursor to it", pusher.scopes[scope]!.replica.cursor == 2 && pusher.scopes[scope]!.replica.verifyAt().1 == auth5.log.base.hash)
-        pusher.recv(.batch(scope: scope, items: [BatchItem(seq: 3, entry: e3, facts: nil), BatchItem(seq: 4, entry: e9, facts: nil)], hasMore: false))
-        check("and the tail brings it to the head", Hex.encode(pusher.scopes[scope]!.replica.verifyAt().1) == finalHash)
+        pusher.recv(.snapshotOf(seq: 2, hash: auth5.log.base.hash, rows: snapRows))
+        check("a snapshot moves the cursor to it", pusher.replica.cursor == 2 && pusher.replica.verifyAt().1 == auth5.log.base.hash)
+        pusher.recv(.batch(items: [BatchItem(seq: 3, entry: e3, facts: nil), BatchItem(seq: 4, entry: e9, facts: nil)], hasMore: false))
+        check("and the tail brings it to the head", Hex.encode(pusher.replica.verifyAt().1) == finalHash)
         // Closures arriving unblock a replica without code.
-        var late = Client.openClient(sch, nil)
-        late.subscribe(.whole, Replica.open(sch, scope, [:], MemoryStore(schema: sch), 0, []))
+        var late = Client.openClient(Replica.open(sch, [:], MemoryStore(schema: sch), 0, []), .whole, nil)
         late.connected()
         _ = late.takeOutgoing()
-        late.recv(.batch(scope: scope, items: entries.map { BatchItem(seq: $0.0, entry: $0.1, facts: nil) }, hasMore: false))
+        late.recv(.batch(items: entries.map { BatchItem(seq: $0.0, entry: $0.1, facts: nil) }, hasMore: false))
         _ = late.takeOutgoing()
         late.recv(.closures(items: bodies.map { ClosureItem(hash: $0.key, closure: $0.value) }))
-        check("closures received over the wire unblock the inbox", Hex.encode(late.scopes[scope]!.replica.verifyAt().1) == finalHash)
+        check("closures received over the wire unblock the inbox", Hex.encode(late.replica.verifyAt().1) == finalHash)
         // …and a closure decoded from its wire form runs identically.
         let wireClosure = try Decode.closureFromValue(Hash.closureValue(bodies[hAdd]!))
         check("a closure survives the wire", Hash.functionHash(wireClosure) == hAdd)
@@ -685,10 +680,10 @@ func rebaseVectors() throws {
 func storeRules(_ schema0: Schema) {
     run("store/rules") {
         // A schema with a nullable unique column, a reference, and an enum.
-        let sch = Schema(scopes: [Scope("s", tables: [
+        let sch = Schema(tables: [
             Table("parent", columns: [Column("id", .id("parent")), Column("code", .text, nullable: true), Column("kind", .enumOf(["a", "b"]))], key: ["id"], indexes: [Index(["code"], unique: true)]),
             Table("child", columns: [Column("id", .id("child")), Column("parent_id", .id("parent"), nullable: true)], key: ["id"], refs: [Ref("parent_id", "parent")]),
-        ])])
+        ])
         let st = MemoryStore(schema: sch)
         let p1 = Id(uuid: "00000000-0000-0000-0000-000000000001")!
         let p2 = Id(uuid: "00000000-0000-0000-0000-000000000002")!
