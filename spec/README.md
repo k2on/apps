@@ -20,7 +20,7 @@ maps, a rebase is recomputing a value. What it must be is exact.
 |---|---|---|
 | 1 | `Ark.Value` | the eight run-time values and the one total order over them |
 | 1.3 | `Ark.Canon` | the canonical encoding: RFC 8949 §4.2.1 deterministic CBOR plus the mapping; the decoder that refuses anything else |
-| 2 | `Ark.Schema` | scopes, tables, columns, indexes, references; the derived relationships; well-formedness |
+| 2 | `Ark.Schema` | tables, columns, indexes, references; the derived relationships; well-formedness |
 | 3 | `Ark.IR` | the function language: mutators, queries, helpers, guards and providers; routers (§3.10); input fields and their checks (§3.11); statements — the three table writes among them — expressions, plans, the standard library's names |
 | 4 | `Ark.Store` | the store as a value: `get`, `scan`, `put`, `delete`, and the three writes a body makes of them — insert (§4.3a), upsert (§4.3b), update (§4.3c); constraints as refusals; what a write reports |
 | 5 | `Ark.Std`, `Ark.Std.Unicode` | the standard library's semantics; the three pinned Unicode tables, generated from UCD 16.0.0 by `tools/GenUnicode.hs` |
@@ -28,10 +28,10 @@ maps, a rebase is recomputing a value. What it must be is exact.
 | 7 | `Ark.Encode` | the module as a value (its wire and storage form) and alpha-normalisation |
 | 8 | `Ark.Hash`, `Ark.Sha256` | the state hash; closures and the function hash, which covers the helpers a function calls and the middleware it runs; SHA-256 itself, so the spec imports nothing |
 | 9 | `Ark.Verify` | what a module must satisfy before anything runs, prints or hashes it |
-| 10 | `Ark.Log` | an entry; a scope's log with the facts kept beside each entry; snapshots, the horizon, the state at any retained sequence from facts alone |
-| 11 | `Ark.Peer` | the replica: pending intents, the optimistic view, the rebase, applying by intent or by facts, divergence detection; the authority: sequencing, dedupe, verdicts, compaction, retirement of closures no retained entry names, adoption of a scope; `localCommit`, the serverless peer |
+| 10 | `Ark.Log` | an entry; the module's one log with the facts kept beside each entry; snapshots, the horizon, the state at any retained sequence from facts alone |
+| 11 | `Ark.Peer` | the replica: pending intents, the optimistic view, the rebase, applying by intent or by facts, divergence detection; the authority: sequencing, dedupe, verdicts, compaction, retirement of closures no retained entry names, adoption of a log; `localCommit`, the serverless peer |
 | 7.2 | `Ark.Decode` | a module, a closure, a schema or a type from its value: the inverse of `Ark.Encode`, strict about shape |
-| 12 | `Ark.Protocol` | the frames as values and their encodings; the client machine (subscriptions, hello, push, pages, facts, snapshots, closures, verify) and the server machine (authenticate once, hold every entry to its identity, sequence, fan out a page at a time, rooms) |
+| 12 | `Ark.Protocol` | the frames as values and their encodings; the client machine (the subscription, hello, push, pages, facts, snapshots, closures, verify) and the server machine (authenticate once, hold every entry to its identity (or an older login of the same user, where the server allows it), give every refusal a reason, sequence, fan out a page at a time, rooms) |
 | 13 | `Ark.View` | incremental views over a plan: hydrate, push, patches, refill under a limit, child changes as parent updates, the correctness contract; a maintained count is a view's length |
 | 14 | `Ark.Live` | rooms per account over opaque frames: arrive, speak, depart; a snapshot kept when a room empties; a repeated hello is paging |
 | 15 | `Ark.Sim` | the seeded fleet: a server, clients, a network that reorders, duplicates and drops; partition, heal, step, settle |

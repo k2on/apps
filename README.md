@@ -6,8 +6,8 @@ natively in Rust, Swift and Kotlin — and harken, the first app on it.
 - `docs/arkdb.md` — the design: a survey of Petros and how harken used it,
   what compiling the domain to FFI cost, and the architecture of the
   successor — a domain written once, in one vocabulary spelt three ways,
-  emitted as one IR and run natively by every peer; an intent log per
-  scope with facts retained beside it; snapshots; authority as a role;
+  emitted as one IR and run natively by every peer; one intent log
+  with facts retained beside it; snapshots; authority as a role;
   and a conformance suite every runtime is held to.
 - `spec/` — the specification, as a Haskell program: one module per
   section, each normative, the pinned Unicode tables, `arkc` (verify,

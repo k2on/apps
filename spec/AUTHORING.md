@@ -18,7 +18,8 @@ its Rust print are the same function. Names of `let` bindings and closure
 parameters travel in `fnNames`, outside the hash, so the print reads as the
 author wrote it.
 
-Spec version **2**. Section numbers refer to `spec/README.md`.
+Spec version **3**. (Version 2 had scopes; `docs/scopes.md` says what they
+were and why they are gone.) Section numbers refer to `spec/README.md`.
 
 ## 1. IR additions (`Ark.IR`, `Ark.Encode`, `Ark.Decode`)
 
@@ -27,7 +28,6 @@ Spec version **2**. Section numbers refer to `spec/README.md`.
 ```haskell
 data Router = Router
   { rtName  :: Text          -- "playlists"
-  , rtScope :: ScopeName     -- the scope every procedure on it reads and writes
   , rtUses  :: [Text]        -- the middleware declared on it, in declaration order
   }
 -- Module gains:  modRouters :: [Router]
@@ -44,11 +44,9 @@ router declares: in harken `create_playlist` is `signed_in.input(..)` and
 `["signed_in", "owned"]`. `rtUses` is the union in declaration order and a
 procedure's `fnUses` must be a subsequence of it (verifier: `UsesNotOnRouter`).
 
-`fnScope` is derived: a procedure's scope is its router's. Queries are on
-routers too and read their router's scope only (a query over two scopes is
-two queries and a join on the client, as harken already does). Helpers have
-no router. Middleware (below) names its scope directly, and a router may use
-only middleware of its own scope.
+A router is a group of procedures and the middleware chains built on them;
+it names no tables. Any procedure, query or middleware may read and write
+any table of the module. Helpers have no router.
 
 ### 1.2 Middleware
 
@@ -59,7 +57,7 @@ data FnKind = Mutator | Query | Helper
                        -- the body reads as  EProvided <middleware name>
 ```
 
-A middleware function has `fnScope = Just s`, `fnInput` (the fields of the
+A middleware function has `fnInput` (the fields of the
 procedure's input it reads, by name and type — the verifier requires every
 procedure using it to have those fields with those types), a body over the
 same `db`, and for `Provide` an `fnRet`. `Expr` gains `EProvided Text`.
@@ -84,7 +82,7 @@ data Check
   | CMaxLen Int (Maybe Text)
   | CRange (Maybe Int) (Maybe Int) (Maybe Text)   -- int: lo ≤ v ≤ hi, either bound optional
   | CNonEmpty (Maybe Text)             -- list: at least one element
-  | CExists (Maybe Text)               -- id: a row with that key exists in the procedure's scope
+  | CExists (Maybe Text)               -- id: a row with that key exists
   | CRefine Expr (Maybe Text)          -- any: the expression, over EArg <this field>, is true
 -- Function gains: fnRefine :: [(Expr, Maybe Text)]   -- over the whole input, after the fields
 ```
@@ -103,8 +101,6 @@ reference defines (`Ark.Eval.defaultMessage`) and every runtime copies:
 
 A failing check is a **refusal** with that message, for mutators and for
 queries alike (`Ark.Eval.queryClosure` returns `Either Refusal Value` now).
-`CExists` is verified only for an id whose table is in the procedure's
-scope; on another scope's id it is a verifier error (`ExistsAcrossScopes`).
 A field of type `TOption t` applies its checks when the value is `Some`.
 
 Runtimes expose the same walk as a **form validator**: `check(schema,
@@ -137,8 +133,8 @@ t e []` is exactly the old `SPut t e`.
 `Sym`, `SLet` (reads still only as a whole right-hand side), `SIf`, `SFor`,
 `SDelete`, `SRefuse`, `SReturn`, all of `Expr`, `Plan`, `Pred`, `StdFn`,
 `Auto`, `fnAutos`, `fnNames`, the schema, the log, the peer, the protocol,
-`live`. The verifier gains: routers (names unique, scope exists, uses are
-middleware of that scope), middleware input compatibility, `CExists` scope,
+`live`. The verifier gains: routers (names unique, uses are
+middleware), middleware input compatibility, `CExists` on an id,
 `.on` uniqueness, `EProvided` only of a `Provide` in the function's own `fnUses`.
 
 ## 2. The vocabulary
@@ -236,22 +232,22 @@ crate's own naming them):
 
 ```rust
 // schema.rs
-pub struct Playlists {                       // a scope: its tables, in order
+pub struct Harken {                          // the module's tables, in order
     pub playlist: Table<Playlist>,
     pub playlist_item: Table<PlaylistItem>,
 }
-impl Scope for Playlists {
-    const NAME: &str = "playlists";
+impl Tables for Harken {
     fn open() -> Self {
-        Playlists {
+        Harken {
             playlist: table(),
             playlist_item: table(),
         }
     }
 }
 // `open()` is how a body's `db` is made, and the order its fields are
-// written is the schema's table order for the scope: no host can enumerate
-// a struct's fields, so the scope says them once, here. Swift and Kotlin
+// written is the schema's table order: no host can enumerate a struct's
+// fields, so the tables say them once, here. `arkc gen --name Harken` names
+// the struct (default `Tables`). Swift and Kotlin
 // spell the same constructor in their own declarations.
 
 pub struct Playlist {
@@ -306,8 +302,8 @@ impl Input for CreatePlaylist {
     }
 }
 
-pub fn playlists() -> Router<Playlists> {
-    let playlists = router::<Playlists>("playlists");
+pub fn playlists() -> Router<Harken> {
+    let playlists = router::<Harken>("playlists");
     let signed_in = playlists.guard("signed_in", |ctx, _db| when(ctx.user.is_empty(), || refuse("sign in first")));
     let owned = signed_in.provide("owned", |ctx, db, input: &Owned| {
         db.playlist
@@ -461,7 +457,7 @@ in that order that calls it (a helper a helper calls precedes its caller).
 normalised, so the bytes equal `verify`'s output.
 
 **Middleware.** `fnInput` is the declared input type's fields by name and
-type, checks stripped; `fnScope` is the router's; `fnRouter` is `null`;
+type, checks stripped; `fnRouter` is `null`;
 `fnUses` is `[]`. A procedure's `fnUses` is the chain it was built from,
 oldest first.
 
@@ -478,7 +474,7 @@ one column — and a plan's `Related.rName` is that name.
 
 **Input types are named after the function that declares them**, in
 PascalCase: `CreatePlaylist` for `create_playlist`, `Owned` for the `owned`
-provider's input. A name that is already a scope's or a row's gets `Input`
+provider's input. A name that is already the tables' or a row's gets `Input`
 appended. Two procedures with the same input fields still get a type each
 (`AddToPlaylist`, `RemoveFromPlaylist`): the module does not carry a type's
 name, so the print cannot know that an author shared one, and a type per
@@ -516,11 +512,11 @@ module file names. Swift: `import ArkAuthoring`. Kotlin: `package <p>`
 import, so the two are named). Kotlin spells `when` as `` `when` `` (a
 hard keyword), a key as `Key1<A>`/`Key2<A, B>`/`Key3<A, B, C>` on the row
 class and positional arguments at a call, `orderBy` and `routes` as
-varargs, a scope and a row and an input as a class whose
-`companion object : Scope.Of` / `Row.Of<T>` / `Input.Of<T>` carries
+varargs, the tables and a row and an input as a class whose
+`companion object : Tables.Of` / `Row.Of<T>` / `Input.Of<T>` carries
 `NAME`, `columns()`, `schema()` and the column and relation constants; an
-unused closure parameter is `_`; a scope has no `open()`, because the
-Kotlin runtime reads a scope's, a row's and an input's fields from its
+unused closure parameter is `_`; the tables have no `open()`, because the
+Kotlin runtime reads the tables', a row's and an input's fields from its
 constructor, in declaration order; the module file is
 `fun module(): Module = Module(library(), playlists())`. The Kotlin runtime's
 `dev.arkdb.authoring` is the reference for that spelling, and `arkc gen
@@ -537,9 +533,10 @@ reference writes them.
 
 ```
 module      : + ("routers", [router])                        -- after "functions"
-router      : {"t":"router","name":txt,"scope":txt,"uses":[txt]}
+router      : {"t":"router","name":txt,"uses":[txt]}
 fn          : "kind" ∈ "mutator"|"query"|"helper"|"guard"|"provide"
-              + ("router", txt | null)                        -- after "scope"
+              - "scope"                                       -- gone in version 3
+              + ("router", txt | null)                        -- after "kind"
               + ("uses", [txt])                               -- after "router"; [] when not a procedure
               "args" becomes "input": [field]
               + ("refine", [{"t":"refine","e":expr,"why":txt|null}])   -- after "input"
@@ -558,8 +555,7 @@ stmt        : {"t":"insert","table":txt,"row":expr,"on":[txt]}
 expr        : + {"t":"provided","fn":txt}
 ```
 
-`"scope"` on a function is still written, derived from its router, so a
-function's value stands alone; the verifier holds the two equal. Symbols
+Symbols
 inside a `check`'s or `refine`'s expression are numbered in the same walk
 as the body, before it (input, then refine, then body), so one numbering
 covers the function. `EArg` inside a field's check refers to that field
@@ -568,7 +564,7 @@ after any `trim` before it.
 ## Appendix B. The demo, in the vocabulary
 
 `Ark.Demo` (and `spec/vectors/module/demo.json`) is the playlist demo the
-vectors run: one scope `demo` with `playlist(id, name, user_id)` and
+vectors run: the tables `playlist(id, name, user_id)` and
 `item(playlist_id → playlist, track_id: text, pos)`, unique
 `(playlist.user_id, playlist.name)` and `(item.playlist_id, item.pos)`.
 Its router, as `arkc gen rust` prints it from `arkc demo` under the
@@ -634,7 +630,8 @@ impl Input for Items {
 }
 ```
 
-with the scope `Demo { playlist: Table<Playlist>, item: Table<Item> }`,
+with the tables `Demo { playlist: Table<Playlist>, item: Table<Item> }`
+(`arkc gen rust --name Demo`),
 opened as `Demo { playlist: table(), item: table() }`. A runtime's own
 demo may name its input types otherwise — a name reaches no byte — but its
 `emit` is held to the vector's bytes; that is check 1 of §5.
