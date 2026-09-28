@@ -39,5 +39,16 @@ takes their columns, tables or fields in declaration order; a row's and an
 input's companion (`Row.Of`, `Input.Of`) carries the rest, and the tables
 class implements `Tables` (a companion, if written, is a `Tables.Of` and
 names nothing). Every router of a module is over the same tables class.
+A record — a struct that is no table's row, which a query or a helper
+returns — is a class implementing `Record` whose `companion object :
+Record.Of<R>` says `fields<R>().field("name", text())…` (no checks), its
+constructor taking them in that order; `record<R>()` is a field of one.
+A helper is a function whose body is `helper("slug", "text" to text) { text
+-> … }` (up to six named parameters, typed as written): `ECall` under Emit,
+emitted once before its first caller, and its body under Native;
+`evaluate { … }` runs one outside any procedure. `lit("#")`, `lit(1)`,
+`lit(true)` lift a Kotlin literal where a value is taken exactly (Rust's
+`.into()`). Options compare with `eq`/`ne` (`ECmp`), and an auto named
+twice with one kind (`ctx.now("added_ms")` in two rows) is one auto.
 The runtime reads them by reflection (`java.lang.reflect` and `kotlin.reflect.typeOf`, no
 kotlin-reflect), which Android runs unchanged.

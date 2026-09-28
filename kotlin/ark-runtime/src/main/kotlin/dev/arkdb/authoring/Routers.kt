@@ -226,10 +226,22 @@ public class Module(vararg routers: Router<*>) {
                 )
             }
         }
+        // A helper is emitted into the module immediately before the first
+        // function that calls it.
         val fns = ArrayList<Function>()
-        for (r in routers) {
-            for (mw in r.middleware) fns.add(emitMiddleware(r, mw))
-            for (route in r.routes) fns.add(emitRoute(r, route))
+        Helpers.during { helpers ->
+            for (r in routers) {
+                for (mw in r.middleware) {
+                    val f = emitMiddleware(r, mw)
+                    fns.addAll(helpers.drain())
+                    fns.add(f)
+                }
+                for (route in r.routes) {
+                    val f = emitRoute(r, route)
+                    fns.addAll(helpers.drain())
+                    fns.add(f)
+                }
+            }
         }
         val rs = routers.map { r -> dev.arkdb.Router(r.name, r.middleware.map { it.name }) }
         return dev.arkdb.Module(SPEC_VERSION, IrSchema(first?.tables?.tables ?: emptyList()), fns, emptyList(), rs)

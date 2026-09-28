@@ -47,6 +47,52 @@ public interface Row<K : Key> : Data {
 }
 
 /**
+ * A struct of the vocabulary's values that is not a row of a table: what a
+ * query or a helper builds and returns (`TStruct`). Its companion is a
+ * `Record.Of` saying its fields once, in declaration order, and its
+ * constructor takes them in that order:
+ *
+ * ```
+ * class ArtistsEntry(val art: Text, val name: Text, val tracks: Int) : Record {
+ *     companion object : Record.Of<ArtistsEntry> {
+ *         override fun fields(): Fields<ArtistsEntry> =
+ *             fields<ArtistsEntry>().field("art", text()).field("name", text()).field("tracks", int())
+ *     }
+ * }
+ * ```
+ *
+ * The IR's struct type is a map, so the canonical form has the fields in
+ * name order whatever order they are declared in.
+ */
+public interface Record : Data {
+    public interface Of<R : Record> {
+        public fun fields(): Fields<R>
+    }
+}
+
+/** A record's fields, by name and type, in declaration order. */
+public class Fields<R : Record> internal constructor(internal val defs: KList<Pair<String, FieldSpec<*>>>) {
+    /**
+     * The next field, of the type the field builder names (`text()`,
+     * `int()`, `opt(..)`, `id<T>()`, `record<R>()`, …). A record's field
+     * carries no checks: a check belongs to an input.
+     */
+    public fun field(name: String, spec: FieldSpec<*>): Fields<R> {
+        if (spec.checks.isNotEmpty()) throw Fault.bug("authoring: $name: a record's field carries no checks")
+        return Fields(defs + (name to spec))
+    }
+}
+
+/** `fields<ArtistsEntry>()`, the start of a record's field list. */
+public fun <R : Record> fields(): Fields<R> = Fields(emptyList())
+
+/** A field of a record type (in a record, or in a list or option of one). */
+public inline fun <reified R : Record> record(): FieldSpec<R> = recordIn(R::class.java)
+
+@PublishedApi
+internal fun <R : Record> recordIn(cls: Class<*>): FieldSpec<R> = FieldSpec({ Kind.KRecord(RecordInfo.of(cls)) }, emptyList())
+
+/**
  * The module's tables: a class whose constructor takes them, in the
  * schema's order. A module has one; every router of it is over the same
  * class. A companion is optional, and when written is a `Tables.Of`.
@@ -287,6 +333,72 @@ internal class RowInfo<T : Row<*>> private constructor(val cls: Class<T>) {
     }
 }
 
+/** What a record class is, read once: its fields, their kinds, and how to make one. */
+internal class RecordInfo<R : Record> private constructor(val cls: Class<R>) {
+    private val defs: KList<Pair<String, FieldSpec<*>>> by lazy {
+        @Suppress("UNCHECKED_CAST")
+        ((cls.getField("Companion").get(null) as? Record.Of<R>) ?: throw Fault.bug("authoring: ${cls.name}'s companion is not a Record.Of"))
+            .fields().defs
+    }
+
+    val names: KList<String> get() = defs.map { it.first }
+
+    private val kinds: KList<Kind> by lazy { defs.map { it.second.kind() } }
+
+    val ty: Ty.TStruct by lazy { Ty.TStruct(names.zip(kinds).associate { (n, k) -> n to k.ty }) }
+
+    private val ctor: Constructor<*> by lazy {
+        cls.constructors.firstOrNull { it.parameterCount == defs.size && !it.isSynthetic }
+            ?: throw Fault.bug("authoring: ${cls.name} needs a constructor of its ${defs.size} fields in fields() order")
+    }
+
+    private val getters: KList<Method> by lazy {
+        names.map { n ->
+            val g = "get" + RowInfo.camel(n).replaceFirstChar { it.uppercaseChar() }
+            try {
+                cls.getMethod(g)
+            } catch (e: NoSuchMethodException) {
+                throw Fault.bug("authoring: ${cls.name} has no property ${RowInfo.camel(n)} for field $n")
+            }
+        }
+    }
+
+    /** A record over a term: each field a field of it. */
+    fun make(t: Term): R {
+        val args = names.mapIndexed { i, n ->
+            kinds[i].make(
+                when (t) {
+                    is Term.N -> Term.N((t.v as? Value.VStruct)?.get(n) ?: Value.VNull)
+                    is Term.E -> Term.E(Expr.Field(t.e, n))
+                },
+            )
+        }
+        @Suppress("UNCHECKED_CAST")
+        val r = ctor.newInstance(*args.toTypedArray()) as R
+        Run.current().remember(r, t)
+        return r
+    }
+
+    /** A record built by the author: a struct of its fields. */
+    fun termOfFields(r: Any): Term {
+        val vals = getters.map { it.invoke(r) as Data }
+        return if (Run.current().native) {
+            Term.N(Value.VStruct(names.zip(vals).associate { (n, v) -> n to valueOf(v) }))
+        } else {
+            Term.E(Expr.Struct(names.zip(vals).associate { (n, v) -> n to exprOf(v) }))
+        }
+    }
+
+    companion object {
+        private val cache = ConcurrentHashMap<Class<*>, RecordInfo<*>>()
+
+        fun of(c: Class<*>): RecordInfo<*> = cache.getOrPut(c) {
+            @Suppress("UNCHECKED_CAST")
+            RecordInfo(c as Class<Record>)
+        }
+    }
+}
+
 /** What the tables class is: its tables, in constructor order. */
 internal class TablesInfo(val cls: Class<*>) {
     private val ctor: Constructor<*> by lazy {
@@ -320,6 +432,7 @@ internal object Kinds {
             c == List::class.java -> Kind.KList(of(arg()))
             c == Split::class.java -> Kind.KSplit
             Row::class.java.isAssignableFrom(c) -> Kind.KRow(RowInfo.of(c))
+            Record::class.java.isAssignableFrom(c) -> Kind.KRecord(RecordInfo.of(c))
             else -> throw Fault.bug("authoring: no kind for $t")
         }
     }

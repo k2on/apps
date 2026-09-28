@@ -72,6 +72,12 @@ internal sealed class Kind {
         override fun make(t: Term): Data = info.make(t, this)
     }
 
+    /** A record: a struct of the vocabulary's values that is no table's row. */
+    class KRecord(val info: RecordInfo<*>) : Kind() {
+        override val ty: Ty get() = info.ty
+        override fun make(t: Term): Data = info.make(t)
+    }
+
     object KSplit : Kind() {
         override val ty: Ty get() = Ty.TStruct(mapOf("before" to Ty.TText, "after" to Ty.TText))
         override fun make(t: Term): Data = Split(t)
@@ -113,12 +119,14 @@ public abstract class Val internal constructor(internal val term: Term, internal
 internal fun kindOf(d: Data): Kind = when (d) {
     is Val -> d.kind
     is Row<*> -> Kind.KRow(RowInfo.of(d.javaClass))
+    is Record -> Kind.KRecord(RecordInfo.of(d.javaClass))
     else -> throw Fault.bug("authoring: not a value of the vocabulary: ${d.javaClass.name}")
 }
 
 internal fun termOf(d: Data): Term = when (d) {
     is Val -> d.term
     is Row<*> -> Run.current().origin(d) ?: RowInfo.of(d.javaClass).termOfFields(d)
+    is Record -> Run.current().origin(d) ?: RecordInfo.of(d.javaClass).termOfFields(d)
     else -> throw Fault.bug("authoring: not a value of the vocabulary: ${d.javaClass.name}")
 }
 
@@ -164,10 +172,21 @@ internal fun arith(op: Op, a: Data, b: Data): Int = build(
 
 // Literals lift ----------------------------------------------------------------
 
-internal fun lit(b: Boolean): Bool = Bool(Term.N(Value.VBool(b)))
-internal fun lit(n: Long): Int = Int(Term.N(Value.VInt(n)))
-internal fun lit(n: KInt): Int = lit(n.toLong())
-internal fun lit(s: String): Text = Text(Term.N(Value.VText(s)), Kind.TEXT)
+// `lit(..)` is a Kotlin literal as a value of the vocabulary, where one is
+// taken exactly (a list's element, a record's field, a helper's argument):
+// Rust's `.into()`. Most operations take the literal itself as well.
+
+/** `ELit (VBool b)`. */
+public fun lit(b: Boolean): Bool = Bool(Term.N(Value.VBool(b)))
+
+/** `ELit (VInt n)`. */
+public fun lit(n: Long): Int = Int(Term.N(Value.VInt(n)))
+
+/** `ELit (VInt n)`. */
+public fun lit(n: KInt): Int = lit(n.toLong())
+
+/** `ELit (VText s)`. */
+public fun lit(s: String): Text = Text(Term.N(Value.VText(s)), Kind.TEXT)
 
 // The types ------------------------------------------------------------------
 
@@ -302,6 +321,12 @@ public class Opt<T : Data> internal constructor(term: Term, kind: Kind) : Val(te
     }
 
     public fun isSome(): Bool = std(Kind.KBool, StdFn.IsSome, this) as Bool
+
+    /** `ECmp Eq`: an option is flat, so `none` equals only `none` and `some(x)` equals `some(x)`. */
+    public fun eq(b: Opt<T>): Bool = cmp(CmpOp.Eq, this, b)
+
+    /** `ECmp Ne`. */
+    public fun ne(b: Opt<T>): Bool = cmp(CmpOp.Ne, this, b)
 
     /** `EStd UnwrapOr [opt, d]`. */
     public fun unwrapOr(d: T): T {

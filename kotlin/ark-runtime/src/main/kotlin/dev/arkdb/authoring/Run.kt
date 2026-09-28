@@ -146,9 +146,19 @@ internal class Emitting : Run() {
         blocks.last().add(if (p.upsert) Stmt.Upsert(p.table, row, p.on) else Stmt.Insert(p.table, row, p.on))
     }
 
+    /**
+     * Register an auto by name. Naming it again is reading the same frozen
+     * value again — `ctx.now("added_ms")` in three rows of one entry is one
+     * time — so a repeated name of the same kind is that auto; a repeated
+     * name of another kind is an error.
+     */
     fun auto(name: String, a: Auto) {
-        if (name in autos) throw Fault.bug("authoring: the auto ${dev.arkdb.HsShow.text(name)} is drawn twice")
-        autos[name] = a
+        val had = autos[name]
+        when {
+            had == null -> autos[name] = a
+            had == a -> Unit
+            else -> throw Fault.bug("authoring: the auto ${dev.arkdb.HsShow.text(name)} is drawn as $had and again as $a; one name is one auto")
+        }
     }
 }
 

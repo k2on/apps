@@ -92,7 +92,9 @@ object Authoring {
                 }
             }
         }
-        test("authoring/self: a repeated auto, a statement in an expression, .on after something else") { selfRefusals() }
+        test("authoring/self: an auto name of two kinds, a statement in an expression, .on after something else") { selfRefusals() }
+        test("authoring/vocab: helpers, records, option comparisons and a repeated auto") { vocabulary() }
+        test("authoring/vocab: each helper's closure is harken.ark's") { helpersAsHarken(root, skipped) }
     }
 
     // Agreement ------------------------------------------------------------------
@@ -321,6 +323,99 @@ object Authoring {
         eq(nobodyServer.takeOutgoing(), listOf<kotlin.Pair<Long, dev.arkdb.ServerMsg>>(1L to dev.arkdb.ServerMsg.Denied("not signed in")), "nobody is denied")
     }
 
+    private fun vocabulary() {
+        val m = selfdemo.vocabModule()
+        val ir = m.ir
+        eq(
+            ir.functions.map { it.name to it.kind },
+            listOf(
+                "work_title", "slug", "key_part", "work_key", "work_id", "credited_as", "movement_key", "recording_key", "recording_id",
+            ).map { it to FnKind.Helper } + listOf("keys" to FnKind.Query, "compare" to FnKind.Query, "twice" to FnKind.Mutator),
+            "each helper once, before the first function that calls it, a helper a helper calls first",
+        )
+        eq(Decode.fromValue(Canon.decode(m.emit())), ir, "emit decodes to the IR")
+        eq(Encode.toValue(Verify.verify(ir)), Encode.toValue(ir), "and verifies as it is")
+        val rid = ir.lookupFunction("recording_id")!!
+        eq(rid.input.map { it.first to it.second.ty }, listOf(
+            "work_id" to dev.arkdb.Ty.TOption(dev.arkdb.Ty.TText), "album" to dev.arkdb.Ty.TText, "title" to dev.arkdb.Ty.TText,
+            "artist" to dev.arkdb.Ty.TText, "performer" to dev.arkdb.Ty.TText,
+        ), "a helper's parameters are its names and its Kotlin types")
+        eq(rid.ret, dev.arkdb.Ty.TText as dev.arkdb.Ty?, "and its result's")
+        val keysTy = dev.arkdb.Ty.TStruct(mapOf("credited" to dev.arkdb.Ty.TText, "movement" to dev.arkdb.Ty.TText, "recording" to dev.arkdb.Ty.TText, "work" to dev.arkdb.Ty.TOption(dev.arkdb.Ty.TText)))
+        eq(ir.lookupFunction("keys")!!.ret, dev.arkdb.Ty.TList(keysTy) as dev.arkdb.Ty?, "a record is a TStruct of its fields")
+        eq(ir.lookupFunction("compare")!!.ret, dev.arkdb.Ty.TStruct(mapOf("eq" to dev.arkdb.Ty.TBool, "ne" to dev.arkdb.Ty.TBool, "keys" to dev.arkdb.Ty.TOption(keysTy))) as dev.arkdb.Ty?, "a record holding a record")
+        check(ir.lookupFunction("keys")!!.body.toString().contains("Call(fn=work_title")) { "a helper is called by ECall" }
+        val compare = ir.lookupFunction("compare")!!.body.toString()
+        for (op in listOf(dev.arkdb.CmpOp.Eq, dev.arkdb.CmpOp.Ne)) {
+            val want = dev.arkdb.Expr.Cmp(op, dev.arkdb.Expr.Arg("a"), dev.arkdb.Expr.Arg("b")).toString()
+            check(compare.contains(want)) { "options compare by ECmp $op: $compare" }
+        }
+        val twice = ir.lookupFunction("twice")!!
+        eq(twice.autos, listOf("id" to dev.arkdb.Auto.NewId("playlist"), "at" to (dev.arkdb.Auto.Now as dev.arkdb.Auto)), "a name drawn twice is one auto")
+
+        // Natively and by the interpreter, the same answers.
+        val p = Pair2(m)
+        val st = MemoryStore(ir.schema)
+        val alice = Ctx("alice", "a1")
+        fun track(artist: String, catalogue: String, workTitle: String, album: String, title: String, performer: String, part: String, no: Long) = mapOf(
+            "artist" to Value.text(artist), "catalogue" to Value.text(catalogue), "work_title" to Value.text(workTitle), "album" to Value.text(album),
+            "title" to Value.text(title), "performer" to Value.text(performer), "part" to Value.text(part), "no" to Value.int(no),
+        )
+        val tracks = listOf(
+            track("Johann Sebastian Bach", "BWV 988", "Goldberg Variations", "Goldberg Variations", "Aria", "Kimiko Ishizaka", "", 1),
+            track("Antonín Dvořák", "", "", "Symphony No. 9", "Largo", "", "II", 2),
+            track("!!!", "", "", "Myth Takes", "Heart of Hearts", "", "", 3),
+            track("Sergei Rachmaninoff", "Op. 23", "Preludes", "Preludes", "No. 5", "", "", 5),
+            track("", "", "", "", "", "", "", 0),
+        )
+        for (t in tracks) p.step("keys", alice, emptyMap(), t, st)
+        val answer = (p.answer("keys", alice, tracks[0], st) as Eval.Answer.Ok).value.asList().single()
+        eq(answer.field("work"), Value.text("johann-sebastian-bach/bwv-988") as Value, "a work's key")
+        eq(answer.field("movement"), Value.text("johann-sebastian-bach/bwv-988#1") as Value, "a movement's")
+        eq(answer.field("recording"), Value.text("johann-sebastian-bach/bwv-988@kimiko-ishizaka") as Value, "a recording's")
+        eq(answer.field("credited"), Value.text("Kimiko Ishizaka") as Value, "who is credited")
+        val bang = (p.answer("keys", alice, tracks[2], st) as Eval.Answer.Ok).value.asList().single()
+        check(bang.field("recording").asText().startsWith("myth-takes/heart-of-hearts@x")) { "a name with no letters keys by its hash: $bang" }
+        eq(dev.arkdb.authoring.evaluate { selfdemo.slug(dev.arkdb.authoring.lit("  Dvořák -- Op. 23 ")) }, Eval.Answer.Ok(Value.text("dvořák-op-23")) as Eval.Answer, "evaluate runs a helper natively")
+
+        fun opt(s: String?): Value = s?.let { Value.text(it) } ?: Value.VNull
+        for ((a, b) in listOf(null to null, "x" to null, null to "x", "x" to "x", "x" to "y")) {
+            val args = mapOf("a" to opt(a), "b" to opt(b))
+            p.step("compare", alice, emptyMap(), args, st)
+            val c = (p.answer("compare", alice, args, st) as Eval.Answer.Ok).value
+            eq(c.field("eq") to c.field("ne"), Value.bool(a == b) to Value.bool(a != b), "$a against $b")
+            eq(c.field("keys").isNull(), a == null, "a record in an option, filtered on one of its fields ($a)")
+        }
+
+        // One name, one value: the id and the clock read twice are the entry's one each.
+        val id = Value.id(dev.arkdb.Id(ByteArray(16) { 3 }))
+        val after = p.step("twice", alice, mapOf("id" to id, "at" to Value.int(42)), emptyMap(), st)
+        val row = after.scan("playlist").single()
+        eq(row["id"] to row["name"], id to dev.arkdb.Std.textOfId(id), "the id, twice")
+        eq(after.scan("item").single()["track_id"], Value.text("42") as Value, "the clock, twice")
+    }
+
+    /**
+     * The helpers above are harken's, as library.rs writes them in Rust:
+     * each one's closure hash is the one harken.ark carries under its name,
+     * which holds the Kotlin emission to Rust's byte for byte.
+     */
+    private fun helpersAsHarken(root: File, skipped: MutableList<String>) {
+        val ark = File(root, "../../harken/domain/harken.ark")
+        val whole = if (ark.isFile) Decode.fromValue(Canon.decode(ark.readBytes())) else null
+        val ir = selfdemo.vocabModule().ir
+        val helpers = ir.functions.filter { it.kind == FnKind.Helper }
+        val theirs = helpers.mapNotNull { f -> whole?.lookupFunction(f.name)?.let { f to it } }
+        if (whole == null || theirs.isEmpty()) {
+            skipped.add("authoring/vocab: harken.ark carries none of the helpers; their hashes are not compared")
+            return
+        }
+        for ((f, t) in theirs) {
+            eq(Hex.encode(Hash.functionHash(Hash.closure(ir, f)).bytes), Hex.encode(Hash.functionHash(Hash.closure(whole, t)).bytes), "${f.name}: the closure hash")
+        }
+        eq(theirs.size, helpers.size, "every helper is in harken.ark")
+    }
+
     private fun selfRefusals() {
         fun fails(what: String, f: () -> Unit) {
             val ok = try {
@@ -331,7 +426,7 @@ object Authoring {
             }
             check(!ok) { "should have been refused: $what" }
         }
-        fails("an auto drawn twice") { selfdemo.twice().ir }
+        fails("one auto name drawn as two kinds") { selfdemo.twiceDifferently().ir }
         fails("a read inside map's closure") { selfdemo.readInMap().ir }
         fails(".on after another statement") { selfdemo.onLate().ir }
     }
