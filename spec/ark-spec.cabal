@@ -40,6 +40,7 @@ library
     Ark.Live
     Ark.Protocol
     Ark.Sim
+    Ark.Gen
     Ark.Demo
     Ark.Compat
     Ark.Print
@@ -54,4 +55,4 @@ executable arkc
   import:           shared
   hs-source-dirs:   app
   main-is:          Arkc.hs
-  build-depends:    ark-spec, directory
+  build-depends:    ark-spec, directory, process

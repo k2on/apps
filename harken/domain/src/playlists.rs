@@ -3,6 +3,16 @@ use ark::authoring::*;
 
 use crate::schema::*;
 
+/// What `owned` reads of a procedure's input: the playlist it is about.
+pub struct Owned {
+    pub playlist_id: Id<Playlist>,
+}
+impl Input for Owned {
+    fn schema() -> Object<Self> {
+        object().field("playlist_id", id::<Playlist>())
+    }
+}
+
 pub struct CreatePlaylist {
     pub name: Text,
 }
@@ -12,20 +22,30 @@ impl Input for CreatePlaylist {
     }
 }
 
-pub struct OnPlaylist {
+pub struct AddToPlaylist {
     pub playlist_id: Id<Playlist>,
     pub track_id: Id<Track>,
 }
-impl Input for OnPlaylist {
+impl Input for AddToPlaylist {
     fn schema() -> Object<Self> {
         object().field("playlist_id", id::<Playlist>().exists()).field("track_id", id::<Track>())
     }
 }
 
-pub struct PlaylistId {
+pub struct RemoveFromPlaylist {
+    pub playlist_id: Id<Playlist>,
+    pub track_id: Id<Track>,
+}
+impl Input for RemoveFromPlaylist {
+    fn schema() -> Object<Self> {
+        object().field("playlist_id", id::<Playlist>().exists()).field("track_id", id::<Track>())
+    }
+}
+
+pub struct PlaylistItems {
     pub playlist_id: Id<Playlist>,
 }
-impl Input for PlaylistId {
+impl Input for PlaylistItems {
     fn schema() -> Object<Self> {
         object().field("playlist_id", id::<Playlist>().exists())
     }
@@ -34,7 +54,7 @@ impl Input for PlaylistId {
 pub fn playlists() -> Router<Playlists> {
     let playlists = router::<Playlists>("playlists");
     let signed_in = playlists.guard("signed_in", |ctx, _db| when(ctx.user.is_empty(), || refuse("sign in first")));
-    let owned = signed_in.provide("owned", |ctx, db, input: &PlaylistId| {
+    let owned = signed_in.provide("owned", |ctx, db, input: &Owned| {
         db.playlist
             .get((input.playlist_id,))
             .filter(|row| row.user_id.eq(ctx.user))
@@ -56,7 +76,7 @@ pub fn playlists() -> Router<Playlists> {
         }),
         // After everything already on it, which is what makes the rebase
         // visible: add while offline and it lands after what arrived.
-        owned.input::<OnPlaylist>().mutation("add_to_playlist", |ctx, db, input, playlist| {
+        owned.input::<AddToPlaylist>().mutation("add_to_playlist", |ctx, db, input, playlist| {
             let playlist_item = db
                 .playlist_item
                 .filter(PlaylistItem::playlist_id.eq(playlist.id))
@@ -70,13 +90,15 @@ pub fn playlists() -> Router<Playlists> {
                 user_id: ctx.user,
             })
         }),
-        owned.input::<OnPlaylist>().mutation("remove_from_playlist", |_ctx, db, input, playlist| {
-            db.playlist_item.delete((playlist.id, input.track_id))
-        }),
+        owned
+            .input::<RemoveFromPlaylist>()
+            .mutation("remove_from_playlist", |_ctx, db, input, playlist| {
+                db.playlist_item.delete((playlist.id, input.track_id))
+            }),
         signed_in.query("playlists", |ctx, db, _input: ()| {
             db.playlist.filter(Playlist::user_id.eq(ctx.user)).order_by(Playlist::name.asc()).all()
         }),
-        owned.input::<PlaylistId>().query("playlist_items", |_ctx, db, _input, playlist| {
+        owned.input::<PlaylistItems>().query("playlist_items", |_ctx, db, _input, playlist| {
             db.playlist_item
                 .filter(PlaylistItem::playlist_id.eq(playlist.id))
                 .order_by((PlaylistItem::pos.asc(), PlaylistItem::track_id.asc()))
