@@ -1,7 +1,7 @@
 //! Where things go, which nothing on screen can check for you.
 use iced::{Point, Size};
 
-use crate::{media_url, App, Message, BAR_HEIGHT, DEVICES_WIDTH, PAGE_PADDING, SHELF, SIDEBAR_WIDTH};
+use crate::{media_url, App, Message, BAR_HEIGHT, DEVICES_WIDTH, PAGE_PADDING, SHELF};
 use arkui::menu::{Anchor, Menu};
 use arkui::panel::EDGE;
 
@@ -38,18 +38,26 @@ fn the_awkward_characters_in_a_filename_are_escaped() {
 }
 
 /// This window's cards fit their row at every width, and a card that would
-/// fit is drawn — against *this* window's pane, the window less the sidebar,
-/// which is what the keyboard's grid is built from too.
+/// fit is drawn — against *this* window's pane, which is what the keyboard's
+/// grid is built from too.
 ///
-/// Falsified by computing `columns` from the whole window: it fails at the
-/// first width where the sidebar's 200px is the difference.
+/// The page is 265px narrower than the window: 16 of padding either side,
+/// the 200px sidebar, and the 1px rule with 16 either side of it — measured
+/// off a screenshot, where the first card starts at x = 265 (16 of the
+/// shelf's own padding past the page's edge at 249). A literal, because
+/// written as `pane_width()` the test agreed with the bug it was for: the
+/// pane once left out all of it but the sidebar, and a seventh card at
+/// 1280px was squeezed to fit.
+///
+/// Falsified by `pane_width` returning the window less the sidebar alone: it
+/// fails at 522px, where 2 cards need 280px in 215.
 #[test]
 fn the_cards_fit_the_page_beside_the_sidebar() {
     let mut app = App::with_peer(super::peer(ark_client::Options::alone("me")), String::new(), None);
     for width in 320..=4000 {
         app.window = Size::new(width as f32, 600.0);
         let n = app.columns() as f32;
-        let room = width as f32 - SIDEBAR_WIDTH - SHELF.padding * 2.0 - arkui::SCROLLBAR;
+        let room = width as f32 - 265.0 - 32.0 - arkui::SCROLLBAR;
         let needed = n * SHELF.card + (n - 1.0) * SHELF.gap;
         assert!(n == 1.0 || needed <= room, "at {width}px {n} cards need {needed}px in {room}px");
         assert!((n + 1.0) * SHELF.card + n * SHELF.gap > room, "at {width}px another card fits");

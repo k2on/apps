@@ -170,6 +170,8 @@ pub struct Edit {
 // so these are declared rather than measured.
 pub const SIDEBAR_WIDTH: f32 = 200.0;
 pub const PAGE_PADDING: f32 = 16.0;
+/// The gap either side of the rule between the sidebar and the page.
+pub const PANE_GAP: f32 = 16.0;
 /// The index pages' cards.
 pub const SHELF: Shelf = Shelf::DEFAULT;
 /// How tall the play bar is — declared because the device picker sits on it
@@ -521,9 +523,13 @@ impl App {
         self.focus() == Focus::Pane(pane)
     }
 
-    /// How wide the page beside the sidebar is.
+    /// How wide the page beside the sidebar is: the window less its padding
+    /// either side, the sidebar, and the rule with a gap either side of it —
+    /// every width `view` lays out before the page. Leaving the chrome out
+    /// counted 65px that are not there, so at the widths where the last card
+    /// needed them iced squeezed it to fit.
     pub fn pane_width(&self) -> f32 {
-        self.window.width - SIDEBAR_WIDTH
+        self.window.width - PAGE_PADDING * 2.0 - SIDEBAR_WIDTH - PANE_GAP * 2.0 - 1.0
     }
 
     /// How many cards fit across an index page — the same division the view

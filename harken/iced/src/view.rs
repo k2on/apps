@@ -13,7 +13,7 @@ use iced::{Alignment, Element, Length, Padding};
 
 use crate::places::{Focus, Pane, Source};
 use crate::player::Player;
-use crate::{credit, App, Message, BAR_HEIGHT, DEVICES_WIDTH, PAGE_PADDING, SHELF, SIDEBAR, SIDEBAR_WIDTH, TRACKS};
+use crate::{credit, App, Message, BAR_HEIGHT, DEVICES_WIDTH, PAGE_PADDING, PANE_GAP, SHELF, SIDEBAR, SIDEBAR_WIDTH, TRACKS};
 
 // The table's columns. Portions rather than pixels, so the text columns share
 // whatever is left after the fixed ones and none can push another off a
@@ -61,7 +61,7 @@ impl App {
                 // The sidebar and the page share the height left once the bar
                 // has taken its own, so the bar stays at the bottom.
                 row![self.view_sidebar(), rule::vertical(1), self.view_page()]
-                    .spacing(16)
+                    .spacing(PANE_GAP)
                     .height(Length::Fill),
                 rule::horizontal(1),
                 self.view_bar(),
