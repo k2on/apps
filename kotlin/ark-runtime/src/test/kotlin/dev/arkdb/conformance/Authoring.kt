@@ -43,7 +43,6 @@ object Authoring {
             eq(back.spec, SPEC_VERSION, "spec version")
             eq(back.functions.map { it.name }, listOf("create_playlist", "add_to_playlist", "items"), "function order")
             eq(back.routers.map { it.name to it.uses }, listOf("demo" to emptyList<String>()), "routers")
-            File(System.getProperty("java.io.tmpdir"), "ark-kotlin-demo.json").writeText(Encode.toValue(back).show())
         }
         val vector = File(root, "module/demo.json")
         val v = Json.parse(vector.readText(Charsets.UTF_8))
@@ -72,7 +71,6 @@ object Authoring {
             ), "functions")
             eq(ir.functions.associate { it.name to it.uses }["add_to_playlist"], listOf("signed_in", "owned"), "add_to_playlist's chain")
             eq(ir.functions.associate { it.name to it.uses }["create_playlist"], listOf("signed_in"), "create_playlist's chain")
-            File(System.getProperty("java.io.tmpdir"), "ark-kotlin-harken.json").writeText(Encode.toValue(ir).show())
         }
         test("authoring/harken: native agrees with the interpreter on every procedure") { harkenAgreement(harken.gen.module()) }
         // The phone's print against the whole module the Rust domain emits:
