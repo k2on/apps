@@ -192,32 +192,32 @@ pub fn playlists() -> Router<Harken> {
             }),
         // The caller's playlists, in the order they were made.
         playlists.query("playlists", |ctx, db, _input: ()| {
-            db.playlist.filter(Playlist::user_id.eq(ctx.user)).order_by(Playlist::pos.asc()).all()
+            db.playlist.filter(Playlist::user_id.eq(ctx.user)).order_by(Playlist::pos.asc())
         }),
         // Which of the caller's playlists a track is on: what makes a
-        // playlist sheet a toggle rather than a one-way door.
+        // playlist sheet a toggle rather than a one-way door. Each playlist
+        // with its entry for the track beneath it, kept when there is one.
         playlists.input::<PlaylistsOf>().query("playlists_of", |ctx, db, input| {
-            let playlist_item = db.playlist_item.filter(PlaylistItem::media_id.eq(input.media_id)).all();
             db.playlist
                 .filter(Playlist::user_id.eq(ctx.user))
                 .order_by(Playlist::pos.asc())
-                .all()
-                .filter(|row| playlist_item.any(|row_2| row_2.playlist_id.eq(row.id)))
+                .each(|playlist, ()| {
+                    db.playlist_item
+                        .filter(PlaylistItem::media_id.eq(input.media_id))
+                        .on(PlaylistItem::playlist_id.eq(playlist.id))
+                })
+                .having(|_playlist, (items,)| items.is_empty().not())
+                .map(|playlist, _| playlist)
         }),
         // One playlist's contents, in playlist order, as the library's own
         // rows; an entry whose media has gone is dropped.
         owned.input::<PlaylistInput>().query("playlist", |_ctx, db, _input, playlist| {
-            let playlist_item = db.playlist_item.filter(PlaylistItem::playlist_id.eq(playlist.id)).all();
-            db.media
-                .all()
-                .filter(|row| playlist_item.any(|row_2| row_2.media_id.eq(row.id)))
-                .sort_by(|row| {
-                    playlist_item
-                        .filter(|row_2| row_2.media_id.eq(row.id))
-                        .first()
-                        .map_or(0, |row_2| row_2.pos)
-                })
-                .map(|row| library_entry(row, playlist_item))
+            db.playlist_item
+                .filter(PlaylistItem::playlist_id.eq(playlist.id))
+                .order_by(PlaylistItem::pos.asc())
+                .get(|item, ()| db.media.by((item.media_id,)))
+                .having(|_item, (media,)| media.is_some())
+                .map(|item, (media,)| library_entry(media.unwrap(), some(item.pos)))
         }),
     ))
 }

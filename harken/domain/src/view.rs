@@ -2,24 +2,22 @@
 //!
 //! `library(playlist_id)` answers every media row in library order, each
 //! with where it sits on that playlist ([`crate::library::LibraryEntry`]).
-//! Re-running it on every change costs the library; a client instead holds
-//! an `ark::view::View` over [`library_plan`] — the media rows in `pos`
-//! order with that playlist's entries beneath each (`playlist_item`, the
-//! relationship `playlist_item.media_id` declares) — hydrates it once,
-//! pushes every change through `ark::view::push`, and turns each node into
-//! the same entry the query answers with [`entry_of`]. [`patch`] is that
-//! splice, for a list of entries a screen holds. The plan is read out of
-//! the emitted `library` query rather than written a second time, so the
-//! query and the view cannot come to disagree; the tests hold the two
-//! equal after every step.
+//! Until the engine maintains every plan (`docs/plan-v4.md` §1.5), a client
+//! holds an `ark::view::View` over [`library_plan`] — the query's own plan
+//! without its projection, the playlist's entries hung beneath each media
+//! row and pinned to the playlist — hydrates it once, pushes every change
+//! through `ark::view::push`, and turns each node into the entry the query
+//! answers with [`entry_of`]. [`patch`] is that splice, for a list of
+//! entries a screen holds. The plan is read out of the emitted `library`
+//! query rather than written a second time, so the query and the view
+//! cannot come to disagree; the tests hold the two equal after every step.
 //!
 //! A rebase (`Changes::Rebuilt`) is no sequence of patches: re-hydrate and
 //! take the list whole.
 
 use std::collections::BTreeMap;
 
-use ark::ir::{Expr, Stmt};
-use ark::schema::Relation;
+use ark::ir::{CmpOp, Expr, Pred};
 use ark::value::{Id, Value};
 use ark::view::{self, Patch, ViewPlan};
 
@@ -28,53 +26,31 @@ use crate::module;
 /// The field of a node holding the playlist's entries for that media row.
 pub const ITEMS: &str = "playlist_item";
 
-/// The plan a client maintains for `library(playlist_id)`: the query's own
-/// reads of the media and of the playlist's entries, the entries hung
-/// beneath each media row. `playlist_id` is the playlist as `playlists`
-/// lists it; the query itself also resolves another id of the same
-/// playlist (a same-name playlist made on another device), which a plan
-/// fixed to one id cannot.
+/// The plan a client maintains for `library(playlist_id)`: the query's
+/// plan, its projection left to [`entry_of`], its entries' filter pinned to
+/// the playlist.
 ///
 /// # Panics
 ///
-/// If the emitted `library` query no longer reads `playlist_item` and then
-/// `media` — a change to the query that this file must follow.
+/// If the emitted `library` query is no longer the media with the
+/// playlist's entries beneath — a change to the query that this file must
+/// follow.
 pub fn library_plan(playlist_id: Id) -> ViewPlan {
     let m = module();
     let f = m.build().lookup_function("library").expect("the library query");
-    let read = |table: &str| -> ark::ir::Plan {
-        f.body
-            .iter()
-            .find_map(|s| match s {
-                Stmt::Let(_, Expr::Select(p)) if p.table == table => Some((**p).clone()),
-                _ => None,
-            })
-            .unwrap_or_else(|| panic!("library reads {table}: {:?}", f.body))
-    };
-    let mut items = read("playlist_item");
-    items.filter = Some(ark::ir::Pred::Cmp(
-        "playlist_id".into(),
-        ark::ir::CmpOp::Eq,
-        Expr::Lit(Value::Id(playlist_id)),
-    ));
-    let mut lit = |e: &Expr| -> Result<Value, String> {
-        match e {
-            Expr::Lit(v) => Ok(v.clone()),
-            other => Err(format!("{other:?}")),
-        }
-    };
-    let items = view::eval_plan(&items, &mut lit).expect("the entries' plan, pinned to the playlist");
-    let mut media = view::eval_plan(&read("media"), &mut lit).expect("the media plan reads nothing");
-    media.related.push((
-        ITEMS.into(),
-        Relation {
-            parent: "media".into(),
-            child: "playlist_item".into(),
-            column: "media_id".into(),
-        },
-        items,
-    ));
-    media
+    let mut plan = f.plan.clone().expect("library is a plan");
+    assert!(
+        plan.table() == "media" && plan.related.len() == 1,
+        "library reads media with the entries beneath: {plan:?}"
+    );
+    plan.project = None;
+    plan.related[0].name = ITEMS.into();
+    plan.related[0].plan.filter = Some(Pred::Cmp("playlist_id".into(), CmpOp::Eq, Expr::Lit(Value::Id(playlist_id))));
+    view::eval_plan(&plan, &mut |e: &Expr| match e {
+        Expr::Lit(v) => Ok(v.clone()),
+        other => Err(format!("{other:?}")),
+    })
+    .expect("the library's plan, pinned to the playlist")
 }
 
 /// A node of [`library_plan`] as the entry `library` answers with: the media

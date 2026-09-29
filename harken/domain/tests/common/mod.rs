@@ -1,7 +1,9 @@
-//! One library, one store, and every call held to the interpreter: each
-//! mutation is applied natively and through `apply_closure` over copies of
-//! the store, compared, then applied; each query likewise. So every test in
-//! this directory is an agreement test too.
+//! One library, one store, and every mutation held to the interpreter:
+//! each is applied natively and through `apply_closure` over copies of the
+//! store, compared, then applied. So every test in this directory is an
+//! agreement test too. A query has no native half to agree with (a query
+//! is its plan, and `ark::view::pull` is what it means), so it is asked
+//! once.
 
 #![allow(dead_code)]
 
@@ -100,7 +102,7 @@ impl Lib {
     pub fn query(&self, user: &str, name: &str, a: Args) -> Result<Value, String> {
         let p = self.procs.get(name).unwrap_or_else(|| panic!("no procedure {name}"));
         self.called.borrow_mut().insert(name.into());
-        match p.agrees_on_query(&Ctx::new(user, "s"), &a, &self.store).unwrap_or_else(|e| panic!("{e}")) {
+        match p.query(&Ctx::new(user, "s"), &a, &self.store) {
             Ok(v) => Ok(v),
             Err(EvalFault::Verdict(Refusal::Refused(t))) => Err(t),
             Err(other) => panic!("{name}: {other:?}"),

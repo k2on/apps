@@ -530,19 +530,20 @@ pub fn movement_id(work_id: Opt<Text>, movement_no: Int, track: Int) -> Opt<Text
     )
 }
 
-/// A media row as a list renders it, read against one playlist's entries.
-pub fn library_entry(media: Media, items: List<PlaylistItem>) -> LibraryEntry {
+/// A media row as a list renders it, and where it sits on the playlist
+/// the list was read against, if it is on it.
+pub fn library_entry(media: Media, playlist_pos: Opt<Int>) -> LibraryEntry {
     helper(
         "library_entry",
-        (("media", media), ("items", items)),
-        |media: Media, items: List<PlaylistItem>| LibraryEntry {
+        (("media", media), ("playlist_pos", playlist_pos)),
+        |media: Media, playlist_pos: Opt<Int>| LibraryEntry {
             added_ms: media.added_ms,
             creator: media.creator,
             duration_ms: media.duration_ms,
             file: media.file,
             id: media.id,
             kind: media.kind,
-            playlist_pos: items.filter(|row| row.media_id.eq(media.id)).first().map(|row| row.pos),
+            playlist_pos,
             pos: media.pos,
             title: media.title,
             user_id: media.user_id,
@@ -582,36 +583,43 @@ pub fn performers(credits: List<Credit>, recording_id: Text) -> Text {
     )
 }
 
-/// How many of these songs are movements among these.
-pub fn tracks_on(songs: List<Song>, movements: List<Movement>) -> Int {
-    helper(
-        "tracks_on",
-        (("songs", songs), ("movements", movements)),
-        |songs: List<Song>, movements: List<Movement>| {
-            songs
-                .filter(|row| row.movement_id.map_or(false, |x| movements.any(|row_2| row_2.id.eq(x))))
-                .len()
-        },
-    )
-}
-
-/// A work, with how much of it the library holds.
-pub fn work_summary(work: Work, recordings: List<Recording>, songs: List<Song>, movements: List<Movement>) -> WorkSummary {
+/// A work, with how much of it the library holds: its recordings, and the
+/// tracks that are movements of it.
+pub fn work_summary(work: Work, recordings: Int, tracks: Int) -> WorkSummary {
     helper(
         "work_summary",
-        (("work", work), ("recordings", recordings), ("songs", songs), ("movements", movements)),
-        |work: Work, recordings: List<Recording>, songs: List<Song>, movements: List<Movement>| WorkSummary {
+        (("work", work), ("recordings", recordings), ("tracks", tracks)),
+        |work: Work, recordings: Int, tracks: Int| WorkSummary {
             art: work.art,
             catalogue: work.catalogue,
             composer: work.composer,
             form: work.form,
             id: work.id,
             period: work.period,
-            recordings: recordings.filter(|row| row.work_id.eq(some(work.id))).len(),
+            recordings,
             title: work.title,
-            tracks: tracks_on(songs, movements.filter(|row| row.work_id.eq(work.id))),
+            tracks,
         },
     )
+}
+
+/// The sum of some counts.
+pub fn total(counts: List<Int>) -> Int {
+    helper("total", ("counts", counts), |counts: List<Int>| counts.fold(0, |acc: Int, x| acc.add(x)))
+}
+
+/// Works, each with how many recordings of it there are and how many
+/// tracks are movements of it: what `works` and `work` both answer.
+fn summaries(db: &Harken, works: Query<Work>) -> Query<Work, (List<Recording>, List<Int>), WorkSummary> {
+    works
+        .each(|work, ()| db.recording.rows().on(Recording::work_id.eq(some(work.id))))
+        .each(|work, _| {
+            db.movement
+                .each(|movement, ()| db.song.rows().on(Song::movement_id.eq(some(movement.id))))
+                .on(Movement::work_id.eq(work.id))
+                .map(|_movement, (songs,)| songs.len())
+        })
+        .map(|work, (recordings, movements)| work_summary(work, recordings.len(), total(movements)))
 }
 
 pub fn library() -> Router<Harken> {
@@ -958,211 +966,194 @@ pub fn library() -> Router<Harken> {
             db.media.delete((input.id,))
         }),
         // The whole library, in the order things were added — every kind, one
-        // list — read against a playlist. The one a client maintains
-        // (`crate::view`).
+        // list — each with where it sits on one playlist: the playlist's
+        // entry for that media, beneath it.
         library.input::<Library>().query("library", |_ctx, db, input| {
-            let playlist_item = db.playlist_item.filter(PlaylistItem::playlist_id.eq(input.playlist_id)).all();
-            db.media.order_by(Media::pos.asc()).all().map(|row| library_entry(row, playlist_item))
+            db.media
+                .order_by(Media::pos.asc())
+                .each(|media, ()| {
+                    db.playlist_item
+                        .filter(PlaylistItem::playlist_id.eq(input.playlist_id))
+                        .on(PlaylistItem::media_id.eq(media.id))
+                })
+                .map(|media, (items,)| library_entry(media, items.first().map(|row| row.pos)))
         }),
-        // Every album some song is on, by name.
+        // Every album some song is on, by name, with whoever made its first
+        // track (in the song table's order) and how many tracks it has.
         library.query("albums", |_ctx, db, _input: ()| {
-            let song = db.song.all();
-            let media = db.media.all();
             db.album
-                .all()
-                .map(|row| AlbumsEntry {
-                    art: row.art,
-                    creator: song.filter(|row_2| row_2.album_name.eq(some(row.name))).first().map_or("", |row_2| {
-                        media
-                            .filter(|row_3| row_3.id.eq(row_2.media_id))
-                            .first()
-                            .map_or("", |row_3| row_3.creator)
-                    }),
-                    name: row.name,
-                    tracks: song.filter(|row_2| row_2.album_name.eq(some(row.name))).len(),
+                .each(|album, ()| {
+                    db.song
+                        .rows()
+                        .get(|song, ()| db.media.by((song.media_id,)))
+                        .on(Song::album_name.eq(some(album.name)))
+                        .map(|_song, (media,)| media.map_or("", |row| row.creator))
                 })
-                .filter(|row| row.tracks.gt(0))
+                .having(|_album, (creators,)| creators.len().gt(0))
+                .map(|album, (creators,)| AlbumsEntry {
+                    art: album.art,
+                    creator: creators.first().unwrap_or(""),
+                    name: album.name,
+                    tracks: creators.len(),
+                })
         }),
-        // Everyone who made something in the library, by name.
+        // Everyone who made something in the library, by name: the media
+        // grouped by creator, with the picture `person` has for the name.
         library.query("artists", |_ctx, db, _input: ()| {
-            let person = db.person.all();
-            let media = db.media.order_by(Media::creator.asc()).all();
-            media
-                .filter(|row| {
-                    media
-                        .filter(|row_2| row_2.creator.eq(row.creator))
-                        .first()
-                        .map_or(false, |row_2| row_2.id.eq(row.id))
-                })
-                .map(|row| ArtistsEntry {
-                    art: person.filter(|row_2| row_2.name.eq(row.creator)).first().map_or("", |row_2| row_2.art),
-                    name: row.creator,
-                    tracks: media.filter(|row_2| row_2.creator.eq(row.creator)).len(),
+            db.media
+                .group_by(Media::creator)
+                .get(|creator, (_media,)| db.person.by((creator,)))
+                .map(|creator, (media, person)| ArtistsEntry {
+                    art: person.map_or("", |row| row.art),
+                    name: creator,
+                    tracks: media.len(),
                 })
         }),
-        // Every song, with the columns only a song has.
+        // Every song, with the columns only a song has: its movement and
+        // that movement's work, its recording, and the recording's credits.
         library.query("track_details", |_ctx, db, _input: ()| {
-            let work = db.work.all();
-            let movement = db.movement.all();
-            let credit = db.credit.all();
-            let recording = db.recording.all();
-            db.song.all().map(|row| TrackDetailsEntry {
-                album: row.album_name.unwrap_or(""),
-                bpm: row.bpm,
-                catalogue: row.movement_id.map_or("", |x| {
-                    movement.filter(|row_2| row_2.id.eq(x)).first().map_or("", |row_2| {
-                        work.filter(|row_3| row_3.id.eq(row_2.work_id))
-                            .first()
-                            .map_or("", |row_3| row_3.catalogue)
-                    })
-                }),
-                licence: recording
-                    .filter(|row_2| row_2.id.eq(row.recording_id))
-                    .first()
-                    .map_or("", |row_2| row_2.licence),
-                media_id: row.media_id,
-                part: row
-                    .movement_id
-                    .map_or("", |x| movement.filter(|row_2| row_2.id.eq(x)).first().map_or("", |row_2| row_2.part)),
-                performer: performers(credit, row.recording_id),
-                track: row.track,
-            })
+            db.song
+                .rows()
+                .get(|song, ()| db.movement.by_opt(song.movement_id))
+                .get(|_song, (movement,)| db.work.by_opt(movement.map(|row| row.work_id)))
+                .get(|song, _| db.recording.by((song.recording_id,)))
+                .each(|song, _| db.credit.on(Credit::recording_id.eq(song.recording_id)))
+                .map(|song, (movement, work, recording, credits)| TrackDetailsEntry {
+                    album: song.album_name.unwrap_or(""),
+                    bpm: song.bpm,
+                    catalogue: work.map_or("", |row| row.catalogue),
+                    licence: recording.map_or("", |row| row.licence),
+                    media_id: song.media_id,
+                    part: movement.map_or("", |row| row.part),
+                    performer: performers(credits, song.recording_id),
+                    track: song.track,
+                })
         }),
         // One album's tracks in the order the work goes: part, then track
-        // (an untagged one, 0, last in its part), then title, then id — as
-        // stable sorts, the last key first.
+        // (an untagged one, 0, last in its part), then title, then the key.
         library.input::<AlbumInput>().query("album", |_ctx, db, input| {
-            let playlist_item = db.playlist_item.filter(PlaylistItem::playlist_id.eq(input.playlist_id)).all();
-            let movement = db.movement.all();
-            let song = db.song.filter(Song::album_name.eq(some(input.name))).all();
-            db.media
-                .all()
-                .filter(|row| song.any(|row_2| row_2.media_id.eq(row.id)))
-                .sort_by(|row| row.title)
-                .sort_by(|row| song.filter(|row_2| row_2.media_id.eq(row.id)).first().map_or(0, |row_2| row_2.track))
-                .sort_by(|row| {
-                    song.filter(|row_2| row_2.media_id.eq(row.id))
-                        .first()
-                        .map_or(false, |row_2| row_2.track.eq(0))
+            db.song
+                .filter(Song::album_name.eq(some(input.name)))
+                .get(|song, ()| db.media.by((song.media_id,)))
+                .get(|song, _| db.movement.by_opt(song.movement_id))
+                .each(|song, _| {
+                    db.playlist_item
+                        .filter(PlaylistItem::playlist_id.eq(input.playlist_id))
+                        .on(PlaylistItem::media_id.eq(song.media_id))
                 })
-                .sort_by(|row| {
-                    song.filter(|row_2| row_2.media_id.eq(row.id)).first().map_or("", |row_2| {
-                        row_2
-                            .movement_id
-                            .map_or("", |x| movement.filter(|row_3| row_3.id.eq(x)).first().map_or("", |row_3| row_3.part))
-                    })
-                })
-                .map(|row| library_entry(row, playlist_item))
+                .having(|_song, (media, _, _)| media.is_some())
+                .sort_by(|_song, (_, movement, _)| movement.map_or("", |row| row.part))
+                .sort_by(|song, _| song.track.eq(0))
+                .sort_by(|song, _| song.track)
+                .sort_by(|_song, (media, _, _)| media.map_or("", |row| row.title))
+                .map(|_song, (media, _, items)| library_entry(media.unwrap(), items.first().map(|row| row.pos)))
         }),
         // One artist's tracks, in library order.
         library.input::<Artist>().query("artist", |_ctx, db, input| {
-            let playlist_item = db.playlist_item.filter(PlaylistItem::playlist_id.eq(input.playlist_id)).all();
             db.media
                 .filter(Media::creator.eq(input.name))
                 .order_by(Media::pos.asc())
-                .all()
-                .map(|row| library_entry(row, playlist_item))
+                .each(|media, ()| {
+                    db.playlist_item
+                        .filter(PlaylistItem::playlist_id.eq(input.playlist_id))
+                        .on(PlaylistItem::media_id.eq(media.id))
+                })
+                .map(|media, (items,)| library_entry(media, items.first().map(|row| row.pos)))
         }),
-        // Everyone some work here is by: the composers index.
+        // Everyone some work here is by: the composers index. A composer's
+        // tracks are the songs that are movements of their works, counted
+        // down the tree person → work → movement → song.
         library.query("composers", |_ctx, db, _input: ()| {
-            let work = db.work.all();
-            let movement = db.movement.all();
-            let song = db.song.all();
             db.person
-                .all()
-                .filter(|row| work.any(|row_2| row_2.composer.eq(row.name)))
-                .map(|row| ComposersEntry {
-                    art: row.art,
-                    born: row.born,
-                    died: row.died,
-                    name: row.name,
-                    sort_name: pick(row.sort_name.is_empty(), row.name, row.sort_name),
-                    tracks: tracks_on(
-                        song,
-                        movement.filter(|row_2| work.any(|row_3| row_3.id.eq(row_2.work_id).and(row_3.composer.eq(row.name)))),
-                    ),
-                    works: work.filter(|row_2| row_2.composer.eq(row.name)).len(),
+                .each(|person, ()| {
+                    db.work
+                        .each(|work, ()| {
+                            db.movement
+                                .each(|movement, ()| db.song.rows().on(Song::movement_id.eq(some(movement.id))))
+                                .on(Movement::work_id.eq(work.id))
+                                .map(|_movement, (songs,)| songs.len())
+                        })
+                        .on(Work::composer.eq(person.name))
+                        .map(|_work, (movements,)| total(movements))
+                })
+                .having(|_person, (works,)| works.len().gt(0))
+                .map(|person, (works,)| ComposersEntry {
+                    art: person.art,
+                    born: person.born,
+                    died: person.died,
+                    name: person.name,
+                    sort_name: pick(person.sort_name.is_empty(), person.name, person.sort_name),
+                    tracks: total(works),
+                    works: works.len(),
                 })
         }),
         // One composer's works, by catalogue and then title.
         library.input::<Works>().query("works", |_ctx, db, input| {
-            let recording = db.recording.all();
-            let song = db.song.all();
-            let movement = db.movement.all();
-            db.work
-                .filter(Work::composer.eq(input.composer))
-                .order_by((Work::catalogue.asc(), Work::title.asc()))
-                .all()
-                .map(|row| work_summary(row, recording, song, movement))
+            summaries(
+                db,
+                db.work
+                    .filter(Work::composer.eq(input.composer))
+                    .order_by((Work::catalogue.asc(), Work::title.asc())),
+            )
         }),
         // One work by its key: none or one, for a page opened from a link.
-        library.input::<WorkInput>().query("work", |_ctx, db, input| {
-            let recording = db.recording.all();
-            let song = db.song.all();
-            let movement = db.movement.all();
-            db.work
-                .filter(Work::id.eq(input.id))
-                .all()
-                .map(|row| work_summary(row, recording, song, movement))
-        }),
+        library
+            .input::<WorkInput>()
+            .query("work", |_ctx, db, input| summaries(db, db.work.filter(Work::id.eq(input.id)))),
         // Every performance of one work: the most complete first, then the
         // oldest, then the key.
         library.input::<Recordings>().query("recordings", |_ctx, db, input| {
-            let song = db.song.all();
-            let credit = db.credit.all();
             db.recording
                 .filter(Recording::work_id.eq(some(input.work_id)))
-                .all()
-                .map(|row| RecordingsEntry {
-                    art: row.art,
-                    id: row.id,
-                    label: row.label,
-                    licence: row.licence,
-                    performers: performers(credit, row.id),
-                    recorded: row.recorded,
-                    tracks: song.filter(|row_2| row_2.recording_id.eq(row.id)).len(),
+                .each(|recording, ()| db.song.rows().on(Song::recording_id.eq(recording.id)))
+                .each(|recording, _| db.credit.on(Credit::recording_id.eq(recording.id)))
+                .sort_by(|_recording, (songs, _)| songs.len().neg())
+                .sort_by(|recording, _| recording.recorded)
+                .map(|recording, (songs, credits)| RecordingsEntry {
+                    art: recording.art,
+                    id: recording.id,
+                    label: recording.label,
+                    licence: recording.licence,
+                    performers: performers(credits, recording.id),
+                    recorded: recording.recorded,
+                    tracks: songs.len(),
                 })
-                .sort_by(|row| row.recorded)
-                .sort_by(|row| row.tracks.neg())
         }),
-        // Who is on one recording, with the roles kept, in billing order.
+        // Who is on one recording, with the roles kept, in billing order:
+        // the real credits (`pos` from 1) where there are any, which
+        // displace the lumped string a track carried at `pos` 0 — each
+        // credit asks its siblings whether there is a real one.
         library.input::<Credits>().query("credits", |_ctx, db, input| {
-            let credit = db
-                .credit
+            db.credit
                 .filter(Credit::recording_id.eq(input.recording_id))
                 .order_by((Credit::pos.asc(), Credit::person_name.asc()))
-                .all();
-            credited(credit).map(|row| CreditsEntry {
-                instrument: row.instrument,
-                name: row.person_name,
-                pos: row.pos,
-                role: row.role,
-            })
+                .each(|credit, ()| db.credit.filter(Credit::pos.gt(0)).on(Credit::recording_id.eq(credit.recording_id)))
+                .having(|credit, (real,)| credit.pos.gt(0).or(real.is_empty()))
+                .map(|credit, _| CreditsEntry {
+                    instrument: credit.instrument,
+                    name: credit.person_name,
+                    pos: credit.pos,
+                    role: credit.role,
+                })
         }),
         // One performance's tracks in the order the work goes: by movement
         // number, not by track number (a compilation's track 9 may be a
         // sonata's first movement); a track of no movement after the rest.
         library.input::<RecordingInput>().query("recording", |_ctx, db, input| {
-            let playlist_item = db.playlist_item.filter(PlaylistItem::playlist_id.eq(input.playlist_id)).all();
-            let movement = db.movement.all();
-            let song = db.song.filter(Song::recording_id.eq(input.id)).all();
-            db.media
-                .all()
-                .filter(|row| song.any(|row_2| row_2.media_id.eq(row.id)))
-                .sort_by(|row| row.title)
-                .sort_by(|row| {
-                    song.filter(|row_2| row_2.media_id.eq(row.id)).first().map_or(0, |row_2| {
-                        row_2
-                            .movement_id
-                            .map_or(0, |x| movement.filter(|row_3| row_3.id.eq(x)).first().map_or(0, |row_3| row_3.no))
-                    })
+            db.song
+                .filter(Song::recording_id.eq(input.id))
+                .get(|song, ()| db.media.by((song.media_id,)))
+                .get(|song, _| db.movement.by_opt(song.movement_id))
+                .each(|song, _| {
+                    db.playlist_item
+                        .filter(PlaylistItem::playlist_id.eq(input.playlist_id))
+                        .on(PlaylistItem::media_id.eq(song.media_id))
                 })
-                .sort_by(|row| {
-                    song.filter(|row_2| row_2.media_id.eq(row.id))
-                        .first()
-                        .map_or(true, |row_2| row_2.movement_id.is_none())
-                })
-                .map(|row| library_entry(row, playlist_item))
+                .having(|_song, (media, _, _)| media.is_some())
+                .sort_by(|song, _| song.movement_id.is_none())
+                .sort_by(|_song, (_, movement, _)| movement.map_or(0, |row| row.no))
+                .sort_by(|_song, (media, _, _)| media.map_or("", |row| row.title))
+                .map(|_song, (media, _, items)| library_entry(media.unwrap(), items.first().map(|row| row.pos)))
         }),
     ))
 }

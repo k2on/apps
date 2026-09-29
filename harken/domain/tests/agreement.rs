@@ -53,7 +53,9 @@ fn the_module_verifies_and_is_the_committed_file() {
             "track_details",
             "album",
             "artist",
-            "tracks_on",
+            // At v4 `composers` counts down its plan's tree and sums with
+            // `total`, where it asked `tracks_on` of two whole tables.
+            "total",
             "composers",
             "work_summary",
             "works",
@@ -116,6 +118,47 @@ fn the_module_verifies_and_is_the_committed_file() {
         committed == bytes,
         "harken/domain/harken.ark is stale: `cargo run -p harken-domain -- ../harken/domain/harken.ark` rewrites it"
     );
+}
+
+/// §1.8 Spec v4 changed what a query is and nothing about a mutator: the
+/// log names every mutator by its closure's hash, so each is pinned here to
+/// the hash it had at spec v3 (`f45790f`, before any of v4 landed), both as
+/// the domain builds it and as the committed `harken.ark` carries it. The
+/// Haskell `arkc check` refuses a spec-4 module outright (`BadSpecVersion
+/// 4`), so this is where the check the spec asks for (§1.8) is made.
+/// Falsified by writing a plan's `row` key even when it is absent (the
+/// encoder's `if let Some(r) = p.row`): every mutator that reads moves.
+#[test]
+fn every_mutator_hashes_as_it_did_at_spec_v3() {
+    let v3 = [
+        ("add_song", "32150bd38f156c31a87fcb726a68fe20e5293302a8c6bd233cd52e82d6eb6eef"),
+        ("describe_work", "a74fc779a35bbd4ee5abf56d3c1c4c4a80abea624e5ea8f47083fc136d39ab8d"),
+        ("describe_recording", "4edffc9e12721bf58d4a2ab0a61f252c615f2dbda44559e5c22eece4e270f98f"),
+        ("describe_person", "15508559e7c540069012698099398b0f74fdb7f66fa59f0ebaf6527be5728692"),
+        ("credit_recording", "3e10d18b33c7b703822cb4969ed8b8c483e001f4f882864325893580c780546e"),
+        ("remove_media", "885266129e9c3955a8dc12270305b1843e07e43ff195588c3d0cd08bbd02c06b"),
+        ("create_playlist", "1dade18e3915345976190cb3b65d2f7f5774b3921a9b4a0a5a7bb24b1549e90a"),
+        ("add_to_playlist", "29ef6578cbda8f224d8b279461e1544a8fcf910ee259c32379edcbc4da32d2c1"),
+        ("add_all_to_playlist", "ca05acf23e131c0ffbecb7f302224cd690a2da78a9d41ef10185dcc846d1587a"),
+        ("remove_from_playlist", "e6b2807ee3556a5e85dbab34795fb8abdbfe951d3fa994065fc2542cd6e2230e"),
+    ];
+    let built = module();
+    let committed = std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("harken.ark")).unwrap();
+    let decoded = ark::ir::module_from_value(&ark::canon::decode(&committed).unwrap()).unwrap();
+    for m in [built.build(), &decoded] {
+        let mutators: Vec<&str> = m
+            .functions
+            .iter()
+            .filter(|f| f.kind == FnKind::Mutator)
+            .map(|f| f.name.as_str())
+            .collect();
+        assert_eq!(mutators, v3.map(|(n, _)| n), "the same mutators, in the same order");
+        for (name, hash) in v3 {
+            let f = m.lookup_function(name).unwrap();
+            let h = ark::hash::function_hash(&ark::hash::closure(m, f));
+            assert_eq!(ark::value::hex(&h), hash, "{name}: its closure hashes as it did at v3");
+        }
+    }
 }
 
 /// Every procedure, natively and through the interpreter, over one store
