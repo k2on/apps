@@ -666,12 +666,36 @@ All five pieces are on `main` (`4ea802a` through `4bfc7a6`), and
 mutator's closure hash is what it was at spec v3, held by
 `every_mutator_hashes_as_it_did_at_spec_v3`. What is not verified from
 here: a window nobody opened, on the desktop or in a browser (the browser
-build itself passes); the benchmark numbers come from one container. Two
-engine costs are worth knowing and are stated as they are: a playlist
-toggle against the `library` view grows sub-linearly with the library
-(50 µs at the demo's size, 142 µs at sixteen times it, inside `push_all`),
-and a peer alone rewriting its replica after every mutation evicts the
-cache, so the first view to touch the store afterwards pays a refill
-(`artists` on a describe, 10.7 ms cold at sixteen times the demo). Neither
-is the client's, and neither was hidden by the numbers before this work,
-which re-read every list.
+build itself passes); the benchmark numbers come from one container. One
+engine cost is worth knowing and is stated as it is: a peer alone
+replacing its replica after every mutation evicts the cache, so the first
+view to touch the store afterwards pays a refill (`artists` on a describe,
+10.7 ms cold at sixteen times the demo). It is not the client's, and it
+was not hidden by the numbers before this work, which re-read every list.
+
+A playlist toggle through `library` no longer grows with the library in
+anything it does; it grew in two places, both `settle`'s, and neither was
+a read. Every rebuilt entry was taken out of the admitted list and put
+back, moving the tail of a 3344-element vector twice for an entry that had
+not moved; and finding where an entry sat was a binary search whose every
+probe walked `by_key`, log² of the list and nearly all of it cache misses.
+An entry that stays put is now written in place, checked against its two
+neighbours; one that moves is rotated across what it crosses; and the list
+holds each entry's order keys beside its key, so the search reads nothing
+else (`ark::view::View::entries`). The store's reads were already flat —
+two, the media row and the `playlist_item` under `(playlist, media)` — but
+by accident: the widest-index rule broke its tie by declaration order, and
+`media_id` happens to be declared last. A read holding a table's whole key
+is now one `get`, and otherwise the index with the fewest rows under the
+values serves. `rust/ark/tests/toggle.rs` counts the reads (one `get` and
+one row at 200 media and at 3200, falsified to 101 and 1601 by reading
+through the first index) and times the push from 250 media to 16000: 17 µs
+at every size with the view in cache, where it was 19 µs rising to 30 µs.
+In `bench_views` the toggle is 38, 55 and 85 µs at one, four and sixteen
+times the demo, from 42, 72 and 133 µs; pushed a second time, with nothing
+evicted, it is 18, 20 and 19 µs, from 22, 25 and 29. What still grows in
+the first column is the bench's own warm-up — it clones every row of every
+table before each push, which at sixteen times the demo is larger than the
+cache and takes the view's indexes with it — and a cold walk of a
+`BTreeMap` is a logarithm's worth of misses, which is the contract's
+"through the indexes" and not a pass over the list.
