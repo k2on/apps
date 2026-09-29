@@ -6,10 +6,9 @@
 //! authors as them, or as nobody); what is drawn is this.
 use std::collections::HashMap;
 
-use ark_client::ark::store::{Change, MemoryStore, Store};
-use ark_client::ark::view as plans;
-use ark_client::{args, Args, Changes, Id, Patch, Value};
-use harken_domain::view::{entry_of, library_plan, Item};
+use ark_client::ark::store::Change;
+use ark_client::{args, Args, Changes, Id, Patch, Update, Value};
+use harken_domain::view::Item;
 
 use crate::places::{Place, Source};
 use crate::rows::{self, Album, Artist, Composer, Playlist, Recording, TrackDetail, Work};
@@ -27,53 +26,30 @@ pub struct Choice {
 /// The library, maintained rather than re-read.
 ///
 /// Hydrated once and then told what each change did, so a tap costs the rows
-/// that moved instead of the whole list. The plan is the domain's
-/// (`harken_domain::view::library_plan`): `library` is two reads and a map,
-/// which `ark_client::View` would re-run on every change, so the view is held
-/// here over the plan the domain reads out of its own query.
+/// that moved instead of the whole list: an `ark_client::View` over the
+/// domain's own `library` query, which the engine maintains like every
+/// query (`docs/plan-v4.md` §1.5).
 struct Maintained {
-    view: plans::View,
+    view: ark_client::View,
 }
 
 impl Maintained {
     fn hydrate(peer: &ark_client::Peer, playlist: Id) -> (Maintained, Vec<Item>) {
-        let view = plans::hydrate(peer.schema(), &library_plan(playlist), peer.store());
-        let items = view.rows().iter().map(|n| Item::from_value(&entry_of(n))).collect();
+        let view = peer
+            .view("library", args([("playlist_id", Value::Id(playlist))]))
+            .expect("library refuses nothing and faults on nothing");
+        let items = view.rows().iter().map(Item::from_value).collect();
         (Maintained { view }, items)
     }
 
-    /// Push what moved through the plan and splice the rows it moved.
-    ///
-    /// Several changes at once are each pushed against the store as it stood
-    /// just after that change — the store now, rolled back through the later
-    /// ones — which is what `ark_client::View` does for a plan of its own. A
-    /// batch big enough that rolling back costs more than reading is read.
-    fn update(&mut self, peer: &ark_client::Peer, changes: &[Change], items: &mut Vec<Item>) {
-        const READ_INSTEAD: usize = 64;
-        let sch = peer.schema();
-        if changes.len() > READ_INSTEAD {
-            self.view = plans::hydrate(sch, &self.view.plan, peer.store());
-            *items = self.view.rows().iter().map(|n| Item::from_value(&entry_of(n))).collect();
-            return;
+    /// Push what moved through the view and splice the rows it moved; a
+    /// reset — a rebase, or the view read again — takes the rows whole.
+    fn update(&mut self, peer: &ark_client::Peer, changes: &Changes, items: &mut Vec<Item>) {
+        match self.view.update(peer, changes) {
+            Ok(Update::Unchanged) => {}
+            Ok(Update::Patched(patches)) => splice(items, &patches),
+            Ok(Update::Reset) | Err(_) => *items = self.view.rows().iter().map(Item::from_value).collect(),
         }
-        let mut patches = vec![];
-        if let [ch] = changes {
-            let (v, ps) = plans::push(sch, peer.store(), ch, &self.view);
-            self.view = v;
-            patches = ps;
-        } else {
-            let mut st: MemoryStore = peer.store().clone();
-            for ch in changes.iter().rev() {
-                st.apply_change(&invert(ch));
-            }
-            for ch in changes {
-                st.apply_change(ch);
-                let (v, ps) = plans::push(sch, &st, ch, &self.view);
-                self.view = v;
-                patches.extend(ps);
-            }
-        }
-        splice(items, &patches);
     }
 }
 
@@ -87,23 +63,14 @@ fn table_of(ch: &Change) -> &str {
     }
 }
 
-fn invert(ch: &Change) -> Change {
-    match ch {
-        Change::Add(t, r) => Change::Remove(t.clone(), r.clone()),
-        Change::Remove(t, r) => Change::Add(t.clone(), r.clone()),
-        Change::Edit(t, o, n) => Change::Edit(t.clone(), n.clone(), o.clone()),
-    }
-}
-
-/// The patches, in order, onto the decoded list: a node becomes the entry
+/// The patches, in order, onto the decoded list: a node is the entry
 /// `library` answers with, and that entry an [`Item`].
 fn splice(items: &mut Vec<Item>, patches: &[Patch]) {
-    let item = |node: &Value| Item::from_value(&entry_of(node));
     for p in patches {
         match p {
             Patch::Insert { at, node } => {
                 let at = (*at).min(items.len());
-                items.insert(at, item(node));
+                items.insert(at, Item::from_value(node));
             }
             Patch::Remove { at } => {
                 if *at < items.len() {
@@ -112,7 +79,7 @@ fn splice(items: &mut Vec<Item>, patches: &[Patch]) {
             }
             Patch::Update { at, node } => {
                 if *at < items.len() {
-                    items[*at] = item(node);
+                    items[*at] = Item::from_value(node);
                 }
             }
         }
@@ -238,19 +205,13 @@ impl Peer {
     /// and `Rebuilt` — a rebase rolled the optimistic store back — is a
     /// re-hydrate, which is the one thing no list of changes describes.
     pub fn refresh(&mut self) -> bool {
-        let lists_only = match self.client.take_changes() {
-            Changes::Applied(changes) if changes.is_empty() => return false,
-            Changes::Applied(changes) => {
-                self.library.update(&self.client, &changes, &mut self.items);
-                changes.iter().all(|c| PLAYLIST_TABLES.contains(&table_of(c)))
-            }
-            Changes::Rebuilt => {
-                let (library, items) = Maintained::hydrate(&self.client, self.playlist);
-                self.library = library;
-                self.items = items;
-                false
-            }
+        let changes = self.client.take_changes();
+        let lists_only = match &changes {
+            Changes::Applied(chs) if chs.is_empty() => return false,
+            Changes::Applied(chs) => chs.iter().all(|c| PLAYLIST_TABLES.contains(&table_of(c))),
+            Changes::Rebuilt => false,
         };
+        self.library.update(&self.client, &changes, &mut self.items);
         // What moved decides what is read again. A playlist toggle — the one
         // change a person makes here — touches no album, artist, composer or
         // song, and re-reading those is most of the cost of a change: they
@@ -540,10 +501,8 @@ mod tests {
     ///
     /// Falsified by dropping the `Update` arm of `splice`: the toggle — which
     /// arrives as an update to the row it moved — leaves the old
-    /// `playlist_pos`. (Pushing a batch against the final store without
-    /// rolling back was tried too and passes every case here; the rollback
-    /// stays because it is what `ark_client::View` does, and is the argument
-    /// for correctness rather than a case anyone has seen fail.)
+    /// `playlist_pos`. A batch is pushed against the final store, once per
+    /// touched entry (`docs/plan-v4.md` §1.5).
     #[test]
     fn the_maintained_library_is_the_query() {
         let domain = Domain::new(&harken_domain::module());
@@ -575,9 +534,8 @@ mod tests {
         assert!(peer.items[2].on_playlist());
         assert!(!peer.refresh(), "nothing moved, nothing read");
 
-        // A song and its place on the playlist in one batch: pushed against
-        // the final store, the song's node already carries the entry, and the
-        // entry is then added to it a second time.
+        // A song and its place on the playlist in one batch: the song's entry
+        // is built once, against the final store, already carrying its place.
         peer.client.mutate("add_song", song("Late", "Z", "", "e")).unwrap();
         let late = peer.client.query("library", &args([("playlist_id", Value::Id(peer.playlist))])).unwrap();
         let late = rows::list(&late, Item::from_value).last().unwrap().id;
