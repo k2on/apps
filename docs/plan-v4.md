@@ -367,11 +367,14 @@ not bound in the node's scope is `UnboundSymbol`, as anywhere.
 ### 1.11 What leaves
 
 - `Ark.*` under `spec/src`, `spec/app` (`Arkc.hs`, `Vectors.hs`),
-  `spec/ark-spec.cabal`, `spec/generated/unicode/UnicodeTables.{swift,kt}`
-  and the `spec` devshell. `spec/tools/GenUnicode.hs` is ported to a Rust
-  binary if it stays under ~200 lines; otherwise it is kept beside a note
-  that it is a one-off run by hand, since the tables it wrote are checked
-  in and pinned to UCD 16.0.0.
+  `spec/ark-spec.cabal`, the whole of `spec/generated` and the `spec`
+  devshell. `spec/generated/unicode` held three tables: the Rust one is
+  `rust/ark/src/unicode_tables.rs`, and the Swift and Kotlin ones were
+  already copied, byte for byte, into the frozen trees
+  (`swift/Sources/ArkDB/UnicodeTables.swift`,
+  `kotlin/ark-runtime/src/main/kotlin/dev/arkdb/std/UnicodeTables.kt`),
+  which read nothing from `spec/`. `spec/tools/GenUnicode.hs` was ported to
+  `rust/ark/src/bin/gen-unicode.rs` and deleted with `spec/tools`.
 - `arkc print`, `arkc gen`, `arkc roundtrip`; `Ark.Print`, `Ark.Gen`.
 - `checks.swift`, `checks.kotlin`, `packages.arkdb-swift`,
   `packages.arkdb-kotlin`, `packages.kotlin-deps`, the `swift` and `kotlin`
