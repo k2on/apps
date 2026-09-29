@@ -64,27 +64,43 @@ if peer.epoch() != introduced_on { /* a new connection: say who you are again */
   browser) and `Date.now()`/`SystemTime` per `Now`. `Autos::seeded(n)` makes
   them reproducible for tests.
 - **Persistence** is what `Replica::open` takes and nothing optimistic, in
-  two canonical-CBOR records: `replica` — the confirmed store, the cursor
-  and the login last authored as — written when the cursor or the login
-  moves, once per batch that lands; and `pending` — the intents not yet
-  answered — written when they do. So `mutate` writes the intent and not
-  the store, and authoring a thousand intents costs a thousand small
-  writes rather than a thousand copies of a growing store. The order is
-  the pending record first, so a stop between the two leaves an intent to
-  be sent again rather than one applied twice. A peer alone moves its
-  cursor on every mutate; it writes the store on its next `pump` (the
+  canonical-CBOR records (the layout is in `storage.rs`'s module docs): a
+  snapshot, `replica` — the confirmed store at a cursor — and after it a
+  journal of pages, `facts.1`, `facts.2`, …, each the changes the confirmed
+  store moved by for a contiguous run of sequences, in the form a
+  `FactsFor` frame carries them; `pending` — the intents not yet answered —
+  written when they move; and `who`, the login last authored as, written
+  when it does, so a sign-in writes neither the store nor a page. So
+  `mutate` writes the intent and not the store, and a `pump` after it
+  writes one page of what the confirmed store moved by — a mutation's
+  changes, not the library, which a peer alone used to re-encode whole
+  after every tap. A snapshot is written when the confirmed store was
+  replaced (a snapshot from below the server's horizon), and to compact:
+  once the pages' total size exceeds the snapshot's, a fresh one at the
+  cursor, then the pages removed, newest first — so the bytes written stay
+  within twice the journal's whatever the store's size, and a storage holds
+  up to about twice a snapshot. The order is the pending record first, so a
+  stop between the two leaves an intent to be sent again rather than one
+  applied twice; `open` reads the pages in order, skips any a snapshot
+  already holds, drops a torn or out-of-order tail rather than apply it,
+  and compacts away whatever it could not use. A peer alone moves its
+  cursor on every mutate; it writes the page on its next `pump` (the
   clients call one every fifty milliseconds) and when it is dropped, so
   the window in which a crash loses the last change is one tick. A
-  directory keeps the mode it was opened with — alone or with a server —
-  and refuses the other (`Error::ModeMismatch`), because the sequences
-  mean different things. Signed out and signed in are the same mode: one
-  directory is opened either way.
-  In a browser it is `localStorage`, base64 under `ark:<name>:replica`
-  and `ark:<name>:pending`:
+  directory writes each record to a temporary name, syncs it, renames it
+  and syncs the directory. A storage written before the journal — a
+  `replica` record and nothing after it — opens as it did. A directory
+  keeps the mode it was opened with — alone or with a server — and refuses
+  the other (`Error::ModeMismatch`), because the sequences mean different
+  things. Signed out and signed in are the same mode: one directory is
+  opened either way.
+  In a browser it is `localStorage`, base64 under `ark:<name>:replica`,
+  `ark:<name>:facts.<n>`, `ark:<name>:pending` and `ark:<name>:who`:
   synchronous, which iced's `boot` needs, and limited to the origin's quota
-  of about five megabytes — a library of a few thousand rows fits. An app
-  that outgrows it implements `storage::Storage` over IndexedDB, loaded
-  before `open`.
+  of about five megabytes — which, with room for the journal beside the
+  snapshot, is a snapshot of about half that: a library of a few thousand
+  rows fits. An app that outgrows it implements `storage::Storage` over
+  IndexedDB, loaded before `open`.
 - **Views**: every query is maintained (`docs/plan-v4.md` §1.5). A query
   is a plan, and `peer.view(name, args)` runs its middleware — input
   checks, guards, provides — over the peer's store, hydrates the plan in the

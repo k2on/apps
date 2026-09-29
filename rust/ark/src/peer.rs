@@ -64,6 +64,14 @@ pub struct Replica {
     pub rebuilt: bool,
     /// Oldest first.
     pub changes: Vec<Change>,
+    /// What has happened to `confirmed` since `take_confirmed` last asked:
+    /// replaced wholesale — opened, or a snapshot adopted below the horizon
+    /// — which no list of changes describes…
+    pub replaced: bool,
+    /// …or moved by these changes, one list per sequence applied, oldest
+    /// first and contiguous. The durable half of the log, as it moves: what
+    /// a store written at the old cursor needs to reach the new one.
+    pub journal: Vec<(Seq, Facts)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
@@ -78,6 +86,17 @@ pub struct Inbox {
 pub enum Changes {
     Applied(Vec<Change>),
     Rebuilt,
+}
+
+/// What whoever keeps the confirmed store durable is told (§11.1): the
+/// changes it moved by since they last asked, per sequence, or that it was
+/// replaced and must be written whole. Not [`Changes`]: those are the
+/// optimistic store's, and under pending intents the two differ — the view
+/// has the intents already, and a rebase rolls it back and replays.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Journal {
+    Facts(Vec<(Seq, Facts)>),
+    Replaced,
 }
 
 fn ctx_of(e: &Entry) -> Ctx {
@@ -137,6 +156,8 @@ impl Replica {
             diverged: vec![],
             rebuilt: true,
             changes: vec![],
+            replaced: true,
+            journal: vec![],
         };
         r.replay();
         r
@@ -303,6 +324,18 @@ impl Replica {
         out
     }
 
+    /// What the confirmed store has done since the last ask, and the slate
+    /// wiped: [`Journal::Replaced`] once it was replaced, whatever it moved
+    /// by afterwards, since writing it whole covers that too.
+    pub fn take_confirmed(&mut self) -> Journal {
+        let facts = std::mem::take(&mut self.journal);
+        if std::mem::take(&mut self.replaced) {
+            Journal::Replaced
+        } else {
+            Journal::Facts(facts)
+        }
+    }
+
     /// This replica's claim: its cursor and the hash of its confirmed state
     /// there. What `Verify { seq, hash }` carries.
     pub fn verify_at(&self) -> (Seq, Vec<u8>) {
@@ -335,6 +368,7 @@ impl Replica {
             // confirmed store reaches by applying it (see below).
             let own_next = self.pending.first() == Some(&e);
             self.confirmed.apply_changes(&chs);
+            self.journal.push((n, chs.clone()));
             self.cursor = n;
             self.inbox.remove(&n);
             self.pending.retain(|p| p.id != e.id);
@@ -936,5 +970,54 @@ mod tests {
         assert_eq!(r.view, r.confirmed);
         assert!(r.view.get("item", &[Value::Id(idv(1001)), Value::text("t2")]).is_some());
         assert_eq!(r.take_changes(), Changes::Rebuilt);
+    }
+
+    /// The journal is what the confirmed store moved by, per sequence, in
+    /// order: replayed over the store it last reported, it reaches the
+    /// store now — under pending intents too, where the view's changes are
+    /// something else. An open is a replacement. Falsified by journaling
+    /// only what lands while nothing is pending: this peer's own confirmed
+    /// intent is missing and the replay falls short of the store.
+    #[test]
+    fn the_journal_is_what_the_confirmed_store_moved_by() {
+        let d = demo();
+        let mut a = d.authority();
+        let (me, them) = (Ctx::new("me", "s"), Ctx::new("them", "t"));
+        let (mut r, mut other) = (d.replica(true), d.replica(true));
+        assert_eq!(r.take_confirmed(), Journal::Replaced, "an open is a replacement");
+        assert_eq!(r.take_confirmed(), Journal::Facts(vec![]));
+        let mut durable = r.confirmed.clone();
+        let mut seqs = vec![];
+        let mut catch_up = |r: &mut Replica, what: &str| {
+            let Journal::Facts(fs) = r.take_confirmed() else {
+                panic!("{what}: replaced")
+            };
+            for (n, f) in fs {
+                seqs.push(n);
+                durable.apply_changes(&f);
+            }
+            assert_eq!(durable, r.confirmed, "{what}");
+            assert_eq!(seqs, (1..=r.cursor).collect::<Vec<_>>(), "{what}: contiguous");
+        };
+        let sequence = |a: &mut Authority, e: &Entry| match a.sequence_entry(e) {
+            Sequenced::Appended(n, f) => (n, f),
+            o => panic!("{o:?}"),
+        };
+        let e1 = d.create(&mut r, &me, 1, "Mine");
+        let (n1, f1) = sequence(&mut a, &e1);
+        r.receive_facts(n1, f1.clone());
+        r.ack(&e1.id, n1);
+        catch_up(&mut r, "our own, nothing behind it");
+        other.receive_with(n1, e1, f1);
+        let e2 = d.add(&mut r, &me, 2, 1, "a");
+        let x = d.add(&mut other, &them, 3, 1, "x");
+        let (nx, fx) = sequence(&mut a, &x);
+        r.receive_with(nx, x, fx);
+        let _ = r.take_changes();
+        catch_up(&mut r, "theirs, under ours");
+        let (n2, f2) = sequence(&mut a, &e2);
+        r.receive_with(n2, e2, f2);
+        catch_up(&mut r, "ours, after the rebase");
+        assert_eq!(r.confirmed, a.store);
     }
 }

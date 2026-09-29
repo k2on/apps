@@ -34,6 +34,8 @@ pub mod demo;
 mod domain;
 pub mod link;
 mod peer;
+#[cfg(test)]
+mod persistence_tests;
 pub mod storage;
 mod view;
 

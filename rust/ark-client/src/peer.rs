@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use ark::canon;
 use ark::eval::{self, Args, Checked, Ctx, EvalFault};
 use ark::log::{snapshot_of, Log, Seq};
-use ark::peer::{local_commit, Authority, Changes, Replica};
+use ark::peer::{local_commit, Authority, Changes, Journal, Replica};
 use ark::protocol::{Client, ClientMsg, Mode, ServerMsg};
 use ark::schema::Schema;
 use ark::store::{MemoryStore, Refusal};
@@ -16,7 +16,7 @@ use ark::value::{Id, Value};
 
 use crate::autos::Autos;
 use crate::link::{platform_dial, Dial, Link, State, Timing};
-use crate::storage::{decode_pending, encode_pending, encode_replica, BoxStorage, Memory, ReplicaFile};
+use crate::storage::{count_pages, decode_pending, encode_page, encode_pending, encode_replica, encode_who, BoxStorage, Memory, ReplicaFile, Stored};
 use crate::view::View;
 use crate::{Domain, Error};
 
@@ -175,11 +175,13 @@ pub struct Peer {
     alone: bool,
     /// Nobody is signed in, so nothing is dialled.
     signed_out: bool,
-    /// What the `replica` record holds — the cursor and the login — and
-    /// what the `pending` record holds — the intents' ids — or `None`
-    /// where it is behind in a way those do not show (pending re-stamped
-    /// by a sign-in).
-    wrote_replica: Option<(Seq, Ctx)>,
+    /// What the storage holds of the confirmed store: the snapshot and the
+    /// journal after it.
+    durable: Durable,
+    /// What the `who` record holds, and what the `pending` record holds —
+    /// the intents' ids — or `None` where it is behind in a way those do
+    /// not show (nothing written yet; pending re-stamped by a sign-in).
+    wrote_who: Option<Ctx>,
     wrote_pending: Option<Vec<Id>>,
     link: Option<Link>,
     rejections: Vec<Rejection>,
@@ -191,9 +193,27 @@ pub struct Peer {
     bad_frames: u64,
 }
 
+/// The confirmed store as the storage has it (`storage` module docs): a
+/// snapshot, and `pages` journal pages after it, together reaching
+/// `cursor`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Durable {
+    snapshot_bytes: usize,
+    /// `facts.1` to `facts.<pages>`: the pages on the storage, which a
+    /// compaction removes.
+    pages: usize,
+    page_bytes: usize,
+    cursor: Seq,
+    /// The journal cannot be written on from `cursor` — there is no
+    /// snapshot yet, the confirmed store was replaced, a write failed,
+    /// `open` found a page it could not use — so the next write is a
+    /// snapshot.
+    snapshot_due: bool,
+}
+
 impl Drop for Peer {
-    /// Whatever is not yet written down is: a peer alone leaves its store to
-    /// the next `pump`, and a program that closes between the two closes
+    /// Whatever is not yet written down is: a peer alone leaves its journal
+    /// to the next `pump`, and a program that closes between the two closes
     /// through here.
     fn drop(&mut self) {
         let _ = self.persist();
@@ -225,10 +245,12 @@ impl Peer {
     pub fn open(domain: Domain, storage: BoxStorage, opts: Options) -> Result<Peer, Error> {
         let schema = domain.module().schema.clone();
         let natives = domain.native_list();
-        // What the two records hold decides what is written first: a storage
-        // with no replica yet has both written at the end of this open.
-        let (confirmed, cursor, pending, was, wrote_replica, mut wrote_pending) = match ReplicaFile::load(&*storage, &schema)? {
-            Some(f) => {
+        // What the records hold decides what is written first: a storage
+        // with no replica yet has everything written at the end of this
+        // open, and one whose journal could not all be read is compacted.
+        let (confirmed, cursor, pending, was, durable, wrote_who, mut wrote_pending) = match Stored::load(&*storage, &schema)? {
+            Some(st) => {
+                let f = st.file;
                 if f.mode != mode_word(opts.alone) {
                     return Err(Error::ModeMismatch {
                         was: f.mode,
@@ -237,7 +259,14 @@ impl Peer {
                 }
                 let was = Ctx::new(f.user, f.session);
                 let ids: Vec<Id> = f.pending.iter().map(|e| e.id).collect();
-                (f.confirmed, f.cursor, f.pending, was.clone(), Some((f.cursor, was)), Some(ids))
+                let durable = Durable {
+                    snapshot_bytes: st.snapshot_bytes,
+                    pages: st.found,
+                    page_bytes: st.page_bytes,
+                    cursor: f.cursor,
+                    snapshot_due: !st.clean,
+                };
+                (f.confirmed, f.cursor, f.pending, was.clone(), durable, Some(was), Some(ids))
             }
             None => {
                 // No store yet, but perhaps intents: a run that stopped between
@@ -246,7 +275,14 @@ impl Peer {
                     Some(bytes) => decode_pending(&bytes)?,
                     None => vec![],
                 };
-                (MemoryStore::empty(schema.clone()), 0, pending, Ctx::nobody(), None, None)
+                let durable = Durable {
+                    snapshot_bytes: 0,
+                    pages: count_pages(&*storage)?,
+                    page_bytes: 0,
+                    cursor: 0,
+                    snapshot_due: true,
+                };
+                (MemoryStore::empty(schema.clone()), 0, pending, Ctx::nobody(), durable, None, None)
             }
         };
         let authored = pending.iter().map(|e| e.id).collect();
@@ -266,6 +302,9 @@ impl Peer {
         let mut r = Replica::open(schema.clone(), domain.closures().clone(), confirmed, cursor, pending);
         r.hold(natives.iter().cloned());
         let mut client = Client::open(r, Mode::Whole, opts.token.clone());
+        // What was just opened is what the storage holds; the journal starts
+        // here.
+        let _ = client.replica.take_confirmed();
         // Who authors. Opened signed out over storage somebody has used, it
         // is still them; opened with a login over work nobody authored, that
         // work is the login's — the same as `sign_in`, whichever order the
@@ -289,7 +328,8 @@ impl Peer {
             timing: opts.timing,
             alone: opts.alone,
             signed_out,
-            wrote_replica,
+            durable,
+            wrote_who,
             wrote_pending,
             link: None,
             rejections: vec![],
@@ -313,7 +353,8 @@ impl Peer {
         Peer::open(domain, Box::new(Memory::new()), opts)
     }
 
-    /// A directory, holding the file `replica`.
+    /// A directory, holding the files `replica`, `facts.<n>`, `pending` and
+    /// `who`.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn open_path(domain: Domain, dir: impl Into<std::path::PathBuf>, opts: Options) -> Result<Peer, Error> {
         Peer::open(domain, Box::new(crate::storage::Dir(dir.into())), opts)
@@ -720,22 +761,78 @@ impl Peer {
         self.client.take_outgoing().iter().map(|m| canon::encode(&m.to_value())).collect()
     }
 
-    /// Write down what moved: the pending intents when they did, then the
-    /// confirmed store when the cursor or the login did — in that order,
-    /// so a stop between the two leaves an intent to be sent again rather
-    /// than one applied twice. `pump` calls it on every turn, with or
-    /// without a link, and so does dropping the peer; a caller driving the
-    /// sans-io half by hand calls it after `recv`.
+    /// Write down what moved: the pending intents when they did, the login
+    /// when it did, then what the confirmed store moved by — in that order,
+    /// so a stop between the first and the last leaves an intent to be
+    /// sent again rather than one applied twice. The confirmed store goes
+    /// down as a journal page of the sequences since the last write, or as
+    /// a snapshot when it was replaced or the pages have outgrown the last
+    /// one (the `storage` module docs). `pump` calls it on every turn, with
+    /// or without a link, and so does dropping the peer; a caller driving
+    /// the sans-io half by hand calls it after `recv`.
     pub fn persist(&mut self) -> Result<(), Error> {
         self.persist_pending()?;
-        let r = &self.client.replica;
-        let now = (r.cursor, self.ctx.clone());
-        if self.wrote_replica.as_ref() == Some(&now) {
-            return Ok(());
+        if self.wrote_who.as_ref() != Some(&self.ctx) {
+            self.storage.save(ReplicaFile::WHO, &encode_who(&self.ctx.user, &self.ctx.session))?;
+            self.wrote_who = Some(self.ctx.clone());
         }
+        self.persist_confirmed()
+    }
+
+    /// The journal since the last write, as one page; or a snapshot.
+    fn persist_confirmed(&mut self) -> Result<(), Error> {
+        let run = match self.client.replica.take_confirmed() {
+            Journal::Replaced => {
+                self.durable.snapshot_due = true;
+                vec![]
+            }
+            Journal::Facts(run) => run,
+        };
+        // A run that does not start where the storage ends cannot be a page
+        // (nothing should make one; a snapshot is right whatever did).
+        let follows = run.first().is_none_or(|(n, _)| *n == self.durable.cursor + 1);
+        if self.durable.snapshot_due || !follows {
+            return self.snapshot();
+        }
+        let Some((to, _)) = run.last() else { return Ok(()) };
+        let to = *to;
+        let bytes = encode_page(&run);
+        if let Err(e) = self.storage.save(&ReplicaFile::page_key(self.durable.pages + 1), &bytes) {
+            // The run is out of the replica's journal and not on the
+            // storage: only a snapshot can catch up now.
+            self.durable.snapshot_due = true;
+            return Err(e);
+        }
+        self.durable.pages += 1;
+        self.durable.page_bytes += bytes.len();
+        self.durable.cursor = to;
+        if self.durable.page_bytes > self.durable.snapshot_bytes {
+            self.snapshot()?;
+        }
+        Ok(())
+    }
+
+    /// Compact: the confirmed store whole at the cursor, then the pages it
+    /// now holds removed, newest first — so a stop anywhere leaves only
+    /// pages at or below the snapshot's cursor, at the front, which `open`
+    /// skips.
+    fn snapshot(&mut self) -> Result<(), Error> {
+        self.durable.snapshot_due = true;
+        let r = &self.client.replica;
         let bytes = encode_replica(mode_word(self.alone), r.cursor, &r.confirmed, &self.ctx.user, &self.ctx.session);
+        let cursor = r.cursor;
         self.storage.save(ReplicaFile::KEY, &bytes)?;
-        self.wrote_replica = Some(now);
+        for n in (1..=self.durable.pages).rev() {
+            self.storage.remove(&ReplicaFile::page_key(n))?;
+            self.durable.pages = n - 1;
+        }
+        self.durable = Durable {
+            snapshot_bytes: bytes.len(),
+            pages: 0,
+            page_bytes: 0,
+            cursor,
+            snapshot_due: false,
+        };
         Ok(())
     }
 
@@ -842,7 +939,8 @@ mod tests {
     /// store did not move; alone it did, and follows on `pump` — and on
     /// drop, for a program that closes between the two. Falsified by
     /// `mutate` calling `persist`: the store record moves on the first
-    /// mutate, alone.
+    /// mutate, alone. (What a pump writes, a page or a snapshot, is
+    /// `persistence_tests`'.)
     #[test]
     fn authoring_writes_the_intent_and_the_store_follows() {
         let disk = Memory::new();
@@ -872,8 +970,11 @@ mod tests {
             store_at_open,
             "alone, the store waits for a pump"
         );
+        assert!(disk.load(&ReplicaFile::page_key(1)).unwrap().is_none(), "…the journal too");
+        let schema = demo::domain().module().schema.clone();
+        assert_eq!(ReplicaFile::load(&disk, &schema).unwrap().unwrap().cursor, 0);
         p.pump();
-        assert_ne!(disk.load(ReplicaFile::KEY).unwrap().unwrap(), store_at_open, "and moves on one");
+        assert_eq!(ReplicaFile::load(&disk, &schema).unwrap().unwrap().cursor, 1, "and moves on one");
         p.mutate("create_playlist", args([("name", Value::text("Two"))])).unwrap();
         drop(p);
         let p = Peer::open(demo::domain(), Box::new(disk.clone()), Options::alone("me")).unwrap();

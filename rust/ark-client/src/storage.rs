@@ -2,32 +2,79 @@
 //!
 //! What is durable about the log is the confirmed store at its cursor and
 //! the intents still pending — exactly what `Replica::open` takes, and
-//! nothing optimistic. It is one canonical-CBOR record, the Swift client's
-//! `ReplicaFile` shape without the `scope` spec v3 removed:
+//! nothing optimistic. It is kept as canonical-CBOR records, each written
+//! whole or not at all ([`Storage::save`] is atomic per record):
 //!
 //! ```text
-//! { t: "replica", mode: "server" | "alone", cursor,
-//!   confirmed: { table: [row…] }, pending: [entry…],
-//!   user, session }
+//! replica   { t: "replica", mode: "server" | "alone", cursor,
+//!             confirmed: { table: [row…] }, user, session }    the snapshot
+//! facts.1   { t: "facts", from, to, facts: [[change…], …] }    the journal:
+//! facts.2   …                                                  one page per
+//!                                                              write, dense
+//! pending   { t: "pending", entries: [entry…] }
+//! who       { t: "who", user, session }
 //! ```
 //!
-//! `user` and `session` are the login this peer last authored as — both
-//! empty while nobody has signed in on it — so a peer reopened signed out
-//! goes on authoring as whoever it was. A file written before they existed
-//! reads as nobody's.
+//! **A snapshot and a journal**, because a peer alone moves its cursor on
+//! every mutation and writing the whole store each time made every tap cost
+//! the library (`docs/plan-v4.md`, "Landed"). The snapshot is the confirmed
+//! store at some cursor, in the Swift client's `ReplicaFile` shape without
+//! the `scope` spec v3 removed. Each page after it holds the changes the
+//! confirmed store moved by for a contiguous run of sequences — `from` to
+//! `to`, one list of changes per sequence, in the form a `FactsFor` frame
+//! carries them (§12) — starting where the previous page, or the snapshot,
+//! ended. What a write costs is the changes since the last one, and not
+//! the store.
+//!
+//! **Compaction** writes a fresh snapshot at the current cursor and removes
+//! the pages, once their total encoded size exceeds the snapshot's. That is
+//! the rule that keeps a mutation's cost independent of the store: a
+//! snapshot of *S* bytes is written only after at least *S* bytes of pages,
+//! so every byte of journal pays for at most one byte of snapshot and the
+//! bytes written stay within twice the journal's, whatever the library's
+//! size — where compacting every *n* pages would have every *n*th write pay
+//! for the whole store, and the average grow with it. What it costs is room:
+//! a storage holds up to about twice a snapshot, and a directory up to as
+//! many small files as it takes to reach one.
+//!
+//! **What a stop leaves behind is safe, by the order of the writes.** A
+//! page is written after the intents it confirmed have left `pending`, so a
+//! stop between leaves an intent to be sent again rather than one applied
+//! twice. A compaction writes the snapshot before it removes a page, and
+//! removes them newest first. So `open` reads the snapshot, then `facts.1`,
+//! `facts.2`, … until one is absent (a [`Storage`] cannot list its keys):
+//! a page wholly at or below the snapshot's cursor is one a compaction
+//! already holds, and is skipped; the first page that does not start at the
+//! next sequence — or does not decode, being a write the platform tore — is
+//! where the journal ends, and it and everything after it are dropped,
+//! never applied out of order. Anything skipped or dropped is cleaned up by
+//! a compaction as the peer opens. A torn tail costs the sequences in it,
+//! which a server sends again and a peer alone had not yet written down.
+//!
+//! **The login is a record of its own** (`who`): the one this peer last
+//! authored as, both empty while nobody has signed in on it, so a peer
+//! reopened signed out goes on authoring as whoever it was. It moves on a
+//! sign-in, which is no reason to write the store. The snapshot carries it
+//! too, as it always has; `who` wins where both are.
+//!
+//! A storage written before the journal existed — a `replica` record, no
+//! pages, no `who` — is a snapshot with nothing after it, and opens as it
+//! did. A file written before `user` and `session` existed reads as
+//! nobody's; one written before the intents had a record of their own
+//! carries them inside, and the record wins where both are.
 //!
 //! Three places to keep it: a directory natively ([`Dir`], written to a
-//! temporary name and renamed), the browser's `localStorage` in wasm
-//! ([`Local`], base64 under a key), and memory ([`Memory`], for tests and
-//! the demo — cloneable, so a test can "reopen" from what a peer left
+//! temporary name, synced, and renamed), the browser's `localStorage` in
+//! wasm ([`Local`], base64 under a key), and memory ([`Memory`], for tests
+//! and the demo — cloneable, so a test can "reopen" from what a peer left
 //! behind).
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use ark::canon;
-use ark::log::{Entry, Seq};
-use ark::protocol::{entry_from_value, entry_value};
+use ark::log::{Entry, Facts, Seq};
+use ark::protocol::{change_from_value, change_value, entry_from_value, entry_value};
 use ark::schema::Schema;
 use ark::store::{Change, MemoryStore, Store};
 use ark::value::Value;
@@ -36,6 +83,10 @@ use crate::Error;
 
 /// A key-value place for a peer's files. `key` is a short file name such as
 /// `replica`.
+///
+/// A `save` replaces its record whole or not at all: what the layout's
+/// crash rules rest on (module docs). There is no listing; the journal's
+/// pages are found by trying `facts.1`, `facts.2`, … in turn.
 pub trait Storage {
     fn load(&self, key: &str) -> Result<Option<Vec<u8>>, Error>;
     fn save(&mut self, key: &str, bytes: &[u8]) -> Result<(), Error>;
@@ -83,7 +134,11 @@ impl Storage for Memory {
 }
 
 /// A directory, one file per key, each written whole to a temporary name
-/// beside it and renamed over the old one: a crash leaves either.
+/// beside it, synced, and renamed over the old one, and the directory
+/// synced after: a crash — of the program or of the machine — leaves the
+/// old record or the new one, never part of either, and a record `save`
+/// returned from is there after a restart (the spec's durability of a
+/// local write, `spec/README.md`).
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Debug)]
 pub struct Dir(pub std::path::PathBuf);
@@ -103,8 +158,17 @@ impl Storage for Dir {
         std::fs::create_dir_all(&self.0).map_err(|e| io(e, &self.0))?;
         let path = self.0.join(key);
         let tmp = self.0.join(format!(".{key}.tmp"));
-        std::fs::write(&tmp, bytes).map_err(|e| io(e, &tmp))?;
-        std::fs::rename(&tmp, &path).map_err(|e| io(e, &path))
+        {
+            use std::io::Write;
+            let mut f = std::fs::File::create(&tmp).map_err(|e| io(e, &tmp))?;
+            f.write_all(bytes).map_err(|e| io(e, &tmp))?;
+            // Without it a machine that stops after the rename can come back
+            // with the new name over an empty or partial file.
+            f.sync_all().map_err(|e| io(e, &tmp))?;
+        }
+        std::fs::rename(&tmp, &path).map_err(|e| io(e, &path))?;
+        // …and without this, with the old record, or none.
+        sync_dir(&self.0).map_err(|e| io(e, &self.0))
     }
     fn remove(&mut self, key: &str) -> Result<(), Error> {
         let path = self.0.join(key);
@@ -115,7 +179,20 @@ impl Storage for Dir {
     }
 }
 
-/// The browser's `localStorage`: base64 under `"{prefix}{key}"`.
+// A directory's entries are made durable by syncing the directory itself,
+// where the platform lets one be opened to do it.
+#[cfg(all(not(target_arch = "wasm32"), unix))]
+fn sync_dir(dir: &std::path::Path) -> std::io::Result<()> {
+    std::fs::File::open(dir)?.sync_all()
+}
+#[cfg(all(not(target_arch = "wasm32"), not(unix)))]
+fn sync_dir(_: &std::path::Path) -> std::io::Result<()> {
+    Ok(())
+}
+
+/// The browser's `localStorage`: base64 under `"{prefix}{key}"`. One
+/// `setItem` replaces one value whole, which is the atomicity a record
+/// needs.
 ///
 /// Synchronous, which is why it is this and not IndexedDB: a peer opens
 /// inside iced's `boot`, which cannot wait for a promise. The cost is the
@@ -198,11 +275,10 @@ pub fn base64_decode(s: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// What is durable about the log, in two records: `replica` — the mode,
-/// the cursor, the confirmed store, the login — written when the cursor or
-/// the login moves, and `pending` — the intents not yet answered — written
-/// when they do. Authoring an intent costs writing the intents, not the
-/// store; the store is written once per batch that lands.
+/// What is durable about the log, as `open` reads it back: the snapshot
+/// with every page after it applied — the mode, the cursor, the confirmed
+/// store, the login — and the intents not yet answered. See the module
+/// docs for the records it is kept in.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReplicaFile {
     /// `"server"` for a replica of an authority elsewhere, `"alone"` for one
@@ -217,12 +293,20 @@ pub struct ReplicaFile {
 }
 
 impl ReplicaFile {
-    /// The key the confirmed store is kept under.
+    /// The key the snapshot is kept under.
     pub const KEY: &'static str = "replica";
     /// The key the pending intents are kept under.
     pub const PENDING: &'static str = "pending";
+    /// The key the login is kept under.
+    pub const WHO: &'static str = "who";
 
-    /// The `replica` record: everything but the pending intents.
+    /// The key of the journal's `n`th page, counting from 1.
+    pub fn page_key(n: usize) -> String {
+        format!("facts.{n}")
+    }
+
+    /// The `replica` record: a snapshot of everything but the pending
+    /// intents.
     pub fn encode(&self) -> Vec<u8> {
         encode_replica(&self.mode, self.cursor, &self.confirmed, &self.user, &self.session)
     }
@@ -232,20 +316,14 @@ impl ReplicaFile {
         encode_pending(&self.pending)
     }
 
-    /// Both records out of a storage, or `None` where there is no replica.
-    /// A replica written before the intents had a record of their own
-    /// carries them inside; the record wins where both are there.
+    /// Everything durable out of a storage, or `None` where there is no
+    /// replica: [`Stored::load`], without what it says about the pages.
     pub fn load(storage: &dyn Storage, schema: &Schema) -> Result<Option<ReplicaFile>, Error> {
-        let Some(bytes) = storage.load(ReplicaFile::KEY)? else {
-            return Ok(None);
-        };
-        let mut f = ReplicaFile::decode(&bytes, schema)?;
-        if let Some(bytes) = storage.load(ReplicaFile::PENDING)? {
-            f.pending = decode_pending(&bytes)?;
-        }
-        Ok(Some(f))
+        Ok(Stored::load(storage, schema)?.map(|s| s.file))
     }
 
+    /// The `replica` record alone: a snapshot, with the intents it carried
+    /// if it was written before they had a record of their own.
     pub fn decode(bytes: &[u8], schema: &Schema) -> Result<ReplicaFile, Error> {
         let bad = |w: &str| Error::Corrupt(format!("a replica file: {w}"));
         let v = canon::decode(bytes).map_err(|e| bad(&e.to_string()))?;
@@ -301,7 +379,182 @@ impl ReplicaFile {
     }
 }
 
-/// The `replica` record's bytes.
+/// What `open` found in a storage: the replica, and what the journal
+/// looked like — which decides whether the next write is a page or a
+/// snapshot.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Stored {
+    /// The snapshot with every good page applied, the intents and the
+    /// login.
+    pub file: ReplicaFile,
+    /// The snapshot's cursor and encoded size.
+    pub snapshot_cursor: Seq,
+    pub snapshot_bytes: usize,
+    /// The pages applied, and their total encoded size.
+    pub pages: usize,
+    pub page_bytes: usize,
+    /// The highest `n` with a `facts.<n>` record, good or not.
+    pub found: usize,
+    /// Every page found was applied, in place: the journal can be written
+    /// on from here. `false` when a page was skipped as one the snapshot
+    /// already holds, or dropped as a torn or out-of-order tail — which a
+    /// compaction then cleans up.
+    pub clean: bool,
+}
+
+impl Stored {
+    /// The snapshot, the journal after it — skipping pages at or below the
+    /// snapshot's cursor, stopping at the first that does not decode or does
+    /// not start at the next sequence — the login and the intents; `None`
+    /// where there is no snapshot. Reads, never writes.
+    pub fn load(storage: &dyn Storage, schema: &Schema) -> Result<Option<Stored>, Error> {
+        let Some(bytes) = storage.load(ReplicaFile::KEY)? else {
+            return Ok(None);
+        };
+        let snapshot_bytes = bytes.len();
+        let mut file = ReplicaFile::decode(&bytes, schema)?;
+        let snapshot_cursor = file.cursor;
+        let (mut pages, mut page_bytes, mut found, mut clean, mut torn) = (0, 0, 0, true, false);
+        while let Some(bytes) = storage.load(&ReplicaFile::page_key(found + 1))? {
+            found += 1;
+            if torn {
+                continue;
+            }
+            match decode_page(&bytes) {
+                Ok(p) if p.to <= snapshot_cursor => clean = false,
+                Ok(p) if p.from == file.cursor + 1 => {
+                    for f in &p.facts {
+                        file.confirmed.apply_changes(f);
+                    }
+                    file.cursor = p.to;
+                    pages += 1;
+                    page_bytes += bytes.len();
+                }
+                _ => {
+                    torn = true;
+                    clean = false;
+                }
+            }
+        }
+        if let Some(bytes) = storage.load(ReplicaFile::WHO)? {
+            (file.user, file.session) = decode_who(&bytes)?;
+        }
+        if let Some(bytes) = storage.load(ReplicaFile::PENDING)? {
+            file.pending = decode_pending(&bytes)?;
+        }
+        Ok(Some(Stored {
+            file,
+            snapshot_cursor,
+            snapshot_bytes,
+            pages,
+            page_bytes,
+            found,
+            clean,
+        }))
+    }
+}
+
+/// How many `facts.<n>` records a storage holds, counting from 1 to the
+/// first absent: what a storage with no snapshot has to clear before its
+/// first one, since a page found then would be read against it.
+pub fn count_pages(storage: &dyn Storage) -> Result<usize, Error> {
+    let mut n = 0;
+    while storage.load(&ReplicaFile::page_key(n + 1))?.is_some() {
+        n += 1;
+    }
+    Ok(n)
+}
+
+/// One page of the journal: the changes the confirmed store moved by at
+/// each sequence from `from` to `to`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JournalPage {
+    pub from: Seq,
+    pub to: Seq,
+    /// One list per sequence, `from` first.
+    pub facts: Vec<Facts>,
+}
+
+/// A page's bytes, for a contiguous run of sequences, oldest first (what
+/// `Replica::take_confirmed` hands over). Empty is not a page.
+pub fn encode_page(run: &[(Seq, Facts)]) -> Vec<u8> {
+    let from = run.first().map_or(0, |(n, _)| *n);
+    let to = run.last().map_or(0, |(n, _)| *n);
+    debug_assert!(
+        run.iter().enumerate().all(|(i, (n, _))| *n == from + i as Seq),
+        "a page is a contiguous run of sequences"
+    );
+    canon::encode(&Value::record(vec![
+        ("t", Value::text("facts")),
+        ("from", Value::Int(from)),
+        ("to", Value::Int(to)),
+        (
+            "facts",
+            Value::List(run.iter().map(|(_, f)| Value::List(f.iter().map(change_value).collect())).collect()),
+        ),
+    ]))
+}
+
+/// A page back, whole: a run that does not add up — not one list of
+/// changes per sequence from `from` to `to` — is as corrupt as bytes that
+/// do not decode.
+pub fn decode_page(bytes: &[u8]) -> Result<JournalPage, Error> {
+    let bad = |w: &str| Error::Corrupt(format!("a journal page: {w}"));
+    let v = canon::decode(bytes).map_err(|e| bad(&e.to_string()))?;
+    let Value::Struct(m) = &v else { return Err(bad("not a struct")) };
+    if m.get("t") != Some(&Value::text("facts")) {
+        return Err(bad("not a page"));
+    }
+    let int = |k: &str| match m.get(k) {
+        Some(Value::Int(n)) => Ok(*n),
+        _ => Err(bad(&format!("no {k}"))),
+    };
+    let (from, to) = (int("from")?, int("to")?);
+    let Some(Value::List(runs)) = m.get("facts") else {
+        return Err(bad("no facts"));
+    };
+    let facts = runs
+        .iter()
+        .map(|f| match f {
+            Value::List(cs) => cs
+                .iter()
+                .map(change_from_value)
+                .collect::<Result<Facts, _>>()
+                .map_err(|e| bad(&e.to_string())),
+            _ => Err(bad("facts are not lists")),
+        })
+        .collect::<Result<Vec<Facts>, Error>>()?;
+    if from < 1 || to < from || facts.len() as i64 != to - from + 1 {
+        return Err(bad(&format!("{} lists of facts for {from}..{to}", facts.len())));
+    }
+    Ok(JournalPage { from, to, facts })
+}
+
+/// The `who` record's bytes.
+pub fn encode_who(user: &str, session: &str) -> Vec<u8> {
+    canon::encode(&Value::record(vec![
+        ("t", Value::text("who")),
+        ("user", Value::text(user)),
+        ("session", Value::text(session)),
+    ]))
+}
+
+/// The login a `who` record holds: user, session.
+pub fn decode_who(bytes: &[u8]) -> Result<(String, String), Error> {
+    let bad = |w: &str| Error::Corrupt(format!("a who file: {w}"));
+    let v = canon::decode(bytes).map_err(|e| bad(&e.to_string()))?;
+    let Value::Struct(m) = &v else { return Err(bad("not a struct")) };
+    if m.get("t") != Some(&Value::text("who")) {
+        return Err(bad("not a login"));
+    }
+    let text = |k: &str| match m.get(k) {
+        Some(Value::Text(t)) => Ok(t.clone()),
+        _ => Err(bad(&format!("no {k}"))),
+    };
+    Ok((text("user")?, text("session")?))
+}
+
+/// The `replica` record's bytes: a snapshot.
 pub fn encode_replica(mode: &str, cursor: Seq, confirmed: &MemoryStore, user: &str, session: &str) -> Vec<u8> {
     canon::encode(&Value::record(vec![
         ("t", Value::text("replica")),
