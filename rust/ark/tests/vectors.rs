@@ -13,16 +13,16 @@ use std::path::{Path, PathBuf};
 use ark::canon::{decode, encode};
 use ark::eval::{apply, Args, Ctx};
 use ark::hash::{closure, closures, function_hash, module_hash, state_hash, FnHash};
-use ark::ir::{module_from_value, module_value, CmpOp, Module};
+use ark::ir::{module_from_value, module_value, CmpOp, Expr, Module, Plan, Pred};
 use ark::log::{Entry, Seq};
 use ark::peer::{local_commit, AdoptError, Authority, Changes, Replica, Sequenced};
 use ark::protocol::{change_from_value, change_value, entry_from_value, ClientMsg, ServerMsg};
-use ark::schema::{check_schema, Dir, Relation, Schema};
+use ark::schema::{check_schema, Dir, Schema};
 use ark::sim::Sim;
 use ark::stdlib::id_of_text;
 use ark::store::{Change, MemoryStore, Store};
 use ark::value::{compare_value, decode_hex, hex, Id, Value};
-use ark::view::{contract, hydrate, push, splice, Filter, Patch, View, ViewPlan};
+use ark::view::{contract, hydrate, push_all, splice, Env, Patch, View};
 
 fn vectors() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../spec/vectors")
@@ -344,37 +344,20 @@ fn pid() -> Id {
 
 /// The vector's `plan` field is Haskell `show` text, so the two plans are
 /// reconstructed here from their names, as `spec/app/Vectors.hs` builds
-/// them.
-fn view_plan(name: &str) -> ViewPlan {
+/// them — written as the v4 plans that mean what those v3 view plans did:
+/// the child pinned by an `on` against the parent's key.
+fn view_plan(name: &str) -> Plan {
     match name {
-        "top-two-by-pos" => ViewPlan {
-            table: "item".into(),
-            filter: Some(Filter::Cmp("playlist_id".into(), CmpOp::Eq, Value::Id(pid()))),
-            order: vec![("pos".into(), Dir::Asc)],
-            limit: Some(2),
-            related: vec![],
-        },
-        "playlist-with-items" => ViewPlan {
-            table: "playlist".into(),
-            filter: None,
-            order: vec![("name".into(), Dir::Asc)],
-            limit: None,
-            related: vec![(
-                "item".into(),
-                Relation {
-                    parent: "playlist".into(),
-                    child: "item".into(),
-                    column: "playlist_id".into(),
-                },
-                ViewPlan {
-                    table: "item".into(),
-                    filter: None,
-                    order: vec![("pos".into(), Dir::Desc)],
-                    limit: Some(3),
-                    related: vec![],
-                },
-            )],
-        },
+        "top-two-by-pos" => Plan::from("item")
+            .filter(Pred::Cmp("playlist_id".into(), CmpOp::Eq, Expr::Lit(Value::Id(pid()))))
+            .order_by("pos", Dir::Asc)
+            .limit(2),
+        "playlist-with-items" => Plan::from("playlist").row(0).order_by("name", Dir::Asc).related(
+            "item",
+            1,
+            vec![("playlist_id", Expr::Field(Box::new(Expr::Var(0)), "id".into()))],
+            Plan::from("item").order_by("pos", Dir::Desc).limit(3),
+        ),
         other => panic!("no plan is known for the view vector {other}"),
     }
 }
@@ -403,18 +386,16 @@ fn views() {
         let steps = v["steps"].as_array().unwrap();
         assert_eq!(changes.len(), steps.len());
         let mut st = MemoryStore::empty(sch.clone());
-        let mut view: View = hydrate(sch, &vp, &st);
+        let mut view: View = hydrate(sch, &vp, Env::default(), &st).unwrap();
         let mut saw_patch = false;
         for (i, (group, step)) in changes.iter().zip(steps).enumerate() {
             let before = view.rows();
             let mut patches = Vec::new();
             for ch in group {
                 st.apply_change(ch);
-                let (v2, ps) = push(sch, &st, ch, &view);
-                view = v2;
-                patches.extend(ps);
+                patches.extend(push_all(sch, &st, std::slice::from_ref(ch), &mut view).unwrap());
             }
-            assert!(contract(sch, &vp, &st, &view), "{name}: step {i} breaks the contract");
+            assert!(contract(sch, &st, &view), "{name}: step {i} breaks the contract");
             let got = Value::List(patches.iter().map(patch_value).collect());
             assert_eq!(got, value(&step["patches"]), "{name}: step {i} patches");
             assert_eq!(Value::List(view.rows()), value(&step["rows"]), "{name}: step {i} rows");

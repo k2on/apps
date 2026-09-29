@@ -10,24 +10,23 @@
 //! [`read`] is that answer for a caller that keeps no entries, which is
 //! how a query and a mutator's `select` ask.
 //!
-//! The incremental half below — [`ViewPlan`], [`hydrate`], [`push`],
-//! [`contract`] — is v3's, and maintains a v3-shaped plan only
-//! ([`Plan::is_v3_shaped`]): a table, a filter, a column order, a limit and
-//! references beneath. `push_all` over entries replaces it (§1.5, B1b).
-//! A view there is a plan kept up to date: [`hydrate`] pulls what `select`
-//! gives; [`push`] is told each change the store made and moves that answer
-//! to what `select` would give now, reporting what it did to its own list
-//! as positions ([`Patch`]). The contract ([`contract`]): after any
-//! sequence of changes the rows equal a fresh hydrate, and splicing the
-//! patches into the old list gives the new one. The store is already at the
-//! new state when a change arrives.
+//! A [`View`] is a plan kept up to date (§1.5): [`hydrate`] pulls it once
+//! and keeps the entries, indexed by key and by `(node, dependency)`;
+//! [`push_all`] is told the changes of one settle — the store already at
+//! the state after all of them — rebuilds the entries they touch, once
+//! each, against that store, and reports what it did to the answer as
+//! positions ([`Patch`]). Every plan is maintained this way: a group
+//! source, lookups, related plans at any depth, a having, expression order
+//! keys and a limit window. The contract ([`contract`]): after any
+//! sequence of changes the view is exactly a fresh hydrate over the same
+//! store, and splicing the patches into the old answer gives the new one.
 
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
-use crate::eval::{EvalError, EvalFault, NodeScope, Scope};
-use crate::ir::{CmpOp, Expr, Key, Lookup, Plan, Pred, Related, Source};
-use crate::schema::{Dir, Relation, Schema, Table};
+use crate::eval::{Args, Ctx, EvalError, EvalFault, NodeScope, Scope};
+use crate::ir::{CmpOp, Expr, Function, Key, Lookup, Plan, Pred, Related, Source};
+use crate::schema::{Dir, Schema, Table};
 use crate::store::{Change, Row, Store};
 use crate::value::{compare_value, FieldName, TableName, Value};
 
@@ -347,67 +346,17 @@ fn order_key(k: &Key, row: &Value, node: Option<&NodeScope>) -> Result<Value, Ev
     }
 }
 
-// §13.1 The v3 view (B1b replaces it) ------------------------------------
+// The filter, evaluated ------------------------------------------------------
 
-// §13.1 The plan a view maintains ----------------------------------------
-
-/// A filter with its right-hand sides evaluated: one constructor per
-/// [`Pred`] constructor.
+// A filter with its right-hand sides evaluated: one constructor per
+// [`Pred`] constructor.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Filter {
+enum Filter {
     Cmp(FieldName, CmpOp, Value),
     In(FieldName, Vec<Value>),
     All(Vec<Filter>),
     Any(Vec<Filter>),
     Not(Box<Filter>),
-}
-
-/// A [`Plan`] with every right-hand side evaluated, to any depth.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ViewPlan {
-    pub table: TableName,
-    pub filter: Option<Filter>,
-    /// The plan's order; `compare_rows` appends the key, which makes the
-    /// order total when a caller hands the view a plan the verifier never
-    /// saw.
-    pub order: Vec<(FieldName, Dir)>,
-    pub limit: Option<i64>,
-    /// Each relationship read beneath a row: the field it appears as, the
-    /// relationship, and the child plan (whose limit is per parent).
-    pub related: Vec<(FieldName, Relation, ViewPlan)>,
-}
-
-/// Resolve a v3-shaped plan ([`Plan::is_v3_shaped`]) with an evaluator
-/// for its right-hand sides; the first failure is the answer, in the plan's
-/// own order. A related plan's `on` is read back as the reference it is:
-/// the child's column against the parent's key.
-///
-/// # Panics
-///
-/// On a plan that is not v3-shaped: this view cannot maintain one.
-pub fn eval_plan<E>(p: &Plan, ev: &mut dyn FnMut(&Expr) -> Result<Value, E>) -> Result<ViewPlan, E> {
-    assert!(p.is_v3_shaped(), "a v3 view maintains a v3-shaped plan only: {p:?}");
-    let filter = match &p.filter {
-        None => None,
-        Some(f) => Some(eval_pred(f, ev)?),
-    };
-    let mut related = Vec::with_capacity(p.related.len());
-    for r in &p.related {
-        let child = eval_plan(&r.plan, ev)?;
-        let relation = Relation {
-            parent: p.table().clone(),
-            child: r.plan.table().clone(),
-            column: r.on[0].0.clone(),
-        };
-        related.push((r.name.clone(), relation, child));
-    }
-    Ok(ViewPlan {
-        table: p.table().clone(),
-        filter,
-        order: p.order_columns().unwrap_or_default(),
-        limit: p.limit,
-        related,
-    })
 }
 
 fn eval_pred<E>(p: &Pred, ev: &mut dyn FnMut(&Expr) -> Result<Value, E>) -> Result<Filter, E> {
@@ -420,12 +369,10 @@ fn eval_pred<E>(p: &Pred, ev: &mut dyn FnMut(&Expr) -> Result<Value, E>) -> Resu
     })
 }
 
-/// Whether a row passes the filter; no filter admits every row. A column
-/// the row lacks reads as `Null`.
-/// The columns a filter holds equal to a value however it is satisfied:
-/// its top-level `Cmp(_, Eq, _)`, and every one inside a top-level `All`.
-/// What an indexed store looks rows up by ([`Store::scan_where_eq`]).
-pub fn equalities(f: Option<&Filter>) -> Vec<(&str, &Value)> {
+// The columns a filter holds equal to a value however it is satisfied: its
+// top-level `Cmp(_, Eq, _)`, and every one inside a top-level `All`. What
+// an indexed store looks rows up by ([`Store::scan_where_eq`]).
+fn equalities(f: Option<&Filter>) -> Vec<(&str, &Value)> {
     fn go<'a>(f: &'a Filter, out: &mut Vec<(&'a str, &'a Value)>) {
         match f {
             Filter::Cmp(c, CmpOp::Eq, v) => out.push((c, v)),
@@ -440,26 +387,25 @@ pub fn equalities(f: Option<&Filter>) -> Vec<(&str, &Value)> {
     out
 }
 
-pub fn admits(f: Option<&Filter>, row: &Row) -> bool {
-    match f {
-        None => true,
-        Some(f) => go(f, row),
+// Whether a row passes the filter; no filter admits every row. A column
+// the row lacks reads as `Null`.
+fn admits(f: Option<&Filter>, row: &Row) -> bool {
+    fn go(f: &Filter, row: &Row) -> bool {
+        let field = |c: &str| row.get(c).cloned().unwrap_or(Value::Null);
+        match f {
+            Filter::Cmp(c, op, v) => cmp(*op, &field(c), v),
+            Filter::In(c, vs) => vs.iter().any(|v| cmp(CmpOp::Eq, &field(c), v)),
+            Filter::All(fs) => fs.iter().all(|g| go(g, row)),
+            Filter::Any(fs) => fs.iter().any(|g| go(g, row)),
+            Filter::Not(g) => !go(g, row),
+        }
     }
-}
-
-fn go(f: &Filter, row: &Row) -> bool {
-    let field = |c: &str| row.get(c).cloned().unwrap_or(Value::Null);
-    match f {
-        Filter::Cmp(c, op, v) => cmp(*op, &field(c), v),
-        Filter::In(c, vs) => vs.iter().any(|v| cmp(CmpOp::Eq, &field(c), v)),
-        Filter::All(fs) => fs.iter().all(|g| go(g, row)),
-        Filter::Any(fs) => fs.iter().any(|g| go(g, row)),
-        Filter::Not(g) => !go(g, row),
-    }
+    f.is_none_or(|f| go(f, row))
 }
 
 /// Comparison under the one total order, so `NULL = NULL` is true and
-/// `NULL < 0` is true (`Ark.Eval.cmp`, which `Ark.View.cmp` must equal).
+/// `NULL < 0` is true — which is also why a related plan's `on` with a
+/// `Null` parent value joins the children whose column is `Null`.
 pub fn cmp(op: CmpOp, a: &Value, b: &Value) -> bool {
     let o = compare_value(a, b);
     match op {
@@ -472,110 +418,244 @@ pub fn cmp(op: CmpOp, a: &Value, b: &Value) -> bool {
     }
 }
 
-/// The plan's order alone, stable ties (`Ark.Eval.orderBy`).
-pub fn order_by(cols: &[(FieldName, Dir)], a: &Row, b: &Row) -> Ordering {
-    for (c, d) in cols {
-        let o = compare_value(a.get(c).unwrap_or(&Value::Null), b.get(c).unwrap_or(&Value::Null));
-        let o = if *d == Dir::Desc { o.reverse() } else { o };
-        if o != Ordering::Equal {
-            return o;
-        }
+// The plan's own filter, evaluated once for a hydrate or a push: its
+// right-hand sides are constant for the read.
+fn root_filter(plan: &Plan, scope: &Scope) -> Result<Option<Filter>, EvalFault> {
+    plan.filter.as_ref().map(|f| eval_pred(f, &mut |e: &Expr| scope.eval(e))).transpose()
+}
+
+// A group source's key: the row's values of the `by` columns.
+fn group_of(by: &[FieldName], row: &Row) -> Vec<Value> {
+    by.iter().map(|c| row.get(c).cloned().unwrap_or(Value::Null)).collect()
+}
+
+// §1.5 The view -----------------------------------------------------------
+
+/// What a view's expressions are evaluated in, owned: the function's
+/// helpers, the context, the (checked) arguments and the provided values.
+/// A [`Scope`] borrows these; a view rebuilds entries long after the call
+/// that opened it, so it keeps its own ([`Env::scope`]).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Env {
+    pub helpers: Vec<Function>,
+    pub ctx: Ctx,
+    pub args: Args,
+    pub provided: Args,
+}
+
+impl Env {
+    /// The scope a plan is pulled in.
+    pub fn scope<'s>(&'s self, sch: &'s Schema) -> Scope<'s> {
+        Scope::new(sch, &self.helpers, &self.ctx, &self.args, &self.provided)
     }
-    Ordering::Equal
 }
 
-/// §13.2 The order a view keeps its rows in: the plan's order, then the key
-/// ascending — a total comparison (`Ark.View.compareRows`).
-pub fn compare_rows(tbl: &Table, cols: &[(FieldName, Dir)], a: &Row, b: &Row) -> Ordering {
-    order_by(cols, a, b).then_with(|| tbl.key_of(a).cmp(&tbl.key_of(b)))
-}
-
-// §13.3 The view -----------------------------------------------------------
-
-/// A maintained plan: the plan and its nodes, in the plan's order, each
-/// node beside the row it was built over.
+/// §1.5 A plan kept up to date: the plan, its environment, and one
+/// [`Entry`] per candidate, with the two indexes that route a change.
+///
+/// Every field is a function of the plan, the environment and the store —
+/// which is what [`contract`] checks, by comparing the whole view with a
+/// fresh [`hydrate`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct View {
-    pub plan: ViewPlan,
-    pub nodes: Vec<(Row, Value)>,
+    pub plan: Plan,
+    pub env: Env,
+    /// The admitted entries' keys in answer order, *not* cut to the limit:
+    /// the answer is the first `limit` of them, and the rest are what a
+    /// window refills from without reading the store (§1.5, 4).
+    pub entries: Vec<Vec<Value>>,
+    /// Every candidate — a source row the filter admits, or a non-empty
+    /// group — admitted or not, by key. A refused one is kept so that a
+    /// child arriving can admit it (§1.3, having).
+    pub by_key: BTreeMap<Vec<Value>, Entry>,
+    /// For every `(node, dependency value)` some entry recorded, the keys of
+    /// the entries that recorded it: how a change to a table read beneath
+    /// the source finds what it touches, at any depth (§1.5, 2).
+    pub by_dep: BTreeMap<(NodeId, Value), BTreeSet<Vec<Value>>>,
+    /// A group source only: the keys of the rows the filter admits, by the
+    /// group they are in. Kept from the changes, so that rebuilding a group
+    /// costs its members and not a scan of the table (§1.5, 1); empty
+    /// groups are not kept.
+    pub groups: BTreeMap<Vec<Value>, BTreeSet<Vec<Value>>>,
 }
 
-/// Pull everything: what `select` answers for the plan, as a view.
-pub fn hydrate(sch: &Schema, vp: &ViewPlan, st: &dyn Store) -> View {
-    View {
-        plan: vp.clone(),
-        nodes: pull_view(sch, vp, st),
+/// §1.5 Pull everything, and keep it: the view whose answer is what
+/// [`read`] gives for the plan in `env`.
+pub fn hydrate(sch: &Schema, plan: &Plan, env: Env, st: &dyn Store) -> Result<View, EvalFault> {
+    let (pulled, groups) = {
+        let scope = env.scope(sch);
+        let pulled = pull(sch, plan, &scope, st)?;
+        let mut groups: BTreeMap<Vec<Value>, BTreeSet<Vec<Value>>> = BTreeMap::new();
+        if let Source::Group { by, .. } = &plan.source {
+            let (tbl, rows) = candidates(sch, plan, &[], &scope, st)?;
+            for r in rows {
+                groups.entry(group_of(by, &r)).or_default().insert(tbl.key_of(&r));
+            }
+        }
+        (pulled, groups)
+    };
+    let mut v = View {
+        plan: plan.clone(),
+        env,
+        entries: Vec::new(),
+        by_key: BTreeMap::new(),
+        by_dep: BTreeMap::new(),
+        groups,
+    };
+    for e in pulled {
+        if e.admitted {
+            v.entries.push(e.key.clone());
+        }
+        v.index(&e);
+        v.by_key.insert(e.key.clone(), e);
     }
+    Ok(v)
 }
 
-/// A rebase rolled the optimistic store back: hydrate again.
-pub fn rebuild(sch: &Schema, st: &dyn Store, view: &View) -> View {
-    hydrate(sch, &view.plan, st)
+/// §1.6 A rebase rolled the optimistic store back: hydrate again, in the
+/// same environment.
+pub fn rebuild(sch: &Schema, st: &dyn Store, view: &View) -> Result<View, EvalFault> {
+    hydrate(sch, &view.plan, view.env.clone(), st)
 }
 
 impl View {
-    /// The current nodes, in order.
+    /// The answer, as it stands: the admitted entries' nodes in order, cut
+    /// to the limit — what [`read`] would answer now.
     pub fn rows(&self) -> Vec<Value> {
-        self.nodes.iter().map(|(_, n)| n.clone()).collect()
+        self.entries.iter().take(self.limit()).map(|k| self.by_key[k].node.clone()).collect()
     }
-}
 
-/// `select` over an evaluated plan: scan, filter, sort, take, attach. A
-/// table the schema lacks is empty here, so that a view is total.
-pub fn pull_view(sch: &Schema, vp: &ViewPlan, st: &dyn Store) -> Vec<(Row, Value)> {
-    let Some(tbl) = sch.lookup_table(&vp.table) else {
-        return vec![];
-    };
-    let mut admitted: Vec<Row> = st.scan_where_eq(&vp.table, &equalities(vp.filter.as_ref()), &|r| admits(vp.filter.as_ref(), r));
-    admitted.sort_by(|a, b| compare_rows(tbl, &vp.order, a, b));
-    if let Some(lim) = vp.limit {
-        admitted.truncate(lim.max(0) as usize);
+    fn limit(&self) -> usize {
+        self.plan.limit.map(|n| n.max(0) as usize).unwrap_or(usize::MAX)
     }
-    admitted
-        .into_iter()
-        .map(|row| {
-            let node = node_of(sch, vp, st, tbl, &row);
-            (row, node)
-        })
-        .collect()
-}
 
-/// A node over a row: the row's columns plus one field per relationship
-/// holding the child nodes (the relationship's field wins a name clash).
-pub fn node_of(sch: &Schema, vp: &ViewPlan, st: &dyn Store, tbl: &Table, row: &Row) -> Value {
-    let pk = parent_key(tbl, row);
-    let mut fields: BTreeMap<FieldName, Value> = row.clone();
-    for (name, rel, child) in &vp.related {
-        let pin = Filter::Cmp(rel.column.clone(), CmpOp::Eq, pk.clone());
-        let pinned = ViewPlan {
-            filter: Some(match &child.filter {
-                None => pin,
-                Some(f) => Filter::All(vec![pin, f.clone()]),
-            }),
-            ..child.clone()
+    // Where an entry of this plan sits, or would sit, among the admitted.
+    fn position(&self, e: &Entry) -> usize {
+        self.entries
+            .partition_point(|k| compare_entries(&self.plan, &self.by_key[k], e) == Ordering::Less)
+    }
+
+    fn index(&mut self, e: &Entry) {
+        for d in &e.deps {
+            self.by_dep.entry(d.clone()).or_default().insert(e.key.clone());
+        }
+    }
+
+    fn unindex(&mut self, e: &Entry) {
+        for d in &e.deps {
+            if let Some(ks) = self.by_dep.get_mut(d) {
+                ks.remove(&e.key);
+                if ks.is_empty() {
+                    self.by_dep.remove(d);
+                }
+            }
+        }
+    }
+
+    // The node at a position of the whole admitted list.
+    fn node_at(&self, i: usize) -> Value {
+        self.by_key[&self.entries[i]].node.clone()
+    }
+
+    // §1.5, 3–4 One entry's new state against its old, as patches against
+    // the window the client holds. A moved entry is a `Remove` at its old
+    // place and an `Insert` at its new one; an entry that stays where it
+    // was is an `Update` when its node changed and nothing when it did
+    // not. Under a limit, an entry leaving the window lets the next one in
+    // and an entry entering it pushes the last one out — both read from
+    // the entries, not the store.
+    fn settle(&mut self, key: Vec<Value>, new: Option<Entry>, out: &mut Vec<Patch>) {
+        let lim = self.limit();
+        let was = match self.by_key.get(&key) {
+            Some(o) if o.admitted => Some(self.position(o)),
+            _ => None,
         };
-        let kids: Vec<Value> = pull_view(sch, &pinned, st).into_iter().map(|(_, n)| n).collect();
-        fields.insert(name.clone(), Value::List(kids));
-    }
-    Value::Struct(fields)
-}
-
-/// The value a child's join column holds for this parent: the single key
-/// column's value, or the whole key as a list where a verified module never
-/// arrives.
-pub fn parent_key(tbl: &Table, row: &Row) -> Value {
-    let mut ks = tbl.key_of(row);
-    if ks.len() == 1 {
-        ks.pop().unwrap_or(Value::Null)
-    } else {
-        Value::List(ks)
+        let old = self.by_key.remove(&key);
+        if let Some(o) = &old {
+            self.unindex(o);
+        }
+        if let Some(p) = was {
+            self.entries.remove(p);
+        }
+        let is = match &new {
+            Some(n) if n.admitted => Some(self.position(n)),
+            _ => None,
+        };
+        let changed = match (&old, &new) {
+            (Some(o), Some(n)) => o.node != n.node,
+            _ => true,
+        };
+        if let Some(n) = new {
+            self.index(&n);
+            if let Some(q) = is {
+                self.entries.insert(q, n.key.clone());
+            }
+            self.by_key.insert(key, n);
+        }
+        match (was, is) {
+            (None, None) => {}
+            (Some(p), None) => {
+                if p < lim {
+                    out.push(Patch::Remove { at: p });
+                    if self.entries.len() >= lim {
+                        out.push(Patch::Insert {
+                            at: lim - 1,
+                            node: self.node_at(lim - 1),
+                        });
+                    }
+                }
+            }
+            (None, Some(q)) => {
+                if q < lim {
+                    out.push(Patch::Insert {
+                        at: q,
+                        node: self.node_at(q),
+                    });
+                    if self.entries.len() > lim {
+                        out.push(Patch::Remove { at: lim });
+                    }
+                }
+            }
+            (Some(p), Some(q)) if p == q => {
+                if p < lim && changed {
+                    out.push(Patch::Update {
+                        at: p,
+                        node: self.node_at(p),
+                    });
+                }
+            }
+            (Some(p), Some(q)) => match (p < lim, q < lim) {
+                (true, true) => {
+                    out.push(Patch::Remove { at: p });
+                    out.push(Patch::Insert {
+                        at: q,
+                        node: self.node_at(q),
+                    });
+                }
+                (true, false) => {
+                    out.push(Patch::Remove { at: p });
+                    out.push(Patch::Insert {
+                        at: lim - 1,
+                        node: self.node_at(lim - 1),
+                    });
+                }
+                (false, true) => {
+                    out.push(Patch::Insert {
+                        at: q,
+                        node: self.node_at(q),
+                    });
+                    out.push(Patch::Remove { at: lim });
+                }
+                (false, false) => {}
+            },
+        }
     }
 }
 
 // §13.4 Patches -------------------------------------------------------------
 
-/// What `push` did to the view's list, as positions into the list as it
-/// stands when the patch is applied, in order.
+/// What [`push_all`] did to the view's answer, as positions into the list
+/// as it stands when the patch is applied, in order.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Patch {
     /// Puts the node before the element at `at` (`at == len` appends).
@@ -613,183 +693,130 @@ pub fn splice(ps: &[Patch], xs: &[Value]) -> Vec<Value> {
     vs
 }
 
-/// §13.5 A change arrives; the store is the store after it. A change in the
-/// plan's own table moves the list; a change in a table read beneath it
-/// updates the parent nodes; both run when the table is both.
-pub fn push(sch: &Schema, st: &dyn Store, ch: &Change, view: &View) -> (View, Vec<Patch>) {
-    let Some(tbl) = sch.lookup_table(&view.plan.table) else {
-        return (view.clone(), vec![]);
-    };
-    let (v1, mut ps1) = if ch.table() == view.plan.table {
-        push_top(sch, st, tbl, ch, view)
-    } else {
-        (view.clone(), vec![])
-    };
-    let (v2, ps2) = push_below(sch, st, tbl, ch, &v1);
-    ps1.extend(ps2);
-    (v2, ps1)
+// §1.5 Maintenance ----------------------------------------------------------
+
+/// §1.5 The changes of one settle, pushed through the view: `st` is already
+/// the store after all of them. Every entry a change touches is rebuilt
+/// from `st`, once, however many changes touched it:
+///
+/// 1. a change in the source table names a key — a row's key, or for a
+///    group source the group of the old row and of the new one — and the
+///    store now decides that key's entry: gone, new, or rebuilt;
+/// 2. a change in a table some `Lookup` or `Related` node reads, at any
+///    depth, selects through [`View::by_dep`] the entries whose recorded
+///    dependencies hold the value the old or the new row satisfies
+///    ([`Node::dependency`]), and each is rebuilt; the rebuild decides
+///    whether the row was really in its subtree;
+/// 3. each rebuilt entry is settled against the old one, in key order, into
+///    patches (`Insert`, `Remove`, `Update`, a move as `Remove` then
+///    `Insert`), with the limit window refilled from the entries.
+///
+/// Nothing is changed unless every rebuild succeeds: an `Err` (a fault in
+/// one of the plan's expressions) leaves the view as it was, which is then
+/// stale — [`rebuild`] it.
+///
+/// Because the rebuild reads the final store, the order of the changes and
+/// how many there are do not matter beyond which keys they name; a batch
+/// of *n* changes touching *k* entries costs *k* rebuilds and no rollback.
+pub fn push_all(sch: &Schema, st: &dyn Store, changes: &[Change], view: &mut View) -> Result<Vec<Patch>, EvalFault> {
+    let (rebuilt, groups) = touched(sch, st, changes, view)?;
+    for (g, members) in groups {
+        if members.is_empty() {
+            view.groups.remove(&g);
+        } else {
+            view.groups.insert(g, members);
+        }
+    }
+    let mut out = Vec::new();
+    for (k, e) in rebuilt {
+        view.settle(k, e, &mut out);
+    }
+    Ok(out)
 }
 
-// A change in the plan's own table: an add, a remove, an edit in place or
-// across, or nothing. Under a limit the view is a window; whenever a row
-// leaves a full window, or moves to its end, the store is asked what comes
-// next (`refill`).
-fn push_top(sch: &Schema, st: &dyn Store, tbl: &Table, ch: &Change, view: &View) -> (View, Vec<Patch>) {
-    let vp = &view.plan;
-    let nodes = &view.nodes;
-    let keep = |r: &Row| admits(vp.filter.as_ref(), r);
-    let key = |r: &Row| tbl.key_of(r);
-    let order = |a: &Row, b: &Row| compare_rows(tbl, &vp.order, a, b);
-    let position = |row: &Row| nodes.iter().position(|(r, _)| key(r) == key(row));
-    let insert_pos = |row: &Row, ns: &[(Row, Value)]| ns.iter().take_while(|(r, _)| order(r, row) == Ordering::Less).count();
-    let build = |row: &Row| (row.clone(), node_of(sch, vp, st, tbl, row));
-    let full = vp.limit == Some(nodes.len() as i64);
-    let with = |ns: Vec<(Row, Value)>| View { plan: vp.clone(), nodes: ns };
+type Rebuilt = Vec<(Vec<Value>, Option<Entry>)>;
+type Groups = BTreeMap<Vec<Value>, BTreeSet<Vec<Value>>>;
 
-    // The pull: the first admitted row beyond the bound, the bound being the
-    // last row the window still holds.
-    let refill = |ns: &[(Row, Value)]| -> Option<(Row, Value)> {
-        let bound = ns.last().map(|(r, _)| r);
-        let mut candidates: Vec<Row> = st.scan_where_eq(&vp.table, &equalities(vp.filter.as_ref()), &|r| {
-            keep(r) && bound.is_none_or(|b| order(b, r) == Ordering::Less)
-        });
-        candidates.sort_by(|a, b| order(a, b));
-        candidates.first().map(&build)
+// §1.5, 1–2 The keys the changes touch, each with its entry rebuilt from
+// the store (`None`: no candidate there any more), and a group source's
+// touched groups as they now stand. Reads the view; changes nothing.
+fn touched(sch: &Schema, st: &dyn Store, changes: &[Change], view: &View) -> Result<(Rebuilt, Groups), EvalFault> {
+    let plan = &view.plan;
+    let table = plan.table();
+    let Some(tbl) = sch.lookup_table(table) else {
+        return Err(EvalFault::Bug(EvalError::UnknownTable(table.clone())));
     };
-
-    let add = |row: &Row| -> (View, Vec<Patch>) {
-        if !keep(row) {
-            return (view.clone(), vec![]);
-        }
-        let j = insert_pos(row, nodes);
-        if let Some(lim) = vp.limit {
-            if j as i64 >= lim {
-                return (view.clone(), vec![]);
-            }
-        }
-        let n = build(row);
-        let mut ns = nodes.clone();
-        ns.insert(j, n.clone());
-        match vp.limit {
-            Some(lim) if ns.len() as i64 > lim => {
-                ns.truncate(lim as usize);
-                (with(ns), vec![Patch::Insert { at: j, node: n.1 }, Patch::Remove { at: lim as usize }])
-            }
-            _ => (with(ns), vec![Patch::Insert { at: j, node: n.1 }]),
-        }
-    };
-
-    let remove_at = |i: usize| -> (View, Vec<Patch>) {
-        let mut ns = nodes.clone();
-        ns.remove(i);
-        match if full { refill(&ns) } else { None } {
-            Some(n) => {
-                let at = ns.len();
-                ns.push(n.clone());
-                (with(ns), vec![Patch::Remove { at: i }, Patch::Insert { at, node: n.1 }])
-            }
-            None => (with(ns), vec![Patch::Remove { at: i }]),
-        }
-    };
-
-    // The row at i is now `new`, and still admitted. The one case that asks
-    // the store: a full window whose edited row now orders last.
-    let edit = |i: usize, new: &Row| -> (View, Vec<Patch>) {
-        let mut ns = nodes.clone();
-        ns.remove(i);
-        let j = insert_pos(new, &ns);
-        let n = build(new);
-        let hidden = if full && j == ns.len() { refill(&ns) } else { None };
-        match hidden {
-            Some(h) if key(&h.0) != key(new) => {
-                let at = ns.len();
-                ns.push(h.clone());
-                (with(ns), vec![Patch::Remove { at: i }, Patch::Insert { at: j.min(at), node: h.1 }])
-            }
-            _ => {
-                ns.insert(j, n.clone());
-                if j == i {
-                    (with(ns), vec![Patch::Update { at: i, node: n.1 }])
-                } else {
-                    (with(ns), vec![Patch::Remove { at: i }, Patch::Insert { at: j, node: n.1 }])
+    let scope = view.env.scope(sch);
+    let filter = root_filter(plan, &scope)?;
+    let ns = nodes(plan);
+    let mut keys: BTreeSet<Vec<Value>> = BTreeSet::new();
+    let mut groups: Groups = BTreeMap::new();
+    for ch in changes {
+        let (old, new) = match ch {
+            Change::Add(_, r) => (None, Some(r)),
+            Change::Remove(_, r) => (Some(r), None),
+            Change::Edit(_, o, n) => (Some(o), Some(n)),
+        };
+        if ch.table() == table.as_str() {
+            match &plan.source {
+                Source::Table(_) => keys.extend(old.iter().chain(new.iter()).map(|r| tbl.key_of(r))),
+                // In change order, so an edit within a group, out of one
+                // and into another, all leave the members right.
+                Source::Group { by, .. } => {
+                    for (r, arrives) in [(old, false), (new, true)] {
+                        let Some(r) = r else { continue };
+                        let g = group_of(by, r);
+                        let members = groups
+                            .entry(g.clone())
+                            .or_insert_with(|| view.groups.get(&g).cloned().unwrap_or_default());
+                        if !arrives {
+                            members.remove(&tbl.key_of(r));
+                        } else if admits(filter.as_ref(), r) {
+                            members.insert(tbl.key_of(r));
+                        }
+                        keys.insert(g);
+                    }
                 }
             }
         }
-    };
-
-    match ch {
-        Change::Add(_, row) => add(row),
-        Change::Remove(_, row) => match position(row) {
-            Some(i) => remove_at(i),
-            None => (view.clone(), vec![]),
-        },
-        Change::Edit(_, old, new) => match (position(old), keep(new)) {
-            (None, false) => (view.clone(), vec![]),
-            (None, true) => add(new),
-            (Some(i), false) => remove_at(i),
-            (Some(i), true) => edit(i, new),
-        },
-    }
-}
-
-/// §13.6 A change beneath the plan: every parent node it could have moved is
-/// rebuilt from the store and, if it differs, reported as an `Update` at the
-/// parent's position. A direct relationship's parents are those whose key
-/// equals the changed row's join column (old and new of an edit); a table
-/// reached only deeper updates every parent.
-fn push_below(sch: &Schema, st: &dyn Store, tbl: &Table, ch: &Change, view: &View) -> (View, Vec<Patch>) {
-    let vp = &view.plan;
-    let t = ch.table();
-    let direct: Vec<&FieldName> = vp
-        .related
-        .iter()
-        .filter(|(_, rel, _)| rel.child == t)
-        .map(|(_, rel, _)| &rel.column)
-        .collect();
-    let deeper = vp.related.iter().any(|(_, _, c)| descendants(c).iter().any(|d| d == t));
-    if direct.is_empty() && !deeper {
-        return (view.clone(), vec![]);
-    }
-    let joins: Vec<Value> = direct
-        .iter()
-        .flat_map(|col| changed_rows(ch).into_iter().filter_map(|row| row.get(*col).cloned()))
-        .collect();
-    let affected = |row: &Row| deeper || joins.contains(&parent_key(tbl, row));
-    let mut nodes = Vec::with_capacity(view.nodes.len());
-    let mut patches = Vec::new();
-    for (i, (row, old)) in view.nodes.iter().enumerate() {
-        if affected(row) {
-            let new = node_of(sch, vp, st, tbl, row);
-            if new != *old {
-                patches.push(Patch::Update { at: i, node: new.clone() });
-                nodes.push((row.clone(), new));
+        for (id, n) in &ns {
+            if n.table() != ch.table() {
                 continue;
             }
+            for r in old.iter().chain(new.iter()) {
+                if let Some(ks) = view.by_dep.get(&(*id, n.dependency(sch, r))) {
+                    keys.extend(ks.iter().cloned());
+                }
+            }
         }
-        nodes.push((row.clone(), old.clone()));
     }
-    (View { plan: vp.clone(), nodes }, patches)
+    let mut rebuilt = Vec::with_capacity(keys.len());
+    for k in keys {
+        let e = match &plan.source {
+            Source::Table(_) => match st.get(table, &k) {
+                Some(row) if admits(filter.as_ref(), &row) => Some(entry(sch, plan, 0, &scope, st, k.clone(), Value::Struct(row), None)?),
+                _ => None,
+            },
+            Source::Group { by, .. } => match groups.get(&k).or_else(|| view.groups.get(&k)) {
+                Some(ms) if !ms.is_empty() => {
+                    let rows: Vec<Value> = ms.iter().filter_map(|m| st.get(table, m)).map(Value::Struct).collect();
+                    let key_row = Value::Struct(by.iter().cloned().zip(k.iter().cloned()).collect());
+                    Some(entry(sch, plan, 0, &scope, st, k.clone(), key_row, Some(Value::List(rows)))?)
+                }
+                _ => None,
+            },
+        };
+        rebuilt.push((k, e));
+    }
+    Ok((rebuilt, groups))
 }
 
-fn descendants(c: &ViewPlan) -> Vec<TableName> {
-    let mut out: Vec<TableName> = c.related.iter().map(|(_, _, g)| g.table.clone()).collect();
-    for (_, _, g) in &c.related {
-        out.extend(descendants(g));
-    }
-    out
-}
-
-fn changed_rows(ch: &Change) -> Vec<&Row> {
-    match ch {
-        Change::Add(_, r) | Change::Remove(_, r) => vec![r],
-        Change::Edit(_, o, n) => vec![o, n],
-    }
-}
-
-// §13.7 The contract ---------------------------------------------------------
+// §1.5 The contract -----------------------------------------------------------
 
 /// A maintained view is right when it is indistinguishable from one
-/// hydrated now.
-pub fn contract(sch: &Schema, vp: &ViewPlan, st: &dyn Store, view: &View) -> bool {
-    *view == hydrate(sch, vp, st)
+/// hydrated now: the same entries, the same order, the same indexes. (The
+/// answer being right, and the patches splicing the old answer into it,
+/// follow; the tests check those too.)
+pub fn contract(sch: &Schema, st: &dyn Store, view: &View) -> bool {
+    rebuild(sch, st, view).is_ok_and(|fresh| fresh == *view)
 }

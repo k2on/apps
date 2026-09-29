@@ -225,9 +225,51 @@ pub fn query_closure(sch: &Schema, c: &Closure, ctx: &Ctx, args: &Args, store: &
     }
 }
 
+/// §1.7 What a procedure runs before its body: its input checked, then
+/// each middleware in `uses` order, over `store`. The checked input and
+/// what each provide returned, by name — or the verdict. A maintained query
+/// runs this at hydrate, builds its plan's scope from it, and runs it again
+/// when a table it reads ([`crate::ir::reads`]) moves (`docs/plan-v4.md`
+/// §1.7). Nothing is written.
+pub fn middleware(sch: &Schema, c: &Closure, ctx: &Ctx, args: &Args, store: &dyn Store) -> Result<(Args, Args), EvalFault> {
+    let mut overlay = Overlay::new(store);
+    let mut st = St {
+        store: &mut overlay,
+        changes: Vec::new(),
+    };
+    preamble(&mut st, sch, c, ctx, args)
+}
+
 // A procedure, whole: the input decoded and checked, each middleware in
 // `uses` order, the body. What the body returned, for a query.
 fn procedure(st: &mut St, sch: &Schema, c: &Closure, ctx: &Ctx, autos: &Args, args0: &Args) -> Result<Option<Value>, EvalFault> {
+    let f = &c.function;
+    let (args, provided) = preamble(st, sch, c, ctx, args0)?;
+    let env = Env {
+        schema: sch,
+        helpers: &c.helpers,
+        kind: f.kind,
+        ctx,
+        args: &args,
+        autos,
+        provided: &provided,
+        locals: BTreeMap::new(),
+    };
+    // §1.4 A query is its plan: what `pull` answers, over the store the
+    // middleware saw.
+    if let (FnKind::Query, Some(p)) = (f.kind, &f.plan) {
+        return Ok(Some(Value::List(crate::view::read(sch, p, &Scope::of(&env), &*st.store)?)));
+    }
+    match block(st, &env, &f.body) {
+        Ok(()) => Ok(None),
+        Err(Stop::Returned(v)) => Ok(v),
+        Err(Stop::Halt(fault)) => Err(fault),
+    }
+}
+
+// The input checked, then the middleware: the checked input and the
+// provided values.
+fn preamble(st: &mut St, sch: &Schema, c: &Closure, ctx: &Ctx, args0: &Args) -> Result<(Args, Args), EvalFault> {
     let f = &c.function;
     let args = checked_input(st, sch, c, ctx, args0)?;
     let none = Args::new();
@@ -258,26 +300,7 @@ fn procedure(st: &mut St, sch: &Schema, c: &Closure, ctx: &Ctx, autos: &Args, ar
             Err(Stop::Halt(fault)) => return Err(fault),
         }
     }
-    let env = Env {
-        schema: sch,
-        helpers: &c.helpers,
-        kind: f.kind,
-        ctx,
-        args: &args,
-        autos,
-        provided: &provided,
-        locals: BTreeMap::new(),
-    };
-    // §1.4 A query is its plan: what `pull` answers, over the store the
-    // middleware saw.
-    if let (FnKind::Query, Some(p)) = (f.kind, &f.plan) {
-        return Ok(Some(Value::List(crate::view::read(sch, p, &Scope::of(&env), &*st.store)?)));
-    }
-    match block(st, &env, &f.body) {
-        Ok(()) => Ok(None),
-        Err(Stop::Returned(v)) => Ok(v),
-        Err(Stop::Halt(fault)) => Err(fault),
-    }
+    Ok((args, provided))
 }
 
 // §1.3 The input, decoded and checked: every declared field present, each

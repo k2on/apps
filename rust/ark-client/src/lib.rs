@@ -41,7 +41,7 @@ pub use autos::Autos;
 pub use domain::Domain;
 pub use link::Timing;
 pub use peer::{refusal_text, Options, Peer, Pumped, Rejection, Standing, Status};
-pub use view::{diff, splice, Update, View};
+pub use view::{splice, Update, View};
 
 pub use ark;
 pub use ark::eval::{Args, Checked};
