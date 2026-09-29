@@ -53,6 +53,13 @@ fn bench_bulk_mutate_server_mode() {
     bulk("server mode", Options::dev("alice"));
 }
 
+/// Alone, every intent is sequenced and confirmed as it is authored: it is
+/// applied to the view, by the authority, and to the confirmed store — and
+/// neither store is copied (`ark::peer::Replica::advance`). Nothing is
+/// written: `pump` is never called, so what persisting costs is not in
+/// this number (`ark_client`'s `persistence_tests` hold a write to the
+/// mutation's changes). What still grows is `add_to_playlist` itself, on a
+/// playlist fifteen hundred items long: see "engine" and "spread".
 #[test]
 #[ignore]
 fn bench_bulk_mutate_alone() {

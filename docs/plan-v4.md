@@ -699,3 +699,27 @@ table before each push, which at sixteen times the demo is larger than the
 cache and takes the view's indexes with it — and a cold walk of a
 `BTreeMap` is a logarithm's worth of misses, which is the contract's
 "through the indexes" and not a pass over the list.
+
+The cold cost is gone, and it was two costs, neither the client's. When a
+peer's own intents were confirmed with nothing left pending, `advance`
+copied the confirmed store over the view — every table and every index,
+per mutation for a peer alone, which confirms each intent at once — though
+the view had reached the same store by applying the same intents over the
+same base. The copy is gone; the equality is a `debug_assert!` naming the
+sequence, the next pending intent is matched as the whole entry rather
+than by id so one confirmed otherwise is replayed rather than trusted, and
+`ark::peer`'s tests count copies (none in sixty mutations, natively or
+through the interpreter). And `ark-client` wrote the whole store as CBOR
+on the next pump; it now writes a snapshot and a journal after it
+(`storage.rs`'s module docs), one page per write holding the changes the
+confirmed store moved by, from `Replica::take_confirmed`, with a fresh
+snapshot once the pages outgrow the last. A pump after one mutation writes
+the same bytes over 300 playlists as over 2400. In `bench_views` at
+sixteen times the demo the cold toggle through `library` is 26 µs, from
+165, and the cold describe through `artists` is 240 µs, from 5.4 ms — at
+or under the columns measured after the bench's own warm-up, which clones
+every row and is now the thing that evicts (the bench's comment says so).
+`bench_bulk_mutate_alone` is 3.0 s for 1500 mutations, from 4.1; what
+still grows there is `add_to_playlist` on one long playlist. Not verified:
+the journal in a browser's `localStorage`, and `Dir`'s syncs on anything
+but this container's filesystem.

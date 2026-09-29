@@ -73,15 +73,20 @@ fn median(xs: &[Duration]) -> Duration {
 /// the composer and artist views read beyond the songs). Flat in the library
 /// size is the claim: a change costs the entries it touches.
 ///
-/// **Measured twice, because a peer alone flushes the cache.** It writes its
-/// whole replica after every mutation, which streams the library through the
-/// cache, so whichever view first touches the store's rows afterwards pays
-/// to fetch them again — a cost of the store's size and of this machine, not
-/// of the view: pushing the same changes a second time does the same work
-/// in a tenth of it. So each change is made `ROUNDS` times as it comes out
-/// of the mutation (the "cold" columns: what the demo pays, in `refresh`'s
-/// order, the first view in line paying for the rest), and `ROUNDS` times
-/// after an untimed walk of every table (the algorithm's cost).
+/// **Measured twice, and the column names are older than what they
+/// measure.** The "cold" columns are each change as it comes out of the
+/// mutation, in `refresh`'s order: what the demo pays. They were named when
+/// a peer alone copied its whole confirmed store over its view after every
+/// mutation it confirmed (`ark::peer::Replica::advance`), which streamed the
+/// library through the cache so that whichever view first touched the
+/// store's rows paid to fetch them again. Nothing does that any more, and
+/// those columns come out at or under the others. The others are the same
+/// changes, `ROUNDS` times each, after an untimed walk of every table — a
+/// walk meant to warm the cache and which, at sixteen times the demo, does
+/// the opposite: `scan` clones every row of every table, more than the
+/// cache holds, and takes the views' indexes out with it. So neither is
+/// the algorithm's cost alone; the "cold" columns are the nearer, and
+/// where the two differ it is the price of a refill, not of the view.
 fn views_at(copies: usize) {
     let t0 = Instant::now();
     let domain = Domain::new(&harken_domain::module());
