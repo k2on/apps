@@ -1,5 +1,5 @@
 {
-  description = "ArkDB: the specification, the toolchain, the runtimes, and harken on them";
+  description = "ArkDB: the specification and runtime in Rust, the frozen Swift and Kotlin, and harken on them";
 
   # FlakeHub rather than github: for every input, because a machine that can
   # reach FlakeHub and cache.nixos.org but not api.github.com (this one, for
@@ -60,11 +60,6 @@
           cargoHash = "sha256-/uK14uPcftMFwlBx28Z1qHkm1edIWVVXi6hRRQRmYec=";
         };
       };
-
-      # What a phone carries of harken's domain: the procedures it calls, and
-      # nothing the scanner alone authors (harken/README.md). The Swift and
-      # Kotlin domains are `arkc gen … --only` these.
-      clientFunctions = "create_playlist,add_to_playlist,remove_from_playlist,library,playlists,playlists_of,playlist";
 
       perSystem = pkgs:
         let
@@ -146,101 +141,37 @@
             '';
           };
 
-          # The specification and arkc, one Haskell package: `ark-spec` holds
-          # the library and both executables.
-          ark-spec = pkgs.haskellPackages.callCabal2nix "ark-spec" ./spec { };
+          # The specification is `rust/ark` (spec/README.md), and its three
+          # binaries are one crate build: `ark-vectors` writes the vectors,
+          # `arkc` verifies, hashes and compares modules, `gen-unicode`
+          # writes the Unicode tables. `arkc` and `vectors` are that build
+          # under the names `nix run` takes.
+          ark = crate { pname = "ark"; };
           arkc = pkgs.writeShellApplication {
             name = "arkc";
-            runtimeInputs = [ ark-spec ];
+            runtimeInputs = [ ark ];
             text = ''exec arkc "$@"'';
           };
           vectors = pkgs.writeShellApplication {
             name = "ark-vectors";
-            runtimeInputs = [ ark-spec ];
+            runtimeInputs = [ ark ];
             text = ''exec ark-vectors "$@"'';
           };
 
-          # The binary that writes harken.ark from the four canonical Rust
-          # files, and the module it writes.
+          # The binary that writes harken.ark from the domain crate, and the
+          # module it writes, verified by the reference.
           harken-domain-bin = crate { pname = "harken-domain"; };
-          harken-domain = pkgs.runCommand "harken-domain" { nativeBuildInputs = [ harken-domain-bin ark-spec ]; } ''
+          harken-domain = pkgs.runCommand "harken-domain" { nativeBuildInputs = [ harken-domain-bin ark ]; } ''
             mkdir -p $out
             harken-domain $out/harken.ark
             arkc verify $out/harken.ark
           '';
 
-          # The formatter each language's canonical text is the output of:
-          # the Rust printer writes tokens, rustfmt breaks the lines, and the
-          # same for Swift and Kotlin (spec/AUTHORING.md §6).
-          fmt = {
-            rust = "rustfmt --edition 2021 --config-path ${./harken/domain/rustfmt.toml}";
-            swift = "swift-format format --in-place --configuration ${./harken/domain/.swift-format}";
-            kotlin = "ktfmt --kotlinlang-style";
-          };
-
-          # The Swift runtime and client, with the conformance runner over the
-          # vectors it is held to. The two flags the toolchain needs on this
-          # platform are the ones swift/tools/nix-swiftc passes.
-          swift = pkgs.swiftPackages.stdenv.mkDerivation {
-            pname = "arkdb-swift";
-            version = "0.1.0";
-            # Two test targets compile harken's phone domain and the iOS
-            # bridge by symlink, and one holds their hashes to harken.ark.
-            src = only [ "swift" "spec/vectors" "harken/domain/gen/swift" "harken/ios/Harken/Rows.swift" "harken/domain/harken.ark" ];
-            sourceRoot = "source/swift";
-            nativeBuildInputs = [ pkgs.swift pkgs.swiftpm ];
-            # On Linux, Foundation and Dispatch are packages of their own and
-            # go in as build inputs so their rpath reaches every binary SwiftPM
-            # links — the manifest it compiles and runs included. On Darwin
-            # they are the system's and the attributes are null.
-            buildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.swiftPackages.Foundation pkgs.swiftPackages.Dispatch ];
-            swiftpmBuildConfig = "debug";
-            # What swift/tools/swift.sh sets in the devshell, Linux only: the
-            # target and header quirks of nixpkgs' Swift 5.8, and the manifest
-            # SwiftPM compiles and runs having no rpath for libdispatch.
-            preBuild = lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
-              export SWIFT_EXEC="$PWD/tools/nix-swiftc"
-              export ARKDB_SWIFTC_INCLUDE=
-              chmod +x tools/nix-swiftc
-              export LD_LIBRARY_PATH="${lib.makeLibraryPath [ pkgs.swiftPackages.Dispatch pkgs.swiftPackages.Foundation ]}:${pkgs.swiftPackages.Foundation}/lib/swift/linux:${pkgs.swiftPackages.swift-unwrapped}/lib/swift/linux''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-            '';
-            doCheck = true;
-            checkPhase = ''
-              runHook preCheck
-              "$(swiftpmBinPath)/ArkDBTests"
-              runHook postCheck
-            '';
-            installPhase = ''
-              mkdir -p $out/lib
-              cp -r "$(swiftpmBinPath)"/*.swiftmodule "$(swiftpmBinPath)"/*.swiftdoc $out/lib/ 2>/dev/null || true
-              cp "$(swiftpmBinPath)"/ArkDBTests $out/lib/
-            '';
-          };
-
-          # The Kotlin runtime and client: gradle over a recorded Maven graph
-          # (kotlin/deps.json), replayed offline the way nixpkgs builds every
-          # gradle project. `nix run .#kotlin-deps` re-records it.
-          kotlin = pkgs.stdenv.mkDerivation (final: {
-            pname = "arkdb-kotlin";
-            version = "0.1.0";
-            # The tests compile harken's phone domain and hash it against
-            # harken.ark.
-            src = only [ "kotlin" "spec/vectors" "harken/domain/gen/kotlin" "harken/domain/harken.ark" ];
-            sourceRoot = "source/kotlin";
-            nativeBuildInputs = [ pkgs.gradle pkgs.jdk21 ];
-            mitmCache = pkgs.gradle.fetchDeps {
-              pkg = final.finalPackage;
-              data = ./kotlin/deps.json;
-            };
-            __darwinAllowLocalNetworking = true;
-            gradleFlags = [ "-Dorg.gradle.java.home=${pkgs.jdk21}" ];
-            gradleBuildTask = "build";
-            doCheck = false;
-            installPhase = ''
-              mkdir -p $out/lib
-              cp ark-runtime/build/libs/*.jar ark-client/build/libs/*.jar $out/lib/
-            '';
-          });
+          # Swift and Kotlin are frozen at spec v3 (swift/FROZEN.md,
+          # kotlin/FROZEN.md) and have no check or package here. The one
+          # thing built from them is harken-apk below: the frozen Android app
+          # over the frozen Kotlin runtime and the frozen print of harken's
+          # v3 domain, which reads no vectors.
 
           # The Android SDK the APK is built with. Google ships one for
           # x86_64 Linux and for macOS; on Linux the SDK is assembled by hand
@@ -257,11 +188,12 @@
               buildToolsVersions = [ "35.0.0" ];
             }).androidsdk}/libexec/android-sdk";
 
-          # The phone: gradle over the SDK, the Kotlin runtime and client as a
-          # composite build, and the generated domain — assembled offline from
-          # a recorded Maven graph (harken/android/deps.json; `nix run
-          # .#harken-apk-deps` re-records it). Debug-signed, like any
-          # assembleDebug; it installs anywhere and belongs nowhere public.
+          # The phone, frozen at spec v3: gradle over the SDK, the Kotlin
+          # runtime and client as a composite build, and the printed domain
+          # — assembled offline from a recorded Maven graph
+          # (harken/android/deps.json; `nix run .#harken-apk-deps`
+          # re-records it). Debug-signed, like any assembleDebug; it
+          # installs anywhere and belongs nowhere public.
           harken-apk = pkgs.stdenv.mkDerivation (final: {
             pname = "harken-apk";
             version = "0.1.0";
@@ -311,16 +243,13 @@
         in
         {
           packages = {
-            inherit ark-spec arkc vectors harken-domain;
-            arkdb-kotlin = kotlin;
-            kotlin-deps = kotlin.mitmCache.updateScript;
+            inherit ark arkc vectors harken-domain;
             harken-server = crate { pname = "harken-server"; };
             # `nix run .#harken-serve [ADDR]`: the dev server, anyone is
             # whoever they say.
             harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { harken-server = crate { pname = "harken-server"; }; };
             inherit harken-web harken-web-server harken-iced;
-            arkdb-swift = swift;
-            default = ark-spec;
+            default = ark;
             inherit harken-apk;
             harken-apk-deps = harken-apk.mitmCache.updateScript;
           } // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
@@ -331,7 +260,7 @@
 
           checks = {
             # The vectors in the tree are the ones the specification writes.
-            vectors = pkgs.runCommand "check-vectors" { nativeBuildInputs = [ ark-spec ]; } ''
+            vectors = pkgs.runCommand "check-vectors" { nativeBuildInputs = [ ark ]; } ''
               ark-vectors vectors
               diff -r vectors ${./spec/vectors} && touch $out
             '';
@@ -352,20 +281,13 @@
               '';
               installPhase = "touch $out";
             };
-            # harken.ark is what the four canonical Rust files emit, and every
-            # authored domain is arkc's print of it: the Rust files over the
-            # whole module, each phone's over what it carries.
-            harken-domain = pkgs.runCommand "check-harken-domain"
-              { nativeBuildInputs = [ ark-spec rust pkgs.swift-format pkgs.ktfmt ]; } ''
+            # harken.ark is what the domain crate emits, and the reference
+            # verifies it.
+            harken-domain = pkgs.runCommand "check-harken-domain" { nativeBuildInputs = [ ark ]; } ''
               diff ${harken-domain}/harken.ark ${./harken/domain/harken.ark}
-              m=${./harken/domain/harken.ark}
-              arkc roundtrip rust $m ${./harken/domain/src} --name Harken --fmt "${fmt.rust}"
-              arkc roundtrip swift $m ${./harken/domain/gen/swift} --only ${clientFunctions} --name Harken --fmt "${fmt.swift}"
-              arkc roundtrip kotlin $m ${./harken/domain/gen/kotlin} --only ${clientFunctions} --package harken.gen --name Harken --fmt "${fmt.kotlin}"
+              arkc verify ${./harken/domain/harken.ark}
               touch $out
             '';
-            swift = swift;
-            kotlin = kotlin;
           } // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
             # The NixOS module, evaluated under the configurations that
             # matter and held to its assertions, its warning and its unit.
@@ -375,23 +297,8 @@
           };
 
           devShells = {
-            # The spec: GHC with the boot libraries the spec confines itself to.
-            spec = pkgs.mkShell {
-              packages = [
-                (pkgs.haskellPackages.ghcWithPackages (p: [ p.array p.bytestring p.containers p.text p.mtl p.directory ]))
-                pkgs.cabal-install
-                pkgs.haskell-language-server
-                pkgs.ormolu
-              ];
-            };
             rust = pkgs.mkShell {
               packages = [ (rust.override { extensions = [ "rust-src" "rust-analyzer" ]; }) pkgs.pkg-config ];
-            };
-            swift = pkgs.mkShell {
-              packages = [ pkgs.swift pkgs.swiftpm pkgs.swiftPackages.Foundation ];
-            };
-            kotlin = pkgs.mkShell {
-              packages = [ pkgs.kotlin pkgs.gradle pkgs.jdk21 ];
             };
             # What `nix build .#harken-web` builds with, for doing it by hand
             # (harken/iced/README.md); pages.yml also keeps it as a gc root so
@@ -400,7 +307,7 @@
               packages = [ wasmRust wasm-bindgen-cli pkgs.binaryen ];
             };
             default = pkgs.mkShell {
-              packages = [ pkgs.cabal-install rust pkgs.kotlin pkgs.jdk21 ];
+              packages = [ rust pkgs.pkg-config ];
             };
           };
         };
