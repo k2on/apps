@@ -655,3 +655,23 @@ Read each agent's diff against this document; run the workspace's fast
 checks and, before the push, `nix flake check`; commit the agent's paths
 if the agent could not; push to `main`. A question an agent raises is
 answered by an edit to this document first and a message second.
+
+---
+
+## Landed
+
+All five pieces are on `main` (`4ea802a` through `4bfc7a6`), and
+`nix flake check` passes every check — `vectors`, `rust`, `harken-domain`,
+`harken-module` — with the Rust generator writing the vectors. Every
+mutator's closure hash is what it was at spec v3, held by
+`every_mutator_hashes_as_it_did_at_spec_v3`. What is not verified from
+here: a window nobody opened, on the desktop or in a browser (the browser
+build itself passes); the benchmark numbers come from one container. Two
+engine costs are worth knowing and are stated as they are: a playlist
+toggle against the `library` view grows sub-linearly with the library
+(50 µs at the demo's size, 142 µs at sixteen times it, inside `push_all`),
+and a peer alone rewriting its replica after every mutation evicts the
+cache, so the first view to touch the store afterwards pays a refill
+(`artists` on a describe, 10.7 ms cold at sixteen times the demo). Neither
+is the client's, and neither was hidden by the numbers before this work,
+which re-read every list.
