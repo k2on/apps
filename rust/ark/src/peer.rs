@@ -27,7 +27,7 @@ use crate::eval::{apply_closure, Args, Ctx, EvalError};
 use crate::hash::{state_hash, Closure, FnHash};
 use crate::log::{Entry, Facts, Log, Page, Seq};
 use crate::schema::Schema;
-use crate::store::{Change, MemoryStore, Refusal, Store};
+use crate::store::{Change, MemoryStore, Overlay, Refusal, Store};
 use crate::value::{hex, Id};
 
 // ---------------------------------------------------------------------
@@ -104,7 +104,7 @@ fn run(
     ctx: &Ctx,
     autos: &Args,
     args: &Args,
-    store: &mut MemoryStore,
+    store: &mut dyn Store,
 ) -> Option<Applied> {
     if let Some(p) = natives.get(fh) {
         return Some(p.apply(ctx, autos, args, store));
@@ -146,8 +146,13 @@ impl Replica {
     /// and if it is not refused, record it as pending. A refusal changes
     /// nothing and records nothing.
     pub fn mutate(&mut self, id: Id, ctx: &Ctx, fh: &FnHash, autos: &Args, args: &Args) -> Result<Entry, Refusal> {
-        let mut view = self.view.clone();
-        match run(&self.schema, &self.bodies, &self.natives, fh, ctx, autos, args, &mut view) {
+        // Applied through an overlay, so a refusal leaves the view untouched
+        // and an acceptance costs its changes, not a copy of the store.
+        let out = {
+            let mut over = Overlay::new(&self.view);
+            run(&self.schema, &self.bodies, &self.natives, fh, ctx, autos, args, &mut over)
+        };
+        match out {
             None => Err(Refusal::Refused(format!("unknown function {}", hex(fh)))),
             Some(Err(bug)) => Err(Refusal::Refused(bug_text(&bug))),
             Some(Ok(Err(refusal))) => Err(refusal),
@@ -160,7 +165,7 @@ impl Replica {
                     args: args.clone(),
                     autos: autos.clone(),
                 };
-                self.view = view;
+                self.view.apply_changes(&chs);
                 self.pending.push(e.clone());
                 self.changes.extend(chs);
                 Ok(e)
@@ -202,6 +207,23 @@ impl Replica {
                 facts: Some(f),
             },
         );
+        self.advance();
+    }
+
+    /// A page of the log arrives: every entry to the inbox, then one
+    /// advance — so a replica with an intent of its own pending rebuilds
+    /// its view once per page rather than once per entry.
+    pub fn receive_batch(&mut self, items: impl IntoIterator<Item = (Seq, Entry, Option<Facts>)>) {
+        for (n, e, f) in items {
+            if n <= self.cursor {
+                continue;
+            }
+            let ib = self.inbox.entry(n).or_default();
+            ib.entry = Some(e);
+            if let Some(f) = f {
+                ib.facts = Some(f);
+            }
+        }
         self.advance();
     }
 
@@ -304,11 +326,11 @@ impl Replica {
             let Some(ib) = self.inbox.get(&n) else { break };
             let Some(e) = ib.entry.clone() else { break };
             let mf = ib.facts.clone();
-            let Some((st, chs, diverged)) = self.apply_one(n, &e, mf.as_ref()) else {
+            let Some((chs, diverged)) = self.apply_one(n, &e, mf.as_ref()) else {
                 break;
             };
             let own_next = self.pending.first().is_some_and(|p| p.id == e.id);
-            self.confirmed = st;
+            self.confirmed.apply_changes(&chs);
             self.cursor = n;
             self.inbox.remove(&n);
             self.pending.retain(|p| p.id != e.id);
@@ -323,7 +345,9 @@ impl Replica {
             return;
         }
         if !had_pending {
-            self.view = self.confirmed.clone();
+            // Nothing was pending, so the view was the confirmed store: it
+            // moves by the same changes.
+            self.view.apply_changes(&acc);
             self.changes.extend(acc);
         } else if !others {
             if self.pending.is_empty() {
@@ -336,15 +360,12 @@ impl Replica {
 
     // One entry against the confirmed store: by intent when the closure is
     // held, by facts otherwise; both when both are present, comparing them.
-    // `None` means it cannot be applied yet.
-    fn apply_one(&self, n: Seq, e: &Entry, mf: Option<&Facts>) -> Option<(MemoryStore, Vec<Change>, bool)> {
-        let by_facts = |f: &Facts, diverged: bool| {
-            let mut st = self.confirmed.clone();
-            st.apply_changes(f);
-            Some((st, f.clone(), diverged))
-        };
+    // The changes the confirmed store moves by, and whether the two
+    // disagreed; `None` means it cannot be applied yet. The intent runs
+    // over an overlay, so the store is untouched until the caller commits.
+    fn apply_one(&self, n: Seq, e: &Entry, mf: Option<&Facts>) -> Option<(Vec<Change>, bool)> {
         if self.can_apply(&e.fn_hash) && !self.diverged.contains(&n) {
-            let mut st = self.confirmed.clone();
+            let mut over = Overlay::new(&self.confirmed);
             return match run(
                 &self.schema,
                 &self.bodies,
@@ -353,22 +374,16 @@ impl Replica {
                 &ctx_of(e),
                 &e.autos,
                 &e.args,
-                &mut st,
+                &mut over,
             ) {
                 Some(Ok(Ok(chs))) => match mf {
-                    Some(f) if *f != chs => by_facts(f, true),
-                    _ => Some((st, chs, false)),
+                    Some(f) if *f != chs => Some((f.clone(), true)),
+                    _ => Some((chs, false)),
                 },
-                _ => match mf {
-                    Some(f) => by_facts(f, true),
-                    None => None,
-                },
+                _ => mf.map(|f| (f.clone(), true)),
             };
         }
-        match mf {
-            Some(f) => by_facts(f, false),
-            None => None,
-        }
+        mf.map(|f| (f.clone(), false))
     }
 
     // Rebuild the view: the confirmed store, then every pending intent in
@@ -380,20 +395,23 @@ impl Replica {
         let pending = std::mem::take(&mut self.pending);
         let mut kept = Vec::with_capacity(pending.len());
         for e in pending {
-            let mut view = self.view.clone();
-            match run(
-                &self.schema,
-                &self.bodies,
-                &self.natives,
-                &e.fn_hash,
-                &ctx_of(&e),
-                &e.autos,
-                &e.args,
-                &mut view,
-            ) {
+            let out = {
+                let mut over = Overlay::new(&self.view);
+                run(
+                    &self.schema,
+                    &self.bodies,
+                    &self.natives,
+                    &e.fn_hash,
+                    &ctx_of(&e),
+                    &e.autos,
+                    &e.args,
+                    &mut over,
+                )
+            };
+            match out {
                 None => self.rejections.push((e.id, Refusal::Refused("no closure for a pending intent".into()))),
-                Some(Ok(Ok(_))) => {
-                    self.view = view;
+                Some(Ok(Ok(chs))) => {
+                    self.view.apply_changes(&chs);
                     kept.push(e);
                 }
                 Some(Ok(Err(why))) => self.rejections.push((e.id, why)),
@@ -469,23 +487,26 @@ impl Authority {
         if let Some(n) = self.log.seq_of(&e.id) {
             return Sequenced::Duplicate(n);
         }
-        let mut st = self.store.clone();
-        match run(
-            &self.schema,
-            &self.bodies,
-            &self.natives,
-            &e.fn_hash,
-            &ctx_of(e),
-            &e.autos,
-            &e.args,
-            &mut st,
-        ) {
+        let out = {
+            let mut over = Overlay::new(&self.store);
+            run(
+                &self.schema,
+                &self.bodies,
+                &self.natives,
+                &e.fn_hash,
+                &ctx_of(e),
+                &e.autos,
+                &e.args,
+                &mut over,
+            )
+        };
+        match out {
             None => Sequenced::Rejected(Refusal::Refused(format!("unknown function {}", hex(&e.fn_hash)))),
             Some(Err(bug)) => Sequenced::Rejected(Refusal::Refused(bug_text(&bug))),
             Some(Ok(Err(why))) => Sequenced::Rejected(why),
             Some(Ok(Ok(facts))) => {
                 let n = self.log.append(e.clone(), facts.clone());
-                self.store = st;
+                self.store.apply_changes(&facts);
                 Sequenced::Appended(n, facts)
             }
         }

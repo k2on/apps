@@ -125,8 +125,21 @@ impl<T: Row> Record for T {
     }
 }
 
-fn record_names<T: Record>() -> Vec<String> {
-    T::fields().fields.into_iter().map(|(n, _)| n).collect()
+/// A record's field names, computed once per type: taking a row apart
+/// happens once per element of every loop, and `fields()` builds the
+/// declaration each time it is asked.
+fn record_names<T: Record>() -> std::rc::Rc<[std::rc::Rc<str>]> {
+    use std::any::TypeId;
+    use std::collections::HashMap;
+    thread_local! {
+        static NAMES: std::cell::RefCell<HashMap<TypeId, std::rc::Rc<[std::rc::Rc<str>]>>> = std::cell::RefCell::new(HashMap::new());
+    }
+    NAMES.with(|c| {
+        c.borrow_mut()
+            .entry(TypeId::of::<T>())
+            .or_insert_with(|| T::fields().fields.into_iter().map(|(n, _)| n.into()).collect())
+            .clone()
+    })
 }
 
 fn record_what<T: Record>() -> &'static str {
@@ -141,32 +154,29 @@ impl<T: Record> Data for T {
         let names = record_names::<T>();
         let hs: Vec<H> = if cx::emitting() {
             let base = cx::expr(h);
-            names.iter().map(|n| cx::e(Expr::Field(Box::new(base.clone()), n.clone()))).collect()
+            let hs: Vec<H> = names.iter().map(|n| cx::e(Expr::Field(Box::new(base.clone()), n.to_string()))).collect();
+            cx::remember(&hs, h);
+            hs
         } else {
-            let v = cx::value(h);
-            names
-                .iter()
-                .map(|n| {
-                    cx::lit(match &v {
-                        Value::Struct(m) => m.get(n).cloned().unwrap_or(Value::Null),
-                        _ => Value::Null,
-                    })
-                })
-                .collect()
+            // Each field read in place: nothing is copied until a field is
+            // used, and comparing two is not using either.
+            names.iter().map(|n| cx::field(h, n.clone())).collect()
         };
-        cx::remember(&hs, h);
         raw::assemble(&hs, record_what::<T>())
     }
     fn to_h(&self) -> H {
         let names = record_names::<T>();
         let hs = raw::disassemble(self, names.len(), record_what::<T>());
-        if let Some(h) = cx::origin(&hs) {
-            return h;
-        }
         if cx::emitting() {
-            cx::e(Expr::Struct(names.into_iter().zip(hs).map(|(n, h)| (n, cx::expr(h))).collect()))
+            if let Some(h) = cx::origin(&hs) {
+                return h;
+            }
+            cx::e(Expr::Struct(names.iter().zip(hs).map(|(n, h)| (n.to_string(), cx::expr(h))).collect()))
         } else {
-            cx::lit(Value::Struct(names.into_iter().zip(hs).map(|(n, h)| (n, cx::value(h))).collect()))
+            if let Some(h) = cx::whole(&hs, &names) {
+                return h;
+            }
+            cx::lit(Value::Struct(names.iter().zip(hs).map(|(n, h)| (n.to_string(), cx::value(h))).collect()))
         }
     }
 }

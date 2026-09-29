@@ -567,12 +567,7 @@ impl Client {
             }
             ServerMsg::Batch { items, has_more } => {
                 let r = &mut self.replica;
-                for (n, e, mf) in items {
-                    match mf {
-                        Some(f) => r.receive_with(n, e, f),
-                        None => r.receive(n, e),
-                    }
-                }
+                r.receive_batch(items);
                 let needs = r.needs();
                 if !needs.is_empty() {
                     self.emit(ClientMsg::NeedFacts { seqs: needs });

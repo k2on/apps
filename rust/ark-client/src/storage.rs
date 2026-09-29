@@ -198,7 +198,11 @@ pub fn base64_decode(s: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// What is durable about the log.
+/// What is durable about the log, in two records: `replica` — the mode,
+/// the cursor, the confirmed store, the login — written when the cursor or
+/// the login moves, and `pending` — the intents not yet answered — written
+/// when they do. Authoring an intent costs writing the intents, not the
+/// store; the store is written once per batch that lands.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReplicaFile {
     /// `"server"` for a replica of an authority elsewhere, `"alone"` for one
@@ -213,19 +217,33 @@ pub struct ReplicaFile {
 }
 
 impl ReplicaFile {
-    /// The key it is kept under.
+    /// The key the confirmed store is kept under.
     pub const KEY: &'static str = "replica";
+    /// The key the pending intents are kept under.
+    pub const PENDING: &'static str = "pending";
 
+    /// The `replica` record: everything but the pending intents.
     pub fn encode(&self) -> Vec<u8> {
-        canon::encode(&Value::record(vec![
-            ("t", Value::text("replica")),
-            ("mode", Value::text(self.mode.clone())),
-            ("cursor", Value::Int(self.cursor)),
-            ("confirmed", self.confirmed.store_value()),
-            ("pending", Value::List(self.pending.iter().map(entry_value).collect())),
-            ("user", Value::text(self.user.clone())),
-            ("session", Value::text(self.session.clone())),
-        ]))
+        encode_replica(&self.mode, self.cursor, &self.confirmed, &self.user, &self.session)
+    }
+
+    /// The `pending` record.
+    pub fn encode_pending(&self) -> Vec<u8> {
+        encode_pending(&self.pending)
+    }
+
+    /// Both records out of a storage, or `None` where there is no replica.
+    /// A replica written before the intents had a record of their own
+    /// carries them inside; the record wins where both are there.
+    pub fn load(storage: &dyn Storage, schema: &Schema) -> Result<Option<ReplicaFile>, Error> {
+        let Some(bytes) = storage.load(ReplicaFile::KEY)? else {
+            return Ok(None);
+        };
+        let mut f = ReplicaFile::decode(&bytes, schema)?;
+        if let Some(bytes) = storage.load(ReplicaFile::PENDING)? {
+            f.pending = decode_pending(&bytes)?;
+        }
+        Ok(Some(f))
     }
 
     pub fn decode(bytes: &[u8], schema: &Schema) -> Result<ReplicaFile, Error> {
@@ -258,14 +276,15 @@ impl ReplicaFile {
                 confirmed.apply_change(&Change::Add(t.clone(), row.clone()));
             }
         }
-        let Some(Value::List(ps)) = m.get("pending") else {
-            return Err(bad("no pending"));
+        let pending = match m.get("pending") {
+            None => vec![],
+            Some(Value::List(ps)) => ps
+                .iter()
+                .map(entry_from_value)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| bad(&e.to_string()))?,
+            Some(_) => return Err(bad("pending is not a list")),
         };
-        let pending = ps
-            .iter()
-            .map(entry_from_value)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| bad(&e.to_string()))?;
         let optional = |k: &str| match m.get(k) {
             None => Ok(String::new()),
             Some(Value::Text(t)) => Ok(t.clone()),
@@ -280,6 +299,43 @@ impl ReplicaFile {
             session: optional("session")?,
         })
     }
+}
+
+/// The `replica` record's bytes.
+pub fn encode_replica(mode: &str, cursor: Seq, confirmed: &MemoryStore, user: &str, session: &str) -> Vec<u8> {
+    canon::encode(&Value::record(vec![
+        ("t", Value::text("replica")),
+        ("mode", Value::text(mode)),
+        ("cursor", Value::Int(cursor)),
+        ("confirmed", confirmed.store_value()),
+        ("user", Value::text(user)),
+        ("session", Value::text(session)),
+    ]))
+}
+
+/// The `pending` record's bytes.
+pub fn encode_pending(pending: &[Entry]) -> Vec<u8> {
+    canon::encode(&Value::record(vec![
+        ("t", Value::text("pending")),
+        ("entries", Value::List(pending.iter().map(entry_value).collect())),
+    ]))
+}
+
+/// The intents a `pending` record holds.
+pub fn decode_pending(bytes: &[u8]) -> Result<Vec<Entry>, Error> {
+    let bad = |w: &str| Error::Corrupt(format!("a pending file: {w}"));
+    let v = canon::decode(bytes).map_err(|e| bad(&e.to_string()))?;
+    let Value::Struct(m) = &v else { return Err(bad("not a struct")) };
+    if m.get("t") != Some(&Value::text("pending")) {
+        return Err(bad("not pending intents"));
+    }
+    let Some(Value::List(ps)) = m.get("entries") else {
+        return Err(bad("no entries"));
+    };
+    ps.iter()
+        .map(entry_from_value)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| bad(&e.to_string()))
 }
 
 #[cfg(test)]

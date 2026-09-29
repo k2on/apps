@@ -350,7 +350,7 @@ pub fn some<T: Data>(x: impl Into<T>) -> Opt<T> {
     Opt::from_h(cx::op(
         &[h],
         |mut es| Expr::Some(Box::new(es.pop().expect("one"))),
-        |mut vs| Ok(vs.pop().expect("one")),
+        |vs| Ok(vs[0].clone()),
     ))
 }
 
@@ -491,7 +491,7 @@ impl<T: Data, const N: usize> ListOf for [T; N] {
         if cx::emitting() && hs.is_empty() {
             return List::from_h(cx::e(Expr::List(vec![])));
         }
-        List::from_h(cx::op(&hs, Expr::List, |vs| Ok(Value::List(vs))))
+        List::from_h(cx::op(&hs, Expr::List, |vs| Ok(Value::List(vs.iter().map(|v| (*v).clone()).collect()))))
     }
 }
 
@@ -499,7 +499,7 @@ impl<T: Data> ListOf for Vec<T> {
     type Out = List<T>;
     fn list(self) -> List<T> {
         let hs: Vec<H> = self.iter().map(|x| x.to_h()).collect();
-        List::from_h(cx::op(&hs, Expr::List, |vs| Ok(Value::List(vs))))
+        List::from_h(cx::op(&hs, Expr::List, |vs| Ok(Value::List(vs.iter().map(|v| (*v).clone()).collect()))))
     }
 }
 
@@ -508,14 +508,27 @@ pub fn list<A: ListOf>(a: A) -> A::Out {
     a.list()
 }
 
-fn elems(h: H) -> Vec<Value> {
-    match cx::value(h) {
-        Value::List(xs) => xs,
-        Value::Null => vec![],
+/// Native: the list at a handle, shared rather than copied, and the node a
+/// loop reads its elements through in place. A list a closure captured is
+/// iterated as often as the closure runs and copied never.
+fn elems(h: H) -> (std::rc::Rc<Value>, H, usize) {
+    let list = cx::shared(h);
+    let n = match &*list {
+        Value::List(xs) => xs.len(),
+        Value::Null => 0,
         other => {
             cx::halt(EvalFault::Bug(EvalError::TypeError(format!("expected a list, got {other:?}"))));
-            vec![]
+            0
         }
+    };
+    let base = cx::lit_rc(list.clone());
+    (list, base, n)
+}
+
+fn items(list: &Value) -> &[Value] {
+    match list {
+        Value::List(xs) => xs,
+        _ => &[],
     }
 }
 
@@ -545,11 +558,15 @@ impl<T: Data> List<T> {
         std1(StdFn::Reverse, self.0)
     }
 
+    // Native: `f` over every element, read in place, each iteration's
+    // scratch forgotten once its result is copied out; then `native` of
+    // the elements and the results. Every element is visited, as the
+    // interpreter visits every one (a fault on the last is still a fault).
     fn each<U: Data>(
         self,
         f: &mut dyn FnMut(T) -> H,
         mk: impl FnOnce(Box<Expr>, crate::ir::Sym, Box<Expr>) -> Expr,
-        native: impl FnOnce(Vec<(Value, Value)>) -> Value,
+        native: impl FnOnce(&[Value], Vec<Value>) -> Value,
     ) -> U {
         if cx::emitting() {
             let xs = cx::expr(self.0);
@@ -560,43 +577,52 @@ impl<T: Data> List<T> {
         if cx::halted() {
             return U::from_h(cx::lit(Value::Null));
         }
-        let mut pairs = Vec::new();
-        for v in elems(self.0) {
-            let r = cx::value(f(T::from_h(cx::lit(v.clone()))));
-            pairs.push((v, r));
+        let (list, base, n) = elems(self.0);
+        let mut results = Vec::with_capacity(n);
+        for i in 0..n {
+            if cx::halted() {
+                break;
+            }
+            let mark = cx::mark();
+            let r = cx::value(f(T::from_h(cx::elem(base, i))));
+            cx::truncate(mark);
+            results.push(r);
         }
-        U::from_h(cx::lit(native(pairs)))
+        U::from_h(cx::lit(native(items(&list), results)))
     }
 
     /// `EMap`.
     pub fn map<U: Data>(self, mut f: impl FnMut(T) -> U) -> List<U> {
-        self.each(&mut |x| f(x).to_h(), Expr::Map, |ps| {
-            Value::List(ps.into_iter().map(|(_, r)| r).collect())
-        })
+        self.each(&mut |x| f(x).to_h(), Expr::Map, |_, rs| Value::List(rs))
     }
     /// `EFilter`.
     pub fn filter(self, mut f: impl FnMut(T) -> Bool) -> List<T> {
-        self.each(&mut |x| f(x).0, Expr::Filter, |ps| {
-            Value::List(ps.into_iter().filter(|(_, r)| *r == Value::Bool(true)).map(|(v, _)| v).collect())
+        self.each(&mut |x| f(x).0, Expr::Filter, |xs, rs| {
+            Value::List(
+                xs.iter()
+                    .zip(&rs)
+                    .filter(|(_, r)| **r == Value::Bool(true))
+                    .map(|(x, _)| x.clone())
+                    .collect(),
+            )
         })
     }
     /// `EAny`.
     pub fn any(self, mut f: impl FnMut(T) -> Bool) -> Bool {
-        self.each(&mut |x| f(x).0, Expr::Any, |ps| {
-            Value::Bool(ps.iter().any(|(_, r)| *r == Value::Bool(true)))
-        })
+        self.each(&mut |x| f(x).0, Expr::Any, |_, rs| Value::Bool(rs.contains(&Value::Bool(true))))
     }
     /// `EAll`.
     pub fn all(self, mut f: impl FnMut(T) -> Bool) -> Bool {
-        self.each(&mut |x| f(x).0, Expr::All, |ps| {
-            Value::Bool(ps.iter().all(|(_, r)| *r == Value::Bool(true)))
+        self.each(&mut |x| f(x).0, Expr::All, |_, rs| {
+            Value::Bool(rs.iter().all(|r| *r == Value::Bool(true)))
         })
     }
     /// `ESortBy`: stable, by the key under the one order of values.
     pub fn sort_by<K: Data>(self, mut f: impl FnMut(T) -> K) -> List<T> {
-        self.each(&mut |x| f(x).to_h(), Expr::SortBy, |mut ps| {
-            ps.sort_by(|a, b| a.1.cmp(&b.1));
-            Value::List(ps.into_iter().map(|(v, _)| v).collect())
+        self.each(&mut |x| f(x).to_h(), Expr::SortBy, |xs, keys| {
+            let mut order: Vec<usize> = (0..xs.len()).collect();
+            order.sort_by(|a, b| keys[*a].cmp(&keys[*b]));
+            Value::List(order.into_iter().map(|i| xs[i].clone()).collect())
         })
     }
     /// `EFold`.
@@ -610,12 +636,18 @@ impl<T: Data> List<T> {
             let body = cx::in_expr(|| cx::expr(f(bound::<A>(acc), bound::<T>(x)).to_h()));
             return A::from_h(cx::e(Expr::Fold(Box::new(xs), Box::new(z), acc, x, Box::new(body))));
         }
+        let (_list, base, n) = elems(self.0);
         let mut a = init;
-        for v in elems(self.0) {
+        for i in 0..n {
             if cx::halted() {
                 break;
             }
-            a = f(a, T::from_h(cx::lit(v)));
+            // The accumulator is copied out before the iteration's scratch
+            // goes, and carried into the next as a value of its own.
+            let mark = cx::mark();
+            let av = cx::value(f(a, T::from_h(cx::elem(base, i))).to_h());
+            cx::truncate(mark);
+            a = A::from_h(cx::lit(av));
         }
         a
     }
@@ -636,7 +668,7 @@ pub fn pick<T: Data>(c: Bool, a: impl Into<T>, b: impl Into<T>) -> T {
             let c = es.pop().expect("three");
             Expr::If(Box::new(c), Box::new(a), Box::new(b))
         },
-        |vs| match &vs[0] {
+        |vs| match vs[0] {
             Value::Bool(true) => Ok(vs[1].clone()),
             Value::Bool(false) => Ok(vs[2].clone()),
             other => Err(EvalFault::Bug(EvalError::TypeError(format!("pick on {other:?}")))),

@@ -94,6 +94,14 @@ pub trait Store {
     /// Every row of a table, in key order.
     fn scan(&self, table: &str) -> Vec<Row>;
 
+    /// The rows of a table that `keep` admits, in key order: what a select
+    /// with a filter reads. The default scans and then drops; a store that
+    /// can look before it copies copies only what it keeps, which is what
+    /// makes a select cost its answer rather than its table.
+    fn scan_where(&self, table: &str, keep: &dyn Fn(&Row) -> bool) -> Vec<Row> {
+        self.scan(table).into_iter().filter(|r| keep(r)).collect()
+    }
+
     /// §4.5 Apply a change as a fact: raw, unjudged. `Add` and `Edit` write
     /// the new row under its key; `Remove` drops the key. An unknown table
     /// is ignored.
@@ -432,6 +440,13 @@ impl Store for MemoryStore {
         self.tables.get(table).map(|t| t.values().cloned().collect()).unwrap_or_default()
     }
 
+    fn scan_where(&self, table: &str, keep: &dyn Fn(&Row) -> bool) -> Vec<Row> {
+        self.tables
+            .get(table)
+            .map(|t| t.values().filter(|r| keep(r)).cloned().collect())
+            .unwrap_or_default()
+    }
+
     fn apply_change(&mut self, change: &Change) {
         match change {
             Change::Add(t, row) | Change::Edit(t, _, row) => {
@@ -492,16 +507,43 @@ impl Store for Overlay<'_> {
         let Some(tbl) = self.schema().lookup_table(table) else {
             return vec![];
         };
+        // A table this overlay has not written is the base's, as it is.
+        let Some(ws) = self.writes.get(table).filter(|ws| !ws.is_empty()) else {
+            return self.base.scan(table);
+        };
         let mut merged: BTreeMap<Key, Row> = self.base.scan(table).into_iter().map(|r| (tbl.key_of(&r), r)).collect();
-        if let Some(ws) = self.writes.get(table) {
-            for (k, w) in ws {
-                match w {
-                    Some(r) => {
-                        merged.insert(k.clone(), r.clone());
-                    }
-                    None => {
-                        merged.remove(k);
-                    }
+        for (k, w) in ws {
+            match w {
+                Some(r) => {
+                    merged.insert(k.clone(), r.clone());
+                }
+                None => {
+                    merged.remove(k);
+                }
+            }
+        }
+        merged.into_values().collect()
+    }
+
+    fn scan_where(&self, table: &str, keep: &dyn Fn(&Row) -> bool) -> Vec<Row> {
+        let Some(tbl) = self.schema().lookup_table(table) else {
+            return vec![];
+        };
+        let Some(ws) = self.writes.get(table).filter(|ws| !ws.is_empty()) else {
+            return self.base.scan_where(table, keep);
+        };
+        // The base's rows this overlay has not written, kept; then its own
+        // writes, kept; in key order.
+        let mut merged: BTreeMap<Key, Row> = self
+            .base
+            .scan_where(table, &|r| !ws.contains_key(&tbl.key_of(r)) && keep(r))
+            .into_iter()
+            .map(|r| (tbl.key_of(&r), r))
+            .collect();
+        for (k, w) in ws {
+            if let Some(r) = w {
+                if keep(r) {
+                    merged.insert(k.clone(), r.clone());
                 }
             }
         }

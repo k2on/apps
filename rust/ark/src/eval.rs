@@ -970,7 +970,7 @@ fn select(st: &mut St, env: &Env, p: &Plan) -> Run<Vec<Value>> {
         None => Box::new(|_| true),
         Some(f) => predicate(st, env, f)?,
     };
-    let mut admitted: Vec<Row> = st.store.scan(&p.table).into_iter().filter(|r| keep(r)).collect();
+    let mut admitted: Vec<Row> = st.store.scan_where(&p.table, &|r| keep(r));
     admitted.sort_by(|a, b| order_by(&p.order, a, b));
     if let Some(lim) = p.limit {
         admitted.truncate(lim.max(0) as usize);

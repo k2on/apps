@@ -163,7 +163,7 @@ pub fn pull(sch: &Schema, vp: &ViewPlan, st: &dyn Store) -> Vec<(Row, Value)> {
     let Some(tbl) = sch.lookup_table(&vp.table) else {
         return vec![];
     };
-    let mut admitted: Vec<Row> = st.scan(&vp.table).into_iter().filter(|r| admits(vp.filter.as_ref(), r)).collect();
+    let mut admitted: Vec<Row> = st.scan_where(&vp.table, &|r| admits(vp.filter.as_ref(), r));
     admitted.sort_by(|a, b| compare_rows(tbl, &vp.order, a, b));
     if let Some(lim) = vp.limit {
         admitted.truncate(lim.max(0) as usize);
@@ -287,11 +287,7 @@ fn push_top(sch: &Schema, st: &dyn Store, tbl: &Table, ch: &Change, view: &View)
     // last row the window still holds.
     let refill = |ns: &[(Row, Value)]| -> Option<(Row, Value)> {
         let bound = ns.last().map(|(r, _)| r);
-        let mut candidates: Vec<Row> = st
-            .scan(&vp.table)
-            .into_iter()
-            .filter(|r| keep(r) && bound.is_none_or(|b| order(b, r) == Ordering::Less))
-            .collect();
+        let mut candidates: Vec<Row> = st.scan_where(&vp.table, &|r| keep(r) && bound.is_none_or(|b| order(b, r) == Ordering::Less));
         candidates.sort_by(|a, b| order(a, b));
         candidates.first().map(&build)
     };

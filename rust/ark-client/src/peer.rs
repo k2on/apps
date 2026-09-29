@@ -16,7 +16,7 @@ use ark::value::{Id, Value};
 
 use crate::autos::Autos;
 use crate::link::{platform_dial, Dial, Link, State, Timing};
-use crate::storage::{BoxStorage, Memory, ReplicaFile};
+use crate::storage::{decode_pending, encode_pending, encode_replica, BoxStorage, Memory, ReplicaFile};
 use crate::view::View;
 use crate::{Domain, Error};
 
@@ -175,9 +175,12 @@ pub struct Peer {
     alone: bool,
     /// Nobody is signed in, so nothing is dialled.
     signed_out: bool,
-    /// What the file holds — cursor, pending, login — or `None` when it is
-    /// behind in a way those do not show (pending re-stamped by a sign-in).
-    written: Option<Written>,
+    /// What the `replica` record holds — the cursor and the login — and
+    /// what the `pending` record holds — the intents' ids — or `None`
+    /// where it is behind in a way those do not show (pending re-stamped
+    /// by a sign-in).
+    wrote_replica: Option<(Seq, Ctx)>,
+    wrote_pending: Option<Vec<Id>>,
     link: Option<Link>,
     rejections: Vec<Rejection>,
     /// Every intent authored here this run or found pending at open.
@@ -186,6 +189,15 @@ pub struct Peer {
     rejected: BTreeMap<Id, String>,
     heard_frames: u64,
     bad_frames: u64,
+}
+
+impl Drop for Peer {
+    /// Whatever is not yet written down is: a peer alone leaves its store to
+    /// the next `pump`, and a program that closes between the two closes
+    /// through here.
+    fn drop(&mut self) {
+        let _ = self.persist();
+    }
 }
 
 impl std::fmt::Debug for Peer {
@@ -197,8 +209,6 @@ impl std::fmt::Debug for Peer {
             .finish()
     }
 }
-
-type Written = (Seq, Vec<Id>, Ctx);
 
 fn mode_word(alone: bool) -> &'static str {
     if alone {
@@ -215,20 +225,30 @@ impl Peer {
     pub fn open(domain: Domain, storage: BoxStorage, opts: Options) -> Result<Peer, Error> {
         let schema = domain.module().schema.clone();
         let natives = domain.native_list();
-        let (confirmed, cursor, pending, was) = match storage.load(ReplicaFile::KEY)? {
-            Some(bytes) => {
-                let f = ReplicaFile::decode(&bytes, &schema)?;
+        // What the two records hold decides what is written first: a storage
+        // with no replica yet has both written at the end of this open.
+        let (confirmed, cursor, pending, was, wrote_replica, mut wrote_pending) = match ReplicaFile::load(&*storage, &schema)? {
+            Some(f) => {
                 if f.mode != mode_word(opts.alone) {
                     return Err(Error::ModeMismatch {
                         was: f.mode,
                         now: mode_word(opts.alone).into(),
                     });
                 }
-                (f.confirmed, f.cursor, f.pending, Ctx::new(f.user, f.session))
+                let was = Ctx::new(f.user, f.session);
+                let ids: Vec<Id> = f.pending.iter().map(|e| e.id).collect();
+                (f.confirmed, f.cursor, f.pending, was.clone(), Some((f.cursor, was)), Some(ids))
             }
-            None => (MemoryStore::empty(schema.clone()), 0, vec![], Ctx::nobody()),
+            None => {
+                // No store yet, but perhaps intents: a run that stopped between
+                // writing them and writing the store. They are kept.
+                let pending = match storage.load(ReplicaFile::PENDING)? {
+                    Some(bytes) => decode_pending(&bytes)?,
+                    None => vec![],
+                };
+                (MemoryStore::empty(schema.clone()), 0, pending, Ctx::nobody(), None, None)
+            }
         };
-        let written = Some((cursor, pending.iter().map(|e| e.id).collect(), was.clone()));
         let authored = pending.iter().map(|e| e.id).collect();
         let authority = opts.alone.then(|| {
             // The authority a peer alone is: its log is the confirmed store
@@ -252,12 +272,11 @@ impl Peer {
         // app did the two in.
         let mut ctx = Ctx::new(opts.user, opts.session);
         let signed_out = !opts.alone && ctx.is_nobody();
-        let mut written = written;
         if signed_out {
             ctx = was;
         } else if !opts.alone && client.replica.pending.iter().any(|e| e.actor.is_empty() && e.session.is_empty()) {
             client.sign_in(&ctx, opts.token.clone());
-            written = None;
+            wrote_pending = None;
         }
         let mut peer = Peer {
             domain,
@@ -270,7 +289,8 @@ impl Peer {
             timing: opts.timing,
             alone: opts.alone,
             signed_out,
-            written,
+            wrote_replica,
+            wrote_pending,
             link: None,
             rejections: vec![],
             authored,
@@ -349,7 +369,7 @@ impl Peer {
         self.client.sign_in(&self.ctx, token);
         self.signed_out = false;
         self.collect_rejections();
-        self.written = None;
+        self.wrote_pending = None;
         self.persist()?;
         self.reconnect();
         Ok(())
@@ -402,7 +422,9 @@ impl Peer {
         self.authored.insert(id);
         self.commit_alone();
         self.collect_rejections();
-        self.persist()?;
+        // The intent is written down now; the store, alone, follows on the
+        // next `pump` — authoring costs the intent, not the store.
+        self.persist_pending()?;
         Ok(id)
     }
 
@@ -610,36 +632,35 @@ impl Peer {
     /// (fifty milliseconds is what the clients here use).
     pub fn pump(&mut self) -> Pumped {
         let mut p = Pumped::default();
-        let Some(link) = &mut self.link else {
-            return p;
-        };
-        let polled = link.poll();
-        if polled.opened {
-            self.client.connected();
-            p.opened = true;
-        }
-        for f in polled.frames {
-            p.moved = true;
-            if let Err(e) = self.recv_frame(&f) {
-                p.note = Some(e.to_string());
+        if let Some(link) = &mut self.link {
+            let polled = link.poll();
+            if polled.opened {
+                self.client.connected();
+                p.opened = true;
             }
-        }
-        if let Some(why) = polled.closed {
-            self.client.disconnected();
-            p.dropped = Some(why);
-        }
-        if let Some(reason) = self.client.denied.clone() {
-            if let Some(link) = &mut self.link {
-                if link.state() != &State::Idle {
-                    link.stop(&format!("denied: {reason}"));
-                    p.denied = Some(reason);
+            for f in polled.frames {
+                p.moved = true;
+                if let Err(e) = self.recv_frame(&f) {
+                    p.note = Some(e.to_string());
                 }
             }
-        }
-        let frames = self.take_outgoing_frames();
-        if let Some(link) = &mut self.link {
-            for f in frames {
-                link.send(f);
+            if let Some(why) = polled.closed {
+                self.client.disconnected();
+                p.dropped = Some(why);
+            }
+            if let Some(reason) = self.client.denied.clone() {
+                if let Some(link) = &mut self.link {
+                    if link.state() != &State::Idle {
+                        link.stop(&format!("denied: {reason}"));
+                        p.denied = Some(reason);
+                    }
+                }
+            }
+            let frames = self.take_outgoing_frames();
+            if let Some(link) = &mut self.link {
+                for f in frames {
+                    link.send(f);
+                }
             }
         }
         let before = self.rejections.len();
@@ -699,25 +720,34 @@ impl Peer {
         self.client.take_outgoing().iter().map(|m| canon::encode(&m.to_value())).collect()
     }
 
-    /// Write the replica if its cursor or pending moved since it was last
-    /// written. `mutate` and `pump` call it; a caller driving the sans-io
-    /// half by hand calls it after `recv`.
+    /// Write down what moved: the pending intents when they did, then the
+    /// confirmed store when the cursor or the login did — in that order,
+    /// so a stop between the two leaves an intent to be sent again rather
+    /// than one applied twice. `pump` calls it on every turn, with or
+    /// without a link, and so does dropping the peer; a caller driving the
+    /// sans-io half by hand calls it after `recv`.
     pub fn persist(&mut self) -> Result<(), Error> {
+        self.persist_pending()?;
         let r = &self.client.replica;
-        let now = (r.cursor, r.pending.iter().map(|e| e.id).collect::<Vec<Id>>(), self.ctx.clone());
-        if self.written.as_ref() == Some(&now) {
+        let now = (r.cursor, self.ctx.clone());
+        if self.wrote_replica.as_ref() == Some(&now) {
             return Ok(());
         }
-        let file = ReplicaFile {
-            mode: mode_word(self.alone).into(),
-            cursor: r.cursor,
-            confirmed: r.confirmed.clone(),
-            pending: r.pending.clone(),
-            user: self.ctx.user.clone(),
-            session: self.ctx.session.clone(),
-        };
-        self.storage.save(ReplicaFile::KEY, &file.encode())?;
-        self.written = Some(now);
+        let bytes = encode_replica(mode_word(self.alone), r.cursor, &r.confirmed, &self.ctx.user, &self.ctx.session);
+        self.storage.save(ReplicaFile::KEY, &bytes)?;
+        self.wrote_replica = Some(now);
+        Ok(())
+    }
+
+    /// The pending intents, if they moved since they were last written.
+    fn persist_pending(&mut self) -> Result<(), Error> {
+        let pending = &self.client.replica.pending;
+        let ids: Vec<Id> = pending.iter().map(|e| e.id).collect();
+        if self.wrote_pending.as_ref() == Some(&ids) {
+            return Ok(());
+        }
+        self.storage.save(ReplicaFile::PENDING, &encode_pending(pending))?;
+        self.wrote_pending = Some(ids);
         Ok(())
     }
 
@@ -804,8 +834,64 @@ mod tests {
         assert_eq!(p.standing(&id), Standing::Pending);
         drop(p);
         // …and it was written down, not only replayed.
-        let f = ReplicaFile::decode(&disk.load(ReplicaFile::KEY).unwrap().unwrap(), &demo::domain().module().schema).unwrap();
+        let f = ReplicaFile::load(&disk, &demo::domain().module().schema).unwrap().unwrap();
         assert_eq!((f.pending[0].actor.as_str(), f.user.as_str()), ("bob", "bob"));
+    }
+
+    /// `mutate` writes the intents and not the store: with a server the
+    /// store did not move; alone it did, and follows on `pump` — and on
+    /// drop, for a program that closes between the two. Falsified by
+    /// `mutate` calling `persist`: the store record moves on the first
+    /// mutate, alone.
+    #[test]
+    fn authoring_writes_the_intent_and_the_store_follows() {
+        let disk = Memory::new();
+        let mut p = Peer::open(demo::domain(), Box::new(disk.clone()), Options::dev("alice")).unwrap();
+        let store_at_open = disk.load(ReplicaFile::KEY).unwrap().unwrap();
+        assert!(
+            disk.load(ReplicaFile::PENDING).unwrap().is_some(),
+            "both records exist from the first open"
+        );
+        let pending_at_open = disk.load(ReplicaFile::PENDING).unwrap().unwrap();
+        p.mutate("create_playlist", args([("name", Value::text("Mine"))])).unwrap();
+        assert_eq!(disk.load(ReplicaFile::KEY).unwrap().unwrap(), store_at_open, "the store did not move");
+        assert_ne!(
+            disk.load(ReplicaFile::PENDING).unwrap().unwrap(),
+            pending_at_open,
+            "the intent was written"
+        );
+        drop(p);
+
+        let disk = Memory::new();
+        let mut p = Peer::open(demo::domain(), Box::new(disk.clone()), Options::alone("me")).unwrap();
+        let store_at_open = disk.load(ReplicaFile::KEY).unwrap().unwrap();
+        p.mutate("create_playlist", args([("name", Value::text("Mine"))])).unwrap();
+        assert_eq!(p.cursor(), 1);
+        assert_eq!(
+            disk.load(ReplicaFile::KEY).unwrap().unwrap(),
+            store_at_open,
+            "alone, the store waits for a pump"
+        );
+        p.pump();
+        assert_ne!(disk.load(ReplicaFile::KEY).unwrap().unwrap(), store_at_open, "and moves on one");
+        p.mutate("create_playlist", args([("name", Value::text("Two"))])).unwrap();
+        drop(p);
+        let p = Peer::open(demo::domain(), Box::new(disk.clone()), Options::alone("me")).unwrap();
+        assert_eq!(p.cursor(), 2, "a drop writes what the next pump would have");
+    }
+
+    /// A storage holding intents and no store yet — a run that stopped
+    /// between writing the one and the other — keeps them. Falsified by
+    /// `open` reading only the store record.
+    #[test]
+    fn intents_written_before_any_store_are_kept() {
+        let mut author = Peer::open_memory(demo::domain(), Options::dev("alice")).unwrap();
+        author.mutate("create_playlist", args([("name", Value::text("Mine"))])).unwrap();
+        let mut disk = Memory::new();
+        disk.save(ReplicaFile::PENDING, &encode_pending(&author.replica().pending)).unwrap();
+        let p = Peer::open(demo::domain(), Box::new(disk), Options::dev("alice")).unwrap();
+        assert_eq!(p.pending_len(), 1);
+        assert_eq!(p.store().scan("playlist").len(), 1, "and replayed on top of the empty store");
     }
 
     #[test]

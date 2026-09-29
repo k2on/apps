@@ -6,6 +6,8 @@ mod geometry;
 mod signing_in;
 
 #[cfg(feature = "demo")]
+mod bench;
+#[cfg(feature = "demo")]
 mod context;
 #[cfg(feature = "demo")]
 mod demo;

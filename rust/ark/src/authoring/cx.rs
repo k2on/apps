@@ -3,8 +3,18 @@
 //! into the arena of the run in progress; under `Emit` the node is an
 //! expression, under `Native` a value. Nothing outside this file knows
 //! which, except by asking [`emitting`].
+//!
+//! Under `Native` the arena is where a query's time goes, so three things
+//! about it are deliberate. A value is shared (`Rc`), so iterating a list a
+//! closure captured does not copy the list. An element of a list, and a
+//! field of a row, are read *in place* ([`Node::Elem`], [`Node::Field`]):
+//! taking a row apart into its fields allocates nothing, and comparing two
+//! fields ([`op`] reads them where they are) copies nothing. And a loop's scratch is forgotten at
+//! the end of each iteration ([`mark`], [`truncate`]), so a query nested
+//! three deep costs the arena its widest iteration and not every one.
 
 use std::cell::RefCell;
+use std::rc::Rc;
 
 use crate::eval::{self, EvalError, EvalFault};
 use crate::ir::{Auto, Block, CmpOp, Expr, Op, StdFn, Stmt, Sym};
@@ -21,8 +31,14 @@ use crate::value::Value;
 pub struct H(u32);
 
 pub(crate) enum Node {
-    E(Expr),
-    V(Value),
+    /// Emit: an expression.
+    E(Box<Expr>),
+    /// A value; under Emit, a literal.
+    V(Rc<Value>),
+    /// Native: element `i` of the list at the handle, read in place.
+    Elem(H, u32),
+    /// Native: the field of the struct at the handle, read in place.
+    Field(H, Rc<str>),
 }
 
 pub(crate) struct Emit {
@@ -50,9 +66,10 @@ pub(crate) enum Mode {
 pub(crate) struct Cx {
     pub(crate) mode: Mode,
     nodes: Vec<Node>,
-    /// Rows taken apart into their fields, by those fields' handles: a row
-    /// given back unchanged is the term it came from, not a struct rebuilt
-    /// field by field (§6: `or_refuse`'s value is `EStd Unwrap [EVar s]`).
+    /// Emit: rows taken apart into their fields, by those fields' handles: a
+    /// row given back unchanged is the term it came from, not a struct
+    /// rebuilt field by field (§6: `or_refuse`'s value is `EStd Unwrap
+    /// [EVar s]`). Native reads that off the nodes themselves ([`whole`]).
     origins: std::collections::HashMap<Vec<u32>, H>,
 }
 
@@ -156,42 +173,121 @@ pub(crate) fn node(n: Node) -> H {
     with(|cx| push(cx, n))
 }
 
-/// Remember that these field handles are the row `origin` taken apart.
+/// Emit: remember that these field handles are the row `origin` taken apart.
 pub(crate) fn remember(fields: &[H], origin: H) {
     with(|cx| {
         cx.origins.insert(fields.iter().map(|h| h.0).collect(), origin);
     })
 }
 
-/// The row these field handles were taken from, if they are exactly its
-/// fields, unchanged.
+/// Emit: the row these field handles were taken from, if they are exactly
+/// its fields, unchanged.
 pub(crate) fn origin(fields: &[H]) -> Option<H> {
     with(|cx| cx.origins.get(&fields.iter().map(|h| h.0).collect::<Vec<u32>>()).copied())
 }
 
 /// A literal: the same node in both modes.
 pub(crate) fn lit(v: Value) -> H {
+    node(Node::V(Rc::new(v)))
+}
+
+/// A value already shared.
+pub(crate) fn lit_rc(v: Rc<Value>) -> H {
     node(Node::V(v))
 }
 
 /// An expression node (Emit).
 pub(crate) fn e(x: Expr) -> H {
-    node(Node::E(x))
+    node(Node::E(Box::new(x)))
+}
+
+/// Native: element `i` of the list at `list`, read in place.
+pub(crate) fn elem(list: H, i: usize) -> H {
+    node(Node::Elem(list, i as u32))
+}
+
+/// Native: the field of the struct at `of`, read in place.
+pub(crate) fn field(of: H, name: Rc<str>) -> H {
+    node(Node::Field(of, name))
 }
 
 /// The expression a handle stands for (Emit). A literal is `ELit`.
 pub(crate) fn expr(h: H) -> Expr {
     with(|cx| match &cx.nodes[h.0 as usize] {
-        Node::E(x) => x.clone(),
-        Node::V(v) => Expr::Lit(v.clone()),
+        Node::E(x) => (**x).clone(),
+        Node::V(v) => Expr::Lit((**v).clone()),
+        Node::Elem(..) | Node::Field(..) => unreachable!("a value read in place under Emit"),
     })
 }
 
-/// The value a handle holds (Native).
+static NULL: Value = Value::Null;
+
+/// The value at a handle, where it lives (Native).
+fn resolve(cx: &Cx, h: H) -> &Value {
+    match &cx.nodes[h.0 as usize] {
+        Node::V(v) => v,
+        Node::Elem(l, i) => match resolve(cx, *l) {
+            Value::List(xs) => xs.get(*i as usize).unwrap_or(&NULL),
+            _ => &NULL,
+        },
+        Node::Field(o, n) => match resolve(cx, *o) {
+            Value::Struct(m) => m.get(&**n).unwrap_or(&NULL),
+            _ => &NULL,
+        },
+        Node::E(x) => panic!("a Native value that is an expression: {x:?}"),
+    }
+}
+
+/// The value a handle holds (Native), copied out.
 pub(crate) fn value(h: H) -> Value {
+    with(|cx| resolve(cx, h).clone())
+}
+
+/// The value at a handle, shared (Native): the node's own `Rc` where it is
+/// one, so a list a closure captured is iterated and never copied.
+pub(crate) fn shared(h: H) -> Rc<Value> {
     with(|cx| match &cx.nodes[h.0 as usize] {
         Node::V(v) => v.clone(),
-        Node::E(x) => panic!("a Native value that is an expression: {x:?}"),
+        _ => Rc::new(resolve(cx, h).clone()),
+    })
+}
+
+/// Native: the struct these handles are the fields of, read in place and
+/// unchanged — exactly `names`, in order, off one struct — so a row given
+/// back is the row, not a copy rebuilt field by field.
+pub(crate) fn whole(fields: &[H], names: &[Rc<str>]) -> Option<H> {
+    if fields.is_empty() || fields.len() != names.len() {
+        return None;
+    }
+    with(|cx| {
+        let mut base = None;
+        for (h, n) in fields.iter().zip(names) {
+            match &cx.nodes[h.0 as usize] {
+                Node::Field(o, m) if Rc::ptr_eq(m, n) || **m == **n => match base {
+                    None => base = Some(*o),
+                    Some(b) if b == *o => {}
+                    Some(_) => return None,
+                },
+                _ => return None,
+            }
+        }
+        base
+    })
+}
+
+/// How many nodes there are: what [`truncate`] goes back to.
+pub(crate) fn mark() -> usize {
+    with(|cx| cx.nodes.len())
+}
+
+/// Native: forget every node made since `mark` — one iteration's scratch,
+/// once its result has been copied out. Emit keeps everything: a statement
+/// written inside a closure names its nodes later.
+pub(crate) fn truncate(mark: usize) {
+    with(|cx| {
+        if matches!(cx.mode, Mode::Native(_)) {
+            cx.nodes.truncate(mark);
+        }
     })
 }
 
@@ -220,8 +316,9 @@ pub(crate) fn refused(why: String) {
 }
 
 /// An operation over values: in Emit the expression `emit(args)`, in
-/// Native the value `native(args)`, a fault halting the run.
-pub(crate) fn op(args: &[H], emit: impl FnOnce(Vec<Expr>) -> Expr, native: impl FnOnce(Vec<Value>) -> Result<Value, EvalFault>) -> H {
+/// Native the value `native(args)`, a fault halting the run. The values
+/// are read in place; `native` copies what it keeps.
+pub(crate) fn op(args: &[H], emit: impl FnOnce(Vec<Expr>) -> Expr, native: impl FnOnce(&[&Value]) -> Result<Value, EvalFault>) -> H {
     if emitting() {
         let es = args.iter().map(|h| expr(*h)).collect();
         return e(emit(es));
@@ -229,8 +326,12 @@ pub(crate) fn op(args: &[H], emit: impl FnOnce(Vec<Expr>) -> Expr, native: impl 
     if halted() {
         return lit(Value::Null);
     }
-    let vs = args.iter().map(|h| value(*h)).collect();
-    match native(vs) {
+    let r = with(|cx| {
+        let cx: &Cx = cx;
+        let vs: Vec<&Value> = args.iter().map(|h| resolve(cx, *h)).collect();
+        native(&vs)
+    });
+    match r {
         Ok(v) => lit(v),
         Err(f) => {
             halt(f);
@@ -247,9 +348,29 @@ pub(crate) fn std_fault(e: StdError) -> EvalFault {
     }
 }
 
-/// A standard function.
+/// A standard function. The ones a loop body reaches for — what is in a
+/// list, whether an option holds anything — are answered in place; the
+/// rest copy their arguments and go through `stdlib::std`, as the
+/// interpreter does.
 pub(crate) fn std_op(f: StdFn, args: &[H]) -> H {
-    op(args, |es| Expr::Std(f, es), |vs| stdlib::std(f, &vs).map_err(std_fault))
+    op(
+        args,
+        |es| Expr::Std(f, es),
+        |vs| match (f, vs) {
+            (StdFn::Len, [Value::List(xs)]) => Ok(Value::Int(xs.len() as i64)),
+            (StdFn::First, [Value::List(xs)]) => Ok(xs.first().cloned().unwrap_or(Value::Null)),
+            (StdFn::Last, [Value::List(xs)]) => Ok(xs.last().cloned().unwrap_or(Value::Null)),
+            (StdFn::Contains, [Value::List(xs), v]) => Ok(Value::Bool(xs.iter().any(|x| x == *v))),
+            (StdFn::IsSome, [v]) => Ok(Value::Bool(!v.is_null())),
+            (StdFn::IsEmpty, [Value::Text(t)]) => Ok(Value::Bool(t.is_empty())),
+            (StdFn::UnwrapOr, [Value::Null, d]) => Ok((*d).clone()),
+            (StdFn::UnwrapOr, [v, _]) => Ok((*v).clone()),
+            _ => {
+                let owned: Vec<Value> = vs.iter().map(|v| (*v).clone()).collect();
+                stdlib::std(f, &owned).map_err(std_fault)
+            }
+        },
+    )
 }
 
 /// An arithmetic or boolean operator, checked as `Ark.Eval` checks it.
@@ -257,7 +378,7 @@ pub(crate) fn arith_op(o: Op, args: &[H]) -> H {
     op(
         args,
         |es| Expr::Op(o, es),
-        |vs| match (o, vs.as_slice()) {
+        |vs| match (o, vs) {
             (Op::And, [Value::Bool(a), Value::Bool(b)]) => Ok(Value::Bool(*a && *b)),
             (Op::Or, [Value::Bool(a), Value::Bool(b)]) => Ok(Value::Bool(*a || *b)),
             (Op::Not, [Value::Bool(a)]) => Ok(Value::Bool(!a)),
@@ -281,7 +402,7 @@ pub(crate) fn cmp_op(o: CmpOp, a: H, b: H) -> H {
             let l = es.pop().expect("two");
             Expr::Cmp(o, Box::new(l), Box::new(r))
         },
-        |vs| Ok(Value::Bool(crate::view::cmp(o, &vs[0], &vs[1]))),
+        |vs| Ok(Value::Bool(crate::view::cmp(o, vs[0], vs[1]))),
     )
 }
 

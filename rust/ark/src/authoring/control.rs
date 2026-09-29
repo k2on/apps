@@ -62,15 +62,21 @@ pub fn for_each<T: Data, R: IntoEffect>(xs: List<T>, mut body: impl FnMut(T) -> 
     if cx::halted() {
         return Effect(());
     }
-    let vs = match cx::value(xs.to_h()) {
-        Value::List(vs) => vs,
-        _ => vec![],
+    // The rows read in place, and each iteration's scratch forgotten: what
+    // a body does is written to the store as it goes.
+    let list = cx::shared(xs.to_h());
+    let n = match &*list {
+        Value::List(vs) => vs.len(),
+        _ => 0,
     };
-    for v in vs {
+    let base = cx::lit_rc(list);
+    for i in 0..n {
         if cx::halted() {
             break;
         }
-        body(T::from_h(cx::lit(v))).into_effect();
+        let mark = cx::mark();
+        body(T::from_h(cx::elem(base, i))).into_effect();
+        cx::truncate(mark);
     }
     Effect(())
 }

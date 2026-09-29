@@ -63,15 +63,24 @@ if peer.epoch() != introduced_on { /* a new connection: say who you are again */
   version-4 id per `NewId` (the OS's randomness; `getrandom` with `js` in a
   browser) and `Date.now()`/`SystemTime` per `Now`. `Autos::seeded(n)` makes
   them reproducible for tests.
-- **Persistence** is what `Replica::open` takes and nothing optimistic: the
-  confirmed store, the cursor and the pending intents, one canonical-CBOR
-  record (the Swift client's `ReplicaFile` shape, plus the login last
-  authored as), written whole after every mutate and every pump that moved
-  it. A directory keeps the mode it was opened with — alone or with a
-  server — and refuses the other (`Error::ModeMismatch`), because the
-  sequences mean different things. Signed out and signed in are the same
-  mode: one directory is opened either way.
-  In a browser it is `localStorage`, base64 under `ark:<name>:replica`:
+- **Persistence** is what `Replica::open` takes and nothing optimistic, in
+  two canonical-CBOR records: `replica` — the confirmed store, the cursor
+  and the login last authored as — written when the cursor or the login
+  moves, once per batch that lands; and `pending` — the intents not yet
+  answered — written when they do. So `mutate` writes the intent and not
+  the store, and authoring a thousand intents costs a thousand small
+  writes rather than a thousand copies of a growing store. The order is
+  the pending record first, so a stop between the two leaves an intent to
+  be sent again rather than one applied twice. A peer alone moves its
+  cursor on every mutate; it writes the store on its next `pump` (the
+  clients call one every fifty milliseconds) and when it is dropped, so
+  the window in which a crash loses the last change is one tick. A
+  directory keeps the mode it was opened with — alone or with a server —
+  and refuses the other (`Error::ModeMismatch`), because the sequences
+  mean different things. Signed out and signed in are the same mode: one
+  directory is opened either way.
+  In a browser it is `localStorage`, base64 under `ark:<name>:replica`
+  and `ark:<name>:pending`:
   synchronous, which iced's `boot` needs, and limited to the origin's quota
   of about five megabytes — a library of a few thousand rows fits. An app
   that outgrows it implements `storage::Storage` over IndexedDB, loaded
