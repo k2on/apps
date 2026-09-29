@@ -8,9 +8,10 @@
 //! native procedure for.
 //!
 //! A read — a query's plan, a mutator's `select` — means what
-//! [`crate::view::pull`] answers (§1.4): that is the one evaluator of
-//! plans, and it evaluates the expressions inside one through [`Scope`],
-//! which is this file's evaluator with the plan's binders in scope.
+//! [`crate::view::pull`] answers (§1.4), and is asked of it through
+//! [`crate::view::read`]: that is the one evaluator of plans, and it
+//! evaluates the expressions inside one through [`Scope`], which is this
+//! file's evaluator with the plan's binders in scope.
 //!
 //! A procedure runs as spec version 2 has it: its input is decoded and
 //! checked field by field ([`check_field`]), then each middleware in its
@@ -270,8 +271,7 @@ fn procedure(st: &mut St, sch: &Schema, c: &Closure, ctx: &Ctx, autos: &Args, ar
     // §1.4 A query is its plan: what `pull` answers, over the store the
     // middleware saw.
     if let (FnKind::Query, Some(p)) = (f.kind, &f.plan) {
-        let entries = crate::view::pull(sch, p, &Scope::of(&env), &*st.store)?;
-        return Ok(Some(Value::List(crate::view::answer(p, &entries))));
+        return Ok(Some(Value::List(crate::view::read(sch, p, &Scope::of(&env), &*st.store)?)));
     }
     match block(st, &env, &f.body) {
         Ok(()) => Ok(None),
@@ -600,8 +600,7 @@ pub fn eval_helper(m: &Module, name: &str, vals: Vec<Value>) -> Result<Value, Ev
 /// store: exactly what `ESelect` evaluates to. What a native procedure's
 /// reads are, so that the two cannot answer differently.
 pub fn select_plan(sch: &Schema, plan: &Plan, store: &dyn Store) -> Result<Vec<Value>, EvalFault> {
-    let entries = crate::view::pull(sch, plan, &Scope::new(sch, &[], &NOBODY, &NO_ARGS, &NO_ARGS), store)?;
-    Ok(crate::view::answer(plan, &entries))
+    crate::view::read(sch, plan, &Scope::new(sch, &[], &NOBODY, &NO_ARGS, &NO_ARGS), store)
 }
 
 /// §9.4 A plan's order made total, as the verifier makes it: the table's key
@@ -994,11 +993,10 @@ fn eval(st: &mut St, env: &Env, e: &Expr) -> Run<Value> {
         }
         Expr::Select(p) => {
             reading(env)?;
-            let entries = match crate::view::pull(env.schema, p, &Scope::of(env), &*st.store) {
-                Ok(es) => es,
-                Err(fault) => return Err(Stop::Halt(fault)),
-            };
-            Ok(Value::List(crate::view::answer(p, &entries)))
+            match crate::view::read(env.schema, p, &Scope::of(env), &*st.store) {
+                Ok(rows) => Ok(Value::List(rows)),
+                Err(fault) => Err(Stop::Halt(fault)),
+            }
         }
         Expr::Get(t, ks) => {
             reading(env)?;

@@ -6,7 +6,9 @@
 //! filter admits, or a group — carrying what §1.5 names: its key, the
 //! dependencies its subtree read (by plan node, [`nodes`]), its order
 //! keys, whether `having` admitted it, and its node. [`answer`] is the
-//! list a caller sees: the admitted entries, in order, cut to the limit.
+//! list a caller sees: the admitted entries, in order, cut to the limit;
+//! [`read`] is that answer for a caller that keeps no entries, which is
+//! how a query and a mutator's `select` ask.
 //!
 //! The incremental half below — [`ViewPlan`], [`hydrate`], [`push`],
 //! [`contract`] — is v3's, and maintains a v3-shaped plan only
@@ -126,6 +128,56 @@ pub fn answer(plan: &Plan, entries: &[Entry]) -> Vec<Value> {
     entries.iter().filter(|e| e.admitted).take(lim).map(|e| e.node.clone()).collect()
 }
 
+/// §1.4 What a read answers: [`answer`] of [`pull`], for a caller that
+/// keeps no entries — a query's value, a mutator's `select`. A bare plan
+/// (a mutator's read: a table, a filter, a column order, a limit) has one
+/// entry per admitted row, its node the row and its order the row's
+/// columns, so its answer is those rows under [`compare_entries`]'s order
+/// cut to the limit: only the rows the answer keeps are sorted, and none
+/// becomes an entry. `add_to_playlist`'s `MAX(pos) + 1` is a limit of one
+/// over a playlist, and costs its rows once rather than an entry each.
+/// Anything else is pulled whole.
+pub fn read(sch: &Schema, plan: &Plan, scope: &Scope, st: &dyn Store) -> Result<Vec<Value>, EvalFault> {
+    if !plan.is_bare() {
+        return Ok(answer(plan, &pull(sch, plan, scope, st)?));
+    }
+    let (tbl, mut rows) = candidates(sch, plan, &[], scope, st)?;
+    // As compare_entries over a bare plan's entries: the order columns
+    // under their directions, then the key, column by column.
+    fn col<'r>(r: &'r Row, c: &str) -> &'r Value {
+        r.get(c).unwrap_or(&Value::Null)
+    }
+    let cmp = |a: &Row, b: &Row| {
+        for (k, d) in &plan.order {
+            let Key::Column(c) = k else {
+                unreachable!("a bare plan orders by columns")
+            };
+            let o = compare_value(col(a, c), col(b, c));
+            let o = if *d == Dir::Desc { o.reverse() } else { o };
+            if o != Ordering::Equal {
+                return o;
+            }
+        }
+        tbl.key
+            .iter()
+            .map(|k| compare_value(col(a, k), col(b, k)))
+            .find(|o| *o != Ordering::Equal)
+            .unwrap_or(Ordering::Equal)
+    };
+    let lim = plan.limit.map(|n| n.max(0) as usize).unwrap_or(usize::MAX);
+    if lim == 0 {
+        return Ok(vec![]);
+    }
+    // Rows of one table have distinct keys, so the order is total and an
+    // unstable selection of the first `lim` is exact.
+    if lim < rows.len() {
+        rows.select_nth_unstable_by(lim - 1, cmp);
+        rows.truncate(lim);
+    }
+    rows.sort_by(cmp);
+    Ok(rows.into_iter().map(Value::Struct).collect())
+}
+
 /// The order of two entries of one plan (§1.5): each key under its
 /// direction, then the entries' keys.
 pub fn compare_entries(plan: &Plan, a: &Entry, b: &Entry) -> Ordering {
@@ -142,20 +194,7 @@ pub fn compare_entries(plan: &Plan, a: &Entry, b: &Entry) -> Ordering {
 // A plan whose node ids start at `base`, its rows pinned by `pins` (a child
 // plan's `on`, evaluated over its parent).
 fn pull_at(sch: &Schema, plan: &Plan, base: NodeId, pins: &[(FieldName, Value)], scope: &Scope, st: &dyn Store) -> Result<Vec<Entry>, EvalFault> {
-    let table = plan.table();
-    let Some(tbl) = sch.lookup_table(table) else {
-        return Err(EvalFault::Bug(EvalError::UnknownTable(table.clone())));
-    };
-    let mut all: Vec<Filter> = pins.iter().map(|(c, v)| Filter::Cmp(c.clone(), CmpOp::Eq, v.clone())).collect();
-    if let Some(f) = &plan.filter {
-        all.push(eval_pred(f, &mut |e: &Expr| scope.eval(e))?);
-    }
-    let filter = match all.len() {
-        0 => None,
-        1 => all.pop(),
-        _ => Some(Filter::All(all)),
-    };
-    let mut rows: Vec<Row> = st.scan_where_eq(table, &equalities(filter.as_ref()), &|r| admits(filter.as_ref(), r));
+    let (tbl, mut rows) = candidates(sch, plan, pins, scope, st)?;
     let mut out = Vec::new();
     match &plan.source {
         Source::Table(_) => {
@@ -179,6 +218,34 @@ fn pull_at(sch: &Schema, plan: &Plan, base: NodeId, pins: &[(FieldName, Value)],
     }
     out.sort_by(|a, b| compare_entries(plan, a, b));
     Ok(out)
+}
+
+// The source rows a plan's filter and its pins admit, through the store's
+// indexes where they serve (`equalities`), in no particular order.
+fn candidates<'s>(
+    sch: &'s Schema,
+    plan: &Plan,
+    pins: &[(FieldName, Value)],
+    scope: &Scope,
+    st: &dyn Store,
+) -> Result<(&'s Table, Vec<Row>), EvalFault> {
+    let table = plan.table();
+    let Some(tbl) = sch.lookup_table(table) else {
+        return Err(EvalFault::Bug(EvalError::UnknownTable(table.clone())));
+    };
+    let mut all: Vec<Filter> = pins.iter().map(|(c, v)| Filter::Cmp(c.clone(), CmpOp::Eq, v.clone())).collect();
+    if let Some(f) = &plan.filter {
+        all.push(eval_pred(f, &mut |e: &Expr| scope.eval(e))?);
+    }
+    let filter = match all.len() {
+        0 => None,
+        1 => all.pop(),
+        _ => Some(Filter::All(all)),
+    };
+    Ok((
+        tbl,
+        st.scan_where_eq(table, &equalities(filter.as_ref()), &|r| admits(filter.as_ref(), r)),
+    ))
 }
 
 // One candidate, pulled: its lookups, its related plans, its having, its

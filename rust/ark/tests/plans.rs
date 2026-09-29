@@ -822,6 +822,48 @@ fn the_builder_says_where_a_plan_feature_may_not_go() {
     assert!(es.iter().any(|e| e.contains(".on(..) takes column equalities")), "{es:?}");
 }
 
+/// §1.4 `view::read` is `answer` of `pull`: for a bare plan it sorts only
+/// what the limit keeps, and must keep exactly that — under each
+/// direction, ties broken by the key, every limit from none to past the
+/// end, filtered or not; for any other plan it is the pull. Falsified
+/// twice in `read`: by breaking ties by the key descending (the three
+/// Goulds, tied on `creator`, then come out backwards), and by ignoring a
+/// `Desc` (every descending order disagrees).
+#[test]
+fn a_read_is_the_answer_of_the_pull() {
+    let m = module();
+    let built = m.build();
+    let st = library(&built.schema);
+    let (ctx, none) = (eval::Ctx::default(), Args::new());
+    let scope = eval::Scope::new(&built.schema, &built.functions, &ctx, &none, &none);
+    let mut plans = vec![];
+    for filter in [None, Some(Pred::cmp("creator", CmpOp::Eq, t("Gould")))] {
+        for order in [
+            vec![],
+            vec![("pos", Dir::Asc)],
+            vec![("creator", Dir::Desc)],
+            vec![("creator", Dir::Asc), ("title", Dir::Desc)],
+        ] {
+            for limit in [None, Some(0), Some(1), Some(2), Some(3), Some(9)] {
+                let mut p = ir::Plan::from("song");
+                p.filter = filter.clone();
+                for (c, d) in &order {
+                    p = p.order_by(c, *d);
+                }
+                p.limit = limit;
+                plans.push(p);
+            }
+        }
+    }
+    for name in ["listing", "composers", "creators", "biggest_works", "works_twice"] {
+        plans.push(built.lookup_function(name).unwrap().plan.clone().unwrap());
+    }
+    for p in &plans {
+        let pulled = view::answer(p, &view::pull(&built.schema, p, &scope, &st).unwrap());
+        assert_eq!(view::read(&built.schema, p, &scope, &st).unwrap(), pulled, "{p:?}");
+    }
+}
+
 /// The query's value is what `pull` answers whoever asks: the interpreter
 /// by name, a procedure, `select_plan` over a plan with its right-hand
 /// sides as literals, and `Store::select`. Falsified by answering the
