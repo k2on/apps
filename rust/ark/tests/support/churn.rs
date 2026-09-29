@@ -345,7 +345,8 @@ pub struct Tally {
     pub inserts: usize,
     pub removes: usize,
     pub updates: usize,
-    /// Changes to a table a node reads whose row some entry depended on…
+    /// Changes to a table a node reads (the source table too, when a node
+    /// reads it) whose row some entry depended on…
     pub joined: usize,
     /// …and ones no entry depended on.
     pub unjoined: usize,
@@ -390,7 +391,7 @@ pub fn drive(name: &str, sch: &Schema, plan: &Plan, env: &Env, mut st: MemorySto
             }
         }
         for ch in &batch {
-            if ch.table() != plan.table().as_str() && ns.iter().any(|(_, n)| n.table() == ch.table()) {
+            if ns.iter().any(|(_, n)| n.table() == ch.table()) {
                 let rows: Vec<&Row> = match ch {
                     Change::Add(_, r) | Change::Remove(_, r) => vec![r],
                     Change::Edit(_, o, n) => vec![o, n],

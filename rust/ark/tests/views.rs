@@ -446,8 +446,8 @@ fn by_creator_is_maintained() {
 }
 
 /// `.with` a reference, no projection: the node is the row and the list.
-/// Falsified as `listing` is, for `Related` nodes (a movement added under
-/// a work leaves its list short).
+/// Falsified by recording no dependency for a `Related` node in `entry`
+/// (a movement added under a work leaves its list short).
 #[test]
 fn works_with_movements_is_maintained() {
     let t = hold("works_with_movements", none());
@@ -550,10 +550,9 @@ fn a_batch_is_reconciled_against_the_final_store() {
 }
 
 /// The contract is a real check: a view pushed against the store *before*
-/// the change is not a fresh hydrate over the store after it. What makes
+/// the change is not a fresh hydrate over the store after it — what makes
 /// the generator's assertions mean something. Falsified by making
-/// `contract` compare the answers alone (a view whose indexes are stale but
-/// whose answer happens to agree then passes).
+/// `contract` answer `true` (this test is then the only one to fail).
 #[test]
 fn a_view_pushed_against_a_stale_store_breaks_the_contract() {
     let (sch, _, st, mut v) = setup("composers");
