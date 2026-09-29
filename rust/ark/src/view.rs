@@ -77,6 +77,24 @@ fn eval_pred<E>(p: &Pred, ev: &mut dyn FnMut(&Expr) -> Result<Value, E>) -> Resu
 
 /// Whether a row passes the filter; no filter admits every row. A column
 /// the row lacks reads as `Null`.
+/// The columns a filter holds equal to a value however it is satisfied:
+/// its top-level `Cmp(_, Eq, _)`, and every one inside a top-level `All`.
+/// What an indexed store looks rows up by ([`Store::scan_where_eq`]).
+pub fn equalities(f: Option<&Filter>) -> Vec<(&str, &Value)> {
+    fn go<'a>(f: &'a Filter, out: &mut Vec<(&'a str, &'a Value)>) {
+        match f {
+            Filter::Cmp(c, CmpOp::Eq, v) => out.push((c, v)),
+            Filter::All(fs) => fs.iter().for_each(|g| go(g, out)),
+            _ => {}
+        }
+    }
+    let mut out = vec![];
+    if let Some(f) = f {
+        go(f, &mut out);
+    }
+    out
+}
+
 pub fn admits(f: Option<&Filter>, row: &Row) -> bool {
     match f {
         None => true,
@@ -163,7 +181,7 @@ pub fn pull(sch: &Schema, vp: &ViewPlan, st: &dyn Store) -> Vec<(Row, Value)> {
     let Some(tbl) = sch.lookup_table(&vp.table) else {
         return vec![];
     };
-    let mut admitted: Vec<Row> = st.scan_where(&vp.table, &|r| admits(vp.filter.as_ref(), r));
+    let mut admitted: Vec<Row> = st.scan_where_eq(&vp.table, &equalities(vp.filter.as_ref()), &|r| admits(vp.filter.as_ref(), r));
     admitted.sort_by(|a, b| compare_rows(tbl, &vp.order, a, b));
     if let Some(lim) = vp.limit {
         admitted.truncate(lim.max(0) as usize);
@@ -287,7 +305,9 @@ fn push_top(sch: &Schema, st: &dyn Store, tbl: &Table, ch: &Change, view: &View)
     // last row the window still holds.
     let refill = |ns: &[(Row, Value)]| -> Option<(Row, Value)> {
         let bound = ns.last().map(|(r, _)| r);
-        let mut candidates: Vec<Row> = st.scan_where(&vp.table, &|r| keep(r) && bound.is_none_or(|b| order(b, r) == Ordering::Less));
+        let mut candidates: Vec<Row> = st.scan_where_eq(&vp.table, &equalities(vp.filter.as_ref()), &|r| {
+            keep(r) && bound.is_none_or(|b| order(b, r) == Ordering::Less)
+        });
         candidates.sort_by(|a, b| order(a, b));
         candidates.first().map(&build)
     };

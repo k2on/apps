@@ -970,7 +970,12 @@ fn select(st: &mut St, env: &Env, p: &Plan) -> Run<Vec<Value>> {
         None => Box::new(|_| true),
         Some(f) => predicate(st, env, f)?,
     };
-    let mut admitted: Vec<Row> = st.store.scan_where(&p.table, &|r| keep(r));
+    let held = match &p.filter {
+        None => vec![],
+        Some(f) => equalities(st, env, f)?,
+    };
+    let eq: Vec<(&str, &Value)> = held.iter().map(|(c, v)| (c.as_str(), v)).collect();
+    let mut admitted: Vec<Row> = st.store.scan_where_eq(&p.table, &eq, &|r| keep(r));
     admitted.sort_by(|a, b| order_by(&p.order, a, b));
     if let Some(lim) = p.limit {
         admitted.truncate(lim.max(0) as usize);
@@ -1009,6 +1014,22 @@ fn attach(st: &mut St, env: &Env, tbl: &Table, rels: &[Related], row: Row) -> Ru
 // The right-hand sides of a filter are evaluated once, before the scan.
 // A compiled filter over one row.
 type Keep = Box<dyn Fn(&Row) -> bool>;
+
+// The columns a predicate holds equal to a value, the values evaluated:
+// what an indexed store looks rows up by. `predicate` still decides.
+fn equalities(st: &mut St, env: &Env, p: &Pred) -> Run<Vec<(FieldName, Value)>> {
+    let mut out = vec![];
+    match p {
+        Pred::Cmp(c, CmpOp::Eq, e) => out.push((c.clone(), eval(st, env, e)?)),
+        Pred::All(ps) => {
+            for q in ps {
+                out.extend(equalities(st, env, q)?);
+            }
+        }
+        _ => {}
+    }
+    Ok(out)
+}
 
 fn predicate(st: &mut St, env: &Env, p: &Pred) -> Run<Keep> {
     Ok(match p {

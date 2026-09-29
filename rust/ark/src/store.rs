@@ -12,7 +12,7 @@
 //! overlay a mutator writes into, consulted first on every read and dropped
 //! on a verdict.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::ir::{Expr, Plan};
@@ -100,6 +100,15 @@ pub trait Store {
     /// makes a select cost its answer rather than its table.
     fn scan_where(&self, table: &str, keep: &dyn Fn(&Row) -> bool) -> Vec<Row> {
         self.scan(table).into_iter().filter(|r| keep(r)).collect()
+    }
+
+    /// [`Store::scan_where`], told which columns the filter holds equal to
+    /// which values (`keep` still decides; `eq` is a hint). A store with an
+    /// index over those columns reads the rows under the values and never
+    /// looks at the rest of the table; the default ignores the hint.
+    fn scan_where_eq(&self, table: &str, eq: &[(&str, &Value)], keep: &dyn Fn(&Row) -> bool) -> Vec<Row> {
+        let _ = eq;
+        self.scan_where(table, keep)
     }
 
     /// §4.5 Apply a change as a fact: raw, unjudged. `Add` and `Edit` write
@@ -198,10 +207,8 @@ pub fn judge_put(st: &dyn Store, tn: &str, row0: Row) -> Result<Option<Change>, 
     let row = complete(tbl, row0);
     well_typed(tbl, &row)?;
     let k = tbl.key_of(&row);
-    let here = st.scan(tn);
-    let others: Vec<&Row> = here.iter().filter(|r| tbl.key_of(r) != k).collect();
     for ix in tbl.indexes.iter().filter(|ix| ix.unique) {
-        unique(tbl, &others, &row, ix)?;
+        unique(st, tbl, &k, &row, ix)?;
     }
     for r in &tbl.refs {
         parent_exists(st, tbl, &row, r)?;
@@ -220,13 +227,13 @@ pub fn matching(st: &dyn Store, tbl: &Table, row: &Row, on: &[FieldName]) -> Opt
     if on.is_empty() {
         return st.get(&tbl.name, &tbl.key_of(row));
     }
-    let want: Vec<&Value> = on.iter().map(|c| row.get(c).unwrap_or(&Value::Null)).collect();
-    if want.iter().any(|v| v.is_null()) {
+    let want: Vec<(&str, &Value)> = on.iter().map(|c| (c.as_str(), row.get(c).unwrap_or(&Value::Null))).collect();
+    if want.iter().any(|(_, v)| v.is_null()) {
         return None;
     }
-    st.scan(&tbl.name)
+    st.scan_where_eq(&tbl.name, &want, &|r| want.iter().all(|(c, v)| r.get(*c) == Some(*v)))
         .into_iter()
-        .find(|r| on.iter().zip(&want).all(|(c, v)| r.get(c) == Some(*v)))
+        .next()
 }
 
 /// §1.4 `SInsert`: write the row unless one matches on the columns (the
@@ -325,16 +332,23 @@ pub fn of_type(t: &Ty, v: &Value) -> bool {
     }
 }
 
-fn unique(tbl: &Table, others: &[&Row], row: &Row, ix: &Index) -> Result<(), Refusal> {
-    let proj = |r: &Row| -> Vec<Option<Value>> { ix.columns.iter().map(|c| r.get(c).cloned()).collect() };
-    let mine = proj(row);
+// No other row (one under another key) holds the index's columns equal
+// to this row's. Read through the index: the rows under these values, and
+// nothing else in the table.
+fn unique(st: &dyn Store, tbl: &Table, k: &Key, row: &Row, ix: &Index) -> Result<(), Refusal> {
+    let mine: Vec<(&str, &Value)> = ix.columns.iter().map(|c| (c.as_str(), row.get(c).unwrap_or(&Value::Null))).collect();
     // A NULL is not equal to anything, itself included, so two rows that
     // are both NULL in a unique column do not clash.
-    let comparable = mine.iter().all(|v| matches!(v, Some(v) if !v.is_null()));
-    if comparable && others.iter().any(|r| proj(r) == mine) {
-        Err(Refusal::UniqueViolation(tbl.name.clone(), ix.columns.clone()))
-    } else {
+    if mine.iter().any(|(_, v)| v.is_null()) {
+        return Ok(());
+    }
+    let clash = st.scan_where_eq(&tbl.name, &mine, &|r| {
+        tbl.key_of(r) != *k && mine.iter().all(|(c, v)| r.get(*c).is_some_and(|x| x == *v))
+    });
+    if clash.is_empty() {
         Ok(())
+    } else {
+        Err(Refusal::UniqueViolation(tbl.name.clone(), ix.columns.clone()))
     }
 }
 
@@ -354,7 +368,8 @@ fn parent_exists(st: &dyn Store, tbl: &Table, row: &Row, r: &Ref) -> Result<(), 
 
 fn no_child(st: &dyn Store, tbl: &Table, k: &[Value], rel: &Relation) -> Result<(), Refusal> {
     if let [kv] = k {
-        if st.scan(&rel.child).iter().any(|r| r.get(&rel.column) == Some(kv)) {
+        let held = st.scan_where_eq(&rel.child, &[(&rel.column, kv)], &|r| r.get(&rel.column) == Some(kv));
+        if !held.is_empty() {
             return Err(Refusal::StillReferenced(tbl.name.clone(), rel.child.clone()));
         }
     }
@@ -364,20 +379,110 @@ fn no_child(st: &dyn Store, tbl: &Table, k: &[Value], rel: &Relation) -> Result<
 // The in-memory store -----------------------------------------------------
 
 /// The spec's store: the rows of every table, each keyed by its key
-/// (`Ark.Store.Store`).
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// (`Ark.Store.Store`) — and, beside them, an index per declared index and
+/// per reference column, so that a select holding one of those columns to
+/// a value reads the rows under it rather than the table. The indexes are
+/// derived from the rows and say nothing the rows do not: two stores are
+/// equal when their rows are.
+#[derive(Clone, Debug)]
 pub struct MemoryStore {
     schema: Schema,
     tables: BTreeMap<TableName, BTreeMap<Key, Row>>,
+    indexes: BTreeMap<TableName, Vec<Secondary>>,
+}
+
+impl PartialEq for MemoryStore {
+    fn eq(&self, other: &MemoryStore) -> bool {
+        self.schema == other.schema && self.tables == other.tables
+    }
+}
+
+impl Eq for MemoryStore {}
+
+/// One secondary index: the keys of the rows under each value of its
+/// columns, in key order.
+#[derive(Clone, Debug)]
+struct Secondary {
+    columns: Vec<FieldName>,
+    rows: BTreeMap<Vec<Value>, BTreeSet<Key>>,
+}
+
+impl Secondary {
+    fn key_of(&self, row: &Row) -> Vec<Value> {
+        self.columns.iter().map(|c| row.get(c).cloned().unwrap_or(Value::Null)).collect()
+    }
+}
+
+/// The indexes a table gets: each it declares (unique or not) and each
+/// reference column, one index per distinct column list.
+fn secondaries(tbl: &Table) -> Vec<Secondary> {
+    let mut seen: BTreeSet<Vec<FieldName>> = BTreeSet::new();
+    tbl.indexes
+        .iter()
+        .map(|i| i.columns.clone())
+        .chain(tbl.refs.iter().map(|r| vec![r.column.clone()]))
+        .filter(|cols| !cols.is_empty() && *cols != tbl.key && seen.insert(cols.clone()))
+        .map(|columns| Secondary {
+            columns,
+            rows: BTreeMap::new(),
+        })
+        .collect()
 }
 
 impl MemoryStore {
     /// `Ark.Store.empty`.
     pub fn empty(schema: Schema) -> MemoryStore {
+        let indexes = schema.tables().map(|t| (t.name.clone(), secondaries(t))).collect();
         MemoryStore {
             schema,
             tables: BTreeMap::new(),
+            indexes,
         }
+    }
+
+    /// Put `row` under `k` in `t` (or take the key out, for `None`), and
+    /// keep every index of the table true to the rows: the one place the
+    /// rows change.
+    fn set(&mut self, t: &str, k: Key, row: Option<Row>) {
+        let rows = self.tables.entry(t.into()).or_default();
+        let old = match &row {
+            Some(r) => rows.insert(k.clone(), r.clone()),
+            None => rows.remove(&k),
+        };
+        if let Some(ixs) = self.indexes.get_mut(t) {
+            for ix in ixs {
+                if let Some(o) = &old {
+                    let ok = ix.key_of(o);
+                    if let Some(ks) = ix.rows.get_mut(&ok) {
+                        ks.remove(&k);
+                        if ks.is_empty() {
+                            ix.rows.remove(&ok);
+                        }
+                    }
+                }
+                if let Some(r) = &row {
+                    ix.rows.entry(ix.key_of(r)).or_default().insert(k.clone());
+                }
+            }
+        }
+    }
+
+    /// The index over exactly the columns `eq` names (in any order), if
+    /// the table has one, with the values to look up in the index's order.
+    fn lookup(&self, t: &str, eq: &[(&str, &Value)]) -> Option<(&Secondary, Vec<Value>)> {
+        let ixs = self.indexes.get(t)?;
+        // The widest index every column of which the filter holds equal.
+        ixs.iter()
+            .filter(|ix| ix.columns.iter().all(|c| eq.iter().any(|(n, _)| n == c)))
+            .max_by_key(|ix| ix.columns.len())
+            .map(|ix| {
+                let vals = ix
+                    .columns
+                    .iter()
+                    .map(|c| eq.iter().find(|(n, _)| n == c).map(|(_, v)| (*v).clone()).unwrap_or(Value::Null))
+                    .collect();
+                (ix, vals)
+            })
     }
 
     /// The rows of a table, by key (`Ark.Store.rows`).
@@ -400,9 +505,10 @@ impl MemoryStore {
     pub fn merge(&self, other: &MemoryStore) -> MemoryStore {
         let mut out = self.clone();
         for (t, rows) in &other.tables {
-            let mine = out.tables.entry(t.clone()).or_default();
             for (k, r) in rows {
-                mine.entry(k.clone()).or_insert_with(|| r.clone());
+                if !out.tables.get(t).is_some_and(|mine| mine.contains_key(k)) {
+                    out.set(t, k.clone(), Some(r.clone()));
+                }
             }
         }
         out
@@ -447,20 +553,28 @@ impl Store for MemoryStore {
             .unwrap_or_default()
     }
 
+    fn scan_where_eq(&self, table: &str, eq: &[(&str, &Value)], keep: &dyn Fn(&Row) -> bool) -> Vec<Row> {
+        let Some((ix, vals)) = self.lookup(table, eq) else {
+            return self.scan_where(table, keep);
+        };
+        let (Some(rows), Some(keys)) = (self.tables.get(table), ix.rows.get(&vals)) else {
+            return vec![];
+        };
+        keys.iter().filter_map(|k| rows.get(k)).filter(|r| keep(r)).cloned().collect()
+    }
+
     fn apply_change(&mut self, change: &Change) {
         match change {
             Change::Add(t, row) | Change::Edit(t, _, row) => {
                 if let Some(tbl) = self.schema.lookup_table(t) {
                     let k = tbl.key_of(row);
-                    self.tables.entry(t.clone()).or_default().insert(k, row.clone());
+                    self.set(t, k, Some(row.clone()));
                 }
             }
             Change::Remove(t, row) => {
                 if let Some(tbl) = self.schema.lookup_table(t) {
                     let k = tbl.key_of(row);
-                    if let Some(rows) = self.tables.get_mut(t) {
-                        rows.remove(&k);
-                    }
+                    self.set(t, k, None);
                 }
             }
         }
@@ -526,17 +640,21 @@ impl Store for Overlay<'_> {
     }
 
     fn scan_where(&self, table: &str, keep: &dyn Fn(&Row) -> bool) -> Vec<Row> {
+        self.scan_where_eq(table, &[], keep)
+    }
+
+    fn scan_where_eq(&self, table: &str, eq: &[(&str, &Value)], keep: &dyn Fn(&Row) -> bool) -> Vec<Row> {
         let Some(tbl) = self.schema().lookup_table(table) else {
             return vec![];
         };
         let Some(ws) = self.writes.get(table).filter(|ws| !ws.is_empty()) else {
-            return self.base.scan_where(table, keep);
+            return self.base.scan_where_eq(table, eq, keep);
         };
         // The base's rows this overlay has not written, kept; then its own
         // writes, kept; in key order.
         let mut merged: BTreeMap<Key, Row> = self
             .base
-            .scan_where(table, &|r| !ws.contains_key(&tbl.key_of(r)) && keep(r))
+            .scan_where_eq(table, eq, &|r| !ws.contains_key(&tbl.key_of(r)) && keep(r))
             .into_iter()
             .map(|r| (tbl.key_of(&r), r))
             .collect();
@@ -608,6 +726,51 @@ mod tests {
 
     fn row(pairs: Vec<(&str, Value)>) -> Row {
         pairs.into_iter().map(|(k, v)| (k.into(), v)).collect()
+    }
+
+    /// A read holding an indexed column to a value (`p_id`, a reference)
+    /// answers exactly what a scan and a filter would, through every way a
+    /// row moves: added, edited onto another value, removed, applied raw,
+    /// merged, cloned. Falsified by `set` not taking the old row out of its
+    /// index: the edited row still answers under its old parent.
+    #[test]
+    fn an_indexed_read_is_the_scan_filtered() {
+        let mut st = MemoryStore::empty(schema());
+        for i in 1..=3 {
+            st.put("p", row(vec![("id", Value::int(i))])).unwrap();
+        }
+        for i in 1..=9 {
+            st.put("c", row(vec![("id", Value::int(i)), ("p_id", Value::int(i % 3 + 1))])).unwrap();
+        }
+        let same = |st: &MemoryStore, p: i64| {
+            let v = Value::int(p);
+            let by_index = st.scan_where_eq("c", &[("p_id", &v)], &|_| true);
+            let by_scan: Vec<Row> = st.scan("c").into_iter().filter(|r| r["p_id"] == v).collect();
+            assert_eq!(by_index, by_scan, "p_id = {p}");
+            by_index.len()
+        };
+        assert_eq!((same(&st, 1), same(&st, 2), same(&st, 3)), (3, 3, 3));
+        // One edited onto another parent, one removed, one added raw.
+        st.put("c", row(vec![("id", Value::int(1)), ("p_id", Value::int(3))])).unwrap();
+        st.delete("c", &[Value::int(2)]).unwrap();
+        st.apply_change(&Change::Add("c".into(), row(vec![("id", Value::int(10)), ("p_id", Value::int(1))])));
+        assert_eq!((same(&st, 1), same(&st, 2), same(&st, 3)), (4, 2, 3));
+        // A value nobody holds, and a column with no index (the scan).
+        assert!(st.scan_where_eq("c", &[("p_id", &Value::int(9))], &|_| true).is_empty());
+        assert_eq!(st.scan_where_eq("c", &[("id", &Value::int(3))], &|r| r["id"] == Value::int(3)).len(), 1);
+        // Merged and cloned stores keep their indexes.
+        let other = {
+            let mut o = MemoryStore::empty(schema());
+            o.put("p", row(vec![("id", Value::int(1))])).unwrap();
+            o.put("c", row(vec![("id", Value::int(11)), ("p_id", Value::int(1))])).unwrap();
+            o
+        };
+        let merged = st.merge(&other);
+        assert_eq!(same(&merged, 1), 5);
+        assert_eq!(same(&merged.clone(), 3), 3);
+        // A declared unique index answers too.
+        st.put("p", row(vec![("id", Value::int(2)), ("name", Value::text("two"))])).unwrap();
+        assert_eq!(st.scan_where_eq("p", &[("name", &Value::text("two"))], &|_| true).len(), 1);
     }
 
     #[test]

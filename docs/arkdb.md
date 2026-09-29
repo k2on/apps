@@ -622,6 +622,17 @@ above the two statements that read and write them. What leaves is the
 dependency on SQL *semantics*, which is where the cross-language hazards
 were.
 
+**Where the Rust store is against this.** `MemoryStore` keeps, beside
+each table's rows, an index per declared index (`.index`, `.unique`) and
+per reference column, maintained on every write; a select whose filter
+holds those columns equal to values (`Store::scan_where_eq`, the
+equalities `view::equalities` reads off a filter) is answered from the
+index and never looks at the rest of the table — so a relationship pulled
+beneath a row, and `MAX(pos) + 1` over one playlist's items, cost the rows
+they return. The seekable range scan above (`lo`, `hi`, `after`), the
+order taken from an index, and a durable B-tree behind it are not there
+yet: an order still sorts what the filter admitted.
+
 **The rebase is an overlay.** Confirmed state lives in the base; pending
 intents apply forward into an in-memory overlay; reads consult the
 overlay first. A confirmed entry arriving drops the overlay, applies to the

@@ -98,6 +98,54 @@ fn bench_engine_mutate() {
     );
 }
 
+/// The engine alone, the appends spread over fifty playlists: what a read
+/// of one playlist's items costs when an index answers it.
+#[test]
+#[ignore]
+fn bench_engine_mutate_spread() {
+    let d = demo::domain();
+    let schema = d.module().schema.clone();
+    let ctx = Ctx::new("alice", "dev");
+    let id = |n: usize| -> [u8; 16] {
+        let mut b = [0u8; 16];
+        b[8..].copy_from_slice(&(n as u64).to_be_bytes());
+        b
+    };
+    let mut r = Replica::open(schema.clone(), d.closures().clone(), MemoryStore::empty(schema.clone()), 0, vec![]);
+    r.hold(d.native_list());
+    let (create, _) = d.mutator("create_playlist").unwrap();
+    let (add, _) = d.mutator("add_to_playlist").unwrap();
+    let (create, add) = (create.clone(), add.clone());
+    let pls: Vec<Value> = (0..50).map(|j| Value::Id(id(1_000_000 + j))).collect();
+    for (j, pl) in pls.iter().enumerate() {
+        r.mutate(
+            id(j),
+            &ctx,
+            &create,
+            &args([("id", pl.clone())]),
+            &args([("name", Value::text(format!("P{j}")))]),
+        )
+        .unwrap();
+    }
+    let t0 = Instant::now();
+    let (mut first, mut last) = (std::time::Duration::ZERO, std::time::Duration::ZERO);
+    for i in 0..N {
+        let t = Instant::now();
+        r.mutate(id(100 + i), &ctx, &add, &args([]), &item(&pls[i % 50], i)).unwrap();
+        let dt = t.elapsed();
+        if i < 100 {
+            first += dt;
+        }
+        if i >= N - 100 {
+            last += dt;
+        }
+    }
+    eprintln!(
+        "      spread: {N} mutates in {:.1?}; first 100 {first:.1?}, last 100 {last:.1?}",
+        t0.elapsed()
+    );
+}
+
 #[test]
 #[ignore]
 fn bench_initial_sync() {
