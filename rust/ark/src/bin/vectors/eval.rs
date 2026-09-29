@@ -64,6 +64,15 @@ pub fn demo(out: &Out) {
     refused("a procedure running middleware its router lacks", &nope, |e| {
         matches!(e, VerifyError::In(_, Complaint::UsesNotOnRouter(_)))
     });
+    // The first of the two, claimed to verify.
+    out.write(
+        "verify/falsify/insert-on-no-unique-index.json",
+        &obj(&[
+            ("module", json(&module_value(&on_name))),
+            ("verifies", "true".into()),
+            ("expect", quoted("fail")),
+        ]),
+    );
 
     let pid = id_n(1);
     let mut st0 = MemoryStore::empty(m.schema.clone());
@@ -118,6 +127,53 @@ pub fn demo(out: &Out) {
                     step_json(11, &ch4, &st4),
                 ]),
             ),
+        ]),
+    );
+    // The four steps again, the last as a runtime would take it that read
+    // the first item in ascending order: pos 2 where the spec says 3.
+    let ascending: Vec<Change> = ch4
+        .iter()
+        .map(|c| match c {
+            Change::Add(t, row) => {
+                let mut row = row.clone();
+                row.insert("pos".into(), Value::Int(2));
+                Change::Add(t.clone(), row)
+            }
+            other => other.clone(),
+        })
+        .collect();
+    let mut st4_ascending = st3.clone();
+    st4_ascending.apply_changes(&ascending);
+    out.write(
+        "eval/falsify/add-reads-pos-ascending.json",
+        &obj(&[
+            ("module", json(&module_value(&m))),
+            ("function", quoted("add_to_playlist")),
+            ("function_hash", quoted(&hex(&add_hash))),
+            ("store_before", json(&st0.store_value())),
+            ("ctx", json(&ctx_value())),
+            ("autos", json(&Value::Struct(autos.clone()))),
+            (
+                "steps",
+                array([
+                    step_json(7, &ch1, &st1),
+                    step_json(9, &ch2, &st2),
+                    step_json(7, &ch3, &st3),
+                    step_json(11, &ascending, &st4_ascending),
+                ]),
+            ),
+            ("expect", quoted("fail")),
+        ]),
+    );
+    // The store after four steps with the hash of the store before the
+    // last: a hash that did not look at every row would claim it.
+    out.write(
+        "hash/falsify/hash-of-the-store-before.json",
+        &obj(&[
+            ("module", json(&module_value(&m))),
+            ("store", json(&st4.store_value())),
+            ("hash", quoted(&hex(&state_hash(&st3)))),
+            ("expect", quoted("fail")),
         ]),
     );
     // A state hash depends on the schema's table order, so the vector

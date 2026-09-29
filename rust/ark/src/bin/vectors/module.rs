@@ -32,6 +32,21 @@ pub fn module(out: &Out) {
         Ok(Ok(_)) => panic!("module: decode . encode is not the identity"),
         other => panic!("module: {other:?}"),
     }
+    // The hash of the same module with the query's plan left out: a runtime
+    // that does not hash the plan would claim it.
+    let planless = Module {
+        functions: m.functions.iter().map(|f| ark::ir::Function { plan: None, ..f.clone() }).collect(),
+        ..m.clone()
+    };
+    out.write(
+        "module/falsify/hash-without-the-plan.json",
+        &obj(&[
+            ("module", json(&v)),
+            ("bytes", quoted(&hex(&bytes))),
+            ("hash", quoted(&hex(&module_hash(&planless)))),
+            ("expect", quoted("fail")),
+        ]),
+    );
     out.write(
         "module/demo.json",
         &obj(&[

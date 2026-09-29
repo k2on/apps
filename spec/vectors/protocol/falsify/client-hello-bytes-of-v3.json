@@ -1,0 +1,5 @@
+{
+  "frame": {"mode":"whole","since":{"$int":"4"},"spec":{"$int":"4"},"t":"hello","token":"tok"},
+  "bytes": "a561746568656c6c6f646d6f64656577686f6c656473706563036573696e63650465746f6b656e63746f6b",
+  "expect": "fail"
+}

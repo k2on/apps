@@ -1,7 +1,10 @@
 //! The conformance runner: every directory under `spec/vectors`, checked as
 //! `spec/README.md` ("The vectors") says. A vector is JSON with wrappers —
 //! `{"$int": "…"}`, `{"$bytes": "hex"}`, `{"$id": "8-4-4-4-12"}` — and every
-//! `falsify/` vector must fail its directory's check.
+//! directory's `falsify/` vectors must fail its check: each check returns
+//! its first unmet claim as an `Err` rather than panicking, so the one
+//! definition runs both ways (falsified by dropping the module hash from
+//! `check_module`, which lets `module/falsify/` pass and fails the test).
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -84,6 +87,46 @@ fn id_n(k: u8) -> Id {
     id
 }
 
+/// A claim a check makes: `Err` with the message when it does not hold,
+/// so that the same check can be required to fail on a `falsify/` vector.
+macro_rules! ensure {
+    ($ok:expr, $($why:tt)+) => {
+        if !$ok {
+            return Err(format!($($why)+));
+        }
+    };
+}
+
+/// [`ensure!`] for two values that must be equal, naming both when not.
+macro_rules! ensure_eq {
+    ($a:expr, $b:expr, $($why:tt)+) => {{
+        let (a, b) = (&$a, &$b);
+        if a != b {
+            return Err(format!("{}: {:?} != {:?}", format!($($why)+), a, b));
+        }
+    }};
+}
+
+/// Every vector under `dir/falsify/` names `"expect": "fail"` and fails
+/// `check`: a runner that passes by not reading the expected value is
+/// caught by it.
+fn falsified(dir: &str, check: impl Fn(&Path, &serde_json::Value) -> Result<(), String>) {
+    for p in files(&format!("{dir}/falsify")) {
+        let v = read(&p);
+        assert_eq!(v["expect"], "fail", "{}", p.display());
+        assert!(check(&p, &v).is_err(), "{} passed and must not", p.display());
+    }
+}
+
+/// Run `check` over every vector of `dir`, then require each of its
+/// `falsify/` vectors to fail it.
+fn run(dir: &str, check: impl Fn(&Path, &serde_json::Value) -> Result<(), String>) {
+    for p in files(dir) {
+        check(&p, &read(&p)).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
+    }
+    falsified(dir, check);
+}
+
 // codec/ ------------------------------------------------------------------
 
 fn check_codec(v: &serde_json::Value) -> Result<(), String> {
@@ -100,124 +143,138 @@ fn check_codec(v: &serde_json::Value) -> Result<(), String> {
 
 #[test]
 fn codec() {
-    for p in files("codec") {
-        check_codec(&read(&p)).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
-    }
-    for p in files("codec/falsify") {
-        let v = read(&p);
-        assert_eq!(v["expect"], "fail", "{}", p.display());
-        assert!(check_codec(&v).is_err(), "{} passed and must not", p.display());
-    }
+    run("codec", |_, v| check_codec(v));
 }
 
 // order/ ------------------------------------------------------------------
 
-#[test]
-fn order() {
-    for p in files("order") {
-        let v = read(&p);
-        let mut input = value(&v["input"]).as_list();
-        input.sort_by(compare_value);
-        assert_eq!(Value::List(input), value(&v["sorted"]), "{}", p.display());
-        // Falsify: a UTF-16 or locale order would put the astral note first.
-        let a = Value::text("\u{FF5E}");
-        let b = Value::text("\u{1F3B5}");
-        assert_eq!(compare_value(&a, &b), std::cmp::Ordering::Less);
-    }
+fn check_order(v: &serde_json::Value) -> Result<(), String> {
+    let mut input = value(&v["input"]).as_list();
+    input.sort_by(compare_value);
+    ensure_eq!(Value::List(input), value(&v["sorted"]), "sorted");
+    Ok(())
 }
 
-// The demo schema every other directory is over --------------------------
-
-fn demo() -> Module {
-    module_of(&read(&vectors().join("module/demo.json"))["module"])
+#[test]
+fn order() {
+    run("order", |_, v| check_order(v));
 }
 
 // hash/ -------------------------------------------------------------------
 
+fn check_hash(v: &serde_json::Value) -> Result<(), String> {
+    let m = module_of(&v["module"]);
+    let st = MemoryStore::from_value(m.schema.clone(), &value(&v["store"]));
+    ensure_eq!(hex(&state_hash(&st)), v["hash"].as_str().unwrap_or(""), "state hash");
+    Ok(())
+}
+
 #[test]
 fn hash() {
-    // A hash vector carries no schema; the store is the demo's.
-    let sch = demo().schema;
-    for p in files("hash") {
-        let v = read(&p);
-        let st = MemoryStore::from_value(sch.clone(), &value(&v["store"]));
-        assert_eq!(hex(&state_hash(&st)), v["hash"].as_str().unwrap(), "{}", p.display());
-        // Falsify: a store with one row fewer hashes differently.
-        let mut less = st.clone();
-        let row = less.scan("item").remove(0);
-        less.apply_change(&Change::Remove("item".into(), row));
-        assert_ne!(hex(&state_hash(&less)), v["hash"].as_str().unwrap());
-    }
+    run("hash", |_, v| check_hash(v));
 }
 
 // module/ -----------------------------------------------------------------
 
+fn check_module(v: &serde_json::Value) -> Result<(), String> {
+    let val = value(&v["module"]);
+    let bytes = bytes_of(&v["bytes"]);
+    ensure_eq!(decode(&bytes).map_err(|e| e.to_string())?, val, "the bytes decode to the module value");
+    let m = module_from_value(&val).map_err(|e| e.to_string())?;
+    ensure_eq!(m.spec, ark::ir::SPEC_VERSION, "spec version");
+    ensure_eq!(module_value(&m), val, "decode then encode is the identity");
+    ensure_eq!(encode(&module_value(&m)), bytes, "the module encodes to the bytes");
+    ensure_eq!(hex(&module_hash(&m)), v["hash"].as_str().unwrap_or(""), "module hash");
+    ensure!(check_schema(&m.schema).is_empty(), "the schema is not well formed");
+    Ok(())
+}
+
 #[test]
 fn module() {
-    for p in files("module") {
-        let v = read(&p);
-        let val = value(&v["module"]);
-        let bytes = bytes_of(&v["bytes"]);
-        assert_eq!(decode(&bytes).unwrap(), val, "{}: bytes decode to the module value", p.display());
-        let m = module_from_value(&val).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
-        assert_eq!(module_value(&m), val, "{}: decode then encode is the identity", p.display());
-        assert_eq!(encode(&module_value(&m)), bytes);
-        assert_eq!(hex(&module_hash(&m)), v["hash"].as_str().unwrap(), "{}: module hash", p.display());
-        assert!(check_schema(&m.schema).is_empty());
-    }
+    run("module", |_, v| check_module(v));
 }
 
 // verify/ -----------------------------------------------------------------
 
+fn check_verify(v: &serde_json::Value) -> Result<(), String> {
+    let m = module_from_value(&value(&v["module"])).map_err(|e| e.to_string())?;
+    ensure!(v["verifies"].as_bool() == Some(true), "only accepting modules are checked here");
+    ensure!(check_schema(&m.schema).is_empty(), "the schema is not well formed");
+    ensure_eq!(m.spec, ark::ir::SPEC_VERSION, "spec version");
+    let verified = ark::verify::verify(&m).map_err(|es| format!("{es:?}"))?;
+    ensure_eq!(module_value(&verified), module_value(&m), "a verified module is its own verified form");
+    // Every function of a verified module hashes.
+    ensure_eq!(closures(&m).len(), m.functions.len(), "one closure per function");
+    Ok(())
+}
+
 #[test]
-#[ignore = "vectors are regenerated at v4 by B1c"]
 fn verify() {
-    for p in files("verify") {
-        let v = read(&p);
-        let m = module_of(&v["module"]);
-        assert!(
-            v["verifies"].as_bool().unwrap(),
-            "{}: only accepting modules are checked here",
-            p.display()
-        );
-        assert!(check_schema(&m.schema).is_empty());
-        assert_eq!(m.spec, ark::ir::SPEC_VERSION);
-        let verified = ark::verify::verify(&m).unwrap_or_else(|es| panic!("{}: {es:?}", p.display()));
-        assert_eq!(
-            module_value(&verified),
-            module_value(&m),
-            "{}: a verified module is its own verified form",
-            p.display()
-        );
-        // Every function of a verified module hashes, and its closure runs.
-        assert_eq!(closures(&m).len(), m.functions.len());
-    }
+    run("verify", |_, v| check_verify(v));
 }
 
 // protocol/ ---------------------------------------------------------------
 
+fn check_protocol(name: &str, v: &serde_json::Value) -> Result<(), String> {
+    let val = value(&v["frame"]);
+    let bytes = bytes_of(&v["bytes"]);
+    ensure_eq!(decode(&bytes).map_err(|e| e.to_string())?, val, "the bytes decode to the frame");
+    ensure_eq!(encode(&val), bytes, "the frame encodes to the bytes");
+    if name.starts_with("client-") {
+        let f = ClientMsg::from_value(&val).map_err(|e| e.to_string())?;
+        ensure_eq!(f.to_value(), val, "decode then encode");
+        ensure_eq!(ClientMsg::from_value(&f.to_value()).map_err(|e| e.to_string())?, f, "encode then decode");
+    } else {
+        let f = ServerMsg::from_value(&val).map_err(|e| e.to_string())?;
+        ensure_eq!(f.to_value(), val, "decode then encode");
+        ensure_eq!(ServerMsg::from_value(&f.to_value()).map_err(|e| e.to_string())?, f, "encode then decode");
+    }
+    Ok(())
+}
+
 #[test]
 fn protocol() {
-    for p in files("protocol") {
-        let v = read(&p);
-        let val = value(&v["frame"]);
-        let bytes = bytes_of(&v["bytes"]);
-        let name = p.file_name().unwrap().to_str().unwrap();
-        assert_eq!(decode(&bytes).unwrap(), val, "{name}: bytes decode to the frame");
-        assert_eq!(encode(&val), bytes, "{name}: the frame encodes to the bytes");
-        if name.starts_with("client-") {
-            let f = ClientMsg::from_value(&val).unwrap_or_else(|e| panic!("{name}: {e}"));
-            assert_eq!(f.to_value(), val, "{name}: decode then encode");
-            assert_eq!(ClientMsg::from_value(&f.to_value()).unwrap(), f);
-        } else {
-            let f = ServerMsg::from_value(&val).unwrap_or_else(|e| panic!("{name}: {e}"));
-            assert_eq!(f.to_value(), val, "{name}: decode then encode");
-            assert_eq!(ServerMsg::from_value(&f.to_value()).unwrap(), f);
-        }
-    }
+    run("protocol", |p, v| check_protocol(p.file_name().unwrap().to_str().unwrap(), v));
 }
 
 // eval/ -------------------------------------------------------------------
+
+/// One function applied step by step: the changes, the store and the hash
+/// after each, and the same through the closure map as a peer replays it.
+fn check_eval(v: &serde_json::Value) -> Result<(), String> {
+    let m = module_of(&v["module"]);
+    let name = v["function"].as_str().unwrap();
+    let f = m.lookup_function(name).expect("the function");
+    let fh = function_hash(&closure(&m, f));
+    // The hash of the function as verified: the form every other vector
+    // names it by (the `fn` of every entry in rebase/ and protocol/).
+    let three_peers = read(&vectors().join("rebase/three-peers.json"));
+    let named: Vec<FnHash> = entries_of(&three_peers).into_iter().map(|(_, e)| e.fn_hash).collect();
+    ensure!(named.contains(&fh), "the function hash is not the one the log names");
+    ensure_eq!(hex(&fh), v["function_hash"].as_str().unwrap_or(""), "function_hash");
+    let bodies = closures(&m);
+    let ctx_v = value(&v["ctx"]);
+    let ctx = Ctx::new(ctx_v.field("user").as_text(), ctx_v.field("session").as_text());
+    let autos = args_of(&value(&v["autos"]));
+    let mut st = MemoryStore::from_value(m.schema.clone(), &value(&v["store_before"]));
+    let mut by_closure = st.clone();
+    for (i, step) in v["steps"].as_array().unwrap().iter().enumerate() {
+        let args = args_of(&value(&step["args"]));
+        let changes = apply(&m, name, &ctx, &autos, &args, &mut st)
+            .map_err(|e| format!("step {i}: bug {e:?}"))?
+            .map_err(|r| format!("step {i}: refused {r}"))?;
+        let got = Value::List(changes.iter().map(change_value).collect());
+        ensure_eq!(got, value(&step["changes"]), "step {i} changes");
+        ensure_eq!(st.store_value(), value(&step["store_after"]), "step {i} store");
+        ensure_eq!(hex(&state_hash(&st)), step["hash_after"].as_str().unwrap_or(""), "step {i} hash");
+        let again = ark::eval::apply_closure(&m.schema, &bodies[&fh], &ctx, &autos, &args, &mut by_closure)
+            .map_err(|e| format!("step {i}: closure bug {e:?}"))?
+            .map_err(|r| format!("step {i}: closure refused {r}"))?;
+        ensure_eq!(again, changes, "step {i} through the closure");
+    }
+    ensure!(by_closure == st, "the closure map reached another store");
+    Ok(())
+}
 
 #[test]
 fn eval() {
@@ -225,74 +282,11 @@ fn eval() {
         let v = read(&p);
         if v.get("cases").is_some() {
             eval_cases(&p, &v);
-            continue;
+        } else {
+            check_eval(&v).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
         }
-        let m = module_of(&v["module"]);
-        let name = v["function"].as_str().unwrap();
-        let f = m.lookup_function(name).expect("the function");
-        let fh = function_hash(&closure(&m, f));
-        // The hash of the function as verified: the form every other vector
-        // names it by (the `fn` of every entry in rebase/ and protocol/).
-        let three_peers = read(&vectors().join("rebase/three-peers.json"));
-        let named: Vec<FnHash> = entries_of(&three_peers).into_iter().map(|(_, e)| e.fn_hash).collect();
-        assert!(named.contains(&fh), "{}: the function hash is the one the log names", p.display());
-        let claimed = v["function_hash"].as_str().unwrap();
-        if hex(&fh) != claimed {
-            // spec/app/Vectors.hs hashes `closure m addToPlaylist`, the
-            // function as the builder wrote it, whose select order the
-            // verifier has not yet completed with the key columns. That is
-            // a vector bug, not a runtime one: the hash of that
-            // pre-verification form is reproduced here so the discrepancy is
-            // pinned exactly, and this branch dies the day the vector is
-            // regenerated from the verified function.
-            let mut unverified = f.clone();
-            for s in unverified.body.iter_mut() {
-                if let ark::ir::Stmt::Let(_, ark::ir::Expr::Select(plan)) = s {
-                    plan.order.truncate(1);
-                }
-            }
-            let pre = function_hash(&closure(&m, &unverified));
-            assert_eq!(
-                hex(&pre),
-                claimed,
-                "{}: function_hash is neither the verified nor the pre-verification hash",
-                p.display()
-            );
-            eprintln!(
-                "note: {}: function_hash is of the pre-verification function ({claimed}); the verified one is {}",
-                p.display(),
-                hex(&fh)
-            );
-        }
-        let bodies = closures(&m);
-        assert!(bodies.contains_key(&fh));
-        let ctx_v = value(&v["ctx"]);
-        let ctx = Ctx::new(ctx_v.field("user").as_text(), ctx_v.field("session").as_text());
-        let autos = args_of(&value(&v["autos"]));
-        let mut st = MemoryStore::from_value(m.schema.clone(), &value(&v["store_before"]));
-        // The same steps through the closure map, as a peer replays them.
-        let mut by_closure = st.clone();
-        for (i, step) in v["steps"].as_array().unwrap().iter().enumerate() {
-            let args = args_of(&value(&step["args"]));
-            let changes = apply(&m, name, &ctx, &autos, &args, &mut st)
-                .unwrap_or_else(|e| panic!("step {i}: bug {e:?}"))
-                .unwrap_or_else(|r| panic!("step {i}: refused {r}"));
-            let got = Value::List(changes.iter().map(change_value).collect());
-            assert_eq!(got, value(&step["changes"]), "{}: step {i} changes", p.display());
-            assert_eq!(st.store_value(), value(&step["store_after"]), "{}: step {i} store", p.display());
-            assert_eq!(
-                hex(&state_hash(&st)),
-                step["hash_after"].as_str().unwrap(),
-                "{}: step {i} hash",
-                p.display()
-            );
-            let again = ark::eval::apply_closure(&m.schema, &bodies[&fh], &ctx, &autos, &args, &mut by_closure)
-                .unwrap()
-                .unwrap();
-            assert_eq!(again, changes);
-        }
-        assert_eq!(by_closure, st);
     }
+    falsified("eval", |_, v| check_eval(v));
 }
 
 // eval/ with `cases`: the input checks as verdicts, and the form validator.
@@ -675,66 +669,73 @@ fn rebase_three_peers() {
 
 // rebase/fleet-seed-N -------------------------------------------------------------
 
+/// A seeded fleet run from its script: every replica and the server reach
+/// the expected head and hash, nothing pending, nothing refused.
+fn check_fleet(v: &serde_json::Value) -> Result<(), String> {
+    let m = module_of(&v["module"]);
+    let sch: Schema = m.schema.clone();
+    let bodies = closures(&m);
+    let h_create = hash_of(&bodies, "create_playlist");
+    let h_add = hash_of(&bodies, "add_to_playlist");
+    let id_of = |k: i64| -> Id {
+        let mut id = [0u8; 16];
+        id[0] = (k / 256) as u8;
+        id[1] = (k % 256) as u8;
+        id
+    };
+    let pid = id_of(1);
+    let now: Args = Args::new();
+    let clients = value(&v["clients"]).as_int();
+    let seed = value(&v["seed"]).as_int() as u64;
+    let mut sim = Sim::new(sch, bodies, clients, seed);
+    sim.mutate(
+        0,
+        id_of(1000),
+        &h_create,
+        &Args::from([("id".to_string(), Value::Id(pid))]),
+        &Args::from([("name".to_string(), Value::text("Fleet"))]),
+    );
+    sim.settle();
+    let mut n = 0;
+    for op in value(&v["script"]).as_list() {
+        match op.field("t").as_text() {
+            "add" => {
+                let peer = op.field("peer").as_int();
+                let args = Args::from([("playlist_id".to_string(), Value::Id(pid)), ("track_id".to_string(), op.field("track"))]);
+                sim.mutate(peer, id_of(2000 + n), &h_add, &now, &args);
+                n += 1;
+            }
+            "partition" => sim.partition(op.field("peer").as_int()),
+            "heal" => sim.heal(op.field("peer").as_int()),
+            "step" => sim.step(),
+            other => return Err(format!("unknown op {other}")),
+        }
+    }
+    sim.settle();
+    let expected_head = value(&v["expected_head"]).as_int();
+    let expected_hash = v["expected_hash"].as_str().unwrap_or("");
+    let (head, hash) = sim.server_hash();
+    ensure_eq!(head, expected_head, "the head");
+    ensure_eq!(hex(&hash), expected_hash, "the server's hash");
+    for (i, n, h) in sim.client_hashes() {
+        ensure_eq!((n, hex(&h)), (expected_head, expected_hash.to_string()), "client {i}");
+    }
+    ensure!(sim.quiet(), "something is still in flight after settle");
+    for c in sim.clients.values() {
+        ensure!(c.replica.rejections.is_empty(), "a rejection: {:?}", c.replica.rejections);
+        ensure!(c.replica.diverged.is_empty(), "a divergence: {:?}", c.replica.diverged);
+    }
+    ensure_eq!(sim.server.authority.store.store_value(), value(&v["final_store"]), "the final store");
+    Ok(())
+}
+
 #[test]
 fn rebase_fleet() {
     for p in files("rebase")
         .into_iter()
         .filter(|p| p.file_name().unwrap().to_str().unwrap().starts_with("fleet-"))
     {
-        let v = read(&p);
-        let m = module_of(&v["module"]);
-        let sch: Schema = m.schema.clone();
-        let bodies = closures(&m);
-        let h_create = hash_of(&bodies, "create_playlist");
-        let h_add = hash_of(&bodies, "add_to_playlist");
-        let id_of = |k: i64| -> Id {
-            let mut id = [0u8; 16];
-            id[0] = (k / 256) as u8;
-            id[1] = (k % 256) as u8;
-            id
-        };
-        let pid = id_of(1);
-        let now: Args = Args::new();
-        let clients = value(&v["clients"]).as_int();
-        let seed = value(&v["seed"]).as_int() as u64;
-        let mut sim = Sim::new(sch, bodies, clients, seed);
-        sim.mutate(
-            0,
-            id_of(1000),
-            &h_create,
-            &Args::from([("id".to_string(), Value::Id(pid))]),
-            &Args::from([("name".to_string(), Value::text("Fleet"))]),
-        );
-        sim.settle();
-        let mut n = 0;
-        for op in value(&v["script"]).as_list() {
-            match op.field("t").as_text() {
-                "add" => {
-                    let peer = op.field("peer").as_int();
-                    let args = Args::from([("playlist_id".to_string(), Value::Id(pid)), ("track_id".to_string(), op.field("track"))]);
-                    sim.mutate(peer, id_of(2000 + n), &h_add, &now, &args);
-                    n += 1;
-                }
-                "partition" => sim.partition(op.field("peer").as_int()),
-                "heal" => sim.heal(op.field("peer").as_int()),
-                "step" => sim.step(),
-                other => panic!("unknown op {other}"),
-            }
-        }
-        sim.settle();
-        let expected_head = value(&v["expected_head"]).as_int();
-        let expected_hash = v["expected_hash"].as_str().unwrap();
-        let (head, hash) = sim.server_hash();
-        assert_eq!(head, expected_head, "{}: the head", p.display());
-        assert_eq!(hex(&hash), expected_hash, "{}: the server's hash", p.display());
-        for (i, n, h) in sim.client_hashes() {
-            assert_eq!((n, hex(&h)), (expected_head, expected_hash.to_string()), "{}: client {i}", p.display());
-        }
-        assert!(sim.quiet());
-        for c in sim.clients.values() {
-            assert!(c.replica.rejections.is_empty());
-            assert!(c.replica.diverged.is_empty());
-        }
-        assert_eq!(sim.server.authority.store.store_value(), value(&v["final_store"]));
+        check_fleet(&read(&p)).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
     }
+    falsified("rebase", |_, v| check_fleet(v));
 }

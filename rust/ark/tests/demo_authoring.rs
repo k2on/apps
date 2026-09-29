@@ -137,7 +137,6 @@ fn vector() -> serde_json::Value {
 }
 
 #[test]
-#[ignore = "vectors are regenerated at v4 by B1c"]
 fn the_demo_emits_what_the_spec_records() {
     let v = vector();
     let m = module();

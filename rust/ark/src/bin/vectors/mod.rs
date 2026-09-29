@@ -41,24 +41,15 @@ impl Out {
 }
 
 /// The directories a run writes into, created before anything is written.
-const DIRS: [&str; 10] = [
-    "codec",
-    "codec/falsify",
-    "order",
-    "hash",
-    "eval",
-    "verify",
-    "rebase",
-    "protocol",
-    "module",
-    "views",
-];
+/// Each has a `falsify/` beside it: a vector with a wrong expectation that
+/// a conformant runner must fail.
+const DIRS: [&str; 8] = ["codec", "order", "hash", "eval", "verify", "rebase", "protocol", "module"];
 
 /// Write every vector under `root`. Panics, naming the claim, when the
 /// reference disagrees with what a vector would say.
 pub fn write_all(root: &Path) {
     for d in DIRS {
-        let p = root.join(d);
+        let p = root.join(d).join("falsify");
         fs::create_dir_all(&p).unwrap_or_else(|e| panic!("creating {}: {e}", p.display()));
     }
     let out = Out { root: root.to_path_buf() };

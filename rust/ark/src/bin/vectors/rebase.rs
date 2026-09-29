@@ -342,9 +342,8 @@ pub fn fleet(out: &Out) {
         store.rows("item").len(),
         hex(&server_hash)
     );
-    out.write(
-        &format!("rebase/fleet-seed-{seed}.json"),
-        &obj(&[
+    let parts = |head: Seq, expect: bool| {
+        let mut parts = vec![
             ("module", json(&module_value(&m))),
             ("clients", json(&Value::Int(clients))),
             ("seed", json(&Value::Int(seed as i64))),
@@ -352,6 +351,13 @@ pub fn fleet(out: &Out) {
             ("expected_head", json(&Value::Int(head))),
             ("expected_hash", quoted(&hex(&server_hash))),
             ("final_store", json(&store.store_value())),
-        ]),
-    );
+        ];
+        if expect {
+            parts.push(("expect", quoted("fail")));
+        }
+        obj(&parts)
+    };
+    // One entry more than landed, under the hash that did.
+    out.write(&format!("rebase/falsify/fleet-seed-{seed}-one-more.json"), &parts(head + 1, true));
+    out.write(&format!("rebase/fleet-seed-{seed}.json"), &parts(head, false));
 }

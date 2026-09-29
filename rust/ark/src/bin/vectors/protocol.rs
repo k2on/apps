@@ -265,6 +265,20 @@ pub fn protocol(out: &Out) {
         "protocol: work authored as nobody was accepted without signing in: {unsigned:?}"
     );
 
+    // A hello whose bytes say spec version 3 beside a frame that says this
+    // one's: a runner must compare the two, not only decode one.
+    if let Some((_, hello)) = client_frames.first() {
+        let v = hello.to_value();
+        let mut v3 = v.clone();
+        if let Value::Struct(fs) = &mut v3 {
+            fs.insert("spec".into(), Value::Int(3));
+        }
+        assert_ne!(v, v3, "the hello carries a spec version");
+        out.write(
+            "protocol/falsify/client-hello-bytes-of-v3.json",
+            &obj(&[("frame", json(&v)), ("bytes", quoted(&hex(&encode(&v3)))), ("expect", quoted("fail"))]),
+        );
+    }
     for (name, f) in client_frames {
         let v = f.to_value();
         match decode(&encode(&v)).map(|d| ClientMsg::from_value(&d)) {

@@ -57,6 +57,20 @@ pub fn order(out: &Out) {
     ];
     let mut sorted = input.clone();
     sorted.sort_by(compare_value);
+    // The same values in UTF-16 order, which puts the astral note before
+    // the fullwidth tilde.
+    let mut utf16 = sorted.clone();
+    let at = |v: &str| utf16.iter().position(|x| *x == Value::text(v)).expect("both texts are in the list");
+    let (a, b) = (at("\u{FF5E}"), at("\u{1F3B5}"));
+    utf16.swap(a, b);
+    out.write(
+        "order/falsify/utf16.json",
+        &obj(&[
+            ("input", json(&Value::List(input.clone()))),
+            ("sorted", json(&Value::List(utf16))),
+            ("expect", quoted("fail")),
+        ]),
+    );
     out.write(
         "order/mixed.json",
         &obj(&[("input", json(&Value::List(input))), ("sorted", json(&Value::List(sorted)))]),
