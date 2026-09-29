@@ -321,7 +321,7 @@ impl App {
                 self.cursors[Pane::Sidebar as usize] = at;
             }
             self.peer.source = wanted;
-            self.peer.reload_shown();
+            self.peer.open_page();
         }
     }
 
@@ -710,7 +710,7 @@ impl App {
         // Walking the sidebar is one navigation, not one per row: forty
         // history entries would need forty presses of back to undo a scroll.
         self.router.replace_next();
-        self.peer.reload_shown();
+        self.peer.open_page();
         self.cursors[Pane::Tracks as usize] = 0;
     }
 
@@ -823,11 +823,11 @@ impl App {
         let choices = self
             .peer
             .playlists()
-            .into_iter()
+            .iter()
             .map(|p| Choice {
                 on: on.contains(&p.id),
                 value: p.id,
-                name: p.name,
+                name: p.name.clone(),
             })
             .collect();
         self.picker_about = Some(item.id);
@@ -1111,9 +1111,9 @@ impl App {
                     let list = self
                         .peer
                         .playlists()
-                        .into_iter()
+                        .iter()
                         .find(|p| p.id == value)
-                        .map(|p| p.name)
+                        .map(|p| p.name.clone())
                         .unwrap_or_default();
                     let a = args([("playlist_id", Value::Id(value)), ("media_id", Value::Id(media))]);
                     let done = match on {
@@ -1136,8 +1136,9 @@ impl App {
                 let Some(name) = self.ctx.picker.as_ref().map(|p| p.naming.clone().unwrap_or_default()) else {
                     return Task::none();
                 };
-                // Re-read rather than guessing the new row: its id is chosen
-                // inside the mutation. The track is not added to it here —
+                // Rebuilt from the playlists view rather than guessing the new
+                // row: its id is chosen inside the mutation, and the refresh
+                // has just spliced it in. The track is not added to it here —
                 // one tap away, on a row that now exists.
                 if self.author(
                     format!("make the playlist {}", name.trim()),
@@ -1226,7 +1227,7 @@ impl App {
                 // on from wherever it was.
                 let at = self.peer.choices.iter().position(|c| c.source == source);
                 self.peer.source = source;
-                self.peer.reload_shown();
+                self.peer.open_page();
                 if let Some(at) = at {
                     self.cursors[Pane::Sidebar as usize] = at;
                 }

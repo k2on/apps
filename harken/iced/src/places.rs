@@ -14,8 +14,9 @@ use ark_client::Id;
 /// selection should not make the header go blank.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Source {
-    /// Everything, in library order. The only one served by the maintained
-    /// view rather than by a query — see `Peer::reload_shown`.
+    /// Everything, in library order: the library view itself, which is open
+    /// for as long as the window is. Every other source opens views of its
+    /// own — see `Peer::open_page`.
     Library,
     /// Every album, and everyone who made something: index pages of cards.
     ///

@@ -223,16 +223,16 @@ fn the_messiah_has_an_orchestra_and_a_conductor() {
 /// one's rows, or none: invisible on any one page, obvious from a walk.
 ///
 /// Falsified by reading the work's header row from `works_of` rather than by
-/// key in `reload_shown`: the work page's `works` is empty.
+/// key in `open_page`: the work page's `works` is empty.
 #[test]
 fn the_whole_path_from_a_composer_to_a_movement() {
     let mut peer = fresh();
     peer.source = Source::Composers;
-    peer.reload_shown();
+    peer.open_page();
     assert!(peer.composers.iter().any(|c| c.name == "Johann Sebastian Bach"));
 
     peer.source = Source::Works("Johann Sebastian Bach".into());
-    peer.reload_shown();
+    peer.open_page();
     let goldbergs = peer
         .works
         .iter()
@@ -242,14 +242,14 @@ fn the_whole_path_from_a_composer_to_a_movement() {
     assert_eq!(goldbergs.title, "Goldberg Variations");
 
     peer.source = Source::Work(goldbergs.id.clone(), goldbergs.title.clone());
-    peer.reload_shown();
+    peer.open_page();
     assert_eq!(peer.works.len(), 1, "the work's own row, for the header");
     assert_eq!(peer.works[0].catalogue, "BWV 988");
     assert_eq!(peer.recordings.len(), 1);
     let take = peer.recordings[0].clone();
 
     peer.source = Source::Recording(take.id.clone(), String::new());
-    peer.reload_shown();
+    peer.open_page();
     assert!(peer.rows().len() > 20, "{}", peer.rows().len());
     assert_eq!(
         peer.recordings.iter().find(|r| r.id == take.id).map(|r| r.tracks),
@@ -278,7 +278,7 @@ fn a_work_link_resolves_by_its_key() {
 
 /// The sidebar draws a line only when there are rows behind it — and an
 /// empty library alone offers Songs and its own Favorites. Falsified by
-/// pushing the Composers line unconditionally in `reload_sidebar`.
+/// pushing the Composers line unconditionally in `Peer::choose`.
 #[test]
 fn the_sidebar_only_offers_what_there_is() {
     let peer = fresh();

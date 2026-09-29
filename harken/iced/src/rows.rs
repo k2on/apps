@@ -184,7 +184,10 @@ impl Recording {
     }
 }
 
-/// One person on a recording (`credits`).
+/// One person on a recording (`credits`). No page draws credits yet — the
+/// recording's `performers` is what a header says — so only the tests read
+/// them.
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Credit {
     pub name: String,
@@ -193,6 +196,7 @@ pub struct Credit {
     pub pos: i64,
 }
 
+#[cfg(test)]
 impl Credit {
     pub fn from_value(v: &Value) -> Credit {
         Credit {

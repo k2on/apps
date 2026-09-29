@@ -11,6 +11,8 @@ mod bench;
 mod context;
 #[cfg(feature = "demo")]
 mod demo;
+#[cfg(feature = "demo")]
+mod views;
 
 use ark_client::{args, Args, Domain, Options, Value};
 
@@ -45,58 +47,34 @@ pub fn song(title: &str, artist: &str, album: &str, file: &str) -> Args {
 /// The demo, seeded once per test run and handed to each test as a replica
 /// of its own.
 ///
-/// Seeding and the first read of the demo's lists are seconds each in a debug
-/// build — the domain's widest queries scan in nested loops — and every
-/// context test starts from the same library. So the first test to ask seeds
-/// it, keeps the replica's bytes and the lists read from it, and every test
-/// opens its own peer from those bytes: the same library, nothing shared.
+/// Seeding is seconds in a debug build, and every context test starts from
+/// the same library. So the first test to ask seeds it and keeps the
+/// replica's bytes, and every test opens its own peer from those bytes — the
+/// same library, nothing shared — and hydrates its own views, which is what
+/// a window opening does and is cheap now that every query is a plan.
 #[cfg(feature = "demo")]
 pub fn demo_app() -> crate::App {
     use std::sync::OnceLock;
 
     use ark_client::storage::{Memory, ReplicaFile, Storage};
 
-    use crate::peer::{Choice, Peer};
-    use crate::rows::{Album, Artist, Composer, TrackDetail};
-
-    struct Template {
-        bytes: Vec<u8>,
-        choices: Vec<Choice>,
-        albums: Vec<Album>,
-        artists: Vec<Artist>,
-        composers: Vec<Composer>,
-        details: std::collections::HashMap<ark_client::Id, TrackDetail>,
-    }
-    static TEMPLATE: OnceLock<Template> = OnceLock::new();
+    static TEMPLATE: OnceLock<Vec<u8>> = OnceLock::new();
     let domain = Domain::new(&harken_domain::module());
-    let t = TEMPLATE.get_or_init(|| {
-        let peer = crate::App::demo().peer;
-        let r = peer.client.replica();
-        let file = ReplicaFile {
+    let bytes = TEMPLATE.get_or_init(|| {
+        let client = crate::seed::seeded(domain.clone());
+        let r = client.replica();
+        ReplicaFile {
             mode: "alone".into(),
             cursor: r.cursor,
             confirmed: r.confirmed.clone(),
             pending: r.pending.clone(),
             user: crate::seed::DEMO.into(),
             session: "local".into(),
-        };
-        Template {
-            bytes: file.encode(),
-            choices: peer.choices.clone(),
-            albums: peer.albums.clone(),
-            artists: peer.artists.clone(),
-            composers: peer.composers.clone(),
-            details: peer.details.clone(),
         }
+        .encode()
     });
     let mut disk = Memory::new();
-    disk.save(ReplicaFile::KEY, &t.bytes).unwrap();
+    disk.save(ReplicaFile::KEY, bytes).unwrap();
     let client = ark_client::Peer::open(domain, Box::new(disk), Options::alone(crate::seed::DEMO)).unwrap();
-    let mut peer = Peer::hydrated(client);
-    peer.choices = t.choices.clone();
-    peer.albums = t.albums.clone();
-    peer.artists = t.artists.clone();
-    peer.composers = t.composers.clone();
-    peer.details = t.details.clone();
-    crate::App::with_peer(peer, String::new(), None)
+    crate::App::with_peer(crate::peer::Peer::open(client), String::new(), None)
 }
