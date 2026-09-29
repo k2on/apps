@@ -476,7 +476,8 @@ The builder implements the vocabulary twice behind one API:
   and so is every closure of its plan (`get`, `each`, `having`, `sort_by`,
   `map`); what it returns is the query's plan.
 - **Native**: every value holds a `Value`; a read runs at once against
-  the transaction through `eval::select_plan`, which is `view::pull`;
+  the transaction through `eval::select_plan`, which is `view::read`,
+  the answer `view::pull` gives;
   `when` runs its closure only when the condition holds; `ctx.now(name)`
   returns the entry's auto of that name. Only mutators and middleware run
   natively: a query has no native half, and `Procedure::query` is
