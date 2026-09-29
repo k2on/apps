@@ -36,6 +36,7 @@ vectors of the day they do.
 | 11 | `peer.rs` | the replica: pending intents, the optimistic view, the rebase, work authored before anyone signed in made the signer's, applying by intent or by facts, divergence detection; the authority: sequencing, dedupe, verdicts, compaction, retirement of closures no retained entry names, adoption of a log; `local_commit`, the serverless peer |
 | 12 | `protocol.rs` | the frames as values and their encodings; the client machine and the server machine (authenticate once, hold every entry to its identity, give every refusal a reason, sequence, fan out a page at a time, rooms) |
 | 13 | `view.rs` | what a plan means (`pull`, the one evaluator of plans: a query, a mutator's `select`, a hydrating view) and a plan kept up to date: entries, dependencies by plan node, patches, the window under a limit, the correctness contract (`docs/plan-v4.md` §1.5) |
+| 13.7 | `ir/reads.rs` | what a query's middleware reads, by static inspection: the tables whose change re-runs it before a view is pushed (`docs/plan-v4.md` §1.7) |
 | 14 | `live.rs` | rooms per account over opaque frames: arrive, speak, depart; a snapshot kept when a room empties; a repeated hello is paging |
 | 15 | `sim.rs` | the seeded fleet: a server, clients, a network that reorders, duplicates and drops; partition, heal, step, settle |
 | 17 | `compat.rs` | `arkc check`: the additive-only rule between two modules, and re-verifying retained closures against a new schema |
@@ -103,10 +104,21 @@ by it.
 | `rebase/` | `three-peers`: a scripted session of replicas and an authority, asserted step by step; `fleet-seed-N`: a seeded simulation's script and the hash every replica must reach after settle | §10, §11, §15 |
 | `module/` | a module as a value, its canonical bytes, its hash; decode of encode is the identity | §7 |
 | `protocol/` | every frame as a value and its bytes; decode of encode is the identity | §12 |
-| `views/` | a plan, the changes of a run of entries, and after each settle the patches and the answer: a projection, a having that admits a node when a child arrives, a group source, a lookup chain, a related plan on a non-key column, an expression order key under a limit, a related tree three deep | §13 |
+| `views/` | a query of the vector's own module (`query`, and its `plan` as the module writes it), the context and arguments it is read with, `store_before` and the answer at hydrate (`rows_before`); then `batches` of changes, and after each batch the `patches` and the answer (`rows`). One file per plan feature: a projection, a having that admits a node when a child arrives, a group source, a lookup chain, a related plan on a non-key column, an expression order key under a limit, a related tree three deep, and the two v3 plans (`top-two-by-pos`, `playlist-with-items`) | §13 |
 
-`views/` holds v3 plans until the maintained plan of `docs/plan-v4.md`
-§1.5 lands; the table describes what it holds then.
+A change in a batch is the protocol's fact form (§12): `{"t": "add",
+"table", "row"}`, `{"t": "remove", "table", "row"}`, `{"t": "edit",
+"table", "old", "new"}`. A batch is applied to the store whole and then
+pushed as one, so the patches are §1.5's: touched keys settle in
+ascending key order, each against the list as it stands; an entry that
+stays in place is an `update` only if its node changed; a move is a
+`remove` at the old place then an `insert` at the new; under a limit an
+entry leaving the window is a `remove` then an `insert` of the next at
+the last place, one entering an `insert` then a `remove` past the limit;
+a key added, edited and removed in one batch gives nothing. A patch is
+`{"t": "insert", "at", "node"}`, `{"t": "remove", "at"}` or `{"t":
+"update", "at", "node"}`, positions into the list as it stands when the
+patch is applied.
 
 ## Requirements that are not functions
 

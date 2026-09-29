@@ -6,9 +6,10 @@
 //! "decimal"}` — and text, booleans and `null` are themselves. A value is
 //! printed on one line with no spaces, a struct's keys in code-point order
 //! (the order the value already holds them in). A vector file is an object
-//! of named parts, one per line, two-space indented, ending in a newline:
-//! the layout `spec/app/Vectors.hs` wrote, kept so that a regeneration that
-//! changes nothing shows nothing in a diff.
+//! of named parts, one per line, two-space indented, ending in a newline,
+//! so that a regeneration that changes nothing shows nothing in a diff.
+//! This module is the definition of the dialect; `spec/README.md` says it
+//! in prose.
 
 use ark::stdlib::text_of_id;
 use ark::value::{hex, Value};

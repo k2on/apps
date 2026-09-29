@@ -16,6 +16,7 @@ mod json;
 mod module;
 mod protocol;
 mod rebase;
+mod views;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -43,7 +44,7 @@ impl Out {
 /// The directories a run writes into, created before anything is written.
 /// Each has a `falsify/` beside it: a vector with a wrong expectation that
 /// a conformant runner must fail.
-const DIRS: [&str; 8] = ["codec", "order", "hash", "eval", "verify", "rebase", "protocol", "module"];
+const DIRS: [&str; 9] = ["codec", "order", "hash", "eval", "verify", "rebase", "protocol", "module", "views"];
 
 /// Write every vector under `root`. Panics, naming the claim, when the
 /// reference disagrees with what a vector would say.
@@ -60,8 +61,7 @@ pub fn write_all(root: &Path) {
     module::module(&out);
     protocol::protocol(&out);
     rebase::fleet(&out);
-    // views/ waits for the maintained plan (docs/plan-v4.md §1.5): the v3
-    // files stay as they are until then.
+    views::views(&out);
     println!("vectors written");
 }
 

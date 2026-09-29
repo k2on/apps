@@ -13,16 +13,16 @@ use std::path::{Path, PathBuf};
 use ark::canon::{decode, encode};
 use ark::eval::{apply, Args, Ctx};
 use ark::hash::{closure, closures, function_hash, module_hash, state_hash, FnHash};
-use ark::ir::{module_from_value, module_value, CmpOp, Expr, Module, Plan, Pred};
+use ark::ir::{module_from_value, module_value, Module};
 use ark::log::{Entry, Seq};
 use ark::peer::{local_commit, AdoptError, Authority, Changes, Replica, Sequenced};
 use ark::protocol::{change_from_value, change_value, entry_from_value, ClientMsg, ServerMsg};
-use ark::schema::{check_schema, Dir, Schema};
+use ark::schema::{check_schema, Schema};
 use ark::sim::Sim;
 use ark::stdlib::id_of_text;
 use ark::store::{Change, MemoryStore, Store};
 use ark::value::{compare_value, decode_hex, hex, Id, Value};
-use ark::view::{contract, hydrate, push_all, splice, Env, Patch, View};
+use ark::view::{contract, hydrate, push_all, splice, Env, Patch};
 
 fn vectors() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../spec/vectors")
@@ -338,30 +338,6 @@ fn eval_cases(p: &Path, v: &serde_json::Value) {
 
 // views/ ------------------------------------------------------------------
 
-fn pid() -> Id {
-    id_n(1)
-}
-
-/// The vector's `plan` field is Haskell `show` text, so the two plans are
-/// reconstructed here from their names, as `spec/app/Vectors.hs` builds
-/// them — written as the v4 plans that mean what those v3 view plans did:
-/// the child pinned by an `on` against the parent's key.
-fn view_plan(name: &str) -> Plan {
-    match name {
-        "top-two-by-pos" => Plan::from("item")
-            .filter(Pred::Cmp("playlist_id".into(), CmpOp::Eq, Expr::Lit(Value::Id(pid()))))
-            .order_by("pos", Dir::Asc)
-            .limit(2),
-        "playlist-with-items" => Plan::from("playlist").row(0).order_by("name", Dir::Asc).related(
-            "item",
-            1,
-            vec![("playlist_id", Expr::Field(Box::new(Expr::Var(0)), "id".into()))],
-            Plan::from("item").order_by("pos", Dir::Desc).limit(3),
-        ),
-        other => panic!("no plan is known for the view vector {other}"),
-    }
-}
-
 fn patch_value(p: &Patch) -> Value {
     match p {
         Patch::Insert { at, node } => Value::record(vec![("t", Value::text("insert")), ("at", Value::int(*at as i64)), ("node", node.clone())]),
@@ -370,40 +346,71 @@ fn patch_value(p: &Patch) -> Value {
     }
 }
 
-#[test]
-fn views() {
-    for p in files("views") {
-        let v = read(&p);
-        let m = module_of(&v["module"]);
-        let sch = &m.schema;
-        let name = p.file_stem().unwrap().to_str().unwrap();
-        let vp = view_plan(name);
-        let changes: Vec<Vec<Change>> = value(&v["changes"])
+/// A query of the vector's module kept up to date: hydrated over
+/// `store_before` in the vector's context and arguments, then each batch
+/// applied to the store whole and pushed as one; after each, the patches,
+/// the answer, the contract and the splice.
+fn check_view(v: &serde_json::Value) -> Result<(), String> {
+    let m = module_of(&v["module"]);
+    let sch = &m.schema;
+    let name = v["query"].as_str().unwrap_or("");
+    let f = m.lookup_function(name).ok_or(format!("no query {name}"))?;
+    let plan = f.plan.clone().ok_or(format!("{name} is not a plan"))?;
+    let written = value(&v["module"])
+        .field("functions")
+        .as_list()
+        .into_iter()
+        .find(|g| g.field("name") == Value::text(name))
+        .map(|g| g.field("plan"));
+    ensure_eq!(written, Some(value(&v["plan"])), "the plan is the query's, as the module writes it");
+    let ctx_v = value(&v["ctx"]);
+    let ctx = Ctx::new(ctx_v.field("user").as_text(), ctx_v.field("session").as_text());
+    let c = closure(&m, f);
+    let mut st = MemoryStore::from_value(sch.clone(), &value(&v["store_before"]));
+    let (args, provided) = ark::eval::middleware(sch, &c, &ctx, &args_of(&value(&v["args"])), &st).map_err(|e| format!("middleware: {e:?}"))?;
+    let env = Env {
+        helpers: c.helpers.clone(),
+        ctx,
+        args,
+        provided,
+    };
+    let mut view = hydrate(sch, &plan, env, &st).map_err(|e| format!("hydrate: {e:?}"))?;
+    ensure_eq!(Value::List(view.rows()), value(&v["rows_before"]), "the answer at hydrate");
+    let batches = value(&v["batches"]).as_list();
+    let steps = v["steps"].as_array().ok_or("no steps")?;
+    ensure_eq!(batches.len(), steps.len(), "a step per batch");
+    for (i, (batch, step)) in batches.iter().zip(steps).enumerate() {
+        let batch: Vec<Change> = batch
             .as_list()
             .iter()
-            .map(|group| group.as_list().iter().map(|c| change_from_value(c).unwrap()).collect())
-            .collect();
-        let steps = v["steps"].as_array().unwrap();
-        assert_eq!(changes.len(), steps.len());
-        let mut st = MemoryStore::empty(sch.clone());
-        let mut view: View = hydrate(sch, &vp, Env::default(), &st).unwrap();
-        let mut saw_patch = false;
-        for (i, (group, step)) in changes.iter().zip(steps).enumerate() {
-            let before = view.rows();
-            let mut patches = Vec::new();
-            for ch in group {
-                st.apply_change(ch);
-                patches.extend(push_all(sch, &st, std::slice::from_ref(ch), &mut view).unwrap());
-            }
-            assert!(contract(sch, &st, &view), "{name}: step {i} breaks the contract");
-            let got = Value::List(patches.iter().map(patch_value).collect());
-            assert_eq!(got, value(&step["patches"]), "{name}: step {i} patches");
-            assert_eq!(Value::List(view.rows()), value(&step["rows"]), "{name}: step {i} rows");
-            assert_eq!(splice(&patches, &before), view.rows(), "{name}: step {i} splice");
-            saw_patch |= !patches.is_empty();
-        }
-        assert!(saw_patch, "{name}: the vector exercised nothing");
+            .map(change_from_value)
+            .collect::<Result<_, _>>()
+            .map_err(|e| format!("batch {i}: {e}"))?;
+        let before = view.rows();
+        st.apply_changes(&batch);
+        let patches = push_all(sch, &st, &batch, &mut view).map_err(|e| format!("batch {i}: {e:?}"))?;
+        ensure!(contract(sch, &st, &view), "batch {i} breaks the contract");
+        ensure_eq!(
+            Value::List(patches.iter().map(patch_value).collect()),
+            value(&step["patches"]),
+            "batch {i} patches"
+        );
+        ensure_eq!(Value::List(view.rows()), value(&step["rows"]), "batch {i} rows");
+        ensure_eq!(splice(&patches, &before), view.rows(), "batch {i} splice");
     }
+    Ok(())
+}
+
+/// Falsified by not comparing the patches: `views/falsify/`, which drops
+/// the refill after a removal from the window, then passes.
+#[test]
+fn views() {
+    run("views", |_, v| check_view(v));
+}
+
+/// The playlist every scripted vector is about.
+fn pid() -> Id {
+    id_n(1)
 }
 
 // rebase/three-peers ---------------------------------------------------------
@@ -479,7 +486,7 @@ fn rebase_three_peers() {
     assert_eq!(hex(&facts_only.verify_at().1), final_hash);
     assert!(facts_only.diverged.is_empty());
 
-    // The scenario itself, as spec/app/Vectors.hs asserts it step by step.
+    // The scenario itself, as the generator asserts it step by step.
     let h_create = hash_of(&bodies, "create_playlist");
     let h_add = hash_of(&bodies, "add_to_playlist");
     let ctx = |who: &str| Ctx::new(who, format!("{who}-session"));
