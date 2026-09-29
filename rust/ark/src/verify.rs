@@ -1,4 +1,4 @@
-//! §9 Verification, as `Ark.Verify` defines it, at spec version 3.
+//! §9 Verification, at spec version 4 (`docs/plan-v4.md` §1.10).
 //!
 //! What a module must satisfy before anything runs it or hashes it. A
 //! builder ([`crate::authoring`]) makes most of these hard to write; the
@@ -23,13 +23,26 @@
 //! - input: checks fit their field's type; `exists` names an id of a table
 //!   that exists; refinements are Bool;
 //! - `insert`/`upsert` `on` is empty or a declared unique index (`OnNotUnique`);
-//! - `provided` names a `Provide` the procedure uses.
+//! - `provided` names a `Provide` the procedure uses;
+//! - v4: a query has a plan and an empty body, and returns a list of its
+//!   plan's node type (`QueryWithoutPlan`, `QueryWithBody`); nothing else
+//!   has a plan (`PlanOutsideQuery`), and a read in any other body is
+//!   v3-shaped — no group, lookup, having, projection or expression order
+//!   key, and a related plan only as a schema reference
+//!   (`PlanFeatureOutsideQuery`); every node of a plan is typed under its
+//!   own binders alone (scope is flat), a having is a `Bool`, a lookup's
+//!   key fits its table's key (a part may be an option of it), an `on`
+//!   pairs a column with a value of its type (either side may be the
+//!   option), an order column is the source's (a group's `by`), and no
+//!   expression in a plan reads (`ReadInPlan`) or draws an auto
+//!   (`AutoInPlan`); a plan that binds anything has a `row`
+//!   (`NoRowBinder`), and only a group has `members` (`MembersWithoutGroup`).
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::ir::normalize::normalize;
-use crate::ir::{Auto, Block, Check, Expr, FnKind, Function, Module, Op, Plan, Pred, StdFn, Stmt, Sym, SPEC_VERSION};
-use crate::schema::{check_schema, Dir, Schema, SchemaError, Table, Ty};
+use crate::ir::{Auto, Block, Check, Expr, FnKind, Function, Key, Module, Op, Plan, Pred, Source, StdFn, Stmt, Sym, SPEC_VERSION};
+use crate::schema::{check_schema, Schema, SchemaError, Table, Ty};
 use crate::value::{FieldName, TableName, Value};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -114,6 +127,25 @@ pub enum Complaint {
     /// A value returned from a guard or a mutator, or refinements on
     /// something that takes no input.
     RefineOnNonProcedure,
+    // v4
+    /// A query with no plan.
+    QueryWithoutPlan,
+    /// A query whose body is not empty: a query is its plan.
+    QueryWithBody,
+    /// A plan on something that is not a query.
+    PlanOutsideQuery,
+    /// A read in a body that is not v3-shaped, naming what it has.
+    PlanFeatureOutsideQuery(String),
+    /// A `Select`, `Get` or `Exists` inside a plan's expression: a read is
+    /// a lookup or a related plan.
+    ReadInPlan,
+    /// An `Auto` inside a plan: a query draws none.
+    AutoInPlan,
+    /// A plan that binds something (a lookup, a related plan, a having, a
+    /// projection, an expression order key, a group) with no row binder.
+    NoRowBinder,
+    /// `members` on a plan whose source is not a group.
+    MembersWithoutGroup,
 }
 
 /// Verify a module. On success, the module as it is to be hashed and run:
@@ -220,6 +252,14 @@ pub fn verify_function(m: &Module, i: usize, f: &Function) -> Result<(), Vec<Com
             }
             if f.kind == FnKind::Query && !f.autos.is_empty() {
                 return err(Complaint::AutosOnNonMutator);
+            }
+            if f.kind == FnKind::Query {
+                if f.plan.is_none() {
+                    return err(Complaint::QueryWithoutPlan);
+                }
+                if !f.body.is_empty() {
+                    return err(Complaint::QueryWithBody);
+                }
             }
         }
         FnKind::Guard | FnKind::Provide => {
@@ -343,6 +383,19 @@ pub fn verify_function(m: &Module, i: usize, f: &Function) -> Result<(), Vec<Com
             ..g.clone()
         };
         expect(&gc, "refine", &Ty::Bool, e)?;
+    }
+    match (&f.plan, f.kind) {
+        (Some(p), FnKind::Query) => {
+            let node = query_plan(&g, p)?;
+            let got = Ty::List(Box::new(node));
+            if f.ret.as_ref() != Some(&got) {
+                let want = f.ret.clone().unwrap_or(Ty::Bool);
+                return err(Complaint::TypeMismatch("query result".into(), want, got));
+            }
+            return Ok(());
+        }
+        (Some(_), _) => return err(Complaint::PlanOutsideQuery),
+        (None, _) => {}
     }
     block(&g, &f.body)?;
     let must_return = matches!(f.kind, FnKind::Query | FnKind::Helper | FnKind::Provide);
@@ -744,33 +797,229 @@ fn lit(want: Option<&Ty>, v: &Value) -> Check_<Ty> {
     }
 }
 
-/// §9.2 The type of a plan's rows: the table's columns, plus a list field
-/// per relationship read beneath.
+/// §9.2 The type of a read in a body: the table's columns, plus a list
+/// field per relationship read beneath. The plan must be v3-shaped (§1.4):
+/// only a query's plan may look up, group, have, project or sort by an
+/// expression, and a related plan here is a schema reference.
 fn plan_ty(g: &G, p: &Plan) -> Check_<Ty> {
-    let t = table(g, &p.table)?;
+    v3_shaped(g, p)?;
+    let t = table(g, p.table())?;
     if let Some(f) = &p.filter {
         pred_ok(g, t, f)?;
     }
-    for (c, _) in &p.order {
-        if t.column(c).is_none() {
-            return err(Complaint::UnknownColumn(t.name.clone(), c.clone()));
+    for (k, _) in &p.order {
+        if let Key::Column(c) = k {
+            if t.column(c).is_none() {
+                return err(Complaint::UnknownColumn(t.name.clone(), c.clone()));
+            }
         }
     }
     let Ty::Struct(mut fields) = t.row_ty() else {
         unreachable!("a row type is a struct")
     };
     for r in &p.related {
-        let rel = &r.relation;
-        if !(rel.parent == p.table && g.schema().children_of(&p.table).contains(rel)) {
-            return err(Complaint::BadRelation(p.table.clone(), rel.child.clone()));
-        }
-        if r.plan.table != rel.child {
-            return err(Complaint::BadRelation(p.table.clone(), r.plan.table.clone()));
-        }
         let ct = plan_ty(g, &r.plan)?;
         fields.insert(r.name.clone(), ct);
     }
     Ok(Ty::List(Box::new(Ty::Struct(fields))))
+}
+
+// §1.4 What a read outside a query may be, or the first thing it has that
+// it may not.
+fn v3_shaped(g: &G, p: &Plan) -> Check_<()> {
+    let feature = |what: &str| err(Complaint::PlanFeatureOutsideQuery(what.into()));
+    if matches!(p.source, Source::Group { .. }) {
+        return feature("a group source");
+    }
+    if p.members.is_some() {
+        return err(Complaint::MembersWithoutGroup);
+    }
+    if !p.lookups.is_empty() {
+        return feature("a lookup");
+    }
+    if p.having.is_some() {
+        return feature("a having");
+    }
+    if p.project.is_some() {
+        return feature("a projection");
+    }
+    if p.order.iter().any(|(k, _)| matches!(k, Key::Expr(_))) {
+        return feature("an expression order key");
+    }
+    if !p.related.is_empty() && p.row.is_none() {
+        return err(Complaint::NoRowBinder);
+    }
+    for r in &p.related {
+        // The one related form a body may read: `child.col == row.key`
+        // where `child.col` references this table's single key column.
+        let rel = match (&r.on[..], p.row) {
+            ([(col, Expr::Field(e, key))], Some(row)) if **e == Expr::Var(row) => g
+                .schema()
+                .children_of(p.table())
+                .into_iter()
+                .find(|rel| rel.child == *r.plan.table() && rel.column == *col)
+                .filter(|_| g.schema().lookup_table(p.table()).is_some_and(|t| t.key == [key.clone()])),
+            _ => None,
+        };
+        if rel.is_none() {
+            return feature("a related plan that is not a reference");
+        }
+    }
+    Ok(())
+}
+
+/// §1.10 A query's plan: every node typed under its own binders, the node
+/// type as the answer. `g` is the function's scope, which the filter and
+/// every child plan are checked in (scope is flat per node).
+fn query_plan(g: &G, p: &Plan) -> Check_<Ty> {
+    plan_reads_nothing(p)?;
+    node_ty(g, p)
+}
+
+fn node_ty(g: &G, p: &Plan) -> Check_<Ty> {
+    let t = table(g, p.table())?;
+    if let Some(f) = &p.filter {
+        pred_ok(g, t, f)?;
+    }
+    let row_ty = match &p.source {
+        Source::Table(_) => t.row_ty(),
+        Source::Group { by, .. } => {
+            let mut fs = BTreeMap::new();
+            for c in by {
+                let col = t.column(c).map_or_else(|| err(Complaint::UnknownColumn(t.name.clone(), c.clone())), Ok)?;
+                fs.insert(c.clone(), col.column_ty());
+            }
+            Ty::Struct(fs)
+        }
+    };
+    let binds = !p.is_bare();
+    if binds && p.row.is_none() {
+        return err(Complaint::NoRowBinder);
+    }
+    if p.members.is_some() && !matches!(p.source, Source::Group { .. }) {
+        return err(Complaint::MembersWithoutGroup);
+    }
+    let mut node = G {
+        locals: BTreeMap::new(),
+        ..g.clone()
+    };
+    if let Some(x) = p.row {
+        node = node.bind(x, row_ty.clone());
+    }
+    if let Some(x) = p.members {
+        node = node.bind(x, Ty::List(Box::new(t.row_ty())));
+    }
+    for l in &p.lookups {
+        let lt = table(g, &l.table)?;
+        let want = lt.key_ty();
+        if want.len() != l.key.len() {
+            return err(Complaint::KeyArity(l.table.clone(), want.len(), l.key.len()));
+        }
+        for (w, k) in want.iter().zip(&l.key) {
+            let got = infer(&node, Some(w), k)?;
+            if got != *w && got != Ty::Option(Box::new(w.clone())) {
+                return err(Complaint::TypeMismatch(format!("key of {}", l.table), w.clone(), got));
+            }
+        }
+        node = node.bind(l.sym, Ty::Option(Box::new(lt.row_ty())));
+    }
+    let Ty::Struct(mut fields) = row_ty.clone() else {
+        unreachable!("a row type is a struct")
+    };
+    for r in &p.related {
+        let ct = table(g, r.plan.table())?;
+        for (c, e) in &r.on {
+            let col = ct
+                .column(c)
+                .map_or_else(|| err(Complaint::UnknownColumn(ct.name.clone(), c.clone())), Ok)?;
+            let want = col.column_ty();
+            let got = infer(&node, Some(&want), e)?;
+            let fits = got == want || strip(&got) == strip(&want);
+            if !fits {
+                return err(Complaint::TypeMismatch(format!("on {}.{c}", ct.name), want, got));
+            }
+        }
+        let child = Ty::List(Box::new(node_ty(g, &r.plan)?));
+        fields.insert(r.name.clone(), child.clone());
+        node = node.bind(r.sym, child);
+    }
+    if let Some(h) = &p.having {
+        expect(&node, "having", &Ty::Bool, h)?;
+    }
+    for (k, _) in &p.order {
+        match k {
+            Key::Column(c) => {
+                if !matches!(&row_ty, Ty::Struct(fs) if fs.contains_key(c)) {
+                    return err(Complaint::UnknownColumn(t.name.clone(), c.clone()));
+                }
+            }
+            Key::Expr(e) => {
+                infer(&node, None, e)?;
+            }
+        }
+    }
+    match &p.project {
+        Some(e) => infer(&node, None, e),
+        None => Ok(Ty::Struct(fields)),
+    }
+}
+
+// A type with one option taken off, for an `on` that joins `Opt<T>` to `T`.
+fn strip(t: &Ty) -> &Ty {
+    match t {
+        Ty::Option(inner) => inner,
+        other => other,
+    }
+}
+
+// §1.3 No expression in a plan reads or draws an auto, at any depth.
+fn plan_reads_nothing(p: &Plan) -> Check_<()> {
+    let mut es: Vec<&Expr> = vec![];
+    if let Some(f) = &p.filter {
+        pred_exprs(f, &mut es);
+    }
+    es.extend(p.lookups.iter().flat_map(|l| &l.key));
+    es.extend(p.related.iter().flat_map(|r| r.on.iter().map(|(_, e)| e)));
+    es.extend(p.having.iter().chain(&p.project));
+    es.extend(p.order.iter().filter_map(|(k, _)| match k {
+        Key::Expr(e) => Some(e),
+        Key::Column(_) => None,
+    }));
+    for e in es {
+        if let Some(c) = forbidden(e) {
+            return err(c);
+        }
+    }
+    p.related.iter().try_for_each(|r| plan_reads_nothing(&r.plan))
+}
+
+fn pred_exprs<'a>(p: &'a Pred, out: &mut Vec<&'a Expr>) {
+    match p {
+        Pred::Cmp(_, _, e) => out.push(e),
+        Pred::In(_, es) => out.extend(es),
+        Pred::All(ps) | Pred::Any(ps) => ps.iter().for_each(|q| pred_exprs(q, out)),
+        Pred::Not(q) => pred_exprs(q, out),
+    }
+}
+
+// The first read or auto inside an expression.
+fn forbidden(e: &Expr) -> Option<Complaint> {
+    fn any<'a>(mut es: impl Iterator<Item = &'a Expr>) -> Option<Complaint> {
+        es.find_map(forbidden)
+    }
+    match e {
+        Expr::Select(_) | Expr::Get(..) | Expr::Exists(..) => Some(Complaint::ReadInPlan),
+        Expr::Auto(_) => Some(Complaint::AutoInPlan),
+        Expr::Field(e, _) | Expr::Some(e) => forbidden(e),
+        Expr::Struct(fs) => any(fs.values()),
+        Expr::List(es) | Expr::Op(_, es) | Expr::Call(_, es) | Expr::Std(_, es) => any(es.iter()),
+        Expr::Match(a, _, b, c) | Expr::If(a, b, c) => any([&**a, &**b, &**c].into_iter()),
+        Expr::Cmp(_, a, b) | Expr::Map(a, _, b) | Expr::Filter(a, _, b) | Expr::Any(a, _, b) | Expr::All(a, _, b) | Expr::SortBy(a, _, b) => {
+            any([&**a, &**b].into_iter())
+        }
+        Expr::Fold(a, b, _, _, c) => any([&**a, &**b, &**c].into_iter()),
+        Expr::Lit(_) | Expr::Arg(_) | Expr::Var(_) | Expr::CtxUser | Expr::CtxSession | Expr::Provided(_) | Expr::None(_) => None,
+    }
 }
 
 fn pred_ok(g: &G, t: &Table, p: &Pred) -> Check_<()> {
@@ -841,6 +1090,9 @@ pub fn complete_orders(m: &Module) -> Module {
         for s in &mut f.body {
             complete_stmt(&sch, s);
         }
+        if let Some(p) = &mut f.plan {
+            complete_plan(&sch, p);
+        }
     }
     out
 }
@@ -892,14 +1144,5 @@ fn complete_expr(sch: &Schema, e: &mut Expr) {
 }
 
 fn complete_plan(sch: &Schema, p: &mut Plan) {
-    if let Some(t) = sch.lookup_table(&p.table) {
-        for k in &t.key {
-            if !p.order.iter().any(|(c, _)| c == k) {
-                p.order.push((k.clone(), Dir::Asc));
-            }
-        }
-    }
-    for r in &mut p.related {
-        complete_plan(sch, &mut r.plan);
-    }
+    crate::eval::complete_order(sch, p);
 }

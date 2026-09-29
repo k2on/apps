@@ -11,9 +11,14 @@
 //! recursion), and deterministic (no clock, no randomness, no I/O, no
 //! floats).
 //!
-//! Spec version 3 (`spec/AUTHORING.md` §1; version 2 had scopes): routers and middleware, an
-//! input schema with checks in place of bare arguments, `insert`/`upsert`/
-//! `update` in place of `put`, and `provided`.
+//! Spec version 4 (`docs/plan-v4.md` §1; `spec/AUTHORING.md` §1): a query
+//! is a [`Plan`] and nothing else ([`Function::plan`]), and a plan is a tree
+//! of reads — a source (a table, or a table grouped by columns), a filter,
+//! lookups, related plans on any column equality, a having, a projection,
+//! an order that may use expressions, a limit. Version 3 brought routers
+//! and middleware, an input schema with checks in place of bare arguments,
+//! `insert`/`upsert`/`update` in place of `put`, and `provided`; version 2
+//! had scopes.
 //!
 //! The submodules are §7: [`encode`] writes a module as a [`Value`],
 //! [`decode`] reads one back, [`normalize`] renumbers symbols. The closure
@@ -26,7 +31,7 @@ pub mod normalize;
 
 use std::collections::BTreeMap;
 
-use crate::schema::{Dir, Relation, Schema, Ty};
+use crate::schema::{Dir, Schema, Ty};
 use crate::value::{FieldName, TableName, Value};
 
 pub use crate::hash::{closure, closures, function_hash, module_hash, Closure, FnHash};
@@ -37,8 +42,8 @@ pub use normalize::{normalize, normalize_module};
 /// The version of this specification a module was written against.
 pub type SpecVersion = i64;
 
-/// The version this crate implements (`Ark.IR.specVersion`).
-pub const SPEC_VERSION: SpecVersion = 3;
+/// The version this crate implements.
+pub const SPEC_VERSION: SpecVersion = 4;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Module {
@@ -158,6 +163,9 @@ pub struct Function {
     /// or a guard.
     pub ret: Option<Ty>,
     pub body: Block,
+    /// §1.4 A query's whole meaning: `Some` for a query, whose `body` is
+    /// then empty, and `None` for every other kind.
+    pub plan: Option<Plan>,
     /// The author's names for symbols; not hashed, not required.
     pub names: BTreeMap<Sym, String>,
 }
@@ -376,26 +384,139 @@ impl CmpOp {
     }
 }
 
-/// §3.3 A plan: a query's maintainable half, what `select` pulls and what a
-/// view maintains.
+/// §1.3 A plan: a tree of reads, what a query is, what `select` pulls and
+/// what a view maintains. Each node is evaluated in this order: the source
+/// rows the filter admits; `row` (and `members`) bound; the lookups in
+/// order; the related plans; `having`; `project`; the order keys. The
+/// limit is a window over the admitted nodes in order.
+///
+/// Scope is flat per node: `having`, `project`, lookup keys, `on` and
+/// expression order keys see this node's binders and the function's
+/// arguments, context and provided values — never a parent's, which a
+/// child reaches through its `on`. The filter sees only what is constant
+/// for the read (and, in a mutator's body, the locals bound before it).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Plan {
-    pub table: TableName,
+    pub source: Source,
+    /// Over the source table's columns; the right-hand sides are constant
+    /// for the read. What a store's indexes serve.
     pub filter: Option<Pred>,
-    /// The verifier makes every order total by appending the key columns
-    /// ascending.
-    pub order: Vec<(FieldName, Dir)>,
-    pub limit: Option<i64>,
-    /// Relationships read beneath each row, each a field of that name
-    /// holding a list of child rows.
+    /// The binder for the source row, or for a group its key struct.
+    /// Absent exactly when nothing could reference it: a plan with no
+    /// lookups, related plans, having, projection, expression order key or
+    /// group — the v3 shape a mutator's reads have, whose bytes and symbol
+    /// numbering (and so whose function hashes) are unchanged by v4.
+    pub row: Option<Sym>,
+    /// A group source only: the group's rows, as a list in key order.
+    pub members: Option<Sym>,
+    /// Rows by key from other tables, in order; each may use the ones
+    /// before it.
+    pub lookups: Vec<Lookup>,
+    /// Child plans, each a list per node.
     pub related: Vec<Related>,
+    /// Keep the node when true; the node still exists to a view, which is
+    /// what lets it appear when a child arrives.
+    pub having: Option<Expr>,
+    /// The node's value. Absent, the node is the row's columns (a group's
+    /// key columns) plus one field per related list, named by its `name`.
+    pub project: Option<Expr>,
+    /// The verifier makes every order total by appending the key columns
+    /// ascending (a group's `by` columns).
+    pub order: Vec<(Key, Dir)>,
+    pub limit: Option<i64>,
 }
 
+/// Where a plan's nodes come from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Source {
+    /// One node per row the filter admits.
+    Table(TableName),
+    /// The rows the filter admits, grouped by the values of the `by`
+    /// columns: one node per distinct tuple.
+    Group { table: TableName, by: Vec<FieldName> },
+}
+
+impl Source {
+    /// The table the rows are read from.
+    pub fn table(&self) -> &TableName {
+        match self {
+            Source::Table(t) | Source::Group { table: t, .. } => t,
+        }
+    }
+}
+
+/// A row by key from another table, bound to `sym` as an option: the row
+/// under the key the expressions compute, `None` when there is none or
+/// when any key part is `Null`. How a reference is followed upward.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Lookup {
+    pub name: FieldName,
+    pub sym: Sym,
+    pub table: TableName,
+    pub key: Vec<Expr>,
+}
+
+/// A child plan beneath each node, bound to `sym` as the list of its
+/// nodes: evaluated with its own filter and `child.column == expr(parent)`
+/// for every pair in `on`, its order and limit per parent. A reference
+/// declared in the schema is one case — `on = [(fk, row.key)]`, what
+/// `.with(Table::rel)` writes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Related {
     pub name: FieldName,
-    pub relation: Relation,
+    pub sym: Sym,
+    pub on: Vec<(FieldName, Expr)>,
     pub plan: Plan,
+}
+
+/// One key of an order: a column of the source row (a group's key), or an
+/// expression over the node's binders.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Key {
+    Column(FieldName),
+    Expr(Expr),
+}
+
+impl Plan {
+    /// The table the plan reads.
+    pub fn table(&self) -> &TableName {
+        self.source.table()
+    }
+
+    /// §1.4 The shape a mutator's read may have — v3's: a table source, no
+    /// lookups, having, projection or expression order key, and every
+    /// related plan the `on` form of a reference (`[(column,
+    /// row.field)]`, which the verifier holds to the schema) and itself of
+    /// this shape. What the incremental view of v3 maintains.
+    pub fn is_v3_shaped(&self) -> bool {
+        matches!(self.source, Source::Table(_))
+            && self.members.is_none()
+            && self.lookups.is_empty()
+            && self.having.is_none()
+            && self.project.is_none()
+            && self.order.iter().all(|(k, _)| matches!(k, Key::Column(_)))
+            && self
+                .related
+                .iter()
+                .all(|r| matches!((&r.on[..], self.row), ([(_, Expr::Field(e, _))], Some(row)) if **e == Expr::Var(row)) && r.plan.is_v3_shaped())
+    }
+
+    /// v3-shaped with nothing beneath: a plan whose `row` nothing can
+    /// reference, and which therefore carries none.
+    pub fn is_bare(&self) -> bool {
+        self.is_v3_shaped() && self.related.is_empty()
+    }
+
+    /// The columns an order sorts by, when every key is a column.
+    pub fn order_columns(&self) -> Option<Vec<(FieldName, Dir)>> {
+        self.order
+            .iter()
+            .map(|(k, d)| match k {
+                Key::Column(c) => Some((c.clone(), *d)),
+                Key::Expr(_) => None,
+            })
+            .collect()
+    }
 }
 
 /// A filter over one row; the right-hand sides may not mention the row.

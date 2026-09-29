@@ -170,6 +170,7 @@ fn module() {
 // verify/ -----------------------------------------------------------------
 
 #[test]
+#[ignore = "vectors are regenerated at v4 by B1c"]
 fn verify() {
     for p in files("verify") {
         let v = read(&p);

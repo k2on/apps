@@ -1,11 +1,16 @@
 //! §6 Evaluation: what a domain means (`Ark.Eval`).
 //!
-//! An interpreter of the IR over any [`Store`]. A procedure authored in the
+//! An interpreter of the IR over any [`Store`]. A mutator authored in the
 //! vocabulary of `spec/AUTHORING.md` and run `Native`
 //! ([`crate::authoring`]) is the fast path and must agree with this file
 //! over its own `Emit`; the conformance runner checks the `eval/` vectors
 //! through it, and a peer uses it for a closure it received but holds no
 //! native procedure for.
+//!
+//! A read — a query's plan, a mutator's `select` — means what
+//! [`crate::view::pull`] answers (§1.4): that is the one evaluator of
+//! plans, and it evaluates the expressions inside one through [`Scope`],
+//! which is this file's evaluator with the plan's binders in scope.
 //!
 //! A procedure runs as spec version 2 has it: its input is decoded and
 //! checked field by field ([`check_field`]), then each middleware in its
@@ -23,12 +28,12 @@
 use std::collections::BTreeMap;
 
 use crate::hash::{closure, Closure};
-use crate::ir::{Block, Check, CmpOp, Expr, Field, FnKind, Function, Module, Op, Plan, Pred, Related, Stmt, Sym};
-use crate::schema::{Dir, Schema, Table, Ty};
+use crate::ir::{Block, Check, Expr, Field, FnKind, Function, Key, Module, Op, Plan, Stmt, Sym};
+use crate::schema::{Dir, Schema, Ty};
 use crate::stdlib::{self, StdError};
 use crate::store::{self, Change, Overlay, Refusal, Row, Store};
 use crate::value::{FieldName, TableName, Value};
-use crate::view::{cmp, order_by};
+use crate::view::cmp;
 
 pub use crate::stdlib::Args;
 
@@ -262,6 +267,12 @@ fn procedure(st: &mut St, sch: &Schema, c: &Closure, ctx: &Ctx, autos: &Args, ar
         provided: &provided,
         locals: BTreeMap::new(),
     };
+    // §1.4 A query is its plan: what `pull` answers, over the store the
+    // middleware saw.
+    if let (FnKind::Query, Some(p)) = (f.kind, &f.plan) {
+        let entries = crate::view::pull(sch, p, &Scope::of(&env), &*st.store)?;
+        return Ok(Some(Value::List(crate::view::answer(p, &entries))));
+    }
     match block(st, &env, &f.body) {
         Ok(()) => Ok(None),
         Err(Stop::Returned(v)) => Ok(v),
@@ -589,42 +600,143 @@ pub fn eval_helper(m: &Module, name: &str, vals: Vec<Value>) -> Result<Value, Ev
 /// store: exactly what `ESelect` evaluates to. What a native procedure's
 /// reads are, so that the two cannot answer differently.
 pub fn select_plan(sch: &Schema, plan: &Plan, store: &dyn Store) -> Result<Vec<Value>, EvalFault> {
-    let ctx = Ctx::default();
-    let none = Args::new();
-    let env = Env {
-        schema: sch,
-        helpers: &[],
-        kind: FnKind::Query,
-        ctx: &ctx,
-        args: &none,
-        autos: &none,
-        provided: &none,
-        locals: BTreeMap::new(),
-    };
-    let mut overlay = Overlay::new(store);
-    let mut st = St {
-        store: &mut overlay,
-        changes: Vec::new(),
-    };
-    match select(&mut st, &env, plan) {
-        Ok(rows) => Ok(rows),
-        Err(Stop::Halt(fault)) => Err(fault),
-        Err(Stop::Returned(_)) => Err(EvalFault::Bug(EvalError::TypeError("a return inside a plan".into()))),
-    }
+    let entries = crate::view::pull(sch, plan, &Scope::new(sch, &[], &NOBODY, &NO_ARGS, &NO_ARGS), store)?;
+    Ok(crate::view::answer(plan, &entries))
 }
 
 /// §9.4 A plan's order made total, as the verifier makes it: the table's key
-/// columns ascending, after the author's, omitting any already present.
+/// columns ascending — a group's `by` columns — after the author's,
+/// omitting any already there as a column key; in every related plan too.
 pub fn complete_order(sch: &Schema, p: &mut Plan) {
-    if let Some(t) = sch.lookup_table(&p.table) {
-        for k in &t.key {
-            if !p.order.iter().any(|(c, _)| c == k) {
-                p.order.push((k.clone(), Dir::Asc));
-            }
+    let keys: Vec<FieldName> = match &p.source {
+        crate::ir::Source::Table(t) => sch.lookup_table(t).map(|t| t.key.clone()).unwrap_or_default(),
+        crate::ir::Source::Group { by, .. } => by.clone(),
+    };
+    for k in keys {
+        if !p.order.iter().any(|(c, _)| *c == Key::Column(k.clone())) {
+            p.order.push((Key::Column(k), Dir::Asc));
         }
     }
     for r in &mut p.related {
         complete_order(sch, &mut r.plan);
+    }
+}
+
+static NO_ARGS: Args = BTreeMap::new();
+static NOBODY: Ctx = Ctx {
+    user: String::new(),
+    session: String::new(),
+};
+
+/// §1.3 What the expressions of a plan are evaluated in: the function's
+/// helpers, context, arguments, autos and provided values, and the locals
+/// bound around the read (a mutator's; a query has none). A plan's filter
+/// is evaluated here ([`Scope::eval`]); everything a node computes is
+/// evaluated in a [`NodeScope`] of it, where scope is flat: the node's own
+/// binders and nothing a parent bound.
+pub struct Scope<'s> {
+    outer: std::borrow::Cow<'s, Env<'s>>,
+}
+
+impl<'s> Scope<'s> {
+    /// A scope with no locals: a query's, or a read outside any procedure.
+    pub fn new(schema: &'s Schema, helpers: &'s [Function], ctx: &'s Ctx, args: &'s Args, provided: &'s Args) -> Scope<'s> {
+        Scope {
+            outer: std::borrow::Cow::Owned(Env {
+                schema,
+                helpers,
+                kind: FnKind::Helper,
+                ctx,
+                args,
+                autos: &NO_ARGS,
+                provided,
+                locals: BTreeMap::new(),
+            }),
+        }
+    }
+
+    fn of(env: &'s Env<'s>) -> Scope<'s> {
+        Scope {
+            outer: std::borrow::Cow::Borrowed(env),
+        }
+    }
+
+    pub fn schema(&self) -> &'s Schema {
+        self.outer.schema
+    }
+
+    /// An expression constant for the read: a filter's right-hand side.
+    pub fn eval(&self, e: &Expr) -> Result<Value, EvalFault> {
+        pure(&self.outer, e)
+    }
+
+    /// A node's scope: nothing bound yet, and no read allowed (a node
+    /// computes over what the plan has read; the verifier keeps reads out).
+    pub fn node(&self) -> NodeScope<'s> {
+        let o = &self.outer;
+        NodeScope {
+            env: Env {
+                schema: o.schema,
+                helpers: o.helpers,
+                kind: FnKind::Helper,
+                ctx: o.ctx,
+                args: o.args,
+                autos: o.autos,
+                provided: o.provided,
+                locals: BTreeMap::new(),
+            },
+        }
+    }
+}
+
+/// One node's scope: its binders, bound as the plan evaluates them.
+#[derive(Clone)]
+pub struct NodeScope<'s> {
+    env: Env<'s>,
+}
+
+impl NodeScope<'_> {
+    pub fn bind(&mut self, x: Sym, v: Value) {
+        self.env.locals.insert(x, v);
+    }
+
+    pub fn eval(&self, e: &Expr) -> Result<Value, EvalFault> {
+        pure(&self.env, e)
+    }
+}
+
+// An expression that reads nothing, over a store that holds nothing: what
+// a plan's expressions and a filter's right-hand sides are.
+fn pure(env: &Env, e: &Expr) -> Result<Value, EvalFault> {
+    let mut none = NoStore(env.schema);
+    let mut st = St {
+        store: &mut none,
+        changes: Vec::new(),
+    };
+    match eval(&mut st, env, e) {
+        Ok(v) => Ok(v),
+        Err(Stop::Halt(fault)) => Err(fault),
+        Err(Stop::Returned(_)) => Err(EvalFault::Bug(EvalError::TypeError("a return inside an expression".into()))),
+    }
+}
+
+// The store an expression that may not read is run against: empty, and
+// never written (only a mutator's statements write).
+struct NoStore<'a>(&'a Schema);
+
+impl Store for NoStore<'_> {
+    fn schema(&self) -> &Schema {
+        self.0
+    }
+    fn get(&self, _: &str, _: &[Value]) -> Option<Row> {
+        None
+    }
+    fn scan(&self, _: &str) -> Vec<Row> {
+        vec![]
+    }
+    fn apply_change(&mut self, _: &Change) {}
+    fn as_store(&self) -> &dyn Store {
+        self
     }
 }
 
@@ -882,7 +994,11 @@ fn eval(st: &mut St, env: &Env, e: &Expr) -> Run<Value> {
         }
         Expr::Select(p) => {
             reading(env)?;
-            Ok(Value::List(select(st, env, p)?))
+            let entries = match crate::view::pull(env.schema, p, &Scope::of(env), &*st.store) {
+                Ok(es) => es,
+                Err(fault) => return Err(Stop::Halt(fault)),
+            };
+            Ok(Value::List(crate::view::answer(p, &entries)))
         }
         Expr::Get(t, ks) => {
             reading(env)?;
@@ -954,108 +1070,6 @@ pub fn arith(op: Op, x: i64, y: i64) -> Result<i64, &'static str> {
         }
         _ => Err("not an arithmetic operator"),
     }
-}
-
-// §6.6 Select --------------------------------------------------------------------
-
-/// Pull a plan: scan the table, keep the rows the filter admits, sort them
-/// by the order (stably), take the limit, and hang each relationship's rows
-/// beneath as a field of the relationship's name. A child plan runs once per
-/// parent with the join column pinned to the parent's key.
-fn select(st: &mut St, env: &Env, p: &Plan) -> Run<Vec<Value>> {
-    let Some(tbl) = env.schema.lookup_table(&p.table) else {
-        return bug(EvalError::UnknownTable(p.table.clone()));
-    };
-    let keep: Keep = match &p.filter {
-        None => Box::new(|_| true),
-        Some(f) => predicate(st, env, f)?,
-    };
-    let held = match &p.filter {
-        None => vec![],
-        Some(f) => equalities(st, env, f)?,
-    };
-    let eq: Vec<(&str, &Value)> = held.iter().map(|(c, v)| (c.as_str(), v)).collect();
-    let mut admitted: Vec<Row> = st.store.scan_where_eq(&p.table, &eq, &|r| keep(r));
-    admitted.sort_by(|a, b| order_by(&p.order, a, b));
-    if let Some(lim) = p.limit {
-        admitted.truncate(lim.max(0) as usize);
-    }
-    let mut out = Vec::with_capacity(admitted.len());
-    for row in admitted {
-        out.push(attach(st, env, tbl, &p.related, row)?);
-    }
-    Ok(out)
-}
-
-fn attach(st: &mut St, env: &Env, tbl: &Table, rels: &[Related], row: Row) -> Run<Value> {
-    let key = tbl.key_of(&row);
-    let pk = match key.as_slice() {
-        [k] => k.clone(),
-        _ if rels.is_empty() => Value::Null,
-        _ => return bug(EvalError::CompositeParentKey(tbl.name.clone())),
-    };
-    let mut fields = row;
-    for r in rels {
-        let pin = Pred::Cmp(r.relation.column.clone(), CmpOp::Eq, Expr::Lit(pk.clone()));
-        let filter = match &r.plan.filter {
-            None => pin,
-            Some(f) => Pred::All(vec![pin, f.clone()]),
-        };
-        let child = Plan {
-            filter: Some(filter),
-            ..r.plan.clone()
-        };
-        let kids = select(st, env, &child)?;
-        fields.insert(r.name.clone(), Value::List(kids));
-    }
-    Ok(Value::Struct(fields))
-}
-
-// The right-hand sides of a filter are evaluated once, before the scan.
-// A compiled filter over one row.
-type Keep = Box<dyn Fn(&Row) -> bool>;
-
-// The columns a predicate holds equal to a value, the values evaluated:
-// what an indexed store looks rows up by. `predicate` still decides.
-fn equalities(st: &mut St, env: &Env, p: &Pred) -> Run<Vec<(FieldName, Value)>> {
-    let mut out = vec![];
-    match p {
-        Pred::Cmp(c, CmpOp::Eq, e) => out.push((c.clone(), eval(st, env, e)?)),
-        Pred::All(ps) => {
-            for q in ps {
-                out.extend(equalities(st, env, q)?);
-            }
-        }
-        _ => {}
-    }
-    Ok(out)
-}
-
-fn predicate(st: &mut St, env: &Env, p: &Pred) -> Run<Keep> {
-    Ok(match p {
-        Pred::Cmp(c, op, e) => {
-            let v = eval(st, env, e)?;
-            let (c, op) = (c.clone(), *op);
-            Box::new(move |row| cmp(op, row.get(&c).unwrap_or(&Value::Null), &v))
-        }
-        Pred::In(c, es) => {
-            let vs = eval_many(st, env, es)?;
-            let c = c.clone();
-            Box::new(move |row| vs.iter().any(|v| cmp(CmpOp::Eq, row.get(&c).unwrap_or(&Value::Null), v)))
-        }
-        Pred::All(ps) => {
-            let fs = ps.iter().map(|q| predicate(st, env, q)).collect::<Run<Vec<_>>>()?;
-            Box::new(move |row| fs.iter().all(|f| f(row)))
-        }
-        Pred::Any(ps) => {
-            let fs = ps.iter().map(|q| predicate(st, env, q)).collect::<Run<Vec<_>>>()?;
-            Box::new(move |row| fs.iter().any(|f| f(row)))
-        }
-        Pred::Not(q) => {
-            let f = predicate(st, env, q)?;
-            Box::new(move |row| !f(row))
-        }
-    })
 }
 
 // Coercions: a bug when the verifier's type does not hold ---------------------

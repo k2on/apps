@@ -1,15 +1,23 @@
 //! §7.1 Alpha-normalisation (`Ark.Encode.normalize`).
 //!
 //! Symbols are renumbered 0, 1, 2… in the order their binders are met
-//! walking the body top to bottom, left to right, binders before the
-//! scopes they open — the evaluation order of `Ark.Eval`. Free symbols are
-//! left as they are. A nested block's bindings do not escape it, but their
-//! numbers are still consumed, so that numbering is a function of the whole
-//! body.
+//! walking the function — its checks, its refinements, a query's plan, the
+//! body — top to bottom, left to right, binders before the scopes they
+//! open: the evaluation order of [`crate::eval`]. Free symbols are left as
+//! they are. A nested block's bindings do not escape it, but their numbers
+//! are still consumed, so that numbering is a function of the whole body.
+//!
+//! A plan (§1.8) is walked in its evaluation order: the filter (in the
+//! scope around the plan), then `row`, `members`, each lookup's key and
+//! then its symbol, each related plan's `on`, its child plan (in the scope
+//! around the parent, since scope is flat per node) and then its symbol,
+//! then `having`, `project` and the expression order keys. A plan with no
+//! `row` — the v3 shape — consumes no number for one, so a mutator's reads
+//! number exactly as they did at v3.
 
 use std::collections::BTreeMap;
 
-use crate::ir::{Block, Check, Expr, Field, Function, Module, Plan, Pred, Stmt, Sym};
+use crate::ir::{Block, Check, Expr, Field, Function, Key, Lookup, Module, Plan, Pred, Related, Stmt, Sym};
 
 type Ren = BTreeMap<Sym, Sym>;
 
@@ -38,7 +46,14 @@ pub fn normalize(f: &Function) -> Function {
         next = n2;
         refine.push((e2, why.clone()));
     }
-    let (body, mapping) = renumber_block(&Ren::new(), next, &f.body);
+    let mut mapping = Ren::new();
+    let plan = f.plan.as_ref().map(|p| {
+        let (p2, n2) = renumber_plan_with(&Ren::new(), next, p, &mut mapping);
+        next = n2;
+        p2
+    });
+    let (body, body_mapping) = renumber_block(&Ren::new(), next, &f.body);
+    mapping.extend(body_mapping);
     let names = mapping
         .iter()
         .filter_map(|(old, new)| f.names.get(old).map(|n| (*new, n.clone())))
@@ -47,6 +62,7 @@ pub fn normalize(f: &Function) -> Function {
         input,
         refine,
         body,
+        plan,
         names,
         ..f.clone()
     }
@@ -80,6 +96,9 @@ pub fn binders(f: &Function) -> Vec<Sym> {
     }
     for (e, _) in &f.refine {
         add(expr_binders(e));
+    }
+    if let Some(p) = &f.plan {
+        add(plan_binders(p));
     }
     for s in &f.body {
         add(stmt_binders(s));
@@ -240,7 +259,23 @@ fn expr_binders(e: &Expr) -> Vec<Sym> {
 
 fn plan_binders(p: &Plan) -> Vec<Sym> {
     let mut v = p.filter.as_ref().map(pred_binders).unwrap_or_default();
-    v.extend(p.related.iter().flat_map(|r| plan_binders(&r.plan)));
+    v.extend(p.row);
+    v.extend(p.members);
+    for l in &p.lookups {
+        v.extend(l.key.iter().flat_map(expr_binders));
+        v.push(l.sym);
+    }
+    for r in &p.related {
+        v.extend(r.on.iter().flat_map(|(_, e)| expr_binders(e)));
+        v.extend(plan_binders(&r.plan));
+        v.push(r.sym);
+    }
+    v.extend(p.having.iter().chain(&p.project).flat_map(expr_binders));
+    for (k, _) in &p.order {
+        if let Key::Expr(e) = k {
+            v.extend(expr_binders(e));
+        }
+    }
     v
 }
 
@@ -361,25 +396,89 @@ fn binder1(ren: &Ren, next: Sym, xs: &Expr, x: Sym, b: &Expr, mk: impl FnOnce(Ex
 }
 
 fn renumber_plan(ren: &Ren, next: Sym, p: &Plan) -> (Plan, Sym) {
-    let (filter, n1) = match &p.filter {
+    renumber_plan_with(ren, next, p, &mut Ren::new())
+}
+
+// A plan in `ren`, the scope around it; every binder it opens is also
+// recorded in `seen`, for the author's names.
+fn renumber_plan_with(ren: &Ren, next: Sym, p: &Plan, seen: &mut Ren) -> (Plan, Sym) {
+    let (filter, mut n) = match &p.filter {
         None => (None, next),
         Some(f) => {
             let (f2, n) = renumber_pred(ren, next, f);
             (Some(f2), n)
         }
     };
-    let mut n = n1;
+    // The node's own scope: the scope around the plan and its binders.
+    let mut node = ren.clone();
+    fn open(x: Sym, n: &mut Sym, node: &mut Ren, seen: &mut Ren) -> Sym {
+        node.insert(x, *n);
+        seen.insert(x, *n);
+        *n += 1;
+        *n - 1
+    }
+    let row = p.row.map(|x| open(x, &mut n, &mut node, seen));
+    let members = p.members.map(|x| open(x, &mut n, &mut node, seen));
+    let mut lookups = Vec::with_capacity(p.lookups.len());
+    for l in &p.lookups {
+        let (key, n1) = renumber_many(&node, n, &l.key);
+        n = n1;
+        let sym = open(l.sym, &mut n, &mut node, seen);
+        lookups.push(Lookup { key, sym, ..l.clone() });
+    }
     let mut related = Vec::with_capacity(p.related.len());
     for r in &p.related {
-        let (rp, n2) = renumber_plan(ren, n, &r.plan);
-        related.push(crate::ir::Related { plan: rp, ..r.clone() });
-        n = n2;
+        let mut on = Vec::with_capacity(r.on.len());
+        for (c, e) in &r.on {
+            let (e2, n1) = renumber_expr(&node, n, e);
+            on.push((c.clone(), e2));
+            n = n1;
+        }
+        let (plan, n1) = renumber_plan_with(ren, n, &r.plan, seen);
+        n = n1;
+        let sym = open(r.sym, &mut n, &mut node, seen);
+        related.push(Related {
+            name: r.name.clone(),
+            sym,
+            on,
+            plan,
+        });
+    }
+    let one = |e: &Option<Expr>, n: &mut Sym| {
+        e.as_ref().map(|e| {
+            let (e2, n1) = renumber_expr(&node, *n, e);
+            *n = n1;
+            e2
+        })
+    };
+    let having = one(&p.having, &mut n);
+    let project = one(&p.project, &mut n);
+    let mut order = Vec::with_capacity(p.order.len());
+    for (k, d) in &p.order {
+        order.push((
+            match k {
+                Key::Column(c) => Key::Column(c.clone()),
+                Key::Expr(e) => {
+                    let (e2, n1) = renumber_expr(&node, n, e);
+                    n = n1;
+                    Key::Expr(e2)
+                }
+            },
+            *d,
+        ));
     }
     (
         Plan {
+            source: p.source.clone(),
             filter,
+            row,
+            members,
+            lookups,
             related,
-            ..p.clone()
+            having,
+            project,
+            order,
+            limit: p.limit,
         },
         n,
     )

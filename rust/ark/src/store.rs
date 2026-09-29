@@ -15,10 +15,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use crate::ir::{Expr, Plan};
+use crate::ir::Plan;
 use crate::schema::{Index, Ref, Relation, Schema, Table, Ty};
 use crate::value::{FieldName, TableName, Value};
-use crate::view;
 
 /// A row: every column of its table, by name. Never partial once stored.
 pub type Row = BTreeMap<FieldName, Value>;
@@ -156,21 +155,13 @@ pub trait Store {
         self.get(table, key).map(Value::Struct).unwrap_or(Value::Null)
     }
 
-    /// `db.select(plan)`: the nodes `Ark.Eval.select` builds, as a list.
+    /// `db.select(plan)`: what [`crate::view::pull`] answers, as a list.
     /// The plan's right-hand sides must already be literals, as generated
     /// code builds them; anything else is a bug.
     fn select(&self, plan: &Plan) -> Value {
-        let vp = view::eval_plan(plan, &mut |e: &Expr| match e {
-            Expr::Lit(v) => Ok(v.clone()),
-            other => Err(format!("select: a right-hand side that is not a literal: {other:?}")),
-        })
-        .unwrap_or_else(|e| panic!("{e} (a bug: generated code evaluates its plans)"));
-        Value::List(
-            view::pull(self.schema(), &vp, self.as_store())
-                .into_iter()
-                .map(|(_, node)| node)
-                .collect(),
-        )
+        let rows = crate::eval::select_plan(self.schema(), plan, self.as_store())
+            .unwrap_or_else(|e| panic!("select: {e:?} (a bug: generated code evaluates its plans)"));
+        Value::List(rows)
     }
 
     /// Every table's rows, as `store_before`/`store_after` in the vectors:

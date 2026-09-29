@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 use crate::hash::Closure;
 use crate::ir::normalize::normalize;
-use crate::ir::{Auto, Check, Expr, Field, Function, Module, Plan, Pred, Related, Router, Stmt};
+use crate::ir::{Auto, Check, Expr, Field, Function, Key, Lookup, Module, Plan, Pred, Related, Router, Source, Stmt};
 use crate::schema::{Dir, Schema, Ty};
 use crate::value::{FieldName, Value};
 
@@ -113,35 +113,38 @@ pub fn ty_value(t: &Ty) -> Value {
 
 /// One function, normalised, with the hashes of the helpers and middleware
 /// it reaches directly (`Ark.Encode.functionValue`). Names are not carried.
+/// A query's `plan` is written beside its (empty) body; every other kind
+/// has none and writes no key for it, so its bytes are v3's (§1.8).
 pub fn function_value(deps: &BTreeMap<String, Value>, fn0: &Function) -> Value {
     let f = normalize(fn0);
-    node(
-        "fn",
-        vec![
-            ("name", txt(&f.name)),
-            ("deps", Value::Struct(deps.clone())),
-            ("kind", txt(f.kind.name())),
-            ("router", f.router.as_deref().map(txt).unwrap_or(Value::Null)),
-            ("uses", list(|u| txt(u), &f.uses)),
-            (
-                "autos",
-                list(
-                    |(n, a)| match a {
-                        Auto::NewId(t) => node("new_id", vec![("name", txt(n)), ("table", txt(t))]),
-                        Auto::Now => node("now", vec![("name", txt(n))]),
-                    },
-                    &f.autos,
-                ),
+    let mut fields = vec![
+        ("name", txt(&f.name)),
+        ("deps", Value::Struct(deps.clone())),
+        ("kind", txt(f.kind.name())),
+        ("router", f.router.as_deref().map(txt).unwrap_or(Value::Null)),
+        ("uses", list(|u| txt(u), &f.uses)),
+        (
+            "autos",
+            list(
+                |(n, a)| match a {
+                    Auto::NewId(t) => node("new_id", vec![("name", txt(n)), ("table", txt(t))]),
+                    Auto::Now => node("now", vec![("name", txt(n))]),
+                },
+                &f.autos,
             ),
-            ("input", list(|(n, fd)| field_value(n, fd), &f.input)),
-            (
-                "refine",
-                list(|(e, why)| node("refine", vec![("e", expr(e)), ("why", why_value(why))]), &f.refine),
-            ),
-            ("ret", f.ret.as_ref().map(ty_value).unwrap_or(Value::Null)),
-            ("body", list(stmt, &f.body)),
-        ],
-    )
+        ),
+        ("input", list(|(n, fd)| field_value(n, fd), &f.input)),
+        (
+            "refine",
+            list(|(e, why)| node("refine", vec![("e", expr(e)), ("why", why_value(why))]), &f.refine),
+        ),
+        ("ret", f.ret.as_ref().map(ty_value).unwrap_or(Value::Null)),
+        ("body", list(stmt, &f.body)),
+    ];
+    if let Some(p) = &f.plan {
+        fields.push(("plan", plan(p)));
+    }
+    node("fn", fields)
 }
 
 fn why_value(why: &Option<String>) -> Value {
@@ -246,33 +249,72 @@ fn expr(e: &Expr) -> Value {
     }
 }
 
+fn dir(d: &Dir) -> Value {
+    txt(if *d == Dir::Asc { "asc" } else { "desc" })
+}
+
+/// §1.8 A plan: v3's keys — `table`, `filter`, `order`, `limit`, `related`
+/// — and the v4 ones only when present, so a v3-shaped plan encodes as it
+/// did: `group` (the `by` columns; `table` is the grouped table), `row`,
+/// `members`, `lookups`, `having`, `project`.
 fn plan(p: &Plan) -> Value {
-    node(
-        "plan",
-        vec![
-            ("table", txt(&p.table)),
-            ("filter", p.filter.as_ref().map(pred).unwrap_or(Value::Null)),
-            (
-                "order",
-                list(
-                    |(c, d)| node("by", vec![("column", txt(c)), ("dir", txt(if *d == Dir::Asc { "asc" } else { "desc" }))]),
-                    &p.order,
-                ),
+    let mut fields = vec![
+        ("table", txt(p.table())),
+        ("filter", p.filter.as_ref().map(pred).unwrap_or(Value::Null)),
+        (
+            "order",
+            list(
+                |(k, d)| match k {
+                    Key::Column(c) => node("by", vec![("column", txt(c)), ("dir", dir(d))]),
+                    Key::Expr(e) => node("by", vec![("expr", expr(e)), ("dir", dir(d))]),
+                },
+                &p.order,
             ),
-            ("limit", p.limit.map(int).unwrap_or(Value::Null)),
-            ("related", list(related, &p.related)),
+        ),
+        ("limit", p.limit.map(int).unwrap_or(Value::Null)),
+        ("related", list(related, &p.related)),
+    ];
+    if let Source::Group { by, .. } = &p.source {
+        fields.push(("group", list(|c| txt(c), by)));
+    }
+    if let Some(r) = p.row {
+        fields.push(("row", int(r)));
+    }
+    if let Some(m) = p.members {
+        fields.push(("members", int(m)));
+    }
+    if !p.lookups.is_empty() {
+        fields.push(("lookups", list(lookup, &p.lookups)));
+    }
+    if let Some(h) = &p.having {
+        fields.push(("having", expr(h)));
+    }
+    if let Some(e) = &p.project {
+        fields.push(("project", expr(e)));
+    }
+    node("plan", fields)
+}
+
+fn lookup(l: &Lookup) -> Value {
+    node(
+        "lookup",
+        vec![
+            ("name", txt(&l.name)),
+            ("sym", int(l.sym)),
+            ("table", txt(&l.table)),
+            ("key", list(expr, &l.key)),
         ],
     )
 }
 
+/// A related plan is always the `on` form: `[column, expr]` pairs.
 fn related(r: &Related) -> Value {
     node(
         "related",
         vec![
             ("name", txt(&r.name)),
-            ("parent", txt(&r.relation.parent)),
-            ("child", txt(&r.relation.child)),
-            ("column", txt(&r.relation.column)),
+            ("sym", int(r.sym)),
+            ("on", list(|(c, e)| Value::List(vec![txt(c), expr(e)]), &r.on)),
             ("plan", plan(&r.plan)),
         ],
     )
@@ -305,6 +347,9 @@ pub fn calls(f: &Function) -> Vec<String> {
     }
     for s in &f.body {
         stmt_calls(s, &mut acc);
+    }
+    if let Some(p) = &f.plan {
+        plan_calls(p, &mut acc);
     }
     acc.into_iter().collect()
 }
@@ -370,7 +415,17 @@ fn plan_calls(p: &Plan, acc: &mut std::collections::BTreeSet<String>) {
     if let Some(f) = &p.filter {
         pred_calls(f, acc);
     }
-    p.related.iter().for_each(|r| plan_calls(&r.plan, acc));
+    p.lookups.iter().flat_map(|l| &l.key).for_each(|e| expr_calls(e, acc));
+    for r in &p.related {
+        r.on.iter().for_each(|(_, e)| expr_calls(e, acc));
+        plan_calls(&r.plan, acc);
+    }
+    p.having.iter().chain(&p.project).for_each(|e| expr_calls(e, acc));
+    for (k, _) in &p.order {
+        if let Key::Expr(e) = k {
+            expr_calls(e, acc);
+        }
+    }
 }
 
 fn pred_calls(p: &Pred, acc: &mut std::collections::BTreeSet<String>) {

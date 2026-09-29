@@ -6,8 +6,8 @@
 use std::collections::BTreeMap;
 
 use crate::hash::Closure;
-use crate::ir::{Auto, Check, CmpOp, Expr, Field, FnKind, Function, Module, Op, Plan, Pred, Related, Router, StdFn, Stmt, Sym};
-use crate::schema::{Column, Dir, Index, Ref, Relation, Schema, Table, Ty};
+use crate::ir::{Auto, Check, CmpOp, Expr, Field, FnKind, Function, Key, Lookup, Module, Op, Plan, Pred, Related, Router, Source, StdFn, Stmt, Sym};
+use crate::schema::{Column, Dir, Index, Ref, Schema, Table, Ty};
 use crate::value::{FieldName, Value};
 
 /// Where in the module the shape was wrong, and how.
@@ -172,6 +172,10 @@ pub fn function_from_value(v: &Value) -> D<Function> {
     )?;
     let ret = optional(ty_from_value, field(&fs, "ret")?)?;
     let body = list(&p("body"), |x| stmt(&here, x), field(&fs, "body")?)?;
+    let plan = match fs.get("plan") {
+        None => None,
+        Some(v) => Some(plan(&p("plan"), v)?),
+    };
     Ok(Function {
         name,
         kind,
@@ -182,6 +186,7 @@ pub fn function_from_value(v: &Value) -> D<Function> {
         refine,
         ret,
         body,
+        plan,
         names: BTreeMap::new(),
     })
 }
@@ -326,22 +331,28 @@ fn expr(here: &[&str], v: &Value) -> D<Expr> {
     })
 }
 
+/// §1.8 A plan: the v3 keys always, the v4 ones read when present.
 fn plan(here: &[&str], v: &Value) -> D<Plan> {
     let fs = tagged(here, "plan", v)?;
     let table = text(here, field(&fs, "table")?)?;
     let inner: Vec<&str> = [here, &[table.as_str()]].concat();
-    let filter = optional(|x| pred(&inner, x), field(&fs, "filter")?)?;
+    let here = inner.as_slice();
+    let filter = optional(|x| pred(here, x), field(&fs, "filter")?)?;
     let order = list(
         here,
         |x| {
             let fs = tagged(here, "by", x)?;
-            let c = text(here, field(&fs, "column")?)?;
+            let key = match (fs.get("column"), fs.get("expr")) {
+                (Some(c), None) => Key::Column(text(here, c)?),
+                (None, Some(e)) => Key::Expr(expr(here, e)?),
+                _ => return err(here, "an order key is a column or an expression"),
+            };
             let d = match text(here, field(&fs, "dir")?)?.as_str() {
                 "asc" => Dir::Asc,
                 "desc" => Dir::Desc,
                 other => return err(here, format!("unknown direction {other}")),
             };
-            Ok((c, d))
+            Ok((key, d))
         },
         field(&fs, "order")?,
     )?;
@@ -351,25 +362,60 @@ fn plan(here: &[&str], v: &Value) -> D<Plan> {
         |x| {
             let fs = tagged(here, "related", x)?;
             let name = text(here, field(&fs, "name")?)?;
-            let parent = text(here, field(&fs, "parent")?)?;
-            let child = text(here, field(&fs, "child")?)?;
-            let column = text(here, field(&fs, "column")?)?;
             let sub: Vec<&str> = [here, &[name.as_str()]].concat();
+            let sym = sym(&sub, field(&fs, "sym")?)?;
+            let on = list(
+                &sub,
+                |pair| match pair {
+                    Value::List(xs) if xs.len() == 2 => Ok((text(&sub, &xs[0])?, expr(&sub, &xs[1])?)),
+                    _ => err(&sub, "an on pair is [column, expr]"),
+                },
+                field(&fs, "on")?,
+            )?;
             let pl = plan(&sub, field(&fs, "plan")?)?;
-            Ok(Related {
-                name,
-                relation: Relation { parent, child, column },
-                plan: pl,
-            })
+            Ok(Related { name, sym, on, plan: pl })
         },
         field(&fs, "related")?,
     )?;
+    let source = match fs.get("group") {
+        None => Source::Table(table.clone()),
+        Some(g) => Source::Group {
+            table: table.clone(),
+            by: list(here, |c| text(here, c), g)?,
+        },
+    };
+    let opt_sym = |k: &str| fs.get(k).map(|x| sym(here, x)).transpose();
+    let row = opt_sym("row")?;
+    let members = opt_sym("members")?;
+    let lookups = match fs.get("lookups") {
+        None => vec![],
+        Some(ls) => list(
+            here,
+            |x| {
+                let fs = tagged(here, "lookup", x)?;
+                Ok(Lookup {
+                    name: text(here, field(&fs, "name")?)?,
+                    sym: sym(here, field(&fs, "sym")?)?,
+                    table: text(here, field(&fs, "table")?)?,
+                    key: list(here, |k| expr(here, k), field(&fs, "key")?)?,
+                })
+            },
+            ls,
+        )?,
+    };
+    let having = fs.get("having").map(|x| expr(here, x)).transpose()?;
+    let project = fs.get("project").map(|x| expr(here, x)).transpose()?;
     Ok(Plan {
-        table,
+        source,
         filter,
+        row,
+        members,
+        lookups,
+        related,
+        having,
+        project,
         order,
         limit,
-        related,
     })
 }
 

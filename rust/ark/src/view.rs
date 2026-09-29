@@ -1,20 +1,286 @@
-//! §13 Incremental views, as `Ark.View` defines them.
+//! §13 Views: what a plan means, and a plan kept up to date.
 //!
-//! A view is a plan kept up to date: [`hydrate`] pulls what `select` gives;
-//! [`push`] is told each change the store made and moves that answer to
-//! what `select` would give now, reporting what it did to its own list as
-//! positions ([`Patch`]). The contract ([`contract`]): after any sequence of
-//! changes the rows equal a fresh hydrate, and splicing the patches into
-//! the old list gives the new one. The store is already at the new state
-//! when a change arrives.
+//! [`pull`] is the one evaluator of plans (`docs/plan-v4.md` §1.4): a
+//! query's value, a mutator's `select`, a hydrating view are all what it
+//! answers. It returns one [`Entry`] per candidate — a source row the
+//! filter admits, or a group — carrying what §1.5 names: its key, the
+//! dependencies its subtree read (by plan node, [`nodes`]), its order
+//! keys, whether `having` admitted it, and its node. [`answer`] is the
+//! list a caller sees: the admitted entries, in order, cut to the limit.
+//!
+//! The incremental half below — [`ViewPlan`], [`hydrate`], [`push`],
+//! [`contract`] — is v3's, and maintains a v3-shaped plan only
+//! ([`Plan::is_v3_shaped`]): a table, a filter, a column order, a limit and
+//! references beneath. `push_all` over entries replaces it (§1.5, B1b).
+//! A view there is a plan kept up to date: [`hydrate`] pulls what `select`
+//! gives; [`push`] is told each change the store made and moves that answer
+//! to what `select` would give now, reporting what it did to its own list
+//! as positions ([`Patch`]). The contract ([`contract`]): after any
+//! sequence of changes the rows equal a fresh hydrate, and splicing the
+//! patches into the old list gives the new one. The store is already at the
+//! new state when a change arrives.
 
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
-use crate::ir::{CmpOp, Expr, Plan, Pred};
+use crate::eval::{EvalError, EvalFault, NodeScope, Scope};
+use crate::ir::{CmpOp, Expr, Key, Lookup, Plan, Pred, Related, Source};
 use crate::schema::{Dir, Relation, Schema, Table};
 use crate::store::{Change, Row, Store};
 use crate::value::{compare_value, FieldName, TableName, Value};
+
+// §1.3 The one evaluator ----------------------------------------------------
+
+/// A `Lookup` or a `Related` of a plan tree, by its position in a
+/// pre-order walk: a plan's lookups in order, then each related plan
+/// followed by the nodes of its child plan. The root plan's first lookup
+/// is 0.
+pub type NodeId = usize;
+
+/// One node of a plan tree that reads another table: what a dependency is
+/// recorded against.
+#[derive(Clone, Copy, Debug)]
+pub enum Node<'p> {
+    Lookup(&'p Lookup),
+    Related(&'p Related),
+}
+
+impl Node<'_> {
+    /// The table this node reads.
+    pub fn table(&self) -> &TableName {
+        match self {
+            Node::Lookup(l) => &l.table,
+            Node::Related(r) => r.plan.table(),
+        }
+    }
+
+    /// The dependency value a row of [`Node::table`] would satisfy: the
+    /// row's key for a lookup, the values of the `on` columns for a related
+    /// plan — each as a list, the shape [`Entry::deps`] records.
+    pub fn dependency(&self, sch: &Schema, row: &Row) -> Value {
+        match self {
+            Node::Lookup(l) => Value::List(sch.lookup_table(&l.table).map(|t| t.key_of(row)).unwrap_or_default()),
+            Node::Related(r) => Value::List(r.on.iter().map(|(c, _)| row.get(c).cloned().unwrap_or(Value::Null)).collect()),
+        }
+    }
+}
+
+/// Every lookup and related node of a plan tree, by [`NodeId`].
+pub fn nodes(plan: &Plan) -> Vec<(NodeId, Node<'_>)> {
+    fn walk<'p>(p: &'p Plan, out: &mut Vec<(NodeId, Node<'p>)>) {
+        for l in &p.lookups {
+            out.push((out.len(), Node::Lookup(l)));
+        }
+        for r in &p.related {
+            out.push((out.len(), Node::Related(r)));
+            walk(&r.plan, out);
+        }
+    }
+    let mut out = vec![];
+    walk(plan, &mut out);
+    out
+}
+
+/// How many lookup and related nodes a plan tree has.
+pub fn node_count(plan: &Plan) -> usize {
+    plan.lookups.len() + plan.related.iter().map(|r| 1 + node_count(&r.plan)).sum::<usize>()
+}
+
+/// §1.5 One candidate of a plan: a source row the filter admits, or a
+/// non-empty group.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Entry {
+    /// The row's key, or the group's `by` tuple.
+    pub key: Vec<Value>,
+    /// What the subtree read, at every depth, in the order it was read:
+    /// for a lookup the key it looked up, for a related plan the values its
+    /// `on` computed — each a [`Value::List`] against the node's
+    /// [`NodeId`] ([`Node::dependency`] is the same value computed from a
+    /// row). A lookup with a `Null` key part reads nothing and records
+    /// nothing. The related plans' own entries, admitted or not, add
+    /// theirs: a child the limit or its having leaves out can still move
+    /// into the answer.
+    pub deps: Vec<(NodeId, Value)>,
+    /// The order keys' values, in the plan's order.
+    pub order: Vec<Value>,
+    /// Whether `having` admitted it (no `having` admits every entry).
+    pub admitted: bool,
+    /// The node's value; `Null` when not admitted (a projection is not
+    /// evaluated for a node nobody sees).
+    pub node: Value,
+}
+
+/// §1.3, §1.5 Every candidate of a plan over a store, ordered: by the order
+/// keys under each's direction, then by the entry's key ascending, which
+/// makes the order total whether or not the verifier completed it. The
+/// expressions are evaluated in `scope` (the filter) and in a node scope of
+/// it (everything a node computes). A table the schema lacks is a bug.
+pub fn pull(sch: &Schema, plan: &Plan, scope: &Scope, st: &dyn Store) -> Result<Vec<Entry>, EvalFault> {
+    pull_at(sch, plan, 0, &[], scope, st)
+}
+
+/// The list a caller sees: the admitted entries' nodes in order, cut to
+/// the plan's limit.
+pub fn answer(plan: &Plan, entries: &[Entry]) -> Vec<Value> {
+    let lim = plan.limit.map(|n| n.max(0) as usize).unwrap_or(usize::MAX);
+    entries.iter().filter(|e| e.admitted).take(lim).map(|e| e.node.clone()).collect()
+}
+
+/// The order of two entries of one plan (§1.5): each key under its
+/// direction, then the entries' keys.
+pub fn compare_entries(plan: &Plan, a: &Entry, b: &Entry) -> Ordering {
+    for (i, (_, d)) in plan.order.iter().enumerate() {
+        let o = compare_value(a.order.get(i).unwrap_or(&Value::Null), b.order.get(i).unwrap_or(&Value::Null));
+        let o = if *d == Dir::Desc { o.reverse() } else { o };
+        if o != Ordering::Equal {
+            return o;
+        }
+    }
+    a.key.cmp(&b.key)
+}
+
+// A plan whose node ids start at `base`, its rows pinned by `pins` (a child
+// plan's `on`, evaluated over its parent).
+fn pull_at(sch: &Schema, plan: &Plan, base: NodeId, pins: &[(FieldName, Value)], scope: &Scope, st: &dyn Store) -> Result<Vec<Entry>, EvalFault> {
+    let table = plan.table();
+    let Some(tbl) = sch.lookup_table(table) else {
+        return Err(EvalFault::Bug(EvalError::UnknownTable(table.clone())));
+    };
+    let mut all: Vec<Filter> = pins.iter().map(|(c, v)| Filter::Cmp(c.clone(), CmpOp::Eq, v.clone())).collect();
+    if let Some(f) = &plan.filter {
+        all.push(eval_pred(f, &mut |e: &Expr| scope.eval(e))?);
+    }
+    let filter = match all.len() {
+        0 => None,
+        1 => all.pop(),
+        _ => Some(Filter::All(all)),
+    };
+    let mut rows: Vec<Row> = st.scan_where_eq(table, &equalities(filter.as_ref()), &|r| admits(filter.as_ref(), r));
+    let mut out = Vec::new();
+    match &plan.source {
+        Source::Table(_) => {
+            for row in rows {
+                let key = tbl.key_of(&row);
+                out.push(entry(sch, plan, base, scope, st, key, Value::Struct(row), None)?);
+            }
+        }
+        Source::Group { by, .. } => {
+            rows.sort_by_key(|r| tbl.key_of(r));
+            let mut groups: BTreeMap<Vec<Value>, Vec<Value>> = BTreeMap::new();
+            for row in rows {
+                let k: Vec<Value> = by.iter().map(|c| row.get(c).cloned().unwrap_or(Value::Null)).collect();
+                groups.entry(k).or_default().push(Value::Struct(row));
+            }
+            for (k, members) in groups {
+                let key_row = Value::Struct(by.iter().cloned().zip(k.iter().cloned()).collect());
+                out.push(entry(sch, plan, base, scope, st, k, key_row, Some(Value::List(members)))?);
+            }
+        }
+    }
+    out.sort_by(|a, b| compare_entries(plan, a, b));
+    Ok(out)
+}
+
+// One candidate, pulled: its lookups, its related plans, its having, its
+// node and its order keys, in that order.
+#[allow(clippy::too_many_arguments)]
+fn entry(
+    sch: &Schema,
+    plan: &Plan,
+    base: NodeId,
+    scope: &Scope,
+    st: &dyn Store,
+    key: Vec<Value>,
+    row: Value,
+    members: Option<Value>,
+) -> Result<Entry, EvalFault> {
+    let mut deps = Vec::new();
+    // A bare plan (the v3 shape a mutator reads with) binds nothing: its
+    // node is the row, and a scope for it would be work for no one.
+    if plan.is_bare() {
+        let order = plan.order.iter().map(|(k, _)| order_key(k, &row, None)).collect::<Result<_, _>>()?;
+        return Ok(Entry {
+            key,
+            deps,
+            order,
+            admitted: true,
+            node: row,
+        });
+    }
+    let mut node = scope.node();
+    if let Some(x) = plan.row {
+        node.bind(x, row.clone());
+    }
+    if let (Some(x), Some(m)) = (plan.members, members) {
+        node.bind(x, m);
+    }
+    let mut id = base;
+    for l in &plan.lookups {
+        let k = l.key.iter().map(|e| node.eval(e)).collect::<Result<Vec<_>, _>>()?;
+        let found = if k.iter().any(Value::is_null) {
+            Value::Null
+        } else {
+            let found = st.get(&l.table, &k).map(Value::Struct).unwrap_or(Value::Null);
+            deps.push((id, Value::List(k)));
+            found
+        };
+        node.bind(l.sym, found);
+        id += 1;
+    }
+    let mut fields: BTreeMap<FieldName, Value> = match &row {
+        Value::Struct(m) => m.clone(),
+        _ => BTreeMap::new(),
+    };
+    for r in &plan.related {
+        let on =
+            r.on.iter()
+                .map(|(c, e)| Ok((c.clone(), node.eval(e)?)))
+                .collect::<Result<Vec<_>, EvalFault>>()?;
+        deps.push((id, Value::List(on.iter().map(|(_, v)| v.clone()).collect())));
+        let kids = pull_at(sch, &r.plan, id + 1, &on, scope, st)?;
+        for k in &kids {
+            deps.extend(k.deps.iter().cloned());
+        }
+        let list = Value::List(answer(&r.plan, &kids));
+        node.bind(r.sym, list.clone());
+        fields.insert(r.name.clone(), list);
+        id += 1 + node_count(&r.plan);
+    }
+    let admitted = match &plan.having {
+        None => true,
+        Some(h) => match node.eval(h)? {
+            Value::Bool(b) => b,
+            other => return Err(EvalFault::Bug(EvalError::TypeError(format!("a having is a Bool, not {other:?}")))),
+        },
+    };
+    let value = match (&plan.project, admitted) {
+        (_, false) => Value::Null,
+        (Some(p), true) => node.eval(p)?,
+        (None, true) => Value::Struct(fields),
+    };
+    let order = plan
+        .order
+        .iter()
+        .map(|(k, _)| order_key(k, &row, Some(&node)))
+        .collect::<Result<_, _>>()?;
+    Ok(Entry {
+        key,
+        deps,
+        order,
+        admitted,
+        node: value,
+    })
+}
+
+fn order_key(k: &Key, row: &Value, node: Option<&NodeScope>) -> Result<Value, EvalFault> {
+    match (k, node) {
+        (Key::Column(c), _) => Ok(row.field(c)),
+        (Key::Expr(e), Some(n)) => n.eval(e),
+        (Key::Expr(_), None) => Err(EvalFault::Bug(EvalError::TypeError("an expression order key on a bare plan".into()))),
+    }
+}
+
+// §13.1 The v3 view (B1b replaces it) ------------------------------------
 
 // §13.1 The plan a view maintains ----------------------------------------
 
@@ -44,9 +310,16 @@ pub struct ViewPlan {
     pub related: Vec<(FieldName, Relation, ViewPlan)>,
 }
 
-/// Resolve a plan with an evaluator for its right-hand sides; the first
-/// failure is the answer, in the plan's own order (`Ark.View.evalPlan`).
+/// Resolve a v3-shaped plan ([`Plan::is_v3_shaped`]) with an evaluator
+/// for its right-hand sides; the first failure is the answer, in the plan's
+/// own order. A related plan's `on` is read back as the reference it is:
+/// the child's column against the parent's key.
+///
+/// # Panics
+///
+/// On a plan that is not v3-shaped: this view cannot maintain one.
 pub fn eval_plan<E>(p: &Plan, ev: &mut dyn FnMut(&Expr) -> Result<Value, E>) -> Result<ViewPlan, E> {
+    assert!(p.is_v3_shaped(), "a v3 view maintains a v3-shaped plan only: {p:?}");
     let filter = match &p.filter {
         None => None,
         Some(f) => Some(eval_pred(f, ev)?),
@@ -54,12 +327,17 @@ pub fn eval_plan<E>(p: &Plan, ev: &mut dyn FnMut(&Expr) -> Result<Value, E>) -> 
     let mut related = Vec::with_capacity(p.related.len());
     for r in &p.related {
         let child = eval_plan(&r.plan, ev)?;
-        related.push((r.name.clone(), r.relation.clone(), child));
+        let relation = Relation {
+            parent: p.table().clone(),
+            child: r.plan.table().clone(),
+            column: r.on[0].0.clone(),
+        };
+        related.push((r.name.clone(), relation, child));
     }
     Ok(ViewPlan {
-        table: p.table.clone(),
+        table: p.table().clone(),
         filter,
-        order: p.order.clone(),
+        order: p.order_columns().unwrap_or_default(),
         limit: p.limit,
         related,
     })
@@ -159,7 +437,7 @@ pub struct View {
 pub fn hydrate(sch: &Schema, vp: &ViewPlan, st: &dyn Store) -> View {
     View {
         plan: vp.clone(),
-        nodes: pull(sch, vp, st),
+        nodes: pull_view(sch, vp, st),
     }
 }
 
@@ -177,7 +455,7 @@ impl View {
 
 /// `select` over an evaluated plan: scan, filter, sort, take, attach. A
 /// table the schema lacks is empty here, so that a view is total.
-pub fn pull(sch: &Schema, vp: &ViewPlan, st: &dyn Store) -> Vec<(Row, Value)> {
+pub fn pull_view(sch: &Schema, vp: &ViewPlan, st: &dyn Store) -> Vec<(Row, Value)> {
     let Some(tbl) = sch.lookup_table(&vp.table) else {
         return vec![];
     };
@@ -209,7 +487,7 @@ pub fn node_of(sch: &Schema, vp: &ViewPlan, st: &dyn Store, tbl: &Table, row: &R
             }),
             ..child.clone()
         };
-        let kids: Vec<Value> = pull(sch, &pinned, st).into_iter().map(|(_, n)| n).collect();
+        let kids: Vec<Value> = pull_view(sch, &pinned, st).into_iter().map(|(_, n)| n).collect();
         fields.insert(name.clone(), Value::List(kids));
     }
     Value::Struct(fields)
