@@ -37,6 +37,7 @@
 
 pub mod authoring;
 pub mod canon;
+pub mod compat;
 pub mod eval;
 pub mod hash;
 pub mod ir;

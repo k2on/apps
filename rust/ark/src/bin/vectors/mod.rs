@@ -16,8 +16,6 @@ mod json;
 mod module;
 mod protocol;
 mod rebase;
-mod show;
-mod views;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -71,7 +69,8 @@ pub fn write_all(root: &Path) {
     module::module(&out);
     protocol::protocol(&out);
     rebase::fleet(&out);
-    views::views(&out);
+    // views/ waits for the maintained plan (docs/plan-v4.md §1.5): the v3
+    // files stay as they are until then.
     println!("vectors written");
 }
 

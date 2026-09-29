@@ -4,9 +4,8 @@ version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 description = "The ArkDB runtime: the value model, the canonical encoding, the store, the standard library, the interpreter, the log, the peer and the protocol, as spec/ defines them."
-# The binaries are listed below: the generator's modules live under
-# `src/bin/vectors/` and `src/bin/arkc/`, which discovery would otherwise
-# take for binaries of their own.
+# The binaries are named below: discovery would build `src/bin/vectors.rs`
+# a second time, as `vectors` beside `ark-vectors`.
 autobins = false
 
 [dependencies]

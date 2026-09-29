@@ -44,16 +44,11 @@
 //! Both modules are assumed to verify on their own; this compares, it does
 //! not re-admit.
 
-// The library's surface; `arkc` calls `check` alone. It moves to
-// `rust/ark/src/compat.rs`, where nothing is dead, once the library can
-// take it.
-#![allow(dead_code)]
-
-use ark::hash::{function_hash, Closure, FnHash};
-use ark::ir::{FnKind, Function, Module, Router};
-use ark::schema::{Schema, Table, Ty};
-use ark::value::{FieldName, TableName};
-use ark::verify::{verify_function, VerifyError};
+use crate::hash::{function_hash, Closure, FnHash};
+use crate::ir::{FnKind, Function, Module, Router};
+use crate::schema::{Schema, Table, Ty};
+use crate::value::{FieldName, TableName};
+use crate::verify::{verify_function, VerifyError};
 
 /// A change the log cannot survive. Each names what it is about, because
 /// the list is read by somebody who has just made the change and needs to
@@ -136,6 +131,7 @@ pub fn check_retained(new: &Module, retained: &[Closure]) -> Vec<Break> {
             let mut functions = c.helpers.clone();
             functions.push(f.clone());
             let mut routers = new.routers.clone();
+            // `verify_function` refuses a missing router (`UnknownRouter`); `Ark.Verify` only checked one the module had.
             if let Some(r) = &f.router {
                 if new.lookup_router(r).is_none() {
                     routers.push(Router {
@@ -250,9 +246,9 @@ mod tests {
 
     use std::collections::BTreeMap;
 
-    use ark::hash::closure;
-    use ark::ir::{Auto, Expr, Field, Stmt, SPEC_VERSION};
-    use ark::schema::{Column, Index, Ref};
+    use crate::hash::closure;
+    use crate::ir::{Auto, Expr, Field, Plan, Source, Stmt, SPEC_VERSION};
+    use crate::schema::{Column, Index, Ref};
 
     use super::*;
 
@@ -315,14 +311,27 @@ mod tests {
             ret: None,
             body: vec![Stmt::Insert("item".into(), row, vec![])],
             names: BTreeMap::new(),
+            plan: None,
         };
         let lists = Function {
             name: "lists".into(),
             kind: FnKind::Query,
             autos: vec![],
             input: vec![],
-            ret: Some(Ty::Int),
-            body: vec![Stmt::Return(Some(Expr::Lit(ark::value::Value::Int(0))))],
+            ret: Some(Ty::List(Box::new(list.row_ty()))),
+            body: vec![],
+            plan: Some(Plan {
+                source: Source::Table("list".into()),
+                filter: None,
+                row: None,
+                members: None,
+                lookups: vec![],
+                related: vec![],
+                having: None,
+                project: None,
+                order: vec![],
+                limit: None,
+            }),
             ..add.clone()
         };
         Module {
@@ -352,7 +361,7 @@ mod tests {
     #[test]
     fn growing_is_additive() {
         let old = base();
-        ark::verify::verify(&old).expect("the fixture verifies");
+        crate::verify::verify(&old).expect("the fixture verifies");
         assert!(is_additive(&old, &old));
         let mut new = base();
         new.schema.tables.push(Table {

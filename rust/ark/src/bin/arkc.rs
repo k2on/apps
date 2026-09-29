@@ -12,13 +12,12 @@
 //! else, and what it hashes or compares is the verified module: the hash an
 //! entry names is of that form.
 
-#[path = "arkc/compat.rs"]
-mod compat;
 #[path = "vectors/mod.rs"]
 mod vectors;
 
 use std::process::exit;
 
+use ark::compat;
 use ark::hash::{closure, function_hash, module_hash};
 use ark::ir::{module_from_value, Module};
 use ark::value::hex;

@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use ark::canon::{decode, encode};
 use ark::eval::{Args, Ctx};
 use ark::hash::closures;
+use ark::ir::SPEC_VERSION;
 use ark::live::{ConnId, Silent};
 use ark::log::Entry;
 use ark::peer::{Authority, Replica};
@@ -56,16 +57,15 @@ pub fn protocol(out: &Out) {
         ("track_id", Value::text("t7")),
         ("pos", Value::Int(1)),
     ]);
-    // The spec version a hello carries is pinned here rather than read from
-    // the crate: this is an encoding vector, and its bytes are not what a
-    // version bump moves.
+    // A hello carries the spec version the client speaks, which is this
+    // crate's: a version bump moves these two files and no others.
     let client_frames: Vec<(&str, ClientMsg)> = vec![
         (
             "hello",
             ClientMsg::Hello {
                 sub: Subscription { since: 4, mode: Mode::Whole },
                 token: Some("tok".into()),
-                spec: 3,
+                spec: SPEC_VERSION,
             },
         ),
         (
@@ -76,7 +76,7 @@ pub fn protocol(out: &Out) {
                     mode: Mode::ByFacts,
                 },
                 token: None,
-                spec: 3,
+                spec: SPEC_VERSION,
             },
         ),
         (
@@ -171,7 +171,7 @@ pub fn protocol(out: &Out) {
             ClientMsg::Hello {
                 sub: Subscription { since: 0, mode: Mode::Whole },
                 token: Some("alice".into()),
-                spec: ark::ir::SPEC_VERSION,
+                spec: SPEC_VERSION,
             },
         );
         let mut sv = match owns {
