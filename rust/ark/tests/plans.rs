@@ -245,6 +245,12 @@ fn lib() -> Router<Lib> {
                     n: all.len(),
                 })
         }),
+        // Two related plans over one table and no projection: two fields.
+        r.query("works_twice", |_ctx, db, _input: ()| {
+            db.work
+                .each(|work, ()| db.movement.rows().on(Movement::work_id.eq(work.id)))
+                .each(|work, _| db.movement.filter(Movement::no.eq(1)).on(Movement::work_id.eq(work.id)))
+        }),
         // A reference read with `.with`, and no projection: the node is the
         // row and the list beneath it.
         r.input::<Nothing>()
@@ -471,6 +477,30 @@ fn with_reads_a_reference_beneath() {
         .map(|r| (r.field("id").as_text().to_string(), r.field("movement").as_list().len()))
         .collect();
     assert_eq!(got, [("bwv1046".into(), 1), ("bwv988".into(), 2), ("hwv349".into(), 1)]);
+}
+
+/// A second related plan over a table already related is numbered, so a
+/// node with no projection carries both lists. Falsified by naming every
+/// related plan after its table alone: both are `movement`, one field of
+/// the node.
+#[test]
+fn two_related_plans_on_one_table_are_two_fields() {
+    let m = module();
+    let st = library(&m.build().schema);
+    let plan = m.build().lookup_function("works_twice").unwrap().plan.clone().unwrap();
+    let names: Vec<&str> = plan.related.iter().map(|r| r.name.as_str()).collect();
+    assert_eq!(names, ["movement", "movement_2"]);
+    let got: Vec<(String, usize, usize)> = ask(m.build(), "works_twice", &st)
+        .iter()
+        .map(|r| {
+            (
+                r.field("id").as_text().to_string(),
+                r.field("movement").as_list().len(),
+                r.field("movement_2").as_list().len(),
+            )
+        })
+        .collect();
+    assert_eq!(got, [("bwv1046".into(), 1, 1), ("bwv988".into(), 2, 1), ("hwv349".into(), 1, 1)]);
 }
 
 /// §1.5 Soundness of the recorded dependencies: for every entry and every

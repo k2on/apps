@@ -927,7 +927,18 @@ impl<R, B, N> Query<R, B, N> {
         }
     }
 
-    fn related(&mut self, name: String, on: Vec<(String, Expr)>, plan: Plan, node: Ty) {
+    // A related plan, named after its table (or its reference), numbered
+    // `_2`, `_3`… when an earlier one here has the name: without a
+    // projection each is a field of the node, and two of one name would be
+    // one field.
+    fn related(&mut self, base: String, on: Vec<(String, Expr)>, plan: Plan, node: Ty) {
+        let mut name = base.clone();
+        for n in 2.. {
+            if !self.plan.related.iter().any(|r| r.name == name) {
+                break;
+            }
+            name = format!("{base}_{n}");
+        }
         let sym = Self::fresh();
         let list = Ty::List(Box::new(node));
         self.plan.related.push(Related {
