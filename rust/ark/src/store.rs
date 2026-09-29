@@ -376,11 +376,40 @@ fn no_child(st: &dyn Store, tbl: &Table, k: &[Value], rel: &Relation) -> Result<
 /// a value reads the rows under it rather than the table. The indexes are
 /// derived from the rows and say nothing the rows do not: two stores are
 /// equal when their rows are.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct MemoryStore {
     schema: Schema,
     tables: BTreeMap<TableName, BTreeMap<Key, Row>>,
     indexes: BTreeMap<TableName, Vec<Secondary>>,
+}
+
+/// A copy of every row and every index. Written out rather than derived so
+/// that this crate's tests can count them: a copy is the one cost of a
+/// store that grows with it whatever changed, and the replica is held to
+/// making none per mutation (§11.9, `peer::tests`).
+impl Clone for MemoryStore {
+    fn clone(&self) -> MemoryStore {
+        #[cfg(test)]
+        CLONES.with(|n| n.set(n.get() + 1));
+        MemoryStore {
+            schema: self.schema.clone(),
+            tables: self.tables.clone(),
+            indexes: self.indexes.clone(),
+        }
+    }
+}
+
+// Per thread, so that tests running beside each other do not count each
+// other's copies.
+#[cfg(test)]
+thread_local! {
+    static CLONES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How many stores this thread has copied: tests only.
+#[cfg(test)]
+pub(crate) fn clones() -> usize {
+    CLONES.with(|n| n.get())
 }
 
 impl PartialEq for MemoryStore {

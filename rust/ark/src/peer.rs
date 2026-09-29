@@ -329,7 +329,11 @@ impl Replica {
             let Some((chs, diverged)) = self.apply_one(n, &e, mf.as_ref()) else {
                 break;
             };
-            let own_next = self.pending.first().is_some_and(|p| p.id == e.id);
+            // This peer's own next intent, as it was authored — the entry
+            // itself and not only its id, so that the view, which applied
+            // exactly that entry, can be trusted to have reached what the
+            // confirmed store reaches by applying it (see below).
+            let own_next = self.pending.first() == Some(&e);
             self.confirmed.apply_changes(&chs);
             self.cursor = n;
             self.inbox.remove(&n);
@@ -350,8 +354,37 @@ impl Replica {
             self.view.apply_changes(&acc);
             self.changes.extend(acc);
         } else if !others {
+            // Every entry applied was this peer's own next intent, in order,
+            // applied by intent over the state the view applied it over:
+            // the view is `confirmed` with `pending` replayed, so the
+            // confirmed store before the first of them is the view's base,
+            // and before each next one it is the view after the one before.
+            // `apply` is a function of the store and the entry (§11.2), so
+            // the confirmed store has just reached, by the same changes,
+            // exactly the states the view passed through — and the view
+            // owes nothing. Copying `confirmed` over it here was a deep
+            // copy of every table and index per mutation for a peer alone,
+            // which confirms each intent at once (§11.9), and it left the
+            // store and every view's indexes cold in the cache for no one.
+            //
+            // What makes the equality hold, case by case: an own intent is
+            // applied by its closure, never by facts alone — it was
+            // authored here, so its function is held (bodies are only ever
+            // added), and its sequence is new, so not in `diverged`; a
+            // disagreement with the authority's facts sets `diverged`, and
+            // an entry that is not the next one pending (another peer's, or
+            // one of ours out of order or rewritten) sets `others`, and
+            // both replay; a refusal is `reject`, which replays; a
+            // `sign_in` rewrites pending and replays, so the view is of the
+            // rewritten entries, which are what is pushed and confirmed.
+            // Held, not assumed: a divergence between the optimistic path
+            // and the confirmed path is a bug every debug run names.
             if self.pending.is_empty() {
-                self.view = self.confirmed.clone();
+                debug_assert!(
+                    self.view == self.confirmed,
+                    "the view is not the confirmed store at sequence {}, after only this peer's own intents were confirmed",
+                    self.cursor
+                );
             }
         } else {
             self.replay();
@@ -587,5 +620,321 @@ pub fn local_commit(a: &mut Authority, r: &mut Replica) {
             Sequenced::Duplicate(n) => r.ack(&e.id, n),
             Sequenced::Rejected(why) => r.reject(&e.id, why),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::hash::closures;
+    use crate::value::Value;
+
+    /// The spec's demo (`spec/AUTHORING.md` Appendix B), authored here in
+    /// the vocabulary: a playlist and its items, where adding an item reads
+    /// the last one — so an intent's changes depend on the state it meets.
+    #[allow(dead_code)]
+    mod fixture {
+        use crate::authoring::*;
+
+        pub struct Demo {
+            pub playlist: Table<Playlist>,
+            pub item: Table<Item>,
+        }
+        impl Tables for Demo {
+            fn open() -> Self {
+                Demo {
+                    playlist: table(),
+                    item: table(),
+                }
+            }
+        }
+
+        pub struct Playlist {
+            pub id: Id<Playlist>,
+            pub name: Text,
+            pub user_id: Text,
+        }
+        impl Row for Playlist {
+            const NAME: &str = "playlist";
+            type Key = (Id<Playlist>,);
+            fn columns() -> Columns<Self> {
+                columns()
+                    .id(Self::id)
+                    .text(Self::name)
+                    .text(Self::user_id)
+                    .key((Self::id,))
+                    .unique((Self::user_id, Self::name))
+            }
+        }
+        #[allow(non_upper_case_globals)]
+        impl Playlist {
+            pub const id: Col<Self, Id<Self>> = col("id");
+            pub const name: Col<Self, Text> = col("name");
+            pub const user_id: Col<Self, Text> = col("user_id");
+        }
+
+        pub struct Item {
+            pub playlist_id: Id<Playlist>,
+            pub track_id: Text,
+            pub pos: Int,
+        }
+        impl Row for Item {
+            const NAME: &str = "item";
+            type Key = (Id<Playlist>, Text);
+            fn columns() -> Columns<Self> {
+                columns()
+                    .id(Self::playlist_id)
+                    .refs::<Playlist>()
+                    .text(Self::track_id)
+                    .int(Self::pos)
+                    .key((Self::playlist_id, Self::track_id))
+                    .unique((Self::playlist_id, Self::pos))
+            }
+        }
+        #[allow(non_upper_case_globals)]
+        impl Item {
+            pub const playlist_id: Col<Self, Id<Playlist>> = col("playlist_id");
+            pub const track_id: Col<Self, Text> = col("track_id");
+            pub const pos: Col<Self, Int> = col("pos");
+        }
+
+        pub struct CreatePlaylist {
+            pub name: Text,
+        }
+        impl Input for CreatePlaylist {
+            fn schema() -> Object<Self> {
+                object().field("name", text().trim().min(1))
+            }
+        }
+
+        pub struct AddToPlaylist {
+            pub playlist_id: Id<Playlist>,
+            pub track_id: Text,
+        }
+        impl Input for AddToPlaylist {
+            fn schema() -> Object<Self> {
+                object().field("playlist_id", id::<Playlist>().exists()).field("track_id", text().min(1))
+            }
+        }
+
+        pub fn module() -> Module {
+            let demo = router::<Demo>("demo");
+            Module::new((demo.routes((
+                demo.input::<CreatePlaylist>().mutation("create_playlist", |ctx, db, input| {
+                    db.playlist
+                        .insert(Playlist {
+                            id: ctx.new_id("id"),
+                            name: input.name,
+                            user_id: ctx.user,
+                        })
+                        .on((Playlist::user_id, Playlist::name))
+                }),
+                demo.input::<AddToPlaylist>().mutation("add_to_playlist", |_ctx, db, input| {
+                    let last = db.item.filter(Item::playlist_id.eq(input.playlist_id)).order_by(Item::pos.desc()).first();
+                    db.item.insert(Item {
+                        playlist_id: input.playlist_id,
+                        track_id: input.track_id,
+                        pos: last.map_or(0, |row| row.pos).add(1),
+                    })
+                }),
+            )),))
+        }
+    }
+
+    fn idv(k: u32) -> Id {
+        let mut b = [0u8; 16];
+        b[12..].copy_from_slice(&k.to_be_bytes());
+        b
+    }
+
+    fn args<const N: usize>(pairs: [(&str, Value); N]) -> Args {
+        pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect()
+    }
+
+    /// The demo's schema, closures and procedures, and the two hashes.
+    struct Demo {
+        schema: Schema,
+        bodies: BTreeMap<FnHash, Closure>,
+        procs: Vec<(FnHash, Procedure)>,
+        create: FnHash,
+        add: FnHash,
+    }
+
+    fn demo() -> Demo {
+        let m = fixture::module();
+        let procs = m.procedures();
+        let hash = |n: &str| procs.iter().find(|(_, p)| p.name() == n).unwrap().0.clone();
+        Demo {
+            schema: m.build().schema.clone(),
+            bodies: closures(m.build()),
+            create: hash("create_playlist"),
+            add: hash("add_to_playlist"),
+            procs,
+        }
+    }
+
+    impl Demo {
+        fn replica(&self, native: bool) -> Replica {
+            let mut r = Replica::open(
+                self.schema.clone(),
+                self.bodies.clone(),
+                MemoryStore::empty(self.schema.clone()),
+                0,
+                vec![],
+            );
+            if native {
+                r.hold(self.procs.clone());
+            }
+            r
+        }
+
+        fn authority(&self) -> Authority {
+            let mut a = Authority::new(self.schema.clone(), self.bodies.clone());
+            a.hold(self.procs.clone());
+            a
+        }
+
+        fn create(&self, r: &mut Replica, ctx: &Ctx, n: u32, name: &str) -> Entry {
+            r.mutate(
+                idv(n),
+                ctx,
+                &self.create,
+                &args([("id", Value::Id(idv(1000 + n)))]),
+                &args([("name", Value::text(name))]),
+            )
+            .unwrap()
+        }
+
+        fn add(&self, r: &mut Replica, ctx: &Ctx, n: u32, playlist: u32, track: &str) -> Entry {
+            let a = args([("playlist_id", Value::Id(idv(1000 + playlist))), ("track_id", Value::text(track))]);
+            r.mutate(idv(n), ctx, &self.add, &Args::new(), &a).unwrap()
+        }
+    }
+
+    /// The view as a rebase would compute it from scratch: `confirmed`, then
+    /// every pending intent.
+    fn replayed(r: &Replica) -> MemoryStore {
+        let mut fresh = Replica::open(r.schema.clone(), r.bodies.clone(), r.confirmed.clone(), r.cursor, r.pending.clone());
+        fresh.natives = r.natives.clone();
+        fresh.view
+    }
+
+    /// §11.9 A peer alone confirms every intent the moment it is authored,
+    /// and that costs the intent's changes: not one copy of the store, with
+    /// the procedures held natively or run through their closures. Counted
+    /// by `store::clones`, a per-thread tally `MemoryStore::clone` keeps
+    /// under `cfg(test)`. Falsified by putting back `self.view =
+    /// self.confirmed.clone()` in `advance`: sixty copies, one per intent.
+    #[test]
+    fn a_peer_alone_copies_no_store_per_mutation() {
+        let d = demo();
+        for native in [true, false] {
+            let (mut a, mut r) = (d.authority(), d.replica(native));
+            let me = Ctx::new("me", "local");
+            d.create(&mut r, &me, 1, "Mine");
+            local_commit(&mut a, &mut r);
+            let before = crate::store::clones();
+            for i in 0..60 {
+                d.add(&mut r, &me, 10 + i, 1, &format!("t{i}"));
+                local_commit(&mut a, &mut r);
+                assert!(r.pending.is_empty());
+                assert_eq!(r.cursor, 2 + i as Seq);
+            }
+            assert_eq!(crate::store::clones() - before, 0, "copies of the store, native: {native}");
+            assert_eq!(r.view, r.confirmed);
+            assert_eq!(r.confirmed, a.store);
+            assert_eq!(r.view.scan("item").len(), 60);
+        }
+    }
+
+    /// With a server: intents confirmed a few at a time, with and without
+    /// more pending behind them, another peer's entry landing between two
+    /// of them, and more authored while some are pending. At every step the
+    /// view is what a replay from scratch computes, and when nothing is
+    /// pending it is the confirmed store. Falsified by skipping the replay
+    /// when another peer's entry lands (`others` never set): the view keeps
+    /// this peer's own positions and disagrees with the replay.
+    #[test]
+    fn the_view_is_confirmed_then_pending_at_every_step() {
+        let d = demo();
+        let mut a = d.authority();
+        let (me, them) = (Ctx::new("me", "s"), Ctx::new("them", "t"));
+        let (mut r, mut other) = (d.replica(true), d.replica(false));
+        let confirm = |a: &mut Authority, r: &mut Replica, e: &Entry| match a.sequence_entry(e) {
+            Sequenced::Appended(n, f) => {
+                r.receive_facts(n, f);
+                r.ack(&e.id, n);
+                n
+            }
+            other => panic!("{other:?}"),
+        };
+        let check = |r: &Replica, what: &str| {
+            assert_eq!(r.view, replayed(r), "{what}: the view is confirmed then pending");
+            if r.pending.is_empty() {
+                assert_eq!(r.view, r.confirmed, "{what}: nothing pending");
+            }
+            assert!(r.diverged.is_empty(), "{what}");
+        };
+        let e1 = d.create(&mut r, &me, 1, "Mine");
+        let e2 = d.add(&mut r, &me, 2, 1, "a");
+        let e3 = d.add(&mut r, &me, 3, 1, "b");
+        check(&r, "three authored");
+        confirm(&mut a, &mut r, &e1);
+        check(&r, "the first confirmed, two behind it");
+        confirm(&mut a, &mut r, &e2);
+        confirm(&mut a, &mut r, &e3);
+        check(&r, "all three confirmed, in order");
+        // Somebody else adds to the same playlist while one of ours waits.
+        let e4 = d.add(&mut r, &me, 4, 1, "c");
+        other.receive(1, e1.clone());
+        let x = d.add(&mut other, &them, 5, 1, "x");
+        let nx = confirm(&mut a, &mut other, &x);
+        r.receive(nx, x.clone());
+        check(&r, "theirs landed under ours");
+        assert_eq!(
+            r.view.get("item", &[Value::Id(idv(1001)), Value::text("c")]).unwrap()["pos"],
+            Value::Int(4)
+        );
+        let e6 = d.add(&mut r, &me, 6, 1, "d");
+        check(&r, "authored with one pending");
+        confirm(&mut a, &mut r, &e4);
+        check(&r, "the older one confirmed");
+        // One page with ours after theirs: the batch a reconnect delivers.
+        let y = d.add(&mut other, &them, 7, 1, "y");
+        let (ny, fy) = match a.sequence_entry(&y) {
+            Sequenced::Appended(n, f) => (n, f),
+            o => panic!("{o:?}"),
+        };
+        let (n6, f6) = match a.sequence_entry(&e6) {
+            Sequenced::Appended(n, f) => (n, f),
+            o => panic!("{o:?}"),
+        };
+        r.receive_batch([(ny, y, Some(fy)), (n6, e6, Some(f6))]);
+        check(&r, "a page of theirs and ours");
+        assert_eq!(r.confirmed, a.store);
+    }
+
+    /// An intent of this peer's that comes back under its own id but not as
+    /// it was authored is somebody else's news: the view applied what was
+    /// authored, so it is replayed rather than trusted. Falsified by
+    /// matching the next pending intent by id alone: the view keeps "t1",
+    /// the confirmed store has "t2", and the equality `advance` asserts
+    /// fails.
+    #[test]
+    fn an_own_intent_confirmed_otherwise_is_replayed() {
+        let d = demo();
+        let me = Ctx::new("me", "s");
+        let mut r = d.replica(true);
+        let e1 = d.create(&mut r, &me, 1, "Mine");
+        r.ack(&e1.id, 1);
+        let _ = r.take_changes();
+        let e2 = d.add(&mut r, &me, 2, 1, "t1");
+        let mut altered = e2.clone();
+        altered.args.insert("track_id".into(), Value::text("t2"));
+        r.receive(2, altered);
+        assert!(r.pending.is_empty());
+        assert_eq!(r.view, r.confirmed);
+        assert!(r.view.get("item", &[Value::Id(idv(1001)), Value::text("t2")]).is_some());
+        assert_eq!(r.take_changes(), Changes::Rebuilt);
     }
 }
