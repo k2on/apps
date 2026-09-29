@@ -529,10 +529,30 @@ impl View {
         self.plan.limit.map(|n| n.max(0) as usize).unwrap_or(usize::MAX)
     }
 
-    // Where an entry of this plan sits, or would sit, among the admitted.
+    // Where an entry of this plan sits, or would sit, among the admitted: a
+    // binary search, each probe an entry read through `by_key`. The entry's
+    // own key compares as its own place without being read, so the old
+    // entry of a key being settled is found after `by_key` has let it go.
     fn position(&self, e: &Entry) -> usize {
-        self.entries
-            .partition_point(|k| compare_entries(&self.plan, &self.by_key[k], e) == Ordering::Less)
+        self.position_in(0..self.entries.len(), e)
+    }
+
+    // [`View::position`] within a stretch of the admitted entries: the
+    // index, into the whole list, of the first entry in `range` that does
+    // not sort before `e`.
+    fn position_in(&self, range: std::ops::Range<usize>, e: &Entry) -> usize {
+        let start = range.start;
+        start + self.entries[range].partition_point(|k| k != &e.key && compare_entries(&self.plan, &self.by_key[k], e) == Ordering::Less)
+    }
+
+    // Whether `e` belongs at `p`, the place its key holds now: it sorts
+    // after the entry before and before the entry after. The one question a
+    // rebuilt entry whose order keys did not move needs answered, in two
+    // comparisons rather than a search.
+    fn fits_at(&self, p: usize, e: &Entry) -> bool {
+        let before = p == 0 || compare_entries(&self.plan, &self.by_key[&self.entries[p - 1]], e) == Ordering::Less;
+        let after = p + 1 >= self.entries.len() || compare_entries(&self.plan, e, &self.by_key[&self.entries[p + 1]]) == Ordering::Less;
+        before && after
     }
 
     fn index(&mut self, e: &Entry) {
@@ -564,31 +584,59 @@ impl View {
     // not. Under a limit, an entry leaving the window lets the next one in
     // and an entry entering it pushes the last one out — both read from
     // the entries, not the store.
+    //
+    // The admitted list is a vector, so what it costs to keep is how far an
+    // entry moves in it: one that stays where it was — the common rebuild,
+    // a child arriving or leaving beneath a row whose order keys did not
+    // move — is written in place, checked against its two neighbours
+    // rather than searched for again; one that moves is rotated across the
+    // stretch it crosses; only an entry arriving or leaving shifts the tail.
+    // Removing and reinserting would move the tail twice for every
+    // rebuild, which is a cost of the list's length and not of the change
+    // (§1.5, "Cost").
     fn settle(&mut self, key: Vec<Value>, new: Option<Entry>, out: &mut Vec<Patch>) {
         let lim = self.limit();
-        let was = match self.by_key.get(&key) {
+        let old = self.by_key.remove(&key);
+        let was = match &old {
             Some(o) if o.admitted => Some(self.position(o)),
             _ => None,
         };
-        let old = self.by_key.remove(&key);
-        if let Some(o) = &old {
+        // An entry whose dependencies did not change leaves `by_dep` as it
+        // is: taking each out and putting it back is two probes apiece.
+        let same_deps = matches!((&old, &new), (Some(o), Some(n)) if o.deps == n.deps);
+        if let (Some(o), false) = (&old, same_deps) {
             self.unindex(o);
         }
-        if let Some(p) = was {
-            self.entries.remove(p);
-        }
-        let is = match &new {
-            Some(n) if n.admitted => Some(self.position(n)),
-            _ => None,
+        let is = match (&new, was) {
+            (Some(n), _) if !n.admitted => None,
+            (None, _) => None,
+            (Some(n), None) => Some(self.position(n)),
+            (Some(n), Some(p)) => Some(if self.fits_at(p, n) {
+                p
+            } else if p > 0 && compare_entries(&self.plan, n, &self.by_key[&self.entries[p - 1]]) == Ordering::Less {
+                self.position_in(0..p, n)
+            } else {
+                // Among the list without `p`: everything up to `p`, and as
+                // many after it as sort before `n`.
+                self.position_in(p + 1..self.entries.len(), n) - 1
+            }),
         };
         let changed = match (&old, &new) {
             (Some(o), Some(n)) => o.node != n.node,
             _ => true,
         };
+        match (was, is) {
+            (Some(p), None) => {
+                self.entries.remove(p);
+            }
+            (None, Some(q)) => self.entries.insert(q, key.clone()),
+            (Some(p), Some(q)) if q < p => self.entries[q..=p].rotate_right(1),
+            (Some(p), Some(q)) if q > p => self.entries[p..=q].rotate_left(1),
+            _ => {}
+        }
         if let Some(n) = new {
-            self.index(&n);
-            if let Some(q) = is {
-                self.entries.insert(q, n.key.clone());
+            if !same_deps {
+                self.index(&n);
             }
             self.by_key.insert(key, n);
         }

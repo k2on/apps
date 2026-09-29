@@ -104,7 +104,8 @@ pub trait Store {
     /// [`Store::scan_where`], told which columns the filter holds equal to
     /// which values (`keep` still decides; `eq` is a hint). A store with an
     /// index over those columns reads the rows under the values and never
-    /// looks at the rest of the table; the default ignores the hint.
+    /// looks at the rest of the table — and when they hold the whole key,
+    /// reads the one row under it; the default ignores the hint.
     fn scan_where_eq(&self, table: &str, eq: &[(&str, &Value)], keep: &dyn Fn(&Row) -> bool) -> Vec<Row> {
         let _ = eq;
         self.scan_where(table, keep)
@@ -420,6 +421,22 @@ fn secondaries(tbl: &Table) -> Vec<Secondary> {
         .collect()
 }
 
+/// The values `eq` holds `columns` equal to, in the columns' order (the
+/// first, where `eq` names a column twice: `keep` still decides).
+fn held(columns: &[FieldName], eq: &[(&str, &Value)]) -> Vec<Value> {
+    columns
+        .iter()
+        .map(|c| eq.iter().find(|(n, _)| n == c).map(|(_, v)| (*v).clone()).unwrap_or(Value::Null))
+        .collect()
+}
+
+/// The key `eq` names, when it holds every key column equal: then at most
+/// one row answers, and it is read by key, through no index at all.
+fn key_held(tbl: &Table, eq: &[(&str, &Value)]) -> Option<Key> {
+    let all = !tbl.key.is_empty() && tbl.key.iter().all(|c| eq.iter().any(|(n, _)| n == c));
+    all.then(|| held(&tbl.key, eq))
+}
+
 impl MemoryStore {
     /// `Ark.Store.empty`.
     pub fn empty(schema: Schema) -> MemoryStore {
@@ -458,22 +475,21 @@ impl MemoryStore {
         }
     }
 
-    /// The index over exactly the columns `eq` names (in any order), if
-    /// the table has one, with the values to look up in the index's order.
+    /// The index to read `eq` through, and the values to look up in it
+    /// (in the index's column order): of the secondaries every column of
+    /// which `eq` holds equal, the one with the fewest rows under those
+    /// values. That is a probe of each candidate's map, and it is the whole
+    /// of the choice: a toggle's child pull holds both `playlist_item`
+    /// references equal, one to the playlist (whose items grow with the
+    /// library) and one to the media (on a handful of playlists), and
+    /// which is cheaper is a fact about the rows, not about which index the
+    /// schema declared last. A table with no such index answers `None`.
     fn lookup(&self, t: &str, eq: &[(&str, &Value)]) -> Option<(&Secondary, Vec<Value>)> {
         let ixs = self.indexes.get(t)?;
-        // The widest index every column of which the filter holds equal.
         ixs.iter()
             .filter(|ix| ix.columns.iter().all(|c| eq.iter().any(|(n, _)| n == c)))
-            .max_by_key(|ix| ix.columns.len())
-            .map(|ix| {
-                let vals = ix
-                    .columns
-                    .iter()
-                    .map(|c| eq.iter().find(|(n, _)| n == c).map(|(_, v)| (*v).clone()).unwrap_or(Value::Null))
-                    .collect();
-                (ix, vals)
-            })
+            .map(|ix| (ix, held(&ix.columns, eq)))
+            .min_by_key(|(ix, vals)| ix.rows.get(vals).map_or(0, BTreeSet::len))
     }
 
     /// The rows of a table, by key (`Ark.Store.rows`).
@@ -545,6 +561,16 @@ impl Store for MemoryStore {
     }
 
     fn scan_where_eq(&self, table: &str, eq: &[(&str, &Value)], keep: &dyn Fn(&Row) -> bool) -> Vec<Row> {
+        if let Some(k) = self.schema.lookup_table(table).and_then(|tbl| key_held(tbl, eq)) {
+            return self
+                .tables
+                .get(table)
+                .and_then(|t| t.get(&k))
+                .filter(|r| keep(r))
+                .cloned()
+                .into_iter()
+                .collect();
+        }
         let Some((ix, vals)) = self.lookup(table, eq) else {
             return self.scan_where(table, keep);
         };
@@ -638,6 +664,12 @@ impl Store for Overlay<'_> {
         let Some(tbl) = self.schema().lookup_table(table) else {
             return vec![];
         };
+        // Every key column held equal: one row, by key, from whichever of
+        // the overlay and the base has it — what the merge below would
+        // come to, without walking the overlay's writes.
+        if let Some(k) = key_held(tbl, eq) {
+            return self.get(table, &k).filter(|r| keep(r)).into_iter().collect();
+        }
         let Some(ws) = self.writes.get(table).filter(|ws| !ws.is_empty()) else {
             return self.base.scan_where_eq(table, eq, keep);
         };
@@ -711,6 +743,25 @@ mod tests {
                         table: "p".into(),
                     }],
                 },
+                // Two references, as `playlist_item` has, and a key that
+                // takes a third column: holding both references is two
+                // indexes to choose between, holding all three is the key.
+                Table {
+                    name: "pc".into(),
+                    columns: vec![col("p_id", Ty::Int, false), col("c_id", Ty::Int, false), col("n", Ty::Int, false)],
+                    key: vec!["p_id".into(), "c_id".into(), "n".into()],
+                    indexes: vec![],
+                    refs: vec![
+                        Ref {
+                            column: "p_id".into(),
+                            table: "p".into(),
+                        },
+                        Ref {
+                            column: "c_id".into(),
+                            table: "c".into(),
+                        },
+                    ],
+                },
             ],
         }
     }
@@ -762,6 +813,93 @@ mod tests {
         // A declared unique index answers too.
         st.put("p", row(vec![("id", Value::int(2)), ("name", Value::text("two"))])).unwrap();
         assert_eq!(st.scan_where_eq("p", &[("name", &Value::text("two"))], &|_| true).len(), 1);
+    }
+
+    /// A read holding every key column answers by key, and one holding
+    /// two indexed columns reads through the one with fewer rows under its
+    /// value — whichever the schema declared first — in the store and
+    /// through an overlay that has written the table. Counted by `keep`'s
+    /// calls, which are the rows the store looked at. Falsified by keeping
+    /// the widest index with its tie broken by position, either way: the
+    /// last declared (`max_by_key`, what this store did) looks at the
+    /// forty-one rows of `c_id = 9`, the first at the forty of `p_id = 1`.
+    #[test]
+    fn a_read_takes_the_key_or_the_smallest_index() {
+        let mut st = MemoryStore::empty(schema());
+        let pc = |p: i64, c: i64| row(vec![("p_id", Value::int(p)), ("c_id", Value::int(c)), ("n", Value::int(p * 100 + c))]);
+        // Forty rows under p = 1; c = 7 is under p = 1 and p = 2 only.
+        for c in 1..=40 {
+            st.apply_change(&Change::Add("pc".into(), pc(1, c)));
+        }
+        st.apply_change(&Change::Add("pc".into(), pc(2, 7)));
+        // And forty-one under c = 9, which p = 5 holds once.
+        for p in 2..=41 {
+            st.apply_change(&Change::Add("pc".into(), pc(p, 9)));
+        }
+        fn counted<'a>(looked: &'a std::cell::Cell<usize>, want: &'a dyn Fn(&Row) -> bool) -> impl Fn(&Row) -> bool + 'a {
+            move |r| {
+                looked.set(looked.get() + 1);
+                want(r)
+            }
+        }
+        let looked = std::cell::Cell::new(0);
+        let count = |want: &'static dyn Fn(&Row) -> bool| counted(&looked, want);
+        let (one, seven, n) = (Value::int(1), Value::int(7), Value::int(107));
+        fn both(r: &Row) -> bool {
+            r["p_id"] == Value::int(1) && r["c_id"] == Value::int(7)
+        }
+        let by_scan: Vec<Row> = st.scan("pc").into_iter().filter(both).collect();
+        assert_eq!(by_scan.len(), 1);
+        // The whole key, in any order: one row looked at.
+        for eq in [
+            [("p_id", &one), ("c_id", &seven), ("n", &n)],
+            [("n", &n), ("c_id", &seven), ("p_id", &one)],
+        ] {
+            looked.set(0);
+            assert_eq!(st.scan_where_eq("pc", &eq, &count(&both)), by_scan);
+            assert_eq!(looked.get(), 1);
+        }
+        // A key nobody holds, and a row `keep` refuses.
+        assert!(st
+            .scan_where_eq("pc", &[("p_id", &one), ("c_id", &seven), ("n", &one)], &|_| true)
+            .is_empty());
+        assert!(st
+            .scan_where_eq("pc", &[("p_id", &one), ("c_id", &seven), ("n", &n)], &|_| false)
+            .is_empty());
+        // Both references held and not the key: the posting list of
+        // `c_id = 7` (two rows), not of `p_id = 1` (forty), in either order.
+        for eq in [[("p_id", &one), ("c_id", &seven)], [("c_id", &seven), ("p_id", &one)]] {
+            looked.set(0);
+            assert_eq!(st.scan_where_eq("pc", &eq, &count(&both)), by_scan);
+            assert_eq!(looked.get(), 2);
+        }
+        // …and the other way round: `p_id = 5` (one row), not `c_id = 9`
+        // (forty-one), so no order of the schema's indexes serves both.
+        let (five, nine) = (Value::int(5), Value::int(9));
+        let five_nine = |r: &Row| r["p_id"] == Value::int(5) && r["c_id"] == Value::int(9);
+        looked.set(0);
+        assert_eq!(
+            st.scan_where_eq("pc", &[("p_id", &five), ("c_id", &nine)], &counted(&looked, &five_nine))
+                .len(),
+            1
+        );
+        assert_eq!(looked.get(), 1);
+        // Through an overlay that has written the table: the same answers,
+        // its own writes first.
+        let mut ov = Overlay::new(&st);
+        ov.apply_change(&Change::Remove("pc".into(), pc(1, 7)));
+        ov.apply_change(&Change::Add("pc".into(), pc(3, 7)));
+        let merged = |ov: &Overlay, want: &dyn Fn(&Row) -> bool| ov.scan("pc").into_iter().filter(|r| want(r)).collect::<Vec<_>>();
+        assert!(ov.scan_where_eq("pc", &[("p_id", &one), ("c_id", &seven)], &both).is_empty());
+        let three = Value::int(3);
+        let three_seven = |r: &Row| r["p_id"] == Value::int(3) && r["c_id"] == Value::int(7);
+        assert_eq!(
+            ov.scan_where_eq("pc", &[("c_id", &seven), ("p_id", &three)], &three_seven),
+            merged(&ov, &three_seven)
+        );
+        let seven_any = |r: &Row| r["c_id"] == Value::int(7);
+        assert_eq!(ov.scan_where_eq("pc", &[("c_id", &seven)], &seven_any), merged(&ov, &seven_any));
+        assert_eq!(merged(&ov, &seven_any).len(), 2);
     }
 
     #[test]
