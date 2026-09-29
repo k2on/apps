@@ -490,28 +490,50 @@ mutator of the demo and of harken (`Procedure::agrees`).
 
 ## 4. What `arkc` does now
 
-- `arkc verify m.ark`, `print`, `hash`, `check OLD NEW`: as before.
-- `arkc gen rust|swift|kotlin m.ark OUTDIR [--only f,g] [--package p]
-  [--fmt CMD]`: writes the authoring form — `schema.<ext>`, one file per
-  router, and the module file (`Schema.swift`, `Playlists.kt`… in Swift and
-  Kotlin). `--only` keeps the named procedures and whatever they reach,
-  and drops a router left with nothing; the schema is always whole.
-  `--package` is the Kotlin package. `--fmt` runs a formatter over the
-  files it wrote, which is what makes them canonical (§6, "Layout").
-- `arkc roundtrip rust|swift|kotlin m.ark SRC_DIR [same options]`: gen into
-  a temporary directory and compare with `SRC_DIR`, comment-only lines
-  removed from both; exit 1 at the first line that differs, naming it.
-  `nix flake check` runs it over harken's three domains (`checks.harken-domain`).
+`arkc` is a binary of `rust/ark` (`rust/ark/src/bin/arkc.rs`; `nix run
+.#arkc`). It reads a `.ark` file — a module's canonical CBOR — and verifies
+it before anything else, so what it hashes or compares is the verified
+form an entry's hash names:
+
+- `arkc verify M`: verify, and print the module hash.
+- `arkc hash M`: the module hash and every function's hash.
+- `arkc check OLD NEW`: log compatibility (spec §17, `ark::compat`) — every
+  break, and exit 1; or nothing. Run it between the committed module and a
+  new one before a change that could move a retained entry's meaning.
+- `arkc vectors OUTDIR`: write the conformance vectors, as `ark-vectors`
+  does.
+
+There is no `print`, `gen` or `roundtrip`: they existed to hand a phone a
+domain in its own language, and with Swift and Kotlin frozen at spec v3
+there is nobody to print for (`docs/plan-v4.md`, decision 4). A domain's
+source is the Rust a person wrote; its `.ark` is what that source emits.
 
 ## 5. The checks that hold it together
 
-1. `emit` of each language's demo domain equals `spec/vectors/module/demo.json`'s bytes (the demo is authored in all three now).
-2. `arkc roundtrip <lang>` over each authored domain: harken's Rust over the
-   whole module, its Swift and Kotlin over what a phone carries. (The three
-   runtimes' demos live in their test suites and are held by check 1; they
-   are not roundtripped.)
-3. `Native` versus `Ark.Eval` on every procedure of the demo, per runtime.
-4. The eval, verify and rebase vectors as before, regenerated at spec version 2.
+1. `emit` of the demo (Appendix B) equals `spec/vectors/module/demo.json`'s
+   bytes and hash (`the_demo_emits_what_the_spec_records`, in
+   `rust/ark/tests/demo_authoring.rs`). The generator's copy of the demo
+   (`rust/ark/src/bin/vectors/demo.rs`) is what wrote those bytes, and
+   `rust/ark-client/src/demo.rs` is the third copy, held by being the same
+   text.
+2. harken's `harken/domain/harken.ark` equals what the domain crate emits,
+   and verifies: `the_module_verifies_and_is_the_committed_file` in
+   `harken/domain/tests/agreement.rs`, and `checks.harken-domain` in the
+   flake, which writes the module with the `harken-domain` binary, diffs it
+   against the committed file and runs `arkc verify` on it.
+3. `Native` against the evaluator over the function's own `Emit`, on every
+   *mutator* of the demo (`native_agrees_with_the_interpreter_on_every_procedure`)
+   and of harken (`every_procedure_agrees_with_the_interpreter`), step
+   after step over one evolving store: the same verdicts, changes and
+   stores (`Procedure::agrees`). A query has no native half to compare
+   (§3); what it means is `view::pull`, and the view engine's contract
+   holds its maintenance to a fresh pull.
+4. The vectors: `rust/ark`'s `ark-vectors` writes `spec/vectors`, and
+   `rust/ark/tests/vectors.rs` reads every one back and fails every
+   `falsify/` case — two programs against one set of files.
+   `checks.vectors` regenerates them into a temporary directory and `diff
+   -r`s the committed tree, so a change to the reference that moves a
+   vector cannot land without the moved vector.
 
 ## 6. Lowerings: what each spelling emits
 
@@ -668,42 +690,85 @@ A query's plan is walked after its input's checks and refinements.
 
 ## Appendix B. The demo, in the vocabulary
 
-`Ark.Demo` (and `spec/vectors/module/demo.json`) is the playlist demo the
-vectors run: the tables `playlist(id, name, user_id)` and
-`item(playlist_id → playlist, track_id: text, pos)`, unique
-`(playlist.user_id, playlist.name)` and `(item.playlist_id, item.pos)`.
-Its router, as `arkc gen rust` prints it from `arkc demo` under the
-domain's rustfmt, is exactly:
+The playlist demo every vector runs over, whose emit is
+`spec/vectors/module/demo.json`: the tables `playlist(id, name, user_id)`
+and `item(playlist_id → playlist, track_id: text, pos)`, keyed by `id` and
+by `(playlist_id, track_id)`, with unique `(playlist.user_id,
+playlist.name)` and `(item.playlist_id, item.pos)`; the mutators
+`create_playlist` and `add_to_playlist`; and the query `items`, a plan.
+It is written three times, identically — `rust/ark-client/src/demo.rs`
+(what `ark-client`'s and `ark-server`'s tests run against),
+`rust/ark/src/bin/vectors/demo.rs` (the generator's, since a binary of
+`ark` cannot depend on `ark-client`) and `rust/ark/tests/demo_authoring.rs`
+— and check 1 of §5 holds the copies to one set of bytes. Its tables and
+rows:
 
 ```rust
-pub fn demo() -> Router<Demo> {
-    let demo = router::<Demo>("demo");
-    demo.routes((
-        demo.input::<CreatePlaylist>().mutation("create_playlist", |ctx, db, input| {
-            db.playlist
-                .insert(Playlist {
-                    id: ctx.new_id("id"),
-                    name: input.name,
-                    user_id: ctx.user,
-                })
-                .on((Playlist::user_id, Playlist::name))
-        }),
-        demo.input::<AddToPlaylist>().mutation("add_to_playlist", |_ctx, db, input| {
-            let item = db.item.filter(Item::playlist_id.eq(input.playlist_id)).order_by(Item::pos.desc()).first();
-            db.item.insert(Item {
-                playlist_id: input.playlist_id,
-                track_id: input.track_id,
-                pos: item.map_or(0, |row| row.pos).add(1),
-            })
-        }),
-        demo.input::<Items>().query("items", |_ctx, db, input| {
-            db.item.filter(Item::playlist_id.eq(input.playlist_id)).order_by(Item::pos.asc()).all()
-        }),
-    ))
+pub struct Demo {
+    pub playlist: Table<Playlist>,
+    pub item: Table<Item>,
+}
+impl Tables for Demo {
+    fn open() -> Self {
+        Demo {
+            playlist: table(),
+            item: table(),
+        }
+    }
+}
+
+pub struct Playlist {
+    pub id: Id<Playlist>,
+    pub name: Text,
+    pub user_id: Text,
+}
+impl Row for Playlist {
+    const NAME: &str = "playlist";
+    type Key = (Id<Playlist>,);
+    fn columns() -> Columns<Self> {
+        columns()
+            .id(Self::id)
+            .text(Self::name)
+            .text(Self::user_id)
+            .key((Self::id,))
+            .unique((Self::user_id, Self::name))
+    }
+}
+#[allow(non_upper_case_globals)]
+impl Playlist {
+    pub const id: Col<Self, Id<Self>> = col("id");
+    pub const name: Col<Self, Text> = col("name");
+    pub const user_id: Col<Self, Text> = col("user_id");
+    pub const item: Rel<Self, Item> = rel("item");
+}
+
+pub struct Item {
+    pub playlist_id: Id<Playlist>,
+    pub track_id: Text,
+    pub pos: Int,
+}
+impl Row for Item {
+    const NAME: &str = "item";
+    type Key = (Id<Playlist>, Text);
+    fn columns() -> Columns<Self> {
+        columns()
+            .id(Self::playlist_id)
+            .refs::<Playlist>()
+            .text(Self::track_id)
+            .int(Self::pos)
+            .key((Self::playlist_id, Self::track_id))
+            .unique((Self::playlist_id, Self::pos))
+    }
+}
+#[allow(non_upper_case_globals)]
+impl Item {
+    pub const playlist_id: Col<Self, Id<Playlist>> = col("playlist_id");
+    pub const track_id: Col<Self, Text> = col("track_id");
+    pub const pos: Col<Self, Int> = col("pos");
 }
 ```
 
-and its inputs:
+its inputs:
 
 ```rust
 pub struct CreatePlaylist {
@@ -725,18 +790,54 @@ impl Input for AddToPlaylist {
     }
 }
 
-pub struct Items {
+pub struct PlaylistId {
     pub playlist_id: Id<Playlist>,
 }
-impl Input for Items {
+impl Input for PlaylistId {
     fn schema() -> Object<Self> {
         object().field("playlist_id", id::<Playlist>())
     }
 }
 ```
 
-with the tables `Demo { playlist: Table<Playlist>, item: Table<Item> }`
-(`arkc gen rust M OUTDIR --name Demo`),
-opened as `Demo { playlist: table(), item: table() }`. A runtime's own
-demo may name its input types otherwise — a name reaches no byte — but its
-`emit` is held to the vector's bytes; that is check 1 of §5.
+and its router:
+
+```rust
+pub fn demo() -> Router<Demo> {
+    let demo = router::<Demo>("demo");
+    demo.routes((
+        demo.input::<CreatePlaylist>().mutation("create_playlist", |ctx, db, input| {
+            db.playlist
+                .insert(Playlist {
+                    id: ctx.new_id("id"),
+                    name: input.name,
+                    user_id: ctx.user,
+                })
+                .on((Playlist::user_id, Playlist::name))
+        }),
+        demo.input::<AddToPlaylist>().mutation("add_to_playlist", |_ctx, db, input| {
+            let last = db.item.filter(Item::playlist_id.eq(input.playlist_id)).order_by(Item::pos.desc()).first();
+            db.item.insert(Item {
+                playlist_id: input.playlist_id,
+                track_id: input.track_id,
+                pos: last.map_or(0, |row| row.pos).add(1),
+            })
+        }),
+        demo.input::<PlaylistId>().query("items", |_ctx, db, input| {
+            db.item.filter(Item::playlist_id.eq(input.playlist_id)).order_by(Item::pos.asc())
+        }),
+    ))
+}
+
+pub fn module() -> Module {
+    Module::new((demo(),))
+}
+```
+
+`add_to_playlist` reads with a v3-shaped plan — a constant filter, an
+order by a column, `first()` — which is all a mutator's read may be
+(§1.5), so its closure hash is the one it had at spec v3. `items` returns
+the `Query` itself: no `.all()`, no statement, and its value is the plan
+`view::pull` evaluates and a client keeps as a view. A domain written
+elsewhere may name its input types otherwise — a name reaches no byte —
+but its `emit` is held to the vector's bytes.
