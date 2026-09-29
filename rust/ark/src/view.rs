@@ -460,9 +460,14 @@ impl Env {
 pub struct View {
     pub plan: Plan,
     pub env: Env,
-    /// The admitted entries' keys in answer order, *not* cut to the limit:
-    /// the answer is the first `limit` of them, and the rest are what a
-    /// window refills from without reading the store (§1.5, 4).
+    /// The admitted entries in answer order, *not* cut to the limit: the
+    /// answer is the first `limit` of them, and the rest are what a window
+    /// refills from without reading the store (§1.5, 4). Each is its
+    /// entry's *place* — its order keys followed by its key ([`place`]) —
+    /// so that finding where an entry sits compares these and reads
+    /// nothing else: a search that looked each probe up in `by_key` paid a
+    /// walk of that map per probe, log² of the list, and at sixteen times
+    /// the demo that was most of a toggle.
     pub entries: Vec<Vec<Value>>,
     /// Every candidate — a source row the filter admits, or a non-empty
     /// group — admitted or not, by key. A refused one is kept so that a
@@ -504,12 +509,32 @@ pub fn hydrate(sch: &Schema, plan: &Plan, env: Env, st: &dyn Store) -> Result<Vi
     };
     for e in pulled {
         if e.admitted {
-            v.entries.push(e.key.clone());
+            v.entries.push(place(&e));
         }
         v.index(&e);
         v.by_key.insert(e.key.clone(), e);
     }
     Ok(v)
+}
+
+/// Where an entry sorts, as one list: its order keys, then its key — what
+/// [`View::entries`] holds for each admitted entry. [`compare_place`] reads
+/// it the way [`compare_entries`] reads the entry.
+pub fn place(e: &Entry) -> Vec<Value> {
+    e.order.iter().chain(e.key.iter()).cloned().collect()
+}
+
+/// [`compare_entries`] of the entry a place was taken from, and `e`.
+pub fn compare_place(plan: &Plan, place: &[Value], e: &Entry) -> Ordering {
+    let n = plan.order.len().min(place.len());
+    for (i, (_, d)) in plan.order.iter().enumerate() {
+        let o = compare_value(place.get(i).unwrap_or(&Value::Null), e.order.get(i).unwrap_or(&Value::Null));
+        let o = if *d == Dir::Desc { o.reverse() } else { o };
+        if o != Ordering::Equal {
+            return o;
+        }
+    }
+    place[n..].cmp(&e.key[..])
 }
 
 /// §1.6 A rebase rolled the optimistic store back: hydrate again, in the
@@ -522,17 +547,23 @@ impl View {
     /// The answer, as it stands: the admitted entries' nodes in order, cut
     /// to the limit — what [`read`] would answer now.
     pub fn rows(&self) -> Vec<Value> {
-        self.entries.iter().take(self.limit()).map(|k| self.by_key[k].node.clone()).collect()
+        (0..self.entries.len().min(self.limit())).map(|i| self.node_at(i)).collect()
     }
 
     fn limit(&self) -> usize {
         self.plan.limit.map(|n| n.max(0) as usize).unwrap_or(usize::MAX)
     }
 
+    // The key of the admitted entry at `i`: what follows the order keys in
+    // its place.
+    fn key_at(&self, i: usize) -> &[Value] {
+        &self.entries[i][self.plan.order.len()..]
+    }
+
     // Where an entry of this plan sits, or would sit, among the admitted: a
-    // binary search, each probe an entry read through `by_key`. The entry's
-    // own key compares as its own place without being read, so the old
-    // entry of a key being settled is found after `by_key` has let it go.
+    // binary search over the places, reading nothing else. An entry's own
+    // place compares equal to it, so the old entry of a key being settled
+    // is found at its place.
     fn position(&self, e: &Entry) -> usize {
         self.position_in(0..self.entries.len(), e)
     }
@@ -541,8 +572,7 @@ impl View {
     // index, into the whole list, of the first entry in `range` that does
     // not sort before `e`.
     fn position_in(&self, range: std::ops::Range<usize>, e: &Entry) -> usize {
-        let start = range.start;
-        start + self.entries[range].partition_point(|k| k != &e.key && compare_entries(&self.plan, &self.by_key[k], e) == Ordering::Less)
+        range.start + self.entries[range].partition_point(|s| compare_place(&self.plan, s, e) == Ordering::Less)
     }
 
     // Whether `e` belongs at `p`, the place its key holds now: it sorts
@@ -550,8 +580,8 @@ impl View {
     // rebuilt entry whose order keys did not move needs answered, in two
     // comparisons rather than a search.
     fn fits_at(&self, p: usize, e: &Entry) -> bool {
-        let before = p == 0 || compare_entries(&self.plan, &self.by_key[&self.entries[p - 1]], e) == Ordering::Less;
-        let after = p + 1 >= self.entries.len() || compare_entries(&self.plan, e, &self.by_key[&self.entries[p + 1]]) == Ordering::Less;
+        let before = p == 0 || compare_place(&self.plan, &self.entries[p - 1], e) == Ordering::Less;
+        let after = p + 1 >= self.entries.len() || compare_place(&self.plan, &self.entries[p + 1], e) == Ordering::Greater;
         before && after
     }
 
@@ -574,7 +604,7 @@ impl View {
 
     // The node at a position of the whole admitted list.
     fn node_at(&self, i: usize) -> Value {
-        self.by_key[&self.entries[i]].node.clone()
+        self.by_key[self.key_at(i)].node.clone()
     }
 
     // §1.5, 3–4 One entry's new state against its old, as patches against
@@ -593,7 +623,9 @@ impl View {
     // stretch it crosses; only an entry arriving or leaving shifts the tail.
     // Removing and reinserting would move the tail twice for every
     // rebuild, which is a cost of the list's length and not of the change
-    // (§1.5, "Cost").
+    // (§1.5, "Cost"). Where it was is found among the places alone, and
+    // `by_key` is walked once to take the old entry out and once to put
+    // the new one in.
     fn settle(&mut self, key: Vec<Value>, new: Option<Entry>, out: &mut Vec<Patch>) {
         let lim = self.limit();
         let old = self.by_key.remove(&key);
@@ -613,7 +645,7 @@ impl View {
             (Some(n), None) => Some(self.position(n)),
             (Some(n), Some(p)) => Some(if self.fits_at(p, n) {
                 p
-            } else if p > 0 && compare_entries(&self.plan, n, &self.by_key[&self.entries[p - 1]]) == Ordering::Less {
+            } else if p > 0 && compare_place(&self.plan, &self.entries[p - 1], n) == Ordering::Greater {
                 self.position_in(0..p, n)
             } else {
                 // Among the list without `p`: everything up to `p`, and as
@@ -629,10 +661,19 @@ impl View {
             (Some(p), None) => {
                 self.entries.remove(p);
             }
-            (None, Some(q)) => self.entries.insert(q, key.clone()),
+            (None, Some(q)) => self.entries.insert(q, Vec::new()),
             (Some(p), Some(q)) if q < p => self.entries[q..=p].rotate_right(1),
             (Some(p), Some(q)) if q > p => self.entries[p..=q].rotate_left(1),
             _ => {}
+        }
+        // The place at `q` says the new order keys; one whose keys did not
+        // move is left as it is rather than built again.
+        if let (Some(q), Some(n)) = (is, &new) {
+            let olen = self.plan.order.len();
+            let slot = &mut self.entries[q];
+            if slot.len() != olen + n.key.len() || slot[..olen] != n.order[..] {
+                *slot = place(n);
+            }
         }
         if let Some(n) = new {
             if !same_deps {
@@ -766,6 +807,12 @@ pub fn splice(ps: &[Patch], xs: &[Value]) -> Vec<Value> {
 /// Because the rebuild reads the final store, the order of the changes and
 /// how many there are do not matter beyond which keys they name; a batch
 /// of *n* changes touching *k* entries costs *k* rebuilds and no rollback.
+/// What a rebuild costs beyond its reads is the indexes' probes — a
+/// logarithm of the view, not a pass over it: an entry that stays put is
+/// not moved in [`View::entries`], and a read that holds a table's key is
+/// one `get` ([`Store::scan_where_eq`]). `tests/toggle.rs` holds a
+/// playlist toggle through harken's `library` to two store reads at any
+/// size, and times it from 250 media to 16000.
 pub fn push_all(sch: &Schema, st: &dyn Store, changes: &[Change], view: &mut View) -> Result<Vec<Patch>, EvalFault> {
     let (rebuilt, groups) = touched(sch, st, changes, view)?;
     for (g, members) in groups {
