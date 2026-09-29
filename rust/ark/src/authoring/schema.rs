@@ -4,9 +4,11 @@
 
 use std::marker::PhantomData;
 
+use std::rc::Rc;
+
 use crate::eval::{self, EvalError, EvalFault};
-use crate::ir::{CmpOp, Expr, Plan, Pred as IrPred, Related, Stmt};
-use crate::schema::{Column, Dir, Index, Ref, Relation, Table as IrTable, Ty};
+use crate::ir::{CmpOp, Expr, Key as IrKey, Lookup, Plan, Pred as IrPred, Related, Source, Stmt, Sym};
+use crate::schema::{Column, Dir, Index, Ref, Table as IrTable, Ty};
 use crate::store::{self, Change, Refusal, Store};
 use crate::value::Value;
 
@@ -581,6 +583,10 @@ impl<T: Row> Table<T> {
     pub fn get(&self, key: T::Key) -> Opt<T> {
         let ks = key.handles();
         if cx::emitting() {
+            if cx::planning() {
+                read_in_plan(&format!("db.{}.get(..)", T::NAME));
+                return Opt::from_h(cx::e(Expr::None(T::ty())));
+            }
             return Opt::from_h(cx::bind(Expr::Get(T::NAME.into(), ks.iter().map(|h| cx::expr(*h)).collect())));
         }
         if cx::halted() {
@@ -594,6 +600,10 @@ impl<T: Row> Table<T> {
     pub fn exists(&self, key: T::Key) -> Bool {
         let ks = key.handles();
         if cx::emitting() {
+            if cx::planning() {
+                read_in_plan(&format!("db.{}.exists(..)", T::NAME));
+                return Bool::from_h(cx::lit(Value::Bool(false)));
+            }
             return Bool::from_h(cx::bind(Expr::Exists(T::NAME.into(), ks.iter().map(|h| cx::expr(*h)).collect())));
         }
         if cx::halted() {
@@ -604,12 +614,27 @@ impl<T: Row> Table<T> {
     }
 
     fn query(&self) -> Query<T> {
+        let row = if cx::emitting() { cx::fresh() } else { NATIVE_ROW };
         Query {
             plan: Plan::from(T::NAME),
+            sorts: vec![],
+            row,
+            binds: vec![],
+            row_ty: T::ty(),
+            rel_fields: vec![],
+            project_ty: None,
+            on: vec![],
+            make: Rc::new(T::from_h),
             _t: PhantomData,
         }
     }
 
+    /// Every row, in key order, as a plan to build on: what a query whose
+    /// first step is a lookup starts from (`db.song.rows().get(..)`),
+    /// `get` on a table being the bound read of one row.
+    pub fn rows(&self) -> Query<T> {
+        self.query()
+    }
     /// Keep the rows the predicate admits.
     pub fn filter(&self, p: Pred<T>) -> Query<T> {
         self.query().filter(p)
@@ -623,8 +648,54 @@ impl<T: Row> Table<T> {
         self.query().limit(n)
     }
     /// Read a relationship beneath each row.
-    pub fn with<C: Row>(&self, r: Rel<T, C>) -> Query<T> {
+    pub fn with<C: Row>(&self, r: Rel<T, C>) -> Query<T, (List<C>,)> {
         self.query().with(r)
+    }
+    /// §1.9 Every row, as a child plan pinned to its parent; see
+    /// [`Query::on`].
+    pub fn on(&self, p: Pred<T>) -> Query<T> {
+        self.query().on(p)
+    }
+    /// §1.9 A related plan beneath each row; see [`Query::each`].
+    pub fn each<C: 'static, CB, CN: Data>(&self, f: impl FnOnce(T, ()) -> Query<C, CB, CN>) -> Query<T, (List<CN>,)> {
+        self.query().each(f)
+    }
+    /// §1.9 Keep a row's node only when `f` holds; see [`Query::having`].
+    pub fn having(&self, f: impl FnOnce(T, ()) -> Bool) -> Query<T> {
+        self.query().having(f)
+    }
+    /// §1.9 Order by an expression; see [`Query::sort_by`].
+    pub fn sort_by<K: Data>(&self, f: impl FnOnce(T, ()) -> K) -> Query<T> {
+        self.query().sort_by(f)
+    }
+    /// §1.9 Each row's node; see [`Query::map`].
+    pub fn map<U: Data>(&self, f: impl FnOnce(T, ()) -> U) -> Query<T, (), U> {
+        self.query().map(f)
+    }
+    /// §1.9 The rows grouped by one column or a tuple of them; see
+    /// [`Query::group_by`].
+    pub fn group_by<G: GroupCols<T>>(&self, g: G) -> Query<G::Key, (List<T>,), G::Key> {
+        self.query().group_by(g)
+    }
+    /// §1.9 A lookup of one row of this table by key, for a plan's
+    /// [`Query::get`]: `db.media.by((song.media_id,))`. `get` spelt for a
+    /// node, so that a plan's lookup and a mutator's bound read differ.
+    pub fn by(&self, key: T::Key) -> By<T> {
+        By {
+            key: key.handles().into_iter().map(rhs).collect(),
+            _t: PhantomData,
+        }
+    }
+    /// [`Table::by`] with the key's one part an option, as a nullable
+    /// reference holds it: `None` looks up nothing.
+    pub fn by_opt<V: Data>(&self, key: Opt<V>) -> By<T>
+    where
+        T: Row<Key = (V,)>,
+    {
+        By {
+            key: vec![rhs(key.to_h())],
+            _t: PhantomData,
+        }
     }
     /// Every row, in key order.
     pub fn all(&self) -> List<T> {
@@ -687,16 +758,309 @@ impl<T: Row> Table<T> {
     }
 }
 
-/// A read being described: `db.t.filter(p).order_by(o).limit(n)`, then
-/// `.all()` or `.first()`.
-pub struct Query<T> {
+/// §1.9 A plan being described: `db.t.filter(p).order_by(o).limit(n)`,
+/// then `.all()` or `.first()` in a mutator's body, where it is a read; or
+/// returned whole from a query's closure, where it is the query.
+///
+/// `R` is what a node's closures are handed for the source row (the row
+/// type, or for a group its key), `B` the binders the plan has accumulated
+/// — `.get` appends an `Opt<U>`, `.each` and `.with` a `List<N>`, a group
+/// starts with its members — and `N` the node's type, the row until
+/// `.map`. Every closure takes `(row, (a, b, ..))` and is run once, under
+/// `Emit`: a query is recorded, never run natively, and `ark::view::pull`
+/// is what it means.
+pub struct Query<R, B = (), N = R> {
     plan: Plan,
+    /// Expression order keys, after the column keys (§1.9).
+    sorts: Vec<(Expr, Dir)>,
+    row: Sym,
+    /// The symbols of `B`, in order.
+    binds: Vec<Sym>,
+    /// The row binder's type: the table's row, or a group's key struct.
+    row_ty: Ty,
+    /// The related lists a node without a projection carries.
+    rel_fields: Vec<(String, Ty)>,
+    project_ty: Option<Ty>,
+    /// As a child plan: `child.col == expr(parent)`, from [`Query::on`].
+    on: Vec<(String, Expr)>,
+    make: Rc<dyn Fn(H) -> R>,
+    _t: PhantomData<fn() -> (B, N)>,
+}
+
+/// The row symbol a plan built natively uses. Native builds only v3-shaped
+/// reads, whose one binder is the row an `on` reads, and scope is flat per
+/// node, so one number serves every node of such a plan.
+const NATIVE_ROW: Sym = 0;
+
+/// §1.9 A lookup being described: the table and its key, over a node's
+/// binders. [`Table::by`] makes one; [`Query::get`] takes it.
+pub struct By<T> {
+    key: Vec<Expr>,
     _t: PhantomData<fn() -> T>,
 }
 
-impl<T: Row> Query<T> {
-    /// Keep the rows the predicate admits (and any filter before it).
-    pub fn filter(mut self, p: Pred<T>) -> Query<T> {
+/// The binders a plan's closures are handed, as a tuple: `()`, `(A,)`, …
+/// up to six. More is a nested plan.
+pub trait Binders: Sized {
+    #[doc(hidden)]
+    fn at(syms: &[Sym]) -> Self;
+}
+
+/// A tuple of binders with one more on the end.
+pub trait Append<X> {
+    type Out;
+}
+
+impl Binders for () {
+    fn at(_: &[Sym]) -> Self {}
+}
+
+impl<X: Data> Append<X> for () {
+    type Out = (X,);
+}
+
+macro_rules! binders_tuple {
+    ($($v:ident . $i:tt),+) => {
+        impl<$($v: Data),+> Binders for ($($v,)+) {
+            fn at(syms: &[Sym]) -> Self {
+                ($($v::from_h(cx::e(Expr::Var(syms[$i]))),)+)
+            }
+        }
+    };
+}
+binders_tuple!(A.0);
+binders_tuple!(A.0, B.1);
+binders_tuple!(A.0, B.1, C.2);
+binders_tuple!(A.0, B.1, C.2, D.3);
+binders_tuple!(A.0, B.1, C.2, D.3, E.4);
+binders_tuple!(A.0, B.1, C.2, D.3, E.4, F.5);
+
+macro_rules! append_tuple {
+    ($($v:ident),+) => {
+        impl<$($v: Data,)+ X: Data> Append<X> for ($($v,)+) {
+            type Out = ($($v,)+ X);
+        }
+    };
+}
+append_tuple!(A);
+append_tuple!(A, B);
+append_tuple!(A, B, C);
+append_tuple!(A, B, C, D);
+append_tuple!(A, B, C, D, E);
+
+/// What a group is keyed by: one column (the key is its value) or a tuple
+/// of them (the key is the tuple of their values).
+pub trait GroupCols<T> {
+    type Key: 'static;
+    #[doc(hidden)]
+    fn columns(&self) -> Vec<(&'static str, Ty)>;
+    #[doc(hidden)]
+    fn key(names: &[&'static str], h: H) -> Self::Key;
+}
+
+// The value of a group key's column, read off the key struct.
+fn key_field<V: Data>(h: H, name: &str) -> V {
+    V::from_h(cx::e(Expr::Field(Box::new(cx::expr(h)), name.into())))
+}
+
+fn column_ty<T: Row>(name: &str) -> Ty {
+    table_of::<T>()
+        .column(name)
+        .map(|c| c.column_ty())
+        .unwrap_or_else(|| panic!("{}.{name}: no such column", T::NAME))
+}
+
+impl<T: Row, V: Data> GroupCols<T> for Col<T, V> {
+    type Key = V;
+    fn columns(&self) -> Vec<(&'static str, Ty)> {
+        vec![(self.name, column_ty::<T>(self.name))]
+    }
+    fn key(names: &[&'static str], h: H) -> V {
+        key_field(h, names[0])
+    }
+}
+
+macro_rules! group_tuple {
+    ($($v:ident . $i:tt),+) => {
+        impl<T: Row, $($v: Data),+> GroupCols<T> for ($(Col<T, $v>,)+) {
+            type Key = ($($v,)+);
+            fn columns(&self) -> Vec<(&'static str, Ty)> {
+                vec![$((self.$i.name, column_ty::<T>(self.$i.name))),+]
+            }
+            fn key(names: &[&'static str], h: H) -> Self::Key {
+                ($(key_field::<$v>(h, names[$i]),)+)
+            }
+        }
+    };
+}
+group_tuple!(A.0, B.1);
+group_tuple!(A.0, B.1, C.2);
+
+// The one message for a read written where a plan is being described.
+fn read_in_plan(what: &str) {
+    cx::complain(format!(
+        "{what} inside a query's plan: a plan reads through `.get(|..| db.t.by(key))` (a lookup) and `.each(|..| db.t…)` (a related plan), never through an expression"
+    ));
+}
+
+impl<R, B, N> Query<R, B, N> {
+    fn retype<B2, N2>(self) -> Query<R, B2, N2> {
+        Query {
+            plan: self.plan,
+            sorts: self.sorts,
+            row: self.row,
+            binds: self.binds,
+            row_ty: self.row_ty,
+            rel_fields: self.rel_fields,
+            project_ty: self.project_ty,
+            on: self.on,
+            make: self.make,
+            _t: PhantomData,
+        }
+    }
+
+    fn fresh() -> Sym {
+        if cx::emitting() {
+            cx::fresh()
+        } else {
+            NATIVE_ROW + 1
+        }
+    }
+
+    fn related(&mut self, name: String, on: Vec<(String, Expr)>, plan: Plan, node: Ty) {
+        let sym = Self::fresh();
+        let list = Ty::List(Box::new(node));
+        self.plan.related.push(Related {
+            name: name.clone(),
+            sym,
+            on,
+            plan,
+        });
+        self.rel_fields.push((name, list));
+        self.binds.push(sym);
+    }
+
+    /// The plan, with its order assembled and its row binder dropped when
+    /// nothing could read it, and the type of its nodes.
+    pub(crate) fn finish(self) -> (Plan, Ty) {
+        let mut plan = self.plan;
+        plan.order.extend(self.sorts.into_iter().map(|(e, d)| (IrKey::Expr(e), d)));
+        plan.row = Some(self.row);
+        if plan.is_bare() {
+            plan.row = None;
+        }
+        let node = self.project_ty.unwrap_or_else(|| {
+            let Ty::Struct(mut fs) = self.row_ty else {
+                unreachable!("a row type is a struct")
+            };
+            fs.extend(self.rel_fields);
+            Ty::Struct(fs)
+        });
+        (plan, node)
+    }
+}
+
+impl<R: 'static, B: Binders, N> Query<R, B, N> {
+    // A node closure, run once over the node's binders: in the plan's
+    // context, where nothing may be written and nothing read.
+    fn run<X>(&self, what: &str, f: impl FnOnce(R, B) -> X) -> X {
+        assert!(
+            cx::emitting(),
+            "{what}: a query's plan is described under Emit and never run natively (ark::view::pull is what it means)"
+        );
+        cx::in_plan(|| f((self.make)(cx::e(Expr::Var(self.row))), B::at(&self.binds)))
+    }
+
+    /// §1.3 A lookup: the row of another table under the key `f` computes
+    /// over this node, appended to the binders as an `Opt<U>` — `None`
+    /// when there is none, or when a part of the key is `None`.
+    /// `.get(|song, ()| db.media.by((song.media_id,)))`. May chain: a later
+    /// `get` sees the earlier ones.
+    pub fn get<U: Row>(mut self, f: impl FnOnce(R, B) -> By<U>) -> Query<R, B::Out, N>
+    where
+        B: Append<Opt<U>>,
+    {
+        let by = self.run("get", f);
+        let sym = Self::fresh();
+        self.plan.lookups.push(Lookup {
+            name: U::NAME.into(),
+            sym,
+            table: U::NAME.into(),
+            key: by.key,
+        });
+        self.binds.push(sym);
+        self.retype()
+    }
+
+    /// §1.3 A related plan: the child query `f` returns, its rows pinned to
+    /// this node by the child's [`Query::on`], appended to the binders as
+    /// the list of its nodes (in its own order, cut to its own limit).
+    /// `.each(|song, ()| db.credit.order_by(..).on(Credit::recording_id.eq(song.recording_id)))`.
+    /// The child's own closures see the child's binders only.
+    pub fn each<C: 'static, CB, CN: Data>(mut self, f: impl FnOnce(R, B) -> Query<C, CB, CN>) -> Query<R, B::Out, N>
+    where
+        B: Append<List<CN>>,
+    {
+        let child = self.run("each", f);
+        let name = child.plan.table().clone();
+        let on = child.on.clone();
+        let (plan, node) = child.finish();
+        self.related(name, on, plan, node);
+        self.retype()
+    }
+
+    /// §1.3 Keep a node only when `f` holds (and any `having` before it).
+    /// A node it refuses still exists to a view, so it appears when a
+    /// child arrives: `.having(|album, (songs,)| songs.len().gt(0))`.
+    pub fn having(mut self, f: impl FnOnce(R, B) -> Bool) -> Self {
+        let h = cx::expr(self.run("having", f).0);
+        self.plan.having = Some(match self.plan.having.take() {
+            None => h,
+            Some(g) => Expr::Op(crate::ir::Op::And, vec![g, h]),
+        });
+        self
+    }
+
+    /// §1.3 Order by an expression over the node, ascending. Keys compare
+    /// in the order given — every `order_by` column first, then every
+    /// `sort_by` expression, then the key columns — so the *first* call is
+    /// the primary key. That is not the list `sort_by` of v3, where a
+    /// stable sort made the last call primary.
+    pub fn sort_by<K: Data>(self, f: impl FnOnce(R, B) -> K) -> Self {
+        self.sort(Dir::Asc, f)
+    }
+
+    /// [`Query::sort_by`], descending.
+    pub fn sort_by_desc<K: Data>(self, f: impl FnOnce(R, B) -> K) -> Self {
+        self.sort(Dir::Desc, f)
+    }
+
+    fn sort<K: Data>(mut self, d: Dir, f: impl FnOnce(R, B) -> K) -> Self {
+        let k = cx::expr(self.run("sort_by", f).to_h());
+        self.sorts.push((k, d));
+        self
+    }
+
+    /// §1.3 The node's value: `f` over the row and the binders. The query's
+    /// value is the list of these.
+    pub fn map<U: Data>(mut self, f: impl FnOnce(R, B) -> U) -> Query<R, B, U> {
+        let e = cx::expr(self.run("map", f).to_h());
+        self.plan.project = Some(e);
+        self.project_ty = Some(U::ty());
+        self.retype()
+    }
+
+    /// At most `n` nodes (per parent, in a child plan).
+    pub fn limit(mut self, n: i64) -> Self {
+        self.plan.limit = Some(n);
+        self
+    }
+}
+
+impl<T: Row, B, N> Query<T, B, N> {
+    /// Keep the rows the predicate admits (and any filter before it). The
+    /// right-hand sides are constant for the read.
+    pub fn filter(mut self, p: Pred<T>) -> Self {
         self.plan.filter = Some(match self.plan.filter.take() {
             None => p.p,
             Some(q) => IrPred::All(vec![q, p.p]),
@@ -704,17 +1068,17 @@ impl<T: Row> Query<T> {
         self
     }
     /// Order by one column or a tuple of them, after any order before.
-    pub fn order_by(mut self, o: impl Orders<T>) -> Query<T> {
-        self.plan.order.extend(o.orders());
+    pub fn order_by(mut self, o: impl Orders<T>) -> Self {
+        self.plan.order.extend(o.orders().into_iter().map(|(c, d)| (IrKey::Column(c), d)));
         self
     }
-    /// At most `n` rows.
-    pub fn limit(mut self, n: i64) -> Query<T> {
-        self.plan.limit = Some(n);
-        self
-    }
-    /// Read a relationship beneath each row, as a field of its name.
-    pub fn with<C: Row>(mut self, r: Rel<T, C>) -> Query<T> {
+    /// Read a relationship beneath each row, as a field of its name: a
+    /// related plan on the reference the schema declares, appended to the
+    /// binders as a `List<C>`.
+    pub fn with<C: Row>(mut self, r: Rel<T, C>) -> Query<T, B::Out, N>
+    where
+        B: Append<List<C>>,
+    {
         let child = table_of::<C>();
         let column = child
             .refs
@@ -722,29 +1086,57 @@ impl<T: Row> Query<T> {
             .find(|x| x.table == T::NAME)
             .map(|x| x.column.clone())
             .unwrap_or_else(|| panic!("{}: {} has no reference to {}", r.name, C::NAME, T::NAME));
-        self.plan.related.push(Related {
-            name: r.name.into(),
-            relation: Relation {
-                parent: T::NAME.into(),
-                child: C::NAME.into(),
-                column,
-            },
-            plan: Plan::from(C::NAME),
-        });
+        let parent = table_of::<T>();
+        let [key] = &parent.key[..] else {
+            panic!("{}: {} is referenced through a key of one column", r.name, T::NAME)
+        };
+        let on = vec![(column, Expr::Field(Box::new(Expr::Var(self.row)), key.clone()))];
+        self.related(r.name.into(), on, Plan::from(C::NAME), C::ty());
+        self.retype()
+    }
+    /// §1.3 As a child plan: pin each row to its parent, `child.col ==
+    /// expr(parent)`, one equality per column (`.and` them for several).
+    /// `Credit::recording_id.eq(song.recording_id)`. Options are flat, so
+    /// an `Opt<T>` column joins a `T` as plain equality.
+    pub fn on(mut self, p: Pred<T>) -> Self {
+        fn pairs(p: IrPred, out: &mut Vec<(String, Expr)>) -> bool {
+            match p {
+                IrPred::Cmp(c, CmpOp::Eq, e) => {
+                    out.push((c, e));
+                    true
+                }
+                IrPred::All(ps) => ps.into_iter().all(|q| pairs(q, out)),
+                _ => false,
+            }
+        }
+        if !pairs(p.p, &mut self.on) {
+            cx::complain(format!("{}: .on(..) takes column equalities joined with .and", T::NAME));
+        }
         self
     }
 
-    fn pull(mut self) -> H {
+    fn pull(self) -> H {
+        let (mut plan, _) = self.finish();
         if cx::emitting() {
-            return cx::bind(Expr::Select(Box::new(self.plan)));
+            if cx::planning() {
+                read_in_plan(&format!("a read of {}", T::NAME));
+                return cx::lit(Value::List(vec![]));
+            }
+            if !plan.is_v3_shaped() {
+                cx::complain(format!(
+                    "a read of {} with a lookup, a related plan on something other than a reference, a group, a having, a projection or an expression order: only a query's plan may have one (§1.4)",
+                    T::NAME
+                ));
+            }
+            return cx::bind(Expr::Select(Box::new(plan)));
         }
         if cx::halted() {
             return cx::lit(Value::List(vec![]));
         }
         let rows = raw::store(|st| {
             let sch = st.schema().clone();
-            eval::complete_order(&sch, &mut self.plan);
-            eval::select_plan(&sch, &self.plan, st.as_store())
+            eval::complete_order(&sch, &mut plan);
+            eval::select_plan(&sch, &plan, st.as_store())
         });
         match rows {
             Ok(rows) => cx::lit(Value::List(rows)),
@@ -755,21 +1147,66 @@ impl<T: Row> Query<T> {
         }
     }
 
-    /// `SLet s (ESelect plan)`: every row the plan pulls.
-    pub fn all(self) -> List<T> {
+    /// `SLet s (ESelect plan)`: every node the plan pulls. A mutator's (or
+    /// a middleware's) read; a query returns its plan instead.
+    pub fn all(self) -> List<N>
+    where
+        N: Data,
+    {
         List::from_h(self.pull())
     }
 
     /// `SLet s (ESelect plan{limit = 1})`, `SLet s' (EStd First [EVar s])`,
     /// and the value `EVar s'`.
-    pub fn first(mut self) -> Opt<T> {
+    pub fn first(mut self) -> Opt<N>
+    where
+        N: Data,
+    {
         self.plan.limit = Some(1);
         let rows = self.pull();
-        let first = List::<T>::from_h(rows).first();
+        let first = List::<N>::from_h(rows).first();
         if cx::emitting() {
             return Opt::from_h(cx::bind(cx::expr(first.to_h())));
         }
         first
+    }
+}
+
+impl<T: Row> Query<T> {
+    /// §1.3 The rows the filter admits, grouped by one column or a tuple of
+    /// them: one node per distinct key. The closures are handed the key
+    /// (the column's value, or the tuple of them) and, as the first binder,
+    /// the group's rows in key order: `db.media.group_by(Media::creator)` is
+    /// a `Query<Text, (List<Media>,)>`. Grouped rows are ordered by the key.
+    pub fn group_by<G: GroupCols<T>>(self, g: G) -> Query<G::Key, (List<T>,), G::Key> {
+        assert!(
+            self.plan.related.is_empty() && self.plan.order.is_empty(),
+            "group_by comes straight after the filter"
+        );
+        let cols = g.columns();
+        let names: Vec<&'static str> = cols.iter().map(|(n, _)| *n).collect();
+        let members = Self::fresh();
+        let plan = Plan {
+            source: Source::Group {
+                table: T::NAME.into(),
+                by: names.iter().map(|n| n.to_string()).collect(),
+            },
+            members: Some(members),
+            ..self.plan
+        };
+        let names: Rc<[&'static str]> = names.into();
+        Query {
+            plan,
+            sorts: self.sorts,
+            row: self.row,
+            binds: vec![members],
+            row_ty: Ty::Struct(cols.into_iter().map(|(n, t)| (n.to_string(), t)).collect()),
+            rel_fields: vec![],
+            project_ty: None,
+            on: self.on,
+            make: Rc::new(move |h| G::key(&names, h)),
+            _t: PhantomData,
+        }
     }
 }
 

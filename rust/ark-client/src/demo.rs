@@ -121,7 +121,7 @@ pub fn demo() -> Router<Demo> {
             })
         }),
         demo.input::<PlaylistId>().query("items", |_ctx, db, input| {
-            db.item.filter(Item::playlist_id.eq(input.playlist_id)).order_by(Item::pos.asc()).all()
+            db.item.filter(Item::playlist_id.eq(input.playlist_id)).order_by(Item::pos.asc())
         }),
     ))
 }

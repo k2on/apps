@@ -49,6 +49,11 @@ pub(crate) struct Emit {
     /// How deep in expression closures (`map`, `filter`, a check…) the run
     /// is: no statement may be written there.
     in_expr: usize,
+    /// How deep in a query's plan (its body, and the closures of `get`,
+    /// `each`, `having`, `sort_by` and `map`) the run is: no read may be
+    /// written there, because a plan reads through its lookups and related
+    /// plans and never through an expression (§1.2).
+    in_plan: usize,
 }
 
 pub(crate) struct Native {
@@ -82,6 +87,7 @@ impl Cx {
                 autos: vec![],
                 errors: vec![],
                 in_expr: 0,
+                in_plan: 0,
             }),
             nodes: vec![],
             origins: std::collections::HashMap::new(),
@@ -470,6 +476,38 @@ pub(crate) fn in_expr<R>(f: impl FnOnce() -> R) -> R {
     let r = f();
     emit_mut(|em| em.in_expr -= 1);
     r
+}
+
+/// Run a query's body, or a closure of one of its plan's nodes: no
+/// statement may be written inside it, and no read (§1.9).
+pub(crate) fn in_plan<R>(f: impl FnOnce() -> R) -> R {
+    if !emitting() {
+        return f();
+    }
+    emit_mut(|em| {
+        em.in_plan += 1;
+        em.in_expr += 1;
+    });
+    let r = f();
+    emit_mut(|em| {
+        em.in_plan -= 1;
+        em.in_expr -= 1;
+    });
+    r
+}
+
+/// Emit: whether the run is inside a query's plan, where a read is an
+/// authoring error rather than a statement.
+pub(crate) fn planning() -> bool {
+    with(|cx| match &cx.mode {
+        Mode::Emit(em) => em.in_plan > 0,
+        Mode::Native(_) => false,
+    })
+}
+
+/// Emit: an authoring error, reported by `Module::build`.
+pub(crate) fn complain(what: String) {
+    emit_mut(|em| em.errors.push(what));
 }
 
 /// Register an auto by name. Naming it again is reading the same frozen

@@ -378,6 +378,13 @@ impl<T: Data> Opt<T> {
     pub fn is_none(self) -> Bool {
         self.is_some().not()
     }
+    /// `EStd Unwrap`: the value, or the refusal `unwrapped none`. What a
+    /// plan's projection takes a lookup's row with, behind a `having` that
+    /// holds `is_some()` — a projection is evaluated only for an admitted
+    /// node; everywhere else `or_refuse` says why.
+    pub fn unwrap(self) -> T {
+        std1(StdFn::Unwrap, self.0)
+    }
     /// `EStd UnwrapOr`.
     pub fn unwrap_or(self, d: impl Into<T>) -> T {
         std2(StdFn::UnwrapOr, self.0, d.into().to_h())

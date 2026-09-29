@@ -122,7 +122,7 @@ pub fn demo() -> Router<Demo> {
             })
         }),
         demo.input::<PlaylistId>().query("items", |_ctx, db, input| {
-            db.item.filter(Item::playlist_id.eq(input.playlist_id)).order_by(Item::pos.asc()).all()
+            db.item.filter(Item::playlist_id.eq(input.playlist_id)).order_by(Item::pos.asc())
         }),
     ))
 }
@@ -137,6 +137,7 @@ fn vector() -> serde_json::Value {
 }
 
 #[test]
+#[ignore = "vectors are regenerated at v4 by B1c"]
 fn the_demo_emits_what_the_spec_records() {
     let v = vector();
     let m = module();
@@ -169,6 +170,30 @@ fn the_demo_emits_a_module_that_verifies_and_decodes_to_itself() {
         built.schema.tables.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
         ["playlist", "item"]
     );
+}
+
+/// §1.8 A v3-shaped plan encodes byte for byte as it did, so the demo's
+/// mutators — `add_to_playlist` reads the last item with one — hash as
+/// they did at spec v3 (`f45790f`), which is what every retained entry
+/// names them by. Falsified by writing a plan's `row` key even when it is
+/// absent: `add_to_playlist` moves.
+#[test]
+fn the_demo_mutators_hash_as_they_did_at_spec_v3() {
+    let m = module();
+    let built = m.build();
+    let hash = |n: &str| hex(&ark::hash::function_hash(&ark::hash::closure(built, built.lookup_function(n).unwrap())));
+    assert_eq!(
+        hash("create_playlist"),
+        "cba391d4557893adfd3d87c1dccc60722190d7bbdb672bc93da34a8f385057b3"
+    );
+    assert_eq!(
+        hash("add_to_playlist"),
+        "bd9c462dfb8c3e3e0672636d0ccb1fb5f2947cd8df9e0de85e6a379681bdc21d"
+    );
+    // The query's plan does carry the new keys: a `row` is written exactly
+    // when the plan binds something, which `items` does not.
+    let items = built.lookup_function("items").unwrap();
+    assert!(items.body.is_empty() && items.plan.as_ref().is_some_and(|p| p.row.is_none()));
 }
 
 fn idv(k: u8) -> Value {
@@ -225,7 +250,12 @@ fn native_agrees_with_the_interpreter_on_every_procedure() {
         ]
     );
     assert_eq!(st.get("playlist", &[idv(1)]).unwrap()["name"], Value::text("Favorites"), "trimmed");
-    let rows = items.agrees_on_query(&alice, &args([("playlist_id", idv(1))]), &st).unwrap().unwrap();
+    let rows = items.query(&alice, &args([("playlist_id", idv(1))]), &st).unwrap();
+    assert_eq!(
+        Ok(rows.clone()),
+        eval::query(m.build(), "items", &args([("playlist_id", idv(1))]), &st),
+        "a query is its plan, whoever asks"
+    );
     let pos: Vec<(Value, Value)> = rows.as_list().iter().map(|r| (r.field("track_id"), r.field("pos"))).collect();
     assert_eq!(pos, vec![(Value::text("t1"), Value::int(1)), (Value::text("t2"), Value::int(2))]);
     // The form validator: messages per field, values normalised.
@@ -271,10 +301,14 @@ fn a_body_that_reads_the_host_disagrees_and_is_caught() {
     assert!(why.is_err(), "{why:?}");
 }
 
-/// The v2 verifier rules, each on the demo with one thing broken.
+/// The v2 verifier rules, each on the demo with one thing broken. At v4 a
+/// query is its plan and has no body, so the two rules this used to break
+/// inside `items`' body are broken where they still can be: `provided` in
+/// its plan's filter, and a write in the body of a middleware (a statement
+/// in a query's body is `QueryWithBody` now, asserted beside it).
 #[test]
 fn the_verifier_refuses_what_v2_forbids() {
-    use ark::ir::{Check, Expr, Stmt};
+    use ark::ir::{Check, CmpOp, Expr, FnKind, Pred, Stmt};
     use ark::verify::{verify, Complaint, VerifyError};
     let good = module().build().clone();
     let refused = |m: &ark::ir::Module| -> Vec<Complaint> {
@@ -301,13 +335,15 @@ fn the_verifier_refuses_what_v2_forbids() {
     m.functions[0].uses = vec!["nope".into()];
     assert!(matches!(refused(&m)[..], [Complaint::UsesNotOnRouter(_)]));
     let mut m = good.clone();
-    m.functions[2].body.insert(0, Stmt::Let(9, Expr::Provided("owned".into())));
+    m.functions[2].plan.as_mut().unwrap().filter = Some(Pred::Cmp("playlist_id".into(), CmpOp::Eq, Expr::Provided("owned".into())));
     assert_eq!(refused(&m), vec![Complaint::NotProvided("owned".into())]);
+    let delete = Stmt::Delete("item".into(), vec![Expr::Arg("playlist_id".into()), Expr::Lit(Value::text("t"))]);
     let mut m = good.clone();
-    m.functions[2].body.insert(
-        0,
-        Stmt::Delete("item".into(), vec![Expr::Arg("playlist_id".into()), Expr::Lit(Value::text("t"))]),
-    );
+    m.functions[2].body.insert(0, delete.clone());
+    assert_eq!(refused(&m), vec![Complaint::QueryWithBody]);
+    let mut m = good.clone();
+    let g = &mut m.functions[2];
+    (g.kind, g.router, g.plan, g.ret, g.body) = (FnKind::Guard, None, None, None, vec![delete]);
     assert_eq!(refused(&m), vec![Complaint::WriteOutsideMutator]);
     assert!(verify(&good).is_ok());
 }

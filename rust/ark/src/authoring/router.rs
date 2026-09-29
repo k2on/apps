@@ -11,7 +11,7 @@ use std::sync::Arc;
 use crate::canon;
 use crate::eval::{self, Args, Checked, EvalError, EvalFault};
 use crate::hash::{closure, function_hash, module_hash, Closure, FnHash};
-use crate::ir::{self, Check, Expr, Field, FnKind, Function, Stmt, SPEC_VERSION};
+use crate::ir::{self, Check, Expr, Field, FnKind, Function, Plan, Stmt, SPEC_VERSION};
 use crate::schema::{Schema, Table as IrTable, Ty};
 use crate::store::{Change, Overlay, Refusal, Store};
 use crate::value::{hex, Value};
@@ -19,11 +19,21 @@ use crate::value::{hex, Value};
 use super::cx::{self, Cx, H};
 use super::input::{CheckSpec, Input};
 use super::raw;
-use super::schema::{IntoEffect, Tables};
+use super::schema::{Binders, IntoEffect, Query, Tables};
 use super::values::{Ctx, Data};
 
 type MwRun = Arc<dyn Fn(&dyn Fn(&str) -> H) -> Option<H> + Send + Sync>;
-type BodyRun = Arc<dyn Fn(&[H], &[H]) -> Option<H> + Send + Sync>;
+type BodyRun = Arc<dyn Fn(&[H], &[H]) + Send + Sync>;
+/// A query's closure: the plan it returns, and the type of its nodes.
+type PlanRun = Arc<dyn Fn(&[H], &[H]) -> (Plan, Ty) + Send + Sync>;
+
+/// What a route's closure is: a mutator's body, run under both modes, or
+/// a query's plan, described once under `Emit` (§1.4).
+#[derive(Clone)]
+enum Run {
+    Mutator(BodyRun),
+    Query(PlanRun),
+}
 type InputRefineRun = Arc<dyn Fn(&[H]) -> H + Send + Sync>;
 
 #[derive(Clone)]
@@ -68,8 +78,7 @@ struct RouteDecl {
     kind: FnKind,
     chain: Vec<String>,
     input: InputDecl,
-    ret: Option<Ty>,
-    body: BodyRun,
+    body: Run,
 }
 
 struct Core {
@@ -196,7 +205,7 @@ impl<S: Tables> Router<S, ()> {
         self.input::<()>().mutation(name, f)
     }
     /// A query with no input.
-    pub fn query<T: Data>(&self, name: &str, f: impl Fn(&Ctx, &S, ()) -> T + Send + Sync + 'static) -> Route<S> {
+    pub fn query<R: 'static, B: Binders, N>(&self, name: &str, f: impl Fn(&Ctx, &S, ()) -> Query<R, B, N> + Send + Sync + 'static) -> Route<S> {
         self.input::<()>().query(name, f)
     }
 }
@@ -211,7 +220,7 @@ impl<S: Tables, A: Data> Router<S, (A,)> {
         self.input::<()>().mutation(name, f)
     }
     /// A query with no input.
-    pub fn query<T: Data>(&self, name: &str, f: impl Fn(&Ctx, &S, (), A) -> T + Send + Sync + 'static) -> Route<S> {
+    pub fn query<R: 'static, B: Binders, N>(&self, name: &str, f: impl Fn(&Ctx, &S, (), A) -> Query<R, B, N> + Send + Sync + 'static) -> Route<S> {
         self.input::<()>().query(name, f)
     }
 }
@@ -222,7 +231,11 @@ impl<S: Tables, A: Data, B: Data> Router<S, (A, B)> {
         self.input::<()>().mutation(name, f)
     }
     /// A query with no input.
-    pub fn query<T: Data>(&self, name: &str, f: impl Fn(&Ctx, &S, (), A, B) -> T + Send + Sync + 'static) -> Route<S> {
+    pub fn query<R: 'static, Bs: Binders, N>(
+        &self,
+        name: &str,
+        f: impl Fn(&Ctx, &S, (), A, B) -> Query<R, Bs, N> + Send + Sync + 'static,
+    ) -> Route<S> {
         self.input::<()>().query(name, f)
     }
 }
@@ -244,14 +257,16 @@ fn input_of<I: Input>(hs: &[H]) -> I {
 }
 
 impl<S: Tables, I: Input, P> Proc<S, I, P> {
-    fn route(&self, name: &str, kind: FnKind, ret: Option<Ty>, body: BodyRun) -> Route<S> {
+    fn route(&self, name: &str, body: Run) -> Route<S> {
         Route {
             decl: RouteDecl {
                 name: name.into(),
-                kind,
+                kind: match body {
+                    Run::Mutator(_) => FnKind::Mutator,
+                    Run::Query(_) => FnKind::Query,
+                },
                 chain: self.router.chain.clone(),
                 input: InputDecl::of::<I>(),
-                ret,
                 body,
             },
             _t: PhantomData,
@@ -264,14 +279,13 @@ impl<S: Tables, I: Input> Proc<S, I, ()> {
     pub fn mutation<R: IntoEffect>(&self, name: &str, f: impl Fn(&Ctx, &S, I) -> R + Send + Sync + 'static) -> Route<S> {
         let body: BodyRun = Arc::new(move |ins, _| {
             f(&Ctx::current(), &tables_value::<S>(), input_of::<I>(ins)).into_effect();
-            None
         });
-        self.route(name, FnKind::Mutator, None, body)
+        self.route(name, Run::Mutator(body))
     }
-    /// A query: `|ctx, db, input| value`.
-    pub fn query<T: Data>(&self, name: &str, f: impl Fn(&Ctx, &S, I) -> T + Send + Sync + 'static) -> Route<S> {
-        let body: BodyRun = Arc::new(move |ins, _| Some(f(&Ctx::current(), &tables_value::<S>(), input_of::<I>(ins)).to_h()));
-        self.route(name, FnKind::Query, Some(T::ty()), body)
+    /// A query: `|ctx, db, input| plan`, the plan returned whole (§1.9).
+    pub fn query<R: 'static, B: Binders, N>(&self, name: &str, f: impl Fn(&Ctx, &S, I) -> Query<R, B, N> + Send + Sync + 'static) -> Route<S> {
+        let run: PlanRun = Arc::new(move |ins, _| f(&Ctx::current(), &tables_value::<S>(), input_of::<I>(ins)).finish());
+        self.route(name, Run::Query(run))
     }
 }
 
@@ -280,14 +294,13 @@ impl<S: Tables, I: Input, A: Data> Proc<S, I, (A,)> {
     pub fn mutation<R: IntoEffect>(&self, name: &str, f: impl Fn(&Ctx, &S, I, A) -> R + Send + Sync + 'static) -> Route<S> {
         let body: BodyRun = Arc::new(move |ins, ps| {
             f(&Ctx::current(), &tables_value::<S>(), input_of::<I>(ins), A::from_h(ps[0])).into_effect();
-            None
         });
-        self.route(name, FnKind::Mutator, None, body)
+        self.route(name, Run::Mutator(body))
     }
-    /// A query: `|ctx, db, input, provided| value`.
-    pub fn query<T: Data>(&self, name: &str, f: impl Fn(&Ctx, &S, I, A) -> T + Send + Sync + 'static) -> Route<S> {
-        let body: BodyRun = Arc::new(move |ins, ps| Some(f(&Ctx::current(), &tables_value::<S>(), input_of::<I>(ins), A::from_h(ps[0])).to_h()));
-        self.route(name, FnKind::Query, Some(T::ty()), body)
+    /// A query: `|ctx, db, input, provided| plan`.
+    pub fn query<R: 'static, B: Binders, N>(&self, name: &str, f: impl Fn(&Ctx, &S, I, A) -> Query<R, B, N> + Send + Sync + 'static) -> Route<S> {
+        let run: PlanRun = Arc::new(move |ins, ps| f(&Ctx::current(), &tables_value::<S>(), input_of::<I>(ins), A::from_h(ps[0])).finish());
+        self.route(name, Run::Query(run))
     }
 }
 
@@ -303,25 +316,26 @@ impl<S: Tables, I: Input, A: Data, B: Data> Proc<S, I, (A, B)> {
                 B::from_h(ps[1]),
             )
             .into_effect();
-            None
         });
-        self.route(name, FnKind::Mutator, None, body)
+        self.route(name, Run::Mutator(body))
     }
-    /// A query: `|ctx, db, input, a, b| value`.
-    pub fn query<T: Data>(&self, name: &str, f: impl Fn(&Ctx, &S, I, A, B) -> T + Send + Sync + 'static) -> Route<S> {
-        let body: BodyRun = Arc::new(move |ins, ps| {
-            Some(
-                f(
-                    &Ctx::current(),
-                    &tables_value::<S>(),
-                    input_of::<I>(ins),
-                    A::from_h(ps[0]),
-                    B::from_h(ps[1]),
-                )
-                .to_h(),
+    /// A query: `|ctx, db, input, a, b| plan`.
+    pub fn query<R: 'static, Bs: Binders, N>(
+        &self,
+        name: &str,
+        f: impl Fn(&Ctx, &S, I, A, B) -> Query<R, Bs, N> + Send + Sync + 'static,
+    ) -> Route<S> {
+        let run: PlanRun = Arc::new(move |ins, ps| {
+            f(
+                &Ctx::current(),
+                &tables_value::<S>(),
+                input_of::<I>(ins),
+                A::from_h(ps[0]),
+                B::from_h(ps[1]),
             )
+            .finish()
         });
-        self.route(name, FnKind::Query, Some(T::ty()), body)
+        self.route(name, Run::Query(run))
     }
 }
 
@@ -590,6 +604,7 @@ fn emit_middleware(mw: &MwDecl) -> Emitted {
         refine: vec![],
         ret: mw.ret.clone(),
         body,
+        plan: None,
         names: BTreeMap::new(),
     };
     (f, errors)
@@ -604,7 +619,7 @@ fn emit_route(core: &Core, r: &RouteDecl) -> Emitted {
             .cloned()
             .collect()
     };
-    let ((input, refine, ret), cx) = cx::run(Cx::emit(), || {
+    let ((input, refine, planned), cx) = cx::run(Cx::emit(), || {
         let ins: Vec<H> = r.input.fields.iter().map(|(n, _, _)| cx::e(Expr::Arg(n.clone()))).collect();
         let mut input = Vec::with_capacity(r.input.fields.len());
         for (n, ty, checks) in &r.input.fields {
@@ -627,13 +642,22 @@ fn emit_route(core: &Core, r: &RouteDecl) -> Emitted {
             .map(|(f, why)| (cx::in_expr(|| cx::expr(f(&ins))), why.clone()))
             .collect();
         let prov: Vec<H> = provides.iter().map(|n| cx::e(Expr::Provided(n.clone()))).collect();
-        let ret = (r.body)(&ins, &prov).map(cx::expr);
-        (input, refine, ret)
+        // A mutator's body is its statements; a query's is its plan, and
+        // the plan's context forbids a statement or a read inside it.
+        let planned = match &r.body {
+            Run::Mutator(run) => {
+                run(&ins, &prov);
+                None
+            }
+            Run::Query(run) => Some(cx::in_plan(|| run(&ins, &prov))),
+        };
+        (input, refine, planned)
     });
-    let (autos, mut body, errors) = finish(&r.name, cx);
-    if let Some(e) = ret {
-        body.push(Stmt::Return(Some(e)));
-    }
+    let (autos, body, errors) = finish(&r.name, cx);
+    let (plan, ret) = match planned {
+        Some((p, node)) => (Some(p), Some(Ty::List(Box::new(node)))),
+        None => (None, None),
+    };
     let f = Function {
         name: r.name.clone(),
         kind: r.kind,
@@ -642,8 +666,9 @@ fn emit_route(core: &Core, r: &RouteDecl) -> Emitted {
         autos,
         input,
         refine,
-        ret: r.ret.clone(),
+        ret,
         body,
+        plan,
         names: BTreeMap::new(),
     };
     (f, errors)
@@ -756,14 +781,12 @@ impl Procedure {
         }
     }
 
-    /// §6.2 Run the query, as `query_closure` would.
+    /// §6.2 Run the query: its input checked, its middleware, and its plan
+    /// pulled — `eval::query_closure` over the closure it emitted, because
+    /// a query has no native half (§1.4): `ark::view::pull` is what one
+    /// means, the one evaluator of plans.
     pub fn query(&self, ctx: &eval::Ctx, args: &Args, store: &dyn Store) -> Result<Value, EvalFault> {
-        if self.kind() != FnKind::Query {
-            return Err(EvalFault::Bug(EvalError::WrongKind(self.name().into(), self.kind())));
-        }
-        let mut overlay = Overlay::new(store);
-        let (_, v) = raw::with_store(&mut overlay, || self.run(ctx, &Args::new(), args))?;
-        v.ok_or_else(|| EvalFault::Bug(EvalError::NoReturn(self.name().into())))
+        eval::query_closure(&self.0.schema, &self.0.closure, ctx, args, store)
     }
 
     /// Hold this procedure to the interpreter on one entry: run it natively
@@ -781,16 +804,6 @@ impl Procedure {
         }
         if native_store != ir_store {
             return Err(format!("{}: the stores differ afterwards", self.name()));
-        }
-        Ok(native)
-    }
-
-    /// [`Procedure::agrees`] for a query: the same value or the same fault.
-    pub fn agrees_on_query(&self, ctx: &eval::Ctx, args: &Args, store: &dyn Store) -> Result<Result<Value, EvalFault>, String> {
-        let native = self.query(ctx, args, store);
-        let ir = eval::query_closure(&self.0.schema, &self.0.closure, ctx, args, store);
-        if native != ir {
-            return Err(format!("{}: native {native:?}, interpreted {ir:?}", self.name()));
         }
         Ok(native)
     }
@@ -852,11 +865,14 @@ impl Procedure {
                     provided.push(r.ok_or_else(|| EvalFault::Bug(EvalError::NoReturn(mw.name.clone())))?);
                 }
             }
-            let r = (inner.route.body)(&ins, &provided);
-            if let Some(fault) = halt() {
-                return Err(fault);
+            let Run::Mutator(body) = &inner.route.body else {
+                return Err(EvalFault::Bug(EvalError::WrongKind(inner.route.name.clone(), inner.route.kind)));
+            };
+            body(&ins, &provided);
+            match halt() {
+                Some(fault) => Err(fault),
+                None => Ok(None),
             }
-            Ok(r.map(cx::value))
         });
         let native = cx.into_native();
         out.map(|v| (native.changes, v))

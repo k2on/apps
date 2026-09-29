@@ -2,11 +2,12 @@
 //!
 //! Hydrate once, then hand every [`Changes`] to [`View::update`] and splice
 //! what it returns into whatever the screen built from the rows. A query
-//! whose body is a single `select` with no middleware — `db.t.filter(..)
-//! .order_by(..).all()` — is maintained incrementally by `ark::view`: the
-//! cost of a change is the rows it moved, whatever the size of the list.
-//! Any other query is re-run on a change and the difference
-//! reported as patches, which is always correct and costs a query.
+//! whose plan is v3-shaped and runs no middleware — `db.t.filter(..)
+//! .order_by(..)` — is maintained incrementally by `ark::view`: the cost of
+//! a change is the rows it moved, whatever the size of the list. Any other
+//! query is re-run on a change and the difference reported as patches,
+//! which is always correct and costs a query — until the engine maintains
+//! every plan (`docs/plan-v4.md` §1.5).
 //!
 //! `Changes::Rebuilt` — a rebase rolled the optimistic store back and
 //! replayed pending on top — is a re-hydrate and [`Update::Reset`]: no
@@ -14,7 +15,7 @@
 //! to have one.
 
 use ark::eval::{Args, Ctx};
-use ark::ir::{Expr, Function, Plan, Stmt};
+use ark::ir::{Expr, Function};
 use ark::peer::Changes;
 use ark::store::{Change, MemoryStore, Store};
 use ark::value::Value;
@@ -214,18 +215,14 @@ pub fn diff(old: &[Value], new: &[Value]) -> Vec<Patch> {
     ps
 }
 
-/// The plan of a query that is one `select` and nothing else, with its
+/// The plan of a query that is v3-shaped and runs no middleware, with its
 /// right-hand sides evaluated against the (checked) arguments and the
 /// peer's identity; `None` for anything else.
 fn plan_of(f: &Function, peer: &Peer, args: &Args) -> Option<ViewPlan> {
     if !f.uses.is_empty() {
         return None;
     }
-    let plan: &Plan = match f.body.as_slice() {
-        [Stmt::Return(Some(Expr::Select(p)))] => p,
-        [Stmt::Let(s, Expr::Select(p)), Stmt::Return(Some(Expr::Var(v)))] if s == v => p,
-        _ => return None,
-    };
+    let plan = f.plan.as_ref().filter(|p| p.is_v3_shaped())?;
     let checked = peer.check(&f.name, args).ok()?;
     if !checked.messages.is_empty() {
         return None;
