@@ -3758,25 +3758,40 @@ const LOCAL: &str = "local";
 /// The demo's replica: every seeded row, as the confirmed state of a peer that
 /// is its own authority.
 pub fn seeded(domain: Domain) -> ark_client::Peer {
+    seeded_times(domain, 1)
+}
+
+/// The demo's library `copies` times over, for measuring how a list's cost
+/// grows with the library: every copy after the first has its own composers,
+/// albums, works, recordings and files (the names carry ` (k)`), so every
+/// list is `copies` times as long, and the playlists are the first copy's.
+/// `1` is the demo.
+pub fn seeded_times(domain: Domain, copies: usize) -> ark_client::Peer {
     let mut seed = Seeder::new(domain.clone());
     let t = |s: &str| Value::text(s);
+    let copy = |k: usize, s: &str| match k {
+        0 => s.to_string(),
+        k => format!("{s} ({k})"),
+    };
 
     // People first, because a work's composer and a recording's credits both
     // need a `person` row and `describe_person` is the one verb that makes one
     // rather than refusing — somebody can be described before their music
     // arrives.
-    for c in COMPOSERS {
-        seed.mutate(
-            c.name,
-            "describe_person",
-            args([
-                ("name", t(c.name)),
-                ("sort_name", t(c.sort_name)),
-                ("born", Value::Int(c.born)),
-                ("died", Value::Int(c.died)),
-                ("art", t(&art_of("artist", c.name))),
-            ]),
-        );
+    for k in 0..copies {
+        for c in COMPOSERS {
+            seed.mutate(
+                c.name,
+                "describe_person",
+                args([
+                    ("name", t(&copy(k, c.name))),
+                    ("sort_name", t(&copy(k, c.sort_name))),
+                    ("born", Value::Int(c.born)),
+                    ("died", Value::Int(c.died)),
+                    ("art", t(&art_of("artist", c.name))),
+                ]),
+            );
+        }
     }
 
     // Which recordings exist falls out of the tracks rather than being a table
@@ -3784,83 +3799,89 @@ pub fn seeded(domain: Domain) -> ark_client::Peer {
     // collecting the pairs while authoring is the same answer `add_song`
     // reaches, computed from the same helpers (`harken_domain::keys`).
     let mut takes: BTreeMap<String, (&'static str, &'static str)> = BTreeMap::new();
-    let mut work_ids: BTreeMap<&'static str, String> = BTreeMap::new();
-    for s in LIBRARY
-        .iter()
-        .chain(BACH)
-        .chain(BRANDENBURG)
-        .chain(WATER_MUSIC)
-        .chain(FIREWORKS)
-        .chain(MESSIAH)
-        .chain(FOUR_SEASONS)
-        .chain(CONCERTOS)
-    {
-        // The work's own name where this library knows one, and the record's
-        // where it does not: twenty-four preludes and fugues stop being
-        // twenty-four works all called "The Well-Tempered Clavier".
-        let work = work_of(s.catalogue);
-        let work_title = work.map(|w| w.title).unwrap_or(s.album);
-        seed.mutate(
-            s.title,
-            "add_song",
-            args([
-                ("title", t(s.title)),
-                ("artist", t(s.composer)),
-                ("album", t(s.album)),
-                ("duration_ms", Value::Int(s.ms)),
-                ("file", t(s.file)),
-                ("track", Value::Int(s.track)),
-                ("part", t(s.part)),
-                ("catalogue", t(s.catalogue)),
-                // Just who played it. The terms it was given on are
-                // `recording.licence`, set below, and the album page draws the
-                // two together.
-                ("performer", t(s.performer)),
-                ("bpm", Value::Int(s.bpm)),
-                // The pictures, carried by the entry that names the album and
-                // the composer rather than authored separately: `add_song`
-                // reads the repeats as one row.
-                ("album_art", t(&art_of("album", s.album))),
-                ("artist_art", t(&art_of("artist", s.composer))),
-                // No boxed sets here, and the movement number is the track
-                // number — said out loud rather than left to the rule about
-                // entries written before the column existed.
-                ("disc", Value::Int(1)),
-                ("work_title", t(work_title)),
-                ("movement_no", Value::Int(s.track)),
-            ]),
-        );
-        // The same helpers `add_song` used, so the key cannot be a second
-        // opinion: if it ever were, `describe_recording` refuses an id it does
-        // not have and `mutate` says so on the first run.
-        let work_id = keys::work_key(s.composer, s.catalogue, work_title);
-        let who = match s.performer.is_empty() {
-            true => s.composer,
-            false => s.performer,
-        };
-        takes.insert(keys::recording_key(&work_id, who), (s.performer, s.licence));
-        work_ids.insert(s.catalogue, work_id);
+    let mut work_ids: BTreeMap<(usize, &'static str), String> = BTreeMap::new();
+    for k in 0..copies {
+        for s in LIBRARY
+            .iter()
+            .chain(BACH)
+            .chain(BRANDENBURG)
+            .chain(WATER_MUSIC)
+            .chain(FIREWORKS)
+            .chain(MESSIAH)
+            .chain(FOUR_SEASONS)
+            .chain(CONCERTOS)
+        {
+            // The work's own name where this library knows one, and the
+            // record's where it does not: twenty-four preludes and fugues stop
+            // being twenty-four works all called "The Well-Tempered Clavier".
+            let work = work_of(s.catalogue);
+            let album = copy(k, s.album);
+            let composer = copy(k, s.composer);
+            let work_title = work.map_or(album.clone(), |w| w.title.to_string());
+            seed.mutate(
+                s.title,
+                "add_song",
+                args([
+                    ("title", t(&copy(k, s.title))),
+                    ("artist", t(&composer)),
+                    ("album", t(&album)),
+                    ("duration_ms", Value::Int(s.ms)),
+                    ("file", t(&copy(k, s.file))),
+                    ("track", Value::Int(s.track)),
+                    ("part", t(s.part)),
+                    ("catalogue", t(s.catalogue)),
+                    // Just who played it. The terms it was given on are
+                    // `recording.licence`, set below, and the album page draws
+                    // the two together.
+                    ("performer", t(s.performer)),
+                    ("bpm", Value::Int(s.bpm)),
+                    // The pictures, carried by the entry that names the album
+                    // and the composer rather than authored separately:
+                    // `add_song` reads the repeats as one row.
+                    ("album_art", t(&art_of("album", s.album))),
+                    ("artist_art", t(&art_of("artist", s.composer))),
+                    // No boxed sets here, and the movement number is the track
+                    // number — said out loud rather than left to the rule
+                    // about entries written before the column existed.
+                    ("disc", Value::Int(1)),
+                    ("work_title", t(&work_title)),
+                    ("movement_no", Value::Int(s.track)),
+                ]),
+            );
+            // The same helpers `add_song` used, so the key cannot be a second
+            // opinion: if it ever were, `describe_recording` refuses an id it
+            // does not have and `mutate` says so on the first run.
+            let work_id = keys::work_key(&composer, s.catalogue, &work_title);
+            let who = match s.performer.is_empty() {
+                true => composer.as_str(),
+                false => s.performer,
+            };
+            takes.insert(keys::recording_key(&work_id, who), (s.performer, s.licence));
+            work_ids.insert((k, s.catalogue), work_id);
+        }
     }
 
     // What a track could not carry: the key, the form, the period and the year.
-    for w in WORKS {
-        // A work this library describes and holds nothing of is not an error —
-        // `WORKS` may know about music the demo dropped — but `describe_work`
-        // would refuse it, rightly.
-        let Some(id) = work_ids.get(w.catalogue) else { continue };
-        seed.mutate(
-            w.title,
-            "describe_work",
-            args([
-                ("id", t(id)),
-                ("opus", t("")),
-                ("key_sig", t(w.key_sig)),
-                ("form", t(w.form)),
-                ("period", t(w.period)),
-                ("composed", Value::Int(w.composed)),
-                ("art", t("")),
-            ]),
-        );
+    for k in 0..copies {
+        for w in WORKS {
+            // A work this library describes and holds nothing of is not an
+            // error — `WORKS` may know about music the demo dropped — but
+            // `describe_work` would refuse it, rightly.
+            let Some(id) = work_ids.get(&(k, w.catalogue)) else { continue };
+            seed.mutate(
+                w.title,
+                "describe_work",
+                args([
+                    ("id", t(id)),
+                    ("opus", t("")),
+                    ("key_sig", t(w.key_sig)),
+                    ("form", t(w.form)),
+                    ("period", t(w.period)),
+                    ("composed", Value::Int(w.composed)),
+                    ("art", t("")),
+                ]),
+            );
+        }
     }
 
     // …and what the one lumped performer string could not: the terms, and the
