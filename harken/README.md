@@ -4,20 +4,30 @@ A self-hosted music system: a library a server scans from a directory,
 playlists, one listening session per account across every device, and the
 speakers in the house as devices in it. All of it runs on ArkDB: one log,
 one domain written once in Rust, applied natively by the server, the
-desktop and the browser, and printed by `arkc` into the Swift and Kotlin
-the phones compile.
+desktop and the browser, and every query a plan a client can keep up to
+date by the rows a change touched.
 
 ```
 domain/    the domain, in the vocabulary of spec/AUTHORING.md (src/); harken.ark,
-           what it emits; gen/{swift,kotlin}, arkc's print of what the phones call;
-           listening.rs, the listening session's frames (never the log)
+           what it emits; listening.rs, the listening session's frames (never
+           the log)
 server/    ark-server with harken's own parts: the scanner, the listening desk,
            the Home Assistant bridge, sign-in, /media, the web build; the NixOS
            module (server/README.md)
 iced/      the desktop and browser client, on arkui and ark-client; the `demo`
            feature is the seeded library GitHub Pages publishes
-ios/       SwiftUI over ArkDBClient and the printed Swift domain (ios/README.md)
-android/   Compose over ark-client and the printed Kotlin (android/README.md)
+```
+
+Frozen at spec v3, with the Swift and Kotlin runtimes they are built on
+(`swift/FROZEN.md`, `kotlin/FROZEN.md`), and not following the domain
+since:
+
+```
+domain/gen/   {swift,kotlin}: arkc's print of what the phones called, from the
+              v3 harken.ark; there is no printer now
+ios/          SwiftUI over ArkDBClient and the printed Swift (ios/README.md)
+android/      Compose over ark-client and the printed Kotlin (android/README.md);
+              still assembled by nix build .#harken-apk
 ```
 
 ## The domain
@@ -45,9 +55,14 @@ Four decisions that each show on screen:
 - **Every refused change says why.** A rejection carries the domain's own
   sentence, and each client shows it against the change it refused.
 
-`domain/tests/agreement.rs` holds every procedure's native Rust to the
-interpreter over `harken.ark`, and fails while the committed module differs
-from what the source emits. When `domain/src` changes:
+Every query is a plan (`spec/AUTHORING.md` §1.5): `library`, `albums`,
+`composers` and the rest say what they read and how it joins, so a client
+can hold any of them as an `ark_client::View` that a change moves by the
+rows it touched; the desktop's library is one. `domain/tests/agreement.rs`
+holds every mutator's native Rust to the interpreter over `harken.ark` and
+every mutator's hash to its v3 value, and fails while the committed module
+differs from what the source emits.
+When `domain/src` changes:
 
     cd rust && cargo run -p harken-domain -- ../harken/domain/harken.ark
 
@@ -60,19 +75,19 @@ Everything is `nix`, from the repository root:
     nix build .#harken-iced        # the desktop window
     nix build .#harken-web         # the browser demo, as a static directory (Pages)
     nix build .#harken-web-server  # the browser client harken-server serves
-    nix build .#harken-apk         # the Android app, debug-signed
     nix build .#harken-domain      # harken.ark, as the source emits it
-    nix flake check                # all of it: fmt, clippy and every Rust test,
-                                   # the Swift and Kotlin suites, the round trip of
-                                   # the three domains, the NixOS module
+    nix build .#harken-apk         # the frozen Android app, debug-signed
+    nix flake check                # fmt, clippy and every Rust test; harken.ark
+                                   # is what the domain emits and it verifies;
+                                   # the vectors; the NixOS module
 
 `nixosModules.default` is `services.harken` (`server/README.md` has its
-options). The iOS app is Xcode over `ios/project.yml`, since only a Mac can
-build one.
+options). The frozen iOS app is Xcode over `ios/project.yml`, since only a
+Mac can build one.
 
 Two workflows build from `main`: `pages.yml` publishes `harken-web` at
 <https://k2on.github.io/apps/harken/>, and `apk.yml` builds `harken-apk`
-and attaches it to a release on a `v*` tag.
+— the frozen v3 app — and attaches it to a release on a `v*` tag.
 
 ## Running it
 
@@ -90,7 +105,9 @@ button.
 
 ## Not verified
 
-No phone has run either app, and the iOS screens have not met a compiler.
+No phone has run either frozen app, and the iOS screens have not met a
+compiler. The phones speak spec v3 and the server now runs a v4 module;
+they are not expected to sync with it, and nobody has tried.
 No desktop window has been opened: the browser build has been drawn in
 headless Chromium, and the desktop only driven through its tests. Nothing
 here has met a real Home Assistant or a real OpenID Connect provider.
