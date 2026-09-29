@@ -1,5 +1,11 @@
 # ArkDB for Swift
 
+**Frozen at spec v3** (`FROZEN.md`): nothing builds or tests this tree
+now, and its code is kept byte for byte until the spec settles. What
+follows describes it as it was at `4bacc8f`, when its check last passed;
+the `spec/` it names is the Haskell specification of that commit, and
+`nix develop ..#swift` no longer exists.
+
 The Swift runtime of the specification (`spec/`), and the Swift spelling of
 its authoring vocabulary. The contract is **`spec/AUTHORING.md`**: read it
 first; this file only says where each part of it lives here and what is

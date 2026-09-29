@@ -1,5 +1,11 @@
 # The Kotlin runtime
 
+**Frozen at spec v3** (`FROZEN.md`): nothing tests this tree now, and its
+code is kept byte for byte until the spec settles; `harken-apk` still
+builds it, as the Android app's included build. What follows describes it
+as it was at `4bacc8f`, when its check last passed; `nix develop ..#kotlin`
+no longer exists.
+
 `ark-runtime` (package `dev.arkdb`) is ArkDB for the JVM and Android: the
 IR at spec version 3 (one set of tables, one log), its encoder and
 decoder, the verifier, the interpreter (`Eval`), hashes, the store, the
