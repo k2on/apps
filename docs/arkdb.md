@@ -913,9 +913,11 @@ projection's plan, is what would stream a projection its facts (§3.11).
 Unchanged: a room per account in the authority's memory, the app's machine
 deciding what a frame means, `keep` for the one row worth writing when a
 room empties, frames dropped while unlinked, a second `Hello` is paging. The
-module's live section **declares the frame types**, so `arkc gen` emits
-them in every language and the hand-mirrored `Listener` and `Doing` in
-`mobile/src/listening.ts` have no successor. The per-device state machine
+module's live section **declares the frame types**, so a runtime reads
+them from the module rather than from a hand-mirrored copy — the
+`Listener` and `Doing` once kept in `mobile/src/listening.ts` have no
+successor. (While the printers existed, `arkc gen` wrote them out in each
+language; with Rust the one runtime, the declaration is read in place.) The per-device state machine
 (`elsewhere`, `output_here`, the 1100 ms drift) is app code and can be
 written once as a pure Ark helper over a `Session` struct if an app wants
 one definition — harken has already written it twice.
