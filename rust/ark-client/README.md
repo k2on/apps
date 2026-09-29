@@ -85,14 +85,23 @@ if peer.epoch() != introduced_on { /* a new connection: say who you are again */
   of about five megabytes — a library of a few thousand rows fits. An app
   that outgrows it implements `storage::Storage` over IndexedDB, loaded
   before `open`.
-- **Views**: a query that is one `select` with no middleware
-  (`db.t.filter(..).order_by(..).all()`) is maintained through `ark::view`:
-  a change costs the rows it moved. Several changes at once are pushed each
-  against the store as it stood just after that change (the current store
-  rolled back through the later ones). Any other query is re-run on a change
-  and diffed; either way the patches splice the old list into the new. A
-  plan the reading got wrong is caught at hydrate — the view is held to the
-  query's own answer — and falls back to re-running.
+- **Views**: every query is maintained (`docs/plan-v4.md` §1.5). A query
+  is a plan, and `peer.view(name, args)` runs its middleware — input
+  checks, guards, provides — over the peer's store, hydrates the plan in the
+  scope that gives, and keeps `ark::view`'s entries: each candidate row or
+  group, what its subtree looked up and joined on, and whether its having
+  admitted it. `update` hands the changes of one settle to
+  `ark::view::push_all`, which rebuilds the entries they touch — once each,
+  against the store as it now is, at any depth of lookups and related
+  lists — and reports patches that splice the old list into the new; a
+  limit's window refills from the entries rather than the store. A change
+  costs the entries it touches, whatever the size of the list; a change
+  nothing depends on costs two index probes. The tables the middleware
+  reads (`ark::ir::reads`) are kept too: a change to one of them, or another
+  user signed in, runs the middleware again, and a different outcome — a
+  playlist renamed under an open page, or deleted so `owned` refuses — is a
+  re-hydrate (an empty list on a refusal) and `Update::Reset`, as a rebase
+  (`Rebuilt`) is.
 - **The link**: `connect(url)` dials on the next `pump`; a drop dials again
   after half a second, doubling to thirty (`Timing`). A denial (`Denied`, a
   token the server does not accept) stops the link: `set_token` and
@@ -163,8 +172,10 @@ here.
 ## Tested, and not
 
 `cargo test -p ark-client` tests the link's backoff and its reset on open,
-a refused native connection reported closed, the URL authority, base64, and
-the diff a re-run view reports. The peer against a real server is tested in
+a refused native connection reported closed, the URL authority, base64,
+the demo's `items` patch by patch and under seeded churn, and a view reset by
+its middleware (a playlist renamed and deleted under it) and by another user
+signing in. The peer against a real server is tested in
 ark-server (`tests/sync.rs`, `tests/live.rs`, `tests/auth.rs`): two peers
 syncing over sockets, an offline edit rebased on reconnect (a `Rebuilt` and
 a `Reset` view), a view following the log patch by patch, pending intents
