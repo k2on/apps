@@ -265,6 +265,19 @@ impl std::fmt::Debug for Peer {
     }
 }
 
+// Two intents' ids compared, to decide what `persist_pending` writes:
+// counted in a test, per thread, as the engine counts its copies.
+fn same_id(a: &Id, b: &Id) -> bool {
+    #[cfg(test)]
+    COMPARED.with(|n| n.set(n.get() + 1));
+    a == b
+}
+
+#[cfg(test)]
+thread_local! {
+    static COMPARED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 fn mode_word(alone: bool) -> &'static str {
     if alone {
         "alone"
@@ -901,21 +914,40 @@ impl Peer {
     /// nothing else (`docs/plan-perf.md` §R3) — or a snapshot where the
     /// storage's copy is unknown, the move is not a page's shape, or nothing
     /// is left pending.
+    ///
+    /// Whether the list only grew is decided by one comparison, not by
+    /// reading the list (`docs/plan-perf.md` Round 4): comparing what was
+    /// last written with what is pending, id by id, on every `mutate` made a
+    /// tap cost the backlog — about 2 ns an intent, linear in it. The
+    /// pending list changes in two ways only — intents leave it, in any
+    /// place, and the rest keep their order (an answer, a rebase's replay
+    /// dropping one, a snapshot re-opened with them on top), and new intents
+    /// join at the end with ids never held before — so the last intent
+    /// written is still at its place exactly when nothing before it left:
+    /// then what is pending is what was written with the rest after it, and
+    /// the same length is the same list. A debug build compares them whole
+    /// and says so if not.
     fn persist_pending(&mut self) -> Result<(), Error> {
         let pending = &self.client.replica.pending;
         let Some(held) = &self.wrote_pending else {
             return self.snapshot_pending();
         };
-        if held.len() == pending.len() && held.iter().zip(pending).all(|(h, e)| *h == e.id) {
+        let n = held.len();
+        let grew = n == 0 || pending.get(n - 1).is_some_and(|e| same_id(&e.id, &held[n - 1]));
+        debug_assert!(
+            !grew || held.iter().zip(pending).all(|(h, e)| *h == e.id),
+            "the last intent written is in its place, and one before it is not"
+        );
+        if grew && n == pending.len() {
             return Ok(());
         }
         if pending.is_empty() {
             return self.snapshot_pending();
         }
         // What `mutate` makes — the same list with intents after it — is
-        // found without a set; a pump's answers take one.
-        let (add, drop): (Vec<&ark::log::Entry>, Vec<Id>) = if held.len() < pending.len() && held.iter().zip(pending).all(|(h, e)| *h == e.id) {
-            (pending[held.len()..].iter().collect(), vec![])
+        // found by that one comparison; a pump's answers take a set.
+        let (add, drop): (Vec<&ark::log::Entry>, Vec<Id>) = if grew {
+            (pending[n..].iter().collect(), vec![])
         } else {
             let now: BTreeSet<Id> = pending.iter().map(|e| e.id).collect();
             let was: BTreeSet<Id> = held.iter().copied().collect();
@@ -1198,6 +1230,30 @@ mod tests {
             matches!(&hello, Some(ClientMsg::Hello { sub, .. }) if sub.log_id == Some([3; 16]) && sub.since == 21),
             "{hello:?}"
         );
+    }
+
+    /// Round 4: what `mutate` writes is decided by one comparison however
+    /// much is pending — one id compared at 300 pending and at 2,400 —
+    /// and a pump that moved nothing compares one too. Falsified by
+    /// deciding it as it was, id by id through the list written: a mutate
+    /// compares 300 at 300 pending, and the pump after it 301.
+    #[test]
+    fn deciding_what_a_mutate_writes_compares_one_id() {
+        let compared = || COMPARED.with(|n| n.get());
+        let mut p = Peer::open_memory(demo::domain(), Options::dev("alice")).unwrap();
+        let mut per = vec![];
+        for n in 0..2_401usize {
+            let before = compared();
+            p.mutate("create_playlist", args([("name", Value::text(format!("p{n}")))])).unwrap();
+            if n == 300 || n == 2_400 {
+                per.push(compared() - before);
+                let before = compared();
+                p.pump();
+                assert_eq!(compared() - before, 1, "a pump that moved nothing, at {n}");
+            }
+        }
+        assert_eq!(per, [1, 1], "ids compared by a mutate at 300 and 2,400 pending");
+        assert_eq!(p.pending_len(), 2_401);
     }
 
     #[test]
