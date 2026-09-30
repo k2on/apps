@@ -103,6 +103,56 @@ additions land after the other's, in the order the server sequenced them.
 A window with no remembered login opens signed out and offers a sign-in
 button.
 
+## harken-peer, and the fleet
+
+`harken-peer` is a peer with no screen, built beside the server (the
+`harken-server` package ships both). It opens a replica in a directory,
+signs in the way the desktop does in dev auth, dials the sync socket and
+pumps; it reads commands as JSON lines on stdin and answers one line each,
+ids and rows in the vectors' dialect (`ark::json`):
+
+    harken-peer --dir /tmp/alice --server http://127.0.0.1:8787 --user alice
+    {"cmd":"mutate","name":"create_playlist","args":{"name":"Road trip"}}
+    {"ok":true,"id":{"$id":"…"}}
+    {"cmd":"settle"}
+    {"ok":true,"cursor":1,"pending":0}
+
+`mutate`, `status`, `hash`, `wait`, `settle`, `query`, `rejections`,
+`standing`, `disconnect`, `reconnect`, `sign_in`, `sign_out`, `persist`,
+`quit`; the source's first page says what each answers. Without `--user` it
+opens signed out, authoring as nobody until `sign_in`.
+
+`server/tests/fleet.rs` is the process fleet (`docs/plan-fleet.md`): the
+real server and real peers as child processes on loopback, each peer behind
+a TCP proxy the test black-holes, cuts, pauses and replays through, and
+every scenario ending on one invariant — every replica's confirmed state
+hashes as the server's log does, and every accepted intent is in it once.
+
+    cd rust && cargo test -p harken-server --test fleet -- --nocapture   # the timings
+    FLEET_LONG=1 cargo test -p harken-server --test fleet the_seeded_fuzz -- --nocapture
+    FLEET_SEED=12345 cargo test -p harken-server --test fleet the_seeded_fuzz
+    cargo test -p harken-server --test fleet -- --ignored                # the witnesses
+
+The fuzz runs 20 steps on a fixed seed by default, and 2,000 on a seed from
+the clock under `FLEET_LONG=1`; `FLEET_SEED` names one either way, and a
+failure prints the seed and the schedule. A scenario marked `#[ignore = "witness: …"]` is a bug
+found in the engine and left failing on purpose until it is fixed there. A
+failed fleet keeps its directory — the server's log, every replica and every
+stderr — and says where; `FLEET_KEEP=1` keeps it always.
+
+`nix build .#fleet-vm` is the same idea on three NixOS machines under the
+real `services.harken`: an interface taken down, the service restarted, the
+server crashed and booted, files copied into the media directory. The test
+asks for the `kvm` system feature, which is why it is a package and not one
+of the checks. A machine without `/dev/kvm` can still run it, with qemu
+falling back to emulation, by saying it has the feature:
+
+    nix build .#fleet-vm --option system-features "nixos-test benchmark big-parallel kvm"
+
+which took eleven minutes on a four-core container (the test script
+itself five and a half, most of it booting the server again after the
+crash).
+
 ## Not verified
 
 No phone has run either frozen app, and the iOS screens have not met a

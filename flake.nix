@@ -256,6 +256,16 @@
             # The two pieces an ARM Linux needed, on their own.
             inherit aapt2;
             android-sdk = androidSdk;
+            # The fleet on three NixOS machines (docs/plan-fleet.md §3): an
+            # interface down, the service restarted, the server crashed, the
+            # scanner over a bound directory. A package and not a check: it
+            # wants /dev/kvm, and under TCG it takes most of an hour.
+            fleet-vm = import ./harken/server/nix/fleet-vm.nix {
+              inherit pkgs;
+              module = import ./harken/server/nix/module.nix { packages = self.packages; };
+              # Both binaries: the server, and harken-peer beside it.
+              harken-server = crate { pname = "harken-server"; };
+            };
           };
 
           checks = {

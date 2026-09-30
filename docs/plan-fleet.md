@@ -229,3 +229,110 @@ proposed fix, not fixed in place** — those fixes are decided by the
 coordinator and handed out separately, so that a scenario stays a witness
 rather than becoming a patch. Every scenario is falsified once. The
 commit rules of `docs/plan-v4.md` Part 2 apply.
+
+## Measured
+
+What landed, and what it found. The fleet is `harken/server/tests/fleet.rs`
+over `tests/support/{fleet,proxy}.rs`; the peer is
+`harken/server/src/bin/harken-peer.rs`; the machines are
+`harken/server/nix/fleet-vm.nix`. Numbers are from this container (four
+cores, a debug build, nothing else running unless said), printed by
+`cargo test -p harken-server --test fleet -- --nocapture`.
+
+| what | took |
+|---|---|
+| the whole default fleet (13 scenarios, the fuzz at 20 steps) | 17 s |
+| a fresh peer syncs 1,500 entries over a real socket (370 KB from the server) | 3.9 s |
+| …the same, its connection cut twice mid-page | 4.1 s |
+| converge after a black hole of twenty intents | 0.29 s |
+| three peers online, 25 interleaved playlist moves, converge | 0.29 s |
+| the server restarted: to listening | 52–82 ms |
+| …to the first re-ack | 0.19–0.40 s |
+| …to converged | 0.43–0.76 s |
+| a black-holed socket closed by the server (keepalive 300 ms × 3) | 1.03 s |
+| …and noticed by the peer on its own | 1.03 s |
+| converge after the keepalive closed a black hole | 0.29 s |
+| seed 1,500 entries through one peer (`FLEET_LONG=1`) | 51.5 s |
+| the fuzz, 2,000 steps, 3–5 peers, whole run (with the §4 fix below) | 16–38 s |
+
+`log.ark-log` is about 348 bytes an entry for playlists (46 entries, 16 KB)
+and 521 for the mixed 1,500 of scenario 5 (500 songs, 10 playlists, 990
+adds: 782 KB).
+
+**Found, and left as a witness.** `a_server_killed_mid_stream_loses_nothing`
+(3b) is `#[ignore = "witness: …"]`. `Hub::after` delivers what the machine
+queued — the `Ack` to the author, the `Batch` to everyone else — and only
+then writes `log.ark-log`. A `kill -9` between the two leaves peers
+confirmed past the file: over a 1,500-entry log the first of eight rounds
+fails, three runs of three —
+
+    round 0: a confirmed up to 1501 and log.ark-log holds 1500: the server said it before it wrote it
+
+— and the restarted server gives those sequences to other entries. Every
+cursor then agrees with the head, so nothing retries; the state hashes
+differ for ever, and an intent whose ack was taken is stuck pending (its
+re-ack names a sequence the peer believes it is past). The long fuzz found
+the same thing on its own (`FLEET_LONG=1 FLEET_SEED=1790774728680826455`:
+one peer at the head with a different hash and nine pending). Moving
+`self.persist()` before the sending loop makes 3b pass all eight rounds and
+that seed, 42 and 7 converge at 2,000 steps; the fix belongs in
+`rust/ark-server` and was not made here. Two further proposals the same
+witness argues for: a `Hello` whose `since` is past the log's head is a
+peer from a log this server no longer has, and should be answered (a
+snapshot, or a denial that says so) rather than served nothing; and
+`persist::save` renames without an `fsync` of the file or the directory,
+which a process kill cannot tear but a power cut can (`fleet-vm`'s
+`server.crash()` is the one place that would show it).
+
+**Looked for, and not found.** The log file is not torn by a kill:
+`persist.rs` already writes a temporary name and renames it into place (§4
+guessed otherwise), and every kill in 3a, 3b and the fuzz read back whole.
+A `Duplicate` after a peer's restart does advance its cursor (4b). A
+repeated `Hello` on one connection is paging, not a departure (11). The
+keepalive closes a black-holed socket at both ends (10). Revoking a session
+needed nothing new in `ark-auth`: `/auth/logout` with the peer's token
+does it (8).
+
+**Performance, for the other pass.** Every push rewrites the whole log,
+so seeding 1,500 entries through one peer takes 51.5 s, about 34 ms an
+entry at the end; scenario 5 seeds the log before the server starts
+instead, and pushes through a peer only under `FLEET_LONG=1`.
+`Log::entries_after` cloning the remainder per page was not isolated: a
+fresh sync of 1,500 is six pages and 3.9 s, and nothing here says how much
+of that is the clone. In the domain, `create_playlist` reads every other
+playlist of its owner to name the new one, with a fold whose step filters
+the whole list again: 1,500 playlists for one owner did not finish seeding
+in twelve minutes, so the witness seeds songs.
+
+**Corrections to this plan.** Files "copied again under new names" are
+new songs — a song is its path, in `add_song`; scenario 9 asserts that
+rewriting the same names is not, and that new names are. Scenario 8 needed
+the socket cut after the revocation: the token is asked at `Hello` and not
+again, so a revoked session's open connection goes on until it drops.
+
+**The harness's own bugs, each found by a scenario.** `harken-peer`
+pumped only when stdin was quiet, so a driver polling `status` every ten
+milliseconds starved it (it keeps its own clock now). `converged` forgave
+any refusal and so passed scenario 8's falsification (a refusal now fails
+every scenario but the fuzz). The second mid-page cut was armed after the
+first fired, which a peer quick to redial outran under load (cuts queue).
+Rejections are written to `DIR/rejections.jsonl` as they arrive, because
+the engine keeps a verdict only in memory and a peer killed before it was
+asked took the verdict with it.
+
+**`fleet-vm`, under TCG.** The machines ran here with no `/dev/kvm`:
+the test declares the `kvm` feature, so `nix build .#fleet-vm --option
+system-features "nixos-test benchmark big-parallel kvm"` lets qemu fall
+back to emulation. All four subtests passed — sign-in by hostname and the
+scanner's two songs (12 s), both interfaces down with the service
+restarted underneath (15 s), a crash and a boot from
+`/var/lib/private/harken` (123 s, nearly all of it the boot), and files
+copied into `/srv/media/music` (8 s) — in a 328 s test script, eleven
+minutes from start to finish. The crash did not find the missing `fsync`:
+the log had been written back before it. Its first run found a harness
+mistake instead: `settle` is "nothing pending, the cursor still for two
+pumps", which a peer under emulation satisfied before its first batch
+arrived, so the machines wait for the head `/healthz` reports.
+
+**Not verified.** The fleet also runs inside `nix flake check`'s `rust`
+check, on loopback, in the build sandbox.
