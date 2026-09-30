@@ -417,11 +417,18 @@ not bound in the node's scope is `UnboundSymbol`, as anywhere.
 
 ### 1.13 Risks, stated as risks
 
-- **Group rebuilds are whole-group.** `artists` regroups one creator's
-  media per media change; a creator with a thousand tracks costs a
-  thousand-row rebuild per tap on any of them. Acceptable for a library;
-  a maintained aggregate (a count kept as a number, moved by ±1) is the
-  next step if it is not, and the plan shape leaves room for it.
+- **Group rebuilds are whole-group only where a list is used as a
+  list.** Where every use of a related list or of a group's `members` is
+  `len`, or a `fold` of `acc + f(x)` with `f` reading only the element
+  (a helper whose whole body is one included), the view keeps the number
+  instead (`docs/plan-perf.md` R9): recognised at hydrate, nothing on the
+  wire, moved by a change's old and new rows' terms and composed up a
+  nesting — a song under `composers` moves a count, two sums and one
+  node, one `get`, where it rebuilt the composer's works, movements and
+  songs. `artists`, `composers`, `works` and `recordings`' count are
+  kept; a list read any other way — `albums`' `first`, a `map`, a
+  `performers(credits, …)` — is still rebuilt whole, a thousand-row
+  rebuild per tap for a creator with a thousand tracks.
 - **Expression order keys under a limit are exact but not cheap to
   hydrate**: every candidate's keys are computed at hydrate. That is what
   v3's `select` did too (it sorted every admitted row), so no regression;
