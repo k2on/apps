@@ -207,11 +207,13 @@ fn perf_c_pump_alone() {
 /// A peer with a server it cannot reach — offline, or not yet caught up,
 /// or the scanner authoring a whole directory before its first pump — so
 /// every intent stays pending: what `mutate` costs as the pending list
-/// grows, when it writes the `pending` record each time.
+/// grows. It wrote the whole `pending` record each time; since
+/// `docs/plan-perf.md` §R3 it writes one `pending.<n>` page, and the bytes
+/// on the directory are the snapshot and every page.
 #[test]
 #[ignore]
 fn perf_c_offline_pending() {
-    header("(c) offline: mutate with N pending (the pending record rewritten each time)");
+    header("(c) offline: mutate with N pending (one pending page per mutate)");
     for n in [500u64, 2000, 8000] {
         for dir in [false, true] {
             let tmp = tempfile::tempdir().unwrap();
@@ -228,8 +230,13 @@ fn perf_c_offline_pending() {
                     t.elapsed()
                 })
                 .collect();
-            let bytes = if dir {
-                std::fs::metadata(tmp.path().join("pending")).map(|m| m.len()).unwrap_or(0)
+            let bytes: u64 = if dir {
+                std::fs::read_dir(tmp.path())
+                    .unwrap()
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.file_name().to_string_lossy().starts_with("pending"))
+                    .map(|e| e.metadata().map_or(0, |m| m.len()))
+                    .sum()
             } else {
                 0
             };

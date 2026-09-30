@@ -16,7 +16,10 @@ use ark::value::{Id, Value};
 
 use crate::autos::Autos;
 use crate::link::{platform_dial, Dial, Link, State, Timing};
-use crate::storage::{count_pages, decode_pending, encode_page, encode_pending, encode_replica, encode_who, BoxStorage, Memory, ReplicaFile, Stored};
+use crate::storage::{
+    count_pages, encode_page, encode_pending_page, encode_pending_snapshot, encode_replica, encode_who, load_pending, BoxStorage, Memory,
+    PendingStored, ReplicaFile, Stored,
+};
 use crate::view::View;
 use crate::{Domain, Error};
 
@@ -178,11 +181,16 @@ pub struct Peer {
     /// What the storage holds of the confirmed store: the snapshot and the
     /// journal after it.
     durable: Durable,
-    /// What the `who` record holds, and what the `pending` record holds —
-    /// the intents' ids — or `None` where it is behind in a way those do
-    /// not show (nothing written yet; pending re-stamped by a sign-in).
+    /// What the `who` record holds, and what the `pending` snapshot and its
+    /// pages hold together — the intents' ids, in order — or `None` where
+    /// it is behind in a way those do not show (nothing written yet;
+    /// pending re-stamped by a sign-in; a page that may or may not have
+    /// landed), which makes the next write a snapshot.
     wrote_who: Option<Ctx>,
     wrote_pending: Option<Vec<Id>>,
+    /// What the storage holds of the pending intents besides their ids:
+    /// the snapshot and the pages after it.
+    pending_file: PendingFile,
     link: Option<Link>,
     rejections: Vec<Rejection>,
     /// Every intent authored here this run or found pending at open.
@@ -209,6 +217,29 @@ struct Durable {
     /// `open` found a page it could not use — so the next write is a
     /// snapshot.
     snapshot_due: bool,
+}
+
+/// The pending intents as the storage has them (`storage` module docs):
+/// a snapshot of generation `gen`, and `pages` pages after it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct PendingFile {
+    gen: i64,
+    snapshot_bytes: usize,
+    /// `pending.1` to `pending.<pages>`: the pages on the storage, which a
+    /// compaction removes.
+    pages: usize,
+    page_bytes: usize,
+}
+
+impl PendingFile {
+    fn of(st: &PendingStored) -> PendingFile {
+        PendingFile {
+            gen: st.gen,
+            snapshot_bytes: st.snapshot_bytes,
+            pages: st.found,
+            page_bytes: st.page_bytes,
+        }
+    }
 }
 
 impl Drop for Peer {
@@ -248,7 +279,7 @@ impl Peer {
         // What the records hold decides what is written first: a storage
         // with no replica yet has everything written at the end of this
         // open, and one whose journal could not all be read is compacted.
-        let (confirmed, cursor, pending, was, durable, wrote_who, mut wrote_pending) = match Stored::load(&*storage, &schema)? {
+        let (confirmed, cursor, pending, was, durable, wrote_who, mut wrote_pending, pending_file) = match Stored::load(&*storage, &schema)? {
             Some(st) => {
                 let f = st.file;
                 if f.mode != mode_word(opts.alone) {
@@ -266,15 +297,17 @@ impl Peer {
                     cursor: f.cursor,
                     snapshot_due: !st.clean,
                 };
-                (f.confirmed, f.cursor, f.pending, was.clone(), durable, Some(was), Some(ids))
+                // Pending pages that could not all be read, or none written
+                // yet: the open's write is a snapshot of them.
+                let ids = st.pending.clean.then_some(ids);
+                let pending_file = PendingFile::of(&st.pending);
+                (f.confirmed, f.cursor, f.pending, was.clone(), durable, Some(was), ids, pending_file)
             }
             None => {
                 // No store yet, but perhaps intents: a run that stopped between
                 // writing them and writing the store. They are kept.
-                let pending = match storage.load(ReplicaFile::PENDING)? {
-                    Some(bytes) => decode_pending(&bytes)?,
-                    None => vec![],
-                };
+                let (pending, pending_stored) = load_pending(&*storage)?;
+                let pending = pending.unwrap_or_default();
                 let durable = Durable {
                     snapshot_bytes: 0,
                     pages: count_pages(&*storage)?,
@@ -282,7 +315,17 @@ impl Peer {
                     cursor: 0,
                     snapshot_due: true,
                 };
-                (MemoryStore::empty(schema.clone()), 0, pending, Ctx::nobody(), durable, None, None)
+                let pending_file = PendingFile::of(&pending_stored);
+                (
+                    MemoryStore::empty(schema.clone()),
+                    0,
+                    pending,
+                    Ctx::nobody(),
+                    durable,
+                    None,
+                    None,
+                    pending_file,
+                )
             }
         };
         let authored = pending.iter().map(|e| e.id).collect();
@@ -331,6 +374,7 @@ impl Peer {
             durable,
             wrote_who,
             wrote_pending,
+            pending_file,
             link: None,
             rejections: vec![],
             authored,
@@ -353,8 +397,8 @@ impl Peer {
         Peer::open(domain, Box::new(Memory::new()), opts)
     }
 
-    /// A directory, holding the files `replica`, `facts.<n>`, `pending` and
-    /// `who`.
+    /// A directory, holding the files `replica`, `facts.<n>`, `pending`,
+    /// `pending.<n>` and `who`.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn open_path(domain: Domain, dir: impl Into<std::path::PathBuf>, opts: Options) -> Result<Peer, Error> {
         Peer::open(domain, Box::new(crate::storage::Dir(dir.into())), opts)
@@ -766,14 +810,16 @@ impl Peer {
     /// Write down what moved: the pending intents when they did, the login
     /// when it did, then what the confirmed store moved by — in that order,
     /// so a stop between the first and the last leaves an intent to be
-    /// sent again rather than one applied twice. The confirmed store goes
-    /// down as a journal page of the sequences since the last write, or as
-    /// a snapshot when it was replaced or the pages have outgrown the last
-    /// one (the `storage` module docs). `pump` calls it on every turn, with
-    /// or without a link, and so does dropping the peer; a caller driving
-    /// the sans-io half by hand calls it after `recv`.
+    /// sent again rather than one applied twice. Each goes down as a page
+    /// of what moved since the last write, or as a snapshot when a page
+    /// cannot say it or the pages have outgrown the last one — and the
+    /// pending intents as a snapshot, too, once none are left (the
+    /// `storage` module docs). `pump` calls it on every turn, with or
+    /// without a link, and so does dropping the peer; a caller driving the
+    /// sans-io half by hand calls it after `recv`.
     pub fn persist(&mut self) -> Result<(), Error> {
         self.persist_pending()?;
+        self.compact_pending()?;
         if self.wrote_who.as_ref() != Some(&self.ctx) {
             self.storage.save(ReplicaFile::WHO, &encode_who(&self.ctx.user, &self.ctx.session))?;
             self.wrote_who = Some(self.ctx.clone());
@@ -838,14 +884,87 @@ impl Peer {
         Ok(())
     }
 
-    /// The pending intents, if they moved since they were last written.
+    /// The pending intents, if they moved since they were last written: one
+    /// page of what moved — what `mutate` writes, before it returns, and
+    /// nothing else (`docs/plan-perf.md` §R3) — or a snapshot where the
+    /// storage's copy is unknown, the move is not a page's shape, or nothing
+    /// is left pending.
     fn persist_pending(&mut self) -> Result<(), Error> {
         let pending = &self.client.replica.pending;
-        let ids: Vec<Id> = pending.iter().map(|e| e.id).collect();
-        if self.wrote_pending.as_ref() == Some(&ids) {
+        let Some(held) = &self.wrote_pending else {
+            return self.snapshot_pending();
+        };
+        if held.len() == pending.len() && held.iter().zip(pending).all(|(h, e)| *h == e.id) {
             return Ok(());
         }
-        self.storage.save(ReplicaFile::PENDING, &encode_pending(pending))?;
+        if pending.is_empty() {
+            return self.snapshot_pending();
+        }
+        // What `mutate` makes — the same list with intents after it — is
+        // found without a set; a pump's answers take one.
+        let (add, drop): (Vec<&ark::log::Entry>, Vec<Id>) = if held.len() < pending.len() && held.iter().zip(pending).all(|(h, e)| *h == e.id) {
+            (pending[held.len()..].iter().collect(), vec![])
+        } else {
+            let now: BTreeSet<Id> = pending.iter().map(|e| e.id).collect();
+            let was: BTreeSet<Id> = held.iter().copied().collect();
+            let add: Vec<&ark::log::Entry> = pending.iter().filter(|e| !was.contains(&e.id)).collect();
+            let drop: Vec<Id> = held.iter().filter(|i| !now.contains(*i)).copied().collect();
+            // A page says "without these, then these": a list that moved
+            // any other way is a snapshot.
+            let says = held.iter().filter(|i| now.contains(*i)).chain(add.iter().map(|e| &e.id));
+            if !says.eq(pending.iter().map(|e| &e.id)) {
+                return self.snapshot_pending();
+            }
+            (add, drop)
+        };
+        let bytes = encode_pending_page(self.pending_file.gen, &add, &drop);
+        let key = ReplicaFile::pending_page_key(self.pending_file.pages + 1);
+        let added: Vec<Id> = add.iter().map(|e| e.id).collect();
+        if let Err(e) = self.storage.save(&key, &bytes) {
+            // Whether it landed is not known: a snapshot says it either way.
+            self.wrote_pending = None;
+            return Err(e);
+        }
+        self.pending_file.pages += 1;
+        self.pending_file.page_bytes += bytes.len();
+        let held = self.wrote_pending.as_mut().expect("checked above");
+        if !drop.is_empty() {
+            let gone: BTreeSet<Id> = drop.into_iter().collect();
+            held.retain(|i| !gone.contains(i));
+        }
+        held.extend(added);
+        Ok(())
+    }
+
+    /// Compact the pending intents once their pages outgrow the snapshot, or
+    /// once nothing is pending and pages are left: on a pump, never inside
+    /// `mutate`, so a tap costs its page and nothing else.
+    fn compact_pending(&mut self) -> Result<(), Error> {
+        let f = &self.pending_file;
+        if f.pages > 0 && (f.page_bytes > f.snapshot_bytes || self.client.replica.pending.is_empty()) {
+            self.snapshot_pending()?;
+        }
+        Ok(())
+    }
+
+    /// The pending intents whole, as a snapshot of the next generation,
+    /// then the pages it now holds removed, newest first — so a stop
+    /// anywhere leaves only pages of an older generation, which `open`
+    /// skips.
+    fn snapshot_pending(&mut self) -> Result<(), Error> {
+        self.wrote_pending = None;
+        let pending = &self.client.replica.pending;
+        let gen = self.pending_file.gen + 1;
+        let bytes = encode_pending_snapshot(gen, pending);
+        let ids: Vec<Id> = pending.iter().map(|e| e.id).collect();
+        self.storage.save(ReplicaFile::PENDING, &bytes)?;
+        self.pending_file.gen = gen;
+        self.pending_file.snapshot_bytes = bytes.len();
+        for n in (1..=self.pending_file.pages).rev() {
+            self.storage.remove(&ReplicaFile::pending_page_key(n))?;
+            self.pending_file.pages = n - 1;
+        }
+        self.pending_file.page_bytes = 0;
         self.wrote_pending = Some(ids);
         Ok(())
     }
@@ -914,7 +1033,7 @@ pub fn refusal_text(r: &Refusal) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::Storage;
+    use crate::storage::{encode_pending, Storage};
     use crate::{args, demo};
     use ark::store::Store;
 
@@ -955,10 +1074,14 @@ mod tests {
         let pending_at_open = disk.load(ReplicaFile::PENDING).unwrap().unwrap();
         p.mutate("create_playlist", args([("name", Value::text("Mine"))])).unwrap();
         assert_eq!(disk.load(ReplicaFile::KEY).unwrap().unwrap(), store_at_open, "the store did not move");
-        assert_ne!(
+        assert_eq!(
             disk.load(ReplicaFile::PENDING).unwrap().unwrap(),
             pending_at_open,
-            "the intent was written"
+            "the intents' snapshot did not move"
+        );
+        assert!(
+            disk.load(&ReplicaFile::pending_page_key(1)).unwrap().is_some(),
+            "the intent was written, as a page"
         );
         drop(p);
 

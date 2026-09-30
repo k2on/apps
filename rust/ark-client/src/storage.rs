@@ -11,7 +11,10 @@
 //! facts.1   { t: "facts", from, to, facts: [[change…], …] }    the journal:
 //! facts.2   …                                                  one page per
 //!                                                              write, dense
-//! pending   { t: "pending", entries: [entry…] }
+//! pending   { t: "pending", gen, entries: [entry…] }       the intents'
+//! pending.1 { t: "pending-ops", gen, add: [entry…],          snapshot, and
+//!             drop: [id…] }                                  their pages
+//! pending.2 …
 //! who       { t: "who", user, session }
 //! ```
 //!
@@ -51,6 +54,37 @@
 //! a compaction as the peer opens. A torn tail costs the sequences in it,
 //! which a server sends again and a peer alone had not yet written down.
 //!
+//! **The pending intents are a snapshot and pages too**
+//! (`docs/plan-perf.md` §R3), for the same reason: rewriting every intent on
+//! every `mutate` made a tap cost the backlog — 21 ms each at eight thousand
+//! pending, which is where the scanner is after authoring a directory
+//! offline. `pending` is the snapshot; each page after it says what moved
+//! since, as the ids that left (`drop`: acknowledged, or refused) and the
+//! intents that joined (`add`), and the list it stands for is the one
+//! before it without the dropped, then the added, in order. `mutate` writes
+//! one page holding its one intent before it returns, alone — the
+//! durability of a local write (`spec/README.md`) is that page — and a pump
+//! whose answers moved the list writes one page of what they moved.
+//! Compaction writes a fresh snapshot and removes the pages once they
+//! outgrow it, or once nothing is pending (then the snapshot is a few bytes
+//! and is written in place of the page). It happens on a pump, never inside
+//! `mutate`, so what a tap writes is its page and nothing else.
+//!
+//! **`gen` is what makes a stop inside a compaction safe.** Pages are not
+//! idempotent — replaying an old `add` after a snapshot that no longer
+//! holds the intent would resurrect one the server has already answered —
+//! so each snapshot carries a generation, one more than the last, and each
+//! page the generation of the snapshot it extends. A compaction writes the
+//! snapshot and then removes the pages, newest first; what a stop between
+//! leaves is pages of an older generation, which `open` skips. A page of
+//! the right generation that does not decode — a write the platform tore —
+//! or adds an intent already held ends the pages: it and everything after
+//! it are dropped, never applied out of order, and a compaction as the peer
+//! opens cleans up whatever was skipped or dropped. A torn page costs the
+//! one intent it held: `mutate` had not returned. A `pending` record
+//! written before pages existed has no `gen`, reads as generation 0, and
+//! opens unchanged.
+//!
 //! **The login is a record of its own** (`who`): the one this peer last
 //! authored as, both empty while nobody has signed in on it, so a peer
 //! reopened signed out goes on authoring as whoever it was. It moves on a
@@ -69,7 +103,7 @@
 //! and the demo — cloneable, so a test can "reopen" from what a peer left
 //! behind).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
 use ark::canon;
@@ -77,7 +111,7 @@ use ark::log::{Entry, Facts, Seq};
 use ark::protocol::{change_from_value, change_value, entry_from_value, entry_value};
 use ark::schema::Schema;
 use ark::store::{Change, MemoryStore, Store};
-use ark::value::Value;
+use ark::value::{Id, Value};
 
 use crate::Error;
 
@@ -305,6 +339,11 @@ impl ReplicaFile {
         format!("facts.{n}")
     }
 
+    /// The key of the pending intents' `n`th page, counting from 1.
+    pub fn pending_page_key(n: usize) -> String {
+        format!("pending.{n}")
+    }
+
     /// The `replica` record: a snapshot of everything but the pending
     /// intents.
     pub fn encode(&self) -> Vec<u8> {
@@ -400,6 +439,8 @@ pub struct Stored {
     /// already holds, or dropped as a torn or out-of-order tail — which a
     /// compaction then cleans up.
     pub clean: bool,
+    /// What the pending intents' records looked like.
+    pub pending: PendingStored,
 }
 
 impl Stored {
@@ -439,8 +480,9 @@ impl Stored {
         if let Some(bytes) = storage.load(ReplicaFile::WHO)? {
             (file.user, file.session) = decode_who(&bytes)?;
         }
-        if let Some(bytes) = storage.load(ReplicaFile::PENDING)? {
-            file.pending = decode_pending(&bytes)?;
+        let (entries, pending) = load_pending(storage)?;
+        if let Some(entries) = entries {
+            file.pending = entries;
         }
         Ok(Some(Stored {
             file,
@@ -450,6 +492,7 @@ impl Stored {
             page_bytes,
             found,
             clean,
+            pending,
         }))
     }
 }
@@ -566,7 +609,8 @@ pub fn encode_replica(mode: &str, cursor: Seq, confirmed: &MemoryStore, user: &s
     ]))
 }
 
-/// The `pending` record's bytes.
+/// The `pending` record's bytes, as a storage written before pages had
+/// it: generation 0.
 pub fn encode_pending(pending: &[Entry]) -> Vec<u8> {
     canon::encode(&Value::record(vec![
         ("t", Value::text("pending")),
@@ -574,21 +618,159 @@ pub fn encode_pending(pending: &[Entry]) -> Vec<u8> {
     ]))
 }
 
+/// The `pending` record's bytes as a snapshot of generation `gen`: the
+/// intents, and which pages extend it.
+pub fn encode_pending_snapshot(gen: i64, pending: &[Entry]) -> Vec<u8> {
+    canon::encode(&Value::record(vec![
+        ("t", Value::text("pending")),
+        ("gen", Value::Int(gen)),
+        ("entries", Value::List(pending.iter().map(entry_value).collect())),
+    ]))
+}
+
 /// The intents a `pending` record holds.
 pub fn decode_pending(bytes: &[u8]) -> Result<Vec<Entry>, Error> {
+    decode_pending_snapshot(bytes).map(|(_, entries)| entries)
+}
+
+/// A `pending` record: its generation (0 where it has none) and its
+/// intents.
+pub fn decode_pending_snapshot(bytes: &[u8]) -> Result<(i64, Vec<Entry>), Error> {
     let bad = |w: &str| Error::Corrupt(format!("a pending file: {w}"));
     let v = canon::decode(bytes).map_err(|e| bad(&e.to_string()))?;
     let Value::Struct(m) = &v else { return Err(bad("not a struct")) };
     if m.get("t") != Some(&Value::text("pending")) {
         return Err(bad("not pending intents"));
     }
+    let gen = match m.get("gen") {
+        None => 0,
+        Some(Value::Int(n)) => *n,
+        Some(_) => return Err(bad("gen is not an int")),
+    };
     let Some(Value::List(ps)) = m.get("entries") else {
         return Err(bad("no entries"));
     };
-    ps.iter()
+    let entries = ps
+        .iter()
         .map(entry_from_value)
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| bad(&e.to_string()))
+        .map_err(|e| bad(&e.to_string()))?;
+    Ok((gen, entries))
+}
+
+/// One page of the pending intents: what moved since the page before, or
+/// since the snapshot of generation `gen`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingPage {
+    pub gen: i64,
+    /// Intents that joined, in the order they were authored.
+    pub add: Vec<Entry>,
+    /// Ids that left: acknowledged, or refused.
+    pub drop: Vec<Id>,
+}
+
+/// A pending page's bytes.
+pub fn encode_pending_page(gen: i64, add: &[&Entry], drop: &[Id]) -> Vec<u8> {
+    canon::encode(&Value::record(vec![
+        ("t", Value::text("pending-ops")),
+        ("gen", Value::Int(gen)),
+        ("add", Value::List(add.iter().map(|e| entry_value(e)).collect())),
+        ("drop", Value::List(drop.iter().map(|i| Value::Id(*i)).collect())),
+    ]))
+}
+
+/// A pending page back, whole.
+pub fn decode_pending_page(bytes: &[u8]) -> Result<PendingPage, Error> {
+    let bad = |w: &str| Error::Corrupt(format!("a pending page: {w}"));
+    let v = canon::decode(bytes).map_err(|e| bad(&e.to_string()))?;
+    let Value::Struct(m) = &v else { return Err(bad("not a struct")) };
+    if m.get("t") != Some(&Value::text("pending-ops")) {
+        return Err(bad("not a pending page"));
+    }
+    let Some(Value::Int(gen)) = m.get("gen") else {
+        return Err(bad("no gen"));
+    };
+    let (Some(Value::List(add)), Some(Value::List(drop))) = (m.get("add"), m.get("drop")) else {
+        return Err(bad("no add or drop"));
+    };
+    let add = add
+        .iter()
+        .map(entry_from_value)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| bad(&e.to_string()))?;
+    let drop = drop
+        .iter()
+        .map(|v| match v {
+            Value::Id(i) => Ok(*i),
+            _ => Err(bad("a drop is not an id")),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(PendingPage { gen: *gen, add, drop })
+}
+
+/// What the pending intents' records looked like when they were read:
+/// which decides whether the next write is a page or a snapshot.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PendingStored {
+    /// The snapshot's generation and encoded size; 0 and 0 where there is
+    /// no `pending` record.
+    pub gen: i64,
+    pub snapshot_bytes: usize,
+    /// The pages applied, and their total encoded size.
+    pub pages: usize,
+    pub page_bytes: usize,
+    /// The highest `n` with a `pending.<n>` record, good or not.
+    pub found: usize,
+    /// There is a snapshot and every page found was applied: pages can be
+    /// written on from here. `false` otherwise — which a compaction then
+    /// cleans up.
+    pub clean: bool,
+}
+
+/// The pending intents: the snapshot, then its pages in order — skipping
+/// pages of an older generation, stopping at the first that does not decode
+/// or adds an intent already held (the module docs). `None` for the intents
+/// where there is no `pending` record. Reads, never writes.
+pub fn load_pending(storage: &dyn Storage) -> Result<(Option<Vec<Entry>>, PendingStored), Error> {
+    let mut st = PendingStored::default();
+    let (gen, mut entries) = match storage.load(ReplicaFile::PENDING)? {
+        Some(bytes) => {
+            st.snapshot_bytes = bytes.len();
+            let (gen, entries) = decode_pending_snapshot(&bytes)?;
+            (gen, Some(entries))
+        }
+        None => (0, None),
+    };
+    st.gen = gen;
+    st.clean = entries.is_some();
+    let mut torn = entries.is_none();
+    let mut held: BTreeSet<Id> = entries.iter().flatten().map(|e| e.id).collect();
+    while let Some(bytes) = storage.load(&ReplicaFile::pending_page_key(st.found + 1))? {
+        st.found += 1;
+        if torn {
+            continue;
+        }
+        let list = entries.as_mut().expect("not torn, so a snapshot");
+        match decode_pending_page(&bytes) {
+            Ok(p) if p.gen < gen => st.clean = false,
+            Ok(p) if p.gen == gen && p.add.iter().all(|a| !held.contains(&a.id) || p.drop.contains(&a.id)) => {
+                let gone: BTreeSet<Id> = p.drop.iter().copied().collect();
+                if !gone.is_empty() {
+                    list.retain(|e| !gone.contains(&e.id));
+                    held.retain(|i| !gone.contains(i));
+                }
+                held.extend(p.add.iter().map(|e| e.id));
+                list.extend(p.add);
+                st.pages += 1;
+                st.page_bytes += bytes.len();
+            }
+            _ => {
+                torn = true;
+                st.clean = false;
+            }
+        }
+    }
+    Ok((entries, st))
 }
 
 #[cfg(test)]

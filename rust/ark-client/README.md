@@ -73,12 +73,23 @@ if peer.epoch() != introduced_on { /* a new connection: say who you are again */
   journal of pages, `facts.1`, `facts.2`, …, each the changes the confirmed
   store moved by for a contiguous run of sequences, in the form a
   `FactsFor` frame carries them; `pending` — the intents not yet answered —
-  written when they move; and `who`, the login last authored as, written
-  when it does, so a sign-in writes neither the store nor a page. So
-  `mutate` writes the intent and not the store, and a `pump` after it
-  writes one page of what the confirmed store moved by — a mutation's
+  the same shape, a snapshot and after it pages `pending.1`, `pending.2`,
+  …, each the ids that left and the intents that joined since the one
+  before (`docs/plan-perf.md` §R3); and `who`, the login last authored as,
+  written when it does, so a sign-in writes neither the store nor a page.
+  So `mutate` writes one page holding its intent — before it returns,
+  alone, which is the durability of a local write — and not the backlog
+  nor the store, and a `pump` after it writes one page of what its answers
+  moved and one page of what the confirmed store moved by — a mutation's
   changes, not the library, which a peer alone used to re-encode whole
-  after every tap. A snapshot is written when the confirmed store was
+  after every tap, and not every intent still pending, which a peer
+  offline used to (21 ms a tap at eight thousand pending). The pending
+  pages are compacted on a pump, never inside `mutate`: once they outgrow
+  their snapshot, and once nothing is pending, when the snapshot is a few
+  bytes and replaces the page. Each pending snapshot carries a
+  generation and each page the generation it extends, so a stop between a
+  compaction's snapshot and its removing the pages leaves pages `open`
+  skips rather than replays. A snapshot is written when the confirmed store was
   replaced (a snapshot from below the server's horizon), and to compact:
   once the pages' total size exceeds the snapshot's, a fresh one at the
   cursor, then the pages removed, newest first — so the bytes written stay
@@ -93,13 +104,17 @@ if peer.epoch() != introduced_on { /* a new connection: say who you are again */
   the window in which a crash loses the last change is one tick. A
   directory writes each record to a temporary name, syncs it, renames it
   and syncs the directory. A storage written before the journal — a
-  `replica` record and nothing after it — opens as it did. A directory
+  `replica` record and nothing after it — opens as it did, and so does a
+  `pending` record written before the pages (it has no generation, which
+  reads as 0). A torn pending page is dropped with every page after it:
+  it held the one intent whose `mutate` had not returned. A directory
   keeps the mode it was opened with — alone or with a server — and refuses
   the other (`Error::ModeMismatch`), because the sequences mean different
   things. Signed out and signed in are the same mode: one directory is
   opened either way.
   In a browser it is `localStorage`, base64 under `ark:<name>:replica`,
-  `ark:<name>:facts.<n>`, `ark:<name>:pending` and `ark:<name>:who`:
+  `ark:<name>:facts.<n>`, `ark:<name>:pending`, `ark:<name>:pending.<n>`
+  and `ark:<name>:who`:
   synchronous, which iced's `boot` needs, and limited to the origin's quota
   of about five megabytes — which, with room for the journal beside the
   snapshot, is a snapshot of about half that: a library of a few thousand

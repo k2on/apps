@@ -11,7 +11,10 @@ use ark::protocol::{open_access, trusting, Server};
 use ark::store::Store;
 use ark::value::Value;
 
-use crate::storage::{decode_page, encode_page, encode_pending, encode_replica, Memory, ReplicaFile, Storage};
+use crate::storage::{
+    decode_page, decode_pending_snapshot, encode_page, encode_pending, encode_pending_page, encode_pending_snapshot, encode_replica, Memory,
+    ReplicaFile, Storage,
+};
 use crate::{args, demo, Autos, Error, Options, Peer};
 
 /// A storage that counts what is written to it: the bytes, and the keys in
@@ -400,4 +403,240 @@ fn a_directory_round_trips_the_same_way() {
     assert_eq!((back.cursor(), back.replica().confirmed.clone()), live);
     drop(back);
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// The pending intents: a snapshot and pages ----------------------------------------
+
+fn pending_pages(disk: &Memory) -> Vec<String> {
+    disk.keys().into_iter().filter(|k| k.starts_with("pending.")).collect()
+}
+
+/// A peer with a server it is not linked to: everything it authors stays
+/// pending.
+fn offline(user: &str) -> Options {
+    Options::dev(user).with_autos(Autos::seeded(user.as_bytes()[0] as u64))
+}
+
+/// §R3 `mutate` writes one page holding its one intent, and nothing else —
+/// the same bytes with three hundred intents pending as with two thousand
+/// four hundred, and a small fraction of the snapshot a pump then folds
+/// them into. Falsified by writing the whole `pending` record on every
+/// mutate (the layout before the pages): the first mutate writes
+/// `pending`, not `pending.1`.
+#[test]
+fn a_mutate_writes_its_intent_and_not_the_backlog() {
+    let mut cost = vec![];
+    for n in [300, 2400] {
+        let disk = Counting::default();
+        let mut p = Peer::open(demo::domain(), Box::new(disk.clone()), offline("alice")).unwrap();
+        let mut each = std::collections::BTreeSet::new();
+        for i in 0..n {
+            disk.reset();
+            create(&mut p, &format!("p{i:05}"));
+            let (bytes, keys) = disk.written();
+            assert_eq!(keys, vec![ReplicaFile::pending_page_key(i + 1)], "{n}: mutate {i} writes its page alone");
+            each.insert(bytes);
+        }
+        assert_eq!(p.pending_len(), n);
+        assert_eq!(each.len(), 1, "{n}: every mutate the same bytes: {each:?}");
+        // A pump folds the pages into a snapshot; the next mutate is a page
+        // again, the same size.
+        p.pump();
+        assert!(pending_pages(&disk.inner).is_empty(), "{n}: compacted");
+        let snapshot = disk.inner.load(ReplicaFile::PENDING).unwrap().unwrap().len();
+        disk.reset();
+        create(&mut p, "p99999");
+        let (bytes, keys) = disk.written();
+        assert_eq!(keys, vec![ReplicaFile::pending_page_key(1)]);
+        assert!(each.contains(&bytes), "{n}: {bytes}, not {each:?}");
+        assert!(bytes * 100 < snapshot, "{n}: {bytes} bytes against a snapshot of {snapshot}");
+        cost.push(bytes);
+    }
+    assert_eq!(cost[0], cost[1], "the same mutate costs the same bytes whatever is pending");
+}
+
+/// §R3 Reopened after every mutate and after every pump, a peer's pending
+/// intents are the live ones: authored offline, answered a few at a time,
+/// refused, compacted as the pages outgrow the snapshot and as the list
+/// empties. Falsified by `open` reading the `pending` snapshot and not the
+/// pages after it: the first reopen after a mutate has no intent.
+#[test]
+fn reopening_after_every_mutate_and_every_pump_is_the_live_pending() {
+    let mut s = server();
+    let (da, db) = (Memory::new(), Memory::new());
+    let mut alice = Peer::open(demo::domain(), Box::new(da.clone()), offline("alice")).unwrap();
+    let mut bob = Peer::open(demo::domain(), Box::new(db.clone()), offline("bobby")).unwrap();
+    bob.connected();
+    let (mut compacted, mut emptied) = (0, 0);
+    for round in 0..8 {
+        for i in 0..(3 + round * 4) {
+            create(&mut alice, &format!("a{round}-{i}"));
+            reopens_as(&alice, &da, offline("alice"), &format!("round {round}, mutate {i}"));
+        }
+        if round % 3 == 1 {
+            // Answered: linked, every intent acknowledged at once.
+            alice.connected();
+            settle(&mut s, &mut [(1, &mut alice), (2, &mut bob)]);
+            alice.disconnected();
+            s.disconnect(1);
+        } else if round % 3 == 2 {
+            // Refused in part: bob took two of the names first.
+            create(&mut bob, &format!("a{round}-0"));
+            create(&mut bob, &format!("a{round}-1"));
+            settle(&mut s, &mut [(2, &mut bob)]);
+            alice.connected();
+            settle(&mut s, &mut [(1, &mut alice), (2, &mut bob)]);
+            alice.disconnected();
+            s.disconnect(1);
+        }
+        let before = da.load(ReplicaFile::PENDING).unwrap();
+        alice.persist().unwrap();
+        if da.load(ReplicaFile::PENDING).unwrap() != before {
+            compacted += 1;
+            emptied += usize::from(alice.pending_len() == 0);
+        }
+        reopens_as(&alice, &da, offline("alice"), &format!("round {round}, pumped"));
+    }
+    assert!(compacted > emptied && emptied > 0, "{compacted} compactions, {emptied} of them emptied");
+}
+
+/// §R3 A page torn in the writing is dropped with everything after it —
+/// never applied out of order — and the peer reopens to the last whole
+/// op, compacted; a page of an older generation, which a compaction
+/// stopped before removing, is skipped. Falsified by applying a page
+/// whatever its generation: the stopped compaction reopens with the
+/// acknowledged intent back, `[b, a]` where the live list is `[b]`.
+#[test]
+fn a_torn_page_is_dropped_and_the_peer_reopens_to_the_last_whole_op() {
+    let disk = Memory::new();
+    let mut p = Peer::open(demo::domain(), Box::new(disk.clone()), offline("alice")).unwrap();
+    for i in 0..10 {
+        create(&mut p, &format!("p{i}"));
+    }
+    p.pump();
+    assert!(pending_pages(&disk).is_empty(), "ten intents, one snapshot");
+    let ids: Vec<_> = (0..4)
+        .map(|i| {
+            create(&mut p, &format!("q{i}"));
+            p.replica().pending.last().unwrap().id
+        })
+        .collect();
+    assert_eq!(pending_pages(&disk).len(), 4);
+    let live = p.replica().pending.clone();
+
+    for (torn_at, keep) in [(4, 13), (2, 11)] {
+        let broken = copy(&disk);
+        let key = ReplicaFile::pending_page_key(torn_at);
+        let page = broken.load(&key).unwrap().unwrap();
+        broken.clone().save(&key, &page[..page.len() / 2]).unwrap();
+        let back = Peer::open(demo::domain(), Box::new(broken.clone()), offline("alice")).unwrap();
+        assert_eq!(back.replica().pending, live[..keep], "torn at {torn_at}: the last whole op");
+        assert!(pending_pages(&broken).is_empty(), "torn at {torn_at}: and compacted");
+        let (_, on_disk) = decode_pending_snapshot(&broken.load(ReplicaFile::PENDING).unwrap().unwrap()).unwrap();
+        assert_eq!(on_disk, live[..keep]);
+        assert!(!back.replica().pending.iter().any(|e| e.id == ids[torn_at - 1]), "torn at {torn_at}");
+    }
+
+    // A compaction stopped between its snapshot and removing the pages:
+    // the pages say add a, add b, drop a (acknowledged); the snapshot of
+    // the next generation already says [b].
+    let mut author = Peer::open_memory(demo::domain(), offline("alice")).unwrap();
+    create(&mut author, "a");
+    create(&mut author, "b");
+    let (a, b) = (author.replica().pending[0].clone(), author.replica().pending[1].clone());
+    let mut stopped = Memory::new();
+    stopped.save(ReplicaFile::PENDING, &encode_pending_snapshot(1, &[])).unwrap();
+    stopped
+        .save(&ReplicaFile::pending_page_key(1), &encode_pending_page(1, &[&a], &[]))
+        .unwrap();
+    stopped
+        .save(&ReplicaFile::pending_page_key(2), &encode_pending_page(1, &[&b], &[]))
+        .unwrap();
+    stopped
+        .save(&ReplicaFile::pending_page_key(3), &encode_pending_page(1, &[], &[a.id]))
+        .unwrap();
+    let whole = copy(&stopped);
+    let back = Peer::open(demo::domain(), Box::new(whole), offline("alice")).unwrap();
+    assert_eq!(
+        back.replica().pending,
+        std::slice::from_ref(&b),
+        "before the compaction: the pages say [b]"
+    );
+    stopped
+        .save(ReplicaFile::PENDING, &encode_pending_snapshot(2, std::slice::from_ref(&b)))
+        .unwrap();
+    let back = Peer::open(demo::domain(), Box::new(stopped.clone()), offline("alice")).unwrap();
+    assert_eq!(back.replica().pending, [b], "after it: the older generation's pages skipped");
+    assert!(pending_pages(&stopped).is_empty(), "and removed");
+}
+
+/// §R3 A storage in the layout before the pages — one `pending` record,
+/// no generation — opens as it did and writes nothing, then pages on
+/// from it. Falsified by `open` treating a record with no `gen` as
+/// unclean: the open writes the snapshot again, 406 bytes to `pending`.
+#[test]
+fn an_old_pending_record_opens_unchanged() {
+    let mut author = Peer::open_memory(demo::domain(), offline("alice")).unwrap();
+    for i in 0..3 {
+        create(&mut author, &format!("p{i}"));
+    }
+    let disk = Counting::default();
+    let r = author.replica();
+    disk.clone()
+        .save(ReplicaFile::KEY, &encode_replica("server", r.cursor, &r.confirmed, "alice", "dev"))
+        .unwrap();
+    disk.clone().save(ReplicaFile::PENDING, &encode_pending(&r.pending)).unwrap();
+    disk.reset();
+    let fresh = Options::dev("alice").with_autos(Autos::seeded(1234));
+    let mut p = Peer::open(demo::domain(), Box::new(disk.clone()), fresh).unwrap();
+    assert_eq!(disk.written(), (0, vec![]), "opening writes nothing");
+    assert_eq!(p.replica().pending, author.replica().pending);
+    create(&mut p, "p3");
+    assert_eq!(disk.written().1, vec![ReplicaFile::pending_page_key(1)]);
+    reopens_as(&p, &disk.inner, offline("alice"), "paged on from the old layout");
+    assert_eq!(p.pending_len(), 4);
+}
+
+/// §R3 The pages on a directory: files, one per mutate; folded and removed
+/// on a pump; and a reopen — from a copy, so it cannot write into the live
+/// peer's — is the live pending. Falsified by `compact_pending` never
+/// running: the pages are still files after the pump.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_directory_round_trips_the_pending_pages() {
+    let root = std::env::temp_dir().join(format!("ark-client-pending-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let dir = root.join("live");
+    let snap = |n: usize| -> std::path::PathBuf {
+        let to = root.join(format!("copy-{n}"));
+        std::fs::create_dir_all(&to).unwrap();
+        for e in std::fs::read_dir(&dir).unwrap() {
+            let e = e.unwrap();
+            std::fs::copy(e.path(), to.join(e.file_name())).unwrap();
+        }
+        to
+    };
+    let mut p = Peer::open_path(demo::domain(), &dir, offline("alice")).unwrap();
+    for i in 0..30 {
+        create(&mut p, &format!("p{i}"));
+        assert!(dir.join(ReplicaFile::pending_page_key(i + 1)).is_file(), "{i}: a page, a file");
+        let back = Peer::open_path(demo::domain(), snap(i), offline("alice")).unwrap();
+        assert_eq!(back.replica().pending, p.replica().pending, "{i}");
+    }
+    p.pump();
+    assert!(!dir.join(ReplicaFile::pending_page_key(1)).exists(), "folded on the pump");
+    let mut s = server();
+    p.connected();
+    settle(&mut s, &mut [(1, &mut p)]);
+    p.persist().unwrap();
+    assert_eq!(p.pending_len(), 0);
+    let back = Peer::open_path(demo::domain(), snap(99), offline("alice")).unwrap();
+    assert_eq!((back.pending_len(), back.cursor()), (0, 30));
+    let names: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(!names.iter().any(|n| n.ends_with(".tmp") || n.starts_with("pending.")), "{names:?}");
+    drop((p, back));
+    std::fs::remove_dir_all(&root).unwrap();
 }

@@ -321,3 +321,104 @@ swift runtimes, frozen at spec v3, still report `Rebuilt`. `harken/iced`'s
 Harken's own views through the domain's mutations were run by the
 workspace suite and pass, but no test there asserts `Patched` through a
 rebase.
+
+### Round 2, R3 — the server's log and a peer's pending, as snapshots and journals
+
+**What landed.** The server: `log.ark-log` is the snapshot (the file as it
+always was — base, entries, ids — written to `.log.ark-log.tmp`, synced,
+renamed, the directory synced); `log.ark-journal` is append-only, each
+record a 4-byte big-endian length and the canonical CBOR of
+`{seq, entry, facts}` (one item of the snapshot's `entries`), synced once
+per batch. `persist::LogFile` is what the hub holds: `write` appends what
+moved since the last write, or writes a snapshot where the horizon moved
+(`compact_to`) or an append failed part-way; it compacts once the journal
+is larger than the snapshot. `persist::load` reads snapshot then journal
+and never writes; `LogFile::open` — the server starting — truncates a torn
+tail and compacts if a stopped compaction left records the snapshot holds.
+A peer: `pending` is the snapshot, now `{t: "pending", gen, entries}`, and
+`pending.1`, `pending.2`, … are pages `{t: "pending-ops", gen, add, drop}`
+— one per `mutate`, written before it returns and alone, and one per pump
+whose answers moved the list. Compaction on a pump, never inside `mutate`:
+once the pages outgrow the snapshot, and once nothing is pending (then the
+empty snapshot replaces the page). `gen` is the one addition to the shape
+above: pages are not idempotent — replaying an old `add` after a snapshot
+that no longer holds the intent would resurrect an answered one — so a
+page carries the generation of the snapshot it extends and `open` skips
+older ones, which is what a compaction stopped before it removed its
+pages leaves. `who` and the confirmed store's `replica`/`facts.<n>` are
+untouched; a `pending` record with no `gen` reads as generation 0.
+
+**The ordering.** `Hub::after` writes, then delivers: nothing the machine
+queued in answer to a message — the `Ack`, the `Batch` fan-out, anything
+else on that connection — is sent until the journal holding the entries is
+synced, and a failed write holds the whole queue, in order, until a write
+succeeds. It is stated in `hub.rs`'s module docs and held by
+`hub::tests::an_entry_is_acknowledged_only_once_the_disk_holds_it` (a
+directory where the journal goes makes the write fail; no `Ack` until it is
+removed). The fleet's scenario 3b (`a_server_killed_mid_stream_loses_nothing`,
+a server killed with `-9` eight times over a 1,500-entry log) passes with
+`--include-ignored`; its `#[ignore = "witness: …"]` is the fleet's to lift.
+
+**Guards, each falsified once.** Server (`ark-server/tests/journal.rs`):
+bytes per append equal at 300 and 2,400 entries, and a run of appends
+within five times its records (always writing a snapshot: 11,530,570 bytes
+for 69,022 bytes of records at 300); the journal cut at every byte offset
+of its last record reopens to the entry before, truncated there, and an
+append after follows on — 230 cuts of a 230-byte record, every one whole (not truncating: 921
+bytes where the good records end at 920); a temporary snapshot half
+written beside the old one, a renamed snapshot beside an unemptied
+journal, and that journal appended on — each reopens whole (not skipping
+held records: 30, not 32); compaction and `compact_to` reopen identically
+(never compacting: the journal outgrows the snapshot); an old directory
+opens writing nothing (compacting on open: 4,663 bytes); a real hub
+restarted over its directory has every entry (ignoring the journal: the
+head is behind). Peer (`ark-client/src/persistence_tests.rs`): every
+`mutate` writes exactly one key, `pending.<n>`, the same bytes at 300 and
+at 2,400 pending (writing the record: the key is `pending`); reopened after
+every mutate and every pump — acknowledged, refused, compacted, emptied —
+the pending list is the live one (not reading pages: the first reopen is
+empty); a page torn at 4 of 4 and at 2 of 4 reopens to 13 and 11 of 14,
+compacted, and a stopped compaction's older-generation pages are skipped
+(applying them: `[b, a]` where the live list is `[b]`); an old `pending`
+record opens writing nothing (406 bytes, treated as unclean); `Dir`
+round-trips, pages as files, folded on a pump (never compacting: they
+stay).
+
+**Before and after**, `cargo test -p ark-server --release --test perf --
+--ignored` on the shared VM (mean µs per operation; first and last hundred;
+before at `a174981` for the server and client files, the rest of the tree
+as other agents had it at the time; the disk is shared with their runs, so
+the directory rows are noisy and mostly the `fsync`):
+
+| row | n | before mean | first100 → last100 | after mean | first100 → last100 |
+|---|---|---|---|---|---|
+| (b) one playlist, log on disk: round trip | 500 | 3,541 | 945 → 5,745 | 3,080 | 5,238 → 5,720 |
+| (b) playlists of 10, log on disk | 500 | 3,437 | 1,487 → 5,824 | 4,484 | 4,434 → 4,945 |
+| (b) one playlist, log on disk | 2,000 | 10,060 | 1,055 → 12,993 | 3,520 | 6,157 → 4,139 |
+| (b) playlists of 10, log on disk | 2,000 | 16,651 | 2,065 → 42,080 | 4,153 | 326 → 4,285 |
+| (c) offline mutate, Memory | 500 | 1,025 | 830 → 1,679 | 66 | 23 → 105 |
+| (c) offline mutate, Memory | 2,000 | 3,120 | 588 → 6,218 | 24 | 20 → 27 |
+| (c) offline mutate, Memory | 8,000 | 12,953 | 2,712 → 27,273 | 35 | 21 → 43 |
+| (c) offline mutate, Dir | 500 | 11,848 | 11,399 → 12,240 | 7,897 | 7,839 → 7,914 |
+| (c) offline mutate, Dir | 2,000 | 16,162 | 25,358 → 16,120 | 3,230 | 8,197 → 574 |
+| (c) offline mutate, Dir | 8,000 | 35,648 | 13,868 → 25,288 | 2,165 | 7,746 → 6,768 |
+
+What is left is constant: a push with the log on disk is one journal
+`fsync` (and, once in a doubling, a snapshot), 3–5 ms on this disk and
+flat in the log's length where it was 12.8 ms and climbing at 2,000; an
+offline `mutate` on a directory is one small file written, synced, renamed
+and its directory synced, whatever is pending. The Memory row is the
+encoding that went: 35 µs at 8,000 pending against 13 ms.
+
+**Not verified.** A power cut (every kill here is of a process, whose
+written pages the kernel keeps; the `fsync`s are what a power cut needs,
+and none was pulled); a disk that fills (a failed append holds the acks
+and the next write is a snapshot, tested only by the directory-in-the-way
+failure); the journal on a filesystem where `O_APPEND` after `set_len(0)`
+misbehaves; a peer's pages in a browser's `localStorage` (the code is
+shared, the wasm build was not run); many thousands of `pending.<n>`
+files in one directory between pumps, which is what a scanner authoring
+eight thousand files offline before its first pump leaves until that pump.
+The server's `README.md` still says `.data(&data) // log.ark-log,
+live.cbor` and `persist.rs`: one log, `log.ark-log`; it is not this
+round's file to edit.
