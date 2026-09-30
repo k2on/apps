@@ -15,6 +15,8 @@
 //! Ignored by default; run with
 //! `cargo test -p ark --release --test perf -- --ignored --nocapture --test-threads=1`.
 
+use std::alloc::{GlobalAlloc, Layout, System};
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
@@ -29,6 +31,44 @@ use ark::protocol::{open_access, trusting, ClientMsg, Mode, Server, ServerMsg, S
 use ark::schema::Schema;
 use ark::store::{MemoryStore, Store};
 use ark::value::Value;
+
+// Counting allocations, on this thread -------------------------------------------
+//
+// For the frames (h), whose cost is mostly what decoding one builds
+// (`docs/plan-perf.md` R11): counted per thread, so nothing else running
+// is in the count, and a thread-local add rather than an atomic, so the
+// timings beside it barely move.
+
+struct Tally;
+
+thread_local! {
+    static ALLOCS: Cell<usize> = const { Cell::new(0) };
+}
+
+fn count() {
+    let _ = ALLOCS.try_with(|c| c.set(c.get() + 1));
+}
+
+unsafe impl GlobalAlloc for Tally {
+    unsafe fn alloc(&self, l: Layout) -> *mut u8 {
+        count();
+        System.alloc(l)
+    }
+    unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
+        System.dealloc(p, l)
+    }
+    unsafe fn realloc(&self, p: *mut u8, l: Layout, n: usize) -> *mut u8 {
+        count();
+        System.realloc(p, l, n)
+    }
+}
+
+#[global_allocator]
+static GLOBAL: Tally = Tally;
+
+fn allocs() -> usize {
+    ALLOCS.with(Cell::get)
+}
 
 // The demo ---------------------------------------------------------------------
 
@@ -729,7 +769,10 @@ fn perf_g_authority_and_fanout() {
 fn perf_h_frames() {
     let d = fixture();
     header("(h) a Batch of BATCH_LIMIT entries: canon::encode(to_value) and decode");
-    eprintln!("{:<44} {:>7} {:>10} {:>10} {:>10}", "frame", "entries", "bytes", "encode µs", "decode µs");
+    eprintln!(
+        "{:<44} {:>7} {:>10} {:>10} {:>10} {:>12} {:>12}",
+        "frame", "entries", "bytes", "encode µs", "decode µs", "enc. allocs", "dec. allocs"
+    );
     let (_, log) = d.log(10, BATCH_LIMIT as u64);
     for facts in [false, true] {
         let items: Vec<_> = log
@@ -745,20 +788,22 @@ fn perf_h_frames() {
             log_id: None,
         };
         let reps = 50;
+        let a0 = allocs();
         let t = Instant::now();
         let mut bytes = vec![];
         for _ in 0..reps {
             bytes = std::hint::black_box(canon::encode(&m.to_value()));
         }
-        let enc = t.elapsed() / reps;
+        let (enc, enc_a) = (t.elapsed() / reps, (allocs() - a0) / reps as usize);
+        let a0 = allocs();
         let t = Instant::now();
         for _ in 0..reps {
             let v = canon::decode(&bytes).unwrap();
             std::hint::black_box(ServerMsg::from_value(&v).unwrap());
         }
-        let dec = t.elapsed() / reps;
+        let (dec, dec_a) = (t.elapsed() / reps, (allocs() - a0) / reps as usize);
         eprintln!(
-            "{:<44} {:>7} {:>10} {:>10.1} {:>10.1}",
+            "{:<44} {:>7} {:>10} {:>10.1} {:>10.1} {:>12} {:>12}",
             if facts {
                 "Batch, with facts (ByFacts)"
             } else {
@@ -767,7 +812,9 @@ fn perf_h_frames() {
             BATCH_LIMIT,
             bytes.len(),
             us(enc),
-            us(dec)
+            us(dec),
+            enc_a,
+            dec_a
         );
     }
     // A client's Push of one entry, which is every mutation linked.
@@ -795,8 +842,10 @@ fn perf_h_frames() {
     let _ = d.schema.tables().count();
 }
 
-/// Every table's rows copied out of a store, as `scan` does, against the
-/// store's own size: what a `Row` costs to hand out, keys and all.
+/// Every table's rows handed out of a store, as `scan` does, against the
+/// store's own size: what a `Row` costs to hand out — its keys, its map
+/// and its values copied before `docs/plan-perf.md` R11, two reference
+/// counts since.
 #[test]
 #[ignore]
 fn perf_rows_handed_out() {
