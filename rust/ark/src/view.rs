@@ -26,9 +26,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Bound;
 
 use crate::eval::{Args, Ctx, EvalError, EvalFault, NodeScope, Scope};
-use crate::ir::{CmpOp, Expr, Function, Key, Lookup, Plan, Pred, Related, Source};
+use crate::ir::{CmpOp, Expr, FnKind, Function, Key, Lookup, Op, Plan, Pred, Related, Source, StdFn, Stmt, Sym};
 use crate::schema::{Dir, Schema, Table};
-use crate::store::{compare_rows, Change, Row, Span, Store};
+use crate::store::{compare_rows, Change, Refusal, Row, Span, Store};
 use crate::value::{compare_value, FieldName, TableName, Value};
 
 // §1.3 The one evaluator ----------------------------------------------------
@@ -110,6 +110,15 @@ pub struct Entry {
     /// The node's value; `Null` when not admitted (a projection is not
     /// evaluated for a node nobody sees).
     pub node: Value,
+    /// R9 The numbers kept for each kept related plan beneath it
+    /// ([`Shape::kept`]), at every depth, by `(node, dependency)`: each
+    /// key is a dependency the entry recorded, as [`Entry::deps`] are, and
+    /// is indexed the same way. Empty for an entry [`pull`] made, which
+    /// keeps nothing.
+    pub held: HeldMap,
+    /// R9 A group's members as numbers, one per aggregate of
+    /// [`Face::members`]; empty when they are a list.
+    pub members: Vec<i64>,
 }
 
 /// §1.3, §1.5 Every candidate of a plan over a store, ordered: by the order
@@ -287,6 +296,8 @@ fn entry(
             order,
             admitted: true,
             node: row,
+            held: HeldMap::new(),
+            members: vec![],
         });
     }
     // The row is bound by reference — the entry keeps it for its order
@@ -357,6 +368,8 @@ fn entry(
         order,
         admitted,
         node: value,
+        held: HeldMap::new(),
+        members: vec![],
     })
 }
 
@@ -509,6 +522,966 @@ fn group_of(by: &[FieldName], row: &Row) -> Vec<Value> {
     by.iter().map(|c| row.get(c).cloned().unwrap_or(Value::Null)).collect()
 }
 
+// §1.13, R9 Aggregates a view keeps as numbers ------------------------------
+
+/// `docs/plan-perf.md` R9: an aggregate a plan node's expressions take of
+/// one of its lists — a related list, or a group's `members` — recognised
+/// from the expressions rather than declared: `len(list)` is a
+/// [`Agg::Count`], and `fold(list, init, |acc, x| acc + f(x))` with `f`
+/// mentioning nothing but `x` is an [`Agg::Sum`] of `f`. A helper whose
+/// whole body is one of the two over its one parameter (harken's `total`)
+/// is the same use. Integer addition is associative and commutative, so a
+/// sum is the same number whichever order its terms arrive in, and a view
+/// can keep it by adding and subtracting terms (§1.13).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Agg {
+    /// How many admitted nodes the list holds.
+    Count,
+    /// The sum of `f` over the list's nodes, `x` being each node in `f`.
+    Sum { x: Sym, f: Expr },
+}
+
+/// R9 One plan node's expressions as a view evaluates them: the `having`,
+/// the projection and the expression order keys, with every aggregate use
+/// of a maintained list replaced by a number the view keeps — a `Count` by
+/// its slot, a `Sum` by `init + slot`. A slot is a symbol no plan binds
+/// (negative; a plan's are the `n`th binding of a function, from 0).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Face {
+    pub having: Option<Expr>,
+    pub project: Option<Expr>,
+    /// One per order key: the rewritten expression of a [`Key::Expr`],
+    /// `None` for a column.
+    pub order: Vec<Option<Expr>>,
+    /// A group source's `members`, when every use of it is an aggregate:
+    /// each aggregate and its slot.
+    pub members: Option<Vec<(Agg, Sym)>>,
+    /// The node id of each related plan, in order.
+    pub ids: Vec<NodeId>,
+    /// Whether each related plan is kept as numbers ([`Shape::kept`]).
+    pub kept: Vec<bool>,
+}
+
+/// R9 A related plan whose list is kept as numbers: the aggregates its
+/// parent takes of it, each with its slot, and the face of the child plan.
+/// The child plan is itself all numbers — no lookups, no limit, a table
+/// source, and every related plan of it kept — so a node of it is a
+/// function of its row and of the numbers beneath it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Kept {
+    pub aggs: Vec<(Agg, Sym)>,
+    pub face: Face,
+}
+
+/// R9 What a view keeps as numbers, derived from the plan and the
+/// function's helpers when it hydrates: nothing travels, so no frame and
+/// no vector changes. [`Shape::root`] is the root plan's face, and
+/// [`Shape::kept`] every related plan kept as numbers, by node id. A
+/// related plan is kept when every use of its list in its parent is an
+/// [`Agg`], its child plan is all numbers, and its parent is the root or
+/// itself kept; anything else is pulled as a list, as before.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Shape {
+    pub root: Face,
+    pub kept: BTreeMap<NodeId, Kept>,
+}
+
+/// R9 The shape of a plan in a function whose helpers are `helpers`.
+pub fn shape(plan: &Plan, helpers: &[Function]) -> Shape {
+    let mut next: Sym = -1;
+    let (root, kept) = face(plan, 0, true, helpers, &mut next).unwrap_or_default();
+    Shape { root, kept }
+}
+
+// A plan's face, and the kept plans beneath it; `None` when a child plan
+// (`root` false) cannot be all numbers.
+fn face(p: &Plan, base: NodeId, root: bool, helpers: &[Function], next: &mut Sym) -> Option<(Face, BTreeMap<NodeId, Kept>)> {
+    if !root && (!p.lookups.is_empty() || p.limit.is_some() || p.members.is_some() || !matches!(p.source, Source::Table(_))) {
+        return None;
+    }
+    let mut ids = Vec::with_capacity(p.related.len());
+    let mut id = base + p.lookups.len();
+    for r in &p.related {
+        ids.push(id);
+        id += 1 + node_count(&r.plan);
+    }
+    // Pass one: every use of every list, over every expression the node
+    // computes after its reads.
+    let mut cands: BTreeSet<Sym> = p.related.iter().map(|r| r.sym).collect();
+    if let (Some(m), true) = (p.members, root) {
+        cands.insert(m);
+    }
+    let mut uses: BTreeMap<Sym, Option<Vec<Agg>>> = cands.iter().map(|s| (*s, Some(vec![]))).collect();
+    let exprs = p.having.iter().chain(p.project.iter()).chain(p.order.iter().filter_map(|(k, _)| match k {
+        Key::Expr(e) => Some(e),
+        Key::Column(_) => None,
+    }));
+    for e in exprs {
+        scan(e, &cands, helpers, &mut uses);
+    }
+    // The default node carries every related list whole.
+    if p.project.is_none() {
+        for r in &p.related {
+            uses.insert(r.sym, None);
+        }
+    }
+    // Members read before the numbers are bound (a lookup's key, an `on`)
+    // are a list.
+    if let Some(m) = p.members {
+        let early = p
+            .lookups
+            .iter()
+            .flat_map(|l| l.key.iter())
+            .chain(p.related.iter().flat_map(|r| r.on.iter().map(|(_, e)| e)));
+        if early.into_iter().any(|e| mentions(e, m)) {
+            uses.insert(m, None);
+        }
+    }
+    let mut kept = BTreeMap::new();
+    let mut flags = Vec::with_capacity(p.related.len());
+    let mut slots: BTreeMap<Sym, Vec<(Agg, Sym)>> = BTreeMap::new();
+    // Each aggregate a slot of its own, from the one counter.
+    fn assign(aggs: &[Agg], next: &mut Sym) -> Vec<(Agg, Sym)> {
+        aggs.iter()
+            .map(|a| {
+                let s = *next;
+                *next -= 1;
+                (a.clone(), s)
+            })
+            .collect()
+    }
+    for (r, id) in p.related.iter().zip(&ids) {
+        let child = match &uses[&r.sym] {
+            Some(_) => face(&r.plan, id + 1, false, helpers, next),
+            None => None,
+        };
+        match child {
+            Some((f, below)) => {
+                let aggs = assign(uses[&r.sym].as_deref().unwrap_or_default(), next);
+                slots.insert(r.sym, aggs.clone());
+                kept.extend(below);
+                kept.insert(*id, Kept { aggs, face: f });
+                flags.push(true);
+            }
+            None if !root => return None,
+            None => flags.push(false),
+        }
+    }
+    let members = match (p.members, root) {
+        (Some(m), true) => uses[&m].as_deref().map(|aggs| {
+            let a = assign(aggs, next);
+            slots.insert(m, a.clone());
+            a
+        }),
+        _ => None,
+    };
+    let rw = |e: &Expr| rewrite(e, &slots, helpers);
+    Some((
+        Face {
+            having: p.having.as_ref().map(rw),
+            project: p.project.as_ref().map(rw),
+            order: p
+                .order
+                .iter()
+                .map(|(k, _)| match k {
+                    Key::Expr(e) => Some(rw(e)),
+                    Key::Column(_) => None,
+                })
+                .collect(),
+            members,
+            ids,
+            kept: flags,
+        },
+        kept,
+    ))
+}
+
+// One use of a list that is an aggregate: the list's symbol, the aggregate,
+// and the `init` its value is added to (a `Sum`'s; `None` for a count).
+fn aggregate_use<'e>(e: &'e Expr, cands: &BTreeSet<Sym>, helpers: &'e [Function]) -> Option<(Sym, Agg, Option<&'e Expr>)> {
+    match e {
+        Expr::Std(StdFn::Len, es) => match es.as_slice() {
+            [Expr::Var(s)] if cands.contains(s) => Some((*s, Agg::Count, None)),
+            _ => None,
+        },
+        Expr::Fold(xs, init, acc, x, body) => match &**xs {
+            Expr::Var(s) if cands.contains(s) => {
+                let f = step(body, *acc)?;
+                closed(f, &[*x], false).then(|| (*s, Agg::Sum { x: *x, f: f.clone() }, Some(&**init)))
+            }
+            _ => None,
+        },
+        Expr::Call(name, es) => match es.as_slice() {
+            [Expr::Var(s)] if cands.contains(s) => {
+                let h = helpers.iter().find(|h| h.name == *name && h.kind == FnKind::Helper)?;
+                let (agg, init) = helper_agg(h)?;
+                Some((*s, agg, init))
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+// A helper whose whole body is an aggregate of its one parameter: `len` of
+// it, or a fold of it whose `init` and step read nothing else — so the
+// call is that aggregate wherever it is made.
+fn helper_agg(h: &Function) -> Option<(Agg, Option<&Expr>)> {
+    let [(p, _)] = h.input.as_slice() else { return None };
+    let [Stmt::Return(Some(b))] = h.body.as_slice() else { return None };
+    let is_p = |e: &Expr| matches!(e, Expr::Arg(a) if a == p);
+    match b {
+        Expr::Std(StdFn::Len, es) if es.len() == 1 && is_p(&es[0]) => Some((Agg::Count, None)),
+        Expr::Fold(xs, init, acc, x, body) if is_p(xs) => {
+            let f = step(body, *acc)?;
+            (closed(f, &[*x], true) && closed(init, &[], true)).then(|| (Agg::Sum { x: *x, f: f.clone() }, Some(&**init)))
+        }
+        _ => None,
+    }
+}
+
+// The `f` of a fold's step `acc + f` (or `f + acc`), when `f` does not
+// read the accumulator.
+fn step(body: &Expr, acc: Sym) -> Option<&Expr> {
+    match body {
+        Expr::Op(Op::Add, es) if es.len() == 2 => match (&es[0], &es[1]) {
+            (Expr::Var(a), f) | (f, Expr::Var(a)) if *a == acc && !mentions(f, acc) => Some(f),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+// Pass one: note each use of a candidate list — an aggregate, or anything
+// else, which makes it a list (`None`).
+fn scan(e: &Expr, cands: &BTreeSet<Sym>, helpers: &[Function], uses: &mut BTreeMap<Sym, Option<Vec<Agg>>>) {
+    if let Some((s, agg, init)) = aggregate_use(e, cands, helpers) {
+        if let Some(Some(aggs)) = uses.get_mut(&s) {
+            if !aggs.contains(&agg) {
+                aggs.push(agg);
+            }
+        }
+        if let Some(init) = init {
+            scan(init, cands, helpers, uses);
+        }
+        return;
+    }
+    if let Expr::Var(s) = e {
+        if cands.contains(s) {
+            uses.insert(*s, None);
+        }
+    }
+    for c in children(e) {
+        scan(c, cands, helpers, uses);
+    }
+}
+
+// Pass two: each aggregate use of a kept list replaced by its number.
+fn rewrite(e: &Expr, slots: &BTreeMap<Sym, Vec<(Agg, Sym)>>, helpers: &[Function]) -> Expr {
+    let kept: BTreeSet<Sym> = slots.keys().copied().collect();
+    map_expr(e, &mut |x: &Expr| {
+        let (s, agg, init) = aggregate_use(x, &kept, helpers)?;
+        let slot = slots[&s].iter().find(|(a, _)| *a == agg).map(|(_, s)| *s)?;
+        Some(match init {
+            None => Expr::Var(slot),
+            Some(init) => Expr::Op(Op::Add, vec![rewrite(init, slots, helpers), Expr::Var(slot)]),
+        })
+    })
+}
+
+// Whether `x` occurs free in `e`.
+fn mentions(e: &Expr, x: Sym) -> bool {
+    match e {
+        Expr::Var(s) => *s == x,
+        _ => children(e).into_iter().any(|c| mentions(c, x)),
+    }
+}
+
+// Whether every symbol free in `e` is one of `allowed` and nothing is
+// read; `strict` also refuses what only a procedure binds (an argument,
+// an auto, a provided value), which a helper's body cannot see.
+fn closed(e: &Expr, allowed: &[Sym], strict: bool) -> bool {
+    fn go(e: &Expr, bound: &mut Vec<Sym>, strict: bool) -> bool {
+        match e {
+            Expr::Var(s) => bound.contains(s),
+            Expr::Arg(_) | Expr::Auto(_) | Expr::Provided(_) => !strict,
+            Expr::Select(_) | Expr::Get(..) | Expr::Exists(..) => false,
+            Expr::Match(v, x, some, none) => {
+                if !go(v, bound, strict) || !go(none, bound, strict) {
+                    return false;
+                }
+                bound.push(*x);
+                let ok = go(some, bound, strict);
+                bound.pop();
+                ok
+            }
+            Expr::Map(xs, x, b) | Expr::Filter(xs, x, b) | Expr::Any(xs, x, b) | Expr::All(xs, x, b) | Expr::SortBy(xs, x, b) => {
+                if !go(xs, bound, strict) {
+                    return false;
+                }
+                bound.push(*x);
+                let ok = go(b, bound, strict);
+                bound.pop();
+                ok
+            }
+            Expr::Fold(xs, z, acc, x, b) => {
+                if !go(xs, bound, strict) || !go(z, bound, strict) {
+                    return false;
+                }
+                bound.push(*acc);
+                bound.push(*x);
+                let ok = go(b, bound, strict);
+                bound.truncate(bound.len() - 2);
+                ok
+            }
+            _ => children(e).into_iter().all(|c| go(c, bound, strict)),
+        }
+    }
+    go(e, &mut allowed.to_vec(), strict)
+}
+
+// The expressions directly inside one, binders' bodies included; a plan
+// inside a `Select` is not looked into (a node's expressions have none).
+fn children(e: &Expr) -> Vec<&Expr> {
+    match e {
+        Expr::Lit(_)
+        | Expr::Arg(_)
+        | Expr::Auto(_)
+        | Expr::Var(_)
+        | Expr::CtxUser
+        | Expr::CtxSession
+        | Expr::Provided(_)
+        | Expr::None(_)
+        | Expr::Select(_) => vec![],
+        Expr::Field(x, _) | Expr::Some(x) => vec![x],
+        Expr::Struct(fs) => fs.values().collect(),
+        Expr::List(es) | Expr::Op(_, es) | Expr::Call(_, es) | Expr::Std(_, es) | Expr::Get(_, es) | Expr::Exists(_, es) => es.iter().collect(),
+        Expr::Match(v, _, a, b) => vec![v, a, b],
+        Expr::If(c, a, b) => vec![c, a, b],
+        Expr::Cmp(_, a, b) => vec![a, b],
+        Expr::Map(xs, _, b) | Expr::Filter(xs, _, b) | Expr::Any(xs, _, b) | Expr::All(xs, _, b) | Expr::SortBy(xs, _, b) => vec![xs, b],
+        Expr::Fold(xs, z, _, _, b) => vec![xs, z, b],
+    }
+}
+
+// `e` with `f` applied top-down: where `f` answers, its answer replaces
+// the subexpression; elsewhere the children are mapped.
+fn map_expr(e: &Expr, f: &mut dyn FnMut(&Expr) -> Option<Expr>) -> Expr {
+    if let Some(x) = f(e) {
+        return x;
+    }
+    let mut m = |x: &Expr| Box::new(map_expr(x, f));
+    match e {
+        Expr::Lit(_)
+        | Expr::Arg(_)
+        | Expr::Auto(_)
+        | Expr::Var(_)
+        | Expr::CtxUser
+        | Expr::CtxSession
+        | Expr::Provided(_)
+        | Expr::None(_)
+        | Expr::Select(_) => e.clone(),
+        Expr::Field(x, n) => Expr::Field(m(x), n.clone()),
+        Expr::Some(x) => Expr::Some(m(x)),
+        Expr::Struct(fs) => Expr::Struct(fs.iter().map(|(k, v)| (k.clone(), *m(v))).collect()),
+        Expr::List(es) => Expr::List(es.iter().map(|x| *m(x)).collect()),
+        Expr::Op(op, es) => Expr::Op(*op, es.iter().map(|x| *m(x)).collect()),
+        Expr::Call(n, es) => Expr::Call(n.clone(), es.iter().map(|x| *m(x)).collect()),
+        Expr::Std(g, es) => Expr::Std(*g, es.iter().map(|x| *m(x)).collect()),
+        Expr::Get(t, es) => Expr::Get(t.clone(), es.iter().map(|x| *m(x)).collect()),
+        Expr::Exists(t, es) => Expr::Exists(t.clone(), es.iter().map(|x| *m(x)).collect()),
+        Expr::Match(v, x, a, b) => Expr::Match(m(v), *x, m(a), m(b)),
+        Expr::If(c, a, b) => Expr::If(m(c), m(a), m(b)),
+        Expr::Cmp(op, a, b) => Expr::Cmp(*op, m(a), m(b)),
+        Expr::Map(xs, x, b) => Expr::Map(m(xs), *x, m(b)),
+        Expr::Filter(xs, x, b) => Expr::Filter(m(xs), *x, m(b)),
+        Expr::Any(xs, x, b) => Expr::Any(m(xs), *x, m(b)),
+        Expr::All(xs, x, b) => Expr::All(m(xs), *x, m(b)),
+        Expr::SortBy(xs, x, b) => Expr::SortBy(m(xs), *x, m(b)),
+        Expr::Fold(xs, z, a, x, b) => Expr::Fold(m(xs), m(z), *a, *x, m(b)),
+    }
+}
+
+// §1.13, R9 The numbers, kept ------------------------------------------------
+
+/// R9 What one entry keeps of a kept related plan for one `(node,
+/// dependency)`: the numbers its [`Kept::aggs`] come to over the child
+/// nodes that dependency joins — which are a function of the dependency
+/// alone, since a child plan sees nothing of its parent but its `on`
+/// (§1.3, scope) — the child nodes themselves when the child plan has kept
+/// lists of its own (their rows, so a node is re-evaluated without reading
+/// it), and which parent nodes reference it. A child plan with no related
+/// plans keeps no children: a row's term is computed from the row a change
+/// carries, old and new.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Held {
+    /// One per aggregate of the node, in [`Kept::aggs`]'s order.
+    pub nums: Vec<i64>,
+    /// The child nodes, by key, when the child plan has related plans.
+    pub kids: BTreeMap<Vec<Value>, Kid>,
+    /// Who reads these numbers: `None` for the entry's own node, or a
+    /// child node of a kept plan, as `(node, dependency, key)`.
+    pub parents: BTreeSet<Parent>,
+}
+
+/// R9 A reader of a [`Held`]: the entry's node, or a [`Kid`] by where it is.
+pub type Parent = Option<(NodeId, Value, Vec<Value>)>;
+
+/// The numbers an entry keeps, by `(node, dependency)`.
+pub type HeldMap = BTreeMap<(NodeId, Value), Held>;
+
+/// R9 One child node of a kept related plan whose own lists are kept: its
+/// row, whether its having admitted it, its node (`Null` when not), and
+/// the dependency each of its related plans computed, in order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Kid {
+    pub row: Value,
+    pub admitted: bool,
+    pub node: Value,
+    pub subs: Vec<Value>,
+}
+
+// The `(node, dependency)`s an entry's numbers came to hold or let go, in
+// the order it happened: what `by_dep` is told.
+type Ops = Vec<((NodeId, Value), bool)>;
+
+// A group's members as the entry is built with them: the list, or its
+// numbers.
+enum Members {
+    None,
+    List(Value),
+    Nums(Vec<i64>),
+}
+
+// Everything the kept numbers are computed against: the plan, its shape,
+// the scope, the store, and each node by id; a kept child plan's own
+// filter and the root's, evaluated once.
+struct Cx<'a, 's> {
+    sch: &'a Schema,
+    plan: &'a Plan,
+    shape: &'a Shape,
+    scope: &'a Scope<'s>,
+    st: &'a dyn Store,
+    rel: Vec<Option<&'a Related>>,
+    filters: BTreeMap<NodeId, Option<Filter>>,
+    root_filter: Option<Filter>,
+}
+
+impl<'a, 's> Cx<'a, 's> {
+    fn new(sch: &'a Schema, plan: &'a Plan, shape: &'a Shape, scope: &'a Scope<'s>, st: &'a dyn Store) -> Result<Cx<'a, 's>, EvalFault> {
+        let rel = nodes(plan)
+            .into_iter()
+            .map(|(_, n)| match n {
+                Node::Related(r) => Some(r),
+                Node::Lookup(_) => None,
+            })
+            .collect::<Vec<_>>();
+        let mut filters = BTreeMap::new();
+        for id in shape.kept.keys() {
+            let c = &rel[*id].expect("a kept node is a related plan").plan;
+            filters.insert(*id, root_filter(c, scope)?);
+        }
+        Ok(Cx {
+            sch,
+            plan,
+            shape,
+            scope,
+            st,
+            rel,
+            filters,
+            root_filter: root_filter(plan, scope)?,
+        })
+    }
+
+    fn related(&self, id: NodeId) -> &'a Related {
+        self.rel[id].expect("a kept node is a related plan")
+    }
+
+    fn kept(&self, id: NodeId) -> &'a Kept {
+        &self.shape.kept[&id]
+    }
+
+    fn table(&self, t: &TableName) -> Result<&'a Table, EvalFault> {
+        self.sch.lookup_table(t).ok_or_else(|| EvalFault::Bug(EvalError::UnknownTable(t.clone())))
+    }
+}
+
+fn int_of(v: Value) -> Result<i64, EvalFault> {
+    match v {
+        Value::Int(n) => Ok(n),
+        other => Err(EvalFault::Bug(EvalError::TypeError(format!(
+            "an aggregate's term is an Int, not {other:?}"
+        )))),
+    }
+}
+
+fn bool_of(v: Value) -> Result<bool, EvalFault> {
+    match v {
+        Value::Bool(b) => Ok(b),
+        other => Err(EvalFault::Bug(EvalError::TypeError(format!("a having is a Bool, not {other:?}")))),
+    }
+}
+
+// `nums` moved by `terms` under `op` (add or subtract), checked as the
+// evaluator's arithmetic is: an overflow is the same refusal a fold's
+// would be.
+fn shift(nums: &mut [i64], terms: &[i64], op: Op) -> Result<(), EvalFault> {
+    for (n, t) in nums.iter_mut().zip(terms) {
+        *n = crate::eval::arith(op, *n, *t).map_err(|e| EvalFault::Verdict(Refusal::Refused(e.into())))?;
+    }
+    Ok(())
+}
+
+// The terms one admitted node adds to the aggregates `aggs`: 1 to a count,
+// `f(node)` to a sum.
+fn terms(cx: &Cx, aggs: &[(Agg, Sym)], node: &Value) -> Result<Vec<i64>, EvalFault> {
+    aggs.iter()
+        .map(|(a, _)| match a {
+            Agg::Count => Ok(1),
+            Agg::Sum { x, f } => {
+                let mut n = cx.scope.node();
+                n.bind_ref(*x, node);
+                int_of(n.eval(f)?)
+            }
+        })
+        .collect()
+}
+
+// A child row of a kept plan with no related plans: its node, when its
+// having admits it. The row's pins and filter are the caller's.
+fn row_node(cx: &Cx, id: NodeId, row: &Value) -> Result<Option<Value>, EvalFault> {
+    let c = &cx.related(id).plan;
+    let face = &cx.kept(id).face;
+    let mut node = cx.scope.node();
+    if let Some(x) = c.row {
+        node.bind_ref(x, row);
+    }
+    if let Some(h) = &face.having {
+        if !bool_of(node.eval(h)?)? {
+            return Ok(None);
+        }
+    }
+    Ok(Some(match &face.project {
+        Some(p) => node.eval(p)?,
+        None => row.clone(),
+    }))
+}
+
+// The terms a child row adds to its parent's numbers: none when the filter
+// or the having refuses it.
+fn row_terms(cx: &Cx, id: NodeId, row: &Row) -> Result<Option<Vec<i64>>, EvalFault> {
+    if !admits(cx.filters[&id].as_ref(), row) {
+        return Ok(None);
+    }
+    let v = Value::Struct(row.clone());
+    match row_node(cx, id, &v)? {
+        Some(node) => terms(cx, &cx.kept(id).aggs, &node).map(Some),
+        None => Ok(None),
+    }
+}
+
+// A child node of a kept plan whose lists are kept: whether its having
+// admits it and its node, over its row and the numbers its dependencies
+// hold now.
+fn kid_node(cx: &Cx, id: NodeId, row: &Value, subs: &[Value], held: &HeldMap) -> Result<(bool, Value), EvalFault> {
+    let c = &cx.related(id).plan;
+    let face = &cx.kept(id).face;
+    let mut node = cx.scope.node();
+    if let Some(x) = c.row {
+        node.bind_ref(x, row);
+    }
+    for (jid, on) in face.ids.iter().zip(subs) {
+        let h = &held[&(*jid, on.clone())];
+        for ((_, slot), n) in cx.kept(*jid).aggs.iter().zip(&h.nums) {
+            node.bind(*slot, Value::Int(*n));
+        }
+    }
+    let admitted = match &face.having {
+        None => true,
+        Some(h) => bool_of(node.eval(h)?)?,
+    };
+    let value = match (&face.project, admitted) {
+        (_, false) => Value::Null,
+        (Some(p), true) => node.eval(p)?,
+        // A kept child plan with related plans always projects (a default
+        // node would carry its lists, which are then not kept).
+        (None, true) => row.clone(),
+    };
+    Ok((admitted, value))
+}
+
+fn kid_terms(cx: &Cx, id: NodeId, kid: &Kid) -> Result<Option<Vec<i64>>, EvalFault> {
+    if !kid.admitted {
+        return Ok(None);
+    }
+    terms(cx, &cx.kept(id).aggs, &kid.node).map(Some)
+}
+
+// A child row of a kept plan whose lists are kept, as a node: the numbers
+// of each of its dependencies held (pulled if no one holds them yet), and
+// its having and node over them.
+fn build_kid(cx: &Cx, id: NodeId, on: &Value, key: Vec<Value>, row: Value, held: &mut HeldMap, ops: &mut Ops) -> Result<Kid, EvalFault> {
+    let c = &cx.related(id).plan;
+    let face = &cx.kept(id).face;
+    let mut subs = Vec::with_capacity(c.related.len());
+    for (r, jid) in c.related.iter().zip(&face.ids) {
+        let sub = {
+            let mut node = cx.scope.node();
+            if let Some(x) = c.row {
+                node.bind_ref(x, &row);
+            }
+            Value::List(r.on.iter().map(|(_, e)| node.eval(e)).collect::<Result<_, _>>()?)
+        };
+        ensure(cx, *jid, sub.clone(), Some((id, on.clone(), key.clone())), held, ops)?;
+        subs.push(sub);
+    }
+    let (admitted, node) = kid_node(cx, id, &row, &subs, held)?;
+    Ok(Kid { row, admitted, node, subs })
+}
+
+// The numbers of `(id, on)`, read by `parent`: kept if some reader holds
+// them already, pulled from the store otherwise — the child rows the
+// dependency joins, through the store's indexes, each a term or a node.
+fn ensure(cx: &Cx, id: NodeId, on: Value, parent: Parent, held: &mut HeldMap, ops: &mut Ops) -> Result<(), EvalFault> {
+    let k = (id, on);
+    if let Some(h) = held.get_mut(&k) {
+        h.parents.insert(parent);
+        return Ok(());
+    }
+    let r = cx.related(id);
+    let c = &r.plan;
+    let kept = cx.kept(id);
+    let pins: Vec<(FieldName, Value)> = match &k.1 {
+        Value::List(vs) => r.on.iter().map(|(col, _)| col.clone()).zip(vs.iter().cloned()).collect(),
+        _ => vec![],
+    };
+    let (tbl, rows) = candidates(cx.sch, c, &pins, cx.scope, cx.st)?;
+    let mut h = Held {
+        nums: vec![0; kept.aggs.len()],
+        kids: BTreeMap::new(),
+        parents: BTreeSet::from([parent]),
+    };
+    for row in rows {
+        if c.related.is_empty() {
+            if let Some(node) = row_node(cx, id, &Value::Struct(row))? {
+                shift(&mut h.nums, &terms(cx, &kept.aggs, &node)?, Op::Add)?;
+            }
+        } else {
+            let key = tbl.key_of(&row);
+            let kid = build_kid(cx, id, &k.1, key.clone(), Value::Struct(row), held, ops)?;
+            if let Some(t) = kid_terms(cx, id, &kid)? {
+                shift(&mut h.nums, &t, Op::Add)?;
+            }
+            h.kids.insert(key, kid);
+        }
+    }
+    ops.push((k.clone(), true));
+    held.insert(k, h);
+    Ok(())
+}
+
+// `parent` stops reading `k`; the numbers nobody reads are let go, and the
+// dependencies their children read with them.
+fn release(cx: &Cx, k: (NodeId, Value), parent: &Parent, held: &mut HeldMap, ops: &mut Ops) {
+    let Some(h) = held.get_mut(&k) else { return };
+    h.parents.remove(parent);
+    if !h.parents.is_empty() {
+        return;
+    }
+    let Some(h) = held.remove(&k) else { return };
+    let ids = &cx.kept(k.0).face.ids;
+    for (key, kid) in h.kids {
+        let me = Some((k.0, k.1.clone(), key));
+        for (jid, sub) in ids.iter().zip(kid.subs) {
+            release(cx, (*jid, sub), &me, held, ops);
+        }
+    }
+    ops.push((k, false));
+}
+
+/// R9 A change to a table a kept plan reads, as one entry's numbers see
+/// it: the node and dependency it hit, and the old row and the new one
+/// where each satisfies that dependency.
+struct Hit<'c> {
+    id: NodeId,
+    on: Value,
+    old: Option<&'c Row>,
+    new: Option<&'c Row>,
+}
+
+// What a held number is waiting for in a sweep: its numbers before it was
+// first touched, the child rows to read again, the child nodes to
+// evaluate again over numbers that moved beneath them.
+#[derive(Default)]
+struct Dirt {
+    before: Option<Vec<i64>>,
+    reread: BTreeSet<Vec<Value>>,
+    reeval: BTreeSet<Vec<Value>>,
+}
+
+// §1.13, R9 An entry's kept numbers brought up to the store, from the hits
+// its dependencies took — without pulling any list whole. A child plan
+// with no related plans moves its parent's numbers by each hit's old and
+// new row's terms (−old, +new), read from the change alone; one with
+// related plans reads the rows the hits name again, by key, and builds
+// those nodes over the numbers beneath them. Then, deepest first (a
+// node's id is below every id beneath it, §1.8's pre-order), every number
+// that moved re-evaluates the child nodes that read it — their rows are
+// kept — and moves its own parent's numbers by the difference, up to the
+// entry, whose node the caller rebuilds. A song arriving under a movement
+// of a work of a composer is a count moved by one, two sums moved by one,
+// and the composer's node evaluated again: the rows on that song's path,
+// and not the composer's works, movements or songs.
+fn sweep(cx: &Cx, held: &mut HeldMap, hits: &[Hit], ops: &mut Ops) -> Result<(), EvalFault> {
+    let mut dirty: BTreeMap<(NodeId, Value), Dirt> = BTreeMap::new();
+    for hit in hits {
+        let k = (hit.id, hit.on.clone());
+        let Some(h) = held.get_mut(&k) else { continue };
+        let d = dirty.entry(k).or_default();
+        if d.before.is_none() {
+            d.before = Some(h.nums.clone());
+        }
+        let c = &cx.related(hit.id).plan;
+        if c.related.is_empty() {
+            for (row, op) in [(hit.old, Op::Sub), (hit.new, Op::Add)] {
+                if let Some(t) = row.map(|r| row_terms(cx, hit.id, r)).transpose()?.flatten() {
+                    shift(&mut h.nums, &t, op)?;
+                }
+            }
+        } else {
+            let tbl = cx.table(c.table())?;
+            for row in hit.old.into_iter().chain(hit.new) {
+                d.reread.insert(tbl.key_of(row));
+            }
+        }
+    }
+    while let Some((k, d)) = dirty.pop_last() {
+        let Some(mut h) = held.remove(&k) else { continue };
+        let before = d.before.unwrap_or_else(|| h.nums.clone());
+        let (id, on) = (k.0, &k.1);
+        let r = cx.related(id);
+        let ids = &cx.kept(id).face.ids;
+        for key in &d.reread {
+            let old = h.kids.remove(key);
+            let row = cx
+                .st
+                .get(r.plan.table(), key)
+                .filter(|row| admits(cx.filters[&id].as_ref(), row) && Node::Related(r).dependency(cx.sch, row) == *on);
+            let new = match row {
+                Some(row) => Some(build_kid(cx, id, on, key.clone(), Value::Struct(row), held, ops)?),
+                None => None,
+            };
+            if let Some(o) = &old {
+                let me = Some((id, on.clone(), key.clone()));
+                for (j, (jid, sub)) in ids.iter().zip(&o.subs).enumerate() {
+                    if new.as_ref().is_none_or(|n| n.subs[j] != *sub) {
+                        release(cx, (*jid, sub.clone()), &me, held, ops);
+                    }
+                }
+                if let Some(t) = kid_terms(cx, id, o)? {
+                    shift(&mut h.nums, &t, Op::Sub)?;
+                }
+            }
+            if let Some(n) = new {
+                if let Some(t) = kid_terms(cx, id, &n)? {
+                    shift(&mut h.nums, &t, Op::Add)?;
+                }
+                h.kids.insert(key.clone(), n);
+            }
+        }
+        for key in d.reeval.difference(&d.reread) {
+            let Some(kid) = h.kids.get(key) else { continue };
+            let (admitted, node) = kid_node(cx, id, &kid.row, &kid.subs, held)?;
+            if admitted == kid.admitted && node == kid.node {
+                continue;
+            }
+            let old = kid_terms(cx, id, kid)?;
+            let kid = h.kids.get_mut(key).expect("just read");
+            kid.admitted = admitted;
+            kid.node = node;
+            let new = kid_terms(cx, id, kid)?;
+            if let Some(t) = old {
+                shift(&mut h.nums, &t, Op::Sub)?;
+            }
+            if let Some(t) = new {
+                shift(&mut h.nums, &t, Op::Add)?;
+            }
+        }
+        if h.nums != before {
+            for p in h.parents.iter().flatten() {
+                dirty.entry((p.0, p.1.clone())).or_default().reeval.insert(p.2.clone());
+            }
+        }
+        held.insert(k, h);
+    }
+    Ok(())
+}
+
+// A group's members as numbers, from its rows: how many, and each sum.
+fn member_nums(cx: &Cx, aggs: &[(Agg, Sym)], rows: &[Value]) -> Result<Vec<i64>, EvalFault> {
+    let mut nums = vec![0; aggs.len()];
+    for r in rows {
+        shift(&mut nums, &terms(cx, aggs, r)?, Op::Add)?;
+    }
+    Ok(nums)
+}
+
+// §1.5, 3 and R9 One candidate of the root plan, built: its lookups, its
+// related plans — a kept one as the numbers `held` has for its
+// dependency, pulled only when nobody holds them — its having, its node
+// and its order keys, over the face's expressions. `held` is what the
+// entry kept before (empty for a new one), already swept; a dependency the
+// node no longer computes is let go.
+fn entry_at(cx: &Cx, key: Vec<Value>, row: Value, members: Members, mut held: HeldMap, ops: &mut Ops) -> Result<Entry, EvalFault> {
+    let plan = cx.plan;
+    let face = &cx.shape.root;
+    let mut deps = Vec::new();
+    // A bare plan binds nothing: its node is the row (as `entry`).
+    if plan.is_bare() {
+        let order = plan.order.iter().map(|(k, _)| order_key(k, &row, None)).collect::<Result<_, _>>()?;
+        return Ok(Entry {
+            key,
+            deps,
+            order,
+            admitted: true,
+            node: row,
+            held,
+            members: vec![],
+        });
+    }
+    let mut node = cx.scope.node();
+    if let Some(x) = plan.row {
+        node.bind_ref(x, &row);
+    }
+    let mut nums = vec![];
+    match members {
+        Members::None => {}
+        Members::List(m) => {
+            if let Some(x) = plan.members {
+                node.bind(x, m);
+            }
+        }
+        Members::Nums(ns) => {
+            for ((_, slot), n) in face.members.iter().flatten().zip(&ns) {
+                node.bind(*slot, Value::Int(*n));
+            }
+            nums = ns;
+        }
+    }
+    let mut id = 0;
+    for l in &plan.lookups {
+        let k = l.key.iter().map(|e| node.eval(e)).collect::<Result<Vec<_>, _>>()?;
+        let found = if k.iter().any(Value::is_null) {
+            Value::Null
+        } else {
+            let found = cx.st.get(&l.table, &k).map(Value::Struct).unwrap_or(Value::Null);
+            deps.push((id, Value::List(k)));
+            found
+        };
+        node.bind(l.sym, found);
+        id += 1;
+    }
+    let mut fields: Option<BTreeMap<FieldName, Value>> = plan.project.is_none().then(|| match &row {
+        Value::Struct(m) => m.clone(),
+        _ => BTreeMap::new(),
+    });
+    for (j, r) in plan.related.iter().enumerate() {
+        let on =
+            r.on.iter()
+                .map(|(c, e)| Ok((c.clone(), node.eval(e)?)))
+                .collect::<Result<Vec<_>, EvalFault>>()?;
+        if face.kept[j] {
+            let dep = Value::List(on.into_iter().map(|(_, v)| v).collect());
+            ensure(cx, id, dep.clone(), None, &mut held, ops)?;
+            let stale: Vec<(NodeId, Value)> = held
+                .range((id, Value::Null)..(id + 1, Value::Null))
+                .map(|(k, _)| k.clone())
+                .filter(|k| k.1 != dep)
+                .collect();
+            for k in stale {
+                release(cx, k, &None, &mut held, ops);
+            }
+            for ((_, slot), n) in cx.kept(id).aggs.iter().zip(&held[&(id, dep)].nums) {
+                node.bind(*slot, Value::Int(*n));
+            }
+        } else {
+            deps.push((id, Value::List(on.iter().map(|(_, v)| v.clone()).collect())));
+            let mut kids = pull_at(cx.sch, &r.plan, id + 1, &on, cx.scope, cx.st)?;
+            for k in &mut kids {
+                deps.append(&mut k.deps);
+            }
+            let list = Value::List(answer_owned(&r.plan, kids));
+            if let Some(fields) = &mut fields {
+                fields.insert(r.name.clone(), list.clone());
+            }
+            node.bind(r.sym, list);
+        }
+        id += 1 + node_count(&r.plan);
+    }
+    let admitted = match &face.having {
+        None => true,
+        Some(h) => bool_of(node.eval(h)?)?,
+    };
+    let value = match (&face.project, admitted) {
+        (_, false) => Value::Null,
+        (Some(p), true) => node.eval(p)?,
+        (None, true) => Value::Struct(fields.unwrap_or_default()),
+    };
+    let order = plan
+        .order
+        .iter()
+        .zip(&face.order)
+        .map(|((k, _), e)| match (k, e) {
+            (Key::Column(c), _) => Ok(row.field(c)),
+            (Key::Expr(_), Some(e)) => node.eval(e),
+            (Key::Expr(_), None) => Err(EvalFault::Bug(EvalError::TypeError("an expression order key with no face".into()))),
+        })
+        .collect::<Result<_, _>>()?;
+    Ok(Entry {
+        key,
+        deps,
+        order,
+        admitted,
+        node: value,
+        held,
+        members: nums,
+    })
+}
+
+// §1.5 and R9 Every candidate of the root plan, pulled with its shape: what
+// a hydrate keeps.
+fn pull_root(cx: &Cx) -> Result<Vec<Entry>, EvalFault> {
+    let plan = cx.plan;
+    let (tbl, mut rows) = candidates(cx.sch, plan, &[], cx.scope, cx.st)?;
+    let mut out = Vec::new();
+    let mut ops = Ops::new();
+    match &plan.source {
+        Source::Table(_) => {
+            for row in rows {
+                let key = tbl.key_of(&row);
+                out.push(entry_at(cx, key, Value::Struct(row), Members::None, HeldMap::new(), &mut ops)?);
+            }
+        }
+        Source::Group { by, .. } => {
+            rows.sort_by_key(|r| tbl.key_of(r));
+            let mut groups: BTreeMap<Vec<Value>, Vec<Value>> = BTreeMap::new();
+            for row in rows {
+                groups.entry(group_of(by, &row)).or_default().push(Value::Struct(row));
+            }
+            for (k, members) in groups {
+                let key_row = Value::Struct(by.iter().cloned().zip(k.iter().cloned()).collect());
+                let members = match &cx.shape.root.members {
+                    Some(aggs) => Members::Nums(member_nums(cx, aggs, &members)?),
+                    None => Members::List(Value::List(members)),
+                };
+                out.push(entry_at(cx, k, key_row, members, HeldMap::new(), &mut ops)?);
+            }
+        }
+    }
+    out.sort_by(|a, b| compare_entries(plan, a, b));
+    Ok(out)
+}
+
 // §1.5 The view -----------------------------------------------------------
 
 /// What a view's expressions are evaluated in, owned: the function's
@@ -540,6 +1513,9 @@ impl Env {
 pub struct View {
     pub plan: Plan,
     pub env: Env,
+    /// R9 What the view keeps as numbers rather than lists: derived from
+    /// the plan and the helpers at [`hydrate`], never sent.
+    pub shape: Shape,
     /// The admitted entries in answer order, *not* cut to the limit: the
     /// answer is the first `limit` of them, and the rest are what a window
     /// refills from without reading the store (§1.5, 4). Each is its
@@ -567,9 +1543,10 @@ pub struct View {
 /// §1.5 Pull everything, and keep it: the view whose answer is what
 /// [`read`] gives for the plan in `env`.
 pub fn hydrate(sch: &Schema, plan: &Plan, env: Env, st: &dyn Store) -> Result<View, EvalFault> {
+    let shape = shape(plan, &env.helpers);
     let (pulled, groups) = {
         let scope = env.scope(sch);
-        let pulled = pull(sch, plan, &scope, st)?;
+        let pulled = pull_root(&Cx::new(sch, plan, &shape, &scope, st)?)?;
         let mut groups: BTreeMap<Vec<Value>, BTreeSet<Vec<Value>>> = BTreeMap::new();
         if let Source::Group { by, .. } = &plan.source {
             let (tbl, rows) = candidates(sch, plan, &[], &scope, st)?;
@@ -582,6 +1559,7 @@ pub fn hydrate(sch: &Schema, plan: &Plan, env: Env, st: &dyn Store) -> Result<Vi
     let mut v = View {
         plan: plan.clone(),
         env,
+        shape,
         entries: Vec::new(),
         by_key: BTreeMap::new(),
         by_dep: BTreeMap::new(),
@@ -665,9 +1643,35 @@ impl View {
         before && after
     }
 
+    // Every dependency an entry recorded, its kept numbers' included.
     fn index(&mut self, e: &Entry) {
+        self.index_deps(e);
+        for d in e.held.keys() {
+            self.by_dep.entry(d.clone()).or_default().insert(e.key.clone());
+        }
+    }
+
+    // The dependencies an entry recorded as it pulled ([`Entry::deps`]);
+    // its kept numbers' are moved by [`push_all`] as they are taken and
+    // let go.
+    fn index_deps(&mut self, e: &Entry) {
         for d in &e.deps {
             self.by_dep.entry(d.clone()).or_default().insert(e.key.clone());
+        }
+    }
+
+    // What the kept numbers of the entry under `key` came to hold (`true`)
+    // or let go, in order.
+    fn apply_ops(&mut self, key: &[Value], ops: Ops) {
+        for (d, held) in ops {
+            if held {
+                self.by_dep.entry(d).or_default().insert(key.to_vec());
+            } else if let Some(ks) = self.by_dep.get_mut(&d) {
+                ks.remove(key);
+                if ks.is_empty() {
+                    self.by_dep.remove(&d);
+                }
+            }
         }
     }
 
@@ -757,7 +1761,7 @@ impl View {
         }
         if let Some(n) = new {
             if !same_deps {
-                self.index(&n);
+                self.index_deps(&n);
             }
             self.by_key.insert(key, n);
         }
@@ -880,9 +1884,18 @@ pub fn splice(ps: &[Patch], xs: &[Value]) -> Vec<Value> {
 ///    patches (`Insert`, `Remove`, `Update`, a move as `Remove` then
 ///    `Insert`), with the limit window refilled from the entries.
 ///
-/// Nothing is changed unless every rebuild succeeds: an `Err` (a fault in
-/// one of the plan's expressions) leaves the view as it was, which is then
-/// stale — [`rebuild`] it.
+/// Kept numbers (R9, [`Shape`]) are moved rather than recounted: a change
+/// to a table a kept plan reads moves the numbers of the dependency it
+/// hits by the terms of its old and new rows, and the numbers above it by
+/// what moved beneath them ([`sweep`]), and the entry's node is evaluated
+/// again over them; no kept list is pulled whole. A group's kept members
+/// are counted from the kept member keys and summed by the changes' terms.
+/// What is not kept is rebuilt as above — which is also what a fresh
+/// [`hydrate`] would find, and what [`contract`] holds either to.
+///
+/// An `Err` (a fault in one of the plan's expressions) leaves the view
+/// stale, possibly with some entries' numbers moved and their nodes not —
+/// [`rebuild`] it, as `ark_client::View` does.
 ///
 /// Because the rebuild reads the final store, the order of the changes and
 /// how many there are do not matter beyond which keys they name; a batch
@@ -892,10 +1905,22 @@ pub fn splice(ps: &[Patch], xs: &[Value]) -> Vec<Value> {
 /// not moved in [`View::entries`], and a read that holds a table's key is
 /// one `get` ([`Store::scan_where_eq`]). `tests/toggle.rs` holds a
 /// playlist toggle through harken's `library` to two store reads at any
-/// size, and times it from 250 media to 16000.
+/// size, and times it from 250 media to 16000; `tests/aggregates.rs`
+/// holds a song added under a composer of the `composers` view to the
+/// rows on its path.
 pub fn push_all(sch: &Schema, st: &dyn Store, changes: &[Change], view: &mut View) -> Result<Vec<Patch>, EvalFault> {
-    let (rebuilt, groups) = touched(sch, st, changes, view)?;
-    for (g, members) in groups {
+    let scope = view.env.scope(sch);
+    let cx = Cx::new(sch, &view.plan, &view.shape, &scope, st)?;
+    let t = touched(&cx, changes, &view.by_dep, &view.groups)?;
+    let mut rebuilt: Vec<(Vec<Value>, Option<Entry>, Ops)> = Vec::with_capacity(t.keys.len());
+    for (k, hits) in &t.keys {
+        let mut held = view.by_key.get_mut(k).map(|e| std::mem::take(&mut e.held)).unwrap_or_default();
+        let mut ops = Ops::new();
+        sweep(&cx, &mut held, hits, &mut ops)?;
+        let e = root_of(&cx, k, held, &t, &view.groups, view.by_key.get(k), &mut ops)?;
+        rebuilt.push((k.clone(), e, ops));
+    }
+    for (g, members) in t.groups {
         if members.is_empty() {
             view.groups.remove(&g);
         } else {
@@ -903,29 +1928,41 @@ pub fn push_all(sch: &Schema, st: &dyn Store, changes: &[Change], view: &mut Vie
         }
     }
     let mut out = Vec::new();
-    for (k, e) in rebuilt {
-        view.settle(k, e, &mut out);
+    for (k, e, ops) in rebuilt {
+        view.settle(k.clone(), e, &mut out);
+        view.apply_ops(&k, ops);
     }
     Ok(out)
 }
 
-type Rebuilt = Vec<(Vec<Value>, Option<Entry>)>;
 type Groups = BTreeMap<Vec<Value>, BTreeSet<Vec<Value>>>;
 
-// §1.5, 1–2 The keys the changes touch, each with its entry rebuilt from
-// the store (`None`: no candidate there any more), and a group source's
-// touched groups as they now stand. Reads the view; changes nothing.
-fn touched(sch: &Schema, st: &dyn Store, changes: &[Change], view: &View) -> Result<(Rebuilt, Groups), EvalFault> {
-    let plan = &view.plan;
+// §1.5, 1–2 What the changes touch: the keys of the entries to rebuild,
+// each with the hits its kept numbers took (R9); a group source's touched
+// groups as they now stand, and what each one's kept member sums moved
+// by. Reads the view; changes nothing.
+struct Touched<'c> {
+    keys: BTreeMap<Vec<Value>, Vec<Hit<'c>>>,
+    groups: Groups,
+    sums: BTreeMap<Vec<Value>, Vec<i64>>,
+}
+
+fn touched<'c>(
+    cx: &Cx,
+    changes: &'c [Change],
+    by_dep: &BTreeMap<(NodeId, Value), BTreeSet<Vec<Value>>>,
+    view_groups: &Groups,
+) -> Result<Touched<'c>, EvalFault> {
+    let (sch, plan) = (cx.sch, cx.plan);
     let table = plan.table();
-    let Some(tbl) = sch.lookup_table(table) else {
-        return Err(EvalFault::Bug(EvalError::UnknownTable(table.clone())));
-    };
-    let scope = view.env.scope(sch);
-    let filter = root_filter(plan, &scope)?;
+    let tbl = cx.table(table)?;
     let ns = nodes(plan);
-    let mut keys: BTreeSet<Vec<Value>> = BTreeSet::new();
-    let mut groups: Groups = BTreeMap::new();
+    let mut t = Touched {
+        keys: BTreeMap::new(),
+        groups: BTreeMap::new(),
+        sums: BTreeMap::new(),
+    };
+    let member_aggs = cx.shape.root.members.as_deref().filter(|a| a.iter().any(|(a, _)| *a != Agg::Count));
     for ch in changes {
         let (old, new) = match ch {
             Change::Add(_, r) => (None, Some(r)),
@@ -934,22 +1971,33 @@ fn touched(sch: &Schema, st: &dyn Store, changes: &[Change], view: &View) -> Res
         };
         if ch.table() == table.as_str() {
             match &plan.source {
-                Source::Table(_) => keys.extend(old.iter().chain(new.iter()).map(|r| tbl.key_of(r))),
+                Source::Table(_) => {
+                    for r in old.iter().chain(new.iter()) {
+                        t.keys.entry(tbl.key_of(r)).or_default();
+                    }
+                }
                 // In change order, so an edit within a group, out of one
-                // and into another, all leave the members right.
+                // and into another, all leave the members right — and a
+                // kept sum moved by each row that really left or arrived.
                 Source::Group { by, .. } => {
                     for (r, arrives) in [(old, false), (new, true)] {
                         let Some(r) = r else { continue };
                         let g = group_of(by, r);
-                        let members = groups
+                        let members = t
+                            .groups
                             .entry(g.clone())
-                            .or_insert_with(|| view.groups.get(&g).cloned().unwrap_or_default());
-                        if !arrives {
-                            members.remove(&tbl.key_of(r));
-                        } else if admits(filter.as_ref(), r) {
-                            members.insert(tbl.key_of(r));
+                            .or_insert_with(|| view_groups.get(&g).cloned().unwrap_or_default());
+                        let moved = if !arrives {
+                            members.remove(&tbl.key_of(r))
+                        } else {
+                            admits(cx.root_filter.as_ref(), r) && members.insert(tbl.key_of(r))
+                        };
+                        if let (true, Some(aggs)) = (moved, member_aggs) {
+                            let terms = terms(cx, aggs, &Value::Struct(r.clone()))?;
+                            let sums = t.sums.entry(g.clone()).or_insert_with(|| vec![0; aggs.len()]);
+                            shift(sums, &terms, if arrives { Op::Add } else { Op::Sub })?;
                         }
-                        keys.insert(g);
+                        t.keys.entry(g).or_default();
                     }
                 }
             }
@@ -958,32 +2006,87 @@ fn touched(sch: &Schema, st: &dyn Store, changes: &[Change], view: &View) -> Res
             if n.table() != ch.table() {
                 continue;
             }
-            for r in old.iter().chain(new.iter()) {
-                if let Some(ks) = view.by_dep.get(&(*id, n.dependency(sch, r))) {
-                    keys.extend(ks.iter().cloned());
+            let kept = cx.shape.kept.contains_key(id);
+            let d_old = old.map(|r| n.dependency(sch, r));
+            let d_new = new.map(|r| n.dependency(sch, r));
+            let both = d_old.is_some() && d_old == d_new;
+            for (d, is_old) in [(&d_old, true), (&d_new, false)] {
+                let Some(d) = d else { continue };
+                if both && !is_old {
+                    continue;
+                }
+                let Some(ks) = by_dep.get(&(*id, d.clone())) else { continue };
+                for k in ks {
+                    let hits = t.keys.entry(k.clone()).or_default();
+                    if kept {
+                        hits.push(Hit {
+                            id: *id,
+                            on: d.clone(),
+                            old: old.filter(|_| is_old),
+                            new: new.filter(|_| !is_old || both),
+                        });
+                    }
                 }
             }
         }
     }
-    let mut rebuilt = Vec::with_capacity(keys.len());
-    for k in keys {
-        let e = match &plan.source {
-            Source::Table(_) => match st.get(table, &k) {
-                Some(row) if admits(filter.as_ref(), &row) => Some(entry(sch, plan, 0, &scope, st, k.clone(), Value::Struct(row), None)?),
-                _ => None,
-            },
-            Source::Group { by, .. } => match groups.get(&k).or_else(|| view.groups.get(&k)) {
-                Some(ms) if !ms.is_empty() => {
-                    let rows: Vec<Value> = ms.iter().filter_map(|m| st.get(table, m)).map(Value::Struct).collect();
-                    let key_row = Value::Struct(by.iter().cloned().zip(k.iter().cloned()).collect());
-                    Some(entry(sch, plan, 0, &scope, st, k.clone(), key_row, Some(Value::List(rows)))?)
-                }
-                _ => None,
-            },
-        };
-        rebuilt.push((k, e));
+    Ok(t)
+}
+
+// §1.5, 1 and R9 The entry under `k` as the store now decides it — gone,
+// new, or rebuilt over the numbers `held` keeps (already swept) — with
+// every dependency it let go told to `ops`.
+fn root_of(
+    cx: &Cx,
+    k: &[Value],
+    held: HeldMap,
+    t: &Touched,
+    view_groups: &Groups,
+    old: Option<&Entry>,
+    ops: &mut Ops,
+) -> Result<Option<Entry>, EvalFault> {
+    let plan = cx.plan;
+    let table = plan.table();
+    let gone = |held: HeldMap, ops: &mut Ops| {
+        ops.extend(held.into_keys().map(|d| (d, false)));
+        Ok(None)
+    };
+    match &plan.source {
+        Source::Table(_) => match cx.st.get(table, k) {
+            Some(row) if admits(cx.root_filter.as_ref(), &row) => entry_at(cx, k.to_vec(), Value::Struct(row), Members::None, held, ops).map(Some),
+            _ => gone(held, ops),
+        },
+        Source::Group { by, .. } => match t.groups.get(k).or_else(|| view_groups.get(k)) {
+            Some(ms) if !ms.is_empty() => {
+                let rows = || ms.iter().filter_map(|m| cx.st.get(table, m)).map(Value::Struct).collect::<Vec<_>>();
+                let members = match &cx.shape.root.members {
+                    None => Members::List(Value::List(rows())),
+                    // A count is the kept keys; a sum is what it was plus
+                    // what the changes moved it by, or — for a group that
+                    // is new — its rows'.
+                    Some(aggs) => Members::Nums(match old {
+                        Some(o) if o.members.len() == aggs.len() => {
+                            let mut nums = o.members.clone();
+                            if let Some(moved) = t.sums.get(k) {
+                                shift(&mut nums, moved, Op::Add)?;
+                            }
+                            for (n, (a, _)) in nums.iter_mut().zip(aggs) {
+                                if *a == Agg::Count {
+                                    *n = ms.len() as i64;
+                                }
+                            }
+                            nums
+                        }
+                        _ if aggs.iter().all(|(a, _)| *a == Agg::Count) => vec![ms.len() as i64; aggs.len()],
+                        _ => member_nums(cx, aggs, &rows())?,
+                    }),
+                };
+                let key_row = Value::Struct(by.iter().cloned().zip(k.iter().cloned()).collect());
+                entry_at(cx, k.to_vec(), key_row, members, held, ops).map(Some)
+            }
+            _ => gone(held, ops),
+        },
     }
-    Ok((rebuilt, groups))
 }
 
 // §1.5 The contract -----------------------------------------------------------
