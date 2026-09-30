@@ -1233,7 +1233,12 @@ struct Dirt {
 // and the composer's node evaluated again: the rows on that song's path,
 // and not the composer's works, movements or songs.
 fn sweep(cx: &Cx, held: &mut HeldMap, hits: &[Hit], ops: &mut Ops) -> Result<(), EvalFault> {
-    let mut dirty: BTreeMap<(NodeId, Value), Dirt> = BTreeMap::new();
+    // Boxed: a node of this map is then under a kilobyte, which glibc
+    // serves from its small bins. Unboxed it was a larger request, and the
+    // first such after a burst of frees pays for consolidating all of them
+    // — 90 µs of `bench_views`' warm toggle on `playlists_of`, a view with
+    // one hit to sweep.
+    let mut dirty: BTreeMap<(NodeId, Value), Box<Dirt>> = BTreeMap::new();
     for hit in hits {
         let k = (hit.id, hit.on.clone());
         let Some(h) = held.get_mut(&k) else { continue };
