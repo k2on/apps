@@ -64,7 +64,7 @@ pub fn demo_app() -> crate::App {
         let client = crate::seed::seeded(domain.clone());
         let r = client.replica();
         ReplicaFile {
-            mode: "alone".into(),
+            fork: Default::default(),
             cursor: r.cursor,
             confirmed: r.confirmed.clone(),
             pending: r.pending.clone(),

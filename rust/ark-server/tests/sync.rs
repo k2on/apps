@@ -146,10 +146,15 @@ fn pending_intents_survive_a_restart_and_so_does_the_servers_log() {
     p.connect(&running.sync_url());
     pump_until(&mut [&mut p, &mut carol], |ps| ps[1].cursor() == 1 && ps[0].linked());
     assert_eq!(carol.replica().verify_at(), claim);
-    // Opened the other way, a directory refuses: its sequences mean something else.
+    // Opened the other way, a directory leaves the server rather than
+    // refusing (`docs/plan-alone.md` §1): its fork is where it stood, and
+    // it goes on from there alone.
     drop(p);
-    let err = Peer::open_path(demo::domain(), client_data.path(), Options::alone("alice")).unwrap_err();
-    assert!(matches!(err, ark_client::Error::ModeMismatch { .. }), "{err}");
+    let alone = Peer::open_path(demo::domain(), client_data.path(), Options::alone("alice")).unwrap();
+    assert_eq!(
+        (alone.cursor(), alone.status().fork.cursor, alone.status().link.as_str()),
+        (1, 1, "alone")
+    );
     rt.block_on(running.stop());
 }
 

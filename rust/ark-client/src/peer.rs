@@ -2,22 +2,35 @@
 //! around it; a local authority when there is no server; the link to the
 //! server when there is one; and what a screen does — mutate, query, check,
 //! hold a view.
+//!
+//! **Alone is a way of being used, not a kind of peer** (`docs/plan-alone.md`).
+//! A peer opened with [`Options::alone`] is its own authority: every intent
+//! is sequenced as it is authored, and the entries are kept — on the
+//! storage, never in memory — as its **local history**, above the **fork**,
+//! the `(log, cursor)` it last shared with a server. [`Peer::join`] hands
+//! that history to a server: the confirmed store goes back to the fork and
+//! every local entry is pending again, in order, pushed and rebased as any
+//! offline work is. [`Peer::leave`] is the other way. Opening a storage the
+//! other way from how it was last used is the same two transitions, so a
+//! directory used alone for a year and then opened with a server is joined,
+//! and nothing is refused.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use ark::canon;
 use ark::eval::{self, Args, Checked, Ctx, EvalFault};
-use ark::log::{snapshot_of, Log, Seq};
+use ark::journal::{self as records, Journal as LogJournal, Layout};
+use ark::log::{snapshot_of, Entry, Facts, Log, Seq, Snapshot};
 use ark::peer::{local_commit, Authority, Changes, Journal, Replica};
 use ark::protocol::{Client, ClientMsg, Mode, ServerMsg};
 use ark::schema::Schema;
-use ark::store::{MemoryStore, Refusal};
+use ark::store::{MemoryStore, Refusal, Store};
 use ark::value::{Id, Value};
 
 use crate::autos::Autos;
 use crate::link::{platform_dial, Dial, Link, State, Timing};
 use crate::storage::{
-    count_pages, encode_page, encode_pending_page, encode_pending_snapshot, encode_replica_of, encode_who, load_pending, BoxStorage, Memory,
+    count_pages, encode_page, encode_pending_page, encode_pending_snapshot, encode_replica_of, encode_who, load_pending, BoxStorage, Fork, Memory,
     PendingStored, ReplicaFile, Stored,
 };
 use crate::view::View;
@@ -35,7 +48,9 @@ pub struct Options {
     /// What the `Hello` proves the login with.
     pub token: Option<String>,
     /// No server: this peer is the authority for the log, and nothing
-    /// stays pending (the demo, a peer working alone).
+    /// stays pending (the demo, a peer working alone). Over a storage last
+    /// used with a server, opening alone is [`Peer::leave`]; without it,
+    /// over one last used alone, it is a join (`docs/plan-alone.md` §1).
     pub alone: bool,
     pub autos: Autos,
     pub timing: Timing,
@@ -74,7 +89,9 @@ impl Options {
         Options::server("", "", None)
     }
 
-    /// A peer that is its own authority.
+    /// A peer that is its own authority, authoring as `user` under the
+    /// session `"local"`. What it sequences is kept as its local history,
+    /// which [`Peer::join`] later hands a server.
     pub fn alone(user: impl Into<String>) -> Options {
         Options {
             alone: true,
@@ -90,6 +107,31 @@ impl Options {
     pub fn with_timing(mut self, timing: Timing) -> Options {
         self.timing = timing;
         self
+    }
+}
+
+/// Who a peer signs in as at a server: what [`Options::server`] takes, as
+/// one value for [`Peer::join`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Login {
+    pub user: String,
+    pub session: String,
+    pub token: Option<String>,
+}
+
+impl Login {
+    pub fn new(user: impl Into<String>, session: impl Into<String>, token: Option<String>) -> Login {
+        Login {
+            user: user.into(),
+            session: session.into(),
+            token,
+        }
+    }
+
+    /// Dev auth: the token is the name and the session is `"dev"`.
+    pub fn dev(user: impl Into<String>) -> Login {
+        let user = user.into();
+        Login::new(user.clone(), "dev", Some(user))
     }
 }
 
@@ -147,8 +189,14 @@ pub struct Status {
     /// The engine is linked: the socket is open and `Hello` was said.
     pub linked: bool,
     /// The link in a word: `alone`, `signed out`, `offline`, `idle`,
-    /// `connecting`, `open`, `waiting`.
+    /// `connecting`, `joining` (open or connecting with local history still
+    /// pending), `open`, `waiting`.
     pub link: String,
+    /// Intents this peer sequenced alone that a join re-queued and the
+    /// server has not yet answered: 0 once it has taken them all.
+    pub joining: usize,
+    /// Where this peer last shared a log with a server.
+    pub fork: Fork,
     pub url: Option<String>,
     /// Connections opened.
     pub opens: u64,
@@ -199,6 +247,23 @@ pub struct Peer {
     rejected: BTreeMap<Id, String>,
     heard_frames: u64,
     bad_frames: u64,
+    /// Where this replica last shared a log with a server
+    /// (`docs/plan-alone.md` §1); alone, the base of its local history.
+    fork: Fork,
+    /// Alone: the local history as the storage has it.
+    alone_log: Option<AloneLog>,
+    /// The intents the last join re-queued, for [`Status::joining`].
+    local: BTreeSet<Id>,
+}
+
+/// A peer alone's local history as the storage has it
+/// (`docs/plan-alone.md` §2): the journal, and the entries sequenced since
+/// it was last written — which is before `mutate` returns, so this holds
+/// entries only across a write that failed. The authority keeps none: its
+/// log is a head and an id set.
+struct AloneLog {
+    journal: LogJournal,
+    unwritten: Vec<(Seq, Entry, Facts)>,
 }
 
 /// The confirmed store as the storage has it (`storage` module docs): a
@@ -278,33 +343,29 @@ thread_local! {
     static COMPARED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-fn mode_word(alone: bool) -> &'static str {
-    if alone {
-        "alone"
-    } else {
-        "server"
-    }
-}
-
 impl Peer {
     /// Open the replica from `storage` (or empty), replay what was pending
     /// on top, and — alone — sequence it. No socket yet: [`Peer::connect`]
     /// dials.
+    ///
+    /// A storage last used the other way is carried across rather than
+    /// refused (`docs/plan-alone.md` §1): opened alone over a replica of a
+    /// server, the peer leaves it ([`Peer::leave`]); opened for a server
+    /// over local history, the history is re-queued as [`Peer::join`] does
+    /// — as the login in `opts`, or as nobody when it is signed out, for
+    /// [`Peer::sign_in`] to make the signer's — and nothing is dialled
+    /// until [`Peer::connect`]. A join that stopped halfway, with the
+    /// re-queued intents and the fork's replica written and the local
+    /// history not yet removed, finishes the same way.
     pub fn open(domain: Domain, storage: BoxStorage, opts: Options) -> Result<Peer, Error> {
         let schema = domain.module().schema.clone();
         let natives = domain.native_list();
         // What the records hold decides what is written first: a storage
         // with no replica yet has everything written at the end of this
         // open, and one whose journal could not all be read is compacted.
-        let (confirmed, cursor, pending, was, durable, wrote_who, mut wrote_pending, pending_file) = match Stored::load(&*storage, &schema)? {
+        let (confirmed, cursor, pending, was, durable, wrote_who, mut wrote_pending, pending_file, fork) = match Stored::load(&*storage, &schema)? {
             Some(st) => {
                 let f = st.file;
-                if f.mode != mode_word(opts.alone) {
-                    return Err(Error::ModeMismatch {
-                        was: f.mode,
-                        now: mode_word(opts.alone).into(),
-                    });
-                }
                 let was = Ctx::new(f.user, f.session);
                 let ids: Vec<Id> = f.pending.iter().map(|e| e.id).collect();
                 let durable = Durable {
@@ -319,7 +380,17 @@ impl Peer {
                 // yet: the open's write is a snapshot of them.
                 let ids = st.pending.clean.then_some(ids);
                 let pending_file = PendingFile::of(&st.pending);
-                (f.confirmed, f.cursor, f.pending, was.clone(), durable, Some(was), ids, pending_file)
+                (
+                    f.confirmed,
+                    f.cursor,
+                    f.pending,
+                    was.clone(),
+                    durable,
+                    Some(was),
+                    ids,
+                    pending_file,
+                    f.fork,
+                )
             }
             None => {
                 // No store yet, but perhaps intents: a run that stopped between
@@ -344,23 +415,13 @@ impl Peer {
                     None,
                     None,
                     pending_file,
+                    Fork::default(),
                 )
             }
         };
+        // A `log` record is local history: the peer was last used alone.
+        let had_log = storage.load(&Layout::alone().snapshot)?.is_some();
         let authored = pending.iter().map(|e| e.id).collect();
-        let authority = opts.alone.then(|| {
-            // The authority a peer alone is: its log is the confirmed store
-            // as a snapshot at the cursor, with nothing above it yet.
-            let mut a = Authority::new(schema.clone(), domain.closures().clone());
-            a.log = Log {
-                base: snapshot_of(cursor, confirmed.clone()),
-                entries: BTreeMap::new(),
-                ids: BTreeMap::new(),
-            };
-            a.store = confirmed.clone();
-            a.hold(natives.iter().cloned());
-            a
-        });
         let mut r = Replica::open(schema.clone(), domain.closures().clone(), confirmed, cursor, pending);
         // The log the cursor is of, as the storage names it; unnamed, the
         // server's first answer names it (Round 4).
@@ -377,7 +438,10 @@ impl Peer {
         let mut ctx = Ctx::new(opts.user, opts.session);
         let signed_out = !opts.alone && ctx.is_nobody();
         if signed_out {
-            ctx = was;
+            // Who last used it — unless that was a peer alone, whose login
+            // no server knows: a join signed out re-queues the local
+            // history as nobody's, for a sign-in to make the signer's.
+            ctx = if had_log { Ctx::nobody() } else { was };
         } else if !opts.alone && client.replica.pending.iter().any(|e| e.actor.is_empty() && e.session.is_empty()) {
             client.sign_in(&ctx, opts.token.clone());
             wrote_pending = None;
@@ -386,12 +450,12 @@ impl Peer {
             domain,
             schema,
             client,
-            authority,
+            authority: None,
             storage,
             ctx,
             autos: opts.autos,
             timing: opts.timing,
-            alone: opts.alone,
+            alone: false,
             signed_out,
             durable,
             wrote_who,
@@ -403,7 +467,19 @@ impl Peer {
             rejected: BTreeMap::new(),
             heard_frames: 0,
             bad_frames: 0,
+            fork,
+            alone_log: None,
+            local: BTreeSet::new(),
         };
+        match (had_log, opts.alone) {
+            (true, _) => peer.resume_alone()?,
+            (false, true) => peer.start_alone()?,
+            (false, false) => {}
+        }
+        if had_log && !opts.alone {
+            let who = peer.ctx.clone();
+            peer.fork_back_to(&who)?;
+        }
         // Alone, whatever a previous run left pending is sequenced now.
         peer.commit_alone();
         peer.collect_rejections();
@@ -420,7 +496,7 @@ impl Peer {
     }
 
     /// A directory, holding the files `replica`, `facts.<n>`, `pending`,
-    /// `pending.<n>` and `who`.
+    /// `pending.<n>` and `who` — and alone, `log` and `log.<n>`.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn open_path(domain: Domain, dir: impl Into<std::path::PathBuf>, opts: Options) -> Result<Peer, Error> {
         Peer::open(domain, Box::new(crate::storage::Dir(dir.into())), opts)
@@ -502,6 +578,60 @@ impl Peer {
         }
     }
 
+    /// Alone → server (`docs/plan-alone.md` §1): everything this peer
+    /// sequenced alone since its fork goes to the server at `url`, in
+    /// order, on top of whatever the server has. The confirmed store goes
+    /// back to the fork — the log and cursor it last shared with a server,
+    /// or nothing — every local entry is pending again, authored as
+    /// `login` (or as nobody, for [`Peer::sign_in`] to make the signer's,
+    /// when there is none yet), and the link dials: the `Hello` names the
+    /// fork's log, the server pages it or sends its snapshot, and the
+    /// intents are pushed and rebased on top, as offline work always is. A
+    /// local intent that now refuses is dropped with its reason. What a
+    /// view is told is a rebase, by changes: a screen of the library is
+    /// patched through a join, not rebuilt.
+    ///
+    /// Durable before it dials, in the order [`Peer::open`] finishes from.
+    /// [`Status::joining`] counts what the server has yet to take. On a
+    /// peer that already has a server, it is [`Peer::sign_in`] (with a
+    /// login) and [`Peer::connect`].
+    pub fn join(&mut self, url: &str, login: Option<Login>) -> Result<(), Error> {
+        let who = login.as_ref().map_or_else(Ctx::nobody, |l| Ctx::new(l.user.clone(), l.session.clone()));
+        if self.alone {
+            self.ctx = who.clone();
+            self.signed_out = login.is_none();
+            self.client.token = login.and_then(|l| l.token);
+            self.fork_back_to(&who)?;
+        } else if let Some(l) = login {
+            self.sign_in(l.user, l.session, l.token)?;
+        }
+        self.connect(url);
+        Ok(())
+    }
+
+    /// Server → alone (`docs/plan-alone.md` §1): the link closed and
+    /// forgotten, the fork recorded where the replica stands, and this peer
+    /// its own authority from its confirmed store on — what was pending
+    /// sequenced locally at once. It authors as the login it had. Coming
+    /// back is [`Peer::join`]. Alone already, nothing.
+    pub fn leave(&mut self) -> Result<(), Error> {
+        if self.alone {
+            return Ok(());
+        }
+        if let Some(link) = &mut self.link {
+            link.stop("alone");
+        }
+        self.link = None;
+        if self.client.linked {
+            self.client.disconnected();
+        }
+        self.client.denied = None;
+        self.start_alone()?;
+        self.commit_alone();
+        self.collect_rejections();
+        self.persist()
+    }
+
     /// Author under this login from now on (entries already pending keep
     /// the session they were authored under).
     pub fn set_session(&mut self, session: impl Into<String>) {
@@ -530,8 +660,11 @@ impl Peer {
         self.authored.insert(id);
         self.commit_alone();
         self.collect_rejections();
-        // The intent is written down now; the store, alone, follows on the
-        // next `pump` — authoring costs the intent, not the store.
+        // The intent is written down now — alone, as the entry it became,
+        // a page of the local history (`docs/plan-alone.md` §2); with a
+        // server, as a pending page. The store follows on the next `pump`:
+        // authoring costs the intent, not the store.
+        self.persist_log()?;
         self.persist_pending()?;
         Ok(id)
     }
@@ -865,7 +998,13 @@ impl Peer {
     /// `storage` module docs). `pump` calls it on every turn, with or
     /// without a link, and so does dropping the peer; a caller driving the
     /// sans-io half by hand calls it after `recv`.
+    ///
+    /// Alone, the local history goes first: an entry on the storage and
+    /// still pending there — a stop before the pending record moved — is
+    /// confirmed by the log when the peer reopens, never sequenced twice
+    /// (`docs/plan-alone.md` §2).
     pub fn persist(&mut self) -> Result<(), Error> {
+        self.persist_log()?;
         self.persist_pending()?;
         self.compact_pending()?;
         if self.wrote_who.as_ref() != Some(&self.ctx) {
@@ -916,7 +1055,7 @@ impl Peer {
     fn snapshot(&mut self) -> Result<(), Error> {
         self.durable.snapshot_due = true;
         let r = &self.client.replica;
-        let bytes = encode_replica_of(mode_word(self.alone), r.cursor, r.log_id, &r.confirmed, &self.ctx.user, &self.ctx.session);
+        let bytes = encode_replica_of(r.cursor, r.log_id, self.fork, &r.confirmed, &self.ctx.user, &self.ctx.session);
         let (cursor, log_id) = (r.cursor, r.log_id);
         self.storage.save(ReplicaFile::KEY, &bytes)?;
         for n in (1..=self.durable.pages).rev() {
@@ -1039,12 +1178,14 @@ impl Peer {
     }
 
     pub fn status(&self) -> Status {
+        let joining = self.joining();
         let link = match (&self.link, self.alone) {
             (_, true) => "alone",
             (_, false) if self.signed_out => "signed out",
             (None, false) => "offline",
             (Some(l), false) => match l.state() {
                 State::Idle => "idle",
+                State::Connecting | State::Open if joining > 0 => "joining",
                 State::Connecting => "connecting",
                 State::Open => "open",
                 State::Waiting(_) => "waiting",
@@ -1057,6 +1198,8 @@ impl Peer {
             signed_out: self.signed_out,
             linked: self.client.linked,
             link: link.into(),
+            joining,
+            fork: self.fork,
             url: self.link.as_ref().map(|l| l.url().to_string()),
             opens: self.link.as_ref().map_or(0, |l| l.opens),
             epoch: self.client.epoch,
@@ -1072,10 +1215,201 @@ impl Peer {
 
     // -- inside -------------------------------------------------------------------
 
+    /// Alone, sequence what is pending, and take the entries out of the
+    /// authority's memory into the log's next write: its log keeps a head
+    /// and the ids, and the entries live on the storage
+    /// (`docs/plan-alone.md` §2).
     fn commit_alone(&mut self) {
         if let Some(a) = &mut self.authority {
             local_commit(a, &mut self.client.replica);
+            let taken = a.log.take_entries();
+            if let Some(l) = &mut self.alone_log {
+                l.unwritten.extend(taken);
+            }
         }
+    }
+
+    /// Intents a join re-queued that are still pending.
+    fn joining(&self) -> usize {
+        if self.local.is_empty() {
+            return 0;
+        }
+        self.client.replica.pending.iter().filter(|e| self.local.contains(&e.id)).count()
+    }
+
+    /// The entries sequenced alone since the last write, as one page of
+    /// the local history; then its pages merged, as `ark::journal` merges
+    /// them. A write that fails keeps them for the next, which saves the
+    /// same page again: a page is whole or absent.
+    fn persist_log(&mut self) -> Result<(), Error> {
+        let Some(l) = &mut self.alone_log else { return Ok(()) };
+        let Some((to, _, _)) = l.unwritten.last() else { return Ok(()) };
+        let to = *to;
+        let mut page = vec![];
+        for (n, e, f) in &l.unwritten {
+            page.extend(records::encode_record(*n, e, f));
+        }
+        l.journal.append(&mut *self.storage, &page, to).map_err(Error::Storage)?;
+        l.unwritten.clear();
+        l.journal.merge(&mut *self.storage).map_err(Error::Storage)
+    }
+
+    /// The authority a peer alone is: the confirmed store as its state at
+    /// `head`, the ids its local history holds, and no entries — its log's
+    /// base carries an empty store, since the authority holds the state
+    /// and is asked about the head only (`ark::log::Log::take_entries`).
+    fn alone_authority(&self, head: Seq, ids: BTreeMap<Id, Seq>) -> Authority {
+        let mut a = Authority::new(self.schema.clone(), self.domain.closures().clone());
+        a.log = Log {
+            base: Snapshot {
+                seq: head,
+                store: MemoryStore::empty(self.schema.clone()),
+                hash: vec![],
+                log_id: None,
+            },
+            entries: BTreeMap::new(),
+            ids,
+        };
+        a.store = self.client.replica.confirmed.clone();
+        a.hold(self.domain.native_list());
+        a
+    }
+
+    /// Carry on alone from the local history on the storage: read it for
+    /// its head and its ids, and bring the confirmed store to the head —
+    /// forward by the entries the store had not reached (a stop after the
+    /// log was written and before the store was), or rebuilt from the fork
+    /// and every entry's facts where the store is ahead of what the log
+    /// kept (a page lost after the store was written, which nothing here
+    /// does, but a storage can). Entries pending that the log already
+    /// holds are confirmed by it, as a server's answer would, and are not
+    /// sequenced again.
+    fn resume_alone(&mut self) -> Result<(), Error> {
+        let layout = Layout::alone();
+        let cursor = self.client.replica.cursor;
+        let mut ids = BTreeMap::new();
+        let mut ahead = vec![];
+        let (journal, o) = LogJournal::open(&mut *self.storage, layout.clone(), &self.schema, |n, e, f| {
+            ids.insert(e.id, n);
+            if n > cursor {
+                ahead.push((n, e, Some(f)));
+            }
+        })
+        .map_err(Error::Storage)?;
+        let base = o.snapshot.ok_or_else(|| Error::Corrupt("the local history has no snapshot".into()))?;
+        let fork = Fork {
+            log_id: base.id(),
+            cursor: base.horizon(),
+        };
+        let head = o.head;
+        let r = &mut self.client.replica;
+        if cursor > head || cursor < fork.cursor {
+            let mut st = base.base.store;
+            records::read(&*self.storage, &layout, &self.schema, |n, _, f| {
+                if n <= head {
+                    st.apply_changes(&f);
+                }
+            })
+            .map_err(Error::Storage)?;
+            let pending = std::mem::take(&mut r.pending);
+            let mut fresh = Replica::open(r.schema.clone(), r.bodies.clone(), st, head, pending);
+            fresh.natives = r.natives.clone();
+            *r = fresh;
+        } else if !ahead.is_empty() {
+            r.receive_batch(ahead);
+        }
+        // An intent pending that the history already holds — a join that
+        // stopped after writing its re-queued intents, reopened alone — is
+        // the history's, and would never be answered: the replica is opened
+        // again without it.
+        if r.pending.iter().any(|e| ids.get(&e.id).is_some_and(|n| *n <= head)) {
+            let pending: Vec<Entry> = std::mem::take(&mut r.pending)
+                .into_iter()
+                .filter(|e| ids.get(&e.id).is_none_or(|n| *n > head))
+                .collect();
+            let mut fresh = Replica::open(r.schema.clone(), r.bodies.clone(), r.confirmed.clone(), r.cursor, pending);
+            fresh.natives = r.natives.clone();
+            *r = fresh;
+            self.wrote_pending = None;
+        }
+        // Alone, the sequences are the local history's, of no named log.
+        r.log_id = None;
+        self.authority = Some(self.alone_authority(head, ids));
+        self.fork = fork;
+        self.alone = true;
+        self.signed_out = false;
+        self.alone_log = Some(AloneLog { journal, unwritten: vec![] });
+        Ok(())
+    }
+
+    /// Server → alone (`docs/plan-alone.md` §1): the fork is where the
+    /// replica stands — its log and cursor — and the local history starts
+    /// there, its snapshot the confirmed store, written before anything
+    /// else moves; the authority starts from the same store with nothing
+    /// in its log. What is pending is sequenced by the caller, locally.
+    fn start_alone(&mut self) -> Result<(), Error> {
+        let r = &self.client.replica;
+        let fork = Fork {
+            log_id: r.log_id,
+            cursor: r.cursor,
+        };
+        let base = Log {
+            base: snapshot_of(fork.cursor, r.confirmed.clone()).of_log(fork.log_id),
+            entries: BTreeMap::new(),
+            ids: BTreeMap::new(),
+        };
+        let journal = LogJournal::create(&mut *self.storage, Layout::alone(), &base).map_err(Error::Storage)?;
+        drop(base);
+        self.client.replica.log_id = None;
+        self.authority = Some(self.alone_authority(fork.cursor, BTreeMap::new()));
+        self.fork = fork;
+        self.alone = true;
+        self.signed_out = false;
+        self.local.clear();
+        self.alone_log = Some(AloneLog { journal, unwritten: vec![] });
+        Ok(())
+    }
+
+    /// Alone → server, up to the connecting (`docs/plan-alone.md` §1): the
+    /// local history read back from the storage, taken out of the confirmed
+    /// store newest first ([`Replica::fork_back`]) — the store, the cursor
+    /// and the log back at the fork — and every local entry re-queued as
+    /// pending in order, as `who`: the same ids, functions, autos and
+    /// arguments, nothing drawn again. Then, in this order, the re-queued
+    /// intents, the login and the fork's replica written, and only then the
+    /// local history removed — so a stop between the two reopens with both
+    /// and finishes the join ([`Peer::open`]).
+    fn fork_back_to(&mut self, who: &Ctx) -> Result<(), Error> {
+        self.persist_log()?;
+        let fork = self.fork;
+        let layout = Layout::alone();
+        let (mut facts, mut requeue) = (vec![], vec![]);
+        let o = records::read(&*self.storage, &layout, &self.schema, |n, mut e, f| {
+            if n > fork.cursor {
+                e.actor = who.user.clone();
+                e.session = who.session.clone();
+                requeue.push(e);
+                facts.push(f);
+            }
+        })
+        .map_err(Error::Storage)?;
+        let cursor = self.client.replica.cursor;
+        if o.head != cursor || cursor - fork.cursor != facts.len() as Seq {
+            return Err(Error::Corrupt(format!(
+                "the local history runs from {} to {} and the store is at {cursor}",
+                fork.cursor, o.head
+            )));
+        }
+        self.local = requeue.iter().map(|e| e.id).collect();
+        self.authored.extend(self.local.iter().copied());
+        self.client.replica.fork_back(facts, fork.cursor, fork.log_id, requeue);
+        self.authority = None;
+        self.alone_log = None;
+        self.alone = false;
+        self.collect_rejections();
+        self.wrote_pending = None;
+        self.persist()?;
+        LogJournal::destroy(&mut *self.storage, &layout).map_err(Error::Storage)
     }
 
     fn collect_rejections(&mut self) {
@@ -1090,6 +1424,20 @@ impl Peer {
             self.rejected.insert(id, reason.clone());
             self.rejections.push(Rejection { id, reason });
         }
+    }
+}
+
+#[cfg(test)]
+impl Peer {
+    /// Entries this peer holds in memory: its authority's log, and the
+    /// local history not yet written (`docs/plan-alone.md` §2).
+    pub(crate) fn entries_held(&self) -> usize {
+        self.authority.as_ref().map_or(0, |a| a.log.entries.len()) + self.alone_log.as_ref().map_or(0, |l| l.unwritten.len())
+    }
+
+    /// The authority's log: its head and its ids.
+    pub(crate) fn authority_log(&self) -> Option<&Log> {
+        self.authority.as_ref().map(|a| &a.log)
     }
 }
 

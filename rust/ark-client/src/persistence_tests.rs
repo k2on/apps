@@ -123,7 +123,7 @@ fn seeded(disk: &Memory, n: usize) -> Peer {
         create(&mut author, &format!("p{i}"));
     }
     let r = author.replica();
-    let snapshot = encode_replica("alone", r.cursor, &r.confirmed, "me", "local");
+    let snapshot = encode_replica(r.cursor, &r.confirmed, "me", "local");
     disk.clone().save(ReplicaFile::KEY, &snapshot).unwrap();
     Peer::open(demo::domain(), Box::new(disk.clone()), alone()).unwrap()
 }
@@ -132,7 +132,9 @@ fn seeded(disk: &Memory, n: usize) -> Peer {
 /// mutation's changes — the same bytes over three hundred playlists as over
 /// two thousand four hundred, and a small fraction of the snapshot. Falsified by writing a
 /// snapshot on every pump that moved the cursor (the layout before the
-/// journal): 6617 bytes against 104983.
+/// journal): 6617 bytes against 104983. The mutation itself wrote a page
+/// of the local history before it returned (`docs/plan-alone.md` §2), and
+/// that too is the mutation's size and not the store's.
 #[test]
 fn a_write_costs_the_mutation_not_the_store() {
     let mut cost = vec![];
@@ -148,6 +150,10 @@ fn a_write_costs_the_mutation_not_the_store() {
         let snapshot = disk.inner.load(ReplicaFile::KEY).unwrap().unwrap().len();
         disk.reset();
         create(&mut p, "New");
+        let (authored, keys) = disk.written();
+        assert!(keys[0].starts_with("log."), "{n}: the entry, as a page of the local history: {keys:?}");
+        assert!(authored * 20 < snapshot || keys.len() > 1, "{n}: {authored} bytes to author");
+        disk.reset();
         p.pump();
         let (bytes, keys) = disk.written();
         assert_eq!(keys, vec![ReplicaFile::page_key(1)], "{n}: one page and nothing else");
@@ -341,10 +347,12 @@ fn dropping_the_peer_writes_the_journal() {
 }
 
 /// A storage written before the journal — a `replica` record with the
-/// login inside and a `pending` record — opens as it did and writes
-/// nothing, then journals on from it. Falsified by `open` compacting any
-/// storage it has not seen a page of: the open writes the 585-byte
-/// snapshot again.
+/// login inside and a `pending` record — opens as it did, writing only
+/// where its local history starts (`log`, the fork: it has no `log`
+/// record, so it was last used as a replica of a server, which is what a
+/// record with no mode reads as — `docs/plan-alone.md` §1), then journals
+/// on from it. Falsified by `open` compacting any storage it has not seen
+/// a page of: the open writes the 585-byte snapshot again.
 #[test]
 fn a_storage_in_the_old_layout_opens_unchanged() {
     let mut author = Peer::open_memory(demo::domain(), alone()).unwrap();
@@ -354,17 +362,18 @@ fn a_storage_in_the_old_layout_opens_unchanged() {
     let r = author.replica();
     let disk = Counting::default();
     disk.clone()
-        .save(ReplicaFile::KEY, &encode_replica("alone", r.cursor, &r.confirmed, "me", "local"))
+        .save(ReplicaFile::KEY, &encode_replica(r.cursor, &r.confirmed, "me", "local"))
         .unwrap();
     disk.clone().save(ReplicaFile::PENDING, &encode_pending(&[])).unwrap();
     disk.reset();
     let mut p = Peer::open(demo::domain(), Box::new(disk.clone()), alone()).unwrap();
-    assert_eq!(disk.written(), (0, vec![]), "opening writes nothing");
+    assert_eq!(disk.written().1, vec!["log".to_string()], "opening writes the fork and nothing else");
     assert_eq!(p.cursor(), 12);
     assert!(p.replica().confirmed == author.replica().confirmed);
+    disk.reset();
     create(&mut p, "New");
     p.pump();
-    assert_eq!(disk.written().1, vec![ReplicaFile::page_key(1)]);
+    assert_eq!(disk.written().1, vec!["log.1".to_string(), ReplicaFile::page_key(1)]);
     reopens_as(&p, &disk.inner, alone(), "journalled on from the old layout");
 }
 
@@ -583,7 +592,7 @@ fn an_old_pending_record_opens_unchanged() {
     let disk = Counting::default();
     let r = author.replica();
     disk.clone()
-        .save(ReplicaFile::KEY, &encode_replica("server", r.cursor, &r.confirmed, "alice", "dev"))
+        .save(ReplicaFile::KEY, &encode_replica(r.cursor, &r.confirmed, "alice", "dev"))
         .unwrap();
     disk.clone().save(ReplicaFile::PENDING, &encode_pending(&r.pending)).unwrap();
     disk.reset();

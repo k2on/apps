@@ -3949,7 +3949,7 @@ pub fn seeded_times(domain: Domain, copies: usize) -> ark_client::Peer {
     // The store, as a peer alone keeps it: the confirmed state at the start of
     // an empty log, which its own authority takes as its snapshot.
     let file = ReplicaFile {
-        mode: "alone".into(),
+        fork: Default::default(),
         cursor: 0,
         confirmed: seed.store,
         pending: vec![],

@@ -6,9 +6,8 @@
 //! whole or not at all ([`Storage::save`] is atomic per record):
 //!
 //! ```text
-//! replica   { t: "replica", mode: "server" | "alone", cursor,
-//!             confirmed: { table: [row…] }, user, session,     the snapshot
-//!             log }
+//! replica   { t: "replica", cursor, confirmed: { table: [row…] },
+//!             user, session, log, fork: { log, cursor } }     the snapshot
 //! facts.1   { t: "facts", from, to, facts: [[change…], …] }    the journal:
 //! facts.2   …                                                  one page per
 //!                                                              write, dense
@@ -17,6 +16,10 @@
 //!             drop: [id…] }                                  their pages
 //! pending.2 …
 //! who       { t: "who", user, session }
+//! log       { t: "log", base: { seq, hash, rows, log },     a peer alone's
+//!             entries: [], ids: [] }                    local history: the
+//! log.1     [len, { seq, entry, facts }]…              fork, then pages of
+//! log.2     …                                          what it sequenced
 //! ```
 //!
 //! **A snapshot and a journal**, because a peer alone moves its cursor on
@@ -107,6 +110,20 @@
 //! written before logs had names has no `log`, opens unnamed, and is
 //! served as it was until the server's first answer names it.
 //!
+//! **The replica remembers its fork** (`fork`, `docs/plan-alone.md` §1): the
+//! `(log, cursor)` it last shared with a server, `{ cursor: 0 }` for a peer
+//! that never had one. Which way a peer was last used is not written down
+//! as a mode any more: **a `log` record is a peer alone**, and its absence
+//! a peer of a server. The `log` record and its pages are the alone
+//! authority's log, kept by `ark::journal` in the layout
+//! `ark::journal::Layout::alone` names: the snapshot is the fork — the store
+//! at the fork's cursor, naming the fork's log — with no entries, and each
+//! write a page of records `{ seq, entry, facts }`, the server's journal
+//! records, merged into fewer pages as they accumulate and never folded
+//! into the snapshot, because they are the local history a join re-queues.
+//! A `replica` record written before the fork existed carries a `mode`,
+//! which is read past, and opens with the fork at nothing.
+//!
 //! A storage written before the journal existed — a `replica` record, no
 //! pages, no `who` — is a snapshot with nothing after it, and opens as it
 //! did. A file written before `user` and `session` existed reads as
@@ -149,6 +166,30 @@ pub trait Storage {
 pub type BoxStorage = Box<dyn Storage + Send>;
 #[cfg(target_arch = "wasm32")]
 pub type BoxStorage = Box<dyn Storage>;
+
+// Every storage is where a log's records can be kept (`ark::journal`): the
+// alone log is written through the same `save` and `remove` as the replica.
+macro_rules! keys_through_storage {
+    ($($t:ty),*) => {$(
+        impl ark::journal::Keys for $t {
+            fn load(&self, key: &str) -> Result<Option<Vec<u8>>, String> {
+                Storage::load(self, key).map_err(|e| e.to_string())
+            }
+            fn save(&mut self, key: &str, bytes: &[u8]) -> Result<(), String> {
+                Storage::save(self, key, bytes).map_err(|e| e.to_string())
+            }
+            fn remove(&mut self, key: &str) -> Result<(), String> {
+                Storage::remove(self, key).map_err(|e| e.to_string())
+            }
+        }
+    )*};
+}
+
+keys_through_storage!(dyn Storage, dyn Storage + Send, Memory);
+#[cfg(not(target_arch = "wasm32"))]
+keys_through_storage!(Dir);
+#[cfg(target_arch = "wasm32")]
+keys_through_storage!(Local);
 
 /// In memory. Clones share the same map.
 #[derive(Clone, Debug, Default)]
@@ -325,15 +366,34 @@ pub fn base64_decode(s: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// Where a replica last shared a log with a server (`docs/plan-alone.md`
+/// §1): that log and the cursor it was at — `None` and 0 for a peer that
+/// never had a server. Everything a peer sequences alone after it is local
+/// history, which a join re-queues on top of it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Fork {
+    pub log_id: Option<Id>,
+    pub cursor: Seq,
+}
+
+impl Fork {
+    fn value(&self) -> Value {
+        let mut f = vec![("cursor", Value::Int(self.cursor))];
+        if let Some(id) = self.log_id {
+            f.push(("log", Value::Id(id)));
+        }
+        Value::record(f)
+    }
+}
+
 /// What is durable about the log, as `open` reads it back: the snapshot
-/// with every page after it applied — the mode, the cursor, the confirmed
+/// with every page after it applied — the fork, the cursor, the confirmed
 /// store, the login — and the intents not yet answered. See the module
 /// docs for the records it is kept in.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReplicaFile {
-    /// `"server"` for a replica of an authority elsewhere, `"alone"` for one
-    /// that is its own authority: the sequences mean different things.
-    pub mode: String,
+    /// Where this replica last shared a log with a server.
+    pub fork: Fork,
     pub cursor: Seq,
     pub confirmed: MemoryStore,
     pub pending: Vec<Entry>,
@@ -363,7 +423,7 @@ impl ReplicaFile {
     /// The `replica` record: a snapshot of everything but the pending
     /// intents.
     pub fn encode(&self) -> Vec<u8> {
-        encode_replica(&self.mode, self.cursor, &self.confirmed, &self.user, &self.session)
+        encode_replica_of(self.cursor, None, self.fork, &self.confirmed, &self.user, &self.session)
     }
 
     /// The `pending` record.
@@ -393,10 +453,6 @@ pub fn decode_replica(bytes: &[u8], schema: &Schema) -> Result<(ReplicaFile, Opt
     if m.get("t") != Some(&Value::text("replica")) {
         return Err(bad("not a replica"));
     }
-    let text = |k: &str| match m.get(k) {
-        Some(Value::Text(t)) => Ok(t.clone()),
-        _ => Err(bad(&format!("no {k}"))),
-    };
     let cursor = match m.get("cursor") {
         Some(Value::Int(n)) => *n,
         _ => return Err(bad("no cursor")),
@@ -435,8 +491,23 @@ pub fn decode_replica(bytes: &[u8], schema: &Schema) -> Result<(ReplicaFile, Opt
         Some(Value::Id(i)) => Some(*i),
         Some(_) => return Err(bad("log is not an id")),
     };
+    let fork = match m.get("fork") {
+        None => Fork::default(),
+        Some(Value::Struct(f)) => Fork {
+            cursor: match f.get("cursor") {
+                Some(Value::Int(n)) => *n,
+                _ => return Err(bad("a fork with no cursor")),
+            },
+            log_id: match f.get("log") {
+                None => None,
+                Some(Value::Id(i)) => Some(*i),
+                Some(_) => return Err(bad("a fork's log is not an id")),
+            },
+        },
+        Some(_) => return Err(bad("fork is not a struct")),
+    };
     let file = ReplicaFile {
-        mode: text("mode")?,
+        fork,
         cursor,
         confirmed,
         pending,
@@ -628,18 +699,20 @@ pub fn decode_who(bytes: &[u8]) -> Result<(String, String), Error> {
     Ok((text("user")?, text("session")?))
 }
 
-/// The `replica` record's bytes: a snapshot, of no named log.
-pub fn encode_replica(mode: &str, cursor: Seq, confirmed: &MemoryStore, user: &str, session: &str) -> Vec<u8> {
-    encode_replica_of(mode, cursor, None, confirmed, user, session)
+/// The `replica` record's bytes: a snapshot, of no named log, by a peer
+/// that never had a server.
+pub fn encode_replica(cursor: Seq, confirmed: &MemoryStore, user: &str, session: &str) -> Vec<u8> {
+    encode_replica_of(cursor, None, Fork::default(), confirmed, user, session)
 }
 
 /// The `replica` record's bytes: a snapshot at `cursor` of the log
-/// `log_id`. Unnamed, it is the record as it was before logs had names.
-pub fn encode_replica_of(mode: &str, cursor: Seq, log_id: Option<Id>, confirmed: &MemoryStore, user: &str, session: &str) -> Vec<u8> {
+/// `log_id`, by a replica whose fork is `fork`. Unnamed, it is the record
+/// as it was before logs had names.
+pub fn encode_replica_of(cursor: Seq, log_id: Option<Id>, fork: Fork, confirmed: &MemoryStore, user: &str, session: &str) -> Vec<u8> {
     let mut fields = vec![
         ("t", Value::text("replica")),
-        ("mode", Value::text(mode)),
         ("cursor", Value::Int(cursor)),
+        ("fork", fork.value()),
         ("confirmed", confirmed.store_value()),
         ("user", Value::text(user)),
         ("session", Value::text(session)),

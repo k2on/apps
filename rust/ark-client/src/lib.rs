@@ -29,6 +29,8 @@
 //!
 //! The README maps every call harken's iced client made on petros to this.
 
+#[cfg(test)]
+mod alone_tests;
 pub mod autos;
 pub mod demo;
 mod domain;
@@ -42,7 +44,8 @@ mod view;
 pub use autos::Autos;
 pub use domain::Domain;
 pub use link::Timing;
-pub use peer::{refusal_text, Options, Peer, Pumped, Rejection, Standing, Status};
+pub use peer::{refusal_text, Login, Options, Peer, Pumped, Rejection, Standing, Status};
+pub use storage::Fork;
 pub use view::{splice, Update, View};
 
 pub use ark;
@@ -63,12 +66,6 @@ pub enum Error {
     Bug(String),
     Storage(String),
     Corrupt(String),
-    /// The storage was last opened the other way — alone, or with a server —
-    /// and its sequences mean something else under this one.
-    ModeMismatch {
-        was: String,
-        now: String,
-    },
     /// Signing in on a peer that is its own authority: there is no server
     /// to sign in to.
     Alone,
@@ -83,7 +80,6 @@ impl std::fmt::Display for Error {
             Error::Bug(s) => write!(f, "bug: {s}"),
             Error::Storage(s) => write!(f, "storage: {s}"),
             Error::Corrupt(s) => write!(f, "corrupt: {s}"),
-            Error::ModeMismatch { was, now } => write!(f, "the storage was opened {was} before and {now} now"),
             Error::Alone => write!(f, "a peer alone has no server to sign in to"),
         }
     }

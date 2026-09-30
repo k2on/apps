@@ -494,7 +494,12 @@ impl Journal {
     /// first. Nothing is written where the records are whole. Skipped
     /// records under a [`Compaction::Snapshot`] layout are left for the
     /// caller, who holds the log, to compact ([`Opened::stale`]).
-    pub fn open<K: Keys + ?Sized>(keys: &mut K, layout: Layout, schema: &Schema, each: impl FnMut(Seq, Entry, Facts)) -> Result<(Journal, Opened), String> {
+    pub fn open<K: Keys + ?Sized>(
+        keys: &mut K,
+        layout: Layout,
+        schema: &Schema,
+        each: impl FnMut(Seq, Entry, Facts),
+    ) -> Result<(Journal, Opened), String> {
         let snapshot = read_snapshot(keys, &layout, schema)?;
         let snapshot_bytes = snapshot.as_ref().map_or(0, |(_, n)| *n as u64);
         let base_head = snapshot.as_ref().map_or(0, |(l, _)| l.head_seq());
@@ -581,7 +586,8 @@ impl Journal {
 
     /// Records above the head, already encoded ([`encode_record`]),
     /// reaching `to`: appended to the one page, or saved as a page of
-    /// their own; then, under [`Compaction::Merge`], neighbours merged.
+    /// their own. Under [`Compaction::Merge`] the caller merges after
+    /// ([`Journal::merge`]), whose failure leaves the records durable.
     /// `Ok` means every record is on the storage. Whether the page landed
     /// when this fails is not known: the next write under
     /// [`Paging::Append`] is a snapshot; under [`Paging::Pages`] the page
@@ -609,9 +615,6 @@ impl Journal {
         }
         self.written += records.len() as u64;
         self.head = to;
-        if self.layout.compaction == Compaction::Merge {
-            self.merge(keys)?;
-        }
         Ok(())
     }
 
@@ -619,8 +622,11 @@ impl Journal {
     /// is no larger (the module docs): the merged page saved whole first,
     /// then the newer removed — so a stop between leaves a page every
     /// record of which the merged one holds, which a reader skips and
-    /// [`Journal::open`] removes.
-    fn merge<K: Keys + ?Sized>(&mut self, keys: &mut K) -> Result<(), String> {
+    /// [`Journal::open`] removes. Nothing under [`Compaction::Snapshot`].
+    pub fn merge<K: Keys + ?Sized>(&mut self, keys: &mut K) -> Result<(), String> {
+        if self.layout.compaction != Compaction::Merge {
+            return Ok(());
+        }
         while let [.., older, newer] = self.pages[..] {
             if older > newer {
                 break;
@@ -812,6 +818,7 @@ mod tests {
         let snapshot = keys.load("log").unwrap();
         for i in 1..=1000 {
             j.append(&mut keys, &record(i), i).unwrap();
+            j.merge(&mut keys).unwrap();
         }
         assert!(j.page_count() <= 10, "{} pages", j.page_count());
         assert_eq!(seqs(&keys), (1..=1000).collect::<Vec<_>>());

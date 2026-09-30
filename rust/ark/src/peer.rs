@@ -434,6 +434,78 @@ impl Replica {
         self.rebase(&undo, vec![], at);
     }
 
+    /// Alone → server (`docs/plan-alone.md` §1): the local history since
+    /// the fork is taken back out of the confirmed store and becomes
+    /// pending again. `local` is what each entry this peer sequenced alone
+    /// above the fork changed, in sequence order — the confirmed store is
+    /// at `fork + local.len()` — and `requeue` is what those intents are
+    /// pushed as: the same ids, functions, autos and arguments, under the
+    /// login that is taking them to a server. The cursor and the log move to
+    /// the fork's, the requeued intents go ahead of anything already
+    /// pending (an id already pending is not queued twice), and the view is
+    /// told every transition: what pending held undone, the local history
+    /// undone newest first — each change inverts exactly, so the confirmed
+    /// store is the fork's state again without reading it — and every
+    /// intent run again on top. A rebase of the kind that lands nothing,
+    /// so a screen of the library is patched and not rebuilt; an intent the
+    /// replay now refuses is dropped with its reason, as any rebase does.
+    ///
+    /// The confirmed store was moved backwards, which no page of a journal
+    /// can say: whoever keeps it durable is told [`Journal::Replaced`].
+    pub fn fork_back(&mut self, local: Vec<Facts>, fork: Seq, log_id: Option<Id>, requeue: Vec<Entry>) {
+        debug_assert_eq!(
+            self.cursor,
+            fork + local.len() as Seq,
+            "the confirmed store is the fork with the local history on it"
+        );
+        let order: Vec<Id> = self.pending.iter().map(|e| e.id).collect();
+        let whole = order.iter().all(|id| self.recorded.contains_key(id));
+        let mut told = Vec::new();
+        if whole {
+            for id in order.iter().rev() {
+                let rec = self.recorded.remove(id).unwrap_or_default();
+                for c in rec.into_iter().rev() {
+                    let back = invert(c);
+                    self.view.apply_change(&back);
+                    told.push(back);
+                }
+            }
+        }
+        for facts in local.into_iter().rev() {
+            for c in facts.into_iter().rev() {
+                let back = invert(c);
+                self.confirmed.apply_change(&back);
+                if whole {
+                    self.view.apply_change(&back);
+                }
+                told.push(back);
+            }
+        }
+        self.cursor = fork;
+        self.log_id = log_id;
+        self.inbox.clear();
+        self.journal.clear();
+        self.replaced = true;
+        let queued: BTreeSet<Id> = requeue.iter().map(|e| e.id).collect();
+        let rest: Vec<Entry> = std::mem::take(&mut self.pending)
+            .into_iter()
+            .filter(|e| !queued.contains(&e.id))
+            .collect();
+        self.pending = requeue;
+        self.pending.extend(rest);
+        if !whole {
+            // A record missing: `pending` was changed from outside, and the
+            // confirmed store is right whatever happened (`rebase`).
+            return self.replay();
+        }
+        debug_assert!(
+            same_rows(&self.view, &self.confirmed),
+            "undoing pending and the local history did not reach the fork's state"
+        );
+        told.extend(self.run_pending(0));
+        self.changes.extend(told);
+    }
+
     /// The sequences the replica is waiting on facts for: entries whose
     /// closures it does not hold, or which it could not apply as the
     /// authority did.

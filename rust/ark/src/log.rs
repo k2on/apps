@@ -224,6 +224,20 @@ impl Log {
         })
     }
 
+    /// Every entry taken out, oldest first, and the log left standing at
+    /// its head with the ids kept: what a peer alone's authority does after
+    /// each append, since its entries are kept in its journal and not in
+    /// memory (`docs/plan-alone.md` §2). What is left says nothing about the
+    /// state below the head — its base's store is whatever it was, and a
+    /// peer alone gives it an empty one, since the authority holds the state
+    /// at the head — so it is asked only [`Log::head_seq`], [`Log::seq_of`],
+    /// [`Log::append`] and [`Log::hash_at`] the head.
+    pub fn take_entries(&mut self) -> Vec<(Seq, Entry, Facts)> {
+        let head = self.head_seq();
+        self.base.seq = head;
+        std::mem::take(&mut self.entries).into_iter().map(|(n, (e, f))| (n, e, f)).collect()
+    }
+
     /// The function hashes the retained entries name.
     pub fn named_hashes(&self) -> BTreeSet<FnHash> {
         self.entries.values().map(|(e, _)| e.fn_hash.clone()).collect()
