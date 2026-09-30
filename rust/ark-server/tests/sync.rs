@@ -65,10 +65,11 @@ fn two_peers_sync_and_an_offline_edit_rebases_on_top() {
     assert_eq!(tracks(&alice, list), ["a", "b", "c"]);
     let changes = bob.take_changes();
     assert!(
-        matches!(changes, ark_client::Changes::Rebuilt),
-        "a confirmed entry under a pending one is a rebuild, not a list: {changes:?}"
+        matches!(changes, ark_client::Changes::Applied(_)),
+        "a confirmed entry under a pending one is the transitions the rebase made: {changes:?}"
     );
-    assert_eq!(view.update(&bob, &changes).unwrap(), Update::Reset);
+    let update = view.update(&bob, &changes).unwrap();
+    assert!(matches!(update, Update::Patched(_)), "{update:?}");
     assert_eq!(rows_tracks(view.rows()), ["a", "b", "c"]);
     assert!(bob.take_rejections().is_empty());
 

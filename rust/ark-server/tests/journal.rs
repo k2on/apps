@@ -87,9 +87,11 @@ fn bytes_written_per_append_do_not_grow_with_the_log() {
             "{n}: {} bytes written for {records} bytes of records",
             f.written
         );
-        // One more, and not one that lands on a compaction.
+        // One more, and not one that lands on a compaction (the one after a
+        // compaction never is: the journal is empty and the snapshot whole).
         let mut i = n;
         let bytes = loop {
+            assert!(i < n + 3, "{n}: three appends in a row compacted");
             let before = f.written;
             author(&mut a, &d, i);
             f.write(&a.log).unwrap();
@@ -312,7 +314,17 @@ fn a_server_restarted_over_its_directory_has_every_entry() {
         pump_until(&mut p, &|p| p.pending_len() == 0);
     }
     let head = p.cursor();
-    let log = rt.block_on(app.hub.read(|h| h.authority().log.clone())).unwrap();
+    // Every wait is bounded: a hub that stopped answering is a failure, not
+    // a test that runs until somebody kills it.
+    let read = |hub: &ark_server::HubHandle| {
+        rt.block_on(async {
+            tokio::time::timeout(std::time::Duration::from_secs(20), hub.read(|h| h.authority().log.clone()))
+                .await
+                .expect("the hub answers")
+                .unwrap()
+        })
+    };
+    let log = read(&app.hub);
     assert_eq!(log.head_seq(), head);
     assert!(
         fs::metadata(journal_path_of(data.path())).unwrap().len() > 0,
@@ -321,7 +333,7 @@ fn a_server_restarted_over_its_directory_has_every_entry() {
     drop(p);
     drop(app);
     let again = build();
-    let back = rt.block_on(again.hub.read(|h| h.authority().log.clone())).unwrap();
+    let back = read(&again.hub);
     assert_eq!(back.head_seq(), head, "every entry a peer was told of");
     assert_eq!(back, log);
 }
