@@ -780,6 +780,186 @@ drops SYNs (loopback refuses or answers); the read timeouts were. A
 browser's `web.rs` transport and ark-auth's `web.rs` have no timeouts of
 their own; the browser's are the platform's.
 
+### Round 4, and the pass closed
+
+**What landed.** *A log's identity* (`a155a1e`). `Snapshot::log_id`,
+so a log's base carries its name, `compact_to` keeps it and a page below
+the horizon carries it; `Log::id` and `Log::name_if_unnamed`. The engine
+has no randomness, so the hub draws the name (`Hub::new`, from
+`ark_client::Autos::system`) for a log it creates or loads unnamed. On
+the wire, `log` — an id or null — in `hello` (`Subscription::log_id`),
+`batch` and `snapshot`; a frame without the field decodes as null. The
+server compares a `Hello`'s name with its log's only when both have one:
+different, the connection is sent `SnapshotOf` at the head, named, once
+and before anything else — wherever its cursor is, which is what makes it
+the past-the-head case generalised. A client learns the name from the
+first `batch` when it had none, and holds a snapshot's from it. On disk:
+the server's snapshot has `base.log` (a file without it loads unnamed, is
+named by the hub, and its next write is a snapshot); the client's
+`replica` record has `log` (one without it opens unnamed, and learning a
+name is written as a snapshot, not left for a compaction). *A verdict
+once* (`21f0918`): `Replica::reject` reports only for an intent still
+pending. *`stdlib` borrows* (`ded8965`): `std` is generic over
+`Borrow<Value>`, so it takes `&Value`, the interpreter's `Cow` or an owned
+`Value`, and copies only what it answers; `eval.rs` reads a call's
+arguments with `eval_ref`, on the stack for the three arities there are,
+and the form validator's `trim` borrows.
+
+**The wire.** Moved: `protocol/client-hello.json` (named),
+`client-hello-facts.json` (null), `server-batch.json`,
+`server-snapshot.json`, and `falsify/client-hello-bytes-of-v3.json`, whose
+hello gained the field; new: `falsify/server-snapshot-bytes-of-another-
+log.json`, since the existing falsify case does not reach the snapshot.
+No other directory moved, and `ir::SPEC_VERSION` did not: every frame
+from before decodes and is served as it was — an old client's hello names
+no log and is paged as before, and an old client ignores the field on a
+batch or a snapshot, as an old server ignores it on a hello.
+`spec/README.md`'s §10 and §12 rows say so.
+
+**Guards, each falsified once.** `ark/tests/past_the_head.rs`: a replica
+confirmed to 30 of log A meets a server at 40 of log B and is sent B's
+snapshot at 40 first, its three pending acknowledged at 41–43, its store
+B's hash for hash and its item after B's thirty-nine (never comparing the
+names: a `Batch` from 31 first, and another hash); a peer that names no
+log is paged as before and learns the name from the page (ignoring the
+page's `log`: still unnamed). `log.rs`: the name survives `compact_to`
+and rides a page below the horizon (`snapshot_of` alone: unnamed).
+`persist.rs`: the name survives appends, compaction, the horizon and a
+reopen (leaving it out of `log_to_value`: unnamed); an unnamed file is
+named at its next write, as a snapshot (not treating the rename as due:
+unnamed on reopen). `ark-client` `peer.rs`: a peer at 20 of a server that
+then names its log learns it on the next page, writes it as a snapshot,
+and says it in the `Hello` after a reopen (not treating the rename as
+due: the page is appended and the snapshot stays unnamed). Fleet 3c, its
+other half: the log lost again, sequenced to 12 by a fourth device before
+the three return at 9 — converged on 18, three runs of three, 0.8–1.0 s
+restart to converged (never comparing the names: all three at 18 with a
+hash that is not the log's). A verdict once:
+`peer::tests::a_verdict_and_a_sign_in_rebase_by_changes` gives the
+server's verdict after the replay's and keeps two rejections, and
+`past_the_head.rs` asserts one intent with one reason through the
+protocol (reporting before asking whether the intent is pending: three,
+and the reason twice). `stdlib`: `len` and `first` of a local list cost
+17 and 19 allocations at 100 elements and at 400 (copying the arguments
+first: 118 and 418, 120 and 420); a `library` entry is 52.2 allocations
+at 285, from 55.8 (its `first(items)` copied the items: 54.8 with the
+copy put back). Every vector and `every_procedure_agrees_with_the_
+interpreter` pass unchanged; the fleet suite is green twice.
+
+**The closing measurement.** The three harnesses whole, release, one
+thread (`cargo test -p <ark | ark-server | harken-domain> --release
+--test perf -- --ignored --nocapture --test-threads=1`) at `ded8965` on
+the shared VM, nothing else running; mean µs per operation at the two
+largest sizes each row has (`l100` is the last hundred where that says
+more than the mean). *Flat*: within the VM's noise over a fourfold (or
+sixteenfold) size. *Logarithmic*: a few tens of percent over a fourfold
+size, where the path is a B-tree's. *Constant*: a named factor, with its
+number. *The answer*: the operation's result is the size of the data.
+*Grows*: it grows, and the cause is said.
+
+| row | sizes | µs per operation | category |
+|---|---|---|---|
+| (a) alone, one playlist: whole | 2,000 / 8,000 | 29.2 / 28.2 | flat |
+| (a) … `Replica::mutate` / `local_commit` | 2,000 / 8,000 | 16.8 / 15.5; 12.4 / 12.7 | flat |
+| (a) alone, playlists of 10: whole | 2,000 / 8,000 | 23.9 / 29.2 | logarithmic |
+| (a) offline, all pending | 2,000 / 8,000 | 14.2 / 15.4 | flat |
+| (d) receive by intent, native / interpreted | 2,010 / 8,010 | 18.0 / 23.5; 17.9 / 22.1 | logarithmic |
+| (d) intent and facts, compared / facts alone | 2,010 / 8,010 | 18.5 / 25.3; 6.3 / 9.1 | logarithmic |
+| (d) the server paging a fresh connection, per entry | 2,010 / 8,010 | 2.4 / 3.6 (last page 340 / 234 µs) | flat, after the first page — see below |
+| (d) `entries_after(0)`, one page, measured once | 2,000 / 8,000 | 452 / 1,367 | grows cold; warm, flat — see below |
+| (e) K=10 pending, M=256 one at a time, per entry | 2,000 / 8,000 | 189 / 218 | constant: K intents re-run, ≈ 20 µs each |
+| (e) K=100, one at a time, per entry | 2,000 / 8,000 | 1,915 / 2,040 | constant: the same, K = 100 |
+| (e) K=10 / K=100, one page, per entry | 2,000 / 8,000 | 19.5 / 22.6; 27.8 / 33.9 | logarithmic |
+| (e) ack of K=1,000 own, per ack | 2,000 / 8,000 | 6.5 / 8.5 | logarithmic |
+| (g) `sequence_entry` | 2,000 / 8,000 | 19.4 / 20.4 | flat |
+| (g) fan-out, C=10 / C=160, per connection | 500 / 8,000 | 6.2 / 12.5; 4.4 / 7.0 | logarithmic at two sizes sixteen apart (2× and 1.6×); not separated from the cold page below |
+| (g) `Verify` at the head, as served | 2,000 / 8,000 | 2,590 / 15,379 | the answer: `state_hash` of every row |
+| (g) `state_at` + hash, a `Verify` below the head | 2,000 / 8,000 | 9,232 / 60,501 | the answer: a replay from the snapshot, by §10.2 |
+| (h) a `Batch` of 256, encode / decode | 256 | 614 / 615 (with facts 1,036 / 1,087) | constant per entry, ≈ 2.4 µs |
+| `MemoryStore::scan`, per row | 2,000 / 8,000 | 0.72 / 1.29 | grows — see below |
+| (b) one playlist, no log file: round trip | 500 / 2,000 | 92.5 / 119.1 | logarithmic |
+| (b) … `Peer::mutate` alone | 500 / 2,000 | 23.0 / 28.4 | logarithmic |
+| (b) playlists of 10, no log file: round trip | 500 / 2,000 | 81.0 / 134.0 (l100 76 / 136) | grows — see below |
+| (b) log on disk: round trip, one playlist / of 10 | 500 / 2,000 | 4,093 / 3,750; 4,016 / 3,476 | constant: the journal's `fsync` |
+| (b) a watcher receiving, nothing pending | 500 / 2,000 | 32.1 / 34.8 | flat |
+| (c) offline, Memory: mutate | 2,000 / 8,000 | 20.3 / 32.5 (l100 23.9 / 39.7) | grows — see below |
+| (c) offline, Dir: mutate | 2,000 / 8,000 | 6,662 / 5,807 | constant: one file written and synced |
+| (c) alone, Memory: mutate / pump | 2,000 / 8,000 | 25.5 / 39.5; 6.4 / 9.2 | mutate grows — see below; pump logarithmic |
+| (c) alone, Dir: mutate / pump | 2,000 / 8,000 | 133 / 116; 9,767 / 6,476 | constant: the `fsync`s |
+| harken `add_song`: whole | 2,000 / 8,000 | 363 / 378 | flat (its dozen upserts, and the interpreter) |
+| … `Replica::mutate` / `local_commit` | 2,000 / 8,000 | 283 / 290; 80 / 88 | flat |
+| harken `add_to_playlist`, one playlist: whole | 2,000 / 8,000 | 45.6 / 52.3 | logarithmic |
+| … `Replica::mutate` / `local_commit` | 2,000 / 8,000 | 31.8 / 35.4; 13.8 / 16.9 | logarithmic |
+| harken `create_playlist`, distinct names | P=200 / 800 | 56.8 / 63.8 | flat |
+| harken `create_playlist`, all "Favorites" | P=200 / 800 | 4,212 / 61,073 (l100 7,261 / 157,158) | grows: `free_number`'s square of the siblings, accepted (Round 4) |
+| `playlist_name`, a taken name / a free one | P=100 / 1,000 | 3,282 / 274,809; 28 / 195 | the same square; a free name is linear in the list it is given, which the read bounds to the siblings |
+| harken views, `library`: a toggle | 500 / 2,000 songs | 14.0 / 19.4 | logarithmic |
+| harken views, add a Bach song: `albums` / `artists` / `composers` / `works` | 500 / 2,000 songs | 85 / 340; 203 / 833; 813 / 3,121; 47 / 114 | grows with the group: the whole-group rebuild, accepted (`docs/plan-v4.md` §1.13) |
+| harken views, hydrate per row: `library` / `track_details` | 500 / 2,000 songs | 4.7 / 5.4; 12.5 / 16.6 | the answer; per row logarithmic |
+| `library` read whole, per entry | 2,000 / 8,000 | 4.2 / 4.3 µs, 51 / 51 allocations | flat |
+| `add_to_playlist` applied, allocations | 2,000 / 8,000 | 358 / 358 | flat |
+| rows a mutation examines (four mutations) | 500 / 8,000 | identical: 14g 1r, 7g 0r, 7g 1r, 2g 1r, 2g 102r | flat |
+| scanner: one new file / a full rescan, per file | 2,000 / 8,000 | 2.0 / 3.0; 1.54 / 1.72 | flat (a rescan is the answer: one probe a file) |
+| an apply, native against interpreted | — | `create_playlist` 47–73 / 27–33; `add_song` 241–1,000 / 372–980 | constant |
+
+**What still grows, plainly.** Five rows do, and none is fitted into a
+category:
+
+- *`(c)` offline, Memory: `mutate`*, 20.3 µs at 2,000 pending to 32.5 at
+  8,000: real, linear in what is pending, about 2 ns an intent. The cause
+  is `ark_client::Peer::persist_pending`, which decides that `mutate`
+  only added at the end by comparing the whole list it last wrote with
+  the pending list — `held.iter().zip(pending).all(..)` — on every
+  `mutate`. The replica's own `mutate` is flat (`(a)` offline, 15.4 at
+  8,000). Not changed here; the fix is to know that the list only grew
+  (a counter `mutate` moves) rather than to find it out.
+- *`(c)` alone, Memory: `mutate`*, 25.5 to 39.5 at 2,000 and 8,000, where
+  nothing is pending across a pump and the same mutate in `ark` is flat.
+  Not attributed.
+- *`(b)` playlists of ten, no log file: the round trip*, 81 to 134 at 500
+  and 2,000 — two sizes only, through the hub's thread and channel, where
+  the one-playlist row and every engine row it is made of are flat or
+  logarithmic. Not attributed.
+- *`MemoryStore::scan`, per row*, 0.72 to 1.29 µs at 2,000 and 8,000. A
+  walk of the table and a copy a row, the same allocations a row whatever
+  the table's size; a probe of the same shape measured 132, 375, 418 and
+  589 ns a row at 500, 2,000, 8,000 and 32,000 rows, which is the memory
+  hierarchy under a table that no longer fits in cache, not the walk.
+- *The first page to a fresh connection*, measured once and cold:
+  `entries_after(0)` 452 µs at 2,000 and 1,367 at 8,000, and the server's
+  first page 1,252 and 7,405 µs where its last is 340 and 234. A probe
+  that pages the same log fifty times measured 155, 155, 162 and 153 µs a
+  warm page at 500, 2,000, 8,000 and 32,000 entries, and 557–770 µs cold
+  at every size: the harness's single cold shot of a page whose entries
+  were allocated long before. Flat as an operation; the harness does not
+  show it.
+
+Accepted and named, with their numbers: the whole-group rebuild of a
+grouped or nested view (`composers` 3.1 ms per Bach song at 2,000 songs,
+§1.13); `free_number`'s square of one person's numbered siblings (61 ms a
+call on average, 157 ms at the last hundred, at 800); the row
+representation (a fifth of a hydrate's allocations and an eighth of an
+apply's, R5 — deferred); a rebase's K intents re-run per landing entry
+(≈ 20 µs each); the `fsync`s of a directory (3.5–10 ms here, the disk's).
+A `Verify` and a replay are their answers. Everything else is flat or
+logarithmic. By this document's rule the pass ends when only constant
+factors remain — and the first of the five above is not one; it is
+small, it is a peer's own pending, and it is one comparison to remove.
+
+**Not verified.** The kotlin and swift runtimes, frozen at spec v3,
+neither send nor read a log's name, and are served as before. An old
+client against a new server and a new client against an old one are
+argued from the decoders — both ignore a field they do not know, and
+`log_of` reads an absent one as null — and tested only as a frame
+without the field; no old binary was run against a new one. A data
+directory from before this round was not upgraded by a real server: the
+path is `persist.rs`'s test, which names an unnamed file at its next
+write. The two gaps `persist.rs`'s docs state — a new log's name sent in
+a snapshot at 0 before anything was appended, and a compaction failing
+after its append — cost a peer one needless re-base after a restart and
+are not tested. The browser's storage (`Local`) carries the name through
+the same code; the wasm build was not run. Timings share the VM.
+
 ## Round 3 — decided with round 2's numbers
 
 Round 2 removed every super-linear cost the harness found. What remains

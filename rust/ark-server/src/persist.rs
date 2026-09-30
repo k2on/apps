@@ -59,9 +59,16 @@
 //! record does not carry it: a journal only ever extends the snapshot it
 //! follows. A snapshot written before logs had names has no `log`, loads
 //! unnamed, and the hub names it; the next write is then a snapshot, so
-//! the name is on the disk before a restart could draw another. A
-//! directory with no snapshot at all — new, or a journal alone — writes one
-//! at its first append anyway, because any journal outgrows no snapshot.
+//! the name is on the disk before a restart could draw another, and —
+//! since the hub writes before it delivers (`hub.rs`) — before any peer is
+//! told it. A directory with no snapshot at all, new or a journal alone,
+//! writes its name with its first append, which compacts at once because
+//! any journal outgrows no snapshot; it is not written sooner, so opening
+//! one writes nothing. Two gaps are left, both costing a re-base and never
+//! a wrong state: a new log's name told in a snapshot at 0 before anything
+//! was appended, and a compaction that fails after its append (said, not
+//! returned). A server restarted in either draws another name, and its
+//! peers are sent its snapshot once.
 
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
@@ -431,11 +438,11 @@ impl LogFile {
     /// compaction that follows a good append and fails is said, not
     /// returned: the entries are durable either way.
     ///
-    /// A log whose name is not the one on the snapshot — a directory
+    /// A log whose name is not the one on its snapshot — a directory
     /// written before logs had names, named since it was opened — is
-    /// written as a snapshot, so the name is on the disk from the first
-    /// write (the module docs). Where there is no snapshot yet the append
-    /// is what writes one.
+    /// written as a snapshot, whether or not it moved, so the name is on
+    /// the disk from the first write (the module docs). Where there is no
+    /// snapshot yet, the first append is what writes one.
     pub fn write(&mut self, log: &Log) -> Result<()> {
         let renamed = log.id() != self.named && self.snapshot_bytes > 0;
         if self.due || renamed || log.horizon() != self.horizon || log.head_seq() < self.head {
