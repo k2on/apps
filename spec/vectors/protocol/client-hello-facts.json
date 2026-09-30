@@ -1,4 +1,4 @@
 {
-  "frame": {"mode":"facts","since":{"$int":"0"},"spec":{"$int":"4"},"t":"hello","token":null},
-  "bytes": "a561746568656c6c6f646d6f64656566616374736473706563046573696e63650065746f6b656ef6"
+  "frame": {"log":null,"mode":"facts","since":{"$int":"0"},"spec":{"$int":"4"},"t":"hello","token":null},
+  "bytes": "a661746568656c6c6f636c6f67f6646d6f64656566616374736473706563046573696e63650065746f6b656ef6"
 }

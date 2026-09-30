@@ -418,7 +418,7 @@ fn perf_d_initial_sync() {
             last = dt;
             let mut more = false;
             for (_, m) in out {
-                if let ServerMsg::Batch { items, has_more } = m {
+                if let ServerMsg::Batch { items, has_more, .. } = m {
                     since = items.last().map_or(since, |(s, _, _)| *s);
                     more = has_more;
                 }
@@ -452,7 +452,7 @@ fn perf_d_initial_sync() {
 
 fn hello(since: Seq, mode: Mode) -> ClientMsg {
     ClientMsg::Hello {
-        sub: Subscription { since, mode },
+        sub: Subscription { since, mode, log_id: None },
         token: Some("alice".into()),
         spec: ark::ir::SPEC_VERSION,
     }
@@ -714,7 +714,11 @@ fn perf_h_frames() {
             .rev()
             .map(|(n, e, f)| (*n, e.clone(), facts.then(|| f.clone())))
             .collect();
-        let m = ServerMsg::Batch { items, has_more: false };
+        let m = ServerMsg::Batch {
+            items,
+            has_more: false,
+            log_id: None,
+        };
         let reps = 50;
         let t = Instant::now();
         let mut bytes = vec![];

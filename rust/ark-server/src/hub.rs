@@ -149,6 +149,12 @@ impl Hub {
             }
         }
         server.rooms.kept = kept.clone();
+        // A log is named once, when it is created: here, for a new one or
+        // one loaded from a directory written before logs had names — the
+        // engine has no randomness to draw it with. One loaded named keeps
+        // its name; `LogFile::write` puts a new one on the disk at the
+        // first write (`persist` module docs, `docs/plan-perf.md` Round 4).
+        server.authority.log.name_if_unnamed(ark_client::Autos::system().new_id());
         Ok(Hub {
             server,
             relay,

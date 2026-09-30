@@ -378,7 +378,11 @@ fn a_push_is_held_to_its_login_and_every_refusal_says_why() {
         }
     };
     let hello = |tok: &str| ClientMsg::Hello {
-        sub: Subscription { since: 0, mode: Mode::Whole },
+        sub: Subscription {
+            since: 0,
+            mode: Mode::Whole,
+            log_id: None,
+        },
         token: Some(tok.into()),
         spec: ark::ir::SPEC_VERSION,
     };

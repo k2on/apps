@@ -342,9 +342,24 @@ fn a_server_stopped_mid_stream_loses_nothing() {
 /// because there is one log and this is it. The server's own scanner peer,
 /// whose replica is past the head too, is re-based the same way.
 ///
+/// **And the half a cursor cannot tell** (`docs/plan-perf.md` Round 4):
+/// the log is lost again, the three author two more each and go away, and
+/// the server — started on a new, empty log — is not idle while they are
+/// gone: a fourth device, `d`, sequences twelve on it. When the three come
+/// back their cursors, 9, are *below* its head, 12, and a sequence number
+/// alone says they are three entries behind on this log — which they never
+/// held a byte of. Their `Hello` names the log they were confirmed on; this
+/// one has another name, so each is answered with its snapshot at the head
+/// as before, and the fleet converges on `d`'s twelve and the six. Nothing
+/// of the second log — nor the first — is left on any peer.
+///
 /// Falsified by serving a cursor past the head nothing, as before
 /// (`sent >= head` in `ark::protocol::Server::fanout`): not converged —
-/// every peer stays at 16, ahead of a head of 9, its three pending.
+/// every peer stays at 16, ahead of a head of 9, its three pending. The
+/// second half is falsified by a server that never compares the names
+/// (`elsewhere` always false in `Server::recv`): the three are paged 10 to
+/// 12 of the new log on top of the old one's nine, and are never
+/// converged — their hashes are not the log's.
 #[test]
 fn a_server_that_lost_its_log_re_bases_everyone_onto_what_it_has() {
     let mut f = Fleet::new("log-lost");
@@ -382,6 +397,69 @@ fn a_server_that_lost_its_log_re_bases_everyone_onto_what_it_has() {
         assert!(
             !names.is_empty() && names.iter().all(|n| n.split('-').nth(1) == Some("1")),
             "{}: only the second burst's: {names:?}",
+            p.name
+        );
+    }
+
+    // The other half: the log lost again, and sequenced on before the
+    // peers that held it come back.
+    f.server.stop();
+    for gone in [
+        ark_server::persist::path_of(&f.server.data),
+        ark_server::persist::journal_path_of(&f.server.data),
+    ] {
+        std::fs::remove_file(&gone).unwrap_or_else(|e| panic!("{}: {e}", gone.display()));
+    }
+    burst(&mut [&mut a, &mut b, &mut c], 2, 2);
+    assert_eq!(pending(&mut [&mut a, &mut b, &mut c]), 6);
+    for p in [&mut a, &mut b, &mut c] {
+        p.quit();
+    }
+    let t = Instant::now();
+    f.server.start();
+    f.lost(done.entries.iter().map(|(_, e)| e.id));
+    let mut d = f.peer("d", Some("alice"));
+    burst(&mut [&mut d], 3, 12);
+    assert!(
+        eventually(PATIENCE, || {
+            let st = d.status();
+            st.pending == 0 && st.cursor == 12
+        }),
+        "d's twelve are the new log: {:?}",
+        d.status()
+    );
+    for p in [&mut a, &mut b, &mut c] {
+        p.start();
+        assert!(
+            p.status().cursor == 9,
+            "{} comes back at 9 of the old log",
+            p.name
+        );
+    }
+    let again = f.converged(&mut [&mut a, &mut b, &mut c, &mut d]);
+    measured(
+        "a lost log sequenced on before its peers returned: restart to converged",
+        t.elapsed(),
+    );
+    assert_eq!(
+        again.head, 18,
+        "d's twelve and the six, and nothing either lost log held"
+    );
+    for p in [&mut a, &mut b, &mut c, &mut d] {
+        let names: Vec<String> = playlists(p).into_iter().map(|(n, _)| n).collect();
+        // Bob's are his two; alice's are her three devices' — a's and b's
+        // two each, and d's twelve.
+        let (count, rounds) = if p.name == "c" {
+            (2, &["2"][..])
+        } else {
+            (16, &["2", "3"][..])
+        };
+        assert!(
+            names.len() == count
+                && names
+                    .iter()
+                    .all(|n| n.split('-').nth(1).is_some_and(|r| rounds.contains(&r))),
+            "{}: only what was authored since the second loss: {names:?}",
             p.name
         );
     }

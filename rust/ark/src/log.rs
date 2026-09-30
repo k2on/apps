@@ -7,6 +7,14 @@
 //! authoritative, and are what a peer takes for an entry it cannot replay.
 //! The horizon is the snapshot the log stands on; entry ids are kept below
 //! it too, so a re-pushed intent older than the horizon is recognised.
+//!
+//! A log has an identity, drawn once when it is created and kept on its
+//! snapshot for as long as the log lives (`docs/plan-perf.md` Round 4). A
+//! sequence number says where in *a* log a peer is and nothing about which
+//! log: a server that lost its log and went on sequencing numbers its new
+//! entries from 1 again, and a peer confirmed to 30 of the old one would be
+//! handed 31 onwards of the new one on top of a store that never held its
+//! first 30. The id is what tells the two apart (§12.4).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -62,18 +70,36 @@ thread_local! {
 /// What applying an entry changed, in order.
 pub type Facts = Vec<Change>;
 
-/// The state at a sequence, and its hash.
+/// The state at a sequence, and its hash — and which log it is a state
+/// of.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Snapshot {
     pub seq: Seq,
     pub store: MemoryStore,
     pub hash: Vec<u8>,
+    /// The identity of the log this is a snapshot of; `None` for a log
+    /// nobody named — a peer alone's, a test's, one written before logs had
+    /// names. Not in the hash: the hash is of the state, and two logs can
+    /// reach the same state.
+    pub log_id: Option<Id>,
 }
 
-/// A snapshot of a store at a sequence, hashed.
+/// A snapshot of a store at a sequence, hashed, of no named log.
 pub fn snapshot_of(n: Seq, store: MemoryStore) -> Snapshot {
     let hash = state_hash(&store);
-    Snapshot { seq: n, store, hash }
+    Snapshot {
+        seq: n,
+        store,
+        hash,
+        log_id: None,
+    }
+}
+
+impl Snapshot {
+    /// The same snapshot, as one of the log `log_id`.
+    pub fn of_log(self, log_id: Option<Id>) -> Snapshot {
+        Snapshot { log_id, ..self }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -103,6 +129,21 @@ impl Log {
             entries: BTreeMap::new(),
             ids: BTreeMap::new(),
         }
+    }
+
+    /// The log's identity, which its snapshot carries (the module docs).
+    pub fn id(&self) -> Option<Id> {
+        self.base.log_id
+    }
+
+    /// Name a log nobody has named yet; a log already named keeps its name
+    /// — a log's identity is drawn once, when it is created, and moving it
+    /// would re-base every peer of it onto a snapshot for nothing. What
+    /// the server does with a log it creates or loads from a directory
+    /// written before logs had names; `id` is the caller's randomness, since
+    /// this crate has none.
+    pub fn name_if_unnamed(&mut self, id: Id) {
+        self.base.log_id.get_or_insert(id);
     }
 
     /// The last sequence assigned.
@@ -171,12 +212,13 @@ impl Log {
     }
 
     /// §10.3 Move the horizon up to a sequence: snapshot the state there and
-    /// drop everything at or under it. Ids are kept. `None` if the sequence
-    /// is not retained.
+    /// drop everything at or under it. Ids are kept, entry ids and the
+    /// log's own: it is the same log with less of its past. `None` if the
+    /// sequence is not retained.
     pub fn compact_to(&self, n: Seq) -> Option<Log> {
         let st = self.state_at(n)?;
         Some(Log {
-            base: snapshot_of(n, st),
+            base: snapshot_of(n, st).of_log(self.id()),
             entries: self.entries.range(n + 1..).map(|(k, v)| (*k, v.clone())).collect(),
             ids: self.ids.clone(),
         })
@@ -280,5 +322,24 @@ mod tests {
         assert_eq!(l.hash_at(20, &head), Some(at_20));
         assert_ne!(l.hash_at(20, &head), l.hash_at(50, &head));
         assert_eq!(l.hash_at(51, &head), None);
+    }
+
+    /// Round 4: a log's name survives a compaction, a page below the
+    /// horizon carries it, and naming a named log changes nothing.
+    /// Falsified by `compact_to` building its base with `snapshot_of`
+    /// alone: the compacted log is unnamed.
+    #[test]
+    fn a_log_keeps_its_name() {
+        let mut l = log(20);
+        assert_eq!(l.id(), None);
+        l.name_if_unnamed([7; 16]);
+        l.name_if_unnamed([8; 16]);
+        assert_eq!(l.id(), Some([7; 16]));
+        let c = l.compact_to(10).unwrap();
+        assert_eq!(c.id(), Some([7; 16]));
+        let Page::BelowHorizon(sn) = c.entries_after(3, 10) else {
+            panic!("below the horizon")
+        };
+        assert_eq!((sn.seq, sn.log_id), (10, Some([7; 16])));
     }
 }

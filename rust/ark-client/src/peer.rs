@@ -17,7 +17,7 @@ use ark::value::{Id, Value};
 use crate::autos::Autos;
 use crate::link::{platform_dial, Dial, Link, State, Timing};
 use crate::storage::{
-    count_pages, encode_page, encode_pending_page, encode_pending_snapshot, encode_replica, encode_who, load_pending, BoxStorage, Memory,
+    count_pages, encode_page, encode_pending_page, encode_pending_snapshot, encode_replica_of, encode_who, load_pending, BoxStorage, Memory,
     PendingStored, ReplicaFile, Stored,
 };
 use crate::view::View;
@@ -212,6 +212,10 @@ struct Durable {
     pages: usize,
     page_bytes: usize,
     cursor: Seq,
+    /// The log the snapshot names (`storage` module docs). The replica
+    /// learning another is written as a snapshot, since a page cannot say
+    /// it.
+    log_id: Option<Id>,
     /// The journal cannot be written on from `cursor` — there is no
     /// snapshot yet, the confirmed store was replaced, a write failed,
     /// `open` found a page it could not use — so the next write is a
@@ -295,6 +299,7 @@ impl Peer {
                     pages: st.found,
                     page_bytes: st.page_bytes,
                     cursor: f.cursor,
+                    log_id: st.log_id,
                     snapshot_due: !st.clean,
                 };
                 // Pending pages that could not all be read, or none written
@@ -313,6 +318,7 @@ impl Peer {
                     pages: count_pages(&*storage)?,
                     page_bytes: 0,
                     cursor: 0,
+                    log_id: None,
                     snapshot_due: true,
                 };
                 let pending_file = PendingFile::of(&pending_stored);
@@ -343,6 +349,9 @@ impl Peer {
             a
         });
         let mut r = Replica::open(schema.clone(), domain.closures().clone(), confirmed, cursor, pending);
+        // The log the cursor is of, as the storage names it; unnamed, the
+        // server's first answer names it (Round 4).
+        r.log_id = durable.log_id;
         r.hold(natives.iter().cloned());
         let mut client = Client::open(r, Mode::Whole, opts.token.clone());
         // What was just opened is what the storage holds; the journal starts
@@ -840,7 +849,8 @@ impl Peer {
         // A run that does not start where the storage ends cannot be a page
         // (nothing should make one; a snapshot is right whatever did).
         let follows = run.first().is_none_or(|(n, _)| *n == self.durable.cursor + 1);
-        if self.durable.snapshot_due || !follows {
+        let renamed = self.client.replica.log_id != self.durable.log_id;
+        if self.durable.snapshot_due || !follows || renamed {
             return self.snapshot();
         }
         let Some((to, _)) = run.last() else { return Ok(()) };
@@ -868,8 +878,8 @@ impl Peer {
     fn snapshot(&mut self) -> Result<(), Error> {
         self.durable.snapshot_due = true;
         let r = &self.client.replica;
-        let bytes = encode_replica(mode_word(self.alone), r.cursor, &r.confirmed, &self.ctx.user, &self.ctx.session);
-        let cursor = r.cursor;
+        let bytes = encode_replica_of(mode_word(self.alone), r.cursor, r.log_id, &r.confirmed, &self.ctx.user, &self.ctx.session);
+        let (cursor, log_id) = (r.cursor, r.log_id);
         self.storage.save(ReplicaFile::KEY, &bytes)?;
         for n in (1..=self.durable.pages).rev() {
             self.storage.remove(&ReplicaFile::page_key(n))?;
@@ -880,6 +890,7 @@ impl Peer {
             pages: 0,
             page_bytes: 0,
             cursor,
+            log_id,
             snapshot_due: false,
         };
         Ok(())
@@ -1119,6 +1130,74 @@ mod tests {
         let p = Peer::open(demo::domain(), Box::new(disk), Options::dev("alice")).unwrap();
         assert_eq!(p.pending_len(), 1);
         assert_eq!(p.store().scan("playlist").len(), 1, "and replayed on top of the empty store");
+    }
+
+    /// Round 4: a peer whose storage names no log — written before logs
+    /// had names — syncs as it did, and learns the name from the first page
+    /// a server that names its log sends it; the name is written as a
+    /// snapshot at once, not left for a compaction, and a reopen says it in
+    /// its `Hello`. Here twenty entries arrive from a server not yet
+    /// naming its log, which then names it (the server upgraded) and
+    /// sequences one more. Falsified by `persist_confirmed` not treating a
+    /// renamed replica as due a snapshot: the page is appended, the
+    /// snapshot on the storage stays unnamed, and the reopened peer's
+    /// `Hello` names nothing.
+    #[test]
+    fn a_peer_learns_the_log_it_holds_and_writes_it_down() {
+        use crate::storage::Stored;
+        use ark::live::Silent;
+        use ark::protocol::{open_access, trusting, Server};
+        let d = demo::domain();
+        let schema = d.module().schema.clone();
+        let mut a = ark::peer::Authority::new(schema.clone(), d.closures().clone());
+        a.hold(d.native_list());
+        let mut sv = Server::open(trusting(), open_access(), Silent, a);
+        let exchange = |p: &mut Peer, sv: &mut Server<Silent>| loop {
+            let up = p.take_outgoing();
+            for m in up.iter().cloned() {
+                sv.recv(1, m);
+            }
+            let down = sv.take_outgoing();
+            if up.is_empty() && down.is_empty() {
+                p.persist().unwrap();
+                return;
+            }
+            for (_, m) in down {
+                p.recv(m);
+            }
+        };
+        let disk = Memory::new();
+        let mut p = Peer::open(d.clone(), Box::new(disk.clone()), Options::dev("alice")).unwrap();
+        p.connected();
+        for i in 0..20 {
+            p.mutate("create_playlist", args([("name", Value::text(format!("p{i:02}")))])).unwrap();
+            exchange(&mut p, &mut sv);
+        }
+        assert_eq!((p.cursor(), p.replica().log_id), (20, None));
+        let stored = || Stored::load(&disk, &schema).unwrap().unwrap();
+        let (st, pages) = (stored(), stored().pages);
+        assert!(
+            pages > 0 && st.page_bytes + 2 * st.page_bytes / pages < st.snapshot_bytes,
+            "the next page is not a compaction: {} bytes of {pages} pages beside {}",
+            st.page_bytes,
+            st.snapshot_bytes
+        );
+
+        sv.authority.log.name_if_unnamed([3; 16]);
+        p.mutate("create_playlist", args([("name", Value::text("named"))])).unwrap();
+        exchange(&mut p, &mut sv);
+        assert_eq!((p.cursor(), p.replica().log_id), (21, Some([3; 16])));
+        assert_eq!((stored().log_id, stored().pages), (Some([3; 16]), 0), "written as a snapshot");
+        drop(p);
+
+        let mut p = Peer::open(d, Box::new(disk.clone()), Options::dev("alice")).unwrap();
+        assert_eq!(p.replica().log_id, Some([3; 16]));
+        p.connected();
+        let hello = p.take_outgoing().into_iter().next();
+        assert!(
+            matches!(&hello, Some(ClientMsg::Hello { sub, .. }) if sub.log_id == Some([3; 16]) && sub.since == 21),
+            "{hello:?}"
+        );
     }
 
     #[test]

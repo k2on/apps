@@ -15,7 +15,7 @@
 //!
 //! ```text
 //! { t: "log",
-//!   base: { seq: Int, hash: Bytes, rows: { table: [row…] } },
+//!   base: { seq: Int, hash: Bytes, rows: { table: [row…] }, log: Id },
 //!   entries: [ { seq: Int, entry: Entry, facts: [Change…] } … ],
 //!   ids: [ { id: Id, seq: Int } … ] }
 //! ```
@@ -50,6 +50,18 @@
 //!
 //! A data directory written before the journal existed — `log.ark-log`
 //! alone — is a snapshot with nothing after it, and opens unchanged.
+//!
+//! **The log's identity is on the snapshot** (`base.log`,
+//! `docs/plan-perf.md` Round 4): drawn when the log is created — by the
+//! hub, since this crate's core has no randomness — and kept through every
+//! compaction and restart, because a peer's `Hello` names it and a server
+//! whose log has another name answers with its snapshot (§12.4). A journal
+//! record does not carry it: a journal only ever extends the snapshot it
+//! follows. A snapshot written before logs had names has no `log`, loads
+//! unnamed, and the hub names it; the next write is then a snapshot, so
+//! the name is on the disk before a restart could draw another. A
+//! directory with no snapshot at all — new, or a journal alone — writes one
+//! at its first append anyway, because any journal outgrows no snapshot.
 
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
@@ -62,7 +74,7 @@ use ark::log::{snapshot_of, Entry, Facts, Log, Seq};
 use ark::protocol::{change_from_value, change_value, entry_from_value, entry_value};
 use ark::schema::Schema;
 use ark::store::{MemoryStore, Store};
-use ark::value::{FieldName, Value};
+use ark::value::{FieldName, Id, Value};
 
 /// The snapshot's file.
 pub fn path_of(dir: &Path) -> PathBuf {
@@ -115,16 +127,18 @@ pub fn log_to_value(log: &Log) -> Value {
         .iter()
         .map(|(id, n)| Value::record(vec![("id", Value::Id(*id)), ("seq", Value::int(*n))]))
         .collect();
+    let mut base = vec![
+        ("seq", Value::int(log.base.seq)),
+        ("hash", Value::bytes(log.base.hash.clone())),
+        ("rows", Value::record(rows)),
+    ];
+    // Unnamed, it is written as a file was before logs had names.
+    if let Some(id) = log.id() {
+        base.push(("log", Value::Id(id)));
+    }
     Value::record(vec![
         ("t", Value::text("log")),
-        (
-            "base",
-            Value::record(vec![
-                ("seq", Value::int(log.base.seq)),
-                ("hash", Value::bytes(log.base.hash.clone())),
-                ("rows", Value::record(rows)),
-            ]),
-        ),
+        ("base", Value::record(base)),
         ("entries", Value::list(entries)),
         ("ids", Value::list(ids)),
     ])
@@ -177,7 +191,12 @@ pub fn log_from_value(schema: &Schema, v: &Value) -> Result<Log> {
     }
     let base = fields(need(m, "base")?)?;
     let store = MemoryStore::from_value(schema.clone(), need(base, "rows")?);
-    let snapshot = snapshot_of(int(need(base, "seq")?)?, store);
+    let log_id = match base.get("log") {
+        None => None,
+        Some(Value::Id(i)) => Some(*i),
+        Some(other) => bail!("the log's identity is not an id: {other:?}"),
+    };
+    let snapshot = snapshot_of(int(need(base, "seq")?)?, store).of_log(log_id);
     match need(base, "hash")? {
         Value::Bytes(h) if *h == snapshot.hash => {}
         _ => bail!("the snapshot's hash does not match its rows"),
@@ -339,6 +358,8 @@ pub struct LogFile {
     /// The head and horizon of the log as last written.
     head: Seq,
     horizon: Seq,
+    /// The log's identity as the snapshot on the disk has it.
+    named: Option<Id>,
     /// The journal has bytes in it that are not whole records — an append
     /// failed part-way — so the next write is a snapshot, which empties it.
     due: bool,
@@ -372,6 +393,7 @@ impl LogFile {
             journal_bytes: replayed.end,
             head: log.as_ref().map_or(0, Log::head_seq),
             horizon: log.as_ref().map_or(0, Log::horizon),
+            named: log.as_ref().and_then(Log::id),
             due: false,
             written: 0,
         };
@@ -408,8 +430,15 @@ impl LogFile {
     /// written on. `Ok` means every entry of `log` is on the disk. A
     /// compaction that follows a good append and fails is said, not
     /// returned: the entries are durable either way.
+    ///
+    /// A log whose name is not the one on the snapshot — a directory
+    /// written before logs had names, named since it was opened — is
+    /// written as a snapshot, so the name is on the disk from the first
+    /// write (the module docs). Where there is no snapshot yet the append
+    /// is what writes one.
     pub fn write(&mut self, log: &Log) -> Result<()> {
-        if self.due || log.horizon() != self.horizon || log.head_seq() < self.head {
+        let renamed = log.id() != self.named && self.snapshot_bytes > 0;
+        if self.due || renamed || log.horizon() != self.horizon || log.head_seq() < self.head {
             return self.snapshot(log);
         }
         if log.head_seq() == self.head {
@@ -462,6 +491,7 @@ impl LogFile {
         self.snapshot_bytes = bytes.len() as u64;
         self.head = log.head_seq();
         self.horizon = log.horizon();
+        self.named = log.id();
         if let Some(f) = &self.journal {
             let path = journal_path_of(&self.dir);
             f.set_len(0).with_context(|| format!("emptying {}", path.display()))?;
@@ -533,5 +563,64 @@ mod tests {
         }
         let err = log_from_value(&schema, &v).unwrap_err();
         assert!(err.to_string().contains("hash"), "{err}");
+    }
+
+    /// Round 4: a log's name is on its snapshot and survives what the disk
+    /// does to a log — a save and a load, appends, a compaction, the
+    /// horizon moving, a reopen. Falsified by `log_to_value` leaving the
+    /// name out: the reopened log is unnamed.
+    #[test]
+    fn a_log_keeps_its_name_on_the_disk() {
+        let d = demo::domain();
+        let schema = d.module().schema.clone();
+        let mut a = Authority::new(schema.clone(), d.closures().clone());
+        a.hold(d.native_list());
+        a.log.name_if_unnamed([5; 16]);
+        let ctx = Ctx::new("alice", "dev");
+        let dir = tempfile::tempdir().unwrap();
+        let (mut f, none) = LogFile::open(dir.path(), &schema).unwrap();
+        assert!(none.is_none());
+        for i in 0..40u8 {
+            author(&mut a, &d, [i + 1; 16], &format!("p{i}"), &ctx);
+            f.write(&a.log).unwrap();
+            let back = load(dir.path(), &schema).unwrap().unwrap();
+            assert_eq!(back.id(), Some([5; 16]), "after {i}");
+        }
+        assert!(a.compact(30));
+        f.write(&a.log).unwrap();
+        let (_, back) = LogFile::open(dir.path(), &schema).unwrap();
+        assert_eq!(back.as_ref(), Some(&a.log));
+        assert_eq!(back.unwrap().id(), Some([5; 16]));
+    }
+
+    /// Round 4: a snapshot written before logs had names loads unnamed and
+    /// opens writing nothing; named after it is opened, as the hub names
+    /// it, the next write is a snapshot with the name on it — not an
+    /// append the old snapshot would stand under, unnamed, until a
+    /// compaction — and the name is what a reopen reads. Falsified by
+    /// `write` not treating a renamed log as due a snapshot: the reopened
+    /// log is unnamed.
+    #[test]
+    fn an_unnamed_log_is_named_at_its_next_write() {
+        let d = demo::domain();
+        let schema = d.module().schema.clone();
+        let mut a = Authority::new(schema.clone(), d.closures().clone());
+        a.hold(d.native_list());
+        let ctx = Ctx::new("alice", "dev");
+        for i in 0..5u8 {
+            author(&mut a, &d, [i + 1; 16], &format!("p{i}"), &ctx);
+        }
+        let dir = tempfile::tempdir().unwrap();
+        save(dir.path(), &a.log).unwrap();
+        let (mut f, log) = LogFile::open(dir.path(), &schema).unwrap();
+        let mut log = log.unwrap();
+        assert_eq!((log.id(), f.written), (None, 0));
+        log.name_if_unnamed([6; 16]);
+        a.log = log;
+        author(&mut a, &d, [9; 16], "p9", &ctx);
+        f.write(&a.log).unwrap();
+        assert_eq!(f.sizes().1, 0, "written as a snapshot");
+        let (_, back) = LogFile::open(dir.path(), &schema).unwrap();
+        assert_eq!(back.unwrap().id(), Some([6; 16]));
     }
 }

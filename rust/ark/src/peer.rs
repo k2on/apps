@@ -54,6 +54,13 @@ pub struct Replica {
     /// `cursor`. Durable; moves only forward.
     pub confirmed: MemoryStore,
     pub cursor: Seq,
+    /// The identity of the log `confirmed` is a prefix of (§10, §12.4),
+    /// once this peer knows it: what its `Hello` says beside its cursor, so
+    /// that a server whose log is another — one that lost this peer's log
+    /// and has sequenced since — answers with its own snapshot rather than
+    /// with entries on top of a store that is not theirs. `None` until the
+    /// server first says, and for a peer alone. Durable, beside the cursor.
+    pub log_id: Option<Id>,
     /// Intents authored here that no verdict has answered, in authoring
     /// order. Durable.
     pub pending: Vec<Entry>,
@@ -244,6 +251,7 @@ impl Replica {
             view: confirmed.clone(),
             confirmed,
             cursor,
+            log_id: None,
             pending,
             recorded: BTreeMap::new(),
             inbox: BTreeMap::new(),

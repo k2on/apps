@@ -42,6 +42,11 @@ pub struct Subscription {
     /// The cursor: the last sequence applied.
     pub since: Seq,
     pub mode: Mode,
+    /// Which log `since` is a sequence of (§10), as the peer last heard it
+    /// named; `None` from a peer that has not been told, or one older than
+    /// logs having names, which is served as before (§12.4). On the wire,
+    /// `log`, an id or null; a hello without the field decodes as `None`.
+    pub log_id: Option<Id>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -59,6 +64,10 @@ pub enum ServerMsg {
     Batch {
         items: Vec<(Seq, Entry, Option<Facts>)>,
         has_more: bool,
+        /// The log these entries are of: how a peer that never knew —
+        /// opened from storage written before logs had names, or new —
+        /// learns it from the first page it is sent. `log` on the wire.
+        log_id: Option<Id>,
     },
     FactsFor {
         items: Vec<(Seq, Facts)>,
@@ -67,6 +76,9 @@ pub enum ServerMsg {
         seq: Seq,
         hash: Vec<u8>,
         rows: BTreeMap<TableName, Vec<Value>>,
+        /// The log this is a state of; the peer re-opened from it holds
+        /// that log from here. `log` on the wire.
+        log_id: Option<Id>,
     },
     Ack {
         ids: Vec<Id>,
@@ -116,6 +128,11 @@ fn strct(pairs: Vec<(&str, Value)>) -> Value {
     Value::Struct(pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect())
 }
 
+// A log's identity on the wire: an id, or null where none is known.
+fn log_value(id: &Option<Id>) -> Value {
+    id.map_or(Value::Null, Value::Id)
+}
+
 pub fn entry_value(e: &Entry) -> Value {
     strct(vec![
         ("id", Value::Id(e.id)),
@@ -153,6 +170,7 @@ impl ClientMsg {
                     ("mode", txt(if sub.mode == Mode::Whole { "whole" } else { "facts" })),
                     ("token", token.as_deref().map(txt).unwrap_or(Value::Null)),
                     ("spec", int(*spec)),
+                    ("log", log_value(&sub.log_id)),
                 ],
             ),
             ClientMsg::Push { entries } => node("push", vec![("entries", Value::List(entries.iter().map(entry_value).collect()))]),
@@ -209,14 +227,25 @@ fn sub(m: &BTreeMap<FieldName, Value>) -> Result<Subscription, DecodeError> {
     Ok(Subscription {
         since: int64(need(m, "since")?)?,
         mode,
+        log_id: log_of(m)?,
     })
+}
+
+/// The `log` of a frame that may carry one. Absent is `None`, as null is:
+/// a frame from a runtime older than logs having names (§12.4), which is
+/// served — and serves — as it was.
+fn log_of(m: &BTreeMap<FieldName, Value>) -> Result<Option<Id>, DecodeError> {
+    match m.get("log") {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => ident(v).map(Some),
+    }
 }
 
 impl ServerMsg {
     /// The frame as a value.
     pub fn to_value(&self) -> Value {
         match self {
-            ServerMsg::Batch { items, has_more } => node(
+            ServerMsg::Batch { items, has_more, log_id } => node(
                 "batch",
                 vec![
                     (
@@ -235,6 +264,7 @@ impl ServerMsg {
                         ),
                     ),
                     ("has_more", Value::Bool(*has_more)),
+                    ("log", log_value(log_id)),
                 ],
             ),
             ServerMsg::FactsFor { items } => node(
@@ -249,7 +279,7 @@ impl ServerMsg {
                     ),
                 )],
             ),
-            ServerMsg::SnapshotOf { seq, hash, rows } => node(
+            ServerMsg::SnapshotOf { seq, hash, rows, log_id } => node(
                 "snapshot",
                 vec![
                     ("seq", int(*seq)),
@@ -258,6 +288,7 @@ impl ServerMsg {
                         "rows",
                         Value::Struct(rows.iter().map(|(t, vs)| (t.clone(), Value::List(vs.clone()))).collect()),
                     ),
+                    ("log", log_value(log_id)),
                 ],
             ),
             ServerMsg::Ack { ids, seqs } => node(
@@ -307,6 +338,7 @@ impl ServerMsg {
                     need(m, "items")?,
                 )?,
                 has_more: boolean(need(m, "has_more")?)?,
+                log_id: log_of(m)?,
             },
             "facts" => ServerMsg::FactsFor {
                 items: list(
@@ -327,6 +359,7 @@ impl ServerMsg {
                     }
                     out
                 },
+                log_id: log_of(m)?,
             },
             "ack" => ServerMsg::Ack {
                 ids: list(ident, need(m, "ids")?)?,
@@ -515,6 +548,7 @@ impl Client {
             sub: Subscription {
                 since: self.replica.cursor,
                 mode: self.mode,
+                log_id: self.replica.log_id,
             },
             token: self.token.clone(),
             spec: crate::ir::SPEC_VERSION,
@@ -565,8 +599,15 @@ impl Client {
                 self.linked = false;
                 self.out.clear();
             }
-            ServerMsg::Batch { items, has_more } => {
+            ServerMsg::Batch { items, has_more, log_id } => {
                 let r = &mut self.replica;
+                // A peer that did not know which log it holds learns it
+                // from the first page (Round 4). One that did is never sent
+                // a page of another: the server answered its `Hello` with a
+                // snapshot first.
+                if r.log_id.is_none() {
+                    r.log_id = log_id;
+                }
                 r.receive_batch(items);
                 let needs = r.needs();
                 if !needs.is_empty() {
@@ -582,13 +623,15 @@ impl Client {
                     self.replica.receive_facts(n, f);
                 }
             }
-            // Below the horizon, or past the head (R6): the confirmed store
-            // is replaced by the snapshot and the cursor moves to it;
-            // pending intents are kept and replay on top. Verdicts the app
-            // has not yet taken are kept too, ahead of any the replay
-            // makes: a snapshot replaces what is confirmed, not what this
-            // peer was told about its own intents.
-            ServerMsg::SnapshotOf { seq, rows, .. } => {
+            // Below the horizon, past the head (R6), or of another log than
+            // the one this peer held (Round 4): the confirmed store is
+            // replaced by the snapshot, the cursor moves to it, and the
+            // peer holds the snapshot's log from here; pending intents are
+            // kept and replay on top. Verdicts the app has not yet taken
+            // are kept too, ahead of any the replay makes: a snapshot
+            // replaces what is confirmed, not what this peer was told about
+            // its own intents.
+            ServerMsg::SnapshotOf { seq, rows, log_id, .. } => {
                 let mut st = MemoryStore::empty(self.schema.clone());
                 for (t, vs) in rows {
                     for v in vs {
@@ -600,6 +643,7 @@ impl Client {
                 let r = &mut self.replica;
                 let mut opened = Replica::open(r.schema.clone(), r.bodies.clone(), st, seq, r.pending.clone());
                 opened.natives = r.natives.clone();
+                opened.log_id = log_id;
                 let mut told = std::mem::take(&mut r.rejections);
                 told.append(&mut opened.rejections);
                 opened.rejections = told;
@@ -702,6 +746,10 @@ struct Conn {
     mode: Mode,
     /// The sequence the connection has been sent up to.
     sent: Seq,
+    /// Its `Hello` named another log than this authority's: what it
+    /// confirmed is of that log, and it is sent this one's snapshot at the
+    /// head before anything else (§12.4, Round 4).
+    elsewhere: bool,
 }
 
 /// An authority's end of every connection (`Ark.Protocol.Server`).
@@ -787,6 +835,14 @@ impl<M: Machine> Server<M> {
                     // A second Hello on one connection is the log paging,
                     // and says where to continue from; the room already has
                     // this peer, and arriving again changes nothing.
+                    //
+                    // A cursor is a place in one log, and the one this
+                    // peer names may not be this authority's (Round 4).
+                    // Only two names can disagree: a peer that names none
+                    // — it has not been told, or it is older than logs
+                    // having names — and an authority whose log nobody
+                    // named are both served as they always were.
+                    let elsewhere = matches!((sub.log_id, self.authority.log.id()), (Some(theirs), Some(ours)) if theirs != ours);
                     let peer = live::Peer {
                         conn: c,
                         room: who.user.clone(),
@@ -798,6 +854,7 @@ impl<M: Machine> Server<M> {
                             who,
                             mode: sub.mode,
                             sent: sub.since,
+                            elsewhere,
                         },
                     );
                     let post = live::arrive(&self.machine, &mut self.rooms, peer);
@@ -893,16 +950,25 @@ impl<M: Machine> Server<M> {
     /// by the page that follows. Entries it had confirmed that this log
     /// never held are gone from it: everyone is re-based onto what the
     /// authority has, which is the only log there is.
+    ///
+    /// A connection whose `Hello` named another log is the same case with
+    /// the cursor anywhere (Round 4): at or below the head is no evidence
+    /// the peer holds this log, only that it holds as many entries of *a*
+    /// log — the lost one, when a server that lost its log has sequenced
+    /// past where its peers were before they came back. Paged on from its
+    /// cursor it would take this log's entries on top of the other's
+    /// state, and nothing but a `Verify` would ever say so. It is sent the
+    /// snapshot at the head, once, with this log's name on it.
     fn fanout(&mut self) {
-        let conns: Vec<(ConnId, Mode, Seq)> = self.conns.iter().map(|(c, cn)| (*c, cn.mode, cn.sent)).collect();
-        for (c, md, sent) in conns {
+        let conns: Vec<(ConnId, Mode, Seq, bool)> = self.conns.iter().map(|(c, cn)| (*c, cn.mode, cn.sent, cn.elsewhere)).collect();
+        for (c, md, sent, elsewhere) in conns {
             let a = &self.authority;
             let head = a.log.head_seq();
-            if sent == head {
+            if sent == head && !elsewhere {
                 continue;
             }
-            let page = if sent > head {
-                Page::BelowHorizon(snapshot_of(head, a.store.clone()))
+            let page = if sent > head || elsewhere {
+                Page::BelowHorizon(snapshot_of(head, a.store.clone()).of_log(a.log.id()))
             } else {
                 a.page(sent, BATCH_LIMIT)
             };
@@ -919,6 +985,7 @@ impl<M: Machine> Server<M> {
                             seq: sn.seq,
                             hash: sn.hash.clone(),
                             rows,
+                            log_id: sn.log_id,
                         },
                         sn.seq,
                     )
@@ -933,6 +1000,7 @@ impl<M: Machine> Server<M> {
                         ServerMsg::Batch {
                             items: with_facts,
                             has_more: more,
+                            log_id: a.log.id(),
                         },
                         last,
                     )
@@ -941,6 +1009,7 @@ impl<M: Machine> Server<M> {
             self.send(c, msg);
             if let Some(conn) = self.conns.get_mut(&c) {
                 conn.sent = advanced;
+                conn.elsewhere = false;
             }
         }
     }

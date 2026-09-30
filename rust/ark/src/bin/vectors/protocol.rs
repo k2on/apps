@@ -2,7 +2,9 @@
 //! encode is the identity. Before the frames are written, the server's
 //! rules about whose entry it takes are asserted: an older login of the
 //! same user only where ownership is installed, a stranger's never, and
-//! work authored before anyone signed in as whoever signs in.
+//! work authored before anyone signed in as whoever signs in; and a
+//! `Hello` naming another log answered with this one's snapshot at the
+//! head, where one naming this log, or none, is answered as it was.
 
 use std::collections::BTreeMap;
 
@@ -52,18 +54,25 @@ pub fn protocol(out: &Out) {
         args: args([("playlist_id", Value::Id(id_n(1))), ("track_id", Value::text("t7"))]),
         autos: Args::new(),
     };
+    // A log's identity (§10): the one the frames below name, and another.
+    let (log_a, log_b) = (id_n(0xa1), id_n(0xb2));
     let row: BTreeMap<String, Value> = args([
         ("playlist_id", Value::Id(id_n(1))),
         ("track_id", Value::text("t7")),
         ("pos", Value::Int(1)),
     ]);
     // A hello carries the spec version the client speaks, which is this
-    // crate's: a version bump moves these two files and no others.
+    // crate's: a version bump moves these two files and no others. The
+    // first names the log its cursor is of; the second has not been told.
     let client_frames: Vec<(&str, ClientMsg)> = vec![
         (
             "hello",
             ClientMsg::Hello {
-                sub: Subscription { since: 4, mode: Mode::Whole },
+                sub: Subscription {
+                    since: 4,
+                    mode: Mode::Whole,
+                    log_id: Some(log_a),
+                },
                 token: Some("tok".into()),
                 spec: SPEC_VERSION,
             },
@@ -74,6 +83,7 @@ pub fn protocol(out: &Out) {
                 sub: Subscription {
                     since: 0,
                     mode: Mode::ByFacts,
+                    log_id: None,
                 },
                 token: None,
                 spec: SPEC_VERSION,
@@ -105,6 +115,7 @@ pub fn protocol(out: &Out) {
                     (6, entry.clone(), Some(vec![Change::Add("item".into(), row.clone())])),
                 ],
                 has_more: true,
+                log_id: Some(log_a),
             },
         ),
         (
@@ -122,6 +133,7 @@ pub fn protocol(out: &Out) {
                 seq: 2,
                 hash: vec![0xcd; 32],
                 rows: BTreeMap::from([("item".to_string(), vec![Value::Struct(row.clone())])]),
+                log_id: Some(log_a),
             },
         ),
         (
@@ -169,7 +181,11 @@ pub fn protocol(out: &Out) {
         sv.recv(
             1,
             ClientMsg::Hello {
-                sub: Subscription { since: 0, mode: Mode::Whole },
+                sub: Subscription {
+                    since: 0,
+                    mode: Mode::Whole,
+                    log_id: None,
+                },
                 token: Some("alice".into()),
                 spec: SPEC_VERSION,
             },
@@ -264,6 +280,56 @@ pub fn protocol(out: &Out) {
                 .all(|v| matches!(v, ServerMsg::Reject { reason, .. } if reason == "not yours")),
         "protocol: work authored as nobody was accepted without signing in: {unsigned:?}"
     );
+
+    // A server whose log is named: a hello at its head naming another log
+    // is answered with its snapshot at the head, named; one naming this log
+    // and one naming none are answered with nothing, as a hello at the
+    // head always was.
+    let mut named = Authority::new(m.schema.clone(), bodies.clone());
+    named.log.name_if_unnamed(log_a);
+    let mut sv = Server::open(trusting(), open_access(), Silent, named);
+    for (conn, said) in [(1, Some(log_b)), (2, Some(log_a)), (3, None)] {
+        sv.recv(
+            conn,
+            ClientMsg::Hello {
+                sub: Subscription {
+                    since: 0,
+                    mode: Mode::Whole,
+                    log_id: said,
+                },
+                token: Some("alice".into()),
+                spec: SPEC_VERSION,
+            },
+        );
+    }
+    let answers: Vec<(ConnId, Option<ark::value::Id>)> = sv
+        .take_outgoing()
+        .into_iter()
+        .filter_map(|(c, f)| match f {
+            ServerMsg::SnapshotOf { seq: 0, log_id, .. } => Some((c, log_id)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        answers,
+        vec![(1, Some(log_a))],
+        "protocol: a hello naming another log is answered with this one's snapshot, and no other hello is"
+    );
+
+    // A snapshot whose bytes name another log than its frame: a runner
+    // must read the log's identity, not only the rows.
+    if let Some((_, snap)) = server_frames.iter().find(|(n, _)| *n == "snapshot") {
+        let v = snap.to_value();
+        let mut other = v.clone();
+        if let Value::Struct(fs) = &mut other {
+            fs.insert("log".into(), Value::Id(log_b));
+        }
+        assert_ne!(v, other, "the snapshot names its log");
+        out.write(
+            "protocol/falsify/server-snapshot-bytes-of-another-log.json",
+            &obj(&[("frame", json(&v)), ("bytes", quoted(&hex(&encode(&other)))), ("expect", quoted("fail"))]),
+        );
+    }
 
     // A hello whose bytes say spec version 3 beside a frame that says this
     // one's: a runner must compare the two, not only decode one.

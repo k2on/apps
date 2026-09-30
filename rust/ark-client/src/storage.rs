@@ -7,7 +7,8 @@
 //!
 //! ```text
 //! replica   { t: "replica", mode: "server" | "alone", cursor,
-//!             confirmed: { table: [row…] }, user, session }    the snapshot
+//!             confirmed: { table: [row…] }, user, session,     the snapshot
+//!             log }
 //! facts.1   { t: "facts", from, to, facts: [[change…], …] }    the journal:
 //! facts.2   …                                                  one page per
 //!                                                              write, dense
@@ -95,6 +96,16 @@
 //! reopened signed out goes on authoring as whoever it was. It moves on a
 //! sign-in, which is no reason to write the store. The snapshot carries it
 //! too, as it always has; `who` wins where both are.
+//!
+//! **The snapshot names the log its cursor is of** (`log`, an id;
+//! `docs/plan-perf.md` Round 4), because a cursor is a place in one log and
+//! the peer's `Hello` says which (§12.4). A page does not repeat it: pages
+//! only extend the snapshot. The name moves only when the server says —
+//! the first page a peer that did not know is sent, or a snapshot of
+//! another log — and a move is written as a snapshot, so the name on the
+//! storage is never older than the cursor beside it. A `replica` record
+//! written before logs had names has no `log`, opens unnamed, and is
+//! served as it was until the server's first answer names it.
 //!
 //! A storage written before the journal existed — a `replica` record, no
 //! pages, no `who` — is a snapshot with nothing after it, and opens as it
@@ -369,58 +380,70 @@ impl ReplicaFile {
     /// The `replica` record alone: a snapshot, with the intents it carried
     /// if it was written before they had a record of their own.
     pub fn decode(bytes: &[u8], schema: &Schema) -> Result<ReplicaFile, Error> {
-        let bad = |w: &str| Error::Corrupt(format!("a replica file: {w}"));
-        let v = canon::decode(bytes).map_err(|e| bad(&e.to_string()))?;
-        let Value::Struct(m) = &v else { return Err(bad("not a struct")) };
-        if m.get("t") != Some(&Value::text("replica")) {
-            return Err(bad("not a replica"));
-        }
-        let text = |k: &str| match m.get(k) {
-            Some(Value::Text(t)) => Ok(t.clone()),
-            _ => Err(bad(&format!("no {k}"))),
-        };
-        let cursor = match m.get("cursor") {
-            Some(Value::Int(n)) => *n,
-            _ => return Err(bad("no cursor")),
-        };
-        let Some(Value::Struct(tables)) = m.get("confirmed") else {
-            return Err(bad("no confirmed store"));
-        };
-        let mut confirmed = MemoryStore::empty(schema.clone());
-        for (t, rows) in tables {
-            let Value::List(rs) = rows else {
-                return Err(bad(&format!("rows of {t}")));
-            };
-            for r in rs {
-                let Value::Struct(row) = r else {
-                    return Err(bad(&format!("a row of {t}")));
-                };
-                confirmed.apply_change(&Change::Add(t.clone(), row.clone()));
-            }
-        }
-        let pending = match m.get("pending") {
-            None => vec![],
-            Some(Value::List(ps)) => ps
-                .iter()
-                .map(entry_from_value)
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| bad(&e.to_string()))?,
-            Some(_) => return Err(bad("pending is not a list")),
-        };
-        let optional = |k: &str| match m.get(k) {
-            None => Ok(String::new()),
-            Some(Value::Text(t)) => Ok(t.clone()),
-            Some(_) => Err(bad(&format!("{k} is not text"))),
-        };
-        Ok(ReplicaFile {
-            mode: text("mode")?,
-            cursor,
-            confirmed,
-            pending,
-            user: optional("user")?,
-            session: optional("session")?,
-        })
+        decode_replica(bytes, schema).map(|(f, _)| f)
     }
+}
+
+/// The `replica` record, and the log it names — `None` where it names
+/// none, as one written before logs had names does not (module docs).
+pub fn decode_replica(bytes: &[u8], schema: &Schema) -> Result<(ReplicaFile, Option<Id>), Error> {
+    let bad = |w: &str| Error::Corrupt(format!("a replica file: {w}"));
+    let v = canon::decode(bytes).map_err(|e| bad(&e.to_string()))?;
+    let Value::Struct(m) = &v else { return Err(bad("not a struct")) };
+    if m.get("t") != Some(&Value::text("replica")) {
+        return Err(bad("not a replica"));
+    }
+    let text = |k: &str| match m.get(k) {
+        Some(Value::Text(t)) => Ok(t.clone()),
+        _ => Err(bad(&format!("no {k}"))),
+    };
+    let cursor = match m.get("cursor") {
+        Some(Value::Int(n)) => *n,
+        _ => return Err(bad("no cursor")),
+    };
+    let Some(Value::Struct(tables)) = m.get("confirmed") else {
+        return Err(bad("no confirmed store"));
+    };
+    let mut confirmed = MemoryStore::empty(schema.clone());
+    for (t, rows) in tables {
+        let Value::List(rs) = rows else {
+            return Err(bad(&format!("rows of {t}")));
+        };
+        for r in rs {
+            let Value::Struct(row) = r else {
+                return Err(bad(&format!("a row of {t}")));
+            };
+            confirmed.apply_change(&Change::Add(t.clone(), row.clone()));
+        }
+    }
+    let pending = match m.get("pending") {
+        None => vec![],
+        Some(Value::List(ps)) => ps
+            .iter()
+            .map(entry_from_value)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| bad(&e.to_string()))?,
+        Some(_) => return Err(bad("pending is not a list")),
+    };
+    let optional = |k: &str| match m.get(k) {
+        None => Ok(String::new()),
+        Some(Value::Text(t)) => Ok(t.clone()),
+        Some(_) => Err(bad(&format!("{k} is not text"))),
+    };
+    let log_id = match m.get("log") {
+        None => None,
+        Some(Value::Id(i)) => Some(*i),
+        Some(_) => return Err(bad("log is not an id")),
+    };
+    let file = ReplicaFile {
+        mode: text("mode")?,
+        cursor,
+        confirmed,
+        pending,
+        user: optional("user")?,
+        session: optional("session")?,
+    };
+    Ok((file, log_id))
 }
 
 /// What `open` found in a storage: the replica, and what the journal
@@ -431,6 +454,8 @@ pub struct Stored {
     /// The snapshot with every good page applied, the intents and the
     /// login.
     pub file: ReplicaFile,
+    /// The log the snapshot names, if it names one.
+    pub log_id: Option<Id>,
     /// The snapshot's cursor and encoded size.
     pub snapshot_cursor: Seq,
     pub snapshot_bytes: usize,
@@ -458,7 +483,7 @@ impl Stored {
             return Ok(None);
         };
         let snapshot_bytes = bytes.len();
-        let mut file = ReplicaFile::decode(&bytes, schema)?;
+        let (mut file, log_id) = decode_replica(&bytes, schema)?;
         let snapshot_cursor = file.cursor;
         let (mut pages, mut page_bytes, mut found, mut clean, mut torn) = (0, 0, 0, true, false);
         while let Some(bytes) = storage.load(&ReplicaFile::page_key(found + 1))? {
@@ -491,6 +516,7 @@ impl Stored {
         }
         Ok(Some(Stored {
             file,
+            log_id,
             snapshot_cursor,
             snapshot_bytes,
             pages,
@@ -602,16 +628,26 @@ pub fn decode_who(bytes: &[u8]) -> Result<(String, String), Error> {
     Ok((text("user")?, text("session")?))
 }
 
-/// The `replica` record's bytes: a snapshot.
+/// The `replica` record's bytes: a snapshot, of no named log.
 pub fn encode_replica(mode: &str, cursor: Seq, confirmed: &MemoryStore, user: &str, session: &str) -> Vec<u8> {
-    canon::encode(&Value::record(vec![
+    encode_replica_of(mode, cursor, None, confirmed, user, session)
+}
+
+/// The `replica` record's bytes: a snapshot at `cursor` of the log
+/// `log_id`. Unnamed, it is the record as it was before logs had names.
+pub fn encode_replica_of(mode: &str, cursor: Seq, log_id: Option<Id>, confirmed: &MemoryStore, user: &str, session: &str) -> Vec<u8> {
+    let mut fields = vec![
         ("t", Value::text("replica")),
         ("mode", Value::text(mode)),
         ("cursor", Value::Int(cursor)),
         ("confirmed", confirmed.store_value()),
         ("user", Value::text(user)),
         ("session", Value::text(session)),
-    ]))
+    ];
+    if let Some(id) = log_id {
+        fields.push(("log", Value::Id(id)));
+    }
+    canon::encode(&Value::record(fields))
 }
 
 /// The `pending` record's bytes, as a storage written before pages had
