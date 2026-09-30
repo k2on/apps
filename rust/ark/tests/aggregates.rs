@@ -679,3 +679,29 @@ fn a_composer_described_reads_one_row() {
         assert!(ps.is_empty(), "the node does not show `born`: {ps:?}");
     }
 }
+
+/// The group's face of the guard: a song added to the largest creator's
+/// group of `creator_pos` — its count and its sum kept — costs one `get`
+/// (the person row the key looks up) and no member row, at 500 songs and
+/// at 2,000; the group's kept keys are moved, not copied. Falsified by
+/// keeping the members as a list (`face` answering no `members`): 127
+/// and 502 `get`s at the two sizes — every one of Gould's songs read
+/// again, and the person.
+#[test]
+fn a_song_costs_its_group_one_row() {
+    let m = module();
+    let built = m.build();
+    let sch = &built.schema;
+    let (plan, env) = plan_env(built, "creator_pos");
+    let mut seen = vec![];
+    for n in [500, 2000] {
+        let mut st = seeded(sch, n);
+        let mut v = view::hydrate(sch, &plan, env.clone(), &st).expect("hydrate");
+        let one = Change::Add("song".into(), song("new", "Gould", None, 5));
+        let (r, ps) = push_counted(sch, &mut st, &[one], &mut v);
+        assert!(matches!(ps.as_slice(), [Patch::Update { .. }]), "{ps:?}");
+        eprintln!("creator_pos at {n} songs: a song {r:?}");
+        seen.push(r);
+    }
+    assert_eq!(seen, vec![Reads { gets: 1, rows: 0 }; 2]);
+}

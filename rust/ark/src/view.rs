@@ -1920,11 +1920,14 @@ pub fn push_all(sch: &Schema, st: &dyn Store, changes: &[Change], view: &mut Vie
         let e = root_of(&cx, k, held, &t, &view.groups, view.by_key.get(k), &mut ops)?;
         rebuilt.push((k.clone(), e, ops));
     }
-    for (g, members) in t.groups {
+    for (g, moves) in t.groups {
+        let members = view.groups.entry(g.clone()).or_default();
+        for k in &moves.left {
+            members.remove(k);
+        }
+        members.extend(moves.arrived);
         if members.is_empty() {
             view.groups.remove(&g);
-        } else {
-            view.groups.insert(g, members);
         }
     }
     let mut out = Vec::new();
@@ -1937,13 +1940,64 @@ pub fn push_all(sch: &Schema, st: &dyn Store, changes: &[Change], view: &mut Vie
 
 type Groups = BTreeMap<Vec<Value>, BTreeSet<Vec<Value>>>;
 
+// R9 What the changes did to one group's members, over the kept set rather
+// than a copy of it: the keys that arrived and were not members, and the
+// members that left. A group of a thousand touched by one row costs that
+// row, not the thousand (`artists`, Bach's group).
+#[derive(Default)]
+struct Moves {
+    arrived: BTreeSet<Vec<Value>>,
+    left: BTreeSet<Vec<Value>>,
+}
+
+impl Moves {
+    fn has(&self, base: Option<&BTreeSet<Vec<Value>>>, k: &Vec<Value>) -> bool {
+        self.arrived.contains(k) || (!self.left.contains(k) && base.is_some_and(|b| b.contains(k)))
+    }
+
+    // `k` leaves; whether it was a member.
+    fn leave(&mut self, base: Option<&BTreeSet<Vec<Value>>>, k: Vec<Value>) -> bool {
+        if !self.has(base, &k) {
+            return false;
+        }
+        if !self.arrived.remove(&k) {
+            self.left.insert(k);
+        }
+        true
+    }
+
+    // `k` arrives; whether it was not a member.
+    fn arrive(&mut self, base: Option<&BTreeSet<Vec<Value>>>, k: Vec<Value>) -> bool {
+        if self.has(base, &k) {
+            return false;
+        }
+        if !self.left.remove(&k) {
+            self.arrived.insert(k);
+        }
+        true
+    }
+
+    // How many members the group has now.
+    fn len(&self, base: Option<&BTreeSet<Vec<Value>>>) -> usize {
+        base.map_or(0, |b| b.len()) + self.arrived.len() - self.left.len()
+    }
+
+    // The members' keys now, in key order.
+    fn keys(&self, base: Option<&BTreeSet<Vec<Value>>>) -> Vec<Vec<Value>> {
+        let mut out: Vec<Vec<Value>> = base.into_iter().flatten().filter(|k| !self.left.contains(*k)).cloned().collect();
+        out.extend(self.arrived.iter().cloned());
+        out.sort();
+        out
+    }
+}
+
 // §1.5, 1–2 What the changes touch: the keys of the entries to rebuild,
-// each with the hits its kept numbers took (R9); a group source's touched
-// groups as they now stand, and what each one's kept member sums moved
-// by. Reads the view; changes nothing.
+// each with the hits its kept numbers took (R9); what the changes did to
+// each touched group's members, and what each one's kept member sums
+// moved by. Reads the view; changes nothing.
 struct Touched<'c> {
     keys: BTreeMap<Vec<Value>, Vec<Hit<'c>>>,
-    groups: Groups,
+    groups: BTreeMap<Vec<Value>, Moves>,
     sums: BTreeMap<Vec<Value>, Vec<i64>>,
 }
 
@@ -1983,14 +2037,12 @@ fn touched<'c>(
                     for (r, arrives) in [(old, false), (new, true)] {
                         let Some(r) = r else { continue };
                         let g = group_of(by, r);
-                        let members = t
-                            .groups
-                            .entry(g.clone())
-                            .or_insert_with(|| view_groups.get(&g).cloned().unwrap_or_default());
+                        let base = view_groups.get(&g);
+                        let members = t.groups.entry(g.clone()).or_default();
                         let moved = if !arrives {
-                            members.remove(&tbl.key_of(r))
+                            members.leave(base, tbl.key_of(r))
                         } else {
-                            admits(cx.root_filter.as_ref(), r) && members.insert(tbl.key_of(r))
+                            admits(cx.root_filter.as_ref(), r) && members.arrive(base, tbl.key_of(r))
                         };
                         if let (true, Some(aggs)) = (moved, member_aggs) {
                             let terms = terms(cx, aggs, &Value::Struct(r.clone()))?;
@@ -2056,9 +2108,19 @@ fn root_of(
             Some(row) if admits(cx.root_filter.as_ref(), &row) => entry_at(cx, k.to_vec(), Value::Struct(row), Members::None, held, ops).map(Some),
             _ => gone(held, ops),
         },
-        Source::Group { by, .. } => match t.groups.get(k).or_else(|| view_groups.get(k)) {
-            Some(ms) if !ms.is_empty() => {
-                let rows = || ms.iter().filter_map(|m| cx.st.get(table, m)).map(Value::Struct).collect::<Vec<_>>();
+        Source::Group { by, .. } => match t
+            .groups
+            .get(k)
+            .map_or_else(|| view_groups.get(k).map_or(0, |b| b.len()), |m| m.len(view_groups.get(k)))
+        {
+            0 => gone(held, ops),
+            size => {
+                let base = view_groups.get(k);
+                let rows = || match t.groups.get(k) {
+                    Some(m) => m.keys(base),
+                    None => base.into_iter().flatten().cloned().collect(),
+                };
+                let rows = || rows().iter().filter_map(|m| cx.st.get(table, m)).map(Value::Struct).collect::<Vec<_>>();
                 let members = match &cx.shape.root.members {
                     None => Members::List(Value::List(rows())),
                     // A count is the kept keys; a sum is what it was plus
@@ -2072,19 +2134,18 @@ fn root_of(
                             }
                             for (n, (a, _)) in nums.iter_mut().zip(aggs) {
                                 if *a == Agg::Count {
-                                    *n = ms.len() as i64;
+                                    *n = size as i64;
                                 }
                             }
                             nums
                         }
-                        _ if aggs.iter().all(|(a, _)| *a == Agg::Count) => vec![ms.len() as i64; aggs.len()],
+                        _ if aggs.iter().all(|(a, _)| *a == Agg::Count) => vec![size as i64; aggs.len()],
                         _ => member_nums(cx, aggs, &rows())?,
                     }),
                 };
                 let key_row = Value::Struct(by.iter().cloned().zip(k.iter().cloned()).collect());
                 entry_at(cx, k.to_vec(), key_row, members, held, ops).map(Some)
             }
-            _ => gone(held, ops),
         },
     }
 }
