@@ -545,6 +545,113 @@ closures is §8.3's existing behaviour, and `check_retained` is the only
 check made. The timings share the VM with other agents' builds and tests;
 the counted rows and clones are what the guards hold.
 
+### Round 3, R5 — the interpreter borrows, and binds on its own stack
+
+**What landed.** `eval.rs` has a borrowing path, `eval_ref(&Expr) ->
+Cow<Value>`: a literal, an argument, an auto, a local, a provided value
+and a field of any of these, however deep, are answered by reference, and
+`if`/`some` pass through to the arm they lead to; everything else is
+computed and owned. `eval` takes that path for those six and copies only
+at the end, so a value is copied where it is kept — a struct's field, a
+list's element, a helper's result, a row written. `Cmp`, `match`, `let`,
+`for`, the list functions' lists and a call's arguments take it too.
+Locals are not a map copied per bind, and not the `Vec` the design
+named: they are `Frame`s on the evaluator's own call stack, each pointing
+at the one it was bound over, so a scope's locals are pushed as it binds
+and gone when it returns. The reason is the list functions: an element
+bound by reference into a list that is itself a local cannot be pushed
+into the same `Vec` that holds the list, and a frame can. A `let` binds
+for the rest of its block by running the rest over its frame. `Env` is
+now `Copy` — references and a `Params` that is either a procedure's
+`Args` or a helper's declared inputs beside the values the call
+evaluated, borrowed where they could be, so calling a helper builds no
+map and copies no row. A `NodeScope` keeps its binders in a `Vec` it
+owns (`bind_ref` for one the caller keeps), under any frames.
+`view::entry` binds the row by reference, builds the unprojected
+default struct only for a node that does not project, moves its related
+entries' deps and nodes out, and a read that keeps no entries moves its
+nodes (`answer_owned`); `admits` compares each column in place. In
+`store.rs`, `insert`/`upsert`/`update` borrow the table from the schema,
+`well_typed` compares the column names in place each way, and
+`MemoryStore`/`Overlay` answer `exists` from the key where the default
+copied the row out — once per parent on every write with a reference.
+`ark-client`'s `Peer::mutate` reads the mutator's IR from the domain
+and copies none of it. The shadowing a map's `insert` gave is the newest
+frame answering first; a helper input named twice reads the last, as
+collecting the pairs into a map did.
+
+**Guards, each falsified once** (`rust/ark/tests/allocations.rs`, an
+allocator counting per thread). A `library` entry hydrated through its
+plan — harken's tables, helper and query copied into the test, at the
+demo's 285 tracks with a third on the playlist — allocates 55.8,
+bounded at 64, which reading each field by copying the row (+150) or
+binding the row by a copy (+15) would cross; making `Field` copy what it
+reads before taking the field: 203.2. A `map` then a `filter` over a
+local list of N text elements: 142 allocations at 100 and 446 at 400,
+one an element, asserted at most three an element and linear; copying
+every local on each bind, as `Env::bind` did: 20,542 and 322,046. Every
+vector (`cargo test -p ark --test vectors`) and
+`every_procedure_agrees_with_the_interpreter` pass unchanged.
+
+**Before and after**, release builds on the shared VM,
+`harken/domain/tests/perf.rs`: before at `ed5852b`, after at `209cbb5`
+(the interpreted `create_playlist` rows at `2b4731a`, before R6's
+`932a47e` changed that mutation, and run back to back with the old
+`eval.rs` swapped in):
+
+| row | n | before | after |
+|---|---|---|---|
+| `media.title` in a plan's expression | — | 806 ns, 16 allocs | 75 ns, 1 alloc |
+| `library` read whole, per entry | 500 | 18.0 µs, 287 allocs | 4.6 µs, 55 allocs |
+| `library` read whole, per entry | 2,000 | 21.4 µs, 286 allocs | 4.5 µs, 55 allocs |
+| `library` read whole, per entry | 8,000 | 18.4 µs, 286 allocs | 4.6 µs, 55 allocs |
+| `add_to_playlist` applied (native), allocs | 500–8,000 | 428 | 358 |
+| `create_playlist`, a new name, interpreted | P=50 | 1,726 µs | 88 µs |
+| `create_playlist`, a new name, interpreted | P=200 | 22,577 µs | 220 µs |
+| `create_playlist`, a new name, interpreted | P=800 | 348,395 µs | 917 µs |
+| `create_playlist`, a taken name, interpreted | P=800 | 795,857 µs | 164,165 µs (native: 179,288) |
+| `add_song`, 80-character names, interpreted | — | 1,260 µs | 1,058 µs |
+
+The interpreted `create_playlist` was the quadratic bind: every element of
+a person's playlists bound with a copy of every local, the list among
+them. It is now below its native twin; what remains of a taken name is
+`free_number`'s own search, which R6 replaces.
+
+**The row, measured.** `perf_row_share` (same file, ignored, printed)
+wraps the store in one that counts every row a read hands out and every
+row a change carries, by table, and splits a row's copy into its values
+and the rest (media: 15 allocations, 10 of them keys and map nodes;
+`playlist_item`: 7 and 6). With R5 in, the pull copies no row beyond
+what the store hands out, so:
+
+| operation | n | allocations | whole `Row` copies | `Row` keys and map nodes | the node's own names and map |
+|---|---|---|---|---|---|
+| `library`, whole | 285 | 15,909 (55.8 an entry) | 4,940 (31%) | 3,420 (21%) | 3,135 (20%) |
+| `library`, whole | 8,000 | 437,653 (54.7 an entry) | 138,662 (32%) | 95,996 (22%) | 88,000 (20%) |
+| `add_to_playlist`, native | 285–8,000 | 204 | 28 (14%) | 24 (12%) | — |
+
+(The apply's rows: one item read for `MAX(pos)`, and the item written —
+built once, copied into the procedure's overlay and into the caller's.
+This `add_to_playlist` lacks harken's `owned` middleware; harken's is
+358.) So a positional row with the names on the `Table` removes about a
+fifth of a hydrate's allocations and an eighth of an apply's; an
+`Rc<[Value]>` that a read hands out by count rather than by copy removes
+about a third of a hydrate's. A fifth more is the nodes' own field names
+and maps — a `Value::Struct`, which a positional *row* does not touch.
+The other seven eighths of an apply are not rows: the native procedure's
+context, the checked input, the plan the read builds and the change
+list, not broken down here.
+
+**Not verified.** The `library` guard holds a copy of harken's query in
+`rust/ark/tests`, not harken's own module (the engine does not depend on a
+domain); the two agree — 55 an entry in harken's harness at 500, 55.8
+in the copy at 285. The shares are counted rows times a
+measured per-row split, not a per-allocation attribution. Timings share
+the VM with other agents' builds. `Std` still takes its arguments owned
+(`stdlib::std(f, &[Value])`), so `len(xs)` and `first(xs)` of a local
+copy the list; that is `stdlib.rs`'s signature to change and was not in
+this round's files. The kotlin and swift runtimes were not touched.
+
 ## Round 3 — decided with round 2's numbers
 
 Round 2 removed every super-linear cost the harness found. What remains
