@@ -100,6 +100,13 @@ pub struct Config {
     /// black-holed socket is closed in a second rather than a minute
     /// (`docs/plan-fleet.md` §2, scenario 10).
     pub keepalive: ark_server::Keepalive,
+    /// How much of the log the server keeps (`ark::retention`,
+    /// `docs/plan-alone.md` §3): everything above the lowest cursor of a
+    /// device heard from within `days` (`HARKEN_RETAIN_DAYS`, 30), and
+    /// never fewer than `entries` below the head (`HARKEN_RETAIN_ENTRIES`,
+    /// 10,000). A device further behind is sent a snapshot and rebases onto
+    /// it; the process fleet shrinks both to watch one be.
+    pub retain: ark_server::Retention,
 }
 
 impl Config {
@@ -117,6 +124,7 @@ impl Config {
             web_module: None,
             house: None,
             keepalive: ark_server::Keepalive::default(),
+            retain: ark_server::Retention::default(),
         }
     }
 
@@ -136,6 +144,8 @@ impl Config {
     ///                               all three, or none; HARKEN_HA_MEDIA
     /// HARKEN_KEEPALIVE_MS           the sync socket's ping interval (20000)
     /// HARKEN_KEEPALIVE_MISSED       pings unanswered before it closes (3)
+    /// HARKEN_RETAIN_DAYS            how long a device's place holds the log (30)
+    /// HARKEN_RETAIN_ENTRIES         entries kept below the head regardless (10000)
     /// ```
     pub fn from_env(listen: &str) -> Result<Config> {
         Config::from_vars(listen, |k| std::env::var(k).ok())
@@ -176,6 +186,19 @@ impl Config {
                 .parse()
                 .map_err(|_| anyhow!("HARKEN_KEEPALIVE_MISSED is a count: {n}"))?;
         }
+        let mut retain = ark_server::Retention::default();
+        if let Some(d) = env("HARKEN_RETAIN_DAYS") {
+            retain.days = d
+                .trim()
+                .parse()
+                .map_err(|_| anyhow!("HARKEN_RETAIN_DAYS is a count of days: {d}"))?;
+        }
+        if let Some(n) = env("HARKEN_RETAIN_ENTRIES") {
+            retain.entries = n
+                .trim()
+                .parse()
+                .map_err(|_| anyhow!("HARKEN_RETAIN_ENTRIES is a count of entries: {n}"))?;
+        }
         Ok(Config {
             listen: listen.into(),
             data: env("HARKEN_DATA")
@@ -195,6 +218,7 @@ impl Config {
             web_module: env("HARKEN_WEB_MODULE"),
             house,
             keepalive,
+            retain,
         })
     }
 
@@ -391,7 +415,8 @@ pub async fn start(config: Config) -> Result<Server> {
         .data(&config.data)
         .auth(auth.clone())
         .live(desk)
-        .keepalive(config.keepalive);
+        .keepalive(config.keepalive)
+        .retain(config.retain);
     if config.keepalive != ark_server::Keepalive::default() {
         eprintln!(
             "harken-server: the sync socket pings every {}ms and gives up after {} unanswered",
@@ -563,6 +588,48 @@ mod tests {
             ("HARKEN_KEEPALIVE_MS", "0"),
             ("HARKEN_KEEPALIVE_MS", "1s"),
             ("HARKEN_KEEPALIVE_MISSED", "-1"),
+        ] {
+            assert!(
+                Config::from_vars("x:1", vars(&[dev, bad])).is_err(),
+                "{bad:?}"
+            );
+        }
+    }
+
+    /// The two retention constants are `ark::retention`'s unless told,
+    /// and nothing a typo could make of them. Falsified by ignoring
+    /// `HARKEN_RETAIN_ENTRIES`: the count is 10,000.
+    #[test]
+    fn retention_is_the_engines_unless_told() {
+        let dev = ("HARKEN_DEV_AUTH", "1");
+        let c = Config::from_vars("x:1", vars(&[dev])).unwrap();
+        assert_eq!(
+            c.retain,
+            ark_server::Retention {
+                entries: 10_000,
+                days: 30
+            }
+        );
+        let c = Config::from_vars(
+            "x:1",
+            vars(&[
+                dev,
+                ("HARKEN_RETAIN_DAYS", "0"),
+                ("HARKEN_RETAIN_ENTRIES", " 50 "),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(
+            c.retain,
+            ark_server::Retention {
+                entries: 50,
+                days: 0
+            }
+        );
+        for bad in [
+            ("HARKEN_RETAIN_DAYS", "-1"),
+            ("HARKEN_RETAIN_DAYS", "30d"),
+            ("HARKEN_RETAIN_ENTRIES", "1e4"),
         ] {
             assert!(
                 Config::from_vars("x:1", vars(&[dev, bad])).is_err(),

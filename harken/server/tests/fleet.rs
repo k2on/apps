@@ -1378,3 +1378,110 @@ fn fuzz(seed: u64, steps: usize) {
         &done.hash[..12]
     );
 }
+
+/// **13. Retention: a peer away past the horizon.** A server keeping fifty
+/// entries (`HARKEN_RETAIN_ENTRIES=50`) and holding the log for no session
+/// that is not connected (`HARKEN_RETAIN_DAYS=0`), and three of alice's
+/// devices. The third is black-holed and authors ten playlists into the
+/// void while the other two author two hundred — so the server compacts
+/// past where the third last was (`ark::retention`, `docs/plan-alone.md`
+/// §3). Given the network back, it is below the horizon: it is served the
+/// snapshot, rebases its ten onto it, pushes them, and converges; its ten
+/// land after all two hundred.
+///
+/// What `converged` checks by entry is checked here by id for what went
+/// below the horizon: the log keeps every id it ever sequenced (§10.3),
+/// and an accepted intent whose entry was compacted away is in `log.ids`
+/// rather than `log.entries` — it is then forgotten for `converged`, which
+/// reads entries.
+///
+/// Falsified by `HARKEN_RETAIN_ENTRIES=100000`: nothing is compacted, and
+/// the horizon assertion names 0.
+#[test]
+fn a_peer_away_past_the_horizon_is_served_the_snapshot() {
+    let f = Fleet::with_env(
+        "retention",
+        vec![("HARKEN_RETAIN_ENTRIES", "50"), ("HARKEN_RETAIN_DAYS", "0")],
+    );
+    let mut a = f.peer("a", Some("alice"));
+    let mut b = f.peer("b", Some("alice"));
+    let mut c = f.peer("c", Some("alice"));
+    a.author("create_playlist", named("Before"));
+    f.converged(&mut [&mut a, &mut b, &mut c]);
+    let left_at = c.status().cursor;
+
+    c.proxy.blackhole();
+    let mut away = vec![];
+    for i in 0..10 {
+        away.push(c.author("create_playlist", named(&format!("away-{i}"))));
+    }
+    assert!(
+        eventually(PATIENCE, || f.server.room("alice") == 2),
+        "the server closes the black hole: it no longer holds the log"
+    );
+    let t = Instant::now();
+    for i in 0..100 {
+        a.author("create_playlist", named(&format!("a-{i}")));
+        b.author("create_playlist", named(&format!("b-{i}")));
+    }
+    assert!(a.settle(PATIENCE) && b.settle(PATIENCE));
+    measured(
+        "two peers author 200 entries on a retaining server",
+        t.elapsed(),
+    );
+    assert_eq!(
+        c.status().pending,
+        10,
+        "the ten are pending behind the black hole"
+    );
+    let before = f.server.log_on_disk().expect("a log");
+    assert!(
+        before.horizon() > left_at,
+        "compacted past where the third peer was: horizon {}, it left at {left_at}",
+        before.horizon()
+    );
+    assert!(
+        before.entries.len() <= 75,
+        "fifty kept, and half again at most: {}",
+        before.entries.len()
+    );
+    let head_before = before.head_seq();
+
+    let t = Instant::now();
+    c.proxy.pass();
+    assert!(c.settle(PATIENCE), "the returning peer settles");
+    measured(
+        "a peer below the horizon: snapshot, rebase, push, confirm",
+        t.elapsed(),
+    );
+    let log = f.server.log_on_disk().expect("a log");
+    for (id, who) in f.accepted() {
+        assert!(
+            log.seq_of(&id).is_some(),
+            "{who} {} is in the log",
+            ark::value::hex(&id)
+        );
+    }
+    for id in &away {
+        let n = log.seq_of(id).expect("sequenced");
+        assert!(
+            n > head_before,
+            "the away peer's intent landed after the two hundred: {n} <= {head_before}"
+        );
+    }
+    let below: Vec<Id> = log
+        .ids
+        .iter()
+        .filter(|(_, n)| **n <= log.horizon())
+        .map(|(id, _)| *id)
+        .collect();
+    f.lost(below);
+    let done = f.converged(&mut [&mut a, &mut b, &mut c]);
+    assert_eq!(done.head, head_before + 10);
+    println!(
+        "fleet: retention kept {} of {} entries (horizon {})",
+        done.log.entries.len(),
+        done.head,
+        done.log.horizon()
+    );
+}

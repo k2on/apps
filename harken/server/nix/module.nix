@@ -151,6 +151,30 @@ in
       '';
     };
 
+    retainDays = lib.mkOption {
+      type = lib.types.ints.unsigned;
+      default = 30;
+      description = ''
+        How long a device's place in the log holds the log for it: every entry
+        above the lowest cursor of a device heard from within this many days
+        is kept, so a laptop closed for a fortnight catches up by paging. A
+        device away longer is sent a snapshot when it returns and rebases what
+        it did offline onto it — nothing is lost either way; this only decides
+        which of the two it costs.
+      '';
+    };
+
+    retainEntries = lib.mkOption {
+      type = lib.types.ints.unsigned;
+      default = 10000;
+      description = ''
+        Entries of the log kept below its head whoever has been heard from:
+        what bounds the server's memory and its log on disk once every device
+        is caught up. The log is compacted when it holds half as much again as
+        it has to keep.
+      '';
+    };
+
     web = lib.mkOption {
       type = lib.types.nullOr lib.types.package;
       default = null;
@@ -344,6 +368,8 @@ in
         HARKEN_DATA = "%S/harken";
         HARKEN_PUBLIC_URL = cfg.publicUrl;
         HARKEN_REDIRECTS = lib.concatStringsSep "," cfg.redirects;
+        HARKEN_RETAIN_DAYS = toString cfg.retainDays;
+        HARKEN_RETAIN_ENTRIES = toString cfg.retainEntries;
       } // lib.optionalAttrs (cfg.mediaPath != null) {
         HARKEN_MEDIA = "${cfg.mediaPath}";
       } // lib.optionalAttrs (cfg.web != null) {
