@@ -274,11 +274,22 @@ randomized change sequences (§2, B1b).
 
 ### 1.6 `Rebuilt`
 
-A rebase rolls the optimistic store back and replays pending on top. No
-sequence of changes describes that, so the peer reports `Changes::Rebuilt`
-and a view re-hydrates; `ark_client::Update::Reset` says so to the screen.
-Unchanged from v3, and the engine still never synthesises changes for a
-rollback.
+A rebase reports the transitions it made. The replica keeps, beside each
+pending intent, the changes its run made to the optimistic store; a rebase
+undoes them newest first, applies what landed, and runs the surviving
+intents again, and a view is told the inverse of what it undid, what
+landed and what it re-applied — in that order, each a transition the store
+made. `push_all` settles each touched key once against the final store,
+so a rebase costs a view the keys it touched, and the view patches.
+`Changes::Rebuilt` is reserved for a store replaced whole — a replica
+opened, a snapshot adopted from the server — and a view re-hydrates on it;
+`ark_client::Update::Reset` says so to the screen. The engine never invents
+a change.
+
+This revises v3 and this section as first written, which reported every
+rebase as `Rebuilt` because "a rollback reports nothing": true of a
+SQLite savepoint, and not of changes a replica recorded itself
+(`docs/plan-perf.md` R2).
 
 ### 1.7 Middleware over a maintained query
 

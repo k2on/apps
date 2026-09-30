@@ -130,9 +130,16 @@ that argues it.
   else; the optimistic state it produced is never committed. One fsync per
   tap is the floor and the design does not go below it. (`docs/arkdb.md`
   §3.6.)
-- **The overlay reports nothing when dropped.** A rebase tells every view
-  `Rebuilt`; no runtime may synthesise changes for a rollback. (§3.6,
-  §3.13.)
+- **A rebase reports the transitions it made.** A replica keeps, beside
+  each pending intent, the changes its run made to the optimistic store.
+  A rebase undoes them newest first — each inverts exactly: an `add` by
+  deleting its key, a `remove` by putting the row back, an `edit` by
+  putting the old row — applies what landed, and runs the surviving
+  intents again; every view is told the inverse of what it undid, what
+  landed and what it re-applied, in that order. Each is a transition the
+  store made, never one invented for it. `Rebuilt` is reserved for a store
+  replaced whole: a replica opened, a snapshot adopted. (§3.6, §3.13;
+  `docs/plan-perf.md` R2.)
 - **A live frame never touches the optimistic view.** `Heard` is taken
   before any rebase logic runs. (§3.14.)
 - **The transport pings, the engine does not.** An authority's transport

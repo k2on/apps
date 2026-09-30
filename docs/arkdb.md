@@ -285,7 +285,7 @@ any table. A design that split it into several logs was built and removed;
 | all non-determinism in `fill_auto`, once, at origin | wasm, wasmi, the guest ABI; UniFFI, `ubrn`, Expo, `petros-js` | the domain is generated native source in every language |
 | `Ctx { user, session }`; entries held to the login that pushed them | `#[mutation]`, `peer!`, `tables!` as proc macros | builders that emit IR; `arkc gen` emits the row types and the call surface |
 | typed writes that report `Change`; queries as data; trees via declared references | | `Change`s are *kept* on the authority and are the facts a peer may take |
-| incremental views; `Rebuilt` after a rebase | | views are in the spec so every runtime maintains them natively |
+| incremental views | | views are in the spec so every runtime maintains them natively; a rebase is the transitions it made, not `Rebuilt` |
 | sans-io machines; the deterministic simulation; one log per module | | the log has snapshots and a horizon (§3.9) |
 | three lifetimes; rooms per account; one socket; server pings | | live frame types declared in the module, generated everywhere |
 | server as the only OIDC client | | |
@@ -637,14 +637,23 @@ they return. The seekable range scan above (`lo`, `hi`, `after`), the
 order taken from an index, and a durable B-tree behind it are not there
 yet: an order still sorts what the filter admitted.
 
-**The rebase is an overlay.** Confirmed state lives in the base; pending
-intents apply forward into an in-memory overlay; reads consult the
-overlay first. A confirmed entry arriving drops the overlay, applies to the
-base in one batch, and re-runs the still-pending intents into a fresh
-overlay. Pending intents are themselves committed in the base (one fsync per
-tap, as today), the optimistic state never is, a tap costs the same at
-pending depth 400 as at 5, and a view is told `Rebuilt` after a rebase
-because dropping an overlay reports nothing.
+**The rebase is by changes.** Confirmed state lives in the base; each
+pending intent applies forward into the optimistic store through an
+overlay, and the changes its run made are kept beside it. A confirmed
+entry arriving under pending intents undoes those changes newest first —
+each inverts exactly: an `Add` by deleting its key, a `Remove` by putting
+the row back, an `Edit` by putting the old row — applies what landed, and
+re-runs the still-pending intents, recording them anew. No store is
+copied. An intent of the peer's own, confirmed with nothing but its own
+intents landed before it, is not run again: its record is what running it
+over the confirmed store produces, held to the authority's facts when
+they come, and a peer alone hands its authority the same record. Pending
+intents are themselves committed in the base (one fsync per tap, as
+today), the optimistic state and the records never are, a tap costs the
+same at pending depth 400 as at 5, and a view is told what the rebase did
+— the inverses, what landed, what was re-applied — so it patches rather
+than re-hydrates. `Rebuilt` is for a store replaced whole
+(`docs/plan-perf.md` R2).
 
 ### 3.7 The log
 
@@ -896,7 +905,9 @@ its value — indexed by key and by (plan node, dependency value).
 store only the entries those changes hit, and reports `Insert{at}` /
 `Remove{at}` / `Update{at}` against the list the client holds; under a
 limit the window is refilled from the entries, not the store (plan-v4 §1.5). A
-rebase is still `Rebuilt` and a re-hydrate (plan-v4 §1.6), and a query's guards
+rebase is changes like any other — the transitions it made — so a view
+patches through one; `Rebuilt`, a store replaced whole, is a re-hydrate
+(plan-v4 §1.6). A query's guards
 and provides run again when a table they read changes, a different
 outcome resetting the view (plan-v4 §1.7). The correctness contract — the answer
 equals a fresh pull, and the patches splice the old list into the new —
