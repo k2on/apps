@@ -1016,13 +1016,34 @@ impl<M: Machine> Server<M> {
     /// cursor it would take this log's entries on top of the other's
     /// state, and nothing but a `Verify` would ever say so. It is sent the
     /// snapshot at the head, once, with this log's name on it.
+    ///
+    /// **A snapshot below the head is followed by the first page, in the
+    /// same turn** (`docs/plan-perf.md` R10). A connection is otherwise sent
+    /// one message per turn, and a client asks again only after a `Batch`
+    /// with `has_more`; after a `SnapshotOf` it has nothing to ask with, so
+    /// a peer with nothing pending that came back below the horizon of a
+    /// quiet server sat at the horizon until somebody else spoke. The page
+    /// is the one it would have been sent next; only which turn carries it
+    /// moved.
     fn fanout(&mut self) {
         let conns: Vec<(ConnId, Mode, Seq, bool)> = self.conns.iter().map(|(c, cn)| (*c, cn.mode, cn.sent, cn.elsewhere)).collect();
         for (c, md, sent, elsewhere) in conns {
+            let mut next = self.fan_one(c, md, sent, elsewhere);
+            while let Some(from) = next {
+                next = self.fan_one(c, md, from, false);
+            }
+        }
+    }
+
+    /// One message to connection `c` of [`Server::fanout`], if it is owed
+    /// one; `Some(seq)` when that was a snapshot at `seq`, after which the
+    /// first page above it follows at once.
+    fn fan_one(&mut self, c: ConnId, md: Mode, sent: Seq, elsewhere: bool) -> Option<Seq> {
+        {
             let a = &self.authority;
             let head = a.log.head_seq();
             if sent == head && !elsewhere {
-                continue;
+                return None;
             }
             let page = if sent > head || elsewhere {
                 Page::BelowHorizon(snapshot_of(head, a.store.clone()).of_log(a.log.id()))
@@ -1063,11 +1084,13 @@ impl<M: Machine> Server<M> {
                     )
                 }
             };
+            let snapshot = matches!(msg, ServerMsg::SnapshotOf { .. });
             self.send(c, msg);
             if let Some(conn) = self.conns.get_mut(&c) {
                 conn.sent = advanced;
                 conn.elsewhere = false;
             }
+            snapshot.then_some(advanced)
         }
     }
 

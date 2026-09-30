@@ -25,6 +25,10 @@
 //! A cursor already below the horizon pins nothing: that peer is served the
 //! snapshot whatever is kept, and keeping entries for it would keep them
 //! for nobody.
+//!
+//! Entry ids are not retention's to drop: a log keeps every id it ever
+//! sequenced, below the horizon too, by design (§10.3), so a re-push is
+//! still recognised.
 
 use crate::log::Seq;
 
