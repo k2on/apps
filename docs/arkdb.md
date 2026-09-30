@@ -834,9 +834,26 @@ already in the design:
   unusual depth, and refusals come back as verdicts, as they would for any
   offline edit.
 
+**As it is built** (`docs/plan-alone.md`): the second path, for every
+server, including one that has never seen the peer. A replica remembers its
+**fork** — the log and cursor it last shared with a server, nothing for a
+peer that never had one — and what it sequences alone after it is its
+**local history**, kept on its storage in the server's own record shape
+(`ark::journal`: a snapshot that is the fork, and pages of `{seq, entry,
+facts}` merged as they accumulate but never folded past the fork) and not
+in memory; its authority holds its store and the ids. Joining a server
+takes that history back out of the confirmed store by its own facts, newest
+first, and re-queues every entry as pending, in order, with nothing drawn
+again; the `Hello` names the fork's log, and the server pages it or sends
+its snapshot while the intents are pushed and rebased as any offline work
+is. Leaving records the fork and starts sequencing locally. Neither is a
+mode written into the replica, so a storage opened the other way from its
+last use transitions instead of refusing. Adoption, which keeps the peer's
+own sequence numbers, has no wire yet.
+
 Handing authority *back* — a server going away and a peer resuming
 sequencing — is the same step in reverse and is deliberately not built
-first. Authority transfer between two live peers is a protocol with a
+first; a peer leaving a server that goes on is `Peer::leave`, above. Authority transfer between two live peers is a protocol with a
 fencing token, and nothing in harken needs it yet.
 
 ### 3.11 Authorization and partial sync

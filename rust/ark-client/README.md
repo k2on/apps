@@ -99,22 +99,22 @@ if peer.epoch() != introduced_on { /* a new connection: say who you are again */
   applied twice; `open` reads the pages in order, skips any a snapshot
   already holds, drops a torn or out-of-order tail rather than apply it,
   and compacts away whatever it could not use. A peer alone moves its
-  cursor on every mutate; it writes the page on its next `pump` (the
-  clients call one every fifty milliseconds) and when it is dropped, so
-  the window in which a crash loses the last change is one tick. A
+  cursor on every mutate and writes the entry it became before `mutate`
+  returns — a page of its local history, below — so it is as durable as a
+  peer with a server; its store's page follows on the next `pump` and when
+  it is dropped, and a reopen brings the store up to the history. A
   directory writes each record to a temporary name, syncs it, renames it
   and syncs the directory. A storage written before the journal — a
   `replica` record and nothing after it — opens as it did, and so does a
   `pending` record written before the pages (it has no generation, which
   reads as 0). A torn pending page is dropped with every page after it:
-  it held the one intent whose `mutate` had not returned. A directory
-  keeps the mode it was opened with — alone or with a server — and refuses
-  the other (`Error::ModeMismatch`), because the sequences mean different
-  things. Signed out and signed in are the same mode: one directory is
-  opened either way.
+  it held the one intent whose `mutate` had not returned. A directory is
+  not in a mode: opened alone after a server, or with a server after being
+  alone, it transitions (below). The `replica` record carries the fork, and
+  a `log` record says the peer was last used alone.
   In a browser it is `localStorage`, base64 under `ark:<name>:replica`,
-  `ark:<name>:facts.<n>`, `ark:<name>:pending`, `ark:<name>:pending.<n>`
-  and `ark:<name>:who`:
+  `ark:<name>:facts.<n>`, `ark:<name>:pending`, `ark:<name>:pending.<n>`,
+  `ark:<name>:who`, and alone `ark:<name>:log` and `ark:<name>:log.<n>`:
   synchronous, which iced's `boot` needs, and limited to the origin's quota
   of about five megabytes — which, with room for the journal beside the
   snapshot, is a snapshot of about half that: a library of a few thousand
@@ -169,8 +169,39 @@ if peer.epoch() != introduced_on { /* a new connection: say who you are again */
   done before anyone ever signed in on a peer is given to whoever signs in,
   because only that was never anybody's. (petros did the same for a denied
   peer: its pending edits waited for the next login as the same person.)
-- **Alone**, the peer is its own authority: every intent is sequenced at
-  once, nothing stays pending, and `verify` answers immediately.
+- **Alone** (`Options::alone(name)`, or `Options::alone_as_nobody()` for a
+  peer nobody has signed in on), the peer is its own authority: every
+  intent is sequenced at once, nothing stays pending, and `verify` answers
+  immediately. It is not a mode but a way of being used
+  (`docs/plan-alone.md`). The replica remembers its **fork**, the log and
+  cursor it last shared with a server — nothing, for a peer that never had
+  one — and what it sequences after it is its **local history**, kept on
+  the storage by `ark::journal`: `log`, a snapshot that is the fork (the
+  store at that cursor, naming that log), then `log.1`, `log.2`, … pages of
+  the server's own journal records, `{seq, entry, facts}`, one written per
+  `mutate` before it returns. The pages are merged while the older is no
+  larger than the newer — about log₂ of them, each record rewritten about
+  as often — and never folded into the snapshot, because a join needs every
+  entry since the fork. The authority keeps its store and the ids, and no
+  entry: memory is the store's, disk grows with the history as a server's
+  log does. A page torn in the writing reopens to its last whole record,
+  and a store written ahead of the history is rebuilt from the fork.
+
+  `peer.join(url, login)` hands the history to a server: the confirmed
+  store is rolled back to the fork by the entries' own facts, newest first,
+  and every local entry is re-queued as pending, in order, authored as
+  `login` (or as nobody, for `sign_in` to make the signer's) with nothing
+  drawn again; then it connects, the `Hello` names the fork's log, and the
+  intents are pushed and rebased as offline work is — landing after
+  whatever the server has, a refusal dropped with its reason. A view is
+  told a rebase by changes, not `Rebuilt`. It is written in this order: the
+  re-queued intents, the login, the replica at the fork, and only then the
+  local history removed, so a stop between reopens with both and finishes
+  the join. `status().joining` counts what the server has yet to take, and
+  the link reads `joining` meanwhile. `peer.leave()` is the other way: the
+  link closed, the fork recorded where the replica stands, the history
+  started there, and what was pending sequenced locally. Opening a storage
+  with the other `Options` from its last use is the same two transitions.
 - **Sans-io**, for a transport of your own: `connected`, `disconnected`,
   `recv`/`recv_frame`, `take_outgoing`/`take_outgoing_frames`, `persist`;
   `connect_with(url, dial)` takes any `link::Transport` (ark-server's
@@ -215,8 +246,8 @@ signing in. The peer against a real server is tested in
 ark-server (`tests/sync.rs`, `tests/live.rs`, `tests/auth.rs`): two peers
 syncing over sockets, an offline edit rebased on reconnect (the view
 patched through it), a view following the log patch by patch, pending intents
-and the confirmed store across a reopen of the directory, a mode mismatch
-refused, a peer alone, live frames relayed within an account, the sign-in
+and the confirmed store across a reopen of the directory, a directory
+opened alone after a server leaving it, a peer alone, live frames relayed within an account, the sign-in
 token on the socket and a denial. Signing in late: fifty-one entries
 authored signed out, across a restart, all confirmed as the signer's with
 the playlist hers on the server, the directory then opened signed in, and
@@ -225,6 +256,19 @@ and the one entry the server's copy refused (its playlist was never made
 there) standing `Rejected("playlist_id: no such playlist")` while the rest
 are confirmed. An intent refused both by the peer's own rebase and by the
 authority it had been pushed to is reported once.
+
+A peer without a server (`src/alone_tests.rs`, each falsified once): its
+local history survives a reopen, entry by entry; the authority holds no
+entry after five hundred appends; a page torn mid-write reopens to the last
+whole entry and a store written ahead of the history is rebuilt; a peer
+that left a server at 50 keeps 51 to 250 over a fork written once; alone
+for thirty then a fresh sans-io hub, which ends with the thirty in order
+and the same hash; alone beside another user, landing after theirs; leave,
+more, join again, the away items after the others'; a join stopped after
+every one of its writes, reopened for the server and finishing; a server
+replica opened alone, leaving with its fork; two thousand local intents
+joining (175 ms to re-queue and 405 ms to be confirmed, a debug build). The
+process fleet runs the same through `harken-peer` (`harken/README.md`).
 
 Not verified: the wasm build in a browser. It compiles for
 `wasm32-unknown-unknown` (clippy clean) and nobody has opened a page with

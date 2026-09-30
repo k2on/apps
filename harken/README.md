@@ -103,6 +103,29 @@ additions land after the other's, in the order the server sequenced them.
 A window with no remembered login opens signed out and offers a sign-in
 button.
 
+### Starting without a server, connecting later
+
+    nix run .#harken-iced            # no --server: alone
+
+With no `--server` (in a browser, no `?server=`) the window opens **alone**,
+on this device's own replica in a fixed place — `local` under
+`$XDG_DATA_HOME/harken`, or `harken:local` in the page's `localStorage` —
+and it is not a demo: the peer is its own authority, every change is
+sequenced as it is made and kept, and the status line says `alone`. The
+line above the table has a server address and **connect**: that joins the
+server in place (`docs/plan-alone.md` §4). Everything done alone is handed
+to it — the replica goes back to where it last shared the server's log,
+which for a device that never had one is nothing, and every local change is
+pending again, in order — and that server's sign-in starts; once it
+finishes, the changes become the signer's and are pushed, landing after
+whatever the server already has. The lists on screen are patched through
+the join, not rebuilt. The server is remembered for `local`, so the next
+start opens there. Leaving a server is `ark_client::Peer::leave`, an API
+and not yet a control.
+
+`harken-peer` does the same from a shell: `--alone` and later `--server
+URL` over one `--dir` is the join, and `join` and `leave` are commands.
+
 ## harken-peer, and the fleet
 
 `harken-peer` is a peer with no screen, built beside the server (the
@@ -118,8 +141,8 @@ ids and rows in the vectors' dialect (`ark::json`):
     {"ok":true,"cursor":1,"pending":0}
 
 `mutate`, `status`, `hash`, `wait`, `settle`, `query`, `rejections`,
-`standing`, `disconnect`, `reconnect`, `sign_in`, `sign_out`, `persist`,
-`quit`; the source's first page says what each answers. Without `--user` it
+`standing`, `disconnect`, `reconnect`, `sign_in`, `sign_out`, `join`,
+`leave`, `persist`, `quit`; the source's first page says what each answers. Without `--user` it
 opens signed out, authoring as nobody until `sign_in`. A sign-in waits on
 the server ten seconds to connect and twenty to read (ark-auth's bounds),
 or `--auth-patience-ms` for both; one that fails at start ends the

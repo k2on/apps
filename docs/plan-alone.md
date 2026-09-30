@@ -133,3 +133,113 @@ established; every new test is falsified once. The `rebase/` and
 `protocol/` vectors are untouched: nothing here changes a frame. What a
 peer alone *is* — an authority in-process — is unchanged; what changes is
 that it remembers where it forked and keeps what it did.
+
+## Landed
+
+**What.** `ark::journal` (`9316419`) is the log on a key/value storage —
+the server's snapshot and `{seq, entry, facts}` records, generic over a
+`Keys` trait (`load`, `save`, `remove`, and `append`/`truncate` with
+defaults that rewrite a record whole) — in two layouts: the server's (one
+page appended to, a snapshot compaction) and a peer alone's (a page per
+write, merged while the older is no larger than the newer, the snapshot
+never moved). The server's `persist.rs` is that in the server layout
+(`6a8b4e0`); its files, records, crash rules and messages are unchanged,
+and `ark-server/tests/journal.rs` passes as it was.
+
+`ark-client` (`4e079b6`): the `replica` record carries `fork: { log,
+cursor }` where it carried `mode`; a `log` record is a peer alone. The
+alone log is
+
+```text
+log      { t: "log", base: { seq: fork cursor, hash, rows: the store there,
+           log: fork log }, entries: [], ids: [] }
+log.N    [4-byte length, { seq, entry, facts }]…   one page per mutate,
+                                                   merged into fewer
+```
+
+written through the peer's own `Storage`, so a browser's `localStorage`
+carries it. `mutate` alone writes its page before it returns and the
+authority's log is emptied after every append (`Log::take_entries`): a
+head and the ids, no entries. `Peer::open` over either use transitions;
+`Error::ModeMismatch` is gone. `Peer::join(url, Option<Login>)`:
+`persist_log`, then the local history read back and taken out of the
+confirmed store by its own facts newest first (`Replica::fork_back`, a
+rebase by changes — a view is patched, never `Rebuilt`), every entry
+re-queued as pending in order under the joining login (nobody, when
+there is none), then **the write order**: the pending snapshot of the
+re-queued intents, `who`, the `replica` snapshot at the fork (the
+journal's pages after it removed), and only then the alone log removed —
+pages newest first, `log` last — and the link. `Peer::leave()`: the link
+closed, `log` created at the replica's `(log, cursor)`, the authority
+started from the confirmed store, pending sequenced locally. `status()`
+says `alone`, `joining` while local intents are pending on an open link,
+`joining: N`, and the fork. Reopening alone over a join that stopped
+halfway confirms from the history what is still pending, and does not
+sequence it twice.
+
+`harken-peer` (`7b9026c`): `--alone` then `--server` over one directory,
+`join` and `leave`. The desktop and the browser (`48abacb`): no server
+named opens `local` alone as nobody (`Options::alone_as_nobody`), the
+status line says `alone`, and the connect entry joins in place,
+remembers the server for `local`, and starts that server's sign-in. The
+demo still seeds its library in memory as a peer alone, as it did; it
+offers no connect.
+
+**Tests, each falsified once.** `ark::journal` (merging, a torn page, a
+merge stopped halfway, create over leftovers); `ark-client`'s
+`alone_tests` (the history survives a reopen; no entry in memory after
+500 appends; a torn page and a store ahead of the history; 51–250 kept
+over a fork at 50; alone then a fresh hub; beside another user; leave and
+join twice; a join stopped after each of its writes; a server replica
+opened alone; 2,000 local intents); `harken-iced`'s
+`a_window_alone_joins_a_server_in_place` (no list reset through the join);
+`harken-peer`'s `alone_then_a_server_is_one_directory`; fleet scenarios
+14–19.
+
+**The fleet's timings** (a debug build, a shared VM):
+
+| scenario | measured |
+|---|---:|
+| 14. 61 local intents: start with `--server`, and a second device, to converged | 1,397 ms |
+| 17. a join of 400 local intents, `join` said to its answer | 426 ms |
+| 17. kills at 10, 50, 90 and 99% of that | history, history, history, joined — all converged |
+| 18. 300 songs said, killed 120 ms in | 27 answered, 27 kept, all on the server after the join |
+| 19. 2,000 local intents: start with `--server` to converged | 6,923 ms |
+| 19. …authoring them alone through `harken-peer` | 73,895 ms |
+
+In process, two thousand local intents re-queue in 175 ms and are on a
+sans-io hub and confirmed in 405 ms.
+
+**Not verified, and for the coordinator.**
+
+- Authoring alone in a *debug* build grows with the library — 0.5 ms
+  a mutate at a hundred songs and 10 at a thousand through `harken-peer`,
+  where a peer of a server is flat at 1.8 — and the same binary in release
+  is flat at 1.7 ms, the same as with a server. The alone log is not it:
+  without the log written, the debug numbers are the same. Most likely it
+  is the debug-only checks on the path a peer alone takes on every mutate
+  — the view compared with the confirmed store whole once nothing is
+  pending, the record run again over the authority's store — though that
+  was not profiled; it is why scenario 19 takes a minute.
+- No kill in scenario 17 landed between the two writes of a join — the
+  window is a few file removals wide. The unit test walks a stop after every
+  write of the join; the fleet shows kills before the join and after it
+  converge.
+- A join rewrites the local entries' author to the joining login. A peer
+  alone under one name joining as another person makes its history that
+  person's; there is no question asked.
+- A `replica` record written alone before the fork existed opens with its
+  store as the fork at its cursor and naming no log: it has no history to
+  hand a server, and a join sends a `Hello` at that cursor naming none,
+  which a named server pages from there. No such directory exists outside
+  a demo; untested.
+- The browser's alone start, connect and the sign-in redirect back to a
+  joined `local` were compiled (`nix build .#harken-web`) and not opened
+  in a browser. The desktop's connect was not run in a window; the peer
+  underneath it is tested.
+- A view is reset on a login change whatever it reads (`ark_client::View`),
+  so the sign-in after a join resets the lists as every sign-in has; the
+  join itself does not. Adoption keeping the peer's own sequence numbers
+  has no wire yet (§1).
+- The alone peer's *confirmed* journal still compacts by size and not by
+  `ark::retention` (R10's other half, not this round).
