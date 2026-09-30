@@ -296,9 +296,10 @@ const SIZES: [u64; 3] = [500, 2000, 8000];
 // (a) A peer alone: the engine -------------------------------------------------
 
 /// `Replica::mutate` then `local_commit`, as `ark_client::Peer::mutate`
-/// does alone, with nothing written: the intent applied optimistically, by
-/// the authority, and to the confirmed store. Split, so that what is done
-/// three times is visible: the optimistic apply alone, and the commit.
+/// does alone, with nothing written. Split: the optimistic apply, which is
+/// the intent's one run, and the commit, which since R2 of
+/// `docs/plan-perf.md` appends and confirms by that run's record rather
+/// than running it twice more.
 #[test]
 #[ignore]
 fn perf_a_mutate_alone() {
@@ -461,8 +462,10 @@ fn hello(since: Seq, mode: Mode) -> ClientMsg {
 
 /// K intents of this peer's pending while M entries of another peer's land
 /// over a confirmed store of S rows: once as one page (one replay), and one
-/// entry at a time as a live server's fan-out delivers them (a replay each).
-/// A replay copies the confirmed store and applies every pending intent.
+/// entry at a time as a live server's fan-out delivers them (a rebase
+/// each). A rebase undoes the pending intents' recorded changes, applies
+/// what landed and runs them again (`docs/plan-perf.md` R2); the clone
+/// line is what each rebase copied before that.
 #[test]
 #[ignore]
 fn perf_e_rebase() {

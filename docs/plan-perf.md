@@ -210,3 +210,114 @@ whole record; the fleet's scenario 3 stops being a witness.
 Every fix lands with its regression guard as a countable property, its
 before-and-after row from the harness, and one falsification. The
 harness's tables are re-run at the end of each round and appended here.
+
+### Round 2, R2 — an own intent run once, and a rebase by changes
+
+**What landed.** `Replica::recorded` holds, by id, what each pending
+intent's run did to the optimistic store — every transition, in order —
+and is never written: an intent opened from disk is run once by the open,
+which records it. In `advance`, an entry that is the first pending intent
+(the whole entry) with nothing but this peer's own intents landed before it
+in that advance is confirmed by its record: facts, when they came, are
+compared to it, and a difference is a divergence exactly as a run's was;
+without facts the record is the facts. A debug build runs the intent anyway
+and asserts it produces the record. `Authority::append_as(e, facts)`
+appends without running (deduped by id, never a verdict; a debug build
+runs and compares), and `local_commit` uses it when the authority's head is
+the replica's cursor and the intent is the first pending — so alone, an
+intent is run once, when it is authored. `sequence_entry` is unchanged. A
+rebase — entries landing under pending intents, a `reject`, a `sign_in` —
+undoes the records newest first (`Add` → delete the key, `Remove` → put the
+row, `Edit(old, new)` → put `old`, applied raw), applies what landed, and
+re-runs the surviving intents through an overlay, recording them anew; a
+verdict or a sign-in undoes only from the intent it touches. The view is
+told the concatenation as `Changes::Applied`; `Rebuilt` is `Replica::open`
+alone (and so a snapshot adopted from the server, which opens a replica),
+plus the fallback when a record is missing, which only a `pending` cut from
+outside produces. `spec/README.md`, `docs/arkdb.md` §3.6/§3.13,
+`docs/plan-v4.md` §1.6 and `rust/ark-client/README.md` say so.
+
+**Guards, each falsified once** (`ark/src/peer.rs` tests, and one in
+`ark-client/src/view.rs`). Runs are counted per thread, as clones are,
+outside the debug guards: alone, 41 intents are 41 runs, native and
+interpreted (sequencing with `sequence_entry`: 82; confirming by a run: 82);
+against a server, 21 own intents confirmed with and without facts run
+nothing (confirming by a run: 21); three intents opened from disk run three
+times and confirm with none (not recording in the open's replay: nothing
+recorded, and without that assertion 3 runs to confirm). Facts that differ
+from the record set `diverged`, the authority's row wins, and the pending
+one behind it runs again over it (taking the record regardless: `diverged`
+empty). The step test now also follows what a view is told: every change
+applied to a copy of the view as it last asked must be a transition from
+the row there, and the copy must reach the view; no store is copied across
+a rebase (reporting only what landed and what re-ran: "theirs landed under
+ours" is told an `Add` of "c" onto the key where "c" already is; rebasing
+by the old replay: one copy). A verdict on the second of five intents
+drops it and the item on its playlist with its reason, and a sign-in
+rewrites two of three, each with no copy and told as transitions (undoing
+only the refused intent's record: the view disagrees with a replay).
+`ark-client`: a view of the demo's `items` through four rounds of bob
+offline with one to four pending while alice's land, then reconnecting to
+a sans-io server — `Patched` every time, never `Reset`, the query, a fresh
+hydrate (`view::contract`) and its own splice after each (reporting a
+rebase as `Rebuilt`: `Reset` at the first reconnect). The `rebase/`
+vector files are unchanged and `cargo test -p ark --test vectors` is
+green; its claim, and the generator's, that the three-peer rebase "is
+reported as a rebuild" now says it is six transitions.
+
+**Before and after**, `cargo test -p ark --release --test perf --
+--ignored` on the shared VM, mean µs per operation; before is `peer.rs` at
+`3197e8a` and after at `a32be8c`, over the same tree otherwise (R1 landed,
+other agents' edits in progress), run back to back:
+
+| row | n | before | after |
+|---|---|---|---|
+| (a) alone, one playlist: whole | 500 | 55.17 | 37.62 |
+| (a) … `local_commit` | 500 | 39.93 | 20.77 |
+| (a) alone, one playlist: whole | 2,000 | 53.05 | 30.36 |
+| (a) … `local_commit` | 2,000 | 38.05 | 13.78 |
+| (a) alone, one playlist: whole | 8,000 | 57.08 | 34.16 |
+| (a) … `Replica::mutate` | 8,000 | 16.20 | 20.95 |
+| (a) … `local_commit` | 8,000 | 40.88 | 13.21 |
+| (a) alone, playlists of 10: whole | 8,000 | 57.09 | 39.31 |
+| (a) … `local_commit` | 8,000 | 39.43 | 15.77 |
+| (a) offline, all pending | 8,000 | 16.31 | 18.28 |
+| (d) receive by intent (native) | 8,010 | 25.96 | 27.01 |
+| (d) intent + facts, compared | 8,010 | 25.06 | 26.00 |
+| (d) by facts alone | 8,010 | 8.87 | 10.46 |
+| (e) K=10, M=256 one at a time, per entry | 500 | 926.1 | 207.4 |
+| (e) K=10 one at a time | 2,000 | 3,346.1 | 209.3 |
+| (e) K=10 one at a time | 8,000 | 22,260.7 | 229.1 |
+| (e) K=10 one page, per entry | 8,000 | 205.8 | 23.5 |
+| (e) K=100 one at a time | 500 | 2,200.4 | 1,832.6 |
+| (e) K=100 one at a time | 2,000 | 5,197.3 | 1,963.3 |
+| (e) K=100 one at a time | 8,000 | 23,233.5 | 2,543.7 |
+| (e) K=100 one page, per entry | 8,000 | 180.7 | 42.6 |
+| (e) ack K=1000 own, one at a time, per ack | 8,000 | 31.1 | 7.6 |
+| (e) the harness's own `MemoryStore::clone` of that store, for scale | 8,000 | 19,999 | 14,709 (no rebase makes one now) |
+
+What is left is constant in the store's size. Alone, the commit is the
+journal, the comparison of facts to the record and the two stores moving
+by them — a third of what it was; `mutate` gained the record's copy, a
+few µs and within this VM's noise. A rebase costs what is pending, not
+what is confirmed: one entry landing under K pending undoes and re-runs K
+intents, about 20–25 µs each here, flat from 500 rows to 8,000 where it
+was a 20 ms copy per entry; a page pays it once. (d) is not on R2's path —
+nothing is pending during an initial sync — and did not move.
+
+**Decided in passing.** `MemoryStore`'s `==` tells a table never written
+from one whose rows were all removed, which undoing an intent that wrote a
+table's first row produces; no read and no hash can see it, so the
+replica's own guard compares rows (`same_rows`), and so do the tests. It
+is `store.rs`'s to change if it should.
+
+**Not verified.** `ark-server/tests/sync.rs`'s
+`two_peers_sync_and_an_offline_edit_rebases_on_top` still asserts the old
+`Rebuilt` and `Reset` and fails; it is `rust/ark-server`'s file, and its
+new assertions are `Changes::Applied` and `Update::Patched` (the
+`ark-client` test above is the same scenario sans-io). The kotlin and
+swift runtimes, frozen at spec v3, still report `Rebuilt`. `harken/iced`'s
+`peer.rs` comment that a rebase is `Rebuilt` is not this round's file.
+Harken's own views through the domain's mutations were run by the
+workspace suite and pass, but no test there asserts `Patched` through a
+rebase.

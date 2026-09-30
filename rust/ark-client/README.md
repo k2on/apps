@@ -15,7 +15,11 @@ A peer is `replay(confirmed) then replay(pending)`: a mutation applies at
 once to the optimistic store, is kept durable as a pending intent, and is
 pushed when the socket is up; confirmed entries only move forward, and the
 only thing ever undone is this peer's own pending, replayed on top. That is
-the rebase, and `Changes::Rebuilt` is how a screen hears about it.
+the rebase, and a screen hears about it as changes like any other: the
+transitions it made — the inverse of what it undid, what landed, what it
+re-applied — so a view patches through it (`docs/plan-perf.md` R2).
+`Changes::Rebuilt` is for a store replaced whole, as opening over a
+snapshot is.
 
 ## The API
 
@@ -116,8 +120,8 @@ if peer.epoch() != introduced_on { /* a new connection: say who you are again */
   reads (`ark::ir::reads`) are kept too: a change to one of them, or another
   user signed in, runs the middleware again, and a different outcome — a
   playlist renamed under an open page, or deleted so `owned` refuses — is a
-  re-hydrate (an empty list on a refusal) and `Update::Reset`, as a rebase
-  (`Rebuilt`) is.
+  re-hydrate (an empty list on a refusal) and `Update::Reset`, as a store
+  replaced whole (`Rebuilt`) is. A rebase is not: it is patches.
 - **The link**: `connect(url)` dials on the next `pump`; a drop dials again
   after half a second, doubling to thirty (`Timing`). A denial (`Denied`, a
   token the server does not accept) stops the link: `set_token` and
@@ -189,12 +193,13 @@ here.
 
 `cargo test -p ark-client` tests the link's backoff and its reset on open,
 a refused native connection reported closed, the URL authority, base64,
-the demo's `items` patch by patch and under seeded churn, and a view reset by
+the demo's `items` patch by patch, under seeded churn and through four
+rebases against a sans-io server (patches every time, never a reset), and a view reset by
 its middleware (a playlist renamed and deleted under it) and by another user
 signing in. The peer against a real server is tested in
 ark-server (`tests/sync.rs`, `tests/live.rs`, `tests/auth.rs`): two peers
-syncing over sockets, an offline edit rebased on reconnect (a `Rebuilt` and
-a `Reset` view), a view following the log patch by patch, pending intents
+syncing over sockets, an offline edit rebased on reconnect (the view
+patched through it), a view following the log patch by patch, pending intents
 and the confirmed store across a reopen of the directory, a mode mismatch
 refused, a peer alone, live frames relayed within an account, the sign-in
 token on the socket and a denial. Signing in late: fifty-one entries
