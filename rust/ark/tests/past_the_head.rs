@@ -257,12 +257,10 @@ fn a_cursor_past_the_head_is_re_based_onto_the_head() {
         .map(|(i, r)| (*i, ark::protocol::refusal_text(r)))
         .collect();
     // Refused by the replay the snapshot opens (the playlist is not in
-    // it) and again by the authority's verdict: one intent, one reason.
-    assert!(!refused.is_empty());
-    assert!(
-        refused.iter().all(|(i, why)| *i == key(8, 3) && why == "playlist_id: no such playlist"),
-        "{refused:?}"
-    );
+    // it), and then by the authority's verdict, which arrives for an
+    // intent no longer pending: one intent, one reason (Round 4). Reported
+    // for every verdict, as `Replica::reject` did before: two.
+    assert_eq!(refused, [(key(8, 3), "playlist_id: no such playlist".to_string())]);
 
     let head = sv.authority.log.head_seq();
     assert_eq!((peer.replica.cursor, head), (13, 13));

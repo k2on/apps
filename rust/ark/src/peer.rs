@@ -411,11 +411,19 @@ impl Replica {
     /// verdict is kept for the app to show, and the view undoes it and
     /// every intent after it and runs those again (R2) — the ones before it
     /// never saw it.
+    ///
+    /// Only for an intent still pending (`docs/plan-perf.md` Round 4). One
+    /// that is not was answered already — dropped by a rebase whose replay
+    /// refused it, which kept that reason, or confirmed — and the server's
+    /// `Reject` that follows a replay's refusal, as it does whenever the
+    /// peer pushed the intent before the rebase that dropped it, is the
+    /// same verdict arriving a second time. Reporting it again told the app
+    /// one intent was refused twice, with two reasons.
     pub fn reject(&mut self, id: &Id, why: Refusal) {
-        self.rejections.push((*id, why));
         let Some(at) = self.pending.iter().position(|e| e.id == *id) else {
             return;
         };
+        self.rejections.push((*id, why));
         let undo: Vec<Id> = self.pending[at..].iter().map(|e| e.id).collect();
         self.pending.remove(at);
         self.rebase(&undo, vec![], at);
@@ -1410,9 +1418,12 @@ mod tests {
     /// they touch, the view undoes and runs again, and a view is told the
     /// transitions — no copy, no `Rebuilt`. An intent the rebase now
     /// refuses (an item on a playlist whose creation was refused) is
-    /// dropped with its reason, as it always was. Falsified by `reject`
-    /// undoing only the refused intent's own record: the item on the
-    /// refused playlist stays in the view and the replay disagrees.
+    /// dropped with its reason, as it always was — and the server's
+    /// verdict on it, arriving after, is not a second one (Round 4).
+    /// Falsified by `reject` undoing only the refused intent's own record:
+    /// the item on the refused playlist stays in the view and the replay
+    /// disagrees; and by `reject` reporting before it asks whether the
+    /// intent is pending: three rejections, the item's twice.
     #[test]
     fn a_verdict_and_a_sign_in_rebase_by_changes() {
         let d = demo();
@@ -1439,6 +1450,12 @@ mod tests {
         assert!(same_rows(&r.view, &replayed(&r)));
         follow(&mut shadow, &mut r, "a verdict");
         let _ = e1;
+
+        // The server refuses the item too, as it will have: the playlist is
+        // not in its log either. That verdict is the one the replay
+        // already gave, and is not reported again.
+        r.reject(&doomed.id, Refusal::Refused("playlist_id: no such playlist".into()));
+        assert_eq!(r.rejections.len(), 2, "one intent, one reason: {:?}", r.rejections);
 
         // Signed in: the intents authored as nobody become theirs.
         let nobody = Ctx::nobody();
