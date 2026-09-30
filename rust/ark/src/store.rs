@@ -573,12 +573,21 @@ impl MemoryStore {
     /// Put `row` under `k` in `t` (or take the key out, for `None`), and
     /// keep every index of the table true to the rows: the one place the
     /// rows change.
+    ///
+    /// A table whose last row goes is taken out of `tables` altogether, as
+    /// an emptied index posting is out of its index: the representation is
+    /// the rows and nothing else, so a store that wrote a table's first row
+    /// and then undid it — what a rebase's inverse does — is equal to one
+    /// that never wrote it (`docs/plan-perf.md` R2).
     fn set(&mut self, t: &str, k: Key, row: Option<Row>) {
         let rows = self.tables.entry(t.into()).or_default();
         let old = match &row {
             Some(r) => rows.insert(k.clone(), r.clone()),
             None => rows.remove(&k),
         };
+        if rows.is_empty() {
+            self.tables.remove(t);
+        }
         if let Some(ixs) = self.indexes.get_mut(t) {
             for ix in ixs {
                 if let Some(o) = &old {
@@ -815,8 +824,10 @@ impl Store for MemoryStore {
 
 /// An optimistic overlay over a base store: `(table, key) -> Option<row>`,
 /// consulted first on every read, with the base untouched until the caller
-/// commits the changes it produced. Dropping it reports nothing, which is
-/// why a view is told `Rebuilt` after a rebase.
+/// commits the changes it produced. Dropping it reports nothing; what a
+/// rebase tells a view is the transitions it made — the inverse of what it
+/// undid, what landed, what it re-applied — from the changes each overlay
+/// recorded (`docs/plan-perf.md` R2, `docs/arkdb.md` §3.13).
 pub struct Overlay<'a> {
     base: &'a dyn Store,
     writes: BTreeMap<TableName, BTreeMap<Key, Option<Row>>>,
@@ -1388,6 +1399,29 @@ mod tests {
         assert_eq!(st.delete("p", &[Value::int(77)]), Ok(None));
         assert!(matches!(st.delete("p", &[Value::int(2)]), Ok(Some(Change::Remove(_, _)))));
         assert_eq!(st.put("nope", row(vec![])), Err(Refusal::NoSuchTable("nope".into())));
+    }
+
+    /// A table whose rows were all removed is the table never written:
+    /// two stores with the same rows are equal, whatever was written and
+    /// undone on the way (R2's rebase undoes by inverse changes). Through
+    /// `delete`, through a raw `Remove`, and with the index on the way
+    /// emptied too. Falsified by leaving the emptied table in `tables`:
+    /// the first comparison fails.
+    #[test]
+    fn a_table_emptied_is_a_table_never_written() {
+        let empty = MemoryStore::empty(schema());
+        let mut st = MemoryStore::empty(schema());
+        st.put("p", row(vec![("id", Value::int(1)), ("name", Value::text("x"))])).unwrap();
+        assert_ne!(st, empty);
+        st.delete("p", &[Value::int(1)]).unwrap();
+        assert_eq!(st, empty);
+        assert!(st.is_empty());
+        st.apply_change(&Change::Add("it".into(), it(1, 1, 1)));
+        st.apply_change(&Change::Remove("it".into(), it(1, 1, 1)));
+        assert_eq!(st, empty);
+        let any = |_: &Row| true;
+        assert_eq!(st.scan_ordered("it", &[], &[("pos", Dir::Asc)], &any, 5), Some(vec![]));
+        assert!(st.scan_where_eq("p", &[("name", &Value::text("x"))], &any).is_empty());
     }
 
     #[test]
