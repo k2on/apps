@@ -871,9 +871,8 @@ fn a_peer_turned_away_keeps_its_work_until_signed_in_again() {
 /// scanner; the peer comes back and has them. The same files written again
 /// under the same names are not new songs, nor is anything after a
 /// restart's rescan — the identity of a song is its path, in `add_song`.
-/// (Copies under *new* names are new songs, by that same rule: the plan's
-/// "copied again under new names are not new songs" says what the path
-/// identity makes false, and this asserts the true half of each.)
+/// Copies under *new* names are new songs, by that same rule; the plan
+/// said otherwise until R6 corrected it, and this asserts both halves.
 ///
 /// Falsified by giving the rewritten files new names: "rewriting a file is
 /// not a new song" fails.

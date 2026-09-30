@@ -117,6 +117,9 @@ removed dedupe, a skipped persist) with the doc comment saying how:
    is it whole? `persist.rs` rewrites it whole per batch — check it writes
    to a temporary name and renames, and if it does not, that is a finding
    (a torn log on restart is the worst outcome this harness can catch).
+   And restarted with its log deleted (3c, `docs/plan-perf.md` R6): every
+   peer's cursor is past the new head, and the server answers with its
+   snapshot at the head — the fleet re-bases onto the log there is.
 4. **Peer killed with `-9`** right after `mutate` returned and before its
    next pump, restarted — the intent is in `pending` on disk (the durability
    rule), is pushed, converges. And killed right after the server's ack but
@@ -142,8 +145,10 @@ removed dedupe, a skipped persist) with the doc comment saying how:
    new login (`with_owns`) and converges.
 9. **The scanner and an absent peer**: files dropped into `media/music`
    while one peer is black-holed; the server's scanner authors them; the
-   peer returns and sees the songs; the files copied again under new names
-   are not new songs (idempotency by `file`).
+   peer returns and sees the songs. A song's identity is its path (`add_song`
+   refuses a `file` the library has), so the scenario tests both halves:
+   the same files written again under the same names, and a restart's
+   rescan, are not new songs; copies under new names are new songs.
 10. **Keepalive**: a peer black-holed with no FIN — the server closes it
     after `Keepalive::missed` pings (shorten the keepalive for the test via
     an environment variable if there is none — say so), the peer notices,
@@ -255,6 +260,12 @@ cores, a debug build, nothing else running unless said), printed by
 | converge after the keepalive closed a black hole | 0.29 s |
 | seed 1,500 entries through one peer (`FLEET_LONG=1`, before R3) | 51.5 s |
 | the fuzz, 2,000 steps, 3–5 peers, whole run (with the §4 fix below) | 16–38 s |
+| …after R6, signing in under a black hole allowed (`FLEET_SEED=99`, 5 peers) | 11 s |
+| the whole default fleet after R6 (15 scenarios, alone) | 24.6 s |
+| a server that lost its log: restart to converged, three peers re-based (3c) | 0.37–0.48 s |
+| a session revoked with its socket open, to the peer `denied` (8) | 13–27 ms |
+| a sign-in into a black hole, refused (8, `--auth-patience-ms 2000`) | 2.0 s |
+| …a first sign-in at start, given up and the process ended | 2.05–2.14 s |
 
 The log on disk is about 348 bytes an entry for playlists (46 entries,
 16 KB; 345 as snapshot and journal after R3) and 521 for the mixed 1,500
@@ -280,12 +291,14 @@ one peer at the head with a different hash and nine pending), and moving
 `a486891`, `19c8bf6`) is the fix as landed: the log is a snapshot
 `log.ark-log` and an append-only `log.ark-journal`, synced before anything
 it holds is sent. 3b is a plain test now and passes three runs of three;
-that seed and seed 99 converge at 2,000 steps. One proposal the witness
-argued for is still open: a `Hello` whose `since` is past the log's head
-is a peer from a log this server no longer has, and could be answered (a
-snapshot, or a denial that says so) rather than served nothing — 3a's
-falsification, an emptied data directory, is that case, and today it
-leaves every pending intent unacked for ever.
+that seed and seed 99 converge at 2,000 steps. The proposal the witness
+argued for landed as R6 (`docs/plan-perf.md`): a `Hello` whose `since` is
+past the log's head is a peer from a log this server no longer has, and
+is answered as one below the horizon is — the authority's store as the
+snapshot at the head — so the peer re-opens from it and its pending
+intents, pushed after the `Hello`, are sequenced and confirmed. 3a's old
+falsification, a deleted log, is scenario 3c now: "a server that lost its
+log re-bases everyone onto what it has".
 
 **Looked for, and not found.** The log file was not torn by a kill:
 `persist.rs` already wrote a temporary name and renamed it into place (§4
@@ -309,10 +322,18 @@ the whole list again: 1,500 playlists for one owner did not finish seeding
 in twelve minutes, so the witness seeds songs.
 
 **Corrections to this plan.** Files "copied again under new names" are
-new songs — a song is its path, in `add_song`; scenario 9 asserts that
-rewriting the same names is not, and that new names are. Scenario 8 needed
-the socket cut after the revocation: the token is asked at `Hello` and not
-again, so a revoked session's open connection goes on until it drops.
+new songs — a song is its path, in `add_song`; §2's scenario 9 says so
+now, and the scenario asserts both halves. Scenario 8 needed the socket
+cut after the revocation: the token is asked at `Hello` and not again, so
+a revoked session's open connection went on until it dropped. Since R6 it
+does not: `/auth/logout` tells the hub, which sends that session's
+connections `Denied` ("signed out: this login was revoked") at once, and
+scenario 8 revokes a linked peer and cuts nothing. It also signs in
+behind a black hole, twice — late, and at a first start — and both give
+up within `harken-peer --auth-patience-ms` (ark-auth's own bounds are ten
+seconds to connect and twenty to read), so the fuzz signs peers in under
+a black hole or a stopped server again, which it had excluded because
+`login` could wait for ever.
 
 **The harness's own bugs, each found by a scenario.** `harken-peer`
 pumped only when stdin was quiet, so a driver polling `status` every ten

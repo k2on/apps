@@ -120,7 +120,15 @@ ids and rows in the vectors' dialect (`ark::json`):
 `mutate`, `status`, `hash`, `wait`, `settle`, `query`, `rejections`,
 `standing`, `disconnect`, `reconnect`, `sign_in`, `sign_out`, `persist`,
 `quit`; the source's first page says what each answers. Without `--user` it
-opens signed out, authoring as nobody until `sign_in`.
+opens signed out, authoring as nobody until `sign_in`. A sign-in waits on
+the server ten seconds to connect and twenty to read (ark-auth's bounds),
+or `--auth-patience-ms` for both; one that fails at start ends the
+process. Its session revoked (`/auth/logout` with its token), a peer is
+told at once on the socket it has — `denied`, "signed out: this login was
+revoked" — keeps its store and pending, and stops dialling until
+`sign_in`. A server restarted with less log than a peer has confirmed
+hands it its state as a snapshot, and the peer's pending intents land on
+that.
 
 `server/tests/fleet.rs` is the process fleet (`docs/plan-fleet.md`): the
 real server and real peers as child processes on loopback, each peer behind

@@ -652,6 +652,134 @@ the VM with other agents' builds. `Std` still takes its arguments owned
 copy the list; that is `stdlib.rs`'s signature to change and was not in
 this round's files. The kotlin and swift runtimes were not touched.
 
+### Round 3, R6 — what the fleet found
+
+**What landed.** *A range after the held columns.* `Store::scan_where_eq`
+and `scan_ordered` take `spans: &[Span]` beside the equalities — a column
+held between two bounds, each `Included`, `Excluded` or `Unbounded` —
+and `view::read` and `candidates` hand them down from every top-level
+`Pred::Cmp` with `Ge`/`Gt`/`Le`/`Lt` (and those under a top-level `All`),
+one span per column with the tightest bound of each side. `MemoryStore`
+uses a span when it bounds the column right after an index's held
+prefix: `lookup` scores a prefix with a bounded next column as one
+column longer, and `Secondary::under` walks only `prefix ++ [lo] ..
+prefix ++ [hi]` of the map (an inclusive upper bound and an exclusive
+lower one end on `prefix ++ [v, struct]`, which is above every bucket
+continuing `v`); crossed bounds are the empty range rather than
+`BTreeMap::range`'s panic. `scan_ordered` narrows its walk the same way,
+either direction. A span on any other column, or a table no index
+serves, is the read it was; `keep` still decides everything. `Overlay`
+passes the spans to its base and judges its own writes by `keep`.
+`create_playlist` reads the person's names from `name` up to `name )`
+— the name and every `name (…)`, a range of the unique `(user_id,
+name)` — rather than all of theirs; `free_number` is correct over any
+list holding the numbered names, so the answer is the old one. That is
+one range rather than the name's `get` beside `[name (, name ))`: it
+costs a handful of names that start with the name and sort before
+`name )` ("name !", "name  x"), which `playlist_name` ignores. `add_song`
+binds its work's name, its key, the recording and the credit once each;
+emitted, a pure `let` is inlined (§6), so its closure is the same bytes
+and only the helpers' first-call order had to be kept.
+
+*A `Hello` past the head.* `Server::fanout` answers a connection whose
+cursor is past the head with `SnapshotOf` of the authority's store at
+the head — the below-horizon frame, no new frame or field — and the
+client re-opens from it with its pending on top, which it pushed after
+the `Hello`. A snapshot also keeps the verdicts the app had not yet
+taken.
+
+*Timeouts.* `ark_auth::client::{login, exchange, whoami, logout}` wait
+`CONNECT_TIMEOUT` (10 s: three SYN retransmissions) for a connection and
+`READ_TIMEOUT` (20 s: every one is answered from the server's memory and
+session file, never a provider) on each read and write; `login_with` and
+`exchange_with` take a `Patience`. The person's time at a browser is not
+bounded. The native WebSocket transport holds its handshake to
+`Timing::connect_timeout_ms` (5 s by default), then clears it.
+`harken-peer --auth-patience-ms` bounds its sign-ins.
+
+*Revocation.* `Auth::revoke` (what `/auth/logout` calls) tells whatever
+registered with `Auth::on_revoke` `(user, session)`; `Builder::build`
+registers the hub, weakly. The hub sends every replica connection of
+that session `Denied` with `ark_server::REVOKED` ("signed out: this
+login was revoked") through its held queue and takes it off the machine.
+The token check at `Hello` is unchanged.
+
+**Hashes.** `create_playlist`'s closure moved `904226b2…9c08` →
+`2eb47c7f…f005`; `add_song`'s did not move (`1633aca2…`); module
+`1a2119a2…` → `dfc028e2…`. `compat::check` of the previous `harken.ark`
+against the new module found nothing, and `compat::check_retained` of
+all forty-five of its closures against the new schema found nothing.
+`agreement.rs` pins the new hash, naming the commit.
+
+**The vectors.** `protocol/` pins frames' bytes and `rebase/` the state
+hashes a seeded sim settles at; neither has a connection past the head,
+the answer reuses `SnapshotOf`, and no vector file changed. `cargo test
+-p ark --test vectors` is green.
+
+**Guards, each falsified once.** `store.rs`: a span after the held
+columns reads only its range — both bounds, each alone, inclusive and
+exclusive, with and without a prefix, crossed and meeting bounds empty,
+a span on another column the prefix read, no index the scan (ignoring
+the span in `lookup`: 13 rows examined for 6; an inclusive upper bound
+without the struct suffix: 1 for 2; no guard on crossed bounds: a
+panic); an ordered read walks only its span, three rows examined each way
+(walking without it: four); an overlay's writes inside, into, out of and
+outside the range merge exactly (not leaving written keys out of the
+base's answer: the row moved out comes back). `view.rs`: a filter's
+bounds become one span per column, the tightest, exclusive at a tie (no
+tie rule: inclusive). `harken/domain`: `keys::tests` holds
+`playlist_name` over the siblings to the old body over a thousand names,
+a hundred of them numbered with gaps (a range ending at `name (`:
+"Favorites (1)"); `perf.rs` counts alice's 102nd "Favorites" among a
+thousand of hers and a thousand of bob's "Favorites (k)" at 102 rows —
+the last playlist, the name, its hundred siblings — where it was 1,001,
+and her second playlist at 1 where it was 2, named "Favorites (101)"
+(no span from `view::read`: 1,001; a range ending at `name (`: a unique
+violation). `ark/tests/past_the_head.rs`: a replica at 30 meets a server
+at 10, is sent `SnapshotOf` at 10, its three applicable intents are
+acked 11–13 and the fourth refused with its reason, and it ends at 13
+hash for hash with nothing pending (serving it nothing: no snapshot); a
+verdict not yet taken survives a snapshot (not carrying them: none).
+`ark-auth`: a login and an exchange into a listener that never answers
+fail within a quarter-second patience (no read timeout: still waiting
+after 5 s); a revocation is told to whoever asked, once (no listener
+loop: nothing). `ark-client`: a handshake nobody answers closes the link
+within 2 s at 300 ms of patience (no read timeout: nothing in 5).
+`ark-server`: a revoked login's connection is denied with `REVOKED`, the
+other login of the same person stays linked, and what the revoked one
+says after is not taken (`revoked` doing nothing: linked at 10 s). The
+fleet: 3c and 8, in `docs/plan-fleet.md`.
+
+**Before and after**, release, the shared VM (`cargo test -p
+harken-domain --release --test perf -- --ignored`), mean µs:
+
+| row | n | before (R1 record) | after |
+|---|---|---|---|
+| create_playlist, distinct names, last 100 | 800 | 1,245 | 59 |
+| create_playlist, all "Favorites", last 100 | 800 | 186,912 | 157,397 |
+| rows examined, alice's 102nd "Favorites" of 1,000 | — | 1,001 | 102 |
+
+What is left: a person whose every playlist is the same name numbered
+still pays `free_number`'s square of them — 800 "Favorites (n)" is 157 ms
+a call — because every one of those is a sibling; the range removed the
+rest of their playlists from it, not the siblings. A fold over the
+siblings in name order could be linear, but "(10)" sorts before "(2)",
+so it is not a fold over the index's order; it is left as decided in R1.
+
+**Not verified.** The kotlin and swift runtimes, frozen at spec v3, still
+serve a cursor past the head nothing; the Haskell reference is not in
+this tree to check. A peer whose cursor is *below* a new server's head
+over a log that is not the one it confirmed (a server that lost its log
+and has since sequenced more than the peer had) is served entries on top
+of a state that is not theirs; nothing in the protocol names a log's
+identity, so only `Verify` would notice — a log id in `Hello` is the
+design if it matters. A session revoked while its peer is behind a black
+hole is told nothing until the peer dials again, when `Hello` refuses
+the token. The connect timeouts were not exercised against a route that
+drops SYNs (loopback refuses or answers); the read timeouts were. A
+browser's `web.rs` transport and ark-auth's `web.rs` have no timeouts of
+their own; the browser's are the platform's.
+
 ## Round 3 — decided with round 2's numbers
 
 Round 2 removed every super-linear cost the harness found. What remains

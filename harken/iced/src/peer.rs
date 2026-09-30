@@ -323,9 +323,12 @@ impl Peer {
     /// any of them moved.
     ///
     /// Nothing is read again here: each open view is handed the settle's
-    /// changes and answers with what it moved. `Rebuilt` — a rebase rolled
-    /// the optimistic store back — resets every view, which is the one thing
-    /// no list of changes describes (§1.6). The views are asked even when
+    /// changes and answers with what it moved. A rebase is changes too: the
+    /// inverse of what it undid, what landed, what it re-applied
+    /// (`docs/plan-perf.md` R2). `Rebuilt` is a store replaced whole — a
+    /// snapshot adopted from the server, below its horizon or past its head
+    /// (R6) — and resets every view, which is the one thing no list of
+    /// changes describes (§1.6). The views are asked even when
     /// nothing changed, because a view also answers to who is signed in
     /// (§1.7); that costs a comparison each.
     pub fn refresh(&mut self) -> bool {
