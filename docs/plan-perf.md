@@ -787,8 +787,9 @@ so a log's base carries its name, `compact_to` keeps it and a page below
 the horizon carries it; `Log::id` and `Log::name_if_unnamed`. The engine
 has no randomness, so the hub draws the name (`Hub::new`, from
 `ark_client::Autos::system`) for a log it creates or loads unnamed. On
-the wire, `log` — an id or null — in `hello` (`Subscription::log_id`),
-`batch` and `snapshot`; a frame without the field decodes as null. The
+the wire, `log`, an id, in `hello` (`Subscription::log_id`), `batch` and
+`snapshot` — absent where no log is named, which is the one encoding of
+that (`d6542c5`; a null is refused, so a frame has one form). The
 server compares a `Hello`'s name with its log's only when both have one:
 different, the connection is sent `SnapshotOf` at the head, named, once
 and before anything else — wherever its cursor is, which is what makes it
@@ -805,16 +806,22 @@ pending. *`stdlib` borrows* (`ded8965`): `std` is generic over
 arguments with `eval_ref`, on the stack for the three arities there are,
 and the form validator's `trim` borrows.
 
-**The wire.** Moved: `protocol/client-hello.json` (named),
-`client-hello-facts.json` (null), `server-batch.json`,
-`server-snapshot.json`, and `falsify/client-hello-bytes-of-v3.json`, whose
-hello gained the field; new: `falsify/server-snapshot-bytes-of-another-
-log.json`, since the existing falsify case does not reach the snapshot.
-No other directory moved, and `ir::SPEC_VERSION` did not: every frame
-from before decodes and is served as it was — an old client's hello names
-no log and is paged as before, and an old client ignores the field on a
-batch or a snapshot, as an old server ignores it on a hello.
-`spec/README.md`'s §10 and §12 rows say so.
+**The wire.** A frame that names no log is byte for byte what it was:
+`protocol/client-hello.json`, `client-hello-facts.json`,
+`server-batch.json`, `server-snapshot.json` and
+`falsify/client-hello-bytes-of-v3.json` are identical to their content
+at `5eb8864` (compared with `cmp` against `git show`; `a155a1e` had moved
+them by writing a null, and `d6542c5` put them back). The named form is
+pinned by three new files — `client-hello-named.json`,
+`server-batch-named.json`, `server-snapshot-named.json` — and a new
+falsify case, `falsify/server-snapshot-bytes-of-another-log.json`, built
+from the named snapshot, since the existing one does not reach a
+snapshot. `ir::SPEC_VERSION` did not move: a v4 runtime that never names
+a log is conformant as it was, and one that names it emits the field.
+Every frame from before decodes and is served as it was — an old
+client's hello names no log and is paged as before, and an old client
+ignores the field on a batch or a snapshot, as an old server ignores it
+on a hello. `spec/README.md`'s §10 and §12 rows say so.
 
 **Guards, each falsified once.** `ark/tests/past_the_head.rs`: a replica
 confirmed to 30 of log A meets a server at 40 of log B and is sent B's
@@ -879,12 +886,12 @@ number. *The answer*: the operation's result is the size of the data.
 | `MemoryStore::scan`, per row | 2,000 / 8,000 | 0.72 / 1.29 | grows — see below |
 | (b) one playlist, no log file: round trip | 500 / 2,000 | 92.5 / 119.1 | logarithmic |
 | (b) … `Peer::mutate` alone | 500 / 2,000 | 23.0 / 28.4 | logarithmic |
-| (b) playlists of 10, no log file: round trip | 500 / 2,000 | 81.0 / 134.0 (l100 76 / 136) | grows — see below |
+| (b) playlists of 10, no log file: round trip | 500 / 2,000 | 81.0 / 134.0 at `ded8965`; 120.0 / 125.2 and 133.8 / 134.3 in two runs since | flat — see below |
 | (b) log on disk: round trip, one playlist / of 10 | 500 / 2,000 | 4,093 / 3,750; 4,016 / 3,476 | constant: the journal's `fsync` |
 | (b) a watcher receiving, nothing pending | 500 / 2,000 | 32.1 / 34.8 | flat |
-| (c) offline, Memory: mutate | 2,000 / 8,000 | 20.3 / 32.5 (l100 23.9 / 39.7) | grows — see below |
+| (c) offline, Memory: mutate | 2,000 / 8,000 | 20.3 / 32.5 at `ded8965`; 18.6 / 25.6 at `bdff718` | flat in the work since `bdff718` — see below |
 | (c) offline, Dir: mutate | 2,000 / 8,000 | 6,662 / 5,807 | constant: one file written and synced |
-| (c) alone, Memory: mutate / pump | 2,000 / 8,000 | 25.5 / 39.5; 6.4 / 9.2 | mutate grows — see below; pump logarithmic |
+| (c) alone, Memory: mutate / pump | 2,000 / 8,000 | 25.5 / 39.5; 6.4 / 9.2 (27.9 / 35.6; 6.9 / 8.5 at `bdff718`) | the same instructions, a bigger heap — see below; pump logarithmic |
 | (c) alone, Dir: mutate / pump | 2,000 / 8,000 | 133 / 116; 9,767 / 6,476 | constant: the `fsync`s |
 | harken `add_song`: whole | 2,000 / 8,000 | 363 / 378 | flat (its dozen upserts, and the interpreter) |
 | … `Replica::mutate` / `local_commit` | 2,000 / 8,000 | 283 / 290; 80 / 88 | flat |
@@ -902,24 +909,41 @@ number. *The answer*: the operation's result is the size of the data.
 | scanner: one new file / a full rescan, per file | 2,000 / 8,000 | 2.0 / 3.0; 1.54 / 1.72 | flat (a rescan is the answer: one probe a file) |
 | an apply, native against interpreted | — | `create_playlist` 47–73 / 27–33; `add_song` 241–1,000 / 372–980 | constant |
 
-**What still grows, plainly.** Five rows do, and none is fitted into a
-category:
+**What still grew, plainly, and what it was.** Five rows grew at
+`ded8965`; none is fitted into a category:
 
 - *`(c)` offline, Memory: `mutate`*, 20.3 µs at 2,000 pending to 32.5 at
-  8,000: real, linear in what is pending, about 2 ns an intent. The cause
-  is `ark_client::Peer::persist_pending`, which decides that `mutate`
-  only added at the end by comparing the whole list it last wrote with
-  the pending list — `held.iter().zip(pending).all(..)` — on every
-  `mutate`. The replica's own `mutate` is flat (`(a)` offline, 15.4 at
-  8,000). Not changed here; the fix is to know that the list only grew
-  (a counter `mutate` moves) rather than to find it out.
-- *`(c)` alone, Memory: `mutate`*, 25.5 to 39.5 at 2,000 and 8,000, where
-  nothing is pending across a pump and the same mutate in `ark` is flat.
-  Not attributed.
+  8,000: real, linear in what is pending, about 2 ns an intent.
+  `ark_client::Peer::persist_pending` decided that `mutate` only added at
+  the end by comparing the whole list it last wrote with the pending list,
+  id by id, on every `mutate` and every pump. **Fixed** (`bdff718`): the
+  pending list changes only by intents leaving, the rest in order, and new
+  ones joining at the end, so the last intent written is still in its
+  place exactly when nothing before it left — one comparison, whatever is
+  pending (a debug build still compares the lists whole). Held by
+  `deciding_what_a_mutate_writes_compares_one_id`: one id compared by a
+  mutate at 300 pending and at 2,400, and one by a pump that moved nothing
+  (the old decision: 300 and 301). The row re-measured 18.6 and 25.6 µs;
+  counted with callgrind over the same loop (a probe of the harness's
+  shape, the loop's instructions less the setup's), a mutate is 162,900
+  instructions at 2,000 pending and 166,500 at 8,000 — flat — and timed
+  alone in that probe 23.6–27.6 and 26.3–28.5 µs over three runs each. The
+  harness row is the VM's.
+- *`(c)` alone, Memory: `mutate`*, 25.5 to 39.5 µs (27.9 to 35.6 after
+  `bdff718`, and 33.7–35.5 to 44.5–48.0 in the probe): not the
+  comparison, which alone has nothing pending across a pump to compare.
+  Callgrind over a mutate and its pump: 225,900 instructions at 2,000 and
+  220,100 at 8,000. The work is flat; what grows is the time the same
+  instructions take over a heap four times the size — the authority's
+  log keeping every entry and its facts, and the stores it and the replica
+  hold — which is the memory hierarchy, as the scan's below. Reported,
+  not changed.
 - *`(b)` playlists of ten, no log file: the round trip*, 81 to 134 at 500
-  and 2,000 — two sizes only, through the hub's thread and channel, where
-  the one-playlist row and every engine row it is made of are flat or
-  logarithmic. Not attributed.
+  and 2,000 in the closing run; 120.0 to 125.2 and 133.8 to 134.3 in the
+  two runs since, beside a one-playlist row of 129–145 at both sizes. Flat;
+  the closing run's 81 at 500 was the VM, and the persist fix is not what
+  moved it — this peer is linked and pumped, so it had one or two pending
+  to compare.
 - *`MemoryStore::scan`, per row*, 0.72 to 1.29 µs at 2,000 and 8,000. A
   walk of the table and a copy a row, the same allocations a row whatever
   the table's size; a probe of the same shape measured 132, 375, 418 and
@@ -940,11 +964,13 @@ grouped or nested view (`composers` 3.1 ms per Bach song at 2,000 songs,
 call on average, 157 ms at the last hundred, at 800); the row
 representation (a fifth of a hydrate's allocations and an eighth of an
 apply's, R5 — deferred); a rebase's K intents re-run per landing entry
-(≈ 20 µs each); the `fsync`s of a directory (3.5–10 ms here, the disk's).
-A `Verify` and a replay are their answers. Everything else is flat or
-logarithmic. By this document's rule the pass ends when only constant
-factors remain — and the first of the five above is not one; it is
-small, it is a peer's own pending, and it is one comparison to remove.
+(≈ 20 µs each); the `fsync`s of a directory (3.5–10 ms here, the disk's);
+the memory hierarchy under a larger heap, which moves the time of
+instructions that do not grow (the scan, a peer alone's `mutate`, a cold
+page). A `Verify` and a replay are their answers. Everything else is flat
+or logarithmic, and the one row that grew with the data in its work is
+fixed: **the pass is closed.** `authoring/cx.rs`'s `std_op` passes its
+arguments to `std` as they are too (`0e384ef`).
 
 **Not verified.** The kotlin and swift runtimes, frozen at spec v3,
 neither send nor read a log's name, and are served as before. An old
