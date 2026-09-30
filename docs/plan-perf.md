@@ -544,3 +544,77 @@ hashes was not replayed here: that the authority keeps and runs those
 closures is §8.3's existing behaviour, and `check_retained` is the only
 check made. The timings share the VM with other agents' builds and tests;
 the counted rows and clones are what the guards hold.
+
+## Round 3 — decided with round 2's numbers
+
+Round 2 removed every super-linear cost the harness found. What remains
+is constant factors in the engine and a handful of edge cases the fleet
+surfaced. Two pieces, disjoint in the files they touch.
+
+### R5. The interpreter's clones (engine)
+
+`eval.rs` clones a whole bound value to read one field (`Arg`/`Var`/
+`Provided` then `Field`: 741 ns and 16 allocations for `media.title`) and
+clones every local on every `bind` (a `map`/`filter` inside an interpreted
+body over a large local is quadratic in it; an interpreted `create_playlist`
+with a taken name at 800 was 345 ms). Hydrating `library` is 18 µs and 286
+allocations per entry, and the plan expressions are always interpreted.
+
+**Design.** Evaluate `Field(e, name)` where `e` is a binder or an argument by
+borrowing the bound value and cloning the one field; more generally, give
+the evaluator a borrowing path (`eval_ref(&Expr) -> Cow<Value>`) that
+`Field`, `Var`, `Arg`, `Provided` and the list functions' element binders
+use, so a clone happens only where a value is stored. Keep locals in a
+`Vec<(Sym, Value)>` (or a `Vec<Value>` indexed by symbol, since symbols are
+dense per function) that is pushed on `bind` and truncated when the scope
+ends, rather than cloned per bind. Also fold in the small ones that live in
+the same files: `Peer::mutate` cloning the mutator's IR `Function` per call,
+a write cloning the table schema, `well_typed` building two sets per `put`,
+`admits` cloning each field it compares.
+
+**Guard.** An allocation count per hydrated `library` entry (the harness
+already counts allocations) with the number stated; the interpreted
+`map`/`filter` over a local of N elements linear in N (a counting test at
+two sizes). Every vector and every agreement test between Native and the
+interpreter unchanged.
+
+**Then measure the row.** With R5 in, re-run the allocation profile of a
+`library` hydrate and of one `add_to_playlist` apply and report the share
+that is `Row`'s keys and map nodes. That number decides the row
+representation (a positional `Rc<[Value]>` with names on the `Table`), which
+is not done in this round.
+
+### R6. What the fleet found (domain, protocol, transport)
+
+- **A `Hello` whose `since` is past the head.** A server restarted over an
+  emptied data directory serves such a peer nothing, and its pending is
+  never acknowledged. Decision: it is the below-horizon case from the other
+  side — the server answers with its snapshot at the head, and the peer
+  re-opens from it and re-pushes pending, which is what `Replica::open` from
+  a snapshot already does. The fleet's 3a falsification becomes a scenario:
+  a server that lost its log re-bases everyone onto what it has.
+- **`create_playlist` naming** (`free_number`) reads every playlist of the
+  person and is quadratic for a taken name. Decision: read only the
+  numbered siblings. The store serves a **range** on the column after an
+  index's equality prefix (`Pred::Cmp` with `Ge`/`Gt`/`Le`/`Lt` on that
+  column becomes a `BTreeMap` range over the `(user_id, name)` index), and
+  the mutation reads `name >= "Favorites (" and name < "Favorites )"` for
+  the person — the numbered variants and nothing else — then folds over
+  that short list. `scan_where_eq`/`scan_ordered` gain the range; `read`
+  passes it. Also `add_song` computes `work_title` and `work_id` about
+  fifteen times each, eagerly in Native: bind each once with a `let`.
+- **A login into a black hole waits forever**: `ark_auth::client::login`
+  and `exchange` get connect and read timeouts, and the native WebSocket
+  transport's handshake a read timeout; the fleet's fuzz may then include
+  sign-in under a black hole again.
+- **A revoked session's socket stays up** until it drops, because the token
+  is checked at `Hello` only. Decision: revocation closes the session's
+  connections at once — the auth server tells the hub which session was
+  revoked and the hub closes its connections with the reason; scenario 8
+  no longer cuts the connection itself.
+- **The plan's scenario 9 wording**: a song's identity is its path, so files
+  copied under new names *are* new songs; the scenario tests both halves
+  and the plan should say so.
+
+Each with its test (falsified once) and, where the fleet has a scenario,
+the scenario extended rather than a second test written.
