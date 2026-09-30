@@ -1,8 +1,9 @@
 //! What the interpreter allocates, counted rather than timed, because a
-//! count does not move with the machine (`docs/plan-perf.md` R5). Two
-//! guards: a `library` entry hydrated through its plan — every query's plan
-//! is interpreted, natively run or not — and a `map`/`filter` over a local
-//! list, which must cost allocations linear in the list.
+//! count does not move with the machine (`docs/plan-perf.md` R5, Round 4).
+//! Three guards: a `library` entry hydrated through its plan — every
+//! query's plan is interpreted, natively run or not — a `map`/`filter` over
+//! a local list, which must cost allocations linear in the list, and a
+//! standard function over a local list, which must cost what it answers.
 //!
 //! The allocator counts per thread, so the suite's other tests running
 //! beside these on other threads are not in the count.
@@ -339,14 +340,16 @@ fn library(sch: &Schema, n: u64) -> (MemoryStore, Value) {
 const DEMO: u64 = 285;
 
 /// `docs/plan-perf.md` R5: a `library` entry hydrated through its plan
-/// allocates 56 times (285 entries, a third of them on the playlist; 55
-/// in harken's own harness, where it was 287 before the interpreter
-/// borrowed). The media row the store hands out is 15 of them and the
-/// node the helper builds about 20 more; the rest is the related read of
-/// the entry's items and the entry itself. Reading each of the ten fields
-/// by copying the row, as it was, is 150 more, and binding the row by a
-/// copy 15 more — so the bound is 64, which either would cross. Falsified
-/// by making `Field` copy what it reads before taking the field
+/// allocates 52.2 times (285 entries, a third of them on the playlist;
+/// 55.8 when R5 landed, and 287 before the interpreter borrowed). The
+/// media row the store hands out is 15 of them and the node the helper
+/// builds about 20 more; the rest is the related read of the entry's items
+/// and the entry itself. Round 4 took 3.6 off: `first(items)` copied the
+/// entry's list of items to answer its first, and the call built a list of
+/// its arguments (54.8 with the copy put back). Reading each of the ten
+/// fields by copying the row, as it was, is 150 more, and binding the row
+/// by a copy 15 more — so the bound is 64, which either would cross.
+/// Falsified by making `Field` copy what it reads before taking the field
 /// (`eval_ref(..).into_owned()`): 203.2 an entry.
 #[test]
 fn a_library_entry_hydrates_in_a_bounded_number_of_allocations() {
@@ -364,7 +367,7 @@ fn a_library_entry_hydrates_in_a_bounded_number_of_allocations() {
     assert_eq!(rows[5].field("title"), Value::text("Track 5"));
     let per = allocs as f64 / DEMO as f64;
     eprintln!("library at {DEMO}: {allocs} allocations, {per:.1} an entry");
-    assert!(per <= 64.0, "{per:.1} allocations a library entry (55.8 when R5 landed)");
+    assert!(per <= 64.0, "{per:.1} allocations a library entry (52.2 at Round 4, 55.8 when R5 landed)");
 }
 
 // A local list, mapped and filtered ---------------------------------------------
@@ -425,6 +428,65 @@ fn a_map_and_a_filter_over_a_local_cost_what_the_list_holds() {
     eprintln!("map and filter over a local: {small} allocations at 100, {big} at 400; {per:.2} an element");
     assert!(per <= 3.0, "{per:.2} allocations an element: {small} at 100, {big} at 400");
     assert!(big <= 5 * small, "not linear: {small} at 100, {big} at 400");
+}
+
+// A standard function over a local ---------------------------------------------
+
+/// A helper over a list of text: `let xs = input; return f(xs)`, for a
+/// standard function of one list.
+fn std_over_a_local(f: ir::StdFn, ret: Ty) -> ir::Module {
+    let text = || Ty::List(Box::new(Ty::Text));
+    let g = ir::Function {
+        name: "call".into(),
+        kind: FnKind::Helper,
+        router: None,
+        uses: vec![],
+        autos: vec![],
+        input: vec![("input".into(), ir::Field::plain(text()))],
+        refine: vec![],
+        ret: Some(ret),
+        body: vec![
+            Stmt::Let(1, Expr::Arg("input".into())),
+            Stmt::Return(Some(Expr::Std(f, vec![Expr::Var(1)]))),
+        ],
+        plan: None,
+        names: BTreeMap::new(),
+    };
+    ir::Module {
+        spec: ir::SPEC_VERSION,
+        schema: Schema::empty(),
+        functions: vec![g],
+        routers: vec![],
+        live: vec![],
+    }
+}
+
+fn called(m: &ir::Module, n: usize, want: impl Fn(&[Value]) -> Value) -> usize {
+    let xs: Vec<Value> = (0..n).map(|i| Value::text(format!("element {i}"))).collect();
+    let input = Value::List(xs.clone());
+    let (allocs, out) = counted(|| eval::eval_helper(m, "call", vec![input]).unwrap());
+    assert_eq!(out, want(&xs));
+    allocs
+}
+
+/// `docs/plan-perf.md` Round 4: a standard function reads its arguments
+/// where they are bound and copies only what it answers, so `len` of a
+/// local list is the same allocations at a hundred elements as at four
+/// hundred — 17, which is the helper's call — and `first` of one is those
+/// and the element it answers, 19. Falsified by copying the arguments
+/// before the call, as `std` taking them owned did: 118 and 418 for `len`,
+/// 120 and 420 for `first` — a copy of the list each time.
+#[test]
+fn a_standard_function_copies_only_what_it_answers() {
+    let len = std_over_a_local(ir::StdFn::Len, Ty::Int);
+    let first = std_over_a_local(ir::StdFn::First, Ty::Option(Box::new(Ty::Text)));
+    let len_of = |xs: &[Value]| Value::int(xs.len() as i64);
+    let first_of = |xs: &[Value]| xs[0].clone();
+    let (l100, l400) = (called(&len, 100, len_of), called(&len, 400, len_of));
+    let (f100, f400) = (called(&first, 100, first_of), called(&first, 400, first_of));
+    eprintln!("len of a local: {l100} allocations at 100, {l400} at 400; first: {f100} and {f400}");
+    assert_eq!((l100, f100), (l400, f400), "the same at any length");
+    assert!(f100 <= l100 + 2, "first {f100} against len {l100}: more than the element it answers");
 }
 
 // What is left, by what it is ----------------------------------------------------

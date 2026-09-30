@@ -8,6 +8,7 @@
 //! The module is named `stdlib` rather than `std` so that `std::` paths in
 //! this crate stay unambiguous.
 
+use std::borrow::Borrow;
 use std::collections::BTreeMap;
 
 use crate::ir::StdFn;
@@ -25,13 +26,33 @@ pub enum StdError {
 }
 
 /// Apply a standard function to already-evaluated arguments (`Ark.Std.std`).
-pub fn std(f: StdFn, args: &[Value]) -> Result<Value, StdError> {
-    use StdFn::*;
-    use Value::*;
-    let mismatch = || Err(StdError::TypeMismatch(f));
+///
+/// The arguments are borrowed — anything that is a `Value` by reference: a
+/// `&Value`, the interpreter's `Cow` of one it read in place, or a `Value`
+/// a caller owns — and only what a function returns is copied: `len(xs)`
+/// of a bound list counts it where it stands, `first(xs)` copies one
+/// element, `contains(xs, x)` compares in place (`docs/plan-perf.md` Round
+/// 4). Taking them owned made a call's arguments the price of every call,
+/// so `len` of a local list copied the list to count it.
+pub fn std<V: Borrow<Value>>(f: StdFn, args: &[V]) -> Result<Value, StdError> {
     if args.len() != f.arity() {
         return Err(StdError::Arity(f, args.len()));
     }
+    // Every arity is at most three: the references on the stack, and no
+    // list of them built per call.
+    let a = |i: usize| args[i].borrow();
+    match args.len() {
+        0 => apply(f, &[]),
+        1 => apply(f, &[a(0)]),
+        2 => apply(f, &[a(0), a(1)]),
+        _ => apply(f, &[a(0), a(1), a(2)]),
+    }
+}
+
+fn apply(f: StdFn, args: &[&Value]) -> Result<Value, StdError> {
+    use StdFn::*;
+    use Value::*;
+    let mismatch = || Err(StdError::TypeMismatch(f));
     match (f, args) {
         // text
         (Trim, [Text(t)]) => Ok(Text(t.trim_matches(is_white_space).to_string())),
@@ -91,13 +112,13 @@ pub fn std(f: StdFn, args: &[Value]) -> Result<Value, StdError> {
         (First, [List(xs)]) => Ok(xs.first().cloned().unwrap_or(Null)),
         (Last, [List(xs)]) => Ok(xs.last().cloned().unwrap_or(Null)),
         (Len, [List(xs)]) => Ok(Int(xs.len() as i64)),
-        (Contains, [List(xs), v]) => Ok(Bool(xs.iter().any(|x| x == v))),
+        (Contains, [List(xs), v]) => Ok(Bool(xs.iter().any(|x| x == *v))),
         (Reverse, [List(xs)]) => Ok(List(xs.iter().rev().cloned().collect())),
         (IsSome, [v]) => Ok(Bool(!v.is_null())),
-        (UnwrapOr, [Null, d]) => Ok(d.clone()),
-        (UnwrapOr, [v, _]) => Ok(v.clone()),
+        (UnwrapOr, [Null, d]) => Ok((*d).clone()),
+        (UnwrapOr, [v, _]) => Ok((*v).clone()),
         (Unwrap, [Null]) => Err(StdError::Fault("unwrapped none".into())),
-        (Unwrap, [v]) => Ok(v.clone()),
+        (Unwrap, [v]) => Ok((*v).clone()),
         _ => mismatch(),
     }
 }

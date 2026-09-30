@@ -514,8 +514,9 @@ pub fn check_field_with(
     for (i, c) in field.checks.iter().enumerate() {
         let ok = match c {
             Check::Trim => match &v {
-                Value::Text(t) => {
-                    v = stdlib::std(crate::ir::StdFn::Trim, &[Value::Text(t.clone())]).map_err(|_| bad("trim"))?;
+                Value::Text(_) => {
+                    let trimmed = stdlib::std(crate::ir::StdFn::Trim, &[&v]).map_err(|_| bad("trim"))?;
+                    v = trimmed;
                     true
                 }
                 _ => return Err(bad("trim of a value that is not text")),
@@ -1099,9 +1100,32 @@ fn eval(st: &mut St, env: &Env, e: &Expr) -> Run<Value> {
             }
             call(st, env, f, &vals)
         }
+        // Its arguments are read in place (Round 4): a standard function
+        // copies only what it answers, so `len` of a local list counts the
+        // list where it is bound, and its arity is at most three, so they
+        // are held on the stack.
         Expr::Std(f, es) => {
-            let vals = eval_many(st, env, es)?;
-            match stdlib::std(*f, &vals) {
+            let out = match es.as_slice() {
+                [] => stdlib::std::<Value>(*f, &[]),
+                [a] => stdlib::std(*f, &[eval_ref(st, env, a)?]),
+                [a, b] => {
+                    let a = eval_ref(st, env, a)?;
+                    stdlib::std(*f, &[a, eval_ref(st, env, b)?])
+                }
+                [a, b, c] => {
+                    let a = eval_ref(st, env, a)?;
+                    let b = eval_ref(st, env, b)?;
+                    stdlib::std(*f, &[a, b, eval_ref(st, env, c)?])
+                }
+                more => {
+                    let mut vals = Vec::with_capacity(more.len());
+                    for e in more {
+                        vals.push(eval_ref(st, env, e)?);
+                    }
+                    stdlib::std(*f, &vals)
+                }
+            };
+            match out {
                 Ok(v) => Ok(v),
                 Err(StdError::Fault(t)) => verdict(Refusal::Refused(t)),
                 Err(StdError::Arity(g, n)) => bug(EvalError::Arity(format!("{}/{n}", g.show()))),
