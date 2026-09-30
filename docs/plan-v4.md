@@ -263,7 +263,10 @@ applied. `splice` is unchanged.
 recorded dependencies it hits, each rebuilt from the store through the
 indexes, plus the patch bookkeeping. A change nothing depends on costs
 two index probes. Hydrate costs what `pull` costs, which is what v3's
-`select` cost. A group source rebuilds a whole group per member change.
+`select` cost. A group source, or a nested related list, is rebuilt whole per
+member change only where the projection uses the list as a list; a count or a
+sum over it is kept as a number and moved by the member (`docs/plan-perf.md`
+R9).
 `nix run .#latency` and the two benchmarks measure it; a vector cannot.
 
 **The correctness contract is unchanged**: after any sequence of changes,
