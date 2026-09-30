@@ -8,14 +8,77 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
+use std::time::Duration;
 
 use crate::util::{login_url, query_value};
 use crate::Login;
 
+/// How long a request to the server waits for its TCP connection
+/// (`docs/plan-perf.md` R6). Ten seconds is three of a connect's SYN
+/// retransmissions (at one, three and seven seconds), so a lossy network
+/// gets through, where the kernel's own limit is two minutes and more; an
+/// address nothing answers from gives up in ten.
+pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How long a request waits on each read of the server's answer, and on
+/// each write of its own, once connected. Every request here is answered
+/// from the server's own memory and its session file — the login's first
+/// redirect, a code traded for a session, `me`, `logout` — and none waits
+/// on a provider, so an answer twenty seconds late is a server that is
+/// not answering: a black hole, a proxy holding the socket, a process
+/// stopped under it. That is what used to wait for ever, on a thread the
+/// desktop signs in on and before a headless peer's first frame. Twenty
+/// is room for a server starting cold behind a proxy. The person's own
+/// time — the browser, the provider's page — is not bounded: that is
+/// [`wait_for_code`], which waits on a person rather than on a server.
+pub const READ_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// How long a request waits: the connection, and each read or write of
+/// it. [`Patience::DEFAULT`] is [`CONNECT_TIMEOUT`] and [`READ_TIMEOUT`];
+/// a test, or a headless peer told to, may be shorter.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Patience {
+    pub connect: Duration,
+    pub read: Duration,
+}
+
+impl Patience {
+    pub const DEFAULT: Patience = Patience {
+        connect: CONNECT_TIMEOUT,
+        read: READ_TIMEOUT,
+    };
+
+    /// The same bound on the connection and on each read.
+    pub fn of(d: Duration) -> Patience {
+        Patience { connect: d, read: d }
+    }
+
+    // An agent held to it, following redirects or not.
+    fn agent(self, redirects: u32) -> ureq::Agent {
+        ureq::AgentBuilder::new()
+            .redirects(redirects)
+            .timeout_connect(self.connect)
+            .timeout_read(self.read)
+            .timeout_write(self.read)
+            .build()
+    }
+}
+
+impl Default for Patience {
+    fn default() -> Patience {
+        Patience::DEFAULT
+    }
+}
+
 /// Sign in to `server`, opening a browser with `open` if the server needs a
 /// person to. Blocking, for as long as the person takes; call it off the UI
-/// thread.
+/// thread. The server is waited on for [`Patience::DEFAULT`] at most.
 pub fn login(server: &str, user: Option<&str>, open: impl FnOnce(&str)) -> Result<Login, String> {
+    login_with(server, user, open, Patience::DEFAULT)
+}
+
+/// [`login`], waiting on the server for `patience` at most.
+pub fn login_with(server: &str, user: Option<&str>, open: impl FnOnce(&str), patience: Patience) -> Result<Login, String> {
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let redirect = format!("http://127.0.0.1:{port}/");
@@ -23,7 +86,7 @@ pub fn login(server: &str, user: Option<&str>, open: impl FnOnce(&str)) -> Resul
 
     // Ask without following: a dev server answers with the code straight
     // away, and anything else is a page for a person.
-    let first = ureq::AgentBuilder::new().redirects(0).build().get(&url).call();
+    let first = patience.agent(0).get(&url).call();
     let code = match first {
         Ok(resp) if resp.status() / 100 == 3 => {
             let location = resp.header("Location").unwrap_or_default().to_string();
@@ -45,13 +108,20 @@ pub fn login(server: &str, user: Option<&str>, open: impl FnOnce(&str)) -> Resul
         }
         Err(e) => return Err(format!("cannot reach {server}: {e}")),
     };
-    exchange(server, &code)
+    exchange_with(server, &code, patience)
 }
 
 /// The code, for the login it stands for.
 pub fn exchange(server: &str, code: &str) -> Result<Login, String> {
+    exchange_with(server, code, Patience::DEFAULT)
+}
+
+/// [`exchange`], waiting on the server for `patience` at most.
+pub fn exchange_with(server: &str, code: &str, patience: Patience) -> Result<Login, String> {
     let url = format!("{}/auth/exchange", server.trim_end_matches('/'));
-    let resp = ureq::post(&url)
+    let resp = patience
+        .agent(5)
+        .post(&url)
         .set("Content-Type", "application/json")
         .send_string(&serde_json::json!({ "code": code }).to_string())
         .map_err(|e| match e {
@@ -62,10 +132,16 @@ pub fn exchange(server: &str, code: &str) -> Result<Login, String> {
     serde_json::from_str(&body).map_err(|e| format!("the login did not parse: {e}"))
 }
 
-/// Whether `token` still proves a login at `server`, and whose.
+/// Whether `token` still proves a login at `server`, and whose; the
+/// server is waited on for [`Patience::DEFAULT`] at most.
 pub fn whoami(server: &str, token: &str) -> Result<Option<Login>, String> {
     let url = format!("{}/auth/me", server.trim_end_matches('/'));
-    match ureq::get(&url).set("Authorization", &format!("Bearer {token}")).call() {
+    match Patience::DEFAULT
+        .agent(5)
+        .get(&url)
+        .set("Authorization", &format!("Bearer {token}"))
+        .call()
+    {
         Ok(resp) => {
             let body = resp.into_string().map_err(|e| e.to_string())?;
             serde_json::from_str(&body).map(Some).map_err(|e| format!("the login did not parse: {e}"))
@@ -75,10 +151,13 @@ pub fn whoami(server: &str, token: &str) -> Result<Option<Login>, String> {
     }
 }
 
-/// End the login `token` proves.
+/// End the login `token` proves; the server is waited on for
+/// [`Patience::DEFAULT`] at most.
 pub fn logout(server: &str, token: &str) -> Result<(), String> {
     let url = format!("{}/auth/logout", server.trim_end_matches('/'));
-    ureq::post(&url)
+    Patience::DEFAULT
+        .agent(5)
+        .post(&url)
         .set("Authorization", &format!("Bearer {token}"))
         .call()
         .map(|_| ())

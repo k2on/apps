@@ -80,7 +80,8 @@ pub struct Timing {
     /// How often the native transport pings; it gives up after three of
     /// these with nothing received.
     pub ping_every_ms: u64,
-    /// How long the native transport waits for a TCP connection.
+    /// How long the native transport waits for a TCP connection, and then
+    /// for the answer to its WebSocket handshake (`docs/plan-perf.md` R6).
     pub connect_timeout_ms: u64,
 }
 

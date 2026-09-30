@@ -118,10 +118,25 @@ fn connect(url: &str, timing: &Timing) -> Result<WebSocket<MaybeTlsStream<TcpStr
     let addrs: Vec<_> = authority.to_socket_addrs().map_err(|e| format!("{authority}: {e}"))?.collect();
     let mut last = format!("{authority} resolves to nothing");
     for addr in addrs {
-        match TcpStream::connect_timeout(&addr, Duration::from_millis(timing.connect_timeout_ms)) {
+        let patience = Duration::from_millis(timing.connect_timeout_ms.max(1));
+        match TcpStream::connect_timeout(&addr, patience) {
             Ok(stream) => {
                 let _ = stream.set_nodelay(true);
-                return handshake(url, stream);
+                // The handshake is the connection's second half, one
+                // request and one answer, and is held to the same patience
+                // (`docs/plan-perf.md` R6): a socket accepted and never
+                // answered — a proxy holding it, a lid closed on the far
+                // end — used to block this thread in the handshake's read
+                // for ever, so the link neither opened nor closed and
+                // never dialled again. Unbounded again after, where
+                // `set_slice` and the keepalive take over.
+                let _ = stream.set_read_timeout(Some(patience));
+                let _ = stream.set_write_timeout(Some(patience));
+                let ws = handshake(url, stream)?;
+                if let Some(s) = tcp(&ws) {
+                    let _ = s.set_write_timeout(None);
+                }
+                return Ok(ws);
             }
             Err(e) => last = format!("{addr}: {e}"),
         }
@@ -144,14 +159,18 @@ fn handshake(url: &str, stream: TcpStream) -> Result<WebSocket<MaybeTlsStream<Tc
         .map_err(|e| format!("{url}: {e}"))
 }
 
-fn set_slice(ws: &mut WebSocket<MaybeTlsStream<TcpStream>>) {
-    let tcp: Option<&TcpStream> = match ws.get_ref() {
+// The TCP stream under a WebSocket, plain or under TLS.
+fn tcp(ws: &WebSocket<MaybeTlsStream<TcpStream>>) -> Option<&TcpStream> {
+    match ws.get_ref() {
         MaybeTlsStream::Plain(s) => Some(s),
         #[cfg(feature = "tls")]
         MaybeTlsStream::Rustls(s) => Some(s.get_ref()),
         _ => None,
-    };
-    if let Some(s) = tcp {
+    }
+}
+
+fn set_slice(ws: &mut WebSocket<MaybeTlsStream<TcpStream>>) {
+    if let Some(s) = tcp(ws) {
         let _ = s.set_read_timeout(Some(SLICE));
     }
 }
@@ -253,5 +272,36 @@ mod tests {
             std::thread::sleep(Duration::from_millis(5));
         }
         assert!(matches!(got.as_slice(), [Event::Closed(_)]), "{got:?}");
+    }
+
+    /// A server that accepts the connection and never answers the
+    /// handshake is given up on within the connect patience, and the link
+    /// reports it closed — so the peer backs off and dials again, rather
+    /// than waiting on one socket for ever (`docs/plan-perf.md` R6). With
+    /// 300 ms of patience it closes well inside two seconds. Falsified by
+    /// leaving the handshake's read timeout unset: nothing in five.
+    #[test]
+    fn a_handshake_nobody_answers_is_given_up() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let mut held = vec![];
+            for s in listener.incoming().flatten() {
+                held.push(s);
+            }
+        });
+        let timing = Timing {
+            connect_timeout_ms: 300,
+            ..Timing::default()
+        };
+        let t = Instant::now();
+        let mut link = dial(&format!("ws://127.0.0.1:{port}/sync"), &timing);
+        let mut got = vec![];
+        while got.is_empty() && t.elapsed() < Duration::from_secs(5) {
+            got = link.poll();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(matches!(got.as_slice(), [Event::Closed(_)]), "{got:?} after {:?}", t.elapsed());
+        assert!(t.elapsed() < Duration::from_secs(2), "{:?}", t.elapsed());
     }
 }
