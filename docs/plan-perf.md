@@ -986,6 +986,103 @@ after its append — cost a peer one needless re-base after a restart and
 are not tested. The browser's storage (`Local`) carries the name through
 the same code; the wasm build was not run. Timings share the VM.
 
+### Round 5, R10 (server) — the log kept to what somebody may ask for
+
+**What landed.** `ark::retention::compact_to(head, horizon, Retention {
+entries, days }, now_ms, [(cursor, heard_ms)])` → `Option<Seq>`: the
+horizon moves to the lower of `head − RETAIN_ENTRIES` and the lowest
+cursor of a session heard within `RETAIN_DAYS` (a cursor already below the
+horizon pins nothing — that peer is served the snapshot whatever is kept),
+and only when the log holds more than half again as much as it keeps.
+*Half again of what is kept*, not of the constant: with every peer caught
+up the two are the same 15,000 `docs/plan-alone.md` §3 states, and with a
+session holding the log low the constant would make every step it
+advanced a compaction rewriting everything held; relative to what is
+kept, each compaction drops at least a third, so the snapshot bytes
+written stay within twice the entries dropped. Defaults 10,000 and 30,
+from `HARKEN_RETAIN_ENTRIES` and `HARKEN_RETAIN_DAYS` (and the NixOS
+module's `retainEntries`/`retainDays`), `Builder::retain` in `ark-server`.
+
+The hub records a cursor per `(user, session)` — not the session id
+alone, since dev auth gives every login `dev` — in `cursors.cbor` beside
+`live.cbor` (`ark_server::retain`): at every `Hello`, the cursor it names
+(unless it names another log); at every page or snapshot delivered, where
+the connection stood before it (a page's start, a snapshot's sequence).
+No frame acknowledges a page, and the `Ack` answers pushes, so the
+delivery is the plan's "ack", and recording the page's *start* keeps a
+page in flight — and any `NeedFacts` about it — above the horizon. The
+time heard moves with every frame and at a close; a session with a
+connection open is heard now. The file is written by a rename, unsynced,
+when a session arrives or leaves, when the horizon moves, at most once a
+second otherwise, and when the hub stops: nothing correct rests on it (a
+stale one keeps more, or serves a snapshot a page would have done). After
+every message the hub asks the rule; `Authority::compact` moves the
+horizon in memory — in place now, moving the kept entries instead of
+cloning them and taking the head's state from its own store — and the
+write that follows is the journal's own compaction (a snapshot at the new
+horizon; `LogFile::write` already wrote one when the horizon moved), made,
+like every write, before anything queued is sent.
+
+**A finding, answered in the hub.** A peer below the horizon with nothing
+pending was sent the snapshot and then *nothing*: the machine sends a
+connection one message per turn, and after `SnapshotOf` the client has no
+`has_more` to say `Hello` again with — it sat at the horizon of a quiet
+server until somebody else spoke. The hub now follows a snapshot below
+the head with an empty `Push` turn from that connection, which sequences
+nothing and makes the machine send the first page (`Hub::after`). It
+belongs in `protocol.rs`'s fanout (send the first page after a
+`BelowHorizon` in the same turn); that file was not this round's.
+
+**Measured** (`hub::tests::a_caught_up_hub_holds_retain_entries_and_serves_the_snapshot`,
+debug build, the demo's `create_playlist` in thirty offline bursts of a
+thousand, every burst paged back to its author before the next):
+
+| at 30,000 sequenced, every peer caught up | before (never compacted) | after (R10) |
+|---|---:|---:|
+| entries in memory (`log.entries.len()`) | 30,000 | **12,000** |
+| horizon | 0 | 18,000 |
+| ids in memory (`log.ids`, kept below the horizon, §10.3) | 30,000 | 30,000 |
+| snapshot on disk | 3,854,564 B | 3,991,846 B |
+| journal on disk | 3,465,000 B | 462,000 B |
+| time to sequence and page back | 9.0 s | 10.4 s |
+
+The horizon moved at 16,000, 22,000 and 28,000 — each time the log held
+more than 15,000 — to 10,000 below the head; two bursts since, so 12,000
+are held, and never more than 15,000. A fresh peer at 0 is served
+`SnapshotOf` at 18,000 and pages to 30,000 with the same state hash; a
+hub started again over the directory has the same log and the same
+cursors. The snapshot is about the same size either way because it is
+mostly the *state* (30,000 playlists), which retention does not touch;
+the journal is what stopped growing. The fleet's scenario 13 (below)
+measured 705 ms for two peers to author 200 entries on a server keeping
+fifty, and 188 ms for the black-holed third to return below the horizon,
+take the snapshot, rebase its ten, push them and be confirmed.
+
+**Tests, each falsified once.** The rule at its edges
+(`ark::retention::tests`): the floor and the half-again threshold, a
+session inside the window (the edge in, one millisecond past it out),
+never fewer than the floor, a slow session not compacting every step, a
+cursor below the horizon pinning nothing. The hub: 30,000 as above; a
+session written into `cursors.cbor` as heard yesterday at 100 keeps every
+entry above 100, and heard thirty-one days ago lets the log go to its
+floor; the restart. `compacting_in_place_is_compacting` holds
+`Authority::compact` to `Log::compact_to`. Fleet scenario 13: a server with
+`HARKEN_RETAIN_ENTRIES=50` and `HARKEN_RETAIN_DAYS=0`, three peers, one
+black-holed through two hundred entries, compacted past it, served the
+snapshot on return, its ten landing after the two hundred, converged;
+scenario 5 unchanged and green. `converged` reads entries, so an accepted
+id below the horizon is checked in `log.ids` by the scenario and then
+forgotten for it.
+
+**Not verified, and for the coordinator.** A *sent* page is not a
+*received* one: a black-holed connection's recorded place runs ahead of
+what it holds, and it is then served the snapshot where a page might have
+done — right, and one message more. The replica's own confirmed journal
+and the alone peer do not use the rule yet (the other half of R10). The
+ids map is kept whole below the horizon by design (§10.3) and is now the
+log's one unbounded structure: 30,000 ids at 30,000 entries. Timings are
+a debug build on a shared VM; the release build was not measured.
+
 ### Round 5, R8 — a rebase once per pump
 
 **What landed** (`219195a`). `Replica::receive`, `receive_with` and
