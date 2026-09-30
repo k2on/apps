@@ -26,10 +26,11 @@
 //! to right, `if` and `match` evaluate only the taken arm, list elements
 //! and call arguments left to right, a struct's fields in field-name order.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use crate::hash::{closure, Closure};
-use crate::ir::{Block, Check, Expr, Field, FnKind, Function, Key, Module, Op, Plan, Stmt, Sym};
+use crate::ir::{Check, Expr, Field, FnKind, Function, Key, Module, Op, Plan, Stmt, Sym};
 use crate::schema::{Dir, Schema, Ty};
 use crate::stdlib::{self, StdError};
 use crate::store::{self, Change, Overlay, Refusal, Row, Store};
@@ -120,25 +121,86 @@ fn verdict<T>(r: Refusal) -> Run<T> {
     Err(Stop::Halt(EvalFault::Verdict(r)))
 }
 
-#[derive(Clone)]
+// Everything an expression is evaluated in, borrowed: copying one is
+// copying a handful of references, which is what makes binding a local
+// free (`docs/plan-perf.md` R5).
+#[derive(Clone, Copy)]
 struct Env<'a> {
     schema: &'a Schema,
     /// The helpers and middleware in reach: a closure's, never a module's.
     helpers: &'a [Function],
     kind: FnKind,
     ctx: &'a Ctx,
-    args: &'a Args,
+    args: Params<'a>,
     autos: &'a Args,
     /// What each `Provide` the procedure has run so far returned.
     provided: &'a Args,
-    locals: BTreeMap<Sym, Value>,
+    /// A plan node's binders ([`NodeScope`]), under every frame.
+    node: &'a [(Sym, Cow<'a, Value>)],
+    /// The innermost local, which points at the one it was bound over.
+    locals: Option<&'a Frame<'a>>,
 }
 
-impl Env<'_> {
-    fn bind(&self, x: Sym, v: Value) -> Self {
-        let mut e = self.clone();
-        e.locals.insert(x, v);
-        e
+// §6.4 A local: one per `let`, per element a list function or a `for`
+// binds, per `match`'s `some` and `update`'s row. Each is pushed on the
+// evaluator's own call stack over the one before and is gone when the
+// scope that bound it returns — so a bind copies no other local, and an
+// element is bound by reference into the list it is in, which is what
+// makes a `map` over a local of N elements cost N rather than N² (R5).
+// The newest frame answers first, which is the shadowing a map's `insert`
+// gave.
+struct Frame<'a> {
+    sym: Sym,
+    value: &'a Value,
+    up: Option<&'a Frame<'a>>,
+}
+
+// A function's arguments: a procedure's checked input by name, or a
+// helper's, as the call evaluated them — borrowed where the caller's
+// expression was a binder, an argument or a field of one, so passing a
+// row to a helper does not copy it, and never gathered into a map.
+#[derive(Clone, Copy)]
+enum Params<'a> {
+    Named(&'a Args),
+    Call(&'a [(String, Field)], &'a [Cow<'a, Value>]),
+}
+
+impl<'a> Env<'a> {
+    fn local(&self, x: Sym) -> Option<&'a Value> {
+        let mut at = self.locals;
+        while let Some(f) = at {
+            if f.sym == x {
+                return Some(f.value);
+            }
+            at = f.up;
+        }
+        self.node.iter().rev().find(|(s, _)| *s == x).map(|(_, v)| &**v)
+    }
+
+    fn arg(&self, a: &str) -> Option<&'a Value> {
+        match self.args {
+            Params::Named(m) => m.get(a),
+            // The last of a name, as collecting the pairs into a map kept.
+            Params::Call(names, vals) => names.iter().rposition(|(n, _)| n == a).map(|i| &*vals[i]),
+        }
+    }
+
+    // This scope with one more local: `frame`, pushed over the rest.
+    fn under<'b>(&self, frame: &'b Frame<'b>) -> Env<'b>
+    where
+        'a: 'b,
+    {
+        Env {
+            schema: self.schema,
+            helpers: self.helpers,
+            kind: self.kind,
+            ctx: self.ctx,
+            args: self.args,
+            autos: self.autos,
+            provided: self.provided,
+            node: self.node,
+            locals: Some(frame),
+        }
     }
 }
 
@@ -250,10 +312,11 @@ fn procedure(st: &mut St, sch: &Schema, c: &Closure, ctx: &Ctx, autos: &Args, ar
         helpers: &c.helpers,
         kind: f.kind,
         ctx,
-        args: &args,
+        args: Params::Named(&args),
         autos,
         provided: &provided,
-        locals: BTreeMap::new(),
+        node: &[],
+        locals: None,
     };
     // §1.4 A query is its plan: what `pull` answers, over the store the
     // middleware saw.
@@ -286,10 +349,11 @@ fn preamble(st: &mut St, sch: &Schema, c: &Closure, ctx: &Ctx, args0: &Args) -> 
             helpers: &c.helpers,
             kind: mw.kind,
             ctx,
-            args: &args,
+            args: Params::Named(&args),
             autos: &none,
             provided: &provided,
-            locals: BTreeMap::new(),
+            node: &[],
+            locals: None,
         };
         match block(st, &env, &mw.body) {
             Ok(()) | Err(Stop::Returned(None)) if mw.kind == FnKind::Guard => {}
@@ -329,10 +393,11 @@ fn checked_input(st: &mut St, sch: &Schema, c: &Closure, ctx: &Ctx, args0: &Args
                     helpers: &c.helpers,
                     kind: FnKind::Helper,
                     ctx,
-                    args: &local,
+                    args: Params::Named(&local),
                     autos: &none,
                     provided: &none,
-                    locals: BTreeMap::new(),
+                    node: &[],
+                    locals: None,
                 };
                 let mut empty = St {
                     store: &mut Overlay::new(&empty_store),
@@ -355,10 +420,11 @@ fn checked_input(st: &mut St, sch: &Schema, c: &Closure, ctx: &Ctx, args0: &Args
             helpers: &c.helpers,
             kind: FnKind::Helper,
             ctx,
-            args: &args,
+            args: Params::Named(&args),
             autos: &none,
             provided: &none,
-            locals: BTreeMap::new(),
+            node: &[],
+            locals: None,
         };
         if !pure_bool(st, &env, e)? {
             return Err(EvalFault::Verdict(Refusal::Refused(why.clone().unwrap_or_else(|| "invalid".into()))));
@@ -527,10 +593,11 @@ pub fn check(sch: &Schema, c: &Closure, ctx: &Ctx, partial: &Args, store: &dyn S
                 helpers: &c.helpers,
                 kind: FnKind::Helper,
                 ctx,
-                args: &local,
+                args: Params::Named(&local),
                 autos: &none,
                 provided: &none,
-                locals: BTreeMap::new(),
+                node: &[],
+                locals: None,
             };
             let mut st = St {
                 store: &mut Overlay::new(&empty),
@@ -561,10 +628,11 @@ pub fn check(sch: &Schema, c: &Closure, ctx: &Ctx, partial: &Args, store: &dyn S
                 helpers: &c.helpers,
                 kind: FnKind::Helper,
                 ctx,
-                args: &out.values,
+                args: Params::Named(&out.values),
                 autos: &none,
                 provided: &none,
-                locals: BTreeMap::new(),
+                node: &[],
+                locals: None,
             };
             let mut st = St {
                 store: &mut Overlay::new(&empty),
@@ -601,10 +669,11 @@ pub fn eval_helper(m: &Module, name: &str, vals: Vec<Value>) -> Result<Value, Ev
         helpers: &c.helpers,
         kind: FnKind::Helper,
         ctx: &ctx,
-        args: &none,
+        args: Params::Named(&none),
         autos: &none,
         provided: &none,
-        locals: BTreeMap::new(),
+        node: &[],
+        locals: None,
     };
     let empty = crate::store::MemoryStore::empty(m.schema.clone());
     let mut overlay = Overlay::new(&empty);
@@ -612,7 +681,8 @@ pub fn eval_helper(m: &Module, name: &str, vals: Vec<Value>) -> Result<Value, Ev
         store: &mut overlay,
         changes: Vec::new(),
     };
-    match call(&mut st, &env, f, vals) {
+    let vals: Vec<Cow<Value>> = vals.into_iter().map(Cow::Owned).collect();
+    match call(&mut st, &env, f, &vals) {
         Ok(v) => Ok(v),
         Err(Stop::Returned(_)) => Err(EvalFault::Bug(EvalError::NoReturn(name.into()))),
         Err(Stop::Halt(fault)) => Err(fault),
@@ -657,30 +727,29 @@ static NOBODY: Ctx = Ctx {
 /// evaluated in a [`NodeScope`] of it, where scope is flat: the node's own
 /// binders and nothing a parent bound.
 pub struct Scope<'s> {
-    outer: std::borrow::Cow<'s, Env<'s>>,
+    outer: Env<'s>,
 }
 
 impl<'s> Scope<'s> {
     /// A scope with no locals: a query's, or a read outside any procedure.
     pub fn new(schema: &'s Schema, helpers: &'s [Function], ctx: &'s Ctx, args: &'s Args, provided: &'s Args) -> Scope<'s> {
         Scope {
-            outer: std::borrow::Cow::Owned(Env {
+            outer: Env {
                 schema,
                 helpers,
                 kind: FnKind::Helper,
                 ctx,
-                args,
+                args: Params::Named(args),
                 autos: &NO_ARGS,
                 provided,
-                locals: BTreeMap::new(),
-            }),
+                node: &[],
+                locals: None,
+            },
         }
     }
 
-    fn of(env: &'s Env<'s>) -> Scope<'s> {
-        Scope {
-            outer: std::borrow::Cow::Borrowed(env),
-        }
+    fn of(env: &Env<'s>) -> Scope<'s> {
+        Scope { outer: *env }
     }
 
     pub fn schema(&self) -> &'s Schema {
@@ -695,35 +764,47 @@ impl<'s> Scope<'s> {
     /// A node's scope: nothing bound yet, and no read allowed (a node
     /// computes over what the plan has read; the verifier keeps reads out).
     pub fn node(&self) -> NodeScope<'s> {
-        let o = &self.outer;
         NodeScope {
             env: Env {
-                schema: o.schema,
-                helpers: o.helpers,
                 kind: FnKind::Helper,
-                ctx: o.ctx,
-                args: o.args,
-                autos: o.autos,
-                provided: o.provided,
-                locals: BTreeMap::new(),
+                node: &[],
+                locals: None,
+                ..self.outer
             },
+            bound: Vec::new(),
         }
     }
 }
 
-/// One node's scope: its binders, bound as the plan evaluates them.
+/// One node's scope: its binders, bound as the plan evaluates them — the
+/// row by reference where the caller still holds it, so a node reading
+/// `media.title` copies the title and nothing else (`docs/plan-perf.md`
+/// R5).
 #[derive(Clone)]
 pub struct NodeScope<'s> {
     env: Env<'s>,
+    bound: Vec<(Sym, Cow<'s, Value>)>,
 }
 
-impl NodeScope<'_> {
+impl<'s> NodeScope<'s> {
     pub fn bind(&mut self, x: Sym, v: Value) {
-        self.env.locals.insert(x, v);
+        self.bound.push((x, Cow::Owned(v)));
+    }
+
+    /// [`NodeScope::bind`] of a value the caller keeps.
+    pub fn bind_ref(&mut self, x: Sym, v: &'s Value) {
+        self.bound.push((x, Cow::Borrowed(v)));
     }
 
     pub fn eval(&self, e: &Expr) -> Result<Value, EvalFault> {
-        pure(&self.env, e)
+        pure(&self.env(), e)
+    }
+
+    fn env(&self) -> Env<'_> {
+        Env {
+            node: &self.bound,
+            ..self.env
+        }
     }
 }
 
@@ -768,28 +849,43 @@ fn function<'m>(m: &'m Module, name: &str) -> Result<&'m Function, EvalError> {
 
 // §6.3 Statements -----------------------------------------------------------
 
-fn block(st: &mut St, env: &Env, blk: &Block) -> Run<()> {
-    let mut env = env.clone();
-    for s in blk {
-        exec(st, &mut env, s)?;
+// A `let` binds for the rest of its block and no further: its frame is
+// pushed here and the rest of the block runs over it, so a block's locals
+// are gone when it returns, as they were when a block copied its scope.
+fn block(st: &mut St, env: &Env, blk: &[Stmt]) -> Run<()> {
+    let mut rest = blk;
+    while let Some((s, tail)) = rest.split_first() {
+        if let Stmt::Let(x, e) = s {
+            let v = eval_ref(st, env, e)?;
+            let frame = Frame {
+                sym: *x,
+                value: &v,
+                up: env.locals,
+            };
+            return block(st, &env.under(&frame), tail);
+        }
+        exec(st, env, s)?;
+        rest = tail;
     }
     Ok(())
 }
 
-fn exec(st: &mut St, env: &mut Env, s: &Stmt) -> Run<()> {
+fn exec(st: &mut St, env: &Env, s: &Stmt) -> Run<()> {
     match s {
-        Stmt::Let(x, e) => {
-            let v = eval(st, env, e)?;
-            env.locals.insert(*x, v);
-        }
+        Stmt::Let(..) => unreachable!("a block binds its lets"),
         Stmt::If(c, yes, no) => {
             let b = bool(eval(st, env, c)?)?;
             block(st, env, if b { yes } else { no })?;
         }
         Stmt::For(x, xs, body) => {
-            let vs = list(eval(st, env, xs)?)?;
-            for v in vs {
-                block(st, &env.bind(*x, v), body)?;
+            let vs = eval_ref(st, env, xs)?;
+            for v in list_ref(&vs)? {
+                let frame = Frame {
+                    sym: *x,
+                    value: v,
+                    up: env.locals,
+                };
+                block(st, &env.under(&frame), body)?;
             }
         }
         Stmt::Insert(t, e, on) => {
@@ -808,7 +904,13 @@ fn exec(st: &mut St, env: &mut Env, s: &Stmt) -> Run<()> {
             mutating(env)?;
             let key = eval_many(st, env, ks)?;
             if let Some(old) = st.store.get(t, &key) {
-                let row = strct(eval(st, &env.bind(*x, Value::Struct(old)), e)?)?;
+                let old = Value::Struct(old);
+                let frame = Frame {
+                    sym: *x,
+                    value: &old,
+                    up: env.locals,
+                };
+                let row = strct(eval(st, &env.under(&frame), e)?)?;
                 let r = store::update(st.store, t, &key, row);
                 wrote(st, r)?;
             }
@@ -865,19 +967,58 @@ fn reading(env: &Env) -> Run<()> {
 
 // §6.4 Expressions ------------------------------------------------------------
 
+// §6.4 An expression's value, borrowed where it already exists: a
+// literal, an argument, an auto, a local, a provided value, or a field of
+// any of these, however deep — so reading `media.title` copies the title
+// and not the row (`docs/plan-perf.md` R5). Anything else is computed, and
+// owned. A value is copied only where it is kept: a struct's field, a
+// list's element, a helper's result, a row written.
+fn eval_ref<'v>(st: &mut St, env: &Env<'v>, e: &'v Expr) -> Run<Cow<'v, Value>> {
+    Ok(match e {
+        Expr::Lit(v) => Cow::Borrowed(v),
+        Expr::Arg(a) => match env.arg(a) {
+            Some(v) => Cow::Borrowed(v),
+            None => return bug(EvalError::MissingArg(a.clone())),
+        },
+        Expr::Auto(a) => match env.autos.get(a) {
+            Some(v) => Cow::Borrowed(v),
+            None => return bug(EvalError::MissingAuto(a.clone())),
+        },
+        Expr::Var(x) => match env.local(*x) {
+            Some(v) => Cow::Borrowed(v),
+            None => return bug(EvalError::UnboundVar(*x)),
+        },
+        Expr::Provided(n) => match env.provided.get(n) {
+            Some(v) => Cow::Borrowed(v),
+            None => return bug(EvalError::NotProvided(n.clone())),
+        },
+        Expr::Field(e, f) => match eval_ref(st, env, e)? {
+            Cow::Borrowed(Value::Struct(m)) => match m.get(f) {
+                Some(v) => Cow::Borrowed(v),
+                None => return bug(EvalError::NoSuchField(f.clone())),
+            },
+            Cow::Owned(Value::Struct(mut m)) => match m.remove(f) {
+                Some(v) => Cow::Owned(v),
+                None => return bug(EvalError::NoSuchField(f.clone())),
+            },
+            other => return type_error("Struct", &other),
+        },
+        // An option is flat, and `if` evaluates only the taken arm: either
+        // is the value of the expression it leads to.
+        Expr::Some(e) => return eval_ref(st, env, e),
+        Expr::If(c, a, b) => {
+            let t = bool(eval(st, env, c)?)?;
+            return eval_ref(st, env, if t { a } else { b });
+        }
+        _ => Cow::Owned(eval(st, env, e)?),
+    })
+}
+
 fn eval(st: &mut St, env: &Env, e: &Expr) -> Run<Value> {
     match e {
-        Expr::Lit(v) => Ok(v.clone()),
-        Expr::Arg(a) => env.args.get(a).cloned().map_or_else(|| bug(EvalError::MissingArg(a.clone())), Ok),
-        Expr::Auto(a) => env.autos.get(a).cloned().map_or_else(|| bug(EvalError::MissingAuto(a.clone())), Ok),
-        Expr::Var(x) => env.locals.get(x).cloned().map_or_else(|| bug(EvalError::UnboundVar(*x)), Ok),
+        Expr::Lit(_) | Expr::Arg(_) | Expr::Auto(_) | Expr::Var(_) | Expr::Provided(_) | Expr::Field(..) => eval_ref(st, env, e).map(Cow::into_owned),
         Expr::CtxUser => Ok(Value::Text(env.ctx.user.clone())),
         Expr::CtxSession => Ok(Value::Text(env.ctx.session.clone())),
-        Expr::Provided(n) => env.provided.get(n).cloned().map_or_else(|| bug(EvalError::NotProvided(n.clone())), Ok),
-        Expr::Field(e, f) => {
-            let m = strct(eval(st, env, e)?)?;
-            m.get(f).cloned().map_or_else(|| bug(EvalError::NoSuchField(f.clone())), Ok)
-        }
         // Fields are evaluated in field-name order, which is the map's order.
         Expr::Struct(fs) => {
             let mut m = BTreeMap::new();
@@ -891,11 +1032,16 @@ fn eval(st: &mut St, env: &Env, e: &Expr) -> Run<Value> {
         Expr::Some(e) => eval(st, env, e),
         Expr::None(_) => Ok(Value::Null),
         Expr::Match(e, x, some, none) => {
-            let v = eval(st, env, e)?;
+            let v = eval_ref(st, env, e)?;
             if v.is_null() {
                 eval(st, env, none)
             } else {
-                eval(st, &env.bind(*x, v), some)
+                let frame = Frame {
+                    sym: *x,
+                    value: &v,
+                    up: env.locals,
+                };
+                eval(st, &env.under(&frame), some)
             }
         }
         Expr::If(c, a, b) => {
@@ -936,19 +1082,22 @@ fn eval(st: &mut St, env: &Env, e: &Expr) -> Run<Value> {
         }
         Expr::Op(op, _) => bug(EvalError::Arity(op.show().into())),
         Expr::Cmp(op, a, b) => {
-            let x = eval(st, env, a)?;
-            let y = eval(st, env, b)?;
+            let x = eval_ref(st, env, a)?;
+            let y = eval_ref(st, env, b)?;
             Ok(Value::Bool(cmp(*op, &x, &y)))
         }
         Expr::Call(name, es) => {
-            let vals = eval_many(st, env, es)?;
+            let mut vals = Vec::with_capacity(es.len());
+            for e in es {
+                vals.push(eval_ref(st, env, e)?);
+            }
             let Some(f) = env.helpers.iter().find(|h| h.name == *name) else {
                 return bug(EvalError::UnknownFunction(name.clone()));
             };
             if f.kind != FnKind::Helper {
                 return bug(EvalError::WrongKind(name.clone(), f.kind));
             }
-            call(st, env, f, vals)
+            call(st, env, f, &vals)
         }
         Expr::Std(f, es) => {
             let vals = eval_many(st, env, es)?;
@@ -959,58 +1108,67 @@ fn eval(st: &mut St, env: &Env, e: &Expr) -> Run<Value> {
                 Err(StdError::TypeMismatch(g)) => bug(EvalError::TypeError(g.show().into())),
             }
         }
+        // The list functions bind each element by reference into the list,
+        // which is itself borrowed when it is a local, an argument or a
+        // field of one: an element is copied only into what is kept.
         Expr::Map(xs, x, body) => {
-            let vs = list(eval(st, env, xs)?)?;
+            let vs = eval_ref(st, env, xs)?;
+            let vs = list_ref(&vs)?;
             let mut out = Vec::with_capacity(vs.len());
             for v in vs {
-                out.push(eval(st, &env.bind(*x, v), body)?);
+                out.push(eval(st, &env.under(&frame(*x, v, env)), body)?);
             }
             Ok(Value::List(out))
         }
         Expr::Filter(xs, x, body) => {
-            let vs = list(eval(st, env, xs)?)?;
-            let mut out = Vec::new();
-            for v in vs {
-                if bool(eval(st, &env.bind(*x, v.clone()), body)?)? {
-                    out.push(v);
-                }
+            let vs = eval_ref(st, env, xs)?;
+            let mut keep = Vec::new();
+            for v in list_ref(&vs)? {
+                keep.push(bool(eval(st, &env.under(&frame(*x, v, env)), body)?)?);
             }
-            Ok(Value::List(out))
+            Ok(Value::List(picked(vs, keep.into_iter().enumerate().filter(|(_, k)| *k).map(|(i, _)| i))))
         }
         // Every element is evaluated, as the spec's `mapM` does; the result
         // is the disjunction (conjunction).
         Expr::Any(xs, x, body) => {
-            let vs = list(eval(st, env, xs)?)?;
+            let vs = eval_ref(st, env, xs)?;
             let mut acc = false;
-            for v in vs {
-                acc |= bool(eval(st, &env.bind(*x, v), body)?)?;
+            for v in list_ref(&vs)? {
+                acc |= bool(eval(st, &env.under(&frame(*x, v, env)), body)?)?;
             }
             Ok(Value::Bool(acc))
         }
         Expr::All(xs, x, body) => {
-            let vs = list(eval(st, env, xs)?)?;
+            let vs = eval_ref(st, env, xs)?;
             let mut acc = true;
-            for v in vs {
-                acc &= bool(eval(st, &env.bind(*x, v), body)?)?;
+            for v in list_ref(&vs)? {
+                acc &= bool(eval(st, &env.under(&frame(*x, v, env)), body)?)?;
             }
             Ok(Value::Bool(acc))
         }
         // Stable, under compare_value of the key.
         Expr::SortBy(xs, x, key) => {
-            let vs = list(eval(st, env, xs)?)?;
-            let mut keyed = Vec::with_capacity(vs.len());
-            for v in vs {
-                let k = eval(st, &env.bind(*x, v.clone()), key)?;
-                keyed.push((v, k));
+            let vs = eval_ref(st, env, xs)?;
+            let mut keys = Vec::new();
+            for v in list_ref(&vs)? {
+                keys.push(eval(st, &env.under(&frame(*x, v, env)), key)?);
             }
-            keyed.sort_by(|a, b| a.1.cmp(&b.1));
-            Ok(Value::List(keyed.into_iter().map(|(v, _)| v).collect()))
+            let mut order: Vec<usize> = (0..keys.len()).collect();
+            order.sort_by(|a, b| keys[*a].cmp(&keys[*b]));
+            Ok(Value::List(picked(vs, order.into_iter())))
         }
         Expr::Fold(xs, z, acc, x, body) => {
-            let vs = list(eval(st, env, xs)?)?;
+            let vs = eval_ref(st, env, xs)?;
+            let vs = list_ref(&vs)?;
             let mut a = eval(st, env, z)?;
             for v in vs {
-                a = eval(st, &env.bind(*acc, a).bind(*x, v), body)?;
+                let with_acc = frame(*acc, &a, env);
+                let with_x = Frame {
+                    sym: *x,
+                    value: v,
+                    up: Some(&with_acc),
+                };
+                a = eval(st, &env.under(&with_x), body)?;
             }
             Ok(a)
         }
@@ -1034,6 +1192,30 @@ fn eval(st: &mut St, env: &Env, e: &Expr) -> Run<Value> {
     }
 }
 
+// A frame binding `x` to `v` over `env`'s locals.
+fn frame<'b>(x: Sym, v: &'b Value, env: &Env<'b>) -> Frame<'b> {
+    Frame {
+        sym: x,
+        value: v,
+        up: env.locals,
+    }
+}
+
+// The elements of a list at `at`, in that order: moved out of a list the
+// evaluation owns, copied out of one it borrows.
+fn picked(vs: Cow<Value>, at: impl Iterator<Item = usize>) -> Vec<Value> {
+    match vs {
+        Cow::Owned(Value::List(xs)) => {
+            let mut slots: Vec<Option<Value>> = xs.into_iter().map(Some).collect();
+            at.filter_map(|i| slots[i].take()).collect()
+        }
+        other => match &*other {
+            Value::List(xs) => at.map(|i| xs[i].clone()).collect(),
+            _ => vec![],
+        },
+    }
+}
+
 fn eval_many(st: &mut St, env: &Env, es: &[Expr]) -> Run<Vec<Value>> {
     let mut out = Vec::with_capacity(es.len());
     for e in es {
@@ -1045,21 +1227,20 @@ fn eval_many(st: &mut St, env: &Env, es: &[Expr]) -> Run<Vec<Value>> {
 // Call a helper: bind its arguments as a fresh environment, run its body,
 // and take what it returned. Helpers never see locals, autos, arguments or
 // the context of their caller.
-fn call(st: &mut St, env: &Env, f: &Function, vals: Vec<Value>) -> Run<Value> {
+fn call(st: &mut St, env: &Env, f: &Function, vals: &[Cow<Value>]) -> Run<Value> {
     if vals.len() != f.input.len() {
         return bug(EvalError::Arity(f.name.clone()));
     }
-    let args: Args = f.input.iter().map(|(n, _)| n.clone()).zip(vals).collect();
-    let autos = Args::new();
     let env2 = Env {
         schema: env.schema,
         helpers: env.helpers,
         kind: FnKind::Helper,
         ctx: env.ctx,
-        args: &args,
-        autos: &autos,
-        provided: &autos,
-        locals: BTreeMap::new(),
+        args: Params::Call(&f.input, vals),
+        autos: &NO_ARGS,
+        provided: &NO_ARGS,
+        node: &[],
+        locals: None,
     };
     match block(st, &env2, &f.body) {
         Ok(()) | Err(Stop::Returned(None)) => bug(EvalError::NoReturn(f.name.clone())),
@@ -1121,10 +1302,10 @@ fn text(v: Value) -> Run<String> {
     }
 }
 
-fn list(v: Value) -> Run<Vec<Value>> {
+fn list_ref(v: &Value) -> Run<&[Value]> {
     match v {
         Value::List(xs) => Ok(xs),
-        other => type_error("List", &other),
+        other => type_error("List", other),
     }
 }
 
