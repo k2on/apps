@@ -175,6 +175,19 @@ impl Row {
         Row { cols: cols.clone(), vals }
     }
 
+    /// A struct read back as a row of `tbl` — a snapshot's, a vector's: laid
+    /// out as the table's when its fields are exactly the table's columns,
+    /// and otherwise kept as it is, a row of no table, as a fact is applied
+    /// raw (§4.5). Its values are copied once, into place.
+    pub fn stored_in(tbl: &Table, m: &BTreeMap<FieldName, Value>) -> Row {
+        let cols = tbl.row_columns();
+        if m.len() == cols.len() && m.keys().all(|k| cols.position(k).is_some()) {
+            let vals: Arc<[Value]> = cols.names.iter().map(|n| m[n].clone()).collect();
+            return Row { cols: cols.clone(), vals };
+        }
+        Row::from_struct_ref(m)
+    }
+
     /// A row of no table yet: a struct's fields as they are, in name order.
     /// What a row decoded without its schema is — from the wire, from a
     /// vector — until a store lays it out as its table's
@@ -1133,7 +1146,11 @@ impl MemoryStore {
                 if let Value::List(rs) = rows {
                     for r in rs {
                         if let Value::Struct(row) = r {
-                            st.apply_change(&Change::Add(t.clone(), Row::from_struct_ref(row)));
+                            let row = match st.schema.lookup_table(t) {
+                                Some(tbl) => Row::stored_in(tbl, row),
+                                None => Row::from_struct_ref(row),
+                            };
+                            st.apply_change(&Change::Add(t.clone(), row));
                         }
                     }
                 }

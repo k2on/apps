@@ -143,7 +143,7 @@ use ark::canon;
 use ark::log::{Entry, Facts, Seq};
 use ark::protocol::{change_from_value, change_value, entry_from_value, entry_value};
 use ark::schema::Schema;
-use ark::store::{Change, MemoryStore, Store};
+use ark::store::{Change, MemoryStore, Row, Store};
 use ark::value::{Id, Value};
 
 use crate::Error;
@@ -462,6 +462,7 @@ pub fn decode_replica(bytes: &[u8], schema: &Schema) -> Result<(ReplicaFile, Opt
     };
     let mut confirmed = MemoryStore::empty(schema.clone());
     for (t, rows) in tables {
+        let tbl = schema.lookup_table(t);
         let Value::List(rs) = rows else {
             return Err(bad(&format!("rows of {t}")));
         };
@@ -469,7 +470,8 @@ pub fn decode_replica(bytes: &[u8], schema: &Schema) -> Result<(ReplicaFile, Opt
             let Value::Struct(row) = r else {
                 return Err(bad(&format!("a row of {t}")));
             };
-            confirmed.apply_change(&Change::Add(t.clone(), row.clone()));
+            let row = tbl.map_or_else(|| Row::from_struct_ref(row), |tbl| Row::stored_in(tbl, row));
+            confirmed.apply_change(&Change::Add(t.clone(), row));
         }
     }
     let pending = match m.get("pending") {

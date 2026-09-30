@@ -674,9 +674,11 @@ impl Client {
                 self.replica.settle();
                 let mut st = MemoryStore::empty(self.schema.clone());
                 for (t, vs) in rows {
+                    let tbl = self.schema.lookup_table(&t);
                     for v in vs {
                         if let Value::Struct(row) = v {
-                            st.apply_change(&Change::Add(t.clone(), Row::from_struct(row)));
+                            let row = tbl.map_or_else(|| Row::from_struct_ref(&row), |tbl| Row::stored_in(tbl, &row));
+                            st.apply_change(&Change::Add(t.clone(), row));
                         }
                     }
                 }

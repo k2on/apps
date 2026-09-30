@@ -990,7 +990,12 @@ impl Fleet {
     pub fn rows(&self, table: &str) -> Vec<BTreeMap<String, Value>> {
         use ark::store::Store;
         let log = self.server.log_on_disk().expect("a log");
-        log.state_at(log.head_seq()).unwrap().scan(table)
+        log.state_at(log.head_seq())
+            .unwrap()
+            .scan(table)
+            .iter()
+            .map(ark::store::Row::to_struct)
+            .collect()
     }
 }
 

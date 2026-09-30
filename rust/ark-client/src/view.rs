@@ -538,7 +538,7 @@ mod tests {
         put(&mut p, "a");
         p.take_changes();
         let mut v = p.view("items", args([("playlist_id", list.clone())])).unwrap();
-        let row = |p: &Peer, t: &str| Value::Struct(p.store().get("item", &[list.clone(), Value::text(t)]).unwrap());
+        let row = |p: &Peer, t: &str| p.store().get("item", &[list.clone(), Value::text(t)]).unwrap().into_value();
 
         put(&mut p, "b");
         let ch = p.take_changes();

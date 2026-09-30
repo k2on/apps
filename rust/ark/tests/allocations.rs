@@ -339,18 +339,20 @@ fn library(sch: &Schema, n: u64) -> (MemoryStore, Value) {
 /// The demo's library: the tracks `harken/iced`'s seed authors.
 const DEMO: u64 = 285;
 
-/// `docs/plan-perf.md` R5: a `library` entry hydrated through its plan
-/// allocates 52.2 times (285 entries, a third of them on the playlist;
-/// 55.8 when R5 landed, and 287 before the interpreter borrowed). The
-/// media row the store hands out is 15 of them and the node the helper
-/// builds about 20 more; the rest is the related read of the entry's items
-/// and the entry itself. Round 4 took 3.6 off: `first(items)` copied the
-/// entry's list of items to answer its first, and the call built a list of
-/// its arguments (54.8 with the copy put back). Reading each of the ten
-/// fields by copying the row, as it was, is 150 more, and binding the row
-/// by a copy 15 more — so the bound is 64, which either would cross.
-/// Falsified by making `Field` copy what it reads before taking the field
-/// (`eval_ref(..).into_owned()`): 203.2 an entry.
+/// `docs/plan-perf.md` R5 and R11: a `library` entry hydrated through its
+/// plan allocates 37.5 times (285 entries, a third of them on the
+/// playlist). It was 52.2 before the row was positional (R11), 55.8 when
+/// R5 landed, and 287 before the interpreter borrowed. The media row the
+/// store hands out was 15 of those — its keys, its map nodes and its
+/// values copied — and is none now: a reference count, bound as the store
+/// holds it, each field the helper reads taken by position. The node the
+/// helper builds is about 20; the rest is the related read of the entry's
+/// items (a third of the entries have one, built into the struct a bare
+/// node is) and the entry itself. The bound is 44, which binding the row
+/// as the struct it is — what every read cost before R11 — crosses.
+/// Falsified twice: binding the plan's row as `to_value()` in `view.rs`
+/// (`Cand::bind`), 53.5 an entry; and making `Field` copy what it reads
+/// before taking the field (`cow().into_owned()` in `eval_val`), 194.8.
 #[test]
 fn a_library_entry_hydrates_in_a_bounded_number_of_allocations() {
     let m = module();
@@ -367,7 +369,7 @@ fn a_library_entry_hydrates_in_a_bounded_number_of_allocations() {
     assert_eq!(rows[5].field("title"), Value::text("Track 5"));
     let per = allocs as f64 / DEMO as f64;
     eprintln!("library at {DEMO}: {allocs} allocations, {per:.1} an entry");
-    assert!(per <= 64.0, "{per:.1} allocations a library entry (52.2 at Round 4, 55.8 when R5 landed)");
+    assert!(per <= 44.0, "{per:.1} allocations a library entry (37.5 with R11, 52.2 before it)");
 }
 
 // A local list, mapped and filtered ---------------------------------------------
@@ -563,31 +565,37 @@ impl ark::store::Store for Crossing {
     }
 }
 
-/// A row's copy, split: its allocations whole, and those that are its keys
-/// and its map nodes (the whole less its values copied alone, less the
-/// vector those were copied into).
-fn keys_and_map(row: &StoreRow) -> (usize, usize) {
-    let (whole, _) = counted(|| std::hint::black_box(row.clone()));
-    let (values, _) = counted(|| std::hint::black_box(row.values().cloned().collect::<Vec<Value>>()));
-    (whole, whole - (values - 1))
+/// What a row costs where one still costs anything: handed out (a clone,
+/// two reference counts since the row is positional — `docs/plan-perf.md`
+/// R11) and built into the struct it is (§4), which the evaluator does
+/// only where a row is used whole — a bare plan's node, a row returned.
+fn row_costs(row: &StoreRow) -> (usize, usize) {
+    let (clone, _) = counted(|| std::hint::black_box(row.clone()));
+    let (as_struct, _) = counted(|| std::hint::black_box(row.to_value()));
+    (clone, as_struct)
 }
 
-/// `docs/plan-perf.md` R5, then: with the interpreter's own copies gone,
-/// how much of a `library` hydrate and of one `add_to_playlist` apply is a
-/// `Row`'s keys and map nodes — the number the row representation is
-/// decided by. Printed, not asserted.
+/// `docs/plan-perf.md` R5, then R11: how much of a `library` hydrate and
+/// of one `add_to_playlist` apply is rows — what the row representation
+/// was decided by. Before R11 a row handed out was its whole map copied
+/// (media 15 allocations, 10 of them keys and map nodes; `playlist_item`
+/// 7 and 6), 31% of a hydrate and 14% of an apply. Now a row handed out
+/// costs nothing, and what is left is the rows built into structs: in the
+/// hydrate each item found (the related plan's bare node), in the apply
+/// the item `MAX(pos)` read and the row written (its values, once).
+/// Printed, not asserted.
 #[test]
 #[ignore]
 fn perf_row_share() {
     let m = module();
     let built = m.build();
     let procs: BTreeMap<String, Procedure> = m.procedures().into_iter().map(|(_, p)| (p.name().to_string(), p)).collect();
-    eprintln!("\n== what is left: the share that is a Row's keys and map nodes");
+    eprintln!("\n== what is left: the share that is rows");
     for n in [DEMO, 2000, 8000] {
         let (st, pl) = library(&built.schema, n);
         let per: BTreeMap<&str, (usize, usize)> = ["media", "playlist", "playlist_item"]
             .into_iter()
-            .map(|t| (t, keys_and_map(&st.rows(t).into_values().next().unwrap())))
+            .map(|t| (t, row_costs(&st.rows(t).into_values().next().unwrap())))
             .collect();
         let crossing = Crossing {
             inner: st,
@@ -599,16 +607,17 @@ fn perf_row_share() {
         crossing.out.borrow_mut().values_mut().for_each(|k| *k = 0);
         let (total, _) = counted(|| eval::query(built, "library", &a, &crossing).unwrap());
         let out = crossing.out.borrow().clone();
-        let rows: usize = out.iter().map(|(t, k)| k * per[t.as_str()].0).sum();
-        let keys: usize = out.iter().map(|(t, k)| k * per[t.as_str()].1).sum();
+        let handed: usize = out.iter().map(|(t, k)| k * per[t.as_str()].0).sum();
+        // Each item found is the related plan's node: its struct, built.
+        let items = out.get("playlist_item").copied().unwrap_or(0);
+        let built_rows = items * per["playlist_item"].1;
         // The node: a struct of ten fields, built by the helper — its ten
         // names and its one map node.
         let node = 11 * n as usize;
         eprintln!(
-            "library at {n}: {total} allocations ({:.1} an entry); rows handed out {out:?} = {rows} ({:.0}%), of which keys and map nodes {keys} ({:.0}%); the nodes' own names and maps {node} ({:.0}%)",
+            "library at {n}: {total} allocations ({:.1} an entry); rows handed out {out:?} at {handed} allocations; items built into structs {built_rows} ({:.0}%); the nodes' own names and maps {node} ({:.0}%)",
             total as f64 / n as f64,
-            100.0 * rows as f64 / total as f64,
-            100.0 * keys as f64 / total as f64,
+            100.0 * built_rows as f64 / total as f64,
             100.0 * node as f64 / total as f64,
         );
 
@@ -626,16 +635,14 @@ fn perf_row_share() {
         let changes = out.unwrap().unwrap();
         assert_eq!(changes.len(), 1);
         let out = crossing.out.borrow().clone();
-        // Handed out by the store, and the row written: built once, copied
-        // into the procedure's own overlay and into the caller's.
+        // The item read, built into a struct; the row written, its values
+        // laid out once and then shared by the procedure's overlay and the
+        // caller's.
         let handed: usize = out.iter().map(|(t, k)| k * per[t.as_str()].0).sum();
-        let handed_keys: usize = out.iter().map(|(t, k)| k * per[t.as_str()].1).sum();
-        let (item, item_keys) = per["playlist_item"];
-        let (rows, keys) = (handed + 3 * item, handed_keys + 3 * item_keys);
+        let rows = out.get("playlist_item").copied().unwrap_or(0) * per["playlist_item"].1 + 1;
         eprintln!(
-            "add_to_playlist at {n}: {total} allocations; rows handed out {out:?}, and the row written three times: {rows} ({:.0}%), of which keys and map nodes {keys} ({:.0}%)",
+            "add_to_playlist at {n}: {total} allocations; rows handed out {out:?} at {handed} allocations; rows built {rows} ({:.0}%)",
             100.0 * rows as f64 / total as f64,
-            100.0 * keys as f64 / total as f64,
         );
     }
 }

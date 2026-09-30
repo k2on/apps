@@ -548,7 +548,7 @@ fn perf_row_keys() {
     let (ctx, none) = (Ctx::default(), Args::new());
     let scope = ark::eval::Scope::new(&m.schema, &[], &ctx, &none, &none);
     let mut node = scope.node();
-    node.bind(0, Value::Struct(media_row.clone()));
+    node.bind_row_owned(0, media_row.clone());
     let read = ark::ir::Expr::Field(Box::new(ark::ir::Expr::Var(0)), "title".into());
     let reps = 100_000;
     let a0 = allocs();
