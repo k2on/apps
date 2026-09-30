@@ -179,6 +179,33 @@ impl Harken {
         (st, pl)
     }
 
+    /// A library of `n` media rows, and a thousand playlists each for
+    /// alice and bob: alice's are "Favorites", a hundred "Favorites (k)"
+    /// and 899 others, bob's a thousand "Favorites (k)" — what naming a
+    /// person's next "Favorites" reads a range of (`docs/plan-perf.md` R6).
+    fn with_playlists(&self, n: u64) -> MemoryStore {
+        let mut st = self.library(n);
+        let alice = std::iter::once("Favorites".to_string())
+            .chain((1..=100).map(|k| format!("Favorites ({k})")))
+            .chain((0..899).map(|k| format!("List {k}")))
+            .map(|name| ("alice", name));
+        let bob = (1..=1000).map(|k| ("bob", format!("Favorites ({k})")));
+        for (i, (user, name)) in alice.chain(bob).enumerate() {
+            let row: Row = [
+                ("id", Value::Id(idv(3, i as u64))),
+                ("name", Value::text(name)),
+                ("pos", Value::int(i as i64 + 1)),
+                ("created_ms", Value::int(1)),
+                ("user_id", Value::text(user)),
+            ]
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect();
+            st.apply_change(&Change::Add("playlist".into(), row));
+        }
+        st
+    }
+
     fn autos(&self, name: &str, next: &mut u64) -> Args {
         self.procs[name]
             .1
@@ -403,6 +430,11 @@ fn read_cases(h: &Harken) -> Vec<(&'static str, &'static str, Make<'_>)> {
             "create_playlist",
             Box::new(|n| (h.with_playlist(n, 0).0, args([("name", Value::text("Other"))]))),
         ),
+        (
+            "create_playlist (a 102nd Favorites, of 1,000)",
+            "create_playlist",
+            Box::new(|n| (h.with_playlists(n), args([("name", Value::text("Favorites"))]))),
+        ),
     ]
 }
 
@@ -451,15 +483,42 @@ fn perf_rows_read_per_mutation() {
 /// Falsified by taking `.index((Self::playlist_id, Self::pos))` off
 /// `playlist_item`: the playlist of 7,999 is 7,999 rows again; and by
 /// taking `.index((Self::file,))` off `media`: `add_song` is 8,001.
+///
+/// R6: `create_playlist` now reads only the names from its own up to its
+/// numbered siblings, so alice's second is one row (the last playlist;
+/// "Mine" is not near "Other"), and her next "Favorites" among a thousand
+/// of hers — a hundred of them "Favorites (k)" — and a thousand of bob's
+/// "Favorites (k)" is 102: the last playlist, "Favorites" and its hundred
+/// siblings, where reading all of hers was 1,001. It is named
+/// "Favorites (101)". Falsified by dropping the span from `view::read`
+/// (`&[]` for `&spans`): alice's second is two rows again and the 102nd
+/// Favorites 1,001; and by ending the range at `name (` in
+/// `create_playlist`: the siblings go unread and it names the playlist
+/// "Favorites (1)", which she has — a unique violation.
 #[test]
 fn a_mutation_examines_the_rows_it_needs_not_the_library() {
     let h = harken();
-    let want = [(14, 1), (7, 0), (7, 1), (2, 2)];
+    let want = [(14, 1), (7, 0), (7, 1), (2, 1), (2, 102)];
     for ((label, name, make), (gets, rows)) in read_cases(&h).iter().zip(want) {
         let (small, big) = (reads_of(&h, 500, name, &**make), reads_of(&h, 8000, name, &**make));
         assert_eq!((big.gets, big.rows), (gets, rows), "{label} at 8,000");
         assert_eq!(small, big, "{label}: the same at 500 as at 8,000");
     }
+    // And the range named it as reading everything would have.
+    let p = h.alone(h.with_playlists(10));
+    let mut ov = Overlay::new(&p.r.view);
+    let autos = h.autos("create_playlist", &mut 1_000_000);
+    let out = h.procs["create_playlist"]
+        .1
+        .apply(&p.ctx, &autos, &args([("name", Value::text("Favorites"))]), &mut ov);
+    assert!(matches!(out, Ok(Ok(_))), "{out:?}");
+    let made: Vec<Value> = ov
+        .scan("playlist")
+        .into_iter()
+        .filter(|r| p.r.view.get("playlist", &[r["id"].clone()]).is_none())
+        .map(|r| r["name"].clone())
+        .collect();
+    assert_eq!(made, [Value::text("Favorites (101)")]);
 }
 
 // Reads, and what a row's keys cost ---------------------------------------------------

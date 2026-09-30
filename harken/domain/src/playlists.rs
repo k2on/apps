@@ -91,19 +91,17 @@ pub fn numbered(name: Text, n: Int) -> Text {
 
 /// The smallest n from 1 whose "name (n)" is none of these names. The
 /// names are one person's, so distinct: each one's rank among them is one
-/// of 1..len, and of len names at least one is not a numbered one when the
-/// plain name is taken, so the answer is always among the ranks.
+/// of 1..len, and at most len of the numbers are taken, so the answer is
+/// len + 1 or among the ranks — whichever names the list holds besides
+/// the numbered ones, which is what lets `create_playlist` hand it only
+/// the name and its numbered siblings (`docs/plan-perf.md` R6).
 ///
-/// Quadratic in the person's playlists, and run only for a name they
-/// already have (`playlist_name`, `docs/plan-perf.md` R1): per name its
-/// rank is counted twice (natively `pick` computes both arms) and the
-/// numbered name looked for, about three comparisons per pair of names —
-/// three million at a thousand playlists, with a million names copied into
-/// the lists `filter` builds: 340 ms a call natively at a thousand, 4.6 ms
-/// at a hundred, against 0.2 ms for a free name at a thousand
-/// (`perf_playlist_name` in `tests/perf.rs`, a release build). Paid per
-/// apply, and only by somebody making their thousand-and-first playlist
-/// under a name they have used.
+/// Quadratic in the list, and run only for a name they already have
+/// (`playlist_name`, R1): per name its rank is counted twice (natively
+/// `pick` computes both arms) and the numbered name looked for. Over every
+/// playlist of a person's that was 340 ms a call natively at a thousand;
+/// over the siblings it is the square of how many times they have reused
+/// this one name, not of how many playlists they have.
 pub fn free_number(names: List<Text>, name: Text) -> Int {
     helper("free_number", (("names", names), ("name", name)), |names: List<Text>, name: Text| {
         names.fold(names.len().add(1), |acc: Int, x| {
@@ -154,12 +152,24 @@ pub fn playlists() -> Router<Harken> {
         // apply time, so every peer replaying reaches the same name in log
         // order; by person, not by library; case is kept. The same entry
         // twice is one playlist: its id is the key. The last playlist is
-        // read through `playlist (pos)` and the person's through the
-        // `user_id` prefix of an index (R1): the rows examined are one and
-        // that person's playlists, not every playlist twice.
+        // read through `playlist (pos)` (R1). Of the person's, only the
+        // names `playlist_name` can find taken are read: the name itself
+        // and its numbered siblings, which are every name from `name` up
+        // to `name )` — "name (" sorts right after "name" and ")" right
+        // after "(" — a range of `(user_id, name)` under the person
+        // (`docs/plan-perf.md` R6). Somebody with a thousand playlists
+        // and a hundred "Favorites (n)" examines a hundred and one.
         playlists.input::<CreatePlaylist>().mutation("create_playlist", |ctx, db, input| {
             let playlist = db.playlist.order_by(Playlist::pos.desc()).first();
-            let playlist_2 = db.playlist.filter(Playlist::user_id.eq(ctx.user)).all();
+            let playlist_2 = db
+                .playlist
+                .filter(
+                    Playlist::user_id
+                        .eq(ctx.user)
+                        .and(Playlist::name.ge(input.name))
+                        .and(Playlist::name.lt(concat(list([input.name, " )".into()])))),
+                )
+                .all();
             db.playlist.insert(Playlist {
                 id: ctx.new_id("id"),
                 name: playlist_name(playlist_2.map(|row| row.name), input.name),

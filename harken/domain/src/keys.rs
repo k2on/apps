@@ -191,4 +191,67 @@ mod tests {
             }
         }
     }
+
+    /// `create_playlist` hands `playlist_name` only the names from `name`
+    /// up to `name )` of the person's (`docs/plan-perf.md` R6), and that is
+    /// the same answer as every name of theirs: over a thousand playlists
+    /// of which a hundred are "Favorites (n)" — numbered with gaps, some
+    /// numbered twice over, beside names that sort just outside the range
+    /// ("Favorite", "Favorites )", "Favorites!", "Favoritesz") and just
+    /// inside it ("Favorites (x)", "Favorites  two") — for the name, for
+    /// names that are free, for a numbered sibling asked for itself, and
+    /// with the plain name taken or not. Which rows the store examines for
+    /// that range is `tests/perf.rs`'s to count. Falsified by an upper
+    /// bound of `name (` (the siblings left out): "Favorites" comes back
+    /// "Favorites (1)", which the person already has.
+    #[test]
+    fn playlist_name_over_the_siblings_is_over_every_name() {
+        use ark::authoring::{list, List};
+        let mut all: Vec<String> = vec!["Favorites".into()];
+        // A hundred numbered siblings: 1..=60, then every other number to
+        // 138, so the first free number is 61.
+        all.extend((1..=60).map(|n| format!("Favorites ({n})")));
+        all.extend((0..40).map(|i| format!("Favorites ({})", 62 + 2 * i)));
+        all.extend(
+            [
+                "Favorite",
+                "Favorites )",
+                "Favorites!",
+                "Favoritesz",
+                "Favorites (x)",
+                "Favorites  two",
+                "Favorites (61) b",
+            ]
+            .map(String::from),
+        );
+        all.extend((all.len()..1000).map(|i| format!("List {i}")));
+        assert_eq!(all.len(), 1000);
+        let siblings = |of: &[String], name: &str| -> Vec<String> {
+            let hi = format!("{name} )");
+            let mut s: Vec<String> = of.iter().filter(|n| n.as_str() >= name && **n < hi).cloned().collect();
+            s.sort();
+            s
+        };
+        let without_plain: Vec<String> = all.iter().filter(|n| *n != "Favorites").cloned().collect();
+        for of in [&all, &without_plain] {
+            for name in ["Favorites", "Favorites (3)", "Favorite", "Night", "List 500", "Favorites (x)"] {
+                let names = |xs: &[String]| -> List<Text> { list(xs.iter().map(|n| Text::from(n.as_str())).collect::<Vec<_>>()) };
+                let near = siblings(of, name);
+                assert!(near.len() <= 110, "{name}: {} names", near.len());
+                let was = native(ark::authoring::evaluate(|| playlist_name_before(names(of), Text::from(name))));
+                let is = native(ark::authoring::evaluate(|| {
+                    crate::playlists::playlist_name(names(&near), Text::from(name))
+                }));
+                assert_eq!(is, was, "{name:?}, plain name taken: {}", of.len() == 1000);
+            }
+        }
+        let taken = native(ark::authoring::evaluate(|| {
+            playlist_name_before(
+                list(all.iter().map(|n| Text::from(n.as_str())).collect::<Vec<_>>()),
+                Text::from("Favorites"),
+            )
+        }));
+        assert_eq!(taken, Value::Text("Favorites (61)".into()));
+        assert_eq!(siblings(&all, "Favorites").len(), 1 + 100 + 3);
+    }
 }

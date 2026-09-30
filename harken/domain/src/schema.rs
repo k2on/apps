@@ -6,7 +6,10 @@
 //! and one set of tables. The unique index on `(playlist.user_id,
 //! playlist.name)` is the one addition that means anything: it is what
 //! `create_playlist`'s insert matches on, so a person's second "Favorites"
-//! is no row at all. The other indexes say nothing about the rows and are
+//! is no row at all — and, since R6, what that insert names the new one
+//! from: its columns are the person and the name, so the names from
+//! "Favorites" up to "Favorites )" are one range of it. The other indexes
+//! say nothing about the rows and are
 //! there for the mutations' reads (`docs/plan-perf.md` R1): each is the
 //! columns one read holds equal followed by the column it orders by, so
 //! the store hands back `MAX(pos)` or the row for a file by walking to it
@@ -387,9 +390,9 @@ impl Row for Playlist {
             .text(Self::user_id)
             .key((Self::id,))
             .unique((Self::user_id, Self::name))
-            // `create_playlist`: the last playlist anyone made, and one
-            // person's (read by the prefix of this index, or of the one
-            // above).
+            // `create_playlist`: the last playlist anyone made. One
+            // person's names near the one asked for are a range of the
+            // unique index above (R6).
             .index((Self::pos,))
             .index((Self::user_id, Self::pos))
     }

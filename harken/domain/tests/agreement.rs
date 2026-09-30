@@ -138,6 +138,16 @@ fn the_module_verifies_and_is_the_committed_file() {
 /// a log's entries naming those keep naming them, and run the closures the
 /// authority kept for them, which still verify against this schema
 /// (`compat::check_retained`, old module against new, found nothing).
+///
+/// `create_playlist` has moved once more, in the commit "harken-domain:
+/// create_playlist reads its name's siblings, add_song derives once
+/// (R6)" (`docs/plan-perf.md` R6): it reads the person's names from the
+/// name up to `name )` rather than all of them, a range of `(user_id,
+/// name)`. It was `904226b2…9c08` after R1. `compat::check` of the module
+/// before against this one found nothing, and `check_retained` of all
+/// forty-five of the earlier module's closures against this schema found
+/// nothing. `add_song` binds what it derives once each natively and
+/// emits the same bytes (§6 inlines a pure `let`), so it did not move.
 #[test]
 fn every_mutator_hashes_as_it_did_at_spec_v3() {
     let v3 = [
@@ -147,7 +157,7 @@ fn every_mutator_hashes_as_it_did_at_spec_v3() {
         ("describe_person", "15508559e7c540069012698099398b0f74fdb7f66fa59f0ebaf6527be5728692"),
         ("credit_recording", "3e10d18b33c7b703822cb4969ed8b8c483e001f4f882864325893580c780546e"),
         ("remove_media", "885266129e9c3955a8dc12270305b1843e07e43ff195588c3d0cd08bbd02c06b"),
-        ("create_playlist", "904226b29ef9460eb4aa63f480d4c32134c21b0efc9e569d21793d1942839c08"),
+        ("create_playlist", "2eb47c7fe50b8b6d4aca5816c0f1127dbf08ca4b05adffac589fbab2d5edf005"),
         ("add_to_playlist", "29ef6578cbda8f224d8b279461e1544a8fcf910ee259c32379edcbc4da32d2c1"),
         ("add_all_to_playlist", "ca05acf23e131c0ffbecb7f302224cd690a2da78a9d41ef10185dcc846d1587a"),
         ("remove_from_playlist", "e6b2807ee3556a5e85dbab34795fb8abdbfe951d3fa994065fc2542cd6e2230e"),
