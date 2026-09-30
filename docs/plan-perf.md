@@ -1099,3 +1099,67 @@ are named with their numbers: the row representation (a fifth of a
 hydrate, an eighth of an apply — `Rc<[Value]>` positional rows, deferred),
 and the whole-group rebuild of a grouped or nested view (`docs/plan-v4.md`
 §1.13, accepted).
+
+## Round 5 — the four that remained, and a peer alone
+
+Asked for after the pass closed: the four items the closing report named,
+in this order, and — arriving mid-design — that a peer without a server is
+first class, which is `docs/plan-alone.md` and carries item 3 with it.
+
+### R8. A rebase once per pump, not once per frame
+
+`Client::recv` hands each frame to the replica as it arrives and every
+`receive` runs `advance`, so with K pending each live push costs the K
+re-runs (≈ 20 µs each). Decision: the client drains every frame a pump
+received into the inbox first and advances once — `Replica::receive` and
+`receive_facts` stop calling `advance`; a `Replica::settle()` (or the
+existing `retry`) is called once by `Client` after the frames of one pump,
+and by the sans-io tests where they relied on the implicit advance. A
+batch already lands whole. Guard: with K = 100 pending and 50 pushes
+delivered in one pump, the pending intents are re-run once (the `runs()`
+counter), not fifty times; the churn and fleet suites unchanged.
+
+### R9. Grouped and nested views keep an aggregate, not a recount
+
+A grouped node (`artists`: `members.len()`) and a nested one (`composers`:
+`total(works)` over three levels) are rebuilt whole when one member moves,
+O(group). Decision: a maintained aggregate for the projections whose only
+use of a related list or of `members` is `len`, or a `fold` whose step is
+`acc + f(x)` with `f` free of the accumulator (the verifier recognises the
+shape and the plan records it as `Agg::Count` / `Agg::Sum(expr)` on the
+`Related`/group binder); the entry keeps the running number beside the
+dependency it belongs to, and a member arriving or leaving moves it by
+`±f(x)` and re-evaluates the projection over the numbers without
+re-pulling the list. Any other use of the list keeps the rebuild. The
+contract (`view == hydrate`) is unchanged and is what the churn tests hold;
+guard: adding one Bach song at 2,000 songs costs `composers` the rows of
+that song's path, counted, not Bach's; `bench_views` rows before/after.
+
+### R10. Retention
+
+`docs/plan-alone.md` §3: one rule in `ark::retention`, the server's horizon
+advanced by it (cursors per session recorded at `Hello` and ack, the two
+constants as environment variables), the alone peer's authority holding
+no entries in memory. Guard: a server that has sequenced 30,000 entries
+with every peer caught up holds `RETAIN_ENTRIES` in memory and serves a
+peer at cursor 0 the snapshot; a peer heard from yesterday at cursor 100
+keeps the log above 100.
+
+### R11. The row is positional
+
+`Row` is `BTreeMap<String, Value>`; two thirds of a row copy is keys and
+map nodes, and the closing measurement's "same instructions, bigger heap"
+rows are this heap. Decision: `Row` becomes a positional record —
+`Rc<[Value]>` in the table's column order, the column names held once on
+the `Table`, `Row::get(&str)` resolved through the table's name→index map
+— behind an API that keeps `get`, iteration by name, construction from
+pairs and equality by columns, so the wire (`Value::Struct` on encode), the
+indexes, the changes, the overlay and the vectors are unchanged in bytes
+and meaning. The store hands out rows without copying (`Rc` clone). Done
+last and alone, because it touches every store path; guard: the
+allocation counts of a `library` hydrate and an `add_to_playlist` apply
+re-stated, and the closing harness re-run whole.
+
+Order of work: R8, R9 and the server half of R10 in parallel (disjoint
+files); the peer-alone work of `docs/plan-alone.md` after R8 lands (both
+touch `peer.rs`); R11 after everything else.
