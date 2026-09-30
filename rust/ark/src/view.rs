@@ -128,6 +128,13 @@ pub fn answer(plan: &Plan, entries: &[Entry]) -> Vec<Value> {
     entries.iter().filter(|e| e.admitted).take(lim).map(|e| e.node.clone()).collect()
 }
 
+// [`answer`] of entries nobody keeps: the nodes are moved out rather than
+// copied (`docs/plan-perf.md` R5).
+fn answer_owned(plan: &Plan, entries: Vec<Entry>) -> Vec<Value> {
+    let lim = plan.limit.map(|n| n.max(0) as usize).unwrap_or(usize::MAX);
+    entries.into_iter().filter(|e| e.admitted).take(lim).map(|e| e.node).collect()
+}
+
 /// §1.4 What a read answers: [`answer`] of [`pull`], for a caller that
 /// keeps no entries — a query's value, a mutator's `select`. A bare plan
 /// (a mutator's read: a table, a filter, a column order, a limit) has one
@@ -144,7 +151,7 @@ pub fn answer(plan: &Plan, entries: &[Entry]) -> Vec<Value> {
 /// rows of `(user_id, name)` between the name and its numbered siblings.
 pub fn read(sch: &Schema, plan: &Plan, scope: &Scope, st: &dyn Store) -> Result<Vec<Value>, EvalFault> {
     if !plan.is_bare() {
-        return Ok(answer(plan, &pull(sch, plan, scope, st)?));
+        return Ok(answer_owned(plan, pull(sch, plan, scope, st)?));
     }
     let (tbl, filter) = source(sch, plan, &[], scope)?;
     let order: Vec<(&str, Dir)> = plan
@@ -282,9 +289,13 @@ fn entry(
             node: row,
         });
     }
+    // The row is bound by reference — the entry keeps it for its order
+    // keys — and a node that projects never builds the default struct of
+    // the row and its related lists, so a node's own reads copy only what
+    // they read (`docs/plan-perf.md` R5).
     let mut node = scope.node();
     if let Some(x) = plan.row {
-        node.bind(x, row.clone());
+        node.bind_ref(x, &row);
     }
     if let (Some(x), Some(m)) = (plan.members, members) {
         node.bind(x, m);
@@ -302,23 +313,25 @@ fn entry(
         node.bind(l.sym, found);
         id += 1;
     }
-    let mut fields: BTreeMap<FieldName, Value> = match &row {
+    let mut fields: Option<BTreeMap<FieldName, Value>> = plan.project.is_none().then(|| match &row {
         Value::Struct(m) => m.clone(),
         _ => BTreeMap::new(),
-    };
+    });
     for r in &plan.related {
         let on =
             r.on.iter()
                 .map(|(c, e)| Ok((c.clone(), node.eval(e)?)))
                 .collect::<Result<Vec<_>, EvalFault>>()?;
         deps.push((id, Value::List(on.iter().map(|(_, v)| v.clone()).collect())));
-        let kids = pull_at(sch, &r.plan, id + 1, &on, scope, st)?;
-        for k in &kids {
-            deps.extend(k.deps.iter().cloned());
+        let mut kids = pull_at(sch, &r.plan, id + 1, &on, scope, st)?;
+        for k in &mut kids {
+            deps.append(&mut k.deps);
         }
-        let list = Value::List(answer(&r.plan, &kids));
-        node.bind(r.sym, list.clone());
-        fields.insert(r.name.clone(), list);
+        let list = Value::List(answer_owned(&r.plan, kids));
+        if let Some(fields) = &mut fields {
+            fields.insert(r.name.clone(), list.clone());
+        }
+        node.bind(r.sym, list);
         id += 1 + node_count(&r.plan);
     }
     let admitted = match &plan.having {
@@ -331,7 +344,7 @@ fn entry(
     let value = match (&plan.project, admitted) {
         (_, false) => Value::Null,
         (Some(p), true) => node.eval(p)?,
-        (None, true) => Value::Struct(fields),
+        (None, true) => Value::Struct(fields.unwrap_or_default()),
     };
     let order = plan
         .order
@@ -454,13 +467,14 @@ fn spans(f: Option<&Filter>) -> Vec<Span<'_>> {
 }
 
 // Whether a row passes the filter; no filter admits every row. A column
-// the row lacks reads as `Null`.
+// the row lacks reads as `Null`. Each column is compared where it is, not
+// copied out first (`docs/plan-perf.md` R5).
 fn admits(f: Option<&Filter>, row: &Row) -> bool {
     fn go(f: &Filter, row: &Row) -> bool {
-        let field = |c: &str| row.get(c).cloned().unwrap_or(Value::Null);
+        let field = |c: &str| row.get(c).unwrap_or(&Value::Null);
         match f {
-            Filter::Cmp(c, op, v) => cmp(*op, &field(c), v),
-            Filter::In(c, vs) => vs.iter().any(|v| cmp(CmpOp::Eq, &field(c), v)),
+            Filter::Cmp(c, op, v) => cmp(*op, field(c), v),
+            Filter::In(c, vs) => vs.iter().any(|v| cmp(CmpOp::Eq, field(c), v)),
             Filter::All(fs) => fs.iter().all(|g| go(g, row)),
             Filter::Any(fs) => fs.iter().any(|g| go(g, row)),
             Filter::Not(g) => !go(g, row),

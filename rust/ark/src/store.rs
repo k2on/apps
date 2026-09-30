@@ -281,9 +281,11 @@ pub fn matching(st: &dyn Store, tbl: &Table, row: &Row, on: &[FieldName]) -> Opt
 /// §1.4 `SInsert`: write the row unless one matches on the columns (the
 /// key when the list is empty). A match is no change and no refusal.
 pub fn insert(st: &mut dyn Store, tn: &str, row0: Row, on: &[FieldName]) -> Result<Option<Change>, Refusal> {
-    let tbl = st.schema().lookup_table(tn).cloned().ok_or_else(|| Refusal::NoSuchTable(tn.into()))?;
-    let row = complete(&tbl, row0);
-    if matching(st.as_store(), &tbl, &row, on).is_some() {
+    // The table is borrowed from the store's schema until the write, never
+    // copied (`docs/plan-perf.md` R5); so in `upsert` and `update`.
+    let tbl = st.schema().lookup_table(tn).ok_or_else(|| Refusal::NoSuchTable(tn.into()))?;
+    let row = complete(tbl, row0);
+    if matching(st.as_store(), tbl, &row, on).is_some() {
         return Ok(None);
     }
     st.put(tn, row)
@@ -293,9 +295,9 @@ pub fn insert(st: &mut dyn Store, tn: &str, row0: Row, on: &[FieldName]) -> Resu
 /// key columns and take the rest from the new row. `upsert(t, row, [])` is
 /// exactly `put(t, row)`.
 pub fn upsert(st: &mut dyn Store, tn: &str, row0: Row, on: &[FieldName]) -> Result<Option<Change>, Refusal> {
-    let tbl = st.schema().lookup_table(tn).cloned().ok_or_else(|| Refusal::NoSuchTable(tn.into()))?;
-    let mut row = complete(&tbl, row0);
-    if let Some(old) = matching(st.as_store(), &tbl, &row, on) {
+    let tbl = st.schema().lookup_table(tn).ok_or_else(|| Refusal::NoSuchTable(tn.into()))?;
+    let mut row = complete(tbl, row0);
+    if let Some(old) = matching(st.as_store(), tbl, &row, on) {
         for k in &tbl.key {
             if let Some(v) = old.get(k) {
                 row.insert(k.clone(), v.clone());
@@ -309,8 +311,8 @@ pub fn upsert(st: &mut dyn Store, tn: &str, row0: Row, on: &[FieldName]) -> Resu
 /// row under `key` replaced by `row`. The replacement must keep the key;
 /// one that moves it is refused as a malformed row.
 pub fn update(st: &mut dyn Store, tn: &str, key: &[Value], row0: Row) -> Result<Option<Change>, Refusal> {
-    let tbl = st.schema().lookup_table(tn).cloned().ok_or_else(|| Refusal::NoSuchTable(tn.into()))?;
-    let row = complete(&tbl, row0);
+    let tbl = st.schema().lookup_table(tn).ok_or_else(|| Refusal::NoSuchTable(tn.into()))?;
+    let row = complete(tbl, row0);
     if tbl.key_of(&row) != key {
         return Err(Refusal::MalformedRow(tn.into(), "update changed the key".into()));
     }
@@ -332,12 +334,13 @@ pub fn judge_delete(st: &dyn Store, tn: &str, k: &[Value]) -> Result<Option<Chan
 }
 
 // A row is exactly the table's columns, each holding a value of the
-// column's type (`Null` only where nullable).
+// column's type (`Null` only where nullable). The two name sets are
+// compared in place, each way, rather than built per write
+// (`docs/plan-perf.md` R5): a row and a table are a dozen columns.
 fn well_typed(tbl: &Table, row: &Row) -> Result<(), Refusal> {
-    let want: std::collections::BTreeSet<&str> = tbl.columns.iter().map(|c| c.name.as_str()).collect();
-    let have: std::collections::BTreeSet<&str> = row.keys().map(|k| k.as_str()).collect();
-    if want != have {
-        let have: Vec<&str> = have.into_iter().collect();
+    let same = tbl.columns.iter().all(|c| row.contains_key(&c.name)) && row.keys().all(|k| tbl.column(k).is_some());
+    if !same {
+        let have: Vec<&str> = row.keys().map(|k| k.as_str()).collect();
         let want: Vec<&str> = tbl.columns.iter().map(|c| c.name.as_str()).collect();
         return Err(Refusal::MalformedRow(tbl.name.clone(), format!("columns {have:?} are not {want:?}")));
     }

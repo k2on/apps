@@ -499,11 +499,12 @@ impl Peer {
     /// interpreter); kept durable as pending; pushed if linked. The entry's
     /// id, or the refusal — a refusal changes nothing and records nothing.
     pub fn mutate(&mut self, name: &str, args: Args) -> Result<Id, Error> {
+        // Borrowed from the domain, field by field beside the draws: the
+        // mutator's IR is read, never copied (`docs/plan-perf.md` R5).
         let (fh, f) = self.domain.mutator(name)?;
-        let (fh, f) = (fh.clone(), f.clone());
-        let autos = self.autos.draw(&f);
+        let autos = self.autos.draw(f);
         let id = self.autos.new_id();
-        self.client.mutate(id, &self.ctx, &fh, &autos, &args).map_err(Error::Refused)?;
+        self.client.mutate(id, &self.ctx, fh, &autos, &args).map_err(Error::Refused)?;
         self.authored.insert(id);
         self.commit_alone();
         self.collect_rejections();
