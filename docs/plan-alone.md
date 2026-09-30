@@ -177,9 +177,15 @@ says `alone`, `joining` while local intents are pending on an open link,
 halfway confirms from the history what is still pending, and does not
 sequence it twice.
 
+A join makes the local history the joining login's: it is `sign_in`'s rule
+for work authored before anyone signed in, and a server would refuse the
+entries under any other author.
+
 `harken-peer` (`7b9026c`): `--alone` then `--server` over one directory,
 `join` and `leave`. The desktop and the browser (`48abacb`): no server
-named opens `local` alone as nobody (`Options::alone_as_nobody`), the
+named — and, for a page, no harken server behind its own origin, which one
+fetch of `/healthz` with a timeout of a second and a half decides at load —
+opens `local` alone as nobody (`Options::alone_as_nobody`), the
 status line says `alone`, and the connect entry joins in place,
 remembers the server for `local`, and starts that server's sign-in. The
 demo still seeds its library in memory as a peer alone, as it did; it
@@ -229,9 +235,6 @@ sans-io hub and confirmed in 405 ms.
   window is a few file removals wide. The unit test walks a stop after every
   write of the join; the fleet shows kills before the join and after it
   converge.
-- A join rewrites the local entries' author to the joining login. A peer
-  alone under one name joining as another person makes its history that
-  person's; there is no question asked.
 - A `replica` record written alone before the fork existed opens with its
   store as the fork at its cursor and naming no log: it has no history to
   hand a server, and a join sends a `Hello` at that cursor naming none,

@@ -191,7 +191,9 @@ if peer.epoch() != introduced_on { /* a new connection: say who you are again */
   store is rolled back to the fork by the entries' own facts, newest first,
   and every local entry is re-queued as pending, in order, authored as
   `login` (or as nobody, for `sign_in` to make the signer's) with nothing
-  drawn again; then it connects, the `Hello` names the fork's log, and the
+  drawn again — the local history becomes the joining login's, which is
+  `sign_in`'s rule for work nobody authored, and the only author a server
+  would accept it under; then it connects, the `Hello` names the fork's log, and the
   intents are pushed and rebased as offline work is — landing after
   whatever the server has, a refusal dropped with its reason. A view is
   told a rebase by changes, not `Rebuilt`. It is written in this order: the

@@ -116,6 +116,9 @@ pub enum Message {
     /// Join that server, in place, and sign in there
     /// (`docs/plan-alone.md` §4).
     Connect,
+    /// Whether the page's own origin is a harken server, answered: the
+    /// window it opens on — that server's, or alone.
+    Started(Option<String>),
     /// The sign-in came back, one way or the other.
     SignedIn(Result<Login, String>),
     SignOut,
@@ -399,9 +402,31 @@ impl App {
         #[cfg(not(feature = "demo"))]
         {
             let (named, user) = auth::config();
-            let Some(server) = named.or_else(auth::joined) else {
-                return (App::alone(user), Task::none());
-            };
+            match auth::start(named, auth::joined(), auth::origin()) {
+                auth::Start::Server(server) => App::open_server(server, user),
+                auth::Start::Alone => (App::alone(user), Task::none()),
+                // A page with no `?server=`: whether whoever served it is a
+                // harken server is one fetch of its `/healthz` away. Until it
+                // answers the window is alone in memory, writing nothing.
+                auth::Start::Ask(origin) => {
+                    let peer = ark_client::Peer::open_memory(Domain::new(&harken_domain::module()), ark_client::Options::alone_as_nobody())
+                        .expect("a peer in memory opens");
+                    let mut app = App::with_peer(Peer::open(peer), String::new(), None);
+                    app.user = user;
+                    app.note = format!("looking for a server at {origin}\u{2026}");
+                    let probe = auth::answers(format!("{origin}/healthz"));
+                    let task = Task::perform(probe, move |ok| Message::Started(auth::decide(None, None, Some(origin.clone()), |_| ok)));
+                    (app, task)
+                }
+            }
+        }
+    }
+
+    /// A window over `server`'s replica on this device, signed in as the
+    /// login it remembers there, or signed out.
+    #[cfg(not(feature = "demo"))]
+    fn open_server(server: String, user: Option<String>) -> (App, Task<Message>) {
+        {
             let login = auth::logins().recall(&server);
             let domain = Domain::new(&harken_domain::module());
             let (client, note) = match auth::open(domain.clone(), &server, auth::options(login.as_ref())) {
@@ -1080,6 +1105,21 @@ impl App {
         match message {
             Message::SignIn => return self.start_sign_in(),
             Message::ConnectUrl(url) => self.connect = url,
+            Message::Started(server) => {
+                #[cfg(not(feature = "demo"))]
+                {
+                    let (mut app, task) = match server {
+                        Some(server) => App::open_server(server, self.user.clone()),
+                        None => (App::alone(self.user.clone()), Task::none()),
+                    };
+                    app.window = self.window;
+                    *self = app;
+                    self.arrive();
+                    return task;
+                }
+                #[cfg(feature = "demo")]
+                let _ = server;
+            }
             Message::Connect => return self.connect(),
             Message::SignedIn(outcome) => {
                 self.signing_in = false;

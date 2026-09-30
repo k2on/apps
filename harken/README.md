@@ -107,8 +107,11 @@ button.
 
     nix run .#harken-iced            # no --server: alone
 
-With no `--server` (in a browser, no `?server=`) the window opens **alone**,
-on this device's own replica in a fixed place — `local` under
+With no `--server` the desktop opens **alone**. A page with no `?server=`
+first asks whoever served it: when its `/healthz` answers — a harken
+server serving its own page — it opens on that server, as it always did;
+from anywhere else (GitHub Pages, a file) it opens alone. Alone is this
+device's own replica in a fixed place — `local` under
 `$XDG_DATA_HOME/harken`, or `harken:local` in the page's `localStorage` —
 and it is not a demo: the peer is its own authority, every change is
 sequenced as it is made and kept, and the status line says `alone`. The

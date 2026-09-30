@@ -65,6 +65,92 @@ pub fn config() -> (Option<String>, Option<String>) {
     }
 }
 
+/// Where a window starts (`docs/plan-alone.md` §4).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Start {
+    /// A server named, or the one `local` joined.
+    Server(String),
+    /// A page with no server named: ask whoever served it whether it is a
+    /// harken server — a household opens its server's address and is
+    /// connected, as it always was — and start alone if it is not (GitHub
+    /// Pages, a file).
+    Ask(String),
+    /// Nothing named and nothing to ask: a desktop given no `--server`.
+    Alone,
+}
+
+/// Where a window starts, from what it was told (`--server`, `?server=`),
+/// what `local` joined, and the page's origin where there is one: named,
+/// then joined, then ask the origin, then alone.
+#[cfg_attr(feature = "demo", allow(dead_code))]
+pub fn start(named: Option<String>, joined: Option<String>, origin: Option<String>) -> Start {
+    match (named.or(joined), origin) {
+        (Some(server), _) => Start::Server(server),
+        (None, Some(origin)) => Start::Ask(origin),
+        (None, None) => Start::Alone,
+    }
+}
+
+/// [`start`] carried through: `answers` is whether a URL answers, asked of
+/// `{origin}/healthz` only when there is nothing else to go on. The server
+/// to open, or `None` for alone.
+#[cfg_attr(feature = "demo", allow(dead_code))]
+pub fn decide(named: Option<String>, joined: Option<String>, origin: Option<String>, answers: impl FnOnce(&str) -> bool) -> Option<String> {
+    match start(named, joined, origin) {
+        Start::Server(server) => Some(server),
+        Start::Ask(origin) => answers(&format!("{origin}/healthz")).then_some(origin),
+        Start::Alone => None,
+    }
+}
+
+/// The page's origin, where it has one a fetch can reach; `None` on the
+/// desktop and for a page opened from a file.
+#[cfg_attr(feature = "demo", allow(dead_code))]
+pub fn origin() -> Option<String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        None
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let origin = web_sys::window()?.location().origin().ok()?;
+        origin.starts_with("http").then(|| origin.trim_end_matches('/').to_string())
+    }
+}
+
+/// Whether `url` answers a GET with a success within a second and a half.
+/// One fetch, and a timeout, because a page from somewhere that is not a
+/// server must not sit waiting to find out.
+#[cfg(target_arch = "wasm32")]
+pub fn answers(url: String) -> impl std::future::Future<Output = bool> {
+    use wasm_bindgen::prelude::*;
+    #[wasm_bindgen(inline_js = r#"
+export function probe(url, ms, done) {
+  const stop = new AbortController();
+  const timer = setTimeout(() => stop.abort(), ms);
+  fetch(url, { signal: stop.signal, cache: "no-store" })
+    .then((r) => { clearTimeout(timer); done(r.ok); })
+    .catch(() => { clearTimeout(timer); done(false); });
+}
+"#)]
+    extern "C" {
+        fn probe(url: &str, ms: u32, done: &JsValue);
+    }
+    let (tx, rx) = iced::futures::channel::oneshot::channel();
+    let done = Closure::once_into_js(move |ok: bool| {
+        let _ = tx.send(ok);
+    });
+    probe(&url, 1_500, &done);
+    async move { rx.await.unwrap_or(false) }
+}
+
+/// The desktop never asks: it has no origin ([`origin`]).
+#[cfg(not(target_arch = "wasm32"))]
+#[cfg_attr(feature = "demo", allow(dead_code))]
+pub fn answers(_: String) -> impl std::future::Future<Output = bool> {
+    std::future::ready(false)
+}
+
 /// The server the `local` replica joined, if it has: the next start opens
 /// there, over the same place, rather than alone — opening it alone again
 /// would be leaving it.
@@ -189,6 +275,31 @@ mod tests {
 
     /// One server is one directory whatever it is spelt with, and two servers
     /// are two. Falsified by keeping the trailing slash: the first fails.
+    /// Where a window starts: a server named wins without asking anybody,
+    /// then the one `local` joined; a page with neither asks its own origin
+    /// and opens there when `/healthz` answers — a harken server serving
+    /// its page — and alone when it does not (GitHub Pages, a file); a
+    /// desktop with neither, and no origin, is alone without asking.
+    /// Falsified by `decide` opening the origin whatever it answered: the
+    /// page from elsewhere opens a server that is not there.
+    #[test]
+    fn a_page_opens_on_the_server_that_served_it_and_alone_elsewhere() {
+        let s = |x: &str| Some(x.to_string());
+        let never = |_: &str| -> bool { panic!("nothing to ask") };
+        assert_eq!(decide(s("http://a"), s("http://b"), s("http://c"), never), s("http://a"));
+        assert_eq!(decide(None, s("http://b"), s("http://c"), never), s("http://b"));
+        let mut asked = vec![];
+        let served = decide(None, None, s("http://home.lan"), |u| {
+            asked.push(u.to_string());
+            true
+        });
+        assert_eq!(served, s("http://home.lan"));
+        assert_eq!(asked, ["http://home.lan/healthz"]);
+        assert_eq!(decide(None, None, s("https://pages.example"), |_| false), None);
+        assert_eq!(decide(None, None, None, never), None);
+        assert_eq!(start(None, None, None), Start::Alone);
+    }
+
     #[test]
     fn a_server_is_one_directory() {
         assert_eq!(server_key("http://127.0.0.1:8787/"), server_key("http://127.0.0.1:8787"));
