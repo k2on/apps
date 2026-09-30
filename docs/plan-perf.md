@@ -1023,15 +1023,17 @@ write that follows is the journal's own compaction (a snapshot at the new
 horizon; `LogFile::write` already wrote one when the horizon moved), made,
 like every write, before anything queued is sent.
 
-**A finding, answered in the hub.** A peer below the horizon with nothing
-pending was sent the snapshot and then *nothing*: the machine sends a
-connection one message per turn, and after `SnapshotOf` the client has no
-`has_more` to say `Hello` again with — it sat at the horizon of a quiet
-server until somebody else spoke. The hub now follows a snapshot below
-the head with an empty `Push` turn from that connection, which sequences
-nothing and makes the machine send the first page (`Hub::after`). It
-belongs in `protocol.rs`'s fanout (send the first page after a
-`BelowHorizon` in the same turn); that file was not this round's.
+**A finding, fixed in the machine.** A peer below the horizon with
+nothing pending was sent the snapshot and then *nothing*: the machine
+sent a connection one message per turn, and after `SnapshotOf` the client
+has no `has_more` to say `Hello` again with — it sat at the horizon of a
+quiet server until somebody else spoke. `Server::fanout` now follows a
+snapshot below the head with the first page in the same turn
+(`ark/tests/below_the_horizon.rs`); frame forms are unchanged, and the
+`protocol/` vectors with them. (A first version patched it in the hub
+with an empty `Push` turn; that is gone.) `converged` in the fleet reads
+accepted ids from `log.ids` as well as `log.entries`, so an intent
+compacted below the horizon is accounted for without the scenario's help.
 
 **Measured** (`hub::tests::a_caught_up_hub_holds_retain_entries_and_serves_the_snapshot`,
 debug build, the demo's `create_playlist` in thirty offline bursts of a
@@ -1070,9 +1072,7 @@ floor; the restart. `compacting_in_place_is_compacting` holds
 `HARKEN_RETAIN_ENTRIES=50` and `HARKEN_RETAIN_DAYS=0`, three peers, one
 black-holed through two hundred entries, compacted past it, served the
 snapshot on return, its ten landing after the two hundred, converged;
-scenario 5 unchanged and green. `converged` reads entries, so an accepted
-id below the horizon is checked in `log.ids` by the scenario and then
-forgotten for it.
+scenario 5 unchanged and green.
 
 **Not verified, and for the coordinator.** A *sent* page is not a
 *received* one: a black-holed connection's recorded place runs ahead of
