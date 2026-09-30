@@ -48,6 +48,13 @@
 //! the file there and, if it skipped anything, compacts, so what it appends
 //! next follows on from what it read.
 //!
+//! **The logic is `ark::journal`'s** (`docs/plan-alone.md` §2), in its
+//! server layout (`Layout::server`): one page appended to and a snapshot
+//! compaction. A peer alone keeps its local history with the same records
+//! in the other layout, through its own storage. What is here is the
+//! directory — files written whole by a rename, the one page appended to
+//! and synced — and the names and messages this server has always had.
+//!
 //! A data directory written before the journal existed — `log.ark-log`
 //! alone — is a snapshot with nothing after it, and opens unchanged.
 //!
@@ -70,18 +77,19 @@
 //! returned). A server restarted in either draws another name, and its
 //! peers are sent its snapshot once.
 
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, Context, Result};
 use ark::canon;
-use ark::log::{snapshot_of, Entry, Facts, Log, Seq};
-use ark::protocol::{change_from_value, change_value, entry_from_value, entry_value};
+use ark::journal::{self, Journal, Keys, Layout};
+use ark::log::{Entry, Facts, Log, Seq};
 use ark::schema::Schema;
-use ark::store::{MemoryStore, Store};
-use ark::value::{FieldName, Id, Value};
+use ark::value::Value;
+
+pub use ark::journal::{encode_record, log_to_value, record_value, Replayed};
 
 /// The snapshot's file.
 pub fn path_of(dir: &Path) -> PathBuf {
@@ -99,222 +107,102 @@ pub const FILE: &str = "log.ark-log";
 /// The journal's name.
 pub const JOURNAL: &str = "log.ark-journal";
 
-/// One entry as the log file and the journal both carry it.
-pub fn record_value(n: Seq, e: &Entry, facts: &Facts) -> Value {
-    Value::record(vec![
-        ("seq", Value::int(n)),
-        ("entry", entry_value(e)),
-        ("facts", Value::list(facts.iter().map(change_value).collect())),
-    ])
-}
-
-/// A journal record's bytes: the length, then the record.
-pub fn encode_record(n: Seq, e: &Entry, facts: &Facts) -> Vec<u8> {
-    let body = canon::encode(&record_value(n, e, facts));
-    let mut out = Vec::with_capacity(body.len() + 4);
-    out.extend_from_slice(&(body.len() as u32).to_be_bytes());
-    out.extend_from_slice(&body);
-    out
-}
-
-/// A log as a value; its file form is `canon::encode` of this.
-pub fn log_to_value(log: &Log) -> Value {
-    let store = &log.base.store;
-    let rows: Vec<(String, Value)> = store
-        .table_names()
-        .into_iter()
-        .map(|t| {
-            let rs = store.scan(&t).into_iter().map(Value::Struct).collect();
-            (t, Value::list(rs))
-        })
-        .collect();
-    let entries: Vec<Value> = log.entries.iter().map(|(n, (e, f))| record_value(*n, e, f)).collect();
-    let ids: Vec<Value> = log
-        .ids
-        .iter()
-        .map(|(id, n)| Value::record(vec![("id", Value::Id(*id)), ("seq", Value::int(*n))]))
-        .collect();
-    let mut base = vec![
-        ("seq", Value::int(log.base.seq)),
-        ("hash", Value::bytes(log.base.hash.clone())),
-        ("rows", Value::record(rows)),
-    ];
-    // Unnamed, it is written as a file was before logs had names.
-    if let Some(id) = log.id() {
-        base.push(("log", Value::Id(id)));
-    }
-    Value::record(vec![
-        ("t", Value::text("log")),
-        ("base", Value::record(base)),
-        ("entries", Value::list(entries)),
-        ("ids", Value::list(ids)),
-    ])
-}
-
-fn fields(v: &Value) -> Result<&BTreeMap<FieldName, Value>> {
-    match v {
-        Value::Struct(m) => Ok(m),
-        other => bail!("expected a struct, found {other:?}"),
-    }
-}
-
-fn need<'a>(m: &'a BTreeMap<FieldName, Value>, k: &str) -> Result<&'a Value> {
-    m.get(k).with_context(|| format!("missing field {k}"))
-}
-
-fn int(v: &Value) -> Result<i64> {
-    match v {
-        Value::Int(n) => Ok(*n),
-        other => bail!("expected an int, found {other:?}"),
-    }
-}
-
-fn items(v: &Value) -> Result<&[Value]> {
-    match v {
-        Value::List(xs) => Ok(xs),
-        other => bail!("expected a list, found {other:?}"),
-    }
-}
-
 /// One entry back from its value.
 pub fn record_from_value(v: &Value) -> Result<(Seq, Entry, Facts)> {
-    let im = fields(v)?;
-    let n = int(need(im, "seq")?)?;
-    let e = entry_from_value(need(im, "entry")?).with_context(|| format!("entry {n}"))?;
-    let facts = items(need(im, "facts")?)?
-        .iter()
-        .map(change_from_value)
-        .collect::<Result<Vec<_>, _>>()
-        .with_context(|| format!("facts of {n}"))?;
-    Ok((n, e, facts))
+    journal::record_from_value(v).map_err(|e| anyhow!(e))
 }
 
 /// A log from its value, over the module's schema.
 pub fn log_from_value(schema: &Schema, v: &Value) -> Result<Log> {
-    let m = fields(v)?;
-    match need(m, "t")? {
-        Value::Text(t) if t == "log" => {}
-        other => bail!("not a log file: t = {other:?}"),
-    }
-    let base = fields(need(m, "base")?)?;
-    let store = MemoryStore::from_value(schema.clone(), need(base, "rows")?);
-    let log_id = match base.get("log") {
-        None => None,
-        Some(Value::Id(i)) => Some(*i),
-        Some(other) => bail!("the log's identity is not an id: {other:?}"),
-    };
-    let snapshot = snapshot_of(int(need(base, "seq")?)?, store).of_log(log_id);
-    match need(base, "hash")? {
-        Value::Bytes(h) if *h == snapshot.hash => {}
-        _ => bail!("the snapshot's hash does not match its rows"),
-    }
-    let mut log = Log {
-        base: snapshot,
-        entries: BTreeMap::new(),
-        ids: BTreeMap::new(),
-    };
-    for item in items(need(m, "entries")?)? {
-        let (n, e, facts) = record_from_value(item)?;
-        log.entries.insert(n, (e, facts));
-    }
-    for item in items(need(m, "ids")?)? {
-        let im = fields(item)?;
-        let id = match need(im, "id")? {
-            Value::Id(i) => *i,
-            other => bail!("expected an id, found {other:?}"),
-        };
-        log.ids.insert(id, int(need(im, "seq")?)?);
-    }
-    if !log.contiguous() {
-        bail!("the entries do not run without a gap from {} to {}", log.horizon() + 1, log.head_seq());
-    }
-    Ok(log)
-}
-
-/// Read a file, or `None` where there is none.
-fn read_opt(path: &Path) -> Result<Option<Vec<u8>>> {
-    match fs::read(path) {
-        Ok(b) => Ok(Some(b)),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(e).with_context(|| format!("reading {}", path.display())),
-    }
-}
-
-/// The snapshot, if there is one.
-fn read_snapshot(dir: &Path, schema: &Schema) -> Result<Option<(Log, usize)>> {
-    let path = path_of(dir);
-    let Some(bytes) = read_opt(&path)? else { return Ok(None) };
-    let v = canon::decode(&bytes).with_context(|| format!("decoding {}", path.display()))?;
-    let log = log_from_value(schema, &v).with_context(|| format!("reading {}", path.display()))?;
-    Ok(Some((log, bytes.len())))
-}
-
-/// What reading a journal over a log found.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Replayed {
-    /// Records appended to the log.
-    pub applied: usize,
-    /// Records at or below the snapshot's head, ahead of the rest: what a
-    /// compaction that stopped before emptying the journal left.
-    pub stale: usize,
-    /// Where the good records end: the file's length, or the offset of the
-    /// first record that is short, does not decode, or does not follow on.
-    pub end: u64,
-    /// The file's length as read.
-    pub len: u64,
-}
-
-impl Replayed {
-    /// Whether everything after `end` is a torn tail.
-    pub fn torn(&self) -> bool {
-        self.end < self.len
-    }
+    journal::log_from_value(schema, v).map_err(|e| anyhow!(e))
 }
 
 /// Append a journal's records to `log`, in order, stopping at the first
 /// that is short, does not decode, or does not carry the next sequence
 /// (the module docs).
 pub fn replay_journal(log: &mut Log, bytes: &[u8]) -> Replayed {
-    let mut out = Replayed {
-        len: bytes.len() as u64,
-        ..Replayed::default()
-    };
-    let mut at = 0usize;
-    while at < bytes.len() {
-        let Some(head) = bytes.get(at..at + 4) else { break };
-        let n = u32::from_be_bytes([head[0], head[1], head[2], head[3]]) as usize;
-        let Some(body) = bytes.get(at + 4..at + 4 + n) else { break };
-        let Ok((seq, e, facts)) = canon::decode(body).map_err(anyhow::Error::from).and_then(|v| record_from_value(&v)) else {
-            break;
-        };
-        if seq == log.head_seq() + 1 {
-            log.append(e, facts);
-            out.applied += 1;
-        } else if seq <= log.head_seq() && out.applied == 0 {
-            out.stale += 1;
-        } else {
-            break;
+    journal::replay_into(log, bytes)
+}
+
+/// A data directory as `ark::journal` keeps a log in it: a record is a file,
+/// saved whole by a rename, and the journal is appended to through a handle
+/// kept open once it exists.
+#[derive(Debug)]
+struct Files {
+    dir: PathBuf,
+    open: HashMap<String, File>,
+}
+
+impl Files {
+    fn new(dir: &Path) -> Files {
+        Files {
+            dir: dir.to_path_buf(),
+            open: HashMap::new(),
         }
-        at += 4 + n;
     }
-    out.end = at as u64;
-    out
+
+    fn handle(&mut self, key: &str, create: bool) -> std::io::Result<&mut File> {
+        if !self.open.contains_key(key) {
+            let path = self.dir.join(key);
+            let existed = path.exists();
+            let f = OpenOptions::new().create(create).append(true).open(&path)?;
+            if !existed {
+                // The file's name is durable only once its directory is.
+                sync_dir(&self.dir)?;
+            }
+            self.open.insert(key.to_string(), f);
+        }
+        Ok(self.open.get_mut(key).expect("inserted above"))
+    }
+}
+
+fn say(e: impl std::fmt::Display, what: &str, path: &Path) -> String {
+    format!("{what} {}: {e}", path.display())
+}
+
+impl Keys for Files {
+    fn load(&self, key: &str) -> Result<Option<Vec<u8>>, String> {
+        let path = self.dir.join(key);
+        match fs::read(&path) {
+            Ok(b) => Ok(Some(b)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(say(e, "reading", &path)),
+        }
+    }
+
+    fn save(&mut self, key: &str, bytes: &[u8]) -> Result<(), String> {
+        write_whole(&self.dir, key, bytes).map_err(|e| format!("{e:#}"))
+    }
+
+    fn remove(&mut self, key: &str) -> Result<(), String> {
+        self.open.remove(key);
+        let path = self.dir.join(key);
+        match fs::remove_file(&path) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(say(e, "removing", &path)),
+            _ => Ok(()),
+        }
+    }
+
+    fn append(&mut self, key: &str, bytes: &[u8]) -> Result<(), String> {
+        let path = self.dir.join(key);
+        let f = self.handle(key, true).map_err(|e| say(e, "opening", &path))?;
+        f.write_all(bytes).map_err(|e| say(e, "appending to", &path))?;
+        f.sync_data().map_err(|e| say(e, "syncing", &path))
+    }
+
+    fn truncate(&mut self, key: &str, len: usize) -> Result<(), String> {
+        let path = self.dir.join(key);
+        let f = self.handle(key, false).map_err(|e| say(e, "opening", &path))?;
+        f.set_len(len as u64).map_err(|e| say(e, "truncating", &path))?;
+        f.sync_all().map_err(|e| say(e, "syncing", &path))
+    }
 }
 
 /// Read the log back, if there is one: the snapshot, then the journal (the
 /// module docs). Reads, never writes — a test, or a tool beside a running
 /// server, sees a whole prefix of what the server has written.
 pub fn load(dir: &Path, schema: &Schema) -> Result<Option<Log>> {
-    let snapshot = read_snapshot(dir, schema)?;
-    let journal = read_opt(&journal_path_of(dir))?;
-    if snapshot.is_none() && journal.as_ref().is_none_or(|j| j.is_empty()) {
-        return Ok(None);
-    }
-    let mut log = snapshot.map_or_else(|| Log::empty(schema.clone()), |(l, _)| l);
-    if let Some(bytes) = journal {
-        replay_journal(&mut log, &bytes);
-    }
-    Ok(Some(log))
+    journal::load(&Files::new(dir), &Layout::server(), schema).map_err(|e| anyhow!(e))
 }
 
 /// Write `bytes` as `dir/name`: to a temporary name, synced, renamed over
@@ -347,29 +235,15 @@ fn sync_dir(_: &Path) -> std::io::Result<()> {
 /// follow would be read on top of it.
 pub fn save(dir: &Path, log: &Log) -> Result<()> {
     write_whole(dir, FILE, &canon::encode(&log_to_value(log)))?;
-    match fs::remove_file(journal_path_of(dir)) {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e).with_context(|| format!("removing {}", journal_path_of(dir).display())),
-        _ => Ok(()),
-    }
+    Files::new(dir).remove(JOURNAL).map_err(|e| anyhow!(e))
 }
 
 /// A data directory's log, open for writing: what the disk holds, so that
 /// [`LogFile::write`] appends what moved since and nothing else.
 #[derive(Debug)]
 pub struct LogFile {
-    dir: PathBuf,
-    /// Open for appending once there is anything to append.
-    journal: Option<File>,
-    snapshot_bytes: u64,
-    journal_bytes: u64,
-    /// The head and horizon of the log as last written.
-    head: Seq,
-    horizon: Seq,
-    /// The log's identity as the snapshot on the disk has it.
-    named: Option<Id>,
-    /// The journal has bytes in it that are not whole records — an append
-    /// failed part-way — so the next write is a snapshot, which empties it.
-    due: bool,
+    files: Files,
+    journal: Journal,
     /// Every byte written, snapshots and journal both: what a test counts.
     pub written: u64,
 }
@@ -383,49 +257,30 @@ impl LogFile {
     /// whole.
     pub fn open(dir: &Path, schema: &Schema) -> Result<(LogFile, Option<Log>)> {
         fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
-        let snapshot = read_snapshot(dir, schema)?;
-        let jpath = journal_path_of(dir);
-        let journal = read_opt(&jpath)?;
-        let snapshot_bytes = snapshot.as_ref().map_or(0, |(_, n)| *n as u64);
-        let mut log = snapshot.as_ref().map(|(l, _)| l.clone());
-        let mut replayed = Replayed::default();
-        if let Some(bytes) = &journal {
+        let mut files = Files::new(dir);
+        let mut got = vec![];
+        let (journal, opened) = Journal::open(&mut files, Layout::server(), schema, |_, e, f| got.push((e, f))).map_err(|e| anyhow!(e))?;
+        if let Some((_, dropped)) = opened.torn {
+            eprintln!(
+                "ark-server: {} ends in {dropped} bytes that are not a whole record; dropped",
+                journal_path_of(dir).display()
+            );
+        }
+        let applied = !got.is_empty();
+        let mut log = opened.snapshot.clone();
+        if applied {
             let l = log.get_or_insert_with(|| Log::empty(schema.clone()));
-            replayed = replay_journal(l, bytes);
-        }
-        let mut file = LogFile {
-            dir: dir.to_path_buf(),
-            journal: None,
-            snapshot_bytes,
-            journal_bytes: replayed.end,
-            head: log.as_ref().map_or(0, Log::head_seq),
-            horizon: log.as_ref().map_or(0, Log::horizon),
-            named: log.as_ref().and_then(Log::id),
-            due: false,
-            written: 0,
-        };
-        if journal.is_some() {
-            let f = OpenOptions::new()
-                .append(true)
-                .open(&jpath)
-                .with_context(|| format!("opening {}", jpath.display()))?;
-            if replayed.torn() {
-                eprintln!(
-                    "ark-server: {} ends in {} bytes that are not a whole record; dropped",
-                    jpath.display(),
-                    replayed.len - replayed.end
-                );
-                f.set_len(replayed.end).with_context(|| format!("truncating {}", jpath.display()))?;
-                f.sync_all().with_context(|| format!("syncing {}", jpath.display()))?;
+            for (e, f) in got {
+                l.append(e, f);
             }
-            file.journal = Some(f);
         }
-        if replayed.stale > 0 {
+        let mut file = LogFile { files, journal, written: 0 };
+        if opened.stale > 0 {
             if let Some(l) = &log {
                 file.snapshot(l)?;
             }
         }
-        if snapshot.is_none() && replayed.applied == 0 {
+        if opened.snapshot.is_none() && !applied {
             log = None;
         }
         Ok((file, log))
@@ -444,79 +299,35 @@ impl LogFile {
     /// the disk from the first write (the module docs). Where there is no
     /// snapshot yet, the first append is what writes one.
     pub fn write(&mut self, log: &Log) -> Result<()> {
-        let renamed = log.id() != self.named && self.snapshot_bytes > 0;
-        if self.due || renamed || log.horizon() != self.horizon || log.head_seq() < self.head {
-            return self.snapshot(log);
-        }
-        if log.head_seq() == self.head {
-            return Ok(());
-        }
-        let mut buf = vec![];
-        for (n, (e, f)) in log.entries.range(self.head + 1..) {
-            buf.extend_from_slice(&encode_record(*n, e, f));
-        }
-        if let Err(e) = self.append(&buf) {
-            // Some of it may be on the disk and not whole.
-            self.due = true;
-            return Err(e);
-        }
-        self.written += buf.len() as u64;
-        self.journal_bytes += buf.len() as u64;
-        self.head = log.head_seq();
-        if self.journal_bytes > self.snapshot_bytes {
-            if let Err(e) = self.snapshot(log) {
-                eprintln!("ark-server: could not compact the log: {e:#}");
+        let out = self.journal.write(&mut self.files, log);
+        self.written = self.journal.written;
+        match out {
+            Ok(None) => Ok(()),
+            Ok(Some(e)) => {
+                eprintln!("ark-server: could not compact the log: {e}");
+                Ok(())
             }
+            Err(e) => Err(anyhow!(e)),
         }
-        Ok(())
-    }
-
-    fn append(&mut self, buf: &[u8]) -> Result<()> {
-        let path = journal_path_of(&self.dir);
-        if self.journal.is_none() {
-            let f = OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&path)
-                .with_context(|| format!("opening {}", path.display()))?;
-            // The file's name is durable only once its directory is.
-            sync_dir(&self.dir).with_context(|| format!("syncing {}", self.dir.display()))?;
-            self.journal = Some(f);
-        }
-        let f = self.journal.as_mut().expect("opened above");
-        f.write_all(buf).with_context(|| format!("appending to {}", path.display()))?;
-        f.sync_data().with_context(|| format!("syncing {}", path.display()))
     }
 
     /// Compact: the log whole as the snapshot, renamed into place, then
     /// the journal emptied — so a stop between leaves records the snapshot
     /// already holds, which a reader skips.
     pub fn snapshot(&mut self, log: &Log) -> Result<()> {
-        let bytes = canon::encode(&log_to_value(log));
-        write_whole(&self.dir, FILE, &bytes)?;
-        self.written += bytes.len() as u64;
-        self.snapshot_bytes = bytes.len() as u64;
-        self.head = log.head_seq();
-        self.horizon = log.horizon();
-        self.named = log.id();
-        if let Some(f) = &self.journal {
-            let path = journal_path_of(&self.dir);
-            f.set_len(0).with_context(|| format!("emptying {}", path.display()))?;
-            f.sync_all().with_context(|| format!("syncing {}", path.display()))?;
-        }
-        self.journal_bytes = 0;
-        self.due = false;
-        Ok(())
+        let out = self.journal.snapshot(&mut self.files, log);
+        self.written = self.journal.written;
+        out.map_err(|e| anyhow!(e))
     }
 
     /// The snapshot's size and the journal's, as last written.
     pub fn sizes(&self) -> (u64, u64) {
-        (self.snapshot_bytes, self.journal_bytes)
+        self.journal.sizes()
     }
 
     /// The head as last written.
     pub fn head(&self) -> Seq {
-        self.head
+        self.journal.head()
     }
 }
 
