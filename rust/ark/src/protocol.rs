@@ -518,6 +518,15 @@ pub struct Client {
     pub heard: Vec<Vec<u8>>,
     pub denied: Option<String>,
     pub agreed: Vec<(Seq, bool)>,
+    /// A page arrived since the last [`Client::settle`]: the facts it
+    /// leaves the replica waiting on are asked for there, once the inbox
+    /// has been applied (R8).
+    pub paged: bool,
+    /// A page said there is more: the `Hello` that asks for it is said at
+    /// the settle, at the cursor the page moved the replica to. Said at
+    /// the frame, before the page is applied, it would name the old cursor
+    /// and be sent the same page again.
+    pub more: bool,
 }
 
 impl Client {
@@ -535,6 +544,8 @@ impl Client {
             heard: vec![],
             denied: None,
             agreed: vec![],
+            paged: false,
+            more: false,
         }
     }
 
@@ -572,6 +583,7 @@ impl Client {
         self.linked = true;
         self.epoch += 1;
         self.out.clear();
+        self.more = false;
         self.heard.clear();
         let hello = self.hello();
         self.emit(hello);
@@ -584,6 +596,7 @@ impl Client {
     pub fn disconnected(&mut self) {
         self.linked = false;
         self.out.clear();
+        self.more = false;
         self.heard.clear();
     }
 
@@ -601,7 +614,12 @@ impl Client {
         self.replica.hold(procs.iter().cloned());
     }
 
-    /// §12.2 A frame from the server.
+    /// §12.2 A frame from the server. What it brings of the log — a page,
+    /// facts, acknowledgements, closures — is placed in the replica's inbox
+    /// and applied by [`Client::settle`], which the driver calls once after
+    /// the last frame of a pump (`docs/plan-perf.md` R8). Only the driver
+    /// knows where a pump ends: frames reach this one at a time, and
+    /// advancing on each cost the K pending intents' re-runs per frame.
     pub fn recv(&mut self, msg: ServerMsg) {
         match msg {
             ServerMsg::Heard { frame } => self.heard.push(frame),
@@ -609,6 +627,7 @@ impl Client {
                 self.denied = Some(reason);
                 self.linked = false;
                 self.out.clear();
+                self.more = false;
             }
             ServerMsg::Batch { items, has_more, log_id } => {
                 let r = &mut self.replica;
@@ -619,15 +638,14 @@ impl Client {
                 if r.log_id.is_none() {
                     r.log_id = log_id;
                 }
-                r.receive_batch(items);
-                let needs = r.needs();
-                if !needs.is_empty() {
-                    self.emit(ClientMsg::NeedFacts { seqs: needs });
+                for (n, e, f) in items {
+                    match f {
+                        Some(f) => r.receive_with(n, e, f),
+                        None => r.receive(n, e),
+                    }
                 }
-                if has_more {
-                    let hello = self.hello();
-                    self.emit(hello);
-                }
+                self.paged = true;
+                self.more |= has_more;
             }
             ServerMsg::FactsFor { items } => {
                 for (n, f) in items {
@@ -642,7 +660,14 @@ impl Client {
             // are kept too, ahead of any the replay makes: a snapshot
             // replaces what is confirmed, not what this peer was told about
             // its own intents.
+            //
+            // What earlier frames of this pump placed is applied first, so
+            // that everything before the snapshot is exactly what it was
+            // when each frame advanced (an acknowledgement in the inbox
+            // leaves pending as a confirmed intent, not as one the replay
+            // runs again); the fresh replica has an empty inbox.
             ServerMsg::SnapshotOf { seq, rows, log_id, .. } => {
+                self.replica.settle();
                 let mut st = MemoryStore::empty(self.schema.clone());
                 for (t, vs) in rows {
                     for v in vs {
@@ -666,16 +691,37 @@ impl Client {
                 }
             }
             ServerMsg::Reject { id, reason } => self.replica.reject(&id, Refusal::Refused(reason)),
-            // New closures may unblock entries waiting in the inbox. A
-            // received closure replaces one already held under its hash
-            // (the spec's left-biased union).
+            // New closures may unblock entries waiting in the inbox, at
+            // the settle. A received closure replaces one already held
+            // under its hash (the spec's left-biased union).
             ServerMsg::Closures { items } => {
                 for (h, c) in items {
                     self.replica.bodies.insert(h, c);
                 }
-                self.replica.retry();
             }
             ServerMsg::Agree { seq, ok, .. } => self.agreed.push((seq, ok)),
+        }
+    }
+
+    /// §12.2 The end of a pump: the replica's inbox applied once
+    /// ([`Replica::settle`]), then, if a page arrived, the facts it still
+    /// waits on asked for, and the next page if it said there is one. Call it after the last frame of each pump —
+    /// `ark_client::Peer::pump` does, after draining its link, and
+    /// [`crate::sim::Sim`] does after each delivery to a client. Frames
+    /// with nothing to apply cost nothing here. One advance per pump is
+    /// what R8 of `docs/plan-perf.md` holds: with K intents pending, fifty
+    /// pushes in one pump re-run the K once.
+    pub fn settle(&mut self) {
+        self.replica.settle();
+        if std::mem::take(&mut self.paged) {
+            let needs = self.replica.needs();
+            if !needs.is_empty() {
+                self.emit(ClientMsg::NeedFacts { seqs: needs });
+            }
+        }
+        if std::mem::take(&mut self.more) {
+            let hello = self.hello();
+            self.emit(hello);
         }
     }
 

@@ -64,7 +64,9 @@ pub fn three_peers(out: &Out) {
     );
     let (s1, _) = push(&mut auth, &e1);
     alice.ack(&e1.id, s1);
+    alice.settle();
     bob.receive(s1, e1.clone());
+    bob.settle();
     claim("the playlist was sequenced first", s1 == 1);
     claim(
         "alice's name was trimmed",
@@ -75,9 +77,11 @@ pub fn three_peers(out: &Out) {
     let e2 = must("bob adds 1", bob.mutate(id_n(102), &ctx("bob"), &h_add, &now, &add_args(1)));
     let (s2, _) = push(&mut auth, &e2);
     bob.ack(&e2.id, s2);
+    bob.settle();
     let e3 = must("bob adds 2", bob.mutate(id_n(103), &ctx("bob"), &h_add, &now, &add_args(2)));
     let (s3, _) = push(&mut auth, &e3);
     bob.ack(&e3.id, s3);
+    bob.settle();
     let _ = alice.take_changes(); // the ack rebuilt her view; a screen has drawn it since
     let e9 = must("alice adds 9 alone", alice.mutate(id_n(109), &ctx("alice"), &h_add, &now, &add_args(9)));
     claim("alone, alice's track is first on her view", pos_of(&alice, 9) == Some(Value::Int(1)));
@@ -90,8 +94,11 @@ pub fn three_peers(out: &Out) {
         pos_of(&bob, 1) == Some(Value::Int(1)) && pos_of(&bob, 2) == Some(Value::Int(2)),
     );
     // step 3: alice comes back. bob's entries land; her pending replays on top.
+    // Two pumps, one landing each (plan-perf R8): two rebases.
     alice.receive(s2, e2.clone());
+    alice.settle();
     alice.receive(s3, e3.clone());
+    alice.settle();
     // Each landing undoes her track, lands bob's, and puts hers back on
     // top: three transitions a view can be told, twice (plan-perf R2).
     claim(
@@ -105,7 +112,9 @@ pub fn three_peers(out: &Out) {
     let (s9, f9) = push(&mut auth, &e9);
     alice.receive_facts(s9, f9.clone());
     alice.ack(&e9.id, s9);
+    alice.settle();
     bob.receive(s9, e9.clone());
+    bob.settle();
     claim("nothing is pending on alice once acked", alice.pending.is_empty());
     claim(
         "with nothing pending the ack costs no rebuild",
@@ -124,6 +133,7 @@ pub fn three_peers(out: &Out) {
     // a duplicate delivery changes nothing
     let before = bob.clone();
     bob.receive(s2, e2.clone());
+    bob.settle();
     claim("a duplicate delivery is a no-op", bob == before);
     // carol holds no generated code at all: she applies by facts
     let sequenced = [(s1, &e1), (s2, &e2), (s3, &e3), (s9, &e9)];
@@ -136,6 +146,7 @@ pub fn three_peers(out: &Out) {
     for n in 1..=4 {
         carol.receive_facts(n, facts_of(n));
     }
+    carol.settle();
     claim(
         "by facts alone carol reaches the same state",
         carol.verify_at() == bob.verify_at() && carol.diverged.is_empty(),
@@ -153,6 +164,7 @@ pub fn three_peers(out: &Out) {
     for (n, e) in sequenced {
         dave.receive_with(n, e.clone(), facts_of(n));
     }
+    dave.settle();
     claim("a divergent runtime is detected", dave.diverged == vec![2, 3, 4]);
     claim("and healed by the facts", dave.verify_at() == bob.verify_at());
     // eve has no server: she is her own authority, and later hands the log over

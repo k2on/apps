@@ -461,11 +461,12 @@ fn hello(since: Seq, mode: Mode) -> ClientMsg {
 // (e) The rebase -----------------------------------------------------------------
 
 /// K intents of this peer's pending while M entries of another peer's land
-/// over a confirmed store of S rows: once as one page (one replay), and one
-/// entry at a time as a live server's fan-out delivers them (a rebase
-/// each). A rebase undoes the pending intents' recorded changes, applies
-/// what landed and runs them again (`docs/plan-perf.md` R2); the clone
-/// line is what each rebase copied before that.
+/// over a confirmed store of S rows: once as one page (one rebase), and one
+/// entry at a time as a live server's fan-out delivers them — a pump each
+/// (a rebase each), and all in one pump, placed singly and settled once
+/// (one rebase, `docs/plan-perf.md` R8). A rebase undoes the pending
+/// intents' recorded changes, applies what landed and runs them again
+/// (R2); the clone line is what each rebase copied before that.
 #[test]
 #[ignore]
 fn perf_e_rebase() {
@@ -483,6 +484,7 @@ fn perf_e_rebase() {
             for (n, e, f) in &base {
                 other.receive_with(*n, e.clone(), f.clone());
             }
+            other.settle();
             let them = Ctx::new("alice", "dev");
             let landing: Vec<(Seq, Entry, Facts)> = (0..m)
                 .map(|i| {
@@ -510,20 +512,41 @@ fn perf_e_rebase() {
             r.receive_batch(landing.iter().map(|(n, e, f)| (*n, e.clone(), Some(f.clone()))));
             let page = t.elapsed();
             assert_eq!(r.pending.len(), k as usize);
-            // One at a time.
+            // One at a time, a pump each: a settle per entry, which is
+            // what a live push costs when it is the only frame of its pump.
+            let mut r = caught_up();
+            mine(&mut r);
+            let t = Instant::now();
+            for (n, e, f) in &landing {
+                r.receive_with(*n, e.clone(), f.clone());
+                r.settle();
+            }
+            let each = t.elapsed();
+            assert_eq!(r.pending.len(), k as usize);
+            // One at a time, one pump: every entry placed as its own
+            // frame, then the one settle a pump makes (R8).
             let mut r = caught_up();
             mine(&mut r);
             let t = Instant::now();
             for (n, e, f) in &landing {
                 r.receive_with(*n, e.clone(), f.clone());
             }
-            let each = t.elapsed();
+            r.settle();
+            let pumped = t.elapsed();
+            assert_eq!(r.pending.len(), k as usize);
             eprintln!(
                 "{:<44} {:>7} {:>8.1}µs {:>8.1}ms",
-                format!("K={k} M={m}: one entry at a time"),
+                format!("K={k} M={m}: one entry at a time, a pump each"),
                 s,
                 us(each) / m as f64,
                 each.as_secs_f64() * 1e3
+            );
+            eprintln!(
+                "{:<44} {:>7} {:>8.1}µs {:>8.1}ms",
+                format!("K={k} M={m}: one entry at a time, one pump"),
+                s,
+                us(pumped) / m as f64,
+                pumped.as_secs_f64() * 1e3
             );
             eprintln!(
                 "{:<44} {:>7} {:>8.1}µs {:>8.1}ms",
@@ -565,6 +588,7 @@ fn perf_e_rebase() {
             let t = Instant::now();
             for (e, (n, _)) in es.iter().zip(&seqs) {
                 r.ack(&e.id, *n);
+                r.settle();
             }
             let dt = t.elapsed();
             assert!(r.pending.is_empty());
@@ -635,6 +659,7 @@ fn perf_g_authority_and_fanout() {
             for (n, e, f) in &log {
                 author.receive_with(*n, e.clone(), f.clone());
             }
+            author.settle();
             let reps = 20u64;
             let (mut recv, mut enc) = (Duration::ZERO, Duration::ZERO);
             let mut bytes = 0;

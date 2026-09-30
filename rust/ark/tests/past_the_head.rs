@@ -147,6 +147,8 @@ fn exchange(c: &mut Client, sv: &mut Server<Silent>) -> Vec<ServerMsg> {
             heard.push(f.clone());
             c.recv(f);
         }
+        // One pump: what the round's frames placed is applied once (R8).
+        c.settle();
     }
 }
 

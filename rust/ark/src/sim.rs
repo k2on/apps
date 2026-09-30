@@ -160,6 +160,7 @@ impl Sim {
                 for _ in 0..times {
                     self.deliver_to_client(i, m.clone());
                 }
+                self.settle_client(i);
             }
         }
     }
@@ -170,9 +171,20 @@ impl Sim {
         self.flush_server();
     }
 
+    // A frame reaches a client's inbox; nothing is applied until the
+    // client settles (R8 of `docs/plan-perf.md`).
     fn deliver_to_client(&mut self, i: i64, m: ServerMsg) {
         let Some(c) = self.clients.get_mut(&i) else { return };
         c.recv(m);
+    }
+
+    // The end of a client's pump: what its frames placed is applied once,
+    // and what that makes it say goes on the wire. A step is one pump of
+    // one frame (twice, when the network duplicated it); a drain is one
+    // pump of every frame in flight to that client.
+    fn settle_client(&mut self, i: i64) {
+        let Some(c) = self.clients.get_mut(&i) else { return };
+        c.settle();
         self.flush_client(i);
     }
 
@@ -211,6 +223,7 @@ impl Sim {
             for m in ms {
                 self.deliver_to_client(i, m);
             }
+            self.settle_client(i);
         }
     }
 

@@ -319,16 +319,23 @@ impl Replica {
     }
 
     /// §11.3 A confirmed entry arrives, at its sequence; it waits in the
-    /// inbox until everything before it has been applied.
+    /// inbox until everything before it has been applied — by the next
+    /// [`Replica::settle`], never by this call.
+    ///
+    /// Placing only (`docs/plan-perf.md` R8): with K intents pending, every
+    /// advance that lands something under them re-runs all K, so a client
+    /// that advanced per frame paid K runs for each live push. A pump
+    /// hands every frame it received to the inbox and settles once, and
+    /// the K runs are paid once per pump.
     pub fn receive(&mut self, n: Seq, e: Entry) {
         if n <= self.cursor {
             return;
         }
         self.inbox.entry(n).or_default().entry = Some(e);
-        self.advance();
     }
 
     /// An entry and its facts arrive together, as a batch delivers them.
+    /// Placed in the inbox; applied by the next [`Replica::settle`] (R8).
     pub fn receive_with(&mut self, n: Seq, e: Entry, f: Facts) {
         if n <= self.cursor {
             return;
@@ -340,38 +347,36 @@ impl Replica {
                 facts: Some(f),
             },
         );
-        self.advance();
     }
 
-    /// A page of the log arrives: every entry to the inbox, then one
-    /// advance — so a replica with an intent of its own pending rebuilds
-    /// its view once per page rather than once per entry.
+    /// A page of the log handed in whole, as its own pump: every entry to
+    /// the inbox, then one [`Replica::settle`] — so a replica with an
+    /// intent of its own pending rebases once per page rather than once
+    /// per entry. [`crate::protocol::Client`] does not use it: a page is
+    /// one of the frames of a pump there, and the pump settles (R8).
     pub fn receive_batch(&mut self, items: impl IntoIterator<Item = (Seq, Entry, Option<Facts>)>) {
         for (n, e, f) in items {
-            if n <= self.cursor {
-                continue;
-            }
-            let ib = self.inbox.entry(n).or_default();
-            ib.entry = Some(e);
-            if let Some(f) = f {
-                ib.facts = Some(f);
+            match f {
+                Some(f) => self.receive_with(n, e, f),
+                None => self.receive(n, e),
             }
         }
-        self.advance();
+        self.settle();
     }
 
-    /// The facts of an entry arrive, at its sequence.
+    /// The facts of an entry arrive, at its sequence. Placed in the inbox;
+    /// applied by the next [`Replica::settle`] (R8).
     pub fn receive_facts(&mut self, n: Seq, f: Facts) {
         if n <= self.cursor {
             return;
         }
         self.inbox.entry(n).or_default().facts = Some(f);
-        self.advance();
     }
 
     /// §11.4 An acknowledgement: this peer's own intent was sequenced at
     /// `n`. It goes to the inbox as if it had arrived, and is applied at its
-    /// turn through the confirmed store, which is the rebase.
+    /// turn through the confirmed store, which is the rebase — by the next
+    /// [`Replica::settle`], as any arrival is (R8).
     pub fn ack(&mut self, id: &Id, n: Seq) {
         if let Some(e) = self.pending.iter().find(|e| e.id == *id).cloned() {
             self.receive(n, e);
@@ -442,8 +447,16 @@ impl Replica {
             .collect()
     }
 
-    /// Try the inbox again — after closures arrived, or facts.
-    pub fn retry(&mut self) {
+    /// §11.6 Apply what the inbox holds, in order, for as long as the next
+    /// entry can be applied — once, after everything a pump received was
+    /// placed (`docs/plan-perf.md` R8), and after closures or facts arrive
+    /// that may unblock what waits. Whatever landed under this peer's
+    /// pending intents is one rebase, however many frames brought it: the
+    /// K pending intents are re-run once, not once per frame.
+    ///
+    /// What `retry` was, under the name it has now that it is the only way
+    /// the inbox moves. Settling with nothing new placed does nothing.
+    pub fn settle(&mut self) {
         self.advance();
     }
 
@@ -486,6 +499,12 @@ impl Replica {
     // anything else landed under pending intents, and the view is rebased
     // by changes (R2).
     fn advance(&mut self) {
+        // Nothing next in the inbox, nothing to do: a settle with nothing
+        // placed, which every pump that heard nothing makes (R8), costs a
+        // lookup and not a list of the pending ids.
+        if !self.inbox.contains_key(&(self.cursor + 1)) {
+            return;
+        }
         // The intents the view holds above `confirmed`, in the order it
         // applied them: what a rebase undoes, whichever of them this
         // advance confirms first.
@@ -921,6 +940,13 @@ pub fn local_commit(a: &mut Authority, r: &mut Replica) {
             Sequenced::Duplicate(n) => r.ack(&e.id, n),
             Sequenced::Rejected(why) => r.reject(&e.id, why),
         }
+        // Settled per intent, not once at the end (R8): the next intent is
+        // sequenced by its record only when the replica's cursor is the
+        // authority's head and it is the first pending, which is true
+        // after this one is confirmed and not before. Alone, nothing but
+        // this peer's own intents lands, so each settle confirms by the
+        // record and re-runs nothing.
+        r.settle();
     }
 }
 
@@ -1205,6 +1231,7 @@ mod tests {
             Sequenced::Appended(n, f) => {
                 r.receive_facts(n, f);
                 r.ack(&e.id, n);
+                r.settle();
                 n
             }
             other => panic!("{other:?}"),
@@ -1234,10 +1261,12 @@ mod tests {
         // Somebody else adds to the same playlist while one of ours waits.
         let e4 = d.add(&mut r, &me, 4, 1, "c");
         other.receive(1, e1.clone());
+        other.settle();
         let x = d.add(&mut other, &them, 5, 1, "x");
         let nx = confirm(&mut a, &mut other, &x);
         let mine = crate::store::clones();
         r.receive(nx, x.clone());
+        r.settle();
         assert_eq!(crate::store::clones(), mine, "a rebase copies no store");
         check(&mut r, "theirs landed under ours");
         assert_eq!(
@@ -1330,6 +1359,7 @@ mod tests {
                 r.receive_facts(n, f);
             }
             r.ack(&id, n);
+            r.settle();
         }
         assert_eq!(runs() - before, 0, "confirming ran nothing");
         assert!(r.pending.is_empty() && r.recorded.is_empty() && r.diverged.is_empty());
@@ -1371,6 +1401,7 @@ mod tests {
         for (id, n, f) in facts.into_iter().take(2) {
             r.receive_facts(n, f);
             r.ack(&id, n);
+            r.settle();
         }
         assert_eq!(r.diverged, vec![2], "the record and the facts disagreed");
         assert_eq!(item(&r.confirmed, "a"), Value::int(99), "the authority's facts win");
@@ -1407,6 +1438,7 @@ mod tests {
                 Sequenced::Appended(n, _) => r.ack(&e.id, n),
                 o => panic!("{o:?}"),
             }
+            r.settle();
         }
         let ours = runs() - before - es.len();
         assert_eq!(ours, 0, "confirming ran nothing (the authority ran {} times)", es.len());
@@ -1487,11 +1519,13 @@ mod tests {
         let mut r = d.replica(true);
         let e1 = d.create(&mut r, &me, 1, "Mine");
         r.ack(&e1.id, 1);
+        r.settle();
         let _ = r.take_changes();
         let e2 = d.add(&mut r, &me, 2, 1, "t1");
         let mut altered = e2.clone();
         altered.args.insert("track_id".into(), Value::text("t2"));
         r.receive(2, altered);
+        r.settle();
         assert!(r.pending.is_empty());
         assert_eq!(r.view, r.confirmed);
         assert!(r.view.get("item", &[Value::Id(idv(1001)), Value::text("t2")]).is_some());
@@ -1546,17 +1580,95 @@ mod tests {
         let (n1, f1) = sequence(&mut a, &e1);
         r.receive_facts(n1, f1.clone());
         r.ack(&e1.id, n1);
+        r.settle();
         catch_up(&mut r, "our own, nothing behind it");
         other.receive_with(n1, e1, f1);
+        other.settle();
         let e2 = d.add(&mut r, &me, 2, 1, "a");
         let x = d.add(&mut other, &them, 3, 1, "x");
         let (nx, fx) = sequence(&mut a, &x);
         r.receive_with(nx, x, fx);
+        r.settle();
         let _ = r.take_changes();
         catch_up(&mut r, "theirs, under ours");
         let (n2, f2) = sequence(&mut a, &e2);
         r.receive_with(n2, e2, f2);
+        r.settle();
         catch_up(&mut r, "ours, after the rebase");
         assert_eq!(r.confirmed, a.store);
+    }
+
+    /// §R8 A pump is one rebase, however many frames it brought. K = 100
+    /// intents of this peer's pending while fifty of another peer's land,
+    /// each its own `Batch` as a live server's fan-out sends it, all
+    /// delivered to the client in one pump: the frames apply nothing, and
+    /// the settle runs each landing entry once and the hundred pending
+    /// intents once — 150 runs, where a rebase per frame was 50 + 50 × 100.
+    /// The view is the replay's, is told as transitions, and is the view a
+    /// client settling per frame reaches. Falsified by settling in
+    /// `Client::recv` (the advance per frame R8 removed): 5,050 runs.
+    #[test]
+    fn fifty_pushes_in_one_pump_rerun_the_pending_once() {
+        use crate::protocol::{Client, Mode, ServerMsg};
+        let d = demo();
+        let mut a = d.authority();
+        let (me, them) = (Ctx::new("me", "s"), Ctx::new("them", "t"));
+        let page = |items: Vec<(Seq, Entry)>| ServerMsg::Batch {
+            items: items.into_iter().map(|(n, e)| (n, e, None)).collect(),
+            has_more: false,
+            log_id: None,
+        };
+        let mut other = d.replica(true);
+        let shared = d.create(&mut other, &them, 1, "Shared");
+        let Sequenced::Appended(n1, _) = a.sequence_entry(&shared) else {
+            panic!("the playlist")
+        };
+        let (mut one, mut each) = (
+            Client::open(d.replica(true), Mode::Whole, None),
+            Client::open(d.replica(true), Mode::Whole, None),
+        );
+        for c in [&mut one, &mut each] {
+            c.recv(page(vec![(n1, shared.clone())]));
+            c.settle();
+            for i in 0..100 {
+                d.add(&mut c.replica, &me, 100 + i, 1, &format!("m{i}"));
+            }
+        }
+        let pushes: Vec<ServerMsg> = (0..50)
+            .map(|i| {
+                let x = d.add(&mut other, &them, 1000 + i, 1, &format!("x{i}"));
+                match a.sequence_entry(&x) {
+                    Sequenced::Appended(n, _) => page(vec![(n, x)]),
+                    o => panic!("{o:?}"),
+                }
+            })
+            .collect();
+        let mut shadow = drawn(&mut one.replica);
+        let before = runs();
+        for m in pushes.iter().cloned() {
+            one.recv(m);
+        }
+        assert_eq!(runs() - before, 0, "a frame only places what it brings");
+        assert_eq!(one.replica.cursor, n1, "and nothing has landed");
+        one.settle();
+        assert_eq!(runs() - before, 50 + 100, "each landing entry once, the hundred pending once");
+        assert_eq!(one.replica.cursor, n1 + 50);
+        assert_eq!(one.replica.pending.len(), 100);
+        assert!(
+            same_rows(&one.replica.view, &replayed(&one.replica)),
+            "the view is confirmed then pending"
+        );
+        follow(&mut shadow, &mut one.replica, "fifty pushes in one pump");
+        // The same frames, a pump each: the K re-runs per frame R8 saves,
+        // counted, and the same view at the end.
+        let before = runs();
+        for m in pushes {
+            each.recv(m);
+            each.settle();
+        }
+        assert_eq!(runs() - before, 50 + 50 * 100, "a pump per frame is a rebase per frame");
+        assert!(same_rows(&each.replica.view, &one.replica.view));
+        assert!(same_rows(&each.replica.confirmed, &one.replica.confirmed));
+        assert!(same_rows(&one.replica.confirmed, &a.store));
     }
 }

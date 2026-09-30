@@ -738,8 +738,16 @@ impl Peer {
     }
 
     /// One turn of the link: dial if due, hand the engine what arrived,
-    /// send what it queued, and write whatever moved. Call it on a tick
-    /// (fifty milliseconds is what the clients here use).
+    /// settle it once, send what it queued, and write whatever moved. Call
+    /// it on a tick (fifty milliseconds is what the clients here use).
+    ///
+    /// The one [`ark::protocol::Client::settle`] of a pump is here, after
+    /// the last frame the link polled (`docs/plan-perf.md` R8): every
+    /// frame goes to the replica's inbox first, so with K intents pending
+    /// the fifty pushes a busy second brings re-run the K once, not fifty
+    /// times. It lives in the driver rather than in `Client::recv` because
+    /// only the driver knows where a pump ends; the sans-io `Client` gets
+    /// its frames one at a time and is told.
     pub fn pump(&mut self) -> Pumped {
         let mut p = Pumped::default();
         if let Some(link) = &mut self.link {
@@ -750,10 +758,11 @@ impl Peer {
             }
             for f in polled.frames {
                 p.moved = true;
-                if let Err(e) = self.recv_frame(&f) {
+                if let Err(e) = self.place_frame(&f) {
                     p.note = Some(e.to_string());
                 }
             }
+            self.client.settle();
             if let Some(why) = polled.closed {
                 self.client.disconnected();
                 p.dropped = Some(why);
@@ -799,16 +808,32 @@ impl Peer {
         self.client.disconnected();
     }
 
-    /// A message from the server.
+    /// A message from the server, handed in by a transport of the
+    /// caller's own: a pump of one frame, so it is settled at once (R8).
     pub fn recv(&mut self, msg: ServerMsg) {
+        self.place(msg);
+        self.client.settle();
+    }
+
+    /// A binary frame from the server: canonical CBOR of a `ServerMsg`. A
+    /// pump of one frame, as [`Peer::recv`] is.
+    pub fn recv_frame(&mut self, bytes: &[u8]) -> Result<(), Error> {
+        self.place_frame(bytes)?;
+        self.client.settle();
+        Ok(())
+    }
+
+    // A message to the engine, not yet settled: what `pump` does with each
+    // frame before its one settle.
+    fn place(&mut self, msg: ServerMsg) {
         if matches!(msg, ServerMsg::Heard { .. }) {
             self.heard_frames += 1;
         }
         self.client.recv(msg);
     }
 
-    /// A binary frame from the server: canonical CBOR of a `ServerMsg`.
-    pub fn recv_frame(&mut self, bytes: &[u8]) -> Result<(), Error> {
+    // A frame decoded and placed, not yet settled.
+    fn place_frame(&mut self, bytes: &[u8]) -> Result<(), Error> {
         let msg = canon::decode(bytes)
             .map_err(|e| e.to_string())
             .and_then(|v| ServerMsg::from_value(&v).map_err(|e| e.to_string()))
@@ -816,7 +841,7 @@ impl Peer {
                 self.bad_frames += 1;
                 Error::Corrupt(format!("a frame from the server: {e}"))
             })?;
-        self.recv(msg);
+        self.place(msg);
         Ok(())
     }
 
@@ -1254,6 +1279,97 @@ mod tests {
         }
         assert_eq!(per, [1, 1], "ids compared by a mutate at 300 and 2,400 pending");
         assert_eq!(p.pending_len(), 2_401);
+    }
+
+    /// R8 of `docs/plan-perf.md`, where it lives: a pump hands every frame
+    /// its link polled to the engine and settles once. Bob has K = 100
+    /// items of his own pending on a playlist while fifty of Alice's land,
+    /// each its own `Batch` as the server's fan-out sends it, all polled in
+    /// one pump: what his view is told is one rebase — his hundred undone,
+    /// her fifty landed, his hundred again, 250 transitions — where a
+    /// settle per frame told fifty rebases, 50 × 201. Falsified by settling
+    /// in `place` (per frame): 10,050.
+    #[test]
+    fn a_pump_is_one_rebase_however_many_frames_it_polled() {
+        use crate::link::{BoxTransport, Event, Queues};
+        use ark::live::Silent;
+        use ark::protocol::{open_access, trusting, Server};
+        let d = demo::domain();
+        let mut a = ark::peer::Authority::new(d.module().schema.clone(), d.closures().clone());
+        a.hold(d.native_list());
+        let mut sv = Server::open(trusting(), open_access(), Silent, a);
+        let frame = |m: &ServerMsg| Event::Frame(canon::encode(&m.to_value()));
+        let decode = |f: &[u8]| ClientMsg::from_value(&canon::decode(f).unwrap()).unwrap();
+
+        let q = Queues::default();
+        let dialled = q.clone();
+        let mut bob = Peer::open_memory(d.clone(), Options::dev("bob")).unwrap();
+        bob.connect_with("queues", Box::new(move |_: &str| Box::new(dialled.clone()) as BoxTransport));
+        let events = |es: Vec<Event>| q.events.lock().unwrap().extend(es);
+        let up = |sv: &mut Server<Silent>| {
+            for f in std::mem::take(&mut *q.sent.lock().unwrap()) {
+                sv.recv(2, decode(&f));
+            }
+        };
+        let down = |sv: &mut Server<Silent>| -> Vec<Event> { sv.take_outgoing().iter().filter(|(c, _)| *c == 2).map(|(_, m)| frame(m)).collect() };
+        bob.pump();
+        events(vec![Event::Opened]);
+        bob.pump();
+        up(&mut sv);
+
+        let mut alice = Peer::open_memory(d.clone(), Options::dev("alice")).unwrap();
+        alice.connected();
+        let mut to_bob = vec![];
+        let exchange = |alice: &mut Peer, sv: &mut Server<Silent>, to_bob: &mut Vec<Event>| {
+            for m in alice.take_outgoing() {
+                sv.recv(1, m);
+            }
+            for (c, m) in sv.take_outgoing() {
+                match c {
+                    1 => alice.recv(m),
+                    _ => to_bob.push(frame(&m)),
+                }
+            }
+        };
+        exchange(&mut alice, &mut sv, &mut to_bob);
+        alice.mutate("create_playlist", args([("name", Value::text("Shared"))])).unwrap();
+        exchange(&mut alice, &mut sv, &mut to_bob);
+        exchange(&mut alice, &mut sv, &mut to_bob);
+        let shared = alice.store().scan("playlist")[0]["id"].clone();
+        to_bob.extend(down(&mut sv));
+        events(std::mem::take(&mut to_bob));
+        bob.pump();
+        assert_eq!(bob.cursor(), 1, "the playlist reached bob");
+
+        for i in 0..100 {
+            bob.mutate(
+                "add_to_playlist",
+                args([("playlist_id", shared.clone()), ("track_id", Value::text(format!("b{i}")))]),
+            )
+            .unwrap();
+        }
+        for i in 0..50 {
+            alice
+                .mutate(
+                    "add_to_playlist",
+                    args([("playlist_id", shared.clone()), ("track_id", Value::text(format!("a{i}")))]),
+                )
+                .unwrap();
+            exchange(&mut alice, &mut sv, &mut to_bob);
+        }
+        assert_eq!(to_bob.len(), 50, "a frame a push");
+        let _ = bob.take_changes();
+        events(to_bob);
+        bob.pump();
+        assert_eq!((bob.cursor(), bob.pending_len()), (51, 100));
+        let Changes::Applied(told) = bob.take_changes() else {
+            panic!("a rebase is its transitions")
+        };
+        assert_eq!(told.len(), 100 + 50 + 100, "one rebase for fifty frames");
+        let items = bob.store().scan("item");
+        assert_eq!(items.len(), 150);
+        let last = items.iter().map(|r| r["pos"].clone()).max().unwrap();
+        assert_eq!(last, Value::int(150), "his hundred after her fifty");
     }
 
     #[test]

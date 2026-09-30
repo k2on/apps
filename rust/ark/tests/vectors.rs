@@ -470,6 +470,7 @@ fn rebase_three_peers() {
     for (n, e) in entries.iter().rev() {
         whole.receive(*n, e.clone()); // out of order: the inbox holds them
     }
+    whole.settle();
     assert_eq!(whole.cursor, entries.len() as Seq);
     assert_eq!(hex(&whole.verify_at().1), final_hash);
     assert!(whole.diverged.is_empty());
@@ -483,6 +484,7 @@ fn rebase_three_peers() {
     for ((n, _), f) in entries.iter().zip(&facts) {
         facts_only.receive_facts(*n, f.clone());
     }
+    facts_only.settle();
     assert_eq!(hex(&facts_only.verify_at().1), final_hash);
     assert!(facts_only.diverged.is_empty());
 
@@ -522,7 +524,9 @@ fn rebase_three_peers() {
         .unwrap();
     let (s1, _) = push(&mut auth, &e1);
     alice.ack(&e1.id, s1);
+    alice.settle();
     bob.receive(s1, e1.clone());
+    bob.settle();
     assert_eq!(s1, 1, "the playlist was sequenced first");
     assert_eq!(
         alice.view.get("playlist", &[Value::Id(pid())]).unwrap()["name"],
@@ -534,9 +538,11 @@ fn rebase_three_peers() {
     let e2 = bob.mutate(id_n(102), &ctx("bob"), &h_add, &now, &add_args(1)).unwrap();
     let (s2, _) = push(&mut auth, &e2);
     bob.ack(&e2.id, s2);
+    bob.settle();
     let e3 = bob.mutate(id_n(103), &ctx("bob"), &h_add, &now, &add_args(2)).unwrap();
     let (s3, _) = push(&mut auth, &e3);
     bob.ack(&e3.id, s3);
+    bob.settle();
     let _ = alice.take_changes(); // the ack rebuilt her view; a screen has drawn it since
     let e9 = alice.mutate(id_n(109), &ctx("alice"), &h_add, &now, &add_args(9)).unwrap();
     assert_eq!(
@@ -551,8 +557,13 @@ fn rebase_three_peers() {
     assert_eq!(pos_of(&bob, 1), Some(Value::int(1)));
     assert_eq!(pos_of(&bob, 2), Some(Value::int(2)));
     // step 3: alice comes back. bob's entries land; her pending replays on top.
+    // Two pumps, one entry each: the six transitions below are two
+    // rebases, and a settle per landing is what makes them two (R8 of
+    // `docs/plan-perf.md` — one settle over both would be one rebase, four).
     alice.receive(s2, e2.clone());
+    alice.settle();
     alice.receive(s3, e3.clone());
+    alice.settle();
     // Each landing undoes her track, lands bob's, and puts hers back on
     // top: three transitions a view can be told, twice (plan-perf R2).
     assert!(
@@ -569,7 +580,9 @@ fn rebase_three_peers() {
     let (s9, f9) = push(&mut auth, &e9);
     alice.receive_facts(s9, f9.clone());
     alice.ack(&e9.id, s9);
+    alice.settle();
     bob.receive(s9, e9.clone());
+    bob.settle();
     assert!(alice.pending.is_empty(), "nothing is pending on alice once acked");
     assert!(
         matches!(alice.take_changes(), Changes::Applied(_)),
@@ -585,6 +598,7 @@ fn rebase_three_peers() {
     // a duplicate delivery changes nothing
     let bob_before = bob.clone();
     bob.receive(s2, e2.clone());
+    bob.settle();
     assert_eq!(bob, bob_before, "a duplicate delivery is a no-op");
     // dave's build of add_to_playlist is wrong: it steps by two. Facts catch it.
     let mut wrong = bodies.clone();
@@ -600,6 +614,7 @@ fn rebase_three_peers() {
     for ((n, e), f) in entries.iter().zip(&facts) {
         dave.receive_with(*n, e.clone(), f.clone());
     }
+    dave.settle();
     assert_eq!(dave.diverged, vec![2, 3, 4], "a divergent runtime is detected");
     assert_eq!(hex(&dave.verify_at().1), final_hash, "and healed by the facts");
     // eve has no server: she is her own authority, and later hands the log over
