@@ -4,8 +4,20 @@
 //! write would stall every socket waiting on it; so one thread owns it and
 //! everything — a WebSocket handler, an in-process peer, a standing device,
 //! `/healthz` — talks to it through a [`HubHandle`]. That thread is also
-//! where each log and the rooms' kept snapshots are written, after the
+//! where the log and the rooms' kept snapshots are written, after the
 //! message that moved them.
+//!
+//! **An acknowledgement follows the write.** What a message moved in the log
+//! is appended to the journal and synced ([`crate::persist::LogFile`])
+//! before anything the machine queued in answer to it is sent: the `Ack` to
+//! the author, the `Batch` to everyone else. So an entry any peer has been
+//! told about is on the disk, and a server killed at any instant restarts
+//! with every sequence a peer holds — a torn tail can only be an entry
+//! nobody was told of, which its author still has pending and pushes again
+//! (`docs/plan-perf.md` §R3; `harken/server/tests/fleet.rs`, scenario 3b,
+//! is the witness it answers). Where the write fails, everything queued is
+//! held, in order, until a write succeeds: a server that cannot keep its
+//! log promises nothing about it.
 //!
 //! Three kinds of connection, one numbering: a **socket** (frames go to its
 //! writer task), a **local** peer (an `ark_client::Peer` in this process,
@@ -27,6 +39,7 @@ use ark::store::{Row, Store};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::live::{decode_kept, encode_kept, Relay};
+use crate::persist::LogFile;
 
 /// Where a connection's frames go.
 enum Sink {
@@ -43,8 +56,11 @@ pub struct Hub {
     relay: Relay,
     sinks: BTreeMap<ConnId, Sink>,
     data: Option<PathBuf>,
-    /// The head of the log as last written.
-    head: Seq,
+    /// The log's files, where there is a data directory.
+    log: Option<LogFile>,
+    /// What the machine queued and nothing has been sent of, because the
+    /// log it speaks of is not yet on the disk (the module docs).
+    held: Vec<(ConnId, ServerMsg)>,
     /// The rooms' kept snapshots as last written.
     kept: BTreeMap<String, Vec<u8>>,
 }
@@ -62,8 +78,7 @@ pub struct Health {
 const KEPT: &str = "live.cbor";
 
 impl Hub {
-    pub(crate) fn new(mut server: Server<Relay>, relay: Relay, data: Option<PathBuf>) -> Result<Hub> {
-        let head = server.authority.log.head_seq();
+    pub(crate) fn new(mut server: Server<Relay>, relay: Relay, data: Option<PathBuf>, log: Option<LogFile>) -> Result<Hub> {
         let mut kept = BTreeMap::new();
         if let Some(dir) = &data {
             match std::fs::read(dir.join(KEPT)) {
@@ -78,7 +93,8 @@ impl Hub {
             relay,
             sinks: BTreeMap::new(),
             data,
-            head,
+            log,
+            held: vec![],
             kept,
         })
     }
@@ -179,24 +195,32 @@ impl Hub {
         }
     }
 
-    // Deliver what the machine queued, then write whatever moved.
+    // Write whatever moved, then deliver what the machine queued — in that
+    // order, so no peer hears of an entry the disk does not hold (the module
+    // docs). The whole queue waits on the write, not only the acks: a
+    // connection's messages are an ordered stream, and one held back makes
+    // everything after it wait with it.
     fn after(&mut self) {
-        for (c, m) in self.server.take_outgoing() {
-            self.send(c, m);
+        let durable = self.persist();
+        self.held.extend(self.server.take_outgoing());
+        if durable {
+            for (c, m) in std::mem::take(&mut self.held) {
+                self.send(c, m);
+            }
         }
-        self.persist();
     }
 
-    fn persist(&mut self) {
+    /// Write the log and the rooms; whether the log is on the disk.
+    fn persist(&mut self) -> bool {
         let Some(dir) = self.data.clone() else {
             self.relay.keeps.lock().unwrap_or_else(|e| e.into_inner()).clear();
-            return;
+            return true;
         };
-        let head = self.server.authority.log.head_seq();
-        if head != self.head {
-            match crate::persist::save(&dir, &self.server.authority.log) {
-                Ok(()) => self.head = head,
-                Err(e) => eprintln!("ark-server: could not write the log: {e:#}"),
+        let mut durable = true;
+        if let Some(file) = &mut self.log {
+            if let Err(e) = file.write(&self.server.authority.log) {
+                eprintln!("ark-server: could not write the log; holding what it would say: {e:#}");
+                durable = false;
             }
         }
         // The rooms: what the engine keeps for rooms that emptied, what a
@@ -225,6 +249,7 @@ impl Hub {
                 Err(e) => eprintln!("ark-server: could not write {}: {e}", path.display()),
             }
         }
+        durable
     }
 }
 
@@ -440,5 +465,64 @@ impl ark_client::link::Transport for Local {
 impl Drop for Local {
     fn drop(&mut self) {
         ark_client::link::Transport::close(self);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ark::protocol::{open_access, trusting};
+    use ark_client::{args, demo, Options, Peer as Device, Value};
+
+    /// §R3 The order the module docs state, held: an `Ack` is not sent for
+    /// an entry the log could not write, and is sent — with everything
+    /// queued behind it, in order — once a write succeeds. The write is
+    /// made to fail by a directory standing where the journal goes.
+    /// Falsified by writing after delivering, the order `after` had: the
+    /// `Ack` arrives while nothing is on the disk.
+    #[test]
+    fn an_entry_is_acknowledged_only_once_the_disk_holds_it() {
+        let d = demo::domain();
+        let schema = d.module().schema.clone();
+        let dir = tempfile::tempdir().unwrap();
+        let (file, log) = LogFile::open(dir.path(), &schema).unwrap();
+        assert!(log.is_none());
+        let relay = Relay::new(Box::new(crate::Quiet));
+        let mut a = Authority::new(schema.clone(), d.closures().clone());
+        a.hold(d.native_list());
+        let server = Server::open(trusting(), open_access(), relay.clone(), a);
+        let mut hub = Hub::new(server, relay, Some(dir.path().to_path_buf()), Some(file)).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        hub.attach(1, Sink::Local(tx));
+
+        let mut peer = Device::open_memory(d.clone(), Options::dev("alice")).unwrap();
+        let exchange = |hub: &mut Hub, peer: &mut Device| {
+            for m in peer.take_outgoing() {
+                hub.recv(1, m);
+            }
+            let heard: Vec<ServerMsg> = rx.try_iter().collect();
+            for m in &heard {
+                peer.recv(m.clone());
+            }
+            heard
+        };
+        peer.connected();
+        exchange(&mut hub, &mut peer);
+        assert!(peer.linked(), "hello answered: nothing in the log moved");
+
+        std::fs::create_dir(crate::persist::journal_path_of(dir.path())).unwrap();
+        peer.mutate("create_playlist", args([("name", Value::text("Kept"))])).unwrap();
+        let heard = exchange(&mut hub, &mut peer);
+        assert!(heard.is_empty(), "nothing said of an entry the disk does not hold: {heard:?}");
+        assert_eq!(hub.authority().log.head_seq(), 1, "sequenced, in memory");
+        assert_eq!(peer.pending_len(), 1);
+
+        std::fs::remove_dir(crate::persist::journal_path_of(dir.path())).unwrap();
+        hub.after();
+        let heard = exchange(&mut hub, &mut peer);
+        assert!(matches!(heard.first(), Some(ServerMsg::Ack { seqs, .. }) if seqs == &[1]), "{heard:?}");
+        let on_disk = crate::persist::load(dir.path(), &schema).unwrap().expect("a log");
+        assert_eq!(on_disk, hub.authority().log);
+        assert_eq!((peer.pending_len(), peer.cursor()), (0, 1));
     }
 }

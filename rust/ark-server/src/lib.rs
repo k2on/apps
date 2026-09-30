@@ -6,7 +6,8 @@
 //!      ── /auth/* (ark-auth)         │     ark::protocol::Server<Relay>
 //!      ── /media  (a directory)      │       the Authority, natives held
 //!      ── /*      (a web build)      │       live rooms → the app's `Live`
-//!      ── the app's own routes ──────┘     logs and kept rooms, written after each message
+//!      ── the app's own routes ──────┘     the log and kept rooms, written after each
+//!                                          message and before anything is said of it
 //! ```
 //!
 //! An app builds its server from a [`Builder`] and adds its own routes:
@@ -109,9 +110,10 @@ impl Builder {
         self
     }
 
-    /// Keep the log (`log.ark-log`) and the rooms' kept
-    /// snapshots (`live.cbor`) here, and read them back at start. Without
-    /// it nothing survives a restart.
+    /// Keep the log (`log.ark-log`, a snapshot, and `log.ark-journal`, the
+    /// entries since it: [`persist`]) and the rooms' kept snapshots
+    /// (`live.cbor`) here, and read them back at start. Without it nothing
+    /// survives a restart.
     pub fn data(mut self, dir: impl AsRef<Path>) -> Builder {
         self.data = Some(dir.as_ref().to_path_buf());
         self
@@ -275,19 +277,21 @@ fn open_hub(
     let schema = &domain.module().schema;
     let mut a = Authority::new(schema.clone(), domain.closures().clone());
     a.hold(domain.native_list());
+    let mut file = None;
     if let Some(dir) = &data {
-        std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
-        if let Some(log) = persist::load(dir, schema)? {
+        let (f, log) = persist::LogFile::open(dir, schema)?;
+        if let Some(log) = log {
             a.store = log.state_at(log.head_seq()).context("a loaded log has no state at its head")?;
             a.log = log;
         }
+        file = Some(f);
     }
     eprintln!("{name}: the log at seq {}", a.log.head_seq());
     let mut server = Server::open(auth, access, relay.clone(), a);
     if let Some(owns) = owns {
         server = server.with_owns(owns);
     }
-    Hub::new(server, relay, data)
+    Hub::new(server, relay, data, file)
 }
 
 /// A server that is built and not yet listening: its hub, and the router
