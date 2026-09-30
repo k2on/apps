@@ -422,3 +422,125 @@ eight thousand files offline before its first pump leaves until that pump.
 The server's `README.md` still says `.data(&data) // log.ark-log,
 live.cbor` and `persist.rs`: one log, `log.ark-log`; it is not this
 round's file to edit.
+
+### Round 2, R1 and R4 — reads that stop at what they need
+
+**What landed.** `Store::scan_ordered(table, eq, order, keep, limit)`,
+a default method answering `None`. `MemoryStore` serves it from the first
+`Secondary` whose leading columns are exactly the columns `eq` holds (in
+any order), whose remaining columns are the order's next ones in
+sequence under one direction (a column `eq` holds is skipped wherever the
+order names it), and after which the order says only the key's remaining
+columns ascending — the order a bucket's keys are in, and what §9.4
+completes every order with. It walks the range under the held prefix
+(from the prefix to the prefix followed by a struct, which outranks every
+column value) forwards, or backwards bucket by bucket with each bucket's
+keys still forwards, and stops at the `limit`-th row `keep` admits.
+`Overlay` asks the base with every key it has written left out of `keep`,
+adds its own writes that `keep` admits, sorts by `store::compare_rows` and
+cuts: exact, at the price of the table's writes once per read, which
+`scan_where_eq` already paid there. `view::read` asks it first for every
+bare plan and falls back as before. `scan_where_eq` also reads through an
+index whose leading columns the equalities hold (a range, the longest
+such prefix, put back in key order), which is what serves one person's
+playlists by `user_id`. The domain declares `playlist_item (playlist_id,
+pos)`, `media (file)`, `media (pos)`, `playlist (pos)` and `playlist
+(user_id, pos)`; module hash `8c678d5f…` → `536c3c13…` with no function's
+hash moved. `slug` is one fold, last to first, over the characters and
+one pass to spell the separators; `key_part` takes the slug once, in an
+option; `playlist_name` branches with an option's `filter`/`map_or`
+(`EMatch`, lazy both ways — `if_else` is lazy too but a statement, and a
+helper is an expression), so a free name costs one `contains`. That moved
+`add_song` and `create_playlist`'s closure hashes (module `1a2119a2…`):
+`compat::check` and `check_retained` of the previous module against this
+one found nothing, and a log's entries naming the old hashes keep running
+the old closures. R4: `Log::entries_after` clones the page and asks the
+range for one more; `Log::hash_at(n, head)` answers the head with the
+held store's hash, which the server's `Verify` and a peer alone's
+`verify` use; the scanner's `known_file` asks the view per file through
+`media (file)` and the set is gone. And, at R2's request, `MemoryStore`
+drops a table from `tables` when its last row goes, so a store that wrote
+and undid a table's first row equals one that never wrote it.
+
+**Guards, each falsified once.** `store.rs`: both walk directions with
+ties on the position falling to the key, the prefix, `keep` refusing rows
+before the limit, the rows examined counted (4, 1, 3 and 13 for limits
+4, 1, 3 and all — walking each bucket backwards, dropping the stop, or an
+unbounded range each fail it), orders no index holds answering `None`
+(dropping the tail's direction check fails it), an overlay write inside
+the window and two that take rows out of it (asking the base without
+leaving out written keys brings the removed row back), a prefix read in
+key order (without the sort it comes back by position), and a table
+emptied equal to one never written. `harken/domain/tests/perf.rs`
+`a_mutation_examines_the_rows_it_needs_not_the_library`, with the suite:
+at 8,000, `add_song` of a new file examines 1 row and 14 gets (16,000
+rows before), `add_to_playlist` onto a playlist of 7,999 1 row and 7 gets
+(7,999 before), `create_playlist` 2 and 2; the same at 500. Taking the
+`playlist_item` index off is 7,999 again; taking `media (file)` off is
+8,001. `keys::tests` holds `slug`, `key_part` and `playlist_name` to their
+old bodies over names of every shape (not collapsing a run: `a  b` is
+`a--b`; numbering a free name: `Favorites (1)`). `log.rs`: a page clones
+exactly itself at every cursor (the old body: 1,000 for a page of ten),
+and the hash at the head copies no store (replaying: one).
+
+**Before and after**, release builds on the shared VM, mean µs per
+operation (last hundred where the row has one). The harken rows' before is
+`a174981` (with other agents' work in progress in the tree) and after is
+`94176d2`, which also has R2 and R3 — so a
+`local_commit` column is theirs as much as this round's, and the clean
+measure of R1 is `Replica::mutate` (one optimistic apply, untouched by
+R2) and the rows counted. The ark and ark-server rows are one tree
+(`94176d2`) built twice, before with `view::read` skipping `scan_ordered`,
+`entries_after` cloning every entry and `hash_at` always replaying, run
+back to back.
+
+| row | n | before | after |
+|---|---|---|---|
+| add_song: whole, last 100 | 8,000 | 99,216 | 1,042 |
+| … `Replica::mutate`, last 100 | 8,000 | 33,394 | 956 |
+| … `local_commit`, last 100 (with R2) | 8,000 | 65,822 | 86 |
+| add_song: whole, l/f | 8,000 | 21.56 | 1.23 |
+| add_to_playlist, one playlist: whole, last 100 | 8,000 | 38,250 | 55 |
+| … `Replica::mutate`, last 100 | 8,000 | 12,760 | 39 |
+| add_to_playlist, one playlist: whole, l/f | 8,000 | 126.4 | 1.22 |
+| create_playlist, distinct names, last 100 | 800 | 486,016 | 1,245 |
+| create_playlist, all "Favorites", last 100 | 800 | 509,550 | 186,912 |
+| `playlist_name`, a free name among 1,000 | — | ≈ a taken name's (`free_number` ran) | 195 |
+| `playlist_name`, a taken name among 1,000 | — | the same path | 332,400 |
+| scanner: one new file, ms | 8,000 | 15.38 (the set) | 0.0035 |
+| scanner: full rescan, ms | 8,000 | 16.13 (the set) | 14.79 |
+| (d) `entries_after(0)` of | 8,000 | 29,425 | 1,237 |
+| (d) `entries_after(4000)` of | 8,000 | 15,299 | 660 |
+| (d) the server paging a fresh connection, total ms | 8,010 | 489.6 | 38.7 |
+| (d) receive by intent (native), last page | 8,010 | 1,260 | 29 |
+| (g) `sequence_entry`, one playlist, last 100 | 8,000 | 7,083 | 21.8 |
+| (g) fan-out, C=10, recv | 8,000 | 2,045 | 51 |
+| (g) `Verify` at the head, as served | 8,000 | 52,858 | 15,054 |
+| (b) one playlist, no log file: round trip, last 100 | 2,000 | 4,029 | 134 |
+| (b) … `Peer::mutate` alone, last 100 | 2,000 | 1,840 | 43 |
+| (b) one playlist, log on disk: round trip, last 100 | 2,000 | 4,409 | 342 |
+
+What is left is constant, or is the answer's own size. `add_song` is a
+flat millisecond, which is its dozen upserts and the interpreter (round
+3). `create_playlist` still grows with one person's playlists — it reads
+them all, which its `playlist_name` needs — and a taken name is
+`free_number`'s quadratic, 330 ms a call at a thousand, as decided. A
+`Verify` at the head is now `state_hash` of the store, 15 ms at 8,000
+rows, which is the answer and not a replay. (d)'s receive rows moved
+because the demo's `add_to_playlist` (whose `item` has a unique
+`(playlist_id, pos)`) now reads one row per apply; the page's own cost is
+flat. A full rescan is one probe per file, the same order as the set it
+replaced, and a look at one new file no longer reads the table. (c) is not
+on these paths (playlists of ten, and R3's persistence) and is left out;
+its `Dir` rows moved between the two runs by more than anything here could
+explain, which is this VM's disk.
+
+**Not verified.** The `harken-iced` and phone clients were not run; the
+module they load is the regenerated `harken.ark`, and the equivalence
+tests are native (the interpreter's agreement with the new helper bodies
+is `every_procedure_agrees_with_the_interpreter`). An existing installation
+whose log holds `add_song` or `create_playlist` entries under the old
+hashes was not replayed here: that the authority keeps and runs those
+closures is §8.3's existing behaviour, and `check_retained` is the only
+check made. The timings share the VM with other agents' builds and tests;
+the counted rows and clones are what the guards hold.

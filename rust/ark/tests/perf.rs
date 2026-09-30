@@ -689,10 +689,7 @@ fn perf_g_authority_and_fanout() {
         let t = Instant::now();
         s.recv(1, ClientMsg::Verify { seq, hash });
         let dt = t.elapsed();
-        let agreed = s
-            .take_outgoing()
-            .into_iter()
-            .any(|(_, m)| matches!(m, ServerMsg::Agree { ok: true, .. }));
+        let agreed = s.take_outgoing().into_iter().any(|(_, m)| matches!(m, ServerMsg::Agree { ok: true, .. }));
         assert!(agreed, "the authority agrees with its own head");
         once(&format!("Verify at the head, log of {n}"), 1, dt, "");
     }
