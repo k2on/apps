@@ -239,18 +239,49 @@ impl Input for Library {
     }
 }
 
+pub struct AddToPlaylist {
+    pub playlist_id: Id<Playlist>,
+    pub media_id: Id<Media>,
+}
+impl Input for AddToPlaylist {
+    fn schema() -> Object<Self> {
+        object().field("playlist_id", id::<Playlist>().exists()).field("media_id", id::<Media>())
+    }
+}
+
 fn module() -> Module {
     let library = router::<Lib>("library");
-    Module::new((library.routes((library.input::<Library>().query("library", |_ctx, db, input| {
-        db.media
-            .order_by(Media::pos.asc())
-            .each(|media, ()| {
-                db.playlist_item
+    Module::new((library.routes((
+        library.input::<Library>().query("library", |_ctx, db, input| {
+            db.media
+                .order_by(Media::pos.asc())
+                .each(|media, ()| {
+                    db.playlist_item
+                        .filter(PlaylistItem::playlist_id.eq(input.playlist_id))
+                        .on(PlaylistItem::media_id.eq(media.id))
+                })
+                .map(|media, (items,)| library_entry(media, items.first().map(|row| row.pos)))
+        }),
+        // harken's, less its `owned` middleware (which reads the playlist
+        // once more): the next position on one playlist.
+        library.input::<AddToPlaylist>().mutation("add_to_playlist", |ctx, db, input| {
+            let media = db.media.exists((input.media_id,));
+            when(media, || {
+                let last = db
+                    .playlist_item
                     .filter(PlaylistItem::playlist_id.eq(input.playlist_id))
-                    .on(PlaylistItem::media_id.eq(media.id))
+                    .order_by(PlaylistItem::pos.desc())
+                    .first();
+                db.playlist_item.insert(PlaylistItem {
+                    playlist_id: input.playlist_id,
+                    media_id: input.media_id,
+                    pos: last.map_or(0, |row| row.pos).add(1),
+                    added_ms: ctx.now("added_ms"),
+                    user_id: ctx.user,
+                })
             })
-            .map(|media, (items,)| library_entry(media, items.first().map(|row| row.pos)))
-    }),)),))
+        }),
+    )),))
 }
 
 fn idv(tag: u8, n: u64) -> Value {
@@ -394,4 +425,155 @@ fn a_map_and_a_filter_over_a_local_cost_what_the_list_holds() {
     eprintln!("map and filter over a local: {small} allocations at 100, {big} at 400; {per:.2} an element");
     assert!(per <= 3.0, "{per:.2} allocations an element: {small} at 100, {big} at 400");
     assert!(big <= 5 * small, "not linear: {small} at 100, {big} at 400");
+}
+
+// What is left, by what it is ----------------------------------------------------
+
+/// A store that counts the rows it hands out and takes in, by table: every
+/// row a read returns is a copy of the row the store holds, and every row
+/// a change carries is copied into it. What those copies cost in keys and
+/// map nodes is [`keys_and_map`]'s.
+struct Crossing {
+    inner: MemoryStore,
+    out: std::cell::RefCell<BTreeMap<String, usize>>,
+    written: BTreeMap<String, usize>,
+}
+
+impl Crossing {
+    // Counted without allocating: a name is copied the first time only.
+    fn out(&self, table: &str, n: usize) {
+        let mut out = self.out.borrow_mut();
+        match out.get_mut(table) {
+            Some(k) => *k += n,
+            None => {
+                out.insert(table.into(), n);
+            }
+        }
+    }
+}
+
+impl ark::store::Store for Crossing {
+    fn schema(&self) -> &Schema {
+        self.inner.schema()
+    }
+    fn get(&self, table: &str, key: &[Value]) -> Option<StoreRow> {
+        let r = self.inner.get(table, key);
+        self.out(table, r.iter().len());
+        r
+    }
+    fn exists(&self, table: &str, key: &[Value]) -> bool {
+        self.inner.exists(table, key)
+    }
+    fn scan(&self, table: &str) -> Vec<StoreRow> {
+        let rs = self.inner.scan(table);
+        self.out(table, rs.len());
+        rs
+    }
+    fn scan_where(&self, table: &str, keep: &dyn Fn(&StoreRow) -> bool) -> Vec<StoreRow> {
+        let rs = self.inner.scan_where(table, keep);
+        self.out(table, rs.len());
+        rs
+    }
+    fn scan_where_eq(&self, table: &str, eq: &[(&str, &Value)], spans: &[ark::store::Span], keep: &dyn Fn(&StoreRow) -> bool) -> Vec<StoreRow> {
+        let rs = self.inner.scan_where_eq(table, eq, spans, keep);
+        self.out(table, rs.len());
+        rs
+    }
+    fn scan_ordered(
+        &self,
+        table: &str,
+        eq: &[(&str, &Value)],
+        spans: &[ark::store::Span],
+        order: &[(&str, ark::schema::Dir)],
+        keep: &dyn Fn(&StoreRow) -> bool,
+        limit: usize,
+    ) -> Option<Vec<StoreRow>> {
+        let rs = self.inner.scan_ordered(table, eq, spans, order, keep, limit)?;
+        self.out(table, rs.len());
+        Some(rs)
+    }
+    fn apply_change(&mut self, change: &Change) {
+        *self.written.entry(change.table().into()).or_default() += 1;
+        self.inner.apply_change(change);
+    }
+    fn as_store(&self) -> &dyn ark::store::Store {
+        self
+    }
+}
+
+/// A row's copy, split: its allocations whole, and those that are its keys
+/// and its map nodes (the whole less its values copied alone, less the
+/// vector those were copied into).
+fn keys_and_map(row: &StoreRow) -> (usize, usize) {
+    let (whole, _) = counted(|| std::hint::black_box(row.clone()));
+    let (values, _) = counted(|| std::hint::black_box(row.values().cloned().collect::<Vec<Value>>()));
+    (whole, whole - (values - 1))
+}
+
+/// `docs/plan-perf.md` R5, then: with the interpreter's own copies gone,
+/// how much of a `library` hydrate and of one `add_to_playlist` apply is a
+/// `Row`'s keys and map nodes — the number the row representation is
+/// decided by. Printed, not asserted.
+#[test]
+#[ignore]
+fn perf_row_share() {
+    let m = module();
+    let built = m.build();
+    let procs: BTreeMap<String, Procedure> = m.procedures().into_iter().map(|(_, p)| (p.name().to_string(), p)).collect();
+    eprintln!("\n== what is left: the share that is a Row's keys and map nodes");
+    for n in [DEMO, 2000, 8000] {
+        let (st, pl) = library(&built.schema, n);
+        let per: BTreeMap<&str, (usize, usize)> = ["media", "playlist", "playlist_item"]
+            .into_iter()
+            .map(|t| (t, keys_and_map(&st.rows(t).into_values().next().unwrap())))
+            .collect();
+        let crossing = Crossing {
+            inner: st,
+            out: Default::default(),
+            written: BTreeMap::new(),
+        };
+        let a: Args = [("playlist_id".to_string(), pl.clone())].into_iter().collect();
+        let _ = eval::query(built, "library", &a, &crossing).unwrap();
+        crossing.out.borrow_mut().values_mut().for_each(|k| *k = 0);
+        let (total, _) = counted(|| eval::query(built, "library", &a, &crossing).unwrap());
+        let out = crossing.out.borrow().clone();
+        let rows: usize = out.iter().map(|(t, k)| k * per[t.as_str()].0).sum();
+        let keys: usize = out.iter().map(|(t, k)| k * per[t.as_str()].1).sum();
+        // The node: a struct of ten fields, built by the helper — its ten
+        // names and its one map node.
+        let node = 11 * n as usize;
+        eprintln!(
+            "library at {n}: {total} allocations ({:.1} an entry); rows handed out {out:?} = {rows} ({:.0}%), of which keys and map nodes {keys} ({:.0}%); the nodes' own names and maps {node} ({:.0}%)",
+            total as f64 / n as f64,
+            100.0 * rows as f64 / total as f64,
+            100.0 * keys as f64 / total as f64,
+            100.0 * node as f64 / total as f64,
+        );
+
+        crossing.out.borrow_mut().clear();
+        let a: Args = [("playlist_id".to_string(), pl.clone()), ("media_id".to_string(), idv(1, n - 1))]
+            .into_iter()
+            .collect();
+        let autos: Args = [("added_ms".to_string(), Value::int(7))].into_iter().collect();
+        let ctx = eval::Ctx::new("alice", "s");
+        let p = &procs["add_to_playlist"];
+        let (total, out) = counted(|| {
+            let mut ov = ark::store::Overlay::new(&crossing);
+            p.apply(&ctx, &autos, &a, &mut ov)
+        });
+        let changes = out.unwrap().unwrap();
+        assert_eq!(changes.len(), 1);
+        let out = crossing.out.borrow().clone();
+        // Handed out by the store, and the row written: built once, copied
+        // into the procedure's own overlay and into the caller's.
+        let handed: usize = out.iter().map(|(t, k)| k * per[t.as_str()].0).sum();
+        let handed_keys: usize = out.iter().map(|(t, k)| k * per[t.as_str()].1).sum();
+        let (item, item_keys) = per["playlist_item"];
+        let (rows, keys) = (handed + 3 * item, handed_keys + 3 * item_keys);
+        eprintln!(
+            "add_to_playlist at {n}: {total} allocations; rows handed out {out:?}, and the row written three times: {rows} ({:.0}%), of which keys and map nodes {keys} ({:.0}%)",
+            100.0 * rows as f64 / total as f64,
+            100.0 * keys as f64 / total as f64,
+        );
+    }
 }

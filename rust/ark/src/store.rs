@@ -773,6 +773,13 @@ impl Store for MemoryStore {
         self.tables.get(table).and_then(|t| t.get(key)).cloned()
     }
 
+    // Asked by every write of a row with a reference, once per parent, and
+    // by every `exists` check: answered without copying the row out
+    // (`docs/plan-perf.md` R5).
+    fn exists(&self, table: &str, key: &[Value]) -> bool {
+        self.tables.get(table).is_some_and(|t| t.contains_key(key))
+    }
+
     fn scan(&self, table: &str) -> Vec<Row> {
         self.tables.get(table).map(|t| t.values().cloned().collect()).unwrap_or_default()
     }
@@ -938,6 +945,13 @@ impl Store for Overlay<'_> {
         match self.writes.get(table).and_then(|t| t.get(key)) {
             Some(w) => w.clone(),
             None => self.base.get(table, key),
+        }
+    }
+
+    fn exists(&self, table: &str, key: &[Value]) -> bool {
+        match self.writes.get(table).and_then(|t| t.get(key)) {
+            Some(w) => w.is_some(),
+            None => self.base.exists(table, key),
         }
     }
 
