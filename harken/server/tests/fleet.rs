@@ -1389,11 +1389,8 @@ fn fuzz(seed: u64, steps: usize) {
 /// snapshot, rebases its ten onto it, pushes them, and converges; its ten
 /// land after all two hundred.
 ///
-/// What `converged` checks by entry is checked here by id for what went
-/// below the horizon: the log keeps every id it ever sequenced (§10.3),
-/// and an accepted intent whose entry was compacted away is in `log.ids`
-/// rather than `log.entries` — it is then forgotten for `converged`, which
-/// reads entries.
+/// An accepted intent whose entry was compacted away is in `log.ids`
+/// rather than `log.entries`, and `converged` reads both.
 ///
 /// Falsified by `HARKEN_RETAIN_ENTRIES=100000`: nothing is compacted, and
 /// the horizon assertion names 0.
@@ -1469,13 +1466,6 @@ fn a_peer_away_past_the_horizon_is_served_the_snapshot() {
             "the away peer's intent landed after the two hundred: {n} <= {head_before}"
         );
     }
-    let below: Vec<Id> = log
-        .ids
-        .iter()
-        .filter(|(_, n)| **n <= log.horizon())
-        .map(|(id, _)| *id)
-        .collect();
-    f.lost(below);
     let done = f.converged(&mut [&mut a, &mut b, &mut c]);
     assert_eq!(done.head, head_before + 10);
     println!(

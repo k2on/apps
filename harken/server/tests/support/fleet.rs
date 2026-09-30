@@ -900,9 +900,13 @@ impl Fleet {
                 self.name
             );
         }
+        // An entry the server compacted below its horizon is gone from
+        // `entries` and its id is not: the log keeps every id it ever
+        // sequenced (§10.3, `ark::retention`).
         let accepted = self.accepted();
         for (id, who) in &accepted {
-            match (ids.contains_key(id), refused.get(id)) {
+            let sequenced = ids.contains_key(id) || log.ids.contains_key(id);
+            match (sequenced, refused.get(id)) {
                 (true, None) => {}
                 (false, Some(_)) => {}
                 (true, Some(why)) => panic!(
