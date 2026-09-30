@@ -15,6 +15,7 @@
 //! | [`verify`] | `Ark.Verify`: what a module must satisfy before anything runs it |
 //! | [`hash`] | `Ark.Hash`: the state hash, closures, the function hash |
 //! | [`log`] | `Ark.Log`: entries, facts, snapshots, the horizon |
+//! | [`journal`] | a log on a key/value storage: a snapshot and pages of records, the server's and a peer alone's (`docs/plan-alone.md` §2) |
 //! | [`peer`] | `Ark.Peer`: the replica and the authority |
 //! | [`protocol`] | `Ark.Protocol`: the frames, the client and server machines |
 //! | [`view`] | `Ark.View`: [`view::pull`], the one evaluator of plans (spec v4), and incremental views with their contract |
@@ -42,6 +43,7 @@ pub mod compat;
 pub mod eval;
 pub mod hash;
 pub mod ir;
+pub mod journal;
 pub mod json;
 pub mod live;
 pub mod log;
