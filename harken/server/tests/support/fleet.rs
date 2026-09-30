@@ -280,6 +280,10 @@ pub struct PeerProc {
     pub name: String,
     pub dir: PathBuf,
     pub user: Option<String>,
+    /// Started `--alone`: its own authority, dialling nothing
+    /// (`docs/plan-alone.md` §4). Cleared, the next start is `--server`
+    /// over the same directory — the join.
+    pub alone: bool,
     pub proxy: Proxy,
     child: Option<Child>,
     stdin: Option<ChildStdin>,
@@ -344,13 +348,13 @@ impl PeerProc {
             .open(&self.stderr)
             .unwrap();
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_harken-peer"));
+        cmd.args(["--dir", self.dir.to_str().unwrap()]);
+        if self.alone {
+            cmd.arg("--alone");
+        } else {
+            cmd.args(["--server", &self.proxy.url()]);
+        }
         cmd.args([
-            "--dir",
-            self.dir.to_str().unwrap(),
-            "--server",
-            &self.proxy.url(),
-        ])
-        .args([
             "--pump-ms",
             &PUMP_MS.to_string(),
             "--ping-ms",
@@ -361,7 +365,7 @@ impl PeerProc {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::from(err));
-        if let Some(u) = &self.user {
+        if let (Some(u), false) = (&self.user, self.alone) {
             cmd.args(["--user", u]);
         }
         let mut child = cmd.spawn().expect("harken-peer starts");
@@ -422,6 +426,39 @@ impl PeerProc {
                 tail(&self.stderr, 30)
             ),
         }
+    }
+
+    /// Send one line and do not wait for its answer: what a scenario that
+    /// kills a peer in the middle of a command does. [`PeerProc::answers`]
+    /// reads what came back.
+    pub fn say(&mut self, cmd: &str, fields: Vec<(&str, Value)>) {
+        let stdin = self
+            .stdin
+            .as_mut()
+            .unwrap_or_else(|| panic!("{} is not running", self.name));
+        writeln!(stdin, "{}", command(cmd, fields))
+            .and_then(|_| stdin.flush())
+            .unwrap_or_else(|e| panic!("{} has gone: {e}", self.name));
+    }
+
+    /// Every answer that has arrived and not been read, without waiting.
+    pub fn answers(&mut self) -> Vec<Value> {
+        let Some(lines) = &self.lines else {
+            return vec![];
+        };
+        lines
+            .try_iter()
+            .map(|l| json::decode(&l).unwrap_or_else(|e| panic!("{l}: {e}")))
+            .collect()
+    }
+
+    /// Record an intent as owed by the log: one this peer made whose
+    /// answer a kill took, and that the directory kept.
+    pub fn owe(&self, id: Id, what: &str) {
+        self.accepted
+            .lock()
+            .unwrap()
+            .insert(id, format!("{} {what}", self.name));
     }
 
     pub fn ask(&mut self, cmd: &str, fields: Vec<(&str, Value)>) -> Value {
@@ -762,6 +799,7 @@ impl Fleet {
             name: name.into(),
             dir: self.root.path().join(format!("peer-{name}")),
             user: user.map(str::to_string),
+            alone: false,
             proxy: Proxy::start(self.upstream.clone()),
             child: None,
             stdin: None,
