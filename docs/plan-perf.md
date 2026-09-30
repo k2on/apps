@@ -986,6 +986,89 @@ after its append — cost a peer one needless re-base after a restart and
 are not tested. The browser's storage (`Local`) carries the name through
 the same code; the wasm build was not run. Timings share the VM.
 
+### Round 5, R8 — a rebase once per pump
+
+**What landed** (`219195a`). `Replica::receive`, `receive_with` and
+`receive_facts` place what arrived in the inbox and nothing else; `ack`
+goes through `receive`, so it only places too. `Replica::settle` is the
+one advance — what `retry` was, renamed now that it is the only way the
+inbox moves — and costs a lookup when nothing is next. `receive_batch`
+is a page handed in whole: placed, then settled, as before. `Client::recv`
+no longer advances: a `Batch` places its entries, `FactsFor`, `Ack` and
+`Closures` place or hold, and `Client::settle` applies the inbox once and
+then says what a page left to say — `NeedFacts` for what still waits, and
+the `Hello` for the next page, at the cursor the page moved the replica
+to (said at the frame, before the page is applied, it named the old
+cursor and would be sent the same page again). A `SnapshotOf` settles
+what earlier frames of the pump placed before it replaces the replica, so
+everything before it is what it was when each frame advanced.
+
+**Where the one settle lives.** In the driver, because only the driver
+knows where a pump ends: the sans-io `Client` gets its frames one at a
+time and is told. `ark_client::Peer::pump` places every frame its link
+polled and calls `Client::settle` once, before it sends and persists;
+`Peer::recv` and `recv_frame`, the entry points for a transport of the
+caller's own, are a pump of one frame and settle after it (which keeps
+the hub's, the view's and the persistence tests' one-frame exchanges
+exactly as they were). `Sim` settles after each step's delivery (once
+when the network duplicated the frame) and after a drain's frames to each
+client, and flushes what the client says only then. `local_commit`
+settles per intent: the next intent is sequenced by its record only once
+the one before is confirmed, so alone an intent is still run once. The
+tests that relied on the implicit advance settle where it was; the
+`rebase/three-peers` script settles per landing in step 3, because its
+six transitions are two rebases — one settle over both entries is one
+rebase and four. The vectors regenerated from the changed generator are
+byte-identical to the tree's (`diff -r`), fleet transcripts included.
+
+**Guards, each falsified once.** `peer::tests::fifty_pushes_in_one_pump_
+rerun_the_pending_once`: K = 100 intents pending, fifty of another
+peer's entries each its own `Batch` through `Client::recv`, then one
+`Client::settle` — the frames run nothing, the settle runs 150 (each
+landing entry once, the hundred once), where a settle per frame runs
+5,050; the view is the replay's, told as transitions, and the same as the
+per-frame client's (settling inside `Client::recv`: 5,050 at the first
+assertion). `ark-client` `peer::tests::a_pump_is_one_rebase_however_
+many_frames_it_polled`: the same shape through a real `Server` and a
+`Queues` link, fifty frames polled by one `Peer::pump` — the view is told
+250 transitions (a hundred undone, fifty landed, a hundred again), where a
+settle per frame tells 10,050 (settling in `place`: 10,050). Unchanged
+and green: every `ark` vector test, `past_the_head`, `demo_authoring`,
+the churn suites (`ark` and `harken-domain` `views`, `converge`),
+`ark-server`'s `sync`, `journal`, `live` and `bench`, and
+`harken-server`'s `fleet`.
+
+**The row.** `cargo test -p ark --release --test perf perf_e_rebase --
+--ignored --nocapture --test-threads=1`; before at `f5ab5ac`, after at
+`219195a` in two runs, µs per entry, M = 256 landing. Before, "one entry
+at a time" advanced per `receive_with`; after, the harness says which
+pump shape it measures — a settle per entry (a trickle, one push a pump)
+or all 256 placed singly and settled once (a burst, one pump).
+
+| row | S = 500 / 2,000 / 8,000, before | after, a pump each | after, one pump | one page, after |
+|---|---|---|---|---|
+| (e) K=10, one at a time | 185 / 196 / 197 | 189–202 / 196–198 / 201–204 | 22.4–23.7 / 22.7–23.1 / 22.9–25.7 | 21–22 / 20–21 / 22 |
+| (e) K=100, one at a time | 1,704 / 1,761 / 1,940 | 1,684–1,780 / 1,783–1,858 / 2,586–2,838 | 29.1–29.6 / 28.4–30.8 / 29.5–30.8 | 24–25 / 27–29 / 31–32 |
+
+A burst in one pump now costs what a page costs — constant in K up to the
+one re-run of the pending, 30 µs an entry at K = 100 where it was 1,900.
+A trickle, one push per pump, costs what it did: K re-runs per pump is
+the rebase, and is what `docs/plan-perf.md` accepted in Round 4 at ≈ 20 µs
+an intent. The after runs of K = 100 a pump each at 8,000 (2,586 and
+2,838) are above the before (1,940); the work is the same — the guard
+counts the runs, and `settle` is the advance the before made — and the
+runs were taken while two other agents compiled and tested in the same
+VM, so that cell is the VM's, not a regression, and is worth re-taking
+on a quiet machine.
+
+**Not verified.** The pump's one settle is exercised through `Queues`
+and the in-process hub, not a real socket; the browser's `Web` link goes
+through the same `pump` and was not run. A pump that polls both frames
+and a close settles before the close is noted, so a `Hello` a page
+deferred is queued and then dropped with the connection, as the one said
+at the frame was; that order is argued from the code, not tested. The kotlin and swift runtimes still advance per frame;
+nothing about the wire changed, so they are served as before.
+
 ## Round 3 — decided with round 2's numbers
 
 Round 2 removed every super-linear cost the harness found. What remains
