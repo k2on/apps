@@ -1166,6 +1166,164 @@ deferred is queued and then dropped with the connection, as the one said
 at the frame was; that order is argued from the code, not tested. The kotlin and swift runtimes still advance per frame;
 nothing about the wire changed, so they are served as before.
 
+### Round 5, R9 — a count or a sum kept as a number
+
+**What landed** (`e41de7a`, `a0cf539`, `2b9e99b`). The aggregate is
+recognised, not declared. At hydrate `view::shape` reads the plan and the
+closure's helpers and finds, per node, each related list — and a group's
+`members` — whose every use in the `having`, the projection and the
+expression order keys is `len(list)` (`Agg::Count`) or `fold(list, init,
+|acc, x| acc + f(x))` with `f` mentioning nothing but `x`
+(`Agg::Sum { x, f }`); a helper whose whole body is one of the two over its
+one parameter is the same use, which is how harken's `total` is seen
+through. `is_empty()` is `len() == 0` in the vocabulary, so it is a count.
+A related list is *kept* when its uses are all aggregates, its child plan
+is all numbers — a table source, no lookups, no limit, every related plan
+of its own kept — and its parent is the root or kept; anything else is a
+list, and so is everything beneath it. The expressions are rewritten once
+(`Face`): a count becomes a slot, a sum `init + slot`, a slot being a
+negative symbol no plan binds. Nothing travels: `Shape` lives on the
+`View` beside the plan, so no IR, frame, closure hash or vector moved
+(`cargo test -p ark --test vectors` and `spec/vectors/views/*` unchanged;
+the views vectors' patches are what they were).
+
+An entry keeps, per `(node, dependency)` of a kept plan, a `Held`: the
+numbers (a function of the dependency alone, since a child plan sees
+nothing of its parent but its `on`), the child nodes with their rows when
+the child plan has kept lists of its own, and which parent nodes read it.
+Its keys are the entry's dependencies and are indexed in `by_dep` as
+`deps` are. `push_all` routes as before; a hit on a kept node moves the
+numbers there by the change's rows — `−terms(old) + terms(new)`, the old
+and new rows `touched` already sees, read from the change and not the
+store — or, for a child plan with lists of its own, reads the named child
+rows again by key and builds those nodes over the numbers beneath them.
+Then deepest first (a node's id is below every id under it, §1.8's
+pre-order) each number that moved re-evaluates the child nodes that read
+it from their kept rows and moves its own parent by the difference, up to
+the entry, whose node is evaluated again over the numbers; a dependency
+nobody reads any more is let go, with what it held. A dependency not held
+yet is pulled from the store once, which is exact because the store is
+already final and no change was routed to it. A group's kept members are
+counted from the kept keys and summed by the changes' terms; a touched
+group's keys are an overlay of arrivals and departures over the kept set
+rather than a copy of it (`a0cf539` — the copy kept `artists` linear in
+Bach's group after its count was kept). Any other use of a list is the
+rebuild it was, over the same store; the contract is unchanged and is what
+the churn suites hold.
+
+**Which of harken's projections qualified.** Kept: `composers` at all
+three depths (the works counted and summed, each work's movements summed,
+each movement's songs counted); `works` and `work` (`recordings.len()`,
+`total(movements)` over counted songs); `artists` (`media.len()`);
+`recordings`' songs (`songs.len()` in the projection and the order key)
+beside its credits, which are a list (`performers(credits, …)` filters
+them); `credits`' `real` (`is_empty()`); `playlists_of`'s items
+(`is_empty()`). Not kept: `albums` — its creators are read for their
+`first`, and its child plan has a lookup; `library`, `album`, `artist`,
+`recording`, `playlist` read their items' `first`; `track_details` hands
+its credits to `performers`. A child plan with a lookup is never kept: a
+change to the looked-up table would have to find the child node it moves,
+which `by_dep` does not say.
+
+**Guards, each falsified once** (`rust/ark/tests/aggregates.rs`).
+`a_song_costs_composers_its_path`: harken's `composers`, node for node,
+over a library with Bach's fifty works of ten movements and a quarter of
+the songs under them — a song added under an existing movement costs one
+`get` (Bach's row, which the node is evaluated over) and no row, at 500
+songs and at 2,000; a new movement and its first song in one batch, two
+`get`s and one row (the movement, Bach, the one song under the movement
+through the index); taking the song away, one `get`. Each is one `Update`
+and the view a fresh hydrate. With nothing kept (`face` answering `None`
+for every child plan, which is the rebuild as before) the same three
+pushes read 676, 678 and 677 rows at 500 songs and 1,051, 1,053 and
+1,052 at 2,000 — Bach's works, movements and songs. `a_composer_
+described_reads_one_row`: Bach's own row edited (harken's
+`describe_person`) is one `get` and no row, where the rebuild read 675 at
+500. `a_song_costs_its_group_one_row`: a song into the largest group of a
+group source whose members are counted and summed is one `get` (the
+lookup from the key) at both sizes, where members kept as a list read 127
+and 502 — every member again. What is recognised:
+`composers_is_kept_three_deep` (refusing a helper as an aggregate: the
+works are a list and nothing is kept), `what_is_kept_and_what_is_not` (a
+list mapped at the root, a list's `first` two deep, one list kept beside
+one that is not; falsified by keeping a child plan with an unkept list),
+`only_a_sum_of_the_element_is_a_sum` (`acc + acc`, `acc * x` and a step
+over the parent's row are not sums; falsified by dropping the
+free-variable test). The contract under churn, the kept and the broken
+shape alike: `composers`, a sum in an expression order key under a limit,
+a group counted and summed under a having, and `composers_mapped` (the
+works mapped at the root), `composers_first` (a movement reads its songs'
+`first`) and `mixed` (one list kept, one not) — falsified by never
+letting go of a re-read child's old dependencies, by skipping the
+re-evaluation of a child whose numbers moved, and by not subtracting a
+row that leaves its group, each "the view is not a fresh hydrate" within
+the first steps. Green unchanged: `rust/ark/tests/views.rs`,
+`plans.rs`, `toggle.rs` (the library toggle still two reads),
+`vectors.rs`, `harken/domain/tests/views.rs`, and the workspace.
+
+**The rows.** Before at `df66ab2`, after at `a0cf539` (the harness row)
+and `2b9e99b`'s `view.rs` over `df66ab2` (`bench_views`), release, one
+thread, the shared VM with other agents building.
+
+`cargo test -p harken-domain --release --test perf perf_f_views --
+--ignored --nocapture --test-threads=1`, µs per push (median of five),
+and the hydrate in ms:
+
+| query | add a Bach song, 500 / 2,000 songs, before | after | hydrate 500 / 2,000, before | after |
+|---|---|---|---|---|
+| `albums` | 90.5 / 316.5 | 86.0 / 372.4 | 3.17 / 10.85 | 2.98 / 11.17 |
+| `artists` | 201.9 / 916.5 | 10.0 / 12.6 | 2.09 / 9.60 | 2.26 / 10.36 |
+| `composers` | 845.4 / 3,128.4 | 35.1 / 42.3 | 0.98 / 3.76 | 1.75 / 4.54 |
+| `works` | 47.9 / 113.7 | 25.4 / 32.6 | 1.53 / 4.79 | 2.08 / 6.66 |
+
+`cargo test -p harken-iced --features demo --release -- --ignored
+--nocapture --test-threads=1 bench_views` — the desktop's views through
+`ark_client::View`, a playlist toggle and Handel described
+(`describe_person`), medians of 21 warm rounds, at 1× and 4× the demo:
+
+| query | describe, 1× / 4×, before | after | toggle 1× / 4×, before | after | hydrate 4×, before / after |
+|---|---|---|---|---|---|
+| `artists` | 109.9 / 200.7 µs | 12.9 / 19.4 µs | 0.23 / 0.36 µs | 0.45 / 0.54 µs | 2.3 / 2.3 ms |
+| `composers` | 319.3 / 333.6 µs | 11.3 / 14.2 µs | 0.30 / 0.59 µs | 0.89 / 1.1 µs | 4.8 / 6.6 ms |
+| `works` | 0.42 / 0.50 µs | 0.77 / 0.94 µs | 0.43 / 0.49 µs | 0.89 / 1.0 µs | 0.45 / 0.96 ms |
+| `playlists_of` | 0.27 / 0.30 µs | 0.57 / 0.74 µs | 5.7 / 6.0 µs | 9.5 / 10.5 µs | 0.06 / 0.07 ms |
+| `albums` | 0.30 / 0.52 µs | 0.53 / 0.72 µs | 0.38 / 0.56 µs | 0.57 / 0.80 µs | 3.0 / 3.8 ms |
+
+Handel described was his composer's whole tree and his group's every row
+read again; it is now his row and the numbers kept. A push that touches
+nothing costs half a microsecond more than it did — the per-push context
+(`Cx`: the plan's nodes by id, the kept plans' filters evaluated) is
+built before the changes are looked at — which is a constant, and where a
+view is touched it is repaid many times over. `playlists_of`'s toggle
+is one hit swept: 94 µs in the first `a0cf539` run, which was glibc
+consolidating the bench's freed scans on the sweep's first allocation of
+over a kilobyte (a `Vec::with_capacity(4096)` dropped before the push
+took it to 7.6 µs); `2b9e99b` boxes the sweep's entries under that size,
+and what remains is the sweep's own few microseconds.
+
+`albums` is not kept and did not move (its two runs are within the VM).
+`composers` and `works` still rise a little from 500 to 2,000 songs: the
+harness's song is always a new movement, whose songs are pulled once
+through the index, and the pushes are tens of microseconds on a shared VM;
+the reads the guard counts do not grow. A hydrate of a kept view costs
+more — it keeps each kept child node's row — `composers` 3.76 to 4.54 ms
+and `works` 4.79 to 6.66 ms at 2,000; that is the price of never pulling
+the list again.
+
+**Not verified, and decided.** A sum kept is checked as a fold is, but a
+fold refuses when a prefix of its terms overflows and a kept sum only when
+its running total does: the two differ only for terms of both signs near
+`i64`'s ends, which no harken projection has. An `Err` from `push_all`
+now leaves the view stale with some entries' numbers possibly moved
+(before, it left the view as it was, also stale); `ark_client::View`
+re-hydrates on any `Err`, which is the only caller. Recognition is at
+hydrate, in `view.rs`, not in the verifier: it needs the closure's
+helpers, and the verifier's typing is what makes the fold's `+` an
+integer one. `docs/plan-v4.md` §1.5's "A group source rebuilds a whole
+group per member change" is now true only of unkept members; §1.13 says
+so. The kotlin and swift runtimes, frozen at v3, have no views of this
+kind.
+
 ## Round 3 — decided with round 2's numbers
 
 Round 2 removed every super-linear cost the harness found. What remains
