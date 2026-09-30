@@ -1475,3 +1475,320 @@ fn a_peer_away_past_the_horizon_is_served_the_snapshot() {
         done.log.horizon()
     );
 }
+
+// -- a peer without a server (`docs/plan-alone.md` §4) ----------------------------------
+
+/// A peer started `--alone` over its own directory, as `user` once it
+/// joins a server.
+fn alone_peer(f: &Fleet, name: &str, user: &str) -> PeerProc {
+    let mut p = f.peer_stopped(name, Some(user));
+    p.alone = true;
+    p.start();
+    p
+}
+
+/// `n` songs authored, each with a title of its own.
+fn songs(p: &mut PeerProc, tag: &str, n: usize) -> Vec<Id> {
+    (0..n)
+        .map(|i| p.author("add_song", song(&format!("{tag}-{i:04}"))))
+        .collect()
+}
+
+/// The media on a playlist, in `pos` order.
+fn on_playlist(f: &Fleet, list: Id) -> Vec<Id> {
+    playlists_in_pos_order(&f.rows("playlist_item"))
+        .remove(&list)
+        .unwrap_or_default()
+}
+
+/// **14. Alone, then a fresh server.** A peer that never had a server
+/// authors fifty songs, a playlist and ten things on it with no server
+/// dialled at all; then the same directory is started with `--server` —
+/// the join — and a second device of the same person joins too. The
+/// server ends with exactly those sixty-one entries, in the order they
+/// were sequenced alone, all of them the person's, and every hash is the
+/// server's.
+///
+/// Falsified by `Replica::fork_back` re-queuing nothing: the server ends
+/// empty and the joined peer's hash is not its store's.
+#[test]
+fn alone_then_a_fresh_server() {
+    let f = Fleet::new("alone-fresh");
+    let mut p = alone_peer(&f, "p", "alice");
+    let mut made = songs(&mut p, "alone", 50);
+    made.push(p.author("create_playlist", named("Alone")));
+    let list = playlist(&mut p, "Alone");
+    for m in media(&mut p).into_iter().take(10) {
+        made.push(add(&mut p, list, m));
+    }
+    let st = p.status();
+    assert_eq!((st.cursor, st.pending, st.link.as_str()), (61, 0, "alone"));
+    p.quit();
+    p.alone = false;
+    let t = Instant::now();
+    p.start();
+    let mut q = f.peer("q", Some("alice"));
+    let done = f.converged(&mut [&mut p, &mut q]);
+    measured("sixty-one local intents join a fresh server", t.elapsed());
+    assert_eq!(done.head, 61);
+    let order: Vec<Id> = done.entries.iter().map(|(_, e)| e.id).collect();
+    assert_eq!(order, made, "in the order they were sequenced alone");
+    assert!(done.entries.iter().all(|(_, e)| e.actor == "alice"));
+    assert_eq!(on_playlist(&f, list).len(), 10);
+}
+
+/// **15. Alone beside two people using the server.** Alice's and bob's
+/// devices author on the server while a third peer, never connected,
+/// authors thirty of its own; told to `join` as alice, its local history
+/// lands after everything theirs, once, and all three converge.
+///
+/// Falsified by `Peer::join` connecting without re-queuing (the
+/// `fork_back_to` call skipped): the join answers with nothing pending.
+#[test]
+fn alone_beside_two_server_users_lands_after_theirs() {
+    let f = Fleet::new("alone-beside");
+    let mut a = f.peer("a", Some("alice"));
+    let mut b = f.peer("b", Some("bob"));
+    let mut m = alone_peer(&f, "m", "alice");
+    let mine = songs(&mut m, "mine", 30);
+    songs(&mut a, "a", 20);
+    songs(&mut b, "b", 20);
+    a.author("create_playlist", named("Theirs"));
+    // Not `converged`: the thirty are owed fleet-wide and not yet pushed.
+    assert!(a.settle(PATIENCE) && b.settle(PATIENCE));
+    let head_before = f.server.log_on_disk().expect("a log").head_seq();
+    let joined = m.ask(
+        "join",
+        vec![
+            ("server", Value::text(m.proxy.url())),
+            ("user", Value::text("alice")),
+        ],
+    );
+    assert_eq!(
+        joined,
+        ark::json::decode(r#"{"ok":true,"pending":30,"cursor":0}"#).unwrap()
+    );
+    let done = f.converged(&mut [&mut a, &mut b, &mut m]);
+    assert_eq!(done.head, head_before + 30);
+    for id in &mine {
+        let n = done.log.seq_of(id).expect("sequenced");
+        assert!(n > head_before, "{n} is not after {head_before}");
+    }
+}
+
+/// **16. Leave, more, and back — twice.** Alice's two devices share a
+/// playlist; one `leave`s, puts three things on it alone, while the other
+/// puts three on it online; the first `join`s again, and its three sit
+/// after the other's — authored first, sequenced last, the rebase over a
+/// fork. Then away and back once more.
+///
+/// Falsified by `Peer::leave` recording the fork at nothing: the rejoin's
+/// `Hello` names no log at cursor 0 and is paged everything on top of a
+/// store that already holds it — the peer never converges.
+#[test]
+fn leave_more_intents_and_join_again() {
+    let f = Fleet::new("alone-leave");
+    let mut a = f.peer("a", Some("alice"));
+    let mut m = f.peer("m", Some("alice"));
+    songs(&mut a, "s", 12);
+    a.author("create_playlist", named("Shared"));
+    f.converged(&mut [&mut a, &mut m]);
+    let list = playlist(&mut m, "Shared");
+    let ms = media(&mut m);
+    add(&mut a, list, ms[0]);
+    f.converged(&mut [&mut a, &mut m]);
+
+    let left = m.ask("leave", vec![]);
+    assert_eq!(left.as_struct()["ok"], Value::Bool(true));
+    assert_eq!(m.status().link, "alone");
+    for x in &ms[1..4] {
+        add(&mut m, list, *x);
+    }
+    for y in &ms[4..7] {
+        add(&mut a, list, *y);
+    }
+    assert!(a.settle(PATIENCE));
+    m.ask(
+        "join",
+        vec![
+            ("server", Value::text(m.proxy.url())),
+            ("user", Value::text("alice")),
+        ],
+    );
+    f.converged(&mut [&mut a, &mut m]);
+    let want: Vec<Id> = [&ms[0..1], &ms[4..7], &ms[1..4]].concat();
+    assert_eq!(
+        on_playlist(&f, list),
+        want,
+        "the away three after the other's"
+    );
+
+    m.ask("leave", vec![]);
+    add(&mut m, list, ms[7]);
+    m.ask(
+        "join",
+        vec![
+            ("server", Value::text(m.proxy.url())),
+            ("user", Value::text("alice")),
+        ],
+    );
+    let done = f.converged(&mut [&mut a, &mut m]);
+    assert_eq!(on_playlist(&f, list).len(), 8);
+    assert_eq!(done.head, 12 + 1 + 1 + 3 + 3 + 1);
+}
+
+/// **17. `kill -9` during a join.** A peer with four hundred local intents
+/// joins to completion, which times a join; four more are told to `join`
+/// and killed a tenth, a half, nine tenths and ninety-nine hundredths of
+/// that time later — each a directory of its own — and started again with
+/// `--server`. Whatever the kill cut, the restart finishes the join: the
+/// transition writes the re-queued intents and the fork's replica before
+/// it removes the local history, so a peer killed between the two reopens
+/// with both (`docs/plan-alone.md` §4), and one killed before either
+/// reopens alone-shaped and joins at open. Every intent is on the server
+/// once. What each kill left is printed.
+///
+/// Falsified by `Peer::open` not joining over a local history (the
+/// `fork_back_to` at open skipped): the restarted peers stay at their
+/// local cursors and nothing converges. Removing the local history before
+/// writing the re-queued intents was not caught here — that window is a
+/// few file removals wide and no kill landed in it; `ark-client`'s
+/// `a_join_killed_between_its_writes_finishes_on_reopen` walks every write.
+#[test]
+fn a_join_killed_with_kill9_finishes_on_restart() {
+    let f = Fleet::new("alone-kill-join");
+    let join = |p: &mut PeerProc| {
+        let url = p.proxy.url();
+        p.say(
+            "join",
+            vec![("server", Value::text(url)), ("user", Value::text("alice"))],
+        );
+    };
+    let mut cal = alone_peer(&f, "cal", "alice");
+    songs(&mut cal, "cal", 400);
+    let t = Instant::now();
+    join(&mut cal);
+    let answered = eventually(PATIENCE, || !cal.answers().is_empty());
+    assert!(answered, "the join answers");
+    let whole = t.elapsed();
+    measured("a join of 400 local intents, to its answer", whole);
+    let mut peers = vec![cal];
+    for (i, frac) in [0.1f64, 0.5, 0.9, 0.99].into_iter().enumerate() {
+        let mut p = alone_peer(&f, &format!("k{i}"), "alice");
+        songs(&mut p, &format!("k{i}"), 400);
+        join(&mut p);
+        std::thread::sleep(whole.mul_f64(frac));
+        p.kill9();
+        let replica = p.dir.join("replica");
+        let pending = std::fs::metadata(replica.join("pending")).map_or(0, |m| m.len());
+        println!(
+            "fleet: killed at {:.0}% of a join: local history {}, pending record {pending} bytes",
+            frac * 100.0,
+            if replica.join("log").exists() {
+                "present"
+            } else {
+                "gone"
+            },
+        );
+        p.alone = false;
+        p.start();
+        peers.push(p);
+    }
+    let mut refs: Vec<&mut PeerProc> = peers.iter_mut().collect();
+    let done = f.converged(&mut refs);
+    assert_eq!(done.head, 5 * 400);
+}
+
+/// **18. A peer alone killed mid-append.** Three hundred songs are said to
+/// a peer alone without waiting, and it is killed a hundred and twenty milliseconds in.
+/// Started again alone, it is whole: nothing is pending, its confirmed
+/// store is its view, and every song in its library is an entry of its
+/// local history — the last whole one is where it stops. Then it joins,
+/// and the server has what it kept, every intent it answered before the
+/// kill among them.
+///
+/// Falsified by `mutate` alone not writing its page before it returns
+/// (`persist_log` left to the pump): an answered intent is missing after
+/// the restart.
+#[test]
+fn a_peer_alone_killed_mid_append_reopens_whole() {
+    let f = Fleet::new("alone-kill-append");
+    let mut p = alone_peer(&f, "p", "alice");
+    for i in 0..300 {
+        p.say(
+            "mutate",
+            vec![
+                ("name", Value::text("add_song")),
+                ("args", Value::record(song(&format!("burst-{i:04}")))),
+            ],
+        );
+    }
+    std::thread::sleep(Duration::from_millis(120));
+    let answered: Vec<Id> = p
+        .answers()
+        .iter()
+        .filter_map(|a| match &a.as_struct()["id"] {
+            Value::Id(id) => Some(*id),
+            _ => None,
+        })
+        .collect();
+    p.kill9();
+    p.start();
+    let (cursor, hash, view) = p.hash();
+    assert_eq!(hash, view, "the confirmed store is the view");
+    assert_eq!(p.status().pending, 0);
+    let kept = media(&mut p).len() as i64;
+    assert_eq!(kept, cursor, "every song an entry, and every entry a song");
+    assert!(cursor >= answered.len() as i64);
+    println!(
+        "fleet: killed mid-append: {} answered, {cursor} kept of 300",
+        answered.len()
+    );
+    // What it kept and did not answer is owed too: the log has it.
+    p.ask(
+        "join",
+        vec![
+            ("server", Value::text(p.proxy.url())),
+            ("user", Value::text("alice")),
+        ],
+    );
+    assert!(p.settle(PATIENCE));
+    let log = f.server.log_on_disk().expect("a log");
+    assert_eq!(log.head_seq(), cursor);
+    for id in &answered {
+        assert!(
+            log.seq_of(id).is_some(),
+            "an intent answered before the kill is kept"
+        );
+    }
+    for (_, (e, _)) in &log.entries {
+        p.owe(e.id, "add_song, kept past the kill");
+    }
+    f.converged(&mut [&mut p]);
+}
+
+/// **19. Two thousand local intents join, timed.** A peer alone authors
+/// two thousand songs, then is started with `--server`: the time from the
+/// start to every intent on the server and the peer converged is printed
+/// (`docs/plan-alone.md`, "Landed").
+///
+/// Falsified by `Replica::fork_back` queuing the first thousand only: the
+/// thousand after them were accepted and are not in the log.
+#[test]
+fn two_thousand_local_intents_join_timed() {
+    let f = Fleet::new("alone-2000");
+    let mut p = alone_peer(&f, "p", "alice");
+    let t = Instant::now();
+    songs(&mut p, "big", 2_000);
+    measured("a peer alone authors 2,000 songs", t.elapsed());
+    p.quit();
+    p.alone = false;
+    let t = Instant::now();
+    p.start();
+    let done = f.converged(&mut [&mut p]);
+    measured(
+        "2,000 local intents: start with --server to converged",
+        t.elapsed(),
+    );
+    assert_eq!(done.head, 2_000);
+}
