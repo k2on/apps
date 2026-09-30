@@ -13,6 +13,14 @@
 //! start that ends the process (exit 1), as any other failed sign-in does
 //! (`docs/plan-perf.md` R6).
 //!
+//! **Alone, then a server, is one directory.** A directory used `--alone`
+//! and then opened with `--server` is a peer joining that server
+//! (`docs/plan-alone.md` §1): everything it sequenced alone is re-queued
+//! and pushed on top of whatever the server has — as the login `--user`
+//! signs in, or as nobody until `sign_in` — and the other way round a
+//! directory opened `--alone` after a server leaves it. `join` and `leave`
+//! do the same without a restart.
+//!
 //! It is what the desktop is, minus the window: the replica in `DIR/replica`
 //! (`Peer::open_path`), signed in the way the desktop signs in under dev
 //! auth (`ark_auth::client::login` with a name, which a dev server answers
@@ -40,6 +48,9 @@
 //! {"cmd":"standing","id":…}    {"standing":"pending|confirmed|rejected|unknown","why":…}
 //! {"cmd":"disconnect"} {"cmd":"reconnect"}      {"ok":true}
 //! {"cmd":"sign_in","user":"…"} {"cmd":"sign_out"}  {"ok":b,…}
+//! {"cmd":"join","server":URL,"user":"…"}   {"ok":b,"pending":K,…} — alone → that server;
+//!                              without `user`, signed out
+//! {"cmd":"leave"}              {"ok":b,"cursor":N} — the server → alone
 //! {"cmd":"persist"}            {"ok":true}  — a pump and a write, now
 //! {"cmd":"quit"}               {"ok":true}, then exit 0 after a persist
 //! ```
@@ -193,18 +204,40 @@ fn log_in(server: &str, user: &str, patience: Patience) -> Result<Login, String>
 /// One line from stdin, read.
 #[derive(Clone, Debug, PartialEq)]
 enum Cmd {
-    Mutate { name: String, args: Args },
+    Mutate {
+        name: String,
+        args: Args,
+    },
     Status,
     Hash,
-    Wait { cursor: i64, timeout: Duration },
-    Settle { timeout: Duration },
-    Query { name: String, args: Args },
-    Rejections { all: bool },
-    Standing { id: ark::value::Id },
+    Wait {
+        cursor: i64,
+        timeout: Duration,
+    },
+    Settle {
+        timeout: Duration,
+    },
+    Query {
+        name: String,
+        args: Args,
+    },
+    Rejections {
+        all: bool,
+    },
+    Standing {
+        id: ark::value::Id,
+    },
     Disconnect,
     Reconnect,
-    SignIn { user: String },
+    SignIn {
+        user: String,
+    },
     SignOut,
+    Join {
+        server: String,
+        user: Option<String>,
+    },
+    Leave,
     Persist,
     Quit,
 }
@@ -266,6 +299,14 @@ fn parse(line: &str) -> Result<Cmd, String> {
             user: text("user")?,
         },
         "sign_out" => Cmd::SignOut,
+        "join" => Cmd::Join {
+            server: text("server")?.trim_end_matches('/').to_string(),
+            user: match m.get("user") {
+                None | Some(Value::Null) => None,
+                Some(_) => Some(text("user")?),
+            },
+        },
+        "leave" => Cmd::Leave,
         "persist" => Cmd::Persist,
         "quit" => Cmd::Quit,
         other => return Err(format!("no command {other:?}")),
@@ -452,6 +493,8 @@ impl Headless {
             .text("link", &s.link)
             .num("opens", s.opens as i64)
             .num("diverged", s.diverged as i64)
+            .num("joining", s.joining as i64)
+            .num("fork", s.fork.cursor)
     }
 
     /// Answer one command. `quit` is answered like `persist`; the loop is
@@ -554,6 +597,46 @@ impl Headless {
                 forget(&self.dir);
                 Answer::ok(true)
             }
+            Cmd::Join { server, user } => {
+                let login = match &user {
+                    None => None,
+                    Some(user) => match log_in(&server, user, self.patience) {
+                        Ok(l) => Some(l),
+                        Err(e) => {
+                            return Answer::refused(format!("signing {user} in at {server}: {e}"))
+                        }
+                    },
+                };
+                if let Some(l) = &login {
+                    if let Err(e) = remember(&self.dir, &server, l) {
+                        eprintln!("harken-peer: the login is not remembered: {e}");
+                    }
+                }
+                let took = Instant::now();
+                let login =
+                    login.map(|l| ark_client::Login::new(l.user.id, l.session, Some(l.token)));
+                match self.peer.join(&ark_auth::socket_url(&server), login) {
+                    Ok(()) => {
+                        eprintln!(
+                            "harken-peer: joined {server}: {} re-queued in {:?}",
+                            self.peer.status().joining,
+                            took.elapsed()
+                        );
+                        self.server = Some(server);
+                        Answer::ok(true)
+                            .num("pending", self.peer.pending_len() as i64)
+                            .num("cursor", self.peer.cursor())
+                    }
+                    Err(e) => Answer::refused(e),
+                }
+            }
+            Cmd::Leave => match self.peer.leave() {
+                Ok(()) => {
+                    self.server = None;
+                    Answer::ok(true).num("cursor", self.peer.cursor())
+                }
+                Err(e) => Answer::refused(e),
+            },
             Cmd::Persist | Cmd::Quit => {
                 self.pump();
                 match self.peer.persist() {
@@ -740,6 +823,20 @@ mod tests {
                 user: "alice".into()
             }
         );
+        assert_eq!(
+            parse(r#"{"cmd":"join","server":"http://h:1/","user":"alice"}"#).unwrap(),
+            Cmd::Join {
+                server: "http://h:1".into(),
+                user: Some("alice".into())
+            }
+        );
+        assert_eq!(
+            parse(r#"{"cmd":"join","server":"http://h:1"}"#).unwrap(),
+            Cmd::Join {
+                server: "http://h:1".into(),
+                user: None
+            }
+        );
         for (line, simple) in [
             ("status", Cmd::Status),
             ("hash", Cmd::Hash),
@@ -747,6 +844,7 @@ mod tests {
             ("disconnect", Cmd::Disconnect),
             ("reconnect", Cmd::Reconnect),
             ("sign_out", Cmd::SignOut),
+            ("leave", Cmd::Leave),
             ("persist", Cmd::Persist),
             ("quit", Cmd::Quit),
         ] {
@@ -763,6 +861,7 @@ mod tests {
                 "`args` is an object",
             ),
             (r#"{"cmd":"standing","id":"x"}"#, "`id` is an id"),
+            (r#"{"cmd":"join"}"#, "`server` is missing"),
         ] {
             let e = parse(bad).unwrap_err();
             assert!(e.contains(says), "{bad}: {e}");
@@ -841,6 +940,68 @@ mod tests {
             r#"{"rejections":[]}"#
         );
         assert_eq!(h.handle(Cmd::Quit).line(), r#"{"ok":true}"#);
+    }
+
+    /// `docs/plan-alone.md` §4: a directory used `--alone` and then opened
+    /// with `--server` is the join — what it sequenced alone is pending,
+    /// the store back at the fork — and `leave` and `join` walk the same
+    /// two transitions without a restart. No server answers here, so the
+    /// join is signed out and nothing is pushed; the fleet has the rest.
+    /// Falsified by `Cmd::Leave` answering without leaving: the cursor
+    /// stays at 0 with three pending.
+    #[test]
+    fn alone_then_a_server_is_one_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let server = format!("http://127.0.0.1:{port}");
+        let d = dir.path().to_str().unwrap();
+        let alone = flags(&a(&["--dir", d, "--alone"])).unwrap();
+        let mut h = Headless::open(&alone, Domain::new(&harken_domain::module())).unwrap();
+        for name in ["one", "two", "three"] {
+            let made = h.handle(
+                parse(&format!(
+                    r#"{{"cmd":"mutate","name":"create_playlist","args":{{"name":"{name}"}}}}"#
+                ))
+                .unwrap(),
+            );
+            assert!(made.line().starts_with(r#"{"ok":true"#), "{}", made.line());
+        }
+        let status = json::decode(&h.handle(Cmd::Status).line()).unwrap();
+        assert_eq!(status.as_struct()["link"], Value::text("alone"));
+        assert_eq!(status.as_struct()["cursor"], Value::int(3));
+        drop(h);
+
+        let online = flags(&a(&["--dir", d, "--server", &server])).unwrap();
+        let mut h = Headless::open(&online, Domain::new(&harken_domain::module())).unwrap();
+        let status = json::decode(&h.handle(Cmd::Status).line()).unwrap();
+        assert_eq!(
+            (
+                &status.as_struct()["cursor"],
+                &status.as_struct()["pending"],
+                &status.as_struct()["joining"]
+            ),
+            (&Value::int(0), &Value::int(3), &Value::int(3)),
+            "joined, signed out: the three are pending"
+        );
+        let left = json::decode(&h.handle(Cmd::Leave).line()).unwrap();
+        assert_eq!(left.as_struct()["cursor"], Value::int(3));
+        let status = json::decode(&h.handle(Cmd::Status).line()).unwrap();
+        assert_eq!(status.as_struct()["pending"], Value::int(0));
+        assert_eq!(status.as_struct()["link"], Value::text("alone"));
+        let joined = json::decode(
+            &h.handle(Cmd::Join {
+                server: server.clone(),
+                user: None,
+            })
+            .line(),
+        )
+        .unwrap();
+        assert_eq!(joined.as_struct()["pending"], Value::int(3));
+        assert_eq!(joined.as_struct()["cursor"], Value::int(0));
     }
 
     /// With a server that is not there: a peer signed out holds its intent
