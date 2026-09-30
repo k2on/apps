@@ -10,13 +10,22 @@ workspace = "../../rust"
 name = "harken-server"
 path = "src/main.rs"
 
+# A peer with no screen, driven by JSON lines: what the process fleet
+# (tests/fleet.rs) and the VM test run as a device (docs/plan-fleet.md §1).
+# A binary of this package because `CARGO_BIN_EXE_*` reaches only the
+# binaries of the crate whose tests run.
+[[bin]]
+name = "harken-peer"
+path = "src/bin/harken-peer.rs"
+
 [dependencies]
 ark = { path = "../../rust/ark" }
 # The scanner is an ark-client peer in this process; it dials the hub, never
 # a socket, so it needs no TLS.
 ark-client = { path = "../../rust/ark-client", default-features = false }
 ark-server = { path = "../../rust/ark-server" }
-ark-auth = { path = "../../rust/ark-auth", features = ["server"] }
+# `client` for harken-peer, which signs in the way the desktop does.
+ark-auth = { path = "../../rust/ark-auth", features = ["server", "client"] }
 harken-domain = { path = "../domain" }
 anyhow = "1"
 axum = { version = "0.7", features = ["ws"] }

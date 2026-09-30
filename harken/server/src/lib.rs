@@ -94,6 +94,12 @@ pub struct Config {
     pub web_module: Option<String>,
     /// The house, if there is one.
     pub house: Option<ha::Config>,
+    /// How often the sync socket pings, and how many may go unanswered
+    /// before a connection is closed. The engine's default everywhere but a
+    /// test: the process fleet shortens it (`HARKEN_KEEPALIVE_MS`) so a
+    /// black-holed socket is closed in a second rather than a minute
+    /// (`docs/plan-fleet.md` §2, scenario 10).
+    pub keepalive: ark_server::Keepalive,
 }
 
 impl Config {
@@ -110,6 +116,7 @@ impl Config {
             web: None,
             web_module: None,
             house: None,
+            keepalive: ark_server::Keepalive::default(),
         }
     }
 
@@ -127,6 +134,8 @@ impl Config {
     /// HARKEN_WEB, HARKEN_WEB_MODULE the browser client
     /// HARKEN_HA_URL, HARKEN_HA_TOKEN_FILE, HARKEN_HA_PLAYERS
     ///                               all three, or none; HARKEN_HA_MEDIA
+    /// HARKEN_KEEPALIVE_MS           the sync socket's ping interval (20000)
+    /// HARKEN_KEEPALIVE_MISSED       pings unanswered before it closes (3)
     /// ```
     pub fn from_env(listen: &str) -> Result<Config> {
         Config::from_vars(listen, |k| std::env::var(k).ok())
@@ -154,6 +163,19 @@ impl Config {
             _ => bail!("HARKEN_OIDC_ISSUER, HARKEN_OIDC_CLIENT_ID and HARKEN_OIDC_CLIENT_SECRET_FILE go together; set all three"),
         };
         let house = house(&env)?;
+        let mut keepalive = ark_server::Keepalive::default();
+        if let Some(ms) = env("HARKEN_KEEPALIVE_MS") {
+            let ms: u64 = ms.trim().parse().ok().filter(|n| *n > 0).ok_or_else(|| {
+                anyhow!("HARKEN_KEEPALIVE_MS is milliseconds, more than none: {ms}")
+            })?;
+            keepalive.every = std::time::Duration::from_millis(ms);
+        }
+        if let Some(n) = env("HARKEN_KEEPALIVE_MISSED") {
+            keepalive.missed = n
+                .trim()
+                .parse()
+                .map_err(|_| anyhow!("HARKEN_KEEPALIVE_MISSED is a count: {n}"))?;
+        }
         Ok(Config {
             listen: listen.into(),
             data: env("HARKEN_DATA")
@@ -172,6 +194,7 @@ impl Config {
             web: env("HARKEN_WEB").map(PathBuf::from),
             web_module: env("HARKEN_WEB_MODULE"),
             house,
+            keepalive,
         })
     }
 
@@ -367,7 +390,15 @@ pub async fn start(config: Config) -> Result<Server> {
         .name("harken-server")
         .data(&config.data)
         .auth(auth.clone())
-        .live(desk);
+        .live(desk)
+        .keepalive(config.keepalive);
+    if config.keepalive != ark_server::Keepalive::default() {
+        eprintln!(
+            "harken-server: the sync socket pings every {}ms and gives up after {} unanswered",
+            config.keepalive.every.as_millis(),
+            config.keepalive.missed
+        );
+    }
     // One root for every kind rather than one per kind, because `file` is
     // on the kind-neutral side of the schema: the scanner writes each
     // track's path relative to this directory, and `/media/` serves that
@@ -503,7 +534,41 @@ mod tests {
             }
         );
         assert_eq!(c.redirects, ["https://a/", "https://b/"]);
+        assert_eq!(c.keepalive, ark_server::Keepalive::default());
         assert_eq!(c.public_url(), "https://harken.example.com");
+    }
+
+    /// The keepalive a test shortens, and nothing a typo could make of it.
+    /// Falsified by ignoring `HARKEN_KEEPALIVE_MISSED`: the count is 3.
+    #[test]
+    fn the_keepalive_is_the_engines_unless_told() {
+        let dev = ("HARKEN_DEV_AUTH", "1");
+        let c = Config::from_vars(
+            "x:1",
+            vars(&[
+                dev,
+                ("HARKEN_KEEPALIVE_MS", "250"),
+                ("HARKEN_KEEPALIVE_MISSED", "2"),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(
+            c.keepalive,
+            ark_server::Keepalive {
+                every: std::time::Duration::from_millis(250),
+                missed: 2
+            }
+        );
+        for bad in [
+            ("HARKEN_KEEPALIVE_MS", "0"),
+            ("HARKEN_KEEPALIVE_MS", "1s"),
+            ("HARKEN_KEEPALIVE_MISSED", "-1"),
+        ] {
+            assert!(
+                Config::from_vars("x:1", vars(&[dev, bad])).is_err(),
+                "{bad:?}"
+            );
+        }
     }
 
     #[test]
