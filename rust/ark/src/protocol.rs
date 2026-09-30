@@ -20,7 +20,7 @@ use crate::hash::{Closure, FnHash};
 use crate::ir::decode::{closure_from_value, DecodeError};
 use crate::ir::encode::closure_value;
 use crate::live::{self, ConnId, Machine, Rooms};
-use crate::log::{Entry, Facts, Page, Seq};
+use crate::log::{snapshot_of, Entry, Facts, Page, Seq};
 use crate::peer::{Authority, Replica, Sequenced};
 use crate::schema::Schema;
 use crate::store::{Change, MemoryStore, Refusal, Row, Store};
@@ -582,9 +582,12 @@ impl Client {
                     self.replica.receive_facts(n, f);
                 }
             }
-            // Below the horizon: the confirmed store is replaced by the
-            // snapshot and the cursor moves to it; pending intents are kept
-            // and replay on top.
+            // Below the horizon, or past the head (R6): the confirmed store
+            // is replaced by the snapshot and the cursor moves to it;
+            // pending intents are kept and replay on top. Verdicts the app
+            // has not yet taken are kept too, ahead of any the replay
+            // makes: a snapshot replaces what is confirmed, not what this
+            // peer was told about its own intents.
             ServerMsg::SnapshotOf { seq, rows, .. } => {
                 let mut st = MemoryStore::empty(self.schema.clone());
                 for (t, vs) in rows {
@@ -594,9 +597,12 @@ impl Client {
                         }
                     }
                 }
-                let r = &self.replica;
+                let r = &mut self.replica;
                 let mut opened = Replica::open(r.schema.clone(), r.bodies.clone(), st, seq, r.pending.clone());
                 opened.natives = r.natives.clone();
+                let mut told = std::mem::take(&mut r.rejections);
+                told.append(&mut opened.rejections);
+                opened.rejections = told;
                 self.replica = opened;
             }
             ServerMsg::Ack { ids, seqs } => {
@@ -873,14 +879,34 @@ impl<M: Machine> Server<M> {
     /// §12.4 Fan-out: every connection, everything above what it has been
     /// sent, a page at a time; a snapshot for one below the horizon. Run
     /// after every message.
+    ///
+    /// A connection whose cursor is *past* the head is the below-horizon
+    /// case from the other side (`docs/plan-perf.md` R6): a peer confirmed
+    /// entries of a log this authority no longer has — a server restarted
+    /// over an emptied or older data directory. Serving it nothing left
+    /// it at a cursor nothing would ever reach and its pending intents
+    /// unacknowledged for ever. It is sent the authority's store as the
+    /// snapshot at the head, the same `SnapshotOf` a peer below the
+    /// horizon gets, and a client re-opens from any snapshot with its
+    /// pending intents on top (§12.2) — which it pushed after its `Hello`,
+    /// so they are sequenced here, acknowledged or refused, and confirmed
+    /// by the page that follows. Entries it had confirmed that this log
+    /// never held are gone from it: everyone is re-based onto what the
+    /// authority has, which is the only log there is.
     fn fanout(&mut self) {
         let conns: Vec<(ConnId, Mode, Seq)> = self.conns.iter().map(|(c, cn)| (*c, cn.mode, cn.sent)).collect();
         for (c, md, sent) in conns {
             let a = &self.authority;
-            if sent >= a.log.head_seq() {
+            let head = a.log.head_seq();
+            if sent == head {
                 continue;
             }
-            let (msg, advanced) = match a.page(sent, BATCH_LIMIT) {
+            let page = if sent > head {
+                Page::BelowHorizon(snapshot_of(head, a.store.clone()))
+            } else {
+                a.page(sent, BATCH_LIMIT)
+            };
+            let (msg, advanced) = match page {
                 Page::BelowHorizon(sn) => {
                     let rows = sn
                         .store
