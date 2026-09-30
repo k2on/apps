@@ -82,7 +82,13 @@ pub struct Auth {
     redirects: Vec<String>,
     pending: Mutex<HashMap<String, Pending>>,
     codes: Mutex<HashMap<String, Issued>>,
+    /// Told `(user, session)` of every session revoked ([`Auth::on_revoke`]).
+    revoked: Mutex<Vec<Revoked>>,
 }
+
+/// What [`Auth::on_revoke`] is handed: told the user and the session id of
+/// every session revoked, after the store has written it down.
+pub type Revoked = Box<dyn Fn(&str, &str) + Send + Sync>;
 
 impl std::fmt::Debug for Auth {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -103,6 +109,7 @@ impl Auth {
             redirects: Vec::new(),
             pending: Mutex::new(HashMap::new()),
             codes: Mutex::new(HashMap::new()),
+            revoked: Mutex::new(Vec::new()),
         }
     }
 
@@ -179,6 +186,29 @@ impl Auth {
     /// the same person (see `owns_fn`).
     pub fn owns(&self, user: &str, session: &str) -> bool {
         self.sessions().owned_by(user, session)
+    }
+
+    /// Be told of every session revoked from here on (`docs/plan-perf.md`
+    /// R6). The token is asked at a connection's `Hello` and not again, so
+    /// without this a revoked session's open socket went on syncing until
+    /// it happened to drop; the sync server registers here and closes that
+    /// session's connections at once. Called on the thread that revoked,
+    /// with no lock of this one held.
+    pub fn on_revoke(&self, f: impl Fn(&str, &str) + Send + Sync + 'static) {
+        self.revoked.lock().unwrap_or_else(|e| e.into_inner()).push(Box::new(f));
+    }
+
+    /// End the session `token` proves, and tell everything registered with
+    /// [`Auth::on_revoke`]. Whether there was a live one.
+    pub fn revoke(&self, token: &str) -> Result<bool, String> {
+        let gone = self.sessions().revoke_session(token)?;
+        let Some((user, session)) = gone else {
+            return Ok(false);
+        };
+        for f in self.revoked.lock().unwrap_or_else(|e| e.into_inner()).iter() {
+            f(&user, &session);
+        }
+        Ok(true)
     }
 }
 
@@ -344,7 +374,7 @@ async fn me(State(auth): State<Arc<Auth>>, headers: HeaderMap) -> Response {
 
 /// End the session a bearer token proves.
 async fn logout(State(auth): State<Arc<Auth>>, headers: HeaderMap) -> Response {
-    let revoked = bearer(&headers).map(|t| auth.sessions().revoke(t).unwrap_or(false)).unwrap_or(false);
+    let revoked = bearer(&headers).map(|t| auth.revoke(t).unwrap_or(false)).unwrap_or(false);
     if revoked {
         StatusCode::NO_CONTENT.into_response()
     } else {
@@ -431,5 +461,27 @@ mod tests {
         let owns = a.owns_fn();
         assert!(owns("alice", &login.session));
         assert!(!owns("bob", &login.session));
+    }
+
+    /// R6: revoking a session tells every listener whose and which, once,
+    /// and a token already revoked or never issued tells nobody. Falsified
+    /// by leaving out the loop over the listeners in `Auth::revoke` (the
+    /// store revoking alone, as `logout` did): the listener hears nothing.
+    #[test]
+    fn a_revocation_is_told_to_whoever_asked() {
+        let a = auth();
+        let heard: Arc<Mutex<Vec<(String, String)>>> = Arc::default();
+        let h = heard.clone();
+        a.on_revoke(move |user, session| h.lock().unwrap().push((user.into(), session.into())));
+        let account = Account {
+            id: "alice".into(),
+            name: "Alice".into(),
+            email: String::new(),
+        };
+        let login = a.issue(&account).unwrap();
+        assert!(a.revoke(&login.token).unwrap());
+        assert!(!a.revoke(&login.token).unwrap(), "already gone");
+        assert!(!a.revoke("no such token").unwrap());
+        assert_eq!(*heard.lock().unwrap(), [("alice".to_string(), login.session.clone())]);
     }
 }

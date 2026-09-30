@@ -154,13 +154,21 @@ impl SessionStore {
     /// End a session. Its token proves nothing from here; entries authored
     /// under it are still its owner's. Whether there was a live one.
     pub fn revoke(&mut self, token: &str) -> Result<bool, String> {
+        self.revoke_session(token).map(|gone| gone.is_some())
+    }
+
+    /// [`SessionStore::revoke`], answering whose session it was and which:
+    /// `(user, session id)`, what a server with sockets open under it needs
+    /// to close them (`docs/plan-perf.md` R6).
+    pub fn revoke_session(&mut self, token: &str) -> Result<Option<(String, String)>, String> {
         let h = hash(token);
         let Some(r) = self.rows.iter_mut().find(|r| r.token_hash == h && !r.revoked) else {
-            return Ok(false);
+            return Ok(None);
         };
         r.revoked = true;
+        let gone = (r.user.clone(), r.id.clone());
         self.write()?;
-        Ok(true)
+        Ok(Some(gone))
     }
 
     /// Whether `session` is or was `user`'s — live, expired or revoked.

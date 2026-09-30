@@ -33,6 +33,17 @@
 //! duplicate it is, once the disk holds it. A standing device is not a
 //! replica and hears no log, so it stays.
 //!
+//! **A revoked session's connections are closed at once.** The token is
+//! asked at `Hello` and not again, so a session revoked while its socket is
+//! open used to go on syncing until the socket happened to drop. The sign-in
+//! routes tell the hub which session went ([`HubHandle::revoker`], which
+//! `ark_auth::server::Auth::on_revoke` is given), and every replica
+//! connection identified as it is sent `Denied` with [`REVOKED`] — the last
+//! frame a socket gets, which the peer keeps as its reason and stops
+//! dialling on — and forgotten by the machine at once, so nothing it says
+//! after is taken (`docs/plan-perf.md` R6). The token check at `Hello` is
+//! unchanged: it is what turns the peer away when it dials again.
+//!
 //! Three kinds of connection, one numbering: a **socket** (frames go to its
 //! writer task), a **local** peer (an `ark_client::Peer` in this process,
 //! through [`HubHandle::dial`]: the scanner's shape), and a **standing**
@@ -111,6 +122,9 @@ const KEPT: &str = "live.cbor";
 /// its intents are on its disk, and the re-push is how the server learns
 /// its disk is back.
 pub const GIVE_UP_AFTER: Duration = Duration::from_secs(5);
+
+/// What a connection whose session was revoked is told, as a `Denied`.
+pub const REVOKED: &str = "signed out: this login was revoked";
 
 /// How often a failed write is tried again while nothing arrives: what
 /// makes [`GIVE_UP_AFTER`] a duration rather than a count of messages that
@@ -312,6 +326,30 @@ impl Hub {
         }
     }
 
+    /// A session was revoked: every replica connection identified as it is
+    /// told `Denied` and forgotten by the machine (the module docs). The
+    /// denial goes out through the held queue like anything else, after
+    /// whatever was already queued for it and only once the log is written.
+    fn revoked(&mut self, session: &str) {
+        let gone: Vec<ConnId> = self
+            .sinks
+            .iter()
+            .filter(|(_, s)| !matches!(s, Sink::Standing(_)))
+            .map(|(c, _)| *c)
+            .filter(|c| self.server.identity(*c).is_some_and(|who| who.session == session))
+            .collect();
+        if gone.is_empty() {
+            return;
+        }
+        eprintln!("ark-server: a login was revoked; closing its {} connection(s)", gone.len());
+        self.held.extend(self.server.take_outgoing());
+        for c in gone {
+            self.server.disconnect(c);
+            self.held.push((c, ServerMsg::Denied { reason: REVOKED.into() }));
+        }
+        self.after();
+    }
+
     /// Write the log and the rooms; `Err` where the log is not on the disk.
     fn persist(&mut self) -> Result<()> {
         let Some(dir) = self.data.clone() else {
@@ -360,6 +398,7 @@ enum Cmd {
     Recv(ConnId, ClientMsg),
     Stand(ConnId, String, String, Box<dyn Fn(Vec<u8>) + Send>),
     Read(Reader),
+    Revoked(String),
 }
 
 /// The async (and sync) side's handle on the hub's thread. Cheap to clone;
@@ -424,6 +463,7 @@ impl HubHandle {
                         Cmd::Recv(c, m) => hub.recv(c, m),
                         Cmd::Stand(c, room, who, sink) => hub.stand(c, room, who, sink),
                         Cmd::Read(f) => f(&hub),
+                        Cmd::Revoked(session) => hub.revoked(&session),
                     }
                 }
             })
@@ -464,6 +504,24 @@ impl HubHandle {
     /// A connection closed: the room hears it.
     pub fn detach(&self, c: ConnId) -> Result<()> {
         self.send(Cmd::Detach(c))
+    }
+
+    /// A session was revoked: close its connections (the module docs).
+    pub fn revoke(&self, session: &str) -> Result<()> {
+        self.send(Cmd::Revoked(session.into()))
+    }
+
+    /// [`HubHandle::revoke`] as what `ark_auth::server::Auth::on_revoke`
+    /// takes. It holds the hub weakly: the authenticator the hub's machine
+    /// holds keeps the `Auth` alive, and a strong handle in the `Auth`
+    /// would keep the hub's thread alive for ever.
+    pub fn revoker(&self) -> impl Fn(&str, &str) + Send + Sync + 'static {
+        let hub = self.tx.downgrade();
+        move |_user: &str, session: &str| {
+            if let Some(tx) = hub.upgrade() {
+                let _ = tx.send(Cmd::Revoked(session.into()));
+            }
+        }
     }
 
     /// A frame from a connection.
@@ -734,5 +792,79 @@ mod tests {
         let on_disk = crate::persist::load(dir.path(), &schema).unwrap().expect("a log");
         assert_eq!((on_disk.head_seq(), on_disk.ids.len()), (1, 1));
         assert!(hub.failure().is_none(), "the stretch is over");
+    }
+
+    /// R6: a revoked session's connections are told `Denied` with
+    /// [`REVOKED`] at once and taken off the machine, and nobody else's
+    /// are: alice's two devices are two logins, and revoking one leaves the
+    /// other linked and syncing. What the revoked one says after is not
+    /// taken — its next intent stays pending and the log does not move.
+    /// Falsified by `Hub::revoked` doing nothing: the first device is still
+    /// linked, and undenied, at the ten-second deadline.
+    #[test]
+    fn a_revoked_login_is_closed_and_no_other() {
+        let d = demo::domain();
+        let make_domain = d.clone();
+        // A token is `user:session`.
+        let by_token: ark::protocol::Authenticate = Box::new(|t| {
+            let (user, session) = t?.split_once(':')?;
+            Some(Identity {
+                user: user.into(),
+                session: session.into(),
+            })
+        });
+        let hub = HubHandle::spawn(move || {
+            let relay = Relay::new(Box::new(crate::Quiet));
+            let schema = make_domain.module().schema.clone();
+            let mut a = Authority::new(schema, make_domain.closures().clone());
+            a.hold(make_domain.native_list());
+            let server = Server::open(by_token, open_access(), relay.clone(), a);
+            Hub::new(server, relay, None, None)
+        })
+        .unwrap();
+        let quick = ark_client::Timing {
+            first_backoff_ms: 5,
+            max_backoff_ms: 50,
+            ping_every_ms: 60_000,
+            connect_timeout_ms: 2_000,
+        };
+        let device = |session: &str| {
+            let o = Options::server("alice", session, Some(format!("alice:{session}"))).with_timing(quick.clone());
+            let mut p = Device::open_memory(d.clone(), o).unwrap();
+            p.connect_with("local", hub.dial());
+            p
+        };
+        let (mut one, mut two) = (device("one"), device("two"));
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let pump_until = |ps: &mut [&mut Device], done: &dyn Fn(&[&mut Device]) -> bool, what: &str| {
+            while !done(ps) {
+                for p in ps.iter_mut() {
+                    p.pump();
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "{what}: {:?}",
+                    ps.iter().map(|p| p.status()).collect::<Vec<_>>()
+                );
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        };
+        pump_until(&mut [&mut one, &mut two], &|ps| ps.iter().all(|p| p.linked()), "both linked");
+
+        hub.revoker()("alice", "one");
+        pump_until(&mut [&mut one, &mut two], &|ps| ps[0].denied().is_some(), "the revoked one is told");
+        assert_eq!(one.denied(), Some(REVOKED));
+        assert!(!one.linked());
+        one.mutate("create_playlist", args([("name", Value::text("After"))])).unwrap();
+        two.mutate("create_playlist", args([("name", Value::text("Still"))])).unwrap();
+        pump_until(&mut [&mut one, &mut two], &|ps| ps[1].pending_len() == 0, "the other syncs");
+        for _ in 0..20 {
+            one.pump();
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert!((two.linked(), two.denied()) == (true, None));
+        assert_eq!(one.pending_len(), 1, "nothing the revoked one says is taken");
+        let head = hub.read_blocking(|h| h.authority().log.head_seq()).unwrap();
+        assert_eq!(head, 1);
     }
 }

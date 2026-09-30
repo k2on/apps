@@ -58,7 +58,7 @@ use tokio::task::JoinHandle;
 use tower_http::services::ServeDir;
 
 pub use ark_client::Domain;
-pub use hub::{Health, Hub, HubHandle};
+pub use hub::{Health, Hub, HubHandle, REVOKED};
 pub use live::{Echo, Live, Peer, Post, Quiet};
 pub use sync::Keepalive;
 
@@ -245,6 +245,9 @@ impl Builder {
             }))
             .merge(self.routes);
         if let Some(auth) = &self.auth {
+            // A session revoked at `/auth/logout` closes its sockets now,
+            // not when they next dial (`hub.rs`, R6).
+            auth.on_revoke(hub.revoker());
             router = router.merge(ark_auth::server::router(auth.clone()));
         }
         if let Some(media) = &self.media {
