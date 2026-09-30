@@ -8,10 +8,11 @@
 //! Beside the timings, two things are counted rather than timed, because a
 //! count does not move with the machine: the rows each mutation's reads
 //! examine (the `Counting` store `rust/ark/tests/toggle.rs` counts with),
-//! and the allocations a read makes — with a row's clone split into its
-//! values and its keys, which is the measurement the question "how much of
-//! a read is `Row`'s owned `String` keys" needs before anything is proposed
-//! about it.
+//! and the allocations a read makes — with what a row costs beside them:
+//! handed out (a clone), and built into the struct it is. The first was
+//! the measurement the question "how much of a read is `Row`'s owned
+//! `String` keys" needed; the row is positional since (`docs/plan-perf.md`
+//! R11) and a clone is two reference counts.
 //!
 //! Ignored by default; run with
 //! `cargo test -p harken-domain --release --test perf -- --ignored --nocapture --test-threads=1`.
@@ -524,25 +525,25 @@ fn a_mutation_examines_the_rows_it_needs_not_the_library() {
 // Reads, and what a row's keys cost ---------------------------------------------------
 
 /// `library` read whole (what a hydrate pulls), with the allocations it
-/// makes, beside what a `Row` costs to copy: the whole row, its values
-/// alone, and so its keys and its map. The rows the store hands out are a
-/// floor on the rows copied (the pull copies each again into its node and
-/// its fields), so the key share printed is a lower bound.
+/// makes, beside what a `Row` costs: handed out (a clone — its keys, its
+/// map and its values before R11; two reference counts since) and built
+/// into the struct it is, which a read does only where a row is used
+/// whole (a bare plan's node: each item the related plan finds). The rows
+/// built are the row-shaped part of the allocations left.
 #[test]
 #[ignore]
 fn perf_row_keys() {
     let h = harken();
-    eprintln!("\n== what a Row's owned keys cost");
+    eprintln!("\n== what a Row costs");
     let (st, _) = h.with_playlist(2, 1);
     let media_row = st.scan("media")[0].clone();
     let item_row = st.scan("playlist_item")[0].clone();
-    let km = keys_of("media", &media_row);
-    let ki = keys_of("playlist_item", &item_row);
+    row_cost("media", &media_row);
+    let ki = row_cost("playlist_item", &item_row);
 
     // One field of a row read by a plan's expression: `media.title` with
-    // `media` bound, as `library_entry` reads each of its ten. The
-    // interpreter evaluates the variable — a copy of the whole row, keys
-    // and all — and then takes the one field out of the copy.
+    // `media` bound as the store holds it, as `library_entry` reads each
+    // of its ten — the title found by position and copied, nothing else.
     let module = harken_domain::module();
     let m = module.build();
     let (ctx, none) = (Ctx::default(), Args::new());
@@ -557,14 +558,14 @@ fn perf_row_keys() {
         std::hint::black_box(node.eval(&read).unwrap());
     }
     eprintln!(
-        "`media.title` in a plan's expression: {:.0} ns, {:.1} allocs (the row's clone is 15, the title's 1)",
+        "`media.title` in a plan's expression: {:.0} ns, {:.1} allocs (the title's 1)",
         us(t.elapsed()) * 1e3 / reps as f64,
         (allocs() - a0) as f64 / reps as f64
     );
 
     eprintln!(
         "{:<36} {:>7} {:>10} {:>12} {:>12} {:>14}",
-        "read", "N", "time", "allocs", "rows out", "key share ≥"
+        "read", "N", "time", "allocs", "rows out", "rows built"
     );
     for n in [500u64, 2000, 8000] {
         let (st, pl) = h.with_playlist(n, n / 3);
@@ -580,9 +581,9 @@ fn perf_row_keys() {
         let (dt, al) = (t.elapsed(), allocs() - a0);
         assert_eq!(v.as_list().len(), n as usize);
         // The store hands out each media row once and each item it finds
-        // once; each is one clone of its keys and its map. A floor: the
-        // pull copies a row again into its node and its fields.
-        let floor = n as f64 * km + (rows_out as f64 - n as f64) * ki;
+        // once, at no allocation; each item found is built into its
+        // struct, the related plan's bare node.
+        let built = (rows_out as f64 - n as f64) * ki;
         eprintln!(
             "{:<36} {:>7} {:>8.2}ms {:>12} {:>12} {:>13.0}%",
             "library (read whole, as hydrate)",
@@ -590,7 +591,7 @@ fn perf_row_keys() {
             dt.as_secs_f64() * 1e3,
             al,
             rows_out,
-            100.0 * floor / al as f64
+            100.0 * built / al as f64
         );
         eprintln!(
             "{:<36} {:>7} {:>8.2}ms {:>12.0} {:>12} {:>14}",
@@ -632,42 +633,38 @@ fn perf_row_keys() {
             dt.as_secs_f64() * 1e3,
             al,
             rows_out,
-            100.0 * rows_out as f64 * ki / al as f64
+            100.0 * (ki + 1.0) / al as f64
         );
     }
 }
 
-/// A row's clone, split: the allocations and time of the whole row, of its
-/// values alone, and so of its keys and its map.
-fn keys_of(table: &str, row: &Row) -> f64 {
+/// A row's costs: its clone (what a read hands out) and the struct it is
+/// built into, in allocations and time; the second is returned.
+fn row_cost(table: &str, row: &Row) -> f64 {
     let reps = 100_000usize;
     let a0 = allocs();
     let t = Instant::now();
     for _ in 0..reps {
         std::hint::black_box(row.clone());
     }
-    let (whole_t, whole_a) = (t.elapsed(), allocs() - a0);
+    let (clone_t, clone_a) = (t.elapsed(), allocs() - a0);
     let a0 = allocs();
     let t = Instant::now();
     for _ in 0..reps {
-        std::hint::black_box(row.values().cloned().collect::<Vec<Value>>());
+        std::hint::black_box(row.to_value());
     }
-    let (vals_t, vals_a) = (t.elapsed(), allocs() - a0);
+    let (built_t, built_a) = (t.elapsed(), allocs() - a0);
     let per = |d: Duration| d.as_secs_f64() * 1e9 / reps as f64;
-    let (row_allocs, val_allocs) = (whole_a as f64 / reps as f64, vals_a as f64 / reps as f64 - 1.0);
-    let keys = row_allocs - val_allocs;
+    let (clone_a, built_a) = (clone_a as f64 / reps as f64, built_a as f64 / reps as f64);
     eprintln!(
-        "a {table} row ({} columns): clone {:.0} ns / {:.1} allocs; its values alone {:.0} ns / {:.1} allocs; so its keys and map {:.1} allocs, ~{:.0} ns ({:.0}% of the clone's time)",
+        "a {table} row ({} columns): clone {:.0} ns / {:.1} allocs; built into its struct {:.0} ns / {:.1} allocs",
         row.len(),
-        per(whole_t),
-        row_allocs,
-        per(vals_t),
-        val_allocs,
-        keys,
-        per(whole_t) - per(vals_t),
-        100.0 * (per(whole_t) - per(vals_t)) / per(whole_t)
+        per(clone_t),
+        clone_a,
+        per(built_t),
+        built_a,
     );
-    keys
+    built_a
 }
 
 /// What the scanner does per look to decide which files it already has
