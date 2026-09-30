@@ -20,6 +20,7 @@
 //! | [`view`] | `Ark.View`: [`view::pull`], the one evaluator of plans (spec v4), and incremental views with their contract |
 //! | [`live`] | `Ark.Live`: rooms per account over opaque frames |
 //! | [`sim`] | `Ark.Sim`: the seeded fleet |
+//! | [`json`] | the vectors' JSON dialect (`spec/README.md`), printed and read back |
 //! | [`authoring`] | `spec/AUTHORING.md`: the vocabulary a domain is written in; a mutator run `Emit` or `Native`, a query described under `Emit` as its plan |
 //!
 //! A domain is written once, in Rust, in the vocabulary of
@@ -41,6 +42,7 @@ pub mod compat;
 pub mod eval;
 pub mod hash;
 pub mod ir;
+pub mod json;
 pub mod live;
 pub mod log;
 pub mod peer;
