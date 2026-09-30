@@ -855,15 +855,26 @@ impl Authority {
         self.log.entries_after(cursor, limit)
     }
 
-    /// Move the horizon; `false` if the sequence is not retained.
+    /// Move the horizon; `false` if the sequence is not retained. In
+    /// place, as [`Log::compact_to`] would build it: the entries kept are
+    /// moved rather than cloned, since a server compacting to its
+    /// retention floor keeps ten thousand of them and would otherwise hold
+    /// two copies at once (`docs/plan-perf.md` R10, `ark::retention`). At
+    /// the head the state is this authority's store and nothing is
+    /// replayed.
     pub fn compact(&mut self, n: Seq) -> bool {
-        match self.log.compact_to(n) {
-            Some(l) => {
-                self.log = l;
-                true
+        let st = if n == self.log.head_seq() && n >= self.log.horizon() {
+            self.store.clone()
+        } else {
+            match self.log.state_at(n) {
+                Some(st) => st,
+                None => return false,
             }
-            None => false,
-        }
+        };
+        let kept = self.log.entries.split_off(&(n + 1));
+        self.log.entries = kept;
+        self.log.base = crate::log::snapshot_of(n, st).of_log(self.log.id());
+        true
     }
 
     /// Drop every closure that neither the current module nor a retained
