@@ -99,6 +99,18 @@ impl Options {
         }
     }
 
+    /// A peer alone that nobody has signed in on: it authors as nobody
+    /// (`Ctx::nobody`), as a signed-out peer of a server does, so a
+    /// [`Peer::join`] with no login changes no row and no view is told to
+    /// start over — and the [`Peer::sign_in`] after it makes everything the
+    /// signer's, as it always has (`docs/plan-alone.md` §4).
+    pub fn alone_as_nobody() -> Options {
+        Options {
+            alone: true,
+            ..Options::server("", "", None)
+        }
+    }
+
     pub fn with_autos(mut self, autos: Autos) -> Options {
         self.autos = autos;
         self

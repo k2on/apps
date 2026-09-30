@@ -8,7 +8,7 @@
 //! `main.rs`, the same numbers the keyboard uses.
 use arkui::format::{clock, plural, span, spell};
 use arkui::{art, cards, fit, glyphs, icon, layer, menu, panel, picker, style, table};
-use iced::widget::{button, column, container, mouse_area, row, rule, scrollable, slider, stack, text, Row};
+use iced::widget::{button, column, container, mouse_area, row, rule, scrollable, slider, stack, text, text_input, Row};
 use iced::{Alignment, Element, Length, Padding};
 
 use crate::places::{Focus, Pane, Source};
@@ -584,6 +584,24 @@ impl App {
                 .style(style::action)
                 .on_press_maybe((!self.signing_in).then_some(Message::SignIn))
         };
+        if self.peer.client.is_alone() {
+            // Alone: everything works here, and this is how it starts
+            // syncing — a server, then its sign-in (`docs/plan-alone.md` §4).
+            return Some(
+                row![
+                    text_input("server address", &self.connect)
+                        .on_input(Message::ConnectUrl)
+                        .on_submit(Message::Connect)
+                        .size(12)
+                        .width(Length::Fixed(220.0)),
+                    button("connect").style(style::action).on_press(Message::Connect),
+                    text("alone \u{2014} what you do is kept on this device").size(12).style(style::dim),
+                ]
+                .spacing(12)
+                .align_y(Alignment::Center)
+                .into(),
+            );
+        }
         let actions: Element<'_, Message> = match &self.login {
             // Nobody yet: everything works, and this is how it starts syncing.
             None => row![
@@ -625,13 +643,17 @@ impl App {
             p.client.cursor(),
             p.client.pending_len()
         );
-        if !cfg!(feature = "demo") {
+        if !cfg!(feature = "demo") && p.client.is_alone() {
+            line = format!("alone \u{b7} {line}");
+        } else if !cfg!(feature = "demo") {
             let who = match &self.login {
                 Some(l) => crate::auth::who(l),
                 None => "nobody".into(),
             };
+            let joining = p.client.status().joining;
             let link = match (&self.login, p.client.linked()) {
                 (None, _) => "not signed in",
+                (Some(_), true) if joining > 0 => "joining",
                 (Some(_), true) => "online",
                 (Some(_), false) => "offline",
             };

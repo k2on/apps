@@ -6,6 +6,7 @@
 //!
 //!   the server:  harken-server
 //!   the desktop: harken-iced --server http://127.0.0.1:8787 --user alice
+//!   alone:       harken-iced, with no server — "connect" joins one later
 //!   a browser:   the same crate compiled to wasm, served beside the server
 //!   the demo:    `--features demo`, a seeded library and no server at all
 //!
@@ -110,6 +111,11 @@ pub enum Message {
     /// Dragging the bar's progress, in seconds.
     Seek(f32),
     SignIn,
+    /// What the connect entry says: the server a window alone would join.
+    ConnectUrl(String),
+    /// Join that server, in place, and sign in there
+    /// (`docs/plan-alone.md` §4).
+    Connect,
     /// The sign-in came back, one way or the other.
     SignedIn(Result<Login, String>),
     SignOut,
@@ -239,6 +245,8 @@ pub struct App {
     pub logins: Option<ark_auth::remember::Logins>,
     /// A sign-in is in flight.
     pub signing_in: bool,
+    /// What the connect entry holds, while this window is alone.
+    pub connect: String,
     /// Offline on purpose.
     pub offline: bool,
     /// Ticks the link has been quiet since it opened, while this window waits
@@ -280,6 +288,7 @@ impl App {
             login,
             logins: None,
             signing_in: false,
+            connect: String::new(),
             offline: false,
             quiet: None,
             peer,
@@ -298,6 +307,63 @@ impl App {
         let mut app = App::with_peer(peer, String::new(), None);
         app.note = "a demo — nothing here leaves your browser".into();
         app
+    }
+
+    /// No server named and none joined: this device's own replica, its own
+    /// authority, for real (`docs/plan-alone.md` §4). What is done is kept
+    /// here as local history until "connect" hands it to a server.
+    #[cfg(not(feature = "demo"))]
+    fn alone(user: Option<String>) -> App {
+        let domain = Domain::new(&harken_domain::module());
+        let (client, note) = match auth::open_alone(domain.clone()) {
+            Ok(c) => (c, "alone \u{2014} what you do is kept on this device until you connect".to_string()),
+            Err(e) => (
+                ark_client::Peer::open_memory(domain, ark_client::Options::alone_as_nobody()).expect("a peer in memory opens"),
+                format!("the saved library would not open ({e}) \u{2014} working in memory"),
+            ),
+        };
+        let mut peer = Peer::open(client);
+        peer.ensure_playlist();
+        let mut app = App::with_peer(peer, String::new(), None);
+        app.logins = Some(auth::logins());
+        app.user = user;
+        app.connect = auth::DEFAULT_SERVER.into();
+        app.note = note;
+        app
+    }
+
+    /// "Connect": the replica this window has been using alone joins the
+    /// server in the entry, in place — the local history pending there, the
+    /// lists patched rather than rebuilt — the server is remembered for the
+    /// `local` place, and the sign-in that server needs starts. Until it
+    /// finishes the history is nobody's and nothing is dialled; the sign-in
+    /// makes it the signer's and pushes it, as any work done signed out.
+    pub fn connect(&mut self) -> Task<Message> {
+        let server = self.connect.trim().trim_end_matches('/').to_string();
+        if server.is_empty() {
+            self.note = "which server? type its address".into();
+            return Task::none();
+        }
+        if let Err(e) = self.peer.join(&ark_auth::socket_url(&server), None) {
+            self.note = format!("could not connect to {server}: {e}");
+            return Task::none();
+        }
+        if let Err(e) = auth::remember_joined(&server) {
+            self.note = format!("connected, but this device will not remember it: {e}");
+        }
+        let pending = self.peer.client.pending_len();
+        self.server = server;
+        self.login = self.logins.as_ref().and_then(|l| l.recall(&self.server));
+        if let Some(login) = self.login.clone() {
+            self.signed_in(login);
+            return Task::none();
+        }
+        self.note = format!(
+            "joined {} \u{2014} {pending} change{} waiting for a sign-in",
+            self.server,
+            if pending == 1 { "" } else { "s" }
+        );
+        self.start_sign_in()
     }
 
     fn boot() -> (App, Task<Message>) {
@@ -332,7 +398,10 @@ impl App {
         }
         #[cfg(not(feature = "demo"))]
         {
-            let (server, user) = auth::config();
+            let (named, user) = auth::config();
+            let Some(server) = named.or_else(auth::joined) else {
+                return (App::alone(user), Task::none());
+            };
             let login = auth::logins().recall(&server);
             let domain = Domain::new(&harken_domain::module());
             let (client, note) = match auth::open(domain.clone(), &server, auth::options(login.as_ref())) {
@@ -1010,6 +1079,8 @@ impl App {
         }
         match message {
             Message::SignIn => return self.start_sign_in(),
+            Message::ConnectUrl(url) => self.connect = url,
+            Message::Connect => return self.connect(),
             Message::SignedIn(outcome) => {
                 self.signing_in = false;
                 match outcome {

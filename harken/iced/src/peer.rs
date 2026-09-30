@@ -319,6 +319,18 @@ impl Peer {
         }
     }
 
+    /// Hand what this peer did alone to the server at `url`
+    /// (`ark_client::Peer::join`, `docs/plan-alone.md` §4), in place: the
+    /// replica rolls back to its fork and re-queues its local history, and
+    /// every open list is told that as changes — patched, not rebuilt, so
+    /// the library does not blink. With no login the history stays
+    /// nobody's until a sign-in makes it the signer's.
+    pub fn join(&mut self, url: &str, login: Option<ark_client::Login>) -> Result<(), ark_client::Error> {
+        self.client.join(url, login)?;
+        self.refresh();
+        Ok(())
+    }
+
     /// Bring every list up to date with whatever just happened. `true` when
     /// any of them moved.
     ///
@@ -717,6 +729,81 @@ mod tests {
             .unwrap();
         peer.refresh();
         assert_eq!(peer.items, read(&peer), "a song and its playlist entry in one batch");
+    }
+
+    /// `docs/plan-alone.md` §4: a window alone joins a server in place. The
+    /// replica is opened alone as nobody, as the desktop opens it, a
+    /// playlist and songs are made and one put on it, and the join hands
+    /// all of it to an in-process hub: no open list is taken whole through
+    /// the join — as nobody to nobody, the rebase undoes and re-applies the
+    /// same rows, and the lists are told nothing moved — and each is the
+    /// query after it; a
+    /// sign-in then makes it the signer's, and once the hub has taken it
+    /// all, the lists are patched again and still the query.
+    ///
+    /// Falsified by `ark_client::Peer::join` replacing the replica whole
+    /// (`Replica::open` at the fork with the history pending, instead of
+    /// `Replica::fork_back`): every list is `Reset`.
+    #[test]
+    fn a_window_alone_joins_a_server_in_place() {
+        use ark_client::ark::live::Silent;
+        use ark_client::ark::peer::Authority;
+        use ark_client::ark::protocol::{open_access, trusting, Server};
+        let domain = Domain::new(&harken_domain::module());
+        let client = ark_client::Peer::open_memory(domain.clone(), Options::alone_as_nobody()).unwrap();
+        let mut peer = Peer::open(client);
+        peer.ensure_playlist();
+        for (t, f) in [("Air", "a"), ("Glue", "b"), ("Opal", "c")] {
+            peer.client.mutate("add_song", song(t, "Bach", "Suites", f)).unwrap();
+        }
+        peer.refresh();
+        let id = peer.items[1].id;
+        peer.client
+            .mutate(
+                "add_to_playlist",
+                args([("playlist_id", Value::Id(peer.playlist)), ("media_id", Value::Id(id))]),
+            )
+            .unwrap();
+        peer.refresh();
+        assert_eq!(peer.client.status().link, "alone");
+        let read = |p: &Peer| p.ask("library", args([("playlist_id", Value::Id(p.playlist))]), Item::from_value);
+        let before = peer.items.clone();
+
+        peer.join("ws://hub/sync", None).unwrap();
+        assert!(
+            peer.moved.iter().all(|(_, m)| matches!(m, Moved::Patched(_))),
+            "patched, not reset: {:?}",
+            peer.moved
+        );
+        assert_eq!(peer.items, before, "the library does not blink");
+        assert_eq!(peer.items, read(&peer));
+        assert_eq!(peer.client.pending_len(), 5);
+
+        let mut a = Authority::new(domain.module().schema.clone(), domain.closures().clone());
+        a.hold(domain.native_list());
+        let mut hub = Server::open(trusting(), open_access(), Silent, a);
+        peer.client.sign_in("alice", "dev", Some("alice".into())).unwrap();
+        peer.refresh();
+        peer.client.connected();
+        loop {
+            let up = peer.client.take_outgoing();
+            for m in up.iter().cloned() {
+                hub.recv(1, m);
+            }
+            let down = hub.take_outgoing();
+            if up.is_empty() && down.is_empty() {
+                break;
+            }
+            for (_, m) in down {
+                peer.client.recv(m);
+            }
+        }
+        peer.refresh();
+        assert!(peer.moved.iter().all(|(_, m)| matches!(m, Moved::Patched(_))), "{:?}", peer.moved);
+        assert_eq!(hub.authority.log.head_seq(), 5);
+        assert_eq!(peer.client.pending_len(), 0);
+        assert_eq!(peer.items, read(&peer));
+        assert!(peer.items[1].on_playlist());
     }
 
     /// The playlist the library is read against can go — here a rebase

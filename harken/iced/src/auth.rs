@@ -10,6 +10,15 @@
 //! per person: it is the device's copy of that server's log, whoever is
 //! using it.
 //!
+//! **Nobody has to have a server, either** (`docs/plan-alone.md` §4). Given
+//! no server — no `--server`, no `?server=` — the window opens alone, in a
+//! fixed place of its own (`local`), for real: the peer is its own
+//! authority and keeps what it does as its local history. "Connect" is a
+//! join, in place: that same replica is handed to the server named, the
+//! local history pending on it, and the server remembered for this place
+//! ([`joined`]) so the next start opens there again rather than alone. The
+//! sign-in that follows is the one below, unchanged.
+//!
 //! Who you are is what the server says. Signing in is ark-auth's flow — open
 //! one URL, get one code back — and differs between the targets only in where
 //! the code comes back to: a loopback port the desktop listens on, or this
@@ -18,9 +27,15 @@ use ark_auth::remember::Logins;
 use ark_auth::Login;
 use ark_client::{Domain, Error, Options};
 
-/// Where a desktop looks for a server nobody named.
+/// What the connect entry offers before anything is typed: a dev server
+/// on this machine.
 #[cfg_attr(feature = "demo", allow(dead_code))]
 pub const DEFAULT_SERVER: &str = "http://127.0.0.1:8787";
+
+/// The place a window with no server keeps its replica: one per device,
+/// whatever it later joins.
+#[cfg_attr(feature = "demo", allow(dead_code))]
+pub const LOCAL: &str = "local";
 
 /// The logins this device remembers, one per server.
 #[cfg_attr(feature = "demo", allow(dead_code))]
@@ -28,27 +43,78 @@ pub fn logins() -> Logins {
     Logins::new("harken")
 }
 
-/// Where the server is, and a name to offer a dev server. On the desktop,
-/// `--server` and `--user`; in a browser, the query string, with the server
-/// defaulting to wherever this page came from — which is the server, when it
-/// serves it.
+/// Where the server is, if anybody said, and a name to offer a dev server.
+/// On the desktop, `--server` and `--user`; in a browser, the query string.
+/// No server named is a window alone — or the one [`joined`] remembers.
 #[cfg_attr(feature = "demo", allow(dead_code))]
-pub fn config() -> (String, Option<String>) {
+pub fn config() -> (Option<String>, Option<String>) {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let args: Vec<String> = std::env::args().collect();
         let flag = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
-        (flag("--server").unwrap_or_else(|| DEFAULT_SERVER.into()), flag("--user"))
+        (flag("--server").map(|s| s.trim_end_matches('/').to_string()), flag("--user"))
     }
     #[cfg(target_arch = "wasm32")]
     {
         let location = web_sys::window().map(|w| w.location());
         let query = location.as_ref().and_then(|l| l.search().ok()).unwrap_or_default();
-        let origin = location.and_then(|l| l.origin().ok()).unwrap_or_else(|| DEFAULT_SERVER.into());
         (
-            ark_auth::query_value(&query, "server").unwrap_or(origin),
+            ark_auth::query_value(&query, "server").map(|s| s.trim_end_matches('/').to_string()),
             ark_auth::query_value(&query, "user"),
         )
+    }
+}
+
+/// The server the `local` replica joined, if it has: the next start opens
+/// there, over the same place, rather than alone — opening it alone again
+/// would be leaving it.
+#[cfg_attr(feature = "demo", allow(dead_code))]
+pub fn joined() -> Option<String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::fs::read_to_string(data_dir(LOCAL).join("joined"))
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        ark_auth::web::storage().and_then(|s| s.get_item("harken:local:joined").ok().flatten())
+    }
+}
+
+/// Remember that the `local` replica now belongs to `server`.
+#[cfg_attr(feature = "demo", allow(dead_code))]
+pub fn remember_joined(server: &str) -> Result<(), String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let dir = data_dir(LOCAL);
+        std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        let tmp = dir.join(".joined.tmp");
+        std::fs::write(&tmp, server).map_err(|e| format!("{}: {e}", tmp.display()))?;
+        std::fs::rename(&tmp, dir.join("joined")).map_err(|e| format!("{}: {e}", dir.display()))
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        ark_auth::web::storage()
+            .ok_or_else(|| "this page has no localStorage".to_string())?
+            .set_item("harken:local:joined", server)
+            .map_err(|e| format!("{e:?}"))
+    }
+}
+
+/// This device's replica with no server: its own authority, authoring as
+/// nobody until somebody signs in at a server it joins
+/// (`ark_client::Options::alone_as_nobody`).
+#[cfg_attr(feature = "demo", allow(dead_code))]
+pub fn open_alone(domain: Domain) -> Result<ark_client::Peer, Error> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        ark_client::Peer::open_path(domain, data_dir(LOCAL), Options::alone_as_nobody())
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        ark_client::Peer::open_local(domain, &format!("harken:{LOCAL}"), Options::alone_as_nobody())
     }
 }
 
@@ -66,16 +132,21 @@ pub fn options(login: Option<&Login>) -> Options {
 }
 
 /// This server's replica on this device: a directory natively, the page's
-/// `localStorage` in a browser.
+/// `localStorage` in a browser — the `local` one when that is what joined
+/// this server.
 #[cfg_attr(feature = "demo", allow(dead_code))]
 pub fn open(domain: Domain, server: &str, opts: Options) -> Result<ark_client::Peer, Error> {
+    let place = match joined().as_deref() == Some(server) {
+        true => LOCAL.to_string(),
+        false => server.to_string(),
+    };
     #[cfg(not(target_arch = "wasm32"))]
     {
-        ark_client::Peer::open_path(domain, data_dir(server), opts)
+        ark_client::Peer::open_path(domain, data_dir(&place), opts)
     }
     #[cfg(target_arch = "wasm32")]
     {
-        ark_client::Peer::open_local(domain, &format!("harken:{server}"), opts)
+        ark_client::Peer::open_local(domain, &format!("harken:{place}"), opts)
     }
 }
 
