@@ -853,3 +853,43 @@ is not done in this round.
 
 Each with its test (falsified once) and, where the fleet has a scenario,
 the scenario extended rather than a second test written.
+
+## Round 4 — what round 3 left, and when the pass ends
+
+Round 3 removed the interpreter's clones and answered the fleet's four
+findings. What it left is two correctness gaps the fleet uncovered and one
+constant factor, each small and each decided:
+
+- **A peer cannot tell one log from another.** A server that lost its log
+  and then sequenced new entries serves a peer *below* its head new entries
+  on top of a base that is not the server's; only `Verify` would notice.
+  Decision: a log has an identity. `Log::base` carries a `log_id` (an `Id`
+  drawn when the log is created, kept in the snapshot and the journal's
+  base, and in the client's `replica` record); `Hello` carries the id the
+  peer's confirmed store is a prefix of, and a server whose id differs
+  answers with its snapshot at the head, exactly as it answers a cursor
+  past the head. A `Hello` without an id (an older client) is served as
+  today. This adds a field to `Hello` and to the snapshot, which moves the
+  `protocol/` vectors that pin those frames' bytes and is therefore a spec
+  change, made once and recorded in `spec/README.md`'s protocol row. The
+  fleet's scenario 3c gains the half it could not test: the lost log that
+  went on without its peers.
+- **A verdict is reported twice** when the local replay after a rebase
+  refuses an intent and the server's `Reject` for it then arrives.
+  Decision: `Replica::reject` reports only for an intent still pending;
+  one already dropped by a replay has had its reason reported.
+- **`stdlib::std` takes owned values**, so `len` or `first` of a bound list
+  still copies it. Decision: it takes borrowed values and clones only what
+  it returns; the allocation guard's number is re-stated.
+- `free_number` over a person's numbered siblings is quadratic in them
+  (157 ms per call at eight hundred playlists all of one name); accepted —
+  it is that person's own list and that shape of library does not occur.
+  Stated here so it is not rediscovered.
+
+**When the pass ends.** After round 4 the harness is run whole once more.
+The pass is finished when every row's per-operation cost is flat in the
+data or logarithmic through an index, and the remaining constant factors
+are named with their numbers: the row representation (a fifth of a
+hydrate, an eighth of an apply — `Rc<[Value]>` positional rows, deferred),
+and the whole-group rebuild of a grouped or nested view (`docs/plan-v4.md`
+§1.13, accepted).
