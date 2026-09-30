@@ -529,7 +529,9 @@ fn a_mutation_examines_the_rows_it_needs_not_the_library() {
 /// map and its values before R11; two reference counts since) and built
 /// into the struct it is, which a read does only where a row is used
 /// whole (a bare plan's node: each item the related plan finds). The rows
-/// built are the row-shaped part of the allocations left.
+/// built are the row-shaped part of the allocations left. The apply's is
+/// an upper bound: every row its reads return — a native procedure's
+/// reads hand the domain a struct (`cx::lit`) — counted at an item's cost.
 #[test]
 #[ignore]
 fn perf_row_keys() {
@@ -633,7 +635,7 @@ fn perf_row_keys() {
             dt.as_secs_f64() * 1e3,
             al,
             rows_out,
-            100.0 * (ki + 1.0) / al as f64
+            100.0 * rows_out as f64 * ki / al as f64
         );
     }
 }

@@ -340,7 +340,7 @@ fn library(sch: &Schema, n: u64) -> (MemoryStore, Value) {
 const DEMO: u64 = 285;
 
 /// `docs/plan-perf.md` R5 and R11: a `library` entry hydrated through its
-/// plan allocates 37.5 times (285 entries, a third of them on the
+/// plan allocates 37.2 times (285 entries, a third of them on the
 /// playlist). It was 52.2 before the row was positional (R11), 55.8 when
 /// R5 landed, and 287 before the interpreter borrowed. The media row the
 /// store hands out was 15 of those — its keys, its map nodes and its
@@ -351,7 +351,7 @@ const DEMO: u64 = 285;
 /// node is) and the entry itself. The bound is 44, which binding the row
 /// as the struct it is — what every read cost before R11 — crosses.
 /// Falsified twice: binding the plan's row as `to_value()` in `view.rs`
-/// (`Cand::bind`), 53.5 an entry; and making `Field` copy what it reads
+/// (`Cand::bind`), 52.2 an entry — the number before R11, exactly; and making `Field` copy what it reads
 /// before taking the field (`cow().into_owned()` in `eval_val`), 194.8.
 #[test]
 fn a_library_entry_hydrates_in_a_bounded_number_of_allocations() {
@@ -369,7 +369,7 @@ fn a_library_entry_hydrates_in_a_bounded_number_of_allocations() {
     assert_eq!(rows[5].field("title"), Value::text("Track 5"));
     let per = allocs as f64 / DEMO as f64;
     eprintln!("library at {DEMO}: {allocs} allocations, {per:.1} an entry");
-    assert!(per <= 44.0, "{per:.1} allocations a library entry (37.5 with R11, 52.2 before it)");
+    assert!(per <= 44.0, "{per:.1} allocations a library entry (37.2 with R11, 52.2 before it)");
 }
 
 // A local list, mapped and filtered ---------------------------------------------

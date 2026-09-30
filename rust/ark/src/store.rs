@@ -66,8 +66,13 @@ impl Columns {
         &self.names
     }
 
-    /// Where a name's value is held, if the row has the column.
+    /// Where a name's value is held, if the row has the column. A table is
+    /// a dozen columns, so the names are walked, the length compared
+    /// first; past that many the sorted positions are searched.
     pub fn position(&self, name: &str) -> Option<usize> {
+        if self.names.len() <= 16 {
+            return self.names.iter().position(|n| n.len() == name.len() && n == name);
+        }
         self.sorted
             .binary_search_by(|i| self.names[*i as usize].as_str().cmp(name))
             .ok()
@@ -257,7 +262,13 @@ impl Row {
 
     /// The row as the struct it is (§4): every column by name.
     pub fn to_struct(&self) -> BTreeMap<FieldName, Value> {
-        self.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+        // Inserted one by one rather than collected: collecting sorts
+        // through a vector first, one more allocation a row.
+        let mut m = BTreeMap::new();
+        for (k, v) in self.iter() {
+            m.insert(k.clone(), v.clone());
+        }
+        m
     }
 
     /// [`Row::to_struct`], as a [`Value::Struct`].
@@ -269,14 +280,13 @@ impl Row {
     /// rather than copied; copied when the row is shared.
     pub fn into_value(mut self) -> Value {
         match Arc::get_mut(&mut self.vals) {
-            Some(vals) => Value::Struct(
-                self.cols
-                    .names
-                    .iter()
-                    .cloned()
-                    .zip(vals.iter_mut().map(|v| std::mem::replace(v, Value::Null)))
-                    .collect(),
-            ),
+            Some(vals) => {
+                let mut m = BTreeMap::new();
+                for (k, v) in self.cols.names.iter().zip(vals.iter_mut()) {
+                    m.insert(k.clone(), std::mem::replace(v, Value::Null));
+                }
+                Value::Struct(m)
+            }
             None => self.to_value(),
         }
     }
