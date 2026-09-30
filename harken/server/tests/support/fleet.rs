@@ -34,6 +34,12 @@ pub const KEEPALIVE_MS: u64 = 300;
 pub const PUMP_MS: u64 = 20;
 pub const BACKOFF: &str = "20,250";
 
+/// How long a peer's sign-in waits on the server (`--auth-patience-ms`):
+/// ark-auth's own ten and twenty seconds are a deployment's, and a fleet
+/// that signs in behind a black hole on purpose (scenario 8, the fuzz)
+/// wants the failure in two. Loopback answers a sign-in in milliseconds.
+pub const AUTH_PATIENCE_MS: u64 = 2_000;
+
 /// How long a condition is waited for before a scenario fails.
 pub const PATIENCE: Duration = Duration::from_secs(60);
 
@@ -321,6 +327,16 @@ impl PeerProc {
 
     /// Start (again) over the same directory.
     pub fn start(&mut self) {
+        if let Err(e) = self.try_start() {
+            panic!("{} did not start: {e}", self.name);
+        }
+    }
+
+    /// [`PeerProc::start`], where the peer may not come up: a sign-in it
+    /// has to make at start that fails — into a black hole, or a server
+    /// that is down — ends the process, and that is an answer here rather
+    /// than a panic. `Err` with the tail of its stderr, and not running.
+    pub fn try_start(&mut self) -> Result<(), String> {
         assert!(self.child.is_none(), "{} is already running", self.name);
         let err = std::fs::OpenOptions::new()
             .create(true)
@@ -341,6 +357,7 @@ impl PeerProc {
             &KEEPALIVE_MS.to_string(),
         ])
         .args(["--backoff-ms", BACKOFF])
+        .args(["--auth-patience-ms", &AUTH_PATIENCE_MS.to_string()])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::from(err));
@@ -364,7 +381,18 @@ impl PeerProc {
         self.starts += 1;
         // Answered once it is open and, with a login to make, signed in —
         // so a scenario that kills it next kills a peer, not a start-up.
-        self.ask("status", vec![]);
+        let line = command("status", vec![]);
+        let asked = self
+            .stdin
+            .as_mut()
+            .map(|i| writeln!(i, "{line}").and_then(|_| i.flush()));
+        let answered = asked.is_some_and(|w| w.is_ok())
+            && self.lines.as_ref().unwrap().recv_timeout(PATIENCE).is_ok();
+        if answered {
+            return Ok(());
+        }
+        self.kill9();
+        Err(tail(&self.stderr, 5))
     }
 
     /// Send one line, read its one answer.
@@ -513,6 +541,18 @@ impl PeerProc {
                 (*id, text(field(r, "reason")))
             })
             .collect()
+    }
+
+    /// `sign_in`, where it may be refused: the peer's answer, `Err` with
+    /// its reason. A sign-in the server does not answer fails within
+    /// [`AUTH_PATIENCE_MS`].
+    pub fn try_sign_in(&mut self, user: &str) -> Result<(String, String), String> {
+        let a = self.ask("sign_in", vec![("user", Value::text(user))]);
+        if field(&a, "ok") != &Value::Bool(true) {
+            return Err(text(field(&a, "why")));
+        }
+        self.user = Some(user.into());
+        Ok((text(field(&a, "user")), text(field(&a, "session"))))
     }
 
     pub fn sign_in(&mut self, user: &str) -> (String, String) {
@@ -729,6 +769,16 @@ impl Fleet {
             stderr: self.root.path().join(format!("peer-{name}.stderr")),
             accepted: self.accepted.clone(),
             starts: 0,
+        }
+    }
+
+    /// Forget that these intents were accepted: a log the server lost
+    /// took them with it, and a scenario that loses one on purpose (3c)
+    /// says so rather than `converged` finding them missing.
+    pub fn lost(&self, ids: impl IntoIterator<Item = Id>) {
+        let mut accepted = self.accepted.lock().unwrap();
+        for id in ids {
+            accepted.remove(&id);
         }
     }
 

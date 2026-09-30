@@ -282,10 +282,11 @@ fn pending(peers: &mut [&mut PeerProc]) -> i64 {
 /// renames a snapshot into place and appends a journal it reads to its
 /// last whole record, so a stop never leaves half of either).
 ///
-/// Falsified by starting again over an emptied data directory: the
-/// peers' cursors are ahead of an empty log, the new server's acks name
-/// sequences they believe they are past, and nothing pending is ever
-/// acked — the shape 3b found by accident before R3, reached on purpose.
+/// Falsified by starting again over an emptied data directory: what was
+/// accepted before the stop is not in the log. (Before R6 it failed
+/// earlier — the peers' cursors ahead of an empty log, the new server's
+/// acks naming sequences they believed they were past, nothing pending
+/// ever confirmed; that case is a scenario of its own now, 3c.)
 #[test]
 fn a_server_stopped_mid_stream_loses_nothing() {
     let mut f = Fleet::new("server-stop");
@@ -325,6 +326,65 @@ fn a_server_stopped_mid_stream_loses_nothing() {
         done.head,
         f.server.log_bytes() / done.head as u64
     );
+}
+
+/// **3c. A server that lost its log re-bases everyone onto what it has.**
+/// Three peers converge on a song and fifteen playlists; the server is
+/// stopped, its log — snapshot and journal — deleted (the sessions are
+/// kept: this is a lost log, not a lost server), and the peers author nine
+/// more against nothing. Started again with an empty log, it answers each
+/// peer's `Hello` — whose cursor, 16, is past its head, 0 — as it answers
+/// one below its horizon: its store at the head as a snapshot
+/// (`docs/plan-perf.md` R6). Each re-opens from it, its nine pending on top,
+/// already pushed after its `Hello`; they are sequenced, acknowledged and
+/// confirmed, and the fleet converges on a log of exactly those nine. What
+/// the lost log held is gone from every peer — the song, the fifteen —
+/// because there is one log and this is it. The server's own scanner peer,
+/// whose replica is past the head too, is re-based the same way.
+///
+/// Falsified by serving a cursor past the head nothing, as before
+/// (`sent >= head` in `ark::protocol::Server::fanout`): not converged —
+/// every peer stays at 16, ahead of a head of 9, its three pending.
+#[test]
+fn a_server_that_lost_its_log_re_bases_everyone_onto_what_it_has() {
+    let mut f = Fleet::new("log-lost");
+    let mut a = f.peer("a", Some("alice"));
+    let mut b = f.peer("b", Some("alice"));
+    let mut c = f.peer("c", Some("bob"));
+    a.author("add_song", song("lost with the log"));
+    burst(&mut [&mut a, &mut b, &mut c], 0, 5);
+    let before = f.converged(&mut [&mut a, &mut b, &mut c]);
+    assert_eq!(before.head, 16);
+    f.server.stop();
+    for gone in [
+        ark_server::persist::path_of(&f.server.data),
+        ark_server::persist::journal_path_of(&f.server.data),
+    ] {
+        std::fs::remove_file(&gone).unwrap_or_else(|e| panic!("{}: {e}", gone.display()));
+    }
+    burst(&mut [&mut a, &mut b, &mut c], 1, 3);
+    assert_eq!(pending(&mut [&mut a, &mut b, &mut c]), 9);
+    let t = Instant::now();
+    f.server.start();
+    f.lost(before.entries.iter().map(|(_, e)| e.id));
+    let done = f.converged(&mut [&mut a, &mut b, &mut c]);
+    measured(
+        "a server that lost its log: restart to converged",
+        t.elapsed(),
+    );
+    assert_eq!(
+        done.head, 9,
+        "the nine pending, and nothing the lost log held"
+    );
+    assert!(media(&mut a).is_empty(), "the song went with the log");
+    for p in [&mut a, &mut b, &mut c] {
+        let names: Vec<String> = playlists(p).into_iter().map(|(n, _)| n).collect();
+        assert!(
+            !names.is_empty() && names.iter().all(|n| n.split('-').nth(1) == Some("1")),
+            "{}: only the second burst's: {names:?}",
+            p.name
+        );
+    }
 }
 
 /// **3b. The server killed with `-9` mid-stream.**
@@ -684,18 +744,31 @@ fn the_same_name_twice_is_numbered_in_log_order() {
     }
 }
 
-/// **8. Turned away.** Alice's device makes three things behind a black
-/// hole while its session is revoked at the server (`/auth/logout` with
-/// its token — the store already had a way). Given the network back it is
-/// denied: it keeps its store and its pending, says `denied`, and stops
-/// dialling. Alice signs in on it again, and what was pending — authored
-/// under the revoked login — is taken under the new one's person
+/// **8. Turned away.** Alice's device is linked and idle when its session
+/// is revoked at the server (`/auth/logout` with its token). The server
+/// closes that socket at once, saying why (`Denied` with
+/// `ark_server::REVOKED`, `docs/plan-perf.md` R6): nothing cuts it, and
+/// the peer does not have to dial again to learn it. It says `denied`,
+/// keeps its store, stops dialling, and goes on authoring — three things,
+/// pending under the revoked login. Alice's other device is another login
+/// and is not touched. Alice signs in on it again, and what was pending —
+/// authored under the revoked login — is taken under the new one's person
 /// (`with_owns`) and converges, still carrying the session it was made in.
 ///
-/// Falsified by signing in again as bob: the authority refuses the three
-/// as `not yours`, and `converged` fails on the refusals. It first passed
-/// that falsification — `converged` then forgave any refusal — which is
-/// why a refusal now fails every scenario but the fuzz.
+/// Then a sign-in into a black hole: signed out and signing in again with
+/// the network black-holed, the answer is a refusal within the peer's
+/// sign-in patience rather than a wait for ever; and a device with no
+/// login yet, started behind a black hole, gives up and exits within it
+/// (R6 — `login` had no timeout, which is why the fuzz could not do this).
+///
+/// Falsified three ways: by signing in again as bob (the authority
+/// refuses the three as `not yours`, and `converged` fails on the
+/// refusals — it first passed that, when `converged` forgave any refusal);
+/// by the hub not closing a revoked session (`Hub::revoked` doing
+/// nothing): the peer is still linked and not denied five seconds on; and
+/// by the fleet's peers signing in on ark-auth's own patience (no
+/// `--auth-patience-ms`): the refusal takes 21 s against a bound of five
+/// — and before ark-auth had a timeout it was never answered at all.
 #[test]
 fn a_peer_turned_away_keeps_its_work_until_signed_in_again() {
     let f = Fleet::new("turned-away");
@@ -704,7 +777,40 @@ fn a_peer_turned_away_keeps_its_work_until_signed_in_again() {
     p.author("add_song", song("kept"));
     f.converged(&mut [&mut p, &mut q]);
     let old = p.status().session;
-    p.proxy.blackhole();
+    let dials = p.proxy.accepted();
+    let token = p.token();
+    let t = Instant::now();
+    ureq::post(&format!("{}/auth/logout", f.server.url()))
+        .set("Authorization", &format!("Bearer {token}"))
+        .call()
+        .expect("the session is revoked");
+    assert!(
+        eventually(Duration::from_secs(5), || p.status().denied.is_some()),
+        "the peer is told at once: {:?}",
+        p.status()
+    );
+    measured(
+        "a revoked session's socket closed, to the peer denied",
+        t.elapsed(),
+    );
+    let st = p.status();
+    assert_eq!(st.denied.as_deref(), Some(ark_server::REVOKED));
+    assert_eq!(
+        (
+            st.linked,
+            st.link.as_str(),
+            p.proxy.cuts(),
+            p.proxy.accepted()
+        ),
+        (false, "idle", 0, dials),
+        "closed by the server, on the socket it had: {st:?}"
+    );
+    let other = q.status();
+    assert!(
+        other.linked && other.denied.is_none(),
+        "the other login is not touched: {other:?}"
+    );
+
     let list_id = p.author("create_playlist", named("Kept through a revocation"));
     let list = playlist(&mut p, "Kept through a revocation");
     let m = media(&mut p);
@@ -714,27 +820,10 @@ fn a_peer_turned_away_keeps_its_work_until_signed_in_again() {
         p.author("create_playlist", named("And this")),
     ];
     let (_, _, view) = p.hash();
-    let token = p.token();
-    ureq::post(&format!("{}/auth/logout", f.server.url()))
-        .set("Authorization", &format!("Bearer {token}"))
-        .call()
-        .expect("the session is revoked");
-
-    p.proxy.pass();
-    assert!(
-        eventually(PATIENCE, || p.status().denied.is_some()),
-        "the peer is told"
-    );
-    let st = p.status();
-    assert_eq!(
-        (st.pending, st.linked, st.link.as_str()),
-        (3, false, "idle"),
-        "{st:?}"
-    );
+    assert_eq!(p.status().pending, 3);
     assert_eq!(p.hash().2, view, "the store is kept");
     // Not dialling is an absence, so it is watched for a while: a second
     // is three backoffs at the fleet's pace.
-    let dials = p.proxy.accepted();
     assert!(
         !eventually(Duration::from_secs(1), || p.proxy.accepted() > dials),
         "a denied peer does not dial again"
@@ -755,6 +844,26 @@ fn a_peer_turned_away_keeps_its_work_until_signed_in_again() {
             ("alice", old.as_str())
         );
     }
+
+    // A sign-in into a black hole is answered, within the patience.
+    let bound = Duration::from_millis(AUTH_PATIENCE_MS) * 2 + Duration::from_secs(1);
+    p.ask("sign_out", vec![]);
+    p.proxy.blackhole();
+    let t = Instant::now();
+    let refused = p
+        .try_sign_in("alice")
+        .expect_err("a black hole signs nobody in");
+    assert!(t.elapsed() < bound, "{:?}: {refused}", t.elapsed());
+    measured("a sign-in into a black hole, refused", t.elapsed());
+    let mut r = f.peer_stopped("r", Some("alice"));
+    r.proxy.blackhole();
+    let t = Instant::now();
+    let why = r
+        .try_start()
+        .expect_err("a first sign-in into a black hole ends the start");
+    assert!(t.elapsed() < bound, "{:?}: {why}", t.elapsed());
+    assert!(!r.running());
+    measured("a first sign-in into a black hole, given up", t.elapsed());
 }
 
 /// **9. The scanner, and a peer that was away.** Files dropped into
@@ -1006,7 +1115,9 @@ impl Drop for Schedule {
 /// nobody signs in on until the schedule says so, and sometimes bob again —
 /// and a seeded schedule of mutating, black-holing, releasing, cutting,
 /// pausing, killing and restarting peers, killing and restarting the
-/// server, and signing in late. Then everything is given back and the
+/// server, and signing in late — at start or on a running peer, under a
+/// black hole or a stopped server as well, now that a sign-in gives up
+/// (R6). Then everything is given back and the
 /// fleet must converge. Twenty steps by default, 2,000 under
 /// `FLEET_LONG=1`; `FLEET_SEED` picks the seed, and a failure prints it
 /// with the schedule.
@@ -1128,18 +1239,15 @@ fn fuzz(seed: u64, steps: usize) {
                 peers[i].kill9();
                 format!("{} kill -9", peers[i].name)
             }
-            // A peer that never finished signing in signs in as it starts,
-            // and ark-auth's login has no timeout: into a black hole it
-            // would wait for ever.
-            85..=91
-                if !peers[i].running()
-                    && (peers[i].user.is_none()
-                        || peers[i].dir.join("login.json").exists()
-                        || (net[i] == Net::Pass && f.server.running())) =>
-            {
-                peers[i].start();
-                format!("{} restart", peers[i].name)
-            }
+            // A peer that never finished signing in signs in as it starts —
+            // into a black hole, or a server that is down, too: the sign-in
+            // gives up within its patience (R6) and the process ends, which
+            // is a step like any other. It was excluded while `login` had no
+            // timeout and would have waited for ever.
+            85..=91 if !peers[i].running() => match peers[i].try_start() {
+                Ok(()) => format!("{} restart", peers[i].name),
+                Err(_) => format!("{} restart: its sign-in gave up", peers[i].name),
+            },
             92..=94 if f.server.running() => {
                 f.server.kill9();
                 "server kill -9".to_string()
@@ -1148,13 +1256,11 @@ fn fuzz(seed: u64, steps: usize) {
                 f.server.start();
                 "server restart".to_string()
             }
-            99 if peers[i].user.is_none()
-                && peers[i].running()
-                && f.server.running()
-                && net[i] == Net::Pass =>
-            {
-                peers[i].sign_in("alice");
-                format!("{} sign_in alice", peers[i].name)
+            // Signing in late, whatever the network: refused within the
+            // patience when there is no server to answer.
+            99 if peers[i].user.is_none() && peers[i].running() => {
+                let got = peers[i].try_sign_in("alice");
+                format!("{} sign_in alice: {}", peers[i].name, got.is_ok())
             }
             _ => "nothing".to_string(),
         };

@@ -4,7 +4,14 @@
 //! harken-peer --dir DIR --server URL [--user NAME]     a peer of that server
 //! harken-peer --dir DIR --alone [--user NAME]          its own authority
 //!   [--pump-ms 50] [--ping-ms 20000] [--backoff-ms 500,30000]
+//!   [--auth-patience-ms N]
 //! ```
+//!
+//! `--auth-patience-ms` bounds each sign-in request — its connection and
+//! each read — where `ark_auth::client::Patience::DEFAULT` is ten seconds
+//! and twenty; a sign-in the server does not answer in time fails, and at
+//! start that ends the process (exit 1), as any other failed sign-in does
+//! (`docs/plan-perf.md` R6).
 //!
 //! It is what the desktop is, minus the window: the replica in `DIR/replica`
 //! (`Peer::open_path`), signed in the way the desktop signs in under dev
@@ -53,12 +60,14 @@ use std::time::{Duration, Instant};
 use ark::hash::state_hash;
 use ark::json;
 use ark::value::{hex, Value};
+use ark_auth::client::Patience;
 use ark_auth::Login;
 use ark_client::{Args, Domain, Options, Peer, Standing, Timing};
 
 const USAGE: &str =
     "usage: harken-peer --dir DIR (--server URL [--user NAME] | --alone [--user NAME])
                    [--pump-ms 50] [--ping-ms 20000] [--backoff-ms 500,30000]
+                   [--auth-patience-ms N]
 Commands are JSON lines on stdin; see the source's first page.";
 
 /// What the command line says.
@@ -70,6 +79,7 @@ struct Flags {
     alone: bool,
     pump: Duration,
     timing: Timing,
+    patience: Patience,
 }
 
 fn flags(args: &[String]) -> Result<Flags, String> {
@@ -80,6 +90,7 @@ fn flags(args: &[String]) -> Result<Flags, String> {
         alone: false,
         pump: Duration::from_millis(50),
         timing: Timing::default(),
+        patience: Patience::DEFAULT,
     };
     let mut dir = None;
     let mut it = args.iter();
@@ -114,6 +125,11 @@ fn flags(args: &[String]) -> Result<Flags, String> {
                     .trim()
                     .parse()
                     .map_err(|_| "--backoff-ms takes milliseconds")?;
+            }
+            "--auth-patience-ms" => {
+                f.patience = Patience::of(Duration::from_millis(
+                    ms(it.next(), "--auth-patience-ms")?.max(1),
+                ))
             }
             "-h" | "--help" => return Err(USAGE.into()),
             other => return Err(format!("unexpected argument {other}\n{USAGE}")),
@@ -161,10 +177,15 @@ fn forget(dir: &Path) {
 /// Sign `user` in at `server` the desktop's way. A dev server answers with
 /// a code and no page; anything else needs a person, so the URL is said on
 /// stderr for one to open.
-fn log_in(server: &str, user: &str) -> Result<Login, String> {
-    ark_auth::client::login(server, Some(user), |url| {
-        eprintln!("harken-peer: open {url} to sign in");
-    })
+fn log_in(server: &str, user: &str, patience: Patience) -> Result<Login, String> {
+    ark_auth::client::login_with(
+        server,
+        Some(user),
+        |url| {
+            eprintln!("harken-peer: open {url} to sign in");
+        },
+        patience,
+    )
 }
 
 // -- a command, and its answer ----------------------------------------------------
@@ -292,6 +313,8 @@ struct Headless {
     peer: Peer,
     dir: PathBuf,
     server: Option<String>,
+    /// How long a sign-in waits on the server.
+    patience: Patience,
     pump: Duration,
     /// Verdicts collected and not yet asked for. Every one is also appended
     /// to `DIR/rejections.jsonl` the pump it arrives in, because the engine
@@ -312,7 +335,7 @@ impl Headless {
                 let login = match (remembered, &f.user) {
                     (Some(l), _) => Some(l),
                     (None, Some(user)) => {
-                        let l = log_in(server, user)
+                        let l = log_in(server, user, f.patience)
                             .map_err(|e| format!("signing {user} in at {server}: {e}"))?;
                         remember(&f.dir, server, &l)?;
                         Some(l)
@@ -336,6 +359,7 @@ impl Headless {
             peer,
             dir: f.dir.clone(),
             server: f.server.clone(),
+            patience: f.patience,
             pump: f.pump,
             unasked: vec![],
         })
@@ -505,7 +529,7 @@ impl Headless {
                 let Some(server) = self.server.clone() else {
                     return Answer::refused("a peer alone has no server to sign in to");
                 };
-                let login = match log_in(&server, &user) {
+                let login = match log_in(&server, &user, self.patience) {
                     Ok(l) => l,
                     Err(e) => {
                         return Answer::refused(format!("signing {user} in at {server}: {e}"))
