@@ -1,7 +1,8 @@
 //! A [`Store`] that counts what a read costs: every row a scan hands back
 //! or a filter is asked about, and every `get`. Wrapped around a
-//! [`MemoryStore`], it passes the equalities through so the store's own
-//! indexes still serve — and counts each row the store *examines* (each
+//! [`MemoryStore`], it passes the equalities and the spans through so the
+//! store's own indexes still serve — and counts each row the store
+//! *examines* (each
 //! call to `keep`), not only the rows it returns, because a read through
 //! the wrong index returns the right rows and examines the wrong number.
 
@@ -10,7 +11,7 @@
 use std::cell::Cell;
 
 use ark::schema::{Dir, Schema};
-use ark::store::{Change, MemoryStore, Row, Store};
+use ark::store::{Change, MemoryStore, Row, Span, Store};
 use ark::value::Value;
 
 /// What one stretch of reads cost.
@@ -68,8 +69,8 @@ impl Store for Counting<'_> {
         })
     }
 
-    fn scan_where_eq(&self, table: &str, eq: &[(&str, &Value)], keep: &dyn Fn(&Row) -> bool) -> Vec<Row> {
-        self.inner.scan_where_eq(table, eq, &|r| {
+    fn scan_where_eq(&self, table: &str, eq: &[(&str, &Value)], spans: &[Span], keep: &dyn Fn(&Row) -> bool) -> Vec<Row> {
+        self.inner.scan_where_eq(table, eq, spans, &|r| {
             self.rows.set(self.rows.get() + 1);
             keep(r)
         })
@@ -79,10 +80,19 @@ impl Store for Counting<'_> {
     // what a bounded read through an index examines (`docs/plan-perf.md`
     // R1). A store with no index that serves answers `None` here as it
     // would unwrapped, and the read falls back to `scan_where_eq` above.
-    fn scan_ordered(&self, table: &str, eq: &[(&str, &Value)], order: &[(&str, Dir)], keep: &dyn Fn(&Row) -> bool, limit: usize) -> Option<Vec<Row>> {
+    fn scan_ordered(
+        &self,
+        table: &str,
+        eq: &[(&str, &Value)],
+        spans: &[Span],
+        order: &[(&str, Dir)],
+        keep: &dyn Fn(&Row) -> bool,
+        limit: usize,
+    ) -> Option<Vec<Row>> {
         self.inner.scan_ordered(
             table,
             eq,
+            spans,
             order,
             &|r| {
                 self.rows.set(self.rows.get() + 1);

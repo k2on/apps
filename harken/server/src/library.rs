@@ -307,7 +307,9 @@ fn known_file(peer: &Peer, file: &str) -> bool {
     let f = Value::text(file);
     !peer
         .store()
-        .scan_where_eq("media", &[("file", &f)], &|row| row.get("file") == Some(&f))
+        .scan_where_eq("media", &[("file", &f)], &[], &|row| {
+            row.get("file") == Some(&f)
+        })
         .is_empty()
 }
 

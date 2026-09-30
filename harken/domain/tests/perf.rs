@@ -630,7 +630,7 @@ fn perf_scanner_known_files() {
         let st = h.library(n);
         let known = |file: &str| {
             let f = Value::text(file);
-            !st.scan_where_eq("media", &[("file", &f)], &|r| r.get("file") == Some(&f)).is_empty()
+            !st.scan_where_eq("media", &[("file", &f)], &[], &|r| r.get("file") == Some(&f)).is_empty()
         };
         let t = Instant::now();
         assert!(!known("music/new/0.flac"));

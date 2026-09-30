@@ -23,11 +23,12 @@
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
+use std::ops::Bound;
 
 use crate::eval::{Args, Ctx, EvalError, EvalFault, NodeScope, Scope};
 use crate::ir::{CmpOp, Expr, Function, Key, Lookup, Plan, Pred, Related, Source};
 use crate::schema::{Dir, Schema, Table};
-use crate::store::{compare_rows, Change, Row, Store};
+use crate::store::{compare_rows, Change, Row, Span, Store};
 use crate::value::{compare_value, FieldName, TableName, Value};
 
 // §1.3 The one evaluator ----------------------------------------------------
@@ -138,7 +139,9 @@ pub fn answer(plan: &Plan, entries: &[Entry]) -> Vec<Value> {
 /// position, `add_to_playlist`'s `MAX(pos) + 1` is one row examined
 /// however long the playlist. Without one, every candidate is read and
 /// only the rows the answer keeps are sorted. Anything else is pulled
-/// whole.
+/// whole. Either way the filter's bounds on a column go down with its
+/// equalities ([`spans`], R6): `create_playlist` names a playlist from the
+/// rows of `(user_id, name)` between the name and its numbered siblings.
 pub fn read(sch: &Schema, plan: &Plan, scope: &Scope, st: &dyn Store) -> Result<Vec<Value>, EvalFault> {
     if !plan.is_bare() {
         return Ok(answer(plan, &pull(sch, plan, scope, st)?));
@@ -157,10 +160,11 @@ pub fn read(sch: &Schema, plan: &Plan, scope: &Scope, st: &dyn Store) -> Result<
         return Ok(vec![]);
     }
     let (eq, keep) = (equalities(filter.as_ref()), |r: &Row| admits(filter.as_ref(), r));
-    if let Some(rows) = st.scan_ordered(plan.table(), &eq, &order, &keep, lim) {
+    let spans = spans(filter.as_ref());
+    if let Some(rows) = st.scan_ordered(plan.table(), &eq, &spans, &order, &keep, lim) {
         return Ok(rows.into_iter().map(Value::Struct).collect());
     }
-    let mut rows = st.scan_where_eq(plan.table(), &eq, &keep);
+    let mut rows = st.scan_where_eq(plan.table(), &eq, &spans, &keep);
     // As compare_entries over a bare plan's entries: the order columns
     // under their directions, then the key, column by column.
     let cmp = |a: &Row, b: &Row| compare_rows(tbl, &order, a, b);
@@ -217,7 +221,7 @@ fn pull_at(sch: &Schema, plan: &Plan, base: NodeId, pins: &[(FieldName, Value)],
 }
 
 // The source rows a plan's filter and its pins admit, through the store's
-// indexes where they serve (`equalities`), in no particular order.
+// indexes where they serve (`equalities`, `spans`), in no particular order.
 fn candidates<'s>(
     sch: &'s Schema,
     plan: &Plan,
@@ -228,7 +232,9 @@ fn candidates<'s>(
     let (tbl, filter) = source(sch, plan, pins, scope)?;
     Ok((
         tbl,
-        st.scan_where_eq(plan.table(), &equalities(filter.as_ref()), &|r| admits(filter.as_ref(), r)),
+        st.scan_where_eq(plan.table(), &equalities(filter.as_ref()), &spans(filter.as_ref()), &|r| {
+            admits(filter.as_ref(), r)
+        }),
     ))
 }
 
@@ -381,6 +387,63 @@ fn equalities(f: Option<&Filter>) -> Vec<(&str, &Value)> {
             Filter::Cmp(c, CmpOp::Eq, v) => out.push((c, v)),
             Filter::All(fs) => fs.iter().for_each(|g| go(g, out)),
             _ => {}
+        }
+    }
+    let mut out = vec![];
+    if let Some(f) = f {
+        go(f, &mut out);
+    }
+    out
+}
+
+// The columns a filter holds between bounds however it is satisfied: its
+// top-level `Cmp(_, Ge|Gt|Le|Lt, _)`, and every one inside a top-level
+// `All`, one span per column with the tightest bound of each side (the
+// greater lower, the lesser upper, exclusive over inclusive at a tie).
+// What an indexed store reads a range of an index by (R6); `keep` still
+// decides, so a bound left out is only a wider read.
+fn spans(f: Option<&Filter>) -> Vec<Span<'_>> {
+    fn go<'a>(f: &'a Filter, out: &mut Vec<Span<'a>>) {
+        match f {
+            Filter::Cmp(c, op @ (CmpOp::Ge | CmpOp::Gt | CmpOp::Le | CmpOp::Lt), v) => {
+                let i = out.iter().position(|s| s.column == c.as_str()).unwrap_or_else(|| {
+                    out.push(Span {
+                        column: c,
+                        lo: Bound::Unbounded,
+                        hi: Bound::Unbounded,
+                    });
+                    out.len() - 1
+                });
+                let s = &mut out[i];
+                match op {
+                    CmpOp::Ge | CmpOp::Gt => {
+                        let new = if *op == CmpOp::Ge { Bound::Included(v) } else { Bound::Excluded(v) };
+                        if tighter(new, s.lo, Ordering::Greater) {
+                            s.lo = new;
+                        }
+                    }
+                    _ => {
+                        let new = if *op == CmpOp::Le { Bound::Included(v) } else { Bound::Excluded(v) };
+                        if tighter(new, s.hi, Ordering::Less) {
+                            s.hi = new;
+                        }
+                    }
+                }
+            }
+            Filter::All(fs) => fs.iter().for_each(|g| go(g, out)),
+            _ => {}
+        }
+    }
+    // Whether `new` narrows past `old`, `inward` being the direction a
+    // bound moves to narrow: up for a lower one, down for an upper.
+    fn tighter(new: Bound<&Value>, old: Bound<&Value>, inward: Ordering) -> bool {
+        match (new, old) {
+            (_, Bound::Unbounded) => true,
+            (Bound::Unbounded, _) => false,
+            (Bound::Included(n) | Bound::Excluded(n), Bound::Included(o) | Bound::Excluded(o)) => {
+                let by = compare_value(n, o);
+                by == inward || (by == Ordering::Equal && matches!(new, Bound::Excluded(_)))
+            }
         }
     }
     let mut out = vec![];
@@ -917,4 +980,51 @@ fn touched(sch: &Schema, st: &dyn Store, changes: &[Change], view: &View) -> Res
 /// follow; the tests check those too.)
 pub fn contract(sch: &Schema, st: &dyn Store, view: &View) -> bool {
     rebuild(sch, st, view).is_ok_and(|fresh| fresh == *view)
+}
+
+#[cfg(test)]
+mod span_tests {
+    use super::*;
+
+    /// R6: the bounds a filter holds a column between, as the store is told
+    /// them — one span per column, from the top level and a top-level `All`
+    /// only, each side the tightest the filter says (at a tie, exclusive).
+    /// A bound under an `Any` or a `Not` is no bound on every row and is
+    /// left out; an equality is the equalities' and not a span. Falsified
+    /// by dropping the tie rule in `tighter`: `>= "a"` after `> "a"` widens
+    /// the lower bound back to inclusive.
+    #[test]
+    fn a_filter_s_bounds_become_one_span_per_column() {
+        let t = |s: &str| Value::Text(s.into());
+        let cmp = |c: &str, op, v| Filter::Cmp(c.into(), op, v);
+        let f = Filter::All(vec![
+            cmp("user_id", CmpOp::Eq, t("ada")),
+            cmp("name", CmpOp::Gt, t("a")),
+            cmp("name", CmpOp::Ge, t("a")),
+            cmp("name", CmpOp::Lt, t("c")),
+            cmp("name", CmpOp::Le, t("b")),
+            cmp("name", CmpOp::Le, t("bb")),
+            Filter::Any(vec![cmp("pos", CmpOp::Gt, Value::int(3))]),
+            Filter::Not(Box::new(cmp("pos", CmpOp::Lt, Value::int(1)))),
+            Filter::All(vec![cmp("pos", CmpOp::Ge, Value::int(7))]),
+        ]);
+        let (a, b, seven) = (t("a"), t("b"), Value::int(7));
+        assert_eq!(
+            spans(Some(&f)),
+            vec![
+                Span {
+                    column: "name",
+                    lo: Bound::Excluded(&a),
+                    hi: Bound::Included(&b),
+                },
+                Span {
+                    column: "pos",
+                    lo: Bound::Included(&seven),
+                    hi: Bound::Unbounded,
+                },
+            ]
+        );
+        assert_eq!(spans(Some(&cmp("pos", CmpOp::Ne, Value::int(1)))), vec![]);
+        assert_eq!(spans(None), vec![]);
+    }
 }

@@ -81,6 +81,22 @@ impl fmt::Display for Refusal {
 
 impl std::error::Error for Refusal {}
 
+/// One column a read's filter holds between two bounds — `name >= "a" and
+/// name < "b"`, `pos > 5` — handed to the store beside the equalities
+/// (`docs/plan-perf.md` R6). A hint, as the equalities are: `keep` still
+/// decides, so a store may ignore it, and one that has an index whose
+/// columns after the held ones begin with this column reads the part of
+/// that index between the bounds instead of the whole of it. The bounds
+/// are under `compare_value`, the order an index's map is in and the one
+/// `Pred::Cmp` compares by, so `Null` is below every bound and a range
+/// with no lower bound starts at it, exactly as the filter admits it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Span<'a> {
+    pub column: &'a str,
+    pub lo: Bound<&'a Value>,
+    pub hi: Bound<&'a Value>,
+}
+
 /// The store's interface. A backend implements the four primitives; the
 /// constraints, the reads generated code makes and `select` are given.
 ///
@@ -104,13 +120,16 @@ pub trait Store {
     }
 
     /// [`Store::scan_where`], told which columns the filter holds equal to
-    /// which values (`keep` still decides; `eq` is a hint). A store with an
-    /// index over those columns — or over columns that begin with some of
-    /// them — reads the rows under the values and never looks at the rest
-    /// of the table, and when they hold the whole key, reads the one row
-    /// under it; the default ignores the hint. In key order either way.
-    fn scan_where_eq(&self, table: &str, eq: &[(&str, &Value)], keep: &dyn Fn(&Row) -> bool) -> Vec<Row> {
-        let _ = eq;
+    /// which values and which it holds between bounds (`keep` still
+    /// decides; `eq` and `spans` are hints). A store with an index over
+    /// those columns — or over columns that begin with some of them, or
+    /// with some of them and then a column a span bounds (R6) — reads the
+    /// rows under the values, between the bounds, and never looks at the
+    /// rest of the table, and when they hold the whole key, reads the one
+    /// row under it; the default ignores the hints. In key order either
+    /// way.
+    fn scan_where_eq(&self, table: &str, eq: &[(&str, &Value)], spans: &[Span], keep: &dyn Fn(&Row) -> bool) -> Vec<Row> {
+        let _ = (eq, spans);
         self.scan_where(table, keep)
     }
 
@@ -119,16 +138,26 @@ pub trait Store {
     /// [`compare_rows`]'s order — read from an index that already holds
     /// them in that order, when one does: `Some` then, `None` when no
     /// index serves and the caller reads and sorts as before. `eq` says
-    /// which columns `keep` holds equal to which values, as for
-    /// [`Store::scan_where_eq`]; `keep` still decides.
+    /// which columns `keep` holds equal to which values and `spans` which
+    /// it holds between bounds, as for [`Store::scan_where_eq`]: a span on
+    /// the column right after the held ones narrows the walk to its range
+    /// (R6). `keep` still decides.
     ///
     /// This is what makes `MAX(pos) + 1` — `order_by(pos desc).first()`
     /// over one playlist — cost the rows up to the first `keep` admits
     /// rather than every row of the playlist: a bounded read that fetched
     /// everything is the round-2 growth R1 names. The default serves
     /// nothing, which is always correct.
-    fn scan_ordered(&self, table: &str, eq: &[(&str, &Value)], order: &[(&str, Dir)], keep: &dyn Fn(&Row) -> bool, limit: usize) -> Option<Vec<Row>> {
-        let _ = (table, eq, order, keep, limit);
+    fn scan_ordered(
+        &self,
+        table: &str,
+        eq: &[(&str, &Value)],
+        spans: &[Span],
+        order: &[(&str, Dir)],
+        keep: &dyn Fn(&Row) -> bool,
+        limit: usize,
+    ) -> Option<Vec<Row>> {
+        let _ = (table, eq, spans, order, keep, limit);
         None
     }
 
@@ -244,7 +273,7 @@ pub fn matching(st: &dyn Store, tbl: &Table, row: &Row, on: &[FieldName]) -> Opt
     if want.iter().any(|(_, v)| v.is_null()) {
         return None;
     }
-    st.scan_where_eq(&tbl.name, &want, &|r| want.iter().all(|(c, v)| r.get(*c) == Some(*v)))
+    st.scan_where_eq(&tbl.name, &want, &[], &|r| want.iter().all(|(c, v)| r.get(*c) == Some(*v)))
         .into_iter()
         .next()
 }
@@ -378,7 +407,7 @@ fn unique(st: &dyn Store, tbl: &Table, k: &Key, row: &Row, ix: &Index) -> Result
     if mine.iter().any(|(_, v)| v.is_null()) {
         return Ok(());
     }
-    let clash = st.scan_where_eq(&tbl.name, &mine, &|r| {
+    let clash = st.scan_where_eq(&tbl.name, &mine, &[], &|r| {
         tbl.key_of(r) != *k && mine.iter().all(|(c, v)| r.get(*c).is_some_and(|x| x == *v))
     });
     if clash.is_empty() {
@@ -404,7 +433,7 @@ fn parent_exists(st: &dyn Store, tbl: &Table, row: &Row, r: &Ref) -> Result<(), 
 
 fn no_child(st: &dyn Store, tbl: &Table, k: &[Value], rel: &Relation) -> Result<(), Refusal> {
     if let [kv] = k {
-        let held = st.scan_where_eq(&rel.child, &[(&rel.column, kv)], &|r| r.get(&rel.column) == Some(kv));
+        let held = st.scan_where_eq(&rel.child, &[(&rel.column, kv)], &[], &|r| r.get(&rel.column) == Some(kv));
         if !held.is_empty() {
             return Err(Refusal::StillReferenced(tbl.name.clone(), rel.child.clone()));
         }
@@ -477,16 +506,45 @@ impl Secondary {
         self.columns.iter().map(|c| row.get(c).cloned().unwrap_or(Value::Null)).collect()
     }
 
-    /// The buckets whose values begin with `prefix`, in the index's order:
-    /// a range of the map, from the prefix itself up to the prefix followed
-    /// by a value above every column's. A column holds a scalar or `Null`,
-    /// and a struct outranks both (`Ark.Value.rank`), so nothing under the
-    /// prefix reaches the upper bound and nothing past it is walked.
-    fn under(&self, prefix: &[Value]) -> std::collections::btree_map::Range<'_, Vec<Value>, BTreeSet<Key>> {
-        let mut above = prefix.to_vec();
-        above.push(Value::Struct(BTreeMap::new()));
-        self.rows
-            .range::<[Value], _>((Bound::Included(prefix), Bound::Excluded(above.as_slice())))
+    /// The buckets whose values begin with `prefix`, in the index's order,
+    /// and — given a span, which is on the column right after the prefix
+    /// (R6) — whose next value lies between the span's bounds: a range of
+    /// the map. A column holds a scalar or `Null`, and a struct outranks
+    /// both (`Ark.Value.rank`), so `prefix ++ [v, struct]` is above every
+    /// bucket that continues `prefix ++ [v]` and below every one past it:
+    /// an inclusive upper bound `v` ends there, an exclusive lower bound
+    /// `v` starts there, and with no span the range is the prefix up to
+    /// `prefix ++ [struct]`. Nothing outside is walked. Bounds that cross
+    /// (`x > 5 and x < 3`) are the empty range, which `BTreeMap::range`
+    /// would otherwise panic on.
+    fn under(&self, prefix: &[Value], span: Option<&Span>) -> std::collections::btree_map::Range<'_, Vec<Value>, BTreeSet<Key>> {
+        let at = |v: Option<&Value>, top: bool| -> Vec<Value> {
+            let mut k = prefix.to_vec();
+            k.extend(v.cloned());
+            if top {
+                k.push(Value::Struct(BTreeMap::new()));
+            }
+            k
+        };
+        let (lo, hi) = span.map_or((Bound::Unbounded, Bound::Unbounded), |s| (s.lo, s.hi));
+        let lo = match lo {
+            Bound::Unbounded => Bound::Included(at(None, false)),
+            Bound::Included(v) => Bound::Included(at(Some(v), false)),
+            Bound::Excluded(v) => Bound::Excluded(at(Some(v), true)),
+        };
+        let hi = match hi {
+            Bound::Unbounded => Bound::Excluded(at(None, true)),
+            Bound::Included(v) => Bound::Excluded(at(Some(v), true)),
+            Bound::Excluded(v) => Bound::Excluded(at(Some(v), false)),
+        };
+        let (Bound::Included(l) | Bound::Excluded(l), Bound::Excluded(h)) = (&lo, &hi) else {
+            unreachable!("the bounds above are never unbounded and the upper never inclusive")
+        };
+        if l >= h {
+            let l = l.clone();
+            return self.rows.range((Bound::Included(l.clone()), Bound::Excluded(l)));
+        }
+        self.rows.range((lo, hi))
     }
 
     /// Whether this index holds a read's rows in the read's order (R1),
@@ -550,6 +608,13 @@ fn held(columns: &[FieldName], eq: &[(&str, &Value)]) -> Vec<Value> {
         .iter()
         .map(|c| eq.iter().find(|(n, _)| n == c).map(|(_, v)| (*v).clone()).unwrap_or(Value::Null))
         .collect()
+}
+
+/// The span on the column after an index's first `n`, if the index has
+/// one and a span bounds it.
+fn bounding<'q>(columns: &[FieldName], n: usize, spans: &'q [Span<'q>]) -> Option<&'q Span<'q>> {
+    let c = columns.get(n)?;
+    spans.iter().find(|s| s.column == c.as_str())
 }
 
 /// The key `eq` names, when it holds every key column equal: then at most
@@ -617,28 +682,35 @@ impl MemoryStore {
     /// schema declared last.
     ///
     /// Failing that, an index whose *leading* columns `eq` holds serves
-    /// too, as a range of its map rather than one bucket — the longest such
-    /// prefix, the first declared among equals — and the values returned
-    /// are then that prefix, shorter than the index. `create_playlist`
-    /// reads one person's playlists by `user_id`, which no index is over
-    /// alone and two begin with (`docs/plan-perf.md` R1). A table with
-    /// neither answers `None`.
-    fn lookup(&self, t: &str, eq: &[(&str, &Value)]) -> Option<(&Secondary, Vec<Value>)> {
+    /// too, as a range of its map rather than one bucket, and the values
+    /// returned are then that prefix, shorter than the index. When a span
+    /// bounds the column right after the prefix, the range is narrowed to
+    /// it and the span is returned with it (R6): that column counts as one
+    /// more held, so of the prefixes the longest wins, a bounded column
+    /// adding one, the first declared among equals. `create_playlist`
+    /// reads one person's playlists by `user_id` whose names lie between
+    /// the name and its numbered siblings — the `(user_id, name)` index,
+    /// its prefix and a range — rather than every playlist of theirs. A
+    /// table with none of these answers `None`.
+    fn lookup<'s, 'q>(&'s self, t: &str, eq: &[(&str, &Value)], spans: &'q [Span<'q>]) -> Option<(&'s Secondary, Vec<Value>, Option<&'q Span<'q>>)> {
         let ixs = self.indexes.get(t)?;
         let is_held = |c: &FieldName| eq.iter().any(|(n, _)| n == c);
         let whole = ixs
             .iter()
             .filter(|ix| ix.columns.iter().all(is_held))
-            .map(|ix| (ix, held(&ix.columns, eq)))
-            .min_by_key(|(ix, vals)| ix.rows.get(vals).map_or(0, BTreeSet::len));
+            .map(|ix| (ix, held(&ix.columns, eq), None))
+            .min_by_key(|(ix, vals, _)| ix.rows.get(vals).map_or(0, BTreeSet::len));
         if whole.is_some() {
             return whole;
         }
         ixs.iter()
-            .map(|ix| (ix, ix.columns.iter().take_while(|c| is_held(c)).count()))
-            .filter(|(_, n)| *n > 0)
-            .min_by_key(|(_, n)| std::cmp::Reverse(*n))
-            .map(|(ix, n)| (ix, held(&ix.columns[..n], eq)))
+            .map(|ix| {
+                let n = ix.columns.iter().take_while(|c| is_held(c)).count();
+                (ix, n, bounding(&ix.columns, n, spans))
+            })
+            .filter(|(_, n, span)| *n > 0 || span.is_some())
+            .min_by_key(|(_, n, span)| std::cmp::Reverse(n + usize::from(span.is_some())))
+            .map(|(ix, n, span)| (ix, held(&ix.columns[..n], eq), span))
     }
 
     /// The rows of a table, by key (`Ark.Store.rows`).
@@ -709,7 +781,7 @@ impl Store for MemoryStore {
             .unwrap_or_default()
     }
 
-    fn scan_where_eq(&self, table: &str, eq: &[(&str, &Value)], keep: &dyn Fn(&Row) -> bool) -> Vec<Row> {
+    fn scan_where_eq(&self, table: &str, eq: &[(&str, &Value)], spans: &[Span], keep: &dyn Fn(&Row) -> bool) -> Vec<Row> {
         if let Some(k) = self.schema.lookup_table(table).and_then(|tbl| key_held(tbl, eq)) {
             return self
                 .tables
@@ -720,7 +792,7 @@ impl Store for MemoryStore {
                 .into_iter()
                 .collect();
         }
-        let Some((ix, vals)) = self.lookup(table, eq) else {
+        let Some((ix, vals, span)) = self.lookup(table, eq, spans) else {
             return self.scan_where(table, keep);
         };
         let Some(rows) = self.tables.get(table) else {
@@ -732,11 +804,12 @@ impl Store for MemoryStore {
             };
             return keys.iter().filter_map(|k| rows.get(k)).filter(|r| keep(r)).cloned().collect();
         }
-        // A prefix: the buckets under it come in the index's order, not the
-        // key's, and a scan answers in key order — so what is kept is put
-        // back in key order before a row is copied.
+        // A prefix, and perhaps a range after it: the buckets under it come
+        // in the index's order, not the key's, and a scan answers in key
+        // order — so what is kept is put back in key order before a row is
+        // copied.
         let mut hits: Vec<(&Key, &Row)> = ix
-            .under(&vals)
+            .under(&vals, span)
             .flat_map(|(_, ks)| ks.iter())
             .filter_map(|k| rows.get(k).map(|r| (k, r)))
             .filter(|(_, r)| keep(r))
@@ -750,8 +823,18 @@ impl Store for MemoryStore {
     /// backwards and stopping at the `limit`-th row `keep` admits. The
     /// rows examined are those up to the last one returned, plus any
     /// `keep` refuses on the way — for `MAX(pos) + 1` over a playlist of
-    /// eight thousand, one.
-    fn scan_ordered(&self, table: &str, eq: &[(&str, &Value)], order: &[(&str, Dir)], keep: &dyn Fn(&Row) -> bool, limit: usize) -> Option<Vec<Row>> {
+    /// eight thousand, one. A span on the column after the held ones
+    /// narrows the walk to its range first (R6), so rows outside it are
+    /// never examined; a span on any other column is left to `keep`.
+    fn scan_ordered(
+        &self,
+        table: &str,
+        eq: &[(&str, &Value)],
+        spans: &[Span],
+        order: &[(&str, Dir)],
+        keep: &dyn Fn(&Row) -> bool,
+        limit: usize,
+    ) -> Option<Vec<Row>> {
         let tbl = self.schema.lookup_table(table)?;
         let (ix, n, dir) = self
             .indexes
@@ -766,6 +849,7 @@ impl Store for MemoryStore {
             return Some(out);
         }
         let prefix = held(&ix.columns[..n], eq);
+        let span = bounding(&ix.columns, n, spans);
         // One bucket's keys, ascending whichever way the buckets are
         // walked; true once the answer is full.
         let mut take = |ks: &BTreeSet<Key>| {
@@ -781,14 +865,14 @@ impl Store for MemoryStore {
         };
         match dir {
             Dir::Asc => {
-                for (_, ks) in ix.under(&prefix) {
+                for (_, ks) in ix.under(&prefix, span) {
                     if take(ks) {
                         break;
                     }
                 }
             }
             Dir::Desc => {
-                for (_, ks) in ix.under(&prefix).rev() {
+                for (_, ks) in ix.under(&prefix, span).rev() {
                     if take(ks) {
                         break;
                     }
@@ -877,10 +961,10 @@ impl Store for Overlay<'_> {
     }
 
     fn scan_where(&self, table: &str, keep: &dyn Fn(&Row) -> bool) -> Vec<Row> {
-        self.scan_where_eq(table, &[], keep)
+        self.scan_where_eq(table, &[], &[], keep)
     }
 
-    fn scan_where_eq(&self, table: &str, eq: &[(&str, &Value)], keep: &dyn Fn(&Row) -> bool) -> Vec<Row> {
+    fn scan_where_eq(&self, table: &str, eq: &[(&str, &Value)], spans: &[Span], keep: &dyn Fn(&Row) -> bool) -> Vec<Row> {
         let Some(tbl) = self.schema().lookup_table(table) else {
             return vec![];
         };
@@ -891,13 +975,14 @@ impl Store for Overlay<'_> {
             return self.get(table, &k).filter(|r| keep(r)).into_iter().collect();
         }
         let Some(ws) = self.writes.get(table).filter(|ws| !ws.is_empty()) else {
-            return self.base.scan_where_eq(table, eq, keep);
+            return self.base.scan_where_eq(table, eq, spans, keep);
         };
         // The base's rows this overlay has not written, kept; then its own
-        // writes, kept; in key order.
+        // writes, kept; in key order. A written row is judged by `keep`
+        // alone, wherever a span would have put it (R6).
         let mut merged: BTreeMap<Key, Row> = self
             .base
-            .scan_where_eq(table, eq, &|r| !ws.contains_key(&tbl.key_of(r)) && keep(r))
+            .scan_where_eq(table, eq, spans, &|r| !ws.contains_key(&tbl.key_of(r)) && keep(r))
             .into_iter()
             .map(|r| (tbl.key_of(&r), r))
             .collect();
@@ -920,15 +1005,24 @@ impl Store for Overlay<'_> {
     /// touched, and the answer's first `limit` are among those and the
     /// writes. The cost is the writes to the table once per read, which is
     /// what `scan_where_eq` pays here too; `None` when the base has no
-    /// index that serves.
-    fn scan_ordered(&self, table: &str, eq: &[(&str, &Value)], order: &[(&str, Dir)], keep: &dyn Fn(&Row) -> bool, limit: usize) -> Option<Vec<Row>> {
+    /// index that serves. The spans go to the base with the equalities
+    /// (R6); the writes are `keep`'s to judge, as they are for those.
+    fn scan_ordered(
+        &self,
+        table: &str,
+        eq: &[(&str, &Value)],
+        spans: &[Span],
+        order: &[(&str, Dir)],
+        keep: &dyn Fn(&Row) -> bool,
+        limit: usize,
+    ) -> Option<Vec<Row>> {
         let tbl = self.schema().lookup_table(table)?;
         let Some(ws) = self.writes.get(table).filter(|ws| !ws.is_empty()) else {
-            return self.base.scan_ordered(table, eq, order, keep, limit);
+            return self.base.scan_ordered(table, eq, spans, order, keep, limit);
         };
         let mut rows = self
             .base
-            .scan_ordered(table, eq, order, &|r| !ws.contains_key(&tbl.key_of(r)) && keep(r), limit)?;
+            .scan_ordered(table, eq, spans, order, &|r| !ws.contains_key(&tbl.key_of(r)) && keep(r), limit)?;
         rows.extend(ws.values().flatten().filter(|r| keep(r)).cloned());
         rows.sort_by(|a, b| compare_rows(tbl, order, a, b));
         rows.truncate(limit);
@@ -1097,18 +1191,20 @@ mod tests {
             (&desc, usize::MAX, 13),
         ] {
             looked.set(0);
-            let got = st.scan_ordered("it", &[("p_id", &one)], order, &on(1), limit).expect("an index serves");
+            let got = st
+                .scan_ordered("it", &[("p_id", &one)], &[], order, &on(1), limit)
+                .expect("an index serves");
             assert_eq!(looked.get(), examined, "{order:?} limit {limit}");
             assert_eq!(got, sorted(&st, &on(1), order, limit), "{order:?} limit {limit}");
         }
         // The ties at position 5, both ways: the key ascending.
-        let at_5: Vec<(i64, i64)> = ns(&st.scan_ordered("it", &[("p_id", &one)], &desc, &on(1), 8).unwrap())[4..].to_vec();
+        let at_5: Vec<(i64, i64)> = ns(&st.scan_ordered("it", &[("p_id", &one)], &[], &desc, &on(1), 8).unwrap())[4..].to_vec();
         assert_eq!(at_5, [(1, 5), (1, 11), (1, 12), (1, 13)]);
-        let at_5: Vec<(i64, i64)> = ns(&st.scan_ordered("it", &[("p_id", &one)], &asc, &on(1), 9).unwrap())[5..].to_vec();
+        let at_5: Vec<(i64, i64)> = ns(&st.scan_ordered("it", &[("p_id", &one)], &[], &asc, &on(1), 9).unwrap())[5..].to_vec();
         assert_eq!(at_5, [(1, 5), (1, 11), (1, 12), (1, 13)]);
         // Only list 2's rows are under its prefix.
         looked.set(0);
-        let all_two = st.scan_ordered("it", &[("p_id", &two)], &desc, &on(2), usize::MAX).unwrap();
+        let all_two = st.scan_ordered("it", &[("p_id", &two)], &[], &desc, &on(2), usize::MAX).unwrap();
         assert_eq!((all_two.len(), looked.get()), (10, 10));
         // `keep` refusing rows on the way: the walk goes on past them to
         // the limit, and counts them as examined. Even items of list 1,
@@ -1119,7 +1215,7 @@ mod tests {
             looked.set(looked.get() + 1);
             r["p_id"] == Value::int(1) && r["n"].as_int() % 2 == 0
         };
-        let got = st.scan_ordered("it", &[("p_id", &one)], &desc, &even, 2).unwrap();
+        let got = st.scan_ordered("it", &[("p_id", &one)], &[], &desc, &even, 2).unwrap();
         assert_eq!(looked.get(), 4);
         assert_eq!(ns(&got), [(1, 4), (1, 8)]);
         assert_eq!(got, sorted(&st, &even, &desc, 2));
@@ -1127,10 +1223,16 @@ mod tests {
         // table in its order.
         let any = |_: &Row| true;
         for limit in [1, 5, usize::MAX] {
-            assert_eq!(st.scan_ordered("it", &[], &desc, &any, limit).unwrap(), sorted(&st, &any, &desc, limit));
-            assert_eq!(st.scan_ordered("it", &[], &asc, &any, limit).unwrap(), sorted(&st, &any, &asc, limit));
+            assert_eq!(
+                st.scan_ordered("it", &[], &[], &desc, &any, limit).unwrap(),
+                sorted(&st, &any, &desc, limit)
+            );
+            assert_eq!(
+                st.scan_ordered("it", &[], &[], &asc, &any, limit).unwrap(),
+                sorted(&st, &any, &asc, limit)
+            );
         }
-        assert_eq!(st.scan_ordered("it", &[("p_id", &one)], &desc, &any, 0), Some(vec![]));
+        assert_eq!(st.scan_ordered("it", &[("p_id", &one)], &[], &desc, &any, 0), Some(vec![]));
     }
 
     /// No index holds the order, so no answer: the caller reads and sorts.
@@ -1153,10 +1255,10 @@ mod tests {
             (&[("p_id", &one), ("n", &one)], &[("pos", Dir::Asc)]),
         ];
         for (eq, order) in cases {
-            assert_eq!(st.scan_ordered("it", eq, order, &any, 3), None, "{eq:?} {order:?}");
+            assert_eq!(st.scan_ordered("it", eq, &[], order, &any, 3), None, "{eq:?} {order:?}");
         }
-        assert_eq!(st.scan_ordered("c", &[], &[("id", Dir::Desc)], &any, 1), None);
-        assert_eq!(Overlay::new(&st).scan_ordered("c", &[], &[("id", Dir::Desc)], &any, 1), None);
+        assert_eq!(st.scan_ordered("c", &[], &[], &[("id", Dir::Desc)], &any, 1), None);
+        assert_eq!(Overlay::new(&st).scan_ordered("c", &[], &[], &[("id", Dir::Desc)], &any, 1), None);
     }
 
     /// Through an overlay: a write that belongs inside the window is in
@@ -1172,7 +1274,7 @@ mod tests {
         let on_1 = |r: &Row| r["p_id"] == Value::int(1);
         let desc = [("pos", Dir::Desc), ("p_id", Dir::Asc), ("n", Dir::Asc)];
         let window = |ov: &Overlay| {
-            let got = ov.scan_ordered("it", &[("p_id", &one)], &desc, &on_1, 3).unwrap();
+            let got = ov.scan_ordered("it", &[("p_id", &one)], &[], &desc, &on_1, 3).unwrap();
             assert_eq!(got, sorted(ov, &on_1, &desc, 3));
             ns(&got)
         };
@@ -1191,7 +1293,7 @@ mod tests {
         // And the whole list, both ways.
         let asc = [("pos", Dir::Asc), ("p_id", Dir::Asc), ("n", Dir::Asc)];
         for order in [&asc, &desc] {
-            let got = ov.scan_ordered("it", &[("p_id", &one)], order, &on_1, usize::MAX).unwrap();
+            let got = ov.scan_ordered("it", &[("p_id", &one)], &[], order, &on_1, usize::MAX).unwrap();
             assert_eq!(got, sorted(&ov, &on_1, order, usize::MAX));
             assert_eq!(got.len(), 13);
         }
@@ -1209,10 +1311,175 @@ mod tests {
             looked.set(looked.get() + 1);
             r["p_id"] == Value::int(1)
         };
-        let got = st.scan_where_eq("it", &[("p_id", &Value::int(1))], &on_1);
+        let got = st.scan_where_eq("it", &[("p_id", &Value::int(1))], &[], &on_1);
         assert_eq!(looked.get(), 13);
         let by_scan: Vec<Row> = st.scan("it").into_iter().filter(|r| r["p_id"] == Value::int(1)).collect();
         assert_eq!(got, by_scan);
+    }
+
+    // R6: a span on `pos`, and whether a row is inside it — what the
+    // filter the span came from would say, under `compare_value`.
+    fn pos_span<'a>(lo: Bound<&'a Value>, hi: Bound<&'a Value>) -> Span<'a> {
+        Span { column: "pos", lo, hi }
+    }
+
+    fn inside(s: &Span, r: &Row) -> bool {
+        let v = &r[s.column];
+        let above = match s.lo {
+            Bound::Unbounded => true,
+            Bound::Included(b) => compare_value(v, b) != Ordering::Less,
+            Bound::Excluded(b) => compare_value(v, b) == Ordering::Greater,
+        };
+        let below = match s.hi {
+            Bound::Unbounded => true,
+            Bound::Included(b) => compare_value(v, b) != Ordering::Greater,
+            Bound::Excluded(b) => compare_value(v, b) == Ordering::Less,
+        };
+        above && below
+    }
+
+    /// R6: a span on the column after the held ones reads that part of the
+    /// index and nothing else — both bounds, each bound alone, inclusive
+    /// and exclusive, under an equality prefix and with none — answering
+    /// what a scan and a filter answer, in key order, having examined only
+    /// the rows inside. List 1's positions are 0..10 once each and 5 four
+    /// times. Bounds that cross, or meet with one side exclusive, are an
+    /// empty range, not a panic (`BTreeMap::range` panics on both). A span
+    /// on a column the index does not put next — `n`, under `p_id` — is
+    /// the prefix read, and a table with no index serving is the scan.
+    /// Falsified three ways: ignoring the span in `lookup` (`bounding`
+    /// answering `None`) examines all thirteen of list 1 for `[3, 6)`;
+    /// ending an inclusive upper bound without the struct suffix
+    /// (`at(Some(v), false)`) leaves out the bucket at the bound, one row
+    /// examined for `<= 1` where there are two; and dropping the guard on
+    /// crossed bounds panics on `> 5 and <= 5`.
+    #[test]
+    fn a_span_after_the_held_columns_reads_only_its_range() {
+        let st = items();
+        let (one, n) = (Value::int(1), |i: i64| Value::int(i));
+        let (v0, v1, v3, v5, v6, v7, v9) = (n(0), n(1), n(3), n(5), n(6), n(7), n(9));
+        use Bound::{Excluded as X, Included as I, Unbounded as U};
+        type Case<'a> = (Vec<(&'a str, &'a Value)>, Span<'a>, usize);
+        let cases: Vec<Case> = vec![
+            (vec![("p_id", &one)], pos_span(I(&v3), X(&v6)), 6),
+            (vec![("p_id", &one)], pos_span(X(&v7), U), 2),
+            (vec![("p_id", &one)], pos_span(U, I(&v1)), 2),
+            (vec![("p_id", &one)], pos_span(I(&v5), I(&v5)), 4),
+            (vec![("p_id", &one)], pos_span(X(&v0), X(&v1)), 0),
+            (vec![], pos_span(I(&v9), U), 3),
+            (vec![], pos_span(X(&v3), I(&v5)), 9),
+            (vec![("p_id", &one)], pos_span(X(&v5), X(&v3)), 0),
+            (vec![("p_id", &one)], pos_span(I(&v5), X(&v5)), 0),
+            (vec![("p_id", &one)], pos_span(X(&v5), I(&v5)), 0),
+        ];
+        for (eq, span, examined) in cases {
+            let looked = std::cell::Cell::new(0);
+            let keep = |r: &Row| {
+                looked.set(looked.get() + 1);
+                eq.iter().all(|(c, v)| &r[*c] == *v) && inside(&span, r)
+            };
+            let got = st.scan_where_eq("it", &eq, &[span], &keep);
+            assert_eq!(looked.get(), examined, "{eq:?} {span:?}");
+            let by_scan: Vec<Row> = st
+                .scan("it")
+                .into_iter()
+                .filter(|r| eq.iter().all(|(c, v)| &r[*c] == *v) && inside(&span, r))
+                .collect();
+            assert_eq!(got, by_scan, "{eq:?} {span:?}");
+        }
+        // A span on `n`, which `(p_id, pos)` does not put after `p_id`:
+        // the prefix read, every row of list 1 examined, the same answer.
+        let looked = std::cell::Cell::new(0);
+        let span = Span {
+            column: "n",
+            lo: I(&v3),
+            hi: X(&v6),
+        };
+        let keep = |r: &Row| {
+            looked.set(looked.get() + 1);
+            r["p_id"] == one && inside(&span, r)
+        };
+        let got = st.scan_where_eq("it", &[("p_id", &one)], &[span], &keep);
+        assert_eq!((looked.get(), ns(&got)), (13, vec![(1, 3), (1, 4), (1, 5)]));
+        // No index over `c.id` but the key: the scan, whatever the span.
+        let mut st = MemoryStore::empty(schema());
+        for i in 1..=5 {
+            st.put("c", row(vec![("id", Value::int(i)), ("p_id", Value::Null)])).unwrap();
+        }
+        let looked = std::cell::Cell::new(0);
+        let span = Span {
+            column: "id",
+            lo: I(&v3),
+            hi: U,
+        };
+        let got = st.scan_where_eq("c", &[], &[span], &|r| {
+            looked.set(looked.get() + 1);
+            compare_value(&r["id"], &v3) != Ordering::Less
+        });
+        assert_eq!((looked.get(), got.len()), (5, 3));
+        assert_eq!(st.scan_ordered("c", &[], &[span], &[("id", Dir::Desc)], &|_| true, 1), None);
+    }
+
+    /// R6: an ordered read with a span on its order column walks the range
+    /// only, either way, and stops at the limit: `[2, 8]` of list 1 by
+    /// position is 8, 7, 6 descending and 2, 3, 4 ascending, three rows
+    /// examined each. With no equality the `(pos)` index serves. Falsified
+    /// by walking `under(&prefix, None)` in `scan_ordered`: descending
+    /// examines 9 first, four rows for three.
+    #[test]
+    fn an_ordered_read_walks_only_its_span() {
+        let st = items();
+        let (one, v2, v8) = (Value::int(1), Value::int(2), Value::int(8));
+        let span = pos_span(Bound::Included(&v2), Bound::Included(&v8));
+        let asc = [("pos", Dir::Asc), ("p_id", Dir::Asc), ("n", Dir::Asc)];
+        let desc = [("pos", Dir::Desc), ("p_id", Dir::Asc), ("n", Dir::Asc)];
+        for (order, want) in [(&desc, [8, 7, 6]), (&asc, [2, 3, 4])] {
+            let looked = std::cell::Cell::new(0);
+            let keep = |r: &Row| {
+                looked.set(looked.get() + 1);
+                r["p_id"] == one && inside(&span, r)
+            };
+            let got = st.scan_ordered("it", &[("p_id", &one)], &[span], order, &keep, 3).unwrap();
+            assert_eq!(got, sorted(&st, &keep, order, 3));
+            let pos: Vec<i64> = got.iter().map(|r| r["pos"].as_int()).collect();
+            assert_eq!(pos, want);
+            // `sorted` asked `keep` about every row; the walk, three.
+            assert_eq!(looked.get(), 3 + 33);
+        }
+        let any_list = |r: &Row| inside(&span, r);
+        let got = st.scan_ordered("it", &[], &[span], &desc, &any_list, usize::MAX).unwrap();
+        assert_eq!(got, sorted(&st, &any_list, &desc, usize::MAX));
+        assert_eq!(got.len(), 7 * 3 + 3);
+    }
+
+    /// R6: an overlay hands the span to the base and judges its own writes
+    /// by `keep` — a row written into the range, one moved into it from
+    /// outside, one moved out, one removed inside, and one written outside
+    /// — so a ranged read through it is the merged table filtered, in both
+    /// the key-ordered and the position-ordered read. Falsified by passing
+    /// the base's rows through without leaving out the written keys: the
+    /// row moved out of the range comes back at its old position.
+    #[test]
+    fn an_overlay_merges_its_writes_into_a_ranged_read() {
+        let st = items();
+        let (one, v3, v6) = (Value::int(1), Value::int(3), Value::int(6));
+        let span = pos_span(Bound::Included(&v3), Bound::Excluded(&v6));
+        let keep = |r: &Row| r["p_id"] == one && inside(&span, r);
+        let mut ov = Overlay::new(&st);
+        ov.apply_change(&Change::Add("it".into(), it(1, 40, 4)));
+        ov.apply_change(&Change::Edit("it".into(), it(1, 7, 9), it(1, 7, 3)));
+        ov.apply_change(&Change::Edit("it".into(), it(1, 2, 4), it(1, 2, 8)));
+        ov.apply_change(&Change::Remove("it".into(), it(1, 11, 5)));
+        ov.apply_change(&Change::Add("it".into(), it(1, 41, 7)));
+        let by_scan: Vec<Row> = ov.scan("it").into_iter().filter(|r| keep(r)).collect();
+        let got = ov.scan_where_eq("it", &[("p_id", &one)], &[span], &keep);
+        assert_eq!(got, by_scan);
+        assert_eq!(ns(&got), [(1, 5), (1, 7), (1, 9), (1, 12), (1, 13), (1, 40)]);
+        let desc = [("pos", Dir::Desc), ("p_id", Dir::Asc), ("n", Dir::Asc)];
+        for limit in [1, 3, usize::MAX] {
+            let got = ov.scan_ordered("it", &[("p_id", &one)], &[span], &desc, &keep, limit).unwrap();
+            assert_eq!(got, sorted(&ov, &keep, &desc, limit), "{limit}");
+        }
     }
 
     fn row(pairs: Vec<(&str, Value)>) -> Row {
@@ -1235,7 +1502,7 @@ mod tests {
         }
         let same = |st: &MemoryStore, p: i64| {
             let v = Value::int(p);
-            let by_index = st.scan_where_eq("c", &[("p_id", &v)], &|_| true);
+            let by_index = st.scan_where_eq("c", &[("p_id", &v)], &[], &|_| true);
             let by_scan: Vec<Row> = st.scan("c").into_iter().filter(|r| r["p_id"] == v).collect();
             assert_eq!(by_index, by_scan, "p_id = {p}");
             by_index.len()
@@ -1247,8 +1514,11 @@ mod tests {
         st.apply_change(&Change::Add("c".into(), row(vec![("id", Value::int(10)), ("p_id", Value::int(1))])));
         assert_eq!((same(&st, 1), same(&st, 2), same(&st, 3)), (4, 2, 3));
         // A value nobody holds, and a column with no index (the scan).
-        assert!(st.scan_where_eq("c", &[("p_id", &Value::int(9))], &|_| true).is_empty());
-        assert_eq!(st.scan_where_eq("c", &[("id", &Value::int(3))], &|r| r["id"] == Value::int(3)).len(), 1);
+        assert!(st.scan_where_eq("c", &[("p_id", &Value::int(9))], &[], &|_| true).is_empty());
+        assert_eq!(
+            st.scan_where_eq("c", &[("id", &Value::int(3))], &[], &|r| r["id"] == Value::int(3)).len(),
+            1
+        );
         // Merged and cloned stores keep their indexes.
         let other = {
             let mut o = MemoryStore::empty(schema());
@@ -1261,7 +1531,7 @@ mod tests {
         assert_eq!(same(&merged.clone(), 3), 3);
         // A declared unique index answers too.
         st.put("p", row(vec![("id", Value::int(2)), ("name", Value::text("two"))])).unwrap();
-        assert_eq!(st.scan_where_eq("p", &[("name", &Value::text("two"))], &|_| true).len(), 1);
+        assert_eq!(st.scan_where_eq("p", &[("name", &Value::text("two"))], &[], &|_| true).len(), 1);
     }
 
     /// A read holding every key column answers by key, and one holding
@@ -1305,21 +1575,21 @@ mod tests {
             [("n", &n), ("c_id", &seven), ("p_id", &one)],
         ] {
             looked.set(0);
-            assert_eq!(st.scan_where_eq("pc", &eq, &count(&both)), by_scan);
+            assert_eq!(st.scan_where_eq("pc", &eq, &[], &count(&both)), by_scan);
             assert_eq!(looked.get(), 1);
         }
         // A key nobody holds, and a row `keep` refuses.
         assert!(st
-            .scan_where_eq("pc", &[("p_id", &one), ("c_id", &seven), ("n", &one)], &|_| true)
+            .scan_where_eq("pc", &[("p_id", &one), ("c_id", &seven), ("n", &one)], &[], &|_| true)
             .is_empty());
         assert!(st
-            .scan_where_eq("pc", &[("p_id", &one), ("c_id", &seven), ("n", &n)], &|_| false)
+            .scan_where_eq("pc", &[("p_id", &one), ("c_id", &seven), ("n", &n)], &[], &|_| false)
             .is_empty());
         // Both references held and not the key: the posting list of
         // `c_id = 7` (two rows), not of `p_id = 1` (forty), in either order.
         for eq in [[("p_id", &one), ("c_id", &seven)], [("c_id", &seven), ("p_id", &one)]] {
             looked.set(0);
-            assert_eq!(st.scan_where_eq("pc", &eq, &count(&both)), by_scan);
+            assert_eq!(st.scan_where_eq("pc", &eq, &[], &count(&both)), by_scan);
             assert_eq!(looked.get(), 2);
         }
         // …and the other way round: `p_id = 5` (one row), not `c_id = 9`
@@ -1328,7 +1598,7 @@ mod tests {
         let five_nine = |r: &Row| r["p_id"] == Value::int(5) && r["c_id"] == Value::int(9);
         looked.set(0);
         assert_eq!(
-            st.scan_where_eq("pc", &[("p_id", &five), ("c_id", &nine)], &counted(&looked, &five_nine))
+            st.scan_where_eq("pc", &[("p_id", &five), ("c_id", &nine)], &[], &counted(&looked, &five_nine))
                 .len(),
             1
         );
@@ -1339,15 +1609,15 @@ mod tests {
         ov.apply_change(&Change::Remove("pc".into(), pc(1, 7)));
         ov.apply_change(&Change::Add("pc".into(), pc(3, 7)));
         let merged = |ov: &Overlay, want: &dyn Fn(&Row) -> bool| ov.scan("pc").into_iter().filter(|r| want(r)).collect::<Vec<_>>();
-        assert!(ov.scan_where_eq("pc", &[("p_id", &one), ("c_id", &seven)], &both).is_empty());
+        assert!(ov.scan_where_eq("pc", &[("p_id", &one), ("c_id", &seven)], &[], &both).is_empty());
         let three = Value::int(3);
         let three_seven = |r: &Row| r["p_id"] == Value::int(3) && r["c_id"] == Value::int(7);
         assert_eq!(
-            ov.scan_where_eq("pc", &[("c_id", &seven), ("p_id", &three)], &three_seven),
+            ov.scan_where_eq("pc", &[("c_id", &seven), ("p_id", &three)], &[], &three_seven),
             merged(&ov, &three_seven)
         );
         let seven_any = |r: &Row| r["c_id"] == Value::int(7);
-        assert_eq!(ov.scan_where_eq("pc", &[("c_id", &seven)], &seven_any), merged(&ov, &seven_any));
+        assert_eq!(ov.scan_where_eq("pc", &[("c_id", &seven)], &[], &seven_any), merged(&ov, &seven_any));
         assert_eq!(merged(&ov, &seven_any).len(), 2);
     }
 
@@ -1420,8 +1690,8 @@ mod tests {
         st.apply_change(&Change::Remove("it".into(), it(1, 1, 1)));
         assert_eq!(st, empty);
         let any = |_: &Row| true;
-        assert_eq!(st.scan_ordered("it", &[], &[("pos", Dir::Asc)], &any, 5), Some(vec![]));
-        assert!(st.scan_where_eq("p", &[("name", &Value::text("x"))], &any).is_empty());
+        assert_eq!(st.scan_ordered("it", &[], &[], &[("pos", Dir::Asc)], &any, 5), Some(vec![]));
+        assert!(st.scan_where_eq("p", &[("name", &Value::text("x"))], &[], &any).is_empty());
     }
 
     #[test]
