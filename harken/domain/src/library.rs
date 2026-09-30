@@ -412,30 +412,44 @@ pub fn work_title(work_title: Text, album: Text, catalogue: Text, part: Text) ->
 /// digits survive lowercased, every run of anything else is one dash, and
 /// none leads or trails. Non-ASCII letters are kept rather than folded:
 /// "Dvořák" and "Dvorak" are two keys, as they are two `person` names.
+///
+/// One fold over the characters, last to first, and one pass to spell the
+/// separators (`docs/plan-perf.md` R1). Built backwards so that "a
+/// separator is already there" is `starts_with` on the text so far, where
+/// forwards it was the last of `acc.chars()` — a value per character of
+/// the text so far, at every character, which is what made the old body
+/// quadratic in allocations. What is left is one `concat` of a piece onto
+/// the text so far per character: its length in bytes copied, which this
+/// vocabulary cannot avoid (a run is only seen from the character beside
+/// it, and nothing but a fold sees two), and which for a name is a few
+/// hundred bytes. The answer is the old body's on every input
+/// (`keys::tests::slug_is_what_it_was`).
 pub fn slug(text: Text) -> Text {
     helper("slug", ("text", text), |text: Text| {
-        concat(text.chars().map(|x| pick(x.is_alnum(), x.lower(), " ")))
-            .trim()
-            .chars()
-            .fold("", |acc: Text, x| {
-                pick(
-                    x.eq(" ").and(acc.chars().last().map_or(false, |x_2| x_2.eq("-"))),
-                    acc,
-                    concat(list([acc, pick(x.eq(" "), "-", x)])),
-                )
-            })
+        concat(
+            text.chars()
+                .reverse()
+                .fold("", |acc: Text, x| {
+                    concat(list([
+                        pick(x.is_alnum(), x.lower(), pick::<Text>(acc.is_empty().or(acc.starts_with(" ")), "", " ")),
+                        acc,
+                    ]))
+                })
+                .trim()
+                .chars()
+                .map(|x| pick(x.eq(" "), "-", x)),
+        )
     })
 }
 
 /// …and the same for a name with no letters in it at all: "!!!" is a band,
-/// and every such name in one key would be one band.
+/// and every such name in one key would be one band. The slug is computed
+/// once and held in an option, where it was asked for twice (R1).
 pub fn key_part(text: Text) -> Text {
     helper("key_part", ("text", text), |text: Text| {
-        pick(
-            slug(text).is_empty(),
-            concat(list(["x".into(), text.trim().fnv1a64().to_text()])),
-            slug(text),
-        )
+        some(slug(text))
+            .filter(|s: Text| s.is_empty().not())
+            .unwrap_or(concat(list(["x".into(), text.trim().fnv1a64().to_text()])))
     })
 }
 

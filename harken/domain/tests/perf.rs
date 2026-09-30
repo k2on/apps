@@ -345,6 +345,36 @@ fn perf_playlists() {
     }
 }
 
+/// `playlist_name` alone, natively, among one person's P playlists: a
+/// name they do not have (one `contains`, since R1 made the branch lazy)
+/// and one they do (`free_number`, quadratic in P). The number
+/// `free_number`'s doc comment quotes at a thousand.
+#[test]
+#[ignore]
+fn perf_playlist_name() {
+    use ark::authoring::{evaluate, list, Text};
+    eprintln!("\n== playlist_name among P names (native, harken_domain::playlists)");
+    eprintln!("{:<40} {:>7} {:>12}", "name", "P", "µs per call");
+    for p in [10usize, 100, 1000] {
+        let names: Vec<String> = std::iter::once("Favorites".to_string())
+            .chain((1..p).map(|i| format!("List {i}")))
+            .collect();
+        for (label, name) in [("a free name", "Night"), ("a taken name", "Favorites")] {
+            let reps = if p >= 1000 { 5 } else { 50 };
+            let t = Instant::now();
+            for _ in 0..reps {
+                let v = evaluate(|| {
+                    let of = list(names.iter().map(|n| Text::from(n.as_str())).collect::<Vec<_>>());
+                    harken_domain::playlists::playlist_name(of, Text::from(name))
+                })
+                .unwrap();
+                std::hint::black_box(v);
+            }
+            eprintln!("{:<40} {:>7} {:>12.1}", label, p, us(t.elapsed()) / reps as f64);
+        }
+    }
+}
+
 fn newest_playlist(st: &MemoryStore) -> Value {
     st.scan("playlist")
         .into_iter()

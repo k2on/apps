@@ -65,10 +65,130 @@ mod tests {
         let bang = key_part("!!!");
         assert!(bang.starts_with('x') && bang.len() > 1, "{bang}");
         assert_ne!(bang, key_part("???"), "two names of no letters are two keys");
+        assert_eq!(key_part("Kimiko Ishizaka"), "kimiko-ishizaka");
         assert_eq!(movement_key("johann-sebastian-bach/bwv-988", 3), "johann-sebastian-bach/bwv-988#3");
         assert_eq!(
             recording_key("johann-sebastian-bach/bwv-988", "Kimiko Ishizaka"),
             "johann-sebastian-bach/bwv-988@kimiko-ishizaka"
         );
+    }
+
+    // The bodies `slug`, `key_part` and `playlist_name` had before
+    // `docs/plan-perf.md` R1, kept here as the reference the new ones are
+    // held to: a key is permanent, so a faster body must be the same
+    // function.
+    fn slug_before(text: Text) -> Text {
+        use ark::authoring::{concat, helper, list, pick};
+        helper("slug_before", ("text", text), |text: Text| {
+            concat(text.chars().map(|x| pick(x.is_alnum(), x.lower(), " ")))
+                .trim()
+                .chars()
+                .fold("", |acc: Text, x| {
+                    pick(
+                        x.eq(" ").and(acc.chars().last().map_or(false, |x_2| x_2.eq("-"))),
+                        acc,
+                        concat(list([acc, pick(x.eq(" "), "-", x)])),
+                    )
+                })
+        })
+    }
+
+    fn key_part_before(text: Text) -> Text {
+        use ark::authoring::{concat, helper, list, pick};
+        helper("key_part_before", ("text", text), |text: Text| {
+            pick(
+                slug_before(text).is_empty(),
+                concat(list(["x".into(), text.trim().fnv1a64().to_text()])),
+                slug_before(text),
+            )
+        })
+    }
+
+    fn playlist_name_before(names: ark::authoring::List<Text>, name: Text) -> Text {
+        use ark::authoring::{helper, pick, List};
+        helper(
+            "playlist_name_before",
+            (("names", names), ("name", name)),
+            |names: List<Text>, name: Text| {
+                pick(
+                    names.contains(name),
+                    crate::playlists::numbered(name, crate::playlists::free_number(names, name)),
+                    name,
+                )
+            },
+        )
+    }
+
+    fn native(v: Result<Value, ark::eval::EvalFault>) -> Value {
+        v.unwrap_or_else(|e| panic!("{e:?}"))
+    }
+
+    /// `slug` and `key_part` answer what their bodies before R1 answered,
+    /// on names with every shape a run can take: leading, trailing and
+    /// doubled separators, nothing but separators, the empty name, letters
+    /// outside ASCII (one that lowercases to two characters), digits, and
+    /// separators that are not spaces. Falsified by starting a run only
+    /// when the text so far is empty (dropping `acc.starts_with(" ")`):
+    /// "a  b" becomes "a--b".
+    #[test]
+    fn slug_is_what_it_was() {
+        let names = [
+            "",
+            " ",
+            "!!!",
+            "???",
+            "a",
+            "a b",
+            "a  b",
+            "  --a  b--  ",
+            "Dvořák: Symphony No. 9, \"From the New World\"!",
+            "İstanbul",
+            "ΑΒΓ δ",
+            "BWV 988",
+            "Op. 23 — No. 4",
+            "tab\tand\nnewline",
+            "x-y_z.w",
+            "999",
+            "日本 の 音楽",
+            "a!b?c",
+            "-",
+            "--a",
+            "a--",
+        ];
+        for n in names {
+            let (was, is) = (
+                native(ark::authoring::evaluate(|| slug_before(Text::from(n)))),
+                native(ark::authoring::evaluate(|| crate::library::slug(Text::from(n)))),
+            );
+            assert_eq!(is, was, "slug({n:?})");
+            let (was, is) = (
+                native(ark::authoring::evaluate(|| key_part_before(Text::from(n)))),
+                native(ark::authoring::evaluate(|| crate::library::key_part(Text::from(n)))),
+            );
+            assert_eq!(is, was, "key_part({n:?})");
+        }
+    }
+
+    /// `playlist_name` answers what its `pick` did, for a name that is free,
+    /// one that is taken, and one taken with its first numbers taken too.
+    /// Falsified by numbering the name when it is free (`.not()` in the
+    /// filter): "Favorites" among no playlists comes back "Favorites (1)".
+    #[test]
+    fn playlist_name_is_what_it_was() {
+        use ark::authoring::{list, List};
+        let sets: [&[&str]; 4] = [
+            &[],
+            &["Favorites"],
+            &["Favorites", "Favorites (1)", "Favorites (3)", "Evening"],
+            &["Evening", "Morning"],
+        ];
+        for names in sets {
+            for name in ["Favorites", "Evening", "Night"] {
+                let of = || -> List<Text> { list(names.iter().map(|n| Text::from(*n)).collect::<Vec<_>>()) };
+                let was = native(ark::authoring::evaluate(|| playlist_name_before(of(), Text::from(name))));
+                let is = native(ark::authoring::evaluate(|| crate::playlists::playlist_name(of(), Text::from(name))));
+                assert_eq!(is, was, "{name:?} among {names:?}");
+            }
+        }
     }
 }

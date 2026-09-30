@@ -93,6 +93,17 @@ pub fn numbered(name: Text, n: Int) -> Text {
 /// names are one person's, so distinct: each one's rank among them is one
 /// of 1..len, and of len names at least one is not a numbered one when the
 /// plain name is taken, so the answer is always among the ranks.
+///
+/// Quadratic in the person's playlists, and run only for a name they
+/// already have (`playlist_name`, `docs/plan-perf.md` R1): per name its
+/// rank is counted twice (natively `pick` computes both arms) and the
+/// numbered name looked for, about three comparisons per pair of names —
+/// three million at a thousand playlists, with a million names copied into
+/// the lists `filter` builds: 340 ms a call natively at a thousand, 4.6 ms
+/// at a hundred, against 0.2 ms for a free name at a thousand
+/// (`perf_playlist_name` in `tests/perf.rs`, a release build). Paid per
+/// apply, and only by somebody making their thousand-and-first playlist
+/// under a name they have used.
 pub fn free_number(names: List<Text>, name: Text) -> Int {
     helper("free_number", (("names", names), ("name", name)), |names: List<Text>, name: Text| {
         names.fold(names.len().add(1), |acc: Int, x| {
@@ -108,9 +119,21 @@ pub fn free_number(names: List<Text>, name: Text) -> Int {
 /// What a new playlist is called, among a person's other playlists: the
 /// name asked for, or when they already have one of that name, the first
 /// "name (n)" they do not have.
+///
+/// The branch is an option's match rather than `pick`, because `pick`
+/// computes both arms natively and `free_number` is the expensive one
+/// (`docs/plan-perf.md` R1): `filter` keeps the name only when it is
+/// taken, and `map_or` numbers it only then — each an `EMatch` whose other
+/// arm the interpreter never evaluates, over a closure the native build
+/// calls only when it is taken. `if_else` is the vocabulary's other lazy
+/// branch, but a statement: it chooses between effects and has no value
+/// to give, and a helper is an expression. A fresh name costs one
+/// `contains`.
 pub fn playlist_name(names: List<Text>, name: Text) -> Text {
     helper("playlist_name", (("names", names), ("name", name)), |names: List<Text>, name: Text| {
-        pick(names.contains(name), numbered(name, free_number(names, name)), name)
+        some(name)
+            .filter(|n| names.contains(n))
+            .map_or(name, |n| numbered(n, free_number(names, n)))
     })
 }
 
