@@ -635,7 +635,11 @@ index and never looks at the rest of the table — so a relationship pulled
 beneath a row, and `MAX(pos) + 1` over one playlist's items, cost the rows
 they return. The seekable range scan above (`lo`, `hi`, `after`), the
 order taken from an index, and a durable B-tree behind it are not there
-yet: an order still sorts what the filter admitted.
+yet: an order still sorts what the filter admitted. A row there is positional
+(`docs/plan-perf.md` R11): its values in the table's column order behind
+one shared allocation, the names held once on the table, so the store
+hands a row out by reference count — and it is still the `Struct` of
+every column wherever it is observed, on the wire and in the state hash.
 
 **The rebase is by changes.** Confirmed state lives in the base; each
 pending intent applies forward into the optimistic store through an

@@ -1324,6 +1324,130 @@ group per member change" is now true only of unkept members; §1.13 says
 so. The kotlin and swift runtimes, frozen at v3, have no views of this
 kind.
 
+### Round 5, R11 — the row is positional
+
+**What landed.** `ark::store::Row` is a positional record: the values in
+the table's column order behind one `Arc<[Value]>`, beside an
+`Arc<Columns>` — the names, held once on the `Table` (`Table::new` lays
+them out, with the key's positions) and shared by every row of it. The
+row carries its names rather than the store supplying them: rows are read
+far from any store (a view binding one, a change on the wire, a test
+comparing two), and each would otherwise need the table threaded to it;
+`store.rs`'s module docs say so. `Arc`, not the `Rc` this item named,
+because a row crosses threads — the hub's `ServerMsg` carries facts to the
+socket tasks and `HubHandle::rows` answers another thread. The API keeps
+what callers used: `get` by name (the names walked, the length first, up
+to sixteen columns; the sorted positions searched past that), `row["c"]`,
+iteration in column order, `insert` and `with`, construction from pairs
+(`Row::of(tbl, …)` lays them out, a missing nullable column `Null`), equality
+by columns whatever the order, `Debug` as the map it was. A row built
+before any table laid it out — decoded without a schema, a vector's, a
+test's pairs, or naming a column its table lacks or leaving out one that
+is not nullable — keeps its own names in name order (shared per shape
+through a small per-thread cache), and a store lays it out as its table's
+when it is applied (`stored`: a pointer or a name comparison, and a
+permutation only when the order differs), or refuses it at `put` with the
+message it always had (`complete`, `well_typed`). A raw fact that is not
+the table's shape is kept as it came, as §4.5 applies facts. The store
+hands a row out by reference count: `scan`, `get`, the overlay and
+`Change` copy no row. The evaluator binds a row as the store holds it —
+`eval_val` answers a `Val` that may be a row (a plan's row, a lookup's,
+`get`'s, `update`'s old row, a helper's argument), a field of one is read
+by position, and only a row used whole is built into its struct. The wire
+(`change_value` writes `to_value()`), the state hash, the indexes'
+keys, `Change`'s shape and the overlay's meaning did not move: every
+vector passes byte for byte and `spec/` is untouched.
+
+**Guards.** `a_library_entry_hydrates_in_a_bounded_number_of_allocations`
+(`rust/ark/tests/allocations.rs`): 37.2 allocations an entry at 285, from
+52.2; bounded at 44, and falsified by binding the plan's row as its struct
+in `view.rs` (`Cand::bind`: 52.2, the number before, exactly) and by
+making `Field` copy what it reads (194.8). `toggle.rs` is unchanged — a
+toggle reads the same rows at 200 as at 3,200, as before. The fleet
+suite is green (22, 37 s), with the workspace, `harken-iced --features
+demo`, clippy `-D warnings`, `fmt --check`, `cargo test -p ark --test
+vectors` and `nix build .#harken-web`.
+
+**Before and after.** Release, one thread, the shared VM: before at
+`cb47634` (built from a `git archive` of it, into the same target
+directory), after at `a25c616`; the three harnesses whole, run back to
+back, and `bench_views`. The frames harness counts allocations now
+(`0073222`, a per-thread tally), and was run over both.
+
+| row | n | before | after |
+|---|---|---|---|
+| `library` hydrate, allocations an entry (`allocations.rs`) | 285 / 8,000 | 52.2 / 51.0 | 37.2 / 36.0 |
+| `library` read whole (harken harness), time and allocations | 2,000 | 11.30 ms, 102,281 | 6.68 ms, 72,291 |
+| `library` read whole (harken harness), time and allocations | 8,000 | 38.65 ms, 408,285 | 29.79 ms, 288,295 |
+| `media.title` in a plan's expression | — | 85 ns, 1 alloc | 72 ns, 1 alloc |
+| `add_to_playlist` applied, interpreted (`allocations.rs`) | 285–8,000 | 204 | 194 |
+| `add_to_playlist` applied, native (harken, `owned` middleware) | 500–8,000 | 358 | 355 |
+| harken `add_to_playlist`, one playlist: whole | 2,000 / 8,000 | 62.3 / 47.8 µs | 38.5 / 40.9 µs |
+| harken `add_song`: whole / `local_commit` | 8,000 | 316 / 76.3 µs | 257 / 38.4 µs |
+| a `Batch` of 256 with facts: decode, time and allocations | 256 | 1,074 µs, 11,540 | 951 µs, 11,028 |
+| … encode | 256 | 1,235 µs, 19,997 | 948 µs, 19,997 |
+| a `Batch` of 256, intents only: decode / encode | 256 | 742 / 731 µs | 551 / 607 µs |
+| `MemoryStore::scan`, per row | 500 / 2,000 / 8,000 | 0.39 / 0.73 / 1.13 µs | 0.04 / 0.05 / 0.06 µs |
+| the scanner's full rescan, per look | 8,000 | 23.9 ms | 8.2 ms |
+| (c) alone, Memory: `mutate` | 500 / 2,000 / 8,000 | 34.1 / 32.7 / 40.6 µs | 28.7 / 28.8 / 33.0 and 43.7 / 32.5 / 36.2 µs (two runs) |
+| (c) offline, Memory: `mutate` | 2,000 / 8,000 | 19.1 / 24.1 µs | 17.8 / 21.3 µs |
+| (a) alone, one playlist: whole | 2,000 / 8,000 | 29.1 / 27.1 µs | 22.3 / 21.6 µs |
+| (d) receive by facts alone | 2,010 / 8,010 | 5.83 / 7.56 µs | 4.12 / 6.33 µs |
+| `MemoryStore::clone` of the confirmed store | 8,000 | 12.1 ms | 8.3 ms |
+| `state_at` + `state_hash`, log of 8,000 | 8,000 | 44.3 ms (hash 12.2) | 39.3 ms (hash 15.1) |
+
+`bench_views`, the desktop's views, medians of 21 warm rounds:
+
+| query | hydrate 1× / 4×, before | after | toggle 1× / 4×, before | after | describe 1× / 4×, before | after |
+|---|---|---|---|---|---|---|
+| `library` | 1.2 / 4.5 ms | 0.97 / 3.9 ms | 21.7 / 39.2 µs | 9.6 / 12.7 µs | 1.3 / 2.5 µs | 0.33 / 0.52 µs |
+| `albums` | 0.67 / 3.0 ms | 0.43 / 1.7 ms | 0.50 / 0.86 µs | 0.29 / 0.31 µs | 0.46 / 0.82 µs | 0.25 / 0.26 µs |
+| `artists` | 0.56 / 2.3 ms | 0.49 / 1.8 ms | 0.42 / 0.56 µs | 0.24 / 0.25 µs | 12.9 / 20.4 µs | 4.9 / 6.8 µs |
+| `composers` | 1.4 / 5.9 ms | 1.6 / 6.1 ms | 0.70 / 1.1 µs | 0.41 / 0.42 µs | 11.7 / 14.4 µs | 5.7 / 6.9 µs |
+| `track_details` | 3.9 / 16.7 ms | 3.8 / 15.7 ms | 0.49 / 0.57 µs | 0.24 / 0.24 µs | 0.63 / 0.64 µs | 0.31 / 0.32 µs |
+
+An intents-only `Batch` carries no row, so its quarter is the VM's —
+the size of the noise every timing here sits in. The warm toggles and
+describes of `bench_views` halve and the cold ones do not move; that was
+not taken apart.
+
+**The rows the memory hierarchy had moved.** The scan per row is flat
+now — 0.04 to 0.06 µs from 500 rows to 8,000, where it was 0.39 to 1.13:
+it copied every row, and the copies were what outran the cache; handing
+out a reference count does not. A peer alone's `mutate` still rises
+somewhat from 2,000 to 8,000 (28.8 to 33.0, and 32.5 to 36.2, in two
+runs; 32.7 to 40.6 before) — less than it did, and the same instructions
+over a heap that still grows, the authority's log among it; not changed
+further here.
+
+**The row's share now.** A row handed out is two reference counts (26 ns,
+no allocation), where it was a whole copy — media 15 allocations and
+592 ns, `playlist_item` 7 and 198 ns — 33% of a `library` hydrate and 14%
+of an interpreted `add_to_playlist`. What is left that is row-shaped is a
+row built into its struct where one is used whole: in the hydrate, each
+item the related plan finds (a bare node is the row as a struct) — 6% of
+the allocations; in the interpreted apply, the item `MAX(pos)` read and
+the row written, its values laid out once — 8 of 194 (4%). The largest
+share of a hydrate is now the node the helper builds, its ten names and
+its map (30%), which a positional row does not touch.
+
+**Not changed, and why.** A native procedure's reads hand the domain a
+struct (`cx::lit(row.into_value())` in `authoring/schema.rs`): the
+authoring vocabulary's handles hold values, and a row-valued handle is a
+change to that vocabulary rather than to the store — so harken's native
+`add_to_playlist` is 355 allocations where it was 358. The state hash, a
+change on the wire and a snapshot build each row's struct and then encode
+it, as they did; encoding a row canonically without the struct would
+remove that, and was left alone because those bytes are pinned. A row
+decoded from the wire is laid out once more when applied (its names are
+in name order, the table's are declared order): one allocation a fact row.
+
+**Not verified.** Timings share the VM with whatever else runs, and single
+shots (a native apply, 0.10 ms) move by tens of percent between runs; the
+allocation counts do not. The wasm build was built (`nix build
+.#harken-web`) and not run in a browser. The kotlin and swift runtimes
+have their own rows and were not touched.
+
 ## Round 3 — decided with round 2's numbers
 
 Round 2 removed every super-linear cost the harness found. What remains
