@@ -27,7 +27,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::eval::{Args, Ctx, EvalError, EvalFault, NodeScope, Scope};
 use crate::ir::{CmpOp, Expr, Function, Key, Lookup, Plan, Pred, Related, Source};
 use crate::schema::{Dir, Schema, Table};
-use crate::store::{Change, Row, Store};
+use crate::store::{compare_rows, Change, Row, Store};
 use crate::value::{compare_value, FieldName, TableName, Value};
 
 // §1.3 The one evaluator ----------------------------------------------------
@@ -132,41 +132,38 @@ pub fn answer(plan: &Plan, entries: &[Entry]) -> Vec<Value> {
 /// (a mutator's read: a table, a filter, a column order, a limit) has one
 /// entry per admitted row, its node the row and its order the row's
 /// columns, so its answer is those rows under [`compare_entries`]'s order
-/// cut to the limit: only the rows the answer keeps are sorted, and none
-/// becomes an entry. `add_to_playlist`'s `MAX(pos) + 1` is a limit of one
-/// over a playlist, and costs its rows once rather than an entry each.
-/// Anything else is pulled whole.
+/// cut to the limit, and none becomes an entry. The store is asked first
+/// for the rows already in that order ([`Store::scan_ordered`],
+/// `docs/plan-perf.md` R1): with an index over the playlist and the
+/// position, `add_to_playlist`'s `MAX(pos) + 1` is one row examined
+/// however long the playlist. Without one, every candidate is read and
+/// only the rows the answer keeps are sorted. Anything else is pulled
+/// whole.
 pub fn read(sch: &Schema, plan: &Plan, scope: &Scope, st: &dyn Store) -> Result<Vec<Value>, EvalFault> {
     if !plan.is_bare() {
         return Ok(answer(plan, &pull(sch, plan, scope, st)?));
     }
-    let (tbl, mut rows) = candidates(sch, plan, &[], scope, st)?;
-    // As compare_entries over a bare plan's entries: the order columns
-    // under their directions, then the key, column by column.
-    fn col<'r>(r: &'r Row, c: &str) -> &'r Value {
-        r.get(c).unwrap_or(&Value::Null)
-    }
-    let cmp = |a: &Row, b: &Row| {
-        for (k, d) in &plan.order {
-            let Key::Column(c) = k else {
-                unreachable!("a bare plan orders by columns")
-            };
-            let o = compare_value(col(a, c), col(b, c));
-            let o = if *d == Dir::Desc { o.reverse() } else { o };
-            if o != Ordering::Equal {
-                return o;
-            }
-        }
-        tbl.key
-            .iter()
-            .map(|k| compare_value(col(a, k), col(b, k)))
-            .find(|o| *o != Ordering::Equal)
-            .unwrap_or(Ordering::Equal)
-    };
+    let (tbl, filter) = source(sch, plan, &[], scope)?;
+    let order: Vec<(&str, Dir)> = plan
+        .order
+        .iter()
+        .map(|(k, d)| match k {
+            Key::Column(c) => (c.as_str(), *d),
+            Key::Expr(_) => unreachable!("a bare plan orders by columns"),
+        })
+        .collect();
     let lim = plan.limit.map(|n| n.max(0) as usize).unwrap_or(usize::MAX);
     if lim == 0 {
         return Ok(vec![]);
     }
+    let (eq, keep) = (equalities(filter.as_ref()), |r: &Row| admits(filter.as_ref(), r));
+    if let Some(rows) = st.scan_ordered(plan.table(), &eq, &order, &keep, lim) {
+        return Ok(rows.into_iter().map(Value::Struct).collect());
+    }
+    let mut rows = st.scan_where_eq(plan.table(), &eq, &keep);
+    // As compare_entries over a bare plan's entries: the order columns
+    // under their directions, then the key, column by column.
+    let cmp = |a: &Row, b: &Row| compare_rows(tbl, &order, a, b);
     // Rows of one table have distinct keys, so the order is total and an
     // unstable selection of the first `lim` is exact.
     if lim < rows.len() {
@@ -228,6 +225,15 @@ fn candidates<'s>(
     scope: &Scope,
     st: &dyn Store,
 ) -> Result<(&'s Table, Vec<Row>), EvalFault> {
+    let (tbl, filter) = source(sch, plan, pins, scope)?;
+    Ok((
+        tbl,
+        st.scan_where_eq(plan.table(), &equalities(filter.as_ref()), &|r| admits(filter.as_ref(), r)),
+    ))
+}
+
+// A plan's table, and its filter and its pins as one filter, evaluated.
+fn source<'s>(sch: &'s Schema, plan: &Plan, pins: &[(FieldName, Value)], scope: &Scope) -> Result<(&'s Table, Option<Filter>), EvalFault> {
     let table = plan.table();
     let Some(tbl) = sch.lookup_table(table) else {
         return Err(EvalFault::Bug(EvalError::UnknownTable(table.clone())));
@@ -241,10 +247,7 @@ fn candidates<'s>(
         1 => all.pop(),
         _ => Some(Filter::All(all)),
     };
-    Ok((
-        tbl,
-        st.scan_where_eq(table, &equalities(filter.as_ref()), &|r| admits(filter.as_ref(), r)),
-    ))
+    Ok((tbl, filter))
 }
 
 // One candidate, pulled: its lookups, its related plans, its having, its

@@ -9,7 +9,7 @@
 
 use std::cell::Cell;
 
-use ark::schema::Schema;
+use ark::schema::{Dir, Schema};
 use ark::store::{Change, MemoryStore, Row, Store};
 use ark::value::Value;
 
@@ -73,6 +73,23 @@ impl Store for Counting<'_> {
             self.rows.set(self.rows.get() + 1);
             keep(r)
         })
+    }
+
+    // The store's own ordered walk, each row it asks `keep` about counted:
+    // what a bounded read through an index examines (`docs/plan-perf.md`
+    // R1). A store with no index that serves answers `None` here as it
+    // would unwrapped, and the read falls back to `scan_where_eq` above.
+    fn scan_ordered(&self, table: &str, eq: &[(&str, &Value)], order: &[(&str, Dir)], keep: &dyn Fn(&Row) -> bool, limit: usize) -> Option<Vec<Row>> {
+        self.inner.scan_ordered(
+            table,
+            eq,
+            order,
+            &|r| {
+                self.rows.set(self.rows.get() + 1);
+                keep(r)
+            },
+            limit,
+        )
     }
 
     fn apply_change(&mut self, _: &Change) {

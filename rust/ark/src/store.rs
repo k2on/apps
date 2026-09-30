@@ -12,12 +12,14 @@
 //! overlay a mutator writes into, consulted first on every read and dropped
 //! on a verdict.
 
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::ops::Bound;
 
 use crate::ir::Plan;
-use crate::schema::{Index, Ref, Relation, Schema, Table, Ty};
-use crate::value::{FieldName, TableName, Value};
+use crate::schema::{Dir, Index, Ref, Relation, Schema, Table, Ty};
+use crate::value::{compare_value, FieldName, TableName, Value};
 
 /// A row: every column of its table, by name. Never partial once stored.
 pub type Row = BTreeMap<FieldName, Value>;
@@ -103,12 +105,31 @@ pub trait Store {
 
     /// [`Store::scan_where`], told which columns the filter holds equal to
     /// which values (`keep` still decides; `eq` is a hint). A store with an
-    /// index over those columns reads the rows under the values and never
-    /// looks at the rest of the table — and when they hold the whole key,
-    /// reads the one row under it; the default ignores the hint.
+    /// index over those columns — or over columns that begin with some of
+    /// them — reads the rows under the values and never looks at the rest
+    /// of the table, and when they hold the whole key, reads the one row
+    /// under it; the default ignores the hint. In key order either way.
     fn scan_where_eq(&self, table: &str, eq: &[(&str, &Value)], keep: &dyn Fn(&Row) -> bool) -> Vec<Row> {
         let _ = eq;
         self.scan_where(table, keep)
+    }
+
+    /// `docs/plan-perf.md` R1: the first `limit` rows `keep` admits, in
+    /// `order` — each column under its direction, then the key ascending,
+    /// [`compare_rows`]'s order — read from an index that already holds
+    /// them in that order, when one does: `Some` then, `None` when no
+    /// index serves and the caller reads and sorts as before. `eq` says
+    /// which columns `keep` holds equal to which values, as for
+    /// [`Store::scan_where_eq`]; `keep` still decides.
+    ///
+    /// This is what makes `MAX(pos) + 1` — `order_by(pos desc).first()`
+    /// over one playlist — cost the rows up to the first `keep` admits
+    /// rather than every row of the playlist: a bounded read that fetched
+    /// everything is the round-2 growth R1 names. The default serves
+    /// nothing, which is always correct.
+    fn scan_ordered(&self, table: &str, eq: &[(&str, &Value)], order: &[(&str, Dir)], keep: &dyn Fn(&Row) -> bool, limit: usize) -> Option<Vec<Row>> {
+        let _ = (table, eq, order, keep, limit);
+        None
     }
 
     /// §4.5 Apply a change as a fact: raw, unjudged. `Add` and `Edit` write
@@ -324,6 +345,29 @@ pub fn of_type(t: &Ty, v: &Value) -> bool {
     }
 }
 
+/// The order a read with an order answers in (§1.5): each column under its
+/// direction, then the key ascending, column by column — what
+/// [`crate::view::read`] sorts a bare plan's rows by and what
+/// [`Store::scan_ordered`] must hand them back in. A column a row lacks
+/// reads as `Null`.
+pub fn compare_rows(tbl: &Table, order: &[(&str, Dir)], a: &Row, b: &Row) -> Ordering {
+    fn col<'r>(r: &'r Row, c: &str) -> &'r Value {
+        r.get(c).unwrap_or(&Value::Null)
+    }
+    for (c, d) in order {
+        let o = compare_value(col(a, c), col(b, c));
+        let o = if *d == Dir::Desc { o.reverse() } else { o };
+        if o != Ordering::Equal {
+            return o;
+        }
+    }
+    tbl.key
+        .iter()
+        .map(|k| compare_value(col(a, k), col(b, k)))
+        .find(|o| *o != Ordering::Equal)
+        .unwrap_or(Ordering::Equal)
+}
+
 // No other row (one under another key) holds the index's columns equal
 // to this row's. Read through the index: the rows under these values, and
 // nothing else in the table.
@@ -432,6 +476,55 @@ impl Secondary {
     fn key_of(&self, row: &Row) -> Vec<Value> {
         self.columns.iter().map(|c| row.get(c).cloned().unwrap_or(Value::Null)).collect()
     }
+
+    /// The buckets whose values begin with `prefix`, in the index's order:
+    /// a range of the map, from the prefix itself up to the prefix followed
+    /// by a value above every column's. A column holds a scalar or `Null`,
+    /// and a struct outranks both (`Ark.Value.rank`), so nothing under the
+    /// prefix reaches the upper bound and nothing past it is walked.
+    fn under(&self, prefix: &[Value]) -> std::collections::btree_map::Range<'_, Vec<Value>, BTreeSet<Key>> {
+        let mut above = prefix.to_vec();
+        above.push(Value::Struct(BTreeMap::new()));
+        self.rows
+            .range::<[Value], _>((Bound::Included(prefix), Bound::Excluded(above.as_slice())))
+    }
+
+    /// Whether this index holds a read's rows in the read's order (R1),
+    /// and if so how many of its leading columns the read holds equal and
+    /// which way to walk it. It does when its leading columns are exactly
+    /// the columns `eq` holds, in any order; its remaining columns are the
+    /// order's next ones, in sequence, all one direction (a column `eq`
+    /// holds is one value and says nothing about order, so it is skipped
+    /// wherever the order names it); and whatever the order says after
+    /// those is the key's remaining columns ascending, in key order — the
+    /// order a bucket's keys are already in, and the tie-break the
+    /// verifier completes every order with (§9.4). Walking backwards visits
+    /// the buckets in reverse and each bucket's keys still forwards, which
+    /// is exactly "these columns descending, then the key ascending".
+    fn serves(&self, tbl: &Table, eq: &[(&str, &Value)], order: &[(&str, Dir)]) -> Option<(usize, Dir)> {
+        let is_eq = |c: &str| eq.iter().any(|(n, _)| *n == c);
+        let n = self.columns.iter().take_while(|c| is_eq(c)).count();
+        let (lead, rest) = self.columns.split_at(n);
+        if !eq.iter().all(|(c, _)| lead.iter().any(|x| x == c)) {
+            return None;
+        }
+        let mut ord = order.iter().filter(|(c, _)| !is_eq(c));
+        let mut dir = None;
+        for c in rest {
+            let (o, d) = ord.next()?;
+            if *o != c.as_str() || dir.is_some_and(|x| x != *d) {
+                return None;
+            }
+            dir = Some(*d);
+        }
+        let mut tail = tbl.key.iter().filter(|k| !is_eq(k) && !rest.contains(k));
+        for (o, d) in ord {
+            if *d != Dir::Asc || tail.next().is_none_or(|k| k.as_str() != *o) {
+                return None;
+            }
+        }
+        Some((n, dir.unwrap_or(Dir::Asc)))
+    }
 }
 
 /// The indexes a table gets: each it declares (unique or not) and each
@@ -512,13 +605,31 @@ impl MemoryStore {
     /// references equal, one to the playlist (whose items grow with the
     /// library) and one to the media (on a handful of playlists), and
     /// which is cheaper is a fact about the rows, not about which index the
-    /// schema declared last. A table with no such index answers `None`.
+    /// schema declared last.
+    ///
+    /// Failing that, an index whose *leading* columns `eq` holds serves
+    /// too, as a range of its map rather than one bucket — the longest such
+    /// prefix, the first declared among equals — and the values returned
+    /// are then that prefix, shorter than the index. `create_playlist`
+    /// reads one person's playlists by `user_id`, which no index is over
+    /// alone and two begin with (`docs/plan-perf.md` R1). A table with
+    /// neither answers `None`.
     fn lookup(&self, t: &str, eq: &[(&str, &Value)]) -> Option<(&Secondary, Vec<Value>)> {
         let ixs = self.indexes.get(t)?;
-        ixs.iter()
-            .filter(|ix| ix.columns.iter().all(|c| eq.iter().any(|(n, _)| n == c)))
+        let is_held = |c: &FieldName| eq.iter().any(|(n, _)| n == c);
+        let whole = ixs
+            .iter()
+            .filter(|ix| ix.columns.iter().all(is_held))
             .map(|ix| (ix, held(&ix.columns, eq)))
-            .min_by_key(|(ix, vals)| ix.rows.get(vals).map_or(0, BTreeSet::len))
+            .min_by_key(|(ix, vals)| ix.rows.get(vals).map_or(0, BTreeSet::len));
+        if whole.is_some() {
+            return whole;
+        }
+        ixs.iter()
+            .map(|ix| (ix, ix.columns.iter().take_while(|c| is_held(c)).count()))
+            .filter(|(_, n)| *n > 0)
+            .min_by_key(|(_, n)| std::cmp::Reverse(*n))
+            .map(|(ix, n)| (ix, held(&ix.columns[..n], eq)))
     }
 
     /// The rows of a table, by key (`Ark.Store.rows`).
@@ -603,10 +714,79 @@ impl Store for MemoryStore {
         let Some((ix, vals)) = self.lookup(table, eq) else {
             return self.scan_where(table, keep);
         };
-        let (Some(rows), Some(keys)) = (self.tables.get(table), ix.rows.get(&vals)) else {
+        let Some(rows) = self.tables.get(table) else {
             return vec![];
         };
-        keys.iter().filter_map(|k| rows.get(k)).filter(|r| keep(r)).cloned().collect()
+        if vals.len() == ix.columns.len() {
+            let Some(keys) = ix.rows.get(&vals) else {
+                return vec![];
+            };
+            return keys.iter().filter_map(|k| rows.get(k)).filter(|r| keep(r)).cloned().collect();
+        }
+        // A prefix: the buckets under it come in the index's order, not the
+        // key's, and a scan answers in key order — so what is kept is put
+        // back in key order before a row is copied.
+        let mut hits: Vec<(&Key, &Row)> = ix
+            .under(&vals)
+            .flat_map(|(_, ks)| ks.iter())
+            .filter_map(|k| rows.get(k).map(|r| (k, r)))
+            .filter(|(_, r)| keep(r))
+            .collect();
+        hits.sort_by(|a, b| a.0.cmp(b.0));
+        hits.into_iter().map(|(_, r)| r.clone()).collect()
+    }
+
+    /// R1: through the first index that [serves](Secondary::serves) the
+    /// read, walking the range under the held values forwards or
+    /// backwards and stopping at the `limit`-th row `keep` admits. The
+    /// rows examined are those up to the last one returned, plus any
+    /// `keep` refuses on the way — for `MAX(pos) + 1` over a playlist of
+    /// eight thousand, one.
+    fn scan_ordered(&self, table: &str, eq: &[(&str, &Value)], order: &[(&str, Dir)], keep: &dyn Fn(&Row) -> bool, limit: usize) -> Option<Vec<Row>> {
+        let tbl = self.schema.lookup_table(table)?;
+        let (ix, n, dir) = self
+            .indexes
+            .get(table)?
+            .iter()
+            .find_map(|ix| ix.serves(tbl, eq, order).map(|(n, d)| (ix, n, d)))?;
+        let mut out = Vec::new();
+        let Some(rows) = self.tables.get(table) else {
+            return Some(out);
+        };
+        if limit == 0 {
+            return Some(out);
+        }
+        let prefix = held(&ix.columns[..n], eq);
+        // One bucket's keys, ascending whichever way the buckets are
+        // walked; true once the answer is full.
+        let mut take = |ks: &BTreeSet<Key>| {
+            for r in ks.iter().filter_map(|k| rows.get(k)) {
+                if keep(r) {
+                    out.push(r.clone());
+                    if out.len() == limit {
+                        return true;
+                    }
+                }
+            }
+            false
+        };
+        match dir {
+            Dir::Asc => {
+                for (_, ks) in ix.under(&prefix) {
+                    if take(ks) {
+                        break;
+                    }
+                }
+            }
+            Dir::Desc => {
+                for (_, ks) in ix.under(&prefix).rev() {
+                    if take(ks) {
+                        break;
+                    }
+                }
+            }
+        }
+        Some(out)
     }
 
     fn apply_change(&mut self, change: &Change) {
@@ -720,6 +900,30 @@ impl Store for Overlay<'_> {
         merged.into_values().collect()
     }
 
+    /// R1: the base's ordered answer for the rows this overlay has not
+    /// written, and its own writes that `keep` admits, merged — re-sorted
+    /// under [`compare_rows`] and cut to `limit`. Exact rather than
+    /// approximate: the base is asked to leave out every key written here
+    /// (a row written here is either replaced or gone), so its first
+    /// `limit` rows are the first `limit` of what the overlay has not
+    /// touched, and the answer's first `limit` are among those and the
+    /// writes. The cost is the writes to the table once per read, which is
+    /// what `scan_where_eq` pays here too; `None` when the base has no
+    /// index that serves.
+    fn scan_ordered(&self, table: &str, eq: &[(&str, &Value)], order: &[(&str, Dir)], keep: &dyn Fn(&Row) -> bool, limit: usize) -> Option<Vec<Row>> {
+        let tbl = self.schema().lookup_table(table)?;
+        let Some(ws) = self.writes.get(table).filter(|ws| !ws.is_empty()) else {
+            return self.base.scan_ordered(table, eq, order, keep, limit);
+        };
+        let mut rows = self
+            .base
+            .scan_ordered(table, eq, order, &|r| !ws.contains_key(&tbl.key_of(r)) && keep(r), limit)?;
+        rows.extend(ws.values().flatten().filter(|r| keep(r)).cloned());
+        rows.sort_by(|a, b| compare_rows(tbl, order, a, b));
+        rows.truncate(limit);
+        Some(rows)
+    }
+
     fn apply_change(&mut self, change: &Change) {
         let (t, row, present) = match change {
             Change::Add(t, row) | Change::Edit(t, _, row) => (t, row, true),
@@ -791,8 +995,213 @@ mod tests {
                         },
                     ],
                 },
+                // A playlist's items, as R1 reads them: keyed by the list
+                // and a number, ordered by a position an index holds under
+                // the list, and by the position alone.
+                Table {
+                    name: "it".into(),
+                    columns: vec![col("p_id", Ty::Int, false), col("n", Ty::Int, false), col("pos", Ty::Int, false)],
+                    key: vec!["p_id".into(), "n".into()],
+                    indexes: vec![
+                        Index {
+                            columns: vec!["p_id".into(), "pos".into()],
+                            unique: false,
+                        },
+                        Index {
+                            columns: vec!["pos".into()],
+                            unique: false,
+                        },
+                    ],
+                    refs: vec![],
+                },
             ],
         }
+    }
+
+    /// Three lists of ten items, positions a shuffle of 0..10 in each, and
+    /// three more on list 1 sharing position 5 with item 5, so that the key
+    /// has ties to break.
+    fn items() -> MemoryStore {
+        let mut st = MemoryStore::empty(schema());
+        for p in 1..=3 {
+            for n in 1..=10 {
+                st.apply_change(&Change::Add("it".into(), it(p, n, n * 7 % 10)));
+            }
+        }
+        for n in [13, 11, 12] {
+            st.apply_change(&Change::Add("it".into(), it(1, n, 5)));
+        }
+        st
+    }
+
+    fn it(p: i64, n: i64, pos: i64) -> Row {
+        row(vec![("p_id", Value::int(p)), ("n", Value::int(n)), ("pos", Value::int(pos))])
+    }
+
+    /// What an ordered read must answer, the slow way: every row, kept,
+    /// sorted, cut.
+    fn sorted(st: &dyn Store, keep: &dyn Fn(&Row) -> bool, order: &[(&str, Dir)], limit: usize) -> Vec<Row> {
+        let tbl = st.schema().lookup_table("it").unwrap().clone();
+        let mut rows: Vec<Row> = st.scan("it").into_iter().filter(|r| keep(r)).collect();
+        rows.sort_by(|a, b| compare_rows(&tbl, order, a, b));
+        rows.truncate(limit);
+        rows
+    }
+
+    fn ns(rows: &[Row]) -> Vec<(i64, i64)> {
+        rows.iter().map(|r| (r["p_id"].as_int(), r["n"].as_int())).collect()
+    }
+
+    /// R1: a read with an equality on the index's leading column and an
+    /// order on the rest walks the index, forwards or backwards, and stops
+    /// at the limit — the same rows, in the same order, as reading all and
+    /// sorting, and only as many examined as it took to find them. Ties on
+    /// the position fall to the key ascending in both directions. The
+    /// counts are of `keep`'s calls. Falsified three ways: walking a
+    /// bucket's keys backwards (`.rev()` on `ks.iter()`) puts item 13
+    /// before 11 at position 5; dropping the `out.len() == limit` stop
+    /// examines all thirteen of list 1 for a limit of four; and taking the
+    /// range from the prefix to the end of the map (`Bound::Unbounded`)
+    /// starts a descending walk at the map's end, examining lists 3 and 2
+    /// (twenty-one rows) before the one it wanted.
+    #[test]
+    fn an_ordered_read_walks_the_index_and_stops_at_the_limit() {
+        let st = items();
+        let (one, two) = (Value::int(1), Value::int(2));
+        let looked = std::cell::Cell::new(0);
+        let on = |p: i64| {
+            let looked = &looked;
+            move |r: &Row| {
+                looked.set(looked.get() + 1);
+                r["p_id"] == Value::int(p)
+            }
+        };
+        let asc = [("pos", Dir::Asc), ("p_id", Dir::Asc), ("n", Dir::Asc)];
+        let desc = [("pos", Dir::Desc), ("p_id", Dir::Asc), ("n", Dir::Asc)];
+        for (order, limit, examined) in [
+            (&asc, 4, 4),
+            (&desc, 1, 1),
+            (&desc, 3, 3),
+            (&asc, usize::MAX, 13),
+            (&desc, usize::MAX, 13),
+        ] {
+            looked.set(0);
+            let got = st.scan_ordered("it", &[("p_id", &one)], order, &on(1), limit).expect("an index serves");
+            assert_eq!(looked.get(), examined, "{order:?} limit {limit}");
+            assert_eq!(got, sorted(&st, &on(1), order, limit), "{order:?} limit {limit}");
+        }
+        // The ties at position 5, both ways: the key ascending.
+        let at_5: Vec<(i64, i64)> = ns(&st.scan_ordered("it", &[("p_id", &one)], &desc, &on(1), 8).unwrap())[4..].to_vec();
+        assert_eq!(at_5, [(1, 5), (1, 11), (1, 12), (1, 13)]);
+        let at_5: Vec<(i64, i64)> = ns(&st.scan_ordered("it", &[("p_id", &one)], &asc, &on(1), 9).unwrap())[5..].to_vec();
+        assert_eq!(at_5, [(1, 5), (1, 11), (1, 12), (1, 13)]);
+        // Only list 2's rows are under its prefix.
+        looked.set(0);
+        let all_two = st.scan_ordered("it", &[("p_id", &two)], &desc, &on(2), usize::MAX).unwrap();
+        assert_eq!((all_two.len(), looked.get()), (10, 10));
+        // `keep` refusing rows on the way: the walk goes on past them to
+        // the limit, and counts them as examined. Even items of list 1,
+        // descending: positions 9 (item 7) is odd, 8 (item 4) even, 7
+        // (item 1) odd, 6 (item 8) even.
+        looked.set(0);
+        let even = |r: &Row| {
+            looked.set(looked.get() + 1);
+            r["p_id"] == Value::int(1) && r["n"].as_int() % 2 == 0
+        };
+        let got = st.scan_ordered("it", &[("p_id", &one)], &desc, &even, 2).unwrap();
+        assert_eq!(looked.get(), 4);
+        assert_eq!(ns(&got), [(1, 4), (1, 8)]);
+        assert_eq!(got, sorted(&st, &even, &desc, 2));
+        // No equality at all: the index on the position alone, the whole
+        // table in its order.
+        let any = |_: &Row| true;
+        for limit in [1, 5, usize::MAX] {
+            assert_eq!(st.scan_ordered("it", &[], &desc, &any, limit).unwrap(), sorted(&st, &any, &desc, limit));
+            assert_eq!(st.scan_ordered("it", &[], &asc, &any, limit).unwrap(), sorted(&st, &any, &asc, limit));
+        }
+        assert_eq!(st.scan_ordered("it", &[("p_id", &one)], &desc, &any, 0), Some(vec![]));
+    }
+
+    /// No index holds the order, so no answer: the caller reads and sorts.
+    /// An order on a column no index leads with; an equality the index
+    /// does not begin with; the key descending after the position, which
+    /// no bucket is in; the list and the position in two directions; and a
+    /// table with no index at all. Falsified by `serves` not checking the
+    /// tail's direction: the third answers in the wrong order.
+    #[test]
+    fn an_ordered_read_no_index_holds_is_none() {
+        let st = items();
+        let one = Value::int(1);
+        let any = |_: &Row| true;
+        type Read<'a> = (&'a [(&'a str, &'a Value)], &'a [(&'a str, Dir)]);
+        let cases: [Read; 5] = [
+            (&[], &[("n", Dir::Desc), ("p_id", Dir::Asc)]),
+            (&[("n", &one)], &[("pos", Dir::Asc), ("p_id", Dir::Asc)]),
+            (&[("p_id", &one)], &[("pos", Dir::Desc), ("p_id", Dir::Asc), ("n", Dir::Desc)]),
+            (&[], &[("p_id", Dir::Asc), ("pos", Dir::Desc), ("n", Dir::Asc)]),
+            (&[("p_id", &one), ("n", &one)], &[("pos", Dir::Asc)]),
+        ];
+        for (eq, order) in cases {
+            assert_eq!(st.scan_ordered("it", eq, order, &any, 3), None, "{eq:?} {order:?}");
+        }
+        assert_eq!(st.scan_ordered("c", &[], &[("id", Dir::Desc)], &any, 1), None);
+        assert_eq!(Overlay::new(&st).scan_ordered("c", &[], &[("id", Dir::Desc)], &any, 1), None);
+    }
+
+    /// Through an overlay: a write that belongs inside the window is in
+    /// it, one that takes a row out of the window (removed, or moved to a
+    /// position below it) lets the next row in, a write to another list
+    /// is not in it, and every answer is what reading the overlay whole and
+    /// sorting says. Falsified by asking the base for its rows without
+    /// leaving out the keys written here: the removed row comes back.
+    #[test]
+    fn an_overlay_merges_its_writes_into_an_ordered_read() {
+        let st = items();
+        let one = Value::int(1);
+        let on_1 = |r: &Row| r["p_id"] == Value::int(1);
+        let desc = [("pos", Dir::Desc), ("p_id", Dir::Asc), ("n", Dir::Asc)];
+        let window = |ov: &Overlay| {
+            let got = ov.scan_ordered("it", &[("p_id", &one)], &desc, &on_1, 3).unwrap();
+            assert_eq!(got, sorted(ov, &on_1, &desc, 3));
+            ns(&got)
+        };
+        let mut ov = Overlay::new(&st);
+        assert_eq!(window(&ov), [(1, 7), (1, 4), (1, 1)]);
+        // A new last item: at the top.
+        ov.apply_change(&Change::Add("it".into(), it(1, 50, 100)));
+        assert_eq!(window(&ov), [(1, 50), (1, 7), (1, 4)]);
+        // The item at 9 removed, and the one at 8 moved to the bottom.
+        ov.apply_change(&Change::Remove("it".into(), it(1, 7, 9)));
+        ov.apply_change(&Change::Edit("it".into(), it(1, 4, 8), it(1, 4, -1)));
+        assert_eq!(window(&ov), [(1, 50), (1, 1), (1, 8)]);
+        // Another list's write is not this list's.
+        ov.apply_change(&Change::Add("it".into(), it(2, 60, 200)));
+        assert_eq!(window(&ov), [(1, 50), (1, 1), (1, 8)]);
+        // And the whole list, both ways.
+        let asc = [("pos", Dir::Asc), ("p_id", Dir::Asc), ("n", Dir::Asc)];
+        for order in [&asc, &desc] {
+            let got = ov.scan_ordered("it", &[("p_id", &one)], order, &on_1, usize::MAX).unwrap();
+            assert_eq!(got, sorted(&ov, &on_1, order, usize::MAX));
+            assert_eq!(got.len(), 13);
+        }
+    }
+
+    /// An equality on an index's leading column alone reads the range
+    /// under it — only that list's rows examined — and answers in key
+    /// order, as a scan would, not in the index's. Falsified by leaving
+    /// out the sort: list 1 comes back by position.
+    #[test]
+    fn an_equality_on_an_index_prefix_reads_its_range_in_key_order() {
+        let st = items();
+        let looked = std::cell::Cell::new(0);
+        let on_1 = |r: &Row| {
+            looked.set(looked.get() + 1);
+            r["p_id"] == Value::int(1)
+        };
+        let got = st.scan_where_eq("it", &[("p_id", &Value::int(1))], &on_1);
+        assert_eq!(looked.get(), 13);
+        let by_scan: Vec<Row> = st.scan("it").into_iter().filter(|r| r["p_id"] == Value::int(1)).collect();
+        assert_eq!(got, by_scan);
     }
 
     fn row(pairs: Vec<(&str, Value)>) -> Row {
