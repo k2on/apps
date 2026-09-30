@@ -677,6 +677,25 @@ fn perf_g_authority_and_fanout() {
             &format!("state_at {:.0} µs, hash {:.0} µs ({} B)", us(replay), us(t.elapsed()), h.len()),
         );
     }
+    // What the server does with a Verify at the head since R4: hash the
+    // authority's store as it stands, replaying nothing.
+    header("(g) Server::recv(Verify at the head) — the answer, as served");
+    for &n in &SIZES {
+        let (a, _) = d.log(10, n);
+        let (seq, hash) = (a.log.head_seq(), state_hash(&a.store));
+        let mut s = Server::open(trusting(), open_access(), Silent, a);
+        s.recv(1, hello(seq, Mode::Whole));
+        let _ = s.take_outgoing();
+        let t = Instant::now();
+        s.recv(1, ClientMsg::Verify { seq, hash });
+        let dt = t.elapsed();
+        let agreed = s
+            .take_outgoing()
+            .into_iter()
+            .any(|(_, m)| matches!(m, ServerMsg::Agree { ok: true, .. }));
+        assert!(agreed, "the authority agrees with its own head");
+        once(&format!("Verify at the head, log of {n}"), 1, dt, "");
+    }
 }
 
 // (h) The wire ---------------------------------------------------------------------

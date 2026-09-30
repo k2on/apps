@@ -611,18 +611,36 @@ fn keys_of(table: &str, row: &Row) -> f64 {
     keys
 }
 
-/// What the scanner does per look: every file the library knows, read out
-/// of the media table (`harken-server`'s `known_files`), at the library's
-/// size.
+/// What the scanner does per look to decide which files it already has
+/// (`harken-server`'s `known_file`): since R4 one probe of `media (file)`
+/// per file the look names, where it was the whole media table read into a
+/// set once per look. Timed for a look at one new file (what the watch
+/// sends) and for a full rescan of every file the library has; the set,
+/// as it was, beside them.
 #[test]
 #[ignore]
 fn perf_scanner_known_files() {
     let h = harken();
-    eprintln!("\n== the scanner's known_files: scan(\"media\") into a set, per look");
+    eprintln!("\n== the scanner's known_file: one probe per file the look names");
+    eprintln!(
+        "{:>7} {:>22} {:>22} {:>22}",
+        "files", "one new file, ms", "full rescan, ms", "the set (before), ms"
+    );
     for n in [500u64, 2000, 8000] {
         let st = h.library(n);
+        let known = |file: &str| {
+            let f = Value::text(file);
+            !st.scan_where_eq("media", &[("file", &f)], &|r| r.get("file") == Some(&f)).is_empty()
+        };
         let t = Instant::now();
-        let known: std::collections::BTreeSet<String> = st
+        assert!(!known("music/new/0.flac"));
+        let one = t.elapsed();
+        let files: Vec<String> = (0..n).map(|i| format!("music/a{}/t{i}.flac", i % 50)).collect();
+        let t = Instant::now();
+        assert!(files.iter().all(|f| known(f)));
+        let all = t.elapsed();
+        let t = Instant::now();
+        let set: std::collections::BTreeSet<String> = st
             .scan("media")
             .into_iter()
             .filter_map(|r| match r.get("file") {
@@ -630,7 +648,15 @@ fn perf_scanner_known_files() {
                 _ => None,
             })
             .collect();
-        eprintln!("{:>7} files: {:>8.2} ms per look", known.len(), t.elapsed().as_secs_f64() * 1e3);
+        let before = t.elapsed();
+        assert_eq!(set.len(), n as usize);
+        eprintln!(
+            "{:>7} {:>22.4} {:>22.2} {:>22.2}",
+            n,
+            one.as_secs_f64() * 1e3,
+            all.as_secs_f64() * 1e3,
+            before.as_secs_f64() * 1e3
+        );
     }
 }
 

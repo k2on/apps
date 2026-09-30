@@ -552,14 +552,16 @@ impl Peer {
     }
 
     /// Ask the authority whether it agrees with the confirmed state; the
-    /// answer arrives in [`Peer::agreed`]. Alone, at once.
+    /// answer arrives in [`Peer::agreed`]. Alone, at once — and at the head,
+    /// which is where a peer alone is, by hashing the authority's store as
+    /// it stands rather than replaying the log (`docs/plan-perf.md` R4).
     pub fn verify(&mut self) {
         let Some(a) = &self.authority else {
             self.client.verify_all();
             return;
         };
         let (n, h) = self.client.replica.verify_at();
-        let ok = a.log.state_at(n).map(|st| ark::hash::state_hash(&st)) == Some(h);
+        let ok = a.log.hash_at(n, &a.store) == Some(h);
         self.client.agreed.push((n, ok));
     }
 

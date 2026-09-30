@@ -289,30 +289,26 @@ fn look(peer: &mut Peer, root: &Path, music: &Path, nudges: Vec<Nudge>) -> usize
             }
         }
     }
-    // What the replica already has, once per look rather than once per file.
-    let mut known = known_files(peer);
     let mut added = 0;
     for p in &paths {
-        if offer(peer, &known, root, music, p) {
+        if offer(peer, root, music, p) {
             added += 1;
-            if let Some(rel) = relative(root, p) {
-                known.insert(rel);
-            }
         }
     }
     added
 }
 
-/// Every file the library already knows about.
-fn known_files(peer: &Peer) -> BTreeSet<String> {
-    peer.store()
-        .scan("media")
-        .into_iter()
-        .filter_map(|row| match row.get("file") {
-            Some(Value::Text(f)) if !f.is_empty() => Some(f.clone()),
-            _ => None,
-        })
-        .collect()
+/// Whether the library already has a file: asked of the replica's view,
+/// per file, through `media (file)` — one row looked at, where it was the
+/// whole media table read into a set once per look (`docs/plan-perf.md`
+/// R4). The view holds what this look has already authored, so a file
+/// authored a moment ago is known without a set to remember it in.
+fn known_file(peer: &Peer, file: &str) -> bool {
+    let f = Value::text(file);
+    !peer
+        .store()
+        .scan_where_eq("media", &[("file", &f)], &|row| row.get("file") == Some(&f))
+        .is_empty()
 }
 
 /// Every file under `dir`. A directory that cannot be read is skipped rather
@@ -351,20 +347,14 @@ pub fn is_track(music: &Path, path: &Path) -> bool {
 }
 
 /// Offer one path to the log. Says whether it authored anything.
-fn offer(
-    peer: &mut Peer,
-    known: &BTreeSet<String>,
-    root: &Path,
-    music: &Path,
-    path: &Path,
-) -> bool {
+fn offer(peer: &mut Peer, root: &Path, music: &Path, path: &Path) -> bool {
     if !is_track(music, path) {
         return false;
     }
     let Some(rel) = relative(root, path) else {
         return false;
     };
-    if known.contains(&rel) {
+    if known_file(peer, &rel) {
         return false;
     }
     let Some(track) = read(path) else {

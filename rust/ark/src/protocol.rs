@@ -16,7 +16,7 @@
 use std::collections::BTreeMap;
 
 use crate::eval::{Args, Ctx};
-use crate::hash::{state_hash, Closure, FnHash};
+use crate::hash::{Closure, FnHash};
 use crate::ir::decode::{closure_from_value, DecodeError};
 use crate::ir::encode::closure_value;
 use crate::live::{self, ConnId, Machine, Rooms};
@@ -850,8 +850,10 @@ impl<M: Machine> Server<M> {
                     .collect();
                 self.send(c, ServerMsg::Closures { items });
             }
+            // At the head the authority's store is the answer, hashed as
+            // it stands; only a sequence below it is replayed (R4).
             ClientMsg::Verify { seq, hash } => {
-                let ok = self.authority.log.state_at(seq).map(|st| state_hash(&st)) == Some(hash.clone());
+                let ok = self.authority.log.hash_at(seq, &self.authority.store) == Some(hash.clone());
                 self.send(c, ServerMsg::Agree { seq, hash, ok });
             }
             ClientMsg::Say { frame } => {
