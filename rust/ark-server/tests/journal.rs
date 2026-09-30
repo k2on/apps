@@ -337,3 +337,28 @@ fn a_server_restarted_over_its_directory_has_every_entry() {
     assert_eq!(back.head_seq(), head, "every entry a peer was told of");
     assert_eq!(back, log);
 }
+
+/// R10: `Authority::compact` moves the entries it keeps rather than
+/// cloning them, and takes the head's state from its own store; what it
+/// leaves is exactly the log `Log::compact_to` builds, at the horizon, in
+/// the middle, at the head, and not below the horizon at all. Falsified by
+/// splitting the entries at `n` rather than `n + 1`: the entry at the new
+/// horizon is kept above it.
+#[test]
+fn compacting_in_place_is_compacting() {
+    let (mut a, d) = authority();
+    for i in 0..200 {
+        author(&mut a, &d, i);
+    }
+    assert!(a.compact(20));
+    for n in [20, 21, 150, 200] {
+        let mut b = a.clone();
+        assert!(b.compact(n), "{n}");
+        assert_eq!(Some(&b.log), a.log.compact_to(n).as_ref(), "at {n}");
+        assert_eq!(b.store, a.store, "the head's state does not move");
+    }
+    let mut b = a.clone();
+    assert!(!b.compact(19), "below the horizon");
+    assert!(!b.compact(201), "past the head");
+    assert_eq!(b, a);
+}

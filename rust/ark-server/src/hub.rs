@@ -44,6 +44,18 @@
 //! after is taken (`docs/plan-perf.md` R6). The token check at `Hello` is
 //! unchanged: it is what turns the peer away when it dials again.
 //!
+//! **The log is kept to what somebody may still ask for** (`ark::retention`,
+//! `docs/plan-alone.md` §3). Every session's place in the log and when it
+//! was last heard are recorded as it says `Hello` and as pages reach it
+//! ([`crate::retain`], `cursors.cbor` beside `live.cbor`), and after every
+//! message — so after each batch of appends — the rule is asked whether to
+//! move the horizon. When it says so the authority compacts in memory and
+//! the write that follows is the journal's own compaction: a snapshot at the
+//! new horizon with the entries above it (`persist` module docs), written,
+//! like everything else, before anything queued is sent. A peer below the
+//! horizon is then served that snapshot and rebases its pending onto it,
+//! which is what the machine already did for one (§12.4).
+//!
 //! Three kinds of connection, one numbering: a **socket** (frames go to its
 //! writer task), a **local** peer (an `ark_client::Peer` in this process,
 //! through [`HubHandle::dial`]: the scanner's shape), and a **standing**
@@ -61,11 +73,13 @@ use ark::live::{self, ConnId, Peer};
 use ark::log::Seq;
 use ark::peer::Authority;
 use ark::protocol::{ClientMsg, Identity, Server, ServerMsg};
+use ark::retention::{self, Retention};
 use ark::store::{Row, Store};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::live::{decode_kept, encode_kept, Relay};
 use crate::persist::LogFile;
+use crate::retain::{self, Cursors, Heard};
 
 /// Where a connection's frames go.
 enum Sink {
@@ -98,6 +112,20 @@ pub struct Hub {
     failure: Arc<Mutex<Option<String>>>,
     /// The rooms' kept snapshots as last written.
     kept: BTreeMap<String, Vec<u8>>,
+    /// How much of the log is kept (the module docs).
+    pub(crate) retention: Retention,
+    /// Every session's place in the log and when it was heard, as
+    /// `cursors.cbor` holds it once written ([`crate::retain`]).
+    cursors: Cursors,
+    /// Each open replica connection's place, so that a session open on two
+    /// connections is recorded at the lower of the two.
+    at: BTreeMap<ConnId, Seq>,
+    /// The cursors moved since they were last written; whether what moved
+    /// is worth writing now (a session arrived or left, the horizon moved);
+    /// and when they were last written.
+    cursors_due: bool,
+    cursors_now: bool,
+    cursors_written: Instant,
 }
 
 /// What `/healthz` reports.
@@ -106,6 +134,8 @@ pub struct Health {
     pub connections: usize,
     /// The head of the log.
     pub head: Seq,
+    /// The log's horizon: the snapshot it stands on (`ark::retention`).
+    pub horizon: Seq,
     /// Open rooms and how many peers each has.
     pub rooms: Vec<(String, usize)>,
 }
@@ -149,6 +179,7 @@ impl Hub {
             }
         }
         server.rooms.kept = kept.clone();
+        let cursors = data.as_deref().map(retain::load).unwrap_or_default();
         // A log is named once, when it is created: here, for a new one or
         // one loaded from a directory written before logs had names — the
         // engine has no randomness to draw it with. One loaded named keeps
@@ -166,6 +197,12 @@ impl Hub {
             give_up: GIVE_UP_AFTER,
             failure: Arc::default(),
             kept,
+            retention: Retention::default(),
+            cursors,
+            at: BTreeMap::new(),
+            cursors_due: false,
+            cursors_now: false,
+            cursors_written: Instant::now(),
         })
     }
 
@@ -186,6 +223,17 @@ impl Hub {
         self.server.identity(c).cloned()
     }
 
+    /// Every session's place in the log and when it was last heard
+    /// ([`crate::retain`]).
+    pub fn cursors(&self) -> &Cursors {
+        &self.cursors
+    }
+
+    /// How much of the log this hub keeps.
+    pub fn retention(&self) -> Retention {
+        self.retention
+    }
+
     /// Every open room and who is in it.
     pub fn rooms(&self) -> BTreeMap<String, Vec<Peer>> {
         self.server.rooms.open.iter().map(|(r, (_, ps))| (r.clone(), ps.clone())).collect()
@@ -200,6 +248,7 @@ impl Hub {
         Health {
             connections: self.sinks.values().filter(|s| !matches!(s, Sink::Standing(_))).count(),
             head: self.server.authority.log.head_seq(),
+            horizon: self.server.authority.log.horizon(),
             rooms: self.server.rooms.open.iter().map(|(r, (_, ps))| (r.clone(), ps.len())).collect(),
         }
     }
@@ -215,6 +264,10 @@ impl Hub {
             let post = live::depart(&self.relay, &mut self.server.rooms, c);
             self.deliver(post);
         } else {
+            // Heard until now; and a session leaving is worth writing down.
+            self.touch(c);
+            self.at.remove(&c);
+            self.cursors_now = true;
             self.server.disconnect(c);
         }
         self.sinks.remove(&c);
@@ -229,9 +282,100 @@ impl Hub {
                 self.deliver(post);
             }
         } else {
+            // The cursor a `Hello` names, if it is a place in this log: one
+            // naming another log is sent the snapshot at the head, and that
+            // delivery is what records it (`retain` module docs).
+            let hello = match &msg {
+                ClientMsg::Hello { sub, .. } => {
+                    let ours = self.server.authority.log.id();
+                    let elsewhere = matches!((sub.log_id, ours), (Some(theirs), Some(ours)) if theirs != ours);
+                    (!elsewhere).then_some(sub.since)
+                }
+                _ => None,
+            };
             self.server.recv(c, msg);
+            match hello {
+                Some(since) => self.note(c, since),
+                None => self.touch(c),
+            }
         }
         self.after();
+    }
+
+    /// A connection is at `cursor`: its session is recorded at the lowest
+    /// place any of its open connections is, heard now. The first note on a
+    /// connection — a session arriving — is written at once.
+    fn note(&mut self, c: ConnId, cursor: Seq) {
+        let Some(who) = self.server.identity(c).cloned() else { return };
+        if self.at.insert(c, cursor).is_none() {
+            self.cursors_now = true;
+        }
+        let low = self
+            .at
+            .iter()
+            .filter(|(k, _)| self.sinks.contains_key(k) && self.server.identity(**k) == Some(&who))
+            .map(|(_, n)| *n)
+            .min()
+            .unwrap_or(cursor);
+        self.cursors.insert(
+            (who.user, who.session),
+            Heard {
+                cursor: low,
+                at_ms: retain::now_ms(),
+            },
+        );
+        self.cursors_due = true;
+    }
+
+    /// A connection was heard from: its session's time moves, its place
+    /// does not.
+    fn touch(&mut self, c: ConnId) {
+        let Some(who) = self.server.identity(c) else { return };
+        if let Some(h) = self.cursors.get_mut(&(who.user.clone(), who.session.clone())) {
+            h.at_ms = retain::now_ms();
+            self.cursors_due = true;
+        }
+    }
+
+    /// Ask `ark::retention` whether to move the horizon, and move it: in
+    /// memory here, on the disk by the write that follows (the module
+    /// docs). A session with a connection open is heard now.
+    fn retain_log(&mut self) {
+        let now = retain::now_ms();
+        self.at.retain(|c, _| self.sinks.contains_key(c));
+        let open: BTreeSet<(String, String)> = self
+            .at
+            .keys()
+            .filter_map(|c| self.server.identity(*c))
+            .map(|w| (w.user.clone(), w.session.clone()))
+            .collect();
+        let heard = self.cursors.iter().map(|(k, h)| (h.cursor, if open.contains(k) { now } else { h.at_ms }));
+        let log = &self.server.authority.log;
+        let (head, horizon) = (log.head_seq(), log.horizon());
+        if let Some(n) = retention::compact_to(head, horizon, self.retention, now, heard) {
+            if self.server.authority.compact(n) {
+                eprintln!("ark-server: the log's horizon moved from {horizon} to {n}; {} entries kept", head - n);
+                self.cursors_now = true;
+            }
+        }
+    }
+
+    /// Write the cursors if they moved and it is time (`retain` module
+    /// docs), or if `stopping` says so.
+    fn write_cursors(&mut self, stopping: bool) {
+        let Some(dir) = &self.data else { return };
+        let due = self.cursors_due || self.cursors_now;
+        if !due || !(stopping || self.cursors_now || self.cursors_written.elapsed() >= retain::WRITE_EVERY) {
+            return;
+        }
+        match retain::save(dir, &self.cursors) {
+            Ok(()) => {
+                self.cursors_due = false;
+                self.cursors_now = false;
+                self.cursors_written = Instant::now();
+            }
+            Err(e) => eprintln!("ark-server: could not write the cursors: {e:#}"),
+        }
     }
 
     fn stand(&mut self, c: ConnId, room: String, who: String, sink: Box<dyn Fn(Vec<u8>) + Send>) {
@@ -270,7 +414,11 @@ impl Hub {
     // docs). The whole queue waits on the write, not only the acks: a
     // connection's messages are an ordered stream, and one held back makes
     // everything after it wait with it.
+    //
+    // The horizon is moved first, so that a compaction is written by the
+    // same write as the appends that prompted it.
     fn after(&mut self) {
+        self.retain_log();
         let wrote = self.persist();
         self.held.extend(self.server.take_outgoing());
         match wrote {
@@ -279,8 +427,48 @@ impl Hub {
                     eprintln!("ark-server: the log is written again, after {:.1?}", f.since.elapsed());
                     *self.failure.lock().unwrap_or_else(|e| e.into_inner()) = None;
                 }
+                // Where each connection stood before what it is sent now:
+                // the start of a page, or a snapshot's sequence (`retain`
+                // module docs).
+                let (mut reached, mut snapshots) = (vec![], BTreeSet::new());
                 for (c, m) in std::mem::take(&mut self.held) {
+                    match &m {
+                        ServerMsg::Batch { items, .. } => {
+                            if let Some((n, _, _)) = items.first() {
+                                reached.push((c, n - 1));
+                            }
+                        }
+                        ServerMsg::SnapshotOf { seq, .. } => {
+                            reached.push((c, *seq));
+                            snapshots.insert(c);
+                        }
+                        _ => {}
+                    }
                     self.send(c, m);
+                }
+                let head = self.server.authority.log.head_seq();
+                let mut behind = vec![];
+                for (c, n) in reached {
+                    self.note(c, n);
+                    if snapshots.contains(&c) && n < head {
+                        behind.push(c);
+                    }
+                }
+                self.write_cursors(false);
+                // A snapshot below the head is followed by the pages above
+                // it at once, not at whatever message next moves the
+                // machine: it sends a connection one message per turn, and
+                // after a snapshot the peer has no `has_more` to ask again
+                // with — a returning peer with nothing pending sat at the
+                // horizon of a quiet server. A `Push` of nothing is a turn
+                // that sequences nothing and says nothing but the page.
+                if !behind.is_empty() {
+                    for c in behind {
+                        if self.server.identity(c).is_some() {
+                            self.server.recv(c, ClientMsg::Push { entries: vec![] });
+                        }
+                    }
+                    self.after();
                 }
             }
             Err(e) => {
@@ -393,6 +581,14 @@ impl Hub {
             }
         }
         wrote
+    }
+}
+
+/// The cursors that only moved are written when the hub stops, since
+/// they are written lazily while it runs (`retain` module docs).
+impl Drop for Hub {
+    fn drop(&mut self) {
+        self.write_cursors(true);
     }
 }
 
@@ -872,5 +1068,176 @@ mod tests {
         assert_eq!(one.pending_len(), 1, "nothing the revoked one says is taken");
         let head = hub.read_blocking(|h| h.authority().log.head_seq()).unwrap();
         assert_eq!(head, 1);
+    }
+
+    // -- retention (`docs/plan-perf.md` R10) ------------------------------------
+
+    /// A hub over `dir` keeping `retain`, trusting: every login is `(name, dev)`.
+    fn retaining(dir: &std::path::Path, retain: Retention) -> Hub {
+        let d = demo::domain();
+        let schema = d.module().schema.clone();
+        let (file, log) = LogFile::open(dir, &schema).unwrap();
+        let relay = Relay::new(Box::new(crate::Quiet));
+        let mut a = Authority::new(schema.clone(), d.closures().clone());
+        a.hold(d.native_list());
+        if let Some(log) = log {
+            a.store = log.state_at(log.head_seq()).unwrap();
+            a.log = log;
+        }
+        let server = Server::open(trusting(), open_access(), relay.clone(), a);
+        let mut hub = Hub::new(server, relay, Some(dir.to_path_buf()), Some(file)).unwrap();
+        hub.retention = retain;
+        hub
+    }
+
+    /// A sans-io device on connection `c` of `hub`.
+    struct Wire {
+        c: ConnId,
+        rx: std::sync::mpsc::Receiver<ServerMsg>,
+        peer: Device,
+        /// Every frame it was sent, oldest first.
+        heard: Vec<ServerMsg>,
+    }
+
+    impl Wire {
+        fn attach(hub: &mut Hub, c: ConnId, user: &str) -> Wire {
+            let (tx, rx) = std::sync::mpsc::channel();
+            hub.attach(c, Sink::Local(tx));
+            let peer = Device::open_memory(demo::domain(), Options::dev(user)).unwrap();
+            Wire { c, rx, peer, heard: vec![] }
+        }
+
+        /// Everything each side says, until neither says anything.
+        fn settle(&mut self, hub: &mut Hub) {
+            loop {
+                let out = self.peer.take_outgoing();
+                for m in &out {
+                    hub.recv(self.c, m.clone());
+                }
+                let heard: Vec<ServerMsg> = self.rx.try_iter().collect();
+                if out.is_empty() && heard.is_empty() {
+                    return;
+                }
+                for m in &heard {
+                    self.peer.recv(m.clone());
+                }
+                self.heard.extend(heard);
+            }
+        }
+
+        /// `n` playlists authored offline, then one reconnect: one `Push`
+        /// of all of them, and the pages back — a batch of appends as a
+        /// peer that was away delivers it, without a sync per entry.
+        fn burst(&mut self, hub: &mut Hub, from: u32, n: u32) {
+            self.peer.disconnected();
+            for i in from..from + n {
+                self.peer
+                    .mutate("create_playlist", args([("name", Value::text(format!("p{i:05}")))]))
+                    .unwrap();
+            }
+            self.peer.connected();
+            self.settle(hub);
+            assert_eq!(self.peer.pending_len(), 0);
+        }
+    }
+
+    /// R10, the guard: a hub that has sequenced 30,000 entries with every
+    /// peer caught up holds [`RETAIN_ENTRIES`] of them in memory, give or
+    /// take the half again it waits for before compacting —
+    /// `log.entries.len()`, counted: 12,000 — and serves a fresh peer at cursor 0
+    /// the snapshot, from which it reaches the head with the same state;
+    /// and a hub started again over the directory holds the same horizon
+    /// and the same cursors. Falsified by `retain_log` doing nothing: all
+    /// 30,000 are held; by `Hub::new` not reading `cursors.cbor`: the
+    /// reopened cursors are empty; and by not following a snapshot with
+    /// the pages above it (`after`): the fresh peer stops at 18,000.
+    ///
+    /// [`RETAIN_ENTRIES`]: ark::retention::RETAIN_ENTRIES
+    #[test]
+    fn a_caught_up_hub_holds_retain_entries_and_serves_the_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut hub = retaining(dir.path(), Retention::default());
+        let mut alice = Wire::attach(&mut hub, 1, "alice");
+        alice.peer.connected();
+        alice.settle(&mut hub);
+        let t = Instant::now();
+        for k in 0..30 {
+            alice.burst(&mut hub, k * 1000, 1000);
+        }
+        let log = &hub.authority().log;
+        let disk = |f: &str| std::fs::metadata(dir.path().join(f)).map_or(0, |m| m.len());
+        eprintln!(
+            "R10: 30,000 entries sequenced in {:.1?}; {} held in memory, horizon {}, {} ids; \
+             on disk the snapshot is {} bytes and the journal {}",
+            t.elapsed(),
+            log.entries.len(),
+            log.horizon(),
+            log.ids.len(),
+            disk(crate::persist::FILE),
+            disk(crate::persist::JOURNAL)
+        );
+        assert_eq!(log.head_seq(), 30_000);
+        assert_eq!(alice.peer.cursor(), 30_000, "caught up");
+        // Compacted at 16,000, 22,000 and 28,000 — each time the log held
+        // more than half again as much as it keeps — to 10,000 below the
+        // head; two bursts since the last.
+        let keep = ark::retention::RETAIN_ENTRIES as usize;
+        assert!((keep..=keep + keep / 2).contains(&log.entries.len()), "{}", log.entries.len());
+        assert_eq!((log.horizon(), log.entries.len()), (18_000, 12_000));
+        assert_eq!(log.ids.len(), 30_000, "every id is kept below the horizon");
+        let session = ("alice".to_string(), "dev".to_string());
+        assert!(hub.cursors()[&session].cursor >= 29_000, "{:?}", hub.cursors());
+
+        let mut fresh = Wire::attach(&mut hub, 2, "bob");
+        fresh.peer.connected();
+        fresh.settle(&mut hub);
+        assert!(
+            matches!(fresh.heard.first(), Some(ServerMsg::SnapshotOf { seq: 18_000, .. })),
+            "a peer at 0 is served the snapshot: {:?}",
+            fresh.heard.first().map(|m| format!("{m:?}").chars().take(80).collect::<String>())
+        );
+        assert_eq!(fresh.peer.cursor(), 30_000);
+        assert_eq!(
+            ark::hash::state_hash(&fresh.peer.replica().confirmed),
+            ark::hash::state_hash(&hub.authority().store)
+        );
+
+        let (cursors, log) = (hub.cursors().clone(), hub.authority().log.clone());
+        drop(hub);
+        let again = retaining(dir.path(), Retention::default());
+        assert_eq!(again.authority().log, log, "the horizon and the entries above it");
+        assert_eq!(again.cursors(), &cursors, "the cursors");
+    }
+
+    /// R10: a session heard yesterday at cursor 100 keeps every entry
+    /// above 100, however far the head runs past the floor; the same
+    /// session heard thirty-one days ago does not, and the log is
+    /// compacted to its floor. The session is written into `cursors.cbor`
+    /// before the hub starts, as a restart finds it. Falsified by leaving
+    /// the recorded sessions out of the rule: yesterday's case compacts
+    /// to 950.
+    #[test]
+    fn a_session_heard_yesterday_keeps_the_log_above_its_cursor() {
+        let small = Retention { entries: 50, days: 30 };
+        for (ago, horizon) in [(1, 0), (31, 950)] {
+            let dir = tempfile::tempdir().unwrap();
+            let phone = ("carol".to_string(), "phone".to_string());
+            let heard = Heard {
+                cursor: 100,
+                at_ms: retain::now_ms() - ago * ark::retention::DAY_MS,
+            };
+            retain::save(dir.path(), &[(phone.clone(), heard)].into()).unwrap();
+            let mut hub = retaining(dir.path(), small);
+            let mut alice = Wire::attach(&mut hub, 1, "alice");
+            alice.peer.connected();
+            alice.settle(&mut hub);
+            alice.burst(&mut hub, 0, 1000);
+            let log = &hub.authority().log;
+            assert_eq!((log.head_seq(), log.horizon()), (1000, horizon), "heard {ago} days ago");
+            if ago == 1 {
+                assert!((101..=1000).all(|n| log.entries.contains_key(&n)), "everything above 100");
+            }
+            assert_eq!(hub.cursors()[&phone], heard, "a session nobody heard again stays as it was");
+        }
     }
 }

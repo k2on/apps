@@ -37,6 +37,7 @@
 mod hub;
 pub mod live;
 pub mod persist;
+pub mod retain;
 mod sync;
 pub mod web;
 
@@ -57,6 +58,7 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tower_http::services::ServeDir;
 
+pub use ark::retention::Retention;
 pub use ark_client::Domain;
 pub use hub::{Health, Hub, HubHandle, REVOKED};
 pub use live::{Echo, Live, Peer, Post, Quiet};
@@ -83,6 +85,7 @@ pub fn builder(domain: Domain) -> Builder {
         media: None,
         routes: Router::new(),
         keepalive: Keepalive::default(),
+        retention: Retention::default(),
     }
 }
 
@@ -101,6 +104,7 @@ pub struct Builder {
     media: Option<PathBuf>,
     routes: Router,
     keepalive: Keepalive,
+    retention: Retention,
 }
 
 impl Builder {
@@ -111,8 +115,9 @@ impl Builder {
     }
 
     /// Keep the log (`log.ark-log`, a snapshot, and `log.ark-journal`, the
-    /// entries since it: [`persist`]) and the rooms' kept snapshots
-    /// (`live.cbor`) here, and read them back at start. Without it nothing
+    /// entries since it: [`persist`]), the rooms' kept snapshots
+    /// (`live.cbor`) and every session's place in the log (`cursors.cbor`:
+    /// [`retain`]) here, and read them back at start. Without it nothing
     /// survives a restart.
     pub fn data(mut self, dir: impl AsRef<Path>) -> Builder {
         self.data = Some(dir.as_ref().to_path_buf());
@@ -200,6 +205,15 @@ impl Builder {
         self
     }
 
+    /// How much of the log is kept in memory and on the disk
+    /// (`ark::retention`; the `hub` module docs): everything above the
+    /// lowest cursor of a session heard within `days`, and never fewer
+    /// than `entries` below the head. [`Retention::default`] without it.
+    pub fn retain(mut self, r: Retention) -> Builder {
+        self.retention = r;
+        self
+    }
+
     /// Host the log it left on disk, start the hub, and
     /// assemble the router. Refuses a server told nothing about who people
     /// are: dev auth has to be asked for.
@@ -220,6 +234,11 @@ impl Builder {
         if let Some(a) = &self.announce {
             notes.push(format!("{name}: {a}"));
         }
+        let r = self.retention;
+        notes.push(format!(
+            "{name}: keeping the log above every session heard within {} days, and never fewer than {} entries",
+            r.days, r.entries
+        ));
         for n in &notes {
             eprintln!("{n}");
         }
@@ -234,6 +253,10 @@ impl Builder {
                 access.unwrap_or_else(open_access),
                 live.unwrap_or_else(|| Box::new(Quiet)),
             )
+            .map(|mut hub| {
+                hub.retention = r;
+                hub
+            })
         })?;
 
         let mut router = Router::new()
@@ -289,7 +312,7 @@ fn open_hub(
         }
         file = Some(f);
     }
-    eprintln!("{name}: the log at seq {}", a.log.head_seq());
+    eprintln!("{name}: the log at seq {}, its horizon at {}", a.log.head_seq(), a.log.horizon());
     let mut server = Server::open(auth, access, relay.clone(), a);
     if let Some(owns) = owns {
         server = server.with_owns(owns);
@@ -369,6 +392,7 @@ async fn healthz(State(hub): State<HubHandle>) -> Response {
         Ok(h) => {
             let mut text = format!("ok\nconnections {}\n", h.connections);
             text.push_str(&format!("head {}\n", h.head));
+            text.push_str(&format!("horizon {}\n", h.horizon));
             for (room, n) in h.rooms {
                 text.push_str(&format!("room {room} peers {n}\n"));
             }
