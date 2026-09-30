@@ -15,7 +15,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use ark::canon;
 use ark::protocol::{ClientMsg, ServerMsg};
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
 use axum::response::Response;
 use tokio::sync::mpsc;
@@ -55,7 +55,9 @@ pub(crate) async fn sync(ws: WebSocketUpgrade, State(st): State<SyncState>) -> R
 /// One socket: frames in go to the hub, frames the hub queues for this
 /// connection go out, and the server pings. A frame that is not the
 /// protocol closes this socket and nothing else; a denial is the last frame
-/// a socket gets.
+/// a socket gets. The hub letting the connection go — its log cannot be
+/// written (`hub.rs`) — ends its channel, and the socket is closed with the
+/// hub's reason as the close frame's text.
 async fn connection(mut socket: WebSocket, hub: HubHandle, keepalive: Keepalive) -> Result<()> {
     let (tx, mut rx) = mpsc::unbounded_channel::<ServerMsg>();
     let conn = hub.fresh();
@@ -82,7 +84,18 @@ async fn connection(mut socket: WebSocket, hub: HubHandle, keepalive: Keepalive)
                 Some(Ok(_)) => unanswered = 0,
                 Some(Err(e)) => break Err(e.into()),
             },
-            Some(msg) = rx.recv() => {
+            msg = rx.recv() => {
+                let Some(msg) = msg else {
+                    let why = hub.failure().unwrap_or_else(|| "the hub closed this connection".into());
+                    let mut reason = why.clone();
+                    // A close frame's reason is at most 123 bytes.
+                    while reason.len() > 123 {
+                        reason.pop();
+                    }
+                    let frame = CloseFrame { code: 1011, reason: reason.into() };
+                    let _ = socket.send(Message::Close(Some(frame))).await;
+                    break Err(anyhow::anyhow!(why));
+                };
                 let last = matches!(msg, ServerMsg::Denied { .. });
                 if let Err(e) = socket.send(Message::Binary(canon::encode(&msg.to_value()))).await {
                     break Err(e.into());

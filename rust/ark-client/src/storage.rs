@@ -68,7 +68,12 @@
 //! Compaction writes a fresh snapshot and removes the pages once they
 //! outgrow it, or once nothing is pending (then the snapshot is a few bytes
 //! and is written in place of the page). It happens on a pump, never inside
-//! `mutate`, so what a tap writes is its page and nothing else.
+//! `mutate`, so what a tap writes is its page and nothing else — which means
+//! a peer that authors without pumping, as the scanner does over a whole
+//! directory offline, leaves one `pending.<n>` per intent (a file each, in
+//! a [`Dir`]) until its next pump folds them into one snapshot; an `open`
+//! before then reads every page. That is by design: the alternative is a
+//! tap that sometimes costs the backlog.
 //!
 //! **`gen` is what makes a stop inside a compaction safe.** Pages are not
 //! idempotent — replaying an old `add` after a snapshot that no longer

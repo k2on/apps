@@ -19,6 +19,20 @@
 //! held, in order, until a write succeeds: a server that cannot keep its
 //! log promises nothing about it.
 //!
+//! **…and holds it for [`GIVE_UP_AFTER`], not for ever.** A stretch of
+//! failed writes is retried every [`RETRY_EVERY`] whether or not anything
+//! arrives, and said once when it starts and once when it ends. Once it has
+//! lasted [`GIVE_UP_AFTER`], every connection is closed with the reason
+//! (`the log cannot be written: <error>`, the close frame's text on a
+//! socket), the held queue is dropped, and so is whatever a connection says
+//! while the disk stays unwritable. The log in memory is not rolled back:
+//! its unwritten entries go to the disk with the first write that
+//! succeeds. A peer sees a closed link, keeps its pending intents on its
+//! own disk, dials again with its backoff, and re-pushes them — the path a
+//! restart already takes — and an intent the log holds is answered as the
+//! duplicate it is, once the disk holds it. A standing device is not a
+//! replica and hears no log, so it stays.
+//!
 //! Three kinds of connection, one numbering: a **socket** (frames go to its
 //! writer task), a **local** peer (an `ark_client::Peer` in this process,
 //! through [`HubHandle::dial`]: the scanner's shape), and a **standing**
@@ -28,7 +42,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicI64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
 use ark::live::{self, ConnId, Peer};
@@ -61,6 +76,15 @@ pub struct Hub {
     /// What the machine queued and nothing has been sent of, because the
     /// log it speaks of is not yet on the disk (the module docs).
     held: Vec<(ConnId, ServerMsg)>,
+    /// Since when, and why, the log has not been written; `None` while it
+    /// is.
+    failing: Option<Failing>,
+    /// How long a stretch of failed writes holds the queue before every
+    /// connection is closed: [`GIVE_UP_AFTER`], or shorter in a test.
+    give_up: Duration,
+    /// What a connection closed for the disk is told, where the
+    /// [`HubHandle`] can read it without the hub's thread.
+    failure: Arc<Mutex<Option<String>>>,
     /// The rooms' kept snapshots as last written.
     kept: BTreeMap<String, Vec<u8>>,
 }
@@ -76,6 +100,29 @@ pub struct Health {
 }
 
 const KEPT: &str = "live.cbor";
+
+/// How long the hub holds what it would say while its log cannot be
+/// written, before it closes every connection. Long enough for a
+/// transient failure — a disk freed by a log rotation, a network
+/// filesystem's hiccup — to pass unnoticed by any peer: five seconds is
+/// under the keepalive's twenty, so a quiet peer never sees it. Short
+/// enough that nobody waits on an `Ack` for longer than a peer's own
+/// backoff would take to dial again, which is what it is better off doing:
+/// its intents are on its disk, and the re-push is how the server learns
+/// its disk is back.
+pub const GIVE_UP_AFTER: Duration = Duration::from_secs(5);
+
+/// How often a failed write is tried again while nothing arrives: what
+/// makes [`GIVE_UP_AFTER`] a duration rather than a count of messages that
+/// may never come.
+pub const RETRY_EVERY: Duration = Duration::from_millis(250);
+
+/// A stretch of failed writes.
+struct Failing {
+    since: Instant,
+    /// The connections have been closed for it.
+    closed: bool,
+}
 
 impl Hub {
     pub(crate) fn new(mut server: Server<Relay>, relay: Relay, data: Option<PathBuf>, log: Option<LogFile>) -> Result<Hub> {
@@ -95,6 +142,9 @@ impl Hub {
             data,
             log,
             held: vec![],
+            failing: None,
+            give_up: GIVE_UP_AFTER,
+            failure: Arc::default(),
             kept,
         })
     }
@@ -201,27 +251,76 @@ impl Hub {
     // connection's messages are an ordered stream, and one held back makes
     // everything after it wait with it.
     fn after(&mut self) {
-        let durable = self.persist();
+        let wrote = self.persist();
         self.held.extend(self.server.take_outgoing());
-        if durable {
-            for (c, m) in std::mem::take(&mut self.held) {
-                self.send(c, m);
+        match wrote {
+            Ok(()) => {
+                if let Some(f) = self.failing.take() {
+                    eprintln!("ark-server: the log is written again, after {:.1?}", f.since.elapsed());
+                    *self.failure.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                }
+                for (c, m) in std::mem::take(&mut self.held) {
+                    self.send(c, m);
+                }
+            }
+            Err(e) => {
+                let why = format!("the log cannot be written: {e:#}");
+                let give_up = self.give_up;
+                let f = self.failing.get_or_insert_with(|| {
+                    eprintln!("ark-server: {why}; holding what it would say for up to {give_up:?}");
+                    Failing {
+                        since: Instant::now(),
+                        closed: false,
+                    }
+                });
+                *self.failure.lock().unwrap_or_else(|e| e.into_inner()) = Some(why);
+                if f.since.elapsed() >= self.give_up {
+                    self.close_for_the_disk();
+                }
             }
         }
     }
 
-    /// Write the log and the rooms; whether the log is on the disk.
-    fn persist(&mut self) -> bool {
+    /// Whether the log is failing to be written: the hub's thread then tries
+    /// again every [`RETRY_EVERY`] rather than only when a message comes.
+    fn is_failing(&self) -> bool {
+        self.failing.is_some()
+    }
+
+    /// Past [`GIVE_UP_AFTER`]: every connection that is a replica closed,
+    /// and nothing said to any of them (the module docs).
+    fn close_for_the_disk(&mut self) {
+        let conns: Vec<ConnId> = self
+            .sinks
+            .iter()
+            .filter(|(_, s)| !matches!(s, Sink::Standing(_)))
+            .map(|(c, _)| *c)
+            .collect();
+        for c in &conns {
+            // Dropping the sender is the close: the socket's task, or the
+            // in-process transport, sees its channel end.
+            self.sinks.remove(c);
+            self.server.disconnect(*c);
+        }
+        self.held.clear();
+        let _ = self.server.take_outgoing();
+        if let Some(f) = &mut self.failing {
+            if !f.closed && !conns.is_empty() {
+                eprintln!("ark-server: closing {} connections until the log can be written", conns.len());
+            }
+            f.closed = true;
+        }
+    }
+
+    /// Write the log and the rooms; `Err` where the log is not on the disk.
+    fn persist(&mut self) -> Result<()> {
         let Some(dir) = self.data.clone() else {
             self.relay.keeps.lock().unwrap_or_else(|e| e.into_inner()).clear();
-            return true;
+            return Ok(());
         };
-        let mut durable = true;
+        let mut wrote = Ok(());
         if let Some(file) = &mut self.log {
-            if let Err(e) = file.write(&self.server.authority.log) {
-                eprintln!("ark-server: could not write the log; holding what it would say: {e:#}");
-                durable = false;
-            }
+            wrote = file.write(&self.server.authority.log);
         }
         // The rooms: what the engine keeps for rooms that emptied, what a
         // hook asked to keep of an open one, and nothing for a room that is
@@ -249,7 +348,7 @@ impl Hub {
                 Err(e) => eprintln!("ark-server: could not write {}: {e}", path.display()),
             }
         }
-        durable
+        wrote
     }
 }
 
@@ -269,6 +368,7 @@ enum Cmd {
 pub struct HubHandle {
     tx: mpsc::UnboundedSender<Cmd>,
     next: Arc<AtomicI64>,
+    failure: Arc<Mutex<Option<String>>>,
 }
 
 impl std::fmt::Debug for HubHandle {
@@ -283,11 +383,14 @@ impl HubHandle {
     pub(crate) fn spawn(make: impl FnOnce() -> Result<Hub> + Send + 'static) -> Result<HubHandle> {
         let (tx, mut rx) = mpsc::unbounded_channel::<Cmd>();
         let (built, ready) = std::sync::mpsc::channel::<Result<()>>();
+        let failure: Arc<Mutex<Option<String>>> = Arc::default();
+        let shared = failure.clone();
         std::thread::Builder::new()
             .name("ark-hub".into())
             .spawn(move || {
                 let mut hub = match make() {
-                    Ok(h) => {
+                    Ok(mut h) => {
+                        h.failure = shared;
                         let _ = built.send(Ok(()));
                         h
                     }
@@ -296,7 +399,25 @@ impl HubHandle {
                         return;
                     }
                 };
-                while let Some(cmd) = rx.blocking_recv() {
+                loop {
+                    // While the log cannot be written, the hub does not wait
+                    // for a message to try again (`GIVE_UP_AFTER`).
+                    let cmd = if hub.is_failing() {
+                        match rx.try_recv() {
+                            Ok(cmd) => cmd,
+                            Err(mpsc::error::TryRecvError::Empty) => {
+                                std::thread::sleep(RETRY_EVERY);
+                                hub.after();
+                                continue;
+                            }
+                            Err(mpsc::error::TryRecvError::Disconnected) => break,
+                        }
+                    } else {
+                        match rx.blocking_recv() {
+                            Some(cmd) => cmd,
+                            None => break,
+                        }
+                    };
                     match cmd {
                         Cmd::Attach(c, s) => hub.attach(c, s),
                         Cmd::Detach(c) => hub.detach(c),
@@ -311,11 +432,18 @@ impl HubHandle {
         Ok(HubHandle {
             tx,
             next: Arc::new(AtomicI64::new(1)),
+            failure,
         })
     }
 
     fn send(&self, cmd: Cmd) -> Result<()> {
         self.tx.send(cmd).map_err(|_| anyhow!("the hub has stopped"))
+    }
+
+    /// Why the hub is closing connections, while it is: its log cannot be
+    /// written (the module docs). What a connection it let go is told.
+    pub fn failure(&self) -> Option<String> {
+        self.failure.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// A fresh connection id, never reused.
@@ -448,8 +576,20 @@ impl ark_client::link::Transport for Local {
             self.opened = true;
             out.push(Event::Opened);
         }
-        while let Ok(m) = self.rx.try_recv() {
-            out.push(Event::Frame(ark::canon::encode(&m.to_value())));
+        loop {
+            match self.rx.try_recv() {
+                Ok(m) => out.push(Event::Frame(ark::canon::encode(&m.to_value()))),
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                // The hub let this connection go (its log cannot be
+                // written): a close like a socket's, and the link dials again.
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.closed = true;
+                    self.opened = false;
+                    let why = self.hub.failure().unwrap_or_else(|| "the hub closed this connection".into());
+                    out.push(Event::Closed(why));
+                    break;
+                }
+            }
         }
         out
     }
@@ -524,5 +664,75 @@ mod tests {
         let on_disk = crate::persist::load(dir.path(), &schema).unwrap().expect("a log");
         assert_eq!(on_disk, hub.authority().log);
         assert_eq!((peer.pending_len(), peer.cursor()), (0, 1));
+    }
+
+    /// §R3 A disk that stays unwritable does not hold the acks for ever:
+    /// past the bound every connection is closed with the reason, the peer
+    /// keeps its intent pending and dials again, and once the obstacle is
+    /// gone its re-push is acknowledged — once: the log holds one entry.
+    /// The bound is 100ms here, [`GIVE_UP_AFTER`] in a server. Falsified by
+    /// never closing (`close_for_the_disk` doing nothing): the link is
+    /// still open, reason-less, at the ten-second deadline.
+    #[test]
+    fn a_disk_that_stays_unwritable_closes_every_connection() {
+        let d = demo::domain();
+        let schema = d.module().schema.clone();
+        let dir = tempfile::tempdir().unwrap();
+        let journal = crate::persist::journal_path_of(dir.path());
+        let (data, make_schema, make_domain) = (dir.path().to_path_buf(), schema.clone(), d.clone());
+        let hub = HubHandle::spawn(move || {
+            let (file, _) = LogFile::open(&data, &make_schema)?;
+            let relay = Relay::new(Box::new(crate::Quiet));
+            let mut a = Authority::new(make_schema.clone(), make_domain.closures().clone());
+            a.hold(make_domain.native_list());
+            let server = Server::open(trusting(), open_access(), relay.clone(), a);
+            let mut h = Hub::new(server, relay, Some(data), Some(file))?;
+            h.give_up = Duration::from_millis(100);
+            Ok(h)
+        })
+        .unwrap();
+        let quick = ark_client::Timing {
+            first_backoff_ms: 5,
+            max_backoff_ms: 50,
+            ping_every_ms: 60_000,
+            connect_timeout_ms: 2_000,
+        };
+        let mut peer = Device::open_memory(d.clone(), Options::dev("alice").with_timing(quick)).unwrap();
+        peer.connect_with("local", hub.dial());
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let pump_until = |peer: &mut Device, done: &dyn Fn(&Device) -> bool, what: &str| {
+            while !done(peer) {
+                peer.pump();
+                assert!(Instant::now() < deadline, "{what}: {:?}", peer.status());
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        };
+        pump_until(&mut peer, &|p| p.linked(), "linked");
+
+        // Where the journal goes, and where a snapshot is written before its
+        // rename: neither an append nor the snapshot a failed append falls
+        // back on can land.
+        let tmp = dir.path().join(".log.ark-log.tmp");
+        std::fs::create_dir(&journal).unwrap();
+        std::fs::create_dir(&tmp).unwrap();
+        let id = peer.mutate("create_playlist", args([("name", Value::text("Kept"))])).unwrap();
+        pump_until(
+            &mut peer,
+            &|p| p.status().last_close.is_some_and(|w| w.starts_with("the log cannot be written")),
+            "closed for the disk",
+        );
+        assert_eq!(peer.pending_len(), 1, "the intent is still pending");
+        assert!(hub.failure().is_some());
+
+        std::fs::remove_dir(&journal).unwrap();
+        std::fs::remove_dir(&tmp).unwrap();
+        pump_until(&mut peer, &|p| p.pending_len() == 0, "re-pushed and acknowledged");
+        assert_eq!(peer.standing(&id), ark_client::Standing::Confirmed);
+        assert_eq!(peer.cursor(), 1);
+        let head = hub.read_blocking(|h| h.authority().log.head_seq()).unwrap();
+        assert_eq!(head, 1, "acknowledged once: one entry");
+        let on_disk = crate::persist::load(dir.path(), &schema).unwrap().expect("a log");
+        assert_eq!((on_disk.head_seq(), on_disk.ids.len()), (1, 1));
+        assert!(hub.failure().is_none(), "the stretch is over");
     }
 }
