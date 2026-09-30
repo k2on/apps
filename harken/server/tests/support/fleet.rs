@@ -358,6 +358,9 @@ impl PeerProc {
         self.lines = Some(rx);
         self.child = Some(child);
         self.starts += 1;
+        // Answered once it is open and, with a login to make, signed in —
+        // so a scenario that kills it next kills a peer, not a start-up.
+        self.ask("status", vec![]);
     }
 
     /// Send one line, read its one answer.

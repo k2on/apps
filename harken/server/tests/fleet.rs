@@ -475,7 +475,9 @@ fn copy_dir(from: &std::path::Path, to: &std::path::Path) {
 ///
 /// Falsified by arming the second cut at twice a whole sync: it never
 /// fires, because what is left is less — so the two cuts this asserts are
-/// cuts in the middle of the sync, not after it.
+/// cuts in the middle of the sync, not after it. (The first version armed
+/// the second cut once the first had fired, and under load a peer quick to
+/// dial again had synced before it was armed: the proxy queues cuts now.)
 #[test]
 fn a_first_sync_cut_mid_page_resumes_at_its_cursor() {
     let long = std::env::var("FLEET_LONG").is_ok_and(|v| v == "1");
@@ -543,27 +545,20 @@ fn a_first_sync_cut_mid_page_resumes_at_its_cursor() {
     println!("fleet: a whole first sync of {head} entries is {whole} bytes from the server");
 
     let mut h = f.peer_stopped("cut", Some("alice"));
+    // Both cuts armed before the first byte: the second counts from the
+    // byte after the first, whenever the peer dials again.
+    h.proxy.cut_after(whole / 3);
     h.proxy.cut_after(whole / 3);
     let t = Instant::now();
     h.start();
     assert!(
-        eventually(PATIENCE, || h.proxy.cuts() == 1),
-        "the first cut"
-    );
-    let at_first = h.status().cursor;
-    h.proxy.cut_after(whole / 3);
-    assert!(
         eventually(PATIENCE, || h.proxy.cuts() == 2),
-        "the second cut"
+        "both cuts, each before the sync was done"
     );
     assert!(h.wait(head, PATIENCE), "the cut peer reaches the head");
     measured(
         "a fresh peer syncs 1,500 entries, cut twice mid-page",
         t.elapsed(),
-    );
-    assert!(
-        at_first < head,
-        "the first cut was before the end ({at_first})"
     );
     assert!(h.proxy.accepted() >= 3, "it dialled again after each cut");
     f.converged(&mut [&mut s, &mut g, &mut h]);
@@ -1120,7 +1115,15 @@ fn fuzz(seed: u64, steps: usize) {
                 peers[i].kill9();
                 format!("{} kill -9", peers[i].name)
             }
-            85..=91 if !peers[i].running() => {
+            // A peer that never finished signing in signs in as it starts,
+            // and ark-auth's login has no timeout: into a black hole it
+            // would wait for ever.
+            85..=91
+                if !peers[i].running()
+                    && (peers[i].user.is_none()
+                        || peers[i].dir.join("login.json").exists()
+                        || (net[i] == Net::Pass && f.server.running())) =>
+            {
                 peers[i].start();
                 format!("{} restart", peers[i].name)
             }

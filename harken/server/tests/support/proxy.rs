@@ -53,7 +53,7 @@ struct State {
     mode: Mode,
     delay: Duration,
     /// Bytes from the server still allowed before a cut, when armed.
-    cut_after: Option<usize>,
+    cut_after: std::collections::VecDeque<usize>,
 }
 
 struct Shared {
@@ -118,7 +118,7 @@ impl Proxy {
             state: Mutex::new(State {
                 mode: Mode::Pass,
                 delay: Duration::ZERO,
-                cut_after: None,
+                cut_after: Default::default(),
             }),
             changed: Condvar::new(),
             conns: Mutex::new(vec![]),
@@ -207,9 +207,12 @@ impl Proxy {
     }
 
     /// Let `n` more bytes from the server through, then cut the connection
-    /// they were on, mid-stream. Once.
+    /// they were on, mid-stream. Once. Asked again before it fires, the
+    /// next cut waits its turn and counts from the byte after the first —
+    /// so two cuts can be armed before the peer starts, and a peer quick
+    /// to dial again cannot outrun the test arming the second.
     pub fn cut_after(&self, n: usize) {
-        self.set(|st| st.cut_after = Some(n));
+        self.set(|st| st.cut_after.push_back(n));
     }
 
     /// How many `cut_after`s have fired.
@@ -485,13 +488,13 @@ fn forward(shared: &Shared, conn: &Conn, up: bool) {
                     // nothing, on both sides.
                     let allowed = {
                         let mut st = shared.state.lock().unwrap();
-                        match st.cut_after {
+                        match st.cut_after.front().copied() {
                             Some(left) if left <= chunk.len() => {
-                                st.cut_after = None;
+                                st.cut_after.pop_front();
                                 Some(left)
                             }
                             Some(left) => {
-                                st.cut_after = Some(left - chunk.len());
+                                st.cut_after[0] = left - chunk.len();
                                 None
                             }
                             None => None,
