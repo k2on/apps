@@ -196,16 +196,20 @@ opened alone; 2,000 local intents); `harken-iced`'s
 `harken-peer`'s `alone_then_a_server_is_one_directory`; fleet scenarios
 14–19.
 
-**The fleet's timings** (a debug build, a shared VM):
+**The fleet's timings** (a debug build, a shared VM; the first run was
+alone, the suite then green twice more, whole, 22 of 22 in 52 s):
 
-| scenario | measured |
-|---|---:|
-| 14. 61 local intents: start with `--server`, and a second device, to converged | 1,397 ms |
-| 17. a join of 400 local intents, `join` said to its answer | 426 ms |
-| 17. kills at 10, 50, 90 and 99% of that | history, history, history, joined — all converged |
-| 18. 300 songs said, killed 120 ms in | 27 answered, 27 kept, all on the server after the join |
-| 19. 2,000 local intents: start with `--server` to converged | 6,923 ms |
-| 19. …authoring them alone through `harken-peer` | 73,895 ms |
+| scenario | first run | suite, twice |
+|---|---:|---:|
+| 14. 61 local intents: start with `--server`, and a second device, to converged | 1,397 ms | 472 / 503 ms |
+| 17. a join of 400 local intents, `join` said to its answer | 426 ms | 546 / 595 ms |
+| 17. what kills at 10, 50, 90 and 99% of that left | history ×3, joined | history ×2, joined ×2 — all converged |
+| 18. 300 songs said, killed 120 ms in: answered, and kept | 27, 27 | 21, 21 / 15, 15 |
+| 19. 2,000 local intents: start with `--server` to converged | 6,923 ms | 6,948 / 7,555 ms |
+| 19. …authoring them alone through `harken-peer` | 73,895 ms | 28,837 / 27,833 ms |
+
+(The first run shared the machine with three other builds; the authoring
+row is the one that felt it.)
 
 In process, two thousand local intents re-queue in 175 ms and are on a
 sans-io hub and confirmed in 405 ms.
@@ -220,7 +224,7 @@ sans-io hub and confirmed in 405 ms.
   is the debug-only checks on the path a peer alone takes on every mutate
   — the view compared with the confirmed store whole once nothing is
   pending, the record run again over the authority's store — though that
-  was not profiled; it is why scenario 19 takes a minute.
+  was not profiled; it is why scenario 19 takes half a minute.
 - No kill in scenario 17 landed between the two writes of a join — the
   window is a few file removals wide. The unit test walks a stop after every
   write of the join; the fleet shows kills before the join and after it
