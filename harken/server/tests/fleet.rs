@@ -1761,7 +1761,7 @@ fn a_peer_alone_killed_mid_append_reopens_whole() {
             "an intent answered before the kill is kept"
         );
     }
-    for (_, (e, _)) in &log.entries {
+    for (e, _) in log.entries.values() {
         p.owe(e.id, "add_song, kept past the kill");
     }
     f.converged(&mut [&mut p]);
