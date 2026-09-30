@@ -1661,6 +1661,7 @@ dependencies = [
  "ark-server",
  "axum",
  "harken-domain",
+ "libc",
  "lofty",
  "notify",
  "serde_json",

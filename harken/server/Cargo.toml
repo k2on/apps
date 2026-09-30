@@ -43,5 +43,7 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 ark-auth = { path = "../../rust/ark-auth", features = ["server", "client"] }
+# The fleet stops the server with SIGTERM, which std cannot send.
+libc = "0.2"
 tempfile = "3"
 ureq = { version = "2", default-features = false }

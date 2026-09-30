@@ -28,7 +28,8 @@
 //! {"cmd":"wait","cursor":N,"timeout_ms":T}      {"ok":b,"cursor":N}
 //! {"cmd":"settle","timeout_ms":T}               {"ok":b,"cursor":N,"pending":K}
 //! {"cmd":"query","name":"playlists","args":{}}  {"rows":…} | {"ok":false,"why":"…"}
-//! {"cmd":"rejections"}         {"rejections":[{"id":…,"reason":"…"}]}
+//! {"cmd":"rejections"}         {"rejections":[{"id":…,"reason":"…"}]} — since last asked;
+//!                              `"all":true` for every one this directory has seen
 //! {"cmd":"standing","id":…}    {"standing":"pending|confirmed|rejected|unknown","why":…}
 //! {"cmd":"disconnect"} {"cmd":"reconnect"}      {"ok":true}
 //! {"cmd":"sign_in","user":"…"} {"cmd":"sign_out"}  {"ok":b,…}
@@ -177,7 +178,7 @@ enum Cmd {
     Wait { cursor: i64, timeout: Duration },
     Settle { timeout: Duration },
     Query { name: String, args: Args },
-    Rejections,
+    Rejections { all: bool },
     Standing { id: ark::value::Id },
     Disconnect,
     Reconnect,
@@ -231,7 +232,9 @@ fn parse(line: &str) -> Result<Cmd, String> {
             name: text("name")?,
             args: args()?,
         },
-        "rejections" => Cmd::Rejections,
+        "rejections" => Cmd::Rejections {
+            all: matches!(m.get("all"), Some(Value::Bool(true))),
+        },
         "standing" => match m.get("id") {
             Some(Value::Id(id)) => Cmd::Standing { id: *id },
             _ => return Err("`id` is an id: {\"$id\":\"8-4-4-4-12\"}".into()),
@@ -290,6 +293,12 @@ struct Headless {
     dir: PathBuf,
     server: Option<String>,
     pump: Duration,
+    /// Verdicts collected and not yet asked for. Every one is also appended
+    /// to `DIR/rejections.jsonl` the pump it arrives in, because the engine
+    /// keeps a verdict in memory only: a peer killed before anybody asked
+    /// would take it with it, and a fleet counting what became of every
+    /// intent would count one intent as lost that was refused.
+    unasked: Vec<String>,
 }
 
 impl Headless {
@@ -328,6 +337,7 @@ impl Headless {
             dir: f.dir.clone(),
             server: f.server.clone(),
             pump: f.pump,
+            unasked: vec![],
         })
     }
 
@@ -352,6 +362,35 @@ impl Headless {
         }
         // Nothing here listens to the room; what it said is not kept.
         drop(self.peer.heard());
+        self.collect();
+    }
+
+    /// Take the verdicts that arrived, and write each down.
+    fn collect(&mut self) {
+        let fresh: Vec<String> = self
+            .peer
+            .take_rejections()
+            .into_iter()
+            .map(|r| {
+                Answer::default()
+                    .value("id", &Value::Id(r.id))
+                    .text("reason", &r.reason)
+                    .line()
+            })
+            .collect();
+        if fresh.is_empty() {
+            return;
+        }
+        let file = self.dir.join("rejections.jsonl");
+        let wrote = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&file)
+            .and_then(|mut f| f.write_all(format!("{}\n", fresh.join("\n")).as_bytes()));
+        if let Err(e) = wrote {
+            eprintln!("harken-peer: {}: {e}", file.display());
+        }
+        self.unasked.extend(fresh);
     }
 
     /// Pump until `done`, or the timeout. Whether it was done.
@@ -432,13 +471,18 @@ impl Headless {
                 Ok(v) => Answer::default().value("rows", &v),
                 Err(e) => Answer::refused(e),
             },
-            Cmd::Rejections => {
-                let items = self.peer.take_rejections().into_iter().map(|r| {
-                    Answer::default()
-                        .value("id", &Value::Id(r.id))
-                        .text("reason", &r.reason)
-                        .line()
-                });
+            Cmd::Rejections { all } => {
+                self.collect();
+                let asked = std::mem::take(&mut self.unasked);
+                let items = if all {
+                    std::fs::read_to_string(self.dir.join("rejections.jsonl"))
+                        .unwrap_or_default()
+                        .lines()
+                        .map(str::to_string)
+                        .collect()
+                } else {
+                    asked
+                };
                 Answer::default().raw("rejections", json::array(items))
             }
             Cmd::Standing { id } => match self.peer.standing(&id) {
@@ -516,13 +560,19 @@ fn run(f: Flags) -> Result<(), String> {
     let mut h = Headless::open(&f, Domain::new(&harken_domain::module()))?;
     let input = lines();
     let mut out = std::io::stdout().lock();
+    // The pump keeps its own clock rather than waiting for a quiet stdin:
+    // a driver asking `status` every ten milliseconds would otherwise be a
+    // peer that never pumps, and a test polling for progress would be what
+    // stopped it.
+    let mut due = Instant::now();
     loop {
-        let line = match input.recv_timeout(h.pump) {
+        if Instant::now() >= due {
+            h.pump();
+            due = Instant::now() + h.pump;
+        }
+        let line = match input.recv_timeout(due.saturating_duration_since(Instant::now())) {
             Ok(l) => l,
-            Err(RecvTimeoutError::Timeout) => {
-                h.pump();
-                continue;
-            }
+            Err(RecvTimeoutError::Timeout) => continue,
             // The end of stdin is a quit.
             Err(RecvTimeoutError::Disconnected) => {
                 h.handle(Cmd::Quit);
@@ -657,6 +707,10 @@ mod tests {
             Cmd::Standing { id: want }
         );
         assert_eq!(
+            parse(r#"{"cmd":"rejections","all":true}"#).unwrap(),
+            Cmd::Rejections { all: true }
+        );
+        assert_eq!(
             parse(r#"{"cmd":"sign_in","user":"alice"}"#).unwrap(),
             Cmd::SignIn {
                 user: "alice".into()
@@ -665,7 +719,7 @@ mod tests {
         for (line, simple) in [
             ("status", Cmd::Status),
             ("hash", Cmd::Hash),
-            ("rejections", Cmd::Rejections),
+            ("rejections", Cmd::Rejections { all: false }),
             ("disconnect", Cmd::Disconnect),
             ("reconnect", Cmd::Reconnect),
             ("sign_out", Cmd::SignOut),
@@ -758,7 +812,10 @@ mod tests {
             h.handle(Cmd::SignIn { user: "x".into() }).line(),
             r#"{"ok":false,"why":"a peer alone has no server to sign in to"}"#
         );
-        assert_eq!(h.handle(Cmd::Rejections).line(), r#"{"rejections":[]}"#);
+        assert_eq!(
+            h.handle(Cmd::Rejections { all: true }).line(),
+            r#"{"rejections":[]}"#
+        );
         assert_eq!(h.handle(Cmd::Quit).line(), r#"{"ok":true}"#);
     }
 
