@@ -356,8 +356,9 @@ pub(crate) fn std_fault(e: StdError) -> EvalFault {
 
 /// A standard function. The ones a loop body reaches for — what is in a
 /// list, whether an option holds anything — are answered in place; the
-/// rest copy their arguments and go through `stdlib::std`, as the
-/// interpreter does.
+/// rest go through `stdlib::std` with their arguments as they are, which
+/// borrows them and copies only what it answers, as the interpreter does
+/// (`docs/plan-perf.md` Round 4).
 pub(crate) fn std_op(f: StdFn, args: &[H]) -> H {
     op(
         args,
@@ -371,10 +372,7 @@ pub(crate) fn std_op(f: StdFn, args: &[H]) -> H {
             (StdFn::IsEmpty, [Value::Text(t)]) => Ok(Value::Bool(t.is_empty())),
             (StdFn::UnwrapOr, [Value::Null, d]) => Ok((*d).clone()),
             (StdFn::UnwrapOr, [v, _]) => Ok((*v).clone()),
-            _ => {
-                let owned: Vec<Value> = vs.iter().map(|v| (*v).clone()).collect();
-                stdlib::std(f, &owned).map_err(std_fault)
-            }
+            _ => stdlib::std(f, vs).map_err(std_fault),
         },
     )
 }
