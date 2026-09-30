@@ -353,6 +353,42 @@ fn newest_playlist(st: &MemoryStore) -> Value {
         .expect("a playlist")
 }
 
+type Make<'a> = Box<dyn Fn(u64) -> (MemoryStore, Args) + 'a>;
+
+/// The mutations whose reads R1 is about, each with the store and the
+/// arguments it is applied to at a library of `n`.
+fn read_cases(h: &Harken) -> Vec<(&'static str, &'static str, Make<'_>)> {
+    let onto = |filled: bool| {
+        move |n: u64| {
+            let (st, pl) = h.with_playlist(n, if filled { n - 1 } else { 0 });
+            (st, args([("playlist_id", pl), ("media_id", Value::Id(idv(1, n - 1)))]))
+        }
+    };
+    vec![
+        ("add_song (a new file)", "add_song", Box::new(|n| (h.library(n), song(99_999_999)))),
+        ("add_to_playlist (an empty playlist)", "add_to_playlist", Box::new(onto(false))),
+        ("add_to_playlist (a playlist of N-1)", "add_to_playlist", Box::new(onto(true))),
+        (
+            "create_playlist (alice's second)",
+            "create_playlist",
+            Box::new(|n| (h.with_playlist(n, 0).0, args([("name", Value::text("Other"))]))),
+        ),
+    ]
+}
+
+/// What one mutation's reads examine, applied once through a counting
+/// store over a peer alone at a library of `n`.
+fn reads_of(h: &Harken, n: u64, name: &str, make: &dyn Fn(u64) -> (MemoryStore, Args)) -> counting::Reads {
+    let (st, a) = make(n);
+    let p = h.alone(st);
+    let autos = h.autos(name, &mut 1_000_000);
+    let c = Counting::new(&p.r.view);
+    let mut ov = Overlay::new(&c);
+    let out = h.procs[name].1.apply(&p.ctx, &autos, &a, &mut ov);
+    assert!(matches!(out, Ok(Ok(_))), "{name}: {out:?}");
+    c.reads()
+}
+
 /// The rows each mutation's reads examine, counted, at two library sizes
 /// sixteen times apart: a mutation whose reads go through an index reads
 /// the same number at both; one that scans reads sixteen times as many.
@@ -362,42 +398,37 @@ fn perf_rows_read_per_mutation() {
     let h = harken();
     eprintln!("\n== rows a mutation's reads examine (Counting store), by library size");
     eprintln!("{:<52} {:>12} {:>12}", "mutation", "N=500", "N=8000");
-    let at = |n: u64, name: &str, make: &dyn Fn(u64) -> (MemoryStore, Args)| {
-        let (st, a) = make(n);
-        let p = h.alone(st);
-        let autos = h.autos(name, &mut 1_000_000);
-        let c = Counting::new(&p.r.view);
-        let mut ov = Overlay::new(&c);
-        let out = h.procs[name].1.apply(&p.ctx, &autos, &a, &mut ov);
-        assert!(matches!(out, Ok(Ok(_))), "{name}: {out:?}");
-        c.reads()
-    };
-    let hr = &h;
-    let onto = |filled: bool| {
-        move |n: u64| {
-            let (st, pl) = hr.with_playlist(n, if filled { n - 1 } else { 0 });
-            (st, args([("playlist_id", pl), ("media_id", Value::Id(idv(1, n - 1)))]))
-        }
-    };
-    type Make<'a> = Box<dyn Fn(u64) -> (MemoryStore, Args) + 'a>;
-    let cases: Vec<(&str, &str, Make)> = vec![
-        ("add_song (a new file)", "add_song", Box::new(|n| (h.library(n), song(99_999_999)))),
-        ("add_to_playlist (an empty playlist)", "add_to_playlist", Box::new(onto(false))),
-        ("add_to_playlist (a playlist of N-1)", "add_to_playlist", Box::new(onto(true))),
-        (
-            "create_playlist (alice's second)",
-            "create_playlist",
-            Box::new(|n| (h.with_playlist(n, 0).0, args([("name", Value::text("Other"))]))),
-        ),
-    ];
-    for (label, name, make) in &cases {
-        let (small, big) = (at(500, name, &**make), at(8000, name, &**make));
+    for (label, name, make) in &read_cases(&h) {
+        let (small, big) = (reads_of(&h, 500, name, &**make), reads_of(&h, 8000, name, &**make));
         eprintln!(
             "{:<52} {:>12} {:>12}",
             label,
             format!("{}g {}r", small.gets, small.rows),
             format!("{}g {}r", big.gets, big.rows)
         );
+    }
+}
+
+/// The guard for `docs/plan-perf.md` R1, run with the suite rather than
+/// printed: every read these mutations make is served by an index, so the
+/// rows they examine are a handful at a library of 8,000 and the same at
+/// 500. At 8,000: `add_song` examines one row (the last by `pos`; the file
+/// is new, so its lookup finds none) and fourteen gets; `add_to_playlist`
+/// onto a playlist of 7,999 examines one (its last item) and seven gets,
+/// onto an empty one none; `create_playlist` two (the last playlist, and
+/// alice's one other) and two gets. Before the indexes these were 16,000,
+/// 7,999 and 2 rows (the harness's round-1 rows, `docs/plan-perf.md`).
+/// Falsified by taking `.index((Self::playlist_id, Self::pos))` off
+/// `playlist_item`: the playlist of 7,999 is 7,999 rows again; and by
+/// taking `.index((Self::file,))` off `media`: `add_song` is 8,001.
+#[test]
+fn a_mutation_examines_the_rows_it_needs_not_the_library() {
+    let h = harken();
+    let want = [(14, 1), (7, 0), (7, 1), (2, 2)];
+    for ((label, name, make), (gets, rows)) in read_cases(&h).iter().zip(want) {
+        let (small, big) = (reads_of(&h, 500, name, &**make), reads_of(&h, 8000, name, &**make));
+        assert_eq!((big.gets, big.rows), (gets, rows), "{label} at 8,000");
+        assert_eq!(small, big, "{label}: the same at 500 as at 8,000");
     }
 }
 

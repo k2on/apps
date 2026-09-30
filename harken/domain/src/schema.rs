@@ -4,8 +4,16 @@
 //!
 //! harken's `schema.sql`, table for table and column for column, one log
 //! and one set of tables. The unique index on `(playlist.user_id,
-//! playlist.name)` is the one addition: it is what `create_playlist`'s
-//! insert matches on, so a person's second "Favorites" is no row at all.
+//! playlist.name)` is the one addition that means anything: it is what
+//! `create_playlist`'s insert matches on, so a person's second "Favorites"
+//! is no row at all. The other indexes say nothing about the rows and are
+//! there for the mutations' reads (`docs/plan-perf.md` R1): each is the
+//! columns one read holds equal followed by the column it orders by, so
+//! the store hands back `MAX(pos)` or the row for a file by walking to it
+//! rather than by reading every candidate — `add_song`'s two reads,
+//! `create_playlist`'s two and `add_to_playlist`'s one. A non-unique index
+//! is additive under `compat`, changes no row and no mutator's closure,
+//! and a store loaded from before it builds it as the rows are put.
 use ark::authoring::*;
 
 /// Every table harken has, in one set: the library (what the scanner
@@ -65,6 +73,9 @@ impl Row for Media {
             .int(Self::added_ms)
             .text(Self::user_id)
             .key((Self::id,))
+            // `add_song`: the row already holding a file, and the last.
+            .index((Self::file,))
+            .index((Self::pos,))
     }
 }
 impl Media {
@@ -376,6 +387,11 @@ impl Row for Playlist {
             .text(Self::user_id)
             .key((Self::id,))
             .unique((Self::user_id, Self::name))
+            // `create_playlist`: the last playlist anyone made, and one
+            // person's (read by the prefix of this index, or of the one
+            // above).
+            .index((Self::pos,))
+            .index((Self::user_id, Self::pos))
     }
 }
 impl Playlist {
@@ -407,6 +423,8 @@ impl Row for PlaylistItem {
             .int(Self::added_ms)
             .text(Self::user_id)
             .key((Self::playlist_id, Self::media_id))
+            // `add_to_playlist`: the last item of one playlist.
+            .index((Self::playlist_id, Self::pos))
     }
 }
 impl PlaylistItem {

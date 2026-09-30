@@ -130,7 +130,10 @@ pub fn playlists() -> Router<Harken> {
         // what is on it, as "Favorites (1)". Decided here, from the rows at
         // apply time, so every peer replaying reaches the same name in log
         // order; by person, not by library; case is kept. The same entry
-        // twice is one playlist: its id is the key.
+        // twice is one playlist: its id is the key. The last playlist is
+        // read through `playlist (pos)` and the person's through the
+        // `user_id` prefix of an index (R1): the rows examined are one and
+        // that person's playlists, not every playlist twice.
         playlists.input::<CreatePlaylist>().mutation("create_playlist", |ctx, db, input| {
             let playlist = db.playlist.order_by(Playlist::pos.desc()).first();
             let playlist_2 = db.playlist.filter(Playlist::user_id.eq(ctx.user)).all();
@@ -144,7 +147,9 @@ pub fn playlists() -> Router<Harken> {
         }),
         // Put something on a playlist, at the end of it. A playlist holds an
         // item once, so adding one already there keeps its place; something
-        // no longer in the library is a no-op.
+        // no longer in the library is a no-op. `MAX(pos)` is the first row
+        // of `playlist_item (playlist_id, pos)` walked backwards (R1): one
+        // row examined onto a playlist of 7,999, where it was 7,999.
         owned.input::<AddToPlaylist>().mutation("add_to_playlist", |ctx, db, input, playlist| {
             let media = db.media.exists((input.media_id,));
             when(media, || {

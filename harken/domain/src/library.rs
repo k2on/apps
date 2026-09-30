@@ -630,6 +630,9 @@ pub fn library() -> Router<Harken> {
         // recording it is part of and the one credit its lumped performer
         // string can honestly give. The same file twice is the first entry's
         // (a rescan is free); an empty file is no path and never collides.
+        // Both reads go through an index (`media (file)`, `media (pos)`;
+        // docs/plan-perf.md R1): into a library of 8,000 a new file
+        // examines one row, where it was every row twice — 16,000.
         library.input::<AddSong>().mutation("add_song", |ctx, db, input| {
             let media = db.media.filter(Media::file.eq(input.file)).first();
             unless(input.file.is_empty().not().and(media.is_some()), || {
