@@ -553,7 +553,12 @@ fn rebase_three_peers() {
     // step 3: alice comes back. bob's entries land; her pending replays on top.
     alice.receive(s2, e2.clone());
     alice.receive(s3, e3.clone());
-    assert_eq!(alice.take_changes(), Changes::Rebuilt, "the rebase is reported as a rebuild");
+    // Each landing undoes her track, lands bob's, and puts hers back on
+    // top: three transitions a view can be told, twice (plan-perf R2).
+    assert!(
+        matches!(alice.take_changes(), Changes::Applied(ref c) if c.len() == 6),
+        "the rebase is reported as its transitions"
+    );
     assert_eq!(
         pos_of(&alice, 9),
         Some(value(&v["alice_after_rebase_pos_of_9"])),

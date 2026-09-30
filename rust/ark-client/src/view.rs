@@ -15,10 +15,12 @@
 //! appearing or clearing, or another user signed in — re-hydrates (to
 //! nothing, on a refusal) and reports [`Update::Reset`].
 //!
-//! `Changes::Rebuilt` — a rebase rolled the optimistic store back and
-//! replayed pending on top — is a re-hydrate and [`Update::Reset`] too: no
-//! sequence of patches describes a rollback (§1.6), so the view does not
-//! pretend to have one.
+//! A rebase is changes like any other: the engine undoes this peer's
+//! pending intents by their recorded changes, applies what landed and runs
+//! them again, and reports every transition (`docs/plan-perf.md` R2), so a
+//! view patches through one. `Changes::Rebuilt` — the optimistic store
+//! replaced whole, as opening over a snapshot does — is a re-hydrate and
+//! [`Update::Reset`].
 
 use std::collections::BTreeSet;
 
@@ -507,9 +509,11 @@ mod tests {
         p.sign_in("bob", "s2", Some("bob".into())).unwrap();
         // Told nothing moved, the view still notices whose it is now…
         assert_eq!(v.update(&p, &Changes::Applied(vec![])).unwrap(), Update::Reset);
-        // …and signing in replays pending, which is `Rebuilt` anyway.
+        // …and signing in with nothing pending moves nothing (R2): the view
+        // already follows its user.
         let ch = p.take_changes();
-        assert_eq!(v.update(&p, &ch).unwrap(), Update::Reset, "{ch:?}");
+        assert_eq!(ch, Changes::Applied(vec![]));
+        assert_eq!(v.update(&p, &ch).unwrap(), Update::Unchanged, "{ch:?}");
         made(&mut p, "His");
         let ch = p.take_changes();
         assert!(matches!(v.update(&p, &ch).unwrap(), Update::Patched(_)));
@@ -519,7 +523,7 @@ mod tests {
 
     /// The demo's `items`, patch for patch: a track added at the end is one
     /// `Insert` at the end; two added in one settle are two inserts in
-    /// order; a rebase is `Reset`. Falsified by settling the rebuilt keys
+    /// order; a store replaced whole is `Reset`. Falsified by settling the rebuilt keys
     /// in reverse (the batch's inserts come out as `at: 2` then `at: 2`,
     /// which splices them the wrong way round).
     #[test]
@@ -556,6 +560,107 @@ mod tests {
         assert_eq!(v.update(&p, &Changes::Applied(vec![])).unwrap(), Update::Unchanged);
         assert_eq!(v.update(&p, &Changes::Rebuilt).unwrap(), Update::Reset);
         assert_eq!(v.rows(), p.query("items", &args([("playlist_id", list)])).unwrap().as_list());
+    }
+
+    /// `docs/plan-perf.md` R2: a rebase is patches. Bob goes offline and
+    /// adds to a shared playlist while alice's additions land at the
+    /// server; he comes back, hers land under his pending ones, and his own
+    /// are then confirmed. His view of `items` is told every transition the
+    /// rebase made — his tracks going, hers arriving, his coming back after
+    /// them — so it is `Patched`, never `Reset`, and after every settle it
+    /// is the query, a fresh hydrate, and its own splice. Four rounds, bob
+    /// with one to four pending. Falsified by reporting a rebase as the
+    /// replay it was (`Rebuilt`): the first reconnect is a `Reset`.
+    #[test]
+    fn a_rebase_is_patches_to_the_demos_items() {
+        use ark::live::{ConnId, Silent};
+        use ark::peer::Authority;
+        use ark::protocol::{open_access, trusting, Server};
+
+        fn settle(s: &mut Server<Silent>, peers: &mut [(ConnId, &mut Peer)]) {
+            loop {
+                let mut moved = false;
+                for (c, p) in peers.iter_mut() {
+                    for m in p.take_outgoing() {
+                        moved = true;
+                        s.recv(*c, m);
+                    }
+                }
+                for (c, m) in s.take_outgoing() {
+                    if let Some((_, p)) = peers.iter_mut().find(|(pc, _)| *pc == c) {
+                        moved = true;
+                        p.recv(m);
+                    }
+                }
+                if !moved {
+                    return;
+                }
+            }
+        }
+
+        let d = demo::domain();
+        let mut a = Authority::new(d.module().schema.clone(), d.closures().clone());
+        a.hold(d.native_list());
+        let mut s = Server::open(trusting(), open_access(), Silent, a);
+        let dev = |u: &str| Options::dev(u).with_autos(crate::Autos::seeded(u.as_bytes()[0] as u64));
+        let mut alice = Peer::open_memory(demo::domain(), dev("alice")).unwrap();
+        let mut bob = Peer::open_memory(demo::domain(), dev("bob")).unwrap();
+        alice.connected();
+        bob.connected();
+        alice.mutate("create_playlist", args([("name", Value::text("Shared"))])).unwrap();
+        settle(&mut s, &mut [(1, &mut alice), (2, &mut bob)]);
+        let list = bob.store().scan("playlist")[0]["id"].clone();
+        let put = |p: &mut Peer, t: String| {
+            p.mutate("add_to_playlist", args([("playlist_id", list.clone()), ("track_id", Value::text(t))]))
+                .unwrap();
+        };
+        let mut v = bob.view("items", args([("playlist_id", list.clone())])).unwrap();
+        let _ = bob.take_changes();
+        let mut shown = v.rows().to_vec();
+        let mut patched = 0;
+        let mut told = |bob: &mut Peer, v: &mut View, what: &str| {
+            let ch = bob.take_changes();
+            assert!(matches!(ch, Changes::Applied(_)), "{what}: a rebase is changes, not {ch:?}");
+            match v.update(bob, &ch).unwrap() {
+                Update::Reset => panic!("{what}: the view was reset"),
+                Update::Patched(ps) => {
+                    splice(&mut shown, &ps);
+                    patched += 1;
+                }
+                Update::Unchanged => {}
+            }
+            assert_eq!(
+                v.rows(),
+                bob.query("items", &args([("playlist_id", list.clone())])).unwrap().as_list(),
+                "{what}: the query"
+            );
+            assert!(
+                ark::view::contract(bob.schema(), bob.store(), v.entries().unwrap()),
+                "{what}: a fresh hydrate"
+            );
+            assert_eq!(shown, v.rows(), "{what}: its own splice");
+        };
+        for round in 0..4 {
+            bob.disconnected();
+            s.disconnect(2);
+            for k in 0..=round {
+                put(&mut bob, format!("b{round}.{k}"));
+            }
+            told(&mut bob, &mut v, &format!("round {round}: bob's, offline"));
+            put(&mut alice, format!("a{round}.0"));
+            put(&mut alice, format!("a{round}.1"));
+            settle(&mut s, &mut [(1, &mut alice)]);
+            bob.connected();
+            settle(&mut s, &mut [(1, &mut alice), (2, &mut bob)]);
+            assert_eq!(bob.pending_len(), 0, "round {round}");
+            told(&mut bob, &mut v, &format!("round {round}: bob back, rebased and confirmed"));
+            // Alice's two of this round sit before bob's, as the log has them.
+            let tracks: Vec<String> = v.rows().iter().map(|r| r.field("track_id").as_text().to_string()).collect();
+            let at = tracks.iter().position(|t| *t == format!("a{round}.0")).unwrap();
+            assert_eq!(tracks[at + 2], format!("b{round}.0"), "round {round}: {tracks:?}");
+        }
+        assert_eq!(patched, 8, "every step was patches");
+        assert!(bob.take_rejections().is_empty());
     }
 
     /// §1.5 The demo's one query under the contract: seeded churn over

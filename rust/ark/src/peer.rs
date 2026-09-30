@@ -8,7 +8,10 @@
 //! is the rebase. A replica that holds the closure an entry names replays
 //! the intent; one that does not asks for the facts; when it holds both it
 //! replays and compares, and a disagreement is recorded in `diverged` and
-//! resolved in the authority's favour.
+//! resolved in the authority's favour. An intent of this replica's own is
+//! the exception, because it was already run here: what that run did is
+//! kept beside it, and confirming it applies that record rather than
+//! running it again (`docs/plan-perf.md` R2).
 //!
 //! An entry is applied by a native procedure when the peer holds one for
 //! its hash ([`crate::authoring::Procedure`], the domain's own code run
@@ -17,8 +20,12 @@
 //! each other by the runtime's tests on every procedure; both are this
 //! file's "the closure is held".
 //!
-//! The stores here are [`MemoryStore`]s, as the spec's are: the optimistic
-//! view is a value recomputed on every rebase.
+//! The stores here are [`MemoryStore`]s, as the spec's are. The optimistic
+//! view is copied from the confirmed store once, when the replica is
+//! opened; after that it moves only by changes — its own intents' going on,
+//! a rebase's undoing them, what landed, and their going on again — and
+//! reports every one of them, so that a view of it is never told to start
+//! over by a rebase (R2).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -50,8 +57,15 @@ pub struct Replica {
     /// Intents authored here that no verdict has answered, in authoring
     /// order. Durable.
     pub pending: Vec<Entry>,
+    /// What each pending intent's run did to `view`, by its id: every
+    /// transition, in the order it made them (`docs/plan-perf.md` R2).
+    /// Applied in `pending`'s order over `confirmed`, they reach `view` —
+    /// so they are what confirming an own intent applies to `confirmed`
+    /// without running it again, and what a rebase undoes. Never durable:
+    /// an intent opened from disk is run once at open, which records it.
+    pub recorded: BTreeMap<Id, Facts>,
     /// The optimistic store: `confirmed` with `pending` replayed. Never
-    /// durable; recomputed on every rebase.
+    /// durable; copied whole at open and moved by changes after that.
     pub view: MemoryStore,
     /// Confirmed entries received and not yet applied.
     pub inbox: BTreeMap<Seq, Inbox>,
@@ -81,10 +95,15 @@ pub struct Inbox {
 }
 
 /// What a view is told: the changes to the optimistic store since it last
-/// asked, or that it was rebuilt and must re-hydrate.
+/// asked — every transition it made, a rebase's included — or that it was
+/// replaced whole and must re-hydrate.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Changes {
+    /// Oldest first. After a rebase: the inverse of what it undid, what
+    /// landed, and what it re-applied (`docs/plan-perf.md` R2).
     Applied(Vec<Change>),
+    /// The store was replaced whole: the replica was opened, or opened
+    /// again over a snapshot adopted from the server.
     Rebuilt,
 }
 
@@ -92,7 +111,8 @@ pub enum Changes {
 /// changes it moved by since they last asked, per sequence, or that it was
 /// replaced and must be written whole. Not [`Changes`]: those are the
 /// optimistic store's, and under pending intents the two differ — the view
-/// has the intents already, and a rebase rolls it back and replays.
+/// has the intents already, and a rebase undoes them and applies them
+/// again.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Journal {
     Facts(Vec<(Seq, Facts)>),
@@ -112,6 +132,23 @@ fn bug_text(e: &EvalError) -> String {
 
 type Applied = Result<Result<Vec<Change>, Refusal>, EvalError>;
 
+// Every run of an entry's function a replica or an authority makes, per
+// thread, as `store::clones` counts copies: tests only. What R2 of
+// `docs/plan-perf.md` is held to — one run per intent alone, one per own
+// intent against a server — is this count. The guards a debug build keeps
+// (`runs_as`) run uncounted, so that the count is what a release
+// build does.
+#[cfg(test)]
+thread_local! {
+    static RUNS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How many times this thread has run an entry's function: tests only.
+#[cfg(test)]
+pub(crate) fn runs() -> usize {
+    RUNS.with(|n| n.get())
+}
+
 #[allow(clippy::too_many_arguments)]
 /// Apply an entry's function by its hash: natively when a procedure is
 /// held, through the closure otherwise; `None` when neither is.
@@ -125,10 +162,67 @@ fn run(
     args: &Args,
     store: &mut dyn Store,
 ) -> Option<Applied> {
+    #[cfg(test)]
+    RUNS.with(|n| n.set(n.get() + 1));
+    run_uncounted(schema, bodies, natives, fh, ctx, autos, args, store)
+}
+
+#[allow(clippy::too_many_arguments)]
+/// [`run`], for a debug build's guard: not counted.
+fn run_uncounted(
+    schema: &Schema,
+    bodies: &BTreeMap<FnHash, Closure>,
+    natives: &BTreeMap<FnHash, Procedure>,
+    fh: &FnHash,
+    ctx: &Ctx,
+    autos: &Args,
+    args: &Args,
+    store: &mut dyn Store,
+) -> Option<Applied> {
     if let Some(p) = natives.get(fh) {
         return Some(p.apply(ctx, autos, args, store));
     }
     bodies.get(fh).map(|c| apply_closure(schema, c, ctx, autos, args, store))
+}
+
+/// Whether running an entry over `store` produces exactly `facts` — the
+/// guard a debug build keeps wherever a record stands in for a run (R2):
+/// the run it saves, made anyway and compared. Over an overlay, so the
+/// store is untouched.
+fn runs_as(
+    schema: &Schema,
+    bodies: &BTreeMap<FnHash, Closure>,
+    natives: &BTreeMap<FnHash, Procedure>,
+    e: &Entry,
+    store: &dyn Store,
+    facts: &Facts,
+) -> bool {
+    let mut over = Overlay::new(store);
+    matches!(
+        run_uncounted(schema, bodies, natives, &e.fn_hash, &ctx_of(e), &e.autos, &e.args, &mut over),
+        Some(Ok(Ok(chs))) if chs == *facts
+    )
+}
+
+/// Whether two stores hold the same rows. Not `==`, which also tells a
+/// table never written from one whose rows were all taken out — a
+/// difference no read and no hash can see, and one undoing an intent that
+/// wrote a table's first row leaves behind.
+fn same_rows(a: &MemoryStore, b: &MemoryStore) -> bool {
+    a.schema() == b.schema() && a.schema().tables().all(|t| a.scan(&t.name) == b.scan(&t.name))
+}
+
+/// A change undone: the transition back, exact because a change a write
+/// reports carries the whole row on each side of it — an `Add` is undone by
+/// deleting its key, a `Remove` by putting the row back, an `Edit` by
+/// putting the old row (`docs/plan-perf.md` R2). Applied raw, through
+/// [`Store::apply_change`], as any fact is.
+fn invert(c: Change) -> Change {
+    match c {
+        Change::Add(t, row) => Change::Remove(t, row),
+        Change::Remove(t, row) => Change::Add(t, row),
+        Change::Edit(t, old, new) => Change::Edit(t, new, old),
+    }
 }
 
 /// Hold native procedures, and the closures they carry.
@@ -151,6 +245,7 @@ impl Replica {
             confirmed,
             cursor,
             pending,
+            recorded: BTreeMap::new(),
             inbox: BTreeMap::new(),
             rejections: vec![],
             diverged: vec![],
@@ -187,6 +282,15 @@ impl Replica {
                     autos: autos.clone(),
                 };
                 self.view.apply_changes(&chs);
+                // A record for every pending intent and no other: one left
+                // behind means `pending` was cut short from outside (a
+                // benchmark's author does), and it is let go here rather
+                // than kept for ever.
+                if self.recorded.len() > self.pending.len() {
+                    let live: BTreeSet<Id> = self.pending.iter().map(|p| p.id).collect();
+                    self.recorded.retain(|id, _| live.contains(id));
+                }
+                self.recorded.insert(e.id, chs.clone());
                 self.pending.push(e.clone());
                 self.changes.extend(chs);
                 Ok(e)
@@ -276,22 +380,37 @@ impl Replica {
     /// the server's question ([`crate::protocol::Server::with_owns`]). One
     /// the replay now refuses is dropped with its reason, as any rebase
     /// does.
+    ///
+    /// A rebase of the kind that lands nothing (R2): from the first
+    /// intent rewritten, the view undoes what each did and runs them again
+    /// as their new author, and a view of it is told every transition.
     pub fn sign_in(&mut self, who: &Ctx) {
-        for e in &mut self.pending {
-            if e.actor.is_empty() && e.session.is_empty() {
+        let nobody = |e: &Entry| e.actor.is_empty() && e.session.is_empty();
+        let Some(from) = self.pending.iter().position(nobody) else {
+            return;
+        };
+        let undo: Vec<Id> = self.pending[from..].iter().map(|e| e.id).collect();
+        for e in &mut self.pending[from..] {
+            if nobody(e) {
                 e.actor = who.user.clone();
                 e.session = who.session.clone();
             }
         }
-        self.replay();
+        self.rebase(&undo, vec![], from);
     }
 
     /// §11.5 A verdict against this peer's own intent: it is dropped, the
-    /// verdict is kept for the app to show, and the view is rebuilt.
+    /// verdict is kept for the app to show, and the view undoes it and
+    /// every intent after it and runs those again (R2) — the ones before it
+    /// never saw it.
     pub fn reject(&mut self, id: &Id, why: Refusal) {
-        self.pending.retain(|e| e.id != *id);
         self.rejections.push((*id, why));
-        self.replay();
+        let Some(at) = self.pending.iter().position(|e| e.id == *id) else {
+            return;
+        };
+        let undo: Vec<Id> = self.pending[at..].iter().map(|e| e.id).collect();
+        self.pending.remove(at);
+        self.rebase(&undo, vec![], at);
     }
 
     /// The sequences the replica is waiting on facts for: entries whose
@@ -348,9 +467,13 @@ impl Replica {
     // applied; then decide what the view owes: nothing pending before or
     // after, the confirmed changes are the view's; every entry applied was
     // this peer's own next pending intent in order, nothing is reported;
-    // anything else landed under pending intents, the view is rebuilt.
+    // anything else landed under pending intents, and the view is rebased
+    // by changes (R2).
     fn advance(&mut self) {
-        let had_pending = !self.pending.is_empty();
+        // The intents the view holds above `confirmed`, in the order it
+        // applied them: what a rebase undoes, whichever of them this
+        // advance confirms first.
+        let order: Vec<Id> = self.pending.iter().map(|e| e.id).collect();
         let mut acc: Vec<Change> = Vec::new();
         let mut moved = false;
         let mut others = false;
@@ -359,19 +482,47 @@ impl Replica {
             let Some(ib) = self.inbox.get(&n) else { break };
             let Some(e) = ib.entry.clone() else { break };
             let mf = ib.facts.clone();
-            let Some((chs, diverged)) = self.apply_one(n, &e, mf.as_ref()) else {
-                break;
-            };
             // This peer's own next intent, as it was authored — the entry
             // itself and not only its id, so that the view, which applied
             // exactly that entry, can be trusted to have reached what the
             // confirmed store reaches by applying it (see below).
             let own_next = self.pending.first() == Some(&e);
+            // §R2 Confirmed by its record. Nothing but this peer's own
+            // intents, in order, has landed since the view was last
+            // `confirmed` with `pending` over it — at the start of every
+            // advance it is, and `others` says whether anything else has
+            // landed since — so the confirmed store is exactly the state
+            // this intent was run over when it was authored, and `apply`
+            // is a function of the state and the entry (§11.2): the record
+            // is what running it again would produce. Facts, when they
+            // came, are compared to the record, and a difference is a
+            // divergence exactly as a run's would be.
+            let by_record = match self.recorded.get(&e.id) {
+                Some(rec) if own_next && !others => {
+                    debug_assert!(
+                        runs_as(&self.schema, &self.bodies, &self.natives, &e, &self.confirmed, rec),
+                        "the record of this peer's own intent is not what running it over the confirmed store at sequence {} produces",
+                        self.cursor
+                    );
+                    Some(match &mf {
+                        Some(f) if f != rec => (f.clone(), true),
+                        _ => (rec.clone(), false),
+                    })
+                }
+                _ => None,
+            };
+            let Some((chs, diverged)) = by_record.or_else(|| self.apply_one(n, &e, mf.as_ref())) else {
+                break;
+            };
             self.confirmed.apply_changes(&chs);
             self.journal.push((n, chs.clone()));
             self.cursor = n;
             self.inbox.remove(&n);
-            self.pending.retain(|p| p.id != e.id);
+            if own_next {
+                self.pending.remove(0);
+            } else {
+                self.pending.retain(|p| p.id != e.id);
+            }
             if diverged {
                 self.diverged.push(n);
             }
@@ -382,37 +533,38 @@ impl Replica {
         if !moved {
             return;
         }
-        if !had_pending {
+        if order.is_empty() {
             // Nothing was pending, so the view was the confirmed store: it
             // moves by the same changes.
             self.view.apply_changes(&acc);
             self.changes.extend(acc);
         } else if !others {
             // Every entry applied was this peer's own next intent, in order,
-            // applied by intent over the state the view applied it over:
-            // the view is `confirmed` with `pending` replayed, so the
-            // confirmed store before the first of them is the view's base,
-            // and before each next one it is the view after the one before.
-            // `apply` is a function of the store and the entry (§11.2), so
-            // the confirmed store has just reached, by the same changes,
-            // exactly the states the view passed through — and the view
-            // owes nothing. Copying `confirmed` over it here was a deep
-            // copy of every table and index per mutation for a peer alone,
-            // which confirms each intent at once (§11.9), and it left the
-            // store and every view's indexes cold in the cache for no one.
+            // applied over the state the view applied it over: the view is
+            // `confirmed` with `pending` replayed, so the confirmed store
+            // before the first of them is the view's base, and before each
+            // next one it is the view after the one before. The confirmed
+            // store has just reached, by the same changes — the records, or
+            // facts equal to them — exactly the states the view passed
+            // through, and the view owes nothing. Copying `confirmed` over
+            // it here was a deep copy of every table and index per mutation
+            // for a peer alone, which confirms each intent at once (§11.9).
             //
             // What makes the equality hold, case by case: an own intent is
-            // applied by its closure, never by facts alone — it was
-            // authored here, so its function is held (bodies are only ever
-            // added), and its sequence is new, so not in `diverged`; a
-            // disagreement with the authority's facts sets `diverged`, and
+            // applied by its record, which is its run over this same state,
+            // or by its closure where there is no record — it was authored
+            // here, so its function is held (bodies are only ever added);
+            // a disagreement with the authority's facts sets `diverged`, and
             // an entry that is not the next one pending (another peer's, or
             // one of ours out of order or rewritten) sets `others`, and
-            // both replay; a refusal is `reject`, which replays; a
-            // `sign_in` rewrites pending and replays, so the view is of the
+            // both rebase; a refusal is `reject`, which rebases; a
+            // `sign_in` rewrites pending and rebases, so the view is of the
             // rewritten entries, which are what is pushed and confirmed.
             // Held, not assumed: a divergence between the optimistic path
             // and the confirmed path is a bug every debug run names.
+            for id in &order[..order.len() - self.pending.len()] {
+                self.recorded.remove(id);
+            }
             if self.pending.is_empty() {
                 debug_assert!(
                     self.view == self.confirmed,
@@ -421,7 +573,7 @@ impl Replica {
                 );
             }
         } else {
-            self.replay();
+            self.rebase(&order, acc, 0);
         }
     }
 
@@ -453,15 +605,72 @@ impl Replica {
         mf.map(|f| (f.clone(), false))
     }
 
-    // Rebuild the view: the confirmed store, then every pending intent in
-    // order. One that is now refused is dropped and recorded.
+    // Rebuild the view whole: a copy of the confirmed store, then every
+    // pending intent in order, recorded. What opening does — the one
+    // wholesale replacement a replica makes of its own view — and the
+    // fallback of a rebase that finds a record missing.
     fn replay(&mut self) {
         self.view = self.confirmed.clone();
         self.rebuilt = true;
         self.changes.clear();
-        let pending = std::mem::take(&mut self.pending);
-        let mut kept = Vec::with_capacity(pending.len());
-        for e in pending {
+        self.recorded.clear();
+        let _ = self.run_pending(0);
+    }
+
+    // §R2 The rebase, by changes. `undo` is the intents whose records the
+    // view holds above the state to return to, in the order it applied
+    // them; `landed` is what the confirmed store moved by since that state
+    // (nothing, for a verdict or a sign-in, which return to a state inside
+    // the pending); then `pending[from..]` runs again over the view.
+    //
+    // 1. The records, undone newest first: each change inverts exactly
+    //    (`invert`), so the view is the state before the first of them —
+    //    the old confirmed store, when `from` is 0.
+    // 2. What landed, applied: the view is the new confirmed store.
+    // 3. The surviving intents, run again through an overlay in order,
+    //    each one's new changes recorded; one that now refuses is dropped
+    //    with its reason, as it always was.
+    //
+    // A view of it is told the concatenation — every transition the view
+    // store made, in the order it made them — so `push_all`, which settles
+    // each touched key once against the final store, costs the keys
+    // touched, and nothing re-hydrates. No copy of the store is made.
+    fn rebase(&mut self, undo: &[Id], landed: Vec<Change>, from: usize) {
+        if undo.iter().any(|id| !self.recorded.contains_key(id)) {
+            // Only when `pending` was changed from outside: the confirmed
+            // store is right whatever happened, so a replay from it is too.
+            return self.replay();
+        }
+        let mut told = Vec::new();
+        for id in undo.iter().rev() {
+            let rec = self.recorded.remove(id).unwrap_or_default();
+            for c in rec.into_iter().rev() {
+                let back = invert(c);
+                self.view.apply_change(&back);
+                told.push(back);
+            }
+        }
+        self.view.apply_changes(&landed);
+        told.extend(landed);
+        if from == 0 {
+            debug_assert!(
+                same_rows(&self.view, &self.confirmed),
+                "undoing this peer's pending and applying what landed did not reach the confirmed store at sequence {}",
+                self.cursor
+            );
+        }
+        told.extend(self.run_pending(from));
+        self.changes.extend(told);
+    }
+
+    // Run `pending[from..]` over the view in order, each through an overlay
+    // so a refusal leaves it untouched, recording each one's changes; one
+    // that is now refused is dropped and its reason kept. What the view
+    // moved by, oldest first.
+    fn run_pending(&mut self, from: usize) -> Vec<Change> {
+        let rest = self.pending.split_off(from);
+        let mut moved = Vec::new();
+        for e in rest {
             let out = {
                 let mut over = Overlay::new(&self.view);
                 run(
@@ -479,13 +688,15 @@ impl Replica {
                 None => self.rejections.push((e.id, Refusal::Refused("no closure for a pending intent".into()))),
                 Some(Ok(Ok(chs))) => {
                     self.view.apply_changes(&chs);
-                    kept.push(e);
+                    moved.extend(chs.iter().cloned());
+                    self.recorded.insert(e.id, chs);
+                    self.pending.push(e);
                 }
                 Some(Ok(Err(why))) => self.rejections.push((e.id, why)),
                 Some(Err(bug)) => self.rejections.push((e.id, Refusal::Refused(bug_text(&bug)))),
             }
         }
-        self.pending = kept;
+        moved
     }
 }
 
@@ -579,6 +790,30 @@ impl Authority {
         }
     }
 
+    /// §R2 Append an intent this process has already run, with the changes
+    /// that run produced, without running it again: what a peer alone's
+    /// authority does with its replica's record ([`local_commit`]). The
+    /// authority and the replica are one process over one store there, so
+    /// the second run was the first run again. Deduped by id as
+    /// [`Authority::sequence_entry`] is; never a verdict, since the record
+    /// is of a run that was accepted. A server judges what it is sent, and
+    /// uses `sequence_entry`.
+    ///
+    /// The caller holds `facts` to be the entry's run over this store at
+    /// its head; a debug build runs it anyway and says so if not.
+    pub fn append_as(&mut self, e: &Entry, facts: Facts) -> Sequenced {
+        if let Some(n) = self.log.seq_of(&e.id) {
+            return Sequenced::Duplicate(n);
+        }
+        debug_assert!(
+            runs_as(&self.schema, &self.bodies, &self.natives, e, &self.store, &facts),
+            "appended as recorded, but running the intent over the head state produces something else"
+        );
+        self.store.apply_changes(&facts);
+        let n = self.log.append(e.clone(), facts.clone());
+        Sequenced::Appended(n, facts)
+    }
+
     /// What a peer at a cursor is sent: a page of entries with their facts,
     /// or the snapshot if it is below the horizon.
     pub fn page(&self, cursor: Seq, limit: usize) -> Page {
@@ -644,9 +879,25 @@ impl Authority {
 /// §11.9 A peer that is its own authority: everything pending is sequenced,
 /// and every answer is delivered back, in order. After it, nothing is
 /// pending and the view is the confirmed store.
+///
+/// Sequenced by the replica's own record (R2, [`Authority::append_as`])
+/// when the authority's head is the replica's cursor and the intent is the
+/// first pending: the authority's store is then the replica's confirmed
+/// store, which is the state the record was made over. The replica then
+/// confirms it by the same record, so an intent alone is run once, when it
+/// is authored. Anything else — an authority ahead of the replica, an
+/// intent with no record — is sequenced by running it, as a server does.
 pub fn local_commit(a: &mut Authority, r: &mut Replica) {
     for e in r.pending.clone() {
-        match a.sequence_entry(&e) {
+        let recorded = match r.recorded.get(&e.id) {
+            Some(rec) if a.log.head_seq() == r.cursor && r.pending.first() == Some(&e) => Some(rec.clone()),
+            _ => None,
+        };
+        let out = match recorded {
+            Some(rec) => a.append_as(&e, rec),
+            None => a.sequence_entry(&e),
+        };
+        match out {
             Sequenced::Appended(n, facts) => {
                 r.receive_facts(n, facts);
                 r.ack(&e.id, n);
@@ -853,6 +1104,40 @@ mod tests {
         fresh.view
     }
 
+    /// Follow what a view is told, as a view does (R2): every change must
+    /// be a transition from the row the store held — an `Add` onto an
+    /// absent key, a `Remove` or an `Edit` from exactly the row there — and
+    /// applied in order to a store that was the view when it last asked,
+    /// they must reach the view. `Rebuilt` is only for a store replaced
+    /// whole, which none of the callers do.
+    fn follow(shadow: &mut MemoryStore, r: &mut Replica, what: &str) {
+        let Changes::Applied(chs) = r.take_changes() else {
+            panic!("{what}: told `Rebuilt`")
+        };
+        for c in &chs {
+            let tbl = shadow.schema().lookup_table(c.table()).unwrap().clone();
+            let (row, before) = match c {
+                Change::Add(_, row) => (row, None),
+                Change::Remove(_, row) => (row, Some(row)),
+                Change::Edit(_, old, new) => (new, Some(old)),
+            };
+            assert_eq!(
+                shadow.get(c.table(), &tbl.key_of(row)).as_ref(),
+                before,
+                "{what}: {c:?} is not a transition from the store it was told over"
+            );
+            shadow.apply_change(c);
+        }
+        assert!(same_rows(shadow, &r.view), "{what}: what the view was told reaches the view");
+    }
+
+    /// A replica whose view has been read, as a screen's has: nothing it
+    /// was told is outstanding. Its store, as the screen now has it.
+    fn drawn(r: &mut Replica) -> MemoryStore {
+        let _ = r.take_changes();
+        r.view.clone()
+    }
+
     /// §11.9 A peer alone confirms every intent the moment it is authored,
     /// and that costs the intent's changes: not one copy of the store, with
     /// the procedures held natively or run through their closures. Counted
@@ -885,15 +1170,21 @@ mod tests {
     /// more pending behind them, another peer's entry landing between two
     /// of them, and more authored while some are pending. At every step the
     /// view is what a replay from scratch computes, and when nothing is
-    /// pending it is the confirmed store. Falsified by skipping the replay
-    /// when another peer's entry lands (`others` never set): the view keeps
-    /// this peer's own positions and disagrees with the replay.
+    /// pending it is the confirmed store. And at every step what a view was
+    /// told since the last is transitions that reach it (R2): a rebase is
+    /// `Applied`, never `Rebuilt`, and copies no store. Falsified by
+    /// skipping the rebase when another peer's entry lands (`others` never
+    /// set): the view keeps this peer's own positions and disagrees with
+    /// the replay; and by reporting only what landed and what was re-run,
+    /// not the inverses: "theirs landed under ours" is told an `Add` of
+    /// "c" onto the key where "c" already is.
     #[test]
     fn the_view_is_confirmed_then_pending_at_every_step() {
         let d = demo();
         let mut a = d.authority();
         let (me, them) = (Ctx::new("me", "s"), Ctx::new("them", "t"));
         let (mut r, mut other) = (d.replica(true), d.replica(false));
+        let mut shadow = drawn(&mut r);
         let confirm = |a: &mut Authority, r: &mut Replica, e: &Entry| match a.sequence_entry(e) {
             Sequenced::Appended(n, f) => {
                 r.receive_facts(n, f);
@@ -902,37 +1193,45 @@ mod tests {
             }
             other => panic!("{other:?}"),
         };
-        let check = |r: &Replica, what: &str| {
-            assert_eq!(r.view, replayed(r), "{what}: the view is confirmed then pending");
+        let mut check = |r: &mut Replica, what: &str| {
+            assert!(same_rows(&r.view, &replayed(r)), "{what}: the view is confirmed then pending");
             if r.pending.is_empty() {
-                assert_eq!(r.view, r.confirmed, "{what}: nothing pending");
+                assert!(same_rows(&r.view, &r.confirmed), "{what}: nothing pending");
             }
             assert!(r.diverged.is_empty(), "{what}");
+            assert_eq!(
+                r.recorded.keys().collect::<BTreeSet<_>>(),
+                r.pending.iter().map(|e| &e.id).collect(),
+                "{what}: a record per pending intent"
+            );
+            follow(&mut shadow, r, what);
         };
         let e1 = d.create(&mut r, &me, 1, "Mine");
         let e2 = d.add(&mut r, &me, 2, 1, "a");
         let e3 = d.add(&mut r, &me, 3, 1, "b");
-        check(&r, "three authored");
+        check(&mut r, "three authored");
         confirm(&mut a, &mut r, &e1);
-        check(&r, "the first confirmed, two behind it");
+        check(&mut r, "the first confirmed, two behind it");
         confirm(&mut a, &mut r, &e2);
         confirm(&mut a, &mut r, &e3);
-        check(&r, "all three confirmed, in order");
+        check(&mut r, "all three confirmed, in order");
         // Somebody else adds to the same playlist while one of ours waits.
         let e4 = d.add(&mut r, &me, 4, 1, "c");
         other.receive(1, e1.clone());
         let x = d.add(&mut other, &them, 5, 1, "x");
         let nx = confirm(&mut a, &mut other, &x);
+        let mine = crate::store::clones();
         r.receive(nx, x.clone());
-        check(&r, "theirs landed under ours");
+        assert_eq!(crate::store::clones(), mine, "a rebase copies no store");
+        check(&mut r, "theirs landed under ours");
         assert_eq!(
             r.view.get("item", &[Value::Id(idv(1001)), Value::text("c")]).unwrap()["pos"],
             Value::Int(4)
         );
         let e6 = d.add(&mut r, &me, 6, 1, "d");
-        check(&r, "authored with one pending");
+        check(&mut r, "authored with one pending");
         confirm(&mut a, &mut r, &e4);
-        check(&r, "the older one confirmed");
+        check(&mut r, "the older one confirmed");
         // One page with ours after theirs: the batch a reconnect delivers.
         let y = d.add(&mut other, &them, 7, 1, "y");
         let (ny, fy) = match a.sequence_entry(&y) {
@@ -943,17 +1242,219 @@ mod tests {
             Sequenced::Appended(n, f) => (n, f),
             o => panic!("{o:?}"),
         };
+        let mine = crate::store::clones();
         r.receive_batch([(ny, y, Some(fy)), (n6, e6, Some(f6))]);
-        check(&r, "a page of theirs and ours");
+        assert_eq!(crate::store::clones(), mine, "a rebase copies no store");
+        check(&mut r, "a page of theirs and ours");
         assert_eq!(r.confirmed, a.store);
+    }
+
+    /// §R2 Alone, an intent is run once — when it is authored — and never
+    /// again: the authority appends the replica's record, and the replica
+    /// confirms by it. Counted by `runs`, which a debug build's guards do
+    /// not add to. Falsified by sequencing with `sequence_entry` in
+    /// `local_commit` (two runs per intent), and by confirming by
+    /// `apply_one` whatever is recorded (two again).
+    #[test]
+    fn a_peer_alone_runs_each_intent_once() {
+        let d = demo();
+        for native in [true, false] {
+            let (mut a, mut r) = (d.authority(), d.replica(native));
+            let me = Ctx::new("me", "local");
+            let before = runs();
+            d.create(&mut r, &me, 1, "Mine");
+            local_commit(&mut a, &mut r);
+            for i in 0..40 {
+                d.add(&mut r, &me, 10 + i, 1, &format!("t{i}"));
+                local_commit(&mut a, &mut r);
+            }
+            assert_eq!(runs() - before, 41, "runs for 41 intents, native: {native}");
+            assert!(r.pending.is_empty() && r.recorded.is_empty());
+            assert_eq!(r.confirmed, a.store);
+            assert_eq!(r.view, r.confirmed);
+            assert!(r.diverged.is_empty());
+            // A log sequenced by records is one a server adopts by running it.
+            assert!(Authority::adopt(d.schema.clone(), d.bodies.clone(), &a.log).is_ok());
+        }
+    }
+
+    /// §R2 Against a server, an intent of this peer's own is run once here —
+    /// when it is authored — and confirmed by its record, whether the
+    /// acknowledgement comes with the authority's facts (compared) or
+    /// without (the record is the facts). The authority's own run is the
+    /// server's, in another process, and not counted with the replica's.
+    /// Falsified by confirming by `apply_one` whatever is recorded: two
+    /// runs per intent.
+    #[test]
+    fn against_a_server_an_own_intent_is_run_once() {
+        let d = demo();
+        let mut a = d.authority();
+        let me = Ctx::new("me", "s");
+        let mut r = d.replica(true);
+        let mut here = 0;
+        let mut author = |r: &mut Replica, f: &dyn Fn(&mut Replica) -> Entry| {
+            let before = runs();
+            let e = f(r);
+            here += runs() - before;
+            e
+        };
+        let e1 = author(&mut r, &|r| d.create(r, &me, 1, "Mine"));
+        let es: Vec<Entry> = (0..20).map(|i| author(&mut r, &|r| d.add(r, &me, 10 + i, 1, &format!("t{i}")))).collect();
+        assert_eq!(here, 21, "one run per intent authored");
+        let mut sequenced = vec![];
+        for e in std::iter::once(&e1).chain(&es) {
+            match a.sequence_entry(e) {
+                Sequenced::Appended(n, f) => sequenced.push((e.id, n, f)),
+                o => panic!("{o:?}"),
+            }
+        }
+        let before = runs();
+        for (i, (id, n, f)) in sequenced.into_iter().enumerate() {
+            if i % 2 == 0 {
+                r.receive_facts(n, f);
+            }
+            r.ack(&id, n);
+        }
+        assert_eq!(runs() - before, 0, "confirming ran nothing");
+        assert!(r.pending.is_empty() && r.recorded.is_empty() && r.diverged.is_empty());
+        assert_eq!(r.confirmed, a.store);
+        assert!(same_rows(&r.view, &r.confirmed));
+    }
+
+    /// §R2 Facts that differ from the record are a divergence, exactly as
+    /// facts that differ from a run were: the sequence is named in
+    /// `diverged`, the confirmed store takes the authority's facts, and
+    /// the view is rebased onto them — told as transitions — with what is
+    /// still pending run again over them. Falsified by taking the record
+    /// whatever the facts say: `diverged` is empty and the confirmed store
+    /// has position 2, not 99.
+    #[test]
+    fn facts_that_differ_from_the_record_are_a_divergence() {
+        let d = demo();
+        let mut a = d.authority();
+        let me = Ctx::new("me", "s");
+        let mut r = d.replica(true);
+        let e1 = d.create(&mut r, &me, 1, "Mine");
+        let e2 = d.add(&mut r, &me, 2, 1, "a");
+        let e3 = d.add(&mut r, &me, 3, 1, "b");
+        let mut shadow = drawn(&mut r);
+        let mut facts = vec![];
+        for e in [&e1, &e2, &e3] {
+            match a.sequence_entry(e) {
+                Sequenced::Appended(n, f) => facts.push((e.id, n, f)),
+                o => panic!("{o:?}"),
+            }
+        }
+        // The authority says the first item went at 99.
+        for c in &mut facts[1].2 {
+            if let Change::Add(_, row) = c {
+                row.insert("pos".into(), Value::int(99));
+            }
+        }
+        let item = |st: &MemoryStore, t: &str| st.get("item", &[Value::Id(idv(1001)), Value::text(t)]).unwrap()["pos"].clone();
+        for (id, n, f) in facts.into_iter().take(2) {
+            r.receive_facts(n, f);
+            r.ack(&id, n);
+        }
+        assert_eq!(r.diverged, vec![2], "the record and the facts disagreed");
+        assert_eq!(item(&r.confirmed, "a"), Value::int(99), "the authority's facts win");
+        assert_eq!(r.pending, vec![e3.clone()]);
+        assert_eq!(item(&r.view, "b"), Value::int(100), "what is still pending ran again over them");
+        assert!(same_rows(&r.view, &replayed(&r)));
+        follow(&mut shadow, &mut r, "a divergence under a pending intent");
+    }
+
+    /// §R2 A pending intent opened from disk has no record, since a record
+    /// is never written: opening runs it once, which records it, and it is
+    /// then confirmed by that record without running again. Falsified by
+    /// not recording in the open's replay: nothing is recorded, and with
+    /// that assertion taken out, confirming runs each of the three again.
+    #[test]
+    fn an_intent_opened_without_a_record_runs_once_then_confirms_by_it() {
+        let d = demo();
+        let mut a = d.authority();
+        let me = Ctx::new("me", "s");
+        let mut author = d.replica(true);
+        let es = [
+            d.create(&mut author, &me, 1, "Mine"),
+            d.add(&mut author, &me, 2, 1, "a"),
+            d.add(&mut author, &me, 3, 1, "b"),
+        ];
+        let before = runs();
+        let mut r = Replica::open(d.schema.clone(), d.bodies.clone(), MemoryStore::empty(d.schema.clone()), 0, es.to_vec());
+        r.hold(d.procs.clone());
+        assert_eq!(runs() - before, 3, "opening runs each once");
+        assert_eq!(r.recorded.len(), 3, "and records it");
+        let before = runs();
+        for e in &es {
+            match a.sequence_entry(e) {
+                Sequenced::Appended(n, _) => r.ack(&e.id, n),
+                o => panic!("{o:?}"),
+            }
+        }
+        let ours = runs() - before - es.len();
+        assert_eq!(ours, 0, "confirming ran nothing (the authority ran {} times)", es.len());
+        assert!(r.pending.is_empty() && r.diverged.is_empty());
+        assert_eq!(r.confirmed, a.store);
+    }
+
+    /// §R2 A verdict and a sign-in rebase by changes too: from the intent
+    /// they touch, the view undoes and runs again, and a view is told the
+    /// transitions — no copy, no `Rebuilt`. An intent the rebase now
+    /// refuses (an item on a playlist whose creation was refused) is
+    /// dropped with its reason, as it always was. Falsified by `reject`
+    /// undoing only the refused intent's own record: the item on the
+    /// refused playlist stays in the view and the replay disagrees.
+    #[test]
+    fn a_verdict_and_a_sign_in_rebase_by_changes() {
+        let d = demo();
+        let me = Ctx::new("me", "s");
+        let mut r = d.replica(true);
+        let e1 = d.create(&mut r, &me, 1, "Mine");
+        let e2 = d.create(&mut r, &me, 2, "Doomed");
+        d.add(&mut r, &me, 3, 1, "a");
+        let doomed = d.add(&mut r, &me, 4, 2, "x");
+        d.add(&mut r, &me, 5, 1, "b");
+        let mut shadow = drawn(&mut r);
+        let copies = crate::store::clones();
+        r.reject(&e2.id, Refusal::Refused("no".into()));
+        assert_eq!(crate::store::clones(), copies, "a verdict copies no store");
+        assert_eq!(r.pending.iter().map(|e| e.id).collect::<Vec<_>>(), [idv(1), idv(3), idv(5)]);
+        assert_eq!(r.rejections.len(), 2, "the verdict, and the intent it left with nothing to apply to");
+        assert_eq!(r.rejections[1].0, doomed.id);
+        assert!(
+            matches!(r.rejections[1].1, Refusal::Refused(_) | Refusal::MissingParent(..)),
+            "{:?}",
+            r.rejections[1]
+        );
+        assert!(r.view.get("playlist", &[Value::Id(idv(1002))]).is_none());
+        assert!(same_rows(&r.view, &replayed(&r)));
+        follow(&mut shadow, &mut r, "a verdict");
+        let _ = e1;
+
+        // Signed in: the intents authored as nobody become theirs.
+        let nobody = Ctx::nobody();
+        let mut r = d.replica(true);
+        d.create(&mut r, &me, 1, "Mine");
+        d.create(&mut r, &nobody, 2, "Theirs");
+        d.add(&mut r, &nobody, 3, 2, "a");
+        let mut shadow = drawn(&mut r);
+        let copies = crate::store::clones();
+        r.sign_in(&Ctx::new("you", "t"));
+        assert_eq!(crate::store::clones(), copies, "a sign-in copies no store");
+        assert_eq!(r.view.get("playlist", &[Value::Id(idv(1002))]).unwrap()["user_id"], Value::text("you"));
+        assert_eq!(r.view.get("playlist", &[Value::Id(idv(1001))]).unwrap()["user_id"], Value::text("me"));
+        assert!(same_rows(&r.view, &replayed(&r)));
+        follow(&mut shadow, &mut r, "a sign-in");
     }
 
     /// An intent of this peer's that comes back under its own id but not as
     /// it was authored is somebody else's news: the view applied what was
-    /// authored, so it is replayed rather than trusted. Falsified by
-    /// matching the next pending intent by id alone: the view keeps "t1",
-    /// the confirmed store has "t2", and the equality `advance` asserts
-    /// fails.
+    /// authored, so it is rebased rather than trusted — and a view of it is
+    /// told so, as the transitions: "t1" going, "t2" arriving (R2).
+    /// Falsified by matching the next pending intent by id alone: the view
+    /// keeps "t1", the confirmed store has "t2", and the equality `advance`
+    /// asserts fails.
     #[test]
     fn an_own_intent_confirmed_otherwise_is_replayed() {
         let d = demo();
@@ -969,7 +1470,20 @@ mod tests {
         assert!(r.pending.is_empty());
         assert_eq!(r.view, r.confirmed);
         assert!(r.view.get("item", &[Value::Id(idv(1001)), Value::text("t2")]).is_some());
-        assert_eq!(r.take_changes(), Changes::Rebuilt);
+        let Changes::Applied(told) = r.take_changes() else {
+            panic!("a rebase is its transitions")
+        };
+        let track = |c: &Change| match c {
+            Change::Add(_, row) | Change::Remove(_, row) | Change::Edit(_, _, row) => row["track_id"].clone(),
+        };
+        assert!(
+            matches!(&told[..], [Change::Add(..), Change::Remove(..), Change::Add(..)]),
+            "authored, undone, landed: {told:?}"
+        );
+        assert_eq!(
+            told.iter().map(track).collect::<Vec<_>>(),
+            [Value::text("t1"), Value::text("t1"), Value::text("t2")]
+        );
     }
 
     /// The journal is what the confirmed store moved by, per sequence, in

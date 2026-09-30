@@ -92,7 +92,12 @@ pub fn three_peers(out: &Out) {
     // step 3: alice comes back. bob's entries land; her pending replays on top.
     alice.receive(s2, e2.clone());
     alice.receive(s3, e3.clone());
-    claim("the rebase is reported as a rebuild", alice.take_changes() == Changes::Rebuilt);
+    // Each landing undoes her track, lands bob's, and puts hers back on
+    // top: three transitions a view can be told, twice (plan-perf R2).
+    claim(
+        "the rebase is reported as its transitions",
+        matches!(alice.take_changes(), Changes::Applied(ref c) if c.len() == 6),
+    );
     claim("after the rebase alice's track is third", pos_of(&alice, 9) == Some(Value::Int(3)));
     claim("alice's confirmed state is bob's", alice.verify_at() == bob.verify_at());
     // alice pushes what she did alone; it lands after everything that
