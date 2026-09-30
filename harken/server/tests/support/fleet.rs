@@ -238,8 +238,12 @@ impl Server {
     }
 
     /// The size of `log.ark-log`, in bytes.
+    /// The log on disk, in bytes: the snapshot `log.ark-log` and the
+    /// journal `log.ark-journal` appended after it.
     pub fn log_bytes(&self) -> u64 {
-        std::fs::metadata(ark_server::persist::path_of(&self.data)).map_or(0, |m| m.len())
+        let size = |p: std::path::PathBuf| std::fs::metadata(p).map_or(0, |m| m.len());
+        size(ark_server::persist::path_of(&self.data))
+            + size(ark_server::persist::journal_path_of(&self.data))
     }
 }
 

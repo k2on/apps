@@ -7,7 +7,7 @@
 //!
 //! `ark::sim` already holds the engine to this in one process. What only
 //! processes can reach is everything outside it: the WebSocket and its
-//! keepalive, a server killed and restarted from `log.ark-log`, a peer
+//! keepalive, a server killed and restarted from its data directory, a peer
 //! killed between writing its intent and pumping, a connection cut in the
 //! middle of a page, the sign-in before the first frame, the scanner
 //! authoring while a client is away.
@@ -276,16 +276,16 @@ fn pending(peers: &mut [&mut PeerProc]) -> i64 {
 
 /// **3a. The server stopped mid-stream.** Three peers push bursts of
 /// intents; the server is sent `SIGTERM` with frames in flight, the peers
-/// go on authoring against nothing, and it is started again from
-/// `log.ark-log` — the peers find it on their own. Converged, nothing lost
-/// and nothing twice, and the file read back whole after the stop
-/// (`persist.rs` writes a temporary file and renames it into place, so a
-/// stop lands between two versions and never inside one).
+/// go on authoring against nothing, and it is started again from its data
+/// directory — the peers find it on their own. Converged, nothing lost and
+/// nothing twice, and the log read back whole after the stop (`persist.rs`
+/// renames a snapshot into place and appends a journal it reads to its
+/// last whole record, so a stop never leaves half of either).
 ///
 /// Falsified by starting again over an emptied data directory: the
 /// peers' cursors are ahead of an empty log, the new server's acks name
 /// sequences they believe they are past, and nothing pending is ever
-/// acked — the shape witness 3b reaches by accident, reached on purpose.
+/// acked — the shape 3b found by accident before R3, reached on purpose.
 #[test]
 fn a_server_stopped_mid_stream_loses_nothing() {
     let mut f = Fleet::new("server-stop");
@@ -320,35 +320,35 @@ fn a_server_stopped_mid_stream_loses_nothing() {
     measured("converge after a server restart", t.elapsed());
     assert_eq!(done.head, 1 + 45, "one song and forty-five playlists");
     println!(
-        "fleet: log.ark-log is {} bytes for {} entries ({} bytes an entry)",
+        "fleet: the log on disk (snapshot and journal) is {} bytes for {} entries ({} bytes an entry)",
         f.server.log_bytes(),
         done.head,
         f.server.log_bytes() / done.head as u64
     );
 }
 
-/// **3b. The server killed with `-9` mid-stream** — a witness (plan §4).
+/// **3b. The server killed with `-9` mid-stream.**
 ///
 /// Over a log of 1,500 entries, so that writing it down takes long enough
 /// to land in: three peers push bursts and the server is killed in the
-/// middle of each, up to eight times. After each kill, **no peer may have
+/// middle of each, eight times. After each kill, **no peer may have
 /// confirmed a sequence the log on disk does not hold** — a peer that
-/// has, has an entry the restarted server will give a different one at
+/// has, has an entry the restarted server would give a different one at
 /// the same sequence. Then restarted, converged.
 ///
-/// What it finds: `Hub::after` (`rust/ark-server/src/hub.rs`) delivers
-/// what the machine queued — the `Ack` to the author, the `Batch` to
-/// everyone else — and only then calls `persist`. A kill between the two
-/// leaves peers holding sequences the file never got. The restarted server
-/// hands those sequences to other entries; every cursor still agrees with
-/// the head, so nothing retries, the state hashes differ for ever, and an
-/// intent whose ack the peer took is stuck pending (its re-ack names a
-/// sequence the peer thinks it is already past).
+/// What it holds is that an acknowledgement follows the write: the hub
+/// appends what a message moved to `log.ark-journal` and syncs it before
+/// it sends the `Ack` to the author or the `Batch` to anyone else (R3 in
+/// `rust/ark-server`). It was a witness until then — `Hub::after` sent
+/// first and rewrote the whole `log.ark-log` after, and a kill between
+/// left peers confirmed past the file, the restarted server reusing their
+/// sequences, the hashes different for ever and an acked intent stuck
+/// pending.
 ///
-/// Falsified — that is, made to pass — by moving `self.persist()` before
-/// the loop that sends in `Hub::after`: no peer is ever ahead of the file.
+/// Falsified by that code, before R3 (up to `a3ef488`): round 0 fails —
+/// "a confirmed up to 1501 and the log on disk holds 1500" — three runs of
+/// three.
 #[test]
-#[ignore = "witness: the hub acks and fans out an entry before log.ark-log holds it; a kill -9 between loses it and the restarted server reuses its seq"]
 fn a_server_killed_mid_stream_loses_nothing() {
     let mut f = Fleet::seeded("server-kill", |s| {
         // Songs, not playlists: naming a playlist reads every other one of
@@ -377,7 +377,7 @@ fn a_server_killed_mid_stream_loses_nothing() {
             let st = p.status();
             assert!(
                 st.cursor <= on_disk,
-                "round {round}: {} confirmed up to {} and log.ark-log holds {on_disk}: the server said it before it wrote it",
+                "round {round}: {} confirmed up to {} and the log on disk holds {on_disk}: the server said it before it wrote it",
                 p.name,
                 st.cursor
             );
@@ -477,7 +477,9 @@ fn copy_dir(from: &std::path::Path, to: &std::path::Path) {
 /// fires, because what is left is less — so the two cuts this asserts are
 /// cuts in the middle of the sync, not after it. (The first version armed
 /// the second cut once the first had fired, and under load a peer quick to
-/// dial again had synced before it was armed: the proxy queues cuts now.)
+/// dial again had synced before it was armed: the proxy queues cuts now,
+/// and each is a sixth of a sync rather than a third, for the reason the
+/// code gives.)
 #[test]
 fn a_first_sync_cut_mid_page_resumes_at_its_cursor() {
     let long = std::env::var("FLEET_LONG").is_ok_and(|v| v == "1");
@@ -528,7 +530,7 @@ fn a_first_sync_cut_mid_page_resumes_at_its_cursor() {
     let head = 1500;
     assert!(s.wait(head, PATIENCE), "the seeder has the log");
     println!(
-        "fleet: log.ark-log is {} bytes for {head} entries ({} bytes an entry)",
+        "fleet: the log on disk (snapshot and journal) is {} bytes for {head} entries ({} bytes an entry)",
         f.server.log_bytes(),
         f.server.log_bytes() / head as u64
     );
@@ -545,15 +547,26 @@ fn a_first_sync_cut_mid_page_resumes_at_its_cursor() {
     println!("fleet: a whole first sync of {head} entries is {whole} bytes from the server");
 
     let mut h = f.peer_stopped("cut", Some("alice"));
-    // Both cuts armed before the first byte: the second counts from the
-    // byte after the first, whenever the peer dials again.
-    h.proxy.cut_after(whole / 3);
-    h.proxy.cut_after(whole / 3);
+    // Both cuts armed before the first byte, the second counting from the
+    // byte after the first, and each a sixth of what a whole sync took —
+    // about a page. Under load `whole` can come out larger than the sync
+    // really is (a peer too busy applying a page to answer the keepalive
+    // is dropped and fetches from its cursor again), and at a third the
+    // second cut could find less left than its budget and never fire; a
+    // sixth leaves room for `whole` to be more than twice the truth.
+    h.proxy.cut_after(whole / 6);
+    h.proxy.cut_after(whole / 6);
     let t = Instant::now();
     h.start();
+    let cut = eventually(PATIENCE * 3, || {
+        h.proxy.cuts() == 2 || h.status().cursor >= head
+    });
     assert!(
-        eventually(PATIENCE, || h.proxy.cuts() == 2),
-        "both cuts, each before the sync was done"
+        cut && h.proxy.cuts() == 2,
+        "both cuts, each before the sync was done: {} of 2 fired, {} of {whole} bytes down, cursor {}",
+        h.proxy.cuts(),
+        h.proxy.down_bytes(),
+        h.status().cursor
     );
     assert!(h.wait(head, PATIENCE), "the cut peer reaches the head");
     measured(

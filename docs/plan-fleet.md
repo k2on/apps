@@ -241,9 +241,10 @@ cores, a debug build, nothing else running unless said), printed by
 
 | what | took |
 |---|---|
-| the whole default fleet (13 scenarios, the fuzz at 20 steps) | 17 s |
-| a fresh peer syncs 1,500 entries over a real socket (370 KB from the server) | 3.9 s |
-| …the same, its connection cut twice mid-page | 4.1 s |
+| the whole default fleet (13 scenarios, the fuzz at 20 steps; before 3b ran) | 17 s |
+| …with 3b, in `cargo test --workspace` beside everything else, after R3 and R4 | 31–32 s |
+| a fresh peer syncs 1,500 entries over a real socket (370 KB from the server) | 3.9 s; 2.2 s after R4 |
+| …the same, its connection cut twice mid-page | 4.1 s; 3.1–3.2 s after R4 |
 | converge after a black hole of twenty intents | 0.29 s |
 | three peers online, 25 interleaved playlist moves, converge | 0.29 s |
 | the server restarted: to listening | 52–82 ms |
@@ -252,50 +253,53 @@ cores, a debug build, nothing else running unless said), printed by
 | a black-holed socket closed by the server (keepalive 300 ms × 3) | 1.03 s |
 | …and noticed by the peer on its own | 1.03 s |
 | converge after the keepalive closed a black hole | 0.29 s |
-| seed 1,500 entries through one peer (`FLEET_LONG=1`) | 51.5 s |
+| seed 1,500 entries through one peer (`FLEET_LONG=1`, before R3) | 51.5 s |
 | the fuzz, 2,000 steps, 3–5 peers, whole run (with the §4 fix below) | 16–38 s |
 
-`log.ark-log` is about 348 bytes an entry for playlists (46 entries, 16 KB)
-and 521 for the mixed 1,500 of scenario 5 (500 songs, 10 playlists, 990
-adds: 782 KB).
+The log on disk is about 348 bytes an entry for playlists (46 entries,
+16 KB; 345 as snapshot and journal after R3) and 521 for the mixed 1,500
+of scenario 5 (500 songs, 10 playlists, 990 adds: 782 KB, seeded as a
+snapshot).
 
-**Found, and left as a witness.** `a_server_killed_mid_stream_loses_nothing`
-(3b) is `#[ignore = "witness: …"]`. `Hub::after` delivers what the machine
-queued — the `Ack` to the author, the `Batch` to everyone else — and only
-then writes `log.ark-log`. A `kill -9` between the two leaves peers
+**Found, and fixed as R3.** `a_server_killed_mid_stream_loses_nothing`
+(3b) landed as `#[ignore = "witness: …"]`. `Hub::after` delivered what the
+machine queued — the `Ack` to the author, the `Batch` to everyone else —
+and only then wrote `log.ark-log`. A `kill -9` between the two left peers
 confirmed past the file: over a 1,500-entry log the first of eight rounds
-fails, three runs of three —
+failed, three runs of three —
 
     round 0: a confirmed up to 1501 and log.ark-log holds 1500: the server said it before it wrote it
 
-— and the restarted server gives those sequences to other entries. Every
-cursor then agrees with the head, so nothing retries; the state hashes
-differ for ever, and an intent whose ack was taken is stuck pending (its
-re-ack names a sequence the peer believes it is past). The long fuzz found
+— and the restarted server gave those sequences to other entries. Every
+cursor then agreed with the head, so nothing retried; the state hashes
+differed for ever, and an intent whose ack was taken was stuck pending (its
+re-ack named a sequence the peer believed it was past). The long fuzz found
 the same thing on its own (`FLEET_LONG=1 FLEET_SEED=1790774728680826455`:
-one peer at the head with a different hash and nine pending). Moving
-`self.persist()` before the sending loop makes 3b pass all eight rounds and
-that seed, 42 and 7 converge at 2,000 steps; the fix belongs in
-`rust/ark-server` and was not made here. Two further proposals the same
-witness argues for: a `Hello` whose `since` is past the log's head is a
-peer from a log this server no longer has, and should be answered (a
-snapshot, or a denial that says so) rather than served nothing; and
-`persist::save` renames without an `fsync` of the file or the directory,
-which a process kill cannot tear but a power cut can (`fleet-vm`'s
-`server.crash()` is the one place that would show it).
+one peer at the head with a different hash and nine pending), and moving
+`self.persist()` before the sending loop made both pass. R3 (`3197e8a`,
+`a486891`, `19c8bf6`) is the fix as landed: the log is a snapshot
+`log.ark-log` and an append-only `log.ark-journal`, synced before anything
+it holds is sent. 3b is a plain test now and passes three runs of three;
+that seed and seed 99 converge at 2,000 steps. One proposal the witness
+argued for is still open: a `Hello` whose `since` is past the log's head
+is a peer from a log this server no longer has, and could be answered (a
+snapshot, or a denial that says so) rather than served nothing — 3a's
+falsification, an emptied data directory, is that case, and today it
+leaves every pending intent unacked for ever.
 
-**Looked for, and not found.** The log file is not torn by a kill:
-`persist.rs` already writes a temporary name and renames it into place (§4
-guessed otherwise), and every kill in 3a, 3b and the fuzz read back whole.
+**Looked for, and not found.** The log file was not torn by a kill:
+`persist.rs` already wrote a temporary name and renamed it into place (§4
+guessed otherwise), and every kill in 3a, 3b and the fuzz read back whole
+— before R3 and after it.
 A `Duplicate` after a peer's restart does advance its cursor (4b). A
 repeated `Hello` on one connection is paging, not a departure (11). The
 keepalive closes a black-holed socket at both ends (10). Revoking a session
 needed nothing new in `ark-auth`: `/auth/logout` with the peer's token
 does it (8).
 
-**Performance, for the other pass.** Every push rewrites the whole log,
-so seeding 1,500 entries through one peer takes 51.5 s, about 34 ms an
-entry at the end; scenario 5 seeds the log before the server starts
+**Performance, for the other pass.** Before R3 every push rewrote the
+whole log, so seeding 1,500 entries through one peer took 51.5 s, about
+34 ms an entry at the end (not measured again since the journal); scenario 5 seeds the log before the server starts
 instead, and pushes through a peer only under `FLEET_LONG=1`.
 `Log::entries_after` cloning the remainder per page was not isolated: a
 fresh sync of 1,500 is six pages and 3.9 s, and nothing here says how much
@@ -334,5 +338,7 @@ mistake instead: `settle` is "nothing pending, the cursor still for two
 pumps", which a peer under emulation satisfied before its first batch
 arrived, so the machines wait for the head `/healthz` reports.
 
-**Not verified.** The fleet also runs inside `nix flake check`'s `rust`
-check, on loopback, in the build sandbox.
+**In the sandbox.** `nix flake check` at `a3ef488` passed: its `rust`
+check runs the fleet in the build sandbox on loopback, in release — 13
+passed and the witness ignored, in 8 s. After R3, `cargo test --workspace`
+here ran it twice beside everything else, 14 passed each time.

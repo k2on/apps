@@ -131,7 +131,7 @@ hashes as the server's log does, and every accepted intent is in it once.
     cd rust && cargo test -p harken-server --test fleet -- --nocapture   # the timings
     FLEET_LONG=1 cargo test -p harken-server --test fleet the_seeded_fuzz -- --nocapture
     FLEET_SEED=12345 cargo test -p harken-server --test fleet the_seeded_fuzz
-    cargo test -p harken-server --test fleet -- --ignored                # the witnesses
+    cargo test -p harken-server --test fleet -- --ignored                # witnesses, if any (none today)
 
 The fuzz runs 20 steps on a fixed seed by default, and 2,000 on a seed from
 the clock under `FLEET_LONG=1`; `FLEET_SEED` names one either way, and a

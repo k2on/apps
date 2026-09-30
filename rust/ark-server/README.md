@@ -107,7 +107,7 @@ harken's `server/src/web.rs` made generic.
 | `hub.server()` under a mutex | `hub.read(|h| ..)` on the hub's thread (`authority()`, `rows(table)`, `rooms()`, `identity(conn)`, `health()`) |
 | `web::router(dir)`, `web::build_tag(dir)` | `web::router_with_module(dir, module)`, `web::build_tag(dir, module)` |
 | `.nest_service("/media", ServeDir::new(dir))` | `.media(dir)` |
-| harken's `persist.rs` (`<scope>.ark-log`) | `persist.rs`: one log, `log.ark-log` |
+| harken's `persist.rs` (`<scope>.ark-log`) | `persist.rs`: one log, a snapshot `log.ark-log` and the append-only `log.ark-journal` after it, synced before anything it holds is acknowledged |
 | `/healthz` per scope | `/healthz`: `ok`, `connections N`, `head N`, `room R peers N` |
 
 ## Tested, and not
