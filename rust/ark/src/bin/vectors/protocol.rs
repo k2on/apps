@@ -62,21 +62,21 @@ pub fn protocol(out: &Out) {
         ("pos", Value::Int(1)),
     ]);
     // A hello carries the spec version the client speaks, which is this
-    // crate's: a version bump moves these two files and no others. The
-    // first names the log its cursor is of; the second has not been told.
+    // crate's: a version bump moves these files and no others. Neither of
+    // the first two names a log, so they are the bytes they were before
+    // logs had names; `hello-named` is the first naming the log its cursor
+    // is of (Round 4).
+    let hello = |log_id| ClientMsg::Hello {
+        sub: Subscription {
+            since: 4,
+            mode: Mode::Whole,
+            log_id,
+        },
+        token: Some("tok".into()),
+        spec: SPEC_VERSION,
+    };
     let client_frames: Vec<(&str, ClientMsg)> = vec![
-        (
-            "hello",
-            ClientMsg::Hello {
-                sub: Subscription {
-                    since: 4,
-                    mode: Mode::Whole,
-                    log_id: Some(log_a),
-                },
-                token: Some("tok".into()),
-                spec: SPEC_VERSION,
-            },
-        ),
+        ("hello", hello(None)),
         (
             "hello-facts",
             ClientMsg::Hello {
@@ -89,6 +89,7 @@ pub fn protocol(out: &Out) {
                 spec: SPEC_VERSION,
             },
         ),
+        ("hello-named", hello(Some(log_a))),
         (
             "push",
             ClientMsg::Push {
@@ -106,18 +107,25 @@ pub fn protocol(out: &Out) {
         ),
         ("say", ClientMsg::Say { frame: vec![1, 2, 3] }),
     ];
+    // A batch and a snapshot of a log nobody named, as they always were,
+    // and each again of a named one.
+    let batch = |log_id| ServerMsg::Batch {
+        items: vec![
+            (5, entry.clone(), None),
+            (6, entry.clone(), Some(vec![Change::Add("item".into(), row.clone())])),
+        ],
+        has_more: true,
+        log_id,
+    };
+    let snapshot = |log_id| ServerMsg::SnapshotOf {
+        seq: 2,
+        hash: vec![0xcd; 32],
+        rows: BTreeMap::from([("item".to_string(), vec![Value::Struct(row.clone())])]),
+        log_id,
+    };
     let server_frames: Vec<(&str, ServerMsg)> = vec![
-        (
-            "batch",
-            ServerMsg::Batch {
-                items: vec![
-                    (5, entry.clone(), None),
-                    (6, entry.clone(), Some(vec![Change::Add("item".into(), row.clone())])),
-                ],
-                has_more: true,
-                log_id: Some(log_a),
-            },
-        ),
+        ("batch", batch(None)),
+        ("batch-named", batch(Some(log_a))),
         (
             "facts",
             ServerMsg::FactsFor {
@@ -127,15 +135,8 @@ pub fn protocol(out: &Out) {
                 )],
             },
         ),
-        (
-            "snapshot",
-            ServerMsg::SnapshotOf {
-                seq: 2,
-                hash: vec![0xcd; 32],
-                rows: BTreeMap::from([("item".to_string(), vec![Value::Struct(row.clone())])]),
-                log_id: Some(log_a),
-            },
-        ),
+        ("snapshot", snapshot(None)),
+        ("snapshot-named", snapshot(Some(log_a))),
         (
             "ack",
             ServerMsg::Ack {
@@ -316,9 +317,19 @@ pub fn protocol(out: &Out) {
         "protocol: a hello naming another log is answered with this one's snapshot, and no other hello is"
     );
 
+    // Absence is the one encoding of "no log": a hello saying `log: null`
+    // is not a frame.
+    if let Some((_, h)) = client_frames.first() {
+        let mut v = h.to_value();
+        if let Value::Struct(fs) = &mut v {
+            fs.insert("log".into(), Value::Null);
+        }
+        assert!(ClientMsg::from_value(&v).is_err(), "protocol: a hello whose log is null decoded");
+    }
+
     // A snapshot whose bytes name another log than its frame: a runner
     // must read the log's identity, not only the rows.
-    if let Some((_, snap)) = server_frames.iter().find(|(n, _)| *n == "snapshot") {
+    if let Some((_, snap)) = server_frames.iter().find(|(n, _)| *n == "snapshot-named") {
         let v = snap.to_value();
         let mut other = v.clone();
         if let Value::Struct(fs) = &mut other {

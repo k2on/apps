@@ -45,7 +45,7 @@ pub struct Subscription {
     /// Which log `since` is a sequence of (§10), as the peer last heard it
     /// named; `None` from a peer that has not been told, or one older than
     /// logs having names, which is served as before (§12.4). On the wire,
-    /// `log`, an id or null; a hello without the field decodes as `None`.
+    /// `log`, an id, absent for `None`.
     pub log_id: Option<Id>,
 }
 
@@ -128,9 +128,15 @@ fn strct(pairs: Vec<(&str, Value)>) -> Value {
     Value::Struct(pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect())
 }
 
-// A log's identity on the wire: an id, or null where none is known.
-fn log_value(id: &Option<Id>) -> Value {
-    id.map_or(Value::Null, Value::Id)
+// A log's identity on the wire: `log`, an id, and absent where none is
+// known — so a frame that names no log is the bytes it was before logs had
+// names, and a runtime that never names one is conformant as it was
+// (Round 4).
+fn named<'a>(mut fields: Vec<(&'a str, Value)>, id: &Option<Id>) -> Vec<(&'a str, Value)> {
+    if let Some(i) = id {
+        fields.push(("log", Value::Id(*i)));
+    }
+    fields
 }
 
 pub fn entry_value(e: &Entry) -> Value {
@@ -165,13 +171,15 @@ impl ClientMsg {
         match self {
             ClientMsg::Hello { sub, token, spec } => node(
                 "hello",
-                vec![
-                    ("since", int(sub.since)),
-                    ("mode", txt(if sub.mode == Mode::Whole { "whole" } else { "facts" })),
-                    ("token", token.as_deref().map(txt).unwrap_or(Value::Null)),
-                    ("spec", int(*spec)),
-                    ("log", log_value(&sub.log_id)),
-                ],
+                named(
+                    vec![
+                        ("since", int(sub.since)),
+                        ("mode", txt(if sub.mode == Mode::Whole { "whole" } else { "facts" })),
+                        ("token", token.as_deref().map(txt).unwrap_or(Value::Null)),
+                        ("spec", int(*spec)),
+                    ],
+                    &sub.log_id,
+                ),
             ),
             ClientMsg::Push { entries } => node("push", vec![("entries", Value::List(entries.iter().map(entry_value).collect()))]),
             ClientMsg::NeedFacts { seqs } => node("need_facts", vec![("seqs", Value::List(seqs.iter().map(|n| int(*n)).collect()))]),
@@ -231,14 +239,13 @@ fn sub(m: &BTreeMap<FieldName, Value>) -> Result<Subscription, DecodeError> {
     })
 }
 
-/// The `log` of a frame that may carry one. Absent is `None`, as null is:
-/// a frame from a runtime older than logs having names (§12.4), which is
-/// served — and serves — as it was.
+/// The `log` of a frame that may carry one: an id, or `None` where the
+/// field is absent — a frame that names no log, which is also every frame
+/// from a runtime older than logs having names (§12.4), served and serving
+/// as it was. A null is refused: absence is the one encoding of "no log",
+/// so that a frame has one form.
 fn log_of(m: &BTreeMap<FieldName, Value>) -> Result<Option<Id>, DecodeError> {
-    match m.get("log") {
-        None | Some(Value::Null) => Ok(None),
-        Some(v) => ident(v).map(Some),
-    }
+    m.get("log").map(ident).transpose()
 }
 
 impl ServerMsg {
@@ -247,25 +254,27 @@ impl ServerMsg {
         match self {
             ServerMsg::Batch { items, has_more, log_id } => node(
                 "batch",
-                vec![
-                    (
-                        "items",
-                        Value::List(
-                            items
-                                .iter()
-                                .map(|(n, e, f)| {
-                                    strct(vec![
-                                        ("seq", int(*n)),
-                                        ("entry", entry_value(e)),
-                                        ("facts", f.as_ref().map(facts_value).unwrap_or(Value::Null)),
-                                    ])
-                                })
-                                .collect(),
+                named(
+                    vec![
+                        (
+                            "items",
+                            Value::List(
+                                items
+                                    .iter()
+                                    .map(|(n, e, f)| {
+                                        strct(vec![
+                                            ("seq", int(*n)),
+                                            ("entry", entry_value(e)),
+                                            ("facts", f.as_ref().map(facts_value).unwrap_or(Value::Null)),
+                                        ])
+                                    })
+                                    .collect(),
+                            ),
                         ),
-                    ),
-                    ("has_more", Value::Bool(*has_more)),
-                    ("log", log_value(log_id)),
-                ],
+                        ("has_more", Value::Bool(*has_more)),
+                    ],
+                    log_id,
+                ),
             ),
             ServerMsg::FactsFor { items } => node(
                 "facts",
@@ -281,15 +290,17 @@ impl ServerMsg {
             ),
             ServerMsg::SnapshotOf { seq, hash, rows, log_id } => node(
                 "snapshot",
-                vec![
-                    ("seq", int(*seq)),
-                    ("hash", Value::Bytes(hash.clone())),
-                    (
-                        "rows",
-                        Value::Struct(rows.iter().map(|(t, vs)| (t.clone(), Value::List(vs.clone()))).collect()),
-                    ),
-                    ("log", log_value(log_id)),
-                ],
+                named(
+                    vec![
+                        ("seq", int(*seq)),
+                        ("hash", Value::Bytes(hash.clone())),
+                        (
+                            "rows",
+                            Value::Struct(rows.iter().map(|(t, vs)| (t.clone(), Value::List(vs.clone()))).collect()),
+                        ),
+                    ],
+                    log_id,
+                ),
             ),
             ServerMsg::Ack { ids, seqs } => node(
                 "ack",
