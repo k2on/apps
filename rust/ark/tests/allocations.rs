@@ -351,8 +351,9 @@ const DEMO: u64 = 285;
 /// node is) and the entry itself. The bound is 44, which binding the row
 /// as the struct it is — what every read cost before R11 — crosses.
 /// Falsified twice: binding the plan's row as `to_value()` in `view.rs`
-/// (`Cand::bind`), 52.2 an entry — the number before R11, exactly; and making `Field` copy what it reads
-/// before taking the field (`cow().into_owned()` in `eval_val`), 194.8.
+/// (`Cand::bind`), 52.2 an entry — the number before R11, exactly; and
+/// making `Field` copy what it reads before taking the field
+/// (`cow().into_owned()` in `eval_val`), 194.8.
 #[test]
 fn a_library_entry_hydrates_in_a_bounded_number_of_allocations() {
     let m = module();
