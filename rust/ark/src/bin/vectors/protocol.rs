@@ -16,7 +16,7 @@ use ark::live::{ConnId, Silent};
 use ark::log::Entry;
 use ark::peer::{Authority, Replica};
 use ark::protocol::{open_access, trusting, Client, ClientMsg, Mode, Server, ServerMsg, Subscription};
-use ark::store::{Change, MemoryStore, Store};
+use ark::store::{Change, MemoryStore, Row, Store};
 use ark::value::{hex, Value};
 
 use super::demo::{self, hash_of, id_n};
@@ -56,11 +56,11 @@ pub fn protocol(out: &Out) {
     };
     // A log's identity (§10): the one the frames below name, and another.
     let (log_a, log_b) = (id_n(0xa1), id_n(0xb2));
-    let row: BTreeMap<String, Value> = args([
+    let row: Row = Row::from_struct(args([
         ("playlist_id", Value::Id(id_n(1))),
         ("track_id", Value::text("t7")),
         ("pos", Value::Int(1)),
-    ]);
+    ]));
     // A hello carries the spec version the client speaks, which is this
     // crate's: a version bump moves these files and no others. Neither of
     // the first two names a log, so they are the bytes they were before
@@ -120,7 +120,7 @@ pub fn protocol(out: &Out) {
     let snapshot = |log_id| ServerMsg::SnapshotOf {
         seq: 2,
         hash: vec![0xcd; 32],
-        rows: BTreeMap::from([("item".to_string(), vec![Value::Struct(row.clone())])]),
+        rows: BTreeMap::from([("item".to_string(), vec![row.to_value()])]),
         log_id,
     };
     let server_frames: Vec<(&str, ServerMsg)> = vec![

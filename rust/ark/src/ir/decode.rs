@@ -92,13 +92,7 @@ fn table(x: &Value) -> D<Table> {
     let key = list(&here("key"), |k| text(&here("key"), k), field(&fs, "key")?)?;
     let indexes = list(&here("indexes"), index, field(&fs, "indexes")?)?;
     let refs = list(&here("refs"), reference, field(&fs, "refs")?)?;
-    Ok(Table {
-        name,
-        columns,
-        key,
-        indexes,
-        refs,
-    })
+    Ok(Table::new(name, columns, key, indexes, refs))
 }
 
 fn column(x: &Value) -> D<Column> {

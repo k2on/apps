@@ -152,12 +152,9 @@ pub fn entry_value(e: &Entry) -> Value {
 
 pub fn change_value(c: &Change) -> Value {
     match c {
-        Change::Add(t, r) => node("add", vec![("table", txt(t)), ("row", Value::Struct(r.clone()))]),
-        Change::Remove(t, r) => node("remove", vec![("table", txt(t)), ("row", Value::Struct(r.clone()))]),
-        Change::Edit(t, o, n) => node(
-            "edit",
-            vec![("table", txt(t)), ("old", Value::Struct(o.clone())), ("new", Value::Struct(n.clone()))],
-        ),
+        Change::Add(t, r) => node("add", vec![("table", txt(t)), ("row", r.to_value())]),
+        Change::Remove(t, r) => node("remove", vec![("table", txt(t)), ("row", r.to_value())]),
+        Change::Edit(t, o, n) => node("edit", vec![("table", txt(t)), ("old", o.to_value()), ("new", n.to_value())]),
     }
 }
 
@@ -469,8 +466,15 @@ fn list<T>(f: impl Fn(&Value) -> D<T>, v: &Value) -> D<Vec<T>> {
     }
 }
 
-fn row_of(v: &Value) -> D<Row> {
+fn args_of(v: &Value) -> D<Args> {
     strct_of(v).cloned()
+}
+
+// A change's row, as the struct it crossed as: a row of no table until the
+// store it is applied to lays it out as its table's (`store.rs`'s module
+// docs), its values copied and its names shared with its shape's.
+fn row_of(v: &Value) -> D<Row> {
+    strct_of(v).map(Row::from_struct_ref)
 }
 
 pub fn entry_from_value(v: &Value) -> D<Entry> {
@@ -480,8 +484,8 @@ pub fn entry_from_value(v: &Value) -> D<Entry> {
         actor: text(need(m, "actor")?)?,
         session: text(need(m, "session")?)?,
         fn_hash: bytes(need(m, "fn")?)?,
-        args: row_of(need(m, "args")?)?,
-        autos: row_of(need(m, "autos")?)?,
+        args: args_of(need(m, "args")?)?,
+        autos: args_of(need(m, "autos")?)?,
     })
 }
 
@@ -672,7 +676,7 @@ impl Client {
                 for (t, vs) in rows {
                     for v in vs {
                         if let Value::Struct(row) = v {
-                            st.apply_change(&Change::Add(t.clone(), row));
+                            st.apply_change(&Change::Add(t.clone(), Row::from_struct(row)));
                         }
                     }
                 }
@@ -1056,7 +1060,7 @@ impl<M: Machine> Server<M> {
                         .store
                         .table_names()
                         .into_iter()
-                        .map(|t| (t.clone(), sn.store.scan(&t).into_iter().map(Value::Struct).collect()))
+                        .map(|t| (t.clone(), sn.store.scan(&t).into_iter().map(Row::into_value).collect()))
                         .collect();
                     (
                         ServerMsg::SnapshotOf {

@@ -264,34 +264,34 @@ mod tests {
     /// `(list_id, pos)`; the mutator `add(list_id, pos)` with an auto `at`,
     /// which writes an item, and the query `lists`.
     fn base() -> Module {
-        let list = Table {
-            name: "list".into(),
-            columns: vec![
+        let list = Table::new(
+            "list",
+            vec![
                 col("id", Ty::Id("list".into()), false),
                 col("name", Ty::Text, false),
                 col("note", Ty::Text, true),
             ],
-            key: vec!["id".into()],
-            indexes: vec![],
-            refs: vec![],
-        };
-        let item = Table {
-            name: "item".into(),
-            columns: vec![
+            vec!["id".into()],
+            vec![],
+            vec![],
+        );
+        let item = Table::new(
+            "item",
+            vec![
                 col("list_id", Ty::Id("list".into()), false),
                 col("pos", Ty::Int, false),
                 col("label", Ty::Text, true),
             ],
-            key: vec!["list_id".into(), "pos".into()],
-            indexes: vec![Index {
+            vec!["list_id".into(), "pos".into()],
+            vec![Index {
                 columns: vec!["label".into()],
                 unique: false,
             }],
-            refs: vec![Ref {
+            vec![Ref {
                 column: "list_id".into(),
                 table: "list".into(),
             }],
-        };
+        );
         let row = Expr::Struct(BTreeMap::from([
             ("list_id".to_string(), Expr::Arg("list_id".into())),
             ("pos".to_string(), Expr::Arg("pos".into())),
@@ -364,13 +364,9 @@ mod tests {
         crate::verify::verify(&old).expect("the fixture verifies");
         assert!(is_additive(&old, &old));
         let mut new = base();
-        new.schema.tables.push(Table {
-            name: "tag".into(),
-            columns: vec![col("name", Ty::Text, false)],
-            key: vec!["name".into()],
-            indexes: vec![],
-            refs: vec![],
-        });
+        new.schema
+            .tables
+            .push(Table::new("tag", vec![col("name", Ty::Text, false)], vec!["name".into()], vec![], vec![]));
         table(&mut new, "list").columns.push(col("colour", Ty::Text, true));
         table(&mut new, "item").indexes.push(Index {
             columns: vec!["pos".into()],

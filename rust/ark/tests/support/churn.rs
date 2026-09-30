@@ -258,7 +258,7 @@ impl<'a> Churn<'a> {
             // Add: a fresh key (or one drawn from its class, so that a
             // composite key joins), every column drawn.
             0..=3 => {
-                let mut row = Row::new();
+                let mut row = Row::default();
                 for c in &tbl.columns {
                     row.insert(c.name.clone(), self.value(st, &t, &c.name));
                 }

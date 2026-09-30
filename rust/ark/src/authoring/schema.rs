@@ -2,6 +2,7 @@
 //! [`Row::columns`], the module's tables are a struct of [`Table`]s, and `db.<table>` is
 //! how a body reads and writes one.
 
+use std::collections::BTreeMap;
 use std::marker::PhantomData;
 
 use std::rc::Rc;
@@ -414,13 +415,7 @@ impl<T> Columns<T> {
                 c.name
             );
         }
-        IrTable {
-            name: name.into(),
-            columns: self.cols,
-            key: self.key,
-            indexes: self.indexes,
-            refs: self.refs,
-        }
+        IrTable::new(name, self.cols, self.key, self.indexes, self.refs)
     }
 }
 
@@ -568,7 +563,9 @@ fn write(f: impl FnOnce(&mut dyn Store) -> Result<Option<Change>, Refusal>) {
     }
 }
 
-fn row_of(h: H) -> Option<crate::store::Row> {
+// A row written, as the struct it was built as: the store lays it out as
+// its table's (`store::row_for`).
+fn row_of(h: H) -> Option<BTreeMap<String, Value>> {
     match cx::value(h) {
         Value::Struct(m) => Some(m),
         other => {
@@ -734,9 +731,12 @@ impl<T: Row> Table<T> {
         }
         let k = key_values(&ks);
         if let Some(old) = raw::store(|st| st.get(T::NAME, &k)) {
-            let new = f(T::from_h(cx::lit(Value::Struct(old))));
+            let new = f(T::from_h(cx::lit(old.into_value())));
             if let Some(row) = row_of(new.to_h()) {
-                write(|st| store::update(st, T::NAME, &k, row));
+                write(|st| {
+                    let row = store::row_for(st.as_store(), T::NAME, row);
+                    store::update(st, T::NAME, &k, row)
+                });
             }
         }
         Effect(())
@@ -1299,8 +1299,14 @@ impl<T: Row> Write<T> {
         let Some(row) = row_of(self.row) else { return };
         let on = self.on.clone();
         match self.kind {
-            WriteKind::Insert => write(|st| store::insert(st, T::NAME, row, &on)),
-            WriteKind::Upsert => write(|st| store::upsert(st, T::NAME, row, &on)),
+            WriteKind::Insert => write(|st| {
+                let row = store::row_for(st.as_store(), T::NAME, row);
+                store::insert(st, T::NAME, row, &on)
+            }),
+            WriteKind::Upsert => write(|st| {
+                let row = store::row_for(st.as_store(), T::NAME, row);
+                store::upsert(st, T::NAME, row, &on)
+            }),
         }
     }
 }

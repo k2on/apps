@@ -7,7 +7,10 @@
 //! (`docs/scopes.md` says what spec version 2's scopes were).
 
 use std::collections::BTreeMap;
+use std::fmt;
+use std::sync::Arc;
 
+use crate::store::{Columns, Row};
 use crate::value::{FieldName, TableName, Value};
 
 /// §2.1 The static types of the IR (`Ark.Schema.Ty`).
@@ -52,13 +55,39 @@ pub struct Ref {
     pub table: TableName,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// A table. Built by [`Table::new`], which lays out its rows once: the
+/// column names every row of it shares, and where its key columns are
+/// among them (`docs/plan-perf.md` R11, `store.rs`'s module docs).
+#[derive(Clone)]
 pub struct Table {
     pub name: TableName,
     pub columns: Vec<Column>,
     pub key: Vec<FieldName>,
     pub indexes: Vec<Index>,
     pub refs: Vec<Ref>,
+    rows: Arc<Columns>,
+    key_at: Vec<usize>,
+}
+
+/// A table is its declaration: how its rows are laid out follows from it.
+impl PartialEq for Table {
+    fn eq(&self, other: &Table) -> bool {
+        self.name == other.name && self.columns == other.columns && self.key == other.key && self.indexes == other.indexes && self.refs == other.refs
+    }
+}
+
+impl Eq for Table {}
+
+impl fmt::Debug for Table {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Table")
+            .field("name", &self.name)
+            .field("columns", &self.columns)
+            .field("key", &self.key)
+            .field("indexes", &self.indexes)
+            .field("refs", &self.refs)
+            .finish()
+    }
 }
 
 /// The tables, in declaration order — which is also the order a state
@@ -116,6 +145,34 @@ impl Schema {
 }
 
 impl Table {
+    pub fn new(name: impl Into<TableName>, columns: Vec<Column>, key: Vec<FieldName>, indexes: Vec<Index>, refs: Vec<Ref>) -> Table {
+        let rows = Arc::new(Columns::new(columns.iter().map(|c| c.name.clone()).collect()));
+        let key_at = key.iter().filter_map(|k| rows.position(k)).collect();
+        Table {
+            name: name.into(),
+            columns,
+            key,
+            indexes,
+            refs,
+            rows,
+            key_at,
+        }
+    }
+
+    /// The names every row of this table holds its values under, in
+    /// declared order: one allocation for the table, shared by its rows.
+    ///
+    /// A table's columns are not changed in place once it is built — its
+    /// rows' names would no longer be its own — which a debug build checks.
+    pub fn row_columns(&self) -> &Arc<Columns> {
+        debug_assert!(
+            self.rows.names().len() == self.columns.len() && self.rows.names().iter().zip(&self.columns).all(|(n, c)| *n == c.name),
+            "{}: columns changed after the table was built; build it with Table::new",
+            self.name
+        );
+        &self.rows
+    }
+
     /// `Ark.Schema.column`.
     pub fn column(&self, name: &str) -> Option<&Column> {
         self.columns.iter().find(|c| c.name == name)
@@ -133,7 +190,10 @@ impl Table {
 
     /// The key of a row: the key columns' values in key order; a missing
     /// column reads as `Null` (`keyOf`).
-    pub fn key_of(&self, row: &BTreeMap<FieldName, Value>) -> Vec<Value> {
+    pub fn key_of(&self, row: &Row) -> Vec<Value> {
+        if row.is_of(self) && self.key_at.len() == self.key.len() {
+            return self.key_at.iter().map(|i| row.at(*i).clone()).collect();
+        }
         self.key.iter().map(|k| row.get(k).cloned().unwrap_or(Value::Null)).collect()
     }
 }
@@ -292,23 +352,17 @@ mod tests {
     fn a_reference_is_two_relations_and_checks_its_type() {
         let sch = Schema {
             tables: vec![
-                Table {
-                    name: "p".into(),
-                    columns: vec![col("id", Ty::Id("p".into()))],
-                    key: vec!["id".into()],
-                    indexes: vec![],
-                    refs: vec![],
-                },
-                Table {
-                    name: "c".into(),
-                    columns: vec![col("id", Ty::Int), col("p_id", Ty::Int)],
-                    key: vec!["id".into()],
-                    indexes: vec![],
-                    refs: vec![Ref {
+                Table::new("p", vec![col("id", Ty::Id("p".into()))], vec!["id".into()], vec![], vec![]),
+                Table::new(
+                    "c",
+                    vec![col("id", Ty::Int), col("p_id", Ty::Int)],
+                    vec!["id".into()],
+                    vec![],
+                    vec![Ref {
                         column: "p_id".into(),
                         table: "p".into(),
                     }],
-                },
+                ),
             ],
         };
         assert_eq!(sch.children_of("p").len(), 1);

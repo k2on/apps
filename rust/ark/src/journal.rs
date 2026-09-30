@@ -60,7 +60,7 @@ use crate::canon;
 use crate::log::{snapshot_of, Entry, Facts, Log, Seq};
 use crate::protocol::{change_from_value, change_value, entry_from_value, entry_value};
 use crate::schema::Schema;
-use crate::store::{MemoryStore, Store};
+use crate::store::{MemoryStore, Row, Store};
 use crate::value::{FieldName, Id, Value};
 
 /// A key/value place for a log's records: what the server's directory and
@@ -178,7 +178,7 @@ pub fn log_to_value(log: &Log) -> Value {
         .table_names()
         .into_iter()
         .map(|t| {
-            let rs = store.scan(&t).into_iter().map(Value::Struct).collect();
+            let rs = store.scan(&t).into_iter().map(Row::into_value).collect();
             (t, Value::list(rs))
         })
         .collect();
@@ -772,17 +772,17 @@ mod tests {
 
     fn schema() -> Schema {
         Schema {
-            tables: vec![Table {
-                name: "t".into(),
-                columns: vec![Column {
+            tables: vec![Table::new(
+                "t",
+                vec![Column {
                     name: "id".into(),
                     ty: Ty::Int,
                     nullable: false,
                 }],
-                key: vec!["id".into()],
-                indexes: vec![],
-                refs: vec![],
-            }],
+                vec!["id".into()],
+                vec![],
+                vec![],
+            )],
         }
     }
 

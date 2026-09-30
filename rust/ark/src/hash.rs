@@ -72,7 +72,7 @@ pub fn state_hash(st: &dyn Store) -> Vec<u8> {
         .map(|t| {
             Value::List(vec![
                 Value::text(&t.name),
-                Value::List(st.scan(&t.name).into_iter().map(Value::Struct).collect()),
+                Value::List(st.scan(&t.name).into_iter().map(|r| r.into_value()).collect()),
             ])
         })
         .collect();

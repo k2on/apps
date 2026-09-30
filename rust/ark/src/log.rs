@@ -263,17 +263,17 @@ mod tests {
 
     fn schema() -> Schema {
         Schema {
-            tables: vec![Table {
-                name: "t".into(),
-                columns: vec![Column {
+            tables: vec![Table::new(
+                "t",
+                vec![Column {
                     name: "id".into(),
                     ty: Ty::Int,
                     nullable: false,
                 }],
-                key: vec!["id".into()],
-                indexes: vec![],
-                refs: vec![],
-            }],
+                vec!["id".into()],
+                vec![],
+                vec![],
+            )],
         }
     }
 

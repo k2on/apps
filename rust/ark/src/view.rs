@@ -178,7 +178,7 @@ pub fn read(sch: &Schema, plan: &Plan, scope: &Scope, st: &dyn Store) -> Result<
     let (eq, keep) = (equalities(filter.as_ref()), |r: &Row| admits(filter.as_ref(), r));
     let spans = spans(filter.as_ref());
     if let Some(rows) = st.scan_ordered(plan.table(), &eq, &spans, &order, &keep, lim) {
-        return Ok(rows.into_iter().map(Value::Struct).collect());
+        return Ok(rows.into_iter().map(Row::into_value).collect());
     }
     let mut rows = st.scan_where_eq(plan.table(), &eq, &spans, &keep);
     // As compare_entries over a bare plan's entries: the order columns
@@ -191,7 +191,7 @@ pub fn read(sch: &Schema, plan: &Plan, scope: &Scope, st: &dyn Store) -> Result<
         rows.truncate(lim);
     }
     rows.sort_by(cmp);
-    Ok(rows.into_iter().map(Value::Struct).collect())
+    Ok(rows.into_iter().map(Row::into_value).collect())
 }
 
 /// The order of two entries of one plan (§1.5): each key under its
@@ -216,7 +216,7 @@ fn pull_at(sch: &Schema, plan: &Plan, base: NodeId, pins: &[(FieldName, Value)],
         Source::Table(_) => {
             for row in rows {
                 let key = tbl.key_of(&row);
-                out.push(entry(sch, plan, base, scope, st, key, Value::Struct(row), None)?);
+                out.push(entry(sch, plan, base, scope, st, key, Cand::Row(row), None)?);
             }
         }
         Source::Group { by, .. } => {
@@ -224,10 +224,10 @@ fn pull_at(sch: &Schema, plan: &Plan, base: NodeId, pins: &[(FieldName, Value)],
             let mut groups: BTreeMap<Vec<Value>, Vec<Value>> = BTreeMap::new();
             for row in rows {
                 let k: Vec<Value> = by.iter().map(|c| row.get(c).cloned().unwrap_or(Value::Null)).collect();
-                groups.entry(k).or_default().push(Value::Struct(row));
+                groups.entry(k).or_default().push(row.into_value());
             }
             for (k, members) in groups {
-                let key_row = Value::Struct(by.iter().cloned().zip(k.iter().cloned()).collect());
+                let key_row = Cand::Group(Value::Struct(by.iter().cloned().zip(k.iter().cloned()).collect()));
                 out.push(entry(sch, plan, base, scope, st, k, key_row, Some(Value::List(members)))?);
             }
         }
@@ -282,7 +282,7 @@ fn entry(
     scope: &Scope,
     st: &dyn Store,
     key: Vec<Value>,
-    row: Value,
+    row: Cand,
     members: Option<Value>,
 ) -> Result<Entry, EvalFault> {
     let mut deps = Vec::new();
@@ -295,7 +295,7 @@ fn entry(
             deps,
             order,
             admitted: true,
-            node: row,
+            node: row.into_value(),
             held: HeldMap::new(),
             members: vec![],
         });
@@ -306,7 +306,7 @@ fn entry(
     // they read (`docs/plan-perf.md` R5).
     let mut node = scope.node();
     if let Some(x) = plan.row {
-        node.bind_ref(x, &row);
+        row.bind(&mut node, x);
     }
     if let (Some(x), Some(m)) = (plan.members, members) {
         node.bind(x, m);
@@ -314,20 +314,10 @@ fn entry(
     let mut id = base;
     for l in &plan.lookups {
         let k = l.key.iter().map(|e| node.eval(e)).collect::<Result<Vec<_>, _>>()?;
-        let found = if k.iter().any(Value::is_null) {
-            Value::Null
-        } else {
-            let found = st.get(&l.table, &k).map(Value::Struct).unwrap_or(Value::Null);
-            deps.push((id, Value::List(k)));
-            found
-        };
-        node.bind(l.sym, found);
+        look_up(&mut node, l, st, k, id, &mut deps);
         id += 1;
     }
-    let mut fields: Option<BTreeMap<FieldName, Value>> = plan.project.is_none().then(|| match &row {
-        Value::Struct(m) => m.clone(),
-        _ => BTreeMap::new(),
-    });
+    let mut fields: Option<BTreeMap<FieldName, Value>> = plan.project.is_none().then(|| row.fields());
     for r in &plan.related {
         let on =
             r.on.iter()
@@ -373,7 +363,66 @@ fn entry(
     })
 }
 
-fn order_key(k: &Key, row: &Value, node: Option<&NodeScope>) -> Result<Value, EvalFault> {
+// What an entry is built over: a row of the plan's table, bound as the
+// store holds it (`docs/plan-perf.md` R11), or a group's key as the struct
+// of its `by` columns.
+enum Cand {
+    Row(Row),
+    Group(Value),
+}
+
+impl Cand {
+    fn bind<'s>(&'s self, node: &mut NodeScope<'s>, x: Sym) {
+        match self {
+            Cand::Row(r) => node.bind_row(x, r),
+            Cand::Group(v) => node.bind_ref(x, v),
+        }
+    }
+
+    // A column, as `Value::field` reads one: fatal when it is missing.
+    fn field(&self, c: &str) -> Value {
+        match self {
+            Cand::Row(r) => r
+                .get(c)
+                .cloned()
+                .unwrap_or_else(|| panic!("field: no field {c:?} in {r:?} (a bug: a verified module never mismatches)")),
+            Cand::Group(v) => v.field(c),
+        }
+    }
+
+    // The default node's own fields: every column, or the group's key.
+    fn fields(&self) -> BTreeMap<FieldName, Value> {
+        match self {
+            Cand::Row(r) => r.to_struct(),
+            Cand::Group(Value::Struct(m)) => m.clone(),
+            Cand::Group(_) => BTreeMap::new(),
+        }
+    }
+
+    fn into_value(self) -> Value {
+        match self {
+            Cand::Row(r) => r.into_value(),
+            Cand::Group(v) => v,
+        }
+    }
+}
+
+// A lookup, bound: the row under its key as the store holds it, or `Null`
+// — read, and recorded as a dependency, only when no part of the key is
+// `Null`.
+fn look_up(node: &mut NodeScope, l: &Lookup, st: &dyn Store, k: Vec<Value>, id: NodeId, deps: &mut Vec<(NodeId, Value)>) {
+    if k.iter().any(Value::is_null) {
+        node.bind(l.sym, Value::Null);
+        return;
+    }
+    match st.get(&l.table, &k) {
+        Some(r) => node.bind_row_owned(l.sym, r),
+        None => node.bind(l.sym, Value::Null),
+    }
+    deps.push((id, Value::List(k)));
+}
+
+fn order_key(k: &Key, row: &Cand, node: Option<&NodeScope>) -> Result<Value, EvalFault> {
     match (k, node) {
         (Key::Column(c), _) => Ok(row.field(c)),
         (Key::Expr(e), Some(n)) => n.eval(e),
@@ -1073,7 +1122,7 @@ fn row_terms(cx: &Cx, id: NodeId, row: &Row) -> Result<Option<Vec<i64>>, EvalFau
     if !admits(cx.filters[&id].as_ref(), row) {
         return Ok(None);
     }
-    let v = Value::Struct(row.clone());
+    let v = row.to_value();
     match row_node(cx, id, &v)? {
         Some(node) => terms(cx, &cx.kept(id).aggs, &node).map(Some),
         None => Ok(None),
@@ -1163,12 +1212,12 @@ fn ensure(cx: &Cx, id: NodeId, on: Value, parent: Parent, held: &mut HeldMap, op
     };
     for row in rows {
         if c.related.is_empty() {
-            if let Some(node) = row_node(cx, id, &Value::Struct(row))? {
+            if let Some(node) = row_node(cx, id, &row.into_value())? {
                 shift(&mut h.nums, &terms(cx, &kept.aggs, &node)?, Op::Add)?;
             }
         } else {
             let key = tbl.key_of(&row);
-            let kid = build_kid(cx, id, &k.1, key.clone(), Value::Struct(row), held, ops)?;
+            let kid = build_kid(cx, id, &k.1, key.clone(), row.into_value(), held, ops)?;
             if let Some(t) = kid_terms(cx, id, &kid)? {
                 shift(&mut h.nums, &t, Op::Add)?;
             }
@@ -1273,7 +1322,7 @@ fn sweep(cx: &Cx, held: &mut HeldMap, hits: &[Hit], ops: &mut Ops) -> Result<(),
                 .get(r.plan.table(), key)
                 .filter(|row| admits(cx.filters[&id].as_ref(), row) && Node::Related(r).dependency(cx.sch, row) == *on);
             let new = match row {
-                Some(row) => Some(build_kid(cx, id, on, key.clone(), Value::Struct(row), held, ops)?),
+                Some(row) => Some(build_kid(cx, id, on, key.clone(), row.into_value(), held, ops)?),
                 None => None,
             };
             if let Some(o) = &old {
@@ -1337,7 +1386,7 @@ fn member_nums(cx: &Cx, aggs: &[(Agg, Sym)], rows: &[Value]) -> Result<Vec<i64>,
 // and its order keys, over the face's expressions. `held` is what the
 // entry kept before (empty for a new one), already swept; a dependency the
 // node no longer computes is let go.
-fn entry_at(cx: &Cx, key: Vec<Value>, row: Value, members: Members, mut held: HeldMap, ops: &mut Ops) -> Result<Entry, EvalFault> {
+fn entry_at(cx: &Cx, key: Vec<Value>, row: Cand, members: Members, mut held: HeldMap, ops: &mut Ops) -> Result<Entry, EvalFault> {
     let plan = cx.plan;
     let face = &cx.shape.root;
     let mut deps = Vec::new();
@@ -1349,14 +1398,14 @@ fn entry_at(cx: &Cx, key: Vec<Value>, row: Value, members: Members, mut held: He
             deps,
             order,
             admitted: true,
-            node: row,
+            node: row.into_value(),
             held,
             members: vec![],
         });
     }
     let mut node = cx.scope.node();
     if let Some(x) = plan.row {
-        node.bind_ref(x, &row);
+        row.bind(&mut node, x);
     }
     let mut nums = vec![];
     match members {
@@ -1376,20 +1425,10 @@ fn entry_at(cx: &Cx, key: Vec<Value>, row: Value, members: Members, mut held: He
     let mut id = 0;
     for l in &plan.lookups {
         let k = l.key.iter().map(|e| node.eval(e)).collect::<Result<Vec<_>, _>>()?;
-        let found = if k.iter().any(Value::is_null) {
-            Value::Null
-        } else {
-            let found = cx.st.get(&l.table, &k).map(Value::Struct).unwrap_or(Value::Null);
-            deps.push((id, Value::List(k)));
-            found
-        };
-        node.bind(l.sym, found);
+        look_up(&mut node, l, cx.st, k, id, &mut deps);
         id += 1;
     }
-    let mut fields: Option<BTreeMap<FieldName, Value>> = plan.project.is_none().then(|| match &row {
-        Value::Struct(m) => m.clone(),
-        _ => BTreeMap::new(),
-    });
+    let mut fields: Option<BTreeMap<FieldName, Value>> = plan.project.is_none().then(|| row.fields());
     for (j, r) in plan.related.iter().enumerate() {
         let on =
             r.on.iter()
@@ -1464,17 +1503,17 @@ fn pull_root(cx: &Cx) -> Result<Vec<Entry>, EvalFault> {
         Source::Table(_) => {
             for row in rows {
                 let key = tbl.key_of(&row);
-                out.push(entry_at(cx, key, Value::Struct(row), Members::None, HeldMap::new(), &mut ops)?);
+                out.push(entry_at(cx, key, Cand::Row(row), Members::None, HeldMap::new(), &mut ops)?);
             }
         }
         Source::Group { by, .. } => {
             rows.sort_by_key(|r| tbl.key_of(r));
             let mut groups: BTreeMap<Vec<Value>, Vec<Value>> = BTreeMap::new();
             for row in rows {
-                groups.entry(group_of(by, &row)).or_default().push(Value::Struct(row));
+                groups.entry(group_of(by, &row)).or_default().push(row.into_value());
             }
             for (k, members) in groups {
-                let key_row = Value::Struct(by.iter().cloned().zip(k.iter().cloned()).collect());
+                let key_row = Cand::Group(Value::Struct(by.iter().cloned().zip(k.iter().cloned()).collect()));
                 let members = match &cx.shape.root.members {
                     Some(aggs) => Members::Nums(member_nums(cx, aggs, &members)?),
                     None => Members::List(Value::List(members)),
@@ -2050,7 +2089,7 @@ fn touched<'c>(
                             admits(cx.root_filter.as_ref(), r) && members.arrive(base, tbl.key_of(r))
                         };
                         if let (true, Some(aggs)) = (moved, member_aggs) {
-                            let terms = terms(cx, aggs, &Value::Struct(r.clone()))?;
+                            let terms = terms(cx, aggs, &r.to_value())?;
                             let sums = t.sums.entry(g.clone()).or_insert_with(|| vec![0; aggs.len()]);
                             shift(sums, &terms, if arrives { Op::Add } else { Op::Sub })?;
                         }
@@ -2110,7 +2149,7 @@ fn root_of(
     };
     match &plan.source {
         Source::Table(_) => match cx.st.get(table, k) {
-            Some(row) if admits(cx.root_filter.as_ref(), &row) => entry_at(cx, k.to_vec(), Value::Struct(row), Members::None, held, ops).map(Some),
+            Some(row) if admits(cx.root_filter.as_ref(), &row) => entry_at(cx, k.to_vec(), Cand::Row(row), Members::None, held, ops).map(Some),
             _ => gone(held, ops),
         },
         Source::Group { by, .. } => match t
@@ -2125,7 +2164,7 @@ fn root_of(
                     Some(m) => m.keys(base),
                     None => base.into_iter().flatten().cloned().collect(),
                 };
-                let rows = || rows().iter().filter_map(|m| cx.st.get(table, m)).map(Value::Struct).collect::<Vec<_>>();
+                let rows = || rows().iter().filter_map(|m| cx.st.get(table, m)).map(Row::into_value).collect::<Vec<_>>();
                 let members = match &cx.shape.root.members {
                     None => Members::List(Value::List(rows())),
                     // A count is the kept keys; a sum is what it was plus
@@ -2148,7 +2187,7 @@ fn root_of(
                         _ => member_nums(cx, aggs, &rows())?,
                     }),
                 };
-                let key_row = Value::Struct(by.iter().cloned().zip(k.iter().cloned()).collect());
+                let key_row = Cand::Group(Value::Struct(by.iter().cloned().zip(k.iter().cloned()).collect()));
                 entry_at(cx, k.to_vec(), key_row, members, held, ops).map(Some)
             }
         },

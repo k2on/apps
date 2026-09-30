@@ -136,7 +136,7 @@ struct Env<'a> {
     /// What each `Provide` the procedure has run so far returned.
     provided: &'a Args,
     /// A plan node's binders ([`NodeScope`]), under every frame.
-    node: &'a [(Sym, Cow<'a, Value>)],
+    node: &'a [(Sym, Val<'a>)],
     /// The innermost local, which points at the one it was bound over.
     locals: Option<&'a Frame<'a>>,
 }
@@ -151,8 +151,63 @@ struct Env<'a> {
 // gave.
 struct Frame<'a> {
     sym: Sym,
-    value: &'a Value,
+    value: Place<'a>,
     up: Option<&'a Frame<'a>>,
+}
+
+// Where a bound value is: a value, or a row as the store holds it
+// (`docs/plan-perf.md` R11). A row is bound as it is — a plan's row, a
+// lookup's, an `update`'s old row, a `get`'s — and a field of it is read
+// by position; only a use of the whole row as a value builds the struct
+// it is (§4), and that is the one copy a row costs the evaluator.
+#[derive(Clone, Copy)]
+enum Place<'a> {
+    Value(&'a Value),
+    Row(&'a Row),
+}
+
+impl<'a> Place<'a> {
+    fn val(self) -> Val<'a> {
+        match self {
+            Place::Value(v) => Val::Ref(v),
+            Place::Row(r) => Val::Row(r),
+        }
+    }
+}
+
+// An expression's value, borrowed where it already exists and owned
+// otherwise: a `Cow` that can also hold a row (`eval_val`).
+#[derive(Clone)]
+pub(crate) enum Val<'a> {
+    Ref(&'a Value),
+    Own(Value),
+    Row(&'a Row),
+    OwnRow(Row),
+}
+
+impl<'a> Val<'a> {
+    fn place(&self) -> Place<'_> {
+        match self {
+            Val::Ref(v) => Place::Value(v),
+            Val::Own(v) => Place::Value(v),
+            Val::Row(r) => Place::Row(r),
+            Val::OwnRow(r) => Place::Row(r),
+        }
+    }
+
+    fn is_null(&self) -> bool {
+        matches!(self, Val::Ref(Value::Null) | Val::Own(Value::Null))
+    }
+
+    // As a value: a row becomes the struct it is.
+    fn cow(self) -> Cow<'a, Value> {
+        match self {
+            Val::Ref(v) => Cow::Borrowed(v),
+            Val::Own(v) => Cow::Owned(v),
+            Val::Row(r) => Cow::Owned(r.to_value()),
+            Val::OwnRow(r) => Cow::Owned(r.into_value()),
+        }
+    }
 }
 
 // A function's arguments: a procedure's checked input by name, or a
@@ -162,11 +217,11 @@ struct Frame<'a> {
 #[derive(Clone, Copy)]
 enum Params<'a> {
     Named(&'a Args),
-    Call(&'a [(String, Field)], &'a [Cow<'a, Value>]),
+    Call(&'a [(String, Field)], &'a [Val<'a>]),
 }
 
 impl<'a> Env<'a> {
-    fn local(&self, x: Sym) -> Option<&'a Value> {
+    fn local(&self, x: Sym) -> Option<Place<'a>> {
         let mut at = self.locals;
         while let Some(f) = at {
             if f.sym == x {
@@ -174,14 +229,14 @@ impl<'a> Env<'a> {
             }
             at = f.up;
         }
-        self.node.iter().rev().find(|(s, _)| *s == x).map(|(_, v)| &**v)
+        self.node.iter().rev().find(|(s, _)| *s == x).map(|(_, v)| v.place())
     }
 
-    fn arg(&self, a: &str) -> Option<&'a Value> {
+    fn arg(&self, a: &str) -> Option<Place<'a>> {
         match self.args {
-            Params::Named(m) => m.get(a),
+            Params::Named(m) => m.get(a).map(Place::Value),
             // The last of a name, as collecting the pairs into a map kept.
-            Params::Call(names, vals) => names.iter().rposition(|(n, _)| n == a).map(|i| &*vals[i]),
+            Params::Call(names, vals) => names.iter().rposition(|(n, _)| n == a).map(|i| vals[i].place()),
         }
     }
 
@@ -682,7 +737,7 @@ pub fn eval_helper(m: &Module, name: &str, vals: Vec<Value>) -> Result<Value, Ev
         store: &mut overlay,
         changes: Vec::new(),
     };
-    let vals: Vec<Cow<Value>> = vals.into_iter().map(Cow::Owned).collect();
+    let vals: Vec<Val> = vals.into_iter().map(Val::Own).collect();
     match call(&mut st, &env, f, &vals) {
         Ok(v) => Ok(v),
         Err(Stop::Returned(_)) => Err(EvalFault::Bug(EvalError::NoReturn(name.into()))),
@@ -784,17 +839,28 @@ impl<'s> Scope<'s> {
 #[derive(Clone)]
 pub struct NodeScope<'s> {
     env: Env<'s>,
-    bound: Vec<(Sym, Cow<'s, Value>)>,
+    bound: Vec<(Sym, Val<'s>)>,
 }
 
 impl<'s> NodeScope<'s> {
     pub fn bind(&mut self, x: Sym, v: Value) {
-        self.bound.push((x, Cow::Owned(v)));
+        self.bound.push((x, Val::Own(v)));
     }
 
     /// [`NodeScope::bind`] of a value the caller keeps.
     pub fn bind_ref(&mut self, x: Sym, v: &'s Value) {
-        self.bound.push((x, Cow::Borrowed(v)));
+        self.bound.push((x, Val::Ref(v)));
+    }
+
+    /// A row, bound as the store holds it: its fields are read in place and
+    /// the struct it is is built only if the node uses it whole (R11).
+    pub fn bind_row(&mut self, x: Sym, r: &'s Row) {
+        self.bound.push((x, Val::Row(r)));
+    }
+
+    /// [`NodeScope::bind_row`] of a row the scope keeps: a lookup's.
+    pub fn bind_row_owned(&mut self, x: Sym, r: Row) {
+        self.bound.push((x, Val::OwnRow(r)));
     }
 
     pub fn eval(&self, e: &Expr) -> Result<Value, EvalFault> {
@@ -857,10 +923,10 @@ fn block(st: &mut St, env: &Env, blk: &[Stmt]) -> Run<()> {
     let mut rest = blk;
     while let Some((s, tail)) = rest.split_first() {
         if let Stmt::Let(x, e) = s {
-            let v = eval_ref(st, env, e)?;
+            let v = eval_val(st, env, e)?;
             let frame = Frame {
                 sym: *x,
-                value: &v,
+                value: v.place(),
                 up: env.locals,
             };
             return block(st, &env.under(&frame), tail);
@@ -883,7 +949,7 @@ fn exec(st: &mut St, env: &Env, s: &Stmt) -> Run<()> {
             for v in list_ref(&vs)? {
                 let frame = Frame {
                     sym: *x,
-                    value: v,
+                    value: Place::Value(v),
                     up: env.locals,
                 };
                 block(st, &env.under(&frame), body)?;
@@ -892,12 +958,14 @@ fn exec(st: &mut St, env: &Env, s: &Stmt) -> Run<()> {
         Stmt::Insert(t, e, on) => {
             mutating(env)?;
             let row = strct(eval(st, env, e)?)?;
+            let row = store::row_for(st.store.as_store(), t, row);
             let r = store::insert(st.store, t, row, on);
             wrote(st, r)?;
         }
         Stmt::Upsert(t, e, on) => {
             mutating(env)?;
             let row = strct(eval(st, env, e)?)?;
+            let row = store::row_for(st.store.as_store(), t, row);
             let r = store::upsert(st.store, t, row, on);
             wrote(st, r)?;
         }
@@ -905,13 +973,13 @@ fn exec(st: &mut St, env: &Env, s: &Stmt) -> Run<()> {
             mutating(env)?;
             let key = eval_many(st, env, ks)?;
             if let Some(old) = st.store.get(t, &key) {
-                let old = Value::Struct(old);
                 let frame = Frame {
                     sym: *x,
-                    value: &old,
+                    value: Place::Row(&old),
                     up: env.locals,
                 };
                 let row = strct(eval(st, &env.under(&frame), e)?)?;
+                let row = store::row_for(st.store.as_store(), t, row);
                 let r = store::update(st.store, t, &key, row);
                 wrote(st, r)?;
             }
@@ -975,49 +1043,76 @@ fn reading(env: &Env) -> Run<()> {
 // owned. A value is copied only where it is kept: a struct's field, a
 // list's element, a helper's result, a row written.
 fn eval_ref<'v>(st: &mut St, env: &Env<'v>, e: &'v Expr) -> Run<Cow<'v, Value>> {
+    eval_val(st, env, e).map(Val::cow)
+}
+
+// [`eval_ref`], where a row may be the answer: a row bound as the store
+// holds it, a field of one, or a `get` — so `let x = get(..)` and
+// `x.title` copy the title and never build the struct (R11). A `let`, a
+// `match`'s `some`, a helper's argument and a field take this path; every
+// other use of a row as a value builds its struct ([`Val::cow`]).
+fn eval_val<'v>(st: &mut St, env: &Env<'v>, e: &'v Expr) -> Run<Val<'v>> {
     Ok(match e {
-        Expr::Lit(v) => Cow::Borrowed(v),
+        Expr::Lit(v) => Val::Ref(v),
         Expr::Arg(a) => match env.arg(a) {
-            Some(v) => Cow::Borrowed(v),
+            Some(v) => v.val(),
             None => return bug(EvalError::MissingArg(a.clone())),
         },
         Expr::Auto(a) => match env.autos.get(a) {
-            Some(v) => Cow::Borrowed(v),
+            Some(v) => Val::Ref(v),
             None => return bug(EvalError::MissingAuto(a.clone())),
         },
         Expr::Var(x) => match env.local(*x) {
-            Some(v) => Cow::Borrowed(v),
+            Some(v) => v.val(),
             None => return bug(EvalError::UnboundVar(*x)),
         },
         Expr::Provided(n) => match env.provided.get(n) {
-            Some(v) => Cow::Borrowed(v),
+            Some(v) => Val::Ref(v),
             None => return bug(EvalError::NotProvided(n.clone())),
         },
-        Expr::Field(e, f) => match eval_ref(st, env, e)? {
-            Cow::Borrowed(Value::Struct(m)) => match m.get(f) {
-                Some(v) => Cow::Borrowed(v),
+        Expr::Field(e, f) => match eval_val(st, env, e)? {
+            Val::Ref(Value::Struct(m)) => match m.get(f) {
+                Some(v) => Val::Ref(v),
                 None => return bug(EvalError::NoSuchField(f.clone())),
             },
-            Cow::Owned(Value::Struct(mut m)) => match m.remove(f) {
-                Some(v) => Cow::Owned(v),
+            Val::Own(Value::Struct(mut m)) => match m.remove(f) {
+                Some(v) => Val::Own(v),
                 None => return bug(EvalError::NoSuchField(f.clone())),
             },
-            other => return type_error("Struct", &other),
+            Val::Row(r) => match r.get(f) {
+                Some(v) => Val::Ref(v),
+                None => return bug(EvalError::NoSuchField(f.clone())),
+            },
+            Val::OwnRow(r) => match r.get(f) {
+                Some(v) => Val::Own(v.clone()),
+                None => return bug(EvalError::NoSuchField(f.clone())),
+            },
+            other => return type_error("Struct", &other.cow()),
         },
         // An option is flat, and `if` evaluates only the taken arm: either
         // is the value of the expression it leads to.
-        Expr::Some(e) => return eval_ref(st, env, e),
+        Expr::Some(e) => return eval_val(st, env, e),
         Expr::If(c, a, b) => {
             let t = bool(eval(st, env, c)?)?;
-            return eval_ref(st, env, if t { a } else { b });
+            return eval_val(st, env, if t { a } else { b });
         }
-        _ => Cow::Owned(eval(st, env, e)?),
+        Expr::Get(t, ks) => {
+            reading(env)?;
+            let key = eval_many(st, env, ks)?;
+            match st.store.get(t, &key) {
+                Some(r) => Val::OwnRow(r),
+                None => Val::Own(Value::Null),
+            }
+        }
+        _ => Val::Own(eval(st, env, e)?),
     })
 }
 
 fn eval(st: &mut St, env: &Env, e: &Expr) -> Run<Value> {
     match e {
-        Expr::Lit(_) | Expr::Arg(_) | Expr::Auto(_) | Expr::Var(_) | Expr::Provided(_) | Expr::Field(..) => eval_ref(st, env, e).map(Cow::into_owned),
+        Expr::Lit(_) | Expr::Arg(_) | Expr::Auto(_) | Expr::Var(_) | Expr::Provided(_) | Expr::Field(..) | Expr::Get(..) => {
+            eval_ref(st, env, e).map(Cow::into_owned)
+        }
         Expr::CtxUser => Ok(Value::Text(env.ctx.user.clone())),
         Expr::CtxSession => Ok(Value::Text(env.ctx.session.clone())),
         // Fields are evaluated in field-name order, which is the map's order.
@@ -1033,13 +1128,13 @@ fn eval(st: &mut St, env: &Env, e: &Expr) -> Run<Value> {
         Expr::Some(e) => eval(st, env, e),
         Expr::None(_) => Ok(Value::Null),
         Expr::Match(e, x, some, none) => {
-            let v = eval_ref(st, env, e)?;
+            let v = eval_val(st, env, e)?;
             if v.is_null() {
                 eval(st, env, none)
             } else {
                 let frame = Frame {
                     sym: *x,
-                    value: &v,
+                    value: v.place(),
                     up: env.locals,
                 };
                 eval(st, &env.under(&frame), some)
@@ -1090,7 +1185,7 @@ fn eval(st: &mut St, env: &Env, e: &Expr) -> Run<Value> {
         Expr::Call(name, es) => {
             let mut vals = Vec::with_capacity(es.len());
             for e in es {
-                vals.push(eval_ref(st, env, e)?);
+                vals.push(eval_val(st, env, e)?);
             }
             let Some(f) = env.helpers.iter().find(|h| h.name == *name) else {
                 return bug(EvalError::UnknownFunction(name.clone()));
@@ -1189,7 +1284,7 @@ fn eval(st: &mut St, env: &Env, e: &Expr) -> Run<Value> {
                 let with_acc = frame(*acc, &a, env);
                 let with_x = Frame {
                     sym: *x,
-                    value: v,
+                    value: Place::Value(v),
                     up: Some(&with_acc),
                 };
                 a = eval(st, &env.under(&with_x), body)?;
@@ -1203,11 +1298,6 @@ fn eval(st: &mut St, env: &Env, e: &Expr) -> Run<Value> {
                 Err(fault) => Err(Stop::Halt(fault)),
             }
         }
-        Expr::Get(t, ks) => {
-            reading(env)?;
-            let key = eval_many(st, env, ks)?;
-            Ok(st.store.get(t, &key).map(Value::Struct).unwrap_or(Value::Null))
-        }
         Expr::Exists(t, ks) => {
             reading(env)?;
             let key = eval_many(st, env, ks)?;
@@ -1220,7 +1310,7 @@ fn eval(st: &mut St, env: &Env, e: &Expr) -> Run<Value> {
 fn frame<'b>(x: Sym, v: &'b Value, env: &Env<'b>) -> Frame<'b> {
     Frame {
         sym: x,
-        value: v,
+        value: Place::Value(v),
         up: env.locals,
     }
 }
@@ -1251,7 +1341,7 @@ fn eval_many(st: &mut St, env: &Env, es: &[Expr]) -> Run<Vec<Value>> {
 // Call a helper: bind its arguments as a fresh environment, run its body,
 // and take what it returned. Helpers never see locals, autos, arguments or
 // the context of their caller.
-fn call(st: &mut St, env: &Env, f: &Function, vals: &[Cow<Value>]) -> Run<Value> {
+fn call(st: &mut St, env: &Env, f: &Function, vals: &[Val]) -> Run<Value> {
     if vals.len() != f.input.len() {
         return bug(EvalError::Arity(f.name.clone()));
     }

@@ -510,7 +510,7 @@ fn a_window_refills_from_the_entries() {
         [
             Patch::Insert {
                 at: 0,
-                node: Value::Struct(song("s9", 10))
+                node: song("s9", 10).to_value()
             },
             Patch::Remove { at: 3 }
         ]

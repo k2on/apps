@@ -11,18 +11,352 @@
 //! [`MemoryStore`] is the spec's map of maps; [`Overlay`] is the optimistic
 //! overlay a mutator writes into, consulted first on every read and dropped
 //! on a verdict.
+//!
+//! A [`Row`] is positional (`docs/plan-perf.md` R11): its values in the
+//! table's column order behind one shared allocation, and the names beside
+//! them held once, on the [`Table`], for every row of it. A row carries a
+//! reference to those names rather than the store supplying them at each
+//! use, because a row is read far from any store — a view binding it, a
+//! change crossing the wire, a test comparing two — and every one of those
+//! would otherwise need the table threaded to it to say `row["title"]`.
+//! Carrying them costs a reference count per copy and keeps the change in
+//! this file and the few places that build a row. The references are
+//! `Arc` rather than `Rc` because a row crosses threads: the hub's frames
+//! carry facts to the socket tasks, and `HubHandle::rows` answers another
+//! thread. Nothing observable moved: a row is still a `Struct` of every
+//! column on the wire and in the state hash ([`Row::to_value`]), equal
+//! when its columns are, and built from pairs by name. A row built from a
+//! struct before any table laid it out — decoded without a schema, or
+//! naming a column its table lacks — keeps its own names, in name order,
+//! until a store lays it out as the table's ([`Store::apply_change`]) or
+//! refuses it as today ([`Store::put`]).
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::ops::Bound;
+use std::sync::Arc;
 
 use crate::ir::Plan;
 use crate::schema::{Dir, Index, Ref, Relation, Schema, Table, Ty};
 use crate::value::{compare_value, FieldName, TableName, Value};
 
-/// A row: every column of its table, by name. Never partial once stored.
-pub type Row = BTreeMap<FieldName, Value>;
+/// The names of a row's columns, in the order its values are held — a
+/// table's, as it declares them, once for every row of it (R11) — and the
+/// same positions sorted by name, which is how a name is found and the
+/// order a struct's fields are in (§1.2).
+pub struct Columns {
+    names: Box<[FieldName]>,
+    sorted: Box<[u32]>,
+}
+
+impl Columns {
+    /// Names, each once, in the order the values will be held.
+    pub fn new(names: Vec<FieldName>) -> Columns {
+        let mut sorted: Vec<u32> = (0..names.len() as u32).collect();
+        sorted.sort_by(|a, b| names[*a as usize].cmp(&names[*b as usize]));
+        Columns {
+            names: names.into_boxed_slice(),
+            sorted: sorted.into_boxed_slice(),
+        }
+    }
+
+    /// The names, in the order the values are held.
+    pub fn names(&self) -> &[FieldName] {
+        &self.names
+    }
+
+    /// Where a name's value is held, if the row has the column.
+    pub fn position(&self, name: &str) -> Option<usize> {
+        self.sorted
+            .binary_search_by(|i| self.names[*i as usize].as_str().cmp(name))
+            .ok()
+            .map(|at| self.sorted[at] as usize)
+    }
+
+    pub fn len(&self) -> usize {
+        self.names.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.names.is_empty()
+    }
+}
+
+impl PartialEq for Columns {
+    fn eq(&self, other: &Columns) -> bool {
+        self.names == other.names
+    }
+}
+
+impl Eq for Columns {}
+
+impl fmt::Debug for Columns {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_list().entries(self.names.iter()).finish()
+    }
+}
+
+// The names of rows built from a struct that no table has laid out yet —
+// a row decoded from the wire, from a vector, from a test's pairs — kept
+// so that the rows of one shape share one set of names, as a table's rows
+// share the table's. A page of facts is a few tables' rows; sixteen shapes
+// is more than any schema here writes at once, and a miss costs only the
+// names of one row.
+thread_local! {
+    static LOOSE: std::cell::RefCell<Vec<Arc<Columns>>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn loose_columns<'a>(names: impl ExactSizeIterator<Item = &'a FieldName> + Clone) -> Arc<Columns> {
+    LOOSE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let n = names.len();
+        if let Some(at) = cache
+            .iter()
+            .position(|c| c.len() == n && c.names.iter().zip(names.clone()).all(|(a, b)| a == b))
+        {
+            let hit = cache.remove(at);
+            cache.push(hit.clone());
+            return hit;
+        }
+        let made = Arc::new(Columns::new(names.cloned().collect()));
+        if cache.len() == 16 {
+            cache.remove(0);
+        }
+        cache.push(made.clone());
+        made
+    })
+}
+
+/// A row: its table's columns' values, in the table's column order, beside
+/// the table's names (`docs/plan-perf.md` R11; the module docs say why the
+/// row carries them). A stored row is never partial. Cloning one is two
+/// reference counts, which is what a read hands out.
+///
+/// It keeps the map's interface — a column by name, the columns in order,
+/// built from pairs, equal when every column is — so that what a row *is*
+/// (§4: a `Struct` of every column) has not moved: [`Row::to_value`] is
+/// that struct, and it is what crosses the wire and is hashed.
+#[derive(Clone)]
+pub struct Row {
+    cols: Arc<Columns>,
+    vals: Arc<[Value]>,
+}
+
+impl Row {
+    /// The values of `cols`, in its order.
+    ///
+    /// # Panics
+    ///
+    /// When there are not as many values as columns.
+    pub fn new(cols: Arc<Columns>, vals: impl IntoIterator<Item = Value>) -> Row {
+        let vals: Arc<[Value]> = vals.into_iter().collect();
+        assert_eq!(cols.len(), vals.len(), "a row has a value for every column");
+        Row { cols, vals }
+    }
+
+    /// A row of `tbl` from its columns by name: laid out in the table's
+    /// order, a column the pairs leave out `Null`. Pairs that name a column
+    /// the table lacks, or leave out one that is not nullable, are kept as
+    /// they are — a row of no table — for [`Store::put`] to refuse as
+    /// malformed, as it refused the map they were.
+    pub fn of(tbl: &Table, pairs: impl IntoIterator<Item = (FieldName, Value)>) -> Row {
+        Row::from_struct_in(tbl, pairs.into_iter().collect())
+    }
+
+    /// [`Row::of`] from a struct's fields.
+    pub fn from_struct_in(tbl: &Table, mut m: BTreeMap<FieldName, Value>) -> Row {
+        let cols = tbl.row_columns();
+        let fits = m.keys().all(|k| cols.position(k).is_some()) && tbl.columns.iter().all(|c| c.nullable || m.contains_key(&c.name));
+        if !fits {
+            return Row::from_struct(m);
+        }
+        let vals: Arc<[Value]> = cols.names.iter().map(|n| m.remove(n).unwrap_or(Value::Null)).collect();
+        Row { cols: cols.clone(), vals }
+    }
+
+    /// A row of no table yet: a struct's fields as they are, in name order.
+    /// What a row decoded without its schema is — from the wire, from a
+    /// vector — until a store lays it out as its table's
+    /// ([`Store::apply_change`], [`Store::put`]).
+    pub fn from_struct(m: BTreeMap<FieldName, Value>) -> Row {
+        let cols = loose_columns(m.keys());
+        let vals: Vec<Value> = m.into_values().collect();
+        Row { cols, vals: vals.into() }
+    }
+
+    /// [`Row::from_struct`] of a struct the caller keeps: its values copied,
+    /// its names shared with every row of the same shape.
+    pub fn from_struct_ref(m: &BTreeMap<FieldName, Value>) -> Row {
+        let cols = loose_columns(m.keys());
+        let vals: Vec<Value> = m.values().cloned().collect();
+        Row { cols, vals: vals.into() }
+    }
+
+    /// A column's value, by name.
+    pub fn get(&self, name: &str) -> Option<&Value> {
+        self.cols.position(name).map(|i| &self.vals[i])
+    }
+
+    pub fn contains_key(&self, name: &str) -> bool {
+        self.cols.position(name).is_some()
+    }
+
+    /// The columns and their values, in the row's column order — its
+    /// table's declared order, once a store has laid it out.
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = (&FieldName, &Value)> + '_ {
+        self.cols.names.iter().zip(self.vals.iter())
+    }
+
+    /// The column names, in column order.
+    pub fn keys(&self) -> impl ExactSizeIterator<Item = &FieldName> + '_ {
+        self.cols.names.iter()
+    }
+
+    /// The value held at a position of [`Row::columns`].
+    pub fn at(&self, i: usize) -> &Value {
+        &self.vals[i]
+    }
+
+    /// The values, in column order.
+    pub fn values(&self) -> impl ExactSizeIterator<Item = &Value> + '_ {
+        self.vals.iter()
+    }
+
+    pub fn len(&self) -> usize {
+        self.vals.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.vals.is_empty()
+    }
+
+    /// The names this row's values are held under.
+    pub fn columns(&self) -> &Arc<Columns> {
+        &self.cols
+    }
+
+    /// Whether this row is laid out as `tbl`'s rows are: its names are the
+    /// table's own, not merely equal to them.
+    pub fn is_of(&self, tbl: &Table) -> bool {
+        Arc::ptr_eq(&self.cols, tbl.row_columns())
+    }
+
+    /// The row as the struct it is (§4): every column by name.
+    pub fn to_struct(&self) -> BTreeMap<FieldName, Value> {
+        self.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+    }
+
+    /// [`Row::to_struct`], as a [`Value::Struct`].
+    pub fn to_value(&self) -> Value {
+        Value::Struct(self.to_struct())
+    }
+
+    /// [`Row::to_value`] of a row nobody else holds, its values moved
+    /// rather than copied; copied when the row is shared.
+    pub fn into_value(mut self) -> Value {
+        match Arc::get_mut(&mut self.vals) {
+            Some(vals) => Value::Struct(
+                self.cols
+                    .names
+                    .iter()
+                    .cloned()
+                    .zip(vals.iter_mut().map(|v| std::mem::replace(v, Value::Null)))
+                    .collect(),
+            ),
+            None => self.to_value(),
+        }
+    }
+
+    /// Set a column, as a map's `insert` does: its old value back — or
+    /// `None`, and the row a row of no table, when it had no such column
+    /// (which [`Store::put`] then refuses as malformed).
+    pub fn insert(&mut self, name: FieldName, v: Value) -> Option<Value> {
+        if let Some(i) = self.cols.position(&name) {
+            return Some(self.set_at(i, v));
+        }
+        let mut m = self.to_struct();
+        m.insert(name, v);
+        *self = Row::from_struct(m);
+        None
+    }
+
+    /// This row with one column's value replaced; the row as it was when
+    /// it has no such column.
+    pub fn with(mut self, name: &str, v: Value) -> Row {
+        if let Some(i) = self.cols.position(name) {
+            self.set_at(i, v);
+        }
+        self
+    }
+
+    // The values are copied first when another row shares them.
+    fn set_at(&mut self, i: usize, v: Value) -> Value {
+        if Arc::get_mut(&mut self.vals).is_none() {
+            self.vals = self.vals.iter().cloned().collect();
+        }
+        let vals = Arc::get_mut(&mut self.vals).expect("the values are held once");
+        std::mem::replace(&mut vals[i], v)
+    }
+}
+
+/// Equal when every column is: the same names, each holding an equal
+/// value, whatever order either holds them in.
+impl PartialEq for Row {
+    fn eq(&self, other: &Row) -> bool {
+        if Arc::ptr_eq(&self.cols, &other.cols) || self.cols == other.cols {
+            return self.vals == other.vals;
+        }
+        self.len() == other.len() && self.iter().all(|(k, v)| other.get(k) == Some(v))
+    }
+}
+
+impl Eq for Row {}
+
+/// As the map it was: the columns in name order.
+impl fmt::Debug for Row {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_map()
+            .entries(self.cols.sorted.iter().map(|i| (&self.cols.names[*i as usize], &self.vals[*i as usize])))
+            .finish()
+    }
+}
+
+impl std::ops::Index<&str> for Row {
+    type Output = Value;
+
+    fn index(&self, name: &str) -> &Value {
+        self.get(name).unwrap_or_else(|| panic!("a row has no column {name:?}"))
+    }
+}
+
+/// The row with no columns: a row of no table, to [`Row::insert`] into.
+impl Default for Row {
+    fn default() -> Row {
+        Row::from_struct(BTreeMap::new())
+    }
+}
+
+/// A row of no table yet, from a struct's fields ([`Row::from_struct`]).
+impl From<BTreeMap<FieldName, Value>> for Row {
+    fn from(m: BTreeMap<FieldName, Value>) -> Row {
+        Row::from_struct(m)
+    }
+}
+
+/// A row of no table yet, from its pairs ([`Row::from_struct`]).
+impl<const N: usize> From<[(FieldName, Value); N]> for Row {
+    fn from(pairs: [(FieldName, Value); N]) -> Row {
+        pairs.into_iter().collect()
+    }
+}
+
+/// A row of no table yet, from its pairs ([`Row::from_struct`]).
+impl FromIterator<(FieldName, Value)> for Row {
+    fn from_iter<I: IntoIterator<Item = (FieldName, Value)>>(pairs: I) -> Row {
+        Row::from_struct(pairs.into_iter().collect())
+    }
+}
 
 /// The key columns' values, in key order.
 pub type Key = Vec<Value>;
@@ -203,7 +537,7 @@ pub trait Store {
 
     /// The row under a key as a value, or `Null`.
     fn get_value(&self, table: &str, key: &[Value]) -> Value {
-        self.get(table, key).map(Value::Struct).unwrap_or(Value::Null)
+        self.get(table, key).map(Row::into_value).unwrap_or(Value::Null)
     }
 
     /// `db.select(plan)`: what [`crate::view::pull`] answers, as a list.
@@ -221,7 +555,7 @@ pub trait Store {
         Value::Struct(
             self.schema()
                 .tables()
-                .map(|t| (t.name.clone(), Value::List(self.scan(&t.name).into_iter().map(Value::Struct).collect())))
+                .map(|t| (t.name.clone(), Value::List(self.scan(&t.name).into_iter().map(Row::into_value).collect())))
                 .collect(),
         )
     }
@@ -233,14 +567,48 @@ pub trait Store {
 // The rules -------------------------------------------------------------
 
 /// Fill in every nullable column the row left out, as `Null`
-/// (`Ark.Store.complete`).
-pub fn complete(tbl: &Table, mut row: Row) -> Row {
+/// (`Ark.Store.complete`) — which is laying it out as `tbl`'s row when it
+/// names only the table's columns and leaves out only nullable ones. A
+/// row laid out as the table's is complete already; one with the table's
+/// names in another object is given the table's, which copies nothing.
+/// Anything else stays a row of no table, completed by name, for
+/// [`judge_put`] to refuse.
+pub fn complete(tbl: &Table, row: Row) -> Row {
+    if row.is_of(tbl) {
+        return row;
+    }
+    let cols = tbl.row_columns();
+    if *row.cols == **cols {
+        return Row {
+            cols: cols.clone(),
+            vals: row.vals,
+        };
+    }
+    let mut m = row.to_struct();
     for c in &tbl.columns {
         if c.nullable {
-            row.entry(c.name.clone()).or_insert(Value::Null);
+            m.entry(c.name.clone()).or_insert(Value::Null);
         }
     }
-    row
+    Row::from_struct_in(tbl, m)
+}
+
+/// A row with a table's column names in any order, as that table's row;
+/// anything else as it is. What a store holds a fact's row as: a fact is
+/// applied raw (§4.5), so a row that is not the table's shape is kept as
+/// it came rather than completed or refused.
+fn stored(tbl: &Table, row: &Row) -> Row {
+    let cols = tbl.row_columns();
+    if Arc::ptr_eq(&row.cols, cols) || *row.cols == **cols {
+        return Row {
+            cols: cols.clone(),
+            vals: row.vals.clone(),
+        };
+    }
+    if row.len() == cols.len() && row.keys().all(|k| cols.position(k).is_some()) {
+        return Row::new(cols.clone(), cols.names.iter().map(|n| row[n.as_str()].clone()));
+    }
+    row.clone()
 }
 
 /// What `put` would report and the row it would store, without writing.
@@ -262,6 +630,17 @@ pub fn judge_put(st: &dyn Store, tn: &str, row0: Row) -> Result<Option<Change>, 
     })
 }
 
+/// A struct written to a table, as the table's row: what the evaluator and
+/// a native procedure hand [`insert`], [`upsert`] and [`update`]. A table
+/// the schema lacks gives a row of no table, which the write refuses as it
+/// did.
+pub fn row_for(st: &dyn Store, tn: &str, m: BTreeMap<FieldName, Value>) -> Row {
+    match st.schema().lookup_table(tn) {
+        Some(tbl) => Row::from_struct_in(tbl, m),
+        None => Row::from_struct(m),
+    }
+}
+
 /// §1.4 The row a write's column list matches, if any: the table's key
 /// when the list is empty, otherwise every listed column equal and none of
 /// them `Null` (a `Null` matches nothing, as a unique index has it).
@@ -273,7 +652,7 @@ pub fn matching(st: &dyn Store, tbl: &Table, row: &Row, on: &[FieldName]) -> Opt
     if want.iter().any(|(_, v)| v.is_null()) {
         return None;
     }
-    st.scan_where_eq(&tbl.name, &want, &[], &|r| want.iter().all(|(c, v)| r.get(*c) == Some(*v)))
+    st.scan_where_eq(&tbl.name, &want, &[], &|r| want.iter().all(|(c, v)| r.get(c) == Some(*v)))
         .into_iter()
         .next()
 }
@@ -300,7 +679,7 @@ pub fn upsert(st: &mut dyn Store, tn: &str, row0: Row, on: &[FieldName]) -> Resu
     if let Some(old) = matching(st.as_store(), tbl, &row, on) {
         for k in &tbl.key {
             if let Some(v) = old.get(k) {
-                row.insert(k.clone(), v.clone());
+                row = row.with(k, v.clone());
             }
         }
     }
@@ -334,25 +713,25 @@ pub fn judge_delete(st: &dyn Store, tn: &str, k: &[Value]) -> Result<Option<Chan
 }
 
 // A row is exactly the table's columns, each holding a value of the
-// column's type (`Null` only where nullable). The two name sets are
-// compared in place, each way, rather than built per write
-// (`docs/plan-perf.md` R5): a row and a table are a dozen columns.
+// column's type (`Null` only where nullable). A row laid out as the
+// table's has exactly its columns by construction ([`complete`]), so the
+// names are compared only for one that is not, and the types then in
+// column order, position by position (R11).
 fn well_typed(tbl: &Table, row: &Row) -> Result<(), Refusal> {
-    let same = tbl.columns.iter().all(|c| row.contains_key(&c.name)) && row.keys().all(|k| tbl.column(k).is_some());
-    if !same {
-        let have: Vec<&str> = row.keys().map(|k| k.as_str()).collect();
+    if !row.is_of(tbl) {
+        let mut have: Vec<&str> = row.keys().map(|k| k.as_str()).collect();
+        have.sort_unstable();
         let want: Vec<&str> = tbl.columns.iter().map(|c| c.name.as_str()).collect();
         return Err(Refusal::MalformedRow(tbl.name.clone(), format!("columns {have:?} are not {want:?}")));
     }
-    for c in &tbl.columns {
-        match row.get(&c.name) {
-            None => return Err(Refusal::MalformedRow(tbl.name.clone(), c.name.clone())),
-            Some(Value::Null) => {
+    for (c, v) in tbl.columns.iter().zip(row.values()) {
+        match v {
+            Value::Null => {
                 if !c.nullable {
                     return Err(Refusal::NotNull(tbl.name.clone(), c.name.clone()));
                 }
             }
-            Some(v) => {
+            v => {
                 if !of_type(&c.ty, v) {
                     return Err(Refusal::MalformedRow(tbl.name.clone(), format!("{} has the wrong type", c.name)));
                 }
@@ -411,7 +790,7 @@ fn unique(st: &dyn Store, tbl: &Table, k: &Key, row: &Row, ix: &Index) -> Result
         return Ok(());
     }
     let clash = st.scan_where_eq(&tbl.name, &mine, &[], &|r| {
-        tbl.key_of(r) != *k && mine.iter().all(|(c, v)| r.get(*c).is_some_and(|x| x == *v))
+        tbl.key_of(r) != *k && mine.iter().all(|(c, v)| r.get(c).is_some_and(|x| x == *v))
     });
     if clash.is_empty() {
         Ok(())
@@ -754,7 +1133,7 @@ impl MemoryStore {
                 if let Value::List(rs) = rows {
                     for r in rs {
                         if let Value::Struct(row) = r {
-                            st.apply_change(&Change::Add(t.clone(), row.clone()));
+                            st.apply_change(&Change::Add(t.clone(), Row::from_struct_ref(row)));
                         }
                     }
                 }
@@ -897,7 +1276,8 @@ impl Store for MemoryStore {
             Change::Add(t, row) | Change::Edit(t, _, row) => {
                 if let Some(tbl) = self.schema.lookup_table(t) {
                     let k = tbl.key_of(row);
-                    self.set(t, k, Some(row.clone()));
+                    let row = stored(tbl, row);
+                    self.set(t, k, Some(row));
                 }
             }
             Change::Remove(t, row) => {
@@ -1053,10 +1433,8 @@ impl Store for Overlay<'_> {
         };
         if let Some(tbl) = self.schema().lookup_table(t) {
             let k = tbl.key_of(row);
-            self.writes
-                .entry(t.clone())
-                .or_default()
-                .insert(k, if present { Some(row.clone()) } else { None });
+            let w = present.then(|| stored(tbl, row));
+            self.writes.entry(t.clone()).or_default().insert(k, w);
         }
     }
 
@@ -1078,35 +1456,35 @@ mod tests {
         };
         Schema {
             tables: vec![
-                Table {
-                    name: "p".into(),
-                    columns: vec![col("id", Ty::Int, false), col("name", Ty::Text, true)],
-                    key: vec!["id".into()],
-                    indexes: vec![Index {
+                Table::new(
+                    "p",
+                    vec![col("id", Ty::Int, false), col("name", Ty::Text, true)],
+                    vec!["id".into()],
+                    vec![Index {
                         columns: vec!["name".into()],
                         unique: true,
                     }],
-                    refs: vec![],
-                },
-                Table {
-                    name: "c".into(),
-                    columns: vec![col("id", Ty::Int, false), col("p_id", Ty::Int, true)],
-                    key: vec!["id".into()],
-                    indexes: vec![],
-                    refs: vec![Ref {
+                    vec![],
+                ),
+                Table::new(
+                    "c",
+                    vec![col("id", Ty::Int, false), col("p_id", Ty::Int, true)],
+                    vec!["id".into()],
+                    vec![],
+                    vec![Ref {
                         column: "p_id".into(),
                         table: "p".into(),
                     }],
-                },
+                ),
                 // Two references, as `playlist_item` has, and a key that
                 // takes a third column: holding both references is two
                 // indexes to choose between, holding all three is the key.
-                Table {
-                    name: "pc".into(),
-                    columns: vec![col("p_id", Ty::Int, false), col("c_id", Ty::Int, false), col("n", Ty::Int, false)],
-                    key: vec!["p_id".into(), "c_id".into(), "n".into()],
-                    indexes: vec![],
-                    refs: vec![
+                Table::new(
+                    "pc",
+                    vec![col("p_id", Ty::Int, false), col("c_id", Ty::Int, false), col("n", Ty::Int, false)],
+                    vec!["p_id".into(), "c_id".into(), "n".into()],
+                    vec![],
+                    vec![
                         Ref {
                             column: "p_id".into(),
                             table: "p".into(),
@@ -1116,15 +1494,15 @@ mod tests {
                             table: "c".into(),
                         },
                     ],
-                },
+                ),
                 // A playlist's items, as R1 reads them: keyed by the list
                 // and a number, ordered by a position an index holds under
                 // the list, and by the position alone.
-                Table {
-                    name: "it".into(),
-                    columns: vec![col("p_id", Ty::Int, false), col("n", Ty::Int, false), col("pos", Ty::Int, false)],
-                    key: vec!["p_id".into(), "n".into()],
-                    indexes: vec![
+                Table::new(
+                    "it",
+                    vec![col("p_id", Ty::Int, false), col("n", Ty::Int, false), col("pos", Ty::Int, false)],
+                    vec!["p_id".into(), "n".into()],
+                    vec![
                         Index {
                             columns: vec!["p_id".into(), "pos".into()],
                             unique: false,
@@ -1134,8 +1512,8 @@ mod tests {
                             unique: false,
                         },
                     ],
-                    refs: vec![],
-                },
+                    vec![],
+                ),
             ],
         }
     }
