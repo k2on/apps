@@ -430,7 +430,7 @@ impl Hub {
                 // Where each connection stood before what it is sent now:
                 // the start of a page, or a snapshot's sequence (`retain`
                 // module docs).
-                let (mut reached, mut snapshots) = (vec![], BTreeSet::new());
+                let mut reached = vec![];
                 for (c, m) in std::mem::take(&mut self.held) {
                     match &m {
                         ServerMsg::Batch { items, .. } => {
@@ -438,38 +438,15 @@ impl Hub {
                                 reached.push((c, n - 1));
                             }
                         }
-                        ServerMsg::SnapshotOf { seq, .. } => {
-                            reached.push((c, *seq));
-                            snapshots.insert(c);
-                        }
+                        ServerMsg::SnapshotOf { seq, .. } => reached.push((c, *seq)),
                         _ => {}
                     }
                     self.send(c, m);
                 }
-                let head = self.server.authority.log.head_seq();
-                let mut behind = vec![];
                 for (c, n) in reached {
                     self.note(c, n);
-                    if snapshots.contains(&c) && n < head {
-                        behind.push(c);
-                    }
                 }
                 self.write_cursors(false);
-                // A snapshot below the head is followed by the pages above
-                // it at once, not at whatever message next moves the
-                // machine: it sends a connection one message per turn, and
-                // after a snapshot the peer has no `has_more` to ask again
-                // with — a returning peer with nothing pending sat at the
-                // horizon of a quiet server. A `Push` of nothing is a turn
-                // that sequences nothing and says nothing but the page.
-                if !behind.is_empty() {
-                    for c in behind {
-                        if self.server.identity(c).is_some() {
-                            self.server.recv(c, ClientMsg::Push { entries: vec![] });
-                        }
-                    }
-                    self.after();
-                }
             }
             Err(e) => {
                 let why = format!("the log cannot be written: {e:#}");
@@ -1149,8 +1126,9 @@ mod tests {
     /// and a hub started again over the directory holds the same horizon
     /// and the same cursors. Falsified by `retain_log` doing nothing: all
     /// 30,000 are held; by `Hub::new` not reading `cursors.cbor`: the
-    /// reopened cursors are empty; and by not following a snapshot with
-    /// the pages above it (`after`): the fresh peer stops at 18,000.
+    /// reopened cursors are empty; and by the machine not following a
+    /// snapshot with the page above it (`Server::fanout`): the fresh peer
+    /// stops at 18,000.
     ///
     /// [`RETAIN_ENTRIES`]: ark::retention::RETAIN_ENTRIES
     #[test]
