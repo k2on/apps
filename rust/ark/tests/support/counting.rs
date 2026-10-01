@@ -5,6 +5,8 @@
 //! *examines* (each
 //! call to `keep`), not only the rows it returns, because a read through
 //! the wrong index returns the right rows and examines the wrong number.
+//! A state hash over it costs nothing when the store keeps its digests,
+//! and every row when it does not.
 
 #![allow(dead_code)]
 
@@ -120,6 +122,14 @@ impl Store for Counting<'_> {
 
     fn apply_change(&mut self, _: &Change) {
         unreachable!("a counting store is read, never written")
+    }
+
+    // The digests the store keeps (§8.1, `docs/plan-db.md` D3), passed
+    // through uncounted: they are read, not scanned. A store that keeps
+    // none answers `None`, and `state_hash` scans — through `scan` above,
+    // where every row is counted.
+    fn digest(&self, table: &str) -> Option<ark::hash::Digest> {
+        self.inner.digest(table)
     }
 
     fn as_store(&self) -> &dyn Store {
