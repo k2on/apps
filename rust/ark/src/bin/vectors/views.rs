@@ -587,6 +587,7 @@ pub fn views(out: &Out) {
     }
     println!("  {} batches through {} plans", batches.len(), m.functions.len());
     more(out);
+    fuzzed_sums(out);
 }
 
 // `docs/plan-db.md` D4 ------------------------------------------------------
@@ -811,4 +812,97 @@ fn more(out: &Out) {
         out.write(&format!("views/{name}.json"), &obj(&parts));
     }
     println!("  {} batches through {} plans (D4)", batches.len(), m.functions.len());
+}
+
+// Found by `arkc fuzz` (`docs/plan-db.md` D2, finding 3), decided in D4 ----
+//
+// Two views whose plan sums a group's members by a `fold`, which disagreed
+// with the kept sum about overflow until §13 said a sum is judged on its
+// result alone. The fuzzer's files are in `fuzzed/` as it wrote them, and
+// each is written only while it holds: hydrated and pushed every batch,
+// the view is a fresh hydrate, answers what a read answers, and the patches
+// splice. One whose recorded answers are the rule's is carried byte for
+// byte (`…-overflows-where-the-fold-answers`: its refusal was the push's,
+// on the way); one whose answers were the old rule's (`…-answers-where-the-
+// fold-overflows`, whose last batch the fold refused) is written again with
+// the rule's — the module, query, store and batches as found, the answers
+// a read gives, no patches (the fuzzer's form), and its provenance.
+
+const SUMS: [(&str, &str); 2] = [
+    (
+        "a-maintained-sum-answers-where-the-fold-overflows.json",
+        include_str!("fuzzed/a-maintained-sum-answers-where-the-fold-overflows.json"),
+    ),
+    (
+        "a-maintained-sum-overflows-where-the-fold-answers.json",
+        include_str!("fuzzed/a-maintained-sum-overflows-where-the-fold-answers.json"),
+    ),
+];
+
+// The values back out of the JSON the parts were written as.
+fn json_rows(text: &str) -> Value {
+    ark::json::decode(text).expect("our own JSON")
+}
+
+fn steps_rows(text: &str) -> Vec<Value> {
+    json_rows(text).as_list().iter().map(|s| s.field("rows")).collect()
+}
+
+fn fuzzed_sums(out: &Out) {
+    for (name, text) in SUMS {
+        let v = ark::json::decode(text).unwrap_or_else(|e| panic!("{name}: {e:?}"));
+        let m = ark::ir::module_from_value(&v.field("module")).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let sch = &m.schema;
+        let query = v.field("query").as_text().to_string();
+        let f = m.lookup_function(&query).expect("the query");
+        let plan = f.plan.clone().expect("a plan");
+        let cx = v.field("ctx");
+        let ctx = EvalCtx::new(cx.field("user").as_text(), cx.field("session").as_text());
+        let mut st = MemoryStore::from_value(sch.clone(), &v.field("store_before"));
+        let c = closure(&m, f);
+        let (args, provided) = eval::middleware(sch, &c, &ctx, v.field("args").as_struct(), &st).expect("the middleware");
+        let env = Env {
+            helpers: c.helpers.clone(),
+            ctx,
+            args,
+            provided,
+        };
+        let mut view = hydrate(sch, &plan, env.clone(), &st).unwrap_or_else(|e| panic!("{name}: hydrate: {e:?}"));
+        let read = |st: &MemoryStore| ark::view::read(sch, &plan, &env.scope(sch), st).unwrap_or_else(|e| panic!("{name}: read: {e:?}"));
+        claim(&format!("{name}: the answer at hydrate"), view.rows() == read(&st));
+        let rows_before = view.rows();
+        let mut steps = vec![];
+        for (i, b) in v.field("batches").as_list().iter().enumerate() {
+            let batch: Vec<Change> = b
+                .as_list()
+                .iter()
+                .map(|c| ark::protocol::change_from_value(c).expect("a change"))
+                .collect();
+            let before = view.rows();
+            st.apply_changes(&batch);
+            let patches = push_all(sch, &st, &batch, &mut view).unwrap_or_else(|e| panic!("{name}: batch {i}: {e:?}"));
+            claim(&format!("{name}: batch {i} keeps the contract"), contract(sch, &st, &view));
+            claim(&format!("{name}: batch {i} splices"), splice(&patches, &before) == view.rows());
+            claim(&format!("{name}: batch {i} answers what a read does"), view.rows() == read(&st));
+            steps.push(view.rows());
+        }
+        let parts = vec![
+            ("module", json(&v.field("module"))),
+            ("query", quoted(&query)),
+            ("plan", json(&v.field("plan"))),
+            ("ctx", json(&v.field("ctx"))),
+            ("args", json(&v.field("args"))),
+            ("store_before", json(&v.field("store_before"))),
+            ("rows_before", json(&Value::List(rows_before))),
+            ("batches", json(&v.field("batches"))),
+            ("steps", array(steps.into_iter().map(|rows| obj(&[("rows", json(&Value::List(rows)))])))),
+            ("fuzz", json(&v.field("fuzz"))),
+        ];
+        let recorded = v.field("rows_before") == json_rows(&parts[6].1)
+            && v.field("steps").as_list().iter().map(|s| s.field("rows")).eq(steps_rows(&parts[8].1));
+        match recorded {
+            true => out.write(&format!("views/{name}"), text),
+            false => out.write(&format!("views/{name}"), &obj(&parts)),
+        }
+    }
 }

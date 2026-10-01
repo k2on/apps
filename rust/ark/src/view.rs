@@ -28,7 +28,7 @@ use std::ops::Bound;
 use crate::eval::{Args, Ctx, EvalError, EvalFault, NodeScope, Scope};
 use crate::ir::{CmpOp, Expr, FnKind, Function, Key, Lookup, Op, Plan, Pred, Related, Source, StdFn, Stmt, Sym};
 use crate::schema::{Dir, Schema, Table};
-use crate::store::{self, compare_rows, Change, Refusal, Row, Span, Store};
+use crate::store::{self, compare_rows, Change, Row, Span, Store};
 use crate::value::{compare_value, FieldName, TableName, Value};
 
 // §1.3 The one evaluator ----------------------------------------------------
@@ -119,7 +119,7 @@ pub struct Entry {
     /// R9 A group's members as numbers, one per aggregate of
     /// [`Face::members`]; empty when they are a list. An extreme (D4) is
     /// the column's value, or `Null` for none.
-    pub members: Vec<Value>,
+    pub members: Vec<Num>,
 }
 
 /// §1.3, §1.5 Every candidate of a plan over a store, ordered: by the order
@@ -671,8 +671,11 @@ fn group_of(by: &[FieldName], row: &Row) -> Vec<Value> {
 pub enum Agg {
     /// How many admitted nodes the list holds.
     Count,
-    /// The sum of `f` over the list's nodes, `x` being each node in `f`.
-    Sum { x: Sym, f: Expr },
+    /// `init` plus the sum of `f` over the list's nodes, `x` being each
+    /// node in `f`; `init` reads no binder, so the number is a function of
+    /// the list alone. Kept as an integer of any size and judged only when
+    /// a node reads it (§13, `docs/plan-db.md` D4).
+    Sum { x: Sym, f: Expr, init: Expr },
     /// D4 The least value of a column over the list's rows, `Null` when the
     /// list is empty: `fold(list, init, |acc, x| min(acc, x.col))`, or
     /// `first` of a list ordered by the column ascending (`last`, descending)
@@ -926,13 +929,14 @@ fn face(sch: &Schema, p: &Plan, base: NodeId, root: bool, helpers: &[Function], 
     let mut kept = BTreeMap::new();
     let mut flags = Vec::with_capacity(p.related.len());
     let mut slots: BTreeMap<Sym, Vec<(Agg, Sym)>> = BTreeMap::new();
-    // Each aggregate a slot of its own, from the one counter; an extreme
-    // two, the second the binder its fold's rewrite matches the first by.
+    // Each aggregate a slot of its own, from the one counter; a sum two
+    // (its number as a pair of `i64`s), an extreme two (the second the
+    // binder its fold's rewrite matches the first by).
     fn assign(aggs: &[Agg], next: &mut Sym) -> Vec<(Agg, Sym)> {
         aggs.iter()
             .map(|a| {
                 let s = *next;
-                *next -= if a.extreme().is_some() { 2 } else { 1 };
+                *next -= if matches!(a, Agg::Count) { 1 } else { 2 };
                 (a.clone(), s)
             })
             .collect()
@@ -1005,7 +1009,17 @@ fn aggregate_use<'e>(e: &'e Expr, cands: &BTreeSet<Sym>, rec: &Rec<'e>) -> Optio
                     return Some((*s, agg, Use::Fold(init, g)));
                 }
                 let f = step(body, *acc)?;
-                closed(f, &[*x], false).then(|| (*s, Agg::Sum { x: *x, f: f.clone() }, Use::Plain(Some(&**init))))
+                (closed(f, &[*x], false) && closed(init, &[], false)).then(|| {
+                    (
+                        *s,
+                        Agg::Sum {
+                            x: *x,
+                            f: f.clone(),
+                            init: (**init).clone(),
+                        },
+                        Use::Plain(Some(&**init)),
+                    )
+                })
             }
             _ => None,
         },
@@ -1079,22 +1093,27 @@ fn helper_agg(h: &Function) -> Option<(Agg, Option<&Expr>)> {
         Expr::Std(StdFn::Len, es) if es.len() == 1 && is_p(&es[0]) => Some((Agg::Count, None)),
         Expr::Fold(xs, init, acc, x, body) if is_p(xs) => {
             let f = step(body, *acc)?;
-            (closed(f, &[*x], true) && closed(init, &[], true)).then(|| (Agg::Sum { x: *x, f: f.clone() }, Some(&**init)))
+            (closed(f, &[*x], true) && closed(init, &[], true)).then(|| {
+                (
+                    Agg::Sum {
+                        x: *x,
+                        f: f.clone(),
+                        init: (**init).clone(),
+                    },
+                    Some(&**init),
+                )
+            })
         }
         _ => None,
     }
 }
 
 // The `f` of a fold's step `acc + f` (or `f + acc`), when `f` does not
-// read the accumulator.
+// read the accumulator: the evaluator's own test of a sum
+// ([`crate::eval::sum_step`]), so that what a view keeps as a number is
+// what a fresh read sums wide.
 fn step(body: &Expr, acc: Sym) -> Option<&Expr> {
-    match body {
-        Expr::Op(Op::Add, es) if es.len() == 2 => match (&es[0], &es[1]) {
-            (Expr::Var(a), f) | (f, Expr::Var(a)) if *a == acc && !mentions(f, acc) => Some(f),
-            _ => None,
-        },
-        _ => None,
-    }
+    crate::eval::sum_step(body, acc)
 }
 
 // Pass one: note each use of a candidate list — an aggregate, or anything
@@ -1138,7 +1157,10 @@ fn rewrite(e: &Expr, slots: &BTreeMap<Sym, Vec<(Agg, Sym)>>, rec: &Rec) -> Expr 
         let v = |s: Sym| Box::new(Expr::Var(s));
         Some(match u {
             Use::Plain(None) => Expr::Var(slot),
-            Use::Plain(Some(init)) => Expr::Op(Op::Add, vec![rewrite(init, slots, rec), Expr::Var(slot)]),
+            // The sum's `init` is in its number; the number is two slots
+            // whose checked addition overflows exactly when it is not an
+            // `i64` (§13: a sum is judged on its result alone).
+            Use::Plain(Some(_)) => Expr::Op(Op::Add, vec![Expr::Var(slot), Expr::Var(slot - 1)]),
             Use::Fold(init, g) => {
                 let init = rewrite(init, slots, rec);
                 let y = slot - 1;
@@ -1208,7 +1230,7 @@ fn closed(e: &Expr, allowed: &[Sym], strict: bool) -> bool {
 
 // The expressions directly inside one, binders' bodies included; a plan
 // inside a `Select` is not looked into (a node's expressions have none).
-fn children(e: &Expr) -> Vec<&Expr> {
+pub(crate) fn children(e: &Expr) -> Vec<&Expr> {
     match e {
         Expr::Lit(_)
         | Expr::Arg(_)
@@ -1284,7 +1306,7 @@ pub struct Held {
     /// One per aggregate of the node, in [`Kept::aggs`]'s order: an `Int`
     /// for a count or a sum, the column's value for an extreme (D4), `Null`
     /// when there is none.
-    pub nums: Vec<Value>,
+    pub nums: Vec<Num>,
     /// The child nodes, by key, when the child plan has related plans.
     pub kids: BTreeMap<Vec<Value>, Kid>,
     /// Who reads these numbers: `None` for the entry's own node, or a
@@ -1318,7 +1340,7 @@ type Ops = Vec<((NodeId, Value), bool)>;
 enum Members {
     None,
     List(Value),
-    Nums(Vec<Value>),
+    Nums(Vec<Num>),
 }
 
 // Everything the kept numbers are computed against: the plan, its shape,
@@ -1390,38 +1412,50 @@ fn bool_of(v: Value) -> Result<bool, EvalFault> {
     }
 }
 
-// A count or a sum moved by a term under `op` (add or subtract), checked as
-// the evaluator's arithmetic is: an overflow is the same refusal a fold's
-// would be.
-fn shift(op: Op, n: &Value, t: &Value) -> Result<Value, EvalFault> {
-    let (Value::Int(n), Value::Int(t)) = (n, t) else {
-        return Err(EvalFault::Bug(EvalError::TypeError(format!("a count or a sum moved by {t:?}, at {n:?}"))));
-    };
-    crate::eval::arith(op, *n, *t)
-        .map(Value::Int)
-        .map_err(|e| EvalFault::Verdict(Refusal::Refused(e.into())))
+/// What one aggregate a view keeps comes to (R9, `docs/plan-db.md` D4): a
+/// count or a sum as an integer of any size — §13 judges a sum on its
+/// result alone, so a total that passes outside an `i64` on the way, in
+/// whatever order its terms arrive, is not an overflow — and an extreme as
+/// the column's value, `Null` for none.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Num {
+    Int(i128),
+    Val(Value),
 }
 
-// What `aggs` come to over no node: nothing counted, nothing summed, no
+// What `aggs` come to over no node: nothing counted, a sum's `init`, no
 // extreme.
-fn zero(aggs: &[(Agg, Sym)]) -> Vec<Value> {
+fn zero(cx: &Cx, aggs: &[(Agg, Sym)]) -> Result<Vec<Num>, EvalFault> {
     aggs.iter()
-        .map(|(a, _)| if a.extreme().is_some() { Value::Null } else { Value::Int(0) })
+        .map(|(a, _)| match a {
+            Agg::Count => Ok(Num::Int(0)),
+            Agg::Sum { init, .. } => int_of(cx.scope.node().eval(init)?).map(|n| Num::Int(n.into())),
+            Agg::Min(_) | Agg::Max(_) => Ok(Num::Val(Value::Null)),
+        })
         .collect()
 }
 
+fn wide(n: &Num) -> Result<i128, EvalFault> {
+    match n {
+        Num::Int(n) => Ok(*n),
+        Num::Val(v) => Err(EvalFault::Bug(EvalError::TypeError(format!("a count or a sum at {v:?}")))),
+    }
+}
+
 // One admitted node's terms put in: added to a count or a sum, compared
-// with an extreme (D4), which it replaces when it is beyond it.
-fn put_in(aggs: &[(Agg, Sym)], nums: &mut [Value], terms: &[Value]) -> Result<(), EvalFault> {
+// with an extreme (D4), which it replaces when it is beyond it. An `i128`
+// does not overflow by adding `i64`s one at a time.
+fn put_in(aggs: &[(Agg, Sym)], nums: &mut [Num], terms: &[Num]) -> Result<(), EvalFault> {
     for (((a, _), n), t) in aggs.iter().zip(nums.iter_mut()).zip(terms) {
-        match a.extreme() {
-            None => *n = shift(Op::Add, n, t)?,
-            Some((_, d)) => {
+        match (a.extreme(), n, t) {
+            (None, n, t) => *n = Num::Int(wide(n)? + wide(t)?),
+            (Some((_, d)), Num::Val(n), Num::Val(t)) => {
                 let o = compare_value(t, n);
                 if n.is_null() || o == if d == Dir::Asc { Ordering::Less } else { Ordering::Greater } {
                     *n = t.clone();
                 }
             }
+            (Some(_), n, t) => return Err(EvalFault::Bug(EvalError::TypeError(format!("an extreme {n:?} by {t:?}")))),
         }
     }
     Ok(())
@@ -1433,15 +1467,37 @@ fn put_in(aggs: &[(Agg, Sym)], nums: &mut [Value], terms: &[Value]) -> Result<()
 // from the store ([`extremes`]), which is already final: arrivals compared
 // after that are compared against an answer that has them already, and
 // comparing is idempotent (D4).
-fn take_out(aggs: &[(Agg, Sym)], nums: &mut [Value], terms: &[Value]) -> Result<bool, EvalFault> {
+fn take_out(aggs: &[(Agg, Sym)], nums: &mut [Num], terms: &[Num]) -> Result<bool, EvalFault> {
     let mut stale = false;
     for (((a, _), n), t) in aggs.iter().zip(nums.iter_mut()).zip(terms) {
-        match a.extreme() {
-            None => *n = shift(Op::Sub, n, t)?,
-            Some(_) => stale |= n.is_null() || n == t,
+        match (a.extreme(), n) {
+            (None, n) => *n = Num::Int(wide(n)? - wide(t)?),
+            (Some(_), Num::Val(n)) => stale |= n.is_null() || Num::Val(n.clone()) == *t,
+            (Some(_), n) => return Err(EvalFault::Bug(EvalError::TypeError(format!("an extreme at {n:?}")))),
         }
     }
     Ok(stale)
+}
+
+// The numbers bound for a node to read, at their slots: a count as itself;
+// a sum as two `i64`s — the total clamped, and what is left clamped — whose
+// checked sum, which is what the rewritten expression computes, is the
+// total when it is an `i64` and the evaluator's overflow when it is not,
+// exactly as a fresh `fold` judges it (§13); an extreme as its value.
+fn bind_nums(node: &mut NodeScope, aggs: &[(Agg, Sym)], nums: &[Num]) {
+    let clamp = |n: i128| n.clamp(i64::MIN.into(), i64::MAX.into()) as i64;
+    for ((a, slot), n) in aggs.iter().zip(nums) {
+        match (a, n) {
+            (Agg::Count, Num::Int(n)) => node.bind(*slot, Value::Int(clamp(*n))),
+            (Agg::Sum { .. }, Num::Int(n)) => {
+                let first = clamp(*n);
+                node.bind(*slot, Value::Int(first));
+                node.bind(*slot - 1, Value::Int(clamp(*n - i128::from(first))));
+            }
+            (_, Num::Val(v)) => node.bind(*slot, v.clone()),
+            (_, Num::Int(n)) => node.bind(*slot, Value::Int(clamp(*n))),
+        }
+    }
 }
 
 // A column of a node that is its row; `Null` where it has none.
@@ -1454,16 +1510,16 @@ fn column(node: &Value, c: &str) -> Value {
 
 // The terms one admitted node adds to the aggregates `aggs`: 1 to a count,
 // `f(node)` to a sum, the column to an extreme (whose node is its row).
-fn terms(cx: &Cx, aggs: &[(Agg, Sym)], node: &Value) -> Result<Vec<Value>, EvalFault> {
+fn terms(cx: &Cx, aggs: &[(Agg, Sym)], node: &Value) -> Result<Vec<Num>, EvalFault> {
     aggs.iter()
         .map(|(a, _)| match a {
-            Agg::Count => Ok(Value::Int(1)),
-            Agg::Sum { x, f } => {
+            Agg::Count => Ok(Num::Int(1)),
+            Agg::Sum { x, f, .. } => {
                 let mut n = cx.scope.node();
                 n.bind_ref(*x, node);
-                int_of(n.eval(f)?).map(Value::Int)
+                int_of(n.eval(f)?).map(|t| Num::Int(t.into()))
             }
-            Agg::Min(c) | Agg::Max(c) => Ok(column(node, c)),
+            Agg::Min(c) | Agg::Max(c) => Ok(Num::Val(column(node, c))),
         })
         .collect()
 }
@@ -1484,7 +1540,7 @@ fn pins_of(r: &Related, on: &Value) -> Vec<(FieldName, Value)> {
 // past those `keep` refuses — and [`shape`] keeps an extreme only where the
 // schema has such an index. A store that serves none has every candidate
 // read, which is right and is the scan the index is there to spare.
-fn extremes(cx: &Cx, plan: &Plan, pins: &[(FieldName, Value)], aggs: &[(Agg, Sym)], nums: &mut [Value]) -> Result<(), EvalFault> {
+fn extremes(cx: &Cx, plan: &Plan, pins: &[(FieldName, Value)], aggs: &[(Agg, Sym)], nums: &mut [Num]) -> Result<(), EvalFault> {
     if !aggs.iter().any(|(a, _)| a.extreme().is_some()) {
         return Ok(());
     }
@@ -1504,7 +1560,7 @@ fn extremes(cx: &Cx, plan: &Plan, pins: &[(FieldName, Value)], aggs: &[(Agg, Sym
                 }
             }),
         };
-        *n = row.map_or(Value::Null, |r| column_of(&r, c));
+        *n = Num::Val(row.map_or(Value::Null, |r| column_of(&r, c)));
     }
     Ok(())
 }
@@ -1535,7 +1591,7 @@ fn row_node(cx: &Cx, id: NodeId, row: &Value) -> Result<Option<Value>, EvalFault
 
 // The terms a child row adds to its parent's numbers: none when the filter
 // or the having refuses it.
-fn row_terms(cx: &Cx, id: NodeId, row: &Row) -> Result<Option<Vec<Value>>, EvalFault> {
+fn row_terms(cx: &Cx, id: NodeId, row: &Row) -> Result<Option<Vec<Num>>, EvalFault> {
     if !admits(cx.filters[&id].as_ref(), row) {
         return Ok(None);
     }
@@ -1557,10 +1613,7 @@ fn kid_node(cx: &Cx, id: NodeId, row: &Value, subs: &[Value], held: &HeldMap) ->
         node.bind_ref(x, row);
     }
     for (jid, on) in face.ids.iter().zip(subs) {
-        let h = &held[&(*jid, on.clone())];
-        for ((_, slot), n) in cx.kept(*jid).aggs.iter().zip(&h.nums) {
-            node.bind(*slot, n.clone());
-        }
+        bind_nums(&mut node, &cx.kept(*jid).aggs, &held[&(*jid, on.clone())].nums);
     }
     let admitted = match &face.having {
         None => true,
@@ -1576,7 +1629,7 @@ fn kid_node(cx: &Cx, id: NodeId, row: &Value, subs: &[Value], held: &HeldMap) ->
     Ok((admitted, value))
 }
 
-fn kid_terms(cx: &Cx, id: NodeId, kid: &Kid) -> Result<Option<Vec<Value>>, EvalFault> {
+fn kid_terms(cx: &Cx, id: NodeId, kid: &Kid) -> Result<Option<Vec<Num>>, EvalFault> {
     if !kid.admitted {
         return Ok(None);
     }
@@ -1619,7 +1672,7 @@ fn ensure(cx: &Cx, id: NodeId, on: Value, parent: Parent, held: &mut HeldMap, op
     let kept = cx.kept(id);
     let pins = pins_of(r, &k.1);
     let mut h = Held {
-        nums: zero(&kept.aggs),
+        nums: zero(cx, &kept.aggs)?,
         kids: BTreeMap::new(),
         parents: BTreeSet::from([parent]),
     };
@@ -1682,7 +1735,7 @@ struct Hit<'c> {
 // evaluate again over numbers that moved beneath them.
 #[derive(Default)]
 struct Dirt {
-    before: Option<Vec<Value>>,
+    before: Option<Vec<Num>>,
     reread: BTreeSet<Vec<Value>>,
     reeval: BTreeSet<Vec<Value>>,
     /// D4 An extreme left with a row: read it again ([`extremes`]).
@@ -1803,8 +1856,8 @@ fn sweep(cx: &Cx, held: &mut HeldMap, hits: &[Hit], ops: &mut Ops) -> Result<(),
 
 // A group's members as numbers, from its rows: how many, each sum, each
 // extreme.
-fn member_nums(cx: &Cx, aggs: &[(Agg, Sym)], rows: &[Value]) -> Result<Vec<Value>, EvalFault> {
-    let mut nums = zero(aggs);
+fn member_nums(cx: &Cx, aggs: &[(Agg, Sym)], rows: &[Value]) -> Result<Vec<Num>, EvalFault> {
+    let mut nums = zero(cx, aggs)?;
     for r in rows {
         put_in(aggs, &mut nums, &terms(cx, aggs, r)?)?;
     }
@@ -1847,9 +1900,7 @@ fn entry_at(cx: &Cx, key: Vec<Value>, row: Cand, members: Members, mut held: Hel
             }
         }
         Members::Nums(ns) => {
-            for ((_, slot), n) in face.members.iter().flatten().zip(&ns) {
-                node.bind(*slot, n.clone());
-            }
+            bind_nums(&mut node, face.members.as_deref().unwrap_or_default(), &ns);
             nums = ns;
         }
     }
@@ -1876,9 +1927,7 @@ fn entry_at(cx: &Cx, key: Vec<Value>, row: Cand, members: Members, mut held: Hel
             for k in stale {
                 release(cx, k, &None, &mut held, ops);
             }
-            for ((_, slot), n) in cx.kept(id).aggs.iter().zip(&held[&(id, dep)].nums) {
-                node.bind(*slot, n.clone());
-            }
+            bind_nums(&mut node, &cx.kept(id).aggs, &held[&(id, dep)].nums);
         } else {
             deps.push((id, Value::List(on.iter().map(|(_, v)| v.clone()).collect())));
             let mut kids = pull_at(cx.sch, &r.plan, id + 1, &on, cx.scope, cx.st)?;
@@ -2481,7 +2530,7 @@ struct Touched<'c> {
 // for a group with no entry, which is counted from its rows — and whether
 // an extreme left with a row, to be read again.
 struct Track {
-    nums: Option<Vec<Value>>,
+    nums: Option<Vec<Num>>,
     stale: bool,
 }
 
@@ -2638,12 +2687,12 @@ fn root_of(
                             Some(mut nums) => {
                                 for (n, (a, _)) in nums.iter_mut().zip(aggs) {
                                     if *a == Agg::Count {
-                                        *n = Value::Int(size as i64);
+                                        *n = Num::Int(size as i128);
                                     }
                                 }
                                 nums
                             }
-                            None if aggs.iter().all(|(a, _)| *a == Agg::Count) => vec![Value::Int(size as i64); aggs.len()],
+                            None if aggs.iter().all(|(a, _)| *a == Agg::Count) => vec![Num::Int(size as i128); aggs.len()],
                             None => member_nums(cx, aggs, &rows())?,
                         }
                     }),

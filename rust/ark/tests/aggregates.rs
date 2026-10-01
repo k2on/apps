@@ -707,3 +707,133 @@ fn a_song_costs_its_group_one_row() {
     }
     assert_eq!(seen, vec![Reads { gets: 1, rows: 0 }; 2]);
 }
+
+// §13, `docs/plan-db.md` D4: a sum is judged on its result -----------------
+
+pub struct Ledger {
+    pub entry: Table<Entry>,
+}
+impl Tables for Ledger {
+    fn open() -> Self {
+        Ledger { entry: table() }
+    }
+}
+
+pub struct Entry {
+    pub id: Text,
+    pub g: Text,
+    pub v: Int,
+}
+impl Row for Entry {
+    const NAME: &str = "entry";
+    type Key = (Text,);
+    fn columns() -> Columns<Self> {
+        columns().text(Self::id).text(Self::g).int(Self::v).key((Self::id,))
+    }
+}
+#[allow(non_upper_case_globals)]
+impl Entry {
+    pub const id: Col<Self, Text> = col("id");
+    pub const g: Col<Self, Text> = col("g");
+    pub const v: Col<Self, Int> = col("v");
+}
+
+fn sum_of(xs: List<Int>) -> Int {
+    helper("sum_of", ("xs", xs), |xs: List<Int>| xs.fold(0, |acc: Int, x| acc.add(x)))
+}
+
+fn ledger() -> Module {
+    let r = router::<Ledger>("ledger");
+    Module::new((r.routes((
+        // Each group's total, by a fold over its members in key order.
+        r.query("totals", |_ctx, db, _input: ()| {
+            db.entry.group_by(Entry::g).map(|g, (rows,)| Tally2 {
+                name: g,
+                n: rows.fold(0, |acc: Int, row| acc.add(row.v)),
+            })
+        }),
+        // A helper reached from a node, and the same helper's fold as a
+        // procedure reaches it (`eval_helper`).
+        r.query("totals_by_helper", |_ctx, db, _input: ()| {
+            db.entry.group_by(Entry::g).map(|g, (rows,)| Tally2 {
+                name: g,
+                n: sum_of(rows.map(|row| row.v)),
+            })
+        }),
+    )),))
+}
+
+fn entry(id: &str, g: &str, v: i64) -> ark::store::Row {
+    [("id", t(id)), ("g", t(g)), ("v", Value::int(v))]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect()
+}
+
+fn ledger_store(sch: &Schema, rows: &[(&str, i64)]) -> MemoryStore {
+    let mut st = MemoryStore::empty(sch.clone());
+    for (id, v) in rows {
+        st.apply_change(&Change::Add("entry".into(), entry(id, "a", *v)));
+    }
+    st
+}
+
+fn totals(built: &ir::Module, name: &str, st: &MemoryStore) -> Result<Vec<Value>, ark::eval::EvalFault> {
+    let (plan, env) = plan_env(built, name);
+    view::read(&built.schema, &plan, &env.scope(&built.schema), st)
+}
+
+const MAX: i64 = i64::MAX;
+
+/// The first direction of D2's finding 3: a group whose fold, in key order,
+/// passes outside an `i64` — `MAX + 5`, then `- 10` — and whose total fits
+/// answers the total, read fresh and kept alike, inline and through a helper
+/// a node calls. A total that does not fit refuses both ways. Falsified by
+/// evaluating no fold wide (`Env::wide` false in `Scope::node`): the fresh
+/// read refuses "integer overflow" where the kept sum answers.
+#[test]
+fn a_fold_that_overflows_on_the_way_answers_its_total() {
+    let m = ledger();
+    let built = m.build();
+    let sch = &built.schema;
+    let st = ledger_store(sch, &[("1", MAX), ("2", 5), ("3", -10)]);
+    for name in ["totals", "totals_by_helper"] {
+        let want = vec![Value::record(vec![("name", t("a")), ("n", Value::int(MAX - 5))])];
+        assert_eq!(totals(built, name, &st).expect("the total fits"), want, "{name}: read");
+        let (plan, env) = plan_env(built, name);
+        let v = view::hydrate(sch, &plan, env, &st).expect("hydrate");
+        assert_eq!(v.rows(), want, "{name}: kept");
+        let over = ledger_store(sch, &[("1", MAX), ("2", 1)]);
+        assert!(totals(built, name, &over).is_err(), "{name}: a total past MAX refuses");
+        let (plan, env) = plan_env(built, name);
+        assert!(view::hydrate(sch, &plan, env, &over).is_err(), "{name}: kept, too");
+    }
+    // A procedure's fold keeps checked arithmetic step by step (§6.5): a
+    // native runs it as a Rust closure, which no recogniser sees into.
+    let xs = Value::List(vec![Value::int(MAX), Value::int(5), Value::int(-10)]);
+    assert!(ark::eval::eval_helper(built, "sum_of", vec![xs]).is_err());
+}
+
+/// The other direction: a kept total of `MAX` whose member moves from `-1`
+/// to `-2` — taking `-1` out passes `MAX + 1` on the way — answers `MAX - 1`
+/// where the fresh fold does, one `Update`. Falsified by holding a kept
+/// number to an `i64` after each move (`take_out` refusing outside it): the
+/// push refuses "integer overflow".
+#[test]
+fn a_kept_sum_moved_through_an_overflow_answers_its_total() {
+    let m = ledger();
+    let built = m.build();
+    let sch = &built.schema;
+    for name in ["totals", "totals_by_helper"] {
+        let mut st = ledger_store(sch, &[("1", MAX), ("2", -1), ("3", 1)]);
+        let (plan, env) = plan_env(built, name);
+        let mut v = view::hydrate(sch, &plan, env, &st).expect("hydrate");
+        let moved = Change::Edit("entry".into(), entry("2", "a", -1), entry("2", "a", -2));
+        st.apply_change(&moved);
+        let ps = view::push_all(sch, &st, &[moved], &mut v).expect("the total fits");
+        assert!(matches!(ps.as_slice(), [Patch::Update { .. }]), "{name}: {ps:?}");
+        assert_eq!(v.rows(), totals(built, name, &st).unwrap(), "{name}");
+        assert_eq!(v.rows()[0].field("n"), Value::int(MAX - 1));
+        assert!(view::contract(sch, &st, &v));
+    }
+}

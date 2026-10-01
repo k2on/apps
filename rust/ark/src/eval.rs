@@ -139,6 +139,13 @@ struct Env<'a> {
     node: &'a [(Sym, Val<'a>)],
     /// The innermost local, which points at the one it was bound over.
     locals: Option<&'a Frame<'a>>,
+    /// Whether this is a plan's node, or a helper one calls: there a sum's
+    /// `fold` is arithmetic over the integers, judged on its result alone
+    /// (§13, `docs/plan-db.md` D4), so that a fresh read and a view that
+    /// keeps the sum as a number agree. A procedure's body keeps checked
+    /// arithmetic step by step (§6.5): its natives run the fold as a Rust
+    /// closure, which no recogniser can see into.
+    wide: bool,
 }
 
 // §6.4 A local: one per `let`, per element a list function or a `for`
@@ -255,6 +262,7 @@ impl<'a> Env<'a> {
             provided: self.provided,
             node: self.node,
             locals: Some(frame),
+            wide: false,
         }
     }
 }
@@ -372,6 +380,7 @@ fn procedure(st: &mut St, sch: &Schema, c: &Closure, ctx: &Ctx, autos: &Args, ar
         provided: &provided,
         node: &[],
         locals: None,
+        wide: false,
     };
     // §1.4 A query is its plan: what `pull` answers, over the store the
     // middleware saw.
@@ -409,6 +418,7 @@ fn preamble(st: &mut St, sch: &Schema, c: &Closure, ctx: &Ctx, args0: &Args) -> 
             provided: &provided,
             node: &[],
             locals: None,
+            wide: false,
         };
         match block(st, &env, &mw.body) {
             Ok(()) | Err(Stop::Returned(None)) if mw.kind == FnKind::Guard => {}
@@ -453,6 +463,7 @@ fn checked_input(st: &mut St, sch: &Schema, c: &Closure, ctx: &Ctx, args0: &Args
                     provided: &none,
                     node: &[],
                     locals: None,
+                    wide: false,
                 };
                 let mut empty = St {
                     store: &mut Overlay::new(&empty_store),
@@ -480,6 +491,7 @@ fn checked_input(st: &mut St, sch: &Schema, c: &Closure, ctx: &Ctx, args0: &Args
             provided: &none,
             node: &[],
             locals: None,
+            wide: false,
         };
         if !pure_bool(st, &env, e)? {
             return Err(EvalFault::Verdict(Refusal::Refused(why.clone().unwrap_or_else(|| "invalid".into()))));
@@ -654,6 +666,7 @@ pub fn check(sch: &Schema, c: &Closure, ctx: &Ctx, partial: &Args, store: &dyn S
                 provided: &none,
                 node: &[],
                 locals: None,
+                wide: false,
             };
             let mut st = St {
                 store: &mut Overlay::new(&empty),
@@ -689,6 +702,7 @@ pub fn check(sch: &Schema, c: &Closure, ctx: &Ctx, partial: &Args, store: &dyn S
                 provided: &none,
                 node: &[],
                 locals: None,
+                wide: false,
             };
             let mut st = St {
                 store: &mut Overlay::new(&empty),
@@ -730,6 +744,7 @@ pub fn eval_helper(m: &Module, name: &str, vals: Vec<Value>) -> Result<Value, Ev
         provided: &none,
         node: &[],
         locals: None,
+        wide: false,
     };
     let empty = crate::store::MemoryStore::empty(m.schema.clone());
     let mut overlay = Overlay::new(&empty);
@@ -800,6 +815,7 @@ impl<'s> Scope<'s> {
                 provided,
                 node: &[],
                 locals: None,
+                wide: false,
             },
         }
     }
@@ -825,6 +841,7 @@ impl<'s> Scope<'s> {
                 kind: FnKind::Helper,
                 node: &[],
                 locals: None,
+                wide: true,
                 ..self.outer
             },
             bound: Vec::new(),
@@ -1280,6 +1297,22 @@ fn eval(st: &mut St, env: &Env, e: &Expr) -> Run<Value> {
             let vs = eval_ref(st, env, xs)?;
             let vs = list_ref(&vs)?;
             let mut a = eval(st, env, z)?;
+            // §13 In a plan's node a sum is arithmetic over the integers:
+            // `init` and every term added in an `i128` and the total checked
+            // once — an overflow on the way, which depends on the members'
+            // order, is not one (`docs/plan-db.md` D4). Each term is still
+            // checked as the evaluator checks anything.
+            if let (true, Some(f), Value::Int(init)) = (env.wide, sum_step(body, *acc), &a) {
+                let mut total = i128::from(*init);
+                for v in vs {
+                    let with_x = frame(*x, v, env);
+                    total += i128::from(int(eval(st, &env.under(&with_x), f)?)?);
+                }
+                return match i64::try_from(total) {
+                    Ok(n) => Ok(Value::Int(n)),
+                    Err(_) => verdict(Refusal::Refused("integer overflow".into())),
+                };
+            }
             for v in vs {
                 let with_acc = frame(*acc, &a, env);
                 let with_x = Frame {
@@ -1303,6 +1336,26 @@ fn eval(st: &mut St, env: &Env, e: &Expr) -> Run<Value> {
             let key = eval_many(st, env, ks)?;
             Ok(Value::Bool(st.store.exists(t, &key)))
         }
+    }
+}
+
+/// §13 The term of a fold whose step is a sum — `acc + f` or `f + acc`,
+/// `f` not reading the accumulator — which is the shape whose result alone
+/// is judged in a plan's node (`docs/plan-db.md` D4). The view recognises
+/// the same step when it keeps a sum as a number.
+pub fn sum_step(body: &Expr, acc: Sym) -> Option<&Expr> {
+    fn mentions(e: &Expr, x: Sym) -> bool {
+        match e {
+            Expr::Var(s) => *s == x,
+            _ => crate::view::children(e).into_iter().any(|c| mentions(c, x)),
+        }
+    }
+    match body {
+        Expr::Op(Op::Add, es) if es.len() == 2 => match (&es[0], &es[1]) {
+            (Expr::Var(a), f) | (f, Expr::Var(a)) if *a == acc && !mentions(f, acc) => Some(f),
+            _ => None,
+        },
+        _ => None,
     }
 }
 
@@ -1355,6 +1408,7 @@ fn call(st: &mut St, env: &Env, f: &Function, vals: &[Val]) -> Run<Value> {
         provided: &NO_ARGS,
         node: &[],
         locals: None,
+        wide: env.wide,
     };
     match block(st, &env2, &f.body) {
         Ok(()) | Err(Stop::Returned(None)) => bug(EvalError::NoReturn(f.name.clone())),
