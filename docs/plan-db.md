@@ -452,6 +452,25 @@ not this item's (`agreement.rs` there holds them on fixed cases).
 seed 1's first case). `nix flake check` itself was not run here; the
 smoke command was, by hand.
 
+**Decided, and fixed** (after the coordinator's answers). Finding 1 is
+fixed in `Replica::ack` (`11d7af1`) and finding 2 in the protocol
+(`7d894b3`): `ack` carries `log` as a page does, absent where the server
+names none — every existing `protocol/` vector byte-identical,
+`protocol/server-ack-named.json` new — the client learns the name from
+an ack, and a replay of a confirmed entry that refuses with no facts in
+hand is recorded as a divergence, so `needs()` asks for them. The three
+sessions are `rebase/fleet-fuzz-an-ack-*.json`, byte for byte as the
+fuzzer wrote them, carried by `ark-vectors` from `bin/vectors/fuzzed/`
+and written only while they hold; each fix falsified by disabling it,
+and two sans-io tests in `tests/fuzz.rs` (an ack names the log; a
+refusing replay asks for facts), each falsified once. Finding 3 went to
+D4. `checks.fuzz-smoke` passes (`nix build .#checks.x86_64-linux.fuzz-smoke`).
+Ten minutes more, two processes, wipes on: 61,232 cases, 122,336
+sessions, 11,065,173 ops, 272,349 restarts, nothing but the sums.
+`harken/domain/tests/fuzz.rs` holds harken's natives to the interpreter
+under forty of these sessions (falsified by a `create_playlist` that
+reads a host counter).
+
 ## D3. A state hash that moves with the store
 
 `state_hash` is SHA-256 over the canonical encoding of every table's rows
