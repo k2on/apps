@@ -1086,8 +1086,8 @@ fn a_black_holed_socket_is_closed_by_the_keepalive() {
     );
 }
 
-/// **11. Replayed frames.** The last frame a peer sent, sent again on the
-/// same connection: a `Push` — the server dedupes it by entry id, and the
+/// **11. Replayed frames.** The last push a peer sent, sent again on the
+/// same connection — the server dedupes it by entry id, and the
 /// log holds the intent once — and a `Hello`, which on one connection is
 /// the log paging, not the device leaving and arriving: the room still has
 /// two devices, the peer is still linked on the same epoch, and it
@@ -1106,13 +1106,21 @@ fn a_replayed_push_or_hello_changes_nothing() {
     let once = p.author("create_playlist", named("Once"));
     assert!(p.settle(PATIENCE));
     let head = p.status().cursor;
-    let frame = p.proxy.last_payload().expect("a frame was sent");
+    // The push, which a `Verify` follows once it is answered: a linked peer
+    // verifies after every settle (`docs/plan-db.md` D3).
+    let push = |b: &[u8]| {
+        ark::canon::decode(b)
+            .ok()
+            .and_then(|v| ClientMsg::from_value(&v).ok())
+            .is_some_and(|m| matches!(m, ClientMsg::Push { .. }))
+    };
+    let frame = p.proxy.last_payload_where(push).expect("a push was sent");
     let msg = ClientMsg::from_value(&ark::canon::decode(&frame).unwrap()).unwrap();
     assert!(
         matches!(&msg, ClientMsg::Push { entries } if entries.iter().any(|e| e.id == once)),
         "{msg:?}"
     );
-    assert!(p.proxy.replay_last());
+    assert!(p.proxy.replay_where(push));
     // Whatever the peer says next travels behind the replay on the same
     // connection, so once it is answered the replay has been.
     p.author("create_playlist", named("After the replay"));

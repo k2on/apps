@@ -81,10 +81,17 @@ struct Conn {
     closed: AtomicBool,
     /// Held across a whole client frame, so a replay cannot interleave.
     to_server: Mutex<()>,
-    /// The last whole binary frame the client sent, as it went on the wire
-    /// (masked), and its payload unmasked.
-    last: Mutex<Option<(Vec<u8>, Vec<u8>)>>,
+    /// The last whole binary frames the client sent, as they went on the
+    /// wire (masked), and their payloads unmasked; oldest first, the last
+    /// [`RECENT`] of them. More than one, because a peer that verifies after
+    /// every settle (`docs/plan-db.md` D3) follows a push with a `Verify`
+    /// once the push is answered, and a test replaying the push has to be
+    /// able to find it.
+    last: Mutex<std::collections::VecDeque<(Vec<u8>, Vec<u8>)>>,
 }
+
+/// How many of a connection's last client frames are kept for a replay.
+const RECENT: usize = 16;
 
 impl Conn {
     fn cut(&self) {
@@ -238,18 +245,33 @@ impl Proxy {
     /// The payload of the last binary frame the client sent on the newest
     /// connection, unmasked: what [`Proxy::replay_last`] would send again.
     pub fn last_payload(&self) -> Option<Vec<u8>> {
+        self.last_payload_where(|_| true)
+    }
+
+    /// [`Proxy::last_payload`] of the last of the recent frames whose
+    /// payload `want` picks: what [`Proxy::replay_where`] would send again.
+    pub fn last_payload_where(&self, want: impl Fn(&[u8]) -> bool) -> Option<Vec<u8>> {
         let c = self
             .conns()
             .into_iter()
             .rev()
             .find(|c| !c.tainted.load(Ordering::SeqCst))?;
         let last = c.last.lock().unwrap();
-        last.as_ref().map(|(_, p)| p.clone())
+        last.iter()
+            .rev()
+            .find(|(_, p)| want(p))
+            .map(|(_, p)| p.clone())
     }
 
     /// Send the client's last binary frame on the newest connection to the
     /// server again, whole. Whether there was one.
     pub fn replay_last(&self) -> bool {
+        self.replay_where(|_| true)
+    }
+
+    /// [`Proxy::replay_last`] of the last of the recent frames whose
+    /// payload `want` picks.
+    pub fn replay_where(&self, want: impl Fn(&[u8]) -> bool) -> bool {
         let Some(c) = self
             .conns()
             .into_iter()
@@ -262,7 +284,14 @@ impl Proxy {
             return false;
         };
         let _whole = c.to_server.lock().unwrap();
-        let frame = c.last.lock().unwrap().as_ref().map(|(f, _)| f.clone());
+        let frame = c
+            .last
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .find(|(_, p)| want(p))
+            .map(|(f, _)| f.clone());
         match frame {
             Some(f) => (&*server).write_all(&f).is_ok(),
             None => false,
@@ -352,7 +381,7 @@ fn open(shared: &Arc<Shared>, client: TcpStream) {
         tainted: AtomicBool::new(blackholed),
         closed: AtomicBool::new(false),
         to_server: Mutex::new(()),
-        last: Mutex::new(None),
+        last: Mutex::new(std::collections::VecDeque::new()),
     });
     shared.conns.lock().unwrap().push(conn.clone());
     for up in [true, false] {
@@ -471,7 +500,11 @@ fn forward(shared: &Shared, conn: &Conn, up: bool) {
                             return;
                         }
                         if let Some(payload) = unit.binary {
-                            *conn.last.lock().unwrap() = Some((unit.bytes.clone(), payload));
+                            let mut last = conn.last.lock().unwrap();
+                            if last.len() == RECENT {
+                                last.pop_front();
+                            }
+                            last.push_back((unit.bytes.clone(), payload));
                         }
                     }
                 }
