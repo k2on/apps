@@ -162,10 +162,58 @@ fn order() {
 
 // hash/ -------------------------------------------------------------------
 
+/// The sum of two 256-bit big-endian integers, modulo 2^256: written here
+/// rather than taken from `ark::hash::Digest`, so that the runner checks
+/// the construction (§8.1) and not the reference's arithmetic against
+/// itself.
+fn sum256(a: &[u8], b: &[u8]) -> Vec<u8> {
+    let mut out = vec![0u8; 32];
+    let mut carry = 0u16;
+    for i in (0..32).rev() {
+        let s = u16::from(a[i]) + u16::from(b[i]) + carry;
+        out[i] = s as u8;
+        carry = s >> 8;
+    }
+    out
+}
+
+/// §8.1 A store and its hash: the store's own, kept as it was built; and,
+/// where the vector pins the construction part by part (`tables`), every
+/// leaf as `sha256(enc(Text table) ‖ enc(row))`, every digest as the sum of
+/// its table's leaves, and the hash as that of the `[table, digest]` pairs
+/// — each recomputed here from the canonical encoding and SHA-256 alone.
 fn check_hash(v: &serde_json::Value) -> Result<(), String> {
     let m = module_of(&v["module"]);
     let st = MemoryStore::from_value(m.schema.clone(), &value(&v["store"]));
-    ensure_eq!(hex(&state_hash(&st)), v["hash"].as_str().unwrap_or(""), "state hash");
+    let want = v["hash"].as_str().unwrap_or("");
+    let Some(tables) = v["tables"].as_array() else {
+        ensure_eq!(hex(&state_hash(&st)), want, "state hash");
+        return Ok(());
+    };
+    let names: Vec<String> = m.schema.tables().map(|t| t.name.clone()).collect();
+    ensure_eq!(tables.len(), names.len(), "one entry per table of the schema");
+    let mut pairs = Vec::new();
+    for (t, name) in tables.iter().zip(&names) {
+        ensure_eq!(t["table"].as_str().unwrap_or(""), name.as_str(), "the tables in schema order");
+        let mut digest = vec![0u8; 32];
+        let rows = t["rows"].as_array().cloned().unwrap_or_default();
+        ensure_eq!(rows.len(), st.scan(name).len(), "{name}: every row of the store");
+        for r in &rows {
+            let mut bytes = encode(&Value::text(name));
+            bytes.extend(encode(&value(&r["row"])));
+            let leaf = ark::sha256::sha256(&bytes);
+            ensure_eq!(hex(&leaf), r["leaf"].as_str().unwrap_or(""), "{name}: a row's leaf");
+            digest = sum256(&digest, &leaf);
+        }
+        ensure_eq!(
+            hex(&digest),
+            t["digest"].as_str().unwrap_or(""),
+            "{name}: the digest is the sum of the leaves"
+        );
+        pairs.push(Value::List(vec![Value::text(name), Value::Bytes(digest)]));
+    }
+    ensure_eq!(hex(&ark::sha256::sha256(&encode(&Value::List(pairs)))), want, "the hash of the pairs");
+    ensure_eq!(hex(&state_hash(&st)), want, "state hash");
     Ok(())
 }
 

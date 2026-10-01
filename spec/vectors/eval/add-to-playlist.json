@@ -9,25 +9,25 @@
   "args": {"playlist_id":{"$id":"00000000-0000-0000-0000-000000000001"},"track_id":"t7"},
   "changes": [{"row":{"playlist_id":{"$id":"00000000-0000-0000-0000-000000000001"},"pos":{"$int":"1"},"track_id":"t7"},"t":"add","table":"item"}],
   "store_after": {"item":[{"playlist_id":{"$id":"00000000-0000-0000-0000-000000000001"},"pos":{"$int":"1"},"track_id":"t7"}],"playlist":[{"id":{"$id":"00000000-0000-0000-0000-000000000001"},"name":"Favorites","user_id":"alice"}]},
-  "hash_after": "bacd3bec6e5cf3ae6d13986bcf25b2f1b3985e78d140069f65d2afa72ac1a8af"
+  "hash_after": "dca5382ec67abf31ff376df451da803af0c0b36aace49c9e53e0c9c3494edfae"
 }
 ,{
   "args": {"playlist_id":{"$id":"00000000-0000-0000-0000-000000000001"},"track_id":"t9"},
   "changes": [{"row":{"playlist_id":{"$id":"00000000-0000-0000-0000-000000000001"},"pos":{"$int":"2"},"track_id":"t9"},"t":"add","table":"item"}],
   "store_after": {"item":[{"playlist_id":{"$id":"00000000-0000-0000-0000-000000000001"},"pos":{"$int":"1"},"track_id":"t7"},{"playlist_id":{"$id":"00000000-0000-0000-0000-000000000001"},"pos":{"$int":"2"},"track_id":"t9"}],"playlist":[{"id":{"$id":"00000000-0000-0000-0000-000000000001"},"name":"Favorites","user_id":"alice"}]},
-  "hash_after": "b9dc9ae9b2e0461dd3bb89403ea38fa9d42c8988d5a540d77161ed273f5d4283"
+  "hash_after": "8a8c0bf4f3644b327c16e0860cba778a9706959fd0620c8707f9f8932748aad6"
 }
 ,{
   "args": {"playlist_id":{"$id":"00000000-0000-0000-0000-000000000001"},"track_id":"t7"},
   "changes": [],
   "store_after": {"item":[{"playlist_id":{"$id":"00000000-0000-0000-0000-000000000001"},"pos":{"$int":"1"},"track_id":"t7"},{"playlist_id":{"$id":"00000000-0000-0000-0000-000000000001"},"pos":{"$int":"2"},"track_id":"t9"}],"playlist":[{"id":{"$id":"00000000-0000-0000-0000-000000000001"},"name":"Favorites","user_id":"alice"}]},
-  "hash_after": "b9dc9ae9b2e0461dd3bb89403ea38fa9d42c8988d5a540d77161ed273f5d4283"
+  "hash_after": "8a8c0bf4f3644b327c16e0860cba778a9706959fd0620c8707f9f8932748aad6"
 }
 ,{
   "args": {"playlist_id":{"$id":"00000000-0000-0000-0000-000000000001"},"track_id":"t11"},
   "changes": [{"row":{"playlist_id":{"$id":"00000000-0000-0000-0000-000000000001"},"pos":{"$int":"3"},"track_id":"t11"},"t":"add","table":"item"}],
   "store_after": {"item":[{"playlist_id":{"$id":"00000000-0000-0000-0000-000000000001"},"pos":{"$int":"3"},"track_id":"t11"},{"playlist_id":{"$id":"00000000-0000-0000-0000-000000000001"},"pos":{"$int":"1"},"track_id":"t7"},{"playlist_id":{"$id":"00000000-0000-0000-0000-000000000001"},"pos":{"$int":"2"},"track_id":"t9"}],"playlist":[{"id":{"$id":"00000000-0000-0000-0000-000000000001"},"name":"Favorites","user_id":"alice"}]},
-  "hash_after": "2dcffedac564340db30d68af74fc74c87db5432ea8803f77f2e6dc6e294d8623"
+  "hash_after": "fb562f4aa6179a1e09a3b9897834f4cbe77d31ad695ff20124eaeecdbba3ba4e"
 }
 ]
 }

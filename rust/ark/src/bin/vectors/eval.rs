@@ -1,10 +1,12 @@
 //! `verify/` (§9), `eval/` (§6, §8) and `hash/` (§8.1): the demo module
 //! verifies and two one-line edits of it do not; `add_to_playlist` applied
 //! four times, with the changes, the store and the hash after each; the
-//! input checks as verdicts, and the form validator.
+//! input checks as verdicts, and the form validator; and the state hash's
+//! construction pinned part by part — every row's leaf, every table's
+//! digest, the pairs they make (`docs/plan-db.md` D3).
 
 use ark::eval::{apply, check, Args, Ctx};
-use ark::hash::{closure, function_hash, state_hash};
+use ark::hash::{closure, function_hash, leaf, state_hash, state_hash_of, table_digest, Digest};
 use ark::ir::{module_value, Module, Stmt};
 use ark::protocol::change_value;
 use ark::store::{Change, MemoryStore, Refusal, Store};
@@ -186,6 +188,7 @@ pub fn demo(out: &Out) {
             ("hash", quoted(&hex(&state_hash(&st4)))),
         ]),
     );
+    leaves_and_digests(out, &m, &st2);
     println!("  function hash {}", hex(&add_hash));
     println!("  state hash    {}", hex(&state_hash(&st4)));
     println!("  changes       ({},{},{},{})", ch1.len(), ch2.len(), ch3.len(), ch4.len());
@@ -346,4 +349,63 @@ pub fn demo(out: &Out) {
             ),
         ]),
     );
+}
+
+/// `hash/leaves-and-digests.json` (§8.1, `docs/plan-db.md` D3): a store of
+/// one playlist and two of its items, with every row's leaf, every table's
+/// digest and the state hash of the pairs — so that a runtime is held to
+/// each step of the construction rather than only to where it ends. A
+/// one-row table's digest is its leaf; a two-row table's is the sum of the
+/// two, which is not their exclusive or: the falsify case claims the xor,
+/// and a runner that sums must refuse it.
+fn leaves_and_digests(out: &Out, m: &Module, st: &MemoryStore) {
+    let tables: Vec<(String, Vec<ark::store::Row>)> = m.schema.tables().map(|t| (t.name.clone(), st.scan(&t.name))).collect();
+    let counts: Vec<usize> = tables.iter().map(|(_, rs)| rs.len()).collect();
+    super::claim("one playlist and two items", counts == [1, 2]);
+    let (pl, items) = (&tables[0], &tables[1]);
+    super::claim(
+        "a one-row table's digest is its leaf",
+        table_digest(&pl.0, &pl.1) == Digest(leaf(&pl.0, &pl.1[0])),
+    );
+    let (a, b) = (leaf(&items.0, &items.1[0]), leaf(&items.0, &items.1[1]));
+    let mut sum = Digest(a);
+    sum.add(&b);
+    super::claim(
+        "a two-row table's digest is the sum of its leaves",
+        table_digest(&items.0, &items.1) == sum,
+    );
+    super::claim("the store keeps what it would sum", st.digest(&items.0) == Some(sum));
+    let xor = Digest(std::array::from_fn(|i| a[i] ^ b[i]));
+    super::claim("the sum is not the exclusive or", xor != sum);
+    let digests: Vec<(&str, Digest)> = tables.iter().map(|(t, rs)| (t.as_str(), table_digest(t, rs))).collect();
+    super::claim("the state hash is of the pairs", state_hash_of(digests.clone()) == state_hash(st));
+    let write = |name: &str, digests: &[(&str, Digest)], expect_fail: bool| {
+        let entry = |(t, rs): &(String, Vec<ark::store::Row>), d: Digest| {
+            obj(&[
+                ("table", quoted(t)),
+                (
+                    "rows",
+                    array(
+                        rs.iter()
+                            .map(|r| obj(&[("row", json(&r.to_value())), ("leaf", quoted(&hex(&leaf(t, r))))])),
+                    ),
+                ),
+                ("digest", quoted(&hex(&d.0))),
+            ])
+        };
+        let mut parts = vec![
+            ("module", json(&module_value(m))),
+            ("store", json(&st.store_value())),
+            ("tables", array(tables.iter().zip(digests).map(|(t, (_, d))| entry(t, *d)))),
+            ("hash", quoted(&hex(&state_hash_of(digests.iter().copied())))),
+        ];
+        if expect_fail {
+            parts.push(("expect", quoted("fail")));
+        }
+        out.write(name, &obj(&parts));
+    };
+    write("hash/leaves-and-digests.json", &digests, false);
+    let mut xored = digests.clone();
+    xored[1].1 = xor;
+    write("hash/falsify/digest-by-xor.json", &xored, true);
 }
