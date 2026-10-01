@@ -157,6 +157,15 @@
             runtimeInputs = [ ark ];
             text = ''exec ark-vectors "$@"'';
           };
+          # `nix run .#fuzz [SECONDS] [ARGS…]`: the differential fuzzer
+          # (docs/plan-db.md D2) for SECONDS, ten minutes by default, from a
+          # seed it prints; a finding is written under ./fuzz-out as a vector
+          # and the run exits 1.
+          fuzz = pkgs.writeShellApplication {
+            name = "ark-fuzz";
+            runtimeInputs = [ ark ];
+            text = ''exec arkc fuzz --seconds "''${1:-600}" "''${@:2}"'';
+          };
 
           # The binary that writes harken.ark from the domain crate, and the
           # module it writes, verified by the reference.
@@ -243,7 +252,7 @@
         in
         {
           packages = {
-            inherit ark arkc vectors harken-domain;
+            inherit ark arkc vectors fuzz harken-domain;
             harken-server = crate { pname = "harken-server"; };
             # `nix run .#harken-serve [ADDR]`: the dev server, anyone is
             # whoever they say.
@@ -273,6 +282,12 @@
             vectors = pkgs.runCommand "check-vectors" { nativeBuildInputs = [ ark ]; } ''
               ark-vectors vectors
               diff -r vectors ${./spec/vectors} && touch $out
+            '';
+            # The fuzzer still generates, verifies, runs and checks: a fixed
+            # seed and a few cases, so that the generator cannot rot.
+            fuzz-smoke = pkgs.runCommand "check-fuzz-smoke" { nativeBuildInputs = [ ark ]; } ''
+              arkc fuzz --seed 1 --cases 25 --out findings
+              touch $out
             '';
             # The Rust workspace: formatted, lint-clean, and its tests.
             rust = crate {
