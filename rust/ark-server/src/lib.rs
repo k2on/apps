@@ -61,7 +61,7 @@ use tower_http::services::ServeDir;
 
 pub use ark::retention::Retention;
 pub use ark_client::Domain;
-pub use hub::{Health, Hub, HubHandle, REVOKED};
+pub use hub::{Health, Hub, HubHandle, SessionHealth, REVOKED};
 pub use live::{Echo, Live, Peer, Post, Quiet};
 pub use sync::Keepalive;
 
@@ -308,9 +308,9 @@ fn open_hub(
     // closures held and kept (closure provenance, `modules` module docs).
     let module = domain.hash();
     let shipped = || domain.closures().iter().map(|(h, c)| (h.clone(), c.clone()));
-    let ran = match &data {
+    let (ran, fresh) = match &data {
         Some(dir) => modules::start_with(dir, module.clone(), shipped())?,
-        None => vec![(module.clone(), shipped().collect())],
+        None => (vec![(module.clone(), shipped().collect())], true),
     };
     if ran.len() > 1 {
         eprintln!("{name}: holding the closures of {} modules run before this one", ran.len() - 1);
@@ -320,9 +320,18 @@ fn open_hub(
     }
     let mut file = None;
     if let Some(dir) = &data {
+        // The first start with a module may be over a log written under
+        // another: its snapshot is hashed again under this schema before
+        // it is read (`persist::rehome`, `docs/plan-db.md` D1).
+        if fresh && persist::rehome(dir, schema)? {
+            eprintln!("{name}: a new module: the log's snapshot hashed again under its schema");
+        }
         let (f, log) = persist::LogFile::open(dir, schema)?;
         if let Some(log) = log {
-            a.store = log.state_at(log.head_seq()).context("a loaded log has no state at its head")?;
+            // Rows the journal's older facts wrote without a column this
+            // schema added hold it `Null`, as every peer of it does
+            // (`persist::widen`).
+            a.store = persist::widen(&log.state_at(log.head_seq()).context("a loaded log has no state at its head")?);
             a.log = log;
         }
         file = Some(f);
@@ -402,8 +411,16 @@ impl Running {
     }
 }
 
-async fn healthz(State(hub): State<HubHandle>) -> Response {
+async fn healthz(State(hub): State<HubHandle>, headers: axum::http::HeaderMap) -> Response {
+    // Asked for JSON, it answers JSON: the same facts and the sessions
+    // beside them, for a tool rather than a person (`docs/plan-db.md` D6).
+    let json = headers
+        .get_all(axum::http::header::ACCEPT)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .any(|v| v.split(',').any(|t| t.split(';').next().is_some_and(|m| m.trim() == "application/json")));
     match hub.health().await {
+        Ok(h) if json => ([(axum::http::header::CONTENT_TYPE, "application/json")], health_json(&h)).into_response(),
         Ok(h) => {
             let mut text = format!("ok\nconnections {}\n", h.connections);
             text.push_str(&format!("head {}\n", h.head));
@@ -421,4 +438,39 @@ async fn healthz(State(hub): State<HubHandle>) -> Response {
         }
         Err(e) => (axum::http::StatusCode::SERVICE_UNAVAILABLE, format!("{e:#}\n")).into_response(),
     }
+}
+
+/// `/healthz` as JSON (`docs/plan-db.md` D6): one object, hashes and ids
+/// in hex, times in milliseconds since the Unix epoch.
+///
+/// ```text
+/// { "status": "ok", "head": 12, "horizon": 0, "log": "…" | null,
+///   "module": "…" | null, "modules": ["…"], "connections": 2,
+///   "sessions": [ { "user", "session", "cursor", "heard_ms", "open" } ],
+///   "rooms": [ { "room", "peers" } ] }
+/// ```
+pub fn health_json(h: &Health) -> String {
+    use ark::json::{array, quoted};
+    use ark::value::hex;
+    let hexed = |b: Option<&[u8]>| b.map_or_else(|| "null".to_string(), |b| quoted(&hex(b)));
+    let sessions = array(h.sessions.iter().map(|s| {
+        format!(
+            "{{\"user\":{},\"session\":{},\"cursor\":{},\"heard_ms\":{},\"open\":{}}}",
+            quoted(&s.user),
+            quoted(&s.session),
+            s.cursor,
+            s.heard_ms,
+            s.open
+        )
+    }));
+    let rooms = array(h.rooms.iter().map(|(r, n)| format!("{{\"room\":{},\"peers\":{n}}}", quoted(r))));
+    format!(
+        "{{\"status\":\"ok\",\"head\":{},\"horizon\":{},\"log\":{},\"module\":{},\"modules\":{},\"connections\":{},\"sessions\":{sessions},\"rooms\":{rooms}}}\n",
+        h.head,
+        h.horizon,
+        hexed(h.log_id.as_ref().map(|i| &i[..])),
+        hexed(h.module.as_deref()),
+        array(h.modules.iter().map(|m| quoted(&hex(m)))),
+        h.connections,
+    )
 }

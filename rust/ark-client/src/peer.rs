@@ -15,7 +15,7 @@
 //! directory used alone for a year and then opened with a server is joined,
 //! and nothing is refused.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use ark::canon;
 use ark::eval::{self, Args, Checked, Ctx, EvalFault};
@@ -276,6 +276,36 @@ pub struct Peer {
     alone_log: Option<AloneLog>,
     /// The intents the last join re-queued, for [`Status::joining`].
     local: BTreeSet<Id>,
+    /// Verify after every settle (`docs/plan-db.md` D3): what this
+    /// connection has asked and been answered.
+    checks: Checks,
+}
+
+/// The verifies of one connection (`docs/plan-db.md` D3). Since the state
+/// hash is read rather than computed (§8.1), a `Verify` costs both ends the
+/// tables rather than the rows, so a linked peer asks after every settle
+/// that moved its cursor — and a divergence is reported when it happens,
+/// not when somebody thinks to ask. A connection answers in the order it
+/// was asked, so which answer is to which question is a queue: an answer
+/// to one [`Peer::verify`] asked for goes to [`Peer::agreed`] as it always
+/// did; one to an automatic verify goes there only when it disagrees, so
+/// that agreeing a hundred times a minute is not a hundred entries.
+#[derive(Debug, Default)]
+struct Checks {
+    /// The connection these are of, as [`Client::epoch`] counts them.
+    epoch: i64,
+    /// The cursor last verified on it.
+    at: Option<Seq>,
+    /// For each verify said on it and not yet answered, oldest first,
+    /// whether it was automatic.
+    asked: VecDeque<bool>,
+    /// It has sent a page or a snapshot. Until then the cursor is the one
+    /// this peer came with, which may be past the head or on another log —
+    /// the server is about to say so with a snapshot, and a verify there
+    /// would report as a divergence what is only a peer being re-based.
+    served: bool,
+    /// Every answer to a verify asked for, and every disagreement.
+    agreed: Vec<(Seq, bool)>,
 }
 
 /// A peer alone's local history as the storage has it
@@ -495,6 +525,7 @@ impl Peer {
             fork,
             alone_log: None,
             local: BTreeSet::new(),
+            checks: Checks::default(),
         };
         match (had_log, opts.alone) {
             (true, _) => peer.resume_alone()?,
@@ -782,17 +813,71 @@ impl Peer {
     /// it stands rather than replaying the log (`docs/plan-perf.md` R4).
     pub fn verify(&mut self) {
         let Some(a) = &self.authority else {
-            self.client.verify_all();
+            self.ask_verify(false);
             return;
         };
         let (n, h) = self.client.replica.verify_at();
         let ok = a.log.hash_at(n, &a.store) == Some(h);
-        self.client.agreed.push((n, ok));
+        self.checks.agreed.push((n, ok));
     }
 
-    /// Every `(seq, agreed)` the authority has answered.
+    /// Every `(seq, agreed)` the authority has answered to a
+    /// [`Peer::verify`], and every `(seq, false)` of the verify a linked
+    /// peer makes after each settle on its own (`docs/plan-db.md` D3): a
+    /// divergence is reported here whoever asked.
     pub fn agreed(&self) -> &[(Seq, bool)] {
-        &self.client.agreed
+        &self.checks.agreed
+    }
+
+    /// A `Verify` said on this connection, and remembered as asked for or
+    /// automatic until its answer comes back. Whatever the engine did not
+    /// say — unlinked, or behind its server (`docs/plan-db.md` D1) — is not
+    /// remembered, so that every answer still meets its own question.
+    fn ask_verify(&mut self, auto: bool) {
+        self.this_connection();
+        let before = self.client.out.len();
+        self.client.verify_all();
+        if self.client.out.len() > before {
+            self.checks.asked.push_back(auto);
+            self.checks.at = Some(self.client.replica.cursor);
+        }
+    }
+
+    // What was asked of another connection is not answered on this one.
+    fn this_connection(&mut self) {
+        if self.checks.epoch != self.client.epoch {
+            self.checks.epoch = self.client.epoch;
+            self.checks.at = None;
+            self.checks.asked.clear();
+            self.checks.served = false;
+        }
+    }
+
+    /// The engine's settle, then what comes after it here: the answers that
+    /// arrived sorted to their questions, and — linked, done paging, the
+    /// cursor moved since the last — a `Verify` of the confirmed state
+    /// (`docs/plan-db.md` D3). The disagreements it brought, as `(seq,
+    /// false)`.
+    fn settle(&mut self) -> Vec<Seq> {
+        let paging = self.client.more;
+        self.client.settle();
+        self.this_connection();
+        let mut disagreed = vec![];
+        for (n, ok) in std::mem::take(&mut self.client.agreed) {
+            let auto = self.checks.asked.pop_front().unwrap_or(false);
+            if !ok {
+                disagreed.push(n);
+            }
+            if !auto || !ok {
+                self.checks.agreed.push((n, ok));
+            }
+        }
+        let cursor = self.client.replica.cursor;
+        let due = self.checks.served && !paging && self.checks.at != Some(cursor);
+        if self.authority.is_none() && self.client.linked && due {
+            self.ask_verify(true);
+        }
+        disagreed
     }
 
     // -- the live channel -------------------------------------------------------
@@ -920,7 +1005,9 @@ impl Peer {
                     p.note = Some(e.to_string());
                 }
             }
-            self.client.settle();
+            if let Some(n) = self.settle().first() {
+                p.note = Some(format!("the server's state at {n} is not this replica's"));
+            }
             if let Some(why) = polled.closed {
                 self.client.disconnected();
                 p.dropped = Some(why);
@@ -970,14 +1057,14 @@ impl Peer {
     /// caller's own: a pump of one frame, so it is settled at once (R8).
     pub fn recv(&mut self, msg: ServerMsg) {
         self.place(msg);
-        self.client.settle();
+        self.settle();
     }
 
     /// A binary frame from the server: canonical CBOR of a `ServerMsg`. A
     /// pump of one frame, as [`Peer::recv`] is.
     pub fn recv_frame(&mut self, bytes: &[u8]) -> Result<(), Error> {
         self.place_frame(bytes)?;
-        self.client.settle();
+        self.settle();
         Ok(())
     }
 
@@ -986,6 +1073,10 @@ impl Peer {
     fn place(&mut self, msg: ServerMsg) {
         if matches!(msg, ServerMsg::Heard { .. }) {
             self.heard_frames += 1;
+        }
+        if matches!(msg, ServerMsg::Batch { .. } | ServerMsg::SnapshotOf { .. }) {
+            self.this_connection();
+            self.checks.served = true;
         }
         self.client.recv(msg);
     }
@@ -1630,6 +1721,66 @@ mod tests {
             matches!(&hello, Some(ClientMsg::Hello { sub, .. }) if sub.log_id == Some([3; 16]) && sub.since == 21),
             "{hello:?}"
         );
+    }
+
+    /// D3 of `docs/plan-db.md`: a linked peer verifies after every settle
+    /// that moved its cursor, without being asked, and a divergence reaches
+    /// [`Peer::agreed`] when it happens. Ten intents land with ten
+    /// verifies said and nothing reported; then a raw fact is applied to
+    /// the replica's stores behind the engine's back, and the
+    /// next intent to land is answered `(11, false)` — and only that, with
+    /// no `verify()` called. Falsified by never verifying after a settle:
+    /// no verify is said and the divergence goes unreported.
+    #[test]
+    fn a_linked_peer_verifies_after_every_settle_and_reports_a_divergence() {
+        use ark::live::Silent;
+        use ark::protocol::{open_access, trusting, Server};
+        use ark::store::{Change, Row};
+        let d = demo::domain();
+        let schema = d.module().schema.clone();
+        let mut a = ark::peer::Authority::new(schema.clone(), d.closures().clone());
+        a.hold(d.native_list());
+        let mut sv = Server::open(trusting(), open_access(), Silent, a);
+        let said = std::cell::Cell::new(0);
+        let exchange = |p: &mut Peer, sv: &mut Server<Silent>| loop {
+            let up = p.take_outgoing();
+            said.set(said.get() + up.iter().filter(|m| matches!(m, ClientMsg::Verify { .. })).count());
+            for m in up.iter().cloned() {
+                sv.recv(1, m);
+            }
+            let down = sv.take_outgoing();
+            if up.is_empty() && down.is_empty() {
+                return;
+            }
+            for (_, m) in down {
+                p.recv(m);
+            }
+        };
+        let mut p = Peer::open_memory(d.clone(), Options::dev("alice")).unwrap();
+        p.connected();
+        for i in 0..10 {
+            p.mutate("create_playlist", args([("name", Value::text(format!("p{i}")))])).unwrap();
+            exchange(&mut p, &mut sv);
+        }
+        assert_eq!(p.cursor(), 10);
+        assert!(p.agreed().is_empty(), "agreeing is not news: {:?}", p.agreed());
+
+        let tbl = schema.lookup_table("playlist").unwrap();
+        let stray = Row::of(
+            tbl,
+            [
+                ("id".to_string(), Value::Id([7; 16])),
+                ("name".to_string(), Value::text("nobody wrote this")),
+                ("user_id".to_string(), Value::text("alice")),
+            ],
+        );
+        let stray = Change::Add("playlist".into(), stray);
+        p.client.replica.confirmed.apply_change(&stray);
+        p.client.replica.view.apply_change(&stray);
+        p.mutate("create_playlist", args([("name", Value::text("p10"))])).unwrap();
+        exchange(&mut p, &mut sv);
+        assert_eq!(said.get(), 11, "a verify per settle that moved the cursor, and no more");
+        assert_eq!(p.agreed(), [(11, false)], "the divergence, reported unasked");
     }
 
     /// Round 4: what `mutate` writes is decided by one comparison however
