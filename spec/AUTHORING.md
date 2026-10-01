@@ -263,6 +263,7 @@ A mutator's body reads and writes:
 | `Update` | `db.playlist.update((id,), \|row\| Playlist { .. })` |
 | `Delete` | `db.playlist.delete((id,))` |
 | `Pred` | `Playlist::user_id.eq(x)` `.and(..)` `.or(..)` `.not()` `Playlist::id.in_(list)` |
+| `Pred::Has` | `Media::title.has(needle)` — the text column holds the needle as a substring, both folded by the pinned `lower`; a `None` column holds nothing. Read through a text index on the column (`.index_text(..)`), the rows holding every trigram of the needle, when it has three characters or more; `docs/plan-db.md` D4 |
 | order | `Playlist::name.asc()` `.desc()`; several as a tuple |
 
 A key is a tuple; its shape is the row's `Key` type, so a wrong order does
@@ -276,6 +277,7 @@ never calls `.all()` or `.first()`:
 | source table | `db.song` (a `Table<Song>`; `db.song.rows()` is its `Query<Song>` when the first step is a lookup) |
 | filter | `.filter(Song::album_name.eq(some(input.name)))` |
 | group source | `db.media.group_by(Media::creator)` — a `Query<Text, (List<Media>,)>`: closures are handed the key (the column's value, or a tuple of values for a tuple of columns) and the group's rows as the first binder |
+| text search | `.filter(Media::title.has(input.needle).or(Media::creator.has(input.needle)))` — a filter like any other, so a view over it re-admits a changed row by the predicate; an `or` of `has` is read as the union of each branch's postings |
 | distinct | `db.media.distinct(Media::creator)` — `group_by(Media::creator).map(\|creator, _\| creator)`, the same plan: a group with no aggregate, whose node is its key (for a tuple of columns, the key struct); `docs/plan-db.md` D4 |
 | lookup | `.get(\|song, ()\| db.media.by((song.media_id,)))` — appends `Opt<Media>`; `db.t.by_opt(opt)` for a one-column key held as an option |
 | related, by reference | `.with(Media::playlist_item)` — appends `List<PlaylistItem>` |
@@ -375,7 +377,20 @@ impl Playlist {
 `columns()` also has `.bool`, `.bytes`, `.enum_(Self::c, ["a", "b"])`,
 `.nullable()` after a column whose type is an `Opt`,
 `.refs::<Parent>()` after a column that references a parent's key,
-`.index((..))`.
+`.index((..))`, and `.index_text(Self::c)` — a text index on one text
+column, the trigrams of its folded value (`docs/plan-db.md` D4): it serves
+`c.has(..)`, says nothing about the rows, and moves the module's hash and
+no mutator's.
+
+A list a node uses only as a count, a sum, a least or a greatest value is
+kept by a view as that number rather than as a list (`docs/plan-perf.md`
+R9, `docs/plan-db.md` D4) — nothing to declare, but worth writing so:
+`xs.len()`, `xs.fold(0, |acc, x| acc.add(f(x)))`,
+`xs.fold(init, |acc, x| acc.max(x.c))` (or `min`), and
+`xs.first().map_or(d, |x| x.c)` (or `last`) of a list ordered by `c` and
+nothing else. The extremes are kept only where an index serves `c` under
+the list's `on` columns; elsewhere, and for any other use, the list is a
+list.
 
 ```rust
 // playlists.rs
@@ -572,6 +587,8 @@ A query's plan (§1.5), part by part:
 |---|---|
 | the query's closure returning `q` | `plan: Some(q's plan)`, `body: []`, `ret: Some(List(q's node type))` |
 | `db.t.group_by(c)` / `group_by((c, d))` | `source: Group { table: t, by: [c] }` / `by: [c, d]`, `members: Some(m)`; the row binder is the key struct, handed to closures as the column's value (a tuple of them) |
+| `T::c.has(x)` | `Pred::Has(c, x)` |
+| `.index_text(T::c)` | `c` appended to the table's `text` (`Table::with_text`); on the wire an `index` of kind `text` |
 | `db.t.distinct(c)` / `distinct((c, d))` | `group_by`'s plan with `project: Some(Field(Var(row), c))` / `project: Some(Var(row))`; the node type is the column's / the key struct |
 | `.get(\|row, bs\| db.u.by(k))` / `db.u.by_opt(o)` | `Lookup { name: u, sym, table: u, key: k }` / `key: [o]`, appended to `lookups` |
 | `.with(T::rel)` | `Related { name: rel, sym, on: [(fk, Field(Var(row), key))], plan: <every row of the child> }` |
@@ -667,7 +684,15 @@ by          : {"t":"by","column":txt,"dir":"asc"|"desc"}
 lookup      : {"t":"lookup","name":txt,"sym":int,"table":txt,"key":[expr]}
 related     : {"t":"related","name":txt,"sym":int,"on":[[txt, expr]],"plan":plan}
               -- "parent", "child", "column" are gone: a related plan is always the on form
+pred        : + {"t":"phas","column":txt,"e":expr}   -- `docs/plan-db.md` D4, only where used
+index       : + ("kind", "text")           -- a text index, on one column, not unique; after
+                                              the table's other indexes, only where declared
 ```
+
+A `phas` and an index of kind `text` are written only where a module has
+one, so every module before D4 — every retained closure, every vector —
+keeps its bytes; a text index is additive under `compat` and is in the
+schema, which is in no closure.
 
 **The row binder, and why it may be absent.** `row` is written, and
 numbered, exactly when the plan binds something: a lookup, a related plan,

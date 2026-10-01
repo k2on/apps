@@ -278,6 +278,122 @@ SHA-256, which is the nearest this repository gets.
   table of 8,000 equals the postings' intersection, not the table; the
   churn contract over a `Has` plan.
 
+### Landed
+
+Commits: `99f36fa` (min and max), `8ce987e` (distinct), `23b0fcb` (text
+search), `d9b402c` (the two vectors), `fb316b8` (harken), and the docs.
+
+**Min and max** (`view.rs`, R9's `shape` extended; nothing travels).
+`Agg::Min(col)`/`Agg::Max(col)` keep the column's value, `Null` for an
+empty list. Recognised from `fold(list, init, |acc, x| min(acc, x.col))`
+(either argument order, `max` likewise) — rewritten to `match slot {
+v => min(init, v), None => init }` — and from `match first(list) { y =>
+some, None => none }` (`last` too) where the list is ordered by one column
+and then only by its key, has no limit, and `some` reads `y` only as
+`y.col` of that column — rewritten to a match on the slot with `y.col`
+read as `y`. Reading the value alone is what makes ties harmless, and why
+`first(list)` read for another column stays a list. Kept only where the
+column is the row's (a child plan with no projection, having or lists of
+its own), is not nullable, and an index of the schema serves it under the
+list's `on` columns and the child filter's equalities — `MemoryStore`'s own
+`serves` rule, restated for one order column; elsewhere the list is a
+list. A group's `members` fold the same way, its pins the `by` columns. An
+arrival compares; a departure equal to the extreme marks it stale, and it
+is read again from the final store through `scan_ordered(.., limit 1)`
+(comparing later arrivals against that is idempotent); an edit is both.
+A list kept only as extremes is pulled as one indexed read each, not the
+list. Not recognised: an extreme through a helper (R9 sees `total` through
+one; no helper here has the shape), and `first`/`last` of a group's
+members (they are in key order).
+
+Guard (`rust/ark/tests/extremes.rs`, the counting store): Gould's greatest
+position over 2,000 songs leaving costs one row examined and one `get` (his
+row) — the same at 500; one arriving above it or below it, one `get` and no
+row; through a group source, the departure is one row and no `get`.
+Falsified by reading the extreme without the index: 1,999 rows (499 at
+500), and through the group 2,000 (500). Churn: a kept max (fold), a kept
+min (first, behind a having that flips), a max of text (last, in an order
+key), both ends and a count in an order key under a limit, a group's max,
+and the two shapes left lists — each falsified once (`take_out` never
+stale, `put_in` comparing the wrong way, a group's stale extreme ignored).
+
+**Distinct** (`authoring/schema.rs`). `.distinct(c)` is `group_by(c)` with
+`project: Field(Var(row), c)` — the plan `group_by(c).map(|c, _| c)`
+writes, byte for byte (`rust/ark/tests/distinct.rs`); a tuple projects the
+key struct. No verifier rule was needed: the module verifies as built.
+
+**Text search.** `Pred::Has(column, needle)`; both sides folded by
+`store::fold`, the pinned `to_lower_simple` one character for one, so no
+accent is folded away and `ß` is not `ss`. A `Null` holds nothing; every
+text holds `""`. The text index is `Table::text` — the columns with one —
+rather than a field of `Index`, so that an `Index` is still the two fields
+every literal in the workspace writes (D2's generator among them); on the
+wire it is an `index` node with `"kind": "text"` after the table's other
+indexes, and a `Has` is `{"t":"phas","column","e"}`, each written only where
+used. `MemoryStore` keeps, per text index, `[char; 3] → keys`, moved in
+`set` by the difference of the old and new value's trigrams (nothing when
+the column did not change). `Store::scan_where_text` carries the hint — a
+disjunction of conjunctions of `(column, folded needle)`, so harken's
+title-or-creator is two branches unioned — and its default is
+`scan_where_eq`; `MemoryStore` intersects each branch's postings from the
+shortest, unions the branches, then asks `keep`; a branch with no trigram
+on an indexed column (a needle under three characters) leaves the read to
+the scan. The overlay merges its writes as for equalities. `compat` treats
+a text index as additive, the verifier holds `Has` to a text column
+(nullable or not) and a text needle, and a view over a `Has` filter
+re-admits a changed row by the predicate, as any filter.
+
+Guard (`rust/ark/tests/text.rs`, the counting store): a search of 8,000
+media for "sonata" in the title or the creator examines 2,514 rows — the
+postings' intersection, computed in the test from each row's trigrams —
+of which 1,829 answer (a decoy title holding every trigram and not the
+needle is refused by `keep`); the same rows with no text index examine
+8,000. Falsified by skipping the index: 8,000. Beside it, each falsified
+once: the Unicode case (`É` found by `é` and `ÉLÉ`, `Σ` by `σ`; folding
+with `to_ascii_lowercase` breaks it), a needle under three characters
+read as the scan, the overlay, the wire round trip, the verifier, `compat`,
+and the churn contract over three `Has` plans and three needles (reading an
+`or` through its first branch breaks it).
+
+**The trigram index's cost per row**, `harken/domain/tests/perf.rs`
+`perf_search`, release, the shared VM: over 8,000 media with harken's two
+text indexes, 14.66 postings a row (its title's trigrams and its
+creator's), and a put costs 13.0 µs a row with them against 5.5 µs without.
+
+**harken.** `media` has a text index on `title` and on `creator`;
+`search(playlist_id, needle)` is the library's plan over a `Has` on either.
+There was no search box: the client's search was vim's `/`, a jump to the
+next row whose `title creator` lower-cased contains the text. On the Songs
+page `/` now narrows the list as it is typed — each keystroke opens a view
+over `search` with the needle and drops the last; `<Enter>` keeps it and
+lands on its first row, `<Esc>` widens back; on every other page `/` is
+the jump it was. What a keystroke costs (`perf_search`, 8,000 media, a
+view hydrated, median of five): a needle answering 160 rows, 0.9 ms; 1,760
+rows, 9 ms; one every row holds (the harness's creators are all "Artist
+N"), 35–47 ms — the hydrate is per row answered, about 5 µs, where the old
+`/` scanned every row in 1.6 ms to find one. Module hash
+`dfc028e2f07a3d78ee7696dbfb2cc032799d9c058a2b96a96deae4959f311dcc` →
+`abf1cbdd8b0ccd361adf4916184d3e81f89f633734025f4642b0915b1499165b`; every
+existing function's hash unmoved (`arkc hash` of both), `arkc check`
+additive, the pinned mutator hashes unchanged.
+
+**Vectors.** `views/kept-max.json` and `views/has-search.json`, in a module
+of their own (every views file carries its module whole, and this one has a
+text index): regenerated whole, every existing file byte-identical.
+
+**Not verified.** The desktop's search was driven through `update` in a
+test, never on a screen; the browser build (`nix build .#harken-web`)
+compiles it. A store other than `MemoryStore` serves no text index and no
+extreme (the defaults scan), which is correct and unmeasured. A kept
+extreme whose departure meets a store that serves nothing (`scan_ordered`
+answering `None`) reads every candidate — `shape` only keeps one where the
+schema's indexes serve it, so that path is a store's choice, not a plan's.
+For the coordinator: the per-keystroke hydrate is linear in the rows
+answered, so an unselective needle on a large library is tens of
+milliseconds; patching the last needle's view (a needle extended only
+narrows) would make a keystroke cost the rows that leave, if that is
+wanted.
+
 ## D5. Open time, and the backend decision
 
 Add to the harnesses: time to **open** a client replica from a snapshot of
