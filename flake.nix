@@ -310,10 +310,30 @@
               module = import ./harken/server/nix/module.nix { packages = self.packages; };
               # Both binaries: the server, and harken-peer beside it.
               harken-server = crate { pname = "harken-server"; };
+              # The previous pinned revision's, for the machines run mixed
+              # (docs/plan-db.md D1).
+              old = (lib.last versions).server;
             };
           };
 
           checks = {
+            # The fleet run mixed (docs/plan-db.md D1): every pinned
+            # revision's harken-server package built from its own flake, and
+            # harken/server/tests/versions.rs run with each named as
+            # HARKEN_OLD_<n>_* — an old peer beside new ones, an old server
+            # upgraded in place under its peers, a client upgraded in place,
+            # a schema grown under running peers. In the sandbox, on
+            # loopback, in release; the scenarios' own timings are printed.
+            versions = crate {
+              pname = "harken-versions";
+              flags = [ "-p" "harken-server" "--test" "versions" ];
+              doCheck = true;
+              # The test target needs the two binaries built beside it.
+              cargoBuildFlags = [ "-p" "harken-server" ];
+              checkFlags = [ "--nocapture" "--test-threads=2" ];
+              preCheck = oldEnv;
+              installPhase = "touch $out";
+            };
             # The vectors in the tree are the ones the specification writes.
             vectors = pkgs.runCommand "check-vectors" { nativeBuildInputs = [ ark ]; } ''
               ark-vectors vectors
