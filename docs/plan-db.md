@@ -978,3 +978,23 @@ and D4 both touch `store.rs` in different places (the digest; the trigram
 index) — commit early, retry on `index.lock`, never revert another's hunk.
 Every test falsified once; the commit rules of `docs/plan-v4.md` Part 2;
 what is not verified said plainly.
+
+## D5, decided: no paged backend yet — a memory round first
+
+The open-time table says the dataset is memory and open time is linear in
+it: a client holding 100,000 media rows opens in about 4 s and 820 MB with
+harken's two text indexes, 1.5 GB per 400,000 rows without them. Two
+things in that number are not the store's fault and are cheaper to remove
+than a backend is to build: the trigram postings (a `BTreeSet` of
+`Vec<Value>` keys per trigram — about half of every row's footprint once
+the two text indexes exist; sorted `Vec<u32>` row ordinals would be a
+fifth of it) and the optimistic store opened as a full copy of the
+confirmed one (two map trees and two sets of indexes over the same `Arc`
+rows). Decision: a **memory round** before any backend — postings as
+ordinals; the view sharing the confirmed store's tables and indexes
+copy-on-write until the first pending write; per-row bytes measured by
+component (map node, `Arc<[Value]>`, `Value` width, index postings, digest
+leaf) and the two or three largest shrunk — with the open-time table re-run
+after. A paged backend behind `Store` is decided again when a dataset
+exceeds what that round leaves, which no app here approaches: harken's
+largest library is tens of thousands of rows.
