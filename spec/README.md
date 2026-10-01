@@ -72,6 +72,26 @@ reasoning, and what a 256-bit sum does not defend against, is in
 in key order; the vectors carrying one were regenerated once, and only
 their hashes moved.
 
+**A stored snapshot names its construction.** The server's `log.ark-log`,
+a peer alone's `log` and a client's `replica` record carry `hashing: 2`
+beside the snapshot; absent means 1, the construction before D3. A
+snapshot of construction 1 is checked by that construction when it is
+opened and held hashed by this one from then on, never refused; a
+construction a runtime does not know is refused (`ark::hash::HASH_VERSION`,
+`ark::journal::hashing_of`). `SPEC_VERSION` stays 4: the vectors are the
+spec, and they moved once.
+
+**Not a commitment — a stated non-goal.** The state hash is for replicas
+of one log to tell whether they hold the same rows, which nobody is
+choosing adversarially. It is not a commitment to a set of rows against
+somebody who chooses them: for a sum of 256-bit leaves, Wagner's
+generalised birthday attack finds a different multiset with the same
+digest far below 2^128 work. So a snapshot from a source not trusted is
+verified by replaying the log to it (`docs/arkdb.md` §3.9), never by its
+hash alone. Should a hash alone ever have to carry that weight, the digest
+wants a much wider group — a lattice hash of a couple of kilobytes, as
+LtHash does — and that would be a construction 3.
+
 ## The toolchain
 
 `rust/ark` has three binaries:

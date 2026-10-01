@@ -177,6 +177,44 @@ pub fn state_hash_of<'t>(digests: impl IntoIterator<Item = (&'t str, Digest)>) -
     sha256(&encode(&Value::List(pairs)))
 }
 
+/// Which construction of the state hash a stored snapshot's hash is by: 2
+/// is §8.1 as above, 1 the one before it ([`state_hash_v1`]). A snapshot
+/// written down — the server's `log.ark-log`, a peer alone's `log`, a
+/// client's `replica` record — carries it as `hashing`, and one without the
+/// field was written before there was a second, so reads as 1. A snapshot of
+/// an older construction is checked by that one and hashed again by this
+/// one when it is opened, never refused (`docs/plan-db.md` D3, Landed).
+pub const HASH_VERSION: i64 = 2;
+
+/// §8.1 as it was until `docs/plan-db.md` D3: SHA-256 of the canonical
+/// encoding of the list of every table's `[name, rows]`, schema order, rows
+/// in key order. Kept for one purpose — checking the hash of a snapshot
+/// written before the change ([`HASH_VERSION`] 1) when it is opened — and
+/// O(rows), which is why it is the state hash no longer.
+pub fn state_hash_v1(st: &dyn Store) -> Vec<u8> {
+    let tables: Vec<Value> = st
+        .schema()
+        .tables()
+        .map(|t| {
+            Value::List(vec![
+                Value::text(&t.name),
+                Value::List(st.scan(&t.name).into_iter().map(Row::into_value).collect()),
+            ])
+        })
+        .collect();
+    sha256(&encode(&Value::List(tables)))
+}
+
+/// The state hash of a store by the construction `version` names
+/// ([`HASH_VERSION`]); `None` for one this build does not know.
+pub fn state_hash_by(version: i64, st: &dyn Store) -> Option<Vec<u8>> {
+    match version {
+        1 => Some(state_hash_v1(st)),
+        HASH_VERSION => Some(state_hash(st)),
+        _ => None,
+    }
+}
+
 /// §8.1 The state hash of a store: every table of its schema, in schema
 /// order, with the digest the store keeps for it ([`Store::digest`]) — read,
 /// not computed, for a [`crate::store::MemoryStore`] — or, for a store that

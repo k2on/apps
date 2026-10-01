@@ -347,54 +347,77 @@ fn version_5_a_client_upgraded_in_place() {
     }
 }
 
-/// **5b. An alone directory upgraded in place** — a witness, ignored.
-/// A directory each pinned `harken-peer` used `--alone`, opened by this
-/// build with a server, should join it with its local history landing.
-/// It does not, two ways, and neither is D1's to fix:
+/// The pinned revisions from before `docs/plan-alone.md`, whose `--alone`
+/// kept no history ([`version_5c_an_alone_directory_from_before_plan_alone`]).
+const BEFORE_ALONE: [&str; 1] = ["v4-journal"];
+
+/// One pinned revision's alone directory opened by this build with a
+/// server: its local history joins and lands.
+fn alone_upgraded(o: &Old) {
+    let f = Fleet::new(&format!("v5b-{}", o.name));
+    let mut b = f.peer("new", Some("alice"));
+    songs(&mut b, "v5b", 2);
+    let mut d = f.peer_stopped("alone", Some("alice"));
+    d.old(&o.peer);
+    d.alone = true;
+    d.start();
+    create(&mut d, "Local");
+    songs(&mut d, "v5b-alone", 2);
+    d.quit();
+    d.alone = false;
+    let t = Instant::now();
+    d.upgrade();
+    let took = f.converged_across(&mut [(&mut b, "alice"), (&mut d, "alice")]);
+    playlist(&mut b, "Local");
+    measured(
+        &format!(
+            "v5b {} alone history joined after the upgrade, to converged",
+            o.name
+        ),
+        t.elapsed(),
+    );
+    measured(&format!("v5b {} …the last settle", o.name), took);
+}
+
+/// **5b. An alone directory upgraded in place.** A directory a pinned
+/// `harken-peer` used `--alone`, opened by this build with a server: it
+/// joins, and its local history lands. The alone log's snapshot was hashed
+/// by the state hash before `docs/plan-db.md` D3 redefined it, and says so
+/// by having no `hashing`; this build checks it the way it was written and
+/// holds it hashed the new way (`ark::journal::log_from_value`). Every
+/// pinned revision but those from before `docs/plan-alone.md`, which are
+/// 5c's.
 ///
-/// - `v4-rows` (`71f7b0c`): this build cannot open the directory at all —
-///   `storage: reading log: the snapshot's hash does not match its rows`.
-///   The alone log's snapshot was hashed by the state hash before
-///   `docs/plan-db.md` D3 redefined it, and `ark::journal` checks it by the
-///   new definition. The server's own log meets the same check and is
-///   re-hashed on the first start with a new module
-///   (`ark_server::persist::rehome`); a client has no such moment.
-/// - `v4-journal` (`abbf861`): before `docs/plan-alone.md` a peer alone kept
-///   no history, only its store under a cursor of its own sequence. Opened
-///   with a server, that store is taken as the fork and paged on top of:
-///   the peer reaches the head with nothing pending, and its playlists are
-///   not the log's — its alone work never reaches the server, and the
-///   server's lands on a store that was never its.
-///
-/// Run with `--ignored` under `HARKEN_OLD_<n>_*`; the coordinator decides
-/// both (`docs/plan-db.md` D1, Landed).
+/// Falsified once, against `v4-rows`, by `ark::journal` checking every
+/// snapshot by this build's construction alone: `storage: reading log: the
+/// snapshot's hash does not match its rows`, the directory not opened.
 #[test]
-#[ignore = "witness: an alone directory from before D3, or before plan-alone, does not join"]
 fn version_5b_an_alone_directory_upgraded_in_place() {
     for o in olds_or_skip("5b alone directory upgraded in place") {
-        let f = Fleet::new(&format!("v5b-{}", o.name));
-        let mut b = f.peer("new", Some("alice"));
-        songs(&mut b, "v5b", 2);
-        let mut d = f.peer_stopped("alone", Some("alice"));
-        d.old(&o.peer);
-        d.alone = true;
-        d.start();
-        create(&mut d, "Local");
-        songs(&mut d, "v5b-alone", 2);
-        d.quit();
-        d.alone = false;
-        let t = Instant::now();
-        d.upgrade();
-        let took = f.converged_across(&mut [(&mut b, "alice"), (&mut d, "alice")]);
-        playlist(&mut b, "Local");
-        measured(
-            &format!(
-                "v5b {} alone history joined after the upgrade, to converged",
-                o.name
-            ),
-            t.elapsed(),
-        );
-        measured(&format!("v5b {} …the last settle", o.name), took);
+        if BEFORE_ALONE.contains(&o.name.as_str()) {
+            println!("fleet: 5b: {} is before plan-alone, and is 5c's", o.name);
+            continue;
+        }
+        alone_upgraded(&o);
+    }
+}
+
+/// **5c. An alone directory from before plan-alone** — a witness, ignored.
+/// Before `docs/plan-alone.md` a peer alone kept no history, only its
+/// store under a cursor of its own sequence. Opened with a server, that
+/// store is taken as the fork and paged on top of: the peer reaches the
+/// head with nothing pending, and its playlists are not the log's — its
+/// alone work never reaches the server, and the server's lands on a store
+/// that was never its. Not D1's or D3's to fix; the coordinator decides
+/// (`docs/plan-db.md` D1, Landed). Run with `--ignored` under
+/// `HARKEN_OLD_<n>_*`.
+#[test]
+#[ignore = "witness: an alone directory from before plan-alone has no history to join"]
+fn version_5c_an_alone_directory_from_before_plan_alone() {
+    for o in olds_or_skip("5c alone directory from before plan-alone") {
+        if BEFORE_ALONE.contains(&o.name.as_str()) {
+            alone_upgraded(&o);
+        }
     }
 }
 

@@ -4,7 +4,8 @@
 //! ```text
 //! snapshot  canonical CBOR of `log_to_value`:
 //!           { t: "log",
-//!             base: { seq: Int, hash: Bytes, rows: { table: [row…] }, log: Id },
+//!             base: { seq: Int, hash: Bytes, hashing: Int,
+//!                     rows: { table: [row…] }, log: Id },
 //!             entries: [ { seq: Int, entry: Entry, facts: [Change…] } … ],
 //!             ids: [ { id: Id, seq: Int } …,             exact; then
 //!                    { key: Bytes(8), seq: Int } … ] }   below the horizon
@@ -58,6 +59,7 @@
 use std::collections::BTreeMap;
 
 use crate::canon;
+use crate::hash::{state_hash_by, HASH_VERSION};
 use crate::log::{snapshot_of, Entry, Facts, Log, Seq};
 use crate::protocol::{change_from_value, change_value, entry_from_value, entry_value};
 use crate::schema::Schema;
@@ -199,6 +201,7 @@ pub fn log_to_value(log: &Log) -> Value {
     let mut base = vec![
         ("seq", Value::int(log.base.seq)),
         ("hash", Value::bytes(log.base.hash.clone())),
+        ("hashing", Value::int(HASH_VERSION)),
         ("rows", Value::record(rows)),
     ];
     // Unnamed, it is written as a file was before logs had names.
@@ -251,6 +254,18 @@ pub fn record_from_value(v: &Value) -> Result<(Seq, Entry, Facts), String> {
     Ok((n, e, facts))
 }
 
+/// Which construction a snapshot's `hash` is by ([`HASH_VERSION`]): its
+/// `hashing`, 1 where it has none, as a snapshot written before there were
+/// two does not. One this build does not know is refused rather than read
+/// as either.
+pub fn hashing_of(base: &BTreeMap<FieldName, Value>) -> Result<i64, String> {
+    match base.get("hashing") {
+        None => Ok(1),
+        Some(Value::Int(n)) if (1..=HASH_VERSION).contains(n) => Ok(*n),
+        Some(other) => Err(format!("a state hash by a construction this build does not know: {other:?}")),
+    }
+}
+
 /// A log from its value, over the module's schema.
 pub fn log_from_value(schema: &Schema, v: &Value) -> Result<Log, String> {
     let m = fields(v)?;
@@ -265,11 +280,15 @@ pub fn log_from_value(schema: &Schema, v: &Value) -> Result<Log, String> {
         Some(Value::Id(i)) => Some(*i),
         Some(other) => return Err(format!("the log's identity is not an id: {other:?}")),
     };
-    let snapshot = snapshot_of(int(need(base, "seq")?)?, store).of_log(log_id);
+    // Checked by the construction it was hashed by, and held hashed by
+    // this one ([`HASH_VERSION`]): a snapshot written before `docs/plan-db.md`
+    // D3 opens, its hash checked as it was written.
+    let claimed = state_hash_by(hashing_of(base)?, &store);
     match need(base, "hash")? {
-        Value::Bytes(h) if *h == snapshot.hash => {}
+        Value::Bytes(h) if Some(h) == claimed.as_ref() => {}
         _ => return Err("the snapshot's hash does not match its rows".into()),
     }
+    let snapshot = snapshot_of(int(need(base, "seq")?)?, store).of_log(log_id);
     let mut log = Log {
         base: snapshot,
         entries: BTreeMap::new(),
@@ -827,6 +846,54 @@ mod tests {
     /// thousand writes of one record are a handful of pages, every record
     /// is still there in order, and the snapshot — the fork — was written
     /// once. Falsified by `merge` returning at once: a thousand pages.
+    /// `docs/plan-db.md` D3, Landed: a snapshot written before the state
+    /// hash was a sum — its `hash` by the old construction, no `hashing` —
+    /// opens, checked by the construction it was written by and held under
+    /// this one; the same file claiming the new construction is refused,
+    /// and so is one naming a construction this build does not know; and
+    /// what is written now says `hashing: 2`. Falsified by checking every
+    /// snapshot by this build's construction alone, as before: the old
+    /// file is refused, "the snapshot's hash does not match its rows".
+    #[test]
+    fn a_snapshot_hashed_the_old_way_opens_and_is_held_hashed_the_new_way() {
+        let mut st = MemoryStore::empty(schema());
+        for i in 1..=3 {
+            st.apply_change(&Change::Add("t".into(), [("id".to_string(), Value::int(i))].into_iter().collect()));
+        }
+        let log = Log {
+            base: snapshot_of(3, st.clone()),
+            entries: BTreeMap::new(),
+            ids: BTreeMap::new(),
+            below: Default::default(),
+        };
+        let written = log_to_value(&log);
+        let base = |v: &Value| fields(v).unwrap()["base"].clone();
+        assert_eq!(fields(&base(&written)).unwrap().get("hashing"), Some(&Value::int(HASH_VERSION)));
+        let with = |hash: Vec<u8>, hashing: Option<i64>| {
+            let mut v = written.clone();
+            if let Value::Struct(m) = &mut v {
+                if let Some(Value::Struct(b)) = m.get_mut("base") {
+                    b.insert("hash".into(), Value::bytes(hash));
+                    match hashing {
+                        Some(n) => b.insert("hashing".into(), Value::int(n)),
+                        None => b.remove("hashing"),
+                    };
+                }
+            }
+            v
+        };
+        let old = crate::hash::state_hash_v1(&st);
+        assert_ne!(old, crate::hash::state_hash(&st));
+        let opened = log_from_value(&schema(), &with(old.clone(), None)).expect("an old snapshot opens");
+        assert_eq!(opened.base.hash, crate::hash::state_hash(&st), "held hashed the new way");
+        assert_eq!(opened, log);
+        assert!(log_from_value(&schema(), &with(old.clone(), Some(1))).is_ok());
+        let claimed = log_from_value(&schema(), &with(old, Some(2))).unwrap_err();
+        assert!(claimed.contains("hash"), "{claimed}");
+        let newer = log_from_value(&schema(), &with(log.base.hash.clone(), Some(3))).unwrap_err();
+        assert!(newer.contains("does not know"), "{newer}");
+    }
+
     #[test]
     fn pages_merge_into_few_and_keep_every_record() {
         let mut keys = Mem::default();

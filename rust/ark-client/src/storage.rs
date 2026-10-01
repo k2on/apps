@@ -7,7 +7,8 @@
 //!
 //! ```text
 //! replica   { t: "replica", cursor, confirmed: { table: [row…] },
-//!             user, session, log, fork: { log, cursor } }     the snapshot
+//!             user, session, log, fork: { log, cursor },      the snapshot
+//!             hashing }
 //! facts.1   { t: "facts", from, to, facts: [[change…], …] }    the journal:
 //! facts.2   …                                                  one page per
 //!                                                              write, dense
@@ -16,7 +17,8 @@
 //!             drop: [id…] }                                  their pages
 //! pending.2 …
 //! who       { t: "who", user, session }
-//! log       { t: "log", base: { seq, hash, rows, log },     a peer alone's
+//! log       { t: "log", base: { seq, hash, hashing,       a peer alone's
+//!             rows, log },
 //!             entries: [], ids: [] }                    local history: the
 //! log.1     [len, { seq, entry, facts }]…              fork, then pages of
 //! log.2     …                                          what it sequenced
@@ -493,6 +495,16 @@ pub fn decode_replica(bytes: &[u8], schema: &Schema) -> Result<(ReplicaFile, Opt
         Some(Value::Id(i)) => Some(*i),
         Some(_) => return Err(bad("log is not an id")),
     };
+    // Which construction of the state hash this snapshot was written under
+    // (`ark::hash::HASH_VERSION`; absent, the first). The record carries no
+    // hash, so an older one needs nothing but opening: the store is hashed
+    // by this build's construction as it is read. A newer one is refused,
+    // since a build cannot know what a later construction would make of it.
+    match m.get("hashing") {
+        None => {}
+        Some(Value::Int(n)) if (1..=ark::hash::HASH_VERSION).contains(n) => {}
+        Some(other) => return Err(bad(&format!("a state hash by a construction this build does not know: {other:?}"))),
+    }
     let fork = match m.get("fork") {
         None => Fork::default(),
         Some(Value::Struct(f)) => Fork {
@@ -718,6 +730,7 @@ pub fn encode_replica_of(cursor: Seq, log_id: Option<Id>, fork: Fork, confirmed:
         ("confirmed", confirmed.store_value()),
         ("user", Value::text(user)),
         ("session", Value::text(session)),
+        ("hashing", Value::Int(ark::hash::HASH_VERSION)),
     ];
     if let Some(id) = log_id {
         fields.push(("log", Value::Id(id)));
@@ -904,5 +917,32 @@ mod tests {
         assert_eq!(base64_encode(b"Man"), "TWFu");
         assert_eq!(base64_encode(b"Ma"), "TWE=");
         assert!(base64_decode("*").is_none());
+    }
+
+    /// `docs/plan-db.md` D3, Landed: the `replica` record says which
+    /// construction of the state hash it was written under. One without the
+    /// field, from before there were two, opens; one naming a construction
+    /// this build does not know is refused. Falsified by reading the record
+    /// as it was, without looking at `hashing`: the newer one opens.
+    #[test]
+    fn a_replica_record_says_its_hashing_and_a_newer_one_is_refused() {
+        let schema = crate::demo::domain().module().schema.clone();
+        let st = MemoryStore::empty(schema.clone());
+        let bytes = encode_replica(4, &st, "alice", "s");
+        let with = |hashing: Option<i64>| {
+            let Value::Struct(mut m) = canon::decode(&bytes).unwrap() else {
+                panic!()
+            };
+            assert_eq!(m.get("hashing"), Some(&Value::Int(ark::hash::HASH_VERSION)), "written");
+            match hashing {
+                Some(n) => m.insert("hashing".into(), Value::Int(n)),
+                None => m.remove("hashing"),
+            };
+            canon::encode(&Value::Struct(m))
+        };
+        assert_eq!(decode_replica(&with(None), &schema).unwrap().0.cursor, 4, "an older record opens");
+        assert!(decode_replica(&bytes, &schema).is_ok());
+        let newer = decode_replica(&with(Some(ark::hash::HASH_VERSION + 1)), &schema);
+        assert!(matches!(newer, Err(Error::Corrupt(ref w)) if w.contains("does not know")), "{newer:?}");
     }
 }

@@ -322,9 +322,10 @@ fn open_hub(
     if let Some(dir) = &data {
         // The first start with a module may be over a log written under
         // another: its snapshot is hashed again under this schema before
-        // it is read (`persist::rehome`, `docs/plan-db.md` D1).
-        if fresh && persist::rehome(dir, schema)? {
-            eprintln!("{name}: a new module: the log's snapshot hashed again under its schema");
+        // it is read (`persist::rehome`, `docs/plan-db.md` D1). So is one
+        // hashed by an older construction of the state hash (D3).
+        if persist::rehome(dir, schema, fresh)? {
+            eprintln!("{name}: the log's snapshot hashed again, under this module and this build's state hash");
         }
         let (f, log) = persist::LogFile::open(dir, schema)?;
         if let Some(log) = log {

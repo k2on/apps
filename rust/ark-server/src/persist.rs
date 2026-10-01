@@ -15,7 +15,7 @@
 //!
 //! ```text
 //! { t: "log",
-//!   base: { seq: Int, hash: Bytes, rows: { table: [row…] }, log: Id },
+//!   base: { seq: Int, hash: Bytes, hashing: Int, rows: { table: [row…] }, log: Id },
 //!   entries: [ { seq: Int, entry: Entry, facts: [Change…] } … ],
 //!   ids: [ { id: Id, seq: Int } … ] }
 //! ```
@@ -269,7 +269,14 @@ pub fn widen(st: &ark::store::MemoryStore) -> ark::store::MemoryStore {
 /// foreign file, is not what a new module brings. Every other start checks
 /// the hash as it always has. The journal after the snapshot is left as
 /// it is: its records extend the same head.
-pub fn rehome(dir: &Path, schema: &Schema) -> Result<bool> {
+///
+/// `fresh` says the module is new. With the same module the file is
+/// rewritten only when its hash is by an older construction than this
+/// build's (`hashing`, `ark::hash::HASH_VERSION`): such a file opens
+/// anyway, its hash checked the way it was written, but every later open
+/// would check it that way again, at the cost of every row, until
+/// something rewrote it.
+pub fn rehome(dir: &Path, schema: &Schema, fresh: bool) -> Result<bool> {
     use ark::store::MemoryStore;
     let path = path_of(dir);
     let bytes = match fs::read(&path) {
@@ -291,6 +298,13 @@ pub fn rehome(dir: &Path, schema: &Schema) -> Result<bool> {
         }
     };
     let base = field(&v, "base")?;
+    let Value::Struct(b) = &base else {
+        return Err(anyhow!("{}: the snapshot is not a struct", path.display()));
+    };
+    let hashing = journal::hashing_of(b).map_err(|e| anyhow!("{}: {e}", path.display()))?;
+    if !fresh && hashing == ark::hash::HASH_VERSION {
+        return Ok(false);
+    }
     let Value::Int(seq) = field(&base, "seq")? else {
         return Err(anyhow!("{}: the snapshot's seq is not an int", path.display()));
     };
@@ -298,7 +312,14 @@ pub fn rehome(dir: &Path, schema: &Schema) -> Result<bool> {
         Ok(Value::Id(i)) => Some(i),
         _ => None,
     };
-    let store = widen(&MemoryStore::from_value(schema.clone(), &field(&base, "rows")?));
+    let read = MemoryStore::from_value(schema.clone(), &field(&base, "rows")?);
+    // The same module: nothing about the schema moved, so the hash is
+    // checked, by the construction it was written by, before it is
+    // replaced — what a torn or foreign file would fail.
+    if !fresh && ark::hash::state_hash_by(hashing, &read).map(Value::Bytes) != Some(field(&base, "hash")?) {
+        return Err(anyhow!("{}: the snapshot's hash does not match its rows", path.display()));
+    }
+    let store = widen(&read);
     let mut log = Log {
         base: ark::log::snapshot_of(seq, store).of_log(log_id),
         entries: Default::default(),
@@ -471,6 +492,60 @@ mod tests {
             }
         }
         let err = log_from_value(&schema, &v).unwrap_err();
+        assert!(err.to_string().contains("hash"), "{err}");
+    }
+
+    /// `docs/plan-db.md` D3, Landed: a `log.ark-log` written before the
+    /// state hash was a sum — no `hashing`, its hash the old construction's
+    /// — is rewritten by `rehome` on a start with the *same* module, once:
+    /// the file then says `hashing: 2` and loads by the new construction,
+    /// and the next start leaves it alone. A file whose rows moved under
+    /// its old hash is refused rather than rewritten. Falsified by `rehome`
+    /// keying on the module alone (returning at once when it is not new):
+    /// the file keeps its old hash and `hashing` stays absent.
+    #[test]
+    fn a_snapshot_hashed_the_old_way_is_rewritten_once_with_the_same_module() {
+        let d = demo::domain();
+        let schema = d.module().schema.clone();
+        let mut a = Authority::new(schema.clone(), d.closures().clone());
+        a.hold(d.native_list());
+        let ctx = Ctx::new("alice", "dev");
+        author(&mut a, &d, [1; 16], "Road trip", &ctx);
+        author(&mut a, &d, [2; 16], "Focus", &ctx);
+        assert!(a.compact(2));
+        let dir = tempfile::tempdir().unwrap();
+        let as_before = |log: &Log, hash: Vec<u8>, rows: Option<Value>| {
+            let mut v = journal::log_to_value(log);
+            if let Value::Struct(m) = &mut v {
+                if let Some(Value::Struct(b)) = m.get_mut("base") {
+                    b.remove("hashing");
+                    b.insert("hash".into(), Value::bytes(hash));
+                    if let Some(r) = rows {
+                        b.insert("rows".into(), r);
+                    }
+                }
+            }
+            canon::encode(&v)
+        };
+        let old = ark::hash::state_hash_v1(&a.log.base.store);
+        write_whole(dir.path(), FILE, &as_before(&a.log, old.clone(), None)).unwrap();
+        let hashing = |dir: &Path| {
+            let v = canon::decode(&fs::read(path_of(dir)).unwrap()).unwrap();
+            let Value::Struct(m) = v else { panic!() };
+            let Some(Value::Struct(b)) = m.get("base") else { panic!() };
+            (b.get("hashing").cloned(), b.get("hash").cloned())
+        };
+        assert!(rehome(dir.path(), &schema, false).unwrap(), "rewritten");
+        assert_eq!(
+            hashing(dir.path()),
+            (Some(Value::int(ark::hash::HASH_VERSION)), Some(Value::bytes(a.log.base.hash.clone())))
+        );
+        assert_eq!(load(dir.path(), &schema).unwrap().unwrap().base, a.log.base);
+        assert!(!rehome(dir.path(), &schema, false).unwrap(), "and only once");
+
+        let torn = tempfile::tempdir().unwrap();
+        write_whole(torn.path(), FILE, &as_before(&a.log, old, Some(Value::record::<String>(vec![])))).unwrap();
+        let err = rehome(torn.path(), &schema, false).unwrap_err();
         assert!(err.to_string().contains("hash"), "{err}");
     }
 
