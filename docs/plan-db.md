@@ -123,6 +123,153 @@ by a narrower schema, `behind` set, Verify skipped, the row readable); and
 the `protocol/` vectors regenerated only for the new frames, every existing
 file byte-identical.
 
+### Landed
+
+**The wire.** Two additions, both absent from every frame written before,
+so every existing `protocol/` vector is byte-identical:
+
+- `held` — `{t: "held", id, reason}`, beside `reject`. A server answers it
+  for an intent whose function no module it has run shipped
+  (`Authority::can_apply` false and the id not in the log). The `Client`
+  keeps the intent pending (`Client::held_ids`, `Client::held`), tells a
+  view nothing, and pushes it again on its next connection; an `ack`
+  clears it. A `reject` whose reason is exactly `unknown function <this
+  intent's hash>` (`protocol::unknown_function`) — what every server before
+  this one said — is read as the same hold, which is what lets scenario 3
+  work against a pinned server. A peer older than this cannot decode
+  `held`, counts a bad frame, and keeps the intent pending: the right
+  answer by accident of being undecodable.
+- `module` — the server's module hash, bytes, on `batch` and `snapshot`,
+  absent for `None`, decoded as `log` is (a null is refused). A server
+  built from a module (`Server::with_module`; ark-server always) says it
+  on every page, and answers a `hello` at its head — which used to get
+  nothing — with an empty page carrying it, so a peer at the head learns
+  it is behind before it would verify. A server that says no module (the
+  sim's, the vectors') is answered exactly as before, which is why no
+  `rebase/` vector moved.
+
+New vector files: `protocol/server-held.json`,
+`protocol/server-batch-module.json`, `protocol/server-snapshot-module.json`.
+The generator also asserts the empty page at the head and the hold.
+
+**Closure provenance.** `Authority::modules` (module hash → the function
+hashes it shipped) and `Authority::ran`, which records a module and holds
+its closures; `retire` keeps every one. `ark-server` writes
+`DATA/modules.cbor` — every module started with, its closures, in the order
+first run — at the first start with each, synced and renamed, and refuses
+to start on one that does not decode. `/healthz` lists `module <hex>` per
+module run, the current one marked `current` (and the JSON form D6 added
+carries both).
+
+**The first start with a new module re-homes the log** — not in the
+brief, and found by scenario 7. A server upgraded to a domain with a new
+table refused its own `log.ark-log` at start ("the snapshot's hash does not
+match its rows": a table more is a pair more in the state hash), and so did
+this build over any data directory a pinned revision wrote, because D3
+redefined the hash. `modules::start_with` now says whether the module is
+new; on that start only, `persist::rehome` reads the snapshot without its
+hash check — the file is this server's own, written by a rename — widens
+every row and writes it back hashed under the current schema. Every other
+start checks as before.
+
+**Projection.** `store::project_row` / `store::project`: a row laid out as
+its table's, a column the table lacks dropped, a nullable one the row lacks
+`Null`, a required one missing `MalformedRow`; a change to a table the
+schema lacks is `None`. The replica (`Replica::behind`, set by the `Client`
+from the two hashes) projects facts before it compares them with a run or
+applies them; the `Client` projects a snapshot's rows the same way; it says
+no `Verify` while behind. **One widening applies whether or not a peer is
+behind**: a fact row that names nothing the schema lacks but leaves out a
+nullable column is completed with `Null`, and the server widens its head
+store at start the same way (`persist::widen`). Without it a peer of the
+grown module that replays an old entry by intent writes `note: Null`, while
+the server and a peer fed that entry's facts hold the row without the
+column, and the two hash apart over rows that say the same thing. The
+store's own `apply_change` is unchanged — a fact is still applied raw
+(§4.5) — and the projection lives where `behind` is known.
+
+**The matrix.** `nix/versions.nix`: `v4-journal` at
+`abbf861feed6468baea238babc7baa8e1750d3bc` and `v4-rows` at
+`71f7b0c40e81a226d980f52d20c259d73ee4e055`, the head when this began. One
+flake input each, `git+https://github.com/k2on/apps?ref=main&rev=…`,
+following this flake's `nixpkgs` and `rust-overlay`, locked by `nix flake
+lock` over the network (it was reachable); the flake refuses to evaluate if
+a locked revision is not the one `versions.nix` names.
+`packages.harken-server-<name>` is each revision's own `harken-server`
+package. `checks.versions` runs `harken/server/tests/versions.rs` with
+`HARKEN_OLD_<n>_SERVER`, `_PEER` and `_NAME` set, `n` in `versions.nix`'s
+order — one variable per binary rather than a directory per revision,
+because that is what a shell sets by hand. The scenarios are a test target
+of their own over the fleet's support so that the check builds and runs
+exactly these; `Server::old`, `PeerProc::old`, `Server::upgrade`,
+`PeerProc::upgrade` are the support's.
+
+Scenario 6 needs a schema no pinned revision has. `harken_server::grown` is
+harken's domain grown as a release would grow it — a nullable
+`playlist_item.note`, a table `tag`, `set_item_note`, `tag_playlist`, the
+query `item_notes`, and `create_playlist`'s body moved (one more input
+check that always holds: a new hash, the same behaviour) — chosen by the
+flag both binaries have for another module, `HARKEN_MODULE` and
+`harken-peer --module FILE` (new). The column is on `playlist_item` and not
+`playlist` because every base function that returns a whole playlist row
+declares its type, and a column there fails `verify` until those functions
+move too — which says something about growth under §17 (below).
+
+**The scenarios**, each falsified once (its doc comment says how), the
+timings from upgrade or start to converged — a debug build in this
+container, then the same in release in the `checks.versions` sandbox:
+
+| scenario | v4-journal | v4-rows | sandbox, release |
+|---|---:|---:|---|
+| 1. old peer beside two new ones, a new server | 831 ms | 869 ms | 461 / 419 ms |
+| 2. old peer authors `create_playlist` at its hash after the server moved to the grown module | 1,530 ms | 1,684 ms | 506 / 517 ms |
+| 3. new (grown) peer held by an old server; server upgraded in place; lands | 993 ms | 1,431 ms | 523 / 506 ms |
+| 4. old server upgraded in place under peers of both revisions; identity and head kept | 642 ms | 657 ms | 374 / 482 ms |
+| 5. old peer's directory, pending behind a black hole, opened by this build | 290 ms | 314 ms | 265 / 250 ms |
+| 6. schema grows under a running peer: projected, `behind`, hashing as the log projected | 2,191–2,775 ms | — | 858 ms |
+| 7. module update over a retained log: an entry at a hash the module no longer ships | 1,566–1,612 ms | — | 536 ms |
+
+6 and 7 need no pinned revision and run in every `cargo test`. The whole
+target is 3.2 s in the sandbox (8 passed, one ignored). The process fleet
+(`tests/fleet.rs`) and the workspace are unchanged by the empty page at the
+head and pass whole.
+
+**Found, and for the coordinator.**
+
+- **D3's hash makes yesterday's files unreadable.** A server's snapshot is
+  re-homed on the first start with a new module (above); a peer's alone log
+  is not: this build cannot open a directory `v4-rows`'s `harken-peer` used
+  `--alone` — `storage: reading log: the snapshot's hash does not match its
+  rows`. Scenario 5b (`#[ignore = "witness: …"]`) holds it. And the
+  server's re-homing is keyed to a new module, so a future change to the
+  hash's definition under the same module would not trigger it: recording
+  the hash's version beside the snapshot would make that the key. Both are
+  D3's to decide; neither is fixed here.
+- **An alone directory from before plan-alone does not join.** `v4-journal`'s
+  peer alone kept no history; opened with a server, its store is taken as
+  the fork and paged on top of, it reaches the head with nothing pending,
+  and its playlists are not the log's — its alone work never reaches the
+  server. plan-alone said this case was untested; 5b is the witness.
+- **A column on a table a function returns whole moves that function.**
+  `verify` types a query's result and a middleware's provided row as the
+  table's row, so adding a nullable `playlist.note` makes `playlists`,
+  `playlists_of` and `owned` fail until re-authored — new hashes for
+  functions that never mention the column. `arkc check`'s additive rule is
+  satisfied by the schema and not by the module. Whether a query's row type
+  should be open to added nullable columns is a §9 question.
+- **Below the head, facts are still raw.** `Log::state_at` and `hash_at` at
+  a sequence below the head apply a pre-upgrade fact as it came, so a
+  `Verify` that lands below the head over such facts would disagree with a
+  widened peer. A peer verifies at its cursor after every settle (D3),
+  which is the head almost always; not seen in any scenario.
+- **A peer behind is never verified.** By the decision, and so a divergence
+  on a frozen phone is invisible until the phone is updated.
+
+**Not verified.** A real older phone (they are frozen at spec v3 and do not
+sync with v4 at all); a pinned revision with a schema of its own (none
+exists — the grown domain stands in); `held` against a server that
+actually lacks a module in production rather than in a fleet.
+
 ## D2. Differential fuzzing
 
 `arkc fuzz [--seed N] [--seconds S] [--out DIR]` (in `rust/ark/src/bin/`),
