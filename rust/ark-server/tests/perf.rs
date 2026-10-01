@@ -251,3 +251,375 @@ fn perf_c_offline_pending() {
         }
     }
 }
+
+// (d) Open time (`docs/plan-db.md` D5) ---------------------------------------------------
+
+/// The sizes D5 asks for, in rows.
+const OPEN_SIZES: [u64; 3] = [10_000, 100_000, 400_000];
+
+/// harken's module, as the server would host it from `HARKEN_MODULE`: the
+/// schema is harken's own (the `media` table, its indexes and the tables
+/// beside it), with nothing native — opening runs no function.
+///
+/// `ARK_PERF_MODULE` names another `.ark` to open with instead — an older
+/// revision's harken, say, to set a schema change's cost beside it.
+fn harken() -> ark_client::Domain {
+    match std::env::var_os("ARK_PERF_MODULE") {
+        Some(p) => ark_client::Domain::from_bytes(&std::fs::read(&p).expect("ARK_PERF_MODULE"), vec![]).expect("a module"),
+        None => ark_client::Domain::from_bytes(include_bytes!("../../../harken/domain/harken.ark"), vec![]).expect("harken.ark"),
+    }
+}
+
+fn open_id(tag: u8, n: u64) -> [u8; 16] {
+    let mut b = [0u8; 16];
+    b[0] = tag;
+    b[8..].copy_from_slice(&n.to_be_bytes());
+    b
+}
+
+/// A media row as `add_song` writes one: nine columns, the shape that
+/// dominates a library.
+fn open_media(i: u64) -> ark::store::Row {
+    [
+        ("id", Value::Id(open_id(1, i))),
+        ("kind", Value::text("song")),
+        ("title", Value::text(format!("Track {i}"))),
+        ("creator", Value::text(format!("Artist {}", i % 50))),
+        ("duration_ms", Value::int(180_000)),
+        ("file", Value::text(format!("music/a{}/t{i}.flac", i % 50))),
+        ("pos", Value::int(i as i64 + 1)),
+        ("added_ms", Value::int(1_000 + i as i64)),
+        ("user_id", Value::text("library")),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_string(), v))
+    .collect()
+}
+
+fn open_store(d: &ark_client::Domain, rows: std::ops::Range<u64>) -> ark::store::MemoryStore {
+    let mut st = ark::store::MemoryStore::empty(d.module().schema.clone());
+    for i in rows {
+        st.apply_change(&ark::store::Change::Add("media".into(), open_media(i)));
+    }
+    st
+}
+
+/// The entry that put row `i` there, as the scanner authors it: `add_song`
+/// with its arguments and autos, and the row as its one fact.
+fn open_record(d: &ark_client::Domain, i: u64) -> (ark::log::Entry, ark::log::Facts) {
+    let (fh, _) = d.mutator("add_song").expect("add_song");
+    let a: Args = [
+        ("title", Value::text(format!("Track {i}"))),
+        ("artist", Value::text(format!("Artist {}", i % 50))),
+        ("album", Value::text(format!("Album {}", i % 200))),
+        ("duration_ms", Value::int(180_000)),
+        ("file", Value::text(format!("music/a{}/t{i}.flac", i % 50))),
+        ("track", Value::int((i % 12) as i64 + 1)),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_string(), v))
+    .collect();
+    let autos: Args = [
+        ("id".to_string(), Value::Id(open_id(1, i))),
+        ("now".to_string(), Value::int(1_000 + i as i64)),
+    ]
+    .into();
+    let e = ark::log::Entry {
+        id: open_id(7, i),
+        actor: "library".into(),
+        session: "scan".into(),
+        fn_hash: fh.clone(),
+        args: a,
+        autos,
+    };
+    (e, vec![ark::store::Change::Add("media".into(), open_media(i))])
+}
+
+const OPEN_LOG: [u8; 16] = [0x5a; 16];
+
+/// A client of a server, caught up: a `replica` record of `n` rows at
+/// cursor `n` of a named log, nothing pending, no pages.
+fn write_client(dir: &std::path::Path, d: &ark_client::Domain, n: u64) {
+    let st = open_store(d, 0..n);
+    let fork = ark_client::Fork::default();
+    let bytes = ark_client::storage::encode_replica_of(n as i64, Some(OPEN_LOG), fork, &st, "alice", "dev");
+    std::fs::write(dir.join("replica"), bytes).unwrap();
+}
+
+/// A server's data directory: a snapshot at the horizon `n - n/10` with
+/// its rows and the id of every entry below it, and a journal of the last
+/// tenth — each record an `add_song` adding one row — which is as long as
+/// a journal gets before it is compacted (the journal is folded once it
+/// outgrows the snapshot; a tenth is a typical middle).
+fn write_server(dir: &std::path::Path, d: &ark_client::Domain, n: u64) {
+    let horizon = n - n / 10;
+    let st = open_store(d, 0..horizon);
+    let mut log = ark::log::Log {
+        base: ark::log::snapshot_of(horizon as i64, st).of_log(Some(OPEN_LOG)),
+        ..ark::log::Log::empty(d.module().schema.clone())
+    };
+    for i in 0..horizon {
+        log.ids.insert(open_id(7, i), i as i64 + 1);
+    }
+    ark_server::persist::save(dir, &log).unwrap();
+    let mut journal = vec![];
+    for i in horizon..n {
+        let (e, f) = open_record(d, i);
+        journal.extend(ark::journal::encode_record(i as i64 + 1, &e, &f));
+    }
+    std::fs::write(ark_server::persist::journal_path_of(dir), journal).unwrap();
+}
+
+/// A peer alone that has authored `n` songs: the `replica` record at its
+/// head, and its local history — the fork (the empty store at 0) and one
+/// page of `n` records — which `open` reads whole for the ids.
+fn write_alone(dir: &std::path::Path, d: &ark_client::Domain, n: u64) {
+    let st = open_store(d, 0..n);
+    let replica = ark_client::storage::encode_replica_of(n as i64, None, ark_client::Fork::default(), &st, "alice", "local");
+    std::fs::write(dir.join("replica"), replica).unwrap();
+    let fork = ark::log::Log::empty(d.module().schema.clone());
+    std::fs::write(dir.join("log"), ark::canon::encode(&ark::journal::log_to_value(&fork))).unwrap();
+    let mut page = vec![];
+    for i in 0..n {
+        let (e, f) = open_record(d, i);
+        page.extend(ark::journal::encode_record(i as i64 + 1, &e, &f));
+    }
+    std::fs::write(dir.join("log.1"), page).unwrap();
+}
+
+/// Resident memory, in KiB, from `/proc/self/status`.
+fn vm_rss_kb() -> u64 {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| {
+            s.lines()
+                .find_map(|l| l.strip_prefix("VmRSS:").and_then(|v| v.trim().trim_end_matches("kB").trim().parse().ok()))
+        })
+        .unwrap_or(0)
+}
+
+fn ms(d: Duration) -> f64 {
+    d.as_secs_f64() * 1e3
+}
+
+/// The bytes on the directory, as an open reads them.
+fn dir_bytes(dir: &std::path::Path) -> u64 {
+    std::fs::read_dir(dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.metadata().map_or(0, |m| m.len()))
+        .sum()
+}
+
+/// D5: what opening costs, in time and in resident memory, at 10,000,
+/// 100,000 and 400,000 rows — one store alone (the `replica` decoded and
+/// built, the baseline a row costs), a client of a server from its
+/// `replica` (`Peer::open` over `Dir`), a server from `log.ark-log` and its
+/// journal (what `Builder::build` does: `persist::LogFile::open`, then the
+/// state at the head), and a peer alone from its replica and local
+/// history. The
+/// stores are written directly, as rows, so that the setup is not the
+/// thing measured; each open runs in a process of its own
+/// ([`perf_d_open_child`]) so the resident memory after it is the open's,
+/// not this generator's. The time is split coarsely into what it is spent
+/// on: decoding CBOR into values, building the store (rows into tables and
+/// their indexes, and each row's leaf of the state hash), freeing the
+/// decoded values, checking the snapshot's hash, replaying records, and —
+/// for a peer — opening the replica, whose optimistic store starts as a
+/// copy of the confirmed one. "The rest" is the open less what was timed
+/// apart. Timings move with the machine's load; the resident memory does
+/// not.
+///
+/// `ARK_PERF_DIR` names where the stores are written (the 400,000-row ones
+/// are tens of megabytes); a temporary directory otherwise. Each is removed
+/// once measured.
+#[test]
+#[ignore]
+fn perf_d_open() {
+    let d = harken();
+    let root = std::env::var_os("ARK_PERF_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    eprintln!("\n== (d) open time and resident memory (docs/plan-db.md D5), harken's schema, media rows");
+    eprintln!(
+        "{:<8} {:>8} {:>9} {:>10} {:>9} {:>9}   split (ms)",
+        "what", "rows", "on disk", "open ms", "rss MB", "base MB"
+    );
+    for n in OPEN_SIZES {
+        for kind in ["store", "client", "server", "alone"] {
+            let dir = tempfile::Builder::new().prefix("ark-open-").tempdir_in(&root).unwrap();
+            match kind {
+                "client" | "store" => write_client(dir.path(), &d, n),
+                "server" => write_server(dir.path(), &d, n),
+                _ => write_alone(dir.path(), &d, n),
+            }
+            let bytes = dir_bytes(dir.path());
+            let out = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["perf_d_open_child", "--exact", "--ignored", "--nocapture", "--test-threads=1"])
+                .env("ARK_OPEN", format!("{kind} {n} {}", dir.path().display()))
+                .output()
+                .expect("the child runs");
+            let text = String::from_utf8_lossy(&out.stdout);
+            let line = text
+                .lines()
+                .find_map(|l| l.split_once("OPEN ").map(|(_, m)| m))
+                .unwrap_or_else(|| panic!("{kind} {n}: no measurement:\n{text}\n{}", String::from_utf8_lossy(&out.stderr)));
+            let f: Vec<&str> = line.splitn(4, ' ').collect();
+            eprintln!(
+                "{kind:<8} {n:>8} {:>7.1}MB {:>10} {:>9} {:>9}   {}",
+                bytes as f64 / 1e6,
+                f[0],
+                f[1],
+                f[2],
+                f.get(3).unwrap_or(&"")
+            );
+        }
+    }
+}
+
+/// One open, in a process of its own: what [`perf_d_open`] runs. Prints
+/// `OPEN <ms> <rss MB> <baseline MB> <split…>`. Does nothing unless
+/// `ARK_OPEN` says what to open.
+#[test]
+#[ignore]
+fn perf_d_open_child() {
+    use ark::journal::{self, Layout};
+    use ark::store::MemoryStore;
+    let Ok(spec) = std::env::var("ARK_OPEN") else { return };
+    let mut it = spec.splitn(3, ' ');
+    let (kind, n, dir) = (
+        it.next().unwrap(),
+        it.next().unwrap().parse::<u64>().unwrap(),
+        std::path::PathBuf::from(it.next().unwrap()),
+    );
+    let d = harken();
+    let schema = d.module().schema.clone();
+    let mb = |kb: u64| format!("{:.1}", kb as f64 / 1024.0);
+    let base = vm_rss_kb();
+    // The open, whole, as the program does it; then the resident memory
+    // with what it holds still held.
+    let t = Instant::now();
+    let held: Box<dyn std::any::Any> = match kind {
+        "server" => {
+            let (file, log) = ark_server::persist::LogFile::open(&dir, &schema).unwrap();
+            let log = log.expect("a log");
+            let mut a = ark::peer::Authority::new(schema.clone(), d.closures().clone());
+            a.store = log.state_at(log.head_seq()).unwrap();
+            a.log = log;
+            Box::new((file, a))
+        }
+        "client" => Box::new(Peer::open_path(d.clone(), &dir, Options::dev("alice")).unwrap()),
+        // One store and nothing else — the client's `replica` decoded and
+        // built, the decoded tree freed: what a row costs resident, with
+        // its indexes, before any program holds two copies of it.
+        "store" => {
+            let bytes = std::fs::read(dir.join("replica")).unwrap();
+            let (file, _) = ark_client::storage::decode_replica(&bytes, &schema).unwrap();
+            Box::new(file.confirmed)
+        }
+        _ => Box::new(Peer::open_path(d.clone(), &dir, Options::alone("alice")).unwrap()),
+    };
+    let whole = t.elapsed();
+    let rss = vm_rss_kb();
+    if let Some((_, a)) = held.downcast_ref::<(ark_server::persist::LogFile, ark::peer::Authority)>() {
+        assert_eq!(a.store.scan("media").len() as u64, n, "every row opened");
+    } else if let Some(p) = held.downcast_ref::<Peer>() {
+        assert_eq!(p.store().scan("media").len() as u64, n, "every row opened");
+    } else if let Some(st) = held.downcast_ref::<MemoryStore>() {
+        assert_eq!(st.scan("media").len() as u64, n, "every row opened");
+    }
+    drop(held);
+
+    // The same work again, step by step, for where the time goes. Timed
+    // after the whole open, so the files are in the page cache both times.
+    let time = |f: &mut dyn FnMut()| {
+        let t = Instant::now();
+        f();
+        t.elapsed()
+    };
+    let mut split = String::new();
+    // The client checks no hash on open; the server checks its snapshot's.
+    let snapshot_split = |bytes: &[u8], rows_key: &str, hashes: bool, split: &mut String| -> MemoryStore {
+        let mut v = Value::Null;
+        let decode = time(&mut || v = ark::canon::decode(bytes).unwrap());
+        // The rows taken out of the tree rather than copied, so nothing is
+        // timed twice.
+        let Value::Struct(m) = &mut v else { panic!("not a record") };
+        let holder = if rows_key == "base" {
+            let Some(Value::Struct(b)) = m.get_mut("base") else { panic!("no base") };
+            b
+        } else {
+            m
+        };
+        let key = if rows_key == "base" { "rows" } else { rows_key };
+        let rows = std::mem::replace(holder.get_mut(key).unwrap(), Value::Null);
+        let mut st = MemoryStore::empty(schema.clone());
+        let build = time(&mut || st = MemoryStore::from_value(schema.clone(), &rows));
+        // Freeing the decoded tree is part of an open too.
+        let mut held = Some((rows, std::mem::replace(&mut v, Value::Null)));
+        let free = time(&mut || drop(held.take()));
+        split.push_str(&format!("decode {:.0}, build {:.0}, free {:.0}", ms(decode), ms(build), ms(free)));
+        if hashes {
+            let hash = time(&mut || {
+                std::hint::black_box(ark::hash::state_hash(std::hint::black_box(&st)));
+            });
+            split.push_str(&format!(", hash {:.1}", ms(hash)));
+        }
+        st
+    };
+    match kind {
+        "store" => {
+            let replica = std::fs::read(dir.join("replica")).unwrap();
+            let _ = snapshot_split(&replica, "confirmed", false, &mut split);
+        }
+        "server" => {
+            let snap = std::fs::read(ark_server::persist::path_of(&dir)).unwrap();
+            let journal_bytes = std::fs::read(ark_server::persist::journal_path_of(&dir)).unwrap();
+            let _ = snapshot_split(&snap, "base", true, &mut split);
+            let mut log = journal::decode_snapshot(&schema, &snap).unwrap();
+            let replay = time(&mut || {
+                journal::replay_into(&mut log, &journal_bytes);
+            });
+            let mut st = MemoryStore::empty(schema.clone());
+            let head = time(&mut || st = log.state_at(log.head_seq()).unwrap());
+            split.push_str(&format!(
+                ", journal {} records {:.0}, state at head {:.0}",
+                log.entries.len(),
+                ms(replay),
+                ms(head)
+            ));
+        }
+        _ => {
+            let replica = std::fs::read(dir.join("replica")).unwrap();
+            let _ = snapshot_split(&replica, "confirmed", false, &mut split);
+            // The replica as `Peer::open` reads it — the bytes, decoded,
+            // built — and then opened: the optimistic store is a copy of
+            // the confirmed one (`ark::peer::Replica::open`).
+            let storage = ark_client::storage::Dir(dir.clone());
+            let mut stored = None;
+            let load = time(&mut || stored = ark_client::storage::Stored::load(&storage, &schema).unwrap());
+            let file = stored.expect("a replica").file;
+            let replica = time(&mut || {
+                std::hint::black_box(ark::peer::Replica::open(
+                    schema.clone(),
+                    d.closures().clone(),
+                    file.confirmed.clone(),
+                    file.cursor,
+                    vec![],
+                ));
+            });
+            let mut accounted = load + replica;
+            split.push_str(&format!(" (read whole {:.0}), replica open {:.0}", ms(load), ms(replica)));
+            if kind == "alone" {
+                let mut records = 0usize;
+                let pages = time(&mut || {
+                    journal::read(&storage, &Layout::alone(), &schema, |_, _, _| records += 1).unwrap();
+                });
+                accounted += pages;
+                split.push_str(&format!(", history {records} records {:.0}", ms(pages)));
+            }
+            split.push_str(&format!(", the rest {:.0}", ms(whole.saturating_sub(accounted))));
+        }
+    }
+    println!("OPEN {:.0} {} {} {split}", ms(whole), mb(rss), mb(base));
+}
