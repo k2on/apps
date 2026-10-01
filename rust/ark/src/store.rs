@@ -37,6 +37,7 @@ use std::fmt;
 use std::ops::Bound;
 use std::sync::Arc;
 
+use crate::hash::{leaf, Digest};
 use crate::ir::Plan;
 use crate::schema::{Dir, Index, Ref, Relation, Schema, Table, Ty};
 use crate::value::{compare_value, FieldName, TableName, Value};
@@ -583,6 +584,16 @@ pub trait Store {
         )
     }
 
+    /// §8.1 The digest this store keeps for a table — the sum of its rows'
+    /// leaves — if it keeps one; `None`, the default, and
+    /// [`crate::hash::state_hash`] sums a scan instead. A store that keeps
+    /// one moves it on every write, which is what makes a `Verify` cost the
+    /// tables rather than the rows (`docs/plan-db.md` D3).
+    fn digest(&self, table: &str) -> Option<Digest> {
+        let _ = table;
+        None
+    }
+
     /// `self` as a trait object, for the shared rules.
     fn as_store(&self) -> &dyn Store;
 }
@@ -853,12 +864,16 @@ fn no_child(st: &dyn Store, tbl: &Table, k: &[Value], rel: &Relation) -> Result<
 /// per reference column, so that a select holding one of those columns to
 /// a value reads the rows under it rather than the table. The indexes are
 /// derived from the rows and say nothing the rows do not: two stores are
-/// equal when their rows are.
+/// equal when their rows are. So are the digests (§8.1): one per table
+/// with rows, the sum of its rows' leaves, moved by [`MemoryStore::set`]
+/// as the rows are, so that the state hash is read rather than computed
+/// (`docs/plan-db.md` D3).
 #[derive(Debug)]
 pub struct MemoryStore {
     schema: Schema,
     tables: BTreeMap<TableName, BTreeMap<Key, Row>>,
     indexes: BTreeMap<TableName, Vec<Secondary>>,
+    digests: BTreeMap<TableName, Digest>,
 }
 
 /// A copy of every row and every index. Written out rather than derived so
@@ -873,6 +888,7 @@ impl Clone for MemoryStore {
             schema: self.schema.clone(),
             tables: self.tables.clone(),
             indexes: self.indexes.clone(),
+            digests: self.digests.clone(),
         }
     }
 }
@@ -1037,6 +1053,7 @@ impl MemoryStore {
             schema,
             tables: BTreeMap::new(),
             indexes,
+            digests: BTreeMap::new(),
         }
     }
 
@@ -1049,14 +1066,33 @@ impl MemoryStore {
     /// the rows and nothing else, so a store that wrote a table's first row
     /// and then undid it — what a rebase's inverse does — is equal to one
     /// that never wrote it (`docs/plan-perf.md` R2).
+    ///
+    /// The table's digest moves here too (§8.1, `docs/plan-db.md` D3): the
+    /// old row's leaf taken away, the new one's added — nothing when the
+    /// row is the one already there — and the digest dropped with the
+    /// table's last row, when it is back to zero.
     fn set(&mut self, t: &str, k: Key, row: Option<Row>) {
         let rows = self.tables.entry(t.into()).or_default();
         let old = match &row {
             Some(r) => rows.insert(k.clone(), r.clone()),
             None => rows.remove(&k),
         };
-        if rows.is_empty() {
+        let emptied = rows.is_empty();
+        if emptied {
             self.tables.remove(t);
+        }
+        if old != row {
+            let d = self.digests.entry(t.into()).or_default();
+            if let Some(o) = &old {
+                d.sub(&leaf(t, o));
+            }
+            if let Some(r) = &row {
+                d.add(&leaf(t, r));
+            }
+            if emptied {
+                debug_assert_eq!(*d, Digest::ZERO, "a table with no rows sums to nothing");
+                self.digests.remove(t);
+            }
         }
         if let Some(ixs) = self.indexes.get_mut(t) {
             for ix in ixs {
@@ -1316,6 +1352,14 @@ impl Store for MemoryStore {
         }
     }
 
+    /// Kept by [`MemoryStore::set`]: read, never summed. A table of the
+    /// schema with no rows is zero; one the schema lacks has none.
+    fn digest(&self, table: &str) -> Option<Digest> {
+        self.schema
+            .lookup_table(table)
+            .map(|_| self.digests.get(table).copied().unwrap_or_default())
+    }
+
     fn as_store(&self) -> &dyn Store {
         self
     }
@@ -1463,6 +1507,28 @@ impl Store for Overlay<'_> {
             let w = present.then(|| stored(tbl, row));
             self.writes.entry(t.clone()).or_default().insert(k, w);
         }
+    }
+
+    /// The base's digest moved by this overlay's writes (`docs/plan-db.md`
+    /// D3): for each key written, the base's row there taken away and the
+    /// written one added. The cost is the writes to the table, which is
+    /// what reading through the overlay costs anyway; a base that keeps no
+    /// digest gives none here either.
+    fn digest(&self, table: &str) -> Option<Digest> {
+        let mut d = self.base.digest(table)?;
+        for (k, w) in self.writes.get(table).into_iter().flatten() {
+            let old = self.base.get(table, k);
+            if old.as_ref() == w.as_ref() {
+                continue;
+            }
+            if let Some(o) = &old {
+                d.sub(&leaf(table, o));
+            }
+            if let Some(r) = w {
+                d.add(&leaf(table, r));
+            }
+        }
+        Some(d)
     }
 
     fn as_store(&self) -> &dyn Store {

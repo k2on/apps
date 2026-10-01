@@ -19,7 +19,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::eval::Args;
-use crate::hash::{state_hash, FnHash};
+use crate::hash::{leaf, state_hash, state_hash_of, Digest, FnHash};
 use crate::schema::Schema;
 use crate::store::{Change, MemoryStore, Store};
 use crate::value::Id;
@@ -200,15 +200,41 @@ impl Log {
 
     /// The state hash at a retained sequence, given the store at the head
     /// — which the authority holds, so at the head nothing is replayed and
-    /// the answer is that store's hash; below it, [`Log::state_at`]'s.
-    /// What a `Verify` asks, and asked at the head it used to replay the
-    /// whole log (`docs/plan-perf.md` R4). `head` must be the state at
-    /// [`Log::head_seq`], as `Authority::store` is.
+    /// the answer is that store's hash. What a `Verify` asks, and asked at
+    /// the head it used to replay the whole log (`docs/plan-perf.md` R4).
+    /// `head` must be the state at [`Log::head_seq`], as `Authority::store`
+    /// is.
+    ///
+    /// Below the head nothing is replayed either (`docs/plan-db.md` D3):
+    /// the head's digests (§8.1) with every fact above `n` taken back — an
+    /// `add`'s leaf subtracted, a `remove`'s added, an `edit`'s new row
+    /// swapped for its old — which is [`Log::state_at`]'s hash at the cost
+    /// of the facts since `n` rather than a copy of the store. A peer that
+    /// verifies after every settle lands a little below a busy head, and
+    /// that is what this answers.
     pub fn hash_at(&self, n: Seq, head: &MemoryStore) -> Option<Vec<u8>> {
         if n == self.head_seq() {
             return Some(state_hash(head));
         }
-        self.state_at(n).map(|st| state_hash(&st))
+        if n < self.horizon() || n > self.head_seq() {
+            return None;
+        }
+        let names: Vec<&str> = head.schema().tables().map(|t| t.name.as_str()).collect();
+        let mut ds: BTreeMap<&str, Digest> = names.iter().map(|t| (*t, head.digest(t).unwrap_or_default())).collect();
+        for (_, (_, facts)) in self.entries.range(n + 1..) {
+            for c in facts {
+                let Some(d) = ds.get_mut(c.table()) else { continue };
+                match c {
+                    Change::Add(t, r) => d.sub(&leaf(t, r)),
+                    Change::Remove(t, r) => d.add(&leaf(t, r)),
+                    Change::Edit(t, old, new) => {
+                        d.sub(&leaf(t, new));
+                        d.add(&leaf(t, old));
+                    }
+                }
+            }
+        }
+        Some(state_hash_of(names.into_iter().map(|t| (t, ds[t]))))
     }
 
     /// §10.3 Move the horizon up to a sequence: snapshot the state there and
@@ -322,9 +348,11 @@ mod tests {
     }
 
     /// R4: the hash at the head is the head store's, with no store copied
-    /// and nothing replayed; below it, the replay's. Both agree with
+    /// and nothing replayed; below it (D3), the head's digests with the
+    /// facts above taken back, again copying nothing. Both agree with
     /// hashing `state_at`. Falsified by answering the head through
-    /// `state_at` again: one store copied.
+    /// `state_at` again: one store copied; and by answering below it so
+    /// (the body this replaced): one store copied there too.
     #[test]
     fn the_hash_at_the_head_replays_nothing() {
         let l = log(50);
@@ -333,7 +361,10 @@ mod tests {
         assert_eq!(l.hash_at(50, &head), Some(state_hash(&head)));
         assert_eq!(crate::store::clones() - before, 0);
         let at_20 = state_hash(&l.state_at(20).unwrap());
+        let before = crate::store::clones();
         assert_eq!(l.hash_at(20, &head), Some(at_20));
+        assert_eq!(crate::store::clones() - before, 0, "below the head, nothing copied");
+        assert_eq!(l.hash_at(0, &head), Some(state_hash(&MemoryStore::empty(schema()))));
         assert_ne!(l.hash_at(20, &head), l.hash_at(50, &head));
         assert_eq!(l.hash_at(51, &head), None);
     }
