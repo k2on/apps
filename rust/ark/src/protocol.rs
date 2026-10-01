@@ -295,25 +295,25 @@ impl ServerMsg {
                 "batch",
                 of_module(
                     named(
-                    vec![
-                        (
-                            "items",
-                            Value::List(
-                                items
-                                    .iter()
-                                    .map(|(n, e, f)| {
-                                        strct(vec![
-                                            ("seq", int(*n)),
-                                            ("entry", entry_value(e)),
-                                            ("facts", f.as_ref().map(facts_value).unwrap_or(Value::Null)),
-                                        ])
-                                    })
-                                    .collect(),
+                        vec![
+                            (
+                                "items",
+                                Value::List(
+                                    items
+                                        .iter()
+                                        .map(|(n, e, f)| {
+                                            strct(vec![
+                                                ("seq", int(*n)),
+                                                ("entry", entry_value(e)),
+                                                ("facts", f.as_ref().map(facts_value).unwrap_or(Value::Null)),
+                                            ])
+                                        })
+                                        .collect(),
+                                ),
                             ),
-                        ),
-                        ("has_more", Value::Bool(*has_more)),
-                    ],
-                    log_id,
+                            ("has_more", Value::Bool(*has_more)),
+                        ],
+                        log_id,
                     ),
                     module,
                 ),
@@ -340,15 +340,15 @@ impl ServerMsg {
                 "snapshot",
                 of_module(
                     named(
-                    vec![
-                        ("seq", int(*seq)),
-                        ("hash", Value::Bytes(hash.clone())),
-                        (
-                            "rows",
-                            Value::Struct(rows.iter().map(|(t, vs)| (t.clone(), Value::List(vs.clone()))).collect()),
-                        ),
-                    ],
-                    log_id,
+                        vec![
+                            ("seq", int(*seq)),
+                            ("hash", Value::Bytes(hash.clone())),
+                            (
+                                "rows",
+                                Value::Struct(rows.iter().map(|(t, vs)| (t.clone(), Value::List(vs.clone()))).collect()),
+                            ),
+                        ],
+                        log_id,
                     ),
                     module,
                 ),
@@ -835,11 +835,7 @@ impl Client {
             // own refusal can name the hash of the intent it is refusing,
             // so nothing else reads this way.
             ServerMsg::Reject { id, reason } => {
-                let unknown = self
-                    .replica
-                    .pending
-                    .iter()
-                    .any(|e| e.id == id && reason == unknown_function(&e.fn_hash));
+                let unknown = self.replica.pending.iter().any(|e| e.id == id && reason == unknown_function(&e.fn_hash));
                 if unknown {
                     self.hold_intent(id);
                 } else {

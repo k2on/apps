@@ -723,20 +723,38 @@ impl Replica {
         mf.map(|f| (f.clone(), false))
     }
 
-    // The authority's facts as this replica holds them: as they are, or,
-    // `behind`, projected to this replica's schema (`docs/plan-db.md` D1)
-    // — a change to a table it lacks dropped, each row laid out as its
-    // table's with what the table lacks dropped and what the row lacks
-    // `Null`. A fact whose row lacks a column this schema requires cannot
-    // be projected (`MalformedRow`) and is applied as it came, which §4.5
+    // The authority's facts as this replica holds them (`docs/plan-db.md`
+    // D1). `behind`, projected to this replica's schema: a change to a
+    // table it lacks dropped, each row laid out as its table's with what
+    // the table lacks dropped and what the row lacks `Null`. Otherwise
+    // only widened: a row that names nothing this schema lacks but leaves
+    // out a nullable column — a fact written under an older module than
+    // this one, which the server may still serve — has it `Null`, as this
+    // peer's own run of the same entry would; any other row as it came.
+    // A fact whose row lacks a column this schema requires cannot be
+    // projected (`MalformedRow`) and is applied as it came, which §4.5
     // already does with a fact; the advance compares it with the run, and
     // a difference is a divergence, never silent.
     fn here(&self, f: &Facts) -> Facts {
-        if !self.behind {
+        let short = |c: &Change| {
+            self.schema.lookup_table(c.table()).is_some_and(|tbl| {
+                let rows: Vec<&crate::store::Row> = match c {
+                    Change::Add(_, r) | Change::Remove(_, r) => vec![r],
+                    Change::Edit(_, o, r) => vec![o, r],
+                };
+                rows.iter()
+                    .any(|r| r.len() < tbl.columns.len() && r.keys().all(|k| tbl.column(k).is_some()))
+            })
+        };
+        if !self.behind && !f.iter().any(short) {
             return f.clone();
         }
         let mut out = Vec::with_capacity(f.len());
         for c in f {
+            if !self.behind && !short(c) {
+                out.push(c.clone());
+                continue;
+            }
             match crate::store::project(&self.schema, c) {
                 Ok(Some(c)) => out.push(c),
                 Ok(None) => {}
@@ -1851,7 +1869,10 @@ mod tests {
         assert!(a.log.named_hashes().is_empty(), "nothing in the log names a closure");
         // A new module that ships none of them.
         a.retire(&BTreeSet::new());
-        assert!(a.bodies.contains_key(&d.create) && a.bodies.contains_key(&d.add), "a module it ran is kept");
+        assert!(
+            a.bodies.contains_key(&d.create) && a.bodies.contains_key(&d.add),
+            "a module it ran is kept"
+        );
         assert!(!a.bodies.contains_key(&stray), "a closure no module it ran shipped is retired");
         assert!(
             matches!(a.sequence_entry(&e), Sequenced::Appended(1, _)),

@@ -416,7 +416,10 @@ fn an_unknown_function_is_held_and_lands_after_the_upgrade() {
     c.disconnected();
     c.connected();
     let heard = exchange(&mut c, 2, &mut sv);
-    assert!(heard.iter().any(|f| matches!(f, ServerMsg::Ack { .. })), "acknowledged after the upgrade: {heard:?}");
+    assert!(
+        heard.iter().any(|f| matches!(f, ServerMsg::Ack { .. })),
+        "acknowledged after the upgrade: {heard:?}"
+    );
     assert_eq!((c.replica.pending.len(), c.held(), c.replica.cursor), (0, 0, 1), "confirmed");
     assert!(c.replica.rejections.is_empty());
 
@@ -441,7 +444,11 @@ fn an_unknown_function_is_held_and_lands_after_the_upgrade() {
         reason: "a playlist needs a name".into(),
     });
     c.settle();
-    assert_eq!((c.replica.pending.len(), c.replica.rejections.len()), (0, 1), "any other reject is a verdict");
+    assert_eq!(
+        (c.replica.pending.len(), c.replica.rejections.len()),
+        (0, 1),
+        "any other reject is a verdict"
+    );
 }
 
 /// A peer older than its server: the wide server's log has a playlist with
@@ -468,10 +475,34 @@ fn a_narrower_schema_applies_facts_projected() {
     let say = |c: &mut Client, i: u8, f: &str, autos: Args, a: Args| {
         c.mutate(key(9, i), &alice, &w.fh(f), &autos, &a).unwrap_or_else(|e| panic!("{f}: {e:?}"));
     };
-    say(&mut author, 1, "create_playlist", args([("id", p.clone())]), args([("name", Value::text("Road"))]));
-    say(&mut author, 2, "set_note", Args::new(), args([("playlist_id", p.clone()), ("note", Value::text("for the drive"))]));
-    say(&mut author, 3, "tag_playlist", Args::new(), args([("playlist_id", p.clone()), ("tag", Value::text("summer"))]));
-    say(&mut author, 4, "add_to_playlist", Args::new(), args([("playlist_id", p.clone()), ("track_id", Value::text("t1"))]));
+    say(
+        &mut author,
+        1,
+        "create_playlist",
+        args([("id", p.clone())]),
+        args([("name", Value::text("Road"))]),
+    );
+    say(
+        &mut author,
+        2,
+        "set_note",
+        Args::new(),
+        args([("playlist_id", p.clone()), ("note", Value::text("for the drive"))]),
+    );
+    say(
+        &mut author,
+        3,
+        "tag_playlist",
+        Args::new(),
+        args([("playlist_id", p.clone()), ("tag", Value::text("summer"))]),
+    );
+    say(
+        &mut author,
+        4,
+        "add_to_playlist",
+        Args::new(),
+        args([("playlist_id", p.clone()), ("track_id", Value::text("t1"))]),
+    );
     exchange(&mut author, 1, &mut sv);
     assert_eq!(author.replica.cursor, 4);
     assert!(!author.behind(), "a peer of the server's own module is not behind");

@@ -343,8 +343,8 @@ pub fn protocol(out: &Out) {
     // head is answered with an empty page carrying the module, where one
     // that says none is answered with nothing; and an intent at a hash no
     // module it ran shipped is held, not refused.
-    let mut said = Server::open(trusting(), open_access(), Silent, Authority::new(m.schema.clone(), bodies.clone()))
-        .with_module(ark::hash::module_hash(&m));
+    let mut said =
+        Server::open(trusting(), open_access(), Silent, Authority::new(m.schema.clone(), bodies.clone())).with_module(ark::hash::module_hash(&m));
     said.recv(
         1,
         ClientMsg::Hello {
