@@ -43,24 +43,39 @@ struct Tally;
 
 thread_local! {
     static ALLOCS: Cell<usize> = const { Cell::new(0) };
+    // The bytes this thread has asked for and not given back: what a
+    // structure holds, counted rather than read off the process
+    // (`docs/plan-db.md` D6, the ids below the horizon).
+    static LIVE: Cell<isize> = const { Cell::new(0) };
 }
 
 fn count() {
     let _ = ALLOCS.try_with(|c| c.set(c.get() + 1));
 }
 
+fn live(delta: isize) {
+    let _ = LIVE.try_with(|c| c.set(c.get() + delta));
+}
+
 unsafe impl GlobalAlloc for Tally {
     unsafe fn alloc(&self, l: Layout) -> *mut u8 {
         count();
+        live(l.size() as isize);
         System.alloc(l)
     }
     unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
+        live(-(l.size() as isize));
         System.dealloc(p, l)
     }
     unsafe fn realloc(&self, p: *mut u8, l: Layout, n: usize) -> *mut u8 {
         count();
+        live(n as isize - l.size() as isize);
         System.realloc(p, l, n)
     }
+}
+
+fn live_bytes() -> isize {
+    LIVE.with(Cell::get)
 }
 
 #[global_allocator]
@@ -861,5 +876,65 @@ fn perf_rows_handed_out() {
             rows = std::hint::black_box(a.store.scan("item")).len();
         }
         once(&format!("scan of {rows} rows"), rows, t.elapsed() / reps, "(per row)");
+    }
+}
+
+// The ids below the horizon (`docs/plan-db.md` D6) ------------------------------------
+
+/// D6: what a log's ids cost per million, whole in the `BTreeMap` every id
+/// used to be kept in and by their 8-byte keys below the horizon
+/// (`ark::log::Below`) — counted as the bytes this thread holds, not read
+/// off the process, so the map's freed nodes are not mistaken for what the
+/// keys hold. Ids are a digest of a counter, in that order, so they arrive
+/// as random ids do. Beside it: a fold's time, and a lookup's above and
+/// below the horizon (`Log::seq_of`, which a re-push asks first).
+#[test]
+#[ignore]
+fn perf_ids_below_the_horizon() {
+    use ark::log::Log;
+    eprintln!("\n== the ids a log keeps (docs/plan-db.md D6), per id and per million");
+    let schema = Schema { tables: vec![] };
+    for n in [100_000u64, 1_000_000] {
+        let ids: Vec<[u8; 16]> = (0..n)
+            .map(|i| {
+                let h = ark::sha256::sha256(&i.to_be_bytes());
+                h[..16].try_into().unwrap()
+            })
+            .collect();
+        let before = live_bytes();
+        let mut log = Log::empty(schema.clone());
+        for (i, id) in ids.iter().enumerate() {
+            log.ids.insert(*id, i as Seq + 1);
+        }
+        let whole = live_bytes() - before;
+        let t = Instant::now();
+        let probes = 100_000.min(n as usize);
+        for id in ids.iter().take(probes) {
+            assert!(log.seq_of(id).is_some());
+        }
+        let exact_lookup = t.elapsed() / probes as u32;
+        // Everything below the horizon, as a server's log is once retention
+        // has moved it past them all.
+        log.base.seq = n as Seq;
+        let t = Instant::now();
+        log.fold_ids();
+        let fold = t.elapsed();
+        let keyed = live_bytes() - before;
+        assert_eq!((log.ids.len(), log.below.len()), (0, n as usize));
+        let t = Instant::now();
+        for id in ids.iter().take(probes) {
+            assert!(log.seq_of(id).is_some());
+        }
+        let key_lookup = t.elapsed() / probes as u32;
+        let per = |b: isize| b as f64 / n as f64;
+        // Bytes an id is megabytes a million.
+        eprintln!(
+            "{n:>9} ids: whole {:.1} B/id, by key {:.1} B/id; fold {:.1} ms; seq_of {:.0} ns exact, {:.0} ns by key",
+            per(whole),
+            per(keyed),
+            fold.as_secs_f64() * 1e3,
+            exact_lookup.as_nanos(),
+            key_lookup.as_nanos()
+        );
     }
 }

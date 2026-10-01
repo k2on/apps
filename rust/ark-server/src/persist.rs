@@ -303,16 +303,28 @@ pub fn rehome(dir: &Path, schema: &Schema) -> Result<bool> {
         base: ark::log::snapshot_of(seq, store).of_log(log_id),
         entries: Default::default(),
         ids: Default::default(),
+        below: Default::default(),
     };
     for item in list(field(&v, "entries")?)? {
         let (n, e, f) = journal::record_from_value(&item).map_err(|e| anyhow!("{}: {e}", path.display()))?;
         log.entries.insert(n, (e, f));
     }
+    // An id below the horizon is kept as its key (`ark::log::Below`,
+    // `docs/plan-db.md` D6), and must be carried as one: dropping it would
+    // let a re-push of that intent be applied again.
+    let mut keys = vec![];
     for item in list(field(&v, "ids")?)? {
-        if let (Ok(Value::Id(id)), Ok(Value::Int(n))) = (field(&item, "id"), field(&item, "seq")) {
-            log.ids.insert(id, n);
+        match (field(&item, "id"), field(&item, "key"), field(&item, "seq")) {
+            (Ok(Value::Id(id)), _, Ok(Value::Int(n))) => {
+                log.ids.insert(id, n);
+            }
+            (_, Ok(Value::Bytes(k)), Ok(Value::Int(n))) if k.len() == 8 => {
+                keys.push((u64::from_be_bytes(k[..].try_into().expect("eight bytes")), n));
+            }
+            _ => {}
         }
     }
+    log.below.extend(keys);
     write_whole(dir, FILE, &canon::encode(&journal::log_to_value(&log)))?;
     Ok(true)
 }

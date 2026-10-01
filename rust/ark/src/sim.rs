@@ -792,6 +792,7 @@ impl Sim {
             base: log.base.clone(),
             entries: BTreeMap::new(),
             ids: BTreeMap::new(),
+            below: Default::default(),
         };
         for (n, (e, facts)) in &log.entries {
             match again.sequence_entry(e) {

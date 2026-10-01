@@ -211,6 +211,10 @@ impl Hub {
         // its name; `LogFile::write` puts a new one on the disk at the
         // first write (`persist` module docs, `docs/plan-perf.md` Round 4).
         server.authority.log.name_if_unnamed(ark_client::Autos::system().new_id());
+        // Ids below the horizon by their keys (`ark::log::Below`,
+        // `docs/plan-db.md` D6): a log read back holds them as written, and
+        // one written before they were folded holds them whole.
+        server.authority.log.fold_ids();
         Ok(Hub {
             server,
             relay,
@@ -398,6 +402,9 @@ impl Hub {
         let (head, horizon) = (log.head_seq(), log.horizon());
         if let Some(n) = retention::compact_to(head, horizon, self.retention, now, heard) {
             if self.server.authority.compact(n) {
+                // The ids now below the horizon are kept by their keys
+                // (`ark::log::Below`, `docs/plan-db.md` D6).
+                self.server.authority.log.fold_ids();
                 eprintln!("ark-server: the log's horizon moved from {horizon} to {n}; {} entries kept", head - n);
                 self.cursors_now = true;
             }
@@ -1172,7 +1179,9 @@ mod tests {
     /// 30,000 are held; by `Hub::new` not reading `cursors.cbor`: the
     /// reopened cursors are empty; and by the machine not following a
     /// snapshot with the page above it (`Server::fanout`): the fresh peer
-    /// stops at 18,000.
+    /// stops at 18,000; and by the hub not folding the ids after a
+    /// compaction (`docs/plan-db.md` D6): every id is held whole, 30,000
+    /// exact and none by its key.
     ///
     /// [`RETAIN_ENTRIES`]: ark::retention::RETAIN_ENTRIES
     #[test]
@@ -1194,7 +1203,7 @@ mod tests {
             t.elapsed(),
             log.entries.len(),
             log.horizon(),
-            log.ids.len(),
+            log.id_count(),
             disk(crate::persist::FILE),
             disk(crate::persist::JOURNAL)
         );
@@ -1206,7 +1215,9 @@ mod tests {
         let keep = ark::retention::RETAIN_ENTRIES as usize;
         assert!((keep..=keep + keep / 2).contains(&log.entries.len()), "{}", log.entries.len());
         assert_eq!((log.horizon(), log.entries.len()), (18_000, 12_000));
-        assert_eq!(log.ids.len(), 30_000, "every id is kept below the horizon");
+        assert_eq!(log.id_count(), 30_000, "every id is kept below the horizon");
+        // Exactly above it, by key below it (`ark::log::Below`, D6).
+        assert_eq!((log.ids.len(), log.below.len()), (12_000, 18_000));
         let session = ("alice".to_string(), "dev".to_string());
         assert!(hub.cursors()[&session].cursor >= 29_000, "{:?}", hub.cursors());
 

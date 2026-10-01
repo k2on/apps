@@ -6,7 +6,7 @@
 //! arguments, the autos. The facts beside it are derived, never
 //! authoritative, and are what a peer takes for an entry it cannot replay.
 //! The horizon is the snapshot the log stands on; entry ids are kept below
-//! it too, so a re-pushed intent older than the horizon is recognised.
+//! it too — by an 8-byte key rather than whole ([`Below`]) — so a re-pushed intent older than the horizon is recognised.
 //!
 //! A log has an identity, drawn once when it is created and kept on its
 //! snapshot for as long as the log lives (`docs/plan-perf.md` Round 4). A
@@ -107,8 +107,105 @@ pub struct Log {
     pub base: Snapshot,
     /// Every sequence above `base`, contiguous.
     pub entries: BTreeMap<Seq, (Entry, Facts)>,
-    /// Every entry id ever sequenced, kept below the horizon too.
+    /// Every entry id sequenced above the horizon, exactly — and below it,
+    /// those not yet folded into `below` ([`Log::fold_ids`]).
     pub ids: BTreeMap<Id, Seq>,
+    /// The ids below the horizon, kept as 8-byte keys rather than whole
+    /// (`docs/plan-db.md` D6; [`Below`]).
+    pub below: Below,
+}
+
+/// The ids of the entries at or below the horizon, each as an 8-byte key
+/// and the sequence it was given (`docs/plan-db.md` D6).
+///
+/// **Why.** A log keeps every id it ever sequenced, below the horizon too,
+/// so that a re-push of an intent older than the snapshot is answered
+/// `Duplicate` rather than applied twice (§10.3). Above the horizon the
+/// ids are what a page is checked against and are kept exactly; below it
+/// the only question asked of one is "was this sequenced, and where" — and
+/// the answer may be wrong with probability 2^-64 per id held, which for a
+/// random id is never. A `BTreeMap<Id, Seq>` costs about 40 bytes an id
+/// (24 of payload and the tree's nodes around it); a sorted vector of
+/// `(u64, Seq)` costs 16, and a server that has run for years holds
+/// millions (`rust/ark/tests/perf.rs`, `perf_ids_below_the_horizon`).
+///
+/// **The key is the first 8 bytes of the id's SHA-256, not of the id.** An
+/// id is chosen by the peer that authored the intent, and nothing makes its
+/// first half random: a UUID's version nibble is there, and an id built
+/// from a counter — every test's, and any peer's that numbers its own —
+/// differs only in its last bytes, so its prefix is every other one's. A
+/// digest's prefix is uniform whatever the id looks like.
+///
+/// **A false positive** — a fresh intent whose key one below the horizon
+/// already has — is answered `Duplicate` at that sequence and never
+/// applied. That is the price, stated: 2^-64 per pair. Two ids below the
+/// horizon with one key are both kept, and the lower sequence is the
+/// answer.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Below {
+    /// `(key, seq)`, sorted.
+    keys: Vec<(u64, Seq)>,
+}
+
+impl Below {
+    /// The key an id is kept under.
+    pub fn key(id: &Id) -> u64 {
+        let h = crate::sha256::sha256(id);
+        u64::from_be_bytes([h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7]])
+    }
+
+    pub fn len(&self) -> usize {
+        self.keys.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.keys.is_empty()
+    }
+
+    /// The sequence an id below the horizon was given, if its key is held.
+    pub fn get(&self, id: &Id) -> Option<Seq> {
+        self.get_key(Below::key(id))
+    }
+
+    /// The sequence held under a key: the lowest, where two share it.
+    pub fn get_key(&self, key: u64) -> Option<Seq> {
+        let at = self.keys.partition_point(|(k, _)| *k < key);
+        self.keys.get(at).filter(|(k, _)| *k == key).map(|(_, n)| *n)
+    }
+
+    /// Every key and its sequence, in key order.
+    pub fn iter(&self) -> impl Iterator<Item = (u64, Seq)> + '_ {
+        self.keys.iter().copied()
+    }
+
+    /// Add keys: sorted, and merged with those held in one pass, so a fold
+    /// costs the ids held and not their square.
+    pub fn extend(&mut self, more: impl IntoIterator<Item = (u64, Seq)>) {
+        let mut more: Vec<(u64, Seq)> = more.into_iter().collect();
+        if more.is_empty() {
+            return;
+        }
+        more.sort_unstable();
+        let old = std::mem::take(&mut self.keys);
+        let mut out = Vec::with_capacity(old.len() + more.len());
+        let (mut a, mut b) = (old.into_iter().peekable(), more.into_iter().peekable());
+        loop {
+            let next = match (a.peek(), b.peek()) {
+                (Some(x), Some(y)) if x <= y => a.next(),
+                (Some(_), Some(_)) => b.next(),
+                (Some(_), None) => a.next(),
+                (None, Some(_)) => b.next(),
+                (None, None) => break,
+            };
+            out.extend(next);
+        }
+        self.keys = out;
+    }
+
+    /// The bytes the keys take on the heap.
+    pub fn heap_bytes(&self) -> usize {
+        self.keys.capacity() * std::mem::size_of::<(u64, Seq)>()
+    }
 }
 
 /// What a peer at a cursor is sent next (`Ark.Log.Page`).
@@ -128,6 +225,7 @@ impl Log {
             base: snapshot_of(0, MemoryStore::empty(sch)),
             entries: BTreeMap::new(),
             ids: BTreeMap::new(),
+            below: Below::default(),
         }
     }
 
@@ -166,9 +264,45 @@ impl Log {
         n
     }
 
-    /// The sequence an entry id was given, if it ever was.
+    /// The sequence an entry id was given, if it ever was: exactly above
+    /// the horizon, and by its key below it ([`Below`]).
     pub fn seq_of(&self, id: &Id) -> Option<Seq> {
-        self.ids.get(id).copied()
+        self.ids.get(id).copied().or_else(|| self.below.get(id))
+    }
+
+    /// How many ids the log holds, exact and keyed.
+    pub fn id_count(&self) -> usize {
+        self.ids.len() + self.below.len()
+    }
+
+    /// Fold every id at or below the horizon into [`Below`]: what the
+    /// server does after each compaction and when it opens its log
+    /// (`ark-server`'s hub). Costs the ids held, once per move of the
+    /// horizon — which the retention rule makes rare (`ark::retention`).
+    /// Not done by [`Log::compact_to`] or by reading a log back, so that a
+    /// log written and read is the log it was; a log is folded where memory
+    /// is the point. A peer alone's log, whose horizon is its head after
+    /// every append ([`Log::take_entries`]), is never folded: its ids are
+    /// its local history's, and it keeps them exactly.
+    pub fn fold_ids(&mut self) {
+        let horizon = self.horizon();
+        if !self.ids.values().any(|n| *n <= horizon) {
+            return;
+        }
+        let mut folded = vec![];
+        let kept: BTreeMap<Id, Seq> = std::mem::take(&mut self.ids)
+            .into_iter()
+            .filter(|(id, n)| {
+                if *n <= horizon {
+                    folded.push((Below::key(id), *n));
+                    false
+                } else {
+                    true
+                }
+            })
+            .collect();
+        self.ids = kept;
+        self.below.extend(folded);
     }
 
     /// What a peer at a cursor is sent next: a page, or the snapshot if the
@@ -239,14 +373,18 @@ impl Log {
 
     /// §10.3 Move the horizon up to a sequence: snapshot the state there and
     /// drop everything at or under it. Ids are kept, entry ids and the
-    /// log's own: it is the same log with less of its past. `None` if the
-    /// sequence is not retained.
+    /// log's own: it is the same log with less of its past. They are kept
+    /// as they were — whole — as `Authority::compact` keeps them; folding
+    /// the ones now below the horizon into their keys is
+    /// [`Log::fold_ids`], which the server does after a compaction. `None`
+    /// if the sequence is not retained.
     pub fn compact_to(&self, n: Seq) -> Option<Log> {
         let st = self.state_at(n)?;
         Some(Log {
             base: snapshot_of(n, st).of_log(self.id()),
             entries: self.entries.range(n + 1..).map(|(k, v)| (*k, v.clone())).collect(),
             ids: self.ids.clone(),
+            below: self.below.clone(),
         })
     }
 
@@ -386,5 +524,65 @@ mod tests {
             panic!("below the horizon")
         };
         assert_eq!((sn.seq, sn.log_id), (10, Some([7; 16])));
+    }
+
+    /// D6: an id below the horizon is held by its key, and a re-push of it
+    /// is still answered `Duplicate` at the sequence it was given — through
+    /// the authority, as the server asks. Above the horizon ids stay exact.
+    /// Falsified by forgetting the keys (`seq_of` reading `ids` alone): the
+    /// eighty below the horizon are unknown — id 1 first — and the authority
+    /// would run the re-push rather than answer the duplicate it is.
+    #[test]
+    fn a_duplicate_below_the_horizon_is_still_refused() {
+        let mut l = log(100).compact_to(80).unwrap();
+        l.fold_ids();
+        assert_eq!((l.ids.len(), l.below.len(), l.id_count()), (20, 80, 100));
+        for n in 1..=100i64 {
+            let mut id = [0u8; 16];
+            id[8..].copy_from_slice(&n.to_be_bytes());
+            assert_eq!(l.seq_of(&id), Some(n), "id {n}");
+        }
+        let mut fresh = [0u8; 16];
+        fresh[8..].copy_from_slice(&101i64.to_be_bytes());
+        assert_eq!(l.seq_of(&fresh), None);
+
+        let mut a = crate::peer::Authority::new(schema(), BTreeMap::new());
+        a.store = l.state_at(100).unwrap();
+        a.log = l;
+        let mut id = [0u8; 16];
+        id[8..].copy_from_slice(&7i64.to_be_bytes());
+        let again = Entry {
+            id,
+            actor: "a".into(),
+            session: "s".into(),
+            fn_hash: vec![1],
+            args: Args::new(),
+            autos: Args::new(),
+        };
+        assert!(matches!(a.sequence_entry(&again), crate::peer::Sequenced::Duplicate(7)));
+        // Folding twice changes nothing, and two ids of one key are both
+        // kept, the lower sequence the answer.
+        let mut twice = a.log.clone();
+        twice.fold_ids();
+        assert_eq!(twice, a.log);
+        let mut b = Below::default();
+        b.extend([(5, 9), (5, 3), (1, 4)]);
+        assert_eq!((b.get_key(5), b.get_key(1), b.get_key(2), b.len()), (Some(3), Some(4), None, 3));
+    }
+
+    /// D6: a folded log is written with its keys and read back with them,
+    /// so a server restarted still answers a re-push below its horizon.
+    /// Falsified by writing the exact ids alone (`journal::log_to_value`
+    /// without the keys): the log read back is not the one written — it
+    /// holds nothing below the horizon, so not id 7.
+    #[test]
+    fn a_folded_log_survives_its_file() {
+        let mut l = log(50).compact_to(30).unwrap();
+        l.fold_ids();
+        let back = crate::journal::log_from_value(&schema(), &crate::journal::log_to_value(&l)).unwrap();
+        assert_eq!(back, l);
+        let mut id = [0u8; 16];
+        id[8..].copy_from_slice(&7i64.to_be_bytes());
+        assert_eq!(back.seq_of(&id), Some(7));
     }
 }

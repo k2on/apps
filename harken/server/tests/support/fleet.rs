@@ -1045,7 +1045,7 @@ impl Fleet {
         // sequenced (§10.3, `ark::retention`).
         let accepted = self.accepted();
         for (id, who) in &accepted {
-            let sequenced = ids.contains_key(id) || log.ids.contains_key(id);
+            let sequenced = ids.contains_key(id) || log.seq_of(id).is_some();
             match (sequenced, refused.get(id)) {
                 (true, None) => {}
                 (false, Some(_)) => {}
@@ -1321,7 +1321,7 @@ impl Fleet {
                 }
                 for (id, who) in self.accepted() {
                     assert!(
-                        seen.contains(&id) || log.ids.contains_key(&id),
+                        seen.contains(&id) || log.seq_of(&id).is_some(),
                         "{}: {who} {} was accepted and is not in the log",
                         self.name,
                         hex(&id)

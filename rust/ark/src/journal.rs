@@ -6,7 +6,8 @@
 //!           { t: "log",
 //!             base: { seq: Int, hash: Bytes, rows: { table: [row…] }, log: Id },
 //!             entries: [ { seq: Int, entry: Entry, facts: [Change…] } … ],
-//!             ids: [ { id: Id, seq: Int } … ] }
+//!             ids: [ { id: Id, seq: Int } …,             exact; then
+//!                    { key: Bytes(8), seq: Int } … ] }   below the horizon
 //! page      records one after another, each a 4-byte big-endian length
 //!           and then the canonical CBOR of { seq, entry, facts } — one item
 //!           of the snapshot's `entries`, and of a `Batch` frame's
@@ -183,10 +184,17 @@ pub fn log_to_value(log: &Log) -> Value {
         })
         .collect();
     let entries: Vec<Value> = log.entries.iter().map(|(n, (e, f))| record_value(*n, e, f)).collect();
+    // Exact ids, then the keys of those below the horizon (`Log::below`,
+    // `docs/plan-db.md` D6): `{ key: Bytes(8), seq }`.
     let ids: Vec<Value> = log
         .ids
         .iter()
         .map(|(id, n)| Value::record(vec![("id", Value::Id(*id)), ("seq", Value::int(*n))]))
+        .chain(
+            log.below
+                .iter()
+                .map(|(k, n)| Value::record(vec![("key", Value::bytes(k.to_be_bytes().to_vec())), ("seq", Value::int(n))])),
+        )
         .collect();
     let mut base = vec![
         ("seq", Value::int(log.base.seq)),
@@ -266,19 +274,27 @@ pub fn log_from_value(schema: &Schema, v: &Value) -> Result<Log, String> {
         base: snapshot,
         entries: BTreeMap::new(),
         ids: BTreeMap::new(),
+        below: Default::default(),
     };
     for item in items(need(m, "entries")?)? {
         let (n, e, facts) = record_from_value(item)?;
         log.entries.insert(n, (e, facts));
     }
+    let mut keys = vec![];
     for item in items(need(m, "ids")?)? {
         let im = fields(item)?;
-        let id = match need(im, "id")? {
-            Value::Id(i) => *i,
-            other => return Err(format!("expected an id, found {other:?}")),
-        };
-        log.ids.insert(id, int(need(im, "seq")?)?);
+        let n = int(need(im, "seq")?)?;
+        match (im.get("id"), im.get("key")) {
+            (Some(Value::Id(i)), _) => {
+                log.ids.insert(*i, n);
+            }
+            (None, Some(Value::Bytes(k))) if k.len() == 8 => {
+                keys.push((u64::from_be_bytes(k[..].try_into().expect("eight bytes")), n));
+            }
+            (other, key) => return Err(format!("expected an id or an 8-byte key, found {other:?} {key:?}")),
+        }
     }
+    log.below.extend(keys);
     if !log.contiguous() {
         return Err(format!(
             "the entries do not run without a gap from {} to {}",

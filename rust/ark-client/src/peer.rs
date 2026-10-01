@@ -1387,6 +1387,7 @@ impl Peer {
             },
             entries: BTreeMap::new(),
             ids,
+            below: Default::default(),
         };
         a.store = self.client.replica.confirmed.clone();
         a.hold(self.domain.native_list());
@@ -1475,6 +1476,7 @@ impl Peer {
             base: snapshot_of(fork.cursor, r.confirmed.clone()).of_log(fork.log_id),
             entries: BTreeMap::new(),
             ids: BTreeMap::new(),
+            below: Default::default(),
         };
         let journal = LogJournal::create(&mut *self.storage, Layout::alone(), &base).map_err(Error::Storage)?;
         drop(base);

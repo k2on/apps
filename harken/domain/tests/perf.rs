@@ -125,6 +125,7 @@ impl Harken {
             base: snapshot_of(0, confirmed.clone()),
             entries: BTreeMap::new(),
             ids: BTreeMap::new(),
+            below: Default::default(),
         };
         a.store = confirmed.clone();
         let natives: Vec<_> = self.procs.values().cloned().collect();
