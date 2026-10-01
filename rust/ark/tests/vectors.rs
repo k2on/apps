@@ -438,11 +438,16 @@ fn check_view(v: &serde_json::Value) -> Result<(), String> {
         st.apply_changes(&batch);
         let patches = push_all(sch, &st, &batch, &mut view).map_err(|e| format!("batch {i}: {e:?}"))?;
         ensure!(contract(sch, &st, &view), "batch {i} breaks the contract");
-        ensure_eq!(
-            Value::List(patches.iter().map(patch_value).collect()),
-            value(&step["patches"]),
-            "batch {i} patches"
-        );
+        // A step the fuzzer wrote has no patches: what a correct engine
+        // patches is not what the broken one did, and the splice below
+        // holds the patches to the answer either way.
+        if step.get("patches").is_some() {
+            ensure_eq!(
+                Value::List(patches.iter().map(patch_value).collect()),
+                value(&step["patches"]),
+                "batch {i} patches"
+            );
+        }
         ensure_eq!(Value::List(view.rows()), value(&step["rows"]), "batch {i} rows");
         ensure_eq!(splice(&patches, &before), view.rows(), "batch {i} splice");
     }
@@ -728,6 +733,16 @@ fn rebase_three_peers() {
 /// A seeded fleet run from its script: every replica and the server reach
 /// the expected head and hash, nothing pending, nothing refused.
 fn check_fleet(v: &serde_json::Value) -> Result<(), String> {
+    // A session the fuzzer wrote (`arkc fuzz`, `docs/plan-db.md` D2): its
+    // own script of ops, held to convergence and replay rather than to a
+    // hash, since the hash a fixed engine reaches is not the broken one's.
+    if v.get("fuzz").is_some() {
+        let m = module_of(&v["module"]);
+        let script = value(&v["script"]).as_list();
+        let clients = value(&v["clients"]).as_int();
+        let seed = value(&v["seed"]).as_int() as u64;
+        return ark::sim::run_script(m.schema.clone(), closures(&m), clients, seed, &script).map(|_| ());
+    }
     let m = module_of(&v["module"]);
     let sch: Schema = m.schema.clone();
     let bodies = closures(&m);

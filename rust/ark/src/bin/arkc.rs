@@ -10,6 +10,11 @@
 //! arkc restore BACKUP DIR [--same-log] put a backup into an empty directory, as a new log
 //! arkc verify-log DIR [M]             replay a data directory: head, hash (with M), horizon,
 //!                                     log id, modules run
+//!
+//! arkc fuzz [--seed N] [--seconds S] [--cases K] [--out DIR] [--without OP,…]
+//!                                     differential fuzzing (D2): random modules and
+//!                                     fleet sessions, every finding a vector
+//! arkc fuzz --replay FILE             a finding run again, saying where it parts
 //! ```
 //!
 //! The last three are about a server's data directory rather than a module
@@ -20,6 +25,8 @@
 //! else, and what it hashes or compares is the verified module: the hash an
 //! entry names is of that form.
 
+#[path = "fuzz/mod.rs"]
+mod fuzz;
 #[path = "vectors/mod.rs"]
 mod vectors;
 
@@ -35,7 +42,7 @@ use ark::hash::{closure, function_hash, module_hash};
 use ark::ir::{module_from_value, Module};
 use ark::value::hex;
 
-const USAGE: &str = "usage: arkc verify M | hash M | check OLD NEW | vectors OUTDIR\n       arkc backup DIR OUT | restore BACKUP DIR [--same-log] | verify-log DIR [M]";
+const USAGE: &str = "usage: arkc verify M | hash M | check OLD NEW | vectors OUTDIR\n       arkc backup DIR OUT | restore BACKUP DIR [--same-log] | verify-log DIR [M]\n       arkc fuzz [--seed N] [--seconds S] [--cases K] [--out DIR] [--without OP,…] | fuzz --replay FILE";
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -61,6 +68,7 @@ fn main() {
             }
         }
         ["vectors", out] => vectors::write_all(std::path::Path::new(out)),
+        ["fuzz", rest @ ..] => exit(fuzz::main(rest)),
         // A server's data directory (D6, `ops.rs`).
         ["backup", dir, out] => print!("{}", ops::backup(dir.as_ref(), out.as_ref()).unwrap_or_else(|e| die(&e))),
         ["restore", from, dir] => print!("{}", ops::restore(from.as_ref(), dir.as_ref(), false).unwrap_or_else(|e| die(&e))),
