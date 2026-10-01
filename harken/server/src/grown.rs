@@ -248,6 +248,61 @@ pub fn write(path: &Path) -> Result<()> {
 mod tests {
     use super::*;
 
+    /// harken's module with a nullable `playlist.note` and nothing else: a
+    /// column on a table that `playlists`, `playlists_of` and the `owned`
+    /// middleware return or provide whole.
+    fn noted_playlist() -> ir::Module {
+        let mut m = harken_domain::module().build().clone();
+        for t in &mut m.schema.tables {
+            if t.name == "playlist" {
+                let mut columns = t.columns.clone();
+                columns.push(Column {
+                    name: "note".into(),
+                    ty: Ty::Text,
+                    nullable: true,
+                });
+                *t = TableDecl::new(
+                    t.name.clone(),
+                    columns,
+                    t.key.clone(),
+                    t.indexes.clone(),
+                    t.refs.clone(),
+                )
+                .with_text(t.text.clone());
+            }
+        }
+        m
+    }
+
+    /// A row in a function's signature is the table's row (§9, `docs/plan-db.md`
+    /// D1): the module with `playlist.note` added verifies, and every
+    /// function that names a whole playlist keeps the hash it had —
+    /// `playlists` among them — because nothing in it moved.
+    ///
+    /// Falsified once: with `verify`'s query-result comparison exact again,
+    /// the module refused `playlists`' declared result, one field short.
+    #[test]
+    fn a_nullable_column_moves_no_function_that_returns_its_rows() {
+        let base = Domain::new(&harken_domain::module());
+        let noted = ark::verify::verify(&noted_playlist()).unwrap_or_else(|es| panic!("{es:?}"));
+        let noted = Domain::of(noted, vec![]);
+        assert_ne!(base.hash(), noted.hash(), "the module moved");
+        for name in [
+            "playlists",
+            "playlists_of",
+            "owned",
+            "create_playlist",
+            "add_to_playlist",
+        ] {
+            let (h, _) = base.function(name).unwrap();
+            assert_eq!(
+                noted.function(name).map(|(h, _)| h),
+                Some(h),
+                "{name} kept its hash"
+            );
+        }
+    }
+
     /// The grown module is the base one plus the column, the table and the
     /// two mutators — every base function but `create_playlist` at the hash
     /// it had, and `create_playlist` at another.

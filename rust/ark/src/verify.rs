@@ -388,7 +388,7 @@ pub fn verify_function(m: &Module, i: usize, f: &Function) -> Result<(), Vec<Com
         (Some(p), FnKind::Query) => {
             let node = query_plan(&g, p)?;
             let got = Ty::List(Box::new(node));
-            if f.ret.as_ref() != Some(&got) {
+            if !f.ret.as_ref().is_some_and(|r| same(&g.m.schema, r, &got)) {
                 let want = f.ret.clone().unwrap_or(Ty::Bool);
                 return err(Complaint::TypeMismatch("query result".into(), want, got));
             }
@@ -597,9 +597,45 @@ fn keyed(g: &G, t: &str, ks: &[Expr]) -> Check_<()> {
     Ok(())
 }
 
+/// §9 Two types the same, where a table's row is that table's row whichever
+/// schema it was written against (`docs/plan-db.md` D1). There is no row
+/// type of its own: a row is `Ty::Struct` of its columns (`Table::row_ty`),
+/// and that struct is what a function's `ret`, a provider's result and an
+/// `Expr::None` carry and what its hash covers. So a schema that grew a
+/// nullable column made every function that names a whole row of the
+/// table fail here — the declared struct one field short of the one the
+/// plan now produces — though nothing it does had changed, and re-authoring
+/// it would have moved its hash. A row is therefore compared as the table's
+/// row: two structs that differ only in fields that are nullable columns of
+/// one table, carried whole by the wider of the two, are the same type.
+/// Anything else is compared exactly, as before.
+fn same(sch: &Schema, a: &Ty, b: &Ty) -> bool {
+    if a == b {
+        return true;
+    }
+    match (a, b) {
+        (Ty::Option(x), Ty::Option(y)) | (Ty::List(x), Ty::List(y)) => same(sch, x, y),
+        (Ty::Struct(fa), Ty::Struct(fb)) => {
+            let (wide, narrow) = if fa.len() >= fb.len() { (fa, fb) } else { (fb, fa) };
+            if !narrow.iter().all(|(k, t)| wide.get(k).is_some_and(|w| same(sch, w, t))) {
+                return false;
+            }
+            let extra: Vec<&String> = wide.keys().filter(|k| !narrow.contains_key(*k)).collect();
+            if extra.is_empty() {
+                return true;
+            }
+            sch.tables().any(|tbl| {
+                tbl.columns.iter().all(|c| wide.get(&c.name) == Some(&c.column_ty()))
+                    && extra.iter().all(|k| tbl.column(k).is_some_and(|c| c.nullable))
+            })
+        }
+        _ => false,
+    }
+}
+
 fn expect(g: &G, site: &str, want: &Ty, e: &Expr) -> Check_<()> {
     let got = infer(g, Some(want), e)?;
-    if got == *want {
+    if same(g.schema(), &got, want) {
         Ok(())
     } else {
         err(Complaint::TypeMismatch(site.into(), want.clone(), got))
@@ -656,7 +692,7 @@ fn infer(g: &G, want: Option<&Ty>, e: &Expr) -> Check_<Ty> {
                 (None, None) => err(Complaint::NeedsAnnotation("empty list".into())),
                 (Some(t), _) => {
                     for t2 in &ts[1..] {
-                        if t2 != t {
+                        if !same(g.schema(), t2, t) {
                             return err(Complaint::TypeMismatch("list element".into(), t.clone(), t2.clone()));
                         }
                     }
@@ -686,7 +722,7 @@ fn infer(g: &G, want: Option<&Ty>, e: &Expr) -> Check_<Ty> {
             };
             let ta = infer(&g.bind(*x, inner), want, a)?;
             let tb = infer(g, Some(&ta), b)?;
-            if ta != tb {
+            if !same(g.schema(), &ta, &tb) {
                 return err(Complaint::TypeMismatch("match arms".into(), ta, tb));
             }
             Ok(ta)
@@ -695,7 +731,7 @@ fn infer(g: &G, want: Option<&Ty>, e: &Expr) -> Check_<Ty> {
             expect(g, "if", &Ty::Bool, c)?;
             let ta = infer(g, want, a)?;
             let tb = infer(g, Some(&ta), b)?;
-            if ta != tb {
+            if !same(g.schema(), &ta, &tb) {
                 return err(Complaint::TypeMismatch("if arms".into(), ta, tb));
             }
             Ok(ta)
