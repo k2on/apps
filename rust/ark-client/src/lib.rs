@@ -39,6 +39,8 @@ mod peer;
 #[cfg(test)]
 mod persistence_tests;
 pub mod storage;
+#[cfg(test)]
+mod versions_tests;
 mod view;
 
 pub use autos::Autos;
