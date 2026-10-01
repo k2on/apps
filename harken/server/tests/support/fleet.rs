@@ -86,12 +86,20 @@ pub struct Server {
     pub log: PathBuf,
     pub port: u16,
     upstream: Upstream,
-    env: Vec<(String, String)>,
+    pub env: Vec<(String, String)>,
     pub starts: usize,
+    /// The binary the next start runs: this build's, or a pinned
+    /// revision's ([`Server::old`]).
+    pub bin: PathBuf,
 }
 
 impl Server {
-    fn spawn(root: &Path, upstream: Upstream, env: Vec<(String, String)>) -> Server {
+    fn spawn(
+        root: &Path,
+        upstream: Upstream,
+        env: Vec<(String, String)>,
+        bin: Option<&Path>,
+    ) -> Server {
         let mut s = Server {
             child: None,
             data: root.join("server-data"),
@@ -101,6 +109,10 @@ impl Server {
             upstream,
             env,
             starts: 0,
+            bin: bin.map_or_else(
+                || PathBuf::from(env!("CARGO_BIN_EXE_harken-server")),
+                Path::to_path_buf,
+            ),
         };
         std::fs::create_dir_all(s.media.join("music")).unwrap();
         s.start();
@@ -110,7 +122,7 @@ impl Server {
     /// Start (again) over the same data directory, and wait for `/healthz`.
     pub fn start(&mut self) {
         assert!(self.child.is_none(), "the server is already running");
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_harken-server"));
+        let mut cmd = Command::new(&self.bin);
         cmd.arg("127.0.0.1:0")
             .env("HARKEN_DEV_AUTH", "1")
             .env("HARKEN_DATA", &self.data)
@@ -233,13 +245,54 @@ impl Server {
         self.start();
     }
 
+    /// Run `bin` — a pinned revision's `harken-server`
+    /// (`HARKEN_OLD_<n>_SERVER`, [`olds`]) — from the next start on.
+    pub fn old(&mut self, bin: &Path) {
+        self.bin = bin.to_path_buf();
+    }
+
+    /// Stop cleanly and start this build's binary over the same data
+    /// directory, with `env` set or replaced: a deploy, in place.
+    pub fn upgrade(&mut self, env: Vec<(&str, &str)>) {
+        self.stop();
+        self.bin = PathBuf::from(env!("CARGO_BIN_EXE_harken-server"));
+        for (k, v) in env {
+            self.env.retain(|(ek, _)| ek != k);
+            self.env.push((k.into(), v.into()));
+        }
+        self.start();
+    }
+
+    /// The module hashes `/healthz` lists, each with whether it is the
+    /// current one (`ark-server`'s `modules`); none from a server older
+    /// than that.
+    pub fn modules(&self) -> Vec<(String, bool)> {
+        let h = self.health().unwrap_or_default();
+        h.lines()
+            .filter_map(|l| l.strip_prefix("module "))
+            .map(|rest| {
+                let mut w = rest.split_whitespace();
+                (
+                    w.next().unwrap_or("").to_string(),
+                    w.next() == Some("current"),
+                )
+            })
+            .collect()
+    }
+
     /// The log as it is on disk: `log.ark-log`, read the way the server
     /// reads it at start. `None` before the first write.
     pub fn log_on_disk(&self) -> Option<Log> {
         let schema = domain().module().schema.clone();
         // The file is replaced by a rename, so a read is of one version or
         // the next; an error is a file that is not whole, which is a finding.
+        // A server upgraded to the grown domain (`docs/plan-db.md` D1)
+        // hashed its snapshot again under that schema, so it is read so.
         ark_server::persist::load(&self.data, &schema)
+            .or_else(|e| {
+                let grown = harken_server::grown::domain().module().schema.clone();
+                ark_server::persist::load(&self.data, &grown).map_err(|_| e)
+            })
             .unwrap_or_else(|e| panic!("the log on disk is not a log: {e:#}"))
     }
 
@@ -273,6 +326,9 @@ pub struct Status {
     pub epoch: i64,
     pub opens: i64,
     pub link: String,
+    /// `docs/plan-db.md` D1: `None` from a peer older than holding.
+    pub held: Option<i64>,
+    pub behind: Option<bool>,
 }
 
 /// `harken-peer` as a child process, dialling its own [`Proxy`].
@@ -292,6 +348,10 @@ pub struct PeerProc {
     /// Every id a `mutate` answered with, fleet-wide: what the log owes.
     accepted: Arc<Mutex<BTreeMap<Id, String>>>,
     pub starts: usize,
+    /// The binary the next start runs ([`PeerProc::old`]).
+    pub bin: PathBuf,
+    /// Said on every start after the rest (`--module FILE`, say).
+    pub args: Vec<String>,
 }
 
 fn field<'a>(v: &'a Value, k: &str) -> &'a Value {
@@ -300,6 +360,14 @@ fn field<'a>(v: &'a Value, k: &str) -> &'a Value {
             .get(k)
             .unwrap_or_else(|| panic!("no `{k}` in {}", json::json(v))),
         other => panic!("not an answer: {other:?}"),
+    }
+}
+
+/// A field an older peer may not say.
+fn has<'a>(v: &'a Value, k: &str) -> Option<&'a Value> {
+    match v {
+        Value::Struct(m) => m.get(k),
+        _ => None,
     }
 }
 
@@ -347,8 +415,9 @@ impl PeerProc {
             .append(true)
             .open(&self.stderr)
             .unwrap();
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_harken-peer"));
+        let mut cmd = Command::new(&self.bin);
         cmd.args(["--dir", self.dir.to_str().unwrap()]);
+        cmd.args(&self.args);
         if self.alone {
             cmd.arg("--alone");
         } else {
@@ -507,6 +576,8 @@ impl PeerProc {
             epoch: int(field(&a, "epoch")),
             opens: int(field(&a, "opens")),
             link: text(field(&a, "link")),
+            held: has(&a, "held").map(int),
+            behind: has(&a, "behind").map(|b| b == &Value::Bool(true)),
         }
     }
 
@@ -638,6 +709,20 @@ impl PeerProc {
         self.kill9();
         self.start();
     }
+
+    /// Run `bin` — a pinned revision's `harken-peer`
+    /// (`HARKEN_OLD_<n>_PEER`, [`olds`]) — from the next start on.
+    pub fn old(&mut self, bin: &Path) {
+        self.bin = bin.to_path_buf();
+    }
+
+    /// Quit, and start this build's binary over the same directory: the
+    /// client upgraded in place.
+    pub fn upgrade(&mut self) {
+        self.quit();
+        self.bin = PathBuf::from(env!("CARGO_BIN_EXE_harken-peer"));
+        self.start();
+    }
 }
 
 impl Drop for PeerProc {
@@ -757,7 +842,22 @@ impl Fleet {
         Fleet::build(name, vec![], seed)
     }
 
+    /// A fleet whose server is `bin` — a pinned revision's — from its
+    /// first start ([`olds`]).
+    pub fn old(name: &str, bin: &Path) -> Fleet {
+        Fleet::built(name, vec![], |_| {}, Some(bin))
+    }
+
     fn build(name: &str, env: Vec<(&str, &str)>, seed: impl FnOnce(&mut Seeder)) -> Fleet {
+        Fleet::built(name, env, seed, None)
+    }
+
+    fn built(
+        name: &str,
+        env: Vec<(&str, &str)>,
+        seed: impl FnOnce(&mut Seeder),
+        bin: Option<&Path>,
+    ) -> Fleet {
         let root = tempfile::Builder::new()
             .prefix(&format!("fleet-{name}-"))
             .tempdir()
@@ -773,7 +873,7 @@ impl Fleet {
             .into_iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
-        let server = Server::spawn(root.path(), upstream.clone(), env);
+        let server = Server::spawn(root.path(), upstream.clone(), env, bin);
         Fleet {
             root,
             server,
@@ -807,6 +907,8 @@ impl Fleet {
             stderr: self.root.path().join(format!("peer-{name}.stderr")),
             accepted: self.accepted.clone(),
             starts: 0,
+            bin: PathBuf::from(env!("CARGO_BIN_EXE_harken-peer")),
+            args: vec![],
         }
     }
 
@@ -1054,4 +1156,193 @@ pub fn playlists_in_pos_order(rows: &[BTreeMap<String, Value>]) -> BTreeMap<Id, 
 /// A set of ids, for comparing.
 pub fn set(ids: &[Id]) -> BTreeSet<Id> {
     ids.iter().copied().collect()
+}
+
+// -- versions (`docs/plan-db.md` D1) -------------------------------------------------
+
+/// A pinned previous revision's binaries, as `checks.versions` hands them
+/// to the fleet: `HARKEN_OLD_<n>_SERVER` and `HARKEN_OLD_<n>_PEER` for
+/// `n` from 1, in `nix/versions.nix`'s order, and `HARKEN_OLD_<n>_NAME`
+/// for what a scenario prints. One environment variable per binary rather
+/// than a directory per revision, because that is what a shell sets by
+/// hand: `HARKEN_OLD_1_SERVER=$(nix build --print-out-paths
+/// .#harken-server-v4-journal)/bin/harken-server`.
+#[derive(Clone, Debug)]
+pub struct Old {
+    pub n: usize,
+    pub name: String,
+    pub server: PathBuf,
+    pub peer: PathBuf,
+}
+
+/// Every pinned revision the environment names, in order; a gap ends the
+/// list. Empty on a laptop, where the version scenarios say so and pass.
+pub fn olds() -> Vec<Old> {
+    let mut out = vec![];
+    for n in 1.. {
+        let var = |what: &str| std::env::var(format!("HARKEN_OLD_{n}_{what}")).ok();
+        let (Some(server), Some(peer)) = (var("SERVER"), var("PEER")) else {
+            break;
+        };
+        out.push(Old {
+            n,
+            name: var("NAME").unwrap_or_else(|| format!("old-{n}")),
+            server: server.into(),
+            peer: peer.into(),
+        });
+    }
+    out
+}
+
+/// The pinned revisions, or a line saying the scenario is skipped and why.
+pub fn olds_or_skip(scenario: &str) -> Vec<Old> {
+    let olds = olds();
+    if olds.is_empty() {
+        println!(
+            "fleet: {scenario}: skipped — no pinned revision named (HARKEN_OLD_1_SERVER and \
+             HARKEN_OLD_1_PEER unset; `nix flake check` sets them in checks.versions)"
+        );
+    }
+    olds
+}
+
+/// The grown domain (`harken_server::grown`) written as an `.ark` file
+/// under `dir`: what `HARKEN_MODULE` and `harken-peer --module` take.
+pub fn grown_module(dir: &Path) -> PathBuf {
+    let path = dir.join("grown.ark");
+    harken_server::grown::write(&path).unwrap();
+    path
+}
+
+/// The fields of a playlist every revision has.
+fn listed(rows: &[BTreeMap<String, Value>]) -> Vec<(Value, Value)> {
+    rows.iter()
+        .map(|r| (r["id"].clone(), r["name"].clone()))
+        .collect()
+}
+
+impl Fleet {
+    /// **What a version scenario ends on** (`docs/plan-db.md` D1): every
+    /// running peer at the log's head with nothing pending, and what each
+    /// peer's user sees — their playlists in order, and what is on each in
+    /// order — equal to the log's state at the head; every intent once;
+    /// nothing refused. Rows rather than a state hash, because a peer of
+    /// another revision computes its hash over its own schema, or by its
+    /// own definition (`docs/plan-db.md` D3 moved it), so equal rows can
+    /// hash apart. `peers` are `(peer, user)`.
+    pub fn converged_across(&self, peers: &mut [(&mut PeerProc, &str)]) -> Duration {
+        let started = Instant::now();
+        let deadline = started + PATIENCE;
+        loop {
+            for (p, _) in peers.iter_mut() {
+                p.settle(Duration::from_secs(2));
+            }
+            let log = self.server.log_on_disk().expect("a log");
+            let head = log.head_seq();
+            let st = log.state_at(head).expect("a state at the head");
+            let rows = |t: &str| -> Vec<BTreeMap<String, Value>> {
+                use ark::store::Store;
+                st.scan(t).iter().map(ark::store::Row::to_struct).collect()
+            };
+            let (playlists, items, media) =
+                (rows("playlist"), rows("playlist_item"), rows("media"));
+            let mut off = vec![];
+            for (p, user) in peers.iter_mut() {
+                let s = p.status();
+                if s.cursor != head || s.pending != 0 {
+                    off.push(format!(
+                        "{}: cursor {} pending {} (head {head}) held {:?} behind {:?}",
+                        p.name, s.cursor, s.pending, s.held, s.behind
+                    ));
+                    continue;
+                }
+                let mut mine: Vec<&BTreeMap<String, Value>> = playlists
+                    .iter()
+                    .filter(|r| r["user_id"] == Value::text(*user))
+                    .collect();
+                mine.sort_by_key(|r| match r["pos"] {
+                    Value::Int(n) => n,
+                    _ => 0,
+                });
+                let want: Vec<(Value, Value)> = mine
+                    .iter()
+                    .map(|r| (r["id"].clone(), r["name"].clone()))
+                    .collect();
+                let got = listed(&p.query("playlists", vec![]));
+                if got != want {
+                    off.push(format!("{}: playlists {got:?}, the log {want:?}", p.name));
+                    continue;
+                }
+                for (id, _) in &want {
+                    let mut on: Vec<(i64, Value)> = items
+                        .iter()
+                        .filter(|r| &r["playlist_id"] == id)
+                        .filter(|r| media.iter().any(|m| m["id"] == r["media_id"]))
+                        .map(|r| {
+                            let Value::Int(pos) = r["pos"] else {
+                                panic!("{r:?}")
+                            };
+                            (pos, r["media_id"].clone())
+                        })
+                        .collect();
+                    on.sort_by_key(|(pos, _)| *pos);
+                    let want: Vec<Value> = on.into_iter().map(|(_, m)| m).collect();
+                    let got: Vec<Value> = p
+                        .query("playlist", vec![("playlist_id", id.clone())])
+                        .iter()
+                        .map(|r| r["id"].clone())
+                        .collect();
+                    if got != want {
+                        off.push(format!(
+                            "{}: playlist {id:?} holds {got:?}, the log {want:?}",
+                            p.name
+                        ));
+                    }
+                }
+            }
+            if off.is_empty() {
+                let mut seen = BTreeSet::new();
+                for (n, (e, _)) in &log.entries {
+                    assert!(
+                        seen.insert(e.id),
+                        "{}: intent {} twice, the second at {n}",
+                        self.name,
+                        hex(&e.id)
+                    );
+                }
+                for (p, _) in peers.iter_mut() {
+                    let refused = p.rejections();
+                    assert!(
+                        refused.is_empty(),
+                        "{}: {} was refused {refused:?}",
+                        self.name,
+                        p.name
+                    );
+                }
+                for (id, who) in self.accepted() {
+                    assert!(
+                        seen.contains(&id) || log.ids.contains_key(&id),
+                        "{}: {who} {} was accepted and is not in the log",
+                        self.name,
+                        hex(&id)
+                    );
+                }
+                return started.elapsed();
+            }
+            if Instant::now() >= deadline {
+                let tails: Vec<String> = peers
+                    .iter()
+                    .map(|(p, _)| format!("--- {} ---\n{}", p.name, tail(&p.stderr, 15)))
+                    .collect();
+                panic!(
+                    "{}: not converged after {PATIENCE:?}:\n{}\n--- server ---\n{}\n{}",
+                    self.name,
+                    off.join("\n"),
+                    tail(&self.server.log, 20),
+                    tails.join("\n")
+                );
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
 }

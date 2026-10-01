@@ -4,8 +4,13 @@
 //! harken-peer --dir DIR --server URL [--user NAME]     a peer of that server
 //! harken-peer --dir DIR --alone [--user NAME]          its own authority
 //!   [--pump-ms 50] [--ping-ms 20000] [--backoff-ms 500,30000]
-//!   [--auth-patience-ms N]
+//!   [--auth-patience-ms N] [--module FILE]
 //! ```
+//!
+//! `--module FILE` runs the module in that `.ark` file instead of harken's
+//! own, with harken's procedures native wherever a hash matches — the
+//! server's `HARKEN_MODULE`. The fleet's version scenarios run a peer of a
+//! grown domain with it (`harken_server::grown`, `docs/plan-db.md` D1).
 //!
 //! `--auth-patience-ms` bounds each sign-in request — its connection and
 //! each read — where `ark_auth::client::Patience::DEFAULT` is ten seconds
@@ -38,7 +43,8 @@
 //! ```text
 //! {"cmd":"mutate","name":"create_playlist","args":{"name":"Road trip"}}
 //!                              {"ok":true,"id":{"$id":"…"}} | {"ok":false,"why":"…"}
-//! {"cmd":"status"}             {"cursor":N,"pending":K,"linked":b,"denied":null|"…","user":"…",…}
+//! {"cmd":"status"}             {"cursor":N,"pending":K,"held":H,"behind":b,"linked":b,
+//!                               "denied":null|"…","user":"…",…}
 //! {"cmd":"hash"}               {"cursor":N,"hash":"hex","view":"hex"}
 //! {"cmd":"wait","cursor":N,"timeout_ms":T}      {"ok":b,"cursor":N}
 //! {"cmd":"settle","timeout_ms":T}               {"ok":b,"cursor":N,"pending":K}
@@ -78,7 +84,7 @@ use ark_client::{Args, Domain, Options, Peer, Standing, Timing};
 const USAGE: &str =
     "usage: harken-peer --dir DIR (--server URL [--user NAME] | --alone [--user NAME])
                    [--pump-ms 50] [--ping-ms 20000] [--backoff-ms 500,30000]
-                   [--auth-patience-ms N]
+                   [--auth-patience-ms N] [--module FILE]
 Commands are JSON lines on stdin; see the source's first page.";
 
 /// What the command line says.
@@ -91,6 +97,7 @@ struct Flags {
     pump: Duration,
     timing: Timing,
     patience: Patience,
+    module: Option<PathBuf>,
 }
 
 fn flags(args: &[String]) -> Result<Flags, String> {
@@ -102,6 +109,7 @@ fn flags(args: &[String]) -> Result<Flags, String> {
         pump: Duration::from_millis(50),
         timing: Timing::default(),
         patience: Patience::DEFAULT,
+        module: None,
     };
     let mut dir = None;
     let mut it = args.iter();
@@ -142,6 +150,7 @@ fn flags(args: &[String]) -> Result<Flags, String> {
                     ms(it.next(), "--auth-patience-ms")?.max(1),
                 ))
             }
+            "--module" => f.module = Some(PathBuf::from(it.next().ok_or("--module needs a file")?)),
             "-h" | "--help" => return Err(USAGE.into()),
             other => return Err(format!("unexpected argument {other}\n{USAGE}")),
         }
@@ -481,6 +490,10 @@ impl Headless {
         Answer::default()
             .num("cursor", s.cursor)
             .num("pending", s.pending as i64)
+            // `docs/plan-db.md` D1: intents the server cannot run yet, and
+            // whether its module is this peer's.
+            .num("held", s.held as i64)
+            .raw("behind", s.behind.to_string())
             .raw("linked", s.linked.to_string())
             .raw(
                 "denied",
@@ -664,7 +677,11 @@ fn lines() -> Receiver<String> {
 }
 
 fn run(f: Flags) -> Result<(), String> {
-    let mut h = Headless::open(&f, Domain::new(&harken_domain::module()))?;
+    let domain = match &f.module {
+        None => Domain::new(&harken_domain::module()),
+        Some(p) => harken_server::domain(Some(p)).map_err(|e| format!("{e:#}"))?,
+    };
+    let mut h = Headless::open(&f, domain)?;
     let input = lines();
     let mut out = std::io::stdout().lock();
     // The pump keeps its own clock rather than waiting for a quiet stdin:

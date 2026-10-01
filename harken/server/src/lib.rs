@@ -28,6 +28,7 @@
 //! the engine `Auth::owns`.
 
 pub mod assistant;
+pub mod grown;
 pub mod library;
 pub mod listening;
 
