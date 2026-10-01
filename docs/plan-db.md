@@ -234,6 +234,16 @@ target is 3.2 s in the sandbox (8 passed, one ignored). The process fleet
 (`tests/fleet.rs`) and the workspace are unchanged by the empty page at the
 head and pass whole.
 
+**`fleet-vm`, under TCG**, here with no `/dev/kvm` (`--option
+system-features "nixos-test benchmark big-parallel kvm"`): every subtest
+passed, the two new ones included — the `v4-rows` server with a `v4-rows`
+peer and a current one, upgraded in place under both by
+`switch-to-configuration` into the specialisation whose only change is the
+package, `/healthz` then listing its module, the log's head kept, both
+converging after (39 s); and the `v4-rows` peer against the current
+`server` (6 s). The test script took 529 s and the whole build 21.5
+minutes, five machines on four cores.
+
 **Found, and for the coordinator.**
 
 - **D3's hash makes yesterday's files unreadable.** A server's snapshot is
