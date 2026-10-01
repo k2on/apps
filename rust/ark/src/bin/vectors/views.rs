@@ -586,4 +586,229 @@ pub fn views(out: &Out) {
         }
     }
     println!("  {} batches through {} plans", batches.len(), m.functions.len());
+    more(out);
+}
+
+// `docs/plan-db.md` D4 ------------------------------------------------------
+//
+// Two cases in a module of their own — its schema has a text index, and
+// every file above carries its module whole, so adding them there would
+// move every one of those files' bytes.
+
+pub struct More {
+    pub person: Table<Person>,
+    pub track: Table<Track>,
+}
+impl Tables for More {
+    fn open() -> Self {
+        More {
+            person: table(),
+            track: table(),
+        }
+    }
+}
+
+/// Tracks with an index under the creator by position, which is what lets
+/// `kept-max` keep its greatest, and a text index on the title, which is
+/// what serves `has-search`.
+pub struct Track {
+    pub id: Text,
+    pub title: Text,
+    pub creator: Text,
+    pub pos: Int,
+}
+impl Row for Track {
+    const NAME: &str = "track";
+    type Key = (Text,);
+    fn columns() -> Columns<Self> {
+        columns()
+            .text(Self::id)
+            .text(Self::title)
+            .text(Self::creator)
+            .int(Self::pos)
+            .key((Self::id,))
+            .index((Self::creator, Self::pos))
+            .index_text(Self::title)
+    }
+}
+#[allow(non_upper_case_globals)]
+impl Track {
+    pub const id: Col<Self, Text> = col("id");
+    pub const title: Col<Self, Text> = col("title");
+    pub const creator: Col<Self, Text> = col("creator");
+    pub const pos: Col<Self, Int> = col("pos");
+}
+
+pub struct Needle {
+    pub needle: Text,
+}
+impl Input for Needle {
+    fn schema() -> Object<Self> {
+        object().field("needle", text())
+    }
+}
+
+fn more_lib() -> Router<More> {
+    let r = router::<More>("views_d4");
+    r.routes((
+        // Each person's greatest position, kept as a value: an arrival above
+        // it compares, its holder leaving with a twin behind changes
+        // nothing, its holder leaving alone is read again through the index.
+        r.query("kept-max", |_ctx, db, _input: ()| {
+            db.person
+                .order_by(Person::name.asc())
+                .each(|person, ()| db.track.rows().on(Track::creator.eq(person.name)))
+                .map(|person, (tracks,)| Tally {
+                    name: person.name,
+                    n: tracks.fold(-1, |acc: Int, x| acc.max(x.pos)),
+                })
+        }),
+        // A search of the titles, folded, in position order: a row moves in
+        // and out of it as its title is edited.
+        r.input::<Needle>().query("has-search", |_ctx, db, input| {
+            db.track
+                .filter(Track::title.has(input.needle))
+                .order_by(Track::pos.asc())
+                .map(|track, ()| Tally {
+                    name: track.title,
+                    n: track.pos,
+                })
+        }),
+    ))
+}
+
+fn track(id: &str, title: &str, creator: &str, pos: i64) -> StoreRow {
+    row(vec![
+        ("id", t(id)),
+        ("title", t(title)),
+        ("creator", t(creator)),
+        ("pos", Value::Int(pos)),
+    ])
+}
+
+fn more_batches() -> Vec<Vec<Change>> {
+    let t6 = track("t6", "ARIA da capo", "Gould", 9);
+    let t2 = track("t2", "Variation 1", "Gould", 7);
+    let t3 = track("t3", "Variation 2", "Gould", 7);
+    let t4 = track("t4", "Air", "Bach", 1);
+    let t9 = track("t9", "Passing aria", "Gould", 20);
+    vec![
+        // above Gould's greatest, and capitals found by their lowercase
+        vec![add("track", t6.clone())],
+        // the greatest leaves: read again
+        vec![remove("track", t6)],
+        // the greatest leaves with a twin behind: nothing for the max
+        vec![remove("track", t2)],
+        // the last of the sevens moves down, and out of the search
+        vec![edit("track", t3, track("t3", "Sarabande", "Gould", 2))],
+        // Bach's one track moves up, and into the search
+        vec![edit("track", t4, track("t4", "Fair aria", "Bach", 12))],
+        // a person with no track
+        vec![add("person", person("Nobody", 2000))],
+        // added and removed within one batch: nothing to say
+        vec![add("track", t9.clone()), remove("track", t9)],
+    ]
+}
+
+fn more(out: &Out) {
+    let module = Module::new((more_lib(),));
+    let m = module.build();
+    let sch = &m.schema;
+    let mv = module_value(m);
+    let ctx = EvalCtx::new("alice", "dev");
+    let ctx_value = Value::record(vec![("user", t("alice")), ("session", t("dev"))]);
+    let mut st0 = MemoryStore::empty(sch.clone());
+    st0.apply_changes(&[
+        add("person", person("Bach", 1685)),
+        add("person", person("Gould", 1932)),
+        add("person", person("Handel", 1685)),
+        add("track", track("t1", "Aria", "Gould", 3)),
+        add("track", track("t2", "Variation 1", "Gould", 7)),
+        add("track", track("t3", "Variation 2", "Gould", 7)),
+        add("track", track("t4", "Air", "Bach", 1)),
+        add("track", track("t5", "Ariadne", "Handel", 2)),
+    ]);
+    let batches = more_batches();
+    for f in m.functions.iter() {
+        let name = f.name.as_str();
+        let plan = f.plan.clone().expect("a query is a plan");
+        let plan_value = mv
+            .field("functions")
+            .as_list()
+            .into_iter()
+            .find(|g| g.field("name") == t(name))
+            .map(|g| g.field("plan"))
+            .expect("the query in the module's value");
+        let args: Args = if f.input.is_empty() {
+            Args::new()
+        } else {
+            Args::from([("needle".to_string(), t("ari"))])
+        };
+        let c = closure(m, f);
+        let (args_in, provided) = eval::middleware(sch, &c, &ctx, &args, &st0).expect("the middleware");
+        let env = Env {
+            helpers: c.helpers.clone(),
+            ctx: ctx.clone(),
+            args: args_in,
+            provided,
+        };
+        let mut st = st0.clone();
+        let mut view = hydrate(sch, &plan, env.clone(), &st).expect("hydrate");
+        let kept = !view.shape.kept.is_empty();
+        claim(&format!("view {name}: the max is kept"), name != "kept-max" || kept);
+        let rows_before = view.rows();
+        let mut steps: Vec<(Vec<Patch>, Vec<Value>)> = Vec::new();
+        for (i, batch) in batches.iter().enumerate() {
+            let before = view.rows();
+            st.apply_changes(batch);
+            let patches = push_all(sch, &st, batch, &mut view).unwrap_or_else(|e| panic!("view {name}: batch {i}: {e:?}"));
+            claim(&format!("view {name}: batch {i} keeps the contract"), contract(sch, &st, &view));
+            claim(
+                &format!("view {name}: batch {i}'s patches splice"),
+                splice(&patches, &before) == view.rows(),
+            );
+            steps.push((patches, view.rows()));
+        }
+        let has = |i: usize, f: fn(&Patch) -> bool| steps[i].0.iter().any(f);
+        let update = |p: &Patch| matches!(p, Patch::Update { .. });
+        let insert = |p: &Patch| matches!(p, Patch::Insert { .. });
+        let remove = |p: &Patch| matches!(p, Patch::Remove { .. });
+        let shows = steps[6].0.is_empty()
+            && match name {
+                // up with the arrival, back with its leaving, still with the
+                // twin, down with the last seven, Bach up, Nobody in
+                "kept-max" => has(0, update) && has(1, update) && steps[2].0.is_empty() && has(3, update) && has(4, update) && has(5, insert),
+                // the capitals found, gone, a Variation gone, the
+                // Sarabande out, the Fair aria in
+                "has-search" => has(0, insert) && has(1, remove) && has(2, remove) && has(3, remove) && has(4, insert) && steps[5].0.is_empty(),
+                _ => false,
+            };
+        claim(&format!("view {name}: the patches do not show what the plan is for"), shows);
+        let parts = vec![
+            ("module", json(&mv)),
+            ("query", quoted(name)),
+            ("plan", json(&plan_value)),
+            ("ctx", json(&ctx_value)),
+            ("args", json(&Value::Struct(args.clone()))),
+            ("store_before", json(&st0.store_value())),
+            ("rows_before", json(&Value::List(rows_before))),
+            (
+                "batches",
+                json(&Value::List(
+                    batches.iter().map(|b| Value::List(b.iter().map(change_value).collect())).collect(),
+                )),
+            ),
+            (
+                "steps",
+                array(steps.iter().map(|(ps, rows)| {
+                    obj(&[
+                        ("patches", json(&Value::List(ps.iter().map(patch_value).collect()))),
+                        ("rows", json(&Value::List(rows.clone()))),
+                    ])
+                })),
+            ),
+        ];
+        out.write(&format!("views/{name}.json"), &obj(&parts));
+    }
+    println!("  {} batches through {} plans (D4)", batches.len(), m.functions.len());
 }
