@@ -27,7 +27,7 @@ mod support {
 }
 
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use ark::value::{hex, Id, Value};
 use support::fleet::*;
@@ -344,8 +344,6 @@ fn version_5_a_client_upgraded_in_place() {
             ),
             t.elapsed(),
         );
-
-        measured(&format!("v5 {} …the last settle", o.name), Duration::ZERO);
     }
 }
 
@@ -555,5 +553,4 @@ fn version_7_a_module_update_over_a_retained_log() {
     );
     measured("v7 restart with a newer module, to converged", t.elapsed());
     measured("v7 …the last settle", took);
-    let _ = Duration::ZERO;
 }

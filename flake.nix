@@ -330,7 +330,7 @@
               doCheck = true;
               # The test target needs the two binaries built beside it.
               cargoBuildFlags = [ "-p" "harken-server" ];
-              checkFlags = [ "--nocapture" "--test-threads=2" ];
+              checkFlags = [ "--nocapture" ];
               preCheck = oldEnv;
               installPhase = "touch $out";
             };
