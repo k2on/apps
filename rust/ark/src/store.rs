@@ -934,16 +934,28 @@ fn no_child(st: &dyn Store, tbl: &Table, k: &[Value], rel: &Relation) -> Result<
 /// Each table's rows, indexes and digest are one [`TableState`], and an
 /// index names a row by the table's own number for it, its ordinal
 /// (`docs/plan-db.md` D7.2), not by its key.
+///
+/// A table is held behind an `Arc` (D7.3), so that a store and its clone
+/// share every table until one of them writes it: the first write a store
+/// makes to a table it shares copies that table and nothing else
+/// ([`Arc::make_mut`]), and every write after is in place. That is what
+/// lets a replica's optimistic view be its confirmed store with only the
+/// tables pending has written copied (`peer.rs`, `Replica`).
 pub struct MemoryStore {
     schema: Schema,
     /// One per table of the schema, written or not.
-    tables: BTreeMap<TableName, TableState>,
+    tables: BTreeMap<TableName, Arc<TableState>>,
+    /// D7.3 The tables this store has written since it was made or cloned
+    /// ([`MemoryStore::written`]).
+    written: BTreeSet<TableName>,
 }
 
-/// A copy of every row and every index. Written out rather than derived so
-/// that this crate's tests can count them: a copy is the one cost of a
-/// store that grows with it whatever changed, and the replica is held to
-/// making none per mutation (§11.9, `peer::tests`).
+/// A second handle on every table, sharing them all: `O(tables)`, and a
+/// table is copied only when one of the two writes it (D7.3,
+/// [`copies`]). Written out rather than derived so that this crate's tests
+/// can count them: a clone was a copy of every row and index until D7.3,
+/// and the replica is still held to making none per mutation (§11.9,
+/// `peer::tests`).
 impl Clone for MemoryStore {
     fn clone(&self) -> MemoryStore {
         #[cfg(test)]
@@ -951,6 +963,7 @@ impl Clone for MemoryStore {
         MemoryStore {
             schema: self.schema.clone(),
             tables: self.tables.clone(),
+            written: BTreeSet::new(),
         }
     }
 }
@@ -962,10 +975,23 @@ thread_local! {
     static CLONES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-/// How many stores this thread has copied: tests only.
+/// How many stores this thread has cloned: tests only.
 #[cfg(test)]
 pub(crate) fn clones() -> usize {
     CLONES.with(|n| n.get())
+}
+
+#[cfg(test)]
+thread_local! {
+    static COPIES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How many tables this thread has copied — a write that found its table
+/// shared with another store (`docs/plan-db.md` D7.3): tests only. The
+/// cost [`clones`] no longer counts, now that a clone shares.
+#[cfg(test)]
+pub(crate) fn copies() -> usize {
+    COPIES.with(|n| n.get())
 }
 
 /// Equal when the rows are, table by table: never the ordinals, which are
@@ -977,7 +1003,11 @@ impl PartialEq for MemoryStore {
     fn eq(&self, other: &MemoryStore) -> bool {
         self.schema == other.schema
             && self.tables.len() == other.tables.len()
-            && self.tables.iter().zip(&other.tables).all(|((n, a), (m, b))| n == m && a.same_rows(b))
+            && self
+                .tables
+                .iter()
+                .zip(&other.tables)
+                .all(|((n, a), (m, b))| n == m && (Arc::ptr_eq(a, b) || a.same_rows(b)))
     }
 }
 
@@ -1378,18 +1408,84 @@ fn key_held(tbl: &Table, eq: &[(&str, &Value)]) -> Option<Key> {
 impl MemoryStore {
     /// `Ark.Store.empty`.
     pub fn empty(schema: Schema) -> MemoryStore {
-        let tables = schema.tables().map(|t| (t.name.clone(), TableState::new(t))).collect();
-        MemoryStore { schema, tables }
+        let tables = schema.tables().map(|t| (t.name.clone(), Arc::new(TableState::new(t)))).collect();
+        MemoryStore {
+            schema,
+            tables,
+            written: BTreeSet::new(),
+        }
     }
 
     // A table's state, to read.
     fn table(&self, t: &str) -> Option<&TableState> {
-        self.tables.get(t)
+        self.tables.get(t).map(|st| &**st)
     }
 
-    // A table's state, to write.
+    // A table's state, to write: copied first when another store shares it
+    // (D7.3), which is the one place a table is copied, counted under test.
     fn table_mut(&mut self, t: &str) -> Option<&mut TableState> {
-        self.tables.get_mut(t)
+        let st = self.tables.get_mut(t)?;
+        if !self.written.contains(t) {
+            self.written.insert(t.into());
+        }
+        #[cfg(test)]
+        if Arc::strong_count(st) > 1 {
+            COPIES.with(|n| n.set(n.get() + 1));
+        }
+        Some(Arc::make_mut(st))
+    }
+
+    /// D7.3 Let go of the tables `which` names: this store holds nothing of
+    /// them until [`MemoryStore::retake`] gives them back, so that a store
+    /// it shared them with writes them in place rather than copying them.
+    /// Only a replica's view does this, and only between its two halves of
+    /// a move of the confirmed store; read in between, a released table has
+    /// no rows.
+    pub(crate) fn release<'a>(&mut self, which: impl IntoIterator<Item = &'a str>) {
+        for t in which {
+            self.tables.remove(t);
+        }
+    }
+
+    /// D7.3 Take the tables `which` names as `from` holds them — its own
+    /// `Arc`s, shared — after [`MemoryStore::release`]. The caller vouches
+    /// that this store's rows of them are `from`'s; a debug build checks
+    /// any it still held.
+    pub(crate) fn retake<'a>(&mut self, from: &MemoryStore, which: impl IntoIterator<Item = &'a str>) {
+        for t in which {
+            let Some(theirs) = from.tables.get(t) else { continue };
+            match self.tables.get_mut(t) {
+                Some(mine) => {
+                    debug_assert!(
+                        Arc::ptr_eq(mine, theirs) || mine.same_rows(theirs),
+                        "table {t}: taken back from a store whose rows differ"
+                    );
+                    *mine = theirs.clone();
+                }
+                None => {
+                    self.tables.insert(t.into(), theirs.clone());
+                }
+            }
+        }
+    }
+
+    /// D7.3 The tables this store has written — through any write, which
+    /// all reach a table by one path — since it was made or cloned: a
+    /// clone has written nothing yet. What a replica's view has written
+    /// since its last replay is what it holds its own copy of
+    /// ([`crate::peer::Replica::written`]); a table it has not written is
+    /// the confirmed store's.
+    pub fn written(&self) -> &BTreeSet<TableName> {
+        &self.written
+    }
+
+    /// D7.3 Whether this store and `other` hold table `t` as one `Arc`.
+    pub(crate) fn shares(&self, other: &MemoryStore, t: &str) -> bool {
+        match (self.tables.get(t), other.tables.get(t)) {
+            (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+            (None, None) => true,
+            _ => false,
+        }
     }
 
     /// D4 The ordinals of the rows a text index says may hold the needles,

@@ -21,11 +21,15 @@
 //! file's "the closure is held".
 //!
 //! The stores here are [`MemoryStore`]s, as the spec's are. The optimistic
-//! view is copied from the confirmed store once, when the replica is
-//! opened; after that it moves only by changes — its own intents' going on,
-//! a rebase's undoing them, what landed, and their going on again — and
-//! reports every one of them, so that a view of it is never told to start
-//! over by a rebase (R2).
+//! view starts as a clone of the confirmed store when the replica is
+//! opened, which shares every table (`docs/plan-db.md` D7.3); after that it
+//! moves only by changes — its own intents' going on, a rebase's undoing
+//! them, what landed, and their going on again — and reports every one of
+//! them, so that a view of it is never told to start over by a rebase
+//! (R2). A table the view has not written is the confirmed store's own
+//! `Arc`, moved with it by the one wrapper every move of the confirmed
+//! store goes through (`move_confirmed`); a table it has written is its own
+//! copy, made by its first write and kept until the next replay.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -35,7 +39,7 @@ use crate::hash::{state_hash, Closure, FnHash};
 use crate::log::{Entry, Facts, Log, Page, Seq};
 use crate::schema::Schema;
 use crate::store::{Change, MemoryStore, Overlay, Refusal, Store};
-use crate::value::{hex, Id};
+use crate::value::{hex, Id, TableName};
 
 // ---------------------------------------------------------------------
 // A replica
@@ -72,7 +76,10 @@ pub struct Replica {
     /// an intent opened from disk is run once at open, which records it.
     pub recorded: BTreeMap<Id, Facts>,
     /// The optimistic store: `confirmed` with `pending` replayed. Never
-    /// durable; copied whole at open and moved by changes after that.
+    /// durable. A clone of `confirmed` at open and at every replay, sharing
+    /// its tables, and moved by changes after that: a table it writes is
+    /// copied once and kept, and every other table is `confirmed`'s own
+    /// (`docs/plan-db.md` D7.3, [`Replica::written`]).
     pub view: MemoryStore,
     /// Confirmed entries received and not yet applied.
     pub inbox: BTreeMap<Seq, Inbox>,
@@ -405,7 +412,7 @@ impl Replica {
         if n <= self.cursor {
             let undo: Vec<Id> = self.pending[at..].iter().map(|e| e.id).collect();
             self.pending.remove(at);
-            self.rebase(&undo, vec![], at);
+            self.rebase(&undo, vec![], at, &[]);
             return;
         }
         let e = self.pending[at].clone();
@@ -438,7 +445,7 @@ impl Replica {
                 e.session = who.session.clone();
             }
         }
-        self.rebase(&undo, vec![], from);
+        self.rebase(&undo, vec![], from, &[]);
     }
 
     /// §11.5 A verdict against this peer's own intent: it is dropped, the
@@ -460,7 +467,7 @@ impl Replica {
         self.rejections.push((*id, why));
         let undo: Vec<Id> = self.pending[at..].iter().map(|e| e.id).collect();
         self.pending.remove(at);
-        self.rebase(&undo, vec![], at);
+        self.rebase(&undo, vec![], at, &[]);
     }
 
     /// Alone → server (`docs/plan-alone.md` §1): the local history since
@@ -500,16 +507,22 @@ impl Replica {
                 }
             }
         }
-        for facts in local.into_iter().rev() {
-            for c in facts.into_iter().rev() {
-                let back = invert(c);
-                self.confirmed.apply_change(&back);
-                if whole {
-                    self.view.apply_change(&back);
+        // The confirmed store moves backwards, through the one wrapper: a
+        // table the view shares is the confirmed store's again after, and
+        // takes nothing twice; one the view holds a copy of takes the same
+        // step back (D7.3).
+        self.move_confirmed(|r, shared| {
+            for facts in local.into_iter().rev() {
+                for c in facts.into_iter().rev() {
+                    let back = invert(c);
+                    r.confirmed.apply_change(&back);
+                    if whole && !shared.iter().any(|t| t == back.table()) {
+                        r.view.apply_change(&back);
+                    }
+                    told.push(back);
                 }
-                told.push(back);
             }
-        }
+        });
         self.cursor = fork;
         self.log_id = log_id;
         self.inbox.clear();
@@ -559,6 +572,11 @@ impl Replica {
     /// the inbox moves. Settling with nothing new placed does nothing.
     pub fn settle(&mut self) {
         self.advance();
+        debug_assert!(
+            self.shares_exactly_unwritten(),
+            "the view shares a table it has written, or holds its own copy of one it has not, at sequence {} (docs/plan-db.md D7.3)",
+            self.cursor
+        );
     }
 
     /// What a view is told, and the slate wiped.
@@ -610,6 +628,66 @@ impl Replica {
         // applied them: what a rebase undoes, whichever of them this
         // advance confirms first.
         let order: Vec<Id> = self.pending.iter().map(|e| e.id).collect();
+        // Every entry applied moves the confirmed store, so the loop runs
+        // inside the wrapper that keeps the view's sharing (D7.3); the
+        // view's own move follows it.
+        let ((acc, moved, others), shared) = self.move_confirmed(|r, _| r.confirm_inbox());
+        if !moved {
+            return;
+        }
+        if order.is_empty() {
+            // Nothing was pending, so the view was the confirmed store: it
+            // let go of every table and took them back moved, and a view of
+            // it is told the same changes. (A table a record still names —
+            // `pending` cut short from outside — kept its own copy, which
+            // moves by them as it always did.)
+            self.land(&acc, &shared);
+            self.changes.extend(acc);
+        } else if !others {
+            // Every entry applied was this peer's own next intent, in order,
+            // applied over the state the view applied it over: the view is
+            // `confirmed` with `pending` replayed, so the confirmed store
+            // before the first of them is the view's base, and before each
+            // next one it is the view after the one before. The confirmed
+            // store has just reached, by the same changes — the records, or
+            // facts equal to them — exactly the states the view passed
+            // through, and the view owes nothing. Copying `confirmed` over
+            // it here was a deep copy of every table and index per mutation
+            // for a peer alone, which confirms each intent at once (§11.9).
+            //
+            // What makes the equality hold, case by case: an own intent is
+            // applied by its record, which is its run over this same state,
+            // or by its closure where there is no record — it was authored
+            // here, so its function is held (bodies are only ever added);
+            // a disagreement with the authority's facts sets `diverged`, and
+            // an entry that is not the next one pending (another peer's, or
+            // one of ours out of order or rewritten) sets `others`, and
+            // both rebase; a refusal is `reject`, which rebases; a
+            // `sign_in` rewrites pending and rebases, so the view is of the
+            // rewritten entries, which are what is pushed and confirmed.
+            // Held, not assumed: a divergence between the optimistic path
+            // and the confirmed path is a bug every debug run names.
+            for id in &order[..order.len() - self.pending.len()] {
+                self.recorded.remove(id);
+            }
+            if self.pending.is_empty() {
+                debug_assert!(
+                    self.view == self.confirmed,
+                    "the view is not the confirmed store at sequence {}, after only this peer's own intents were confirmed",
+                    self.cursor
+                );
+            }
+        } else {
+            self.rebase(&order, acc, 0, &shared);
+        }
+    }
+
+    // The advance's first half: apply from the inbox in order for as long
+    // as the next entry can be applied, moving the confirmed store and
+    // nothing else. What it moved by, whether it moved, and whether
+    // anything other than this peer's own next intents, in order and
+    // agreeing with their records, landed.
+    fn confirm_inbox(&mut self) -> (Vec<Change>, bool, bool) {
         let mut acc: Vec<Change> = Vec::new();
         let mut moved = false;
         let mut others = false;
@@ -676,51 +754,7 @@ impl Replica {
             moved = true;
             others = others || !own_next || diverged;
         }
-        if !moved {
-            return;
-        }
-        if order.is_empty() {
-            // Nothing was pending, so the view was the confirmed store: it
-            // moves by the same changes.
-            self.view.apply_changes(&acc);
-            self.changes.extend(acc);
-        } else if !others {
-            // Every entry applied was this peer's own next intent, in order,
-            // applied over the state the view applied it over: the view is
-            // `confirmed` with `pending` replayed, so the confirmed store
-            // before the first of them is the view's base, and before each
-            // next one it is the view after the one before. The confirmed
-            // store has just reached, by the same changes — the records, or
-            // facts equal to them — exactly the states the view passed
-            // through, and the view owes nothing. Copying `confirmed` over
-            // it here was a deep copy of every table and index per mutation
-            // for a peer alone, which confirms each intent at once (§11.9).
-            //
-            // What makes the equality hold, case by case: an own intent is
-            // applied by its record, which is its run over this same state,
-            // or by its closure where there is no record — it was authored
-            // here, so its function is held (bodies are only ever added);
-            // a disagreement with the authority's facts sets `diverged`, and
-            // an entry that is not the next one pending (another peer's, or
-            // one of ours out of order or rewritten) sets `others`, and
-            // both rebase; a refusal is `reject`, which rebases; a
-            // `sign_in` rewrites pending and rebases, so the view is of the
-            // rewritten entries, which are what is pushed and confirmed.
-            // Held, not assumed: a divergence between the optimistic path
-            // and the confirmed path is a bug every debug run names.
-            for id in &order[..order.len() - self.pending.len()] {
-                self.recorded.remove(id);
-            }
-            if self.pending.is_empty() {
-                debug_assert!(
-                    self.view == self.confirmed,
-                    "the view is not the confirmed store at sequence {}, after only this peer's own intents were confirmed",
-                    self.cursor
-                );
-            }
-        } else {
-            self.rebase(&order, acc, 0);
-        }
+        (acc, moved, others)
     }
 
     // One entry against the confirmed store: by intent when the closure is
@@ -794,8 +828,9 @@ impl Replica {
         out
     }
 
-    // Rebuild the view whole: a copy of the confirmed store, then every
-    // pending intent in order, recorded. What opening does — the one
+    // Rebuild the view whole: a clone of the confirmed store — every table
+    // shared, nothing written (D7.3) — then every pending intent in order,
+    // recorded. What opening does — the one
     // wholesale replacement a replica makes of its own view — and the
     // fallback of a rebase that finds a record missing.
     fn replay(&mut self) {
@@ -824,7 +859,7 @@ impl Replica {
     // store made, in the order it made them — so `push_all`, which settles
     // each touched key once against the final store, costs the keys
     // touched, and nothing re-hydrates. No copy of the store is made.
-    fn rebase(&mut self, undo: &[Id], landed: Vec<Change>, from: usize) {
+    fn rebase(&mut self, undo: &[Id], landed: Vec<Change>, from: usize, shared: &[TableName]) {
         if undo.iter().any(|id| !self.recorded.contains_key(id)) {
             // Only when `pending` was changed from outside: the confirmed
             // store is right whatever happened, so a replay from it is too.
@@ -839,7 +874,7 @@ impl Replica {
                 told.push(back);
             }
         }
-        self.view.apply_changes(&landed);
+        self.land(&landed, shared);
         told.extend(landed);
         if from == 0 {
             debug_assert!(
@@ -850,6 +885,78 @@ impl Replica {
         }
         told.extend(self.run_pending(from));
         self.changes.extend(told);
+    }
+
+    // D7.3 The one way the confirmed store is moved after open: `f` writes
+    // it — given the tables the view has let go of — between the view
+    // releasing every table it shares with the confirmed store, which is
+    // every table it has not written since the last replay, and taking
+    // those tables back as the confirmed store's own `Arc`s. Released,
+    // they are held once, so `f`'s writes to them are in place; without
+    // the release the confirmed store's write would be the copy,
+    // `make_mut` on an `Arc` the view also holds, and a quiet client would
+    // copy `media` once per batch. A table the view has written it holds a
+    // copy of, which takes what landed as R2 says (`rebase`, `land`).
+    // Returns `f`'s answer and the tables taken back, which the view has
+    // already moved with the confirmed store and must not move again.
+    fn move_confirmed<T>(&mut self, f: impl FnOnce(&mut Replica, &[TableName]) -> T) -> (T, Vec<TableName>) {
+        let shared = self.unwritten();
+        debug_assert!(
+            shared.iter().all(|t| self.view.shares(&self.confirmed, t)),
+            "a table the view has not written is not the confirmed store's own (docs/plan-db.md D7.3)"
+        );
+        self.view.release(shared.iter().map(String::as_str));
+        let out = f(self, &shared);
+        self.view.retake(&self.confirmed, shared.iter().map(String::as_str));
+        (out, shared)
+    }
+
+    /// D7.3 The tables the view has written since the last replay (or
+    /// open): the design's `diverged`, named apart from
+    /// [`Replica::diverged`], which is sequences. Each is the view's own
+    /// copy until the next replay — not taken back when the intent that
+    /// wrote it is confirmed, because freeing a copy costs what making one
+    /// does, and a peer whose pending empties between mutations would pay
+    /// both on every mutation (`docs/plan-db.md` D7.3). Kept by the view's
+    /// own write path ([`MemoryStore::written`]), so no write to it can
+    /// go unrecorded.
+    pub fn written(&self) -> &BTreeSet<TableName> {
+        self.view.written()
+    }
+
+    // D7.3 The tables of the schema the view has not written since the
+    // last replay: equal to the confirmed store's, and held as its `Arc`s.
+    fn unwritten(&self) -> Vec<TableName> {
+        let written = self.view.written();
+        self.schema
+            .tables()
+            .filter(|t| !written.contains(&t.name))
+            .map(|t| t.name.clone())
+            .collect()
+    }
+
+    // What landed on the confirmed store, applied to the view's own copies:
+    // a change to a table the view shares with the confirmed store (one of
+    // `shared`, taken back by `move_confirmed`) is already there.
+    fn land(&mut self, landed: &[Change], shared: &[TableName]) {
+        for c in landed {
+            if !shared.iter().any(|t| t == c.table()) {
+                self.view.apply_change(c);
+            }
+        }
+    }
+
+    /// D7.3 Whether the view holds as the confirmed store's own `Arc`
+    /// exactly the tables it has not written ([`Replica::written`]), and
+    /// a copy of its own of every one it has — what [`Replica::settle`]
+    /// asserts after every pump, beside the equality the replica's tests
+    /// assert, so that the sharing and the rows cannot drift apart
+    /// silently.
+    pub fn shares_exactly_unwritten(&self) -> bool {
+        let written = self.view.written();
+        self.schema
+            .tables()
+            .all(|t| self.view.shares(&self.confirmed, &t.name) != written.contains(&t.name))
     }
 
     // Run `pending[from..]` over the view in order, each through an overlay
@@ -1908,5 +2015,120 @@ mod tests {
             matches!(a.sequence_entry(&e), Sequenced::Appended(1, _)),
             "an old client's intent at its old hash is sequenced"
         );
+    }
+
+    /// `docs/plan-db.md` D7.3 Sequence `e` and hand it to `r` with its facts,
+    /// as a page brings it; the sequence.
+    fn land_on(a: &mut Authority, r: &mut Replica, e: &Entry) -> Seq {
+        let Sequenced::Appended(n, f) = a.sequence_entry(e) else {
+            panic!("sequenced")
+        };
+        r.receive_with(n, e.clone(), f);
+        n
+    }
+
+    /// D7.3 A quiet client — nothing pending — takes a hundred landed
+    /// batches, three entries each, and copies no table: the view lets go
+    /// of every table it shares before the confirmed store is written, so
+    /// the write is in place, and takes them back after. Counted by
+    /// `store::copies`, around the settle alone. Falsified by dropping the
+    /// release in `move_confirmed`: the first batch's write found its
+    /// table shared and copied it (and the view, holding its own `Arc`,
+    /// was then told to take back a table whose rows differ).
+    #[test]
+    fn a_quiet_client_copies_no_table_per_batch() {
+        let d = demo();
+        let mut a = d.authority();
+        let bob = Ctx::new("bob", "b");
+        let mut w = d.replica(true);
+        let mut r = d.replica(true);
+        let e = d.create(&mut w, &bob, 1, "Road");
+        land_on(&mut a, &mut r, &e);
+        r.settle();
+        for b in 0..100u32 {
+            for k in 0..3 {
+                let e = d.add(&mut w, &bob, 10 + b * 3 + k, 1, &format!("t{b}.{k}"));
+                land_on(&mut a, &mut r, &e);
+            }
+            let before = crate::store::copies();
+            r.settle();
+            assert_eq!(crate::store::copies() - before, 0, "batch {b}: tables copied");
+            assert!(r.written().is_empty() && r.shares_exactly_unwritten());
+        }
+        assert_eq!(r.cursor, 301);
+        assert_eq!(r.view, r.confirmed);
+        assert_eq!(r.confirmed, a.store);
+    }
+
+    /// D7.3 One pending intent over a large table copies it once — the
+    /// view's first write to a table it shares — and the view keeps that
+    /// copy: confirming the intent copies nothing, and the next intent
+    /// over the table, and its confirming, copy nothing more. Falsified by
+    /// re-sharing on confirm as the first draft of D7.3 did (the view
+    /// taking every table no record names back as the confirmed store's,
+    /// and forgetting it wrote them): the second intent copied the table
+    /// again, 1 where 0 was asserted.
+    #[test]
+    fn a_pending_intent_copies_its_table_once_and_keeps_it() {
+        let d = demo();
+        let mut a = d.authority();
+        let me = Ctx::new("me", "m");
+        let mut filled = d.replica(true);
+        let e = d.create(&mut filled, &me, 1, "Long");
+        land_on(&mut a, &mut filled, &e);
+        filled.settle();
+        for i in 0..500 {
+            let e = d.add(&mut filled, &me, 10 + i, 1, &format!("t{i}"));
+            land_on(&mut a, &mut filled, &e);
+            filled.settle();
+        }
+        let (cursor, st) = (filled.cursor, filled.confirmed.clone());
+        drop(filled);
+        let mut r = Replica::open(d.schema.clone(), d.bodies.clone(), st, cursor, vec![]);
+        r.hold(d.procs.clone());
+        assert!(r.written().is_empty() && r.shares_exactly_unwritten());
+        for (i, want) in [(0u32, 1usize), (1, 0), (2, 0)] {
+            let before = crate::store::copies();
+            let e = d.add(&mut r, &me, 2000 + i, 1, &format!("new{i}"));
+            assert_eq!(crate::store::copies() - before, want, "intent {i}: tables copied by authoring it");
+            assert_eq!(r.written().iter().map(String::as_str).collect::<Vec<_>>(), ["item"]);
+            land_on(&mut a, &mut r, &e);
+            let before = crate::store::copies();
+            r.settle();
+            assert_eq!(crate::store::copies() - before, 0, "intent {i}: tables copied by confirming it");
+            assert!(r.pending.is_empty() && r.shares_exactly_unwritten());
+            assert!(!r.view.shares(&r.confirmed, "item"), "the view keeps its copy");
+            assert!(r.view.shares(&r.confirmed, "playlist"), "and shares what it never wrote");
+            assert_eq!(r.view, r.confirmed);
+        }
+        assert_eq!(r.confirmed, a.store);
+    }
+
+    /// D7.3 A replay — what an open with pending intents does — starts the
+    /// view as the confirmed store's tables, shared, and runs ten intents
+    /// over one table: the first write copies it and the other nine write
+    /// the copy, so one table copied, not ten. Falsified by making every
+    /// write copy its table (`Arc::new((**t).clone())` in place of
+    /// `make_mut`, counted each time): ten.
+    #[test]
+    fn a_replay_copies_each_table_it_writes_once() {
+        let d = demo();
+        let mut a = d.authority();
+        let me = Ctx::new("me", "m");
+        let mut r = d.replica(true);
+        let e = d.create(&mut r, &me, 1, "Road");
+        land_on(&mut a, &mut r, &e);
+        r.settle();
+        for i in 0..10 {
+            d.add(&mut r, &me, 10 + i, 1, &format!("t{i}"));
+        }
+        assert_eq!(r.pending.len(), 10);
+        let (st, pending) = (r.confirmed.clone(), r.pending.clone());
+        let before = crate::store::copies();
+        let opened = Replica::open(d.schema.clone(), d.bodies.clone(), st, r.cursor, pending);
+        assert_eq!(crate::store::copies() - before, 1, "tables copied by a replay of ten intents over one");
+        assert_eq!(opened.pending.len(), 10);
+        assert!(same_rows(&opened.view, &r.view));
+        assert!(opened.shares_exactly_unwritten());
     }
 }
