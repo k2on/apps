@@ -27,6 +27,15 @@ mod support {
     pub mod proxy;
 }
 
+// `arkc backup`, `restore` and `verify-log`, as the binary runs them
+// (`docs/plan-db.md` D6): the same file, so the scenario below drives the
+// code an operator runs against a real server's directory. Formatted as
+// the crate it belongs to formats it (`rust/rustfmt.toml`), not as this one.
+#[allow(dead_code)]
+#[rustfmt::skip]
+#[path = "../../../rust/ark/src/bin/ops.rs"]
+mod ops;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
 
@@ -1791,4 +1800,177 @@ fn two_thousand_local_intents_join_timed() {
         t.elapsed(),
     );
     assert_eq!(done.head, 2_000);
+}
+
+/// **D6. A backup taken while the server appends restores to its moment.**
+/// Three peers converge on a song and nine playlists; then, while they push
+/// round after round, another thread takes a backup of the running
+/// server's data directory with `arkc backup`'s code the moment the log on
+/// disk has moved, and the peers push one more round once it has. The copy
+/// is checked with `verify-log`: its head is past what was converged before
+/// and short of what was converged after, and its state hash is the full
+/// log's at that head — it is the log at a moment, not a mixture.
+///
+/// The server is stopped, the backup restored into a new directory and the
+/// server started on it; the three are away, and a fourth device, `d`,
+/// sequences more on the restored log than the three ever confirmed, so
+/// that when they come back their cursors are *below* its head — a place
+/// in a history this log does not hold. `restore` wrote the log unnamed and
+/// the server named it afresh, so every `Hello` names another log and is
+/// answered with the snapshot (§12.4): the fleet converges on the restored
+/// log, the entries sequenced after the backup's journal length are in no
+/// replica and in no log, and `/healthz` asked for JSON says the head, the
+/// new name and each session's place.
+///
+/// Falsified by restoring with the name kept (`ops::restore(.., true)`):
+/// the three are paged `d`'s entries on top of the old history's and never
+/// converge — their hashes are not the log's.
+#[test]
+fn a_backup_taken_mid_stream_restores_to_its_moment() {
+    let mut f = Fleet::new("backup");
+    let mut a = f.peer("a", Some("alice"));
+    let mut b = f.peer("b", Some("alice"));
+    let mut c = f.peer("c", Some("bob"));
+    a.author("add_song", song("before the backup"));
+    burst(&mut [&mut a, &mut b, &mut c], 0, 3);
+    let before = f.converged(&mut [&mut a, &mut b, &mut c]);
+
+    let (data, out) = (f.server.data.clone(), f.root.path().join("backup"));
+    let schema = domain().module().schema.clone();
+    let at = before.head;
+    let taker = std::thread::spawn(move || {
+        let moved = eventually(PATIENCE, || {
+            ark_server::persist::load(&data, &schema)
+                .ok()
+                .flatten()
+                .is_some_and(|l| l.head_seq() > at)
+        });
+        assert!(moved, "the log never moved past {at}");
+        let t = Instant::now();
+        let taken = ops::backup(&data, &out).unwrap();
+        (taken, t.elapsed())
+    });
+    let mut round = 1;
+    while !taker.is_finished() {
+        burst(&mut [&mut a, &mut b, &mut c], round, 2);
+        round += 1;
+    }
+    let (taken, took) = taker.join().unwrap();
+    measured("a backup of a server being pushed to", took);
+    burst(&mut [&mut a, &mut b, &mut c], round, 2);
+    let after = f.converged(&mut [&mut a, &mut b, &mut c]);
+    assert!(
+        before.head < taken.head && taken.head < after.head,
+        "the backup is mid-stream: {} < {} < {}",
+        before.head,
+        taken.head,
+        after.head
+    );
+    let backup = f.root.path().join("backup");
+    let v = ops::verify_log(&backup, Some(domain().module())).unwrap();
+    let want = ark::hash::state_hash(&after.log.state_at(taken.head).unwrap());
+    assert_eq!((v.head, v.hash.as_ref()), (taken.head, Some(&want)));
+    assert_eq!(v.log_id, after.log.id());
+    assert_eq!(v.torn, 0);
+
+    f.server.stop();
+    for p in [&mut a, &mut b, &mut c] {
+        p.quit();
+    }
+    let restored = f.root.path().join("restored");
+    let r = ops::restore(&backup, &restored, false).unwrap();
+    assert_eq!(r.head, taken.head);
+    f.server.data = restored;
+    let t = Instant::now();
+    f.server.start();
+    let gone: Vec<Id> = after
+        .entries
+        .iter()
+        .filter(|(n, _)| *n > taken.head)
+        .map(|(_, e)| e.id)
+        .collect();
+    f.lost(gone.iter().copied());
+
+    let mut d = f.peer("d", Some("alice"));
+    let more = (after.head - taken.head + 3) as usize;
+    burst(&mut [&mut d], 100, more);
+    let head = taken.head + more as i64;
+    assert!(
+        eventually(PATIENCE, || {
+            let st = d.status();
+            st.pending == 0 && st.cursor == head
+        }),
+        "d's are on the restored log: {:?}",
+        d.status()
+    );
+    for p in [&mut a, &mut b, &mut c] {
+        p.start();
+    }
+    let again = f.converged(&mut [&mut a, &mut b, &mut c, &mut d]);
+    measured("a restored server: restart to converged", t.elapsed());
+    assert_eq!(
+        again.head, head,
+        "the backup's entries and d's, nothing after the backup"
+    );
+    assert_ne!(
+        again.log.id(),
+        after.log.id(),
+        "the restored log has a name of its own"
+    );
+    for id in &gone {
+        assert_eq!(
+            again.log.seq_of(id),
+            None,
+            "{} was after the backup",
+            ark::value::hex(id)
+        );
+    }
+    for (n, (e, _)) in &before.log.entries {
+        assert_eq!(
+            again.log.seq_of(&e.id),
+            Some(*n),
+            "what was before the backup is where it was"
+        );
+    }
+
+    // `/healthz`, asked for JSON (D6): the head, the log's new name, and
+    // every session with its place.
+    let body = ureq::get(&format!("{}/healthz", f.server.url()))
+        .set("Accept", "application/json")
+        .call()
+        .unwrap()
+        .into_string()
+        .unwrap();
+    let h = ark::json::decode(&body).unwrap_or_else(|e| panic!("{body}: {e:?}"));
+    let field = |k: &str| match &h {
+        Value::Struct(m) => m.get(k).cloned().unwrap_or(Value::Null),
+        _ => panic!("{body}"),
+    };
+    assert_eq!(field("head"), Value::int(head));
+    let named = again.log.id().map(|i| Value::text(ark::value::hex(&i)));
+    assert_eq!(Some(field("log")), named);
+    let Value::List(sessions) = field("sessions") else {
+        panic!("{body}")
+    };
+    let alice = sessions
+        .iter()
+        .find(|s| matches!(s, Value::Struct(m) if m.get("user") == Some(&Value::text("alice"))))
+        .unwrap_or_else(|| panic!("no alice: {body}"));
+    let Value::Struct(alice) = alice else {
+        unreachable!()
+    };
+    // Recorded where a page started, at the lowest of the session's open
+    // connections (`ark_server::retain`): at or below the head.
+    assert!(
+        matches!(alice.get("cursor"), Some(Value::Int(n)) if (0..=head).contains(n)),
+        "{body}"
+    );
+    assert!(
+        matches!(alice.get("heard_ms"), Some(Value::Int(n)) if *n > 0),
+        "{body}"
+    );
+    assert!(
+        matches!(alice.get("open"), Some(Value::Int(n)) if *n >= 1),
+        "{body}"
+    );
 }

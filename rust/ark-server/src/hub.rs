@@ -142,6 +142,27 @@ pub struct Health {
     /// (`crate::modules`), and the one it runs now.
     pub modules: Vec<Vec<u8>>,
     pub module: Option<Vec<u8>>,
+    /// The log's identity (`ark::log`, Round 4): what a peer's `Hello`
+    /// names, and what a restore draws afresh (`arkc restore`).
+    pub log_id: Option<ark::value::Id>,
+    /// Every session the hub has heard from, as `cursors.cbor` holds it,
+    /// with how many replica connections it has open now
+    /// (`docs/plan-db.md` D6).
+    pub sessions: Vec<SessionHealth>,
+}
+
+/// One session in `/healthz`: who, where in the log, when last heard, and
+/// how many connections it has open.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionHealth {
+    pub user: String,
+    pub session: String,
+    /// Its place in the log as last recorded ([`crate::retain`]).
+    pub cursor: Seq,
+    /// When it was last heard, in milliseconds since the Unix epoch.
+    pub heard_ms: i64,
+    /// Replica connections identified as it, open now.
+    pub open: usize,
 }
 
 const KEPT: &str = "live.cbor";
@@ -256,6 +277,23 @@ impl Hub {
             rooms: self.server.rooms.open.iter().map(|(r, (_, ps))| (r.clone(), ps.len())).collect(),
             modules: self.server.authority.modules.keys().cloned().collect(),
             module: self.server.module.clone(),
+            log_id: self.server.authority.log.id(),
+            sessions: self
+                .cursors
+                .iter()
+                .map(|((user, session), h)| SessionHealth {
+                    user: user.clone(),
+                    session: session.clone(),
+                    cursor: h.cursor,
+                    heard_ms: h.at_ms,
+                    open: self
+                        .sinks
+                        .iter()
+                        .filter(|(_, s)| !matches!(s, Sink::Standing(_)))
+                        .filter(|(c, _)| self.server.identity(**c).is_some_and(|w| &w.user == user && &w.session == session))
+                        .count(),
+                })
+                .collect(),
         }
     }
 
