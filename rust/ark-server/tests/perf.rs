@@ -12,10 +12,57 @@
 //! Ignored by default; run with
 //! `cargo test -p ark-server --release --test perf -- --ignored --nocapture --test-threads=1`.
 
+use std::alloc::{GlobalAlloc, Layout, System};
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::{Duration, Instant};
 
 use ark_client::ark::store::Store;
 use ark_client::{args, demo, Args, Options, Peer, Timing, Value};
+
+// Live bytes, counted (`docs/plan-db.md` D7.1) ------------------------------
+//
+// The allocator `rust/ark/tests/allocations.rs` counts allocations with,
+// counting *bytes* instead, and both ways: what is allocated and not yet
+// freed is what the program holds, which `/proc`'s resident figure is not —
+// glibc keeps what was freed in its arenas, so resident carries every
+// high-water mark for the life of the process. Process-wide rather than
+// per thread, because a store built on one thread is dropped on another in
+// a hub; the measurements that read it run alone in a process of their own
+// (`perf_d_bytes_child`, `perf_d_open_child`), so nothing else is in the
+// count. A relaxed add per allocation is all the other tests here pay.
+
+struct Live;
+
+static LIVE: AtomicI64 = AtomicI64::new(0);
+
+unsafe impl GlobalAlloc for Live {
+    unsafe fn alloc(&self, l: Layout) -> *mut u8 {
+        LIVE.fetch_add(l.size() as i64, Ordering::Relaxed);
+        System.alloc(l)
+    }
+    unsafe fn alloc_zeroed(&self, l: Layout) -> *mut u8 {
+        LIVE.fetch_add(l.size() as i64, Ordering::Relaxed);
+        System.alloc_zeroed(l)
+    }
+    unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
+        LIVE.fetch_sub(l.size() as i64, Ordering::Relaxed);
+        System.dealloc(p, l)
+    }
+    unsafe fn realloc(&self, p: *mut u8, l: Layout, n: usize) -> *mut u8 {
+        LIVE.fetch_add(n as i64 - l.size() as i64, Ordering::Relaxed);
+        System.realloc(p, l, n)
+    }
+}
+
+#[global_allocator]
+static GLOBAL: Live = Live;
+
+/// The bytes allocated and not yet freed, process-wide. What a request
+/// asked for, not what the allocator rounded it to: glibc's chunk header
+/// (eight bytes) and its rounding to sixteen are not in it.
+fn live_bytes() -> i64 {
+    LIVE.load(Ordering::Relaxed)
+}
 
 fn us(d: Duration) -> f64 {
     d.as_secs_f64() * 1e6
@@ -280,6 +327,11 @@ fn open_id(tag: u8, n: u64) -> [u8; 16] {
 /// A media row as `add_song` writes one: nine columns, the shape that
 /// dominates a library.
 fn open_media(i: u64) -> ark::store::Row {
+    open_media_pairs(i).into_iter().collect()
+}
+
+/// [`open_media`]'s columns, by name.
+fn open_media_pairs(i: u64) -> Vec<(String, Value)> {
     [
         ("id", Value::Id(open_id(1, i))),
         ("kind", Value::text("song")),
@@ -442,8 +494,8 @@ fn perf_d_open() {
         .unwrap_or_else(std::env::temp_dir);
     eprintln!("\n== (d) open time and resident memory (docs/plan-db.md D5), harken's schema, media rows");
     eprintln!(
-        "{:<8} {:>8} {:>9} {:>10} {:>9} {:>9}   split (ms)",
-        "what", "rows", "on disk", "open ms", "rss MB", "base MB"
+        "{:<8} {:>8} {:>9} {:>10} {:>9} {:>9} {:>9}   split (ms)",
+        "what", "rows", "on disk", "open ms", "rss MB", "base MB", "live MB"
     );
     for n in OPEN_SIZES {
         for kind in ["store", "client", "server", "alone"] {
@@ -464,22 +516,26 @@ fn perf_d_open() {
                 .lines()
                 .find_map(|l| l.split_once("OPEN ").map(|(_, m)| m))
                 .unwrap_or_else(|| panic!("{kind} {n}: no measurement:\n{text}\n{}", String::from_utf8_lossy(&out.stderr)));
-            let f: Vec<&str> = line.splitn(4, ' ').collect();
+            let f: Vec<&str> = line.splitn(5, ' ').collect();
             eprintln!(
-                "{kind:<8} {n:>8} {:>7.1}MB {:>10} {:>9} {:>9}   {}",
+                "{kind:<8} {n:>8} {:>7.1}MB {:>10} {:>9} {:>9} {:>9}   {}",
                 bytes as f64 / 1e6,
                 f[0],
                 f[1],
                 f[2],
-                f.get(3).unwrap_or(&"")
+                f[3],
+                f.get(4).unwrap_or(&"")
             );
         }
     }
 }
 
 /// One open, in a process of its own: what [`perf_d_open`] runs. Prints
-/// `OPEN <ms> <rss MB> <baseline MB> <split…>`. Does nothing unless
-/// `ARK_OPEN` says what to open.
+/// `OPEN <ms> <rss MB> <baseline MB> <live MB> <split…>` — the live
+/// figure is what the open holds, counted by the allocator, against which
+/// resident less the baseline is what the allocator kept besides
+/// (`docs/plan-db.md` D7.1). Does nothing unless `ARK_OPEN` says what to
+/// open.
 #[test]
 #[ignore]
 fn perf_d_open_child() {
@@ -496,6 +552,7 @@ fn perf_d_open_child() {
     let schema = d.module().schema.clone();
     let mb = |kb: u64| format!("{:.1}", kb as f64 / 1024.0);
     let base = vm_rss_kb();
+    let live0 = live_bytes();
     // The open, whole, as the program does it; then the resident memory
     // with what it holds still held.
     let t = Instant::now();
@@ -521,6 +578,7 @@ fn perf_d_open_child() {
     };
     let whole = t.elapsed();
     let rss = vm_rss_kb();
+    let live = live_bytes() - live0;
     if let Some((_, a)) = held.downcast_ref::<(ark_server::persist::LogFile, ark::peer::Authority)>() {
         assert_eq!(a.store.scan("media").len() as u64, n, "every row opened");
     } else if let Some(p) = held.downcast_ref::<Peer>() {
@@ -621,5 +679,150 @@ fn perf_d_open_child() {
             split.push_str(&format!(", the rest {:.0}", ms(whole.saturating_sub(accounted))));
         }
     }
-    println!("OPEN {:.0} {} {} {split}", ms(whole), mb(rss), mb(base));
+    println!("OPEN {:.0} {} {} {:.1} {split}", ms(whole), mb(rss), mb(base), live as f64 / 1048576.0);
+}
+
+/// D7.1 The schema `perf_d_bytes` builds a variant under: harken's, with
+/// its indexes, its references and its text indexes kept or taken out.
+/// A reference is an index here (`store.rs`, `secondaries`), so it goes
+/// with them.
+fn bytes_schema(d: &ark_client::Domain, secondaries: bool, texts: bool) -> ark::schema::Schema {
+    let mut schema = d.module().schema.clone();
+    for t in &mut schema.tables {
+        if !secondaries {
+            t.indexes.clear();
+            t.refs.clear();
+        }
+        if !texts {
+            t.text.clear();
+        }
+    }
+    schema
+}
+
+const BYTES_SIZES: [u64; 2] = [10_000, 100_000];
+
+/// `docs/plan-db.md` D7.1: what a media row costs, by component, in live
+/// bytes — what the allocator was asked for and has not had back — and
+/// beside each the resident figure `perf_d_open` reads. Built by
+/// subtraction, each variant in a process of its own
+/// ([`perf_d_bytes_child`]) so that one's freed memory is not another's
+/// resident:
+///
+/// - **rows**: the rows alone, laid out as the table's, in a `Vec<Row>`
+///   (sixteen bytes a row of that is the vector's slot);
+/// - **bare**: a store under harken's schema with every index, reference
+///   and text index taken out — the rows and the primary map;
+/// - **secondaries**: the declared indexes and the references back;
+/// - **text**: D4's text indexes back too — harken as it is.
+///
+/// Then one open of a `replica` record as `perf_d_open` makes it, a store
+/// and a client, each with its live bytes beside its resident memory: the
+/// question whether the decoded tree an open builds and frees is still
+/// resident after it.
+///
+/// `cargo test -p ark-server --release --test perf perf_d_bytes -- --ignored --nocapture --test-threads=1`.
+#[test]
+#[ignore]
+fn perf_d_bytes() {
+    let run = |test: &str, var: &str, val: String| -> String {
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([test, "--exact", "--ignored", "--nocapture", "--test-threads=1"])
+            .env(var, val)
+            .output()
+            .expect("the child runs");
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    eprintln!("\n== (d) bytes by component (docs/plan-db.md D7.1), harken's schema, media rows");
+    eprintln!(
+        "{:<12} {:>8} {:>10} {:>10} {:>12} {:>12} {:>12}",
+        "variant", "rows", "live MB", "rss MB", "live B/row", "rss B/row", "component"
+    );
+    for n in BYTES_SIZES {
+        let mut prev: Option<f64> = None;
+        for variant in ["rows", "bare", "secondaries", "text"] {
+            let text = run("perf_d_bytes_child", "ARK_BYTES", format!("{variant} {n}"));
+            let line = text
+                .lines()
+                .find_map(|l| l.split_once("BYTES ").map(|(_, m)| m))
+                .unwrap_or_else(|| panic!("{variant} {n}: no measurement:\n{text}"));
+            let f: Vec<f64> = line.split(' ').map(|x| x.parse().unwrap()).collect();
+            let (live, rss) = (f[0], f[1] * 1024.0);
+            let per = live / n as f64;
+            let what = match variant {
+                "rows" => "the rows",
+                "bare" => "primary map",
+                "secondaries" => "secondaries",
+                _ => "text indexes",
+            };
+            eprintln!(
+                "{variant:<12} {n:>8} {:>10.1} {:>10.1} {:>12.0} {:>12.0} {:>7.0} {what}",
+                live / 1048576.0,
+                rss / 1048576.0,
+                per,
+                rss / n as f64,
+                per - prev.unwrap_or(0.0)
+            );
+            prev = Some(per);
+        }
+    }
+    // The decoded tree: an open as `perf_d_open` makes it, live against
+    // resident.
+    let d = harken();
+    let root = std::env::var_os("ARK_PERF_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    eprintln!("\n{:<8} {:>8} {:>10} {:>10} {:>12} {:>12}", "open", "rows", "live MB", "rss MB", "live B/row", "rss B/row");
+    for n in BYTES_SIZES {
+        for kind in ["store", "client"] {
+            let dir = tempfile::Builder::new().prefix("ark-bytes-").tempdir_in(&root).unwrap();
+            write_client(dir.path(), &d, n);
+            let text = run("perf_d_open_child", "ARK_OPEN", format!("{kind} {n} {}", dir.path().display()));
+            let line = text
+                .lines()
+                .find_map(|l| l.split_once("OPEN ").map(|(_, m)| m))
+                .unwrap_or_else(|| panic!("{kind} {n}: no measurement:\n{text}"));
+            let f: Vec<&str> = line.splitn(5, ' ').collect();
+            let (rss, base, live): (f64, f64, f64) = (f[1].parse().unwrap(), f[2].parse().unwrap(), f[3].parse().unwrap());
+            eprintln!(
+                "{kind:<8} {n:>8} {live:>10.1} {:>10.1} {:>12.0} {:>12.0}",
+                rss - base,
+                live * 1048576.0 / n as f64,
+                (rss - base) * 1048576.0 / n as f64
+            );
+        }
+    }
+}
+
+/// One variant of [`perf_d_bytes`], in a process of its own. Prints
+/// `BYTES <live bytes> <rss KiB>`, both as moved by building it. Does
+/// nothing unless `ARK_BYTES` says what to build.
+#[test]
+#[ignore]
+fn perf_d_bytes_child() {
+    use ark::store::{Change, MemoryStore, Row};
+    let Ok(spec) = std::env::var("ARK_BYTES") else { return };
+    let (variant, n) = spec.split_once(' ').unwrap();
+    let n: u64 = n.parse().unwrap();
+    let d = harken();
+    let schema = match variant {
+        "rows" | "bare" => bytes_schema(&d, false, false),
+        "secondaries" => bytes_schema(&d, true, false),
+        _ => bytes_schema(&d, true, true),
+    };
+    let (rss0, live0) = (vm_rss_kb(), live_bytes());
+    let held: Box<dyn std::any::Any> = if variant == "rows" {
+        let tbl = schema.lookup_table("media").unwrap();
+        let rows: Vec<Row> = (0..n).map(|i| Row::of(tbl, open_media_pairs(i))).collect();
+        Box::new(rows)
+    } else {
+        let mut st = MemoryStore::empty(schema.clone());
+        for i in 0..n {
+            st.apply_change(&Change::Add("media".into(), open_media(i)));
+        }
+        Box::new(st)
+    };
+    let (rss, live) = (vm_rss_kb().saturating_sub(rss0), live_bytes() - live0);
+    println!("BYTES {live} {rss}");
+    drop(held);
 }
