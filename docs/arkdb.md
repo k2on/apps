@@ -802,7 +802,12 @@ a new device starts from, what a peer below the horizon restarts from, and
 what a schema rebuild replays forward from. Because every whole peer
 replays exactly, a snapshot is **verifiable**: any peer with the log can
 reproduce the hash, and an authority adopting a peer's log (§3.10) proves
-the claimed snapshot by replaying to it.
+the claimed snapshot by replaying to it. The hash is a per-table sum of row
+leaves (`spec/README.md` §8.1, `docs/plan-db.md` D3), so a store keeps it as
+it writes and checking a replica costs its tables, not its rows — which is
+what lets a linked client verify after every settle, though a sum is a check
+between replicas of one log and not a commitment to trust a stranger's
+snapshot on without replaying it.
 
 The **horizon** is the oldest sequence the authority still serves. Below it
 go entries, their facts, and every function version no retained entry names

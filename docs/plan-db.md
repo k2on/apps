@@ -170,6 +170,88 @@ Guard: the digest after N random puts and deletes equals the digest of a
 store built from the surviving rows (falsify by skipping the subtraction),
 and `Verify` after a settle costs no scan (the counting store).
 
+### Landed
+
+**The construction** (`hash.rs`'s module doc, `spec/README.md` §8.1):
+`leaf(t, row) = sha256(enc(Text t) ‖ enc(Struct row))`; `digest(t)` the sum
+of its rows' leaves mod 2^256, each a big-endian integer, zero for no rows;
+the state hash `sha256(enc(List [[Text t, Bytes digest(t)]]))` over the
+schema's tables in schema order. The table name is encoded on its own so it
+is delimited, and the row is its §4 struct so no runtime's layout reaches a
+leaf.
+
+**Where it is kept.** `Store::digest(table)` is the hook, `None` by default;
+`state_hash(&dyn Store)` reads it and sums a scan where a store keeps none.
+`MemoryStore::set` subtracts the old row's leaf and adds the new one's —
+nothing for an equal row — and drops a table's digest with its last row,
+asserting zero there in debug. `Overlay::digest` is its base's moved by its
+writes. `Log::hash_at` below the head takes the facts above the sequence
+back off the head's digests (an add's leaf out, a remove's in, an edit's
+new for its old), so a `Verify` that lands behind a busy head costs the
+facts since rather than a copy of the store — a change to `log.rs` this
+item did not name, made because the client now verifies after every
+settle and would otherwise land there and cost the server a replay.
+
+**The client.** `ark_client::Peer` says a `Verify` after every settle that
+moved its cursor, once its connection has sent it a page or a snapshot and
+not while paging; answers are matched to questions by a queue per
+connection. An answer to `verify()` reaches `agreed()` as before; an
+automatic one only when it disagrees, with a note on the pump. A verify the
+engine does not say (behind, D1) is not queued.
+
+**The cost of a `Verify` at 8,000 rows**, release build, this machine
+(`ark/tests/hash_digest.rs` `perf_verify_at_8000_rows`, mean of 200; and
+`ark/tests/perf.rs` (g)):
+
+| | before | after |
+|---|---|---|
+| the state hash of the store (the claim; the answer at the head) | 12,253 µs | 2.3 µs |
+| `Server::recv(Verify)` at the head, as served | 15,054 µs (`plan-perf.md`) | 0.5 – 4.4 µs |
+| the answer 100 entries below the head | 13,034 µs (replay) | 92 µs (facts taken back) |
+| summing a scan, for a store that keeps no digest | — | 9,056 µs |
+| what a write adds, per row in or out | — | 0.84 µs (one leaf) |
+
+**Vectors.** Seven files moved and only their hashes: `eval/add-to-playlist`
+and its falsify (`steps[].hash_after`), `hash/demo-state` and its falsify
+(`hash`), `rebase/three-peers` (`final_hash`), `rebase/fleet-seed-7` and its
+falsify (`expected_hash`). Every other directory is byte-identical; the
+protocol vectors carry placeholder hashes. New: `hash/leaves-and-digests`
+(every leaf, every digest, the pairs) and `hash/falsify/digest-by-xor`.
+
+**Guards**, each falsified once: the digest after 4,000 random writes
+equals a rebuilt store's (fails at 250 without the subtraction); a peer's
+claim and the authority's answer after a settle read no row through the
+counting store (2,000 rows each when `MemoryStore` keeps none); `hash_at`
+below the head equals the replay's at every sequence of a log of adds,
+removes and edits (fails at 0 with an edit swapped); the client's
+verify-after-settle reports `(11, false)` for a raw fact applied by hand
+and nothing over ten clean settles (no verify said at all without it). The
+fleet's replay scenario now replays the last push, since a `Verify` follows
+it; the fleet is green.
+
+**Not decided here, and the coordinator's:**
+
+- *A 256-bit sum is not a commitment.* Agreement between replicas of one
+  log is what it is for; against somebody *choosing* rows, Wagner's
+  generalised birthday attack finds a multiset with a given 256-bit sum far
+  below 2^128 work. A snapshot from an untrusted source is still verified by
+  replaying it, not by its hash. If a snapshot's hash should ever be trusted
+  alone, the digest wants a wider group (a lattice hash of a couple of
+  kilobytes, as LtHash does) — a second spec change, cheap now and dear
+  once other runtimes exist.
+- *`ir::SPEC_VERSION` did not move.* `spec/README.md` says to move it when a
+  conformant runtime would become non-conformant, which this does to any
+  v4 runtime's state hash; moving it also moves every module hash. Left at
+  4, and said here.
+- *A `Verify` below the horizon* is answered `ok: false`, as it was: the
+  frame has no "cannot say". A client verifying after every settle meets
+  that only when the server compacts past a cursor it is still paging up
+  from, which today it is not, but the answer would read as a divergence.
+
+**Not verified:** another runtime reproducing the construction from the
+prose alone — the runner recomputes it from the canonical encoding and
+SHA-256, which is the nearest this repository gets.
+
 ## D4. The algebra's remaining gaps
 
 - **Maintained `min` and `max`.** `Agg::Min(col)`/`Agg::Max(col)` beside

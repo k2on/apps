@@ -30,7 +30,7 @@ vectors of the day they do.
 | 6 | `eval.rs` | what a mutator means, which every runtime's native procedures are held to: `apply`, evaluation order (checks, middleware, body), checked arithmetic; the form validator (§6.7) and the default messages (§6.8) |
 | 7 | `ir/encode.rs`, `ir/normalize.rs` | the module as a value (its wire and storage form); alpha-normalisation (§7.1), a plan's binders with the function's |
 | 7.2 | `ir/decode.rs` | a module, a closure, a schema or a type from its value: the inverse of §7, strict about shape |
-| 8 | `hash.rs`, `sha256.rs` | the state hash; closures and the function hash, which covers the helpers a function calls and the middleware it runs |
+| 8 | `hash.rs`, `sha256.rs` | the state hash (§8.1, below): a sum of row leaves per table, so that a store keeps it as it writes; closures and the function hash, which covers the helpers a function calls and the middleware it runs |
 | 9 | `verify.rs` | what a module must satisfy before anything runs or hashes it, a plan's typing and scope included (`docs/plan-v4.md` §1.10) |
 | 10 | `log.rs` | an entry; the module's one log with the facts kept beside each entry; snapshots, the horizon, the state at any retained sequence from facts alone; the log's identity, on its snapshot |
 | 11 | `peer.rs` | the replica: pending intents, the optimistic view, the rebase — once per settle, after every frame a pump received was placed in the inbox, not once per frame (`receive` places, `settle` applies; `docs/plan-perf.md` R8) — work authored before anyone signed in made the signer's, applying by intent or by facts, divergence detection; the fork a replica remembers, the log and cursor it last shared with a server, and the local history since it taken back out of the confirmed store and re-queued as pending (`fork_back`, `docs/plan-alone.md` §1); the authority: sequencing, dedupe, verdicts, compaction, retirement of closures no retained entry names, adoption of a log; `local_commit`, the serverless peer, whose log keeps a head and ids and whose entries are kept on its storage (`journal.rs`) |
@@ -45,6 +45,31 @@ vectors of the day they do.
 
 §16 (the printable form) and §18 (`arkc gen`, `arkc roundtrip`) left
 with the Haskell and are not in version 4.
+
+### §8.1 The state hash, exactly
+
+What a `Verify` compares, what a snapshot carries and what the `hash/`,
+`eval/` and `rebase/` vectors pin. With `enc` the canonical encoding
+(§1.3) and `‖` concatenation:
+
+    leaf(t, row)  = sha256(enc(Text t) ‖ enc(Struct row))
+    digest(t)     = Σ leaf(t, row) over the rows of t, mod 2^256
+    state_hash(s) = sha256(enc(List [List [Text t, Bytes digest(t)]
+                                     for every table t of the schema,
+                                     in schema order]))
+
+`Struct row` is the row as §4 has it, every column by name, whatever
+order a runtime holds the values in. A leaf is read as a 256-bit
+big-endian unsigned integer and a digest is written back as 32
+big-endian bytes; a table with no rows has the digest of 32 zero bytes,
+and contributes its name and that. The sum is order-independent and
+subtraction undoes it, so a store moves a table's digest by one leaf in
+and one out per row written, and a `Verify` hashes as many pairs as
+there are tables rather than every row (`docs/plan-db.md` D3; the
+reasoning, and what a 256-bit sum does not defend against, is in
+`hash.rs`). Until D3 the state hash was SHA-256 over every table's rows
+in key order; the vectors carrying one were regenerated once, and only
+their hashes moved.
 
 ## The toolchain
 
@@ -100,7 +125,7 @@ by it.
 | `order/` | values and their sorted order | §1.2 |
 | `verify/` | a module and whether it verifies | §9 |
 | `eval/` | a module, a store, a mutator applied step by step — the changes, the rows, the hash; the input checks as verdicts; the form validator | §6, §8 |
-| `hash/` | a store and its hash, with the module it belongs to | §8 |
+| `hash/` | a store and its hash, with the module it belongs to; `leaves-and-digests` also every row's leaf and every table's digest, so the construction is checked step by step | §8 |
 | `rebase/` | `three-peers`: a scripted session of replicas and an authority, asserted step by step; `fleet-seed-N`: a seeded simulation's script and the hash every replica must reach after settle | §10, §11, §15 |
 | `module/` | a module as a value, its canonical bytes, its hash; decode of encode is the identity | §7 |
 | `protocol/` | every frame as a value and its bytes; decode of encode is the identity | §12 |
