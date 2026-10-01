@@ -296,12 +296,26 @@ impl S<'_> {
         if let Some(why) = self.sim.faults.first() {
             return Some(self.finding("faults", why.clone()));
         }
+        // Everything a client's view was told since the last look, as one:
+        // the store it is pushed against is the view as it stands now,
+        // after all of it — so a rebuild anywhere in it is a rebuild, and
+        // otherwise the changes are one batch.
         let told = std::mem::take(&mut self.sim.told);
         for (i, chs) in told {
-            for ch in chs {
-                if let Some(f) = self.push_views(i, ch) {
-                    return Some(f);
-                }
+            let ch = if chs.iter().any(|c| matches!(c, Changes::Rebuilt)) {
+                Changes::Rebuilt
+            } else {
+                Changes::Applied(
+                    chs.into_iter()
+                        .flat_map(|c| match c {
+                            Changes::Applied(cs) => cs,
+                            Changes::Rebuilt => vec![],
+                        })
+                        .collect(),
+                )
+            };
+            if let Some(f) = self.push_views(i, ch) {
+                return Some(f);
             }
         }
         None

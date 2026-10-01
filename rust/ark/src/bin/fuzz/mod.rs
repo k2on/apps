@@ -56,6 +56,11 @@ use churn::Rng;
 
 const USAGE: &str = "usage: arkc fuzz [--seed N] [--seconds S] [--cases K] [--out DIR] [--without OP,…] | --replay FILE";
 
+/// The generator's randomness from a seed, for a caller outside this module.
+pub fn churn_rng(seed: u64) -> Rng {
+    Rng::new(seed)
+}
+
 /// What a run did, printed at the end and every half minute.
 #[derive(Default)]
 pub struct Stats {
@@ -228,7 +233,8 @@ fn report(s: &Stats, took: Duration) {
     }
 }
 
-fn demo_module() -> (Module, Vec<(FnHash, Procedure)>) {
+/// The demo, built, and its procedures run native.
+pub fn demo_module() -> (Module, Vec<(FnHash, Procedure)>) {
     let m = ark::authoring::Module::new((demo::demo(),));
     (m.build().clone(), m.procedures())
 }
@@ -237,7 +243,7 @@ fn demo_module() -> (Module, Vec<(FnHash, Procedure)>) {
 // left.
 fn case(seed: u64, o: &Opts, stats: &mut Stats) {
     stats.cases += 1;
-    let mut rng = Rng::new(seed);
+    let mut rng = churn_rng(seed);
     let (m, natives) = if rng.chance(20) {
         stats.demo_cases += 1;
         demo_module()
