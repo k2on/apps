@@ -94,10 +94,12 @@ fn kind(why: &str) -> String {
         Some(rest) => rest.split_once(": ").map_or(first, |(_, r)| r),
         None => first,
     };
-    let words: Vec<&str> = first
+    let mut words: Vec<&str> = first
         .split_whitespace()
         .map(|w| if w.chars().any(|c| c.is_ascii_digit()) { "#" } else { w })
         .collect();
+    // A list of numbers is one `#`, however long it is.
+    words.dedup_by(|a, b| *a == "#" && *b == "#");
     words.join(" ").chars().take(140).collect()
 }
 

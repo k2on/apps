@@ -3,7 +3,9 @@
 //! found, the ops a vector is written in read back as themselves — and every
 //! finding still open, kept under `tests/fuzz-findings/` because fixing it
 //! would change what the spec says, still fails the way it was found to.
-//! A finding that starts to pass here has been decided: its vector moves to
+//! A plain bug whose fix is in another's hands waits here too, its vector
+//! as the fuzzer wrote it. A finding that starts to pass here has been
+//! decided or fixed: its vector moves, unchanged but for its name, to
 //! `spec/vectors/`, or is deleted with the decision that made it moot.
 
 #[allow(dead_code, clippy::duplicate_mod)]

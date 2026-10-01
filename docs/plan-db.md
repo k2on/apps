@@ -305,6 +305,153 @@ cannot rot. Run it here for an hour before reporting and say what it found
 and a fix (a fix in the engine is designed with the coordinator first if it
 changes meaning; a plain bug is fixed in place with its vector).
 
+### Landed
+
+**What runs.** `arkc fuzz [--seed N] [--seconds S] [--cases K] [--out
+DIR] [--without OP,…]` and `arkc fuzz --replay FILE`, in
+`rust/ark/src/bin/fuzz/` (a subcommand of `arkc`, not a binary of its
+own: the demo and the JSON dialect it shares with `arkc vectors` are
+already there). Case `k` of a run from seed `N` is the case of seed
+`N + k`, so `--seed N+k --cases 1` runs one alone. `packages.fuzz` is
+`nix run .#fuzz [SECONDS]`, ten minutes by default; `checks.fuzz-smoke`
+is seed 1, 25 cases, under a second.
+
+**The generator** (`gen.rs`) builds IR directly, not through the
+authoring vocabulary, because the vocabulary's types keep an author
+inside what it can say and a module may arrive from anywhere. A schema
+is two to four tables, each keyed by an id of its own, a text or an
+int, or two columns (a parent and a position); scalar columns, some
+nullable; references to earlier tables and, rarely, a table's own;
+unique and plain indexes. A module is up to two helpers, up to three
+middleware (a guard that refuses when a table is full, a provide that
+counts one, a provide over `ctx.user`), three to eight mutators — insert,
+upsert, update, delete with a cascade by hand, an append whose position
+is read in the body (the rebase-visible shape), a bulk update or delete
+over a select, a get-then-insert-or-update — with input checks,
+refinements, autos, guards and helper calls; and one to four queries: a
+filtered list with a projection, a tree on a reference (to three deep),
+a lookup up a reference, a group with `Len` and a `fold` sum and a
+having, an expression order under a limit. Everything is typed by
+construction; the verifier names a query's result type and the
+generator takes it. **Of 218,623 modules generated in the hour, 218,338
+verified (99.87%)**; all 285 misses were one complaint, a filter
+literal on an id the context does not type.
+
+**A session** (`session.rs`) is two to four clients and 30–150 ops
+drawn against what the clients hold — a mutation (42%) with arguments
+drawn mostly from the author's own view, a random delivery (33%), a
+partition, a heal, a settle, a restart from the journal, a restart over
+an emptied directory (`wipe`), a compaction to a random retained
+sequence, a late joiner (by facts or by replay, with closures or
+without, signed in or used by nobody), a sign-in, a client re-opened
+from what it made durable, a verify. One case in five is the demo, its
+natives held by the server and every even client. The `Op`s are
+`ark::sim`'s and the script is the vector: `Sim::run` is the one
+meaning of an op, and `rebase/` runs a `fleet-fuzz-*` file through
+`ark::sim::run_script`.
+
+**The checks**, after every op: every frame it put on the wire decoded
+from its bytes as itself; every maintained view of every query on every
+client pushed what its replica told it and held to a fresh hydrate, a
+fresh read and the splice; the changes a view was told reach the view;
+on the demo, every mutation run native and interpreted (`agrees`) over
+the author's view; a restart reads its journal back as the log it wrote;
+a re-open finds the durable store at the cursor equal to the confirmed
+one. After every session: settle, then every replica at the server's
+head and hash with nothing pending and no divergence, every view its
+confirmed store, the log replayed from its facts and from its intents
+to the same facts and state, and every query driven 25 batches under the
+churn generator over what the session left.
+
+**A finding** is shrunk — ops removed by halving chunks, then every
+function the script does not name — while `run_script` still fails the
+same way, deduplicated by its text with the numbers taken out, and
+written under `--out` in the suite's format with a line in `--out/README`
+(`spec/README.md` §15.1 says the forms).
+
+**The run.** Two processes for 3600 s each, from seeds 20261001 and
+900000000, against `rust/ark` as of `d551dd2` (the harness as of
+`f051abc`) with the one engine fix below applied — it is in `peer.rs`
+and waits on the coordinator, and without it a third of the sessions end
+in it and hide the rest:
+
+| | |
+|---|---|
+| cases | 272,874 (54,536 the demo) |
+| sessions | 542,888 |
+| ops | 49,090,055 — 20,391,614 mutations, 6,926,967 refused by the author's own view; 11,500,692 entries sequenced |
+| restarts (journal or wiped) | 1,214,091 |
+| compactions | 971,241 |
+| snapshots sent (below the horizon, or another log) | 1,839,931 |
+| re-opens / sign-ins | 1,212,833 / 94,788 |
+| frames round-tripped | 62,796,539 |
+| view pushes | 24,480,008 in sessions, 14,455,453 under churn |
+| native-against-interpreted mutations | 4,077,249 |
+
+Findings, every one read and its cause named:
+
+1. **Plain bug — an ack at or below the cursor leaves the intent pending
+   for ever** (`Replica::ack`). An intent is sequenced, its ack is lost,
+   the client comes back below the horizon and re-opens from the
+   snapshot — which holds the intent — then pushes it again; the
+   duplicate is acked at `n <= cursor`, `receive` drops anything at or
+   below the cursor, and the intent stays pending: pushed on every
+   reconnect, and applied twice in the view. 1,015 of 3,392 sessions on
+   `ac4424a` (two minutes from seed 32000000); none in the hour with the
+   fix. The fix drops the intent from pending and rebases with no
+   verdict, as `reject` does. Vector: 5 ops (an update of an absent row,
+   two deliveries, a compaction to the head) and one mutator,
+   `rust/ark/tests/fuzz-findings/fleet-fuzz-an-ack-at-or-below-the-cursor.json`,
+   which `tests/fuzz.rs` holds to failing until the fix lands — then it
+   moves, unchanged, to `spec/vectors/rebase/`, where `rebase_fleet`
+   runs it. Not committed: `peer.rs` is D1's, and the hunk went to the
+   coordinator.
+2. **Meaning — an `ack` names no log.** A client confirmed only by an ack
+   (the page carrying the log's name lost) never learns the log it is
+   at; after the server restarts over an emptied directory its `hello`
+   names none and is served as before from its cursor, so it holds a
+   state of the old log under the new one's sequence — a different hash
+   at the same head (3,856 sessions), a divergence the facts then heal
+   (19), or a fleet that never settles because a later entry refuses on
+   that state and a replica in `Whole` mode never asks for facts for an
+   entry its replay refuses (1,201). Every one needs `wipe`: with the
+   wipes taken out of each shrunk script it converges. Either the ack
+   carries the log, or a client does not confirm by ack until it knows
+   the log; the protocol has to say which. Vectors:
+   `rust/ark/tests/fuzz-findings/an-ack-names-no-log*.json`.
+3. **Meaning — a maintained sum and a checked `fold` disagree about
+   overflow** (`view.rs`, R9). `fold` adds in member order and refuses on
+   the first intermediate overflow; the maintained sum moves by `s - old
+   + new`. So a group whose total fits but whose fold passes through
+   `i64::MIN` answers when maintained and refuses when read fresh (246),
+   and an edit whose `s - old` overflows refuses when maintained where
+   the fresh fold answers (401). No order of maintenance can match a fold
+   that is order-dependent; the spec has to say what a sum's overflow is
+   judged on (the total, say, in wider arithmetic). Vectors:
+   `rust/ark/tests/fuzz-findings/a-maintained-sum-*.json`.
+
+Nothing else: no frame that did not come back as itself, no native
+disagreeing with the interpreter on the demo, no log that did not
+replay, no journal read back as another log, no view wrong but for the
+sums. `tests/fuzz.rs` holds the generator to nine in ten verifying, an
+op to its value, a restart and a re-open to the same fleet (each
+falsified), and every file under `tests/fuzz-findings/` to still
+failing — falsified by taking the wipes out of one.
+
+**Confirmed on the tree as it stands.** Ten minutes more on `ac4424a`
+(D1, D4, D5 and D6 landed) with the fix, from seed 31000000: 26,906
+cases, 53,574 sessions, 4,847,381 ops, 21,564 of 21,594 modules
+verified; the same two meaning findings and nothing else, every session
+one needing a wipe.
+
+**Not done, and not verified.** harken's natives are not run against the
+interpreter here: `arkc` cannot depend on harken, and a session over
+harken's module would have to live in `harken/domain/tests/`, which is
+not this item's (`agreement.rs` there holds them on fixed cases).
+`checks.fuzz-smoke` fails on the tree until finding 1 is fixed (it is
+seed 1's first case). `nix flake check` itself was not run here; the
+smoke command was, by hand.
+
 ## D3. A state hash that moves with the store
 
 `state_hash` is SHA-256 over the canonical encoding of every table's rows
