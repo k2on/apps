@@ -1,0 +1,4 @@
+{
+  "frame": {"hash":{"$bytes":"abababababababababababababababababababababababababababababababab"},"ok":false,"seq":{"$int":"4"},"t":"agree","unknown":true},
+  "bytes": "a56174656167726565626f6bf4637365710464686173685820abababababababababababababababababababababababababababababababab67756e6b6e6f776ef5"
+}

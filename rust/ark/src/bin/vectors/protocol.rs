@@ -202,6 +202,19 @@ pub fn protocol(out: &Out) {
                 seq: 4,
                 hash: vec![0xab; 32],
                 ok: true,
+                unknown: false,
+            },
+        ),
+        // A sequence the authority holds no state at — below its horizon,
+        // past its head — is answered "cannot say", not a disagreement
+        // (`docs/plan-db.md` D3).
+        (
+            "agree-unknown",
+            ServerMsg::Agree {
+                seq: 4,
+                hash: vec![0xab; 32],
+                ok: false,
+                unknown: true,
             },
         ),
         ("heard", ServerMsg::Heard { frame: vec![4, 5] }),

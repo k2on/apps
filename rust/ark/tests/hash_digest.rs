@@ -309,6 +309,45 @@ fn a_verify_after_a_settle_reads_no_row() {
     assert_eq!(exchange(&mut sv, &mut peer), [(2000, true)]);
 }
 
+/// A `Verify` at a sequence the authority holds no state at — below its
+/// horizon, past its head — is answered "cannot say" (`unknown`), not
+/// `ok: false`; one at a sequence it holds is answered as ever, with
+/// `unknown` absent from the frame. Falsified by answering a missing state
+/// as `(ok: false, unknown: false)`, as before: the answer below the
+/// horizon reads as a divergence.
+#[test]
+fn a_verify_below_the_horizon_is_answered_cannot_say() {
+    let (mut a, _) = sequenced(20);
+    assert!(a.compact(10));
+    let hash = state_hash(&a.store);
+    let mut sv = Server::open(trusting(), open_access(), Silent, a);
+    let hello = ClientMsg::Hello {
+        sub: ark::protocol::Subscription {
+            since: 20,
+            mode: Mode::Whole,
+            log_id: sv.authority.log.id(),
+        },
+        token: Some("alice".into()),
+        spec: ark::ir::SPEC_VERSION,
+    };
+    sv.recv(1, hello);
+    let _ = sv.take_outgoing();
+    let mut answer = |seq| {
+        sv.recv(1, ClientMsg::Verify { seq, hash: hash.clone() });
+        sv.take_outgoing()
+            .into_iter()
+            .find_map(|(_, m)| match m {
+                ServerMsg::Agree { ok, unknown, .. } => Some((ok, unknown)),
+                _ => None,
+            })
+            .expect("an answer")
+    };
+    assert_eq!(answer(20), (true, false), "at the head");
+    assert_eq!(answer(5), (false, true), "below the horizon: cannot say");
+    assert_eq!(answer(30), (false, true), "past the head: cannot say");
+    assert!(!answer(15).1, "above the horizon it can say");
+}
+
 /// `Log::hash_at` below the head, over a log with edits and removes as
 /// well as adds, against hashing the replay at every retained sequence:
 /// taking the facts above `n` back off the head's digests is `state_at(n)`.

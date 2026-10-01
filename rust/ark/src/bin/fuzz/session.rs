@@ -241,7 +241,7 @@ impl S<'_> {
         let compacted = self.script.iter().any(|o| matches!(o, Op::Compact(_) | Op::Wipe));
         if !compacted {
             for (i, c) in &self.sim.clients {
-                if let Some((n, _)) = c.agreed.iter().find(|(_, ok)| !ok) {
+                if let Some((n, _)) = c.agreed.iter().find(|(_, ok)| *ok == Some(false)) {
                     return Some(self.finding("verify", format!("client {i}: the authority disagreed at {n}")));
                 }
             }

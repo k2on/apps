@@ -571,6 +571,19 @@ it; the fleet is green.
   that only when the server compacts past a cursor it is still paging up
   from, which today it is not, but the answer would read as a divergence.
 
+**Decided after, and landed.** A stored snapshot names its construction
+(`hashing: 2` on the server's `log.ark-log`, a peer alone's `log` and the
+client's `replica` record; absent is 1): one of construction 1 is checked
+that way on open and held hashed the new way, never refused, and
+`persist::rehome` rewrites such a server snapshot once even with the same
+module — which is what lets D1's 5b, an alone directory of `v4-rows`
+upgraded in place, pass (its pre-plan-alone half, 5c, stays an ignored
+witness). A `Verify` below the horizon or past the head is answered
+`unknown: true` (absent otherwise, so every existing `protocol/` vector is
+byte-identical; `protocol/server-agree-unknown` is new), and the client's
+automatic verify reports nothing for it. The sum not being a commitment is
+a stated non-goal in `spec/README.md` §8.1, and `SPEC_VERSION` stays 4.
+
 **Not verified:** another runtime reproducing the construction from the
 prose alone — the runner recomputes it from the canonical encoding and
 SHA-256, which is the nearest this repository gets.

@@ -123,10 +123,17 @@ pub enum ServerMsg {
     Closures {
         items: Vec<(FnHash, Closure)>,
     },
+    /// The answer to a `Verify`. `unknown` is the authority saying it
+    /// cannot say — the sequence is below its horizon or past its head, so
+    /// it holds no state there to compare (`docs/plan-db.md` D3) — and `ok`
+    /// is then false and means nothing. On the wire `unknown` is present
+    /// only when true, so the two answers there were before it are the
+    /// bytes they were; `unknown: false` is refused as a second spelling.
     Agree {
         seq: Seq,
         hash: Vec<u8>,
         ok: bool,
+        unknown: bool,
     },
     Heard {
         frame: Vec<u8>,
@@ -386,10 +393,13 @@ impl ServerMsg {
                     ),
                 )],
             ),
-            ServerMsg::Agree { seq, hash, ok } => node(
-                "agree",
-                vec![("seq", int(*seq)), ("hash", Value::Bytes(hash.clone())), ("ok", Value::Bool(*ok))],
-            ),
+            ServerMsg::Agree { seq, hash, ok, unknown } => {
+                let mut fields = vec![("seq", int(*seq)), ("hash", Value::Bytes(hash.clone())), ("ok", Value::Bool(*ok))];
+                if *unknown {
+                    fields.push(("unknown", Value::Bool(true)));
+                }
+                node("agree", fields)
+            }
             ServerMsg::Heard { frame } => node("heard", vec![("hear", Value::Bytes(frame.clone()))]),
         }
     }
@@ -466,6 +476,11 @@ impl ServerMsg {
                 seq: int64(need(m, "seq")?)?,
                 hash: bytes(need(m, "hash")?)?,
                 ok: boolean(need(m, "ok")?)?,
+                unknown: match m.get("unknown") {
+                    None => false,
+                    Some(Value::Bool(true)) => true,
+                    Some(_) => return bad("an agree's unknown is true or absent"),
+                },
             },
             "heard" => ServerMsg::Heard {
                 frame: bytes(need(m, "hear")?)?,
@@ -594,7 +609,9 @@ pub struct Client {
     /// Oldest first.
     pub heard: Vec<Vec<u8>>,
     pub denied: Option<String>,
-    pub agreed: Vec<(Seq, bool)>,
+    /// Every answer to a `Verify`, oldest first: `Some(agreed)`, or `None`
+    /// where the authority could not say (`ServerMsg::Agree::unknown`).
+    pub agreed: Vec<(Seq, Option<bool>)>,
     /// A page arrived since the last [`Client::settle`]: the facts it
     /// leaves the replica waiting on are asked for there, once the inbox
     /// has been applied (R8).
@@ -870,7 +887,7 @@ impl Client {
                     self.replica.bodies.insert(h, c);
                 }
             }
-            ServerMsg::Agree { seq, ok, .. } => self.agreed.push((seq, ok)),
+            ServerMsg::Agree { seq, ok, unknown, .. } => self.agreed.push((seq, (!unknown).then_some(ok))),
         }
     }
 
@@ -1211,8 +1228,14 @@ impl<M: Machine> Server<M> {
             // At the head the authority's store is the answer, hashed as
             // it stands; only a sequence below it is replayed (R4).
             ClientMsg::Verify { seq, hash } => {
-                let ok = self.authority.log.hash_at(seq, &self.authority.store) == Some(hash.clone());
-                self.send(c, ServerMsg::Agree { seq, hash, ok });
+                // Below the horizon or past the head there is no state to
+                // compare, and saying `ok: false` there would be reported
+                // as a divergence: it is said to be unknown (D3).
+                let (ok, unknown) = match self.authority.log.hash_at(seq, &self.authority.store) {
+                    Some(h) => (h == hash, false),
+                    None => (false, true),
+                };
+                self.send(c, ServerMsg::Agree { seq, hash, ok, unknown });
             }
             ClientMsg::Say { frame } => {
                 let post = live::speak(&self.machine, &mut self.rooms, c, &frame);

@@ -306,6 +306,8 @@ struct Checks {
     served: bool,
     /// Every answer to a verify asked for, and every disagreement.
     agreed: Vec<(Seq, bool)>,
+    /// Every verify asked for that was answered "cannot say".
+    unknown: Vec<Seq>,
 }
 
 /// A peer alone's local history as the storage has it
@@ -817,8 +819,10 @@ impl Peer {
             return;
         };
         let (n, h) = self.client.replica.verify_at();
-        let ok = a.log.hash_at(n, &a.store) == Some(h);
-        self.checks.agreed.push((n, ok));
+        match a.log.hash_at(n, &a.store) {
+            Some(theirs) => self.checks.agreed.push((n, theirs == h)),
+            None => self.checks.unknown.push(n),
+        }
     }
 
     /// Every `(seq, agreed)` the authority has answered to a
@@ -827,6 +831,14 @@ impl Peer {
     /// divergence is reported here whoever asked.
     pub fn agreed(&self) -> &[(Seq, bool)] {
         &self.checks.agreed
+    }
+
+    /// Every sequence a [`Peer::verify`] was answered "cannot say" at: the
+    /// authority holds no state there — below its horizon, past its head —
+    /// to compare (`docs/plan-db.md` D3). An automatic verify answered so
+    /// reports nothing, here or in [`Peer::agreed`].
+    pub fn unknown(&self) -> &[Seq] {
+        &self.checks.unknown
     }
 
     /// A `Verify` said on this connection, and remembered as asked for or
@@ -863,13 +875,21 @@ impl Peer {
         self.client.settle();
         self.this_connection();
         let mut disagreed = vec![];
-        for (n, ok) in std::mem::take(&mut self.client.agreed) {
+        for (n, answer) in std::mem::take(&mut self.client.agreed) {
             let auto = self.checks.asked.pop_front().unwrap_or(false);
-            if !ok {
-                disagreed.push(n);
-            }
-            if !auto || !ok {
-                self.checks.agreed.push((n, ok));
+            match answer {
+                // Cannot say: nothing is known, so nothing is reported
+                // unless somebody asked.
+                None if !auto => self.checks.unknown.push(n),
+                None => {}
+                Some(ok) => {
+                    if !ok {
+                        disagreed.push(n);
+                    }
+                    if !auto || !ok {
+                        self.checks.agreed.push((n, ok));
+                    }
+                }
             }
         }
         let cursor = self.client.replica.cursor;
@@ -1783,6 +1803,59 @@ mod tests {
         exchange(&mut p, &mut sv);
         assert_eq!(said.get(), 11, "a verify per settle that moved the cursor, and no more");
         assert_eq!(p.agreed(), [(11, false)], "the divergence, reported unasked");
+    }
+
+    /// D3: an answer of "cannot say" — the authority holds no state at the
+    /// sequence, below its horizon or past its head — is not a divergence.
+    /// To the verify a linked peer makes on its own it reports nothing at
+    /// all; to one asked for it is an [`Peer::unknown`], not an
+    /// [`Peer::agreed`] of `false`. Falsified by reading "cannot say" as
+    /// `ok: false`: the automatic one is reported as `(1, false)`.
+    #[test]
+    fn a_verify_answered_cannot_say_reports_no_divergence() {
+        use ark::live::Silent;
+        use ark::protocol::{open_access, trusting, Server};
+        let d = demo::domain();
+        let mut a = ark::peer::Authority::new(d.module().schema.clone(), d.closures().clone());
+        a.hold(d.native_list());
+        let mut sv = Server::open(trusting(), open_access(), Silent, a);
+        // Every frame to the server but a `Verify`, which is answered here,
+        // as an authority past whose horizon the cursor has fallen would.
+        let exchange = |p: &mut Peer, sv: &mut Server<Silent>| loop {
+            let up = p.take_outgoing();
+            let mut cannot = vec![];
+            for m in up.iter().cloned() {
+                match m {
+                    ClientMsg::Verify { seq, hash } => cannot.push(ServerMsg::Agree {
+                        seq,
+                        hash,
+                        ok: false,
+                        unknown: true,
+                    }),
+                    m => sv.recv(1, m),
+                }
+            }
+            let down: Vec<ServerMsg> = sv.take_outgoing().into_iter().map(|(_, m)| m).chain(cannot).collect();
+            if up.is_empty() && down.is_empty() {
+                return;
+            }
+            for m in down {
+                p.recv(m);
+            }
+        };
+        let mut p = Peer::open_memory(d.clone(), Options::dev("alice")).unwrap();
+        p.connected();
+        p.mutate("create_playlist", args([("name", Value::text("p"))])).unwrap();
+        exchange(&mut p, &mut sv);
+        assert_eq!(p.cursor(), 1);
+        assert_eq!(
+            (p.agreed(), p.unknown()),
+            (&[][..], &[][..]),
+            "an automatic verify, unanswerable: nothing"
+        );
+        p.verify();
+        exchange(&mut p, &mut sv);
+        assert_eq!((p.agreed(), p.unknown()), (&[][..], &[1][..]), "one asked for: unknown");
     }
 
     /// Round 4: what `mutate` writes is decided by one comparison however
