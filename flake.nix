@@ -8,9 +8,27 @@
     nixpkgs.url = "https://flakehub.com/f/NixOS/nixpkgs/0.2411.*.tar.gz";
     rust-overlay.url = "https://flakehub.com/f/oxalica/rust-overlay/0.1.*.tar.gz";
     rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
+
+    # The pinned previous revisions of this repository (nix/versions.nix),
+    # one input each, so that the lockfile pins them and an old build is
+    # evaluated offline from it. Over git rather than `github:` for the
+    # reason above: the API is the part that may be unreachable. Each
+    # follows this flake's nixpkgs and toolchain overlay, so an old
+    # revision is the old code under today's compiler — what a matrix of
+    # the code, rather than of the compilers, wants.
+    harken-v4-journal = {
+      url = "git+https://github.com/k2on/apps?ref=main&rev=abbf861feed6468baea238babc7baa8e1750d3bc";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.rust-overlay.follows = "rust-overlay";
+    };
+    harken-v4-rows = {
+      url = "git+https://github.com/k2on/apps?ref=main&rev=71f7b0c40e81a226d980f52d20c259d73ee4e055";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.rust-overlay.follows = "rust-overlay";
+    };
   };
 
-  outputs = { self, nixpkgs, rust-overlay }:
+  outputs = { self, nixpkgs, rust-overlay, ... }@inputs:
     let
       lib = nixpkgs.lib;
       systems = [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ];
@@ -249,6 +267,23 @@
               cp app/build/outputs/apk/debug/app-debug.apk $out/harken-debug.apk
             '';
           });
+          # The pinned previous revisions (nix/versions.nix), each its
+          # `harken-server` package as that revision's own flake builds it:
+          # both binaries, the server and harken-peer. In order, which is
+          # the `n` of `HARKEN_OLD_<n>_*`.
+          system = pkgs.stdenv.hostPlatform.system;
+          versions = map (v:
+            let input = inputs."harken-${v.name}"; in
+            assert lib.assertMsg (input.rev == v.rev)
+              "flake.nix: the input harken-${v.name} is locked at ${input.rev}, and nix/versions.nix says ${v.rev}";
+            v // { server = input.packages.${system}.harken-server; })
+            (import ./nix/versions.nix);
+          # What the fleet reads to find them (harken/server/tests/support/fleet.rs).
+          oldEnv = lib.concatImapStrings (n: v: ''
+            export HARKEN_OLD_${toString n}_NAME=${v.name}
+            export HARKEN_OLD_${toString n}_SERVER=${v.server}/bin/harken-server
+            export HARKEN_OLD_${toString n}_PEER=${v.server}/bin/harken-peer
+          '') versions;
         in
         {
           packages = {
@@ -261,7 +296,8 @@
             default = ark;
             inherit harken-apk;
             harken-apk-deps = harken-apk.mitmCache.updateScript;
-          } // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          } // lib.listToAttrs (map (v: lib.nameValuePair "harken-server-${v.name}" v.server) versions)
+          // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
             # The two pieces an ARM Linux needed, on their own.
             inherit aapt2;
             android-sdk = androidSdk;

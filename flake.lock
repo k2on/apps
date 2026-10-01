@@ -1,5 +1,55 @@
 {
   "nodes": {
+    "harken-v4-journal": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "rust-overlay": [
+          "rust-overlay"
+        ]
+      },
+      "locked": {
+        "lastModified": 1790795584,
+        "narHash": "sha256-J2/Cuu9OAXb6eUm1lA9kJFAx6nOo1Nr2u5utfhH1tcs=",
+        "ref": "main",
+        "rev": "abbf861feed6468baea238babc7baa8e1750d3bc",
+        "revCount": 178,
+        "type": "git",
+        "url": "https://github.com/k2on/apps"
+      },
+      "original": {
+        "ref": "main",
+        "rev": "abbf861feed6468baea238babc7baa8e1750d3bc",
+        "type": "git",
+        "url": "https://github.com/k2on/apps"
+      }
+    },
+    "harken-v4-rows": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "rust-overlay": [
+          "rust-overlay"
+        ]
+      },
+      "locked": {
+        "lastModified": 1790859199,
+        "narHash": "sha256-/9wea3OiIFulbSPviGGifVTwGA5kgCwu0/PuqiYTylI=",
+        "ref": "main",
+        "rev": "71f7b0c40e81a226d980f52d20c259d73ee4e055",
+        "revCount": 214,
+        "type": "git",
+        "url": "https://github.com/k2on/apps"
+      },
+      "original": {
+        "ref": "main",
+        "rev": "71f7b0c40e81a226d980f52d20c259d73ee4e055",
+        "type": "git",
+        "url": "https://github.com/k2on/apps"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1751274312,
@@ -16,6 +66,8 @@
     },
     "root": {
       "inputs": {
+        "harken-v4-journal": "harken-v4-journal",
+        "harken-v4-rows": "harken-v4-rows",
         "nixpkgs": "nixpkgs",
         "rust-overlay": "rust-overlay"
       }
