@@ -1094,24 +1094,40 @@ writes `playlist` and `playlist_item`, and the copy is of `media`.
   nothing else, and every write after is in place. A pending
   `add_to_playlist` copies `playlist_item`; `media` is never copied until
   something pending writes it.
-- **The replica re-shares after every move of `confirmed`.** The view is
-  `confirmed` with `pending` replayed, so every table no pending record
-  (`recorded`, which lists each intent's facts) has written is *equal* to
-  confirmed's and may be confirmed's `Arc`. One rule, in one wrapper that
-  every write to `confirmed` goes through — a landed batch, an own intent
-  confirmed from its record, a snapshot adopted, the horizon's rewrite:
-  the view first *releases* the tables no record touched, confirmed is
-  written (in place, its `Arc`s now unique), and the view takes those
-  tables back as confirmed's `Arc`s, or as absent where confirmed has
-  none. Without the release, confirmed's write would be the copy —
-  `make_mut` on an `Arc` the view also holds — so a quiet client would
-  copy `media` once per batch; that is the trap, and the test for it is a
-  client receiving a hundred batches and copying no table.
-  The same rule frees the copy when it is done with: an own `add_song`
-  copies `media` into the view when it is authored, and the move of
-  confirmed that confirms it re-shares `media`, dropping the copy. A
-  rejected intent's tables are re-shared by the verdict's move the same
-  way.
+- **The view shares what it has not written, and keeps what it has.**
+  The view is `confirmed` with `pending` replayed, so every table no
+  pending write has touched since the last replay is *equal* to
+  confirmed's and is confirmed's `Arc`. When confirmed moves — a landed
+  batch, an own intent confirmed from its record, a snapshot adopted, the
+  horizon's rewrite — one wrapper around the write has the view *release*
+  the tables it shares first, writes confirmed in place (its `Arc`s now
+  unique), and has the view take them back as confirmed's `Arc`s, or as
+  absent where confirmed has none. Without the release, confirmed's write
+  would be the copy — `make_mut` on an `Arc` the view also holds — so a
+  quiet client would copy `media` once per batch; that is the trap, and
+  the test for it is a client receiving a hundred batches and copying no
+  table. A table the view has written is its own copy from then until the
+  next replay or open: it takes landed changes as R2 always applied them,
+  and it is **not** re-shared when the intent that wrote it is confirmed.
+
+  It was going to be — the first draft of this section re-shared every
+  table no record touched after every move of confirmed, so that an own
+  `add_song`'s copy of `media` went when it was confirmed — and that rule
+  was measured before it was committed: for a peer whose pending empties
+  between mutations, which is every peer alone and every connected client
+  at rest, each mutation copied its table (`make_mut` on a shared `Arc`),
+  the confirm freed the copy, and the next mutation copied it again.
+  `perf_a_mutate_alone` went from 23.6 µs flat to 2.8 ms at 8,000 items,
+  growing with the table, which is the property every round of
+  `docs/plan-perf.md` held and harken's "sub-10 ms, held under spamming"
+  rests on. Freeing is `O(table)` as copying is, so no cheaper point to
+  re-share at exists without a persistent map, and that is not this
+  round. The cost of keeping the copy is the status quo for that table
+  — a client held two of every table before — and nothing for the
+  tables pending never writes, which for harken's clients is `media`.
+  The replica keeps the set of tables the view has written since the
+  last replay (`diverged`), which is what the wrapper releases around and
+  what the assertion below is checked against.
 - **Tables pending has written take landed changes as before.** R2's
   rebase — undo the records newest first, apply what landed, run pending
   again — is unchanged for a table the view has diverged on; sharing only
@@ -1121,9 +1137,9 @@ writes `playlist` and `playlist_item`, and the copy is of `media`.
   that holds still and is cheap now. `store::copies()` counts *table*
   copies — a `make_mut` that found its `Arc` shared — and three tests pin
   it: a hundred landed batches on a quiet client copy nothing; one pending
-  intent over `media` copies it once and the copy is gone once confirmed;
-  a replay with ten pending intents over one table copies it once, not
-  ten times.
+  intent over `media` copies it once, and confirming it and then writing
+  it again copy nothing more; a replay with ten pending intents over one
+  table copies it once, not ten times.
 - **The server shares for free, and keeps two copies of `media` anyway.**
   The log's base store and the state at the head are one `clone` and a
   journal of facts, and the journal's `add_song`s write `media`, so the
@@ -1131,8 +1147,8 @@ writes `playlist` and `playlist_item`, and the copy is of `media`.
   disk for the rare peer below the horizon is the way to lose that copy;
   not this round.
 
-A debug assertion holds the invariant after every pump — for every table
-no record touched, the view's `Arc` is confirmed's — beside the equality
+A debug assertion holds the invariant after every pump — the view's `Arc`
+is confirmed's exactly for the tables not in `diverged` — beside the equality
 the replica tests already assert, so the two cannot drift silently.
 
 ### D7.4 The two or three largest components after that, and the table
@@ -1162,7 +1178,8 @@ the state hash, the snapshot and the vectors are what they were — and
 
 - `checks.rust` and `checks.fuzz-smoke` as they stand; `allocations.rs`'s
   bounds — a sort in place allocates nothing beyond the answer.
-- The three `copies()` tests above, each falsified once: deriving `Eq`,
-  dropping the release step, cloning the store in `replay` as before.
+- The three `copies()` tests above, each falsified once: dropping the
+  release step, re-sharing on confirm as the first draft did, cloning the
+  store in `replay` as before — and `perf_a_mutate_alone` stays flat.
 - `perf_d_bytes` before and after each step, in `--release`, in the
   commit message of the step.
