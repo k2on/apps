@@ -276,6 +276,7 @@ never calls `.all()` or `.first()`:
 | source table | `db.song` (a `Table<Song>`; `db.song.rows()` is its `Query<Song>` when the first step is a lookup) |
 | filter | `.filter(Song::album_name.eq(some(input.name)))` |
 | group source | `db.media.group_by(Media::creator)` — a `Query<Text, (List<Media>,)>`: closures are handed the key (the column's value, or a tuple of values for a tuple of columns) and the group's rows as the first binder |
+| distinct | `db.media.distinct(Media::creator)` — `group_by(Media::creator).map(\|creator, _\| creator)`, the same plan: a group with no aggregate, whose node is its key (for a tuple of columns, the key struct); `docs/plan-db.md` D4 |
 | lookup | `.get(\|song, ()\| db.media.by((song.media_id,)))` — appends `Opt<Media>`; `db.t.by_opt(opt)` for a one-column key held as an option |
 | related, by reference | `.with(Media::playlist_item)` — appends `List<PlaylistItem>` |
 | related, general | `.each(\|song, (media,)\| db.credit.order_by(..).on(Credit::recording_id.eq(song.recording_id)))` — appends `List<Node>`; the child's own `get`, `each` and `map` nest |
@@ -571,6 +572,7 @@ A query's plan (§1.5), part by part:
 |---|---|
 | the query's closure returning `q` | `plan: Some(q's plan)`, `body: []`, `ret: Some(List(q's node type))` |
 | `db.t.group_by(c)` / `group_by((c, d))` | `source: Group { table: t, by: [c] }` / `by: [c, d]`, `members: Some(m)`; the row binder is the key struct, handed to closures as the column's value (a tuple of them) |
+| `db.t.distinct(c)` / `distinct((c, d))` | `group_by`'s plan with `project: Some(Field(Var(row), c))` / `project: Some(Var(row))`; the node type is the column's / the key struct |
 | `.get(\|row, bs\| db.u.by(k))` / `db.u.by_opt(o)` | `Lookup { name: u, sym, table: u, key: k }` / `key: [o]`, appended to `lookups` |
 | `.with(T::rel)` | `Related { name: rel, sym, on: [(fk, Field(Var(row), key))], plan: <every row of the child> }` |
 | `.each(\|row, bs\| q.on(C::c.eq(e)))` | `Related { name: <q's table>, sym, on: [(c, e)], plan: q's plan }` (`.and` for several pairs) |

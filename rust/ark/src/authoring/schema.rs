@@ -674,6 +674,11 @@ impl<T: Row> Table<T> {
     pub fn group_by<G: GroupCols<T>>(&self, g: G) -> Query<G::Key, (List<T>,), G::Key> {
         self.query().group_by(g)
     }
+    /// §1.9, D4 The distinct values of one column or a tuple of them; see
+    /// [`Query::distinct`].
+    pub fn distinct<G: GroupCols<T>>(&self, g: G) -> Query<G::Key, (List<T>,), G::Key> {
+        self.query().distinct(g)
+    }
     /// §1.9 A lookup of one row of this table by key, for a plan's
     /// [`Query::get`]: `db.media.by((song.media_id,))`. `get` spelt for a
     /// node, so that a plan's lookup and a mutator's bound read differ.
@@ -1218,6 +1223,27 @@ impl<T: Row> Query<T> {
             make: Rc::new(move |h| G::key(&names, h)),
             _t: PhantomData,
         }
+    }
+
+    /// §1.9, `docs/plan-db.md` D4 The distinct values of one column (or a
+    /// tuple of them) among the rows the filter admits, in key order: a
+    /// group with no aggregate, so it is [`Query::group_by`] whose node is
+    /// its key — the column's value, or for a tuple the key struct of the
+    /// columns — and nothing new in the engine. `db.song.distinct(Song::creator)`
+    /// is `db.song.group_by(Song::creator).map(|creator, _| creator)`, the
+    /// same plan byte for byte, and is maintained as a group is: a value
+    /// appears with its first row and goes with its last. The members are
+    /// still the first binder, for a `.having` over them.
+    pub fn distinct<G: GroupCols<T>>(self, g: G) -> Query<G::Key, (List<T>,), G::Key> {
+        let cols = g.columns();
+        let mut q = self.group_by(g);
+        let (e, ty) = match cols.as_slice() {
+            [(name, ty)] => (Expr::Field(Box::new(Expr::Var(q.row)), name.to_string()), ty.clone()),
+            _ => (Expr::Var(q.row), q.row_ty.clone()),
+        };
+        q.plan.project = Some(e);
+        q.project_ty = Some(ty);
+        q
     }
 }
 
