@@ -61,7 +61,7 @@ use tower_http::services::ServeDir;
 
 pub use ark::retention::Retention;
 pub use ark_client::Domain;
-pub use hub::{Health, Hub, HubHandle, SessionHealth, REVOKED};
+pub use hub::{Health, Hub, HubHandle, REVOKED};
 pub use live::{Echo, Live, Peer, Post, Quiet};
 pub use sync::Keepalive;
 
@@ -402,16 +402,8 @@ impl Running {
     }
 }
 
-async fn healthz(State(hub): State<HubHandle>, headers: axum::http::HeaderMap) -> Response {
-    // Asked for JSON, it answers JSON: the same facts and the sessions
-    // beside them, for a tool rather than a person (`docs/plan-db.md` D6).
-    let json = headers
-        .get_all(axum::http::header::ACCEPT)
-        .iter()
-        .filter_map(|v| v.to_str().ok())
-        .any(|v| v.split(',').any(|t| t.split(';').next().is_some_and(|m| m.trim() == "application/json")));
+async fn healthz(State(hub): State<HubHandle>) -> Response {
     match hub.health().await {
-        Ok(h) if json => ([(axum::http::header::CONTENT_TYPE, "application/json")], health_json(&h)).into_response(),
         Ok(h) => {
             let mut text = format!("ok\nconnections {}\n", h.connections);
             text.push_str(&format!("head {}\n", h.head));
@@ -429,39 +421,4 @@ async fn healthz(State(hub): State<HubHandle>, headers: axum::http::HeaderMap) -
         }
         Err(e) => (axum::http::StatusCode::SERVICE_UNAVAILABLE, format!("{e:#}\n")).into_response(),
     }
-}
-
-/// `/healthz` as JSON (`docs/plan-db.md` D6): one object, hashes and ids
-/// in hex, times in milliseconds since the Unix epoch.
-///
-/// ```text
-/// { "status": "ok", "head": 12, "horizon": 0, "log": "…" | null,
-///   "module": "…" | null, "modules": ["…"], "connections": 2,
-///   "sessions": [ { "user", "session", "cursor", "heard_ms", "open" } ],
-///   "rooms": [ { "room", "peers" } ] }
-/// ```
-pub fn health_json(h: &Health) -> String {
-    use ark::json::{array, quoted};
-    use ark::value::hex;
-    let hexed = |b: Option<&[u8]>| b.map_or_else(|| "null".to_string(), |b| quoted(&hex(b)));
-    let sessions = array(h.sessions.iter().map(|s| {
-        format!(
-            "{{\"user\":{},\"session\":{},\"cursor\":{},\"heard_ms\":{},\"open\":{}}}",
-            quoted(&s.user),
-            quoted(&s.session),
-            s.cursor,
-            s.heard_ms,
-            s.open
-        )
-    }));
-    let rooms = array(h.rooms.iter().map(|(r, n)| format!("{{\"room\":{},\"peers\":{n}}}", quoted(r))));
-    format!(
-        "{{\"status\":\"ok\",\"head\":{},\"horizon\":{},\"log\":{},\"module\":{},\"modules\":{},\"connections\":{},\"sessions\":{sessions},\"rooms\":{rooms}}}\n",
-        h.head,
-        h.horizon,
-        hexed(h.log_id.as_ref().map(|i| &i[..])),
-        hexed(h.module.as_deref()),
-        array(h.modules.iter().map(|m| quoted(&hex(m)))),
-        h.connections,
-    )
 }

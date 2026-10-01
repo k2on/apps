@@ -117,13 +117,17 @@ pub fn load(dir: &Path) -> Result<Vec<Ran>> {
 /// Start with `module`: every module run before (`dir`'s file), and this
 /// one added and the file rewritten if it is new. What the hub holds and
 /// `/healthz` lists.
-pub fn start_with(dir: &Path, module: Vec<u8>, closures: impl IntoIterator<Item = (FnHash, Closure)>) -> Result<Vec<Ran>> {
+/// Whether it is new — the first start with it — is the second half of
+/// the answer: what decides whether the log on the disk may be of another
+/// schema (`crate::persist::rehome`).
+pub fn start_with(dir: &Path, module: Vec<u8>, closures: impl IntoIterator<Item = (FnHash, Closure)>) -> Result<(Vec<Ran>, bool)> {
     let mut ran = load(dir)?;
-    if !ran.iter().any(|(m, _)| *m == module) {
+    let fresh = !ran.iter().any(|(m, _)| *m == module);
+    if fresh {
         ran.push((module, closures.into_iter().collect()));
         crate::persist::write_whole(dir, FILE, &encode(&ran))?;
     }
-    Ok(ran)
+    Ok((ran, fresh))
 }
 
 /// The hashes of every module run, in the order first run.
@@ -144,18 +148,23 @@ mod tests {
     /// The file keeps every module in the order first run, a module started
     /// with again adds nothing, and a closure read back is the closure
     /// written — the hash it was filed under is its function hash.
+    ///
+    /// Falsified once: with `start_with` not writing the file, the second
+    /// start listed only itself.
     #[test]
     fn every_module_run_is_kept_and_read_back() {
         let dir = std::env::temp_dir().join(format!("ark-modules-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let d = ark_client::demo::domain();
         let cs: Vec<(FnHash, Closure)> = d.closures().iter().map(|(h, c)| (h.clone(), c.clone())).collect();
-        let first = start_with(&dir, b"first".to_vec(), cs.clone()).unwrap();
+        let (first, fresh) = start_with(&dir, b"first".to_vec(), cs.clone()).unwrap();
+        assert!(fresh);
         assert_eq!(hashes(&first), vec![b"first".to_vec()]);
-        let second = start_with(&dir, b"second".to_vec(), vec![]).unwrap();
+        let (second, _) = start_with(&dir, b"second".to_vec(), vec![]).unwrap();
         assert_eq!(hashes(&second), vec![b"first".to_vec(), b"second".to_vec()]);
-        let again = start_with(&dir, b"first".to_vec(), vec![]).unwrap();
+        let (again, fresh) = start_with(&dir, b"first".to_vec(), vec![]).unwrap();
         assert_eq!(hashes(&again), hashes(&second), "a module run before is not added twice");
+        assert!(!fresh, "and is not new");
         assert_eq!(functions(&again), cs.iter().map(|(h, _)| h.clone()).collect());
         for (h, c) in &again[0].1 {
             assert_eq!(&function_hash(c), h, "a closure read back hashes as it was filed");

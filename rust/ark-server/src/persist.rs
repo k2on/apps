@@ -238,6 +238,85 @@ pub fn save(dir: &Path, log: &Log) -> Result<()> {
     Files::new(dir).remove(JOURNAL).map_err(|e| anyhow!(e))
 }
 
+/// Every row of `st` laid out as its table's under `st`'s schema where it
+/// names only columns the table has — a nullable column it lacks `Null` —
+/// and any other row as it is (`docs/plan-db.md` D1). A log written under
+/// an older module holds rows without a column the current one added;
+/// a peer of the current module that runs one of those entries again
+/// writes the column `Null`, so the server must hold it so too, or the two
+/// hash apart over rows that say the same thing.
+pub fn widen(st: &ark::store::MemoryStore) -> ark::store::MemoryStore {
+    use ark::store::{project_row, Change, MemoryStore, Store};
+    let schema = st.schema().clone();
+    let mut out = MemoryStore::empty(schema.clone());
+    for tbl in schema.tables() {
+        for r in st.scan(&tbl.name) {
+            let fits = r.keys().all(|k| tbl.column(k).is_some());
+            let r = if fits { project_row(tbl, &r).unwrap_or(r) } else { r };
+            out.apply_change(&Change::Add(tbl.name.clone(), r));
+        }
+    }
+    out
+}
+
+/// The snapshot rewritten under `schema` (`docs/plan-db.md` D1): read
+/// without its hash checked, every row widened ([`widen`]), hashed again,
+/// and renamed into place. For the first start with a new module only,
+/// whose schema may have grown — a table more is a pair more in the state
+/// hash — or whose state hash was defined otherwise when the file was
+/// written (`docs/plan-db.md` D3): the file is this server's own, synced
+/// and renamed into place by it, so what the hash would catch, a torn or
+/// foreign file, is not what a new module brings. Every other start checks
+/// the hash as it always has. The journal after the snapshot is left as
+/// it is: its records extend the same head.
+pub fn rehome(dir: &Path, schema: &Schema) -> Result<bool> {
+    use ark::store::MemoryStore;
+    let path = path_of(dir);
+    let bytes = match fs::read(&path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
+    };
+    let v = canon::decode(&bytes).map_err(|e| anyhow!("{}: {e}", path.display()))?;
+    let field = |v: &Value, k: &str| -> Result<Value> {
+        match v {
+            Value::Struct(m) => m.get(k).cloned().ok_or_else(|| anyhow!("{}: no {k}", path.display())),
+            _ => Err(anyhow!("{}: not a struct", path.display())),
+        }
+    };
+    let list = |v: Value| -> Result<Vec<Value>> {
+        match v {
+            Value::List(xs) => Ok(xs),
+            _ => Err(anyhow!("{}: not a list", path.display())),
+        }
+    };
+    let base = field(&v, "base")?;
+    let Value::Int(seq) = field(&base, "seq")? else {
+        return Err(anyhow!("{}: the snapshot's seq is not an int", path.display()));
+    };
+    let log_id = match field(&base, "log") {
+        Ok(Value::Id(i)) => Some(i),
+        _ => None,
+    };
+    let store = widen(&MemoryStore::from_value(schema.clone(), &field(&base, "rows")?));
+    let mut log = Log {
+        base: ark::log::snapshot_of(seq, store).of_log(log_id),
+        entries: Default::default(),
+        ids: Default::default(),
+    };
+    for item in list(field(&v, "entries")?)? {
+        let (n, e, f) = journal::record_from_value(&item).map_err(|e| anyhow!("{}: {e}", path.display()))?;
+        log.entries.insert(n, (e, f));
+    }
+    for item in list(field(&v, "ids")?)? {
+        if let (Ok(Value::Id(id)), Ok(Value::Int(n))) = (field(&item, "id"), field(&item, "seq")) {
+            log.ids.insert(id, n);
+        }
+    }
+    write_whole(dir, FILE, &canon::encode(&journal::log_to_value(&log)))?;
+    Ok(true)
+}
+
 /// A data directory's log, open for writing: what the disk holds, so that
 /// [`LogFile::write`] appends what moved since and nothing else.
 #[derive(Debug)]
