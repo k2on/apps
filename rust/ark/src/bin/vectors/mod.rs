@@ -12,6 +12,7 @@
 mod codec;
 mod demo;
 mod eval;
+mod fuzzed;
 mod json;
 mod module;
 mod protocol;
@@ -61,6 +62,7 @@ pub fn write_all(root: &Path) {
     module::module(&out);
     protocol::protocol(&out);
     rebase::fleet(&out);
+    fuzzed::fuzzed(&out);
     views::views(&out);
     println!("vectors written");
 }

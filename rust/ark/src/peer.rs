@@ -386,10 +386,28 @@ impl Replica {
     /// `n`. It goes to the inbox as if it had arrived, and is applied at its
     /// turn through the confirmed store, which is the rebase — by the next
     /// [`Replica::settle`], as any arrival is (R8).
+    ///
+    /// An acknowledgement at or below the cursor is of an intent the
+    /// confirmed store already holds: the peer re-opened from a snapshot
+    /// that covers `n` — below the horizon, or past the head — and pushed
+    /// the intent again, and the authority answered the duplicate with the
+    /// sequence it already had. Placed in the inbox it would be dropped
+    /// there, and the intent would stay pending for ever, pushed on every
+    /// reconnect and applied twice in the view (`arkc fuzz`,
+    /// `rebase/fleet-fuzz-an-ack-at-or-below-the-cursor.json`). It is
+    /// confirmed, not refused: dropped from pending with no verdict, and
+    /// the view undoes it and every intent after it and runs those again,
+    /// as [`Replica::reject`] does.
     pub fn ack(&mut self, id: &Id, n: Seq) {
-        if let Some(e) = self.pending.iter().find(|e| e.id == *id).cloned() {
-            self.receive(n, e);
+        let Some(at) = self.pending.iter().position(|e| e.id == *id) else { return };
+        if n <= self.cursor {
+            let undo: Vec<Id> = self.pending[at..].iter().map(|e| e.id).collect();
+            self.pending.remove(at);
+            self.rebase(&undo, vec![], at);
+            return;
         }
+        let e = self.pending[at].clone();
+        self.receive(n, e);
     }
 
     /// §11.2b Somebody signs in on a peer that has been used without an
