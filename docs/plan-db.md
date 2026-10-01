@@ -405,6 +405,97 @@ backend behind `Store` (the design names SQLite as a backend and not a
 dependency; `redb` is the other candidate) is next, or memory as the
 dataset stands for now. Do not build a backend in this round.
 
+### Landed
+
+`perf_d_open` in `rust/ark-server/tests/perf.rs` (`cargo test -p
+ark-server --release --test perf perf_d_open -- --ignored --nocapture`).
+The stores are written directly, as rows, so the setup is quick: media
+rows as `add_song` writes them, nine columns, under harken's own schema
+(`harken.ark`, as the server hosts it). Each open runs in a process of its
+own, so the resident memory read from `/proc/self/status` after it is the
+open's own and not the generator's. The baseline before any open is
+10.4 MB.
+
+- **store** is one `MemoryStore`, from the `replica` record: decoded,
+  built, the decoded tree freed. It is what a row costs before any program
+  holds it twice.
+- **client** is `Peer::open` over `Dir`: a `replica` of N rows at cursor
+  N of a named log, nothing pending.
+- **server** is what `Builder::build` does: `persist::LogFile::open` on a
+  snapshot holding the horizon's rows and the id of every entry below it,
+  plus a journal of the last tenth as `add_song` records, then the state
+  at the head.
+- **alone** is `Peer::open` with `Options::alone`: the `replica` at its
+  head and a local history of N records, all read for their ids.
+
+Harken as it stands, with D4's two text indexes on `media.title` and
+`media.creator` (`fb316b8`):
+
+| rows | | on disk | open | resident | split, ms |
+|---:|---|---:|---:|---:|---|
+| 10,000 | store | 1.5 MB | 0.19 s | 46 MB | decode 14, build 138, free 8 |
+| | client | 1.5 MB | 0.33 s | 86 MB | decode 16, build 152, free 12, replica open 156 |
+| | server | 2.0 MB | 0.27 s | 62 MB | decode 14, build 103, free 12, journal 1,000 records 7, state at head 48 |
+| | alone | 5.7 MB | 0.39 s | 87 MB | decode 10, build 121, free 11, replica open 123, history 10,000 records 86 |
+| 100,000 | store | 14.9 MB | 2.3 s | 412 MB | decode 122, build 1,760, free 100 |
+| | client | 14.9 MB | 4.0 s | 818 MB | decode 150, build 1,538, free 110, replica open 1,505 |
+| | server | 20.4 MB | 3.5 s | 570 MB | decode 136, build 1,666, free 138, journal 10,000 records 65, state at head 661 |
+| | alone | 57.7 MB | 5.0 s | 823 MB | decode 244, build 2,399, free 176, replica open 2,423, history 100,000 records 1,316 |
+| 400,000 | store | 61.0 MB | 13.5 s | 1,658 MB | decode 615, build 9,466, free 441 |
+| | client | 61.0 MB | 23.9 s | 3,342 MB | decode 529, build 10,126, free 414, replica open 7,087, the rest 7,218 |
+| | server | 83.7 MB | 15.3 s | 2,317 MB | decode 491, build 6,312, free 455, journal 40,000 records 233, state at head 2,763 |
+| | alone | 235.1 MB | 17.4 s | 3,362 MB | decode 412, build 6,276, free 426, replica open 5,055, history 400,000 records 3,285, the rest 1,694 |
+
+The same, under the schema before D4's text indexes
+(`ARK_PERF_MODULE` names a `.ark` to open with):
+
+| rows | | open | resident | split, ms |
+|---:|---|---:|---:|---|
+| 10,000 | store / client / server / alone | 0.11 / 0.16 / 0.13 / 0.25 s | 32 / 44 / 37 / 45 MB | |
+| 100,000 | store / client / server / alone | 0.83 / 1.4 / 1.3 / 1.8 s | 264 / 375 / 303 / 381 MB | |
+| 400,000 | store | 3.3 s | 1,035 MB | decode 400, build 1,965, free 304 |
+| | client | 4.7 s | 1,481 MB | decode 428, build 2,116, free 324, replica open 1,717, the rest 223 |
+| | server | 6.3 s | 1,192 MB | decode 510, build 2,378, free 449, journal 40,000 records 250, state at head 610 |
+| | alone | 9.8 s | 1,501 MB | decode 466, build 2,313, free 354, replica open 4,101, history 400,000 records 3,071 |
+
+**Where the time goes**, coarsely:
+
+- **build** is putting rows into their tables and indexes, each row's
+  leaf of the state hash included (D3). It is most of every open: about
+  5 µs a row without text indexes and 16–24 µs with them.
+- **decode** is canonical CBOR into values, about 1 µs a row, and
+  **free** is dropping those values afterwards, about another 1 µs.
+- **replica open** is a peer's optimistic store starting as a copy of
+  the confirmed one (`Replica::open`). It costs nearly a second build,
+  and it is why a client holds about twice what one store does.
+- **journal** and **history** are records decoded and appended: 6–8 µs
+  a record. A peer alone reads its whole local history at every open,
+  for the ids.
+- **state at head** is the server copying the snapshot's store and
+  applying the journal's facts. It holds both stores afterwards: the
+  log's base, which it serves to a peer below the horizon, and the head.
+- **hash** is the snapshot's own check, O(tables) since D3: under a
+  millisecond, so it is not a column.
+- **the rest** is the open less what was timed apart. It is noise at 10k
+  and 100k. At 400k it is seconds, and it moved between runs.
+
+**Memory**: resident per row, the baseline taken off.
+
+| | one store | client | server | alone |
+|---|---:|---:|---:|---:|
+| without text indexes | 2.6 KB | 3.7 KB | 3.0 KB | 3.7 KB |
+| with D4's two | 4.1 KB | 8.3 KB | 5.8 KB | 8.4 KB |
+
+On disk a row is about 150 B in a snapshot. Time and memory both grow
+linearly over the three sizes, and no term grows faster.
+
+Not verified: the timings were taken on a 4-core machine shared with four
+other builds, at load averages between 7 and 12. The same open moved by
+up to half between two runs, so read the times as a scale. The resident
+memory was the same to 0.1 MB in every run. Nothing here was measured on
+a phone. The rows are one shape, media; a library's other tables (songs,
+works, playlists) would add their own indexes.
+
 ## D6. Operations
 
 - `arkc backup DIR OUT` copies a running server's state consistently
@@ -421,6 +512,115 @@ dataset stands for now. Do not build a backend in this round.
   below the horizon is answered `Duplicate` at the sequence the prefix
   recorded); above the horizon it is exact. State the memory per million
   entries before and after.
+
+### Landed
+
+- **`arkc backup DIR OUT`, `arkc restore BACKUP DIR [--same-log]`,
+  `arkc verify-log DIR [M]`** (`e32aa0f`; `rust/ark/src/bin/ops.rs`).
+  - A backup reads the snapshot, then the journal up to the length it
+    had once the snapshot had been read, cut to its last whole record
+    that follows on, then every other top-level file: cursors, sessions,
+    rooms, modules.
+  - A compaction between the two reads is seen, because the snapshot's
+    file changes (inode, length, mtime), and the pair is read again.
+    Without that check the copy is still a consistent prefix, but an
+    older one than the disk held when the backup began.
+  - Directories (the scanner's `library/` replica) are a peer's, not the
+    server's, and are not copied.
+  - `verify-log` reads without the module, schema-free: head, horizon,
+    log id, entry and id counts, stale records, a torn tail, and the
+    modules `modules.cbor` lists. Given the module, it checks the
+    snapshot's rows against its hash, replays the journal, prints the
+    state hash at the head, and says whether that module is one the
+    server has run. The brief's `verify-log DIR` cannot print a hash
+    alone, because the state hash is over the schema's tables in schema
+    order, and a snapshot does not carry its schema.
+  - The guards are `ops_tests.rs`, each falsified once (its doc comment
+    says how):
+    - the length rule: reading to the journal's end gives a head of 13
+      where it was 10;
+    - the re-read: without it the copy's head is 5 where the disk held 8;
+    - the unnamed restore;
+    - a backup taken while another thread appends and compacts as fast
+      as it can, forty times, each a loadable prefix at least as long as
+      the disk was when it began.
+- **A restore is a new log** (a decision this item made). The backup is a
+  prefix of a history some peers saw more of. Under the same log id, a
+  peer that dials only after the restored server has sequenced past its
+  cursor would be handed the new entries on top of the old ones, and
+  nothing would tell the two apart (§12.4). So `restore` writes the
+  snapshot unnamed, the hub names it at start, and every peer is sent the
+  snapshot once. `--same-log` keeps the name, for a stopped server moved
+  elsewhere.
+- **The fleet** (`70b06c0`): `a_backup_taken_mid_stream_restores_to_its_moment`.
+  - Three peers push round after round while another thread backs up the
+    running server's directory with `ops::backup`. On this run the backup
+    took 3 ms and its head was strictly between the heads converged
+    before and after it.
+  - `verify-log` on the copy gives the full log's hash at that head.
+  - The copy is restored into a new directory and the server started
+    there. A fourth device sequences past the others' cursors before
+    they return.
+  - All four converge on the restored log, 733 ms from the restart, and
+    no entry appended after the backup's journal length is in any replica
+    or in the log.
+  - Falsified by restoring with the name kept: the three are paged the
+    new history on top of the old and never converge (different hashes
+    at one head, 31). Falsified again by `/healthz` answering text
+    whatever is asked.
+- **`/healthz` as JSON** (`70b06c0`). Under `Accept: application/json` it
+  is one object (`ark_server::health_json`): `head`, `horizon`, `log`,
+  `module`, `modules`, `connections`, `rooms`, and `sessions` with `user`,
+  `session`, `cursor`, `heard_ms` and `open` (the connections it has open
+  now). Ids and hashes are hex. The text form is unchanged. A session's
+  `cursor` is where `cursors.cbor` records it: the start of the last page
+  delivered, at the lowest of its open connections. That can be below the
+  head of a peer that is caught up.
+- **The ids below the horizon** (`ce4bbed`):
+  - `Log::below` keeps each id at or below the horizon as 8 bytes and its
+    sequence, in a sorted vector. `seq_of` asks it after the exact map,
+    so a re-push older than the snapshot is answered `Duplicate` at the
+    sequence it recorded.
+  - **The 8 bytes are the first of the id's SHA-256, not of the id**, a
+    departure from the brief's wording. An id built from a counter (every
+    test's, and any peer that numbers its own) differs only in its last
+    bytes, and a UUID has a version nibble in its first half. A digest's
+    prefix is uniform whatever the id looks like, which is what makes
+    2^-64 true.
+  - The hub folds after each compaction and when it opens its log.
+    `compact_to` and reading a file back do not fold, so a log written
+    and read is the log it was. A peer alone never folds.
+  - The snapshot writes `{ key: Bytes(8), seq }` beside `{ id, seq }`,
+    and readers take both, so old files open. D1's `rehome` was taught the
+    keys too; dropping them would have let a re-push be applied twice.
+  - Measured (`perf_ids_below_the_horizon` in `rust/ark/tests/perf.rs`,
+    the bytes this thread holds, counted by the harness's allocator):
+
+    | | per id | per million |
+    |---|---:|---:|
+    | before: `BTreeMap<Id, Seq>` | 38.8 B | 38.8 MB |
+    | after: below the horizon, by key | 16.0 B | 16.0 MB |
+
+    The first fold of a million ids takes 198 ms. Later folds move only
+    what the horizon passed, plus one merge. `seq_of` by key costs 0.6 µs
+    against 0.3 µs exact, and every pushed intent that is not a duplicate
+    asks it once.
+  - Guards: a duplicate below the horizon refused through the authority
+    (falsified by `seq_of` forgetting the keys); the keys surviving the
+    snapshot (falsified by writing them out of it); the hub's R10 test
+    counting 12,000 exact and 18,000 keyed (falsified by the hub not
+    folding: 30,000 exact).
+
+Not verified:
+- A backup or restore against a NixOS deployment's state directory.
+- A backup of a directory larger than the fleet's: the copy reads the
+  snapshot and journal whole into memory.
+- The stamp check on a filesystem whose inode numbers or mtimes do not
+  move on a rename. That is never the case on Linux, and off unix the
+  check is the length alone.
+- A restore's new log name costs every peer one snapshot. Nothing here
+  measured that on a large library; at 400,000 rows a snapshot is the
+  61 MB a client's replica is.
 
 ## Order and rules
 

@@ -129,6 +129,35 @@ and not yet a control.
 `harken-peer` does the same from a shell: `--alone` and later `--server
 URL` over one `--dir` is the join, and `join` and `leave` are commands.
 
+### Backing up, restoring, and asking a running server
+
+    nix run .#arkc -- backup /var/lib/harken /srv/backup/harken   # while it runs
+    nix run .#arkc -- verify-log /srv/backup/harken harken/domain/harken.ark
+    nix run .#arkc -- restore /srv/backup/harken /var/lib/harken-new
+    curl -H 'Accept: application/json' http://127.0.0.1:8787/healthz
+
+`backup` copies a running server's data directory without stopping it:
+the log's snapshot, then its journal as long as it was once the snapshot
+had been read, so what the server appends meanwhile is not in the copy
+and the copy is the log at one moment. Then the cursors, the sign-in
+sessions, the rooms and the modules run. The scanner's `library/`
+replica is not copied; it is a peer, and catches up from the log.
+`restore` refuses a directory with anything in it and writes the log
+**unnamed**, so the server started on it names the log afresh. Every
+device is then sent the snapshot once and rebases its pending work onto
+it. That is deliberate: a device that saw more of the old log than the
+backup holds would otherwise be handed the new history on top of the old
+one. `--same-log` keeps the name, for a backup of a stopped server
+moved elsewhere. `verify-log DIR` prints the head, the horizon, the
+log's id and the modules the server has run. Given the module, it also
+replays the log and prints the state hash at the head, which is what
+every device's `Verify` is compared with. `/healthz` asked for JSON
+answers one object: head, horizon, log id, the module and every module
+run, connections, rooms, and every session with its cursor, when it was
+last heard and how many connections it has open. The process fleet's
+`a_backup_taken_mid_stream_restores_to_its_moment` does all of it
+against a server being pushed to (`docs/plan-db.md` D6).
+
 ## harken-peer, and the fleet
 
 `harken-peer` is a peer with no screen, built beside the server (the

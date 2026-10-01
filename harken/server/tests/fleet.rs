@@ -1832,7 +1832,8 @@ fn two_thousand_local_intents_join_timed() {
 ///
 /// Falsified by restoring with the name kept (`ops::restore(.., true)`):
 /// the three are paged `d`'s entries on top of the old history's and never
-/// converge — their hashes are not the log's.
+/// converge — their hashes are not the log's. And by `/healthz` answering
+/// text whatever it is asked: the body does not decode as JSON.
 #[test]
 fn a_backup_taken_mid_stream_restores_to_its_moment() {
     let mut f = Fleet::new("backup");

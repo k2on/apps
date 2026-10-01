@@ -110,6 +110,16 @@ harken's `server/src/web.rs` made generic.
 | harken's `persist.rs` (`<scope>.ark-log`) | `persist.rs`: one log, a snapshot `log.ark-log` and the append-only `log.ark-journal` after it, synced before anything it holds is acknowledged |
 | `/healthz` per scope | `/healthz`: `ok`, `connections N`, `head N`, `room R peers N` |
 
+`/healthz` under `Accept: application/json` is one object
+(`ark_server::health_json`): head, horizon, log id, modules run,
+connections, rooms, and every session with its cursor, last-heard time and
+open connections. `arkc backup DIR OUT` copies a running server's data
+directory consistently (the snapshot, then the journal up to its length at
+that moment, then the rest), and `arkc restore BACKUP DIR` puts it back
+into an empty directory as a log the server names afresh. `arkc verify-log
+DIR [M]` reads one: head, horizon, log id, modules run, and with the module
+the state hash at the head.
+
 ## Tested, and not
 
 `cargo test -p ark-server`, all against the demo module over real sockets:
