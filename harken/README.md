@@ -185,7 +185,72 @@ falling back to emulation, by saying it has the feature:
 
 which took eleven minutes on a four-core container (the test script
 itself five and a half, most of it booting the server again after the
-crash).
+crash). It also runs mixed: a fourth machine on the last pinned revision's
+server, with alice on that revision's peer and bob on this one's, upgraded
+in place under both by `switch-to-configuration` into a specialisation
+whose only change is the package; and bob on the old peer against this
+revision's server.
+
+## Versions: the fleet run mixed
+
+A deployment lives through releases: phones that are never updated, a
+server upgraded in place under the peers using it, a domain that grows a
+column. `server/tests/versions.rs` runs the process fleet with older
+binaries beside this build's (`docs/plan-db.md` D1); the older ones are
+**pinned previous revisions of this repository**, listed in
+`nix/versions.nix` and built by nix from each revision's own flake.
+
+    nix flake check                       # checks.versions: every pinned revision, every scenario
+    nix build .#harken-server-v4-journal  # one pinned revision's two binaries
+    HARKEN_OLD_1_SERVER=$(nix build --print-out-paths .#harken-server-v4-journal)/bin/harken-server \
+    HARKEN_OLD_1_PEER=$(nix build --print-out-paths .#harken-server-v4-journal)/bin/harken-peer \
+      cargo test -p harken-server --test versions -- --nocapture
+
+`HARKEN_OLD_<n>_SERVER` and `HARKEN_OLD_<n>_PEER` (and `HARKEN_OLD_<n>_NAME`
+for what is printed), `n` counting from 1 in `nix/versions.nix`'s order, are
+what the scenarios read; without them, the five that need an older binary
+say they are skipped and pass, so `cargo test` on a laptop is unchanged.
+The two that need none run the grown domain — `harken_server::grown`, a
+nullable `playlist_item.note`, a table `tag`, and `create_playlist`'s body
+moved — as "the next release": `HARKEN_MODULE=FILE` for the server and
+`harken-peer --module FILE` for a peer, `FILE` what `grown::write` makes.
+
+**To add a release to the matrix**: append `{ name; rev; }` to
+`nix/versions.nix`, add the input `harken-<name>` to `flake.nix` with the
+same revision (`git+https://github.com/k2on/apps?ref=main&rev=…`, following
+this flake's `nixpkgs` and `rust-overlay`), run `nix flake lock`. The flake
+refuses to evaluate if the locked revision is not the one `versions.nix`
+names. `packages.harken-server-<name>` appears, `checks.versions` runs every
+scenario once more against it, and `fleet-vm` runs its mixed machines on
+the last entry.
+
+What a peer says about versions, in `harken-peer`'s `status`:
+
+- **`held`**: intents the server answered `held` — it has run no module
+  that ships their function, so this peer is newer than it. They stay
+  pending, are pushed again on every connection, and land once the server
+  is upgraded; nothing is refused. A server from before holding says
+  `reject` with `unknown function <hash>` for the same thing, and this
+  build reads that as a hold too.
+- **`behind`**: the server's module (said on every page) is not this
+  peer's. Its facts are applied projected to this peer's schema — a column
+  or table this peer lacks dropped, a nullable column it has and they lack
+  `Null` — and no `Verify` is said, since two schemas' hashes cannot agree.
+  A peer behind stays usable on everything its schema can see.
+
+A server keeps the closures of every module it has started with
+(`DATA/modules.cbor`; `/healthz` lists them, the current one marked), so an
+older client's intent at a hash this server once ran is applied rather than
+held; one from a module it never ran is held, which is the honest answer to
+a client older than the server's first deploy. Its first start with a new
+module re-hashes the log's snapshot under the new schema
+(`ark_server::persist::rehome`).
+
+The pinned revisions are still frozen at spec version 4 like this one: a
+pinned peer reads this server's frames, and this server reads theirs. Two
+revisions' state hashes are not comparable (a schema, or the hash's own
+definition, may differ between them), so the version scenarios compare
+what each peer reads, not what it hashes.
 
 ## Not verified
 

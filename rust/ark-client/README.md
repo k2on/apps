@@ -204,6 +204,20 @@ if peer.epoch() != introduced_on { /* a new connection: say who you are again */
   link closed, the fork recorded where the replica stands, the history
   started there, and what was pending sequenced locally. Opening a storage
   with the other `Options` from its last use is the same two transitions.
+- **Versions** (`docs/plan-db.md` D1). `status().held` counts pending
+  intents the server answered `held`: it has run no module that ships their
+  function — this peer is newer than the server — so they stay pending,
+  nothing is told to a view, they are pushed again on every connection,
+  and they land once the server can run them. A `reject` saying `unknown
+  function <this intent's hash>`, from a server older than holding, is read
+  the same way. `status().behind` says the server's module, which it says
+  on every page and snapshot, is not this peer's (`Domain::hash`): its facts
+  are applied projected to this peer's schema — a column or table the
+  schema lacks dropped, a nullable column it has and they lack `Null`, a
+  missing required one still `MalformedRow` — and `verify` says nothing,
+  since a hash over one schema cannot agree with one over another. A fact
+  whose row only lacks a nullable column is widened whether or not the
+  peer is behind: a server serves facts it sequenced before its module grew.
 - **Sans-io**, for a transport of your own: `connected`, `disconnected`,
   `recv`/`recv_frame`, `take_outgoing`/`take_outgoing_frames`, `persist`;
   `connect_with(url, dial)` takes any `link::Transport` (ark-server's
