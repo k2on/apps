@@ -926,19 +926,18 @@ fn no_child(st: &dyn Store, tbl: &Table, k: &[Value], rel: &Relation) -> Result<
 /// per reference column, so that a select holding one of those columns to
 /// a value reads the rows under it rather than the table. The indexes are
 /// derived from the rows and say nothing the rows do not: two stores are
-/// equal when their rows are. So are the digests (§8.1): one per table
-/// with rows, the sum of its rows' leaves, moved by [`MemoryStore::set`]
-/// as the rows are, so that the state hash is read rather than computed
+/// equal when their rows are. So are the digests (§8.1): one per table,
+/// the sum of its rows' leaves, moved by [`MemoryStore::set`] as the rows
+/// are, so that the state hash is read rather than computed
 /// (`docs/plan-db.md` D3).
-#[derive(Debug)]
+///
+/// Each table's rows, indexes and digest are one [`TableState`], and an
+/// index names a row by the table's own number for it, its ordinal
+/// (`docs/plan-db.md` D7.2), not by its key.
 pub struct MemoryStore {
     schema: Schema,
-    tables: BTreeMap<TableName, BTreeMap<Key, Row>>,
-    indexes: BTreeMap<TableName, Vec<Secondary>>,
-    digests: BTreeMap<TableName, Digest>,
-    /// D4 The text indexes, per table: one [`Trigrams`] per column the
-    /// table declares one on ([`Table::text`]).
-    texts: BTreeMap<TableName, Vec<Trigrams>>,
+    /// One per table of the schema, written or not.
+    tables: BTreeMap<TableName, TableState>,
 }
 
 /// A copy of every row and every index. Written out rather than derived so
@@ -952,9 +951,6 @@ impl Clone for MemoryStore {
         MemoryStore {
             schema: self.schema.clone(),
             tables: self.tables.clone(),
-            indexes: self.indexes.clone(),
-            digests: self.digests.clone(),
-            texts: self.texts.clone(),
         }
     }
 }
@@ -972,20 +968,210 @@ pub(crate) fn clones() -> usize {
     CLONES.with(|n| n.get())
 }
 
+/// Equal when the rows are, table by table: never the ordinals, which are
+/// the order rows happened to be written in (D7.2). Two stores that wrote
+/// the same rows in different orders number them differently and are the
+/// same store; the fuzzer's equality checks (D2) are what would catch a
+/// comparison of the numbering.
 impl PartialEq for MemoryStore {
     fn eq(&self, other: &MemoryStore) -> bool {
-        self.schema == other.schema && self.tables == other.tables
+        self.schema == other.schema
+            && self.tables.len() == other.tables.len()
+            && self.tables.iter().zip(&other.tables).all(|((n, a), (m, b))| n == m && a.same_rows(b))
     }
 }
 
 impl Eq for MemoryStore {}
 
-/// One secondary index: the keys of the rows under each value of its
-/// columns, in key order.
+/// The schema and the rows, by table and key: what the store is. The
+/// indexes and the ordinals are not printed, being derived.
+impl fmt::Debug for MemoryStore {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        struct Rows<'a>(&'a TableState);
+        impl fmt::Debug for Rows<'_> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.debug_map().entries(self.0.rows.iter().map(|(k, s)| (k, &s.row))).finish()
+            }
+        }
+        f.debug_struct("MemoryStore")
+            .field("schema", &self.schema)
+            .field("tables", &self.tables.iter().map(|(t, st)| (t, Rows(st))).collect::<BTreeMap<_, _>>())
+            .finish()
+    }
+}
+
+/// `docs/plan-db.md` D7.2 One table: its rows by key, each with the
+/// ordinal the table numbered it with; the rows again by ordinal, so that a
+/// posting resolves to its row in one index; the ordinals free to number
+/// the next row with; the secondaries and the text indexes, whose postings
+/// are ordinals; and the digest (D3). Everything here is derived from
+/// `rows` but the numbering, which is the order the rows happened to be
+/// written in and never leaves the store: nothing durable, nothing hashed
+/// and nothing on the wire names an ordinal.
+#[derive(Clone)]
+struct TableState {
+    rows: BTreeMap<Key, Slot>,
+    by_ord: Vec<Option<Row>>,
+    free: Vec<u32>,
+    indexes: Vec<Secondary>,
+    texts: Vec<Trigrams>,
+    digest: Digest,
+}
+
+/// A row under its key, and its ordinal.
+#[derive(Clone)]
+struct Slot {
+    row: Row,
+    ord: u32,
+}
+
+impl TableState {
+    fn new(tbl: &Table) -> TableState {
+        TableState {
+            rows: BTreeMap::new(),
+            by_ord: Vec::new(),
+            free: Vec::new(),
+            indexes: secondaries(tbl),
+            texts: tbl
+                .text
+                .iter()
+                .map(|c| Trigrams {
+                    column: c.clone(),
+                    postings: BTreeMap::new(),
+                })
+                .collect(),
+            digest: Digest::ZERO,
+        }
+    }
+
+    fn same_rows(&self, other: &TableState) -> bool {
+        self.rows.len() == other.rows.len() && self.rows.iter().zip(&other.rows).all(|((k, a), (j, b))| k == j && a.row == b.row)
+    }
+
+    /// The row an ordinal names. Every ordinal a posting holds names one.
+    fn at(&self, ord: u32) -> &Row {
+        self.by_ord[ord as usize].as_ref().expect("a posting names a row")
+    }
+
+    /// Put `row` under `k` (or take the key out, for `None`), and keep
+    /// every index of the table true to the rows: [`MemoryStore::set`]'s
+    /// work, on one table. A row replaced keeps its ordinal, so an index
+    /// whose columns did not change does not move; a row taken out frees
+    /// its ordinal for the next. A table whose last row goes is put back
+    /// as it was before its first (its numbering included), so that a
+    /// store which wrote a table's first row and undid it holds what one
+    /// that never wrote it holds (R2).
+    fn set(&mut self, t: &str, k: Key, row: Option<Row>) {
+        let (old, ord) = match &row {
+            Some(r) => match self.rows.entry(k) {
+                std::collections::btree_map::Entry::Occupied(mut e) => {
+                    let ord = e.get().ord;
+                    let old = std::mem::replace(&mut e.get_mut().row, r.clone());
+                    self.by_ord[ord as usize] = Some(r.clone());
+                    (Some(old), ord)
+                }
+                std::collections::btree_map::Entry::Vacant(e) => {
+                    let ord = self.free.pop().unwrap_or_else(|| {
+                        self.by_ord.push(None);
+                        u32::try_from(self.by_ord.len() - 1).expect("fewer than 2^32 rows in a table")
+                    });
+                    self.by_ord[ord as usize] = Some(r.clone());
+                    e.insert(Slot { row: r.clone(), ord });
+                    (None, ord)
+                }
+            },
+            None => match self.rows.remove(&k) {
+                Some(s) => {
+                    self.by_ord[s.ord as usize] = None;
+                    self.free.push(s.ord);
+                    (Some(s.row), s.ord)
+                }
+                None => return,
+            },
+        };
+        if old != row {
+            if let Some(o) = &old {
+                self.digest.sub(&leaf(t, o));
+            }
+            if let Some(r) = &row {
+                self.digest.add(&leaf(t, r));
+            }
+        }
+        for ix in &mut self.texts {
+            ix.set(ord, old.as_ref(), row.as_ref());
+        }
+        for ix in &mut self.indexes {
+            ix.set(ord, old.as_ref(), row.as_ref());
+        }
+        if self.rows.is_empty() {
+            debug_assert_eq!(self.digest, Digest::ZERO, "a table with no rows sums to nothing");
+            debug_assert!(self.indexes.iter().all(|ix| ix.rows.is_empty()) && self.texts.iter().all(|ix| ix.postings.is_empty()));
+            self.by_ord = Vec::new();
+            self.free = Vec::new();
+        }
+    }
+}
+
+/// D7.2 Insert an ordinal into a sorted posting list; nothing if it is
+/// there.
+fn post(list: &mut Vec<u32>, ord: u32) {
+    if let Err(at) = list.binary_search(&ord) {
+        list.insert(at, ord);
+    }
+}
+
+/// D7.2 Take an ordinal out of a sorted posting list; whether the list is
+/// now empty.
+fn unpost(list: &mut Vec<u32>, ord: u32) -> bool {
+    if let Ok(at) = list.binary_search(&ord) {
+        list.remove(at);
+    }
+    list.is_empty()
+}
+
+/// D7.2 The ordinals in every one of `lists`, each sorted: walked from the
+/// shortest, each of its ordinals looked for in every other list from
+/// where the last one was found — a merge that steps by binary search, so
+/// that a short list against a long one costs the short one's length and
+/// not the long one's. Sorted.
+fn intersect(mut lists: Vec<&[u32]>) -> Vec<u32> {
+    lists.sort_by_key(|l| l.len());
+    let Some((first, rest)) = lists.split_first_mut() else {
+        return vec![];
+    };
+    let mut out = Vec::with_capacity(first.len());
+    'next: for &o in first.iter() {
+        for l in rest.iter_mut() {
+            let at = l.partition_point(|x| *x < o);
+            *l = &l[at..];
+            if l.first() != Some(&o) {
+                continue 'next;
+            }
+        }
+        out.push(o);
+    }
+    out
+}
+
+/// D7.2 Rows read through an index, put in key order: a posting list is
+/// in ordinal order, and every read promises key order. In place, and in
+/// practice near linear — a store opened from a snapshot numbers its rows
+/// in the order the snapshot holds them, which is key order, so a bucket
+/// no row has been written to since is already sorted and the sort sees
+/// one run. Never a stable sort, which allocates: keys are unique, so
+/// there is nothing for stability to keep.
+fn by_key(tbl: Option<&Table>, rows: &mut [Row]) {
+    if let (Some(tbl), true) = (tbl, rows.len() > 1) {
+        rows.sort_unstable_by(|a, b| compare_rows(tbl, &[], a, b));
+    }
+}
+
+/// One secondary index: the ordinals of the rows under each value of its
+/// columns, sorted (D7.2).
 #[derive(Clone, Debug)]
 struct Secondary {
     columns: Vec<FieldName>,
-    rows: BTreeMap<Vec<Value>, BTreeSet<Key>>,
+    rows: BTreeMap<Vec<Value>, Vec<u32>>,
 }
 
 impl Secondary {
@@ -993,6 +1179,25 @@ impl Secondary {
         self.columns.iter().map(|c| row.get(c).cloned().unwrap_or(Value::Null)).collect()
     }
 
+    /// The row numbered `ord` going from `old` to `new`: out of its old
+    /// bucket and into its new one, and nothing when the two are one.
+    fn set(&mut self, ord: u32, old: Option<&Row>, new: Option<&Row>) {
+        let was = old.map(|r| self.key_of(r));
+        let is = new.map(|r| self.key_of(r));
+        if was == is {
+            return;
+        }
+        if let Some(w) = was {
+            if let Some(list) = self.rows.get_mut(&w) {
+                if unpost(list, ord) {
+                    self.rows.remove(&w);
+                }
+            }
+        }
+        if let Some(i) = is {
+            post(self.rows.entry(i).or_default(), ord);
+        }
+    }
     /// The buckets whose values begin with `prefix`, in the index's order,
     /// and — given a span, which is on the column right after the prefix
     /// (R6) — whose next value lies between the span's bounds: a range of
@@ -1004,7 +1209,7 @@ impl Secondary {
     /// `prefix ++ [struct]`. Nothing outside is walked. Bounds that cross
     /// (`x > 5 and x < 3`) are the empty range, which `BTreeMap::range`
     /// would otherwise panic on.
-    fn under(&self, prefix: &[Value], span: Option<&Span>) -> std::collections::btree_map::Range<'_, Vec<Value>, BTreeSet<Key>> {
+    fn under(&self, prefix: &[Value], span: Option<&Span>) -> std::collections::btree_map::Range<'_, Vec<Value>, Vec<u32>> {
         let at = |v: Option<&Value>, top: bool| -> Vec<Value> {
             let mut k = prefix.to_vec();
             k.extend(v.cloned());
@@ -1042,10 +1247,11 @@ impl Secondary {
     /// holds is one value and says nothing about order, so it is skipped
     /// wherever the order names it); and whatever the order says after
     /// those is the key's remaining columns ascending, in key order — the
-    /// order a bucket's keys are already in, and the tie-break the
-    /// verifier completes every order with (§9.4). Walking backwards visits
-    /// the buckets in reverse and each bucket's keys still forwards, which
-    /// is exactly "these columns descending, then the key ascending".
+    /// order each bucket is put in as it is walked (D7.2: its postings are
+    /// ordinals, in no order of the key's), and the tie-break the verifier
+    /// completes every order with (§9.4). Walking backwards visits the
+    /// buckets in reverse and each bucket's rows still forwards, which is
+    /// exactly "these columns descending, then the key ascending".
     fn serves(&self, tbl: &Table, eq: &[(&str, &Value)], order: &[(&str, Dir)]) -> Option<(usize, Dir)> {
         let is_eq = |c: &str| eq.iter().any(|(n, _)| *n == c);
         let n = self.columns.iter().take_while(|c| is_eq(c)).count();
@@ -1122,17 +1328,18 @@ pub fn trigrams(folded: &str) -> BTreeSet<[char; 3]> {
 }
 
 /// D4 A text index: for each trigram of the folded value of one text
-/// column, the keys of the rows whose value holds it. Moved by
-/// [`MemoryStore::set`] as the rows are — a row's trigrams that its new
-/// value lost taken out, the ones it gained put in, nothing when the
-/// column did not change — so that a row costs the trigrams of its text,
-/// once, when it is written: about one posting per character. A `Null`
-/// holds no trigram, and neither does a text of under three characters;
-/// both are still found, by `keep`, when the needle is that short.
+/// column, the ordinals of the rows whose value holds it (D7.2), sorted.
+/// Moved by [`MemoryStore::set`] as the rows are — a row's trigrams that
+/// its new value lost taken out, the ones it gained put in, nothing when
+/// the column did not change — so that a row costs the trigrams of its
+/// text, once, when it is written: about one posting per character, four
+/// bytes each. A `Null` holds no trigram, and neither does a text of under
+/// three characters; both are still found, by `keep`, when the needle is
+/// that short.
 #[derive(Clone, Debug)]
 struct Trigrams {
     column: FieldName,
-    postings: BTreeMap<[char; 3], BTreeSet<Key>>,
+    postings: BTreeMap<[char; 3], Vec<u32>>,
 }
 
 impl Trigrams {
@@ -1143,21 +1350,20 @@ impl Trigrams {
         }
     }
 
-    fn set(&mut self, k: &Key, old: Option<&Row>, new: Option<&Row>) {
+    fn set(&mut self, ord: u32, old: Option<&Row>, new: Option<&Row>) {
         if old.and_then(|r| r.get(&self.column)) == new.and_then(|r| r.get(&self.column)) && old.is_some() == new.is_some() {
             return;
         }
         let (was, is) = (Trigrams::of(old, &self.column), Trigrams::of(new, &self.column));
         for g in was.difference(&is) {
-            if let Some(ks) = self.postings.get_mut(g) {
-                ks.remove(k);
-                if ks.is_empty() {
+            if let Some(list) = self.postings.get_mut(g) {
+                if unpost(list, ord) {
                     self.postings.remove(g);
                 }
             }
         }
         for g in is.difference(&was) {
-            self.postings.entry(*g).or_default().insert(k.clone());
+            post(self.postings.entry(*g).or_default(), ord);
         }
     }
 }
@@ -1172,124 +1378,77 @@ fn key_held(tbl: &Table, eq: &[(&str, &Value)]) -> Option<Key> {
 impl MemoryStore {
     /// `Ark.Store.empty`.
     pub fn empty(schema: Schema) -> MemoryStore {
-        let indexes = schema.tables().map(|t| (t.name.clone(), secondaries(t))).collect();
-        MemoryStore {
-            schema,
-            tables: BTreeMap::new(),
-            indexes,
-            digests: BTreeMap::new(),
-            texts: BTreeMap::new(),
+        let tables = schema.tables().map(|t| (t.name.clone(), TableState::new(t))).collect();
+        MemoryStore { schema, tables }
+    }
+
+    // A table's state, to read.
+    fn table(&self, t: &str) -> Option<&TableState> {
+        self.tables.get(t)
+    }
+
+    // A table's state, to write.
+    fn table_mut(&mut self, t: &str) -> Option<&mut TableState> {
+        self.tables.get_mut(t)
+    }
+
+    /// D4 The ordinals of the rows a text index says may hold the needles,
+    /// sorted: per branch, every trigram of every needle on a column with a
+    /// text index, each trigram's postings intersected ([`intersect`]), and
+    /// the branches' answers together. `None` when some branch has no
+    /// trigram on an indexed column, and the caller reads as it would
+    /// without a hint.
+    fn text_ords(&self, st: &TableState, has: &[Vec<(&str, &str)>]) -> Option<Vec<u32>> {
+        if st.texts.is_empty() {
+            return None;
         }
-        .with_texts()
-    }
-
-    // D4 A text index for every column the schema declares one on, empty.
-    fn with_texts(mut self) -> MemoryStore {
-        self.texts = self
-            .schema
-            .tables()
-            .filter(|t| !t.text.is_empty())
-            .map(|t| {
-                let ixs = t
-                    .text
-                    .iter()
-                    .map(|c| Trigrams {
-                        column: c.clone(),
-                        postings: BTreeMap::new(),
-                    })
-                    .collect();
-                (t.name.clone(), ixs)
-            })
-            .collect();
-        self
-    }
-
-    /// D4 The keys of the rows a text index says may hold the needles, in
-    /// key order: per branch, every trigram of every needle on a column
-    /// with a text index, each trigram's postings intersected — walked from
-    /// the shortest, each key asked of the others — and the branches'
-    /// answers together. `None` when some branch has no trigram on an
-    /// indexed column, and the caller reads as it would without a hint.
-    fn text_keys(&self, t: &str, has: &[Vec<(&str, &str)>]) -> Option<BTreeSet<&Key>> {
-        let ixs = self.texts.get(t)?;
-        let mut out = BTreeSet::new();
+        let mut out = Vec::new();
         for branch in has {
-            let mut lists: Vec<Option<&BTreeSet<Key>>> = vec![];
+            let mut lists: Vec<Option<&Vec<u32>>> = vec![];
             for (c, needle) in branch {
-                let Some(ix) = ixs.iter().find(|ix| ix.column == *c) else { continue };
+                let Some(ix) = st.texts.iter().find(|ix| ix.column == *c) else {
+                    continue;
+                };
                 lists.extend(trigrams(needle).iter().map(|g| ix.postings.get(g)));
             }
             if lists.is_empty() {
                 return None;
             }
             // A trigram nobody holds: no row holds this branch's needles.
-            let Some(mut sets) = lists.into_iter().collect::<Option<Vec<_>>>() else {
+            let Some(lists) = lists.into_iter().map(|l| l.map(Vec::as_slice)).collect::<Option<Vec<_>>>() else {
                 continue;
             };
-            sets.sort_by_key(|s| s.len());
-            let (first, rest) = sets.split_first()?;
-            out.extend(first.iter().filter(|k| rest.iter().all(|s| s.contains(*k))));
+            let hit = intersect(lists);
+            if out.is_empty() {
+                out = hit;
+            } else {
+                out.extend(hit);
+            }
+        }
+        if has.len() > 1 {
+            out.sort_unstable();
+            out.dedup();
         }
         Some(out)
     }
 
     /// Put `row` under `k` in `t` (or take the key out, for `None`), and
     /// keep every index of the table true to the rows: the one place the
-    /// rows change.
+    /// rows change ([`TableState::set`]).
     ///
-    /// A table whose last row goes is taken out of `tables` altogether, as
-    /// an emptied index posting is out of its index: the representation is
-    /// the rows and nothing else, so a store that wrote a table's first row
-    /// and then undid it — what a rebase's inverse does — is equal to one
-    /// that never wrote it (`docs/plan-perf.md` R2).
+    /// A table whose last row goes holds what it held before its first,
+    /// as an emptied index posting is out of its index: the representation
+    /// is the rows and nothing else, so a store that wrote a table's first
+    /// row and then undid it — what a rebase's inverse does — is equal to
+    /// one that never wrote it (`docs/plan-perf.md` R2).
     ///
     /// The table's digest moves here too (§8.1, `docs/plan-db.md` D3): the
     /// old row's leaf taken away, the new one's added — nothing when the
-    /// row is the one already there — and the digest dropped with the
-    /// table's last row, when it is back to zero.
+    /// row is the one already there — and back to zero with the table's
+    /// last row.
     fn set(&mut self, t: &str, k: Key, row: Option<Row>) {
-        let rows = self.tables.entry(t.into()).or_default();
-        let old = match &row {
-            Some(r) => rows.insert(k.clone(), r.clone()),
-            None => rows.remove(&k),
-        };
-        let emptied = rows.is_empty();
-        if emptied {
-            self.tables.remove(t);
-        }
-        if old != row {
-            let d = self.digests.entry(t.into()).or_default();
-            if let Some(o) = &old {
-                d.sub(&leaf(t, o));
-            }
-            if let Some(r) = &row {
-                d.add(&leaf(t, r));
-            }
-            if emptied {
-                debug_assert_eq!(*d, Digest::ZERO, "a table with no rows sums to nothing");
-                self.digests.remove(t);
-            }
-        }
-        if let Some(ixs) = self.texts.get_mut(t) {
-            for ix in ixs {
-                ix.set(&k, old.as_ref(), row.as_ref());
-            }
-        }
-        if let Some(ixs) = self.indexes.get_mut(t) {
-            for ix in ixs {
-                if let Some(o) = &old {
-                    let ok = ix.key_of(o);
-                    if let Some(ks) = ix.rows.get_mut(&ok) {
-                        ks.remove(&k);
-                        if ks.is_empty() {
-                            ix.rows.remove(&ok);
-                        }
-                    }
-                }
-                if let Some(r) = &row {
-                    ix.rows.entry(ix.key_of(r)).or_default().insert(k.clone());
-                }
-            }
+        if let Some(st) = self.table_mut(t) {
+            st.set(t, k, row);
         }
     }
 
@@ -1314,14 +1473,14 @@ impl MemoryStore {
     /// the name and its numbered siblings — the `(user_id, name)` index,
     /// its prefix and a range — rather than every playlist of theirs. A
     /// table with none of these answers `None`.
-    fn lookup<'s, 'q>(&'s self, t: &str, eq: &[(&str, &Value)], spans: &'q [Span<'q>]) -> Option<(&'s Secondary, Vec<Value>, Option<&'q Span<'q>>)> {
-        let ixs = self.indexes.get(t)?;
+    fn lookup<'s, 'q>(st: &'s TableState, eq: &[(&str, &Value)], spans: &'q [Span<'q>]) -> Option<(&'s Secondary, Vec<Value>, Option<&'q Span<'q>>)> {
+        let ixs = &st.indexes;
         let is_held = |c: &FieldName| eq.iter().any(|(n, _)| n == c);
         let whole = ixs
             .iter()
             .filter(|ix| ix.columns.iter().all(is_held))
             .map(|ix| (ix, held(&ix.columns, eq), None))
-            .min_by_key(|(ix, vals, _)| ix.rows.get(vals).map_or(0, BTreeSet::len));
+            .min_by_key(|(ix, vals, _)| ix.rows.get(vals).map_or(0, Vec::len));
         if whole.is_some() {
             return whole;
         }
@@ -1337,7 +1496,9 @@ impl MemoryStore {
 
     /// The rows of a table, by key (`Ark.Store.rows`).
     pub fn rows(&self, table: &str) -> BTreeMap<Key, Row> {
-        self.tables.get(table).cloned().unwrap_or_default()
+        self.table(table)
+            .map(|st| st.rows.iter().map(|(k, s)| (k.clone(), s.row.clone())).collect())
+            .unwrap_or_default()
     }
 
     /// Every table of the schema, in schema order (`Ark.Store.tableNames`).
@@ -1347,17 +1508,17 @@ impl MemoryStore {
 
     /// Whether any table holds a row.
     pub fn is_empty(&self) -> bool {
-        self.tables.values().all(|t| t.is_empty())
+        self.tables.values().all(|t| t.rows.is_empty())
     }
 
     /// The rows of two stores over one schema, together; where both hold a
     /// table, `self` wins (`Ark.Store.merge`).
     pub fn merge(&self, other: &MemoryStore) -> MemoryStore {
         let mut out = self.clone();
-        for (t, rows) in &other.tables {
-            for (k, r) in rows {
-                if !out.tables.get(t).is_some_and(|mine| mine.contains_key(k)) {
-                    out.set(t, k.clone(), Some(r.clone()));
+        for (t, theirs) in &other.tables {
+            for (k, s) in &theirs.rows {
+                if !out.table(t).is_some_and(|mine| mine.rows.contains_key(k)) {
+                    out.set(t, k.clone(), Some(s.row.clone()));
                 }
             }
         }
@@ -1393,62 +1554,57 @@ impl Store for MemoryStore {
     }
 
     fn get(&self, table: &str, key: &[Value]) -> Option<Row> {
-        self.tables.get(table).and_then(|t| t.get(key)).cloned()
+        self.table(table).and_then(|t| t.rows.get(key)).map(|s| s.row.clone())
     }
 
     // Asked by every write of a row with a reference, once per parent, and
     // by every `exists` check: answered without copying the row out
     // (`docs/plan-perf.md` R5).
     fn exists(&self, table: &str, key: &[Value]) -> bool {
-        self.tables.get(table).is_some_and(|t| t.contains_key(key))
+        self.table(table).is_some_and(|t| t.rows.contains_key(key))
     }
 
     fn scan(&self, table: &str) -> Vec<Row> {
-        self.tables.get(table).map(|t| t.values().cloned().collect()).unwrap_or_default()
+        self.table(table)
+            .map(|t| t.rows.values().map(|s| s.row.clone()).collect())
+            .unwrap_or_default()
     }
 
     fn scan_where(&self, table: &str, keep: &dyn Fn(&Row) -> bool) -> Vec<Row> {
-        self.tables
-            .get(table)
-            .map(|t| t.values().filter(|r| keep(r)).cloned().collect())
+        self.table(table)
+            .map(|t| t.rows.values().map(|s| &s.row).filter(|r| keep(r)).cloned().collect())
             .unwrap_or_default()
     }
 
     fn scan_where_eq(&self, table: &str, eq: &[(&str, &Value)], spans: &[Span], keep: &dyn Fn(&Row) -> bool) -> Vec<Row> {
-        if let Some(k) = self.schema.lookup_table(table).and_then(|tbl| key_held(tbl, eq)) {
-            return self
-                .tables
-                .get(table)
-                .and_then(|t| t.get(&k))
-                .filter(|r| keep(r))
-                .cloned()
-                .into_iter()
-                .collect();
-        }
-        let Some((ix, vals, span)) = self.lookup(table, eq, spans) else {
-            return self.scan_where(table, keep);
-        };
-        let Some(rows) = self.tables.get(table) else {
+        let tbl = self.schema.lookup_table(table);
+        let Some(st) = self.table(table) else {
             return vec![];
         };
-        if vals.len() == ix.columns.len() {
-            let Some(keys) = ix.rows.get(&vals) else {
+        if let Some(k) = tbl.and_then(|tbl| key_held(tbl, eq)) {
+            return st.rows.get(&k).map(|s| &s.row).filter(|r| keep(r)).cloned().into_iter().collect();
+        }
+        let Some((ix, vals, span)) = MemoryStore::lookup(st, eq, spans) else {
+            return self.scan_where(table, keep);
+        };
+        // One bucket, or a prefix and perhaps a range after it: either way
+        // the rows come in ordinal order, and a scan answers in key order —
+        // so what is kept is put in key order once it is read (D7.2).
+        let mut out: Vec<Row> = if vals.len() == ix.columns.len() {
+            let Some(ords) = ix.rows.get(&vals) else {
                 return vec![];
             };
-            return keys.iter().filter_map(|k| rows.get(k)).filter(|r| keep(r)).cloned().collect();
-        }
-        // A prefix, and perhaps a range after it: the buckets under it come
-        // in the index's order, not the key's, and a scan answers in key
-        // order — so what is kept is put back in key order before a row is
-        // copied.
-        let mut hits: Vec<(&Key, &Row)> = ix
-            .under(&vals, span)
-            .flat_map(|(_, ks)| ks.iter())
-            .filter_map(|k| rows.get(k).map(|r| (k, r)))
-            .filter(|(_, r)| keep(r))
-            .collect();
-        hits.sort_by(|a, b| a.0.cmp(b.0));
-        hits.into_iter().map(|(_, r)| r.clone()).collect()
+            ords.iter().map(|o| st.at(*o)).filter(|r| keep(r)).cloned().collect()
+        } else {
+            ix.under(&vals, span)
+                .flat_map(|(_, ords)| ords.iter())
+                .map(|o| st.at(*o))
+                .filter(|r| keep(r))
+                .cloned()
+                .collect()
+        };
+        by_key(tbl, &mut out);
+        out
     }
 
     /// R1: through the first index that [serves](Secondary::serves) the
@@ -1459,6 +1615,13 @@ impl Store for MemoryStore {
     /// eight thousand, one. A span on the column after the held ones
     /// narrows the walk to its range first (R6), so rows outside it are
     /// never examined; a span on any other column is left to `keep`.
+    ///
+    /// A bucket's ordinals are in the order its rows were numbered, so a
+    /// bucket of more than one row is put in key order before it is walked
+    /// — one bucket at a time, as the walk reaches it, so the walk still
+    /// stops at the `limit` (D7.2). The rows of a bucket are sorted, not
+    /// judged: `keep` is still asked only of the rows up to the last one
+    /// returned.
     fn scan_ordered(
         &self,
         table: &str,
@@ -1469,26 +1632,31 @@ impl Store for MemoryStore {
         limit: usize,
     ) -> Option<Vec<Row>> {
         let tbl = self.schema.lookup_table(table)?;
-        let (ix, n, dir) = self
-            .indexes
-            .get(table)?
-            .iter()
-            .find_map(|ix| ix.serves(tbl, eq, order).map(|(n, d)| (ix, n, d)))?;
+        let st = self.table(table)?;
+        let (ix, n, dir) = st.indexes.iter().find_map(|ix| ix.serves(tbl, eq, order).map(|(n, d)| (ix, n, d)))?;
         let mut out = Vec::new();
-        let Some(rows) = self.tables.get(table) else {
-            return Some(out);
-        };
-        if limit == 0 {
+        if limit == 0 || st.rows.is_empty() {
             return Some(out);
         }
         let prefix = held(&ix.columns[..n], eq);
         let span = bounding(&ix.columns, n, spans);
-        // One bucket's keys, ascending whichever way the buckets are
+        // One bucket's rows, in key order whichever way the buckets are
         // walked; true once the answer is full.
-        let mut take = |ks: &BTreeSet<Key>| {
-            for r in ks.iter().filter_map(|k| rows.get(k)) {
+        let mut sorted: Vec<&Row> = Vec::new();
+        let mut take = |ords: &[u32]| {
+            let one;
+            let rows: &[&Row] = if let [o] = ords {
+                one = [st.at(*o)];
+                &one
+            } else {
+                sorted.clear();
+                sorted.extend(ords.iter().map(|o| st.at(*o)));
+                sorted.sort_unstable_by(|a, b| compare_rows(tbl, &[], a, b));
+                &sorted
+            };
+            for r in rows {
                 if keep(r) {
-                    out.push(r.clone());
+                    out.push((*r).clone());
                     if out.len() == limit {
                         return true;
                     }
@@ -1498,15 +1666,15 @@ impl Store for MemoryStore {
         };
         match dir {
             Dir::Asc => {
-                for (_, ks) in ix.under(&prefix, span) {
-                    if take(ks) {
+                for (_, ords) in ix.under(&prefix, span) {
+                    if take(ords) {
                         break;
                     }
                 }
             }
             Dir::Desc => {
-                for (_, ks) in ix.under(&prefix, span).rev() {
-                    if take(ks) {
+                for (_, ords) in ix.under(&prefix, span).rev() {
+                    if take(ords) {
                         break;
                     }
                 }
@@ -1536,16 +1704,14 @@ impl Store for MemoryStore {
     /// Kept by [`MemoryStore::set`]: read, never summed. A table of the
     /// schema with no rows is zero; one the schema lacks has none.
     fn digest(&self, table: &str) -> Option<Digest> {
-        self.schema
-            .lookup_table(table)
-            .map(|_| self.digests.get(table).copied().unwrap_or_default())
+        self.table(table).map(|st| st.digest)
     }
 
     /// D4 Through a text index, when one serves a needle: the rows of the
     /// postings' intersection, each asked of `keep` — so the rows examined
-    /// are the intersection, not the table. The whole key held is still
-    /// the one row, and anything a text index does not serve is
-    /// [`Store::scan_where_eq`].
+    /// are the intersection, not the table — then put in key order (D7.2).
+    /// The whole key held is still the one row, and anything a text index
+    /// does not serve is [`Store::scan_where_eq`].
     fn scan_where_text(
         &self,
         table: &str,
@@ -1554,15 +1720,18 @@ impl Store for MemoryStore {
         has: &[Vec<(&str, &str)>],
         keep: &dyn Fn(&Row) -> bool,
     ) -> Vec<Row> {
-        let by_key = self.schema.lookup_table(table).and_then(|tbl| key_held(tbl, eq)).is_some();
-        let keys = if by_key { None } else { self.text_keys(table, has) };
-        let Some(keys) = keys else {
+        let tbl = self.schema.lookup_table(table);
+        let whole_key = tbl.and_then(|tbl| key_held(tbl, eq)).is_some();
+        let found = match self.table(table) {
+            Some(st) if !whole_key => self.text_ords(st, has).map(|ords| (st, ords)),
+            _ => None,
+        };
+        let Some((st, ords)) = found else {
             return self.scan_where_eq(table, eq, spans, keep);
         };
-        let Some(rows) = self.tables.get(table) else {
-            return vec![];
-        };
-        keys.into_iter().filter_map(|k| rows.get(k)).filter(|r| keep(r)).cloned().collect()
+        let mut out: Vec<Row> = ords.iter().map(|o| st.at(*o)).filter(|r| keep(r)).cloned().collect();
+        by_key(tbl, &mut out);
+        out
     }
 
     fn as_store(&self) -> &dyn Store {
@@ -2418,5 +2587,78 @@ mod tests {
         assert_eq!(base.scan("p").len(), 1);
         base.apply_changes(&changes);
         assert_eq!(base.scan("p"), vec![row(vec![("id", Value::int(0)), ("name", Value::Null)])]);
+    }
+
+    /// `docs/plan-db.md` D7.2: a store numbers its rows in the order they
+    /// were written, freeing a removed row's number for the next, and its
+    /// postings are those numbers — so here a store written backwards,
+    /// with removals between, holds every bucket out of key order. Every
+    /// read through an index still answers in key order (a bucket, a
+    /// prefix and its range, an ordered read cut at a limit, a text
+    /// search), the same answer as a store written in key order, and the
+    /// two stores are equal although no row has the same number in both.
+    /// Falsified twice: by `by_key` not sorting (the backwards store
+    /// answers its bucket backwards), and by `PartialEq` comparing the
+    /// slots' ordinals as a derived one would (the stores differ).
+    #[test]
+    fn rows_numbered_out_of_key_order_are_read_in_key_order() {
+        let col = |n: &str, ty: Ty| Column {
+            name: n.into(),
+            ty,
+            nullable: false,
+        };
+        let sch = Schema {
+            tables: vec![Table::new(
+                "s",
+                vec![col("id", Ty::Int), col("grp", Ty::Int), col("name", Ty::Text)],
+                vec!["id".into()],
+                vec![Index {
+                    columns: vec!["grp".into(), "name".into()],
+                    unique: false,
+                }],
+                vec![],
+            )
+            .with_text(vec!["name".into()])],
+        };
+        let s = |id: i64| {
+            row(vec![
+                ("id", Value::int(id)),
+                ("grp", Value::int(id % 3)),
+                ("name", Value::text("same name")),
+            ])
+        };
+        let mut back = MemoryStore::empty(sch.clone());
+        for id in (0..40).rev() {
+            back.apply_change(&Change::Add("s".into(), s(id)));
+        }
+        // Freed numbers, taken again by rows below the ones that freed them.
+        for id in [39, 38, 37, 36] {
+            back.apply_change(&Change::Remove("s".into(), s(id)));
+        }
+        for id in [50, 45, 41] {
+            back.apply_change(&Change::Add("s".into(), s(id)));
+        }
+        let mut fwd = MemoryStore::empty(sch.clone());
+        for id in (0..36).chain([41, 45, 50]) {
+            fwd.apply_change(&Change::Add("s".into(), s(id)));
+        }
+        assert!(back == fwd, "the same rows, numbered differently, are the same store");
+        let ids = |rows: Vec<Row>| rows.iter().map(|r| r["id"].as_int()).collect::<Vec<i64>>();
+        let all = |_: &Row| true;
+        let want: Vec<i64> = (0..36).chain([41, 45, 50]).filter(|i| i % 3 == 0).collect();
+        let name = Value::text("same name");
+        for st in [&back, &fwd] {
+            let bucket = st.scan_where_eq("s", &[("grp", &Value::int(0)), ("name", &name)], &[], &all);
+            assert_eq!(ids(bucket), want, "a bucket");
+            let prefix = st.scan_where_eq("s", &[("grp", &Value::int(0))], &[], &all);
+            assert_eq!(ids(prefix), want, "a prefix");
+            let first = st
+                .scan_ordered("s", &[("grp", &Value::int(0))], &[], &[("name", Dir::Desc)], &all, 3)
+                .unwrap();
+            assert_eq!(ids(first), want[..3], "an ordered read, cut");
+            let found = st.scan_where_text("s", &[], &[], &[vec![("name", "me na")]], &all);
+            let every: Vec<i64> = (0..36).chain([41, 45, 50]).collect();
+            assert_eq!(ids(found), every, "a text search");
+        }
     }
 }

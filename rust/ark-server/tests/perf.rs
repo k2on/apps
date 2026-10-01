@@ -772,7 +772,10 @@ fn perf_d_bytes() {
     let root = std::env::var_os("ARK_PERF_DIR")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(std::env::temp_dir);
-    eprintln!("\n{:<8} {:>8} {:>10} {:>10} {:>12} {:>12}", "open", "rows", "live MB", "rss MB", "live B/row", "rss B/row");
+    eprintln!(
+        "\n{:<8} {:>8} {:>10} {:>10} {:>12} {:>12}",
+        "open", "rows", "live MB", "rss MB", "live B/row", "rss B/row"
+    );
     for n in BYTES_SIZES {
         for kind in ["store", "client"] {
             let dir = tempfile::Builder::new().prefix("ark-bytes-").tempdir_in(&root).unwrap();
