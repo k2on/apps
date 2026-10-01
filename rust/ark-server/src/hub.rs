@@ -138,6 +138,10 @@ pub struct Health {
     pub horizon: Seq,
     /// Open rooms and how many peers each has.
     pub rooms: Vec<(String, usize)>,
+    /// The hash of every module this server has run, in hash order
+    /// (`crate::modules`), and the one it runs now.
+    pub modules: Vec<Vec<u8>>,
+    pub module: Option<Vec<u8>>,
 }
 
 const KEPT: &str = "live.cbor";
@@ -250,6 +254,8 @@ impl Hub {
             head: self.server.authority.log.head_seq(),
             horizon: self.server.authority.log.horizon(),
             rooms: self.server.rooms.open.iter().map(|(r, (_, ps))| (r.clone(), ps.len())).collect(),
+            modules: self.server.authority.modules.keys().cloned().collect(),
+            module: self.server.module.clone(),
         }
     }
 

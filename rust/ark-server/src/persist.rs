@@ -208,7 +208,7 @@ pub fn load(dir: &Path, schema: &Schema) -> Result<Option<Log>> {
 /// Write `bytes` as `dir/name`: to a temporary name, synced, renamed over
 /// the old one, and the directory synced — so a stop leaves the old file
 /// or the new one, never part of either.
-fn write_whole(dir: &Path, name: &str, bytes: &[u8]) -> Result<()> {
+pub(crate) fn write_whole(dir: &Path, name: &str, bytes: &[u8]) -> Result<()> {
     fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     let tmp = dir.join(format!(".{name}.tmp"));
     {

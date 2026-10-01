@@ -36,6 +36,7 @@
 
 mod hub;
 pub mod live;
+pub mod modules;
 pub mod persist;
 pub mod retain;
 mod sync;
@@ -303,6 +304,20 @@ fn open_hub(
     let schema = &domain.module().schema;
     let mut a = Authority::new(schema.clone(), domain.closures().clone());
     a.hold(domain.native_list());
+    // Every module this server has run, this one among them, and their
+    // closures held and kept (closure provenance, `modules` module docs).
+    let module = domain.hash();
+    let shipped = || domain.closures().iter().map(|(h, c)| (h.clone(), c.clone()));
+    let ran = match &data {
+        Some(dir) => modules::start_with(dir, module.clone(), shipped())?,
+        None => vec![(module.clone(), shipped().collect())],
+    };
+    if ran.len() > 1 {
+        eprintln!("{name}: holding the closures of {} modules run before this one", ran.len() - 1);
+    }
+    for (m, cs) in ran {
+        a.ran(m, cs);
+    }
     let mut file = None;
     if let Some(dir) = &data {
         let (f, log) = persist::LogFile::open(dir, schema)?;
@@ -313,7 +328,7 @@ fn open_hub(
         file = Some(f);
     }
     eprintln!("{name}: the log at seq {}, its horizon at {}", a.log.head_seq(), a.log.horizon());
-    let mut server = Server::open(auth, access, relay.clone(), a);
+    let mut server = Server::open(auth, access, relay.clone(), a).with_module(module);
     if let Some(owns) = owns {
         server = server.with_owns(owns);
     }
@@ -393,6 +408,12 @@ async fn healthz(State(hub): State<HubHandle>) -> Response {
             let mut text = format!("ok\nconnections {}\n", h.connections);
             text.push_str(&format!("head {}\n", h.head));
             text.push_str(&format!("horizon {}\n", h.horizon));
+            // Every module this server has run, the current one marked
+            // (closure provenance, `modules`).
+            for m in &h.modules {
+                let current = if Some(m) == h.module.as_ref() { " current" } else { "" };
+                text.push_str(&format!("module {}{current}\n", ark::value::hex(m)));
+            }
             for (room, n) in h.rooms {
                 text.push_str(&format!("room {room} peers {n}\n"));
             }
