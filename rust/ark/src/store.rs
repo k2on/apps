@@ -194,6 +194,26 @@ impl Row {
         Row::from_struct_ref(m)
     }
 
+    /// `docs/plan-db.md` D7.4 A row read field by field from a snapshot
+    /// ([`crate::canon::decode_rows`]), the fields drained: laid out as
+    /// `tbl`'s when they are exactly its columns, each value moved into its
+    /// place, and otherwise kept as they are, a row of no table — what
+    /// [`Row::stored_in`] makes of the struct they would have been.
+    pub fn from_fields(tbl: Option<&Table>, fields: &mut Vec<(&str, Value)>) -> Row {
+        if let Some(tbl) = tbl {
+            let cols = tbl.row_columns();
+            if fields.len() == cols.len() && fields.iter().all(|(k, _)| cols.position(k).is_some()) {
+                let mut vals: Vec<Value> = (0..cols.len()).map(|_| Value::Null).collect();
+                for (k, v) in fields.drain(..) {
+                    let at = cols.position(k).expect("every field is a column");
+                    vals[at] = v;
+                }
+                return Row::new(cols.clone(), vals);
+            }
+        }
+        Row::from_struct(fields.drain(..).map(|(k, v)| (k.to_string(), v)).collect())
+    }
+
     /// A row of no table yet: a struct's fields as they are, in name order.
     /// What a row decoded without its schema is — from the wire, from a
     /// vector — until a store lays it out as its table's

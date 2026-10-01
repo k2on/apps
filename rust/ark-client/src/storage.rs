@@ -450,7 +450,16 @@ impl ReplicaFile {
 /// none, as one written before logs had names does not (module docs).
 pub fn decode_replica(bytes: &[u8], schema: &Schema) -> Result<(ReplicaFile, Option<Id>), Error> {
     let bad = |w: &str| Error::Corrupt(format!("a replica file: {w}"));
-    let v = canon::decode(bytes).map_err(|e| bad(&e.to_string()))?;
+    // The rows are built as they are read (`docs/plan-db.md` D7.4): no
+    // struct per row is decoded and then freed. What comes back under
+    // `confirmed` is only what is not a list of rows, which is refused
+    // below as it always was.
+    let mut confirmed = MemoryStore::empty(schema.clone());
+    let v = canon::decode_rows(bytes, &["confirmed"], &mut |t, fields| {
+        let row = Row::from_fields(schema.lookup_table(t), fields);
+        confirmed.apply_change(&Change::Add(t.into(), row));
+    })
+    .map_err(|e| bad(&e.to_string()))?;
     let Value::Struct(m) = &v else { return Err(bad("not a struct")) };
     if m.get("t") != Some(&Value::text("replica")) {
         return Err(bad("not a replica"));
@@ -459,21 +468,15 @@ pub fn decode_replica(bytes: &[u8], schema: &Schema) -> Result<(ReplicaFile, Opt
         Some(Value::Int(n)) => *n,
         _ => return Err(bad("no cursor")),
     };
-    let Some(Value::Struct(tables)) = m.get("confirmed") else {
+    let Some(Value::Struct(odd)) = m.get("confirmed") else {
         return Err(bad("no confirmed store"));
     };
-    let mut confirmed = MemoryStore::empty(schema.clone());
-    for (t, rows) in tables {
-        let tbl = schema.lookup_table(t);
+    for (t, rows) in odd {
         let Value::List(rs) = rows else {
             return Err(bad(&format!("rows of {t}")));
         };
-        for r in rs {
-            let Value::Struct(row) = r else {
-                return Err(bad(&format!("a row of {t}")));
-            };
-            let row = tbl.map_or_else(|| Row::from_struct_ref(row), |tbl| Row::stored_in(tbl, row));
-            confirmed.apply_change(&Change::Add(t.clone(), row));
+        if !rs.is_empty() {
+            return Err(bad(&format!("a row of {t}")));
         }
     }
     let pending = match m.get("pending") {

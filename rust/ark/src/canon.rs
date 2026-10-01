@@ -145,6 +145,38 @@ pub fn decode(input: &[u8]) -> Result<Value, DecodeError> {
     }
 }
 
+/// What [`decode_rows`] hands each row to: its table, and its fields in key
+/// order, the names borrowed from the input, to be drained.
+pub type RowSink<'s, 'a> = dyn FnMut(&str, &mut Vec<(&'a str, Value)>) + 's;
+
+/// `docs/plan-db.md` D7.4 [`decode`], except that the struct at `path` —
+/// a chain of struct keys from the root, `["confirmed"]` in a replica
+/// record, `["base", "rows"]` in a log's snapshot — is read as a store's
+/// rows, `{table: [row, …]}`, and each row is handed to `row` as its fields
+/// in key order, the names borrowed from the input, rather than built into
+/// a [`Value::Struct`]. A store opened from a snapshot builds its rows from
+/// the fields as they are read, so the tree of a struct per row — a
+/// `BTreeMap` node and a `String` per column, freed once the rows are built
+/// — is never made: it is the open's high-water mark, which an allocator
+/// keeps resident after it is freed. Exactly as strict as [`decode`]: the
+/// same bytes are refused, for the same reasons.
+///
+/// What is not a list of structs is kept: the value at `path` comes back
+/// as a struct of only the tables whose value is not a list, as they are,
+/// and of the elements of a table's list that are not structs, in order —
+/// what a reader that checks its rows' shapes refuses, and nothing else.
+/// The rows of a table are handed over in order, tables in key order: the
+/// order a reader walking the decoded struct would put them in.
+pub fn decode_rows<'a>(input: &'a [u8], path: &[&str], row: &mut RowSink<'_, 'a>) -> Result<Value, DecodeError> {
+    let mut p = Parser { s: input };
+    let v = p.value_at(path, row)?;
+    if p.s.is_empty() {
+        Ok(v)
+    } else {
+        Err(DecodeError::Trailing)
+    }
+}
+
 /// Whether some bytes are a canonical encoding: they decode, and what they
 /// decode to encodes back to exactly them.
 pub fn round_trip(b: &[u8]) -> bool {
@@ -280,6 +312,17 @@ impl<'a> Parser<'a> {
     /// their encoded bytes, head included.
     fn pairs(&mut self, n: u64) -> Result<BTreeMap<String, Value>, DecodeError> {
         let mut m = BTreeMap::new();
+        self.each_pair(n, &mut |p, k| {
+            let v = p.value()?;
+            m.insert(k.to_string(), v);
+            Ok(())
+        })?;
+        Ok(m)
+    }
+
+    /// `n` pairs, keys checked as [`Parser::pairs`] checks them, each key
+    /// handed to `each` with the parser at its value, which `each` reads.
+    fn each_pair(&mut self, n: u64, each: &mut dyn FnMut(&mut Self, &'a str) -> Result<(), DecodeError>) -> Result<(), DecodeError> {
         let mut prev: Option<&'a [u8]> = None;
         for _ in 0..n {
             let before = self.s;
@@ -293,22 +336,89 @@ impl<'a> Parser<'a> {
                     return Err(DecodeError::UnsortedKeys);
                 }
             }
-            let v = self.value()?;
-            m.insert(k, v);
+            each(self, k)?;
             prev = Some(raw);
         }
-        Ok(m)
+        Ok(())
     }
 
-    /// A map key: a text string, and nothing else.
-    fn key(&mut self) -> Result<String, DecodeError> {
+    /// A map key: a text string, and nothing else, borrowed from the input.
+    fn key(&mut self) -> Result<&'a str, DecodeError> {
         let ib = self.peek()?;
         if ib >> 5 != 3 {
             return Err(DecodeError::NonTextKey);
         }
         self.byte()?;
         let n = self.argument(ib & 0x1f)?;
-        self.text(n)
+        let b = self.chunk(n)?;
+        std::str::from_utf8(b).map_err(|_| DecodeError::BadUtf8)
+    }
+
+    /// The head of a map, if a map is next: its length. Nothing is read
+    /// otherwise.
+    fn map_head(&mut self) -> Result<Option<u64>, DecodeError> {
+        let ib = self.peek()?;
+        if ib >> 5 != 5 {
+            return Ok(None);
+        }
+        self.byte()?;
+        self.argument(ib & 0x1f).map(Some)
+    }
+
+    /// [`decode_rows`]: the value here, with the struct at `path` read as
+    /// rows.
+    fn value_at(&mut self, path: &[&str], row: &mut RowSink<'_, 'a>) -> Result<Value, DecodeError> {
+        let Some((first, rest)) = path.split_first() else {
+            return self.tables(row);
+        };
+        let Some(n) = self.map_head()? else {
+            return self.value();
+        };
+        let mut m = BTreeMap::new();
+        self.each_pair(n, &mut |p, k| {
+            let v = if k == *first { p.value_at(rest, row)? } else { p.value()? };
+            m.insert(k.to_string(), v);
+            Ok(())
+        })?;
+        Ok(Value::Struct(m))
+    }
+
+    /// `{table: [row, …]}`, each row that is a struct handed to `row`;
+    /// what is not, kept (see [`decode_rows`]).
+    fn tables(&mut self, row: &mut RowSink<'_, 'a>) -> Result<Value, DecodeError> {
+        let Some(n) = self.map_head()? else {
+            return self.value();
+        };
+        let mut kept = BTreeMap::new();
+        let mut fields: Vec<(&'a str, Value)> = Vec::new();
+        self.each_pair(n, &mut |p, t| {
+            let ib = p.peek()?;
+            if ib >> 5 != 4 {
+                kept.insert(t.to_string(), p.value()?);
+                return Ok(());
+            }
+            p.byte()?;
+            let len = p.argument(ib & 0x1f)?;
+            let mut odd = Vec::new();
+            for _ in 0..len {
+                let Some(k) = p.map_head()? else {
+                    odd.push(p.value()?);
+                    continue;
+                };
+                fields.clear();
+                p.each_pair(k, &mut |p, name| {
+                    let v = p.value()?;
+                    fields.push((name, v));
+                    Ok(())
+                })?;
+                row(t, &mut fields);
+            }
+            if !odd.is_empty() {
+                kept.insert(t.to_string(), Value::List(odd));
+            }
+            Ok(())
+        })?;
+        Ok(Value::Struct(kept))
     }
 
     /// What follows tag 37: a byte string of exactly sixteen bytes.
@@ -363,5 +473,65 @@ mod tests {
         assert!(round_trip(&b));
         assert_eq!(decode(&[0xd8, 0x25, 0x41, 0x00]), Err(DecodeError::BadId));
         assert_eq!(decode(&[0xd8, 0x26, 0x00]), Err(DecodeError::BadTag));
+    }
+
+    /// `docs/plan-db.md` D7.4 `decode_rows` hands over exactly the rows
+    /// `decode` would have built, in order — the fields of each struct in a
+    /// table's list, tables in key order — keeps what is not a list of
+    /// structs where it was, decodes everything off the path as `decode`
+    /// does, and refuses what `decode` refuses: here a row whose keys are
+    /// out of order. Falsified by dropping the elements that are not
+    /// structs instead of keeping them: the kept struct lost `a`'s `7`.
+    #[test]
+    fn rows_decoded_in_place_are_the_rows_decoded() {
+        let row = |i: i64| {
+            Value::Struct(
+                [("id", Value::Int(i)), ("nm", Value::text(format!("n{i}"))), ("tg", Value::Null)]
+                    .into_iter()
+                    .map(|(k, v)| (k.to_string(), v))
+                    .collect(),
+            )
+        };
+        let tables: BTreeMap<String, Value> = [
+            ("a".to_string(), Value::List(vec![row(1), Value::Int(7), row(2)])),
+            ("b".to_string(), Value::Int(1)),
+            ("c".to_string(), Value::List(vec![row(3)])),
+        ]
+        .into();
+        let whole = Value::Struct(
+            [
+                ("confirmed".to_string(), Value::Struct(tables)),
+                ("t".to_string(), Value::text("replica")),
+            ]
+            .into(),
+        );
+        let bytes = encode(&whole);
+        let mut seen: Vec<(String, Value)> = vec![];
+        let rest = decode_rows(&bytes, &["confirmed"], &mut |t, fields| {
+            let m: BTreeMap<String, Value> = fields.drain(..).map(|(k, v)| (k.to_string(), v)).collect();
+            seen.push((t.to_string(), Value::Struct(m)));
+        })
+        .unwrap();
+        assert_eq!(seen, vec![("a".into(), row(1)), ("a".into(), row(2)), ("c".into(), row(3))]);
+        let kept = Value::Struct(
+            [
+                (
+                    "confirmed".to_string(),
+                    Value::Struct([("a".to_string(), Value::List(vec![Value::Int(7)])), ("b".to_string(), Value::Int(1))].into()),
+                ),
+                ("t".to_string(), Value::text("replica")),
+            ]
+            .into(),
+        );
+        assert_eq!(rest, kept);
+        // Off the path, the value is `decode`'s.
+        assert_eq!(decode_rows(&bytes, &["elsewhere"], &mut |_, _| panic!("no rows here")).unwrap(), whole);
+        // The first row's "id" renamed "zz", which sorts after the "nm"
+        // that follows it: both refuse it.
+        let at = bytes.windows(3).position(|w| w == [0x62, b'i', b'd']).unwrap();
+        let mut bad = bytes.clone();
+        bad[at..at + 3].copy_from_slice(&[0x62, b'z', b'z']);
+        assert_eq!(decode(&bad), Err(DecodeError::UnsortedKeys));
+        assert_eq!(decode_rows(&bad, &["confirmed"], &mut |_, _| {}), Err(DecodeError::UnsortedKeys));
     }
 }

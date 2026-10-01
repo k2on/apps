@@ -63,7 +63,7 @@ use crate::hash::{state_hash_by, HASH_VERSION};
 use crate::log::{snapshot_of, Entry, Facts, Log, Seq};
 use crate::protocol::{change_from_value, change_value, entry_from_value, entry_value};
 use crate::schema::Schema;
-use crate::store::{MemoryStore, Row, Store};
+use crate::store::{Change, MemoryStore, Row, Store};
 use crate::value::{FieldName, Id, Value};
 
 /// A key/value place for a log's records: what the server's directory and
@@ -268,13 +268,20 @@ pub fn hashing_of(base: &BTreeMap<FieldName, Value>) -> Result<i64, String> {
 
 /// A log from its value, over the module's schema.
 pub fn log_from_value(schema: &Schema, v: &Value) -> Result<Log, String> {
+    let base = fields(need(fields(v)?, "base")?)?;
+    let store = MemoryStore::from_value(schema.clone(), need(base, "rows")?);
+    log_from_parts(v, store)
+}
+
+// [`log_from_value`], given the store its snapshot's rows make.
+fn log_from_parts(v: &Value, store: MemoryStore) -> Result<Log, String> {
     let m = fields(v)?;
     match need(m, "t")? {
         Value::Text(t) if t == "log" => {}
         other => return Err(format!("not a log file: t = {other:?}")),
     }
     let base = fields(need(m, "base")?)?;
-    let store = MemoryStore::from_value(schema.clone(), need(base, "rows")?);
+    need(base, "rows")?;
     let log_id = match base.get("log") {
         None => None,
         Some(Value::Id(i)) => Some(*i),
@@ -326,8 +333,17 @@ pub fn log_from_value(schema: &Schema, v: &Value) -> Result<Log, String> {
 
 /// The snapshot's bytes back, as a log.
 pub fn decode_snapshot(schema: &Schema, bytes: &[u8]) -> Result<Log, String> {
-    let v = canon::decode(bytes).map_err(|e| format!("decoding: {e}"))?;
-    log_from_value(schema, &v)
+    // The snapshot's rows are built as they are read (`docs/plan-db.md`
+    // D7.4), into the store `log_from_value` would have built from them:
+    // the same rows, applied raw, in the same order — and what is not a
+    // list of rows ignored, as `MemoryStore::from_value` ignores it.
+    let mut store = MemoryStore::empty(schema.clone());
+    let v = canon::decode_rows(bytes, &["base", "rows"], &mut |t, fields| {
+        let row = Row::from_fields(schema.lookup_table(t), fields);
+        store.apply_change(&Change::Add(t.into(), row));
+    })
+    .map_err(|e| format!("decoding: {e}"))?;
+    log_from_parts(&v, store)
 }
 
 /// What reading one page's records over a head found.

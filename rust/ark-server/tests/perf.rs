@@ -474,11 +474,12 @@ fn dir_bytes(dir: &std::path::Path) -> u64 {
 /// thing measured; each open runs in a process of its own
 /// ([`perf_d_open_child`]) so the resident memory after it is the open's,
 /// not this generator's. The time is split coarsely into what it is spent
-/// on: decoding CBOR into values, building the store (rows into tables and
-/// their indexes, and each row's leaf of the state hash), freeing the
-/// decoded values, checking the snapshot's hash, replaying records, and —
-/// for a peer — opening the replica, whose optimistic store starts as a
-/// copy of the confirmed one. "The rest" is the open less what was timed
+/// on: reading the rows — decoding the CBOR and building the store in one
+/// pass (`docs/plan-db.md` D7.4), rows into tables and their indexes and
+/// each row's leaf of the state hash — checking the snapshot's hash,
+/// replaying records, and — for a peer — opening the replica, whose
+/// optimistic store starts as a clone of the confirmed one, sharing every
+/// table (D7.3). "The rest" is the open less what was timed
 /// apart. Timings move with the machine's load; the resident memory does
 /// not.
 ///
@@ -597,26 +598,23 @@ fn perf_d_open_child() {
     };
     let mut split = String::new();
     // The client checks no hash on open; the server checks its snapshot's.
+    // The rows are built as they are decoded (`docs/plan-db.md` D7.4), so
+    // decoding and building are one pass and there is no tree to free:
+    // "read" is that pass, as the open makes it.
     let snapshot_split = |bytes: &[u8], rows_key: &str, hashes: bool, split: &mut String| -> MemoryStore {
-        let mut v = Value::Null;
-        let decode = time(&mut || v = ark::canon::decode(bytes).unwrap());
-        // The rows taken out of the tree rather than copied, so nothing is
-        // timed twice.
-        let Value::Struct(m) = &mut v else { panic!("not a record") };
-        let holder = if rows_key == "base" {
-            let Some(Value::Struct(b)) = m.get_mut("base") else { panic!("no base") };
-            b
-        } else {
-            m
-        };
-        let key = if rows_key == "base" { "rows" } else { rows_key };
-        let rows = std::mem::replace(holder.get_mut(key).unwrap(), Value::Null);
+        let path: &[&str] = if rows_key == "base" { &["base", "rows"] } else { &[rows_key] };
         let mut st = MemoryStore::empty(schema.clone());
-        let build = time(&mut || st = MemoryStore::from_value(schema.clone(), &rows));
-        // Freeing the decoded tree is part of an open too.
-        let mut held = Some((rows, std::mem::replace(&mut v, Value::Null)));
-        let free = time(&mut || drop(held.take()));
-        split.push_str(&format!("decode {:.0}, build {:.0}, free {:.0}", ms(decode), ms(build), ms(free)));
+        let read = time(&mut || {
+            let mut built = MemoryStore::empty(schema.clone());
+            let rest = ark::canon::decode_rows(bytes, path, &mut |t, fields| {
+                let row = ark::store::Row::from_fields(schema.lookup_table(t), fields);
+                built.apply_change(&ark::store::Change::Add(t.into(), row));
+            })
+            .unwrap();
+            std::hint::black_box(rest);
+            st = built;
+        });
+        split.push_str(&format!("read {:.0}", ms(read)));
         if hashes {
             let hash = time(&mut || {
                 std::hint::black_box(ark::hash::state_hash(std::hint::black_box(&st)));
