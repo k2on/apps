@@ -90,9 +90,17 @@ fn table(x: &Value) -> D<Table> {
     let here = |k: &'static str| vec!["table", name.as_str(), k];
     let columns = list(&here("columns"), column, field(&fs, "columns")?)?;
     let key = list(&here("key"), |k| text(&here("key"), k), field(&fs, "key")?)?;
-    let indexes = list(&here("indexes"), index, field(&fs, "indexes")?)?;
+    let all = list(&here("indexes"), index, field(&fs, "indexes")?)?;
     let refs = list(&here("refs"), reference, field(&fs, "refs")?)?;
-    Ok(Table::new(name, columns, key, indexes, refs))
+    let (mut indexes, mut texts) = (vec![], vec![]);
+    for (ix, text) in all {
+        match (text, &ix.columns[..]) {
+            (false, _) => indexes.push(ix),
+            (true, [c]) => texts.push(c.clone()),
+            (true, _) => return err(&here("indexes"), "a text index is on one column"),
+        }
+    }
+    Ok(Table::new(name, columns, key, indexes, refs).with_text(texts))
 }
 
 fn column(x: &Value) -> D<Column> {
@@ -103,11 +111,18 @@ fn column(x: &Value) -> D<Column> {
     Ok(Column { name, ty, nullable })
 }
 
-fn index(x: &Value) -> D<Index> {
+// An index, and whether it is of kind `text` (D4): `kind` is written only
+// for one, and names no other kind.
+fn index(x: &Value) -> D<(Index, bool)> {
     let fs = tagged(&["index"], "index", x)?;
     let columns = list(&["index", "columns"], |c| text(&["index", "columns"], c), field(&fs, "columns")?)?;
     let unique = bool(&["index", "unique"], field(&fs, "unique")?)?;
-    Ok(Index { columns, unique })
+    let text_kind = match fs.get("kind") {
+        None => false,
+        Some(k) if text(&["index", "kind"], k)? == "text" && !unique => true,
+        Some(k) => return err(&["index", "kind"], format!("unknown index kind {k:?}")),
+    };
+    Ok((Index { columns, unique }, text_kind))
 }
 
 fn reference(x: &Value) -> D<Ref> {
@@ -425,6 +440,7 @@ fn pred(here: &[&str], v: &Value) -> D<Pred> {
         "pall" => Pred::All(list(here, |x| pred(here, x), field(&fs, "items")?)?),
         "pany" => Pred::Any(list(here, |x| pred(here, x), field(&fs, "items")?)?),
         "pnot" => Pred::Not(Box::new(pred(here, field(&fs, "e")?)?)),
+        "phas" => Pred::Has(text(here, field(&fs, "column")?)?, expr(here, field(&fs, "e")?)?),
         other => return err(here, format!("unknown predicate {other}")),
     })
 }

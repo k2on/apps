@@ -76,14 +76,29 @@ fn table_value(t: &crate::schema::Table) -> Value {
             ("key", list(|k| txt(k), &t.key)),
             (
                 "indexes",
-                list(
-                    |i| {
-                        node(
-                            "index",
-                            vec![("columns", list(|c| txt(c), &i.columns)), ("unique", Value::Bool(i.unique))],
-                        )
-                    },
-                    &t.indexes,
+                Value::List(
+                    t.indexes
+                        .iter()
+                        .map(|i| {
+                            node(
+                                "index",
+                                vec![("columns", list(|c| txt(c), &i.columns)), ("unique", Value::Bool(i.unique))],
+                            )
+                        })
+                        // D4 A text index is an index of kind `text`, after
+                        // the others; a table with none writes what it
+                        // always did.
+                        .chain(t.text.iter().map(|c| {
+                            node(
+                                "index",
+                                vec![
+                                    ("columns", list(|c| txt(c), std::slice::from_ref(c))),
+                                    ("unique", Value::Bool(false)),
+                                    ("kind", txt("text")),
+                                ],
+                            )
+                        }))
+                        .collect(),
                 ),
             ),
             (
@@ -327,6 +342,7 @@ fn pred(p: &Pred) -> Value {
         Pred::All(ps) => node("pall", vec![("items", list(pred, ps))]),
         Pred::Any(ps) => node("pany", vec![("items", list(pred, ps))]),
         Pred::Not(q) => node("pnot", vec![("e", pred(q))]),
+        Pred::Has(c, e) => node("phas", vec![("column", txt(c)), ("e", expr(e))]),
     }
 }
 
@@ -434,5 +450,6 @@ fn pred_calls(p: &Pred, acc: &mut std::collections::BTreeSet<String>) {
         Pred::In(_, es) => es.iter().for_each(|e| expr_calls(e, acc)),
         Pred::All(ps) | Pred::Any(ps) => ps.iter().for_each(|p| pred_calls(p, acc)),
         Pred::Not(q) => pred_calls(q, acc),
+        Pred::Has(_, e) => expr_calls(e, acc),
     }
 }

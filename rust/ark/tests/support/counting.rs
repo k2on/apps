@@ -76,6 +76,22 @@ impl Store for Counting<'_> {
         })
     }
 
+    // `docs/plan-db.md` D4: the text hint passed through, so the store's
+    // text indexes still serve, and each row it asks `keep` about counted.
+    fn scan_where_text(
+        &self,
+        table: &str,
+        eq: &[(&str, &Value)],
+        spans: &[Span],
+        has: &[Vec<(&str, &str)>],
+        keep: &dyn Fn(&Row) -> bool,
+    ) -> Vec<Row> {
+        self.inner.scan_where_text(table, eq, spans, has, &|r| {
+            self.rows.set(self.rows.get() + 1);
+            keep(r)
+        })
+    }
+
     // The store's own ordered walk, each row it asks `keep` about counted:
     // what a bounded read through an index examines (`docs/plan-perf.md`
     // R1). A store with no index that serves answers `None` here as it

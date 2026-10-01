@@ -28,7 +28,7 @@ use std::ops::Bound;
 use crate::eval::{Args, Ctx, EvalError, EvalFault, NodeScope, Scope};
 use crate::ir::{CmpOp, Expr, FnKind, Function, Key, Lookup, Op, Plan, Pred, Related, Source, StdFn, Stmt, Sym};
 use crate::schema::{Dir, Schema, Table};
-use crate::store::{compare_rows, Change, Refusal, Row, Span, Store};
+use crate::store::{self, compare_rows, Change, Refusal, Row, Span, Store};
 use crate::value::{compare_value, FieldName, TableName, Value};
 
 // §1.3 The one evaluator ----------------------------------------------------
@@ -178,10 +178,16 @@ pub fn read(sch: &Schema, plan: &Plan, scope: &Scope, st: &dyn Store) -> Result<
     }
     let (eq, keep) = (equalities(filter.as_ref()), |r: &Row| admits(filter.as_ref(), r));
     let spans = spans(filter.as_ref());
-    if let Some(rows) = st.scan_ordered(plan.table(), &eq, &spans, &order, &keep, lim) {
-        return Ok(rows.into_iter().map(Row::into_value).collect());
+    // A text search is read through its text index (D4) and then sorted:
+    // an ordered walk would examine every row up to the limit's last
+    // match, which is the table when the needle is rare.
+    let searched = needles(filter.as_ref()).is_some_and(|bs| bs.iter().flatten().any(|(_, n)| !store::trigrams(n).is_empty()));
+    if !searched {
+        if let Some(rows) = st.scan_ordered(plan.table(), &eq, &spans, &order, &keep, lim) {
+            return Ok(rows.into_iter().map(Row::into_value).collect());
+        }
     }
-    let mut rows = st.scan_where_eq(plan.table(), &eq, &spans, &keep);
+    let mut rows = fetch(st, plan.table(), filter.as_ref());
     // As compare_entries over a bare plan's entries: the order columns
     // under their directions, then the key, column by column.
     let cmp = |a: &Row, b: &Row| compare_rows(tbl, &order, a, b);
@@ -247,12 +253,21 @@ fn candidates<'s>(
     st: &dyn Store,
 ) -> Result<(&'s Table, Vec<Row>), EvalFault> {
     let (tbl, filter) = source(sch, plan, pins, scope)?;
-    Ok((
-        tbl,
-        st.scan_where_eq(plan.table(), &equalities(filter.as_ref()), &spans(filter.as_ref()), &|r| {
-            admits(filter.as_ref(), r)
-        }),
-    ))
+    Ok((tbl, fetch(st, plan.table(), filter.as_ref())))
+}
+
+// The rows a filter admits, in key order, through whatever of the store's
+// indexes serve it: its equalities and spans (R1, R6) and its text
+// searches (`docs/plan-db.md` D4) — a store with a text index on a
+// searched column reads the rows holding every trigram of the needle and
+// never the rest.
+fn fetch(st: &dyn Store, table: &str, filter: Option<&Filter>) -> Vec<Row> {
+    let (eq, sp) = (equalities(filter), spans(filter));
+    let keep = |r: &Row| admits(filter, r);
+    match needles(filter) {
+        None => st.scan_where_eq(table, &eq, &sp, &keep),
+        Some(has) => st.scan_where_text(table, &eq, &sp, &has, &keep),
+    }
 }
 
 // A plan's table, and its filter and its pins as one filter, evaluated.
@@ -442,6 +457,10 @@ enum Filter {
     All(Vec<Filter>),
     Any(Vec<Filter>),
     Not(Box<Filter>),
+    /// D4 The needle, folded once for the read ([`store::fold`]); `None`
+    /// for a needle that is not text, which a verified module never has
+    /// and which admits nothing.
+    Has(FieldName, Option<String>),
 }
 
 fn eval_pred<E>(p: &Pred, ev: &mut dyn FnMut(&Expr) -> Result<Value, E>) -> Result<Filter, E> {
@@ -451,7 +470,58 @@ fn eval_pred<E>(p: &Pred, ev: &mut dyn FnMut(&Expr) -> Result<Value, E>) -> Resu
         Pred::All(ps) => Filter::All(ps.iter().map(|q| eval_pred(q, ev)).collect::<Result<_, _>>()?),
         Pred::Any(ps) => Filter::Any(ps.iter().map(|q| eval_pred(q, ev)).collect::<Result<_, _>>()?),
         Pred::Not(q) => Filter::Not(Box::new(eval_pred(q, ev)?)),
+        Pred::Has(c, e) => Filter::Has(
+            c.clone(),
+            match ev(e)? {
+                Value::Text(t) => Some(store::fold(&t)),
+                _ => None,
+            },
+        ),
     })
+}
+
+// D4 The text searches a filter holds however it is satisfied, as a
+// disjunction of conjunctions of `(column, folded needle)`: a row the
+// filter admits holds every needle of at least one branch. A `Has` is one
+// branch of one; an `All` is the product of what its members say (a member
+// that says nothing — a comparison, a `Not` — restricts nothing and is
+// left to `keep`); an `Any` is the branches of its members, and nothing
+// when one of them says nothing. `None` is no restriction at all. What a
+// text index serves ([`Store::scan_where_text`]): harken's search is a
+// title *or* a creator, two branches. Past sixteen branches it says
+// nothing, which is only a wider read.
+fn needles(f: Option<&Filter>) -> Option<Vec<Vec<(&str, &str)>>> {
+    const MOST: usize = 16;
+    fn go(f: &Filter) -> Option<Vec<Vec<(&str, &str)>>> {
+        match f {
+            Filter::Has(c, Some(n)) => Some(vec![vec![(c.as_str(), n.as_str())]]),
+            Filter::All(fs) => {
+                let mut out: Option<Vec<Vec<(&str, &str)>>> = None;
+                for g in fs.iter().filter_map(go) {
+                    out = Some(match out {
+                        None => g,
+                        Some(bs) => {
+                            let prod: Vec<_> = bs
+                                .iter()
+                                .flat_map(|b| g.iter().map(move |h| b.iter().chain(h).copied().collect()))
+                                .collect();
+                            if prod.len() > MOST {
+                                return Some(bs);
+                            }
+                            prod
+                        }
+                    });
+                }
+                out
+            }
+            Filter::Any(fs) => {
+                let bs: Vec<_> = fs.iter().map(go).collect::<Option<Vec<_>>>()?.into_iter().flatten().collect();
+                (bs.len() <= MOST).then_some(bs)
+            }
+            _ => None,
+        }
+    }
+    f.and_then(go).filter(|bs| !bs.is_empty())
 }
 
 // The columns a filter holds equal to a value however it is satisfied: its
@@ -541,6 +611,13 @@ fn admits(f: Option<&Filter>, row: &Row) -> bool {
             Filter::All(fs) => fs.iter().all(|g| go(g, row)),
             Filter::Any(fs) => fs.iter().any(|g| go(g, row)),
             Filter::Not(g) => !go(g, row),
+            // D4 Both sides folded by the pinned `lower`; a `Null` holds
+            // nothing, and every text the empty needle.
+            Filter::Has(c, n) => match (field(c), n) {
+                (Value::Text(_), Some(n)) if n.is_empty() => true,
+                (Value::Text(s), Some(n)) => store::fold(s).contains(n.as_str()),
+                _ => false,
+            },
         }
     }
     f.is_none_or(|f| go(f, row))
@@ -1418,7 +1495,7 @@ fn extremes(cx: &Cx, plan: &Plan, pins: &[(FieldName, Value)], aggs: &[(Agg, Sym
         let Some((c, d)) = a.extreme() else { continue };
         let row = match cx.st.scan_ordered(plan.table(), &eq, &sp, &[(c, d)], &keep, 1) {
             Some(rows) => rows.into_iter().next(),
-            None => cx.st.scan_where_eq(plan.table(), &eq, &sp, &keep).into_iter().reduce(|a, b| {
+            None => fetch(cx.st, plan.table(), filter.as_ref()).into_iter().reduce(|a, b| {
                 let o = compare_value(&column_of(&b, c), &column_of(&a, c));
                 if o == if d == Dir::Asc { Ordering::Less } else { Ordering::Greater } {
                     b

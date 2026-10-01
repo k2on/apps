@@ -431,7 +431,7 @@ fn push_counted(sch: &Schema, st: &mut MemoryStore, batch: &[Change], v: &mut vi
 /// `get`. Each is one `Update`, the same at both sizes.
 ///
 /// Falsified by reading the extreme without the index (`extremes` taking
-/// its `scan_where_eq` arm whatever the store answers): the departure
+/// its `fetch` arm whatever the store answers): the departure
 /// examines 1,999 rows at 2,000 songs and 499 at 500 — every one of
 /// Gould's songs left — and through the group 2,000 and 500.
 #[test]

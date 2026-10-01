@@ -184,6 +184,9 @@ fn schema_breaks(old: &Schema, new: &Schema) -> Vec<Break> {
         if t.key != t2.key {
             out.push(Break::KeyChanged(t.name.clone()));
         }
+        // A plain index says nothing about the rows, and neither does a
+        // text index (`Table::text`, `docs/plan-db.md` D4): neither is a
+        // break, added or taken away. Only a unique index refuses.
         for ix in &t2.indexes {
             if ix.unique && !t.indexes.contains(ix) {
                 out.push(Break::UniqueAdded(t.name.clone(), ix.columns.clone()));
@@ -376,6 +379,30 @@ mod tests {
         add(&mut new).autos.push(("id".into(), Auto::NewId("list".into())));
         new.functions.retain(|f| f.name != "lists"); // a query may go
         assert_eq!(check(&old, &new), vec![]);
+    }
+
+    /// `docs/plan-db.md` D4 A text index added breaks nothing, as a plain
+    /// index does not: it says nothing about the rows. It moves the
+    /// module's bytes and no mutator's closure — the schema is not in a
+    /// closure — and a module without one writes the bytes it always did.
+    /// Falsified by treating a new text index as a unique one (a
+    /// `UniqueAdded` for each column of `t.text` not in the old table):
+    /// the first assertion fails.
+    #[test]
+    fn a_text_index_is_additive() {
+        let old = base();
+        let mut new = base();
+        table(&mut new, "list").text.push("name".into());
+        crate::verify::verify(&new).expect("a text index on a text column verifies");
+        assert_eq!(check(&old, &new), vec![]);
+        let canon = |m: &Module| crate::canon::encode(&crate::ir::module_value(m));
+        assert_ne!(canon(&old), canon(&new), "the module's bytes move");
+        assert_eq!(canon(&old), canon(&base()), "and without it they do not");
+        let hashes = |m: &Module| m.functions.iter().map(|f| crate::hash::function_hash(&closure(m, f))).collect::<Vec<_>>();
+        assert_eq!(hashes(&old), hashes(&new), "no function's closure moves");
+        // On a column that is not text it is no schema at all.
+        table(&mut new, "item").text.push("pos".into());
+        assert!(crate::verify::verify(&new).is_err());
     }
 
     /// Falsified by looking a mutator up in the old module instead of the

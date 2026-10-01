@@ -285,6 +285,7 @@ fn pred_binders(p: &Pred) -> Vec<Sym> {
         Pred::In(_, es) => es.iter().flat_map(expr_binders).collect(),
         Pred::All(ps) | Pred::Any(ps) => ps.iter().flat_map(pred_binders).collect(),
         Pred::Not(q) => pred_binders(q),
+        Pred::Has(_, e) => expr_binders(e),
     }
 }
 
@@ -505,6 +506,10 @@ fn renumber_pred(ren: &Ren, next: Sym, p: &Pred) -> (Pred, Sym) {
         Pred::Not(q) => {
             let (q2, n) = renumber_pred(ren, next, q);
             (Pred::Not(Box::new(q2)), n)
+        }
+        Pred::Has(c, e) => {
+            let (e2, n) = renumber_expr(ren, next, e);
+            (Pred::Has(c.clone(), e2), n)
         }
     }
 }

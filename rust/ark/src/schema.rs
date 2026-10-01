@@ -65,6 +65,15 @@ pub struct Table {
     pub key: Vec<FieldName>,
     pub indexes: Vec<Index>,
     pub refs: Vec<Ref>,
+    /// `docs/plan-db.md` D4 The text indexes: each a text column whose
+    /// folded value's trigrams name the rows holding them, which is what
+    /// serves a `Pred::Has` (`store.rs`, `Trigrams`). An index kind beside
+    /// [`Table::indexes`] — on the wire an `index` node of kind `text`, in
+    /// the same list — kept apart here so that an [`Index`] is still the
+    /// two fields every caller writes. Like a plain index it says nothing
+    /// about the rows: additive under `compat`, and a store from before it
+    /// builds it as the rows are put. Set by [`Table::with_text`].
+    pub text: Vec<FieldName>,
     rows: Arc<Columns>,
     key_at: Vec<usize>,
 }
@@ -72,7 +81,12 @@ pub struct Table {
 /// A table is its declaration: how its rows are laid out follows from it.
 impl PartialEq for Table {
     fn eq(&self, other: &Table) -> bool {
-        self.name == other.name && self.columns == other.columns && self.key == other.key && self.indexes == other.indexes && self.refs == other.refs
+        self.name == other.name
+            && self.columns == other.columns
+            && self.key == other.key
+            && self.indexes == other.indexes
+            && self.refs == other.refs
+            && self.text == other.text
     }
 }
 
@@ -86,6 +100,7 @@ impl fmt::Debug for Table {
             .field("key", &self.key)
             .field("indexes", &self.indexes)
             .field("refs", &self.refs)
+            .field("text", &self.text)
             .finish()
     }
 }
@@ -154,9 +169,16 @@ impl Table {
             key,
             indexes,
             refs,
+            text: vec![],
             rows,
             key_at,
         }
+    }
+
+    /// D4 The table with a text index on each of `columns`, in order.
+    pub fn with_text(mut self, columns: Vec<FieldName>) -> Table {
+        self.text = columns;
+        self
     }
 
     /// The names every row of this table holds its values under, in
@@ -239,6 +261,9 @@ pub enum SchemaError {
     /// An id-typed column must be a key of its own table or a reference,
     /// and name the table it references.
     IdNamesWrongTable(TableName, FieldName),
+    /// D4 A text index is on one column whose type is text (nullable or
+    /// not), once.
+    TextIndexNotText(TableName, FieldName),
 }
 
 fn dups(names: impl Iterator<Item = String>) -> Vec<String> {
@@ -294,6 +319,13 @@ fn per_table(sch: &Schema, t: &Table, errs: &mut Vec<SchemaError>) {
             if t.column(c).is_none() {
                 errs.push(SchemaError::UnknownIndexColumn(tn(), c.clone()));
             }
+        }
+    }
+    for (i, c) in t.text.iter().enumerate() {
+        match t.column(c) {
+            None => errs.push(SchemaError::UnknownIndexColumn(tn(), c.clone())),
+            Some(col) if col.ty != Ty::Text || t.text[..i].contains(c) => errs.push(SchemaError::TextIndexNotText(tn(), c.clone())),
+            Some(_) => {}
         }
     }
     for r in &t.refs {

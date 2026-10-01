@@ -999,6 +999,7 @@ fn pred_exprs<'a>(p: &'a Pred, out: &mut Vec<&'a Expr>) {
         Pred::In(_, es) => out.extend(es),
         Pred::All(ps) | Pred::Any(ps) => ps.iter().for_each(|q| pred_exprs(q, out)),
         Pred::Not(q) => pred_exprs(q, out),
+        Pred::Has(_, e) => out.push(e),
     }
 }
 
@@ -1032,6 +1033,15 @@ fn pred_ok(g: &G, t: &Table, p: &Pred) -> Check_<()> {
         }
         Pred::All(ps) | Pred::Any(ps) => ps.iter().try_for_each(|q| pred_ok(g, t, q)),
         Pred::Not(q) => pred_ok(g, t, q),
+        // D4 A substring of a text column, the needle text: on any other
+        // column it would fold something that is not text.
+        Pred::Has(c, e) => {
+            let ty = col(c)?.column_ty();
+            if !matches!(&ty, Ty::Text) && ty != Ty::Option(Box::new(Ty::Text)) {
+                return err(Complaint::TypeMismatch(format!("has on {c}"), Ty::Text, ty));
+            }
+            expect(g, &format!("has on {c}"), &Ty::Text, e)
+        }
     }
 }
 

@@ -104,6 +104,7 @@ fn pred(p: &Pred, out: &mut BTreeSet<TableName>) {
         Pred::In(_, es) => es.iter().for_each(|e| expr(e, out)),
         Pred::All(ps) | Pred::Any(ps) => ps.iter().for_each(|q| pred(q, out)),
         Pred::Not(q) => pred(q, out),
+        Pred::Has(_, e) => expr(e, out),
     }
 }
 

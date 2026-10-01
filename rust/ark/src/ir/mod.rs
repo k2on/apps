@@ -529,6 +529,14 @@ pub enum Pred {
     All(Vec<Pred>),
     Any(Vec<Pred>),
     Not(Box<Pred>),
+    /// `docs/plan-db.md` D4 The text column holds the needle as a
+    /// substring, both sides folded by the pinned Unicode tables (`lower`,
+    /// `unicode_tables.rs`), so that every peer finds the same rows. A
+    /// `Null` column holds nothing; every text holds the empty needle. What
+    /// a text index on the column serves (`Table::text`); without one it is
+    /// a scan, as any filter. On the wire `phas`, written only where used,
+    /// so no existing plan's bytes move.
+    Has(FieldName, Expr),
 }
 
 /// §3.4 The standard library, by name; `Ark.Std` is its meaning.

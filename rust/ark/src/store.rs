@@ -584,6 +584,31 @@ pub trait Store {
         )
     }
 
+    /// `docs/plan-db.md` D4 [`Store::scan_where_eq`], told also which text
+    /// columns the filter holds to contain which needles (`Pred::Has`):
+    /// `has` is a disjunction of conjunctions — every row `keep` admits
+    /// holds each needle of at least one branch — and each needle is
+    /// already folded by the pinned `lower` ([`fold`]). A hint as the
+    /// others are; `keep` still decides. A store with a text index on such
+    /// a column reads, per branch, the rows whose folded value holds every
+    /// trigram of the branch's needles — the intersection of those
+    /// trigrams' postings — and the union of the branches, and no other row
+    /// of the table. A branch with no needle it can serve (no text index on
+    /// any of its columns, or needles of fewer than three characters, which
+    /// have no trigram) leaves the read to the default, which ignores the
+    /// hint. In key order either way.
+    fn scan_where_text(
+        &self,
+        table: &str,
+        eq: &[(&str, &Value)],
+        spans: &[Span],
+        has: &[Vec<(&str, &str)>],
+        keep: &dyn Fn(&Row) -> bool,
+    ) -> Vec<Row> {
+        let _ = has;
+        self.scan_where_eq(table, eq, spans, keep)
+    }
+
     /// §8.1 The digest this store keeps for a table — the sum of its rows'
     /// leaves — if it keeps one; `None`, the default, and
     /// [`crate::hash::state_hash`] sums a scan instead. A store that keeps
@@ -911,6 +936,9 @@ pub struct MemoryStore {
     tables: BTreeMap<TableName, BTreeMap<Key, Row>>,
     indexes: BTreeMap<TableName, Vec<Secondary>>,
     digests: BTreeMap<TableName, Digest>,
+    /// D4 The text indexes, per table: one [`Trigrams`] per column the
+    /// table declares one on ([`Table::text`]).
+    texts: BTreeMap<TableName, Vec<Trigrams>>,
 }
 
 /// A copy of every row and every index. Written out rather than derived so
@@ -926,6 +954,7 @@ impl Clone for MemoryStore {
             tables: self.tables.clone(),
             indexes: self.indexes.clone(),
             digests: self.digests.clone(),
+            texts: self.texts.clone(),
         }
     }
 }
@@ -1075,6 +1104,64 @@ fn bounding<'q>(columns: &[FieldName], n: usize, spans: &'q [Span<'q>]) -> Optio
     spans.iter().find(|s| s.column == c.as_str())
 }
 
+/// `docs/plan-db.md` D4 A text, folded as `lower` folds it: each character
+/// to its simple lowercase mapping under the pinned Unicode tables
+/// (`unicode_tables.rs`), one character for one, so that a substring of
+/// the folded text is the folding of a substring and every peer folds a
+/// title the same way whatever its platform's own tables say.
+pub fn fold(s: &str) -> String {
+    s.chars().map(crate::unicode_tables::to_lower_simple).collect()
+}
+
+/// D4 The trigrams of a folded text: every run of three characters (not
+/// bytes) in it, once each. A text of fewer than three characters has
+/// none.
+pub fn trigrams(folded: &str) -> BTreeSet<[char; 3]> {
+    let cs: Vec<char> = folded.chars().collect();
+    cs.windows(3).map(|w| [w[0], w[1], w[2]]).collect()
+}
+
+/// D4 A text index: for each trigram of the folded value of one text
+/// column, the keys of the rows whose value holds it. Moved by
+/// [`MemoryStore::set`] as the rows are — a row's trigrams that its new
+/// value lost taken out, the ones it gained put in, nothing when the
+/// column did not change — so that a row costs the trigrams of its text,
+/// once, when it is written: about one posting per character. A `Null`
+/// holds no trigram, and neither does a text of under three characters;
+/// both are still found, by `keep`, when the needle is that short.
+#[derive(Clone, Debug)]
+struct Trigrams {
+    column: FieldName,
+    postings: BTreeMap<[char; 3], BTreeSet<Key>>,
+}
+
+impl Trigrams {
+    fn of(row: Option<&Row>, column: &str) -> BTreeSet<[char; 3]> {
+        match row.and_then(|r| r.get(column)) {
+            Some(Value::Text(s)) => trigrams(&fold(s)),
+            _ => BTreeSet::new(),
+        }
+    }
+
+    fn set(&mut self, k: &Key, old: Option<&Row>, new: Option<&Row>) {
+        if old.and_then(|r| r.get(&self.column)) == new.and_then(|r| r.get(&self.column)) && old.is_some() == new.is_some() {
+            return;
+        }
+        let (was, is) = (Trigrams::of(old, &self.column), Trigrams::of(new, &self.column));
+        for g in was.difference(&is) {
+            if let Some(ks) = self.postings.get_mut(g) {
+                ks.remove(k);
+                if ks.is_empty() {
+                    self.postings.remove(g);
+                }
+            }
+        }
+        for g in is.difference(&was) {
+            self.postings.entry(*g).or_default().insert(k.clone());
+        }
+    }
+}
+
 /// The key `eq` names, when it holds every key column equal: then at most
 /// one row answers, and it is read by key, through no index at all.
 fn key_held(tbl: &Table, eq: &[(&str, &Value)]) -> Option<Key> {
@@ -1091,7 +1178,59 @@ impl MemoryStore {
             tables: BTreeMap::new(),
             indexes,
             digests: BTreeMap::new(),
+            texts: BTreeMap::new(),
         }
+        .with_texts()
+    }
+
+    // D4 A text index for every column the schema declares one on, empty.
+    fn with_texts(mut self) -> MemoryStore {
+        self.texts = self
+            .schema
+            .tables()
+            .filter(|t| !t.text.is_empty())
+            .map(|t| {
+                let ixs = t
+                    .text
+                    .iter()
+                    .map(|c| Trigrams {
+                        column: c.clone(),
+                        postings: BTreeMap::new(),
+                    })
+                    .collect();
+                (t.name.clone(), ixs)
+            })
+            .collect();
+        self
+    }
+
+    /// D4 The keys of the rows a text index says may hold the needles, in
+    /// key order: per branch, every trigram of every needle on a column
+    /// with a text index, each trigram's postings intersected — walked from
+    /// the shortest, each key asked of the others — and the branches'
+    /// answers together. `None` when some branch has no trigram on an
+    /// indexed column, and the caller reads as it would without a hint.
+    fn text_keys(&self, t: &str, has: &[Vec<(&str, &str)>]) -> Option<BTreeSet<&Key>> {
+        let ixs = self.texts.get(t)?;
+        let mut out = BTreeSet::new();
+        for branch in has {
+            let mut lists: Vec<Option<&BTreeSet<Key>>> = vec![];
+            for (c, needle) in branch {
+                let Some(ix) = ixs.iter().find(|ix| ix.column == *c) else { continue };
+                lists.extend(trigrams(needle).iter().map(|g| ix.postings.get(g)));
+            }
+            if lists.is_empty() {
+                return None;
+            }
+            // A trigram nobody holds: no row holds this branch's needles.
+            let Some(mut sets) = lists.into_iter().collect::<Option<Vec<_>>>() else {
+                continue;
+            };
+            sets.sort_by_key(|s| s.len());
+            let (first, rest) = sets.split_first()?;
+            out.extend(first.iter().filter(|k| rest.iter().all(|s| s.contains(*k))));
+        }
+        Some(out)
     }
 
     /// Put `row` under `k` in `t` (or take the key out, for `None`), and
@@ -1129,6 +1268,11 @@ impl MemoryStore {
             if emptied {
                 debug_assert_eq!(*d, Digest::ZERO, "a table with no rows sums to nothing");
                 self.digests.remove(t);
+            }
+        }
+        if let Some(ixs) = self.texts.get_mut(t) {
+            for ix in ixs {
+                ix.set(&k, old.as_ref(), row.as_ref());
             }
         }
         if let Some(ixs) = self.indexes.get_mut(t) {
@@ -1397,6 +1541,30 @@ impl Store for MemoryStore {
             .map(|_| self.digests.get(table).copied().unwrap_or_default())
     }
 
+    /// D4 Through a text index, when one serves a needle: the rows of the
+    /// postings' intersection, each asked of `keep` — so the rows examined
+    /// are the intersection, not the table. The whole key held is still
+    /// the one row, and anything a text index does not serve is
+    /// [`Store::scan_where_eq`].
+    fn scan_where_text(
+        &self,
+        table: &str,
+        eq: &[(&str, &Value)],
+        spans: &[Span],
+        has: &[Vec<(&str, &str)>],
+        keep: &dyn Fn(&Row) -> bool,
+    ) -> Vec<Row> {
+        let by_key = self.schema.lookup_table(table).and_then(|tbl| key_held(tbl, eq)).is_some();
+        let keys = if by_key { None } else { self.text_keys(table, has) };
+        let Some(keys) = keys else {
+            return self.scan_where_eq(table, eq, spans, keep);
+        };
+        let Some(rows) = self.tables.get(table) else {
+            return vec![];
+        };
+        keys.into_iter().filter_map(|k| rows.get(k)).filter(|r| keep(r)).cloned().collect()
+    }
+
     fn as_store(&self) -> &dyn Store {
         self
     }
@@ -1470,6 +1638,19 @@ impl Store for Overlay<'_> {
     }
 
     fn scan_where_eq(&self, table: &str, eq: &[(&str, &Value)], spans: &[Span], keep: &dyn Fn(&Row) -> bool) -> Vec<Row> {
+        self.scan_where_text(table, eq, spans, &[], keep)
+    }
+
+    /// The equalities' read and the text search's (D4) alike: the base's
+    /// indexes, text ones too, serve the rows not written here.
+    fn scan_where_text(
+        &self,
+        table: &str,
+        eq: &[(&str, &Value)],
+        spans: &[Span],
+        has: &[Vec<(&str, &str)>],
+        keep: &dyn Fn(&Row) -> bool,
+    ) -> Vec<Row> {
         let Some(tbl) = self.schema().lookup_table(table) else {
             return vec![];
         };
@@ -1479,15 +1660,17 @@ impl Store for Overlay<'_> {
         if let Some(k) = key_held(tbl, eq) {
             return self.get(table, &k).filter(|r| keep(r)).into_iter().collect();
         }
+        let base = |keep: &dyn Fn(&Row) -> bool| match has {
+            [] => self.base.scan_where_eq(table, eq, spans, keep),
+            _ => self.base.scan_where_text(table, eq, spans, has, keep),
+        };
         let Some(ws) = self.writes.get(table).filter(|ws| !ws.is_empty()) else {
-            return self.base.scan_where_eq(table, eq, spans, keep);
+            return base(keep);
         };
         // The base's rows this overlay has not written, kept; then its own
         // writes, kept; in key order. A written row is judged by `keep`
         // alone, wherever a span would have put it (R6).
-        let mut merged: BTreeMap<Key, Row> = self
-            .base
-            .scan_where_eq(table, eq, spans, &|r| !ws.contains_key(&tbl.key_of(r)) && keep(r))
+        let mut merged: BTreeMap<Key, Row> = base(&|r| !ws.contains_key(&tbl.key_of(r)) && keep(r))
             .into_iter()
             .map(|r| (tbl.key_of(&r), r))
             .collect();

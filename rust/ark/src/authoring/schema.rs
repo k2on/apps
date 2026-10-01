@@ -260,6 +260,17 @@ impl<T: Row, V: Data> Col<T, V> {
     }
 }
 
+impl<T: Row, V: Data + ColumnOf<super::values::Text>> Col<T, V> {
+    /// `docs/plan-db.md` D4 `PHas c x`: the text column holds `needle` as a
+    /// substring, both folded by the pinned `lower` — `Media::title.has(input.q)`.
+    /// A `None` column holds nothing; every text holds `""`. Served by a
+    /// text index on the column ([`Columns::index_text`]) when the needle
+    /// has three characters or more, and otherwise read as any filter is.
+    pub fn has(self, needle: impl Into<super::values::Text>) -> Pred<T> {
+        Pred::new(IrPred::Has(self.name.into(), rhs(needle.into().to_h())))
+    }
+}
+
 // A right-hand side: the expression, or the value as a literal.
 fn rhs(h: H) -> Expr {
     if cx::emitting() {
@@ -314,6 +325,7 @@ pub struct Columns<T> {
     key: Vec<String>,
     indexes: Vec<Index>,
     refs: Vec<Ref>,
+    text: Vec<String>,
     _t: PhantomData<fn() -> T>,
 }
 
@@ -325,6 +337,7 @@ pub fn columns<T>() -> Columns<T> {
         key: vec![],
         indexes: vec![],
         refs: vec![],
+        text: vec![],
         _t: PhantomData,
     }
 }
@@ -401,6 +414,16 @@ impl<T> Columns<T> {
         });
         self
     }
+    /// `docs/plan-db.md` D4 A text index on one text column: the store
+    /// keeps, per trigram of the column's folded value, the rows holding
+    /// it, and a [`Col::has`] on the column reads the rows holding every
+    /// trigram of its needle rather than the table. Like [`Columns::index`]
+    /// it says nothing about the rows; it moves the module's hash and no
+    /// mutator's.
+    pub fn index_text<V: Data + ColumnOf<super::values::Text>>(mut self, c: Col<T, V>) -> Self {
+        self.text.push(c.name.into());
+        self
+    }
 
     /// The table, as the schema carries it.
     ///
@@ -415,7 +438,7 @@ impl<T> Columns<T> {
                 c.name
             );
         }
-        IrTable::new(name, self.cols, self.key, self.indexes, self.refs)
+        IrTable::new(name, self.cols, self.key, self.indexes, self.refs).with_text(self.text)
     }
 }
 
