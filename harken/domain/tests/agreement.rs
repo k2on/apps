@@ -45,6 +45,8 @@ fn the_module_verifies_and_is_the_committed_file() {
             "remove_media",
             "library_entry",
             "library",
+            // `docs/plan-db.md` D4: the search box's query.
+            "search",
             "albums",
             "artists",
             "credited",
@@ -329,6 +331,11 @@ fn every_procedure_agrees_with_the_interpreter() {
         c.query("alice", q, args([])).unwrap();
     }
     let with_favs = |k: &str, v: Value| args([("playlist_id", Value::Id(favs)), (k, v)]);
+    // A search of the title or the creator, case folded (D4): Bach's tracks
+    // by creator, and nothing for a needle nobody holds.
+    let found = c.list("search", with_favs("needle", Value::text("SEBASTIAN")));
+    assert!(!found.is_empty() && found.iter().all(|r| r.field("creator") == Value::text("Johann Sebastian Bach")));
+    assert!(c.list("search", with_favs("needle", Value::text("zzz"))).is_empty());
     c.list("album", with_favs("name", Value::text("Goldberg Variations")));
     c.list("artist", with_favs("name", Value::text("Johann Sebastian Bach")));
     c.list("recording", with_favs("id", rid.clone()));

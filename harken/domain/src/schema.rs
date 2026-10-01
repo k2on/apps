@@ -79,6 +79,10 @@ impl Row for Media {
             // `add_song`: the row already holding a file, and the last.
             .index((Self::file,))
             .index((Self::pos,))
+            // `search`: the trigrams of each, folded (`docs/plan-db.md`
+            // D4). They move the module's hash and no mutator's.
+            .index_text(Self::title)
+            .index_text(Self::creator)
     }
 }
 impl Media {

@@ -217,6 +217,10 @@ pub struct Peer {
     /// `Source::Library` is `items` itself. Every other list of tracks is the
     /// page's own view, opened when the source changes.
     pub source: Source,
+    /// What the Songs page is narrowed to, as the search box has it typed:
+    /// `None` is the whole library. While there is one, the page's list is
+    /// the `search` view (`docs/plan-db.md` D4) rather than `items`.
+    pub search: Option<String>,
     pub shown: Vec<Item>,
     /// Which album each track is on, and the rest of what only a song has: a
     /// map beside the list, because the library row is kind-neutral. Joined
@@ -278,6 +282,7 @@ impl Peer {
             playlist,
             playlists: rows,
             source: Source::Library,
+            search: None,
             shown: Vec::new(),
             details: HashMap::new(),
             detail_rows: Vec::new(),
@@ -516,7 +521,17 @@ impl Peer {
         let text = |s: &str| Value::text(s);
         let on = |key: &str, value: &str| args([("playlist_id", Value::Id(self.playlist)), (key, text(value))]);
         let (shown, works, recordings): (Option<(&'static str, Args)>, _, _) = match &self.source {
-            Source::Library | Source::Albums | Source::Artists | Source::Composers => (None, None, None),
+            // The library is `items` itself, unless a search narrows it: then
+            // the page is the `search` view, read through the text indexes
+            // and kept like any other (`docs/plan-db.md` D4).
+            Source::Library => (
+                self.search
+                    .as_deref()
+                    .map(|n| ("search", args([("playlist_id", Value::Id(self.playlist)), ("needle", text(n))]))),
+                None,
+                None,
+            ),
+            Source::Albums | Source::Artists | Source::Composers => (None, None, None),
             Source::Works(composer) => (None, Some(("works", args([("composer", text(composer))]))), None),
             // Both halves: the work itself, for the header, and its
             // performances. This page may have been reached without opening a
@@ -607,10 +622,33 @@ impl Peer {
         }
     }
 
+    /// Narrow the Songs page to what holds `needle` in its title or its
+    /// creator, case folded — or, given nothing (or `""`), widen it back to
+    /// the library. `true` when that changed what the page shows.
+    ///
+    /// The box drives a view: each keystroke opens `search` over the new
+    /// needle and drops the last one. That is one hydrate per keystroke —
+    /// the text index's read of the rows holding every trigram of the
+    /// needle, and each one's playlist entry — rather than a view patched
+    /// from the last needle's, which would be a second kind of view for
+    /// something a hydrate already answers at typing speed; what one costs
+    /// is `harken/domain/tests/perf.rs`'s `perf_search`. A needle of one or
+    /// two characters has no trigram and is a scan, which is what this
+    /// client did for every search before.
+    pub fn search(&mut self, needle: Option<&str>) -> bool {
+        let needle = needle.filter(|n| !n.is_empty()).map(str::to_string);
+        if needle == self.search {
+            return false;
+        }
+        self.search = needle;
+        self.open_page();
+        true
+    }
+
     /// What the table is showing, whichever side it came from.
     pub fn rows(&self) -> &[Item] {
         match self.source {
-            Source::Library => &self.items,
+            Source::Library if self.search.is_none() => &self.items,
             _ => &self.shown,
         }
     }

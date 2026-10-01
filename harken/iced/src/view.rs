@@ -547,7 +547,13 @@ impl App {
         if titled {
             main = main.push(
                 row![
-                    text(p.source.title().to_string()).size(22),
+                    // A search narrowing the Songs page says so where the
+                    // page's name is (`docs/plan-db.md` D4).
+                    text(match (&p.source, &p.search) {
+                        (Source::Library, Some(n)) => format!("{} matching “{n}”", p.source.title()),
+                        _ => p.source.title().to_string(),
+                    })
+                    .size(22),
                     text(format!("{} {}", p.rows().len(), plural(p.rows().len() as i64, "track")))
                         .size(12)
                         .style(style::dim),

@@ -145,6 +145,18 @@ impl Input for Library {
     }
 }
 
+/// `search`: the playlist each row's position is read against, as
+/// `library` has it, and what to look for.
+pub struct Search {
+    pub playlist_id: Id<Playlist>,
+    pub needle: Text,
+}
+impl Input for Search {
+    fn schema() -> Object<Self> {
+        object().field("playlist_id", id::<Playlist>()).field("needle", text())
+    }
+}
+
 pub struct AlbumInput {
     pub playlist_id: Id<Playlist>,
     pub name: Text,
@@ -890,6 +902,24 @@ pub fn library() -> Router<Harken> {
         // entry for that media, beneath it.
         library.input::<Library>().query("library", |_ctx, db, input| {
             db.media
+                .order_by(Media::pos.asc())
+                .each(|media, ()| {
+                    db.playlist_item
+                        .filter(PlaylistItem::playlist_id.eq(input.playlist_id))
+                        .on(PlaylistItem::media_id.eq(media.id))
+                })
+                .map(|media, (items,)| library_entry(media, items.first().map(|row| row.pos)))
+        }),
+        // The library's rows whose title or creator holds the needle, case
+        // folded by the pinned `lower`, in library order and each as
+        // `library` has it — what the search box shows. Read through the
+        // text indexes on `media.title` and `media.creator`: the rows
+        // holding every trigram of the needle, not the library
+        // (`docs/plan-db.md` D4); a needle of one or two characters is the
+        // scan the client used to do.
+        library.input::<Search>().query("search", |_ctx, db, input| {
+            db.media
+                .filter(Media::title.has(input.needle).or(Media::creator.has(input.needle)))
                 .order_by(Media::pos.asc())
                 .each(|media, ()| {
                     db.playlist_item

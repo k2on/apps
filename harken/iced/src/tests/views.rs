@@ -108,3 +108,65 @@ fn every_list_on_screen_is_its_query_after_every_change() {
 
     assert!(!peer.refresh(), "nothing moved, nothing to splice");
 }
+
+/// `docs/plan-db.md` D4: the search box drives a view. On the Songs page `/`
+/// and a needle narrow the list, keystroke by keystroke, to the domain's
+/// `search` — the tracks whose title or creator holds what is typed, case
+/// folded — and that list is kept like any other: a song added that matches
+/// is patched in. `<Enter>` keeps the search and lands on its first row;
+/// `<Esc>` widens the page back to the library. Falsified by leaving
+/// `Peer::rows` on the library while a search is up: "narrowed as typed"
+/// fails at the first letter.
+#[test]
+fn the_search_box_drives_a_view() {
+    use iced::keyboard::{key::Named, Key, Modifiers};
+
+    use crate::places::Pane;
+    use crate::{App, Message};
+
+    let mut app = super::demo_app();
+    app.pane = Pane::Tracks;
+    let press = |app: &mut App, k: Key| {
+        let _ = app.update(Message::Key(k, Modifiers::empty()));
+    };
+    let search = |app: &App, needle: &str| {
+        app.peer.ask(
+            "search",
+            args([("playlist_id", Value::Id(app.peer.playlist)), ("needle", Value::text(needle))]),
+            Item::from_value,
+        )
+    };
+    let all = app.peer.rows().len();
+    press(&mut app, Key::Character("/".into()));
+    assert_eq!(app.peer.rows().len(), all, "nothing typed yet: the library");
+    let mut typed = String::new();
+    for c in "HANDEL".chars() {
+        typed.push(c);
+        press(&mut app, Key::Character(c.to_string().into()));
+        assert_eq!(app.peer.rows(), &search(&app, &typed)[..], "narrowed as typed: {typed}");
+    }
+    let n = app.peer.rows().len();
+    assert!(n > 0 && n < all, "{n} of {all}");
+    for i in app.peer.rows() {
+        let hay = format!("{} {}", i.title, i.creator).to_lowercase();
+        assert!(hay.contains("handel"), "{hay}");
+    }
+    press(&mut app, Key::Named(Named::Enter));
+    assert_eq!(app.peer.search.as_deref(), Some("HANDEL"), "<Enter> keeps it");
+    assert_eq!(app.at(Pane::Tracks), 0);
+
+    app.peer
+        .client
+        .mutate(
+            "add_song",
+            super::song("Hornpipe again", "George Frideric Handel", "", "music/hornpipe.mp3"),
+        )
+        .unwrap();
+    assert!(app.peer.refresh());
+    assert_eq!(app.peer.rows().len(), n + 1, "a match arriving is in the list");
+    assert_eq!(app.peer.rows(), &search(&app, "HANDEL")[..]);
+
+    press(&mut app, Key::Named(Named::Escape));
+    assert_eq!(app.peer.search, None);
+    assert_eq!(app.peer.rows().len(), all + 1, "<Esc> is the library again");
+}

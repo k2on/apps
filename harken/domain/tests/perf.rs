@@ -940,3 +940,117 @@ fn perf_native_vs_interpreted() {
     classical.insert("file".into(), Value::text("music/x.flac"));
     both("add_song, empty library, a catalogued work", &st, "add_song", &classical);
 }
+
+// (g) Search -----------------------------------------------------------------------
+
+/// `docs/plan-db.md` D4: `search` over a library of 8,000 media, as the
+/// desktop's search box asks it — a view opened for each keystroke of
+/// "artist 12", the last one dropped. Per prefix: how many rows answer, how
+/// many the read examined (the counting store: the text indexes' postings'
+/// intersection, or the scan for a prefix under three characters), and the
+/// hydrate's median of five. Beside it, what the client did before: every
+/// title and creator lower-cased and searched, on every keystroke. And what
+/// the two text indexes cost a row: the postings it adds (its title's and
+/// its creator's trigrams) and the time to put the library with and
+/// without them.
+#[test]
+#[ignore]
+fn perf_search() {
+    let h = harken();
+    let n = 8000u64;
+    let st = h.library(n);
+    let mut plain = h.schema.clone();
+    for t in &mut plain.tables {
+        t.text.clear();
+    }
+    let put = |sch: &Schema| {
+        let mut ts: Vec<Duration> = (0..5)
+            .map(|_| {
+                let t = Instant::now();
+                let mut st = MemoryStore::empty(sch.clone());
+                for i in 0..n {
+                    st.apply_change(&Change::Add("media".into(), media(i)));
+                }
+                let d = t.elapsed();
+                drop(st);
+                d
+            })
+            .collect();
+        ts.sort();
+        ts[2]
+    };
+    let (with, without) = (put(&h.schema), put(&plain));
+    let grams = |c: &str| -> usize {
+        st.scan("media")
+            .iter()
+            .map(|r| ark::store::trigrams(&ark::store::fold(r[c].as_text())).len())
+            .sum()
+    };
+    let postings = grams("title") + grams("creator");
+    eprintln!(
+        "\n== (g) the text indexes on media.title and media.creator, {n} rows: {:.2} postings a row; put {:.2}µs a row with them, {:.2}µs without",
+        postings as f64 / n as f64,
+        us(with) / n as f64,
+        us(without) / n as f64
+    );
+    let me = Ctx::new("alice", "s");
+    let (hash, _) = &h.procs["search"];
+    let c = &h.bodies[hash];
+    let plan = c.function.plan.as_ref().unwrap();
+    eprintln!("\n== (g) search over {n} media: a view opened per keystroke");
+    eprintln!(
+        "{:>12} {:>8} {:>10} {:>12} {:>14}",
+        "needle", "answer", "examined", "hydrate", "client scan"
+    );
+    let full = "artist 12";
+    for k in 1..=full.len() {
+        let needle = &full[..k];
+        let a = args([("playlist_id", Value::Id([0; 16])), ("needle", Value::text(needle))]);
+        let (args, provided) = ark::eval::middleware(&h.schema, c, &me, &a, &st).unwrap();
+        let env = ark::view::Env {
+            helpers: c.helpers.clone(),
+            ctx: me.clone(),
+            args,
+            provided,
+        };
+        let counted = Counting::new(&st);
+        let v = ark::view::hydrate(&h.schema, plan, env.clone(), &counted).unwrap();
+        let examined = counted.reads().rows;
+        let mut times: Vec<Duration> = (0..5)
+            .map(|_| {
+                let t = Instant::now();
+                let v = ark::view::hydrate(&h.schema, plan, env.clone(), &st).unwrap();
+                let d = t.elapsed();
+                drop(v);
+                d
+            })
+            .collect();
+        times.sort();
+        let lower = needle.to_lowercase();
+        let mut scans: Vec<Duration> = (0..5)
+            .map(|_| {
+                let t = Instant::now();
+                let hits = st
+                    .scan("media")
+                    .iter()
+                    .filter(|r| {
+                        format!("{} {}", r["title"].as_text(), r["creator"].as_text())
+                            .to_lowercase()
+                            .contains(&lower)
+                    })
+                    .count();
+                std::hint::black_box(hits);
+                t.elapsed()
+            })
+            .collect();
+        scans.sort();
+        eprintln!(
+            "{:>12} {:>8} {:>10} {:>10.1}µs {:>12.1}µs",
+            format!("{needle:?}"),
+            v.rows().len(),
+            examined,
+            us(times[2]),
+            us(scans[2])
+        );
+    }
+}

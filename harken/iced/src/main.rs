@@ -719,6 +719,7 @@ impl App {
                 self.help = false;
                 self.debug = false;
                 self.note.clear();
+                self.narrow(None);
                 Task::none()
             }
             // Keys this app binds for itself, kept out of the grammar so a
@@ -806,6 +807,14 @@ impl App {
         self.router.replace_next();
         self.peer.open_page();
         self.cursors[Pane::Tracks as usize] = 0;
+    }
+
+    /// The Songs page narrowed to a search, or widened back: the cursor goes
+    /// to the top of whatever list that leaves, as a page opened does.
+    fn narrow(&mut self, needle: Option<&str>) {
+        if self.peer.search(needle) {
+            self.cursors[Pane::Tracks as usize] = 0;
+        }
     }
 
     /// Keep the cursor on screen.
@@ -1154,7 +1163,16 @@ impl App {
             Message::Key(key, mods) => {
                 // `None` is still typing: a count, a `g`, a search — drawn in
                 // the status line so nothing swallowed is a mystery.
-                if let Some(action) = self.keys.press(&key, mods) {
+                let action = self.keys.press(&key, mods);
+                // A search typed on the Songs page narrows it as it is typed
+                // (`docs/plan-db.md` D4): the domain's `search`, a view over
+                // the needle so far. `<Enter>` keeps it and lands on the first
+                // row; `<Esc>` widens the page back to the library.
+                if let (vim::Mode::Search(q), Pane::Tracks, Source::Library) = (self.keys.mode(), self.pane, &self.peer.source) {
+                    let q = q.clone();
+                    self.narrow(Some(&q));
+                }
+                if let Some(action) = action {
                     return self.act(action);
                 }
                 return Task::none();
@@ -1338,6 +1356,7 @@ impl App {
                 // on from wherever it was.
                 let at = self.peer.choices.iter().position(|c| c.source == source);
                 self.peer.source = source;
+                self.peer.search = None;
                 self.peer.open_page();
                 if let Some(at) = at {
                     self.cursors[Pane::Sidebar as usize] = at;

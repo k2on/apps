@@ -222,6 +222,22 @@ fn with_favs(s: &Seeded, more: &[(&str, Value)]) -> Args {
     a
 }
 
+/// `docs/plan-db.md` D4 The search box's query: a `Has` on the title or the
+/// creator, read through the text indexes on both and maintained as any
+/// filter is — a row whose title or creator is edited is re-admitted by the
+/// predicate — for a needle the indexes serve, one folded from capitals, and
+/// one too short to have a trigram. Falsified by reading an `or` of `Has`es
+/// through its first branch alone (`ark::view::needles`): "BACH", which
+/// only creators hold, answers nothing at all.
+#[test]
+fn search() {
+    let s = seeded();
+    for needle in ["ari", "BACH", "a"] {
+        let t = hold("search", with_favs(&s, &[("needle", Value::text(needle))]));
+        assert!(t.joined > 0 && t.updates + t.inserts + t.removes > 0, "{needle}: {t:?}");
+    }
+}
+
 /// Falsified by recording no dependency for a `Related` node in
 /// `ark::view::entry` (a playlist entry added leaves `playlist_pos` stale).
 #[test]
