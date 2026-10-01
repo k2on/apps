@@ -92,6 +92,14 @@ pub enum ServerMsg {
     Ack {
         ids: Vec<Id>,
         seqs: Vec<Seq>,
+        /// The log the sequences are of, as a page names it: `log` on the
+        /// wire, absent for `None`. A peer confirmed by an ack alone — the
+        /// page that would have named the log lost — learns it here, so
+        /// that its next `hello` names it and a server that has since lost
+        /// that log answers with its own snapshot rather than paging on
+        /// from a cursor in another log (`arkc fuzz`,
+        /// `rebase/fleet-fuzz-an-ack-names-no-log.json`).
+        log_id: Option<Id>,
     },
     Reject {
         id: Id,
@@ -353,12 +361,15 @@ impl ServerMsg {
                     module,
                 ),
             ),
-            ServerMsg::Ack { ids, seqs } => node(
+            ServerMsg::Ack { ids, seqs, log_id } => node(
                 "ack",
-                vec![
-                    ("ids", Value::List(ids.iter().map(|i| Value::Id(*i)).collect())),
-                    ("seqs", Value::List(seqs.iter().map(|n| int(*n)).collect())),
-                ],
+                named(
+                    vec![
+                        ("ids", Value::List(ids.iter().map(|i| Value::Id(*i)).collect())),
+                        ("seqs", Value::List(seqs.iter().map(|n| int(*n)).collect())),
+                    ],
+                    log_id,
+                ),
             ),
             ServerMsg::Reject { id, reason } => node("reject", vec![("id", Value::Id(*id)), ("reason", txt(reason))]),
             ServerMsg::Held { id, reason } => node("held", vec![("id", Value::Id(*id)), ("reason", txt(reason))]),
@@ -429,6 +440,7 @@ impl ServerMsg {
             "ack" => ServerMsg::Ack {
                 ids: list(ident, need(m, "ids")?)?,
                 seqs: list(int64, need(m, "seqs")?)?,
+                log_id: log_of(m)?,
             },
             "reject" => ServerMsg::Reject {
                 id: ident(need(m, "id")?)?,
@@ -821,7 +833,12 @@ impl Client {
                 opened.rejections = told;
                 self.replica = opened;
             }
-            ServerMsg::Ack { ids, seqs } => {
+            ServerMsg::Ack { ids, seqs, log_id } => {
+                // As from a page: a peer that did not know which log it
+                // holds learns it from the first frame that says.
+                if self.replica.log_id.is_none() {
+                    self.replica.log_id = log_id;
+                }
                 for (i, n) in ids.iter().zip(seqs) {
                     self.held_ids.remove(i);
                     self.replica.ack(i, n);
@@ -1171,6 +1188,7 @@ impl<M: Machine> Server<M> {
                         ServerMsg::Ack {
                             ids: acks.iter().map(|(i, _)| *i).collect(),
                             seqs: acks.iter().map(|(_, n)| *n).collect(),
+                            log_id: self.authority.log.id(),
                         },
                     );
                 }

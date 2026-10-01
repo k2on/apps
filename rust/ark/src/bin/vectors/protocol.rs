@@ -155,6 +155,17 @@ pub fn protocol(out: &Out) {
             ServerMsg::Ack {
                 ids: vec![id_n(9)],
                 seqs: vec![5],
+                log_id: None,
+            },
+        ),
+        // An ack names the log as a page does, so a peer confirmed by an
+        // ack alone knows which log it is at (`arkc fuzz`, D2).
+        (
+            "ack-named",
+            ServerMsg::Ack {
+                ids: vec![id_n(9)],
+                seqs: vec![5],
+                log_id: Some(log_a),
             },
         ),
         (

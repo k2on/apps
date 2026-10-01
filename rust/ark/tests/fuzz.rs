@@ -202,3 +202,98 @@ fn every_open_finding_still_fails() {
         );
     }
 }
+
+/// An ack names the log, and a peer that never knew it learns it there:
+/// a client whose push is acknowledged and whose page is lost still says
+/// the log in its next `hello`. Falsified by not reading `log` off the ack
+/// in `Client::recv`: the client knows no log.
+#[test]
+fn an_ack_names_the_log() {
+    use ark::live::Silent;
+    use ark::peer::{Authority, Replica};
+    use ark::protocol::{open_access, trusting, Client, ServerMsg};
+    let (m, _) = fuzz::demo_module();
+    let mut a = Authority::new(m.schema.clone(), closures(&m));
+    let name = [7u8; 16];
+    a.log.name_if_unnamed(name);
+    let mut server = ark::protocol::Server::open(trusting(), open_access(), Silent, a);
+    let r = Replica::open(m.schema.clone(), closures(&m), MemoryStore::empty(m.schema.clone()), 0, vec![]);
+    let mut c = Client::open(r, Mode::Whole, Some("alice".into()));
+    c.connected();
+    let fh = closures(&m)
+        .into_iter()
+        .find(|(_, c)| c.function.name == "create_playlist")
+        .map(|(h, _)| h)
+        .unwrap();
+    let mut pid = [0u8; 16];
+    pid[15] = 1;
+    c.mutate(
+        [9u8; 16],
+        &Ctx::new("alice", "dev"),
+        &fh,
+        &[("id".to_string(), Value::Id(pid))].into_iter().collect(),
+        &[("name".to_string(), Value::text("Road"))].into_iter().collect(),
+    )
+    .unwrap();
+    for f in c.take_outgoing() {
+        server.recv(1, f);
+    }
+    // Only the ack arrives: every page is lost.
+    for (_, f) in server.take_outgoing() {
+        if matches!(f, ServerMsg::Ack { .. }) {
+            c.recv(f);
+        }
+    }
+    c.settle();
+    assert_eq!(c.replica.cursor, 1, "the ack confirmed the intent");
+    assert_eq!(c.replica.log_id, Some(name), "and named the log it is at");
+}
+
+/// A replica fed by replay whose replay of a confirmed entry refuses asks
+/// for that entry's facts, and takes them, rather than waiting for facts
+/// nobody will send it. Falsified by not recording the refusal in
+/// `advance`: `needs` is empty and the cursor never moves.
+#[test]
+fn a_replay_that_refuses_asks_for_facts() {
+    use ark::log::Entry;
+    use ark::peer::Replica;
+    use ark::store::{Change, Row};
+    let (m, _) = fuzz::demo_module();
+    let bodies = closures(&m);
+    let fh = bodies
+        .iter()
+        .find(|(_, c)| c.function.name == "add_to_playlist")
+        .map(|(h, _)| h.clone())
+        .unwrap();
+    let mut pid = [0u8; 16];
+    pid[15] = 1;
+    // The authority holds a playlist this replica's state does not.
+    let e = Entry {
+        id: [3u8; 16],
+        actor: "bob".into(),
+        session: "dev".into(),
+        fn_hash: fh,
+        args: [("playlist_id".to_string(), Value::Id(pid)), ("track_id".to_string(), Value::text("t1"))]
+            .into_iter()
+            .collect(),
+        autos: Default::default(),
+    };
+    let mut r = Replica::open(m.schema.clone(), bodies, MemoryStore::empty(m.schema.clone()), 0, vec![]);
+    r.receive(1, e);
+    r.settle();
+    assert_eq!(r.cursor, 0, "the replay refused");
+    assert_eq!(r.needs(), vec![1], "so the replica asks for the facts");
+    let item = m.schema.lookup_table("item").unwrap();
+    let row = Row::of(
+        item,
+        [
+            ("playlist_id".to_string(), Value::Id(pid)),
+            ("track_id".to_string(), Value::text("t1")),
+            ("pos".to_string(), Value::Int(1)),
+        ],
+    );
+    r.receive_facts(1, vec![Change::Add("item".into(), row)]);
+    r.settle();
+    assert_eq!(r.cursor, 1, "and takes them");
+    assert_eq!(r.diverged, vec![1], "a divergence, recorded");
+}

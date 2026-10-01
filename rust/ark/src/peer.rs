@@ -399,7 +399,9 @@ impl Replica {
     /// the view undoes it and every intent after it and runs those again,
     /// as [`Replica::reject`] does.
     pub fn ack(&mut self, id: &Id, n: Seq) {
-        let Some(at) = self.pending.iter().position(|e| e.id == *id) else { return };
+        let Some(at) = self.pending.iter().position(|e| e.id == *id) else {
+            return;
+        };
         if n <= self.cursor {
             let undo: Vec<Id> = self.pending[at..].iter().map(|e| e.id).collect();
             self.pending.remove(at);
@@ -646,6 +648,16 @@ impl Replica {
                 _ => None,
             };
             let Some((chs, diverged)) = by_record.or_else(|| self.apply_one(n, &e, mf.as_ref())) else {
+                // A confirmed entry this replica holds the closure for and
+                // whose replay refuses, with no facts in hand: the
+                // authority applied it, so the replay disagrees with it —
+                // a divergence, recorded so that `needs` asks for the
+                // facts. Waiting for them unasked was waiting for ever: a
+                // replica fed by replay is sent none (`arkc fuzz`,
+                // `rebase/fleet-fuzz-an-ack-names-no-log-and-the-replay-refuses.json`).
+                if mf.is_none() && self.can_apply(&e.fn_hash) && !self.diverged.contains(&n) {
+                    self.diverged.push(n);
+                }
                 break;
             };
             self.confirmed.apply_changes(&chs);

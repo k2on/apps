@@ -11,10 +11,20 @@ use ark::ir::module_from_value;
 use super::{claim, Out};
 
 /// Each session, by the name it is published under.
-const SESSIONS: [(&str, &str); 1] = [(
-    "fleet-fuzz-an-ack-at-or-below-the-cursor.json",
-    include_str!("fuzzed/fleet-fuzz-an-ack-at-or-below-the-cursor.json"),
-)];
+const SESSIONS: [(&str, &str); 3] = [
+    (
+        "fleet-fuzz-an-ack-at-or-below-the-cursor.json",
+        include_str!("fuzzed/fleet-fuzz-an-ack-at-or-below-the-cursor.json"),
+    ),
+    (
+        "fleet-fuzz-an-ack-names-no-log.json",
+        include_str!("fuzzed/fleet-fuzz-an-ack-names-no-log.json"),
+    ),
+    (
+        "fleet-fuzz-an-ack-names-no-log-and-the-replay-refuses.json",
+        include_str!("fuzzed/fleet-fuzz-an-ack-names-no-log-and-the-replay-refuses.json"),
+    ),
+];
 
 pub fn fuzzed(out: &Out) {
     out.dir("rebase/ (found by arkc fuzz)");
