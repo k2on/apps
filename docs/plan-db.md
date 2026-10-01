@@ -998,3 +998,171 @@ leaf) and the two or three largest shrunk — with the open-time table re-run
 after. A paged backend behind `Store` is decided again when a dataset
 exceeds what that round leaves, which no app here approaches: harken's
 largest library is tens of thousands of rows.
+
+## D7. The memory round
+
+What D5 decided, worked out. The dataset is memory and open time is linear
+in it, and the open-time table says where the bytes are only coarsely: a
+client at 100,000 media rows is 818 MB with harken's two text indexes and
+375 MB without, against 14.9 MB on disk. Three things in that number are
+the representation's and not the data's, and this round takes them in the
+order they can be *measured*, because the last time a number was reasoned
+about rather than read (`cargoVendorHash`, in harken's covers commit) the
+reasoning was wrong.
+
+### D7.1 Bytes by component, before anything is shrunk
+
+`perf_d_bytes` in `rust/ark-server/tests/perf.rs`, beside `perf_d_open`:
+a counting global allocator (the one `rust/ark/tests/allocations.rs`
+already has) reads *live* bytes, and the table is built by subtraction —
+the rows alone held in a `Vec<Row>`; the store under a schema stripped of
+every index and text index (the primary map); with the secondaries back;
+with the text indexes back — at 10,000 and 100,000 rows, printed as bytes
+per row per component beside the resident figure `perf_d_open` reads from
+`/proc`. Two gaps are expected and each decides something:
+
+- **Live against resident.** `perf_d_open`'s build decodes a `Value` tree
+  first — a `Struct` of nine fields per row, each a `BTreeMap` node of
+  hundreds of bytes — and frees it after. glibc keeps what was freed in its
+  arenas, so the resident figure carries the tree's high-water mark for the
+  process's life. If live is well under resident, the fix is a decode that
+  builds each `Row` straight from the CBOR (`Row::new(cols, vals)` as the
+  row's map is read, no tree), which also removes the `decode` and `free`
+  columns of the open-time table — about 2 µs a row of 16–24.
+- **The sum of components against the rows alone.** 2.6 KB a row where
+  the row itself is perhaps 500 bytes says the structure around a row costs
+  more than the row. Which structure is what D7.2 and D7.3 are sized by.
+
+### D7.2 Postings as ordinals
+
+A posting today is a `Key`, which is a `Vec<Value>`: twenty-four bytes of
+header, a heap block of thirty-two per key column, the allocator's word on
+top, and a `BTreeSet` node around it — close to a hundred bytes to say
+"this row". A media row is said about forty times by its two text indexes
+(a title and a creator's trigrams) and once by each secondary, which is
+why the text indexes doubled a client. The ordinal is the one answer for
+both kinds of index:
+
+- **Each table numbers its rows.** `tables` holds, per table, the map it
+  has (`BTreeMap<Key, Row>`, by key, which is what every scan's "in key
+  order" reads) with a `u32` ordinal beside each row, and the reverse —
+  `Vec<Option<Row>>` by ordinal, a free list of ordinals whose row went —
+  so that a posting resolves to its row in one index. A `Row` is two
+  `Arc`s, so the reverse table is twenty-four bytes a row and shares every
+  value. Ordinals are per table and never cross the store's boundary:
+  nothing durable, nothing hashed and nothing on the wire names one.
+- **A posting list is a sorted `Vec<u32>`.** Four bytes a posting.
+  Insertion is a binary search and a shift, removal the same; a trigram
+  nobody holds any more is taken out of its map as its set is today. A
+  `Pred::Has` is the intersection of its needle's trigrams' lists, which
+  over sorted vectors is a merge from the shortest — linear, where the
+  `contains` probe of a set was logarithmic per candidate — and the
+  result is the rows, in key order (D7.2's third rule).
+- **Key order is restored by sorting what was read, not kept in the
+  index.** The sets gave each bucket's keys in order for free; vectors of
+  ordinals give ordinal order, and `scan_where_eq`, `scan_ordered` and
+  `scan_where_text` all promise key order. So a bucket read through an
+  index is sorted by key before it is returned — by `compare_rows` on the
+  key, over the rows, in place. That is `O(b log b)` over the rows *read*,
+  never over the table, and in practice near linear: a store opened from
+  a snapshot numbers its rows in the order the snapshot holds them, which
+  is key order, so a bucket with no row written since open is already
+  sorted and Rust's sort sees one run. `scan_ordered` sorts one bucket at
+  a time as it walks them and stops at `limit`, so `MAX(pos) + 1` still
+  costs the rows up to the first `keep` admits (R1).
+- **Equality ignores ordinals.** Two stores built in different orders
+  number the same rows differently and are the same store;
+  `PartialEq for MemoryStore` compares rows, and the fuzzer's equality
+  checks (D2) are what would catch a derived `Eq` that compared the
+  numbering. Falsify once by deriving it.
+
+Nothing about `Overlay` changes: it never held an index.
+
+### D7.3 The view shares the confirmed store, copy-on-write, per table
+
+A replica's optimistic view starts as `confirmed.clone()` and is rebuilt
+that way at every full replay — a second map tree and a second set of
+indexes over the same `Arc` rows, which is why a client holds twice what a
+store does. The copy is of tables pending never touches: harken's pending
+writes `playlist` and `playlist_item`, and the copy is of `media`.
+
+- **A table is an `Arc`.** `MemoryStore` holds, per table, one
+  `Arc<TableState>` — rows, ordinals, secondaries, text postings, digest,
+  together — and `Clone` is a clone of that map: `O(tables)`, sharing
+  everything. `set` reaches its table through `Arc::make_mut`, so the
+  first write a store makes to a table it shares copies that table and
+  nothing else, and every write after is in place. A pending
+  `add_to_playlist` copies `playlist_item`; `media` is never copied until
+  something pending writes it.
+- **The replica re-shares after every move of `confirmed`.** The view is
+  `confirmed` with `pending` replayed, so every table no pending record
+  (`recorded`, which lists each intent's facts) has written is *equal* to
+  confirmed's and may be confirmed's `Arc`. One rule, in one wrapper that
+  every write to `confirmed` goes through — a landed batch, an own intent
+  confirmed from its record, a snapshot adopted, the horizon's rewrite:
+  the view first *releases* the tables no record touched, confirmed is
+  written (in place, its `Arc`s now unique), and the view takes those
+  tables back as confirmed's `Arc`s, or as absent where confirmed has
+  none. Without the release, confirmed's write would be the copy —
+  `make_mut` on an `Arc` the view also holds — so a quiet client would
+  copy `media` once per batch; that is the trap, and the test for it is a
+  client receiving a hundred batches and copying no table.
+  The same rule frees the copy when it is done with: an own `add_song`
+  copies `media` into the view when it is authored, and the move of
+  confirmed that confirms it re-shares `media`, dropping the copy. A
+  rejected intent's tables are re-shared by the verdict's move the same
+  way.
+- **Tables pending has written take landed changes as before.** R2's
+  rebase — undo the records newest first, apply what landed, run pending
+  again — is unchanged for a table the view has diverged on; sharing only
+  takes the tables it has not.
+- **What is counted changes.** `store::clones()` counted whole-store
+  copies and the replica is held to none per mutation (`peer::tests`);
+  that holds still and is cheap now. `store::copies()` counts *table*
+  copies — a `make_mut` that found its `Arc` shared — and three tests pin
+  it: a hundred landed batches on a quiet client copy nothing; one pending
+  intent over `media` copies it once and the copy is gone once confirmed;
+  a replay with ten pending intents over one table copies it once, not
+  ten times.
+- **The server shares for free, and keeps two copies of `media` anyway.**
+  The log's base store and the state at the head are one `clone` and a
+  journal of facts, and the journal's `add_song`s write `media`, so the
+  head copies it on the first. Dropping the base and rebuilding it from
+  disk for the rare peer below the horizon is the way to lose that copy;
+  not this round.
+
+A debug assertion holds the invariant after every pump — for every table
+no record touched, the view's `Arc` is confirmed's — beside the equality
+the replica tests already assert, so the two cannot drift silently.
+
+### D7.4 The two or three largest components after that, and the table
+
+D7.1 is re-run after D7.2 and D7.3 and whatever is then largest is next,
+up to two or three of them, each measured before and after. The candidates
+by reasoning, to be confirmed by the numbers and not taken on them:
+
+- **The primary map's key** is a second `Vec<Value>` per row, holding
+  values the row already holds. A row can be its own key: a map keyed by a
+  wrapper over the `Row` whose `Ord` compares the key columns, found
+  through positions `Columns` carries for them. Seventy-odd bytes and an
+  allocation a row, and the row's ordinal goes beside it.
+- **The decoded tree at open** (D7.1's first gap), if live and resident
+  disagree.
+- **`Value` itself**: thirty-two bytes a column whatever it holds. Not
+  this round unless the rows alone are the largest component, which the
+  estimate says they are not.
+
+Then the open-time and memory tables of D5 are re-run on the same
+machine and recorded here, with the per-component table beside them. The
+spec moves not at all — the store's representation is this crate's and
+the state hash, the snapshot and the vectors are what they were — and
+`spec/vectors` stays byte-identical, which `checks.vectors` says.
+
+### Guards
+
+- `checks.rust` and `checks.fuzz-smoke` as they stand; `allocations.rs`'s
+  bounds — a sort in place allocates nothing beyond the answer.
+- The three `copies()` tests above, each falsified once: deriving `Eq`,
+  dropping the release step, cloning the store in `replay` as before.
+- `perf_d_bytes` before and after each step, in `--release`, in the
+  commit message of the step.
