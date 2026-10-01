@@ -466,6 +466,7 @@ fn a_verdict_not_yet_taken_survives_a_snapshot() {
         hash: state_hash(&empty),
         rows: Default::default(),
         log_id: None,
+        module: None,
     });
     let told: Vec<_> = c.replica.rejections.iter().map(|(i, _)| *i).collect();
     assert_eq!(told, [key(8, 1)]);

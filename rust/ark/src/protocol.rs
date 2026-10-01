@@ -13,7 +13,7 @@
 //! what it has been sent, a page at a time. A page carries facts for a peer
 //! that asked to be fed by facts, and not for one that replays.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::eval::{Args, Ctx};
 use crate::hash::{Closure, FnHash};
@@ -23,8 +23,8 @@ use crate::live::{self, ConnId, Machine, Rooms};
 use crate::log::{snapshot_of, Entry, Facts, Page, Seq};
 use crate::peer::{Authority, Replica, Sequenced};
 use crate::schema::Schema;
-use crate::store::{Change, MemoryStore, Refusal, Row, Store};
-use crate::value::{FieldName, Id, TableName, Value};
+use crate::store::{project_row, Change, MemoryStore, Refusal, Row, Store};
+use crate::value::{hex, FieldName, Id, TableName, Value};
 
 // ---------------------------------------------------------------------
 // Frames
@@ -68,6 +68,13 @@ pub enum ServerMsg {
         /// opened from storage written before logs had names, or new —
         /// learns it from the first page it is sent. `log` on the wire.
         log_id: Option<Id>,
+        /// The hash of the module the server runs (`docs/plan-db.md` D1):
+        /// how a peer learns that the facts it is fed are of another
+        /// schema than its own, and that it is `behind`. `module` on the
+        /// wire, bytes, absent for `None` — so a frame from a server that
+        /// does not say is the bytes it was, and a peer that does not read
+        /// it ignores a field it does not know.
+        module: Option<Vec<u8>>,
     },
     FactsFor {
         items: Vec<(Seq, Facts)>,
@@ -79,12 +86,26 @@ pub enum ServerMsg {
         /// The log this is a state of; the peer re-opened from it holds
         /// that log from here. `log` on the wire.
         log_id: Option<Id>,
+        /// As a batch's: the server's module hash, `module` on the wire.
+        module: Option<Vec<u8>>,
     },
     Ack {
         ids: Vec<Id>,
         seqs: Vec<Seq>,
     },
     Reject {
+        id: Id,
+        reason: String,
+    },
+    /// An intent the server cannot run yet: it names a function no module
+    /// this server has run shipped (`docs/plan-db.md` D1). Not a verdict —
+    /// nothing was refused of what the person did; a server older than the
+    /// peer cannot judge it — so the peer keeps it pending and pushes it
+    /// again on its next connection, when the server may have been
+    /// upgraded. Its own kind, `held`, beside `reject`, so that a `reject`
+    /// is the bytes it was and a peer that predates holding, which cannot
+    /// read the frame, keeps the intent pending too.
+    Held {
         id: Id,
         reason: String,
     },
@@ -135,6 +156,16 @@ fn strct(pairs: Vec<(&str, Value)>) -> Value {
 fn named<'a>(mut fields: Vec<(&'a str, Value)>, id: &Option<Id>) -> Vec<(&'a str, Value)> {
     if let Some(i) = id {
         fields.push(("log", Value::Id(*i)));
+    }
+    fields
+}
+
+// The server's module hash on the wire: `module`, bytes, absent where the
+// server does not say — the encoding `log` has, for the reason it has it
+// (`docs/plan-db.md` D1).
+fn of_module<'a>(mut fields: Vec<(&'a str, Value)>, module: &Option<Vec<u8>>) -> Vec<(&'a str, Value)> {
+    if let Some(m) = module {
+        fields.push(("module", Value::Bytes(m.clone())));
     }
     fields
 }
@@ -245,13 +276,25 @@ fn log_of(m: &BTreeMap<FieldName, Value>) -> Result<Option<Id>, DecodeError> {
     m.get("log").map(ident).transpose()
 }
 
+/// The `module` of a page or a snapshot, as `log` is read: bytes, or
+/// `None` where the field is absent; a null is refused.
+fn module_of(m: &BTreeMap<FieldName, Value>) -> Result<Option<Vec<u8>>, DecodeError> {
+    m.get("module").map(bytes).transpose()
+}
+
 impl ServerMsg {
     /// The frame as a value.
     pub fn to_value(&self) -> Value {
         match self {
-            ServerMsg::Batch { items, has_more, log_id } => node(
+            ServerMsg::Batch {
+                items,
+                has_more,
+                log_id,
+                module,
+            } => node(
                 "batch",
-                named(
+                of_module(
+                    named(
                     vec![
                         (
                             "items",
@@ -271,6 +314,8 @@ impl ServerMsg {
                         ("has_more", Value::Bool(*has_more)),
                     ],
                     log_id,
+                    ),
+                    module,
                 ),
             ),
             ServerMsg::FactsFor { items } => node(
@@ -285,9 +330,16 @@ impl ServerMsg {
                     ),
                 )],
             ),
-            ServerMsg::SnapshotOf { seq, hash, rows, log_id } => node(
+            ServerMsg::SnapshotOf {
+                seq,
+                hash,
+                rows,
+                log_id,
+                module,
+            } => node(
                 "snapshot",
-                named(
+                of_module(
+                    named(
                     vec![
                         ("seq", int(*seq)),
                         ("hash", Value::Bytes(hash.clone())),
@@ -297,6 +349,8 @@ impl ServerMsg {
                         ),
                     ],
                     log_id,
+                    ),
+                    module,
                 ),
             ),
             ServerMsg::Ack { ids, seqs } => node(
@@ -307,6 +361,7 @@ impl ServerMsg {
                 ],
             ),
             ServerMsg::Reject { id, reason } => node("reject", vec![("id", Value::Id(*id)), ("reason", txt(reason))]),
+            ServerMsg::Held { id, reason } => node("held", vec![("id", Value::Id(*id)), ("reason", txt(reason))]),
             ServerMsg::Denied { reason } => node("denied", vec![("reason", txt(reason))]),
             ServerMsg::Closures { items } => node(
                 "closures",
@@ -347,6 +402,7 @@ impl ServerMsg {
                 )?,
                 has_more: boolean(need(m, "has_more")?)?,
                 log_id: log_of(m)?,
+                module: module_of(m)?,
             },
             "facts" => ServerMsg::FactsFor {
                 items: list(
@@ -368,12 +424,17 @@ impl ServerMsg {
                     out
                 },
                 log_id: log_of(m)?,
+                module: module_of(m)?,
             },
             "ack" => ServerMsg::Ack {
                 ids: list(ident, need(m, "ids")?)?,
                 seqs: list(int64, need(m, "seqs")?)?,
             },
             "reject" => ServerMsg::Reject {
+                id: ident(need(m, "id")?)?,
+                reason: text(need(m, "reason")?)?,
+            },
+            "held" => ServerMsg::Held {
                 id: ident(need(m, "id")?)?,
                 reason: text(need(m, "reason")?)?,
             },
@@ -531,6 +592,17 @@ pub struct Client {
     /// the frame, before the page is applied, it would name the old cursor
     /// and be sent the same page again.
     pub more: bool,
+    /// The hash of this peer's own module, where the caller says it
+    /// (`ark_client::Peer` does): what the server's is compared with.
+    pub module: Option<Vec<u8>>,
+    /// The server's module hash, as its last page or snapshot said it
+    /// (`docs/plan-db.md` D1).
+    pub server_module: Option<Vec<u8>>,
+    /// Pending intents the server answered `held`: it cannot run them yet
+    /// (`docs/plan-db.md` D1). They stay pending and are pushed again on
+    /// the next connection; an id leaves this set when the server answers
+    /// it otherwise. [`Client::held`] counts the ones still pending.
+    pub held_ids: BTreeSet<Id>,
 }
 
 impl Client {
@@ -550,6 +622,42 @@ impl Client {
             agreed: vec![],
             paged: false,
             more: false,
+            module: None,
+            server_module: None,
+            held_ids: BTreeSet::new(),
+        }
+    }
+
+    /// §12 `behind` (`docs/plan-db.md` D1): both module hashes are known
+    /// and they differ. The schema the server's facts are of is then not
+    /// this peer's — narrower or wider, a hash cannot say which — so its
+    /// facts are applied projected to this peer's schema
+    /// ([`crate::store::project_row`]: columns this schema lacks dropped,
+    /// nullable ones it has and the fact lacks `Null`), and no `Verify` is
+    /// said: a state hash over one schema compared with one over another
+    /// would disagree whatever happened, and mean nothing.
+    pub fn behind(&self) -> bool {
+        matches!((&self.module, &self.server_module), (Some(ours), Some(theirs)) if ours != theirs)
+    }
+
+    /// Pending intents the server has answered `held`, and nothing since.
+    pub fn held(&self) -> usize {
+        self.replica.pending.iter().filter(|e| self.held_ids.contains(&e.id)).count()
+    }
+
+    // The server said which module it runs: the replica projects facts
+    // from here on if that is not this peer's.
+    fn heard_module(&mut self, module: Option<Vec<u8>>) {
+        if module.is_some() {
+            self.server_module = module;
+        }
+        self.replica.behind = self.behind();
+    }
+
+    // A pending intent of this peer's that the server cannot run yet.
+    fn hold_intent(&mut self, id: Id) {
+        if self.replica.pending.iter().any(|e| e.id == id) {
+            self.held_ids.insert(id);
         }
     }
 
@@ -633,7 +741,13 @@ impl Client {
                 self.out.clear();
                 self.more = false;
             }
-            ServerMsg::Batch { items, has_more, log_id } => {
+            ServerMsg::Batch {
+                items,
+                has_more,
+                log_id,
+                module,
+            } => {
+                self.heard_module(module);
                 let r = &mut self.replica;
                 // A peer that did not know which log it holds learns it
                 // from the first page (Round 4). One that did is never sent
@@ -670,14 +784,29 @@ impl Client {
             // when each frame advanced (an acknowledgement in the inbox
             // leaves pending as a confirmed intent, not as one the replay
             // runs again); the fresh replica has an empty inbox.
-            ServerMsg::SnapshotOf { seq, rows, log_id, .. } => {
+            //
+            // Behind (`docs/plan-db.md` D1), each row is projected to this
+            // peer's table as a fact is; one that cannot be is kept as it
+            // came, as a fact is applied raw (§4.5).
+            ServerMsg::SnapshotOf {
+                seq, rows, log_id, module, ..
+            } => {
+                self.heard_module(module);
                 self.replica.settle();
+                let behind = self.replica.behind;
                 let mut st = MemoryStore::empty(self.schema.clone());
                 for (t, vs) in rows {
                     let tbl = self.schema.lookup_table(&t);
                     for v in vs {
                         if let Value::Struct(row) = v {
-                            let row = tbl.map_or_else(|| Row::from_struct_ref(&row), |tbl| Row::stored_in(tbl, &row));
+                            let row = match tbl {
+                                None => Row::from_struct_ref(&row),
+                                Some(tbl) if behind => {
+                                    let raw = Row::from_struct_ref(&row);
+                                    project_row(tbl, &raw).unwrap_or(raw)
+                                }
+                                Some(tbl) => Row::stored_in(tbl, &row),
+                            };
                             st.apply_change(&Change::Add(t.clone(), row));
                         }
                     }
@@ -686,6 +815,7 @@ impl Client {
                 let mut opened = Replica::open(r.schema.clone(), r.bodies.clone(), st, seq, r.pending.clone());
                 opened.natives = r.natives.clone();
                 opened.log_id = log_id;
+                opened.behind = r.behind;
                 let mut told = std::mem::take(&mut r.rejections);
                 told.append(&mut opened.rejections);
                 opened.rejections = told;
@@ -693,10 +823,32 @@ impl Client {
             }
             ServerMsg::Ack { ids, seqs } => {
                 for (i, n) in ids.iter().zip(seqs) {
+                    self.held_ids.remove(i);
                     self.replica.ack(i, n);
                 }
             }
-            ServerMsg::Reject { id, reason } => self.replica.reject(&id, Refusal::Refused(reason)),
+            // A server from before holding answered an unknown function
+            // with a `reject` saying exactly that, of exactly this intent's
+            // hash ([`unknown_function`], word for word): read as the hold
+            // it was — the same server upgraded in place takes it
+            // (`docs/plan-db.md` D1, the fleet's scenario 3). No mutator's
+            // own refusal can name the hash of the intent it is refusing,
+            // so nothing else reads this way.
+            ServerMsg::Reject { id, reason } => {
+                let unknown = self
+                    .replica
+                    .pending
+                    .iter()
+                    .any(|e| e.id == id && reason == unknown_function(&e.fn_hash));
+                if unknown {
+                    self.hold_intent(id);
+                } else {
+                    self.held_ids.remove(&id);
+                    self.replica.reject(&id, Refusal::Refused(reason));
+                }
+            }
+            // Kept pending; nothing about the view moves (D1).
+            ServerMsg::Held { id, .. } => self.hold_intent(id),
             // New closures may unblock entries waiting in the inbox, at
             // the settle. A received closure replaces one already held
             // under its hash (the spec's left-biased union).
@@ -738,7 +890,13 @@ impl Client {
 
     /// Ask the authority whether it agrees with the replica's confirmed
     /// state.
+    ///
+    /// Not while [`Client::behind`] (`docs/plan-db.md` D1): the hash is
+    /// over this peer's schema, which is not the server's.
     pub fn verify_all(&mut self) {
+        if self.behind() {
+            return;
+        }
         let (seq, hash) = self.replica.verify_at();
         self.emit(ClientMsg::Verify { seq, hash });
     }
@@ -788,6 +946,14 @@ pub fn open_access() -> Access {
     Box::new(|_| true)
 }
 
+/// What an intent naming a function no closure is held for is answered
+/// with: a `held` from a server that holds (`docs/plan-db.md` D1), and
+/// before that a `reject` with this reason, which a [`Client`] reads as
+/// the hold it was.
+pub fn unknown_function(fh: &[u8]) -> String {
+    format!("unknown function {}", hex(fh))
+}
+
 /// §12.5 The reason a `Reject` carries (`Ark.Protocol.refusalText`): a
 /// mutator's own refusal is its text, word for word, because that is what
 /// an author wrote for a person to read; the store's constraint refusals
@@ -826,6 +992,12 @@ pub struct Server<M: Machine> {
     pub rooms: Rooms<M::State>,
     /// Oldest first.
     out: Vec<(ConnId, ServerMsg)>,
+    /// The hash of the module this server runs ([`Server::with_module`]):
+    /// said on every page and snapshot as `module` (`docs/plan-db.md` D1),
+    /// so a peer whose own module differs knows it is applying facts of a
+    /// schema that is not its own. `None` only for a machine nobody told,
+    /// a test's or a vector's, whose frames are the bytes they were.
+    pub module: Option<Vec<u8>>,
 }
 
 impl<M: Machine> Server<M> {
@@ -841,7 +1013,15 @@ impl<M: Machine> Server<M> {
             machine,
             rooms: Rooms::new(),
             out: vec![],
+            module: None,
         }
+    }
+
+    /// Say this module hash on every page and snapshot (`docs/plan-db.md`
+    /// D1): a server built from a module always does.
+    pub fn with_module(mut self, module: Vec<u8>) -> Server<M> {
+        self.module = Some(module);
+        self
     }
 
     /// Install the sessions a user owns, which the authenticator's session
@@ -922,7 +1102,29 @@ impl<M: Machine> Server<M> {
                     );
                     let post = live::arrive(&self.machine, &mut self.rooms, peer);
                     self.deliver(post);
+                    let before = self.out.len();
                     self.fanout();
+                    // A server that says its module says it in answer to
+                    // every `Hello` (`docs/plan-db.md` D1): a peer at the
+                    // head is sent no page, and would otherwise learn
+                    // only at the next entry that it is behind — after a
+                    // `Verify` that could only disagree. An empty page,
+                    // carrying the log and the module; a server that says
+                    // no module is answered as it always was.
+                    let paged = self.out[before..]
+                        .iter()
+                        .any(|(to, m)| *to == c && matches!(m, ServerMsg::Batch { .. } | ServerMsg::SnapshotOf { .. }));
+                    if self.module.is_some() && !paged {
+                        self.send(
+                            c,
+                            ServerMsg::Batch {
+                                items: vec![],
+                                has_more: false,
+                                log_id: self.authority.log.id(),
+                                module: self.module.clone(),
+                            },
+                        );
+                    }
                 }
             },
             ClientMsg::Push { entries } => {
@@ -936,6 +1138,22 @@ impl<M: Machine> Server<M> {
                             ServerMsg::Reject {
                                 id: e.id,
                                 reason: "not yours".into(),
+                            },
+                        );
+                        continue;
+                    }
+                    // A function this server cannot run — no module it
+                    // has run shipped it — is held, not refused
+                    // (`docs/plan-db.md` D1): the peer is newer than the
+                    // server, and the same intent pushed after an upgrade
+                    // is sequenced. One already in the log is the
+                    // duplicate it is, whatever is held now.
+                    if !self.authority.can_apply(&e.fn_hash) && self.authority.log.seq_of(&e.id).is_none() {
+                        self.send(
+                            c,
+                            ServerMsg::Held {
+                                id: e.id,
+                                reason: unknown_function(&e.fn_hash),
                             },
                         );
                         continue;
@@ -1070,6 +1288,7 @@ impl<M: Machine> Server<M> {
                             hash: sn.hash.clone(),
                             rows,
                             log_id: sn.log_id,
+                            module: self.module.clone(),
                         },
                         sn.seq,
                     )
@@ -1085,6 +1304,7 @@ impl<M: Machine> Server<M> {
                             items: with_facts,
                             has_more: more,
                             log_id: a.log.id(),
+                            module: self.module.clone(),
                         },
                         last,
                     )

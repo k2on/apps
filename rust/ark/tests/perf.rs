@@ -786,6 +786,7 @@ fn perf_h_frames() {
             items,
             has_more: false,
             log_id: None,
+            module: None,
         };
         let reps = 50;
         let a0 = allocs();

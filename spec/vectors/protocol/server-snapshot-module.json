@@ -1,0 +1,4 @@
+{
+  "frame": {"hash":{"$bytes":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"},"log":{"$id":"00000000-0000-0000-0000-0000000000a1"},"module":{"$bytes":"85049a90e468560dc18c3f72cdc7ebce2c7cb16c6c796e7a6d1a9fdba1cb2d16"},"rows":{"item":[{"playlist_id":{"$id":"00000000-0000-0000-0000-000000000001"},"pos":{"$int":"1"},"track_id":"t7"}]},"seq":{"$int":"2"},"t":"snapshot"},
+  "bytes": "a6617468736e617073686f74636c6f67d82550000000000000000000000000000000a1637365710264686173685820cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd64726f7773a1646974656d81a363706f730168747261636b5f69646274376b706c61796c6973745f6964d8255000000000000000000000000000000001666d6f64756c65582085049a90e468560dc18c3f72cdc7ebce2c7cb16c6c796e7a6d1a9fdba1cb2d16"
+}

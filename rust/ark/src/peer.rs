@@ -93,6 +93,14 @@ pub struct Replica {
     /// first and contiguous. The durable half of the log, as it moves: what
     /// a store written at the old cursor needs to reach the new one.
     pub journal: Vec<(Seq, Facts)>,
+    /// The server runs another module than this peer's (§12 `behind`,
+    /// `docs/plan-db.md` D1; [`crate::protocol::Client`] sets it from the
+    /// hash the server says): facts are applied *projected* to this
+    /// replica's schema ([`crate::store::project_row`]) — a column it
+    /// lacks dropped, a nullable one the fact lacks `Null` — before they
+    /// are compared with a run or applied. Not durable: every connection's
+    /// first answer says it again.
+    pub behind: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
@@ -261,6 +269,7 @@ impl Replica {
             changes: vec![],
             replaced: true,
             journal: vec![],
+            behind: false,
         };
         r.replay();
         r
@@ -611,8 +620,8 @@ impl Replica {
                         "the record of this peer's own intent is not what running it over the confirmed store at sequence {} produces",
                         self.cursor
                     );
-                    Some(match &mf {
-                        Some(f) if f != rec => (f.clone(), true),
+                    Some(match mf.as_ref().map(|f| self.here(f)) {
+                        Some(f) if f != *rec => (f, true),
                         _ => (rec.clone(), false),
                     })
                 }
@@ -690,6 +699,8 @@ impl Replica {
     // disagreed; `None` means it cannot be applied yet. The intent runs
     // over an overlay, so the store is untouched until the caller commits.
     fn apply_one(&self, n: Seq, e: &Entry, mf: Option<&Facts>) -> Option<(Vec<Change>, bool)> {
+        let projected = mf.map(|f| self.here(f));
+        let mf = projected.as_ref();
         if self.can_apply(&e.fn_hash) && !self.diverged.contains(&n) {
             let mut over = Overlay::new(&self.confirmed);
             return match run(
@@ -710,6 +721,29 @@ impl Replica {
             };
         }
         mf.map(|f| (f.clone(), false))
+    }
+
+    // The authority's facts as this replica holds them: as they are, or,
+    // `behind`, projected to this replica's schema (`docs/plan-db.md` D1)
+    // — a change to a table it lacks dropped, each row laid out as its
+    // table's with what the table lacks dropped and what the row lacks
+    // `Null`. A fact whose row lacks a column this schema requires cannot
+    // be projected (`MalformedRow`) and is applied as it came, which §4.5
+    // already does with a fact; the advance compares it with the run, and
+    // a difference is a divergence, never silent.
+    fn here(&self, f: &Facts) -> Facts {
+        if !self.behind {
+            return f.clone();
+        }
+        let mut out = Vec::with_capacity(f.len());
+        for c in f {
+            match crate::store::project(&self.schema, c) {
+                Ok(Some(c)) => out.push(c),
+                Ok(None) => {}
+                Err(_) => out.push(c.clone()),
+            }
+        }
+        out
     }
 
     // Rebuild the view whole: a copy of the confirmed store, then every
@@ -821,6 +855,17 @@ pub struct Authority {
     pub log: Log,
     /// The state at the head of the log.
     pub store: MemoryStore,
+    /// Every module this authority has started with, by module hash, and
+    /// the function hashes each shipped (`docs/plan-db.md` D1, closure
+    /// provenance): what [`Authority::retire`] keeps whatever the log
+    /// still names. A peer authors at the hashes of the module it was
+    /// built with, and a server that once ran that module has told it
+    /// those hashes are good; dropping one because the module moved on
+    /// and no retained entry happens to name it would turn an older
+    /// client's ordinary intent into an unknown function. A hash from a
+    /// module this authority never ran is still unknown — the honest
+    /// answer to a peer older than the server's first deploy.
+    pub modules: BTreeMap<Vec<u8>, BTreeSet<FnHash>>,
 }
 
 /// The answer to a pushed intent.
@@ -857,12 +902,33 @@ impl Authority {
             schema,
             bodies,
             natives: BTreeMap::new(),
+            modules: BTreeMap::new(),
         }
     }
 
     /// Hold native procedures (and the closures they carry).
     pub fn hold(&mut self, procs: impl IntoIterator<Item = (FnHash, Procedure)>) {
         hold(&mut self.bodies, &mut self.natives, procs);
+    }
+
+    /// Whether an intent naming this hash can be run here: a procedure or a
+    /// closure is held for it.
+    pub fn can_apply(&self, fh: &FnHash) -> bool {
+        self.natives.contains_key(fh) || self.bodies.contains_key(fh)
+    }
+
+    /// Record that this authority has run `module` (its hash), which
+    /// shipped `closures`: from here on [`Authority::retire`] keeps every
+    /// one of them, and an intent naming one is sequenced through it
+    /// whichever module is current (`docs/plan-db.md` D1). A closure
+    /// already held under a hash is kept as it is — the left-biased union
+    /// a received closure follows (§12.2), and a hash names one function.
+    pub fn ran(&mut self, module: Vec<u8>, closures: impl IntoIterator<Item = (FnHash, Closure)>) {
+        let shipped = self.modules.entry(module).or_default();
+        for (h, c) in closures {
+            shipped.insert(h.clone());
+            self.bodies.entry(h).or_insert(c);
+        }
     }
 
     /// §11.7 Sequence an intent: dedupe by id, apply to the head state, and
@@ -949,12 +1015,18 @@ impl Authority {
         true
     }
 
-    /// Drop every closure that neither the current module nor a retained
-    /// entry names.
+    /// Drop every closure that neither the current module, a retained
+    /// entry, nor a module this authority has run ([`Authority::ran`])
+    /// names. The last is closure provenance (`docs/plan-db.md` D1): an
+    /// old client authors at the hashes its module shipped, and a server
+    /// that ran that module answers them for as long as it lives, not only
+    /// while its log happens to hold an entry naming one.
     pub fn retire(&mut self, current: &BTreeSet<FnHash>) {
         let named = self.log.named_hashes();
-        self.bodies.retain(|h, _| current.contains(h) || named.contains(h));
-        self.natives.retain(|h, _| current.contains(h) || named.contains(h));
+        let ran: BTreeSet<&FnHash> = self.modules.values().flatten().collect();
+        let keep = |h: &FnHash| current.contains(h) || named.contains(h) || ran.contains(h);
+        self.bodies.retain(|h, _| keep(h));
+        self.natives.retain(|h, _| keep(h));
     }
 
     /// §11.8 Adopt a log a peer sequenced alone: replay every intent from
@@ -1700,6 +1772,7 @@ mod tests {
             items: items.into_iter().map(|(n, e)| (n, e, None)).collect(),
             has_more: false,
             log_id: None,
+            module: None,
         };
         let mut other = d.replica(true);
         let shared = d.create(&mut other, &them, 1, "Shared");
@@ -1753,5 +1826,36 @@ mod tests {
         assert!(same_rows(&each.replica.view, &one.replica.view));
         assert!(same_rows(&each.replica.confirmed, &one.replica.confirmed));
         assert!(same_rows(&one.replica.confirmed, &a.store));
+    }
+
+    /// Closure provenance (`docs/plan-db.md` D1): a server that once ran a
+    /// module keeps that module's closures through [`Authority::retire`]
+    /// when the current module no longer ships them and no retained entry
+    /// names them, so an old client's intent at its old hash is sequenced
+    /// rather than refused as an unknown function. A closure no module it
+    /// ran shipped, and nothing names, still goes.
+    ///
+    /// Falsified once: without `ran` in `retire`'s rule, the old module's
+    /// closures were dropped and the old client's `create_playlist` was
+    /// `Rejected("unknown function …")`.
+    #[test]
+    fn retire_keeps_every_module_it_has_run() {
+        let d = demo();
+        let me = Ctx::new("me", "s");
+        let mut r = d.replica(false);
+        let e = d.create(&mut r, &me, 1, "Road");
+        let mut a = Authority::new(d.schema.clone(), d.bodies.clone());
+        a.ran(b"the old module".to_vec(), d.bodies.clone());
+        let stray: FnHash = vec![9; 32];
+        a.bodies.insert(stray.clone(), d.bodies[&d.create].clone());
+        assert!(a.log.named_hashes().is_empty(), "nothing in the log names a closure");
+        // A new module that ships none of them.
+        a.retire(&BTreeSet::new());
+        assert!(a.bodies.contains_key(&d.create) && a.bodies.contains_key(&d.add), "a module it ran is kept");
+        assert!(!a.bodies.contains_key(&stray), "a closure no module it ran shipped is retired");
+        assert!(
+            matches!(a.sequence_entry(&e), Sequenced::Appended(1, _)),
+            "an old client's intent at its old hash is sequenced"
+        );
     }
 }

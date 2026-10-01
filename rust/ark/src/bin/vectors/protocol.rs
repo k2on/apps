@@ -4,7 +4,10 @@
 //! same user only where ownership is installed, a stranger's never, and
 //! work authored before anyone signed in as whoever signs in; and a
 //! `Hello` naming another log answered with this one's snapshot at the
-//! head, where one naming this log, or none, is answered as it was.
+//! head, where one naming this log, or none, is answered as it was; and a
+//! server that says its module answering a `Hello` at its head with an
+//! empty page saying it, and holding an intent it cannot run
+//! (`docs/plan-db.md` D1).
 
 use std::collections::BTreeMap;
 
@@ -109,23 +112,32 @@ pub fn protocol(out: &Out) {
     ];
     // A batch and a snapshot of a log nobody named, as they always were,
     // and each again of a named one.
-    let batch = |log_id| ServerMsg::Batch {
+    //
+    // A page and a snapshot also say the server's module hash, as `module`
+    // (`docs/plan-db.md` D1): absent from every file written before, which
+    // keep their bytes, and present in the `-module` pair, which a server
+    // built from a module always sends.
+    let module = || Some(ark::hash::module_hash(&m));
+    let batch = |log_id, module| ServerMsg::Batch {
         items: vec![
             (5, entry.clone(), None),
             (6, entry.clone(), Some(vec![Change::Add("item".into(), row.clone())])),
         ],
         has_more: true,
         log_id,
+        module,
     };
-    let snapshot = |log_id| ServerMsg::SnapshotOf {
+    let snapshot = |log_id, module| ServerMsg::SnapshotOf {
         seq: 2,
         hash: vec![0xcd; 32],
         rows: BTreeMap::from([("item".to_string(), vec![row.to_value()])]),
         log_id,
+        module,
     };
     let server_frames: Vec<(&str, ServerMsg)> = vec![
-        ("batch", batch(None)),
-        ("batch-named", batch(Some(log_a))),
+        ("batch", batch(None, None)),
+        ("batch-named", batch(Some(log_a), None)),
+        ("batch-module", batch(Some(log_a), module())),
         (
             "facts",
             ServerMsg::FactsFor {
@@ -135,8 +147,9 @@ pub fn protocol(out: &Out) {
                 )],
             },
         ),
-        ("snapshot", snapshot(None)),
-        ("snapshot-named", snapshot(Some(log_a))),
+        ("snapshot", snapshot(None, None)),
+        ("snapshot-named", snapshot(Some(log_a), None)),
+        ("snapshot-module", snapshot(Some(log_a), module())),
         (
             "ack",
             ServerMsg::Ack {
@@ -149,6 +162,15 @@ pub fn protocol(out: &Out) {
             ServerMsg::Reject {
                 id: id_n(9),
                 reason: "a playlist needs a name".into(),
+            },
+        ),
+        // An intent naming a function this server never ran: kept pending
+        // by the peer, not refused (`docs/plan-db.md` D1).
+        (
+            "held",
+            ServerMsg::Held {
+                id: id_n(9),
+                reason: ark::protocol::unknown_function(&h_add),
             },
         ),
         (
@@ -315,6 +337,44 @@ pub fn protocol(out: &Out) {
         answers,
         vec![(1, Some(log_a))],
         "protocol: a hello naming another log is answered with this one's snapshot, and no other hello is"
+    );
+
+    // A server that says its module (`docs/plan-db.md` D1): a hello at its
+    // head is answered with an empty page carrying the module, where one
+    // that says none is answered with nothing; and an intent at a hash no
+    // module it ran shipped is held, not refused.
+    let mut said = Server::open(trusting(), open_access(), Silent, Authority::new(m.schema.clone(), bodies.clone()))
+        .with_module(ark::hash::module_hash(&m));
+    said.recv(
+        1,
+        ClientMsg::Hello {
+            sub: Subscription {
+                since: 0,
+                mode: Mode::Whole,
+                log_id: None,
+            },
+            token: Some("alice".into()),
+            spec: SPEC_VERSION,
+        },
+    );
+    let first = said.take_outgoing();
+    assert!(
+        matches!(first.as_slice(), [(1, ServerMsg::Batch { items, module: Some(_), .. })] if items.is_empty()),
+        "protocol: a hello at the head of a server that says its module: {first:?}"
+    );
+    let unknown = Entry {
+        id: id_n(40),
+        actor: "alice".into(),
+        session: "dev".into(),
+        fn_hash: vec![7; 32],
+        args: Args::new(),
+        autos: Args::new(),
+    };
+    said.recv(1, ClientMsg::Push { entries: vec![unknown] });
+    let answer = said.take_outgoing();
+    assert!(
+        matches!(answer.as_slice(), [(1, ServerMsg::Held { id, .. })] if *id == id_n(40)),
+        "protocol: an unknown function is held: {answer:?}"
     );
 
     // Absence is the one encoding of "no log": a hello saying `log: null`

@@ -645,6 +645,43 @@ fn stored(tbl: &Table, row: &Row) -> Row {
     row.clone()
 }
 
+/// §12 `behind` (`docs/plan-db.md` D1): a fact's row as a peer whose
+/// schema is not the server's holds it — laid out as `tbl`'s row, a column
+/// the table lacks dropped and a nullable column the row lacks `Null`. A
+/// column the table requires and the row lacks is still a
+/// [`Refusal::MalformedRow`]: projection narrows and widens by what may be
+/// absent, never by inventing a value. Only a replica that knows it is
+/// behind projects ([`crate::peer::Replica::behind`]); otherwise a fact is
+/// applied raw, as [`Store::apply_change`] always has.
+pub fn project_row(tbl: &Table, row: &Row) -> Result<Row, Refusal> {
+    if row.is_of(tbl) {
+        return Ok(row.clone());
+    }
+    let mut vals = Vec::with_capacity(tbl.columns.len());
+    for c in &tbl.columns {
+        match row.get(&c.name) {
+            Some(v) => vals.push(v.clone()),
+            None if c.nullable => vals.push(Value::Null),
+            None => return Err(Refusal::MalformedRow(tbl.name.clone(), format!("{} is missing", c.name))),
+        }
+    }
+    Ok(Row::new(tbl.row_columns().clone(), vals))
+}
+
+/// [`project_row`] of a change: every row in it projected, and `None` for
+/// a change to a table the schema does not have — a table added after this
+/// peer's module, which it cannot see.
+pub fn project(schema: &Schema, c: &Change) -> Result<Option<Change>, Refusal> {
+    let Some(tbl) = schema.lookup_table(c.table()) else {
+        return Ok(None);
+    };
+    Ok(Some(match c {
+        Change::Add(t, r) => Change::Add(t.clone(), project_row(tbl, r)?),
+        Change::Remove(t, r) => Change::Remove(t.clone(), project_row(tbl, r)?),
+        Change::Edit(t, o, r) => Change::Edit(t.clone(), project_row(tbl, o)?, project_row(tbl, r)?),
+    }))
+}
+
 /// What `put` would report and the row it would store, without writing.
 pub fn judge_put(st: &dyn Store, tn: &str, row0: Row) -> Result<Option<Change>, Refusal> {
     let tbl = st.schema().lookup_table(tn).ok_or_else(|| Refusal::NoSuchTable(tn.into()))?;
