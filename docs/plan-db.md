@@ -260,20 +260,27 @@ minutes, five machines on four cores.
   the fork and paged on top of, it reaches the head with nothing pending,
   and its playlists are not the log's — its alone work never reaches the
   server. plan-alone said this case was untested; 5b is the witness.
-- **A column on a table a function returns whole moves that function.**
-  `verify` types a query's result and a middleware's provided row as the
-  table's row, so adding a nullable `playlist.note` makes `playlists`,
-  `playlists_of` and `owned` fail until re-authored — new hashes for
-  functions that never mention the column. `arkc check`'s additive rule is
-  satisfied by the schema and not by the module. Whether a query's row type
-  should be open to added nullable columns is a §9 question.
-- **Below the head, facts are still raw.** `Log::state_at` and `hash_at` at
-  a sequence below the head apply a pre-upgrade fact as it came, so a
-  `Verify` that lands below the head over such facts would disagree with a
-  widened peer. A peer verifies at its cursor after every settle (D3),
-  which is the head almost always; not seen in any scenario.
+- **A column on a table a function returns whole moved that function —
+  decided: a row in a signature is the table's row.** There is no row type
+  of its own (a row is `Ty::Struct` of its columns, which `ret`, a
+  provider's result and `Expr::None` carry and the hash covers), and a
+  nominal one would be a new `Ty` on the wire, moving `module/`, `verify/`
+  and every row-naming function's hash. So `verify::same` compares rows as
+  the table's: two structs that differ only in nullable columns of one
+  table, carried whole by the wider, are the same type. harken with
+  `playlist.note` verifies and `playlists`, `playlists_of`, `owned`,
+  `create_playlist` and `add_to_playlist` keep their hashes
+  (`a_nullable_column_moves_no_function_that_returns_its_rows`, falsified
+  by making the query-result comparison exact). No vector moved.
+- **Below the head, facts are widened too — decided and done.**
+  `Log::state_at` and `hash_at` fill a nullable column a fact's row lacks
+  with `Null` (`log::widened`, borrowed where nothing is filled), so a
+  `Verify` below the head over pre-upgrade facts agrees
+  (`a_verify_below_the_head_over_older_facts_agrees`, falsified by
+  `hash_at` taking the raw facts off). No vector moved.
 - **A peer behind is never verified.** By the decision, and so a divergence
-  on a frozen phone is invisible until the phone is updated.
+  on a frozen phone is invisible until the phone is updated. Confirmed by
+  design.
 
 **Not verified.** A real older phone (they are frozen at spec v3 and do not
 sync with v4 at all); a pinned revision with a schema of its own (none

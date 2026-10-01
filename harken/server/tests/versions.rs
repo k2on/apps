@@ -408,11 +408,13 @@ fn version_5b_an_alone_directory_upgraded_in_place() {
 /// store is taken as the fork and paged on top of: the peer reaches the
 /// head with nothing pending, and its playlists are not the log's — its
 /// alone work never reaches the server, and the server's lands on a store
-/// that was never its. Not D1's or D3's to fix; the coordinator decides
-/// (`docs/plan-db.md` D1, Landed). Run with `--ignored` under
-/// `HARKEN_OLD_<n>_*`.
+/// that was never its. **Accepted as a limitation** (`docs/plan-db.md`
+/// D1): those directories predate the fork, so there is no history to hand
+/// over, and nothing will be built to recover one. Kept, ignored, so that
+/// what such a directory does is written down and can be run with
+/// `--ignored` under `HARKEN_OLD_<n>_*`.
 #[test]
-#[ignore = "witness: an alone directory from before plan-alone has no history to join"]
+#[ignore = "accepted limitation: an alone directory from before plan-alone predates the fork and has no history to hand over"]
 fn version_5c_an_alone_directory_from_before_plan_alone() {
     for o in olds_or_skip("5c alone directory from before plan-alone") {
         if BEFORE_ALONE.contains(&o.name.as_str()) {

@@ -569,3 +569,94 @@ fn projection_never_invents_a_required_value() {
     let short = row(vec![("id", Value::Id(key(1, 1))), ("name", Value::text("Road"))]);
     assert!(matches!(project_row(nt, &short), Err(Refusal::MalformedRow(t, _)) if t == "playlist"));
 }
+
+/// Facts below the head are widened as the head is (`docs/plan-db.md` D1):
+/// a log sequenced under `narrow` — playlists without a `note` — is the
+/// wide server's log after its upgrade. Its state at the head holds the
+/// rows with `note` `Null`, as a wide peer fed those facts does; and a
+/// `Verify` from that peer *below* the head, over the older facts, agrees,
+/// where taking a raw row's leaf off a widened row's digest did not.
+///
+/// Falsified once: with `Log::hash_at` taking the facts above the sequence
+/// off the head as they came, the server answered `ok: false`.
+#[test]
+fn a_verify_below_the_head_over_older_facts_agrees() {
+    let (n, w) = (held(&narrow::module()), held(&wide::module()));
+    let alice = Ctx::new("alice", "dev");
+    let mut old = n.authority();
+    let mut author = n.client(Mode::Whole).replica;
+    let p = Value::Id(key(1, 1));
+    let mut sequence = |r: &mut Replica, i: u8, f: &str, autos: Args, a: Args| {
+        let e = r.mutate(key(9, i), &alice, &n.fh(f), &autos, &a).unwrap();
+        assert!(matches!(old.sequence_entry(&e), ark::peer::Sequenced::Appended(..)));
+    };
+    sequence(
+        &mut author,
+        1,
+        "create_playlist",
+        args([("id", p.clone())]),
+        args([("name", Value::text("Road"))]),
+    );
+    sequence(
+        &mut author,
+        2,
+        "add_to_playlist",
+        Args::new(),
+        args([("playlist_id", p.clone()), ("track_id", Value::text("t1"))]),
+    );
+    sequence(
+        &mut author,
+        3,
+        "create_playlist",
+        args([("id", Value::Id(key(1, 2)))]),
+        args([("name", Value::text("Later"))]),
+    );
+
+    // The server, upgraded: the same entries and facts, the wide schema.
+    let mut log = ark::log::Log::empty(w.module.schema.clone());
+    for (_, (e, f)) in old.log.entries.clone() {
+        log.append(e, f);
+    }
+    let head = log.state_at(log.head_seq()).unwrap();
+    let row = head.get("playlist", std::slice::from_ref(&p)).unwrap();
+    assert_eq!(row.get("note"), Some(&Value::Null), "the head holds the column, Null");
+    let mut up = w.authority();
+    up.ran(n.hash.clone(), closures(&n.module));
+    up.log = log;
+    up.store = head;
+    let mut sv = w.server(up);
+
+    // A wide peer fed the first two entries by their facts: one below the head.
+    let mut c = w.client(Mode::ByFacts);
+    for (seq, (e, f)) in old.log.entries.range(..=2) {
+        c.replica.receive_with(*seq, e.clone(), f.clone());
+    }
+    c.replica.settle();
+    assert_eq!(c.replica.cursor, 2);
+    c.connected();
+    let _ = c.take_outgoing();
+    let (seq, hash) = c.replica.verify_at();
+    sv.recv(
+        1,
+        ClientMsg::Hello {
+            sub: ark::protocol::Subscription {
+                since: 2,
+                mode: Mode::ByFacts,
+                log_id: None,
+            },
+            token: Some("alice".into()),
+            spec: ark::ir::SPEC_VERSION,
+        },
+    );
+    let _ = sv.take_outgoing();
+    sv.recv(1, ClientMsg::Verify { seq, hash });
+    let agreed: Vec<bool> = sv
+        .take_outgoing()
+        .into_iter()
+        .filter_map(|(_, m)| match m {
+            ServerMsg::Agree { ok, .. } => Some(ok),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(agreed, [true], "a Verify below the head over pre-upgrade facts agrees");
+}

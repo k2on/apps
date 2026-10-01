@@ -16,12 +16,13 @@
 //! handed 31 onwards of the new one on top of a store that never held its
 //! first 30. The id is what tells the two apart (§12.4).
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::eval::Args;
 use crate::hash::{leaf, state_hash, state_hash_of, Digest, FnHash};
 use crate::schema::Schema;
-use crate::store::{Change, MemoryStore, Store};
+use crate::store::{project_row, Change, MemoryStore, Row, Store};
 use crate::value::Id;
 
 /// A position in the log. The first entry is 1; 0 is "nothing".
@@ -208,6 +209,38 @@ impl Below {
     }
 }
 
+/// A fact as a state of this schema holds it (`docs/plan-db.md` D1): a row
+/// that names nothing the table lacks but leaves out a nullable column — a
+/// fact sequenced before the module grew that column — laid out with the
+/// column `Null`, as the server widens its head (`ark_server::persist::
+/// widen`) and as a peer of this module that runs the entry again writes
+/// it; any other change as it is. So the state below the head, and its
+/// hash, agree with the head about rows that predate a column — without it
+/// a `Verify` below the head over such facts took a raw row's leaf off a
+/// widened row's digest and disagreed with every peer. A fact sequenced
+/// under this schema has every column and is returned as it is.
+/// Borrowed where nothing is filled, which is every fact of a log written
+/// under one schema.
+pub fn widened<'c>(sch: &Schema, c: &'c Change) -> Cow<'c, Change> {
+    let Some(tbl) = sch.lookup_table(c.table()) else {
+        return Cow::Borrowed(c);
+    };
+    let short = |r: &Row| r.len() < tbl.columns.len() && r.keys().all(|k| tbl.column(k).is_some());
+    let fill = |r: &Row| {
+        if short(r) {
+            project_row(tbl, r).unwrap_or_else(|_| r.clone())
+        } else {
+            r.clone()
+        }
+    };
+    Cow::Owned(match c {
+        Change::Add(t, r) if short(r) => Change::Add(t.clone(), fill(r)),
+        Change::Remove(t, r) if short(r) => Change::Remove(t.clone(), fill(r)),
+        Change::Edit(t, o, r) if short(o) || short(r) => Change::Edit(t.clone(), fill(o), fill(r)),
+        _ => return Cow::Borrowed(c),
+    })
+}
+
 /// What a peer at a cursor is sent next (`Ark.Log.Page`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Page {
@@ -327,7 +360,9 @@ impl Log {
         }
         let mut st = self.base.store.clone();
         for (_, (_, f)) in self.entries.range(..=n) {
-            st.apply_changes(f);
+            for c in f {
+                st.apply_change(&widened(st.schema(), c));
+            }
         }
         Some(st)
     }
@@ -357,6 +392,7 @@ impl Log {
         let mut ds: BTreeMap<&str, Digest> = names.iter().map(|t| (*t, head.digest(t).unwrap_or_default())).collect();
         for (_, (_, facts)) in self.entries.range(n + 1..) {
             for c in facts {
+                let c = &*widened(head.schema(), c);
                 let Some(d) = ds.get_mut(c.table()) else { continue };
                 match c {
                     Change::Add(t, r) => d.sub(&leaf(t, r)),
