@@ -117,8 +117,9 @@ pub struct Entry {
     /// keeps nothing.
     pub held: HeldMap,
     /// R9 A group's members as numbers, one per aggregate of
-    /// [`Face::members`]; empty when they are a list.
-    pub members: Vec<i64>,
+    /// [`Face::members`]; empty when they are a list. An extreme (D4) is
+    /// the column's value, or `Null` for none.
+    pub members: Vec<Value>,
 }
 
 /// §1.3, §1.5 Every candidate of a plan over a store, ordered: by the order
@@ -582,12 +583,56 @@ fn group_of(by: &[FieldName], row: &Row) -> Vec<Value> {
 /// is the same use. Integer addition is associative and commutative, so a
 /// sum is the same number whichever order its terms arrive in, and a view
 /// can keep it by adding and subtracting terms (§1.13).
+///
+/// `docs/plan-db.md` D4 adds the extremes. A least or greatest value is not
+/// a group under subtraction — a departure of the extreme says nothing of
+/// what is next — so a view keeps one only where the store can answer that
+/// question in one indexed read ([`Store::scan_ordered`], limit 1): an
+/// arrival compares, a departure of the extreme reads it again, an edit is
+/// both. Where no index serves the column the list stays a list.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Agg {
     /// How many admitted nodes the list holds.
     Count,
     /// The sum of `f` over the list's nodes, `x` being each node in `f`.
     Sum { x: Sym, f: Expr },
+    /// D4 The least value of a column over the list's rows, `Null` when the
+    /// list is empty: `fold(list, init, |acc, x| min(acc, x.col))`, or
+    /// `first` of a list ordered by the column ascending (`last`, descending)
+    /// whose element is read for that column alone — ties then cannot tell
+    /// two rows apart, which is what lets the value stand for the row.
+    Min(FieldName),
+    /// D4 The greatest: `max` as the step, or `first` of a list ordered by
+    /// the column descending (`last`, ascending).
+    Max(FieldName),
+}
+
+impl Agg {
+    // The column and the direction an extreme is read in from an index.
+    fn extreme(&self) -> Option<(&str, Dir)> {
+        match self {
+            Agg::Min(c) => Some((c, Dir::Asc)),
+            Agg::Max(c) => Some((c, Dir::Desc)),
+            Agg::Count | Agg::Sum { .. } => None,
+        }
+    }
+}
+
+// How one aggregate use reads its number, which is how it is rewritten.
+enum Use<'e> {
+    // `len(list)` (no `init`), or a sum's fold (`init + number`).
+    Plain(Option<&'e Expr>),
+    // D4 `fold(list, init, |acc, x| min(acc, x.c))`, or `max`: `init` when
+    // the list is empty, else the step over `init` and the extreme.
+    Fold(&'e Expr, StdFn),
+    // D4 `match first(list) { y => some, None => none }` reading `y.col`
+    // alone: the extreme bound to `y`, its column reads `y` itself.
+    Pick {
+        y: Sym,
+        col: FieldName,
+        some: &'e Expr,
+        none: &'e Expr,
+    },
 }
 
 /// R9 One plan node's expressions as a view evaluates them: the `having`,
@@ -635,16 +680,108 @@ pub struct Shape {
     pub kept: BTreeMap<NodeId, Kept>,
 }
 
-/// R9 The shape of a plan in a function whose helpers are `helpers`.
-pub fn shape(plan: &Plan, helpers: &[Function]) -> Shape {
+/// R9 The shape of a plan in a function whose helpers are `helpers`, over
+/// a schema — which says, for an extreme (D4), whether its column can be
+/// `Null` and whether an index serves it.
+pub fn shape(sch: &Schema, plan: &Plan, helpers: &[Function]) -> Shape {
     let mut next: Sym = -1;
-    let (root, kept) = face(plan, 0, true, helpers, &mut next).unwrap_or_default();
+    let (root, kept) = face(sch, plan, 0, true, helpers, &mut next).unwrap_or_default();
     Shape { root, kept }
+}
+
+// D4 The one column a list is ordered by, when it is: no limit, and an
+// order of that column followed by nothing but the key columns ascending in
+// key order (all of them, as the verifier completes it, or some first few:
+// ties fall to the key either way). What `first` and `last` of it are an
+// extreme of.
+fn one_column_order(sch: &Schema, c: &Plan) -> Option<(FieldName, Dir)> {
+    let tbl = sch.lookup_table(c.table())?;
+    let ((Key::Column(c0), d), rest) = c.order.split_first()? else {
+        return None;
+    };
+    if c.limit.is_some() {
+        return None;
+    }
+    let keys = tbl.key.iter().filter(|k| *k != c0);
+    let ok = rest.len() <= keys.clone().count()
+        && rest
+            .iter()
+            .zip(keys)
+            .all(|((k, d), want)| *d == Dir::Asc && *k == Key::Column(want.clone()));
+    ok.then(|| (c0.clone(), *d))
+}
+
+// D4 The columns a plan's filter holds equal however it is satisfied — its
+// top-level `Cmp(_, Eq, _)`s and those inside a top-level `All` — read off
+// the plan rather than evaluated: what [`equalities`] will hand the store.
+fn filter_eqs(p: Option<&Pred>) -> Vec<&str> {
+    fn go<'p>(p: &'p Pred, out: &mut Vec<&'p str>) {
+        match p {
+            Pred::Cmp(c, CmpOp::Eq, _) => out.push(c),
+            Pred::All(ps) => ps.iter().for_each(|q| go(q, out)),
+            _ => {}
+        }
+    }
+    let mut out = vec![];
+    if let Some(p) = p {
+        go(p, &mut out);
+    }
+    out
+}
+
+// D4 Whether a store keeping the schema's indexes reads the rows `eq` holds
+// equal in `col`'s order through one of them — `MemoryStore`'s rule
+// (`Secondary::serves`) for an order of one column: an index whose leading
+// columns are exactly the held ones and whose next and last is `col`, or —
+// ascending only — one of exactly the held ones with `col` the first key
+// column they leave free. The indexes are each declared plain or unique
+// index and each reference column; a text index orders nothing.
+fn served(tbl: &Table, eq: &[&str], col: &str, dir: Dir) -> bool {
+    let lists = tbl
+        .indexes
+        .iter()
+        .map(|i| i.columns.clone())
+        .chain(tbl.refs.iter().map(|r| vec![r.column.clone()]))
+        .filter(|cols| !cols.is_empty() && *cols != tbl.key);
+    let held = |c: &str| eq.contains(&c);
+    for cols in lists {
+        let n = cols.iter().take_while(|c| held(c)).count();
+        let (lead, rest) = cols.split_at(n);
+        if !eq.iter().all(|c| lead.iter().any(|x| x == c)) || held(col) {
+            continue;
+        }
+        match rest {
+            [c] if c == col => return true,
+            [] if dir == Dir::Asc && tbl.key.iter().find(|k| !held(k)).is_some_and(|k| k == col) => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
+// D4 Whether every extreme among `aggs` can be kept over `p`'s rows with
+// `pinned` held equal: the column is the row's (a child plan whose node is
+// its row — no projection, having or lists of its own), never `Null` (a
+// `Null` would read as an empty list), and an index serves it in its
+// direction (a departure of the extreme is then one read, not a scan).
+fn extremes_kept(sch: &Schema, p: &Plan, pinned: &[&str], aggs: &[Agg], child: bool) -> bool {
+    if !aggs.iter().any(|a| a.extreme().is_some()) {
+        return true;
+    }
+    let Some(tbl) = sch.lookup_table(p.table()) else { return false };
+    if child && (p.project.is_some() || p.having.is_some() || !p.related.is_empty()) {
+        return false;
+    }
+    let mut eq: Vec<&str> = pinned.to_vec();
+    eq.extend(filter_eqs(p.filter.as_ref()));
+    aggs.iter()
+        .filter_map(Agg::extreme)
+        .all(|(c, d)| tbl.column(c).is_some_and(|col| !col.nullable) && served(tbl, &eq, c, d))
 }
 
 // A plan's face, and the kept plans beneath it; `None` when a child plan
 // (`root` false) cannot be all numbers.
-fn face(p: &Plan, base: NodeId, root: bool, helpers: &[Function], next: &mut Sym) -> Option<(Face, BTreeMap<NodeId, Kept>)> {
+fn face(sch: &Schema, p: &Plan, base: NodeId, root: bool, helpers: &[Function], next: &mut Sym) -> Option<(Face, BTreeMap<NodeId, Kept>)> {
     if !root && (!p.lookups.is_empty() || p.limit.is_some() || p.members.is_some() || !matches!(p.source, Source::Table(_))) {
         return None;
     }
@@ -661,12 +798,35 @@ fn face(p: &Plan, base: NodeId, root: bool, helpers: &[Function], next: &mut Sym
         cands.insert(m);
     }
     let mut uses: BTreeMap<Sym, Option<Vec<Agg>>> = cands.iter().map(|s| (*s, Some(vec![]))).collect();
+    let orders: BTreeMap<Sym, (FieldName, Dir)> = p
+        .related
+        .iter()
+        .filter_map(|r| one_column_order(sch, &r.plan).map(|o| (r.sym, o)))
+        .collect();
+    let rec = Rec { helpers, orders: &orders };
     let exprs = p.having.iter().chain(p.project.iter()).chain(p.order.iter().filter_map(|(k, _)| match k {
         Key::Expr(e) => Some(e),
         Key::Column(_) => None,
     }));
     for e in exprs {
-        scan(e, &cands, helpers, &mut uses);
+        scan(e, &cands, &rec, &mut uses);
+    }
+    // D4 An extreme no index serves leaves its list a list.
+    for r in &p.related {
+        if let Some(Some(aggs)) = uses.get(&r.sym) {
+            let pinned: Vec<&str> = r.on.iter().map(|(c, _)| c.as_str()).collect();
+            if !extremes_kept(sch, &r.plan, &pinned, aggs, true) {
+                uses.insert(r.sym, None);
+            }
+        }
+    }
+    if let (Some(m), true, Source::Group { by, .. }) = (p.members, root, &p.source) {
+        if let Some(Some(aggs)) = uses.get(&m) {
+            let pinned: Vec<&str> = by.iter().map(|c| c.as_str()).collect();
+            if !extremes_kept(sch, p, &pinned, aggs, false) {
+                uses.insert(m, None);
+            }
+        }
     }
     // The default node carries every related list whole.
     if p.project.is_none() {
@@ -689,19 +849,20 @@ fn face(p: &Plan, base: NodeId, root: bool, helpers: &[Function], next: &mut Sym
     let mut kept = BTreeMap::new();
     let mut flags = Vec::with_capacity(p.related.len());
     let mut slots: BTreeMap<Sym, Vec<(Agg, Sym)>> = BTreeMap::new();
-    // Each aggregate a slot of its own, from the one counter.
+    // Each aggregate a slot of its own, from the one counter; an extreme
+    // two, the second the binder its fold's rewrite matches the first by.
     fn assign(aggs: &[Agg], next: &mut Sym) -> Vec<(Agg, Sym)> {
         aggs.iter()
             .map(|a| {
                 let s = *next;
-                *next -= 1;
+                *next -= if a.extreme().is_some() { 2 } else { 1 };
                 (a.clone(), s)
             })
             .collect()
     }
     for (r, id) in p.related.iter().zip(&ids) {
         let child = match &uses[&r.sym] {
-            Some(_) => face(&r.plan, id + 1, false, helpers, next),
+            Some(_) => face(sch, &r.plan, id + 1, false, helpers, next),
             None => None,
         };
         match child {
@@ -724,7 +885,7 @@ fn face(p: &Plan, base: NodeId, root: bool, helpers: &[Function], next: &mut Sym
         }),
         _ => None,
     };
-    let rw = |e: &Expr| rewrite(e, &slots, helpers);
+    let rw = |e: &Expr| rewrite(e, &slots, &rec);
     Some((
         Face {
             having: p.having.as_ref().map(rw),
@@ -745,30 +906,88 @@ fn face(p: &Plan, base: NodeId, root: bool, helpers: &[Function], next: &mut Sym
     ))
 }
 
+// What recognising an aggregate needs beyond the expression: the function's
+// helpers, and the one column each related list is ordered by (D4).
+struct Rec<'a> {
+    helpers: &'a [Function],
+    orders: &'a BTreeMap<Sym, (FieldName, Dir)>,
+}
+
 // One use of a list that is an aggregate: the list's symbol, the aggregate,
-// and the `init` its value is added to (a `Sum`'s; `None` for a count).
-fn aggregate_use<'e>(e: &'e Expr, cands: &BTreeSet<Sym>, helpers: &'e [Function]) -> Option<(Sym, Agg, Option<&'e Expr>)> {
+// and how the use reads it ([`Use`]).
+fn aggregate_use<'e>(e: &'e Expr, cands: &BTreeSet<Sym>, rec: &Rec<'e>) -> Option<(Sym, Agg, Use<'e>)> {
     match e {
         Expr::Std(StdFn::Len, es) => match es.as_slice() {
-            [Expr::Var(s)] if cands.contains(s) => Some((*s, Agg::Count, None)),
+            [Expr::Var(s)] if cands.contains(s) => Some((*s, Agg::Count, Use::Plain(None))),
             _ => None,
         },
         Expr::Fold(xs, init, acc, x, body) => match &**xs {
             Expr::Var(s) if cands.contains(s) => {
+                if let Some((g, c)) = extreme_step(body, *acc, *x) {
+                    let agg = if g == StdFn::Min { Agg::Min(c.into()) } else { Agg::Max(c.into()) };
+                    return Some((*s, agg, Use::Fold(init, g)));
+                }
                 let f = step(body, *acc)?;
-                closed(f, &[*x], false).then(|| (*s, Agg::Sum { x: *x, f: f.clone() }, Some(&**init)))
+                closed(f, &[*x], false).then(|| (*s, Agg::Sum { x: *x, f: f.clone() }, Use::Plain(Some(&**init))))
             }
+            _ => None,
+        },
+        // D4 `first`/`last` of a list ordered by one column, read for that
+        // column alone: the least or greatest of it.
+        Expr::Match(o, y, some, none) => match &**o {
+            Expr::Std(g @ (StdFn::First | StdFn::Last), es) => match es.as_slice() {
+                [Expr::Var(s)] if cands.contains(s) => {
+                    let (c, d) = rec.orders.get(s)?;
+                    if !only_field(some, *y, c) {
+                        return None;
+                    }
+                    let least = (*d == Dir::Asc) == (*g == StdFn::First);
+                    let agg = if least { Agg::Min(c.clone()) } else { Agg::Max(c.clone()) };
+                    Some((
+                        *s,
+                        agg,
+                        Use::Pick {
+                            y: *y,
+                            col: c.clone(),
+                            some,
+                            none,
+                        },
+                    ))
+                }
+                _ => None,
+            },
             _ => None,
         },
         Expr::Call(name, es) => match es.as_slice() {
             [Expr::Var(s)] if cands.contains(s) => {
-                let h = helpers.iter().find(|h| h.name == *name && h.kind == FnKind::Helper)?;
+                let h = rec.helpers.iter().find(|h| h.name == *name && h.kind == FnKind::Helper)?;
                 let (agg, init) = helper_agg(h)?;
-                Some((*s, agg, init))
+                Some((*s, agg, Use::Plain(init)))
             }
             _ => None,
         },
         _ => None,
+    }
+}
+
+// D4 A fold's step that is `min(acc, x.c)` or `max(acc, x.c)`, either way
+// round: which, and the column.
+fn extreme_step(body: &Expr, acc: Sym, x: Sym) -> Option<(StdFn, &str)> {
+    let Expr::Std(g @ (StdFn::Min | StdFn::Max), es) = body else {
+        return None;
+    };
+    match es.as_slice() {
+        [Expr::Var(a), Expr::Field(v, c)] | [Expr::Field(v, c), Expr::Var(a)] if *a == acc && **v == Expr::Var(x) => Some((*g, c.as_str())),
+        _ => None,
+    }
+}
+
+// D4 Whether every occurrence of `y` in `e` is `y.c`.
+fn only_field(e: &Expr, y: Sym, c: &str) -> bool {
+    match e {
+        Expr::Field(v, f) if **v == Expr::Var(y) => f == c,
+        Expr::Var(s) => *s != y,
+        _ => children(e).into_iter().all(|k| only_field(k, y, c)),
     }
 }
 
@@ -803,15 +1022,20 @@ fn step(body: &Expr, acc: Sym) -> Option<&Expr> {
 
 // Pass one: note each use of a candidate list — an aggregate, or anything
 // else, which makes it a list (`None`).
-fn scan(e: &Expr, cands: &BTreeSet<Sym>, helpers: &[Function], uses: &mut BTreeMap<Sym, Option<Vec<Agg>>>) {
-    if let Some((s, agg, init)) = aggregate_use(e, cands, helpers) {
+fn scan(e: &Expr, cands: &BTreeSet<Sym>, rec: &Rec, uses: &mut BTreeMap<Sym, Option<Vec<Agg>>>) {
+    if let Some((s, agg, u)) = aggregate_use(e, cands, rec) {
         if let Some(Some(aggs)) = uses.get_mut(&s) {
             if !aggs.contains(&agg) {
                 aggs.push(agg);
             }
         }
-        if let Some(init) = init {
-            scan(init, cands, helpers, uses);
+        match u {
+            Use::Plain(None) => {}
+            Use::Plain(Some(init)) | Use::Fold(init, _) => scan(init, cands, rec, uses),
+            Use::Pick { some, none, .. } => {
+                scan(some, cands, rec, uses);
+                scan(none, cands, rec, uses);
+            }
         }
         return;
     }
@@ -821,19 +1045,35 @@ fn scan(e: &Expr, cands: &BTreeSet<Sym>, helpers: &[Function], uses: &mut BTreeM
         }
     }
     for c in children(e) {
-        scan(c, cands, helpers, uses);
+        scan(c, cands, rec, uses);
     }
 }
 
-// Pass two: each aggregate use of a kept list replaced by its number.
-fn rewrite(e: &Expr, slots: &BTreeMap<Sym, Vec<(Agg, Sym)>>, helpers: &[Function]) -> Expr {
+// Pass two: each aggregate use of a kept list replaced by its number — a
+// count by its slot, a sum by `init + slot`, an extreme's fold by `init`
+// or the step over `init` and the slot, an extreme's pick by a match on
+// the slot whose `y.col` is `y` (D4).
+fn rewrite(e: &Expr, slots: &BTreeMap<Sym, Vec<(Agg, Sym)>>, rec: &Rec) -> Expr {
     let kept: BTreeSet<Sym> = slots.keys().copied().collect();
     map_expr(e, &mut |x: &Expr| {
-        let (s, agg, init) = aggregate_use(x, &kept, helpers)?;
+        let (s, agg, u) = aggregate_use(x, &kept, rec)?;
         let slot = slots[&s].iter().find(|(a, _)| *a == agg).map(|(_, s)| *s)?;
-        Some(match init {
-            None => Expr::Var(slot),
-            Some(init) => Expr::Op(Op::Add, vec![rewrite(init, slots, helpers), Expr::Var(slot)]),
+        let v = |s: Sym| Box::new(Expr::Var(s));
+        Some(match u {
+            Use::Plain(None) => Expr::Var(slot),
+            Use::Plain(Some(init)) => Expr::Op(Op::Add, vec![rewrite(init, slots, rec), Expr::Var(slot)]),
+            Use::Fold(init, g) => {
+                let init = rewrite(init, slots, rec);
+                let y = slot - 1;
+                Expr::Match(v(slot), y, Box::new(Expr::Std(g, vec![init.clone(), Expr::Var(y)])), Box::new(init))
+            }
+            Use::Pick { y, col, some, none } => {
+                let some = map_expr(some, &mut |z: &Expr| match z {
+                    Expr::Field(w, c) if **w == Expr::Var(y) && *c == col => Some(Expr::Var(y)),
+                    _ => None,
+                });
+                Expr::Match(v(slot), y, Box::new(rewrite(&some, slots, rec)), Box::new(rewrite(none, slots, rec)))
+            }
         })
     })
 }
@@ -964,8 +1204,10 @@ fn map_expr(e: &Expr, f: &mut dyn FnMut(&Expr) -> Option<Expr>) -> Expr {
 /// carries, old and new.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Held {
-    /// One per aggregate of the node, in [`Kept::aggs`]'s order.
-    pub nums: Vec<i64>,
+    /// One per aggregate of the node, in [`Kept::aggs`]'s order: an `Int`
+    /// for a count or a sum, the column's value for an extreme (D4), `Null`
+    /// when there is none.
+    pub nums: Vec<Value>,
     /// The child nodes, by key, when the child plan has related plans.
     pub kids: BTreeMap<Vec<Value>, Kid>,
     /// Who reads these numbers: `None` for the entry's own node, or a
@@ -999,7 +1241,7 @@ type Ops = Vec<((NodeId, Value), bool)>;
 enum Members {
     None,
     List(Value),
-    Nums(Vec<i64>),
+    Nums(Vec<Value>),
 }
 
 // Everything the kept numbers are computed against: the plan, its shape,
@@ -1071,29 +1313,127 @@ fn bool_of(v: Value) -> Result<bool, EvalFault> {
     }
 }
 
-// `nums` moved by `terms` under `op` (add or subtract), checked as the
-// evaluator's arithmetic is: an overflow is the same refusal a fold's
+// A count or a sum moved by a term under `op` (add or subtract), checked as
+// the evaluator's arithmetic is: an overflow is the same refusal a fold's
 // would be.
-fn shift(nums: &mut [i64], terms: &[i64], op: Op) -> Result<(), EvalFault> {
-    for (n, t) in nums.iter_mut().zip(terms) {
-        *n = crate::eval::arith(op, *n, *t).map_err(|e| EvalFault::Verdict(Refusal::Refused(e.into())))?;
+fn shift(op: Op, n: &Value, t: &Value) -> Result<Value, EvalFault> {
+    let (Value::Int(n), Value::Int(t)) = (n, t) else {
+        return Err(EvalFault::Bug(EvalError::TypeError(format!("a count or a sum moved by {t:?}, at {n:?}"))));
+    };
+    crate::eval::arith(op, *n, *t)
+        .map(Value::Int)
+        .map_err(|e| EvalFault::Verdict(Refusal::Refused(e.into())))
+}
+
+// What `aggs` come to over no node: nothing counted, nothing summed, no
+// extreme.
+fn zero(aggs: &[(Agg, Sym)]) -> Vec<Value> {
+    aggs.iter()
+        .map(|(a, _)| if a.extreme().is_some() { Value::Null } else { Value::Int(0) })
+        .collect()
+}
+
+// One admitted node's terms put in: added to a count or a sum, compared
+// with an extreme (D4), which it replaces when it is beyond it.
+fn put_in(aggs: &[(Agg, Sym)], nums: &mut [Value], terms: &[Value]) -> Result<(), EvalFault> {
+    for (((a, _), n), t) in aggs.iter().zip(nums.iter_mut()).zip(terms) {
+        match a.extreme() {
+            None => *n = shift(Op::Add, n, t)?,
+            Some((_, d)) => {
+                let o = compare_value(t, n);
+                if n.is_null() || o == if d == Dir::Asc { Ordering::Less } else { Ordering::Greater } {
+                    *n = t.clone();
+                }
+            }
+        }
     }
     Ok(())
 }
 
+// One admitted node's terms taken out: subtracted from a count or a sum.
+// An extreme it was (or one already lost) cannot be moved — what is next is
+// not in the terms — so the answer is `true`, and the caller reads it again
+// from the store ([`extremes`]), which is already final: arrivals compared
+// after that are compared against an answer that has them already, and
+// comparing is idempotent (D4).
+fn take_out(aggs: &[(Agg, Sym)], nums: &mut [Value], terms: &[Value]) -> Result<bool, EvalFault> {
+    let mut stale = false;
+    for (((a, _), n), t) in aggs.iter().zip(nums.iter_mut()).zip(terms) {
+        match a.extreme() {
+            None => *n = shift(Op::Sub, n, t)?,
+            Some(_) => stale |= n.is_null() || n == t,
+        }
+    }
+    Ok(stale)
+}
+
+// A column of a node that is its row; `Null` where it has none.
+fn column(node: &Value, c: &str) -> Value {
+    match node {
+        Value::Struct(m) => m.get(c).cloned().unwrap_or(Value::Null),
+        _ => Value::Null,
+    }
+}
+
 // The terms one admitted node adds to the aggregates `aggs`: 1 to a count,
-// `f(node)` to a sum.
-fn terms(cx: &Cx, aggs: &[(Agg, Sym)], node: &Value) -> Result<Vec<i64>, EvalFault> {
+// `f(node)` to a sum, the column to an extreme (whose node is its row).
+fn terms(cx: &Cx, aggs: &[(Agg, Sym)], node: &Value) -> Result<Vec<Value>, EvalFault> {
     aggs.iter()
         .map(|(a, _)| match a {
-            Agg::Count => Ok(1),
+            Agg::Count => Ok(Value::Int(1)),
             Agg::Sum { x, f } => {
                 let mut n = cx.scope.node();
                 n.bind_ref(*x, node);
-                int_of(n.eval(f)?)
+                int_of(n.eval(f)?).map(Value::Int)
             }
+            Agg::Min(c) | Agg::Max(c) => Ok(column(node, c)),
         })
         .collect()
+}
+
+// A related plan's pins for one dependency: each `on` column held to the
+// value the parent computed for it.
+fn pins_of(r: &Related, on: &Value) -> Vec<(FieldName, Value)> {
+    match on {
+        Value::List(vs) => r.on.iter().map(|(col, _)| col.clone()).zip(vs.iter().cloned()).collect(),
+        _ => vec![],
+    }
+}
+
+// D4 Every extreme among `aggs` read again from the store, which is final:
+// the least or greatest value of its column over the rows `plan`'s filter
+// and `pins` admit. That is the first row of an index that holds them in
+// the column's order — [`Store::scan_ordered`], limit 1, one row examined
+// past those `keep` refuses — and [`shape`] keeps an extreme only where the
+// schema has such an index. A store that serves none has every candidate
+// read, which is right and is the scan the index is there to spare.
+fn extremes(cx: &Cx, plan: &Plan, pins: &[(FieldName, Value)], aggs: &[(Agg, Sym)], nums: &mut [Value]) -> Result<(), EvalFault> {
+    if !aggs.iter().any(|(a, _)| a.extreme().is_some()) {
+        return Ok(());
+    }
+    let (_, filter) = source(cx.sch, plan, pins, cx.scope)?;
+    let (eq, sp) = (equalities(filter.as_ref()), spans(filter.as_ref()));
+    let keep = |r: &Row| admits(filter.as_ref(), r);
+    for ((a, _), n) in aggs.iter().zip(nums.iter_mut()) {
+        let Some((c, d)) = a.extreme() else { continue };
+        let row = match cx.st.scan_ordered(plan.table(), &eq, &sp, &[(c, d)], &keep, 1) {
+            Some(rows) => rows.into_iter().next(),
+            None => cx.st.scan_where_eq(plan.table(), &eq, &sp, &keep).into_iter().reduce(|a, b| {
+                let o = compare_value(&column_of(&b, c), &column_of(&a, c));
+                if o == if d == Dir::Asc { Ordering::Less } else { Ordering::Greater } {
+                    b
+                } else {
+                    a
+                }
+            }),
+        };
+        *n = row.map_or(Value::Null, |r| column_of(&r, c));
+    }
+    Ok(())
+}
+
+fn column_of(r: &Row, c: &str) -> Value {
+    r.get(c).cloned().unwrap_or(Value::Null)
 }
 
 // A child row of a kept plan with no related plans: its node, when its
@@ -1118,7 +1458,7 @@ fn row_node(cx: &Cx, id: NodeId, row: &Value) -> Result<Option<Value>, EvalFault
 
 // The terms a child row adds to its parent's numbers: none when the filter
 // or the having refuses it.
-fn row_terms(cx: &Cx, id: NodeId, row: &Row) -> Result<Option<Vec<i64>>, EvalFault> {
+fn row_terms(cx: &Cx, id: NodeId, row: &Row) -> Result<Option<Vec<Value>>, EvalFault> {
     if !admits(cx.filters[&id].as_ref(), row) {
         return Ok(None);
     }
@@ -1142,7 +1482,7 @@ fn kid_node(cx: &Cx, id: NodeId, row: &Value, subs: &[Value], held: &HeldMap) ->
     for (jid, on) in face.ids.iter().zip(subs) {
         let h = &held[&(*jid, on.clone())];
         for ((_, slot), n) in cx.kept(*jid).aggs.iter().zip(&h.nums) {
-            node.bind(*slot, Value::Int(*n));
+            node.bind(*slot, n.clone());
         }
     }
     let admitted = match &face.having {
@@ -1159,7 +1499,7 @@ fn kid_node(cx: &Cx, id: NodeId, row: &Value, subs: &[Value], held: &HeldMap) ->
     Ok((admitted, value))
 }
 
-fn kid_terms(cx: &Cx, id: NodeId, kid: &Kid) -> Result<Option<Vec<i64>>, EvalFault> {
+fn kid_terms(cx: &Cx, id: NodeId, kid: &Kid) -> Result<Option<Vec<Value>>, EvalFault> {
     if !kid.admitted {
         return Ok(None);
     }
@@ -1200,28 +1540,30 @@ fn ensure(cx: &Cx, id: NodeId, on: Value, parent: Parent, held: &mut HeldMap, op
     let r = cx.related(id);
     let c = &r.plan;
     let kept = cx.kept(id);
-    let pins: Vec<(FieldName, Value)> = match &k.1 {
-        Value::List(vs) => r.on.iter().map(|(col, _)| col.clone()).zip(vs.iter().cloned()).collect(),
-        _ => vec![],
-    };
-    let (tbl, rows) = candidates(cx.sch, c, &pins, cx.scope, cx.st)?;
+    let pins = pins_of(r, &k.1);
     let mut h = Held {
-        nums: vec![0; kept.aggs.len()],
+        nums: zero(&kept.aggs),
         kids: BTreeMap::new(),
         parents: BTreeSet::from([parent]),
     };
-    for row in rows {
-        if c.related.is_empty() {
-            if let Some(node) = row_node(cx, id, &row.into_value())? {
-                shift(&mut h.nums, &terms(cx, &kept.aggs, &node)?, Op::Add)?;
+    if c.related.is_empty() && kept.aggs.iter().all(|(a, _)| a.extreme().is_some()) {
+        // D4 Extremes alone: one indexed read each, not the list.
+        extremes(cx, c, &pins, &kept.aggs, &mut h.nums)?;
+    } else {
+        let (tbl, rows) = candidates(cx.sch, c, &pins, cx.scope, cx.st)?;
+        for row in rows {
+            if c.related.is_empty() {
+                if let Some(node) = row_node(cx, id, &row.into_value())? {
+                    put_in(&kept.aggs, &mut h.nums, &terms(cx, &kept.aggs, &node)?)?;
+                }
+            } else {
+                let key = tbl.key_of(&row);
+                let kid = build_kid(cx, id, &k.1, key.clone(), row.into_value(), held, ops)?;
+                if let Some(t) = kid_terms(cx, id, &kid)? {
+                    put_in(&kept.aggs, &mut h.nums, &t)?;
+                }
+                h.kids.insert(key, kid);
             }
-        } else {
-            let key = tbl.key_of(&row);
-            let kid = build_kid(cx, id, &k.1, key.clone(), row.into_value(), held, ops)?;
-            if let Some(t) = kid_terms(cx, id, &kid)? {
-                shift(&mut h.nums, &t, Op::Add)?;
-            }
-            h.kids.insert(key, kid);
         }
     }
     ops.push((k.clone(), true));
@@ -1263,9 +1605,11 @@ struct Hit<'c> {
 // evaluate again over numbers that moved beneath them.
 #[derive(Default)]
 struct Dirt {
-    before: Option<Vec<i64>>,
+    before: Option<Vec<Value>>,
     reread: BTreeSet<Vec<Value>>,
     reeval: BTreeSet<Vec<Value>>,
+    /// D4 An extreme left with a row: read it again ([`extremes`]).
+    stale: bool,
 }
 
 // §1.13, R9 An entry's kept numbers brought up to the store, from the hits
@@ -1297,10 +1641,12 @@ fn sweep(cx: &Cx, held: &mut HeldMap, hits: &[Hit], ops: &mut Ops) -> Result<(),
         }
         let c = &cx.related(hit.id).plan;
         if c.related.is_empty() {
-            for (row, op) in [(hit.old, Op::Sub), (hit.new, Op::Add)] {
-                if let Some(t) = row.map(|r| row_terms(cx, hit.id, r)).transpose()?.flatten() {
-                    shift(&mut h.nums, &t, op)?;
-                }
+            let aggs = &cx.kept(hit.id).aggs;
+            if let Some(t) = hit.old.map(|r| row_terms(cx, hit.id, r)).transpose()?.flatten() {
+                d.stale |= take_out(aggs, &mut h.nums, &t)?;
+            }
+            if let Some(t) = hit.new.map(|r| row_terms(cx, hit.id, r)).transpose()?.flatten() {
+                put_in(aggs, &mut h.nums, &t)?;
             }
         } else {
             let tbl = cx.table(c.table())?;
@@ -1315,6 +1661,13 @@ fn sweep(cx: &Cx, held: &mut HeldMap, hits: &[Hit], ops: &mut Ops) -> Result<(),
         let (id, on) = (k.0, &k.1);
         let r = cx.related(id);
         let ids = &cx.kept(id).face.ids;
+        if d.stale {
+            extremes(cx, &r.plan, &pins_of(r, on), &cx.kept(id).aggs, &mut h.nums)?;
+        }
+        // A child plan with lists of its own keeps no extreme
+        // (`extremes_kept`), so taking a child node out never leaves one
+        // stale below.
+        let aggs = &cx.kept(id).aggs;
         for key in &d.reread {
             let old = h.kids.remove(key);
             let row = cx
@@ -1333,12 +1686,12 @@ fn sweep(cx: &Cx, held: &mut HeldMap, hits: &[Hit], ops: &mut Ops) -> Result<(),
                     }
                 }
                 if let Some(t) = kid_terms(cx, id, o)? {
-                    shift(&mut h.nums, &t, Op::Sub)?;
+                    take_out(aggs, &mut h.nums, &t)?;
                 }
             }
             if let Some(n) = new {
                 if let Some(t) = kid_terms(cx, id, &n)? {
-                    shift(&mut h.nums, &t, Op::Add)?;
+                    put_in(aggs, &mut h.nums, &t)?;
                 }
                 h.kids.insert(key.clone(), n);
             }
@@ -1355,10 +1708,10 @@ fn sweep(cx: &Cx, held: &mut HeldMap, hits: &[Hit], ops: &mut Ops) -> Result<(),
             kid.node = node;
             let new = kid_terms(cx, id, kid)?;
             if let Some(t) = old {
-                shift(&mut h.nums, &t, Op::Sub)?;
+                take_out(aggs, &mut h.nums, &t)?;
             }
             if let Some(t) = new {
-                shift(&mut h.nums, &t, Op::Add)?;
+                put_in(aggs, &mut h.nums, &t)?;
             }
         }
         if h.nums != before {
@@ -1371,11 +1724,12 @@ fn sweep(cx: &Cx, held: &mut HeldMap, hits: &[Hit], ops: &mut Ops) -> Result<(),
     Ok(())
 }
 
-// A group's members as numbers, from its rows: how many, and each sum.
-fn member_nums(cx: &Cx, aggs: &[(Agg, Sym)], rows: &[Value]) -> Result<Vec<i64>, EvalFault> {
-    let mut nums = vec![0; aggs.len()];
+// A group's members as numbers, from its rows: how many, each sum, each
+// extreme.
+fn member_nums(cx: &Cx, aggs: &[(Agg, Sym)], rows: &[Value]) -> Result<Vec<Value>, EvalFault> {
+    let mut nums = zero(aggs);
     for r in rows {
-        shift(&mut nums, &terms(cx, aggs, r)?, Op::Add)?;
+        put_in(aggs, &mut nums, &terms(cx, aggs, r)?)?;
     }
     Ok(nums)
 }
@@ -1417,7 +1771,7 @@ fn entry_at(cx: &Cx, key: Vec<Value>, row: Cand, members: Members, mut held: Hel
         }
         Members::Nums(ns) => {
             for ((_, slot), n) in face.members.iter().flatten().zip(&ns) {
-                node.bind(*slot, Value::Int(*n));
+                node.bind(*slot, n.clone());
             }
             nums = ns;
         }
@@ -1446,7 +1800,7 @@ fn entry_at(cx: &Cx, key: Vec<Value>, row: Cand, members: Members, mut held: Hel
                 release(cx, k, &None, &mut held, ops);
             }
             for ((_, slot), n) in cx.kept(id).aggs.iter().zip(&held[&(id, dep)].nums) {
-                node.bind(*slot, Value::Int(*n));
+                node.bind(*slot, n.clone());
             }
         } else {
             deps.push((id, Value::List(on.iter().map(|(_, v)| v.clone()).collect())));
@@ -1587,7 +1941,7 @@ pub struct View {
 /// §1.5 Pull everything, and keep it: the view whose answer is what
 /// [`read`] gives for the plan in `env`.
 pub fn hydrate(sch: &Schema, plan: &Plan, env: Env, st: &dyn Store) -> Result<View, EvalFault> {
-    let shape = shape(plan, &env.helpers);
+    let shape = shape(sch, plan, &env.helpers);
     let (pulled, groups) = {
         let scope = env.scope(sch);
         let pulled = pull_root(&Cx::new(sch, plan, &shape, &scope, st)?)?;
@@ -1955,7 +2309,7 @@ pub fn splice(ps: &[Patch], xs: &[Value]) -> Vec<Value> {
 pub fn push_all(sch: &Schema, st: &dyn Store, changes: &[Change], view: &mut View) -> Result<Vec<Patch>, EvalFault> {
     let scope = view.env.scope(sch);
     let cx = Cx::new(sch, &view.plan, &view.shape, &scope, st)?;
-    let t = touched(&cx, changes, &view.by_dep, &view.groups)?;
+    let t = touched(&cx, changes, &view.by_dep, &view.groups, &view.by_key)?;
     let mut rebuilt: Vec<(Vec<Value>, Option<Entry>, Ops)> = Vec::with_capacity(t.keys.len());
     for (k, hits) in &t.keys {
         let mut held = view.by_key.get_mut(k).map(|e| std::mem::take(&mut e.held)).unwrap_or_default();
@@ -2037,12 +2391,21 @@ impl Moves {
 
 // §1.5, 1–2 What the changes touch: the keys of the entries to rebuild,
 // each with the hits its kept numbers took (R9); what the changes did to
-// each touched group's members, and what each one's kept member sums
-// moved by. Reads the view; changes nothing.
+// each touched group's members, and what each one's kept member numbers
+// came to. Reads the view; changes nothing.
 struct Touched<'c> {
     keys: BTreeMap<Vec<Value>, Vec<Hit<'c>>>,
     groups: BTreeMap<Vec<Value>, Moves>,
-    sums: BTreeMap<Vec<Value>, Vec<i64>>,
+    sums: BTreeMap<Vec<Value>, Track>,
+}
+
+// R9, D4 One touched group's kept member numbers: those its entry held,
+// moved by each row that really left or arrived, in change order — `None`
+// for a group with no entry, which is counted from its rows — and whether
+// an extreme left with a row, to be read again.
+struct Track {
+    nums: Option<Vec<Value>>,
+    stale: bool,
 }
 
 fn touched<'c>(
@@ -2050,6 +2413,7 @@ fn touched<'c>(
     changes: &'c [Change],
     by_dep: &BTreeMap<(NodeId, Value), BTreeSet<Vec<Value>>>,
     view_groups: &Groups,
+    by_key: &BTreeMap<Vec<Value>, Entry>,
 ) -> Result<Touched<'c>, EvalFault> {
     let (sch, plan) = (cx.sch, cx.plan);
     let table = plan.table();
@@ -2090,8 +2454,17 @@ fn touched<'c>(
                         };
                         if let (true, Some(aggs)) = (moved, member_aggs) {
                             let terms = terms(cx, aggs, &r.to_value())?;
-                            let sums = t.sums.entry(g.clone()).or_insert_with(|| vec![0; aggs.len()]);
-                            shift(sums, &terms, if arrives { Op::Add } else { Op::Sub })?;
+                            let tr = t.sums.entry(g.clone()).or_insert_with(|| Track {
+                                nums: by_key.get(&g).filter(|e| e.members.len() == aggs.len()).map(|e| e.members.clone()),
+                                stale: false,
+                            });
+                            if let Some(nums) = &mut tr.nums {
+                                if arrives {
+                                    put_in(aggs, nums, &terms)?;
+                                } else {
+                                    tr.stale |= take_out(aggs, nums, &terms)?;
+                                }
+                            }
                         }
                         t.keys.entry(g).or_default();
                     }
@@ -2167,24 +2540,35 @@ fn root_of(
                 let rows = || rows().iter().filter_map(|m| cx.st.get(table, m)).map(Row::into_value).collect::<Vec<_>>();
                 let members = match &cx.shape.root.members {
                     None => Members::List(Value::List(rows())),
-                    // A count is the kept keys; a sum is what it was plus
-                    // what the changes moved it by, or — for a group that
-                    // is new — its rows'.
-                    Some(aggs) => Members::Nums(match old {
-                        Some(o) if o.members.len() == aggs.len() => {
-                            let mut nums = o.members.clone();
-                            if let Some(moved) = t.sums.get(k) {
-                                shift(&mut nums, moved, Op::Add)?;
-                            }
-                            for (n, (a, _)) in nums.iter_mut().zip(aggs) {
-                                if *a == Agg::Count {
-                                    *n = size as i64;
+                    // A count is the kept keys; a sum is what it was moved
+                    // by the rows that left and arrived, an extreme what
+                    // they compared to — or read again, when it left (D4);
+                    // a group that is new, its rows'.
+                    Some(aggs) => Members::Nums({
+                        let moved = match (old, t.sums.get(k)) {
+                            (Some(o), None) if o.members.len() == aggs.len() => Some(o.members.clone()),
+                            (_, Some(Track { nums: Some(nums), stale })) => {
+                                let mut nums = nums.clone();
+                                if *stale {
+                                    let pins: Vec<(FieldName, Value)> = by.iter().cloned().zip(k.iter().cloned()).collect();
+                                    extremes(cx, plan, &pins, aggs, &mut nums)?;
                                 }
+                                Some(nums)
                             }
-                            nums
+                            _ => None,
+                        };
+                        match moved {
+                            Some(mut nums) => {
+                                for (n, (a, _)) in nums.iter_mut().zip(aggs) {
+                                    if *a == Agg::Count {
+                                        *n = Value::Int(size as i64);
+                                    }
+                                }
+                                nums
+                            }
+                            None if aggs.iter().all(|(a, _)| *a == Agg::Count) => vec![Value::Int(size as i64); aggs.len()],
+                            None => member_nums(cx, aggs, &rows())?,
                         }
-                        _ if aggs.iter().all(|(a, _)| *a == Agg::Count) => vec![size as i64; aggs.len()],
-                        _ => member_nums(cx, aggs, &rows())?,
                     }),
                 };
                 let key_row = Cand::Group(Value::Struct(by.iter().cloned().zip(k.iter().cloned()).collect()));

@@ -391,7 +391,7 @@ fn composers_is_kept_three_deep() {
     let m = module();
     let built = m.build();
     let (plan, env) = plan_env(built, "composers");
-    let s = view::shape(&plan, &env.helpers);
+    let s = view::shape(&built.schema, &plan, &env.helpers);
     assert_eq!(s.root.kept, vec![true]);
     assert_eq!(s.kept.keys().copied().collect::<Vec<_>>(), vec![0, 1, 2]);
     let aggs = |id: usize| s.kept[&id].aggs.iter().map(|(a, _)| a.clone()).collect::<Vec<_>>();
@@ -418,7 +418,7 @@ fn what_is_kept_and_what_is_not() {
     let built = m.build();
     let shape = |name: &str| {
         let (plan, env) = plan_env(built, name);
-        view::shape(&plan, &env.helpers)
+        view::shape(&built.schema, &plan, &env.helpers)
     };
     let pos = shape("creator_pos");
     let members = pos.root.members.as_ref().expect("the members kept");
@@ -463,7 +463,9 @@ fn only_a_sum_of_the_element_is_a_sum() {
         order: vec![],
         limit: None,
     };
-    let kept = |e: Expr| !view::shape(&plan(e), &[]).kept.is_empty();
+    let m = module();
+    let sch = &m.build().schema;
+    let kept = |e: Expr| !view::shape(sch, &plan(e), &[]).kept.is_empty();
     let field = |s, c: &str| Expr::Field(Box::new(var(s)), c.into());
     assert!(kept(fold(Expr::Op(Op::Add, vec![var(acc), field(x, "no")]))));
     assert!(kept(fold(Expr::Op(Op::Add, vec![field(x, "no"), var(acc)]))));
