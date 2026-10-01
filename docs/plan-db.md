@@ -1183,3 +1183,205 @@ the state hash, the snapshot and the vectors are what they were — and
   store in `replay` as before — and `perf_a_mutate_alone` stays flat.
 - `perf_d_bytes` before and after each step, in `--release`, in the
   commit message of the step.
+
+### Landed
+
+Five commits: `cbb799d` (D7.1), `ed5028e` (D7.2), `f9adeb2` (D7.3),
+`119b798` (D7.4), and this record. All numbers are release builds of
+`rust/ark-server/tests/perf.rs`, media rows under harken's schema, on the
+4-core machine D5 was measured on. Load averages were 1 to 2.5, against
+D5's 7 to 12.
+
+**D7.1, the instrument.** `perf_d_bytes` counts *live* bytes — what the
+allocator was asked for and has not had back — with a counting global
+allocator, and builds the table by subtraction, each variant in a process
+of its own. `perf_d_open_child` prints live beside resident, so the open
+table has a live column now. The first reading (100,000 rows, live bytes
+a row):
+
+| component | before | after D7.2 | after D7.3 and D7.4 |
+|---|---:|---:|---:|
+| the rows, alone in a `Vec<Row>` | 393 | 393 | 393 |
+| + the primary map | 87 | 134 | 134 |
+| + the secondaries (`file`, `pos`) | 888 | 296 | 296 |
+| + the text indexes (`title`, `creator`) | 1,271 | 90 | 90 |
+| one store | 2,639 | 912 | 912 |
+
+At 10,000 rows every figure is within a few bytes of these. The two
+expected gaps were both there:
+- The structure around a row cost more than five times the row.
+- An open's resident memory was 1.5 to 1.7 times its live bytes:
+  4,208 B a row against 2,638 for one store, 8,464 against 4,925 for a
+  client.
+
+**D7.2, postings as ordinals** (`ed5028e`).
+- Each table is a `TableState`. Its rows are held by key with a `u32`
+  ordinal beside each, and again by ordinal, with a free list.
+  Secondaries and trigrams post sorted `Vec<u32>`s.
+- An Edit keeps its ordinal, so an index whose columns did not move is
+  not touched at all.
+- Key order is restored by an unstable sort in place over the rows
+  read. `scan_ordered` sorts a bucket as it reaches it and asks `keep`
+  of the same rows as before.
+- `PartialEq` and `Debug` read rows only.
+- Where it moved: the secondaries went from 888 to 296 B a row (a bucket
+  of one key was a whole `BTreeSet` leaf), and the text indexes from
+  1,271 to 90. These titles are short, about sixteen trigrams a row.
+- The primary map grew by the ordinal and the reverse table, 87 to 134 B.
+
+**D7.3, the view shares what it has not written** (`f9adeb2`).
+- One `Arc<TableState>` per table. `Clone` is `O(tables)`, and a write
+  goes through `make_mut`.
+- A store records the tables it has written since it was made or cloned
+  (`MemoryStore::written`) on the one path every write takes. A
+  replica's view therefore knows its `diverged` (`Replica::written`)
+  without a call site remembering it.
+- Every move of the confirmed store goes through `move_confirmed`: a
+  landed batch, an own intent confirmed from its record, `fork_back`'s
+  rewrite. The view releases the tables it has not written (asserted to
+  be exactly the ones it shares), confirmed is written in place, and the
+  view takes them back. A snapshot adopted is a `Replica::open`.
+- A table the view has written is its own copy until the next replay,
+  and takes what landed as R2 applied it.
+- `Replica::settle` asserts after every pump that the view shares
+  exactly the tables it has not written.
+
+The first draft re-shared on confirm, and was measured before it was
+committed (above, in the design): `perf_a_mutate_alone` went from
+23.6 µs to 409 µs at 2,000 items and 2,808 µs (l/f 170) at 8,000. As
+landed:
+
+| `perf_a_mutate_alone`, whole | at D7.2 | landed |
+|---|---|---|
+| 2,000 items | 22.5 µs, l/f 1.33 | 22.6 µs, l/f 1.17 |
+| 8,000 items | 23.6 µs, l/f 1.23 | 23.0 µs, l/f 1.18 |
+
+A client now holds what one store holds: 87.3 MB live at 100,000 rows,
+against 87.0 for the store, 134.9 after D7.2 and 469.7 before.
+
+The three `copies()` tests, each falsified once:
+- `a_quiet_client_copies_no_table_per_batch`: a hundred batches of
+  three copy no table. Without the release it fails on batch 0. The
+  retake's debug check fires first, and with that check off the count is
+  1 against 0.
+- `a_pending_intent_copies_its_table_once_and_keeps_it`: one add over
+  500 items copies `item` once, and its confirm and two more adds and
+  confirms copy nothing. Re-sharing on confirm made it fail ("the view
+  keeps its copy"; with that assertion off, the second add copied
+  again, 1 against 0).
+- `a_replay_copies_each_table_it_writes_once`: an open replaying ten
+  adds copies `item` once. Making every write copy its table counted 10.
+
+**D7.4, the decoded tree** (`119b798`). With D7.2 and D7.3 in, an open
+was 2.4 times live (87.0 MB live, 206.5 resident above the baseline, at
+100,000 rows), so
+the tree came first. `canon::decode_rows` reads the rows at a path of a
+record — `confirmed` in a replica, `base.rows` in a log's snapshot — and
+hands each row's fields to the reader in key order, names borrowed. It
+is exactly as strict as `decode`, the key checks shared through one
+`each_pair`. `Row::from_fields` lays them out as the table's row.
+`decode_replica` and `journal::decode_snapshot` read this way;
+`MemoryStore::from_value` stays for the vectors. The guard,
+`rows_decoded_in_place_are_the_rows_decoded`, was falsified by dropping
+what is not a struct instead of keeping it.
+
+| open, 100,000 rows | live MB | resident MB less baseline |
+|---|---:|---:|
+| store, before D7.4 | 87.0 | 206.5 |
+| store, after | 87.0 | 102.6 |
+| client, before | 87.3 | 206.5 |
+| client, after | 87.3 | 105.2 |
+
+Resident is 1.18 times live now, which is the allocator's rounding. The
+decode, build and free columns of D5's split are one pass, "read".
+
+The primary map's key, a row as its own key, was **not** done. At 134 B
+it is the second smallest component, and the brief made it conditional
+on being the largest. The largest is now the rows themselves (393 B:
+nine 32-byte `Value`s and five strings), which the design deferred
+unless they were the largest. They are, and shrinking `Value` changes
+every match on it in every crate, so it is the next round's question if
+there is one. After the rows come the secondaries (296 B for two
+indexes, most of it the bucket's key: a copy of the column's value in a
+`Vec<Value>`).
+
+**The open table again**, harken's schema with D4's two text indexes.
+Resident is as `/proc` reads it, the baseline (10.5 MB) included as in
+D5:
+
+| rows | | on disk | open | resident | live | split, ms |
+|---:|---|---:|---:|---:|---:|---|
+| 10,000 | store | 1.5 MB | 0.08 s | 17 MB | 9 MB | read 70 |
+| | client | 1.5 MB | 0.09 s | 20 MB | 9 MB | read 69, replica open 1 |
+| | server | 2.0 MB | 0.10 s | 27 MB | 17 MB | read 67, journal 1,000 records 6, state at head 13 |
+| | alone | 5.7 MB | 0.15 s | 20 MB | 10 MB | read 71, replica open 1, history 10,000 records 64 |
+| 100,000 | store | 14.9 MB | 0.89 s | 113 MB | 87 MB | read 855 |
+| | client | 14.9 MB | 0.89 s | 116 MB | 87 MB | read 808, replica open 1, the rest 82 |
+| | server | 20.4 MB | 1.2 s | 203 MB | 164 MB | read 774, journal 10,000 records 93, state at head 163 |
+| | alone | 57.7 MB | 1.6 s | 119 MB | 92 MB | read 872, replica open 1, history 100,000 records 620 |
+| 400,000 | store | 61.0 MB | 3.9 s | 433 MB | 351 MB | read 3,539 |
+| | client | 61.0 MB | 3.9 s | 436 MB | 351 MB | read 3,686, replica open 1, the rest 296 |
+| | server | 83.7 MB | 4.9 s | 788 MB | 658 MB | read 3,346, journal 40,000 records 255, state at head 711 |
+| | alone | 235.1 MB | 6.5 s | 453 MB | 370 MB | read 3,599, replica open 1, history 400,000 records 2,451, the rest 485 |
+
+Under the schema before D4's text indexes (`ARK_PERF_MODULE`):
+
+| rows | store / client / server / alone: open | resident | live |
+|---:|---|---|---|
+| 10,000 | 0.05 / 0.06 / 0.08 / 0.13 s | 17 / 19 / 25 / 19 MB | 8 / 8 / 15 / 9 MB |
+| 100,000 | 0.57 / 0.57 / 0.81 / 1.2 s | 106 / 108 / 187 / 111 MB | 78 / 79 / 145 / 84 MB |
+| 400,000 | 2.4 / 2.3 / 3.4 / 5.0 s | 403 / 406 / 725 / 423 MB | 315 / 315 / 582 / 334 MB |
+
+**Memory**: resident per row at 400,000, the baseline taken off, against
+D5:
+
+| | one store | client | server | alone |
+|---|---:|---:|---:|---:|
+| without text indexes, D5 | 2.6 KB | 3.7 KB | 3.0 KB | 3.7 KB |
+| without text indexes, now | 1.0 KB | 1.0 KB | 1.8 KB | 1.0 KB |
+| with D4's two, D5 | 4.1 KB | 8.3 KB | 5.8 KB | 8.4 KB |
+| with D4's two, now | 1.1 KB | 1.1 KB | 1.9 KB | 1.1 KB |
+
+What moved:
+- **A client is one store**, and at 400,000 rows a client is 436 MB
+  resident where it was 3,342 MB.
+- **Open time**: a client at 100,000 rows from 4.0 s to 0.9 s, at
+  400,000 from 23.9 s to 3.9 s. The "replica open" column went from
+  seconds to a millisecond, and "free" went altogether.
+- **The text indexes now cost** about 0.1 KB a row where they cost
+  1.5 KB.
+
+What did not:
+- The server still holds two copies of `media`: the log's base, and the
+  head, which copies it at the journal's first `add_song`. That is
+  1.9 KB a row against a store's 1.1, as the design said it would stay
+  this round.
+- "History" for a peer alone, reading its whole local history for the
+  ids, is still 6 µs a record (2.5 s at 400,000), and is now the larger
+  part of an alone open.
+- "Read" is still about 9 µs a row with the text indexes and 5 µs
+  without. Building is the rest of every open, as in D5.
+
+Green at the last commit:
+- `cargo test --workspace` and `cargo test -p harken-iced --features
+  demo` (harken's domain, server and `fleet.rs` included).
+- `cargo fmt --all --check` and both clippy invocations, `-D warnings`.
+- `arkc fuzz --seed 1 --cases 25`: 0 findings.
+- `ark-vectors` diffed against `spec/vectors`: identical. The spec did
+  not move.
+- `rust/ark/tests/perf.rs` and `rust/ark-server/tests/perf.rs`, all
+  ignored tests, release. Everything flat that was flat:
+  `perf_c_pump_alone` and `perf_b_watcher` l/f between 0.5 and 1.6.
+- `allocations.rs`'s bounds.
+
+Not verified:
+- `nix flake check` itself was not run here.
+- Nothing was measured on a phone.
+- Rows are one shape, media, with short titles, so the text indexes'
+  90 B a row is these titles' and not a real library's. Real titles of
+  forty characters would post about forty ordinals a row, 160 B.
+- The decode in place is used by the client's replica and the server's
+  snapshot. A snapshot sent over the wire is still decoded whole: one
+  frame, the peer below the horizon.
+- The timings were taken once each, so read them as a scale. The live
+  bytes moved by under 0.1 MB between runs.
