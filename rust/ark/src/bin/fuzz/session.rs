@@ -90,12 +90,9 @@ pub struct Tally {
     pub view_pushes: u64,
     pub natives_checked: u64,
     /// Answers to a `Verify` at the end of a session, by kind: agreed or
-    /// not, and `unknown` (below the horizon, D3); and of the first, the
-    /// disagreements in a session that wiped the server, which a `Verify`
-    /// naming no log cannot be held to.
+    /// not, and `unknown` (below the horizon, D3, or of another log, D2).
     pub verifies_answered: u64,
     pub verifies_unknown: u64,
-    pub verifies_across_wipe: u64,
 }
 
 struct Held {
@@ -200,7 +197,6 @@ pub fn run(m: &Module, natives: &[(FnHash, Procedure)], seed: u64, without: &[St
     tally.natives_checked += t.natives_checked;
     tally.verifies_answered += t.verifies_answered;
     tally.verifies_unknown += t.verifies_unknown;
-    tally.verifies_across_wipe += t.verifies_across_wipe;
     (out, s.sim.server.authority.store.clone())
 }
 
@@ -248,31 +244,21 @@ impl S<'_> {
         if let Err(why) = self.sim.replays() {
             return Some(self.finding("replays", why));
         }
-        // Every answer a `Verify` had, compactions or not: a sequence below
-        // the horizon is answered `unknown` (`docs/plan-db.md` D3,
-        // `Agree::unknown`), recorded as `None` — the authority saying it
-        // cannot say, never a finding — so only an answer that it disagreed
-        // is one. Both kinds are counted, so a run shows the check
-        // exercised both ways.
-        //
-        // Except across a wipe. A `Verify` names no log, so one said at a
-        // sequence of the log a client held before the server came back
-        // emptied, under a new name, is answered against the new log at
-        // that sequence — "disagreed", about two logs — whenever it
-        // arrives before the snapshot of the new log has (seed 20265421).
-        // That is the protocol's to say, as an `ack` naming its log was
-        // (D2's finding 2), not this check's; until it does, a
-        // disagreement in a session that wiped is counted and not reported.
-        let wiped = self.script.iter().any(|o| matches!(o, Op::Wipe));
+        // Every answer a `Verify` had, whatever the script did: a sequence
+        // below the horizon or past the head, or of another log than the
+        // authority's — a client that has not yet had the snapshot of a
+        // server that came back emptied — is answered `unknown`
+        // (`docs/plan-db.md` D3, D2), recorded as `None`: the authority
+        // saying it cannot say, never a finding. Only an answer that it
+        // disagreed is one. Both kinds are counted, so a run shows the
+        // check exercised both ways.
         let mut disagreed = None;
         for (i, c) in &self.sim.clients {
             for (n, ok) in &c.agreed {
                 match ok {
                     Some(agreed) => {
                         self.tally.verifies_answered += 1;
-                        if !agreed && wiped {
-                            self.tally.verifies_across_wipe += 1;
-                        } else if !agreed && disagreed.is_none() {
+                        if !agreed && disagreed.is_none() {
                             disagreed = Some((*i, *n));
                         }
                     }

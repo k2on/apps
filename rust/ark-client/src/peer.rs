@@ -1837,7 +1837,7 @@ mod tests {
             let mut cannot = vec![];
             for m in up.iter().cloned() {
                 match m {
-                    ClientMsg::Verify { seq, hash } => cannot.push(ServerMsg::Agree {
+                    ClientMsg::Verify { seq, hash, .. } => cannot.push(ServerMsg::Agree {
                         seq,
                         hash,
                         ok: false,

@@ -51,12 +51,37 @@ pub struct Subscription {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ClientMsg {
-    Hello { sub: Subscription, token: Option<String>, spec: i64 },
-    Push { entries: Vec<Entry> },
-    NeedFacts { seqs: Vec<Seq> },
-    NeedClosures { hashes: Vec<FnHash> },
-    Verify { seq: Seq, hash: Vec<u8> },
-    Say { frame: Vec<u8> },
+    Hello {
+        sub: Subscription,
+        token: Option<String>,
+        spec: i64,
+    },
+    Push {
+        entries: Vec<Entry>,
+    },
+    NeedFacts {
+        seqs: Vec<Seq>,
+    },
+    NeedClosures {
+        hashes: Vec<FnHash>,
+    },
+    /// Whether the authority holds the state `hash` at `seq`.
+    Verify {
+        seq: Seq,
+        hash: Vec<u8>,
+        /// The log `seq` is a sequence of, as the client last heard it named
+        /// (`docs/plan-db.md` D2): `log` on the wire, an id, absent for
+        /// `None` — a client that has never heard a server name its log,
+        /// or a peer alone. An authority on another log answers `unknown`
+        /// rather than comparing a state of one log with a state of
+        /// another. Additive, as the ack's `log` was: a `verify` naming
+        /// none is the bytes it was and is compared as it always was, so a
+        /// client older than the field is answered as before.
+        log_id: Option<Id>,
+    },
+    Say {
+        frame: Vec<u8>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -125,7 +150,8 @@ pub enum ServerMsg {
     },
     /// The answer to a `Verify`. `unknown` is the authority saying it
     /// cannot say — the sequence is below its horizon or past its head, so
-    /// it holds no state there to compare (`docs/plan-db.md` D3) — and `ok`
+    /// it holds no state there to compare (`docs/plan-db.md` D3), or the
+    /// `Verify` named another log than its own (D2) — and `ok`
     /// is then false and means nothing. On the wire `unknown` is present
     /// only when true, so the two answers there were before it are the
     /// bytes they were; `unknown: false` is refused as a second spelling.
@@ -230,7 +256,7 @@ impl ClientMsg {
                 "need_closures",
                 vec![("hashes", Value::List(hashes.iter().map(|h| Value::Bytes(h.clone())).collect()))],
             ),
-            ClientMsg::Verify { seq, hash } => node("verify", vec![("seq", int(*seq)), ("hash", Value::Bytes(hash.clone()))]),
+            ClientMsg::Verify { seq, hash, log_id } => node("verify", named(vec![("seq", int(*seq)), ("hash", Value::Bytes(hash.clone()))], log_id)),
             ClientMsg::Say { frame } => node("say", vec![("say", Value::Bytes(frame.clone()))]),
         }
     }
@@ -260,6 +286,7 @@ impl ClientMsg {
             "verify" => ClientMsg::Verify {
                 seq: int64(need(m, "seq")?)?,
                 hash: bytes(need(m, "hash")?)?,
+                log_id: log_of(m)?,
             },
             "say" => ClientMsg::Say {
                 frame: bytes(need(m, "say")?)?,
@@ -1026,7 +1053,8 @@ impl Client {
             return;
         }
         let (seq, hash) = self.replica.verify_at();
-        self.emit(ClientMsg::Verify { seq, hash });
+        let log_id = self.replica.log_id;
+        self.emit(ClientMsg::Verify { seq, hash, log_id });
     }
 
     pub fn take_outgoing(&mut self) -> Vec<ClientMsg> {
@@ -1325,11 +1353,22 @@ impl<M: Machine> Server<M> {
             }
             // At the head the authority's store is the answer, hashed as
             // it stands; only a sequence below it is replayed (R4).
-            ClientMsg::Verify { seq, hash } => {
+            ClientMsg::Verify { seq, hash, log_id } => {
                 // Below the horizon or past the head there is no state to
                 // compare, and saying `ok: false` there would be reported
-                // as a divergence: it is said to be unknown (D3).
-                let (ok, unknown) = match self.authority.log.hash_at(seq, &self.authority.store) {
+                // as a divergence: it is said to be unknown (D3). So is a
+                // sequence of another log than this authority's — a client
+                // that has not yet had the snapshot of a log that replaced
+                // the one it held (D2) — which is never compared. One that
+                // names no log is compared, as it always was; "another" is
+                // read as a `hello`'s is, both named and not the same.
+                let elsewhere = matches!((log_id, self.authority.log.id()), (Some(theirs), Some(ours)) if theirs != ours);
+                let at = if elsewhere {
+                    None
+                } else {
+                    self.authority.log.hash_at(seq, &self.authority.store)
+                };
+                let (ok, unknown) = match at {
                     Some(h) => (h == hash, false),
                     None => (false, true),
                 };
@@ -1462,5 +1501,72 @@ impl<M: Machine> Server<M> {
     /// Who a connection was identified as, if it has said hello.
     pub fn identity(&self, c: ConnId) -> Option<&Identity> {
         self.conns.get(&c).map(|cn| &cn.who)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::hash::state_hash;
+    use crate::live::Silent;
+
+    /// `docs/plan-db.md` D2 A `verify` names the log its sequence is of,
+    /// and an authority on another log answers it `unknown` — never
+    /// compared, so never "disagreed" about two logs, which is what a
+    /// client that had not yet had the snapshot of a server that came back
+    /// emptied was told. The same `verify` naming no log, as every client
+    /// before the field sends it, is compared as it always was: agreed
+    /// with the right hash, disagreed with a wrong one; and one naming the
+    /// authority's own log likewise. Falsified by ignoring the field on the
+    /// server: the verify from log A was answered `ok`, not `unknown`.
+    #[test]
+    fn a_verify_of_another_log_is_answered_cannot_say() {
+        let sch = Schema::empty();
+        let (log_a, log_b) = ([0xa1; 16], [0xb2; 16]);
+        let mut a = Authority::new(sch.clone(), BTreeMap::new());
+        a.log.name_if_unnamed(log_b);
+        let hash = state_hash(&a.store);
+        let mut sv = Server::open(trusting(), open_access(), Silent, a);
+        let hello = ClientMsg::Hello {
+            sub: Subscription {
+                since: 0,
+                mode: Mode::Whole,
+                log_id: Some(log_b),
+            },
+            token: Some("alice".into()),
+            spec: crate::ir::SPEC_VERSION,
+        };
+        sv.recv(1, hello);
+        let _ = sv.take_outgoing();
+        let mut answer = |hash: &[u8], log_id| {
+            sv.recv(
+                1,
+                ClientMsg::Verify {
+                    seq: 0,
+                    hash: hash.to_vec(),
+                    log_id,
+                },
+            );
+            sv.take_outgoing()
+                .into_iter()
+                .find_map(|(_, m)| match m {
+                    ServerMsg::Agree { ok, unknown, .. } => Some((ok, unknown)),
+                    _ => None,
+                })
+                .expect("an answer")
+        };
+        assert_eq!(answer(&hash, Some(log_a)), (false, true), "another log: cannot say");
+        assert_eq!(answer(&[0; 32], Some(log_a)), (false, true), "another log, whatever the hash");
+        assert_eq!(answer(&hash, None), (true, false), "no log named: compared");
+        assert_eq!(answer(&[0; 32], None), (false, false), "no log named, a wrong hash: disagreed");
+        assert_eq!(answer(&hash, Some(log_b)), (true, false), "its own log: compared");
+
+        // And the client names the log it holds when it asks.
+        let r = Replica::open(sch.clone(), BTreeMap::new(), MemoryStore::empty(sch), 0, vec![]);
+        let mut c = Client::open(r, Mode::Whole, None);
+        c.connected();
+        c.replica.log_id = Some(log_a);
+        c.verify_all();
+        assert!(matches!(c.out.last(), Some(ClientMsg::Verify { log_id: Some(l), .. }) if *l == log_a));
     }
 }

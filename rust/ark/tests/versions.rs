@@ -649,7 +649,7 @@ fn a_verify_below_the_head_over_older_facts_agrees() {
         },
     );
     let _ = sv.take_outgoing();
-    sv.recv(1, ClientMsg::Verify { seq, hash });
+    sv.recv(1, ClientMsg::Verify { seq, hash, log_id: None });
     let agreed: Vec<bool> = sv
         .take_outgoing()
         .into_iter()

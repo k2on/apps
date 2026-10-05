@@ -333,7 +333,14 @@ fn a_verify_below_the_horizon_is_answered_cannot_say() {
     sv.recv(1, hello);
     let _ = sv.take_outgoing();
     let mut answer = |seq| {
-        sv.recv(1, ClientMsg::Verify { seq, hash: hash.clone() });
+        sv.recv(
+            1,
+            ClientMsg::Verify {
+                seq,
+                hash: hash.clone(),
+                log_id: None,
+            },
+        );
         sv.take_outgoing()
             .into_iter()
             .find_map(|(_, m)| match m {
@@ -484,6 +491,7 @@ fn perf_verify_at_8000_rows() {
             ClientMsg::Verify {
                 seq: head,
                 hash: hash.clone(),
+                log_id: sv.authority.log.id(),
             },
         );
     }

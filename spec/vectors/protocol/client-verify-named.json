@@ -1,0 +1,4 @@
+{
+  "frame": {"hash":{"$bytes":"abababababababababababababababababababababababababababababababab"},"log":{"$id":"00000000-0000-0000-0000-0000000000a1"},"seq":{"$int":"4"},"t":"verify"},
+  "bytes": "a4617466766572696679636c6f67d82550000000000000000000000000000000a1637365710464686173685820abababababababababababababababababababababababababababababababab"
+}

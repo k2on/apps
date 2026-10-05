@@ -483,26 +483,33 @@ reads a host counter).
 "agreed" only in a session whose script neither compacted nor wiped:
 below the horizon the authority had no "cannot say", and answered
 "disagreed". D3 gave it one (`Agree::unknown`, recorded as `None` in
-`Client::agreed`), so the check runs after a compaction now: an answer
-of `Some(false)` is a finding, `None` never is, and the summary line
-counts both. Seed 20261005 for 120 s: 7,186 cases, 14,372 sessions,
-1,545 verifies answered and 96 unknown, 0 findings; seed 1, 200 cases:
-41 answered, none unknown (they are rare), 0 findings. Falsified by
-counting `None` as a finding: 43 findings in 60 s, the one written a
-script with a compaction and no wipe.
+`Client::agreed`), so the check runs on every session now: an answer of
+`Some(false)` is a finding, `None` never is, and the summary line counts
+both. Falsified by counting `None` as a finding: 43 findings in 60 s
+from seed 20261005, the one written a script with a compaction and no
+wipe.
 
-A wipe is still not held, and that is the protocol's gap rather than
-the check's. A `Verify` names no log, so one said at a sequence of the
-log a client held before the server came back emptied, under a new
-name, is answered against the new log at that sequence whenever it
-arrives before the client has the new log's snapshot — "disagreed",
-about two different logs. With wipes held the 120 s run found exactly
-this (3 sessions, seed 20265421 the first written, a `verify` right
-after a `wipe`); with `--without wipe`, 0 findings over 13,436 sessions.
-So a disagreement in a session that wiped is counted (5 in the run
-above) and not reported. The fix is finding 2's again: the `Verify`
-carries `log`, and an authority on another log answers `unknown`. It
-changes the wire, so it is the coordinator's to decide.
+Held across a wipe, it found what D2's finding 2 was one frame over: a
+`Verify` named no log, so one said at a sequence of the log a client
+held before the server came back emptied, under a new name, was
+answered against the new log at that sequence whenever it arrived ahead
+of the new log's snapshot — "disagreed", about two logs (3 sessions in
+120 s, seed 20265421 the first written, a `verify` right after a
+`wipe`). **Decided, and landed:** a `verify` names its log as `log`, as
+an `ack` does — absent where the client knows none, so one naming none
+is the bytes it was and is compared as it always was, and a client
+older than the field is answered as before — and an authority on
+another log answers it `unknown` and never compares it.
+`protocol/client-verify-named.json` is new beside `client-verify.json`,
+every other vector byte-identical; `spec/README.md` §12 says it.
+`a_verify_of_another_log_is_answered_cannot_say` (`protocol.rs`) holds
+the server to it and the client to sending its log, falsified by the
+server ignoring the field (the verify from another log answered `ok`).
+Ignoring it again, the 120 s run with wipes reports the same 3 findings
+from seed 20265421; with it, seed 20261005 for 120 s: 6,990 cases,
+13,980 sessions, 1,502 verifies answered and 100 unknown, 0 findings;
+seed 1, 200 cases: 41 answered, none unknown (they are rare), 0
+findings.
 
 ## D3. A state hash that moves with the store
 

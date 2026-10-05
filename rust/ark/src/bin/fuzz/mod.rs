@@ -20,11 +20,10 @@
 //! agree. After every session the fleet must have converged on the
 //! authority's head and hash, the log must replay from its facts and from
 //! its intents to the same state, no `Verify` may have been answered
-//! "disagreed" — one below the horizon is answered "unknown", which is not
-//! a finding (`docs/plan-db.md` D3), and one in a session that wiped the
-//! server is not held, since a `Verify` names no log — and every query is
-//! driven once more under raw changes by the churn generator
-//! (`tests/support/churn.rs`).
+//! "disagreed" — one below the horizon, or naming another log than the
+//! authority's, is answered "unknown", which is not a finding
+//! (`docs/plan-db.md` D3, D2) — and every query is driven once more under
+//! raw changes by the churn generator (`tests/support/churn.rs`).
 //!
 //! Case `k` of a run from seed `N` is the case of seed `N + k`, so
 //! `--seed N+k --cases 1` runs it alone. A finding is written under `--out`
@@ -232,10 +231,6 @@ fn report(s: &Stats, took: Duration) {
     println!(
         "    {} frames round-tripped, {} view pushes in sessions, {} under churn, {} native agreements",
         t.frames, t.view_pushes, s.churn_pushes, t.natives_checked
-    );
-    println!(
-        "    verifies: {} answered, {} unknown (below the horizon); {} disagreed in a session that wiped, not checked: a verify names no log",
-        t.verifies_answered, t.verifies_unknown, t.verifies_across_wipe
     );
     for (seed, check, path, why) in &s.findings {
         println!("  finding: seed {seed}, {check}: {why}\n    written to {path}");

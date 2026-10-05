@@ -106,6 +106,17 @@ pub fn protocol(out: &Out) {
             ClientMsg::Verify {
                 seq: 4,
                 hash: vec![0xab; 32],
+                log_id: None,
+            },
+        ),
+        // The log the sequence is of, named (`docs/plan-db.md` D2): an
+        // authority on another log answers `unknown`.
+        (
+            "verify-named",
+            ClientMsg::Verify {
+                seq: 4,
+                hash: vec![0xab; 32],
+                log_id: Some(log_a),
             },
         ),
         ("say", ClientMsg::Say { frame: vec![1, 2, 3] }),
