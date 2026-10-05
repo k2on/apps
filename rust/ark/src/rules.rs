@@ -129,7 +129,11 @@ pub fn admits(t: &Table, p: &Pred, row: &Row, who: Who, st: &dyn Store) -> bool 
             let Some(child) = st.schema().lookup_table(via) else { return false };
             let key = t.key_of(row);
             let [k] = &key[..] else { return false };
-            !st.scan_where_eq(via, &[(column.as_str(), k)], &[], &|r| admits(child, q, r, who, st))
+            // The equality is a hint a store may serve from the reference
+            // index and may not — an overlay's own writes are in no index —
+            // so `keep` decides it too, as `Store::scan_where_eq` says.
+            let names = |r: &Row| r.get(column).is_some_and(|v| cmp(CmpOp::Eq, v, k));
+            !st.scan_where_eq(via, &[(column.as_str(), k)], &[], &|r| names(r) && admits(child, q, r, who, st))
                 .is_empty()
         }
     }

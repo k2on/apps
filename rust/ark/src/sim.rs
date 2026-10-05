@@ -25,7 +25,8 @@ use crate::journal::{self, Journal, Keys, Layout};
 use crate::live::{ConnId, Silent};
 use crate::log::{Log, Seq};
 use crate::peer::{Authority, Changes, Journal as Durable, Replica, Sequenced};
-use crate::protocol::{open_access, trusting, Client, ClientMsg, Mode, Server, ServerMsg};
+use crate::protocol::{dev_identity, open_access, trusting, Client, ClientMsg, Identity, Mode, Server, ServerMsg};
+use crate::rules;
 use crate::schema::Schema;
 use crate::store::{MemoryStore, Store};
 use crate::value::{hex, Id, Value};
@@ -77,6 +78,20 @@ pub struct Sim {
     /// journal read back as another log, or a client's durable store not
     /// its confirmed one. Empty on a conformant runtime.
     pub faults: Vec<String>,
+    /// `docs/plan-auth.md` The roles each client's login holds — what its
+    /// token says to dev auth, `peer-1:r0,r1` — and the roles its own
+    /// device believes it holds, which it checks its own writes with: the
+    /// same, but for a client that believes more than it was granted, whose
+    /// writes the authority must refuse. Absent is none.
+    pub roles: BTreeMap<i64, BTreeSet<String>>,
+    pub believes: BTreeMap<i64, BTreeSet<String>>,
+    /// The identity each partial client was last started from a snapshot
+    /// under: what the rows it holds are a partition for.
+    pub served: BTreeMap<i64, Identity>,
+    /// Writes a client's own device refused as forbidden, and pushes the
+    /// authority refused as forbidden.
+    pub forbidden_local: u64,
+    pub forbidden_remote: u64,
 }
 
 /// One frame, as it went on the wire.
@@ -165,16 +180,27 @@ pub enum Op {
     Reopen(i64),
     /// A client asks the authority whether it agrees ([`Client::verify_all`]).
     Verify(i64),
+    /// `docs/plan-auth.md` A client's login holds these roles, and its
+    /// device believes it holds those, from its next connection — which is
+    /// now ([`Sim::grant`]).
+    Roles {
+        peer: i64,
+        roles: BTreeSet<String>,
+        believes: BTreeSet<String>,
+    },
 }
 
 fn name(i: i64) -> String {
     format!("peer-{i}")
 }
 
-// Under dev auth the server names every login "dev", and an entry is held
-// to the login that pushed it, so this is what a client authors under.
-fn ctx_of(i: i64) -> Ctx {
-    Ctx::new(name(i), "dev")
+// What a client's token says to dev auth: its name, and the roles its login
+// holds after a colon (`docs/plan-auth.md`).
+fn token(i: i64, roles: Option<&BTreeSet<String>>) -> String {
+    match roles.filter(|r| !r.is_empty()) {
+        None => name(i),
+        Some(rs) => format!("{}:{}", name(i), rs.iter().cloned().collect::<Vec<_>>().join(",")),
+    }
 }
 
 impl Sim {
@@ -209,11 +235,48 @@ impl Sim {
             told_store: BTreeMap::new(),
             wiped: 0,
             faults: vec![],
+            roles: BTreeMap::new(),
+            believes: BTreeMap::new(),
+            served: BTreeMap::new(),
+            forbidden_local: 0,
+            forbidden_remote: 0,
         };
         for i in 0..n {
             sim.heal(i);
         }
         sim
+    }
+
+    /// Under dev auth the server names every login "dev", and an entry is
+    /// held to the login that pushed it, so this is what a client authors
+    /// under — with the roles its device believes it holds.
+    pub fn ctx_of(&self, i: i64) -> Ctx {
+        Ctx::new(name(i), "dev").with_roles(self.believes.get(&i).cloned().unwrap_or_default())
+    }
+
+    /// Who the server takes client `i` for: its name and the roles its
+    /// login holds.
+    pub fn identity_of(&self, i: i64) -> Identity {
+        dev_identity(&token(i, self.roles.get(&i)), "dev")
+    }
+
+    /// `docs/plan-auth.md` Client `i`'s login holds `roles` and its device
+    /// believes `believes`: from its next connection, which is now. What a
+    /// server restarted with new configuration does to every login of the
+    /// account at once, done to one.
+    pub fn grant(&mut self, i: i64, roles: BTreeSet<String>, believes: BTreeSet<String>) {
+        self.roles.insert(i, roles);
+        self.believes.insert(i, believes);
+        let t = token(i, self.roles.get(&i));
+        let nobody = self.nobody.contains(&i);
+        let Some(c) = self.clients.get_mut(&i) else { return };
+        if !nobody {
+            c.token = Some(t);
+        }
+        if self.conn.contains_key(&i) {
+            self.partition(i);
+            self.heal(i);
+        }
     }
 
     /// Record every frame put on the wire from here on, in [`Sim::tap`].
@@ -259,10 +322,12 @@ impl Sim {
 
     /// A client authors an intent. A refusal by its own view is dropped.
     pub fn mutate(&mut self, i: i64, eid: Id, fh: &FnHash, autos: &Args, args: &Args) {
-        let ctx = if self.nobody.contains(&i) { Ctx::nobody() } else { ctx_of(i) };
+        let ctx = if self.nobody.contains(&i) { Ctx::nobody() } else { self.ctx_of(i) };
         let Some(c) = self.clients.get_mut(&i) else { return };
-        if c.mutate(eid, &ctx, fh, autos, args).is_ok() {
-            self.flush_client(i);
+        match c.mutate(eid, &ctx, fh, autos, args) {
+            Ok(_) => self.flush_client(i),
+            Err(crate::store::Refusal::Forbidden(_)) => self.forbidden_local += 1,
+            Err(_) => {}
         }
         self.keep(i);
     }
@@ -366,13 +431,85 @@ impl Sim {
 
     fn deliver_to_server(&mut self, i: i64, m: ClientMsg) {
         let Some(conn) = self.conn.get(&i).copied() else { return };
+        let before = self.server.authority.log.head_seq();
+        let push = matches!(m, ClientMsg::Push { .. });
         self.server.recv(conn, m);
+        if push {
+            self.held_to_rules(conn, before);
+        }
         self.flush_server();
+    }
+
+    // `docs/plan-auth.md` Every entry a push sequenced, held to the
+    // `writable` rules for the identity of the connection that pushed it,
+    // between the states the log's facts reach before and after it; and
+    // every refusal for one counted. A forbidden write that landed is a
+    // fault: the authority's check is the one a dishonest device cannot
+    // skip.
+    fn held_to_rules(&mut self, conn: ConnId, before: Seq) {
+        let refused = self
+            .server
+            .peek_outgoing()
+            .iter()
+            .filter(|(c, m)| *c == conn && matches!(m, ServerMsg::Reject { reason, .. } if reason.ends_with("not this login's to write")))
+            .count();
+        self.forbidden_remote += refused as u64;
+        let sch = &self.server.authority.schema;
+        if !sch.tables().any(|t| t.writable.is_some()) {
+            return;
+        }
+        let Some(who) = self.server.identity(conn).cloned() else { return };
+        let log = &self.server.authority.log;
+        for n in before + 1..=log.head_seq() {
+            let (Some(b), Some(a), Some((_, facts))) = (log.state_at(n - 1), log.state_at(n), log.entries.get(&n)) else {
+                continue;
+            };
+            if let Some(t) = rules::forbidden(sch, &b, &a, facts, who.who()) {
+                self.faults
+                    .push(format!("entry {n} wrote {t}, which its writable rule forbids {} to", who.user));
+            }
+        }
+    }
+
+    /// `docs/plan-auth.md` Every partial client holds exactly what it may
+    /// see of the state at its cursor, under the identity it was last
+    /// served as: nothing its rules forbid, nothing they admit missing.
+    /// Asked only where it can be: a replica of this log, with its cursor
+    /// between the horizon and the head.
+    pub fn partitions_hold(&self) -> Result<(), String> {
+        let log = &self.server.authority.log;
+        for (i, c) in &self.clients {
+            let r = &c.replica;
+            let Some(who) = self.served.get(i) else { continue };
+            if !r.partial || self.nobody.contains(i) || r.log_id != log.id() {
+                continue;
+            }
+            let Some(st) = log.state_at(r.cursor) else { continue };
+            let want = rules::visible_rows(&st, who.who());
+            for t in self.schema.tables() {
+                if r.confirmed.scan(&t.name) != want[&t.name] {
+                    return Err(format!(
+                        "client {i} at {} does not hold what {} may see of {}",
+                        r.cursor, who.user, t.name
+                    ));
+                }
+            }
+        }
+        Ok(())
     }
 
     // A frame reaches a client's inbox; nothing is applied until the
     // client settles (R8 of `docs/plan-perf.md`).
     fn deliver_to_client(&mut self, i: i64, m: ServerMsg) {
+        // The identity a partial snapshot is of: the connection's, as the
+        // server took it at its `Hello` — not the token's now, which a
+        // sign-in on a connection already open moves without a `Hello`
+        // (`docs/plan-auth.md`).
+        if matches!(m, ServerMsg::SnapshotOf { partial: true, .. }) {
+            if let Some(who) = self.conn.get(&i).and_then(|c| self.server.identity(*c)).cloned() {
+                self.served.insert(i, who);
+            }
+        }
         let Some(c) = self.clients.get_mut(&i) else { return };
         c.recv(m);
     }
@@ -592,14 +729,16 @@ impl Sim {
             Op::Join { mode, closures, nobody } => self.join(*mode, *closures, *nobody),
             Op::SignIn(i) => {
                 if self.nobody.remove(i) {
+                    let (ctx, t) = (self.ctx_of(*i), token(*i, self.roles.get(i)));
                     if let Some(c) = self.clients.get_mut(i) {
-                        c.sign_in(&ctx_of(*i), Some(name(*i)));
+                        c.sign_in(&ctx, Some(t));
                     }
                     self.keep(*i);
                     self.heal(*i);
                 }
             }
             Op::Reopen(i) => self.reopen(*i),
+            Op::Roles { peer, roles, believes } => self.grant(*peer, roles.clone(), believes.clone()),
             Op::Verify(i) => {
                 if let Some(c) = self.clients.get_mut(i) {
                     c.verify_all();
@@ -688,7 +827,7 @@ impl Sim {
         let i = self.clients.keys().next_back().map_or(0, |n| n + 1);
         let bodies = if closures { self.bodies.clone() } else { BTreeMap::new() };
         let r = Replica::open(self.schema.clone(), bodies, MemoryStore::empty(self.schema.clone()), 0, vec![]);
-        let token = if nobody { None } else { Some(name(i)) };
+        let token = if nobody { None } else { Some(token(i, self.roles.get(&i))) };
         let mut c = Client::open(r, mode, token);
         if closures && i % 2 == 0 && !self.natives.is_empty() && !self.native_peers.is_empty() {
             c.hold(&self.natives);
@@ -751,6 +890,23 @@ impl Sim {
             if self.nobody.contains(i) {
                 continue;
             }
+            // `docs/plan-auth.md` Each client holds what it may see: the
+            // whole store when every table is `Everyone` to it, and
+            // otherwise its partition, by rows and by digest.
+            let who = self.identity_of(*i);
+            let whole = rules::whole_to(&self.schema, who.who());
+            if c.replica.partial == whole {
+                return Err(format!(
+                    "client {i} holds {} and is {}",
+                    if whole { "a partition" } else { "the log whole" },
+                    if whole { "whole" } else { "partial" }
+                ));
+            }
+            let hash = if whole {
+                hash.clone()
+            } else {
+                rules::partition_hash(&self.server.authority.store, who.who())
+            };
             let (n, h) = c.replica.verify_at();
             if (n, &h) != (head, &hash) {
                 return Err(format!("client {i} at {n} {} and the server at {head} {}", hex(&h), hex(&hash)));
@@ -861,6 +1017,10 @@ impl Op {
             Op::SignIn(i) => Value::record(vec![t("sign_in"), peer(i)]),
             Op::Reopen(i) => Value::record(vec![t("reopen"), peer(i)]),
             Op::Verify(i) => Value::record(vec![t("verify"), peer(i)]),
+            Op::Roles { peer: i, roles, believes } => {
+                let texts = |s: &BTreeSet<String>| Value::List(s.iter().map(|r| Value::text(r.clone())).collect());
+                Value::record(vec![t("roles"), peer(i), ("roles", texts(roles)), ("believes", texts(believes))])
+            }
         }
     }
 
@@ -916,6 +1076,23 @@ impl Op {
             "sign_in" => Op::SignIn(int("peer")?),
             "reopen" => Op::Reopen(int("peer")?),
             "verify" => Op::Verify(int("peer")?),
+            "roles" => {
+                let texts = |k: &str| match get(k)? {
+                    Value::List(xs) => xs
+                        .iter()
+                        .map(|x| match x {
+                            Value::Text(r) => Ok(r.to_string()),
+                            other => Err(format!("a role is not text: {other:?}")),
+                        })
+                        .collect::<Result<BTreeSet<String>, String>>(),
+                    other => Err(format!("{k} is not a list: {other:?}")),
+                };
+                Op::Roles {
+                    peer: int("peer")?,
+                    roles: texts("roles")?,
+                    believes: texts("believes")?,
+                }
+            }
             other => return Err(format!("unknown op {other}")),
         })
     }
@@ -933,6 +1110,7 @@ pub fn run_script(sch: Schema, bodies: BTreeMap<FnHash, Closure>, clients: i64, 
         if let Some(f) = sim.faults.first() {
             return Err(f.clone());
         }
+        sim.partitions_hold().map_err(|e| format!("op {k}: {e}"))?;
     }
     sim.try_settle()?;
     sim.converged()?;

@@ -68,6 +68,11 @@ fn an_op_is_its_value() {
         Op::SignIn(3),
         Op::Reopen(0),
         Op::Verify(2),
+        Op::Roles {
+            peer: 1,
+            roles: ["r0".to_string()].into_iter().collect(),
+            believes: ["r0".to_string(), "r1".to_string()].into_iter().collect(),
+        },
     ];
     for op in ops {
         assert_eq!(Op::from_value(&op.value()), Ok(op.clone()));

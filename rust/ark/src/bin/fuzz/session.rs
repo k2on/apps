@@ -93,6 +93,15 @@ pub struct Tally {
     /// not, and `unknown` (below the horizon, D3, or of another log, D2).
     pub verifies_answered: u64,
     pub verifies_unknown: u64,
+    /// `docs/plan-auth.md` Clients at the end of a session that held a
+    /// partition and that held the log whole; role changes drawn; writes
+    /// refused as forbidden by the author's own device, and by the
+    /// authority (a device believing a role it was not granted).
+    pub partial_peers: u64,
+    pub whole_peers: u64,
+    pub role_changes: u64,
+    pub forbidden_local: u64,
+    pub forbidden_remote: u64,
 }
 
 struct Held {
@@ -135,7 +144,7 @@ fn ctx_of(sim: &Sim, i: i64) -> Ctx {
     if sim.nobody.contains(&i) {
         Ctx::nobody()
     } else {
-        Ctx::new(format!("peer-{i}"), "dev")
+        sim.ctx_of(i)
     }
 }
 
@@ -197,6 +206,18 @@ pub fn run(m: &Module, natives: &[(FnHash, Procedure)], seed: u64, without: &[St
     tally.natives_checked += t.natives_checked;
     tally.verifies_answered += t.verifies_answered;
     tally.verifies_unknown += t.verifies_unknown;
+    tally.role_changes += t.role_changes;
+    tally.forbidden_local += s.sim.forbidden_local;
+    tally.forbidden_remote += s.sim.forbidden_remote;
+    for (i, c) in &s.sim.clients {
+        if !s.sim.nobody.contains(i) {
+            if c.replica.partial {
+                tally.partial_peers += 1;
+            } else {
+                tally.whole_peers += 1;
+            }
+        }
+    }
     (out, s.sim.server.authority.store.clone())
 }
 
@@ -214,6 +235,15 @@ impl S<'_> {
     fn session(&mut self, len: usize) -> Option<Finding> {
         if let Some(f) = self.observe() {
             return Some(f);
+        }
+        // `docs/plan-auth.md` Every client's login granted roles at the
+        // start — a module whose rules name none leaves them whole — as
+        // the script's first ops, so a vector of it replays them.
+        for i in 0..self.clients {
+            let op = self.roles(i);
+            if let Some(f) = self.apply(op) {
+                return Some(f);
+            }
         }
         for _ in 0..len {
             let mut op = self.draw();
@@ -282,6 +312,7 @@ impl S<'_> {
             Op::Reopen(_) => self.tally.reopens += 1,
             Op::SignIn(_) => self.tally.sign_ins += 1,
             Op::Mutate { .. } => self.tally.mutations += 1,
+            Op::Roles { .. } => self.tally.role_changes += 1,
             _ => {}
         }
         self.script.push(op.clone());
@@ -318,6 +349,12 @@ impl S<'_> {
         }
         if let Some(why) = self.sim.faults.first() {
             return Some(self.finding("faults", why.clone()));
+        }
+        // `docs/plan-auth.md` No peer ever holds a row its rule forbids, nor
+        // lacks one it admits: every partial client is its partition of
+        // the state at its cursor.
+        if let Err(why) = self.sim.partitions_hold() {
+            return Some(self.finding("partition", why));
         }
         // Everything a client's view was told since the last look, as one:
         // the store it is pushed against is the view as it stands now,
@@ -497,6 +534,10 @@ impl S<'_> {
         let r = self.rng.below(1000);
         match r {
             0..=419 if !self.mutators.is_empty() => self.mutation(),
+            735..=749 => {
+                let p = self.peer();
+                self.roles(p)
+            }
             0..=749 => Op::Step,
             750..=799 => Op::Partition(self.peer()),
             800..=869 => Op::Heal(self.peer()),
@@ -521,6 +562,24 @@ impl S<'_> {
             985..=999 => Op::Verify(self.peer()),
             _ => Op::Step,
         }
+    }
+
+    // `docs/plan-auth.md` New roles for a client's login: each of the
+    // module's role names, or not; and one device in four believes it holds
+    // every one of them, so its writes reach the authority's check.
+    fn roles(&mut self, peer: i64) -> Op {
+        let mut roles = std::collections::BTreeSet::new();
+        for r in super::gen::ROLES {
+            if self.rng.chance(40) {
+                roles.insert(r.to_string());
+            }
+        }
+        let believes = if self.rng.chance(25) {
+            super::gen::ROLES.iter().map(|r| r.to_string()).collect()
+        } else {
+            roles.clone()
+        };
+        Op::Roles { peer, roles, believes }
     }
 
     fn mutation(&mut self) -> Op {
@@ -628,6 +687,9 @@ impl<'a> Draw<'a> {
                 2 => Value::Int(1 << 40),
                 _ => Value::Int(self.rng.below(12) as i64 - 3),
             },
+            // A client's name, now and then, so that a column a rule asks
+            // to be `Me` holds somebody's (`docs/plan-auth.md`).
+            Ty::Text if self.rng.chance(25) => Value::text(format!("peer-{}", self.rng.below(4))),
             Ty::Text => Value::text(TEXTS[self.rng.below(TEXTS.len())]),
             Ty::Bool => Value::Bool(self.rng.chance(50)),
             Ty::Bytes => Value::Bytes((0..self.rng.below(3)).map(|i| i as u8 * 7).collect()),

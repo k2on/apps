@@ -459,9 +459,9 @@ fn a_partial_peer_holds_what_its_rules_admit() {
     for (c, frames) in &net.heard {
         let partial = net.identity(*c).roles.iter().all(|r| r != "admin") && *c != 2;
         for f in frames {
-            if let ServerMsg::Batch { items, upto, .. } = f {
+            if let ServerMsg::Batch { items, covers, .. } = f {
                 if partial {
-                    assert!(upto.is_some(), "client {c}: a partial page says how far it covers");
+                    assert!(covers.is_some(), "client {c}: a partial page says what it covers");
                     for (_, e, _) in items {
                         let own = e.actor == net.identity(*c).user;
                         assert!(
@@ -471,7 +471,7 @@ fn a_partial_peer_holds_what_its_rules_admit() {
                         );
                     }
                 } else if *c == 4 {
-                    assert!(upto.is_none(), "a whole peer's page is as it was");
+                    assert!(covers.is_none(), "a whole peer's page is as it was");
                 }
             }
         }
@@ -483,8 +483,11 @@ fn a_partial_peer_holds_what_its_rules_admit() {
 /// head, the state the log's facts reach below it — and `unknown` where a
 /// whole peer's would be. Its claim is the hash of what it holds, which is
 /// that set by construction; the hash of the whole store is a disagreement.
-/// Falsified by answering a partial peer as a whole one (`hash_at`): its
-/// own claim was answered "disagreed".
+/// A claim about the log whole on a partial connection — a peer reconnected
+/// as an identity some rule hides rows from, asking before its snapshot
+/// landed — is `unknown`. Falsified by answering a partial peer as a whole
+/// one (`hash_at`): its own claim was answered "disagreed"; and by
+/// comparing a claim of the other kind (the whole claim was "agreed").
 #[test]
 fn a_partial_peer_is_answered_from_its_partition() {
     use ark::eval::Ctx;
@@ -498,25 +501,37 @@ fn a_partial_peer_is_answered_from_its_partition() {
     let (alice, bob) = (Ctx::new("alice", "dev"), Ctx::new("bob", "dev"));
     for (k, who, c) in [(1u8, &alice, 1), (2, &bob, 2), (3, &alice, 1)] {
         let o = Value::Id(net.id());
-        net.mutate(c, who, "make", args([("id", o), ("name", Value::text(format!("n{k}")))])).unwrap();
+        net.mutate(c, who, "make", args([("id", o), ("name", Value::text(format!("n{k}")))]))
+            .unwrap();
     }
     let who = net.identity(2);
     let a = &net.sv.authority;
     let at = |n| ark::rules::partition_hash(&a.log.state_at(n).unwrap(), who.who());
-    let asks: Vec<(i64, Vec<u8>, Option<bool>)> = vec![
-        (3, at(3), Some(true)),
-        (2, at(2), Some(true)),
-        (1, at(1), Some(true)),
-        (2, ark::hash::state_hash(&a.log.state_at(2).unwrap()), Some(false)),
-        (9, at(3), None),
+    let asks: Vec<(i64, Vec<u8>, bool, Option<bool>)> = vec![
+        (3, at(3), true, Some(true)),
+        (2, at(2), true, Some(true)),
+        (1, at(1), true, Some(true)),
+        (2, ark::hash::state_hash(&a.log.state_at(2).unwrap()), true, Some(false)),
+        (9, at(3), true, None),
+        // A claim about the log whole, on a partial connection: a state the
+        // authority does not serve this peer — cannot say.
+        (3, at(3), false, None),
     ];
-    for (seq, hash, want) in asks {
-        net.sv.recv(2, ClientMsg::Verify { seq, hash, log_id: None });
+    for (seq, hash, partial, want) in asks {
+        net.sv.recv(
+            2,
+            ClientMsg::Verify {
+                seq,
+                hash,
+                log_id: None,
+                partial,
+            },
+        );
         let got = net.sv.take_outgoing().into_iter().find_map(|(c, f)| match f {
             ServerMsg::Agree { ok, unknown, .. } if c == 2 => Some((!unknown).then_some(ok)),
             _ => None,
         });
-        assert_eq!(got, Some(want), "a verify at {seq}");
+        assert_eq!(got, Some(want), "a verify at {seq}, partial {partial}");
     }
     net.converged();
 }

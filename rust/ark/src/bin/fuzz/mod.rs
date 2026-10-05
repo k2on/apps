@@ -232,6 +232,10 @@ fn report(s: &Stats, took: Duration) {
         "    {} frames round-tripped, {} view pushes in sessions, {} under churn, {} native agreements",
         t.frames, t.view_pushes, s.churn_pushes, t.natives_checked
     );
+    println!(
+        "    rules (docs/plan-auth.md): {} peers ended partial and {} whole, {} role changes, {} writes refused as forbidden on the device and {} by the authority",
+        t.partial_peers, t.whole_peers, t.role_changes, t.forbidden_local, t.forbidden_remote
+    );
     for (seed, check, path, why) in &s.findings {
         println!("  finding: seed {seed}, {check}: {why}\n    written to {path}");
     }
@@ -358,6 +362,12 @@ pub fn replay(path: &str) -> i32 {
             describe(&sim);
             return 1;
         }
+        // `docs/plan-auth.md` As `run_script` holds it after every op.
+        if let Err(e) = sim.partitions_hold() {
+            println!("op {k} ({op:?}): {e}");
+            describe(&sim);
+            return 1;
+        }
     }
     let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sim.settle()));
     if r.is_err() {
@@ -408,6 +418,21 @@ fn describe(sim: &ark::sim::Sim) {
         println!("    confirmed {}", ark::json::json(&ark::store::Store::store_value(&r.confirmed)));
     }
     println!("server store {}", ark::json::json(&ark::store::Store::store_value(&a.store)));
+    for i in sim.clients.keys() {
+        let who = sim.identity_of(*i);
+        let rows = ark::rules::visible_rows(&a.store, who.who());
+        println!(
+            "  {} {:?} may see {:?}",
+            who.user,
+            who.roles,
+            rows.iter().map(|(t, rs)| (t, rs.len())).collect::<Vec<_>>()
+        );
+        println!(
+            "    served {:?} partial {}",
+            sim.served.get(i).map(|w| (&w.user, &w.roles)),
+            sim.clients[i].replica.partial
+        );
+    }
     for (n, (e, f)) in &a.log.entries {
         println!("  {n}: {} {} {:?}", ark::value::hex(&e.id), e.actor, f.len());
     }

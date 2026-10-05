@@ -87,6 +87,14 @@ pub enum ClientMsg {
         /// none is the bytes it was and is compared as it always was, so a
         /// client older than the field is answered as before.
         log_id: Option<Id>,
+        /// `docs/plan-auth.md` The state is a partition — what this peer
+        /// may see — and not the log whole. A connection served the other
+        /// kind is answered `unknown`: a peer that holds the log whole and
+        /// was reconnected as an identity some rule hides rows from, asking
+        /// before the snapshot that starts it over has landed, is asking
+        /// about a state the authority does not serve it, as one asking
+        /// about another log is. `partial: true`, absent otherwise.
+        partial: bool,
     },
     Say {
         frame: Vec<u8>,
@@ -110,18 +118,18 @@ pub enum ServerMsg {
         /// it ignores a field it does not know.
         module: Option<Vec<u8>>,
         /// `docs/plan-auth.md` A page for a peer that is not whole — one
-        /// some table's `visible` rule hides rows from: the last sequence
-        /// it covers, every one up to which has passed whether or not an
-        /// item names it. Its items are the entries with a fact the peer
+        /// some table's `visible` rule hides rows from: the sequences it
+        /// covers ([`Covers`]), every one of which has passed whether or not
+        /// an item names it. Its items are the entries with a fact the peer
         /// may see, with those facts only (an edit across the line as the
         /// add or the remove it is to that peer, and the rows the entry
         /// made visible or hid without touching them, as adds and removes),
         /// and with another person's intent carried as its envelope — its
         /// id, author and function, its arguments and autos empty — since a
-        /// partial peer applies facts and never replays an intent. The
-        /// peer's cursor moves to it. `upto` on the wire, absent on a page
-        /// for a whole peer, which is the bytes it was.
-        upto: Option<Seq>,
+        /// partial peer applies facts and never replays an intent. `after`
+        /// and `upto` on the wire, both absent on a page for a whole peer,
+        /// which is the bytes it was.
+        covers: Option<Covers>,
     },
     FactsFor {
         items: Vec<(Seq, Facts)>,
@@ -137,7 +145,7 @@ pub enum ServerMsg {
         module: Option<Vec<u8>>,
         /// `docs/plan-auth.md` The rows are what a peer that is not whole
         /// may see of the state at `seq`, and `hash` their state hash: the
-        /// peer holds a partition from here, and is paged with `upto`. On
+        /// peer holds a partition from here, and is paged with [`Covers`]. On
         /// the wire `partial: true`, absent otherwise.
         partial: bool,
     },
@@ -191,6 +199,19 @@ pub enum ServerMsg {
     Heard {
         frame: Vec<u8>,
     },
+}
+
+/// `docs/plan-auth.md` The sequences a partial page covers: those after
+/// `after`, to `upto`. A whole peer's page needs neither — its items are
+/// every entry, so a gap is a sequence missing from its inbox and it waits
+/// — but a partial page leaves out what its peer may not see, so only its
+/// ends say what passed. `after` is what makes a missing page visible: a
+/// peer told it continues from somewhere it has not reached asks again from
+/// its cursor rather than stepping over a page's facts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Covers {
+    pub after: Seq,
+    pub upto: Seq,
 }
 
 /// Entries per page.
@@ -287,9 +308,14 @@ impl ClientMsg {
                 "need_closures",
                 vec![("hashes", Value::List(hashes.iter().map(|h| Value::Bytes(h[..].into())).collect()))],
             ),
-            ClientMsg::Verify { seq, hash, log_id } => {
-                node("verify", named(vec![("seq", int(*seq)), ("hash", Value::Bytes(hash[..].into()))], log_id))
-            }
+            ClientMsg::Verify { seq, hash, log_id, partial } => node(
+                "verify",
+                flagged(
+                    named(vec![("seq", int(*seq)), ("hash", Value::Bytes(hash[..].into()))], log_id),
+                    "partial",
+                    *partial,
+                ),
+            ),
             ClientMsg::Say { frame } => node("say", vec![("say", Value::Bytes(frame[..].into()))]),
         }
     }
@@ -320,6 +346,7 @@ impl ClientMsg {
                 seq: int64(need(m, "seq")?)?,
                 hash: bytes(need(m, "hash")?)?,
                 log_id: log_of(m)?,
+                partial: flag(m, "partial")?,
             },
             "say" => ClientMsg::Say {
                 frame: bytes(need(m, "say")?)?,
@@ -361,13 +388,25 @@ fn flag(m: &BTreeMap<FieldName, Value>, name: &str) -> Result<bool, DecodeError>
     }
 }
 
-// `docs/plan-auth.md` A partial page's last sequence: `upto`, absent for a
-// whole peer's page.
-fn upto_field<'a>(mut fields: Vec<(&'a str, Value)>, upto: &Option<Seq>) -> Vec<(&'a str, Value)> {
-    if let Some(n) = upto {
-        fields.push(("upto", Value::Int(*n)));
+// `docs/plan-auth.md` What a partial page covers: `after` and `upto`, both
+// absent for a whole peer's page.
+fn covers_fields<'a>(mut fields: Vec<(&'a str, Value)>, covers: &Option<Covers>) -> Vec<(&'a str, Value)> {
+    if let Some(c) = covers {
+        fields.push(("after", Value::Int(c.after)));
+        fields.push(("upto", Value::Int(c.upto)));
     }
     fields
+}
+
+fn covers_of(m: &BTreeMap<FieldName, Value>) -> Result<Option<Covers>, DecodeError> {
+    match (m.get("after"), m.get("upto")) {
+        (None, None) => Ok(None),
+        (Some(a), Some(u)) => Ok(Some(Covers {
+            after: int64(a)?,
+            upto: int64(u)?,
+        })),
+        _ => bad("a page's after and upto go together"),
+    }
 }
 
 /// The `log` of a frame that may carry one: an id, or `None` where the
@@ -394,10 +433,10 @@ impl ServerMsg {
                 has_more,
                 log_id,
                 module,
-                upto,
+                covers,
             } => node(
                 "batch",
-                upto_field(
+                covers_fields(
                     of_module(
                         named(
                             vec![
@@ -422,7 +461,7 @@ impl ServerMsg {
                         ),
                         module,
                     ),
-                    upto,
+                    covers,
                 ),
             ),
             ServerMsg::FactsFor { items } => node(
@@ -521,7 +560,7 @@ impl ServerMsg {
                 has_more: boolean(need(m, "has_more")?)?,
                 log_id: log_of(m)?,
                 module: module_of(m)?,
-                upto: m.get("upto").map(int64).transpose()?,
+                covers: covers_of(m)?,
             },
             "facts" => ServerMsg::FactsFor {
                 items: list(
@@ -847,6 +886,10 @@ pub struct Client {
     /// the next connection; an id leaves this set when the server answers
     /// it otherwise. [`Client::held`] counts the ones still pending.
     pub held_ids: BTreeSet<Id>,
+    /// This connection has sent a page or a snapshot (`docs/plan-auth.md`):
+    /// what a replica holding a partition waits for before it says a
+    /// `verify` ([`Client::verify_all`]).
+    pub served: bool,
 }
 
 impl Client {
@@ -869,6 +912,7 @@ impl Client {
             module: None,
             server_module: None,
             held_ids: BTreeSet::new(),
+            served: false,
         }
     }
 
@@ -941,6 +985,7 @@ impl Client {
         self.epoch += 1;
         self.out.clear();
         self.more = false;
+        self.served = false;
         self.heard.clear();
         let hello = self.hello();
         self.emit(hello);
@@ -991,20 +1036,34 @@ impl Client {
                 has_more,
                 log_id,
                 module,
-                upto,
+                covers,
             } => {
                 self.heard_module(module);
+                self.served = true;
                 let r = &mut self.replica;
                 // `docs/plan-auth.md` A page of the other kind than the
                 // replica holds — a partial one for a whole replica, or the
                 // reverse — is nothing it can apply: a server starts every
                 // connection that changes kind with a snapshot, and this is
                 // a page from before it.
-                if upto.is_some() != r.partial {
+                if covers.is_some() != r.partial {
                     return;
                 }
-                if let Some(n) = upto {
-                    r.through = r.through.max(n);
+                if let Some(c) = covers {
+                    // One already covered — the network's duplicate — is
+                    // nothing new. One that continues from past where this
+                    // peer has been told is a page missed: its items would
+                    // be applied over a gap that no `upto` could show, so
+                    // it is dropped and the settle asks again from the
+                    // cursor, which the server pages from.
+                    if c.upto <= r.through {
+                        return;
+                    }
+                    if c.after > r.through {
+                        self.more = true;
+                        return;
+                    }
+                    r.through = c.upto;
                 }
                 // A peer that did not know which log it holds learns it
                 // from the first page (Round 4). One that did is never sent
@@ -1107,6 +1166,7 @@ impl Client {
     /// put in the store here, not as they are decoded: whether this peer is
     /// behind is said by the frame's `module`, which follows its `rows`.
     pub fn recv_snapshot(&mut self, s: Snapshot) {
+        self.served = true;
         let Snapshot {
             seq,
             rows,
@@ -1173,14 +1233,21 @@ impl Client {
     /// state.
     ///
     /// Not while [`Client::behind`] (`docs/plan-db.md` D1): the hash is
-    /// over this peer's schema, which is not the server's.
+    /// over this peer's schema, which is not the server's. Nor, holding a
+    /// partition, before this connection's first page or snapshot
+    /// (`docs/plan-auth.md`): every partial connection starts from a
+    /// snapshot of what this identity may see now, and until it lands the
+    /// replica holds what an earlier connection's identity could — another
+    /// partition when a role moved in between, which the authority would
+    /// answer as a disagreement about nothing.
     pub fn verify_all(&mut self) {
-        if self.behind() {
+        if self.behind() || (self.replica.partial && !self.served) {
             return;
         }
         let (seq, hash) = self.replica.verify_at();
         let log_id = self.replica.log_id;
-        self.emit(ClientMsg::Verify { seq, hash, log_id });
+        let partial = self.replica.partial;
+        self.emit(ClientMsg::Verify { seq, hash, log_id, partial });
     }
 
     pub fn take_outgoing(&mut self) -> Vec<ClientMsg> {
@@ -1306,7 +1373,7 @@ struct Conn {
     elsewhere: bool,
     /// `docs/plan-auth.md` Some table's `visible` rule hides rows from
     /// this identity: it is sent what it may see, by facts, filtered, with
-    /// `upto` on every page — never an intent to replay.
+    /// `after` and `upto` on every page — never an intent to replay.
     partial: bool,
     /// A partial connection that has not yet been sent its snapshot: what
     /// it may see can have moved since it last connected without any
@@ -1426,7 +1493,11 @@ impl<M: Machine> Server<M> {
                     // held a partition and is whole now is sent the snapshot
                     // at the head, as one of another log is: paged, it would
                     // take intents onto a store missing rows.
-                    let first = !self.conns.contains_key(&c);
+                    // A partial connection asking again from anywhere but
+                    // where it was sent to has missed something — a page,
+                    // or the snapshot that started it — and is started over
+                    // from a snapshot: its rows may be another identity's.
+                    let again = self.conns.get(&c).is_none_or(|was| was.sent != sub.since);
                     let partial = !rules::whole_to(&self.authority.schema, who.who());
                     let elsewhere = elsewhere || (sub.partial && !partial);
                     let peer = live::Peer {
@@ -1442,7 +1513,7 @@ impl<M: Machine> Server<M> {
                             sent: sub.since,
                             elsewhere,
                             partial,
-                            fresh: partial && first,
+                            fresh: partial && again,
                         },
                     );
                     let post = live::arrive(&self.machine, &mut self.rooms, peer);
@@ -1460,7 +1531,8 @@ impl<M: Machine> Server<M> {
                         .iter()
                         .any(|(to, m)| *to == c && matches!(m, ServerMsg::Batch { .. } | ServerMsg::SnapshotOf { .. }));
                     if self.module.is_some() && !paged {
-                        let upto = partial.then(|| self.authority.log.head_seq());
+                        let head = self.authority.log.head_seq();
+                        let covers = partial.then_some(Covers { after: head, upto: head });
                         self.send(
                             c,
                             ServerMsg::Batch {
@@ -1468,7 +1540,7 @@ impl<M: Machine> Server<M> {
                                 has_more: false,
                                 log_id: self.authority.log.id(),
                                 module: self.module.clone(),
-                                upto,
+                                covers,
                             },
                         );
                     }
@@ -1557,7 +1629,7 @@ impl<M: Machine> Server<M> {
             }
             // At the head the authority's store is the answer, hashed as
             // it stands; only a sequence below it is replayed (R4).
-            ClientMsg::Verify { seq, hash, log_id } => {
+            ClientMsg::Verify { seq, hash, log_id, partial } => {
                 // Below the horizon or past the head there is no state to
                 // compare, and saying `ok: false` there would be reported
                 // as a divergence: it is said to be unknown (D3). So is a
@@ -1569,7 +1641,7 @@ impl<M: Machine> Server<M> {
                 let elsewhere = matches!((log_id, self.authority.log.id()), (Some(theirs), Some(ours)) if theirs != ours);
                 let conn = &self.conns[&c];
                 let a = &self.authority;
-                let at = if elsewhere {
+                let at = if elsewhere || partial != conn.partial {
                     None
                 } else if conn.partial {
                     // `docs/plan-auth.md` A partial peer holds what it may
@@ -1702,12 +1774,12 @@ impl<M: Machine> Server<M> {
                 has_more: more,
                 log_id: a.log.id(),
                 module: self.module.clone(),
-                upto: Some(upto),
+                covers: Some(Covers { after: sent, upto }),
             }
         };
         let advanced = match &msg {
             ServerMsg::SnapshotOf { seq, .. } => *seq,
-            ServerMsg::Batch { upto, .. } => upto.unwrap_or(sent),
+            ServerMsg::Batch { covers, .. } => covers.map_or(sent, |c| c.upto),
             _ => sent,
         };
         self.send(c, msg);
@@ -1827,7 +1899,7 @@ impl<M: Machine> Server<M> {
                             has_more: more,
                             log_id: a.log.id(),
                             module: self.module.clone(),
-                            upto: None,
+                            covers: None,
                         },
                         last,
                     )
@@ -1845,6 +1917,11 @@ impl<M: Machine> Server<M> {
 
     pub fn take_outgoing(&mut self) -> Vec<(ConnId, ServerMsg)> {
         std::mem::take(&mut self.out)
+    }
+
+    /// What is queued and not yet taken, oldest first.
+    pub fn peek_outgoing(&self) -> &[(ConnId, ServerMsg)] {
+        &self.out
     }
 
     /// Who a connection was identified as, if it has said hello.
@@ -1895,6 +1972,7 @@ mod tests {
                     seq: 0,
                     hash: hash.to_vec(),
                     log_id,
+                    partial: false,
                 },
             );
             sv.take_outgoing()

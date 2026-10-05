@@ -109,6 +109,7 @@ pub fn protocol(out: &Out) {
                 seq: 4,
                 hash: vec![0xab; 32],
                 log_id: None,
+                partial: false,
             },
         ),
         // The log the sequence is of, named (`docs/plan-db.md` D2): an
@@ -119,6 +120,7 @@ pub fn protocol(out: &Out) {
                 seq: 4,
                 hash: vec![0xab; 32],
                 log_id: Some(log_a),
+                partial: false,
             },
         ),
         ("say", ClientMsg::Say { frame: vec![1, 2, 3] }),
@@ -139,7 +141,7 @@ pub fn protocol(out: &Out) {
         has_more: true,
         log_id,
         module,
-        upto: None,
+        covers: None,
     };
     let snapshot = |log_id, module| ServerMsg::SnapshotOf {
         seq: 2,
@@ -488,8 +490,9 @@ pub fn protocol(out: &Out) {
 /// other, its reason naming the table (`protocol/server-reject-forbidden`);
 /// a peer some `visible` rule hides rows from is paged with `upto` and only
 /// what it may see (`server-batch-partial`), started from a snapshot of
-/// that (`server-snapshot-partial`), and says it holds a partition when it
-/// comes back (`client-hello-partial`).
+/// that (`server-snapshot-partial`), says it holds a partition when it
+/// comes back (`client-hello-partial`) and when it asks the authority
+/// whether it agrees (`client-verify-partial`).
 /// Asserted on the demo with rules (`module/rules.json`): alice adding an
 /// item, which only an `editor` writes, is refused, and with the role
 /// (`alice:editor`, as dev auth reads a token) acknowledged.
@@ -600,8 +603,12 @@ pub fn rules(out: &Out) {
         .find(|f| matches!(f, ServerMsg::Batch { items, .. } if !items.is_empty()))
         .cloned()
         .expect("protocol: bob was sent no page");
-    let ServerMsg::Batch { items, upto, .. } = &page else { unreachable!() };
-    assert_eq!(*upto, Some(2), "protocol: a partial page covers both sequences");
+    let ServerMsg::Batch { items, covers, .. } = &page else { unreachable!() };
+    assert_eq!(
+        *covers,
+        Some(ark::protocol::Covers { after: 0, upto: 2 }),
+        "protocol: a partial page covers both sequences"
+    );
     assert_eq!(items.len(), 1, "protocol: the playlist bob cannot see is not sent");
     let (n, e, facts) = &items[0];
     assert!(
@@ -637,7 +644,30 @@ pub fn rules(out: &Out) {
         .find_map(|(c, f)| (c == 2 && matches!(f, ServerMsg::SnapshotOf { .. })).then_some(f))
         .expect("protocol: a partial peer's connection starts from a snapshot");
     assert!(matches!(&snapshot, ServerMsg::SnapshotOf { partial: true, seq: 2, .. }));
-    let client_frames: Vec<(&str, ClientMsg)> = vec![("hello-partial", again)];
+    // Started over, bob asks whether the authority agrees: about a
+    // partition, and it is answered from the partition digest.
+    bob.recv(snapshot.clone());
+    bob.settle();
+    bob.verify_all();
+    let verify = bob
+        .take_outgoing()
+        .into_iter()
+        .find(|f| matches!(f, ClientMsg::Verify { partial: true, .. }))
+        .expect("protocol: a partial peer's verify says it holds a partition");
+    sv.recv(2, verify.clone());
+    assert!(
+        sv.take_outgoing().iter().any(|(c, f)| *c == 2
+            && matches!(
+                f,
+                ServerMsg::Agree {
+                    ok: true,
+                    unknown: false,
+                    ..
+                }
+            )),
+        "protocol: the authority agrees with bob's partition"
+    );
+    let client_frames: Vec<(&str, ClientMsg)> = vec![("hello-partial", again), ("verify-partial", verify)];
     for (name, f) in client_frames {
         let v = f.to_value();
         match decode(&encode(&v)).map(|d| ClientMsg::from_value(&d)) {

@@ -772,7 +772,15 @@ fn perf_g_authority_and_fanout() {
         s.recv(1, hello(seq, Mode::Whole));
         let _ = s.take_outgoing();
         let t = Instant::now();
-        s.recv(1, ClientMsg::Verify { seq, hash, log_id: None });
+        s.recv(
+            1,
+            ClientMsg::Verify {
+                seq,
+                hash,
+                log_id: None,
+                partial: false,
+            },
+        );
         let dt = t.elapsed();
         let agreed = s.take_outgoing().into_iter().any(|(_, m)| matches!(m, ServerMsg::Agree { ok: true, .. }));
         assert!(agreed, "the authority agrees with its own head");
@@ -807,7 +815,7 @@ fn perf_h_frames() {
             has_more: false,
             log_id: None,
             module: None,
-            upto: None,
+            covers: None,
         };
         let reps = 50;
         let a0 = allocs();

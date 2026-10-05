@@ -2041,7 +2041,7 @@ mod tests {
             has_more: false,
             log_id: None,
             module: None,
-            upto: None,
+            covers: None,
         };
         let mut other = d.replica(true);
         let shared = d.create(&mut other, &them, 1, "Shared");
