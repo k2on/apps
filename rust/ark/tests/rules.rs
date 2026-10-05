@@ -25,7 +25,11 @@ impl Row for Owner {
             .text(Self::user_id)
             .text(Self::name)
             .key((Self::id,))
-            .visible(Self::user_id.is(Me).or(exists(Member::owner_id, Member::user_id.is(Me))))
+            .visible(
+                Pred::from(Role("admin"))
+                    .or(Self::user_id.is(Me))
+                    .or(exists(Member::owner_id, Member::user_id.is(Me))),
+            )
             .writable(Self::user_id.is(Me))
     }
 }
@@ -72,6 +76,7 @@ fn the_vocabulary_writes_the_rule_the_schema_carries() {
     assert_eq!(
         owner.visible,
         Some(IrPred::Any(vec![
+            IrPred::Role("admin".into()),
             me("user_id"),
             IrPred::Exists("member".into(), "owner_id".into(), Box::new(me("user_id")))
         ]))
@@ -181,9 +186,14 @@ mod net {
     use ark::hash::FnHash;
     use ark::live::Silent;
     use ark::peer::{Authority, Replica};
-    use ark::protocol::{open_access, trusting, Client, Mode, Server};
+    use ark::protocol::{dev_identity, open_access, trusting, Client, Identity, Mode, Server, ServerMsg};
+    use ark::rules;
     use ark::schema::Schema;
-    use ark::store::{MemoryStore, Refusal};
+    use ark::store::{MemoryStore, Refusal, Store};
+
+    fn same_rows(a: &MemoryStore, b: &MemoryStore) -> bool {
+        a.schema().tables().all(|t| a.scan(&t.name) == b.scan(&t.name))
+    }
     use ark::value::{Id, Value};
 
     /// A trusting server and clients on a perfect network: a token is a
@@ -193,6 +203,8 @@ mod net {
         pub clients: BTreeMap<i64, Client>,
         pub schema: Schema,
         pub fns: BTreeMap<String, FnHash>,
+        /// Every frame the server sent each connection, oldest first.
+        pub heard: BTreeMap<i64, Vec<ServerMsg>>,
         next: u8,
     }
 
@@ -206,7 +218,46 @@ mod net {
                 clients: BTreeMap::new(),
                 schema: built.schema.clone(),
                 fns,
+                heard: BTreeMap::new(),
                 next: 0,
+            }
+        }
+
+        /// The identity client `c`'s token says, as the trusting server reads it.
+        pub fn identity(&self, c: i64) -> Identity {
+            dev_identity(self.clients[&c].token.as_deref().unwrap_or(""), "dev")
+        }
+
+        /// Every client holds exactly what it may see of the authority's
+        /// store — all of it, for a whole one — at the head, and the
+        /// authority agrees when asked.
+        pub fn converged(&mut self) {
+            let head = self.sv.authority.log.head_seq();
+            for c in self.clients.keys().copied().collect::<Vec<_>>() {
+                let who = self.identity(c);
+                let cl = &self.clients[&c];
+                let a = &self.sv.authority;
+                assert_eq!(cl.replica.cursor, head, "client {c} at the head");
+                assert_eq!(cl.replica.partial, !rules::whole_to(&self.schema, who.who()), "client {c} whole or not");
+                let want = rules::visible_rows(&a.store, who.who());
+                for t in self.schema.tables() {
+                    assert_eq!(
+                        cl.replica.confirmed.scan(&t.name),
+                        want[&t.name],
+                        "client {c} holds what it may see of {}",
+                        t.name
+                    );
+                }
+                assert_eq!(cl.replica.verify_at().1, rules::partition_hash(&a.store, who.who()), "client {c}'s hash");
+                assert!(
+                    same_rows(&cl.replica.view, &cl.replica.confirmed),
+                    "client {c}: nothing pending, the view is confirmed"
+                );
+                self.clients.get_mut(&c).unwrap().verify_all();
+            }
+            self.pump();
+            for (c, cl) in &self.clients {
+                assert_eq!(cl.agreed.last(), Some(&(head, Some(true))), "client {c}: the authority agrees");
             }
         }
 
@@ -260,6 +311,7 @@ mod net {
                 }
                 for (to, m) in self.sv.take_outgoing() {
                     moved = true;
+                    self.heard.entry(to).or_default().push(m.clone());
                     if let Some(cl) = self.clients.get_mut(&to) {
                         cl.recv(m);
                     }
@@ -286,7 +338,9 @@ fn args<const N: usize>(pairs: [(&str, ark::value::Value); N]) -> ark::eval::Arg
 /// sequenced. A device that believes it holds a role it does not is
 /// refused by the authority with `Forbidden` — rolled back, answered as any
 /// refusal, and landing nowhere; an edit is held on its old row too, so
-/// writing over somebody else's row is refused whatever the new row says.
+/// writing over somebody else's row is refused whatever the new row says —
+/// by the authority when the device cannot see the row (its preview is an
+/// add of its own), and on the device once it can.
 /// Falsified by leaving the check out of `Authority::sequence_as` (the
 /// believer's member row was sequenced), and out of `Replica::mutate` (bob's
 /// own device recorded the forbidden intent pending).
@@ -300,39 +354,169 @@ fn a_write_is_held_to_its_tables_rule_on_the_device_and_at_the_authority() {
     let mut net = net::Net::new(&m);
     net.join(1, "alice");
     net.join(2, "bob");
-    net.join(3, "carol:library");
+    net.join(3, "carol:library,admin");
     let alice = Ctx::new("alice", "dev");
     let bob = Ctx::new("bob", "dev");
-    let carol = Ctx::new("carol", "dev").with_roles(["library"]);
+    let carol = Ctx::new("carol", "dev").with_roles(["library", "admin"]);
     let o = Value::Id(net.id());
-    net.mutate(1, &alice, "make", args([("id", o.clone()), ("name", Value::text("mine"))]))
-        .expect("alice writes her own row");
-    // Bob, naming alice's row: refused on his own device, nothing pending.
-    let forbidden = Err(Refusal::Forbidden("owner".into()));
-    assert_eq!(
-        net.mutate(2, &bob, "make", args([("id", o.clone()), ("name", Value::text("theirs"))])),
-        forbidden
-    );
-    assert!(net.clients[&2].replica.pending.is_empty(), "a forbidden intent is never pending");
-    // Members are the library's: carol may, bob may not.
+    let make = |name: &str| args([("id", o.clone()), ("name", Value::text(name))]);
+    net.mutate(1, &alice, "make", make("mine")).expect("alice writes her own row");
+    // Bob, naming alice's row, which he cannot see: his preview is a row of
+    // his own; the authority's run is an edit of hers, and refuses.
+    net.mutate(2, &bob, "make", make("theirs")).expect("bob's own view cannot see the row");
+    let refused = |net: &net::Net| net.clients[&2].replica.rejections.last().map(|(_, r)| r.clone());
+    assert_eq!(refused(&net), Some(Refusal::Refused("owner: not this login's to write".into())));
+    assert!(net.clients[&2].replica.pending.is_empty());
+    // Members are the library's: carol may, bob may not — refused on his
+    // own device, nothing pending.
     let join = || args([("owner_id", o.clone()), ("user_id", Value::text("bob"))]);
     net.mutate(3, &carol, "join", join()).expect("the library writes members");
     assert_eq!(net.mutate(2, &bob, "join", join()), Err(Refusal::Forbidden("member".into())));
+    assert!(net.clients[&2].replica.pending.is_empty(), "a forbidden intent is never pending");
+    // A member of alice's row now sees it, and writing over it is refused
+    // on his own device.
+    assert_eq!(net.mutate(2, &bob, "make", make("theirs")), Err(Refusal::Forbidden("owner".into())));
     // A device that believes it holds the role: its preview takes it, the
     // authority does not, and it lands nowhere.
     let believer = Ctx::new("bob", "dev").with_roles(["library"]);
     net.mutate(2, &believer, "join", join()).expect("the believer's own view takes it");
-    let refused = &net.clients[&2].replica.rejections;
-    assert_eq!(
-        refused.last().map(|(_, r)| r),
-        Some(&Refusal::Refused("member: not this login's to write".into()))
-    );
+    assert_eq!(refused(&net), Some(Refusal::Refused("member: not this login's to write".into())));
     assert!(net.clients[&2].replica.pending.is_empty());
     let a = &net.sv.authority;
     assert_eq!(a.log.head_seq(), 2, "two entries: alice's row and carol's member");
     assert_eq!(a.store.scan("member").len(), 1);
     assert_eq!(a.store.scan("owner")[0].get("name"), Some(&Value::text("mine")));
-    for (i, c) in &net.clients {
-        assert_eq!(c.replica.verify_at(), (2, ark::hash::state_hash(&a.store)), "client {i} converged");
+    net.converged();
+}
+
+/// `docs/plan-auth.md` A4. A peer to which some table's `visible` rule
+/// hides rows is served the facts its rules admit, and holds exactly what
+/// it may see at every head: its own rows, a row another made once a
+/// member row naming it is written (the lookup form, sent as an `Add` of a
+/// row the entry did not touch), its edits after that, and its going when
+/// the member row goes (a `Remove`). An `admin` is whole — every table
+/// `Everyone` to it — and is served the log by intents with no `upto`, as
+/// before rules. A partial peer is never sent another person's intent
+/// with its arguments, and its `Verify` is answered from the partition
+/// digest. Falsified by sending the lookup form's `Add`s and `Remove`s
+/// nowhere (bob did not hold alice's row after he was made a member);
+/// and by not stripping another's arguments (the envelope check).
+#[test]
+fn a_partial_peer_holds_what_its_rules_admit() {
+    use ark::eval::Ctx;
+    use ark::protocol::ServerMsg;
+    use ark::store::Store;
+    use ark::value::Value;
+
+    let m = domain();
+    let mut net = net::Net::new(&m);
+    net.join(1, "alice");
+    net.join(2, "bob");
+    net.join(3, "carol:library");
+    net.join(4, "dave:admin");
+    let alice = Ctx::new("alice", "dev");
+    let bob = Ctx::new("bob", "dev");
+    let dave = Ctx::new("dave", "dev").with_roles(["admin"]);
+    let (o1, o2) = (Value::Id(net.id()), Value::Id(net.id()));
+    let make = |o: &Value, name: &str| args([("id", o.clone()), ("name", Value::text(name))]);
+    net.mutate(1, &alice, "make", make(&o1, "alice's")).unwrap();
+    net.mutate(2, &bob, "make", make(&o2, "bob's")).unwrap();
+    net.converged();
+    assert!(!net.clients[&4].replica.partial, "an admin is whole");
+    assert_eq!(net.clients[&1].replica.confirmed.scan("owner").len(), 1);
+    assert_eq!(net.clients[&3].replica.confirmed.scan("owner").len(), 0, "the library sees no owner row");
+    // Bob made a member of alice's row: he sees it, and its edits.
+    let carol_admin = Ctx::new("carol", "dev").with_roles(["library", "admin"]);
+    net.reconnect(3, "carol:library,admin");
+    net.mutate(3, &carol_admin, "join", args([("owner_id", o1.clone()), ("user_id", Value::text("bob"))]))
+        .unwrap();
+    net.converged();
+    assert_eq!(net.clients[&2].replica.confirmed.scan("owner").len(), 2, "bob sees alice's row too");
+    net.mutate(1, &alice, "make", make(&o1, "renamed")).unwrap();
+    net.converged();
+    // …and stops when the member row goes.
+    let member = net.sv.authority.store.scan("member")[0].get("id").cloned().unwrap();
+    net.mutate(4, &dave, "leave", args([("id", member)])).unwrap_err();
+    net.mutate(
+        3,
+        &carol_admin,
+        "leave",
+        args([("id", net.sv.authority.store.scan("member")[0]["id"].clone())]),
+    )
+    .unwrap();
+    net.converged();
+    assert_eq!(net.clients[&2].replica.confirmed.scan("owner").len(), 1, "bob's own again");
+    // A role granted between connections is the next connection's: bob as
+    // an admin is whole, and back again partial, from a snapshot each time.
+    net.reconnect(2, "bob:admin");
+    net.converged();
+    assert!(!net.clients[&2].replica.partial);
+    net.reconnect(2, "bob");
+    net.converged();
+    assert!(net.clients[&2].replica.partial);
+    // What a partial peer was sent: pages with `upto`, never another's
+    // arguments; the whole one, pages without.
+    for (c, frames) in &net.heard {
+        let partial = net.identity(*c).roles.iter().all(|r| r != "admin") && *c != 2;
+        for f in frames {
+            if let ServerMsg::Batch { items, upto, .. } = f {
+                if partial {
+                    assert!(upto.is_some(), "client {c}: a partial page says how far it covers");
+                    for (_, e, _) in items {
+                        let own = e.actor == net.identity(*c).user;
+                        assert!(
+                            own || (e.args.is_empty() && e.autos.is_empty()),
+                            "client {c} was sent {}'s intent",
+                            e.actor
+                        );
+                    }
+                } else if *c == 4 {
+                    assert!(upto.is_none(), "a whole peer's page is as it was");
+                }
+            }
+        }
     }
+}
+
+/// `docs/plan-auth.md` A5. A partial peer's `Verify` is answered from the
+/// partition digest of the state at its sequence — the head's store at the
+/// head, the state the log's facts reach below it — and `unknown` where a
+/// whole peer's would be. Its claim is the hash of what it holds, which is
+/// that set by construction; the hash of the whole store is a disagreement.
+/// Falsified by answering a partial peer as a whole one (`hash_at`): its
+/// own claim was answered "disagreed".
+#[test]
+fn a_partial_peer_is_answered_from_its_partition() {
+    use ark::eval::Ctx;
+    use ark::protocol::{ClientMsg, ServerMsg};
+    use ark::value::Value;
+
+    let m = domain();
+    let mut net = net::Net::new(&m);
+    net.join(1, "alice");
+    net.join(2, "bob");
+    let (alice, bob) = (Ctx::new("alice", "dev"), Ctx::new("bob", "dev"));
+    for (k, who, c) in [(1u8, &alice, 1), (2, &bob, 2), (3, &alice, 1)] {
+        let o = Value::Id(net.id());
+        net.mutate(c, who, "make", args([("id", o), ("name", Value::text(format!("n{k}")))])).unwrap();
+    }
+    let who = net.identity(2);
+    let a = &net.sv.authority;
+    let at = |n| ark::rules::partition_hash(&a.log.state_at(n).unwrap(), who.who());
+    let asks: Vec<(i64, Vec<u8>, Option<bool>)> = vec![
+        (3, at(3), Some(true)),
+        (2, at(2), Some(true)),
+        (1, at(1), Some(true)),
+        (2, ark::hash::state_hash(&a.log.state_at(2).unwrap()), Some(false)),
+        (9, at(3), None),
+    ];
+    for (seq, hash, want) in asks {
+        net.sv.recv(2, ClientMsg::Verify { seq, hash, log_id: None });
+        let got = net.sv.take_outgoing().into_iter().find_map(|(c, f)| match f {
+            ServerMsg::Agree { ok, unknown, .. } if c == 2 => Some((!unknown).then_some(ok)),
+            _ => None,
+        });
+        assert_eq!(got, Some(want), "a verify at {seq}");
+    }
+    net.converged();
 }

@@ -70,6 +70,7 @@ pub fn demo_app() -> crate::App {
             pending: r.pending.clone(),
             user: crate::seed::DEMO.into(),
             session: "local".into(),
+            partial: false,
         }
         .encode()
     });

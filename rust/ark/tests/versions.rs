@@ -643,6 +643,7 @@ fn a_verify_below_the_head_over_older_facts_agrees() {
                 since: 2,
                 mode: Mode::ByFacts,
                 log_id: None,
+                partial: false,
             },
             token: Some("alice".into()),
             spec: ark::ir::SPEC_VERSION,

@@ -119,6 +119,9 @@ pub struct Kept {
     pub store: MemoryStore,
     pub cursor: Seq,
     pub log_id: Option<Id>,
+    /// The store is a partition (`docs/plan-auth.md`), as a client's
+    /// `replica` record says `partial`.
+    pub partial: bool,
 }
 
 /// One move of a scripted session (`rebase/fleet-fuzz-*` vectors, and the
@@ -521,6 +524,7 @@ impl Sim {
             store: r.confirmed.clone(),
             cursor: r.cursor,
             log_id: r.log_id,
+            partial: r.partial,
         });
         match r.take_confirmed() {
             Durable::Replaced => k.store = r.confirmed.clone(),
@@ -532,6 +536,7 @@ impl Sim {
         }
         k.cursor = r.cursor;
         k.log_id = r.log_id;
+        k.partial = r.partial;
         let ch = r.take_changes();
         match &ch {
             Changes::Rebuilt => {
@@ -722,6 +727,8 @@ impl Sim {
             old.replica.pending.clone(),
         );
         r.log_id = k.log_id;
+        r.partial = k.partial;
+        r.through = k.cursor;
         let mut c = Client::open(r, old.mode, old.token.clone());
         if self.native_peers.contains(&i) {
             c.hold(&self.natives);

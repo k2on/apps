@@ -284,8 +284,13 @@ fn check_protocol(name: &str, v: &serde_json::Value) -> Result<(), String> {
         for sch in [demo, Schema::empty()] {
             let want = match f.clone() {
                 ServerMsg::SnapshotOf {
-                    seq, rows, log_id, module, ..
-                } => Received::Snapshot(Snapshot::of_values(&sch, seq, rows, log_id, module)),
+                    seq,
+                    rows,
+                    log_id,
+                    module,
+                    partial,
+                    ..
+                } => Received::Snapshot(Snapshot::of_values(&sch, seq, rows, log_id, module, partial)),
                 other => Received::Msg(other),
             };
             let got = ServerMsg::decode_for(&bytes, &sch)?;

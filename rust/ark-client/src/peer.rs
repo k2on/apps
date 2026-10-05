@@ -335,6 +335,9 @@ struct Durable {
     /// learning another is written as a snapshot, since a page cannot say
     /// it.
     log_id: Option<Id>,
+    /// The snapshot is of a partition (`docs/plan-auth.md`): what the
+    /// replica is opened holding, and says in its next `Hello`.
+    partial: bool,
     /// The journal cannot be written on from `cursor` — there is no
     /// snapshot yet, the confirmed store was replaced, a write failed,
     /// `open` found a page it could not use — so the next write is a
@@ -428,6 +431,7 @@ impl Peer {
                     page_bytes: st.page_bytes,
                     cursor: f.cursor,
                     log_id: st.log_id,
+                    partial: f.partial,
                     snapshot_due: !st.clean,
                 };
                 // Pending pages that could not all be read, or none written
@@ -457,6 +461,7 @@ impl Peer {
                     page_bytes: 0,
                     cursor: 0,
                     log_id: None,
+                    partial: false,
                     snapshot_due: true,
                 };
                 let pending_file = PendingFile::of(&pending_stored);
@@ -480,6 +485,10 @@ impl Peer {
         // The log the cursor is of, as the storage names it; unnamed, the
         // server's first answer names it (Round 4).
         r.log_id = durable.log_id;
+        // A partition, if that is what was kept (`docs/plan-auth.md`): every
+        // sequence up to the cursor has been told about.
+        r.partial = durable.partial;
+        r.through = cursor;
         r.hold(natives.iter().cloned());
         let mut client = Client::open(r, Mode::Whole, opts.token.clone());
         // What the server's module is compared with (`behind`,
@@ -1213,8 +1222,8 @@ impl Peer {
     fn snapshot(&mut self) -> Result<(), Error> {
         self.durable.snapshot_due = true;
         let r = &self.client.replica;
-        let bytes = encode_replica_of(r.cursor, r.log_id, self.fork, &r.confirmed, &self.ctx.user, &self.ctx.session);
-        let (cursor, log_id) = (r.cursor, r.log_id);
+        let bytes = encode_replica_of(r.cursor, r.log_id, self.fork, r.partial, &r.confirmed, &self.ctx.user, &self.ctx.session);
+        let (cursor, log_id, partial) = (r.cursor, r.log_id, r.partial);
         self.storage.save(ReplicaFile::KEY, &bytes)?;
         for n in (1..=self.durable.pages).rev() {
             self.storage.remove(&ReplicaFile::page_key(n))?;
@@ -1226,6 +1235,7 @@ impl Peer {
             page_bytes: 0,
             cursor,
             log_id,
+            partial,
             snapshot_due: false,
         };
         Ok(())

@@ -507,7 +507,12 @@ fn perf_d_initial_sync() {
 
 fn hello(since: Seq, mode: Mode) -> ClientMsg {
     ClientMsg::Hello {
-        sub: Subscription { since, mode, log_id: None },
+        sub: Subscription {
+            since,
+            mode,
+            log_id: None,
+            partial: false,
+        },
         token: Some("alice".into()),
         spec: ark::ir::SPEC_VERSION,
     }
@@ -802,6 +807,7 @@ fn perf_h_frames() {
             has_more: false,
             log_id: None,
             module: None,
+            upto: None,
         };
         let reps = 50;
         let a0 = allocs();

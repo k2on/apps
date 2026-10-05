@@ -418,7 +418,7 @@ const OPEN_LOG: [u8; 16] = [0x5a; 16];
 fn write_client(dir: &std::path::Path, d: &ark_client::Domain, n: u64) {
     let st = open_store(d, 0..n);
     let fork = ark_client::Fork::default();
-    let bytes = ark_client::storage::encode_replica_of(n as i64, Some(OPEN_LOG), fork, &st, "alice", "dev");
+    let bytes = ark_client::storage::encode_replica_of(n as i64, Some(OPEN_LOG), fork, false, &st, "alice", "dev");
     std::fs::write(dir.join("replica"), bytes).unwrap();
 }
 
@@ -451,7 +451,7 @@ fn write_server(dir: &std::path::Path, d: &ark_client::Domain, n: u64) {
 /// page of `n` records — which `open` reads whole for the ids.
 fn write_alone(dir: &std::path::Path, d: &ark_client::Domain, n: u64) {
     let st = open_store(d, 0..n);
-    let replica = ark_client::storage::encode_replica_of(n as i64, None, ark_client::Fork::default(), &st, "alice", "local");
+    let replica = ark_client::storage::encode_replica_of(n as i64, None, ark_client::Fork::default(), false, &st, "alice", "local");
     std::fs::write(dir.join("replica"), replica).unwrap();
     let fork = ark::log::Log::empty(d.module().schema.clone());
     std::fs::write(dir.join("log"), ark::canon::encode(&ark::journal::log_to_value(&fork))).unwrap();
@@ -932,6 +932,7 @@ fn snapshot_frame(d: &ark_client::Domain, n: u64) -> Vec<u8> {
         rows,
         log_id: Some(OPEN_LOG),
         module: Some(vec![0xa5; 32]),
+        partial: false,
     };
     ark::canon::encode(&msg.to_value())
 }

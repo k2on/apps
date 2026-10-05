@@ -20,10 +20,11 @@ use crate::hash::{Closure, FnHash};
 use crate::ir::decode::{closure_from_value, DecodeError};
 use crate::ir::encode::closure_value;
 use crate::live::{self, ConnId, Machine, Rooms};
-use crate::log::{snapshot_of, Entry, Facts, Page, Seq};
+use crate::log::{snapshot_of, widened, Entry, Facts, Page, Seq};
 use crate::peer::{Authority, Replica, Sequenced};
+use crate::rules;
 use crate::schema::Schema;
-use crate::store::{project_row, Change, MemoryStore, Refusal, Row, Store};
+use crate::store::{project_row, Change, MemoryStore, Overlay, Refusal, Row, Store};
 use crate::value::{hex, FieldName, Id, TableName, Value};
 
 // ---------------------------------------------------------------------
@@ -47,6 +48,14 @@ pub struct Subscription {
     /// logs having names, which is served as before (§12.4). On the wire,
     /// `log`, an id, absent for `None`.
     pub log_id: Option<Id>,
+    /// `docs/plan-auth.md` The peer holds a partition: the rows a table's
+    /// `visible` rule let it see when it was last served, not the log
+    /// whole. A server that finds this identity whole answers with its
+    /// snapshot at the head rather than paging intents onto a store missing
+    /// rows; one that finds it partial starts it from a snapshot of what it
+    /// may see whatever this says. On the wire `partial: true`, absent
+    /// otherwise, so a `hello` from a whole peer is the bytes it was.
+    pub partial: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -100,6 +109,19 @@ pub enum ServerMsg {
         /// does not say is the bytes it was, and a peer that does not read
         /// it ignores a field it does not know.
         module: Option<Vec<u8>>,
+        /// `docs/plan-auth.md` A page for a peer that is not whole — one
+        /// some table's `visible` rule hides rows from: the last sequence
+        /// it covers, every one up to which has passed whether or not an
+        /// item names it. Its items are the entries with a fact the peer
+        /// may see, with those facts only (an edit across the line as the
+        /// add or the remove it is to that peer, and the rows the entry
+        /// made visible or hid without touching them, as adds and removes),
+        /// and with another person's intent carried as its envelope — its
+        /// id, author and function, its arguments and autos empty — since a
+        /// partial peer applies facts and never replays an intent. The
+        /// peer's cursor moves to it. `upto` on the wire, absent on a page
+        /// for a whole peer, which is the bytes it was.
+        upto: Option<Seq>,
     },
     FactsFor {
         items: Vec<(Seq, Facts)>,
@@ -113,6 +135,11 @@ pub enum ServerMsg {
         log_id: Option<Id>,
         /// As a batch's: the server's module hash, `module` on the wire.
         module: Option<Vec<u8>>,
+        /// `docs/plan-auth.md` The rows are what a peer that is not whole
+        /// may see of the state at `seq`, and `hash` their state hash: the
+        /// peer holds a partition from here, and is paged with `upto`. On
+        /// the wire `partial: true`, absent otherwise.
+        partial: bool,
     },
     Ack {
         ids: Vec<Id>,
@@ -240,14 +267,18 @@ impl ClientMsg {
         match self {
             ClientMsg::Hello { sub, token, spec } => node(
                 "hello",
-                named(
-                    vec![
-                        ("since", int(sub.since)),
-                        ("mode", txt(if sub.mode == Mode::Whole { "whole" } else { "facts" })),
-                        ("token", token.as_deref().map(txt).unwrap_or(Value::Null)),
-                        ("spec", int(*spec)),
-                    ],
-                    &sub.log_id,
+                flagged(
+                    named(
+                        vec![
+                            ("since", int(sub.since)),
+                            ("mode", txt(if sub.mode == Mode::Whole { "whole" } else { "facts" })),
+                            ("token", token.as_deref().map(txt).unwrap_or(Value::Null)),
+                            ("spec", int(*spec)),
+                        ],
+                        &sub.log_id,
+                    ),
+                    "partial",
+                    sub.partial,
                 ),
             ),
             ClientMsg::Push { entries } => node("push", vec![("entries", Value::List(entries.iter().map(entry_value).collect()))]),
@@ -308,7 +339,35 @@ fn sub(m: &BTreeMap<FieldName, Value>) -> Result<Subscription, DecodeError> {
         since: int64(need(m, "since")?)?,
         mode,
         log_id: log_of(m)?,
+        partial: flag(m, "partial")?,
     })
+}
+
+// `docs/plan-auth.md` A flag that is `true` when present: absent is the one
+// encoding of `false`, so a frame without it is the bytes it was, and
+// `false` is refused as a second spelling.
+fn flagged<'a>(mut fields: Vec<(&'a str, Value)>, name: &'a str, on: bool) -> Vec<(&'a str, Value)> {
+    if on {
+        fields.push((name, Value::Bool(true)));
+    }
+    fields
+}
+
+fn flag(m: &BTreeMap<FieldName, Value>, name: &str) -> Result<bool, DecodeError> {
+    match m.get(name) {
+        None => Ok(false),
+        Some(Value::Bool(true)) => Ok(true),
+        Some(_) => bad(format!("{name} is true or absent")),
+    }
+}
+
+// `docs/plan-auth.md` A partial page's last sequence: `upto`, absent for a
+// whole peer's page.
+fn upto_field<'a>(mut fields: Vec<(&'a str, Value)>, upto: &Option<Seq>) -> Vec<(&'a str, Value)> {
+    if let Some(n) = upto {
+        fields.push(("upto", Value::Int(*n)));
+    }
+    fields
 }
 
 /// The `log` of a frame that may carry one: an id, or `None` where the
@@ -335,31 +394,35 @@ impl ServerMsg {
                 has_more,
                 log_id,
                 module,
+                upto,
             } => node(
                 "batch",
-                of_module(
-                    named(
-                        vec![
-                            (
-                                "items",
-                                Value::List(
-                                    items
-                                        .iter()
-                                        .map(|(n, e, f)| {
-                                            strct(vec![
-                                                ("seq", int(*n)),
-                                                ("entry", entry_value(e)),
-                                                ("facts", f.as_ref().map(facts_value).unwrap_or(Value::Null)),
-                                            ])
-                                        })
-                                        .collect(),
+                upto_field(
+                    of_module(
+                        named(
+                            vec![
+                                (
+                                    "items",
+                                    Value::List(
+                                        items
+                                            .iter()
+                                            .map(|(n, e, f)| {
+                                                strct(vec![
+                                                    ("seq", int(*n)),
+                                                    ("entry", entry_value(e)),
+                                                    ("facts", f.as_ref().map(facts_value).unwrap_or(Value::Null)),
+                                                ])
+                                            })
+                                            .collect(),
+                                    ),
                                 ),
-                            ),
-                            ("has_more", Value::Bool(*has_more)),
-                        ],
-                        log_id,
+                                ("has_more", Value::Bool(*has_more)),
+                            ],
+                            log_id,
+                        ),
+                        module,
                     ),
-                    module,
+                    upto,
                 ),
             ),
             ServerMsg::FactsFor { items } => node(
@@ -380,21 +443,26 @@ impl ServerMsg {
                 rows,
                 log_id,
                 module,
+                partial,
             } => node(
                 "snapshot",
-                of_module(
-                    named(
-                        vec![
-                            ("seq", int(*seq)),
-                            ("hash", Value::Bytes(hash[..].into())),
-                            (
-                                "rows",
-                                Value::Struct(Box::new(rows.iter().map(|(t, vs)| (t.clone(), Value::List(vs[..].into()))).collect())),
-                            ),
-                        ],
-                        log_id,
+                flagged(
+                    of_module(
+                        named(
+                            vec![
+                                ("seq", int(*seq)),
+                                ("hash", Value::Bytes(hash[..].into())),
+                                (
+                                    "rows",
+                                    Value::Struct(Box::new(rows.iter().map(|(t, vs)| (t.clone(), Value::List(vs[..].into()))).collect())),
+                                ),
+                            ],
+                            log_id,
+                        ),
+                        module,
                     ),
-                    module,
+                    "partial",
+                    *partial,
                 ),
             ),
             ServerMsg::Ack { ids, seqs, log_id } => node(
@@ -453,6 +521,7 @@ impl ServerMsg {
                 has_more: boolean(need(m, "has_more")?)?,
                 log_id: log_of(m)?,
                 module: module_of(m)?,
+                upto: m.get("upto").map(int64).transpose()?,
             },
             "facts" => ServerMsg::FactsFor {
                 items: list(
@@ -475,6 +544,7 @@ impl ServerMsg {
                 },
                 log_id: log_of(m)?,
                 module: module_of(m)?,
+                partial: flag(m, "partial")?,
             },
             "ack" => ServerMsg::Ack {
                 ids: list(ident, need(m, "ids")?)?,
@@ -531,6 +601,8 @@ pub struct Snapshot {
     pub rows: BTreeMap<TableName, Vec<Row>>,
     pub log_id: Option<Id>,
     pub module: Option<Vec<u8>>,
+    /// `docs/plan-auth.md` The rows are a partition: what the peer may see.
+    pub partial: bool,
 }
 
 impl Snapshot {
@@ -539,7 +611,14 @@ impl Snapshot {
     /// has no such table; each element that is not a struct dropped, and a
     /// table left with no rows not named — as [`ServerMsg::decode_for`],
     /// which is handed rows and not tables, never names one.
-    pub fn of_values(schema: &Schema, seq: Seq, rows: BTreeMap<TableName, Vec<Value>>, log_id: Option<Id>, module: Option<Vec<u8>>) -> Snapshot {
+    pub fn of_values(
+        schema: &Schema,
+        seq: Seq,
+        rows: BTreeMap<TableName, Vec<Value>>,
+        log_id: Option<Id>,
+        module: Option<Vec<u8>>,
+        partial: bool,
+    ) -> Snapshot {
         let rows = rows
             .into_iter()
             .map(|(t, vs)| {
@@ -558,7 +637,13 @@ impl Snapshot {
             })
             .filter(|(_, rs): &(TableName, Vec<Row>)| !rs.is_empty())
             .collect();
-        Snapshot { seq, rows, log_id, module }
+        Snapshot {
+            seq,
+            rows,
+            log_id,
+            module,
+            partial,
+        }
     }
 }
 
@@ -602,7 +687,19 @@ impl ServerMsg {
         Ok(match ServerMsg::from_value(&v).map_err(|e| e.to_string())? {
             // What is left under `rows` is only what is not a struct, which
             // adoption drops.
-            ServerMsg::SnapshotOf { seq, log_id, module, .. } => Received::Snapshot(Snapshot { seq, rows, log_id, module }),
+            ServerMsg::SnapshotOf {
+                seq,
+                log_id,
+                module,
+                partial,
+                ..
+            } => Received::Snapshot(Snapshot {
+                seq,
+                rows,
+                log_id,
+                module,
+                partial,
+            }),
             msg => Received::Msg(msg),
         })
     }
@@ -830,6 +927,7 @@ impl Client {
                 since: self.replica.cursor,
                 mode: self.mode,
                 log_id: self.replica.log_id,
+                partial: self.replica.partial,
             },
             token: self.token.clone(),
             spec: crate::ir::SPEC_VERSION,
@@ -893,9 +991,21 @@ impl Client {
                 has_more,
                 log_id,
                 module,
+                upto,
             } => {
                 self.heard_module(module);
                 let r = &mut self.replica;
+                // `docs/plan-auth.md` A page of the other kind than the
+                // replica holds — a partial one for a whole replica, or the
+                // reverse — is nothing it can apply: a server starts every
+                // connection that changes kind with a snapshot, and this is
+                // a page from before it.
+                if upto.is_some() != r.partial {
+                    return;
+                }
+                if let Some(n) = upto {
+                    r.through = r.through.max(n);
+                }
                 // A peer that did not know which log it holds learns it
                 // from the first page (Round 4). One that did is never sent
                 // a page of another: the server answered its `Hello` with a
@@ -921,9 +1031,14 @@ impl Client {
             // rows read as `decode_for` reads them, then adopted
             // ([`Client::recv_snapshot`]).
             ServerMsg::SnapshotOf {
-                seq, rows, log_id, module, ..
+                seq,
+                rows,
+                log_id,
+                module,
+                partial,
+                ..
             } => {
-                let s = Snapshot::of_values(&self.schema, seq, rows, log_id, module);
+                let s = Snapshot::of_values(&self.schema, seq, rows, log_id, module, partial);
                 self.recv_snapshot(s);
             }
             ServerMsg::Ack { ids, seqs, log_id } => {
@@ -992,7 +1107,13 @@ impl Client {
     /// put in the store here, not as they are decoded: whether this peer is
     /// behind is said by the frame's `module`, which follows its `rows`.
     pub fn recv_snapshot(&mut self, s: Snapshot) {
-        let Snapshot { seq, rows, log_id, module } = s;
+        let Snapshot {
+            seq,
+            rows,
+            log_id,
+            module,
+            partial,
+        } = s;
         self.heard_module(module);
         self.replica.settle();
         let behind = self.replica.behind;
@@ -1012,6 +1133,9 @@ impl Client {
         opened.natives = r.natives.clone();
         opened.log_id = log_id;
         opened.behind = r.behind;
+        // A partition from here, or the log whole (`docs/plan-auth.md`).
+        opened.partial = partial;
+        opened.through = seq;
         let mut told = std::mem::take(&mut r.rejections);
         told.append(&mut opened.rejections);
         opened.rejections = told;
@@ -1180,6 +1304,16 @@ struct Conn {
     /// confirmed is of that log, and it is sent this one's snapshot at the
     /// head before anything else (§12.4, Round 4).
     elsewhere: bool,
+    /// `docs/plan-auth.md` Some table's `visible` rule hides rows from
+    /// this identity: it is sent what it may see, by facts, filtered, with
+    /// `upto` on every page — never an intent to replay.
+    partial: bool,
+    /// A partial connection that has not yet been sent its snapshot: what
+    /// it may see can have moved since it last connected without any
+    /// entry saying so — a role granted or revoked by the configuration, a
+    /// rule changed by a new module — so every connection of a partial
+    /// identity starts from a snapshot of what it may see now.
+    fresh: bool,
 }
 
 /// An authority's end of every connection (`Ark.Protocol.Server`).
@@ -1287,6 +1421,14 @@ impl<M: Machine> Server<M> {
                     // having names — and an authority whose log nobody
                     // named are both served as they always were.
                     let elsewhere = matches!((sub.log_id, self.authority.log.id()), (Some(theirs), Some(ours)) if theirs != ours);
+                    // `docs/plan-auth.md` Whole or partial is decided by the
+                    // rules and this identity, never asked for. A peer that
+                    // held a partition and is whole now is sent the snapshot
+                    // at the head, as one of another log is: paged, it would
+                    // take intents onto a store missing rows.
+                    let first = !self.conns.contains_key(&c);
+                    let partial = !rules::whole_to(&self.authority.schema, who.who());
+                    let elsewhere = elsewhere || (sub.partial && !partial);
                     let peer = live::Peer {
                         conn: c,
                         room: who.user.clone(),
@@ -1299,6 +1441,8 @@ impl<M: Machine> Server<M> {
                             mode: sub.mode,
                             sent: sub.since,
                             elsewhere,
+                            partial,
+                            fresh: partial && first,
                         },
                     );
                     let post = live::arrive(&self.machine, &mut self.rooms, peer);
@@ -1316,6 +1460,7 @@ impl<M: Machine> Server<M> {
                         .iter()
                         .any(|(to, m)| *to == c && matches!(m, ServerMsg::Batch { .. } | ServerMsg::SnapshotOf { .. }));
                     if self.module.is_some() && !paged {
+                        let upto = partial.then(|| self.authority.log.head_seq());
                         self.send(
                             c,
                             ServerMsg::Batch {
@@ -1323,6 +1468,7 @@ impl<M: Machine> Server<M> {
                                 has_more: false,
                                 log_id: self.authority.log.id(),
                                 module: self.module.clone(),
+                                upto,
                             },
                         );
                     }
@@ -1383,10 +1529,23 @@ impl<M: Machine> Server<M> {
                 self.fanout();
             }
             ClientMsg::NeedFacts { seqs } => {
-                let items = seqs
-                    .iter()
-                    .filter_map(|n| self.authority.log.entries.get(n).map(|(_, f)| (*n, f.clone())))
-                    .collect();
+                // A partial peer asks for none — it is sent every fact it may
+                // see — and one that asks anyway is answered with those and
+                // no others (`docs/plan-auth.md`).
+                let conn = &self.conns[&c];
+                let items = if conn.partial {
+                    let who = conn.who.clone();
+                    seqs.iter()
+                        .filter_map(|n| {
+                            let (_, f) = self.authority.log.entries.get(n)?;
+                            Some((*n, self.facts_for(*n, f, &who)))
+                        })
+                        .collect()
+                } else {
+                    seqs.iter()
+                        .filter_map(|n| self.authority.log.entries.get(n).map(|(_, f)| (*n, f.clone())))
+                        .collect()
+                };
                 self.send(c, ServerMsg::FactsFor { items });
             }
             ClientMsg::NeedClosures { hashes } => {
@@ -1408,10 +1567,24 @@ impl<M: Machine> Server<M> {
                 // names no log is compared, as it always was; "another" is
                 // read as a `hello`'s is, both named and not the same.
                 let elsewhere = matches!((log_id, self.authority.log.id()), (Some(theirs), Some(ours)) if theirs != ours);
+                let conn = &self.conns[&c];
+                let a = &self.authority;
                 let at = if elsewhere {
                     None
+                } else if conn.partial {
+                    // `docs/plan-auth.md` A partial peer holds what it may
+                    // see, and is answered from the partition digest of the
+                    // state at its sequence: the authority's store at the
+                    // head, and below it the state the facts reach — O(the
+                    // partition) per verify, and verifies are rare.
+                    let who = conn.who.who();
+                    if seq == a.log.head_seq() {
+                        Some(rules::partition_hash(&a.store, who))
+                    } else {
+                        a.log.state_at(seq).map(|st| rules::partition_hash(&st, who))
+                    }
                 } else {
-                    self.authority.log.hash_at(seq, &self.authority.store)
+                    a.log.hash_at(seq, &a.store)
                 };
                 let (ok, unknown) = match at {
                     Some(h) => (h == hash, false),
@@ -1468,13 +1641,142 @@ impl<M: Machine> Server<M> {
     /// quiet server sat at the horizon until somebody else spoke. The page
     /// is the one it would have been sent next; only which turn carries it
     /// moved.
+    ///
+    /// **A connection that is not whole** (`docs/plan-auth.md`) is served
+    /// otherwise, and only it: its first message is the snapshot at the
+    /// head of what it may see, and after that every page is
+    /// [`Server::partial_page`]'s. A whole one costs exactly what it did.
     fn fanout(&mut self) {
-        let conns: Vec<(ConnId, Mode, Seq, bool)> = self.conns.iter().map(|(c, cn)| (*c, cn.mode, cn.sent, cn.elsewhere)).collect();
-        for (c, md, sent, elsewhere) in conns {
+        let conns: Vec<(ConnId, Mode, Seq, bool, bool)> = self
+            .conns
+            .iter()
+            .map(|(c, cn)| (*c, cn.mode, cn.sent, cn.elsewhere, cn.partial))
+            .collect();
+        for (c, md, sent, elsewhere, partial) in conns {
+            if partial {
+                self.fan_partial(c);
+                continue;
+            }
             let mut next = self.fan_one(c, md, sent, elsewhere);
             while let Some(from) = next {
                 next = self.fan_one(c, md, from, false);
             }
+        }
+    }
+
+    /// `docs/plan-auth.md` One message to a partial connection, if it is
+    /// owed one: the snapshot at the head of what it may see — on its first
+    /// fan-out, or wherever a whole one would be sent a snapshot — or the
+    /// next page, filtered. A page is sent even when no item survives the
+    /// filter: its `upto` is what moves the peer's cursor past sequences it
+    /// may see nothing of, so its cursor is always the last sequence it was
+    /// told about and a `Verify` there is answered for that state.
+    fn fan_partial(&mut self, c: ConnId) {
+        let Some(conn) = self.conns.get(&c) else { return };
+        let (sent, who, snapshot) = (conn.sent, conn.who.clone(), conn.fresh || conn.elsewhere);
+        let a = &self.authority;
+        let head = a.log.head_seq();
+        let msg = if snapshot || sent > head || sent < a.log.horizon() {
+            let w = who.who();
+            let rows = rules::visible_rows(&a.store, w)
+                .into_iter()
+                .map(|(t, rs)| (t, rs.into_iter().map(Row::into_value).collect()))
+                .collect();
+            ServerMsg::SnapshotOf {
+                seq: head,
+                hash: rules::partition_hash(&a.store, w),
+                rows,
+                log_id: a.log.id(),
+                module: self.module.clone(),
+                partial: true,
+            }
+        } else if sent == head {
+            return;
+        } else {
+            let Page::Entries(items, more) = a.page(sent, BATCH_LIMIT) else {
+                unreachable!("a cursor at or above the horizon is paged")
+            };
+            let upto = items.last().map_or(sent, |(n, _, _)| *n);
+            ServerMsg::Batch {
+                items: self.partial_page(items, &who),
+                has_more: more,
+                log_id: a.log.id(),
+                module: self.module.clone(),
+                upto: Some(upto),
+            }
+        };
+        let advanced = match &msg {
+            ServerMsg::SnapshotOf { seq, .. } => *seq,
+            ServerMsg::Batch { upto, .. } => upto.unwrap_or(sent),
+            _ => sent,
+        };
+        self.send(c, msg);
+        if let Some(conn) = self.conns.get_mut(&c) {
+            conn.sent = advanced;
+            conn.elsewhere = false;
+            conn.fresh = false;
+        }
+    }
+
+    /// `docs/plan-auth.md` A page of the log as `who` may see it: each
+    /// entry's facts through [`rules::filter_facts`], between the state
+    /// before it and the state after it, and an entry none of whose facts
+    /// survive left out — unless it is `who`'s own, which is sent with
+    /// whatever survives so that the intent it confirms leaves pending.
+    /// Another person's entry goes as its envelope: its arguments and
+    /// autos are theirs, and a partial peer never runs an intent.
+    ///
+    /// The states are the authority's store at the head with the facts
+    /// above each entry taken back, in overlays over it, newest first: a
+    /// page at the head — every page but a peer's catching up, which a
+    /// partial peer never does, since it starts from a snapshot — takes
+    /// back nothing but its own entries.
+    fn partial_page(&self, items: Vec<(Seq, Entry, Facts)>, who: &Identity) -> Vec<(Seq, Entry, Option<Facts>)> {
+        let Some(last) = items.last().map(|(n, _, _)| *n) else { return vec![] };
+        let a = &self.authority;
+        let sch = &a.schema;
+        let mut after = Overlay::new(&a.store);
+        for (_, (_, f)) in a.log.entries.range(last + 1..).rev() {
+            for c in f.iter().rev() {
+                after.apply_change(&rules::undo(&widened(sch, c)));
+            }
+        }
+        let mut out = Vec::with_capacity(items.len());
+        for (n, e, f) in items.into_iter().rev() {
+            let back: Vec<Change> = f.iter().rev().map(|c| rules::undo(&widened(sch, c))).collect();
+            let seen = {
+                let mut before = Overlay::new(&after);
+                before.apply_changes(&back);
+                rules::filter_facts(sch, &before, &after, &f, who.who())
+            };
+            after.apply_changes(&back);
+            let own = e.actor == who.user;
+            if seen.is_empty() && !own {
+                continue;
+            }
+            let e = if own {
+                e
+            } else {
+                Entry {
+                    args: Args::new(),
+                    autos: Args::new(),
+                    ..e
+                }
+            };
+            out.push((n, e, Some(seen)));
+        }
+        out.reverse();
+        out
+    }
+
+    // One entry's facts as `who` may see them, between the states the log's
+    // facts reach before and after it: what a partial peer asking
+    // `need_facts` is answered with.
+    fn facts_for(&self, n: Seq, f: &Facts, who: &Identity) -> Facts {
+        let a = &self.authority;
+        match (a.log.state_at(n - 1), a.log.state_at(n)) {
+            (Some(before), Some(after)) => rules::filter_facts(&a.schema, &before, &after, f, who.who()),
+            _ => vec![],
         }
     }
 
@@ -1508,6 +1810,7 @@ impl<M: Machine> Server<M> {
                             rows,
                             log_id: sn.log_id,
                             module: self.module.clone(),
+                            partial: false,
                         },
                         sn.seq,
                     )
@@ -1524,6 +1827,7 @@ impl<M: Machine> Server<M> {
                             has_more: more,
                             log_id: a.log.id(),
                             module: self.module.clone(),
+                            upto: None,
                         },
                         last,
                     )
@@ -1577,6 +1881,7 @@ mod tests {
                 since: 0,
                 mode: Mode::Whole,
                 log_id: Some(log_b),
+                partial: false,
             },
             token: Some("alice".into()),
             spec: crate::ir::SPEC_VERSION,

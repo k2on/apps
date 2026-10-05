@@ -322,3 +322,14 @@ pub fn partition_hash(st: &dyn Store, who: Who) -> Vec<u8> {
         .collect();
     state_hash_of(digests)
 }
+
+/// A change undone: the transition back, exact because a fact carries the
+/// whole row on each side — what taking an entry's facts back off a later
+/// state applies, newest first.
+pub fn undo(c: &Change) -> Change {
+    match c {
+        Change::Add(t, r) => Change::Remove(t.clone(), r.clone()),
+        Change::Remove(t, r) => Change::Add(t.clone(), r.clone()),
+        Change::Edit(t, old, new) => Change::Edit(t.clone(), new.clone(), old.clone()),
+    }
+}
