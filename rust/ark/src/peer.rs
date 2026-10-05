@@ -229,9 +229,11 @@ fn runs_as(
 /// Whether two stores hold the same rows. Not `==`, which also tells a
 /// table never written from one whose rows were all taken out — a
 /// difference no read and no hash can see, and one undoing an intent that
-/// wrote a table's first row leaves behind.
+/// wrote a table's first row leaves behind. A table the two share (one
+/// `Arc`, D7.3) is the same rows and is not read: a view compared with its
+/// confirmed store reads only the tables it has written.
 fn same_rows(a: &MemoryStore, b: &MemoryStore) -> bool {
-    a.schema() == b.schema() && a.schema().tables().all(|t| a.scan(&t.name) == b.scan(&t.name))
+    a.schema() == b.schema() && a.schema().tables().all(|t| a.shares(b, &t.name) || a.scan(&t.name) == b.scan(&t.name))
 }
 
 /// A change undone: the transition back, exact because a change a write

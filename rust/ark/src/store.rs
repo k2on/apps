@@ -345,11 +345,16 @@ impl Row {
 }
 
 /// Equal when every column is: the same names, each holding an equal
-/// value, whatever order either holds them in.
+/// value, whatever order either holds them in. Two rows holding the same
+/// values (one `Arc`) under the same columns are equal without reading a
+/// value: a row the view applied and the confirmed store then applied from
+/// the same record is one row, which is what lets a debug build compare a
+/// view with its confirmed store at the cost of the keys and not of every
+/// value (`docs/plan-alone.md`, "Not verified").
 impl PartialEq for Row {
     fn eq(&self, other: &Row) -> bool {
         if Arc::ptr_eq(&self.cols, &other.cols) || self.cols == other.cols {
-            return self.vals == other.vals;
+            return Arc::ptr_eq(&self.vals, &other.vals) || self.vals == other.vals;
         }
         self.len() == other.len() && self.iter().all(|(k, v)| other.get(k) == Some(v))
     }

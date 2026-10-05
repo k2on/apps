@@ -222,15 +222,35 @@ sans-io hub and confirmed in 405 ms.
 
 **Not verified, and for the coordinator.**
 
-- Authoring alone in a *debug* build grows with the library — 0.5 ms
-  a mutate at a hundred songs and 10 at a thousand through `harken-peer`,
-  where a peer of a server is flat at 1.8 — and the same binary in release
-  is flat at 1.7 ms, the same as with a server. The alone log is not it:
-  without the log written, the debug numbers are the same. Most likely it
-  is the debug-only checks on the path a peer alone takes on every mutate
-  — the view compared with the confirmed store whole once nothing is
-  pending, the record run again over the authority's store — though that
-  was not profiled; it is why scenario 19 takes half a minute.
+- Authoring alone in a *debug* build grows with the library, and it is
+  the one debug check. Measured after plan-db D7.3 through `harken-peer`
+  alone, a mutate is 5.3, 6.0 and 7.5 ms at 100, 1,000 and 2,000 songs
+  (this bullet's first reading, 0.5 ms at a hundred and 10 at a thousand,
+  was taken before D7.3, when that comparison read every table). Of that, about
+  1.7 ms is fsync, flat, which is what a release build measures, and the
+  rest is debug CPU, attributed by turning each check off in a local
+  build and by callgrind over a thousand mutates:
+  - **The view compared with the confirmed store once nothing is
+    pending** (`Replica::advance`) is all of the growth: without it the
+    same run is 5.3, 5.6 and 5.2 ms. `MemoryStore`'s `==` already takes
+    a table the two share by its `Arc` since D7.3, so the tables it reads
+    are the ones the view has written — and a peer alone's view has
+    written every table `add_song` writes and keeps its copy of each
+    (D7.3's rule), so none of them is shared. A row the view applied and
+    the confirmed store applied from the same record is one row, and
+    `Row`'s `==` now says so by its `Arc`; that took the values out of
+    the comparison and left the walk of two maps and their keys, which is
+    most of it, so the number did not move. Making it not grow means
+    comparing only the keys written since the last comparison, which is
+    a different check, and was not done.
+  - **The record run again** — over the authority's store in `append_as`
+    and over the confirmed store when the intent is confirmed by it — is
+    two more runs of `add_song` a mutate, about 1.5 ms of it, and flat:
+    without both, 3.8, 4.9 and 6.4 ms.
+  Scenario 19's authoring row in a whole `cargo test --workspace` is
+  16,590 ms before the two fast paths (`Row`'s values, and the peer's
+  `same_rows` skipping a shared table) and 15,800 after: within noise, as
+  the attribution says it should be.
 - No kill in scenario 17 landed between the two writes of a join — the
   window is a few file removals wide. The unit test walks a stop after every
   write of the join; the fleet shows kills before the join and after it
