@@ -20,8 +20,27 @@ gives the clients the other half — how to get a token to send.
   never forgotten: an entry authored under an expired or revoked one is still
   its owner's (`Auth::owns`).
 - **dev auth**: `Mode::Dev` signs anyone in as the name they give — at once
-  when the login URL carries `user=`, through a one-field form otherwise.
-  `Mode::announce()` is the sentence a server prints at startup, every time.
+  when the login URL carries `user=`, through a one-field form otherwise —
+  and `name:role,role` as that name holding those roles (`alice:library`,
+  read as the engine's own dev auth reads a token,
+  `ark::protocol::dev_identity`). `Auth::announce()` is what a server prints
+  at startup, every time: the mode's sentence (dev auth's names the
+  `name:role,role` form) and every role the configuration grants.
+- **roles** (`docs/plan-auth.md`): a claim about a person the log does not
+  hold, which a table's `writable` and `visible` rules ask. A login holds
+  the roles it was issued with — kept on its session as `roles`, absent when
+  none: the server's own scanner's by construction, a dev login's from its
+  name — and the ones `Auth::with_roles([(role, [account id…])])` grants
+  its account from configuration, merged at every ask and never written
+  into a session, so a restart with other configuration grants or revokes
+  for every login at once. `Account.roles` carries them to the client in
+  the exchange's and `/auth/me`'s answers (absent when none, so a login
+  remembered before roles reads as one holding none); a client hands them
+  to its peer (`ark_client::Peer::set_roles`) to hold its own writes to
+  the rules before pushing them, and the server holds every entry to the
+  roles it asks for the connection whatever the client says.
+  `auth.authenticator()` answers `Identity { user, session, roles }`. A
+  provider's groups claim is not read.
 - **OIDC**: authorization code with PKCE, as a confidential client;
   discovery from the issuer; the secret read from a file
   (`oidc::read_secret`, `Provider::discover_with_secret_file`) — a systemd
@@ -56,11 +75,20 @@ let mode = match issuer {
     Some(iss) => Mode::Oidc(Provider::discover_with_secret_file(&iss, &client_id, &secret_file, &["openid", "profile", "email"])?),
     None => Mode::Dev, // only when asked for, and said loudly
 };
-let auth = Arc::new(Auth::new(sessions, mode, &public_url).allow_redirect("myapp://"));
+let auth = Arc::new(
+    Auth::new(sessions, mode, &public_url)
+        .allow_redirect("myapp://")
+        // role → the account ids holding it: the provider's `sub`, or a dev name
+        .with_roles([("library", vec!["scanner"]), ("admin", vec!["a1b2-sub"])]),
+);
 // ark-server: `.auth(auth.clone())` mounts the routes and asks
 // `auth.authenticator()` at every Hello.
 // A peer the server runs itself signs in like everyone else:
-let scanner_login = auth.issue(&ark_auth::Account { id: "library".into(), ..Default::default() })?;
+let scanner_login = auth.issue(&ark_auth::Account {
+    id: "library".into(),
+    roles: vec!["library".into()], // by construction: kept on its session
+    ..Default::default()
+})?;
 ```
 
 ## A client
@@ -99,7 +127,9 @@ if let Some(code) = ark_auth::web::take_code() {
 
 `cargo test -p ark-auth` runs the session store (expiry, revocation, a file
 across a reopen holding no token), the redirect rules, a code redeemed once,
-the authenticator, and the whole dev login over real HTTP: login with no
+the authenticator, roles (a login's own and the configured ones merged in
+the exchange and at `Hello`, the configuration moved under the same session
+store, dev auth's `name:role,role`), and the whole dev login over real HTTP: login with no
 browser, `whoami`, two logins as two sessions, logout, a code refused the
 second time and refused a foreign redirect, the dev form. ark-server's
 `tests/auth.rs` takes the token onto the sync socket.

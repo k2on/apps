@@ -788,6 +788,98 @@ fn perf_g_authority_and_fanout() {
     }
 }
 
+// (g′) The partial fan-out (`docs/plan-auth.md`) --------------------------------------
+
+/// The demo with a `visible` rule on `playlist`: its owner's (`user_id` is
+/// `Me`), or — the lookup — its owner's or one with a `public` item.
+fn ruled(lookup: bool) -> Fixture {
+    use ark::ir::{CmpOp, Expr, Pred};
+    let mut d = fixture();
+    let mine = Pred::Cmp("user_id".into(), CmpOp::Eq, Expr::CtxUser);
+    let public = Pred::Exists(
+        "item".into(),
+        "playlist_id".into(),
+        Box::new(Pred::Cmp("track_id".into(), CmpOp::Eq, Expr::Lit(Value::text("public")))),
+    );
+    let rule = if lookup { Pred::Any(vec![mine, public]) } else { mine };
+    for t in d.schema.tables.iter_mut() {
+        if t.name == "playlist" {
+            *t = t.clone().with_rules(Some(rule.clone()), None);
+        }
+    }
+    d
+}
+
+/// (g)'s fan-out with every connection partial: one entry pushed to C
+/// connections each served what a `visible` rule admits — the facts
+/// filtered between the states before and after the entry, and for the
+/// lookup the playlist the item names asked again on both sides — and
+/// what each connection costs per fact. The connections are the log's
+/// author, so every fact is theirs to see: the filter's whole cost, and
+/// the most a page can carry.
+#[test]
+#[ignore]
+fn perf_g_partial_fanout() {
+    header("(g′) partial fan-out of one pushed entry to C connections (docs/plan-auth.md)");
+    eprintln!("{:<44} {:>7} {:>10} {:>10} {:>12}", "shape", "C", "recv µs", "encode µs", "per conn·fact");
+    for lookup in [false, true] {
+        let d = ruled(lookup);
+        for c in [10i64, 40, 160] {
+            for s in [500u64, 8000] {
+                let (a, log) = d.log(10, s);
+                let mut srv = Server::open(trusting(), open_access(), Silent, a);
+                for conn in 0..c {
+                    srv.recv(conn, hello(log.len() as Seq, Mode::Whole));
+                }
+                let joined = srv.take_outgoing();
+                assert!(
+                    joined.iter().all(|(_, m)| matches!(m, ServerMsg::SnapshotOf { partial: true, .. })),
+                    "every connection is partial, and starts from its snapshot"
+                );
+                let ctx = Ctx::new("alice", "dev");
+                let mut author = d.replica(true);
+                for (n, e, f) in &log {
+                    author.receive_with(*n, e.clone(), f.clone());
+                }
+                author.settle();
+                let reps = 20u64;
+                let (mut recv, mut enc) = (Duration::ZERO, Duration::ZERO);
+                let (mut bytes, mut facts) = (0, 0);
+                for i in 0..reps {
+                    let e = d.add(&mut author, &ctx, 3_000_000 + i, i % 10, 600_000 + i);
+                    author.pending.clear();
+                    let t = Instant::now();
+                    srv.recv(0, ClientMsg::Push { entries: vec![e] });
+                    let out = srv.take_outgoing();
+                    let t1 = Instant::now();
+                    for (_, m) in &out {
+                        if let ServerMsg::Batch { items, .. } = m {
+                            facts += items.iter().map(|(_, _, f)| f.as_ref().map_or(0, Vec::len)).sum::<usize>();
+                        }
+                        bytes += std::hint::black_box(canon::encode(&m.to_value())).len();
+                    }
+                    enc += t1.elapsed();
+                    recv += t1 - t;
+                }
+                let (recv, enc) = (recv / reps as u32, enc / reps as u32);
+                let per_fact = (facts as f64 / (reps as f64 * c as f64)).max(1.0);
+                eprintln!(
+                    "{:<44} {:>7} {:>10.1} {:>10.1} {:>12.2}",
+                    format!(
+                        "{}, log of {s}; {} B per push",
+                        if lookup { "Me or a lookup" } else { "Me" },
+                        bytes / reps as usize
+                    ),
+                    c,
+                    us(recv),
+                    us(enc),
+                    (us(recv) + us(enc)) / c as f64 / per_fact
+                );
+            }
+        }
+    }
+}
+
 // (h) The wire ---------------------------------------------------------------------
 
 /// A page of entries as a `Batch` frame: encoded and decoded, with facts
