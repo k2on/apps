@@ -22,7 +22,7 @@ vectors of the day they do.
 |---|---|---|
 | 1 | `value.rs` | the eight run-time values and the one total order over them |
 | 1.3 | `canon.rs` | the canonical encoding: RFC 8949 §4.2.1 deterministic CBOR plus the mapping; the decoder that refuses anything else |
-| 2 | `schema.rs` | tables, columns, indexes, references; the derived relationships; well-formedness |
+| 2 | `schema.rs` | tables, columns, indexes, references; the derived relationships; well-formedness; a table's rules (`docs/plan-auth.md`) — `visible` and `writable`, each a predicate over the table's own columns with `Me` (the context's user), `Pred::Role` and the one lookup `Pred::Exists` (some row of a table referencing this one, admitted by that table's own predicate), absent for `Everyone` and then not encoded, so a module that declares none is the bytes it was |
 | 3 | `ir/mod.rs` | the function language: mutators, queries, helpers, guards and providers; routers (§3.10); input fields and their checks (§3.11); statements — the three table writes among them — and expressions; the standard library's names |
 | 3.3 | `ir/mod.rs` (`Plan`) | a query is a plan and nothing else: source (a table or a group), filter, lookups, related plans, having, projection, order, limit (`docs/plan-v4.md` §1.3) |
 | 4 | `store.rs` | the store as a value: `get`, `scan`, `put`, `delete`, and the three writes a body makes of them — insert (§4.3a), upsert (§4.3b), update (§4.3c); constraints as refusals; what a write reports. Its indexes, each a hint a read is served by and none a fact about the rows: per declared index and reference column, the rows under each value, read by equalities, a range and an order (`scan_where_eq`, `scan_ordered`; `docs/plan-perf.md` R1, R6); and per text index, the rows under each trigram of a column's value folded by the pinned `lower`, which serves `Pred::Has` as the intersection of the needle's trigrams' postings (`scan_where_text`, `docs/plan-db.md` D4). A posting names a row by the ordinal its table numbered it with, and a read through an index is put in key order (`docs/plan-db.md` D7.2); each table is shared between a store and its clone until one of them writes it (D7.3) |
@@ -144,11 +144,11 @@ by it.
 |---|---|---|
 | `codec/` | a value and its canonical bytes | §1.3 |
 | `order/` | values and their sorted order | §1.2 |
-| `verify/` | a module and whether it verifies | §9 |
+| `verify/` | a module and whether it verifies; `rules-ok` the demo with a rule of every form | §9 |
 | `eval/` | a module, a store, a mutator applied step by step — the changes, the rows, the hash; the input checks as verdicts; the form validator | §6, §8 |
 | `hash/` | a store and its hash, with the module it belongs to; `leaves-and-digests` also every row's leaf and every table's digest, so the construction is checked step by step | §8 |
 | `rebase/` | `three-peers`: a scripted session of replicas and an authority, asserted step by step; `fleet-seed-N`: a seeded simulation's script and the hash every replica must reach after settle | §10, §11, §15 |
-| `module/` | a module as a value, its canonical bytes, its hash; decode of encode is the identity | §7 |
+| `module/` | a module as a value, its canonical bytes, its hash; decode of encode is the identity. `rules`: the demo with a rule of every form declared (`docs/plan-auth.md`) | §7 |
 | `protocol/` | every frame as a value and its bytes; decode of encode is the identity | §12 |
 | `views/` | a query of the vector's own module (`query`, and its `plan` as the module writes it), the context and arguments it is read with, `store_before` and the answer at hydrate (`rows_before`); then `batches` of changes, and after each batch the `patches` and the answer (`rows`). One file per plan feature: a projection, a having that admits a node when a child arrives, a group source, a lookup chain, a related plan on a non-key column, an expression order key under a limit, a related tree three deep, and the two v3 plans (`top-two-by-pos`, `playlist-with-items`) | §13 |
 

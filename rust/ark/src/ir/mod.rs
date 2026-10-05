@@ -251,7 +251,11 @@ pub enum Expr {
     Arg(String),
     Auto(String),
     Var(Sym),
-    /// The user the authority verified for the entry's connection.
+    /// The user the authority verified for the entry's connection. In a
+    /// table's rule (`docs/plan-auth.md`) it is `Me`: the identity the rule
+    /// is asked about — the author, for `writable`; the peer being served,
+    /// for `visible`. One expression for both, because they are the same
+    /// user the authenticator named at `Hello`.
     CtxUser,
     /// The login the entry was authored under.
     CtxSession,
@@ -537,6 +541,22 @@ pub enum Pred {
     /// a scan, as any filter. On the wire `phas`, written only where used,
     /// so no existing plan's bytes move.
     Has(FieldName, Expr),
+    /// `docs/plan-auth.md` A rule's leaf: the identity a rule is asked
+    /// about holds this role. A role is a claim the authenticator makes
+    /// (`protocol::Identity::roles`), never a row: granting one in the log
+    /// would need a rule about who may grant, which is a role. Only in a
+    /// table's rule ([`crate::schema::Table::visible`], `writable`), never
+    /// in a plan — the verifier refuses it there (`RuleLeafInPlan`). On the
+    /// wire `prole`, written only where used.
+    Role(String),
+    /// `docs/plan-auth.md` A rule's one lookup form: some row of `table`
+    /// whose reference column `column` names this row — `playlist_member`
+    /// rows by `playlist_id` — is admitted by the predicate, which is over
+    /// that table's own columns and may itself use `Me` and roles but no
+    /// further lookup. Read through the reference index a store keeps on
+    /// every reference column, so it costs the referencing rows of one
+    /// parent. Only in a rule, as `Role` is; on the wire `pexists`.
+    Exists(TableName, FieldName, Box<Pred>),
 }
 
 /// §3.4 The standard library, by name; `Ark.Std` is its meaning.

@@ -146,6 +146,9 @@ pub enum Complaint {
     NoRowBinder,
     /// `members` on a plan whose source is not a group.
     MembersWithoutGroup,
+    /// `docs/plan-auth.md` A role or a lookup of a table's rule in a plan's
+    /// filter: those are asked of an identity, and a read has none.
+    RuleLeafInPlan,
 }
 
 /// Verify a module. On success, the module as it is to be hashed and run:
@@ -1036,6 +1039,8 @@ fn pred_exprs<'a>(p: &'a Pred, out: &mut Vec<&'a Expr>) {
         Pred::All(ps) | Pred::Any(ps) => ps.iter().for_each(|q| pred_exprs(q, out)),
         Pred::Not(q) => pred_exprs(q, out),
         Pred::Has(_, e) => out.push(e),
+        Pred::Role(_) => {}
+        Pred::Exists(_, _, q) => pred_exprs(q, out),
     }
 }
 
@@ -1078,6 +1083,9 @@ fn pred_ok(g: &G, t: &Table, p: &Pred) -> Check_<()> {
             }
             expect(g, &format!("has on {c}"), &Ty::Text, e)
         }
+        // `docs/plan-auth.md` A rule's leaves are a table's, asked about an
+        // identity; a plan is asked about a store, and has none to ask.
+        Pred::Role(_) | Pred::Exists(..) => err(Complaint::RuleLeafInPlan),
     }
 }
 

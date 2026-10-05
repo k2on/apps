@@ -382,6 +382,30 @@ column, the trigrams of its folded value (`docs/plan-db.md` D4): it serves
 `c.has(..)`, says nothing about the rows, and moves the module's hash and
 no mutator's.
 
+A table may say who sees its rows and who writes them (`docs/plan-auth.md`):
+
+```rust
+columns()
+    // …the columns, the key, the indexes…
+    .visible(Self::user_id.is(Me).or(exists(PlaylistMember::playlist_id, PlaylistMember::user_id.is(Me))))
+    .writable(Self::user_id.is(Me))          // or Role("library"), or Everyone
+```
+
+A rule is a predicate over the table's own columns, as a filter is, with
+three things a filter does not have: `Me`, the user the rule is asked about
+(`c.is(Me)` on a text column — the author, for `writable`; the peer being
+served, for `visible`); `Role("name")`, which the identity holds or does
+not (`Pred::from(Role(..))` to combine one with `.and`/`.or`); and the one
+lookup, `exists(Child::fk, pred)` — some row of another table whose
+reference column names this row, admitted by a predicate over that table's
+own columns. A lookup reaches one table and no further. The default,
+`Everyone`, is not written down at all, so a table that declares nothing is
+the bytes it always was. A rule is in the module's hash and in no closure,
+and `arkc check` does not compare rules: they decide what a connection is
+sent and what the authority sequences from here on, never what a retained
+entry means. The engine enforces them and decides none — the app declares
+them.
+
 A list a node uses only as a count, a sum, a least or a greatest value is
 kept by a view as that number rather than as a list (`docs/plan-perf.md`
 R9, `docs/plan-db.md` D4) — nothing to declare, but worth writing so:
@@ -685,6 +709,10 @@ lookup      : {"t":"lookup","name":txt,"sym":int,"table":txt,"key":[expr]}
 related     : {"t":"related","name":txt,"sym":int,"on":[[txt, expr]],"plan":plan}
               -- "parent", "child", "column" are gone: a related plan is always the on form
 pred        : + {"t":"phas","column":txt,"e":expr}   -- `docs/plan-db.md` D4, only where used
+            + {"t":"prole","name":txt}           -- `docs/plan-auth.md`, only in a rule
+            + {"t":"pexists","table":txt,"column":txt,"pred":pred}   -- the one lookup, only in a rule
+table       : + ("visible", pred) + ("writable", pred)   -- each only where declared; `Me` is
+                                              {"t":"ctx_user"} as a comparison's right-hand side
 index       : + ("kind", "text")           -- a text index, on one column, not unique; after
                                               the table's other indexes, only where declared
 ```

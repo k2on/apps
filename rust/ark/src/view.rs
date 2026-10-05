@@ -477,6 +477,10 @@ fn eval_pred<E>(p: &Pred, ev: &mut dyn FnMut(&Expr) -> Result<Value, E>) -> Resu
                 _ => None,
             },
         ),
+        // A rule's leaves, which a verified plan never has
+        // (`RuleLeafInPlan`): admitting nothing is the reading that cannot
+        // widen what a read returns.
+        Pred::Role(_) | Pred::Exists(..) => Filter::Any(vec![]),
     })
 }
 

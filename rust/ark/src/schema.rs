@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
+use crate::ir::{Expr, Pred};
 use crate::store::{Columns, Row};
 use crate::value::{FieldName, TableName, Value};
 
@@ -74,6 +75,22 @@ pub struct Table {
     /// about the rows: additive under `compat`, and a store from before it
     /// builds it as the rows are put. Set by [`Table::with_text`].
     pub text: Vec<FieldName>,
+    /// `docs/plan-auth.md` Who may see a row of this table: a predicate
+    /// over its own columns, the identity's user (`Me`, which is
+    /// [`Expr::CtxUser`] here) and roles ([`Pred::Role`]), and the one
+    /// lookup — some row of another table referencing this one, admitted
+    /// by its own predicate ([`Pred::Exists`]). `None` is `Everyone`, and
+    /// is not encoded: a table that declares no rule is the bytes it
+    /// always was, so a module with none hashes as it did. A peer to which
+    /// every table is `Everyone` is served the log whole, by intents; any
+    /// other is served the facts its rules admit (`protocol.rs`).
+    pub visible: Option<Pred>,
+    /// Who may write a row of this table, the same kind of predicate: an
+    /// entry every one of whose facts' rows — old and new, for an edit —
+    /// it admits for the author, or a refusal (`Refusal::Forbidden`),
+    /// checked at the authority after the run and on the device before an
+    /// intent is recorded pending. `None` is `Everyone`.
+    pub writable: Option<Pred>,
     rows: Arc<Columns>,
     key_at: Vec<usize>,
 }
@@ -87,6 +104,8 @@ impl PartialEq for Table {
             && self.indexes == other.indexes
             && self.refs == other.refs
             && self.text == other.text
+            && self.visible == other.visible
+            && self.writable == other.writable
     }
 }
 
@@ -101,6 +120,8 @@ impl fmt::Debug for Table {
             .field("indexes", &self.indexes)
             .field("refs", &self.refs)
             .field("text", &self.text)
+            .field("visible", &self.visible)
+            .field("writable", &self.writable)
             .finish()
     }
 }
@@ -170,9 +191,19 @@ impl Table {
             indexes,
             refs,
             text: vec![],
+            visible: None,
+            writable: None,
             rows,
             key_at,
         }
+    }
+
+    /// `docs/plan-auth.md` The table with these rules: who may see a row,
+    /// and who may write one; `None` for `Everyone`.
+    pub fn with_rules(mut self, visible: Option<Pred>, writable: Option<Pred>) -> Table {
+        self.visible = visible;
+        self.writable = writable;
+        self
     }
 
     /// D4 The table with a text index on each of `columns`, in order.
@@ -264,6 +295,23 @@ pub enum SchemaError {
     /// D4 A text index is on one column whose type is text (nullable or
     /// not), once.
     TextIndexNotText(TableName, FieldName),
+    /// `docs/plan-auth.md` A rule names a column its table does not have
+    /// (the table, then the table the column was looked for in, which is a
+    /// lookup's own for the predicate inside one), and the column.
+    RuleUnknownColumn(TableName, TableName, FieldName),
+    /// A rule compares a column with something other than a literal of
+    /// the column's type or `Me` on a text column: a rule is asked of a
+    /// row and an identity, and has nothing else to read.
+    RuleBadValue(TableName, FieldName),
+    /// A role named by the empty text.
+    RuleEmptyRole(TableName),
+    /// A lookup through a table and column that is not a reference of that
+    /// table to this one: table, the looked-up table, the column.
+    RuleNotAReference(TableName, TableName, FieldName),
+    /// A lookup inside a lookup: a rule reaches one table away, so that a
+    /// change to a row moves the visibility of the rows it references and
+    /// no others.
+    RuleNested(TableName),
 }
 
 fn dups(names: impl Iterator<Item = String>) -> Vec<String> {
@@ -331,12 +379,72 @@ fn per_table(sch: &Schema, t: &Table, errs: &mut Vec<SchemaError>) {
     for r in &t.refs {
         per_ref(sch, t, r, errs);
     }
+    for rule in [&t.visible, &t.writable].into_iter().flatten() {
+        rule_ok(sch, t, t, rule, false, errs);
+    }
     for c in &t.columns {
         if let Ty::Id(of) = &c.ty {
             let is_ref = t.refs.iter().any(|r| r.column == c.name);
             let is_own_key = *of == t.name && t.key.contains(&c.name);
             if !is_ref && !is_own_key {
                 errs.push(SchemaError::IdColumnWithoutRef(tn(), c.name.clone()));
+            }
+        }
+    }
+}
+
+// `docs/plan-auth.md` A rule of `owner`, over the columns of `t` — the
+// owner's own, or a looked-up table's inside a lookup (`inside`).
+fn rule_ok(sch: &Schema, owner: &Table, t: &Table, p: &Pred, inside: bool, errs: &mut Vec<SchemaError>) {
+    let col = |c: &str, errs: &mut Vec<SchemaError>| {
+        let found = t.column(c);
+        if found.is_none() {
+            errs.push(SchemaError::RuleUnknownColumn(owner.name.clone(), t.name.clone(), c.into()));
+        }
+        found
+    };
+    let value = |c: &Column, e: &Expr, errs: &mut Vec<SchemaError>| {
+        let ok = match e {
+            Expr::Lit(v) => crate::store::of_type(&c.column_ty(), v),
+            Expr::CtxUser => c.ty == Ty::Text,
+            _ => false,
+        };
+        if !ok {
+            errs.push(SchemaError::RuleBadValue(owner.name.clone(), c.name.clone()));
+        }
+    };
+    match p {
+        Pred::Cmp(c, _, e) | Pred::Has(c, e) => {
+            if let Some(c) = col(c, errs) {
+                if matches!(p, Pred::Has(..)) && c.ty != Ty::Text {
+                    errs.push(SchemaError::RuleBadValue(owner.name.clone(), c.name.clone()));
+                }
+                value(c, e, errs);
+            }
+        }
+        Pred::In(c, es) => {
+            if let Some(c) = col(c, errs) {
+                es.iter().for_each(|e| value(c, e, errs));
+            }
+        }
+        Pred::All(ps) | Pred::Any(ps) => ps.iter().for_each(|q| rule_ok(sch, owner, t, q, inside, errs)),
+        Pred::Not(q) => rule_ok(sch, owner, t, q, inside, errs),
+        Pred::Role(r) => {
+            if r.is_empty() {
+                errs.push(SchemaError::RuleEmptyRole(owner.name.clone()));
+            }
+        }
+        Pred::Exists(via, c, q) => {
+            if inside {
+                errs.push(SchemaError::RuleNested(owner.name.clone()));
+                return;
+            }
+            let reached = sch
+                .lookup_table(via)
+                .filter(|v| v.name != t.name && v.refs.iter().any(|r| r.column == *c && r.table == t.name));
+            match reached {
+                Some(v) => rule_ok(sch, owner, v, q, true, errs),
+                None => errs.push(SchemaError::RuleNotAReference(owner.name.clone(), via.clone(), c.clone())),
             }
         }
     }
@@ -378,6 +486,94 @@ mod tests {
             ty,
             nullable: false,
         }
+    }
+
+    // `docs/plan-auth.md` `owner(id, user_id, n?)` and `member(id, owner_id
+    // → owner, user_id)`, with whatever rules a test gives `owner`.
+    fn ruled(visible: Option<Pred>, writable: Option<Pred>) -> Schema {
+        Schema {
+            tables: vec![
+                Table::new(
+                    "owner",
+                    vec![
+                        col("id", Ty::Id("owner".into())),
+                        col("user_id", Ty::Text),
+                        Column {
+                            name: "n".into(),
+                            ty: Ty::Int,
+                            nullable: true,
+                        },
+                    ],
+                    vec!["id".into()],
+                    vec![],
+                    vec![],
+                )
+                .with_rules(visible, writable),
+                Table::new(
+                    "member",
+                    vec![col("id", Ty::Int), col("owner_id", Ty::Id("owner".into())), col("user_id", Ty::Text)],
+                    vec!["id".into()],
+                    vec![],
+                    vec![Ref {
+                        column: "owner_id".into(),
+                        table: "owner".into(),
+                    }],
+                ),
+            ],
+        }
+    }
+
+    /// `docs/plan-auth.md` A rule is checked as the schema is: every column
+    /// it names is its table's — a lookup's predicate, the looked-up
+    /// table's — a value is a literal of the column's type or `Me` on a
+    /// text column, a role has a name, and a lookup goes through a
+    /// reference of that table to this one, once. Falsified by accepting
+    /// any value (`RuleBadValue` never pushed): the `Me`-on-an-int case
+    /// came back clean.
+    #[test]
+    fn a_rule_names_only_what_its_table_has() {
+        use crate::ir::{CmpOp, Expr};
+        let me = |c: &str| Pred::Cmp(c.into(), CmpOp::Eq, Expr::CtxUser);
+        let lit = |c: &str, v: Value| Pred::Cmp(c.into(), CmpOp::Eq, Expr::Lit(v));
+        let through = |t: &str, c: &str, p: Pred| Pred::Exists(t.into(), c.into(), Box::new(p));
+        let ok = ruled(
+            Some(Pred::Any(vec![
+                me("user_id"),
+                through("member", "owner_id", me("user_id")),
+                Pred::Role("admin".into()),
+            ])),
+            Some(Pred::All(vec![
+                me("user_id"),
+                lit("n", Value::Null),
+                Pred::Not(Box::new(lit("n", Value::Int(3)))),
+            ])),
+        );
+        assert_eq!(check_schema(&ok), vec![]);
+        let errs = |v: Pred| check_schema(&ruled(Some(v), None));
+        let o = || "owner".to_string();
+        assert_eq!(errs(me("nope")), vec![SchemaError::RuleUnknownColumn(o(), o(), "nope".into())]);
+        assert_eq!(errs(me("n")), vec![SchemaError::RuleBadValue(o(), "n".into())]);
+        assert_eq!(
+            errs(lit("user_id", Value::Int(1))),
+            vec![SchemaError::RuleBadValue(o(), "user_id".into())]
+        );
+        assert_eq!(
+            errs(Pred::Cmp("user_id".into(), CmpOp::Eq, Expr::Arg("x".into()))),
+            vec![SchemaError::RuleBadValue(o(), "user_id".into())]
+        );
+        assert_eq!(errs(Pred::Role(String::new())), vec![SchemaError::RuleEmptyRole(o())]);
+        assert_eq!(
+            errs(through("member", "user_id", me("user_id"))),
+            vec![SchemaError::RuleNotAReference(o(), "member".into(), "user_id".into())]
+        );
+        assert_eq!(
+            errs(through("member", "owner_id", me("nope"))),
+            vec![SchemaError::RuleUnknownColumn(o(), "member".into(), "nope".into())]
+        );
+        assert_eq!(
+            errs(through("member", "owner_id", through("member", "owner_id", me("user_id")))),
+            vec![SchemaError::RuleNested(o())]
+        );
     }
 
     #[test]

@@ -192,6 +192,12 @@ fn schema_breaks(old: &Schema, new: &Schema) -> Vec<Break> {
                 out.push(Break::UniqueAdded(t.name.clone(), ix.columns.clone()));
             }
         }
+        // A table's rules (`docs/plan-auth.md`) are not compared, either
+        // way: who may see a row decides what a connection is sent, and who
+        // may write one what the authority sequences from here on — neither
+        // is anything a retained entry means. An entry already in the log
+        // was judged when it was sequenced and replays as it did, and the
+        // next `Hello` is answered by the new rules.
     }
     out
 }
@@ -403,6 +409,33 @@ mod tests {
         // On a column that is not text it is no schema at all.
         table(&mut new, "item").text.push("pos".into());
         assert!(crate::verify::verify(&new).is_err());
+    }
+
+    /// `docs/plan-auth.md` A rule added, changed or taken away breaks
+    /// nothing: it decides what a connection is sent and what the authority
+    /// sequences from here on, not what a retained entry means. It moves
+    /// the module's bytes and no closure's — the schema is in no closure —
+    /// and a table that declares none writes what it always did. Falsified
+    /// by reporting a `KeyChanged` for any table whose rules differ: the
+    /// first assertion fails.
+    #[test]
+    fn a_rule_is_not_a_break() {
+        use crate::ir::{CmpOp, Pred};
+        let old = base();
+        let mut new = base();
+        let mine = Pred::Cmp("name".into(), CmpOp::Eq, Expr::CtxUser);
+        let member = Pred::Exists("item".into(), "list_id".into(), Box::new(Pred::Role("editor".into())));
+        let t = table(&mut new, "list").clone();
+        *table(&mut new, "list") = t.with_rules(Some(Pred::Any(vec![mine.clone(), member])), Some(mine));
+        crate::verify::verify(&new).expect("rules over the table's own columns verify");
+        assert_eq!(check(&old, &new), vec![]);
+        assert_eq!(check(&new, &old), vec![], "and taking them away");
+        let canon = |m: &Module| crate::canon::encode(&crate::ir::module_value(m));
+        assert_ne!(canon(&old), canon(&new), "the module's bytes move");
+        let back = crate::ir::module_from_value(&crate::canon::decode(&canon(&new)).unwrap()).unwrap();
+        assert_eq!(back.schema, new.schema, "and read back as written");
+        let hashes = |m: &Module| m.functions.iter().map(|f| crate::hash::function_hash(&closure(m, f))).collect::<Vec<_>>();
+        assert_eq!(hashes(&old), hashes(&new), "no function's closure moves");
     }
 
     /// Falsified by looking a mutator up in the old module instead of the
