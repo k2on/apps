@@ -1038,10 +1038,7 @@ mod tests {
         // A token is `user:session`.
         let by_token: ark::protocol::Authenticate = Box::new(|t| {
             let (user, session) = t?.split_once(':')?;
-            Some(Identity {
-                user: user.into(),
-                session: session.into(),
-            })
+            Some(Identity::new(user, session))
         });
         let hub = HubHandle::spawn(move || {
             let relay = Relay::new(Box::new(crate::Quiet));

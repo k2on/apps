@@ -443,6 +443,11 @@ pub enum Refusal {
     StillReferenced(TableName, TableName),
     /// An explicit `refuse` from a mutator, or a checked arithmetic fault.
     Refused(String),
+    /// `docs/plan-auth.md` A row the entry writes that the table's
+    /// `writable` rule does not admit for its author: the table. Judged
+    /// after the run, at the authority and on the device before an intent
+    /// is recorded pending ([`crate::rules::forbidden`]).
+    Forbidden(TableName),
 }
 
 impl fmt::Display for Refusal {
@@ -458,6 +463,7 @@ impl fmt::Display for Refusal {
             Refusal::MissingParent(t, c, p) => write!(f, "MissingParent {t:?} {c:?} {p:?}"),
             Refusal::StillReferenced(t, c) => write!(f, "StillReferenced {t:?} {c:?}"),
             Refusal::Refused(why) => write!(f, "Refused {why:?}"),
+            Refusal::Forbidden(t) => write!(f, "Forbidden {t:?}"),
         }
     }
 }

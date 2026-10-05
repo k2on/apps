@@ -475,3 +475,85 @@ pub fn protocol(out: &Out) {
         );
     }
 }
+
+/// `docs/plan-auth.md` What a table's rules make of the frames: a write the
+/// `writable` rule does not admit for the connection is a `reject` like any
+/// other, its reason naming the table (`protocol/server-reject-forbidden`).
+/// Asserted on the demo with rules (`module/rules.json`): alice adding an
+/// item, which only an `editor` writes, is refused, and with the role
+/// (`alice:editor`, as dev auth reads a token) acknowledged.
+pub fn rules(out: &Out) {
+    out.dir("protocol/ (rules)");
+    let m = super::module::ruled();
+    let bodies = closures(&m);
+    let (h_create, h_add) = (hash_of(&m, "create_playlist"), hash_of(&m, "add_to_playlist"));
+    let pid = id_n(1);
+    let create = Entry {
+        id: id_n(40),
+        actor: "alice".into(),
+        session: "dev".into(),
+        fn_hash: h_create,
+        args: args([("name", Value::text("Mix"))]),
+        autos: args([("id", Value::Id(pid))]),
+    };
+    let add = Entry {
+        id: id_n(41),
+        actor: "alice".into(),
+        session: "dev".into(),
+        fn_hash: h_add,
+        args: args([("playlist_id", Value::Id(pid)), ("track_id", Value::text("t1"))]),
+        autos: Args::new(),
+    };
+    let verdict = |token: &str| {
+        let mut sv = Server::open(trusting(), open_access(), Silent, Authority::new(m.schema.clone(), bodies.clone()));
+        sv.recv(
+            1,
+            ClientMsg::Hello {
+                sub: Subscription {
+                    since: 0,
+                    mode: Mode::Whole,
+                    log_id: None,
+                },
+                token: Some(token.into()),
+                spec: SPEC_VERSION,
+            },
+        );
+        let _ = sv.take_outgoing();
+        sv.recv(
+            1,
+            ClientMsg::Push {
+                entries: vec![create.clone(), add.clone()],
+            },
+        );
+        verdicts(&mut sv, 1)
+    };
+    let refused = verdict("alice");
+    let forbidden = refused
+        .iter()
+        .find(|v| matches!(v, ServerMsg::Reject { .. }))
+        .cloned()
+        .expect("protocol: an item written without the editor role was not refused");
+    assert_eq!(
+        forbidden,
+        ServerMsg::Reject {
+            id: id_n(41),
+            reason: "item: not this login's to write".into(),
+        }
+    );
+    assert!(
+        verdict("alice:editor").iter().all(|v| matches!(v, ServerMsg::Ack { .. })),
+        "protocol: an editor's item was refused"
+    );
+    let frames: Vec<(&str, ServerMsg)> = vec![("reject-forbidden", forbidden)];
+    for (name, f) in frames {
+        let v = f.to_value();
+        match decode(&encode(&v)).map(|d| ServerMsg::from_value(&d)) {
+            Ok(Ok(back)) if back == f => {}
+            other => panic!("protocol server {name}: {other:?}"),
+        }
+        out.write(
+            &format!("protocol/server-{name}.json"),
+            &obj(&[("frame", json(&v)), ("bytes", quoted(&hex(&encode(&v))))]),
+        );
+    }
+}

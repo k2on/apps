@@ -8,7 +8,7 @@
 //! // the sync server with `auth.authenticator()`.
 //! ```
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 
 use ark::protocol::{Authenticate, Identity};
@@ -40,8 +40,8 @@ impl Mode {
     pub fn announce(&self) -> String {
         match self {
             Mode::Oidc(p) => format!("signing in through {}", p.issuer()),
-            Mode::Dev => "*** DEV AUTH: anyone is whoever they say. A name is a login and nothing is checked. \
-                          Fine on a laptop; never anywhere else. ***"
+            Mode::Dev => "*** DEV AUTH: anyone is whoever they say. A name is a login, `name:role,role` a login \
+                          holding those roles, and nothing is checked. Fine on a laptop; never anywhere else. ***"
                 .into(),
         }
     }
@@ -84,6 +84,11 @@ pub struct Auth {
     codes: Mutex<HashMap<String, Issued>>,
     /// Told `(user, session)` of every session revoked ([`Auth::on_revoke`]).
     revoked: Mutex<Vec<Revoked>>,
+    /// `docs/plan-auth.md` The roles the configuration grants, by account
+    /// id ([`Auth::with_roles`]). Asked at every `Hello` rather than written
+    /// into a session, so a restart with new configuration grants or
+    /// revokes a role for every login at once.
+    roles: BTreeMap<String, BTreeSet<String>>,
 }
 
 /// What [`Auth::on_revoke`] is handed: told the user and the session id of
@@ -110,7 +115,52 @@ impl Auth {
             pending: Mutex::new(HashMap::new()),
             codes: Mutex::new(HashMap::new()),
             revoked: Mutex::new(Vec::new()),
+            roles: BTreeMap::new(),
         }
+    }
+
+    /// `docs/plan-auth.md` Grant roles from the configuration: role name →
+    /// the account ids holding it, as `services.harken.roles` says them.
+    /// Every login of such an account holds the role, beside any it was
+    /// issued with (the scanner's own; a dev login's from its name).
+    pub fn with_roles<R: Into<String>, A: Into<String>>(mut self, roles: impl IntoIterator<Item = (R, Vec<A>)>) -> Self {
+        for (role, accounts) in roles {
+            let role = role.into();
+            for a in accounts {
+                self.roles.entry(a.into()).or_default().insert(role.clone());
+            }
+        }
+        self
+    }
+
+    /// The roles the configuration grants an account.
+    pub fn configured_roles(&self, account: &str) -> BTreeSet<String> {
+        self.roles.get(account).cloned().unwrap_or_default()
+    }
+
+    /// What a server says about how it signs people in, every time it
+    /// starts: the mode, and every role the configuration grants, by role.
+    pub fn announce(&self) -> String {
+        let mut by_role: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+        for (account, roles) in &self.roles {
+            for r in roles {
+                by_role.entry(r).or_default().push(account);
+            }
+        }
+        let mut out = self.mode.announce();
+        for (r, accounts) in by_role {
+            out.push_str(&format!("\nrole {r}: {}", accounts.join(", ")));
+        }
+        out
+    }
+
+    // A login as a client and the engine are told of it: the roles it was
+    // issued with and the configuration's, sorted, once each.
+    fn completed(&self, mut login: Login) -> Login {
+        let mut roles: BTreeSet<String> = login.user.roles.drain(..).collect();
+        roles.extend(self.configured_roles(&login.user.id));
+        login.user.roles = roles.into_iter().collect();
+        login
     }
 
     /// Let a login code go back to anything starting with `prefix` — an
@@ -173,12 +223,14 @@ impl Auth {
     pub fn redeem(&self, code: &str) -> Option<Login> {
         let mut codes = self.codes.lock().unwrap_or_else(|e| e.into_inner());
         let issued = codes.remove(code)?;
-        (now_ms() - issued.issued_ms < CODE_TTL_MS).then_some(issued.login)
+        (now_ms() - issued.issued_ms < CODE_TTL_MS).then(|| self.completed(issued.login))
     }
 
-    /// The login a bearer token proves, if it is live.
+    /// The login a bearer token proves, if it is live, with every role it
+    /// holds now.
     pub fn whoami(&self, token: &str) -> Option<Login> {
-        self.sessions().lookup(token)
+        let login = self.sessions().lookup(token)?;
+        Some(self.completed(login))
     }
 
     /// Whether `session` is or was `user`'s — live, expired or revoked. What
@@ -214,15 +266,13 @@ impl Auth {
 
 impl Auth {
     /// What the sync server asks at every `Hello`: the login a token
-    /// proves, as the engine's identity — the account's id and the session.
+    /// proves, as the engine's identity — the account's id, the session,
+    /// and the roles it holds now (issued with it, and configured).
     pub fn authenticator(self: &Arc<Self>) -> Authenticate {
         let auth = self.clone();
         Box::new(move |token: Option<&str>| {
             let login = auth.whoami(token?)?;
-            Some(Identity {
-                user: login.user.id,
-                session: login.session,
-            })
+            Some(Identity::new(login.user.id, login.session).with_roles(login.user.roles))
         })
     }
 
@@ -272,11 +322,15 @@ async fn login(State(auth): State<Arc<Auth>>, Query(q): Query<LoginQuery>) -> Re
             let Some(user) = q.user.filter(|u| !u.trim().is_empty()) else {
                 return Html(dev_form(&q.redirect)).into_response();
             };
-            let user = user.trim().to_string();
+            // `name:role,role` is a login holding those roles, as the
+            // engine's own dev auth reads a token (`ark::protocol::
+            // dev_identity`), which the announcement says.
+            let who = ark::protocol::dev_identity(user.trim(), "");
             let account = Account {
-                id: user.clone(),
-                name: user,
+                id: who.user.clone(),
+                name: who.user,
                 email: String::new(),
+                roles: who.roles.into_iter().collect(),
             };
             match auth.finish(&account) {
                 Ok(code) => Redirect::to(&with_code(&q.redirect, &code)).into_response(),
@@ -442,25 +496,52 @@ mod tests {
             .finish(&Account {
                 id: "alice".into(),
                 name: "alice".into(),
-                email: String::new(),
+                ..Account::default()
             })
             .unwrap();
         let login = a.redeem(&code).expect("first time");
         assert_eq!(login.user.id, "alice");
         assert!(a.redeem(&code).is_none(), "second time");
         let who = a.authenticator();
-        assert_eq!(
-            who(Some(&login.token)),
-            Some(Identity {
-                user: "alice".into(),
-                session: login.session.clone()
-            })
-        );
+        assert_eq!(who(Some(&login.token)), Some(Identity::new("alice", login.session.clone())));
         assert_eq!(who(Some("forged")), None);
         assert_eq!(who(None), None);
         let owns = a.owns_fn();
         assert!(owns("alice", &login.session));
         assert!(!owns("bob", &login.session));
+    }
+
+    /// `docs/plan-auth.md` A login holds the roles it was issued with and
+    /// the ones the configuration grants its account, in what the exchange
+    /// hands the client and in what the engine is told at `Hello`; a
+    /// server started again with other configuration answers the same
+    /// token with the new roles, and the dev form's `name:role,role` is a
+    /// login holding them. Falsified by leaving the configured roles out
+    /// of `completed`: the exchange's login held only `scanner`.
+    #[test]
+    fn a_login_holds_its_own_roles_and_the_configured_ones() {
+        let sessions = || SessionStore::memory();
+        let a = Arc::new(Auth::new(sessions(), Mode::Dev, "https://app.example/").with_roles([("library", vec!["alice"])]));
+        let code = a
+            .finish(&Account {
+                id: "alice".into(),
+                roles: vec!["scanner".into()],
+                ..Account::default()
+            })
+            .unwrap();
+        let login = a.redeem(&code).expect("redeemed");
+        assert_eq!(login.user.roles, ["library", "scanner"]);
+        let who = a.authenticator()(Some(&login.token)).expect("signed in");
+        assert_eq!(who, Identity::new("alice", login.session.clone()).with_roles(["library", "scanner"]));
+        assert!(a.announce().contains("role library: alice"), "{}", a.announce());
+        // The same session store, the configuration moved: the role goes.
+        let store = std::mem::replace(&mut *a.sessions(), sessions());
+        let b = Arc::new(Auth::new(store, Mode::Dev, "https://app.example/"));
+        let who = b.authenticator()(Some(&login.token)).expect("signed in");
+        assert_eq!(who.roles, ["scanner".to_string()].into_iter().collect());
+        // Dev auth's name, with roles.
+        let dev = ark::protocol::dev_identity("bob:library, admin,", "s");
+        assert_eq!(dev, Identity::new("bob", "s").with_roles(["admin", "library"]));
     }
 
     /// R6: revoking a session tells every listener whose and which, once,
@@ -476,7 +557,7 @@ mod tests {
         let account = Account {
             id: "alice".into(),
             name: "Alice".into(),
-            email: String::new(),
+            ..Account::default()
         };
         let login = a.issue(&account).unwrap();
         assert!(a.revoke(&login.token).unwrap());

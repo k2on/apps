@@ -14,8 +14,7 @@ fn login(who: &str) -> Login {
         session: format!("session-{who}"),
         user: Account {
             id: who.into(),
-            name: String::new(),
-            email: String::new(),
+            ..Account::default()
         },
         expires_ms: 0,
     }

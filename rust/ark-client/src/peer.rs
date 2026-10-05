@@ -690,6 +690,17 @@ impl Peer {
         self.persist()
     }
 
+    /// `docs/plan-auth.md` The roles this login holds, as the sign-in said
+    /// them (`ark_auth::Login`'s `user.roles`): what this peer holds its
+    /// own intents to a table's `writable` rule with before recording them
+    /// pending, so a forbidden write is refused here rather than by the
+    /// server a round trip later. The server holds every entry to the
+    /// roles it knows for the connection whatever this says. Said after
+    /// [`Peer::sign_in`], which starts a login holding none.
+    pub fn set_roles(&mut self, roles: impl IntoIterator<Item = impl Into<String>>) {
+        self.ctx.roles = roles.into_iter().map(Into::into).collect();
+    }
+
     /// Author under this login from now on (entries already pending keep
     /// the session they were authored under).
     pub fn set_session(&mut self, session: impl Into<String>) {

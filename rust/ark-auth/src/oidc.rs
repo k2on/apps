@@ -155,6 +155,7 @@ impl Provider {
             id: claims.sub.clone(),
             name: claims.display_name(),
             email: claims.email.clone().unwrap_or_default(),
+            roles: vec![],
         };
         // A provider that keeps the ID token small says the rest at userinfo.
         if account.name.is_empty() || account.email.is_empty() {

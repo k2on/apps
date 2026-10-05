@@ -365,10 +365,7 @@ fn a_push_is_held_to_its_login_and_every_refusal_says_why() {
     let serve = |owns: bool| {
         let auth: ark::protocol::Authenticate = Box::new(|tok| {
             let (user, session) = tok?.split_once(':')?;
-            Some(Identity {
-                user: user.into(),
-                session: session.into(),
-            })
+            Some(Identity::new(user, session))
         });
         let sv = Server::open(auth, open_access(), Silent, Authority::new(built.schema.clone(), bodies.clone()));
         if owns {

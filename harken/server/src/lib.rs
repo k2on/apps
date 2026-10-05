@@ -465,7 +465,7 @@ pub async fn start(config: Config) -> Result<Server> {
                 .issue(&Account {
                     id: library::ACCOUNT.into(),
                     name: "Library".into(),
-                    email: String::new(),
+                    ..Account::default()
                 })
                 .map_err(|e| anyhow!("signing the scanner in: {e}"))?;
             Some(Scanner::start(

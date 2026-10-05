@@ -1071,12 +1071,46 @@ impl Client {
 // ---------------------------------------------------------------------
 // The server
 
-/// Who a connection is: the user, and the login. Every entry the connection
-/// pushes is held to both.
+/// Who a connection is: the user, the login, and the roles the
+/// authenticator says they hold. Every entry the connection pushes is held
+/// to the user and the login, and every row it writes to a table's
+/// `writable` rule for this identity; what it is sent, to each table's
+/// `visible` rule (`docs/plan-auth.md`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Identity {
     pub user: String,
     pub session: String,
+    /// A claim about a person that the log does not hold — granting one in
+    /// the log would need a rule about who may grant, which is a role — so
+    /// the authenticator makes it, at every `Hello`, from what it was
+    /// configured with.
+    pub roles: BTreeSet<String>,
+}
+
+impl Identity {
+    /// A user under a login, holding no role.
+    pub fn new(user: impl Into<String>, session: impl Into<String>) -> Identity {
+        Identity {
+            user: user.into(),
+            session: session.into(),
+            roles: BTreeSet::new(),
+        }
+    }
+
+    /// The same identity, holding these roles.
+    pub fn with_roles(mut self, roles: impl IntoIterator<Item = impl Into<String>>) -> Identity {
+        self.roles = roles.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// What a rule is asked about this identity with
+    /// ([`crate::rules::Who`]).
+    pub fn who(&self) -> crate::rules::Who<'_> {
+        crate::rules::Who {
+            user: &self.user,
+            roles: &self.roles,
+        }
+    }
 }
 
 /// What a token proves; asked once, at `Hello`.
@@ -1089,14 +1123,22 @@ pub type Access = Box<dyn Fn(&Identity) -> bool + Send + Sync>;
 /// user, of an entry whose session is not the connection's.
 pub type Owns = Box<dyn Fn(&str, &str) -> bool + Send + Sync>;
 
-/// Dev auth: anyone is whoever they say, and the token is their name.
+/// Dev auth: anyone is whoever they say, and the token is their name —
+/// `alice`, or `alice:library,admin` for a name holding roles
+/// ([`dev_identity`]).
 pub fn trusting() -> Authenticate {
-    Box::new(|tok| {
-        Some(Identity {
-            user: tok.unwrap_or("anonymous").to_string(),
-            session: "dev".into(),
-        })
-    })
+    Box::new(|tok| Some(dev_identity(tok.unwrap_or("anonymous"), "dev")))
+}
+
+/// `docs/plan-auth.md` A dev login's name read as dev auth reads it, under
+/// `session`: `name` is that user holding no role, `name:role,role` the
+/// user `name` holding each role named — what a laptop types to be the
+/// scanner (`alice:library`). An empty role is not one.
+pub fn dev_identity(name: &str, session: &str) -> Identity {
+    match name.split_once(':') {
+        None => Identity::new(name, session),
+        Some((user, roles)) => Identity::new(user, session).with_roles(roles.split(',').map(str::trim).filter(|r| !r.is_empty())),
+    }
 }
 
 /// Everyone who signed in may read the log.
@@ -1125,6 +1167,7 @@ pub fn refusal_text(r: &Refusal) -> String {
         Refusal::UniqueViolation(t, cs) => format!("{t}: another row has the same {}", cs.join(", ")),
         Refusal::MissingParent(t, c, p) => format!("{t}.{c} names no {p}"),
         Refusal::StillReferenced(t, child) => format!("{t}: still referenced by {child}"),
+        Refusal::Forbidden(t) => format!("{t}: not this login's to write"),
     }
 }
 
@@ -1316,7 +1359,7 @@ impl<M: Machine> Server<M> {
                         );
                         continue;
                     }
-                    match self.authority.sequence_entry(e) {
+                    match self.authority.sequence_as(e, who.who()) {
                         Sequenced::Appended(n, _) | Sequenced::Duplicate(n) => acks.push((e.id, n)),
                         Sequenced::Rejected(why) => self.send(
                             c,

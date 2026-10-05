@@ -27,7 +27,7 @@
 //! and call arguments left to right, a struct's fields in field-name order.
 
 use std::borrow::Cow;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::hash::{closure, Closure};
 use crate::ir::{Check, Expr, Field, FnKind, Function, Key, Module, Op, Plan, Stmt, Sym};
@@ -45,6 +45,14 @@ pub use crate::stdlib::Args;
 pub struct Ctx {
     pub user: String,
     pub session: String,
+    /// `docs/plan-auth.md` The roles the author holds as this peer knows
+    /// them: its own login's, so that a device can hold its own intents to
+    /// a table's `writable` rule before recording them pending. Not in the
+    /// entry and not read by a body: the authority holds an entry to the
+    /// roles of the connection that pushed it, which the authenticator
+    /// said at `Hello` (`protocol::Identity::roles`), and a replay holds
+    /// nothing to them — an entry in the log was judged once.
+    pub roles: BTreeSet<String>,
 }
 
 impl Ctx {
@@ -64,7 +72,14 @@ impl Ctx {
         Ctx {
             user: user.into(),
             session: session.into(),
+            roles: BTreeSet::new(),
         }
+    }
+
+    /// The same author, holding these roles (`docs/plan-auth.md`).
+    pub fn with_roles(mut self, roles: impl IntoIterator<Item = impl Into<String>>) -> Ctx {
+        self.roles = roles.into_iter().map(Into::into).collect();
+        self
     }
 }
 
@@ -789,6 +804,7 @@ static NO_ARGS: Args = BTreeMap::new();
 static NOBODY: Ctx = Ctx {
     user: String::new(),
     session: String::new(),
+    roles: BTreeSet::new(),
 };
 
 /// §1.3 What the expressions of a plan are evaluated in: the function's

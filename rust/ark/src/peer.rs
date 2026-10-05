@@ -37,6 +37,7 @@ pub use crate::authoring::Procedure;
 use crate::eval::{apply_closure, Args, Ctx, EvalError};
 use crate::hash::{state_hash, Closure, FnHash};
 use crate::log::{Entry, Facts, Log, Page, Seq};
+use crate::rules::{self, Who};
 use crate::schema::Schema;
 use crate::store::{Change, MemoryStore, Overlay, Refusal, Store};
 use crate::value::{hex, Id, TableName};
@@ -141,11 +142,10 @@ pub enum Journal {
     Replaced,
 }
 
+// The entry's author, as a replay runs it: an entry carries no roles, and
+// nothing a body does reads them.
 fn ctx_of(e: &Entry) -> Ctx {
-    Ctx {
-        user: e.actor.clone(),
-        session: e.session.clone(),
-    }
+    Ctx::new(e.actor.clone(), e.session.clone())
 }
 
 fn bug_text(e: &EvalError) -> String {
@@ -292,7 +292,25 @@ impl Replica {
         // and an acceptance costs its changes, not a copy of the store.
         let out = {
             let mut over = Overlay::new(&self.view);
-            run(&self.schema, &self.bodies, &self.natives, fh, ctx, autos, args, &mut over)
+            let out = run(&self.schema, &self.bodies, &self.natives, fh, ctx, autos, args, &mut over);
+            // `docs/plan-auth.md` The device holds its own write to the
+            // tables' `writable` rules for its own login's roles, as the
+            // authority will for the connection's: a forbidden intent is
+            // refused here and never pushed. Nothing is read where no rule
+            // is declared.
+            match out {
+                Some(Ok(Ok(chs))) => {
+                    let who = Who {
+                        user: &ctx.user,
+                        roles: &ctx.roles,
+                    };
+                    match rules::forbidden(&self.schema, &self.view, &over, &chs, who) {
+                        Some(t) => Some(Ok(Err(Refusal::Forbidden(t)))),
+                        None => Some(Ok(Ok(chs))),
+                    }
+                }
+                other => other,
+            }
         };
         match out {
             None => Err(Refusal::Refused(format!("unknown function {}", hex(fh)))),
@@ -1091,13 +1109,33 @@ impl Authority {
     /// §11.7 Sequence an intent: dedupe by id, apply to the head state, and
     /// append with the facts. An intent naming a closure the authority does
     /// not hold is refused, not stalled.
+    ///
+    /// Unjudged by the tables' `writable` rules: what a log being replayed
+    /// or adopted, and a peer alone's own authority, sequence — every entry
+    /// there was judged when it was first sequenced, or is the peer's own.
+    /// A server sequences what a connection pushes with
+    /// [`Authority::sequence_as`].
     pub fn sequence_entry(&mut self, e: &Entry) -> Sequenced {
+        self.sequence(e, None)
+    }
+
+    /// `docs/plan-auth.md` [`Authority::sequence_entry`], with every row the
+    /// run writes held to its table's `writable` rule for `who`, the
+    /// connection's identity, after the run and before anything is
+    /// appended: a row it does not admit is the verdict
+    /// [`Refusal::Forbidden`], and nothing of the run is kept. A schema
+    /// whose rules `who`'s roles decide true reads no row for it.
+    pub fn sequence_as(&mut self, e: &Entry, who: Who) -> Sequenced {
+        self.sequence(e, Some(who))
+    }
+
+    fn sequence(&mut self, e: &Entry, who: Option<Who>) -> Sequenced {
         if let Some(n) = self.log.seq_of(&e.id) {
             return Sequenced::Duplicate(n);
         }
         let out = {
             let mut over = Overlay::new(&self.store);
-            run(
+            let out = run(
                 &self.schema,
                 &self.bodies,
                 &self.natives,
@@ -1106,7 +1144,14 @@ impl Authority {
                 &e.autos,
                 &e.args,
                 &mut over,
-            )
+            );
+            match (out, who) {
+                (Some(Ok(Ok(facts))), Some(who)) => match rules::forbidden(&self.schema, &self.store, &over, &facts, who) {
+                    Some(t) => Some(Ok(Err(Refusal::Forbidden(t)))),
+                    None => Some(Ok(Ok(facts))),
+                },
+                (out, _) => out,
+            }
         };
         match out {
             None => Sequenced::Rejected(Refusal::Refused(format!("unknown function {}", hex(&e.fn_hash)))),

@@ -130,7 +130,7 @@ impl Builder {
     /// whose asked of an entry authored under an earlier login of the same
     /// person — so signing in again does not strand what was pending.
     pub fn auth(mut self, auth: Arc<ark_auth::server::Auth>) -> Builder {
-        self.announce = Some(auth.mode().announce());
+        self.announce = Some(auth.announce());
         self.authenticate = Some(auth.authenticator());
         self.owns = Some(auth.owns_fn());
         self.auth = Some(auth);

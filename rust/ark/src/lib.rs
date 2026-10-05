@@ -51,6 +51,7 @@ pub mod peer;
 pub mod plan;
 pub mod protocol;
 pub mod retention;
+pub mod rules;
 pub mod schema;
 pub mod sha256;
 pub mod sim;

@@ -31,6 +31,14 @@ struct Row {
     issued_ms: i64,
     expires_ms: i64,
     revoked: bool,
+    /// The roles the login was issued with (`Account::roles`): the scanner's
+    /// own, by construction, and a dev login's from its name. The server's
+    /// configured roles are not written here — they are asked at every
+    /// `Hello`, so a restart with new configuration grants or revokes at
+    /// once. Absent when there are none, so a file written before roles
+    /// reads as it did.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    roles: Vec<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -119,6 +127,7 @@ impl SessionStore {
             issued_ms,
             expires_ms: issued_ms + self.ttl_ms,
             revoked: false,
+            roles: account.roles.clone(),
         };
         let login = Login {
             token,
@@ -146,6 +155,7 @@ impl SessionStore {
                 id: r.user.clone(),
                 name: r.name.clone(),
                 email: r.email.clone(),
+                roles: r.roles.clone(),
             },
             expires_ms: r.expires_ms,
         })
@@ -217,6 +227,7 @@ mod tests {
             id: "sub-alice".into(),
             name: "Alice".into(),
             email: "alice@example".into(),
+            roles: vec![],
         }
     }
 

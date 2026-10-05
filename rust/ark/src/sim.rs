@@ -171,10 +171,7 @@ fn name(i: i64) -> String {
 // Under dev auth the server names every login "dev", and an entry is held
 // to the login that pushed it, so this is what a client authors under.
 fn ctx_of(i: i64) -> Ctx {
-    Ctx {
-        user: name(i),
-        session: "dev".into(),
-    }
+    Ctx::new(name(i), "dev")
 }
 
 impl Sim {

@@ -15,6 +15,16 @@ pub struct Account {
     /// May be empty.
     #[serde(default)]
     pub email: String,
+    /// `docs/plan-auth.md` The roles this person holds, as the server says:
+    /// what it was configured with for the account
+    /// (`server::Auth::with_roles`) and, signed in through dev auth, what
+    /// the name asked for (`alice:library`). What a table's `writable` and
+    /// `visible` rules are asked with — at the server for every connection,
+    /// and on the device for its own intents before they are pushed.
+    /// Absent when there are none, so a login written before roles reads
+    /// as one holding none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub roles: Vec<String>,
 }
 
 /// What the server hands back for a login code: everything a client needs

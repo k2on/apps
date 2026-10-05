@@ -62,6 +62,7 @@ pub fn write_all(root: &Path) {
     module::module(&out);
     module::rules(&out);
     protocol::protocol(&out);
+    protocol::rules(&out);
     rebase::fleet(&out);
     fuzzed::fuzzed(&out);
     views::views(&out);
