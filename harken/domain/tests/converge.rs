@@ -15,6 +15,10 @@ use ark::sim::Sim;
 use ark::value::{Id, Value};
 use harken_domain::module;
 
+fn library() -> String {
+    harken_domain::schema::LIBRARY.to_string()
+}
+
 struct Fleet {
     sim: Sim,
     procs: BTreeMap<String, (FnHash, Procedure)>,
@@ -32,6 +36,15 @@ impl Fleet {
         sim.partition(2);
         sim.clients.get_mut(&2).unwrap().token = Some("peer-0".into());
         sim.heal(2);
+        // Every login here holds `library` (`docs/plan-auth.md`): these
+        // fleets add songs from every peer, which harken's rules give the
+        // library's role alone, and what they hold to is convergence.
+        for i in 0..n {
+            let user = if i == 2 { "peer-0".to_string() } else { format!("peer-{i}") };
+            sim.partition(i);
+            sim.clients.get_mut(&i).unwrap().token = Some(format!("{user}:{}", library()));
+            sim.heal(i);
+        }
         Fleet { sim, procs, next: 0 }
     }
 
@@ -45,7 +58,7 @@ impl Fleet {
     /// Author on client `i` as `user`; a refusal by the client's own view
     /// is dropped, as a screen would show it and move on.
     fn mutate(&mut self, i: i64, user: &str, name: &str, a: Args) {
-        let _ = self.mutate_as(i, &Ctx::new(user, "dev"), name, a);
+        let _ = self.mutate_as(i, &Ctx::new(user, "dev").with_roles([library()]), name, a);
     }
 
     /// Author on client `i` as `ctx`, and answer the entry's first fresh id
@@ -229,7 +242,7 @@ fn same_named_playlists_made_apart_are_numbered_in_log_order() {
         .clients
         .get_mut(&1)
         .unwrap()
-        .sign_in(&Ctx::new("peer-0", "dev"), Some("peer-0".into()));
+        .sign_in(&Ctx::new("peer-0", "dev"), Some(format!("peer-0:{}", library())));
     f.sim.settle();
 
     let server = f.sim.server_hash();

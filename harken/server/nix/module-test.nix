@@ -44,6 +44,7 @@ let
     homeAssistant = { url = "http://ha:8123"; tokenFile = "/run/secrets/ha"; players = [ "media_player.kitchen" ]; mediaUrl = "http://10.0.0.2:8787"; };
   };
   noMedia = eval { devAuth = true; mediaPath = null; };
+  roles = eval { devAuth = true; roles = { library = [ "alice" "bob" ]; admin = [ "alice" ]; }; };
 
   checks = [
     [ (says nobody "nobody could sign in") "a server nobody can sign in to is refused" ]
@@ -65,6 +66,8 @@ let
     [ ((env lanUnbound).HARKEN_HA_MEDIA == "http://10.0.0.2:8787") "and speakers fetch from the LAN" ]
     [ (failing bound == [ ] && bound.warnings == [ ]) "bound to every interface, nothing to warn about" ]
     [ (!(lib.any (lib.hasInfix "/srv/media") noMedia.systemd.tmpfiles.rules) && !(env noMedia ? HARKEN_MEDIA) && (unit noMedia).serviceConfig.BindReadOnlyPaths == [ ]) "no media path, no media" ]
+    [ ((env roles).HARKEN_ROLES == "admin=alice;library=alice,bob") "roles reach the server, role by role" ]
+    [ (!(env dev ? HARKEN_ROLES)) "and none, nothing" ]
   ];
   wrong = map (c: builtins.elemAt c 1) (lib.filter (c: !(builtins.elemAt c 0)) checks);
 in

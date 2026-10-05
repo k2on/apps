@@ -108,6 +108,11 @@ pub struct Config {
     /// 10,000). A device further behind is sent a snapshot and rebases onto
     /// it; the process fleet shrinks both to watch one be.
     pub retain: ark_server::Retention,
+    /// `docs/plan-auth.md` Who holds which role: role → account ids
+    /// (`HARKEN_ROLES`, what `services.harken.roles` sets). Asked at every
+    /// `Hello`, so a restart with another configuration grants or revokes
+    /// at once. The scanner's account holds `library` whatever this says.
+    pub roles: std::collections::BTreeMap<String, Vec<String>>,
 }
 
 impl Config {
@@ -126,6 +131,7 @@ impl Config {
             house: None,
             keepalive: ark_server::Keepalive::default(),
             retain: ark_server::Retention::default(),
+            roles: Default::default(),
         }
     }
 
@@ -147,6 +153,7 @@ impl Config {
     /// HARKEN_KEEPALIVE_MISSED       pings unanswered before it closes (3)
     /// HARKEN_RETAIN_DAYS            how long a device's place holds the log (30)
     /// HARKEN_RETAIN_ENTRIES         entries kept below the head regardless (10000)
+    /// HARKEN_ROLES                  who holds which role: `library=alice,bob;admin=alice`
     /// ```
     pub fn from_env(listen: &str) -> Result<Config> {
         Config::from_vars(listen, |k| std::env::var(k).ok())
@@ -220,6 +227,7 @@ impl Config {
             house,
             keepalive,
             retain,
+            roles: roles_of(&env("HARKEN_ROLES").unwrap_or_default())?,
         })
     }
 
@@ -228,6 +236,31 @@ impl Config {
             .clone()
             .unwrap_or_else(|| format!("http://{}", self.listen))
     }
+}
+
+/// `docs/plan-auth.md` `library=alice,bob;admin=alice` — each role, then the
+/// account ids holding it — as role → accounts. What `services.harken.roles`
+/// writes from an attrset; empty is no role at all.
+pub fn roles_of(text: &str) -> Result<std::collections::BTreeMap<String, Vec<String>>> {
+    let mut out: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+    for part in text.split(';').map(str::trim).filter(|p| !p.is_empty()) {
+        let Some((role, accounts)) = part.split_once('=') else {
+            bail!("HARKEN_ROLES: `{part}` is not role=account,account");
+        };
+        let role = role.trim();
+        if role.is_empty() {
+            bail!("HARKEN_ROLES: a role with no name in `{part}`");
+        }
+        out.entry(role.to_string()).or_default().extend(
+            accounts
+                .split(',')
+                .map(str::trim)
+                .filter(|a| !a.is_empty())
+                .map(str::to_string),
+        );
+    }
+    Ok(out)
 }
 
 /// The house, from the environment, or nothing.
@@ -393,8 +426,20 @@ pub async fn start(config: Config) -> Result<Server> {
     let sessions = SessionStore::open(config.data.join("sessions.json"))
         .map_err(|e| anyhow!("the sessions: {e}"))?;
     let public_url = config.public_url();
-    let mut auth =
-        Auth::new(sessions, mode(&config.sign_in).await?, &public_url).allow_redirect(PHONE_SCHEME);
+    // `docs/plan-auth.md` The roles the configuration grants, and the
+    // scanner's own `library`, by construction: the library's tables are
+    // that role's to write, and the scanner is what writes them.
+    let roles = config
+        .roles
+        .iter()
+        .map(|(r, a)| (r.clone(), a.clone()))
+        .chain([(
+            harken_domain::schema::LIBRARY.to_string(),
+            vec![library::ACCOUNT.to_string()],
+        )]);
+    let mut auth = Auth::new(sessions, mode(&config.sign_in).await?, &public_url)
+        .allow_redirect(PHONE_SCHEME)
+        .with_roles(roles);
     for prefix in &config.redirects {
         auth = auth.allow_redirect(prefix);
     }
@@ -465,6 +510,7 @@ pub async fn start(config: Config) -> Result<Server> {
                 .issue(&Account {
                     id: library::ACCOUNT.into(),
                     name: "Library".into(),
+                    roles: vec![harken_domain::schema::LIBRARY.into()],
                     ..Account::default()
                 })
                 .map_err(|e| anyhow!("signing the scanner in: {e}"))?;
@@ -600,6 +646,37 @@ mod tests {
     /// The two retention constants are `ark::retention`'s unless told,
     /// and nothing a typo could make of them. Falsified by ignoring
     /// `HARKEN_RETAIN_ENTRIES`: the count is 10,000.
+    /// `docs/plan-auth.md` `HARKEN_ROLES` is role, `=`, the accounts, `;` to
+    /// the next — what `services.harken.roles` writes — and unset is no
+    /// role; something that is not that refuses to start rather than
+    /// granting nothing quietly. Falsified by reading the accounts as one
+    /// (no split on `,`): bob held nothing.
+    #[test]
+    fn roles_are_read_role_by_role() {
+        let dev = ("HARKEN_DEV_AUTH", "1");
+        let c = Config::from_vars(
+            "x:1",
+            vars(&[dev, ("HARKEN_ROLES", "library=alice, bob;admin=alice")]),
+        )
+        .unwrap();
+        let want: std::collections::BTreeMap<String, Vec<String>> = [
+            ("admin".to_string(), vec!["alice".to_string()]),
+            (
+                "library".to_string(),
+                vec!["alice".to_string(), "bob".to_string()],
+            ),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(c.roles, want);
+        assert!(Config::from_vars("x:1", vars(&[dev]))
+            .unwrap()
+            .roles
+            .is_empty());
+        assert!(Config::from_vars("x:1", vars(&[dev, ("HARKEN_ROLES", "library")])).is_err());
+        assert!(Config::from_vars("x:1", vars(&[dev, ("HARKEN_ROLES", "=alice")])).is_err());
+    }
+
     #[test]
     fn retention_is_the_engines_unless_told() {
         let dev = ("HARKEN_DEV_AUTH", "1");

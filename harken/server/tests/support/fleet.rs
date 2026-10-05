@@ -129,6 +129,11 @@ impl Server {
             .env("HARKEN_MEDIA", &self.media)
             .env("HARKEN_KEEPALIVE_MS", KEEPALIVE_MS.to_string())
             .env("HARKEN_KEEPALIVE_MISSED", "3")
+            // `docs/plan-auth.md` The fleet's people add songs, which harken's
+            // rules give the `library` role alone: it holds to convergence,
+            // so the two people it signs in hold it, unless a scenario's own
+            // `env` says otherwise.
+            .env("HARKEN_ROLES", FLEET_ROLES)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -352,7 +357,16 @@ pub struct PeerProc {
     pub bin: PathBuf,
     /// Said on every start after the rest (`--module FILE`, say).
     pub args: Vec<String>,
+    /// `--roles` for this build's peer (`docs/plan-auth.md`): what the
+    /// device holds its own writes to, beside its login's. `library` by
+    /// default, as [`FLEET_ROLES`] grants it at the server; an older build
+    /// knows no such flag and is told nothing.
+    pub roles: Vec<String>,
 }
+
+/// What the fleet's server grants (`HARKEN_ROLES`): its people hold the
+/// library's role, because its scenarios add songs from every peer.
+pub const FLEET_ROLES: &str = "library=alice,bob";
 
 fn field<'a>(v: &'a Value, k: &str) -> &'a Value {
     match v {
@@ -418,6 +432,9 @@ impl PeerProc {
         let mut cmd = Command::new(&self.bin);
         cmd.args(["--dir", self.dir.to_str().unwrap()]);
         cmd.args(&self.args);
+        if !self.roles.is_empty() && self.bin == Path::new(env!("CARGO_BIN_EXE_harken-peer")) {
+            cmd.args(["--roles", &self.roles.join(",")]);
+        }
         if self.alone {
             cmd.arg("--alone");
         } else {
@@ -579,6 +596,14 @@ impl PeerProc {
             held: has(&a, "held").map(int),
             behind: has(&a, "behind").map(|b| b == &Value::Bool(true)),
         }
+    }
+
+    /// Whether the peer holds a partition (`docs/plan-auth.md`): what a
+    /// table's rule lets its login see, and not the log whole. An older
+    /// build does not say, and held the log whole.
+    pub fn partial(&mut self) -> bool {
+        let a = self.ask("hash", vec![]);
+        has(&a, "partial") == Some(&Value::Bool(true))
     }
 
     /// `(cursor, confirmed hash, view hash)`.
@@ -909,6 +934,7 @@ impl Fleet {
             starts: 0,
             bin: PathBuf::from(env!("CARGO_BIN_EXE_harken-peer")),
             args: vec![],
+            roles: vec!["library".into()],
         }
     }
 

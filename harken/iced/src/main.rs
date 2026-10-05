@@ -440,6 +440,11 @@ impl App {
                 ),
             };
             let mut peer = Peer::open(client);
+            // `docs/plan-auth.md` What this device holds its own writes to:
+            // the roles the remembered login was signed in with.
+            if let Some(l) = &login {
+                peer.client.set_roles(l.user.roles.clone());
+            }
             peer.client.connect(&ark_auth::socket_url(&server));
             // Signed out, the replica is the whole truth there is: its own
             // default playlist is made now. Signed in, not until the log has
@@ -530,6 +535,10 @@ impl App {
             .sign_in(login.user.id.clone(), login.session.clone(), Some(login.token.clone()))
         {
             Ok(()) => {
+                // The roles the sign-in said this login holds: a library
+                // write is then refused on this device, as the server would
+                // (`docs/plan-auth.md`), and shown as any refusal is.
+                self.peer.client.set_roles(login.user.roles.clone());
                 let pending = self.peer.client.pending_len();
                 self.note = match pending {
                     0 => format!("signed in as {}", auth::who(&login)),

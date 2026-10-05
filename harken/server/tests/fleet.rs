@@ -1983,3 +1983,187 @@ fn a_backup_taken_mid_stream_restores_to_its_moment() {
         "{body}"
     );
 }
+
+/// The household's module with its playlists private: a playlist and its
+/// items `visible(Role("admin") or user_id is Me)`, everything else as
+/// harken declares it. What a deployment whose people must not see each
+/// other's lists would host (`HARKEN_MODULE`, and `--module` on a peer);
+/// written to `dir`, and the module returned for the rules it carries.
+fn private_playlists(dir: &std::path::Path) -> (std::path::PathBuf, ark::ir::Module) {
+    use ark::ir::{CmpOp, Expr, Pred};
+    let mut m = harken_domain::module().build().clone();
+    let mine = Pred::Any(vec![
+        Pred::Role("admin".into()),
+        Pred::Cmp("user_id".into(), CmpOp::Eq, Expr::CtxUser),
+    ]);
+    for t in m.schema.tables.iter_mut() {
+        if t.name == "playlist" || t.name == "playlist_item" {
+            let w = t.writable.clone();
+            *t = t.clone().with_rules(Some(mine.clone()), w);
+        }
+    }
+    ark::verify::verify(&m).expect("the module with private playlists verifies");
+    let path = dir.join("private-playlists.ark");
+    std::fs::write(&path, ark::canon::encode(&ark::ir::module_value(&m))).unwrap();
+    (path, m)
+}
+
+/// Every peer at the log's head holding what its login may see: the
+/// partition its rules admit, by digest — and not the store whole, for one
+/// some rule hides rows from — or the store whole for one every table is
+/// `Everyone` to. `who` is each peer's identity as the server's
+/// configuration makes it.
+fn holds_what_it_may_see(
+    f: &Fleet,
+    m: &ark::ir::Module,
+    peers: &mut [(&mut PeerProc, ark::protocol::Identity)],
+) {
+    use ark::store::{Change, MemoryStore, Store};
+    let deadline = Instant::now() + PATIENCE;
+    loop {
+        for (p, _) in peers.iter_mut() {
+            p.settle(Duration::from_secs(2));
+        }
+        let log = f.server.log_on_disk().expect("a log");
+        let head = log.head_seq();
+        // The state at the head, laid out under the module the server
+        // hosts — the rules are its, not harken's own.
+        let at = log.state_at(head).expect("a state at the head");
+        let mut st = MemoryStore::empty(m.schema.clone());
+        for t in m.schema.tables() {
+            for r in at.scan(&t.name) {
+                st.apply_change(&Change::Add(t.name.clone(), r));
+            }
+        }
+        let whole = ark::value::hex(&ark::hash::state_hash(&st));
+        let mut all = true;
+        let mut seen = vec![];
+        for (p, who) in peers.iter_mut() {
+            let partial = !ark::rules::whole_to(&m.schema, who.who());
+            let want = ark::value::hex(&ark::rules::partition_hash(&st, who.who()));
+            let (cursor, h, view) = p.hash();
+            let holds = p.partial();
+            let ok = cursor == head
+                && h == want
+                && view == want
+                && holds == partial
+                && (!partial || want != whole);
+            seen.push(format!(
+                "{} ({}): cursor {cursor} partial {holds} hash {} want {}",
+                p.name,
+                who.user,
+                &h[..12],
+                &want[..12]
+            ));
+            all &= ok;
+        }
+        if all {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "{}: not every peer holds what it may see at {head}:\n{}\n--- server ---\n{}",
+            f.name,
+            seen.join("\n"),
+            tail(&f.server.log, 20)
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// **Roles** (`docs/plan-auth.md`). A server hosting harken with private
+/// playlists, alice and bob signed in, and no role configured: both are
+/// partial — each holds the library and their own playlist and not the
+/// other's — and bob's song is refused on his own device. The server
+/// restarts with alice granted `admin` and `library` in its configuration;
+/// signed in again, she is whole — every table `Everyone` to an admin —
+/// and her song is sequenced. Restarted once more with `library` revoked,
+/// her device still believes it holds the role and takes her next song,
+/// and the server refuses it: `Forbidden`, a reason naming the table, and
+/// nothing in the log.
+///
+/// Falsified by leaving `HARKEN_ROLES` out of the configuration the server
+/// is built from (alice's song after the grant was refused); and by
+/// serving every connection whole (bob held alice's playlist, his hash the
+/// store's).
+#[test]
+fn a_partial_peer_a_role_granted_by_a_restart_and_a_library_write_refused() {
+    use ark::protocol::Identity;
+    let modules = tempfile::tempdir().unwrap();
+    let (ark_file, m) = private_playlists(modules.path());
+    let ark_file = ark_file.to_str().unwrap().to_string();
+    let mut f = Fleet::with_env(
+        "roles",
+        vec![("HARKEN_MODULE", &ark_file), ("HARKEN_ROLES", "")],
+    );
+    let peer = |f: &Fleet, name: &str| {
+        let mut p = f.peer_stopped(name, Some(name));
+        p.args = vec!["--module".into(), ark_file.clone()];
+        p.roles = vec![];
+        p.start();
+        p
+    };
+    let mut alice = peer(&f, "alice");
+    let mut bob = peer(&f, "bob");
+    let refused = bob
+        .mutate("add_song", song("bob's"))
+        .expect_err("a library write by a login without the role");
+    assert!(
+        refused.contains("not this login's to write"),
+        "refused on bob's own device as forbidden: {refused}"
+    );
+    alice.author("create_playlist", named("Alice's"));
+    bob.author("create_playlist", named("Bob's"));
+    holds_what_it_may_see(
+        &f,
+        &m,
+        &mut [
+            (&mut alice, Identity::new("alice", "")),
+            (&mut bob, Identity::new("bob", "")),
+        ],
+    );
+
+    // Granted by configuration, at a restart; a fresh login holds it.
+    f.server
+        .upgrade(vec![("HARKEN_ROLES", "admin=alice;library=alice")]);
+    alice.sign_in("alice");
+    let kept = alice.author("add_song", song("alice's"));
+    let granted = Identity::new("alice", "").with_roles(["admin", "library"]);
+    holds_what_it_may_see(
+        &f,
+        &m,
+        &mut [
+            (&mut alice, granted.clone()),
+            (&mut bob, Identity::new("bob", "")),
+        ],
+    );
+    assert!(!alice.partial(), "an admin is whole");
+    assert_eq!(
+        f.rows("media").len(),
+        1,
+        "alice's song is in the log, bob's nowhere"
+    );
+
+    // Revoked at another restart, while her device believes it still
+    // holds it: the device takes the song, the authority does not.
+    f.server.upgrade(vec![("HARKEN_ROLES", "admin=alice")]);
+    let late = alice.author("add_song", song("too late"));
+    assert!(
+        eventually(PATIENCE, || alice.rejections().iter().any(|(id, why)| *id
+            == late
+            && why.contains("not this login's to write"))),
+        "the server refused the song as forbidden"
+    );
+    holds_what_it_may_see(
+        &f,
+        &m,
+        &mut [
+            (&mut alice, Identity::new("alice", "").with_roles(["admin"])),
+            (&mut bob, Identity::new("bob", "")),
+        ],
+    );
+    let media = f.rows("media");
+    assert_eq!(media.len(), 1, "and it landed nowhere");
+    assert!(f.server.log_on_disk().unwrap().seq_of(&kept).is_some());
+    assert!(f.server.log_on_disk().unwrap().seq_of(&late).is_none());
+}

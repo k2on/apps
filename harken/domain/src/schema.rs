@@ -19,6 +19,24 @@
 //! and a store loaded from before it builds it as the rows are put.
 use ark::authoring::*;
 
+/// `docs/plan-auth.md` The role the library's tables are written under: the
+/// scanner's, by construction (`harken_server::library`), and nobody
+/// else's unless the server's configuration grants it
+/// (`services.harken.roles`).
+///
+/// harken is one household's server, and declares a household: every table
+/// is `visible(Everyone)` — nothing is declared, so everybody signed in
+/// receives the log whole, as before rules existed, playlists included —
+/// and the rules are about writing. Every table of the library is the
+/// library's to write; a playlist and its items are their maker's
+/// (`user_id`, which every row of both already carries), though the whole
+/// household reads them. A client pushing a library write, or an edit of
+/// somebody else's playlist, is refused with `Forbidden` — by its own
+/// device first, and by the server whatever the device says. Assumed, not
+/// asked: that a household does not edit each other's playlists; if it
+/// should, those two lines become `Everyone` and nothing else moves.
+pub const LIBRARY: &str = "library";
+
 /// Every table harken has, in one set: the library (what the scanner
 /// authors and every peer reads) and the playlists (what people make of it).
 pub struct Harken {
@@ -83,6 +101,7 @@ impl Row for Media {
             // D4). They move the module's hash and no mutator's.
             .index_text(Self::title)
             .index_text(Self::creator)
+            .writable(Role(LIBRARY))
     }
 }
 impl Media {
@@ -119,6 +138,7 @@ impl Row for Album {
             .int(Self::added_ms)
             .text(Self::user_id)
             .key((Self::name,))
+            .writable(Role(LIBRARY))
     }
 }
 impl Album {
@@ -153,6 +173,7 @@ impl Row for Person {
             .int(Self::added_ms)
             .text(Self::user_id)
             .key((Self::name,))
+            .writable(Role(LIBRARY))
     }
 }
 impl Person {
@@ -200,6 +221,7 @@ impl Row for Work {
             .int(Self::added_ms)
             .text(Self::user_id)
             .key((Self::id,))
+            .writable(Role(LIBRARY))
     }
 }
 impl Work {
@@ -242,6 +264,7 @@ impl Row for Movement {
             .int(Self::added_ms)
             .text(Self::user_id)
             .key((Self::id,))
+            .writable(Role(LIBRARY))
     }
 }
 impl Movement {
@@ -283,6 +306,7 @@ impl Row for Recording {
             .int(Self::added_ms)
             .text(Self::user_id)
             .key((Self::id,))
+            .writable(Role(LIBRARY))
     }
 }
 impl Recording {
@@ -323,6 +347,7 @@ impl Row for Credit {
             .int(Self::added_ms)
             .text(Self::user_id)
             .key((Self::recording_id, Self::person_name, Self::role))
+            .writable(Role(LIBRARY))
     }
 }
 impl Credit {
@@ -363,6 +388,7 @@ impl Row for Song {
             .refs::<Movement>()
             .int(Self::bpm)
             .key((Self::media_id,))
+            .writable(Role(LIBRARY))
     }
 }
 impl Song {
@@ -399,6 +425,7 @@ impl Row for Playlist {
             // unique index above (R6).
             .index((Self::pos,))
             .index((Self::user_id, Self::pos))
+            .writable(Self::user_id.is(Me))
     }
 }
 impl Playlist {
@@ -432,6 +459,7 @@ impl Row for PlaylistItem {
             .key((Self::playlist_id, Self::media_id))
             // `add_to_playlist`: the last item of one playlist.
             .index((Self::playlist_id, Self::pos))
+            .writable(Self::user_id.is(Me))
     }
 }
 impl PlaylistItem {

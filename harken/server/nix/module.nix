@@ -151,6 +151,22 @@ in
       '';
     };
 
+    roles = lib.mkOption {
+      type = lib.types.attrsOf (lib.types.listOf lib.types.str);
+      default = { };
+      example = { library = [ "a1b2c3-provider-sub" ]; };
+      description = ''
+        Who holds which role, as the account ids holding each: the provider's
+        `sub`, or the name under {option}`services.harken.devAuth`. A role is
+        what a table's `writable` rule asks of the person writing
+        (`docs/plan-auth.md`): harken's library tables are the `library`
+        role's to write, which the server's own scanner holds by construction
+        and nobody else does unless named here — anyone else adding a song is
+        refused, by their own device and by the server. Asked at every
+        connection, so changing this and restarting grants or revokes at once.
+      '';
+    };
+
     retainDays = lib.mkOption {
       type = lib.types.ints.unsigned;
       default = 30;
@@ -370,6 +386,10 @@ in
         HARKEN_REDIRECTS = lib.concatStringsSep "," cfg.redirects;
         HARKEN_RETAIN_DAYS = toString cfg.retainDays;
         HARKEN_RETAIN_ENTRIES = toString cfg.retainEntries;
+      } // lib.optionalAttrs (cfg.roles != { }) {
+        # `library=sub1,sub2;admin=sub1`, as `harken_server::roles_of` reads it.
+        HARKEN_ROLES = lib.concatStringsSep ";"
+          (lib.mapAttrsToList (role: ids: "${role}=${lib.concatStringsSep "," ids}") cfg.roles);
       } // lib.optionalAttrs (cfg.mediaPath != null) {
         HARKEN_MEDIA = "${cfg.mediaPath}";
       } // lib.optionalAttrs (cfg.web != null) {

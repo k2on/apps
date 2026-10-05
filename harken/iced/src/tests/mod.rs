@@ -17,8 +17,13 @@ mod views;
 use ark_client::{args, Args, Domain, Options, Value};
 
 /// A replica in memory, opened with `opts`, wrapped as the window's peer.
+///
+/// Its device holds the `library` role (`docs/plan-auth.md`): these windows
+/// fill their own library with `add_song`, which harken's rules give that
+/// role alone, as a server's scanner would.
 pub fn peer(opts: Options) -> crate::peer::Peer {
-    let client = ark_client::Peer::open_memory(Domain::new(&harken_domain::module()), opts).expect("a peer in memory opens");
+    let mut client = ark_client::Peer::open_memory(Domain::new(&harken_domain::module()), opts).expect("a peer in memory opens");
+    client.set_roles([harken_domain::schema::LIBRARY]);
     crate::peer::Peer::open(client)
 }
 
@@ -76,6 +81,9 @@ pub fn demo_app() -> crate::App {
     });
     let mut disk = Memory::new();
     disk.save(ReplicaFile::KEY, bytes).unwrap();
-    let client = ark_client::Peer::open(domain, Box::new(disk), Options::alone(crate::seed::DEMO)).unwrap();
+    let mut client = ark_client::Peer::open(domain, Box::new(disk), Options::alone(crate::seed::DEMO)).unwrap();
+    // The demo authored its own library, as the scanner would: it holds the
+    // role harken's library tables are written under (`docs/plan-auth.md`).
+    client.set_roles([harken_domain::schema::LIBRARY]);
     crate::App::with_peer(crate::peer::Peer::open(client), String::new(), None)
 }

@@ -726,7 +726,8 @@ mod tests {
     #[test]
     fn the_maintained_library_is_the_query() {
         let domain = Domain::new(&harken_domain::module());
-        let client = ark_client::Peer::open_memory(domain, Options::alone("me")).unwrap();
+        let mut client = ark_client::Peer::open_memory(domain, Options::alone("me")).unwrap();
+        client.set_roles([harken_domain::schema::LIBRARY]);
         let mut peer = Peer::open(client);
         peer.ensure_playlist();
         assert_ne!(peer.playlist, [0; 16], "Favorites was made");
@@ -788,7 +789,8 @@ mod tests {
         use ark_client::ark::peer::Authority;
         use ark_client::ark::protocol::{open_access, trusting, Server};
         let domain = Domain::new(&harken_domain::module());
-        let client = ark_client::Peer::open_memory(domain.clone(), Options::alone_as_nobody()).unwrap();
+        let mut client = ark_client::Peer::open_memory(domain.clone(), Options::alone_as_nobody()).unwrap();
+        client.set_roles([harken_domain::schema::LIBRARY]);
         let mut peer = Peer::open(client);
         peer.ensure_playlist();
         for (t, f) in [("Air", "a"), ("Glue", "b"), ("Opal", "c")] {
@@ -820,7 +822,9 @@ mod tests {
         let mut a = Authority::new(domain.module().schema.clone(), domain.closures().clone());
         a.hold(domain.native_list());
         let mut hub = Server::open(trusting(), open_access(), Silent, a);
-        peer.client.sign_in("alice", "dev", Some("alice".into())).unwrap();
+        // The songs are the library's to write (`docs/plan-auth.md`): dev
+        // auth's `name:role` is a login holding it.
+        peer.client.sign_in("alice", "dev", Some("alice:library".into())).unwrap();
         peer.refresh();
         peer.client.connected();
         loop {
@@ -859,7 +863,8 @@ mod tests {
     fn a_playlist_that_goes_repoints_the_library() {
         use ark_client::ark::protocol::ServerMsg;
         let domain = Domain::new(&harken_domain::module());
-        let client = ark_client::Peer::open_memory(domain, Options::dev("me")).unwrap();
+        let mut client = ark_client::Peer::open_memory(domain, Options::dev("me")).unwrap();
+        client.set_roles([harken_domain::schema::LIBRARY]);
         let mut peer = Peer::open(client);
         peer.client.mutate("add_song", song("Air", "Bach", "Suites", "a")).unwrap();
         let made = peer.client.mutate("create_playlist", args([("name", Value::text("Mine"))])).unwrap();

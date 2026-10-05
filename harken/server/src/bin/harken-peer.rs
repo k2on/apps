@@ -4,8 +4,14 @@
 //! harken-peer --dir DIR --server URL [--user NAME]     a peer of that server
 //! harken-peer --dir DIR --alone [--user NAME]          its own authority
 //!   [--pump-ms 50] [--ping-ms 20000] [--backoff-ms 500,30000]
-//!   [--auth-patience-ms N] [--module FILE]
+//!   [--auth-patience-ms N] [--module FILE] [--roles ROLE,ROLE]
 //! ```
+//!
+//! `--roles` names roles this device holds its own writes to beside the
+//! ones its login says (`docs/plan-auth.md`): a peer alone, or signed out,
+//! has no login to say any. The server holds every entry to the roles it
+//! knows for the connection whatever this says, so a device told a role it
+//! was not granted has its writes refused there rather than here.
 //!
 //! `--module FILE` runs the module in that `.ark` file instead of harken's
 //! own, with harken's procedures native wherever a hash matches — the
@@ -84,7 +90,7 @@ use ark_client::{Args, Domain, Options, Peer, Standing, Timing};
 const USAGE: &str =
     "usage: harken-peer --dir DIR (--server URL [--user NAME] | --alone [--user NAME])
                    [--pump-ms 50] [--ping-ms 20000] [--backoff-ms 500,30000]
-                   [--auth-patience-ms N] [--module FILE]
+                   [--auth-patience-ms N] [--module FILE] [--roles ROLE,ROLE]
 Commands are JSON lines on stdin; see the source's first page.";
 
 /// What the command line says.
@@ -98,6 +104,7 @@ struct Flags {
     timing: Timing,
     patience: Patience,
     module: Option<PathBuf>,
+    roles: Vec<String>,
 }
 
 fn flags(args: &[String]) -> Result<Flags, String> {
@@ -110,6 +117,7 @@ fn flags(args: &[String]) -> Result<Flags, String> {
         timing: Timing::default(),
         patience: Patience::DEFAULT,
         module: None,
+        roles: vec![],
     };
     let mut dir = None;
     let mut it = args.iter();
@@ -151,6 +159,16 @@ fn flags(args: &[String]) -> Result<Flags, String> {
                 ))
             }
             "--module" => f.module = Some(PathBuf::from(it.next().ok_or("--module needs a file")?)),
+            "--roles" => {
+                f.roles = it
+                    .next()
+                    .ok_or("--roles needs ROLE,ROLE")?
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|r| !r.is_empty())
+                    .map(str::to_string)
+                    .collect()
+            }
             "-h" | "--help" => return Err(USAGE.into()),
             other => return Err(format!("unexpected argument {other}\n{USAGE}")),
         }
@@ -372,11 +390,16 @@ struct Headless {
     /// would take it with it, and a fleet counting what became of every
     /// intent would count one intent as lost that was refused.
     unasked: Vec<String>,
+    /// `--roles`: what this device holds its writes to beside its login's.
+    roles: Vec<String>,
 }
 
 impl Headless {
     fn open(f: &Flags, domain: Domain) -> Result<Headless, String> {
         std::fs::create_dir_all(&f.dir).map_err(|e| format!("{}: {e}", f.dir.display()))?;
+        // `docs/plan-auth.md` The roles the login holds, as the sign-in said
+        // them: what this device holds its own writes to.
+        let mut roles: Vec<String> = vec![];
         let opts = match (&f.server, f.alone) {
             (_, true) => Options::alone(f.user.clone().unwrap_or_else(|| "me".into())),
             (Some(server), false) => {
@@ -393,7 +416,10 @@ impl Headless {
                     (None, None) => None,
                 };
                 match login {
-                    Some(l) => Options::server(l.user.id, l.session, Some(l.token)),
+                    Some(l) => {
+                        roles = l.user.roles.clone();
+                        Options::server(l.user.id, l.session, Some(l.token))
+                    }
                     None => Options::signed_out(),
                 }
             }
@@ -402,6 +428,7 @@ impl Headless {
         .with_timing(f.timing.clone());
         let mut peer = Peer::open_path(domain, f.dir.join("replica"), opts)
             .map_err(|e| format!("opening {}: {e}", f.dir.display()))?;
+        peer.set_roles(roles.iter().chain(&f.roles).cloned());
         if let Some(server) = &f.server {
             peer.connect(&ark_auth::socket_url(server));
         }
@@ -412,6 +439,7 @@ impl Headless {
             patience: f.patience,
             pump: f.pump,
             unasked: vec![],
+            roles: f.roles.clone(),
         })
     }
 
@@ -525,6 +553,9 @@ impl Headless {
                     .num("cursor", r.cursor)
                     .text("hash", &hex(&state_hash(&r.confirmed)))
                     .text("view", &hex(&state_hash(&r.view)))
+                    // `docs/plan-auth.md`: whether what it holds is a
+                    // partition, the rows a table's rule lets it see.
+                    .raw("partial", r.partial.to_string())
             }
             Cmd::Wait { cursor, timeout } => {
                 let ok = self.pump_until(timeout, |p| p.cursor() >= cursor);
@@ -594,14 +625,19 @@ impl Headless {
                 if let Err(e) = remember(&self.dir, &server, &login) {
                     eprintln!("harken-peer: the login is not remembered: {e}");
                 }
+                let roles = login.user.roles.clone();
                 match self.peer.sign_in(
                     login.user.id.clone(),
                     login.session.clone(),
                     Some(login.token),
                 ) {
-                    Ok(()) => Answer::ok(true)
-                        .text("user", &login.user.id)
-                        .text("session", &login.session),
+                    Ok(()) => {
+                        self.peer
+                            .set_roles(roles.iter().chain(&self.roles).cloned());
+                        Answer::ok(true)
+                            .text("user", &login.user.id)
+                            .text("session", &login.session)
+                    }
                     Err(e) => Answer::refused(e),
                 }
             }
@@ -626,10 +662,16 @@ impl Headless {
                     }
                 }
                 let took = Instant::now();
+                let roles = login
+                    .as_ref()
+                    .map(|l| l.user.roles.clone())
+                    .unwrap_or_default();
                 let login =
                     login.map(|l| ark_client::Login::new(l.user.id, l.session, Some(l.token)));
                 match self.peer.join(&ark_auth::socket_url(&server), login) {
                     Ok(()) => {
+                        self.peer
+                            .set_roles(roles.iter().chain(&self.roles).cloned());
                         eprintln!(
                             "harken-peer: joined {server}: {} re-queued in {:?}",
                             self.peer.status().joining,
