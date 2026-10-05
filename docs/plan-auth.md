@@ -391,6 +391,24 @@ their peer; `harken-peer --roles` names more for a device with no login.
 `agreement.rs`'s pinned hashes stand. `ark_client` views no longer start
 over when a login's roles move: a body never reads one.
 
+**A removal reaches everybody's playlists** (after A8). `remove_media`
+takes the removed track's items off every playlist holding it, and with
+`playlist_item` its maker's alone the library's own login was refused at
+the first item that was somebody else's. `playlist_item` is
+`writable(Self::user_id.is(Me).or(Role(LIBRARY)))` now — the rule algebra's
+`Any`, which a rule already reached — so the library may take an item
+off; putting one on another's playlist is still refused, by
+`add_to_playlist`'s own "not your playlist". `harken.ark` moved again
+(`e9383d95…` to `ae4ec685…`), and again no closure hash did.
+`converge.rs`'s `the_library_takes_a_removed_track_off_everybodys_playlists`
+holds it: the library removing a track on two people's playlists leaves
+four items of six and none naming it, each person's other two kept; a
+login without the role removing another track is refused on its device
+with `Forbidden`, and from a device believing `library` by the server;
+every peer ends at the server's hash. Falsified by dropping the `Role`
+arm: the library's removal is refused on its own device and all six items
+stay.
+
 **The fleet.** `a_partial_peer_a_role_granted_by_a_restart_and_a_library_
 write_refused`: harken hosting its module with private playlists
 (`visible(Role("admin") or user_id is Me)`), alice and bob partial, bob's
@@ -412,7 +430,8 @@ authority answers. A lookup costs the referencing rows of one parent per
 evaluation, and an entry touching many referencing rows asks each named
 parent twice; nothing here measures a lookup over a large child table.
 `remove_media` takes a song off every playlist holding it, which under
-`playlist_item`'s rule the scanner may not do for somebody else's — only
-tests call it, and a caller would need `Role(LIBRARY)` beside `Me` there.
+`playlist_item`'s first rule the scanner could not do for somebody
+else's; that item is now `writable(user_id is Me or Role(LIBRARY))` (see
+below).
 `nix flake check`, `checks.harken-module` with the new role checks, and the
 NixOS module on a machine were not run here.

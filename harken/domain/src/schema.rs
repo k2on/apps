@@ -30,11 +30,13 @@ use ark::authoring::*;
 /// and the rules are about writing. Every table of the library is the
 /// library's to write; a playlist and its items are their maker's
 /// (`user_id`, which every row of both already carries), though the whole
-/// household reads them. A client pushing a library write, or an edit of
-/// somebody else's playlist, is refused with `Forbidden` — by its own
-/// device first, and by the server whatever the device says. Assumed, not
-/// asked: that a household does not edit each other's playlists; if it
-/// should, those two lines become `Everyone` and nothing else moves.
+/// household reads them — and an item is the library's to take off too,
+/// when the track it names leaves the library. A client pushing a library
+/// write, or an edit of somebody else's playlist, is refused with
+/// `Forbidden` — by its own device first, and by the server whatever the
+/// device says. Assumed, not asked: that a household does not edit each
+/// other's playlists; if it should, those two lines become `Everyone` and
+/// nothing else moves.
 pub const LIBRARY: &str = "library";
 
 /// Every table harken has, in one set: the library (what the scanner
@@ -459,7 +461,12 @@ impl Row for PlaylistItem {
             .key((Self::playlist_id, Self::media_id))
             // `add_to_playlist`: the last item of one playlist.
             .index((Self::playlist_id, Self::pos))
-            .writable(Self::user_id.is(Me))
+            // Its maker's — or the library's, because `remove_media` takes
+            // a track off every playlist holding it, and an item pointing
+            // at a song that is gone is a row nobody can see the point of.
+            // Putting one on somebody else's playlist is still refused, by
+            // `add_to_playlist` itself ("not your playlist").
+            .writable(Self::user_id.is(Me).or(Role(LIBRARY).into()))
     }
 }
 impl PlaylistItem {
