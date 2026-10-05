@@ -218,7 +218,7 @@ impl S<'_> {
         for _ in 0..len {
             let mut op = self.draw();
             if let ark::value::Value::Text(t) = op.value().field("t") {
-                if self.without.contains(&t) {
+                if self.without.iter().any(|w| w.as_str() == &*t) {
                     op = Op::Step;
                 }
             }
@@ -633,7 +633,7 @@ impl<'a> Draw<'a> {
             Ty::Bytes => Value::Bytes((0..self.rng.below(3)).map(|i| i as u8 * 7).collect()),
             Ty::Enum(vs) => Value::text(vs.get(self.rng.below(vs.len().max(1))).cloned().unwrap_or_else(|| ENUM[0].into())),
             Ty::List(t) => Value::List((0..self.rng.below(3)).map(|_| self.value(t, st)).collect()),
-            Ty::Struct(fs) => Value::Struct(fs.iter().map(|(k, t)| (k.clone(), self.value(t, st))).collect()),
+            Ty::Struct(fs) => Value::Struct(Box::new(fs.iter().map(|(k, t)| (k.clone(), self.value(t, st))).collect())),
         }
     }
 }

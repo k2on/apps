@@ -294,7 +294,7 @@ impl Row {
 
     /// [`Row::to_struct`], as a [`Value::Struct`].
     pub fn to_value(&self) -> Value {
-        Value::Struct(self.to_struct())
+        Value::from(self.to_struct())
     }
 
     /// [`Row::to_value`] of a row nobody else holds, its values moved
@@ -306,7 +306,7 @@ impl Row {
                 for (k, v) in self.cols.names.iter().zip(vals.iter_mut()) {
                     m.insert(k.clone(), std::mem::replace(v, Value::Null));
                 }
-                Value::Struct(m)
+                Value::from(m)
             }
             None => self.to_value(),
         }
@@ -595,18 +595,18 @@ pub trait Store {
     fn select(&self, plan: &Plan) -> Value {
         let rows = crate::eval::select_plan(self.schema(), plan, self.as_store())
             .unwrap_or_else(|e| panic!("select: {e:?} (a bug: generated code evaluates its plans)"));
-        Value::List(rows)
+        Value::from(rows)
     }
 
     /// Every table's rows, as `store_before`/`store_after` in the vectors:
     /// a struct from table name to the list of rows, in schema order.
     fn store_value(&self) -> Value {
-        Value::Struct(
+        Value::Struct(Box::new(
             self.schema()
                 .tables()
                 .map(|t| (t.name.clone(), Value::List(self.scan(&t.name).into_iter().map(Row::into_value).collect())))
                 .collect(),
-        )
+        ))
     }
 
     /// `docs/plan-db.md` D4 [`Store::scan_where_eq`], told also which text
@@ -870,7 +870,7 @@ pub fn of_type(t: &Ty, v: &Value) -> bool {
         (Ty::Text, Value::Text(_)) => true,
         (Ty::Bytes, Value::Bytes(_)) => true,
         (Ty::Id(_), Value::Id(_)) => true,
-        (Ty::Enum(vs), Value::Text(x)) => vs.contains(x),
+        (Ty::Enum(vs), Value::Text(x)) => vs.iter().any(|v| v.as_str() == &**x),
         (Ty::Option(_), Value::Null) => true,
         (Ty::Option(t), v) => of_type(t, v),
         _ => false,
@@ -1256,12 +1256,13 @@ impl Secondary {
     /// The buckets whose values begin with `prefix`, in the index's order,
     /// and — given a span, which is on the column right after the prefix
     /// (R6) — whose next value lies between the span's bounds: a range of
-    /// the map. A column holds a scalar or `Null`, and a struct outranks
-    /// both (`Ark.Value.rank`), so `prefix ++ [v, struct]` is above every
+    /// the map. A column holds a scalar or `Null`, and a list outranks
+    /// both (`Ark.Value.rank`), so `prefix ++ [v, []]` is above every
     /// bucket that continues `prefix ++ [v]` and below every one past it:
     /// an inclusive upper bound `v` ends there, an exclusive lower bound
     /// `v` starts there, and with no span the range is the prefix up to
-    /// `prefix ++ [struct]`. Nothing outside is walked. Bounds that cross
+    /// `prefix ++ [[]]`. The empty list, because boxing nothing allocates
+    /// nothing. Nothing outside is walked. Bounds that cross
     /// (`x > 5 and x < 3`) are the empty range, which `BTreeMap::range`
     /// would otherwise panic on.
     fn under(&self, prefix: &[Value], span: Option<&Span>) -> std::collections::btree_map::Range<'_, Vec<Value>, Vec<u32>> {
@@ -1269,7 +1270,7 @@ impl Secondary {
             let mut k = prefix.to_vec();
             k.extend(v.cloned());
             if top {
-                k.push(Value::Struct(BTreeMap::new()));
+                k.push(Value::List(Box::default()));
             }
             k
         };
@@ -1651,9 +1652,9 @@ impl MemoryStore {
     pub fn from_value(schema: Schema, v: &Value) -> MemoryStore {
         let mut st = MemoryStore::empty(schema);
         if let Value::Struct(m) = v {
-            for (t, rows) in m {
+            for (t, rows) in m.iter() {
                 if let Value::List(rs) = rows {
-                    for r in rs {
+                    for r in rs.iter() {
                         if let Value::Struct(row) = r {
                             let row = match st.schema.lookup_table(t) {
                                 Some(tbl) => Row::stored_in(tbl, row),

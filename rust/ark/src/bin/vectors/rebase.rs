@@ -248,8 +248,8 @@ pub fn three_peers(out: &Out) {
         "rebase/three-peers.json",
         &obj(&[
             ("module", json(&module_value(&m))),
-            ("entries", json(&Value::List(entries))),
-            ("facts", json(&Value::List(facts))),
+            ("entries", json(&Value::from(entries))),
+            ("facts", json(&Value::from(facts))),
             ("alice_alone_pos_of_9", json(&Value::Int(1))),
             ("alice_after_rebase_pos_of_9", json(&Value::Int(3))),
             ("final_hash", quoted(&hex(&state_hash(&auth.store)))),

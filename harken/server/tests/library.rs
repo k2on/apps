@@ -31,7 +31,7 @@ fn songs(server: &Server) -> Vec<(String, String)> {
         .iter()
         .map(|r| {
             let text = |k: &str| match &r[k] {
-                Value::Text(t) => t.clone(),
+                Value::Text(t) => t.to_string(),
                 other => panic!("{k}: {other:?}"),
             };
             (text("title"), text("file"))

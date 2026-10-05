@@ -37,7 +37,7 @@ impl Item {
             _ => 0,
         };
         let text = |k: &str| match v.field(k) {
-            Value::Text(t) => t,
+            Value::Text(t) => t.into_string(),
             _ => String::new(),
         };
         Item {

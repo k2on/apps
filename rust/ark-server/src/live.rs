@@ -228,9 +228,9 @@ impl Machine for Relay {
 
 /// The kept snapshots as a file: canonical CBOR of `{ room: bytes }`.
 pub(crate) fn encode_kept(kept: &BTreeMap<String, Vec<u8>>) -> Vec<u8> {
-    ark::canon::encode(&ark::value::Value::Struct(
-        kept.iter().map(|(r, b)| (r.clone(), ark::value::Value::Bytes(b.clone()))).collect(),
-    ))
+    ark::canon::encode(&ark::value::Value::Struct(Box::new(
+        kept.iter().map(|(r, b)| (r.clone(), ark::value::Value::Bytes(b[..].into()))).collect(),
+    )))
 }
 
 pub(crate) fn decode_kept(bytes: &[u8]) -> Result<BTreeMap<String, Vec<u8>>, String> {
@@ -238,7 +238,7 @@ pub(crate) fn decode_kept(bytes: &[u8]) -> Result<BTreeMap<String, Vec<u8>>, Str
         ark::value::Value::Struct(m) => m
             .into_iter()
             .map(|(r, v)| match v {
-                ark::value::Value::Bytes(b) => Ok((r, b)),
+                ark::value::Value::Bytes(b) => Ok((r, b.into_vec())),
                 other => Err(format!("room {r} kept {other:?}, not bytes")),
             })
             .collect(),

@@ -21,9 +21,9 @@ pub fn codec(out: &Out) {
         ("int-max", Value::Int(i64::MAX)),
         ("text-water", Value::text("水")),
         ("text-astral", Value::text("\u{10151}")),
-        ("bytes", Value::Bytes(vec![1, 2, 3, 4])),
+        ("bytes", Value::bytes(vec![1, 2, 3, 4])),
         ("id-nil", Value::Id([0; 16])),
-        ("list", Value::List(vec![Value::Int(1), Value::List(vec![Value::Int(2), Value::Int(3)])])),
+        ("list", Value::list(vec![Value::Int(1), Value::list(vec![Value::Int(2), Value::Int(3)])])),
         ("struct-key-order", Value::record(vec![("aa", Value::Int(1)), ("b", Value::Int(2))])),
     ];
     for (name, v) in cases {
@@ -50,9 +50,9 @@ pub fn order(out: &Out) {
         Value::Int(3),
         Value::Null,
         Value::Bool(false),
-        Value::List(vec![]),
-        Value::List(vec![Value::Int(1)]),
-        Value::Bytes(vec![]),
+        Value::list(vec![]),
+        Value::list(vec![Value::Int(1)]),
+        Value::bytes(vec![]),
         Value::Struct(Default::default()),
     ];
     let mut sorted = input.clone();
@@ -66,13 +66,13 @@ pub fn order(out: &Out) {
     out.write(
         "order/falsify/utf16.json",
         &obj(&[
-            ("input", json(&Value::List(input.clone()))),
-            ("sorted", json(&Value::List(utf16))),
+            ("input", json(&Value::from(input.clone()))),
+            ("sorted", json(&Value::from(utf16))),
             ("expect", quoted("fail")),
         ]),
     );
     out.write(
         "order/mixed.json",
-        &obj(&[("input", json(&Value::List(input))), ("sorted", json(&Value::List(sorted)))]),
+        &obj(&[("input", json(&Value::from(input))), ("sorted", json(&Value::from(sorted)))]),
     );
 }

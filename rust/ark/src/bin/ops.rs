@@ -119,7 +119,7 @@ pub fn head_of(bytes: &[u8]) -> Result<Head, String> {
         _ => None,
     };
     let hash = match base.get("hash") {
-        Some(Value::Bytes(b)) => b.clone(),
+        Some(Value::Bytes(b)) => b.to_vec(),
         _ => vec![],
     };
     let (entries, ids) = match (field(m, "entries")?, field(m, "ids")?) {
@@ -538,7 +538,7 @@ fn modules_run(dir: &Path) -> Result<Vec<Vec<u8>>, String> {
     };
     ms.iter()
         .map(|m| match record(m).and_then(|r| field(r, "module").cloned()) {
-            Ok(Value::Bytes(h)) => Ok(h),
+            Ok(Value::Bytes(h)) => Ok(h.into_vec()),
             _ => Err(format!("{}: a module with no hash", path.display())),
         })
         .collect()

@@ -179,7 +179,9 @@ impl<T: Record> Data for T {
             if let Some(h) = cx::whole(&hs, &names) {
                 return h;
             }
-            cx::lit(Value::Struct(names.iter().zip(hs).map(|(n, h)| (n.to_string(), cx::value(h))).collect()))
+            cx::lit(Value::Struct(Box::new(
+                names.iter().zip(hs).map(|(n, h)| (n.to_string(), cx::value(h))).collect(),
+            )))
         }
     }
 }
@@ -590,7 +592,7 @@ fn write(f: impl FnOnce(&mut dyn Store) -> Result<Option<Change>, Refusal>) {
 // its table's (`store::row_for`).
 fn row_of(h: H) -> Option<BTreeMap<String, Value>> {
     match cx::value(h) {
-        Value::Struct(m) => Some(m),
+        Value::Struct(m) => Some(*m),
         other => {
             cx::halt(EvalFault::Bug(EvalError::TypeError(format!("a row is a struct, not {other:?}"))));
             None
@@ -1159,7 +1161,7 @@ impl<T: Row, B, N> Query<T, B, N> {
         if cx::emitting() {
             if cx::planning() {
                 read_in_plan(&format!("a read of {}", T::NAME));
-                return cx::lit(Value::List(vec![]));
+                return cx::lit(Value::list(vec![]));
             }
             if !plan.is_v3_shaped() {
                 cx::complain(format!(
@@ -1170,7 +1172,7 @@ impl<T: Row, B, N> Query<T, B, N> {
             return cx::bind(Expr::Select(Box::new(plan)));
         }
         if cx::halted() {
-            return cx::lit(Value::List(vec![]));
+            return cx::lit(Value::list(vec![]));
         }
         let rows = raw::store(|st| {
             let sch = st.schema().clone();
@@ -1178,10 +1180,10 @@ impl<T: Row, B, N> Query<T, B, N> {
             eval::select_plan(&sch, &plan, st.as_store())
         });
         match rows {
-            Ok(rows) => cx::lit(Value::List(rows)),
+            Ok(rows) => cx::lit(Value::from(rows)),
             Err(f) => {
                 cx::halt(f);
-                cx::lit(Value::List(vec![]))
+                cx::lit(Value::list(vec![]))
             }
         }
     }

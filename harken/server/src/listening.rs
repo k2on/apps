@@ -147,7 +147,7 @@ pub fn kept(session: &Session) -> Option<Vec<u8>> {
     let mut m = BTreeMap::new();
     m.insert("t".to_string(), Value::text("kept"));
     m.insert("session".to_string(), keep.to_value());
-    Some(ark::canon::encode(&Value::Struct(m)))
+    Some(ark::canon::encode(&Value::from(m)))
 }
 
 /// Yesterday's session, from the disk: paused, and with every device away.

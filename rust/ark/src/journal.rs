@@ -277,7 +277,7 @@ pub fn log_from_value(schema: &Schema, v: &Value) -> Result<Log, String> {
 fn log_from_parts(v: &Value, store: MemoryStore) -> Result<Log, String> {
     let m = fields(v)?;
     match need(m, "t")? {
-        Value::Text(t) if t == "log" => {}
+        Value::Text(t) if &**t == "log" => {}
         other => return Err(format!("not a log file: t = {other:?}")),
     }
     let base = fields(need(m, "base")?)?;
@@ -292,7 +292,7 @@ fn log_from_parts(v: &Value, store: MemoryStore) -> Result<Log, String> {
     // D3 opens, its hash checked as it was written.
     let claimed = state_hash_by(hashing_of(base)?, &store);
     match need(base, "hash")? {
-        Value::Bytes(h) if Some(h) == claimed.as_ref() => {}
+        Value::Bytes(h) if Some(&h[..]) == claimed.as_deref() => {}
         _ => return Err("the snapshot's hash does not match its rows".into()),
     }
     let snapshot = snapshot_of(int(need(base, "seq")?)?, store).of_log(log_id);

@@ -23,16 +23,25 @@ pub type Id = [u8; 16];
 /// `Null` exists only as the absent case of an `Option` type. `Struct` is a
 /// named record whose field names are its identity; a row of a table is a
 /// `Struct` of every column, never partial.
+///
+/// Twenty-four bytes: every payload is at most sixteen — an id, or a boxed
+/// slice's pointer and length — and the tag takes the word before it. A
+/// value is never grown in place, so it holds no spare capacity: text,
+/// bytes and lists are built as a `String` or a `Vec` and boxed once,
+/// and a struct's map sits behind one pointer, being twenty-four bytes on
+/// its own. The row is a table's largest component since `docs/plan-db.md`
+/// D7, nine of these a media row, which is what the size is for
+/// (`value_is_24_bytes`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Value {
     Null,
     Bool(bool),
     Int(i64),
-    Text(String),
-    Bytes(Vec<u8>),
+    Text(Box<str>),
+    Bytes(Box<[u8]>),
     Id(Id),
-    List(Vec<Value>),
-    Struct(BTreeMap<FieldName, Value>),
+    List(Box<[Value]>),
+    Struct(Box<BTreeMap<FieldName, Value>>),
 }
 
 /// The rank of a value's type in the total order:
@@ -136,19 +145,19 @@ impl Value {
 
     /// `Value.text(s)`.
     pub fn text<S: Into<String>>(s: S) -> Value {
-        Value::Text(s.into())
+        Value::Text(s.into().into_boxed_str())
     }
 
     /// A byte string from its bytes.
     pub fn bytes<B: Into<Vec<u8>>>(b: B) -> Value {
-        Value::Bytes(b.into())
+        Value::Bytes(b.into().into_boxed_slice())
     }
 
     /// `Value.bytesHex("0a0b")`: a byte string from lowercase or uppercase
     /// hex. Panics on anything that is not hex of even length, which in
     /// generated code is a literal and therefore a bug.
     pub fn bytes_hex(hex: &str) -> Value {
-        Value::Bytes(decode_hex(hex).unwrap_or_else(|| panic!("Value::bytes_hex: not hex: {hex:?}")))
+        Value::bytes(decode_hex(hex).unwrap_or_else(|| panic!("Value::bytes_hex: not hex: {hex:?}")))
     }
 
     /// An id from its sixteen bytes.
@@ -178,13 +187,13 @@ impl Value {
 
     /// `Value.list([v…])`.
     pub fn list(items: Vec<Value>) -> Value {
-        Value::List(items)
+        Value::List(items.into_boxed_slice())
     }
 
     /// `Value.record([("k", v)…])`: a struct from its fields. A repeated
     /// name keeps the last value.
     pub fn record<K: Into<String>>(fields: Vec<(K, Value)>) -> Value {
-        Value::Struct(fields.into_iter().map(|(k, v)| (k.into(), v)).collect())
+        Value::Struct(Box::new(fields.into_iter().map(|(k, v)| (k.into(), v)).collect()))
     }
 
     /// `v.isNull()`.
@@ -236,7 +245,7 @@ impl Value {
     /// binds a `Value`; fatal on anything else.
     pub fn as_list(&self) -> Vec<Value> {
         match self {
-            Value::List(xs) => xs.clone(),
+            Value::List(xs) => xs.to_vec(),
             other => panic!("as_list: expected List, got {other:?} (a bug: a verified module never mismatches)"),
         }
     }
@@ -259,6 +268,31 @@ impl Value {
                 .unwrap_or_else(|| panic!("field: no field {name:?} in {self:?} (a bug: a verified module never mismatches)")),
             other => panic!("field: expected Struct, got {other:?} (a bug: a verified module never mismatches)"),
         }
+    }
+}
+
+impl From<&str> for Value {
+    fn from(s: &str) -> Value {
+        Value::Text(s.into())
+    }
+}
+
+impl From<String> for Value {
+    fn from(s: String) -> Value {
+        Value::Text(s.into_boxed_str())
+    }
+}
+
+impl From<Vec<Value>> for Value {
+    fn from(xs: Vec<Value>) -> Value {
+        Value::List(xs.into_boxed_slice())
+    }
+}
+
+/// A struct from its map of fields.
+impl From<BTreeMap<FieldName, Value>> for Value {
+    fn from(m: BTreeMap<FieldName, Value>) -> Value {
+        Value::Struct(Box::new(m))
     }
 }
 
@@ -325,5 +359,15 @@ mod tests {
             Value::id_hex("00000000-0000-0000-0000-000000000001"),
             Value::Id([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1])
         );
+    }
+
+    /// Twenty-four bytes, and it is held there: a media row is nine of
+    /// these, and since `docs/plan-db.md` D7 the rows are a store's largest
+    /// component — 393 bytes a row when a value was thirty-two. A payload
+    /// wider than sixteen bytes (an unboxed `String`, `Vec` or map, or an
+    /// id grown past sixteen) makes every column of every row a word wider.
+    #[test]
+    fn value_is_24_bytes() {
+        assert_eq!(std::mem::size_of::<Value>(), 24);
     }
 }

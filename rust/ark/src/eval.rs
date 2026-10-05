@@ -385,7 +385,7 @@ fn procedure(st: &mut St, sch: &Schema, c: &Closure, ctx: &Ctx, autos: &Args, ar
     // §1.4 A query is its plan: what `pull` answers, over the store the
     // middleware saw.
     if let (FnKind::Query, Some(p)) = (f.kind, &f.plan) {
-        return Ok(Some(Value::List(crate::view::read(sch, p, &Scope::of(&env), &*st.store)?)));
+        return Ok(Some(Value::from(crate::view::read(sch, p, &Scope::of(&env), &*st.store)?)));
     }
     match block(st, &env, &f.body) {
         Ok(()) => Ok(None),
@@ -1130,17 +1130,17 @@ fn eval(st: &mut St, env: &Env, e: &Expr) -> Run<Value> {
         Expr::Lit(_) | Expr::Arg(_) | Expr::Auto(_) | Expr::Var(_) | Expr::Provided(_) | Expr::Field(..) | Expr::Get(..) => {
             eval_ref(st, env, e).map(Cow::into_owned)
         }
-        Expr::CtxUser => Ok(Value::Text(env.ctx.user.clone())),
-        Expr::CtxSession => Ok(Value::Text(env.ctx.session.clone())),
+        Expr::CtxUser => Ok(Value::Text(env.ctx.user.as_str().into())),
+        Expr::CtxSession => Ok(Value::Text(env.ctx.session.as_str().into())),
         // Fields are evaluated in field-name order, which is the map's order.
         Expr::Struct(fs) => {
             let mut m = BTreeMap::new();
             for (k, e) in fs {
                 m.insert(k.clone(), eval(st, env, e)?);
             }
-            Ok(Value::Struct(m))
+            Ok(Value::Struct(Box::new(m)))
         }
-        Expr::List(es) => Ok(Value::List(eval_many(st, env, es)?)),
+        Expr::List(es) => Ok(Value::from(eval_many(st, env, es)?)),
         // An option is flat: `Some v` is `v` and `None` is `Null`.
         Expr::Some(e) => eval(st, env, e),
         Expr::None(_) => Ok(Value::Null),
@@ -1254,7 +1254,7 @@ fn eval(st: &mut St, env: &Env, e: &Expr) -> Run<Value> {
             for v in vs {
                 out.push(eval(st, &env.under(&frame(*x, v, env)), body)?);
             }
-            Ok(Value::List(out))
+            Ok(Value::from(out))
         }
         Expr::Filter(xs, x, body) => {
             let vs = eval_ref(st, env, xs)?;
@@ -1262,7 +1262,12 @@ fn eval(st: &mut St, env: &Env, e: &Expr) -> Run<Value> {
             for v in list_ref(&vs)? {
                 keep.push(bool(eval(st, &env.under(&frame(*x, v, env)), body)?)?);
             }
-            Ok(Value::List(picked(vs, keep.into_iter().enumerate().filter(|(_, k)| *k).map(|(i, _)| i))))
+            let n = keep.iter().filter(|k| **k).count();
+            Ok(Value::List(picked(
+                vs,
+                keep.into_iter().enumerate().filter(|(_, k)| *k).map(|(i, _)| i),
+                n,
+            )))
         }
         // Every element is evaluated, as the spec's `mapM` does; the result
         // is the disjunction (conjunction).
@@ -1291,7 +1296,8 @@ fn eval(st: &mut St, env: &Env, e: &Expr) -> Run<Value> {
             }
             let mut order: Vec<usize> = (0..keys.len()).collect();
             order.sort_by(|a, b| keys[*a].cmp(&keys[*b]));
-            Ok(Value::List(picked(vs, order.into_iter())))
+            let n = order.len();
+            Ok(Value::List(picked(vs, order.into_iter(), n)))
         }
         Expr::Fold(xs, z, acc, x, body) => {
             let vs = eval_ref(st, env, xs)?;
@@ -1327,7 +1333,7 @@ fn eval(st: &mut St, env: &Env, e: &Expr) -> Run<Value> {
         Expr::Select(p) => {
             reading(env)?;
             match crate::view::read(env.schema, p, &Scope::of(env), &*st.store) {
-                Ok(rows) => Ok(Value::List(rows)),
+                Ok(rows) => Ok(Value::from(rows)),
                 Err(fault) => Err(Stop::Halt(fault)),
             }
         }
@@ -1368,19 +1374,23 @@ fn frame<'b>(x: Sym, v: &'b Value, env: &Env<'b>) -> Frame<'b> {
     }
 }
 
-// The elements of a list at `at`, in that order: moved out of a list the
-// evaluation owns, copied out of one it borrows.
-fn picked(vs: Cow<Value>, at: impl Iterator<Item = usize>) -> Vec<Value> {
+// The `n` elements of a list at `at`, in that order: moved out of a list
+// the evaluation owns, copied out of one it borrows. Reserved for exactly
+// `n`, so that boxing the result does not reallocate it.
+fn picked(vs: Cow<Value>, at: impl Iterator<Item = usize>, n: usize) -> Box<[Value]> {
+    let mut out = Vec::with_capacity(n);
     match vs {
         Cow::Owned(Value::List(xs)) => {
-            let mut slots: Vec<Option<Value>> = xs.into_iter().map(Some).collect();
-            at.filter_map(|i| slots[i].take()).collect()
+            let mut slots: Vec<Option<Value>> = xs.into_vec().into_iter().map(Some).collect();
+            out.extend(at.filter_map(|i| slots[i].take()));
         }
-        other => match &*other {
-            Value::List(xs) => at.map(|i| xs[i].clone()).collect(),
-            _ => vec![],
-        },
+        other => {
+            if let Value::List(xs) = &*other {
+                out.extend(at.map(|i| xs[i].clone()));
+            }
+        }
     }
+    out.into_boxed_slice()
 }
 
 fn eval_many(st: &mut St, env: &Env, es: &[Expr]) -> Run<Vec<Value>> {
@@ -1465,7 +1475,7 @@ fn int(v: Value) -> Run<i64> {
 
 fn text(v: Value) -> Run<String> {
     match v {
-        Value::Text(t) => Ok(t),
+        Value::Text(t) => Ok(t.into_string()),
         other => type_error("Text", &other),
     }
 }
@@ -1479,7 +1489,7 @@ fn list_ref(v: &Value) -> Run<&[Value]> {
 
 fn strct(v: Value) -> Run<BTreeMap<FieldName, Value>> {
     match v {
-        Value::Struct(m) => Ok(m),
+        Value::Struct(m) => Ok(*m),
         other => type_error("Struct", &other),
     }
 }

@@ -471,7 +471,7 @@ fn tagged(here: &[&str], want: &str, v: &Value) -> D<Fields> {
 fn tagged_any(here: &[&str], v: &Value) -> D<(String, Fields)> {
     match v {
         Value::Struct(fs) => match fs.get("t") {
-            Some(Value::Text(t)) => Ok((t.clone(), fs.clone())),
+            Some(Value::Text(t)) => Ok((t.to_string(), (**fs).clone())),
             _ => err(here, "a node needs a text tag \"t\""),
         },
         _ => err(here, "expected a struct"),
@@ -508,7 +508,7 @@ fn struct_map<'a>(here: &[&str], v: &'a Value) -> D<&'a Fields> {
 
 fn text(here: &[&str], v: &Value) -> D<String> {
     match v {
-        Value::Text(t) => Ok(t.clone()),
+        Value::Text(t) => Ok(t.to_string()),
         _ => err(here, "expected text"),
     }
 }

@@ -50,7 +50,7 @@ fn value(j: &serde_json::Value) -> Value {
         J::Null => Value::Null,
         J::Bool(b) => Value::Bool(*b),
         J::Number(n) => Value::Int(n.as_i64().expect("an integer")),
-        J::String(s) => Value::Text(s.clone()),
+        J::String(s) => Value::from(s.clone()),
         J::Array(xs) => Value::List(xs.iter().map(value).collect()),
         J::Object(m) => {
             if m.len() == 1 {
@@ -58,13 +58,13 @@ fn value(j: &serde_json::Value) -> Value {
                     return Value::Int(s.parse().expect("an int"));
                 }
                 if let Some(J::String(s)) = m.get("$bytes") {
-                    return Value::Bytes(decode_hex(s).expect("hex"));
+                    return Value::bytes(decode_hex(s).expect("hex"));
                 }
                 if let Some(J::String(s)) = m.get("$id") {
                     return Value::Id(id_of_text(s).expect("an id"));
                 }
             }
-            Value::Struct(m.iter().map(|(k, v)| (k.clone(), value(v))).collect())
+            Value::Struct(Box::new(m.iter().map(|(k, v)| (k.clone(), value(v))).collect()))
         }
     }
 }
@@ -151,7 +151,7 @@ fn codec() {
 fn check_order(v: &serde_json::Value) -> Result<(), String> {
     let mut input = value(&v["input"]).as_list();
     input.sort_by(compare_value);
-    ensure_eq!(Value::List(input), value(&v["sorted"]), "sorted");
+    ensure_eq!(Value::from(input), value(&v["sorted"]), "sorted");
     Ok(())
 }
 
@@ -210,9 +210,9 @@ fn check_hash(v: &serde_json::Value) -> Result<(), String> {
             t["digest"].as_str().unwrap_or(""),
             "{name}: the digest is the sum of the leaves"
         );
-        pairs.push(Value::List(vec![Value::text(name), Value::Bytes(digest)]));
+        pairs.push(Value::list(vec![Value::text(name), Value::bytes(digest)]));
     }
-    ensure_eq!(hex(&ark::sha256::sha256(&encode(&Value::List(pairs)))), want, "the hash of the pairs");
+    ensure_eq!(hex(&ark::sha256::sha256(&encode(&Value::from(pairs)))), want, "the hash of the pairs");
     ensure_eq!(hex(&state_hash(&st)), want, "state hash");
     Ok(())
 }
@@ -393,12 +393,7 @@ fn eval_cases(p: &Path, v: &serde_json::Value) {
                 .map(|x| (x["field"].as_str().unwrap().to_string(), x["message"].as_str().unwrap().to_string()))
                 .collect();
             assert_eq!(got.messages, want, "{}: {name} messages", p.display());
-            assert_eq!(
-                Value::Struct(got.values),
-                value(&case["normalised"]),
-                "{}: {name} normalised",
-                p.display()
-            );
+            assert_eq!(Value::from(got.values), value(&case["normalised"]), "{}: {name} normalised", p.display());
         }
     }
 }
@@ -442,7 +437,7 @@ fn check_view(v: &serde_json::Value) -> Result<(), String> {
         provided,
     };
     let mut view = hydrate(sch, &plan, env, &st).map_err(|e| format!("hydrate: {e:?}"))?;
-    ensure_eq!(Value::List(view.rows()), value(&v["rows_before"]), "the answer at hydrate");
+    ensure_eq!(Value::from(view.rows()), value(&v["rows_before"]), "the answer at hydrate");
     let batches = value(&v["batches"]).as_list();
     let steps = v["steps"].as_array().ok_or("no steps")?;
     ensure_eq!(batches.len(), steps.len(), "a step per batch");
@@ -467,7 +462,7 @@ fn check_view(v: &serde_json::Value) -> Result<(), String> {
                 "batch {i} patches"
             );
         }
-        ensure_eq!(Value::List(view.rows()), value(&step["rows"]), "batch {i} rows");
+        ensure_eq!(Value::from(view.rows()), value(&step["rows"]), "batch {i} rows");
         ensure_eq!(splice(&patches, &before), view.rows(), "batch {i} splice");
     }
     Ok(())
@@ -495,7 +490,7 @@ fn entries_of(v: &serde_json::Value) -> Vec<(Seq, Entry)> {
             let seq = e.field("seq").as_int();
             let mut m = e.as_struct().clone();
             m.remove("seq");
-            (seq, entry_from_value(&Value::Struct(m)).unwrap())
+            (seq, entry_from_value(&Value::from(m)).unwrap())
         })
         .collect()
 }

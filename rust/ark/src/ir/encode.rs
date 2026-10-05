@@ -17,7 +17,7 @@ fn node(t: &str, fields: Vec<(&str, Value)>) -> Value {
     for (k, v) in fields {
         m.insert(k.into(), v);
     }
-    Value::Struct(m)
+    Value::from(m)
 }
 
 fn txt(s: &str) -> Value {
@@ -121,7 +121,10 @@ pub fn ty_value(t: &Ty) -> Value {
         Ty::List(t) => node("list", vec![("of", ty_value(t))]),
         Ty::Struct(fs) => node(
             "struct",
-            vec![("fields", Value::Struct(fs.iter().map(|(k, v)| (k.clone(), ty_value(v))).collect()))],
+            vec![(
+                "fields",
+                Value::Struct(Box::new(fs.iter().map(|(k, v)| (k.clone(), ty_value(v))).collect())),
+            )],
         ),
     }
 }
@@ -134,7 +137,7 @@ pub fn function_value(deps: &BTreeMap<String, Value>, fn0: &Function) -> Value {
     let f = normalize(fn0);
     let mut fields = vec![
         ("name", txt(&f.name)),
-        ("deps", Value::Struct(deps.clone())),
+        ("deps", Value::from(deps.clone())),
         ("kind", txt(f.kind.name())),
         ("router", f.router.as_deref().map(txt).unwrap_or(Value::Null)),
         ("uses", list(|u| txt(u), &f.uses)),
@@ -232,7 +235,7 @@ fn expr(e: &Expr) -> Value {
         Expr::Field(e, f) => node("field", vec![("e", expr(e)), ("name", txt(f))]),
         Expr::Struct(fs) => node(
             "struct",
-            vec![("fields", Value::Struct(fs.iter().map(|(k, v)| (k.clone(), expr(v))).collect()))],
+            vec![("fields", Value::Struct(Box::new(fs.iter().map(|(k, v)| (k.clone(), expr(v))).collect())))],
         ),
         Expr::List(es) => node("list", vec![("items", list(expr, es))]),
         Expr::Some(e) => node("some", vec![("e", expr(e))]),
@@ -329,7 +332,7 @@ fn related(r: &Related) -> Value {
         vec![
             ("name", txt(&r.name)),
             ("sym", int(r.sym)),
-            ("on", list(|(c, e)| Value::List(vec![txt(c), expr(e)]), &r.on)),
+            ("on", list(|(c, e)| Value::list(vec![txt(c), expr(e)]), &r.on)),
             ("plan", plan(&r.plan)),
         ],
     )

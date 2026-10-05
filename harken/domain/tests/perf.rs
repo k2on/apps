@@ -703,7 +703,7 @@ fn perf_scanner_known_files() {
             .scan("media")
             .into_iter()
             .filter_map(|r| match r.get("file") {
-                Some(Value::Text(f)) if !f.is_empty() => Some(f.clone()),
+                Some(Value::Text(f)) if !f.is_empty() => Some(f.to_string()),
                 _ => None,
             })
             .collect();

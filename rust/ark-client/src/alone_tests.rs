@@ -333,7 +333,7 @@ fn leave_more_intents_and_join_again() {
     let order: Vec<String> = items
         .iter()
         .map(|r| match &r["track_id"] {
-            Value::Text(t) => t.clone(),
+            Value::Text(t) => t.to_string(),
             v => panic!("{v:?}"),
         })
         .collect();

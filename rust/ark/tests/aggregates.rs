@@ -810,7 +810,7 @@ fn a_fold_that_overflows_on_the_way_answers_its_total() {
     }
     // A procedure's fold keeps checked arithmetic step by step (§6.5): a
     // native runs it as a Rust closure, which no recogniser sees into.
-    let xs = Value::List(vec![Value::int(MAX), Value::int(5), Value::int(-10)]);
+    let xs = Value::list(vec![Value::int(MAX), Value::int(5), Value::int(-10)]);
     assert!(ark::eval::eval_helper(built, "sum_of", vec![xs]).is_err());
 }
 

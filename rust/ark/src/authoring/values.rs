@@ -119,19 +119,19 @@ impl From<&str> for Text {
 
 impl From<String> for Text {
     fn from(s: String) -> Text {
-        Text(cx::lit(Value::Text(s)))
+        Text(cx::lit(Value::from(s)))
     }
 }
 
 impl From<&[u8]> for Bytes {
     fn from(b: &[u8]) -> Bytes {
-        Bytes(cx::lit(Value::Bytes(b.to_vec())))
+        Bytes(cx::lit(Value::Bytes(b.into())))
     }
 }
 
 impl From<Vec<u8>> for Bytes {
     fn from(b: Vec<u8>) -> Bytes {
-        Bytes(cx::lit(Value::Bytes(b)))
+        Bytes(cx::lit(Value::bytes(b)))
     }
 }
 
@@ -600,7 +600,7 @@ impl<T: Data> List<T> {
 
     /// `EMap`.
     pub fn map<U: Data>(self, mut f: impl FnMut(T) -> U) -> List<U> {
-        self.each(&mut |x| f(x).to_h(), Expr::Map, |_, rs| Value::List(rs))
+        self.each(&mut |x| f(x).to_h(), Expr::Map, |_, rs| Value::from(rs))
     }
     /// `EFilter`.
     pub fn filter(self, mut f: impl FnMut(T) -> Bool) -> List<T> {
@@ -704,8 +704,8 @@ impl Ctx {
         } else {
             let (u, s) = cx::native(|n| (n.ctx.user.clone(), n.ctx.session.clone()));
             Ctx {
-                user: Text(cx::lit(Value::Text(u))),
-                session: Text(cx::lit(Value::Text(s))),
+                user: Text(cx::lit(Value::from(u))),
+                session: Text(cx::lit(Value::from(s))),
             }
         }
     }

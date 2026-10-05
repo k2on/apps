@@ -393,7 +393,7 @@ fn a_lookup_of_nothing_records_nothing() {
     let aria = entries.iter().find(|e| e.key == [t("s1")]).unwrap();
     assert_eq!(
         aria.deps,
-        vec![(0, Value::List(vec![t("bwv988#1")])), (1, Value::List(vec![t("bwv988")]))]
+        vec![(0, Value::list(vec![t("bwv988#1")])), (1, Value::list(vec![t("bwv988")]))]
     );
 }
 
@@ -883,5 +883,5 @@ fn every_path_to_a_query_is_the_one_evaluator() {
     let rows = eval::select_plan(&built.schema, &bare, &st).unwrap();
     let ids: Vec<Value> = rows.iter().map(|r| r.field("id")).collect();
     assert_eq!(ids, [t("s4"), t("s1"), t("s2")]);
-    assert_eq!(st.select(&bare), Value::List(rows));
+    assert_eq!(st.select(&bare), Value::from(rows));
 }

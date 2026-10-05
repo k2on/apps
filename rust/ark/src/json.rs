@@ -150,14 +150,14 @@ impl Parser<'_> {
             Some(b'n') => self.word("null", Value::Null),
             Some(b't') => self.word("true", Value::Bool(true)),
             Some(b'f') => self.word("false", Value::Bool(false)),
-            Some(b'"') => self.string().map(Value::Text),
+            Some(b'"') => self.string().map(Value::from),
             Some(b'[') => {
                 self.at += 1;
                 let mut xs = vec![];
                 self.skip();
                 if self.s.get(self.at) == Some(&b']') {
                     self.at += 1;
-                    return Ok(Value::List(xs));
+                    return Ok(Value::from(xs));
                 }
                 loop {
                     xs.push(self.value(depth + 1)?);
@@ -166,7 +166,7 @@ impl Parser<'_> {
                         Some(b',') => self.at += 1,
                         Some(b']') => {
                             self.at += 1;
-                            return Ok(Value::List(xs));
+                            return Ok(Value::from(xs));
                         }
                         _ => return Err(self.fail("expected `,` or `]`")),
                     }
@@ -185,7 +185,7 @@ impl Parser<'_> {
         self.skip();
         if self.s.get(self.at) == Some(&b'}') {
             self.at += 1;
-            return Ok(Value::Struct(m));
+            return Ok(Value::from(m));
         }
         loop {
             self.skip();
@@ -218,13 +218,13 @@ impl Parser<'_> {
             };
             match (k.as_str(), v) {
                 ("$int", Value::Text(s)) => return wrapped("a decimal integer", s.parse().ok().map(Value::Int)),
-                ("$bytes", Value::Text(s)) => return wrapped("hex", decode_hex(s).map(Value::Bytes)),
+                ("$bytes", Value::Text(s)) => return wrapped("hex", decode_hex(s).map(Value::bytes)),
                 ("$id", Value::Text(s)) => return wrapped("an 8-4-4-4-12 id", id_of_text(s).map(Value::Id)),
                 ("$int" | "$bytes" | "$id", _) => return wrapped("text", None),
                 _ => {}
             }
         }
-        Ok(Value::Struct(m))
+        Ok(Value::from(m))
     }
 
     fn number(&mut self) -> Result<Value, JsonError> {
@@ -319,7 +319,7 @@ mod tests {
     #[test]
     fn the_dialect() {
         let v = Value::record(vec![
-            ("b", Value::List(vec![Value::int(-1), Value::Bytes(vec![0xab, 1]), Value::Id([0; 16])])),
+            ("b", Value::list(vec![Value::int(-1), Value::bytes(vec![0xab, 1]), Value::Id([0; 16])])),
             ("a", Value::text("q\"\\\u{1f}水")),
             ("c", Value::Null),
             ("d", Value::Bool(true)),
@@ -340,11 +340,11 @@ mod tests {
         id[0] = 0xde;
         id[15] = 0x01;
         let v = Value::record(vec![
-            ("ints", Value::List(vec![Value::int(i64::MIN), Value::int(0), Value::int(i64::MAX)])),
+            ("ints", Value::list(vec![Value::int(i64::MIN), Value::int(0), Value::int(i64::MAX)])),
             ("text", Value::text("tab\there \"quoted\" \\ 水 \u{1f3b5} \u{0}")),
-            ("bytes", Value::Bytes(vec![0, 255, 16])),
+            ("bytes", Value::bytes(vec![0, 255, 16])),
             ("id", Value::Id(id)),
-            ("empty", Value::List(vec![])),
+            ("empty", Value::list(vec![])),
             ("nested", Value::record(vec![("x", Value::Null), ("y", Value::Bool(false))])),
             ("nothing", Value::record::<String>(vec![])),
         ]);
@@ -361,7 +361,7 @@ mod tests {
             Value::record(vec![
                 ("n", Value::int(3)),
                 ("s", Value::text("a/bé\u{1f3b5}\n")),
-                ("l", Value::List(vec![Value::int(-7), Value::Bool(true), Value::Null])),
+                ("l", Value::list(vec![Value::int(-7), Value::Bool(true), Value::Null])),
             ])
         );
         // One key that merely looks like a wrapper's is a struct.

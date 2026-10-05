@@ -96,7 +96,7 @@ pub fn rows_tracks(rows: &[Value]) -> Vec<String> {
     rows.iter()
         .map(|r| match r {
             Value::Struct(m) => match &m["track_id"] {
-                Value::Text(t) => t.clone(),
+                Value::Text(t) => t.to_string(),
                 other => panic!("{other:?}"),
             },
             other => panic!("{other:?}"),

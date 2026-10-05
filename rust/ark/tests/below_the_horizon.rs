@@ -167,7 +167,7 @@ fn a_snapshot_read_as_it_is_decoded_is_the_snapshot_read_whole() {
     let m = Module::new((lists(),));
     let built = m.build();
     let (sch, bodies) = (built.schema.clone(), ark::hash::closures(built));
-    let strct = |pairs: Vec<(&str, Value)>| Value::Struct(pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect());
+    let strct = |pairs: Vec<(&str, Value)>| Value::record(pairs);
     let playlist = |n: u16| {
         vec![
             ("id", Value::Id(key(1, n))),
@@ -270,7 +270,7 @@ fn a_snapshot_read_as_it_is_decoded_is_the_snapshot_read_whole() {
             row.extend(canon::encode(v));
         }
         let Value::Struct(mut fs) = frame(None).to_value() else { unreachable!() };
-        fs.insert("rows".into(), strct(vec![("playlist", Value::List(vec![Value::Int(0)]))]));
+        fs.insert("rows".into(), strct(vec![("playlist", Value::list(vec![Value::Int(0)]))]));
         let b = canon::encode(&Value::Struct(fs));
         // The one element, `0x00`, after the list's head, `0x81`.
         let at = b.windows(2).position(|w| w == [0x81, 0x00]).unwrap();
@@ -289,7 +289,7 @@ fn a_snapshot_read_as_it_is_decoded_is_the_snapshot_read_whole() {
         ("unsorted", by_hand(&[("nm", Value::Int(1)), ("id", Value::Id(key(1, 1)))])),
         ("duplicate", by_hand(&[("id", Value::Id(key(1, 1))), ("id", Value::Id(key(1, 1)))])),
         ("not a list", with_rows(strct(vec![("playlist", Value::Int(1))]))),
-        ("not a struct", with_rows(Value::List(vec![]))),
+        ("not a struct", with_rows(Value::list(vec![]))),
         ("cut short", cut),
         ("trailing", trailing),
     ];

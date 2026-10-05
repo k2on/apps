@@ -554,9 +554,9 @@ pub fn views(out: &Out) {
                 ("query", quoted(name)),
                 ("plan", json(&plan_value)),
                 ("ctx", json(&ctx_value)),
-                ("args", json(&Value::Struct(args.clone()))),
+                ("args", json(&Value::from(args.clone()))),
                 ("store_before", json(&st0.store_value())),
-                ("rows_before", json(&Value::List(rows_before.clone()))),
+                ("rows_before", json(&Value::from(rows_before.clone()))),
                 (
                     "batches",
                     json(&Value::List(
@@ -568,7 +568,7 @@ pub fn views(out: &Out) {
                     array(steps.iter().map(|(ps, rows)| {
                         obj(&[
                             ("patches", json(&Value::List(ps.iter().map(patch_value).collect()))),
-                            ("rows", json(&Value::List(rows.clone()))),
+                            ("rows", json(&Value::from(rows.clone()))),
                         ])
                     })),
                 ),
@@ -790,9 +790,9 @@ fn more(out: &Out) {
             ("query", quoted(name)),
             ("plan", json(&plan_value)),
             ("ctx", json(&ctx_value)),
-            ("args", json(&Value::Struct(args.clone()))),
+            ("args", json(&Value::from(args.clone()))),
             ("store_before", json(&st0.store_value())),
-            ("rows_before", json(&Value::List(rows_before))),
+            ("rows_before", json(&Value::from(rows_before))),
             (
                 "batches",
                 json(&Value::List(
@@ -804,7 +804,7 @@ fn more(out: &Out) {
                 array(steps.iter().map(|(ps, rows)| {
                     obj(&[
                         ("patches", json(&Value::List(ps.iter().map(patch_value).collect()))),
-                        ("rows", json(&Value::List(rows.clone()))),
+                        ("rows", json(&Value::from(rows.clone()))),
                     ])
                 })),
             ),
@@ -893,9 +893,9 @@ fn fuzzed_sums(out: &Out) {
             ("ctx", json(&v.field("ctx"))),
             ("args", json(&v.field("args"))),
             ("store_before", json(&v.field("store_before"))),
-            ("rows_before", json(&Value::List(rows_before))),
+            ("rows_before", json(&Value::from(rows_before))),
             ("batches", json(&v.field("batches"))),
-            ("steps", array(steps.into_iter().map(|rows| obj(&[("rows", json(&Value::List(rows)))])))),
+            ("steps", array(steps.into_iter().map(|rows| obj(&[("rows", json(&Value::from(rows)))])))),
             ("fuzz", json(&v.field("fuzz"))),
         ];
         let recorded = v.field("rows_before") == json_rows(&parts[6].1)

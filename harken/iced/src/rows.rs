@@ -17,7 +17,7 @@ fn get(v: &Value, k: &str) -> Value {
 
 pub(crate) fn text(v: &Value, k: &str) -> String {
     match get(v, k) {
-        Value::Text(t) => t,
+        Value::Text(t) => t.into_string(),
         _ => String::new(),
     }
 }
@@ -285,7 +285,7 @@ mod tests {
     /// frame. Falsified by reading with `Value::field`: it panics.
     #[test]
     fn a_missing_field_is_empty() {
-        let v = Value::Struct([("name".to_string(), Value::text("Water Music"))].into_iter().collect());
+        let v = Value::record(vec![("name", Value::text("Water Music"))]);
         let a = Album::from_value(&v);
         assert_eq!((a.name.as_str(), a.creator.as_str(), a.tracks), ("Water Music", "", 0));
     }

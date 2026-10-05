@@ -13,7 +13,7 @@ use crate::library;
 
 fn text(v: Result<Value, ark::eval::EvalFault>) -> String {
     match v {
-        Ok(Value::Text(t)) => t,
+        Ok(Value::Text(t)) => t.into_string(),
         other => unreachable!("a key helper returns text and never refuses: {other:?}"),
     }
 }
@@ -251,7 +251,7 @@ mod tests {
                 Text::from("Favorites"),
             )
         }));
-        assert_eq!(taken, Value::Text("Favorites (61)".into()));
+        assert_eq!(taken, Value::text("Favorites (61)"));
         assert_eq!(siblings(&all, "Favorites").len(), 1 + 100 + 3);
     }
 }

@@ -175,7 +175,7 @@ fn node(t: &str, fields: Vec<(&str, Value)>) -> Value {
     for (k, v) in fields {
         m.insert(k.into(), v);
     }
-    Value::Struct(m)
+    Value::from(m)
 }
 
 fn txt(s: &str) -> Value {
@@ -187,7 +187,7 @@ fn int(n: i64) -> Value {
 }
 
 fn strct(pairs: Vec<(&str, Value)>) -> Value {
-    Value::Struct(pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect())
+    Value::Struct(Box::new(pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect()))
 }
 
 // A log's identity on the wire: `log`, an id, and absent where none is
@@ -206,7 +206,7 @@ fn named<'a>(mut fields: Vec<(&'a str, Value)>, id: &Option<Id>) -> Vec<(&'a str
 // (`docs/plan-db.md` D1).
 fn of_module<'a>(mut fields: Vec<(&'a str, Value)>, module: &Option<Vec<u8>>) -> Vec<(&'a str, Value)> {
     if let Some(m) = module {
-        fields.push(("module", Value::Bytes(m.clone())));
+        fields.push(("module", Value::Bytes(m[..].into())));
     }
     fields
 }
@@ -216,9 +216,9 @@ pub fn entry_value(e: &Entry) -> Value {
         ("id", Value::Id(e.id)),
         ("actor", txt(&e.actor)),
         ("session", txt(&e.session)),
-        ("fn", Value::Bytes(e.fn_hash.clone())),
-        ("args", Value::Struct(e.args.clone())),
-        ("autos", Value::Struct(e.autos.clone())),
+        ("fn", Value::Bytes(e.fn_hash[..].into())),
+        ("args", Value::from(e.args.clone())),
+        ("autos", Value::from(e.autos.clone())),
     ])
 }
 
@@ -254,10 +254,12 @@ impl ClientMsg {
             ClientMsg::NeedFacts { seqs } => node("need_facts", vec![("seqs", Value::List(seqs.iter().map(|n| int(*n)).collect()))]),
             ClientMsg::NeedClosures { hashes } => node(
                 "need_closures",
-                vec![("hashes", Value::List(hashes.iter().map(|h| Value::Bytes(h.clone())).collect()))],
+                vec![("hashes", Value::List(hashes.iter().map(|h| Value::Bytes(h[..].into())).collect()))],
             ),
-            ClientMsg::Verify { seq, hash, log_id } => node("verify", named(vec![("seq", int(*seq)), ("hash", Value::Bytes(hash.clone()))], log_id)),
-            ClientMsg::Say { frame } => node("say", vec![("say", Value::Bytes(frame.clone()))]),
+            ClientMsg::Verify { seq, hash, log_id } => {
+                node("verify", named(vec![("seq", int(*seq)), ("hash", Value::Bytes(hash[..].into()))], log_id))
+            }
+            ClientMsg::Say { frame } => node("say", vec![("say", Value::Bytes(frame[..].into()))]),
         }
     }
 
@@ -384,10 +386,10 @@ impl ServerMsg {
                     named(
                         vec![
                             ("seq", int(*seq)),
-                            ("hash", Value::Bytes(hash.clone())),
+                            ("hash", Value::Bytes(hash[..].into())),
                             (
                                 "rows",
-                                Value::Struct(rows.iter().map(|(t, vs)| (t.clone(), Value::List(vs.clone()))).collect()),
+                                Value::Struct(Box::new(rows.iter().map(|(t, vs)| (t.clone(), Value::List(vs[..].into()))).collect())),
                             ),
                         ],
                         log_id,
@@ -415,19 +417,19 @@ impl ServerMsg {
                     Value::List(
                         items
                             .iter()
-                            .map(|(h, c)| strct(vec![("hash", Value::Bytes(h.clone())), ("closure", closure_value(c))]))
+                            .map(|(h, c)| strct(vec![("hash", Value::Bytes(h[..].into())), ("closure", closure_value(c))]))
                             .collect(),
                     ),
                 )],
             ),
             ServerMsg::Agree { seq, hash, ok, unknown } => {
-                let mut fields = vec![("seq", int(*seq)), ("hash", Value::Bytes(hash.clone())), ("ok", Value::Bool(*ok))];
+                let mut fields = vec![("seq", int(*seq)), ("hash", Value::Bytes(hash[..].into())), ("ok", Value::Bool(*ok))];
                 if *unknown {
                     fields.push(("unknown", Value::Bool(true)));
                 }
                 node("agree", fields)
             }
-            ServerMsg::Heard { frame } => node("heard", vec![("hear", Value::Bytes(frame.clone()))]),
+            ServerMsg::Heard { frame } => node("heard", vec![("hear", Value::Bytes(frame[..].into()))]),
         }
     }
 
@@ -547,7 +549,7 @@ impl Snapshot {
                     .filter_map(|v| match v {
                         Value::Struct(m) => Some(match tbl {
                             Some(tbl) => Row::stored_in(tbl, &m),
-                            None => Row::from_struct(m),
+                            None => Row::from_struct(*m),
                         }),
                         _ => None,
                     })
@@ -630,14 +632,14 @@ fn need<'a>(m: &'a BTreeMap<FieldName, Value>, k: &str) -> D<&'a Value> {
 
 fn text(v: &Value) -> D<String> {
     match v {
-        Value::Text(t) => Ok(t.clone()),
+        Value::Text(t) => Ok(t.to_string()),
         _ => bad("expected text"),
     }
 }
 
 fn bytes(v: &Value) -> D<Vec<u8>> {
     match v {
-        Value::Bytes(b) => Ok(b.clone()),
+        Value::Bytes(b) => Ok(b.to_vec()),
         _ => bad("expected bytes"),
     }
 }

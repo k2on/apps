@@ -60,7 +60,7 @@ fn record(tag: Option<&str>, fields: Vec<(&str, Value)>) -> Value {
     if let Some(t) = tag {
         m.insert("t".into(), Value::text(t));
     }
-    Value::Struct(m)
+    Value::from(m)
 }
 
 fn fields(v: &Value) -> Decoded<&BTreeMap<String, Value>> {
@@ -76,7 +76,7 @@ fn get<'a>(m: &'a BTreeMap<String, Value>, k: &str) -> Decoded<&'a Value> {
 
 fn text(m: &BTreeMap<String, Value>, k: &str) -> Decoded<String> {
     match get(m, k)? {
-        Value::Text(t) => Ok(t.clone()),
+        Value::Text(t) => Ok(t.to_string()),
         other => bad(format!("{k}: expected text, got {other:?}")),
     }
 }
@@ -102,7 +102,7 @@ fn boolean(m: &BTreeMap<String, Value>, k: &str) -> Decoded<bool> {
 fn opt_text(m: &BTreeMap<String, Value>, k: &str) -> Decoded<Option<String>> {
     match get(m, k)? {
         Value::Null => Ok(None),
-        Value::Text(t) => Ok(Some(t.clone())),
+        Value::Text(t) => Ok(Some(t.to_string())),
         other => bad(format!("{k}: expected text or null, got {other:?}")),
     }
 }

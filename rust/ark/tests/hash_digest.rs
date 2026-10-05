@@ -422,13 +422,13 @@ fn state_hash_before(st: &dyn Store) -> Vec<u8> {
         .schema()
         .tables()
         .map(|t| {
-            Value::List(vec![
+            Value::list(vec![
                 Value::text(&t.name),
                 Value::List(st.scan(&t.name).into_iter().map(|r| r.into_value()).collect()),
             ])
         })
         .collect();
-    sha256(&encode(&Value::List(tables)))
+    sha256(&encode(&Value::from(tables)))
 }
 
 fn us(d: std::time::Duration) -> f64 {

@@ -105,7 +105,7 @@ pub fn demo(out: &Out) {
     let (st4, ch4) = step(&st3, 11); // lands third: which is only true reading pos DESCENDING
     let step_json = |k: u8, chs: &[Change], st: &MemoryStore| {
         obj(&[
-            ("args", json(&Value::Struct(add_args(k)))),
+            ("args", json(&Value::from(add_args(k)))),
             ("changes", json(&Value::List(chs.iter().map(change_value).collect()))),
             ("store_after", json(&st.store_value())),
             ("hash_after", quoted(&hex(&state_hash(st)))),
@@ -119,7 +119,7 @@ pub fn demo(out: &Out) {
             ("function_hash", quoted(&hex(&add_hash))),
             ("store_before", json(&st0.store_value())),
             ("ctx", json(&ctx_value())),
-            ("autos", json(&Value::Struct(autos.clone()))),
+            ("autos", json(&Value::from(autos.clone()))),
             (
                 "steps",
                 array([
@@ -154,7 +154,7 @@ pub fn demo(out: &Out) {
             ("function_hash", quoted(&hex(&add_hash))),
             ("store_before", json(&st0.store_value())),
             ("ctx", json(&ctx_value())),
-            ("autos", json(&Value::Struct(autos.clone()))),
+            ("autos", json(&Value::from(autos.clone()))),
             (
                 "steps",
                 array([
@@ -284,8 +284,8 @@ pub fn demo(out: &Out) {
                     obj(&[
                         ("name", quoted(what)),
                         ("function", quoted(name)),
-                        ("autos", json(&Value::Struct(a.clone()))),
-                        ("args", json(&Value::Struct(i.clone()))),
+                        ("autos", json(&Value::from(a.clone()))),
+                        ("args", json(&Value::from(i.clone()))),
                         ("refused", want.map(quoted).unwrap_or_else(|| "null".into())),
                     ])
                 })),
@@ -341,9 +341,9 @@ pub fn demo(out: &Out) {
                     obj(&[
                         ("name", quoted(what)),
                         ("function", quoted(name)),
-                        ("input", json(&Value::Struct(input.clone()))),
+                        ("input", json(&Value::from(input.clone()))),
                         ("messages", json(&Value::List(messages))),
-                        ("normalised", json(&Value::Struct(got.values))),
+                        ("normalised", json(&Value::from(got.values))),
                     ])
                 })),
             ),

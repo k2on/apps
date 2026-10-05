@@ -838,8 +838,8 @@ impl Op {
                 peer(i),
                 ("function", Value::text(function.clone())),
                 ("eid", Value::Id(*eid)),
-                ("autos", Value::Struct(autos.clone())),
-                ("args", Value::Struct(args.clone())),
+                ("autos", Value::from(autos.clone())),
+                ("args", Value::from(args.clone())),
             ]),
             Op::Partition(i) => Value::record(vec![t("partition"), peer(i)]),
             Op::Heal(i) => Value::record(vec![t("heal"), peer(i)]),
@@ -873,17 +873,17 @@ impl Op {
             other => Err(format!("{k} is not a bool: {other:?}")),
         };
         let args = |k: &str| match get(k)? {
-            Value::Struct(a) => Ok(a.clone()),
+            Value::Struct(a) => Ok((**a).clone()),
             other => Err(format!("{k} is not a struct: {other:?}")),
         };
         let Value::Text(t) = get("t")? else {
             return Err(format!("an op whose t is not text: {v:?}"));
         };
-        Ok(match t.as_str() {
+        Ok(match &**t {
             "mutate" => Op::Mutate {
                 peer: int("peer")?,
                 function: match get("function")? {
-                    Value::Text(f) => f.clone(),
+                    Value::Text(f) => f.to_string(),
                     other => return Err(format!("function is not text: {other:?}")),
                 },
                 eid: match get("eid")? {
@@ -902,8 +902,8 @@ impl Op {
             "compact" => Op::Compact(int("seq")?),
             "join" => Op::Join {
                 mode: match get("mode")? {
-                    Value::Text(m) if m == "whole" => Mode::Whole,
-                    Value::Text(m) if m == "facts" => Mode::ByFacts,
+                    Value::Text(m) if &**m == "whole" => Mode::Whole,
+                    Value::Text(m) if &**m == "facts" => Mode::ByFacts,
                     other => return Err(format!("mode is neither whole nor facts: {other:?}")),
                 },
                 closures: flag("closures")?,

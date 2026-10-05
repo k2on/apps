@@ -45,7 +45,7 @@ fn playlist(p: &mut PeerProc, name: &str) -> Id {
     p.query("playlists", vec![])
         .iter()
         .find_map(|r| match (&r["name"], &r["id"]) {
-            (Value::Text(n), Value::Id(i)) if n == name => Some(*i),
+            (Value::Text(n), Value::Id(i)) if &**n == name => Some(*i),
             _ => None,
         })
         .unwrap_or_else(|| panic!("{} has no playlist {name}", p.name))

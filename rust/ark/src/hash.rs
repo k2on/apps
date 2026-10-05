@@ -172,9 +172,9 @@ pub fn table_digest<'r>(table: &str, rows: impl IntoIterator<Item = &'r Row>) ->
 pub fn state_hash_of<'t>(digests: impl IntoIterator<Item = (&'t str, Digest)>) -> Vec<u8> {
     let pairs: Vec<Value> = digests
         .into_iter()
-        .map(|(t, d)| Value::List(vec![Value::text(t), Value::Bytes(d.0.to_vec())]))
+        .map(|(t, d)| Value::list(vec![Value::text(t), Value::Bytes(d.0.into())]))
         .collect();
-    sha256(&encode(&Value::List(pairs)))
+    sha256(&encode(&Value::from(pairs)))
 }
 
 /// Which construction of the state hash a stored snapshot's hash is by: 2
@@ -196,13 +196,13 @@ pub fn state_hash_v1(st: &dyn Store) -> Vec<u8> {
         .schema()
         .tables()
         .map(|t| {
-            Value::List(vec![
+            Value::list(vec![
                 Value::text(&t.name),
                 Value::List(st.scan(&t.name).into_iter().map(Row::into_value).collect()),
             ])
         })
         .collect();
-    sha256(&encode(&Value::List(tables)))
+    sha256(&encode(&Value::from(tables)))
 }
 
 /// The state hash of a store by the construction `version` names
@@ -239,7 +239,7 @@ pub fn function_hash(c: &Closure) -> FnHash {
         if let Some(h) = c.helpers.iter().find(|h| h.name == n) {
             deps.insert(
                 n,
-                Value::Bytes(function_hash(&Closure {
+                Value::bytes(function_hash(&Closure {
                     function: h.clone(),
                     helpers: c.helpers.clone(),
                 })),

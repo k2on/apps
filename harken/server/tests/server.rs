@@ -19,7 +19,7 @@ fn playlists(server: &harken_server::Server) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = rows
         .iter()
         .map(|r| match (&r["name"], &r["user_id"]) {
-            (Value::Text(n), Value::Text(u)) => (n.clone(), u.clone()),
+            (Value::Text(n), Value::Text(u)) => (n.to_string(), u.to_string()),
             other => panic!("{other:?}"),
         })
         .collect();

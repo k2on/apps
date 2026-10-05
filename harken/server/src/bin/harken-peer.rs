@@ -260,7 +260,7 @@ fn parse(line: &str) -> Result<Cmd, String> {
         return Err("a command is an object".into());
     };
     let text = |k: &str| match m.get(k) {
-        Some(Value::Text(t)) => Ok(t.clone()),
+        Some(Value::Text(t)) => Ok(t.to_string()),
         Some(_) => Err(format!("`{k}` is text")),
         None => Err(format!("`{k}` is missing")),
     };
@@ -270,7 +270,7 @@ fn parse(line: &str) -> Result<Cmd, String> {
         None => Ok(None),
     };
     let args = || match m.get("args") {
-        Some(Value::Struct(a)) => Ok(a.clone()),
+        Some(Value::Struct(a)) => Ok((**a).clone()),
         Some(_) => Err("`args` is an object".to_string()),
         None => Ok(Args::new()),
     };

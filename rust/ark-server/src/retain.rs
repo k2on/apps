@@ -102,7 +102,7 @@ pub fn decode(bytes: &[u8]) -> Result<Cursors> {
             bail!("a session that is not a record")
         };
         let text = |k: &str| match s.get(k) {
-            Some(Value::Text(t)) => Ok(t.clone()),
+            Some(Value::Text(t)) => Ok(t.to_string()),
             other => bail!("{k}: {other:?}"),
         };
         let int = |k: &str| match s.get(k) {

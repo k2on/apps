@@ -90,7 +90,7 @@ pub fn refuse(msg: impl Into<Text>) -> Effect {
     }
     if !cx::halted() {
         match cx::value(m.to_h()) {
-            Value::Text(t) => cx::refused(t),
+            Value::Text(t) => cx::refused(t.into_string()),
             other => cx::refused(format!("{other:?}")),
         }
     }

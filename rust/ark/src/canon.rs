@@ -81,7 +81,7 @@ fn build(v: &Value, out: &mut Vec<u8>) {
         // is length first and then bytewise — not the map's own order.
         Value::Struct(m) => {
             header(5, m.len() as u64, out);
-            let mut pairs: Vec<(Vec<u8>, &Value)> = m.iter().map(|(k, v)| (encode(&Value::Text(k.clone())), v)).collect();
+            let mut pairs: Vec<(Vec<u8>, &Value)> = m.iter().map(|(k, v)| (encode(&Value::Text(k.as_str().into())), v)).collect();
             pairs.sort_by(|a, b| a.0.cmp(&b.0));
             for (k, v) in pairs {
                 out.extend_from_slice(&k);
@@ -243,9 +243,9 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn text(&mut self, n: u64) -> Result<String, DecodeError> {
+    fn text(&mut self, n: u64) -> Result<Box<str>, DecodeError> {
         let b = self.chunk(n)?;
-        std::str::from_utf8(b).map(|s| s.to_string()).map_err(|_| DecodeError::BadUtf8)
+        std::str::from_utf8(b).map(Box::from).map_err(|_| DecodeError::BadUtf8)
     }
 
     /// One data item, as a value: the inverse of `build`, case for case.
@@ -271,7 +271,7 @@ impl<'a> Parser<'a> {
             }
             2 => {
                 let n = self.argument(ai)?;
-                Ok(Value::Bytes(self.chunk(n)?.to_vec()))
+                Ok(Value::Bytes(self.chunk(n)?.into()))
             }
             3 => {
                 let n = self.argument(ai)?;
@@ -279,15 +279,18 @@ impl<'a> Parser<'a> {
             }
             4 => {
                 let n = self.argument(ai)?;
-                let mut xs = Vec::new();
+                // Every item is at least a byte, so what is left bounds
+                // the count a header may claim; within it the list is
+                // reserved exactly, and boxing it does not reallocate.
+                let mut xs = Vec::with_capacity((n as usize).min(self.s.len()));
                 for _ in 0..n {
                     xs.push(self.value()?);
                 }
-                Ok(Value::List(xs))
+                Ok(Value::List(xs.into_boxed_slice()))
             }
             5 => {
                 let n = self.argument(ai)?;
-                Ok(Value::Struct(self.pairs(n)?))
+                Ok(Value::Struct(Box::new(self.pairs(n)?)))
             }
             6 => {
                 let t = self.argument(ai)?;
@@ -380,7 +383,7 @@ impl<'a> Parser<'a> {
             m.insert(k.to_string(), v);
             Ok(())
         })?;
-        Ok(Value::Struct(m))
+        Ok(Value::Struct(Box::new(m)))
     }
 
     /// `{table: [row, …]}`, each row that is a struct handed to `row`;
@@ -414,11 +417,11 @@ impl<'a> Parser<'a> {
                 row(t, &mut fields);
             }
             if !odd.is_empty() {
-                kept.insert(t.to_string(), Value::List(odd));
+                kept.insert(t.to_string(), Value::from(odd));
             }
             Ok(())
         })?;
-        Ok(Value::Struct(kept))
+        Ok(Value::Struct(Box::new(kept)))
     }
 
     /// What follows tag 37: a byte string of exactly sixteen bytes.
@@ -484,45 +487,29 @@ mod tests {
     /// structs instead of keeping them: the kept struct lost `a`'s `7`.
     #[test]
     fn rows_decoded_in_place_are_the_rows_decoded() {
-        let row = |i: i64| {
-            Value::Struct(
-                [("id", Value::Int(i)), ("nm", Value::text(format!("n{i}"))), ("tg", Value::Null)]
-                    .into_iter()
-                    .map(|(k, v)| (k.to_string(), v))
-                    .collect(),
-            )
-        };
+        let row = |i: i64| Value::record(vec![("id", Value::Int(i)), ("nm", Value::text(format!("n{i}"))), ("tg", Value::Null)]);
         let tables: BTreeMap<String, Value> = [
-            ("a".to_string(), Value::List(vec![row(1), Value::Int(7), row(2)])),
+            ("a".to_string(), Value::list(vec![row(1), Value::Int(7), row(2)])),
             ("b".to_string(), Value::Int(1)),
-            ("c".to_string(), Value::List(vec![row(3)])),
+            ("c".to_string(), Value::list(vec![row(3)])),
         ]
         .into();
-        let whole = Value::Struct(
-            [
-                ("confirmed".to_string(), Value::Struct(tables)),
-                ("t".to_string(), Value::text("replica")),
-            ]
-            .into(),
-        );
+        let whole = Value::record(vec![("confirmed", Value::from(tables)), ("t", Value::text("replica"))]);
         let bytes = encode(&whole);
         let mut seen: Vec<(String, Value)> = vec![];
         let rest = decode_rows(&bytes, &["confirmed"], &mut |t, fields| {
             let m: BTreeMap<String, Value> = fields.drain(..).map(|(k, v)| (k.to_string(), v)).collect();
-            seen.push((t.to_string(), Value::Struct(m)));
+            seen.push((t.to_string(), Value::from(m)));
         })
         .unwrap();
         assert_eq!(seen, vec![("a".into(), row(1)), ("a".into(), row(2)), ("c".into(), row(3))]);
-        let kept = Value::Struct(
-            [
-                (
-                    "confirmed".to_string(),
-                    Value::Struct([("a".to_string(), Value::List(vec![Value::Int(7)])), ("b".to_string(), Value::Int(1))].into()),
-                ),
-                ("t".to_string(), Value::text("replica")),
-            ]
-            .into(),
-        );
+        let kept = Value::record(vec![
+            (
+                "confirmed",
+                Value::record(vec![("a", Value::list(vec![Value::Int(7)])), ("b", Value::Int(1))]),
+            ),
+            ("t", Value::text("replica")),
+        ]);
         assert_eq!(rest, kept);
         // Off the path, the value is `decode`'s.
         assert_eq!(decode_rows(&bytes, &["elsewhere"], &mut |_, _| panic!("no rows here")).unwrap(), whole);

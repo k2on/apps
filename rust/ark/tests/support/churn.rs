@@ -195,7 +195,7 @@ impl<'a> Churn<'a> {
             // Small, so that order keys tie and a limit's edge moves.
             Ty::Int => Value::int(self.rng.below(12) as i64 - 2),
             Ty::Text => Value::text(format!("x{n}")),
-            Ty::Bytes => Value::Bytes(n.to_be_bytes().to_vec()),
+            Ty::Bytes => Value::Bytes(n.to_be_bytes().into()),
             Ty::Id(_) => {
                 let mut b = [0u8; 16];
                 b[..8].copy_from_slice(&0xfeed_u64.to_be_bytes());
@@ -204,8 +204,8 @@ impl<'a> Churn<'a> {
             }
             Ty::Enum(vs) => Value::text(self.rng.pick(vs).cloned().unwrap_or_default()),
             Ty::Option(t) => self.fresh(t),
-            Ty::List(_) => Value::List(vec![]),
-            Ty::Struct(_) => Value::Struct(BTreeMap::new()),
+            Ty::List(_) => Value::list(vec![]),
+            Ty::Struct(_) => Value::from(BTreeMap::new()),
         }
     }
 

@@ -55,34 +55,34 @@ fn apply(f: StdFn, args: &[&Value]) -> Result<Value, StdError> {
     let mismatch = || Err(StdError::TypeMismatch(f));
     match (f, args) {
         // text
-        (Trim, [Text(t)]) => Ok(Text(t.trim_matches(is_white_space).to_string())),
+        (Trim, [Text(t)]) => Ok(Text(t.trim_matches(is_white_space).into())),
         (IsEmpty, [Text(t)]) => Ok(Bool(t.is_empty())),
         (Concat, [List(xs)]) => {
-            let mut out = String::new();
+            let mut out = String::with_capacity(xs.iter().map(|x| if let Text(t) = x { t.len() } else { 0 }).sum());
             for x in xs {
                 match x {
                     Text(t) => out.push_str(t),
                     _ => return mismatch(),
                 }
             }
-            Ok(Text(out))
+            Ok(Text(out.into_boxed_str()))
         }
         (Lower, [Text(t)]) => Ok(Text(t.chars().map(to_lower_simple).collect())),
         (IsAlnum, [Text(t)]) => Ok(Bool(!t.is_empty() && t.chars().all(is_alphanumeric))),
-        (Chars, [Text(t)]) => Ok(List(t.chars().map(|c| Text(c.to_string())).collect())),
+        (Chars, [Text(t)]) => Ok(List(t.chars().map(|c| Text(c.encode_utf8(&mut [0; 4]).into())).collect())),
         (TextLen, [Text(t)]) => Ok(Int(t.chars().count() as i64)),
-        (StartsWith, [Text(t), Text(p)]) => Ok(Bool(t.starts_with(p.as_str()))),
+        (StartsWith, [Text(t), Text(p)]) => Ok(Bool(t.starts_with(&**p))),
         (SplitOnce, [Text(t), Text(sep)]) => {
             if sep.is_empty() {
                 return Ok(Null);
             }
-            Ok(match t.split_once(sep.as_str()) {
+            Ok(match t.split_once(&**sep) {
                 None => Null,
-                Some((before, after)) => Value::record(vec![("before", Text(before.to_string())), ("after", Text(after.to_string()))]),
+                Some((before, after)) => Value::record(vec![("before", Text(before.into())), ("after", Text(after.into()))]),
             })
         }
-        (TextOfInt, [Int(n)]) => Ok(Text(n.to_string())),
-        (Hex, [Bytes(b)]) => Ok(Text(hex(b))),
+        (TextOfInt, [Int(n)]) => Ok(Value::text(n.to_string())),
+        (Hex, [Bytes(b)]) => Ok(Value::text(hex(b))),
         // int
         (Min, [Int(a), Int(b)]) => Ok(Int(*a.min(b))),
         (Max, [Int(a), Int(b)]) => Ok(Int(*a.max(b))),
@@ -102,12 +102,12 @@ fn apply(f: StdFn, args: &[&Value]) -> Result<Value, StdError> {
         }
         // hash
         (Fnv1a64, [Text(t)]) => Ok(Int(fnv1a64(t.as_bytes()) as i64)),
-        (Sha256, [Bytes(b)]) => Ok(Bytes(sha256(b))),
+        (Sha256, [Bytes(b)]) => Ok(Value::bytes(sha256(b))),
         // id
         (IdOfText, [Text(t)]) => Ok(id_of_text(t).map(Value::Id).unwrap_or(Null)),
-        (TextOfId, [Value::Id(i)]) => Ok(Text(text_of_id(i))),
+        (TextOfId, [Value::Id(i)]) => Ok(Value::text(text_of_id(i))),
         (NilId, []) => Ok(Value::Id([0; 16])),
-        (Utf8, [Text(t)]) => Ok(Bytes(t.as_bytes().to_vec())),
+        (Utf8, [Text(t)]) => Ok(Bytes(t.as_bytes().into())),
         // list and option
         (First, [List(xs)]) => Ok(xs.first().cloned().unwrap_or(Null)),
         (Last, [List(xs)]) => Ok(xs.last().cloned().unwrap_or(Null)),

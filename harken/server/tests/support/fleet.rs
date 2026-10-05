@@ -380,7 +380,7 @@ fn int(v: &Value) -> i64 {
 
 fn text(v: &Value) -> String {
     match v {
-        Value::Text(t) => t.clone(),
+        Value::Text(t) => t.to_string(),
         other => panic!("not text: {other:?}"),
     }
 }
@@ -568,7 +568,7 @@ impl PeerProc {
             pending: int(field(&a, "pending")),
             linked: field(&a, "linked") == &Value::Bool(true),
             denied: match field(&a, "denied") {
-                Value::Text(t) => Some(t.clone()),
+                Value::Text(t) => Some(t.to_string()),
                 _ => None,
             },
             user: text(field(&a, "user")),
@@ -626,7 +626,7 @@ impl PeerProc {
             Value::List(rows) => rows
                 .iter()
                 .map(|r| match r {
-                    Value::Struct(m) => m.clone(),
+                    Value::Struct(m) => (**m).clone(),
                     other => panic!("a row: {other:?}"),
                 })
                 .collect(),

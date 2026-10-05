@@ -97,9 +97,9 @@ pub fn vector(seed: u64, m: &Module, f: &Finding) -> (&'static str, String, Stri
                     ("query", quoted(query)),
                     ("plan", json(&plan)),
                     ("ctx", json(&ctx_value(ctx))),
-                    ("args", json(&Value::Struct(args.clone()))),
+                    ("args", json(&Value::from(args.clone()))),
                     ("store_before", json(&base.store_value())),
-                    ("rows_before", json(&Value::List(before))),
+                    ("rows_before", json(&Value::from(before))),
                     (
                         "batches",
                         json(&Value::List(
@@ -110,7 +110,7 @@ pub fn vector(seed: u64, m: &Module, f: &Finding) -> (&'static str, String, Stri
                     // patches, since what a correct engine patches is not
                     // what the broken one did, and the splice is checked
                     // against the answer anyway.
-                    ("steps", array(steps.into_iter().map(|rows| obj(&[("rows", json(&Value::List(rows)))])))),
+                    ("steps", array(steps.into_iter().map(|rows| obj(&[("rows", json(&Value::from(rows)))])))),
                     ("fuzz", fuzz("view", why)),
                 ]),
             )
@@ -158,8 +158,8 @@ pub fn vector(seed: u64, m: &Module, f: &Finding) -> (&'static str, String, Stri
                         array([obj(&[
                             ("name", quoted(&format!("fuzz-{seed}"))),
                             ("function", quoted(function)),
-                            ("autos", json(&Value::Struct(autos.clone()))),
-                            ("args", json(&Value::Struct(args.clone()))),
+                            ("autos", json(&Value::from(autos.clone()))),
+                            ("args", json(&Value::from(args.clone()))),
                             ("refused", refused),
                         ])]),
                     ),

@@ -471,7 +471,7 @@ pub fn decode_replica(bytes: &[u8], schema: &Schema) -> Result<(ReplicaFile, Opt
     let Some(Value::Struct(odd)) = m.get("confirmed") else {
         return Err(bad("no confirmed store"));
     };
-    for (t, rows) in odd {
+    for (t, rows) in odd.iter() {
         let Value::List(rs) = rows else {
             return Err(bad(&format!("rows of {t}")));
         };
@@ -490,7 +490,7 @@ pub fn decode_replica(bytes: &[u8], schema: &Schema) -> Result<(ReplicaFile, Opt
     };
     let optional = |k: &str| match m.get(k) {
         None => Ok(String::new()),
-        Some(Value::Text(t)) => Ok(t.clone()),
+        Some(Value::Text(t)) => Ok(t.to_string()),
         Some(_) => Err(bad(&format!("{k} is not text"))),
     };
     let log_id = match m.get("log") {
@@ -710,7 +710,7 @@ pub fn decode_who(bytes: &[u8]) -> Result<(String, String), Error> {
         return Err(bad("not a login"));
     }
     let text = |k: &str| match m.get(k) {
-        Some(Value::Text(t)) => Ok(t.clone()),
+        Some(Value::Text(t)) => Ok(t.to_string()),
         _ => Err(bad(&format!("no {k}"))),
     };
     Ok((text("user")?, text("session")?))

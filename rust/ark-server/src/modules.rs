@@ -49,12 +49,12 @@ pub fn encode(modules: &[Ran]) -> Vec<u8> {
         .iter()
         .map(|(m, cs)| {
             Value::record(vec![
-                ("module", Value::Bytes(m.clone())),
+                ("module", Value::Bytes(m[..].into())),
                 (
                     "closures",
                     Value::List(
                         cs.iter()
-                            .map(|(h, c)| Value::record(vec![("hash", Value::Bytes(h.clone())), ("closure", closure_value(c))]))
+                            .map(|(h, c)| Value::record(vec![("hash", Value::Bytes(h[..].into())), ("closure", closure_value(c))]))
                             .collect(),
                     ),
                 ),
@@ -80,7 +80,7 @@ fn list(v: &Value) -> Result<&[Value]> {
 
 fn bytes(v: &Value) -> Result<Vec<u8>> {
     match v {
-        Value::Bytes(b) => Ok(b.clone()),
+        Value::Bytes(b) => Ok(b.to_vec()),
         _ => bail!("expected bytes"),
     }
 }

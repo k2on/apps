@@ -1442,3 +1442,68 @@ Not verified:
   every other is checked against.
 - The timings were taken once each, so read them as a scale. The live
   bytes moved by under 0.1 MB between runs.
+
+**And `Value`, twenty-four bytes** (the round after, and the question the
+rows left open above). `Text(Box<str>)`, `Bytes(Box<[u8]>)`,
+`List(Box<[Value]>)` and `Struct(Box<BTreeMap<..>>)`: an id is sixteen
+bytes, so every payload is at most sixteen and the tag takes the word
+before it. `value_is_24_bytes` holds it. A value is never grown in place,
+so nothing relied on the spare capacity a `String` or a `Vec` carries;
+text, bytes and lists are built as one and boxed once, and `canon`'s
+decode boxes text and bytes straight from the input and reserves a list
+for its header's count (bounded by what input is left), so boxing it does
+not reallocate. The ordering, the encoding, the hash, the JSON and the
+vectors are what they were: `spec/vectors` is byte-identical. The one
+internal choice that moved is the range bound an index read builds past
+a prefix (`Secondary::under`), an empty list rather than an empty struct:
+it outranks every scalar as the struct did, and boxing nothing allocates
+nothing.
+
+Release, harken's media rows, live bytes a row, 100,000 rows:
+
+| component | before | after |
+|---|---:|---:|
+| the rows, alone | 393 | 307 |
+| + the primary map | 134 | 139 |
+| + the secondaries | 296 | 280 |
+| + the text indexes | 90 | 90 |
+| one store | 912 | 816 |
+
+Nine columns at eight bytes less is 72; the rows fell by 86, the rest
+being the row's block landing in a smaller size class. The secondaries'
+keys are `Vec<Value>` and fell with it. The primary map's 5 is within
+what the subtraction moves between runs.
+
+| open, 100,000 rows | open ms | resident MB | live MB |
+|---|---:|---:|---:|
+| store, before | 819 | 113.1 | 87.0 |
+| store, after | 816 | 100.6 | 77.8 |
+| client, before | 849 | 115.6 | 87.3 |
+| client, after | 821 | 103.1 | 78.1 |
+| server, before | 1,117 | 202.5 | 163.9 |
+| server, after | 1,091 | 183.5 | 150.4 |
+
+At 400,000 a client is 385 MB resident where it was 436, and 314 MB
+live where it was 351.
+
+What it cost, measured against HEAD built beside it, alternating:
+- **A struct is one allocation more**, its map's box: a `Batch` of 256
+  entries encodes in 13,598 allocations where it was 12,573 and decodes in
+  7,439 where it was 6,420 (ByFacts 21,534 and 12,559, against 19,997 and
+  11,028). The time did not move beyond its spread: Whole 415–574 µs to
+  encode against 515–572, ByFacts 665–1,003 against 843–931. A row
+  decoded in place builds no struct, so a store's open does not pay it.
+- **`perf_a_mutate_alone` and every other flat line stayed flat**, l/f
+  between 0.8 and 1.9 on both sides.
+- **The rebase over 8,000 confirmed rows, one pump, reads slower**: K=10
+  about 26 µs an entry against 20, K=100 about 34 against 25, over four
+  alternating runs each. Callgrind over all of `perf_e` counts 30.62 G
+  instructions against 30.39 G (+0.8%), `compare_value` identical to the
+  instruction, and the same number of reallocations, so it is not more
+  work; it was not found what it is. Not at 500 or 2,000.
+- **"Verify at the head" at 8,000 reads 240–330 µs where it read 3**, and
+  it is the allocator, not the path: it is one call, timed once, and the
+  same call repeated is 2.5, 0.8 and 0.6 µs with fifteen allocations each,
+  HEAD's figures. With glibc's fastbins off the first call is 3 µs and the
+  second takes the spike, so it is wherever the heap left a consolidation
+  pending after the log was built.

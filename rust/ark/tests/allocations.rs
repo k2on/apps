@@ -410,9 +410,9 @@ fn spin() -> ir::Module {
 
 fn spun(m: &ir::Module, n: usize) -> usize {
     let xs: Vec<Value> = (0..n).map(|i| Value::text(format!("element {i}"))).collect();
-    let input = Value::List(xs.clone());
+    let input = Value::from(xs.clone());
     let (allocs, out) = counted(|| eval::eval_helper(m, "spin", vec![input]).unwrap());
-    assert_eq!(out, Value::List(xs));
+    assert_eq!(out, Value::from(xs));
     allocs
 }
 
@@ -466,7 +466,7 @@ fn std_over_a_local(f: ir::StdFn, ret: Ty) -> ir::Module {
 
 fn called(m: &ir::Module, n: usize, want: impl Fn(&[Value]) -> Value) -> usize {
     let xs: Vec<Value> = (0..n).map(|i| Value::text(format!("element {i}"))).collect();
-    let input = Value::List(xs.clone());
+    let input = Value::from(xs.clone());
     let (allocs, out) = counted(|| eval::eval_helper(m, "call", vec![input]).unwrap());
     assert_eq!(out, want(&xs));
     allocs

@@ -60,7 +60,7 @@ fn files(p: &mut PeerProc) -> BTreeSet<String> {
     p.query("library", vec![("playlist_id", Value::Id(NO_PLAYLIST))])
         .iter()
         .map(|r| match &r["file"] {
-            Value::Text(t) => t.clone(),
+            Value::Text(t) => t.to_string(),
             other => panic!("{other:?}"),
         })
         .collect()
@@ -71,7 +71,7 @@ fn playlists(p: &mut PeerProc) -> Vec<(String, Id)> {
     p.query("playlists", vec![])
         .iter()
         .map(|r| match (&r["name"], &r["id"]) {
-            (Value::Text(n), Value::Id(i)) => (n.clone(), *i),
+            (Value::Text(n), Value::Id(i)) => (n.to_string(), *i),
             other => panic!("{other:?}"),
         })
         .collect()
@@ -987,7 +987,7 @@ fn the_scanner_authors_while_a_peer_is_away() {
                     .scan("media")
                     .into_iter()
                     .filter_map(|r| match &r["file"] {
-                        Value::Text(t) => Some(t.clone()),
+                        Value::Text(t) => Some(t.to_string()),
                         _ => None,
                     })
                     .collect()

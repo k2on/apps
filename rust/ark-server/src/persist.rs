@@ -293,7 +293,7 @@ pub fn rehome(dir: &Path, schema: &Schema, fresh: bool) -> Result<bool> {
     };
     let list = |v: Value| -> Result<Vec<Value>> {
         match v {
-            Value::List(xs) => Ok(xs),
+            Value::List(xs) => Ok(xs.into_vec()),
             _ => Err(anyhow!("{}: not a list", path.display())),
         }
     };
@@ -316,7 +316,7 @@ pub fn rehome(dir: &Path, schema: &Schema, fresh: bool) -> Result<bool> {
     // The same module: nothing about the schema moved, so the hash is
     // checked, by the construction it was written by, before it is
     // replaced — what a torn or foreign file would fail.
-    if !fresh && ark::hash::state_hash_by(hashing, &read).map(Value::Bytes) != Some(field(&base, "hash")?) {
+    if !fresh && ark::hash::state_hash_by(hashing, &read).map(Value::bytes) != Some(field(&base, "hash")?) {
         return Err(anyhow!("{}: the snapshot's hash does not match its rows", path.display()));
     }
     let store = widen(&read);
