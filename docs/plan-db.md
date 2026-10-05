@@ -367,8 +367,9 @@ a re-open finds the durable store at the cursor equal to the confirmed
 one. After every session: settle, then every replica at the server's
 head and hash with nothing pending and no divergence, every view its
 confirmed store, the log replayed from its facts and from its intents
-to the same facts and state, and every query driven 25 batches under the
-churn generator over what the session left.
+to the same facts and state, no `Verify` answered "disagreed" (see
+below for what a compaction and a wipe do to that), and every query
+driven 25 batches under the churn generator over what the session left.
 
 **A finding** is shrunk — ops removed by halving chunks, then every
 function the script does not name — while `run_script` still fails the
@@ -477,6 +478,31 @@ sessions, 11,065,173 ops, 272,349 restarts, nothing but the sums.
 `harken/domain/tests/fuzz.rs` holds harken's natives to the interpreter
 under forty of these sessions (falsified by a `create_playlist` that
 reads a host counter).
+
+**The verify check, after D3.** Every answer to a `Verify` was held to
+"agreed" only in a session whose script neither compacted nor wiped:
+below the horizon the authority had no "cannot say", and answered
+"disagreed". D3 gave it one (`Agree::unknown`, recorded as `None` in
+`Client::agreed`), so the check runs after a compaction now: an answer
+of `Some(false)` is a finding, `None` never is, and the summary line
+counts both. Seed 20261005 for 120 s: 7,186 cases, 14,372 sessions,
+1,545 verifies answered and 96 unknown, 0 findings; seed 1, 200 cases:
+41 answered, none unknown (they are rare), 0 findings. Falsified by
+counting `None` as a finding: 43 findings in 60 s, the one written a
+script with a compaction and no wipe.
+
+A wipe is still not held, and that is the protocol's gap rather than
+the check's. A `Verify` names no log, so one said at a sequence of the
+log a client held before the server came back emptied, under a new
+name, is answered against the new log at that sequence whenever it
+arrives before the client has the new log's snapshot — "disagreed",
+about two different logs. With wipes held the 120 s run found exactly
+this (3 sessions, seed 20265421 the first written, a `verify` right
+after a `wipe`); with `--without wipe`, 0 findings over 13,436 sessions.
+So a disagreement in a session that wiped is counted (5 in the run
+above) and not reported. The fix is finding 2's again: the `Verify`
+carries `log`, and an authority on another log answers `unknown`. It
+changes the wire, so it is the coordinator's to decide.
 
 ## D3. A state hash that moves with the store
 
