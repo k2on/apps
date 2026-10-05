@@ -5,8 +5,12 @@ receive the log at all, checked at `Hello` — and left everything finer to
 "the mode that does not claim exactness". `docs/scopes.md` records the
 design that had finer grains and why it went. This is the design that
 brings a finer grain back without bringing scopes back, and the questions
-it needs answered before it is built. **Draft: the decisions marked ▢ are
-open and change the work.**
+it needed answered before it was built. The questions marked ▢ were asked
+and are answered under "Decided" at the end; one answer governs all of
+them: **the engine carries the mechanism and decides no rule.** What a
+person may see or write is the application's declaration, and ArkDB's
+job is that whatever is declared is enforced at the authority, verified
+by the fuzzer, and costs nothing when the declaration is "everyone".
 
 ## What is true today
 
@@ -200,3 +204,41 @@ connected peer — a filter per fact per connection, which is cheap for a
 household and is the thing to measure first (`perf_c_fanout`, beside the
 others); and a peer that was whole becomes a facts peer the day a rule is
 added, which is one snapshot.
+
+## Decided
+
+The four questions were put to the owner, and every answer about *what*
+the rules should be came back the same way: that is harken's decision,
+not ArkDB's. So the engine builds the general mechanism — both rule
+kinds, the lookup form, the per-peer filter, the visibility-change
+facts, the partition digest, the write refusal, roles — exercised by the
+fuzzer over a two-account domain with private rows, whatever harken
+declares. harken then declares a household:
+
+- **Q1, privacy:** harken is one household and everyone sees everything,
+  playlists included — every table `visible(Everyone)`. The engine
+  supports private rows regardless; harken does not use them.
+- **Q2, sharing:** moot for harken, since everyone already sees every
+  playlist. The lookup form of a rule and the visibility-change facts are
+  engine mechanism and are built and fuzzed; no `playlist_member` table.
+- **Q3, library writes:** `add_song` and the other library tables are
+  `writable(Role("library"))`, which the server's scanner account carries
+  by construction; a client pushing one is refused with `Forbidden`.
+  Playlists and their items are `writable(Self::user_id.is(Me))` — one
+  person's list is theirs to edit, though the whole household reads it.
+  **Assumed, not asked:** the question was about adding songs; if a
+  household should edit each other's playlists, that line becomes
+  `Everyone` and nothing else moves.
+- **Q4, roles:** the server's configuration — `services.harken.roles`,
+  a list of account ids per role — and the scanner's own identity. Dev
+  auth takes a role from the name, `alice:library`, and says so at
+  startup. A provider's groups claim is not built; the `Identity.roles`
+  it would feed exists either way.
+- **Q5, no mode switch:** agreed by the answers' shape. A peer whose
+  tables are all `Everyone` to it receives the log whole by intents, so
+  harken's clients are unchanged on the wire until a rule says otherwise.
+
+What this means for the order of work: the engine round is the same size
+it was, the harken part is ten declarations and one NixOS option, and the
+proof that the private case works lives in the fuzzer and the fleet
+rather than in harken.
