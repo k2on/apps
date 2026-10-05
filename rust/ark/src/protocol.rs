@@ -490,6 +490,95 @@ impl ServerMsg {
     }
 }
 
+/// `docs/plan-db.md` D7.4 What a `snapshot` frame brings a client: the
+/// state at `seq` as its rows, each already a [`Row`] — laid out as its
+/// table's where its fields are exactly the table's columns, and otherwise
+/// as it came, a row of no table — and what is not a struct gone, as
+/// [`Client::recv_snapshot`] has always dropped it. The hash is not here:
+/// a client re-opened from a snapshot does not check it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Snapshot {
+    pub seq: Seq,
+    pub rows: BTreeMap<TableName, Vec<Row>>,
+    pub log_id: Option<Id>,
+    pub module: Option<Vec<u8>>,
+}
+
+impl Snapshot {
+    /// A `SnapshotOf`'s rows read as a client of `schema` reads them: each
+    /// struct [`Row::stored_in`] its table, or as it came where the schema
+    /// has no such table; each element that is not a struct dropped, and a
+    /// table left with no rows not named — as [`ServerMsg::decode_for`],
+    /// which is handed rows and not tables, never names one.
+    pub fn of_values(schema: &Schema, seq: Seq, rows: BTreeMap<TableName, Vec<Value>>, log_id: Option<Id>, module: Option<Vec<u8>>) -> Snapshot {
+        let rows = rows
+            .into_iter()
+            .map(|(t, vs)| {
+                let tbl = schema.lookup_table(&t);
+                let rs = vs
+                    .into_iter()
+                    .filter_map(|v| match v {
+                        Value::Struct(m) => Some(match tbl {
+                            Some(tbl) => Row::stored_in(tbl, &m),
+                            None => Row::from_struct(m),
+                        }),
+                        _ => None,
+                    })
+                    .collect();
+                (t, rs)
+            })
+            .filter(|(_, rs): &(TableName, Vec<Row>)| !rs.is_empty())
+            .collect();
+        Snapshot { seq, rows, log_id, module }
+    }
+}
+
+/// A server frame as a client of a known schema reads it
+/// ([`ServerMsg::decode_for`]): a snapshot with its rows built, or any
+/// other frame as [`ServerMsg::from_value`] reads it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Received {
+    Msg(ServerMsg),
+    Snapshot(Snapshot),
+}
+
+impl ServerMsg {
+    /// `docs/plan-db.md` D7.4 A frame from its bytes, for a client of
+    /// `schema`: the one way a client reads the socket. Every frame is
+    /// decoded with its `rows` — which only a `snapshot` has — read as a
+    /// store's rows ([`crate::canon::decode_rows`]), each built into a
+    /// [`Row`] as its fields are read, so the tree of a struct per row that
+    /// [`crate::canon::decode`] would build, and adoption free, is never
+    /// made: a snapshot of a whole store is the largest frame there is, and
+    /// that tree was its high-water mark. What is left of the frame — the
+    /// rest of it, and under `rows` only what is not a list of structs — is
+    /// read by [`ServerMsg::from_value`], so exactly the frames refused
+    /// before are refused, with the same words: `canon`'s for bytes that
+    /// are not canonical, `from_value`'s for a value that is not a frame.
+    /// A frame that is not a snapshot comes back as `from_value` reads it;
+    /// one that carries `rows` all the same has them read and dropped, as
+    /// `from_value` ignores them.
+    pub fn decode_for(bytes: &[u8], schema: &Schema) -> Result<Received, String> {
+        let mut rows: BTreeMap<TableName, Vec<Row>> = BTreeMap::new();
+        let v = crate::canon::decode_rows(bytes, &["rows"], &mut |t, fields| {
+            let row = Row::from_fields(schema.lookup_table(t), fields);
+            match rows.get_mut(t) {
+                Some(rs) => rs.push(row),
+                None => {
+                    rows.insert(t.to_string(), vec![row]);
+                }
+            }
+        })
+        .map_err(|e| e.to_string())?;
+        Ok(match ServerMsg::from_value(&v).map_err(|e| e.to_string())? {
+            // What is left under `rows` is only what is not a struct, which
+            // adoption drops.
+            ServerMsg::SnapshotOf { seq, log_id, module, .. } => Received::Snapshot(Snapshot { seq, rows, log_id, module }),
+            msg => Received::Msg(msg),
+        })
+    }
+}
+
 // Decoding primitives ------------------------------------------------------
 
 type D<T> = Result<T, DecodeError>;
@@ -799,56 +888,14 @@ impl Client {
                     self.replica.receive_facts(n, f);
                 }
             }
-            // Below the horizon, past the head (R6), or of another log than
-            // the one this peer held (Round 4): the confirmed store is
-            // replaced by the snapshot, the cursor moves to it, and the
-            // peer holds the snapshot's log from here; pending intents are
-            // kept and replay on top. Verdicts the app has not yet taken
-            // are kept too, ahead of any the replay makes: a snapshot
-            // replaces what is confirmed, not what this peer was told about
-            // its own intents.
-            //
-            // What earlier frames of this pump placed is applied first, so
-            // that everything before the snapshot is exactly what it was
-            // when each frame advanced (an acknowledgement in the inbox
-            // leaves pending as a confirmed intent, not as one the replay
-            // runs again); the fresh replica has an empty inbox.
-            //
-            // Behind (`docs/plan-db.md` D1), each row is projected to this
-            // peer's table as a fact is; one that cannot be is kept as it
-            // came, as a fact is applied raw (§4.5).
+            // Below the horizon, past the head, or of another log: the
+            // rows read as `decode_for` reads them, then adopted
+            // ([`Client::recv_snapshot`]).
             ServerMsg::SnapshotOf {
                 seq, rows, log_id, module, ..
             } => {
-                self.heard_module(module);
-                self.replica.settle();
-                let behind = self.replica.behind;
-                let mut st = MemoryStore::empty(self.schema.clone());
-                for (t, vs) in rows {
-                    let tbl = self.schema.lookup_table(&t);
-                    for v in vs {
-                        if let Value::Struct(row) = v {
-                            let row = match tbl {
-                                None => Row::from_struct_ref(&row),
-                                Some(tbl) if behind => {
-                                    let raw = Row::from_struct_ref(&row);
-                                    project_row(tbl, &raw).unwrap_or(raw)
-                                }
-                                Some(tbl) => Row::stored_in(tbl, &row),
-                            };
-                            st.apply_change(&Change::Add(t.clone(), row));
-                        }
-                    }
-                }
-                let r = &mut self.replica;
-                let mut opened = Replica::open(r.schema.clone(), r.bodies.clone(), st, seq, r.pending.clone());
-                opened.natives = r.natives.clone();
-                opened.log_id = log_id;
-                opened.behind = r.behind;
-                let mut told = std::mem::take(&mut r.rejections);
-                told.append(&mut opened.rejections);
-                opened.rejections = told;
-                self.replica = opened;
+                let s = Snapshot::of_values(&self.schema, seq, rows, log_id, module);
+                self.recv_snapshot(s);
             }
             ServerMsg::Ack { ids, seqs, log_id } => {
                 // As from a page: a peer that did not know which log it
@@ -889,6 +936,57 @@ impl Client {
             }
             ServerMsg::Agree { seq, ok, unknown, .. } => self.agreed.push((seq, (!unknown).then_some(ok))),
         }
+    }
+
+    /// §12.2 A snapshot from the server, its rows built: what a
+    /// `SnapshotOf` is to [`Client::recv`], and what a transport that reads
+    /// frames with [`ServerMsg::decode_for`] hands over in its place
+    /// (`docs/plan-db.md` D7.4).
+    ///
+    /// Below the horizon, past the head (R6), or of another log than the
+    /// one this peer held (Round 4): the confirmed store is replaced by the
+    /// snapshot, the cursor moves to it, and the peer holds the snapshot's
+    /// log from here; pending intents are kept and replay on top. Verdicts
+    /// the app has not yet taken are kept too, ahead of any the replay
+    /// makes: a snapshot replaces what is confirmed, not what this peer was
+    /// told about its own intents.
+    ///
+    /// What earlier frames of this pump placed is applied first, so that
+    /// everything before the snapshot is exactly what it was when each
+    /// frame advanced (an acknowledgement in the inbox leaves pending as a
+    /// confirmed intent, not as one the replay runs again); the fresh
+    /// replica has an empty inbox.
+    ///
+    /// Behind (`docs/plan-db.md` D1), each row is projected to this peer's
+    /// table as a fact is; one that cannot be is kept as it came, as a fact
+    /// is applied raw (§4.5). Which is why the rows arrive as rows and are
+    /// put in the store here, not as they are decoded: whether this peer is
+    /// behind is said by the frame's `module`, which follows its `rows`.
+    pub fn recv_snapshot(&mut self, s: Snapshot) {
+        let Snapshot { seq, rows, log_id, module } = s;
+        self.heard_module(module);
+        self.replica.settle();
+        let behind = self.replica.behind;
+        let mut st = MemoryStore::empty(self.schema.clone());
+        for (t, rs) in rows {
+            let tbl = self.schema.lookup_table(&t);
+            for row in rs {
+                let row = match tbl {
+                    Some(tbl) if behind => project_row(tbl, &row).unwrap_or(row),
+                    _ => row,
+                };
+                st.apply_change(&Change::Add(t.clone(), row));
+            }
+        }
+        let r = &mut self.replica;
+        let mut opened = Replica::open(r.schema.clone(), r.bodies.clone(), st, seq, r.pending.clone());
+        opened.natives = r.natives.clone();
+        opened.log_id = log_id;
+        opened.behind = r.behind;
+        let mut told = std::mem::take(&mut r.rejections);
+        told.append(&mut opened.rejections);
+        opened.rejections = told;
+        self.replica = opened;
     }
 
     /// §12.2 The end of a pump: the replica's inbox applied once

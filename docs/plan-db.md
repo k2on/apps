@@ -1295,6 +1295,29 @@ what is not a struct instead of keeping it.
 Resident is 1.18 times live now, which is the allocator's rounding. The
 decode, build and free columns of D5's split are one pass, "read".
 
+**And the wire.** The third place a store arrives whole — a `snapshot`
+frame, to a peer below the horizon or of another log — reads the same
+way. `ServerMsg::decode_for` decodes every frame with its `rows` (only a
+snapshot has them) through `decode_rows`, each row built by
+`Row::from_fields` as it is read, and hands what is left to
+`ServerMsg::from_value`, so the same frames are refused in the same
+words. `Client::recv_snapshot` adopts the rows, projecting them there
+when the peer is behind, since the frame's `module` follows its `rows`.
+`ark_client::Peer` reads the socket only this way. The sender and the
+wire are untouched: `spec/vectors` is byte-identical. `perf_d_frame`
+decodes and adopts a frame of harken's media rows into a client, each
+way in a process of its own:
+
+| snapshot frame, 100,000 rows (14.9 MB) | high-water live MB | held MB | resident MB | ms |
+|---|---:|---:|---:|---:|
+| decoded whole, before | 165.0 | 87.0 | 213.8–232.7 | 1,142–1,223 |
+| as read, after | 90.0 | 87.0 | 103.3 | 769–797 |
+
+`a_snapshot_read_as_it_is_decoded_is_the_snapshot_read_whole` holds the
+two reads to one store, behind and not, and to the same refusals;
+`check_protocol` reads every `protocol/` vector both ways; and the
+fuzzer's frame check reads every server frame both ways.
+
 The primary map's key, a row as its own key, was **not** done. At 134 B
 it is the second smallest component, and the brief made it conditional
 on being the largest. The largest is now the rows themselves (393 B:
@@ -1380,8 +1403,9 @@ Not verified:
 - Rows are one shape, media, with short titles, so the text indexes'
   90 B a row is these titles' and not a real library's. Real titles of
   forty characters would post about forty ordinals a row, 160 B.
-- The decode in place is used by the client's replica and the server's
-  snapshot. A snapshot sent over the wire is still decoded whole: one
-  frame, the peer below the horizon.
+- The decode in place is used by the client's replica, the server's
+  snapshot and, since, a snapshot frame on the socket. The vectors'
+  runner and the fuzzer still also decode frames whole, as the reading
+  every other is checked against.
 - The timings were taken once each, so read them as a scale. The live
   bytes moved by under 0.1 MB between runs.

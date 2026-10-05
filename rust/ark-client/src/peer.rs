@@ -22,7 +22,7 @@ use ark::eval::{self, Args, Checked, Ctx, EvalFault};
 use ark::journal::{self as records, Journal as LogJournal, Layout};
 use ark::log::{snapshot_of, Entry, Facts, Log, Seq, Snapshot};
 use ark::peer::{local_commit, Authority, Changes, Journal, Replica};
-use ark::protocol::{Client, ClientMsg, Mode, ServerMsg};
+use ark::protocol::{Client, ClientMsg, Mode, Received, ServerMsg};
 use ark::schema::Schema;
 use ark::store::{MemoryStore, Refusal, Store};
 use ark::value::{Id, Value};
@@ -1095,22 +1095,33 @@ impl Peer {
             self.heard_frames += 1;
         }
         if matches!(msg, ServerMsg::Batch { .. } | ServerMsg::SnapshotOf { .. }) {
-            self.this_connection();
-            self.checks.served = true;
+            self.served();
         }
         self.client.recv(msg);
     }
 
-    // A frame decoded and placed, not yet settled.
+    // A page or a snapshot arrived on this connection.
+    fn served(&mut self) {
+        self.this_connection();
+        self.checks.served = true;
+    }
+
+    // A frame decoded and placed, not yet settled. A snapshot's rows are
+    // built as they are decoded (`docs/plan-db.md` D7.4,
+    // `ServerMsg::decode_for`): the whole store, a struct per row, is
+    // never a tree first.
     fn place_frame(&mut self, bytes: &[u8]) -> Result<(), Error> {
-        let msg = canon::decode(bytes)
-            .map_err(|e| e.to_string())
-            .and_then(|v| ServerMsg::from_value(&v).map_err(|e| e.to_string()))
-            .map_err(|e| {
-                self.bad_frames += 1;
-                Error::Corrupt(format!("a frame from the server: {e}"))
-            })?;
-        self.place(msg);
+        let got = ServerMsg::decode_for(bytes, &self.client.schema).map_err(|e| {
+            self.bad_frames += 1;
+            Error::Corrupt(format!("a frame from the server: {e}"))
+        })?;
+        match got {
+            Received::Msg(msg) => self.place(msg),
+            Received::Snapshot(s) => {
+                self.served();
+                self.client.recv_snapshot(s);
+            }
+        }
         Ok(())
     }
 

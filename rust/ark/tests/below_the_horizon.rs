@@ -138,3 +138,168 @@ fn a_peer_below_the_horizon_of_a_quiet_server_reaches_the_head() {
     assert_eq!(state_hash(&peer.replica.confirmed), head_hash);
     assert!(peer.take_outgoing().is_empty(), "with nothing more to say");
 }
+
+/// `docs/plan-db.md` D7.4 The snapshot frame as a client reads it off the
+/// socket — its rows built as they are decoded (`ServerMsg::decode_for`,
+/// `Client::recv_snapshot`) — adopts exactly the store the frame decoded
+/// whole made: the frame's value, `ServerMsg::from_value`, and each struct
+/// in it laid out as the adoption loop always laid it out, written out
+/// here as it was. Over the rows that try it: one of the table's exactly,
+/// one with a column the table lacks and one without a column it requires
+/// (both kept as they came), one that is not a struct (dropped), and one
+/// of a table this schema has not got; and again behind (D1), where each
+/// is projected. The same frames are refused, with the same words: a row's
+/// keys out of order, a key twice, a table that is not a list, rows that
+/// are not a struct, a frame cut short, bytes after it.
+///
+/// Falsified twice: by `canon::decode_rows` dropping a table whose value
+/// is not a list rather than keeping it (the new read took the frame the
+/// whole read refused with "expected a list"), and by reading a row's
+/// fields without `each_pair`'s key checks (the unsorted and the
+/// duplicated keys taken).
+#[test]
+fn a_snapshot_read_as_it_is_decoded_is_the_snapshot_read_whole() {
+    use ark::canon;
+    use ark::protocol::{Received, Snapshot};
+    use ark::store::{project_row, Change, Row, Store};
+    use std::collections::BTreeMap;
+
+    let m = Module::new((lists(),));
+    let built = m.build();
+    let (sch, bodies) = (built.schema.clone(), ark::hash::closures(built));
+    let strct = |pairs: Vec<(&str, Value)>| Value::Struct(pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect());
+    let playlist = |n: u16| {
+        vec![
+            ("id", Value::Id(key(1, n))),
+            ("name", Value::text(format!("p{n}"))),
+            ("user_id", Value::text("alice")),
+        ]
+    };
+    let mut wider = playlist(2);
+    wider.push(("x", Value::Int(1)));
+    let mut narrower = playlist(3);
+    narrower.retain(|(k, _)| *k != "user_id");
+    let rows: BTreeMap<String, Vec<Value>> = [
+        (
+            "playlist".to_string(),
+            vec![strct(playlist(1)), strct(wider), Value::Int(7), strct(narrower), strct(playlist(4))],
+        ),
+        ("ghost".to_string(), vec![strct(vec![("id", Value::Int(1))])]),
+    ]
+    .into();
+    let frame = |module: Option<Vec<u8>>| ServerMsg::SnapshotOf {
+        seq: 5,
+        hash: vec![0xcd; 32],
+        rows: rows.clone(),
+        log_id: Some(key(0xa1, 0)),
+        module,
+    };
+    // The adoption loop as it stood before D7.4, over the whole tree.
+    let old_store = |behind: bool| {
+        let mut st = MemoryStore::empty(sch.clone());
+        for (t, vs) in &rows {
+            let tbl = sch.lookup_table(t);
+            for v in vs {
+                if let Value::Struct(row) = v {
+                    let row = match tbl {
+                        None => Row::from_struct_ref(row),
+                        Some(tbl) if behind => {
+                            let raw = Row::from_struct_ref(row);
+                            project_row(tbl, &raw).unwrap_or(raw)
+                        }
+                        Some(tbl) => Row::stored_in(tbl, row),
+                    };
+                    st.apply_change(&Change::Add(t.clone(), row));
+                }
+            }
+        }
+        st
+    };
+    let client = |behind: bool| {
+        let mut c = Client::open(
+            Replica::open(sch.clone(), bodies.clone(), MemoryStore::empty(sch.clone()), 0, vec![]),
+            Mode::ByFacts,
+            None,
+        );
+        c.module = behind.then(|| vec![1]);
+        c
+    };
+    for behind in [false, true] {
+        let msg = frame(Some(vec![2]));
+        let bytes = canon::encode(&msg.to_value());
+        let mut whole = client(behind);
+        whole.recv(ServerMsg::from_value(&canon::decode(&bytes).unwrap()).unwrap());
+        let mut read = client(behind);
+        let Ok(Received::Snapshot(s)) = ServerMsg::decode_for(&bytes, &sch) else {
+            panic!("a snapshot")
+        };
+        let ServerMsg::SnapshotOf {
+            seq, rows, log_id, module, ..
+        } = msg
+        else {
+            unreachable!()
+        };
+        assert_eq!(
+            s,
+            Snapshot::of_values(&sch, seq, rows, log_id, module),
+            "the rows built as the values make them"
+        );
+        read.recv_snapshot(s);
+        assert_eq!(read.replica.behind, behind);
+        let want = old_store(behind);
+        assert_eq!(want.scan("playlist").len(), 4, "every struct a row, and what is not one dropped");
+        assert_eq!(whole.replica.confirmed, want, "behind {behind}: whole");
+        assert_eq!(read.replica.confirmed, want, "behind {behind}: as decoded");
+        assert_eq!(read.replica.view, want);
+        assert_eq!((read.replica.cursor, read.replica.log_id), (5, Some(key(0xa1, 0))));
+        assert_eq!(state_hash(&read.replica.confirmed), state_hash(&whole.replica.confirmed));
+    }
+
+    // The refusals: the words the whole read gave, and nothing taken.
+    let good = canon::encode(&frame(None).to_value());
+    let whole = |b: &[u8]| -> Result<(), String> {
+        let v = canon::decode(b).map_err(|e| e.to_string())?;
+        ServerMsg::from_value(&v).map(|_| ()).map_err(|e| e.to_string())
+    };
+    // A frame whose one playlist row is `pairs`, in the order given and
+    // encoded by hand: no encoder writes a struct's keys out of order.
+    let by_hand = |pairs: &[(&str, Value)]| {
+        let mut row = vec![0xa0 + pairs.len() as u8];
+        for (k, v) in pairs {
+            row.extend(canon::encode(&Value::text(*k)));
+            row.extend(canon::encode(v));
+        }
+        let Value::Struct(mut fs) = frame(None).to_value() else { unreachable!() };
+        fs.insert("rows".into(), strct(vec![("playlist", Value::List(vec![Value::Int(0)]))]));
+        let b = canon::encode(&Value::Struct(fs));
+        // The one element, `0x00`, after the list's head, `0x81`.
+        let at = b.windows(2).position(|w| w == [0x81, 0x00]).unwrap();
+        [&b[..at + 1], &row[..], &b[at + 2..]].concat()
+    };
+    let with_rows = |r: Value| {
+        let Value::Struct(mut fs) = frame(None).to_value() else { unreachable!() };
+        fs.insert("rows".into(), r);
+        canon::encode(&Value::Struct(fs))
+    };
+    let mut cut = good.clone();
+    cut.pop();
+    let mut trailing = good.clone();
+    trailing.push(0);
+    let bad = [
+        ("unsorted", by_hand(&[("nm", Value::Int(1)), ("id", Value::Id(key(1, 1)))])),
+        ("duplicate", by_hand(&[("id", Value::Id(key(1, 1))), ("id", Value::Id(key(1, 1)))])),
+        ("not a list", with_rows(strct(vec![("playlist", Value::Int(1))]))),
+        ("not a struct", with_rows(Value::List(vec![]))),
+        ("cut short", cut),
+        ("trailing", trailing),
+    ];
+    for (what, b) in bad {
+        let before = whole(&b);
+        assert!(before.is_err(), "{what}: refused whole");
+        assert_eq!(
+            ServerMsg::decode_for(&b, &sch).map(|_| ()),
+            before,
+            "{what}: refused as decoded, in the same words"
+        );
+    }
+}

@@ -12,7 +12,7 @@ use ark::eval::{self, Args, Ctx, EvalFault};
 use ark::hash::{closure, closures, FnHash};
 use ark::ir::{FnKind, Function, Module};
 use ark::peer::Changes;
-use ark::protocol::{ClientMsg, Mode, ServerMsg};
+use ark::protocol::{ClientMsg, Mode, Received, ServerMsg, Snapshot};
 use ark::schema::Ty;
 use ark::sim::{Frame, Op, Sim};
 use ark::store::{Change, MemoryStore, Store};
@@ -285,7 +285,7 @@ impl S<'_> {
             let frames = std::mem::take(tap);
             for f in frames {
                 self.tally.frames += 1;
-                if let Some(x) = round_trip(&f) {
+                if let Some(x) = round_trip(&f, &self.m.schema) {
                     return Some(x);
                 }
                 if let Frame::ToClient(ServerMsg::SnapshotOf { .. }) = f {
@@ -616,8 +616,11 @@ impl<'a> Draw<'a> {
 }
 
 // A frame encoded, decoded and read back: itself. A server frame is held
-// by its value, since a closure decodes with its symbols' names gone.
-fn round_trip(f: &Frame) -> Option<Finding> {
+// by its value, since a closure decodes with its symbols' names gone — and
+// read again as a client of `sch` reads the socket (`docs/plan-db.md`
+// D7.4, `ServerMsg::decode_for`), a snapshot's rows built as they are
+// decoded: the rows its values make.
+fn round_trip(f: &Frame, sch: &ark::schema::Schema) -> Option<Finding> {
     match f {
         Frame::ToServer(m) => {
             let v = m.to_value();
@@ -639,13 +642,31 @@ fn round_trip(f: &Frame) -> Option<Finding> {
                 .map_err(|e| e.to_string())
                 .and_then(|d| ServerMsg::from_value(&d).map_err(|e| e.to_string()));
             match back {
-                Ok(b) if b.to_value() == v => None,
-                other => Some(Finding::Frame {
-                    client: false,
-                    value: v,
-                    why: format!("read back as {:?}", other.map(|b| b.to_value())),
-                }),
+                Ok(b) if b.to_value() == v => {}
+                other => {
+                    return Some(Finding::Frame {
+                        client: false,
+                        value: v,
+                        why: format!("read back as {:?}", other.map(|b| b.to_value())),
+                    })
+                }
             }
+            let read = ServerMsg::decode_for(&encode(&v), sch);
+            let same = match (&read, m) {
+                (
+                    Ok(Received::Snapshot(s)),
+                    ServerMsg::SnapshotOf {
+                        seq, rows, log_id, module, ..
+                    },
+                ) => *s == Snapshot::of_values(sch, *seq, rows.clone(), *log_id, module.clone()),
+                (Ok(Received::Msg(b)), m) => !matches!(m, ServerMsg::SnapshotOf { .. }) && b.to_value() == v,
+                _ => false,
+            };
+            (!same).then(|| Finding::Frame {
+                client: false,
+                value: v,
+                why: format!("read as a client reads it: {read:?}"),
+            })
         }
     }
 }

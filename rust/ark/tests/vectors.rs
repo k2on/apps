@@ -16,7 +16,7 @@ use ark::hash::{closure, closures, function_hash, module_hash, state_hash, FnHas
 use ark::ir::{module_from_value, module_value, Module};
 use ark::log::{Entry, Seq};
 use ark::peer::{local_commit, AdoptError, Authority, Changes, Replica, Sequenced};
-use ark::protocol::{change_from_value, change_value, entry_from_value, ClientMsg, ServerMsg};
+use ark::protocol::{change_from_value, change_value, entry_from_value, ClientMsg, Received, ServerMsg, Snapshot};
 use ark::schema::{check_schema, Schema};
 use ark::sim::Sim;
 use ark::stdlib::id_of_text;
@@ -276,6 +276,25 @@ fn check_protocol(name: &str, v: &serde_json::Value) -> Result<(), String> {
         let f = ServerMsg::from_value(&val).map_err(|e| e.to_string())?;
         ensure_eq!(f.to_value(), val, "decode then encode");
         ensure_eq!(ServerMsg::from_value(&f.to_value()).map_err(|e| e.to_string())?, f, "encode then decode");
+        // As a client reads the socket (`docs/plan-db.md` D7.4): the same
+        // frame, a snapshot's rows built as they are decoded — under the
+        // demo's schema, whose tables these frames' rows are, and under
+        // none, where every row is a row of no table.
+        let demo = module_of(&read(&vectors().join("rebase/three-peers.json"))["module"]).schema;
+        for sch in [demo, Schema::empty()] {
+            let want = match f.clone() {
+                ServerMsg::SnapshotOf {
+                    seq, rows, log_id, module, ..
+                } => Received::Snapshot(Snapshot::of_values(&sch, seq, rows, log_id, module)),
+                other => Received::Msg(other),
+            };
+            let got = ServerMsg::decode_for(&bytes, &sch)?;
+            match (&got, &want) {
+                // Closures decode with empty symbol names, so compare through their values.
+                (Received::Msg(g), Received::Msg(w)) => ensure_eq!(g.to_value(), w.to_value(), "read as a client reads it"),
+                _ => ensure_eq!(got, want, "read as a client reads it"),
+            }
+        }
     }
     Ok(())
 }

@@ -35,13 +35,27 @@ struct Live;
 
 static LIVE: AtomicI64 = AtomicI64::new(0);
 
+/// The most [`LIVE`] has been since [`reset_peak`]: the high-water mark a
+/// transient structure leaves behind it (`docs/plan-db.md` D7.4), read
+/// once the structure is gone.
+static PEAK: AtomicI64 = AtomicI64::new(0);
+
+// Raises `PEAK` to a live figure that has just grown: a load, and a
+// read-modify-write only when it is a new high.
+fn grew(by: i64) {
+    let now = LIVE.fetch_add(by, Ordering::Relaxed) + by;
+    if now > PEAK.load(Ordering::Relaxed) {
+        PEAK.fetch_max(now, Ordering::Relaxed);
+    }
+}
+
 unsafe impl GlobalAlloc for Live {
     unsafe fn alloc(&self, l: Layout) -> *mut u8 {
-        LIVE.fetch_add(l.size() as i64, Ordering::Relaxed);
+        grew(l.size() as i64);
         System.alloc(l)
     }
     unsafe fn alloc_zeroed(&self, l: Layout) -> *mut u8 {
-        LIVE.fetch_add(l.size() as i64, Ordering::Relaxed);
+        grew(l.size() as i64);
         System.alloc_zeroed(l)
     }
     unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
@@ -49,7 +63,7 @@ unsafe impl GlobalAlloc for Live {
         System.dealloc(p, l)
     }
     unsafe fn realloc(&self, p: *mut u8, l: Layout, n: usize) -> *mut u8 {
-        LIVE.fetch_add(n as i64 - l.size() as i64, Ordering::Relaxed);
+        grew(n as i64 - l.size() as i64);
         System.realloc(p, l, n)
     }
 }
@@ -62,6 +76,16 @@ static GLOBAL: Live = Live;
 /// (eight bytes) and its rounding to sixteen are not in it.
 fn live_bytes() -> i64 {
     LIVE.load(Ordering::Relaxed)
+}
+
+/// The high-water mark of [`live_bytes`] since [`reset_peak`].
+fn peak_bytes() -> i64 {
+    PEAK.load(Ordering::Relaxed)
+}
+
+/// Start [`peak_bytes`] again from what is live now.
+fn reset_peak() {
+    PEAK.store(live_bytes(), Ordering::Relaxed);
 }
 
 fn us(d: Duration) -> f64 {
@@ -826,4 +850,130 @@ fn perf_d_bytes_child() {
     let (rss, live) = (vm_rss_kb().saturating_sub(rss0), live_bytes() - live0);
     println!("BYTES {live} {rss}");
     drop(held);
+}
+
+const FRAME_SIZES: [u64; 2] = [10_000, 100_000];
+
+/// `docs/plan-db.md` D7.4, the third place a store arrives whole: a
+/// `snapshot` frame on the socket — what a peer below the horizon is sent
+/// — of `n` media rows under harken's schema, decoded and adopted by a
+/// client, each way in a process of its own ([`perf_d_frame_child`]).
+/// Printed: the high-water mark of the live bytes above what was held
+/// before, what is held after, and resident memory less what it was before
+/// — the tree a decode builds and frees is in the first and the third and
+/// not in the second.
+///
+/// - **tree**: `canon::decode` of the whole frame, `ServerMsg::from_value`,
+///   `Client::recv` — the snapshot's rows a struct each until adopted, as
+///   every client read one before D7.4;
+/// - **read**: `ServerMsg::decode_for` and `Client::recv_snapshot` — each
+///   row built as its fields are read, as `ark_client::Peer` reads the
+///   socket now.
+///
+/// `cargo test -p ark-server --release --test perf perf_d_frame -- --ignored --nocapture --test-threads=1`.
+#[test]
+#[ignore]
+fn perf_d_frame() {
+    let d = harken();
+    let root = std::env::var_os("ARK_PERF_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    eprintln!("\n== (d) a snapshot frame decoded and adopted (docs/plan-db.md D7.4), harken's schema, media rows");
+    eprintln!(
+        "{:<8} {:>8} {:>9} {:>9} {:>11} {:>10} {:>9} {:>14}",
+        "way", "rows", "frame MB", "ms", "high MB", "held MB", "rss MB", "high B/row"
+    );
+    for n in FRAME_SIZES {
+        let dir = tempfile::Builder::new().prefix("ark-frame-").tempdir_in(&root).unwrap();
+        let path = dir.path().join("frame");
+        std::fs::write(&path, snapshot_frame(&d, n)).unwrap();
+        let size = std::fs::metadata(&path).unwrap().len();
+        for way in FRAME_WAYS {
+            let out = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["perf_d_frame_child", "--exact", "--ignored", "--nocapture", "--test-threads=1"])
+                .env("ARK_FRAME", format!("{way} {n} {}", path.display()))
+                .output()
+                .expect("the child runs");
+            let text = String::from_utf8_lossy(&out.stdout);
+            let line = text
+                .lines()
+                .find_map(|l| l.split_once("FRAME ").map(|(_, m)| m))
+                .unwrap_or_else(|| panic!("{way} {n}: no measurement:\n{text}\n{}", String::from_utf8_lossy(&out.stderr)));
+            let f: Vec<f64> = line.split(' ').map(|x| x.parse().unwrap()).collect();
+            let (ms, high, held, rss) = (f[0], f[1], f[2], f[3] * 1024.0);
+            eprintln!(
+                "{way:<8} {n:>8} {:>9.1} {ms:>9.0} {:>11.1} {:>10.1} {:>9.1} {:>14.0}",
+                size as f64 / 1e6,
+                high / 1048576.0,
+                held / 1048576.0,
+                rss / 1048576.0,
+                high / n as f64
+            );
+        }
+    }
+}
+
+const FRAME_WAYS: [&str; 2] = ["tree", "read"];
+
+/// The bytes of the `snapshot` frame a server sends a peer below the
+/// horizon, made as `protocol::Server` makes it: every table's rows, each
+/// `Row::into_value`, under harken's module hash.
+fn snapshot_frame(d: &ark_client::Domain, n: u64) -> Vec<u8> {
+    use ark::protocol::ServerMsg;
+    let st = open_store(d, 0..n);
+    let rows = st
+        .table_names()
+        .into_iter()
+        .map(|t| (t.clone(), st.scan(&t).into_iter().map(ark::store::Row::into_value).collect()))
+        .collect();
+    let msg = ServerMsg::SnapshotOf {
+        seq: n as i64,
+        hash: vec![0x5a; 32],
+        rows,
+        log_id: Some(OPEN_LOG),
+        module: Some(vec![0xa5; 32]),
+    };
+    ark::canon::encode(&msg.to_value())
+}
+
+/// One way of [`perf_d_frame`], in a process of its own: the frame read
+/// from its file first, then the measurement from there. Prints
+/// `FRAME <ms> <high-water bytes> <held bytes> <rss KiB>`. Does nothing
+/// unless `ARK_FRAME` says what to decode.
+#[test]
+#[ignore]
+fn perf_d_frame_child() {
+    use ark::protocol::{Client, Mode, Received, ServerMsg};
+    let Ok(spec) = std::env::var("ARK_FRAME") else { return };
+    let mut it = spec.splitn(3, ' ');
+    let (way, n, path) = (
+        it.next().unwrap(),
+        it.next().unwrap().parse::<u64>().unwrap(),
+        std::path::PathBuf::from(it.next().unwrap()),
+    );
+    let d = harken();
+    let schema = d.module().schema.clone();
+    let replica = ark::peer::Replica::open(schema.clone(), d.closures().clone(), ark::store::MemoryStore::empty(schema), 0, vec![]);
+    let mut client = Client::open(replica, Mode::ByFacts, None);
+    let bytes = std::fs::read(&path).unwrap();
+    let (rss0, live0) = (vm_rss_kb(), live_bytes());
+    reset_peak();
+    let t = Instant::now();
+    match way {
+        "tree" => {
+            let v = ark::canon::decode(&bytes).unwrap();
+            client.recv(ServerMsg::from_value(&v).unwrap());
+        }
+        "read" => match ServerMsg::decode_for(&bytes, &client.schema).unwrap() {
+            Received::Snapshot(s) => client.recv_snapshot(s),
+            Received::Msg(m) => panic!("not a snapshot: {m:?}"),
+        },
+        other => panic!("no way {other}"),
+    }
+    client.settle();
+    let took = t.elapsed();
+    let (high, held, rss) = (peak_bytes() - live0, live_bytes() - live0, vm_rss_kb().saturating_sub(rss0));
+    assert_eq!(client.replica.confirmed.scan("media").len() as u64, n, "every row adopted");
+    println!("FRAME {} {high} {held} {rss}", ms(took));
+    drop(client);
 }
