@@ -151,6 +151,30 @@ is what lets a store answer the match with one lookup; otherwise a
 verifier error (`OnNotUnique`). Every write reports `Add`, `Edit` or
 nothing and refuses on a constraint; `Upsert(t, e, [])` is v2's `Put`.
 
+```rust
+    Private(Block),                            // docs/plan-guards.md D3: the server half
+```
+
+A **private block** (`docs/plan-guards.md` D3) is a mutator's server half.
+Only the authority runs it — `Ctx.authority`, which a server's `Authority`
+sets and nothing else does; a device, a replay and a peer alone run the
+body without it — and it runs **after** the body, in the order the body
+reached its blocks, each over the locals bound where it was written: so
+the public body can never read what a private block wrote, and a client's
+run of the body is the authority's. It may read and write any table and
+any column, those no person's union holds included (no `NotHeld`), and may
+refuse; the refusal is the entry's verdict. A function with one says
+`private: true`, which is hashed; the module a client loads is the
+server's with every block stripped (`ir::strip`, `arkc strip`), and a
+function's hash is of what is left, so the two modules name it alike. A
+client takes every entry of a `private` function by the authority's facts —
+an acknowledgement carries them, and a page to a peer that replays carries
+them for those entries alone — previewing the public body until they
+arrive. The verifier keeps a block in a mutator's body
+(`PrivateOutsideMutator`), one level deep (`NestedPrivate`), with no
+`return` in it (`ReturnInPrivate`), and its function saying so
+(`PrivateUndeclared`).
+
 ### 1.5 A query is a plan
 
 `Function` has `plan: Option<Plan>`. A query has `plan: Some`, an empty
@@ -336,6 +360,7 @@ bound read.
 | `Expr::If` | `pick(c, a, b)` |
 | `For` | `for_each(xs, \|x\| body)` |
 | `Refuse` | `refuse("why")` |
+| `Private` | `ctx.private(move \|db: &Db\| body)` (`docs/plan-guards.md` D3) |
 | `Return` | the closure's value |
 | `Let` | `let x = …` (a read becomes a `Let` at once) |
 
@@ -543,7 +568,9 @@ The builder implements the vocabulary twice behind one API:
   the transaction through `eval::select_plan`, which is `view::read`,
   the answer `view::pull` gives;
   `when` runs its closure only when the condition holds; `ctx.now(name)`
-  returns the entry's auto of that name. Only mutators and middleware run
+  returns the entry's auto of that name; `ctx.private(f)` keeps `f`, when
+  the run is the authority's, and runs it after the body (and otherwise
+  drops it unrun) — which is why `f` owns what it captures. Only mutators and middleware run
   natively: a query has no native half, and `Procedure::query` is
   `eval::query_closure`, which pulls the plan.
 
@@ -560,7 +587,12 @@ it before anything else, so what it hashes or compares is the verified
 form an entry's hash names:
 
 - `arkc verify M`: verify, and print the module hash.
-- `arkc hash M`: the module hash and every function's hash.
+- `arkc hash M`: the module hash and every function's hash; for a server's
+  module with private blocks, the public hash — of the module a client
+  loads — beside it (`docs/plan-guards.md` D3).
+- `arkc strip M OUT`: the module a client loads, every private block taken
+  out, verified and written; its hash printed. A domain's `emit()` is
+  already this, and `emit_server()` the module with its blocks.
 - `arkc check OLD NEW`: log compatibility (spec §17, `ark::compat`) — every
   break, and exit 1; or nothing. Run it between the committed module and a
   new one before a change that could move a retained entry's meaning.
@@ -627,6 +659,7 @@ Symbols below are fresh; normalisation renumbers them.
 | the provided parameter | `Provided("<middleware name>")` |
 | `ctx.user` / `ctx.session` | `CtxUser` / `CtxSession` |
 | `ctx.has_role("r")` | `HasRole("r")`: natively, whether the run's `Ctx` holds `r` — the device's belief when it authors, the entry's stamped roles at the authority and in every replay |
+| `ctx.private(f)` | `Private(block)`, the closure's statements as the block; the function's `private` set (`docs/plan-guards.md` D3) |
 | `ctx.now("n")` / `ctx.new_id("n")` | `Auto("n")`, and `("n", Now)` / `("n", NewId(t))` appended to `autos` in the order the run meets them |
 | a row or record literal | `Struct` of every field written |
 
@@ -739,6 +772,19 @@ pred        : + {"t":"pwhen","e":expr}         -- a Bool of the context; a scope
 
 The `"scope"` of version 2, gone in version 3, named something else; a
 version-4 module never carried the word, so it is free.
+
+`docs/plan-guards.md` D3 adds a statement and a flag, each written only
+where a mutator has a server half, so every module before it keeps its
+bytes:
+
+```
+fn          : + ("private", true)                  -- present only when true; hashed
+stmt        : + {"t":"private","body":[stmt]}      -- the server's module only
+```
+
+A function's hash is taken of it with every `private` statement removed
+and its symbols numbered again, `private: true` kept: the server's
+function and the client's stripped one are one hash.
 
 Symbols
 inside a `check`'s or `refine`'s expression are numbered in the same walk

@@ -527,13 +527,29 @@ impl Module {
         }
     }
 
-    /// The module's canonical bytes: what an `.ark` file holds.
+    /// The module's canonical bytes: what an `.ark` file holds — the module
+    /// a client loads, every private block stripped (`docs/plan-guards.md`
+    /// D3, [`ir::strip_module`]). A module with none is the bytes it was.
     pub fn emit(&self) -> Vec<u8> {
+        canon::encode(&ir::module_value(&ir::strip_module(self.build())))
+    }
+
+    /// The hash of the module a client loads ([`Module::emit`]): what a
+    /// server says on every page, and what a client compares its own with.
+    pub fn hash(&self) -> Vec<u8> {
+        module_hash(&ir::strip_module(self.build()))
+    }
+
+    /// `docs/plan-guards.md` D3 The server's module, private blocks kept,
+    /// as canonical bytes: what [`Module::build`] is. Every function is named
+    /// by the hash it has in [`Module::emit`]'s.
+    pub fn emit_server(&self) -> Vec<u8> {
         canon::encode(&ir::module_value(self.build()))
     }
 
-    /// The module hash.
-    pub fn hash(&self) -> Vec<u8> {
+    /// The hash of the server's module, beside [`Module::hash`]: the same
+    /// where no function has a private block.
+    pub fn server_hash(&self) -> Vec<u8> {
         module_hash(self.build())
     }
 
@@ -671,6 +687,7 @@ fn emit_middleware(mw: &MwDecl) -> Emitted {
         body,
         plan: None,
         holds,
+        private: false,
         names: BTreeMap::new(),
     };
     (f, errors)
@@ -724,6 +741,9 @@ fn emit_route(core: &Core, r: &RouteDecl) -> Emitted {
         Some((p, node)) => (Some(p), Some(Ty::List(Box::new(node)))),
         None => (None, None),
     };
+    // `docs/plan-guards.md` D3 A body that wrote a `ctx.private` block says
+    // so.
+    let private = ir::has_private(&body);
     let f = Function {
         name: r.name.clone(),
         kind: r.kind,
@@ -736,6 +756,7 @@ fn emit_route(core: &Core, r: &RouteDecl) -> Emitted {
         body,
         plan,
         holds: vec![],
+        private,
         names: BTreeMap::new(),
     };
     (f, errors)
@@ -936,10 +957,19 @@ impl Procedure {
                 return Err(EvalFault::Bug(EvalError::WrongKind(inner.route.name.clone(), inner.route.kind)));
             };
             body(&ins, &provided);
-            match halt() {
-                Some(fault) => Err(fault),
-                None => Ok(None),
+            if let Some(fault) = halt() {
+                return Err(fault);
             }
+            // `docs/plan-guards.md` D3 The private blocks the body reached,
+            // at the authority alone, last and in order: a refusal in one is
+            // the entry's verdict.
+            for private in cx::native(|n| std::mem::take(&mut n.deferred)) {
+                private();
+                if let Some(fault) = halt() {
+                    return Err(fault);
+                }
+            }
+            Ok(None)
         });
         let native = cx.into_native();
         out.map(|v| (native.changes, v))

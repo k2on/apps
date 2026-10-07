@@ -121,6 +121,7 @@ pub fn helper<P: Params, R: Data>(name: &'static str, params: P, body: impl Body
             body: block,
             plan: None,
             holds: vec![],
+            private: false,
             names: BTreeMap::new(),
         };
         HELPERS.with(|h| {

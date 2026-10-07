@@ -179,6 +179,7 @@ fn ctx_of(e: &Entry) -> Ctx {
         user: e.actor.clone(),
         session: e.session.clone(),
         roles: e.roles.clone(),
+        authority: false,
     }
 }
 
@@ -396,6 +397,15 @@ impl Replica {
     /// Whether an entry naming this hash can be applied here by intent.
     pub fn can_apply(&self, fh: &FnHash) -> bool {
         self.natives.contains_key(fh) || self.bodies.contains_key(fh)
+    }
+
+    /// `docs/plan-guards.md` D3 Whether an entry naming this hash is taken
+    /// by the authority's facts whatever this replica holds: its function
+    /// has a server half ([`crate::hash::is_private`]), which a run here
+    /// leaves out, so a run here is a preview of the public body and never
+    /// what the log holds.
+    pub fn is_private(&self, fh: &FnHash) -> bool {
+        self.bodies.get(fh).is_some_and(crate::hash::is_private)
     }
 
     /// §11.3 A confirmed entry arrives, at its sequence; it waits in the
@@ -631,7 +641,7 @@ impl Replica {
         self.inbox
             .iter()
             .filter_map(|(n, ib)| match (&ib.entry, &ib.facts) {
-                (Some(e), None) if !self.can_apply(&e.fn_hash) || self.diverged.contains(n) => Some(*n),
+                (Some(e), None) if !self.can_apply(&e.fn_hash) || self.diverged.contains(n) || self.is_private(&e.fn_hash) => Some(*n),
                 _ => None,
             })
             .collect()
@@ -796,6 +806,12 @@ impl Replica {
             // facts it knew, or not at all: never confirmed by that, and
             // whatever the authority's facts did, the view is rebased onto.
             let previewed = self.can_apply(&e.fn_hash);
+            // `docs/plan-guards.md` D3 An entry whose function has a server
+            // half is confirmed by the authority's facts, which are the
+            // whole run's, and never by the record of the public body this
+            // replica previewed: one that differs is the authority's answer,
+            // not a divergence, and the view is rebased onto it.
+            let private = self.is_private(&e.fn_hash);
             let by_record = match self.recorded.get(&e.id) {
                 Some(rec) if own_next && !others && previewed => {
                     debug_assert!(
@@ -803,13 +819,16 @@ impl Replica {
                         "the record of this peer's own intent is not what running it over the confirmed store at sequence {} produces",
                         self.cursor
                     );
-                    Some(match mf.as_ref().map(|f| self.here(f)) {
-                        Some(f) if f != *rec => (f, true),
-                        _ => (rec.clone(), false),
-                    })
+                    match mf.as_ref().map(|f| self.here(f)) {
+                        Some(f) if private => Some((f, false)),
+                        None if private => None,
+                        Some(f) if f != *rec => Some((f, true)),
+                        _ => Some((rec.clone(), false)),
+                    }
                 }
                 _ => None,
             };
+            let corrected = private && own_next && by_record.as_ref().is_some_and(|(f, _)| self.recorded.get(&e.id) != Some(f));
             let Some((chs, diverged)) = by_record.or_else(|| self.apply_one(n, &e, mf.as_ref())) else {
                 // A confirmed entry this replica holds the closure for and
                 // whose replay refuses, with no facts in hand: the
@@ -818,7 +837,7 @@ impl Replica {
                 // facts. Waiting for them unasked was waiting for ever: a
                 // replica fed by replay is sent none (`arkc fuzz`,
                 // `rebase/fleet-fuzz-an-ack-names-no-log-and-the-replay-refuses.json`).
-                if mf.is_none() && self.can_apply(&e.fn_hash) && !self.diverged.contains(&n) {
+                if mf.is_none() && self.can_apply(&e.fn_hash) && !private && !self.diverged.contains(&n) {
                     self.diverged.push(n);
                 }
                 break;
@@ -838,7 +857,7 @@ impl Replica {
             }
             acc.extend(chs);
             moved = true;
-            others = others || !own_next || diverged || !previewed;
+            others = others || !own_next || diverged || !previewed || corrected;
         }
         (acc, moved, others)
     }
@@ -893,6 +912,11 @@ impl Replica {
     fn apply_one(&self, n: Seq, e: &Entry, mf: Option<&Facts>) -> Option<(Vec<Change>, bool)> {
         let projected = mf.map(|f| self.here(f));
         let mf = projected.as_ref();
+        // `docs/plan-guards.md` D3 By its facts alone: a run here would
+        // leave out the server half the authority ran.
+        if self.is_private(&e.fn_hash) {
+            return mf.map(|f| (f.clone(), false));
+        }
         if self.can_apply(&e.fn_hash) && !self.diverged.contains(&n) {
             let mut over = Overlay::new(&self.confirmed);
             return match run(
@@ -1171,6 +1195,12 @@ pub struct Authority {
     /// module this authority never ran is still unknown — the honest
     /// answer to a peer older than the server's first deploy.
     pub modules: BTreeMap<Vec<u8>, BTreeSet<FnHash>>,
+    /// `docs/plan-guards.md` D3 This authority runs mutators' private
+    /// blocks: a server's does ([`crate::protocol::Server::open`] says so),
+    /// and its facts are then the whole run's. A peer alone's does not — it
+    /// is a client here, and its log holds what the public bodies wrote —
+    /// and neither does one replaying a log to check it ([`Authority::adopt`]).
+    pub private: bool,
 }
 
 /// The answer to a pushed intent.
@@ -1208,6 +1238,7 @@ impl Authority {
             bodies,
             natives: BTreeMap::new(),
             modules: BTreeMap::new(),
+            private: false,
         }
     }
 
@@ -1220,6 +1251,13 @@ impl Authority {
     /// closure is held for it.
     pub fn can_apply(&self, fh: &FnHash) -> bool {
         self.natives.contains_key(fh) || self.bodies.contains_key(fh)
+    }
+
+    /// `docs/plan-guards.md` D3 Whether entries naming this hash have a
+    /// server half: every peer is sent their facts, since no peer can run
+    /// them as this authority did.
+    pub fn is_private(&self, fh: &FnHash) -> bool {
+        self.bodies.get(fh).is_some_and(crate::hash::is_private)
     }
 
     /// Record that this authority has run `module` (its hash), which
@@ -1250,7 +1288,8 @@ impl Authority {
                 &self.bodies,
                 &self.natives,
                 &e.fn_hash,
-                &ctx_of(e),
+                // `docs/plan-guards.md` D3 A server's run is the whole one.
+                &ctx_of(e).as_authority(self.private),
                 &e.autos,
                 &e.args,
                 &mut over,

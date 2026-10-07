@@ -82,6 +82,9 @@ fn block(b: &Block, out: &mut BTreeSet<TableName>) {
                 out.insert(t.clone());
                 k.iter().for_each(|x| expr(x, out));
             }
+            // `docs/plan-guards.md` D3 What a private block reads, which only
+            // the server's module carries.
+            Stmt::Private(b) => block(b, out),
         }
     }
 }

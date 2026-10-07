@@ -197,6 +197,13 @@ pub fn function_from_value(v: &Value) -> D<Function> {
         (_, None) => vec![],
         (_, Some(_)) => return err(&p("holds"), "only a scope holds"),
     };
+    // `docs/plan-guards.md` D3 Present only when true: `private: false` is
+    // not a second spelling of its absence.
+    let private = match fs.get("private") {
+        None => false,
+        Some(Value::Bool(true)) => true,
+        Some(_) => return err(&p("private"), "present only as true"),
+    };
     Ok(Function {
         name,
         kind,
@@ -209,6 +216,7 @@ pub fn function_from_value(v: &Value) -> D<Function> {
         body,
         plan,
         holds,
+        private,
         names: BTreeMap::new(),
     })
 }
@@ -311,6 +319,8 @@ fn stmt(here: &[&str], v: &Value) -> D<Stmt> {
         "delete" => Stmt::Delete(text(&p, field(&fs, "table")?)?, list(&p, |x| expr(&p, x), field(&fs, "key")?)?),
         "refuse" => Stmt::Refuse(expr(&p, field(&fs, "e")?)?),
         "return" => Stmt::Return(optional(|x| expr(&p, x), field(&fs, "e")?)?),
+        // `docs/plan-guards.md` D3 A mutator's server half.
+        "private" => Stmt::Private(list(&p, |x| stmt(&p, x), field(&fs, "body")?)?),
         other => return err(here, format!("unknown statement {other}")),
     })
 }

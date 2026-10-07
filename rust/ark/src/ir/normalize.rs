@@ -171,6 +171,13 @@ fn renumber_stmt(ren: &Ren, next: Sym, s: &Stmt) -> (Stmt, Ren, Sym) {
             let (e2, n1) = renumber_expr(ren, next, e);
             (Stmt::Return(Some(e2)), ren.clone(), n1)
         }
+        // `docs/plan-guards.md` D3 A nested block, as a branch is: what it
+        // binds stays in it. The hash is taken after it is stripped and
+        // renumbered again, so the numbers it consumes here move nothing.
+        Stmt::Private(b) => {
+            let (b2, n1) = inner(ren, next, b);
+            (Stmt::Private(b2), ren.clone(), n1)
+        }
     }
 }
 
@@ -220,6 +227,7 @@ fn stmt_binders(s: &Stmt) -> Vec<Sym> {
         }
         Stmt::Delete(_, ks) => ks.iter().flat_map(expr_binders).collect(),
         Stmt::Return(me) => me.as_ref().map(expr_binders).unwrap_or_default(),
+        Stmt::Private(b) => b.iter().flat_map(stmt_binders).collect(),
     }
 }
 

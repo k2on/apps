@@ -61,6 +61,11 @@ pub(crate) struct Native {
     pub(crate) autos: Args,
     pub(crate) halt: Option<EvalFault>,
     pub(crate) changes: Vec<Change>,
+    /// `docs/plan-guards.md` D3 The private blocks an authority's run has
+    /// reached, in order: run by the procedure after its body. While any
+    /// is waiting, no scratch is forgotten ([`truncate`]), since each holds
+    /// handles into the arena from where it was written.
+    pub(crate) deferred: Vec<Box<dyn FnOnce()>>,
 }
 
 pub(crate) enum Mode {
@@ -101,6 +106,7 @@ impl Cx {
                 autos,
                 halt: None,
                 changes: vec![],
+                deferred: vec![],
             }),
             nodes: vec![],
             origins: std::collections::HashMap::new(),
@@ -291,7 +297,7 @@ pub(crate) fn mark() -> usize {
 /// written inside a closure names its nodes later.
 pub(crate) fn truncate(mark: usize) {
     with(|cx| {
-        if matches!(cx.mode, Mode::Native(_)) {
+        if matches!(&cx.mode, Mode::Native(n) if n.deferred.is_empty()) {
             cx.nodes.truncate(mark);
         }
     })

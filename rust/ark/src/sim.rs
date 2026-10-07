@@ -217,7 +217,7 @@ impl Sim {
         }
         let clients = (0..n)
             .map(|i| {
-                let r = Replica::open(sch.clone(), bodies.clone(), MemoryStore::empty(sch.clone()), 0, vec![]);
+                let r = Replica::open(sch.clone(), client_bodies(&bodies), MemoryStore::empty(sch.clone()), 0, vec![]);
                 (i, Client::open(r, Mode::Whole, Some(name(i))))
             })
             .collect();
@@ -821,7 +821,7 @@ impl Sim {
     // A client at 0, connected unless nobody is using it.
     fn join(&mut self, mode: Mode, closures: bool, nobody: bool) {
         let i = self.clients.keys().next_back().map_or(0, |n| n + 1);
-        let bodies = if closures { self.bodies.clone() } else { BTreeMap::new() };
+        let bodies = if closures { client_bodies(&self.bodies) } else { BTreeMap::new() };
         let r = Replica::open(self.schema.clone(), bodies, MemoryStore::empty(self.schema.clone()), 0, vec![]);
         let token = if nobody { None } else { Some(token(i, self.roles.get(&i))) };
         let mut c = Client::open(r, mode, token);
@@ -941,6 +941,7 @@ impl Sim {
             ));
         }
         let mut again = Authority::new(self.schema.clone(), a.bodies.clone());
+        again.private = a.private;
         again.store = log.base.store.clone();
         again.log = Log {
             base: log.base.clone(),
@@ -970,6 +971,14 @@ impl Sim {
 
 /// Whether two stores hold the same rows, a table never written and one
 /// emptied being the same.
+/// `docs/plan-guards.md` D3 The closures a client is built with: the
+/// module's, as a client's module carries them — every private block
+/// stripped ([`crate::hash::stripped`]), the hashes unmoved. The server
+/// keeps the blocks.
+pub fn client_bodies(bodies: &BTreeMap<FnHash, Closure>) -> BTreeMap<FnHash, Closure> {
+    bodies.iter().map(|(h, c)| (h.clone(), crate::hash::stripped(c))).collect()
+}
+
 fn same_rows(a: &MemoryStore, b: &MemoryStore) -> bool {
     a.schema().tables().all(|t| a.scan(&t.name) == b.scan(&t.name))
 }

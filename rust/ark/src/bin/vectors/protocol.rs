@@ -857,3 +857,133 @@ pub fn scoped(out: &Out) {
         );
     }
 }
+
+/// `docs/plan-guards.md` D3 The frames of a function with a server half,
+/// from a run over [`demo::private`]: alice pushes a plain playlist, an
+/// audited one — whose private block files an `audit` item the device never
+/// previewed — and a track on the first, in one push. Her acknowledgement
+/// carries the audited entry's facts, the whole run's, and no other's; bob,
+/// who replays, is sent one page whose middle entry alone carries facts, and
+/// takes it by them. A name the private block refuses is refused, and
+/// nothing of it is logged.
+pub fn private(out: &Out) {
+    let pm = demo::private();
+    let bodies = closures(&pm);
+    let h_create = hash_of(&pm, "create_playlist");
+    let h_audited = hash_of(&pm, "create_audited");
+    let h_add = hash_of(&pm, "add_to_playlist");
+    let mut sv = Server::open(trusting(), open_access(), Silent, Authority::new(pm.schema.clone(), bodies.clone()));
+    let hello = |who: &str| ClientMsg::Hello {
+        sub: Subscription {
+            since: 0,
+            mode: Mode::Whole,
+            log_id: None,
+            partial: false,
+        },
+        token: Some(who.into()),
+        spec: SPEC_VERSION,
+    };
+    sv.recv(1, hello("alice"));
+    sv.recv(2, hello("bob"));
+    let _ = sv.take_outgoing();
+    let entry = |k: u8, fh: &Vec<u8>, args: Args, autos: Args| Entry {
+        id: id_n(k),
+        actor: "alice".into(),
+        session: "dev".into(),
+        roles: Default::default(),
+        fn_hash: fh.clone(),
+        args,
+        autos,
+    };
+    sv.recv(
+        1,
+        ClientMsg::Push {
+            entries: vec![
+                entry(
+                    1,
+                    &h_create,
+                    args([("name", Value::text("Plain"))]),
+                    args([("id", Value::Id(id_n(0x31)))]),
+                ),
+                entry(
+                    2,
+                    &h_audited,
+                    args([("name", Value::text("Audited"))]),
+                    args([("id", Value::Id(id_n(0x32)))]),
+                ),
+                entry(
+                    3,
+                    &h_add,
+                    args([("playlist_id", Value::Id(id_n(0x31))), ("track_id", Value::text("t1"))]),
+                    Args::new(),
+                ),
+            ],
+        },
+    );
+    let said = sv.take_outgoing();
+    let ack = said
+        .iter()
+        .find(|(c, m)| *c == 1 && matches!(m, ServerMsg::Ack { .. }))
+        .map(|(_, m)| m.clone())
+        .unwrap_or_else(|| panic!("protocol: alice is acknowledged: {said:?}"));
+    let page = said
+        .iter()
+        .find(|(c, m)| *c == 2 && matches!(m, ServerMsg::Batch { items, .. } if items.len() == 3))
+        .map(|(_, m)| m.clone())
+        .unwrap_or_else(|| panic!("protocol: bob is paged: {said:?}"));
+    let audit = |f: &[Change]| {
+        f.iter()
+            .any(|c| matches!(c, Change::Add(t, r) if t == "item" && r.get("track_id") == Some(&Value::text("audit"))))
+    };
+    super::claim(
+        "the ack carries the audited entry's facts, private write and all, and no other's",
+        matches!(&ack, ServerMsg::Ack { facts, .. } if facts.len() == 1 && facts[0].0 == 2 && audit(&facts[0].1)),
+    );
+    super::claim(
+        "the page carries facts for the audited entry alone",
+        matches!(&page, ServerMsg::Batch { items, .. }
+            if items.iter().map(|(n, _, f)| (*n, f.is_some())).collect::<Vec<_>>() == vec![(1, false), (2, true), (3, false)]),
+    );
+    // Bob replays what he can and takes the audited entry by its facts: his
+    // store is the authority's, the item he could never have run included.
+    let client_bodies = ark::sim::client_bodies(&bodies);
+    let mut bob = Client::open(
+        Replica::open(pm.schema.clone(), client_bodies, MemoryStore::empty(pm.schema.clone()), 0, vec![]),
+        Mode::Whole,
+        Some("bob".into()),
+    );
+    bob.recv(page.clone());
+    bob.settle();
+    super::claim(
+        "a replaying peer reaches the authority's state through the facts it was sent",
+        bob.replica.verify_at() == (3, ark::hash::state_hash(&sv.authority.store)) && bob.replica.diverged.is_empty(),
+    );
+    // A name the private block keeps is the entry's verdict.
+    sv.recv(
+        1,
+        ClientMsg::Push {
+            entries: vec![entry(
+                4,
+                &h_audited,
+                args([("name", Value::text("forbidden"))]),
+                args([("id", Value::Id(id_n(0x33)))]),
+            )],
+        },
+    );
+    let refused = verdicts(&mut sv, 1);
+    super::claim(
+        "a private block's refusal is the entry's verdict, and nothing of it is logged",
+        matches!(refused.as_slice(), [ServerMsg::Reject { reason, .. }] if reason.contains("keeps that name")) && sv.authority.log.head_seq() == 3,
+    );
+    for (name, f) in [("ack-private", ack), ("batch-private", page)] {
+        let v = f.to_value();
+        match decode(&encode(&v)).map(|d| ServerMsg::from_value(&d)) {
+            Ok(Ok(back)) if back.to_value() == v => {}
+            other => panic!("protocol server {name}: {other:?}"),
+        }
+        out.write(
+            &format!("protocol/server-{name}.json"),
+            &obj(&[("frame", json(&v)), ("bytes", quoted(&hex(&encode(&v))))]),
+        );
+    }
+}

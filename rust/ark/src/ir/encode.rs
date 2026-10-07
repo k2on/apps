@@ -167,6 +167,12 @@ pub fn function_value(deps: &BTreeMap<String, Value>, fn0: &Function) -> Value {
     if f.kind == FnKind::Scope {
         fields.push(("holds", list(hold_value, &f.holds)));
     }
+    // `docs/plan-guards.md` D3 Written only when true, so no function of
+    // any module before private blocks moves; hashed, so a client's module
+    // says which entries it takes by the authority's facts.
+    if f.private {
+        fields.push(("private", Value::Bool(true)));
+    }
     node("fn", fields)
 }
 
@@ -238,6 +244,7 @@ fn stmt(s: &Stmt) -> Value {
         Stmt::Delete(t, ks) => node("delete", vec![("table", txt(t)), ("key", list(expr, ks))]),
         Stmt::Refuse(e) => node("refuse", vec![("e", expr(e))]),
         Stmt::Return(me) => node("return", vec![("e", me.as_ref().map(expr).unwrap_or(Value::Null))]),
+        Stmt::Private(b) => node("private", vec![("body", list(stmt, b))]),
     }
 }
 
@@ -427,6 +434,9 @@ fn stmt_calls(s: &Stmt, acc: &mut std::collections::BTreeSet<String>) {
                 expr_calls(e, acc)
             }
         }
+        // `docs/plan-guards.md` D3 The server's closure carries what a
+        // private block calls; a client's, stripped, does not.
+        Stmt::Private(b) => b.iter().for_each(|s| stmt_calls(s, acc)),
     }
 }
 

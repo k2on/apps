@@ -52,6 +52,13 @@ pub struct Ctx {
     /// with the connection's (`docs/plan-guards.md` D1). What
     /// `Expr::HasRole` asks.
     pub roles: BTreeSet<String>,
+    /// `docs/plan-guards.md` D3 The run is the authority's: a mutator's
+    /// private blocks run, after its public body. Set by a server's
+    /// [`crate::peer::Authority`] when it sequences a pushed intent, and by
+    /// nothing else — a device, a replay and a peer alone, which is a
+    /// client here, leave it false, and run the public body alone. Not
+    /// frozen in the entry: who runs it decides, not who wrote it.
+    pub authority: bool,
 }
 
 impl Ctx {
@@ -72,12 +79,20 @@ impl Ctx {
             user: user.into(),
             session: session.into(),
             roles: BTreeSet::new(),
+            authority: false,
         }
     }
 
     /// The same author, holding these roles.
     pub fn with_roles(mut self, roles: impl IntoIterator<Item = impl Into<String>>) -> Ctx {
         self.roles = roles.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// The same author, run as the authority runs it, private blocks and
+    /// all (`docs/plan-guards.md` D3).
+    pub fn as_authority(mut self, authority: bool) -> Ctx {
+        self.authority = authority;
         self
     }
 }
@@ -285,6 +300,34 @@ impl<'a> Env<'a> {
 struct St<'a> {
     store: &'a mut dyn Store,
     changes: Vec<Change>,
+    /// `docs/plan-guards.md` D3 The private blocks the authority's run has
+    /// reached, in order, each with the locals bound where it was written:
+    /// run after the body ([`procedure`]).
+    deferred: Vec<Deferred>,
+}
+
+// A private block reached, and the locals it was written over, owned: the
+// frames they were on are gone by the time it runs. Outermost first, so the
+// innermost of two with one symbol answers, as it did where it was written.
+type Deferred = (crate::ir::Block, Vec<(Sym, Val<'static>)>);
+
+// The locals in scope, owned, outermost first: what a private block is run
+// over once the body has ended.
+fn captured(env: &Env) -> Vec<(Sym, Val<'static>)> {
+    let own = |p: Place| match p {
+        Place::Value(v) => Val::Own(v.clone()),
+        Place::Row(r) => Val::OwnRow(r.clone()),
+    };
+    let mut out: Vec<(Sym, Val<'static>)> = env.node.iter().map(|(s, v)| (*s, own(v.place()))).collect();
+    let mut frames = Vec::new();
+    let mut at = env.locals;
+    while let Some(f) = at {
+        frames.push((f.sym, own(f.value)));
+        at = f.up;
+    }
+    frames.reverse();
+    out.extend(frames);
+    out
 }
 
 /// §6.1 Apply a mutator to a store by name, through its current closure.
@@ -319,6 +362,7 @@ pub fn apply_closure(
         let mut st = St {
             store: &mut overlay,
             changes: Vec::new(),
+            deferred: Vec::new(),
         };
         let r = procedure(&mut st, sch, c, ctx, autos, args);
         (r, st.changes)
@@ -357,6 +401,7 @@ pub fn query_closure(sch: &Schema, c: &Closure, ctx: &Ctx, args: &Args, store: &
     let mut st = St {
         store: &mut overlay,
         changes: Vec::new(),
+        deferred: Vec::new(),
     };
     match procedure(&mut st, sch, c, ctx, &Args::new(), args)? {
         Some(v) => Ok(v),
@@ -375,6 +420,7 @@ pub fn middleware(sch: &Schema, c: &Closure, ctx: &Ctx, args: &Args, store: &dyn
     let mut st = St {
         store: &mut overlay,
         changes: Vec::new(),
+        deferred: Vec::new(),
     };
     preamble(&mut st, sch, c, ctx, args)
 }
@@ -401,11 +447,23 @@ fn procedure(st: &mut St, sch: &Schema, c: &Closure, ctx: &Ctx, autos: &Args, ar
     if let (FnKind::Query, Some(p)) = (f.kind, &f.plan) {
         return Ok(Some(Value::from(crate::view::read(sch, p, &Scope::of(&env), &*st.store)?)));
     }
-    match block(st, &env, &f.body) {
-        Ok(()) => Ok(None),
-        Err(Stop::Returned(v)) => Ok(v),
-        Err(Stop::Halt(fault)) => Err(fault),
+    let out = match block(st, &env, &f.body) {
+        Ok(()) => None,
+        Err(Stop::Returned(v)) => v,
+        Err(Stop::Halt(fault)) => return Err(fault),
+    };
+    // `docs/plan-guards.md` D3 The private blocks the body reached, last,
+    // in order — at the authority only, since nowhere else defers one —
+    // each over the locals it was written among. A refusal in one is the
+    // entry's verdict.
+    for (b, locals) in std::mem::take(&mut st.deferred) {
+        let env = Env { node: &locals, ..env };
+        match block(st, &env, &b) {
+            Ok(()) | Err(Stop::Returned(_)) => {}
+            Err(Stop::Halt(fault)) => return Err(fault),
+        }
     }
+    Ok(out)
 }
 
 // The input checked, then the middleware: the checked input and the
@@ -487,6 +545,7 @@ fn checked_input(st: &mut St, sch: &Schema, c: &Closure, ctx: &Ctx, args0: &Args
                 let mut empty = St {
                     store: &mut Overlay::new(&empty_store),
                     changes: vec![],
+                    deferred: Vec::new(),
                 };
                 pure_bool(&mut empty, &env, e)
             };
@@ -690,6 +749,7 @@ pub fn check(sch: &Schema, c: &Closure, ctx: &Ctx, partial: &Args, store: &dyn S
             let mut st = St {
                 store: &mut Overlay::new(&empty),
                 changes: vec![],
+                deferred: Vec::new(),
             };
             pure_bool(&mut st, &env, e)
         };
@@ -726,6 +786,7 @@ pub fn check(sch: &Schema, c: &Closure, ctx: &Ctx, partial: &Args, store: &dyn S
             let mut st = St {
                 store: &mut Overlay::new(&empty),
                 changes: vec![],
+                deferred: Vec::new(),
             };
             match pure_bool(&mut st, &env, e) {
                 Ok(true) => {}
@@ -770,6 +831,7 @@ pub fn eval_helper(m: &Module, name: &str, vals: Vec<Value>) -> Result<Value, Ev
     let mut st = St {
         store: &mut overlay,
         changes: Vec::new(),
+        deferred: Vec::new(),
     };
     let vals: Vec<Val> = vals.into_iter().map(Val::Own).collect();
     match call(&mut st, &env, f, &vals) {
@@ -809,6 +871,7 @@ static NOBODY: Ctx = Ctx {
     user: String::new(),
     session: String::new(),
     roles: BTreeSet::new(),
+    authority: false,
 };
 
 /// §1.3 What the expressions of a plan are evaluated in: the function's
@@ -919,6 +982,7 @@ fn pure(env: &Env, e: &Expr) -> Result<Value, EvalFault> {
     let mut st = St {
         store: &mut none,
         changes: Vec::new(),
+        deferred: Vec::new(),
     };
     match eval(&mut st, env, e) {
         Ok(v) => Ok(v),
@@ -1040,6 +1104,13 @@ fn exec(st: &mut St, env: &Env, s: &Stmt) -> Run<()> {
                 None => None,
             };
             return Err(Stop::Returned(v));
+        }
+        // `docs/plan-guards.md` D3 Deferred, at the authority; nothing
+        // anywhere else.
+        Stmt::Private(b) => {
+            if env.ctx.authority {
+                st.deferred.push((b.clone(), captured(env)));
+            }
         }
     }
     Ok(())

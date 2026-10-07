@@ -234,6 +234,40 @@ fn check_module(v: &serde_json::Value) -> Result<(), String> {
     ensure_eq!(encode(&module_value(&m)), bytes, "the module encodes to the bytes");
     ensure_eq!(hex(&module_hash(&m)), v["hash"].as_str().unwrap_or(""), "module hash");
     ensure!(check_schema(&m.schema).is_empty(), "the schema is not well formed");
+    // `docs/plan-guards.md` D3 A server's module with the module a client
+    // loads beside it: the second is the first with every private block
+    // stripped, at its own hash, and the two name every function alike.
+    if !v["stripped"].is_null() {
+        let sval = value(&v["stripped"]);
+        ensure_eq!(
+            decode(&bytes_of(&v["strippedBytes"])).map_err(|e| e.to_string())?,
+            sval,
+            "the stripped bytes decode to the stripped module"
+        );
+        let stripped = module_from_value(&sval).map_err(|e| e.to_string())?;
+        let want = ark::verify::verify(&ark::ir::strip_module(&m)).map_err(|es| format!("{es:?}"))?;
+        ensure_eq!(
+            module_value(&want),
+            sval,
+            "the stripped module is the module with its private blocks taken out"
+        );
+        ensure_eq!(hex(&module_hash(&stripped)), v["public"].as_str().unwrap_or(""), "the public module hash");
+        let names = |m: &Module| -> Vec<(String, String)> {
+            let mut out: Vec<(String, String)> = closures(m).into_iter().map(|(h, c)| (c.function.name, hex(&h))).collect();
+            out.sort();
+            out
+        };
+        let listed: Vec<(String, String)> = v["functions"]
+            .as_array()
+            .map(|xs| {
+                xs.iter()
+                    .map(|p| (p[0].as_str().unwrap_or("").to_string(), p[1].as_str().unwrap_or("").to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        ensure_eq!(names(&m), listed, "the server's module names its functions by the listed hashes");
+        ensure_eq!(names(&stripped), listed, "and so does the client's");
+    }
     Ok(())
 }
 

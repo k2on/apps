@@ -233,9 +233,16 @@ pub fn state_hash(st: &dyn Store) -> Vec<u8> {
 /// excluded, together with the hashes of the helpers it calls and the
 /// middleware it uses directly — which cover theirs in turn, so that
 /// editing a middleware re-hashes every procedure that runs it.
+///
+/// `docs/plan-guards.md` D3 Over the function as a client's module carries
+/// it: every private block taken out ([`crate::ir::strip`]) and the rest
+/// renumbered, `private` kept. So the server's closure and the client's
+/// stripped one are named by one hash, and a function that has no block is
+/// hashed exactly as it always was.
 pub fn function_hash(c: &Closure) -> FnHash {
+    let public = crate::ir::strip(&c.function);
     let mut deps = BTreeMap::new();
-    for n in reaches(&c.function) {
+    for n in reaches(&public) {
         if let Some(h) = c.helpers.iter().find(|h| h.name == n) {
             deps.insert(
                 n,
@@ -246,7 +253,41 @@ pub fn function_hash(c: &Closure) -> FnHash {
             );
         }
     }
-    sha256(&encode(&function_value(&deps, &c.function)))
+    sha256(&encode(&function_value(&deps, &public)))
+}
+
+/// `docs/plan-guards.md` D3 A closure as a client may hold it: its function
+/// stripped of private blocks and its helpers only those the stripped
+/// function reaches. What a server sends for `need_closures`; the same
+/// hash as the closure it came from ([`function_hash`]). A closure with no
+/// private block is itself.
+pub fn stripped(c: &Closure) -> Closure {
+    if !c.function.private {
+        return c.clone();
+    }
+    let function = crate::ir::strip(&c.function);
+    let mut seen: Vec<String> = Vec::new();
+    let mut todo: Vec<String> = reaches(&function);
+    while let Some(n) = todo.pop() {
+        if seen.contains(&n) {
+            continue;
+        }
+        if let Some(h) = c.helpers.iter().find(|h| h.name == n) {
+            todo.extend(reaches(h));
+            seen.push(n);
+        }
+    }
+    Closure {
+        function: normalize(&function),
+        helpers: c.helpers.iter().filter(|h| seen.contains(&h.name)).cloned().collect(),
+    }
+}
+
+/// `docs/plan-guards.md` D3 Whether entries naming this closure are taken by
+/// the authority's facts: its function has a server half, which a client
+/// neither holds nor runs, so its run of the entry is a preview.
+pub fn is_private(c: &Closure) -> bool {
+    c.function.private
 }
 
 /// Whether what a closure writes can depend on its author's roles

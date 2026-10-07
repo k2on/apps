@@ -326,6 +326,7 @@ impl ModuleGen<'_> {
                 ],
                 plan: None,
                 holds: vec![],
+                private: false,
                 names: BTreeMap::new(),
             });
             mw.push("full".into());
@@ -348,6 +349,7 @@ impl ModuleGen<'_> {
                 ],
                 plan: None,
                 holds: vec![],
+                private: false,
                 names: BTreeMap::new(),
             });
             mw.push("count".into());
@@ -366,6 +368,7 @@ impl ModuleGen<'_> {
                 body: vec![Stmt::Return(Some(std1(StdFn::Concat, Expr::List(vec![Expr::CtxUser, lit_text("!")]))))],
                 plan: None,
                 holds: vec![],
+                private: false,
                 names: BTreeMap::new(),
             });
             mw.push("who".into());
@@ -391,6 +394,7 @@ impl ModuleGen<'_> {
                 body: vec![Stmt::If(refuse_when, vec![Stmt::Refuse(lit_text(FORBIDDEN))], vec![])],
                 plan: None,
                 holds: vec![],
+                private: false,
                 names: BTreeMap::new(),
             });
         }
@@ -467,6 +471,7 @@ impl ModuleGen<'_> {
             body: vec![Stmt::Return(Some(body))],
             plan: None,
             holds: vec![],
+            private: false,
             names: BTreeMap::new(),
         }
     }
@@ -501,6 +506,7 @@ impl ModuleGen<'_> {
             body: vec![Stmt::Return(Some(body))],
             plan: None,
             holds: vec![],
+            private: false,
             names: BTreeMap::new(),
         }
     }
@@ -744,6 +750,7 @@ impl ModuleGen<'_> {
             body: vec![],
             plan: None,
             holds: vec![],
+            private: false,
             names: BTreeMap::new(),
         };
         let kind = self.rng.below(12);
@@ -1114,6 +1121,7 @@ impl ModuleGen<'_> {
             body: vec![],
             plan: None,
             holds: vec![],
+            private: false,
             names: BTreeMap::new(),
         };
         let mut env = Env {
@@ -1451,6 +1459,7 @@ pub fn scoped(rng: &mut Rng, m: &Module) -> Option<Result<Module, String>> {
         body: vec![],
         plan: None,
         holds,
+        private: false,
         names: BTreeMap::new(),
     };
     let also = rng.chance(50).then(|| {

@@ -189,6 +189,14 @@ pub struct Function {
     /// the wire `holds`, written only for a scope, so every function of
     /// every module before scopes is the bytes it was.
     pub holds: Vec<Hold>,
+    /// `docs/plan-guards.md` D3 A mutator with a server half: its body
+    /// carries [`Stmt::Private`] blocks, or carried them before they were
+    /// stripped from the module a client loads ([`strip`]). Hashed, so a
+    /// client knows from its own module which entries it takes by the
+    /// authority's facts rather than by its own run. On the wire
+    /// `private: true`, written only when true, so every function before
+    /// private blocks is the bytes it was.
+    pub private: bool,
     /// The author's names for symbols; not hashed, not required.
     pub names: BTreeMap<Sym, String>,
 }
@@ -301,6 +309,62 @@ pub enum Stmt {
     Refuse(Expr),
     /// Leave the function, with a value for a query or helper.
     Return(Option<Expr>),
+    /// `docs/plan-guards.md` D3 A mutator's server half (`ctx.private`):
+    /// run only by the authority, and **after** the public body, in the
+    /// order the blocks were reached, each over the locals bound where it
+    /// was written — so the public body can never have read what a private
+    /// block wrote, and a client reproduces it. May read and write any table
+    /// and column, including what no person's union holds, and may refuse:
+    /// the refusal is the entry's verdict. Never in a client's module:
+    /// [`strip`] removes it, and the function's hash is of what is left. On
+    /// the wire `{"t":"private","body"}`.
+    Private(Block),
+}
+
+/// `docs/plan-guards.md` D3 A function as a client's module carries it:
+/// every [`Stmt::Private`] taken out, wherever it is nested, and
+/// [`Function::private`] kept — what the function's hash is taken of
+/// ([`crate::hash::function_hash`]). A function with no block is itself.
+pub fn strip(f: &Function) -> Function {
+    if !f.private {
+        return f.clone();
+    }
+    fn block(b: &Block) -> Block {
+        b.iter()
+            .filter(|s| !matches!(s, Stmt::Private(_)))
+            .map(|s| match s {
+                Stmt::If(c, a, e) => Stmt::If(c.clone(), block(a), block(e)),
+                Stmt::For(x, xs, body) => Stmt::For(*x, xs.clone(), block(body)),
+                other => other.clone(),
+            })
+            .collect()
+    }
+    Function {
+        body: block(&f.body),
+        ..f.clone()
+    }
+}
+
+/// `docs/plan-guards.md` D3 The module a client loads: every function
+/// [`strip`]ped. `harken.ark` is one; the server keeps the blocks. The two
+/// name every function by the same hash, and differ by module hash only
+/// where a block was taken out.
+pub fn strip_module(m: &Module) -> Module {
+    Module {
+        functions: m.functions.iter().map(strip).collect(),
+        ..m.clone()
+    }
+}
+
+/// `docs/plan-guards.md` D3 Whether a block holds a [`Stmt::Private`],
+/// at any depth.
+pub fn has_private(b: &Block) -> bool {
+    b.iter().any(|s| match s {
+        Stmt::Private(_) => true,
+        Stmt::If(_, a, e) => has_private(a) || has_private(e),
+        Stmt::For(_, _, body) => has_private(body),
+        _ => false,
+    })
 }
 
 /// §3.2 Expressions.

@@ -116,6 +116,85 @@ pub fn module(out: &Out) {
             ("expect", quoted("fail")),
         ]),
     );
+    // `docs/plan-guards.md` D3 A server's module with a private block,
+    // and the module a client loads from it: the block gone, `private: true`
+    // left, and every function named by one hash in both.
+    let pm = demo::private();
+    let stripped = ark::verify::verify(&ark::ir::strip_module(&pm)).expect("the stripped module verifies");
+    let (pv, stv) = (module_value(&pm), module_value(&stripped));
+    let (pbytes, stbytes) = (encode(&pv), encode(&stv));
+    let kept = b"the server keeps that name";
+    for word in [&b"private"[..], kept] {
+        super::claim(
+            &format!("the server's module carries {}", String::from_utf8_lossy(word)),
+            pbytes.windows(word.len()).any(|w| w == word),
+        );
+    }
+    super::claim(
+        "the stripped module carries nothing of the block",
+        !stbytes.windows(kept.len()).any(|w| w == kept),
+    );
+    super::claim(
+        "the stripped module says private",
+        stripped
+            .functions
+            .iter()
+            .any(|f| f.private && f.body.iter().all(|s| !matches!(s, ark::ir::Stmt::Private(_)))),
+    );
+    let names = |m: &Module| -> Vec<(String, String)> {
+        let mut v: Vec<(String, String)> = ark::hash::closures(m).into_iter().map(|(h, c)| (c.function.name, hex(&h))).collect();
+        v.sort();
+        v
+    };
+    super::claim("every function has one hash in both modules", names(&pm) == names(&stripped));
+    super::claim("the two modules are two hashes", module_hash(&pm) != module_hash(&stripped));
+    match decode(&pbytes).map(|v| module_from_value(&v)) {
+        Ok(Ok(back)) if module_value(&back) == pv => {}
+        other => panic!("module private: {other:?}"),
+    }
+    let fns = |m: &Module| -> String {
+        let pairs: Vec<String> = names(m).into_iter().map(|(n, h)| format!("[{},{}]", quoted(&n), quoted(&h))).collect();
+        format!("[{}]", pairs.join(","))
+    };
+    out.write(
+        "module/private.json",
+        &obj(&[
+            ("module", json(&pv)),
+            ("bytes", quoted(&hex(&pbytes))),
+            ("hash", quoted(&hex(&module_hash(&pm)))),
+            ("stripped", json(&stv)),
+            ("strippedBytes", quoted(&hex(&stbytes))),
+            ("public", quoted(&hex(&module_hash(&stripped)))),
+            ("functions", fns(&stripped)),
+        ]),
+    );
+    // And a client's module that lost the flag with the block: its
+    // `create_audited` is another function, at another hash, and a runner
+    // must say so.
+    let unflagged = Module {
+        functions: stripped
+            .functions
+            .iter()
+            .map(|f| ark::ir::Function { private: false, ..f.clone() })
+            .collect(),
+        ..stripped.clone()
+    };
+    super::claim("the flag is hashed", names(&unflagged) != names(&stripped));
+    let uv = module_value(&unflagged);
+    out.write(
+        "module/falsify/stripped-without-the-flag.json",
+        &obj(&[
+            ("module", json(&pv)),
+            ("bytes", quoted(&hex(&pbytes))),
+            ("hash", quoted(&hex(&module_hash(&pm)))),
+            ("stripped", json(&uv)),
+            ("strippedBytes", quoted(&hex(&encode(&uv)))),
+            ("public", quoted(&hex(&module_hash(&unflagged)))),
+            ("functions", fns(&stripped)),
+            ("expect", quoted("fail")),
+        ]),
+    );
+    out.write("verify/private-ok.json", &obj(&[("module", json(&pv)), ("verifies", "true".into())]));
     out.write(
         "module/demo.json",
         &obj(&[

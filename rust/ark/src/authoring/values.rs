@@ -10,7 +10,7 @@ use crate::schema::Ty;
 use crate::value::Value;
 
 use super::cx::{self, H};
-use super::schema::Row;
+use super::schema::{Effect, IntoEffect, Row, Tables};
 
 /// A type of the vocabulary: what it is in the IR, and how it is carried.
 /// Every value type, and every row (through [`Row`]).
@@ -744,6 +744,39 @@ impl Ctx {
         }
         let held = cx::native(|n| n.ctx.roles.contains(name));
         Bool(cx::lit(Value::Bool(held)))
+    }
+
+    /// `docs/plan-guards.md` D3 The mutator's server half: `f` runs only
+    /// where the run is the authority's, and there **after** the body, in
+    /// the order the body reached its `private`s — so nothing the body
+    /// reads can be what a private block wrote, and a client's run of the
+    /// body is the authority's. On a device, in a replay and on a peer
+    /// alone it does nothing; under `Emit` it is a [`crate::ir::Stmt::Private`]
+    /// block, which the module a client loads does not carry
+    /// ([`crate::ir::strip`]). It may write any table and any column, those
+    /// no person holds included, and may refuse: the refusal is the entry's
+    /// verdict, and the author's preview of the entry is undone when the
+    /// verdict arrives.
+    ///
+    /// `f` is given the tables, and keeps what it captures until the body
+    /// has ended, so it owns it: `ctx.private(move |db: &Db| ..)`, with any
+    /// value of the vocabulary — a row, an input, `ctx.user` read into a
+    /// local first — moved in.
+    pub fn private<S: Tables + 'static, R: IntoEffect>(&self, f: impl FnOnce(&S) -> R + 'static) -> Effect {
+        if cx::emitting() {
+            let (_, b) = cx::block(|| f(&S::open()).into_effect());
+            cx::stmt(crate::ir::Stmt::Private(b));
+            return Effect(());
+        }
+        if cx::halted() || !cx::native(|n| n.ctx.authority) {
+            return Effect(());
+        }
+        cx::native(|n| {
+            n.deferred.push(Box::new(move || {
+                f(&S::open()).into_effect();
+            }))
+        });
+        Effect(())
     }
 
     /// `EAuto name` of `Now`: milliseconds since the Unix epoch, drawn once

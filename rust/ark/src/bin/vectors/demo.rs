@@ -191,6 +191,37 @@ pub fn shared() -> Router<Demo> {
     ))
 }
 
+/// A router over the demo's tables whose one mutation has a server half
+/// (`docs/plan-guards.md` D3): `create_audited` makes a playlist, as
+/// `create_playlist` does, and its private block — run by the authority
+/// alone, after the body — files an `audit` item on it, or refuses the name
+/// `forbidden`. What `module/private.json` and the D3 protocol vectors are
+/// over.
+pub fn audited() -> Router<Demo> {
+    let audited = router::<Demo>("audited");
+    audited.routes((audited.input::<CreatePlaylist>().mutation("create_audited", |ctx, db, input| {
+        let id: Id<Playlist> = ctx.new_id("id");
+        let name = input.name;
+        ctx.private(move |db: &Demo| {
+            when(name.eq("forbidden"), || refuse("the server keeps that name"));
+            db.item.insert(Item {
+                playlist_id: id,
+                track_id: "audit".into(),
+                pos: 0.into(),
+            })
+        });
+        db.playlist
+            .insert(Playlist { id, name, user_id: ctx.user })
+            .on((Playlist::user_id, Playlist::name))
+    }),))
+}
+
+/// The demo with [`audited`] beside it, verified: the server's module,
+/// private block and all.
+pub fn private() -> ark::ir::Module {
+    Module::new((demo(), audited())).build().clone()
+}
+
 /// [`shared`] alone, verified.
 pub fn scoped() -> ark::ir::Module {
     Module::new((shared(),)).build().clone()

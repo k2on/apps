@@ -2,7 +2,9 @@
 //!
 //! ```text
 //! arkc verify  M          verify, and print the module hash
-//! arkc hash    M          the module hash and every function's hash
+//! arkc hash    M          the module hash and every function's hash; for a server's
+//!                         module with private blocks, the public hash beside it
+//! arkc strip   M OUT      the module a client loads: every private block taken out
 //! arkc check   OLD NEW    log compatibility (§17): every break, exit 1; or nothing
 //! arkc vectors OUTDIR     write the conformance vectors, as ark-vectors does
 //!
@@ -39,10 +41,10 @@ use std::process::exit;
 
 use ark::compat;
 use ark::hash::{closure, function_hash, module_hash};
-use ark::ir::{module_from_value, Module};
+use ark::ir::{module_from_value, strip_module, Module};
 use ark::value::hex;
 
-const USAGE: &str = "usage: arkc verify M | hash M | check OLD NEW | vectors OUTDIR\n       arkc backup DIR OUT | restore BACKUP DIR [--same-log] | verify-log DIR [M]\n       arkc fuzz [--seed N] [--seconds S] [--cases K] [--out DIR] [--without OP,…] | fuzz --replay FILE";
+const USAGE: &str = "usage: arkc verify M | hash M | strip M OUT | check OLD NEW | vectors OUTDIR\n       arkc backup DIR OUT | restore BACKUP DIR [--same-log] | verify-log DIR [M]\n       arkc fuzz [--seed N] [--seconds S] [--cases K] [--out DIR] [--without OP,…] | fuzz --replay FILE";
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -52,6 +54,12 @@ fn main() {
         ["hash", path] => {
             let m = load(path);
             println!("module   {}", hex(&module_hash(&m)));
+            // `docs/plan-guards.md` D3 A server's module is named to its
+            // clients by the module they load.
+            let public = strip_module(&m);
+            if public != m {
+                println!("public   {}", hex(&module_hash(&public)));
+            }
             for f in &m.functions {
                 println!("{}  {}", hex(&function_hash(&closure(&m, f))), f.name);
             }
@@ -66,6 +74,16 @@ fn main() {
                 }
                 exit(1);
             }
+        }
+        // `docs/plan-guards.md` D3 The client's module from the server's:
+        // what `harken.ark` is to a domain with private blocks. Verified
+        // again, since what is written is what a client will verify.
+        ["strip", path, out] => {
+            let m = load(path);
+            let public = ark::verify::verify(&strip_module(&m)).unwrap_or_else(|es| die(&format!("{es:?}")));
+            let bytes = ark::canon::encode(&ark::ir::module_value(&public));
+            std::fs::write(out, bytes).unwrap_or_else(|e| die(&format!("{out}: {e}")));
+            println!("{}", hex(&module_hash(&public)));
         }
         ["vectors", out] => vectors::write_all(std::path::Path::new(out)),
         ["fuzz", rest @ ..] => exit(fuzz::main(rest)),

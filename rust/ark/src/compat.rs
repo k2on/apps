@@ -314,6 +314,7 @@ mod tests {
             ret: None,
             body: vec![Stmt::Insert("item".into(), row, vec![])],
             holds: vec![],
+            private: false,
             names: BTreeMap::new(),
             plan: None,
         };

@@ -105,8 +105,20 @@ impl Domain {
         }
     }
 
-    /// The module hash.
+    /// The module hash: of the module a client loads, every private block
+    /// stripped (`docs/plan-guards.md` D3) — what a server says on every
+    /// page and a client compares its own with, so a server built from the
+    /// blocks and a phone built from `harken.ark` are one module to each
+    /// other.
     pub fn hash(&self) -> Vec<u8> {
-        ark::hash::module_hash(&self.0.module)
+        ark::hash::module_hash(&ark::ir::strip_module(&self.0.module))
+    }
+
+    /// `docs/plan-guards.md` D3 The hash of this module with its private
+    /// blocks, where it has any: what a server's provenance records beside
+    /// [`Domain::hash`], so it can say which private bodies it ran.
+    pub fn private_hash(&self) -> Option<Vec<u8>> {
+        let whole = ark::hash::module_hash(&self.0.module);
+        (whole != self.hash()).then_some(whole)
     }
 }

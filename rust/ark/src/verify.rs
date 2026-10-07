@@ -46,6 +46,12 @@
 //!   `When` and one `Exists` through a declared reference
 //!   (`ExistsNotAReference`, `NestedExists`) — leaves a plan may not have
 //!   (`ScopeLeafInPlan`).
+//! - `docs/plan-guards.md` D3: a private block is in a mutator's body
+//!   (`PrivateOutsideMutator`), not inside another (`NestedPrivate`), holds
+//!   no `return` (`ReturnInPrivate`), and its function says `private`
+//!   (`PrivateUndeclared`; a stripped function says it with no block left).
+//!   It is typed as the body is and may read and write anything: what it
+//!   names is not held to any person's union, since no client runs it.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -190,6 +196,18 @@ pub enum Complaint {
     /// union of scopes does not give them, so on their device it does not
     /// exist (`docs/plan-guards.md` D2, [`crate::scope::check`]).
     NotHeld(TableName, FieldName, Vec<String>),
+    // `docs/plan-guards.md` D3
+    /// A private block, or `private`, on anything but a mutator.
+    PrivateOutsideMutator,
+    /// A private block inside another: one server half per point.
+    NestedPrivate,
+    /// A `return` inside a private block, which runs after the body has
+    /// ended and has nothing to leave.
+    ReturnInPrivate,
+    /// A body carrying a private block whose function does not say
+    /// `private`: a client's module would not know to take its entries by
+    /// the authority's facts.
+    PrivateUndeclared,
 }
 
 /// Verify a module. On success, the module as it is to be hashed and run:
@@ -388,6 +406,14 @@ fn verify_function_naming(m: &Module, i: usize, f: &Function, named: &RefCell<Na
     if !f.holds.is_empty() {
         return err(Complaint::HoldsOutsideScope);
     }
+    // `docs/plan-guards.md` D3 Only a mutator has a server half, and one
+    // that has one says so.
+    if f.private && f.kind != FnKind::Mutator {
+        return err(Complaint::PrivateOutsideMutator);
+    }
+    if !f.private && crate::ir::has_private(&f.body) {
+        return err(Complaint::PrivateUndeclared);
+    }
     let names: Vec<String> = f
         .input
         .iter()
@@ -427,6 +453,7 @@ fn verify_function_naming(m: &Module, i: usize, f: &Function, named: &RefCell<Na
         args: &args,
         provided: &provided,
         locals: BTreeMap::new(),
+        private: false,
     };
     // The input's checks, each over its own field as it stands.
     for (n, fd) in &f.input {
@@ -506,6 +533,8 @@ struct G<'a> {
     args: &'a BTreeMap<String, Ty>,
     provided: &'a BTreeMap<String, Ty>,
     locals: BTreeMap<Sym, Ty>,
+    /// Inside a private block (`docs/plan-guards.md` D3).
+    private: bool,
 }
 
 impl G<'_> {
@@ -640,6 +669,7 @@ fn stmt<'a>(g: &G<'a>, s: &Stmt) -> Check_<G<'a>> {
             expect(g, "refuse", &Ty::Text, e)?;
             Ok(g.clone())
         }
+        Stmt::Return(_) if g.private => err(Complaint::ReturnInPrivate),
         Stmt::Return(me) => {
             match (&g.f.ret, me) {
                 (None, None) => {}
@@ -647,6 +677,25 @@ fn stmt<'a>(g: &G<'a>, s: &Stmt) -> Check_<G<'a>> {
                 (Some(_), None) => return err(Complaint::NoReturnType),
                 (Some(want), Some(e)) => expect(g, "return", want, e)?,
             }
+            Ok(g.clone())
+        }
+        // `docs/plan-guards.md` D3 Typed as the body around it is, over the
+        // locals bound before it; what it names goes nowhere, since no
+        // client runs it and no union holds it to anything.
+        Stmt::Private(b) => {
+            if g.kind != FnKind::Mutator {
+                return err(Complaint::PrivateOutsideMutator);
+            }
+            if g.private {
+                return err(Complaint::NestedPrivate);
+            }
+            let unheld = RefCell::new(Named::default());
+            let inside = G {
+                named: &unheld,
+                private: true,
+                ..g.clone()
+            };
+            block(&inside, b)?;
             Ok(g.clone())
         }
     }
@@ -1246,6 +1295,7 @@ fn scope_ok(m: &Module, i: usize, f: &Function) -> Result<(), Vec<Complaint>> {
         args: &none,
         provided: &none,
         locals: BTreeMap::new(),
+        private: false,
     };
     for h in &f.holds {
         let t = table(&g, &h.table)?;
@@ -1413,6 +1463,7 @@ fn complete_stmt(sch: &Schema, s: &mut Stmt) {
         }
         Stmt::Delete(_, ks) => ks.iter_mut().for_each(|e| complete_expr(sch, e)),
         Stmt::Return(None) => {}
+        Stmt::Private(b) => b.iter_mut().for_each(|s| complete_stmt(sch, s)),
     }
 }
 

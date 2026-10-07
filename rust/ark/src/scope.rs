@@ -747,7 +747,10 @@ pub fn check(m: &Module, named: &BTreeMap<String, BTreeSet<(TableName, FieldName
         .collect();
     let mut out = Vec::new();
     for p in m.functions.iter().filter(|f| f.kind.is_procedure()) {
-        let c = crate::hash::closure(m, p);
+        // What a client runs is the stripped procedure (`docs/plan-guards.md`
+        // D3): a private block and the helpers only it calls are the
+        // server's, and name nothing a person must hold.
+        let c = crate::hash::closure(m, &crate::ir::strip(p));
         let parts: Vec<&Function> = std::iter::once(&c.function)
             .chain(&c.helpers)
             .filter(|f| f.kind != FnKind::Scope)

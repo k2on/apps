@@ -1528,7 +1528,10 @@ pub struct Server<M: Machine> {
 impl<M: Machine> Server<M> {
     /// A server that is the authority for the log (`openServer`). By
     /// default an entry must carry the connection's own session.
-    pub fn open(auth: Authenticate, access: Access, machine: M, authority: Authority) -> Server<M> {
+    pub fn open(auth: Authenticate, access: Access, machine: M, mut authority: Authority) -> Server<M> {
+        // `docs/plan-guards.md` D3 A server's authority runs the private
+        // blocks: its facts are the whole run's.
+        authority.private = true;
         Server {
             auth,
             owns: Box::new(|_, _| false),
@@ -1773,8 +1776,11 @@ impl<M: Machine> Server<M> {
                         // was: a device whose belief is right, and one whose
                         // function reads no role — every intent of a peer
                         // older than roles, which sends none.
+                        // `docs/plan-guards.md` D3 So does every entry of a
+                        // function with a server half: the device previewed
+                        // the public body, and the log holds the whole run.
                         Sequenced::Appended(n, facts) => {
-                            if restamped && self.reads_roles(&e.fn_hash) {
+                            if (restamped && self.reads_roles(&e.fn_hash)) || self.authority.is_private(&e.fn_hash) {
                                 stamp_facts.push((n, facts));
                             }
                             acks.push((e.id, n))
@@ -1782,10 +1788,16 @@ impl<M: Machine> Server<M> {
                         // A duplicate is held to the roles it was logged
                         // with: the device pushing it again may still be
                         // holding the preview of another belief.
+                        // One below the horizon has no facts to send: the
+                        // snapshot that peer is served covers it, and its
+                        // acknowledgement at or below the cursor confirms it.
                         Sequenced::Duplicate(n) => {
-                            let differs = self.authority.log.entries.get(&n).is_some_and(|(logged, _)| logged.roles != pushed.roles);
-                            if differs && self.reads_roles(&e.fn_hash) {
-                                stamp_facts.push((n, self.authority.log.entries[&n].1.clone()));
+                            if let Some((logged, facts)) = self.authority.log.entries.get(&n) {
+                                let differs = logged.roles != pushed.roles;
+                                let facts = facts.clone();
+                                if (differs && self.reads_roles(&e.fn_hash)) || self.authority.is_private(&e.fn_hash) {
+                                    stamp_facts.push((n, facts));
+                                }
                             }
                             acks.push((e.id, n))
                         }
@@ -1837,9 +1849,11 @@ impl<M: Machine> Server<M> {
                 self.send(c, ServerMsg::FactsFor { items });
             }
             ClientMsg::NeedClosures { hashes } => {
+                // `docs/plan-guards.md` D3 As a client may hold one: a server
+                // half is the server's, and never leaves it.
                 let items = hashes
                     .iter()
-                    .filter_map(|h| self.authority.bodies.get(h).map(|cl| (h.clone(), cl.clone())))
+                    .filter_map(|h| self.authority.bodies.get(h).map(|cl| (h.clone(), crate::hash::stripped(cl))))
                     .collect();
                 self.send(c, ServerMsg::Closures { items });
             }
@@ -2108,9 +2122,15 @@ impl<M: Machine> Server<M> {
                 }
                 Page::Entries(items, more) => {
                     let last = items.iter().map(|(n, _, _)| *n).max().unwrap_or(sent).max(sent);
+                    // `docs/plan-guards.md` D3 A peer that replays is sent the
+                    // facts of exactly the entries it cannot replay: those of
+                    // a function with a server half, which it takes by them.
                     let with_facts = items
                         .into_iter()
-                        .map(|(n, e, f)| (n, e, if md == Mode::ByFacts { Some(f) } else { None }))
+                        .map(|(n, e, f)| {
+                            let facts = md == Mode::ByFacts || a.is_private(&e.fn_hash);
+                            (n, e, facts.then_some(f))
+                        })
                         .collect();
                     (
                         ServerMsg::Batch {
