@@ -717,6 +717,16 @@ effects. The same mechanism is the cure for divergence: `Verify` finds it,
 and the peer resyncs from the last snapshot plus facts rather than being
 reinstalled.
 
+A mutator may have a **server half** (`docs/plan-guards.md` D3): a private
+block, `ctx.private(..)`, which only the authority runs, after the public
+body, and which the module a client loads does not carry — the function's
+hash is of what is left, and says `private: true`. No peer can replay such
+an entry as the authority applied it, so every peer takes it by facts: the
+acknowledgement carries them to its author, who previewed the public body,
+and a page carries them to a peer that replays, for those entries and no
+others; what the block writes to rows or columns a person does not hold is
+projected away with the rest of the facts (§3.11).
+
 **Frames**, canonical CBOR, tagged `"t"`:
 
 ```

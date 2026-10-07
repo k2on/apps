@@ -195,7 +195,7 @@ accounts and role changes.
 
 ## Order, rounds, and guards
 
-**Status: G1, D1 and D2 landed; D3–D4 decided, not started.** Rounds, each ending
+**Status: G1, D1, D2 and D3 landed; D4 decided, not started.** Rounds, each ending
 in a green `nix flake check`:
 
 1. **D1**: roles frozen in the entry and stamped by the authority;
@@ -472,3 +472,100 @@ and the phone do not yet open a partial peer's views under anything but
 what `ark_client::Peer::schema` now says (the device's), and no app
 declares a scope, so a typed row with an excluded field has not met a
 real screen. Per-row column sets are not built.
+
+**D3, private blocks** (`d7ac959`, `53d2c2a`, `29dd2e8`). `Stmt::Private(Block)`
+and `Function::private`; `ctx.private(move |db: &Db| ..)` in the authoring
+(the closure owns what it captures, since it runs after the body has
+ended). Natively a block is kept only when the run's `Ctx` is the
+authority's — `Ctx::authority`, set by `Authority::private`, which
+`protocol::Server::open` sets and nothing else does: a device, a replay
+and a peer alone run the public body — and the kept blocks run after the
+body, in order; the interpreter defers the same way, each block over the
+locals bound where it was written, owned. A refusal in one is the entry's
+verdict. On the wire `{"t":"private","body"}` and `private: true`, both only
+where there is a block. The verifier keeps a block in a mutator's body, one
+deep, with no `return`, its function saying `private`; what a block names
+is held to no union (`scope::check` reads the stripped closure).
+
+**The hash and the stripped module.** `function_hash` is taken of the
+function with its blocks stripped and renumbered, `private` kept — so the
+server's closure and the client's are one hash, and a function with no
+block hashes as it always did. `authoring::Module::emit`/`hash` are the
+client's module (`harken.ark` is one), `emit_server`/`server_hash` the
+server's; `Domain::hash` is the public hash, which every page says and a
+client compares, and `Domain::private_hash` the server module's where it
+differs. `arkc strip`; a closure asked for is sent stripped.
+`modules.cbor` records `private` beside `module`, only where there is one,
+and two starts with one public module and two private halves are two
+records; the current module's closures are held first, so an intent at a
+hash an earlier module shipped too runs the private half running now.
+
+**The facts path is D1's.** The acknowledgement carries the facts of every
+entry of a `private` function (a duplicate's too, while the log retains
+it), and a page to a whole peer carries facts for exactly those entries,
+as `ByFacts` carries them for all; a partial peer was already fed facts,
+filtered and projected, so what a block writes outside a person's union
+is projected away as any fact is. A replica takes such an entry by the
+authority's facts and never by its run: its own intent's record is a
+preview, replaced without a divergence and rebased onto; another's waits
+for facts and asks (`needs`) where none came. Whole peers' entries without
+a block are the bytes they were.
+
+**Hooks.** `ark_server::Builder::on_committed(fn_name, Box<dyn Fn(&Entry,
+&Facts) + Send + Sync>)` — on the builder, since that is what an app
+builds a server from: every entry of that function, with the whole run's
+facts, handed to a thread of its own in sequence order once the write the
+`Ack` waits for has succeeded; held while the journal cannot be written,
+never for what the log held at start; a panic caught and said, the entry
+standing. Off the hub's thread because the hub owns every socket, and a
+hook waiting on the world would hold every acknowledgement behind it.
+
+harken declares no block and registers no hook (comments in `library.rs`
+and harken-server say where each would go): `harken.ark` byte-identical,
+module hash `2339009b3ae76594e5ed6b115aa92267f96e4400c49b64e04765526134088f2f`,
+no closure hash moved.
+
+`spec/vectors` gains six files and every other is byte-identical
+(`ark-vectors` writes the tree exactly): `module/private.json` (the server's
+module, the stripped one, both hashes and every function's, one in both),
+`module/falsify/stripped-without-the-flag.json`, `verify/private-ok.json`,
+`protocol/server-ack-private.json`, `protocol/server-batch-private.json`, and
+the fuzzer's one finding, `rebase/fleet-fuzz-a-private-duplicate-below-the-
+horizon.json`: a private intent pushed again after the horizon had passed
+its entry was acknowledged with the facts of an entry the log no longer
+held, and the server panicked; fixed before the engine commit landed.
+
+The fuzzer gives one generated module in three private blocks — a shared
+write, a write of a column a scope leaves out, a refusal of one login —
+and holds every page and acknowledgement to carry a private entry's facts
+(`private-facts`, against the module's own list: a client that went without
+would ask and converge anyway), every logged private entry to the whole
+run's facts (`private`), and no entry of a refused login to the log
+(`private-refusal`, read off the block's condition).
+
+Numbers. `arkc fuzz --seed 1 --cases 200` (debug): 400 sessions, 37,492
+ops, 7,201 entries, 44 modules with private blocks (32 shared writes, 7
+outside a union, 27 refusals), 471 private entries, 45 confirmed otherwise
+than previewed, 42 refused by a block, 0 findings. `--seconds 300`
+(release): 10,536 cases, 1,963,660 ops, 386,365 entries, 2,788 modules with
+private blocks (2,310 / 502 / 1,373), 29,740 private entries, 5,244
+corrected previews, 2,852 private refusals, 0 findings (11 of 8,474
+generated modules missed, `TypeMismatch filter on id`). `perf.rs` in
+release: a whole peer's bytes per push (1,960 / 7,720 / 30,760 at 10 / 40 /
+160 connections) and a Batch of 256's allocations (13,598 / 7,439; with
+facts 21,534 / 12,559) identical; `perf_a_mutate_alone` 22–27 µs at 500 to
+8,000 items, l/f 0.98–1.53; fan-out flat, 3.8–7.8 µs per whole connection.
+
+Falsified: each test once (in its commit); the fuzz checks with `--seed 1
+--cases 200` — the authority's `is_private` false (36 `private-facts`), the
+replica's (13 `converged`, a divergence), eval ignoring a block's refusal
+(11 `private-refusal`), the server's authority running no block (10
+`private` and 10 `private-refusal`); and the kept vector, by indexing the
+log again (`rebase_fleet` panics).
+
+Not verified: `nix flake check` (the coordinator runs it); `perf.rs` of
+`ark-server` was not run. No app has a private block or a hook, so neither
+has met a real deployment; a block's write outside a union is generated
+rarely (502 in 300 s), since a scope must exclude a column the generator
+can move. The facts a hook is told are the log's; which private body ran
+for an entry is said per module, not per entry.
