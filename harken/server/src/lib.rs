@@ -77,6 +77,13 @@ pub struct Config {
     /// An `.ark` module to host instead of harken's own: functions whose
     /// hashes this build holds run natively, the rest interpreted.
     pub module: Option<PathBuf>,
+    /// `.ark` modules this server is to hold as ones it has run before
+    /// (`HARKEN_OLD_MODULES`, comma-separated paths; what
+    /// `services.harken.oldModules` sets): the closures of each kept, so
+    /// an intent a client built with one authors is sequenced through
+    /// them, though this server never started with it
+    /// (`ark_server::Builder::ran_before`, `docs/plan-guards.md` D1).
+    pub old_modules: Vec<PathBuf>,
     /// Where a browser reaches this server — the proxy's address behind one.
     /// The provider sends people back under it, and the page it serves
     /// signs in against it. `http://{listen}` when unset.
@@ -122,6 +129,7 @@ impl Config {
             listen: listen.into(),
             data: data.into(),
             module: None,
+            old_modules: vec![],
             public_url: None,
             sign_in: SignIn::Dev,
             redirects: vec![],
@@ -140,6 +148,7 @@ impl Config {
     /// ```text
     /// HARKEN_DATA                   where the state lives (default: the temp dir)
     /// HARKEN_MODULE                 an .ark to host instead of harken's own
+    /// HARKEN_OLD_MODULES            .ark files to hold as run before, comma-separated
     /// HARKEN_PUBLIC_URL             where a browser reaches this server
     /// HARKEN_DEV_AUTH=1             anyone is whoever they say
     /// HARKEN_OIDC_ISSUER, HARKEN_OIDC_CLIENT_ID, HARKEN_OIDC_CLIENT_SECRET_FILE
@@ -212,6 +221,13 @@ impl Config {
             data: env("HARKEN_DATA")
                 .map_or_else(|| std::env::temp_dir().join("harken-server"), PathBuf::from),
             module: env("HARKEN_MODULE").map(PathBuf::from),
+            old_modules: env("HARKEN_OLD_MODULES")
+                .unwrap_or_default()
+                .split(',')
+                .map(str::trim)
+                .filter(|p| !p.is_empty())
+                .map(PathBuf::from)
+                .collect(),
             public_url: env("HARKEN_PUBLIC_URL"),
             sign_in,
             redirects: env("HARKEN_REDIRECTS")
@@ -465,6 +481,17 @@ pub async fn start(config: Config) -> Result<Server> {
         .live(desk)
         .keepalive(config.keepalive)
         .retain(config.retain);
+    for p in &config.old_modules {
+        let bytes =
+            std::fs::read(p).with_context(|| format!("reading the old module {}", p.display()))?;
+        let old = Domain::from_bytes(&bytes, vec![])
+            .map_err(|e| anyhow!("the old module {}: {e}", p.display()))?;
+        eprintln!(
+            "harken-server: holding {} as a module run before",
+            p.display()
+        );
+        builder = builder.ran_before(&old);
+    }
     if config.keepalive != ark_server::Keepalive::default() {
         eprintln!(
             "harken-server: the sync socket pings every {}ms and gives up after {} unanswered",

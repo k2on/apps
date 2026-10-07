@@ -166,6 +166,22 @@ in
       '';
     };
 
+    oldModules = lib.mkOption {
+      type = lib.types.listOf lib.types.path;
+      default = [ ];
+      example = lib.literalExpression ''[ "''${harken-v4}/harken/domain/harken.ark" ]'';
+      description = ''
+        `.ark` modules this server is to hold as ones it has run before:
+        each one's closures kept, so an intent a client built with it
+        authors is sequenced through them though this server never started
+        with it. What a server deployed fresh needs for clients older than
+        it — harken's library mutators moved when they gained their guard
+        (`docs/plan-guards.md` D1), and a client built before still authors
+        at the old hashes, whose closures run unguarded. A server upgraded
+        in place already holds every module it ran (`modules.cbor`).
+      '';
+    };
+
     retainDays = lib.mkOption {
       type = lib.types.ints.unsigned;
       default = 30;
@@ -389,6 +405,8 @@ in
         # `library=sub1,sub2;admin=sub1`, as `harken_server::roles_of` reads it.
         HARKEN_ROLES = lib.concatStringsSep ";"
           (lib.mapAttrsToList (role: ids: "${role}=${lib.concatStringsSep "," ids}") cfg.roles);
+      } // lib.optionalAttrs (cfg.oldModules != [ ]) {
+        HARKEN_OLD_MODULES = lib.concatStringsSep "," (map toString cfg.oldModules);
       } // lib.optionalAttrs (cfg.mediaPath != null) {
         HARKEN_MEDIA = "${cfg.mediaPath}";
       } // lib.optionalAttrs (cfg.web != null) {

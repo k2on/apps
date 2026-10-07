@@ -125,15 +125,21 @@ fn upgrade_to(f: &mut Fleet, env: Vec<(&'static str, String)>) {
 }
 
 /// **1. Old peer, new server.** A peer of each pinned revision signs in,
-/// syncs and authors beside two peers of this build — its intents at
-/// hashes this server's module ships — and all of them converge.
+/// syncs and authors beside two peers of this build, and all of them
+/// converge. Its intents are at the hashes its own module shipped: the
+/// playlist mutators' are this server's too, and `add_song`'s moved when
+/// the library gained its guard (`docs/plan-guards.md` D1) — so the
+/// server, fresh, is told it ran that module ([`Fleet::beside`]) and
+/// sequences them through its closures, unguarded, as they always ran.
+/// Without that, `checks.versions` found every old `add_song` held for
+/// ever and the old peer never settled.
 ///
 /// Falsified once: with `converged_across` comparing the old peer's
 /// playlists against bob's rather than alice's, it failed naming them.
 #[test]
 fn version_1_an_old_peer_and_a_new_server() {
     for o in olds_or_skip("1 old peer, new server") {
-        let f = Fleet::new(&format!("v1-{}", o.name));
+        let f = Fleet::beside(&format!("v1-{}", o.name), &o);
         let mut a = old_peer(&f, &o, "old", "alice");
         let mut b = f.peer("new", Some("bob"));
         let mut c = f.peer("new-alice", Some("alice"));
@@ -181,7 +187,7 @@ fn version_1_an_old_peer_and_a_new_server() {
 #[test]
 fn version_2_an_old_peer_authors_a_mutator_whose_body_moved() {
     for o in olds_or_skip("2 old peer, changed mutator") {
-        let mut f = Fleet::new(&format!("v2-{}", o.name));
+        let mut f = Fleet::beside(&format!("v2-{}", o.name), &o);
         let grown = grown_module(f.root.path());
         let mut a = old_peer(&f, &o, "old", "alice");
         songs(&mut a, "v2", 3);
@@ -190,7 +196,10 @@ fn version_2_an_old_peer_authors_a_mutator_whose_body_moved() {
         let t = Instant::now();
         upgrade_to(&mut f, module_flag(&grown));
         let ms = f.server.modules();
-        assert_eq!(ms.len(), 2, "both modules run: {ms:?}");
+        // This build's and the grown one, and the old peer's own, which the
+        // fresh server was told it ran (`Fleet::beside`).
+        let want = if o.module.is_some() { 3 } else { 2 };
+        assert_eq!(ms.len(), want, "every module run: {ms:?}");
         assert!(ms.iter().any(|(_, current)| *current));
         create(&mut a, "After");
         let mut g = grown_peer(&f, &grown, "grown", "alice");
@@ -213,11 +222,13 @@ fn version_2_an_old_peer_authors_a_mutator_whose_body_moved() {
 }
 
 /// **3. New peer, old server.** A peer of this build running the grown
-/// domain authors `create_playlist` at a hash no pinned server ever had.
-/// The old server refuses it as an unknown function; this build reads
-/// that as the hold it is — pending, `held: 1` — and when the server is
-/// upgraded in place to this build with the grown module, the intent is
-/// pushed again on the reconnect and lands.
+/// domain authors at hashes no pinned server ever had: `create_playlist`,
+/// whose body the grown domain changed, and `add_song`, which moved when
+/// the library gained its guard (`docs/plan-guards.md` D1). The old
+/// server refuses each as an unknown function; this build reads that as
+/// the hold it is — every one of them pending and held, three here — and
+/// when the server is upgraded in place to this build with the grown
+/// module, they are pushed again on the reconnect and land.
 ///
 /// Falsified once: with `Client::recv` taking every `reject` as a verdict
 /// (the unknown function not read as a hold), the intent was dropped at
@@ -233,7 +244,7 @@ fn version_3_a_new_peer_is_held_by_an_old_server_until_it_is_upgraded() {
         assert!(
             eventually(PATIENCE, || {
                 let s = n.status();
-                s.held == Some(1) && s.pending == 1
+                s.held == Some(3) && s.pending == 3
             }),
             "held by the old server: {:?}",
             n.status()
@@ -320,7 +331,7 @@ fn version_4_a_server_upgraded_in_place() {
 #[test]
 fn version_5_a_client_upgraded_in_place() {
     for o in olds_or_skip("5 client upgraded in place") {
-        let f = Fleet::new(&format!("v5-{}", o.name));
+        let f = Fleet::beside(&format!("v5-{}", o.name), &o);
         let mut a = old_peer(&f, &o, "old", "alice");
         let mut b = f.peer("new", Some("alice"));
         songs(&mut a, "v5", 3);
@@ -354,7 +365,7 @@ const BEFORE_ALONE: [&str; 1] = ["v4-journal"];
 /// One pinned revision's alone directory opened by this build with a
 /// server: its local history joins and lands.
 fn alone_upgraded(o: &Old) {
-    let f = Fleet::new(&format!("v5b-{}", o.name));
+    let f = Fleet::beside(&format!("v5b-{}", o.name), o);
     let mut b = f.peer("new", Some("alice"));
     songs(&mut b, "v5b", 2);
     let mut d = f.peer_stopped("alone", Some("alice"));

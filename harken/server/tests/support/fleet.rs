@@ -855,6 +855,22 @@ impl Fleet {
         Fleet::with_env(name, vec![])
     }
 
+    /// A fleet of this build's server, fresh, that is to take the intents
+    /// of `o`'s peers: told it ran `o`'s module before
+    /// (`HARKEN_OLD_MODULES`), so it holds the closures those peers author
+    /// at — a mutator's old hash among them, since harken's library
+    /// mutators moved when they gained their guard (`docs/plan-guards.md`
+    /// D1). Without the module named, the fresh server as it was.
+    pub fn beside(name: &str, o: &Old) -> Fleet {
+        match &o.module {
+            Some(m) => Fleet::with_env(
+                name,
+                vec![("HARKEN_OLD_MODULES", m.to_str().expect("a path"))],
+            ),
+            None => Fleet::new(name),
+        }
+    }
+
     pub fn with_env(name: &str, env: Vec<(&str, &str)>) -> Fleet {
         Fleet::build(name, env, |_| {})
     }
@@ -1196,6 +1212,10 @@ pub struct Old {
     pub name: String,
     pub server: PathBuf,
     pub peer: PathBuf,
+    /// The module its peers author at (`HARKEN_OLD_<n>_MODULE`, its tree's
+    /// committed `harken.ark`): what a fresh server of this build is told
+    /// it ran before ([`Fleet::beside`]).
+    pub module: Option<PathBuf>,
 }
 
 /// Every pinned revision the environment names, in order; a gap ends the
@@ -1212,6 +1232,7 @@ pub fn olds() -> Vec<Old> {
             name: var("NAME").unwrap_or_else(|| format!("old-{n}")),
             server: server.into(),
             peer: peer.into(),
+            module: var("MODULE").map(PathBuf::from),
         });
     }
     out

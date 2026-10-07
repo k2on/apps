@@ -87,6 +87,7 @@ pub fn builder(domain: Domain) -> Builder {
         routes: Router::new(),
         keepalive: Keepalive::default(),
         retention: Retention::default(),
+        ran_before: vec![],
     }
 }
 
@@ -106,9 +107,25 @@ pub struct Builder {
     routes: Router,
     keepalive: Keepalive,
     retention: Retention,
+    ran_before: Vec<modules::Ran>,
 }
 
 impl Builder {
+    /// A module this server is to hold as one it has run, though it never
+    /// started with it: its closures kept and an intent at one of its
+    /// hashes sequenced through them (closure provenance, [`modules`]),
+    /// recorded in `modules.cbor` as if it had been the module of an
+    /// earlier start. What a server deployed fresh needs to take the
+    /// intents of clients built before it — the old hashes of mutators the
+    /// current module has since moved, a guard added among them
+    /// (`docs/plan-guards.md` D1). Their entries run the old closures as
+    /// they always did, unguarded.
+    pub fn ran_before(mut self, domain: &Domain) -> Builder {
+        let closures = domain.closures().iter().map(|(h, c)| (h.clone(), c.clone())).collect();
+        self.ran_before.push((domain.hash(), closures));
+        self
+    }
+
     /// What the server calls itself in what it prints.
     pub fn name(mut self, name: &str) -> Builder {
         self.name = name.into();
@@ -244,6 +261,7 @@ impl Builder {
             eprintln!("{n}");
         }
         let (domain, data, access, owns, live) = (self.domain.clone(), self.data.clone(), self.access, self.owns, self.live);
+        let ran_before = self.ran_before;
         let hub = HubHandle::spawn(move || {
             open_hub(
                 &name,
@@ -253,6 +271,7 @@ impl Builder {
                 owns,
                 access.unwrap_or_else(open_access),
                 live.unwrap_or_else(|| Box::new(Quiet)),
+                ran_before,
             )
             .map(|mut hub| {
                 hub.retention = r;
@@ -299,6 +318,7 @@ fn open_hub(
     owns: Option<Owns>,
     access: Access,
     live: Box<dyn Live>,
+    ran_before: Vec<modules::Ran>,
 ) -> Result<Hub> {
     let relay = Relay::new(live);
     let schema = &domain.module().schema;
@@ -308,9 +328,21 @@ fn open_hub(
     // closures held and kept (closure provenance, `modules` module docs).
     let module = domain.hash();
     let shipped = || domain.closures().iter().map(|(h, c)| (h.clone(), c.clone()));
+    // The modules it is told it ran before ([`Builder::ran_before`]) are
+    // recorded first, as earlier starts would have been; whether this
+    // start's own module is new is asked after them.
     let (ran, fresh) = match &data {
-        Some(dir) => modules::start_with(dir, module.clone(), shipped())?,
-        None => (vec![(module.clone(), shipped().collect())], true),
+        Some(dir) => {
+            for (m, cs) in ran_before.into_iter().filter(|(m, _)| *m != module) {
+                modules::start_with(dir, m, cs)?;
+            }
+            modules::start_with(dir, module.clone(), shipped())?
+        }
+        None => {
+            let mut ran: Vec<modules::Ran> = ran_before.into_iter().filter(|(m, _)| *m != module).collect();
+            ran.push((module.clone(), shipped().collect()));
+            (ran, true)
+        }
     };
     if ran.len() > 1 {
         eprintln!("{name}: holding the closures of {} modules run before this one", ran.len() - 1);

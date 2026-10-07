@@ -276,13 +276,20 @@
             let input = inputs."harken-${v.name}"; in
             assert lib.assertMsg (input.rev == v.rev)
               "flake.nix: the input harken-${v.name} is locked at ${input.rev}, and nix/versions.nix says ${v.rev}";
-            v // { server = input.packages.${system}.harken-server; })
+            v // {
+              server = input.packages.${system}.harken-server;
+              # The module that revision's peers author at, as its tree has
+              # it committed: what a fresh server of this build is told it
+              # ran before (`HARKEN_OLD_MODULES`, docs/plan-guards.md D1).
+              module = "${input}/harken/domain/harken.ark";
+            })
             (import ./nix/versions.nix);
           # What the fleet reads to find them (harken/server/tests/support/fleet.rs).
           oldEnv = lib.concatImapStrings (n: v: ''
             export HARKEN_OLD_${toString n}_NAME=${v.name}
             export HARKEN_OLD_${toString n}_SERVER=${v.server}/bin/harken-server
             export HARKEN_OLD_${toString n}_PEER=${v.server}/bin/harken-peer
+            export HARKEN_OLD_${toString n}_MODULE=${v.module}
           '') versions;
         in
         {

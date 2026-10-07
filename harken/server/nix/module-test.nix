@@ -45,6 +45,7 @@ let
   };
   noMedia = eval { devAuth = true; mediaPath = null; };
   roles = eval { devAuth = true; roles = { library = [ "alice" "bob" ]; admin = [ "alice" ]; }; };
+  oldModules = eval { devAuth = true; oldModules = [ "/srv/old/a.ark" "/srv/old/b.ark" ]; };
 
   checks = [
     [ (says nobody "nobody could sign in") "a server nobody can sign in to is refused" ]
@@ -68,6 +69,8 @@ let
     [ (!(lib.any (lib.hasInfix "/srv/media") noMedia.systemd.tmpfiles.rules) && !(env noMedia ? HARKEN_MEDIA) && (unit noMedia).serviceConfig.BindReadOnlyPaths == [ ]) "no media path, no media" ]
     [ ((env roles).HARKEN_ROLES == "admin=alice;library=alice,bob") "roles reach the server, role by role" ]
     [ (!(env dev ? HARKEN_ROLES)) "and none, nothing" ]
+    [ ((env oldModules).HARKEN_OLD_MODULES == "/srv/old/a.ark,/srv/old/b.ark") "the old modules reach the server" ]
+    [ (!(env dev ? HARKEN_OLD_MODULES)) "and none, nothing" ]
   ];
   wrong = map (c: builtins.elemAt c 1) (lib.filter (c: !(builtins.elemAt c 0)) checks);
 in
