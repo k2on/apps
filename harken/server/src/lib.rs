@@ -481,6 +481,11 @@ pub async fn start(config: Config) -> Result<Server> {
         .live(desk)
         .keepalive(config.keepalive)
         .retain(config.retain);
+    // No server hook (`docs/plan-guards.md` D3): nothing harken does reaches
+    // outside its log. One would go here, as
+    // `builder.on_committed("add_song", Box::new(|entry, facts| ..))` — told
+    // each durable entry of that function with its facts, on a thread of
+    // its own, for a mail sent or a webhook called; never a row.
     for p in &config.old_modules {
         let bytes =
             std::fs::read(p).with_context(|| format!("reading the old module {}", p.display()))?;

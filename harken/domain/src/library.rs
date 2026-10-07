@@ -904,6 +904,13 @@ pub fn library() -> Router<Harken> {
             })
         }),
         // Take something out of the library, and off every playlist holding it.
+        //
+        // No private block (`docs/plan-guards.md` D3): every row this writes
+        // is one every client holds and replays. A server half would go here
+        // as `ctx.private(move |db: &Harken| ..)` — say, a removal recorded in
+        // a table no client holds — written after the body's deletes or
+        // before them alike, since it runs last; `harken.ark` would carry
+        // `remove_media` with `private: true` and its hash would not move.
         is_library.input::<RemoveMedia>().mutation("remove_media", |_ctx, db, input| {
             let playlist_item = db.playlist_item.filter(PlaylistItem::media_id.eq(input.id)).all();
             for_each(playlist_item, |row| db.playlist_item.delete((row.playlist_id, row.media_id)));

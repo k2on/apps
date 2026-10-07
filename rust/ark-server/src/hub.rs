@@ -77,6 +77,7 @@ use ark::retention::{self, Retention};
 use ark::store::{Row, Store};
 use tokio::sync::{mpsc, oneshot};
 
+use crate::hooks::Hooks;
 use crate::live::{decode_kept, encode_kept, Relay};
 use crate::persist::LogFile;
 use crate::retain::{self, Cursors, Heard};
@@ -126,6 +127,12 @@ pub struct Hub {
     cursors_due: bool,
     cursors_now: bool,
     cursors_written: Instant,
+    /// `docs/plan-guards.md` D3 The app's hooks ([`crate::hooks`]), the last
+    /// sequence handed to them or passed over, and the entries waiting for
+    /// the write that makes them durable.
+    hooks: Option<Hooks>,
+    hooked: Seq,
+    due: Vec<(Seq, String, ark::log::Entry, ark::log::Facts)>,
 }
 
 /// What `/healthz` reports.
@@ -215,6 +222,9 @@ impl Hub {
         // `docs/plan-db.md` D6): a log read back holds them as written, and
         // one written before they were folded holds them whole.
         server.authority.log.fold_ids();
+        // What the log held at start was committed by an earlier start, and
+        // is no hook's (`crate::hooks`).
+        let hooked = server.authority.log.head_seq();
         Ok(Hub {
             server,
             relay,
@@ -232,7 +242,35 @@ impl Hub {
             cursors_due: false,
             cursors_now: false,
             cursors_written: Instant::now(),
+            hooks: None,
+            hooked,
+            due: vec![],
         })
+    }
+
+    /// `docs/plan-guards.md` D3 Hand every entry of these functions,
+    /// durable, to its hook ([`crate::hooks`]).
+    pub(crate) fn hook(&mut self, hooks: Vec<(String, crate::hooks::Hook)>) {
+        self.hooks = Hooks::start(hooks);
+    }
+
+    // The entries appended since the last look whose function has a hook,
+    // to be handed over once the write that follows has made them durable.
+    // Asked before the horizon moves, so a compaction cannot take one away
+    // first.
+    fn collect_committed(&mut self) {
+        let Some(hooks) = &self.hooks else { return };
+        let a = &self.server.authority;
+        let head = a.log.head_seq();
+        if head <= self.hooked {
+            return;
+        }
+        for (n, (e, f)) in a.log.entries.range(self.hooked + 1..) {
+            if let Some(c) = a.bodies.get(&e.fn_hash).filter(|c| hooks.wants(&c.function.name)) {
+                self.due.push((*n, c.function.name.clone(), e.clone(), f.clone()));
+            }
+        }
+        self.hooked = head;
     }
 
     // -- reading: what a `read` closure may ask -------------------------------
@@ -469,11 +507,18 @@ impl Hub {
     // The horizon is moved first, so that a compaction is written by the
     // same write as the appends that prompted it.
     fn after(&mut self) {
+        self.collect_committed();
         self.retain_log();
         let wrote = self.persist();
         self.held.extend(self.server.take_outgoing());
         match wrote {
             Ok(()) => {
+                // Durable now: what the hooks wait for (`crate::hooks`).
+                if let Some(hooks) = &self.hooks {
+                    for (n, name, e, f) in std::mem::take(&mut self.due) {
+                        hooks.committed(n, name, e, f);
+                    }
+                }
                 if let Some(f) = self.failing.take() {
                     eprintln!("ark-server: the log is written again, after {:.1?}", f.since.elapsed());
                     *self.failure.lock().unwrap_or_else(|e| e.into_inner()) = None;
@@ -952,6 +997,96 @@ mod tests {
         let on_disk = crate::persist::load(dir.path(), &schema).unwrap().expect("a log");
         assert_eq!(on_disk, hub.authority().log);
         assert_eq!((peer.pending_len(), peer.cursor()), (0, 1));
+    }
+
+    /// `docs/plan-guards.md` D3 A server hook hears each entry of its
+    /// function once the disk holds it, and not before: nothing while the
+    /// journal cannot be written, the entry once it can; nothing of another
+    /// function; nothing again of what a hub opened over the directory finds
+    /// already in its log. A hook that panics leaves the entry as it was and
+    /// the hooks after it running. Falsified by handing entries over before
+    /// the write (`after` dispatching ahead of `persist`): the hook heard the
+    /// first playlist while the disk held nothing.
+    #[test]
+    fn a_hook_hears_each_entry_once_it_is_durable() {
+        use std::sync::atomic::AtomicUsize;
+        let d = demo::domain();
+        let schema = d.module().schema.clone();
+        let dir = tempfile::tempdir().unwrap();
+        let open = |dir: &std::path::Path, heard: Arc<Mutex<Vec<String>>>, calls: Arc<AtomicUsize>| {
+            let (file, log) = LogFile::open(dir, &schema).unwrap();
+            let relay = Relay::new(Box::new(crate::Quiet));
+            let mut a = Authority::new(schema.clone(), d.closures().clone());
+            a.hold(d.native_list());
+            if let Some(log) = log {
+                a.store = log.state_at(log.head_seq()).unwrap();
+                a.log = log;
+            }
+            let server = Server::open(trusting(), open_access(), relay.clone(), a);
+            let mut hub = Hub::new(server, relay, Some(dir.to_path_buf()), Some(file)).unwrap();
+            hub.hook(vec![
+                (
+                    "create_playlist".into(),
+                    Box::new(move |e: &ark::log::Entry, f: &ark::log::Facts| {
+                        heard.lock().unwrap().push(format!("{} {}", e.args["name"].as_text(), f.len()));
+                    }) as crate::hooks::Hook,
+                ),
+                (
+                    "create_playlist".into(),
+                    Box::new(move |_: &ark::log::Entry, _: &ark::log::Facts| {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        panic!("a hook that fails");
+                    }),
+                ),
+            ]);
+            hub
+        };
+        let heard = Arc::new(Mutex::new(vec![]));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut hub = open(dir.path(), heard.clone(), calls.clone());
+        let mut alice = Wire::attach(&mut hub, 1, "alice");
+        alice.peer.connected();
+        alice.settle(&mut hub);
+        let wait_for = |n: usize| {
+            let t = Instant::now();
+            while heard.lock().unwrap().len() < n && t.elapsed() < Duration::from_secs(10) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        };
+
+        std::fs::create_dir(crate::persist::journal_path_of(dir.path())).unwrap();
+        alice.peer.mutate("create_playlist", args([("name", Value::text("One"))])).unwrap();
+        alice.settle(&mut hub);
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(heard.lock().unwrap().is_empty(), "nothing heard of an entry the disk does not hold");
+        std::fs::remove_dir(crate::persist::journal_path_of(dir.path())).unwrap();
+        hub.after();
+        wait_for(1);
+        assert_eq!(*heard.lock().unwrap(), vec!["One 1".to_string()], "heard once durable, with its facts");
+
+        let playlist = hub.authority().store.scan("playlist")[0].get("id").cloned().unwrap();
+        alice
+            .peer
+            .mutate("add_to_playlist", args([("playlist_id", playlist), ("track_id", Value::text("t1"))]))
+            .unwrap();
+        alice.peer.mutate("create_playlist", args([("name", Value::text("Two"))])).unwrap();
+        alice.settle(&mut hub);
+        wait_for(2);
+        assert_eq!(
+            *heard.lock().unwrap(),
+            vec!["One 1".to_string(), "Two 1".to_string()],
+            "and of no other function"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 2, "the failing hook was asked both times, and failed both");
+        drop(alice);
+        drop(hub);
+
+        let again = Arc::new(Mutex::new(vec![]));
+        let mut hub = open(dir.path(), again.clone(), Arc::new(AtomicUsize::new(0)));
+        hub.after();
+        std::thread::sleep(Duration::from_millis(100));
+        assert_eq!(hub.authority().log.head_seq(), 3);
+        assert!(again.lock().unwrap().is_empty(), "a log found at start was committed by an earlier one");
     }
 
     /// §R3 A disk that stays unwritable does not hold the acks for ever:

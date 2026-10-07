@@ -34,6 +34,7 @@
 //! # running.stop().await; Ok(()) }
 //! ```
 
+pub mod hooks;
 mod hub;
 pub mod live;
 pub mod modules;
@@ -61,6 +62,7 @@ use tower_http::services::ServeDir;
 
 pub use ark::retention::Retention;
 pub use ark_client::Domain;
+pub use hooks::Hook;
 pub use hub::{Health, Hub, HubHandle, SessionHealth, REVOKED};
 pub use live::{Echo, Live, Peer, Post, Quiet};
 pub use sync::Keepalive;
@@ -88,6 +90,7 @@ pub fn builder(domain: Domain) -> Builder {
         keepalive: Keepalive::default(),
         retention: Retention::default(),
         ran_before: vec![],
+        hooks: vec![],
     }
 }
 
@@ -108,6 +111,7 @@ pub struct Builder {
     keepalive: Keepalive,
     retention: Retention,
     ran_before: Vec<modules::Ran>,
+    hooks: Vec<(String, Hook)>,
 }
 
 impl Builder {
@@ -122,7 +126,11 @@ impl Builder {
     /// they always did, unguarded.
     pub fn ran_before(mut self, domain: &Domain) -> Builder {
         let closures = domain.closures().iter().map(|(h, c)| (h.clone(), c.clone())).collect();
-        self.ran_before.push((domain.hash(), closures));
+        self.ran_before.push(modules::Ran {
+            module: domain.hash(),
+            private: domain.private_hash(),
+            closures,
+        });
         self
     }
 
@@ -232,6 +240,17 @@ impl Builder {
         self
     }
 
+    /// `docs/plan-guards.md` D3 A server hook: `hook` is handed every entry
+    /// of the function `fn_name` once it is durable — after the write the
+    /// `Ack` waits for — with its facts, the private blocks' included, on a
+    /// thread of its own and in sequence order ([`hooks`]). For the world
+    /// outside the database: a row is a private block's to write, and a hook
+    /// that panics is said and leaves the entry as it was.
+    pub fn on_committed(mut self, fn_name: &str, hook: Hook) -> Builder {
+        self.hooks.push((fn_name.into(), hook));
+        self
+    }
+
     /// Host the log it left on disk, start the hub, and
     /// assemble the router. Refuses a server told nothing about who people
     /// are: dev auth has to be asked for.
@@ -262,6 +281,7 @@ impl Builder {
         }
         let (domain, data, access, owns, live) = (self.domain.clone(), self.data.clone(), self.access, self.owns, self.live);
         let ran_before = self.ran_before;
+        let hooks = self.hooks;
         let hub = HubHandle::spawn(move || {
             open_hub(
                 &name,
@@ -275,6 +295,7 @@ impl Builder {
             )
             .map(|mut hub| {
                 hub.retention = r;
+                hub.hook(hooks);
                 hub
             })
         })?;
@@ -328,29 +349,40 @@ fn open_hub(
     a.hold(domain.native_list());
     // Every module this server has run, this one among them, and their
     // closures held and kept (closure provenance, `modules` module docs).
+    // The public hash — of the module a client loads, private blocks
+    // stripped — is what every page says; the private one, where the module
+    // has a server half, is recorded beside it (`docs/plan-guards.md` D3).
     let module = domain.hash();
-    let shipped = || domain.closures().iter().map(|(h, c)| (h.clone(), c.clone()));
+    let this = modules::Ran {
+        module: module.clone(),
+        private: domain.private_hash(),
+        closures: domain.closures().iter().map(|(h, c)| (h.clone(), c.clone())).collect(),
+    };
     // The modules it is told it ran before ([`Builder::ran_before`]) are
     // recorded first, as earlier starts would have been; whether this
     // start's own module is new is asked after them.
     let (ran, fresh) = match &data {
         Some(dir) => {
-            for (m, cs) in ran_before.into_iter().filter(|(m, _)| *m != module) {
-                modules::start_with(dir, m, cs)?;
+            for r in ran_before.into_iter().filter(|r| r.module != module) {
+                modules::start_with(dir, r)?;
             }
-            modules::start_with(dir, module.clone(), shipped())?
+            modules::start_with(dir, this)?
         }
         None => {
-            let mut ran: Vec<modules::Ran> = ran_before.into_iter().filter(|(m, _)| *m != module).collect();
-            ran.push((module.clone(), shipped().collect()));
+            let mut ran: Vec<modules::Ran> = ran_before.into_iter().filter(|r| r.module != module).collect();
+            ran.push(this);
             (ran, true)
         }
     };
     if ran.len() > 1 {
         eprintln!("{name}: holding the closures of {} modules run before this one", ran.len() - 1);
     }
-    for (m, cs) in ran {
-        a.ran(m, cs);
+    // The current module's closures are held first (`Authority::new`
+    // above), and `ran` keeps a closure already held: so an intent at a hash
+    // an earlier module shipped too runs this module's private half, which is
+    // the one this server runs now.
+    for r in ran {
+        a.ran(r.module, r.closures);
     }
     let mut file = None;
     if let Some(dir) = &data {
