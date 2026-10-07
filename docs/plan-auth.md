@@ -1,5 +1,11 @@
 # Authorization: one log, and what each person may see of it
 
+> **Superseded by `docs/plan-guards.md`.** The row rules this document
+> designed and landed were deleted in the round that document describes:
+> authorization is the guards in the functions, visibility is tables and
+> columns, and the explorer writes as the authority. What stays from here
+> is roles on identities and the fuzzer's accounts; the rest is history.
+
 `docs/arkdb.md` §3.11 closed authorization at the coarsest grain — who may
 receive the log at all, checked at `Hello` — and left everything finer to
 "the mode that does not claim exactness". `docs/scopes.md` records the
