@@ -52,6 +52,7 @@ pub mod plan;
 pub mod protocol;
 pub mod retention;
 pub mod schema;
+pub mod scope;
 pub mod sha256;
 pub mod sim;
 pub mod stdlib;

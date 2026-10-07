@@ -226,3 +226,182 @@ fn client_is_a_query_over_a_scope() {
     assert!(errs.iter().any(|e| e.contains("a scope holds rows")), "{errs:?}");
     let _ = APred::<orgs::Org>::when;
 }
+
+// The union --------------------------------------------------------------------
+
+use ark::scope::{Scopes, Who};
+use std::collections::BTreeSet;
+
+fn who<'a>(user: &'a str, roles: &'a BTreeSet<String>) -> Who<'a> {
+    Who { user, session: "s", roles }
+}
+
+fn row(t: &ark::schema::Table, pairs: &[(&str, Value)]) -> ark::store::Row {
+    ark::store::Row::of(t, pairs.iter().map(|(k, v)| (k.to_string(), v.clone())))
+}
+
+// Two orgs, alice a member of the first and bob of both, and three
+// accounts.
+fn store(m: &ir::Module) -> MemoryStore {
+    let mut st = MemoryStore::empty(m.schema.clone());
+    let t = |n: &str| m.schema.lookup_table(n).unwrap().clone();
+    let (org, member, account) = (t("org"), t("member"), t("account"));
+    for (k, name) in [(1u8, "Acme"), (2, "Bolt")] {
+        st.put("org", row(&org, &[("id", Value::Id([k; 16])), ("name", Value::text(name))]))
+            .unwrap();
+    }
+    for (k, user) in [(1u8, "alice"), (1, "bob"), (2, "bob")] {
+        st.put("member", row(&member, &[("org_id", Value::Id([k; 16])), ("user", Value::text(user))]))
+            .unwrap();
+    }
+    for user in ["alice", "bob", "carol"] {
+        let pairs = [
+            ("user", Value::text(user)),
+            ("name", Value::text(user.to_uppercase())),
+            ("password", Value::text("hunter2")),
+        ];
+        st.put("account", row(&account, &pairs)).unwrap();
+    }
+    st
+}
+
+/// What a person holds is the union of the module's scopes with them put
+/// in: alice holds the org she is a member of (the `exists` form), her own
+/// membership rows and her own account without its password, and her
+/// device's schema has no `password` column and no reference from
+/// `member` to an `org` it does not hold whole. An admin holds every table
+/// whole, and is the whole peer a module with no scope makes of everybody.
+/// Falsified by unioning columns of scopes that fold to nothing as well:
+/// alice's `account` kept its password.
+#[test]
+fn a_person_holds_the_union_of_the_scopes() {
+    let m = built();
+    let scopes = Scopes::of(&m);
+    assert_eq!(scopes.roles(), ["admin".to_string()].into());
+    let none = BTreeSet::new();
+    let alice = scopes.holdings(who("alice", &none));
+    assert!(!alice.is_whole());
+    assert_eq!(
+        alice.columns(),
+        [("account".to_string(), vec!["user".to_string(), "name".to_string()])].into()
+    );
+    let acc = alice.schema().lookup_table("account").unwrap();
+    assert!(acc.column("password").is_none(), "an excluded column does not exist on the device");
+    assert!(
+        alice.schema().lookup_table("member").unwrap().refs.is_empty(),
+        "no reference to a parent not held whole"
+    );
+    let st = store(&m);
+    let held = alice.held_rows(&st);
+    assert_eq!(held["org"].len(), 1, "the org she is a member of");
+    assert_eq!(held["member"].len(), 1, "her own membership");
+    assert_eq!(held["account"].len(), 1);
+    assert_eq!(held["account"][0].get("password"), None);
+    let admin_roles: BTreeSet<String> = ["admin".to_string()].into();
+    let admin = scopes.holdings(who("root", &admin_roles));
+    assert!(admin.is_whole(), "{:?}", admin.columns());
+    assert_eq!(admin.schema(), &m.schema);
+    assert_eq!(admin.digest(&st), ark::hash::state_hash(&st), "a whole person's digest is the store's");
+    // A module with no scope holds everything for everybody.
+    assert!(Scopes::of(&ir::Module {
+        functions: vec![],
+        ..m.clone()
+    })
+    .holdings(who("x", &none))
+    .is_whole());
+}
+
+/// The union digest is the state hash of a store holding exactly what the
+/// person holds, laid out as their device lays it — what their own hash is
+/// when they are right. Falsified by summing unprojected rows: the digests
+/// differ.
+#[test]
+fn the_union_digest_is_the_held_store_hashed() {
+    let m = built();
+    let none = BTreeSet::new();
+    let alice = Scopes::of(&m).holdings(who("alice", &none));
+    let st = store(&m);
+    let mut mine = MemoryStore::empty(alice.schema().clone());
+    for (t, rs) in alice.held_rows(&st) {
+        for r in rs {
+            mine.apply_change(&ark::store::Change::Add(t.clone(), r));
+        }
+    }
+    assert_eq!(alice.digest(&st), ark::hash::state_hash(&mine));
+    assert_ne!(alice.digest(&st), ark::hash::state_hash(&st));
+}
+
+/// An entry's facts as a person holds them: bob adding alice to his
+/// second org is, to alice, her new membership and the org it makes hers
+/// — a row the entry never touched, arriving through the `exists` form;
+/// an edit of a password is nothing to her; an account she does not hold
+/// is not sent. Applied to what she held before, they reach what she holds
+/// after. Falsified by not sending the `exists` form's rows: the org did
+/// not arrive.
+#[test]
+fn facts_arrive_as_the_person_holds_them() {
+    let m = built();
+    let none = BTreeSet::new();
+    let alice = Scopes::of(&m).holdings(who("alice", &none));
+    let before = store(&m);
+    let member = m.schema.lookup_table("member").unwrap();
+    let account = m.schema.lookup_table("account").unwrap();
+    let joined = row(member, &[("org_id", Value::Id([2; 16])), ("user", Value::text("alice"))]);
+    let old_pw = before.get("account", &[Value::text("alice")]).unwrap();
+    let new_pw = old_pw.clone().with("password", Value::text("swordfish"));
+    let carol = before.get("account", &[Value::text("carol")]).unwrap();
+    let facts = vec![
+        ark::store::Change::Add("member".into(), joined.clone()),
+        ark::store::Change::Edit("account".into(), old_pw, new_pw),
+        ark::store::Change::Remove("account".into(), carol),
+    ];
+    let mut after = before.clone();
+    after.apply_changes(&facts);
+    let seen = alice.filter_facts(&before, &after, &facts);
+    assert_eq!(seen.len(), 2, "{seen:?}");
+    assert!(matches!(&seen[0], ark::store::Change::Add(t, r) if t == "member" && *r == joined));
+    assert!(matches!(&seen[1], ark::store::Change::Add(t, r) if t == "org" && r.get("name") == Some(&Value::text("Bolt"))));
+    let _ = account;
+    // Applied over what she held, they are what she holds.
+    let mut mine = MemoryStore::empty(alice.schema().clone());
+    for (t, rs) in alice.held_rows(&before) {
+        for r in rs {
+            mine.apply_change(&ark::store::Change::Add(t.clone(), r));
+        }
+    }
+    mine.apply_changes(&seen);
+    assert_eq!(ark::hash::state_hash(&mine), alice.digest(&after));
+}
+
+/// The verifier's rule: a client-run part of a procedure that names a
+/// column outside the union of some role set the module names is
+/// `NotHeld`, naming the table, the column and the roles — unless a guard
+/// the procedure runs refuses that role set outright. `sign_up` writes a
+/// password and builds, behind `is_admin`; the same mutation with the
+/// guard taken out does not, for the person holding no role; a query on
+/// the own-account chain filtering by password does not either. Falsified
+/// by not folding guards: the module with `is_admin` was refused.
+#[test]
+fn a_client_never_names_a_column_it_does_not_hold() {
+    let m = built();
+    assert!(verify(&m).is_ok());
+    let unguarded = edit(&m, "sign_up", |f| f.uses.retain(|u| u != "is_admin"));
+    let cs = complaints(&unguarded);
+    assert!(
+        cs.iter()
+            .any(|c| matches!(c, Complaint::NotHeld(t, col, roles) if t == "account" && col == "password" && roles.is_empty())),
+        "{cs:?}"
+    );
+    let filtered = edit(&m, "me", |f| {
+        f.plan.as_mut().unwrap().filter = Some(Pred::Cmp("password".into(), ir::CmpOp::Eq, Expr::Lit(Value::text("x"))));
+    });
+    let cs = complaints(&filtered);
+    assert!(
+        cs.iter()
+            .any(|c| matches!(c, Complaint::NotHeld(t, col, _) if t == "account" && col == "password")),
+        "{cs:?}"
+    );
+    // A whole-row read names no column: `me` reads every held column of
+    // the account and builds.
+    assert!(m.lookup_function("me").unwrap().plan.as_ref().unwrap().filter.is_none());
+}

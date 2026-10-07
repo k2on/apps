@@ -47,6 +47,7 @@
 //!   (`ExistsNotAReference`, `NestedExists`) — leaves a plan may not have
 //!   (`ScopeLeafInPlan`).
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::ir::normalize::normalize;
@@ -183,12 +184,12 @@ pub enum Complaint {
     /// Table, column: a projection that leaves out a key column, or names
     /// one twice.
     ProjectionDropsKey(TableName, FieldName),
-    /// Table, column (none for the table itself), and the roles of the
-    /// person it is not held for: a part of a procedure that a client runs
-    /// — its checks, its middleware, its body or its plan — names what that
-    /// person's union of scopes does not give them, so on their device it
-    /// does not exist (`docs/plan-guards.md` D2, [`crate::scope`]).
-    NotHeld(TableName, Option<FieldName>, Vec<String>),
+    /// Table, column, and the roles of the person it is not held for: a
+    /// part of a procedure that a client runs — its checks, its
+    /// middleware, its body or its plan — names a column that person's
+    /// union of scopes does not give them, so on their device it does not
+    /// exist (`docs/plan-guards.md` D2, [`crate::scope::check`]).
+    NotHeld(TableName, FieldName, Vec<String>),
 }
 
 /// Verify a module. On success, the module as it is to be hashed and run:
@@ -219,10 +220,18 @@ pub fn verify(m0: &Module) -> Result<Module, Vec<VerifyError>> {
             }
         }
     }
+    let mut named = BTreeMap::new();
     for (i, f) in m.functions.iter().enumerate() {
-        if let Err(cs) = verify_function(&m, i, f) {
+        let seen = RefCell::new(Named::default());
+        if let Err(cs) = verify_function_naming(&m, i, f, &seen) {
             errs.extend(cs.into_iter().map(|c| VerifyError::In(f.name.clone(), c)));
         }
+        named.insert(f.name.clone(), seen.into_inner().columns(&m.schema));
+    }
+    // `docs/plan-guards.md` D2 What a client runs names only what its
+    // person holds, for every role set the module names.
+    if errs.is_empty() {
+        errs.extend(crate::scope::check(&m, &named));
     }
     if errs.is_empty() {
         Ok(Module {
@@ -259,6 +268,39 @@ fn is_subsequence(xs: &[String], ys: &[String]) -> bool {
 /// Verify the `i`th function of a module (its index decides which helpers
 /// and middleware it may reach).
 pub fn verify_function(m: &Module, i: usize, f: &Function) -> Result<(), Vec<Complaint>> {
+    verify_function_naming(m, i, f, &RefCell::new(Named::default()))
+}
+
+/// `docs/plan-guards.md` D2 The columns a function names, as the verifier
+/// meets them: by table where the table is known — a filter's, an order's,
+/// a group's, an `on`'s, a write's — and otherwise as a field read of a
+/// struct, resolved after to the table whose row the struct is
+/// ([`Named::columns`]). What [`crate::scope::check`] holds to the union.
+#[derive(Default)]
+struct Named {
+    columns: BTreeSet<(TableName, FieldName)>,
+    fields: Vec<(BTreeMap<FieldName, Ty>, FieldName)>,
+}
+
+impl Named {
+    // Every column named, by table: a field of a struct that carries a
+    // table's whole row — every column at its type, and perhaps the lists
+    // a plan's node adds — is that table's column.
+    fn columns(self, sch: &Schema) -> BTreeSet<(TableName, FieldName)> {
+        let mut out = self.columns;
+        for (fs, f) in self.fields {
+            for t in sch.tables() {
+                let row = t.column(&f).is_some() && t.columns.iter().all(|c| fs.get(&c.name) == Some(&c.column_ty()));
+                if row {
+                    out.insert((t.name.clone(), f.clone()));
+                }
+            }
+        }
+        out
+    }
+}
+
+fn verify_function_naming(m: &Module, i: usize, f: &Function, named: &RefCell<Named>) -> Result<(), Vec<Complaint>> {
     let sch = &m.schema;
     match f.kind {
         FnKind::Mutator | FnKind::Query => {
@@ -378,6 +420,7 @@ pub fn verify_function(m: &Module, i: usize, f: &Function) -> Result<(), Vec<Com
         .collect();
     let g = G {
         m,
+        named,
         index: i,
         f,
         kind: f.kind,
@@ -455,6 +498,8 @@ pub fn verify_function(m: &Module, i: usize, f: &Function) -> Result<(), Vec<Com
 #[derive(Clone)]
 struct G<'a> {
     m: &'a Module,
+    /// What the function names, for the union check (D2).
+    named: &'a RefCell<Named>,
     index: usize,
     f: &'a Function,
     kind: FnKind,
@@ -466,6 +511,11 @@ struct G<'a> {
 impl G<'_> {
     fn schema(&self) -> &Schema {
         &self.m.schema
+    }
+
+    // A column of a known table, named.
+    fn names(&self, t: &str, c: &str) {
+        self.named.borrow_mut().columns.insert((t.into(), c.into()));
     }
 
     fn bind(&self, x: Sym, t: Ty) -> Self {
@@ -555,6 +605,8 @@ fn stmt<'a>(g: &G<'a>, s: &Stmt) -> Check_<G<'a>> {
         Stmt::Insert(t, e, on) | Stmt::Upsert(t, e, on) => {
             mutating()?;
             let tbl = table(g, t)?;
+            written(g, t, e);
+            on.iter().for_each(|c| g.names(t, c));
             row_fits(g, tbl, e)?;
             if !on.is_empty() {
                 let want: BTreeSet<&String> = on.iter().collect();
@@ -571,6 +623,7 @@ fn stmt<'a>(g: &G<'a>, s: &Stmt) -> Check_<G<'a>> {
         Stmt::Update(t, ks, x, e) => {
             mutating()?;
             keyed(g, t, ks)?;
+            written(g, t, e);
             let tbl = table(g, t)?;
             row_fits(&g.bind(*x, tbl.row_ty()), tbl, e)?;
             Ok(g.clone())
@@ -596,6 +649,15 @@ fn stmt<'a>(g: &G<'a>, s: &Stmt) -> Check_<G<'a>> {
             }
             Ok(g.clone())
         }
+    }
+}
+
+// The columns a write names: every field of the struct it writes, where
+// it writes one written out (D2). A row written whole, as it was read, names
+// none — what it carries is what the reader held.
+fn written(g: &G, t: &str, e: &Expr) {
+    if let Expr::Struct(fs) = e {
+        fs.keys().for_each(|c| g.names(t, c));
     }
 }
 
@@ -713,7 +775,11 @@ fn infer(g: &G, want: Option<&Ty>, e: &Expr) -> Check_<Ty> {
         Expr::HasRole(_) => Ok(Ty::Bool),
         Expr::Provided(n) => g.provided.get(n).cloned().map_or_else(|| err(Complaint::NotProvided(n.clone())), Ok),
         Expr::Field(e, f) => match infer(g, None, e)? {
-            Ty::Struct(fs) => fs.get(f).cloned().map_or_else(|| err(Complaint::NoSuchField(f.clone())), Ok),
+            Ty::Struct(fs) => {
+                let t = fs.get(f).cloned().map_or_else(|| err(Complaint::NoSuchField(f.clone())), Ok)?;
+                g.named.borrow_mut().fields.push((fs, f.clone()));
+                Ok(t)
+            }
             _ => err(Complaint::NotAStruct(f.clone())),
         },
         Expr::Struct(fs) => {
@@ -894,6 +960,7 @@ fn plan_ty(g: &G, p: &Plan) -> Check_<Ty> {
     }
     for (k, _) in &p.order {
         if let Key::Column(c) = k {
+            g.names(&t.name, c);
             if t.column(c).is_none() {
                 return err(Complaint::UnknownColumn(t.name.clone(), c.clone()));
             }
@@ -971,6 +1038,7 @@ fn node_ty(g: &G, p: &Plan) -> Check_<Ty> {
         Source::Group { by, .. } => {
             let mut fs = BTreeMap::new();
             for c in by {
+                g.names(&t.name, c);
                 let col = t.column(c).map_or_else(|| err(Complaint::UnknownColumn(t.name.clone(), c.clone())), Ok)?;
                 fs.insert(c.clone(), col.column_ty());
             }
@@ -1014,6 +1082,7 @@ fn node_ty(g: &G, p: &Plan) -> Check_<Ty> {
     for r in &p.related {
         let ct = table(g, r.plan.table())?;
         for (c, e) in &r.on {
+            g.names(&ct.name, c);
             let col = ct
                 .column(c)
                 .map_or_else(|| err(Complaint::UnknownColumn(ct.name.clone(), c.clone())), Ok)?;
@@ -1034,6 +1103,7 @@ fn node_ty(g: &G, p: &Plan) -> Check_<Ty> {
     for (k, _) in &p.order {
         match k {
             Key::Column(c) => {
+                g.names(&t.name, c);
                 if !matches!(&row_ty, Ty::Struct(fs) if fs.contains_key(c)) {
                     return err(Complaint::UnknownColumn(t.name.clone(), c.clone()));
                 }
@@ -1109,7 +1179,10 @@ fn forbidden(e: &Expr) -> Option<Complaint> {
 }
 
 fn pred_ok(g: &G, t: &Table, p: &Pred) -> Check_<()> {
-    let col = |c: &str| t.column(c).map_or_else(|| err(Complaint::UnknownColumn(t.name.clone(), c.into())), Ok);
+    let col = |c: &str| {
+        g.names(&t.name, c);
+        t.column(c).map_or_else(|| err(Complaint::UnknownColumn(t.name.clone(), c.into())), Ok)
+    };
     match p {
         Pred::Cmp(c, _, e) => expect(g, &format!("filter on {c}"), &col(c)?.column_ty(), e),
         Pred::In(c, es) => {
@@ -1163,8 +1236,10 @@ fn scope_ok(m: &Module, i: usize, f: &Function) -> Result<(), Vec<Complaint>> {
         return err(Complaint::ScopeHoldsNothing);
     }
     let none = BTreeMap::new();
+    let unnamed = RefCell::new(Named::default());
     let g = G {
         m,
+        named: &unnamed,
         index: i,
         f,
         kind: FnKind::Helper,
