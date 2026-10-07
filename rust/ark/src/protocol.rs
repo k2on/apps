@@ -1925,6 +1925,27 @@ impl<M: Machine> Server<M> {
         out
     }
 
+    /// `docs/plan-guards.md` D4 An intent this server authors itself — a
+    /// domain mutation its explorer asked for, as its own identity — judged
+    /// and sequenced as any pushed one is, then served to every connection.
+    /// A raw write is not one ([`Server::edit`] is): it is refused here as
+    /// any intent naming one is.
+    pub fn author(&mut self, e: &Entry) -> Sequenced {
+        let out = self.authority.sequence_entry(e);
+        self.fanout();
+        out
+    }
+
+    /// Every connection that has said `Hello`: who it is, the sequence it has
+    /// been sent to, and whether it is served a union (`docs/plan-guards.md`
+    /// D2). What an operator's view of the log lists.
+    pub fn connections(&self) -> Vec<(ConnId, Identity, Seq, bool)> {
+        self.conns
+            .iter()
+            .map(|(c, cn)| (*c, cn.who.clone(), cn.sent, cn.holdings.is_some()))
+            .collect()
+    }
+
     /// A connection closed: the room hears it, the cursor is forgotten.
     pub fn disconnect(&mut self, c: ConnId) {
         let post = live::depart(&self.machine, &mut self.rooms, c);

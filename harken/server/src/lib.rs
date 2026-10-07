@@ -120,6 +120,15 @@ pub struct Config {
     /// `Hello`, so a restart with another configuration grants or revokes
     /// at once. The scanner's account holds `library` whatever this says.
     pub roles: std::collections::BTreeMap<String, Vec<String>>,
+    /// `docs/plan-guards.md` D4 Where the admin page listens
+    /// (`HARKEN_ADMIN_BIND`, what `services.harken.admin.bind` sets; none
+    /// without it): the explorer over the authority, asking nothing on
+    /// loopback and a login holding `admin` anywhere wider
+    /// (`ark_server::admin`).
+    pub admin_bind: Option<String>,
+    /// The admin page's static build (`HARKEN_ADMIN_WEB`): `ark-admin`
+    /// compiled to wasm. Without it the admin listener serves its API alone.
+    pub admin_web: Option<PathBuf>,
 }
 
 impl Config {
@@ -140,6 +149,8 @@ impl Config {
             keepalive: ark_server::Keepalive::default(),
             retain: ark_server::Retention::default(),
             roles: Default::default(),
+            admin_bind: None,
+            admin_web: None,
         }
     }
 
@@ -163,6 +174,8 @@ impl Config {
     /// HARKEN_RETAIN_DAYS            how long a device's place holds the log (30)
     /// HARKEN_RETAIN_ENTRIES         entries kept below the head regardless (10000)
     /// HARKEN_ROLES                  who holds which role: `library=alice,bob;admin=alice`
+    /// HARKEN_ADMIN_BIND             where the admin page listens (none without it)
+    /// HARKEN_ADMIN_WEB              the admin page's build
     /// ```
     pub fn from_env(listen: &str) -> Result<Config> {
         Config::from_vars(listen, |k| std::env::var(k).ok())
@@ -244,6 +257,8 @@ impl Config {
             keepalive,
             retain,
             roles: roles_of(&env("HARKEN_ROLES").unwrap_or_default())?,
+            admin_bind: env("HARKEN_ADMIN_BIND"),
+            admin_web: env("HARKEN_ADMIN_WEB").map(PathBuf::from),
         })
     }
 
@@ -461,6 +476,18 @@ pub async fn start(config: Config) -> Result<Server> {
     for prefix in &config.redirects {
         auth = auth.allow_redirect(prefix);
     }
+    // An admin page bound wider than loopback signs in through this server
+    // and comes back to its own address with the code: that address may be
+    // sent one when it names a host. A wildcard bind names none, and the
+    // address the page is reached at goes in `HARKEN_REDIRECTS`.
+    if let Some(bind) = &config.admin_bind {
+        if !ark_server::admin::is_loopback(bind)
+            && !bind.starts_with("0.0.0.0:")
+            && !bind.starts_with("[::]:")
+        {
+            auth = auth.allow_redirect(&format!("http://{bind}/admin/"));
+        }
+    }
     let auth = Arc::new(auth);
 
     // What each account is listening to, and where: the hub's live machine,
@@ -521,6 +548,14 @@ pub async fn start(config: Config) -> Result<Server> {
         if let Some(m) = &config.web_module {
             builder = builder.web_module(m);
         }
+    }
+    // `docs/plan-guards.md` D4 The admin page, where one is asked for.
+    if let Some(bind) = &config.admin_bind {
+        builder = builder.admin(ark_server::Admin {
+            bind: bind.clone(),
+            page: config.admin_web.clone(),
+            server: Some(public_url.clone()),
+        });
     }
     let app = builder.build()?;
     let hub = app.hub.clone();
@@ -642,6 +677,28 @@ mod tests {
         assert_eq!(c.redirects, ["https://a/", "https://b/"]);
         assert_eq!(c.keepalive, ark_server::Keepalive::default());
         assert_eq!(c.public_url(), "https://harken.example.com");
+    }
+
+    /// `docs/plan-guards.md` D4 The admin page is there when asked for, and
+    /// not otherwise: a server on a laptop or in a fleet opens no second
+    /// port nobody named. Falsified by reading `HARKEN_ADMIN_WEB` into the
+    /// bind: the bind was the page's directory.
+    #[test]
+    fn the_admin_page_is_there_when_asked_for() {
+        let dev = ("HARKEN_DEV_AUTH", "1");
+        let c = Config::from_vars("x:1", vars(&[dev])).unwrap();
+        assert_eq!((c.admin_bind, c.admin_web), (None, None));
+        let c = Config::from_vars(
+            "x:1",
+            vars(&[
+                dev,
+                ("HARKEN_ADMIN_BIND", "127.0.0.1:8788"),
+                ("HARKEN_ADMIN_WEB", "/nix/store/x-ark-admin"),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(c.admin_bind.as_deref(), Some("127.0.0.1:8788"));
+        assert_eq!(c.admin_web, Some(PathBuf::from("/nix/store/x-ark-admin")));
     }
 
     /// The keepalive a test shortens, and nothing a typo could make of it.

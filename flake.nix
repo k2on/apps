@@ -110,7 +110,11 @@
             version = wasmBindgenVersion;
           } // (wasmBindgenHashes.${wasmBindgenVersion}
             or (throw "flake.nix: no hashes for wasm-bindgen ${wasmBindgenVersion}; add them to wasmBindgenHashes")));
-          icedWeb = { pname, demo }: wasmPlatform.buildRustPackage {
+          # One wasm page: a binary of the workspace compiled to wasm32 and
+          # bound by wasm-bindgen, beside the static files it is loaded from —
+          # the browser peer, and the admin page (docs/plan-guards.md D4),
+          # which is the same mechanism with another binary and another page.
+          wasmPage = { pname, crate, bin ? crate, features ? "", files }: wasmPlatform.buildRustPackage {
             inherit pname;
             version = "0.1.0";
             src = only rustDirs;
@@ -120,13 +124,13 @@
             # Not cargoBuildHook: it targets the host, and this is the wasm.
             buildPhase = ''
               runHook preBuild
-              cargo build --release --offline --frozen -p harken-iced \
-                ${lib.optionalString demo "--features demo"} --target wasm32-unknown-unknown
+              cargo build --release --offline --frozen -p ${crate} \
+                ${features} --target wasm32-unknown-unknown
               wasm-bindgen --target web --no-typescript --out-dir pkg \
-                target/wasm32-unknown-unknown/release/harken-iced.wasm
+                target/wasm32-unknown-unknown/release/${bin}.wasm
               wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int \
                 --enable-sign-ext --enable-mutable-globals --enable-reference-types \
-                -o pkg/harken-iced_bg.wasm pkg/harken-iced_bg.wasm
+                -o pkg/${bin}_bg.wasm pkg/${bin}_bg.wasm
               runHook postBuild
             '';
             # The page names the module and the wasm with `?v=dev`; this
@@ -136,11 +140,26 @@
               runHook preInstall
               mkdir -p $out
               cp -r pkg $out/
-              cp ../harken/iced/web/index.html ../harken/iced/web/favicon.svg $out/
+              cp ${files} $out/
               substituteInPlace $out/index.html --replace-fail "v=dev" "v=$(basename $out | cut -c1-32)"
               runHook postInstall
             '';
             doCheck = false;
+          };
+          icedWeb = { pname, demo }: wasmPage {
+            inherit pname;
+            crate = "harken-iced";
+            features = lib.optionalString demo "--features demo";
+            files = "../harken/iced/web/index.html ../harken/iced/web/favicon.svg";
+          };
+          # The admin page: `ark-explorer`'s `ark-admin` over a server's
+          # authority, which ark-server serves on its admin listener
+          # (`services.harken.admin.page`).
+          ark-admin = wasmPage {
+            pname = "ark-admin";
+            crate = "ark-explorer";
+            bin = "ark-admin";
+            files = "ark-explorer/web/index.html";
           };
           # What GitHub Pages publishes.
           harken-web = icedWeb { pname = "harken-web"; demo = true; };
@@ -299,7 +318,7 @@
             # `nix run .#harken-serve [ADDR]`: the dev server, anyone is
             # whoever they say.
             harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { harken-server = crate { pname = "harken-server"; }; };
-            inherit harken-web harken-web-server harken-iced;
+            inherit harken-web harken-web-server harken-iced ark-admin;
             default = ark;
             inherit harken-apk;
             harken-apk-deps = harken-apk.mitmCache.updateScript;

@@ -133,7 +133,19 @@ pub struct Hub {
     hooks: Option<Hooks>,
     hooked: Seq,
     due: Vec<(Seq, String, ark::log::Entry, ark::log::Facts)>,
+    /// `docs/plan-guards.md` D4 Who this server writes as when its admin page
+    /// asks: the authority's own user (`ark::raw::AUTHOR`), under a login
+    /// that is this start of the server, holding `admin`. No connection is
+    /// it, and none may push its raw writes.
+    authority: Identity,
+    /// The last `Verify` answers sent, newest last, for the admin page: who
+    /// asked, at what sequence, and whether the authority agreed (`None`:
+    /// it could not say).
+    verified: std::collections::VecDeque<(String, Seq, Option<bool>)>,
 }
+
+/// How many `Verify` answers the hub keeps for the admin page.
+const VERIFIED: usize = 64;
 
 /// What `/healthz` reports.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -225,6 +237,8 @@ impl Hub {
         // What the log held at start was committed by an earlier start, and
         // is no hook's (`crate::hooks`).
         let hooked = server.authority.log.head_seq();
+        // The authority's own identity, a login per start.
+        let authority = Identity::new(ark::raw::AUTHOR, ark::value::hex(&ark_client::Autos::system().new_id())).with_roles([crate::admin::ROLE]);
         Ok(Hub {
             server,
             relay,
@@ -245,6 +259,8 @@ impl Hub {
             hooks: None,
             hooked,
             due: vec![],
+            authority,
+            verified: Default::default(),
         })
     }
 
@@ -336,6 +352,58 @@ impl Hub {
                         .count(),
                 })
                 .collect(),
+        }
+    }
+
+    /// `docs/plan-guards.md` D4 Who this server writes as for its admin page.
+    pub fn authority_identity(&self) -> &Identity {
+        &self.authority
+    }
+
+    /// The last `Verify` answers sent, oldest first.
+    pub fn verified(&self) -> impl Iterator<Item = &(String, Seq, Option<bool>)> {
+        self.verified.iter()
+    }
+
+    /// Every replica connection that has said `Hello`: who, the sequence it
+    /// has been sent to, and whether it is served a union.
+    pub fn connections(&self) -> Vec<(Identity, Seq, bool)> {
+        self.server
+            .connections()
+            .into_iter()
+            .filter(|(c, ..)| self.sinks.contains_key(c))
+            .map(|(_, who, sent, partial)| (who, sent, partial))
+            .collect()
+    }
+
+    /// `docs/plan-guards.md` D4 Write a row raw, as the authority
+    /// ([`ark::protocol::Server::edit`]): its sequence, or the refusal in a
+    /// sentence. Durable before anything is said of it, as every write is.
+    pub fn edit(&mut self, change: &ark::store::Change) -> std::result::Result<Seq, String> {
+        let id = ark_client::Autos::system().new_id();
+        let who = self.authority.clone();
+        match self.server.edit(id, &who, change) {
+            ark::peer::Sequenced::Appended(n, _) | ark::peer::Sequenced::Duplicate(n) => Ok(n),
+            ark::peer::Sequenced::Rejected(r) => Err(ark::protocol::refusal_text(&r)),
+        }
+    }
+
+    /// `docs/plan-guards.md` D4 Author a domain mutation as the authority:
+    /// the function by its hash, its autos drawn here, judged and sequenced
+    /// as any pushed intent ([`ark::protocol::Server::author`]).
+    pub fn author(&mut self, fn_hash: ark::hash::FnHash, args: ark::eval::Args, autos: ark::eval::Args) -> std::result::Result<Seq, String> {
+        let e = ark::log::Entry {
+            id: ark_client::Autos::system().new_id(),
+            actor: self.authority.user.clone(),
+            session: self.authority.session.clone(),
+            roles: self.authority.roles.clone(),
+            fn_hash,
+            args,
+            autos,
+        };
+        match self.server.author(&e) {
+            ark::peer::Sequenced::Appended(n, _) | ark::peer::Sequenced::Duplicate(n) => Ok(n),
+            ark::peer::Sequenced::Rejected(r) => Err(ark::protocol::refusal_text(&r)),
         }
     }
 
@@ -528,6 +596,13 @@ impl Hub {
                 // module docs).
                 let mut reached = vec![];
                 for (c, m) in std::mem::take(&mut self.held) {
+                    if let ServerMsg::Agree { seq, ok, unknown, .. } = &m {
+                        let who = self.server.identity(c).map_or_else(|| format!("connection {c}"), |w| w.user.clone());
+                        if self.verified.len() == VERIFIED {
+                            self.verified.pop_front();
+                        }
+                        self.verified.push_back((who, *seq, (!*unknown).then_some(*ok)));
+                    }
                     match &m {
                         ServerMsg::Batch { items, .. } => {
                             if let Some((n, _, _)) = items.first() {
@@ -666,6 +741,9 @@ impl Drop for Hub {
 }
 
 type Reader = Box<dyn FnOnce(&Hub) + Send>;
+/// A change made on the hub's thread, and the answer to hand back once
+/// what it moved is written (`docs/plan-guards.md` D4, the admin page).
+type Changer = Box<dyn FnOnce(&mut Hub) -> Box<dyn FnOnce() + Send> + Send>;
 
 enum Cmd {
     Attach(ConnId, Sink),
@@ -673,6 +751,7 @@ enum Cmd {
     Recv(ConnId, ClientMsg),
     Stand(ConnId, String, String, Box<dyn Fn(Vec<u8>) + Send>),
     Read(Reader),
+    Write(Changer),
     Revoked(String),
 }
 
@@ -738,6 +817,13 @@ impl HubHandle {
                         Cmd::Recv(c, m) => hub.recv(c, m),
                         Cmd::Stand(c, room, who, sink) => hub.stand(c, room, who, sink),
                         Cmd::Read(f) => f(&hub),
+                        // The answer after the write, as an acknowledgement
+                        // follows it (the module docs).
+                        Cmd::Write(f) => {
+                            let answer = f(&mut hub);
+                            hub.after();
+                            answer();
+                        }
                         Cmd::Revoked(session) => hub.revoked(&session),
                     }
                 }
@@ -838,6 +924,20 @@ impl HubHandle {
             let _ = reply.send(f(h));
         })))?;
         answer.recv().map_err(|_| anyhow!("the hub has stopped"))
+    }
+
+    /// `docs/plan-guards.md` D4 Change the hub on its thread — a raw write,
+    /// a mutation the server authors — and hand back what `f` says, once
+    /// what it moved is on the disk.
+    pub async fn write<T: Send + 'static>(&self, f: impl FnOnce(&mut Hub) -> T + Send + 'static) -> Result<T> {
+        let (reply, answer) = oneshot::channel();
+        self.send(Cmd::Write(Box::new(move |h| {
+            let out = f(h);
+            Box::new(move || {
+                let _ = reply.send(out);
+            })
+        })))?;
+        answer.await.map_err(|_| anyhow!("the hub has stopped"))
     }
 
     pub async fn health(&self) -> Result<Health> {

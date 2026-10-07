@@ -47,3 +47,5 @@ ark-auth = { path = "../../rust/ark-auth", features = ["server", "client"] }
 libc = "0.2"
 tempfile = "3"
 ureq = { version = "2", default-features = false }
+# The admin page's wire, read back as the page reads it.
+ark-explorer = { path = "../../rust/ark-explorer", default-features = false }

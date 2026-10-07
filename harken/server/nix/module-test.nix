@@ -46,6 +46,10 @@ let
   noMedia = eval { devAuth = true; mediaPath = null; };
   roles = eval { devAuth = true; roles = { library = [ "alice" "bob" ]; admin = [ "alice" ]; }; };
   oldModules = eval { devAuth = true; oldModules = [ "/srv/old/a.ark" "/srv/old/b.ark" ]; };
+  adminWide = eval { devAuth = true; admin.bind = "0.0.0.0:8788"; };
+  adminWideHeld = eval { devAuth = true; admin.bind = "0.0.0.0:8788"; roles.admin = [ "alice" ]; };
+  adminOff = eval { devAuth = true; admin.bind = null; };
+  adminPage = eval { devAuth = true; admin.page = hello; };
 
   checks = [
     [ (says nobody "nobody could sign in") "a server nobody can sign in to is refused" ]
@@ -71,6 +75,11 @@ let
     [ (!(env dev ? HARKEN_ROLES)) "and none, nothing" ]
     [ ((env oldModules).HARKEN_OLD_MODULES == "/srv/old/a.ark,/srv/old/b.ark") "the old modules reach the server" ]
     [ (!(env dev ? HARKEN_OLD_MODULES)) "and none, nothing" ]
+    [ ((env dev).HARKEN_ADMIN_BIND == "127.0.0.1:8788" && dev.warnings == [ ]) "the admin page is on loopback by default, asking nothing" ]
+    [ ((env adminPage).HARKEN_ADMIN_WEB == "${hello}") "its page is served from the build named" ]
+    [ (warns adminWide "nobody can open it") "an admin page bound wider that nobody holds admin for is a warning" ]
+    [ ((env adminWideHeld).HARKEN_ADMIN_BIND == "0.0.0.0:8788" && adminWideHeld.warnings == [ ]) "and with somebody holding it, none" ]
+    [ (!(env adminOff ? HARKEN_ADMIN_BIND) && !(env adminOff ? HARKEN_ADMIN_WEB)) "no bind, no admin page" ]
   ];
   wrong = map (c: builtins.elemAt c 1) (lib.filter (c: !(builtins.elemAt c 0)) checks);
 in

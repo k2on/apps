@@ -9,6 +9,9 @@ description = "An ArkDB sync server for any app's module, on axum: the authority
 ark = { path = "../ark" }
 ark-client = { path = "../ark-client", default-features = false }
 ark-auth = { path = "../ark-auth", features = ["server"] }
+# The admin page's wire and what it reads (`docs/plan-guards.md` D4): the
+# explorer without its window, so the server links no iced.
+ark-explorer = { path = "../ark-explorer", default-features = false }
 anyhow = "1"
 axum = { version = "0.7", features = ["ws"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }

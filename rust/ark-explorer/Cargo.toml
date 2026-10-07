@@ -34,3 +34,9 @@ wasm-bindgen = { version = "0.2", optional = true }
 wasm-bindgen-futures = { version = "0.4", optional = true }
 web-sys = { version = "0.3", optional = true, features = ["Headers", "Location", "Request", "RequestInit", "Response", "Storage", "Window"] }
 js-sys = { version = "0.3", optional = true }
+
+# The admin page: wasm for a server to serve, or a window natively.
+[[bin]]
+name = "ark-admin"
+path = "src/bin/ark-admin.rs"
+required-features = ["ui"]

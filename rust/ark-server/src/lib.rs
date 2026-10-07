@@ -8,6 +8,8 @@
 //!      ── /*      (a web build)      │       live rooms → the app's `Live`
 //!      ── the app's own routes ──────┘     the log and kept rooms, written after each
 //!                                          message and before anything is said of it
+//! axum ── /admin/ (its own listener,       the explorer over the authority, writing as
+//!          loopback by default) ── HubHandle   it: `admin`, `docs/plan-guards.md` D4
 //! ```
 //!
 //! An app builds its server from a [`Builder`] and adds its own routes:
@@ -34,6 +36,7 @@
 //! # running.stop().await; Ok(()) }
 //! ```
 
+pub mod admin;
 pub mod hooks;
 mod hub;
 pub mod live;
@@ -60,6 +63,7 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tower_http::services::ServeDir;
 
+pub use admin::Admin;
 pub use ark::retention::Retention;
 pub use ark_client::Domain;
 pub use hooks::Hook;
@@ -91,6 +95,7 @@ pub fn builder(domain: Domain) -> Builder {
         retention: Retention::default(),
         ran_before: vec![],
         hooks: vec![],
+        admin: None,
     }
 }
 
@@ -99,7 +104,8 @@ pub struct Builder {
     domain: Domain,
     name: String,
     data: Option<PathBuf>,
-    authenticate: Option<Authenticate>,
+    /// Shared, because the admin page asks it too.
+    authenticate: Option<admin::Check>,
     owns: Option<Owns>,
     auth: Option<Arc<ark_auth::server::Auth>>,
     announce: Option<String>,
@@ -112,6 +118,7 @@ pub struct Builder {
     retention: Retention,
     ran_before: Vec<modules::Ran>,
     hooks: Vec<(String, Hook)>,
+    admin: Option<admin::Admin>,
 }
 
 impl Builder {
@@ -156,7 +163,7 @@ impl Builder {
     /// person — so signing in again does not strand what was pending.
     pub fn auth(mut self, auth: Arc<ark_auth::server::Auth>) -> Builder {
         self.announce = Some(auth.announce());
-        self.authenticate = Some(auth.authenticator());
+        self.authenticate = Some(Arc::from(auth.authenticator()));
         self.owns = Some(auth.owns_fn());
         self.auth = Some(auth);
         self
@@ -166,7 +173,7 @@ impl Builder {
     /// session is always `"dev"`. For a test or a toy; said loudly at start.
     pub fn trusting(mut self) -> Builder {
         self.announce = Some("*** DEV AUTH (trusting): a token is a name, nothing is checked. Never anywhere but a laptop. ***".into());
-        self.authenticate = Some(trusting());
+        self.authenticate = Some(Arc::from(trusting()));
         self
     }
 
@@ -180,7 +187,7 @@ impl Builder {
     /// Any other answer to what a token proves.
     pub fn authenticate(mut self, a: Authenticate, announce: &str) -> Builder {
         self.announce = Some(announce.into());
-        self.authenticate = Some(a);
+        self.authenticate = Some(Arc::from(a));
         self
     }
 
@@ -251,6 +258,15 @@ impl Builder {
         self
     }
 
+    /// `docs/plan-guards.md` D4 Serve the admin page — the explorer over the
+    /// authority — on a listener of its own at `admin.bind` ([`admin`]):
+    /// asking nothing on loopback, a login holding [`admin::ROLE`] anywhere
+    /// wider.
+    pub fn admin(mut self, admin: admin::Admin) -> Builder {
+        self.admin = Some(admin);
+        self
+    }
+
     /// Host the log it left on disk, start the hub, and
     /// assemble the router. Refuses a server told nothing about who people
     /// are: dev auth has to be asked for.
@@ -280,6 +296,8 @@ impl Builder {
             eprintln!("{n}");
         }
         let (domain, data, access, owns, live) = (self.domain.clone(), self.data.clone(), self.access, self.owns, self.live);
+        let check = authenticate.clone();
+        let authenticate: Authenticate = Box::new(move |t: Option<&str>| authenticate(t));
         let ran_before = self.ran_before;
         let hooks = self.hooks;
         let hub = HubHandle::spawn(move || {
@@ -322,11 +340,22 @@ impl Builder {
             eprintln!("{}: serving the web build {}", self.name, dir.display());
             router = router.fallback_service(web::router_with_module(dir, module));
         }
+        let admin = self.admin.map(|a| {
+            let open = if admin::is_loopback(&a.bind) {
+                "on loopback, asking nothing".to_string()
+            } else {
+                format!("asking for a login holding {}", admin::ROLE)
+            };
+            eprintln!("{}: the admin page at {}/admin/, {open}", self.name, a.bind);
+            let r = admin::router(&a, hub.clone(), self.domain.clone(), check);
+            (a.bind, r)
+        });
         Ok(App {
             name: self.name,
             hub,
             router,
             notes,
+            admin,
         })
     }
 }
@@ -424,6 +453,8 @@ pub struct App {
     pub router: Router,
     /// What it said at startup.
     pub notes: Vec<String>,
+    /// The admin page's listener and its routes, when there is one.
+    pub admin: Option<(String, Router)>,
 }
 
 impl App {
@@ -443,11 +474,38 @@ impl App {
                 .await
                 .context("serving")
         });
+        // The admin page on its own listener, stopped with the other.
+        let admin = match self.admin {
+            None => None,
+            Some((bind, routes)) => {
+                let l = TcpListener::bind(&bind)
+                    .await
+                    .with_context(|| format!("binding the admin page at {bind}"))?;
+                let at = l.local_addr()?;
+                eprintln!("{}: the admin page listening on http://{at}/admin/", self.name);
+                let (tx, rx) = oneshot::channel::<()>();
+                let t = tokio::spawn(async move {
+                    axum::serve(l, routes)
+                        .with_graceful_shutdown(async {
+                            let _ = rx.await;
+                        })
+                        .await
+                        .context("serving the admin page")
+                });
+                Some((at, tx, t))
+            }
+        };
+        let (admin_addr, admin_stop) = match admin {
+            Some((at, tx, t)) => (Some(at), Some((tx, t))),
+            None => (None, None),
+        };
         Ok(Running {
             addr,
+            admin_addr,
             hub: self.hub,
             shutdown: Some(shutdown),
             task,
+            admin: admin_stop,
         })
     }
 }
@@ -455,9 +513,12 @@ impl App {
 /// A server that is up: where, and how to stop it.
 pub struct Running {
     pub addr: SocketAddr,
+    /// Where the admin page listens, when there is one.
+    pub admin_addr: Option<SocketAddr>,
     pub hub: HubHandle,
     shutdown: Option<oneshot::Sender<()>>,
     task: JoinHandle<Result<()>>,
+    admin: Option<(oneshot::Sender<()>, JoinHandle<Result<()>>)>,
 }
 
 impl Running {
@@ -476,6 +537,12 @@ impl Running {
     pub async fn stop(mut self) {
         if let Some(tx) = self.shutdown.take() {
             let _ = tx.send(());
+        }
+        if let Some((tx, mut t)) = self.admin.take() {
+            let _ = tx.send(());
+            if tokio::time::timeout(Duration::from_secs(5), &mut t).await.is_err() {
+                t.abort();
+            }
         }
         if tokio::time::timeout(Duration::from_secs(5), &mut self.task).await.is_err() {
             self.task.abort();

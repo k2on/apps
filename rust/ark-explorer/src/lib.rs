@@ -34,6 +34,8 @@ pub mod edit;
 pub mod wire;
 
 #[cfg(feature = "ui")]
+pub mod admin;
+#[cfg(feature = "ui")]
 pub mod model;
 #[cfg(feature = "ui")]
 pub mod view;

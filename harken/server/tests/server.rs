@@ -205,3 +205,52 @@ fn a_server_that_cannot_sign_anybody_in_does_not_start() {
     assert!(e.contains("127.0.0.1:9"), "names the provider: {e}");
     assert!(!e.contains("s3cret"), "and never the secret: {e}");
 }
+
+/// `docs/plan-guards.md` D4 The admin page, where `HARKEN_ADMIN_BIND` asks
+/// for one: on loopback it asks nothing and is shown the authority's own
+/// tables — harken's, every column — and a raw write it asks for is in the
+/// log as the authority's and in every peer. Falsified by not handing the
+/// builder the admin page: nothing listened.
+#[test]
+fn the_admin_page_is_the_authoritys() {
+    let rt = runtime();
+    let data = tempfile::tempdir().unwrap();
+    let server = serve(&rt, data.path(), |c| {
+        c.admin_bind = Some("127.0.0.1:0".into())
+    });
+    let at = server.running.admin_addr.expect("the admin page listens");
+    let mut phone = signed_in(&server, "alice");
+    phone
+        .mutate("create_playlist", args([("name", Value::text("Mine"))]))
+        .unwrap();
+    pump_until(&mut [&mut phone], 10, |ps| ps[0].pending_len() == 0);
+    let get = |path: &str| {
+        ureq::get(&format!("http://{at}{path}"))
+            .call()
+            .unwrap()
+            .into_string()
+            .unwrap()
+    };
+    let state = ark_explorer::wire::State::from_json(&get("/admin/api/state")).unwrap();
+    let module = ark::ir::module_from_value(&ark::canon::decode(&state.module).unwrap()).unwrap();
+    assert_eq!(module.schema, harken_domain::module().build().schema);
+    let st = ark::store::MemoryStore::from_value(module.schema.clone(), &state.store);
+    let list = ark::store::Store::scan(&st, "playlist")[0].clone();
+    let renamed = list.clone().with("name", Value::text("Kept"));
+    let body =
+        ark_explorer::wire::raw_body(&ark::store::Change::Edit("playlist".into(), list, renamed));
+    let r = ureq::post(&format!("http://{at}/admin/api/raw"))
+        .send_string(&body)
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    pump_until(&mut [&mut phone], 10, |ps| {
+        ark::store::Store::scan(ps[0].store(), "playlist")
+            .iter()
+            .any(|r| r["name"] == Value::text("Kept"))
+    });
+    assert_eq!(
+        playlists(&server),
+        [("Kept".to_string(), "alice".to_string())]
+    );
+    rt.block_on(server.stop());
+}

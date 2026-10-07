@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>admin</title>
+    <style>
+      /* iced picks light or dark from the system; the page behind it agrees,
+         so a dark window is not loaded over a white flash. The page is one
+         canvas and never scrolls: iced draws its own bars inside it. */
+      html, body {
+        margin: 0;
+        height: 100%;
+        color-scheme: light dark;
+        font-family: system-ui, sans-serif;
+        overflow: hidden;
+      }
+      canvas { display: block; }
+      #boot { position: fixed; inset: 0; display: grid; place-items: center; background: Canvas; color: CanvasText; font-size: 13px; }
+    </style>
+  </head>
+  <body>
+    <div id="boot">loading the explorer&hellip;</div>
+    <script type="module">
+      // `?v=dev` is rewritten to the build's store hash at install, as the
+      // browser peer's page is, so a browser holding an older build is sent
+      // URLs its cache has never seen; the wasm is named here because the
+      // glue derives it from its own URL with the query dropped.
+      import init from "./pkg/ark-admin.js?v=dev";
+      await init({ module_or_path: new URL("pkg/ark-admin_bg.wasm?v=dev", document.baseURI) });
+      document.getElementById("boot").remove();
+    </script>
+  </body>
+</html>

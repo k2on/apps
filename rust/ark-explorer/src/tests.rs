@@ -539,3 +539,64 @@ fn the_admin_wire_reads_back() {
     args.insert("id".into(), uid(1));
     assert_eq!(author_from(&author_body("delete_user", &args)), Ok(("delete_user".to_string(), args)));
 }
+
+/// The admin page's host: a state as the server sends it, read into a store
+/// the explorer edits like any other, and an edit asked of the server — raw
+/// with the switch on, through the CRUD the module exposes without it — as
+/// the request the server's routes read. Falsified by sending the edit's
+/// old row rather than its new: the raw request carried the name it had.
+#[test]
+fn the_admin_page_asks_the_server_for_its_writes() {
+    use crate::admin::{hello_of, Loaded, Message, Page, Request};
+    use crate::wire::{raw_from, State};
+    let m = module();
+    let st = store(&m);
+    let state = State {
+        module: ark::canon::encode(&ark::ir::module_value(&m)),
+        store: st.store_value(),
+        head: 0,
+        lines: vec![],
+        connections: vec![],
+        verifies: vec![],
+        exposed: crud_of(&m).into_iter().map(|(t, v)| (t, CrudVerbs { may_author: true, ..v })).collect(),
+        raw: true,
+        who: ark::raw::AUTHOR.into(),
+    };
+    let mut page = Page::new("http://127.0.0.1:8788/".into(), None);
+    assert_eq!(page.base, "http://127.0.0.1:8788");
+    let _ = page.update(Message::Loaded(Ok(state.to_json())));
+    let l: &Loaded = page.loaded.as_ref().expect("the state reads");
+    assert_eq!(l.store.scan("user"), st.scan("user"));
+    let edit = |page: &mut Page, table: &str, row: usize, col: usize, to: &str| {
+        let _ = page.update(Message::Explorer(Msg::Open(table.into())));
+        let _ = page.update(Message::Explorer(Msg::Cell(row, col)));
+        let _ = page.update(Message::Explorer(Msg::Edit));
+        let _ = page.update(Message::Explorer(Msg::EditText(to.into())));
+        let _ = page.update(Message::Explorer(Msg::Commit));
+    };
+    edit(&mut page, "user", 0, 1, "anne");
+    match page.sent.last() {
+        Some(Request::Author(f, a)) => {
+            assert_eq!(f, "update_user");
+            assert_eq!(a.get("name"), Some(&Value::text("anne")));
+        }
+        other => panic!("{other:?}"),
+    }
+    let _ = page.update(Message::Explorer(Msg::ToggleRaw));
+    edit(&mut page, "team", 1, 1, "5");
+    let Some(Request::Raw(change)) = page.sent.last().cloned() else {
+        panic!("{:?}", page.sent)
+    };
+    let (path, body) = Request::Raw(change.clone()).to();
+    assert_eq!(path, "/admin/api/raw");
+    assert_eq!(raw_from(&body), Ok(change.clone()));
+    assert!(
+        matches!(&change, Change::Edit(t, _, new) if t == "team" && new.get("size") == Some(&Value::Int(5))),
+        "{change:?}"
+    );
+    assert_eq!(
+        hello_of(r#"{"open":false,"server":"https://h.example"}"#),
+        Ok((false, Some("https://h.example".into())))
+    );
+    assert_eq!(hello_of(r#"{"open":true,"server":null}"#), Ok((true, None)));
+}
