@@ -85,6 +85,9 @@ pub struct Sim {
     /// device's preview reads what it believes (`docs/plan-guards.md` D1).
     pub roles: BTreeMap<i64, BTreeSet<String>>,
     pub believes: BTreeMap<i64, BTreeSet<String>>,
+    /// `docs/plan-guards.md` D2 The module's scopes, which the server serves
+    /// each connection by, through every restart ([`Sim::scoped`]).
+    pub scopes: Option<crate::scope::Scopes>,
 }
 
 /// One frame, as it went on the wire.
@@ -127,6 +130,9 @@ pub struct Kept {
     pub store: MemoryStore,
     pub cursor: Seq,
     pub log_id: Option<Id>,
+    /// `docs/plan-guards.md` D2 The replica held a union: the tables held
+    /// in part, with their columns.
+    pub partial: Option<BTreeMap<crate::value::TableName, Vec<crate::value::FieldName>>>,
 }
 
 /// One move of a scripted session (`rebase/fleet-fuzz-*` vectors, and the
@@ -227,6 +233,7 @@ impl Sim {
             faults: vec![],
             roles: BTreeMap::new(),
             believes: BTreeMap::new(),
+            scopes: None,
         };
         for i in 0..n {
             sim.heal(i);
@@ -258,6 +265,20 @@ impl Sim {
             self.partition(i);
             self.heal(i);
         }
+    }
+
+    /// Serve every connection what its identity holds of these scopes, from
+    /// its next `Hello` on and through every restart (`docs/plan-guards.md`
+    /// D2). Every client connected now reconnects.
+    pub fn scoped(mut self, scopes: crate::scope::Scopes) -> Sim {
+        self.server.set_scopes(scopes.clone());
+        self.scopes = Some(scopes);
+        let linked: Vec<i64> = self.conn.keys().copied().collect();
+        for i in linked {
+            self.partition(i);
+            self.heal(i);
+        }
+        self
     }
 
     /// Record every frame put on the wire from here on, in [`Sim::tap`].
@@ -568,6 +589,7 @@ impl Sim {
             store: r.confirmed.clone(),
             cursor: r.cursor,
             log_id: r.log_id,
+            partial: r.partial.clone(),
         });
         match r.take_confirmed() {
             Durable::Replaced => k.store = r.confirmed.clone(),
@@ -579,6 +601,7 @@ impl Sim {
         }
         k.cursor = r.cursor;
         k.log_id = r.log_id;
+        k.partial = r.partial.clone();
         let ch = r.take_changes();
         match &ch {
             Changes::Rebuilt => {
@@ -720,6 +743,9 @@ impl Sim {
         }
         a.log = log;
         self.server = Server::open(trusting(), open_access(), Silent, a);
+        if let Some(sc) = &self.scopes {
+            self.server.set_scopes(sc.clone());
+        }
         for i in &peers {
             if !self.nobody.contains(i) {
                 self.heal(*i);
@@ -763,14 +789,16 @@ impl Sim {
                 k.cursor, old.replica.cursor
             ));
         }
-        let mut r = Replica::open(
-            old.schema.clone(),
-            old.replica.bodies.clone(),
-            k.store,
-            k.cursor,
-            old.replica.pending.clone(),
-        );
+        // A union kept is opened under the device's schema, and says so in
+        // its next `Hello` (`docs/plan-guards.md` D2).
+        let schema = match &k.partial {
+            Some(h) => crate::scope::device_schema(&old.schema, h),
+            None => old.schema.clone(),
+        };
+        let mut r = Replica::open(schema, old.replica.bodies.clone(), k.store, k.cursor, old.replica.pending.clone());
         r.log_id = k.log_id;
+        r.partial = k.partial;
+        r.through = k.cursor;
         let mut c = Client::open(r, old.mode, old.token.clone());
         if self.native_peers.contains(&i) {
             c.hold(&self.natives);

@@ -323,6 +323,7 @@ fn a_verify_below_the_horizon_is_answered_cannot_say() {
     let mut sv = Server::open(trusting(), open_access(), Silent, a);
     let hello = ClientMsg::Hello {
         sub: ark::protocol::Subscription {
+            partial: false,
             since: 20,
             mode: Mode::Whole,
             log_id: sv.authority.log.id(),
@@ -336,6 +337,7 @@ fn a_verify_below_the_horizon_is_answered_cannot_say() {
         sv.recv(
             1,
             ClientMsg::Verify {
+                partial: false,
                 seq,
                 hash: hash.clone(),
                 log_id: None,
@@ -476,6 +478,7 @@ fn perf_verify_at_8000_rows() {
     let hash = state_hash(&st);
     let hello = ClientMsg::Hello {
         sub: ark::protocol::Subscription {
+            partial: false,
             since: head,
             mode: Mode::Whole,
             log_id: sv.authority.log.id(),
@@ -490,6 +493,7 @@ fn perf_verify_at_8000_rows() {
         sv.recv(
             1,
             ClientMsg::Verify {
+                partial: false,
                 seq: head,
                 hash: hash.clone(),
                 log_id: sv.authority.log.id(),

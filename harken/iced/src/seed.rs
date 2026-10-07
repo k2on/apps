@@ -3958,6 +3958,7 @@ pub fn seeded_times(domain: Domain, copies: usize) -> ark_client::Peer {
         pending: vec![],
         user: DEMO.into(),
         session: LOCAL.into(),
+        partial: None,
     };
     let mut disk = Memory::new();
     disk.save(ReplicaFile::KEY, &file.encode()).expect("memory takes it");

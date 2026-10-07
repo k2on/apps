@@ -1,0 +1,4 @@
+{
+  "frame": {"hash":{"$bytes":"3cabf8b05b4381a79b7beb5aa0a0ffbae8de74ec4ebfdd94d447606ba3e7f01b"},"ok":true,"seq":{"$int":"6"},"t":"agree"},
+  "bytes": "a46174656167726565626f6bf56373657106646861736858203cabf8b05b4381a79b7beb5aa0a0ffbae8de74ec4ebfdd94d447606ba3e7f01b"
+}

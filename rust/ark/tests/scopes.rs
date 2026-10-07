@@ -281,9 +281,16 @@ fn a_person_holds_the_union_of_the_scopes() {
     let none = BTreeSet::new();
     let alice = scopes.holdings(who("alice", &none));
     assert!(!alice.is_whole());
+    let cols = |cs: &[&str]| cs.iter().map(|c| c.to_string()).collect::<Vec<_>>();
     assert_eq!(
         alice.columns(),
-        [("account".to_string(), vec!["user".to_string(), "name".to_string()])].into()
+        [
+            ("account".to_string(), cols(&["user", "name"])),
+            ("member".to_string(), cols(&["org_id", "user"])),
+            ("org".to_string(), cols(&["id", "name"])),
+        ]
+        .into(),
+        "every table held in part, with what is held of it"
     );
     let acc = alice.schema().lookup_table("account").unwrap();
     assert!(acc.column("password").is_none(), "an excluded column does not exist on the device");
@@ -404,4 +411,263 @@ fn a_client_never_names_a_column_it_does_not_hold() {
     // A whole-row read names no column: `me` reads every held column of
     // the account and builds.
     assert!(m.lookup_function("me").unwrap().plan.as_ref().unwrap().filter.is_none());
+}
+
+// Serving the union ----------------------------------------------------------
+
+use ark::live::Silent;
+use ark::peer::{Authority, Replica};
+use ark::protocol::{open_access, trusting, Client, Mode, Server, ServerMsg};
+
+struct Fleet {
+    m: ir::Module,
+    sv: Server<Silent>,
+    clients: Vec<Client>,
+    /// Every frame the server sent each client, in order.
+    sent: Vec<Vec<ServerMsg>>,
+}
+
+impl Fleet {
+    fn new(scoped: bool) -> Fleet {
+        let authored = orgs::module();
+        let m = authored.build().clone();
+        let mut a = Authority::new(m.schema.clone(), closures(&m));
+        a.hold(authored.procedures());
+        let mut sv = Server::open(trusting(), open_access(), Silent, a);
+        if scoped {
+            sv = sv.with_scopes(Scopes::of(&m));
+        }
+        Fleet {
+            m,
+            sv,
+            clients: vec![],
+            sent: vec![],
+        }
+    }
+
+    // A client at 0, connected with this token.
+    fn join(&mut self, token: &str) -> usize {
+        let r = Replica::open(
+            self.m.schema.clone(),
+            closures(&self.m),
+            MemoryStore::empty(self.m.schema.clone()),
+            0,
+            vec![],
+        );
+        let mut c = Client::open(r, Mode::Whole, Some(token.into()));
+        c.connected();
+        self.clients.push(c);
+        self.sent.push(vec![]);
+        let i = self.clients.len() - 1;
+        self.pump();
+        i
+    }
+
+    fn pump(&mut self) {
+        for _ in 0..8 {
+            for (i, c) in self.clients.iter_mut().enumerate() {
+                for m in c.take_outgoing() {
+                    self.sv.recv(i as i64 + 1, m);
+                }
+            }
+            for (to, m) in self.sv.take_outgoing() {
+                let i = (to - 1) as usize;
+                self.sent[i].push(m.clone());
+                self.clients[i].recv(m);
+            }
+            for c in &mut self.clients {
+                c.settle();
+            }
+        }
+    }
+
+    fn mutate(&mut self, i: usize, user: &str, roles: &[&str], name: &str, id: u8, args: Args) {
+        let ctx = Ctx::new(user, "dev").with_roles(roles.iter().map(|r| r.to_string()));
+        let fh = closures(&self.m).into_iter().find(|(_, c)| c.function.name == name).unwrap().0;
+        let autos: Args = [("id".to_string(), Value::Id([id; 16]))].into();
+        let mut eid = [0u8; 16];
+        eid[0] = id;
+        eid[15] = i as u8;
+        self.clients[i].mutate(eid, &ctx, &fh, &autos, &args).expect("accepted on the device");
+        self.pump();
+    }
+
+    fn holdings(&self, user: &str, roles: &[&str]) -> ark::scope::Holdings {
+        let rs: BTreeSet<String> = roles.iter().map(|r| r.to_string()).collect();
+        Scopes::of(&self.m).holdings(who(user, &rs))
+    }
+}
+
+fn text_args(pairs: &[(&str, Value)]) -> Args {
+    pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
+}
+
+/// `docs/plan-guards.md` D2 The authority serves each connection its
+/// union. Alice holds no role: she is started from a snapshot of what she
+/// holds — no password, no org she is not in — and her device's store has
+/// no `password` column. Bob creates an org and adds alice to it: what
+/// alice is sent is her membership and the org it gives her, which the
+/// entry never touched, and nothing of bob's other org; her hash is the
+/// union digest the authority answers her `verify` with. An admin is
+/// whole, paged by intents with no `after`/`upto` and no facts. Falsified
+/// by serving every connection whole (no `with_scopes`): alice was paged
+/// by intents and held bob's org.
+#[test]
+fn the_authority_serves_each_person_their_union() {
+    let mut f = Fleet::new(true);
+    let alice = f.join("alice");
+    let bob = f.join("bob");
+    let root = f.join("root:admin");
+    f.mutate(
+        root,
+        "root",
+        &["admin"],
+        "sign_up",
+        1,
+        text_args(&[
+            ("user", Value::text("alice")),
+            ("name", Value::text("Alice")),
+            ("password", Value::text("pw")),
+        ]),
+    );
+    f.mutate(bob, "bob", &[], "create_org", 2, text_args(&[("name", Value::text("Bolt"))]));
+    f.mutate(bob, "bob", &[], "create_org", 3, text_args(&[("name", Value::text("Cove"))]));
+    assert!(
+        f.sent[alice].iter().any(|m| matches!(m, ServerMsg::SnapshotOf { held: Some(_), .. })),
+        "started from a partial snapshot"
+    );
+    let r = &f.clients[alice].replica;
+    assert!(r.partial.is_some());
+    assert!(r.confirmed.schema().lookup_table("account").unwrap().column("password").is_none());
+    assert_eq!(r.confirmed.scan("account").len(), 1, "her own account");
+    assert!(r.confirmed.scan("org").is_empty(), "no org of bob's");
+    // Bob adds alice to Bolt.
+    f.mutate(
+        bob,
+        "bob",
+        &[],
+        "join",
+        4,
+        text_args(&[("org_id", Value::Id([2; 16])), ("user", Value::text("alice"))]),
+    );
+    let r = &f.clients[alice].replica;
+    assert_eq!(r.confirmed.scan("org").len(), 1, "the org the membership gives her");
+    assert_eq!(r.confirmed.scan("member").len(), 1);
+    let head = f.sv.authority.log.head_seq();
+    let digest = f.holdings("alice", &[]).digest(&f.sv.authority.store);
+    assert_eq!(r.verify_at(), (head, digest.clone()), "at the head, at the union digest");
+    let pages: Vec<&ServerMsg> = f.sent[alice].iter().filter(|m| matches!(m, ServerMsg::Batch { .. })).collect();
+    assert!(pages.iter().all(|m| matches!(m, ServerMsg::Batch { covers: Some(_), .. })));
+    for m in &pages {
+        if let ServerMsg::Batch { items, .. } = m {
+            for (_, e, facts) in items {
+                assert!(e.args.is_empty() || e.actor == "alice", "another's intent as its envelope");
+                assert!(facts.is_some());
+            }
+        }
+    }
+    // Her verify is answered from the union digest.
+    f.clients[alice].verify_all();
+    f.pump();
+    assert_eq!(f.clients[alice].agreed.last(), Some(&(head, Some(true))));
+    // The admin is whole.
+    let root_pages: Vec<&ServerMsg> = f.sent[root].iter().filter(|m| matches!(m, ServerMsg::Batch { .. })).collect();
+    assert!(!root_pages.is_empty());
+    assert!(root_pages.iter().all(|m| matches!(m, ServerMsg::Batch { covers: None, .. })));
+    assert!(f.clients[root].replica.partial.is_none());
+    assert_eq!(f.clients[root].replica.verify_at().1, ark::hash::state_hash(&f.sv.authority.store));
+}
+
+/// A partial peer's own intent is previewed over what it holds and
+/// confirmed by the authority's facts: alice creates an org and holds it
+/// and her membership; she then adds bob to it, which her device previews
+/// as bob's membership row — a row she does not hold — and which the
+/// authority's facts for her leave out. She is confirmed by those, the
+/// preview taken back, at the union digest: nothing pending, and no
+/// divergence, since a difference from her record is the authority's
+/// answer about what she holds. Falsified by confirming a partial
+/// replica's own intents through `confirm_inbox` (the whole path): the
+/// difference was recorded as a divergence.
+#[test]
+fn a_partial_peer_previews_and_is_confirmed_by_facts() {
+    let mut f = Fleet::new(true);
+    let alice = f.join("alice");
+    f.mutate(alice, "alice", &[], "create_org", 5, text_args(&[("name", Value::text("Mine"))]));
+    let r = &f.clients[alice].replica;
+    assert!(r.pending.is_empty() && r.diverged.is_empty(), "{:?} {:?}", r.pending, r.diverged);
+    assert_eq!(r.confirmed.scan("org").len(), 1);
+    f.mutate(
+        alice,
+        "alice",
+        &[],
+        "join",
+        6,
+        text_args(&[("org_id", Value::Id([5; 16])), ("user", Value::text("bob"))]),
+    );
+    let r = &f.clients[alice].replica;
+    assert!(r.pending.is_empty() && r.diverged.is_empty(), "{:?} {:?}", r.pending, r.diverged);
+    assert_eq!(r.view.scan("member").len(), 1, "her own membership, and not bob's");
+    assert_eq!(f.sv.authority.store.scan("member").len(), 2, "both, at the authority");
+    assert_eq!(r.verify_at().1, f.holdings("alice", &[]).digest(&f.sv.authority.store));
+}
+
+/// A role granted between connections moves a person from a union to
+/// everything: alice reconnects holding `admin`, is answered with the
+/// whole snapshot at the head, and holds the log whole — her store the
+/// module's schema again. Falsified by keeping a peer that says `partial`
+/// on the paged path (`elsewhere` ignoring it): she stayed partial-shaped
+/// with the password column missing.
+#[test]
+fn a_role_granted_makes_a_partial_peer_whole() {
+    let mut f = Fleet::new(true);
+    let alice = f.join("alice");
+    let root = f.join("root:admin");
+    f.mutate(
+        root,
+        "root",
+        &["admin"],
+        "sign_up",
+        1,
+        text_args(&[
+            ("user", Value::text("carol")),
+            ("name", Value::text("C")),
+            ("password", Value::text("pw")),
+        ]),
+    );
+    assert!(f.clients[alice].replica.partial.is_some());
+    f.clients[alice].disconnected();
+    f.sv.disconnect(alice as i64 + 1);
+    f.clients[alice].token = Some("alice:admin".into());
+    f.clients[alice].connected();
+    f.pump();
+    let r = &f.clients[alice].replica;
+    assert!(r.partial.is_none(), "whole now");
+    assert_eq!(r.confirmed.schema(), &f.m.schema);
+    assert_eq!(r.verify_at().1, ark::hash::state_hash(&f.sv.authority.store));
+    assert_eq!(r.confirmed.scan("account").len(), 1, "carol's account, password and all");
+}
+
+/// What the scopes change about a whole peer: nothing. A module with
+/// scopes served to a person who holds everything sends the frames a
+/// server with no scopes sends, byte for byte. Falsified by sending a
+/// whole connection's pages with `covers` all the same: the frames
+/// differed.
+#[test]
+fn a_whole_peer_is_served_the_bytes_it_always_was() {
+    let run = |scoped: bool| {
+        let mut f = Fleet::new(scoped);
+        let root = f.join("root:admin");
+        let other = f.join("dave:admin");
+        f.mutate(other, "dave", &["admin"], "create_org", 9, text_args(&[("name", Value::text("Dove"))]));
+        f.mutate(
+            root,
+            "root",
+            &["admin"],
+            "sign_up",
+            1,
+            text_args(&[("user", Value::text("eve")), ("name", Value::text("E")), ("password", Value::text("pw"))]),
+        );
+        f.sent[root].iter().map(|m| encode(&m.to_value())).collect::<Vec<_>>()
+    };
+    assert_eq!(run(true), run(false));
 }

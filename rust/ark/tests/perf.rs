@@ -507,7 +507,12 @@ fn perf_d_initial_sync() {
 
 fn hello(since: Seq, mode: Mode) -> ClientMsg {
     ClientMsg::Hello {
-        sub: Subscription { since, mode, log_id: None },
+        sub: Subscription {
+            partial: false,
+            since,
+            mode,
+            log_id: None,
+        },
         token: Some("alice".into()),
         spec: ark::ir::SPEC_VERSION,
     }
@@ -767,7 +772,15 @@ fn perf_g_authority_and_fanout() {
         s.recv(1, hello(seq, Mode::Whole));
         let _ = s.take_outgoing();
         let t = Instant::now();
-        s.recv(1, ClientMsg::Verify { seq, hash, log_id: None });
+        s.recv(
+            1,
+            ClientMsg::Verify {
+                partial: false,
+                seq,
+                hash,
+                log_id: None,
+            },
+        );
         let dt = t.elapsed();
         let agreed = s.take_outgoing().into_iter().any(|(_, m)| matches!(m, ServerMsg::Agree { ok: true, .. }));
         assert!(agreed, "the authority agrees with its own head");
@@ -798,6 +811,7 @@ fn perf_h_frames() {
             .map(|(n, e, f)| (*n, e.clone(), facts.then(|| f.clone())))
             .collect();
         let m = ServerMsg::Batch {
+            covers: None,
             items,
             has_more: false,
             log_id: None,

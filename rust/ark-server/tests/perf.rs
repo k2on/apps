@@ -928,6 +928,7 @@ fn snapshot_frame(d: &ark_client::Domain, n: u64) -> Vec<u8> {
         .map(|t| (t.clone(), st.scan(&t).into_iter().map(ark::store::Row::into_value).collect()))
         .collect();
     let msg = ServerMsg::SnapshotOf {
+        held: None,
         seq: n as i64,
         hash: vec![0x5a; 32],
         rows,

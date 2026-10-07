@@ -30,7 +30,7 @@ use ark::value::{Id, Value};
 use crate::autos::Autos;
 use crate::link::{platform_dial, Dial, Link, State, Timing};
 use crate::storage::{
-    count_pages, encode_page, encode_pending_page, encode_pending_snapshot, encode_replica_of, encode_who, load_pending, BoxStorage, Fork, Memory,
+    count_pages, encode_page, encode_pending_page, encode_pending_snapshot, encode_replica_held, encode_who, load_pending, BoxStorage, Fork, Memory,
     PendingStored, ReplicaFile, Stored,
 };
 use crate::view::View;
@@ -417,8 +417,10 @@ impl Peer {
         // What the records hold decides what is written first: a storage
         // with no replica yet has everything written at the end of this
         // open, and one whose journal could not all be read is compacted.
+        let mut partial = None;
         let (confirmed, cursor, pending, was, durable, wrote_who, mut wrote_pending, pending_file, fork) = match Stored::load(&*storage, &schema)? {
             Some(st) => {
+                partial = st.file.partial.clone();
                 let f = st.file;
                 let was = Ctx::new(f.user, f.session);
                 let ids: Vec<Id> = f.pending.iter().map(|e| e.id).collect();
@@ -476,7 +478,11 @@ impl Peer {
         // A `log` record is local history: the peer was last used alone.
         let had_log = storage.load(&Layout::alone().snapshot)?.is_some();
         let authored = pending.iter().map(|e| e.id).collect();
-        let mut r = Replica::open(schema.clone(), domain.closures().clone(), confirmed, cursor, pending);
+        // A union kept is opened under the device's schema, and says so in
+        // its next `Hello` (`docs/plan-guards.md` D2).
+        let held_schema = confirmed.schema().clone();
+        let mut r = Replica::open(held_schema, domain.closures().clone(), confirmed, cursor, pending);
+        r.partial = partial;
         // The log the cursor is of, as the storage names it; unnamed, the
         // server's first answer names it (Round 4).
         r.log_id = durable.log_id;
@@ -571,8 +577,11 @@ impl Peer {
         &self.domain
     }
 
+    /// The schema this peer's store is laid out under: the module's, or —
+    /// for a peer holding a union of the module's scopes — the device's,
+    /// whose tables have only the held columns (`docs/plan-guards.md` D2).
     pub fn schema(&self) -> &Schema {
-        &self.schema
+        &self.client.replica.schema
     }
 
     /// Who this peer authors as.
@@ -749,9 +758,12 @@ impl Peer {
     pub fn query(&self, name: &str, args: &Args) -> Result<Value, Error> {
         let (fh, _) = self.domain.query(name)?;
         let store = self.store();
+        // A union is read under the device's schema, whose tables hold only
+        // the held columns (`docs/plan-guards.md` D2).
+        let partial = self.client.replica.partial.is_some();
         let out = match self.domain.natives().get(fh) {
-            Some(p) => p.query(&self.ctx, args, store),
-            None => eval::query_closure(&self.schema, &self.domain.closures()[fh], &self.ctx, args, store),
+            Some(p) if !partial => p.query(&self.ctx, args, store),
+            _ => eval::query_closure(store.schema(), &self.domain.closures()[fh], &self.ctx, args, store),
         };
         out.map_err(|e| match e {
             EvalFault::Verdict(r) => Error::Refused(r),
@@ -765,7 +777,7 @@ impl Peer {
     pub fn check(&self, name: &str, partial: &Args) -> Result<Checked, Error> {
         let (fh, _) = self.domain.function(name).ok_or_else(|| Error::UnknownFunction(name.into()))?;
         let store = self.store();
-        eval::check(&self.schema, &self.domain.closures()[fh], &self.ctx, partial, store).map_err(|b| Error::Bug(format!("{name}: {b:?}")))
+        eval::check(store.schema(), &self.domain.closures()[fh], &self.ctx, partial, store).map_err(|b| Error::Bug(format!("{name}: {b:?}")))
     }
 
     /// A query held as a list and kept up to date: see [`View`].
@@ -1220,7 +1232,15 @@ impl Peer {
     fn snapshot(&mut self) -> Result<(), Error> {
         self.durable.snapshot_due = true;
         let r = &self.client.replica;
-        let bytes = encode_replica_of(r.cursor, r.log_id, self.fork, &r.confirmed, &self.ctx.user, &self.ctx.session);
+        let bytes = encode_replica_held(
+            r.cursor,
+            r.log_id,
+            self.fork,
+            r.partial.as_ref(),
+            &r.confirmed,
+            &self.ctx.user,
+            &self.ctx.session,
+        );
         let (cursor, log_id) = (r.cursor, r.log_id);
         self.storage.save(ReplicaFile::KEY, &bytes)?;
         for n in (1..=self.durable.pages).rev() {

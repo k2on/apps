@@ -1,0 +1,4 @@
+{
+  "frame": {"mode":"whole","partial":true,"since":{"$int":"3"},"spec":{"$int":"4"},"t":"hello","token":"alice"},
+  "bytes": "a661746568656c6c6f646d6f64656577686f6c656473706563046573696e63650365746f6b656e65616c696365677061727469616cf5"
+}

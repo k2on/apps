@@ -372,7 +372,12 @@ fn open_hub(
         file = Some(f);
     }
     eprintln!("{name}: the log at seq {}, its horizon at {}", a.log.head_seq(), a.log.horizon());
-    let mut server = Server::open(auth, access, relay.clone(), a).with_module(module);
+    // `docs/plan-guards.md` D2 Each connection is served what its identity
+    // holds of the module's scopes; a module with none, everything, as
+    // ever.
+    let mut server = Server::open(auth, access, relay.clone(), a)
+        .with_module(module)
+        .with_scopes(ark::scope::Scopes::of(domain.module()));
     if let Some(owns) = owns {
         server = server.with_owns(owns);
     }

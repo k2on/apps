@@ -640,6 +640,7 @@ fn a_verify_below_the_head_over_older_facts_agrees() {
         1,
         ClientMsg::Hello {
             sub: ark::protocol::Subscription {
+                partial: false,
                 since: 2,
                 mode: Mode::ByFacts,
                 log_id: None,
@@ -649,7 +650,15 @@ fn a_verify_below_the_head_over_older_facts_agrees() {
         },
     );
     let _ = sv.take_outgoing();
-    sv.recv(1, ClientMsg::Verify { seq, hash, log_id: None });
+    sv.recv(
+        1,
+        ClientMsg::Verify {
+            partial: false,
+            seq,
+            hash,
+            log_id: None,
+        },
+    );
     let agreed: Vec<bool> = sv
         .take_outgoing()
         .into_iter()

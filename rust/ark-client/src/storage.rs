@@ -8,7 +8,7 @@
 //! ```text
 //! replica   { t: "replica", cursor, confirmed: { table: [row…] },
 //!             user, session, log, fork: { log, cursor },      the snapshot
-//!             hashing }
+//!             hashing, partial? }
 //! facts.1   { t: "facts", from, to, facts: [[change…], …] }    the journal:
 //! facts.2   …                                                  one page per
 //!                                                              write, dense
@@ -146,7 +146,7 @@ use ark::log::{Entry, Facts, Seq};
 use ark::protocol::{change_from_value, change_value, entry_from_value, entry_value};
 use ark::schema::Schema;
 use ark::store::{Change, MemoryStore, Row, Store};
-use ark::value::{Id, Value};
+use ark::value::{FieldName, Id, TableName, Value};
 
 use crate::Error;
 
@@ -402,6 +402,14 @@ pub struct ReplicaFile {
     /// The login last authored as; empty for nobody (`Ctx::nobody`).
     pub user: String,
     pub session: String,
+    /// `docs/plan-guards.md` D2 The confirmed store is a union of the
+    /// module's scopes — what this login held when the server last served
+    /// it — and not the log whole: the tables held in part, with their
+    /// columns, under which the store is laid out (`ark::scope::device_schema`)
+    /// and which the next `Hello` says. On the record `partial`, a struct
+    /// of column lists, absent otherwise, so a record of a whole replica is
+    /// the bytes it was.
+    pub partial: Option<BTreeMap<TableName, Vec<FieldName>>>,
 }
 
 impl ReplicaFile {
@@ -425,7 +433,15 @@ impl ReplicaFile {
     /// The `replica` record: a snapshot of everything but the pending
     /// intents.
     pub fn encode(&self) -> Vec<u8> {
-        encode_replica_of(self.cursor, None, self.fork, &self.confirmed, &self.user, &self.session)
+        encode_replica_held(
+            self.cursor,
+            None,
+            self.fork,
+            self.partial.as_ref(),
+            &self.confirmed,
+            &self.user,
+            &self.session,
+        )
     }
 
     /// The `pending` record.
@@ -523,6 +539,43 @@ pub fn decode_replica(bytes: &[u8], schema: &Schema) -> Result<(ReplicaFile, Opt
         },
         Some(_) => return Err(bad("fork is not a struct")),
     };
+    // A union is laid out under the device's schema: the rows were read
+    // under the module's, where a narrowed row is a row of no table, and are
+    // put again under the tables they are rows of.
+    let partial = match m.get("partial") {
+        None => None,
+        Some(Value::Struct(h)) => {
+            let mut out = BTreeMap::new();
+            for (t, cs) in h.iter() {
+                let Value::List(cs) = cs else {
+                    return Err(bad("partial: a table's columns are not a list"));
+                };
+                let cs: Option<Vec<FieldName>> = cs
+                    .iter()
+                    .map(|c| match c {
+                        Value::Text(t) => Some(t.to_string()),
+                        _ => None,
+                    })
+                    .collect();
+                out.insert(t.clone(), cs.ok_or_else(|| bad("partial: a column is not text"))?);
+            }
+            Some(out)
+        }
+        Some(_) => return Err(bad("partial is not a struct")),
+    };
+    let confirmed = match &partial {
+        None => confirmed,
+        Some(h) => {
+            let device = ark::scope::device_schema(schema, h);
+            let mut st = MemoryStore::empty(device.clone());
+            for t in device.tables() {
+                for r in confirmed.scan(&t.name) {
+                    st.apply_change(&Change::Add(t.name.clone(), r));
+                }
+            }
+            st
+        }
+    };
     let file = ReplicaFile {
         fork,
         cursor,
@@ -530,6 +583,7 @@ pub fn decode_replica(bytes: &[u8], schema: &Schema) -> Result<(ReplicaFile, Opt
         pending,
         user: optional("user")?,
         session: optional("session")?,
+        partial,
     };
     Ok((file, log_id))
 }
@@ -726,6 +780,22 @@ pub fn encode_replica(cursor: Seq, confirmed: &MemoryStore, user: &str, session:
 /// `log_id`, by a replica whose fork is `fork`. Unnamed, it is the record
 /// as it was before logs had names.
 pub fn encode_replica_of(cursor: Seq, log_id: Option<Id>, fork: Fork, confirmed: &MemoryStore, user: &str, session: &str) -> Vec<u8> {
+    encode_replica_held(cursor, log_id, fork, None, confirmed, user, session)
+}
+
+/// [`encode_replica_of`], by a replica that holds a union of the module's
+/// scopes when `partial` says so (`docs/plan-guards.md` D2): the tables
+/// held in part and their columns, on the record as `partial`, absent for
+/// a whole replica.
+pub fn encode_replica_held(
+    cursor: Seq,
+    log_id: Option<Id>,
+    fork: Fork,
+    partial: Option<&BTreeMap<TableName, Vec<FieldName>>>,
+    confirmed: &MemoryStore,
+    user: &str,
+    session: &str,
+) -> Vec<u8> {
     let mut fields = vec![
         ("t", Value::text("replica")),
         ("cursor", Value::Int(cursor)),
@@ -737,6 +807,13 @@ pub fn encode_replica_of(cursor: Seq, log_id: Option<Id>, fork: Fork, confirmed:
     ];
     if let Some(id) = log_id {
         fields.push(("log", Value::Id(id)));
+    }
+    if let Some(h) = partial {
+        let held = h
+            .iter()
+            .map(|(t, cs)| (t.clone(), Value::List(cs.iter().map(|c| Value::text(c)).collect())))
+            .collect();
+        fields.push(("partial", Value::Struct(Box::new(held))));
     }
     canon::encode(&Value::record(fields))
 }
@@ -920,6 +997,42 @@ mod tests {
         assert_eq!(base64_encode(b"Man"), "TWFu");
         assert_eq!(base64_encode(b"Ma"), "TWE=");
         assert!(base64_decode("*").is_none());
+    }
+
+    /// `docs/plan-guards.md` D2 A replica holding a union says so on its
+    /// record, with the columns of each table it holds in part, and opens
+    /// under the device's schema: the narrowed table has no column it does
+    /// not hold, and its rows come back as that table's. A whole replica's
+    /// record is the bytes it was. Falsified by not writing the field: the
+    /// union came back whole, under the module's schema.
+    #[test]
+    fn a_replica_record_says_it_holds_a_union() {
+        let schema = crate::demo::domain().module().schema.clone();
+        let held: BTreeMap<TableName, Vec<FieldName>> = [("playlist".to_string(), vec!["id".to_string(), "name".to_string()])].into();
+        let device = ark::scope::device_schema(&schema, &held);
+        let mut st = MemoryStore::empty(device.clone());
+        let tbl = device.lookup_table("playlist").unwrap();
+        st.put(
+            "playlist",
+            Row::of(tbl, [("id".to_string(), Value::Id([1; 16])), ("name".to_string(), Value::text("Mine"))]),
+        )
+        .unwrap();
+        let whole = MemoryStore::empty(schema.clone());
+        assert_eq!(
+            encode_replica_held(4, None, Fork::default(), None, &whole, "alice", "s"),
+            encode_replica(4, &whole, "alice", "s"),
+            "a whole replica's record is as it was"
+        );
+        assert!(decode_replica(&encode_replica(4, &whole, "alice", "s"), &schema)
+            .unwrap()
+            .0
+            .partial
+            .is_none());
+        let bytes = encode_replica_held(4, None, Fork::default(), Some(&held), &st, "alice", "s");
+        let (f, _) = decode_replica(&bytes, &schema).unwrap();
+        assert_eq!(f.partial, Some(held));
+        assert_eq!(f.confirmed.schema(), &device);
+        assert_eq!(f.confirmed, st, "the rows, as the narrowed table's");
     }
 
     /// `docs/plan-db.md` D3, Landed: the `replica` record says which

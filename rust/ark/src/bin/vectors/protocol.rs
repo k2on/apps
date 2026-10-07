@@ -74,6 +74,7 @@ pub fn protocol(out: &Out) {
     // is of (Round 4).
     let hello = |log_id| ClientMsg::Hello {
         sub: Subscription {
+            partial: false,
             since: 4,
             mode: Mode::Whole,
             log_id,
@@ -87,6 +88,7 @@ pub fn protocol(out: &Out) {
             "hello-facts",
             ClientMsg::Hello {
                 sub: Subscription {
+                    partial: false,
                     since: 0,
                     mode: Mode::ByFacts,
                     log_id: None,
@@ -120,6 +122,7 @@ pub fn protocol(out: &Out) {
         (
             "verify",
             ClientMsg::Verify {
+                partial: false,
                 seq: 4,
                 hash: vec![0xab; 32],
                 log_id: None,
@@ -130,6 +133,7 @@ pub fn protocol(out: &Out) {
         (
             "verify-named",
             ClientMsg::Verify {
+                partial: false,
                 seq: 4,
                 hash: vec![0xab; 32],
                 log_id: Some(log_a),
@@ -146,6 +150,7 @@ pub fn protocol(out: &Out) {
     // built from a module always sends.
     let module = || Some(ark::hash::module_hash(&m));
     let batch = |log_id, module| ServerMsg::Batch {
+        covers: None,
         items: vec![
             (5, entry.clone(), None),
             (6, entry.clone(), Some(vec![Change::Add("item".into(), row.clone())])),
@@ -155,6 +160,7 @@ pub fn protocol(out: &Out) {
         module,
     };
     let snapshot = |log_id, module| ServerMsg::SnapshotOf {
+        held: None,
         seq: 2,
         hash: vec![0xcd; 32],
         rows: BTreeMap::from([("item".to_string(), vec![row.to_value()])]),
@@ -271,6 +277,7 @@ pub fn protocol(out: &Out) {
             1,
             ClientMsg::Hello {
                 sub: Subscription {
+                    partial: false,
                     since: 0,
                     mode: Mode::Whole,
                     log_id: None,
@@ -456,6 +463,7 @@ pub fn protocol(out: &Out) {
             conn,
             ClientMsg::Hello {
                 sub: Subscription {
+                    partial: false,
                     since: 0,
                     mode: Mode::Whole,
                     log_id: said,
@@ -489,6 +497,7 @@ pub fn protocol(out: &Out) {
         1,
         ClientMsg::Hello {
             sub: Subscription {
+                partial: false,
                 since: 0,
                 mode: Mode::Whole,
                 log_id: None,
@@ -591,6 +600,7 @@ fn stamp_on(a: Authority, e: &Entry, token: &str, believed: &[&str]) -> (Vec<Str
         1,
         ClientMsg::Hello {
             sub: Subscription {
+                partial: false,
                 since: 0,
                 mode: Mode::Whole,
                 log_id: None,
@@ -626,4 +636,224 @@ fn stamp_on(a: Authority, e: &Entry, token: &str, believed: &[&str]) -> (Vec<Str
         .get(&1)
         .map_or(vec![], |(e, _)| e.roles.iter().cloned().collect());
     (logged, said.join(" "))
+}
+
+/// `docs/plan-guards.md` D2 The frames of a peer served its union, from a
+/// run over [`demo::scoped`] (`mine` and `tracks`, with the demo's two
+/// mutators beside them to write the rows): alice's `hello` saying she held
+/// one, the snapshot that starts her — her playlist, every item without its
+/// position, and the tables held in part with their columns — a page that
+/// passes an entry she holds nothing of and carries one she does, as its
+/// envelope with its projected facts, a page carrying a playlist that a
+/// track named for her made hers (the `exists` form, a row the entry never
+/// touched), and her `verify` answered from the union's digest.
+pub fn scoped(out: &Out) {
+    let sm = demo::scoped();
+    let dm = demo::module();
+    let mut bodies = closures(&dm);
+    bodies.extend(closures(&sm));
+    let h_create = hash_of(&dm, "create_playlist");
+    let h_add = hash_of(&dm, "add_to_playlist");
+    let a = Authority::new(sm.schema.clone(), bodies.clone());
+    let mut sv = Server::open(trusting(), open_access(), Silent, a).with_scopes(ark::scope::Scopes::of(&sm));
+    let push = |sv: &mut Server<Silent>, c: ConnId, who: &str, k: u8, fh: &Vec<u8>, args: Args, autos: Args| {
+        let e = Entry {
+            id: id_n(k),
+            actor: who.into(),
+            session: "dev".into(),
+            roles: Default::default(),
+            fn_hash: fh.clone(),
+            args,
+            autos,
+        };
+        sv.recv(c, ClientMsg::Push { entries: vec![e] });
+    };
+    let hello = |partial, since| ClientMsg::Hello {
+        sub: Subscription {
+            since,
+            mode: Mode::Whole,
+            log_id: None,
+            partial,
+        },
+        token: Some("alice".into()),
+        spec: SPEC_VERSION,
+    };
+    // Bob's connection is whole to nobody's eyes but its own: it is the
+    // writer here.
+    sv.recv(
+        2,
+        ClientMsg::Hello {
+            sub: Subscription {
+                since: 0,
+                mode: Mode::Whole,
+                log_id: None,
+                partial: false,
+            },
+            token: Some("bob".into()),
+            spec: SPEC_VERSION,
+        },
+    );
+    push(
+        &mut sv,
+        2,
+        "bob",
+        1,
+        &h_create,
+        args([("name", Value::text("Bob's"))]),
+        args([("id", Value::Id(id_n(0x21)))]),
+    );
+    push(
+        &mut sv,
+        2,
+        "bob",
+        2,
+        &h_create,
+        args([("name", Value::text("Ours"))]),
+        args([("id", Value::Id(id_n(0x22)))]),
+    );
+    sv.recv(1, hello(false, 0));
+    push(
+        &mut sv,
+        1,
+        "alice",
+        3,
+        &h_create,
+        args([("name", Value::text("Mine"))]),
+        args([("id", Value::Id(id_n(0x11)))]),
+    );
+    let _ = sv.take_outgoing();
+    // Alice comes back, saying she held a union: the snapshot starts her.
+    sv.disconnect(1);
+    let hello_partial = hello(true, 3);
+    sv.recv(1, hello_partial.clone());
+    let to_alice =
+        |sv: &mut Server<Silent>| -> Vec<ServerMsg> { sv.take_outgoing().into_iter().filter(|(to, _)| *to == 1).map(|(_, m)| m).collect() };
+    let started = to_alice(&mut sv);
+    let snapshot = started
+        .iter()
+        .find(|m| matches!(m, ServerMsg::SnapshotOf { held: Some(_), .. }))
+        .cloned()
+        .expect("protocol: a partial peer is started from a snapshot of its union");
+    // In one push, bob makes a playlist alice does not hold and adds a track
+    // to hers: one page passes the first and carries the second.
+    let entry = |k: u8, fh: &Vec<u8>, args: Args, autos: Args| Entry {
+        id: id_n(k),
+        actor: "bob".into(),
+        session: "dev".into(),
+        roles: Default::default(),
+        fn_hash: fh.clone(),
+        args,
+        autos,
+    };
+    sv.recv(
+        2,
+        ClientMsg::Push {
+            entries: vec![
+                entry(
+                    5,
+                    &h_create,
+                    args([("name", Value::text("Bob's too"))]),
+                    args([("id", Value::Id(id_n(0x23)))]),
+                ),
+                entry(
+                    6,
+                    &h_add,
+                    args([("playlist_id", Value::Id(id_n(0x11))), ("track_id", Value::text("t2"))]),
+                    Args::new(),
+                ),
+            ],
+        },
+    );
+    let paged: Vec<ServerMsg> = to_alice(&mut sv);
+    let page = paged
+        .iter()
+        .find(|m| matches!(m, ServerMsg::Batch { covers: Some(_), items, .. } if items.len() == 1))
+        .cloned()
+        .unwrap_or_else(|| panic!("protocol: a partial page: {paged:?}"));
+    // A track named for alice on bob's other playlist makes that playlist
+    // hers.
+    push(
+        &mut sv,
+        2,
+        "bob",
+        7,
+        &h_add,
+        args([("playlist_id", Value::Id(id_n(0x22))), ("track_id", Value::text("alice"))]),
+        Args::new(),
+    );
+    let seen = to_alice(&mut sv);
+    let visible = seen
+        .iter()
+        .find(|m| {
+            matches!(m, ServerMsg::Batch { items, .. }
+                if items.iter().any(|(_, _, f)| f.as_ref().is_some_and(|f| f.iter().any(|c| matches!(c, Change::Add(t, _) if t == "playlist")))))
+        })
+        .cloned()
+        .unwrap_or_else(|| panic!("protocol: the exists form's row arrives: {seen:?}"));
+    // Alice, fed all of it, asks whether the authority agrees.
+    let mut c = Client::open(
+        Replica::open(sm.schema.clone(), bodies.clone(), MemoryStore::empty(sm.schema.clone()), 0, vec![]),
+        Mode::Whole,
+        Some("alice".into()),
+    );
+    c.connected();
+    let mut sv2 = sv;
+    sv2.disconnect(1);
+    for _ in 0..4 {
+        for m in c.take_outgoing() {
+            sv2.recv(1, m);
+        }
+        for m in to_alice(&mut sv2) {
+            c.recv(m);
+        }
+        c.settle();
+    }
+    c.verify_all();
+    let verify = c
+        .take_outgoing()
+        .into_iter()
+        .find(|m| matches!(m, ClientMsg::Verify { partial: true, .. }))
+        .expect("a partial verify");
+    sv2.recv(1, verify.clone());
+    let agree = to_alice(&mut sv2)
+        .into_iter()
+        .find(|m| matches!(m, ServerMsg::Agree { ok: true, .. }))
+        .expect("protocol: a partial verify agreed from the union's digest");
+    super::claim(
+        "the partial page passes what alice holds nothing of",
+        matches!(&page, ServerMsg::Batch { covers: Some(cv), .. } if cv.upto - cv.after == 2),
+    );
+    super::claim(
+        "the projected snapshot carries no position",
+        matches!(&snapshot, ServerMsg::SnapshotOf { rows, .. } if rows.get("item").is_none_or(|rs| rs.iter().all(|r| !matches!(r, Value::Struct(m) if m.contains_key("pos"))))),
+    );
+    let client_frames = [("hello-partial", hello_partial), ("verify-partial", verify)];
+    let server_frames = [
+        ("snapshot-scoped", snapshot),
+        ("batch-scoped", page),
+        ("batch-scoped-visible", visible),
+        ("agree-scoped", agree),
+    ];
+    for (name, f) in client_frames {
+        let v = f.to_value();
+        match decode(&encode(&v)).map(|d| ClientMsg::from_value(&d)) {
+            Ok(Ok(back)) if back == f => {}
+            other => panic!("protocol client {name}: {other:?}"),
+        }
+        out.write(
+            &format!("protocol/client-{name}.json"),
+            &obj(&[("frame", json(&v)), ("bytes", quoted(&hex(&encode(&v))))]),
+        );
+    }
+    for (name, f) in server_frames {
+        let v = f.to_value();
+        match decode(&encode(&v)).map(|d| ServerMsg::from_value(&d)) {
+            Ok(Ok(back)) if back.to_value() == v => {}
+            other => panic!("protocol server {name}: {other:?}"),
+        }
+        out.write(
+            &format!("protocol/server-{name}.json"),
+            &obj(&[("frame", json(&v)), ("bytes", quoted(&hex(&encode(&v))))]),
+        );
+    }
 }

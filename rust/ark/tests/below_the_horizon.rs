@@ -188,6 +188,7 @@ fn a_snapshot_read_as_it_is_decoded_is_the_snapshot_read_whole() {
     ]
     .into();
     let frame = |module: Option<Vec<u8>>| ServerMsg::SnapshotOf {
+        held: None,
         seq: 5,
         hash: vec![0xcd; 32],
         rows: rows.clone(),
@@ -234,14 +235,19 @@ fn a_snapshot_read_as_it_is_decoded_is_the_snapshot_read_whole() {
             panic!("a snapshot")
         };
         let ServerMsg::SnapshotOf {
-            seq, rows, log_id, module, ..
+            seq,
+            rows,
+            log_id,
+            module,
+            held,
+            ..
         } = msg
         else {
             unreachable!()
         };
         assert_eq!(
             s,
-            Snapshot::of_values(&sch, seq, rows, log_id, module),
+            Snapshot::of_values(&sch, seq, rows, log_id, module, held),
             "the rows built as the values make them"
         );
         read.recv_snapshot(s);

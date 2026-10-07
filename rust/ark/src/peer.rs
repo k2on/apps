@@ -117,6 +117,24 @@ pub struct Replica {
     /// module no longer ships). Either is confirmed by the authority's
     /// facts, never by this. Not durable.
     pub known: BTreeMap<Id, Facts>,
+    /// `docs/plan-guards.md` D2 The replica holds what its person's union
+    /// of the module's scopes gives them, and not the log whole: the
+    /// server said so on the snapshot it started from, and `schema` is the
+    /// device's — the held columns only ([`crate::scope::Holdings::schema`]).
+    /// Confirmed entries are then applied by their facts alone, never by
+    /// running another person's intent, whose read set this store may not
+    /// hold; this peer's own intents are previewed over what it holds and
+    /// confirmed by the authority's facts, and a difference from the record
+    /// is the authority's answer rather than a divergence, since the run
+    /// that made the record saw only what is held. Durable beside the
+    /// cursor, with the held columns: a peer that held a union says so in
+    /// its next `Hello`.
+    pub partial: Option<BTreeMap<TableName, Vec<crate::value::FieldName>>>,
+    /// A partial replica's horizon of what it has been told: the last
+    /// sequence a page covered (`upto`). Every sequence up to it has passed
+    /// — with facts in the inbox, or with nothing this peer holds — and the
+    /// next settle moves the cursor to it.
+    pub through: Seq,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
@@ -317,6 +335,8 @@ impl Replica {
             journal: vec![],
             behind: false,
             known: BTreeMap::new(),
+            partial: None,
+            through: cursor,
         };
         r.replay();
         r
@@ -603,6 +623,11 @@ impl Replica {
     /// closures it does not hold, or which it could not apply as the
     /// authority did.
     pub fn needs(&self) -> Vec<Seq> {
+        // A partial replica is sent every fact it holds, and asks for
+        // nothing (`docs/plan-guards.md` D2).
+        if self.partial.is_some() {
+            return vec![];
+        }
         self.inbox
             .iter()
             .filter_map(|(n, ib)| match (&ib.entry, &ib.facts) {
@@ -672,7 +697,12 @@ impl Replica {
         // Nothing next in the inbox, nothing to do: a settle with nothing
         // placed, which every pump that heard nothing makes (R8), costs a
         // lookup and not a list of the pending ids.
-        if !self.inbox.contains_key(&(self.cursor + 1)) {
+        let next = if self.partial.is_some() {
+            self.through > self.cursor
+        } else {
+            self.inbox.contains_key(&(self.cursor + 1))
+        };
+        if !next {
             return;
         }
         // The intents the view holds above `confirmed`, in the order it
@@ -682,7 +712,7 @@ impl Replica {
         // Every entry applied moves the confirmed store, so the loop runs
         // inside the wrapper that keeps the view's sharing (D7.3); the
         // view's own move follows it.
-        let ((acc, moved, others), shared) = self.move_confirmed(|r, _| r.confirm_inbox());
+        let ((acc, moved, others), shared) = self.move_confirmed(|r, _| if r.partial.is_some() { r.confirm_partial() } else { r.confirm_inbox() });
         if !moved {
             return;
         }
@@ -809,6 +839,48 @@ impl Replica {
             acc.extend(chs);
             moved = true;
             others = others || !own_next || diverged || !previewed;
+        }
+        (acc, moved, others)
+    }
+
+    // `docs/plan-guards.md` D2 The advance's first half for a partial
+    // replica: every sequence up to `through`, in order, by its facts —
+    // what the inbox holds for it, or nothing, for a sequence that passed
+    // with nothing this peer holds. The journal gets a list per sequence,
+    // empty or not, so that it stays contiguous and a store kept from it
+    // reaches the cursor. An own intent whose facts are its record is
+    // confirmed as R2 confirms one; anything else that moved the store, or
+    // took an intent out of `pending`, is `others`, and the view is rebased
+    // by changes as it is for a whole replica. No run, no divergence: the
+    // facts are the authority's answer for what this person holds.
+    fn confirm_partial(&mut self) -> (Vec<Change>, bool, bool) {
+        let mut acc: Vec<Change> = Vec::new();
+        let mut moved = false;
+        let mut others = false;
+        while self.cursor < self.through {
+            let n = self.cursor + 1;
+            let ib = self.inbox.remove(&n).unwrap_or_default();
+            let chs = ib.facts.clone().unwrap_or_default();
+            let own_next = ib.entry.is_some() && self.pending.first() == ib.entry.as_ref();
+            let agrees = own_next
+                && !others
+                && ib.entry.as_ref().is_some_and(|e| self.can_apply(&e.fn_hash))
+                && ib.entry.as_ref().and_then(|e| self.recorded.get(&e.id)) == Some(&chs);
+            let mut dropped = false;
+            if let Some(e) = &ib.entry {
+                let before = self.pending.len();
+                self.pending.retain(|p| p.id != e.id);
+                dropped = self.pending.len() < before;
+                self.known.remove(&e.id);
+            }
+            self.confirmed.apply_changes(&chs);
+            self.journal.push((n, chs.clone()));
+            self.cursor = n;
+            moved = true;
+            if !agrees && (dropped || !chs.is_empty()) {
+                others = true;
+            }
+            acc.extend(chs);
         }
         (acc, moved, others)
     }
@@ -2005,6 +2077,7 @@ mod tests {
         let mut a = d.authority();
         let (me, them) = (Ctx::new("me", "s"), Ctx::new("them", "t"));
         let page = |items: Vec<(Seq, Entry)>| ServerMsg::Batch {
+            covers: None,
             items: items.into_iter().map(|(n, e)| (n, e, None)).collect(),
             has_more: false,
             log_id: None,

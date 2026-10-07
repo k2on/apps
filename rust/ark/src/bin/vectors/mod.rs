@@ -62,6 +62,7 @@ pub fn write_all(root: &Path) {
     rebase::three_peers(&out);
     module::module(&out);
     protocol::protocol(&out);
+    protocol::scoped(&out);
     rebase::fleet(&out);
     fuzzed::fuzzed(&out);
     views::views(&out);

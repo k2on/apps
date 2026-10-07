@@ -119,12 +119,13 @@ impl Scopes {
                 }
             }
         }
-        let schema = projected_schema(&self.schema, &tables);
-        Holdings {
+        let mut h = Holdings {
             full: self.schema.clone(),
-            schema,
+            schema: self.schema.clone(),
             tables,
-        }
+        };
+        h.schema = device_schema(&self.schema, &h.columns());
+        h
     }
 }
 
@@ -174,12 +175,16 @@ impl Holdings {
         self.tables.get(table)
     }
 
-    /// The columns held of each table narrower than its schema's, by
-    /// table: what a partial snapshot says beside its rows.
+    /// Every table held in part, with the columns held of it in the
+    /// table's order: what a partial snapshot says beside its rows, and
+    /// all a device needs to lay out its schema ([`device_schema`]).
     pub fn columns(&self) -> BTreeMap<TableName, Vec<FieldName>> {
         self.tables
             .iter()
-            .filter_map(|(t, h)| h.columns.clone().map(|cs| (t.clone(), cs)))
+            .filter_map(|(t, h)| {
+                let all = || self.full.lookup_table(t).map(|tb| tb.columns.iter().map(|c| c.name.clone()).collect());
+                Some((t.clone(), h.columns.clone().or_else(all)?))
+            })
             .collect()
     }
 
@@ -595,21 +600,25 @@ fn expr_roles(e: &Expr, out: &mut BTreeSet<String>) {
     }
 }
 
-// The schema a person's device has: each table narrowed to its held
-// columns, its indexes and text indexes to those over them, its references
-// to those whose column is held and whose parent is held whole.
-fn projected_schema(full: &Schema, tables: &BTreeMap<TableName, Held>) -> Schema {
-    if tables.is_empty() {
+/// The schema a device has, from the module's and the tables held in part
+/// with their columns ([`Holdings::columns`], what a partial snapshot
+/// says): each such table narrowed to its held columns, its indexes and
+/// text indexes to those over them, and every table's references to those
+/// whose column is held and whose parent is held whole — a device never
+/// refuses a write for a parent it cannot see, and the authority checks
+/// every reference.
+pub fn device_schema(full: &Schema, held: &BTreeMap<TableName, Vec<FieldName>>) -> Schema {
+    if held.is_empty() {
         return full.clone();
     }
-    let whole = |t: &str| !tables.contains_key(t);
+    let whole = |t: &str| !held.contains_key(t);
     Schema {
         tables: full
             .tables()
             .map(|t| {
-                let held = tables.get(&t.name);
-                let keeps = |c: &str| held.and_then(|h| h.columns.as_ref()).is_none_or(|cs| cs.iter().any(|x| x == c));
-                let narrowed = held.is_some_and(|h| h.columns.is_some());
+                let cols = held.get(&t.name);
+                let keeps = |c: &str| cols.is_none_or(|cs| cs.iter().any(|x| x == c));
+                let narrowed = cols.is_some_and(|cs| cs.len() < t.columns.len());
                 let refs_move = t.refs.iter().any(|r| !whole(&r.table));
                 if !narrowed && !refs_move {
                     return t.clone();

@@ -462,6 +462,7 @@ fn a_verdict_not_yet_taken_survives_a_snapshot() {
     });
     let empty = MemoryStore::empty(sch);
     c.recv(ServerMsg::SnapshotOf {
+        held: None,
         seq: 5,
         hash: state_hash(&empty),
         rows: Default::default(),

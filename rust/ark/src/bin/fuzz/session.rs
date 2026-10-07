@@ -871,9 +871,14 @@ fn round_trip(f: &Frame, sch: &ark::schema::Schema) -> Option<Finding> {
                 (
                     Ok(Received::Snapshot(s)),
                     ServerMsg::SnapshotOf {
-                        seq, rows, log_id, module, ..
+                        seq,
+                        rows,
+                        log_id,
+                        module,
+                        held,
+                        ..
                     },
-                ) => *s == Snapshot::of_values(sch, *seq, rows.clone(), *log_id, module.clone()),
+                ) => *s == Snapshot::of_values(sch, *seq, rows.clone(), *log_id, module.clone(), held.clone()),
                 (Ok(Received::Msg(b)), m) => !matches!(m, ServerMsg::SnapshotOf { .. }) && b.to_value() == v,
                 _ => false,
             };

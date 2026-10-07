@@ -20,10 +20,11 @@ use crate::hash::{Closure, FnHash};
 use crate::ir::decode::{closure_from_value, DecodeError};
 use crate::ir::encode::closure_value;
 use crate::live::{self, ConnId, Machine, Rooms};
-use crate::log::{snapshot_of, Entry, Facts, Page, Seq};
+use crate::log::{snapshot_of, widened, Entry, Facts, Page, Seq};
 use crate::peer::{Authority, Replica, Sequenced};
 use crate::schema::Schema;
-use crate::store::{project_row, Change, MemoryStore, Refusal, Row, Store};
+use crate::scope::{Holdings, Scopes, Who};
+use crate::store::{project_row, Change, MemoryStore, Overlay, Refusal, Row, Store};
 use crate::value::{hex, FieldName, Id, TableName, Value};
 
 // ---------------------------------------------------------------------
@@ -47,6 +48,14 @@ pub struct Subscription {
     /// logs having names, which is served as before (§12.4). On the wire,
     /// `log`, an id, absent for `None`.
     pub log_id: Option<Id>,
+    /// `docs/plan-guards.md` D2 The peer holds a union of the module's
+    /// scopes — what its person was last served — and not the log whole. A
+    /// server that finds this identity whole answers with its snapshot at
+    /// the head rather than paging intents onto a store missing rows; one
+    /// that finds it partial starts it from a snapshot of what it holds
+    /// whatever this says. On the wire `partial: true`, absent otherwise,
+    /// so a `hello` from a whole peer is the bytes it was.
+    pub partial: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -78,6 +87,10 @@ pub enum ClientMsg {
         /// none is the bytes it was and is compared as it always was, so a
         /// client older than the field is answered as before.
         log_id: Option<Id>,
+        /// `docs/plan-guards.md` D2 The hash is of what a partial replica
+        /// holds: a connection served the other kind answers `unknown`. On
+        /// the wire `partial: true`, absent otherwise.
+        partial: bool,
     },
     Say {
         frame: Vec<u8>,
@@ -100,6 +113,17 @@ pub enum ServerMsg {
         /// does not say is the bytes it was, and a peer that does not read
         /// it ignores a field it does not know.
         module: Option<Vec<u8>>,
+        /// `docs/plan-guards.md` D2 A page for a peer that is not whole:
+        /// the sequences it covers, `after` its last and through `upto`,
+        /// every one of which has passed whether or not an item names it.
+        /// Its items are the entries with a fact the peer holds, or its
+        /// own, each with those facts only ([`crate::scope::Holdings::filter_facts`]),
+        /// and another person's intent carried as its envelope — id,
+        /// author, function, its arguments and autos empty — since a
+        /// partial peer applies facts and never replays an intent. `after`
+        /// and `upto` on the wire, both absent on a page for a whole peer,
+        /// which is the bytes it was.
+        covers: Option<Covers>,
     },
     FactsFor {
         items: Vec<(Seq, Facts)>,
@@ -113,6 +137,15 @@ pub enum ServerMsg {
         log_id: Option<Id>,
         /// As a batch's: the server's module hash, `module` on the wire.
         module: Option<Vec<u8>>,
+        /// `docs/plan-guards.md` D2 The rows are what a peer that is not
+        /// whole holds of the state at `seq`, projected, and `hash` their
+        /// state hash: the peer holds this from here, and is paged with
+        /// `after` and `upto`. The map is every table held in part, with the
+        /// columns held of it — the device's schema is the module's with
+        /// those tables narrowed to those columns, and a reference kept
+        /// only to a table held whole. On the wire `partial: true`, and
+        /// `held: {table: [column…]}`, both absent for a whole snapshot.
+        held: Option<BTreeMap<TableName, Vec<FieldName>>>,
     },
     Ack {
         ids: Vec<Id>,
@@ -178,6 +211,14 @@ pub enum ServerMsg {
     Heard {
         frame: Vec<u8>,
     },
+}
+
+/// `docs/plan-guards.md` D2 What a partial page covers: the sequences
+/// after `after` through `upto`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Covers {
+    pub after: Seq,
+    pub upto: Seq,
 }
 
 /// Entries per page.
@@ -274,14 +315,18 @@ impl ClientMsg {
         match self {
             ClientMsg::Hello { sub, token, spec } => node(
                 "hello",
-                named(
-                    vec![
-                        ("since", int(sub.since)),
-                        ("mode", txt(if sub.mode == Mode::Whole { "whole" } else { "facts" })),
-                        ("token", token.as_deref().map(txt).unwrap_or(Value::Null)),
-                        ("spec", int(*spec)),
-                    ],
-                    &sub.log_id,
+                flagged(
+                    named(
+                        vec![
+                            ("since", int(sub.since)),
+                            ("mode", txt(if sub.mode == Mode::Whole { "whole" } else { "facts" })),
+                            ("token", token.as_deref().map(txt).unwrap_or(Value::Null)),
+                            ("spec", int(*spec)),
+                        ],
+                        &sub.log_id,
+                    ),
+                    "partial",
+                    sub.partial,
                 ),
             ),
             ClientMsg::Push { entries } => node("push", vec![("entries", Value::List(entries.iter().map(entry_value).collect()))]),
@@ -290,9 +335,14 @@ impl ClientMsg {
                 "need_closures",
                 vec![("hashes", Value::List(hashes.iter().map(|h| Value::Bytes(h[..].into())).collect()))],
             ),
-            ClientMsg::Verify { seq, hash, log_id } => {
-                node("verify", named(vec![("seq", int(*seq)), ("hash", Value::Bytes(hash[..].into()))], log_id))
-            }
+            ClientMsg::Verify { seq, hash, log_id, partial } => node(
+                "verify",
+                flagged(
+                    named(vec![("seq", int(*seq)), ("hash", Value::Bytes(hash[..].into()))], log_id),
+                    "partial",
+                    *partial,
+                ),
+            ),
             ClientMsg::Say { frame } => node("say", vec![("say", Value::Bytes(frame[..].into()))]),
         }
     }
@@ -323,6 +373,7 @@ impl ClientMsg {
                 seq: int64(need(m, "seq")?)?,
                 hash: bytes(need(m, "hash")?)?,
                 log_id: log_of(m)?,
+                partial: flag(m, "partial")?,
             },
             "say" => ClientMsg::Say {
                 frame: bytes(need(m, "say")?)?,
@@ -342,7 +393,78 @@ fn sub(m: &BTreeMap<FieldName, Value>) -> Result<Subscription, DecodeError> {
         since: int64(need(m, "since")?)?,
         mode,
         log_id: log_of(m)?,
+        partial: flag(m, "partial")?,
     })
+}
+
+// `docs/plan-guards.md` D2 A flag that is `true` when present: absent is the
+// one encoding of `false`, so a frame without it is the bytes it was, and
+// `false` is refused as a second spelling.
+fn flagged<'a>(mut fields: Vec<(&'a str, Value)>, name: &'a str, on: bool) -> Vec<(&'a str, Value)> {
+    if on {
+        fields.push((name, Value::Bool(true)));
+    }
+    fields
+}
+
+fn flag(m: &BTreeMap<FieldName, Value>, name: &str) -> Result<bool, DecodeError> {
+    match m.get(name) {
+        None => Ok(false),
+        Some(Value::Bool(true)) => Ok(true),
+        Some(_) => bad(format!("{name} is true or absent")),
+    }
+}
+
+// `docs/plan-guards.md` D2 What a partial page covers: `after` and `upto`,
+// both absent for a whole peer's page.
+fn covers_fields<'a>(mut fields: Vec<(&'a str, Value)>, covers: &Option<Covers>) -> Vec<(&'a str, Value)> {
+    if let Some(c) = covers {
+        fields.push(("after", Value::Int(c.after)));
+        fields.push(("upto", Value::Int(c.upto)));
+    }
+    fields
+}
+
+fn covers_of(m: &BTreeMap<FieldName, Value>) -> Result<Option<Covers>, DecodeError> {
+    match (m.get("after"), m.get("upto")) {
+        (None, None) => Ok(None),
+        (Some(a), Some(u)) => Ok(Some(Covers {
+            after: int64(a)?,
+            upto: int64(u)?,
+        })),
+        _ => bad("a page's after and upto go together"),
+    }
+}
+
+// `docs/plan-guards.md` D2 A partial snapshot's `partial: true` and `held`,
+// both absent for a whole one.
+fn held_fields<'a>(mut fields: Vec<(&'a str, Value)>, held: &Option<BTreeMap<TableName, Vec<FieldName>>>) -> Vec<(&'a str, Value)> {
+    if let Some(h) = held {
+        fields.push(("partial", Value::Bool(true)));
+        fields.push((
+            "held",
+            Value::Struct(Box::new(
+                h.iter()
+                    .map(|(t, cs)| (t.clone(), Value::List(cs.iter().map(|c| txt(c)).collect())))
+                    .collect(),
+            )),
+        ));
+    }
+    fields
+}
+
+fn held_of(m: &BTreeMap<FieldName, Value>) -> Result<Option<BTreeMap<TableName, Vec<FieldName>>>, DecodeError> {
+    match (flag(m, "partial")?, m.get("held")) {
+        (false, None) => Ok(None),
+        (true, Some(h)) => {
+            let mut out = BTreeMap::new();
+            for (t, cs) in strct_of(h)? {
+                out.insert(t.clone(), list(text, cs)?);
+            }
+            Ok(Some(out))
+        }
+        _ => bad("a snapshot's partial and held go together"),
+    }
 }
 
 /// The `log` of a frame that may carry one: an id, or `None` where the
@@ -369,31 +491,35 @@ impl ServerMsg {
                 has_more,
                 log_id,
                 module,
+                covers,
             } => node(
                 "batch",
-                of_module(
-                    named(
-                        vec![
-                            (
-                                "items",
-                                Value::List(
-                                    items
-                                        .iter()
-                                        .map(|(n, e, f)| {
-                                            strct(vec![
-                                                ("seq", int(*n)),
-                                                ("entry", entry_value(e)),
-                                                ("facts", f.as_ref().map(facts_value).unwrap_or(Value::Null)),
-                                            ])
-                                        })
-                                        .collect(),
+                covers_fields(
+                    of_module(
+                        named(
+                            vec![
+                                (
+                                    "items",
+                                    Value::List(
+                                        items
+                                            .iter()
+                                            .map(|(n, e, f)| {
+                                                strct(vec![
+                                                    ("seq", int(*n)),
+                                                    ("entry", entry_value(e)),
+                                                    ("facts", f.as_ref().map(facts_value).unwrap_or(Value::Null)),
+                                                ])
+                                            })
+                                            .collect(),
+                                    ),
                                 ),
-                            ),
-                            ("has_more", Value::Bool(*has_more)),
-                        ],
-                        log_id,
+                                ("has_more", Value::Bool(*has_more)),
+                            ],
+                            log_id,
+                        ),
+                        module,
                     ),
-                    module,
+                    covers,
                 ),
             ),
             ServerMsg::FactsFor { items } => node("facts", vec![("items", seq_facts_value(items))]),
@@ -403,21 +529,25 @@ impl ServerMsg {
                 rows,
                 log_id,
                 module,
+                held,
             } => node(
                 "snapshot",
-                of_module(
-                    named(
-                        vec![
-                            ("seq", int(*seq)),
-                            ("hash", Value::Bytes(hash[..].into())),
-                            (
-                                "rows",
-                                Value::Struct(Box::new(rows.iter().map(|(t, vs)| (t.clone(), Value::List(vs[..].into()))).collect())),
-                            ),
-                        ],
-                        log_id,
+                held_fields(
+                    of_module(
+                        named(
+                            vec![
+                                ("seq", int(*seq)),
+                                ("hash", Value::Bytes(hash[..].into())),
+                                (
+                                    "rows",
+                                    Value::Struct(Box::new(rows.iter().map(|(t, vs)| (t.clone(), Value::List(vs[..].into()))).collect())),
+                                ),
+                            ],
+                            log_id,
+                        ),
+                        module,
                     ),
-                    module,
+                    held,
                 ),
             ),
             ServerMsg::Ack { ids, seqs, log_id, facts } => {
@@ -479,6 +609,7 @@ impl ServerMsg {
                 has_more: boolean(need(m, "has_more")?)?,
                 log_id: log_of(m)?,
                 module: module_of(m)?,
+                covers: covers_of(m)?,
             },
             "facts" => ServerMsg::FactsFor {
                 items: seq_facts_of(need(m, "items")?)?,
@@ -495,6 +626,7 @@ impl ServerMsg {
                 },
                 log_id: log_of(m)?,
                 module: module_of(m)?,
+                held: held_of(m)?,
             },
             "ack" => ServerMsg::Ack {
                 ids: list(ident, need(m, "ids")?)?,
@@ -558,6 +690,9 @@ pub struct Snapshot {
     pub rows: BTreeMap<TableName, Vec<Row>>,
     pub log_id: Option<Id>,
     pub module: Option<Vec<u8>>,
+    /// `docs/plan-guards.md` D2 The rows are what a partial peer holds,
+    /// and these are the tables held in part with their columns.
+    pub held: Option<BTreeMap<TableName, Vec<FieldName>>>,
 }
 
 impl Snapshot {
@@ -566,7 +701,14 @@ impl Snapshot {
     /// has no such table; each element that is not a struct dropped, and a
     /// table left with no rows not named — as [`ServerMsg::decode_for`],
     /// which is handed rows and not tables, never names one.
-    pub fn of_values(schema: &Schema, seq: Seq, rows: BTreeMap<TableName, Vec<Value>>, log_id: Option<Id>, module: Option<Vec<u8>>) -> Snapshot {
+    pub fn of_values(
+        schema: &Schema,
+        seq: Seq,
+        rows: BTreeMap<TableName, Vec<Value>>,
+        log_id: Option<Id>,
+        module: Option<Vec<u8>>,
+        held: Option<BTreeMap<TableName, Vec<FieldName>>>,
+    ) -> Snapshot {
         let rows = rows
             .into_iter()
             .map(|(t, vs)| {
@@ -585,7 +727,13 @@ impl Snapshot {
             })
             .filter(|(_, rs): &(TableName, Vec<Row>)| !rs.is_empty())
             .collect();
-        Snapshot { seq, rows, log_id, module }
+        Snapshot {
+            seq,
+            rows,
+            log_id,
+            module,
+            held,
+        }
     }
 }
 
@@ -629,7 +777,15 @@ impl ServerMsg {
         Ok(match ServerMsg::from_value(&v).map_err(|e| e.to_string())? {
             // What is left under `rows` is only what is not a struct, which
             // adoption drops.
-            ServerMsg::SnapshotOf { seq, log_id, module, .. } => Received::Snapshot(Snapshot { seq, rows, log_id, module }),
+            ServerMsg::SnapshotOf {
+                seq, log_id, module, held, ..
+            } => Received::Snapshot(Snapshot {
+                seq,
+                rows,
+                log_id,
+                module,
+                held,
+            }),
             msg => Received::Msg(msg),
         })
     }
@@ -807,6 +963,11 @@ pub struct Client {
     /// the next connection; an id leaves this set when the server answers
     /// it otherwise. [`Client::held`] counts the ones still pending.
     pub held_ids: BTreeSet<Id>,
+    /// `docs/plan-guards.md` D2 This connection has been sent a page or a
+    /// snapshot: a partial replica says no `verify` before, since what it
+    /// holds may be another identity's until the server has started it
+    /// over.
+    pub served: bool,
 }
 
 impl Client {
@@ -829,6 +990,7 @@ impl Client {
             module: None,
             server_module: None,
             held_ids: BTreeSet::new(),
+            served: false,
         }
     }
 
@@ -887,6 +1049,7 @@ impl Client {
                 since: self.replica.cursor,
                 mode: self.mode,
                 log_id: self.replica.log_id,
+                partial: self.replica.partial.is_some(),
             },
             token: self.token.clone(),
             spec: crate::ir::SPEC_VERSION,
@@ -900,6 +1063,7 @@ impl Client {
         self.epoch += 1;
         self.out.clear();
         self.more = false;
+        self.served = false;
         self.heard.clear();
         let hello = self.hello();
         self.emit(hello);
@@ -950,9 +1114,35 @@ impl Client {
                 has_more,
                 log_id,
                 module,
+                covers,
             } => {
                 self.heard_module(module);
+                self.served = true;
                 let r = &mut self.replica;
+                // `docs/plan-guards.md` D2 A page of the other kind than the
+                // replica holds — a partial one for a whole replica, or the
+                // reverse — is nothing it can apply: a server starts every
+                // connection that changes kind with a snapshot, and this is
+                // a page from before it.
+                if covers.is_some() != r.partial.is_some() {
+                    return;
+                }
+                if let Some(c) = covers {
+                    // One already covered — the network's duplicate — is
+                    // nothing new. One that continues from past where this
+                    // peer has been told is a page missed: its items would
+                    // be applied over a gap no `upto` could show, so it is
+                    // dropped and the settle asks again from the cursor,
+                    // which the server pages from.
+                    if c.upto <= r.through {
+                        return;
+                    }
+                    if c.after > r.through {
+                        self.more = true;
+                        return;
+                    }
+                    r.through = c.upto;
+                }
                 // A peer that did not know which log it holds learns it
                 // from the first page (Round 4). One that did is never sent
                 // a page of another: the server answered its `Hello` with a
@@ -978,9 +1168,14 @@ impl Client {
             // rows read as `decode_for` reads them, then adopted
             // ([`Client::recv_snapshot`]).
             ServerMsg::SnapshotOf {
-                seq, rows, log_id, module, ..
+                seq,
+                rows,
+                log_id,
+                module,
+                held,
+                ..
             } => {
-                let s = Snapshot::of_values(&self.schema, seq, rows, log_id, module);
+                let s = Snapshot::of_values(&self.schema, seq, rows, log_id, module, held);
                 self.recv_snapshot(s);
             }
             ServerMsg::Ack { ids, seqs, log_id, facts } => {
@@ -1055,13 +1250,27 @@ impl Client {
     /// put in the store here, not as they are decoded: whether this peer is
     /// behind is said by the frame's `module`, which follows its `rows`.
     pub fn recv_snapshot(&mut self, s: Snapshot) {
-        let Snapshot { seq, rows, log_id, module } = s;
+        let Snapshot {
+            seq,
+            rows,
+            log_id,
+            module,
+            held,
+        } = s;
         self.heard_module(module);
+        self.served = true;
         self.replica.settle();
         let behind = self.replica.behind;
-        let mut st = MemoryStore::empty(self.schema.clone());
+        // `docs/plan-guards.md` D2 A partial snapshot is of the device's
+        // schema — the module's with the tables held in part narrowed — and
+        // the replica holds a union from here; a whole one, the module's.
+        let schema = match &held {
+            Some(h) => crate::scope::device_schema(&self.schema, h),
+            None => self.schema.clone(),
+        };
+        let mut st = MemoryStore::empty(schema.clone());
         for (t, rs) in rows {
-            let tbl = self.schema.lookup_table(&t);
+            let tbl = schema.lookup_table(&t);
             for row in rs {
                 let row = match tbl {
                     Some(tbl) if behind => project_row(tbl, &row).unwrap_or(row),
@@ -1071,10 +1280,12 @@ impl Client {
             }
         }
         let r = &mut self.replica;
-        let mut opened = Replica::open(r.schema.clone(), r.bodies.clone(), st, seq, r.pending.clone());
+        let mut opened = Replica::open(schema, r.bodies.clone(), st, seq, r.pending.clone());
         opened.natives = r.natives.clone();
         opened.log_id = log_id;
         opened.behind = r.behind;
+        opened.partial = held;
+        opened.through = seq;
         let mut told = std::mem::take(&mut r.rejections);
         told.append(&mut opened.rejections);
         opened.rejections = told;
@@ -1114,12 +1325,13 @@ impl Client {
     /// Not while [`Client::behind`] (`docs/plan-db.md` D1): the hash is
     /// over this peer's schema, which is not the server's.
     pub fn verify_all(&mut self) {
-        if self.behind() {
+        let partial = self.replica.partial.is_some();
+        if self.behind() || (partial && !self.served) {
             return;
         }
         let (seq, hash) = self.replica.verify_at();
         let log_id = self.replica.log_id;
-        self.emit(ClientMsg::Verify { seq, hash, log_id });
+        self.emit(ClientMsg::Verify { seq, hash, log_id, partial });
     }
 
     pub fn take_outgoing(&mut self) -> Vec<ClientMsg> {
@@ -1133,6 +1345,17 @@ impl Client {
 
 // ---------------------------------------------------------------------
 // The server
+
+/// A change undone: the transition back, exact because a fact carries the
+/// whole row on each side — what taking an entry's facts back off a later
+/// state applies, newest first.
+fn undo(c: &Change) -> Change {
+    match c {
+        Change::Add(t, r) => Change::Remove(t.clone(), r.clone()),
+        Change::Remove(t, r) => Change::Add(t.clone(), r.clone()),
+        Change::Edit(t, old, new) => Change::Edit(t.clone(), new.clone(), old.clone()),
+    }
+}
 
 /// Who a connection is: the user, the login, and the roles the
 /// authenticator says they hold. Every entry the connection pushes is held
@@ -1234,6 +1457,12 @@ struct Conn {
     /// confirmed is of that log, and it is sent this one's snapshot at the
     /// head before anything else (§12.4, Round 4).
     elsewhere: bool,
+    /// `docs/plan-guards.md` D2 What this identity holds, when it is not
+    /// everything: the connection is served by facts filtered and
+    /// projected to it, and `None` is today's path, by intents.
+    holdings: Option<Holdings>,
+    /// A partial connection not yet sent the snapshot that starts it.
+    fresh: bool,
 }
 
 /// An authority's end of every connection (`Ark.Protocol.Server`).
@@ -1259,6 +1488,10 @@ pub struct Server<M: Machine> {
     /// any other is not (`docs/plan-guards.md` D1). A closure is fixed by
     /// its hash, so an answer is kept.
     role_readers: BTreeMap<FnHash, bool>,
+    /// `docs/plan-guards.md` D2 The module's scopes ([`Server::with_scopes`]):
+    /// what each connection holds is computed from them at its `Hello`.
+    /// `None`, or a module with none, and every connection is whole.
+    scopes: Option<Scopes>,
 }
 
 impl<M: Machine> Server<M> {
@@ -1276,7 +1509,32 @@ impl<M: Machine> Server<M> {
             out: vec![],
             module: None,
             role_readers: BTreeMap::new(),
+            scopes: None,
         }
+    }
+
+    /// `docs/plan-guards.md` D2 Serve each connection what its identity
+    /// holds of the module's scopes: a server built from a module with any
+    /// says so. With none, every connection is whole and this changes
+    /// nothing.
+    pub fn with_scopes(mut self, scopes: Scopes) -> Server<M> {
+        self.set_scopes(scopes);
+        self
+    }
+
+    /// [`Server::with_scopes`], in place: from the next `Hello` on.
+    pub fn set_scopes(&mut self, scopes: Scopes) {
+        self.scopes = (!scopes.is_empty()).then_some(scopes);
+    }
+
+    /// What `who` holds of this server's scopes; `None` when everything.
+    pub fn holdings_of(&self, who: &Identity) -> Option<Holdings> {
+        let h = self.scopes.as_ref()?.holdings(Who {
+            user: &who.user,
+            session: &who.session,
+            roles: &who.roles,
+        });
+        (!h.is_whole()).then_some(h)
     }
 
     // Whether the closure under `fh` reads a role outside its guards; a
@@ -1359,6 +1617,19 @@ impl<M: Machine> Server<M> {
                     // having names — and an authority whose log nobody
                     // named are both served as they always were.
                     let elsewhere = matches!((sub.log_id, self.authority.log.id()), (Some(theirs), Some(ours)) if theirs != ours);
+                    // `docs/plan-guards.md` D2 Whole or partial is decided
+                    // by the scopes and this identity, never asked for. A
+                    // peer that held a union and is whole now is sent the
+                    // snapshot at the head, as one of another log is: paged,
+                    // it would take intents onto a store missing rows. A
+                    // partial connection asking again from anywhere but where
+                    // it was sent to has missed something — a page, or the
+                    // snapshot that started it — and is started over from a
+                    // snapshot: what it holds may be another identity's.
+                    let holdings = self.holdings_of(&who);
+                    let again = self.conns.get(&c).is_none_or(|was| was.sent != sub.since);
+                    let partial = holdings.is_some();
+                    let elsewhere = elsewhere || (sub.partial && !partial);
                     let peer = live::Peer {
                         conn: c,
                         room: who.user.clone(),
@@ -1371,6 +1642,8 @@ impl<M: Machine> Server<M> {
                             mode: sub.mode,
                             sent: sub.since,
                             elsewhere,
+                            holdings,
+                            fresh: partial && again,
                         },
                     );
                     let post = live::arrive(&self.machine, &mut self.rooms, peer);
@@ -1388,6 +1661,8 @@ impl<M: Machine> Server<M> {
                         .iter()
                         .any(|(to, m)| *to == c && matches!(m, ServerMsg::Batch { .. } | ServerMsg::SnapshotOf { .. }));
                     if self.module.is_some() && !paged {
+                        let head = self.authority.log.head_seq();
+                        let covers = partial.then_some(Covers { after: head, upto: head });
                         self.send(
                             c,
                             ServerMsg::Batch {
@@ -1395,6 +1670,7 @@ impl<M: Machine> Server<M> {
                                 has_more: false,
                                 log_id: self.authority.log.id(),
                                 module: self.module.clone(),
+                                covers,
                             },
                         );
                     }
@@ -1490,6 +1766,12 @@ impl<M: Machine> Server<M> {
                         ),
                     }
                 }
+                // `docs/plan-guards.md` D2 On a partial connection the
+                // stamp's facts are what that person holds of them, as the
+                // page's are, so the acknowledgement and the page agree.
+                if let Some(h) = self.conns.get(&c).and_then(|cn| cn.holdings.clone()) {
+                    stamp_facts = stamp_facts.into_iter().map(|(n, f)| (n, self.facts_for(n, &f, &h))).collect();
+                }
                 if !acks.is_empty() {
                     self.send(
                         c,
@@ -1504,10 +1786,22 @@ impl<M: Machine> Server<M> {
                 self.fanout();
             }
             ClientMsg::NeedFacts { seqs } => {
-                let items = seqs
-                    .iter()
-                    .filter_map(|n| self.authority.log.entries.get(n).map(|(_, f)| (*n, f.clone())))
-                    .collect();
+                // A partial peer asks for none — it is sent every fact it
+                // holds — and one that asks anyway is answered with those
+                // and no others (`docs/plan-guards.md` D2).
+                let items = match self.conns.get(&c).and_then(|cn| cn.holdings.clone()) {
+                    Some(h) => seqs
+                        .iter()
+                        .filter_map(|n| {
+                            let (_, f) = self.authority.log.entries.get(n)?;
+                            Some((*n, self.facts_for(*n, f, &h)))
+                        })
+                        .collect(),
+                    None => seqs
+                        .iter()
+                        .filter_map(|n| self.authority.log.entries.get(n).map(|(_, f)| (*n, f.clone())))
+                        .collect(),
+                };
                 self.send(c, ServerMsg::FactsFor { items });
             }
             ClientMsg::NeedClosures { hashes } => {
@@ -1519,7 +1813,7 @@ impl<M: Machine> Server<M> {
             }
             // At the head the authority's store is the answer, hashed as
             // it stands; only a sequence below it is replayed (R4).
-            ClientMsg::Verify { seq, hash, log_id } => {
+            ClientMsg::Verify { seq, hash, log_id, partial } => {
                 // Below the horizon or past the head there is no state to
                 // compare, and saying `ok: false` there would be reported
                 // as a divergence: it is said to be unknown (D3). So is a
@@ -1529,10 +1823,23 @@ impl<M: Machine> Server<M> {
                 // names no log is compared, as it always was; "another" is
                 // read as a `hello`'s is, both named and not the same.
                 let elsewhere = matches!((log_id, self.authority.log.id()), (Some(theirs), Some(ours)) if theirs != ours);
-                let at = if elsewhere {
+                let holdings = self.conns.get(&c).and_then(|cn| cn.holdings.as_ref());
+                let a = &self.authority;
+                let at = if elsewhere || partial != holdings.is_some() {
                     None
+                } else if let Some(h) = holdings {
+                    // `docs/plan-guards.md` D2 A partial peer holds its
+                    // union, and is answered from the union's digest of the
+                    // state at its sequence: the authority's store at the
+                    // head, and below it the state the facts reach — O(what
+                    // it holds) per verify, and verifies are rare.
+                    if seq == a.log.head_seq() {
+                        Some(h.digest(&a.store))
+                    } else {
+                        a.log.state_at(seq).map(|st| h.digest(&st))
+                    }
                 } else {
-                    self.authority.log.hash_at(seq, &self.authority.store)
+                    a.log.hash_at(seq, &a.store)
                 };
                 let (ok, unknown) = match at {
                     Some(h) => (h == hash, false),
@@ -1590,12 +1897,143 @@ impl<M: Machine> Server<M> {
     /// is the one it would have been sent next; only which turn carries it
     /// moved.
     fn fanout(&mut self) {
-        let conns: Vec<(ConnId, Mode, Seq, bool)> = self.conns.iter().map(|(c, cn)| (*c, cn.mode, cn.sent, cn.elsewhere)).collect();
-        for (c, md, sent, elsewhere) in conns {
+        let conns: Vec<(ConnId, Mode, Seq, bool, bool)> = self
+            .conns
+            .iter()
+            .map(|(c, cn)| (*c, cn.mode, cn.sent, cn.elsewhere, cn.holdings.is_some()))
+            .collect();
+        for (c, md, sent, elsewhere, partial) in conns {
+            if partial {
+                self.fan_partial(c);
+                continue;
+            }
             let mut next = self.fan_one(c, md, sent, elsewhere);
             while let Some(from) = next {
                 next = self.fan_one(c, md, from, false);
             }
+        }
+    }
+
+    /// `docs/plan-guards.md` D2 One message to a partial connection, if it
+    /// is owed one: the snapshot of what it holds at the head when it is
+    /// fresh, of another log, or below the horizon or past the head; else
+    /// the next page of what it holds, covering every sequence it passes.
+    fn fan_partial(&mut self, c: ConnId) {
+        let Some(conn) = self.conns.get(&c) else { return };
+        let (sent, snapshot) = (conn.sent, conn.fresh || conn.elsewhere);
+        let Some(h) = conn.holdings.clone() else { return };
+        let a = &self.authority;
+        let head = a.log.head_seq();
+        let msg = if snapshot || sent > head || sent < a.log.horizon() {
+            let rows = h
+                .held_rows(&a.store)
+                .into_iter()
+                .map(|(t, rs)| (t, rs.into_iter().map(Row::into_value).collect()))
+                .collect();
+            ServerMsg::SnapshotOf {
+                seq: head,
+                hash: h.digest(&a.store),
+                rows,
+                log_id: a.log.id(),
+                module: self.module.clone(),
+                held: Some(h.columns()),
+            }
+        } else if sent == head {
+            return;
+        } else {
+            let Page::Entries(items, more) = a.page(sent, BATCH_LIMIT) else {
+                unreachable!("a cursor at or above the horizon is paged")
+            };
+            let upto = items.last().map_or(sent, |(n, _, _)| *n);
+            let user = self.conns[&c].who.user.clone();
+            ServerMsg::Batch {
+                items: self.partial_page(items, &h, &user),
+                has_more: more,
+                log_id: a.log.id(),
+                module: self.module.clone(),
+                covers: Some(Covers { after: sent, upto }),
+            }
+        };
+        let advanced = match &msg {
+            ServerMsg::SnapshotOf { seq, .. } => *seq,
+            ServerMsg::Batch { covers, .. } => covers.map_or(sent, |c| c.upto),
+            _ => sent,
+        };
+        self.send(c, msg);
+        if let Some(conn) = self.conns.get_mut(&c) {
+            conn.sent = advanced;
+            conn.elsewhere = false;
+            conn.fresh = false;
+        }
+    }
+
+    /// `docs/plan-guards.md` D2 A page of the log as a person holds it:
+    /// each entry's facts through [`Holdings::filter_facts`], between the
+    /// state before it and the state after it, and an entry none of whose
+    /// facts they hold left out — its sequence passes — unless it is their
+    /// own, which is sent with whatever survives so that the intent it
+    /// confirms leaves pending. Another person's entry goes as its
+    /// envelope: its arguments and autos are theirs, and a partial peer
+    /// never runs an intent.
+    ///
+    /// The states are the authority's store at the head with the facts
+    /// above each entry taken back, in overlays over it, newest first: a
+    /// page at the head — every page but a peer's catching up, which a
+    /// partial peer never does, since it starts from a snapshot — takes
+    /// back nothing but its own entries.
+    fn partial_page(&self, items: Vec<(Seq, Entry, Facts)>, h: &Holdings, user: &str) -> Vec<(Seq, Entry, Option<Facts>)> {
+        let Some(last) = items.last().map(|(n, _, _)| *n) else { return vec![] };
+        let a = &self.authority;
+        let sch = &a.schema;
+        let mut after = Overlay::new(&a.store);
+        for (_, (_, f)) in a.log.entries.range(last + 1..).rev() {
+            for c in f.iter().rev() {
+                after.apply_change(&undo(&widened(sch, c)));
+            }
+        }
+        let mut out = Vec::with_capacity(items.len());
+        for (n, e, f) in items.into_iter().rev() {
+            let back: Vec<Change> = f.iter().rev().map(|c| undo(&widened(sch, c))).collect();
+            let seen = {
+                let mut before = Overlay::new(&after);
+                before.apply_changes(&back);
+                h.filter_facts(&before, &after, &f)
+            };
+            after.apply_changes(&back);
+            let own = e.actor == user;
+            if seen.is_empty() && !own {
+                continue;
+            }
+            let e = if own {
+                e
+            } else {
+                Entry {
+                    args: Args::new(),
+                    autos: Args::new(),
+                    ..e
+                }
+            };
+            out.push((n, e, Some(seen)));
+        }
+        out.reverse();
+        out
+    }
+
+    // One entry's facts as a person holds them, between the states the log's
+    // facts reach before and after it: what a partial peer asking
+    // `need_facts`, or acknowledged with the stamp's facts, is sent.
+    fn facts_for(&self, n: Seq, f: &Facts, h: &Holdings) -> Facts {
+        let a = &self.authority;
+        let state = |m: Seq| {
+            if m == a.log.head_seq() {
+                Some(a.store.clone())
+            } else {
+                a.log.state_at(m)
+            }
+        };
+        match (state(n - 1), state(n)) {
+            (Some(before), Some(after)) => h.filter_facts(&before, &after, f),
+            _ => vec![],
         }
     }
 
@@ -1629,6 +2067,7 @@ impl<M: Machine> Server<M> {
                             rows,
                             log_id: sn.log_id,
                             module: self.module.clone(),
+                            held: None,
                         },
                         sn.seq,
                     )
@@ -1645,6 +2084,7 @@ impl<M: Machine> Server<M> {
                             has_more: more,
                             log_id: a.log.id(),
                             module: self.module.clone(),
+                            covers: None,
                         },
                         last,
                     )
@@ -1695,6 +2135,7 @@ mod tests {
         let mut sv = Server::open(trusting(), open_access(), Silent, a);
         let hello = ClientMsg::Hello {
             sub: Subscription {
+                partial: false,
                 since: 0,
                 mode: Mode::Whole,
                 log_id: Some(log_b),
@@ -1708,6 +2149,7 @@ mod tests {
             sv.recv(
                 1,
                 ClientMsg::Verify {
+                    partial: false,
                     seq: 0,
                     hash: hash.to_vec(),
                     log_id,
