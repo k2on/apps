@@ -2060,3 +2060,141 @@ fn a_role_granted_by_a_restart_and_revoked_by_another() {
         }
     }
 }
+
+// -- the authority's raw writes ------------------------------------------------
+
+/// **The authority edits a cell raw** (`docs/plan-guards.md` D4). Three
+/// peers — two of alice's devices and bob's — and alice's playlist; one of
+/// her devices goes behind a black hole and makes a playlist there. The
+/// server's admin page renames hers raw (`ark.put_row`, authored by the
+/// authority as itself) and is refused one the constraints refuse — a
+/// playlist entry naming no playlist — which is logged nowhere. The device
+/// comes back: every peer converges on the log, the rename in each one's
+/// own `playlists`, the black-holed playlist after it.
+///
+/// Then a client pushes a raw write of its own — a frame its peer never
+/// sent, in its own login's name, injected on its connection — and the
+/// server refuses it: it is in the log nowhere and the name is the
+/// authority's still. What the peer says next travels behind the injected
+/// push on the same connection, so once that is in the log the push has
+/// been judged. harken declares no scope, so every peer here holds the
+/// whole log; a partial peer converging on a raw write is `ark`'s own
+/// `tests/raw.rs`, and the fuzzer's.
+///
+/// Falsified twice. The replicas skipping raw entries in `apply_one`: the
+/// three peers stopped at the entry before the rename and `converged`
+/// timed out. And the server's two refusals of a client's raw write both removed
+/// — the check on a pushed entry, and `Authority::sequence_entry`'s: the
+/// injected rename was sequenced, at 6, and `converged` named it an entry
+/// no peer accepted.
+#[test]
+fn the_authority_edits_a_cell_raw_and_every_peer_converges() {
+    use ark::store::{Change, Store};
+    let f = Fleet::with_env("raw", vec![("HARKEN_ADMIN_BIND", "127.0.0.1:0")]);
+    let mut p = f.peer("p", Some("alice"));
+    let mut q = f.peer("q", Some("alice"));
+    let mut r = f.peer("r", Some("bob"));
+    p.author("add_song", song("raw-1"));
+    p.author("create_playlist", named("Mix"));
+    f.converged(&mut [&mut p, &mut q, &mut r]);
+    let mix = playlist(&mut p, "Mix");
+    let track = media(&mut p)[0];
+    add(&mut p, mix, track);
+    f.converged(&mut [&mut p, &mut q, &mut r]);
+
+    q.proxy.blackhole();
+    q.author("create_playlist", named("Away"));
+
+    let row = |name: &str| {
+        let log = f.server.log_on_disk().expect("a log");
+        let st = log.state_at(log.head_seq()).unwrap();
+        st.scan("playlist")
+            .into_iter()
+            .find(|r| r.get("name") == Some(&Value::text(name)))
+            .unwrap_or_else(|| panic!("no playlist {name}"))
+    };
+    let old = row("Mix");
+    let fixed = old.clone().with("name", Value::text("Mix (fixed)"));
+    let at = f
+        .edit_raw(&Change::Edit("playlist".into(), old, fixed))
+        .expect("the authority's rename is logged");
+
+    let orphan = Change::Add(
+        "playlist_item".into(),
+        [
+            ("playlist_id".to_string(), Value::Id([9; 16])),
+            ("media_id".to_string(), Value::Id(track)),
+            ("pos".to_string(), Value::Int(1)),
+            ("added_ms".to_string(), Value::Int(0)),
+            ("user_id".to_string(), Value::text("alice")),
+        ]
+        .into_iter()
+        .collect(),
+    );
+    let why = f
+        .edit_raw(&orphan)
+        .expect_err("an entry naming no playlist");
+    assert!(why.contains("names no playlist"), "{why}");
+
+    q.proxy.pass();
+    let done = f.converged(&mut [&mut p, &mut q, &mut r]);
+    let (e, _) = &done.log.entries[&at];
+    assert_eq!(
+        (ark::raw::of(&e.fn_hash), e.actor.as_str()),
+        (Some(ark::raw::Raw::PutRow), ark::raw::AUTHOR),
+        "logged as the authority's raw write"
+    );
+    assert_eq!(
+        done.head,
+        at + 1,
+        "the refused write is logged nowhere; the black-holed playlist after the rename"
+    );
+    for peer in [&mut p, &mut q] {
+        let names: Vec<String> = playlists(peer).into_iter().map(|(n, _)| n).collect();
+        assert!(
+            names.contains(&"Mix (fixed)".to_string()) && names.contains(&"Away".to_string()),
+            "{}: {names:?}",
+            peer.name
+        );
+        assert_eq!(playlist(peer, "Mix (fixed)"), mix);
+    }
+
+    // A client pushes a raw write: refused, and in the log nowhere.
+    let s = p.status();
+    let (raw, args) = ark::raw::call_of(
+        &domain().module().schema,
+        &Change::Edit(
+            "playlist".into(),
+            row("Mix (fixed)"),
+            row("Mix (fixed)").with("name", Value::text("Hijacked")),
+        ),
+    );
+    let pushed = ark::log::Entry {
+        id: [0x5a; 16],
+        actor: s.user.clone(),
+        session: s.session.clone(),
+        roles: BTreeSet::new(),
+        fn_hash: raw.hash().clone(),
+        args,
+        autos: Default::default(),
+    };
+    let frame = ark::canon::encode(
+        &ClientMsg::Push {
+            entries: vec![pushed.clone()],
+        }
+        .to_value(),
+    );
+    assert!(p.proxy.inject(&frame), "injected on p's connection");
+    p.author("create_playlist", named("After the push"));
+    let done = f.converged(&mut [&mut p, &mut q, &mut r]);
+    assert!(
+        done.log.seq_of(&pushed.id).is_none(),
+        "a client's raw write is in the log nowhere"
+    );
+    assert_eq!(done.head, at + 2);
+    assert_eq!(
+        playlist(&mut q, "Mix (fixed)"),
+        mix,
+        "the name is the authority's still"
+    );
+}

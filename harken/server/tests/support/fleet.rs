@@ -301,7 +301,18 @@ impl Server {
             .unwrap_or_else(|e| panic!("the log on disk is not a log: {e:#}"))
     }
 
-    /// The size of `log.ark-log`, in bytes.
+    /// `docs/plan-guards.md` D4: where the admin page listens, as the
+    /// server last said it (`HARKEN_ADMIN_BIND`, a port of its choosing);
+    /// `None` when it was not asked for one.
+    pub fn admin_url(&self) -> Option<String> {
+        let log = std::fs::read_to_string(&self.log).unwrap_or_default();
+        log.lines().rev().find_map(|l| {
+            l.split("the admin page listening on ")
+                .nth(1)
+                .map(|u| u.trim_end_matches("/admin/").to_string())
+        })
+    }
+
     /// The log on disk, in bytes: the snapshot `log.ark-log` and the
     /// journal `log.ark-journal` appended after it.
     pub fn log_bytes(&self) -> u64 {
@@ -822,6 +833,9 @@ pub struct Fleet {
     pub server: Server,
     upstream: Upstream,
     accepted: Arc<Mutex<BTreeMap<Id, String>>>,
+    /// The seqs the server answered a raw write with ([`Fleet::edit_raw`]):
+    /// entries the authority authored as itself, which no peer accepted.
+    edited: Mutex<BTreeSet<i64>>,
     /// Entries written into the log before the server started.
     seeded: BTreeSet<Id>,
     pub name: String,
@@ -917,6 +931,7 @@ impl Fleet {
             server,
             upstream,
             accepted: Arc::default(),
+            edited: Mutex::default(),
             seeded: seeder.ids,
             name: name.into(),
         }
@@ -1101,9 +1116,11 @@ impl Fleet {
             }
         }
         for (n, (e, _)) in &log.entries {
+            let edited = e.actor == ark::raw::AUTHOR && self.edited.lock().unwrap().contains(n);
             if e.actor != harken_server::library::ACCOUNT
                 && !accepted.contains_key(&e.id)
                 && !self.seeded.contains(&e.id)
+                && !edited
             {
                 panic!(
                     "{}: entry {n} ({} by {}) was never accepted by any peer",
@@ -1124,6 +1141,29 @@ impl Fleet {
             took,
             entries,
             log,
+        }
+    }
+
+    /// `docs/plan-guards.md` D4: a raw write, asked of the server's admin
+    /// page as an operator would — authored by the authority as itself,
+    /// judged by the constraints, and served to every peer like any entry.
+    /// The seq it was logged at, or the refusal as the page is told it.
+    pub fn edit_raw(&self, change: &ark::store::Change) -> Result<i64, String> {
+        let at = self
+            .server
+            .admin_url()
+            .expect("the server was asked for an admin page");
+        let res = ureq::post(&format!("{at}/admin/api/raw"))
+            .timeout(PATIENCE)
+            .send_string(&ark_explorer::wire::raw_body(change));
+        match res {
+            Ok(r) => {
+                let n: i64 = r.into_string().unwrap().trim().parse().unwrap();
+                self.edited.lock().unwrap().insert(n);
+                Ok(n)
+            }
+            Err(ureq::Error::Status(_, r)) => Err(r.into_string().unwrap_or_default()),
+            Err(e) => panic!("{}: the admin page: {e}", self.name),
         }
     }
 
