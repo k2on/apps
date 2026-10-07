@@ -23,8 +23,8 @@ use ark::authoring::*;
 /// construction (`harken_server::library`), and nobody else does unless the
 /// server's configuration grants it (`services.harken.roles`). harken
 /// declares nothing about who sees or writes a table — the row rules that
-/// did were deleted (`docs/plan-guards.md` G1) — and the library's
-/// procedures are to be guarded by this role instead (G2).
+/// did were deleted (`docs/plan-guards.md` G1) — and the library router's
+/// mutations are guarded by this role instead (`is_library`, D1).
 pub const LIBRARY: &str = "library";
 
 /// Every table harken has, in one set: the library (what the scanner

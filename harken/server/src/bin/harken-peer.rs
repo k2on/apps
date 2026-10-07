@@ -9,9 +9,10 @@
 //!
 //! `--roles` names roles this device's `Ctx` carries beside the ones its
 //! login says (`docs/plan-auth.md`): a peer alone, or signed out, has no
-//! login to say any. Nothing reads them yet — they are for the guards of
-//! `docs/plan-guards.md` G2 — and the server takes a connection's roles
-//! from its own configuration whatever this says.
+//! login to say any. They are what `has_role` answers in this device's
+//! preview and what its intents are frozen with; the server stamps every
+//! entry with the roles its own configuration gives the connection,
+//! whatever this says (`docs/plan-guards.md` D1).
 //!
 //! `--module FILE` runs the module in that `.ark` file instead of harken's
 //! own, with harken's procedures native wherever a hash matches — the

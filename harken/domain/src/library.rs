@@ -7,6 +7,11 @@
 //! rather than by a minted id, because an entry is handed exactly one fresh
 //! id and two peers naming "BWV 988" offline must land on one row. The keys
 //! are the helpers below, and they are permanent the way `apply` is.
+//!
+//! Every mutation here is the library's to make: `is_library` runs before
+//! each and refuses an author without the `library` role
+//! (`docs/plan-guards.md` D1) — the scanner, by construction, and whoever
+//! the server's configuration grants it. The queries are everybody's.
 use ark::authoring::*;
 
 use crate::schema::*;
@@ -650,6 +655,14 @@ fn summaries(db: &Harken, works: Query<Work>) -> Query<Work, (List<Recording>, L
 
 pub fn library() -> Router<Harken> {
     let library = router::<Harken>("library");
+    // Who writes the library (`docs/plan-guards.md` D1): every mutation
+    // here runs `is_library` first, and every query reads without it. The
+    // role is asked of the entry, so a login without it is refused on its
+    // own device, and a device that believes it wrongly is refused by the
+    // server, which judges the entry under the roles it stamped.
+    let is_library = library.guard("is_library", |ctx, _db| {
+        unless(ctx.has_role(LIBRARY), || refuse("only the library writes the library"))
+    });
     library.routes((
         // Put a song in the library, and everything it belongs to as rows:
         // the album, the artist, the work and movement it is of, the
@@ -659,7 +672,7 @@ pub fn library() -> Router<Harken> {
         // Both reads go through an index (`media (file)`, `media (pos)`;
         // docs/plan-perf.md R1): into a library of 8,000 a new file
         // examines one row, where it was every row twice — 16,000.
-        library.input::<AddSong>().mutation("add_song", |ctx, db, input| {
+        is_library.input::<AddSong>().mutation("add_song", |ctx, db, input| {
             let media = db.media.filter(Media::file.eq(input.file)).first();
             unless(input.file.is_empty().not().and(media.is_some()), || {
                 let media_2 = db.media.order_by(Media::pos.desc()).first();
@@ -800,7 +813,7 @@ pub fn library() -> Router<Harken> {
         // Say more about a work than the track that created it could. A work
         // exists because a song named it, so an unknown one is refused; every
         // field is fill-if-given, so an empty one leaves what is there.
-        library.input::<DescribeWork>().mutation("describe_work", |ctx, db, input| {
+        is_library.input::<DescribeWork>().mutation("describe_work", |ctx, db, input| {
             let work = db.work.exists((input.id,));
             unless(work, || {
                 refuse(concat(list([
@@ -825,7 +838,7 @@ pub fn library() -> Router<Harken> {
             })
         }),
         // Say more about a performance; refuses an unknown one, as above.
-        library.input::<DescribeRecording>().mutation("describe_recording", |ctx, db, input| {
+        is_library.input::<DescribeRecording>().mutation("describe_recording", |ctx, db, input| {
             let recording = db.recording.exists((input.id,));
             unless(recording, || {
                 refuse(concat(list([
@@ -848,7 +861,7 @@ pub fn library() -> Router<Harken> {
         }),
         // Say more about somebody. This one makes the row when it is not
         // there: a person needs nothing but a name.
-        library.input::<DescribePerson>().mutation("describe_person", |ctx, db, input| {
+        is_library.input::<DescribePerson>().mutation("describe_person", |ctx, db, input| {
             let person = db.person.get((input.name,));
             db.person.upsert(Person {
                 name: input.name,
@@ -863,7 +876,7 @@ pub fn library() -> Router<Harken> {
         // Credit somebody on a recording, properly: keyed by the three, so a
         // person may hold two roles and a second entry is a correction. A
         // real credit is at least 1; 0 is the lumped fallback's.
-        library.input::<CreditRecording>().mutation("credit_recording", |ctx, db, input| {
+        is_library.input::<CreditRecording>().mutation("credit_recording", |ctx, db, input| {
             let recording = db.recording.exists((input.recording_id,));
             unless(recording, || {
                 refuse(concat(list(["no recording ".into(), input.recording_id, " to credit anybody on".into()])))
@@ -891,7 +904,7 @@ pub fn library() -> Router<Harken> {
             })
         }),
         // Take something out of the library, and off every playlist holding it.
-        library.input::<RemoveMedia>().mutation("remove_media", |_ctx, db, input| {
+        is_library.input::<RemoveMedia>().mutation("remove_media", |_ctx, db, input| {
             let playlist_item = db.playlist_item.filter(PlaylistItem::media_id.eq(input.id)).all();
             for_each(playlist_item, |row| db.playlist_item.delete((row.playlist_id, row.media_id)));
             db.song.delete((input.id,));

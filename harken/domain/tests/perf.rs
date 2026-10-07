@@ -135,7 +135,7 @@ impl Harken {
         Alone {
             a,
             r,
-            ctx: Ctx::new("alice", "local"),
+            ctx: Ctx::new("alice", "local").with_roles([harken_domain::schema::LIBRARY]),
             next: 0,
         }
     }
@@ -727,7 +727,7 @@ fn perf_scanner_known_files() {
 /// library — and the rest spread over fifty artists and two hundred albums.
 fn seeded(h: &Harken, n: u64) -> MemoryStore {
     let mut st = MemoryStore::empty(h.schema.clone());
-    let ctx = Ctx::new("library", "scan");
+    let ctx = Ctx::new("library", "scan").with_roles([harken_domain::schema::LIBRARY]);
     let mut next = 0;
     for i in 0..n {
         let a = seed_song(i);
@@ -771,7 +771,7 @@ fn perf_f_views() {
         let t0 = Instant::now();
         let mut st = seeded(&h, n);
         let seed = t0.elapsed();
-        let me = Ctx::new("alice", "s");
+        let me = Ctx::new("alice", "s").with_roles([harken_domain::schema::LIBRARY]);
         let mut next = 50_000_000;
         let mut run = |st: &mut MemoryStore, name: &str, a: Args| -> Vec<Change> {
             let autos = h.autos(name, &mut next);
@@ -878,7 +878,7 @@ fn perf_f_views() {
 #[ignore]
 fn perf_native_vs_interpreted() {
     let h = harken();
-    let me = Ctx::new("alice", "s");
+    let me = Ctx::new("alice", "s").with_roles([harken_domain::schema::LIBRARY]);
     eprintln!("\n== one apply, native against interpreted");
     eprintln!("{:<52} {:>12} {:>14}", "entry", "native", "interpreted");
     let both = |label: &str, st: &MemoryStore, name: &str, a: &Args| {
@@ -994,7 +994,7 @@ fn perf_search() {
         us(with) / n as f64,
         us(without) / n as f64
     );
-    let me = Ctx::new("alice", "s");
+    let me = Ctx::new("alice", "s").with_roles([harken_domain::schema::LIBRARY]);
     let (hash, _) = &h.procs["search"];
     let c = &h.bodies[hash];
     let plan = c.function.plan.as_ref().unwrap();

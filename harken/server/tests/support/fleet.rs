@@ -129,11 +129,10 @@ impl Server {
             .env("HARKEN_MEDIA", &self.media)
             .env("HARKEN_KEEPALIVE_MS", KEEPALIVE_MS.to_string())
             .env("HARKEN_KEEPALIVE_MISSED", "3")
-            // `docs/plan-auth.md` The fleet's people add songs, which the
-            // library's guard is to give the `library` role alone
-            // (`docs/plan-guards.md` G2): it holds to convergence, so the two
-            // people it signs in hold it, unless a scenario's own `env` says
-            // otherwise.
+            // The fleet's people add songs, which the library's guard gives
+            // the `library` role alone (`docs/plan-guards.md` D1): it holds
+            // to convergence, so the two people it signs in hold it, unless
+            // a scenario's own `env` says otherwise.
             .env("HARKEN_ROLES", FLEET_ROLES)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -358,8 +357,9 @@ pub struct PeerProc {
     pub bin: PathBuf,
     /// Said on every start after the rest (`--module FILE`, say).
     pub args: Vec<String>,
-    /// `--roles` for this build's peer (`docs/plan-auth.md`): what the
-    /// device's `Ctx` carries, beside its login's. `library` by
+    /// `--roles` for this build's peer (`docs/plan-guards.md` D1): what the
+    /// device's `Ctx` carries, beside its login's — its preview's, since the
+    /// server stamps every entry with the roles it grants. `library` by
     /// default, as [`FLEET_ROLES`] grants it at the server; an older build
     /// knows no such flag and is told nothing.
     pub roles: Vec<String>,
@@ -793,7 +793,10 @@ impl Seeder {
             id: self.autos.new_id(),
             actor: user.into(),
             session: "seeded".into(),
-            roles: Default::default(),
+            // A log written straight into the authority holds what it would
+            // have stamped: the seed's songs are the library's to write
+            // (`docs/plan-guards.md` D1), so its author holds the role.
+            roles: ["library".to_string()].into(),
             fn_hash: fh.clone(),
             args: args.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
             autos: autos.clone(),

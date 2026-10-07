@@ -654,7 +654,13 @@ impl Peer {
     /// peer that already has a server, it is [`Peer::sign_in`] (with a
     /// login) and [`Peer::connect`].
     pub fn join(&mut self, url: &str, login: Option<Login>) -> Result<(), Error> {
-        let who = login.as_ref().map_or_else(Ctx::nobody, |l| Ctx::new(l.user.clone(), l.session.clone()));
+        let mut who = login.as_ref().map_or_else(Ctx::nobody, |l| Ctx::new(l.user.clone(), l.session.clone()));
+        // Joining with no login is the same author going on: the roles its
+        // device was told it holds stay ([`Peer::set_roles`]). A login is
+        // somebody new, holding none until the sign-in says.
+        if login.is_none() {
+            who.roles = self.ctx.roles.clone();
+        }
         if self.alone {
             self.ctx = who.clone();
             self.signed_out = login.is_none();
@@ -692,11 +698,12 @@ impl Peer {
 
     /// The roles this login holds, as the sign-in said them
     /// (`ark_auth::Login`'s `user.roles`), and the author's `Ctx` carries
-    /// from now on. Nothing in the engine reads them yet: they are kept for
-    /// the guards that will ask them (`docs/plan-guards.md` G2), and the
-    /// server takes a connection's roles from its own configuration
-    /// whatever this says. Said after [`Peer::sign_in`], which starts a
-    /// login holding none.
+    /// from now on: what `has_role` answers in this device's own run of an
+    /// intent, and the roles frozen in the intent it records
+    /// (`docs/plan-guards.md` D1). Its preview, nothing more: the server
+    /// stamps every entry it sequences with the roles its own configuration
+    /// gives the connection, whatever this says. Said after
+    /// [`Peer::sign_in`], which starts a login holding none.
     pub fn set_roles(&mut self, roles: impl IntoIterator<Item = impl Into<String>>) {
         self.ctx.roles = roles.into_iter().map(Into::into).collect();
     }

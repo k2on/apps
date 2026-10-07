@@ -129,7 +129,8 @@ impl Scanner {
         // holds the library's role whatever else its login holds, and its
         // `Ctx` carries it. The server grants the account the same role
         // (`start`), so the device and the authority agree on it — which is
-        // what the guards of `docs/plan-guards.md` G2 will ask.
+        // what `is_library` asks, on the device and, of the roles the
+        // server stamps, at the authority (`docs/plan-guards.md` D1).
         peer.set_roles(
             login
                 .user

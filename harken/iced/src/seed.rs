@@ -3709,7 +3709,10 @@ impl Seeder {
         Seeder {
             domain,
             store,
-            ctx: Ctx::new(DEMO, LOCAL),
+            // The demo authors its own library, as a server's scanner does,
+            // so it holds the role the library's guard asks
+            // (`docs/plan-guards.md` D1).
+            ctx: Ctx::new(DEMO, LOCAL).with_roles([harken_domain::schema::LIBRARY]),
             autos: Autos::seeded(1),
         }
     }
@@ -3958,5 +3961,9 @@ pub fn seeded_times(domain: Domain, copies: usize) -> ark_client::Peer {
     };
     let mut disk = Memory::new();
     disk.save(ReplicaFile::KEY, &file.encode()).expect("memory takes it");
-    ark_client::Peer::open(domain, Box::new(disk), Options::alone(DEMO)).expect("a peer alone opens its seed")
+    let mut peer = ark_client::Peer::open(domain, Box::new(disk), Options::alone(DEMO)).expect("a peer alone opens its seed");
+    // The demo's identity is the library's, as its seed was
+    // (`docs/plan-guards.md` D1).
+    peer.set_roles([harken_domain::schema::LIBRARY]);
+    peer
 }

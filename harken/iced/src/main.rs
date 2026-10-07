@@ -441,8 +441,9 @@ impl App {
             };
             let mut peer = Peer::open(client);
             // The roles the remembered login was signed in with, which the
-            // author's `Ctx` carries (for the guards of `docs/plan-guards.md`
-            // G2; nothing reads them yet).
+            // author's `Ctx` carries: a library write is then refused on this
+            // device as the server would (`docs/plan-guards.md` D1), and
+            // shown as any refusal is.
             if let Some(l) = &login {
                 peer.client.set_roles(l.user.roles.clone());
             }
@@ -537,7 +538,7 @@ impl App {
         {
             Ok(()) => {
                 // The roles the sign-in said this login holds, which the
-                // author's `Ctx` carries (`docs/plan-guards.md` G2).
+                // author's `Ctx` carries (`docs/plan-guards.md` D1).
                 self.peer.client.set_roles(login.user.roles.clone());
                 let pending = self.peer.client.pending_len();
                 self.note = match pending {

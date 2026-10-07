@@ -428,8 +428,9 @@ pub async fn start(config: Config) -> Result<Server> {
     let public_url = config.public_url();
     // `docs/plan-auth.md` The roles the configuration grants, and the
     // scanner's own `library`, by construction: the scanner is the library,
-    // and the role is what its procedures are to be guarded by
-    // (`docs/plan-guards.md` G2).
+    // and the role is what the library's mutations are guarded by
+    // (`is_library`, `docs/plan-guards.md` D1). Asked at every `Hello`, and
+    // stamped on every entry that connection pushes.
     let roles = config
         .roles
         .iter()

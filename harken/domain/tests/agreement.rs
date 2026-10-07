@@ -27,6 +27,9 @@ fn the_module_verifies_and_is_the_committed_file() {
     assert_eq!(
         names,
         [
+            // `docs/plan-guards.md` D1: the library router's middleware,
+            // ahead of its routes.
+            "is_library",
             "work_title",
             "slug",
             "key_part",
@@ -107,7 +110,16 @@ fn the_module_verifies_and_is_the_committed_file() {
     assert_eq!(decoded.lookup_function("add_to_playlist").unwrap().uses, ["owned"]);
     assert!(decoded.lookup_function("create_playlist").unwrap().uses.is_empty());
     assert_eq!(decoded.lookup_router("playlists").unwrap().uses, ["owned"]);
-    assert!(decoded.lookup_router("library").unwrap().uses.is_empty());
+    // `docs/plan-guards.md` D1: the library's mutations run `is_library`,
+    // its queries nothing.
+    assert_eq!(decoded.lookup_router("library").unwrap().uses, ["is_library"]);
+    for f in decoded.functions.iter().filter(|f| f.router.as_deref() == Some("library")) {
+        let want: &[&str] = if f.kind == FnKind::Mutator { &["is_library"] } else { &[] };
+        assert_eq!(f.uses, want, "{}", f.name);
+    }
+    let guard = decoded.lookup_function("is_library").unwrap();
+    assert_eq!(guard.kind, FnKind::Guard);
+    assert!(format!("{:?}", guard.body).contains("HasRole(\"library\")"), "{:?}", guard.body);
     // §6: a provide returns `or_refuse`'s value whole, `EStd Unwrap [EVar s]`.
     let owned = decoded.lookup_function("owned").unwrap();
     assert!(
@@ -150,15 +162,26 @@ fn the_module_verifies_and_is_the_committed_file() {
 /// forty-five of the earlier module's closures against this schema found
 /// nothing. `add_song` binds what it derives once each natively and
 /// emits the same bytes (§6 inlines a pure `let`), so it did not move.
+///
+/// The six library mutators moved together in the commit "harken: the
+/// library's guard" (`docs/plan-guards.md` D1): each now runs `is_library`,
+/// and a closure is the middleware it runs too. They were, in this list's
+/// order, `1633aca2…95a7`, `a74fc779…ab8d`, `4edffc9e…f98f`,
+/// `15508559…8692`, `3e10d18b…546e` and `88526612…c06b`. `arkc check`
+/// of the module before against this one found nothing: every retained
+/// entry still applies, through the closures the authority kept for the
+/// old hashes — which run no guard, so an entry a client authors at one
+/// of them is judged as it always was (closure provenance,
+/// `docs/plan-db.md` D1).
 #[test]
 fn every_mutator_hashes_as_it_did_at_spec_v3() {
     let v3 = [
-        ("add_song", "1633aca2eb971dd1d5cc829e5d7a2bb6f33eec6f28e0b2268e3a40a7dc8795a7"),
-        ("describe_work", "a74fc779a35bbd4ee5abf56d3c1c4c4a80abea624e5ea8f47083fc136d39ab8d"),
-        ("describe_recording", "4edffc9e12721bf58d4a2ab0a61f252c615f2dbda44559e5c22eece4e270f98f"),
-        ("describe_person", "15508559e7c540069012698099398b0f74fdb7f66fa59f0ebaf6527be5728692"),
-        ("credit_recording", "3e10d18b33c7b703822cb4969ed8b8c483e001f4f882864325893580c780546e"),
-        ("remove_media", "885266129e9c3955a8dc12270305b1843e07e43ff195588c3d0cd08bbd02c06b"),
+        ("add_song", "cdc45e72840b44394c3373fb829d4fe5821809e492c6f55eee39f929a1d2725d"),
+        ("describe_work", "f6e51bdd15826720cca2d8efcccddf52bc24d6093c4d310e0168a26e4afd21c3"),
+        ("describe_recording", "f44887b825466b41135a66e942eabce540ce985587ed859a770b987de9dfdb2f"),
+        ("describe_person", "0b9abbcbfb74ff17374e6d5d9babf05621591a3122299d05a2ae6b92f91a2dd6"),
+        ("credit_recording", "57c9c5e274b3e8490504184b53093201e16846a7396f41d95cb712fa2f5eb8be"),
+        ("remove_media", "c7868fd58eea4a348800dde976c47df5a92651c02f9beee83e2eeed92098c984"),
         ("create_playlist", "2eb47c7fe50b8b6d4aca5816c0f1127dbf08ca4b05adffac589fbab2d5edf005"),
         ("add_to_playlist", "29ef6578cbda8f224d8b279461e1544a8fcf910ee259c32379edcbc4da32d2c1"),
         ("add_all_to_playlist", "ca05acf23e131c0ffbecb7f302224cd690a2da78a9d41ef10185dcc846d1587a"),
@@ -224,6 +247,24 @@ fn every_procedure_agrees_with_the_interpreter() {
         ..Song::new("Low Tide", "The Quiet Hours", "")
     });
     c.add(Song::new("Hand-typed", "", ""));
+    // `docs/plan-guards.md` D1: the library's mutations are its role's,
+    // natively and interpreted alike; a playlist is anybody's.
+    for (name, a) in [
+        ("add_song", Song::new("Unwanted", "x", "").args()),
+        ("remove_media", args([("id", Value::Id([9; 16]))])),
+    ] {
+        let autos = c.autos(name);
+        assert_eq!(
+            c.mutate_holding("alice", &["admin"], name, autos, a),
+            Err("only the library writes the library".into()),
+            "{name}"
+        );
+    }
+    let autos = c.autos("create_playlist");
+    assert_eq!(
+        c.mutate_holding("bob", &[], "create_playlist", autos, args([("name", Value::text("Mine"))])),
+        Ok(1)
+    );
     assert_eq!(
         c.mutate("alice", "add_song", Song::new("", "x", "").args()),
         Err("a song needs a title".into())

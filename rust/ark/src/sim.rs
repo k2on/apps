@@ -80,9 +80,9 @@ pub struct Sim {
     /// The roles each client's login holds — what its token says to dev
     /// auth, `peer-1:r0,r1` — and the roles its own device believes it
     /// holds, which its `Ctx` carries: the same, but for a client that
-    /// believes more than it was granted. Absent is none. Nothing reads
-    /// them yet (`docs/plan-guards.md` G1); they are kept, with the role
-    /// changes that move them, for the guards that will (G2).
+    /// believes more than it was granted. Absent is none. The server
+    /// stamps what the login holds on every entry it sequences, and a
+    /// device's preview reads what it believes (`docs/plan-guards.md` D1).
     pub roles: BTreeMap<i64, BTreeSet<String>>,
     pub believes: BTreeMap<i64, BTreeSet<String>>,
 }

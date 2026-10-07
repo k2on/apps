@@ -79,9 +79,18 @@ impl Lib {
         self.mutate_with(user, name, autos, a)
     }
 
+    /// Author as `user` holding the library's role, as the scanner does:
+    /// these tests are of what the library's mutations do, and
+    /// `is_library` refuses anybody without it (`docs/plan-guards.md` D1;
+    /// [`Lib::mutate_holding`] for anybody else).
     pub fn mutate_with(&mut self, user: &str, name: &str, autos: Args, a: Args) -> Result<usize, String> {
+        self.mutate_holding(user, &[harken_domain::schema::LIBRARY], name, autos, a)
+    }
+
+    /// Author as `user` holding exactly `roles`.
+    pub fn mutate_holding(&mut self, user: &str, roles: &[&str], name: &str, autos: Args, a: Args) -> Result<usize, String> {
         let p = self.procs.get(name).unwrap_or_else(|| panic!("no procedure {name}")).clone();
-        let ctx = Ctx::new(user, "s");
+        let ctx = Ctx::new(user, "s").with_roles(roles.iter().copied());
         let out = p.agrees(&ctx, &autos, &a, &self.store).unwrap_or_else(|e| panic!("{e}"));
         let applied = p.apply(&ctx, &autos, &a, &mut self.store);
         assert_eq!(applied, out, "{name}: applying again gave another answer");

@@ -12,6 +12,7 @@ use ark::eval::{Args, Ctx};
 use ark::hash::FnHash;
 use ark::ir::Auto;
 use ark::sim::Sim;
+use ark::store::Refusal;
 use ark::value::{Id, Value};
 use harken_domain::module;
 
@@ -36,6 +37,15 @@ impl Fleet {
         sim.partition(2);
         sim.clients.get_mut(&2).unwrap().token = Some("peer-0".into());
         sim.heal(2);
+        // Every login here holds `library` (`docs/plan-guards.md` D1):
+        // these fleets add songs from every peer, which `is_library` gives
+        // the library's role alone, and what they hold to is convergence.
+        for i in 0..n {
+            let user = if i == 2 { "peer-0".to_string() } else { format!("peer-{i}") };
+            sim.partition(i);
+            sim.clients.get_mut(&i).unwrap().token = Some(format!("{user}:{}", library()));
+            sim.heal(i);
+        }
         Fleet { sim, procs, next: 0 }
     }
 
@@ -46,10 +56,11 @@ impl Fleet {
         b
     }
 
-    /// Author on client `i` as `user`; a refusal by the client's own view
-    /// is dropped, as a screen would show it and move on.
+    /// Author on client `i` as `user`, its device holding `library` as
+    /// its login does; a refusal by the client's own view is dropped, as a
+    /// screen would show it and move on.
     fn mutate(&mut self, i: i64, user: &str, name: &str, a: Args) {
-        let _ = self.mutate_as(i, &Ctx::new(user, "dev"), name, a);
+        let _ = self.mutate_as(i, &Ctx::new(user, "dev").with_roles([library()]), name, a);
     }
 
     /// Author on client `i` as `ctx`, and answer the entry's first fresh id
@@ -233,7 +244,7 @@ fn same_named_playlists_made_apart_are_numbered_in_log_order() {
         .clients
         .get_mut(&1)
         .unwrap()
-        .sign_in(&Ctx::new("peer-0", "dev"), Some("peer-0".into()));
+        .sign_in(&Ctx::new("peer-0", "dev"), Some(format!("peer-0:{}", library())));
     f.sim.settle();
 
     let server = f.sim.server_hash();
@@ -269,18 +280,26 @@ fn texts(rows: &[Value], field: &str) -> Vec<String> {
     rows.iter().map(|r| r.field(field).as_text().to_string()).collect()
 }
 
-/// A track on two people's playlists leaves the library: the library's
-/// login takes both items off with it, and nobody's other items go. Nothing
-/// is declared about who may write a playlist item (`docs/plan-guards.md`
-/// G1), so `remove_media` reaches every playlist holding the track.
+/// `docs/plan-guards.md` D1 A track on two people's playlists leaves the
+/// library: the library's login takes both items off with it, and nobody's
+/// other items go — a playlist is its owner's, but `remove_media` is the
+/// library's and reaches every playlist holding the track. A login without
+/// the role may not do the same to another track: refused on its own
+/// device by `is_library`, and by the server when the device believes a
+/// role its login was never given — and because the authority stamps, no
+/// entry in the log carries that belief.
 #[test]
-fn removing_a_track_takes_it_off_everybodys_playlists() {
+fn the_library_takes_a_removed_track_off_everybodys_playlists() {
     let mut f = Fleet::new(31, 4);
-    // Client 0 authors as the library, holding its role as the scanner
-    // does; 1 and 3 are two people holding none.
+    // Client 0 is the library's; 1 and 3 are two people holding no role.
+    for i in [1, 3] {
+        f.sim.partition(i);
+        f.sim.clients.get_mut(&i).unwrap().token = Some(format!("peer-{i}"));
+        f.sim.heal(i);
+    }
     let lib = Ctx::new("peer-0", "dev").with_roles([library()]);
     let person = |i: i64| Ctx::new(format!("peer-{i}"), "dev");
-    for t in ["removed", "kept"] {
+    for t in ["removed", "attempted", "kept"] {
         f.mutate_as(0, &lib, "add_song", song(t));
     }
     f.sim.settle();
@@ -290,12 +309,12 @@ fn removing_a_track_takes_it_off_everybodys_playlists() {
         .iter()
         .map(|r| r.field("id"))
         .collect();
-    let (removed, kept) = (ids[0].clone(), ids[1].clone());
+    let (removed, attempted, kept) = (ids[0].clone(), ids[1].clone(), ids[2].clone());
     for i in [1, 3] {
         let list = f
             .mutate_as(i, &person(i), "create_playlist", [("name".to_string(), Value::text("Mine"))].into())
             .expect("a playlist id");
-        for media in [&removed, &kept] {
+        for media in [&removed, &attempted, &kept] {
             let a: Args = [("playlist_id".to_string(), Value::Id(list)), ("media_id".to_string(), media.clone())].into();
             f.mutate_as(i, &person(i), "add_to_playlist", a);
         }
@@ -312,24 +331,39 @@ fn removing_a_track_takes_it_off_everybodys_playlists() {
             .map(|r| (r.get("user_id").unwrap().clone(), r.get("media_id").unwrap().clone()))
             .collect()
     };
-    assert_eq!(items(&f).len(), 4, "two tracks on each of two people's playlists");
+    assert_eq!(items(&f).len(), 6, "three tracks on each of two people's playlists");
     let remove = |id: &Value| -> Args { [("id".to_string(), id.clone())].into() };
 
     // The library: both items go with the track, and nothing else does.
     f.mutate_as(0, &lib, "remove_media", remove(&removed));
     f.sim.settle();
     let left = items(&f);
-    assert_eq!(left.len(), 2, "{left:?}");
-    assert!(left.iter().all(|(_, m)| *m == kept), "no item names the removed track: {left:?}");
+    assert_eq!(left.len(), 4, "{left:?}");
+    assert!(left.iter().all(|(_, m)| *m != removed), "no item names the removed track: {left:?}");
     let mut owners: Vec<Value> = left.into_iter().map(|(u, _)| u).collect();
     owners.sort();
-    assert_eq!(
-        owners,
-        [Value::text("peer-1"), Value::text("peer-3")],
-        "each person keeps their other one"
-    );
+    let each = [Value::text("peer-1"), Value::text("peer-1"), Value::text("peer-3"), Value::text("peer-3")];
+    assert_eq!(owners, each, "each person keeps their other two");
 
-    for i in [0, 1, 3] {
+    // Somebody without the role: refused on the device, never sent…
+    let (fh, _) = f.procs["remove_media"].clone();
+    let c = f.sim.clients.get_mut(&1).unwrap();
+    let refused = c.mutate([9; 16], &person(1), &fh, &Args::new(), &remove(&attempted));
+    assert_eq!(refused, Err(Refusal::Refused("only the library writes the library".into())));
+    assert!(c.replica.pending.is_empty(), "nothing pending");
+    // …and by the server, from a device that believes a role it was never given.
+    f.mutate_as(1, &person(1).with_roles([library()]), "remove_media", remove(&attempted));
+    f.sim.settle();
+    let why: Vec<&Refusal> = f.sim.clients[&1].replica.rejections.iter().map(|(_, r)| r).collect();
+    assert_eq!(why, [&Refusal::Refused("only the library writes the library".into())]);
+    assert_eq!(items(&f).len(), 4, "nothing moved");
+    // The log holds what each login holds, never what a device believed.
+    for (n, (e, _)) in &f.sim.server.authority.log.entries {
+        let want: std::collections::BTreeSet<String> = if e.actor == "peer-0" { [library()].into() } else { Default::default() };
+        assert_eq!(e.roles, want, "entry {n} by {}", e.actor);
+    }
+
+    for i in [0, 3] {
         let none = &f.sim.clients[&i].replica.rejections;
         assert!(none.is_empty(), "client {i}: {none:?}");
     }

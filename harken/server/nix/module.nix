@@ -159,9 +159,10 @@ in
         Who holds which role, as the account ids holding each: the provider's
         `sub`, or the name under {option}`services.harken.devAuth`. The
         server's own scanner holds `library` by construction and nobody else
-        does unless named here; the library's procedures are to be guarded by
-        that role (`docs/plan-guards.md` G2). Asked at every connection, so
-        changing this and restarting grants or revokes at once.
+        does unless named here; the library's mutations are guarded by that
+        role (`is_library`, `docs/plan-guards.md` D1). Asked at every
+        connection and stamped on every entry it pushes, so changing this
+        and restarting grants or revokes at once.
       '';
     };
 

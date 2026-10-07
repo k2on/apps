@@ -1983,3 +1983,80 @@ fn a_backup_taken_mid_stream_restores_to_its_moment() {
         "{body}"
     );
 }
+
+/// **The library's guard, judged at the server** (`docs/plan-guards.md`
+/// D1). No role configured: bob's song is refused on his own device by
+/// `is_library`. The server restarts with `HARKEN_ROLES=library=alice`;
+/// signed in again, alice's device is told she holds it and her song is
+/// sequenced — logged with the role the server stamped. Restarted once more
+/// with the role revoked, her device still believes it and takes her next
+/// song; the server, which stamps the entry with the roles it now gives
+/// her login, refuses it with the guard's own words, and it is in the log
+/// nowhere.
+///
+/// Falsified by leaving the stamp out (the server sequenced the entry with
+/// the roles the device froze in it): the song after the revocation was
+/// sequenced.
+#[test]
+fn a_role_granted_by_a_restart_and_revoked_by_another() {
+    let mut f = Fleet::with_env("roles", vec![("HARKEN_ROLES", "")]);
+    let peer = |f: &Fleet, name: &str| {
+        let mut p = f.peer_stopped(name, Some(name));
+        p.roles = vec![];
+        p.start();
+        p
+    };
+    let mut alice = peer(&f, "alice");
+    let mut bob = peer(&f, "bob");
+    let refused = bob
+        .mutate("add_song", song("bob's"))
+        .expect_err("a library write by a login without the role");
+    assert_eq!(
+        refused, "only the library writes the library",
+        "refused on bob's own device by the guard"
+    );
+    alice.author("create_playlist", named("Alice's"));
+
+    // Granted by configuration, at a restart; a fresh login holds it.
+    f.server.upgrade(vec![("HARKEN_ROLES", "library=alice")]);
+    alice.sign_in("alice");
+    let kept = alice.author("add_song", song("alice's"));
+    f.converged(&mut [&mut alice, &mut bob]);
+    assert_eq!(
+        f.rows("media").len(),
+        1,
+        "alice's song is in the log, bob's nowhere"
+    );
+    let log = f.server.log_on_disk().unwrap();
+    let at = log.seq_of(&kept).expect("sequenced");
+    let library: BTreeSet<String> = ["library".to_string()].into();
+    assert_eq!(
+        log.entries[&at].0.roles, library,
+        "logged with the role the server stamped"
+    );
+
+    // Revoked at another restart, while her device believes it still
+    // holds it: the device takes the song, the authority does not.
+    f.server.upgrade(vec![("HARKEN_ROLES", "")]);
+    let late = alice.author("add_song", song("too late"));
+    assert!(
+        eventually(PATIENCE, || alice.rejections().iter().any(|(id, why)| *id
+            == late
+            && why == "only the library writes the library")),
+        "the server refused the song with the guard's words: {:?}",
+        alice.rejections()
+    );
+    f.converged_allowing_refusals(&mut [&mut alice, &mut bob]);
+    assert_eq!(f.rows("media").len(), 1, "and it landed nowhere");
+    let log = f.server.log_on_disk().unwrap();
+    assert!(log.seq_of(&kept).is_some());
+    assert!(log.seq_of(&late).is_none());
+    for (n, (e, _)) in &log.entries {
+        if e.actor == "alice" && n > &at {
+            assert!(
+                e.roles.is_empty(),
+                "entry {n}: after the revocation alice's login holds nothing"
+            );
+        }
+    }
+}

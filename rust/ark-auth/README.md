@@ -27,8 +27,8 @@ gives the clients the other half — how to get a token to send.
   at startup, every time: the mode's sentence (dev auth's names the
   `name:role,role` form) and every role the configuration grants.
 - **roles** (`docs/plan-auth.md`): a claim about a person the log does not
-  hold, which the guards of `docs/plan-guards.md` G2 are to ask (the row
-  rules that asked it are deleted, G1). A login holds
+  hold, which a guard asks with `has_role` — of the roles the server stamps
+  on every entry the login pushes (`docs/plan-guards.md` D1). A login holds
   the roles it was issued with — kept on its session as `roles`, absent when
   none: the server's own scanner's by construction, a dev login's from its
   name — and the ones `Auth::with_roles([(role, [account id…])])` grants
