@@ -231,6 +231,7 @@ fn expr(e: &Expr) -> Value {
         Expr::Var(x) => node("var", vec![("sym", int(*x))]),
         Expr::CtxUser => node("ctx_user", vec![]),
         Expr::CtxSession => node("ctx_session", vec![]),
+        Expr::HasRole(r) => node("has_role", vec![("role", txt(r))]),
         Expr::Provided(n) => node("provided", vec![("fn", txt(n))]),
         Expr::Field(e, f) => node("field", vec![("e", expr(e)), ("name", txt(f))]),
         Expr::Struct(fs) => node(
@@ -426,7 +427,15 @@ fn expr_calls(e: &Expr, acc: &mut std::collections::BTreeSet<String>) {
         }
         Expr::Fold(xs, z, _, _, b) => [xs, z, b].iter().for_each(|e| expr_calls(e, acc)),
         Expr::Select(p) => plan_calls(p, acc),
-        Expr::Lit(_) | Expr::Arg(_) | Expr::Auto(_) | Expr::Var(_) | Expr::CtxUser | Expr::CtxSession | Expr::Provided(_) | Expr::None(_) => {}
+        Expr::Lit(_)
+        | Expr::Arg(_)
+        | Expr::Auto(_)
+        | Expr::Var(_)
+        | Expr::CtxUser
+        | Expr::CtxSession
+        | Expr::HasRole(_)
+        | Expr::Provided(_)
+        | Expr::None(_) => {}
     }
 }
 

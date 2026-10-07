@@ -146,6 +146,9 @@ pub enum Complaint {
     NoRowBinder,
     /// `members` on a plan whose source is not a group.
     MembersWithoutGroup,
+    // `docs/plan-guards.md` D1
+    /// `has_role` of the empty name, which no role is.
+    EmptyRole,
 }
 
 /// Verify a module. On success, the module as it is to be hashed and run:
@@ -662,6 +665,8 @@ fn infer(g: &G, want: Option<&Ty>, e: &Expr) -> Check_<Ty> {
         },
         Expr::Var(x) => g.locals.get(x).cloned().map_or_else(|| err(Complaint::UnboundSymbol(*x)), Ok),
         Expr::CtxUser | Expr::CtxSession => Ok(Ty::Text),
+        Expr::HasRole(r) if r.is_empty() => err(Complaint::EmptyRole),
+        Expr::HasRole(_) => Ok(Ty::Bool),
         Expr::Provided(n) => g.provided.get(n).cloned().map_or_else(|| err(Complaint::NotProvided(n.clone())), Ok),
         Expr::Field(e, f) => match infer(g, None, e)? {
             Ty::Struct(fs) => fs.get(f).cloned().map_or_else(|| err(Complaint::NoSuchField(f.clone())), Ok),
@@ -1055,7 +1060,7 @@ fn forbidden(e: &Expr) -> Option<Complaint> {
             any([&**a, &**b].into_iter())
         }
         Expr::Fold(a, b, _, _, c) => any([&**a, &**b, &**c].into_iter()),
-        Expr::Lit(_) | Expr::Arg(_) | Expr::Var(_) | Expr::CtxUser | Expr::CtxSession | Expr::Provided(_) | Expr::None(_) => None,
+        Expr::Lit(_) | Expr::Arg(_) | Expr::Var(_) | Expr::CtxUser | Expr::CtxSession | Expr::HasRole(_) | Expr::Provided(_) | Expr::None(_) => None,
     }
 }
 
@@ -1185,7 +1190,15 @@ fn complete_expr(sch: &Schema, e: &mut Expr) {
             complete_expr(sch, z);
             complete_expr(sch, b);
         }
-        Expr::Lit(_) | Expr::Arg(_) | Expr::Auto(_) | Expr::Var(_) | Expr::CtxUser | Expr::CtxSession | Expr::Provided(_) | Expr::None(_) => {}
+        Expr::Lit(_)
+        | Expr::Arg(_)
+        | Expr::Auto(_)
+        | Expr::Var(_)
+        | Expr::CtxUser
+        | Expr::CtxSession
+        | Expr::HasRole(_)
+        | Expr::Provided(_)
+        | Expr::None(_) => {}
     }
 }
 

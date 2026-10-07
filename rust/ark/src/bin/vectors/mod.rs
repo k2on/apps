@@ -58,6 +58,7 @@ pub fn write_all(root: &Path) {
     codec::codec(&out);
     codec::order(&out);
     eval::demo(&out);
+    eval::has_role(&out);
     rebase::three_peers(&out);
     module::module(&out);
     protocol::protocol(&out);

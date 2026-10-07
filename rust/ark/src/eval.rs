@@ -1147,6 +1147,7 @@ fn eval(st: &mut St, env: &Env, e: &Expr) -> Run<Value> {
         }
         Expr::CtxUser => Ok(Value::Text(env.ctx.user.as_str().into())),
         Expr::CtxSession => Ok(Value::Text(env.ctx.session.as_str().into())),
+        Expr::HasRole(r) => Ok(Value::Bool(env.ctx.roles.contains(r))),
         // Fields are evaluated in field-name order, which is the map's order.
         Expr::Struct(fs) => {
             let mut m = BTreeMap::new();

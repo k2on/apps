@@ -3,7 +3,9 @@
 //! four times, with the changes, the store and the hash after each; the
 //! input checks as verdicts, and the form validator; and the state hash's
 //! construction pinned part by part — every row's leaf, every table's
-//! digest, the pairs they make (`docs/plan-db.md` D3).
+//! digest, the pairs they make (`docs/plan-db.md` D3); and a guard and a
+//! body asking `has_role`, applied as authors holding different roles
+//! (`docs/plan-guards.md` D1).
 
 use ark::eval::{apply, check, Args, Ctx};
 use ark::hash::{closure, function_hash, leaf, state_hash, state_hash_of, table_digest, Digest};
@@ -347,6 +349,98 @@ pub fn demo(out: &Out) {
                     ])
                 })),
             ),
+        ]),
+    );
+}
+
+/// `eval/has-role.json` (`docs/plan-guards.md` D1): the guarded demo's
+/// `feature`, applied as authors holding different roles. Its guard
+/// `is_curator` refuses whoever does not hold `curator`, and its body reads
+/// `editor` to decide whose the playlist is — so the roles decide both the
+/// verdict and the row. Each case carries its own `ctx`, with `roles`, and
+/// an accepted one its changes. Before writing, the verifier is held to
+/// refusing `has_role` of the empty name.
+pub fn has_role(out: &Out) {
+    let m = demo::guarded();
+    super::claim(
+        "is_curator asks has_role",
+        format!("{:?}", m.lookup_function("is_curator").map(|f| &f.body)).contains("HasRole(\"curator\")"),
+    );
+    fn blank(v: &mut Value) {
+        match v {
+            Value::Struct(fs) => {
+                if fs.get("t") == Some(&Value::text("has_role")) {
+                    fs.insert("role".into(), Value::text(""));
+                }
+                fs.values_mut().for_each(blank);
+            }
+            Value::List(xs) => xs.iter_mut().for_each(blank),
+            _ => {}
+        }
+    }
+    let mut v = module_value(&m);
+    blank(&mut v);
+    let empty = ark::ir::module_from_value(&v).expect("the module with an empty role decodes");
+    refused("has_role of the empty name", &empty, |e| {
+        matches!(e, VerifyError::In(_, Complaint::EmptyRole))
+    });
+
+    let st = MemoryStore::empty(m.schema.clone());
+    let autos = args([("id", Value::Id(id_n(7)))]);
+    let input = args([("name", Value::text("Picks"))]);
+    let cases: Vec<(&str, Vec<&str>, Option<&str>)> = vec![
+        ("held", vec!["curator"], None),
+        ("held-and-an-editor", vec!["curator", "editor"], None),
+        ("not-held", vec![], Some("only a curator features a playlist")),
+        ("another-role-only", vec!["editor"], Some("only a curator features a playlist")),
+    ];
+    let ctx_of = |roles: &[&str]| Ctx::new("alice", "session-1").with_roles(roles.iter().copied());
+    let ctx_json = |roles: &[&str]| {
+        json(&Value::record(vec![
+            ("user", Value::text("alice")),
+            ("session", Value::text("session-1")),
+            ("roles", Value::List(roles.iter().map(|r| Value::text(*r)).collect())),
+        ]))
+    };
+    let mut written = vec![];
+    for (what, roles, want) in &cases {
+        let mut s2 = st.clone();
+        let got = apply(&m, "feature", &ctx_of(roles), &autos, &input, &mut s2).unwrap_or_else(|e| panic!("feature: {e:?}"));
+        let changes = match (got, want) {
+            (Ok(chs), None) => {
+                let owner = match chs.as_slice() {
+                    [Change::Add(t, row)] if t == "playlist" => row.get("user_id").cloned(),
+                    _ => None,
+                };
+                let whose = if roles.contains(&"editor") { "editors" } else { "curators" };
+                super::claim(
+                    &format!("has-role {what}: the playlist is the {whose}'"),
+                    owner == Some(Value::text(whose)),
+                );
+                Some(chs)
+            }
+            (Err(Refusal::Refused(t)), Some(w)) if t == *w => None,
+            other => panic!("has-role {what}: {other:?}"),
+        };
+        let mut parts = vec![
+            ("name", quoted(what)),
+            ("function", quoted("feature")),
+            ("ctx", ctx_json(roles)),
+            ("autos", json(&Value::from(autos.clone()))),
+            ("args", json(&Value::from(input.clone()))),
+            ("refused", want.map(quoted).unwrap_or_else(|| "null".into())),
+        ];
+        if let Some(chs) = changes {
+            parts.push(("changes", json(&Value::List(chs.iter().map(change_value).collect()))));
+        }
+        written.push(obj(&parts));
+    }
+    out.write(
+        "eval/has-role.json",
+        &obj(&[
+            ("module", json(&module_value(&m))),
+            ("store_before", json(&st.store_value())),
+            ("cases", array(written)),
         ]),
     );
 }

@@ -135,6 +135,42 @@ pub fn demo() -> Router<Demo> {
     ))
 }
 
+pub struct Feature {
+    pub name: Text,
+}
+impl Input for Feature {
+    fn schema() -> Object<Self> {
+        object().field("name", text().trim().min(1))
+    }
+}
+
+/// A second router over the demo's tables whose one mutation is guarded by
+/// a role (`docs/plan-guards.md` D1): `is_curator` refuses an author who
+/// does not hold `curator`, and `feature`'s body reads `editor` to decide
+/// whose the playlist is. What `module/guarded.json` and
+/// `eval/has-role.json` are over; the demo's own module, and every vector
+/// of it, is untouched.
+pub fn curated() -> Router<Demo> {
+    let curated = router::<Demo>("curated");
+    let is_curator = curated.guard("is_curator", |ctx, _db| {
+        unless(ctx.has_role("curator"), || refuse("only a curator features a playlist"))
+    });
+    curated.routes((is_curator.input::<Feature>().mutation("feature", |ctx, db, input| {
+        db.playlist
+            .insert(Playlist {
+                id: ctx.new_id("id"),
+                name: input.name,
+                user_id: pick(ctx.has_role("editor"), "editors", "curators"),
+            })
+            .on((Playlist::user_id, Playlist::name))
+    }),))
+}
+
+/// The demo with [`curated`] beside it, verified.
+pub fn guarded() -> ark::ir::Module {
+    Module::new((demo(), curated())).build().clone()
+}
+
 /// The module, verified: orders completed and every function normalised,
 /// which is the form every hash is of.
 pub fn module() -> ark::ir::Module {

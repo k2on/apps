@@ -1,5 +1,6 @@
 //! `module/` (§7): the module as a value, its canonical bytes and its hash;
-//! decode of encode is the identity.
+//! decode of encode is the identity. The demo's, and the demo with a guard
+//! testing a role beside it (`docs/plan-guards.md` D1).
 
 use ark::canon::{decode, encode};
 use ark::hash::module_hash;
@@ -45,6 +46,26 @@ pub fn module(out: &Out) {
             ("bytes", quoted(&hex(&bytes))),
             ("hash", quoted(&hex(&module_hash(&planless)))),
             ("expect", quoted("fail")),
+        ]),
+    );
+    // A module with a guard testing a role (`docs/plan-guards.md` D1):
+    // `has_role` on the wire, and the hash of a module that has one.
+    let g = demo::guarded();
+    let gv = module_value(&g);
+    super::claim(
+        "the guarded module holds has_role",
+        ark::canon::encode(&gv).windows(8).any(|w| w == b"has_role"),
+    );
+    match decode(&encode(&gv)).map(|v| module_from_value(&v)) {
+        Ok(Ok(back)) if module_value(&back) == gv => {}
+        other => panic!("module guarded: {other:?}"),
+    }
+    out.write(
+        "module/guarded.json",
+        &obj(&[
+            ("module", json(&gv)),
+            ("bytes", quoted(&hex(&encode(&gv)))),
+            ("hash", quoted(&hex(&module_hash(&g)))),
         ]),
     );
     out.write(

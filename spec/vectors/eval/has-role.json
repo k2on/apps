@@ -1,0 +1,39 @@
+{
+  "module": {"functions":[{"autos":[{"name":"id","t":"new_id","table":"playlist"}],"body":[{"on":["user_id","name"],"row":{"fields":{"id":{"name":"id","t":"auto"},"name":{"name":"name","t":"arg"},"user_id":{"t":"ctx_user"}},"t":"struct"},"t":"insert","table":"playlist"}],"deps":{},"input":[{"checks":[{"t":"trim"},{"n":{"$int":"1"},"t":"min_len","why":"a playlist needs a name"}],"name":"name","t":"field","ty":{"t":"text"}}],"kind":"mutator","name":"create_playlist","refine":[],"ret":null,"router":"demo","t":"fn","uses":[]},{"autos":[],"body":[{"e":{"plan":{"filter":{"column":"playlist_id","e":{"name":"playlist_id","t":"arg"},"op":"eq","t":"pcmp"},"limit":{"$int":"1"},"order":[{"column":"pos","dir":"desc","t":"by"},{"column":"playlist_id","dir":"asc","t":"by"},{"column":"track_id","dir":"asc","t":"by"}],"related":[],"t":"plan","table":"item"},"t":"select"},"sym":{"$int":"0"},"t":"let"},{"e":{"args":[{"sym":{"$int":"0"},"t":"var"}],"fn":"First","t":"std"},"sym":{"$int":"1"},"t":"let"},{"on":[],"row":{"fields":{"playlist_id":{"name":"playlist_id","t":"arg"},"pos":{"args":[{"e":{"sym":{"$int":"1"},"t":"var"},"none":{"t":"lit","v":{"$int":"0"}},"some":{"e":{"sym":{"$int":"2"},"t":"var"},"name":"pos","t":"field"},"sym":{"$int":"2"},"t":"match"},{"t":"lit","v":{"$int":"1"}}],"op":"add","t":"op"},"track_id":{"name":"track_id","t":"arg"}},"t":"struct"},"t":"insert","table":"item"}],"deps":{},"input":[{"checks":[{"t":"exists","why":null}],"name":"playlist_id","t":"field","ty":{"t":"id","table":"playlist"}},{"checks":[{"n":{"$int":"1"},"t":"min_len","why":null}],"name":"track_id","t":"field","ty":{"t":"text"}}],"kind":"mutator","name":"add_to_playlist","refine":[],"ret":null,"router":"demo","t":"fn","uses":[]},{"autos":[],"body":[],"deps":{},"input":[{"checks":[],"name":"playlist_id","t":"field","ty":{"t":"id","table":"playlist"}}],"kind":"query","name":"items","plan":{"filter":{"column":"playlist_id","e":{"name":"playlist_id","t":"arg"},"op":"eq","t":"pcmp"},"limit":null,"order":[{"column":"pos","dir":"asc","t":"by"},{"column":"playlist_id","dir":"asc","t":"by"},{"column":"track_id","dir":"asc","t":"by"}],"related":[],"t":"plan","table":"item"},"refine":[],"ret":{"of":{"fields":{"playlist_id":{"t":"id","table":"playlist"},"pos":{"t":"int"},"track_id":{"t":"text"}},"t":"struct"},"t":"list"},"router":"demo","t":"fn","uses":[]},{"autos":[],"body":[{"c":{"role":"curator","t":"has_role"},"else":[{"e":{"t":"lit","v":"only a curator features a playlist"},"t":"refuse"}],"t":"if","then":[]}],"deps":{},"input":[],"kind":"guard","name":"is_curator","refine":[],"ret":null,"router":null,"t":"fn","uses":[]},{"autos":[{"name":"id","t":"new_id","table":"playlist"}],"body":[{"on":["user_id","name"],"row":{"fields":{"id":{"name":"id","t":"auto"},"name":{"name":"name","t":"arg"},"user_id":{"c":{"role":"editor","t":"has_role"},"else":{"t":"lit","v":"curators"},"t":"ife","then":{"t":"lit","v":"editors"}}},"t":"struct"},"t":"insert","table":"playlist"}],"deps":{},"input":[{"checks":[{"t":"trim"},{"n":{"$int":"1"},"t":"min_len","why":null}],"name":"name","t":"field","ty":{"t":"text"}}],"kind":"mutator","name":"feature","refine":[],"ret":null,"router":"curated","t":"fn","uses":["is_curator"]}],"live":[],"routers":[{"name":"demo","t":"router","uses":[]},{"name":"curated","t":"router","uses":["is_curator"]}],"schema":[{"columns":[{"name":"id","nullable":false,"t":"column","ty":{"t":"id","table":"playlist"}},{"name":"name","nullable":false,"t":"column","ty":{"t":"text"}},{"name":"user_id","nullable":false,"t":"column","ty":{"t":"text"}}],"indexes":[{"columns":["user_id","name"],"t":"index","unique":true}],"key":["id"],"name":"playlist","refs":[],"t":"table"},{"columns":[{"name":"playlist_id","nullable":false,"t":"column","ty":{"t":"id","table":"playlist"}},{"name":"track_id","nullable":false,"t":"column","ty":{"t":"text"}},{"name":"pos","nullable":false,"t":"column","ty":{"t":"int"}}],"indexes":[{"columns":["playlist_id","pos"],"t":"index","unique":true}],"key":["playlist_id","track_id"],"name":"item","refs":[{"column":"playlist_id","t":"ref","table":"playlist"}],"t":"table"}],"spec":{"$int":"4"},"t":"module"},
+  "store_before": {"item":[],"playlist":[]},
+  "cases": [{
+  "name": "held",
+  "function": "feature",
+  "ctx": {"roles":["curator"],"session":"session-1","user":"alice"},
+  "autos": {"id":{"$id":"00000000-0000-0000-0000-000000000007"}},
+  "args": {"name":"Picks"},
+  "refused": null,
+  "changes": [{"row":{"id":{"$id":"00000000-0000-0000-0000-000000000007"},"name":"Picks","user_id":"curators"},"t":"add","table":"playlist"}]
+}
+,{
+  "name": "held-and-an-editor",
+  "function": "feature",
+  "ctx": {"roles":["curator","editor"],"session":"session-1","user":"alice"},
+  "autos": {"id":{"$id":"00000000-0000-0000-0000-000000000007"}},
+  "args": {"name":"Picks"},
+  "refused": null,
+  "changes": [{"row":{"id":{"$id":"00000000-0000-0000-0000-000000000007"},"name":"Picks","user_id":"editors"},"t":"add","table":"playlist"}]
+}
+,{
+  "name": "not-held",
+  "function": "feature",
+  "ctx": {"roles":[],"session":"session-1","user":"alice"},
+  "autos": {"id":{"$id":"00000000-0000-0000-0000-000000000007"}},
+  "args": {"name":"Picks"},
+  "refused": "only a curator features a playlist"
+}
+,{
+  "name": "another-role-only",
+  "function": "feature",
+  "ctx": {"roles":["editor"],"session":"session-1","user":"alice"},
+  "autos": {"id":{"$id":"00000000-0000-0000-0000-000000000007"}},
+  "args": {"name":"Picks"},
+  "refused": "only a curator features a playlist"
+}
+]
+}

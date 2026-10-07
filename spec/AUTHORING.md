@@ -165,7 +165,7 @@ then the node's key — cut to the limit.
 
 - **No expression reads.** Lookup keys, `on`, `having`, `project` and
   expression order keys may use a binder in scope, `Arg`, `CtxUser`,
-  `CtxSession`, `Provided`, literals, operators, `Std`, `Call` of a helper
+  `CtxSession`, `HasRole`, `Provided`, literals, operators, `Std`, `Call` of a helper
   and every list function — never `Select`, `Get` or `Exists`
   (`ReadInPlan`), and never `Auto` (`AutoInPlan`).
 - **Scope is flat per node.** A node's expressions see its own binders; a
@@ -244,6 +244,7 @@ expression. A host `if` on one does not compile. Literals lift through
 | `List` | `list([a, b])` |
 | `Call` | `helper_name(args)` (a Rust fn) |
 | `CtxUser/CtxSession` | `ctx.user` `ctx.session` |
+| `HasRole` | `ctx.has_role("library")` → `Bool`, whether the entry's author holds the role (`docs/plan-guards.md` D1) |
 | `Auto` | `ctx.now("added_ms")` `ctx.new_id("id")` |
 | `Provided` | the extra body parameter |
 
@@ -578,6 +579,7 @@ Symbols below are fresh; normalisation renumbers them.
 | `input.f` | `Arg("f")` |
 | the provided parameter | `Provided("<middleware name>")` |
 | `ctx.user` / `ctx.session` | `CtxUser` / `CtxSession` |
+| `ctx.has_role("r")` | `HasRole("r")`: natively, whether the run's `Ctx` holds `r` — the device's belief when it authors, the entry's stamped roles at the authority and in every replay |
 | `ctx.now("n")` / `ctx.new_id("n")` | `Auto("n")`, and `("n", Now)` / `("n", NewId(t))` appended to `autos` in the order the run meets them |
 | a row or record literal | `Struct` of every field written |
 
@@ -660,6 +662,20 @@ stmt        : {"t":"insert","table":txt,"row":expr,"on":[txt]}
             -- "put" is gone
 expr        : + {"t":"provided","fn":txt}
 ```
+
+`docs/plan-guards.md` D1 adds one expression, written only where a module
+has one, so every module and closure before it keeps its bytes:
+
+```
+expr        : + {"t":"has_role","role":txt}   -- a Bool; the role is not empty (EmptyRole)
+```
+
+It reads no table and its value is a function of the entry alone: the
+roles frozen in it, which the authority stamped with the connection's at
+sequencing. A guard written with it — `guard("is_library", |ctx, _|
+unless(ctx.has_role("library"), || refuse("…")))` — refuses on the device
+whose sign-in did not say the role, and at the server for a device that
+believed one its login was never given.
 
 Symbols
 inside a `check`'s or `refine`'s expression are numbered in the same walk

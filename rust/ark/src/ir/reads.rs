@@ -110,7 +110,15 @@ fn pred(p: &Pred, out: &mut BTreeSet<TableName>) {
 
 fn expr(e: &Expr, out: &mut BTreeSet<TableName>) {
     match e {
-        Expr::Lit(_) | Expr::Arg(_) | Expr::Auto(_) | Expr::Var(_) | Expr::CtxUser | Expr::CtxSession | Expr::Provided(_) | Expr::None(_) => {}
+        Expr::Lit(_)
+        | Expr::Arg(_)
+        | Expr::Auto(_)
+        | Expr::Var(_)
+        | Expr::CtxUser
+        | Expr::CtxSession
+        | Expr::HasRole(_)
+        | Expr::Provided(_)
+        | Expr::None(_) => {}
         Expr::Field(x, _) | Expr::Some(x) => expr(x, out),
         Expr::Struct(fs) => fs.values().for_each(|x| expr(x, out)),
         Expr::List(xs) | Expr::Op(_, xs) | Expr::Call(_, xs) | Expr::Std(_, xs) => xs.iter().for_each(|x| expr(x, out)),

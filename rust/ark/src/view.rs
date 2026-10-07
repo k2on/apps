@@ -1238,6 +1238,7 @@ pub(crate) fn children(e: &Expr) -> Vec<&Expr> {
         | Expr::Var(_)
         | Expr::CtxUser
         | Expr::CtxSession
+        | Expr::HasRole(_)
         | Expr::Provided(_)
         | Expr::None(_)
         | Expr::Select(_) => vec![],
@@ -1266,6 +1267,7 @@ fn map_expr(e: &Expr, f: &mut dyn FnMut(&Expr) -> Option<Expr>) -> Expr {
         | Expr::Var(_)
         | Expr::CtxUser
         | Expr::CtxSession
+        | Expr::HasRole(_)
         | Expr::Provided(_)
         | Expr::None(_)
         | Expr::Select(_) => e.clone(),

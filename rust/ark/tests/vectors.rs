@@ -306,6 +306,17 @@ fn protocol() {
 
 // eval/ -------------------------------------------------------------------
 
+/// A vector's `ctx`: the user, the login, and the roles held where it says
+/// any (`docs/plan-guards.md` D1) — none where `roles` is absent, as in
+/// every vector written before roles were read.
+fn ctx_of(c: &Value) -> Ctx {
+    let roles: Vec<String> = match c.as_struct().get("roles") {
+        Some(rs) => rs.as_list().iter().map(|r| r.as_text().to_string()).collect(),
+        None => vec![],
+    };
+    Ctx::new(c.field("user").as_text(), c.field("session").as_text()).with_roles(roles)
+}
+
 /// One function applied step by step: the changes, the store and the hash
 /// after each, and the same through the closure map as a peer replays it.
 fn check_eval(v: &serde_json::Value) -> Result<(), String> {
@@ -320,8 +331,7 @@ fn check_eval(v: &serde_json::Value) -> Result<(), String> {
     ensure!(named.contains(&fh), "the function hash is not the one the log names");
     ensure_eq!(hex(&fh), v["function_hash"].as_str().unwrap_or(""), "function_hash");
     let bodies = closures(&m);
-    let ctx_v = value(&v["ctx"]);
-    let ctx = Ctx::new(ctx_v.field("user").as_text(), ctx_v.field("session").as_text());
+    let ctx = ctx_of(&value(&v["ctx"]));
     let autos = args_of(&value(&v["autos"]));
     let mut st = MemoryStore::from_value(m.schema.clone(), &value(&v["store_before"]));
     let mut by_closure = st.clone();
@@ -362,10 +372,7 @@ fn eval_cases(p: &Path, v: &serde_json::Value) {
     let bodies = closures(&m);
     let by_name = |n: &str| bodies.values().find(|c| c.function.name == n).unwrap_or_else(|| panic!("{n}"));
     let ctx = match v.get("ctx") {
-        Some(c) => {
-            let c = value(c);
-            Ctx::new(c.field("user").as_text(), c.field("session").as_text())
-        }
+        Some(c) => ctx_of(&value(c)),
         None => Ctx::new("alice", "session-1"),
     };
     let store_key = if v.get("store_before").is_some() { "store_before" } else { "store" };
@@ -373,13 +380,21 @@ fn eval_cases(p: &Path, v: &serde_json::Value) {
     for case in v["cases"].as_array().unwrap() {
         let name = case["name"].as_str().unwrap();
         let c = by_name(case["function"].as_str().unwrap());
+        // A case may be authored by its own `ctx`, with `roles`
+        // (`eval/has-role.json`, `docs/plan-guards.md` D1).
+        let ctx = case.get("ctx").map_or_else(|| ctx.clone(), |c| ctx_of(&value(c)));
         if let Some(refused) = case.get("refused") {
             let autos = args_of(&value(&case["autos"]));
             let a = args_of(&value(&case["args"]));
             let mut s2 = st.clone();
             let got = ark::eval::apply_closure(&m.schema, c, &ctx, &autos, &a, &mut s2).unwrap_or_else(|e| panic!("{name}: bug {e:?}"));
             match (refused.as_str(), got) {
-                (None, Ok(_)) => {}
+                (None, Ok(chs)) => {
+                    if let Some(want) = case.get("changes") {
+                        let got = Value::List(chs.iter().map(change_value).collect());
+                        assert_eq!(got, value(want), "{}: {name} changes", p.display());
+                    }
+                }
                 (Some(want), Err(ark::store::Refusal::Refused(t))) => assert_eq!(t, want, "{}: {name}", p.display()),
                 (want, got) => panic!("{}: {name}: wanted {want:?}, got {got:?}", p.display()),
             }
@@ -425,8 +440,7 @@ fn check_view(v: &serde_json::Value) -> Result<(), String> {
         .find(|g| g.field("name") == Value::text(name))
         .map(|g| g.field("plan"));
     ensure_eq!(written, Some(value(&v["plan"])), "the plan is the query's, as the module writes it");
-    let ctx_v = value(&v["ctx"]);
-    let ctx = Ctx::new(ctx_v.field("user").as_text(), ctx_v.field("session").as_text());
+    let ctx = ctx_of(&value(&v["ctx"]));
     let c = closure(&m, f);
     let mut st = MemoryStore::from_value(sch.clone(), &value(&v["store_before"]));
     let (args, provided) = ark::eval::middleware(sch, &c, &ctx, &args_of(&value(&v["args"])), &st).map_err(|e| format!("middleware: {e:?}"))?;

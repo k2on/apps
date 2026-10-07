@@ -52,4 +52,4 @@ pub use schema::{
     col, columns, fields, rel, table, table_of, Col, Cols, ColumnOf, Columns, Effect, Fields, IntoEffect, Key, Order, Orders, Pred, Query, Record,
     Rel, Row, Table, Tables, Write,
 };
-pub use values::{concat, id_of_text, list, nil_id, none, pick, some, Bool, Bytes, Ctx, Data, Id, Int, List, ListOf, Opt, Text};
+pub use values::{concat, ctx, id_of_text, list, nil_id, none, pick, some, Bool, Bytes, Ctx, Data, Id, Int, List, ListOf, Opt, Text};

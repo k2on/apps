@@ -253,7 +253,15 @@ fn expr_binders(e: &Expr) -> Vec<Sym> {
             v
         }
         Expr::Select(p) => plan_binders(p),
-        Expr::Lit(_) | Expr::Arg(_) | Expr::Auto(_) | Expr::Var(_) | Expr::CtxUser | Expr::CtxSession | Expr::Provided(_) | Expr::None(_) => vec![],
+        Expr::Lit(_)
+        | Expr::Arg(_)
+        | Expr::Auto(_)
+        | Expr::Var(_)
+        | Expr::CtxUser
+        | Expr::CtxSession
+        | Expr::HasRole(_)
+        | Expr::Provided(_)
+        | Expr::None(_) => vec![],
     }
 }
 
@@ -384,7 +392,9 @@ fn renumber_expr(ren: &Ren, next: Sym, e: &Expr) -> (Expr, Sym) {
             let (ks2, n) = renumber_many(ren, next, ks);
             (Expr::Exists(t.clone(), ks2), n)
         }
-        Expr::Lit(_) | Expr::Arg(_) | Expr::Auto(_) | Expr::CtxUser | Expr::CtxSession | Expr::Provided(_) | Expr::None(_) => (e.clone(), next),
+        Expr::Lit(_) | Expr::Arg(_) | Expr::Auto(_) | Expr::CtxUser | Expr::CtxSession | Expr::HasRole(_) | Expr::Provided(_) | Expr::None(_) => {
+            (e.clone(), next)
+        }
     }
 }
 

@@ -694,6 +694,13 @@ pub struct Ctx {
     pub session: Text,
 }
 
+/// The context, where a closure is not handed it: an input's check
+/// (`.refine(|input| ctx().has_role("editor").or(..))`). The same `Ctx` a
+/// guard, a provide or a body is given.
+pub fn ctx() -> Ctx {
+    Ctx::current()
+}
+
 impl Ctx {
     pub(crate) fn current() -> Ctx {
         if cx::emitting() {
@@ -722,6 +729,21 @@ impl Ctx {
                 cx::lit(Value::Null)
             }
         }
+    }
+
+    /// `EHasRole name`: whether the entry's author holds the role — a
+    /// `Bool`, usable in a guard, a provide, a body or a check. Natively,
+    /// the roles of the `Ctx` the run was given: the device's own belief
+    /// when it authors, the entry's — which the authority stamped with the
+    /// connection's — when it is run again (`docs/plan-guards.md` D1). So a
+    /// guard written with it refuses on the device, and refuses at the
+    /// server a device that believed wrongly.
+    pub fn has_role(&self, name: &str) -> Bool {
+        if cx::emitting() {
+            return Bool(cx::e(Expr::HasRole(name.into())));
+        }
+        let held = cx::native(|n| n.ctx.roles.contains(name));
+        Bool(cx::lit(Value::Bool(held)))
     }
 
     /// `EAuto name` of `Now`: milliseconds since the Unix epoch, drawn once

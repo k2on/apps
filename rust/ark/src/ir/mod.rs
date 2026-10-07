@@ -255,6 +255,11 @@ pub enum Expr {
     CtxUser,
     /// The login the entry was authored under.
     CtxSession,
+    /// Whether the entry's author holds the named role: a `Bool`, read off
+    /// the roles frozen in the entry, which the authority stamped with the
+    /// connection's (`docs/plan-guards.md` D1). Reads no table. The name is
+    /// not empty (`Complaint::EmptyRole`).
+    HasRole(String),
     /// §1.2 What the named `Provide` middleware returned.
     Provided(String),
     Field(Box<Expr>, FieldName),

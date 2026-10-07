@@ -294,6 +294,7 @@ fn expr(here: &[&str], v: &Value) -> D<Expr> {
         "var" => Expr::Var(s("sym")?),
         "ctx_user" => Expr::CtxUser,
         "ctx_session" => Expr::CtxSession,
+        "has_role" => Expr::HasRole(text(&p, field(&fs, "role")?)?),
         "provided" => Expr::Provided(text(&p, field(&fs, "fn")?)?),
         "field" => Expr::Field(e("e")?, text(&p, field(&fs, "name")?)?),
         "struct" => {
