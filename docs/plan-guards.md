@@ -59,6 +59,23 @@ plain Rust functions returning the closure — `is_auth()`, `has_role(r)`
 — and a domain composes them on its routers; nothing in the engine knows
 their names.
 
+**Roles must be frozen in the entry, or `has_role` diverges.** Found
+while reading for the build, before a line was written: an `Entry`
+carries `actor` and `session` and no roles, and a replay runs with empty
+roles — so a peer replaying somebody else's intent would evaluate
+`has_role` as false where the authority evaluated it true, and every
+whole replica, the authority's own `Log::state_at` and compaction would
+diverge. plan-auth never met this because no body read a role. The fix
+is the one `actor` and `session` already have: the author's roles are
+frozen in the entry, encoded only when non-empty so no existing vector
+moves, and the authority holds them to the connection that pushed the
+entry — **stamping** them (the entry's roles become the connection's;
+the device's run was a preview and a guard refuses a device that believed
+wrongly) rather than checking a subset, since a subset would let a
+device leave out a role a `!has_role(..)` depends on. Also noted: a
+guard refuses with `Refusal::Refused(msg)` today, so `Forbidden` is used
+by nothing once the rules go until G5's built-ins bring it back.
+
 ## G3. Server-only columns and tables
 
 `.server_only()` on a column or a table in the schema. The marker is
@@ -158,6 +175,16 @@ ark.delete_row(table, key)
   bound to loopback by default (`HARKEN_ADMIN_BIND`), and when exposed
   wider it requires the `admin` role to open; the writes it makes are the
   authority's either way.
+
+**Status: designed, not started.** The owner paused the build before a
+line of it was written (tree at `ddc4477`). The row rules of plan-auth
+are therefore still in the code and in harken's declarations; deleting
+them is G1 and is the first thing to do when this resumes. G5 is to be
+reshaped before building: the per-table operations become ordinary
+domain mutations a router exposes in one line (`router.crud::<User>()`,
+emitting insert / update / delete / put with the router's guards) and
+grows by writing the function by hand under the same name; the explorer
+uses those where exposed and the authority's raw writes otherwise.
 
 ## Order, rounds, and guards
 
