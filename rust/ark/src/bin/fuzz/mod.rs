@@ -17,7 +17,13 @@
 //! every maintained view of every query on every client must be a fresh
 //! hydrate, and the changes a view was told must reach the store; on the
 //! demo every mutation is run native and interpreted and the two must
-//! agree. After every session the fleet must have converged on the
+//! agree. Every entry the log gains must carry exactly the roles its
+//! author's login holds — the authority stamped them, whatever the device
+//! believed — and be admitted by its middleware under them, so a write a
+//! generated guard refuses (`holds`, testing a role, on a router of its
+//! own) lands nowhere (`docs/plan-guards.md` D1); logins are granted and
+//! revoked roles as the session goes, and their devices believe them, all
+//! of them, or none. After every session the fleet must have converged on the
 //! authority's head and hash, the log must replay from its facts and from
 //! its intents to the same state, no `Verify` may have been answered
 //! "disagreed" — one below the horizon, or naming another log than the
@@ -232,7 +238,10 @@ fn report(s: &Stats, took: Duration) {
         "    {} frames round-tripped, {} view pushes in sessions, {} under churn, {} native agreements",
         t.frames, t.view_pushes, s.churn_pushes, t.natives_checked
     );
-    println!("    {} role changes", t.role_changes);
+    println!(
+        "    {} role changes; {} writes forbidden on the device and {} at the authority; {} entries held to the stamp, {} of them from a device that believed otherwise",
+        t.role_changes, t.forbidden_local, t.forbidden_remote, t.stamps_checked, t.stamps_corrected
+    );
     for (seed, check, path, why) in &s.findings {
         println!("  finding: seed {seed}, {check}: {why}\n    written to {path}");
     }

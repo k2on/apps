@@ -94,8 +94,17 @@ pub struct Tally {
     pub verifies_answered: u64,
     pub verifies_unknown: u64,
     /// Role changes drawn: a client's login granted or revoked roles, and
-    /// its device believing them or more (`docs/plan-guards.md` G1).
+    /// its device believing them, more, or none (`docs/plan-guards.md` D1).
     pub role_changes: u64,
+    /// Writes a guard asking a role refused on the author's own device; and
+    /// at the authority — the device believed otherwise than its login
+    /// holds, and the stamp decided (D1).
+    pub forbidden_local: u64,
+    pub forbidden_remote: u64,
+    /// Entries checked for the stamp, and of those, the ones sequenced from
+    /// a device whose belief was not its login's roles.
+    pub stamps_checked: u64,
+    pub stamps_corrected: u64,
 }
 
 struct Held {
@@ -132,6 +141,48 @@ struct S<'a> {
     mutators: Vec<Function>,
     queries: Vec<Function>,
     tally: Tally,
+    /// The role names a session grants: [`super::gen::ROLES`] and every
+    /// role the module asks (`has_role`), so a domain's own — harken's
+    /// `library` — is granted and revoked too (`docs/plan-guards.md` D1).
+    role_names: Vec<String>,
+    /// The mutators whose middleware asks a role, by name: their local
+    /// refusals by that middleware are counted as forbidden.
+    role_guarded: std::collections::BTreeSet<String>,
+    /// Log entries already held to the stamp, by id and sequence.
+    stamped: std::collections::BTreeSet<(Id, i64)>,
+}
+
+// The literal texts a block refuses with, its branches' included.
+fn refusals(st: &ark::ir::Stmt) -> Vec<String> {
+    use ark::ir::{Expr, Stmt};
+    match st {
+        Stmt::Refuse(Expr::Lit(Value::Text(t))) => vec![t.to_string()],
+        Stmt::If(_, a, b) => a.iter().chain(b.iter()).flat_map(refusals).collect(),
+        Stmt::For(_, _, b) => b.iter().flat_map(refusals).collect(),
+        _ => vec![],
+    }
+}
+
+/// Every role a module asks with `has_role`, in its wire form: what a
+/// guard, a provide, a body or a check of it may test.
+pub fn asked_roles(m: &Module) -> std::collections::BTreeSet<String> {
+    fn walk(v: &Value, out: &mut std::collections::BTreeSet<String>) {
+        match v {
+            Value::Struct(fs) => {
+                if fs.get("t") == Some(&Value::text("has_role")) {
+                    if let Some(Value::Text(r)) = fs.get("role") {
+                        out.insert(r.to_string());
+                    }
+                }
+                fs.values().for_each(|x| walk(x, out));
+            }
+            Value::List(xs) => xs.iter().for_each(|x| walk(x, out)),
+            _ => {}
+        }
+    }
+    let mut out = std::collections::BTreeSet::new();
+    walk(&ark::ir::module_value(m), &mut out);
+    out
 }
 
 fn ctx_of(sim: &Sim, i: i64) -> Ctx {
@@ -169,6 +220,32 @@ pub fn run(m: &Module, natives: &[(FnHash, Procedure)], seed: u64, without: &[St
         sim.hold(natives.to_vec(), true, (0..clients).filter(|i| i % 2 == 0));
     }
     let draw = Draw::new(&m.schema, rng.next());
+    let asked = asked_roles(m);
+    let mut role_names: Vec<String> = super::gen::ROLES.iter().map(|r| r.to_string()).collect();
+    role_names.extend(asked.iter().filter(|r| !role_names.contains(r)).cloned().collect::<Vec<_>>());
+    let asks = |n: &String| {
+        m.lookup_function(n).is_some_and(|g| {
+            !asked_roles(&Module {
+                functions: vec![g.clone()],
+                ..m.clone()
+            })
+            .is_empty()
+        })
+    };
+    let role_guarded = m
+        .functions
+        .iter()
+        .filter(|f| f.kind == FnKind::Mutator && f.uses.iter().any(asks))
+        .map(|f| f.name.clone())
+        .collect();
+    // What those guards refuse with, as literals: how a verdict of theirs
+    // is told from every other, whatever the domain words it as.
+    let guard_words: std::collections::BTreeSet<String> = m
+        .functions
+        .iter()
+        .filter(|g| g.kind.is_middleware() && asks(&g.name))
+        .flat_map(|g| g.body.iter().flat_map(refusals))
+        .collect();
     let mut s = S {
         m,
         natives,
@@ -183,6 +260,9 @@ pub fn run(m: &Module, natives: &[(FnHash, Procedure)], seed: u64, without: &[St
         mutators: m.functions.iter().filter(|f| f.kind == FnKind::Mutator).cloned().collect(),
         queries: m.functions.iter().filter(|f| f.kind == FnKind::Query).cloned().collect(),
         tally: Tally::default(),
+        role_names,
+        role_guarded,
+        stamped: Default::default(),
     };
     let out = s.session(len);
     let t = &s.tally;
@@ -201,6 +281,16 @@ pub fn run(m: &Module, natives: &[(FnHash, Procedure)], seed: u64, without: &[St
     tally.verifies_answered += t.verifies_answered;
     tally.verifies_unknown += t.verifies_unknown;
     tally.role_changes += t.role_changes;
+    tally.forbidden_local += t.forbidden_local;
+    tally.stamps_checked += t.stamps_checked;
+    tally.stamps_corrected += t.stamps_corrected;
+    tally.forbidden_remote += s
+        .sim
+        .clients
+        .values()
+        .flat_map(|c| &c.replica.rejections)
+        .filter(|(_, r)| matches!(r, ark::store::Refusal::Refused(t) if guard_words.contains(t)))
+        .count() as u64;
     (out, s.sim.server.authority.store.clone())
 }
 
@@ -305,10 +395,18 @@ impl S<'_> {
             Ok(Err(why)) => return Some(self.finding("settle", why)),
             Err(p) => return Some(self.finding("panic", panic_text(p))),
         }
-        if let Op::Mutate { .. } = op {
+        if let Op::Mutate { peer, function, args, .. } = &op {
             let after: usize = self.sim.clients.values().map(|c| c.replica.pending.len()).sum();
             if after <= pending_before {
                 self.tally.refused_locally += 1;
+                if self.role_guarded.contains(function) {
+                    if let (Some(f), Some(c)) = (self.m.lookup_function(function), self.sim.clients.get(peer)) {
+                        let refused = eval::middleware(&self.m.schema, &closure(self.m, f), &ctx_of(&self.sim, *peer), args, &c.replica.view);
+                        if matches!(refused, Err(EvalFault::Verdict(_))) {
+                            self.tally.forbidden_local += 1;
+                        }
+                    }
+                }
             }
         }
         self.observe()
@@ -332,6 +430,9 @@ impl S<'_> {
         if let Some(why) = self.sim.faults.first() {
             return Some(self.finding("faults", why.clone()));
         }
+        if let Some(f) = self.stamps() {
+            return Some(f);
+        }
         // Everything a client's view was told since the last look, as one:
         // the store it is pushed against is the view as it stands now,
         // after all of it — so a rebuild anywhere in it is a rebuild, and
@@ -352,6 +453,61 @@ impl S<'_> {
             };
             if let Some(f) = self.push_views(i, ch) {
                 return Some(f);
+            }
+        }
+        None
+    }
+
+    // `docs/plan-guards.md` D1, after every op, of every entry the log
+    // gained: it carries exactly the roles its author's login holds — the
+    // authority stamped them, so a device's claim never reaches the log
+    // (`stamp`) — and its middleware admits it under those roles, so a
+    // write a guard refuses lands nowhere (`forbidden`). A login's roles
+    // move only by an `Op::Roles` or a sign-in, which reconnect it, and
+    // nothing is sequenced inside either, so the roles it holds after the
+    // op are the ones its entries of the op were stamped with.
+    fn stamps(&mut self) -> Option<Finding> {
+        let fresh: Vec<(i64, ark::log::Entry)> = self
+            .sim
+            .server
+            .authority
+            .log
+            .entries
+            .iter()
+            .filter(|(n, (e, _))| !self.stamped.contains(&(e.id, **n)))
+            .map(|(n, (e, _))| (*n, e.clone()))
+            .collect();
+        for (n, e) in fresh {
+            self.stamped.insert((e.id, n));
+            self.tally.stamps_checked += 1;
+            let Some(i) = e.actor.strip_prefix("peer-").and_then(|k| k.parse::<i64>().ok()) else {
+                return Some(self.finding("stamp", format!("entry {n} by {:?}, who is no client", e.actor)));
+            };
+            let holds = self.sim.roles.get(&i).cloned().unwrap_or_default();
+            if e.roles != holds {
+                return Some(self.finding(
+                    "stamp",
+                    format!("entry {n} by client {i} carries {:?} and its login holds {holds:?}", e.roles),
+                ));
+            }
+            if self.sim.believes.get(&i).cloned().unwrap_or_default() != holds {
+                self.tally.stamps_corrected += 1;
+            }
+            let Some(f) = self.sim.server.authority.bodies.get(&e.fn_hash).map(|c| c.function.clone()) else {
+                continue;
+            };
+            if f.uses.is_empty() {
+                continue;
+            }
+            let ctx = Ctx::new(e.actor.clone(), e.session.clone()).with_roles(e.roles.iter().cloned());
+            let at = self.sim.server.authority.log.state_at(n - 1);
+            let Some(st) = at else { continue };
+            let cl = &self.sim.server.authority.bodies[&e.fn_hash];
+            if let Err(EvalFault::Verdict(r)) = eval::middleware(&self.m.schema, cl, &ctx, &e.args, &st) {
+                return Some(self.finding(
+                    "forbidden",
+                    format!("entry {n} ({}) is in the log, and its middleware refuses it: {r}", f.name),
+                ));
             }
         }
         None
@@ -541,18 +697,20 @@ impl S<'_> {
     }
 
     // New roles for a client's login: each of the session's role names, or
-    // not; and one device in four believes it holds every one of them.
+    // not; and one device in five believes it holds every one of them —
+    // its writes meet a `has_role` guard's refusal at the authority — and
+    // one in seven none — a `!has_role` guard's (`docs/plan-guards.md` D1).
     fn roles(&mut self, peer: i64) -> Op {
         let mut roles = std::collections::BTreeSet::new();
-        for r in super::gen::ROLES {
+        for r in self.role_names.clone() {
             if self.rng.chance(40) {
-                roles.insert(r.to_string());
+                roles.insert(r);
             }
         }
-        let believes = if self.rng.chance(25) {
-            super::gen::ROLES.iter().map(|r| r.to_string()).collect()
-        } else {
-            roles.clone()
+        let believes = match self.rng.below(35) {
+            0..=6 => self.role_names.iter().cloned().collect(),
+            7..=11 => Default::default(),
+            _ => roles.clone(),
         };
         Op::Roles { peer, roles, believes }
     }

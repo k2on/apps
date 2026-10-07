@@ -35,4 +35,10 @@ fn harken_natives_agree_with_the_interpreter_under_random_sessions() {
     }
     assert!(tally.natives_checked >= 500, "too few mutations compared: {tally:?}");
     assert!(tally.entries >= 100, "too few entries sequenced: {tally:?}");
+    // `docs/plan-guards.md` D1: `library` is granted and revoked like any
+    // role, so the library's guard refuses on devices and at the authority.
+    assert!(
+        tally.forbidden_local > 0 && tally.forbidden_remote > 0,
+        "the library's guard was never met: {tally:?}"
+    );
 }

@@ -124,10 +124,16 @@ pub fn schema(rng: &mut Rng) -> Schema {
 }
 
 /// The roles a session may grant a client's login, and its device may
-/// believe it holds. Nothing in the engine asks them yet
-/// (`docs/plan-guards.md` G1); the role changes are drawn so that the
-/// guards that will (G2) meet logins whose roles move.
+/// believe it holds; a generated module's `holds` guard tests one of them
+/// (`docs/plan-guards.md` D1).
 pub const ROLES: [&str; 2] = ["r0", "r1"];
+
+/// What a generated `holds` guard refuses with: how a session tells a
+/// guard's refusal from every other.
+pub const FORBIDDEN: &str = "forbidden";
+
+/// The router whose mutators run `holds`.
+pub const GUARDED: &str = "guarded";
 
 fn col(name: &str, ty: Ty, nullable: bool) -> Column {
     Column {
@@ -362,10 +368,37 @@ impl ModuleGen<'_> {
             mw.push("who".into());
             provided.push(("who".into(), Ty::Text));
         }
+        // `docs/plan-guards.md` D1: a second router whose one guard tests a
+        // role — that the author holds it, or one time in four that they do
+        // not — so that some writes are forbidden to some logins, and a
+        // device that believes wrongly meets the authority's stamp.
+        let guarded = self.rng.chance(60);
+        if guarded {
+            let role = Expr::HasRole(ROLES[self.rng.below(ROLES.len())].into());
+            let refuse_when = if self.rng.chance(25) { role } else { Expr::Op(Op::Not, vec![role]) };
+            functions.push(Function {
+                name: "holds".into(),
+                kind: FnKind::Guard,
+                router: None,
+                uses: vec![],
+                autos: vec![],
+                input: vec![],
+                refine: vec![],
+                ret: None,
+                body: vec![Stmt::If(refuse_when, vec![Stmt::Refuse(lit_text(FORBIDDEN))], vec![])],
+                plan: None,
+                names: BTreeMap::new(),
+            });
+        }
         let mut names: Vec<String> = vec![];
         let n_mut = 3 + self.rng.below(6);
         for k in 0..n_mut {
-            let uses: Vec<String> = mw.iter().filter(|_| self.rng.chance(40)).cloned().collect();
+            let on_guarded = guarded && self.rng.chance(40);
+            let uses: Vec<String> = if on_guarded {
+                vec!["holds".into()]
+            } else {
+                mw.iter().filter(|_| self.rng.chance(40)).cloned().collect()
+            };
             let prov: Vec<(String, Ty)> = provided.iter().filter(|(n, _)| uses.contains(n)).cloned().collect();
             let mut f = self.mutator(k, &prov);
             if names.contains(&f.name) {
@@ -373,6 +406,9 @@ impl ModuleGen<'_> {
             }
             names.push(f.name.clone());
             f.uses = uses;
+            if on_guarded {
+                f.router = Some(GUARDED.into());
+            }
             functions.push(f);
         }
         let n_q = 1 + self.rng.below(4);
@@ -386,10 +422,19 @@ impl ModuleGen<'_> {
             spec: SPEC_VERSION,
             schema: self.sch.clone(),
             functions,
-            routers: vec![Router {
-                name: "api".into(),
-                uses: mw,
-            }],
+            routers: [
+                Router {
+                    name: "api".into(),
+                    uses: mw,
+                },
+                Router {
+                    name: GUARDED.into(),
+                    uses: vec!["holds".into()],
+                },
+            ]
+            .into_iter()
+            .filter(|r| r.name == "api" || guarded)
+            .collect(),
             live: vec![],
         }
     }
