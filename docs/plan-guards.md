@@ -252,7 +252,8 @@ failed to verify, `TypeMismatch filter on id` — the generator's misses,
 counted, not findings). Not run: `nix flake check`, `perf.rs` in release.
 
 **D1, guards and stamped roles** (`5d6b329`, `528bed9`, `6545356`,
-`aaff24d`, `c8b54e1`). `Entry` carries `roles`, frozen by
+`aaff24d`, `c8b54e1`; after `checks.versions`, `e757a39`, `ef701df`,
+`ded02c2`). `Entry` carries `roles`, frozen by
 `Replica::mutate` from the author's `Ctx` and written `roles` — texts in
 ascending order, present only when not empty, so every entry from before
 is the bytes it was. The authority stamps: `Server` runs and logs a pushed
@@ -278,8 +279,10 @@ One thing moved after it was committed, because the fuzzer found it
 ahead of the ack, so a device whose ack and page were dropped, never told
 a log's name, kept them in its inbox through a server that lost its log,
 and confirmed the new log's first entry by them. They ride the ack now —
-`ack`'s `facts`, present only when the device's roles were not the ones
-logged, a duplicate's included — and arrive with the log they are of.
+`ack`'s `facts`, a duplicate's included — and arrive with the log they
+are of; and only when the stamp changed the roles *and* the closure reads
+a role outside its guards (`hash::reads_roles`: a guard only refuses, so
+an admitted entry's facts cannot depend on it).
 `the_stamps_facts_arrive_with_the_log_they_are_of` holds it; the
 finding's own vector was not kept, since its interleaving hinged on the
 frame that is gone.
@@ -299,6 +302,34 @@ device took bob's removal); the guard skipped at the authority (42
 `forbidden` findings); harken's fuzz granting only `r0`/`r1` (its guard
 never met at the authority).
 
+**What the version matrix found** (`checks.versions` on `9306447`, five
+scenarios). The guard moved the six library mutators' hashes, and what
+that does across versions is three things. A fresh server of this build
+never ran the module an old peer authors at, so every old `add_song` was
+held for ever (1, 2, 5): `ark_server::Builder::ran_before` records a
+module as one an earlier start ran — `HARKEN_OLD_MODULES`,
+`services.harken.oldModules` — and the flake hands each pinned
+revision's committed `harken.ark` to the matrix, whose fresh servers are
+told them (`Fleet::beside`); those intents run the old closures,
+unguarded. A peer upgraded in place over intents at a hash its module no
+longer ships rejected them as "no closure for a pending intent" (5b):
+such an intent is kept now, pushed, and confirmed by the authority's
+facts, previewed meanwhile by the facts the alone journal kept
+(`Replica::known`, from `fork_back`) while they are still a transition
+from the view, and by nothing otherwise — previewing them over a view
+somebody else's entries had moved tripped the rebase's own assertion; a
+peer alone refuses one, "no closure, and no authority to run it". And
+an old server holds every intent of this build at a moved hash, so
+scenario 3 holds three where it held one, and all land after the
+upgrade. The narrowing of the ack's facts came from the same reading:
+every old peer's push is restamped, since it sends no roles, and was
+being acknowledged with facts it did not need. `cargo test -p
+harken-server --test versions` with both pinned revisions: 9 passed, 1
+ignored (5c). Falsified: rejecting again in `run_pending`, `known` left
+empty, the check in `local_commit` removed, `reads_roles` ignored,
+`transitions` always true — each fails its test; without the old module
+told, 1, 2 and 5 fail as the matrix did.
+
 Numbers. `arkc fuzz --seed 1 --cases 200` (debug): 400 sessions, 37,737
 ops, 7,070 entries, 1,764 role changes, 2,120 writes forbidden on the
 device and 173 at the authority, 8,253 entries held to the stamp (1,832
@@ -307,16 +338,24 @@ from a device that believed otherwise), 0 findings. `--seconds 300`
 changes, 113,371 forbidden on the device and 10,342 at the authority,
 576,433 entries held to the stamp (129,009 corrected), 0 findings (12 of
 10,781 generated modules failed to verify, `TypeMismatch filter on id`,
-the generator's misses). `perf.rs` in release: every flat line flat, l/f
-0.97–1.46; `perf_a_mutate_alone` 22–23 µs at 500 to 8,000 items; a
+the generator's misses); after the matrix's fixes, the same 200 cases to
+the op, and `--seconds 300`: 13,304 cases, 2,491,652 ops, 496,448
+entries, 116,117 role changes, 0 findings (the fuzzer's generated guards
+read no role in a body, so it sends no ack's facts at all now).
+`perf.rs` in release, before and after the matrix's fixes: every flat
+line flat, l/f 0.96–1.46; `perf_a_mutate_alone` 22–24 µs at 500 to
+8,000 items; a
 Batch of 256 encodes in 13,598 allocations and decodes in 7,439, as
 before — a whole peer's frames are the bytes they were. The fleet
 scenario takes about 20 s.
 
-Not verified: `nix flake check` (the coordinator runs it). An entry a
-client authors at a library mutator's old hash still runs that closure,
-unguarded, at a server that ran the module before `is_library` (closure
-provenance keeps it); nothing withdraws a hash yet. A body that reads a
+Not verified: `nix flake check` (the coordinator runs it; `checks.versions`
+was run here with the two pinned revisions' binaries and modules by
+hand, `checks.harken-module` built). An entry a client authors at a
+library mutator's old hash still runs that closure, unguarded, at a
+server that ran — or was told it ran — the module before `is_library`
+(closure provenance keeps it, and the matrix needs it); nothing
+withdraws a hash yet. A body that reads a
 role beyond refusing is confirmed by the ack's facts, and the device's
 preview of it is recorded as a divergence — right, and loud, and not
 something harken does.
