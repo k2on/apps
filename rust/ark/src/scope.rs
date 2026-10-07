@@ -427,7 +427,7 @@ fn value(e: &Expr, ctx: &Ctx) -> Option<Value> {
         },
         Expr::Op(Op::And, xs) => {
             let vs: Vec<Option<Value>> = xs.iter().map(|x| value(x, ctx)).collect();
-            if vs.iter().any(|v| *v == Some(Value::Bool(false))) {
+            if vs.contains(&Some(Value::Bool(false))) {
                 Value::Bool(false)
             } else if vs.iter().all(|v| *v == Some(Value::Bool(true))) {
                 Value::Bool(true)
@@ -437,7 +437,7 @@ fn value(e: &Expr, ctx: &Ctx) -> Option<Value> {
         }
         Expr::Op(Op::Or, xs) => {
             let vs: Vec<Option<Value>> = xs.iter().map(|x| value(x, ctx)).collect();
-            if vs.iter().any(|v| *v == Some(Value::Bool(true))) {
+            if vs.contains(&Some(Value::Bool(true))) {
                 Value::Bool(true)
             } else if vs.iter().all(|v| *v == Some(Value::Bool(false))) {
                 Value::Bool(false)

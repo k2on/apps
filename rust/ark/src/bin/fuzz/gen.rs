@@ -1479,7 +1479,7 @@ pub fn scoped(rng: &mut Rng, m: &Module) -> Option<Result<Module, String>> {
                 if also.is_some() && r.name == "api" {
                     uses.push("also".into());
                 }
-                uses.extend(r.uses.drain(..));
+                uses.append(&mut r.uses);
                 r.uses = uses;
             }
         }
@@ -1490,7 +1490,7 @@ pub fn scoped(rng: &mut Rng, m: &Module) -> Option<Result<Module, String>> {
                 if also.is_some() && r == "api" && rng.chance(50) {
                     uses.push("also".into());
                 }
-                uses.extend(f.uses.drain(..));
+                uses.append(&mut f.uses);
                 f.uses = uses;
             }
         }

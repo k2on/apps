@@ -112,6 +112,9 @@ fn holds_are_on_the_wire_only_for_a_scope() {
     assert!(ir::function_from_value(&fv).is_err(), "a scope with no holds key");
 }
 
+// One refusal case: what it is, the module, and the complaint it wants.
+type Case = (&'static str, ir::Module, fn(&Complaint) -> bool);
+
 /// The verifier holds a scope to its shape and its holds to their table:
 /// each of these is a one-line edit of a module that verifies, refused
 /// with its own complaint. Falsified by accepting an argument in a hold's
@@ -126,7 +129,7 @@ fn the_verifier_holds_a_scope_to_ctx_and_its_tables() {
             f.holds.iter_mut().find(|h| h.table == "member").unwrap().filter = Some(p);
         })
     };
-    let cases: Vec<(&str, ir::Module, fn(&Complaint) -> bool)> = vec![
+    let cases: Vec<Case> = vec![
         (
             "an argument",
             set(Pred::Cmp("user".into(), ir::CmpOp::Eq, Expr::Arg("who".into()))),
@@ -216,13 +219,13 @@ fn client_is_a_query_over_a_scope() {
     assert_eq!(m.lookup_function("my_orgs").unwrap().kind, FnKind::Query);
     let bare = router::<orgs::Orgs>("bare");
     let refused = Authored::new((bare.routes((bare.client("all", |_ctx, db, ()| db.org.rows()),)),));
-    let errs = refused.try_build().err().expect("refused");
+    let errs = refused.try_build().expect_err("refused");
     assert!(errs.iter().any(|e| e.contains("carries no scope")), "{errs:?}");
     // And a scope's filter can only be a filter.
     let r = router::<orgs::Orgs>("r");
     let s = r.server("ordered", |_ctx, db| db.org.rows().order_by(orgs::Org::name.asc()));
     let refused = Authored::new((r.routes((s.client("q", |_ctx, db, ()| db.org.rows()),)),));
-    let errs = refused.try_build().err().expect("refused");
+    let errs = refused.try_build().expect_err("refused");
     assert!(errs.iter().any(|e| e.contains("a scope holds rows")), "{errs:?}");
     let _ = APred::<orgs::Org>::when;
 }

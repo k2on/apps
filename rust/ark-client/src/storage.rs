@@ -811,7 +811,7 @@ pub fn encode_replica_held(
     if let Some(h) = partial {
         let held = h
             .iter()
-            .map(|(t, cs)| (t.clone(), Value::List(cs.iter().map(|c| Value::text(c)).collect())))
+            .map(|(t, cs)| (t.clone(), Value::List(cs.iter().map(Value::text).collect())))
             .collect();
         fields.push(("partial", Value::Struct(Box::new(held))));
     }
