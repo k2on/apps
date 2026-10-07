@@ -23,7 +23,15 @@
 //! generated guard refuses (`holds`, testing a role, on a router of its
 //! own) lands nowhere (`docs/plan-guards.md` D1); logins are granted and
 //! revoked roles as the session goes, and their devices believe them, all
-//! of them, or none. After every session the fleet must have converged on the
+//! of them, or none. One generated module in two is given scopes
+//! (`docs/plan-guards.md` D2; [`gen::scoped`]): an own column that is the
+//! person's name, a role, the `exists` form, a projection; and then after
+//! every op every partial client must hold exactly its union of the state
+//! at its cursor — no row and no column outside it, nothing in it missing
+//! (`Sim::unions_hold`) — and every frame a whole client is sent must carry
+//! nothing of a union, so its bytes are a server's with no scope; at the
+//! end every client holds its union, at the authority's digest of it. After
+//! every session the fleet must have converged on the
 //! authority's head and hash, the log must replay from its facts and from
 //! its intents to the same state, no `Verify` may have been answered
 //! "disagreed" — one below the horizon, or naming another log than the
@@ -81,6 +89,12 @@ pub struct Stats {
     /// Modules that did not verify, by the first complaint.
     pub misses: BTreeMap<String, u64>,
     pub sessions: u64,
+    /// Generated modules given scopes (`docs/plan-guards.md` D2), and of
+    /// those, the ones whose scopes exclude a column and use the `exists`
+    /// form.
+    pub scoped: u64,
+    pub projected: u64,
+    pub reaching: u64,
     pub churn_pushes: u64,
     pub tally: session::Tally,
     pub findings: Vec<(u64, String, String, String)>,
@@ -242,6 +256,10 @@ fn report(s: &Stats, took: Duration) {
         "    {} role changes; {} writes forbidden on the device and {} at the authority; {} entries held to the stamp, {} of them from a device that believed otherwise",
         t.role_changes, t.forbidden_local, t.forbidden_remote, t.stamps_checked, t.stamps_corrected
     );
+    println!(
+        "    {} modules scoped ({} excluding a column, {} with the exists form); {} peers ended holding a union and {} whole; {} unions checked",
+        s.scoped, s.projected, s.reaching, t.partial_peers, t.whole_peers, t.unions_checked
+    );
     for (seed, check, path, why) in &s.findings {
         println!("  finding: seed {seed}, {check}: {why}\n    written to {path}");
     }
@@ -272,6 +290,25 @@ fn case(seed: u64, o: &Opts, stats: &mut Stats) {
             match gen::module(&mut rng, &sch) {
                 Ok(m) => {
                     stats.verified += 1;
+                    // `docs/plan-guards.md` D2: scopes, one module in two.
+                    let m = match gen::scoped(&mut rng, &m) {
+                        None => m,
+                        Some(Ok(s)) => {
+                            stats.scoped += 1;
+                            let holds: Vec<&ark::ir::Hold> = s.functions.iter().flat_map(|f| &f.holds).collect();
+                            if holds.iter().any(|h| h.columns != ark::ir::Projection::All) {
+                                stats.projected += 1;
+                            }
+                            if holds.iter().any(|h| format!("{:?}", h.filter).contains("Exists")) {
+                                stats.reaching += 1;
+                            }
+                            s
+                        }
+                        Some(Err(why)) => {
+                            *stats.misses.entry(format!("scoped: {why}")).or_default() += 1;
+                            m
+                        }
+                    };
                     got = Some(m);
                     break;
                 }
@@ -366,6 +403,18 @@ pub fn replay(path: &str) -> i32 {
         if r.is_err() {
             println!("op {k} ({op:?}) panicked");
             describe(&sim);
+            return 1;
+        }
+        // `docs/plan-guards.md` D2 What every partial client holds, after
+        // every op, as the session held it.
+        if let Err(e) = sim.unions_hold() {
+            println!("op {k}: {e}");
+            for (i, c) in &sim.clients {
+                println!("  client {i}: partial {:?}", c.replica.partial);
+                if let Some(h) = sim.served.get(i).and_then(|w| sim.server.holdings_of(w)) {
+                    println!("    its union now: {:?}", h.columns());
+                }
+            }
             return 1;
         }
     }

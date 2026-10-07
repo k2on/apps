@@ -11,7 +11,7 @@ use ark::ir::module_from_value;
 use super::{claim, Out};
 
 /// Each session, by the name it is published under.
-const SESSIONS: [(&str, &str); 3] = [
+const SESSIONS: [(&str, &str); 4] = [
     (
         "fleet-fuzz-an-ack-at-or-below-the-cursor.json",
         include_str!("fuzzed/fleet-fuzz-an-ack-at-or-below-the-cursor.json"),
@@ -23,6 +23,13 @@ const SESSIONS: [(&str, &str); 3] = [
     (
         "fleet-fuzz-an-ack-names-no-log-and-the-replay-refuses.json",
         include_str!("fuzzed/fleet-fuzz-an-ack-names-no-log-and-the-replay-refuses.json"),
+    ),
+    // `docs/plan-guards.md` D2: a client holding a union, re-opened from
+    // what it made durable, kept laying out every later snapshot from the
+    // device's schema instead of the module's.
+    (
+        "fleet-fuzz-a-union-reopened-keeps-the-modules-schema.json",
+        include_str!("fuzzed/fleet-fuzz-a-union-reopened-keeps-the-modules-schema.json"),
     ),
 ];
 

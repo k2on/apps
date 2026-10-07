@@ -88,6 +88,34 @@ impl Scopes {
         }
     }
 
+    /// The scopes the procedures among `closures` run, each once, over
+    /// `schema`: [`Scopes::of`] for a peer that holds closures and no module
+    /// — the simulation, a vector's runner — since a procedure's closure
+    /// carries every scope it uses.
+    pub fn of_closures<'c>(schema: &Schema, closures: impl IntoIterator<Item = &'c crate::hash::Closure>) -> Scopes {
+        let mut seen: BTreeMap<String, &Function> = BTreeMap::new();
+        for c in closures {
+            if !c.function.kind.is_procedure() {
+                continue;
+            }
+            for u in &c.function.uses {
+                if let Some(f) = c.helpers.iter().find(|h| h.name == *u && h.kind == FnKind::Scope) {
+                    seen.entry(f.name.clone()).or_insert(f);
+                }
+            }
+        }
+        let mut holds: BTreeMap<TableName, Vec<Hold>> = BTreeMap::new();
+        for f in seen.values() {
+            for h in &f.holds {
+                holds.entry(h.table.clone()).or_default().push(h.clone());
+            }
+        }
+        Scopes {
+            schema: schema.clone(),
+            holds,
+        }
+    }
+
     /// Whether the module has any scope at all: when not, every person holds
     /// everything and nothing here is asked.
     pub fn is_empty(&self) -> bool {

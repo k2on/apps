@@ -487,7 +487,7 @@ impl Peer {
         // server's first answer names it (Round 4).
         r.log_id = durable.log_id;
         r.hold(natives.iter().cloned());
-        let mut client = Client::open(r, Mode::Whole, opts.token.clone());
+        let mut client = Client::open(r, Mode::Whole, opts.token.clone()).with_schema(schema.clone());
         // What the server's module is compared with (`behind`,
         // `docs/plan-db.md` D1).
         client.module = Some(domain.hash());

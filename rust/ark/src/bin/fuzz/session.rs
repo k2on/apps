@@ -105,6 +105,12 @@ pub struct Tally {
     /// a device whose belief was not its login's roles.
     pub stamps_checked: u64,
     pub stamps_corrected: u64,
+    /// `docs/plan-guards.md` D2 Clients at the end of a session over a
+    /// scoped module that held a union, and that held everything; and how
+    /// many times a partial client's holding was checked against its union.
+    pub partial_peers: u64,
+    pub whole_peers: u64,
+    pub unions_checked: u64,
 }
 
 struct Held {
@@ -284,6 +290,19 @@ pub fn run(m: &Module, natives: &[(FnHash, Procedure)], seed: u64, without: &[St
     tally.forbidden_local += t.forbidden_local;
     tally.stamps_checked += t.stamps_checked;
     tally.stamps_corrected += t.stamps_corrected;
+    tally.unions_checked += t.unions_checked;
+    if s.sim.scopes.is_some() {
+        for (i, c) in &s.sim.clients {
+            if s.sim.nobody.contains(i) {
+                continue;
+            }
+            if c.replica.partial.is_some() {
+                tally.partial_peers += 1;
+            } else {
+                tally.whole_peers += 1;
+            }
+        }
+    }
     tally.forbidden_remote += s
         .sim
         .clients
@@ -430,6 +449,14 @@ impl S<'_> {
         if let Some(why) = self.sim.faults.first() {
             return Some(self.finding("faults", why.clone()));
         }
+        // `docs/plan-guards.md` D2 No client holds a row or a column outside
+        // its union, nor misses one in it.
+        if self.sim.scopes.is_some() {
+            self.tally.unions_checked += self.sim.clients.values().filter(|c| c.replica.partial.is_some()).count() as u64;
+            if let Err(why) = self.sim.unions_hold() {
+                return Some(self.finding("union", why));
+            }
+        }
         if let Some(f) = self.stamps() {
             return Some(f);
         }
@@ -517,9 +544,12 @@ impl S<'_> {
     // rebuild, pushed the changes otherwise, and held to the contract.
     fn push_views(&mut self, i: i64, ch: Changes) -> Option<Finding> {
         let m = self.m;
-        let sch = &m.schema;
         let c = self.sim.clients.get(&i)?;
         let st = c.replica.view.clone();
+        // A partial client's views are over its device's schema
+        // (`docs/plan-guards.md` D2).
+        let device = st.schema().clone();
+        let sch = &device;
         match ch {
             Changes::Rebuilt => {
                 let ctx = ctx_of(&self.sim, i);
@@ -820,6 +850,9 @@ impl<'a> Draw<'a> {
                 2 => Value::Int(1 << 40),
                 _ => Value::Int(self.rng.below(12) as i64 - 3),
             },
+            // One time in four a client's name, which a scope's own-column
+            // form compares with the person (`docs/plan-guards.md` D2).
+            Ty::Text if self.rng.chance(25) => Value::text(format!("peer-{}", self.rng.below(4))),
             Ty::Text => Value::text(TEXTS[self.rng.below(TEXTS.len())]),
             Ty::Bool => Value::Bool(self.rng.chance(50)),
             Ty::Bytes => Value::Bytes((0..self.rng.below(3)).map(|i| i as u8 * 7).collect()),

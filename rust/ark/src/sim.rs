@@ -25,7 +25,7 @@ use crate::journal::{self, Journal, Keys, Layout};
 use crate::live::{ConnId, Silent};
 use crate::log::{Log, Seq};
 use crate::peer::{Authority, Changes, Journal as Durable, Replica, Sequenced};
-use crate::protocol::{open_access, trusting, Client, ClientMsg, Mode, Server, ServerMsg};
+use crate::protocol::{dev_identity, open_access, trusting, Client, ClientMsg, Identity, Mode, Server, ServerMsg};
 use crate::schema::Schema;
 use crate::store::{MemoryStore, Store};
 use crate::value::{hex, Id, Value};
@@ -85,9 +85,14 @@ pub struct Sim {
     /// device's preview reads what it believes (`docs/plan-guards.md` D1).
     pub roles: BTreeMap<i64, BTreeSet<String>>,
     pub believes: BTreeMap<i64, BTreeSet<String>>,
-    /// `docs/plan-guards.md` D2 The module's scopes, which the server serves
-    /// each connection by, through every restart ([`Sim::scoped`]).
+    /// `docs/plan-guards.md` D2 The module's scopes, read off the closures
+    /// the fleet runs: what the server serves each connection by, through
+    /// every restart. `None` for a module with none.
     pub scopes: Option<crate::scope::Scopes>,
+    /// The identity each partial client was last started from a snapshot
+    /// under, as the server took it at that connection's `Hello`: what the
+    /// rows it holds are a union for.
+    pub served: BTreeMap<i64, Identity>,
 }
 
 /// One frame, as it went on the wire.
@@ -203,7 +208,13 @@ impl Sim {
     /// A fleet: a trusting server that is the log's authority, and `n`
     /// clients each holding the log whole, all connected.
     pub fn new(sch: Schema, bodies: BTreeMap<FnHash, Closure>, n: i64, seed: u64) -> Sim {
-        let server = Server::open(trusting(), open_access(), Silent, Authority::new(sch.clone(), bodies.clone()));
+        let mut server = Server::open(trusting(), open_access(), Silent, Authority::new(sch.clone(), bodies.clone()));
+        // `docs/plan-guards.md` D2 The scopes the procedures run, served by
+        // from the first `Hello`.
+        let scopes = Some(crate::scope::Scopes::of_closures(&sch, bodies.values())).filter(|s| !s.is_empty());
+        if let Some(sc) = &scopes {
+            server.set_scopes(sc.clone());
+        }
         let clients = (0..n)
             .map(|i| {
                 let r = Replica::open(sch.clone(), bodies.clone(), MemoryStore::empty(sch.clone()), 0, vec![]);
@@ -233,7 +244,8 @@ impl Sim {
             faults: vec![],
             roles: BTreeMap::new(),
             believes: BTreeMap::new(),
-            scopes: None,
+            scopes,
+            served: BTreeMap::new(),
         };
         for i in 0..n {
             sim.heal(i);
@@ -246,6 +258,47 @@ impl Sim {
     /// under — with the roles its device believes it holds.
     pub fn ctx_of(&self, i: i64) -> Ctx {
         Ctx::new(name(i), "dev").with_roles(self.believes.get(&i).cloned().unwrap_or_default())
+    }
+
+    /// Who the server takes client `i` for: its name and the roles its
+    /// login holds.
+    pub fn identity_of(&self, i: i64) -> Identity {
+        dev_identity(&token(i, self.roles.get(&i)), "dev")
+    }
+
+    /// `docs/plan-guards.md` D2 What client `i` holds of the authority's
+    /// scopes as its login stands: `None` when everything.
+    pub fn holdings_of(&self, i: i64) -> Option<crate::scope::Holdings> {
+        self.server.holdings_of(&self.identity_of(i))
+    }
+
+    /// `docs/plan-guards.md` D2 Every partial client holds exactly its union
+    /// of the state at its cursor, under the identity it was last served
+    /// as: no row and no column outside it, nothing in it missing, laid out
+    /// under the schema it says — rows projected, the excluded columns
+    /// absent. Asked only where it can be: a replica of this log, with its
+    /// cursor between the horizon and the head.
+    pub fn unions_hold(&self) -> Result<(), String> {
+        let log = &self.server.authority.log;
+        for (i, c) in &self.clients {
+            let r = &c.replica;
+            let Some(who) = self.served.get(i) else { continue };
+            if r.partial.is_none() || self.nobody.contains(i) || r.log_id != log.id() {
+                continue;
+            }
+            let Some(h) = self.server.holdings_of(who) else { continue };
+            if r.partial.as_ref() != Some(&h.columns()) || r.confirmed.schema() != h.schema() {
+                return Err(format!("client {i} is laid out for another union than {}'s", who.user));
+            }
+            let Some(st) = log.state_at(r.cursor) else { continue };
+            let want = h.held_rows(&st);
+            for t in self.schema.tables() {
+                if r.confirmed.scan(&t.name) != want[&t.name] {
+                    return Err(format!("client {i} at {} does not hold what {} holds of {}", r.cursor, who.user, t.name));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Client `i`'s login holds `roles` and its device believes
@@ -265,20 +318,6 @@ impl Sim {
             self.partition(i);
             self.heal(i);
         }
-    }
-
-    /// Serve every connection what its identity holds of these scopes, from
-    /// its next `Hello` on and through every restart (`docs/plan-guards.md`
-    /// D2). Every client connected now reconnects.
-    pub fn scoped(mut self, scopes: crate::scope::Scopes) -> Sim {
-        self.server.set_scopes(scopes.clone());
-        self.scopes = Some(scopes);
-        let linked: Vec<i64> = self.conn.keys().copied().collect();
-        for i in linked {
-            self.partition(i);
-            self.heal(i);
-        }
-        self
     }
 
     /// Record every frame put on the wire from here on, in [`Sim::tap`].
@@ -438,6 +477,32 @@ impl Sim {
     // A frame reaches a client's inbox; nothing is applied until the
     // client settles (R8 of `docs/plan-perf.md`).
     fn deliver_to_client(&mut self, i: i64, m: ServerMsg) {
+        // The identity a partial snapshot is of: the connection's, as the
+        // server took it at its `Hello` — not the token's now, which a
+        // sign-in on a connection already open moves without a `Hello`
+        // (`docs/plan-guards.md` D2).
+        if matches!(m, ServerMsg::SnapshotOf { held: Some(_), .. }) {
+            if let Some(who) = self.conn.get(&i).and_then(|c| self.server.identity(*c)).cloned() {
+                self.served.insert(i, who);
+            }
+        }
+        // And what a whole peer is sent carries nothing of the union — no
+        // `after`/`upto`, no `partial`/`held` — so its bytes are what a
+        // server with no scope sends; a partial peer's pages always carry
+        // what they cover.
+        if self.scopes.is_some() {
+            if let Some(who) = self.conn.get(&i).and_then(|c| self.server.identity(*c)).cloned() {
+                let whole = self.server.holdings_of(&who).is_none();
+                let marked = matches!(&m, ServerMsg::Batch { covers: Some(_), .. } | ServerMsg::SnapshotOf { held: Some(_), .. });
+                let page = matches!(&m, ServerMsg::Batch { .. });
+                if whole && marked {
+                    self.faults.push(format!("client {i}, whole, was sent a frame of a union: {m:?}"));
+                } else if !whole && page && !marked {
+                    self.faults
+                        .push(format!("client {i}, partial, was sent a page that says nothing of what it covers"));
+                }
+            }
+        }
         let Some(c) = self.clients.get_mut(&i) else { return };
         c.recv(m);
     }
@@ -799,7 +864,7 @@ impl Sim {
         r.log_id = k.log_id;
         r.partial = k.partial;
         r.through = k.cursor;
-        let mut c = Client::open(r, old.mode, old.token.clone());
+        let mut c = Client::open(r, old.mode, old.token.clone()).with_schema(old.schema.clone());
         if self.native_peers.contains(&i) {
             c.hold(&self.natives);
         }
@@ -821,6 +886,21 @@ impl Sim {
             if self.nobody.contains(i) {
                 continue;
             }
+            // `docs/plan-guards.md` D2 Each client holds its union: the
+            // whole store when it holds everything, and otherwise its union,
+            // by rows, columns and digest.
+            let held = self.holdings_of(*i);
+            if c.replica.partial.is_some() != held.is_some() {
+                return Err(format!(
+                    "client {i} holds {} and is {}",
+                    if c.replica.partial.is_some() { "a union" } else { "the log whole" },
+                    if held.is_some() { "partial" } else { "whole" }
+                ));
+            }
+            let hash = match &held {
+                None => hash.clone(),
+                Some(h) => h.digest(&self.server.authority.store),
+            };
             let (n, h) = c.replica.verify_at();
             if (n, &h) != (head, &hash) {
                 return Err(format!("client {i} at {n} {} and the server at {head} {}", hex(&h), hex(&hash)));
@@ -1024,6 +1104,7 @@ pub fn run_script(sch: Schema, bodies: BTreeMap<FnHash, Closure>, clients: i64, 
         if let Some(f) = sim.faults.first() {
             return Err(f.clone());
         }
+        sim.unions_hold().map_err(|e| format!("op {k}: {e}"))?;
     }
     sim.try_settle()?;
     sim.converged()?;

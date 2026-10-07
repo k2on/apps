@@ -12,8 +12,8 @@
 use std::collections::BTreeMap;
 
 use ark::ir::{
-    Auto, Block, Check, CmpOp, Expr, Field, FnKind, Function, Key, Lookup, Module, Op, Plan, Pred, Related, Router, Source, StdFn, Stmt, Sym,
-    SPEC_VERSION,
+    Auto, Block, Check, CmpOp, Expr, Field, FnKind, Function, Hold, Key, Lookup, Module, Op, Plan, Pred, Projection, Related, Router, Source, StdFn,
+    Stmt, Sym, SPEC_VERSION,
 };
 use ark::schema::{Column, Dir, Index, Ref, Schema, Table, Ty};
 use ark::value::{FieldName, Value};
@@ -1356,4 +1356,183 @@ impl ModuleGen<'_> {
         p.limit = Some(1 + self.rng.below(3) as i64);
         p
     }
+}
+
+/// `docs/plan-guards.md` D2 Scopes over a generated module, one module in
+/// two: `sees` on the `api` router (and, one time in two, the guarded
+/// one), holding one table by an own column — a text column that is the
+/// person's name — or a role, or either, and the parent of a reference by
+/// the `exists` form, its child's text column the person's name; one time
+/// in two a projection excluding a column; and one time in two a chain
+/// scope `also` on some procedures, a role widening another table. `None`
+/// when the module is left unscoped; otherwise the scoped module verified,
+/// or the complaint — a projection a procedure names (`NotHeld`) is taken
+/// out first, since what the verifier refuses there is what it should.
+pub fn scoped(rng: &mut Rng, m: &Module) -> Option<Result<Module, String>> {
+    if !rng.chance(50) {
+        return None;
+    }
+    let sch = &m.schema;
+    let user = Expr::CtxUser;
+    let role = |rng: &mut Rng| Pred::When(Expr::HasRole(ROLES[rng.below(ROLES.len())].into()));
+    let text_col = |t: &Table| -> Option<FieldName> {
+        let cs: Vec<FieldName> = t
+            .columns
+            .iter()
+            .filter(|c| c.ty == Ty::Text && !c.nullable)
+            .map(|c| c.name.clone())
+            .collect();
+        cs.first().cloned()
+    };
+    let mut holds: Vec<Hold> = vec![];
+    // The own-column form, or a role, or either.
+    let tables: Vec<Table> = sch.tables.clone();
+    if let Some(t) = rng.pick(&tables).cloned() {
+        let own = text_col(&t).map(|c| Pred::Cmp(c, CmpOp::Eq, user.clone()));
+        let filter = match (own, rng.below(3)) {
+            (Some(o), 0) => o,
+            (Some(o), 1) => Pred::Any(vec![o, role(rng)]),
+            _ => role(rng),
+        };
+        holds.push(Hold {
+            table: t.name.clone(),
+            filter: Some(filter),
+            columns: Projection::All,
+        });
+    }
+    // The `exists` form: a parent with a one-column key that a child with a
+    // text column references.
+    let pairs: Vec<(String, String, FieldName, FieldName)> = tables
+        .iter()
+        .flat_map(|c| {
+            c.refs
+                .iter()
+                .filter(|r| r.table != c.name && sch.lookup_table(&r.table).is_some_and(|p| p.key.len() == 1))
+                .filter_map(|r| text_col(c).map(|tc| (r.table.clone(), c.name.clone(), r.column.clone(), tc)))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    if let Some((p, c, rc, tc)) = rng.pick(&pairs).cloned() {
+        if !holds.iter().any(|h| h.table == p) {
+            let mut filter = Pred::Exists(c, rc, Box::new(Pred::Cmp(tc, CmpOp::Eq, user.clone())));
+            if rng.chance(30) {
+                filter = Pred::Any(vec![filter, role(rng)]);
+            }
+            holds.push(Hold {
+                table: p,
+                filter: Some(filter),
+                columns: Projection::All,
+            });
+        }
+    }
+    // A projection.
+    if rng.chance(50) {
+        let k = rng.below(holds.len().max(1));
+        if let Some(h) = holds.get_mut(k) {
+            let t = sch.lookup_table(&h.table).expect("a held table");
+            let others: Vec<FieldName> = t.columns.iter().map(|c| c.name.clone()).filter(|c| !t.key.contains(c)).collect();
+            if let Some(c) = rng.pick(&others).cloned() {
+                h.columns = Projection::Exclude(vec![c]);
+            }
+        }
+    }
+    if holds.is_empty() {
+        return None;
+    }
+    let scope = |name: &str, holds: Vec<Hold>| Function {
+        name: name.into(),
+        kind: FnKind::Scope,
+        router: None,
+        uses: vec![],
+        autos: vec![],
+        input: vec![],
+        refine: vec![],
+        ret: None,
+        body: vec![],
+        plan: None,
+        holds,
+        names: BTreeMap::new(),
+    };
+    let also = rng.chance(50).then(|| {
+        let t = rng.pick(&tables).cloned().expect("a table");
+        scope(
+            "also",
+            vec![Hold {
+                table: t.name,
+                filter: Some(role(rng)),
+                columns: Projection::All,
+            }],
+        )
+    });
+    let on_guarded = rng.chance(50);
+    let build = |holds: Vec<Hold>, rng: &mut Rng| -> Module {
+        let mut m = m.clone();
+        let first = m.functions.iter().position(|f| f.kind.is_procedure()).unwrap_or(m.functions.len());
+        let mut fs = vec![scope("sees", holds)];
+        fs.extend(also.clone());
+        for (k, f) in fs.into_iter().enumerate() {
+            m.functions.insert(first + k, f);
+        }
+        for r in &mut m.routers {
+            if r.name == "api" || (on_guarded && r.name == GUARDED) {
+                let mut uses = vec!["sees".to_string()];
+                if also.is_some() && r.name == "api" {
+                    uses.push("also".into());
+                }
+                uses.extend(r.uses.drain(..));
+                r.uses = uses;
+            }
+        }
+        for f in m.functions.iter_mut().filter(|f| f.kind.is_procedure()) {
+            let r = f.router.clone().unwrap_or_default();
+            if r == "api" || (on_guarded && r == GUARDED) {
+                let mut uses = vec!["sees".to_string()];
+                if also.is_some() && r == "api" && rng.chance(50) {
+                    uses.push("also".into());
+                }
+                uses.extend(f.uses.drain(..));
+                f.uses = uses;
+            }
+        }
+        m
+    };
+    // A procedure a client runs that names an excluded column is what the
+    // verifier refuses (`NotHeld`), rightly: such procedures are left out,
+    // so that the projection is kept and served, as long as a mutator is
+    // left; otherwise the projection goes.
+    let mut m1 = build(holds.clone(), rng);
+    for _ in 0..4 {
+        match ark::verify::verify(&m1) {
+            Ok(v) => return Some(Ok(v)),
+            Err(es) => {
+                let refused: Vec<String> = es
+                    .iter()
+                    .filter_map(|e| match e {
+                        ark::verify::VerifyError::In(f, ark::verify::Complaint::NotHeld(..)) => Some(f.clone()),
+                        _ => None,
+                    })
+                    .collect();
+                if refused.len() < es.len() {
+                    return Some(Err(complaint_kind(&es[0])));
+                }
+                let left = m1
+                    .functions
+                    .iter()
+                    .filter(|f| f.kind == FnKind::Mutator && !refused.contains(&f.name))
+                    .count();
+                if left == 0 {
+                    break;
+                }
+                m1.functions.retain(|f| !refused.contains(&f.name));
+            }
+        }
+    }
+    let all: Vec<Hold> = holds
+        .into_iter()
+        .map(|h| Hold {
+            columns: Projection::All,
+            ..h
+        })
+        .collect();
+    Some(ark::verify::verify(&build(all, rng)).map_err(|es| complaint_kind(&es[0])))
 }

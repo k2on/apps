@@ -994,6 +994,14 @@ impl Client {
         }
     }
 
+    /// `docs/plan-guards.md` D2 The module's schema, for a client opened
+    /// over a replica that holds a union and is laid out under the
+    /// device's: what every later snapshot's device schema is made from.
+    pub fn with_schema(mut self, module: Schema) -> Client {
+        self.schema = module;
+        self
+    }
+
     /// §12 `behind` (`docs/plan-db.md` D1): both module hashes are known
     /// and they differ. The schema the server's facts are of is then not
     /// this peer's — narrower or wider, a hash cannot say which — so its
