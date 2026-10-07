@@ -907,8 +907,9 @@ replaces that with the connection's roles before it runs the intent, so
 the log holds what each entry was judged under and every replay of it —
 a peer's, `Log::state_at`'s, a compaction's — reads the same; a device
 that believed a role its login was never given is refused by the guard
-at the server, and an entry it pushed under another belief is
-acknowledged with the authority's facts. harken's `is_library` is the one
+at the server, and an entry it pushed under another belief, of a
+function whose body reads a role, is acknowledged with the authority's
+facts. harken's `is_library` is the one
 guard of the kind: the library router's mutations are the `library`
 role's, and the playlists are their owner's through `owned`.
 
