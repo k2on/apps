@@ -397,6 +397,7 @@ fn spin() -> ir::Module {
             ))),
         ],
         plan: None,
+        holds: vec![],
         names: BTreeMap::new(),
     };
     ir::Module {
@@ -453,6 +454,7 @@ fn std_over_a_local(f: ir::StdFn, ret: Ty) -> ir::Module {
             Stmt::Return(Some(Expr::Std(f, vec![Expr::Var(1)]))),
         ],
         plan: None,
+        holds: vec![],
         names: BTreeMap::new(),
     };
     ir::Module {

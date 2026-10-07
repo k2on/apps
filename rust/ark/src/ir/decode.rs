@@ -6,7 +6,10 @@
 use std::collections::BTreeMap;
 
 use crate::hash::Closure;
-use crate::ir::{Auto, Check, CmpOp, Expr, Field, FnKind, Function, Key, Lookup, Module, Op, Plan, Pred, Related, Router, Source, StdFn, Stmt, Sym};
+use crate::ir::{
+    Auto, Check, CmpOp, Expr, Field, FnKind, Function, Hold, Key, Lookup, Module, Op, Plan, Pred, Projection, Related, Router, Source, StdFn, Stmt,
+    Sym,
+};
 use crate::schema::{Column, Dir, Index, Ref, Schema, Table, Ty};
 use crate::value::{FieldName, Value};
 
@@ -185,6 +188,15 @@ pub fn function_from_value(v: &Value) -> D<Function> {
         None => None,
         Some(v) => Some(plan(&p("plan"), v)?),
     };
+    // `docs/plan-guards.md` D2 Written for a scope and nothing else: a
+    // scope without them, or anything else with them, is not a function's
+    // one form.
+    let holds = match (kind, fs.get("holds")) {
+        (FnKind::Scope, Some(v)) => list(&p("holds"), |x| hold(&p("holds"), x), v)?,
+        (FnKind::Scope, None) => return err(&p("holds"), "missing field"),
+        (_, None) => vec![],
+        (_, Some(_)) => return err(&p("holds"), "only a scope holds"),
+    };
     Ok(Function {
         name,
         kind,
@@ -196,8 +208,30 @@ pub fn function_from_value(v: &Value) -> D<Function> {
         ret,
         body,
         plan,
+        holds,
         names: BTreeMap::new(),
     })
+}
+
+/// `docs/plan-guards.md` D2 What a scope holds of one table.
+pub fn hold_from_value(v: &Value) -> D<Hold> {
+    hold(&["hold"], v)
+}
+
+fn hold(here: &[&str], v: &Value) -> D<Hold> {
+    let fs = tagged(here, "hold", v)?;
+    let table = text(here, field(&fs, "table")?)?;
+    let inner: Vec<&str> = [here, &[table.as_str()]].concat();
+    let here = inner.as_slice();
+    let filter = optional(|x| pred(here, x), field(&fs, "filter")?)?;
+    let names = |x: &Value| list(here, |c| text(here, c), x);
+    let columns = match (fs.get("pick"), fs.get("exclude")) {
+        (None, None) => Projection::All,
+        (Some(cs), None) => Projection::Pick(names(cs)?),
+        (None, Some(cs)) => Projection::Exclude(names(cs)?),
+        (Some(_), Some(_)) => return err(here, "a hold picks or excludes, not both"),
+    };
+    Ok(Hold { table, filter, columns })
 }
 
 fn why(here: &[&str], v: &Value) -> D<Option<String>> {
@@ -442,6 +476,12 @@ fn pred(here: &[&str], v: &Value) -> D<Pred> {
         "pany" => Pred::Any(list(here, |x| pred(here, x), field(&fs, "items")?)?),
         "pnot" => Pred::Not(Box::new(pred(here, field(&fs, "e")?)?)),
         "phas" => Pred::Has(text(here, field(&fs, "column")?)?, expr(here, field(&fs, "e")?)?),
+        "pwhen" => Pred::When(expr(here, field(&fs, "e")?)?),
+        "pexists" => Pred::Exists(
+            text(here, field(&fs, "table")?)?,
+            text(here, field(&fs, "column")?)?,
+            Box::new(pred(here, field(&fs, "pred")?)?),
+        ),
         other => return err(here, format!("unknown predicate {other}")),
     })
 }

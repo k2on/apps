@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 use crate::hash::Closure;
 use crate::ir::normalize::normalize;
-use crate::ir::{Auto, Check, Expr, Field, Function, Key, Lookup, Module, Plan, Pred, Related, Router, Source, Stmt};
+use crate::ir::{Auto, Check, Expr, Field, FnKind, Function, Hold, Key, Lookup, Module, Plan, Pred, Projection, Related, Router, Source, Stmt};
 use crate::schema::{Dir, Schema, Ty};
 use crate::value::{FieldName, Value};
 
@@ -162,7 +162,25 @@ pub fn function_value(deps: &BTreeMap<String, Value>, fn0: &Function) -> Value {
     if let Some(p) = &f.plan {
         fields.push(("plan", plan(p)));
     }
+    // `docs/plan-guards.md` D2 A scope's holds, written for a scope and for
+    // nothing else, so no function of any module before scopes moves.
+    if f.kind == FnKind::Scope {
+        fields.push(("holds", list(hold_value, &f.holds)));
+    }
     node("fn", fields)
+}
+
+/// `docs/plan-guards.md` D2 What a scope holds of one table:
+/// `{"t":"hold","table","filter"}`, and `pick` or `exclude` — a list of
+/// column names — only where the projection is not every column.
+pub fn hold_value(h: &Hold) -> Value {
+    let mut fields = vec![("table", txt(&h.table)), ("filter", h.filter.as_ref().map(pred).unwrap_or(Value::Null))];
+    match &h.columns {
+        Projection::All => {}
+        Projection::Pick(cs) => fields.push(("pick", list(|c| txt(c), cs))),
+        Projection::Exclude(cs) => fields.push(("exclude", list(|c| txt(c), cs))),
+    }
+    node("hold", fields)
 }
 
 fn why_value(why: &Option<String>) -> Value {
@@ -347,6 +365,11 @@ fn pred(p: &Pred) -> Value {
         Pred::Any(ps) => node("pany", vec![("items", list(pred, ps))]),
         Pred::Not(q) => node("pnot", vec![("e", pred(q))]),
         Pred::Has(c, e) => node("phas", vec![("column", txt(c)), ("e", expr(e))]),
+        // `docs/plan-guards.md` D2 A scope's leaves, written only where a
+        // scope has one, so no plan's bytes and no module without a scope
+        // move.
+        Pred::When(e) => node("pwhen", vec![("e", expr(e))]),
+        Pred::Exists(t, c, q) => node("pexists", vec![("table", txt(t)), ("column", txt(c)), ("pred", pred(q))]),
     }
 }
 
@@ -462,6 +485,7 @@ fn pred_calls(p: &Pred, acc: &mut std::collections::BTreeSet<String>) {
         Pred::In(_, es) => es.iter().for_each(|e| expr_calls(e, acc)),
         Pred::All(ps) | Pred::Any(ps) => ps.iter().for_each(|p| pred_calls(p, acc)),
         Pred::Not(q) => pred_calls(q, acc),
-        Pred::Has(_, e) => expr_calls(e, acc),
+        Pred::Has(_, e) | Pred::When(e) => expr_calls(e, acc),
+        Pred::Exists(_, _, q) => pred_calls(q, acc),
     }
 }

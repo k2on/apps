@@ -11,7 +11,7 @@ use std::sync::Arc;
 use crate::canon;
 use crate::eval::{self, Args, Checked, EvalError, EvalFault};
 use crate::hash::{closure, function_hash, module_hash, Closure, FnHash};
-use crate::ir::{self, Check, Expr, Field, FnKind, Function, Plan, Stmt, SPEC_VERSION};
+use crate::ir::{self, Check, Expr, Field, FnKind, Function, Hold, Plan, Stmt, SPEC_VERSION};
 use crate::schema::{Schema, Table as IrTable, Ty};
 use crate::store::{Change, Overlay, Refusal, Store};
 use crate::value::{hex, Value};
@@ -19,10 +19,13 @@ use crate::value::{hex, Value};
 use super::cx::{self, Cx, H};
 use super::input::{CheckSpec, Input};
 use super::raw;
-use super::schema::{Binders, IntoEffect, Query, Tables};
+use super::schema::{Binders, Holds, IntoEffect, Query, Tables};
 use super::values::{Ctx, Data};
 
 type MwRun = Arc<dyn Fn(&dyn Fn(&str) -> H) -> Option<H> + Send + Sync>;
+/// A scope's closure (`docs/plan-guards.md` D2): what it holds, described
+/// once under `Emit` and never run natively.
+type HoldsRun = Arc<dyn Fn() -> Vec<Hold> + Send + Sync>;
 type BodyRun = Arc<dyn Fn(&[H], &[H]) + Send + Sync>;
 /// A query's closure: the plan it returns, and the type of its nodes.
 type PlanRun = Arc<dyn Fn(&[H], &[H]) -> (Plan, Ty) + Send + Sync>;
@@ -43,6 +46,8 @@ struct MwDecl {
     input: Vec<(String, Ty)>,
     ret: Option<Ty>,
     run: MwRun,
+    /// A scope's holds; `None` for a guard or a provide.
+    holds: Option<HoldsRun>,
 }
 
 #[derive(Clone)]
@@ -79,6 +84,9 @@ struct RouteDecl {
     chain: Vec<String>,
     input: InputDecl,
     body: Run,
+    /// Declared with [`Proc::client`]: a query over a chain that carries a
+    /// scope, which the build holds it to (`docs/plan-guards.md` D2).
+    client: bool,
 }
 
 struct Core {
@@ -155,6 +163,27 @@ impl<S: Tables, P> Router<S, P> {
                 f(&ctx, &tables_value::<S>()).into_effect();
                 None
             }),
+            holds: None,
+        })
+    }
+
+    /// `docs/plan-guards.md` D2 A scope: what the person a procedure built
+    /// on the router it returns is called by holds — `|ctx, db|` to one
+    /// table's rows and columns, or a tuple of them:
+    /// `db.users.filter(User::id.eq(ctx.user)).exclude(User::password)`.
+    /// A function of `ctx` alone, run once under `Emit` and never natively:
+    /// it decides what the authority serves, not what a run does. Named, as
+    /// every middleware is, because a procedure's `uses` lists it. Declared
+    /// on the router itself, every procedure on it inherits it; on a chain,
+    /// every procedure built on the chain does.
+    pub fn server<H: Holds>(&self, name: &str, f: impl Fn(&Ctx, &S) -> H + Send + Sync + 'static) -> Router<S, P> {
+        self.extend(MwDecl {
+            name: name.into(),
+            kind: FnKind::Scope,
+            input: vec![],
+            ret: None,
+            run: Arc::new(|_| None),
+            holds: Some(Arc::new(move || f(&Ctx::current(), &tables_value::<S>()).holds())),
         })
     }
 
@@ -173,6 +202,7 @@ impl<S: Tables, P> Router<S, P> {
                 let ctx = Ctx::current();
                 Some(f(&ctx, &tables_value::<S>(), &j).to_h())
             }),
+            holds: None,
         })
     }
 
@@ -207,6 +237,11 @@ impl<S: Tables> Router<S, ()> {
     /// A query with no input.
     pub fn query<R: 'static, B: Binders, N>(&self, name: &str, f: impl Fn(&Ctx, &S, ()) -> Query<R, B, N> + Send + Sync + 'static) -> Route<S> {
         self.input::<()>().query(name, f)
+    }
+    /// `docs/plan-guards.md` D2 A query with no input, over a scope
+    /// ([`Proc::client`]).
+    pub fn client<R: 'static, B: Binders, N>(&self, name: &str, f: impl Fn(&Ctx, &S, ()) -> Query<R, B, N> + Send + Sync + 'static) -> Route<S> {
+        self.input::<()>().client(name, f)
     }
 }
 
@@ -268,6 +303,7 @@ impl<S: Tables, I: Input, P> Proc<S, I, P> {
                 chain: self.router.chain.clone(),
                 input: InputDecl::of::<I>(),
                 body,
+                client: false,
             },
             _t: PhantomData,
         }
@@ -287,6 +323,18 @@ impl<S: Tables, I: Input> Proc<S, I, ()> {
         let run: PlanRun = Arc::new(move |ins, _| f(&Ctx::current(), &tables_value::<S>(), input_of::<I>(ins)).finish());
         self.route(name, Run::Query(run))
     }
+    /// `docs/plan-guards.md` D2 A query on a chain that carries a scope: the
+    /// client's half of a read, run over what the person holds. Exactly
+    /// [`Proc::query`] — the same IR, the same hash — under the name that
+    /// says what it runs over; the build refuses one whose chain carries no
+    /// scope, where the name would say something untrue. Mutations keep
+    /// their own name: a write is a preview on the device whatever it runs
+    /// over, and its server half is `ctx.private` (D3), not a second verb.
+    pub fn client<R: 'static, B: Binders, N>(&self, name: &str, f: impl Fn(&Ctx, &S, I) -> Query<R, B, N> + Send + Sync + 'static) -> Route<S> {
+        let mut r = self.query(name, f);
+        r.decl.client = true;
+        r
+    }
 }
 
 impl<S: Tables, I: Input, A: Data> Proc<S, I, (A,)> {
@@ -301,6 +349,12 @@ impl<S: Tables, I: Input, A: Data> Proc<S, I, (A,)> {
     pub fn query<R: 'static, B: Binders, N>(&self, name: &str, f: impl Fn(&Ctx, &S, I, A) -> Query<R, B, N> + Send + Sync + 'static) -> Route<S> {
         let run: PlanRun = Arc::new(move |ins, ps| f(&Ctx::current(), &tables_value::<S>(), input_of::<I>(ins), A::from_h(ps[0])).finish());
         self.route(name, Run::Query(run))
+    }
+    /// `docs/plan-guards.md` D2 A query over a scope ([`Proc::client`]).
+    pub fn client<R: 'static, B: Binders, N>(&self, name: &str, f: impl Fn(&Ctx, &S, I, A) -> Query<R, B, N> + Send + Sync + 'static) -> Route<S> {
+        let mut r = self.query(name, f);
+        r.decl.client = true;
+        r
     }
 }
 
@@ -526,6 +580,12 @@ fn build(cores: &[Rc<Core>]) -> Result<Built, Vec<String>> {
             errors.extend(es);
         }
         for r in core.routes.borrow().iter() {
+            if r.client && !r.chain.iter().any(|n| mws.iter().any(|m| m.name == *n && m.kind == FnKind::Scope)) {
+                errors.push(format!(
+                    "{}: `client` is a query over what a scope holds, and this chain carries no scope; it is a `query`",
+                    r.name
+                ));
+            }
             let (f, es) = emit_route(core, r);
             functions.extend(super::helper::drain());
             functions.push(f);
@@ -585,10 +645,15 @@ fn finish(name: &str, cx: Cx) -> (Vec<(String, ir::Auto)>, ir::Block, Vec<String
 }
 
 fn emit_middleware(mw: &MwDecl) -> Emitted {
-    let (ret, cx) = cx::run(Cx::emit(), || {
+    let ((ret, holds), cx) = cx::run(Cx::emit(), || {
+        // A scope is its holds, described as a plan is: no statement and no
+        // read inside it.
+        if let Some(h) = &mw.holds {
+            return (None, cx::in_plan(|| h()));
+        }
         let lookup = |n: &str| cx::e(Expr::Arg(n.into()));
         let r = (mw.run)(&lookup);
-        r.map(cx::expr)
+        (r.map(cx::expr), vec![])
     });
     let (autos, mut body, errors) = finish(&mw.name, cx);
     if let Some(e) = ret {
@@ -605,6 +670,7 @@ fn emit_middleware(mw: &MwDecl) -> Emitted {
         ret: mw.ret.clone(),
         body,
         plan: None,
+        holds,
         names: BTreeMap::new(),
     };
     (f, errors)
@@ -669,6 +735,7 @@ fn emit_route(core: &Core, r: &RouteDecl) -> Emitted {
         ret,
         body,
         plan,
+        holds: vec![],
         names: BTreeMap::new(),
     };
     (f, errors)
@@ -855,7 +922,7 @@ impl Procedure {
                 }
             }
             let mut provided = Vec::new();
-            for mw in &inner.middleware {
+            for mw in inner.middleware.iter().filter(|m| m.kind != FnKind::Scope) {
                 let lookup = |n: &str| cx::lit(checked.get(n).cloned().unwrap_or(Value::Null));
                 let r = (mw.run)(&lookup);
                 if let Some(fault) = halt() {

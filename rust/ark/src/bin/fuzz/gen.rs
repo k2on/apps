@@ -325,6 +325,7 @@ impl ModuleGen<'_> {
                     ),
                 ],
                 plan: None,
+                holds: vec![],
                 names: BTreeMap::new(),
             });
             mw.push("full".into());
@@ -346,6 +347,7 @@ impl ModuleGen<'_> {
                     Stmt::Return(Some(std1(StdFn::Len, var(s)))),
                 ],
                 plan: None,
+                holds: vec![],
                 names: BTreeMap::new(),
             });
             mw.push("count".into());
@@ -363,6 +365,7 @@ impl ModuleGen<'_> {
                 ret: Some(Ty::Text),
                 body: vec![Stmt::Return(Some(std1(StdFn::Concat, Expr::List(vec![Expr::CtxUser, lit_text("!")]))))],
                 plan: None,
+                holds: vec![],
                 names: BTreeMap::new(),
             });
             mw.push("who".into());
@@ -387,6 +390,7 @@ impl ModuleGen<'_> {
                 ret: None,
                 body: vec![Stmt::If(refuse_when, vec![Stmt::Refuse(lit_text(FORBIDDEN))], vec![])],
                 plan: None,
+                holds: vec![],
                 names: BTreeMap::new(),
             });
         }
@@ -462,6 +466,7 @@ impl ModuleGen<'_> {
             ret: Some(Ty::Int),
             body: vec![Stmt::Return(Some(body))],
             plan: None,
+            holds: vec![],
             names: BTreeMap::new(),
         }
     }
@@ -495,6 +500,7 @@ impl ModuleGen<'_> {
             ret: Some(Ty::Text),
             body: vec![Stmt::Return(Some(body))],
             plan: None,
+            holds: vec![],
             names: BTreeMap::new(),
         }
     }
@@ -737,6 +743,7 @@ impl ModuleGen<'_> {
             ret: None,
             body: vec![],
             plan: None,
+            holds: vec![],
             names: BTreeMap::new(),
         };
         let kind = self.rng.below(12);
@@ -1106,6 +1113,7 @@ impl ModuleGen<'_> {
             ret: Some(Ty::Bool),
             body: vec![],
             plan: None,
+            holds: vec![],
             names: BTreeMap::new(),
         };
         let mut env = Env {

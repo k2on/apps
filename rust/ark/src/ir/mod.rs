@@ -2,7 +2,7 @@
 //!
 //! A module carries a schema, routers, functions and the types of its live
 //! frames. A function is a procedure on a router (a mutator or a query),
-//! a middleware (a guard or a provide) or a helper, with a body
+//! a middleware (a guard, a provide or a scope) or a helper, with a body
 //! in a small imperative core over a pure expression language. A domain
 //! is written in the vocabulary of `spec/AUTHORING.md` ([`crate::authoring`]
 //! here); run under `Emit` it yields this IR, run under `Native` it applies
@@ -36,8 +36,12 @@ use crate::schema::{Dir, Schema, Ty};
 use crate::value::{FieldName, TableName, Value};
 
 pub use crate::hash::{closure, closures, function_hash, module_hash, Closure, FnHash};
-pub use decode::{closure_from_value, function_from_value, module_from_value, router_from_value, schema_from_value, ty_from_value, DecodeError};
-pub use encode::{calls, check_value, closure_value, field_value, function_value, module_value, reaches, router_value, schema_value, ty_value};
+pub use decode::{
+    closure_from_value, function_from_value, hold_from_value, module_from_value, router_from_value, schema_from_value, ty_from_value, DecodeError,
+};
+pub use encode::{
+    calls, check_value, closure_value, field_value, function_value, hold_value, module_value, reaches, router_value, schema_value, ty_value,
+};
 pub use normalize::{normalize, normalize_module};
 pub use reads::reads;
 
@@ -98,6 +102,16 @@ pub enum FnKind {
     /// §1.2 Middleware: runs before the body; may refuse; returns a value
     /// the body reads as [`Expr::Provided`].
     Provide,
+    /// `docs/plan-guards.md` D2 Middleware that runs nothing: what the
+    /// person a procedure is called by holds, as a function of `ctx`
+    /// alone — the rows and columns of each table it names
+    /// ([`Function::holds`]). No input, no body, no return; listed in a
+    /// procedure's `uses` like any middleware and hashed into its closure
+    /// like one, so that what a procedure is served over is part of what it
+    /// is. A person holds the union of every scope on every procedure of the
+    /// module ([`crate::scope::Holdings`]); a module with none holds
+    /// everything, and is served as it always was.
+    Scope,
 }
 
 impl FnKind {
@@ -109,6 +123,7 @@ impl FnKind {
             FnKind::Helper => "helper",
             FnKind::Guard => "guard",
             FnKind::Provide => "provide",
+            FnKind::Scope => "scope",
         }
     }
 
@@ -119,6 +134,7 @@ impl FnKind {
             "helper" => FnKind::Helper,
             "guard" => FnKind::Guard,
             "provide" => FnKind::Provide,
+            "scope" => FnKind::Scope,
             _ => return None,
         })
     }
@@ -128,9 +144,9 @@ impl FnKind {
         matches!(self, FnKind::Mutator | FnKind::Query)
     }
 
-    /// A guard or a provide.
+    /// A guard, a provide or a scope.
     pub fn is_middleware(self) -> bool {
-        matches!(self, FnKind::Guard | FnKind::Provide)
+        matches!(self, FnKind::Guard | FnKind::Provide | FnKind::Scope)
     }
 }
 
@@ -168,6 +184,11 @@ pub struct Function {
     /// §1.4 A query's whole meaning: `Some` for a query, whose `body` is
     /// then empty, and `None` for every other kind.
     pub plan: Option<Plan>,
+    /// `docs/plan-guards.md` D2 A scope's whole meaning: what it holds of
+    /// each table it names, at least one; empty for every other kind. On
+    /// the wire `holds`, written only for a scope, so every function of
+    /// every module before scopes is the bytes it was.
+    pub holds: Vec<Hold>,
     /// The author's names for symbols; not hashed, not required.
     pub names: BTreeMap<Sym, String>,
 }
@@ -177,6 +198,44 @@ impl Function {
     /// middleware declares and what the old `args` were.
     pub fn arg_types(&self) -> Vec<(String, Ty)> {
         self.input.iter().map(|(n, f)| (n.clone(), f.ty.clone())).collect()
+    }
+}
+
+/// `docs/plan-guards.md` D2 What a scope holds of one table: the rows its
+/// filter admits — over the table's own columns, compared with `ctx`
+/// ([`Expr::CtxUser`], [`Expr::CtxSession`]) or literals, with the two
+/// leaves only a scope has ([`Pred::When`], [`Pred::Exists`]) — and the
+/// columns its projection keeps. No filter is every row. Never `input`: a
+/// scope is a function of who the person is, so what they hold is fixed
+/// per person, complete offline, and computable at `Hello`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Hold {
+    pub table: TableName,
+    pub filter: Option<Pred>,
+    pub columns: Projection,
+}
+
+/// `docs/plan-guards.md` D2 Which columns of a held row a scope keeps. A
+/// projection keeps the key whatever it says (the verifier refuses one that
+/// drops a key column), since a row is named by its key.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Projection {
+    /// Every column: the absence of `pick` and `exclude` on the wire.
+    All,
+    /// These columns and no others: `pick`.
+    Pick(Vec<FieldName>),
+    /// Every column but these: `exclude`.
+    Exclude(Vec<FieldName>),
+}
+
+impl Projection {
+    /// Whether the projection keeps `column` of a table.
+    pub fn keeps(&self, column: &str) -> bool {
+        match self {
+            Projection::All => true,
+            Projection::Pick(cs) => cs.iter().any(|c| c == column),
+            Projection::Exclude(cs) => !cs.iter().any(|c| c == column),
+        }
     }
 }
 
@@ -542,6 +601,23 @@ pub enum Pred {
     /// a scan, as any filter. On the wire `phas`, written only where used,
     /// so no existing plan's bytes move.
     Has(FieldName, Expr),
+    /// `docs/plan-guards.md` D2 A scope's leaf: a `Bool` that reads no row
+    /// — `has_role(..)`, or a comparison of the context with a literal — so
+    /// it holds for every row or for none, decided by who the person is.
+    /// Only in a scope ([`Hold::filter`]); the verifier refuses it in a
+    /// plan (`ScopeLeafInPlan`). On the wire `pwhen`, written only where
+    /// used.
+    When(Expr),
+    /// `docs/plan-guards.md` D2 A scope's one reach into another table:
+    /// some row of `table` whose reference column `column` names this row
+    /// is admitted by the predicate — `membership` rows by `org`, with
+    /// `user == ctx.user` — which is over that table's own columns and the
+    /// context and has no further `Exists`. Read through the reference
+    /// index a store keeps on every reference column, so it costs the
+    /// referencing rows of one row; what it reads is what
+    /// [`crate::ir::reads`] says of the scope. Only in a scope, as `When`
+    /// is; on the wire `pexists`.
+    Exists(TableName, FieldName, Box<Pred>),
 }
 
 /// §3.4 The standard library, by name; `Ark.Std` is its meaning.

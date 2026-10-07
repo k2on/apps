@@ -266,7 +266,9 @@ pub fn reads_roles(c: &Closure) -> bool {
     }
     std::iter::once(&c.function)
         .chain(&c.helpers)
-        .filter(|f| f.kind != crate::ir::FnKind::Guard)
+        // A scope runs nothing (`docs/plan-guards.md` D2): the role it
+        // tests decides what is served, never what an entry writes.
+        .filter(|f| !matches!(f.kind, crate::ir::FnKind::Guard | crate::ir::FnKind::Scope))
         .any(|f| asks(&function_value(&BTreeMap::new(), f)))
 }
 

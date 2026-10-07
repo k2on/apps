@@ -80,7 +80,10 @@ impl View {
         let c = closure(peer, name)?;
         let mut guards = ark::ir::reads(&c.function);
         for u in &c.function.uses {
-            if let Some(mw) = c.helpers.iter().find(|h| h.name == *u) {
+            // A scope runs nothing on a device (`docs/plan-guards.md` D2):
+            // what it reads decides what the authority serves, not whether
+            // this view's middleware refuses.
+            if let Some(mw) = c.helpers.iter().find(|h| h.name == *u && h.kind != ark::ir::FnKind::Scope) {
                 guards.extend(ark::ir::reads(mw));
             }
         }

@@ -422,6 +422,11 @@ fn preamble(st: &mut St, sch: &Schema, c: &Closure, ctx: &Ctx, args0: &Args) -> 
         if !mw.kind.is_middleware() {
             return Err(EvalFault::Bug(EvalError::WrongKind(u.clone(), mw.kind)));
         }
+        // `docs/plan-guards.md` D2 A scope runs nothing: it says what is
+        // served, which the authority asks at `Hello`, not what a run does.
+        if mw.kind == FnKind::Scope {
+            continue;
+        }
         let env = Env {
             schema: sch,
             helpers: &c.helpers,

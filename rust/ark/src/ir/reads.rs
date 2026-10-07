@@ -14,6 +14,11 @@
 //! A query's own plan is deliberately left out: its reads are the plan's
 //! nodes, which the view maintains (§1.5), and counting them here would
 //! re-run the middleware on every change the view already routes.
+//!
+//! A scope (`docs/plan-guards.md` D2) reads the tables it holds and, for
+//! the `exists` form ([`Pred::Exists`]), the table it reaches through: what
+//! a row of either moving can change about who holds what. Nothing on a
+//! client runs a scope, so a view never asks.
 
 use std::collections::BTreeSet;
 
@@ -41,6 +46,12 @@ pub fn reads(f: &Function) -> BTreeSet<TableName> {
         expr(e, &mut out);
     }
     block(&f.body, &mut out);
+    for h in &f.holds {
+        out.insert(h.table.clone());
+        if let Some(p) = &h.filter {
+            pred(p, &mut out);
+        }
+    }
     out
 }
 
@@ -104,7 +115,11 @@ fn pred(p: &Pred, out: &mut BTreeSet<TableName>) {
         Pred::In(_, es) => es.iter().for_each(|e| expr(e, out)),
         Pred::All(ps) | Pred::Any(ps) => ps.iter().for_each(|q| pred(q, out)),
         Pred::Not(q) => pred(q, out),
-        Pred::Has(_, e) => expr(e, out),
+        Pred::Has(_, e) | Pred::When(e) => expr(e, out),
+        Pred::Exists(t, _, q) => {
+            out.insert(t.clone());
+            pred(q, out);
+        }
     }
 }
 

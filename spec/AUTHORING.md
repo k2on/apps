@@ -59,6 +59,7 @@ pub enum FnKind {
     Guard,    // runs before the body; may refuse; returns nothing
     Provide,  // runs before the body; may refuse; returns `ret`, which the
               // procedure reads as Expr::Provided(<middleware name>)
+    Scope,    // runs nothing: what the person holds (docs/plan-guards.md D2)
 }
 ```
 
@@ -77,6 +78,23 @@ The closure of a procedure (`hash::closure`) includes its middleware and
 the helpers they reach — through its body, its checks or its plan — so
 editing a middleware re-hashes every procedure on its router. That is the
 intended meaning.
+
+A **scope** (`docs/plan-guards.md` D2) is the third kind, and runs
+nothing: it says what the person a procedure is called by *holds*, as a
+function of `ctx` alone. It has no input, no body, no return and no plan,
+only `holds` — at least one `Hold { table, filter, columns }`: the rows of
+`table` its `filter` admits (no filter is every row) and the columns its
+projection keeps (`All`, `Pick(cols)`, `Exclude(cols)`; the key is always
+kept). A filter is a plan's `Pred` over the table's own columns whose
+right-hand sides read the context and literals alone — never input — with
+two leaves only a scope may have: `When(e)`, a `Bool` of the context
+(`has_role(..)`), and `Exists(child, column, p)`, some row of `child`
+whose reference `column` names this row admitted by `p` (one level; the
+reference must be declared). A scope is listed in a procedure's `uses` and
+hashed into its closure like any middleware; evaluation skips it. What a
+person holds is the union of every scope on every procedure of the
+module, evaluated for them (`ark::scope`); a module with no scope is held
+whole and its every byte is what it was.
 
 ### 1.3 Input schema and checks
 
@@ -430,6 +448,35 @@ pub fn playlists() -> Router<Harken> {
 }
 ```
 
+A **scope** (`docs/plan-guards.md` D2, §1.2) is declared with `server`,
+named like any middleware, on the router — every procedure on it
+inherits it — or on a chain, and returns what it holds of one table or a
+tuple of tables:
+
+```rust
+let orgs = router::<Orgs>("orgs");
+let scoped = orgs.server("memberships", |ctx, db| {
+    (
+        db.org.filter(exists(Member::org_id, Member::user.eq(ctx.user))
+            .or(Pred::when(ctx.has_role("admin")))),
+        db.member.filter(Member::user.eq(ctx.user)),
+    )
+});
+let own = accounts.server("own_account", |ctx, db| {
+    db.account.filter(Account::user.eq(ctx.user)).exclude(Account::password)
+});
+scoped.routes((scoped.client("my_orgs", |_ctx, db, ()| db.org.rows()), ..))
+```
+
+`db.t.rows()` and `db.t.filter(p)` hold every column, `.exclude(cols)` and
+`.pick(cols)` narrow them; an order, a limit or anything beneath a row is
+an authoring error, since a scope names rows and columns.
+`Pred::when(b)` and `exists(Child::fk, p)` are the scope's two leaves.
+`client(name, f)` is `query(name, f)` exactly — the same IR and hash —
+named for what it runs over, and refused at build on a chain that carries
+no scope. Mutations keep `mutation`: a write is a preview on the device
+whatever it holds, and its server half is D3's `ctx.private`.
+
 Field builders: `text()`, `int()`, `bool_()`, `bytes()`, `id::<T>()`,
 `enum_::<E>()`, `opt(f)`, `list(f)`; checks `.trim()`, `.min(n)`,
 `.max(n)`, `.range(lo, hi)`, `.at_least(lo)`, `.at_most(hi)`,
@@ -676,6 +723,22 @@ sequencing. A guard written with it — `guard("is_library", |ctx, _|
 unless(ctx.has_role("library"), || refuse("…")))` — refuses on the device
 whose sign-in did not say the role, and at the server for a device that
 believed one its login was never given.
+
+`docs/plan-guards.md` D2 adds a kind and two predicate leaves, each
+written only where a module has a scope, so every module before it keeps
+its bytes:
+
+```
+fn          : "kind" + "scope"
+              + ("holds", [hold])             -- a scope's, and only a scope's
+hold        : {"t":"hold","table":txt,"filter":pred|null}
+              + ("pick", [txt]) | ("exclude", [txt])   -- only when not every column
+pred        : + {"t":"pwhen","e":expr}         -- a Bool of the context; a scope only
+            | + {"t":"pexists","table":txt,"column":txt,"pred":pred}   -- a scope only
+```
+
+The `"scope"` of version 2, gone in version 3, named something else; a
+version-4 module never carried the word, so it is free.
 
 Symbols
 inside a `check`'s or `refine`'s expression are numbered in the same walk

@@ -36,7 +36,16 @@
 //!   option), an order column is the source's (a group's `by`), and no
 //!   expression in a plan reads (`ReadInPlan`) or draws an auto
 //!   (`AutoInPlan`); a plan that binds anything has a `row`
-//!   (`NoRowBinder`), and only a group has `members` (`MembersWithoutGroup`).
+//!   (`NoRowBinder`), and only a group has `members` (`MembersWithoutGroup`);
+//! - `docs/plan-guards.md` D2: a scope is middleware with no input, body,
+//!   return or plan and at least one hold (`NotAScope`,
+//!   `ScopeHoldsNothing`; `holds` on anything else is `HoldsOutsideScope`);
+//!   each hold names a table and its columns, keeps the key
+//!   (`ProjectionDropsKey`), and filters by the table's own columns
+//!   against the context and literals alone (`ScopeReadsBeyondCtx`), with
+//!   `When` and one `Exists` through a declared reference
+//!   (`ExistsNotAReference`, `NestedExists`) — leaves a plan may not have
+//!   (`ScopeLeafInPlan`).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -149,6 +158,37 @@ pub enum Complaint {
     // `docs/plan-guards.md` D1
     /// `has_role` of the empty name, which no role is.
     EmptyRole,
+    // `docs/plan-guards.md` D2
+    /// A scope's leaf — `When` or `Exists` — in a plan: they read the
+    /// context and another table to decide what a person holds, which a
+    /// plan over what is held has no use for.
+    ScopeLeafInPlan,
+    /// A scope with something only a procedure has — input, a body, a
+    /// return type, a plan — naming it.
+    NotAScope(String),
+    /// A scope that holds nothing: a scope is its holds.
+    ScopeHoldsNothing,
+    /// `holds` on something that is not a scope.
+    HoldsOutsideScope,
+    /// An expression in a scope that reads more than the context and
+    /// literals — an argument, a local, a provided value, a read — named
+    /// by its kind: a scope is a function of who the person is, never of
+    /// what they asked.
+    ScopeReadsBeyondCtx(String),
+    /// Table, column: an `exists` whose column is not a reference from
+    /// that table to the one it is held of.
+    ExistsNotAReference(TableName, FieldName),
+    /// An `exists` inside an `exists`: one reach, and no further.
+    NestedExists,
+    /// Table, column: a projection that leaves out a key column, or names
+    /// one twice.
+    ProjectionDropsKey(TableName, FieldName),
+    /// Table, column (none for the table itself), and the roles of the
+    /// person it is not held for: a part of a procedure that a client runs
+    /// — its checks, its middleware, its body or its plan — names what that
+    /// person's union of scopes does not give them, so on their device it
+    /// does not exist (`docs/plan-guards.md` D2, [`crate::scope`]).
+    NotHeld(TableName, Option<FieldName>, Vec<String>),
 }
 
 /// Verify a module. On success, the module as it is to be hashed and run:
@@ -284,6 +324,7 @@ pub fn verify_function(m: &Module, i: usize, f: &Function) -> Result<(), Vec<Com
                 _ => {}
             }
         }
+        FnKind::Scope => return scope_ok(m, i, f),
         FnKind::Helper => {
             if f.router.is_some() {
                 return err(Complaint::RouterOnNonProcedure);
@@ -301,6 +342,9 @@ pub fn verify_function(m: &Module, i: usize, f: &Function) -> Result<(), Vec<Com
                 return err(Complaint::RefineOnNonProcedure);
             }
         }
+    }
+    if !f.holds.is_empty() {
+        return err(Complaint::HoldsOutsideScope);
     }
     let names: Vec<String> = f
         .input
@@ -1039,8 +1083,8 @@ fn pred_exprs<'a>(p: &'a Pred, out: &mut Vec<&'a Expr>) {
         Pred::Cmp(_, _, e) => out.push(e),
         Pred::In(_, es) => out.extend(es),
         Pred::All(ps) | Pred::Any(ps) => ps.iter().for_each(|q| pred_exprs(q, out)),
-        Pred::Not(q) => pred_exprs(q, out),
-        Pred::Has(_, e) => out.push(e),
+        Pred::Not(q) | Pred::Exists(_, _, q) => pred_exprs(q, out),
+        Pred::Has(_, e) | Pred::When(e) => out.push(e),
     }
 }
 
@@ -1083,6 +1127,135 @@ fn pred_ok(g: &G, t: &Table, p: &Pred) -> Check_<()> {
             }
             expect(g, &format!("has on {c}"), &Ty::Text, e)
         }
+        Pred::When(_) | Pred::Exists(..) => err(Complaint::ScopeLeafInPlan),
+    }
+}
+
+// `docs/plan-guards.md` D2 A scope: middleware with no router, no uses, no
+// autos, no input, no refinements, no return, no body and no plan — only
+// holds, at least one, each over a table that exists: its filter over the
+// table's own columns and the context, its projection naming the table's
+// columns and keeping its key.
+fn scope_ok(m: &Module, i: usize, f: &Function) -> Result<(), Vec<Complaint>> {
+    let not = |what: &str| err(Complaint::NotAScope(what.into()));
+    if f.router.is_some() {
+        return err(Complaint::RouterOnNonProcedure);
+    }
+    if !f.uses.is_empty() {
+        return err(Complaint::UsesOnNonProcedure);
+    }
+    if !f.autos.is_empty() {
+        return err(Complaint::AutosOnNonMutator);
+    }
+    if !f.input.is_empty() || !f.refine.is_empty() {
+        return not("input");
+    }
+    if f.ret.is_some() {
+        return not("a return type");
+    }
+    if !f.body.is_empty() {
+        return not("a body");
+    }
+    if f.plan.is_some() {
+        return not("a plan");
+    }
+    if f.holds.is_empty() {
+        return err(Complaint::ScopeHoldsNothing);
+    }
+    let none = BTreeMap::new();
+    let g = G {
+        m,
+        index: i,
+        f,
+        kind: FnKind::Helper,
+        args: &none,
+        provided: &none,
+        locals: BTreeMap::new(),
+    };
+    for h in &f.holds {
+        let t = table(&g, &h.table)?;
+        if let Some(p) = &h.filter {
+            scope_pred_ok(&g, t, p, false)?;
+        }
+        let named: &[FieldName] = match &h.columns {
+            crate::ir::Projection::All => &[],
+            crate::ir::Projection::Pick(cs) | crate::ir::Projection::Exclude(cs) => cs,
+        };
+        let mut seen = BTreeSet::new();
+        for c in named {
+            if t.column(c).is_none() {
+                return err(Complaint::UnknownColumn(t.name.clone(), c.clone()));
+            }
+            if !seen.insert(c) {
+                return err(Complaint::ProjectionDropsKey(t.name.clone(), c.clone()));
+            }
+        }
+        if let Some(k) = t.key.iter().find(|k| !h.columns.keeps(k)) {
+            return err(Complaint::ProjectionDropsKey(t.name.clone(), k.clone()));
+        }
+    }
+    Ok(())
+}
+
+// A scope's predicate over `t`: what a plan's filter may say, with
+// right-hand sides that read the context and literals alone, plus `When`
+// (a `Bool` of the context) and one `Exists` through a reference to `t`.
+fn scope_pred_ok(g: &G, t: &Table, p: &Pred, nested: bool) -> Check_<()> {
+    let col = |c: &str| t.column(c).map_or_else(|| err(Complaint::UnknownColumn(t.name.clone(), c.into())), Ok);
+    match p {
+        Pred::Cmp(c, _, e) => {
+            ctx_only(e)?;
+            expect(g, &format!("scope on {}.{c}", t.name), &col(c)?.column_ty(), e)
+        }
+        Pred::In(c, es) => {
+            let ty = col(c)?.column_ty();
+            es.iter().try_for_each(|e| {
+                ctx_only(e)?;
+                expect(g, &format!("scope on {}.{c}", t.name), &ty, e)
+            })
+        }
+        Pred::Has(c, e) => {
+            ctx_only(e)?;
+            pred_ok(g, t, &Pred::Has(c.clone(), e.clone()))
+        }
+        Pred::When(e) => {
+            ctx_only(e)?;
+            expect(g, "scope condition", &Ty::Bool, e)
+        }
+        Pred::All(ps) | Pred::Any(ps) => ps.iter().try_for_each(|q| scope_pred_ok(g, t, q, nested)),
+        Pred::Not(q) => scope_pred_ok(g, t, q, nested),
+        Pred::Exists(via, column, q) => {
+            if nested {
+                return err(Complaint::NestedExists);
+            }
+            let child = table(g, via)?;
+            let refers = child.refs.iter().any(|r| r.column == *column && r.table == t.name) && t.key.len() == 1;
+            if !refers {
+                return err(Complaint::ExistsNotAReference(via.clone(), column.clone()));
+            }
+            scope_pred_ok(g, child, q, true)
+        }
+    }
+}
+
+// An expression a scope may hold: the context, literals, and the operators
+// and comparisons over them. Anything else is named by its kind.
+fn ctx_only(e: &Expr) -> Check_<()> {
+    let beyond = |what: &str| err(Complaint::ScopeReadsBeyondCtx(what.into()));
+    match e {
+        Expr::Lit(_) | Expr::CtxUser | Expr::CtxSession | Expr::HasRole(_) => Ok(()),
+        Expr::Op(_, es) => es.iter().try_for_each(ctx_only),
+        Expr::Cmp(_, a, b) => {
+            ctx_only(a)?;
+            ctx_only(b)
+        }
+        Expr::Arg(_) => beyond("an argument"),
+        Expr::Auto(_) => beyond("an auto"),
+        Expr::Var(_) => beyond("a local"),
+        Expr::Provided(_) => beyond("a provided value"),
+        Expr::Select(_) | Expr::Get(..) | Expr::Exists(..) => beyond("a read"),
+        Expr::Call(..) => beyond("a call"),
+        _ => beyond("an expression of more than the context"),
     }
 }
 

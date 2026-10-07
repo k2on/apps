@@ -8,7 +8,7 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 
 use crate::eval::{self, EvalError, EvalFault};
-use crate::ir::{CmpOp, Expr, Key as IrKey, Lookup, Plan, Pred as IrPred, Related, Source, Stmt, Sym};
+use crate::ir::{CmpOp, Expr, Hold, Key as IrKey, Lookup, Plan, Pred as IrPred, Projection, Related, Source, Stmt, Sym};
 use crate::schema::{Column, Dir, Index, Ref, Table as IrTable, Ty};
 use crate::store::{self, Change, Refusal, Store};
 use crate::value::Value;
@@ -524,6 +524,138 @@ impl<T> Pred<T> {
     #[allow(clippy::should_implement_trait)]
     pub fn not(self) -> Pred<T> {
         Pred::new(IrPred::Not(Box::new(self.p)))
+    }
+    /// `docs/plan-guards.md` D2 `PWhen c`: every row when the condition
+    /// holds and none when it does not — `Pred::when(ctx.has_role("admin"))`.
+    /// The condition reads the context alone, which the verifier holds it
+    /// to. Only in a scope ([`super::Router::server`]): in a query's filter
+    /// the verifier refuses it.
+    pub fn when(c: Bool) -> Pred<T> {
+        Pred::new(IrPred::When(rhs(c.to_h())))
+    }
+}
+
+/// `docs/plan-guards.md` D2 `PExists child fk p`: the rows of `T` that some
+/// row of `C` references through `fk` and `p` admits —
+/// `exists(Membership::org, Membership::user.eq(ctx.user))`, the orgs a
+/// person is a member of. One reach, through a reference the schema
+/// declares; only in a scope, as [`Pred::when`] is.
+pub fn exists<T: Row, C: Row, V>(fk: Col<C, V>, p: Pred<C>) -> Pred<T> {
+    Pred::new(IrPred::Exists(C::NAME.into(), fk.name().into(), Box::new(p.p)))
+}
+
+/// `docs/plan-guards.md` D2 What a scope holds of a table: the rows a
+/// filter admits and the columns a projection keeps. Built from
+/// `db.<table>` — every row — or a `filter` of it, by `.exclude(cols)` or
+/// `.pick(cols)`; a bare table or filter is every column. What
+/// [`super::Router::server`]'s closure returns, one or a tuple of them.
+pub struct Held<T> {
+    hold: Hold,
+    _t: PhantomData<fn() -> T>,
+}
+
+/// One table a scope holds, or a tuple of them: what a scope's closure
+/// returns.
+pub trait Holds {
+    #[doc(hidden)]
+    fn holds(self) -> Vec<Hold>;
+}
+
+impl<T> Holds for Held<T> {
+    fn holds(self) -> Vec<Hold> {
+        vec![self.hold]
+    }
+}
+
+impl<T: Row> Holds for &Table<T> {
+    fn holds(self) -> Vec<Hold> {
+        vec![Hold {
+            table: T::NAME.into(),
+            filter: None,
+            columns: Projection::All,
+        }]
+    }
+}
+
+impl<T: Row> Holds for Query<T> {
+    fn holds(self) -> Vec<Hold> {
+        vec![self.held(Projection::All).hold]
+    }
+}
+
+macro_rules! holds_tuple {
+    ($($v:ident . $i:tt),+) => {
+        impl<$($v: Holds),+> Holds for ($($v,)+) {
+            fn holds(self) -> Vec<Hold> {
+                let mut out = Vec::new();
+                $(out.extend(self.$i.holds());)+
+                out
+            }
+        }
+    };
+}
+holds_tuple!(A.0);
+holds_tuple!(A.0, B.1);
+holds_tuple!(A.0, B.1, C.2);
+holds_tuple!(A.0, B.1, C.2, D.3);
+holds_tuple!(A.0, B.1, C.2, D.3, E.4);
+holds_tuple!(A.0, B.1, C.2, D.3, E.4, F.5);
+holds_tuple!(A.0, B.1, C.2, D.3, E.4, F.5, G.6);
+holds_tuple!(A.0, B.1, C.2, D.3, E.4, F.5, G.6, H.7);
+
+impl<T: Row> Query<T> {
+    // What a scope holds of this query: its table and its filter, and
+    // nothing else a query may say — an order, a limit, a related plan —
+    // which is an authoring error, since a scope names rows and columns.
+    fn held(self, columns: Projection) -> Held<T> {
+        let p = &self.plan;
+        let more = !p.order.is_empty()
+            || !self.sorts.is_empty()
+            || p.limit.is_some()
+            || !p.related.is_empty()
+            || !p.lookups.is_empty()
+            || p.having.is_some()
+            || p.project.is_some()
+            || !matches!(p.source, Source::Table(_));
+        if more {
+            cx::complain(format!(
+                "a scope holds rows of {} by a filter, and columns by a projection; an order, a limit or anything beneath a row is a query's",
+                T::NAME
+            ));
+        }
+        Held {
+            hold: Hold {
+                table: T::NAME.into(),
+                filter: self.plan.filter,
+                columns,
+            },
+            _t: PhantomData,
+        }
+    }
+
+    /// `docs/plan-guards.md` D2 Every column of the rows but these: an
+    /// excluded column does not exist on the device of anybody this scope
+    /// is all that holds it for.
+    pub fn exclude(self, cols: impl Cols<T>) -> Held<T> {
+        self.held(Projection::Exclude(cols.names()))
+    }
+
+    /// `docs/plan-guards.md` D2 These columns of the rows and no others;
+    /// the key is kept whatever is picked, as the verifier requires.
+    pub fn pick(self, cols: impl Cols<T>) -> Held<T> {
+        self.held(Projection::Pick(cols.names()))
+    }
+}
+
+impl<T: Row> Table<T> {
+    /// `docs/plan-guards.md` D2 Every row, every column but these.
+    pub fn exclude(&self, cols: impl Cols<T>) -> Held<T> {
+        self.query().exclude(cols)
+    }
+
+    /// `docs/plan-guards.md` D2 Every row, these columns only.
+    pub fn pick(&self, cols: impl Cols<T>) -> Held<T> {
+        self.query().pick(cols)
     }
 }
 

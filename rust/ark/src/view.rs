@@ -477,6 +477,15 @@ fn eval_pred<E>(p: &Pred, ev: &mut dyn FnMut(&Expr) -> Result<Value, E>) -> Resu
                 _ => None,
             },
         ),
+        // `docs/plan-guards.md` D2 A scope's leaves, which the verifier
+        // refuses in a plan (`ScopeLeafInPlan`): `When` is the constant it
+        // evaluates to — every row (an empty `All`) or none (an empty
+        // `Any`) — and `Exists`, which needs a store, admits nothing.
+        Pred::When(e) => match ev(e)? {
+            Value::Bool(true) => Filter::All(vec![]),
+            _ => Filter::Any(vec![]),
+        },
+        Pred::Exists(..) => Filter::Any(vec![]),
     })
 }
 

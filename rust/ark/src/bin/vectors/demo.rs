@@ -166,6 +166,36 @@ pub fn curated() -> Router<Demo> {
     }),))
 }
 
+/// A router over the demo's tables that says what each person holds
+/// (`docs/plan-guards.md` D2): on the router, `mine` — a person's own
+/// playlists, every playlist for a curator, and a playlist that has the
+/// person's name among its tracks (the `exists` form) — and on a chain,
+/// `tracks` — every item, without its position. Two queries, one over each.
+/// What `module/scoped.json` and the D2 protocol vectors are over.
+pub fn shared() -> Router<Demo> {
+    let shared = router::<Demo>("shared");
+    let mine = shared.server("mine", |ctx, db| {
+        db.playlist.filter(
+            Playlist::user_id
+                .eq(ctx.user)
+                .or(Pred::when(ctx.has_role("curator")))
+                .or(exists(Item::playlist_id, Item::track_id.eq(ctx.user))),
+        )
+    });
+    let tracks = mine.server("tracks", |_ctx, db| db.item.rows().exclude(Item::pos));
+    shared.routes((
+        mine.client("playlists", |_ctx, db, ()| db.playlist.rows().order_by(Playlist::name.asc())),
+        tracks
+            .input::<PlaylistId>()
+            .client("tracks_of", |_ctx, db, input| db.item.filter(Item::playlist_id.eq(input.playlist_id))),
+    ))
+}
+
+/// [`shared`] alone, verified.
+pub fn scoped() -> ark::ir::Module {
+    Module::new((shared(),)).build().clone()
+}
+
 /// The demo with [`curated`] beside it, verified.
 pub fn guarded() -> ark::ir::Module {
     Module::new((demo(), curated())).build().clone()

@@ -313,6 +313,7 @@ mod tests {
             refine: vec![],
             ret: None,
             body: vec![Stmt::Insert("item".into(), row, vec![])],
+            holds: vec![],
             names: BTreeMap::new(),
             plan: None,
         };
