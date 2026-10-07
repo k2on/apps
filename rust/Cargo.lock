@@ -164,6 +164,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-explorer"
+version = "0.1.0"
+dependencies = [
+ "ark",
+ "ark-auth",
+ "arkui",
+ "iced",
+ "js-sys",
+ "ureq",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
 name = "ark-server"
 version = "0.1.0"
 dependencies = [

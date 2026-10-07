@@ -385,6 +385,13 @@ fn expr(here: &[&str], v: &Value) -> D<Expr> {
     })
 }
 
+/// §1.8 A plan read from its value alone, outside any module: what a
+/// console that runs a plan written in the IR's form reads it with
+/// (`docs/plan-guards.md` D4, the explorer).
+pub fn plan_from_value(v: &Value) -> D<Plan> {
+    plan(&[], v)
+}
+
 /// §1.8 A plan: the v3 keys always, the v4 ones read when present.
 fn plan(here: &[&str], v: &Value) -> D<Plan> {
     let fs = tagged(here, "plan", v)?;

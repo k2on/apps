@@ -37,10 +37,12 @@ use crate::value::{FieldName, TableName, Value};
 
 pub use crate::hash::{closure, closures, function_hash, module_hash, Closure, FnHash};
 pub use decode::{
-    closure_from_value, function_from_value, hold_from_value, module_from_value, router_from_value, schema_from_value, ty_from_value, DecodeError,
+    closure_from_value, function_from_value, hold_from_value, module_from_value, plan_from_value, router_from_value, schema_from_value,
+    ty_from_value, DecodeError,
 };
 pub use encode::{
-    calls, check_value, closure_value, field_value, function_value, hold_value, module_value, reaches, router_value, schema_value, ty_value,
+    calls, check_value, closure_value, field_value, function_value, hold_value, module_value, plan_value, reaches, router_value, schema_value,
+    ty_value,
 };
 pub use normalize::{normalize, normalize_module};
 pub use reads::reads;

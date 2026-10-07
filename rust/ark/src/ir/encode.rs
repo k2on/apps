@@ -301,6 +301,12 @@ fn dir(d: &Dir) -> Value {
 /// — and the v4 ones only when present, so a v3-shaped plan encodes as it
 /// did: `group` (the `by` columns; `table` is the grouped table), `row`,
 /// `members`, `lookups`, `having`, `project`.
+/// A plan as a value, outside any module: [`crate::ir::plan_from_value`]'s
+/// inverse (`docs/plan-guards.md` D4, the explorer's console).
+pub fn plan_value(p: &Plan) -> Value {
+    plan(p)
+}
+
 fn plan(p: &Plan) -> Value {
     let mut fields = vec![
         ("table", txt(p.table())),

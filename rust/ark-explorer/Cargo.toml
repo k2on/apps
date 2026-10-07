@@ -1,0 +1,36 @@
+[package]
+name = "ark-explorer"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "A database explorer for any ArkDB module: its tables and rows, a cell editor and row delete through a writer the host supplies, a read-only query console, and the log. One iced component, hosted by an app's client over its replica and by a server's admin page over the authority."
+
+# Knows nothing about any domain: it is handed a store, a schema, a module, a
+# log view and a writer, and draws whatever they hold (`docs/plan-guards.md`
+# D4). What a host needs without a window — the writer and log traits, how an
+# edit is routed, the console, the admin page's wire form — is outside the
+# `ui` feature, so a server can speak to the admin page without linking iced.
+
+[features]
+default = ["ui"]
+ui = ["dep:iced", "dep:arkui", "dep:ark-auth", "dep:ureq", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:web-sys", "dep:js-sys"]
+
+[dependencies]
+ark = { path = "../ark" }
+arkui = { path = "../arkui", optional = true }
+# Signing the admin page in when it is served wider than loopback: the page's
+# own address and the server's `/auth/login`, as the browser peer does.
+ark-auth = { path = "../ark-auth", features = ["client"], optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+iced = { version = "0.14", features = ["smol", "svg", "image", "advanced", "fira-sans"], optional = true }
+# The admin page run natively against a server: the same requests, blocking,
+# on a thread of their own.
+ureq = { version = "2", default-features = false, features = ["tls"], optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+iced = { version = "0.14", features = ["webgl", "svg", "image", "advanced", "fira-sans"], optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+web-sys = { version = "0.3", optional = true, features = ["Headers", "Location", "Request", "RequestInit", "Response", "Storage", "Window"] }
+js-sys = { version = "0.3", optional = true }
