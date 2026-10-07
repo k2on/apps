@@ -968,6 +968,12 @@ pub struct Client {
     /// holds may be another identity's until the server has started it
     /// over.
     pub served: bool,
+    /// This connection has brought a snapshot. Every partial connection
+    /// starts from one, so a partial page before it is a page over a
+    /// snapshot that was lost, for a union this replica may not be laid out
+    /// for: it is dropped, and the peer asks again, which a server answers
+    /// by starting it over (D2).
+    pub started: bool,
 }
 
 impl Client {
@@ -991,6 +997,7 @@ impl Client {
             server_module: None,
             held_ids: BTreeSet::new(),
             served: false,
+            started: false,
         }
     }
 
@@ -1072,6 +1079,7 @@ impl Client {
         self.out.clear();
         self.more = false;
         self.served = false;
+        self.started = false;
         self.heard.clear();
         let hello = self.hello();
         self.emit(hello);
@@ -1130,9 +1138,17 @@ impl Client {
                 // `docs/plan-guards.md` D2 A page of the other kind than the
                 // replica holds — a partial one for a whole replica, or the
                 // reverse — is nothing it can apply: a server starts every
-                // connection that changes kind with a snapshot, and this is
-                // a page from before it.
+                // connection that changes kind with a snapshot, and this page
+                // is from a connection whose snapshot was lost. So is a
+                // partial page before this connection's snapshot. Either is
+                // dropped and the peer asks again; a `hello` the server did
+                // not page for starts it over.
                 if covers.is_some() != r.partial.is_some() {
+                    self.more = true;
+                    return;
+                }
+                if covers.is_some() && !self.started {
+                    self.more = true;
                     return;
                 }
                 if let Some(c) = covers {
@@ -1267,6 +1283,7 @@ impl Client {
         } = s;
         self.heard_module(module);
         self.served = true;
+        self.started = true;
         self.replica.settle();
         let behind = self.replica.behind;
         // `docs/plan-guards.md` D2 A partial snapshot is of the device's
@@ -1471,6 +1488,12 @@ struct Conn {
     holdings: Option<Holdings>,
     /// A partial connection not yet sent the snapshot that starts it.
     fresh: bool,
+    /// The last page sent to this partial connection said there is more:
+    /// a `hello` from it now is the log paging. Any other `hello` on a
+    /// partial connection is a peer that missed something — the snapshot
+    /// that started it, or a page — and is started over (`docs/plan-guards.md`
+    /// D2).
+    more_owed: bool,
 }
 
 /// An authority's end of every connection (`Ark.Protocol.Server`).
@@ -1635,7 +1658,7 @@ impl<M: Machine> Server<M> {
                     // snapshot that started it — and is started over from a
                     // snapshot: what it holds may be another identity's.
                     let holdings = self.holdings_of(&who);
-                    let again = self.conns.get(&c).is_none_or(|was| was.sent != sub.since);
+                    let again = self.conns.get(&c).is_none_or(|was| was.sent != sub.since || !was.more_owed);
                     let partial = holdings.is_some();
                     let elsewhere = elsewhere || (sub.partial && !partial);
                     let peer = live::Peer {
@@ -1652,6 +1675,7 @@ impl<M: Machine> Server<M> {
                             elsewhere,
                             holdings,
                             fresh: partial && again,
+                            more_owed: false,
                         },
                     );
                     let post = live::arrive(&self.machine, &mut self.rooms, peer);
@@ -1967,11 +1991,13 @@ impl<M: Machine> Server<M> {
             ServerMsg::Batch { covers, .. } => covers.map_or(sent, |c| c.upto),
             _ => sent,
         };
+        let more = matches!(&msg, ServerMsg::Batch { has_more: true, .. });
         self.send(c, msg);
         if let Some(conn) = self.conns.get_mut(&c) {
             conn.sent = advanced;
             conn.elsewhere = false;
             conn.fresh = false;
+            conn.more_owed = more;
         }
     }
 

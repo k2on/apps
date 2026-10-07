@@ -11,7 +11,7 @@ use ark::ir::module_from_value;
 use super::{claim, Out};
 
 /// Each session, by the name it is published under.
-const SESSIONS: [(&str, &str); 4] = [
+const SESSIONS: [(&str, &str); 5] = [
     (
         "fleet-fuzz-an-ack-at-or-below-the-cursor.json",
         include_str!("fuzzed/fleet-fuzz-an-ack-at-or-below-the-cursor.json"),
@@ -30,6 +30,13 @@ const SESSIONS: [(&str, &str); 4] = [
     (
         "fleet-fuzz-a-union-reopened-keeps-the-modules-schema.json",
         include_str!("fuzzed/fleet-fuzz-a-union-reopened-keeps-the-modules-schema.json"),
+    ),
+    // D2: the snapshot that starts a partial connection lost, its first
+    // page was applied over the union the peer held before, laid out for
+    // another identity.
+    (
+        "fleet-fuzz-a-union-whose-snapshot-was-lost.json",
+        include_str!("fuzzed/fleet-fuzz-a-union-whose-snapshot-was-lost.json"),
     ),
 ];
 
