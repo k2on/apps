@@ -189,7 +189,7 @@ accounts and role changes.
 
 ## Order, rounds, and guards
 
-**Status: G1 landed; D1–D4 decided, not started.** Rounds, each ending
+**Status: G1 and D1 landed; D2–D4 decided, not started.** Rounds, each ending
 in a green `nix flake check`:
 
 1. **D1**: roles frozen in the entry and stamped by the authority;
@@ -250,3 +250,73 @@ changes, 0 findings; `--seconds 120`: 5,205 cases, 970,336 ops, 221,233
 entries, 45,065 role changes, 0 findings (8 generated modules of 4,165
 failed to verify, `TypeMismatch filter on id` — the generator's misses,
 counted, not findings). Not run: `nix flake check`, `perf.rs` in release.
+
+**D1, guards and stamped roles** (`5d6b329`, `528bed9`, `6545356`,
+`aaff24d`, `c8b54e1`). `Entry` carries `roles`, frozen by
+`Replica::mutate` from the author's `Ctx` and written `roles` — texts in
+ascending order, present only when not empty, so every entry from before
+is the bytes it was. The authority stamps: `Server` runs and logs a pushed
+entry under its connection's roles, whatever the device believed, and
+every later run (`peer::ctx_of`: replay, rebase, adoption, the sim's and
+the fuzzer's replays) reads the entry's. `Expr::HasRole` (`has_role`, a
+`Bool`, `EmptyRole` for the empty name) and `ctx.has_role(..)`, in a guard,
+a provide, a body and — through the new `ctx()` — a check. harken's
+`library` router runs `is_library` before its six mutations; the queries
+run nothing, the playlists keep `owned`. Module hash
+`2339009b3ae76594e5ed6b115aa92267f96e4400c49b64e04765526134088f2f`, from
+`abf1cbdd…`: the six library mutators' closures move (a closure is the
+middleware it runs) and are pinned anew in `agreement.rs`; no query's and
+no playlist mutator's does; `arkc check` of old against new is additive.
+The fuzzer gives three modules in five a `guarded` router whose `holds`
+guard tests a role, grants the module's own roles too (harken's
+`library`), lets devices believe their login's roles, all, or none, and
+holds every entry the log gains to its login's roles (`stamp`) and to its
+middleware under them (`forbidden`).
+
+One thing moved after it was committed, because the fuzzer found it
+(seed 112): the stamp first sent an entry's facts as a `facts` frame
+ahead of the ack, so a device whose ack and page were dropped, never told
+a log's name, kept them in its inbox through a server that lost its log,
+and confirmed the new log's first entry by them. They ride the ack now —
+`ack`'s `facts`, present only when the device's roles were not the ones
+logged, a duplicate's included — and arrive with the log they are of.
+`the_stamps_facts_arrive_with_the_log_they_are_of` holds it; the
+finding's own vector was not kept, since its interleaving hinged on the
+frame that is gone.
+
+`spec/vectors` gains four files — `protocol/client-push-roles.json`,
+`protocol/server-ack-facts.json`, `module/guarded.json`,
+`eval/has-role.json` — and every other file is byte-identical;
+`ark-vectors` writes the tree exactly. Falsified: the stamp left out
+(`the_authority_stamps_the_roles_an_entry_is_logged_with`, the converge
+refusal half, the fleet's `a_role_granted_by_a_restart_and_revoked_by_
+another`, and the fuzzer's `stamp`, 185 findings over 3 signatures in
+200 cases); `HasRole` answered false in `eval` and natively (`roles.rs`,
+and `eval/has-role.json`); the ack without its facts (the device kept a
+preview the log does not hold) and with them sent as their own frame as
+well (diverged at [1, 2]); the library guard admitting everybody (the
+device took bob's removal); the guard skipped at the authority (42
+`forbidden` findings); harken's fuzz granting only `r0`/`r1` (its guard
+never met at the authority).
+
+Numbers. `arkc fuzz --seed 1 --cases 200` (debug): 400 sessions, 37,737
+ops, 7,070 entries, 1,764 role changes, 2,120 writes forbidden on the
+device and 173 at the authority, 8,253 entries held to the stamp (1,832
+from a device that believed otherwise), 0 findings. `--seconds 300`
+(release): 13,412 cases, 2,511,622 ops, 500,389 entries, 117,052 role
+changes, 113,371 forbidden on the device and 10,342 at the authority,
+576,433 entries held to the stamp (129,009 corrected), 0 findings (12 of
+10,781 generated modules failed to verify, `TypeMismatch filter on id`,
+the generator's misses). `perf.rs` in release: every flat line flat, l/f
+0.97–1.46; `perf_a_mutate_alone` 22–23 µs at 500 to 8,000 items; a
+Batch of 256 encodes in 13,598 allocations and decodes in 7,439, as
+before — a whole peer's frames are the bytes they were. The fleet
+scenario takes about 20 s.
+
+Not verified: `nix flake check` (the coordinator runs it). An entry a
+client authors at a library mutator's old hash still runs that closure,
+unguarded, at a server that ran the module before `is_library` (closure
+provenance keeps it); nothing withdraws a hash yet. A body that reads a
+role beyond refusing is confirmed by the ack's facts, and the device's
+preview of it is recorded as a divergence — right, and loud, and not
+something harken does.

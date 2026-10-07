@@ -899,6 +899,19 @@ pushed intent is re-run at the authority under the connection's identity,
 so a guard is server-side authorization — and what a client does not get
 is tables and columns marked server-only, not rows.
 
+**A guard asks a role of the entry, and the authority stamps it**
+(`docs/plan-guards.md` D1). `ctx.has_role("library")` (`Expr::HasRole`) is
+answered from the roles frozen in the entry beside its actor and session:
+the device freezes what it believes when it authors, and the authority
+replaces that with the connection's roles before it runs the intent, so
+the log holds what each entry was judged under and every replay of it —
+a peer's, `Log::state_at`'s, a compaction's — reads the same; a device
+that believed a role its login was never given is refused by the guard
+at the server, and an entry it pushed under another belief is
+acknowledged with the authority's facts. harken's `is_library` is the one
+guard of the kind: the library router's mutations are the `library`
+role's, and the playlists are their owner's through `owned`.
+
 ### 3.12 Versioning: functions by hash, retained above the horizon
 
 Every function's hash is SHA-256 of its verified, alpha-normalised canonical
