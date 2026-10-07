@@ -1,205 +1,215 @@
 # Authorization is the functions
 
-`docs/plan-auth.md` built authorization as rules on tables: who may see a
-row, who may write one, a predicate per table enforced by the authority
-on facts. It worked, was fuzzed, and is the wrong shape for this engine.
-The owner's direction, in three sentences: *authorization logic lives in
-the functions and the shared guards they compose, tRPC-style; row-level
-security is not wanted; what a client does not get is tables and
-columns, the way a REST API simply does not return them.* This is the
-design that replaces the rules with that — and, because the same
-mechanism carries it, the two other things asked for: a function whose
-server half does more than its client half (Zero's server mutators), and
-a database explorer that edits data as the authority.
+`docs/plan-auth.md` built authorization as rules on tables and it was
+deleted (G1, below). What replaces it was designed in conversation with
+the owner, and the direction is tRPC's: *authorization logic lives in
+the functions and the shared middleware they compose; what a client does
+not get is rows, tables and columns the way a REST API simply does not
+return them; a function may do more on the server than on the client;
+and a database explorer edits data as the authority.* Every mechanism
+below is the engine's; every rule is the application's.
 
 ## What is true, and what every piece stands on
 
 **Every client mutation is checked by the server.** A pushed intent is
 re-run at the authority with the identity of the connection that pushed
-it — `ctx.user`, `ctx.session`, `ctx.roles` — guards first, then the body;
-the client's own run was a preview. The entry is held to the login that
-pushed it. So a guard in a function *is* server-side authorization, and
-nothing declarative is needed beside it. That is the whole argument, and
-the rules go because they were a second mechanism the first one did not
-need.
+it — `ctx.user`, `ctx.session`, `ctx.roles` — middleware first, then the
+body; the client's own run was a preview. The entry is held to the login
+that pushed it. So a guard in a function *is* server-side authorization,
+and nothing declarative is needed beside it.
 
-## G1. The row rules are deleted, cleanly
+**A domain function is one closure that runs two ways.** Natively on the
+server and the desktop, and once in emit mode to record the module the
+phones and the browser load. So "the client's version" of a function is
+never generated: it is the same closure with its server parts skipped,
+and the hash the log names a function by is of the public part.
 
-Everything plan-auth's A1, A3's fact check, A4 and A5 added goes:
-`Table::visible` / `writable`, `Pred::Me` / `Role` / `Exists`, their
-verifier errors, encoding, printing, authoring vocabulary and vectors;
-the authority's post-run check of facts against `writable`; the
-per-connection filter, `Covers`, whole-or-partial decided at `Hello`,
-the visibility-change facts, the partition digest, the client's durable
-`partial`; the fuzzer's rule generation and the three checks over it;
-harken's ten declarations. `spec/vectors` goes back to what it was
-before A1 byte-for-byte plus nothing: the files that round added are
-removed, and `checks.vectors` says every remaining one is unchanged.
-harken's module hash moves back; no closure hash moves.
+## Decided
 
-What stays, because this design needs it: `Identity.roles` and
-`Ctx.roles`; roles from the server's configuration (`Auth::with_roles`,
-`services.harken.roles`, dev auth's `name:role`); the scanner's own
-`library` role; `Refusal::Forbidden` as what a guard's refusal is named;
-the fuzzer's two accounts and role changes; the fleet scenario, reworked
-to hold guards rather than rules. A client that may connect receives
-every table and every column that is not server-only (G3), by intents,
-and replays: there is no partial peer.
+### D1. Writes: guards
 
-## G2. A guard can test a role
+Authorization of a write is a guard or a provide on a router or a chain,
+as the IR already has them: `is_auth`, `has_role("library")`, `owned`
+(harken's provide, which *is* an ownership check). One engine addition:
+`Expr::HasRole(name)`, `ctx.has_role(..)` in the authoring, true when the
+author's roles hold the name. A guard's refusal is the entry's verdict.
 
-`Expr::HasRole(name)` beside `CtxUser`: true when the author's roles
-hold the name. In the authoring, `ctx.has_role("library")`, usable in a
-guard, a provide, a body or a check. harken: the `library` router gains
-`guard("is_library", |ctx, _| ctx.has_role(LIBRARY))`, so `add_song` and
-the rest refuse a login without the role at the device and at the
-server, with the message the guard gives. Playlists keep `owned`, which
-is already the ownership check written as a provide. Shared guards are
-plain Rust functions returning the closure — `is_auth()`, `has_role(r)`
-— and a domain composes them on its routers; nothing in the engine knows
-their names.
+**Roles are frozen in the entry.** An `Entry` carries `actor` and
+`session` and replays with them; a body that reads a role needs the
+roles frozen the same way, encoded only when non-empty so no existing
+vector moves, or a peer replaying somebody else's intent evaluates
+`has_role` as false where the authority evaluated it true and every
+replica, the authority's own `Log::state_at` and compaction diverge.
+The authority **stamps** the entry's roles with the connection's at
+sequencing — the device's run was a preview, and a device that believed
+wrongly is refused by the guard at the server — rather than checking a
+subset, which would let a device leave out a role a `!has_role(..)`
+depends on.
 
-**Roles must be frozen in the entry, or `has_role` diverges.** Found
-while reading for the build, before a line was written: an `Entry`
-carries `actor` and `session` and no roles, and a replay runs with empty
-roles — so a peer replaying somebody else's intent would evaluate
-`has_role` as false where the authority evaluated it true, and every
-whole replica, the authority's own `Log::state_at` and compaction would
-diverge. plan-auth never met this because no body read a role. The fix
-is the one `actor` and `session` already have: the author's roles are
-frozen in the entry, encoded only when non-empty so no existing vector
-moves, and the authority holds them to the connection that pushed the
-entry — **stamping** them (the entry's roles become the connection's;
-the device's run was a preview and a guard refuses a device that believed
-wrongly) rather than checking a subset, since a subset would let a
-device leave out a role a `!has_role(..)` depends on. Also noted: a
-guard refuses with `Refusal::Refused(msg)` today, so `Forbidden` is used
-by nothing once the rules go until G5's built-ins bring it back.
+### D2. Reads: scopes, a middleware over `ctx`
 
-## G3. Server-only columns and tables
-
-`.server_only()` on a column or a table in the schema. The marker is
-part of the schema section and so of the module hash, encoded only when
-present, so a schema without one is byte-identical to today.
-
-- **It never leaves the authority.** Stripped from every snapshot a peer
-  is sent, from the facts beside every entry, from every page; absent
-  from a client's replica. An entry's arguments are the client's own and
-  carry nothing to strip.
-- **The verifier refuses a client-run read of it.** A query's plan, a
-  public body, a check, a guard or a provide that names a server-only
-  column or table is a verifier error naming both — what makes "never
-  leaves" a property of the build rather than of care. Only a private
-  block (G4) may read or write it.
-- **The shared state hash excludes it.** A row's leaf is over its shared
-  columns; a server-only table contributes no digest. The authority keeps
-  its full digest for its own integrity and answers `Verify` with the
-  shared one. A schema without markers hashes exactly as it did, which
-  `checks.vectors` holds.
-
-Where the client keeps a view over a table that has a server-only column,
-nothing changes: the view never saw the column.
-
-## G4. A function's server half: `ctx.private`
+What a person holds is said by **scopes**: a third middleware kind beside
+`Guard` and `Provide`, a plan over the tables as a function of `ctx`
+alone, naming the rows and the columns of each table that person holds.
 
 ```rust
-let hello = r.mutation("hello", |ctx, db, input: &Hello| {
+let is_user = is_auth
+    .server(|ctx, db| db.users.where(User::user_id.eq(ctx.user)).exclude(User::password));
+is_user.client("me", |ctx, db, input: &Me| db.users.where(User::name.has(input.q)));
+
+user_api                                 // or once, on the router
+    .server(|ctx, db| ..)
+    .router(|r| { r.client("me", ..); r.client("list", ..); });
+```
+
+- **Composable and inheritable, as guards are.** A scope sits on a chain
+  (`is_user`, reused by every procedure built on it) or on a router
+  (every procedure on it inherits it), and a procedure's `uses` lists it
+  in order with the rest. It hashes into the closure like any middleware.
+- **A person's holdings are the union**, per table, of every scope on
+  every procedure of the module, evaluated for that person: rows by the
+  predicates, columns by the projections. Computed once per identity at
+  `Hello`. A table no scope names is held whole; a module with no scope
+  is today's whole replica, byte-for-byte, and every client of it keeps
+  replaying by intents. That union is what makes the whole-peer fast
+  path decidable and what a forgotten `where` on one query widens — so
+  the router form is the one to reach for first.
+- **`ctx`, never `input`.** A scope is a function of who the person is,
+  so what they hold is fixed per person, complete offline, and
+  computable at `Hello`. `get_org(org_id)` needs no input in its scope:
+  membership (`exists membership(user = ctx.user)`) says which orgs are
+  held, and the client half picks one. Authorization never needs input;
+  only *size* does — a catalogue of ten million rows, a workspace of
+  years of messages, a map's viewport — and that is the **active-scope
+  extension**, noted and not built: a scope taking `input`, active while
+  a client uses the procedure, the holdings the union of what is active,
+  rows arriving and leaving as screens change, and a screen opened
+  offline for the first time empty until the connection returns. A
+  `Scope` that takes `ctx` today takes `input` tomorrow without anything
+  existing moving. harken, a household holding everything, never needs
+  it.
+- **The client's half runs over what it holds**, as every query does
+  today. A client half that names a column or table its person's union
+  does not give it is a verifier error naming both; the union is static
+  per identity, so this is checked at build for every role set the
+  module names.
+- **An excluded column does not exist on the client.** The client's
+  table has fewer columns, the wire never carries them, the shared state
+  hash is over what is held. The desktop's typed row structs are the
+  schema's, so the field is a typed hole no domain code can name, by the
+  rule above — not a null.
+- **The authority serves the union.** For a person whose union is not
+  whole: facts filtered per connection by the predicates and projected
+  by the columns; an entry none of whose facts the person holds is not
+  sent; a row entering or leaving the union — ownership moved, a role
+  granted — is sent as an `Add` or a `Remove` fact; snapshots and pages
+  hold the union; `Verify` is answered from the digest of the held rows
+  and columns. The client applies other people's entries by facts (it
+  cannot replay an intent that read rows it does not hold) and previews
+  its own, confirmed from the authority's facts. This is the machinery
+  G1 deleted (`db79b6e`, its commits a reference), rebuilt with the
+  predicate coming from the module's scopes and a column projection
+  added — a row projection the store already does. A scope that reads
+  other tables (the `exists membership` form) declares its read set
+  through `ir::reads`, which is what keeps the visibility diff cheap.
+
+### D3. A mutation's server half: `ctx.private`
+
+```rust
+r.mutation("hello", |ctx, db, input: &Hello| {
     ctx.private(|db| db.audit.insert(Audit { who: ctx.user, .. }));
-    db.users.get(input.id)        // the public body
+    db.users.get(input.id)
 });
 ```
 
-A domain function is a closure that runs natively on the server and the
-desktop and is run once in emit mode to record the module, so "the
-client's version" is not generated: it is the same closure with the
-private parts skipped.
+- Natively, `ctx.private` runs only when the `Ctx` is the authority's;
+  on a device it does nothing. In emit it records a `Private` block; the
+  module a client loads has those blocks stripped (`arkc` strips; the
+  server's keeps them) and the function's hash is of the public IR.
+- **Private runs last**, wherever written, in order, after the public
+  body — which is what makes the public body reproducible on a client:
+  it cannot have read what private wrote.
+- **Its facts ride the entry.** A function with a private block says so
+  in the stripped module (`private: true`, hashed); a client previews
+  the public body and, when the entry is confirmed, takes the authority's
+  facts for it rather than its own record — the facts path every peer
+  has. Private may therefore write anything; what it writes to columns
+  or tables outside a person's union is projected away with the rest.
+- **Private may refuse**, and the refusal is the entry's verdict.
+- **Server hooks** are for the world outside the database:
+  `Server::on_committed(name, |entry, facts| ..)` in `ark-server`, after
+  the entry is durable, off the engine's path. The engine stays sans-io.
+- A query whose plan needs data outside every union is a **server
+  query** — a request frame answered once by the authority — noted and
+  not built.
 
-- **Natively**, `ctx.private` runs its block only when the `Ctx` is the
-  authority's; on a device it does nothing. **In emit**, it records a
-  `Private` block, and the module a client loads has those blocks
-  stripped (`arkc`'s build does it; the server's module keeps them). The
-  function's hash is of the public IR, so server and client agree what
-  `hello` is while the server holds more of it.
-- **Private runs last.** Wherever it is written, every private block of
-  a run is deferred until the public body has finished, in order. That
-  is what makes the public body reproducible on a client: it cannot have
-  read what private wrote, by construction.
-- **Its facts ride the entry.** The authority's facts for the entry are
-  the whole run's; a client replays the public body for its preview and,
-  when the entry is confirmed, takes the authority's facts for it rather
-  than its own record — the facts path every peer already has. A
-  function with a private block says so in the stripped module
-  (`private: true`, hashed), which is how a client knows which entries
-  to take by facts; a batch carries the facts for exactly those entries.
-  Private may therefore write anything, shared tables included; what it
-  writes to server-only tables is stripped with the rest (G3).
-- **Private may refuse.** The refusal is the entry's verdict, as any
-  server refusal is, and the client's preview is undone on the rebase.
-- **Server hooks** are for the world outside the database — analytics, a
-  webhook, an email. `Server::on_committed(name, |entry, facts| …)` in
-  `ark-server` runs a Rust closure after the entry is durable, off the
-  engine's path; it can do anything and cannot touch the log's meaning.
-  The engine stays sans-io.
+### D4. Per-table CRUD, and the explorer
 
-A query whose plan needs server-only data cannot run on a client at all.
-That is a **server query** — a request frame answered once by the
-authority, the tRPC query with no subscription — and it is noted here and
-not built: nothing in harken needs one.
+- **Every table's CRUD is one line on a router.** `r.crud::<User>()`
+  emits `insert_user`, `update_user`, `delete_user` and `put_user` as
+  ordinary mutations on that router, under its guards and scopes, hashed
+  and replayed like any mutation. Growing one is writing it: a hand-
+  written `insert_user` on the same router replaces the generated one
+  under the same name, a new hash, the old version kept for the entries
+  that carry it. No client API moves.
+- **The explorer writes as the authority**, not as somebody's account.
+  Two raw writes the authority alone can author — `put_row(table, row)`
+  and `delete_row(table, key)`, judged by constraints, replayed by every
+  client as ordinary confirmed entries, their actor the server's own
+  identity — and no client has a path to them, connected or alone: the
+  server refuses any pushed entry naming them. Where a table's CRUD is
+  exposed on a router, the explorer edits through those functions by
+  default, so the domain's logic applies to the dashboard too, with a
+  visible switch to write raw.
+- **The explorer is one iced component, hosted twice.** An `ark-explorer`
+  crate generic over a schema: a table browser over a `&dyn Store` with
+  dynamic rows (server-only columns included where the store has them),
+  a cell editor and row delete through a `Writer` the host supplies, a
+  read-only query console (a domain query by name, or a plan in the IR's
+  JSON form), and the log — entries, facts, who pushed each, every
+  connection's cursor and pending count, the Verify answers. **On the
+  server** it is the admin page: compiled to wasm as the browser peer is,
+  served at an admin path bound to loopback by default
+  (`HARKEN_ADMIN_BIND`), the `admin` role required to open it when
+  exposed wider, over the authority's store with the raw writer. **In
+  harken's desktop** it opens on a key, as the debug screen does, over
+  the peer's own replica, read-only but for the CRUD mutations the domain
+  exposes, which it authors as the signed-in person like any button. A
+  peer alone is a client here too: it edits through exposed CRUD, never
+  raw, so what it did alone can be pushed and judged later as any
+  offline work is.
 
-## G5. The explorer writes as the authority
+## G1. The row rules are deleted, cleanly
 
-The explorer edits data as the server, not as somebody's account. Two
-built-in mutations the engine provides for every table, present in every
-module by construction the way `std` is, with fixed hashes:
-
-```
-ark.put_row(table, row)        // insert or replace, judged by the table's constraints
-ark.delete_row(table, key)
-```
-
-- **Authority-only.** `Authority::edit(..)` in the server process is the
-  one way to author them; `Replica::mutate` has no path to them, so no
-  client — connected or alone — can, and the server refuses any pushed
-  entry naming them with `Forbidden`. Their actor is the server's own
-  identity.
-- **Replayed by everyone.** They are deterministic puts and deletes, so
-  every client applies them as ordinary confirmed entries and ends at the
-  authority's hash. A put that breaks a reference or a unique index is
-  refused at the authority like any write.
-- **The explorer page** is served by `ark-server` for any module, since
-  the server knows the schema: the tables (server-only ones included,
-  this is the authority), a cell edit and a row delete through the two
-  built-ins, a read-only query console (a domain query by name, or a plan
-  in the IR's JSON form), and the log — entries, facts, who pushed each,
-  every connection's cursor and pending count, the Verify answers. It is
-  bound to loopback by default (`HARKEN_ADMIN_BIND`), and when exposed
-  wider it requires the `admin` role to open; the writes it makes are the
-  authority's either way.
-
-**Status: G1 landed (below); G2–G5 designed, not started.** G5 is to be
-reshaped before building: the per-table operations become ordinary
-domain mutations a router exposes in one line (`router.crud::<User>()`,
-emitting insert / update / delete / put with the router's guards) and
-grows by writing the function by hand under the same name; the explorer
-uses those where exposed and the authority's raw writes otherwise.
+Landed; see below. What stays from plan-auth because this design needs
+it: `Identity.roles`, `Ctx.roles`, roles from the server's configuration
+(`Auth::with_roles`, `services.harken.roles`, dev auth's `name:role`),
+the scanner's `library` role, `Refusal::Forbidden`, the fuzzer's two
+accounts and role changes.
 
 ## Order, rounds, and guards
 
-Three rounds, each ending in a green `nix flake check`:
+**Status: G1 landed; D1–D4 decided, not started.** Rounds, each ending
+in a green `nix flake check`:
 
-1. **G1–G3**: delete the rules; `has_role`; server-only columns and
-   tables. harken: the `library` guard, no declarations, module hash
-   moved once.
-2. **G4**: private blocks, the facts path for them, server hooks. The
-   fuzzer generates private blocks over shared and server-only tables and
-   holds every peer to the authority's shared hash.
-3. **G5**: the built-ins and `Authority::edit`; the explorer page; docs.
+1. **D1**: roles frozen in the entry and stamped by the authority;
+   `has_role`; harken's `library` guard; the fuzzer's forbidden writes
+   through a generated guard.
+2. **D2**: `Scope` middleware; the per-identity union; the authority
+   serving it (filter, projection, visibility facts, union digest), the
+   client holding it; the fuzzer generating scopes over two accounts
+   with a check that no client ever holds a row or column outside its
+   union and every client's hash is the authority's for it; harken
+   declares no scope and changes nothing on the wire.
+3. **D3**: private blocks, the facts path for them, server hooks.
+4. **D4**: `r.crud`, the two raw writes, `ark-explorer`, the admin page,
+   harken's key.
 
 Guards throughout: falsify every new test once; `spec/vectors`
-byte-identical except where this document says a file is removed or
-added; the fuzzer at 0 findings for 300 seconds after each round; a
-whole peer costs on the wire exactly what it costs today for an entry
-with no private block; what is not verified said plainly.
+byte-identical except where a round's Landed says a file is added; the
+fuzzer at 0 findings for 300 seconds after each round; a whole peer
+costs on the wire exactly what it costs today; what is not verified said
+plainly.
 
 ## Landed
 
