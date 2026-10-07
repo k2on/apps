@@ -400,6 +400,7 @@ fn the_hash_below_the_head_is_the_replays() {
             id: key(3, i),
             actor: "a".into(),
             session: "s".into(),
+            roles: Default::default(),
             fn_hash: vec![1],
             args: Args::new(),
             autos: Args::new(),

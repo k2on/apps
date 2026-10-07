@@ -108,6 +108,14 @@ impl Writer {
             id,
             actor: "a".into(),
             session: "s".into(),
+            // Every other entry frozen with a role (`docs/plan-guards.md`
+            // D1), so that what is copied, restored and verified holds
+            // entries both with `roles` and without.
+            roles: if n % 2 == 1 {
+                ["library".to_string()].into()
+            } else {
+                Default::default()
+            },
             fn_hash: vec![1],
             args: Args::new(),
             autos: Args::new(),

@@ -141,9 +141,18 @@ pub enum Journal {
     Replaced,
 }
 
-// The entry's author, as a replay runs it: an entry carries no roles.
+// The entry's author, as every run of it after the first sees it: the
+// actor, the login and the roles frozen in it (`docs/plan-guards.md` D1) —
+// which, once it is in the log, are the ones the authority stamped. A
+// replay, a rebase, the authority's own run of a pushed intent and a debug
+// build's guard all build it here, so none of them can read a role the
+// entry does not carry.
 fn ctx_of(e: &Entry) -> Ctx {
-    Ctx::new(e.actor.clone(), e.session.clone())
+    Ctx {
+        user: e.actor.clone(),
+        session: e.session.clone(),
+        roles: e.roles.clone(),
+    }
 }
 
 fn bug_text(e: &EvalError) -> String {
@@ -297,10 +306,14 @@ impl Replica {
             Some(Err(bug)) => Err(Refusal::Refused(bug_text(&bug))),
             Some(Ok(Err(refusal))) => Err(refusal),
             Some(Ok(Ok(chs))) => {
+                // The roles the author's device believes it holds, frozen
+                // with the intent (`docs/plan-guards.md` D1); the authority
+                // replaces them with the connection's when it sequences.
                 let e = Entry {
                     id,
                     actor: ctx.user.clone(),
                     session: ctx.session.clone(),
+                    roles: ctx.roles.clone(),
                     fn_hash: fh.clone(),
                     args: args.clone(),
                     autos: autos.clone(),
@@ -2130,5 +2143,79 @@ mod tests {
         assert_eq!(opened.pending.len(), 10);
         assert!(same_rows(&opened.view, &r.view));
         assert!(opened.shares_exactly_unwritten());
+    }
+
+    /// `docs/plan-guards.md` D1 Roles are frozen in the entry and stamped
+    /// by the authority. A device that believes `editor` authors with it in
+    /// its pending intent; the server holds the connection to the login's
+    /// own `library` and logs that, whatever the device said; the device is
+    /// confirmed by the acknowledgement alone — the page carrying the
+    /// stamped entry lost — at the authority's hash, by the facts that went
+    /// ahead of the acknowledgement; and a peer fed the log replays the
+    /// entry with the stamped roles, on the wire and in its run. Falsified
+    /// by sequencing the entry as pushed (no stamp): the log holds
+    /// `editor`.
+    #[test]
+    fn the_authority_stamps_the_roles_an_entry_is_logged_with() {
+        use crate::live::Silent;
+        use crate::protocol::{open_access, trusting, Client, Mode, Server, ServerMsg};
+        let d = demo();
+        let mut sv = Server::open(trusting(), open_access(), Silent, d.authority());
+        let believes = Ctx::new("alice", "dev").with_roles(["editor"]);
+        let mut c = Client::open(d.replica(true), Mode::Whole, Some("alice:library".into()));
+        c.connected();
+        let e = c
+            .mutate(
+                idv(1),
+                &believes,
+                &d.create,
+                &args([("id", Value::Id(idv(1001)))]),
+                &args([("name", Value::text("Mine"))]),
+            )
+            .unwrap();
+        assert_eq!(e.roles, ["editor".to_string()].into(), "the device's belief, frozen in its intent");
+        assert_eq!(c.replica.pending, vec![e.clone()]);
+        for m in c.take_outgoing() {
+            sv.recv(1, m);
+        }
+        let logged = &sv.authority.log.entries[&1].0;
+        assert_eq!(logged.roles, ["library".to_string()].into(), "the login's roles, stamped");
+        assert_eq!((logged.id, &logged.actor), (e.id, &e.actor));
+        let said = sv.take_outgoing();
+        assert!(
+            said.iter()
+                .any(|(_, m)| matches!(m, ServerMsg::FactsFor { items } if items.len() == 1 && items[0].0 == 1)),
+            "the facts go ahead of the acknowledgement: {said:?}"
+        );
+        // The page that would have carried the stamped entry is lost.
+        for (_, m) in said.into_iter().filter(|(_, m)| !matches!(m, ServerMsg::Batch { .. })) {
+            c.recv(m);
+        }
+        c.settle();
+        assert!(c.replica.pending.is_empty() && c.replica.diverged.is_empty());
+        assert_eq!(c.replica.verify_at(), (1, state_hash(&sv.authority.store)));
+
+        // A peer fed the log: the entry crosses with its roles and runs with them.
+        let mut late = Client::open(d.replica(false), Mode::Whole, Some("bob".into()));
+        late.connected();
+        for m in late.take_outgoing() {
+            sv.recv(2, m);
+        }
+        let mut got = None;
+        for (to, m) in sv.take_outgoing() {
+            if to != 2 {
+                continue;
+            }
+            let bytes = crate::canon::encode(&m.to_value());
+            let back = ServerMsg::from_value(&crate::canon::decode(&bytes).unwrap()).unwrap();
+            if let ServerMsg::Batch { items, .. } = &back {
+                got = items.first().map(|(_, e, _)| e.roles.clone());
+            }
+            late.recv(back);
+        }
+        late.settle();
+        assert_eq!(got, Some(["library".to_string()].into()), "the stamped roles cross the wire");
+        assert_eq!(ctx_of(&sv.authority.log.entries[&1].0).roles, ["library".to_string()].into());
+        assert_eq!(late.replica.verify_at(), (1, state_hash(&sv.authority.store)));
     }
 }

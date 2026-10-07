@@ -45,11 +45,12 @@ pub use crate::stdlib::Args;
 pub struct Ctx {
     pub user: String,
     pub session: String,
-    /// The roles the author holds as this peer knows them: its own
-    /// login's, as the authenticator said them (`protocol::Identity::roles`).
-    /// Not in the entry, and read by nothing yet: they are carried for the
-    /// guards that will ask them (`docs/plan-guards.md` G2), the row rules
-    /// that asked them before being gone (G1).
+    /// The roles the author holds: when a device authors, its own login's
+    /// as the sign-in said them (`protocol::Identity::roles`), frozen into
+    /// the entry it records; when an entry is run again — at the authority,
+    /// in a replay, in a rebase — the entry's, which the authority stamped
+    /// with the connection's (`docs/plan-guards.md` D1). What
+    /// `Expr::HasRole` asks.
     pub roles: BTreeSet<String>,
 }
 

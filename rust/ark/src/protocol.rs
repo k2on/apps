@@ -211,15 +211,24 @@ fn of_module<'a>(mut fields: Vec<(&'a str, Value)>, module: &Option<Vec<u8>>) ->
     fields
 }
 
+/// An entry as a value: its wire form in a `push` or a `batch`, and its
+/// form on disk (`crate::journal`, a client's pending). `roles` is present
+/// only when the entry holds one (`docs/plan-guards.md` D1): a list of
+/// texts in ascending order, so an entry authored by somebody holding none
+/// — every entry written before roles were frozen — is the bytes it was.
 pub fn entry_value(e: &Entry) -> Value {
-    strct(vec![
+    let mut fields = vec![
         ("id", Value::Id(e.id)),
         ("actor", txt(&e.actor)),
         ("session", txt(&e.session)),
         ("fn", Value::Bytes(e.fn_hash[..].into())),
         ("args", Value::from(e.args.clone())),
         ("autos", Value::from(e.autos.clone())),
-    ])
+    ];
+    if !e.roles.is_empty() {
+        fields.push(("roles", Value::List(e.roles.iter().map(|r| txt(r)).collect())));
+    }
+    strct(fields)
 }
 
 pub fn change_value(c: &Change) -> Value {
@@ -689,10 +698,30 @@ pub fn entry_from_value(v: &Value) -> D<Entry> {
         id: ident(need(m, "id")?)?,
         actor: text(need(m, "actor")?)?,
         session: text(need(m, "session")?)?,
+        roles: roles_of(m)?,
         fn_hash: bytes(need(m, "fn")?)?,
         args: args_of(need(m, "args")?)?,
         autos: args_of(need(m, "autos")?)?,
     })
+}
+
+/// An entry's `roles` (`docs/plan-guards.md` D1): none where the field is
+/// absent, which is the one encoding of none — an empty list is refused —
+/// and otherwise texts in strictly ascending order, refused in any other,
+/// so that an entry has one form and decoding then encoding it is the
+/// bytes it came as.
+fn roles_of(m: &BTreeMap<FieldName, Value>) -> D<BTreeSet<String>> {
+    let Some(v) = m.get("roles") else {
+        return Ok(BTreeSet::new());
+    };
+    let rs = list(text, v)?;
+    if rs.is_empty() {
+        return bad("roles: an empty list is written as no field");
+    }
+    if rs.windows(2).any(|w| w[0] >= w[1]) {
+        return bad("roles: not in ascending order, or repeated");
+    }
+    Ok(rs.into_iter().collect())
 }
 
 pub fn change_from_value(v: &Value) -> D<Change> {
@@ -1073,9 +1102,9 @@ impl Client {
 
 /// Who a connection is: the user, the login, and the roles the
 /// authenticator says they hold. Every entry the connection pushes is held
-/// to the user and the login. The roles are carried for the guards that
-/// will ask them (`docs/plan-guards.md` G2); nothing in the engine reads
-/// them yet — the row rules that did are gone (G1).
+/// to the user and the login, and stamped with the roles
+/// (`docs/plan-guards.md` D1): what the connection pushes is judged and
+/// logged under them, whatever the device believed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Identity {
     pub user: String,
@@ -1350,8 +1379,42 @@ impl<M: Machine> Server<M> {
                         );
                         continue;
                     }
+                    // The authority stamps (`docs/plan-guards.md` D1): the
+                    // entry is judged, and logged, under the roles this
+                    // connection's identity holds, whatever the device
+                    // believed when it authored it — its run was a preview.
+                    // So a device that believed a role it was never given is
+                    // refused by the guard here, and no claim of a device's
+                    // ever reaches the log. A subset check would not do: a
+                    // device could leave out a role a `!has_role(..)`
+                    // depends on.
+                    let restamped = e.roles != who.roles;
+                    let stamped;
+                    let e = if restamped {
+                        stamped = Entry {
+                            roles: who.roles.clone(),
+                            ..e.clone()
+                        };
+                        &stamped
+                    } else {
+                        e
+                    };
                     match self.authority.sequence_entry(e) {
-                        Sequenced::Appended(n, _) | Sequenced::Duplicate(n) => acks.push((e.id, n)),
+                        // Stamped with other roles than the device authored
+                        // under, its run there may not be what was logged:
+                        // the facts go ahead of the acknowledgement, so the
+                        // device holds its record to them — and takes them
+                        // where they differ — even when the page carrying
+                        // the stamped entry never reaches it. A device whose
+                        // belief is right, which is every one ordinarily, is
+                        // sent nothing more than it was.
+                        Sequenced::Appended(n, facts) => {
+                            if restamped {
+                                self.send(c, ServerMsg::FactsFor { items: vec![(n, facts)] });
+                            }
+                            acks.push((e.id, n))
+                        }
+                        Sequenced::Duplicate(n) => acks.push((e.id, n)),
                         Sequenced::Rejected(why) => self.send(
                             c,
                             ServerMsg::Reject {

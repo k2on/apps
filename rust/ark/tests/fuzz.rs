@@ -277,6 +277,7 @@ fn a_replay_that_refuses_asks_for_facts() {
         id: [3u8; 16],
         actor: "bob".into(),
         session: "dev".into(),
+        roles: Default::default(),
         fn_hash: fh,
         args: [("playlist_id".to_string(), Value::Id(pid)), ("track_id".to_string(), Value::text("t1"))]
             .into_iter()

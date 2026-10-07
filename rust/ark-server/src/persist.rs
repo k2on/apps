@@ -456,6 +456,7 @@ mod tests {
             id,
             actor: ctx.user.clone(),
             session: ctx.session.clone(),
+            roles: Default::default(),
             fn_hash: fh.clone(),
             args: [("name".to_string(), Value::text(name))].into(),
             autos: [("id".to_string(), Value::Id(id))].into(),

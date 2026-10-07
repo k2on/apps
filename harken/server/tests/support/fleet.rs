@@ -793,6 +793,7 @@ impl Seeder {
             id: self.autos.new_id(),
             actor: user.into(),
             session: "seeded".into(),
+            roles: Default::default(),
             fn_hash: fh.clone(),
             args: args.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
             autos: autos.clone(),

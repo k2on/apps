@@ -404,6 +404,7 @@ fn open_record(d: &ark_client::Domain, i: u64) -> (ark::log::Entry, ark::log::Fa
         id: open_id(7, i),
         actor: "library".into(),
         session: "scan".into(),
+        roles: Default::default(),
         fn_hash: fh.clone(),
         args: a,
         autos,

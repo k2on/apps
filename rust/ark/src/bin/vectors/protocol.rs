@@ -7,7 +7,9 @@
 //! head, where one naming this log, or none, is answered as it was; and a
 //! server that says its module answering a `Hello` at its head with an
 //! empty page saying it, and holding an intent it cannot run
-//! (`docs/plan-db.md` D1).
+//! (`docs/plan-db.md` D1); and every entry sequenced with the roles of the
+//! connection that pushed it, not the ones its device believed
+//! (`docs/plan-guards.md` D1).
 
 use std::collections::BTreeMap;
 
@@ -53,6 +55,7 @@ pub fn protocol(out: &Out) {
         id: id_n(9),
         actor: "alice".into(),
         session: "alice-dev".into(),
+        roles: Default::default(),
         fn_hash: h_add.clone(),
         args: args([("playlist_id", Value::Id(id_n(1))), ("track_id", Value::text("t7"))]),
         autos: Args::new(),
@@ -97,6 +100,19 @@ pub fn protocol(out: &Out) {
             "push",
             ClientMsg::Push {
                 entries: vec![entry.clone()],
+            },
+        ),
+        // The same entry, frozen with the roles its author's device
+        // believed (`docs/plan-guards.md` D1): `roles`, texts in ascending
+        // order, which `push` above leaves out because it holds none — so
+        // that file is the bytes it was.
+        (
+            "push-roles",
+            ClientMsg::Push {
+                entries: vec![Entry {
+                    roles: ["library".to_string(), "editor".to_string()].into(),
+                    ..entry.clone()
+                }],
             },
         ),
         ("need_facts", ClientMsg::NeedFacts { seqs: vec![2, 3] }),
@@ -259,6 +275,7 @@ pub fn protocol(out: &Out) {
         id: id_n(20),
         actor: "alice".into(),
         session: "alice-old".into(),
+        roles: Default::default(),
         fn_hash: h_create.clone(),
         args: args([("name", Value::text("Road"))]),
         autos: args([("id", Value::Id(id_n(21)))]),
@@ -281,6 +298,82 @@ pub fn protocol(out: &Out) {
     };
     let got = verdict_on(signed_in(Some(Box::new(|_, _| true))), &bob);
     assert_eq!(got, "not yours", "protocol: another user's entry was accepted");
+
+    // The authority stamps (`docs/plan-guards.md` D1): an entry is logged
+    // with the roles of the connection that pushed it, whatever its device
+    // believed — a role it was never given is not in the log, and one it
+    // did not know it held is. Where the two differ the facts go ahead of
+    // the acknowledgement; where they agree, nothing more is sent. And an
+    // entry holding no role carries no `roles` at all.
+    let stamped_as = |token: &str, believed: &[&str]| {
+        let mut sv = server();
+        sv.recv(
+            1,
+            ClientMsg::Hello {
+                sub: Subscription {
+                    since: 0,
+                    mode: Mode::Whole,
+                    log_id: None,
+                },
+                token: Some(token.into()),
+                spec: SPEC_VERSION,
+            },
+        );
+        let _ = sv.take_outgoing();
+        let e = Entry {
+            id: id_n(50),
+            session: "dev".into(),
+            roles: believed.iter().map(|r| r.to_string()).collect(),
+            ..old.clone()
+        };
+        sv.recv(1, ClientMsg::Push { entries: vec![e] });
+        let said: Vec<&str> = sv
+            .take_outgoing()
+            .iter()
+            .filter(|(c, _)| *c == 1)
+            .map(|(_, m)| match m {
+                ServerMsg::FactsFor { .. } => "facts",
+                ServerMsg::Ack { .. } => "ack",
+                ServerMsg::Batch { .. } => "batch",
+                _ => "other",
+            })
+            .collect();
+        let logged: Vec<String> = sv.authority.log.entries[&1].0.roles.iter().cloned().collect();
+        (logged, said.join(" "))
+    };
+    assert_eq!(
+        stamped_as("alice", &["library"]),
+        (vec![], "facts ack batch".to_string()),
+        "protocol: a role the device believed and the login does not hold reached the log"
+    );
+    assert_eq!(
+        stamped_as("alice:library", &[]),
+        (vec!["library".to_string()], "facts ack batch".to_string()),
+        "protocol: the login's role was not stamped on an entry its device authored without it"
+    );
+    assert_eq!(
+        stamped_as("alice:library", &["library"]),
+        (vec!["library".to_string()], "ack batch".to_string()),
+        "protocol: a device that believed rightly was sent more than an acknowledgement"
+    );
+    let plain = ark::protocol::entry_value(&old);
+    assert!(
+        plain.as_struct().get("roles").is_none(),
+        "protocol: an entry holding no role carries `roles`"
+    );
+    let mut empty = plain.clone();
+    if let Value::Struct(fs) = &mut empty {
+        fs.insert("roles".into(), Value::List(vec![].into()));
+    }
+    assert!(ark::protocol::entry_from_value(&empty).is_err(), "protocol: an empty `roles` decoded");
+    let mut unordered = plain.clone();
+    if let Value::Struct(fs) = &mut unordered {
+        fs.insert("roles".into(), Value::List(vec![Value::text("library"), Value::text("editor")].into()));
+    }
+    assert!(
+        ark::protocol::entry_from_value(&unordered).is_err(),
+        "protocol: roles out of order decoded"
+    );
 
     // A peer used for a while with no account, then signed in: everything
     // it authored as nobody is pushed as the person who signed in, every
@@ -401,6 +494,7 @@ pub fn protocol(out: &Out) {
         id: id_n(40),
         actor: "alice".into(),
         session: "dev".into(),
+        roles: Default::default(),
         fn_hash: vec![7; 32],
         args: Args::new(),
         autos: Args::new(),

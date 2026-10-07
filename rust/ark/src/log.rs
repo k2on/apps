@@ -38,6 +38,17 @@ pub struct Entry {
     pub actor: String,
     /// The login it was authored under.
     pub session: String,
+    /// The roles the author held, frozen with the entry as the actor and
+    /// the session are (`docs/plan-guards.md` D1): a body that reads one
+    /// (`Expr::HasRole`) replays with what the authority judged it under,
+    /// on every peer and at every sequence. The device authors with the
+    /// roles it believes; the authority **stamps** the entry with the
+    /// connection's at sequencing ([`crate::protocol::Server`]), so what
+    /// the log holds is the truth and never a device's claim. On the wire
+    /// and on disk `roles`, a list of texts in ascending order, present
+    /// only when not empty — so every entry from before roles is the bytes
+    /// it was (`crate::protocol::entry_value`).
+    pub roles: BTreeSet<String>,
     /// The closure that authored it (§8.3).
     pub fn_hash: FnHash,
     pub args: Args,
@@ -55,6 +66,7 @@ impl Clone for Entry {
             id: self.id,
             actor: self.actor.clone(),
             session: self.session.clone(),
+            roles: self.roles.clone(),
             fn_hash: self.fn_hash.clone(),
             args: self.args.clone(),
             autos: self.autos.clone(),
@@ -487,6 +499,7 @@ mod tests {
                 id,
                 actor: "a".into(),
                 session: "s".into(),
+                roles: BTreeSet::new(),
                 fn_hash: vec![1],
                 args: Args::new(),
                 autos: Args::new(),
@@ -591,6 +604,7 @@ mod tests {
             id,
             actor: "a".into(),
             session: "s".into(),
+            roles: BTreeSet::new(),
             fn_hash: vec![1],
             args: Args::new(),
             autos: Args::new(),

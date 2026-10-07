@@ -844,6 +844,7 @@ mod tests {
             id,
             actor: "a".into(),
             session: "s".into(),
+            roles: Default::default(),
             fn_hash: vec![1],
             args: Args::new(),
             autos: Args::new(),
