@@ -111,6 +111,13 @@ pub struct Tally {
     pub partial_peers: u64,
     pub whole_peers: u64,
     pub unions_checked: u64,
+    /// `docs/plan-guards.md` D3 Entries of a function with a server half
+    /// the log gained; of those, the ones whose author's preview — the
+    /// public body — is not what the log holds, which every client must
+    /// end corrected to; and entries a private block refused.
+    pub private_entries: u64,
+    pub previews_corrected: u64,
+    pub private_refused: u64,
 }
 
 struct Held {
@@ -156,6 +163,9 @@ struct S<'a> {
     role_guarded: std::collections::BTreeSet<String>,
     /// Log entries already held to the stamp, by id and sequence.
     stamped: std::collections::BTreeSet<(Id, i64)>,
+    /// `docs/plan-guards.md` D3 The hashes of the module's functions with a
+    /// server half, read off the module: what the frames are held to.
+    private: std::collections::BTreeSet<FnHash>,
 }
 
 // The literal texts a block refuses with, its branches' included.
@@ -269,6 +279,7 @@ pub fn run(m: &Module, natives: &[(FnHash, Procedure)], seed: u64, without: &[St
         role_names,
         role_guarded,
         stamped: Default::default(),
+        private: closures(m).into_iter().filter(|(_, c)| c.function.private).map(|(h, _)| h).collect(),
     };
     let out = s.session(len);
     let t = &s.tally;
@@ -291,6 +302,15 @@ pub fn run(m: &Module, natives: &[(FnHash, Procedure)], seed: u64, without: &[St
     tally.stamps_checked += t.stamps_checked;
     tally.stamps_corrected += t.stamps_corrected;
     tally.unions_checked += t.unions_checked;
+    tally.private_entries += t.private_entries;
+    tally.previews_corrected += t.previews_corrected;
+    tally.private_refused += s
+        .sim
+        .clients
+        .values()
+        .flat_map(|c| &c.replica.rejections)
+        .filter(|(_, r)| matches!(r, ark::store::Refusal::Refused(t) if t == super::gen::PRIVATE_REFUSES))
+        .count() as u64;
     if s.sim.scopes.is_some() {
         for (i, c) in &s.sim.clients {
             if s.sim.nobody.contains(i) {
@@ -444,6 +464,11 @@ impl S<'_> {
                 if let Frame::ToClient(ServerMsg::SnapshotOf { .. }) = f {
                     self.tally.below_horizon += 1;
                 }
+                if let Frame::ToClient(m) = &f {
+                    if let Some(why) = self.private_facts(m) {
+                        return Some(self.finding("private-facts", why));
+                    }
+                }
             }
         }
         if let Some(why) = self.sim.faults.first() {
@@ -523,6 +548,11 @@ impl S<'_> {
             let Some(f) = self.sim.server.authority.bodies.get(&e.fn_hash).map(|c| c.function.clone()) else {
                 continue;
             };
+            if f.private {
+                if let Some(x) = self.private_entry(n, &e, &f.name) {
+                    return Some(x);
+                }
+            }
             if f.uses.is_empty() {
                 continue;
             }
@@ -536,6 +566,76 @@ impl S<'_> {
                     format!("entry {n} ({}) is in the log, and its middleware refuses it: {r}", f.name),
                 ));
             }
+        }
+        None
+    }
+
+    // `docs/plan-guards.md` D3, of every frame a client is sent: an entry
+    // with a server half carries its facts on every whole page — a peer
+    // that replays cannot run it — and in the acknowledgement of it, while
+    // the log retains it. A client that went without would ask for them
+    // and converge anyway, which is why the frames are held to it here.
+    fn private_facts(&self, m: &ServerMsg) -> Option<String> {
+        let a = &self.sim.server.authority;
+        match m {
+            ServerMsg::Batch { items, covers: None, .. } => items
+                .iter()
+                .find(|(_, e, f)| f.is_none() && self.private.contains(&e.fn_hash))
+                .map(|(n, _, _)| format!("a whole page carries entry {n}, which has a server half, without its facts")),
+            ServerMsg::Ack { seqs, facts, .. } => seqs
+                .iter()
+                .find(|n| a.log.entries.get(n).is_some_and(|(e, _)| self.private.contains(&e.fn_hash)) && !facts.iter().any(|(m, _)| m == *n))
+                .map(|n| format!("entry {n} has a server half and is acknowledged without its facts")),
+            _ => None,
+        }
+    }
+
+    // `docs/plan-guards.md` D3, of every entry the log gains whose function
+    // has a server half: no login a private block refuses is logged
+    // (`private-refusal`, by the block's own condition, read off the module
+    // rather than run again); and the facts the log holds are the whole
+    // run's — the authority's run of it over the state before it — which a
+    // preview of the public body alone is counted against: every client
+    // ends at the authority's hash ([`Sim::converged`]), so a preview that
+    // differs is corrected, never left.
+    fn private_entry(&mut self, n: i64, e: &ark::log::Entry, name: &str) -> Option<Finding> {
+        self.tally.private_entries += 1;
+        if super::gen::private_refusals(self.m).get(name).is_some_and(|who| who.contains(&e.actor)) {
+            return Some(self.finding(
+                "private-refusal",
+                format!(
+                    "entry {n} ({name}) by {} is in the log, and its private block refuses that login",
+                    e.actor
+                ),
+            ));
+        }
+        let a = &self.sim.server.authority;
+        let (Some(st), Some(cl)) = (a.log.state_at(n - 1), a.bodies.get(&e.fn_hash)) else {
+            return None;
+        };
+        let logged = a.log.entries[&n].1.clone();
+        let ctx = Ctx::new(e.actor.clone(), e.session.clone()).with_roles(e.roles.iter().cloned());
+        let run = |authority: bool| {
+            eval::apply_closure(
+                &self.m.schema,
+                cl,
+                &ctx.clone().as_authority(authority),
+                &e.autos,
+                &e.args,
+                &mut st.clone(),
+            )
+        };
+        match run(true) {
+            Ok(Ok(whole)) if whole == logged => {}
+            other => {
+                return Some(self.finding(
+                    "private",
+                    format!("entry {n} ({name}): the log holds other facts than the whole run; logged {logged:?}, the whole run {other:?}"),
+                ))
+            }
+        }
+        if run(false) != Ok(Ok(logged)) {
+            self.tally.previews_corrected += 1;
         }
         None
     }

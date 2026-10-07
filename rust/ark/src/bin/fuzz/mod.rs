@@ -38,6 +38,12 @@
 //! authority's, is answered "unknown", which is not a finding
 //! (`docs/plan-db.md` D3, D2) — and every query is driven once more under
 //! raw changes by the churn generator (`tests/support/churn.rs`).
+//! One generated module in three is given private blocks
+//! (`docs/plan-guards.md` D3; [`gen::privatized`]) — a shared write, a write
+//! of a column a scope leaves out, a refusal of one login's entries — and
+//! every private entry the log gains must hold the whole run's facts, which
+//! is what every client converges on whatever it previewed, and none of a
+//! login a block refuses may be logged at all.
 //!
 //! Case `k` of a run from seed `N` is the case of seed `N + k`, so
 //! `--seed N+k --cases 1` runs it alone. A finding is written under `--out`
@@ -95,6 +101,11 @@ pub struct Stats {
     pub scoped: u64,
     pub projected: u64,
     pub reaching: u64,
+    /// `docs/plan-guards.md` D3 Generated modules given private blocks.
+    pub privatized: u64,
+    /// Their blocks by kind: a shared write, a write of a column a scope
+    /// leaves out, a refusal ([`gen::private_kinds`]).
+    pub private_blocks: (u64, u64, u64),
     pub churn_pushes: u64,
     pub tally: session::Tally,
     pub findings: Vec<(u64, String, String, String)>,
@@ -260,6 +271,10 @@ fn report(s: &Stats, took: Duration) {
         "    {} modules scoped ({} excluding a column, {} with the exists form); {} peers ended holding a union and {} whole; {} unions checked",
         s.scoped, s.projected, s.reaching, t.partial_peers, t.whole_peers, t.unions_checked
     );
+    println!(
+        "    {} modules with private blocks ({} shared writes, {} writes outside a union, {} refusals); {} private entries logged, {} of them confirmed otherwise than their author previewed; {} refused by a private block",
+        s.privatized, s.private_blocks.0, s.private_blocks.1, s.private_blocks.2, t.private_entries, t.previews_corrected, t.private_refused
+    );
     for (seed, check, path, why) in &s.findings {
         println!("  finding: seed {seed}, {check}: {why}\n    written to {path}");
     }
@@ -306,6 +321,24 @@ fn case(seed: u64, o: &Opts, stats: &mut Stats) {
                         }
                         Some(Err(why)) => {
                             *stats.misses.entry(format!("scoped: {why}")).or_default() += 1;
+                            m
+                        }
+                    };
+                    // `docs/plan-guards.md` D3: private blocks, one module
+                    // in three, after the scopes so a block can write what
+                    // one leaves out.
+                    let m = match gen::privatized(&mut rng, &m) {
+                        None => m,
+                        Some(Ok(p)) => {
+                            stats.privatized += 1;
+                            let (shared, outside, refusing) = gen::private_kinds(&p);
+                            stats.private_blocks.0 += shared;
+                            stats.private_blocks.1 += outside;
+                            stats.private_blocks.2 += refusing;
+                            p
+                        }
+                        Some(Err(why)) => {
+                            *stats.misses.entry(format!("private: {why}")).or_default() += 1;
                             m
                         }
                     };

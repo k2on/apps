@@ -11,7 +11,7 @@ use ark::ir::module_from_value;
 use super::{claim, Out};
 
 /// Each session, by the name it is published under.
-const SESSIONS: [(&str, &str); 5] = [
+const SESSIONS: [(&str, &str); 6] = [
     (
         "fleet-fuzz-an-ack-at-or-below-the-cursor.json",
         include_str!("fuzzed/fleet-fuzz-an-ack-at-or-below-the-cursor.json"),
@@ -37,6 +37,14 @@ const SESSIONS: [(&str, &str); 5] = [
     (
         "fleet-fuzz-a-union-whose-snapshot-was-lost.json",
         include_str!("fuzzed/fleet-fuzz-a-union-whose-snapshot-was-lost.json"),
+    ),
+    // `docs/plan-guards.md` D3: an intent of a function with a server half,
+    // pushed again after the horizon had passed its entry, was acknowledged
+    // with the facts of an entry the log no longer held — the server
+    // panicked looking for them.
+    (
+        "fleet-fuzz-a-private-duplicate-below-the-horizon.json",
+        include_str!("fuzzed/fleet-fuzz-a-private-duplicate-below-the-horizon.json"),
     ),
 ];
 

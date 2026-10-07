@@ -1545,3 +1545,200 @@ pub fn scoped(rng: &mut Rng, m: &Module) -> Option<Result<Module, String>> {
         .collect();
     Some(ark::verify::verify(&build(all, rng)).map_err(|es| complaint_kind(&es[0])))
 }
+
+/// What a generated private block refuses with (`docs/plan-guards.md` D3):
+/// how a session tells its refusal from every other.
+pub const PRIVATE_REFUSES: &str = "the server refuses";
+
+/// `docs/plan-guards.md` D3 Private blocks, on a third of modules: one or two
+/// mutators given a server half, at the start or the end of the body (it
+/// runs after the body wherever it is written), of one of three kinds — an
+/// update of the first row of a table every client holds whole (a shared
+/// write the device never previews), the same of a column a scope leaves out
+/// when the module has one (a write outside a union, which the authority's
+/// filter projects away), and a refusal of one login's entries
+/// ([`PRIVATE_REFUSES`]) that a device never sees coming. `None` when the
+/// module is left as it is; otherwise the module verified, or why not.
+pub fn privatized(rng: &mut Rng, m: &Module) -> Option<Result<Module, String>> {
+    if !rng.chance(33) {
+        return None;
+    }
+    let mutators: Vec<usize> = m
+        .functions
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| f.kind == FnKind::Mutator)
+        .map(|(i, _)| i)
+        .collect();
+    if mutators.is_empty() {
+        return None;
+    }
+    // The columns a scope leaves out, where the module has any: the writes
+    // that are outside some union.
+    let excluded: Vec<(String, String)> = m
+        .functions
+        .iter()
+        .flat_map(|f| &f.holds)
+        .flat_map(|h| match &h.columns {
+            Projection::Exclude(cs) => cs.iter().map(|c| (h.table.clone(), c.clone())).collect(),
+            _ => vec![],
+        })
+        .collect();
+    // A column a block may move without breaking a key or a reference: any
+    // but those, and an id.
+    let movable = |t: &Table, c: &Column| !matches!(c.ty, Ty::Id(_)) && !t.key.contains(&c.name) && !t.refs.iter().any(|r| r.column == c.name);
+    let mut out = m.clone();
+    let n = 1 + rng.below(2);
+    for _ in 0..n {
+        let i = *rng.pick(&mutators).expect("a mutator");
+        let f = &mut out.functions[i];
+        // Above every binder the function has: the module is renumbered when
+        // it is verified.
+        let base = 1000 + 10 * f.body.len() as Sym;
+        let block = match rng.below(3) {
+            0 => {
+                let who = format!("peer-{}", rng.below(3));
+                vec![Stmt::If(
+                    cmp(CmpOp::Eq, Expr::CtxUser, lit_text(&who)),
+                    vec![Stmt::Refuse(lit_text(PRIVATE_REFUSES))],
+                    vec![],
+                )]
+            }
+            kind => {
+                let outside: Vec<(Table, Column)> = excluded
+                    .iter()
+                    .filter_map(|(t, c)| {
+                        let tbl = m.schema.lookup_table(t)?;
+                        tbl.columns
+                            .iter()
+                            .find(|x| x.name == *c && movable(tbl, x))
+                            .map(|x| (tbl.clone(), x.clone()))
+                    })
+                    .collect();
+                let shared: Vec<(Table, Column)> = m
+                    .schema
+                    .tables
+                    .iter()
+                    .flat_map(|t| t.columns.iter().filter(|c| movable(t, c)).map(|c| (t.clone(), c.clone())))
+                    .collect();
+                // Outside a union whenever the module has somewhere to write
+                // one, two times in three: it is rare to have one at all.
+                let pool = if (kind == 2 || rng.chance(50)) && !outside.is_empty() {
+                    outside
+                } else {
+                    shared
+                };
+                let Some((t, c)) = rng.pick(&pool).cloned() else { continue };
+                let (s, x, y) = (base, base + 1, base + 2);
+                let mut first = bare(&t.name);
+                first.limit = Some(1);
+                // From what is there where it can be — a text grows, an int
+                // counts — and otherwise a value of the column's type.
+                let moved = match (&c.ty, c.nullable) {
+                    (Ty::Int, false) => Expr::Op(Op::Add, vec![field(var(y), &c.name), int(1)]),
+                    (Ty::Text, false) => Expr::Std(StdFn::Concat, vec![Expr::List(vec![field(var(y), &c.name), lit_text("!")])]),
+                    (ty, nullable) => {
+                        let v = match ty {
+                            Ty::Int => int(7),
+                            Ty::Bool => Expr::Lit(Value::Bool(true)),
+                            Ty::Bytes => Expr::Lit(Value::bytes(b"!".to_vec())),
+                            Ty::Enum(vs) => lit_text(vs.first().map_or("", |v| v.as_str())),
+                            _ => lit_text("!"),
+                        };
+                        if nullable {
+                            Expr::Some(Box::new(v))
+                        } else {
+                            v
+                        }
+                    }
+                };
+                let row: BTreeMap<String, Expr> = t
+                    .columns
+                    .iter()
+                    .map(|k| (k.name.clone(), if k.name == c.name { moved.clone() } else { field(var(y), &k.name) }))
+                    .collect();
+                vec![
+                    Stmt::Let(s, Expr::Select(Box::new(first))),
+                    Stmt::For(
+                        x,
+                        var(s),
+                        vec![Stmt::Update(
+                            t.name.clone(),
+                            t.key.iter().map(|k| field(var(x), k)).collect(),
+                            y,
+                            Expr::Struct(row),
+                        )],
+                    ),
+                ]
+            }
+        };
+        let at = if rng.chance(50) { 0 } else { f.body.len() };
+        f.body.insert(at, Stmt::Private(block));
+        f.private = true;
+    }
+    if !out.functions.iter().any(|f| f.private) {
+        return None;
+    }
+    Some(ark::verify::verify(&out).map_err(|es| complaint_kind(&es[0])))
+}
+
+/// `docs/plan-guards.md` D3 The login each private block refuses, by
+/// function: what a session holds the log to, by an oracle of its own
+/// rather than by running the block again.
+pub fn private_refusals(m: &Module) -> BTreeMap<String, Vec<String>> {
+    let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for f in m.functions.iter().filter(|f| f.private) {
+        for s in &f.body {
+            let Stmt::Private(b) = s else { continue };
+            for t in b {
+                if let Stmt::If(Expr::Cmp(CmpOp::Eq, l, r), yes, no) = t {
+                    if let (Expr::CtxUser, Expr::Lit(Value::Text(who)), [Stmt::Refuse(Expr::Lit(Value::Text(why)))], []) =
+                        (&**l, &**r, yes.as_slice(), no.as_slice())
+                    {
+                        if &**why == PRIVATE_REFUSES {
+                            out.entry(f.name.clone()).or_default().push(who.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// `docs/plan-guards.md` D3 How many private blocks of a module are of each
+/// kind [`privatized`] makes: a shared write, a write of a column a scope
+/// leaves out, a refusal. What the run's report counts.
+pub fn private_kinds(m: &Module) -> (u64, u64, u64) {
+    let excluded: Vec<(String, String)> = m
+        .functions
+        .iter()
+        .flat_map(|f| &f.holds)
+        .flat_map(|h| match &h.columns {
+            Projection::Exclude(cs) => cs.iter().map(|c| (h.table.clone(), c.clone())).collect(),
+            _ => vec![],
+        })
+        .collect();
+    let (mut shared, mut outside, mut refusing) = (0, 0, 0);
+    for b in m.functions.iter().flat_map(|f| &f.body).filter_map(|s| match s {
+        Stmt::Private(b) => Some(b),
+        _ => None,
+    }) {
+        for s in b {
+            match s {
+                Stmt::If(_, yes, _) if matches!(yes.as_slice(), [Stmt::Refuse(_)]) => refusing += 1,
+                Stmt::For(_, _, body) => {
+                    if let [Stmt::Update(t, _, y, Expr::Struct(fs))] = body.as_slice() {
+                        let moved = fs.iter().find(|(c, e)| **e != field(var(*y), c)).map(|(c, _)| c.clone());
+                        match moved {
+                            Some(c) if excluded.contains(&(t.clone(), c.clone())) => outside += 1,
+                            _ => shared += 1,
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    (shared, outside, refusing)
+}
