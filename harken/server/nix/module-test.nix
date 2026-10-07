@@ -77,7 +77,7 @@ let
     [ (!(env dev ? HARKEN_OLD_MODULES)) "and none, nothing" ]
     [ ((env dev).HARKEN_ADMIN_BIND == "127.0.0.1:8788" && dev.warnings == [ ]) "the admin page is on loopback by default, asking nothing" ]
     [ ((env adminPage).HARKEN_ADMIN_WEB == "${hello}") "its page is served from the build named" ]
-    [ (warns adminWide "nobody can open it") "an admin page bound wider that nobody holds admin for is a warning" ]
+    [ (warns adminWide "names nobody holding it") "an admin page bound wider that nobody holds admin for is a warning" ]
     [ ((env adminWideHeld).HARKEN_ADMIN_BIND == "0.0.0.0:8788" && adminWideHeld.warnings == [ ]) "and with somebody holding it, none" ]
     [ (!(env adminOff ? HARKEN_ADMIN_BIND) && !(env adminOff ? HARKEN_ADMIN_WEB)) "no bind, no admin page" ]
   ];
