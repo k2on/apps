@@ -126,18 +126,18 @@ pub enum ServerMsg {
         /// `rebase/fleet-fuzz-an-ack-names-no-log.json`).
         log_id: Option<Id>,
         /// The facts of each acknowledged entry the authority stamped with
-        /// other roles than its device froze in it (`docs/plan-guards.md`
-        /// D1), by sequence: the device's own run of it was a preview under
-        /// a belief the log does not hold, so it confirms by these and not
-        /// by its record. In the acknowledgement and not a frame of their
-        /// own, so they arrive with the log they are of — facts alone, for
-        /// a sequence of a log a peer has not been told the name of, would
-        /// wait in its inbox for whichever entry the next log puts there
-        /// (`arkc fuzz` found it, seed 112; held by `peer`'s
-        /// `the_stamps_facts_arrive_with_the_log_they_are_of`). `facts` on
-        /// the wire, a list of `{seq, facts}`, present only when not empty:
-        /// an acknowledgement of entries whose devices believed rightly is
-        /// the bytes it was.
+        /// other roles than its device froze in it, and whose closure reads
+        /// a role beyond a guard's refusal (`docs/plan-guards.md` D1;
+        /// [`crate::hash::reads_roles`]), by sequence: the device's own run
+        /// of it was a preview under a belief the log does not hold, so it
+        /// confirms by these and not by its record. In the acknowledgement
+        /// and not a frame of their own, so they arrive with the log they
+        /// are of — facts alone, for a sequence of a log a peer has not been
+        /// told the name of, would wait in its inbox for whichever entry the
+        /// next log puts there (`arkc fuzz` found it, seed 112; held by
+        /// `tests/roles.rs`'s `the_stamps_facts_arrive_with_the_log_they_are_of`).
+        /// `facts` on the wire, a list of `{seq, facts}`, present only when
+        /// not empty: every other acknowledgement is the bytes it was.
         facts: Vec<(Seq, Facts)>,
     },
     Reject {
@@ -1253,6 +1253,12 @@ pub struct Server<M: Machine> {
     /// schema that is not its own. `None` only for a machine nobody told,
     /// a test's or a vector's, whose frames are the bytes they were.
     pub module: Option<Vec<u8>>,
+    /// Whether each function's closure reads a role outside its guards
+    /// ([`crate::hash::reads_roles`]), as asked: an entry of one that the
+    /// stamp gave other roles is acknowledged with its facts, and one of
+    /// any other is not (`docs/plan-guards.md` D1). A closure is fixed by
+    /// its hash, so an answer is kept.
+    role_readers: BTreeMap<FnHash, bool>,
 }
 
 impl<M: Machine> Server<M> {
@@ -1269,7 +1275,19 @@ impl<M: Machine> Server<M> {
             rooms: Rooms::new(),
             out: vec![],
             module: None,
+            role_readers: BTreeMap::new(),
         }
+    }
+
+    // Whether the closure under `fh` reads a role outside its guards; a
+    // hash this server holds no closure for reads none.
+    fn reads_roles(&mut self, fh: &FnHash) -> bool {
+        if let Some(r) = self.role_readers.get(fh) {
+            return *r;
+        }
+        let r = self.authority.bodies.get(fh).is_some_and(crate::hash::reads_roles);
+        self.role_readers.insert(fh.clone(), r);
+        r
     }
 
     /// Say this module hash on every page and snapshot (`docs/plan-db.md`
@@ -1437,15 +1455,18 @@ impl<M: Machine> Server<M> {
                     };
                     match self.authority.sequence_entry(e) {
                         // Stamped with other roles than the device authored
-                        // under, its run there was a preview of what was not
-                        // logged: the facts ride the acknowledgement, so the
-                        // device holds its record to them — and takes them
-                        // where they differ — even when the page carrying
-                        // the stamped entry never reaches it. A device whose
-                        // belief is right, which is every one ordinarily, is
-                        // acknowledged as it was.
+                        // under, and its closure reads a role beyond a
+                        // guard's refusal: its run there was a preview of
+                        // what was not logged, so the facts ride the
+                        // acknowledgement and the device holds its record to
+                        // them — and takes them where they differ — even
+                        // when the page carrying the stamped entry never
+                        // reaches it. Any other entry is acknowledged as it
+                        // was: a device whose belief is right, and one whose
+                        // function reads no role — every intent of a peer
+                        // older than roles, which sends none.
                         Sequenced::Appended(n, facts) => {
-                            if restamped {
+                            if restamped && self.reads_roles(&e.fn_hash) {
                                 stamp_facts.push((n, facts));
                             }
                             acks.push((e.id, n))
@@ -1454,10 +1475,9 @@ impl<M: Machine> Server<M> {
                         // with: the device pushing it again may still be
                         // holding the preview of another belief.
                         Sequenced::Duplicate(n) => {
-                            if let Some((logged, facts)) = self.authority.log.entries.get(&n) {
-                                if logged.roles != pushed.roles {
-                                    stamp_facts.push((n, facts.clone()));
-                                }
+                            let differs = self.authority.log.entries.get(&n).is_some_and(|(logged, _)| logged.roles != pushed.roles);
+                            if differs && self.reads_roles(&e.fn_hash) {
+                                stamp_facts.push((n, self.authority.log.entries[&n].1.clone()));
                             }
                             acks.push((e.id, n))
                         }

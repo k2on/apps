@@ -242,3 +242,89 @@ fn the_stamp_decides_what_a_body_reading_a_role_writes() {
     assert_eq!(sv.authority.log.head_seq(), 1, "nothing logged");
     assert_eq!(bob.replica.verify_at(), (1, state_hash(&sv.authority.store)));
 }
+
+/// Found by `arkc fuzz` (seed 112): the facts of an entry the authority
+/// stamped arrive with the log they are of. A device that has never been
+/// told a log's name believes `writer`; its login holds `flagger` too,
+/// which `write`'s body reads, so the authority acknowledges the entry with
+/// its facts — and nothing it sends reaches the device. The server then
+/// loses its log; on the new one somebody else's note is first; the device
+/// comes back naming no log, is paged from 0, and must reach the new log's
+/// hash. Falsified by sending the facts as a frame of their own ahead of
+/// the acknowledgement as well, as the stamp first did, and losing only the
+/// acknowledgement and the page: the facts wait in the inbox at sequence 1,
+/// the new log's first entry is applied by them, and the device diverges.
+#[test]
+fn the_stamps_facts_arrive_with_the_log_they_are_of() {
+    let m = module();
+    let built = m.build().clone();
+    let bodies = closures(&built);
+    let (fh, _) = m.procedure("write").unwrap();
+    let server = |name: u8| {
+        let mut a = Authority::new(built.schema.clone(), bodies.clone());
+        a.hold(m.procedures());
+        a.log.name_if_unnamed([name; 16]);
+        Server::open(trusting(), open_access(), Silent, a)
+    };
+    let replica = || Replica::open(built.schema.clone(), bodies.clone(), MemoryStore::empty(built.schema.clone()), 0, vec![]);
+    let note = |text: &str| args([("text", Value::text(text))]);
+
+    let mut a = server(0xa1);
+    let mut dev = Client::open(replica(), Mode::Whole, Some("bob:writer,flagger".into()));
+    dev.connected();
+    dev.mutate(
+        [1; 16],
+        &eval::Ctx::new("bob", "dev").with_roles(["writer"]),
+        &fh,
+        &args([("id", idv(1))]),
+        &note("mine"),
+    )
+    .unwrap();
+    for f in dev.take_outgoing() {
+        a.recv(1, f);
+    }
+    assert_eq!(a.authority.log.entries[&1].0.roles.len(), 2, "stamped");
+    // Everything but the acknowledgement and the page reaches it.
+    for (_, f) in a.take_outgoing() {
+        if !matches!(f, ServerMsg::Ack { .. } | ServerMsg::Batch { .. }) {
+            dev.recv(f);
+        }
+    }
+    dev.settle();
+    dev.disconnected();
+    assert_eq!((dev.replica.cursor, dev.replica.log_id), (0, None), "it has heard no log");
+
+    // The server comes back without its log; somebody else is first.
+    let mut b = server(0xb2);
+    let mut alice = Client::open(replica(), Mode::Whole, Some("alice:writer".into()));
+    alice.connected();
+    alice
+        .mutate(
+            [2; 16],
+            &eval::Ctx::new("alice", "dev").with_roles(["writer"]),
+            &fh,
+            &args([("id", idv(2))]),
+            &note("hers"),
+        )
+        .unwrap();
+    for f in alice.take_outgoing() {
+        b.recv(2, f);
+    }
+    let _ = b.take_outgoing();
+    dev.connected();
+    for _ in 0..4 {
+        for f in dev.take_outgoing() {
+            b.recv(1, f);
+        }
+        for (to, f) in b.take_outgoing() {
+            if to == 1 {
+                dev.recv(f);
+            }
+        }
+        dev.settle();
+    }
+    assert_eq!(b.authority.log.head_seq(), 2);
+    assert!(dev.replica.pending.is_empty(), "{:?}", dev.replica.pending);
+    assert!(dev.replica.diverged.is_empty(), "{:?}", dev.replica.diverged);
+    assert_eq!(dev.replica.verify_at(), (2, state_hash(&b.authority.store)));
+}

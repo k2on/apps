@@ -317,59 +317,47 @@ pub fn protocol(out: &Out) {
     // The authority stamps (`docs/plan-guards.md` D1): an entry is logged
     // with the roles of the connection that pushed it, whatever its device
     // believed — a role it was never given is not in the log, and one it
-    // did not know it held is. Where the two differ the acknowledgement
-    // carries the entry's facts; where they agree, it is the bytes it was.
+    // did not know it held is. The acknowledgement carries the entry's facts
+    // only where the two differ and its function reads a role beyond a
+    // guard's refusal: `create_playlist` reads none, so a restamped one of
+    // it — every intent of a peer older than roles, which sends none — is
+    // acknowledged as it always was; the guarded demo's `feature` reads
+    // `editor` in its body, so one of it is acknowledged with its facts.
     // And an entry holding no role carries no `roles` at all.
-    let stamped_as = |token: &str, believed: &[&str]| {
-        let mut sv = server();
-        sv.recv(
-            1,
-            ClientMsg::Hello {
-                sub: Subscription {
-                    since: 0,
-                    mode: Mode::Whole,
-                    log_id: None,
-                },
-                token: Some(token.into()),
-                spec: SPEC_VERSION,
-            },
-        );
-        let _ = sv.take_outgoing();
-        let e = Entry {
-            id: id_n(50),
-            session: "dev".into(),
-            roles: believed.iter().map(|r| r.to_string()).collect(),
-            ..old.clone()
-        };
-        sv.recv(1, ClientMsg::Push { entries: vec![e] });
-        let said: Vec<&str> = sv
-            .take_outgoing()
-            .iter()
-            .filter(|(c, _)| *c == 1)
-            .map(|(_, m)| match m {
-                ServerMsg::Ack { facts, .. } if facts.len() == 1 && facts[0].0 == 1 => "ack with its facts",
-                ServerMsg::Ack { facts, .. } if facts.is_empty() => "ack",
-                ServerMsg::Batch { .. } => "batch",
-                _ => "other",
-            })
-            .collect();
-        let logged: Vec<String> = sv.authority.log.entries[&1].0.roles.iter().cloned().collect();
-        (logged, said.join(" "))
+    let stamped_as = |token: &str, believed: &[&str]| stamp_on(Authority::new(m.schema.clone(), bodies.clone()), &old, token, believed);
+    let guarded = demo::guarded();
+    let featured = Entry {
+        fn_hash: hash_of(&guarded, "feature"),
+        args: args([("name", Value::text("Picks"))]),
+        autos: args([("id", Value::Id(id_n(51)))]),
+        ..old.clone()
     };
+    let feature_as =
+        |token: &str, believed: &[&str]| stamp_on(Authority::new(guarded.schema.clone(), closures(&guarded)), &featured, token, believed);
     assert_eq!(
         stamped_as("alice", &["library"]),
-        (vec![], "ack with its facts batch".to_string()),
+        (vec![], "ack batch".to_string()),
         "protocol: a role the device believed and the login does not hold reached the log"
     );
     assert_eq!(
         stamped_as("alice:library", &[]),
-        (vec!["library".to_string()], "ack with its facts batch".to_string()),
+        (vec!["library".to_string()], "ack batch".to_string()),
         "protocol: the login's role was not stamped on an entry its device authored without it"
     );
     assert_eq!(
         stamped_as("alice:library", &["library"]),
         (vec!["library".to_string()], "ack batch".to_string()),
         "protocol: a device that believed rightly was sent more than an acknowledgement"
+    );
+    assert_eq!(
+        feature_as("alice:curator,editor", &["curator"]),
+        (vec!["curator".to_string(), "editor".to_string()], "ack with its facts batch".to_string()),
+        "protocol: a restamped entry whose body reads a role was acknowledged without its facts"
+    );
+    assert_eq!(
+        feature_as("alice:curator", &["curator"]),
+        (vec!["curator".to_string()], "ack batch".to_string()),
+        "protocol: an entry whose roles the stamp kept was acknowledged with its facts"
     );
     let plain = ark::protocol::entry_value(&old);
     assert!(
@@ -592,4 +580,50 @@ pub fn protocol(out: &Out) {
             &obj(&[("frame", json(&v)), ("bytes", quoted(&hex(&encode(&v))))]),
         );
     }
+}
+
+/// An entry pushed to a server over `a` by a connection whose token is
+/// `token`, its device believing `believed`: the roles the log holds for
+/// it, and what that connection was sent (`docs/plan-guards.md` D1).
+fn stamp_on(a: Authority, e: &Entry, token: &str, believed: &[&str]) -> (Vec<String>, String) {
+    let mut sv = Server::open(trusting(), open_access(), Silent, a);
+    sv.recv(
+        1,
+        ClientMsg::Hello {
+            sub: Subscription {
+                since: 0,
+                mode: Mode::Whole,
+                log_id: None,
+            },
+            token: Some(token.into()),
+            spec: SPEC_VERSION,
+        },
+    );
+    let _ = sv.take_outgoing();
+    let e = Entry {
+        id: id_n(50),
+        session: "dev".into(),
+        roles: believed.iter().map(|r| r.to_string()).collect(),
+        ..e.clone()
+    };
+    sv.recv(1, ClientMsg::Push { entries: vec![e] });
+    let said: Vec<&str> = sv
+        .take_outgoing()
+        .iter()
+        .filter(|(c, _)| *c == 1)
+        .map(|(_, m)| match m {
+            ServerMsg::Ack { facts, .. } if facts.len() == 1 && facts[0].0 == 1 => "ack with its facts",
+            ServerMsg::Ack { facts, .. } if facts.is_empty() => "ack",
+            ServerMsg::Batch { .. } => "batch",
+            ServerMsg::Reject { .. } => "reject",
+            _ => "other",
+        })
+        .collect();
+    let logged = sv
+        .authority
+        .log
+        .entries
+        .get(&1)
+        .map_or(vec![], |(e, _)| e.roles.iter().cloned().collect());
+    (logged, said.join(" "))
 }

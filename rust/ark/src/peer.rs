@@ -108,6 +108,15 @@ pub struct Replica {
     /// are compared with a run or applied. Not durable: every connection's
     /// first answer says it again.
     pub behind: bool,
+    /// The facts of pending intents whose function this replica holds no
+    /// closure for, where it knows them: its local history re-queued at a
+    /// join ([`Replica::fork_back`]), whose facts the alone journal kept.
+    /// What such an intent's preview applies; one whose facts are not known
+    /// is pending with no preview (`docs/plan-guards.md` D1, the version
+    /// matrix: a client upgraded in place over intents at a hash its new
+    /// module no longer ships). Either is confirmed by the authority's
+    /// facts, never by this. Not durable.
+    pub known: BTreeMap<Id, Facts>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
@@ -256,6 +265,27 @@ fn invert(c: Change) -> Change {
     }
 }
 
+/// Whether `chs`, applied in order over `store`, is a transition at every
+/// step — an `Add` onto an absent key, a `Remove` or an `Edit` from exactly
+/// the row there — so that applying it and inverting it come back to
+/// `store` (`docs/plan-perf.md` R2). Over an overlay: `store` is untouched.
+fn transitions(schema: &Schema, store: &dyn Store, chs: &[Change]) -> bool {
+    let mut over = Overlay::new(store);
+    for c in chs {
+        let Some(tbl) = schema.lookup_table(c.table()) else { return false };
+        let (row, before) = match c {
+            Change::Add(_, row) => (row, None),
+            Change::Remove(_, row) => (row, Some(row)),
+            Change::Edit(_, old, new) => (new, Some(old)),
+        };
+        if over.get(c.table(), &tbl.key_of(row)).as_ref() != before {
+            return false;
+        }
+        over.apply_change(c);
+    }
+    true
+}
+
 /// Hold native procedures, and the closures they carry.
 fn hold(bodies: &mut BTreeMap<FnHash, Closure>, natives: &mut BTreeMap<FnHash, Procedure>, procs: impl IntoIterator<Item = (FnHash, Procedure)>) {
     for (h, p) in procs {
@@ -286,6 +316,7 @@ impl Replica {
             replaced: true,
             journal: vec![],
             behind: false,
+            known: BTreeMap::new(),
         };
         r.replay();
         r
@@ -509,6 +540,13 @@ impl Replica {
         );
         let order: Vec<Id> = self.pending.iter().map(|e| e.id).collect();
         let whole = order.iter().all(|id| self.recorded.contains_key(id));
+        // What each re-queued intent did alone: the preview of one whose
+        // function this replica can no longer run (`known`).
+        for (e, f) in requeue.iter().zip(&local) {
+            if !self.can_apply(&e.fn_hash) {
+                self.known.insert(e.id, f.clone());
+            }
+        }
         let mut told = Vec::new();
         if whole {
             for id in order.iter().rev() {
@@ -724,8 +762,12 @@ impl Replica {
             // is what running it again would produce. Facts, when they
             // came, are compared to the record, and a difference is a
             // divergence exactly as a run's would be.
+            // An intent this replica holds no closure for was previewed by
+            // facts it knew, or not at all: never confirmed by that, and
+            // whatever the authority's facts did, the view is rebased onto.
+            let previewed = self.can_apply(&e.fn_hash);
             let by_record = match self.recorded.get(&e.id) {
-                Some(rec) if own_next && !others => {
+                Some(rec) if own_next && !others && previewed => {
                     debug_assert!(
                         runs_as(&self.schema, &self.bodies, &self.natives, &e, &self.confirmed, rec),
                         "the record of this peer's own intent is not what running it over the confirmed store at sequence {} produces",
@@ -760,12 +802,13 @@ impl Replica {
             } else {
                 self.pending.retain(|p| p.id != e.id);
             }
+            self.known.remove(&e.id);
             if diverged {
                 self.diverged.push(n);
             }
             acc.extend(chs);
             moved = true;
-            others = others || !own_next || diverged;
+            others = others || !own_next || diverged || !previewed;
         }
         (acc, moved, others)
     }
@@ -994,7 +1037,29 @@ impl Replica {
                 )
             };
             match out {
-                None => self.rejections.push((e.id, Refusal::Refused("no closure for a pending intent".into()))),
+                // `docs/plan-guards.md` D1: no closure for it — an intent
+                // from before an upgrade, at a hash this module no longer
+                // ships — is kept, pushed, and confirmed by the authority's
+                // facts; its preview is the facts this replica knows for
+                // it (`known`), or nothing. A peer alone, which has no
+                // authority to run it, refuses it when it commits
+                // ([`local_commit`]).
+                None => {
+                    // Facts are of the state they were made over: a preview
+                    // only while they are still a transition from the view
+                    // as it stands — at the join, where the view is the fork
+                    // and the local history before them, they are; after a
+                    // rebase that landed somebody else's entries under them,
+                    // they may not be, and the intent waits unpreviewed.
+                    let chs = match self.known.get(&e.id) {
+                        Some(f) if transitions(&self.schema, &self.view, f) => f.clone(),
+                        _ => vec![],
+                    };
+                    self.view.apply_changes(&chs);
+                    moved.extend(chs.iter().cloned());
+                    self.recorded.insert(e.id, chs);
+                    self.pending.push(e);
+                }
                 Some(Ok(Ok(chs))) => {
                     self.view.apply_changes(&chs);
                     moved.extend(chs.iter().cloned());
@@ -1252,6 +1317,9 @@ pub fn local_commit(a: &mut Authority, r: &mut Replica) {
             _ => None,
         };
         let out = match recorded {
+            // No closure on either side: nothing here can run it, and a
+            // peer alone has no other authority (`docs/plan-guards.md` D1).
+            _ if !a.can_apply(&e.fn_hash) => Sequenced::Rejected(Refusal::Refused("no closure, and no authority to run it".into())),
             Some(rec) => a.append_as(&e, rec),
             None => a.sequence_entry(&e),
         };
@@ -2150,11 +2218,13 @@ mod tests {
     /// its pending intent; the server holds the connection to the login's
     /// own `library` and logs that, whatever the device said; the device is
     /// confirmed by the acknowledgement alone — the page carrying the
-    /// stamped entry lost — at the authority's hash, by the facts the
-    /// acknowledgement carries; and a peer fed the log replays the
-    /// entry with the stamped roles, on the wire and in its run. Falsified
-    /// by sequencing the entry as pushed (no stamp): the log holds
-    /// `editor`.
+    /// stamped entry lost — at the authority's hash, by its own record,
+    /// since `create_playlist` reads no role and the acknowledgement carries
+    /// no facts; and a peer fed the log replays the entry with the stamped
+    /// roles, on the wire and in its run. Falsified by sequencing the entry
+    /// as pushed (no stamp): the log holds `editor`; and by acknowledging a
+    /// restamped entry with its facts whatever it reads (`reads_roles`
+    /// ignored): the acknowledgement carries them.
     #[test]
     fn the_authority_stamps_the_roles_an_entry_is_logged_with() {
         use crate::live::Silent;
@@ -2182,10 +2252,12 @@ mod tests {
         assert_eq!(logged.roles, ["library".to_string()].into(), "the login's roles, stamped");
         assert_eq!((logged.id, &logged.actor), (e.id, &e.actor));
         let said = sv.take_outgoing();
+        // `create_playlist` reads no role, so what the device ran is what
+        // was logged, and the acknowledgement carries no facts — as for
+        // every intent of a peer older than roles, which sends none.
         assert!(
-            said.iter()
-                .any(|(_, m)| matches!(m, ServerMsg::Ack { facts, .. } if facts.len() == 1 && facts[0].0 == 1)),
-            "the facts ride the acknowledgement: {said:?}"
+            said.iter().any(|(_, m)| matches!(m, ServerMsg::Ack { facts, .. } if facts.is_empty())),
+            "a plain acknowledgement: {said:?}"
         );
         // The page that would have carried the stamped entry is lost.
         for (_, m) in said.into_iter().filter(|(_, m)| !matches!(m, ServerMsg::Batch { .. })) {
@@ -2219,78 +2291,144 @@ mod tests {
         assert_eq!(late.replica.verify_at(), (1, state_hash(&sv.authority.store)));
     }
 
-    /// `docs/plan-guards.md` D1, found by `arkc fuzz` (seed 112): the facts
-    /// of an entry the authority stamped arrive with the log they are of.
-    /// A device that has never been told a log's name authors under no
-    /// role; its login holds `editor`, so the authority stamps the entry
-    /// and sends its facts — and nothing it sends reaches the device. The
-    /// server then loses its log; on the new one somebody else's entry is
-    /// first; the device comes back naming no log, is paged from 0, and
-    /// must reach the new log's hash. Falsified by sending the facts as a
-    /// frame of their own ahead of the acknowledgement, as the stamp first
-    /// did, and losing only the acknowledgement and the page: the facts
-    /// wait in the inbox at sequence 1, the new log's first entry is
-    /// applied by them, and the device diverges from the authority.
-    #[test]
-    fn the_stamps_facts_arrive_with_the_log_they_are_of() {
-        use crate::live::Silent;
-        use crate::protocol::{open_access, trusting, Client, Mode, Server, ServerMsg};
-        let d = demo();
-        let server = |name: u8| {
-            let mut a = d.authority();
-            a.log.name_if_unnamed([name; 16]);
-            Server::open(trusting(), open_access(), Silent, a)
-        };
-        let mut a = server(0xa1);
-        let mut dev = Client::open(d.replica(true), Mode::Whole, Some("bob:editor".into()));
-        dev.connected();
-        d.create(&mut dev.replica, &Ctx::new("bob", "dev"), 1, "Bob's");
-        dev.out.push(crate::protocol::ClientMsg::Push {
-            entries: dev.replica.pending.clone(),
-        });
-        for m in dev.take_outgoing() {
-            a.recv(1, m);
-        }
-        assert_eq!(a.authority.log.entries[&1].0.roles, ["editor".to_string()].into(), "stamped");
-        // Everything but the acknowledgement and the page reaches it.
-        for (_, m) in a.take_outgoing() {
-            if !matches!(m, ServerMsg::Ack { .. } | ServerMsg::Batch { .. }) {
-                dev.recv(m);
-            }
-        }
-        dev.settle();
-        dev.disconnected();
-        assert_eq!((dev.replica.cursor, dev.replica.log_id), (0, None), "it has heard no log");
+    // A replica of the demo that holds no closure for `create_playlist`:
+    // a client built after that function's hash moved, opened over
+    // intents an older build of it authored.
+    fn without_create(d: &Demo, confirmed: MemoryStore, cursor: Seq, pending: Vec<Entry>) -> Replica {
+        let mut bodies = d.bodies.clone();
+        bodies.remove(&d.create);
+        Replica::open(d.schema.clone(), bodies, confirmed, cursor, pending)
+    }
 
-        // The server comes back without its log; somebody else is first.
-        let mut b = server(0xb2);
-        let mut alice = Client::open(d.replica(false), Mode::Whole, Some("alice".into()));
-        alice.connected();
-        d.create(&mut alice.replica, &Ctx::new("alice", "dev"), 2, "Alice's");
-        alice.out.push(crate::protocol::ClientMsg::Push {
-            entries: alice.replica.pending.clone(),
-        });
-        for m in alice.take_outgoing() {
-            b.recv(2, m);
-        }
-        let _ = b.take_outgoing();
-        dev.connected();
-        for _ in 0..4 {
-            for m in dev.take_outgoing() {
-                b.recv(1, m);
+    // An intent of `create_playlist`, as a replica that runs it authors it.
+    fn old_intent(d: &Demo, n: u32, name: &str) -> Entry {
+        let mut r = d.replica(false);
+        d.create(&mut r, &Ctx::new("alice", "dev"), n, name)
+    }
+
+    // Pump a client against a server on connection 1 until it is quiet.
+    fn pump(sv: &mut crate::protocol::Server<crate::live::Silent>, c: &mut crate::protocol::Client) {
+        for _ in 0..6 {
+            for m in c.take_outgoing() {
+                sv.recv(1, m);
             }
-            for (to, m) in b.take_outgoing() {
+            for (to, m) in sv.take_outgoing() {
                 if to == 1 {
-                    dev.recv(m);
+                    c.recv(m);
                 }
             }
-            dev.settle();
+            c.settle();
         }
-        assert!(
-            dev.replica.pending.is_empty() && dev.replica.diverged.is_empty(),
-            "{:?}",
-            dev.replica.diverged
+    }
+
+    /// `docs/plan-guards.md` D1, the version matrix: a pending intent at a
+    /// hash this replica's module does not ship — opened from what an older
+    /// build left — is kept, with no preview, pushed, and confirmed by the
+    /// authority's facts: the view holds its row only once the authority
+    /// has said what it wrote. Falsified by rejecting it again in
+    /// `run_pending` ("no closure for a pending intent", as it was): it is
+    /// not pending, and the authority never sees it.
+    #[test]
+    fn a_pending_intent_with_no_closure_is_kept_and_confirmed_by_facts() {
+        use crate::live::Silent;
+        use crate::protocol::{open_access, trusting, Client, Mode, Server};
+        let d = demo();
+        let e = old_intent(&d, 1, "Old");
+        let r = without_create(&d, MemoryStore::empty(d.schema.clone()), 0, vec![e.clone()]);
+        assert_eq!(r.pending, vec![e.clone()], "kept");
+        assert!(r.rejections.is_empty(), "{:?}", r.rejections);
+        assert!(r.view.scan("playlist").is_empty(), "no preview: its facts are not known here");
+        let mut sv = Server::open(trusting(), open_access(), Silent, d.authority());
+        let mut c = Client::open(r, Mode::Whole, Some("alice".into()));
+        c.connected();
+        pump(&mut sv, &mut c);
+        assert_eq!(sv.authority.log.head_seq(), 1, "pushed and sequenced");
+        let r = &c.replica;
+        assert!(r.pending.is_empty() && r.diverged.is_empty() && r.rejections.is_empty());
+        assert_eq!(r.verify_at(), (1, state_hash(&sv.authority.store)));
+        assert_eq!(r.view.scan("playlist").len(), 1, "the row, from the authority's facts");
+    }
+
+    /// The same, where the facts are known: local history re-queued at a
+    /// join (`fork_back`) carries what each intent did alone, and an intent
+    /// whose function this module no longer ships previews by those facts
+    /// — the row stays on screen through the join — until the authority's
+    /// facts confirm it. Falsified by not recording them (`known` left
+    /// empty in `fork_back`): the row leaves the view at the join.
+    #[test]
+    fn local_history_with_no_closure_previews_by_the_facts_it_kept() {
+        use crate::live::Silent;
+        use crate::protocol::{open_access, trusting, Client, Mode, Server};
+        let d = demo();
+        // Alone, with the closure: one intent sequenced locally.
+        let (mut a, mut alone) = (d.authority(), d.replica(false));
+        let e = d.create(&mut alone, &Ctx::new("alice", "dev"), 1, "Local");
+        local_commit(&mut a, &mut alone);
+        let facts = a.log.entries[&1].1.clone();
+        // Upgraded: the same confirmed store, under a module without it.
+        let mut r = without_create(&d, alone.confirmed.clone(), 1, vec![]);
+        r.fork_back(vec![facts], 0, None, vec![e.clone()]);
+        assert_eq!(r.pending, vec![e.clone()]);
+        assert!(r.confirmed.scan("playlist").is_empty(), "taken back out of the confirmed store");
+        assert_eq!(r.view.scan("playlist").len(), 1, "previewed by the facts it kept");
+        assert!(r.known.contains_key(&e.id));
+        let mut sv = Server::open(trusting(), open_access(), Silent, d.authority());
+        let mut c = Client::open(r, Mode::Whole, Some("alice".into()));
+        c.connected();
+        pump(&mut sv, &mut c);
+        let r = &c.replica;
+        assert!(r.pending.is_empty() && r.diverged.is_empty() && r.known.is_empty());
+        assert_eq!(r.verify_at(), (1, state_hash(&sv.authority.store)));
+    }
+
+    /// A peer alone with no closure for a local intent has no authority to
+    /// run it: refused when it commits, in those words. Falsified by
+    /// sequencing it anyway (the check in `local_commit` removed): the
+    /// authority refuses it as an unknown function instead, in other words.
+    #[test]
+    fn a_peer_alone_refuses_what_nothing_can_run() {
+        let d = demo();
+        let e = old_intent(&d, 1, "Old");
+        let mut r = without_create(&d, MemoryStore::empty(d.schema.clone()), 0, vec![e.clone()]);
+        let mut a = Authority::new(d.schema.clone(), r.bodies.clone());
+        local_commit(&mut a, &mut r);
+        assert!(r.pending.is_empty());
+        assert_eq!(
+            r.rejections,
+            vec![(e.id, Refusal::Refused("no closure, and no authority to run it".into()))]
         );
-        assert_eq!(dev.replica.verify_at(), (2, state_hash(&b.authority.store)));
+        assert_eq!(a.log.head_seq(), 0);
+    }
+
+    /// Known facts preview an intent only while they are a transition from
+    /// the view: after somebody else's entry put the same row there first,
+    /// they are not, and the intent waits unpreviewed rather than being
+    /// undone into a store it never left (the version matrix's 5b, which
+    /// tripped the rebase's own assertion without this). Falsified by
+    /// `transitions` answering true: an `Add` onto the row already there is
+    /// called a transition.
+    #[test]
+    fn known_facts_preview_only_where_they_still_fit() {
+        let d = demo();
+        let (mut a, mut alone) = (d.authority(), d.replica(false));
+        let e = d.create(&mut alone, &Ctx::new("alice", "dev"), 1, "Local");
+        local_commit(&mut a, &mut alone);
+        let facts = a.log.entries[&1].1.clone();
+        let empty = MemoryStore::empty(d.schema.clone());
+        assert!(transitions(&d.schema, &empty, &facts));
+        assert!(!transitions(&d.schema, &alone.confirmed, &facts), "the row is already there");
+        // At the join it fits; then a row of the same key lands under it.
+        let mut r = without_create(&d, alone.confirmed.clone(), 1, vec![]);
+        r.fork_back(vec![facts.clone()], 0, None, vec![e.clone()]);
+        assert_eq!(r.view.scan("playlist").len(), 1);
+        let theirs = Entry {
+            id: idv(77),
+            actor: "bob".into(),
+            ..e.clone()
+        };
+        r.receive_with(1, theirs, facts);
+        r.settle();
+        assert_eq!(r.pending, vec![e], "still pending, unpreviewed");
+        assert_eq!(r.view, r.confirmed);
     }
 }

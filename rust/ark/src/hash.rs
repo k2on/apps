@@ -249,6 +249,27 @@ pub fn function_hash(c: &Closure) -> FnHash {
     sha256(&encode(&function_value(&deps, &c.function)))
 }
 
+/// Whether what a closure writes can depend on its author's roles
+/// (`docs/plan-guards.md` D1): `HasRole` in the function itself — its body,
+/// its checks, its plan — in a helper it calls or in a provide it runs.
+/// Not in a guard: a guard only refuses, so an entry it admitted wrote what
+/// it would have written under any roles that admit it. What decides
+/// whether an entry the authority stamped with other roles than its device
+/// froze is acknowledged with its facts.
+pub fn reads_roles(c: &Closure) -> bool {
+    fn asks(v: &Value) -> bool {
+        match v {
+            Value::Struct(fs) => fs.get("t") == Some(&Value::text("has_role")) || fs.values().any(asks),
+            Value::List(xs) => xs.iter().any(asks),
+            _ => false,
+        }
+    }
+    std::iter::once(&c.function)
+        .chain(&c.helpers)
+        .filter(|f| f.kind != crate::ir::FnKind::Guard)
+        .any(|f| asks(&function_value(&BTreeMap::new(), f)))
+}
+
 /// The hash of a whole module, normalised.
 pub fn module_hash(m: &Module) -> Vec<u8> {
     sha256(&encode(&module_value(&normalize_module(m))))
