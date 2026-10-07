@@ -654,6 +654,7 @@ Symbols below are fresh; normalisation renumbers them.
 | `db.t.upsert(row)` / `.on(cols)` | `Upsert(t, row, [])` / `Upsert(t, row, cols)` |
 | `db.t.update(k, \|row\| new)` | `Update(t, k, row, new)` |
 | `db.t.delete(k)` | `Delete(t, k)` |
+| `r.crud::<T>()` / `.except(&["insert_t"])` | four mutators on `r`, each `uses` the chain `r` is, and each exactly what the same lines written by hand emit (`docs/plan-guards.md` D4): `insert_<t>`, input every column in order (a nullable one an option), `Let(s, Exists(t, key))`, `If(Var(s), [Refuse(Lit("<t>: a row with this key exists"))], [])`, `Insert(t, row, [])`; `update_<t>`, the same input, `Let(s, Exists(t, key))`, `If(Var(s), [], [Refuse(Lit("<t>: no row with this key"))])`, `Update(t, key, _, row)`; `delete_<t>`, input the key's columns, `Delete(t, key)`; `put_<t>`, `Upsert(t, row, [])`. `.except` leaves the named ones out, to be written by hand under the same names |
 | `let x = e` | nothing: a read is a `Let` by itself and a pure expression is inlined where it is used |
 | `input.f` | `Arg("f")` |
 | the provided parameter | `Provided("<middleware name>")` |

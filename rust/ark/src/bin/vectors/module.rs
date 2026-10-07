@@ -1,7 +1,9 @@
 //! `module/` (§7): the module as a value, its canonical bytes and its hash;
 //! decode of encode is the identity. The demo's, the demo with a guard
-//! testing a role beside it (`docs/plan-guards.md` D1), and a router of
-//! scopes over its tables (D2).
+//! testing a role beside it (`docs/plan-guards.md` D1), a router of
+//! scopes over its tables (D2), a server's module with a private block and
+//! the client's stripped from it (D3), and a table's CRUD in one line beside
+//! the same written by hand (D4).
 
 use ark::canon::{decode, encode};
 use ark::hash::module_hash;
@@ -195,6 +197,31 @@ pub fn module(out: &Out) {
         ]),
     );
     out.write("verify/private-ok.json", &obj(&[("module", json(&pv)), ("verifies", "true".into())]));
+    // `docs/plan-guards.md` D4 A table's CRUD in one line, and the same
+    // four mutations written by hand: one module, byte for byte — so one
+    // hash, and every function one hash — written as a pair, each in this
+    // directory's form.
+    let crud = ark::authoring::Module::new((demo::demo(), demo::crud()));
+    let by_hand = ark::authoring::Module::new((demo::demo(), demo::crud_by_hand()));
+    let (cm, hm) = (crud.build(), by_hand.build());
+    super::claim("crud emits what the same lines by hand emit", crud.emit() == by_hand.emit());
+    super::claim(
+        "crud emits the four, under the router's guard",
+        ["insert_item", "update_item", "delete_item", "put_item"]
+            .iter()
+            .all(|n| cm.lookup_function(n).is_some_and(|f| f.uses == ["signed_in"])),
+    );
+    for (name, m) in [("crud", cm), ("crud-by-hand", hm)] {
+        let mv = module_value(m);
+        out.write(
+            &format!("module/{name}.json"),
+            &obj(&[
+                ("module", json(&mv)),
+                ("bytes", quoted(&hex(&encode(&mv)))),
+                ("hash", quoted(&hex(&module_hash(m)))),
+            ]),
+        );
+    }
     out.write(
         "module/demo.json",
         &obj(&[

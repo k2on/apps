@@ -47,7 +47,7 @@ pub use control::{for_each, if_else, refuse, unless, when};
 pub use cx::H;
 pub use helper::{helper, Body, Params};
 pub use input::{bool_, bytes, enum_, id, int, object, opt, text, FieldB, Input, Object, Variants};
-pub use router::{evaluate, router, Applied, Module, Proc, Procedure, Route, Router, Routers, Routes};
+pub use router::{evaluate, router, Applied, Crud, Module, Proc, Procedure, Route, Router, Routers, Routes};
 pub use schema::{
     col, columns, exists, fields, rel, table, table_of, Col, Cols, ColumnOf, Columns, Effect, Fields, Held, Holds, IntoEffect, Key, Order, Orders,
     Pred, Query, Record, Rel, Row, Table, Tables, Write,

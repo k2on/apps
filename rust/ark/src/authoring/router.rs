@@ -87,6 +87,10 @@ struct RouteDecl {
     /// Declared with [`Proc::client`]: a query over a chain that carries a
     /// scope, which the build holds it to (`docs/plan-guards.md` D2).
     client: bool,
+    /// Written by [`Router::crud`] rather than by hand
+    /// (`docs/plan-guards.md` D4): nothing in the IR says so, and the build
+    /// asks only to say what to do when the verifier refuses one.
+    crud: bool,
 }
 
 struct Core {
@@ -214,6 +218,33 @@ impl<S: Tables, P> Router<S, P> {
         }
     }
 
+    /// `docs/plan-guards.md` D4 Every table's CRUD in one line: four
+    /// ordinary mutations of `T`'s table on this router, or on this chain —
+    /// `insert_<t>`, `update_<t>`, `delete_<t>` and `put_<t>` — run under
+    /// its middleware like any procedure built on it, hashed and replayed
+    /// like any. Handed to [`Router::routes`] beside the rest:
+    ///
+    /// ```ignore
+    /// users.routes((users.crud::<User>().except(&["insert_user"]), users.input::<NewUser>().mutation("insert_user", ..)))
+    /// ```
+    ///
+    /// Each is exactly what a hand-written one would emit — the IR knows
+    /// nothing of where it came from ([`Crud`] says what each is) — so
+    /// growing one is writing it: [`Crud::except`] leaves the generated one
+    /// out, and the hand-written one under the same name is a new hash, the
+    /// old version kept for the entries that carry it. A table a scope
+    /// projects (D2) is refused for the person who does not hold a column,
+    /// since the generated writes name every column; the build says to write
+    /// that one by hand, with `ctx.private` for what the client does not
+    /// hold.
+    pub fn crud<T: super::schema::Row>(&self) -> Crud<S, T> {
+        Crud {
+            chain: self.chain.clone(),
+            except: vec![],
+            _t: PhantomData,
+        }
+    }
+
     /// The router, with these procedures on it.
     pub fn routes(&self, rs: impl Routes<S>) -> Router<S> {
         self.core.routes.borrow_mut().extend(rs.decls().into_iter().map(|RouteDeclBox(d)| d));
@@ -304,6 +335,7 @@ impl<S: Tables, I: Input, P> Proc<S, I, P> {
                 input: InputDecl::of::<I>(),
                 body,
                 client: false,
+                crud: false,
             },
             _t: PhantomData,
         }
@@ -409,39 +441,179 @@ impl<S> Routes<S> for Route<S> {
 }
 
 macro_rules! routes_tuple {
-    ($($i:tt),+) => {
-        impl<S> Routes<S> for ($(routes_tuple!(@t $i S),)+) {
+    ($($v:ident . $i:tt),+) => {
+        impl<S, $($v: Routes<S>),+> Routes<S> for ($($v,)+) {
             fn decls(self) -> Vec<RouteDeclBox> {
-                vec![$(RouteDeclBox(self.$i.decl)),+]
+                let mut out = Vec::new();
+                $(out.extend(self.$i.decls());)+
+                out
             }
         }
     };
-    (@t $i:tt $S:ident) => { Route<$S> };
 }
-routes_tuple!(0);
-routes_tuple!(0, 1);
-routes_tuple!(0, 1, 2);
-routes_tuple!(0, 1, 2, 3);
-routes_tuple!(0, 1, 2, 3, 4);
-routes_tuple!(0, 1, 2, 3, 4, 5);
-routes_tuple!(0, 1, 2, 3, 4, 5, 6);
-routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7);
-routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8);
-routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9);
-routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
-routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11);
-routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12);
-routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);
-routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
-routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
-routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16);
-routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17);
-routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18);
-routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19);
-routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20);
-routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21);
-routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22);
-routes_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23);
+routes_tuple!(A.0);
+routes_tuple!(A.0, B.1);
+routes_tuple!(A.0, B.1, C.2);
+routes_tuple!(A.0, B.1, C.2, D.3);
+routes_tuple!(A.0, B.1, C.2, D.3, E.4);
+routes_tuple!(A.0, B.1, C.2, D.3, E.4, F.5);
+routes_tuple!(A.0, B.1, C.2, D.3, E.4, F.5, G.6);
+routes_tuple!(A.0, B.1, C.2, D.3, E.4, F.5, G.6, H.7);
+routes_tuple!(A.0, B.1, C.2, D.3, E.4, F.5, G.6, H.7, I.8);
+routes_tuple!(A.0, B.1, C.2, D.3, E.4, F.5, G.6, H.7, I.8, J.9);
+routes_tuple!(A.0, B.1, C.2, D.3, E.4, F.5, G.6, H.7, I.8, J.9, K.10);
+routes_tuple!(A.0, B.1, C.2, D.3, E.4, F.5, G.6, H.7, I.8, J.9, K.10, L.11);
+routes_tuple!(A.0, B.1, C.2, D.3, E.4, F.5, G.6, H.7, I.8, J.9, K.10, L.11, M.12);
+routes_tuple!(A.0, B.1, C.2, D.3, E.4, F.5, G.6, H.7, I.8, J.9, K.10, L.11, M.12, N.13);
+routes_tuple!(A.0, B.1, C.2, D.3, E.4, F.5, G.6, H.7, I.8, J.9, K.10, L.11, M.12, N.13, O.14);
+routes_tuple!(A.0, B.1, C.2, D.3, E.4, F.5, G.6, H.7, I.8, J.9, K.10, L.11, M.12, N.13, O.14, P.15);
+routes_tuple!(A.0, B.1, C.2, D.3, E.4, F.5, G.6, H.7, I.8, J.9, K.10, L.11, M.12, N.13, O.14, P.15, Q.16);
+routes_tuple!(A.0, B.1, C.2, D.3, E.4, F.5, G.6, H.7, I.8, J.9, K.10, L.11, M.12, N.13, O.14, P.15, Q.16, R.17);
+routes_tuple!(A.0, B.1, C.2, D.3, E.4, F.5, G.6, H.7, I.8, J.9, K.10, L.11, M.12, N.13, O.14, P.15, Q.16, R.17, T.18);
+routes_tuple!(A.0, B.1, C.2, D.3, E.4, F.5, G.6, H.7, I.8, J.9, K.10, L.11, M.12, N.13, O.14, P.15, Q.16, R.17, T.18, U.19);
+routes_tuple!(A.0, B.1, C.2, D.3, E.4, F.5, G.6, H.7, I.8, J.9, K.10, L.11, M.12, N.13, O.14, P.15, Q.16, R.17, T.18, U.19, V.20);
+routes_tuple!(A.0, B.1, C.2, D.3, E.4, F.5, G.6, H.7, I.8, J.9, K.10, L.11, M.12, N.13, O.14, P.15, Q.16, R.17, T.18, U.19, V.20, W.21);
+routes_tuple!(A.0, B.1, C.2, D.3, E.4, F.5, G.6, H.7, I.8, J.9, K.10, L.11, M.12, N.13, O.14, P.15, Q.16, R.17, T.18, U.19, V.20, W.21, X.22);
+routes_tuple!(A.0, B.1, C.2, D.3, E.4, F.5, G.6, H.7, I.8, J.9, K.10, L.11, M.12, N.13, O.14, P.15, Q.16, R.17, T.18, U.19, V.20, W.21, X.22, Y.23);
+
+/// `docs/plan-guards.md` D4 One table's CRUD, as [`Router::crud`] declares
+/// it: up to four mutations of `T`'s table, each exactly what a
+/// hand-written one-line mutation would emit (the IR has no other kind):
+///
+/// - `insert_<t>`, input every column: refused when a row has the key
+///   (`<t>: a row with this key exists`), otherwise `db.t.insert(row)` —
+///   the refusal written out, since the store's insert keeps a row that
+///   is there and says nothing;
+/// - `update_<t>`, input every column: refused when no row has the key
+///   (`<t>: no row with this key`), otherwise `db.t.update(key, |_| row)`;
+/// - `delete_<t>`, input the key's columns: `db.t.delete(key)`;
+/// - `put_<t>`, input every column: `db.t.upsert(row)`, insert or replace.
+///
+/// The input's fields are the columns by name, in the row's order, at
+/// their types — a nullable column an option — so the arguments of a call
+/// are a row's columns.
+pub struct Crud<S, T> {
+    chain: Vec<String>,
+    except: Vec<String>,
+    _t: PhantomData<fn() -> (S, T)>,
+}
+
+/// What each of a table's four generated mutations does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Verb {
+    Insert,
+    Update,
+    Delete,
+    Put,
+}
+
+impl Verb {
+    const ALL: [Verb; 4] = [Verb::Insert, Verb::Update, Verb::Delete, Verb::Put];
+
+    fn word(self) -> &'static str {
+        match self {
+            Verb::Insert => "insert",
+            Verb::Update => "update",
+            Verb::Delete => "delete",
+            Verb::Put => "put",
+        }
+    }
+}
+
+impl<S, T: super::schema::Row> Crud<S, T> {
+    /// The names of the four mutations this generates, in order.
+    pub fn names() -> [String; 4] {
+        Verb::ALL.map(|v| format!("{}_{}", v.word(), T::NAME))
+    }
+
+    /// Leave these out, to be written by hand under the same names. Each
+    /// must be one of [`Crud::names`].
+    ///
+    /// # Panics
+    ///
+    /// On a name this does not generate: a misspelt exclusion would
+    /// otherwise leave the generated mutation in and the build refusing two
+    /// functions of one name, which says nothing about the typo.
+    pub fn except(mut self, names: &[&str]) -> Crud<S, T> {
+        let ours = Self::names();
+        for n in names {
+            assert!(
+                ours.iter().any(|o| o == n),
+                "crud::<{}>().except: {n} is not one of {}",
+                std::any::type_name::<T>(),
+                ours.join(", ")
+            );
+            self.except.push(n.to_string());
+        }
+        self
+    }
+}
+
+impl<S: Tables, T: super::schema::Row> Routes<S> for Crud<S, T> {
+    fn decls(self) -> Vec<RouteDeclBox> {
+        let table = super::schema::table_of::<T>();
+        let columns: Vec<(String, Ty, Vec<CheckSpec>)> = <T as super::schema::Record>::fields()
+            .fields
+            .into_iter()
+            .map(|(n, t)| (n, t, vec![]))
+            .collect();
+        let key_at: Vec<usize> = table
+            .key
+            .iter()
+            .map(|k| table.columns.iter().position(|c| &c.name == k).expect("a key column is a column"))
+            .collect();
+        let key_fields: Vec<(String, Ty, Vec<CheckSpec>)> = key_at.iter().map(|i| columns[*i].clone()).collect();
+        Verb::ALL
+            .into_iter()
+            .map(|v| (v, format!("{}_{}", v.word(), T::NAME)))
+            .filter(|(_, name)| !self.except.contains(name))
+            .map(|(v, name)| {
+                let fields = if v == Verb::Delete { key_fields.clone() } else { columns.clone() };
+                RouteDeclBox(RouteDecl {
+                    name,
+                    kind: FnKind::Mutator,
+                    chain: self.chain.clone(),
+                    input: InputDecl { fields, refine: vec![] },
+                    body: Run::Mutator(crud_body::<T>(v, key_at.clone())),
+                    client: false,
+                    crud: true,
+                })
+            })
+            .collect()
+    }
+}
+
+/// The body of one generated mutation, over its input's handles: the
+/// row's columns in order (the key's, for a delete). Run under both modes
+/// like any body, so what it emits is what the same lines written by hand
+/// emit, and what it does natively is what they do.
+fn crud_body<T: super::schema::Row>(verb: Verb, key_at: Vec<usize>) -> BodyRun {
+    use super::control::{refuse, unless, when};
+    use super::schema::{IntoEffect, Key as _, Table};
+    Arc::new(move |ins: &[H], _provided: &[H]| {
+        let db: Table<T> = Table::itself();
+        if verb == Verb::Delete {
+            db.delete(T::Key::of_handles(ins)).into_effect();
+            return;
+        }
+        let key = || T::Key::of_handles(&key_at.iter().map(|i| ins[*i]).collect::<Vec<H>>());
+        let row: T = raw::assemble(ins, T::NAME);
+        match verb {
+            Verb::Insert => {
+                when(db.exists(key()), || refuse(format!("{}: a row with this key exists", T::NAME).as_str()));
+                db.insert(row).into_effect();
+            }
+            Verb::Update => {
+                unless(db.exists(key()), || refuse(format!("{}: no row with this key", T::NAME).as_str()));
+                db.update(key(), |_| row).into_effect();
+            }
+            Verb::Put => {
+                db.upsert(row).into_effect();
+            }
+            Verb::Delete => unreachable!("answered above"),
+        }
+    })
+}
 
 // ---------------------------------------------------------------------------
 // The module
@@ -622,7 +794,21 @@ fn build(cores: &[Rc<Core>]) -> Result<Built, Vec<String>> {
         routers,
         live: vec![],
     };
-    let module = crate::verify::verify(&raw_module).map_err(|es| es.iter().map(|e| e.to_string()).collect::<Vec<_>>())?;
+    // `docs/plan-guards.md` D4 A generated write names every column, so a
+    // table a scope projects refuses it for whoever does not hold one — as it
+    // should. The error says what to do about it.
+    let generated: std::collections::BTreeSet<&str> = decls.iter().filter(|(r, _)| r.crud).map(|(r, _)| r.name.as_str()).collect();
+    let module = crate::verify::verify(&raw_module).map_err(|es| {
+        es.iter()
+            .map(|e| match e {
+                crate::verify::VerifyError::In(f, crate::verify::Complaint::NotHeld(t, c, _)) if generated.contains(f.as_str()) => format!(
+                    "{e}: {f} is generated by `crud`, which writes every column, and {t}.{c} is not held there — leave it out \
+                     (`.except(&[\"{f}\"])`) and write {f} by hand, writing {c} in `ctx.private`, which runs at the authority alone"
+                ),
+                e => e.to_string(),
+            })
+            .collect::<Vec<_>>()
+    })?;
     let module = named(module);
     let procedures = decls
         .into_iter()

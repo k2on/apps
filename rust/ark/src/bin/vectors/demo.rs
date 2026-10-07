@@ -216,6 +216,70 @@ pub fn audited() -> Router<Demo> {
     }),))
 }
 
+/// `docs/plan-guards.md` D4 A router of the demo's whose one line is the
+/// item table's CRUD: `insert_item`, `update_item`, `delete_item` and
+/// `put_item`, under its guard. A composite key, a reference and a unique
+/// index, so each verb meets a constraint. What `module/crud.json` is.
+pub fn crud() -> Router<Demo> {
+    let admin = router::<Demo>("admin");
+    let signed_in = admin.guard("signed_in", |ctx, _db| when(ctx.user.is_empty(), || refuse("sign in first")));
+    admin.routes((signed_in.crud::<Item>(),))
+}
+
+/// An item's columns, which a CRUD write takes.
+pub struct ItemIn {
+    pub playlist_id: Id<Playlist>,
+    pub track_id: Text,
+    pub pos: Int,
+}
+impl Input for ItemIn {
+    fn schema() -> Object<Self> {
+        object()
+            .field("playlist_id", id::<Playlist>())
+            .field("track_id", text())
+            .field("pos", int())
+    }
+}
+
+/// An item's key, which a CRUD delete takes.
+pub struct ItemKey {
+    pub playlist_id: Id<Playlist>,
+    pub track_id: Text,
+}
+impl Input for ItemKey {
+    fn schema() -> Object<Self> {
+        object().field("playlist_id", id::<Playlist>()).field("track_id", text())
+    }
+}
+
+/// [`crud`], written by hand: what `module/crud-by-hand.json` is, and the
+/// same bytes.
+pub fn crud_by_hand() -> Router<Demo> {
+    let admin = router::<Demo>("admin");
+    let signed_in = admin.guard("signed_in", |ctx, _db| when(ctx.user.is_empty(), || refuse("sign in first")));
+    let item = |i: ItemIn| Item {
+        playlist_id: i.playlist_id,
+        track_id: i.track_id,
+        pos: i.pos,
+    };
+    admin.routes((
+        signed_in.input::<ItemIn>().mutation("insert_item", move |_ctx, db, input| {
+            when(db.item.exists((input.playlist_id, input.track_id)), || refuse("item: a row with this key exists"));
+            db.item.insert(item(input))
+        }),
+        signed_in.input::<ItemIn>().mutation("update_item", move |_ctx, db, input| {
+            unless(db.item.exists((input.playlist_id, input.track_id)), || refuse("item: no row with this key"));
+            db.item.update((input.playlist_id, input.track_id), |_| item(input))
+        }),
+        signed_in
+            .input::<ItemKey>()
+            .mutation("delete_item", |_ctx, db, input| db.item.delete((input.playlist_id, input.track_id))),
+        signed_in
+            .input::<ItemIn>()
+            .mutation("put_item", move |_ctx, db, input| db.item.upsert(item(input))),
+    ))
+}
+
 /// The demo with [`audited`] beside it, verified: the server's module,
 /// private block and all.
 pub fn private() -> ark::ir::Module {

@@ -474,6 +474,11 @@ cols_tuple!(A.0, B.1, C.2, D.3, E.4);
 pub trait Key {
     #[doc(hidden)]
     fn handles(&self) -> Vec<H>;
+    /// The key whose parts are these handles, in key order: what a
+    /// generated procedure reads its key out of its input with
+    /// (`docs/plan-guards.md` D4, [`super::Router::crud`]).
+    #[doc(hidden)]
+    fn of_handles(hs: &[H]) -> Self;
 }
 
 macro_rules! key_tuple {
@@ -481,6 +486,9 @@ macro_rules! key_tuple {
         impl<$($v: Data),+> Key for ($($v,)+) {
             fn handles(&self) -> Vec<H> {
                 vec![$(self.$i.to_h()),+]
+            }
+            fn of_handles(hs: &[H]) -> Self {
+                ($($v::from_h(hs[$i]),)+)
             }
         }
     };
@@ -698,6 +706,16 @@ orders_tuple!(0, 1, 2, 3, 4, 5);
 /// `db.<table>`: one table of the module.
 pub struct Table<T> {
     _t: PhantomData<fn() -> T>,
+}
+
+impl<T> Table<T> {
+    /// The table itself, outside [`Tables::open`]: what a body the engine
+    /// writes for a domain (`docs/plan-guards.md` D4,
+    /// [`super::Router::crud`]) reads and writes through, since it is
+    /// handed no `db`. Records nothing: a table is declared in `open`.
+    pub(crate) fn itself() -> Table<T> {
+        Table { _t: PhantomData }
+    }
 }
 
 fn key_values(hs: &[H]) -> Vec<Value> {
