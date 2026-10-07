@@ -676,6 +676,17 @@ Petros: there is no partial replication of an exact replica, no per-person
 log and no second authority. `docs/scopes.md` records the design that had
 those, and the questions a return to it must answer.
 
+**A peer holds its union** (`docs/plan-guards.md` D2). What a person
+holds is the union of the module's scopes — middleware that says, as a
+function of `ctx` alone, which rows and columns of each table they hold —
+evaluated for them at `Hello`; *whole* is that union being everything,
+which it is for every person of a module with no scope, and such a peer is
+served by intents as it always was. Any other is served the facts of its
+union, filtered and projected, and holds them exactly: its state hash is
+the authority's digest of that union, and a `Verify` is answered from it.
+It applies other people's entries by facts, never by replaying an intent
+whose read set it may not hold, and previews its own.
+
 ### 3.8 Intents and facts: one log, two ways to apply it
 
 The authority applies each pushed intent in a transaction, and the generated
@@ -912,6 +923,27 @@ function whose body reads a role, is acknowledged with the authority's
 facts. harken's `is_library` is the one
 guard of the kind: the library router's mutations are the `library`
 role's, and the playlists are their owner's through `owned`.
+
+**What a person holds is a scope, and the authority serves the union**
+(`docs/plan-guards.md` D2). A scope (`FnKind::Scope`) is middleware that
+runs nothing: per table, the rows a filter over the table's own columns
+and `ctx` admits — `user == ctx.user`, `has_role(..)`, and one `exists`
+through a reference — and the columns a projection keeps. It sits on a
+router or a chain, is listed in `uses` and hashed into the closure like a
+guard, and never reads input, so what a person holds is fixed per person
+and complete offline. Their holdings are the union over every scope on
+every procedure, per table: rows the disjunction of the filters, columns
+the union of the projections — per table, not per row, so a column one
+scope keeps is held on every row the person holds of that table. A table
+no scope names is held whole, and a person holding every table whole is a
+whole peer (§3.7). Any other is started from a snapshot of their union,
+paged with the facts of it — an entry they hold nothing of passes as a
+sequence, a row the `exists` form moves arrives or leaves as an add or a
+remove — and their device's tables have only the held columns: an
+excluded column does not exist there. The verifier holds every client-run
+part of a procedure to the union of every role set the module names: one
+that names a column outside it, reachable past its guards, is refused at
+build. harken declares no scope and holds everything, as before.
 
 ### 3.12 Versioning: functions by hash, retained above the horizon
 

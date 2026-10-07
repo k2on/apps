@@ -95,7 +95,13 @@ user_api                                 // or once, on the router
   module names.
 - **An excluded column does not exist on the client.** The client's
   table has fewer columns, the wire never carries them, the shared state
-  hash is over what is held. The desktop's typed row structs are the
+  hash is over what is held.
+- **Columns are a union per table, not per row.** A column one scope keeps
+  is held on every row the person holds of that table, whichever scope
+  admitted the row: per-row column sets are not built. So an admin whose
+  admin scope holds `users` whole also sees the password on their own row
+  through the scope that excludes it — the stated limit of this design, and
+  the thing to build if a domain needs a column held on some rows only. The desktop's typed row structs are the
   schema's, so the field is a typed hole no domain code can name, by the
   rule above — not a null.
 - **The authority serves the union.** For a person whose union is not
@@ -189,7 +195,7 @@ accounts and role changes.
 
 ## Order, rounds, and guards
 
-**Status: G1 and D1 landed; D2–D4 decided, not started.** Rounds, each ending
+**Status: G1, D1 and D2 landed; D3–D4 decided, not started.** Rounds, each ending
 in a green `nix flake check`:
 
 1. **D1**: roles frozen in the entry and stamped by the authority;
@@ -359,3 +365,110 @@ withdraws a hash yet. A body that reads a
 role beyond refusing is confirmed by the ack's facts, and the device's
 preview of it is recorded as a divergence — right, and loud, and not
 something harken does.
+
+**D2, scopes** (`1a3123c`, `01bd0c9`, `243f0fa`, `0000339`, `9ff8b62`,
+`66bd04a`, `410f338`). `FnKind::Scope`: middleware that runs nothing,
+whose meaning is its `holds` — per table a filter over the table's own
+columns and `ctx` (with two leaves only a scope has, `Pred::When` and
+`Pred::Exists` through a reference, one level) and a projection
+(`Projection::All`, `Pick`, `Exclude`, the key always kept). Listed in
+`uses` and hashed into the closure like a guard; eval and the native
+loop skip it. On the wire `holds` only for a scope, `pwhen`/`pexists`
+only where used. Authoring: `router.server(name, |ctx, db| holds)` on a
+router or a chain — named, like guard and provide, because `uses` names
+it — with `db.t.filter(p).exclude(cols)` / `.pick(cols)`,
+`Pred::when(..)`, `exists(Child::fk, p)`; `client(name, f)` is `query`
+exactly (same IR, same hash), refused at build on a chain with no scope;
+mutations keep `mutation`.
+
+The union is `ark::scope`: `Scopes::of(module)` (or of a peer's
+closures), `holdings(who)` per identity — rows the disjunction of the
+filters with the context folded in, a hold folding to false contributing
+nothing; columns the union of the contributing projections, per table
+(per-row column sets are not built, the limit stated under D2 above); a
+table no scope names whole, one every scope folds away held empty with
+every column. `is_whole()` decides the path at `Hello`.
+
+**The verifier rule chosen.** For every role set the module names — the
+powerset of the role names its scopes and its procedures' guards test,
+up to ten names; past that each name alone and none, which is not every
+combination — with the user unknown (a `When` reading the user holds
+nothing there, a lower bound): a procedure is skipped under a role set
+when a guard it runs refuses on every path once its `has_role`s are
+folded for the set, and otherwise every column its client-run parts name
+(checks, refinements, the guards and provides it runs, its body or plan,
+and the helpers they reach; collected as the verifier types them, a
+field read resolved to the table whose whole row the struct carries) must
+be held, or it is `NotHeld(table, column, roles)`. A whole-row read names
+no column; a table held empty or by nobody is no error and returns no
+rows. A client-run write of an excluded column in a procedure reachable
+without the role is the error, and what D3's `ctx.private` is for.
+
+Serving (`243f0fa`): a whole connection is today's path byte for byte; a
+partial one is started from a `snapshot` (`partial: true`, `held`: the
+tables held in part with their columns) of the held rows projected, its
+hash the union's digest, and paged with `after`/`upto` — an entry the
+person holds nothing of passes as a sequence, one with facts carries
+them filtered and projected (`Holdings::filter_facts`, the `exists` form's
+untouched rows arriving or leaving), another's intent as its envelope;
+`need_facts` and the stamp's ack facts (D1) filtered the same way;
+`verify` (`partial: true`) answered from the union digest. The client's
+replica (`partial`, `through`) is laid out under the device's schema
+(`scope::device_schema`: held columns only, a reference only to a parent
+held whole — the authority checks every reference), applies confirmed
+entries by facts, previews its own; durable in its replica record and
+next `hello`. The `exists` form hands `scan_where_eq` its inner
+equalities, so a child keyed by the reference and the person is one
+lookup.
+
+harken declares no scope: `harken.ark` is byte-identical to D1's, module
+hash `2339009b3ae76594e5ed6b115aa92267f96e4400c49b64e04765526134088f2f`;
+no closure hash moved.
+
+`spec/vectors` gains eleven files and every other is byte-identical
+(`ark-vectors` writes the tree exactly): `module/scoped.json`,
+`verify/scoped-ok.json`, `verify/falsify/a-scope-reading-input.json`,
+`protocol/client-hello-partial.json`, `client-verify-partial.json`,
+`server-snapshot-scoped.json`, `server-batch-scoped.json`,
+`server-batch-scoped-visible.json`, `server-agree-scoped.json`, and two
+fuzz findings under `rebase/`.
+
+The fuzzer gives one generated module in two scopes (an own column that
+is the person's name, a role, the `exists` form, a projection, a chain
+scope), and holds after every op every partial client to exactly its
+union of the state at its cursor, every frame to a whole client to carry
+nothing of a union, and every client at the end to its union's digest.
+It found two, both fixed and kept as vectors: a re-opened client laying
+out later snapshots from the device's schema instead of the module's
+(`fleet-fuzz-a-union-reopened-keeps-the-modules-schema.json`), and a
+lost snapshot whose connection's first page was applied over the union
+held before (`fleet-fuzz-a-union-whose-snapshot-was-lost.json`: a partial
+page before this connection's snapshot is dropped and asked for again,
+and a server pages on from a `hello` only where it said there was more).
+
+Numbers. `arkc fuzz --seed 1 --cases 200` (debug): 400 sessions, 80
+modules scoped (41 excluding a column, 28 with the `exists` form), 36,799
+ops, 7,070 entries, 32,367 unions checked, 577 peers ended holding a
+union and 56 whole, 0 findings. `--seconds 300` (release): 11,214 cases,
+22,428 sessions, 4,491 scoped, 2,081,013 ops, 411,756 entries, 97,248
+role changes, 1,861,577 unions checked, 32,110 peers ended partial and
+4,211 whole, 0 findings (11 of 9,029 generated modules missed,
+`TypeMismatch filter on id`). `perf.rs` in release against `728d764`: a
+whole peer's bytes per push (1,960 / 7,720 / 30,760 at 10 / 40 / 160
+connections) and a Batch of 256's allocations (13,598 to encode, 7,439
+to decode; with facts 21,534 and 12,559) identical; a partial
+connection 11–17 µs per fact per connection, flat from 500 to 8,000
+entries, against 4–7 µs whole.
+
+Falsified: each test once (in its commit); the fuzz checks with `--seed
+1 --cases 200` — adds unfiltered (54 union findings), facts unprojected
+(1), the digest unprojected (1 converged), `covers` on whole pages (5
+faults) — and the `exists` diff dropped, caught only at `--cases 1000`
+(4 union findings): the visibility the form moves is rare in generated
+data, which is the weakest of the checks.
+
+Not verified: `nix flake check` (the coordinator runs it). The desktop
+and the phone do not yet open a partial peer's views under anything but
+what `ark_client::Peer::schema` now says (the device's), and no app
+declares a scope, so a typed row with an excluded field has not met a
+real screen. Per-row column sets are not built.
