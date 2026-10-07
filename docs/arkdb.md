@@ -955,6 +955,27 @@ part of a procedure to the union of every role set the module names: one
 that names a column outside it, reachable past its guards, is refused at
 build. harken declares no scope and holds everything, as before.
 
+**A table's CRUD is one line, and the authority alone writes raw**
+(`docs/plan-guards.md` D4). `r.crud::<T>()` on a router is four ordinary
+mutations — `insert_<t>`, `update_<t>`, `delete_<t>`, `put_<t>` — under that
+router's guards and scopes, hashed and replayed like any mutation and byte
+for byte what the same lines written by hand emit; a hand-written one of the
+same name replaces the generated one, and `.except(..)` leaves one out. Under
+a scope, one that names a column outside a role set's union is refused at
+build with the advice to leave it out or move the write into `ctx.private`.
+Beside them, in every module by construction, are two raw writes,
+`ark.put_row(table, row)` and `ark.delete_row(table, key)`, named by fixed
+hashes no closure can have and judged by the table's constraints as a
+mutator's `put` and `delete` are. Only a server's authority authors one
+(`Authority::edit`, its actor the server's own identity); every replica
+applies one as any confirmed entry, a partial one by its facts; a replica
+refuses to author one, and a pushed one is refused as `Forbidden` whoever it
+claims to be by. That is what an operator's edit is: an entry like any
+other, in the log, served to everyone — not a write behind the log's back.
+`ark-explorer` is the tool that makes one (§3.17): over a client's replica
+it writes only through the exposed CRUD, as the person; over the authority,
+as the server's admin page, through the CRUD or raw.
+
 ### 3.12 Versioning: functions by hash, retained above the horizon
 
 Every function's hash is SHA-256 of its verified, alpha-normalised canonical
@@ -1093,7 +1114,10 @@ apps/
   rust/           ark (the runtime and the specification: value, canon, store, eval,
                   hash, verify, log, peer, view, live, protocol, sim, compat, and
                   ark::authoring, the vocabulary; the binaries arkc, ark-vectors and
-                  gen-unicode); ark-client, ark-server, ark-auth, arkui
+                  gen-unicode); ark-client, ark-server, ark-auth, arkui, and
+                  ark-explorer (a database explorer for any module, one iced
+                  component: hosted by harken's desktop on a key, and by
+                  ark-server as its admin page, compiled to wasm as ark-admin)
   swift/          frozen at spec v3 (FROZEN.md): ArkDB (the runtime) · ArkAuthoring
                   (the vocabulary) · ArkDBClient · ArkDBTests
   kotlin/         frozen at spec v3 (FROZEN.md): ark-runtime (with
@@ -1102,7 +1126,8 @@ apps/
     domain/       the domain, written once in Rust (src/), and harken.ark, its emit;
                   gen/{swift,kotlin}, arkc's print of the v3 module for the phones,
                   frozen at v3
-    server/       ark-server with harken's scanner, listening desk and house bridge
+    server/       ark-server with harken's scanner, listening desk and house bridge;
+                  the admin page on its own listener, loopback by default
     iced/         the desktop and browser client on arkui and ark-client; its demo
                   build is published to GitHub Pages
     ios/          frozen at spec v3: SwiftUI over ArkDBClient and the printed Swift

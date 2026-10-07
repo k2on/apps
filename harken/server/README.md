@@ -48,6 +48,9 @@ HARKEN_DEV_AUTH=1 harken-server [127.0.0.1:8787]
 | `HARKEN_MODULE` | an `.ark` to host instead of harken's own |
 | `HARKEN_HA_URL`, `HARKEN_HA_TOKEN_FILE`, `HARKEN_HA_PLAYERS` | all three or none; players are `media_player.x[=Name]`, comma-separated |
 | `HARKEN_HA_MEDIA` | where a *speaker* fetches from (default: the public URL) |
+| `HARKEN_ROLES` | who holds which role: `library=alice,bob;admin=alice` |
+| `HARKEN_ADMIN_BIND` | where the admin page listens (none without it): loopback asks nothing, wider asks for a login holding `admin` (`docs/plan-guards.md` D4) |
+| `HARKEN_ADMIN_WEB` | the admin page's build (`nix build .#ark-admin`); without it the admin API alone |
 
 A server with neither a provider nor `HARKEN_DEV_AUTH=1` refuses to start.
 Nothing assumes a peer arrived signed in: a client used before anybody
@@ -64,7 +67,10 @@ an entry authored under an older login of the same person is accepted
   credential, the assertion that a speaker is never handed a URL on this
   machine, and the warning when it is handed a LAN URL this server is not
   bound to. `web` defaults to null: which build a server should serve is the
-  flake's to say.
+  flake's to say. `admin.bind` is the admin page's listener,
+  `127.0.0.1:8788` by default and null for none, and `admin.page` its
+  build, `ark-admin` by default; a bind wider than loopback that nobody in
+  `roles.admin` can open is a warning.
 - `nix/module-test.nix` — the module evaluated under each of those
   configurations and held to its assertions, warning and unit, without
   building a system.

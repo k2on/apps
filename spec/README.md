@@ -150,7 +150,7 @@ by it.
 | `hash/` | a store and its hash, with the module it belongs to; `leaves-and-digests` also every row's leaf and every table's digest, so the construction is checked step by step | §8 |
 | `rebase/` | `three-peers`: a scripted session of replicas and an authority, asserted step by step; `fleet-seed-N`: a seeded simulation's script and the hash every replica must reach after settle | §10, §11, §15 |
 | `module/` | a module as a value, its canonical bytes, its hash; decode of encode is the identity; `crud` and `crud-by-hand` are one module twice — a table's CRUD in one line, and the same four mutations written by hand | §7 |
-| `protocol/` | every frame as a value and its bytes; decode of encode is the identity | §12 |
+| `protocol/` | every frame as a value and its bytes; decode of encode is the identity; `*-raw`: a raw write pushed by a client, served in a batch as the authority's entry, and the `Reject` a pushed one is answered with (`raw.rs`) | §12 |
 | `views/` | a query of the vector's own module (`query`, and its `plan` as the module writes it), the context and arguments it is read with, `store_before` and the answer at hydrate (`rows_before`); then `batches` of changes, and after each batch the `patches` and the answer (`rows`). One file per plan feature: a projection, a having that admits a node when a child arrives, a group source, a lookup chain, a related plan on a non-key column, an expression order key under a limit, a related tree three deep, and the two v3 plans (`top-two-by-pos`, `playlist-with-items`) | §13 |
 
 A change in a batch is the protocol's fact form (§12): `{"t": "add",

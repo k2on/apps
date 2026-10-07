@@ -129,6 +129,33 @@ and not yet a control.
 `harken-peer` does the same from a shell: `--alone` and later `--server
 URL` over one `--dir` is the join, and `join` and `leave` are commands.
 
+### The explorer, on the desktop and on the server
+
+`E` on the desktop opens the explorer (`ark-explorer`, `docs/plan-guards.md`
+D4) over this device's own replica, beside `D`'s numbers: every table it
+holds, a page of rows at a time with every column; the log as a client
+knows it — its pending intents, where it is, how it is linked, its
+`Verify` answers; and a read-only console that runs a domain query by name
+or a plan in the IR's JSON form. `j`/`k`, `h`/`l`, `gg`/`G` and counts
+move; `<Enter>` opens a table or edits a cell, `x` deletes a row, `<Tab>`
+(or `1`, `2`, `3`) goes between the tables, the log and the console, and
+`<Esc>` goes back, and out from the top. A client writes only through the
+CRUD a domain exposes (`r.crud::<T>()`), as the signed-in person, and never
+raw — alone too. harken exposes none, so here it is read-only, and says so.
+
+The server's admin page is the same component compiled to wasm, served on
+a listener of its own (`HARKEN_ADMIN_BIND`; `services.harken.admin.bind`,
+`127.0.0.1:8788` by default) over the authority's store, its log with who
+pushed each entry, and every connection's cursor. It writes as the
+authority: through a table's CRUD where the domain exposes one, unless `R`
+flips the switch, and raw otherwise — `ark.put_row`, `ark.delete_row`,
+judged by the constraints and served to every peer like any entry. harken
+exposes no CRUD, so every edit there is raw. On loopback it asks
+nothing (reach it from elsewhere through an SSH tunnel); bound wider it asks
+for a login holding the `admin` role (`services.harken.roles.admin`), signed
+in through this server's own `/auth`. `nix build .#ark-admin` is the page;
+the NixOS module serves it by default.
+
 ### Backing up, restoring, and asking a running server
 
     nix run .#arkc -- backup /var/lib/harken /srv/backup/harken   # while it runs
