@@ -176,10 +176,7 @@ ark.delete_row(table, key)
   wider it requires the `admin` role to open; the writes it makes are the
   authority's either way.
 
-**Status: designed, not started.** The owner paused the build before a
-line of it was written (tree at `ddc4477`). The row rules of plan-auth
-are therefore still in the code and in harken's declarations; deleting
-them is G1 and is the first thing to do when this resumes. G5 is to be
+**Status: G1 landed (below); G2–G5 designed, not started.** G5 is to be
 reshaped before building: the per-table operations become ordinary
 domain mutations a router exposes in one line (`router.crud::<User>()`,
 emitting insert / update / delete / put with the router's guards) and
@@ -203,3 +200,43 @@ byte-identical except where this document says a file is removed or
 added; the fuzzer at 0 findings for 300 seconds after each round; a
 whole peer costs on the wire exactly what it costs today for an entry
 with no private block; what is not verified said plainly.
+
+## Landed
+
+**G1, the rules deleted** (`db79b6e`). Syntax and machinery both: what
+plan-auth's A1, A3's fact check, A4, A5 and A6's rule half added is gone —
+`Table::visible`/`writable`, `Pred::Me`/`Role`/`Exists` and their verifier
+errors, encoding, normalisation and authoring vocabulary; `ark::rules`;
+`Authority::sequence_as` and the device's own check; the per-connection
+filter, `Covers`, whole-or-partial at `Hello`, the partial snapshot, page
+and `verify`, the partition digest, the replica's `partial`, `through` and
+`confirm_partial`, and the client's durable `partial`; the fuzzer's rule
+generation and its three checks; `perf_g_partial_fanout`; harken's ten
+declarations and the private-playlists fleet scenario. `rust/ark` is
+`b62ee3c` again but for roles: `Identity.roles`, `Ctx.roles`,
+`dev_identity`'s `name:role,role`, and in `ark-auth`, the server, the
+desktop and `harken-peer` everything that carries them, with the fuzzer's
+role grants and role changes (`Op::Roles`) — read by nothing until G2.
+`Refusal::Forbidden` stays as a variant nothing produces, which its doc
+comment says. A client's view starts over again when a login's roles
+move, as it did before plan-auth, since G2 makes a body read them.
+
+`spec/vectors` is `b62ee3c`'s: the ten files plan-auth added are removed,
+the tree diffs empty against `b62ee3c`, and `ark-vectors` writes it
+identically. `harken.ark` is byte-identical to `b62ee3c`'s, module hash
+`abf1cbdd8b0ccd361adf4916184d3e81f89f633734025f4642b0915b1499165b`; no
+closure hash moved. harken's converge test keeps its removal half as
+`removing_a_track_takes_it_off_everybodys_playlists` — the library takes
+a track off two people's playlists, each keeps their other item, every
+peer at the server's hash — falsified by not deleting the items in
+`remove_media` (all four stayed). The refusal halves went with the rules:
+nothing refuses a library write until G2's guard.
+
+Green: `cargo test --workspace`, `fmt --check`, clippy over the workspace
+and over `harken-iced --features demo` with `-D warnings`, the demo's
+tests, `allocations.rs` with its ignored case. `arkc fuzz --seed 1
+--cases 200`: 400 sessions, 36,861 ops, 8,190 entries, 1,707 role
+changes, 0 findings; `--seconds 120`: 5,205 cases, 970,336 ops, 221,233
+entries, 45,065 role changes, 0 findings (8 generated modules of 4,165
+failed to verify, `TypeMismatch filter on id` — the generator's misses,
+counted, not findings). Not run: `nix flake check`, `perf.rs` in release.

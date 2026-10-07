@@ -666,12 +666,9 @@ series, and one cursor per peer. A peer holds it in one of two ways:
 
 - **whole**, in which case it replays intents and is an exact replica, may
   author into the log, and can verify its state hash against anyone;
-- **as a partition** (§3.11), when some table's `visible` rule hides rows
-  from it: it receives the facts its rules admit, applies them and never
-  replays an intent, may still author intents (its optimistic preview runs
-  over what it holds, and the authority's answer wins), and is exact about
-  its partition — its state hash is the partition digest the authority
-  computes.
+- **as a projection** (§3.11), in which case it receives facts for the rows
+  it asked for, may still author intents (its optimistic preview is
+  approximate and the authority's answer wins), and does not claim exactness.
 
 Any mutator may read and write any table, and one entry is one transaction
 over all of them. The cost is that a whole peer holds everything, as in
@@ -868,70 +865,39 @@ sequencing — is the same step in reverse and is deliberately not built
 first; a peer leaving a server that goes on is `Peer::leave`, above. Authority transfer between two live peers is a protocol with a
 fencing token, and nothing in harken needs it yet.
 
-### 3.11 Authorization: rules on the tables, roles on the identity
+### 3.11 Authorization and partial sync
 
-As it is built (`docs/plan-auth.md`, "Landed"): the engine carries the
-whole mechanism and decides no rule. What a person may see or write is the
-application's declaration, beside each table's indexes, in the authoring
-vocabulary:
+Two grains, and they line up with the two ways of holding the log:
 
-```rust
-columns()
-    .visible(Self::user_id.is(Me).or(exists(PlaylistMember::playlist_id, PlaylistMember::user_id.is(Me))))
-    .writable(Role("library"))          // or Everyone, the default
-```
+- **Log grain.** Who may *receive* the log is one rule at its authority,
+  over the whole log, checked at `Hello`. Who may *write* is inside the
+  generated mutator via `ctx.user`, as today; every entry is held to the
+  login that pushed it, and an authority may also accept one authored under
+  an older login of the same user. harken: everyone signed in receives
+  everything, and whose playlist a write may touch is the mutator's
+  question. Read authorization finer than the whole log, for an exact
+  replica, is what the removed design was for (`docs/scopes.md`).
+- **Row grain, in facts mode.** A projection is a plan the authority
+  maintains for that peer and streams facts for; the plan can carry a
+  predicate the peer did not write (a permission rule), which is how
+  row-level read authorization is expressed and the only place it can be —
+  a peer holding a filtered subset cannot replay intents against it, so it
+  does not.
 
-A rule is the plan algebra's `Pred` over the table's own columns with
-three things a filter has not: `Me` (the context's user — the author, for
-`writable`; the peer being served, for `visible`), `Pred::Role`, and the
-one lookup `Pred::Exists` — some row of a table whose reference column
-names this row, admitted by that table's own predicate, one table away
-and no further. `Everyone` is the absence of a rule and is not encoded,
-so a module that declares none is the bytes, hash and vectors it was. A
-rule is in the module's hash and in no closure, and `arkc check` does not
-compare rules: they decide what is sent and sequenced from here on, never
-what a retained entry means.
+This closes the "no authorisation" half of the "no authorisation, no
+partial sync" item from `decisions.md` at the coarsest grain, the whole log,
+and leaves partial sync to the mode that does not claim exactness.
 
-**Roles are the authenticator's**, never rows: granting one in the log
-would need a rule about who may grant, which is a role. `Identity { user,
-session, roles }` is answered at every `Hello` — `ark-auth` merges the
-roles a login was issued with (the scanner's, by construction; a dev
-login's from `name:role,role`) and the ones the server's configuration
-grants its account, so a restart with other configuration grants or
-revokes at once.
-
-**Writes** are held to `writable` after the run: at the authority for the
-connection's identity, every fact's row — old against the state before
-the entry, new against the state after — or the verdict
-`Refusal::Forbidden(table)`, rolled back and answered as any refusal; and
-on the device for its own login's roles (`Ctx::roles`) before an intent is
-recorded pending. Replay, adoption and a peer alone's own authority do not
-judge again: an entry in the log was judged once.
-
-**Reads.** A connection to which every table is `Everyone` — no rule, or
-one its roles alone decide true — is served exactly as before, by
-intents; there is no mode anyone picks. Any other is **partial**: every
-connection of it starts from a snapshot (`partial: true`) of the rows it
-may see now — what it may see can move with no entry saying so — and every
-page after it covers `after`..`upto` and carries only the entries with a
-fact it may see (or its own), each with those facts: an edit across the
-line as the add or the remove it is to that peer, then, for the lookup
-form, the rows the entry made visible or hid without touching them.
-Another person's intent goes as its envelope, arguments and autos empty,
-because a partial peer applies facts and never replays an intent — whose
-read set its store may not hold, which is the divergence scopes existed to
-prevent and which therefore cannot arise. Its own intents are optimistic as
-ever and confirmed by their facts (R2); a difference from the record is
-the authority's answer for the partition, not a divergence. A partial
-peer's `Verify` is answered from the partition digest — §8.1's sum over
-the rows it may see — of the state at its sequence. A partial replica
-keeps `partial` beside its cursor and says it in its `hello`; one the
-rules now make whole is sent the snapshot at the head.
-
-What is still not built is a peer that wants *less* than it may see — a
-phone holding one playlist and not the library. That is the same filter
-asked a second question, a plan instead of a rule, and the machinery above
-is what it would run on.
+Rules on the tables were built once (`docs/plan-auth.md`: who sees a row
+and who writes one, enforced by the authority on facts, with partial peers
+served their partition) and deleted (`docs/plan-guards.md` G1). What stays
+of it is **roles on the identity**: `Identity { user, session, roles }`,
+answered at every `Hello` from the login and the server's configuration,
+and carried in the author's `Ctx`. The design in progress is
+`docs/plan-guards.md`: authorization is the guards in the functions — a
+pushed intent is re-run at the authority under the connection's identity,
+so a guard is server-side authorization — and what a client does not get
+is tables and columns marked server-only, not rows.
 
 ### 3.12 Versioning: functions by hash, retained above the horizon
 
@@ -1140,17 +1106,15 @@ them back takes is in `swift/FROZEN.md` and `kotlin/FROZEN.md`.
   novel piece.** Idiomatic output, readable names, and error messages from
   the verifier decide whether authoring feels like the language or like a
   linter. Budget for it as the main cost.
-- **A whole peer holds everything; a partial peer holds what it may see.**
-  One log still means no per-person log and no second authority, but read
-  rules are no longer the whole log's (§3.11): a peer some table's
-  `visible` rule hides rows from is served its partition by facts and
-  never replays an intent. What remains is size: a peer that may see a
-  large library holds all of it, and wanting less than one may see is not
-  built. The authority evaluates every rule on every fact for every
-  partial connection — a filter per fact per connection, and a snapshot of
-  the partition per connection — which is cheap for a household and is
-  measured (`perf_c_fanout`'s partial rows); a deployment of many
-  partial peers over a large store is where it shows first.
+- **Every exact peer holds everything.** One log means no partial
+  replication, no per-person log and no read rule finer than the whole log
+  for a peer that replays; a large library, or data one person should not
+  receive, is where that shows first. `docs/scopes.md` records the design
+  that answered it and the questions a return to it must settle; row rules
+  with partial peers were built and deleted (`docs/plan-auth.md`,
+  `docs/plan-guards.md` G1), and server-only tables and columns
+  (`docs/plan-guards.md` G3) are the answer in progress for data a client
+  should not receive.
 - **The IR's ceiling still exists**, though compilation makes it cheap to
   raise: a new `std` function is a mapping per generator and an
   implementation per `ArkStd`, with vectors. It should still be raised
