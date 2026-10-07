@@ -130,37 +130,39 @@ fn handwritten() -> Module {
     let (people, signed_in) = people();
     let team = |n: &str| format!("team: {n}");
     let (exists, missing) = (team("a row with this key exists"), team("no row with this key"));
-    Module::new(people.routes((
-        signed_in.input::<TeamIn>().mutation("insert_team", move |_ctx, db, input| {
-            when(db.team.exists((input.name,)), || refuse(exists.as_str()));
-            db.team.insert(Team { name: input.name })
-        }),
-        signed_in.input::<TeamIn>().mutation("update_team", move |_ctx, db, input| {
-            unless(db.team.exists((input.name,)), || refuse(missing.as_str()));
-            db.team.update((input.name,), |_| Team { name: input.name })
-        }),
-        signed_in
-            .input::<TeamIn>()
-            .mutation("delete_team", |_ctx, db, input| db.team.delete((input.name,))),
-        signed_in
-            .input::<TeamIn>()
-            .mutation("put_team", |_ctx, db, input| db.team.upsert(Team { name: input.name })),
-        signed_in.input::<UserIn>().mutation("insert_user", |_ctx, db, input| {
-            when(db.user.exists((input.id,)), || refuse("user: a row with this key exists"));
-            db.user.insert(row(input))
-        }),
-        signed_in.input::<UserIn>().mutation("update_user", |_ctx, db, input| {
-            let key = (input.id,);
-            unless(db.user.exists(key), || refuse("user: no row with this key"));
-            db.user.update((input.id,), |_| row(input))
-        }),
-        signed_in
-            .input::<UserKey>()
-            .mutation("delete_user", |_ctx, db, input| db.user.delete((input.id,))),
-        signed_in
-            .input::<UserIn>()
-            .mutation("put_user", |_ctx, db, input| db.user.upsert(row(input))),
-    )))
+    Module::new(
+        people.routes((
+            signed_in.input::<TeamIn>().mutation("insert_team", move |_ctx, db, input| {
+                when(db.team.exists((input.name,)), || refuse(exists.as_str()));
+                db.team.insert(Team { name: input.name })
+            }),
+            signed_in.input::<TeamIn>().mutation("update_team", move |_ctx, db, input| {
+                unless(db.team.exists((input.name,)), || refuse(missing.as_str()));
+                db.team.update((input.name,), |_| Team { name: input.name })
+            }),
+            signed_in
+                .input::<TeamIn>()
+                .mutation("delete_team", |_ctx, db, input| db.team.delete((input.name,))),
+            signed_in
+                .input::<TeamIn>()
+                .mutation("put_team", |_ctx, db, input| db.team.upsert(Team { name: input.name })),
+            signed_in.input::<UserIn>().mutation("insert_user", |_ctx, db, input| {
+                when(db.user.exists((input.id,)), || refuse("user: a row with this key exists"));
+                db.user.insert(row(input))
+            }),
+            signed_in.input::<UserIn>().mutation("update_user", |_ctx, db, input| {
+                let key = (input.id,);
+                unless(db.user.exists(key), || refuse("user: no row with this key"));
+                db.user.update((input.id,), |_| row(input))
+            }),
+            signed_in
+                .input::<UserKey>()
+                .mutation("delete_user", |_ctx, db, input| db.user.delete((input.id,))),
+            signed_in
+                .input::<UserIn>()
+                .mutation("put_user", |_ctx, db, input| db.user.upsert(row(input))),
+        )),
+    )
 }
 
 pub struct TeamIn {
@@ -204,7 +206,11 @@ fn crud_emits_what_the_same_lines_by_hand_emit() {
         }
     }
     let delete = gm.lookup_function("delete_user").unwrap();
-    assert_eq!(delete.input.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["id"], "a delete takes the key");
+    assert_eq!(
+        delete.input.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(),
+        ["id"],
+        "a delete takes the key"
+    );
     let put = gm.lookup_function("put_user").unwrap();
     assert_eq!(
         put.input.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(),
@@ -310,7 +316,11 @@ fn a_hand_written_mutation_replaces_the_generated_one() {
             .map(|(h, _)| h)
             .expect("the function")
     };
-    assert_ne!(hash(built, "insert_user"), hash(base, "insert_user"), "the hand-written one is a new hash");
+    assert_ne!(
+        hash(built, "insert_user"),
+        hash(base, "insert_user"),
+        "the hand-written one is a new hash"
+    );
     for n in ["update_user", "delete_user", "put_user", "insert_team"] {
         assert_eq!(hash(built, n), hash(base, n), "{n} is as it was");
     }

@@ -264,11 +264,15 @@ pub fn crud_by_hand() -> Router<Demo> {
     };
     admin.routes((
         signed_in.input::<ItemIn>().mutation("insert_item", move |_ctx, db, input| {
-            when(db.item.exists((input.playlist_id, input.track_id)), || refuse("item: a row with this key exists"));
+            when(db.item.exists((input.playlist_id, input.track_id)), || {
+                refuse("item: a row with this key exists")
+            });
             db.item.insert(item(input))
         }),
         signed_in.input::<ItemIn>().mutation("update_item", move |_ctx, db, input| {
-            unless(db.item.exists((input.playlist_id, input.track_id)), || refuse("item: no row with this key"));
+            unless(db.item.exists((input.playlist_id, input.track_id)), || {
+                refuse("item: no row with this key")
+            });
             db.item.update((input.playlist_id, input.track_id), |_| item(input))
         }),
         signed_in
