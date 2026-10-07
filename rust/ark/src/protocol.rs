@@ -125,6 +125,20 @@ pub enum ServerMsg {
         /// from a cursor in another log (`arkc fuzz`,
         /// `rebase/fleet-fuzz-an-ack-names-no-log.json`).
         log_id: Option<Id>,
+        /// The facts of each acknowledged entry the authority stamped with
+        /// other roles than its device froze in it (`docs/plan-guards.md`
+        /// D1), by sequence: the device's own run of it was a preview under
+        /// a belief the log does not hold, so it confirms by these and not
+        /// by its record. In the acknowledgement and not a frame of their
+        /// own, so they arrive with the log they are of — facts alone, for
+        /// a sequence of a log a peer has not been told the name of, would
+        /// wait in its inbox for whichever entry the next log puts there
+        /// (`arkc fuzz` found it, seed 112; held by `peer`'s
+        /// `the_stamps_facts_arrive_with_the_log_they_are_of`). `facts` on
+        /// the wire, a list of `{seq, facts}`, present only when not empty:
+        /// an acknowledgement of entries whose devices believed rightly is
+        /// the bytes it was.
+        facts: Vec<(Seq, Facts)>,
     },
     Reject {
         id: Id,
@@ -241,6 +255,17 @@ pub fn change_value(c: &Change) -> Value {
 
 fn facts_value(f: &Facts) -> Value {
     Value::List(f.iter().map(change_value).collect())
+}
+
+// Facts by sequence, as a `facts` frame's `items` and an ack's `facts` are
+// written: a list of `{seq, facts}`.
+fn seq_facts_value(items: &[(Seq, Facts)]) -> Value {
+    Value::List(
+        items
+            .iter()
+            .map(|(n, f)| strct(vec![("seq", int(*n)), ("facts", facts_value(f))]))
+            .collect(),
+    )
 }
 
 impl ClientMsg {
@@ -371,18 +396,7 @@ impl ServerMsg {
                     module,
                 ),
             ),
-            ServerMsg::FactsFor { items } => node(
-                "facts",
-                vec![(
-                    "items",
-                    Value::List(
-                        items
-                            .iter()
-                            .map(|(n, f)| strct(vec![("seq", int(*n)), ("facts", facts_value(f))]))
-                            .collect(),
-                    ),
-                )],
-            ),
+            ServerMsg::FactsFor { items } => node("facts", vec![("items", seq_facts_value(items))]),
             ServerMsg::SnapshotOf {
                 seq,
                 hash,
@@ -406,16 +420,19 @@ impl ServerMsg {
                     module,
                 ),
             ),
-            ServerMsg::Ack { ids, seqs, log_id } => node(
-                "ack",
-                named(
+            ServerMsg::Ack { ids, seqs, log_id, facts } => {
+                let mut fields = named(
                     vec![
                         ("ids", Value::List(ids.iter().map(|i| Value::Id(*i)).collect())),
                         ("seqs", Value::List(seqs.iter().map(|n| int(*n)).collect())),
                     ],
                     log_id,
-                ),
-            ),
+                );
+                if !facts.is_empty() {
+                    fields.push(("facts", seq_facts_value(facts)));
+                }
+                node("ack", fields)
+            }
             ServerMsg::Reject { id, reason } => node("reject", vec![("id", Value::Id(*id)), ("reason", txt(reason))]),
             ServerMsg::Held { id, reason } => node("held", vec![("id", Value::Id(*id)), ("reason", txt(reason))]),
             ServerMsg::Denied { reason } => node("denied", vec![("reason", txt(reason))]),
@@ -464,13 +481,7 @@ impl ServerMsg {
                 module: module_of(m)?,
             },
             "facts" => ServerMsg::FactsFor {
-                items: list(
-                    |x| {
-                        let m = strct_of(x)?;
-                        Ok((int64(need(m, "seq")?)?, list(change_from_value, need(m, "facts")?)?))
-                    },
-                    need(m, "items")?,
-                )?,
+                items: seq_facts_of(need(m, "items")?)?,
             },
             "snapshot" => ServerMsg::SnapshotOf {
                 seq: int64(need(m, "seq")?)?,
@@ -489,6 +500,13 @@ impl ServerMsg {
                 ids: list(ident, need(m, "ids")?)?,
                 seqs: list(int64, need(m, "seqs")?)?,
                 log_id: log_of(m)?,
+                facts: match m.get("facts") {
+                    None => vec![],
+                    Some(v) => match seq_facts_of(v)? {
+                        fs if fs.is_empty() => return bad("ack: empty facts are written as no field"),
+                        fs => fs,
+                    },
+                },
             },
             "reject" => ServerMsg::Reject {
                 id: ident(need(m, "id")?)?,
@@ -724,6 +742,16 @@ fn roles_of(m: &BTreeMap<FieldName, Value>) -> D<BTreeSet<String>> {
     Ok(rs.into_iter().collect())
 }
 
+fn seq_facts_of(v: &Value) -> D<Vec<(Seq, Facts)>> {
+    list(
+        |x| {
+            let m = strct_of(x)?;
+            Ok((int64(need(m, "seq")?)?, list(change_from_value, need(m, "facts")?)?))
+        },
+        v,
+    )
+}
+
 pub fn change_from_value(v: &Value) -> D<Change> {
     let m = strct_of(v)?;
     let t = text(need(m, "t")?)?;
@@ -955,11 +983,17 @@ impl Client {
                 let s = Snapshot::of_values(&self.schema, seq, rows, log_id, module);
                 self.recv_snapshot(s);
             }
-            ServerMsg::Ack { ids, seqs, log_id } => {
+            ServerMsg::Ack { ids, seqs, log_id, facts } => {
                 // As from a page: a peer that did not know which log it
                 // holds learns it from the first frame that says.
                 if self.replica.log_id.is_none() {
                     self.replica.log_id = log_id;
+                }
+                // An entry stamped with other roles than this device froze
+                // in it (`docs/plan-guards.md` D1) is confirmed by the
+                // authority's facts, which arrive with the log they are of.
+                for (n, f) in facts {
+                    self.replica.receive_facts(n, f);
                 }
                 for (i, n) in ids.iter().zip(seqs) {
                     self.held_ids.remove(i);
@@ -1351,6 +1385,7 @@ impl<M: Machine> Server<M> {
             ClientMsg::Push { entries } => {
                 let who = self.conns[&c].who.clone();
                 let mut acks: Vec<(Id, Seq)> = Vec::new();
+                let mut stamp_facts: Vec<(Seq, Facts)> = Vec::new();
                 for e in &entries {
                     let theirs = e.actor == who.user && (e.session == who.session || (self.owns)(&e.actor, &e.session));
                     if !theirs {
@@ -1390,6 +1425,7 @@ impl<M: Machine> Server<M> {
                     // depends on.
                     let restamped = e.roles != who.roles;
                     let stamped;
+                    let pushed = e;
                     let e = if restamped {
                         stamped = Entry {
                             roles: who.roles.clone(),
@@ -1401,20 +1437,30 @@ impl<M: Machine> Server<M> {
                     };
                     match self.authority.sequence_entry(e) {
                         // Stamped with other roles than the device authored
-                        // under, its run there may not be what was logged:
-                        // the facts go ahead of the acknowledgement, so the
+                        // under, its run there was a preview of what was not
+                        // logged: the facts ride the acknowledgement, so the
                         // device holds its record to them — and takes them
                         // where they differ — even when the page carrying
                         // the stamped entry never reaches it. A device whose
                         // belief is right, which is every one ordinarily, is
-                        // sent nothing more than it was.
+                        // acknowledged as it was.
                         Sequenced::Appended(n, facts) => {
                             if restamped {
-                                self.send(c, ServerMsg::FactsFor { items: vec![(n, facts)] });
+                                stamp_facts.push((n, facts));
                             }
                             acks.push((e.id, n))
                         }
-                        Sequenced::Duplicate(n) => acks.push((e.id, n)),
+                        // A duplicate is held to the roles it was logged
+                        // with: the device pushing it again may still be
+                        // holding the preview of another belief.
+                        Sequenced::Duplicate(n) => {
+                            if let Some((logged, facts)) = self.authority.log.entries.get(&n) {
+                                if logged.roles != pushed.roles {
+                                    stamp_facts.push((n, facts.clone()));
+                                }
+                            }
+                            acks.push((e.id, n))
+                        }
                         Sequenced::Rejected(why) => self.send(
                             c,
                             ServerMsg::Reject {
@@ -1431,6 +1477,7 @@ impl<M: Machine> Server<M> {
                             ids: acks.iter().map(|(i, _)| *i).collect(),
                             seqs: acks.iter().map(|(_, n)| *n).collect(),
                             log_id: self.authority.log.id(),
+                            facts: stamp_facts,
                         },
                     );
                 }

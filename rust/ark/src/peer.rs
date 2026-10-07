@@ -2150,8 +2150,8 @@ mod tests {
     /// its pending intent; the server holds the connection to the login's
     /// own `library` and logs that, whatever the device said; the device is
     /// confirmed by the acknowledgement alone — the page carrying the
-    /// stamped entry lost — at the authority's hash, by the facts that went
-    /// ahead of the acknowledgement; and a peer fed the log replays the
+    /// stamped entry lost — at the authority's hash, by the facts the
+    /// acknowledgement carries; and a peer fed the log replays the
     /// entry with the stamped roles, on the wire and in its run. Falsified
     /// by sequencing the entry as pushed (no stamp): the log holds
     /// `editor`.
@@ -2184,8 +2184,8 @@ mod tests {
         let said = sv.take_outgoing();
         assert!(
             said.iter()
-                .any(|(_, m)| matches!(m, ServerMsg::FactsFor { items } if items.len() == 1 && items[0].0 == 1)),
-            "the facts go ahead of the acknowledgement: {said:?}"
+                .any(|(_, m)| matches!(m, ServerMsg::Ack { facts, .. } if facts.len() == 1 && facts[0].0 == 1)),
+            "the facts ride the acknowledgement: {said:?}"
         );
         // The page that would have carried the stamped entry is lost.
         for (_, m) in said.into_iter().filter(|(_, m)| !matches!(m, ServerMsg::Batch { .. })) {
@@ -2217,5 +2217,80 @@ mod tests {
         assert_eq!(got, Some(["library".to_string()].into()), "the stamped roles cross the wire");
         assert_eq!(ctx_of(&sv.authority.log.entries[&1].0).roles, ["library".to_string()].into());
         assert_eq!(late.replica.verify_at(), (1, state_hash(&sv.authority.store)));
+    }
+
+    /// `docs/plan-guards.md` D1, found by `arkc fuzz` (seed 112): the facts
+    /// of an entry the authority stamped arrive with the log they are of.
+    /// A device that has never been told a log's name authors under no
+    /// role; its login holds `editor`, so the authority stamps the entry
+    /// and sends its facts — and nothing it sends reaches the device. The
+    /// server then loses its log; on the new one somebody else's entry is
+    /// first; the device comes back naming no log, is paged from 0, and
+    /// must reach the new log's hash. Falsified by sending the facts as a
+    /// frame of their own ahead of the acknowledgement, as the stamp first
+    /// did, and losing only the acknowledgement and the page: the facts
+    /// wait in the inbox at sequence 1, the new log's first entry is
+    /// applied by them, and the device diverges from the authority.
+    #[test]
+    fn the_stamps_facts_arrive_with_the_log_they_are_of() {
+        use crate::live::Silent;
+        use crate::protocol::{open_access, trusting, Client, Mode, Server, ServerMsg};
+        let d = demo();
+        let server = |name: u8| {
+            let mut a = d.authority();
+            a.log.name_if_unnamed([name; 16]);
+            Server::open(trusting(), open_access(), Silent, a)
+        };
+        let mut a = server(0xa1);
+        let mut dev = Client::open(d.replica(true), Mode::Whole, Some("bob:editor".into()));
+        dev.connected();
+        d.create(&mut dev.replica, &Ctx::new("bob", "dev"), 1, "Bob's");
+        dev.out.push(crate::protocol::ClientMsg::Push {
+            entries: dev.replica.pending.clone(),
+        });
+        for m in dev.take_outgoing() {
+            a.recv(1, m);
+        }
+        assert_eq!(a.authority.log.entries[&1].0.roles, ["editor".to_string()].into(), "stamped");
+        // Everything but the acknowledgement and the page reaches it.
+        for (_, m) in a.take_outgoing() {
+            if !matches!(m, ServerMsg::Ack { .. } | ServerMsg::Batch { .. }) {
+                dev.recv(m);
+            }
+        }
+        dev.settle();
+        dev.disconnected();
+        assert_eq!((dev.replica.cursor, dev.replica.log_id), (0, None), "it has heard no log");
+
+        // The server comes back without its log; somebody else is first.
+        let mut b = server(0xb2);
+        let mut alice = Client::open(d.replica(false), Mode::Whole, Some("alice".into()));
+        alice.connected();
+        d.create(&mut alice.replica, &Ctx::new("alice", "dev"), 2, "Alice's");
+        alice.out.push(crate::protocol::ClientMsg::Push {
+            entries: alice.replica.pending.clone(),
+        });
+        for m in alice.take_outgoing() {
+            b.recv(2, m);
+        }
+        let _ = b.take_outgoing();
+        dev.connected();
+        for _ in 0..4 {
+            for m in dev.take_outgoing() {
+                b.recv(1, m);
+            }
+            for (to, m) in b.take_outgoing() {
+                if to == 1 {
+                    dev.recv(m);
+                }
+            }
+            dev.settle();
+        }
+        assert!(
+            dev.replica.pending.is_empty() && dev.replica.diverged.is_empty(),
+            "{:?}",
+            dev.replica.diverged
+        );
+        assert_eq!(dev.replica.verify_at(), (2, state_hash(&b.authority.store)));
     }
 }

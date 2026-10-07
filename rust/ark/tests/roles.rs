@@ -161,12 +161,12 @@ fn a_role_is_asked_alike_natively_and_interpreted() {
 /// The stamp, where it decides a row: a device that believes `flagger`
 /// under a login holding only `writer` previews a flagged note; the
 /// authority logs the entry with `writer` and writes it unflagged. The
-/// device, confirmed by the facts and the acknowledgement alone — the page
+/// device, confirmed by the acknowledgement and the facts it carries — the page
 /// lost — holds the authority's row and its hash, its preview recorded as
 /// the divergence it was; a peer fed the log replays the stamped entry to
 /// the same. A device without `writer` is refused on itself; one that
 /// believes it wrongly is refused by the server, and nothing is logged.
-/// Falsified by not sending the facts ahead of the ack: the device keeps
+/// Falsified by acknowledging without the facts: the device keeps
 /// its flagged preview and its hash is not the authority's.
 #[test]
 fn the_stamp_decides_what_a_body_reading_a_role_writes() {

@@ -183,6 +183,7 @@ pub fn protocol(out: &Out) {
                 ids: vec![id_n(9)],
                 seqs: vec![5],
                 log_id: None,
+                facts: vec![],
             },
         ),
         // An ack names the log as a page does, so a peer confirmed by an
@@ -193,6 +194,20 @@ pub fn protocol(out: &Out) {
                 ids: vec![id_n(9)],
                 seqs: vec![5],
                 log_id: Some(log_a),
+                facts: vec![],
+            },
+        ),
+        // An entry the authority stamped with other roles than its device
+        // froze in it is acknowledged with its facts (`docs/plan-guards.md`
+        // D1): `facts`, present only then, so the two above are the bytes
+        // they were.
+        (
+            "ack-facts",
+            ServerMsg::Ack {
+                ids: vec![id_n(9)],
+                seqs: vec![5],
+                log_id: Some(log_a),
+                facts: vec![(5, vec![Change::Add("item".into(), row.clone())])],
             },
         ),
         (
@@ -302,9 +317,9 @@ pub fn protocol(out: &Out) {
     // The authority stamps (`docs/plan-guards.md` D1): an entry is logged
     // with the roles of the connection that pushed it, whatever its device
     // believed — a role it was never given is not in the log, and one it
-    // did not know it held is. Where the two differ the facts go ahead of
-    // the acknowledgement; where they agree, nothing more is sent. And an
-    // entry holding no role carries no `roles` at all.
+    // did not know it held is. Where the two differ the acknowledgement
+    // carries the entry's facts; where they agree, it is the bytes it was.
+    // And an entry holding no role carries no `roles` at all.
     let stamped_as = |token: &str, believed: &[&str]| {
         let mut sv = server();
         sv.recv(
@@ -332,8 +347,8 @@ pub fn protocol(out: &Out) {
             .iter()
             .filter(|(c, _)| *c == 1)
             .map(|(_, m)| match m {
-                ServerMsg::FactsFor { .. } => "facts",
-                ServerMsg::Ack { .. } => "ack",
+                ServerMsg::Ack { facts, .. } if facts.len() == 1 && facts[0].0 == 1 => "ack with its facts",
+                ServerMsg::Ack { facts, .. } if facts.is_empty() => "ack",
                 ServerMsg::Batch { .. } => "batch",
                 _ => "other",
             })
@@ -343,12 +358,12 @@ pub fn protocol(out: &Out) {
     };
     assert_eq!(
         stamped_as("alice", &["library"]),
-        (vec![], "facts ack batch".to_string()),
+        (vec![], "ack with its facts batch".to_string()),
         "protocol: a role the device believed and the login does not hold reached the log"
     );
     assert_eq!(
         stamped_as("alice:library", &[]),
-        (vec!["library".to_string()], "facts ack batch".to_string()),
+        (vec!["library".to_string()], "ack with its facts batch".to_string()),
         "protocol: the login's role was not stamped on an entry its device authored without it"
     );
     assert_eq!(
@@ -374,6 +389,15 @@ pub fn protocol(out: &Out) {
         ark::protocol::entry_from_value(&unordered).is_err(),
         "protocol: roles out of order decoded"
     );
+    // And an ack's `facts` is absent where there are none: `facts: []` is
+    // a second spelling, refused.
+    if let Some((_, ack)) = server_frames.iter().find(|(n, _)| *n == "ack") {
+        let mut v = ack.to_value();
+        if let Value::Struct(fs) = &mut v {
+            fs.insert("facts".into(), Value::List(vec![].into()));
+        }
+        assert!(ServerMsg::from_value(&v).is_err(), "protocol: an ack with empty facts decoded");
+    }
 
     // A peer used for a while with no account, then signed in: everything
     // it authored as nobody is pushed as the person who signed in, every
