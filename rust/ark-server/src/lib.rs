@@ -310,6 +310,8 @@ impl Builder {
     }
 }
 
+// Everything a hub is opened from, as the builder holds it.
+#[allow(clippy::too_many_arguments)]
 fn open_hub(
     name: &str,
     domain: &Domain,
