@@ -788,6 +788,128 @@ fn perf_g_authority_and_fanout() {
     }
 }
 
+// (i) A partial connection ----------------------------------------------------------
+
+/// `docs/plan-guards.md` D2 The demo's tables with a scope over them: a
+/// person's own playlists and any a track named for them is on (the
+/// `exists` form), and every item without its position.
+fn scoped() -> ark::ir::Module {
+    let shared = router::<Demo>("shared");
+    let mine = shared.server("mine", |ctx, db| {
+        (
+            db.playlist
+                .filter(Playlist::user_id.eq(ctx.user).or(exists(Item::playlist_id, Item::track_id.eq(ctx.user)))),
+            db.item.rows().exclude(Item::pos),
+        )
+    });
+    Module::new((shared.routes((mine.client("playlists", |_ctx, db, ()| db.playlist.rows()),)),))
+        .build()
+        .clone()
+}
+
+/// What a person holding a union costs the server per pushed entry: the
+/// fan-out of one `add_to_playlist` to C connections, every one of them
+/// partial — half of them the author, who holds the playlists, half
+/// strangers, who hold the items without their position — filtered between
+/// the states before and after it, projected and encoded. Beside it the
+/// same push to the same C connections of a server with no scope: the
+/// whole path, as it was before scopes.
+#[test]
+#[ignore]
+fn perf_i_partial_fanout() {
+    let d = fixture();
+    let scopes = ark::scope::Scopes::of(&scoped());
+    header("(i) fan-out of one pushed entry to C partial connections (Server::recv + encode)");
+    eprintln!(
+        "{:<44} {:>7} {:>10} {:>10} {:>10} {:>12}",
+        "shape", "C", "recv µs", "encode µs", "per conn", "per fact/conn"
+    );
+    for c in [10i64, 40, 160] {
+        for s in [500u64, 8000] {
+            for partial in [true, false] {
+                let (a, log) = d.log(10, s);
+                let mut srv = Server::open(trusting(), open_access(), Silent, a);
+                if partial {
+                    srv = srv.with_scopes(scopes.clone());
+                }
+                for conn in 0..c {
+                    // A partial connection starts from its snapshot; a
+                    // whole one (an admin's, in no scope) is paged.
+                    // The author's connections are even; an admin holds
+                    // no scope's rows by role here, so `:admin` is only a
+                    // name — a whole connection is one the server finds
+                    // whole, and this module's scope holds a part of every
+                    // table for everyone, so the whole half is served
+                    // without scopes below.
+                    let token = match conn % 2 {
+                        0 => "alice".to_string(),
+                        _ => format!("u{conn}"),
+                    };
+                    srv.recv(
+                        conn,
+                        ClientMsg::Hello {
+                            sub: Subscription {
+                                partial,
+                                since: log.len() as Seq,
+                                mode: Mode::Whole,
+                                log_id: None,
+                            },
+                            token: Some(token),
+                            spec: ark::ir::SPEC_VERSION,
+                        },
+                    );
+                }
+                let _ = srv.take_outgoing();
+                let ctx = Ctx::new("alice", "dev");
+                let mut author = d.replica(true);
+                for (n, e, f) in &log {
+                    author.receive_with(*n, e.clone(), f.clone());
+                }
+                author.settle();
+                let reps = 20u64;
+                let (mut recv, mut enc) = (Duration::ZERO, Duration::ZERO);
+                let (mut bytes, mut facts) = (0, 0);
+                for i in 0..reps {
+                    let e = d.add(&mut author, &ctx, 3_000_000 + i, i % 10, 600_000 + i);
+                    author.pending.clear();
+                    let t = Instant::now();
+                    srv.recv(0, ClientMsg::Push { entries: vec![e] });
+                    let out = srv.take_outgoing();
+                    let t1 = Instant::now();
+                    for (_, m) in &out {
+                        if let ServerMsg::Batch { items, .. } = m {
+                            facts += items.iter().map(|(_, _, f)| f.as_ref().map_or(0, Vec::len)).sum::<usize>();
+                        }
+                        bytes += std::hint::black_box(canon::encode(&m.to_value())).len();
+                    }
+                    enc += t1.elapsed();
+                    recv += t1 - t;
+                }
+                let (recv, enc) = (recv / reps as u32, enc / reps as u32);
+                let per_conn = (us(recv) + us(enc)) / c as f64;
+                let facts_per_conn = facts as f64 / (reps as f64 * c as f64);
+                eprintln!(
+                    "{:<44} {:>7} {:>10.1} {:>10.1} {:>10.2} {:>12}",
+                    format!(
+                        "{} log of {s}; {} B per push",
+                        if partial { "partial," } else { "whole," },
+                        bytes / reps as usize
+                    ),
+                    c,
+                    us(recv),
+                    us(enc),
+                    per_conn,
+                    if partial && facts_per_conn > 0.0 {
+                        format!("{:.2}", per_conn / facts_per_conn)
+                    } else {
+                        "-".into()
+                    }
+                );
+            }
+        }
+    }
+}
+
 // (h) The wire ---------------------------------------------------------------------
 
 /// A page of entries as a `Batch` frame: encoded and decoded, with facts

@@ -589,9 +589,24 @@ fn admits(t: &Table, p: &Pred, row: &Row, st: &dyn Store) -> bool {
             // index and may not — an overlay's own writes are in no index —
             // so `keep` decides it too, as `Store::scan_where_eq` says.
             let names = |r: &Row| r.get(column).is_some_and(|v| cmp(CmpOp::Eq, v, k));
-            !st.scan_where_eq(via, &[(column.as_str(), k)], &[], &|r| names(r) && admits(child, q, r, st))
-                .is_empty()
+            // The inner predicate's own equalities go with it, so a child
+            // keyed by the reference and the person — a membership's
+            // `(org, user)` — is one lookup by its key, not a walk of every
+            // child of the row.
+            let mut eq: Vec<(&str, &Value)> = vec![(column.as_str(), k)];
+            equalities(q, &mut eq);
+            !st.scan_where_eq(via, &eq, &[], &|r| names(r) && admits(child, q, r, st)).is_empty()
         }
+    }
+}
+
+// The equalities a folded predicate holds whatever else it says: a
+// comparison with a literal, or every one of an `All`'s.
+fn equalities<'p>(p: &'p Pred, out: &mut Vec<(&'p str, &'p Value)>) {
+    match p {
+        Pred::Cmp(c, CmpOp::Eq, Expr::Lit(v)) => out.push((c.as_str(), v)),
+        Pred::All(ps) => ps.iter().for_each(|q| equalities(q, out)),
+        _ => {}
     }
 }
 
