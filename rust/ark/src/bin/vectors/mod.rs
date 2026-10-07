@@ -59,11 +59,13 @@ pub fn write_all(root: &Path) {
     codec::order(&out);
     eval::demo(&out);
     eval::has_role(&out);
+    eval::raw(&out);
     rebase::three_peers(&out);
     module::module(&out);
     protocol::protocol(&out);
     protocol::scoped(&out);
     protocol::private(&out);
+    protocol::raw(&out);
     rebase::fleet(&out);
     fuzzed::fuzzed(&out);
     views::views(&out);

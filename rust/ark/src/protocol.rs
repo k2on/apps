@@ -1716,6 +1716,20 @@ impl<M: Machine> Server<M> {
                 let mut acks: Vec<(Id, Seq)> = Vec::new();
                 let mut stamp_facts: Vec<(Seq, Facts)> = Vec::new();
                 for e in &entries {
+                    // `docs/plan-guards.md` D4 The authority's raw writes are
+                    // its own to author ([`Authority::edit`]): one pushed by
+                    // any connection — whoever it claims to be — is refused,
+                    // and lands nowhere.
+                    if let Some(r) = crate::raw::of(&e.fn_hash) {
+                        self.send(
+                            c,
+                            ServerMsg::Reject {
+                                id: e.id,
+                                reason: refusal_text(&Refusal::Forbidden(crate::raw::table_of(r, &e.args))),
+                            },
+                        );
+                        continue;
+                    }
                     let theirs = e.actor == who.user && (e.session == who.session || (self.owns)(&e.actor, &e.session));
                     if !theirs {
                         self.send(
@@ -1898,6 +1912,17 @@ impl<M: Machine> Server<M> {
                 self.deliver(post);
             }
         }
+    }
+
+    /// `docs/plan-guards.md` D4 The authority writes a row raw, as `by` —
+    /// the server's own identity, never a connection's — under the entry id
+    /// `id` ([`Authority::edit`]); every connection is then served it as any
+    /// entry, a partial one by its facts filtered to its union.
+    pub fn edit(&mut self, id: Id, by: &Identity, change: &Change) -> Sequenced {
+        let ctx = Ctx::new(by.user.clone(), by.session.clone()).with_roles(by.roles.iter().cloned());
+        let out = self.authority.edit(id, &ctx, change);
+        self.fanout();
+        out
     }
 
     /// A connection closed: the room hears it, the cursor is forgotten.

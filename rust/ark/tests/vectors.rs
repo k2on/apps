@@ -392,12 +392,46 @@ fn check_eval(v: &serde_json::Value) -> Result<(), String> {
     Ok(())
 }
 
+/// `docs/plan-guards.md` D4 A raw write applied step by step: named by the
+/// hash of its name, each step's changes — or the constraint that refuses
+/// it, with the store unmoved — and the store and the hash after.
+fn check_raw(v: &serde_json::Value) -> Result<(), String> {
+    let m = module_of(&v["module"]);
+    let name = v["raw"].as_str().unwrap_or("");
+    let fh = ark::raw::hash_of(name);
+    ensure_eq!(hex(&fh), v["function_hash"].as_str().unwrap_or(""), "function_hash");
+    let raw = ark::raw::of(&fh).ok_or_else(|| format!("{name} is no raw write"))?;
+    let mut st = MemoryStore::from_value(m.schema.clone(), &value(&v["store_before"]));
+    for (i, step) in v["steps"].as_array().unwrap().iter().enumerate() {
+        let args = args_of(&value(&step["args"]));
+        let before = st.clone();
+        let got = ark::raw::apply(raw, &args, &mut st).map_err(|e| format!("step {i}: bug {e:?}"))?;
+        match (got, step.get("refused")) {
+            (Ok(chs), None) => ensure_eq!(
+                Value::List(chs.iter().map(change_value).collect()),
+                value(&step["changes"]),
+                "step {i} changes"
+            ),
+            (Err(r), Some(want)) => {
+                ensure_eq!(r.to_string(), want.as_str().unwrap_or(""), "step {i} refusal");
+                ensure!(st == before, "step {i}: a refused write moved the store");
+            }
+            (got, want) => return Err(format!("step {i}: got {got:?}, wanted {want:?}")),
+        }
+        ensure_eq!(st.store_value(), value(&step["store_after"]), "step {i} store");
+        ensure_eq!(hex(&state_hash(&st)), step["hash_after"].as_str().unwrap_or(""), "step {i} hash");
+    }
+    Ok(())
+}
+
 #[test]
 fn eval() {
     for p in files("eval") {
         let v = read(&p);
         if v.get("cases").is_some() {
             eval_cases(&p, &v);
+        } else if v.get("raw").is_some() {
+            check_raw(&v).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
         } else {
             check_eval(&v).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
         }

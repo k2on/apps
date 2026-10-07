@@ -43,7 +43,13 @@
 //! of a column a scope leaves out, a refusal of one login's entries — and
 //! every private entry the log gains must hold the whole run's facts, which
 //! is what every client converges on whatever it previewed, and none of a
-//! login a block refuses may be logged at all.
+//! login a block refuses may be logged at all. Now and then the authority
+//! writes a row raw — a column of a row set, a row taken away, a row drawn
+//! whole, which the constraints may refuse — and a client pushes a raw
+//! write built by hand (`docs/plan-guards.md` D4); after every op every raw
+//! write in the log is the authority's and none a client pushed is there
+//! (`Sim::raw_held`), and every peer, whole or partial, converges on what
+//! they wrote.
 //!
 //! Case `k` of a run from seed `N` is the case of seed `N + k`, so
 //! `--seed N+k --cases 1` runs it alone. A finding is written under `--out`
@@ -274,6 +280,10 @@ fn report(s: &Stats, took: Duration) {
     println!(
         "    {} modules with private blocks ({} shared writes, {} writes outside a union, {} refusals); {} private entries logged, {} of them confirmed otherwise than their author previewed; {} refused by a private block",
         s.privatized, s.private_blocks.0, s.private_blocks.1, s.private_blocks.2, t.private_entries, t.previews_corrected, t.private_refused
+    );
+    println!(
+        "    {} raw writes asked of the authority, {} of them logged; {} pushed by a client, none of them in the log",
+        t.raw_edits, t.raw_logged, t.raw_pushed
     );
     for (seed, check, path, why) in &s.findings {
         println!("  finding: seed {seed}, {check}: {why}\n    written to {path}");

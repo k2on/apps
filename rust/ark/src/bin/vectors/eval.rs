@@ -503,3 +503,110 @@ fn leaves_and_digests(out: &Out, m: &Module, st: &MemoryStore) {
     xored[1].1 = xor;
     write("hash/falsify/digest-by-xor.json", &xored, true);
 }
+
+/// `docs/plan-guards.md` D4 The authority's raw writes, applied step by
+/// step over the demo's tables: what each changes, or the constraint that
+/// refuses it — exactly `put`'s and `delete`'s, since that is what they
+/// are — with the store and the hash after each. Each is named by its fixed
+/// hash, `sha256(enc(Text name))`, which no module carries.
+pub fn raw(out: &Out) {
+    use ark::raw::{self, Raw};
+    let m = demo::module();
+    let pid = id_n(1);
+    let playlist = |name: &str| {
+        Value::record(vec![
+            ("id", Value::Id(pid)),
+            ("name", Value::text(name)),
+            ("user_id", Value::text("alice")),
+        ])
+    };
+    let item = |track: &str, pos: i64| {
+        Value::record(vec![
+            ("playlist_id", Value::Id(pid)),
+            ("track_id", Value::text(track)),
+            ("pos", Value::Int(pos)),
+        ])
+    };
+    let put = |table: &str, row: Value| args([("table", Value::text(table)), ("row", row)]);
+    let del = |table: &str, key: Vec<Value>| args([("table", Value::text(table)), ("key", Value::List(key.into()))]);
+    let write = |name: &str, raw: Raw, st0: &MemoryStore, steps: Vec<Args>| {
+        super::claim(
+            &format!("{} is named by the hash of its name", raw.name()),
+            raw::of(&raw::hash_of(raw.name())) == Some(raw),
+        );
+        let mut st = st0.clone();
+        let mut parts = vec![];
+        for a in steps {
+            let step = match raw::apply(raw, &a, &mut st).unwrap_or_else(|e| panic!("{name}: a bug: {e:?}")) {
+                Ok(chs) => obj(&[
+                    ("args", json(&Value::from(a.clone()))),
+                    ("changes", json(&Value::List(chs.iter().map(change_value).collect()))),
+                    ("store_after", json(&st.store_value())),
+                    ("hash_after", quoted(&hex(&state_hash(&st)))),
+                ]),
+                Err(r) => obj(&[
+                    ("args", json(&Value::from(a.clone()))),
+                    ("refused", quoted(&r.to_string())),
+                    ("store_after", json(&st.store_value())),
+                    ("hash_after", quoted(&hex(&state_hash(&st)))),
+                ]),
+            };
+            parts.push(step);
+        }
+        out.write(
+            name,
+            &obj(&[
+                ("module", json(&module_value(&m))),
+                ("raw", quoted(raw.name())),
+                ("function_hash", quoted(&hex(raw.hash()))),
+                ("store_before", json(&st0.store_value())),
+                ("steps", array(parts)),
+            ]),
+        );
+        st
+    };
+    let empty = MemoryStore::empty(m.schema.clone());
+    // A playlist put, an item on it, the playlist renamed, the same row put
+    // again (no change), and an item naming a playlist that is not there —
+    // refused by the reference, as a mutator's `put` would be.
+    let st = write(
+        "eval/raw-put-row.json",
+        Raw::PutRow,
+        &empty,
+        vec![
+            put("playlist", playlist("Favorites")),
+            put("item", item("t7", 1)),
+            put("playlist", playlist("Kept")),
+            put("playlist", playlist("Kept")),
+            put(
+                "item",
+                Value::record(vec![
+                    ("playlist_id", Value::Id(id_n(2))),
+                    ("track_id", Value::text("t9")),
+                    ("pos", Value::Int(1)),
+                ]),
+            ),
+        ],
+    );
+    super::claim(
+        "the puts left a playlist and an item",
+        st.scan("playlist").len() == 1 && st.scan("item").len() == 1,
+    );
+    // From there: the playlist refused while its item references it, the
+    // item taken by its key, a key nothing has (no change), the playlist.
+    let after = write(
+        "eval/raw-delete-row.json",
+        Raw::DeleteRow,
+        &st,
+        vec![
+            del("playlist", vec![Value::Id(pid)]),
+            del("item", vec![Value::Id(pid), Value::text("t7")]),
+            del("item", vec![Value::Id(pid), Value::text("t7")]),
+            del("playlist", vec![Value::Id(pid)]),
+        ],
+    );
+    super::claim(
+        "the deletes left nothing",
+        after.scan("playlist").is_empty() && after.scan("item").is_empty(),
+    );
+}

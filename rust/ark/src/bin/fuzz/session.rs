@@ -118,6 +118,12 @@ pub struct Tally {
     pub private_entries: u64,
     pub previews_corrected: u64,
     pub private_refused: u64,
+    /// `docs/plan-guards.md` D4 Raw writes the authority was asked to make,
+    /// and of those, the ones its constraints let into the log; and raw
+    /// writes a client pushed, every one of which must be refused.
+    pub raw_edits: u64,
+    pub raw_logged: u64,
+    pub raw_pushed: u64,
 }
 
 struct Held {
@@ -304,6 +310,9 @@ pub fn run(m: &Module, natives: &[(FnHash, Procedure)], seed: u64, without: &[St
     tally.unions_checked += t.unions_checked;
     tally.private_entries += t.private_entries;
     tally.previews_corrected += t.previews_corrected;
+    tally.raw_edits += t.raw_edits;
+    tally.raw_logged += t.raw_logged;
+    tally.raw_pushed += t.raw_pushed;
     tally.private_refused += s
         .sim
         .clients
@@ -424,6 +433,8 @@ impl S<'_> {
             Op::SignIn(_) => self.tally.sign_ins += 1,
             Op::Mutate { .. } => self.tally.mutations += 1,
             Op::Roles { .. } => self.tally.role_changes += 1,
+            Op::Edit { .. } => self.tally.raw_edits += 1,
+            Op::PushRaw { .. } => self.tally.raw_pushed += 1,
             _ => {}
         }
         self.script.push(op.clone());
@@ -473,6 +484,11 @@ impl S<'_> {
         }
         if let Some(why) = self.sim.faults.first() {
             return Some(self.finding("faults", why.clone()));
+        }
+        // `docs/plan-guards.md` D4 Every raw write in the log is the
+        // authority's, and none a client pushed is there.
+        if let Err(why) = self.sim.raw_held() {
+            return Some(self.finding("raw", why));
         }
         // `docs/plan-guards.md` D2 No client holds a row or a column outside
         // its union, nor misses one in it.
@@ -531,6 +547,13 @@ impl S<'_> {
             .collect();
         for (n, e) in fresh {
             self.stamped.insert((e.id, n));
+            // `docs/plan-guards.md` D4 A raw write is the authority's, and
+            // carries the authority's identity rather than a login's: what
+            // holds it is `raw_held`.
+            if ark::raw::is_raw(&e.fn_hash) {
+                self.tally.raw_logged += 1;
+                continue;
+            }
             self.tally.stamps_checked += 1;
             let Some(i) = e.actor.strip_prefix("peer-").and_then(|k| k.parse::<i64>().ok()) else {
                 return Some(self.finding("stamp", format!("entry {n} by {:?}, who is no client", e.actor)));
@@ -800,6 +823,26 @@ impl S<'_> {
                 let p = self.peer();
                 self.roles(p)
             }
+            // `docs/plan-guards.md` D4 The authority edits a row raw, now and
+            // then; and a client pushes one, which must land nowhere.
+            715..=729 => {
+                let st = self.sim.server.authority.store.clone();
+                let change = self.draw.change(&st);
+                Op::Edit {
+                    eid: self.draw.mint(),
+                    change,
+                }
+            }
+            730..=734 => {
+                let peer = self.peer();
+                let st = self.sim.server.authority.store.clone();
+                let change = self.draw.change(&st);
+                Op::PushRaw {
+                    peer,
+                    eid: self.draw.mint(),
+                    change,
+                }
+            }
             0..=749 => Op::Step,
             750..=799 => Op::Partition(self.peer()),
             800..=869 => Op::Heal(self.peer()),
@@ -920,6 +963,37 @@ impl<'a> Draw<'a> {
             }
         }
         out
+    }
+
+    /// `docs/plan-guards.md` D4 A change for a raw write, against `st`: one
+    /// time in three a row taken away, otherwise a row's column set to a
+    /// value of its type, and one time in three a row drawn whole — which
+    /// may have a key that is taken, a parent that is not there, or a `Null`
+    /// where none may be, and is then refused by the constraints as any
+    /// `put` would be.
+    pub fn change(&mut self, st: &MemoryStore) -> Change {
+        let tables: Vec<&ark::schema::Table> = self.sch.tables().collect();
+        let t = *self.rng.pick(&tables).expect("a table");
+        let rows = st.scan(&t.name);
+        match self.rng.pick(&rows).cloned() {
+            Some(row) if self.rng.chance(66) => {
+                if self.rng.chance(33) {
+                    return Change::Remove(t.name.clone(), row);
+                }
+                let cols: Vec<&ark::schema::Column> = t.columns.iter().filter(|c| !t.key.contains(&c.name)).collect();
+                match self.rng.pick(&cols).copied() {
+                    Some(c) => {
+                        let v = self.value(&c.column_ty(), st);
+                        Change::Edit(t.name.clone(), row.clone(), row.with(&c.name, v))
+                    }
+                    None => Change::Remove(t.name.clone(), row),
+                }
+            }
+            _ => {
+                let fields = t.columns.iter().map(|c| (c.name.clone(), self.value(&c.column_ty(), st))).collect();
+                Change::Add(t.name.clone(), ark::store::row_for(st, &t.name, fields))
+            }
+        }
     }
 
     fn value(&mut self, ty: &Ty, st: &MemoryStore) -> Value {

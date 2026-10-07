@@ -18,6 +18,7 @@
 //! | [`journal`] | a log on a key/value storage: a snapshot and pages of records, the server's and a peer alone's (`docs/plan-alone.md` §2) |
 //! | [`peer`] | `Ark.Peer`: the replica and the authority |
 //! | [`protocol`] | `Ark.Protocol`: the frames, the client and server machines |
+//! | [`raw`] | the authority's raw writes, `ark.put_row` and `ark.delete_row`: in every module by construction, named by fixed hashes (`docs/plan-guards.md` D4) |
 //! | [`view`] | `Ark.View`: [`view::pull`], the one evaluator of plans (spec v4), and incremental views with their contract |
 //! | [`live`] | `Ark.Live`: rooms per account over opaque frames |
 //! | [`sim`] | `Ark.Sim`: the seeded fleet |
@@ -50,6 +51,7 @@ pub mod log;
 pub mod peer;
 pub mod plan;
 pub mod protocol;
+pub mod raw;
 pub mod retention;
 pub mod schema;
 pub mod scope;

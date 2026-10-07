@@ -443,11 +443,12 @@ pub enum Refusal {
     StillReferenced(TableName, TableName),
     /// An explicit `refuse` from a mutator, or a checked arithmetic fault.
     Refused(String),
-    /// Not this login's to do, naming what it was refused. Nothing in the
-    /// engine produces it now: the row rules that did are deleted
-    /// (`docs/plan-guards.md` G1), and it is kept as the name a refusal of
-    /// authority is given — what the explorer's built-ins answer a client
-    /// that pushes one (G5). A guard refuses with its own message.
+    /// Not this login's to do, naming the table it would have written: a
+    /// refusal of authority rather than of the data. The authority's raw
+    /// writes (`docs/plan-guards.md` D4, [`crate::raw`]) are what it is
+    /// for — a server answers any connection that pushes one with it, a
+    /// replica refuses to author one with it, and so does an authority that
+    /// is not a server's. A domain's guard refuses with its own message.
     Forbidden(TableName),
 }
 

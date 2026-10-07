@@ -93,6 +93,9 @@ pub struct Sim {
     /// under, as the server took it at that connection's `Hello`: what the
     /// rows it holds are a union for.
     pub served: BTreeMap<i64, Identity>,
+    /// `docs/plan-guards.md` D4 The ids of raw writes clients pushed
+    /// ([`Op::PushRaw`]): none of them may ever be in the log.
+    pub raw_pushed: BTreeSet<Id>,
 }
 
 /// One frame, as it went on the wire.
@@ -189,6 +192,27 @@ pub enum Op {
         roles: BTreeSet<String>,
         believes: BTreeSet<String>,
     },
+    /// `docs/plan-guards.md` D4 The authority writes a row raw, as itself
+    /// ([`Server::edit`]): an `Add` or an `Edit` puts the new row, a
+    /// `Remove` deletes the row's key.
+    Edit {
+        eid: Id,
+        change: crate::store::Change,
+    },
+    /// `docs/plan-guards.md` D4 A client pushes a raw write it built by hand
+    /// — no replica authors one — as its own login, if it is linked: the
+    /// server must refuse it, and it must land nowhere.
+    PushRaw {
+        peer: i64,
+        eid: Id,
+        change: crate::store::Change,
+    },
+}
+
+/// `docs/plan-guards.md` D4 Who a simulated server's raw writes are by: the
+/// authority's own user, under the simulation's one login.
+pub fn authority_identity() -> Identity {
+    Identity::new(crate::raw::AUTHOR, "sim")
 }
 
 fn name(i: i64) -> String {
@@ -246,6 +270,7 @@ impl Sim {
             believes: BTreeMap::new(),
             scopes,
             served: BTreeMap::new(),
+            raw_pushed: BTreeSet::new(),
         };
         for i in 0..n {
             sim.heal(i);
@@ -732,6 +757,11 @@ impl Sim {
             }
             Op::Reopen(i) => self.reopen(*i),
             Op::Roles { peer, roles, believes } => self.grant(*peer, roles.clone(), believes.clone()),
+            Op::Edit { eid, change } => {
+                self.server.edit(*eid, &authority_identity(), change);
+                self.flush_server();
+            }
+            Op::PushRaw { peer, eid, change } => self.push_raw(*peer, *eid, change),
             Op::Verify(i) => {
                 if let Some(c) = self.clients.get_mut(i) {
                     c.verify_all();
@@ -740,6 +770,30 @@ impl Sim {
             }
         }
         Ok(())
+    }
+
+    // A raw write a client built by hand, put on its wire as its own login
+    // pushing it — in flight like any frame, so the network may lose it.
+    fn push_raw(&mut self, i: i64, eid: Id, change: &crate::store::Change) {
+        if self.nobody.contains(&i) || !self.conn.contains_key(&i) {
+            return;
+        }
+        let (raw, args) = crate::raw::call_of(&self.schema, change);
+        let e = crate::log::Entry {
+            id: eid,
+            actor: name(i),
+            session: "dev".into(),
+            roles: self.roles.get(&i).cloned().unwrap_or_default(),
+            fn_hash: raw.hash().clone(),
+            args,
+            autos: Args::new(),
+        };
+        self.raw_pushed.insert(eid);
+        let m = ClientMsg::Push { entries: vec![e] };
+        if let Some(tap) = &mut self.tap {
+            tap.push(Frame::ToServer(m.clone()));
+        }
+        self.to_server.entry(i).or_default().push(m);
     }
 
     // The server stops: every connection drops and what was in flight is
@@ -920,8 +974,23 @@ impl Sim {
         if !self.quiet() {
             return Err("something is in flight or pending after settle".into());
         }
+        self.raw_held()?;
         if let Some(f) = self.faults.first() {
             return Err(f.clone());
+        }
+        Ok(())
+    }
+
+    /// `docs/plan-guards.md` D4 Every raw write the log holds is the
+    /// authority's own, and none a client pushed is there at all.
+    pub fn raw_held(&self) -> Result<(), String> {
+        for (n, (e, _)) in &self.server.authority.log.entries {
+            if self.raw_pushed.contains(&e.id) {
+                return Err(format!("a raw write a client pushed is in the log at {n}"));
+            }
+            if crate::raw::is_raw(&e.fn_hash) && e.actor != crate::raw::AUTHOR {
+                return Err(format!("the raw write at {n} is by {}, not the authority", e.actor));
+            }
         }
         Ok(())
     }
@@ -950,7 +1019,7 @@ impl Sim {
             below: Default::default(),
         };
         for (n, (e, facts)) in &log.entries {
-            match again.sequence_entry(e) {
+            match again.sequence_logged(e) {
                 Sequenced::Appended(m, f) if m == *n && f == *facts => {}
                 Sequenced::Appended(m, _) if m != *n => return Err(format!("entry {n} replays at {m}")),
                 Sequenced::Appended(..) => return Err(format!("entry {n} replays to other facts")),
@@ -1024,6 +1093,17 @@ impl Op {
                 let texts = |s: &BTreeSet<String>| Value::List(s.iter().map(|r| Value::text(r.clone())).collect());
                 Value::record(vec![t("roles"), peer(i), ("roles", texts(roles)), ("believes", texts(believes))])
             }
+            Op::Edit { eid, change } => Value::record(vec![
+                t("edit"),
+                ("eid", Value::Id(*eid)),
+                ("change", crate::protocol::change_value(change)),
+            ]),
+            Op::PushRaw { peer: i, eid, change } => Value::record(vec![
+                t("push_raw"),
+                peer(i),
+                ("eid", Value::Id(*eid)),
+                ("change", crate::protocol::change_value(change)),
+            ]),
         }
     }
 
@@ -1094,6 +1174,21 @@ impl Op {
                     peer: int("peer")?,
                     roles: texts("roles")?,
                     believes: texts("believes")?,
+                }
+            }
+            "edit" | "push_raw" => {
+                let eid = match get("eid")? {
+                    Value::Id(i) => *i,
+                    other => return Err(format!("eid is not an id: {other:?}")),
+                };
+                let change = crate::protocol::change_from_value(get("change")?).map_err(|e| format!("change: {e}"))?;
+                match &**t {
+                    "edit" => Op::Edit { eid, change },
+                    _ => Op::PushRaw {
+                        peer: int("peer")?,
+                        eid,
+                        change,
+                    },
                 }
             }
             other => return Err(format!("unknown op {other}")),

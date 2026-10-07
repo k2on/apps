@@ -987,3 +987,146 @@ pub fn private(out: &Out) {
         );
     }
 }
+
+/// `docs/plan-guards.md` D4 The authority's raw writes on the wire, over the
+/// demo: the server puts a playlist and an item raw, renames the playlist,
+/// and takes the item away — four entries by its own identity, each named
+/// by a fixed hash no module carries; one the constraints refuse is logged
+/// nowhere — and bob, who replays and arrives after, is paged them as
+/// intents in one batch and reaches the authority's state by running them. Then alice pushes a raw write of
+/// her own, and it is refused as forbidden and lands nowhere.
+pub fn raw(out: &Out) {
+    use ark::raw::{self, Raw};
+    let m = demo::module();
+    let bodies = closures(&m);
+    let mut sv = Server::open(trusting(), open_access(), Silent, Authority::new(m.schema.clone(), bodies.clone()));
+    let hello = |who: &str| ClientMsg::Hello {
+        sub: Subscription {
+            since: 0,
+            mode: Mode::Whole,
+            log_id: None,
+            partial: false,
+        },
+        token: Some(who.into()),
+        spec: SPEC_VERSION,
+    };
+    sv.recv(1, hello("alice"));
+    let _ = sv.take_outgoing();
+    let me = ark::protocol::Identity::new(raw::AUTHOR, "server-1");
+    let pid = id_n(0x41);
+    let row = |pairs: Vec<(&str, Value)>| Row::from_struct(pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect());
+    let playlist = |name: &str| {
+        row(vec![
+            ("id", Value::Id(pid)),
+            ("name", Value::text(name)),
+            ("user_id", Value::text("alice")),
+        ])
+    };
+    let item = row(vec![
+        ("playlist_id", Value::Id(pid)),
+        ("track_id", Value::text("t1")),
+        ("pos", Value::Int(1)),
+    ]);
+    let edits = [
+        Change::Add("playlist".into(), playlist("Fixed")),
+        Change::Add("item".into(), item.clone()),
+        Change::Edit("playlist".into(), playlist("Fixed"), playlist("Fixed again")),
+        Change::Remove("item".into(), item),
+    ];
+    for (k, ch) in edits.iter().enumerate() {
+        let done = sv.edit(id_n(0x50 + k as u8), &me, ch);
+        super::claim(
+            "the authority's raw write is sequenced",
+            matches!(done, ark::peer::Sequenced::Appended(n, _) if n == k as i64 + 1),
+        );
+    }
+    // A put the reference refuses: no entry, and nothing on the wire.
+    let orphan = row(vec![
+        ("playlist_id", Value::Id(id_n(0x42))),
+        ("track_id", Value::text("t2")),
+        ("pos", Value::Int(1)),
+    ]);
+    let refused = sv.edit(id_n(0x5f), &me, &Change::Add("item".into(), orphan));
+    super::claim(
+        "a raw write is judged by the constraints",
+        matches!(refused, ark::peer::Sequenced::Rejected(ark::store::Refusal::MissingParent(..))) && sv.authority.log.head_seq() == 4,
+    );
+    // Bob arrives after, and is paged the four in one batch.
+    let _ = sv.take_outgoing();
+    sv.recv(2, hello("bob"));
+    let said = sv.take_outgoing();
+    let page = said
+        .iter()
+        .filter(|(c, m)| *c == 2 && matches!(m, ServerMsg::Batch { .. }))
+        .map(|(_, m)| m.clone())
+        .collect::<Vec<_>>();
+    let items: Vec<(i64, Entry)> = page
+        .iter()
+        .flat_map(|m| match m {
+            ServerMsg::Batch { items, .. } => items.iter().map(|(n, e, _)| (*n, e.clone())).collect(),
+            _ => vec![],
+        })
+        .collect();
+    super::claim(
+        "bob is paged the four raw writes as intents, by the authority, at their fixed hashes",
+        items.len() == 4
+            && items.iter().all(|(_, e)| e.actor == raw::AUTHOR && raw::is_raw(&e.fn_hash))
+            && items.iter().filter(|(_, e)| e.fn_hash == *Raw::DeleteRow.hash()).count() == 1,
+    );
+    // Bob replays them — every peer runs the raw writes natively — and
+    // holds what the authority holds.
+    let mut bob = Client::open(
+        Replica::open(m.schema.clone(), bodies.clone(), MemoryStore::empty(m.schema.clone()), 0, vec![]),
+        Mode::Whole,
+        Some("bob".into()),
+    );
+    for p in &page {
+        bob.recv(p.clone());
+    }
+    bob.settle();
+    super::claim(
+        "a replaying peer reaches the authority's state by running the raw writes",
+        bob.replica.verify_at() == (4, ark::hash::state_hash(&sv.authority.store)) && bob.replica.diverged.is_empty(),
+    );
+    // Alice pushes one of her own — no replica authors one, so by hand —
+    // and it is refused, and the log does not move.
+    let (r, a) = raw::call_of(&m.schema, &Change::Add("playlist".into(), playlist("Mine now")));
+    let pushed = ClientMsg::Push {
+        entries: vec![Entry {
+            id: id_n(0x60),
+            actor: "alice".into(),
+            session: "dev".into(),
+            roles: Default::default(),
+            fn_hash: r.hash().clone(),
+            args: a,
+            autos: Args::new(),
+        }],
+    };
+    sv.recv(1, pushed.clone());
+    let answered = verdicts(&mut sv, 1);
+    super::claim(
+        "a pushed raw write is refused as forbidden, and lands nowhere",
+        matches!(answered.as_slice(), [ServerMsg::Reject { reason, .. }] if reason == "playlist: not this login's to write")
+            && sv.authority.log.head_seq() == 4,
+    );
+    let mut alone = Replica::open(m.schema.clone(), bodies.clone(), MemoryStore::empty(m.schema.clone()), 0, vec![]);
+    super::claim(
+        "and no replica can author one",
+        matches!(
+            alone.mutate(id_n(0x61), &Ctx::new("alice", "dev"), Raw::PutRow.hash(), &Args::new(), &Args::new()),
+            Err(ark::store::Refusal::Forbidden(_))
+        ),
+    );
+    let batch = page.into_iter().next().expect("a page");
+    let frames: [(&str, Value); 3] = [
+        ("client-push-raw", pushed.to_value()),
+        ("server-batch-raw", batch.to_value()),
+        ("server-reject-raw", answered[0].to_value()),
+    ];
+    for (name, v) in frames {
+        out.write(
+            &format!("protocol/{name}.json"),
+            &obj(&[("frame", json(&v)), ("bytes", quoted(&hex(&encode(&v))))]),
+        );
+    }
+}

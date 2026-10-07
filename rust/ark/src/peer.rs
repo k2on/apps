@@ -236,6 +236,12 @@ fn run_uncounted(
     args: &Args,
     store: &mut dyn Store,
 ) -> Option<Applied> {
+    // `docs/plan-guards.md` D4 The two raw writes every peer runs natively,
+    // named by fixed hashes no module carries: an entry of one replays here
+    // like any other ([`crate::raw`]).
+    if let Some(r) = crate::raw::of(fh) {
+        return Some(crate::raw::apply(r, args, store));
+    }
     if let Some(p) = natives.get(fh) {
         return Some(p.apply(ctx, autos, args, store));
     }
@@ -347,6 +353,12 @@ impl Replica {
     /// and if it is not refused, record it as pending. A refusal changes
     /// nothing and records nothing.
     pub fn mutate(&mut self, id: Id, ctx: &Ctx, fh: &FnHash, autos: &Args, args: &Args) -> Result<Entry, Refusal> {
+        // `docs/plan-guards.md` D4 A replica has no path to the authority's
+        // raw writes: they are no function a device authors, connected or
+        // alone, so nothing it did can be pushed as one.
+        if let Some(r) = crate::raw::of(fh) {
+            return Err(Refusal::Forbidden(crate::raw::table_of(r, args)));
+        }
         // Applied through an overlay, so a refusal leaves the view untouched
         // and an acceptance costs its changes, not a copy of the store.
         let out = {
@@ -394,9 +406,11 @@ impl Replica {
         hold(&mut self.bodies, &mut self.natives, procs);
     }
 
-    /// Whether an entry naming this hash can be applied here by intent.
+    /// Whether an entry naming this hash can be applied here by intent: a
+    /// procedure or a closure is held for it, or it is one of the raw
+    /// writes every peer runs (`docs/plan-guards.md` D4).
     pub fn can_apply(&self, fh: &FnHash) -> bool {
-        self.natives.contains_key(fh) || self.bodies.contains_key(fh)
+        self.natives.contains_key(fh) || self.bodies.contains_key(fh) || crate::raw::is_raw(fh)
     }
 
     /// `docs/plan-guards.md` D3 Whether an entry naming this hash is taken
@@ -1248,9 +1262,10 @@ impl Authority {
     }
 
     /// Whether an intent naming this hash can be run here: a procedure or a
-    /// closure is held for it.
+    /// closure is held for it, or it is a raw write (`docs/plan-guards.md`
+    /// D4) — which only [`Authority::edit`] sequences.
     pub fn can_apply(&self, fh: &FnHash) -> bool {
-        self.natives.contains_key(fh) || self.bodies.contains_key(fh)
+        self.natives.contains_key(fh) || self.bodies.contains_key(fh) || crate::raw::is_raw(fh)
     }
 
     /// `docs/plan-guards.md` D3 Whether entries naming this hash have a
@@ -1276,10 +1291,54 @@ impl Authority {
 
     /// §11.7 Sequence an intent: dedupe by id, apply to the head state, and
     /// append with the facts. An intent naming a closure the authority does
-    /// not hold is refused, not stalled.
+    /// not hold is refused, not stalled; one naming a raw write is refused
+    /// as [`Refusal::Forbidden`], since [`Authority::edit`] is the one way
+    /// to author one (`docs/plan-guards.md` D4).
     pub fn sequence_entry(&mut self, e: &Entry) -> Sequenced {
+        self.sequence(e, false)
+    }
+
+    /// An entry the log already holds, sequenced again — a raw write among
+    /// them, as [`Authority::edit`] sequenced it: what checking a log by its
+    /// intents is ([`crate::sim::Sim::replays`]). Never a peer's intent.
+    pub fn sequence_logged(&mut self, e: &Entry) -> Sequenced {
+        self.sequence(e, true)
+    }
+
+    /// `docs/plan-guards.md` D4 Author a raw write as this authority: the
+    /// `change` as `ark.put_row` (an `Add` or an `Edit`, its new row) or
+    /// `ark.delete_row` (a `Remove`, its key) — [`crate::raw::call_of`] —
+    /// under the entry id `id`, its actor and login `by`'s, sequenced as any
+    /// intent is: judged by the table's constraints, appended with its
+    /// facts, and served to every peer like any entry. The one way such an
+    /// entry is made, and a server's authority's alone
+    /// ([`Authority::private`], which [`crate::protocol::Server::open`]
+    /// sets): a peer alone's authority is a client here, and is refused as
+    /// one. `by` is the server's own identity — an operator at the explorer
+    /// writes as the authority, not as anybody's account.
+    pub fn edit(&mut self, id: Id, by: &Ctx, change: &Change) -> Sequenced {
+        let (raw, args) = crate::raw::call_of(&self.schema, change);
+        if !self.private {
+            return Sequenced::Rejected(Refusal::Forbidden(crate::raw::table_of(raw, &args)));
+        }
+        let e = Entry {
+            id,
+            actor: by.user.clone(),
+            session: by.session.clone(),
+            roles: by.roles.clone(),
+            fn_hash: raw.hash().clone(),
+            args,
+            autos: Args::new(),
+        };
+        self.sequence(&e, true)
+    }
+
+    fn sequence(&mut self, e: &Entry, raw_ok: bool) -> Sequenced {
         if let Some(n) = self.log.seq_of(&e.id) {
             return Sequenced::Duplicate(n);
+        }
+        if let Some(r) = crate::raw::of(&e.fn_hash).filter(|_| !raw_ok) {
+            return Sequenced::Rejected(Refusal::Forbidden(crate::raw::table_of(r, &e.args)));
         }
         let out = {
             let mut over = Overlay::new(&self.store);
