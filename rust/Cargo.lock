@@ -1657,6 +1657,7 @@ version = "0.1.0"
 dependencies = [
  "ark-auth",
  "ark-client",
+ "ark-explorer",
  "arkui",
  "harken-domain",
  "iced",

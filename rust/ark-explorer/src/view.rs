@@ -28,7 +28,7 @@ fn tab<'a>(label: &'static str, lit: bool, to: Screen) -> Element<'a, Msg> {
 
 impl Explorer {
     /// The whole explorer: which screen, the screen, and the status line.
-    pub fn view<'a>(&'a self, src: &Source<'a>, w: &dyn Writer) -> Element<'a, Msg> {
+    pub fn view<'a>(&'a self, src: &Source<'_>, w: &dyn Writer) -> Element<'a, Msg> {
         let on_tables = matches!(self.screen, Screen::Tables | Screen::Table(_));
         let mut head = Row::new()
             .spacing(4)
@@ -72,7 +72,7 @@ impl Explorer {
             .into()
     }
 
-    fn view_tables<'a>(&'a self, src: &Source<'a>, w: &dyn Writer) -> Element<'a, Msg> {
+    fn view_tables<'a>(&'a self, src: &Source<'_>, w: &dyn Writer) -> Element<'a, Msg> {
         let head = row![
             table::heading("Table", NAME),
             table::heading("Rows", NARROW),
@@ -110,7 +110,7 @@ impl Explorer {
         column![head, scrollable(rows).style(style::bars).height(Length::Fill)].spacing(4).into()
     }
 
-    fn view_table<'a>(&'a self, src: &Source<'a>, w: &dyn Writer, t: &str) -> Element<'a, Msg> {
+    fn view_table<'a>(&'a self, src: &Source<'_>, w: &dyn Writer, t: &str) -> Element<'a, Msg> {
         let columns = Explorer::columns(src, t);
         let key: Vec<String> = src.store.schema().lookup_table(t).map(|tbl| tbl.key.clone()).unwrap_or_default();
         let all = src.store.scan(t);
@@ -193,7 +193,7 @@ impl Explorer {
         .into()
     }
 
-    fn view_log<'a>(&'a self, src: &Source<'a>) -> Element<'a, Msg> {
+    fn view_log<'a>(&'a self, src: &Source<'_>) -> Element<'a, Msg> {
         let log = src.log;
         let mut out = Column::new().spacing(4);
         out = out.push(text(format!("head {}", log.head())).size(13));

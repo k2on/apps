@@ -25,6 +25,7 @@
 //! here is harken's: its places, its panes, its messages, its screens.
 
 mod auth;
+mod explore;
 mod listening;
 mod palette;
 mod peer;
@@ -160,6 +161,8 @@ pub enum Message {
     /// reach the page: a menu is pinned to a window coordinate, and a list
     /// scrolling under it would leave it beside a row it is not about.
     Swallow,
+    /// For the explorer, while it is open (`E`; `docs/plan-guards.md` D4).
+    Explore(ark_explorer::Msg),
 }
 
 /// One change this window made, kept so its fate can be said about *it*.
@@ -210,6 +213,8 @@ pub struct App {
     pub help: bool,
     /// `D` — every number the session holds.
     pub debug: bool,
+    /// `E` — the explorer over this device's replica (`explore.rs`).
+    pub explore: Option<explore::Explore>,
     /// A row's menu, and the playlist picker that is its submenu — or the one
     /// `a` opens alone. arkui holds the rules; the playlists are the values.
     pub ctx: Context<Message, Id>,
@@ -274,6 +279,7 @@ impl App {
             search: String::new(),
             help: false,
             debug: false,
+            explore: None,
             ctx: Context::new(),
             menu_about: None,
             picker_about: None,
@@ -743,6 +749,14 @@ impl App {
                     self.debug = !self.debug;
                     Task::none()
                 }
+                // Beside `D`: the explorer — every table this device holds,
+                // the log as it knows it, a query console. Writes only
+                // through the CRUD the domain exposes, as whoever is signed
+                // in; never raw (`docs/plan-guards.md` D4).
+                'E' => {
+                    self.toggle_explorer();
+                    Task::none()
+                }
                 // "Which lists is this on", which is the one question left
                 // after the hearts went.
                 'a' => self.update(Message::OpenPicker),
@@ -1169,6 +1183,16 @@ impl App {
                 self.listening.close();
                 self.devices = None;
                 self.note = "signed out — what you do now stays on this device until you sign in".into();
+            }
+            // The explorer has the keyboard while it is open: its own
+            // grammar, its own cursor, and `<Esc>` from its top closes it.
+            Message::Key(key, mods) if self.explore.is_some() => {
+                self.explore(ark_explorer::Msg::Key(key, mods));
+                return Task::none();
+            }
+            Message::Explore(m) => {
+                self.explore(m);
+                return Task::none();
             }
             Message::Key(key, mods) => {
                 // `None` is still typing: a count, a `g`, a search — drawn in

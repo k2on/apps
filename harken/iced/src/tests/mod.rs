@@ -2,6 +2,7 @@
 //! Nothing here opens a window — none of these can say what anything looks
 //! like, only that the arithmetic and the rules behind it hold.
 
+mod explorer;
 mod geometry;
 mod signing_in;
 

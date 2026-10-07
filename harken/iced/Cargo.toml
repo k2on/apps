@@ -20,6 +20,9 @@ ark-client = { path = "../../rust/ark-client" }
 # own address in a browser; and the logins a device remembers.
 ark-auth = { path = "../../rust/ark-auth", features = ["client"] }
 arkui = { path = "../../rust/arkui" }
+# `E`: the database explorer over this device's replica (`docs/plan-guards.md`
+# D4), read-only but for the CRUD the domain exposes.
+ark-explorer = { path = "../../rust/ark-explorer" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # `smol` gives iced a timer to drive the tick. `svg` is every glyph, `image`
