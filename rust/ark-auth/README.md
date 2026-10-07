@@ -27,7 +27,8 @@ gives the clients the other half — how to get a token to send.
   at startup, every time: the mode's sentence (dev auth's names the
   `name:role,role` form) and every role the configuration grants.
 - **roles** (`docs/plan-auth.md`): a claim about a person the log does not
-  hold, which a table's `writable` and `visible` rules ask. A login holds
+  hold, which the guards of `docs/plan-guards.md` G2 are to ask (the row
+  rules that asked it are deleted, G1). A login holds
   the roles it was issued with — kept on its session as `roles`, absent when
   none: the server's own scanner's by construction, a dev login's from its
   name — and the ones `Auth::with_roles([(role, [account id…])])` grants
@@ -36,9 +37,9 @@ gives the clients the other half — how to get a token to send.
   for every login at once. `Account.roles` carries them to the client in
   the exchange's and `/auth/me`'s answers (absent when none, so a login
   remembered before roles reads as one holding none); a client hands them
-  to its peer (`ark_client::Peer::set_roles`) to hold its own writes to
-  the rules before pushing them, and the server holds every entry to the
-  roles it asks for the connection whatever the client says.
+  to its peer (`ark_client::Peer::set_roles`), whose `Ctx` carries them,
+  and the server takes a connection's roles from what it asks here
+  whatever the client says.
   `auth.authenticator()` answers `Identity { user, session, roles }`. A
   provider's groups claim is not read.
 - **OIDC**: authorization code with PKCE, as a confidential client;

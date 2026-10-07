@@ -193,7 +193,6 @@ fn a_snapshot_read_as_it_is_decoded_is_the_snapshot_read_whole() {
         rows: rows.clone(),
         log_id: Some(key(0xa1, 0)),
         module,
-        partial: false,
     };
     // The adoption loop as it stood before D7.4, over the whole tree.
     let old_store = |behind: bool| {
@@ -235,19 +234,14 @@ fn a_snapshot_read_as_it_is_decoded_is_the_snapshot_read_whole() {
             panic!("a snapshot")
         };
         let ServerMsg::SnapshotOf {
-            seq,
-            rows,
-            log_id,
-            module,
-            partial,
-            ..
+            seq, rows, log_id, module, ..
         } = msg
         else {
             unreachable!()
         };
         assert_eq!(
             s,
-            Snapshot::of_values(&sch, seq, rows, log_id, module, partial),
+            Snapshot::of_values(&sch, seq, rows, log_id, module),
             "the rows built as the values make them"
         );
         read.recv_snapshot(s);

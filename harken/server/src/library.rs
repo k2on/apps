@@ -126,10 +126,10 @@ impl Scanner {
         let mut peer = Peer::open_path(domain, &dir, opts)
             .map_err(|e| anyhow::anyhow!("the scanner's replica in {}: {e}", dir.display()))?;
         // `docs/plan-auth.md` The scanner is the library, by construction: it
-        // holds the role the library's tables are written under, whatever
-        // else its login holds, and its own device holds its writes to that.
-        // The server grants the account the same role (`start`), so what the
-        // device takes the authority takes.
+        // holds the library's role whatever else its login holds, and its
+        // `Ctx` carries it. The server grants the account the same role
+        // (`start`), so the device and the authority agree on it — which is
+        // what the guards of `docs/plan-guards.md` G2 will ask.
         peer.set_roles(
             login
                 .user

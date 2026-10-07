@@ -33,7 +33,7 @@ fn signing_in_moves_the_same_replica_on() {
     let id = p
         .client
         .mutate("add_song", song("Air", "Bach", "Suites", "music/air.mp3"))
-        .expect("a window holding the library role takes a song signed out");
+        .expect("the library takes a song from anybody");
     p.refresh();
     let mut app = App::with_peer(p, "http://127.0.0.1:9".into(), None);
     assert_eq!(app.peer.items.len(), 1, "what was done signed out is on screen");

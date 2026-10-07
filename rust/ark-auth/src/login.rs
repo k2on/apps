@@ -18,9 +18,9 @@ pub struct Account {
     /// `docs/plan-auth.md` The roles this person holds, as the server says:
     /// what it was configured with for the account
     /// (`server::Auth::with_roles`) and, signed in through dev auth, what
-    /// the name asked for (`alice:library`). What a table's `writable` and
-    /// `visible` rules are asked with — at the server for every connection,
-    /// and on the device for its own intents before they are pushed.
+    /// the name asked for (`alice:library`). What the guards of
+    /// `docs/plan-guards.md` G2 are to ask — the row rules that asked them
+    /// before are gone (G1).
     /// Absent when there are none, so a login written before roles reads
     /// as one holding none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

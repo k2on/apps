@@ -3955,14 +3955,8 @@ pub fn seeded_times(domain: Domain, copies: usize) -> ark_client::Peer {
         pending: vec![],
         user: DEMO.into(),
         session: LOCAL.into(),
-        partial: false,
     };
     let mut disk = Memory::new();
     disk.save(ReplicaFile::KEY, &file.encode()).expect("memory takes it");
-    let mut peer = ark_client::Peer::open(domain, Box::new(disk), Options::alone(DEMO)).expect("a peer alone opens its seed");
-    // The demo authored its own library, as a server's scanner does: its
-    // device holds the role harken's library tables are written under
-    // (`docs/plan-auth.md`).
-    peer.set_roles([harken_domain::schema::LIBRARY]);
-    peer
+    ark_client::Peer::open(domain, Box::new(disk), Options::alone(DEMO)).expect("a peer alone opens its seed")
 }

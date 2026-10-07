@@ -643,22 +643,13 @@ fn a_verify_below_the_head_over_older_facts_agrees() {
                 since: 2,
                 mode: Mode::ByFacts,
                 log_id: None,
-                partial: false,
             },
             token: Some("alice".into()),
             spec: ark::ir::SPEC_VERSION,
         },
     );
     let _ = sv.take_outgoing();
-    sv.recv(
-        1,
-        ClientMsg::Verify {
-            seq,
-            hash,
-            log_id: None,
-            partial: false,
-        },
-    );
+    sv.recv(1, ClientMsg::Verify { seq, hash, log_id: None });
     let agreed: Vec<bool> = sv
         .take_outgoing()
         .into_iter()

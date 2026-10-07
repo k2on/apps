@@ -443,10 +443,11 @@ pub enum Refusal {
     StillReferenced(TableName, TableName),
     /// An explicit `refuse` from a mutator, or a checked arithmetic fault.
     Refused(String),
-    /// `docs/plan-auth.md` A row the entry writes that the table's
-    /// `writable` rule does not admit for its author: the table. Judged
-    /// after the run, at the authority and on the device before an intent
-    /// is recorded pending ([`crate::rules::forbidden`]).
+    /// Not this login's to do, naming what it was refused. Nothing in the
+    /// engine produces it now: the row rules that did are deleted
+    /// (`docs/plan-guards.md` G1), and it is kept as the name a refusal of
+    /// authority is given — what the explorer's built-ins answer a client
+    /// that pushes one (G5). A guard refuses with its own message.
     Forbidden(TableName),
 }
 

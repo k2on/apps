@@ -170,15 +170,11 @@ impl View {
             Changes::Applied(chs) => chs,
         };
         // §1.7 The middleware first: whoever is signed in, and whatever
-        // the tables it reads now say. Who, not what roles they hold: a
-        // body never reads a role (`docs/plan-auth.md`), so a login's roles
-        // moving is no reason for a view to start over.
-        let who = |c: &Ctx| (c.user.clone(), c.session.clone());
-        let moved = who(peer.ctx()) != who(&self.ctx);
-        if moved || chs.iter().any(|c| self.guards.contains(c.table())) {
+        // the tables it reads now say.
+        if *peer.ctx() != self.ctx || chs.iter().any(|c| self.guards.contains(c.table())) {
             let c = closure(peer, &self.name)?;
             let outcome = middleware(peer, &self.name, &c, &self.args)?;
-            if moved || outcome != self.outcome {
+            if *peer.ctx() != self.ctx || outcome != self.outcome {
                 self.ctx = peer.ctx().clone();
                 self.outcome = outcome;
                 self.hydrate(peer, &c)?;

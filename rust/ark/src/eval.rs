@@ -45,13 +45,11 @@ pub use crate::stdlib::Args;
 pub struct Ctx {
     pub user: String,
     pub session: String,
-    /// `docs/plan-auth.md` The roles the author holds as this peer knows
-    /// them: its own login's, so that a device can hold its own intents to
-    /// a table's `writable` rule before recording them pending. Not in the
-    /// entry and not read by a body: the authority holds an entry to the
-    /// roles of the connection that pushed it, which the authenticator
-    /// said at `Hello` (`protocol::Identity::roles`), and a replay holds
-    /// nothing to them — an entry in the log was judged once.
+    /// The roles the author holds as this peer knows them: its own
+    /// login's, as the authenticator said them (`protocol::Identity::roles`).
+    /// Not in the entry, and read by nothing yet: they are carried for the
+    /// guards that will ask them (`docs/plan-guards.md` G2), the row rules
+    /// that asked them before being gone (G1).
     pub roles: BTreeSet<String>,
 }
 
@@ -76,7 +74,7 @@ impl Ctx {
         }
     }
 
-    /// The same author, holding these roles (`docs/plan-auth.md`).
+    /// The same author, holding these roles.
     pub fn with_roles(mut self, roles: impl IntoIterator<Item = impl Into<String>>) -> Ctx {
         self.roles = roles.into_iter().map(Into::into).collect();
         self

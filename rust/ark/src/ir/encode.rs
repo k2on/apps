@@ -57,63 +57,56 @@ pub fn schema_value(sch: &Schema) -> Value {
 }
 
 fn table_value(t: &crate::schema::Table) -> Value {
-    let mut fields = vec![
-        ("name", txt(&t.name)),
-        (
-            "columns",
-            list(
-                |c| {
-                    node(
-                        "column",
-                        vec![("name", txt(&c.name)), ("ty", ty_value(&c.ty)), ("nullable", Value::Bool(c.nullable))],
-                    )
-                },
-                &t.columns,
-            ),
-        ),
-        ("key", list(|k| txt(k), &t.key)),
-        (
-            "indexes",
-            Value::List(
-                t.indexes
-                    .iter()
-                    .map(|i| {
+    node(
+        "table",
+        vec![
+            ("name", txt(&t.name)),
+            (
+                "columns",
+                list(
+                    |c| {
                         node(
-                            "index",
-                            vec![("columns", list(|c| txt(c), &i.columns)), ("unique", Value::Bool(i.unique))],
+                            "column",
+                            vec![("name", txt(&c.name)), ("ty", ty_value(&c.ty)), ("nullable", Value::Bool(c.nullable))],
                         )
-                    })
-                    // D4 A text index is an index of kind `text`, after
-                    // the others; a table with none writes what it
-                    // always did.
-                    .chain(t.text.iter().map(|c| {
-                        node(
-                            "index",
-                            vec![
-                                ("columns", list(|c| txt(c), std::slice::from_ref(c))),
-                                ("unique", Value::Bool(false)),
-                                ("kind", txt("text")),
-                            ],
-                        )
-                    }))
-                    .collect(),
+                    },
+                    &t.columns,
+                ),
             ),
-        ),
-        (
-            "refs",
-            list(|r| node("ref", vec![("column", txt(&r.column)), ("table", txt(&r.table))]), &t.refs),
-        ),
-    ];
-    // `docs/plan-auth.md` A table's rules, each only where declared:
-    // `Everyone` is the absence of the field, so a table with no rule — every
-    // table of every module before rules — writes what it always did.
-    if let Some(p) = &t.visible {
-        fields.push(("visible", pred(p)));
-    }
-    if let Some(p) = &t.writable {
-        fields.push(("writable", pred(p)));
-    }
-    node("table", fields)
+            ("key", list(|k| txt(k), &t.key)),
+            (
+                "indexes",
+                Value::List(
+                    t.indexes
+                        .iter()
+                        .map(|i| {
+                            node(
+                                "index",
+                                vec![("columns", list(|c| txt(c), &i.columns)), ("unique", Value::Bool(i.unique))],
+                            )
+                        })
+                        // D4 A text index is an index of kind `text`, after
+                        // the others; a table with none writes what it
+                        // always did.
+                        .chain(t.text.iter().map(|c| {
+                            node(
+                                "index",
+                                vec![
+                                    ("columns", list(|c| txt(c), std::slice::from_ref(c))),
+                                    ("unique", Value::Bool(false)),
+                                    ("kind", txt("text")),
+                                ],
+                            )
+                        }))
+                        .collect(),
+                ),
+            ),
+            (
+                "refs",
+                list(|r| node("ref", vec![("column", txt(&r.column)), ("table", txt(&r.table))]), &t.refs),
+            ),
+        ],
+    )
 }
 
 pub fn ty_value(t: &Ty) -> Value {
@@ -353,10 +346,6 @@ fn pred(p: &Pred) -> Value {
         Pred::Any(ps) => node("pany", vec![("items", list(pred, ps))]),
         Pred::Not(q) => node("pnot", vec![("e", pred(q))]),
         Pred::Has(c, e) => node("phas", vec![("column", txt(c)), ("e", expr(e))]),
-        // `docs/plan-auth.md` A rule's leaves, written only where a rule
-        // has one, so no plan's bytes and no module without a rule move.
-        Pred::Role(r) => node("prole", vec![("name", txt(r))]),
-        Pred::Exists(t, c, q) => node("pexists", vec![("table", txt(t)), ("column", txt(c)), ("pred", pred(q))]),
     }
 }
 
@@ -465,7 +454,5 @@ fn pred_calls(p: &Pred, acc: &mut std::collections::BTreeSet<String>) {
         Pred::All(ps) | Pred::Any(ps) => ps.iter().for_each(|p| pred_calls(p, acc)),
         Pred::Not(q) => pred_calls(q, acc),
         Pred::Has(_, e) => expr_calls(e, acc),
-        Pred::Role(_) => {}
-        Pred::Exists(_, _, q) => pred_calls(q, acc),
     }
 }

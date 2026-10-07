@@ -11,7 +11,7 @@ use ark::ir::module_from_value;
 use super::{claim, Out};
 
 /// Each session, by the name it is published under.
-const SESSIONS: [(&str, &str); 5] = [
+const SESSIONS: [(&str, &str); 3] = [
     (
         "fleet-fuzz-an-ack-at-or-below-the-cursor.json",
         include_str!("fuzzed/fleet-fuzz-an-ack-at-or-below-the-cursor.json"),
@@ -23,19 +23,6 @@ const SESSIONS: [(&str, &str); 5] = [
     (
         "fleet-fuzz-an-ack-names-no-log-and-the-replay-refuses.json",
         include_str!("fuzzed/fleet-fuzz-an-ack-names-no-log-and-the-replay-refuses.json"),
-    ),
-    // `docs/plan-auth.md`: a partial page dropped in flight, which the next
-    // page's `upto` stepped over before pages said where they continue
-    // from (`Covers::after`)…
-    (
-        "fleet-fuzz-a-partial-page-missed.json",
-        include_str!("fuzzed/fleet-fuzz-a-partial-page-missed.json"),
-    ),
-    // …and a rule's lookup read through an overlay, whose own writes are in
-    // no reference index, admitting a row that names nothing.
-    (
-        "fleet-fuzz-a-lookup-reads-an-overlays-writes.json",
-        include_str!("fuzzed/fleet-fuzz-a-lookup-reads-an-overlays-writes.json"),
     ),
 ];
 

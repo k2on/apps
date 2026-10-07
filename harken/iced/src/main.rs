@@ -440,8 +440,9 @@ impl App {
                 ),
             };
             let mut peer = Peer::open(client);
-            // `docs/plan-auth.md` What this device holds its own writes to:
-            // the roles the remembered login was signed in with.
+            // The roles the remembered login was signed in with, which the
+            // author's `Ctx` carries (for the guards of `docs/plan-guards.md`
+            // G2; nothing reads them yet).
             if let Some(l) = &login {
                 peer.client.set_roles(l.user.roles.clone());
             }
@@ -535,9 +536,8 @@ impl App {
             .sign_in(login.user.id.clone(), login.session.clone(), Some(login.token.clone()))
         {
             Ok(()) => {
-                // The roles the sign-in said this login holds: a library
-                // write is then refused on this device, as the server would
-                // (`docs/plan-auth.md`), and shown as any refusal is.
+                // The roles the sign-in said this login holds, which the
+                // author's `Ctx` carries (`docs/plan-guards.md` G2).
                 self.peer.client.set_roles(login.user.roles.clone());
                 let pending = self.peer.client.pending_len();
                 self.note = match pending {

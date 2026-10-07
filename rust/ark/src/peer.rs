@@ -37,7 +37,6 @@ pub use crate::authoring::Procedure;
 use crate::eval::{apply_closure, Args, Ctx, EvalError};
 use crate::hash::{state_hash, Closure, FnHash};
 use crate::log::{Entry, Facts, Log, Page, Seq};
-use crate::rules::{self, Who};
 use crate::schema::Schema;
 use crate::store::{Change, MemoryStore, Overlay, Refusal, Store};
 use crate::value::{hex, Id, TableName};
@@ -109,22 +108,6 @@ pub struct Replica {
     /// are compared with a run or applied. Not durable: every connection's
     /// first answer says it again.
     pub behind: bool,
-    /// `docs/plan-auth.md` The replica holds a partition — what a table's
-    /// `visible` rule lets this peer see — and not the log whole: the
-    /// server said so on the snapshot it started from. Confirmed entries
-    /// are then applied by their facts alone, never by running another
-    /// peer's intent, whose read set this store may not hold; this peer's
-    /// own intents are optimistic as ever and confirmed by their facts, and
-    /// a difference from the record is the authority's answer rather than a
-    /// divergence, since the run that made the record could see only the
-    /// partition. Durable, beside the cursor: a peer that held a partition
-    /// says so in its next `Hello`.
-    pub partial: bool,
-    /// A partial replica's horizon of what it has been told: the last
-    /// sequence a page covered (`upto`). Every sequence up to it has passed
-    /// — with facts in the inbox, or with nothing this peer may see — and
-    /// the next settle moves the cursor to it.
-    pub through: Seq,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
@@ -158,8 +141,7 @@ pub enum Journal {
     Replaced,
 }
 
-// The entry's author, as a replay runs it: an entry carries no roles, and
-// nothing a body does reads them.
+// The entry's author, as a replay runs it: an entry carries no roles.
 fn ctx_of(e: &Entry) -> Ctx {
     Ctx::new(e.actor.clone(), e.session.clone())
 }
@@ -295,8 +277,6 @@ impl Replica {
             replaced: true,
             journal: vec![],
             behind: false,
-            partial: false,
-            through: cursor,
         };
         r.replay();
         r
@@ -310,25 +290,7 @@ impl Replica {
         // and an acceptance costs its changes, not a copy of the store.
         let out = {
             let mut over = Overlay::new(&self.view);
-            let out = run(&self.schema, &self.bodies, &self.natives, fh, ctx, autos, args, &mut over);
-            // `docs/plan-auth.md` The device holds its own write to the
-            // tables' `writable` rules for its own login's roles, as the
-            // authority will for the connection's: a forbidden intent is
-            // refused here and never pushed. Nothing is read where no rule
-            // is declared.
-            match out {
-                Some(Ok(Ok(chs))) => {
-                    let who = Who {
-                        user: &ctx.user,
-                        roles: &ctx.roles,
-                    };
-                    match rules::forbidden(&self.schema, &self.view, &over, &chs, who) {
-                        Some(t) => Some(Ok(Err(Refusal::Forbidden(t)))),
-                        None => Some(Ok(Ok(chs))),
-                    }
-                }
-                other => other,
-            }
+            run(&self.schema, &self.bodies, &self.natives, fh, ctx, autos, args, &mut over)
         };
         match out {
             None => Err(Refusal::Refused(format!("unknown function {}", hex(fh)))),
@@ -590,11 +552,6 @@ impl Replica {
     /// closures it does not hold, or which it could not apply as the
     /// authority did.
     pub fn needs(&self) -> Vec<Seq> {
-        // A partial replica is sent every fact it may see, and asks for
-        // nothing (`docs/plan-auth.md`).
-        if self.partial {
-            return vec![];
-        }
         self.inbox
             .iter()
             .filter_map(|(n, ib)| match (&ib.entry, &ib.facts) {
@@ -664,12 +621,7 @@ impl Replica {
         // Nothing next in the inbox, nothing to do: a settle with nothing
         // placed, which every pump that heard nothing makes (R8), costs a
         // lookup and not a list of the pending ids.
-        let next = if self.partial {
-            self.through > self.cursor
-        } else {
-            self.inbox.contains_key(&(self.cursor + 1))
-        };
-        if !next {
+        if !self.inbox.contains_key(&(self.cursor + 1)) {
             return;
         }
         // The intents the view holds above `confirmed`, in the order it
@@ -679,7 +631,7 @@ impl Replica {
         // Every entry applied moves the confirmed store, so the loop runs
         // inside the wrapper that keeps the view's sharing (D7.3); the
         // view's own move follows it.
-        let ((acc, moved, others), shared) = self.move_confirmed(|r, _| if r.partial { r.confirm_partial() } else { r.confirm_inbox() });
+        let ((acc, moved, others), shared) = self.move_confirmed(|r, _| r.confirm_inbox());
         if !moved {
             return;
         }
@@ -801,44 +753,6 @@ impl Replica {
             acc.extend(chs);
             moved = true;
             others = others || !own_next || diverged;
-        }
-        (acc, moved, others)
-    }
-
-    // `docs/plan-auth.md` The advance's first half for a partial replica:
-    // every sequence up to `through`, in order, by its facts — what the
-    // inbox holds for it, or nothing, for a sequence that passed with
-    // nothing this peer may see. The journal gets a list per sequence,
-    // empty or not, so that it stays contiguous and a store kept from it
-    // reaches the cursor. An own intent whose facts are its record is
-    // confirmed as R2 confirms one; anything else that moved the store, or
-    // took an intent out of `pending`, is `others`, and the view is
-    // rebased by changes as it is for a whole replica. No run, no
-    // divergence: the facts are the authority's answer for this partition.
-    fn confirm_partial(&mut self) -> (Vec<Change>, bool, bool) {
-        let mut acc: Vec<Change> = Vec::new();
-        let mut moved = false;
-        let mut others = false;
-        while self.cursor < self.through {
-            let n = self.cursor + 1;
-            let ib = self.inbox.remove(&n).unwrap_or_default();
-            let chs = ib.facts.as_ref().map(|f| self.here(f)).unwrap_or_default();
-            let own_next = ib.entry.is_some() && self.pending.first() == ib.entry.as_ref();
-            let agrees = own_next && !others && ib.entry.as_ref().and_then(|e| self.recorded.get(&e.id)) == Some(&chs);
-            let mut dropped = false;
-            if let Some(e) = &ib.entry {
-                let before = self.pending.len();
-                self.pending.retain(|p| p.id != e.id);
-                dropped = self.pending.len() < before;
-            }
-            self.confirmed.apply_changes(&chs);
-            self.journal.push((n, chs.clone()));
-            self.cursor = n;
-            moved = true;
-            if !agrees && (dropped || !chs.is_empty()) {
-                others = true;
-            }
-            acc.extend(chs);
         }
         (acc, moved, others)
     }
@@ -1175,33 +1089,13 @@ impl Authority {
     /// §11.7 Sequence an intent: dedupe by id, apply to the head state, and
     /// append with the facts. An intent naming a closure the authority does
     /// not hold is refused, not stalled.
-    ///
-    /// Unjudged by the tables' `writable` rules: what a log being replayed
-    /// or adopted, and a peer alone's own authority, sequence — every entry
-    /// there was judged when it was first sequenced, or is the peer's own.
-    /// A server sequences what a connection pushes with
-    /// [`Authority::sequence_as`].
     pub fn sequence_entry(&mut self, e: &Entry) -> Sequenced {
-        self.sequence(e, None)
-    }
-
-    /// `docs/plan-auth.md` [`Authority::sequence_entry`], with every row the
-    /// run writes held to its table's `writable` rule for `who`, the
-    /// connection's identity, after the run and before anything is
-    /// appended: a row it does not admit is the verdict
-    /// [`Refusal::Forbidden`], and nothing of the run is kept. A schema
-    /// whose rules `who`'s roles decide true reads no row for it.
-    pub fn sequence_as(&mut self, e: &Entry, who: Who) -> Sequenced {
-        self.sequence(e, Some(who))
-    }
-
-    fn sequence(&mut self, e: &Entry, who: Option<Who>) -> Sequenced {
         if let Some(n) = self.log.seq_of(&e.id) {
             return Sequenced::Duplicate(n);
         }
         let out = {
             let mut over = Overlay::new(&self.store);
-            let out = run(
+            run(
                 &self.schema,
                 &self.bodies,
                 &self.natives,
@@ -1210,14 +1104,7 @@ impl Authority {
                 &e.autos,
                 &e.args,
                 &mut over,
-            );
-            match (out, who) {
-                (Some(Ok(Ok(facts))), Some(who)) => match rules::forbidden(&self.schema, &self.store, &over, &facts, who) {
-                    Some(t) => Some(Ok(Err(Refusal::Forbidden(t)))),
-                    None => Some(Ok(Ok(facts))),
-                },
-                (out, _) => out,
-            }
+            )
         };
         match out {
             None => Sequenced::Rejected(Refusal::Refused(format!("unknown function {}", hex(&e.fn_hash)))),
@@ -2041,7 +1928,6 @@ mod tests {
             has_more: false,
             log_id: None,
             module: None,
-            covers: None,
         };
         let mut other = d.replica(true);
         let shared = d.create(&mut other, &them, 1, "Shared");

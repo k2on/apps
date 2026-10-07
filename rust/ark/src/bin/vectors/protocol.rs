@@ -74,7 +74,6 @@ pub fn protocol(out: &Out) {
             since: 4,
             mode: Mode::Whole,
             log_id,
-            partial: false,
         },
         token: Some("tok".into()),
         spec: SPEC_VERSION,
@@ -88,7 +87,6 @@ pub fn protocol(out: &Out) {
                     since: 0,
                     mode: Mode::ByFacts,
                     log_id: None,
-                    partial: false,
                 },
                 token: None,
                 spec: SPEC_VERSION,
@@ -109,7 +107,6 @@ pub fn protocol(out: &Out) {
                 seq: 4,
                 hash: vec![0xab; 32],
                 log_id: None,
-                partial: false,
             },
         ),
         // The log the sequence is of, named (`docs/plan-db.md` D2): an
@@ -120,7 +117,6 @@ pub fn protocol(out: &Out) {
                 seq: 4,
                 hash: vec![0xab; 32],
                 log_id: Some(log_a),
-                partial: false,
             },
         ),
         ("say", ClientMsg::Say { frame: vec![1, 2, 3] }),
@@ -141,7 +137,6 @@ pub fn protocol(out: &Out) {
         has_more: true,
         log_id,
         module,
-        covers: None,
     };
     let snapshot = |log_id, module| ServerMsg::SnapshotOf {
         seq: 2,
@@ -149,7 +144,6 @@ pub fn protocol(out: &Out) {
         rows: BTreeMap::from([("item".to_string(), vec![row.to_value()])]),
         log_id,
         module,
-        partial: false,
     };
     let server_frames: Vec<(&str, ServerMsg)> = vec![
         ("batch", batch(None, None)),
@@ -249,7 +243,6 @@ pub fn protocol(out: &Out) {
                     since: 0,
                     mode: Mode::Whole,
                     log_id: None,
-                    partial: false,
                 },
                 token: Some("alice".into()),
                 spec: SPEC_VERSION,
@@ -361,7 +354,6 @@ pub fn protocol(out: &Out) {
                     since: 0,
                     mode: Mode::Whole,
                     log_id: said,
-                    partial: false,
                 },
                 token: Some("alice".into()),
                 spec: SPEC_VERSION,
@@ -395,7 +387,6 @@ pub fn protocol(out: &Out) {
                 since: 0,
                 mode: Mode::Whole,
                 log_id: None,
-                partial: false,
             },
             token: Some("alice".into()),
             spec: SPEC_VERSION,
@@ -476,214 +467,6 @@ pub fn protocol(out: &Out) {
         // Closures decode with empty symbol names, so compare through their values.
         match decode(&encode(&v)).map(|d| ServerMsg::from_value(&d)) {
             Ok(Ok(back)) if back.to_value() == v => {}
-            other => panic!("protocol server {name}: {other:?}"),
-        }
-        out.write(
-            &format!("protocol/server-{name}.json"),
-            &obj(&[("frame", json(&v)), ("bytes", quoted(&hex(&encode(&v))))]),
-        );
-    }
-}
-
-/// `docs/plan-auth.md` What a table's rules make of the frames: a write the
-/// `writable` rule does not admit for the connection is a `reject` like any
-/// other, its reason naming the table (`protocol/server-reject-forbidden`);
-/// a peer some `visible` rule hides rows from is paged with `upto` and only
-/// what it may see (`server-batch-partial`), started from a snapshot of
-/// that (`server-snapshot-partial`), says it holds a partition when it
-/// comes back (`client-hello-partial`) and when it asks the authority
-/// whether it agrees (`client-verify-partial`).
-/// Asserted on the demo with rules (`module/rules.json`): alice adding an
-/// item, which only an `editor` writes, is refused, and with the role
-/// (`alice:editor`, as dev auth reads a token) acknowledged.
-pub fn rules(out: &Out) {
-    out.dir("protocol/ (rules)");
-    let m = super::module::ruled();
-    let bodies = closures(&m);
-    let (h_create, h_add) = (hash_of(&m, "create_playlist"), hash_of(&m, "add_to_playlist"));
-    let pid = id_n(1);
-    let create = Entry {
-        id: id_n(40),
-        actor: "alice".into(),
-        session: "dev".into(),
-        fn_hash: h_create,
-        args: args([("name", Value::text("Mix"))]),
-        autos: args([("id", Value::Id(pid))]),
-    };
-    let add = Entry {
-        id: id_n(41),
-        actor: "alice".into(),
-        session: "dev".into(),
-        fn_hash: h_add,
-        args: args([("playlist_id", Value::Id(pid)), ("track_id", Value::text("t1"))]),
-        autos: Args::new(),
-    };
-    let verdict = |token: &str| {
-        let mut sv = Server::open(trusting(), open_access(), Silent, Authority::new(m.schema.clone(), bodies.clone()));
-        sv.recv(
-            1,
-            ClientMsg::Hello {
-                sub: Subscription {
-                    since: 0,
-                    mode: Mode::Whole,
-                    log_id: None,
-                    partial: false,
-                },
-                token: Some(token.into()),
-                spec: SPEC_VERSION,
-            },
-        );
-        let _ = sv.take_outgoing();
-        sv.recv(
-            1,
-            ClientMsg::Push {
-                entries: vec![create.clone(), add.clone()],
-            },
-        );
-        verdicts(&mut sv, 1)
-    };
-    let refused = verdict("alice");
-    let forbidden = refused
-        .iter()
-        .find(|v| matches!(v, ServerMsg::Reject { .. }))
-        .cloned()
-        .expect("protocol: an item written without the editor role was not refused");
-    assert_eq!(
-        forbidden,
-        ServerMsg::Reject {
-            id: id_n(41),
-            reason: "item: not this login's to write".into(),
-        }
-    );
-    assert!(
-        verdict("alice:editor").iter().all(|v| matches!(v, ServerMsg::Ack { .. })),
-        "protocol: an editor's item was refused"
-    );
-    // A partial peer (`docs/plan-auth.md` A4): bob may see a playlist of
-    // his own or one with a `public` item, and sees none of alice's until
-    // she adds one. He joins first and is started from the snapshot of what
-    // he may see; alice, an editor, pushes the playlist and the item in one
-    // frame; bob's page covers both sequences (`upto`), carries only the
-    // second, as its envelope — alice's arguments are not his — with the
-    // item and, after it, the playlist the item made visible, an `add` of
-    // a row the entry did not touch. Bob's client, fed the frames, holds
-    // the partition the authority's digest names.
-    let mut sv = Server::open(trusting(), open_access(), Silent, Authority::new(m.schema.clone(), bodies.clone()));
-    let hello = |partial: bool, token: &str| ClientMsg::Hello {
-        sub: Subscription {
-            since: 0,
-            mode: Mode::Whole,
-            log_id: None,
-            partial,
-        },
-        token: Some(token.into()),
-        spec: SPEC_VERSION,
-    };
-    let r = Replica::open(m.schema.clone(), bodies.clone(), MemoryStore::empty(m.schema.clone()), 0, vec![]);
-    let mut bob = Client::open(r, Mode::Whole, Some("bob".into()));
-    sv.recv(2, hello(false, "bob"));
-    sv.recv(1, hello(false, "alice:editor"));
-    let public = Entry {
-        args: args([("playlist_id", Value::Id(pid)), ("track_id", Value::text("public"))]),
-        ..add.clone()
-    };
-    sv.recv(
-        1,
-        ClientMsg::Push {
-            entries: vec![create.clone(), public],
-        },
-    );
-    let to_bob: Vec<ServerMsg> = sv.take_outgoing().into_iter().filter(|(c, _)| *c == 2).map(|(_, f)| f).collect();
-    for f in to_bob.clone() {
-        bob.recv(f);
-    }
-    bob.settle();
-    let page = to_bob
-        .iter()
-        .find(|f| matches!(f, ServerMsg::Batch { items, .. } if !items.is_empty()))
-        .cloned()
-        .expect("protocol: bob was sent no page");
-    let ServerMsg::Batch { items, covers, .. } = &page else { unreachable!() };
-    assert_eq!(
-        *covers,
-        Some(ark::protocol::Covers { after: 0, upto: 2 }),
-        "protocol: a partial page covers both sequences"
-    );
-    assert_eq!(items.len(), 1, "protocol: the playlist bob cannot see is not sent");
-    let (n, e, facts) = &items[0];
-    assert!(
-        *n == 2 && e.args.is_empty() && e.autos.is_empty(),
-        "protocol: alice's intent went as its envelope"
-    );
-    let tables: Vec<&str> = facts.iter().flatten().map(|c| c.table()).collect();
-    assert_eq!(tables, ["item", "playlist"], "protocol: the item, then the playlist it made visible");
-    let who = ark::protocol::Identity::new("bob", "dev");
-    assert!(
-        bob.replica.partial && bob.replica.cursor == 2,
-        "protocol: bob is a partial peer at the head"
-    );
-    assert_eq!(
-        bob.replica.verify_at().1,
-        ark::rules::partition_hash(&sv.authority.store, who.who()),
-        "protocol: bob holds his partition"
-    );
-    // Bob comes back: his hello says he holds a partition, and he is
-    // started again from the snapshot of what he may see.
-    sv.disconnect(2);
-    bob.disconnected();
-    bob.connected();
-    let again = bob.take_outgoing().remove(0);
-    assert!(
-        matches!(&again, ClientMsg::Hello { sub, .. } if sub.partial),
-        "protocol: a partial peer says so"
-    );
-    sv.recv(2, again.clone());
-    let snapshot = sv
-        .take_outgoing()
-        .into_iter()
-        .find_map(|(c, f)| (c == 2 && matches!(f, ServerMsg::SnapshotOf { .. })).then_some(f))
-        .expect("protocol: a partial peer's connection starts from a snapshot");
-    assert!(matches!(&snapshot, ServerMsg::SnapshotOf { partial: true, seq: 2, .. }));
-    // Started over, bob asks whether the authority agrees: about a
-    // partition, and it is answered from the partition digest.
-    bob.recv(snapshot.clone());
-    bob.settle();
-    bob.verify_all();
-    let verify = bob
-        .take_outgoing()
-        .into_iter()
-        .find(|f| matches!(f, ClientMsg::Verify { partial: true, .. }))
-        .expect("protocol: a partial peer's verify says it holds a partition");
-    sv.recv(2, verify.clone());
-    assert!(
-        sv.take_outgoing().iter().any(|(c, f)| *c == 2
-            && matches!(
-                f,
-                ServerMsg::Agree {
-                    ok: true,
-                    unknown: false,
-                    ..
-                }
-            )),
-        "protocol: the authority agrees with bob's partition"
-    );
-    let client_frames: Vec<(&str, ClientMsg)> = vec![("hello-partial", again), ("verify-partial", verify)];
-    for (name, f) in client_frames {
-        let v = f.to_value();
-        match decode(&encode(&v)).map(|d| ClientMsg::from_value(&d)) {
-            Ok(Ok(back)) if back == f => {}
-            other => panic!("protocol client {name}: {other:?}"),
-        }
-        out.write(
-            &format!("protocol/client-{name}.json"),
-            &obj(&[("frame", json(&v)), ("bytes", quoted(&hex(&encode(&v))))]),
-        );
-    }
-    let frames: Vec<(&str, ServerMsg)> = vec![("reject-forbidden", forbidden), ("batch-partial", page), ("snapshot-partial", snapshot)];
-    for (name, f) in frames {
-        let v = f.to_value();
-        match decode(&encode(&v)).map(|d| ServerMsg::from_value(&d)) {
-            Ok(Ok(back)) if back == f => {}
             other => panic!("protocol server {name}: {other:?}"),
         }
         out.write(

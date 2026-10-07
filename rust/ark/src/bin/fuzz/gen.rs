@@ -120,77 +120,14 @@ pub fn schema(rng: &mut Rng) -> Schema {
         }
         tables.push(Table::new(name, cols, key, indexes, refs));
     }
-    if rng.chance(60) {
-        rules(rng, &mut tables);
-    }
     Schema { tables }
 }
 
-/// The roles a generated rule may name, and a session may grant.
+/// The roles a session may grant a client's login, and its device may
+/// believe it holds. Nothing in the engine asks them yet
+/// (`docs/plan-guards.md` G1); the role changes are drawn so that the
+/// guards that will (G2) meet logins whose roles move.
 pub const ROLES: [&str; 2] = ["r0", "r1"];
-
-/// `docs/plan-auth.md` Rules on some of the tables: who sees a row — a text
-/// column that is `Me`, a role, the two together, or the one lookup
-/// through a table referencing this one — and who writes one, a role or a
-/// column that is `Me`. A session's clients are `peer-0`, `peer-1`, …, and
-/// a text column holds one of those names when a mutator wrote `ctx.user`
-/// there or a draw picked one, so a `Me` rule admits some rows and not
-/// others. Where a parent has a child referencing it, one table in two is
-/// given the lookup, so the two-table form is common rather than rare.
-fn rules(rng: &mut Rng, tables: &mut [Table]) {
-    let me = |c: &str| Pred::Cmp(c.into(), CmpOp::Eq, Expr::CtxUser);
-    let role = |rng: &mut Rng| Pred::Role(ROLES[rng.below(ROLES.len())].into());
-    let texts = |t: &Table| -> Vec<String> { t.columns.iter().filter(|c| c.ty == Ty::Text).map(|c| c.name.clone()).collect() };
-    let snapshot: Vec<Table> = tables.to_vec();
-    for t in tables.iter_mut() {
-        let own = texts(t);
-        // Tables with a reference to this one, through a column, and the
-        // text columns of each: a lookup's ways in.
-        let children: Vec<(String, String, Vec<String>)> = if t.key.len() == 1 {
-            snapshot
-                .iter()
-                .filter(|c| c.name != t.name)
-                .flat_map(|c| {
-                    c.refs
-                        .iter()
-                        .filter(|r| r.table == t.name)
-                        .map(|r| (c.name.clone(), r.column.clone(), texts(c)))
-                        .collect::<Vec<_>>()
-                })
-                .collect()
-        } else {
-            vec![]
-        };
-        let lookup = |rng: &mut Rng| -> Option<Pred> {
-            let (c, col, cs) = rng.pick(&children)?.clone();
-            let inner = match rng.pick(&cs) {
-                Some(tc) if rng.chance(70) => me(tc),
-                _ => role(rng),
-            };
-            Some(Pred::Exists(c, col, Box::new(inner)))
-        };
-        let visible = if !children.is_empty() && rng.chance(50) {
-            let l = lookup(rng).expect("a child");
-            Some(match rng.pick(&own) {
-                Some(c) if rng.chance(60) => Pred::Any(vec![me(c), l]),
-                _ => l,
-            })
-        } else {
-            match rng.below(10) {
-                0..=3 => None,
-                4..=6 => rng.pick(&own).map(|c| me(c)),
-                7 => Some(role(rng)),
-                _ => rng.pick(&own).map(|c| Pred::Any(vec![role(rng), me(c)])),
-            }
-        };
-        let writable = match rng.below(10) {
-            0..=5 => None,
-            6 | 7 => Some(role(rng)),
-            _ => rng.pick(&own).map(|c| me(c)),
-        };
-        *t = t.clone().with_rules(visible, writable);
-    }
-}
 
 fn col(name: &str, ty: Ty, nullable: bool) -> Column {
     Column {

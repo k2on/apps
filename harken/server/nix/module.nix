@@ -157,13 +157,11 @@ in
       example = { library = [ "a1b2c3-provider-sub" ]; };
       description = ''
         Who holds which role, as the account ids holding each: the provider's
-        `sub`, or the name under {option}`services.harken.devAuth`. A role is
-        what a table's `writable` rule asks of the person writing
-        (`docs/plan-auth.md`): harken's library tables are the `library`
-        role's to write, which the server's own scanner holds by construction
-        and nobody else does unless named here — anyone else adding a song is
-        refused, by their own device and by the server. Asked at every
-        connection, so changing this and restarting grants or revokes at once.
+        `sub`, or the name under {option}`services.harken.devAuth`. The
+        server's own scanner holds `library` by construction and nobody else
+        does unless named here; the library's procedures are to be guarded by
+        that role (`docs/plan-guards.md` G2). Asked at every connection, so
+        changing this and restarting grants or revokes at once.
       '';
     };
 

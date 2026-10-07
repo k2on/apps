@@ -427,8 +427,9 @@ pub async fn start(config: Config) -> Result<Server> {
         .map_err(|e| anyhow!("the sessions: {e}"))?;
     let public_url = config.public_url();
     // `docs/plan-auth.md` The roles the configuration grants, and the
-    // scanner's own `library`, by construction: the library's tables are
-    // that role's to write, and the scanner is what writes them.
+    // scanner's own `library`, by construction: the scanner is the library,
+    // and the role is what its procedures are to be guarded by
+    // (`docs/plan-guards.md` G2).
     let roles = config
         .roles
         .iter()
@@ -643,9 +644,6 @@ mod tests {
         }
     }
 
-    /// The two retention constants are `ark::retention`'s unless told,
-    /// and nothing a typo could make of them. Falsified by ignoring
-    /// `HARKEN_RETAIN_ENTRIES`: the count is 10,000.
     /// `docs/plan-auth.md` `HARKEN_ROLES` is role, `=`, the accounts, `;` to
     /// the next — what `services.harken.roles` writes — and unset is no
     /// role; something that is not that refuses to start rather than
@@ -677,6 +675,9 @@ mod tests {
         assert!(Config::from_vars("x:1", vars(&[dev, ("HARKEN_ROLES", "=alice")])).is_err());
     }
 
+    /// The two retention constants are `ark::retention`'s unless told,
+    /// and nothing a typo could make of them. Falsified by ignoring
+    /// `HARKEN_RETAIN_ENTRIES`: the count is 10,000.
     #[test]
     fn retention_is_the_engines_unless_told() {
         let dev = ("HARKEN_DEV_AUTH", "1");

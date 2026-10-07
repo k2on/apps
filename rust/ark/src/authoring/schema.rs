@@ -271,71 +271,6 @@ impl<T: Row, V: Data + ColumnOf<super::values::Text>> Col<T, V> {
     pub fn has(self, needle: impl Into<super::values::Text>) -> Pred<T> {
         Pred::new(IrPred::Has(self.name.into(), rhs(needle.into().to_h())))
     }
-
-    /// `docs/plan-auth.md` In a table's rule: the column holds the user
-    /// the rule is asked about — `Self::user_id.is(Me)`. `Me` is the
-    /// context's user ([`Expr::CtxUser`]): the author, for `writable`; the
-    /// peer being served, for `visible`.
-    pub fn is(self, _me: Me) -> Pred<T> {
-        Pred::new(IrPred::Cmp(self.name.into(), CmpOp::Eq, Expr::CtxUser))
-    }
-}
-
-// Rules ------------------------------------------------------------------------
-
-/// `docs/plan-auth.md` In a table's rule, the identity the rule is asked
-/// about: [`Col::is`].
-#[derive(Clone, Copy, Debug)]
-pub struct Me;
-
-/// `docs/plan-auth.md` The rule that admits every row for everybody: what
-/// a table that declares none has, and what is not encoded.
-#[derive(Clone, Copy, Debug)]
-pub struct Everyone;
-
-/// `docs/plan-auth.md` In a table's rule, a role the identity holds —
-/// `Role("library")`. A role is the authenticator's claim, never a row.
-#[derive(Clone, Copy, Debug)]
-pub struct Role<'a>(pub &'a str);
-
-impl<T> From<Role<'_>> for Pred<T> {
-    fn from(r: Role<'_>) -> Pred<T> {
-        Pred::new(IrPred::Role(r.0.into()))
-    }
-}
-
-/// What a rule may be given as: [`Everyone`], a [`Role`], or a predicate
-/// over the table's columns built with `Me`, roles and [`exists`].
-pub trait Rule<T> {
-    /// The predicate, or `None` for `Everyone`.
-    fn rule(self) -> Option<IrPred>;
-}
-
-impl<T> Rule<T> for Everyone {
-    fn rule(self) -> Option<IrPred> {
-        None
-    }
-}
-
-impl<T> Rule<T> for Role<'_> {
-    fn rule(self) -> Option<IrPred> {
-        Some(IrPred::Role(self.0.into()))
-    }
-}
-
-impl<T> Rule<T> for Pred<T> {
-    fn rule(self) -> Option<IrPred> {
-        Some(self.p)
-    }
-}
-
-/// `docs/plan-auth.md` A rule's one lookup: some row of `C` whose
-/// reference column `via` names this row, admitted by `p` — over `C`'s own
-/// columns, with `Me` and roles but no lookup of its own. A playlist
-/// visible to its members is
-/// `Self::user_id.is(Me).or(exists(PlaylistMember::playlist_id, PlaylistMember::user_id.is(Me)))`.
-pub fn exists<T: Row, C: Row, V: Data + ColumnOf<super::values::Id<T>>>(via: Col<C, V>, p: Pred<C>) -> Pred<T> {
-    Pred::new(IrPred::Exists(C::NAME.into(), via.name.into(), Box::new(p.p)))
 }
 
 // A right-hand side: the expression, or the value as a literal.
@@ -393,8 +328,6 @@ pub struct Columns<T> {
     indexes: Vec<Index>,
     refs: Vec<Ref>,
     text: Vec<String>,
-    visible: Option<IrPred>,
-    writable: Option<IrPred>,
     _t: PhantomData<fn() -> T>,
 }
 
@@ -407,8 +340,6 @@ pub fn columns<T>() -> Columns<T> {
         indexes: vec![],
         refs: vec![],
         text: vec![],
-        visible: None,
-        writable: None,
         _t: PhantomData,
     }
 }
@@ -496,21 +427,6 @@ impl<T> Columns<T> {
         self
     }
 
-    /// `docs/plan-auth.md` Who may see a row of this table. The default,
-    /// [`Everyone`], is not written down at all.
-    pub fn visible(mut self, rule: impl Rule<T>) -> Self {
-        self.visible = rule.rule();
-        self
-    }
-
-    /// `docs/plan-auth.md` Who may write a row of this table: every row an
-    /// entry adds, removes or edits, old and new, is held to it for the
-    /// author. The default, [`Everyone`], is not written down at all.
-    pub fn writable(mut self, rule: impl Rule<T>) -> Self {
-        self.writable = rule.rule();
-        self
-    }
-
     /// The table, as the schema carries it.
     ///
     /// # Panics
@@ -524,9 +440,7 @@ impl<T> Columns<T> {
                 c.name
             );
         }
-        IrTable::new(name, self.cols, self.key, self.indexes, self.refs)
-            .with_text(self.text)
-            .with_rules(self.visible, self.writable)
+        IrTable::new(name, self.cols, self.key, self.indexes, self.refs).with_text(self.text)
     }
 }
 

@@ -93,15 +93,9 @@ pub struct Tally {
     /// not, and `unknown` (below the horizon, D3, or of another log, D2).
     pub verifies_answered: u64,
     pub verifies_unknown: u64,
-    /// `docs/plan-auth.md` Clients at the end of a session that held a
-    /// partition and that held the log whole; role changes drawn; writes
-    /// refused as forbidden by the author's own device, and by the
-    /// authority (a device believing a role it was not granted).
-    pub partial_peers: u64,
-    pub whole_peers: u64,
+    /// Role changes drawn: a client's login granted or revoked roles, and
+    /// its device believing them or more (`docs/plan-guards.md` G1).
     pub role_changes: u64,
-    pub forbidden_local: u64,
-    pub forbidden_remote: u64,
 }
 
 struct Held {
@@ -207,17 +201,6 @@ pub fn run(m: &Module, natives: &[(FnHash, Procedure)], seed: u64, without: &[St
     tally.verifies_answered += t.verifies_answered;
     tally.verifies_unknown += t.verifies_unknown;
     tally.role_changes += t.role_changes;
-    tally.forbidden_local += s.sim.forbidden_local;
-    tally.forbidden_remote += s.sim.forbidden_remote;
-    for (i, c) in &s.sim.clients {
-        if !s.sim.nobody.contains(i) {
-            if c.replica.partial {
-                tally.partial_peers += 1;
-            } else {
-                tally.whole_peers += 1;
-            }
-        }
-    }
     (out, s.sim.server.authority.store.clone())
 }
 
@@ -236,9 +219,8 @@ impl S<'_> {
         if let Some(f) = self.observe() {
             return Some(f);
         }
-        // `docs/plan-auth.md` Every client's login granted roles at the
-        // start — a module whose rules name none leaves them whole — as
-        // the script's first ops, so a vector of it replays them.
+        // Every client's login granted roles at the start, as the script's
+        // first ops, so a vector of it replays them.
         for i in 0..self.clients {
             let op = self.roles(i);
             if let Some(f) = self.apply(op) {
@@ -349,12 +331,6 @@ impl S<'_> {
         }
         if let Some(why) = self.sim.faults.first() {
             return Some(self.finding("faults", why.clone()));
-        }
-        // `docs/plan-auth.md` No peer ever holds a row its rule forbids, nor
-        // lacks one it admits: every partial client is its partition of
-        // the state at its cursor.
-        if let Err(why) = self.sim.partitions_hold() {
-            return Some(self.finding("partition", why));
         }
         // Everything a client's view was told since the last look, as one:
         // the store it is pushed against is the view as it stands now,
@@ -564,9 +540,8 @@ impl S<'_> {
         }
     }
 
-    // `docs/plan-auth.md` New roles for a client's login: each of the
-    // module's role names, or not; and one device in four believes it holds
-    // every one of them, so its writes reach the authority's check.
+    // New roles for a client's login: each of the session's role names, or
+    // not; and one device in four believes it holds every one of them.
     fn roles(&mut self, peer: i64) -> Op {
         let mut roles = std::collections::BTreeSet::new();
         for r in super::gen::ROLES {
@@ -687,9 +662,6 @@ impl<'a> Draw<'a> {
                 2 => Value::Int(1 << 40),
                 _ => Value::Int(self.rng.below(12) as i64 - 3),
             },
-            // A client's name, now and then, so that a column a rule asks
-            // to be `Me` holds somebody's (`docs/plan-auth.md`).
-            Ty::Text if self.rng.chance(25) => Value::text(format!("peer-{}", self.rng.below(4))),
             Ty::Text => Value::text(TEXTS[self.rng.below(TEXTS.len())]),
             Ty::Bool => Value::Bool(self.rng.chance(50)),
             Ty::Bytes => Value::Bytes((0..self.rng.below(3)).map(|i| i as u8 * 7).collect()),
@@ -741,14 +713,9 @@ fn round_trip(f: &Frame, sch: &ark::schema::Schema) -> Option<Finding> {
                 (
                     Ok(Received::Snapshot(s)),
                     ServerMsg::SnapshotOf {
-                        seq,
-                        rows,
-                        log_id,
-                        module,
-                        partial,
-                        ..
+                        seq, rows, log_id, module, ..
                     },
-                ) => *s == Snapshot::of_values(sch, *seq, rows.clone(), *log_id, module.clone(), *partial),
+                ) => *s == Snapshot::of_values(sch, *seq, rows.clone(), *log_id, module.clone()),
                 (Ok(Received::Msg(b)), m) => !matches!(m, ServerMsg::SnapshotOf { .. }) && b.to_value() == v,
                 _ => false,
             };

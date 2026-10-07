@@ -8,7 +8,7 @@
 //! ```text
 //! replica   { t: "replica", cursor, confirmed: { table: [row…] },
 //!             user, session, log, fork: { log, cursor },      the snapshot
-//!             hashing, partial? }
+//!             hashing }
 //! facts.1   { t: "facts", from, to, facts: [[change…], …] }    the journal:
 //! facts.2   …                                                  one page per
 //!                                                              write, dense
@@ -402,12 +402,6 @@ pub struct ReplicaFile {
     /// The login last authored as; empty for nobody (`Ctx::nobody`).
     pub user: String,
     pub session: String,
-    /// `docs/plan-auth.md` The confirmed store is a partition — what this
-    /// login could see when the server last served it — and not the log
-    /// whole, which the next `Hello` says (`Subscription::partial`). On the
-    /// record `partial: true`, absent otherwise, so a record of a whole
-    /// replica is the bytes it was.
-    pub partial: bool,
 }
 
 impl ReplicaFile {
@@ -431,7 +425,7 @@ impl ReplicaFile {
     /// The `replica` record: a snapshot of everything but the pending
     /// intents.
     pub fn encode(&self) -> Vec<u8> {
-        encode_replica_of(self.cursor, None, self.fork, self.partial, &self.confirmed, &self.user, &self.session)
+        encode_replica_of(self.cursor, None, self.fork, &self.confirmed, &self.user, &self.session)
     }
 
     /// The `pending` record.
@@ -529,11 +523,6 @@ pub fn decode_replica(bytes: &[u8], schema: &Schema) -> Result<(ReplicaFile, Opt
         },
         Some(_) => return Err(bad("fork is not a struct")),
     };
-    let partial = match m.get("partial") {
-        None => false,
-        Some(Value::Bool(true)) => true,
-        Some(_) => return Err(bad("partial is true or absent")),
-    };
     let file = ReplicaFile {
         fork,
         cursor,
@@ -541,7 +530,6 @@ pub fn decode_replica(bytes: &[u8], schema: &Schema) -> Result<(ReplicaFile, Opt
         pending,
         user: optional("user")?,
         session: optional("session")?,
-        partial,
     };
     Ok((file, log_id))
 }
@@ -731,14 +719,13 @@ pub fn decode_who(bytes: &[u8]) -> Result<(String, String), Error> {
 /// The `replica` record's bytes: a snapshot, of no named log, by a peer
 /// that never had a server.
 pub fn encode_replica(cursor: Seq, confirmed: &MemoryStore, user: &str, session: &str) -> Vec<u8> {
-    encode_replica_of(cursor, None, Fork::default(), false, confirmed, user, session)
+    encode_replica_of(cursor, None, Fork::default(), confirmed, user, session)
 }
 
 /// The `replica` record's bytes: a snapshot at `cursor` of the log
-/// `log_id`, by a replica whose fork is `fork` and which holds a partition
-/// when `partial` (`docs/plan-auth.md`). Unnamed, it is the record as it was
-/// before logs had names.
-pub fn encode_replica_of(cursor: Seq, log_id: Option<Id>, fork: Fork, partial: bool, confirmed: &MemoryStore, user: &str, session: &str) -> Vec<u8> {
+/// `log_id`, by a replica whose fork is `fork`. Unnamed, it is the record
+/// as it was before logs had names.
+pub fn encode_replica_of(cursor: Seq, log_id: Option<Id>, fork: Fork, confirmed: &MemoryStore, user: &str, session: &str) -> Vec<u8> {
     let mut fields = vec![
         ("t", Value::text("replica")),
         ("cursor", Value::Int(cursor)),
@@ -750,9 +737,6 @@ pub fn encode_replica_of(cursor: Seq, log_id: Option<Id>, fork: Fork, partial: b
     ];
     if let Some(id) = log_id {
         fields.push(("log", Value::Id(id)));
-    }
-    if partial {
-        fields.push(("partial", Value::Bool(true)));
     }
     canon::encode(&Value::record(fields))
 }
@@ -936,21 +920,6 @@ mod tests {
         assert_eq!(base64_encode(b"Man"), "TWFu");
         assert_eq!(base64_encode(b"Ma"), "TWE=");
         assert!(base64_decode("*").is_none());
-    }
-
-    /// `docs/plan-auth.md` A replica holding a partition says so on its
-    /// record, and one holding the log whole writes the bytes it always
-    /// did: `partial` is present only when true, and read back. Falsified by
-    /// not writing the field: the partition came back whole.
-    #[test]
-    fn a_replica_record_says_it_holds_a_partition() {
-        let schema = crate::demo::domain().module().schema.clone();
-        let st = MemoryStore::empty(schema.clone());
-        let whole = encode_replica_of(4, None, Fork::default(), false, &st, "alice", "s");
-        assert_eq!(whole, encode_replica(4, &st, "alice", "s"), "a whole replica's record is as it was");
-        assert!(!decode_replica(&whole, &schema).unwrap().0.partial);
-        let part = encode_replica_of(4, None, Fork::default(), true, &st, "alice", "s");
-        assert!(decode_replica(&part, &schema).unwrap().0.partial);
     }
 
     /// `docs/plan-db.md` D3, Landed: the `replica` record says which

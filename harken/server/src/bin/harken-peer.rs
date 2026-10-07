@@ -7,11 +7,11 @@
 //!   [--auth-patience-ms N] [--module FILE] [--roles ROLE,ROLE]
 //! ```
 //!
-//! `--roles` names roles this device holds its own writes to beside the
-//! ones its login says (`docs/plan-auth.md`): a peer alone, or signed out,
-//! has no login to say any. The server holds every entry to the roles it
-//! knows for the connection whatever this says, so a device told a role it
-//! was not granted has its writes refused there rather than here.
+//! `--roles` names roles this device's `Ctx` carries beside the ones its
+//! login says (`docs/plan-auth.md`): a peer alone, or signed out, has no
+//! login to say any. Nothing reads them yet — they are for the guards of
+//! `docs/plan-guards.md` G2 — and the server takes a connection's roles
+//! from its own configuration whatever this says.
 //!
 //! `--module FILE` runs the module in that `.ark` file instead of harken's
 //! own, with harken's procedures native wherever a hash matches — the
@@ -390,7 +390,7 @@ struct Headless {
     /// would take it with it, and a fleet counting what became of every
     /// intent would count one intent as lost that was refused.
     unasked: Vec<String>,
-    /// `--roles`: what this device holds its writes to beside its login's.
+    /// `--roles`: what this device's `Ctx` carries beside its login's.
     roles: Vec<String>,
 }
 
@@ -398,7 +398,7 @@ impl Headless {
     fn open(f: &Flags, domain: Domain) -> Result<Headless, String> {
         std::fs::create_dir_all(&f.dir).map_err(|e| format!("{}: {e}", f.dir.display()))?;
         // `docs/plan-auth.md` The roles the login holds, as the sign-in said
-        // them: what this device holds its own writes to.
+        // them: what this device's `Ctx` carries.
         let mut roles: Vec<String> = vec![];
         let opts = match (&f.server, f.alone) {
             (_, true) => Options::alone(f.user.clone().unwrap_or_else(|| "me".into())),
@@ -553,9 +553,6 @@ impl Headless {
                     .num("cursor", r.cursor)
                     .text("hash", &hex(&state_hash(&r.confirmed)))
                     .text("view", &hex(&state_hash(&r.view)))
-                    // `docs/plan-auth.md`: whether what it holds is a
-                    // partition, the rows a table's rule lets it see.
-                    .raw("partial", r.partial.to_string())
             }
             Cmd::Wait { cursor, timeout } => {
                 let ok = self.pump_until(timeout, |p| p.cursor() >= cursor);

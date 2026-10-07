@@ -326,7 +326,6 @@ fn a_verify_below_the_horizon_is_answered_cannot_say() {
             since: 20,
             mode: Mode::Whole,
             log_id: sv.authority.log.id(),
-            partial: false,
         },
         token: Some("alice".into()),
         spec: ark::ir::SPEC_VERSION,
@@ -340,7 +339,6 @@ fn a_verify_below_the_horizon_is_answered_cannot_say() {
                 seq,
                 hash: hash.clone(),
                 log_id: None,
-                partial: false,
             },
         );
         sv.take_outgoing()
@@ -480,7 +478,6 @@ fn perf_verify_at_8000_rows() {
             since: head,
             mode: Mode::Whole,
             log_id: sv.authority.log.id(),
-            partial: false,
         },
         token: Some("alice".into()),
         spec: ark::ir::SPEC_VERSION,
@@ -495,7 +492,6 @@ fn perf_verify_at_8000_rows() {
                 seq: head,
                 hash: hash.clone(),
                 log_id: sv.authority.log.id(),
-                partial: false,
             },
         );
     }

@@ -379,7 +379,6 @@ fn a_push_is_held_to_its_login_and_every_refusal_says_why() {
             since: 0,
             mode: Mode::Whole,
             log_id: None,
-            partial: false,
         },
         token: Some(tok.into()),
         spec: ark::ir::SPEC_VERSION,

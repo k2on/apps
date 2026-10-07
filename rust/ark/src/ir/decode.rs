@@ -100,13 +100,7 @@ fn table(x: &Value) -> D<Table> {
             (true, _) => return err(&here("indexes"), "a text index is on one column"),
         }
     }
-    // `docs/plan-auth.md` A rule is absent for `Everyone`; a null is not a
-    // second spelling of it.
-    let rule = |k: &'static str| fs.get(k).map(|v| pred(&here(k), v)).transpose();
-    let (visible, writable) = (rule("visible")?, rule("writable")?);
-    Ok(Table::new(name, columns, key, indexes, refs)
-        .with_text(texts)
-        .with_rules(visible, writable))
+    Ok(Table::new(name, columns, key, indexes, refs).with_text(texts))
 }
 
 fn column(x: &Value) -> D<Column> {
@@ -447,12 +441,6 @@ fn pred(here: &[&str], v: &Value) -> D<Pred> {
         "pany" => Pred::Any(list(here, |x| pred(here, x), field(&fs, "items")?)?),
         "pnot" => Pred::Not(Box::new(pred(here, field(&fs, "e")?)?)),
         "phas" => Pred::Has(text(here, field(&fs, "column")?)?, expr(here, field(&fs, "e")?)?),
-        "prole" => Pred::Role(text(here, field(&fs, "name")?)?),
-        "pexists" => Pred::Exists(
-            text(here, field(&fs, "table")?)?,
-            text(here, field(&fs, "column")?)?,
-            Box::new(pred(here, field(&fs, "pred")?)?),
-        ),
         other => return err(here, format!("unknown predicate {other}")),
     })
 }

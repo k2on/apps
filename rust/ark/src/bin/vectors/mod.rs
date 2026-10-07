@@ -60,9 +60,7 @@ pub fn write_all(root: &Path) {
     eval::demo(&out);
     rebase::three_peers(&out);
     module::module(&out);
-    module::rules(&out);
     protocol::protocol(&out);
-    protocol::rules(&out);
     rebase::fleet(&out);
     fuzzed::fuzzed(&out);
     views::views(&out);

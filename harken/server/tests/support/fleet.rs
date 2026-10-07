@@ -129,10 +129,11 @@ impl Server {
             .env("HARKEN_MEDIA", &self.media)
             .env("HARKEN_KEEPALIVE_MS", KEEPALIVE_MS.to_string())
             .env("HARKEN_KEEPALIVE_MISSED", "3")
-            // `docs/plan-auth.md` The fleet's people add songs, which harken's
-            // rules give the `library` role alone: it holds to convergence,
-            // so the two people it signs in hold it, unless a scenario's own
-            // `env` says otherwise.
+            // `docs/plan-auth.md` The fleet's people add songs, which the
+            // library's guard is to give the `library` role alone
+            // (`docs/plan-guards.md` G2): it holds to convergence, so the two
+            // people it signs in hold it, unless a scenario's own `env` says
+            // otherwise.
             .env("HARKEN_ROLES", FLEET_ROLES)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -358,7 +359,7 @@ pub struct PeerProc {
     /// Said on every start after the rest (`--module FILE`, say).
     pub args: Vec<String>,
     /// `--roles` for this build's peer (`docs/plan-auth.md`): what the
-    /// device holds its own writes to, beside its login's. `library` by
+    /// device's `Ctx` carries, beside its login's. `library` by
     /// default, as [`FLEET_ROLES`] grants it at the server; an older build
     /// knows no such flag and is told nothing.
     pub roles: Vec<String>,
@@ -596,14 +597,6 @@ impl PeerProc {
             held: has(&a, "held").map(int),
             behind: has(&a, "behind").map(|b| b == &Value::Bool(true)),
         }
-    }
-
-    /// Whether the peer holds a partition (`docs/plan-auth.md`): what a
-    /// table's rule lets its login see, and not the log whole. An older
-    /// build does not say, and held the log whole.
-    pub fn partial(&mut self) -> bool {
-        let a = self.ask("hash", vec![]);
-        has(&a, "partial") == Some(&Value::Bool(true))
     }
 
     /// `(cursor, confirmed hash, view hash)`.

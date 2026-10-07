@@ -105,8 +105,6 @@ fn pred(p: &Pred, out: &mut BTreeSet<TableName>) {
         Pred::All(ps) | Pred::Any(ps) => ps.iter().for_each(|q| pred(q, out)),
         Pred::Not(q) => pred(q, out),
         Pred::Has(_, e) => expr(e, out),
-        // A rule's leaves; never in a plan (`RuleLeafInPlan`).
-        Pred::Role(_) | Pred::Exists(..) => {}
     }
 }
 
