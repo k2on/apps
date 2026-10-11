@@ -1,5 +1,11 @@
 # harken for Android
 
+**Out of the flake until round 4 of `docs/plan-phones.md`.** What follows
+describes the v3 app as it stood: its printed domain is deleted (a phone
+loads `harken.ark`), and the Kotlin runtime under it is being rewritten at
+v4 (`kotlin/README.md`), so `nix build .#harken-apk` no longer exists; its
+derivation is as it stood at `2874274`.
+
 Compose over the Kotlin runtime (`kotlin/ark-runtime`), the Kotlin client
 (`kotlin/ark-client`) and harken's domain written in the authoring
 vocabulary (`domain/gen/kotlin/{Schema,Library,Playlists,Module}.kt`,

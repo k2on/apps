@@ -15,9 +15,9 @@ is the contract a domain is written against; `docs/arkdb.md` is the
 architecture, and `docs/plan-v4.md` the design of this version.
 
 Until spec v3 the specification was a Haskell program here, and every
-rule was written twice. Swift and Kotlin are frozen at v3
-(`swift/FROZEN.md`, `kotlin/FROZEN.md`) and come back against the
-vectors of the day they do.
+rule was written twice. Swift is frozen at v3 (`swift/FROZEN.md`); Kotlin
+is coming back against the vectors (`kotlin/README.md`,
+`docs/plan-phones.md`), and Swift will after it.
 
 ## Reading order
 

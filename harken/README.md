@@ -18,16 +18,16 @@ iced/      the desktop and browser client, on arkui and ark-client; the `demo`
            feature is the seeded library GitHub Pages publishes
 ```
 
-Frozen at spec v3, with the Swift and Kotlin runtimes they are built on
-(`swift/FROZEN.md`, `kotlin/FROZEN.md`), and not following the domain
-since:
+Frozen at spec v3, with the runtimes they are built on (`swift/FROZEN.md`,
+`kotlin/FROZEN.md`), and not following the domain since:
 
 ```
-domain/gen/   {swift,kotlin}: arkc's print of what the phones called, from the
-              v3 harken.ark; there is no printer now
+domain/gen/   swift: arkc's print of what the phone called, from the v3
+              harken.ark; there is no printer now (the Kotlin print is
+              deleted: a phone loads harken.ark, docs/plan-phones.md)
 ios/          SwiftUI over ArkDBClient and the printed Swift (ios/README.md)
-android/      Compose over ark-client and the printed Kotlin (android/README.md);
-              still assembled by nix build .#harken-apk
+android/      Compose over the v3 Kotlin runtime (android/README.md); out of
+              the flake until round 4 of docs/plan-phones.md rewires it
 ```
 
 ## The domain
@@ -76,7 +76,6 @@ Everything is `nix`, from the repository root:
     nix build .#harken-web         # the browser demo, as a static directory (Pages)
     nix build .#harken-web-server  # the browser client harken-server serves
     nix build .#harken-domain      # harken.ark, as the source emits it
-    nix build .#harken-apk         # the frozen Android app, debug-signed
     nix flake check                # fmt, clippy and every Rust test; harken.ark
                                    # is what the domain emits and it verifies;
                                    # the vectors; the NixOS module
@@ -86,8 +85,9 @@ options). The frozen iOS app is Xcode over `ios/project.yml`, since only a
 Mac can build one.
 
 Two workflows build from `main`: `pages.yml` publishes `harken-web` at
-<https://k2on.github.io/apps/harken/>, and `apk.yml` builds `harken-apk`
-— the frozen v3 app — and attaches it to a release on a `v*` tag.
+<https://k2on.github.io/apps/harken/>, and `apk.yml` built `harken-apk` —
+the frozen v3 app — which is out of the flake until round 4 of
+`docs/plan-phones.md`, so that workflow has nothing to build until then.
 
 ## Running it
 

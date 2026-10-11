@@ -1,60 +1,102 @@
 # The Kotlin runtime
 
-**Frozen at spec v3** (`FROZEN.md`): nothing tests this tree now, and its
-code is kept byte for byte until the spec settles; `harken-apk` still
-builds it, as the Android app's included build. What follows describes it
-as it was at `4bacc8f`, when its check last passed; `nix develop ..#kotlin`
-no longer exists.
+`ark-runtime` (package `dev.arkdb`) is the core of ArkDB's client for the
+JVM and Android, at spec version 4: what a phone needs to load a module it
+did not author, verify it, interpret it and keep its views up to date. It
+is a port of `rust/ark`, which is the specification (`spec/README.md`), and
+it is held to the same vectors the Rust is, file for file, by
+`checks.kotlin` (`docs/plan-phones.md` S3).
 
-`ark-runtime` (package `dev.arkdb`) is ArkDB for the JVM and Android: the
-IR at spec version 3 (one set of tables, one log), its encoder and
-decoder, the verifier, the interpreter (`Eval`), hashes, the store, the
-peer, the protocol — the client machine and the sans-io `Server` — and
-views.
-`ark-runtime`'s `dev.arkdb.authoring` is the **authoring vocabulary** in
-Kotlin — the contract is `spec/AUTHORING.md`, and this package is the
-reference for its Kotlin spelling (§6). A domain written against it is two
-programs at once: run under Emit it is the module (`Module.emit()`,
-`.hash`, `.ir`), run under Native it applies entries directly
-(`Module.procedures()`, which a `Replica`, an `Authority` and a
-`Session` take by hash). Nothing is generated for Kotlin any more; `arkc gen
-kotlin` prints the authoring form itself. `ark-client` is a peer's shell:
-the socket, the pump, the file, and `Session` — one replica of the log,
-and, for every intent it authored, `statusOf(id)`: pending, confirmed at a
-sequence, or rejected with the server's reason (`Protocol.refusalText`).
-A session may be opened signed out (`user = null`): it authors as
-`Ctx.nobody`, keeps everything pending and written down, and connects to
-nothing until `signIn`, which makes all of it the signer's
-(`Replica.signIn`) and pushes it.
-Its `LocalHub` is the runtime's `Server` in process, for tests.
+A phone's runtime is a **client**: it interprets modules and does not
+author them. The domain is written once, in Rust, and `arkc` emits the
+module (`harken/domain/harken.ark`). So there is no authoring vocabulary
+here, and no printed domain — the v3 tree had both, and they are gone.
 
-    nix develop ..#kotlin -c gradle --no-daemon build     # from kotlin/
+## What is here
 
-runs the conformance runner over `spec/vectors` (which includes the demo of
-AUTHORING.md Appendix B authored in `ark-runtime/src/test/kotlin/demo`, held
-to `module/demo.json`'s bytes, and every procedure of it and of
-`harken/domain/gen/kotlin` run natively against the interpreter) and
-`ark-client`'s tests. `build.sh` is the same without Gradle.
+Each file is a port of the `rust/ark/src` file named beside it; the doc
+comments name the reference function for each piece.
 
-Kotlin's own rules shape three spellings, recorded in AUTHORING.md §6: a
-file names `dev.arkdb.authoring.Int` and `.List` beside the star import
-(Kotlin's default imports win over a star import), `when` is written
-`` `when` ``, and a row's key type is `Key1`/`Key2`/`Key3` on the class.
-A row, the module's tables and an input are classes whose constructor
-takes their columns, tables or fields in declaration order; a row's and an
-input's companion (`Row.Of`, `Input.Of`) carries the rest, and the tables
-class implements `Tables` (a companion, if written, is a `Tables.Of` and
-names nothing). Every router of a module is over the same tables class.
-A record — a struct that is no table's row, which a query or a helper
-returns — is a class implementing `Record` whose `companion object :
-Record.Of<R>` says `fields<R>().field("name", text())…` (no checks), its
-constructor taking them in that order; `record<R>()` is a field of one.
-A helper is a function whose body is `helper("slug", "text" to text) { text
--> … }` (up to six named parameters, typed as written): `ECall` under Emit,
-emitted once before its first caller, and its body under Native;
-`evaluate { … }` runs one outside any procedure. `lit("#")`, `lit(1)`,
-`lit(true)` lift a Kotlin literal where a value is taken exactly (Rust's
-`.into()`). Options compare with `eq`/`ne` (`ECmp`), and an auto named
-twice with one kind (`ctx.now("added_ms")` in two rows) is one auto.
-The runtime reads them by reflection (`java.lang.reflect` and `kotlin.reflect.typeOf`, no
-kotlin-reflect), which Android runs unchanged.
+| file | `rust/ark/src` | what it is |
+|---|---|---|
+| `Value.kt` | `value.rs` | the eight values and the total order over them (text by code point, never by UTF-16 unit) |
+| `Canon.kt` | `canon.rs`, `sha256.rs` | canonical CBOR, strict: the same `DecodeError` for the same bad bytes; UTF-8 both ways; SHA-256 through the JDK |
+| `Schema.kt` | `schema.rs` | tables, columns, keys, indexes, references, text indexes (D4), `check_schema` |
+| `IR.kt` | `ir/mod.rs` | IR v4: plans (group sources, lookups, related plans on any column, having, projection, expression order keys, limits), `Pred::Has`, `When`, `Exists`, scopes and holds, private blocks, `HasRole`, routers; `strip` |
+| `Decode.kt`, `Encode.kt` | `ir/decode.rs`, `ir/encode.rs` | a module from and to its value, every v4 key written only where present; `calls`, `reaches` |
+| `Normalize.kt` | `ir/normalize.rs` | symbols renumbered in evaluation order |
+| `Hash.kt` | `hash.rs` | `leaf`, the additive `Digest` mod 2^256, `state_hash`; `closure`, `function_hash` over the stripped function, `stripped`, `reads_roles`, `module_hash` |
+| `Verify.kt` | `verify.rs` | every complaint by the reference's name, `complete_orders` |
+| `ScopeCheck.kt` | `scope.rs` (the verifier's half) | scopes by table, a filter folded under a context, the union's columns, `check` (`NotHeld`) |
+| `Store.kt` | `store.rs` | the rules (`complete`, `judge_put`, `insert`, `upsert`, `update`, `judge_delete`), `MemoryStore` with its secondary, reference and trigram indexes and its per-table digest, the `Overlay` |
+| `Eval.kt` | `eval.rs` | the interpreter: input checks, middleware in `uses` order, the body or the plan, one transaction; checked arithmetic; private blocks deferred and run by the authority only; the form validator; §13's wide sum in a plan's node |
+| `Std.kt`, `UnicodeTables.kt` | `stdlib.rs`, `unicode_tables.rs` | the standard library; the tables are generated (below) |
+| `Raw.kt` | `raw.rs` | `ark.put_row` and `ark.delete_row` by their fixed hashes, as a client replays them |
+| `View.kt` | `view.rs` | `pull`, `answer`, `read`: the one evaluator of plans, a bare read served in order by an index where one serves |
+| `Maintain.kt` | `view.rs` | `hydrate`, `push_all`, `settle` and its patches, `splice`, `contract`; R9's kept numbers — counts and sums of any size, extremes read again through an index |
+| `Facts.kt`, `Show.kt` | `protocol.rs`, `store.rs` | the change form the vectors and the wire write; a text as Rust's `{:?}` writes it, which a refusal's text is made of |
+
+Two representations differ from the Rust and say nothing different. A row
+is a `Value.VStruct` of every column — the Rust lays one out positionally
+behind its table's names (`docs/plan-perf.md` R11), and "laid out as the
+table's" is here a struct whose fields are exactly the table's columns. An
+index posts keys where the Rust posts ordinals (`docs/plan-db.md` D7.2):
+the same rows, in key order.
+
+**The Unicode tables are generated, not copied.** `ark-runtime`'s build
+reads `rust/ark/src/unicode_tables.rs` — `gen-unicode`'s output from the
+Unicode 16.0.0 Character Database — and writes `UnicodeTables.kt` into
+`build/generated`, each table one string of hex parsed once (an array
+literal is bytecode in `<clinit>`, which the JVM caps at 64 KB). Moving the
+Unicode version is regenerating the Rust file; this build follows.
+
+## What it is held to
+
+    nix build .#checks.x86_64-linux.kotlin     # what nix flake check runs
+    nix develop .#kotlin -c gradle --no-daemon --offline :ark-runtime:check   # from kotlin/
+
+`checks.kotlin` holds every source to `ktfmt --kotlinlang-style` (checked,
+never written), then runs `gradle build`, whose `check` runs three plain
+`main`s — no test framework is on the classpath:
+
+- **the conformance runner** (`dev.arkdb.conformance.Conformance`,
+  `spec/RUNNERS.md`): it walks `spec/vectors/MANIFEST.json`, fails on a file
+  the manifest does not name or one it names that is missing, runs every
+  `client` vector of the kinds it claims — `codec`, `order`, `hash`,
+  `module`, `verify`, `eval`, `views` — requires each `falsify/` vector to
+  fail its check (a crash is a bug, not a pass), skips by name the
+  `rust-only` fleets and the kinds round 3 turns on (`protocol`, `rebase`,
+  `trace`), prints what it ran and skipped, and fails on a claimed kind
+  with nothing run. 54 of the 129 vectors run;
+- **KeptNumbers**: a plan whose kept lists keep lists of their own, three
+  levels deep, through 400 seeded random batches, held after each to a
+  fresh hydrate, to `View.read`'s fold and to its patches' splice — past
+  what the views vectors reach;
+- **StoreHints**: every read through the store's indexes — equalities,
+  spans, needles, ordered reads — over a `MemoryStore` and an `Overlay`,
+  held to the scan it stands for.
+
+The build is offline: `kotlin/deps.json` is the recorded Maven graph,
+replayed as a `mitmCache` the way nixpkgs builds every gradle project, and
+`nix run .#kotlin-deps` re-records it (it needs the network). The runtime
+depends on the Kotlin standard library alone, and uses no JVM API beyond
+`java.util`, `java.io`, `java.math.BigInteger` and
+`java.security.MessageDigest`, so the same source compiles for Android.
+
+## What is not here yet
+
+`docs/plan-phones.md` round 3: the client — the replica and its rebase,
+the protocol client with roles, unions (`scope.rs`'s `Holdings`), private
+and raw entries by facts, the alone authority and its journal, storage, the
+transport — and with it the `protocol`, `rebase` and `trace` vectors and
+`packages.trace-corpus`. Round 4: a JVM `harken-peer` in the fleet, and the
+Compose app over this runtime. `ark-client` is the v3 peer over the v3
+runtime, kept as it was and out of the gradle build until round 3 brings
+it forward. No phone has run any of this, and the Android build is not
+exercised here: everything above ran on the JVM.
+
+## Where it came from
+
+This tree was frozen at spec v3 while v4 moved (`FROZEN.md`); it was last
+green at `4bacc8f`, and `git show 4bacc8f:kotlin` is that runtime, its
+authoring vocabulary and its client.

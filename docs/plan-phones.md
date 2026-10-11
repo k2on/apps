@@ -230,3 +230,62 @@ with them). Not run: `nix flake check`, and `checks.traces` as a nix build
 — its test was run with `cargo test` against the built corpus, 2,565
 replayed. The 22,069 traces of the 120-second run were written and not
 replayed. No phone ran anything; Kotlin and Swift are untouched.
+
+**Round 2, the Kotlin core** (`883655f`, `37c9045`, `e003a18`, `4230f66`,
+`724fab4`, `17f72f0`, `1d75af0`, `ef48a6d`, and the docs). A phone's
+runtime is a client, so `dev.arkdb.authoring`, the `demo` and `selfdemo`
+sources that exercised it and `harken/domain/gen/kotlin` were deleted, not
+ported, and `harken-apk` left the flake until round 4 (option (b): one
+runtime, not a frozen copy beside it to drift; `apk.yml` still names it).
+`ark-runtime` was rewritten in place as a port of `rust/ark`, file for
+file (`kotlin/README.md` maps them): Value and the canonical codec kept, as
+they were right; IR v4 decode, encode and normalisation; the function hash
+over the stripped function, the additive digest, `stripped`,
+`reads_roles`; the verifier with every complaint by the reference's name
+and the verifier's half of `scope.rs`; the interpreter, the standard
+library over Unicode tables generated at build time from
+`rust/ark/src/unicode_tables.rs`, the store with its secondary, reference
+and trigram indexes and the Overlay, raw writes; `pull`/`read`,
+`hydrate`/`push_all`/`settle` and R9's kept numbers — counts and sums of
+any size, judged on their total (§13), extremes read again through an
+index. Two representations differ and say nothing different: a row is a
+struct of every column (the Rust's positional row, R11, is
+representation), and index postings are keys, not ordinals. `ark-client`
+is out of the gradle build until round 3, its sources untouched.
+
+`checks.kotlin` builds the runtime offline from `kotlin/deps.json` (which
+needed no re-recording), holds every source to `ktfmt --kotlinlang-style`,
+and runs three mains. The conformance runner walks `MANIFEST.json` and runs
+54 of the 129 vectors — codec 14, order 2, hash 4, module 8, verify 5,
+eval 7, views 14, each falsify vector failing its check — and skips 75 by
+name: `protocol` 40, `rebase` 9 (8 fleets `rust-only`, `three-peers` the
+client's) and `trace` 26, round 3's kinds. It fails on a vector that fails,
+a falsify vector that passes, a manifest out of step with the files, and
+a claimed kind with nothing run. KeptNumbers holds kept numbers three
+levels deep — further than any views vector, which keeps at most one level
+— through 400 seeded batches to a fresh hydrate, to `View.read`'s fold and
+to the splice; StoreHints holds 600 indexed reads, over a store and an
+overlay, to the scans they stand for. `nix build
+.#checks.x86_64-linux.kotlin`: BUILD SUCCESSFUL, 1m15s of gradle.
+
+Falsified, each restored: struct keys unsorted (codec/struct-key-order and
+both hash vectors), text ordered by UTF-16 units (order/mixed, and
+order/falsify/utf16 then passes), the digest dropping its carries (both
+hash vectors), the encoder dropping `private: true` (module/private), an
+`on` that is no unique index let through (verify/falsify/insert-on-no-
+unique-index then passes), `has_role` always false (eval/has-role), no
+parent check on put (eval/raw-put-row at the step wanting MissingParent),
+no refill after a removal from a window (views/top-two-by-pos at batch 4),
+a node's sum checked step by step (views/a-maintained-sum-answers-where-
+the-fold-overflows at batch 7), a kept sum wrapping at 64 bits
+(views/a-maintained-sum-overflows-where-the-fold-answers at batch 0), kept
+numbers that moved not telling their readers (KeptNumbers at step 11), an
+inclusive upper bound read as exclusive in an index range (StoreHints at
+round 11), an unformatted source (the check's ktfmt step), a claimed kind
+with no vector and a stray or missing vector file (the runner). Two
+falsifications missed and say so: dropping a plan's row binder or its
+projection from the encoder fails no module vector, whose plans have
+neither — the views vectors compare plans that do.
+
+Not verified: the JVM only — nothing here built the runtime for Android or
+ran it on a phone. Rust, `spec/vectors` and the Swift tree are untouched.
