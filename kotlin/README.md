@@ -102,12 +102,10 @@ never written), then runs `gradle build`, whose `check` runs four plain
   `falsify/` vector to fail its check (a crash is a bug, not a pass), skips
   by name the 8 `rust-only` fleets and the two steps of `three-peers` that
   are a server's (adopting a log, compaction), prints what it ran and
-  skipped, and fails on a claimed kind with nothing run: 121 of the 129
-  vectors run. It replays every trace of `ark-runtime/traces` — unedited
-  `arkc fuzz` recordings of a behaviour nothing under `spec/vectors`
-  reaches, today going alone leaving the inbox behind — and of the corpus
-  `-ParkTraceCorpus` or `ARK_TRACE_CORPUS` names: `packages.trace-corpus`,
-  2,565 traces, in the check;
+  skipped, and fails on a claimed kind with nothing run: 122 of the 130
+  vectors run. It replays every trace of the corpus `-ParkTraceCorpus` or
+  `ARK_TRACE_CORPUS` names: `packages.trace-corpus`, 2,565 traces, in the
+  check;
 - **KeptNumbers**: a plan whose kept lists keep lists of their own, three
   levels deep, through 400 seeded random batches, held after each to a
   fresh hydrate, to `View.read`'s fold and to its patches' splice — past

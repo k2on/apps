@@ -167,19 +167,6 @@ object Conformance {
         for (s in ClientChecks.serverOnly) println("  skipped $s")
         for (k in claimed.keys) if (ran[k].isNullOrEmpty())
             problems.add("$k is claimed and ran no vector")
-        // ark-runtime/traces: recordings of `arkc fuzz --traces`, unedited, that
-        // hold a client behaviour no trace under spec/vectors reaches.
-        val own = args.getOrNull(2)?.let(::File)
-        if (own != null && own.isDirectory) {
-            val (n, failed, _) = ClientChecks.corpus(own)
-            println("ark-runtime/traces: ${n - failed.size} of $n replayed")
-            for (f in
-                own.listFiles()!!
-                    .filter { it.name.endsWith(".json") }
-                    .sortedBy { it.name }) println("  ran     ${f.name}")
-            for (f in failed) problems.add("ark-runtime/traces/$f")
-            if (n == 0) problems.add("ark-runtime/traces holds no trace")
-        }
         // `packages.trace-corpus` (docs/plan-phones.md S3): every trace of the
         // directory ARK_TRACE_CORPUS (or the second argument) names, replayed.
         val corpus =

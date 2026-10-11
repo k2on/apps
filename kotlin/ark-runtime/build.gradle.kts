@@ -128,9 +128,7 @@ val conformance by tasks.registering(JavaExec::class) {
     val corpus = providers.gradleProperty("arkTraceCorpus")
         .orElse(providers.environmentVariable("ARK_TRACE_CORPUS"))
         .orElse("")
-    // This runtime's own traces: fuzzer recordings, unedited, of a client
-    // behaviour no trace under spec/vectors reaches (ark-runtime/traces).
-    args(vectors.get(), corpus.get(), file("traces").absolutePath)
+    args(vectors.get(), corpus.get())
     maxHeapSize = "1g"
 }
 

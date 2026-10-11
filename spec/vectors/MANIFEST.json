@@ -98,6 +98,7 @@
 {"expect":"pass","form":"fuzz","kind":"trace","path":"trace/a-snapshot-below-the-horizon.json","side":"client"},
 {"expect":"pass","form":"fuzz","kind":"trace","path":"trace/a-verify-answered-agreed.json","side":"client"},
 {"expect":"pass","form":"fuzz","kind":"trace","path":"trace/a-verify-answered-unknown.json","side":"client"},
+{"expect":"pass","form":"fuzz","kind":"trace","path":"trace/alone-leaves-the-inbox.json","side":"client"},
 {"expect":"pass","form":"fuzz","kind":"trace","path":"trace/alone-then-join.json","side":"client"},
 {"expect":"fail","form":"fuzz","kind":"trace","path":"trace/falsify/plain-sync-a-frame-byte-changed.json","side":"client"},
 {"expect":"pass","form":"fuzz","kind":"trace","path":"trace/fed-by-facts.json","side":"client"},

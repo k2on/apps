@@ -26,6 +26,22 @@ use crate::fuzz;
 const SEED: u64 = 7000;
 const CASES: u64 = 160;
 
+/// Behaviours the run above reaches nowhere, each pinned to the one case of
+/// the fuzzer that found it — `arkc fuzz --seed SEED --cases 1`, the session
+/// and the client — and published under its name with what it must show
+/// asserted of it, so that a fuzzer change that moves the case fails here
+/// rather than publishing something else.
+///
+/// `alone-leaves-the-inbox`: a client goes alone while its inbox holds pages
+/// of the server's past a sequence that never came; left there, the next
+/// local commit takes that sequence and the page is applied on top of it as
+/// the local history's own (round 1's fix, `ark::trace::alone`). Found by
+/// replaying seed 9000's corpus in Kotlin (`docs/plan-phones.md`, round 3).
+#[allow(clippy::type_complexity)]
+fn pinned() -> Vec<(&'static str, u64, usize, i64, Box<dyn Fn(&Read) -> bool>)> {
+    vec![("alone-leaves-the-inbox", 9046, 1, 0, Box::new(|r: &Read| r.left_an_inbox()))]
+}
+
 /// harken's sessions: this many from this seed, its two views kept.
 const HARKEN_SEED: u64 = 0x4a7e_7000;
 const HARKEN_SESSIONS: u64 = 24;
@@ -104,6 +120,38 @@ impl<'a> Read<'a> {
             }
             if i.field("t") == Value::text("settle") && moved && was_pending && !pending.as_list().is_empty() {
                 return true;
+            }
+        }
+        false
+    }
+
+    // Going alone with something received and not applied: an entry of a
+    // page the server sent past the cursor, still in the inbox. What was
+    // received before a reopen, or before the last time it went alone or
+    // joined, is not in this inbox.
+    fn left_an_inbox(&self) -> bool {
+        let mut cursor = Value::Int(0);
+        let mut received: Vec<i64> = vec![];
+        for (i, o) in &self.c.steps {
+            match i.field("t").as_text() {
+                "open" | "reopen" | "join" => received.clear(),
+                "alone" => {
+                    let Value::Int(at) = cursor else { return false };
+                    if received.iter().any(|n| *n > at) {
+                        return true;
+                    }
+                    received.clear();
+                }
+                "receive" => {
+                    let msg = decode(i.field("frame").as_bytes()).ok().and_then(|v| ServerMsg::from_value(&v).ok());
+                    if let Some(ServerMsg::Batch { items, .. }) = msg {
+                        received.extend(items.iter().map(|(n, _, _)| *n));
+                    }
+                }
+                _ => {}
+            }
+            if let Some(n) = o.as_struct().get("cursor") {
+                cursor = n.clone();
             }
         }
         false
@@ -382,6 +430,14 @@ pub fn traces(out: &Out) {
     let mut taken = BTreeSet::new();
     for (name, p) in features() {
         let c = smallest(&cs, &*p, &taken).unwrap_or_else(|| panic!("no trace of seeds {SEED}..{} has {name}", SEED + CASES));
+        taken.insert(c.from.clone());
+        publish(out, name, c);
+    }
+    for (name, seed, session, client, p) in pinned() {
+        let from = fuzz::trace_from(seed, session, client);
+        let cs = fuzzed(seed, 1);
+        let c = cs.iter().find(|c| c.from == from).unwrap_or_else(|| panic!("{from} recorded no trace"));
+        claim(&format!("trace/{name}.json ({from}) shows what it is published for"), p(&Read::of(c)));
         taken.insert(c.from.clone());
         publish(out, name, c);
     }

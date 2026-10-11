@@ -225,7 +225,9 @@ are its inputs, so nothing of the scheduler is left to reproduce.
 `docs/plan-phones.md` S2. One client's life in one session, as its inputs
 and its outputs. `form: fuzz` (`trace/*.json` but harken's): chosen from
 a fixed run of `arkc fuzz --traces` (`bin/vectors/trace.rs` says which
-feature each file is the smallest trace of); `form: harken`
+feature each file is the smallest trace of, and which few are pinned to
+the one fuzzer case that found a behaviour the run reaches nowhere —
+`alone-leaves-the-inbox`, today); `form: harken`
 (`trace/harken-*.json`): sessions over `harken.ark` with its `library`
 and `playlist` views kept. `packages.trace-corpus` is thousands more in the
 same format, every client of every session of a fixed fuzz run, not
@@ -275,7 +277,7 @@ Each `in` is `{"t": …}` and fields. Apply it, then read the outputs.
 | `receive` | `frame` (bytes) | the frame read as a client reads the socket (`ServerMsg::decode_for` under the module's schema): a snapshot adopted at once (`Client::recv_snapshot`, which first applies what earlier frames placed), anything else placed (`Client::recv`) and applied by the next `settle` |
 | `settle` | — | `Client::settle`: the inbox applied once, the facts it waits on asked for, the next page asked for |
 | `verify` | — | `Client::verify_all` |
-| `alone` | — | `trace::alone`: the fork is its cursor and log id; an authority over its stripped closures, not a server's (no private block runs), its log based at the cursor with no entries, its state the confirmed store; the replica's log id cleared; everything pending sequenced locally |
+| `alone` | — | `trace::alone`: the fork is its cursor and log id; an authority over its stripped closures, not a server's (no private block runs), its log based at the cursor with no entries, its state the confirmed store; the replica's log id cleared, and its inbox — what the server sent and was not applied, a page past a sequence that never came — left behind, since applied it would be the local history's own next sequence (`trace/alone-leaves-the-inbox.json`); everything pending sequenced locally |
 | `join` | `ctx` | `trace::join`: every entry the authority sequenced above the fork, in order, re-stamped with `ctx`'s user and session, taken back out of the confirmed store and re-queued ahead of anything pending (`Replica::fork_back`); not alone any more. Connecting is the next input |
 | `hydrate` | `views`: `[{query, ctx, args}]` | these views in place of any kept: each query's middleware run under its `ctx` and `args` over the client's optimistic store, and its plan hydrated (§13); a verdict is that view refused |
 

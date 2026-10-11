@@ -889,7 +889,18 @@ impl S<'_> {
             }
             // `docs/plan-alone.md` §1 A client leaves its server to be its
             // own authority, and joins again.
-            690..=699 => Op::Leave(self.peer()),
+            //
+            // Leaving matters most with something of the server's not yet
+            // applied — a page past a sequence that never came — since that
+            // is the log being left (`ark::trace::alone`), and a client
+            // drawn at random almost never has one: so the client drawn
+            // gives way to one that does, when one could leave. The draw is
+            // made either way, so a session with no such client is the
+            // session it always was.
+            690..=699 => {
+                let p = self.peer();
+                Op::Leave(self.leaving_with_an_inbox(p))
+            }
             700..=714 => match self.sim.alone.keys().next().copied() {
                 Some(i) => Op::Rejoin(i),
                 None => Op::Step,
@@ -918,6 +929,23 @@ impl S<'_> {
             985..=999 => Op::Verify(self.peer()),
             _ => Op::Step,
         }
+    }
+
+    // `p`, or the first client that could leave holding something of the
+    // server's in its inbox when `p` holds nothing there.
+    fn leaving_with_an_inbox(&self, p: i64) -> i64 {
+        let could = |i: &i64| {
+            self.sim
+                .clients
+                .get(i)
+                .is_some_and(|c| c.replica.partial.is_none() && !c.replica.inbox.is_empty())
+                && !self.sim.nobody.contains(i)
+                && !self.sim.alone.contains_key(i)
+        };
+        if could(&p) {
+            return p;
+        }
+        self.sim.clients.keys().copied().find(could).unwrap_or(p)
     }
 
     // New roles for a client's login: each of the session's role names, or
