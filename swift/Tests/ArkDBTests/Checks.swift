@@ -129,4 +129,136 @@ enum Checks {
         try ensureEq(Encode.module(verified), Encode.module(m), "a verified module is its own verified form")
         try ensureEq(Hash.closures(m).count, m.functions.count, "one closure per function")
     }
+
+    // eval ------------------------------------------------------------------
+
+    /// A vector's `ctx`: the user, the login, and the roles where it says any.
+    static func ctxOf(_ c: Value) throws -> Ctx {
+        let roles = try c.opt("roles")?.list().map { try $0.text() } ?? []
+        return Ctx(try c.field("user").text(), try c.field("session").text(), roles: roles)
+    }
+
+    static func argsOf(_ v: Value) throws -> [String: Value] {
+        var out = [String: Value]()
+        for (k, x) in try v.record().pairs { out[k] = x }
+        return out
+    }
+
+    static func changesValue(_ cs: [Change]) -> Value { .list(cs.map(Facts.changeValue)) }
+
+    /// The function hashes `rebase/three-peers.json`'s entries name, as hex.
+    static let named: Set<String> = {
+        guard let v = try? vector("rebase/three-peers.json"), let es = try? v.field("entries").list() else { return [] }
+        return Set(es.compactMap { try? Hex.encode($0.field("fn").bytes()) })
+    }()
+
+    // A bug is a failure of the vector, named; a verdict is the caller's to judge.
+    private static func ran(_ what: String, _ f: () throws -> Ran) throws -> Ran {
+        do {
+            return try f()
+        } catch EvalFault.bug(let e) {
+            throw Failed("\(what): bug \(e)")
+        }
+    }
+
+    /// `check_eval`: a mutator applied step by step — its changes, the store
+    /// and its hash after each — and again through its closure over a second
+    /// copy, which must reach the same store.
+    static func evalApply(_ v: Value) throws {
+        let m = try moduleOf(try v.field("module"))
+        let name = try v.field("function").text()
+        guard let f = m.lookupFunction(name) else { throw Failed("no function \(name)") }
+        let fh = Hex.encode(Hash.functionHash(Hash.closure(m, f)))
+        try ensure(named.contains(fh), "the function hash is not the one the log names")
+        try ensureEq(fh, try v.field("function_hash").text(), "function_hash")
+        let bodies = Hash.closures(m)
+        let ctx = try ctxOf(try v.field("ctx"))
+        let autos = try argsOf(try v.field("autos"))
+        let st = MemoryStore.fromValue(m.schema, try v.field("store_before"))
+        let byClosure = st.copy()
+        for (i, step) in try v.field("steps").list().enumerated() {
+            let args = try argsOf(try step.field("args"))
+            var changes: [Change]
+            switch try ran("step \(i)", { try Eval.apply(m, name, ctx, autos, args, st) }) {
+            case .ok(let cs): changes = cs
+            case .refused(let r): throw Failed("step \(i): refused \(r.show())")
+            }
+            try ensureEq(changesValue(changes), try step.field("changes"), "step \(i) changes")
+            try ensureEq(st.storeValue(), try step.field("store_after"), "step \(i) store")
+            try ensureEq(Hex.encode(Hash.stateHash(st)), try step.field("hash_after").text(), "step \(i) hash")
+            switch try ran("step \(i) closure", { try Eval.applyClosure(m.schema, bodies[fh]!, ctx, autos, args, byClosure) }) {
+            case .ok(let again): try ensure(again == changes, "step \(i) through the closure")
+            case .refused(let r): throw Failed("step \(i): closure refused \(r.show())")
+            }
+        }
+        try ensure(byClosure == st, "the closure map reached another store")
+    }
+
+    /// `eval_cases`: one store, each case over a fresh copy — a mutator that
+    /// must apply (its changes compared where given) or be refused by exactly
+    /// a text; or the form validator's messages and normalised values over a
+    /// partial input.
+    static func evalCases(_ v: Value) throws {
+        let m = try moduleOf(try v.field("module"))
+        let bodies = Hash.closures(m)
+        func byName(_ n: String) throws -> Closure {
+            guard let c = bodies.values.first(where: { $0.function.name == n }) else { throw Failed("no function \(n)") }
+            return c
+        }
+        let ctx0 = try v.opt("ctx").map(ctxOf) ?? Ctx("alice", "session-1")
+        let st = MemoryStore.fromValue(m.schema, try v.opt("store_before") ?? v.field("store"))
+        for c in try v.field("cases").list() {
+            let name = try c.field("name").text()
+            let fn = try byName(try c.field("function").text())
+            let ctx = try c.opt("ctx").map(ctxOf) ?? ctx0
+            if let refused = c.opt("refused") {
+                let got = try ran(name) { try Eval.applyClosure(m.schema, fn, ctx, try argsOf(try c.field("autos")), try argsOf(try c.field("args")), st.copy()) }
+                switch (refused, got) {
+                case (.null, .ok(let cs)):
+                    if let want = c.opt("changes") { try ensureEq(changesValue(cs), want, "\(name) changes") }
+                case (.text(let why), .refused(.refused(let w))):
+                    try ensureEq(w, why, name)
+                default:
+                    throw Failed("\(name): wanted \(refused.show()), got \(got)")
+                }
+            } else {
+                let got: Checked
+                do {
+                    got = try Eval.check(m.schema, fn, ctx, try argsOf(try c.field("input")), st)
+                } catch EvalFault.bug(let e) {
+                    throw Failed("\(name): bug \(e)")
+                }
+                let want = try c.field("messages").list().map { "\(try $0.field("field").text())|\(try $0.field("message").text())" }
+                try ensureEq(got.messages.map { "\($0.0)|\($0.1)" }, want, "\(name) messages")
+                try ensureEq(Value.record(Record(got.values.map { ($0.key, $0.value) })), try c.field("normalised"), "\(name) normalised")
+            }
+        }
+    }
+
+    /// `check_raw`: a raw write named by the hash of its name, applied step by
+    /// step — its changes, or the refusal's text with the store unmoved — and
+    /// the store and its hash after each.
+    static func evalRaw(_ v: Value) throws {
+        let m = try moduleOf(try v.field("module"))
+        let name = try v.field("raw").text()
+        let fh = Raw.hashOf(name)
+        try ensureEq(Hex.encode(fh), try v.field("function_hash").text(), "function_hash")
+        guard let raw = Raw.of(fh) else { throw Failed("\(name) is no raw write") }
+        let st = MemoryStore.fromValue(m.schema, try v.field("store_before"))
+        for (i, step) in try v.field("steps").list().enumerated() {
+            let args = try argsOf(try step.field("args"))
+            let before = st.copy()
+            let got = try ran("step \(i)") { try Raw.apply(raw, args, st) }
+            let want = step.opt("refused")
+            switch (got, want) {
+            case (.ok(let cs), nil): try ensureEq(changesValue(cs), try step.field("changes"), "step \(i) changes")
+            case (.refused(let r), let w?):
+                try ensureEq(r.show(), try w.text(), "step \(i) refusal")
+                try ensure(st == before, "step \(i): a refused write moved the store")
+            default: throw Failed("step \(i): got \(got), wanted \(want?.show() ?? "nothing")")
+            }
+            try ensureEq(st.storeValue(), try step.field("store_after"), "step \(i) store")
+            try ensureEq(Hex.encode(Hash.stateHash(st)), try step.field("hash_after").text(), "step \(i) hash")
+        }
+    }
 }

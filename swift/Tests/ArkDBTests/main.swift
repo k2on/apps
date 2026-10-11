@@ -37,11 +37,18 @@ let claimed: [(String, (Vector, Value) throws -> Void)] = [
     ("hash", { _, v in try Checks.hash(v) }),
     ("module", { _, v in try Checks.module(v) }),
     ("verify", { _, v in try Checks.verify(v) }),
+    ("eval", { x, v in
+        switch x.form {
+        case "apply": try Checks.evalApply(v)
+        case "cases": try Checks.evalCases(v)
+        case "raw": try Checks.evalRaw(v)
+        default: throw Failed("eval: unknown form \(x.form)")
+        }
+    }),
 ]
 
 /// The kinds no check here runs yet, and why.
 let notYet: [String: String] = [
-    "eval": "the evaluator is the next step of docs/plan-phones.md round 5",
     "views": "maintained views are the next step of docs/plan-phones.md round 5",
     "protocol": "the protocol client is docs/plan-phones.md round 6",
     "rebase": "the replica is docs/plan-phones.md round 6",
@@ -92,6 +99,8 @@ func run(_ v: Vector, _ check: (Vector, Value) throws -> Void) -> (String?, Bool
         return ("module: \(e)", false)
     } catch let e as VerifyFailed {
         return ("verify: \(e)", false)
+    } catch let e as FactError {
+        return ("frame: \(e)", false)
     } catch let e as JsonError {
         return ("json: \(e)", true)
     } catch {
@@ -138,6 +147,14 @@ for k in kinds {
     for line in s { print("  skipped \(line)") }
 }
 for (k, _) in claimed where (ran[k] ?? []).isEmpty { problems.append("\(k) is claimed and ran no vector") }
+
+// Past what the vectors reach: the store's index hints held to the scans they stand for.
+do {
+    let n = try StoreHints.run()
+    print("store hints: \(n) reads through the indexes, each the scan filtered and sorted")
+} catch {
+    problems.append("store hints: \(error)")
+}
 
 let total = ran.values.reduce(0) { $0 + $1.count }
 let skippedTotal = skipped.values.reduce(0) { $0 + $1.count }

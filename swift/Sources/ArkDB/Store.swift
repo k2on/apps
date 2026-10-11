@@ -91,6 +91,11 @@ public struct Span: Hashable {
     public var column: String
     public var lo: Bound
     public var hi: Bound
+    public init(column: String, lo: Bound, hi: Bound) {
+        self.column = column
+        self.lo = lo
+        self.hi = hi
+    }
 }
 
 /// A column held equal to a value.
