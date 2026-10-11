@@ -397,6 +397,27 @@
               preCheck = oldEnv;
               installPhase = "touch $out";
             };
+            # docs/plan-phones.md round 4 The fleet mixed across runtimes:
+            # harken/server/tests/fleet_kotlin.rs with FLEET_KOTLIN_PEER the
+            # Kotlin client's harken-peer-kt — two Rust peers and a Kotlin one
+            # through partitions and restarts, a Kotlin peer alone and
+            # joining, through a server restart and a lost log, in the version
+            # matrix's two shapes (so the pinned revisions are named as
+            # checks.versions names them), and partial under a scoped module.
+            # One scenario at a time, so the timings it prints are each its
+            # own. checks.rust and checks.versions run no Kotlin peer.
+            fleet-kotlin = crate {
+              pname = "harken-fleet-kotlin";
+              flags = [ "-p" "harken-server" "--test" "fleet_kotlin" ];
+              doCheck = true;
+              cargoBuildFlags = [ "-p" "harken-server" ];
+              checkFlags = [ "--nocapture" ];
+              dontUseCargoParallelTests = true;
+              preCheck = oldEnv + ''
+                export FLEET_KOTLIN_PEER=${harken-peer-kt}/bin/harken-peer-kt
+              '';
+              installPhase = "touch $out";
+            };
             # docs/plan-phones.md S3 The Kotlin runtime held to spec/vectors
             # and packages.trace-corpus: every client vector and every trace,
             # by its conformance runner, which names what it ran and skipped.

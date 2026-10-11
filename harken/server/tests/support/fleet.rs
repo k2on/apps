@@ -374,6 +374,9 @@ pub struct PeerProc {
     /// default, as [`FLEET_ROLES`] grants it at the server; an older build
     /// knows no such flag and is told nothing.
     pub roles: Vec<String>,
+    /// The binary is the Kotlin client's `harken-peer-kt`
+    /// ([`PeerProc::kotlin`]), which speaks this build's flags and lines.
+    pub kotlin: bool,
 }
 
 /// What the fleet's server grants (`HARKEN_ROLES`): its people hold the
@@ -444,7 +447,9 @@ impl PeerProc {
         let mut cmd = Command::new(&self.bin);
         cmd.args(["--dir", self.dir.to_str().unwrap()]);
         cmd.args(&self.args);
-        if !self.roles.is_empty() && self.bin == Path::new(env!("CARGO_BIN_EXE_harken-peer")) {
+        if !self.roles.is_empty()
+            && (self.kotlin || self.bin == Path::new(env!("CARGO_BIN_EXE_harken-peer")))
+        {
             cmd.args(["--roles", &self.roles.join(",")]);
         }
         if self.alone {
@@ -750,7 +755,16 @@ impl PeerProc {
     pub fn upgrade(&mut self) {
         self.quit();
         self.bin = PathBuf::from(env!("CARGO_BIN_EXE_harken-peer"));
+        self.kotlin = false;
         self.start();
+    }
+
+    /// Run the Kotlin client's `harken-peer-kt` from the next start on
+    /// (`FLEET_KOTLIN_PEER`, [`kotlin_peer`]): the same flags, the same
+    /// lines, the same directory records, another runtime.
+    pub fn kotlin(&mut self, bin: &Path) {
+        self.bin = bin.to_path_buf();
+        self.kotlin = true;
     }
 }
 
@@ -963,7 +977,17 @@ impl Fleet {
             bin: PathBuf::from(env!("CARGO_BIN_EXE_harken-peer")),
             args: vec![],
             roles: vec!["library".into()],
+            kotlin: false,
         }
+    }
+
+    /// [`Fleet::peer`] running the Kotlin client (`bin`, [`kotlin_peer`]),
+    /// started.
+    pub fn kotlin_peer(&self, bin: &Path, name: &str, user: Option<&str>) -> PeerProc {
+        let mut p = self.peer_stopped(name, user);
+        p.kotlin(bin);
+        p.start();
+        p
     }
 
     /// Forget that these intents were accepted: a log the server lost
@@ -1235,6 +1259,30 @@ pub fn playlists_in_pos_order(rows: &[BTreeMap<String, Value>]) -> BTreeMap<Id, 
 /// A set of ids, for comparing.
 pub fn set(ids: &[Id]) -> BTreeSet<Id> {
     ids.iter().copied().collect()
+}
+
+// -- Kotlin peers (`docs/plan-phones.md` round 4) ---------------------------------------
+
+/// The Kotlin client's headless peer, `harken-peer-kt`, as
+/// `checks.fleet-kotlin` hands it to the fleet: `FLEET_KOTLIN_PEER`, the
+/// launcher's path. `nix build .#harken-peer-kt` makes one by hand.
+pub fn kotlin_peer() -> Option<PathBuf> {
+    std::env::var("FLEET_KOTLIN_PEER")
+        .ok()
+        .filter(|p| !p.is_empty())
+        .map(PathBuf::from)
+}
+
+/// The Kotlin peer, or a line saying the scenario is skipped and why.
+pub fn kotlin_or_skip(scenario: &str) -> Option<PathBuf> {
+    let k = kotlin_peer();
+    if k.is_none() {
+        println!(
+            "fleet: {scenario}: skipped — FLEET_KOTLIN_PEER unset (`nix flake check` sets it in \
+             checks.fleet-kotlin; `nix build .#harken-peer-kt` makes one)"
+        );
+    }
+    k
 }
 
 // -- versions (`docs/plan-db.md` D1) -------------------------------------------------
