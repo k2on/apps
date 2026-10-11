@@ -84,11 +84,25 @@ public class MemoryStorage : Storage {
 
 /**
  * A directory, one file per key (`storage::Dir`), each written whole to a temporary name beside it,
- * synced, and renamed over the old one: a crash leaves the old record or the new one, never part of
- * either. The reference also syncs the directory after the rename; `java.io` has no way to open
- * one, so here the rename's durability is the file system's.
+ * synced, renamed over the old one, and the directory synced after: a crash — of the program or of
+ * the machine — leaves the old record or the new one, never part of either, and never the new name
+ * over nothing.
+ *
+ * The directory is synced as the reference's `sync_dir` does it, by opening it and forcing it
+ * (`FileChannel.open(dir, READ).force(true)`, an `fsync(2)` on the directory's descriptor), which
+ * the JVM on Linux and macOS allows and Android, a Linux whose libcore opens a directory the same
+ * way, allows from API 26 (`java.nio.file`, this app's `minSdk`). A platform that refuses to open a
+ * directory — Windows — throws, and from then on this storage does what it did before: the rename's
+ * durability is the file system's. [syncsDirectory] says which.
  */
 public class DirStorage(public val dir: File) : Storage {
+    /** Whether the last save synced the directory after its rename, as the reference does. */
+    public var syncsDirectory: Boolean = false
+        private set
+
+    // Once refused, not asked again: the answer is the platform's, not the file's.
+    private var dirSyncRefused = false
+
     override fun load(key: String): ByteArray? {
         val f = File(dir, key)
         return if (f.isFile) f.readBytes() else null
@@ -106,6 +120,26 @@ public class DirStorage(public val dir: File) : Storage {
             to.delete()
             if (!tmp.renameTo(to)) throw StorageError("cannot rename $tmp to $to")
         }
+        syncDir()
+    }
+
+    // `sync_dir`: the rename made durable, where the platform lets a
+    // directory be opened to do it.
+    private fun syncDir() {
+        if (dirSyncRefused) return
+        syncsDirectory =
+            try {
+                java.nio.channels.FileChannel.open(
+                        dir.toPath(), java.nio.file.StandardOpenOption.READ)
+                    .use { it.force(true) }
+                true
+            } catch (e: java.io.IOException) {
+                dirSyncRefused = true
+                false
+            } catch (e: UnsupportedOperationException) {
+                dirSyncRefused = true
+                false
+            }
     }
 
     override fun remove(key: String) {

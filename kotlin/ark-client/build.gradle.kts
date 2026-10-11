@@ -1,8 +1,9 @@
 // `ark-client`: a peer's shell around the runtime's client machine — the
 // files a replica survives a restart in (`Storage`, in the records
 // rust/ark-client writes), the peer that writes them and goes alone and
-// back (`Peer`), and the WebSocket a transport opens. Android-safe: nothing
-// from java.nio.file or java.net.http; the WebSocket is OkHttp's, which is
+// back (`Peer`), and the WebSocket a transport opens. Android-safe at the
+// app's minSdk 26: java.nio.file only where API 26 has it (a directory
+// synced), nothing from java.net.http; the WebSocket is OkHttp's, which is
 // the standard Android client and runs on the JVM unchanged.
 plugins {
     kotlin("jvm")

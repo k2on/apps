@@ -208,6 +208,31 @@ object StorageTests {
         }
     }
 
+    // `DirStorage` on this machine: a record written, read back, replaced and
+    // removed, and the directory synced after every rename, as the reference's
+    // `Dir` syncs it — the JVM on Linux opens a directory to force it, so here
+    // a save that did not is a regression rather than a platform's refusal.
+    fun directory() {
+        val dir = java.nio.file.Files.createTempDirectory("ark-dir-storage").toFile()
+        val before = problems.size
+        try {
+            val st = DirStorage(File(dir, "replica"))
+            st.save("pending", byteArrayOf(1, 2, 3))
+            st.save("pending", byteArrayOf(4))
+            if (!st.load("pending").contentEquals(byteArrayOf(4)))
+                problems.add("DirStorage: a replaced record does not read back")
+            if (!st.syncsDirectory) problems.add("DirStorage: the directory was not synced")
+            if (File(dir, "replica").list()!!.any { it.endsWith(".tmp") })
+                problems.add("DirStorage: a temporary file was left behind")
+            st.remove("pending")
+            if (st.load("pending") != null) problems.add("DirStorage: a removed record reads back")
+            if (problems.size == before)
+                println("storage: DirStorage writes, replaces and removes, the directory synced")
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
     @JvmStatic
     fun main(args: Array<String>) {
         val vectors = File(args.getOrElse(0) { "../spec/vectors" })
@@ -216,6 +241,7 @@ object StorageTests {
             args.getOrNull(2)?.takeIf { it.isNotEmpty() } ?: System.getenv("ARK_TRACE_CORPUS")
         dev.arkdb.conformance.Conformance.root = vectors
         fixture(fixture)
+        directory()
         traces(vectors, corpus)
         if (problems.isNotEmpty()) {
             println("storage: ${problems.size} problem(s)")
