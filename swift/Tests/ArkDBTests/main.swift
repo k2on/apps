@@ -45,11 +45,11 @@ let claimed: [(String, (Vector, Value) throws -> Void)] = [
         default: throw Failed("eval: unknown form \(x.form)")
         }
     }),
+    ("views", { _, v in try Checks.views(v) }),
 ]
 
 /// The kinds no check here runs yet, and why.
 let notYet: [String: String] = [
-    "views": "maintained views are the next step of docs/plan-phones.md round 5",
     "protocol": "the protocol client is docs/plan-phones.md round 6",
     "rebase": "the replica is docs/plan-phones.md round 6",
     "trace": "the client is docs/plan-phones.md round 6",
@@ -154,6 +154,14 @@ do {
     print("store hints: \(n) reads through the indexes, each the scan filtered and sorted")
 } catch {
     problems.append("store hints: \(error)")
+}
+
+// R9's kept numbers three levels deep, past what the views vectors reach.
+do {
+    let (n, patches) = try KeptNumbers.run(root)
+    print("kept numbers: \(n) batches over three kept levels, \(patches) patches; every one a fresh hydrate, a fold's answer and a splice")
+} catch {
+    problems.append("kept numbers: \(error)")
 }
 
 let total = ran.values.reduce(0) { $0 + $1.count }

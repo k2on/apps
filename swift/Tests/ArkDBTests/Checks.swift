@@ -261,4 +261,57 @@ enum Checks {
             try ensureEq(Hex.encode(Hash.stateHash(st)), try step.field("hash_after").text(), "step \(i) hash")
         }
     }
+
+    // views -----------------------------------------------------------------
+
+    /// `check_view`: a query kept up to date — its plan as the module writes
+    /// it; hydrated over `store_before` in the vector's context and
+    /// arguments, after its middleware; then each batch applied to the store
+    /// whole and pushed as one, and after each the patches (where the step
+    /// has them), the answer, the contract and the splice.
+    static func views(_ v: Value) throws {
+        let m = try moduleOf(try v.field("module"))
+        let sch = m.schema
+        let name = try v.field("query").text()
+        guard let f = m.lookupFunction(name) else { throw Failed("no query \(name)") }
+        guard let plan = f.plan else { throw Failed("\(name) is not a plan") }
+        let written = try v.field("module").field("functions").list().first { $0.opt("name") == .text(name) }?.opt("plan")
+        try ensureEq(written ?? .null, try v.field("plan"), "the plan is the query's, as the module writes it")
+        let ctx = try ctxOf(try v.field("ctx"))
+        let c = Hash.closure(m, f)
+        let st = MemoryStore.fromValue(sch, try v.field("store_before"))
+        let args: [String: Value]
+        let provided: [String: Value]
+        do {
+            (args, provided) = try Eval.middleware(sch, c, ctx, try argsOf(try v.field("args")), st)
+        } catch let x as EvalFault {
+            throw Failed("middleware: \(x)")
+        }
+        let view: MaintainedView
+        do {
+            view = try Views.hydrate(sch, plan, ViewEnv(c.helpers, ctx, args, provided), st)
+        } catch let x as EvalFault {
+            throw Failed("hydrate: \(x)")
+        }
+        try ensureEq(Value.list(view.rows()), try v.field("rows_before"), "the answer at hydrate")
+        let batches = try v.field("batches").list()
+        let steps = try v.field("steps").list()
+        try ensureEq(batches.count, steps.count, "a step per batch")
+        for (i, (batch, step)) in zip(batches, steps).enumerated() {
+            let changes = try batch.list().map(Facts.changeFromValue)
+            let before = view.rows()
+            st.applyChanges(changes)
+            let patches: [Patch]
+            do {
+                patches = try Views.pushAll(sch, st, changes, view)
+            } catch let x as EvalFault {
+                throw Failed("batch \(i): \(x)")
+            }
+            try ensure(Views.contract(sch, st, view), "batch \(i) breaks the contract")
+            // A step the fuzzer wrote has no patches: only the answer, the contract and the splice.
+            if let want = step.opt("patches") { try ensureEq(Value.list(patches.map(Views.patchValue)), want, "batch \(i) patches") }
+            try ensureEq(Value.list(view.rows()), try step.field("rows"), "batch \(i) rows")
+            try ensureEq(Views.splice(patches, before), view.rows(), "batch \(i) splice")
+        }
+    }
 }

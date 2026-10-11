@@ -405,12 +405,22 @@ public struct Lookup: Hashable {
     public var sym: Sym
     public var table: String
     public var key: [Expr]
+    public init(name: String, sym: Sym, table: String, key: [Expr]) {
+        self.name = name
+        self.sym = sym
+        self.table = table
+        self.key = key
+    }
 }
 
 /// One `child.column = expr` of a related plan.
 public struct On: Hashable {
     public let column: String
     public let e: Expr
+    public init(column: String, e: Expr) {
+        self.column = column
+        self.e = e
+    }
 }
 
 /// A child plan beneath each node, bound to `sym` as the list of its nodes.
@@ -419,6 +429,12 @@ public struct Related: Hashable {
     public var sym: Sym
     public var on: [On]
     public var plan: Plan
+    public init(name: String, sym: Sym, on: [On], plan: Plan) {
+        self.name = name
+        self.sym = sym
+        self.on = on
+        self.plan = plan
+    }
 }
 
 /// One key of an order: a column of the source row, or an expression over the node's binders.
