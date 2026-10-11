@@ -14,6 +14,7 @@ import dev.arkdb.Canon
 import dev.arkdb.Hex
 import dev.arkdb.ModuleError
 import dev.arkdb.Value
+import dev.arkdb.VerifyFailed
 import java.io.File
 import kotlin.system.exitProcess
 
@@ -58,13 +59,13 @@ object Conformance {
             "codec" to { _, v -> Checks.codec(v) },
             "order" to { _, v -> Checks.order(v) },
             "hash" to { _, v -> Checks.hash(v) },
+            "module" to { _, v -> Checks.module(v) },
+            "verify" to { _, v -> Checks.verify(v) },
         )
 
     /** The kinds a later round of docs/plan-phones.md turns on, and which. */
     private val notYet: Map<String, String> =
         linkedMapOf(
-            "module" to "round 2, modules",
-            "verify" to "round 2, modules",
             "eval" to "round 2, eval",
             "views" to "round 2, views",
             "protocol" to "round 3, the client",
@@ -176,6 +177,8 @@ object Conformance {
             "decode: ${e.why}" to false
         } catch (e: ModuleError) {
             "module: ${e.message}" to false
+        } catch (e: VerifyFailed) {
+            "verify: ${e.message}" to false
         } catch (e: Throwable) {
             ("${e.javaClass.simpleName}: ${e.message}\n" +
                 e.stackTrace.take(12).joinToString("\n") { "      at $it" }) to true

@@ -91,4 +91,91 @@ public object Hash {
             st.schema.tables.map { t ->
                 t.name to (st.digest(t.name) ?: tableDigest(t.name, st.scan(t.name)))
             })
+
+    /**
+     * `closure`: a function normalised, with the helpers and middleware it reaches, normalised, in
+     * the module's order (`Ark.Hash.closure`).
+     */
+    public fun closure(m: Module, f: Function): Closure {
+        val seen = ArrayList<String>()
+        val todo = ArrayList(Encode.reaches(f).reversed())
+        while (todo.isNotEmpty()) {
+            val n = todo.removeAt(todo.size - 1)
+            if (n in seen) continue
+            val h = m.lookupFunction(n) ?: continue
+            seen.add(n)
+            todo.addAll(Encode.reaches(h).reversed())
+        }
+        return Closure(
+            Normalize.function(f), m.functions.filter { it.name in seen }.map(Normalize::function))
+    }
+
+    /** `closures`: every function of a module by the hash of its closure, as lowercase hex. */
+    public fun closures(m: Module): Map<String, Closure> {
+        val out = java.util.TreeMap<String, Closure>()
+        for (f in m.functions) {
+            val c = closure(m, f)
+            out[Hex.encode(functionHash(c))] = c
+        }
+        return out
+    }
+
+    /**
+     * §8.2 `function_hash`: over the function's normalised canonical form, names excluded, with the
+     * hashes of the helpers it calls and the middleware it uses directly — over the function as a
+     * client's module carries it, every private block stripped (`docs/plan-guards.md` D3).
+     */
+    public fun functionHash(c: Closure): FnHash {
+        val public = strip(c.function)
+        val deps = LinkedHashMap<String, Value>()
+        for (n in Encode.reaches(public)) {
+            val h = c.helpers.firstOrNull { it.name == n } ?: continue
+            deps[n] = Value.VBytes(functionHash(Closure(h, c.helpers)))
+        }
+        return Sha256.hash(Canon.encode(Encode.function(deps, public)))
+    }
+
+    /**
+     * D3 `stripped`: a closure as a client may hold it — its function stripped of private blocks
+     * and its helpers only those the stripped function reaches. The same hash as the closure it
+     * came from.
+     */
+    public fun stripped(c: Closure): Closure {
+        if (!c.function.private) return c
+        val function = strip(c.function)
+        val seen = ArrayList<String>()
+        val todo = ArrayList(Encode.reaches(function))
+        while (todo.isNotEmpty()) {
+            val n = todo.removeAt(todo.size - 1)
+            if (n in seen) continue
+            val h = c.helpers.firstOrNull { it.name == n } ?: continue
+            todo.addAll(Encode.reaches(h))
+            seen.add(n)
+        }
+        return Closure(Normalize.function(function), c.helpers.filter { it.name in seen })
+    }
+
+    /** D3 `is_private`: entries naming this closure are taken by the authority's facts. */
+    public fun isPrivate(c: Closure): Boolean = c.function.private
+
+    /**
+     * D1 `reads_roles`: whether what a closure writes can depend on its author's roles — `has_role`
+     * in the function or a helper or provide it runs; not in a guard or a scope.
+     */
+    public fun readsRoles(c: Closure): Boolean {
+        fun asks(v: Value): Boolean =
+            when (v) {
+                is Value.VStruct ->
+                    v.fields["t"] == Value.VText("has_role") || v.fields.values.any(::asks)
+                is Value.VList -> v.items.any(::asks)
+                else -> false
+            }
+        return (listOf(c.function) + c.helpers)
+            .filter { it.kind != FnKind.Guard && it.kind != FnKind.Scope }
+            .any { asks(Encode.function(emptyMap(), it)) }
+    }
+
+    /** `module_hash`: the hash of a whole module, normalised. */
+    public fun moduleHash(m: Module): ByteArray =
+        Sha256.hash(Canon.encode(Encode.module(Normalize.module(m))))
 }

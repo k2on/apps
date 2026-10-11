@@ -6,14 +6,19 @@ package dev.arkdb.conformance
 
 import dev.arkdb.Canon
 import dev.arkdb.Decode
+import dev.arkdb.Encode
 import dev.arkdb.Hash
 import dev.arkdb.Hex
 import dev.arkdb.MemoryStore
 import dev.arkdb.Module
+import dev.arkdb.SPEC_VERSION
 import dev.arkdb.Sha256
 import dev.arkdb.Value
 import dev.arkdb.ValueOrder
+import dev.arkdb.Verify
+import dev.arkdb.checkSchema
 import dev.arkdb.leaf
+import dev.arkdb.stripModule
 
 object Checks {
     fun bytesOf(v: Value): ByteArray = Hex.decode(v.asText())
@@ -94,5 +99,69 @@ object Checks {
             want,
             "the hash of the pairs")
         ensureEq(Hex.encode(Hash.stateHash(st)), want, "state hash")
+    }
+
+    // module --------------------------------------------------------------
+
+    /**
+     * `check_module`: the bytes decode to the module value; it reads as a module of spec 4 that
+     * writes back as itself and encodes to the bytes; its module hash; its schema well formed. A
+     * `stripped` vector also: the client's module beside it, the server's with its private blocks
+     * stripped and verified, at the public hash, and both naming every function by the listed hash.
+     */
+    fun module(v: Value) {
+        val value = v.field("module")
+        val bytes = bytesOf(v.field("bytes"))
+        ensureEq(Canon.decode(bytes), value, "the bytes decode to the module value")
+        val m = moduleOf(value)
+        ensureEq(m.spec, SPEC_VERSION, "spec version")
+        ensureEq(Encode.module(m), value, "decode then encode is the identity")
+        ensureBytes(Canon.encode(Encode.module(m)), bytes, "the module encodes to the bytes")
+        ensureEq(Hex.encode(Hash.moduleHash(m)), v.field("hash").asText(), "module hash")
+        ensure(checkSchema(m.schema).isEmpty()) { "the schema is not well formed" }
+        val sval = v.asStruct().fields["stripped"] ?: return
+        ensureEq(
+            Canon.decode(bytesOf(v.field("strippedBytes"))),
+            sval,
+            "the stripped bytes decode to the stripped module")
+        val stripped = moduleOf(sval)
+        // The one step a client may skip; this runtime takes it.
+        val want = Verify.verify(stripModule(m))
+        ensureEq(
+            Encode.module(want),
+            sval,
+            "the stripped module is the module with its private blocks taken out")
+        ensureEq(
+            Hex.encode(Hash.moduleHash(stripped)),
+            v.field("public").asText(),
+            "the public module hash")
+        fun names(m: Module): List<Pair<String, String>> =
+            Hash.closures(m)
+                .map { (h, c) -> c.function.name to h }
+                .sortedWith(compareBy({ it.first }, { it.second }))
+        val listed =
+            v.field("functions").asList().map { p ->
+                p.asList()[0].asText() to p.asList()[1].asText()
+            }
+        ensureEq(names(m), listed, "the server's module names its functions by the listed hashes")
+        ensureEq(names(stripped), listed, "and so does the client's")
+    }
+
+    // verify --------------------------------------------------------------
+
+    /**
+     * `check_verify`: it verifies, as itself; its schema, its spec; every function has a closure.
+     */
+    fun verify(v: Value) {
+        val m = moduleOf(v.field("module"))
+        ensure(v.field("verifies") == Value.VBool(true)) {
+            "only accepting modules are checked here"
+        }
+        ensure(checkSchema(m.schema).isEmpty()) { "the schema is not well formed" }
+        ensureEq(m.spec, SPEC_VERSION, "spec version")
+        val verified = Verify.verify(m)
+        ensureEq(
+            Encode.module(verified), Encode.module(m), "a verified module is its own verified form")
+        ensureEq(Hash.closures(m).size, m.functions.size, "one closure per function")
     }
 }
