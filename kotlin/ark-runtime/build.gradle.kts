@@ -139,6 +139,15 @@ val keptNumbers by tasks.registering(JavaExec::class) {
     args(vectors.get())
 }
 
+// The store's index hints held to the scan they stand for.
+val storeHints by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Holds every indexed read to the scan it stands for."
+    dependsOn(tasks.named("testClasses"))
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("dev.arkdb.conformance.StoreHints")
+}
+
 tasks.named("check") {
-    dependsOn(conformance, keptNumbers)
+    dependsOn(conformance, keptNumbers, storeHints)
 }
