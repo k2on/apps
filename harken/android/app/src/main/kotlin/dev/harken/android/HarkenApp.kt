@@ -48,10 +48,10 @@ fun statusLine(s: Status?, signedIn: Boolean): String {
     return when {
         s == null -> "opening…"
         s.denied != null -> "turned away: ${s.denied}"
-        s.serverless -> "alone$pend"
+        s.alone -> "alone$pend"
         !signedIn -> "signed out$pend"
         s.linked -> "linked$pend"
-        else -> "offline" + (s.retryInMs?.let { ", retry in ${(it + 999) / 1000}s" } ?: "") + pend
+        else -> "${s.link}$pend"
     }
 }
 

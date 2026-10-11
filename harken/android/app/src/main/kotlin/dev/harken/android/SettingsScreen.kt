@@ -1,6 +1,7 @@
-// Settings: who is signed in, the server and "work alone", what the session
-// says, and every change this phone made with where it stands. Applying the
-// server reopens the session — the old one is closed and written down
+// Settings: who is signed in, the server and "work alone", what the peer
+// says — its cursor, what is not synced, what the server holds back, the
+// link — and every change this phone made with where it stands. Applying
+// the server reopens the peer — the old one is closed and written down
 // first — in a directory per server (or alone), not per person, so work
 // done signed out is there when somebody signs in.
 package dev.harken.android
@@ -35,7 +36,7 @@ fun SettingsScreen(model: Model) {
     val status by model.status.collectAsStateWithLifecycle()
     val changes by model.changes.collectAsStateWithLifecycle()
     val standings by model.standings.collectAsStateWithLifecycle()
-    var url by rememberSaveable { mutableStateOf(saved.serverUrl) }
+    var url by rememberSaveable { mutableStateOf(saved.server) }
     var alone by rememberSaveable { mutableStateOf(saved.workAlone) }
     var name by rememberSaveable { mutableStateOf("") }
 
@@ -64,8 +65,8 @@ fun SettingsScreen(model: Model) {
         OutlinedTextField(
             value = url,
             onValueChange = { url = it },
-            label = { Text("WebSocket URL") },
-            supportingText = { Text("ws://host:port/sync — 10.0.2.2 reaches the emulator's host") },
+            label = { Text("Server") },
+            supportingText = { Text("http://host:port — the sync socket is /sync beside it; 10.0.2.2 reaches the emulator's host") },
             singleLine = true,
             enabled = !alone,
             modifier = Modifier.fillMaxWidth(),
@@ -80,8 +81,8 @@ fun SettingsScreen(model: Model) {
         }
         Spacer(Modifier.height(16.dp))
         Button(
-            onClick = { model.applySettings(saved.copy(serverUrl = url.trim(), workAlone = alone)) },
-            enabled = (alone || url.isNotBlank()) && (url.trim() != saved.serverUrl || alone != saved.workAlone),
+            onClick = { model.applySettings(saved.copy(server = url.trim(), workAlone = alone)) },
+            enabled = (alone || url.isNotBlank()) && (url.trim() != saved.server || alone != saved.workAlone),
         ) { Text("Apply and reopen") }
 
         Spacer(Modifier.height(24.dp))
@@ -92,7 +93,11 @@ fun SettingsScreen(model: Model) {
         } else {
             Text(statusLine(s, saved.user != null))
             Text(
-                "cursor ${s.cursor}, not synced ${s.pending}, not saved ${s.rejected}, diverged ${s.diverged}",
+                "cursor ${s.cursor}, not synced ${s.pending}, held ${s.held}, diverged ${s.diverged}",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                "link ${s.link}, linked ${s.linked}, connections ${s.opens}" + (if (s.behind) ", the server runs a newer module" else ""),
                 style = MaterialTheme.typography.bodySmall,
             )
             s.lastClose?.let { Text("last close: $it", style = MaterialTheme.typography.bodySmall) }
@@ -100,7 +105,7 @@ fun SettingsScreen(model: Model) {
         }
         Spacer(Modifier.height(12.dp))
         OutlinedButton(onClick = { model.verify() }) { Text("Verify against the authority") }
-        Hint("Alone, the answer is immediate. Linked, the server's Agree arrives on a later pump and is not yet surfaced here.")
+        Hint("Alone, the answer is immediate. Linked, the server's answer arrives on a later pump, and is said when it does.")
 
         Spacer(Modifier.height(24.dp))
         Text("Changes", style = MaterialTheme.typography.titleMedium)

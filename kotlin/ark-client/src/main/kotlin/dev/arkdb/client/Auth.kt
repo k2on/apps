@@ -22,7 +22,7 @@ import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.InetAddress
 import java.net.ServerSocket
-import java.net.URL
+import java.net.URI
 
 /** A signed-in person, as the server knows them (`ark_auth::Account`). */
 public data class Account(
@@ -242,7 +242,7 @@ public object Auth {
     }
 
     private fun connection(url: String, patience: Patience): HttpURLConnection {
-        val c = URL(url).openConnection() as HttpURLConnection
+        val c = URI(url).toURL().openConnection() as HttpURLConnection
         c.connectTimeout = patience.connectMs.toInt()
         c.readTimeout = patience.readMs.toInt()
         c.useCaches = false

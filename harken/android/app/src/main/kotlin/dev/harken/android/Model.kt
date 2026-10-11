@@ -1,51 +1,80 @@
-// The one model: a `Session` and what the screens read from it. Every call
-// into the session happens on the main thread — the pump from a coroutine
-// on `viewModelScope`, every mutation from a click — which is the session's
-// single-thread contract; the link marshals the socket's callbacks onto it.
+// The one model: a Kotlin `Peer` over `harken.ark` and what the screens read
+// from it. The peer is single-threaded, so it lives on a thread of its own
+// (`ark`): the pump every fifty milliseconds, every mutation, every read a
+// screen asks for synchronously. The screens see lists that are *spliced*,
+// never re-read: `library`, `playlists` and the open `playlist` are
+// maintained views (`ClientView`), each handed every `Changes` the peer
+// reports, and the patches they answer with are applied to the list the
+// screen was given; only a `Reset` — a rebase that replaced the store, a
+// sign-in, a selection that moved — reads one again.
 //
-// The app works with nobody signed in: the session is opened with no user,
-// everything is authored as nobody, kept and written down, and nothing is
-// said to any server. Signing in makes all of it the signer's and syncs it;
+// The app works with nobody signed in: the peer is opened signed out, what
+// is authored is nobody's, kept and written down, and nothing is dialled.
+// Signing in (dev auth: a name) makes all of it the signer's and syncs it;
 // signing out keeps what that person left pending for when they sign in
-// again (the server accepts an older login of the same person).
+// again. Alone, the peer is its own authority over a local history, and
+// joins a server when it is told one (Settings).
 package dev.harken.android
 
 import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import dev.arkdb.Changes
 import dev.arkdb.Id
-import dev.arkdb.client.ItemState
-import dev.arkdb.client.Session
+import dev.arkdb.Value
+import dev.arkdb.client.Auth
+import dev.arkdb.client.AuthError
+import dev.arkdb.client.ClientView
+import dev.arkdb.client.DirStorage
+import dev.arkdb.client.Domain
+import dev.arkdb.client.Login
+import dev.arkdb.client.Options
+import dev.arkdb.client.Peer
+import dev.arkdb.client.PeerError
+import dev.arkdb.client.Standing
 import dev.arkdb.client.Status
-import harken.gen.module as harkenDomain
+import dev.arkdb.client.Update
+import java.io.File
+import java.util.concurrent.Executors
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import java.io.File
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 
-/** What Settings holds: where the server is, whether to work alone, and who is signed in (null: nobody). */
-data class Prefs(val serverUrl: String, val workAlone: Boolean, val user: String?) {
+/**
+ * What Settings holds: the server's address (`http://host:port`; the socket is derived from it),
+ * whether to work alone, and the login, if somebody signed in — kept whole, so a restart reuses
+ * it.
+ */
+data class Prefs(val server: String, val workAlone: Boolean, val login: Login?) {
+    val user: String?
+        get() = login?.user?.id
+
     companion object {
         private const val PREFS = "harken"
 
         fun load(ctx: Context): Prefs {
             val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             return Prefs(
-                serverUrl = p.getString("serverUrl", "ws://10.0.2.2:8787/sync") ?: "",
+                server = p.getString("server", "http://10.0.2.2:8787") ?: "",
                 workAlone = p.getBoolean("workAlone", false),
-                user = p.getString("user", null),
+                login = p.getString("login", null)?.let { runCatching { Login.parse(it) }.getOrNull() },
             )
         }
 
         fun save(ctx: Context, s: Prefs) {
-            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                .putString("serverUrl", s.serverUrl)
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .putString("server", s.server)
                 .putBoolean("workAlone", s.workAlone)
-                .putString("user", s.user)
+                .putString("login", s.login?.toJson())
                 .apply()
         }
     }
@@ -55,6 +84,9 @@ data class Prefs(val serverUrl: String, val workAlone: Boolean, val user: String
 data class Authored(val id: Id, val what: String)
 
 class Model(app: Application) : AndroidViewModel(app) {
+    /** The peer's thread: everything that touches it runs here. */
+    private val ark = Executors.newSingleThreadExecutor { r -> Thread(r, "ark-peer") }.asCoroutineDispatcher()
+
     private val _settings = MutableStateFlow(Prefs.load(app))
     val settings: StateFlow<Prefs> = _settings.asStateFlow()
 
@@ -78,11 +110,11 @@ class Model(app: Application) : AndroidViewModel(app) {
     private val _changes = MutableStateFlow<List<Authored>>(emptyList())
     val changes: StateFlow<List<Authored>> = _changes.asStateFlow()
 
-    /** Where each of them stands, re-read on every pump. */
-    private val _standings = MutableStateFlow<Map<Id, ItemState>>(emptyMap())
-    val standings: StateFlow<Map<Id, ItemState>> = _standings.asStateFlow()
+    /** Where each of them stands, read again on every pump. */
+    private val _standings = MutableStateFlow<Map<Id, Standing>>(emptyMap())
+    val standings: StateFlow<Map<Id, Standing>> = _standings.asStateFlow()
 
-    /** The last refusal or rejection, for a snackbar; cleared by `dismissNotice`. */
+    /** The last refusal, rejection or failure, for a snackbar; cleared by `dismissNotice`. */
     private val _notice = MutableStateFlow<String?>(null)
     val notice: StateFlow<String?> = _notice.asStateFlow()
 
@@ -91,164 +123,230 @@ class Model(app: Application) : AndroidViewModel(app) {
     private val madeBy = HashMap<Id, Id>()
     private val touchedBy = HashMap<Pair<Id, Id>, Id>()
 
-    private var session: Session? = null
-    /** Since when the link has been up without a break: the default playlist waits for the log to have arrived. */
-    private var linkedSince: Long? = null
-    private var defaultAsked = false
+    // On the `ark` thread only.
+    private var peer: Peer? = null
+    private var libraryView: ClientView? = null
+    private var playlistsView: ClientView? = null
+    private var itemsView: ClientView? = null
+    private val libraryRows = ArrayList<Track>()
+    private val playlistRows = ArrayList<Playlist>()
+    private val itemRows = ArrayList<Track>()
+    private var verdictsSeen = 0
 
-    /**
-     * harken's domain as the printed Kotlin authors it
-     * (`domain/gen/kotlin`): emitted once for the module the replica hashes
-     * and verifies against, and run natively for everything this phone
-     * authors and replays. What it does not carry (`add_song`) arrives
-     * from the server.
-     */
-    private val domain by lazy { harkenDomain() }
+    /** harken's module, as the domain crate writes it: in the APK's assets, verified on load. */
+    private val domain: Domain by lazy {
+        Domain.fromBytes(getApplication<Application>().assets.open("harken.ark").use { it.readBytes() })
+    }
 
     init {
-        open()
-        viewModelScope.launch {
+        viewModelScope.launch(ark) {
+            open()
             while (isActive) {
-                val s = session
-                if (s != null) {
-                    try {
-                        s.pump()
-                    } catch (t: Throwable) {
-                        _notice.value = "pump: ${t.message ?: t.javaClass.simpleName}"
-                    }
-                    tick(s)
-                }
+                tick()
                 delay(50)
             }
         }
     }
 
     /**
-     * Where the replica lives: one directory per server (or alone), not per
-     * person — the log is the server's and every person reads it — so that
-     * work done signed out is still here when somebody signs in.
+     * Where the replica lives: one directory per server (or alone), not per person — the log is the
+     * server's and every person reads it — so that work done signed out is still here when somebody
+     * signs in.
      */
     private fun directory(st: Prefs): File {
         val app = getApplication<Application>()
-        val place = if (st.workAlone) "alone" else "server-" + st.serverUrl.replace(Regex("[^A-Za-z0-9]"), "_")
-        return File(app.filesDir, "ark/$place")
+        val place = if (st.workAlone) "alone" else "server-" + st.server.replace(Regex("[^A-Za-z0-9]"), "_")
+        return File(app.filesDir, "ark/$place/replica")
     }
 
+    // Open the peer the settings describe, and hydrate the three views.
     private fun open() {
         val st = _settings.value
-        val s = Session.open(directory(st), domain, st.user, if (st.workAlone) null else st.serverUrl)
-        s.onChange { refresh() }
-        session = s
-        linkedSince = null
-        defaultAsked = false
-        _status.value = s.status
-        refresh()
+        val login = st.login
+        val opts =
+            when {
+                st.workAlone -> Options.alone(login?.user?.id ?: "me")
+                login != null -> Options.server(login.user.id, login.session, login.token)
+                else -> Options.signedOut()
+            }
+        val p =
+            try {
+                Peer.open(domain, DirStorage(directory(st)), opts)
+            } catch (e: Exception) {
+                _notice.value = "could not open the replica: ${e.message}"
+                return
+            }
+        login?.let { p.setRoles(it.user.roles) }
+        if (!st.workAlone) p.connect(Auth.socketUrl(st.server))
+        peer = p
+        p.takeChanges()
+        playlistsView = hold(p, "playlists", emptyMap())
+        playlistRows.clear()
+        playlistsView?.rows?.mapTo(playlistRows, Playlist::of)
+        _playlists.value = playlistRows.toList()
+        reselect(p, _selected.value)
+        _status.value = p.status()
     }
 
-    /** Re-read the lists through the procedures, natively; called after every change the session reports. */
-    private fun refresh() {
-        val s = session ?: return
-        val pls = Phone.playlists(s)
-        _playlists.value = pls
-        // A playlist the rebase dropped is no longer selected.
-        val sel = _selected.value?.takeIf { id -> pls.any { it.id == id } } ?: pls.firstOrNull()?.id
+    // A view, or none when its middleware refuses (a playlist that is not
+    // this person's): a screen draws an empty list, not an error.
+    private fun hold(p: Peer, name: String, args: Map<String, Value>): ClientView? =
+        try {
+            p.view(name, args)
+        } catch (e: PeerError) {
+            null
+        }
+
+    // The selection moved, or has to: the first playlist when the one held
+    // went away. The library is read against it and the playlist view is of
+    // it, so both are opened again — a hydrate, once per selection.
+    private fun reselect(p: Peer, want: Id?) {
+        val sel = want?.takeIf { id -> playlistRows.any { it.id == id } } ?: playlistRows.firstOrNull()?.id
         _selected.value = sel
-        _library.value = Phone.library(s, sel)
-        _items.value = if (sel == null) emptyList() else Phone.playlist(s, sel)
+        libraryView = hold(p, "library", Phone.libraryArgs(sel))
+        libraryRows.clear()
+        libraryView?.rows?.mapTo(libraryRows, Track::of)
+        _library.value = libraryRows.toList()
+        itemsView = sel?.let { hold(p, "playlist", Phone.playlistArgs(it)) }
+        itemRows.clear()
+        itemsView?.rows?.mapTo(itemRows, Track::of)
+        _items.value = itemRows.toList()
     }
 
-    /** Every pump: the status, where each change stands, a new rejection's reason, and the default playlist. */
-    private fun tick(s: Session) {
-        val st = s.status
-        _status.value = st
-        linkedSince = if (st.linked) linkedSince ?: System.currentTimeMillis() else null
-        val now = _changes.value.associate { it.id to s.statusOf(it.id) }
+    // What moved, handed to every view; each list spliced by the patches it
+    // answers with, or read again on a reset.
+    private fun splice(p: Peer) {
+        val ch = p.takeChanges()
+        if (ch is Changes.Applied && ch.changes.isEmpty()) return
+        val before = _selected.value
+        if (apply(p, playlistsView, ch, playlistRows, Playlist::of)) _playlists.value = playlistRows.toList()
+        if (before != null && playlistRows.none { it.id == before }) {
+            reselect(p, null)
+            return
+        }
+        if (before == null && playlistRows.isNotEmpty()) {
+            reselect(p, playlistRows.first().id)
+            return
+        }
+        if (apply(p, libraryView, ch, libraryRows, Track::of)) _library.value = libraryRows.toList()
+        if (apply(p, itemsView, ch, itemRows, Track::of)) _items.value = itemRows.toList()
+    }
+
+    private fun <T> apply(p: Peer, v: ClientView?, ch: Changes, rows: MutableList<T>, of: (Value) -> T): Boolean {
+        val view = v ?: return false
+        return when (val u = view.update(p, ch)) {
+            is Update.Unchanged -> false
+            is Update.Patched -> {
+                ClientView.splice(rows, u.patches, of)
+                true
+            }
+            is Update.Reset -> {
+                rows.clear()
+                view.rows.mapTo(rows, of)
+                true
+            }
+        }
+    }
+
+    /** Every pump: what moved, the status, where each change stands, a new verdict's reason. */
+    private fun tick() {
+        val p = peer ?: return
+        val pumped = p.pump()
+        pumped.denied?.let { _notice.value = "turned away: $it" }
+        splice(p)
+        _status.value = p.status()
+        val now = _changes.value.associate { it.id to p.standing(it.id) }
         if (now != _standings.value) _standings.value = now
-        val rejected = s.takeRejections()
-        if (rejected.isNotEmpty()) _notice.value = "not saved: ${rejected.last().second}"
-        makeDefaultIfNone(s, st)
+        val rejected = p.takeRejections()
+        if (rejected.isNotEmpty()) _notice.value = "not saved: ${rejected.last().reason}"
+        val agreed = p.agreed
+        if (agreed.size > verdictsSeen) {
+            val (n, ok) = agreed.last()
+            verdictsSeen = agreed.size
+            _notice.value = "at $n: ${if (ok) "agrees" else "DIVERGED"}"
+        }
     }
 
-    /**
-     * The default playlist, for somebody who has none at all, once the view
-     * is known to hold every playlist of theirs: alone at once, signed in
-     * after the link has been up two seconds (the log arrives first).
-     * Signed out it is made on first use instead (`add`).
-     */
-    private fun makeDefaultIfNone(s: Session, st: Status) {
-        if (defaultAsked) return
-        val caughtUp = linkedSince?.let { System.currentTimeMillis() - it >= 2000 } ?: false
-        if (!(st.serverless || (s.signedIn && caughtUp))) return
-        defaultAsked = true
-        Phone.ensureDefault(s, known = true)?.let { recordCreate(s, it, Phone.DEFAULT_PLAYLIST) }
+    private fun onPeer(f: (Peer) -> Unit) {
+        viewModelScope.launch(ark) {
+            val p = peer ?: return@launch
+            try {
+                f(p)
+            } catch (e: Exception) {
+                _notice.value = e.message ?: e.javaClass.simpleName
+            }
+            splice(p)
+        }
     }
+
+    // A read a screen needs at once, on the peer's thread.
+    private fun <T> now(default: T, f: (Peer) -> T): T =
+        runBlocking(ark) { peer?.let { runCatching { f(it) }.getOrNull() } ?: default }
 
     fun select(playlistId: Id) {
         _selected.value = playlistId
-        refresh()
+        viewModelScope.launch(ark) { peer?.let { reselect(it, playlistId) } }
     }
 
     fun playlist(id: Id): Playlist? = _playlists.value.firstOrNull { it.id == id }
 
     /** Which of the person's playlists a track is on, for the menu's ticks. */
-    fun playlistsOf(track: Track): Set<Id> = session?.let { s -> Phone.playlistsOf(s, track.id).map { it.id }.toSet() } ?: emptySet()
+    fun playlistsOf(track: Track): Set<Id> =
+        now(emptySet()) { p -> Phone.playlistsOf(p, track.id).map { it.id }.toSet() }
 
     // Where things stand -------------------------------------------------------
 
-    // Each takes the standings a screen collected, so that it recomposes as they move.
-
-    fun captionForPlaylist(id: Id, standings: Map<Id, ItemState>): String? =
+    fun captionForPlaylist(id: Id, standings: Map<Id, Standing>): String? =
         madeBy[id]?.let { standings[it] }?.let(Phone::caption)
 
-    fun captionFor(track: Track, playlist: Id, standings: Map<Id, ItemState>): String? =
+    fun captionFor(track: Track, playlist: Id, standings: Map<Id, Standing>): String? =
         touchedBy[playlist to track.id]?.let { standings[it] }?.let(Phone::caption)
 
-    fun captionFor(change: Authored, standings: Map<Id, ItemState>): String = standings[change.id]?.let(Phone::caption) ?: "saved"
+    fun captionFor(change: Authored, standings: Map<Id, Standing>): String =
+        standings[change.id]?.let(Phone::caption) ?: "saved"
 
     // Writing ------------------------------------------------------------------
 
     /** The `create_playlist` input's checks on a name being typed; null when it would pass. */
-    fun playlistNameProblem(name: String): String? = session?.let { Phone.nameProblem(it, name) }
+    fun playlistNameProblem(name: String): String? = now(null) { p -> Phone.nameProblem(p, name) }
 
-    fun createPlaylist(name: String) {
-        val s = session ?: return
-        recordCreate(s, Phone.createPlaylist(s, name), name.trim())
+    fun createPlaylist(name: String) = onPeer { p -> created(p, Phone.createPlaylist(p, name), name.trim()) }
+
+    // A playlist made: which entry made it, found by the row it added.
+    private fun created(p: Peer, w: Wrote, name: String) {
+        val before = playlistRows.map { it.id }.toSet()
+        record(w, "make the playlist $name", null)
+        splice(p)
+        if (w is Wrote.Entry) for (pl in playlistRows) if (pl.id !in before) madeBy[pl.id] = w.id
     }
 
-    /** Put a track on a playlist — the given one, the selected one, or for somebody with none, the default, made now. */
-    fun addToPlaylist(track: Track, playlistId: Id? = _selected.value) {
-        val s = session ?: return
-        val target = playlistId ?: run {
-            val (t, why) = Phone.playlistForAdding(s)
-            if (t == null) {
-                _notice.value = "refused: $why"
-                return
-            }
-            t.made?.let {
-                record(Wrote.Entry(it), "make the playlist ${Phone.DEFAULT_PLAYLIST}", null)
-                madeBy[t.playlist] = it
-            }
-            t.playlist
+    /** Put a track on a playlist — the given one, the selected one, or for somebody with none, "Favorites", made now. */
+    fun addToPlaylist(track: Track, playlistId: Id? = _selected.value) = onPeer { p ->
+        val target =
+            playlistId
+                ?: run {
+                    created(p, Phone.createPlaylist(p, Phone.DEFAULT_PLAYLIST), Phone.DEFAULT_PLAYLIST)
+                    playlistRows.lastOrNull()?.id
+                }
+        if (target == null) {
+            _notice.value = "no playlist to add to"
+            return@onPeer
         }
-        val name = playlist(target)?.name ?: Phone.DEFAULT_PLAYLIST
-        record(Phone.addToPlaylist(s, target, track.id), "add ${track.title} to $name", target to track.id)
+        val name = playlistRows.firstOrNull { it.id == target }?.name ?: Phone.DEFAULT_PLAYLIST
+        record(Phone.addToPlaylist(p, target, track.id), "add ${track.title} to $name", target to track.id)
     }
 
-    fun removeFromPlaylist(playlistId: Id, track: Track) {
-        val s = session ?: return
-        val name = playlist(playlistId)?.name ?: "a playlist"
-        record(Phone.removeFromPlaylist(s, playlistId, track.id), "take ${track.title} off $name", playlistId to track.id)
+    fun removeFromPlaylist(playlistId: Id, track: Track) = onPeer { p ->
+        val name = playlistRows.firstOrNull { it.id == playlistId }?.name ?: "a playlist"
+        record(
+            Phone.removeFromPlaylist(p, playlistId, track.id),
+            "take ${track.title} off $name",
+            playlistId to track.id)
     }
 
     /** On the playlist it is not on, or off the one it is on. */
     fun toggle(track: Track, playlistId: Id) {
         if (playlistId in playlistsOf(track)) removeFromPlaylist(playlistId, track) else addToPlaylist(track, playlistId)
-    }
-
-    private fun recordCreate(s: Session, w: Wrote, name: String) {
-        val before = _playlists.value.map { it.id }.toSet()
-        record(w, "make the playlist $name", null)
-        if (w is Wrote.Entry) for (p in Phone.playlists(s)) if (p.id !in before) madeBy[p.id] = w.id
     }
 
     private fun record(w: Wrote, what: String, key: Pair<Id, Id>?) {
@@ -257,17 +355,13 @@ class Model(app: Application) : AndroidViewModel(app) {
             is Wrote.Entry -> {
                 _changes.value = (listOf(Authored(w.id, what)) + _changes.value).take(100)
                 if (key != null) touchedBy[key] = w.id
-                session?.let { s -> _standings.value = _standings.value + (w.id to s.statusOf(w.id)) }
+                peer?.let { p -> _standings.value = _standings.value + (w.id to p.standing(w.id)) }
             }
         }
-        refresh()
     }
 
-    fun verify() {
-        val s = session ?: return
-        val now = s.verify()
-        if (now != null) _notice.value = "at ${now.first}: ${if (now.second) "agrees" else "DIVERGED"}"
-    }
+    /** Ask the authority whether it agrees: alone, at once; linked, on a later pump. */
+    fun verify() = onPeer { p -> p.verify() }
 
     fun dismissNotice() {
         _notice.value = null
@@ -276,37 +370,67 @@ class Model(app: Application) : AndroidViewModel(app) {
     // Signing in ---------------------------------------------------------------
 
     /**
-     * Somebody signs in (dev auth: the name is the login's token, and the
-     * server calls every login "dev"). Everything done so far as nobody
-     * becomes theirs and is pushed.
+     * Somebody signs in with a name: the server's dev auth, which answers `/auth/login` with a code
+     * and no page. A server with a real provider answers with a page for a browser, which this app
+     * does not open: it says so instead. Everything done so far as nobody becomes theirs and is
+     * pushed.
      */
     fun signIn(name: String) {
         val who = name.trim()
-        val s = session ?: return
         if (who.isEmpty()) return
-        s.signIn(who)
-        val next = _settings.value.copy(user = who)
-        Prefs.save(getApplication(), next)
-        _settings.value = next
-        defaultAsked = false
-        refresh()
+        val server = _settings.value.server
+        viewModelScope.launch(Dispatchers.IO) {
+            val login =
+                try {
+                    Auth.login(server, who) {
+                        throw AuthError(
+                            "$server signs people in through a browser; this app signs in by name only (dev auth)")
+                    }
+                } catch (e: Exception) {
+                    _notice.value = "could not sign in: ${e.message}"
+                    return@launch
+                }
+            withContext(ark) {
+                val p = peer ?: return@withContext
+                try {
+                    p.signIn(login.user.id, login.session, login.token)
+                    p.setRoles(login.user.roles)
+                } catch (e: PeerError) {
+                    _notice.value = "could not sign in: ${e.message}"
+                    return@withContext
+                }
+                val next = _settings.value.copy(login = login)
+                Prefs.save(getApplication(), next)
+                _settings.value = next
+                splice(p)
+            }
+        }
     }
 
-    /** Sign out: reopen with nobody signed in, over the same replica. What that person left pending stays theirs. */
-    fun signOut() = applySettings(_settings.value.copy(user = null))
+    /** Sign out: the token forgotten and the link stopped; what that person left pending stays theirs. */
+    fun signOut() {
+        val next = _settings.value.copy(login = null)
+        Prefs.save(getApplication(), next)
+        _settings.value = next
+        onPeer { p -> p.signOut() }
+    }
 
-    /** Save and reopen: the old session is closed and written down first. */
+    /** Save and reopen: the old peer is closed and written down first. */
     fun applySettings(s: Prefs) {
         Prefs.save(getApplication(), s)
         _settings.value = s
-        session?.close()
-        session = null
-        _selected.value = null
-        open()
+        viewModelScope.launch(ark) {
+            peer?.close()
+            peer = null
+            open()
+        }
     }
 
     override fun onCleared() {
-        session?.close()
-        session = null
+        runBlocking(ark) {
+            peer?.close()
+            peer = null
+        }
+        ark.close()
     }
 }

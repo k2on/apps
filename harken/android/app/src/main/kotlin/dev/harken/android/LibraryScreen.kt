@@ -2,8 +2,9 @@
 // selected playlist so each row knows whether it is on it. The row's button
 // puts it on that playlist or takes it off; its menu does the same for any
 // playlist, ticked by `playlists_of`. With no playlist at all, adding makes
-// "Favorites" first. Songs arrive from the server's scanner — this build
-// carries no `add_song` — so the list is empty alone or signed out.
+// "Favorites" first. Songs arrive from the server's scanner — `add_song` is
+// the library's role's, not a phone's — so the list is empty alone or
+// signed out. The list is a maintained view's, spliced as the peer moves.
 package dev.harken.android
 
 import androidx.compose.foundation.layout.Box
