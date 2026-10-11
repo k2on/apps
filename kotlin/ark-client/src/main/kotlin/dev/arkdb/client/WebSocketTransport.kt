@@ -57,9 +57,17 @@ public class WebSocketTransport(
 
     public companion object {
         /** A client that pings, because the engine has no clock to hang a keepalive on. */
-        public fun defaultClient(): OkHttpClient =
+        public fun defaultClient(): OkHttpClient = client(Timing())
+
+        /**
+         * A client held to a link's [Timing]: a ping every `pingEveryMs`, the connection failed
+         * when one goes unanswered, and `connectTimeoutMs` for the TCP connection and the
+         * handshake.
+         */
+        public fun client(timing: Timing): OkHttpClient =
             OkHttpClient.Builder()
-                .pingInterval(20, TimeUnit.SECONDS)
+                .pingInterval(timing.pingEveryMs, TimeUnit.MILLISECONDS)
+                .connectTimeout(timing.connectTimeoutMs, TimeUnit.MILLISECONDS)
                 .readTimeout(0, TimeUnit.MILLISECONDS)
                 .build()
     }

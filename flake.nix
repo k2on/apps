@@ -239,14 +239,15 @@
           # gradle project; `nix run .#kotlin-deps` re-records it. Its `build`
           # runs the conformance runner over spec/vectors and every trace of
           # `trace-corpus`, which fails on any failure and on a kind it claims
-          # with nothing run, and the client's storage tests over a Rust
-          # peer's bytes and the same traces; the Unicode tables are generated
-          # from rust/ark's, so that file is a source too. The sources are
+          # with nothing run, the client's storage tests over a Rust peer's
+          # bytes and the same traces, and its driver's tests — the link, the
+          # dialect, the sign-in, views over harken.ark, which is a source
+          # too; so are the Unicode tables, generated from rust/ark's. The sources are
           # held to ktfmt's kotlinlang style first, checked and never written.
           kotlin = pkgs.stdenv.mkDerivation (final: {
             pname = "arkdb-kotlin";
             version = "0.1.0";
-            src = only [ "kotlin" "spec/vectors" "rust/ark/src/unicode_tables.rs" ];
+            src = only [ "kotlin" "spec/vectors" "rust/ark/src/unicode_tables.rs" "harken/domain/harken.ark" ];
             sourceRoot = "source/kotlin";
             nativeBuildInputs = [ pkgs.gradle pkgs.jdk21 pkgs.ktfmt ];
             mitmCache = pkgs.gradle.fetchDeps {

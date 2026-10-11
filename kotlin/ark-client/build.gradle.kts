@@ -49,6 +49,18 @@ val storageTests by tasks.registering(JavaExec::class) {
     args(vectors.get(), file("fixtures/rust-peer.json").absolutePath, corpus.get())
 }
 
+// The driver's half without a network: the link's backoff, the dialect, the
+// sign-in's URLs, and views over harken's module.
+val clientTests by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Holds the link, the dialect, the sign-in and the views."
+    dependsOn(tasks.named("testClasses"))
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("dev.arkdb.client.ClientTests")
+    jvmArgs("-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8")
+    args(rootProject.file("../harken/domain/harken.ark").absolutePath)
+}
+
 tasks.named("check") {
-    dependsOn(storageTests)
+    dependsOn(storageTests, clientTests)
 }

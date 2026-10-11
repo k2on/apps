@@ -1,8 +1,8 @@
 // A transport: one way of opening a connection that carries frames. The
 // engine is sans-io, so this is the only place a socket appears: a driver
 // hands what a connection brings to `Peer.recvFrame` and sends what
-// `Peer.takeOutgoingFrames` queues (the reference's driver is
-// `rust/ark-client/src/link`; the JVM one is round 4's).
+// `Peer.takeOutgoingFrames` queues. `Link.kt` is the driver that does it
+// (`rust/ark-client/src/link`), over a `QueuedSocket` around one of these.
 package dev.arkdb.client
 
 /** One connection, as the link sees it: frames go in, and it can be closed. */

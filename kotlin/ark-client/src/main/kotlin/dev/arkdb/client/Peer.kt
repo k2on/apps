@@ -5,10 +5,11 @@
 // client is a driver's: ids and times drawn (`Autos`), who authors (a
 // login, or nobody), what is written when, and going alone and back.
 //
-// The socket is the caller's here, sans-io: `connected`, `recvFrame` and
-// `takeOutgoingFrames` are the three calls a transport makes
-// (`Transport.kt`), and the reference's dial, backoff and pump loop
-// (`ark_client::link`) are round 4's, with the JVM peer in the fleet.
+// The socket is a `Link` (`Link.kt`, the reference's `ark_client::link`):
+// `connect` makes one, and every `pump` dials if due, hands the engine what
+// arrived, settles once, sends what it queued and writes what moved. The
+// sans-io half is still here for a transport of the caller's own:
+// `connected`, `recvFrame` and `takeOutgoingFrames`.
 package dev.arkdb.client
 
 import dev.arkdb.Authority
@@ -68,6 +69,13 @@ public class Domain(public val module: Module) {
     public fun function(name: String): Pair<ByteArray, Function>? =
         byName[name]?.let { h -> dev.arkdb.Hex.decode(h) to closures[h]!!.function }
 
+    /** `Domain::query`. */
+    public fun query(name: String): Pair<ByteArray, Function> {
+        val (h, f) = function(name) ?: throw PeerError("the module has no function $name")
+        if (f.kind != FnKind.Query) throw PeerError("$name is not a query")
+        return h to f
+    }
+
     /** `Domain::mutator`. */
     public fun mutator(name: String): Pair<ByteArray, Function> {
         val (h, f) = function(name) ?: throw PeerError("the module has no function $name")
@@ -82,23 +90,102 @@ public class Domain(public val module: Module) {
     }
 }
 
-/** How a peer opens (`ark_client::Options`): who authors, the token, alone or not, the autos. */
+/**
+ * How a peer opens (`ark_client::Options`): who authors, the token, alone or not, the autos, and
+ * the numbers its link runs on.
+ */
 public data class Options(
     val user: String,
     val session: String,
     val token: String?,
     val alone: Boolean = false,
     val autos: Autos = Autos.System(),
+    val timing: Timing = Timing(),
 ) {
+    /** The same, with a link's numbers (`with_timing`). */
+    public fun withTiming(t: Timing): Options = copy(timing = t)
+
     public companion object {
         /** A login of a server. */
         public fun server(user: String, session: String, token: String?): Options =
             Options(user, session, token)
 
+        /** Nobody signed in: authoring as nobody, dialling nothing until a sign-in. */
+        public fun signedOut(): Options = Options("", "", null)
+
         /** Its own authority, as `user` under the session `local`. */
         public fun alone(user: String): Options = Options(user, "local", null, alone = true)
     }
 }
+
+/** Where one of this peer's own intents stands (`ark_client::Standing`). */
+public sealed class Standing {
+    /** Applied here, not yet answered by the authority. */
+    public object Pending : Standing()
+
+    /** In the log. */
+    public object Confirmed : Standing()
+
+    /** Never going to be in the log, and the reason every replica reaches. */
+    public data class Rejected(val why: String) : Standing()
+
+    /** Not an intent this peer authored (in this run, or pending from the last). */
+    public object Unknown : Standing()
+}
+
+/** What one [Peer.pump] came to (`ark_client::Pumped`). */
+public class Pumped {
+    /** A frame arrived. */
+    public var moved: Boolean = false
+    /** The socket opened, and `Hello` went out. */
+    public var opened: Boolean = false
+    /** The socket that was open went, and why. The link dials again. */
+    public var dropped: String? = null
+    /** The server turned this login away; the link stops until a new token and a reconnect. */
+    public var denied: String? = null
+    /** Verdicts that arrived. */
+    public var rejected: Int = 0
+    /** Something worth a status line: a frame that did not decode, a write that failed. */
+    public var note: String? = null
+}
+
+/** Everything a status line or a debug screen shows (`ark_client::Status`). */
+public data class Status(
+    val user: String,
+    val session: String,
+    val alone: Boolean,
+    /** Nobody is signed in: nothing is dialled. */
+    val signedOut: Boolean,
+    /** The engine is linked: the socket is open and `Hello` was said. */
+    val linked: Boolean,
+    /**
+     * The link in a word: `alone`, `signed out`, `offline`, `idle`, `connecting`, `joining`,
+     * `open`, `waiting`.
+     */
+    val link: String,
+    /** Intents a join re-queued that the server has not yet answered. */
+    val joining: Int,
+    /** Where this peer last shared a log with a server. */
+    val fork: Fork,
+    val url: String?,
+    /** Connections opened. */
+    val opens: Long,
+    /** The connection count the engine keeps: what a live room compares. */
+    val epoch: Long,
+    /** The last confirmed sequence. */
+    val cursor: Seq,
+    val pending: Int,
+    /** Pending intents the server answered `held`: it does not run their function yet (D1). */
+    val held: Int,
+    /** The server runs another module than this peer's (D1). */
+    val behind: Boolean,
+    val diverged: Int,
+    val denied: String?,
+    val lastClose: String?,
+    /** Live frames received, decoded or not. */
+    val heardFrames: Long,
+    val badFrames: Long,
+)
 
 /** A verdict against an intent this peer authored (`ark_client::Rejection`). */
 public data class Rejection(val id: Id, val reason: String)
@@ -116,6 +203,7 @@ private constructor(
     private val storage: Storage,
     ctx: Ctx,
     private val autos: Autos,
+    private val timing: Timing,
     private val writer: ReplicaWriter,
     public var fork: Fork,
     authored: Set<Id>,
@@ -142,6 +230,13 @@ private constructor(
     public val rejections: MutableList<Rejection> = ArrayList()
     private val checks = Checks()
 
+    /** The link, if [connect] made one. */
+    public var link: Link? = null
+        private set
+
+    private var heardFrames: Long = 0
+    private var badFrames: Long = 0
+
     private class AloneLog(
         val journal: Journal,
         val unwritten: MutableList<Triple<Seq, LogEntry, FactList>>
@@ -159,6 +254,17 @@ private constructor(
     /** The replica. */
     public val replica: Replica
         get() = client.replica
+
+    /**
+     * The schema this peer's store is laid out under: the module's, or — for a peer holding a union
+     * of the module's scopes — the device's, whose tables have only the held columns (D2).
+     */
+    public val storeSchema: Schema
+        get() = client.replica.schema
+
+    /** The optimistic store — `confirmed` with `pending` replayed — which every query reads. */
+    public val store: MemoryStore
+        get() = client.replica.view
 
     /** The cursor: the last sequence confirmed. */
     public val cursor: Seq
@@ -231,6 +337,7 @@ private constructor(
                     storage,
                     ctx,
                     opts.autos,
+                    opts.timing,
                     writer,
                     fork,
                     pending.map { it.id }.toSet(),
@@ -262,6 +369,7 @@ private constructor(
         collectRejections()
         writer.forgetPending()
         persist()
+        reconnect()
     }
 
     /** `sign_out`: the token forgotten and the connection dropped; the login is kept. */
@@ -269,6 +377,7 @@ private constructor(
         if (alone) return
         signedOut = true
         client.token = null
+        link?.stop("signed out")
         if (client.linked) client.disconnected()
     }
 
@@ -285,6 +394,8 @@ private constructor(
      */
     public fun leave() {
         if (alone) return
+        link?.stop("alone")
+        link = null
         if (client.linked) client.disconnected()
         client.denied = null
         startAlone()
@@ -310,6 +421,21 @@ private constructor(
         }
     }
 
+    /**
+     * `join`, alone → server (`Peer::join`): [join] up to the connecting, then the link to `url`
+     * dialled — as `login`, or as nobody for a sign-in to make the signer's. On a peer that already
+     * has a server, a sign-in (with a login) and [connect].
+     */
+    public fun join(url: String, login: Login?) {
+        join(login?.user?.id, login?.session, login?.token)
+        connect(url)
+    }
+
+    /** What the next `Hello` proves the login with; [reconnect] for it to be said now. */
+    public fun setToken(token: String?) {
+        client.token = token
+    }
+
     // -- a screen's side ----------------------------------------------------------
 
     /**
@@ -333,6 +459,224 @@ private constructor(
 
     /** What a view of the optimistic store is told (`take_changes`). */
     public fun takeChanges(): Changes = client.replica.takeChanges()
+
+    /** `query`: a query by name over the optimistic store, as this peer's user. */
+    public fun query(name: String, args: Map<String, Value>): Value {
+        val (h, _) = domain.query(name)
+        val st = store
+        return try {
+            dev.arkdb.Eval.queryClosure(
+                st.schema, domain.closures[dev.arkdb.Hex.encode(h)]!!, ctx, args, st)
+        } catch (e: dev.arkdb.EvalFault.Verdict) {
+            throw Refused(e.refusal)
+        } catch (e: dev.arkdb.EvalFault.Bug) {
+            throw PeerError("bug: $name: ${dev.arkdb.debugEvalError(e.error)}")
+        }
+    }
+
+    /** `check`: the form validator over a partial input; a message per failing field. */
+    public fun check(name: String, partial: Map<String, Value>): dev.arkdb.Checked {
+        val (h, _) = domain.function(name) ?: throw PeerError("the module has no function $name")
+        val st = store
+        return try {
+            dev.arkdb.Eval.check(
+                st.schema, domain.closures[dev.arkdb.Hex.encode(h)]!!, ctx, partial, st)
+        } catch (e: dev.arkdb.EvalFault) {
+            throw PeerError("$name: ${e.message}")
+        }
+    }
+
+    /** `view`: a query held as a list and kept up to date ([ClientView]). */
+    public fun view(name: String, args: Map<String, Value>): ClientView =
+        ClientView.open(this, name, args)
+
+    /** Verdicts against this peer's intents since the last ask (`take_rejections`). */
+    public fun takeRejections(): List<Rejection> {
+        collectRejections()
+        val out = ArrayList(rejections)
+        rejections.clear()
+        return out
+    }
+
+    /** Where one of this peer's intents stands: what a screen shows beside the item it made. */
+    public fun standing(id: Id): Standing {
+        rejected[id]?.let {
+            return Standing.Rejected(it)
+        }
+        val r = client.replica
+        r.rejections
+            .firstOrNull { it.first == id }
+            ?.let {
+                return Standing.Rejected(refusalText(it.second))
+            }
+        return when {
+            r.pending.any { it.id == id } -> Standing.Pending
+            id in authored -> Standing.Confirmed
+            else -> Standing.Unknown
+        }
+    }
+
+    /** Intents authored here and not yet answered. */
+    public val pendingLen: Int
+        get() = client.replica.pending.size
+
+    /** Whether the engine is linked: the socket is open and `Hello` said. */
+    public val linked: Boolean
+        get() = client.linked
+
+    /** How many connections this peer has had. */
+    public val epoch: Long
+        get() = client.epoch
+
+    /** Why the server last turned this login away, until a reconnect. */
+    public val denied: String?
+        get() = client.denied
+
+    /** What the room said since the last ask; never durable. */
+    public fun heard(): List<ByteArray> = client.takeHeard()
+
+    // -- the socket ---------------------------------------------------------------
+
+    /**
+     * `connect`: dial the server's sync socket (`ws://host/sync`) and keep it up — every [pump]
+     * moves frames, and a drop dials again with a backoff. Replaces any link there was. Signed out,
+     * the link is kept and not dialled: a sign-in starts it.
+     */
+    public fun connect(url: String, dial: Dial = platformDial(timing)) {
+        disconnect()
+        client.denied = null
+        val l = Link(url, dial, timing)
+        if (signedOut) l.stop("signed out")
+        link = l
+    }
+
+    /** Go offline: close the socket and stop dialling. Everything authored meanwhile is pending. */
+    public fun disconnect() {
+        link?.stop("offline")
+        if (client.linked) client.disconnected()
+    }
+
+    /**
+     * Dial again after [disconnect] or a denial — with a new token, usually. Signed out, nothing.
+     */
+    public fun reconnect() {
+        if (signedOut) return
+        client.denied = null
+        val l = link ?: return
+        if (l.isOpen) {
+            l.stop("reconnecting")
+            client.disconnected()
+        }
+        l.resume()
+    }
+
+    /**
+     * `pump`: one turn of the link — dial if due, hand the engine what arrived, settle it once
+     * (R8), send what it queued, and write whatever moved. Call it on a tick; fifty milliseconds is
+     * what the clients here use. Without a link it still writes, and a peer alone needs nothing
+     * else.
+     */
+    public fun pump(): Pumped {
+        val p = Pumped()
+        val l = link
+        if (l != null) {
+            val polled = l.poll()
+            if (polled.opened) {
+                client.connected()
+                p.opened = true
+            }
+            for (f in polled.frames) {
+                p.moved = true
+                try {
+                    placeFrame(f)
+                } catch (e: Exception) {
+                    badFrames++
+                    p.note = "a frame from the server: ${e.message ?: e.javaClass.simpleName}"
+                }
+            }
+            settle().firstOrNull()?.let { n ->
+                p.note = "the server's state at $n is not this replica's"
+            }
+            polled.closed?.let { why ->
+                client.disconnected()
+                p.dropped = why
+            }
+            client.denied?.let { reason ->
+                val now = link
+                if (now != null && now.state != LinkState.Idle) {
+                    now.stop("denied: $reason")
+                    p.denied = reason
+                }
+            }
+            val frames = takeOutgoingFrames()
+            link?.let { now -> for (f in frames) now.send(f) }
+        }
+        val before = rejections.size
+        collectRejections()
+        p.rejected = rejections.size - before
+        try {
+            persist()
+        } catch (e: Exception) {
+            p.note = e.message ?: e.javaClass.simpleName
+        }
+        return p
+    }
+
+    /** `status`: everything a status line or a debug screen shows. */
+    public fun status(): Status {
+        val joining = joining()
+        val l = link
+        val word =
+            when {
+                alone -> "alone"
+                signedOut -> "signed out"
+                l == null -> "offline"
+                else ->
+                    when (val st = l.state) {
+                        is LinkState.Idle -> "idle"
+                        is LinkState.Connecting,
+                        is LinkState.Open ->
+                            if (joining > 0) "joining"
+                            else if (st is LinkState.Open) "open" else "connecting"
+                        is LinkState.Waiting -> "waiting"
+                    }
+            }
+        return Status(
+            user = ctx.user,
+            session = ctx.session,
+            alone = alone,
+            signedOut = signedOut,
+            linked = client.linked,
+            link = word,
+            joining = joining,
+            fork = fork,
+            url = l?.url,
+            opens = l?.opens ?: 0,
+            epoch = client.epoch,
+            cursor = client.replica.cursor,
+            pending = pendingLen,
+            held = client.held(),
+            behind = client.behind(),
+            diverged = client.replica.diverged.size,
+            denied = client.denied,
+            lastClose = l?.lastClose,
+            heardFrames = heardFrames,
+            badFrames = badFrames,
+        )
+    }
+
+    // Intents a join re-queued that are still pending.
+    private fun joining(): Int =
+        if (local.isEmpty()) 0 else client.replica.pending.count { it.id in local }
+
+    /**
+     * Close: the link stopped, and whatever is not yet written, written (the reference's `Drop`).
+     */
+    public fun close() {
+        link?.stop("closed")
+        link = null
+        persist()
+    }
 
     // -- sans-io: a transport of the caller's own ---------------------------------
 
@@ -364,6 +708,7 @@ private constructor(
     private fun placeFrame(bytes: ByteArray) {
         when (val got = ServerMsg.decodeFor(bytes, client.schema)) {
             is Received.Msg -> {
+                if (got.msg is ServerMsg.Heard) heardFrames++
                 if (got.msg is ServerMsg.Batch || got.msg is ServerMsg.SnapshotOf) served()
                 client.recv(got.msg)
             }
