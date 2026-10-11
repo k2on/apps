@@ -235,6 +235,50 @@ coordinator and handed out separately, so that a scenario stays a witness
 rather than becoming a patch. Every scenario is falsified once. The
 commit rules of `docs/plan-v4.md` Part 2 apply.
 
+## 6. Mixed runtimes: Kotlin peers beside Rust ones
+
+`docs/plan-phones.md` round 4. The Kotlin client has a headless peer of
+its own, `harken-peer-kt` (`kotlin/harken-peer`, `nix build
+.#harken-peer-kt`): §1's flags, commands and answers line for line, the
+same directory records, every function of the module interpreted rather
+than native. The fleet starts one from another binary —
+`PeerProc::kotlin(bin)` and `Fleet::kotlin_peer`, the binary
+`FLEET_KOTLIN_PEER` — and `harken/server/tests/fleet_kotlin.rs`, its own
+target, runs six scenarios with mixed peers, each ending on §2's
+invariants (or, across revisions, on `converged_across`):
+
+| | scenario | what it holds |
+|---|---|---|
+| K1 | two Rust peers and a Kotlin one through partitions and restarts | the Kotlin peer black-holed with ten adds lands them after a Rust device's five; killed with `-9` holding five more; a Rust peer cut and restarted; the server killed and restarted — converged each time |
+| K2 | a Kotlin peer alone, then joining | 41 intents sequenced alone land after bob's, in their order, all alice's; `leave`, three alone, `join` without a restart: after the Rust device's three |
+| K3 | a Kotlin peer through a server restart and a lost log | SIGTERM and restart, nothing lost or twice; the log deleted, the three re-based onto the nine pending |
+| K4 | new peer, old server, per pinned revision | a Kotlin peer of the grown domain held three times by the old server, landed when it is upgraded in place |
+| K5 | old peer, new server, per pinned revision | a Kotlin peer running that revision's own `harken.ark` beside two Rust peers of this build: converged, reported behind, its songs at the old `add_song` hash |
+| K6 | a Kotlin peer partial under a scoped module | harken with one scope (a person holds their own playlists), hosted by the server; alice on Rust and on Kotlin, bob on Rust; each confirmed hash is the person's union of the log's state (`Holdings::digest`), not the whole store's, and alice's two runtimes agree |
+
+`checks.fleet-kotlin` builds `harken-peer-kt`, sets `FLEET_KOTLIN_PEER`
+and the pinned revisions as `checks.versions` does, and runs the six one
+at a time; without the variable each says it is skipped and passes, and
+`checks.rust` and `checks.versions` run no Kotlin peer. Each was falsified
+once with the Kotlin peer broken (the scenario's doc comment says how);
+none found a disagreement between the two runtimes.
+
+Measured in the nix sandbox (`nix build .#checks.x86_64-linux.fleet-kotlin`,
+release, one scenario at a time; all seven tests 14.7 s):
+
+| what | took |
+|---|---|
+| a Kotlin peer started and signed in (a JVM's start included) | 0.58–0.69 s |
+| its first sync of 41 entries | 0.21 s |
+| converge after its black hole of ten | 0.19–0.21 s |
+| converge after a `kill -9` of each kind | 0.25–0.29 s |
+| 41 local intents of a Kotlin peer join (restart to converged) | 0.97–1.09 s |
+| a server restart under a Kotlin peer, to converged | 0.31–0.40 s |
+| a lost log under a Kotlin peer, restart to converged | 0.41 s |
+| a Kotlin peer held by an old server, upgraded under, to landed | 0.47–0.61 s |
+| an old-module Kotlin peer beside new ones, to converged | 0.43–0.54 s |
+| a partial Kotlin peer beside partial Rust ones, to converged | 0.18–0.19 s |
+
 ## Measured
 
 What landed, and what it found. The fleet is `harken/server/tests/fleet.rs`

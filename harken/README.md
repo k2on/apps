@@ -16,18 +16,19 @@ server/    ark-server with harken's own parts: the scanner, the listening desk,
            module (server/README.md)
 iced/      the desktop and browser client, on arkui and ark-client; the `demo`
            feature is the seeded library GitHub Pages publishes
+android/   the phone: Compose over the Kotlin client at spec v4, loading
+           harken.ark from its assets and interpreting it (android/README.md,
+           kotlin/README.md, docs/plan-phones.md)
 ```
 
-Frozen at spec v3, with the runtimes they are built on (`swift/FROZEN.md`,
-`kotlin/FROZEN.md`), and not following the domain since:
+Frozen at spec v3, with the runtime it is built on (`swift/FROZEN.md`), and
+not following the domain since:
 
 ```
 domain/gen/   swift: arkc's print of what the phone called, from the v3
-              harken.ark; there is no printer now (the Kotlin print is
-              deleted: a phone loads harken.ark, docs/plan-phones.md)
+              harken.ark; there is no printer now (a phone loads harken.ark,
+              docs/plan-phones.md)
 ios/          SwiftUI over ArkDBClient and the printed Swift (ios/README.md)
-android/      Compose over the v3 Kotlin runtime (android/README.md); out of
-              the flake until round 4 of docs/plan-phones.md rewires it
 ```
 
 ## The domain
@@ -85,9 +86,15 @@ options). The frozen iOS app is Xcode over `ios/project.yml`, since only a
 Mac can build one.
 
 Two workflows build from `main`: `pages.yml` publishes `harken-web` at
-<https://k2on.github.io/apps/harken/>, and `apk.yml` built `harken-apk` —
-the frozen v3 app — which is out of the flake until round 4 of
-`docs/plan-phones.md`, so that workflow has nothing to build until then.
+<https://k2on.github.io/apps/harken/>, and `apk.yml` builds `harken-apk`,
+the Android app over the Kotlin client (`nix build .#harken-apk`,
+`android/README.md`).
+
+The Kotlin client has a headless peer too, `harken-peer-kt`
+(`nix build .#harken-peer-kt`): `harken-peer`'s lines on another runtime,
+which `checks.fleet-kotlin` runs beside Rust peers — through partitions and
+restarts, alone and joining, a lost log, the version matrix's two shapes
+and a scoped module (`docs/plan-fleet.md`).
 
 ## Running it
 
@@ -310,9 +317,11 @@ what each peer reads, not what it hashes.
 
 ## Not verified
 
-No phone has run either frozen app, and the iOS screens have not met a
-compiler. The phones speak spec v3 and the server now runs a v4 module;
-they are not expected to sync with it, and nobody has tried.
+No phone has run the Android app: `nix build .#harken-apk` compiles it
+and the APK was installed nowhere. Its client is held to the suite and to
+the fleet on the JVM (`harken-peer-kt`), not on Android. The frozen iOS app
+has not met a compiler; it speaks spec v3, and the server runs a v4
+module.
 No desktop window has been opened: the browser build has been drawn in
 headless Chromium, and the desktop only driven through its tests. Nothing
 here has met a real Home Assistant or a real OpenID Connect provider.

@@ -1,39 +1,25 @@
 # harken for Android
 
-**Out of the flake until round 4 of `docs/plan-phones.md`.** What follows
-describes the v3 app as it stood: its printed domain is deleted (a phone
-loads `harken.ark`), and the Kotlin runtime under it is being rewritten at
-v4 (`kotlin/README.md`), so `nix build .#harken-apk` no longer exists; its
-derivation is as it stood at `2874274`.
-
-Compose over the Kotlin runtime (`kotlin/ark-runtime`), the Kotlin client
-(`kotlin/ark-client`) and harken's domain written in the authoring
-vocabulary (`domain/gen/kotlin/{Schema,Library,Playlists,Module}.kt`,
-package `harken.gen` — see `spec/AUTHORING.md`). It is the phone the
-top-level README describes: an exact replica of the log that runs the
-domain **natively, in Kotlin** — the same
-program that, run under Emit, is the module the server and the desktop hold
-by hash — with nothing crossing a bridge and no code generated into a
-private shape.
+Compose over the Kotlin client at spec v4 (`kotlin/ark-runtime`,
+`kotlin/ark-client`, `kotlin/README.md`). The phone is a **client**: it
+loads `harken.ark` — the module the domain crate writes, the one the server,
+the desktop and the browser run — from its own assets, verifies it, and
+interprets every function of it. Nothing of the domain is written in Kotlin,
+and nothing is generated into the app: what the screens call is a mutation
+or a query of the module, by name (`docs/plan-phones.md`).
 
 **Assembled, not run.** `nix build .#harken-apk` compiles every Kotlin file
-here and produces the APK, so the Compose code is at least what the compiler
-accepts; nothing in the container this was written in can install or run
-it, and no phone has run it. What *has* been exercised is everything under
-it: `ark-runtime` and `ark-client` build and pass their tests under `gradle
-build` (JVM 21); the four domain files compile in the runtime's tests, emit
-a module that verifies, every procedure of them hashes as `harken.ark`'s,
-and each is run natively and by the interpreter over its emitted IR and
-must agree, refusals included (`kotlin/ark-runtime/src/test/.../Authoring.kt`).
-`Phone.kt`, the part of the app below the screens, has no Android in it;
-it was compiled off the phone with the domain and driven once by hand
-against a `LocalHub` running the whole of `harken.ark` (a scanner authoring
-`add_song`, a signed-out phone signing in, a second and a third device, a
-re-login) — a scratch program, not a committed test, since the app's build
-has no test dependencies recorded. The Compose and navigation code is
-written against the current stable APIs (Compose BOM 2024.12.01, Material
-3, Navigation 2.8) and checked by reading and by the compiler. Expect the
-first run on a real phone to want small fixes.
+here and produces the APK, so the Compose code is what the compiler accepts;
+nothing in the container this was written in can install or run it, and no
+phone has run it. What *has* been exercised is everything under it, on the
+JVM: the runtime and the client pass every client vector of `spec/vectors`
+and every trace of `packages.trace-corpus` (`checks.kotlin`); the client's
+link, sign-in and maintained views have tests of their own
+(`ClientTests`); and `harken-peer-kt`, a headless peer on the same client,
+runs in the process fleet beside Rust peers — partitions, restarts, a lost
+log, alone and joining, old and new servers, a scoped module
+(`checks.fleet-kotlin`, `docs/plan-fleet.md`). None of it has run on
+Android's runtime. Expect the first run on a real phone to want small fixes.
 
 ## Building
 
@@ -53,6 +39,12 @@ project; the Kotlin runtime and client come in through the composite build
 as they do on a laptop. A new dependency moves that file:
 
     nix run .#harken-apk-deps         # re-records deps.json; needs the network
+
+Moving the app onto the v4 client did not move it: the client's one
+dependency, OkHttp, was already in the graph, and the Kotlin build's
+`harken-peer` uses gradle's own `application` plugin. Maven Central rate-
+limits a cold fetch of the graph (HTTP 429); a build that fails on it is
+retried after a pause, and the artifacts already fetched stay in the store.
 
 **Why aapt2 is compiled here, and how.** Google ships the SDK's native tools
 for x86_64 Linux and macOS only, so an ARM Linux machine has no `aapt2` to
@@ -88,146 +80,110 @@ keystore under `~/.android`. The APK is signed with the debug key every
 Android toolchain shares: it installs anywhere and belongs nowhere public.
 
 With Android Studio (Ladybug or later) or a command-line SDK with platform 35
-and build-tools 35.0.0, plus JDK 17 or 21, the same project builds directly:
+and build-tools 35.0.0, plus JDK 21, the same project builds directly:
 
     cd harken/android
     gradle assembleDebug          # or open the directory in Android Studio
     adb install app/build/outputs/apk/debug/app-debug.apk
 
-The domain is referenced by source directory rather than copied:
-`app/build.gradle.kts` adds `../../domain/gen/kotlin`. Those four files are
-what `arkc gen kotlin` prints from `harken.ark` — the line-for-line Kotlin
-spelling of `domain/src/{schema,library,playlists,module}.rs` — with only
-what the phone calls (`clientFunctions` in `flake.nix`):
-
-    nix run .#arkc -- gen kotlin harken/domain/harken.ark \
-        harken/domain/gen/kotlin --package harken.gen --name Harken \
-        --only create_playlist,add_to_playlist,remove_from_playlist,library,playlists,playlists_of,playlist \
-        --fmt "ktfmt --kotlinlang-style"
-
-So `Library.kt` has the `library` query and no `add_song`: the scanner's
-entries arrive with what the server sends for them, which the replica
-applies without running anything. The schema is always whole. `harken.gen.module()` is a
-`dev.arkdb.authoring.Module`; `Session.open(dir, module(), user, url)`
-emits it once for the IR the replicas hash and verify against, and hands
-the session its `procedures()` to run natively. Never edit the four files
-by hand once the printer writes them; regenerate.
-
-The app is built for JVM 21 (`compileOptions`, `jvmTarget`), as the
-runtime is: the domain calls the vocabulary's inline functions
-(`router<S>()`, `col<T, V>()`, `ctx.newId(..)`), and Kotlin refuses to
-inline bytecode built for a newer JVM than its caller. D8 accepts Java 21
-class files.
+**The module is an asset.** `app/build.gradle.kts` copies
+`harken/domain/harken.ark` into `build/generated/ark-assets` before every
+build (`copyArk`) and adds that directory to the app's assets; the app reads
+`assets/harken.ark` at start and hands the bytes to `Domain.fromBytes`, which
+decodes and verifies it. A new release of the domain is a new `harken.ark`
+and a rebuild; nothing in the app's sources moves with it.
 
 ### How the runtime gets in
 
 `settings.gradle.kts` says `includeBuild("../../kotlin")`: a composite build.
 Gradle substitutes the app's `implementation("dev.arkdb:ark-runtime")` and
 `implementation("dev.arkdb:ark-client")` with the modules of that build, which
-keeps its own settings, plugin versions and toolchain. A project reference
-(`include(":ark-runtime")` with a redirected `projectDir`) would have worked
-too, but would have pulled those modules under this build's plugin
-management; the composite is the smaller intrusion.
+keeps its own settings, plugin versions and toolchain.
 
-Two things to know if the build objects:
-
-- The Kotlin build sets `jvmToolchain(21)`, so the two libraries arrive as
-  Java 21 class files. AGP 8.7's D8 accepts them; an older AGP would not, and
-  the fix is to bump AGP rather than to lower the toolchain (the JVM build
-  is pinned to 21 by its own contract).
+- The Kotlin build sets `jvmToolchain(21)`, so the libraries arrive as Java
+  21 class files; AGP 8.7's D8 accepts them, and the app is built for 21 too.
 - The composite needs the same Kotlin plugin version on both sides; both say
   2.0.21.
+- The client is written for API 26, the app's `minSdk`: `java.nio.file` only
+  where 26 has it (a directory synced after a rename), no `java.net.http`;
+  its HTTP is `HttpURLConnection` and its WebSocket OkHttp's.
 
 ## What it does
 
-Four screens under one `Scaffold`, with a bottom bar and a status line in the
-top bar (`signed out`, `linked`, `offline, retry in 4s`, `alone`, `turned
-away: …`, and how many changes are not synced yet):
+`Model` holds one `dev.arkdb.client.Peer` on a thread of its own: opened
+over a `DirStorage` in a directory per server (or alone), not per person —
+the log is the server's and every person reads it — linked to the server's
+`/sync`, pumped every fifty milliseconds. Everything that touches the peer
+runs on that thread; the screens read `StateFlow`s.
 
-- **It works with nobody signed in.** The first launch opens the session
-  with no user (`Session.open(dir, module, null, url)`): everything is
-  authored as nobody, applied, written down, and nothing is sent anywhere.
-  Signing in (Settings → Account; dev auth, a name is a login) makes all of
-  it that person's (`Session.signIn`) and syncs it; the app then opens as
-  them on every launch. Signing out reopens with nobody over the same
-  replica — one directory per server, not per person, because the log is
-  the server's — and whatever that person left pending stays theirs and
-  goes when they sign in again: the server accepts an entry authored under
-  an older login of the same person.
+**The lists are spliced, not re-read.** `library`, `playlists` and the open
+`playlist` are maintained views (`Peer.view`, `ClientView`): hydrated once,
+then handed every `Changes` the peer reports — a rebase's included — and the
+patches each answers with are spliced into the list the screen holds
+(`ClientView.splice`). Only a `Reset` reads one again: the optimistic store
+replaced (opening over a snapshot), another signer, or a refusal of the
+view's middleware appearing or clearing. Changing the selected playlist
+re-opens the two views read against it, which is a hydrate.
+
+Four screens under one `Scaffold`, with a status line in the top bar
+(`signed out`, `linked`, `alone`, `turned away: …`, the link in a word —
+`connecting`, `waiting`, `joining` — and how many changes are not synced):
+
+- **It works with nobody signed in.** The first launch opens the peer signed
+  out: everything is authored as nobody, applied, written down, and nothing
+  is dialled. Signing in makes all of it that person's and syncs it; the
+  login is kept and the app opens as them on every launch. Signing out
+  stops the link and forgets the token; whatever that person left pending
+  stays theirs and goes when they sign in again.
 - **Library** — everything, in the order it was added (`library`, read
   against the selected playlist so each row knows whether it is on it). The
   row's button puts it on the selected playlist or takes it off; its menu
   lists every playlist, ticked by `playlists_of`, each a toggle. Songs arrive
-  from the server's scanner (this build carries no `add_song`); alone or
-  signed out, the library is empty and the screen says why.
-- **Playlists** — the person's playlists in the order they were made
-  (`playlists`); a `+` opens a dialog to name a new one (`create_playlist`
-  trims and refuses a blank; a name the person already has is kept and
-  numbered by the log, "Favorites (1)"). Tapping one selects it and opens it.
+  from the server's scanner — `add_song` is the library's role's, not a
+  phone's — so alone or signed out the library is empty, and the screen says
+  why.
+- **Playlists** — the person's playlists in the order they were made; a `+`
+  names a new one, checked as it is typed by `create_playlist`'s own input
+  checks (the form validator, `Peer.check`); a name the person already has
+  is kept and numbered by the log, "Favorites (1)". Tapping one selects it
+  and opens it. **There is no rename**: harken's module has no mutation for
+  one, and the app invents nothing the module does not say.
 - **Playlist** — its contents in playlist order (`playlist`, which answers
-  with the library's own rows). Swipe left, or the trash button, removes one.
-- **Favorites.** The app makes a default "Favorites" only for somebody with
-  no playlist at all, and only once it knows: alone at once; signed in after
-  the link has been up two seconds, so the log has arrived; signed out, on
-  the first add with no playlist to add to — not on opening, so that signing
-  in later on a second device does not hand the person a "Favorites (1)".
+  with the library's own rows). Swipe left, or the trash button, removes one
+  (`remove_from_playlist`).
+- **Favorites.** Adding with no playlist at all makes "Favorites" first
+  (`create_playlist`, then `add_to_playlist` on it).
 - **Where every change stands.** Each change this phone makes is kept with
-  its entry id, and `Session.statusOf` says where it is: under a playlist or
-  an item, *not synced yet* while pending, nothing once confirmed, and *not
+  its entry id, and `Peer.standing` says where it is: under a playlist or an
+  item, *not synced yet* while pending, nothing once confirmed, and *not
   saved:* followed by the server's own sentence when it was rejected. The
   newest rejection is also a snackbar, and Settings lists every change.
-- **Settings** — the account; the server URL (`ws://…/sync`; `10.0.2.2`
-  reaches the emulator's host) and **work alone**, which opens the session
-  with no server so the phone sequences its own log; applying closes the
-  session and reopens it. A status block prints the cursor, what is not
-  synced, not saved and diverged, and a button asks the authority to verify.
+- **Settings** — the account; the server (`http://host:port`, the socket
+  `/sync` beside it; `10.0.2.2` reaches the emulator's host) and **work
+  alone**, which opens the peer as its own authority over a local history;
+  applying closes the peer, writes it down, and reopens it. A status block
+  prints the cursor, what is not synced, what the server holds back (a
+  module older than this phone's), what diverged, the link in a word,
+  whether it is linked, how many connections it has had, whether the server
+  runs a newer module, the last close and a denial; a button asks the
+  authority to verify, and its answer is said when it arrives.
 
-Every mutation and every query goes through the session by name, and the
-session runs the procedure **natively**: the replica holds
-`module().procedures()` by the hash an entry names, so the optimistic
-apply, the rebase's replay, and a peer alone sequencing its own entries all
-run the Kotlin body directly. The interpreter runs only what arrives that
-the phone has no procedure for:
+**Sign-in is dev auth only.** The app signs in the way `harken-peer` does
+under a dev server: a name, `/auth/login` answered with a code and no page,
+`/auth/exchange` for the login (`Auth.login` in the client). A server with a
+real OpenID Connect provider answers with a page for a browser, and the app
+says so instead of opening one: the client's `Auth.login` takes the
+desktop's loopback flow (an `open` callback and a port the code comes back
+to), but a phone wants a custom tab and a redirect it owns, which nothing
+here has built or tried.
+
+Every mutation and every query goes through the peer by name and is
+interpreted:
 
 ```kotlin
-session.mutate("add_to_playlist", mapOf("playlist_id" to Value.id(pid), "media_id" to Value.id(mid)))
-session.query("playlist", mapOf("playlist_id" to Value.id(pid)))
+peer.mutate("add_to_playlist", mapOf("playlist_id" to Value.id(pid), "media_id" to Value.id(mid)))
+peer.view("playlist", mapOf("playlist_id" to Value.id(pid)))
 ```
 
-The entry recorded is byte-identical to what the interpreter would record,
-and `kotlin/ark-client`'s tests hold a native session and an interpreted
-one to the same entries, changes and hash on the demo module.
-
-The **new-playlist dialog** checks the name as it is typed with the form
-validator — `Session.check("create_playlist", input)`, which runs
-`create_playlist`'s own input checks (`trim`, `min(1).why("a playlist
-needs a name")`, `max(120)`) — and shows the message under the field; the
-button is enabled exactly when the mutation would accept the name. A query
-the `owned` middleware refuses (a playlist that is not this person's) draws
-as an empty list.
-
-`Phone.kt` is the domain as the screens see it, with no Android in it:
-the rows as data classes, each query and mutation by name, the default
-playlist's rule, and the caption a standing earns. `Model.kt` is one
-`AndroidViewModel` around a `Session`: it pumps it every 50 ms from
-`viewModelScope` (so every call into the session is on the main thread, the
-session's contract), re-reads the lists on the session's change listener,
-re-reads where each change stands on every pump, and turns refusals and
-rejections into a snackbar. State lives under
-`filesDir/ark/<server-…|alone>/` — confirmed store, cursor, pending
-intents, verdicts, and, alone, the log the phone sequenced — written to a
-temp file and renamed.
-
-## Not here yet
-
-- Sign-in: dev auth only; the token on the socket is the user's name and
-  the login is `dev`. OpenID Connect (what `ark-auth` does for the desktop
-  and the page) has no phone flow here yet.
-- Playback: a track's `file` is known, not played.
-- Albums, artists, composers and works: the domain has them; the phone
-  carries only the procedures its four screens call.
-- Adopting a phone's own log into a server it later meets (§3.10) is not in
-  the client machine; switching from alone to a server starts a fresh
-  replica directory.
-- The server's `Agree` after **Verify** arrives on a later pump and is not
-  yet drawn; alone, the answer is immediate and shown.
+What the phone records is byte-identical to what any other peer records for
+the same intent, which is what the suite and the fleet hold the client to.

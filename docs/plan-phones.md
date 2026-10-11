@@ -347,3 +347,96 @@ module. The fixture generator is a scratch program over `rust/ark-client`
 that no build here compiles; Rust, `spec/vectors` and the Swift tree are
 untouched. `DirStorage` was not run against a real disk crash, and does
 not sync its directory (`java.io` cannot), where the reference does.
+
+**Round 4, Kotlin in the fleet and on the phone** (`5fa5d42`, `6d6a7bd`,
+`92599b0`, `c239083`, `bbdc1ad`, `439e3d6`, and the docs).
+
+Two things round 3 left first. Going alone leaves the inbox behind is now
+`spec/vectors/trace/alone-leaves-the-inbox.json`: `ark-vectors` pins the
+one fuzzer case that found it (`arkc fuzz --seed 9046 --cases 1`, session
+1, client 0) and asserts of it what it is published for — a client gone
+alone with a page of the server's past its cursor unapplied — so a fuzzer
+change that moves the case fails the generator. An addition: every other
+file byte-identical, `MANIFEST.json` 130 vectors, 122 a client runs; the
+Kotlin copy and its runner's special-casing are gone. Falsified against
+Rust's `trace::alone` and Kotlin's `goAlone` without the clear: both fail
+the file at step 53. The corpus never reached it because `leave` drew its
+client uniformly and a client almost never holds something unapplied when
+drawn; the draw now gives way to a client that does and could leave, the
+draw still made, so a session with no such client is unchanged — every
+vector came out byte-identical. `packages.trace-corpus` keeps its seed and
+count (2026, 300 cases, 2,565 traces) and its content moved: 2 of its
+traces now fail under the falsification, in both runtimes, where none did.
+And `DirStorage` syncs its directory after a rename
+(`FileChannel.open(dir, READ).force(true)`, Android from API 26), degrading
+where a platform refuses to open a directory (`syncsDirectory`); held by
+StorageTests, falsified by leaving the sync out.
+
+The client's driver half (`kotlin/ark-client`): `Link` is
+`ark_client::link` — dial when due, back off half a second doubling to
+thirty, reset on an open, stop and resume — over OkHttp's WebSocket on the
+JVM and Android alike (one dependency both have; already recorded, so
+`kotlin/deps.json` did not move), pinging every `pingEveryMs` and failing a
+connection whose ping goes unanswered, its handshake bounded by
+`connectTimeoutMs` (without that, a handshake into the fleet's black hole
+waited for ever). `Peer` gained `connect`, `pump` (one settle per pump,
+R8), `status` field for field, `query`, `check`, `view`, `standing`,
+`join(url, login)`; `ClientView` is `view.rs` over `Reads` (`ir/reads.rs`);
+`Auth` is `ark_auth`'s client — dev auth answers with a code, a provider's
+page goes to `open` and a loopback port; `Json` is `ark::json`'s decoder.
+`ClientTests` holds the link, the dialect, the sign-in's URLs and views
+over harken.ark spliced against a fresh read.
+
+`harken-peer-kt` (`kotlin/harken-peer`, `packages.harken-peer-kt`) speaks
+`harken-peer`'s lines exactly — every flag, command and answer, the same
+directory records — and interprets every function of `harken.ark` (in its
+jar) or of `--module`'s file; no command is Rust-only. In the fleet
+(`harken/server/tests/fleet_kotlin.rs`, `checks.fleet-kotlin`, its
+`FLEET_KOTLIN_PEER` and the pinned revisions set as `checks.versions` sets
+them; `docs/plan-fleet.md` §6) six scenarios run mixed: two Rust peers and
+a Kotlin one through a black hole, kill -9s of a peer and of the server
+and a cut; a Kotlin peer alone then joining, and leaving and joining again
+without a restart; through a server restart and a lost log; new Kotlin
+peer, old server and old Kotlin peer (that revision's own `harken.ark`),
+new server, per pinned revision; and a Kotlin peer partial under a scoped
+module (harken plus a scope holding a person's own playlists), its
+confirmed hash the person's union of the log's state and equal to a Rust
+peer's of the same person. All pass: `nix build
+.#checks.x86_64-linux.fleet-kotlin`, 7 tests in 14.7 s, each scenario
+0.2–1.1 s to converged once started and a Kotlin peer up and signed in in
+0.6–0.7 s. No disagreement between the runtimes was found. Each falsified
+once with the Kotlin peer broken — no push of pending on an open, a join
+without its fork-back, snapshots ignored, an unknown function read as a
+verdict, `--module` ignored, a partial snapshot opened whole — and one
+falsification that did not fail is said in its scenario: ignoring acks,
+which every phase of K1 recovers from by reconnecting.
+
+The app (`harken/android`) loads `harken.ark` from its assets (copied at
+build time from where the domain crate writes it), verifies it and
+interprets it; one `Peer` on a thread of its own, pumped every 50 ms;
+`library`, `playlists` and the open `playlist` are maintained views whose
+patches are spliced into the screens' lists, read again only on a `Reset`
+or a new selection; writes are `create_playlist`, `add_to_playlist`
+("Favorites" first for somebody with none), `remove_from_playlist`, each
+with its standing; harken's module has no rename, so neither has the app.
+Sign-in is dev auth only, said in the app and its README: a provider's page
+is not opened. Settings: the server's address, work alone, and the status
+(cursor, not synced, held, diverged, the link, linked, connections, behind,
+last close, denied). `harken-apk` and `harken-apk-deps` are back in the
+flake, built from 883655f^'s derivation over the new sources;
+`harken/android/deps.json` did not need re-recording. `nix build
+.#harken-apk`: `harken-debug.apk`, 10,193,386 bytes, `assets/harken.ark` in
+it, after three retries through Maven Central's 429s.
+
+Green, each by its own `nix build .#checks.x86_64-linux.<name>` (not `nix
+flake check`): `kotlin` (122 of 130 vectors, 2,565 corpus traces, again
+through storage, ClientTests), `vectors`, `traces`, `fuzz-smoke`,
+`harken-domain`, `rust` (fmt, both clippys, the workspace's tests and the
+demo's), `versions` and `fleet-kotlin`; and `harken-apk`. The first run of
+`checks.rust` ran the disk out and was run again after a garbage
+collection.
+
+Not verified: no phone or emulator ran the APK, and it was installed
+nowhere; the client's link, sign-in and views ran on the JVM only. The
+provider sign-in flow on a phone is not built. `DirStorage`'s directory
+sync was not run on Android nor against a real crash.

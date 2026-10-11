@@ -10,7 +10,10 @@ file, and to every trace of `packages.trace-corpus`, by `checks.kotlin`
 (`docs/plan-phones.md` S3). `ark-client` (package `dev.arkdb.client`) is
 the peer around it, a port of `rust/ark-client`: the storage a replica
 survives a restart in, written byte for byte as the Rust writes it, the
-peer that writes it and goes alone and back, and the transport.
+peer that writes it and goes alone and back, its link to a server and its
+sign-in, and maintained views. `harken-peer` is harken's headless peer on
+it, speaking `harken-peer`'s lines, which the fleet runs beside Rust peers;
+`harken/android` is the app on it.
 
 A phone's runtime is a **client**: it interprets modules and does not
 author them. The domain is written once, in Rust, and `arkc` emits the
@@ -46,6 +49,8 @@ comments name the reference function for each piece.
 | `ScopeCheck.kt` | `scope.rs` | also `deviceSchema`, the one piece of a union's client half a client needs |
 | `Journal.kt` | `journal.rs` | a log on a key/value storage: the snapshot and its pages, `Layout.alone()`, open, append, merge, create, destroy |
 | `Trace.kt` | `trace.rs` | `Input`, the durable copy (`Durable`, `KeptStore`), `reopenFrom`, alone, commit, join, `Observer`, `Player`, `replay`, `differs` |
+| `Reads.kt` | `ir/reads.rs` | the tables a function reads outside its plan: what a maintained view's middleware is re-run on |
+| `Json.kt` | `json.rs` | the JSON dialect a headless peer reads and answers in: `decode`, strict where the reference is; printing is `Value.show` |
 
 Three representations differ from the Rust and say nothing different. A row
 is a `Value.VStruct` of every column — the Rust lays one out positionally
@@ -66,16 +71,32 @@ entry here runs by a raw write, by its closure, or not at all.
 |---|---|---|
 | `Storage.kt` | `storage.rs` | `Storage` (a `Keys`), `MemoryStorage`, `DirStorage`; the `replica`, `facts.<n>`, `pending`, `pending.<n>` and `who` records, `Records.load` |
 | `Writer.kt` | `peer.rs` (`persist` and its helpers) | what is written and when: a journal page or a snapshot, compaction once the pages outgrow it, the intents by generation |
-| `Peer.kt` | `peer.rs`, `domain.rs` | `Domain`; `Peer` — open from a storage (carried across alone and back), mutate by name, sign-in, leave and join with the local history in the alone journal, `connected`, `recvFrame`, verify |
+| `Peer.kt` | `peer.rs`, `domain.rs` | `Domain`; `Peer` — open from a storage (carried across alone and back), mutate by name, query, check, sign-in, leave and join with the local history in the alone journal, `connect`, `pump`, `status`, `standing`, verify; the sans-io `connected`, `recvFrame`, `takeOutgoingFrames` for a transport of the caller's |
+| `ClientView.kt` | `view.rs` | a query held as a list: the middleware run first and the tables it reads kept, every change pushed as patches, `Reset` when a signer or the middleware's outcome moves; `splice` |
+| `Link.kt` | `link/mod.rs` | `Link`: dial when due, back off half a second doubling to thirty, reset when a connection opens, stop and resume; `Timing`; `QueuedSocket`, a transport's callbacks kept until polled; `platformDial` |
+| `Transport.kt`, `WebSocketTransport.kt` | `link/native.rs` | one connection carrying frames; OkHttp's WebSocket, pinging every `pingEveryMs` and giving up when a ping goes unanswered, its handshake bounded by `connectTimeoutMs` |
+| `Auth.kt` | `ark-auth`'s `client.rs`, `util.rs` | `Login` and `Account` as serde writes them; `login` (a dev server answers with a code; anything else is a page, handed to `open`, and the code read off the loopback request back), `exchange`, `socketUrl`, `loginUrl` |
 | `Autos.kt` | `autos.rs` | the platform's, or a seed's by the reference's generator |
-| `Transport.kt`, `WebSocketTransport.kt` | `link/` | one connection carrying frames; OkHttp's WebSocket |
 
-The peer is sans-io: a driver hands a connection's frames to `recvFrame`
-and sends what `takeOutgoingFrames` queues. The reference's dial, backoff
-and pump loop (`link/`) are round 4's, with the JVM peer in the fleet.
-`DirStorage` writes a temporary file, syncs it and renames it; `java.io`
-cannot open a directory to sync it, so the rename's durability is the file
-system's, where the reference also syncs the directory.
+The transport is OkHttp's on the JVM and on Android alike — one dependency
+both have, rather than the JDK's `java.net.http` on one and OkHttp on the
+other — and sign-in is `HttpURLConnection`, which both have too. OkHttp
+calls back on threads of its own; `QueuedSocket` keeps what they said until
+the link polls, so the peer is touched only from its own loop.
+`DirStorage` writes a temporary file, syncs it, renames it and syncs the
+directory (`FileChannel.open(dir, READ).force(true)`), as the reference
+does; a platform that refuses to open a directory degrades to the rename's
+durability being the file system's, and says so (`syncsDirectory`).
+
+## `harken-peer`
+
+`harken-peer-kt` (`dev.harken.peer`, `nix build .#harken-peer-kt`) is
+`harken/server/src/bin/harken-peer.rs` on this client: the same flags, the
+same JSON-lines commands and answers, the same directory records. It
+interprets every function of `harken.ark` — carried in its jar — or of the
+`.ark` `--module` names; nothing is native. `checks.fleet-kotlin` runs it
+beside Rust peers (`harken/server/tests/fleet_kotlin.rs`,
+`docs/plan-fleet.md`).
 
 **The Unicode tables are generated, not copied.** `ark-runtime`'s build
 reads `rust/ark/src/unicode_tables.rs` — `gen-unicode`'s output from the
@@ -91,7 +112,7 @@ Unicode version is regenerating the Rust file; this build follows.
         -ParkTraceCorpus=$(nix build .#trace-corpus --print-out-paths)    # from kotlin/
 
 `checks.kotlin` holds every source to `ktfmt --kotlinlang-style` (checked,
-never written), then runs `gradle build`, whose `check` runs four plain
+never written), then runs `gradle build`, whose `check` runs five plain
 `main`s — no test framework is on the classpath:
 
 - **the conformance runner** (`dev.arkdb.conformance.Conformance`,
@@ -113,29 +134,38 @@ never written), then runs `gradle build`, whose `check` runs four plain
 - **StoreHints**: every read through the store's indexes — equalities,
   spans, needles, ordered reads — over a `MemoryStore` and an `Overlay`,
   held to the scan it stands for;
+- **ClientTests** (`ark-client`): the link's backoff, stops and resets
+  over a queue (the reference's link test), the JSON dialect's printing and
+  its refusals, the sign-in's URLs and login, and views over `harken.ark` —
+  a peer alone, `playlists` held, the spliced list equal to a fresh query
+  after every change;
 - **StorageTests** (`ark-client`): `fixtures/rust-peer.json`, written by a
   Rust `ark_client::Peer` (`fixtures/rust-peer.rs`, a scratch program over
   `rust/ark-client` that no build here compiles), replayed into a Kotlin
   `Peer` with the storage compared key for key and byte for byte after
   each of its 73 steps; and every trace again with the client's durable
   copy kept in these records (`StoredCopy`), so a reopen opens what they
-  say.
+  say; and a `DirStorage` on this machine, the directory synced after every
+  rename.
 
 The build is offline: `kotlin/deps.json` is the recorded Maven graph,
 replayed as a `mitmCache` the way nixpkgs builds every gradle project, and
-`nix run .#kotlin-deps` re-records it (it needs the network). The runtime
-depends on the Kotlin standard library alone, and uses no JVM API beyond
-`java.util`, `java.io`, `java.math.BigInteger` and
-`java.security.MessageDigest`, so the same source compiles for Android.
+`nix run .#kotlin-deps` re-records it (it needs the network); the client's
+link and `harken-peer` moved nothing in it. The runtime depends on the
+Kotlin standard library alone, and uses no JVM API beyond `java.util`,
+`java.io`, `java.nio.charset` (the dialect's strict UTF-8),
+`java.math.BigInteger` and `java.security.MessageDigest`; the client adds
+OkHttp, `java.net`'s `HttpURLConnection` and sockets, and `java.nio.file`
+for a directory's sync — all of which Android has at API 26 — so the same
+source compiles for the app (`harken/android`).
 
-## What is not here yet
+## What is not here
 
-`docs/plan-phones.md` round 4: a JVM `harken-peer` in the fleet and its
-version matrix, the driver's link (dial, backoff, keepalive, pump), and the
-Compose app over this runtime. A server is not here and will not be: no
-`Server`, no adopting a log, no compaction, no union's server half. No
-phone has run any of this, and the Android build is not exercised here:
-everything above ran on the JVM.
+A server is not here and will not be: no `Server`, no adopting a log, no
+compaction, no union's server half. Sign-in through a real provider's page
+is the desktop's loopback flow only; the app signs in by name (dev auth).
+No phone has run any of this: `nix build .#harken-apk` compiles the client
+for Android inside the app, and everything above ran on the JVM.
 
 ## Where it came from
 
