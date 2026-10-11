@@ -440,3 +440,59 @@ Not verified: no phone or emulator ran the APK, and it was installed
 nowhere; the client's link, sign-in and views ran on the JVM only. The
 provider sign-in flow on a phone is not built. `DirStorage`'s directory
 sync was not run on Android nor against a real crash.
+
+**Round 5, the Swift core** (`88ba922`, `c8810c2`, `537a388`, `9b973bb`,
+`72f6afe`, and the docs). A phone's runtime is a client, so `ArkAuthoring`,
+the `Demo`, `Kitchen`, `HarkenDomain` and `HarkenPhone` targets and their
+tests, and `harken/domain/gen/swift` were deleted, not ported. `ArkDB` was
+rewritten in place as a port of `rust/ark`, file for file (`swift/README.md`
+maps them), with the Kotlin port as the nearest worked reading: values, the
+canonical codec, the order and the JSON dialect; IR v4 decode, encode and
+normalisation; the state and function hashes; the verifier with every
+complaint by the reference's name and the verifier's half of `scope.rs`;
+the store with its secondary, reference and trigram indexes, its digest
+and the Overlay; the interpreter and the standard library over Unicode
+tables generated at build time from `rust/ark/src/unicode_tables.rs`; raw
+writes; `pull`/`read`, `hydrate`/`push_all` and R9's kept numbers.
+`ArkDBClient` is out of the package until round 6. Three things are Swift's
+own and say nothing different: a value's text is compared, hashed, prefixed
+and searched by its UTF-8 bytes, never by `String`, whose `==` is canonical
+equivalence; nothing observable iterates a `Dictionary`, whose order is
+seeded per process (sorted arrays stand for the Rust's `BTreeMap`s); and
+`Wide` stands for Rust's `i128`, which Swift 5.8 lacks.
+
+`checks.swift` (`packages.arkdb-swift`, `devShells.swift`) builds it with
+SwiftPM in release over nixpkgs' Swift 5.8 — the old derivation's
+Foundation and Dispatch inputs and `tools/nix-swiftc` — and runs three
+things in one executable (no XCTest here): the conformance runner, which
+walks `MANIFEST.json` and runs 54 of the 130 vectors — codec 14, order 2,
+hash 4, module 8, verify 5, eval 7, views 14, each falsify vector failing
+its check — and skips 76 by name: `protocol` 40, `rebase` 9 and `trace` 27,
+round 6's kinds; StoreHints, 600 indexed reads over a store and an overlay,
+each the scan it stands for; and KeptNumbers, kept numbers three levels
+deep through 400 seeded batches. It fails on a vector that fails, a
+falsify vector that passes, a manifest out of step with the files, and a
+claimed kind with nothing run. `nix build .#checks.x86_64-linux.swift`:
+about 20 s.
+
+Falsified, each restored: struct keys sorted by name (codec/struct-key-
+order); text ordered by UTF-16 units (order/mixed, and order/falsify/utf16
+then passes — ordering by `String`'s `<` does not falsify it, since the
+vector's texts are NFC); a stray and a missing vector file and a claimed
+kind with none (the runner); the digest dropping its carries (both hash
+vectors); the encoder dropping `private: true` (module/private); an `on`
+that is no unique index let through (verify/falsify/insert-on-no-unique-
+index passes); `has_role` always false (eval/has-role); no parent check on
+put (eval/raw-put-row); an inclusive upper bound read as exclusive
+(StoreHints at round 11); no refill after a removal from a window
+(views/top-two-by-pos at batch 4); a kept sum checked step by step
+(views/a-maintained-sum-answers-where-the-fold-overflows at batch 7); a kept
+sum wrapping at 64 bits (views/a-maintained-sum-overflows-where-the-fold-
+answers at batch 0); kept numbers that moved not telling their readers
+(KeptNumbers at step 11). One falsification missed and says so: an unkept
+plan node's wide fold turned off fails nothing — no views vector evaluates
+one whose steps overflow and whose total does not.
+
+Not verified: Linux only — nothing here built the runtime for iOS or ran
+it on a phone. Rust, `spec/vectors` and the Kotlin tree are untouched.
+
