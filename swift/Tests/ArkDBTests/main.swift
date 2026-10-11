@@ -34,13 +34,13 @@ Checks.root = root
 let claimed: [(String, (Vector, Value) throws -> Void)] = [
     ("codec", { _, v in try Checks.codec(v) }),
     ("order", { _, v in try Checks.order(v) }),
+    ("hash", { _, v in try Checks.hash(v) }),
+    ("module", { _, v in try Checks.module(v) }),
+    ("verify", { _, v in try Checks.verify(v) }),
 ]
 
 /// The kinds no check here runs yet, and why.
 let notYet: [String: String] = [
-    "hash": "a store's hash needs its module, the next step of docs/plan-phones.md round 5",
-    "module": "modules are the next step of docs/plan-phones.md round 5",
-    "verify": "the verifier is the next step of docs/plan-phones.md round 5",
     "eval": "the evaluator is the next step of docs/plan-phones.md round 5",
     "views": "maintained views are the next step of docs/plan-phones.md round 5",
     "protocol": "the protocol client is docs/plan-phones.md round 6",
@@ -88,6 +88,10 @@ func run(_ v: Vector, _ check: (Vector, Value) throws -> Void) -> (String?, Bool
         return (e.message, false)
     } catch let e as DecodeError {
         return ("decode: \(e)", false)
+    } catch let e as ModuleError {
+        return ("module: \(e)", false)
+    } catch let e as VerifyFailed {
+        return ("verify: \(e)", false)
     } catch let e as JsonError {
         return ("json: \(e)", true)
     } catch {
