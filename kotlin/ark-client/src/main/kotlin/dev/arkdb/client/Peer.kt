@@ -1,0 +1,587 @@
+// A peer on ArkDB, as `rust/ark-client/src/peer.rs` is one: the engine's
+// `Client` over its `Replica`, kept durable on a `Storage` record for record
+// as the reference keeps it, and — alone — its own `Authority` over a local
+// history kept in `ark::journal`'s shape. What it adds over the sans-io
+// client is a driver's: ids and times drawn (`Autos`), who authors (a
+// login, or nobody), what is written when, and going alone and back.
+//
+// The socket is the caller's here, sans-io: `connected`, `recvFrame` and
+// `takeOutgoingFrames` are the three calls a transport makes
+// (`Transport.kt`), and the reference's dial, backoff and pump loop
+// (`ark_client::link`) are round 4's, with the JVM peer in the fleet.
+package dev.arkdb.client
+
+import dev.arkdb.Authority
+import dev.arkdb.Canon
+import dev.arkdb.Changes
+import dev.arkdb.Client
+import dev.arkdb.ClientMsg
+import dev.arkdb.Closure
+import dev.arkdb.Ctx
+import dev.arkdb.Decode
+import dev.arkdb.FactList
+import dev.arkdb.FnKind
+import dev.arkdb.Function
+import dev.arkdb.Hash
+import dev.arkdb.Id
+import dev.arkdb.Journal
+import dev.arkdb.Layout
+import dev.arkdb.Log
+import dev.arkdb.LogEntry
+import dev.arkdb.LogRecords
+import dev.arkdb.MemoryStore
+import dev.arkdb.Mode
+import dev.arkdb.Module
+import dev.arkdb.Received
+import dev.arkdb.Refusal
+import dev.arkdb.Replica
+import dev.arkdb.Schema
+import dev.arkdb.Seq
+import dev.arkdb.ServerMsg
+import dev.arkdb.Value
+import dev.arkdb.Verify
+import dev.arkdb.localCommit
+import dev.arkdb.refusalText
+import dev.arkdb.stripModule
+
+/** What a peer cannot do, or found wrong (`ark_client::Error`). */
+public open class PeerError(what: String) : Exception(what)
+
+/** A verdict: nothing changed (`Error::Refused`). */
+public class Refused(public val refusal: Refusal) : PeerError(refusalText(refusal))
+
+/**
+ * The module a peer runs (`ark_client::Domain`): its closures by hash, and its hash as a client's
+ * module has it — every private block stripped, so a server built from the blocks and a phone built
+ * from `harken.ark` are one module to each other.
+ */
+public class Domain(public val module: Module) {
+    /** Every function's closure, by its hash as hex. */
+    public val closures: Map<String, Closure> = Hash.closures(module)
+    private val byName: Map<String, String> =
+        closures.entries.associate { (h, c) -> c.function.name to h }
+
+    /** `Domain::hash`: the module hash of the module stripped of private blocks. */
+    public val hash: ByteArray = Hash.moduleHash(stripModule(module))
+
+    /** A function by name: its hash and its definition. */
+    public fun function(name: String): Pair<ByteArray, Function>? =
+        byName[name]?.let { h -> dev.arkdb.Hex.decode(h) to closures[h]!!.function }
+
+    /** `Domain::mutator`. */
+    public fun mutator(name: String): Pair<ByteArray, Function> {
+        val (h, f) = function(name) ?: throw PeerError("the module has no function $name")
+        if (f.kind != FnKind.Mutator) throw PeerError("$name is not a mutator")
+        return h to f
+    }
+
+    public companion object {
+        /** `Domain::from_bytes`: the canonical bytes of an `.ark` file, verified. */
+        public fun fromBytes(bytes: ByteArray): Domain =
+            Domain(Verify.verify(Decode.module(Canon.decode(bytes))))
+    }
+}
+
+/** How a peer opens (`ark_client::Options`): who authors, the token, alone or not, the autos. */
+public data class Options(
+    val user: String,
+    val session: String,
+    val token: String?,
+    val alone: Boolean = false,
+    val autos: Autos = Autos.System(),
+) {
+    public companion object {
+        /** A login of a server. */
+        public fun server(user: String, session: String, token: String?): Options =
+            Options(user, session, token)
+
+        /** Its own authority, as `user` under the session `local`. */
+        public fun alone(user: String): Options = Options(user, "local", null, alone = true)
+    }
+}
+
+/** A verdict against an intent this peer authored (`ark_client::Rejection`). */
+public data class Rejection(val id: Id, val reason: String)
+
+/**
+ * A peer (`ark_client::Peer`): opened over a storage, authoring by name, written down on every
+ * `persist` in the reference's records and order.
+ */
+public class Peer
+private constructor(
+    public val domain: Domain,
+    private val schema: Schema,
+    /** The engine's client: the replica, and what is queued for the server. */
+    public val client: Client,
+    private val storage: Storage,
+    ctx: Ctx,
+    private val autos: Autos,
+    private val writer: ReplicaWriter,
+    public var fork: Fork,
+    authored: Set<Id>,
+    signedOut: Boolean,
+) {
+    /** Who this peer authors as. */
+    public var ctx: Ctx = ctx
+        private set
+
+    public var alone: Boolean = false
+        private set
+
+    /** Nobody is signed in: nothing is dialled until a sign-in. */
+    public var signedOut: Boolean = signedOut
+        private set
+
+    private var authority: Authority? = null
+    private var aloneLog: AloneLog? = null
+    private val authored = HashSet(authored)
+    private val rejected = HashMap<Id, String>()
+    private val local = HashSet<Id>()
+
+    /** Every verdict against an intent of this peer's, oldest first, each once. */
+    public val rejections: MutableList<Rejection> = ArrayList()
+    private val checks = Checks()
+
+    private class AloneLog(
+        val journal: Journal,
+        val unwritten: MutableList<Triple<Seq, LogEntry, FactList>>
+    )
+
+    private class Checks {
+        var epoch: Long = 0
+        var at: Seq? = null
+        val asked = ArrayDeque<Boolean>()
+        var served = false
+        val agreed = ArrayList<Pair<Seq, Boolean>>()
+        val unknown = ArrayList<Seq>()
+    }
+
+    /** The replica. */
+    public val replica: Replica
+        get() = client.replica
+
+    /** The cursor: the last sequence confirmed. */
+    public val cursor: Seq
+        get() = client.replica.cursor
+
+    /** Every answer to a verify this peer was asked to make: agreed, or not. */
+    public val agreed: List<Pair<Seq, Boolean>>
+        get() = checks.agreed
+
+    /** Every verify the authority could not answer. */
+    public val unknown: List<Seq>
+        get() = checks.unknown
+
+    public companion object {
+        /**
+         * `Peer::open`: the replica from `storage` (or empty), what was pending replayed on top,
+         * and — alone — sequenced. A storage last used the other way is carried across: opened
+         * alone over a server's replica, the peer leaves it; opened for a server over local
+         * history, the history is re-queued as a join does.
+         */
+        public fun open(domain: Domain, storage: Storage, opts: Options): Peer {
+            val schema = domain.module.schema
+            val st = Records.load(storage, schema)
+            val confirmed: MemoryStore
+            val cursor: Seq
+            val pending: List<LogEntry>
+            val was: Ctx
+            val writer: ReplicaWriter
+            val fork: Fork
+            var partial: Map<String, List<String>>? = null
+            if (st != null) {
+                partial = st.file.partial
+                val f = st.file
+                was = Ctx(f.user, f.session)
+                writer = ReplicaWriter.of(storage, st)
+                confirmed = f.confirmed
+                cursor = f.cursor
+                pending = f.pending
+                fork = f.fork
+            } else {
+                val (ps, pst) = Records.loadPending(storage)
+                pending = ps ?: emptyList()
+                writer = ReplicaWriter.fresh(storage, pst)
+                confirmed = MemoryStore.empty(schema)
+                cursor = 0
+                was = Ctx.nobody
+                fork = Fork()
+            }
+            val hadLog = storage.load(Layout.alone().snapshot) != null
+            val r = Replica.open(confirmed.schema, domain.closures, confirmed, cursor, pending)
+            r.partial = partial?.let { java.util.TreeMap(it) }
+            r.logId = writer.namedLog
+            val client = Client.open(r, Mode.Whole, opts.token).withSchema(schema)
+            client.module = domain.hash
+            client.replica.takeConfirmed()
+            var ctx = Ctx(opts.user, opts.session)
+            val signedOut = !opts.alone && ctx.isNobody
+            if (signedOut) {
+                ctx = if (hadLog) Ctx.nobody else was
+            } else if (!opts.alone &&
+                client.replica.pending.any { it.actor.isEmpty() && it.session.isEmpty() }) {
+                client.signIn(ctx, opts.token)
+                writer.forgetPending()
+            }
+            val peer =
+                Peer(
+                    domain,
+                    schema,
+                    client,
+                    storage,
+                    ctx,
+                    opts.autos,
+                    writer,
+                    fork,
+                    pending.map { it.id }.toSet(),
+                    signedOut)
+            when {
+                hadLog -> peer.resumeAlone()
+                opts.alone -> peer.startAlone()
+            }
+            if (hadLog && !opts.alone) peer.forkBackTo(peer.ctx)
+            peer.commitAlone()
+            peer.collectRejections()
+            peer.persist()
+            peer.client.replica.takeChanges()
+            return peer
+        }
+    }
+
+    // -- who authors --------------------------------------------------------------
+
+    /**
+     * `sign_in`: `user` under `session`, proven with `token`; every intent still pending authored
+     * as nobody becomes theirs, and is written down before anything is said.
+     */
+    public fun signIn(user: String, session: String, token: String?) {
+        if (alone) throw PeerError("a peer alone has no server to sign in to")
+        ctx = Ctx(user, session)
+        client.signIn(ctx, token)
+        signedOut = false
+        collectRejections()
+        writer.forgetPending()
+        persist()
+    }
+
+    /** `sign_out`: the token forgotten and the connection dropped; the login is kept. */
+    public fun signOut() {
+        if (alone) return
+        signedOut = true
+        client.token = null
+        if (client.linked) client.disconnected()
+    }
+
+    /** `set_roles`: the roles this login believes it holds, frozen in what it authors (D1). */
+    public fun setRoles(roles: Collection<String>) {
+        ctx = ctx.withRoles(roles)
+    }
+
+    // -- alone and back -----------------------------------------------------------
+
+    /**
+     * `leave`, server → alone (`docs/plan-alone.md` §1): the connection dropped, the fork recorded
+     * where the replica stands, and this peer its own authority from its confirmed store on.
+     */
+    public fun leave() {
+        if (alone) return
+        if (client.linked) client.disconnected()
+        client.denied = null
+        startAlone()
+        commitAlone()
+        collectRejections()
+        persist()
+    }
+
+    /**
+     * `join`, alone → server, up to the connecting: the local history taken back out of the
+     * confirmed store and re-queued as `login`'s (or nobody's), written down; the caller connects.
+     */
+    public fun join(user: String?, session: String?, token: String?) {
+        var who = if (user != null) Ctx(user, session ?: "") else Ctx.nobody
+        if (user == null) who = who.withRoles(ctx.roles)
+        if (alone) {
+            ctx = who
+            signedOut = user == null
+            client.token = if (user != null) token else null
+            forkBackTo(who)
+        } else if (user != null) {
+            signIn(user, session ?: "", token)
+        }
+    }
+
+    // -- a screen's side ----------------------------------------------------------
+
+    /**
+     * `mutate`: an intent by name, its autos drawn here once and frozen in the entry, applied to
+     * the optimistic store, kept durable as pending, pushed if linked. The entry's id, or
+     * `Refused`.
+     */
+    public fun mutate(name: String, args: Map<String, Value>): Id {
+        val (fh, f) = domain.mutator(name)
+        val autosDrawn = autos.draw(f)
+        val id = autos.newId()
+        val (e, why) = client.mutate(id, ctx, fh, autosDrawn, args)
+        if (e == null) throw Refused(why!!)
+        authored.add(id)
+        commitAlone()
+        collectRejections()
+        persistLog()
+        writer.persistPending(client.replica.pending)
+        return id
+    }
+
+    /** What a view of the optimistic store is told (`take_changes`). */
+    public fun takeChanges(): Changes = client.replica.takeChanges()
+
+    // -- sans-io: a transport of the caller's own ---------------------------------
+
+    public fun connected() {
+        client.connected()
+    }
+
+    public fun disconnected() {
+        client.disconnected()
+    }
+
+    /** `recv_frame`: a frame from the server, placed and settled. */
+    public fun recvFrame(bytes: ByteArray) {
+        placeFrame(bytes)
+        settle()
+    }
+
+    /** Frames from the server, each placed, then one settle and one write: `pump`'s shape. */
+    public fun pump(frames: List<ByteArray>) {
+        for (f in frames) placeFrame(f)
+        settle()
+        collectRejections()
+        persist()
+    }
+
+    /** What is queued for the server, as canonical bytes. */
+    public fun takeOutgoingFrames(): List<ByteArray> = client.takeOutgoing().map(ClientMsg::encode)
+
+    private fun placeFrame(bytes: ByteArray) {
+        when (val got = ServerMsg.decodeFor(bytes, client.schema)) {
+            is Received.Msg -> {
+                if (got.msg is ServerMsg.Batch || got.msg is ServerMsg.SnapshotOf) served()
+                client.recv(got.msg)
+            }
+            is Received.Snap -> {
+                served()
+                client.recvSnapshot(got.snapshot)
+            }
+        }
+    }
+
+    private fun served() {
+        thisConnection()
+        checks.served = true
+    }
+
+    private fun thisConnection() {
+        if (checks.epoch != client.epoch) {
+            checks.epoch = client.epoch
+            checks.at = null
+            checks.asked.clear()
+            checks.served = false
+        }
+    }
+
+    /** `verify`: alone, asked of the local authority; otherwise of the server. */
+    public fun verify() {
+        val a = authority
+        if (a == null) {
+            askVerify(false)
+            return
+        }
+        val (n, h) = client.replica.verifyAt()
+        val theirs = hashAt(a.log, n, a.store)
+        if (theirs != null) checks.agreed.add(n to theirs.contentEquals(h))
+        else checks.unknown.add(n)
+    }
+
+    // `Log::hash_at`, at the head: the alone log's base stands at its head
+    // with its entries taken (`Log.takeEntries`), so the head is all it can say.
+    private fun hashAt(log: Log, n: Seq, head: MemoryStore): ByteArray? =
+        if (n == log.headSeq()) Hash.stateHash(head) else null
+
+    private fun askVerify(auto: Boolean) {
+        thisConnection()
+        val before = client.out.size
+        client.verifyAll()
+        if (client.out.size > before) {
+            checks.asked.addLast(auto)
+            checks.at = client.replica.cursor
+        }
+    }
+
+    /** `settle`: the client settled, verify answers sorted, and a verify asked after a page. */
+    private fun settle(): List<Seq> {
+        val paging = client.more
+        client.settle()
+        thisConnection()
+        val disagreed = ArrayList<Seq>()
+        val answers = ArrayList(client.agreed)
+        client.agreed.clear()
+        for ((n, answer) in answers) {
+            val auto = checks.asked.removeFirstOrNull() ?: false
+            when {
+                answer == null -> if (!auto) checks.unknown.add(n)
+                else -> {
+                    if (!answer) disagreed.add(n)
+                    if (!auto || !answer) checks.agreed.add(n to answer)
+                }
+            }
+        }
+        val due = checks.served && !paging && checks.at != client.replica.cursor
+        if (authority == null && client.linked && due) askVerify(true)
+        return disagreed
+    }
+
+    // -- writing it down ----------------------------------------------------------
+
+    /**
+     * `persist`: what moved since the last write — the local history first, then the pending
+     * intents, the login, and the confirmed store, each as the reference writes it.
+     */
+    public fun persist() {
+        persistLog()
+        writer.persist(client.replica, fork, ctx)
+    }
+
+    // Alone, what is pending sequenced, and the entries taken out of the
+    // authority's memory into the log's next write.
+    private fun commitAlone() {
+        val a = authority ?: return
+        localCommit(a, client.replica)
+        val taken = a.log.takeEntries()
+        aloneLog?.unwritten?.addAll(taken)
+    }
+
+    // The entries sequenced alone since the last write, as one page of the
+    // local history; then its pages merged.
+    private fun persistLog() {
+        val l = aloneLog ?: return
+        val to = l.unwritten.lastOrNull()?.first ?: return
+        val page = java.io.ByteArrayOutputStream()
+        for ((n, e, f) in l.unwritten) page.write(LogRecords.encodeRecord(n, e, f))
+        l.journal.append(storage, page.toByteArray(), to)
+        l.unwritten.clear()
+        l.journal.merge(storage)
+    }
+
+    // The authority a peer alone is: the confirmed store as its state at
+    // `head`, the ids its local history holds, and no entries.
+    private fun aloneAuthority(head: Seq, ids: Map<Id, Seq>): Authority {
+        val a = Authority(schema, domain.closures)
+        a.log = Log(head, MemoryStore.empty(schema), ByteArray(0), null)
+        a.log.ids.putAll(ids)
+        a.store = client.replica.confirmed.copy()
+        return a
+    }
+
+    // `resume_alone`: carry on alone from the local history on the storage.
+    private fun resumeAlone() {
+        val layout = Layout.alone()
+        val cursor = client.replica.cursor
+        val ids = HashMap<Id, Seq>()
+        val ahead = ArrayList<Triple<Seq, LogEntry, FactList?>>()
+        val (journal, o) =
+            Journal.open(storage, layout, schema) { n, e, f ->
+                ids[e.id] = n
+                if (n > cursor) ahead.add(Triple(n, e, f))
+            }
+        val base = o.snapshot ?: throw StorageError("the local history has no snapshot")
+        val fork = Fork(base.logId, base.horizon())
+        val head = o.head
+        var r = client.replica
+        if (cursor > head || cursor < fork.cursor) {
+            val st = base.baseStore
+            LogRecords.read(storage, layout, schema) { n, _, f ->
+                if (n <= head) st.applyChanges(f)
+            }
+            val pending = ArrayList(r.pending)
+            r = Replica.open(r.schema, r.bodies, st, head, pending)
+            client.replica = r
+        } else if (ahead.isNotEmpty()) {
+            r.receiveBatch(ahead)
+        }
+        if (r.pending.any { e -> ids[e.id]?.let { it <= head } == true }) {
+            val pending = r.pending.filter { e -> ids[e.id]?.let { it > head } ?: true }
+            r = Replica.open(r.schema, r.bodies, r.confirmed.copy(), r.cursor, pending)
+            client.replica = r
+            writer.forgetPending()
+        }
+        r.logId = null
+        authority = aloneAuthority(head, ids)
+        this.fork = fork
+        alone = true
+        signedOut = false
+        aloneLog = AloneLog(journal, ArrayList())
+    }
+
+    // `start_alone`, server → alone: the fork where the replica stands, the
+    // local history's snapshot its confirmed store, written before anything
+    // else moves; what the server sent and was not applied left behind.
+    private fun startAlone() {
+        val r = client.replica
+        r.inbox.clear()
+        r.through = r.cursor
+        val fork = Fork(r.logId, r.cursor)
+        val st = r.confirmed.copy()
+        val base = Log(fork.cursor, st, Hash.stateHash(st), fork.logId)
+        val journal = Journal.create(storage, Layout.alone(), base)
+        r.logId = null
+        authority = aloneAuthority(fork.cursor, emptyMap())
+        this.fork = fork
+        alone = true
+        signedOut = false
+        local.clear()
+        aloneLog = AloneLog(journal, ArrayList())
+    }
+
+    // `fork_back_to`, alone → server up to the connecting: the local history
+    // read back from the storage, taken out of the confirmed store, and
+    // re-queued as `who`'s; written down, and only then the history removed.
+    private fun forkBackTo(who: Ctx) {
+        persistLog()
+        val fork = this.fork
+        val layout = Layout.alone()
+        val facts = ArrayList<FactList>()
+        val requeue = ArrayList<LogEntry>()
+        val o =
+            LogRecords.read(storage, layout, schema) { n, e, f ->
+                if (n > fork.cursor) {
+                    requeue.add(e.by(who.user, who.session))
+                    facts.add(f)
+                }
+            }
+        val cursor = client.replica.cursor
+        if (o.head != cursor || cursor - fork.cursor != facts.size.toLong())
+            throw StorageError(
+                "the local history runs from ${fork.cursor} to ${o.head} and the store is at $cursor")
+        local.clear()
+        requeue.forEach { local.add(it.id) }
+        authored.addAll(local)
+        client.replica.forkBack(facts, fork.cursor, fork.logId, requeue)
+        authority = null
+        aloneLog = null
+        alone = false
+        collectRejections()
+        writer.forgetPending()
+        persist()
+        Journal.destroy(storage, layout)
+    }
+
+    private fun collectRejections() {
+        val rs = ArrayList(client.replica.rejections)
+        client.replica.rejections.clear()
+        for ((id, why) in rs) {
+            if (rejected.containsKey(id)) continue
+            val reason = refusalText(why)
+            rejected[id] = reason
+            rejections.add(Rejection(id, reason))
+        }
+    }
+}

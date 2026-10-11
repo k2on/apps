@@ -1,6 +1,7 @@
 // `ark-client`: a peer's shell around the runtime's client machine — the
-// socket, the timer-driven pump, the files a replica survives a restart in,
-// and the one call an app makes to author an intent. Android-safe: nothing
+// files a replica survives a restart in (`Storage`, in the records
+// rust/ark-client writes), the peer that writes them and goes alone and
+// back (`Peer`), and the WebSocket a transport opens. Android-safe: nothing
 // from java.nio.file or java.net.http; the WebSocket is OkHttp's, which is
 // the standard Android client and runs on the JVM unchanged.
 plugins {
@@ -23,23 +24,30 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }
 
-// The demo domain the runtime's tests author (AUTHORING.md Appendix B) is
-// the module these tests open sessions over.
-sourceSets["test"].kotlin.srcDir(project(":ark-runtime").file("src/test/kotlin/demo"))
+// The runtime's conformance runner — the trace reader and replayer, the
+// JSON dialect — is what these tests drive the storage through, so its
+// sources are compiled into this test source set too.
+sourceSets["test"].kotlin.srcDir(project(":ark-runtime").file("src/test/kotlin"))
 
-// The client's tests are a plain `main`, like the runtime's conformance
-// runner, so that they need no test framework on the classpath.
-val clientTests by tasks.registering(JavaExec::class) {
+// The storage's tests are a plain `main`, like the runtime's conformance
+// runner: the Rust-written fixture byte for byte, and every trace with the
+// durable copy kept in these records.
+val storageTests by tasks.registering(JavaExec::class) {
     group = "verification"
-    description = "Runs ark-client's tests against the demo module."
+    description = "Holds the storage to a Rust peer's bytes and every trace to it."
     dependsOn(tasks.named("testClasses"))
     classpath = sourceSets["test"].runtimeClasspath
-    mainClass.set("dev.arkdb.client.ClientTests")
-    val demo = providers.gradleProperty("arkDemoModule")
-        .orElse(rootProject.file("../spec/vectors/module/demo.json").absolutePath)
-    args(demo.get())
+    mainClass.set("dev.arkdb.client.StorageTests")
+    jvmArgs("-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8")
+    maxHeapSize = "1g"
+    val vectors = providers.gradleProperty("arkVectors")
+        .orElse(rootProject.file("../spec/vectors").absolutePath)
+    val corpus = providers.gradleProperty("arkTraceCorpus")
+        .orElse(providers.environmentVariable("ARK_TRACE_CORPUS"))
+        .orElse("")
+    args(vectors.get(), file("fixtures/rust-peer.json").absolutePath, corpus.get())
 }
 
 tasks.named("check") {
-    dependsOn(clientTests)
+    dependsOn(storageTests)
 }

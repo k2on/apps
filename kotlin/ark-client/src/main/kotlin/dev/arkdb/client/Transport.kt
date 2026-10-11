@@ -1,7 +1,8 @@
 // A transport: one way of opening a connection that carries frames. The
-// engine is sans-io, so this is the only place a socket appears — and the
-// in-memory one, which exchanges frames with an in-process `LocalHub`, is
-// what the tests run the same `Link` over.
+// engine is sans-io, so this is the only place a socket appears: a driver
+// hands what a connection brings to `Peer.recvFrame` and sends what
+// `Peer.takeOutgoingFrames` queues (the reference's driver is
+// `rust/ark-client/src/link`; the JVM one is round 4's).
 package dev.arkdb.client
 
 /** One connection, as the link sees it: frames go in, and it can be closed. */
@@ -23,6 +24,9 @@ public interface ConnectionListener {
 }
 
 public interface Transport {
-    /** Begin one connection attempt. Exactly one of `onOpen` or `onClose` follows, then frames, then `onClose`. */
+    /**
+     * Begin one connection attempt. Exactly one of `onOpen` or `onClose` follows, then frames, then
+     * `onClose`.
+     */
     public fun open(listener: ConnectionListener): Connection
 }
