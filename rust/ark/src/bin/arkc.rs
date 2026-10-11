@@ -13,9 +13,10 @@
 //! arkc verify-log DIR [M]             replay a data directory: head, hash (with M), horizon,
 //!                                     log id, modules run
 //!
-//! arkc fuzz [--seed N] [--seconds S] [--cases K] [--out DIR] [--without OP,…]
+//! arkc fuzz [--seed N] [--seconds S] [--cases K] [--out DIR] [--without OP,…] [--traces DIR]
 //!                                     differential fuzzing (D2): random modules and
-//!                                     fleet sessions, every finding a vector
+//!                                     fleet sessions, every finding a vector, and every
+//!                                     client's life a trace (docs/plan-phones.md S2)
 //! arkc fuzz --replay FILE             a finding run again, saying where it parts
 //! ```
 //!
@@ -44,7 +45,7 @@ use ark::hash::{closure, function_hash, module_hash};
 use ark::ir::{module_from_value, strip_module, Module};
 use ark::value::hex;
 
-const USAGE: &str = "usage: arkc verify M | hash M | strip M OUT | check OLD NEW | vectors OUTDIR\n       arkc backup DIR OUT | restore BACKUP DIR [--same-log] | verify-log DIR [M]\n       arkc fuzz [--seed N] [--seconds S] [--cases K] [--out DIR] [--without OP,…] | fuzz --replay FILE";
+const USAGE: &str = "usage: arkc verify M | hash M | strip M OUT | check OLD NEW | vectors OUTDIR\n       arkc backup DIR OUT | restore BACKUP DIR [--same-log] | verify-log DIR [M]\n       arkc fuzz [--seed N] [--seconds S] [--cases K] [--out DIR] [--without OP,…] [--traces DIR] | fuzz --replay FILE";
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();

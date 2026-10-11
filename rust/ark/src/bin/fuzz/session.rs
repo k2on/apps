@@ -124,6 +124,10 @@ pub struct Tally {
     pub raw_edits: u64,
     pub raw_logged: u64,
     pub raw_pushed: u64,
+    /// `docs/plan-alone.md` §1 Clients that left their server to be their
+    /// own authority, and joins back.
+    pub leaves: u64,
+    pub rejoins: u64,
 }
 
 struct Held {
@@ -231,13 +235,39 @@ fn panic_text(p: Box<dyn std::any::Any + Send>) -> String {
 /// The finding, if any, and the authority's store at the end.
 ///
 /// `without` names ops never drawn (`--without`): how a finding is told
-/// apart from the ops it does not need.
+/// apart from the ops it does not need. `arkc` runs [`run_traced`];
+/// harken's own fuzz test runs this.
+#[allow(dead_code)]
 pub fn run(m: &Module, natives: &[(FnHash, Procedure)], seed: u64, without: &[String], tally: &mut Tally) -> (Option<Finding>, MemoryStore) {
+    let (found, st, _) = run_traced(m, natives, seed, without, tally, None);
+    (found, st)
+}
+
+/// [`run`], and, given `record`, every client's trace of it
+/// (`docs/plan-phones.md` S2): the fleet opened recording, with the views a
+/// trace keeps limited to the queries `record` names where it names any.
+/// Recording changes nothing the session does, so a seed is the same
+/// session either way.
+pub fn run_traced(
+    m: &Module,
+    natives: &[(FnHash, Procedure)],
+    seed: u64,
+    without: &[String],
+    tally: &mut Tally,
+    record: Option<Option<std::collections::BTreeSet<String>>>,
+) -> (Option<Finding>, MemoryStore, BTreeMap<i64, ark::trace::Trace>) {
     let mut rng = Rng::new(seed);
     let clients = 2 + rng.below(3) as i64;
     let sim_seed = rng.next();
     let len = 30 + rng.below(120);
-    let mut sim = Sim::new(m.schema.clone(), closures(m), clients, sim_seed).tapped().durable();
+    let opened = match &record {
+        Some(_) => Sim::recorded(m.schema.clone(), closures(m), clients, sim_seed),
+        None => Sim::new(m.schema.clone(), closures(m), clients, sim_seed),
+    };
+    let mut sim = opened.tapped().durable();
+    if let (Some(rec), Some(only)) = (&mut sim.recording, record) {
+        rec.only = only;
+    }
     if !natives.is_empty() {
         sim.hold(natives.to_vec(), true, (0..clients).filter(|i| i % 2 == 0));
     }
@@ -313,6 +343,8 @@ pub fn run(m: &Module, natives: &[(FnHash, Procedure)], seed: u64, without: &[St
     tally.raw_edits += t.raw_edits;
     tally.raw_logged += t.raw_logged;
     tally.raw_pushed += t.raw_pushed;
+    tally.leaves += t.leaves;
+    tally.rejoins += t.rejoins;
     tally.private_refused += s
         .sim
         .clients
@@ -339,7 +371,8 @@ pub fn run(m: &Module, natives: &[(FnHash, Procedure)], seed: u64, without: &[St
         .flat_map(|c| &c.replica.rejections)
         .filter(|(_, r)| matches!(r, ark::store::Refusal::Refused(t) if guard_words.contains(t)))
         .count() as u64;
-    (out, s.sim.server.authority.store.clone())
+    let traces = s.sim.recording.take().map(|r| r.traces).unwrap_or_default();
+    (out, s.sim.server.authority.store.clone(), traces)
 }
 
 impl S<'_> {
@@ -435,6 +468,8 @@ impl S<'_> {
             Op::Roles { .. } => self.tally.role_changes += 1,
             Op::Edit { .. } => self.tally.raw_edits += 1,
             Op::PushRaw { .. } => self.tally.raw_pushed += 1,
+            Op::Leave(_) => self.tally.leaves += 1,
+            Op::Rejoin(_) => self.tally.rejoins += 1,
             _ => {}
         }
         self.script.push(op.clone());
@@ -729,7 +764,16 @@ impl S<'_> {
                         dead: false,
                     });
                 }
+                let specs = held
+                    .iter()
+                    .map(|h| ark::trace::ViewSpec {
+                        query: h.query.clone(),
+                        ctx: h.ctx.clone(),
+                        args: h.args.clone(),
+                    })
+                    .collect();
                 self.views.insert(i, held);
+                self.sim.record_views(i, specs);
             }
             Changes::Applied(cs) => {
                 if cs.is_empty() {
@@ -843,6 +887,13 @@ impl S<'_> {
                     change,
                 }
             }
+            // `docs/plan-alone.md` §1 A client leaves its server to be its
+            // own authority, and joins again.
+            690..=699 => Op::Leave(self.peer()),
+            700..=714 => match self.sim.alone.keys().next().copied() {
+                Some(i) => Op::Rejoin(i),
+                None => Op::Step,
+            },
             0..=749 => Op::Step,
             750..=799 => Op::Partition(self.peer()),
             800..=869 => Op::Heal(self.peer()),

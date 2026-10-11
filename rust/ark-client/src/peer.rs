@@ -1536,6 +1536,14 @@ impl Peer {
     /// else moves; the authority starts from the same store with nothing
     /// in its log. What is pending is sequenced by the caller, locally.
     fn start_alone(&mut self) -> Result<(), Error> {
+        // What the server sent that is not applied yet — a page past a
+        // sequence that never came, an entry waiting on its facts — is of
+        // the log this peer is leaving, and is paged again from the fork at
+        // a join. Left in the inbox, the local history's next sequence
+        // would land on it (`ark::trace::alone`, which the fuzzer found it
+        // through).
+        self.client.replica.inbox.clear();
+        self.client.replica.through = self.client.replica.cursor;
         let r = &self.client.replica;
         let fork = Fork {
             log_id: r.log_id,

@@ -24,10 +24,11 @@ use crate::hash::{state_hash, Closure, FnHash};
 use crate::journal::{self, Journal, Keys, Layout};
 use crate::live::{ConnId, Silent};
 use crate::log::{Log, Seq};
-use crate::peer::{Authority, Changes, Journal as Durable, Replica, Sequenced};
+use crate::peer::{Authority, Changes, Replica, Sequenced};
 use crate::protocol::{dev_identity, open_access, trusting, Client, ClientMsg, Identity, Mode, Server, ServerMsg};
 use crate::schema::Schema;
-use crate::store::{MemoryStore, Store};
+use crate::store::{MemoryStore, Refusal, Store};
+use crate::trace::{Alone, Input, Trace, ViewSpec};
 use crate::value::{hex, Id, Value};
 
 pub struct Sim {
@@ -96,6 +97,43 @@ pub struct Sim {
     /// `docs/plan-guards.md` D4 The ids of raw writes clients pushed
     /// ([`Op::PushRaw`]): none of them may ever be in the log.
     pub raw_pushed: BTreeSet<Id>,
+    /// `docs/plan-alone.md` §1 The clients that are their own authority
+    /// ([`Op::Leave`]), each with its fork and its local history, until
+    /// [`Op::Rejoin`] — or a settle, which brings everyone back.
+    pub alone: BTreeMap<i64, Alone>,
+    /// `docs/plan-phones.md` S2 Every client's life written down as it
+    /// happens, when the fleet was opened recording ([`Sim::recorded`]).
+    pub recording: Option<Recording>,
+}
+
+/// `docs/plan-phones.md` S2 What a recording fleet keeps: one [`Trace`] per
+/// client, every input it was given and what it did after each. A step
+/// takes what the client queued and what its view was told the moment it
+/// happens, which is what a trace says; the fleet's own wire and its
+/// durable copies are given them later, where they always took them, so a
+/// fleet recording runs exactly as one that is not.
+pub struct Recording {
+    pub traces: BTreeMap<i64, Trace>,
+    /// Frames a step took off a client that the wire has not yet: what the
+    /// next flush moves first.
+    wire: BTreeMap<i64, Vec<ClientMsg>>,
+    /// What a step took of a client's view changes, for the next `keep`.
+    told: BTreeMap<i64, Vec<Changes>>,
+    /// The queries a hydrate is recorded for; `None` for every one.
+    pub only: Option<BTreeSet<String>>,
+}
+
+// What a view was told over several takes, as one take would have told it:
+// replaced whole if it was replaced at all, the changes in order otherwise.
+fn merged(taken: Vec<Changes>, last: Changes) -> Changes {
+    let mut out = vec![];
+    for ch in taken.into_iter().chain(std::iter::once(last)) {
+        match ch {
+            Changes::Rebuilt => return Changes::Rebuilt,
+            Changes::Applied(cs) => out.extend(cs),
+        }
+    }
+    Changes::Applied(out)
 }
 
 /// One frame, as it went on the wire.
@@ -199,6 +237,13 @@ pub enum Op {
         eid: Id,
         change: crate::store::Change,
     },
+    /// `docs/plan-alone.md` §1 A whole client goes alone: it leaves its
+    /// server and is its own authority from where it stands
+    /// ([`crate::trace::alone`]).
+    Leave(i64),
+    /// …and joins again: its local history re-queued, then connected
+    /// ([`crate::trace::join`]).
+    Rejoin(i64),
     /// `docs/plan-guards.md` D4 A client pushes a raw write it built by hand
     /// — no replica authors one — as its own login, if it is linked: the
     /// server must refuse it, and it must land nowhere.
@@ -232,6 +277,16 @@ impl Sim {
     /// A fleet: a trusting server that is the log's authority, and `n`
     /// clients each holding the log whole, all connected.
     pub fn new(sch: Schema, bodies: BTreeMap<FnHash, Closure>, n: i64, seed: u64) -> Sim {
+        Sim::open(sch, bodies, n, seed, false)
+    }
+
+    /// [`Sim::new`], recording every client's trace from its first input
+    /// (`docs/plan-phones.md` S2): what `arkc fuzz --traces` runs.
+    pub fn recorded(sch: Schema, bodies: BTreeMap<FnHash, Closure>, n: i64, seed: u64) -> Sim {
+        Sim::open(sch, bodies, n, seed, true)
+    }
+
+    fn open(sch: Schema, bodies: BTreeMap<FnHash, Closure>, n: i64, seed: u64, record: bool) -> Sim {
         let mut server = Server::open(trusting(), open_access(), Silent, Authority::new(sch.clone(), bodies.clone()));
         // `docs/plan-guards.md` D2 The scopes the procedures run, served by
         // from the first `Hello`.
@@ -239,15 +294,9 @@ impl Sim {
         if let Some(sc) = &scopes {
             server.set_scopes(sc.clone());
         }
-        let clients = (0..n)
-            .map(|i| {
-                let r = Replica::open(sch.clone(), client_bodies(&bodies), MemoryStore::empty(sch.clone()), 0, vec![]);
-                (i, Client::open(r, Mode::Whole, Some(name(i))))
-            })
-            .collect();
         let mut sim = Sim {
             server,
-            clients,
+            clients: BTreeMap::new(),
             conn: BTreeMap::new(),
             next_conn: 1,
             to_server: BTreeMap::new(),
@@ -271,11 +320,76 @@ impl Sim {
             scopes,
             served: BTreeMap::new(),
             raw_pushed: BTreeSet::new(),
+            alone: BTreeMap::new(),
+            recording: record.then(|| Recording {
+                traces: BTreeMap::new(),
+                wire: BTreeMap::new(),
+                told: BTreeMap::new(),
+                only: None,
+            }),
         };
+        for i in 0..n {
+            let r = Replica::open(
+                sim.schema.clone(),
+                client_bodies(&sim.bodies),
+                MemoryStore::empty(sim.schema.clone()),
+                0,
+                vec![],
+            );
+            sim.clients.insert(i, Client::open(r, Mode::Whole, Some(name(i))));
+            sim.record(
+                i,
+                Input::Open {
+                    mode: Mode::Whole,
+                    closures: true,
+                    token: Some(name(i)),
+                },
+                None,
+            );
+        }
         for i in 0..n {
             sim.heal(i);
         }
         sim
+    }
+
+    // `docs/plan-phones.md` S2 Client `i` was just given `input`: what it
+    // queued and what its view was told are taken now, as a trace says,
+    // and kept for the wire and the durable copy to take where they always
+    // did; and the step is written down.
+    fn record(&mut self, i: i64, input: Input, refusal: Option<Refusal>) {
+        let Some(rec) = &mut self.recording else { return };
+        let Some(c) = self.clients.get_mut(&i) else { return };
+        // A connection opened or lost clears what the client had queued,
+        // and so does it here.
+        if matches!(input, Input::Connected | Input::Disconnected) {
+            rec.wire.remove(&i);
+        }
+        let frames = c.take_outgoing();
+        let changes = c.replica.take_changes();
+        rec.wire.entry(i).or_default().extend(frames.iter().cloned());
+        rec.told.entry(i).or_default().push(changes.clone());
+        let bodies = &self.bodies;
+        let t = rec.traces.entry(i).or_insert_with(|| Trace::new(bodies));
+        match &input {
+            Input::Open { .. } | Input::Reopen => t.observer.reset(),
+            Input::Hydrate(specs) => t.observer.hydrate(specs.clone(), &c.replica.view),
+            _ => {}
+        }
+        let out = t.observer.step(c, &frames, &changes, refusal.as_ref());
+        t.steps.push((input.value(), out));
+    }
+
+    /// `docs/plan-phones.md` S2 Client `i`'s views, while recording: these,
+    /// in place of any it held — the queries [`Recording::only`] names —
+    /// hydrated over its view, and kept up to date at every step after.
+    pub fn record_views(&mut self, i: i64, specs: Vec<ViewSpec>) {
+        let Some(rec) = &self.recording else { return };
+        let specs = match &rec.only {
+            Some(q) => specs.into_iter().filter(|s| q.contains(&s.query)).collect(),
+            None => specs,
+        };
+        self.record(i, Input::Hydrate(specs), None);
     }
 
     /// Under dev auth the server names every login "dev", and an entry is
@@ -337,7 +451,8 @@ impl Sim {
         let nobody = self.nobody.contains(&i);
         let Some(c) = self.clients.get_mut(&i) else { return };
         if !nobody {
-            c.token = Some(t);
+            c.token = Some(t.clone());
+            self.record(i, Input::Token(Some(t)), None);
         }
         if self.conn.contains_key(&i) {
             self.partition(i);
@@ -390,7 +505,22 @@ impl Sim {
     pub fn mutate(&mut self, i: i64, eid: Id, fh: &FnHash, autos: &Args, args: &Args) {
         let ctx = if self.nobody.contains(&i) { Ctx::nobody() } else { self.ctx_of(i) };
         let Some(c) = self.clients.get_mut(&i) else { return };
-        if c.mutate(eid, &ctx, fh, autos, args).is_ok() {
+        let made = c.mutate(eid, &ctx, fh, autos, args);
+        // Alone, sequenced at once by its own authority.
+        if let Some(a) = self.alone.get_mut(&i) {
+            crate::trace::commit(a, c);
+        }
+        let function = self.bodies.get(fh).map_or_else(String::new, |c| c.function.name.clone());
+        let input = Input::Mutate {
+            ctx,
+            function,
+            fn_hash: fh.clone(),
+            id: eid,
+            autos: autos.clone(),
+            args: args.clone(),
+        };
+        self.record(i, input, made.as_ref().err().cloned());
+        if made.is_ok() {
             self.flush_client(i);
         }
         self.keep(i);
@@ -402,6 +532,7 @@ impl Sim {
         self.server.disconnect(conn);
         if let Some(c) = self.clients.get_mut(&i) {
             c.disconnected();
+            self.record(i, Input::Disconnected, None);
         }
         self.to_server.remove(&i);
         self.to_client.remove(&i);
@@ -410,7 +541,8 @@ impl Sim {
 
     /// A client comes back on a fresh connection and says hello.
     pub fn heal(&mut self, i: i64) {
-        if self.conn.contains_key(&i) {
+        // A client alone has no server to connect to.
+        if self.conn.contains_key(&i) || self.alone.contains_key(&i) {
             return;
         }
         let conn = self.next_conn;
@@ -418,14 +550,16 @@ impl Sim {
         self.next_conn += 1;
         if let Some(c) = self.clients.get_mut(&i) {
             c.connected();
+            self.record(i, Input::Connected, None);
         }
         self.flush_client(i);
     }
 
     // Move what a client queued onto the wire.
     fn flush_client(&mut self, i: i64) {
+        let mut out = self.recording.as_mut().and_then(|r| r.wire.remove(&i)).unwrap_or_default();
         let Some(c) = self.clients.get_mut(&i) else { return };
-        let out = c.take_outgoing();
+        out.extend(c.take_outgoing());
         if let Some(tap) = &mut self.tap {
             tap.extend(out.iter().cloned().map(Frame::ToServer));
         }
@@ -528,8 +662,20 @@ impl Sim {
                 }
             }
         }
+        let bytes = self.recording.is_some().then(|| crate::canon::encode(&m.to_value()));
+        let denied = matches!(m, ServerMsg::Denied { .. });
         let Some(c) = self.clients.get_mut(&i) else { return };
         c.recv(m);
+        if let Some(bytes) = bytes {
+            // A denial clears what the client had queued, and so does it
+            // here.
+            if denied {
+                if let Some(rec) = &mut self.recording {
+                    rec.wire.remove(&i);
+                }
+            }
+            self.record(i, Input::Receive(bytes), None);
+        }
     }
 
     // The end of a client's pump: what its frames placed is applied once,
@@ -539,6 +685,7 @@ impl Sim {
     fn settle_client(&mut self, i: i64) {
         let Some(c) = self.clients.get_mut(&i) else { return };
         c.settle();
+        self.record(i, Input::Settle, None);
         self.flush_client(i);
         self.keep(i);
     }
@@ -549,7 +696,8 @@ impl Sim {
     /// rather than a hang.
     pub fn settle(&mut self) {
         // A client nobody has signed in on does not connect: it has no one
-        // to connect as ([`Op::SignIn`]).
+        // to connect as ([`Op::SignIn`]). One alone joins again first.
+        self.rejoin_all();
         let peers: Vec<i64> = self.clients.keys().copied().filter(|i| !self.nobody.contains(i)).collect();
         for i in &peers {
             self.partition(*i);
@@ -566,6 +714,7 @@ impl Sim {
     /// not converge: what a script's `settle` op is, so that a fleet that
     /// cannot settle is a finding that says why ([`Sim::stuck`]).
     pub fn try_settle(&mut self) -> Result<(), String> {
+        self.rejoin_all();
         let peers: Vec<i64> = self.clients.keys().copied().filter(|i| !self.nobody.contains(i)).collect();
         for i in &peers {
             self.partition(*i);
@@ -675,24 +824,15 @@ impl Sim {
         }
         let Some(c) = self.clients.get_mut(&i) else { return };
         let r = &mut c.replica;
-        let k = self.kept.entry(i).or_insert_with(|| Kept {
-            store: r.confirmed.clone(),
-            cursor: r.cursor,
-            log_id: r.log_id,
-            partial: r.partial.clone(),
-        });
-        match r.take_confirmed() {
-            Durable::Replaced => k.store = r.confirmed.clone(),
-            Durable::Facts(moved) => {
-                for (_, f) in moved {
-                    k.store.apply_changes(&f);
-                }
-            }
+        let mut k = self.kept.remove(&i);
+        crate::trace::keep(&mut k, r);
+        if let Some(k) = k {
+            self.kept.insert(i, k);
         }
-        k.cursor = r.cursor;
-        k.log_id = r.log_id;
-        k.partial = r.partial.clone();
-        let ch = r.take_changes();
+        let mut ch = r.take_changes();
+        if let Some(taken) = self.recording.as_mut().and_then(|rec| rec.told.remove(&i)) {
+            ch = merged(taken, ch);
+        }
         match &ch {
             Changes::Rebuilt => {
                 self.told_store.insert(i, r.view.clone());
@@ -749,7 +889,8 @@ impl Sim {
                 if self.nobody.remove(i) {
                     let (ctx, t) = (self.ctx_of(*i), token(*i, self.roles.get(i)));
                     if let Some(c) = self.clients.get_mut(i) {
-                        c.sign_in(&ctx, Some(t));
+                        c.sign_in(&ctx, Some(t.clone()));
+                        self.record(*i, Input::SignIn { ctx, token: Some(t) }, None);
                     }
                     self.keep(*i);
                     self.heal(*i);
@@ -762,9 +903,12 @@ impl Sim {
                 self.flush_server();
             }
             Op::PushRaw { peer, eid, change } => self.push_raw(*peer, *eid, change),
+            Op::Leave(i) => self.leave(*i),
+            Op::Rejoin(i) => self.rejoin(*i),
             Op::Verify(i) => {
                 if let Some(c) = self.clients.get_mut(i) {
                     c.verify_all();
+                    self.record(*i, Input::Verify, None);
                 }
                 self.flush_client(*i);
             }
@@ -878,12 +1022,13 @@ impl Sim {
         let bodies = if closures { client_bodies(&self.bodies) } else { BTreeMap::new() };
         let r = Replica::open(self.schema.clone(), bodies, MemoryStore::empty(self.schema.clone()), 0, vec![]);
         let token = if nobody { None } else { Some(token(i, self.roles.get(&i))) };
-        let mut c = Client::open(r, mode, token);
+        let mut c = Client::open(r, mode, token.clone());
         if closures && i % 2 == 0 && !self.natives.is_empty() && !self.native_peers.is_empty() {
             c.hold(&self.natives);
             self.native_peers.insert(i);
         }
         self.clients.insert(i, c);
+        self.record(i, Input::Open { mode, closures, token }, None);
         if self.disk.is_some() {
             self.keep(i);
         }
@@ -908,24 +1053,51 @@ impl Sim {
                 k.cursor, old.replica.cursor
             ));
         }
-        // A union kept is opened under the device's schema, and says so in
-        // its next `Hello` (`docs/plan-guards.md` D2).
-        let schema = match &k.partial {
-            Some(h) => crate::scope::device_schema(&old.schema, h),
-            None => old.schema.clone(),
-        };
-        let mut r = Replica::open(schema, old.replica.bodies.clone(), k.store, k.cursor, old.replica.pending.clone());
-        r.log_id = k.log_id;
-        r.partial = k.partial;
-        r.through = k.cursor;
-        let mut c = Client::open(r, old.mode, old.token.clone()).with_schema(old.schema.clone());
+        let mut c = crate::trace::reopen(old, k);
         if self.native_peers.contains(&i) {
             c.hold(&self.natives);
         }
         self.clients.insert(i, c);
+        self.record(i, Input::Reopen, None);
         self.keep(i);
         if linked {
             self.heal(i);
+        }
+    }
+
+    // `docs/plan-alone.md` §1 A whole client signed in leaves its server: it
+    // is its own authority from where it stands, and what it had pending is
+    // sequenced locally.
+    fn leave(&mut self, i: i64) {
+        let whole = self.clients.get(&i).is_some_and(|c| c.replica.partial.is_none());
+        if !whole || self.nobody.contains(&i) || self.alone.contains_key(&i) {
+            return;
+        }
+        self.partition(i);
+        let Some(c) = self.clients.get_mut(&i) else { return };
+        let a = crate::trace::alone(c);
+        self.alone.insert(i, a);
+        self.record(i, Input::Alone, None);
+        self.keep(i);
+    }
+
+    // …and joins it again: its local history re-queued as its own, then
+    // connected.
+    fn rejoin(&mut self, i: i64) {
+        let Some(a) = self.alone.remove(&i) else { return };
+        let who = Ctx::new(name(i), "dev");
+        if let Some(c) = self.clients.get_mut(&i) {
+            crate::trace::join(c, a, &who);
+        }
+        self.record(i, Input::Join(who), None);
+        self.keep(i);
+        self.heal(i);
+    }
+
+    fn rejoin_all(&mut self) {
+        let alone: Vec<i64> = self.alone.keys().copied().collect();
+        for i in alone {
+            self.rejoin(i);
         }
     }
 
@@ -1088,6 +1260,8 @@ impl Op {
             ]),
             Op::SignIn(i) => Value::record(vec![t("sign_in"), peer(i)]),
             Op::Reopen(i) => Value::record(vec![t("reopen"), peer(i)]),
+            Op::Leave(i) => Value::record(vec![t("leave"), peer(i)]),
+            Op::Rejoin(i) => Value::record(vec![t("rejoin"), peer(i)]),
             Op::Verify(i) => Value::record(vec![t("verify"), peer(i)]),
             Op::Roles { peer: i, roles, believes } => {
                 let texts = |s: &BTreeSet<String>| Value::List(s.iter().map(|r| Value::text(r.clone())).collect());
@@ -1158,6 +1332,8 @@ impl Op {
             },
             "sign_in" => Op::SignIn(int("peer")?),
             "reopen" => Op::Reopen(int("peer")?),
+            "leave" => Op::Leave(int("peer")?),
+            "rejoin" => Op::Rejoin(int("peer")?),
             "verify" => Op::Verify(int("peer")?),
             "roles" => {
                 let texts = |k: &str| match get(k)? {

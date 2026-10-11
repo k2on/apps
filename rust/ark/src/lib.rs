@@ -59,6 +59,7 @@ pub mod sha256;
 pub mod sim;
 pub mod stdlib;
 pub mod store;
+pub mod trace;
 pub mod unicode_tables;
 pub mod value;
 pub mod verify;

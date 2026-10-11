@@ -2,7 +2,7 @@
 //! of §3.16 that was never built).
 //!
 //! ```text
-//! arkc fuzz [--seed N] [--seconds S] [--cases K] [--out DIR] [--without OP,…]
+//! arkc fuzz [--seed N] [--seconds S] [--cases K] [--out DIR] [--without OP,…] [--traces DIR]
 //! arkc fuzz --replay FILE
 //! ```
 //!
@@ -51,6 +51,18 @@
 //! (`Sim::raw_held`), and every peer, whole or partial, converges on what
 //! they wrote.
 //!
+//! A client now and then leaves its server to be its own authority and joins
+//! again (`docs/plan-alone.md` §1; ops `leave`, `rejoin`): its local history
+//! is re-queued as its own, and a settle brings every client alone back
+//! first, so the fleet converges with it.
+//!
+//! `--traces DIR` writes every client's life in every session that found
+//! nothing as a trace (`docs/plan-phones.md` S2, `ark::trace`): its inputs
+//! and its outputs, which a client in any language replays and must
+//! reproduce byte for byte — `DIR/SEED-SESSION-CLIENT.json`. Recording
+//! changes nothing a session does, so the same seed and case count write
+//! the same bytes; without the flag nothing is recorded.
+//!
 //! Case `k` of a run from seed `N` is the case of seed `N + k`, so
 //! `--seed N+k --cases 1` runs it alone. A finding is written under `--out`
 //! as a vector in the suite's format ([`write`]), with a line in
@@ -83,7 +95,7 @@ use ark::store::MemoryStore;
 
 use churn::Rng;
 
-const USAGE: &str = "usage: arkc fuzz [--seed N] [--seconds S] [--cases K] [--out DIR] [--without OP,…] | --replay FILE";
+const USAGE: &str = "usage: arkc fuzz [--seed N] [--seconds S] [--cases K] [--out DIR] [--without OP,…] [--traces DIR] | --replay FILE";
 
 /// The generator's randomness from a seed, for a caller outside this module.
 pub fn churn_rng(seed: u64) -> Rng {
@@ -115,6 +127,10 @@ pub struct Stats {
     pub churn_pushes: u64,
     pub tally: session::Tally,
     pub findings: Vec<(u64, String, String, String)>,
+    /// `docs/plan-phones.md` S2 Traces written under `--traces`, and their
+    /// size.
+    pub traces: u64,
+    pub trace_bytes: u64,
     /// Every finding by its signature ([`signature`]), and how often.
     pub seen: BTreeMap<String, u64>,
 }
@@ -149,6 +165,7 @@ struct Opts {
     cases: Option<u64>,
     out: PathBuf,
     without: Vec<String>,
+    traces: Option<PathBuf>,
 }
 
 fn opts(args: &[&str]) -> Result<Opts, String> {
@@ -160,6 +177,7 @@ fn opts(args: &[&str]) -> Result<Opts, String> {
         cases: None,
         out: PathBuf::from("fuzz-out"),
         without: vec![],
+        traces: None,
     };
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -170,6 +188,7 @@ fn opts(args: &[&str]) -> Result<Opts, String> {
             "--cases" => o.cases = Some(val()?.parse().map_err(|e| format!("--cases: {e}"))?),
             "--out" => o.out = PathBuf::from(val()?),
             "--without" => o.without = val()?.split(',').map(str::to_string).collect(),
+            "--traces" => o.traces = Some(PathBuf::from(val()?)),
             other => return Err(format!("unknown argument {other}\n{USAGE}")),
         }
     }
@@ -194,6 +213,12 @@ pub fn main(args: &[&str]) -> i32 {
     // The engine's panics are findings, caught and written; the default
     // hook would print each one over the run's own report.
     std::panic::set_hook(Box::new(|_| {}));
+    if let Some(d) = &o.traces {
+        if let Err(e) = std::fs::create_dir_all(d) {
+            eprintln!("arkc fuzz: --traces {}: {e}", d.display());
+            return 2;
+        }
+    }
     println!("arkc fuzz: seed {}, {}", o.seed, limits(&o));
     let start = Instant::now();
     let mut last = Instant::now();
@@ -285,6 +310,13 @@ fn report(s: &Stats, took: Duration) {
         "    {} raw writes asked of the authority, {} of them logged; {} pushed by a client, none of them in the log",
         t.raw_edits, t.raw_logged, t.raw_pushed
     );
+    println!(
+        "    {} times a client went alone; {} joined again by an op of their own, the rest at the next settle",
+        t.leaves, t.rejoins
+    );
+    if s.traces > 0 {
+        println!("    {} traces written, {} bytes", s.traces, s.trace_bytes);
+    }
     for (seed, check, path, why) in &s.findings {
         println!("  finding: seed {seed}, {check}: {why}\n    written to {path}");
     }
@@ -299,10 +331,14 @@ pub fn demo_module() -> (Module, Vec<(FnHash, Procedure)>) {
     (m.build().clone(), m.procedures())
 }
 
-// One case: a module, two sessions over it, the churn over what the second
-// left.
-fn case(seed: u64, o: &Opts, stats: &mut Stats) {
-    stats.cases += 1;
+/// Native procedures, by the hash of the closure each runs.
+pub type Natives = Vec<(FnHash, Procedure)>;
+
+/// The module case `seed` runs, with its natives, and the randomness the
+/// case goes on from: one case in five the demo, the rest generated and
+/// held to the verifier, given scopes one time in two and private blocks
+/// one in three. `None` when twenty schemas in a row gave no module.
+pub fn case_module(seed: u64, stats: &mut Stats) -> Option<(Module, Natives, Rng)> {
     let mut rng = churn_rng(seed);
     let (m, natives) = if rng.chance(20) {
         stats.demo_cases += 1;
@@ -358,10 +394,17 @@ fn case(seed: u64, o: &Opts, stats: &mut Stats) {
                 Err(why) => *stats.misses.entry(why).or_default() += 1,
             }
         }
-        match got {
-            Some(m) => (m, vec![]),
-            None => return,
-        }
+        (got?, vec![])
+    };
+    Some((m, natives, rng))
+}
+
+// One case: a module, two sessions over it, the churn over what the second
+// left.
+fn case(seed: u64, o: &Opts, stats: &mut Stats) {
+    stats.cases += 1;
+    let Some((m, natives, mut rng)) = case_module(seed, stats) else {
+        return;
     };
     let found = |f: session::Finding, stats: &mut Stats| {
         // One vector per kind of failure: the rest are counted.
@@ -381,18 +424,46 @@ fn case(seed: u64, o: &Opts, stats: &mut Stats) {
         stats.findings.push((seed, f.check().to_string(), path, why));
     };
     let mut last = MemoryStore::empty(m.schema.clone());
-    for _ in 0..2 {
+    for k in 0..2 {
         stats.sessions += 1;
-        let (f, st) = session::run(&m, &natives, rng.next(), &o.without, &mut stats.tally);
+        let record = o.traces.as_ref().map(|_| None);
+        let (f, st, traces) = session::run_traced(&m, &natives, rng.next(), &o.without, &mut stats.tally, record);
         if let Some(f) = f {
             found(f, stats);
             return;
+        }
+        // `docs/plan-phones.md` S2 A session that found nothing is correct
+        // behaviour, and every client's life in it is a trace.
+        if let Some(dir) = &o.traces {
+            for (i, t) in traces {
+                let text = ark::trace::write(&m, &trace_from(seed, k, i), &t.steps, &[]);
+                let path = dir.join(trace_name(seed, k, i));
+                match std::fs::write(&path, &text) {
+                    Ok(()) => {
+                        stats.traces += 1;
+                        stats.trace_bytes += text.len() as u64;
+                    }
+                    Err(e) => eprintln!("arkc fuzz: {}: {e}", path.display()),
+                }
+            }
         }
         last = st;
     }
     if let Some(f) = session::churn(&m, &last, rng.next(), 25, &mut stats.churn_pushes) {
         found(f, stats);
     }
+}
+
+/// `docs/plan-phones.md` S2 Where a trace of a case came from: the case
+/// alone is `--seed SEED --cases 1`, and its sessions and clients are
+/// numbered from 0.
+pub fn trace_from(seed: u64, session: usize, client: i64) -> String {
+    format!("arkc fuzz --seed {seed} --cases 1, session {session}, client {client}")
+}
+
+/// The file a trace is written to under `--traces`.
+pub fn trace_name(seed: u64, session: usize, client: i64) -> String {
+    format!("{seed}-{session}-{client}.json")
 }
 
 /// `arkc fuzz --replay FILE`: a `rebase/fleet-fuzz-*` vector run again,

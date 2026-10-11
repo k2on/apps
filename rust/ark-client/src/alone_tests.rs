@@ -12,7 +12,7 @@ use ark::journal::{self, Layout};
 use ark::live::{ConnId, Silent};
 use ark::log::Seq;
 use ark::peer::{Authority, Changes};
-use ark::protocol::{open_access, trusting, Server};
+use ark::protocol::{open_access, trusting, ClientMsg, Server, ServerMsg};
 use ark::store::Store;
 use ark::value::{Id, Value};
 
@@ -480,4 +480,43 @@ fn two_thousand_local_intents_join() {
     assert_eq!(s.authority.log.head_seq(), 2_000);
     assert_eq!(hash(&p), state_hash(&s.authority.store));
     assert_eq!(p.pending_len(), 0);
+}
+
+/// Going alone with something of the server's in the inbox that could not
+/// be applied yet — here a page at 2, past a 1 that never came — leaves it
+/// behind with the log it is of: the local history numbers from the fork,
+/// and the local intent at the fork's next sequence is followed by nothing
+/// of the server's. `arkc fuzz` found it once its sessions sent clients
+/// alone (`docs/plan-phones.md`, round 1). Falsified by not clearing the
+/// inbox in `start_alone`: the settle after the local commit at 1 went on
+/// to bob's entry at 2, and bob's playlist was in alice's local history at
+/// cursor 2.
+#[test]
+fn going_alone_leaves_what_the_server_sent_and_was_not_applied() {
+    let mut bob = Peer::open_memory(demo::domain(), dev("bob")).unwrap();
+    bob.connected();
+    create(&mut bob, "Bob's");
+    let e = bob
+        .take_outgoing()
+        .into_iter()
+        .find_map(|m| match m {
+            ClientMsg::Push { entries } => entries.into_iter().next(),
+            _ => None,
+        })
+        .expect("bob's push");
+    let mut p = Peer::open_memory(demo::domain(), dev("alice")).unwrap();
+    p.connected();
+    p.recv(ServerMsg::Batch {
+        items: vec![(2, e, None)],
+        has_more: false,
+        log_id: Some([9; 16]),
+        module: None,
+        covers: None,
+    });
+    assert_eq!(p.cursor(), 0, "a page past a missing sequence waits");
+    p.leave().unwrap();
+    create(&mut p, "Mine");
+    assert_eq!(p.cursor(), 1, "the local history is the one intent");
+    let names: Vec<Value> = p.store().scan("playlist").iter().map(|r| r["name"].clone()).collect();
+    assert_eq!(names, vec![Value::text("Mine")], "nothing of the server's is in the local history");
 }
