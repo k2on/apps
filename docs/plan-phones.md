@@ -204,8 +204,8 @@ session generator run by `ark-vectors` over `harken.ark`, interpreted, with
 its `library` and `playlist` views kept, whose patches are outputs. 632 KB,
 and `falsify/`, a frame byte changed, which fails. The C2 commit message
 says 26; it is 25 and the `falsify/` directory. `MANIFEST.json` lists all
-126 vectors with kind, form, expectation and side: every `rebase/` fleet
-`rust-only`, the rest `client`; `tests/vectors.rs` holds it to naming every
+129 vectors with kind, form, expectation and side: every `rebase/` fleet
+`rust-only` (8), the rest `client`; `tests/vectors.rs` holds it to naming every
 file once (falsified by leaving `trace/` out of it). `spec/RUNNERS.md` is
 S1, a section per kind; within `three-peers` the authority adopting a log
 and compaction, and within `module/private.json` stripping, are the steps
