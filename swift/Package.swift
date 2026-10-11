@@ -17,10 +17,12 @@ let package = Package(
         .library(name: "ArkDB", targets: ["ArkDB"]),
         .library(name: "ArkDBClient", targets: ["ArkDBClient"]),
         .executable(name: "ArkDBTests", targets: ["ArkDBTests"]),
+        .executable(name: "harken-peer-swift", targets: ["HarkenPeer"]),
     ],
     targets: [
         .target(name: "ArkDB", dependencies: [], path: "Sources/ArkDB"),
         .target(name: "ArkDBClient", dependencies: ["ArkDB"], path: "Sources/ArkDBClient"),
+        .executableTarget(name: "HarkenPeer", dependencies: ["ArkDB", "ArkDBClient"], path: "Sources/HarkenPeer"),
         .executableTarget(name: "ArkDBTests", dependencies: ["ArkDB", "ArkDBClient"], path: "Tests/ArkDBTests"),
     ]
 )

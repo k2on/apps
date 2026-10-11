@@ -238,8 +238,8 @@
           # spec/vectors and every trace of `trace-corpus`, which names what
           # it ran and skipped and fails on a failure and on a claimed kind
           # with nothing run.
-          swift = pkgs.swiftPackages.stdenv.mkDerivation {
-            pname = "arkdb-swift";
+          swiftBuild = { pname, check }: pkgs.swiftPackages.stdenv.mkDerivation {
+            inherit pname;
             version = "0.1.0";
             # The storage fixture is round 3's, read where it was committed
             # beside the Kotlin client rather than copied.
@@ -252,6 +252,7 @@
             # they are the system's and the attributes are null.
             buildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.swiftPackages.Foundation pkgs.swiftPackages.Dispatch ];
             swiftpmBuildConfig = "release";
+            swiftpmFlags = lib.optionals (!check) [ "--product" "harken-peer-swift" ];
             # What swift/tools/swift.sh sets in the devshell, Linux only: the
             # target and header quirks of nixpkgs' Swift 5.8, and the manifest
             # SwiftPM compiles and runs having no rpath for libdispatch.
@@ -263,17 +264,27 @@
               export ARKDB_SWIFTC_INCLUDE=
               export LD_LIBRARY_PATH="${lib.makeLibraryPath [ pkgs.swiftPackages.Dispatch pkgs.swiftPackages.Foundation ]}:${pkgs.swiftPackages.Foundation}/lib/swift/linux:${pkgs.swiftPackages.swift-unwrapped}/lib/swift/linux''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
             '';
-            doCheck = true;
+            doCheck = check;
             checkPhase = ''
               runHook preCheck
               "$(swiftpmBinPath)/ArkDBTests" ../spec/vectors ${trace-corpus} ../kotlin/ark-client/fixtures/rust-peer.json ../harken/domain/harken.ark
               runHook postCheck
             '';
-            installPhase = ''
+            installPhase = if check then ''
               mkdir -p $out/bin
               cp "$(swiftpmBinPath)"/ArkDBTests $out/bin/
+            '' else ''
+              mkdir -p $out/bin $out/share/harken-peer-swift
+              cp "$(swiftpmBinPath)"/harken-peer-swift $out/bin/
+              cp ../harken/domain/harken.ark $out/share/harken-peer-swift/
             '';
           };
+          swift = swiftBuild { pname = "arkdb-swift"; check = true; };
+          # `harken-peer-swift` (docs/plan-phones.md round 7): harken's
+          # headless peer on the Swift client, speaking harken-peer's lines,
+          # with the harken.ark it runs installed beside it — what
+          # checks.fleet-swift runs beside Rust peers.
+          harken-peer-swift = swiftBuild { pname = "harken-peer-swift"; check = false; };
 
           # The Kotlin runtime and client (kotlin/README.md,
           # docs/plan-phones.md): gradle over a recorded Maven graph
@@ -441,7 +452,7 @@
             arkdb-swift = swift;
             arkdb-kotlin = kotlin;
             kotlin-deps = kotlin.mitmCache.updateScript;
-            inherit harken-peer-kt;
+            inherit harken-peer-kt harken-peer-swift;
             harken-server = crate { pname = "harken-server"; };
             # `nix run .#harken-serve [ADDR]`: the dev server, anyone is
             # whoever they say.
