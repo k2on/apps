@@ -1,5 +1,13 @@
 # Frozen at spec v3
 
+**Being brought forward** (`docs/plan-phones.md`, round 2): a phone's
+runtime is a client, so `dev.arkdb.authoring`, the `demo` and `selfdemo`
+sources that exercised it and `harken/domain/gen/kotlin` are deleted, not
+ported, and `ark-runtime` is rewritten against `rust/ark` and held to
+`spec/vectors`. `harken-apk` is out of the flake until round 4 rewires the
+app to load `harken.ark`; `.github/workflows/apk.yml` still names it.
+What follows is the record of the freeze.
+
 This tree is ArkDB for Kotlin (`ark-runtime`, with `dev.arkdb.authoring`, and
 `ark-client`) as it stood at **spec version 3**, and it is
 not built, tested or kept in step by anything in this repository now.

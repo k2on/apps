@@ -224,13 +224,12 @@
             arkc verify $out/harken.ark
           '';
 
-          # Swift and Kotlin are frozen at spec v3 (swift/FROZEN.md,
-          # kotlin/FROZEN.md) and have no check or package here. The one
-          # thing built from them is harken-apk below: the frozen Android app
-          # over the frozen Kotlin runtime and the frozen print of harken's
-          # v3 domain, which reads no vectors.
+          # Swift is frozen at spec v3 (swift/FROZEN.md) and has no check or
+          # package here. Kotlin is being brought to v4, held to the same
+          # vectors (docs/plan-phones.md, kotlin/README.md).
 
-          # The Android SDK the APK is built with. Google ships one for
+          # The Android SDK the APK is built with (`harken-apk`, out of the
+          # flake until round 4; see below). Google ships one for
           # x86_64 Linux and for macOS; on Linux the SDK is assembled by hand
           # instead (nix/android-sdk.nix) — the platform and build-tools jars
           # from Google's zips, and aapt2, the one native tool AGP runs, from
@@ -245,58 +244,15 @@
               buildToolsVersions = [ "35.0.0" ];
             }).androidsdk}/libexec/android-sdk";
 
-          # The phone, frozen at spec v3: gradle over the SDK, the Kotlin
-          # runtime and client as a composite build, and the printed domain
-          # — assembled offline from a recorded Maven graph
-          # (harken/android/deps.json; `nix run .#harken-apk-deps`
-          # re-records it). Debug-signed, like any assembleDebug; it
-          # installs anywhere and belongs nowhere public.
-          harken-apk = pkgs.stdenv.mkDerivation (final: {
-            pname = "harken-apk";
-            version = "0.1.0";
-            src = only [ "harken/android" "harken/domain/gen/kotlin" "kotlin" ];
-            sourceRoot = "source/harken/android";
-            # stdenv makes only the source root writable, and gradle writes
-            # `.gradle/` and `build/` inside the included build at ../../kotlin
-            # too — a read-only one ends the build with no task run and no
-            # message. The whole unpacked tree is writable instead.
-            postUnpack = "chmod -R u+w source";
-            nativeBuildInputs = [ pkgs.gradle pkgs.jdk21 ];
-            mitmCache = pkgs.gradle.fetchDeps {
-              pkg = final.finalPackage;
-              data = ./harken/android/deps.json;
-            };
-            __darwinAllowLocalNetworking = true;
-            ANDROID_HOME = sdkRoot;
-            ANDROID_SDK_ROOT = sdkRoot;
-            gradleFlags = [
-              "-Dorg.gradle.java.home=${pkgs.jdk21.home}"
-              # The Kotlin build asks for a JDK 21 toolchain; this is the one,
-              # and gradle is not to go looking for or downloading another.
-              "-Porg.gradle.java.installations.auto-detect=false"
-              "-Porg.gradle.java.installations.auto-download=false"
-              "-Porg.gradle.java.installations.paths=${pkgs.jdk21.home}"
-              # AGP would fetch its own aapt2 from Maven, an unpatched binary
-              # that cannot run here; the SDK's is patched and can.
-              "-Pandroid.aapt2FromMavenOverride=${sdkRoot}/build-tools/35.0.0/aapt2"
-            ];
-            # AGP keeps its own state (analytics settings, the debug keystore it
-            # signs with) under ~/.android, and the builder has no home.
-            preBuild = ''
-              export HOME="$TMPDIR/home" ANDROID_USER_HOME="$TMPDIR/home/.android"
-              mkdir -p "$ANDROID_USER_HOME"
-            '';
-            gradleBuildTask = ":app:assembleDebug";
-            # The recording runs the same assemble rather than resolving every
-            # configuration: AGP's androidTest classpaths cannot be resolved
-            # in isolation, and what the build fetches is the whole graph.
-            gradleUpdateTask = ":app:assembleDebug";
-            doCheck = false;
-            installPhase = ''
-              mkdir -p $out
-              cp app/build/outputs/apk/debug/app-debug.apk $out/harken-debug.apk
-            '';
-          });
+          # The phone is out of the flake for now (docs/plan-phones.md, round
+          # 2): `harken-apk` assembled the frozen Compose app over the frozen
+          # v3 Kotlin runtime and `arkc gen kotlin`'s print of harken's v3
+          # domain, and round 2 deleted that print and rewrote the runtime
+          # under the app, which round 4 rewires to load `harken.ark`. The
+          # derivation, and `harken-apk-deps` beside it, are as they stood at
+          # 2874274; the SDK and aapt2 above stay, since nothing about them
+          # changed.
+
           # The pinned previous revisions (nix/versions.nix), each its
           # `harken-server` package as that revision's own flake builds it:
           # both binaries, the server and harken-peer. In order, which is
@@ -331,8 +287,6 @@
             harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { harken-server = crate { pname = "harken-server"; }; };
             inherit harken-web harken-web-server harken-iced ark-admin;
             default = ark;
-            inherit harken-apk;
-            harken-apk-deps = harken-apk.mitmCache.updateScript;
           } // lib.listToAttrs (map (v: lib.nameValuePair "harken-server-${v.name}" v.server) versions)
           // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
             # The two pieces an ARM Linux needed, on their own.
@@ -439,6 +393,11 @@
             # the cached store holds the wasm-bindgen CLI it compiled.
             harken-web = pkgs.mkShell {
               packages = [ wasmRust wasm-bindgen-cli pkgs.binaryen ];
+            };
+            # The Kotlin runtime (kotlin/README.md): gradle, the JDK it runs
+            # on, and ktfmt, whose kotlinlang style the tree is held to.
+            kotlin = pkgs.mkShell {
+              packages = [ pkgs.kotlin pkgs.gradle pkgs.jdk21 pkgs.ktfmt ];
             };
             default = pkgs.mkShell {
               packages = [ rust pkgs.pkg-config ];
