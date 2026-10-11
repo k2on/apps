@@ -235,8 +235,9 @@
           # thousands of traces), its test runner an executable since there is
           # no XCTest here. The Unicode tables are generated from rust/ark's
           # before the build. The check runs the conformance runner over
-          # spec/vectors, which names what it ran and skipped and fails on a
-          # failure and on a claimed kind with nothing run.
+          # spec/vectors and every trace of `trace-corpus`, which names what
+          # it ran and skipped and fails on a failure and on a claimed kind
+          # with nothing run.
           swift = pkgs.swiftPackages.stdenv.mkDerivation {
             pname = "arkdb-swift";
             version = "0.1.0";
@@ -263,7 +264,7 @@
             doCheck = true;
             checkPhase = ''
               runHook preCheck
-              "$(swiftpmBinPath)/ArkDBTests" ../spec/vectors
+              "$(swiftpmBinPath)/ArkDBTests" ../spec/vectors ${trace-corpus}
               runHook postCheck
             '';
             installPhase = ''

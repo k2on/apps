@@ -46,14 +46,16 @@ let claimed: [(String, (Vector, Value) throws -> Void)] = [
         }
     }),
     ("views", { _, v in try Checks.views(v) }),
+    ("protocol", { x, v in try ClientChecks.protocolFrame(x.path, v) }),
+    ("rebase", { x, v in
+        if x.form != "three-peers" { throw Failed("rebase: a client runs no \(x.form)") }
+        try ClientChecks.threePeers(v)
+    }),
+    ("trace", { _, v in try ClientChecks.trace(v) }),
 ]
 
 /// The kinds no check here runs yet, and why.
-let notYet: [String: String] = [
-    "protocol": "the protocol client is docs/plan-phones.md round 6",
-    "rebase": "the replica is docs/plan-phones.md round 6",
-    "trace": "the client is docs/plan-phones.md round 6",
-]
+let notYet: [String: String] = [:]
 
 var problems = [String]()
 var vectors = [Vector]()
@@ -146,7 +148,27 @@ for k in kinds {
     for line in r { print("  ran     \(line)") }
     for line in s { print("  skipped \(line)") }
 }
+// The steps of a client vector a client does not take, by name.
+print("rebase/three-peers.json: steps a client does not take (spec/RUNNERS.md):")
+for s in ClientChecks.serverOnly { print("  skipped \(s)") }
 for (k, _) in claimed where (ran[k] ?? []).isEmpty { problems.append("\(k) is claimed and ran no vector") }
+
+// `packages.trace-corpus` (docs/plan-phones.md S3): every trace of the
+// directory ARK_TRACE_CORPUS (or the second argument) names, replayed.
+let corpusDir = arguments.count > 2 && !arguments[2].isEmpty ? arguments[2] : ProcessInfo.processInfo.environment["ARK_TRACE_CORPUS"]
+if let dir = corpusDir {
+    do {
+        let (n, failed, ms) = try ClientChecks.corpus(dir)
+        print("trace corpus \(dir): \(n - failed.count) of \(n) traces replayed in \(ms) ms, \(failed.count) failed")
+        for f in failed.prefix(20) { print("  FAILED \(String(f.prefix(2000)))") }
+        if n == 0 { problems.append("the trace corpus at \(dir) holds no trace") }
+        if !failed.isEmpty { problems.append("\(failed.count) corpus traces do not replay") }
+    } catch {
+        problems.append("trace corpus: \(error)")
+    }
+} else {
+    print("trace corpus: ARK_TRACE_CORPUS is unset, no corpus replayed")
+}
 
 // Past what the vectors reach: the store's index hints held to the scans they stand for.
 do {
