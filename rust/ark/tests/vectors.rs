@@ -911,3 +911,50 @@ fn rebase_fleet() {
     }
     falsified("rebase", |_, v| check_fleet(v));
 }
+
+// MANIFEST.json ------------------------------------------------------------------
+
+/// `vectors/MANIFEST.json` names every vector there is, once, by the
+/// directory it is in, failing exactly where it is a `falsify/` one, and
+/// says who runs it: every `rebase/` fleet `rust-only` — Rust's simulator
+/// and its scheduler — and everything else `client` (`spec/RUNNERS.md`,
+/// `docs/plan-phones.md` S1). A file the manifest does not name, or one it
+/// names that is not there, is a manifest out of date. Falsified by leaving
+/// `trace/` out of the files the manifest is written from: every trace is
+/// then a file it does not name.
+#[test]
+fn the_manifest_names_every_vector() {
+    let m = read(&vectors().join("MANIFEST.json"));
+    let listed = m["vectors"].as_array().expect("a list of vectors");
+    let mut named = std::collections::BTreeSet::new();
+    let mut sides: BTreeMap<String, usize> = BTreeMap::new();
+    for e in listed {
+        let path = e["path"].as_str().expect("a path");
+        assert!(named.insert(path.to_string()), "{path} is listed twice");
+        assert!(vectors().join(path).is_file(), "{path} is listed and is not there");
+        assert_eq!(e["kind"].as_str(), path.split('/').next(), "{path}: the kind is its directory");
+        let fails = path.contains("/falsify/");
+        assert_eq!(e["expect"].as_str(), Some(if fails { "fail" } else { "pass" }), "{path}");
+        let fleet = path.starts_with("rebase/") && read(&vectors().join(path)).get("script").is_some();
+        assert_eq!(e["side"].as_str(), Some(if fleet { "rust-only" } else { "client" }), "{path}");
+        *sides.entry(e["side"].as_str().unwrap_or("").to_string()).or_default() += 1;
+    }
+    fn walk(dir: &Path, root: &Path, out: &mut Vec<String>) {
+        for e in fs::read_dir(dir).unwrap() {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                walk(&p, root, out);
+            } else if p.extension().is_some_and(|x| x == "json") {
+                out.push(p.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/"));
+            }
+        }
+    }
+    let mut on_disk = vec![];
+    walk(&vectors(), &vectors(), &mut on_disk);
+    on_disk.retain(|p| p != "MANIFEST.json");
+    for p in &on_disk {
+        assert!(named.contains(p), "{p} is a vector the manifest does not name");
+    }
+    assert_eq!(on_disk.len(), named.len());
+    println!("MANIFEST.json: {} vectors, by side {sides:?}", named.len());
+}

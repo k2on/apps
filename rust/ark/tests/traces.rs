@@ -1,6 +1,7 @@
-//! `docs/plan-phones.md` S2 The trace runner, Rust's: every trace of a
-//! corpus directory when `ARK_TRACE_CORPUS` names one
-//! (`packages.trace-corpus`), and of a fuzz run of its own, replayed into a
+//! `docs/plan-phones.md` S2 The trace runner, Rust's: every trace under
+//! `spec/vectors/trace/`, every trace of a corpus directory when
+//! `ARK_TRACE_CORPUS` names one (`packages.trace-corpus`), and every trace
+//! of a fuzz run of its own, replayed into a
 //! fresh client from its inputs alone, every output held to the recorded
 //! one, every frame byte for byte (`ark::trace::replay`). The client the
 //! fuzzer recorded is this crate's, so this is the recording held to being
@@ -15,6 +16,10 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+
+fn vectors() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../spec/vectors/trace")
+}
 
 fn jsons(dir: &Path) -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = fs::read_dir(dir)
@@ -46,6 +51,25 @@ fn run_dir(dir: &Path) -> (Vec<String>, Vec<String>) {
         }
     }
     (ran, failed)
+}
+
+/// Every checked-in trace replays, and every `falsify/` one — a recorded
+/// output altered — does not. The names of both are printed: a run that
+/// passes by running nothing says so.
+#[test]
+fn the_checked_in_traces_replay() {
+    let (ran, failed) = run_dir(&vectors());
+    println!("trace/: {} replayed: {}", ran.len(), ran.join(", "));
+    assert!(failed.is_empty(), "traces that do not replay:\n{}", failed.join("\n"));
+    assert!(ran.len() >= 12, "too few traces under spec/vectors/trace: {}", ran.len());
+    let falsify = jsons(&vectors().join("falsify"));
+    assert!(!falsify.is_empty(), "no trace under trace/falsify");
+    for p in falsify {
+        let text = fs::read_to_string(&p).unwrap();
+        assert!(text.contains("\"expect\": \"fail\""), "{} says nothing of failing", p.display());
+        let e = check(&p).expect_err(&format!("{} replayed and must not", p.display()));
+        println!("trace/falsify/{}: fails, as it must: {e}", p.file_name().unwrap().to_string_lossy());
+    }
 }
 
 /// `ARK_TRACE_CORPUS`: every trace of the generated corpus replays. Says
