@@ -61,13 +61,17 @@ public class WebSocketTransport(
 
         /**
          * A client held to a link's [Timing]: a ping every `pingEveryMs`, the connection failed
-         * when one goes unanswered, and `connectTimeoutMs` for the TCP connection and the
-         * handshake.
+         * when one goes unanswered, and `connectTimeoutMs` for the TCP connection and again for the
+         * handshake — the call's timeout, which OkHttp lets go of once a WebSocket is open, so it
+         * bounds the upgrade and nothing after it. Without it, a handshake into a socket that
+         * accepts and never answers waits for ever: reads have no timeout, since a quiet connection
+         * is a healthy one and the pings are what notice a dead one.
          */
         public fun client(timing: Timing): OkHttpClient =
             OkHttpClient.Builder()
                 .pingInterval(timing.pingEveryMs, TimeUnit.MILLISECONDS)
                 .connectTimeout(timing.connectTimeoutMs, TimeUnit.MILLISECONDS)
+                .callTimeout(timing.connectTimeoutMs, TimeUnit.MILLISECONDS)
                 .readTimeout(0, TimeUnit.MILLISECONDS)
                 .build()
     }

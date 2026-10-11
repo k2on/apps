@@ -257,13 +257,43 @@
             __darwinAllowLocalNetworking = true;
             gradleFlags = [ "-Dorg.gradle.java.home=${pkgs.jdk21}" "-ParkTraceCorpus=${trace-corpus}" ];
             preBuild = ''
-              ${fmt.kotlin} --dry-run --set-exit-if-changed $(find ark-runtime ark-client -name '*.kt' -not -path '*/build/*' | sort)
+              ${fmt.kotlin} --dry-run --set-exit-if-changed $(find ark-runtime ark-client harken-peer -name '*.kt' -not -path '*/build/*' | sort)
             '';
             gradleBuildTask = "build";
             doCheck = false;
             installPhase = ''
               mkdir -p $out/lib
               cp ark-runtime/build/libs/*.jar ark-client/build/libs/*.jar $out/lib/
+            '';
+          });
+
+          # `harken-peer-kt` (docs/plan-phones.md round 4): harken's headless
+          # peer on the Kotlin client, speaking harken-peer's JSON lines, which
+          # the fleet runs beside Rust peers (checks.fleet-kotlin). Gradle's
+          # `installDist` over the same recorded Maven graph as the runtime,
+          # then a launcher naming the JDK and the jars — harken.ark is in the
+          # peer's own jar.
+          harken-peer-kt = pkgs.stdenv.mkDerivation (final: {
+            pname = "harken-peer-kt";
+            version = "0.1.0";
+            src = only [ "kotlin" "rust/ark/src/unicode_tables.rs" "harken/domain/harken.ark" ];
+            sourceRoot = "source/kotlin";
+            nativeBuildInputs = [ pkgs.gradle pkgs.jdk21 pkgs.makeWrapper ];
+            mitmCache = pkgs.gradle.fetchDeps {
+              pkg = final.finalPackage;
+              data = ./kotlin/deps.json;
+            };
+            __darwinAllowLocalNetworking = true;
+            gradleFlags = [ "-Dorg.gradle.java.home=${pkgs.jdk21}" ];
+            gradleBuildTask = ":harken-peer:installDist";
+            doCheck = false;
+            installPhase = ''
+              mkdir -p $out/lib $out/bin
+              cp harken-peer/build/install/harken-peer-kt/lib/*.jar $out/lib/
+              makeWrapper ${pkgs.jdk21}/bin/java $out/bin/harken-peer-kt \
+                --add-flags "-XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xmx512m" \
+                --add-flags "-Dstdout.encoding=UTF-8 -Dstderr.encoding=UTF-8" \
+                --add-flags "-cp '$out/lib/*' dev.harken.peer.HarkenPeerKt"
             '';
           });
 
@@ -322,6 +352,7 @@
             inherit ark arkc vectors fuzz harken-domain trace-corpus;
             arkdb-kotlin = kotlin;
             kotlin-deps = kotlin.mitmCache.updateScript;
+            inherit harken-peer-kt;
             harken-server = crate { pname = "harken-server"; };
             # `nix run .#harken-serve [ADDR]`: the dev server, anyone is
             # whoever they say.
