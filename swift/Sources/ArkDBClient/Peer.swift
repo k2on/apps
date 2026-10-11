@@ -5,7 +5,10 @@
 // client is a driver's: ids and times drawn (`Autos`), who authors (a login,
 // or nobody), what is written when, and going alone and back.
 //
-// The sans-io half is here for a transport of the caller's own:
+// The socket is a `Link` (`Link.swift`, the reference's `ark_client::link`):
+// `connect` makes one, and every `pump` dials if due, hands the engine what
+// arrived, settles once, sends what it queued and writes what moved. The
+// sans-io half is still here for a transport of the caller's own:
 // `connected`, `recvFrame` and `takeOutgoingFrames`.
 import ArkDB
 
@@ -82,13 +85,22 @@ public struct Options {
     public var token: String?
     public var alone: Bool
     public var autos: Autos
+    public var timing: Timing
 
-    public init(_ user: String, _ session: String, _ token: String?, alone: Bool = false, autos: Autos = .system()) {
+    public init(_ user: String, _ session: String, _ token: String?, alone: Bool = false, autos: Autos = .system(), timing: Timing = Timing()) {
         self.user = user
         self.session = session
         self.token = token
         self.alone = alone
         self.autos = autos
+        self.timing = timing
+    }
+
+    /// The same, with a link's numbers (`with_timing`).
+    public func withTiming(_ t: Timing) -> Options {
+        var o = self
+        o.timing = t
+        return o
     }
 
     /// A login of a server.
@@ -113,6 +125,58 @@ public enum Standing: Equatable {
     case unknown
 }
 
+/// What one `Peer.pump` came to (`ark_client::Pumped`).
+public struct Pumped {
+    /// A frame arrived.
+    public var moved = false
+    /// The socket opened, and `Hello` went out.
+    public var opened = false
+    /// The socket that was open went, and why. The link dials again.
+    public var dropped: String? = nil
+    /// The server turned this login away; the link stops until a new token and a reconnect.
+    public var denied: String? = nil
+    /// Verdicts that arrived.
+    public var rejected = 0
+    /// Something worth a status line: a frame that did not decode, a write that failed.
+    public var note: String? = nil
+}
+
+/// Everything a status line or a debug screen shows (`ark_client::Status`).
+public struct Status {
+    public let user: String
+    public let session: String
+    public let alone: Bool
+    /// Nobody is signed in: nothing is dialled.
+    public let signedOut: Bool
+    /// The engine is linked: the socket is open and `Hello` was said.
+    public let linked: Bool
+    /// The link in a word: `alone`, `signed out`, `offline`, `idle`,
+    /// `connecting`, `joining`, `open`, `waiting`.
+    public let link: String
+    /// Intents a join re-queued that the server has not yet answered.
+    public let joining: Int
+    /// Where this peer last shared a log with a server.
+    public let fork: Fork
+    public let url: String?
+    /// Connections opened.
+    public let opens: Int64
+    /// The connection count the engine keeps: what a live room compares.
+    public let epoch: Int64
+    /// The last confirmed sequence.
+    public let cursor: Seq
+    public let pending: Int
+    /// Pending intents the server answered `held`: it does not run their function yet (D1).
+    public let held: Int
+    /// The server runs another module than this peer's (D1).
+    public let behind: Bool
+    public let diverged: Int
+    public let denied: String?
+    public let lastClose: String?
+    /// Live frames received, decoded or not.
+    public let heardFrames: Int64
+    public let badFrames: Int64
+}
+
 /// A verdict against an intent this peer authored (`ark_client::Rejection`).
 public struct Rejection: Equatable {
     public let id: Id
@@ -130,6 +194,7 @@ public final class Peer {
     /// Who this peer authors as.
     public private(set) var ctx: Ctx
     let autos: Autos
+    private let timing: Timing
     private let writer: ReplicaWriter
     /// Where this peer last shared a log with a server.
     public internal(set) var fork: Fork
@@ -147,6 +212,8 @@ public final class Peer {
     private let checks = Checks()
     var heardFrames: Int64 = 0
     var badFrames: Int64 = 0
+    /// The link, if `connect` made one.
+    public private(set) var link: Link? = nil
 
     private final class AloneLog {
         let journal: Journal
@@ -163,13 +230,14 @@ public final class Peer {
         var unknown = [Seq]()
     }
 
-    private init(_ domain: Domain, _ schema: Schema, _ client: Client, _ storage: Storage, _ ctx: Ctx, _ autos: Autos, _ writer: ReplicaWriter, _ fork: Fork, _ authored: Set<Id>, _ signedOut: Bool) {
+    private init(_ domain: Domain, _ schema: Schema, _ client: Client, _ storage: Storage, _ ctx: Ctx, _ autos: Autos, _ timing: Timing, _ writer: ReplicaWriter, _ fork: Fork, _ authored: Set<Id>, _ signedOut: Bool) {
         self.domain = domain
         self.schema = schema
         self.client = client
         self.storage = storage
         self.ctx = ctx
         self.autos = autos
+        self.timing = timing
         self.writer = writer
         self.fork = fork
         self.authored = authored
@@ -247,7 +315,7 @@ public final class Peer {
             client.signIn(ctx, opts.token)
             writer.forgetPending()
         }
-        let peer = Peer(domain, schema, client, storage, ctx, opts.autos, writer, fork, Set(pending.map { $0.id }), signedOut)
+        let peer = Peer(domain, schema, client, storage, ctx, opts.autos, opts.timing, writer, fork, Set(pending.map { $0.id }), signedOut)
         if hadLog {
             try peer.resumeAlone()
         } else if opts.alone {
@@ -274,7 +342,7 @@ public final class Peer {
         collectRejections()
         writer.forgetPending()
         try persist()
-        signedIn()
+        reconnect()
     }
 
     /// `sign_out`: the token forgotten and the connection dropped; the login is kept.
@@ -282,7 +350,7 @@ public final class Peer {
         if alone { return }
         signedOut = true
         client.token = nil
-        dropLink("signed out")
+        link?.stop("signed out")
         if client.linked { client.disconnected() }
     }
 
@@ -296,7 +364,8 @@ public final class Peer {
     /// own authority from its confirmed store on.
     public func leave() throws {
         if alone { return }
-        forgetLink("alone")
+        link?.stop("alone")
+        link = nil
         if client.linked { client.disconnected() }
         client.denied = nil
         try startAlone()
@@ -321,7 +390,16 @@ public final class Peer {
         }
     }
 
-    /// What the next `Hello` proves the login with; a reconnect for it to be said now.
+    /// `join`, alone → server (`Peer::join`): `join` up to the connecting,
+    /// then the link to `url` dialled — as `login`, or as nobody for a
+    /// sign-in to make the signer's. On a peer that already has a server, a
+    /// sign-in (with a login) and `connect`.
+    public func join(_ url: String, _ login: Login?, dial: Dial? = nil) throws {
+        try join(login?.user.id, login?.session, login?.token)
+        connect(url, dial: dial)
+    }
+
+    /// What the next `Hello` proves the login with; `reconnect` for it to be said now.
     public func setToken(_ token: String?) { client.token = token }
 
     // -- a screen's side ---------------------------------------------------------
@@ -406,6 +484,110 @@ public final class Peer {
 
     // Intents a join re-queued that are still pending.
     func joining() -> Int { local.isEmpty ? 0 : client.replica.pending.filter { local.contains($0.id) }.count }
+
+    // -- the socket ---------------------------------------------------------------
+
+    /// `connect`: dial the server's sync socket (`ws://host/sync`) and keep it
+    /// up — every `pump` moves frames, and a drop dials again with a backoff.
+    /// Replaces any link there was. Signed out, the link is kept and not
+    /// dialled: a sign-in starts it.
+    public func connect(_ url: String, dial: Dial? = nil) {
+        disconnect()
+        client.denied = nil
+        let l = Link(url, dial ?? platformDial(timing), timing)
+        if signedOut { l.stop("signed out") }
+        link = l
+    }
+
+    /// Go offline: close the socket and stop dialling. Everything authored meanwhile is pending.
+    public func disconnect() {
+        link?.stop("offline")
+        if client.linked { client.disconnected() }
+    }
+
+    /// Dial again after `disconnect` or a denial — with a new token, usually. Signed out, nothing.
+    public func reconnect() {
+        if signedOut { return }
+        client.denied = nil
+        guard let l = link else { return }
+        if l.isOpen {
+            l.stop("reconnecting")
+            client.disconnected()
+        }
+        l.resume()
+    }
+
+    /// `pump`: one turn of the link — dial if due, hand the engine what
+    /// arrived, settle it once (R8), send what it queued, and write whatever
+    /// moved. Call it on a tick; fifty milliseconds is what the clients here
+    /// use. Without a link it still writes, and a peer alone needs nothing else.
+    @discardableResult
+    public func pump() -> Pumped {
+        var p = Pumped()
+        if let l = link {
+            let polled = l.poll()
+            if polled.opened {
+                client.connected()
+                p.opened = true
+            }
+            for f in polled.frames {
+                p.moved = true
+                do {
+                    try placeFrame(f)
+                } catch {
+                    badFrames += 1
+                    p.note = "a frame from the server: \(error)"
+                }
+            }
+            if let n = settle().first { p.note = "the server's state at \(n) is not this replica's" }
+            if let why = polled.closed {
+                client.disconnected()
+                p.dropped = why
+            }
+            if let reason = client.denied, let now = link, now.state != .idle {
+                now.stop("denied: \(reason)")
+                p.denied = reason
+            }
+            let frames = takeOutgoingFrames()
+            if let now = link { for f in frames { now.send(f) } }
+        }
+        let before = rejections.count
+        collectRejections()
+        p.rejected = rejections.count - before
+        do {
+            try persist()
+        } catch {
+            p.note = "\(error)"
+        }
+        return p
+    }
+
+    /// `status`: everything a status line or a debug screen shows.
+    public func status() -> Status {
+        let joining = self.joining()
+        let word: String
+        if alone {
+            word = "alone"
+        } else if signedOut {
+            word = "signed out"
+        } else if let l = link {
+            switch l.state {
+            case .idle: word = "idle"
+            case .connecting, .open: word = joining > 0 ? "joining" : (l.state == .open ? "open" : "connecting")
+            case .waiting: word = "waiting"
+            }
+        } else {
+            word = "offline"
+        }
+        return Status(user: ctx.user, session: ctx.session, alone: alone, signedOut: signedOut, linked: client.linked, link: word, joining: joining, fork: fork, url: link?.url, opens: link?.opens ?? 0, epoch: client.epoch, cursor: client.replica.cursor, pending: pendingLen, held: client.held(), behind: client.behind(), diverged: client.replica.diverged.count, denied: client.denied, lastClose: link?.lastClose, heardFrames: heardFrames, badFrames: badFrames)
+    }
+
+    /// Close: the link stopped, and whatever is not yet written, written (the reference's `Drop`).
+    public func close() throws {
+        link?.stop("closed")
+        link = nil
+        try persist()
+    }
 
     // -- sans-io: a transport of the caller's own --------------------------------
 
@@ -642,10 +824,4 @@ public final class Peer {
             rejections.append(Rejection(id: id, reason: reason))
         }
     }
-
-    // The link's hooks, which `Link.swift` fills in: a sign-in redials, a
-    // sign-out or a leave stops the dialling.
-    func signedIn() {}
-    func dropLink(_ why: String) {}
-    func forgetLink(_ why: String) {}
 }

@@ -243,7 +243,7 @@
             version = "0.1.0";
             # The storage fixture is round 3's, read where it was committed
             # beside the Kotlin client rather than copied.
-            src = only [ "swift" "spec/vectors" "rust/ark/src/unicode_tables.rs" "kotlin/ark-client/fixtures/rust-peer.json" ];
+            src = only [ "swift" "spec/vectors" "rust/ark/src/unicode_tables.rs" "kotlin/ark-client/fixtures/rust-peer.json" "harken/domain/harken.ark" ];
             sourceRoot = "source/swift";
             nativeBuildInputs = [ pkgs.swift pkgs.swiftpm ];
             # On Linux, Foundation and Dispatch are packages of their own and
@@ -266,7 +266,7 @@
             doCheck = true;
             checkPhase = ''
               runHook preCheck
-              "$(swiftpmBinPath)/ArkDBTests" ../spec/vectors ${trace-corpus} ../kotlin/ark-client/fixtures/rust-peer.json
+              "$(swiftpmBinPath)/ArkDBTests" ../spec/vectors ${trace-corpus} ../kotlin/ark-client/fixtures/rust-peer.json ../harken/domain/harken.ark
               runHook postCheck
             '';
             installPhase = ''
