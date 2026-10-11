@@ -126,6 +126,19 @@ val conformance by tasks.registering(JavaExec::class) {
     args(vectors.get())
 }
 
+// R9's kept numbers held, past what the views vectors reach, to a fresh
+// hydrate and to a fold's answer, over seeded random batches.
+val keptNumbers by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Holds kept numbers three levels deep to a fresh read."
+    dependsOn(tasks.named("testClasses"))
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("dev.arkdb.conformance.KeptNumbers")
+    val vectors = providers.gradleProperty("arkVectors")
+        .orElse(rootProject.file("../spec/vectors").absolutePath)
+    args(vectors.get())
+}
+
 tasks.named("check") {
-    dependsOn(conformance)
+    dependsOn(conformance, keptNumbers)
 }
