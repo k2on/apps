@@ -241,7 +241,9 @@
           swift = pkgs.swiftPackages.stdenv.mkDerivation {
             pname = "arkdb-swift";
             version = "0.1.0";
-            src = only [ "swift" "spec/vectors" "rust/ark/src/unicode_tables.rs" ];
+            # The storage fixture is round 3's, read where it was committed
+            # beside the Kotlin client rather than copied.
+            src = only [ "swift" "spec/vectors" "rust/ark/src/unicode_tables.rs" "kotlin/ark-client/fixtures/rust-peer.json" ];
             sourceRoot = "source/swift";
             nativeBuildInputs = [ pkgs.swift pkgs.swiftpm ];
             # On Linux, Foundation and Dispatch are packages of their own and
@@ -264,7 +266,7 @@
             doCheck = true;
             checkPhase = ''
               runHook preCheck
-              "$(swiftpmBinPath)/ArkDBTests" ../spec/vectors ${trace-corpus}
+              "$(swiftpmBinPath)/ArkDBTests" ../spec/vectors ${trace-corpus} ../kotlin/ark-client/fixtures/rust-peer.json
               runHook postCheck
             '';
             installPhase = ''

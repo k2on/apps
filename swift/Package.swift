@@ -15,10 +15,12 @@ let package = Package(
     platforms: [.iOS(.v15), .macOS(.v12)],
     products: [
         .library(name: "ArkDB", targets: ["ArkDB"]),
+        .library(name: "ArkDBClient", targets: ["ArkDBClient"]),
         .executable(name: "ArkDBTests", targets: ["ArkDBTests"]),
     ],
     targets: [
         .target(name: "ArkDB", dependencies: [], path: "Sources/ArkDB"),
-        .executableTarget(name: "ArkDBTests", dependencies: ["ArkDB"], path: "Tests/ArkDBTests"),
+        .target(name: "ArkDBClient", dependencies: ["ArkDB"], path: "Sources/ArkDBClient"),
+        .executableTarget(name: "ArkDBTests", dependencies: ["ArkDB", "ArkDBClient"], path: "Tests/ArkDBTests"),
     ]
 )

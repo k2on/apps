@@ -9,9 +9,11 @@
 // needs no test framework: `rust/ark/tests/vectors.rs` is the reference
 // reading of each check.
 //
-//   ArkDBTests [VECTORS] [TRACE_CORPUS]
+//   ArkDBTests [VECTORS] [TRACE_CORPUS] [STORAGE_FIXTURE]
 //
-// VECTORS defaults to ../spec/vectors; the corpus to ARK_TRACE_CORPUS.
+// VECTORS defaults to ../spec/vectors; the corpus to ARK_TRACE_CORPUS; the
+// storage fixture to the one round 3 committed beside the Kotlin client,
+// ../kotlin/ark-client/fixtures/rust-peer.json, read where it is.
 import ArkDB
 import Foundation
 
@@ -185,6 +187,11 @@ do {
 } catch {
     problems.append("kept numbers: \(error)")
 }
+
+// The client's storage (`ArkDBClient`): the Rust peer's records byte for
+// byte, and every trace — and the corpus — with its durable copy in them.
+let fixturePath = arguments.count > 3 && !arguments[3].isEmpty ? arguments[3] : "../kotlin/ark-client/fixtures/rust-peer.json"
+problems += StorageTests.run(root, fixturePath, corpusDir).map { "storage: " + $0 }
 
 let total = ran.values.reduce(0) { $0 + $1.count }
 let skippedTotal = skipped.values.reduce(0) { $0 + $1.count }
