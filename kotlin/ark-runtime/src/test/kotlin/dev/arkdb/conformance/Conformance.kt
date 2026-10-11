@@ -70,12 +70,12 @@ object Conformance {
                         else -> throw Failed("eval: unknown form ${x.form}")
                     }
                 },
+            "views" to { _, v -> Checks.views(v) },
         )
 
     /** The kinds a later round of docs/plan-phones.md turns on, and which. */
     private val notYet: Map<String, String> =
         linkedMapOf(
-            "views" to "round 2, views",
             "protocol" to "round 3, the client",
             "rebase" to "round 3, the client",
             "trace" to "round 3, the client",

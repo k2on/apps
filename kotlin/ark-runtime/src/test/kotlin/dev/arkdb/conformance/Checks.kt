@@ -23,6 +23,8 @@ import dev.arkdb.Sha256
 import dev.arkdb.Value
 import dev.arkdb.ValueOrder
 import dev.arkdb.Verify
+import dev.arkdb.ViewEnv
+import dev.arkdb.Views
 import dev.arkdb.checkSchema
 import dev.arkdb.leaf
 import dev.arkdb.stripModule
@@ -327,6 +329,67 @@ object Checks {
             ensureEq(st.storeValue(), step.field("store_after"), "step $i store")
             ensureEq(
                 Hex.encode(Hash.stateHash(st)), step.field("hash_after").asText(), "step $i hash")
+        }
+    }
+
+    // views -----------------------------------------------------------------
+
+    /**
+     * `check_view`: a query kept up to date — its plan as the module writes it; hydrated over
+     * `store_before` in the vector's context and arguments, after its middleware; then each batch
+     * applied to the store whole and pushed as one, and after each the patches (where the step has
+     * them), the answer, the contract and the splice.
+     */
+    fun views(v: Value) {
+        val m = moduleOf(v.field("module"))
+        val sch = m.schema
+        val name = v.field("query").asText()
+        val f = m.lookupFunction(name) ?: throw Failed("no query $name")
+        val plan = f.plan ?: throw Failed("$name is not a plan")
+        val written =
+            v.field("module")
+                .field("functions")
+                .asList()
+                .firstOrNull { it.field("name") == Value.VText(name) }
+                ?.field("plan")
+        ensureEq(written, v.field("plan"), "the plan is the query's, as the module writes it")
+        val ctx = ctxOf(v.field("ctx"))
+        val c = Hash.closure(m, f)
+        val st = MemoryStore.fromValue(sch, v.field("store_before"))
+        val (args, provided) =
+            try {
+                Eval.middleware(sch, c, ctx, argsOf(v.field("args")), st)
+            } catch (x: EvalFault) {
+                throw Failed("middleware: ${x.message}")
+            }
+        val view =
+            try {
+                Views.hydrate(sch, plan, ViewEnv(c.helpers, ctx, args, provided), st)
+            } catch (x: EvalFault) {
+                throw Failed("hydrate: ${x.message}")
+            }
+        ensureEq(Value.VList(view.rows()), v.field("rows_before"), "the answer at hydrate")
+        val batches = v.field("batches").asList()
+        val steps = v.field("steps").asList()
+        ensureEq(batches.size, steps.size, "a step per batch")
+        for ((i, pair) in batches.zip(steps).withIndex()) {
+            val (batch, step) = pair
+            val changes = batch.asList().map(Facts::changeFromValue)
+            val before = view.rows()
+            st.applyChanges(changes)
+            val patches =
+                try {
+                    Views.pushAll(sch, st, changes, view)
+                } catch (x: EvalFault) {
+                    throw Failed("batch $i: ${x.message}")
+                }
+            ensure(Views.contract(sch, st, view)) { "batch $i breaks the contract" }
+            // A step the fuzzer wrote has no patches: only the answer, the contract and the splice.
+            step.asStruct().fields["patches"]?.let {
+                ensureEq(Value.VList(patches.map(Views::patchValue)), it, "batch $i patches")
+            }
+            ensureEq(Value.VList(view.rows()), step.field("rows"), "batch $i rows")
+            ensureEq(Views.splice(patches, before), view.rows(), "batch $i splice")
         }
     }
 }
