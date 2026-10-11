@@ -11,6 +11,7 @@
 package dev.arkdb.conformance
 
 import dev.arkdb.Canon
+import dev.arkdb.FactError
 import dev.arkdb.Hex
 import dev.arkdb.ModuleError
 import dev.arkdb.Value
@@ -71,15 +72,19 @@ object Conformance {
                     }
                 },
             "views" to { _, v -> Checks.views(v) },
+            "protocol" to { x, v -> ClientChecks.protocol(x.path, v) },
+            "rebase" to
+                { x, v ->
+                    when (x.form) {
+                        "three-peers" -> ClientChecks.threePeers(v)
+                        else -> throw Failed("rebase: a client runs no ${x.form}")
+                    }
+                },
+            "trace" to { _, v -> ClientChecks.trace(v) },
         )
 
-    /** The kinds a later round of docs/plan-phones.md turns on, and which. */
-    private val notYet: Map<String, String> =
-        linkedMapOf(
-            "protocol" to "round 3, the client",
-            "rebase" to "round 3, the client",
-            "trace" to "round 3, the client",
-        )
+    /** The kinds no client runs: none — every kind has a check above. */
+    private val notYet: Map<String, String> = emptyMap()
 
     lateinit var root: File
 
@@ -157,8 +162,38 @@ object Conformance {
             for (line in r) println("  ran     $line")
             for (line in s) println("  skipped $line")
         }
+        // The steps of a client vector a client does not take, by name.
+        println("rebase/three-peers.json: steps a client does not take (spec/RUNNERS.md):")
+        for (s in ClientChecks.serverOnly) println("  skipped $s")
         for (k in claimed.keys) if (ran[k].isNullOrEmpty())
             problems.add("$k is claimed and ran no vector")
+        // ark-runtime/traces: recordings of `arkc fuzz --traces`, unedited, that
+        // hold a client behaviour no trace under spec/vectors reaches.
+        val own = args.getOrNull(2)?.let(::File)
+        if (own != null && own.isDirectory) {
+            val (n, failed, _) = ClientChecks.corpus(own)
+            println("ark-runtime/traces: ${n - failed.size} of $n replayed")
+            for (f in
+                own.listFiles()!!
+                    .filter { it.name.endsWith(".json") }
+                    .sortedBy { it.name }) println("  ran     ${f.name}")
+            for (f in failed) problems.add("ark-runtime/traces/$f")
+            if (n == 0) problems.add("ark-runtime/traces holds no trace")
+        }
+        // `packages.trace-corpus` (docs/plan-phones.md S3): every trace of the
+        // directory ARK_TRACE_CORPUS (or the second argument) names, replayed.
+        val corpus =
+            args.getOrNull(1)?.takeIf { it.isNotEmpty() } ?: System.getenv("ARK_TRACE_CORPUS")
+        if (corpus == null) {
+            println("trace corpus: ARK_TRACE_CORPUS is unset, no corpus replayed")
+        } else {
+            val (n, failed, ms) = ClientChecks.corpus(File(corpus))
+            println(
+                "trace corpus $corpus: ${n - failed.size} of $n traces replayed in ${ms} ms, ${failed.size} failed")
+            for (f in failed.take(20)) println("  FAILED $f")
+            if (n == 0) problems.add("the trace corpus at $corpus holds no trace")
+            if (failed.isNotEmpty()) problems.add("${failed.size} corpus traces do not replay")
+        }
         val total = ran.values.sumOf { it.size }
         val skippedTotal = skipped.values.sumOf { it.size }
         println(
@@ -187,6 +222,8 @@ object Conformance {
             "module: ${e.message}" to false
         } catch (e: VerifyFailed) {
             "verify: ${e.message}" to false
+        } catch (e: FactError) {
+            "frame: ${e.message}" to false
         } catch (e: Throwable) {
             ("${e.javaClass.simpleName}: ${e.message}\n" +
                 e.stackTrace.take(12).joinToString("\n") { "      at $it" }) to true

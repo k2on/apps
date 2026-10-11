@@ -3,8 +3,9 @@
 // (`rust/ark/src/scope.rs`): the scopes gathered by table, a filter folded
 // under a context, the union's columns, and `check`, which holds what a
 // client runs to what its person holds for every role set the module
-// names. The client's half (`Holdings`: admits, project, the device
-// schema, filtering facts) is round 3's.
+// names; and the one piece of the client's half a client needs, the
+// device's schema (`deviceSchema`). What a server does with a union —
+// admitting rows, projecting them, filtering facts — is the server's.
 package dev.arkdb
 
 // The context a filter is folded under: everything a person is known by, or
@@ -315,4 +316,32 @@ public object ScopeCheck {
         }
         return false
     }
+}
+
+/**
+ * `scope::device_schema`: the schema a device has, from the module's and the tables held in part
+ * with their columns (what a partial snapshot says) — each such table narrowed to its held columns,
+ * its indexes and text indexes to those over them, and every table's references to those whose
+ * column is held and whose parent is held whole: a device never refuses a write for a parent it
+ * cannot see, and the authority checks every reference.
+ */
+public fun deviceSchema(full: Schema, held: Map<String, List<String>>): Schema {
+    if (held.isEmpty()) return full
+    fun whole(t: String) = !held.containsKey(t)
+    return Schema(
+        full.tables.map { t ->
+            val cols = held[t.name]
+            fun keeps(c: String) = cols == null || c in cols
+            val narrowed = cols != null && cols.size < t.columns.size
+            val refsMove = t.refs.any { !whole(it.table) }
+            if (!narrowed && !refsMove) t
+            else
+                Table(
+                    t.name,
+                    t.columns.filter { keeps(it.name) },
+                    t.key,
+                    t.indexes.filter { ix -> ix.columns.all(::keeps) },
+                    t.refs.filter { keeps(it.column) && whole(it.table) },
+                    t.text.filter(::keeps))
+        })
 }

@@ -113,7 +113,8 @@ sourceSets["main"].kotlin.srcDir(unicodeTables)
 // that it needs no test framework on the classpath: it reads
 // spec/vectors/MANIFEST.json, runs every vector of the kinds it claims,
 // prints what it ran and skipped by name, and exits non-zero on a failure
-// or on a claimed kind with nothing run.
+// or on a claimed kind with nothing run — and replays every trace of the
+// corpus `-ParkTraceCorpus` or ARK_TRACE_CORPUS names.
 val conformance by tasks.registering(JavaExec::class) {
     group = "verification"
     description = "Runs spec/vectors through the runtime (spec/RUNNERS.md)."
@@ -123,7 +124,14 @@ val conformance by tasks.registering(JavaExec::class) {
     jvmArgs("-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8")
     val vectors = providers.gradleProperty("arkVectors")
         .orElse(rootProject.file("../spec/vectors").absolutePath)
-    args(vectors.get())
+    // `packages.trace-corpus`, when named: every trace in it replayed too.
+    val corpus = providers.gradleProperty("arkTraceCorpus")
+        .orElse(providers.environmentVariable("ARK_TRACE_CORPUS"))
+        .orElse("")
+    // This runtime's own traces: fuzzer recordings, unedited, of a client
+    // behaviour no trace under spec/vectors reaches (ark-runtime/traces).
+    args(vectors.get(), corpus.get(), file("traces").absolutePath)
+    maxHeapSize = "1g"
 }
 
 // R9's kept numbers held, past what the views vectors reach, to a fresh
