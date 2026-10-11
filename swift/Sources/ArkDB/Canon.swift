@@ -1,8 +1,13 @@
-import Foundation
+// §1.3 The canonical encoding (`rust/ark/src/canon.rs`).
+//
+// RFC 8949 §4.2.1 deterministic CBOR plus the mapping from Value onto
+// CBOR's types: shortest heads, definite lengths, map keys sorted by the
+// bytes they encode to, tag 37 over sixteen bytes for an id. `decode`
+// accepts canonical bytes and nothing else.
 
 /// Why some bytes are not the canonical encoding of any value; the first
-/// rule the input broke, reading left to right. Mirrors `Ark.Canon.DecodeError`.
-public enum DecodeError: Error, Equatable {
+/// rule the input broke, reading left to right (`canon::DecodeError`).
+public enum DecodeError: Error, Equatable, CustomStringConvertible {
     case nonCanonicalHead
     case indefiniteLength
     case unsortedKeys
@@ -16,21 +21,40 @@ public enum DecodeError: Error, Equatable {
     case intOutOfRange
     case trailing
     case truncated
+
+    public var description: String {
+        switch self {
+        case .nonCanonicalHead: return "NonCanonicalHead"
+        case .indefiniteLength: return "IndefiniteLength"
+        case .unsortedKeys: return "UnsortedKeys"
+        case .duplicateKey: return "DuplicateKey"
+        case .nonTextKey: return "NonTextKey"
+        case .badTag: return "BadTag"
+        case .badId: return "BadId"
+        case .float: return "Float"
+        case .badSimple: return "BadSimple"
+        case .badUtf8: return "BadUtf8"
+        case .intOutOfRange: return "IntOutOfRange"
+        case .trailing: return "Trailing"
+        case .truncated: return "Truncated"
+        }
+    }
 }
 
-/// §1.3 The canonical encoding: RFC 8949 §4.2.1 deterministic CBOR plus the
-/// mapping from `Value` onto CBOR's types, exactly as `Ark.Canon`.
 public enum Canon {
     // MARK: Encoding
 
+    /// The canonical bytes of a value (`canon::encode`). Total: every value has one.
     public static func encode(_ v: Value) -> [UInt8] {
         var out = [UInt8]()
         build(v, into: &out)
         return out
     }
 
-    /// The head of a data item: the major type in the top three bits and
-    /// the argument in the shortest form that holds it.
+    /// The canonical bytes of a value, appended.
+    public static func encode(_ v: Value, into out: inout [UInt8]) { build(v, into: &out) }
+
+    @inline(__always)
     static func header(_ major: UInt8, _ n: UInt64, into out: inout [UInt8]) {
         let mt = major << 5
         if n < 24 {
@@ -40,7 +64,8 @@ public enum Canon {
             out.append(UInt8(n))
         } else if n < 0x10000 {
             out.append(mt | 25)
-            out.append(UInt8(n >> 8)); out.append(UInt8(n & 0xff))
+            out.append(UInt8(n >> 8))
+            out.append(UInt8(n & 0xff))
         } else if n < 0x1_0000_0000 {
             out.append(mt | 26)
             for s in stride(from: 24, through: 0, by: -8) { out.append(UInt8((n >> UInt64(s)) & 0xff)) }
@@ -50,48 +75,55 @@ public enum Canon {
         }
     }
 
-    static func string(_ major: UInt8, _ b: [UInt8], into out: inout [UInt8]) {
-        header(major, UInt64(b.count), into: &out)
-        out.append(contentsOf: b)
+    static func text(_ t: String, into out: inout [UInt8]) {
+        var s = t
+        s.withUTF8 { p in
+            header(3, UInt64(p.count), into: &out)
+            out.append(contentsOf: p)
+        }
     }
 
     static func build(_ v: Value, into out: inout [UInt8]) {
         switch v {
         case .null: out.append(0xf6)
-        case .bool(false): out.append(0xf4)
-        case .bool(true): out.append(0xf5)
+        case .bool(let b): out.append(b ? 0xf5 : 0xf4)
         case .int(let n):
             if n >= 0 {
                 header(0, UInt64(n), into: &out)
             } else {
-                // -1 - n, computed in Int64: in range exactly when n is negative.
-                header(1, UInt64((-1) - n), into: &out)
+                header(1, UInt64(bitPattern: -1 - n), into: &out)
             }
-        case .text(let t): string(3, Array(t.utf8), into: &out)
-        case .bytes(let b): string(2, b, into: &out)
+        case .text(let t): text(t, into: &out)
+        case .bytes(let b):
+            header(2, UInt64(b.count), into: &out)
+            out.append(contentsOf: b)
         case .id(let i):
             header(6, 37, into: &out)
-            string(2, i.bytes, into: &out)
+            header(2, 16, into: &out)
+            out.append(contentsOf: i.bytes)
         case .list(let xs):
             header(4, UInt64(xs.count), into: &out)
             for x in xs { build(x, into: &out) }
-        case .record(let m):
-            header(5, UInt64(m.count), into: &out)
-            // Sorted by the bytes the key encodes to, bytewise.
-            var pairs: [([UInt8], Value)] = []
-            pairs.reserveCapacity(m.count)
-            for (k, x) in m { pairs.append((encode(.text(k)), x)) }
-            pairs.sort { compareBytes($0.0, $1.0) < 0 }
-            for (kb, x) in pairs {
-                out.append(contentsOf: kb)
-                build(x, into: &out)
+        case .record(let r):
+            header(5, UInt64(r.count), into: &out)
+            // Pairs sorted by the bytes the key encodes to: length first,
+            // then bytewise — which is not the order of the names.
+            var order = Array(0..<r.count)
+            let lens = r.names.map { $0.utf8.count }
+            order.sort { a, b in
+                if lens[a] != lens[b] { return lens[a] < lens[b] }
+                return compareText(r.names[a], r.names[b]) < 0
+            }
+            for i in order {
+                text(r.names[i], into: &out)
+                build(r.values[i], into: &out)
             }
         }
     }
 
     // MARK: Decoding
 
-    /// A value from its canonical bytes, and only from those.
+    /// A value from its canonical bytes, and only from those (`canon::decode`).
     public static func decode(_ input: [UInt8]) throws -> Value {
         var p = Parser(input: input, pos: 0)
         let v = try p.value()
@@ -99,8 +131,7 @@ public enum Canon {
         return v
     }
 
-    /// Whether some bytes are a canonical encoding: they decode, and what
-    /// they decode to encodes back to exactly them.
+    /// Whether some bytes decode, and what they decode to encodes back to exactly them.
     public static func roundTrip(_ b: [UInt8]) -> Bool {
         guard let v = try? decode(b) else { return false }
         return encode(v) == b
@@ -124,10 +155,11 @@ public enum Canon {
             return input[pos]
         }
 
-        mutating func chunk(_ n: UInt64) throws -> [UInt8] {
+        /// The next n bytes; n is unsigned, since a length near 2^64 is a legal argument.
+        mutating func chunk(_ n: UInt64) throws -> ArraySlice<UInt8> {
             if n > UInt64(input.count - pos) { throw DecodeError.truncated }
             let k = Int(n)
-            let s = Array(input[pos..<(pos + k)])
+            let s = input[pos..<(pos + k)]
             pos += k
             return s
         }
@@ -138,7 +170,7 @@ public enum Canon {
             return acc
         }
 
-        /// The argument of a head, insisting on the shortest form.
+        /// The argument of a head with additional information ai, in shortest form only.
         mutating func argument(_ ai: UInt8) throws -> UInt64 {
             if ai < 24 { return UInt64(ai) }
             switch ai {
@@ -159,9 +191,7 @@ public enum Canon {
 
         mutating func text(_ n: UInt64) throws -> String {
             let b = try chunk(n)
-            let s = String(decoding: b, as: UTF8.self)
-            // Valid UTF-8 round-trips exactly; anything invalid was replaced.
-            if Array(s.utf8) != b { throw DecodeError.badUtf8 }
+            guard let s = Utf8.decodeStrict(b) else { throw DecodeError.badUtf8 }
             return s
         }
 
@@ -176,25 +206,23 @@ public enum Canon {
             case 1:
                 let n = try argument(ai)
                 if n > Canon.int64Limit { throw DecodeError.intOutOfRange }
-                return .int((-1) - Int64(n))
+                return .int(-1 - Int64(n))
             case 2:
-                let n = try argument(ai)
-                return .bytes(try chunk(n))
+                return .bytes(Array(try chunk(try argument(ai))))
             case 3:
-                let n = try argument(ai)
-                return .text(try text(n))
+                return .text(try text(try argument(ai)))
             case 4:
-                let n = try argument(ai)
+                var n = try argument(ai)
                 var xs: [Value] = []
-                var i: UInt64 = 0
-                while i < n {
+                // One at a time, so an absurd count fails on the input
+                // running out rather than on allocation.
+                while n != 0 {
                     xs.append(try value())
-                    i += 1
+                    n -= 1
                 }
                 return .list(xs)
             case 5:
-                let n = try argument(ai)
-                return .record(try pairs(n))
+                return .record(try pairs(try argument(ai)))
             case 6:
                 let t = try argument(ai)
                 if t != 37 { throw DecodeError.badTag }
@@ -211,35 +239,33 @@ public enum Canon {
             }
         }
 
-        /// `n` key–value pairs whose keys are text strings in strictly
-        /// increasing order of their encoded bytes.
-        mutating func pairs(_ n: UInt64) throws -> [String: Value] {
-            var m: [String: Value] = [:]
-            var prev: [UInt8]? = nil
-            var i: UInt64 = 0
-            while i < n {
+        /// n pairs whose keys are text strings in strictly increasing order of
+        /// their encoded bytes.
+        mutating func pairs(_ count: UInt64) throws -> Record {
+            var out = [(String, Value)]()
+            var prev: ArraySlice<UInt8>? = nil
+            var n = count
+            while n != 0 {
                 let start = pos
                 let k = try key()
-                let raw = Array(input[start..<pos])
+                let raw = input[start..<pos]
                 if let p = prev {
-                    let c = compareBytes(raw, p)
+                    let c = compareSlices(raw, p)
                     if c == 0 { throw DecodeError.duplicateKey }
                     if c < 0 { throw DecodeError.unsortedKeys }
                 }
-                let v = try value()
-                m[k] = v
+                out.append((k, try value()))
                 prev = raw
-                i += 1
+                n -= 1
             }
-            return m
+            return Record(out)
         }
 
         mutating func key() throws -> String {
             let ib = try peek()
             if ib >> 5 != 3 { throw DecodeError.nonTextKey }
             _ = try byte()
-            let n = try argument(ib & 0x1f)
-            return try text(n)
+            return try text(try argument(ib & 0x1f))
         }
 
         mutating func identifier() throws -> Id {
@@ -247,9 +273,40 @@ public enum Canon {
             if ib >> 5 != 2 { throw DecodeError.badId }
             let n = try argument(ib & 0x1f)
             if n != 16 { throw DecodeError.badId }
-            let b = try chunk(n)
-            guard let i = Id(bytes: b) else { throw DecodeError.badId }
-            return i
+            return Id(bytes: Array(try chunk(n)))!
         }
+    }
+
+    static func compareSlices(_ a: ArraySlice<UInt8>, _ b: ArraySlice<UInt8>) -> Int {
+        var i = a.startIndex
+        var j = b.startIndex
+        while i < a.endIndex && j < b.endIndex {
+            if a[i] != b[j] { return a[i] < b[j] ? -1 : 1 }
+            i += 1
+            j += 1
+        }
+        if i < a.endIndex { return 1 }
+        if j < b.endIndex { return -1 }
+        return 0
+    }
+}
+
+/// UTF-8, strictly: overlong forms, surrogates and anything above U+10FFFF
+/// refused. A Swift `String` holds Unicode scalars only, so encoding is total.
+public enum Utf8 {
+    public static func encode(_ s: String) -> [UInt8] { Array(s.utf8) }
+
+    /// The text, or nil if the bytes are not valid UTF-8.
+    public static func decodeStrict<C: Collection>(_ b: C) -> String? where C.Element == UInt8 {
+        var ok = true
+        for x in b where x >= 0x80 {
+            ok = false
+            break
+        }
+        if ok { return String(decoding: b, as: UTF8.self) }
+        // Swift's decoder replaces what it cannot read with U+FFFD, so valid
+        // input is exactly the input that comes back unchanged.
+        let s = String(decoding: b, as: UTF8.self)
+        return s.utf8.elementsEqual(b) ? s : nil
     }
 }

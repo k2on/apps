@@ -1,7 +1,8 @@
-import Foundation
+// SHA-256 (`rust/ark/src/sha256.rs`), FIPS 180-4, in plain Swift: Linux has
+// no CryptoKit, and the runtime imports nothing for a hash it must reproduce
+// byte for byte.
 
-/// SHA-256, FIPS 180-4, in plain Swift: the spec's own definition, so that
-/// the runtime imports nothing for a hash it must reproduce byte for byte.
+/// SHA-256 over a message in memory.
 public enum Sha256 {
     static let k: [UInt32] = [
         0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,

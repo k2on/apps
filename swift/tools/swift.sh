@@ -24,4 +24,5 @@ done
 export LD_LIBRARY_PATH="${libs#:}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export SWIFT_EXEC="$HERE/nix-swiftc"
 cd "$HERE/.."
+"$HERE/gen-unicode.sh"
 exec swift "$@"

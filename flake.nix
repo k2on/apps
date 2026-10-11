@@ -1,5 +1,5 @@
 {
-  description = "ArkDB: the specification and runtime in Rust, the frozen Swift and Kotlin, and harken on them";
+  description = "ArkDB: the specification and runtime in Rust, the Swift and Kotlin clients, and harken on them";
 
   # FlakeHub rather than github: for every input, because a machine that can
   # reach FlakeHub and cache.nixos.org but not api.github.com (this one, for
@@ -230,9 +230,48 @@
             arkc verify $out/harken.ark
           '';
 
-          # Swift is frozen at spec v3 (swift/FROZEN.md) and has no check or
-          # package here.
-          #
+          # The Swift runtime (swift/README.md, docs/plan-phones.md rounds
+          # 5–7): SwiftPM over nixpkgs' Swift 5.8, in release (the corpus is
+          # thousands of traces), its test runner an executable since there is
+          # no XCTest here. The Unicode tables are generated from rust/ark's
+          # before the build. The check runs the conformance runner over
+          # spec/vectors, which names what it ran and skipped and fails on a
+          # failure and on a claimed kind with nothing run.
+          swift = pkgs.swiftPackages.stdenv.mkDerivation {
+            pname = "arkdb-swift";
+            version = "0.1.0";
+            src = only [ "swift" "spec/vectors" "rust/ark/src/unicode_tables.rs" ];
+            sourceRoot = "source/swift";
+            nativeBuildInputs = [ pkgs.swift pkgs.swiftpm ];
+            # On Linux, Foundation and Dispatch are packages of their own and
+            # go in as build inputs so their rpath reaches every binary SwiftPM
+            # links — the manifest it compiles and runs included. On Darwin
+            # they are the system's and the attributes are null.
+            buildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.swiftPackages.Foundation pkgs.swiftPackages.Dispatch ];
+            swiftpmBuildConfig = "release";
+            # What swift/tools/swift.sh sets in the devshell, Linux only: the
+            # target and header quirks of nixpkgs' Swift 5.8, and the manifest
+            # SwiftPM compiles and runs having no rpath for libdispatch.
+            preBuild = ''
+              patchShebangs tools
+              tools/gen-unicode.sh ../rust/ark/src/unicode_tables.rs Sources/ArkDB/UnicodeTables.swift
+            '' + lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
+              export SWIFT_EXEC="$PWD/tools/nix-swiftc"
+              export ARKDB_SWIFTC_INCLUDE=
+              export LD_LIBRARY_PATH="${lib.makeLibraryPath [ pkgs.swiftPackages.Dispatch pkgs.swiftPackages.Foundation ]}:${pkgs.swiftPackages.Foundation}/lib/swift/linux:${pkgs.swiftPackages.swift-unwrapped}/lib/swift/linux''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+            '';
+            doCheck = true;
+            checkPhase = ''
+              runHook preCheck
+              "$(swiftpmBinPath)/ArkDBTests" ../spec/vectors
+              runHook postCheck
+            '';
+            installPhase = ''
+              mkdir -p $out/bin
+              cp "$(swiftpmBinPath)"/ArkDBTests $out/bin/
+            '';
+          };
+
           # The Kotlin runtime and client (kotlin/README.md,
           # docs/plan-phones.md): gradle over a recorded Maven graph
           # (kotlin/deps.json), replayed offline the way nixpkgs builds every
@@ -396,6 +435,7 @@
         {
           packages = {
             inherit ark arkc vectors fuzz harken-domain trace-corpus;
+            arkdb-swift = swift;
             arkdb-kotlin = kotlin;
             kotlin-deps = kotlin.mitmCache.updateScript;
             inherit harken-peer-kt;
@@ -470,6 +510,9 @@
             # and packages.trace-corpus: every client vector and every trace,
             # by its conformance runner, which names what it ran and skipped.
             inherit kotlin;
+            # docs/plan-phones.md S3 The Swift runtime held to spec/vectors, by
+            # its conformance runner, which names what it ran and skipped.
+            inherit swift;
             # The vectors in the tree are the ones the specification writes.
             vectors = pkgs.runCommand "check-vectors" { nativeBuildInputs = [ ark ]; } ''
               ark-vectors vectors
@@ -538,6 +581,12 @@
             # the cached store holds the wasm-bindgen CLI it compiled.
             harken-web = pkgs.mkShell {
               packages = [ wasmRust wasm-bindgen-cli pkgs.binaryen ];
+            };
+            # The Swift runtime (swift/README.md): nixpkgs' Swift 5.8 and
+            # SwiftPM, with Foundation and Dispatch, which are packages of
+            # their own on Linux; `swift/tools/swift.sh` runs SwiftPM in it.
+            swift = pkgs.mkShell {
+              packages = [ pkgs.swift pkgs.swiftpm ] ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.swiftPackages.Foundation pkgs.swiftPackages.Dispatch ];
             };
             # The Kotlin runtime (kotlin/README.md): gradle, the JDK it runs
             # on, and ktfmt, whose kotlinlang style the tree is held to.
