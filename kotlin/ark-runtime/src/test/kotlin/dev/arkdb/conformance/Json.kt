@@ -134,9 +134,13 @@ object Json {
                 val (k, v) = out.entries.first()
                 val t = (v as? Value.VText)?.value
                 when (k) {
-                    "\$int" -> return Value.VInt(t?.toLong() ?: fail("\$int wants a decimal string"))
+                    "\$int" ->
+                        return Value.VInt(t?.toLong() ?: fail("\$int wants a decimal string"))
                     "\$bytes" -> return Value.VBytes(Hex.decode(t ?: fail("\$bytes wants hex")))
-                    "\$id" -> return Value.VId(Id.ofText(t ?: fail("\$id wants text")) ?: fail("\$id is not an id: $t"))
+                    "\$id" ->
+                        return Value.VId(
+                            Id.ofText(t ?: fail("\$id wants text"))
+                                ?: fail("\$id is not an id: $t"))
                 }
             }
             return Value.VStruct(out)

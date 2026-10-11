@@ -11,8 +11,19 @@ import java.io.ByteArrayOutputStream
 public object Canon {
     /** Why some bytes are not the canonical encoding of any value; the first rule broken. */
     public enum class Why {
-        NonCanonicalHead, IndefiniteLength, UnsortedKeys, DuplicateKey, NonTextKey, BadTag, BadId,
-        Float, BadSimple, BadUtf8, IntOutOfRange, Trailing, Truncated,
+        NonCanonicalHead,
+        IndefiniteLength,
+        UnsortedKeys,
+        DuplicateKey,
+        NonTextKey,
+        BadTag,
+        BadId,
+        Float,
+        BadSimple,
+        BadUtf8,
+        IntOutOfRange,
+        Trailing,
+        Truncated,
     }
 
     public class DecodeError(public val why: Why) : Exception(why.name)
@@ -61,7 +72,8 @@ public object Canon {
         when (v) {
             is Value.VNull -> out.write(0xf6)
             is Value.VBool -> out.write(if (v.value) 0xf5 else 0xf4)
-            is Value.VInt -> if (v.value >= 0) header(out, 0, v.value) else header(out, 1, -1L - v.value)
+            is Value.VInt ->
+                if (v.value >= 0) header(out, 0, v.value) else header(out, 1, -1L - v.value)
             is Value.VText -> string(out, 3, Utf8.encode(v.value))
             is Value.VBytes -> string(out, 2, v.value)
             is Value.VId -> {
@@ -75,8 +87,10 @@ public object Canon {
             is Value.VStruct -> {
                 // Pairs sorted by the bytes the key encodes to: length first,
                 // then bytewise, which is not the order of the names.
-                val pairs = v.fields.map { (k, x) -> encode(Value.VText(k)) to x }
-                    .sortedWith { a, b -> ByteOrder.compare(a.first, b.first) }
+                val pairs =
+                    v.fields
+                        .map { (k, x) -> encode(Value.VText(k)) to x }
+                        .sortedWith { a, b -> ByteOrder.compare(a.first, b.first) }
                 header(out, 5, pairs.size.toLong())
                 for ((kb, x) in pairs) {
                     out.write(kb, 0, kb.size)
@@ -97,11 +111,12 @@ public object Canon {
     }
 
     /** Whether some bytes decode, and what they decode to encodes back to exactly them. */
-    public fun roundTrip(b: ByteArray): Boolean = try {
-        encode(decode(b)).contentEquals(b)
-    } catch (e: DecodeError) {
-        false
-    }
+    public fun roundTrip(b: ByteArray): Boolean =
+        try {
+            encode(decode(b)).contentEquals(b)
+        } catch (e: DecodeError) {
+            false
+        }
 
     private const val INT64_LIMIT = Long.MAX_VALUE
 
@@ -118,9 +133,13 @@ public object Canon {
             return input[pos].toInt() and 0xff
         }
 
-        /** The next n bytes; n is compared as unsigned, since a length near 2^64 is a legal argument. */
+        /**
+         * The next n bytes; n is compared as unsigned, since a length near 2^64 is a legal
+         * argument.
+         */
         fun chunk(n: Long): ByteArray {
-            if (java.lang.Long.compareUnsigned(n, (input.size - pos).toLong()) > 0) throw DecodeError(Why.Truncated)
+            if (java.lang.Long.compareUnsigned(n, (input.size - pos).toLong()) > 0)
+                throw DecodeError(Why.Truncated)
             val out = input.copyOfRange(pos, pos + n.toInt())
             pos += n.toInt()
             return out
@@ -133,19 +152,21 @@ public object Canon {
         }
 
         /** The argument of a head with additional information ai, in shortest form only. */
-        fun argument(ai: Int): Long = when {
-            ai < 24 -> ai.toLong()
-            ai == 24 -> wide(1, 24L)
-            ai == 25 -> wide(2, 0x100L)
-            ai == 26 -> wide(4, 0x10000L)
-            ai == 27 -> wide(8, 0x100000000L)
-            ai == 31 -> throw DecodeError(Why.IndefiniteLength)
-            else -> throw DecodeError(Why.NonCanonicalHead)
-        }
+        fun argument(ai: Int): Long =
+            when {
+                ai < 24 -> ai.toLong()
+                ai == 24 -> wide(1, 24L)
+                ai == 25 -> wide(2, 0x100L)
+                ai == 26 -> wide(4, 0x10000L)
+                ai == 27 -> wide(8, 0x100000000L)
+                ai == 31 -> throw DecodeError(Why.IndefiniteLength)
+                else -> throw DecodeError(Why.NonCanonicalHead)
+            }
 
         private fun wide(k: Int, least: Long): Long {
             val n = bigEndian(k)
-            if (java.lang.Long.compareUnsigned(n, least) < 0) throw DecodeError(Why.NonCanonicalHead)
+            if (java.lang.Long.compareUnsigned(n, least) < 0)
+                throw DecodeError(Why.NonCanonicalHead)
             return n
         }
 
@@ -155,12 +176,14 @@ public object Canon {
             return when (ib ushr 5) {
                 0 -> {
                     val n = argument(ai)
-                    if (java.lang.Long.compareUnsigned(n, INT64_LIMIT) > 0) throw DecodeError(Why.IntOutOfRange)
+                    if (java.lang.Long.compareUnsigned(n, INT64_LIMIT) > 0)
+                        throw DecodeError(Why.IntOutOfRange)
                     Value.VInt(n)
                 }
                 1 -> {
                     val n = argument(ai)
-                    if (java.lang.Long.compareUnsigned(n, INT64_LIMIT) > 0) throw DecodeError(Why.IntOutOfRange)
+                    if (java.lang.Long.compareUnsigned(n, INT64_LIMIT) > 0)
+                        throw DecodeError(Why.IntOutOfRange)
                     Value.VInt(-1L - n)
                 }
                 2 -> Value.VBytes(chunk(argument(ai)))
@@ -182,14 +205,17 @@ public object Canon {
                     if (t != 37L) throw DecodeError(Why.BadTag)
                     Value.VId(identifier())
                 }
-                else -> when (ai) {
-                    20 -> Value.VBool(false)
-                    21 -> Value.VBool(true)
-                    22 -> Value.VNull
-                    25, 26, 27 -> throw DecodeError(Why.Float)
-                    31 -> throw DecodeError(Why.IndefiniteLength)
-                    else -> throw DecodeError(Why.BadSimple)
-                }
+                else ->
+                    when (ai) {
+                        20 -> Value.VBool(false)
+                        21 -> Value.VBool(true)
+                        22 -> Value.VNull
+                        25,
+                        26,
+                        27 -> throw DecodeError(Why.Float)
+                        31 -> throw DecodeError(Why.IndefiniteLength)
+                        else -> throw DecodeError(Why.BadSimple)
+                    }
             }
         }
 
@@ -198,7 +224,9 @@ public object Canon {
             return Utf8.decodeStrict(b) ?: throw DecodeError(Why.BadUtf8)
         }
 
-        /** n pairs whose keys are text strings in strictly increasing order of their encoded bytes. */
+        /**
+         * n pairs whose keys are text strings in strictly increasing order of their encoded bytes.
+         */
         fun pairs(count: Long): Map<String, Value> {
             val out = LinkedHashMap<String, Value>()
             var prev: ByteArray? = null
@@ -238,10 +266,9 @@ public object Canon {
 }
 
 /**
- * UTF-8, strictly: the encoder refuses a lone surrogate (a `String` can
- * hold one; a value's text cannot, and writing U+FFFD for it would make two
- * distinct strings one value), and the decoder refuses overlong forms,
- * surrogates and anything above U+10FFFF.
+ * UTF-8, strictly: the encoder refuses a lone surrogate (a `String` can hold one; a value's text
+ * cannot, and writing U+FFFD for it would make two distinct strings one value), and the decoder
+ * refuses overlong forms, surrogates and anything above U+10FFFF.
  */
 public object Utf8 {
     public fun encode(s: String): ByteArray {
@@ -310,8 +337,13 @@ public object Utf8 {
                     val b1 = b[i + 1].toInt() and 0xff
                     val b2 = b[i + 2].toInt() and 0xff
                     val b3 = b[i + 3].toInt() and 0xff
-                    if (b1 and 0xC0 != 0x80 || b2 and 0xC0 != 0x80 || b3 and 0xC0 != 0x80) return null
-                    cp = ((b0 and 0x07) shl 18) or ((b1 and 0x3F) shl 12) or ((b2 and 0x3F) shl 6) or (b3 and 0x3F)
+                    if (b1 and 0xC0 != 0x80 || b2 and 0xC0 != 0x80 || b3 and 0xC0 != 0x80)
+                        return null
+                    cp =
+                        ((b0 and 0x07) shl 18) or
+                            ((b1 and 0x3F) shl 12) or
+                            ((b2 and 0x3F) shl 6) or
+                            (b3 and 0x3F)
                     if (cp < 0x10000 || cp > 0x10FFFF) return null
                     len = 4
                 }
@@ -324,7 +356,10 @@ public object Utf8 {
     }
 }
 
-/** SHA-256, through the platform's digest; the one JVM API beyond java.util and java.io this runtime uses. */
+/**
+ * SHA-256, through the platform's digest; the one JVM API beyond java.util and java.io this runtime
+ * uses.
+ */
 public object Sha256 {
     public fun hash(bytes: ByteArray): ByteArray =
         java.security.MessageDigest.getInstance("SHA-256").digest(bytes)

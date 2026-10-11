@@ -9,10 +9,9 @@ import java.util.SortedMap
 import java.util.TreeMap
 
 /**
- * Text compared by Unicode code point (§1.2), which is UTF-8 byte order.
- * Kotlin's `String.compareTo` compares UTF-16 code units and puts U+FF5E
- * before U+1F3B5 where code points put it after; nothing in this runtime
- * orders text through it.
+ * Text compared by Unicode code point (§1.2), which is UTF-8 byte order. Kotlin's
+ * `String.compareTo` compares UTF-16 code units and puts U+FF5E before U+1F3B5 where code points
+ * put it after; nothing in this runtime orders text through it.
  */
 public object CodePointOrder : Comparator<String> {
     override fun compare(a: String, b: String): Int {
@@ -69,15 +68,15 @@ public object Hex {
     }
 
     /** Whether a character is an ASCII hex digit, as Haskell's `isHexDigit`. */
-    public fun isHexDigit(c: Char): Boolean =
-        (c in '0'..'9') || (c in 'a'..'f') || (c in 'A'..'F')
+    public fun isHexDigit(c: Char): Boolean = (c in '0'..'9') || (c in 'a'..'f') || (c in 'A'..'F')
 
-    internal fun digit(c: Char): Int = when (c) {
-        in '0'..'9' -> c - '0'
-        in 'a'..'f' -> c - 'a' + 10
-        in 'A'..'F' -> c - 'A' + 10
-        else -> throw IllegalArgumentException("not a hex digit: '$c'")
-    }
+    internal fun digit(c: Char): Int =
+        when (c) {
+            in '0'..'9' -> c - '0'
+            in 'a'..'f' -> c - 'a' + 10
+            in 'A'..'F' -> c - 'A' + 10
+            else -> throw IllegalArgumentException("not a hex digit: '$c'")
+        }
 }
 
 /** Sixteen bytes: the run-time form of an id. The table it names is a static type. */
@@ -92,16 +91,27 @@ public class Id(bytes: ByteArray) : Comparable<Id> {
     public val text: String
         get() {
             val h = Hex.encode(bytes)
-            return h.substring(0, 8) + "-" + h.substring(8, 12) + "-" + h.substring(12, 16) + "-" +
-                h.substring(16, 20) + "-" + h.substring(20)
+            return h.substring(0, 8) +
+                "-" +
+                h.substring(8, 12) +
+                "-" +
+                h.substring(12, 16) +
+                "-" +
+                h.substring(16, 20) +
+                "-" +
+                h.substring(20)
         }
 
     /** Thirty-two lowercase hex digits, no dashes. */
-    public val hex: String get() = Hex.encode(bytes)
+    public val hex: String
+        get() = Hex.encode(bytes)
 
     override fun equals(other: Any?): Boolean = other is Id && bytes.contentEquals(other.bytes)
+
     override fun hashCode(): Int = bytes.contentHashCode()
+
     override fun compareTo(other: Id): Int = ByteOrder.compare(bytes, other.bytes)
+
     override fun toString(): String = text
 
     public companion object {
@@ -132,9 +142,9 @@ public typealias Args = Map<String, Value>
 public typealias Row = Value.VStruct
 
 /**
- * A run-time value. `VNull` is the absent case of an option; `VStruct` is
- * a named record whose field names are its identity, so two structs with
- * the same fields and values are equal whatever order they were built in.
+ * A run-time value. `VNull` is the absent case of an option; `VStruct` is a named record whose
+ * field names are its identity, so two structs with the same fields and values are equal whatever
+ * order they were built in.
  */
 public sealed class Value : Comparable<Value> {
     public object VNull : Value() {
@@ -149,8 +159,12 @@ public sealed class Value : Comparable<Value> {
 
     public class VBytes(bytes: ByteArray) : Value() {
         public val value: ByteArray = bytes.copyOf()
-        override fun equals(other: Any?): Boolean = other is VBytes && value.contentEquals(other.value)
+
+        override fun equals(other: Any?): Boolean =
+            other is VBytes && value.contentEquals(other.value)
+
         override fun hashCode(): Int = value.contentHashCode()
+
         override fun toString(): String = "bytes(${Hex.encode(value)})"
     }
 
@@ -168,22 +182,25 @@ public sealed class Value : Comparable<Value> {
         public fun has(name: String): Boolean = fields.containsKey(name)
 
         override fun equals(other: Any?): Boolean = other is VStruct && fields == other.fields
+
         override fun hashCode(): Int = fields.hashCode()
+
         override fun toString(): String = show()
     }
 
     /** `Null < Bool < Int < Text < Bytes < Id < List < Struct`. */
     public val rank: Int
-        get() = when (this) {
-            is VNull -> 0
-            is VBool -> 1
-            is VInt -> 2
-            is VText -> 3
-            is VBytes -> 4
-            is VId -> 5
-            is VList -> 6
-            is VStruct -> 7
-        }
+        get() =
+            when (this) {
+                is VNull -> 0
+                is VBool -> 1
+                is VInt -> 2
+                is VText -> 3
+                is VBytes -> 4
+                is VId -> 5
+                is VList -> 6
+                is VStruct -> 7
+            }
 
     override fun compareTo(other: Value): Int = compareValue(this, other)
 
@@ -215,16 +232,18 @@ public sealed class Value : Comparable<Value> {
         throw IllegalStateException("expected $want, got ${show().take(60)}")
 
     /** A printable form: the vectors' JSON, with the `$int`/`$bytes`/`$id` wrappers. */
-    public fun show(): String = when (this) {
-        is VNull -> "null"
-        is VBool -> if (value) "true" else "false"
-        is VInt -> "{\"\$int\":\"$value\"}"
-        is VText -> quote(value)
-        is VBytes -> "{\"\$bytes\":\"${Hex.encode(value)}\"}"
-        is VId -> "{\"\$id\":\"${value.text}\"}"
-        is VList -> items.joinToString(",", "[", "]") { it.show() }
-        is VStruct -> fields.entries.joinToString(",", "{", "}") { quote(it.key) + ":" + it.value.show() }
-    }
+    public fun show(): String =
+        when (this) {
+            is VNull -> "null"
+            is VBool -> if (value) "true" else "false"
+            is VInt -> "{\"\$int\":\"$value\"}"
+            is VText -> quote(value)
+            is VBytes -> "{\"\$bytes\":\"${Hex.encode(value)}\"}"
+            is VId -> "{\"\$id\":\"${value.text}\"}"
+            is VList -> items.joinToString(",", "[", "]") { it.show() }
+            is VStruct ->
+                fields.entries.joinToString(",", "{", "}") { quote(it.key) + ":" + it.value.show() }
+        }
 
     public companion object {
         /** `Value.null()` in the contract; Kotlin spells the call `Value.\`null\`()`. */
@@ -287,10 +306,9 @@ public fun <V> sortedFields(fields: List<Pair<String, V>>): SortedMap<String, V>
 }
 
 /**
- * §1.2 The total order. Values of different types order by rank; within a
- * type: ints numerically, text by code point, bytes and ids bytewise, lists
- * lexicographically (a prefix first), structs as the association list
- * sorted by field name, names before values.
+ * §1.2 The total order. Values of different types order by rank; within a type: ints numerically,
+ * text by code point, bytes and ids bytewise, lists lexicographically (a prefix first), structs as
+ * the association list sorted by field name, names before values.
  */
 public fun compareValue(a: Value, b: Value): Int {
     val ra = a.rank
