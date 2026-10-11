@@ -84,6 +84,12 @@
           rust = pkgs.rust-bin.stable.latest.default;
           rustPlatform = pkgs.makeRustPlatform { cargo = rust; rustc = rust; };
 
+          # The formatter each language's sources are held to: Kotlin's is
+          # ktfmt in the kotlinlang style (kotlin/README.md).
+          fmt = {
+            kotlin = "ktfmt --kotlinlang-style";
+          };
+
           # One crate of the workspace, built from the whole of it.
           crate = { pname, flags ? [ "-p" pname ], ... }@args: rustPlatform.buildRustPackage ({
             inherit pname;
@@ -225,8 +231,38 @@
           '';
 
           # Swift is frozen at spec v3 (swift/FROZEN.md) and has no check or
-          # package here. Kotlin is being brought to v4, held to the same
-          # vectors (docs/plan-phones.md, kotlin/README.md).
+          # package here.
+          #
+          # The Kotlin runtime (kotlin/README.md, docs/plan-phones.md): gradle
+          # over a recorded Maven graph (kotlin/deps.json), replayed offline
+          # the way nixpkgs builds every gradle project; `nix run
+          # .#kotlin-deps` re-records it. Its `build` runs the conformance
+          # runner over spec/vectors, which fails on any failure and on a kind
+          # it claims with nothing run; the Unicode tables are generated from
+          # rust/ark's, so that file is a source too. The sources are held to
+          # ktfmt's kotlinlang style first, checked and never written.
+          kotlin = pkgs.stdenv.mkDerivation (final: {
+            pname = "arkdb-kotlin";
+            version = "0.1.0";
+            src = only [ "kotlin" "spec/vectors" "rust/ark/src/unicode_tables.rs" ];
+            sourceRoot = "source/kotlin";
+            nativeBuildInputs = [ pkgs.gradle pkgs.jdk21 pkgs.ktfmt ];
+            mitmCache = pkgs.gradle.fetchDeps {
+              pkg = final.finalPackage;
+              data = ./kotlin/deps.json;
+            };
+            __darwinAllowLocalNetworking = true;
+            gradleFlags = [ "-Dorg.gradle.java.home=${pkgs.jdk21}" ];
+            preBuild = ''
+              ${fmt.kotlin} --dry-run --set-exit-if-changed $(find ark-runtime -name '*.kt' -not -path '*/build/*' | sort)
+            '';
+            gradleBuildTask = "build";
+            doCheck = false;
+            installPhase = ''
+              mkdir -p $out/lib
+              cp ark-runtime/build/libs/*.jar $out/lib/
+            '';
+          });
 
           # The Android SDK the APK is built with (`harken-apk`, out of the
           # flake until round 4; see below). Google ships one for
@@ -281,6 +317,8 @@
         {
           packages = {
             inherit ark arkc vectors fuzz harken-domain trace-corpus;
+            arkdb-kotlin = kotlin;
+            kotlin-deps = kotlin.mitmCache.updateScript;
             harken-server = crate { pname = "harken-server"; };
             # `nix run .#harken-serve [ADDR]`: the dev server, anyone is
             # whoever they say.
@@ -325,6 +363,10 @@
               preCheck = oldEnv;
               installPhase = "touch $out";
             };
+            # docs/plan-phones.md S3 The Kotlin runtime held to spec/vectors:
+            # every vector of the kinds it implements, by its conformance
+            # runner, which names what it ran and skipped.
+            inherit kotlin;
             # The vectors in the tree are the ones the specification writes.
             vectors = pkgs.runCommand "check-vectors" { nativeBuildInputs = [ ark ]; } ''
               ark-vectors vectors
