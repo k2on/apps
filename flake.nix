@@ -204,6 +204,17 @@
             text = ''exec arkc fuzz --seconds "''${1:-600}" "''${@:2}"'';
           };
 
+          # docs/plan-phones.md S2 Every client's life in every session of a
+          # fixed run of the fuzzer, as traces (spec/RUNNERS.md § trace): what
+          # every runtime's check replays beside spec/vectors/trace/. A
+          # function of the seed and the case count, so not checked in, and
+          # moving either is a deliberate edit; a run that finds anything
+          # exits 1 and there is no corpus, since a trace is of correct
+          # behaviour.
+          trace-corpus = pkgs.runCommand "trace-corpus" { nativeBuildInputs = [ ark ]; } ''
+            arkc fuzz --seed 2026 --cases 300 --out findings --traces $out
+          '';
+
           # The binary that writes harken.ark from the domain crate, and the
           # module it writes, verified by the reference.
           harken-domain-bin = crate { pname = "harken-domain"; };
@@ -313,7 +324,7 @@
         in
         {
           packages = {
-            inherit ark arkc vectors fuzz harken-domain;
+            inherit ark arkc vectors fuzz harken-domain trace-corpus;
             harken-server = crate { pname = "harken-server"; };
             # `nix run .#harken-serve [ADDR]`: the dev server, anyone is
             # whoever they say.
@@ -365,6 +376,22 @@
               ark-vectors vectors
               diff -r vectors ${./spec/vectors} && touch $out
             '';
+            # docs/plan-phones.md S3 The Rust client replays every trace of the
+            # corpus and of spec/vectors/trace/ (rust/ark/tests/traces.rs):
+            # the check of this runtime that checks.kotlin and checks.swift
+            # are of theirs, over the same files. Its own check rather than
+            # part of checks.rust, so that the workspace's tests do not wait
+            # on a fuzz run and a trace that stops replaying is named as that.
+            traces = crate {
+              pname = "ark-traces";
+              flags = [ "-p" "ark" "--test" "traces" ];
+              cargoBuildFlags = [ "-p" "ark" ];
+              src = only (rustDirs ++ [ "spec/vectors" ]);
+              doCheck = true;
+              preCheck = "export ARK_TRACE_CORPUS=${trace-corpus}";
+              checkFlags = [ "--nocapture" ];
+              installPhase = "touch $out";
+            };
             # The fuzzer still generates, verifies, runs and checks: a fixed
             # seed and a few cases, so that the generator cannot rot.
             fuzz-smoke = pkgs.runCommand "check-fuzz-smoke" { nativeBuildInputs = [ ark ]; } ''
