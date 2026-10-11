@@ -5,12 +5,19 @@
 package dev.arkdb.conformance
 
 import dev.arkdb.Canon
+import dev.arkdb.Ctx
 import dev.arkdb.Decode
 import dev.arkdb.Encode
+import dev.arkdb.Eval
+import dev.arkdb.EvalFault
+import dev.arkdb.Facts
 import dev.arkdb.Hash
 import dev.arkdb.Hex
 import dev.arkdb.MemoryStore
 import dev.arkdb.Module
+import dev.arkdb.Ran
+import dev.arkdb.Raw
+import dev.arkdb.Refusal
 import dev.arkdb.SPEC_VERSION
 import dev.arkdb.Sha256
 import dev.arkdb.Value
@@ -163,5 +170,163 @@ object Checks {
         ensureEq(
             Encode.module(verified), Encode.module(m), "a verified module is its own verified form")
         ensureEq(Hash.closures(m).size, m.functions.size, "one closure per function")
+    }
+
+    // eval ------------------------------------------------------------------
+
+    /** A vector's `ctx`: the user, the login, and the roles where it says any. */
+    fun ctxOf(c: Value): Ctx {
+        val roles = c.asStruct().fields["roles"]?.asList()?.map { it.asText() } ?: emptyList()
+        return Ctx(c.field("user").asText(), c.field("session").asText()).withRoles(roles)
+    }
+
+    fun argsOf(v: Value): Map<String, Value> = v.asStruct().fields
+
+    fun changesValue(cs: List<dev.arkdb.Change>): Value = Value.VList(cs.map(Facts::changeValue))
+
+    /** The function hashes `rebase/three-peers.json`'s entries name, as hex. */
+    private val named: Set<String> by lazy {
+        Conformance.vector("rebase/three-peers.json")
+            .field("entries")
+            .asList()
+            .map { Hex.encode(it.field("fn").asBytes()) }
+            .toSet()
+    }
+
+    /**
+     * `check_eval`: a mutator applied step by step — its changes, the store and its hash after each
+     * — and again through its closure over a second copy, which must reach the same store.
+     */
+    fun evalApply(v: Value) {
+        val m = moduleOf(v.field("module"))
+        val name = v.field("function").asText()
+        val f = m.lookupFunction(name) ?: throw Failed("no function $name")
+        val fh = Hex.encode(Hash.functionHash(Hash.closure(m, f)))
+        ensure(fh in named) { "the function hash is not the one the log names" }
+        ensureEq(fh, v.field("function_hash").asText(), "function_hash")
+        val bodies = Hash.closures(m)
+        val ctx = ctxOf(v.field("ctx"))
+        val autos = argsOf(v.field("autos"))
+        val st = MemoryStore.fromValue(m.schema, v.field("store_before"))
+        val byClosure = st.copy()
+        for ((i, step) in v.field("steps").asList().withIndex()) {
+            val args = argsOf(step.field("args"))
+            val changes =
+                when (val r = ran("step $i") { Eval.apply(m, name, ctx, autos, args, st) }) {
+                    is Ran.Ok -> r.changes
+                    is Ran.Refused -> throw Failed("step $i: refused ${r.refusal.show()}")
+                }
+            ensureEq(changesValue(changes), step.field("changes"), "step $i changes")
+            ensureEq(st.storeValue(), step.field("store_after"), "step $i store")
+            ensureEq(
+                Hex.encode(Hash.stateHash(st)), step.field("hash_after").asText(), "step $i hash")
+            val again =
+                when (val r =
+                    ran("step $i closure") {
+                        Eval.applyClosure(m.schema, bodies[fh]!!, ctx, autos, args, byClosure)
+                    }) {
+                    is Ran.Ok -> r.changes
+                    is Ran.Refused -> throw Failed("step $i: closure refused ${r.refusal.show()}")
+                }
+            ensureEq(again, changes, "step $i through the closure")
+        }
+        ensure(byClosure == st) { "the closure map reached another store" }
+    }
+
+    // A bug is a failure of the vector, named; a verdict is the caller's to judge.
+    private fun ran(what: String, f: () -> Ran): Ran =
+        try {
+            f()
+        } catch (b: EvalFault.Bug) {
+            throw Failed("$what: bug ${b.error}")
+        }
+
+    /**
+     * `eval_cases`: one store, each case over a fresh copy — a mutator that must apply (its changes
+     * compared where given) or be refused by exactly a text; or the form validator's messages and
+     * normalised values over a partial input.
+     */
+    fun evalCases(v: Value) {
+        val m = moduleOf(v.field("module"))
+        val bodies = Hash.closures(m)
+        fun byName(n: String) =
+            bodies.values.firstOrNull { it.function.name == n } ?: throw Failed("no function $n")
+        val ctx0 = v.asStruct().fields["ctx"]?.let(::ctxOf) ?: Ctx("alice", "session-1")
+        val fs = v.asStruct().fields
+        val st = MemoryStore.fromValue(m.schema, fs["store_before"] ?: v.field("store"))
+        for (case in v.field("cases").asList()) {
+            val cf = case.asStruct().fields
+            val name = case.field("name").asText()
+            val c = byName(case.field("function").asText())
+            val ctx = cf["ctx"]?.let(::ctxOf) ?: ctx0
+            val refused = cf["refused"]
+            if (cf.containsKey("refused")) {
+                val got =
+                    ran(name) {
+                        Eval.applyClosure(
+                            m.schema,
+                            c,
+                            ctx,
+                            argsOf(case.field("autos")),
+                            argsOf(case.field("args")),
+                            st.copy())
+                    }
+                when {
+                    refused is Value.VNull && got is Ran.Ok ->
+                        cf["changes"]?.let {
+                            ensureEq(changesValue(got.changes), it, "$name changes")
+                        }
+                    refused is Value.VText &&
+                        got is Ran.Refused &&
+                        got.refusal is Refusal.Refused ->
+                        ensureEq((got.refusal as Refusal.Refused).why, refused.value, name)
+                    else -> throw Failed("$name: wanted ${refused?.show()}, got $got")
+                }
+            } else {
+                val got =
+                    try {
+                        Eval.check(m.schema, c, ctx, argsOf(case.field("input")), st)
+                    } catch (b: EvalFault.Bug) {
+                        throw Failed("$name: bug ${b.error}")
+                    }
+                val want =
+                    case.field("messages").asList().map {
+                        it.field("field").asText() to it.field("message").asText()
+                    }
+                ensureEq(got.messages, want, "$name messages")
+                ensureEq(Value.VStruct(got.values), case.field("normalised"), "$name normalised")
+            }
+        }
+    }
+
+    /**
+     * `check_raw`: a raw write named by the hash of its name, applied step by step — its changes,
+     * or the refusal's text with the store unmoved — and the store and its hash after each.
+     */
+    fun evalRaw(v: Value) {
+        val m = moduleOf(v.field("module"))
+        val name = v.field("raw").asText()
+        val fh = Raw.hashOf(name)
+        ensureEq(Hex.encode(fh), v.field("function_hash").asText(), "function_hash")
+        val raw = Raw.of(fh) ?: throw Failed("$name is no raw write")
+        val st = MemoryStore.fromValue(m.schema, v.field("store_before"))
+        for ((i, step) in v.field("steps").asList().withIndex()) {
+            val args = argsOf(step.field("args"))
+            val before = st.copy()
+            val got = ran("step $i") { Raw.apply(raw, args, st) }
+            val want = step.asStruct().fields["refused"]
+            when {
+                got is Ran.Ok && want == null ->
+                    ensureEq(changesValue(got.changes), step.field("changes"), "step $i changes")
+                got is Ran.Refused && want != null -> {
+                    ensureEq(got.refusal.show(), want.asText(), "step $i refusal")
+                    ensure(st == before) { "step $i: a refused write moved the store" }
+                }
+                else -> throw Failed("step $i: got $got, wanted ${want?.show()}")
+            }
+            ensureEq(st.storeValue(), step.field("store_after"), "step $i store")
+            ensureEq(
+                Hex.encode(Hash.stateHash(st)), step.field("hash_after").asText(), "step $i hash")
+        }
     }
 }

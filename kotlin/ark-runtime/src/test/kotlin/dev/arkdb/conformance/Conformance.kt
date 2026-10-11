@@ -61,12 +61,20 @@ object Conformance {
             "hash" to { _, v -> Checks.hash(v) },
             "module" to { _, v -> Checks.module(v) },
             "verify" to { _, v -> Checks.verify(v) },
+            "eval" to
+                { x, v ->
+                    when (x.form) {
+                        "apply" -> Checks.evalApply(v)
+                        "cases" -> Checks.evalCases(v)
+                        "raw" -> Checks.evalRaw(v)
+                        else -> throw Failed("eval: unknown form ${x.form}")
+                    }
+                },
         )
 
     /** The kinds a later round of docs/plan-phones.md turns on, and which. */
     private val notYet: Map<String, String> =
         linkedMapOf(
-            "eval" to "round 2, eval",
             "views" to "round 2, views",
             "protocol" to "round 3, the client",
             "rebase" to "round 3, the client",
