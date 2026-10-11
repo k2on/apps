@@ -289,3 +289,61 @@ neither — the views vectors compare plans that do.
 
 Not verified: the JVM only — nothing here built the runtime for Android or
 ran it on a phone. Rust, `spec/vectors` and the Swift tree are untouched.
+
+**Round 3, the Kotlin client** (`f673623`, `34c9b08`, `ec7563d`, and the
+docs). The engine half is in `ark-runtime`, file for file with `rust/ark`:
+`Log.kt`, `Peer.kt` (the replica, the rebase by records, settle once per
+pump, verdicts and divergences, roles frozen, private and raw entries,
+intents with no closure, a union by facts, `fork_back`; the authority a
+peer alone is, `local_commit`), `Protocol.kt` (every frame both ways and
+the `Client`), `deviceSchema`, `Journal.kt` and `Trace.kt`. `ark-client`
+was replaced in place — the v3 `Session`, `Durable`, `Link` and `LocalHub`
+deleted, `Transport` and `WebSocketTransport` kept — by `rust/ark-client`'s
+storage records (`Storage.kt`), what its peer writes and when
+(`Writer.kt`), the peer's driver half without its link (`Peer.kt`: open,
+mutate by name, sign-in, leave and join with the alone journal) and
+`Autos`; the link is round 4's.
+
+One representation differs and says nothing different: a replica's view is
+its own store, copied at each replay and moved by every change the confirmed
+store moves by, where the Rust shares the tables it has not written (D7.3).
+
+`checks.kotlin` runs every `client` vector — 121 of 129: codec 14, order 2,
+hash 4, module 8, verify 5, eval 7, views 14, protocol 40,
+`rebase/three-peers` 1 (adopting a log and compaction named and skipped as
+a server's), trace 26 — and skips by name only the 8 `rust-only` fleets;
+nothing marked client is skipped. It replays `packages.trace-corpus`: 2,565
+of 2,565, 6 s of the runner on this machine and 9.8 s inside the nix
+sandbox; and again, with the durable copy kept in the storage records, in
+10.1 s. `nix build .#checks.x86_64-linux.kotlin`: BUILD SUCCESSFUL, 1m39s
+of gradle. Beyond the check, `arkc fuzz --seed 9000 --cases 400 --traces`
+replays 3,465 of 3,465 both ways. The storage is held to a fixture a Rust
+`ark_client::Peer` wrote (`kotlin/ark-client/fixtures/`): 73 steps alone,
+reopened, joined to an in-process server, online and offline, and after
+each the Kotlin storage is the Rust one byte for byte.
+
+Two things the runs found. The corpus reaches nothing that holds round 1's
+fix (going alone leaves the inbox behind): falsifying it failed no vector
+and no corpus trace, and 1 of seed 9000's 3,465 — `arkc fuzz --seed 9046
+--cases 1`, session 1, client 0 — which is now
+`kotlin/ark-runtime/traces/alone-leaves-the-inbox.json`, unedited and
+replayed by the runner; it is a candidate for `spec/vectors/trace/`, which
+this round does not change. And replaying the corpus through the storage
+records first failed 4 traces at a reopen: a sign-in rewrites intents in
+place under the same ids, which the pending pages' one-comparison rule
+cannot see; the reference's peer writes the intents whole after a sign-in
+or a join, and the runner's storage copy now does too.
+
+Falsified, each restored: the rebase not landing what arrived under
+pending (three-peers, 8 traces, 1,510 corpus traces), `hello` without its
+`partial` flag (a protocol vector, 4 traces, 756 corpus traces), going
+alone without clearing the inbox (only the trace above), a facts page not
+applied on load (224 corpus traces through storage), a held column dropped
+from the replica record (228), compaction at twice the snapshot and pages
+merged at equal sizes (the fixture, at steps 29 and 4).
+
+Not verified: the JVM only — no phone, and no Android build of either
+module. The fixture generator is a scratch program over `rust/ark-client`
+that no build here compiles; Rust, `spec/vectors` and the Swift tree are
+untouched. `DirStorage` was not run against a real disk crash, and does
+not sync its directory (`java.io` cannot), where the reference does.

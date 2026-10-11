@@ -17,7 +17,10 @@ from the repository root builds it as it passed.
   authoring vocabulary, the `demo` and `selfdemo` sources that exercised
   it and the printed domain were deleted, not ported: a phone does not
   author modules;
-- **round 3**: the client, and `ark-client` back in the build;
+- **round 3** (done): the client — replica and rebase, the protocol
+  client, alone and its journal, storage byte for byte with the Rust's —
+  held to every client vector and every trace of `packages.trace-corpus`,
+  and `ark-client` back in the build as the v4 peer;
 - **round 4**: the JVM peer in the fleet, and `harken/android` rewired to
   load `harken.ark`. Until then `harken-apk` is out of the flake (its
   derivation is as it stood at `2874274`), and
