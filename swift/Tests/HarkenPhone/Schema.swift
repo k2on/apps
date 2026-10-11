@@ -1,1 +1,0 @@
-../../../harken/domain/gen/swift/Schema.swift

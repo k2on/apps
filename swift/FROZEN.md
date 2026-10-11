@@ -8,11 +8,16 @@ writing the plan algebra and its maintenance a second time while the
 design was still moving, so the runtime, the vocabulary and the client
 stop here, byte for byte, and come back when the spec settles.
 
+**A phone is a client** (`docs/plan-phones.md`): it interprets the module
+`arkc` emits and authors none. So the authoring vocabulary
+(`Sources/ArkAuthoring`), the domains written in it (the `Demo`, `Kitchen`,
+`HarkenDomain` and `HarkenPhone` targets and their tests) and
+`harken/domain/gen/swift` are deleted, not frozen; `git show 4bacc8f:swift`
+has them. What is left — `ArkDB` and `ArkDBClient` — is rewritten to v4 in
+place by rounds 5–7 of that plan.
+
 Frozen with it, for the same reason and in the same state:
 
-- `harken/domain/gen/swift` — `arkc gen swift`'s print of harken's v3
-  domain, which the test targets compiled. There is no printer now (§18
-  left with the Haskell), and `harken/domain/harken.ark` is a v4 module.
 - `harken/ios` — the SwiftUI app over `ArkDBClient` and that print. Only
   its bridge (`Harken/Rows.swift`) was ever compiled here, as a test
   target; the screens have not met a compiler.
