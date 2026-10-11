@@ -496,3 +496,43 @@ one whose steps overflow and whose total does not.
 Not verified: Linux only — nothing here built the runtime for iOS or ran
 it on a phone. Rust, `spec/vectors` and the Kotlin tree are untouched.
 
+
+**Round 6, the Swift client** (`b228c9c`, `818c54d`, and the docs). The
+engine's client half, file for file with `rust/ark`: `Log.swift`,
+`Peer.swift` (the replica — pending and its records, the rebase by records
+(R2), settle once per pump (R8), roles frozen (D1), a union by facts with
+the device's schema (D2), private entries and intents with no closure by
+facts (D3), raw writes replayed (D4), fork back — and the authority a peer
+alone is, whose private blocks never run), `Protocol.swift` (every frame
+both ways, each optional field where the reference writes it, and the
+`Client`), `Journal.swift` (`ark::journal`, both layouts) and `Trace.swift`
+(the player, `Durable`, reopen). `ArkDBClient` is back in the package as
+`rust/ark-client` minus the link: `Storage` (memory, and a directory written
+through a temporary name, fsync, rename and a directory fsync), the
+replica, journal, pending and login records of `storage.rs`, the writer of
+`peer.rs`, seeded and system autos, and a `Peer` that opens over a storage,
+authors by name, leaves (the inbox left behind) and joins.
+
+`checks.swift` now claims `protocol` 40, `rebase/three-peers` 1 (its
+server-only steps named and skipped) and `trace` 27: 122 of 130 vectors
+run, and only the eight rust-only fleets skipped — nothing marked client.
+It replays `packages.trace-corpus`, 2,565 of 2,565 in about 10 s, and again
+with the durable copy kept in the storage records (`StoredCopy`), 2,565 of
+2,565 in about 11 s; and it replays round 3's Rust-written fixture, read in
+place at `kotlin/ark-client/fixtures/rust-peer.json`, into a Swift `Peer`:
+73 steps, every record the Rust peer's byte for byte after every step, and
+each reopen finding the state the Rust peer reported.
+
+Falsified, each restored: the rebase not landing what arrived under pending
+(three-peers and 13 traces); `Hello` without its partial flag (a protocol
+vector, 4 traces, 756 corpus traces); going alone without clearing the inbox
+(trace/alone-leaves-the-inbox at step 53, 2 corpus traces); journal pages
+not applied on load (the fixture at step 72, trace/harken-rebase at its
+reopen); pending compaction off (the fixture at step 71); the seeded
+generator moved by one (the fixture at step 1); the union dropped from the
+replica record — which only the corpus catches, 228 traces at their reopen,
+since neither the fixture nor the 26 traces reopen a partial client through
+storage.
+
+Not verified: Linux only. `DirStorage`'s directory sync ran on Linux, not
+on iOS, and not against a real crash.

@@ -14,9 +14,10 @@ author them. The domain is written once, in Rust, and `arkc` emits the
 module (`harken/domain/harken.ark`). The v3 tree's authoring vocabulary and
 the printed domain are gone (`FROZEN.md`).
 
-Round 5 of `docs/plan-phones.md` landed the core below; the replica, the
-protocol client, storage and the alone authority are round 6, and the peer,
-its transport and the iOS sources round 7.
+Round 5 of `docs/plan-phones.md` landed the core below and round 6 the
+client — the replica, the protocol client, the alone authority and the
+journal in `ArkDB`, and storage and a peer in `ArkDBClient`; the peer's
+transport and the iOS sources are round 7.
 
 ## What is here
 
@@ -37,6 +38,20 @@ its transport and the iOS sources round 7.
 | `Eval.swift`, `Std.swift` | `eval.rs`, `stdlib.rs` | the interpreter and the standard library |
 | `View.swift`, `Maintain.swift` | `view.rs` | `pull`, `answer`, `read`; `hydrate`, `push_all`, patches, R9's kept numbers |
 | `Raw.swift`, `Facts.swift` | `raw.rs`, `protocol.rs` | raw writes as a client replays them; the change form |
+| `Log.swift` | `log.rs` | an entry with its roles frozen, and the log a peer alone keeps |
+| `Peer.swift` | `peer.rs` | the `Replica` — pending, the rebase by records, settle, verdicts, unions, private and raw entries, fork back — and the `Authority` a peer alone is |
+| `Protocol.swift` | `protocol.rs` | every frame to and from its value, and the `Client` |
+| `Journal.swift` | `journal.rs` | a log's snapshot and pages, in both layouts |
+| `Trace.swift` | `trace.rs` | the trace player: inputs, the durable copy, reopen, alone and join |
+
+`ArkDBClient` is `rust/ark-client`:
+
+| file | `rust/ark-client/src` | what it is |
+|---|---|---|
+| `Storage.swift` | `storage.rs` | `Storage` (memory, a directory written whole and synced), the replica, journal, pending and login records, `load` |
+| `Writer.swift` | `peer.rs` (`persist`…) | what is written when: a page or a snapshot, for the journal and for the intents |
+| `Autos.swift` | `autos.rs` | ids and times, from the platform or a seed |
+| `Peer.swift` | `peer.rs` | a peer over a storage: open, sign in and out, mutate, query, check, standing, leave and join, the sans-io frames |
 
 Three things are Swift's own, and each says nothing different from the
 Rust:
@@ -75,10 +90,18 @@ Swift 5.8 and runs `ArkDBTests`, an executable (there is no XCTest here):
 - **the conformance runner** (`spec/RUNNERS.md`): it walks
   `spec/vectors/MANIFEST.json`, fails on a file the manifest does not name
   or one it names that is missing, runs every vector of the kinds it claims
-  — `codec`, `order`, `hash`, `module`, `verify`, `eval`, `views`, 54 of 130
-  — requires each `falsify/` vector to fail its check (a crash is a bug, not
+  — `codec`, `order`, `hash`, `module`, `verify`, `eval`, `views`,
+  `protocol`, `rebase` and `trace`, 122 of 130, skipping only the eight
+  rust-only fleets — requires each `falsify/` vector to fail its check (a crash is a bug, not
   a pass), skips the rest by name with the reason, prints what it ran and
   skipped, and fails on a claimed kind with nothing run;
+- **the trace corpus**: every trace of `packages.trace-corpus` (2,565),
+  replayed;
+- **the storage**: round 3's Rust-written peer fixture
+  (`kotlin/ark-client/fixtures/rust-peer.json`, read in place) replayed into
+  a Swift `Peer`, every record compared byte for byte after every step;
+  `DirStorage` on this machine; and every trace and the corpus again with
+  the client's durable copy kept in the storage records;
 - **StoreHints**: 600 reads through the store's indexes, over a
   `MemoryStore` and an `Overlay`, each the scan it stands for;
 - **KeptNumbers**: kept numbers three levels deep through 400 seeded
