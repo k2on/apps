@@ -233,14 +233,16 @@
           # Swift is frozen at spec v3 (swift/FROZEN.md) and has no check or
           # package here.
           #
-          # The Kotlin runtime (kotlin/README.md, docs/plan-phones.md): gradle
-          # over a recorded Maven graph (kotlin/deps.json), replayed offline
-          # the way nixpkgs builds every gradle project; `nix run
-          # .#kotlin-deps` re-records it. Its `build` runs the conformance
-          # runner over spec/vectors, which fails on any failure and on a kind
-          # it claims with nothing run; the Unicode tables are generated from
-          # rust/ark's, so that file is a source too. The sources are held to
-          # ktfmt's kotlinlang style first, checked and never written.
+          # The Kotlin runtime and client (kotlin/README.md,
+          # docs/plan-phones.md): gradle over a recorded Maven graph
+          # (kotlin/deps.json), replayed offline the way nixpkgs builds every
+          # gradle project; `nix run .#kotlin-deps` re-records it. Its `build`
+          # runs the conformance runner over spec/vectors and every trace of
+          # `trace-corpus`, which fails on any failure and on a kind it claims
+          # with nothing run, and the client's storage tests over a Rust
+          # peer's bytes and the same traces; the Unicode tables are generated
+          # from rust/ark's, so that file is a source too. The sources are
+          # held to ktfmt's kotlinlang style first, checked and never written.
           kotlin = pkgs.stdenv.mkDerivation (final: {
             pname = "arkdb-kotlin";
             version = "0.1.0";
@@ -252,15 +254,15 @@
               data = ./kotlin/deps.json;
             };
             __darwinAllowLocalNetworking = true;
-            gradleFlags = [ "-Dorg.gradle.java.home=${pkgs.jdk21}" ];
+            gradleFlags = [ "-Dorg.gradle.java.home=${pkgs.jdk21}" "-ParkTraceCorpus=${trace-corpus}" ];
             preBuild = ''
-              ${fmt.kotlin} --dry-run --set-exit-if-changed $(find ark-runtime -name '*.kt' -not -path '*/build/*' | sort)
+              ${fmt.kotlin} --dry-run --set-exit-if-changed $(find ark-runtime ark-client -name '*.kt' -not -path '*/build/*' | sort)
             '';
             gradleBuildTask = "build";
             doCheck = false;
             installPhase = ''
               mkdir -p $out/lib
-              cp ark-runtime/build/libs/*.jar $out/lib/
+              cp ark-runtime/build/libs/*.jar ark-client/build/libs/*.jar $out/lib/
             '';
           });
 
@@ -363,9 +365,9 @@
               preCheck = oldEnv;
               installPhase = "touch $out";
             };
-            # docs/plan-phones.md S3 The Kotlin runtime held to spec/vectors:
-            # every vector of the kinds it implements, by its conformance
-            # runner, which names what it ran and skipped.
+            # docs/plan-phones.md S3 The Kotlin runtime held to spec/vectors
+            # and packages.trace-corpus: every client vector and every trace,
+            # by its conformance runner, which names what it ran and skipped.
             inherit kotlin;
             # The vectors in the tree are the ones the specification writes.
             vectors = pkgs.runCommand "check-vectors" { nativeBuildInputs = [ ark ]; } ''
