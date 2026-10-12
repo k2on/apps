@@ -142,7 +142,7 @@ public struct Pumped {
 }
 
 /// Everything a status line or a debug screen shows (`ark_client::Status`).
-public struct Status {
+public struct Status: Equatable {
     public let user: String
     public let session: String
     public let alone: Bool

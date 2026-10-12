@@ -1,5 +1,5 @@
-import SwiftUI
 import ArkDB
+import SwiftUI
 
 /// Everything in the library, in the order it was added — the `library`
 /// query, read against the selected playlist, so each row knows whether it
@@ -12,11 +12,11 @@ struct LibraryView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if model.tracks.isEmpty {
+                if model.library.isEmpty {
                     ContentUnavailableView("Nothing here yet", systemImage: "music.note",
                                            description: Text(emptyReason))
                 } else {
-                    List(model.tracks) { track in
+                    List(model.library) { track in
                         TrackRow(track: track)
                     }
                 }
@@ -27,7 +27,7 @@ struct LibraryView: View {
                     Menu {
                         ForEach(model.playlists) { p in
                             Button {
-                                model.selectedPlaylist = p.id
+                                model.select(p.id)
                             } label: {
                                 if p.id == model.selectedPlaylist {
                                     Label(p.name, systemImage: "checkmark")
@@ -46,15 +46,15 @@ struct LibraryView: View {
     }
 
     private var emptyReason: String {
-        if model.settings.alone { return "The library arrives from a server's scanner; alone, it stays empty." }
-        if model.status?.signedIn == false { return "Sign in (Settings) to sync the library. Playlists made meanwhile are kept." }
+        if model.prefs.workAlone { return "The library arrives from a server's scanner; alone, it stays empty." }
+        if model.status?.signedOut == true { return "Sign in (Settings) to sync the library. Playlists made meanwhile are kept." }
         return "The library arrives from the server's scanner."
     }
 }
 
 struct TrackRow: View {
     @EnvironmentObject private var model: Model
-    let track: LibraryTrack
+    let track: Track
 
     var body: some View {
         HStack {

@@ -243,7 +243,9 @@
             version = "0.1.0";
             # The storage fixture is round 3's, read where it was committed
             # beside the Kotlin client rather than copied.
-            src = only [ "swift" "spec/vectors" "rust/ark/src/unicode_tables.rs" "kotlin/ark-client/fixtures/rust-peer.json" "harken/domain/harken.ark" ];
+            # The iOS app is type-checked by the check alone, so that a
+            # screen edit is not an input to the fleet's peer.
+            src = only ([ "swift" "spec/vectors" "rust/ark/src/unicode_tables.rs" "kotlin/ark-client/fixtures/rust-peer.json" "harken/domain/harken.ark" ] ++ lib.optionals check [ "harken/ios" ]);
             sourceRoot = "source/swift";
             nativeBuildInputs = [ pkgs.swift pkgs.swiftpm ];
             # On Linux, Foundation and Dispatch are packages of their own and
@@ -268,6 +270,9 @@
             checkPhase = ''
               runHook preCheck
               "$(swiftpmBinPath)/ArkDBTests" ../spec/vectors ${trace-corpus} ../kotlin/ark-client/fixtures/rust-peer.json ../harken/domain/harken.ark
+              # What of the iOS app is not SwiftUI, type-checked against the
+              # modules just built (harken/ios/README.md).
+              SWIFT_BUILD="$(swiftpmBinPath)" bash ../harken/ios/tools/typecheck.sh
               runHook postCheck
             '';
             installPhase = if check then ''

@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// The iOS peer: SwiftUI over the Swift runtime (`ArkDB`), the client
-/// library around it (`ArkDBClient`) and harken's domain, authored in Swift
-/// (`../domain/gen/swift`, through `ArkAuthoring`).
-/// One `Model` for the app's life; every screen reads it.
+/// The iOS peer: SwiftUI over the Swift client at spec v4 (`ArkDB`,
+/// `ArkDBClient`), interpreting `harken.ark` — the module every harken peer
+/// runs — loaded from the app's bundle. One `Model` for the app's life;
+/// every screen reads it.
 @main
 struct HarkenApp: App {
     @StateObject private var model = Model()
@@ -47,7 +47,7 @@ struct StatusBar: View {
                 .font(.caption)
                 .lineLimit(1)
             Spacer()
-            if let note = model.note {
+            if let note = model.notice {
                 Text(note)
                     .font(.caption)
                     .foregroundStyle(.secondary)

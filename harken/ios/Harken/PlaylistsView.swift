@@ -1,5 +1,5 @@
-import SwiftUI
 import ArkDB
+import SwiftUI
 
 /// The person's playlists, in the order they were made — the `playlists`
 /// query. Tapping one opens it and makes it the one the library adds to;
@@ -39,7 +39,7 @@ struct PlaylistsView: View {
                 }
             }
             .navigationTitle("Playlists")
-            .navigationDestination(for: PlaylistSummary.self) { p in
+            .navigationDestination(for: Playlist.self) { p in
                 PlaylistView(playlist: p)
             }
             .toolbar {

@@ -1,5 +1,5 @@
-import SwiftUI
 import ArkDB
+import SwiftUI
 
 /// One playlist's contents in playlist order — the `playlist` query, which
 /// answers with the library's own rows. A swipe removes one, which is
@@ -7,11 +7,11 @@ import ArkDB
 /// adds to.
 struct PlaylistView: View {
     @EnvironmentObject private var model: Model
-    let playlist: PlaylistSummary
+    let playlist: Playlist
 
     /// The rows for this playlist, whether or not it is the model's
     /// selection yet (it becomes so on appear).
-    private var rows: [LibraryTrack] {
+    private var rows: [Track] {
         return model.selectedPlaylist == playlist.id ? model.items : []
     }
 
@@ -46,13 +46,13 @@ struct PlaylistView: View {
                         }
                     }
                     .onDelete { offsets in
-                        let rs = rows // each remove re-reads, so take the rows once
+                        let rs = rows // the removes land on a later snapshot, so take the rows once
                         for i in offsets { model.remove(rs[i], from: playlist.id) }
                     }
                 }
             }
         }
         .navigationTitle(playlist.name)
-        .onAppear { model.selectedPlaylist = playlist.id }
+        .onAppear { model.select(playlist.id) }
     }
 }
