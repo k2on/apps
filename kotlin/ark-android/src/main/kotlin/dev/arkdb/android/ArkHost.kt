@@ -124,10 +124,15 @@ public class ArkHost(app: Application) : AndroidViewModel(app) {
                         withContext(Dispatchers.IO) {
                             try {
                                 ArkSession.open(
-                                    d, getApplication<Application>().filesDir, e.server, e.login) {
-                                        why ->
+                                    d,
+                                    getApplication<Application>().filesDir,
+                                    e.server,
+                                    e.login,
+                                    onDenied = { why ->
                                         viewModelScope.launch { send(Event.Denied(why)) }
-                                    }
+                                    },
+                                    onSignOut = { viewModelScope.launch { send(Event.SignOut) } },
+                                )
                             } catch (x: Exception) {
                                 null
                             }

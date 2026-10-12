@@ -1,7 +1,6 @@
 // Navigation: three tabs — Library, Playlists, Settings — and the one page
 // pushed over them, a playlist. A snackbar carries refusals and rejections;
-// the top bar says whether the peer is signed out, linked, alone, not synced
-// or turned away.
+// the top bar says whether the peer is linked and what is not synced.
 package dev.harken.android
 
 import androidx.compose.foundation.layout.padding
@@ -43,13 +42,10 @@ object Routes {
 }
 
 /** One line about the peer, for the top bar. */
-fun statusLine(s: Status?, signedIn: Boolean): String {
+fun statusLine(s: Status?): String {
     val pend = if (s != null && s.pending > 0) ", ${s.pending} not synced" else ""
     return when {
         s == null -> "opening…"
-        s.denied != null -> "turned away: ${s.denied}"
-        s.alone -> "alone$pend"
-        !signedIn -> "signed out$pend"
         s.linked -> "linked$pend"
         else -> "${s.link}$pend"
     }
@@ -62,7 +58,6 @@ fun HarkenApp(model: Model) {
     val snackbar = remember { SnackbarHostState() }
     val notice by model.notice.collectAsStateWithLifecycle()
     val status by model.status.collectAsStateWithLifecycle()
-    val settings by model.settings.collectAsStateWithLifecycle()
 
     LaunchedEffect(notice) {
         val n = notice ?: return@LaunchedEffect
@@ -77,7 +72,7 @@ fun HarkenApp(model: Model) {
         topBar = {
             TopAppBar(
                 title = { Text("Harken") },
-                actions = { Text(statusLine(status, settings.user != null), modifier = Modifier.padding(end = 16.dp)) },
+                actions = { Text(statusLine(status), modifier = Modifier.padding(end = 16.dp)) },
             )
         },
         snackbarHost = { SnackbarHost(snackbar) },

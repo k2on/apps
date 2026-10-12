@@ -1,89 +1,39 @@
-// Settings: who is signed in, the server and "work alone", what the peer
+// Settings: who is signed in and signing out, the server, what the peer
 // says — its cursor, what is not synced, what the server holds back, the
-// link — and every change this phone made with where it stands. Applying
-// the server reopens the peer — the old one is closed and written down
-// first — in a directory per server (or alone), not per person, so work
-// done signed out is there when somebody signs in.
+// link — and every change this phone made with where it stands.
 package dev.harken.android
 
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @Composable
 fun SettingsScreen(model: Model) {
-    val saved by model.settings.collectAsStateWithLifecycle()
     val status by model.status.collectAsStateWithLifecycle()
     val changes by model.changes.collectAsStateWithLifecycle()
     val standings by model.standings.collectAsStateWithLifecycle()
-    var url by rememberSaveable { mutableStateOf(saved.server) }
-    var alone by rememberSaveable { mutableStateOf(saved.workAlone) }
-    var name by rememberSaveable { mutableStateOf("") }
 
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp)) {
         Text("Account", style = MaterialTheme.typography.titleMedium)
-        val who = saved.user
-        if (who != null) {
-            Text("Signed in as $who", style = MaterialTheme.typography.bodyLarge)
-            OutlinedButton(onClick = { model.signOut() }) { Text("Sign out") }
-            Hint("What you made and has not synced stays yours, and goes when you sign in again.")
-        } else {
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
-                label = { Text("Name") },
-                supportingText = { Text("Dev auth: a name is a login.") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Button(onClick = { model.signIn(name) }, enabled = name.isNotBlank()) { Text("Sign in") }
-            Hint("Not signed in: everything works and is kept on this phone, and nothing is sent anywhere. Signing in makes it yours and syncs it.")
-        }
+        Text("Signed in as ${model.user}", style = MaterialTheme.typography.bodyLarge)
+        OutlinedButton(onClick = { model.signOut() }) { Text("Sign out") }
+        Hint("What you made and has not synced stays on this phone, and goes when you sign in again.")
 
         Spacer(Modifier.height(24.dp))
         Text("Server", style = MaterialTheme.typography.titleMedium)
-        OutlinedTextField(
-            value = url,
-            onValueChange = { url = it },
-            label = { Text("Server") },
-            supportingText = { Text("http://host:port — the sync socket is /sync beside it; 10.0.2.2 reaches the emulator's host") },
-            singleLine = true,
-            enabled = !alone,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(12.dp))
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("Work alone", style = MaterialTheme.typography.bodyLarge)
-                Hint("No server: this phone sequences its own log. The library stays empty, because songs come from a server's scanner.")
-            }
-            Switch(checked = alone, onCheckedChange = { alone = it })
-        }
-        Spacer(Modifier.height(16.dp))
-        Button(
-            onClick = { model.applySettings(saved.copy(server = url.trim(), workAlone = alone)) },
-            enabled = (alone || url.isNotBlank()) && (url.trim() != saved.server || alone != saved.workAlone),
-        ) { Text("Apply and reopen") }
+        Text(model.server, style = MaterialTheme.typography.bodyLarge)
 
         Spacer(Modifier.height(24.dp))
         Text("Status", style = MaterialTheme.typography.titleMedium)
@@ -91,7 +41,7 @@ fun SettingsScreen(model: Model) {
         if (s == null) {
             Text("opening…")
         } else {
-            Text(statusLine(s, saved.user != null))
+            Text(statusLine(s))
             Text(
                 "cursor ${s.cursor}, not synced ${s.pending}, held ${s.held}, diverged ${s.diverged}",
                 style = MaterialTheme.typography.bodySmall,
@@ -105,7 +55,7 @@ fun SettingsScreen(model: Model) {
         }
         Spacer(Modifier.height(12.dp))
         OutlinedButton(onClick = { model.verify() }) { Text("Verify against the authority") }
-        Hint("Alone, the answer is immediate. Linked, the server's answer arrives on a later pump, and is said when it does.")
+        Hint("The server's answer arrives on a later pump, and is said when it does.")
 
         Spacer(Modifier.height(24.dp))
         Text("Changes", style = MaterialTheme.typography.titleMedium)

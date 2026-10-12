@@ -53,6 +53,7 @@ private constructor(
     public val login: Login,
     private val peer: Peer,
     private val onDenied: (String) -> Unit,
+    private val onSignOut: () -> Unit,
 ) {
     private val thread =
         Executors.newSingleThreadScheduledExecutor { r ->
@@ -118,6 +119,14 @@ private constructor(
     }
 
     /** Stop the pump and close the peer, written down; its storage stays for the next session. */
+    /**
+     * Sign out: the onboarding forgets the login, closes this session — its replica and whatever is
+     * pending kept — and goes back to *Sign in* with the server kept.
+     */
+    public fun signOut() {
+        onSignOut()
+    }
+
     public fun close() {
         if (closed) return
         thread.execute {
@@ -149,7 +158,8 @@ private constructor(
             root: File,
             server: String,
             login: Login,
-            onDenied: (String) -> Unit
+            onDenied: (String) -> Unit,
+            onSignOut: () -> Unit,
         ): ArkSession {
             val peer =
                 Peer.open(
@@ -158,7 +168,7 @@ private constructor(
                     Options.server(login.user.id, login.session, login.token))
             peer.setRoles(login.user.roles)
             peer.connect(Auth.socketUrl(server))
-            return ArkSession(server, login, peer, onDenied).also { it.start() }
+            return ArkSession(server, login, peer, onDenied, onSignOut).also { it.start() }
         }
     }
 }

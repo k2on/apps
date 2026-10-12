@@ -1,94 +1,47 @@
-// The one model: a Kotlin `Peer` over `harken.ark` and what the screens read
-// from it. The peer is single-threaded, so it lives on a thread of its own
-// (`ark`): the pump every fifty milliseconds, every mutation, every read a
-// screen asks for synchronously. The screens see lists that are *spliced*,
-// never re-read: `library`, `playlists` and the open `playlist` are
-// maintained views (`ClientView`), each handed every `Changes` the peer
-// reports, and the patches they answer with are applied to the list the
-// screen was given; only a `Reset` — a rebase that replaced the store, a
-// sign-in, a selection that moved — reads one again.
+// The one model: harken's lists over the session the onboarding opened
+// (`kotlin/ark-android`'s `ArkSession`) — the Kotlin `Peer` over
+// `harken.ark`, signed in, linked to the server and pumped on a thread of
+// its own. Everything that touches the peer runs on that thread: every
+// mutation, every read a screen asks for, and the splice after each pump.
+// The screens see lists that are *spliced*, never re-read: `library`,
+// `playlists` and the open `playlist` are maintained views (`ClientView`),
+// each handed every `Changes` the peer reports, and the patches they answer
+// with are applied to the list the screen was given; only a `Reset` — a
+// rebase that replaced the store, a selection that moved — reads one again.
 //
-// The app works with nobody signed in: the peer is opened signed out, what
-// is authored is nobody's, kept and written down, and nothing is dialled.
-// Signing in (dev auth: a name) makes all of it the signer's and syncs it;
-// signing out keeps what that person left pending for when they sign in
-// again. Alone, the peer is its own authority over a local history, and
-// joins a server when it is told one (Settings).
+// There is no alone mode and no signed-out mode: harken is used with a
+// server, and a session exists only once somebody has signed in to one.
 package dev.harken.android
 
-import android.app.Application
-import android.content.Context
-import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.viewModelScope
 import dev.arkdb.Changes
 import dev.arkdb.Id
 import dev.arkdb.Value
-import dev.arkdb.client.Auth
-import dev.arkdb.client.AuthError
+import dev.arkdb.android.ArkSession
 import dev.arkdb.client.ClientView
-import dev.arkdb.client.DirStorage
-import dev.arkdb.client.Domain
-import dev.arkdb.client.Login
-import dev.arkdb.client.Options
 import dev.arkdb.client.Peer
 import dev.arkdb.client.PeerError
 import dev.arkdb.client.Standing
 import dev.arkdb.client.Status
 import dev.arkdb.client.Update
-import java.io.File
-import java.util.concurrent.Executors
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.asCoroutineDispatcher
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
-
-/**
- * What Settings holds: the server's address (`http://host:port`; the socket is derived from it),
- * whether to work alone, and the login, if somebody signed in — kept whole, so a restart reuses
- * it.
- */
-data class Prefs(val server: String, val workAlone: Boolean, val login: Login?) {
-    val user: String?
-        get() = login?.user?.id
-
-    companion object {
-        private const val PREFS = "harken"
-
-        fun load(ctx: Context): Prefs {
-            val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            return Prefs(
-                server = p.getString("server", "http://10.0.2.2:8787") ?: "",
-                workAlone = p.getBoolean("workAlone", false),
-                login = p.getString("login", null)?.let { runCatching { Login.parse(it) }.getOrNull() },
-            )
-        }
-
-        fun save(ctx: Context, s: Prefs) {
-            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .edit()
-                .putString("server", s.server)
-                .putBoolean("workAlone", s.workAlone)
-                .putString("login", s.login?.toJson())
-                .apply()
-        }
-    }
-}
 
 /** One change this phone made, and what to call it beside its standing. */
 data class Authored(val id: Id, val what: String)
 
-class Model(app: Application) : AndroidViewModel(app) {
-    /** The peer's thread: everything that touches it runs here. */
-    private val ark = Executors.newSingleThreadExecutor { r -> Thread(r, "ark-peer") }.asCoroutineDispatcher()
+class Model(private val session: ArkSession) {
+    /** On the main thread: what the screens launch. */
+    private val scope = MainScope()
 
-    private val _settings = MutableStateFlow(Prefs.load(app))
-    val settings: StateFlow<Prefs> = _settings.asStateFlow()
+    /** Who is signed in. */
+    val user: String = session.login.user.id
+
+    /** The server, as the onboarding found it. */
+    val server: String = session.server
 
     private val _library = MutableStateFlow<List<Track>>(emptyList())
     val library: StateFlow<List<Track>> = _library.asStateFlow()
@@ -123,7 +76,7 @@ class Model(app: Application) : AndroidViewModel(app) {
     private val madeBy = HashMap<Id, Id>()
     private val touchedBy = HashMap<Pair<Id, Id>, Id>()
 
-    // On the `ark` thread only.
+    // On the peer's thread only.
     private var peer: Peer? = null
     private var libraryView: ClientView? = null
     private var playlistsView: ClientView? = null
@@ -133,51 +86,17 @@ class Model(app: Application) : AndroidViewModel(app) {
     private val itemRows = ArrayList<Track>()
     private var verdictsSeen = 0
 
-    /** harken's module, as the domain crate writes it: in the APK's assets, verified on load. */
-    private val domain: Domain by lazy {
-        Domain.fromBytes(getApplication<Application>().assets.open("harken.ark").use { it.readBytes() })
-    }
+    private var unhook: () -> Unit = {}
 
     init {
-        viewModelScope.launch(ark) {
-            open()
-            while (isActive) {
-                tick()
-                delay(50)
-            }
+        session.post { p ->
+            open(p)
+            unhook = session.onPump { tick(it) }
         }
     }
 
-    /**
-     * Where the replica lives: one directory per server (or alone), not per person — the log is the
-     * server's and every person reads it — so that work done signed out is still here when somebody
-     * signs in.
-     */
-    private fun directory(st: Prefs): File {
-        val app = getApplication<Application>()
-        val place = if (st.workAlone) "alone" else "server-" + st.server.replace(Regex("[^A-Za-z0-9]"), "_")
-        return File(app.filesDir, "ark/$place/replica")
-    }
-
-    // Open the peer the settings describe, and hydrate the three views.
-    private fun open() {
-        val st = _settings.value
-        val login = st.login
-        val opts =
-            when {
-                st.workAlone -> Options.alone(login?.user?.id ?: "me")
-                login != null -> Options.server(login.user.id, login.session, login.token)
-                else -> Options.signedOut()
-            }
-        val p =
-            try {
-                Peer.open(domain, DirStorage(directory(st)), opts)
-            } catch (e: Exception) {
-                _notice.value = "could not open the replica: ${e.message}"
-                return
-            }
-        login?.let { p.setRoles(it.user.roles) }
-        if (!st.workAlone) p.connect(Auth.socketUrl(st.server))
+    // Hydrate the three views, once, on the peer's thread.
+    private fun open(p: Peer) {
         peer = p
         p.takeChanges()
         playlistsView = hold(p, "playlists", emptyMap())
@@ -249,10 +168,7 @@ class Model(app: Application) : AndroidViewModel(app) {
     }
 
     /** Every pump: what moved, the status, where each change stands, a new verdict's reason. */
-    private fun tick() {
-        val p = peer ?: return
-        val pumped = p.pump()
-        pumped.denied?.let { _notice.value = "turned away: $it" }
+    private fun tick(p: Peer) {
         splice(p)
         _status.value = p.status()
         val now = _changes.value.associate { it.id to p.standing(it.id) }
@@ -268,8 +184,7 @@ class Model(app: Application) : AndroidViewModel(app) {
     }
 
     private fun onPeer(f: (Peer) -> Unit) {
-        viewModelScope.launch(ark) {
-            val p = peer ?: return@launch
+        session.post { p ->
             try {
                 f(p)
             } catch (e: Exception) {
@@ -281,11 +196,11 @@ class Model(app: Application) : AndroidViewModel(app) {
 
     // A read a screen needs at once, on the peer's thread.
     private fun <T> now(default: T, f: (Peer) -> T): T =
-        runBlocking(ark) { peer?.let { runCatching { f(it) }.getOrNull() } ?: default }
+        runBlocking { runCatching { session.run(f) }.getOrNull() ?: default }
 
     fun select(playlistId: Id) {
         _selected.value = playlistId
-        viewModelScope.launch(ark) { peer?.let { reselect(it, playlistId) } }
+        session.post { reselect(it, playlistId) }
     }
 
     fun playlist(id: Id): Playlist? = _playlists.value.firstOrNull { it.id == id }
@@ -360,77 +275,19 @@ class Model(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Ask the authority whether it agrees: alone, at once; linked, on a later pump. */
+    /** Ask the authority whether it agrees: its answer arrives on a later pump. */
     fun verify() = onPeer { p -> p.verify() }
 
     fun dismissNotice() {
         _notice.value = null
     }
 
-    // Signing in ---------------------------------------------------------------
+    /** Sign out: the onboarding takes it from here, keeping the server and this phone's copy. */
+    fun signOut() = session.signOut()
 
-    /**
-     * Somebody signs in with a name: the server's dev auth, which answers `/auth/login` with a code
-     * and no page. A server with a real provider answers with a page for a browser, which this app
-     * does not open: it says so instead. Everything done so far as nobody becomes theirs and is
-     * pushed.
-     */
-    fun signIn(name: String) {
-        val who = name.trim()
-        if (who.isEmpty()) return
-        val server = _settings.value.server
-        viewModelScope.launch(Dispatchers.IO) {
-            val login =
-                try {
-                    Auth.login(server, who) {
-                        throw AuthError(
-                            "$server signs people in through a browser; this app signs in by name only (dev auth)")
-                    }
-                } catch (e: Exception) {
-                    _notice.value = "could not sign in: ${e.message}"
-                    return@launch
-                }
-            withContext(ark) {
-                val p = peer ?: return@withContext
-                try {
-                    p.signIn(login.user.id, login.session, login.token)
-                    p.setRoles(login.user.roles)
-                } catch (e: PeerError) {
-                    _notice.value = "could not sign in: ${e.message}"
-                    return@withContext
-                }
-                val next = _settings.value.copy(login = login)
-                Prefs.save(getApplication(), next)
-                _settings.value = next
-                splice(p)
-            }
-        }
-    }
-
-    /** Sign out: the token forgotten and the link stopped; what that person left pending stays theirs. */
-    fun signOut() {
-        val next = _settings.value.copy(login = null)
-        Prefs.save(getApplication(), next)
-        _settings.value = next
-        onPeer { p -> p.signOut() }
-    }
-
-    /** Save and reopen: the old peer is closed and written down first. */
-    fun applySettings(s: Prefs) {
-        Prefs.save(getApplication(), s)
-        _settings.value = s
-        viewModelScope.launch(ark) {
-            peer?.close()
-            peer = null
-            open()
-        }
-    }
-
-    override fun onCleared() {
-        runBlocking(ark) {
-            peer?.close()
-            peer = null
-        }
-        ark.close()
+    /** Stop listening to the session; the session itself is the onboarding's to close. */
+    fun close() {
+        unhook()
+        scope.cancel()
     }
 }

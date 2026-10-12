@@ -3,8 +3,8 @@
 // puts it on that playlist or takes it off; its menu does the same for any
 // playlist, ticked by `playlists_of`. With no playlist at all, adding makes
 // "Favorites" first. Songs arrive from the server's scanner — `add_song` is
-// the library's role's, not a phone's — so the list is empty alone or
-// signed out. The list is a maintained view's, spliced as the peer moves.
+// the library's role's, not a phone's. The list is a maintained view's,
+// spliced as the peer moves.
 package dev.harken.android
 
 import androidx.compose.foundation.layout.Box
@@ -46,7 +46,6 @@ fun LibraryScreen(model: Model) {
     val tracks by model.library.collectAsStateWithLifecycle()
     val playlists by model.playlists.collectAsStateWithLifecycle()
     val selected by model.selected.collectAsStateWithLifecycle()
-    val settings by model.settings.collectAsStateWithLifecycle()
     val standings by model.standings.collectAsStateWithLifecycle()
     val target = playlists.firstOrNull { it.id == selected }
 
@@ -58,12 +57,7 @@ fun LibraryScreen(model: Model) {
         )
         if (tracks.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
-                val why = when {
-                    settings.workAlone -> "The library arrives from a server's scanner; alone, it stays empty."
-                    settings.user == null -> "Sign in (Settings) to sync the library. Playlists made meanwhile are kept."
-                    else -> "The library arrives from the server's scanner."
-                }
-                Text(why, style = MaterialTheme.typography.bodyMedium)
+                Text("The library arrives from the server's scanner.", style = MaterialTheme.typography.bodyMedium)
             }
         } else {
             LazyColumn(Modifier.fillMaxSize()) {

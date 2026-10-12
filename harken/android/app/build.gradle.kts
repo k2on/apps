@@ -69,6 +69,9 @@ dependencies {
     // maintained views.
     implementation("dev.arkdb:ark-runtime")
     implementation("dev.arkdb:ark-client")
+    // The onboarding every Ark app on Android shares, and the session it opens
+    // (kotlin/ark-android, a project of this build).
+    implementation(project(":ark-android"))
 
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
     implementation(composeBom)
