@@ -1,50 +1,57 @@
 # harken for Android
 
 Compose over the Kotlin client at spec v4 (`kotlin/ark-runtime`,
-`kotlin/ark-client`, `kotlin/README.md`). The phone is a **client**: it
-loads `harken.ark` — the module the domain crate writes, the one the server,
-the desktop and the browser run — from its own assets, verifies it, and
-interprets every function of it. Nothing of the domain is written in Kotlin,
-and nothing is generated into the app: what the screens call is a mutation
-or a query of the module, by name (`docs/plan-phones.md`).
+`kotlin/ark-client`, `kotlin/README.md`), inside the onboarding every Ark
+app on Android shares (`kotlin/ark-android`). The phone is a **client**: it
+loads `harken.ark` — the module the domain crate writes, the one the
+server, the desktop and the browser run — from its own assets, verifies
+it, and interprets every function of it. Nothing of the domain is written
+in Kotlin, and nothing is generated into the app: what the screens call is
+a mutation or a query of the module, by name (`docs/plan-phones.md`). What
+it looks like and how it behaves is `docs/plan-android.md`.
 
-**Assembled, not run.** `nix build .#harken-apk` compiles every Kotlin file
-here and produces the APK, so the Compose code is what the compiler accepts;
-nothing in the container this was written in can install or run it, and no
-phone has run it. What *has* been exercised is everything under it, on the
-JVM: the runtime and the client pass every client vector of `spec/vectors`
-and every trace of `packages.trace-corpus` (`checks.kotlin`); the client's
-link, sign-in and maintained views have tests of their own
-(`ClientTests`); and `harken-peer-kt`, a headless peer on the same client,
-runs in the process fleet beside Rust peers — partitions, restarts, a lost
-log, alone and joining, old and new servers, a scoped module
-(`checks.fleet-kotlin`, `docs/plan-fleet.md`). None of it has run on
-Android's runtime. Expect the first run on a real phone to want small fixes.
+**Assembled and rendered, not run.** `nix build .#harken-apk` compiles
+every Kotlin file here and runs the onboarding's JVM tests before it
+produces the APK; `nix build .#harken-android-screens` renders every
+screen, light and dark, on the JVM (below). Nothing in the container this
+was written in can install or run an APK, and no phone has run this one.
+What *has* been exercised is everything under it on the JVM: the runtime
+and the client against every client vector and trace (`checks.kotlin`),
+`harken-peer-kt` in the process fleet beside Rust peers
+(`checks.fleet-kotlin`), the onboarding's machine, and the screens drawn
+by layoutlib. Expect the first run on a real phone to want small fixes —
+the media session, the Custom Tab's redirect and the notification
+permission are the parts only a phone can say anything about.
 
 ## Building
 
 From the repository root, with nothing but nix:
 
-    nix build .#harken-apk            # result/harken-debug.apk
+    nix build .#harken-apk              # result/harken-debug.apk
     adb install result/harken-debug.apk
+    nix build .#harken-android-screens  # result/index.html and the PNGs
 
 That is gradle over an SDK the flake assembles itself (`nix/android-sdk.nix`):
 the platform 35 and build-tools 35.0.0 zips from Google, which are jars and
 scripts, and `aapt2` — the one native program AGP runs for `assembleDebug`
 (d8, apksigner and the rest are Java) — compiled from the Android sources
 for whatever machine is building (`nix/aapt2.nix`). The app's whole Maven
-graph — AGP, Compose, the Kotlin plugins, OkHttp — is recorded in
+graph — AGP, Compose, the Kotlin plugins, OkHttp, Media3, the browser
+library, Paparazzi and the layoutlib it renders with — is recorded in
 `deps.json` and replayed offline, the way nixpkgs builds every gradle
 project; the Kotlin runtime and client come in through the composite build
-as they do on a laptop. A new dependency moves that file:
+as they do on a laptop. One recording serves the APK and the screenshots:
+it runs the onboarding's tests, `recordPaparazziDebug` and
+`assembleDebug`. A new dependency moves that file:
 
-    nix run .#harken-apk-deps         # re-records deps.json; needs the network
+    $(nix build .#harken-apk-deps --print-out-paths)   # from the repository root; needs the network
 
-Moving the app onto the v4 client did not move it: the client's one
-dependency, OkHttp, was already in the graph, and the Kotlin build's
-`harken-peer` uses gradle's own `application` plugin. Maven Central rate-
-limits a cold fetch of the graph (HTTP 429); a build that fails on it is
-retried after a pause, and the artifacts already fetched stay in the store.
+(`nix run .#harken-apk-deps` is the same script, on a nix whose `run`
+takes a bare file; some want a `bin/`.) The script runs `nix-shell` inside
+bubblewrap, so it needs a nix daemon to talk to. Maven Central rate-limits
+a cold fetch of the graph (HTTP 429), both while recording and when the
+build fetches what was recorded; either is retried after a pause, and the
+artifacts already fetched stay in the store.
 
 **Why aapt2 is compiled here, and how.** Google ships the SDK's native tools
 for x86_64 Linux and macOS only, so an ARM Linux machine has no `aapt2` to
@@ -84,7 +91,14 @@ and build-tools 35.0.0, plus JDK 21, the same project builds directly:
 
     cd harken/android
     gradle assembleDebug          # or open the directory in Android Studio
+    gradle :ark-android:testDebugUnitTest :app:testDebugUnitTest
+    gradle :app:recordPaparazziDebug   # app/src/test/snapshots/images, gitignored
     adb install app/build/outputs/apk/debug/app-debug.apk
+
+The flake's SDK works for that too: `nix develop .#kotlin`, then
+`ANDROID_HOME` set to `$(nix build .#android-sdk --print-out-paths)/libexec/android-sdk`
+and gradle given the flags `harken-apk` gives it (the JDK, and
+`android.aapt2FromMavenOverride` pointing at that SDK's aapt2).
 
 **The module is an asset.** `app/build.gradle.kts` copies
 `harken/domain/harken.ark` into `build/generated/ark-assets` before every
@@ -98,7 +112,11 @@ and a rebuild; nothing in the app's sources moves with it.
 `settings.gradle.kts` says `includeBuild("../../kotlin")`: a composite build.
 Gradle substitutes the app's `implementation("dev.arkdb:ark-runtime")` and
 `implementation("dev.arkdb:ark-client")` with the modules of that build, which
-keeps its own settings, plugin versions and toolchain.
+keeps its own settings, plugin versions and toolchain. The onboarding,
+`kotlin/ark-android`, is an Android library and so cannot be a project of
+that JVM-only build: it is a project of this one, included by path
+(`include(":ark-android")`, its `projectDir` set to `../../kotlin/ark-android`),
+under this build's plugin versions.
 
 - The Kotlin build sets `jvmToolchain(21)`, so the libraries arrive as Java
   21 class files; AGP 8.7's D8 accepts them, and the app is built for 21 too.
@@ -110,80 +128,110 @@ keeps its own settings, plugin versions and toolchain.
 
 ## What it does
 
-`Model` holds one `dev.arkdb.client.Peer` on a thread of its own: opened
-over a `DirStorage` in a directory per server (or alone), not per person —
-the log is the server's and every person reads it — linked to the server's
-`/sync`, pumped every fifty milliseconds. Everything that touches the peer
-runs on that thread; the screens read `StateFlow`s.
+`MainActivity` is one line of harken and the rest is the shared onboarding:
 
-**The lists are spliced, not re-read.** `library`, `playlists` and the open
-`playlist` are maintained views (`Peer.view`, `ClientView`): hydrated once,
-then handed every `Changes` the peer reports — a rebase's included — and the
-patches each answers with are spliced into the list the screen holds
-(`ClientView.splice`). Only a `Reset` reads one again: the optimistic store
-replaced (opening over a snapshot), another signer, or a refusal of the
-view's middleware appearing or clearing. Changing the selected playlist
-re-opens the two views read against it, which is a hydrate.
+```kotlin
+ArkApp(identity, listOf(Permission.Notifications(why = WHY_NOTIFY))) { session -> HarkenApp(session) }
+```
 
-Four screens under one `Scaffold`, with a status line in the top bar
-(`signed out`, `linked`, `alone`, `turned away: …`, the link in a word —
-`connecting`, `waiting`, `joining` — and how many changes are not synced):
+**There is no alone mode.** harken is never used without a server: the
+onboarding (`kotlin/ark-android`, `kotlin/README.md`) asks for the server's
+address and checks its `/healthz` is an Ark server serving `harken.ark`,
+signs in on the server's own page in a Custom Tab
+(`/auth/login?redirect=harken://auth`; the manifest takes `harken://auth`
+on a `singleTask` activity, and harken's server allows `harken://`),
+exchanges the code, asks for notifications once, and remembers the server
+and the login. Only then is there a session: the Kotlin `Peer` over a
+replica directory per server, signed in, linked to `/sync`, pumped every
+fifty milliseconds on a thread of its own. A server's `Denied` and
+*Sign out* both come back to *Sign in* with the server and the replica
+kept, so whatever was pending goes when the same person signs in again.
 
-- **It works with nobody signed in.** The first launch opens the peer signed
-  out: everything is authored as nobody, applied, written down, and nothing
-  is dialled. Signing in makes all of it that person's and syncs it; the
-  login is kept and the app opens as them on every launch. Signing out
-  stops the link and forgets the token; whatever that person left pending
-  stays theirs and goes when they sign in again.
-- **Library** — everything, in the order it was added (`library`, read
-  against the selected playlist so each row knows whether it is on it). The
-  row's button puts it on the selected playlist or takes it off; its menu
-  lists every playlist, ticked by `playlists_of`, each a toggle. Songs arrive
-  from the server's scanner — `add_song` is the library's role's, not a
-  phone's — so alone or signed out the library is empty, and the screen says
-  why.
-- **Playlists** — the person's playlists in the order they were made; a `+`
-  names a new one, checked as it is typed by `create_playlist`'s own input
-  checks (the form validator, `Peer.check`); a name the person already has
-  is kept and numbered by the log, "Favorites (1)". Tapping one selects it
-  and opens it. **There is no rename**: harken's module has no mutation for
-  one, and the app invents nothing the module does not say.
-- **Playlist** — its contents in playlist order (`playlist`, which answers
-  with the library's own rows). Swipe left, or the trash button, removes one
-  (`remove_from_playlist`).
-- **Favorites.** Adding with no playlist at all makes "Favorites" first
-  (`create_playlist`, then `add_to_playlist` on it).
-- **Where every change stands.** Each change this phone makes is kept with
-  its entry id, and `Peer.standing` says where it is: under a playlist or an
-  item, *not synced yet* while pending, nothing once confirmed, and *not
-  saved:* followed by the server's own sentence when it was rejected. The
-  newest rejection is also a snackbar, and Settings lists every change.
-- **Settings** — the account; the server (`http://host:port`, the socket
-  `/sync` beside it; `10.0.2.2` reaches the emulator's host) and **work
-  alone**, which opens the peer as its own authority over a local history;
-  applying closes the peer, writes it down, and reopens it. A status block
-  prints the cursor, what is not synced, what the server holds back (a
-  module older than this phone's), what diverged, the link in a word,
-  whether it is linked, how many connections it has had, whether the server
-  runs a newer module, the last close and a denial; a button asks the
-  authority to verify, and its answer is said when it arrives.
-
-**Sign-in is dev auth only.** The app signs in the way `harken-peer` does
-under a dev server: a name, `/auth/login` answered with a code and no page,
-`/auth/exchange` for the login (`Auth.login` in the client). A server with a
-real OpenID Connect provider answers with a page for a browser, and the app
-says so instead of opening one: the client's `Auth.login` takes the
-desktop's loopback flow (an `open` callback and a port the code comes back
-to), but a phone wants a custom tab and a redirect it owns, which nothing
-here has built or tried.
-
-Every mutation and every query goes through the peer by name and is
-interpreted:
+**The lists are spliced, not re-read.** `Library` holds the library, the
+playlists, the albums, the artists and the songs' details as maintained
+views (`Peer.view`, `ClientView`): hydrated once on the session's thread,
+then handed every `Changes` the peer reports — a rebase's included — and
+the patches each answers with are spliced into the list the screens hold
+(`ClientView.splice`). Only a `Reset` reads one again. A page — an album,
+an artist, a playlist — is a view too, held while a screen shows it and
+dropped when the last one leaves. Search is one read per needle of the
+module's `search`, over its text index. Every write is a mutation of the
+module by name:
 
 ```kotlin
 peer.mutate("add_to_playlist", mapOf("playlist_id" to Value.id(pid), "media_id" to Value.id(mid)))
-peer.view("playlist", mapOf("playlist_id" to Value.id(pid)))
+peer.view("album", mapOf("playlist_id" to Value.id(Id.nil), "name" to Value.text("Water Music")))
 ```
 
-What the phone records is byte-identical to what any other peer records for
-the same intent, which is what the suite and the fleet hold the client to.
+and what the phone records is byte-identical to what any other peer
+records for the same intent.
+
+The screens, each a function of plain values (so the screenshots draw
+exactly what the app draws):
+
+- **Home** — what was played last, from where, and a button that plays
+  that list again from that track (remembered on the phone, `Device`);
+  recently added; your playlists; the albums — shelves of covers, each
+  opening its page. Settings is the one thing in its bar.
+- **Search** — one field, answered as you type: songs from `search`,
+  albums and artists from the held lists whose names hold the needle;
+  the last few searches when nothing is typed, on the phone only.
+- **Library** — Playlists, Albums, Artists, Songs; a new playlist from
+  the `+`, checked as it is typed by `create_playlist`'s own validator,
+  whose sentence is shown under the field.
+- **An album** in the order the work goes, in sections where it has
+  parts and with each track's number on the release; **an artist** with
+  their albums and then their songs; **a playlist** in the order it was
+  made. Each opens with its cover, what it is, the numbers true of the
+  whole of it, and Play and Shuffle.
+- **A song's menu** — play next, add to a playlist (every playlist,
+  ticked by `playlists_of`, a tap putting it on or taking it off), go to
+  the album or the artist, and on a playlist, remove from it.
+- **The player** — Media3's ExoPlayer in `PlaybackService`, a
+  `MediaSessionService`, streaming `/media/<file>` from the session's
+  server (`Media.url`, the desktop's `media_url`: each segment
+  percent-encoded, a whole URL passed through); the notification, the lock
+  screen and Bluetooth are the media session's. The screens hold a
+  `MediaController` (`Playback`): the queue is the list a track was started
+  from, snapshotted; shuffle; repeat off, all, one. A mini player above the
+  tab bar opens into the full player — cover, title, artist, a scrubber
+  with the time gone and the time left, previous / play-pause / next,
+  shuffle, repeat — and the queue is a sheet over it.
+- **Settings** — the account, the server and whether it is reached, sign
+  out, about. **Diagnostics** — every number the old settings screen had,
+  each change this phone made with where it stands, and verify — are
+  behind the version, tapped seven times, and listed under About once
+  found.
+
+**Covers** are fetched from the server once and cached twice — the encoded
+original on disk under the cache directory, decoded bitmaps in a
+byte-bounded memory cache — and decoded already shrunk (`inSampleSize` from
+the image's own bounds), with no image library. Under every cover, and in
+place of a missing one, is the desktop's derived square: FNV-1a over UTF-16
+picks one of the same six gradients, so an album is one square on every
+screen.
+
+**The look** is the desktop's: `Theme.kt` is the only file with a literal
+colour — AppKit's neutral greys and the two golds as Material 3 light and
+dark schemes, one type scale, one set of spacings — and the glyphs are the
+desktop's Lucide paths (`Glyphs.kt`). An empty library says where music
+comes from; a server that cannot be reached is one sentence over every
+tab, and what is on the phone keeps playing.
+
+## The screens as images
+
+    nix build .#harken-android-screens     # result/index.html
+
+Paparazzi (1.3.5) renders every screen and state on the JVM through
+layoutlib — the onboarding's three steps and their errors, Home (full,
+offline, empty, loading), Search (recent, nothing yet, typing, results,
+none), each Library tab, an album, an artist, a playlist (and an empty
+and a missing one), the mini player, the full player, the queue, a song's
+menu, adding to a playlist, naming one (and a name refused), Settings and
+diagnostics — in light and dark, at a Pixel 5's 1080×2340, from
+`app/src/test/.../Demo.kt`: rows taken from harken's demo seed
+(`harken/iced/src/seed.rs`). `index.html` lays them out light beside dark.
+A bottom sheet and a dialog are windows of their own, which layoutlib does
+not draw, so the screenshots frame the same composables over a scrim
+instead. Nothing behind them talks to a server, so every cover is the
+derived square.

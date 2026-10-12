@@ -169,7 +169,10 @@ fun HarkenApp(session: ArkSession) {
 
     val act =
         object : Do {
-            override fun open(page: Page) = nav.navigate(page.route)
+            override fun open(page: Page) {
+                // Every song is a tab of the Library, not a page of its own.
+                if (page is Page.Songs) library(LibraryTab.Songs) else nav.navigate(page.route)
+            }
 
             override fun play(queue: List<Track>, at: Int, from: Page?) {
                 startedFrom = from

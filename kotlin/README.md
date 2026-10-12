@@ -11,8 +11,10 @@ file, and to every trace of `packages.trace-corpus`, by `checks.kotlin`
 the peer around it, a port of `rust/ark-client`: the storage a replica
 survives a restart in, written byte for byte as the Rust writes it, the
 peer that writes it and goes alone and back, its link to a server and its
-sign-in, and maintained views. `harken-peer` is harken's headless peer on
-it, speaking `harken-peer`'s lines, which the fleet runs beside Rust peers;
+sign-in, and maintained views. `ark-android` (package `dev.arkdb.android`)
+is the onboarding every Ark app on Android shares, and the session it hands
+the app. `harken-peer` is harken's headless peer on it, speaking
+`harken-peer`'s lines, which the fleet runs beside Rust peers;
 `harken/android` is the app on it.
 
 A phone's runtime is a **client**: it interprets modules and does not
@@ -88,6 +90,78 @@ directory (`FileChannel.open(dir, READ).force(true)`), as the reference
 does; a platform that refuses to open a directory degrades to the rename's
 durability being the file system's, and says so (`syncsDirectory`).
 
+## `ark-android`
+
+The onboarding every Ark app on Android shares (`docs/plan-android.md`),
+and what it hands the app once it is done:
+
+```kotlin
+ArkApp(
+    identity = AppIdentity(name = "Harken", scheme = "harken", mark = painterResource(R.drawable.mark),
+        light = …, dark = …, module = { assets.open("harken.ark").use { it.readBytes() } }),
+    permissions = listOf(Permission.Notifications(why = "…")),
+) { session -> HarkenApp(session) }
+```
+
+An app names only what is its own — its name, the scheme its sign-in comes
+back on, its mark, its two colour schemes and its type, its module — and
+the permissions it wants, a sentence each. Three steps, each remembered:
+
+- **The server.** One field: `host`, `host:port` or a URL (`Address`).
+  A URL is taken at its word; otherwise `https`, and `http` too only for
+  loopback, the private ranges, link-local, the carrier-grade range a
+  tailnet uses, and a name with no dot or under `.local`, `.lan`,
+  `.home.arpa`, `.internal`. `/healthz` is asked for JSON (`Probe`) and the
+  answer decides (`Health`): on only when the module it runs — or one it
+  ran, the server being newer — is this app's, by `Domain.hash`. Every
+  failure is a sentence naming which of those it was.
+- **Signing in**, through the server's own page in a Custom Tab
+  (`androidx.browser`): `/auth/login?redirect=<scheme>://auth`. The server is
+  the only OpenID Connect client (`ark-auth`), so the phone holds no secret
+  and knows no provider, and a dev server's own form works the same way.
+  `<scheme>://auth?code=…` comes back to the activity — **the intent filter
+  is the app's manifest's**, on the activity running `ArkApp`, with
+  `launchMode="singleTask"` (`ArkApp.kt` has the snippet) — and the code is
+  exchanged at `/auth/exchange` (`Auth.exchange`). A code arriving as the
+  launch intent, the app having been killed behind the tab, is exchanged
+  the same way.
+- **Permissions**: one screen per declared permission with the app's
+  reason, *Allow* and *Not now*, asked once; one the platform lacks
+  (notifications below Android 13) is skipped. `Permission` is open, so an
+  app with another need declares its own.
+
+The server, the login and which permissions were asked are kept in the
+app's private preferences (`Remembered` over a `Shelf`); a launch with a
+server and a login goes straight in. A `Denied` from the server, and
+*Sign out* (`ArkSession.signOut`), come back to *Sign in* with the server
+kept; the session is closed and written down, and its replica — one
+directory per server — and its pending intents stay, so signing in again as
+the same person pushes them.
+
+`ArkSession` is the Kotlin `Peer` over that replica, signed in, linked to
+the server's `/sync`, pumped every fifty milliseconds on a thread of its
+own. A screen may read `status` (linked, the link in a word, how much is
+not synced); everything else touches the peer on its thread — `post`,
+`run`, and `onPump`, called after every pump, which is where an app splices
+its views.
+
+The steps are a pure machine (`Onboarding`: a step and an event in, a step
+and the effects to run out), run by `ArkHost`, a `ViewModel`; the screens
+(`ServerStep`, `SignInStep`, `PermissionStep`) draw a step and nothing
+else, so an app's screenshots render them. Everything under the screens is
+plain Kotlin, and `OnboardingTests` and `ServerTests` hold it on the JVM
+(`testDebugUnitTest`): every transition and its effects, including a
+denial while running and signing out; the address normalisation; the
+health decision; the probe's order and sentences over a request that is a
+lambda; the remembered store.
+
+It is an Android library, so it is **not a project of this workspace**,
+which is the JVM's and builds without an SDK: an app's build includes it
+by path (`include(":ark-android")`, its `projectDir` here) and supplies the
+plugin versions, as `harken/android` does. Its sources are held to ktfmt's
+kotlinlang style by `checks.kotlin` with the rest; its tests run in the
+app's build (`nix build .#harken-apk` runs them before assembling).
+
 ## `harken-peer`
 
 `harken-peer-kt` (`dev.harken.peer`, `nix build .#harken-peer-kt`) is
@@ -162,10 +236,11 @@ source compiles for the app (`harken/android`).
 ## What is not here
 
 A server is not here and will not be: no `Server`, no adopting a log, no
-compaction, no union's server half. Sign-in through a real provider's page
-is the desktop's loopback flow only; the app signs in by name (dev auth).
-No phone has run any of this: `nix build .#harken-apk` compiles the client
-for Android inside the app, and everything above ran on the JVM.
+compaction, no union's server half. `Auth.login` is the desktop's loopback
+flow; a phone signs in through `ark-android`'s Custom Tab and
+`Auth.exchange`. No phone has run any of this: `nix build .#harken-apk`
+compiles the client and the onboarding for Android inside the app, and
+everything above ran on the JVM.
 
 ## Where it came from
 
