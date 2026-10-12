@@ -733,7 +733,28 @@ impl PeerProc {
         if self.child.is_some() {
             let _ = self.ask("quit", vec![]);
             if let Some(mut c) = self.child.take() {
-                let _ = c.wait();
+                // A peer that answers `quit` and then does not exit is a bug
+                // in that peer (`harken-peer-swift` once sat in `readLine`
+                // holding stdin's lock while `exit` flushed), and waiting on
+                // it without a bound hangs the whole test rather than failing
+                // it. Five seconds, then the test fails naming the peer.
+                let deadline = Instant::now() + Duration::from_secs(5);
+                loop {
+                    match c.try_wait() {
+                        Ok(Some(_)) => break,
+                        Ok(None) if Instant::now() < deadline => {
+                            std::thread::sleep(Duration::from_millis(20))
+                        }
+                        _ => {
+                            let _ = c.kill();
+                            let _ = c.wait();
+                            panic!(
+                                "{}: answered quit and did not exit within five seconds",
+                                self.name
+                            );
+                        }
+                    }
+                }
             }
             self.stdin = None;
             self.lines = None;
