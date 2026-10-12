@@ -1,141 +1,195 @@
-// The library: everything, in the order it was added, read against the
-// selected playlist so each row knows whether it is on it. The row's button
-// puts it on that playlist or takes it off; its menu does the same for any
-// playlist, ticked by `playlists_of`. With no playlist at all, adding makes
-// "Favorites" first. Songs arrive from the server's scanner — `add_song` is
-// the library's role's, not a phone's. The list is a maintained view's,
-// spliced as the peer moves.
+// Library: everything, four ways — the person's playlists, the albums, the
+// artists, and every song in the order it arrived — each opening the page
+// it stands for. The playlists tab is where a new one is made; the
+// module's own checks decide whether a name will do, and say why not.
 package dev.harken.android
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
-fun clock(ms: Long): String {
-    val s = ms / 1000
-    return "%d:%02d".format(s / 60, s % 60)
+enum class LibraryTab(val title: String) {
+    Playlists("Playlists"),
+    Albums("Albums"),
+    Artists("Artists"),
+    Songs("Songs"),
 }
 
-@Composable
-fun LibraryScreen(model: Model) {
-    val tracks by model.library.collectAsStateWithLifecycle()
-    val playlists by model.playlists.collectAsStateWithLifecycle()
-    val selected by model.selected.collectAsStateWithLifecycle()
-    val standings by model.standings.collectAsStateWithLifecycle()
-    val target = playlists.firstOrNull { it.id == selected }
+/** What the Library draws. */
+data class LibraryData(
+    val loaded: Boolean,
+    val playlists: List<Playlist>,
+    val albums: List<Album>,
+    val artists: List<Artist>,
+    val tracks: List<Track>,
+    val offline: String?,
+)
 
+@Composable
+fun LibraryScreen(tab: LibraryTab, onTab: (LibraryTab) -> Unit, data: LibraryData, albumOf: (Track) -> Album?, playing: String?, act: Do) {
     Column(Modifier.fillMaxSize()) {
-        Text(
-            text = if (target == null) "No playlist yet — adding makes \"${Phone.DEFAULT_PLAYLIST}\"." else "Adding to: ${target.name}",
-            style = MaterialTheme.typography.labelLarge,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-        )
-        if (tracks.isEmpty()) {
-            Box(Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
-                Text("The library arrives from the server's scanner.", style = MaterialTheme.typography.bodyMedium)
+        TabTitle("Library") { IconButton(onClick = act::newPlaylist) { Glyph(Glyphs.Plus, "New playlist") } }
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = Space.page),
+            horizontalArrangement = Arrangement.spacedBy(Space.s),
+        ) {
+            for (t in LibraryTab.entries) {
+                FilterChip(
+                    selected = t == tab,
+                    onClick = { onTab(t) },
+                    label = { Text(t.title) },
+                    colors =
+                        FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.primary,
+                            selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                        ),
+                )
             }
-        } else {
-            LazyColumn(Modifier.fillMaxSize()) {
-                items(tracks, key = { it.id.hex }) { t ->
-                    val caption = target?.let { p -> model.captionFor(t, p.id, standings) }
-                    TrackRow(
-                        t,
-                        caption = caption,
-                        onToggle = {
-                            if (target != null && t.playlistPos != null) model.removeFromPlaylist(target.id, t) else model.addToPlaylist(t)
-                        },
-                        playlists = playlists,
-                        onOf = { model.playlistsOf(t) },
-                        onPick = { p -> model.toggle(t, p.id) },
-                    )
-                    HorizontalDivider()
-                }
-            }
+        }
+        if (data.offline != null) Offline(data.offline)
+        if (!data.loaded) {
+            Loading()
+            return@Column
+        }
+        when (tab) {
+            LibraryTab.Playlists -> Playlists(data.playlists, act)
+            LibraryTab.Albums -> Albums(data.albums, act)
+            LibraryTab.Artists -> Artists(data.artists, act)
+            LibraryTab.Songs -> Songs(data.tracks, albumOf, playing, act)
         }
     }
 }
 
 @Composable
-fun TrackRow(
-    t: Track,
-    caption: String?,
-    onToggle: () -> Unit,
-    playlists: List<Playlist>,
-    onOf: () -> Set<dev.arkdb.Id>,
-    onPick: (Playlist) -> Unit,
-) {
-    var menu by remember { mutableStateOf(false) }
-    Row(
-        Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(t.title, style = MaterialTheme.typography.bodyLarge)
-            Text(t.creator, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (caption != null) Caption(caption)
-        }
-        Text(clock(t.durationMs), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 8.dp))
-        IconButton(onClick = onToggle) {
-            if (t.playlistPos != null) {
-                Icon(Icons.Default.Check, contentDescription = "Take off the playlist", tint = MaterialTheme.colorScheme.primary)
-            } else {
-                Icon(Icons.Default.Add, contentDescription = "Add to playlist")
-            }
-        }
-        Box {
-            IconButton(onClick = { menu = true }, enabled = playlists.isNotEmpty()) {
-                Icon(Icons.Default.MoreVert, contentDescription = "Playlists")
-            }
-            if (menu) {
-                val on = onOf()
-                DropdownMenu(expanded = true, onDismissRequest = { menu = false }) {
-                    for (p in playlists) {
-                        DropdownMenuItem(
-                            text = { Text(p.name) },
-                            leadingIcon = { if (p.id in on) Icon(Icons.Default.Check, contentDescription = "On it") },
-                            onClick = {
-                                menu = false
-                                onPick(p)
-                            },
-                        )
+private fun Playlists(playlists: List<Playlist>, act: Do) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = Space.s)) {
+        item {
+            ListRow(onClick = act::newPlaylist, title = "New playlist", under = null) {
+                Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = RoundedCornerShape(Space.corner), modifier = Modifier.size(56.dp)) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Glyphs.Plus, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                     }
                 }
             }
         }
+        if (playlists.isEmpty()) {
+            item {
+                Empty(Glyphs.Playlist, "No playlists yet", "Make one, then put songs on it from any song's menu.")
+            }
+        }
+        items(playlists, key = { it.id.hex }) { p ->
+            ListRow(onClick = { act.open(Page.ForPlaylist(p.id)) }, title = p.name, under = "Playlist") {
+                Cover(p.name, "", 56.dp, Modifier.size(56.dp))
+            }
+        }
     }
 }
 
-/** A standing, under the item it is about: grey while pending, the error colour with the reason when not saved. */
 @Composable
-fun Caption(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.labelSmall,
-        color = if (text.startsWith("not saved")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-    )
+private fun Albums(albums: List<Album>, act: Do) {
+    if (albums.isEmpty()) {
+        Empty(Glyphs.Album, "No albums yet", "An album appears here when the server finds a song that names one.")
+        return
+    }
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(150.dp),
+        contentPadding = PaddingValues(Space.page),
+        horizontalArrangement = Arrangement.spacedBy(Space.l),
+        verticalArrangement = Arrangement.spacedBy(Space.xl),
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        items(albums, key = { it.name }) { a ->
+            Column(Modifier.clickable { act.open(Page.ForAlbum(a.name)) }) {
+                Cover(a.name, a.art, 180.dp, Modifier.fillMaxWidth().aspectRatio(1f))
+                Spacer(Modifier.height(Space.s))
+                Text(a.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(a.creator, style = quiet(MaterialTheme.typography.bodySmall), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        item(span = { GridItemSpan(maxLineSpan) }) { Spacer(Modifier.height(Space.s)) }
+    }
+}
+
+@Composable
+private fun Artists(artists: List<Artist>, act: Do) {
+    if (artists.isEmpty()) {
+        Empty(Glyphs.Artist, "No artists yet", "Whoever made what the server finds appears here.")
+        return
+    }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = Space.s)) {
+        items(artists, key = { it.name }) { a ->
+            ListRow(onClick = { act.open(Page.ForArtist(a.name)) }, title = a.name, under = Media.count(a.tracks.toInt(), "song")) {
+                Cover(a.name, a.art, 56.dp, Modifier.size(56.dp), round = true)
+            }
+        }
+    }
+}
+
+@Composable
+private fun Songs(tracks: List<Track>, albumOf: (Track) -> Album?, playing: String?, act: Do) {
+    if (tracks.isEmpty()) {
+        Empty(Glyphs.Note, "No songs yet", "Harken plays what your server finds. Put music in its media folder, under music/, and it appears here.")
+        return
+    }
+    LazyColumn(Modifier.fillMaxSize()) {
+        items(tracks, key = { it.id.hex }) { t ->
+            val album = albumOf(t)
+            TrackRow(
+                t,
+                under = listOfNotNull(t.creator, album?.name).joinToString(" · "),
+                playing = t.id.hex == playing,
+                onClick = { act.play(tracks, tracks.indexOf(t), Page.Songs) },
+                onMore = { act.more(t, Page.Songs) },
+            ) { Cover(album?.name ?: t.title, album?.art ?: "", Space.thumb, Modifier.size(Space.thumb), corner = 4.dp) }
+        }
+    }
+}
+
+/** A row that opens something: its picture, its name, a line under it, and a chevron. */
+@Composable
+fun ListRow(onClick: () -> Unit, title: String, under: String?, picture: @Composable () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = Space.page, vertical = Space.s),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        picture()
+        Spacer(Modifier.width(Space.l))
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (under != null) Text(under, style = quiet(MaterialTheme.typography.bodyMedium), maxLines = 1)
+        }
+        Icon(Glyphs.Chevron, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+    }
 }

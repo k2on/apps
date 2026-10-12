@@ -25,6 +25,7 @@ data class Track(
     val durationMs: Long,
     val file: String,
     val playlistPos: Long?,
+    val addedMs: Long = 0,
 ) {
     companion object {
         fun of(v: Value): Track =
@@ -36,6 +37,50 @@ data class Track(
                 durationMs = v.field("duration_ms").asInt(),
                 file = v.field("file").asText(),
                 playlistPos = v.field("playlist_pos").let { if (it.isNull()) null else it.asInt() },
+                addedMs = v.field("added_ms").asInt(),
+            )
+    }
+}
+
+/** A row of `albums`: every album some song is on, with whoever made its first track. */
+data class Album(val name: String, val creator: String, val art: String, val tracks: Long) {
+    companion object {
+        fun of(v: Value): Album =
+            Album(
+                name = v.field("name").asText(),
+                creator = v.field("creator").asText(),
+                art = v.field("art").asText(),
+                tracks = v.field("tracks").asInt(),
+            )
+    }
+}
+
+/** A row of `artists`: everyone who made something in the library. */
+data class Artist(val name: String, val art: String, val tracks: Long) {
+    companion object {
+        fun of(v: Value): Artist =
+            Artist(name = v.field("name").asText(), art = v.field("art").asText(), tracks = v.field("tracks").asInt())
+    }
+}
+
+/** A row of `track_details`: what only a song has — its album, its part of a work, its number on the release. */
+data class TrackDetail(
+    val mediaId: Id,
+    val album: String,
+    val part: String,
+    val track: Long,
+    val performer: String,
+    val licence: String,
+) {
+    companion object {
+        fun of(v: Value): TrackDetail =
+            TrackDetail(
+                mediaId = v.field("media_id").asId(),
+                album = v.field("album").asText(),
+                part = v.field("part").asText(),
+                track = v.field("track").asInt(),
+                performer = v.field("performer").asText(),
+                licence = v.field("licence").asText(),
             )
     }
 }
@@ -73,6 +118,20 @@ object Phone {
 
     /** The `playlist` view's arguments. */
     fun playlistArgs(id: Id): Map<String, Value> = mapOf("playlist_id" to Value.id(id))
+
+    /** The `album` and `artist` views' arguments: by name, read against no playlist. */
+    fun namedArgs(name: String): Map<String, Value> =
+        mapOf("playlist_id" to Value.id(NO_PLAYLIST), "name" to Value.text(name))
+
+    /** The library's rows whose title or creator holds `needle` (the module's `search`, over its text index). */
+    fun search(p: Peer, needle: String): List<Track> =
+        try {
+            p.query("search", mapOf("playlist_id" to Value.id(NO_PLAYLIST), "needle" to Value.text(needle)))
+                .asList()
+                .map(Track::of)
+        } catch (e: PeerError) {
+            emptyList()
+        }
 
     /** Which of the caller's playlists a track is on; nothing when it is refused. */
     fun playlistsOf(p: Peer, media: Id): List<Playlist> =
