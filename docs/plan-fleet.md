@@ -242,7 +242,8 @@ its own, `harken-peer-kt` (`kotlin/harken-peer`, `nix build
 .#harken-peer-kt`): §1's flags, commands and answers line for line, the
 same directory records, every function of the module interpreted rather
 than native. The fleet starts one from another binary —
-`PeerProc::kotlin(bin)` and `Fleet::kotlin_peer`, the binary
+`PeerProc::foreign(bin)` and `Fleet::foreign_peer` (`PeerProc::kotlin`
+and `Fleet::kotlin_peer` until round 7), the binary
 `FLEET_KOTLIN_PEER` — and `harken/server/tests/fleet_kotlin.rs`, its own
 target, runs six scenarios with mixed peers, each ending on §2's
 invariants (or, across revisions, on `converged_across`):
@@ -278,6 +279,47 @@ release, one scenario at a time; all seven tests 14.7 s):
 | a Kotlin peer held by an old server, upgraded under, to landed | 0.47–0.61 s |
 | an old-module Kotlin peer beside new ones, to converged | 0.43–0.54 s |
 | a partial Kotlin peer beside partial Rust ones, to converged | 0.18–0.19 s |
+
+### Swift peers, the same six (`docs/plan-phones.md` round 7)
+
+The Swift client has a headless peer too, `harken-peer-swift`
+(`swift/Sources/HarkenPeer`, `nix build .#harken-peer-swift`): §1's flags,
+commands and answers again, the same directory records, every function
+interpreted. The six scenarios moved into one body each,
+`tests/support/mixed.rs`, run over a `Foreign` peer — a runtime's name, tag
+and binary — and `PeerProc::kotlin` became `PeerProc::foreign`, one
+generic hook both runtimes use, because the only thing the fleet ever did
+differently for the Kotlin peer was tell it `--roles`, which is this
+build's flag whatever runtime speaks it. `tests/fleet_kotlin.rs` and
+`tests/fleet_swift.rs` are each six one-line tests over [`KOTLIN`] or
+[`SWIFT`] (`FLEET_KOTLIN_PEER`, `FLEET_SWIFT_PEER`), with that runtime's
+falsifications in the doc comments; a copy of the six per runtime would
+have been two sets of scenarios that could drift, and the claim is that
+both runtimes pass *the same* six.
+
+`checks.fleet-swift` builds `harken-peer-swift`, sets `FLEET_SWIFT_PEER`
+and the pinned revisions, and runs S1–S6 one at a time. Measured in the
+nix sandbox (`nix build .#checks.x86_64-linux.fleet-swift`, release; all
+seven tests 8.3 s):
+
+| what | took |
+|---|---|
+| a Swift peer started and signed in | 62 ms |
+| its first sync of 41 entries | 0.24 s |
+| converge after its black hole of ten | 0.22 s |
+| converge after a `kill -9` of each kind | 0.23 s |
+| 41 local intents of a Swift peer join (restart to converged) | 0.33 s |
+| a server restart under a Swift peer, to converged | 0.30 s |
+| a lost log under a Swift peer, restart to converged | 0.30 s |
+| a Swift peer held by an old server, upgraded under, to landed | 0.40–0.42 s |
+| an old-module Swift peer beside new ones, to converged | 0.37–0.39 s |
+| a partial Swift peer beside partial Rust ones, to converged | 0.15 s |
+
+It found one bug, in `harken-peer-swift` rather than the client: S2's
+`quit` was answered and the process never exited — its stdin reader was
+blocked in `readLine`, which holds stdin's `FILE` lock, and `exit` flushes
+every stream under its lock. The reader is `read(2)` on the descriptor now.
+No disagreement between the runtimes was found.
 
 ## Measured
 

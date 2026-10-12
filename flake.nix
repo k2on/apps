@@ -520,6 +520,22 @@
               '';
               installPhase = "touch $out";
             };
+            # docs/plan-phones.md round 7 The same six scenarios with the Swift
+            # client's harken-peer-swift (harken/server/tests/fleet_swift.rs
+            # over tests/support/mixed.rs, which fleet_kotlin.rs runs too), the
+            # pinned revisions set as for fleet-kotlin.
+            fleet-swift = crate {
+              pname = "harken-fleet-swift";
+              flags = [ "-p" "harken-server" "--test" "fleet_swift" ];
+              doCheck = true;
+              cargoBuildFlags = [ "-p" "harken-server" ];
+              checkFlags = [ "--nocapture" ];
+              dontUseCargoParallelTests = true;
+              preCheck = oldEnv + ''
+                export FLEET_SWIFT_PEER=${harken-peer-swift}/bin/harken-peer-swift
+              '';
+              installPhase = "touch $out";
+            };
             # docs/plan-phones.md S3 The Kotlin runtime held to spec/vectors
             # and packages.trace-corpus: every client vector and every trace,
             # by its conformance runner, which names what it ran and skipped.

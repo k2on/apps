@@ -374,9 +374,10 @@ pub struct PeerProc {
     /// default, as [`FLEET_ROLES`] grants it at the server; an older build
     /// knows no such flag and is told nothing.
     pub roles: Vec<String>,
-    /// The binary is the Kotlin client's `harken-peer-kt`
-    /// ([`PeerProc::kotlin`]), which speaks this build's flags and lines.
-    pub kotlin: bool,
+    /// The binary is another runtime's headless peer — the Kotlin client's
+    /// `harken-peer-kt`, the Swift client's `harken-peer-swift`
+    /// ([`PeerProc::foreign`]) — which speaks this build's flags and lines.
+    pub foreign: bool,
 }
 
 /// What the fleet's server grants (`HARKEN_ROLES`): its people hold the
@@ -448,7 +449,7 @@ impl PeerProc {
         cmd.args(["--dir", self.dir.to_str().unwrap()]);
         cmd.args(&self.args);
         if !self.roles.is_empty()
-            && (self.kotlin || self.bin == Path::new(env!("CARGO_BIN_EXE_harken-peer")))
+            && (self.foreign || self.bin == Path::new(env!("CARGO_BIN_EXE_harken-peer")))
         {
             cmd.args(["--roles", &self.roles.join(",")]);
         }
@@ -755,16 +756,17 @@ impl PeerProc {
     pub fn upgrade(&mut self) {
         self.quit();
         self.bin = PathBuf::from(env!("CARGO_BIN_EXE_harken-peer"));
-        self.kotlin = false;
+        self.foreign = false;
         self.start();
     }
 
-    /// Run the Kotlin client's `harken-peer-kt` from the next start on
-    /// (`FLEET_KOTLIN_PEER`, [`kotlin_peer`]): the same flags, the same
-    /// lines, the same directory records, another runtime.
-    pub fn kotlin(&mut self, bin: &Path) {
+    /// Run another runtime's headless peer from the next start on
+    /// (`harken-peer-kt`, `harken-peer-swift`: [`Runtime::or_skip`]): the
+    /// same flags, the same lines, the same directory records, another
+    /// runtime.
+    pub fn foreign(&mut self, bin: &Path) {
         self.bin = bin.to_path_buf();
-        self.kotlin = true;
+        self.foreign = true;
     }
 }
 
@@ -977,15 +979,15 @@ impl Fleet {
             bin: PathBuf::from(env!("CARGO_BIN_EXE_harken-peer")),
             args: vec![],
             roles: vec!["library".into()],
-            kotlin: false,
+            foreign: false,
         }
     }
 
-    /// [`Fleet::peer`] running the Kotlin client (`bin`, [`kotlin_peer`]),
-    /// started.
-    pub fn kotlin_peer(&self, bin: &Path, name: &str, user: Option<&str>) -> PeerProc {
+    /// [`Fleet::peer`] running another runtime's headless peer (`bin`,
+    /// [`Runtime::or_skip`]), started.
+    pub fn foreign_peer(&self, bin: &Path, name: &str, user: Option<&str>) -> PeerProc {
         let mut p = self.peer_stopped(name, user);
-        p.kotlin(bin);
+        p.foreign(bin);
         p.start();
         p
     }
@@ -1261,28 +1263,81 @@ pub fn set(ids: &[Id]) -> BTreeSet<Id> {
     ids.iter().copied().collect()
 }
 
-// -- Kotlin peers (`docs/plan-phones.md` round 4) ---------------------------------------
+// -- other runtimes' peers (`docs/plan-phones.md` rounds 4 and 7) ----------------------
 
-/// The Kotlin client's headless peer, `harken-peer-kt`, as
-/// `checks.fleet-kotlin` hands it to the fleet: `FLEET_KOTLIN_PEER`, the
-/// launcher's path. `nix build .#harken-peer-kt` makes one by hand.
-pub fn kotlin_peer() -> Option<PathBuf> {
-    std::env::var("FLEET_KOTLIN_PEER")
-        .ok()
-        .filter(|p| !p.is_empty())
-        .map(PathBuf::from)
+/// A runtime whose headless peer the fleet can run beside Rust ones
+/// (`tests/support/mixed.rs`): what it is called, the tag its scenarios are
+/// named by, and the variable its check hands the binary over in.
+#[derive(Clone, Copy, Debug)]
+pub struct Runtime {
+    pub name: &'static str,
+    pub tag: &'static str,
+    pub var: &'static str,
+    pub check: &'static str,
+    pub package: &'static str,
 }
 
-/// The Kotlin peer, or a line saying the scenario is skipped and why.
-pub fn kotlin_or_skip(scenario: &str) -> Option<PathBuf> {
-    let k = kotlin_peer();
-    if k.is_none() {
-        println!(
-            "fleet: {scenario}: skipped — FLEET_KOTLIN_PEER unset (`nix flake check` sets it in \
-             checks.fleet-kotlin; `nix build .#harken-peer-kt` makes one)"
-        );
+/// The Kotlin client's `harken-peer-kt` (round 4).
+pub const KOTLIN: Runtime = Runtime {
+    name: "Kotlin",
+    tag: "k",
+    var: "FLEET_KOTLIN_PEER",
+    check: "fleet-kotlin",
+    package: "harken-peer-kt",
+};
+
+/// The Swift client's `harken-peer-swift` (round 7).
+pub const SWIFT: Runtime = Runtime {
+    name: "Swift",
+    tag: "s",
+    var: "FLEET_SWIFT_PEER",
+    check: "fleet-swift",
+    package: "harken-peer-swift",
+};
+
+/// A runtime, with the binary its variable names.
+#[derive(Clone, Debug)]
+pub struct Foreign {
+    pub name: &'static str,
+    pub tag: &'static str,
+    pub bin: PathBuf,
+}
+
+impl Foreign {
+    /// A scenario's line for [`measured`]: its number and `what`, the
+    /// runtime's name where `what` says `{}`.
+    pub fn said(&self, n: usize, what: &str) -> String {
+        format!("{}{n} {}", self.tag, what.replace("{}", self.name))
     }
-    k
+}
+
+impl Runtime {
+    /// The binary, as the check hands it over: `FLEET_KOTLIN_PEER`,
+    /// `FLEET_SWIFT_PEER`. `nix build .#harken-peer-kt` (or `-swift`) makes
+    /// one by hand.
+    pub fn peer(&self) -> Option<Foreign> {
+        std::env::var(self.var)
+            .ok()
+            .filter(|p| !p.is_empty())
+            .map(|p| Foreign {
+                name: self.name,
+                tag: self.tag,
+                bin: PathBuf::from(p),
+            })
+    }
+
+    /// The peer, or a line saying the scenario is skipped and why.
+    pub fn or_skip(&self, scenario: &str) -> Option<Foreign> {
+        let p = self.peer();
+        if p.is_none() {
+            println!(
+                "fleet: {scenario}: skipped — {} unset (`nix flake check` sets it in checks.{}; \
+                 `nix build .#{}` makes one)",
+                self.var, self.check, self.package
+            );
+        }
+        p
+    }
 }
 
 // -- versions (`docs/plan-db.md` D1) -------------------------------------------------

@@ -546,7 +546,11 @@ func domain(_ module: String?) throws -> Domain {
     }
 }
 
-/// Every line of stdin, on a thread of its own, so the peer pumps while nothing is said.
+/// Every line of stdin, on a thread of its own, so the peer pumps while
+/// nothing is said. Read with `read(2)` on the descriptor, not `readLine`:
+/// a thread blocked in `getline` holds stdin's `FILE` lock, and `exit`
+/// flushes every stream under its lock — so a `quit` with the driver's end
+/// of the pipe still open was an exit that never finished.
 final class Lines {
     private let cond = NSCondition()
     private var queue = [String]()
@@ -554,13 +558,26 @@ final class Lines {
 
     init() {
         let t = Thread { [self] in
-            while let l = readLine(strippingNewline: true) {
+            var pending = [UInt8]()
+            var chunk = [UInt8](repeating: 0, count: 65536)
+            while true {
+                let n = chunk.withUnsafeMutableBufferPointer { read(0, $0.baseAddress!, $0.count) }
+                if n < 0 && errno == EINTR { continue }
+                if n <= 0 { break }
+                pending += chunk[0..<n]
+                var lines = [String]()
+                while let nl = pending.firstIndex(of: 10) {
+                    lines.append(String(decoding: pending[..<nl], as: UTF8.self))
+                    pending.removeSubrange(...nl)
+                }
+                if lines.isEmpty { continue }
                 cond.lock()
-                queue.append(l)
+                queue += lines
                 cond.signal()
                 cond.unlock()
             }
             cond.lock()
+            if !pending.isEmpty { queue.append(String(decoding: pending, as: UTF8.self)) }
             ended = true
             cond.signal()
             cond.unlock()
