@@ -1,0 +1,7 @@
+# Gradle's and the build's own, and the screenshots Paparazzi records:
+# `packages.harken-android-screens` is where those are kept.
+.gradle/
+.kotlin/
+build/
+local.properties
+app/src/test/snapshots/

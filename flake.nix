@@ -315,7 +315,7 @@
             __darwinAllowLocalNetworking = true;
             gradleFlags = [ "-Dorg.gradle.java.home=${pkgs.jdk21}" "-ParkTraceCorpus=${trace-corpus}" ];
             preBuild = ''
-              ${fmt.kotlin} --dry-run --set-exit-if-changed $(find ark-runtime ark-client harken-peer -name '*.kt' -not -path '*/build/*' | sort)
+              ${fmt.kotlin} --dry-run --set-exit-if-changed $(find ark-runtime ark-client ark-android harken-peer -name '*.kt' -not -path '*/build/*' | sort)
             '';
             gradleBuildTask = "build";
             doCheck = false;

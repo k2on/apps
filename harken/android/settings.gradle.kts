@@ -25,3 +25,9 @@ rootProject.name = "harken-android"
 
 includeBuild("../../kotlin")
 include(":app")
+
+// The onboarding every Ark app on Android shares (kotlin/ark-android): an
+// Android library, so a project of this build rather than of the Kotlin
+// workspace, which builds without an SDK.
+include(":ark-android")
+project(":ark-android").projectDir = file("../../kotlin/ark-android")
