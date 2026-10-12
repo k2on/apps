@@ -33,10 +33,12 @@ it.
   `spec/vectors` by `checks.kotlin` (`kotlin/README.md`). The client and
   the Android app (`harken/android`, out of the flake until round 4) are
   next.
-- **Frozen at spec v3**: `swift/`, the Swift runtime and vocabulary, with
-  harken's `domain/gen/swift` and `ios/`. They stay in the tree unchanged
-  and out of `nix flake check`; `swift/FROZEN.md` says where they were last
-  green and what would bring them back.
+- `swift/` — the Swift runtime and client at v4, a phone's client
+  (`docs/plan-phones.md` rounds 5–7, `swift/README.md`): held to every
+  client vector of `spec/vectors` and the trace corpus by `checks.swift`;
+  `harken-peer-swift` runs in the fleet beside Rust peers
+  (`checks.fleet-swift`); `harken/ios` is rewired onto it and has never
+  been built for iOS.
 
 One command holds all of it:
 

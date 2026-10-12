@@ -14,10 +14,11 @@ author them. The domain is written once, in Rust, and `arkc` emits the
 module (`harken/domain/harken.ark`). The v3 tree's authoring vocabulary and
 the printed domain are gone (`FROZEN.md`).
 
-Round 5 of `docs/plan-phones.md` landed the core below and round 6 the
-client — the replica, the protocol client, the alone authority and the
-journal in `ArkDB`, and storage and a peer in `ArkDBClient`; the peer's
-transport and the iOS sources are round 7.
+Rounds 5–7 of `docs/plan-phones.md` landed it: the core, then the client —
+the replica, the protocol client, the alone authority and the journal in
+`ArkDB`, storage and a peer in `ArkDBClient` — then the peer's link and
+sign-in, `harken-peer-swift` in the fleet, and the iOS app rewired onto it
+(`harken/ios`, never built for iOS).
 
 ## What is here
 
@@ -51,7 +52,33 @@ transport and the iOS sources are round 7.
 | `Storage.swift` | `storage.rs` | `Storage` (memory, a directory written whole and synced), the replica, journal, pending and login records, `load` |
 | `Writer.swift` | `peer.rs` (`persist`…) | what is written when: a page or a snapshot, for the journal and for the intents |
 | `Autos.swift` | `autos.rs` | ids and times, from the platform or a seed |
-| `Peer.swift` | `peer.rs` | a peer over a storage: open, sign in and out, mutate, query, check, standing, leave and join, the sans-io frames |
+| `Peer.swift` | `peer.rs` | a peer over a storage: open, sign in and out, mutate, query, check, standing, leave and join, connect and pump, status, the sans-io frames |
+| `ClientView.swift` | `view.rs` | a query held as a list: hydrated once, patched, its middleware re-run when its `Ctx` or a table it reads moves |
+| `Link.swift` | `link/mod.rs` | the link: dial, backoff, stop; `Queues` for a test; `platformDial` |
+| `WebSocket.swift` | `link/native.rs` | `NativeSocket` (Linux) and `SessionSocket` (Apple), and RFC 6455's wire |
+| `Auth.swift` | `ark-auth` `client.rs`, `util.rs` | `Login`, the URLs, `devLogin`, `exchange`, and on Linux `login` with its loopback port |
+
+`Reads.swift` in `ArkDB` is `ir/reads.rs`, what a view's middleware reads.
+
+**The socket is ours on Linux, and the platform's on Apple.** Linux
+Foundation 5.8 declares `URLSessionWebSocketTask`, and a `ws://` task fails
+at once with `NSURLErrorUnsupportedURL` (-1002) — probed against a plain
+RFC 6455 echo server. So `NativeSocket` is the reference's native transport
+ported over POSIX sockets: a thread, the TCP connection and the handshake
+each held to the connect patience, 20 ms read slices between which what is
+queued is sent, a ping every `pingEveryMs`, the connection given up after
+three of those with nothing heard, `ws://` only — TLS would be a
+dependency, and the reference's build without its `tls` feature refuses
+`wss://` the same way. On iOS and macOS `platformDial` takes
+`SessionSocket`, `URLSessionWebSocketTask` with a ping timer: type-checked
+here, never run. Sign-in is `URLSession` everywhere, which on Linux is
+libcurl and does plain HTTP. No dependency was added.
+
+`harken-peer-swift` (`Sources/HarkenPeer`, `nix build .#harken-peer-swift`)
+is `harken/server/src/bin/harken-peer.rs` on this client — the same flags,
+the same JSON lines, the same directory records — and interprets every
+function of `harken.ark`, installed beside it, or of `--module`'s file.
+`checks.fleet-swift` runs it beside Rust peers (`docs/plan-fleet.md` §6).
 
 Three things are Swift's own, and each says nothing different from the
 Rust:
@@ -102,6 +129,12 @@ Swift 5.8 and runs `ArkDBTests`, an executable (there is no XCTest here):
   a Swift `Peer`, every record compared byte for byte after every step;
   `DirStorage` on this machine; and every trace and the corpus again with
   the client's durable copy kept in the storage records;
+- **the driver half** (`ClientTests`): the link's backoff over `Queues`,
+  the dialect, the sign-in's URLs, views over `harken.ark` spliced against
+  a fresh read, RFC 6455's own examples, and `NativeSocket` against a
+  loopback server in the process;
+- **the iOS app's non-SwiftUI files** (`harken/ios/tools/typecheck.sh`),
+  type-checked against the modules just built;
 - **StoreHints**: 600 reads through the store's indexes, over a
   `MemoryStore` and an `Overlay`, each the scan it stands for;
 - **KeptNumbers**: kept numbers three levels deep through 400 seeded

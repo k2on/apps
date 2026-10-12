@@ -1,5 +1,10 @@
 # The phones: Kotlin and Swift at v4, held to one suite
 
+**Status: rounds 1–7 landed** (each one's `## Landed` paragraph below).
+Both runtimes are at v4 and held to the suite; both headless peers run in
+the fleet beside Rust ones. No phone ran either app: the APK was assembled
+and never installed, and the iOS app was never built.
+
 Swift and Kotlin were frozen at spec v3 (`kotlin/FROZEN.md`,
 `swift/FROZEN.md`) while v4 moved. It has settled — plans and maintained
 views, the rebase by records, the additive digest, roles stamped into
@@ -536,3 +541,95 @@ storage.
 
 Not verified: Linux only. `DirStorage`'s directory sync ran on Linux, not
 on iOS, and not against a real crash.
+
+**Round 7, the Swift peer and the iOS sources** (`ba17889`, `2799693`,
+`a4640d4`, `bcada92`, and the docs). `ArkDBClient` gained the link, sign-in
+and views, file for file with `rust/ark-client`: `Link` (dial, the backoff
+of half a second doubling to thirty, stops), `ClientView` over `Reads`
+(`ir/reads.rs`), `Auth` (`ark_auth`'s client: `Login` as serde writes it,
+the URLs, `devLogin`, `exchange`, and on Linux `login` with its loopback
+port, over `URLSession`), and `Peer` with `connect`, `pump`, `status`,
+`close` and `join` to a URL. **The transport, and why:** Linux Foundation
+5.8 declares `URLSessionWebSocketTask`, and a `ws://` task fails at once
+with `NSURLErrorUnsupportedURL` (-1002), probed against a plain RFC 6455
+echo server; so on Linux the socket is `NativeSocket`, the reference's
+`link/native.rs` ported over POSIX sockets — a thread, the TCP connection
+and the handshake each held to the connect patience, 20 ms read slices,
+a ping every `pingEveryMs`, the connection given up after three of them
+with nothing heard, `ws://` only (TLS would be a dependency, and the
+reference's build without `tls` refuses `wss://` alike). On Apple
+platforms `platformDial` takes `SessionSocket`, `URLSessionWebSocketTask`
+with a ping timer — type-checked on Linux, never run. No dependency was
+added. `ClientTests` holds the link's backoff over `Queues`, the dialect,
+the sign-in's URLs, views over harken.ark spliced against a fresh read,
+RFC 6455's own examples (the accept key of §1.3, the frames of §5.7, every
+length form) and `NativeSocket` against a loopback server in the process.
+
+`harken-peer-swift` (`swift/Sources/HarkenPeer`,
+`packages.harken-peer-swift`) is `harken-peer`'s lines exactly, the same
+directory records, every function of `harken.ark` (installed beside it)
+or of `--module`'s file interpreted. **The fleet, and why it is one
+generic hook:** the six scenarios moved into one body each
+(`harken/server/tests/support/mixed.rs`) over a `Foreign` peer, and
+`PeerProc::kotlin` became `PeerProc::foreign` — the only thing the fleet
+ever did differently for a Kotlin peer was pass it `--roles`, which is
+this build's flag whatever runtime speaks it, so a `PeerProc::swift` would
+have been a second name for the same thing, and a copy of the six for
+Swift two sets of scenarios free to drift. `tests/fleet_kotlin.rs` and
+`tests/fleet_swift.rs` are six one-line tests each, with that runtime's
+falsifications beside them. `checks.fleet-swift` (`FLEET_SWIFT_PEER`, the
+pinned revisions as for `fleet-kotlin`): S1–S6 pass, 7 tests in 8.3 s,
+each scenario 0.15–0.42 s to converged once started and a Swift peer up
+and signed in in 62 ms (`docs/plan-fleet.md` §6). It found one bug, in the
+program rather than the client: S2's `quit` was answered and the process
+never exited — its stdin reader blocked in `readLine` holds stdin's `FILE`
+lock, and `exit` flushes every stream under its lock; the reader is
+`read(2)` now. No disagreement between the runtimes was found.
+Each scenario was falsified once with `harken-peer-swift` broken, all six
+in one scratch derivation over the tree, each failing: no push of pending
+on an open (S1, converged timed out); a join without its fork-back (S2,
+pending 0 where 3 were owed); snapshots ignored (S3, converged timed out);
+an unknown function read as a verdict (S4, held 0 where 3 were owed);
+`--module` ignored (S5, not behind); a partial snapshot opened whole (S6,
+three intents pending for good). The runner's own claims were falsified
+too: the backoff not doubling, no pong, a view's rows not spliced, the
+middleware never re-run (a claim added for it); `ClientView.splice`
+appending rather than inserting passes, since the list it is held to has
+one row.
+
+The iOS app (`harken/ios`) is the Android app's shape on the Swift client:
+`harken.ark` from the bundle (`project.yml` copies `../domain/harken.ark`,
+referenced in place), verified and interpreted; one `Peer` on a serial
+queue of its own, pumped every 50 ms (`Bridge.swift`); `library`,
+`playlists` and the open `playlist` maintained views whose patches are
+spliced into the lists the screens hold, read again only on a reset or a
+new selection; writes are `create_playlist`, `add_to_playlist`
+("Favorites" first for somebody with none) and `remove_from_playlist`,
+each with its standing; Settings has the server's address, work alone, and
+the status field for field. Sign-in is dev auth (`Auth.devLogin`, the
+redirect `harken://`, read off the answer and not followed); a provider's
+page is not opened. `ArkAuthoring`, the domain printed in Swift and the
+native procedures are gone from the app. `Rows.swift`, `Bridge.swift` and
+`Model.swift` type-check on Linux against `ArkDBClient` and a three-line
+stand-in for SwiftUI (`harken/ios/tools/typecheck.sh`, run by
+`checks.swift`; falsified by a misspelt method in each of the two files,
+each named by the compiler). The views and `HarkenApp.swift` were read,
+not compiled.
+
+Green, each by its own `nix build .#checks.x86_64-linux.<name>` (not `nix
+flake check`), on the last commit's tree: `swift` (122 of 130 vectors, the
+2,565-trace corpus directly and through the storage records, the Rust
+peer's fixture byte for byte, `ClientTests`, and the iOS type-check),
+`fleet-swift` (7 tests, 7.2 s) and `fleet-kotlin` (7 tests, 27.3 s, the
+same six bodies over the Kotlin peer); and locally, for the touched
+`harken/server/tests`, `cargo fmt --all --check`, both clippys
+(`--workspace --all-targets` and `harken-iced --features demo`, `-D
+warnings`) and `cargo test -p harken-server` (every target; the fleet's 25
+scenarios with Rust peers among them). `cargo test --workspace` and
+`checks.rust` were not run: nothing outside `harken/server/tests` moved on
+the Rust side, and the disk would not hold the workspace's test builds.
+
+Not verified: the iOS app was never built — no Xcode, no iOS SDK, no
+SwiftUI here — and never ran on a device or a simulator; `SessionSocket`
+never opened a connection; the provider sign-in on a phone is not built.
+Everything Swift that ran, ran on Linux.
