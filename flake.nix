@@ -371,14 +371,18 @@
               buildToolsVersions = [ "35.0.0" ];
             }).androidsdk}/libexec/android-sdk";
 
-          # The phone (docs/plan-phones.md round 4): gradle over the SDK, the
-          # Kotlin runtime and client as a composite build, and harken.ark in
-          # the APK's assets — which the app loads, verifies and interprets —
-          # assembled offline from a recorded Maven graph
-          # (harken/android/deps.json; `nix run .#harken-apk-deps`
-          # re-records it). Debug-signed, like any assembleDebug; it installs
-          # anywhere and belongs nowhere public. The Kotlin build reads the
-          # Unicode tables out of rust/ark, so that file is a source too.
+          # The phone (docs/plan-phones.md round 4, docs/plan-android.md): gradle
+          # over the SDK, the Kotlin runtime and client as a composite build,
+          # the shared onboarding (kotlin/ark-android) as a project of the
+          # app's build, and harken.ark in the APK's assets — which the app
+          # loads, verifies and interprets — assembled offline from a
+          # recorded Maven graph (harken/android/deps.json; `nix run
+          # .#harken-apk-deps` re-records it, for this and for the
+          # screenshots below). The onboarding's JVM tests run first, so an
+          # APK is not built over a machine that fails them. Debug-signed,
+          # like any assembleDebug; it installs anywhere and belongs nowhere
+          # public. The Kotlin build reads the Unicode tables out of
+          # rust/ark, so that file is a source too.
           harken-apk = pkgs.stdenv.mkDerivation (final: {
             pname = "harken-apk";
             version = "0.1.0";
@@ -414,15 +418,37 @@
               export HOME="$TMPDIR/home" ANDROID_USER_HOME="$TMPDIR/home/.android"
               mkdir -p "$ANDROID_USER_HOME"
             '';
-            gradleBuildTask = ":app:assembleDebug";
-            # The recording runs the same assemble rather than resolving every
-            # configuration: AGP's androidTest classpaths cannot be resolved
-            # in isolation, and what the build fetches is the whole graph.
-            gradleUpdateTask = ":app:assembleDebug";
+            gradleBuildTask = ":ark-android:testDebugUnitTest :app:assembleDebug";
+            # The recording runs the same tasks rather than resolving every
+            # configuration — AGP's androidTest classpaths cannot be resolved
+            # in isolation, and what the build fetches is the whole graph —
+            # and the screenshots' too, so that one recording serves both.
+            gradleUpdateTask = ":ark-android:testDebugUnitTest :app:recordPaparazziDebug :app:assembleDebug";
             doCheck = false;
             installPhase = ''
               mkdir -p $out
               cp app/build/outputs/apk/debug/app-debug.apk $out/harken-debug.apk
+            '';
+          });
+
+          # The phone's screens as images (docs/plan-android.md): every screen
+          # and state, light and dark, at a Pixel 5's size, rendered on the
+          # JVM by Paparazzi through layoutlib from a fixed library
+          # (harken/android/app/src/test) — the same build and the same
+          # recorded Maven graph as the APK, layoutlib included. The PNGs and
+          # an index.html laying them out, light beside dark: what a change
+          # to a screen is reviewed by, with no phone and no emulator.
+          harken-android-screens = harken-apk.overrideAttrs (old: {
+            pname = "harken-android-screens";
+            gradleBuildTask = ":app:recordPaparazziDebug";
+            installPhase = ''
+              mkdir -p $out
+              shots=app/src/test/snapshots/images
+              for f in $shots/*.png; do
+                b=$(basename "$f" .png)
+                cp "$f" "$out/''${b#dev.harken.android_Screens_}.png"
+              done
+              ${pkgs.python3}/bin/python3 ${./harken/android/screens-index.py} $out > $out/index.html
             '';
           });
 
@@ -464,7 +490,7 @@
             harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { harken-server = crate { pname = "harken-server"; }; };
             inherit harken-web harken-web-server harken-iced ark-admin;
             default = ark;
-            inherit harken-apk;
+            inherit harken-apk harken-android-screens;
             harken-apk-deps = harken-apk.mitmCache.updateScript;
           } // lib.listToAttrs (map (v: lib.nameValuePair "harken-server-${v.name}" v.server) versions)
           // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {

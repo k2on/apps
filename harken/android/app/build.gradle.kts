@@ -2,6 +2,10 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    // Every screen rendered on the JVM through layoutlib, light and dark, from
+    // a fixed library (src/test): `recordPaparazziDebug` writes the PNGs,
+    // which `packages.harken-android-screens` lays out.
+    id("app.cash.paparazzi")
 }
 
 /** Where `harken.ark` is copied for the APK's assets. */
