@@ -31,6 +31,8 @@ const INDENT: f32 = 16.0;
 const FORM_HEIGHT: f32 = 300.0;
 const PICKER_WIDTH: f32 = 640.0;
 const PICKER_HEIGHT: f32 = 260.0;
+/// A table's row: a cell's whole height, which is also its click target.
+const ROW_HEIGHT: f32 = 23.0;
 
 fn small<'a>(s: impl Into<String>) -> Element<'a, Msg> {
     text(s.into()).size(12).style(style::dim).into()
@@ -740,12 +742,19 @@ fn view_grid<'a>(
             let on = on_row && cursor.is_some_and(|(_, cc)| cc == c);
             let lit = light.cells.get(c).copied().unwrap_or(0.0).max(gone);
             let cell: Element<'a, Msg> = match (&editing, light.origin) {
-                (Some((er, ec, t)), Some(r)) if *er == r && *ec == c => text_input(&g.columns[c], t)
-                    .on_input(Msg::EditText)
-                    .on_submit(Msg::Commit)
-                    .size(13)
-                    .width(cell_box(g.widths[c].max(24)))
-                    .into(),
+                // As tall as the row, so opening it moves no row under the
+                // pointer.
+                (Some((er, ec, t)), Some(r)) if *er == r && *ec == c => container(
+                    text_input(&g.columns[c], t)
+                        .on_input(Msg::EditText)
+                        .on_submit(Msg::Commit)
+                        .size(13)
+                        .padding([1, 3]),
+                )
+                .width(cell_box(g.widths[c].max(24)))
+                .height(Length::Fixed(ROW_HEIGHT))
+                .align_y(Alignment::Center)
+                .into(),
                 _ => {
                     let body = container(
                         text(g.cell(d, c))
@@ -760,6 +769,8 @@ fn view_grid<'a>(
                             }),
                     )
                     .width(cell_box(g.widths[c]))
+                    .height(Length::Fixed(ROW_HEIGHT))
+                    .align_y(Alignment::Center)
                     .padding(pad)
                     .clip(true)
                     .style(move |theme| match on {
@@ -774,10 +785,12 @@ fn view_grid<'a>(
             };
             line = line.push(cell);
         }
+        // No padding above or below: every pixel of a row is a cell's, so a
+        // click between two lines of text still lands on one of them.
         rows = rows.push(
             container(line)
                 .width(Length::Fixed(width))
-                .padding(Padding::from(table::ROW_PADDING))
+                .padding(Padding::from([0.0, table::ROW_PADDING[1]]))
                 .style(move |theme| style::row(theme, false, focused, d % 2 == 1)),
         );
     }
