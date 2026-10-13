@@ -35,8 +35,8 @@ pub const SAMPLE: usize = 200;
 /// hex digits and capitals run wider than the average: erring wide is a
 /// strip of empty column, erring narrow a glyph cut by the clip.
 pub const CHAR_PX: f32 = 7.5;
-/// The gap after every column.
-pub const GAP_PX: f32 = 12.0;
+/// The gap after every column: the same gap `arkui`'s table leaves.
+pub const GAP_PX: f32 = arkui::table::SPACING;
 /// How many hex digits of an id a cell draws.
 pub const ID_DIGITS: usize = 8;
 

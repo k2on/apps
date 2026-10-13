@@ -45,12 +45,12 @@ pub const ENTRY_PAD_X: f32 = 10.0;
 pub const ENTRY_GAP: f32 = 8.0;
 /// Roughly how wide one character is at size 13, in pixels.
 ///
-/// The same kind of estimate [`crate::fit::PER_PORTION`] is, and unavailable
-/// for the same reason — but it errs the other way, because the cost is the
-/// other way: a panel sized from this is its own width, so erring wide is a
-/// strip of empty panel and erring narrow is an ellipsis through somebody's
-/// name. A proportional face's advance at 13px averages about 6.5 across mixed
-/// case; 7 is a shade over, on purpose.
+/// An estimate, because a panel is placed before iced lays anything out —
+/// unlike a table cell, which is cut at layout against the shaped text
+/// ([`crate::fit::within`]). It errs wide, because a panel sized from this is
+/// its own width: erring wide is a strip of empty panel and erring narrow is
+/// an ellipsis through somebody's name. A proportional face's advance at 13px
+/// averages about 6.5 across mixed case; 7 is a shade over, on purpose.
 pub const ENTRY_CHAR: f32 = 7.0;
 /// Everything in a panel row that is not the label: the panel's padding either
 /// side, the row's, the glyph column and the gap after it.
