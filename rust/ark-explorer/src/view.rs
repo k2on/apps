@@ -124,7 +124,7 @@ impl Explorer {
                 table::cell(exposed, WIDE, on, false, true),
             ];
             col.push(
-                mouse_area(table::row(line, on, true, i % 2 == 1))
+                mouse_area(table::row(line, on, self.has_keys, i % 2 == 1))
                     .on_enter(Msg::At(i))
                     .on_press(Msg::Open(t)),
             )
@@ -146,7 +146,7 @@ impl Explorer {
         let body = view_grid(
             grid,
             Some((self.row_at.saturating_sub(from), self.column_at)),
-            true,
+            self.has_keys,
             editing,
             move |r, c| Msg::Cell(from + r, c),
         );
@@ -198,7 +198,7 @@ impl Explorer {
                 table::cell(input, Length::FillPortion(8), on, false, true),
             ];
             list = list.push(
-                mouse_area(table::row(line, on, true, i % 2 == 1))
+                mouse_area(table::row(line, on, self.has_keys, i % 2 == 1))
                     .on_enter(Msg::At(i))
                     .on_press(Msg::Function(i)),
             );
@@ -268,7 +268,7 @@ impl Explorer {
         .spacing(10)
         .align_y(Alignment::End);
         let slots = f.slots();
-        let keys_here = !self.in_answer && self.picker.is_none();
+        let keys_here = !self.in_answer && self.picker.is_none() && self.has_keys;
         let mut lines = Column::new().spacing(2);
         for (i, slot) in slots.iter().enumerate() {
             let on = keys_here && i == f.at;
@@ -310,7 +310,7 @@ impl Explorer {
         if let Some(g) = self.answer_grid() {
             let (r, c) = self.answer_at;
             let detail = g.detail(r, c);
-            out = out.push(view_grid(g, Some((r, c)), self.in_answer, None, Msg::AnswerCell));
+            out = out.push(view_grid(g, Some((r, c)), self.in_answer && self.has_keys, None, Msg::AnswerCell));
             out = out.push(detail_line(detail));
         } else {
             out = out.push(Space::new().height(Length::Fill));
@@ -653,7 +653,7 @@ impl Explorer {
                 table::cell(l.standing.clone(), NAME, on, false, true),
                 table::cell(facts, WIDE, on, false, true),
             ];
-            out = out.push(mouse_area(table::row(line, on, true, i % 2 == 1)).on_enter(Msg::At(i)));
+            out = out.push(mouse_area(table::row(line, on, self.has_keys, i % 2 == 1)).on_enter(Msg::At(i)));
         }
         scrollable(out).style(style::bars).height(Length::Fill).into()
     }

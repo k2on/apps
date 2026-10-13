@@ -157,6 +157,10 @@ pub struct Explorer {
     /// The keys walk a query's answer rather than its form, and where in it.
     pub in_answer: bool,
     pub answer_at: (usize, usize),
+    /// Whether the keyboard is the explorer's: a host that docks it beside
+    /// the app says when the app has it, and every cursor here is then drawn
+    /// as a selection that has lost the keys rather than lit.
+    pub has_keys: bool,
 }
 
 impl Default for Explorer {
@@ -186,6 +190,7 @@ impl Explorer {
             calls: vec![],
             in_answer: false,
             answer_at: (0, 0),
+            has_keys: true,
         }
     }
 

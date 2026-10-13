@@ -116,3 +116,112 @@ fn a_function_from_the_explorer_is_authored_as_the_signed_in_person() {
     assert!(bad.is_empty(), "{bad:?}");
     assert_eq!(args["playlist_id"], made.get("id").cloned().unwrap());
 }
+
+fn point(app: &mut App, x: f32, y: f32) {
+    let _ = app.update(Message::Pointer(iced::Point::new(x, y)));
+}
+
+fn click(app: &mut App, x: f32, y: f32) {
+    point(app, x, y);
+    let _ = app.update(Message::Pressed);
+    let _ = app.update(Message::Released);
+}
+
+/// `E` docks the explorer beside the app rather than over it: the app keeps
+/// its page, its width less the panel's; the keys go to the explorer, and
+/// `` ` `` or a click moves them to the app and back — a click into the
+/// app ending an edit in progress there; `E` from either half closes it.
+/// Falsified by giving the app the whole window while the panel is open:
+/// the app's width was the window's, so its geometry would have laid cards
+/// under the panel.
+#[test]
+fn e_docks_the_explorer_beside_a_working_app() {
+    let mut app = App::with_peer(super::peer(Options::alone("alice")), String::new(), None);
+    app.peer.ensure_playlist();
+    let _ = app.update(Message::Resized(iced::Size::new(1280.0, 800.0)));
+    assert_eq!(app.window.width, 1280.0);
+    press(&mut app, "E");
+    let panel = app.dock.width_in(app.screen);
+    assert!(
+        panel >= crate::explore::DOCK_MIN && app.window.width >= crate::explore::APP_MIN,
+        "{panel}"
+    );
+    assert_eq!(
+        app.window.width,
+        1280.0 - panel - crate::explore::DOCK_RULE,
+        "the app is what the panel leaves"
+    );
+    assert!(app.explorer_has_keys());
+    press(&mut app, "j");
+    assert_eq!(app.explore.as_ref().unwrap().ui.tables_at, 1, "the explorer has the keys");
+    // `` ` ``: the app has them, and works — `j` moves its own cursor.
+    press(&mut app, "`");
+    assert!(!app.explorer_has_keys());
+    assert!(
+        !app.explore.as_ref().unwrap().ui.has_keys,
+        "and the explorer draws its cursor as one without them"
+    );
+    press(&mut app, "j");
+    press(&mut app, "?");
+    assert!(app.help, "the app's own keys reach it");
+    press(&mut app, "?");
+    assert_eq!(app.explore.as_ref().unwrap().ui.tables_at, 1, "and the explorer's cursor did not move");
+    press(&mut app, "`");
+    assert!(app.explorer_has_keys());
+    // A click in the app takes the keys there, and ends an edit in progress
+    // the way a click away from a cell does.
+    let _ = app.update(Message::Explore(ark_explorer::Msg::Open("playlist".into())));
+    let _ = app.update(Message::Explore(ark_explorer::Msg::Cell(0, 1)));
+    let _ = app.update(Message::Explore(ark_explorer::Msg::Edit));
+    assert!(app.explore.as_ref().unwrap().ui.editing.is_some());
+    click(&mut app, 200.0, 300.0);
+    assert!(!app.explorer_has_keys(), "a click in the app gives it the keys");
+    assert!(app.explore.as_ref().unwrap().ui.editing.is_none(), "and ends the edit");
+    click(&mut app, 1200.0, 300.0);
+    assert!(app.explorer_has_keys(), "a click in the panel takes them back");
+    // The app's own messages work beside it.
+    let _ = app.update(Message::Select(crate::places::Source::Albums));
+    assert!(app.explore.is_some(), "the explorer stays open while the app is used");
+    // `E` from the app's half closes it, and the app has the window back.
+    press(&mut app, "`");
+    press(&mut app, "E");
+    assert!(app.explore.is_none());
+    assert_eq!(app.window.width, 1280.0);
+}
+
+/// The panel's edge drags to resize it, within its bounds and the app's, and
+/// the width is kept for the session: closed and opened again, the panel is
+/// as wide as it was left. Its close button closes it. Falsified by
+/// forgetting the width on close: it came back at its first share of the
+/// window.
+#[test]
+fn the_docked_explorer_resizes_and_remembers_its_width() {
+    let mut app = App::with_peer(super::peer(Options::alone("alice")), String::new(), None);
+    let _ = app.update(Message::Resized(iced::Size::new(1280.0, 800.0)));
+    press(&mut app, "E");
+    let edge = app.dock.edge(app.screen);
+    point(&mut app, edge + 2.0, 400.0);
+    let _ = app.update(Message::Pressed);
+    assert!(app.dock.dragging, "a press on the edge starts a drag");
+    point(&mut app, 700.0, 400.0);
+    let _ = app.update(Message::Released);
+    let width = app.dock.width_in(app.screen);
+    assert_eq!(width, 1280.0 - 700.0 - crate::explore::DOCK_RULE);
+    assert_eq!(app.window.width, 700.0);
+    // Past the app's least width, it stops.
+    let edge = app.dock.edge(app.screen);
+    point(&mut app, edge, 400.0);
+    let _ = app.update(Message::Pressed);
+    point(&mut app, 10.0, 400.0);
+    let _ = app.update(Message::Released);
+    assert_eq!(app.window.width, crate::explore::APP_MIN);
+    let edge = app.dock.edge(app.screen);
+    point(&mut app, edge, 400.0);
+    let _ = app.update(Message::Pressed);
+    point(&mut app, 700.0, 400.0);
+    let _ = app.update(Message::Released);
+    let _ = app.update(Message::CloseExplorer);
+    assert!(app.explore.is_none(), "the close button closes it");
+    press(&mut app, "E");
+    assert_eq!(app.dock.width_in(app.screen), width, "as wide as it was left");
+}

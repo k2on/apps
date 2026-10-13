@@ -163,6 +163,14 @@ pub enum Message {
     Swallow,
     /// For the explorer, while it is open (`E`; `docs/plan-guards.md` D4).
     Explore(ark_explorer::Msg),
+    /// The panel's close button.
+    CloseExplorer,
+    /// The pointer, anywhere in the window, and a button pressed or let go:
+    /// seen whatever widget took them, so the keys follow the last click into
+    /// either half and the panel's edge can be dragged (`explore::Dock`).
+    Pointer(Point),
+    Pressed,
+    Released,
 }
 
 /// One change this window made, kept so its fate can be said about *it*.
@@ -215,6 +223,10 @@ pub struct App {
     pub debug: bool,
     /// `E` — the explorer over this device's replica (`explore.rs`).
     pub explore: Option<explore::Explore>,
+    /// …docked beside the app: its width, and which half has the keys.
+    pub dock: explore::Dock,
+    /// The whole window; `window` is the app's part of it.
+    pub screen: Size,
     /// A row's menu, and the playlist picker that is its submenu — or the one
     /// `a` opens alone. arkui holds the rules; the playlists are the values.
     pub ctx: Context<Message, Id>,
@@ -285,6 +297,8 @@ impl App {
             picker_about: None,
             devices: None,
             window: Size::new(860.0, 600.0),
+            screen: Size::new(860.0, 600.0),
+            dock: explore::Dock::default(),
             router: Router::new(),
             cursor: Point::ORIGIN,
             player: Player::new(),
@@ -630,7 +644,12 @@ impl App {
     /// whether its cursor is drawn: a context window over it has the keys, and
     /// a cursor drawn where the next `j` will not go is a lie.
     pub fn has_keys(&self, pane: Pane) -> bool {
-        self.focus() == Focus::Pane(pane)
+        self.focus() == Focus::Pane(pane) && !self.explorer_has_keys()
+    }
+
+    /// Whether the docked explorer has the keyboard rather than the app.
+    pub fn explorer_has_keys(&self) -> bool {
+        self.explore.is_some() && self.dock.keys
     }
 
     /// How wide the page beside the sidebar is: the window less its padding
@@ -1184,14 +1203,45 @@ impl App {
                 self.devices = None;
                 self.note = "signed out — what you do now stays on this device until you sign in".into();
             }
-            // The explorer has the keyboard while it is open: its own
-            // grammar, its own cursor, and `<Esc>` from its top closes it.
-            Message::Key(key, mods) if self.explore.is_some() => {
+            // While the explorer is open, `E` closes it from either half and
+            // `` ` `` moves the keys between them; otherwise the keys go to
+            // whichever has them — the explorer's own grammar, its own
+            // cursor, `<Esc>` from its top closing it — or to the app as ever.
+            Message::Key(iced::keyboard::Key::Character(c), mods)
+                if self.explore.is_some() && !mods.control() && (c == "E" || c == explore::SWITCH) =>
+            {
+                match c.as_str() {
+                    "E" => self.toggle_explorer(),
+                    _ => self.explorer_keys(!self.dock.keys),
+                }
+                return Task::none();
+            }
+            Message::Key(key, mods) if self.explore.is_some() && self.dock.keys => {
                 self.explore(ark_explorer::Msg::Key(key, mods));
                 return Task::none();
             }
+            // A message from the explorer is not a click into it — hovering
+            // a row sends one — so it moves no keys: the press does.
             Message::Explore(m) => {
                 self.explore(m);
+                return Task::none();
+            }
+            Message::CloseExplorer => {
+                if self.explore.is_some() {
+                    self.toggle_explorer();
+                }
+                return Task::none();
+            }
+            Message::Pointer(at) => {
+                self.pointer(at);
+                return Task::none();
+            }
+            Message::Pressed => {
+                self.pressed();
+                return Task::none();
+            }
+            Message::Released => {
+                self.dock.dragging = false;
                 return Task::none();
             }
             Message::Key(key, mods) => {
@@ -1211,7 +1261,10 @@ impl App {
                 }
                 return Task::none();
             }
-            Message::Resized(size) => self.window = size,
+            Message::Resized(size) => {
+                self.screen = size;
+                self.sync_window();
+            }
             Message::HoverAt(at) => {
                 // Not while a context window is up. A backdrop stops a click
                 // and a wheel, but a hover is published by the row itself and
@@ -1539,6 +1592,14 @@ impl App {
             // Only the presses no widget took: a focused text box consumes its
             // own, so typing a playlist's name cannot walk the cursor.
             vim::presses().map(|(key, mods)| Message::Key(key, mods)),
+            // The pointer and its presses, whatever took them: which half
+            // has the keys, and the docked explorer's edge.
+            iced::event::listen_with(|event, _status, _window| match event {
+                iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => Some(Message::Pointer(position)),
+                iced::Event::Mouse(iced::mouse::Event::ButtonPressed(_)) => Some(Message::Pressed),
+                iced::Event::Mouse(iced::mouse::Event::ButtonReleased(_)) => Some(Message::Released),
+                _ => None,
+            }),
         ])
     }
 }
