@@ -20,13 +20,10 @@
 //!   window's width would suggest. So a cell is cut where it is laid out, to
 //!   the width it was actually given less [`SPACING`], and clipped to its
 //!   column besides.
-use iced::advanced::layout::{self, Layout};
-use iced::advanced::text::{self as core_text, Paragraph};
-use iced::advanced::widget::{self, tree, Tree, Widget};
-use iced::advanced::{mouse, renderer};
 use iced::widget::{container, text};
-use iced::{alignment, Element, Length, Padding, Pixels, Rectangle, Size, Theme};
+use iced::{Element, Length, Padding};
 
+use crate::line::Line;
 use crate::{fit, icon, style};
 
 /// The column a row's one mark sits in — what is playing, say — and the gutter
@@ -105,124 +102,6 @@ fn in_column<'a, M: 'a>(line: Line<'a>, width: Length) -> Element<'a, M> {
         })
         .clip(true)
         .into()
-}
-
-/// One line of text cut to whatever width layout gives it.
-///
-/// iced's `text` cannot do this: it is told its content before layout, and
-/// the width is only known during it. So this holds the whole value, and cuts
-/// it in `layout`, where the limits are the column's — remembering the cut
-/// against the value and the width, so a table redrawn twenty times a second
-/// shapes a cell again only when one of those moves.
-struct Line<'a> {
-    body: String,
-    size: f32,
-    cut: fit::Cut,
-    color: Box<dyn Fn(&Theme) -> iced::Color + 'a>,
-}
-
-impl<'a> Line<'a> {
-    fn new(body: String, size: f32, cut: fit::Cut, color: impl Fn(&Theme) -> iced::Color + 'a) -> Self {
-        Line {
-            body,
-            size,
-            cut,
-            color: Box::new(color),
-        }
-    }
-}
-
-/// What a [`Line`] keeps between layouts: what it was last cut for, the cut,
-/// and the cut shaped.
-#[derive(Default)]
-struct Shaped<P: Paragraph> {
-    for_: Option<(String, f32, f32, fit::Cut)>,
-    shown: String,
-    paragraph: core_text::paragraph::Plain<P>,
-}
-
-impl<M, R> Widget<M, Theme, R> for Line<'_>
-where
-    R: core_text::Renderer,
-{
-    fn tag(&self) -> tree::Tag {
-        tree::Tag::of::<Shaped<R::Paragraph>>()
-    }
-
-    fn state(&self) -> tree::State {
-        tree::State::new(Shaped::<R::Paragraph>::default())
-    }
-
-    fn size(&self) -> Size<Length> {
-        Size::new(Length::Shrink, Length::Shrink)
-    }
-
-    fn layout(&mut self, tree: &mut Tree, renderer: &R, limits: &layout::Limits) -> layout::Node {
-        let cut = tree.state.downcast_mut::<Shaped<R::Paragraph>>();
-        let max = limits.max();
-        let (size, font) = (self.size, renderer.default_font());
-
-        let key = (self.body.clone(), max.width, self.size, self.cut);
-        if cut.for_.as_ref() != Some(&key) {
-            cut.shown = fit::within(&self.body, max.width, self.cut, |s| {
-                R::Paragraph::with_text(one_line(s, size, font, max.height)).min_bounds().width
-            });
-            cut.for_ = Some(key);
-        }
-        let _ = cut.paragraph.update(one_line(&cut.shown, size, font, max.height));
-        layout::Node::new(limits.resolve(Length::Shrink, Length::Shrink, cut.paragraph.min_bounds()))
-    }
-
-    fn draw(
-        &self,
-        tree: &Tree,
-        renderer: &mut R,
-        theme: &Theme,
-        defaults: &renderer::Style,
-        layout: Layout<'_>,
-        _cursor: mouse::Cursor,
-        viewport: &Rectangle,
-    ) {
-        let cut = tree.state.downcast_ref::<Shaped<R::Paragraph>>();
-        widget::text::draw(
-            renderer,
-            defaults,
-            layout.bounds(),
-            cut.paragraph.raw(),
-            widget::text::Style {
-                color: Some((self.color)(theme)),
-            },
-            viewport,
-        );
-    }
-
-    fn operate(&mut self, _tree: &mut Tree, layout: Layout<'_>, _renderer: &R, operation: &mut dyn widget::Operation) {
-        operation.text(None, layout.bounds(), &self.body);
-    }
-}
-
-/// `content` as one unwrapped line, for shaping.
-fn one_line<F>(content: &str, size: f32, font: F, height: f32) -> core_text::Text<&str, F> {
-    core_text::Text {
-        content,
-        bounds: Size::new(f32::INFINITY, height),
-        size: Pixels(size),
-        line_height: core_text::LineHeight::default(),
-        font,
-        align_x: core_text::Alignment::Default,
-        align_y: alignment::Vertical::Top,
-        shaping: core_text::Shaping::default(),
-        wrapping: core_text::Wrapping::None,
-    }
-}
-
-impl<'a, M: 'a, R> From<Line<'a>> for Element<'a, M, Theme, R>
-where
-    R: core_text::Renderer + 'a,
-{
-    fn from(line: Line<'a>) -> Self {
-        Element::new(line)
-    }
 }
 
 /// A section heading inside the table: the part of the whole below it.

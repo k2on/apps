@@ -14,6 +14,8 @@
 use iced::widget::{column, container, image, mouse_area, row, scrollable, text};
 use iced::{Alignment, Element, Length, Padding};
 
+use crate::fit::Cut;
+use crate::line::Line;
 use crate::{art, style, vim, SCROLLBAR};
 
 /// A card grid's geometry: how big a card is, the gap between two, and the
@@ -158,6 +160,15 @@ pub fn empty_page<'a, M: 'a>(message: &'a str, padding: f32) -> Element<'a, M> {
 /// first row of a table says nothing about the record. `under` is the one
 /// thing on such a page that is also a *place* (an album's artist), so it is
 /// drawn in the accent and `open_under` is where a click on it goes.
+///
+/// **It is laid out inside the page, however narrow the page is** — beside a
+/// docked panel, `Goldberg Variations, BWV 988` at 26px ran straight on into
+/// the panel. The name wraps, because a title is the one thing on the page
+/// drawn large enough to read on two lines, and cut at 26px it would lose
+/// the half of itself nobody else on the page says. The numbers wrap too,
+/// since every one of them is a fact and a licence is among them. `kind` and
+/// `under` are cut ([`crate::line::Line`]) — at the end, because `under` is
+/// a person's name, and that reads from its start.
 pub fn header<'a, M: Clone + 'a>(
     picture: Element<'a, M>,
     kind: &'a str,
@@ -171,15 +182,16 @@ pub fn header<'a, M: Clone + 'a>(
         row![
             picture,
             column![
-                text(kind).size(10).style(style::faint(0.5)),
-                text(name).size(26).wrapping(text::Wrapping::None),
+                Line::new(kind, 10.0, Cut::End, faint),
+                text(name).size(26).wrapping(text::Wrapping::Word),
                 match open_under {
-                    Some(open) => Element::from(mouse_area(text(under).size(13).style(style::accent)).on_press(open)),
-                    None => text(under).size(13).style(style::accent).into(),
+                    Some(open) => Element::from(mouse_area(under_line(under)).on_press(open)),
+                    None => under_line(under).into(),
                 },
-                text(facts).size(11).style(style::faint(0.5)),
+                text(facts).size(11).wrapping(text::Wrapping::Word).style(style::faint(0.5)),
             ]
-            .spacing(4),
+            .spacing(4)
+            .width(Length::Fill),
         ]
         .spacing(16)
         .align_y(Alignment::Center),
@@ -192,6 +204,16 @@ pub fn header<'a, M: Clone + 'a>(
     })
     .width(Length::Fill)
     .into()
+}
+
+/// The faint grey a header's small print is drawn in.
+fn faint(theme: &iced::Theme) -> iced::Color {
+    style::faint(0.5)(theme).color.unwrap_or_default()
+}
+
+/// A header's `under`, in the accent, cut at its end.
+fn under_line<'a>(under: String) -> Line<'a> {
+    Line::new(under, 13.0, Cut::End, |theme| style::accent(theme).color.unwrap_or_default())
 }
 
 #[cfg(test)]

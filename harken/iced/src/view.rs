@@ -8,6 +8,7 @@
 //! `main.rs`, the same numbers the keyboard uses.
 use arkui::fit::Cut;
 use arkui::format::{clock, plural, span, spell};
+use arkui::line::Line;
 use arkui::{art, cards, fit, glyphs, icon, layer, menu, panel, picker, style, table};
 use iced::widget::{button, column, container, mouse_area, row, rule, scrollable, slider, stack, text, text_input, Row};
 use iced::{Alignment, Element, Length, Padding};
@@ -566,11 +567,18 @@ impl App {
                 row![
                     // A search narrowing the Songs page says so where the
                     // page's name is (`docs/plan-db.md` D4).
-                    text(match (&p.source, &p.search) {
-                        (Source::Library, Some(n)) => format!("{} matching “{n}”", p.source.title()),
-                        _ => p.source.title().to_string(),
-                    })
-                    .size(22),
+                    // Cut rather than run on past the page, and the count
+                    // after it keeps its room: the title gives way.
+                    Line::new(
+                        match (&p.source, &p.search) {
+                            (Source::Library, Some(n)) => format!("{} matching “{n}”", p.source.title()),
+                            _ => p.source.title().to_string(),
+                        },
+                        22.0,
+                        Cut::Middle,
+                        |theme| arkui::theme::of(theme).background.base.text,
+                    )
+                    .gives_way(),
                     text(format!("{} {}", p.rows().len(), plural(p.rows().len() as i64, "track")))
                         .size(12)
                         .style(style::dim),
