@@ -53,16 +53,23 @@ pub const HEADING_SIZE: f32 = 11.0;
 /// narrower, and a cell cut for the wide table drew `Johann Seba` straight
 /// into `Goldberg Variatio`. A value that fits is drawn whole, as it was;
 /// one that does not loses its middle ([`fit::Cut::Middle`]), because a
-/// cell's value is a name and its ends are what identify it — a movement
-/// keeps its catalogue number.
+/// cell's value is usually a title whose ends are what identify it — a
+/// movement keeps its catalogue number. A column that knows it holds
+/// something else says so with [`cell_cut`].
 ///
 /// `on_cursor` is the accent-filled row; `accent` draws the text in the accent
 /// (the one playing, a ticked name); `dim` is a secondary column.
 pub fn cell<'a, M: 'a>(body: String, width: Length, on_cursor: bool, accent: bool, dim: bool) -> Element<'a, M> {
+    cell_cut(body, width, fit::Cut::Middle, on_cursor, accent, dim)
+}
+
+/// A [`cell`] that loses the part `cut` says. Which part is the caller's
+/// to decide, because only the caller knows what the column holds: a
+/// person's name reads from its start (`Johann S…`), where `Joha…ach` is a
+/// puzzle, and this table cannot tell a name from a title.
+pub fn cell_cut<'a, M: 'a>(body: String, width: Length, cut: fit::Cut, on_cursor: bool, accent: bool, dim: bool) -> Element<'a, M> {
     in_column(
-        Line::new(body, CELL_SIZE, fit::Cut::Middle, move |theme| {
-            style::on_row(theme, on_cursor, accent, dim)
-        }),
+        Line::new(body, CELL_SIZE, cut, move |theme| style::on_row(theme, on_cursor, accent, dim)),
         width,
     )
 }

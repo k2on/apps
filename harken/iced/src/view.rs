@@ -6,6 +6,7 @@
 //! theme iced picked. And nothing here decides anything — which grid has the
 //! keyboard, where a panel goes, how many cards fit are all answered in
 //! `main.rs`, the same numbers the keyboard uses.
+use arkui::fit::Cut;
 use arkui::format::{clock, plural, span, spell};
 use arkui::{art, cards, fit, glyphs, icon, layer, menu, panel, picker, style, table};
 use iced::widget::{button, column, container, mouse_area, row, rule, scrollable, slider, stack, text, text_input, Row};
@@ -501,8 +502,10 @@ impl App {
             }
             let line = line
                 .push(table::cell(item.title.clone(), NAME, on_cursor, here, false))
-                .push(table::cell(item.creator.clone(), ARTIST, on_cursor, false, true))
-                .push(table::cell(
+                // People's names lose their end — `Johann S…` — and titles
+                // their middle, which is where they are alike.
+                .push(table::cell_cut(item.creator.clone(), ARTIST, Cut::End, on_cursor, false, true))
+                .push(table::cell_cut(
                     // …and the terms it was given on, beside whoever gave it:
                     // a credit nobody draws is a condition nobody met.
                     match album_page {
@@ -510,6 +513,10 @@ impl App {
                         false => detail.album.clone(),
                     },
                     ALBUM,
+                    match album_page {
+                        true => Cut::End,
+                        false => Cut::Middle,
+                    },
                     on_cursor,
                     false,
                     true,
