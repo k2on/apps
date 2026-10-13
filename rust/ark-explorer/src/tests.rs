@@ -1052,6 +1052,29 @@ fn the_picker_labels_filters_and_chooses() {
         .unwrap();
     }
     assert_eq!(form::label_columns(&same, "user"), (Some("email".into()), None));
+    // The first column that tells rows apart well, not the one that tells
+    // them apart best: a name repeated once still labels them, ahead of an
+    // email that differs on every row.
+    let mut twice = same.clone();
+    for (k, name, email) in [(1, "x", "a@x"), (2, "x", "b@x"), (3, "y", "c@x"), (4, "z", "d@x")] {
+        twice
+            .put(
+                "user",
+                row_of(
+                    &m,
+                    "user",
+                    &[
+                        ("id", uid(k)),
+                        ("name", Value::text(name)),
+                        ("team", Value::text("t")),
+                        ("admin", Value::Bool(false)),
+                        ("email", Value::text(email)),
+                    ],
+                ),
+            )
+            .unwrap();
+    }
+    assert_eq!(form::label_columns(&twice, "user"), (Some("name".into()), Some("email".into())));
     // By the keys.
     let src = source(&m, &st);
     let mut w = writer(&m, false);

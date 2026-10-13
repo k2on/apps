@@ -504,9 +504,12 @@ impl Pickable {
 
 /// Which of a table's columns label its rows in the picker: the first text
 /// column that is not an id or a reference and that tells the rows apart
-/// best — a column that holds one value on every row (a kind, an owner)
-/// says nothing about which row it is — and after it the next such column
-/// that holds more than one value, if any does.
+/// well — at least half as well as the one that tells them apart best, and
+/// never a column that holds one value on every row (a kind, an owner),
+/// which says nothing about which row it is. The *first* such, not the
+/// best: a file path is different on every row and a title on nearly every
+/// one, and a person reads the title. After it, the next such column that
+/// holds more than one value, if any does.
 pub fn label_columns(store: &dyn Store, table: &str) -> (Option<String>, Option<String>) {
     let Some(tbl) = store.schema().lookup_table(table) else {
         return (None, None);
@@ -532,7 +535,8 @@ pub fn label_columns(store: &dyn Store, table: &str) -> (Option<String>, Option<
         .filter(|(_, n)| *n > 0)
         .collect();
     let best = candidates.iter().map(|(_, n)| *n).max().unwrap_or(0);
-    let Some(first) = candidates.iter().position(|(_, n)| *n == best) else {
+    let enough = if rows.len() > 1 { best.div_ceil(2).max(2) } else { 1 };
+    let Some(first) = candidates.iter().position(|(_, n)| *n >= enough) else {
         return (None, None);
     };
     let second = candidates
