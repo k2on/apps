@@ -1190,3 +1190,109 @@ fn the_admin_page_says_the_servers_verdict_when_it_arrives() {
     let first = Explorer::outcome(&page.explorer.calls[0], &Outbox::of(&state, page.sent.len(), &page.answers));
     assert_eq!(first, "in the log, at 12", "each call keeps its own answer");
 }
+
+// -- an edit ends when the click goes elsewhere ------------------------------
+
+/// Start editing the name of the user at row `r`, and type `text`.
+fn editing(ex: &mut Explorer, src: &Source, w: &mut Recorder, r: usize, text: &str) {
+    ex.update(Msg::Open("user".into()), src, w);
+    ex.update(Msg::Cell(r, 1), src, w);
+    ex.update(Msg::Edit, src, w);
+    ex.update(Msg::EditText(text.into()), src, w);
+}
+
+/// A click on another row while a changed, valid value is in the editor
+/// submits it exactly as <Enter> would — to the row it was typed on, not the
+/// one clicked — and the cursor lands on the clicked row with no editor
+/// open. Falsified by not ending the edit on a click: the editor stayed
+/// open and nothing was written.
+#[test]
+fn a_click_elsewhere_submits_a_changed_edit() {
+    let m = module();
+    let st = store(&m);
+    let src = source(&m, &st);
+    let mut w = writer(&m, false);
+    let mut ex = Explorer::new();
+    editing(&mut ex, &src, &mut w, 0, "annie");
+    ex.update(Msg::Cell(2, 3), &src, &mut w);
+    assert!(ex.editing.is_none(), "no editor is left open");
+    assert_eq!((ex.row_at, ex.column_at), (2, 3), "the cursor is where the click was");
+    let (f, args) = w.authored.last().expect("submitted");
+    assert_eq!(f, "update_user");
+    assert_eq!(args["id"], uid(1), "on the row it was typed on");
+    assert_eq!(args["name"], Value::text("annie"));
+    assert_eq!(w.authored.len(), 1);
+    // <Enter> reaching the grammar — the box does not have the keys — submits
+    // too, rather than opening the editor again over what was typed.
+    editing(&mut ex, &src, &mut w, 1, "robert");
+    ex.update(named(Named::Enter), &src, &mut w);
+    assert!(ex.editing.is_none());
+    assert_eq!(w.authored.last().unwrap().1["name"], Value::text("robert"));
+}
+
+/// An edit that changed nothing is dropped by a click elsewhere, as <Esc>
+/// would drop it: nothing is written, and nothing is said — it is not
+/// submitted to find out there was nothing to change. Falsified by
+/// submitting whatever the editor holds: nothing was written either (the
+/// submit has its own guard), so the test first passed for that reason; it
+/// asserts the note now, and the falsified run said "nothing to change".
+#[test]
+fn a_click_elsewhere_drops_an_unchanged_edit() {
+    let m = module();
+    let st = store(&m);
+    let src = source(&m, &st);
+    let mut w = writer(&m, false);
+    let mut ex = Explorer::new();
+    editing(&mut ex, &src, &mut w, 0, "ann");
+    ex.note = "before".into();
+    ex.update(Msg::Cell(1, 1), &src, &mut w);
+    assert_eq!(ex.note, "before", "dropped as <Esc> drops it");
+    assert!(ex.editing.is_none());
+    assert_eq!(ex.row_at, 1);
+    assert!(w.authored.is_empty() && w.raws.is_empty(), "{:?}", w.authored);
+}
+
+/// An edit that does not read as its column's value is dropped by a click
+/// elsewhere, and says why: nothing is written, and the editor does not go
+/// with the cursor. Falsified by keeping the editor when the text does not
+/// read: it stayed open over the row the cursor had left.
+#[test]
+fn a_click_elsewhere_drops_an_invalid_edit() {
+    let m = module();
+    let st = store(&m);
+    let src = source(&m, &st);
+    let mut w = writer(&m, true);
+    let mut ex = Explorer::new();
+    ex.update(Msg::Open("team".into()), &src, &mut w);
+    ex.update(Msg::Cell(0, 1), &src, &mut w);
+    ex.update(Msg::Edit, &src, &mut w);
+    ex.update(Msg::EditText("three".into()), &src, &mut w);
+    ex.update(Msg::Cell(1, 0), &src, &mut w);
+    assert!(ex.editing.is_none());
+    assert_eq!((ex.row_at, ex.column_at), (1, 0));
+    assert!(w.raws.is_empty() && w.authored.is_empty());
+    assert!(ex.note.contains("size: a whole number"), "{}", ex.note);
+}
+
+/// A click outside the table — another screen, or the app beside a docked
+/// explorer, which its host says as `Blur` — ends the edit the same way.
+/// Falsified by leaving `Blur` out of what ends an edit: the editor stayed
+/// open after the click into the app, and nothing was written.
+#[test]
+fn a_click_outside_the_table_ends_the_edit() {
+    let m = module();
+    let st = store(&m);
+    let src = source(&m, &st);
+    let mut w = writer(&m, false);
+    let mut ex = Explorer::new();
+    editing(&mut ex, &src, &mut w, 2, "catherine");
+    ex.update(Msg::Show(Screen::Log), &src, &mut w);
+    assert!(ex.editing.is_none() && ex.screen == Screen::Log);
+    assert_eq!(w.authored.last().unwrap().1["name"], Value::text("catherine"));
+    editing(&mut ex, &src, &mut w, 0, "anne");
+    ex.update(Msg::Blur, &src, &mut w);
+    assert!(ex.editing.is_none());
+    assert_eq!(ex.screen, Screen::Table("user".into()), "the explorer stays where it was");
+    assert_eq!(w.authored.last().unwrap().1["name"], Value::text("anne"));
+    assert_eq!(w.authored.len(), 2);
+}

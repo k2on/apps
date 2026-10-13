@@ -137,11 +137,12 @@ impl Explorer {
         let (page, pages) = self.page(all);
         let from = page * PAGE_ROWS;
         let grid = self.table_grid(src, t);
-        let editing = self
-            .editing
-            .as_ref()
-            .filter(|e| e.table == t)
-            .map(|e| (self.row_at - from, self.column_at, e.text.clone()));
+        // The editor is drawn on the row it edits, found by its key.
+        let editing = self.editing.as_ref().filter(|e| e.table == t).and_then(|e| {
+            let at = self.editing_at(src)?.checked_sub(from)?;
+            let column = Explorer::columns(src, t).iter().position(|c| *c == e.column)?;
+            Some((at, column, e.text.clone()))
+        });
         let body = view_grid(
             grid,
             Some((self.row_at.saturating_sub(from), self.column_at)),

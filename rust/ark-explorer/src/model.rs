@@ -120,6 +120,9 @@ pub enum Msg {
     Recall(usize),
     /// A click on a cell of a query's answer.
     AnswerCell(usize, usize),
+    /// The keyboard and the pointer went somewhere else — the app beside
+    /// a docked explorer: an edit in progress ends as a click away ends it.
+    Blur,
 }
 
 /// The explorer: where it is and what it is in the middle of. Everything
@@ -311,7 +314,15 @@ impl Explorer {
 
     /// Do what `msg` asks, against what `src` holds, writing through `w`.
     pub fn update(&mut self, msg: Msg, src: &Source, w: &mut dyn Writer) -> Outcome {
+        // A spreadsheet's rule: anything that is not the edit itself ends
+        // it — submitted as <Enter> would when it changed and reads, dropped
+        // as <Esc> would otherwise — before it is done, so the editor never
+        // stays on the old row and never lands on the new one.
+        if !matches!(msg, Msg::Key(..) | Msg::EditText(_) | Msg::Commit | Msg::CancelEdit) {
+            self.end_edit(src, w);
+        }
         match msg {
+            Msg::Blur => {}
             Msg::Key(key, mods) => {
                 let searching = matches!(self.keys.mode(), vim::Mode::Search(_));
                 let action = self.keys.press(&key, mods);
@@ -562,6 +573,18 @@ impl Explorer {
                 return o;
             }
         }
+        // The editor is open but its box does not have the keys: <Enter>
+        // submits it, <Esc> drops it, and anything else ends it first.
+        if self.editing.is_some() {
+            match action {
+                Action::Activate => {
+                    self.commit(src, w);
+                    return Outcome::Stay;
+                }
+                Action::Cancel => {}
+                _ => self.end_edit(src, w),
+            }
+        }
         match action {
             Action::Move(m) => self.travel(m, src),
             Action::Activate => match &self.screen {
@@ -761,6 +784,41 @@ impl Explorer {
                 why
             }
         };
+    }
+
+    /// End the edit in progress, as a click elsewhere in a spreadsheet does:
+    /// a value that changed and reads as its column's is submitted exactly as
+    /// <Enter> submits it; one that did not change, or does not read, is
+    /// dropped as <Esc> drops it. Either way the editor is gone — a refusal
+    /// is said, and not left open on a row the cursor has left.
+    pub fn end_edit(&mut self, src: &Source, w: &mut dyn Writer) {
+        let Some(e) = &self.editing else { return };
+        let read = src
+            .store
+            .schema()
+            .lookup_table(&e.table)
+            .and_then(|t| t.column(&e.column))
+            .map(|c| edit::parse_cell(c, &e.text));
+        let old = src.store.get(&e.table, &e.key);
+        match (read, old) {
+            (Some(Ok(v)), Some(old)) if old.get(&e.column) != Some(&v) => {
+                self.commit(src, w);
+                self.editing = None;
+            }
+            (Some(Err(why)), _) => {
+                self.note = format!("edit dropped, {why}");
+                self.editing = None;
+            }
+            _ => self.editing = None,
+        }
+    }
+
+    /// Where the row being edited is drawn, among a table's rows: found by
+    /// its key, not by where the cursor is.
+    pub fn editing_at(&self, src: &Source) -> Option<usize> {
+        let e = self.editing.as_ref()?;
+        let tbl = src.store.schema().lookup_table(&e.table)?;
+        src.store.scan(&e.table).iter().position(|r| tbl.key_of(r) == e.key)
     }
 
     /// Delete the row under the cursor, routed as an edit is.
