@@ -2,88 +2,102 @@
 //!
 //! The failure it prevents is not subtle: `Wrapping::None` does not shorten a
 //! string, it draws it at full length, and a long title runs straight under
-//! the next column. Which end to take off depends on what the string is, so
-//! there are two cuts, in characters ([`tail`], [`middle`]) — and one place
-//! that knows the width in pixels ([`within`]), because a table cell does:
-//! by the time iced lays it out, its column is a number and not an estimate.
+//! the next column. Which part to take out depends on what the string is
+//! ([`Cut`]), and there are two budgets: characters ([`tail`], [`middle`]),
+//! for a width decided before layout, and pixels ([`within`]), because a
+//! table cell is laid out — by then its column is a number and not an
+//! estimate.
 
-/// Shorten to `max` characters, taking the *end* off.
-///
-/// The right one for a sentence — a menu entry. `Go to Goldberg Variations,
-/// BWV…` still says what the row does, where taking the middle out spends
-/// most of the width on `Go to` and an ellipsis. It is also what AppKit does
-/// to a menu item that will not fit. Anything shorter than two characters of
-/// budget is left alone rather than reduced to an ellipsis.
+/// Which part of a string goes when it does not fit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Cut {
+    /// The end, for a sentence or a label — a menu entry, a heading. `Go to
+    /// Goldberg Variations, BWV…` still says what the row does, where taking
+    /// the middle out spends most of the width on `Go to` and an ellipsis.
+    /// It is also what AppKit does to a menu item that will not fit.
+    End,
+    /// The middle, for a name whose ends identify it — a table cell. A Bach
+    /// movement is `Prelude No. 14 in F-sharp minor, BWV 859`, and the tail
+    /// carries the catalogue number that tells it from the other twenty-three
+    /// preludes; cutting the end leaves a column of `Prelude No. 14 in
+    /// F-shar…`, the half that is the same in all of them. The bias is
+    /// forward: the head is doing more work than the tail.
+    Middle,
+}
+
+impl Cut {
+    /// Of `keep` characters, how many are the start's; the rest are the end's.
+    fn head(self, keep: usize) -> usize {
+        match self {
+            Cut::End => keep,
+            Cut::Middle => keep.div_ceil(2),
+        }
+    }
+}
+
+/// `keep` characters of `chars` around one ellipsis, taken as `cut` says. With
+/// `tidy`, a space beside the ellipsis goes: `Johann…`, not `Johann …`.
+fn shorten(chars: &[char], keep: usize, cut: Cut, tidy: bool) -> String {
+    let head = cut.head(keep);
+    let start: String = chars[..head].iter().collect();
+    let end: String = chars[chars.len() - (keep - head)..].iter().collect();
+    match tidy {
+        true => format!("{}\u{2026}{}", start.trim_end(), end.trim_start()),
+        false => format!("{start}\u{2026}{end}"),
+    }
+}
+
+/// Shorten to `max` characters, taking the *end* off ([`Cut::End`]). Anything
+/// shorter than two characters of budget is left alone rather than reduced to
+/// an ellipsis.
 pub fn tail(body: &str, max: usize) -> String {
     let chars: Vec<char> = body.chars().collect();
     if chars.len() <= max || max < 2 {
         return body.to_string();
     }
-    let mut out: String = chars[..max - 1].iter().collect();
-    out.push('\u{2026}');
-    out
+    shorten(&chars, max - 1, Cut::End, false)
 }
 
-/// Shorten to `max` characters, taking the *middle* out.
-///
-/// The right one for a name whose ends identify it: a Bach movement is
-/// `Prelude No. 14 in F-sharp minor, BWV 859`, and the tail carries the
-/// catalogue number that tells it from the other twenty-three preludes.
-/// Clipping the end leaves a column of `Prelude No. 14 in F-shar…`, which is
-/// the half that is the same in all of them. The bias is forward: the head is
-/// doing more work than the tail.
+/// Shorten to `max` characters, taking the *middle* out ([`Cut::Middle`]).
 pub fn middle(body: &str, max: usize) -> String {
     let chars: Vec<char> = body.chars().collect();
     if chars.len() <= max || max < 5 {
         return body.to_string();
     }
-    let keep = max - 1;
-    let head = keep.div_ceil(2);
-    let tail = keep - head;
-    let mut out: String = chars[..head].iter().collect();
-    out.push('\u{2026}');
-    out.extend(chars[chars.len() - tail..].iter());
-    out
+    shorten(&chars, max - 1, Cut::Middle, false)
 }
 
-/// The longest start of `body` that, with an ellipsis after it, `measure`s
-/// no wider than `px` — or `body` itself when it already fits.
+/// The widest cut of `body` — as `cut` says, around one ellipsis — that
+/// `measure`s no wider than `px`, or `body` itself when it already fits.
 ///
-/// This is [`tail`] with the budget found rather than guessed: a table cell is
-/// handed its column's width at layout, so the characters it can afford are
-/// asked of the shaped text instead of an average advance that is wrong for
-/// every string in a different direction. It never answers wider than `px`:
-/// where not even an ellipsis fits, it answers nothing. A space left before
-/// the ellipsis is dropped, so a name cut between two words reads `Johann…`
-/// rather than `Johann …`.
+/// [`tail`] and [`middle`] with the budget found rather than guessed: a table
+/// cell is handed its column's width at layout, so the characters it can
+/// afford are asked of the shaped text instead of an average advance that is
+/// wrong for every string in a different direction. It never answers wider
+/// than `px`: where not even an ellipsis fits, it answers nothing. A space
+/// beside the ellipsis is dropped, on either side, so a name cut between two
+/// words reads `Johann…` rather than `Johann …`.
 ///
 /// `measure` is asked a handful of times: the whole, then a first guess in
 /// proportion to how far over it is, then a character at a time from there.
-pub fn within(body: &str, px: f32, measure: impl Fn(&str) -> f32) -> String {
+pub fn within(body: &str, px: f32, cut: Cut, measure: impl Fn(&str) -> f32) -> String {
     let full = measure(body);
     if full <= px {
         return body.to_string();
     }
-    let n = body.chars().count();
-    // `tail(body, k + 1)` is `k` characters and an ellipsis, for `k` in
-    // `1..=n - 2`; zero characters is the ellipsis alone.
-    let cut = |k: usize| -> String {
-        if k == 0 {
-            return '\u{2026}'.to_string();
-        }
-        let cut = tail(body, k + 1);
-        let head = cut.strip_suffix('\u{2026}').unwrap_or(&cut).trim_end();
-        format!("{head}\u{2026}")
-    };
-    let most = n.saturating_sub(2);
-    let mut k = ((n as f32 * px / full).floor() as usize).min(most);
-    while k > 0 && measure(&cut(k)) > px {
+    let chars: Vec<char> = body.chars().collect();
+    // `k` characters kept around the ellipsis, from none (the ellipsis alone)
+    // to all but one.
+    let shown = |k: usize| shorten(&chars, k, cut, true);
+    let most = chars.len().saturating_sub(1);
+    let mut k = ((chars.len() as f32 * px / full).floor() as usize).min(most);
+    while k > 0 && measure(&shown(k)) > px {
         k -= 1;
     }
-    while k < most && measure(&cut(k + 1)) <= px {
+    while k < most && measure(&shown(k + 1)) <= px {
         k += 1;
     }
-    let out = cut(k);
+    let out = shown(k);
     match measure(&out) <= px {
         true => out,
         false => String::new(),
@@ -121,54 +135,60 @@ mod tests {
             .sum()
     }
 
-    /// What does not fit ends in an ellipsis and never measures wider than
-    /// the column, at every width from nothing to more than it needs — and is
-    /// the *longest* start that does, so a column with room for one more
-    /// character draws it. What fits is drawn whole.
+    /// What does not fit is a start and an end of it around one ellipsis —
+    /// only a start for [`Cut::End`] — with no space beside the ellipsis,
+    /// never wider than the column, at every width from nothing to more than
+    /// it needs; and it is the *widest* such cut, so a column with room for one
+    /// more character draws it. What fits is drawn whole.
     ///
-    /// Falsified by dropping the loop that steps the first guess down, which
-    /// leaves only the last guard between an over-long guess and the column:
-    /// `an ellipsis fits in 10px and nothing was drawn`. Dropping the guard as
-    /// well, so the guess is trusted, draws past the edge: `"…" is 10 wide in
-    /// a 0px column`.
+    /// Falsified by dropping the `trim_start` on the end's side of the cut:
+    /// `"Johan… Bach" has a space beside its ellipsis`.
     #[test]
-    fn what_does_not_fit_ends_in_an_ellipsis_inside_its_width() {
-        for body in [
+    fn what_does_not_fit_loses_its_middle_inside_its_width() {
+        let bodies = [
             "Johann Sebastian Bach",
-            "Goldberg Variations, BWV 988",
+            "Prelude No. 14 in F-sharp minor, BWV 859",
             "Frédéric Chopin",
             "Aria",
             "WWWWWWWW",
-        ] {
-            let whole = advance(body);
-            assert_eq!(within(body, whole, advance), body, "{body} fits exactly");
-            assert_eq!(within(body, whole + 40.0, advance), body, "{body} fits with room");
-            for px in 0..whole.ceil() as usize {
-                let px = px as f32;
-                let out = within(body, px, advance);
-                assert!(advance(&out) <= px, "{out:?} is {} wide in a {px}px column", advance(&out));
-                if out.is_empty() {
-                    assert!(advance("\u{2026}") > px, "an ellipsis fits in {px}px and nothing was drawn");
-                    continue;
+        ];
+        for cut in [Cut::Middle, Cut::End] {
+            for body in bodies {
+                let chars: Vec<char> = body.chars().collect();
+                let whole = advance(body);
+                assert_eq!(within(body, whole, cut, advance), body, "{body} fits exactly");
+                assert_eq!(within(body, whole + 40.0, cut, advance), body, "{body} fits with room");
+                for px in 0..whole.ceil() as usize {
+                    let px = px as f32;
+                    let out = within(body, px, cut, advance);
+                    assert!(advance(&out) <= px, "{out:?} is {} wide in a {px}px column", advance(&out));
+                    if out.is_empty() {
+                        assert!(advance("\u{2026}") > px, "an ellipsis fits in {px}px and nothing was drawn");
+                        continue;
+                    }
+                    let (start, end) = out.split_once('\u{2026}').unwrap_or_else(|| panic!("{out:?} has no ellipsis"));
+                    assert!(!end.contains('\u{2026}'), "{out:?} has two");
+                    assert!(body.starts_with(start) && body.ends_with(end), "{out:?} is not {body:?} around a cut");
+                    assert!(!start.ends_with(' ') && !end.starts_with(' '), "{out:?} has a space beside its ellipsis");
+                    if cut == Cut::End {
+                        assert!(end.is_empty(), "{out:?} kept an end");
+                    }
+                    // No wider cut fits: every longer one is either this one
+                    // again (a space dropped) or too wide.
+                    for k in start.chars().count() + end.chars().count() + 1..chars.len() {
+                        let wider = shorten(&chars, k, cut, true);
+                        assert!(wider == out || advance(&wider) > px, "{wider:?} fits in {px}px, and {out:?} was drawn");
+                    }
                 }
-                assert!(out.ends_with('\u{2026}'), "{out:?} was cut with no ellipsis");
-                let head = out.trim_end_matches('\u{2026}');
-                assert!(body.starts_with(head), "{out:?} is not the start of {body:?}");
-                // One more character, past any space the cut dropped.
-                let m = head.chars().count();
-                let space = body.chars().skip(m).take_while(|c| c.is_whitespace()).count();
-                let longer = format!("{}\u{2026}", body.chars().take(m + space + 1).collect::<String>());
-                assert!(
-                    m + space + 1 >= body.chars().count() - 1 || advance(&longer) > px,
-                    "{longer:?} would have fit in {px}px, and {out:?} was drawn"
-                );
             }
         }
-        assert_eq!(within("Johann Sebastian Bach", 75.0, advance), "Johann Se\u{2026}");
-        assert_eq!(
-            within("Johann Sebastian Bach", 55.0, advance),
-            "Johann\u{2026}",
-            "no space before the ellipsis"
-        );
+        // A movement keeps its catalogue number, which is what tells it from
+        // its twenty-three siblings.
+        let prelude = "Prelude No. 14 in F-sharp minor, BWV 859";
+        assert_eq!(within(prelude, 130.0, Cut::Middle, advance), "Prelude N\u{2026}, BWV 859");
+        // ` Bach` would fit as well, and its space is dropped.
+        assert_eq!(within("Johann Sebastian Bach", 75.0, Cut::Middle, advance), "Johan\u{2026}Bach");
+        assert_eq!(within("Johann Sebastian Bach", 75.0, Cut::End, advance), "Johann Se\u{2026}");
+        assert_eq!(within("Johann Sebastian Bach", 55.0, Cut::End, advance), "Johann\u{2026}");
     }
 }

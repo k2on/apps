@@ -10,8 +10,10 @@
 //! - **A column is as wide as its header and a sample of its values**, within
 //!   [`MIN_CHARS`] and [`MAX_CHARS`]: a column of booleans is not given the
 //!   room a title is, and one long file path does not take the whole pane.
-//! - **A value that does not fit loses its end to an ellipsis**, by
-//!   characters, as `arkui::fit::tail` cuts a menu entry; and the view also
+//! - **A value that does not fit loses its middle to an ellipsis**, by
+//!   characters, as `arkui`'s table cuts a cell ([`arkui::fit::middle`]): a
+//!   value's ends are what tell it from its neighbours. A heading loses its
+//!   end instead, as the table's do ([`arkui::fit::tail`]); and the view also
 //!   clips each cell to its column, so an estimate that errs costs a few
 //!   pixels of glyph and never a neighbour.
 //! - **Nothing is lost by cutting**: [`Grid::detail`] is the whole value of
@@ -60,9 +62,10 @@ pub fn width_of<'v>(header: &str, values: impl IntoIterator<Item = &'v Value>) -
         .clamp(MIN_CHARS, MAX_CHARS)
 }
 
-/// What fits in `chars`: the text itself, or its start and an ellipsis.
+/// What of a value fits in `chars`: the text itself, or its start and its
+/// end around an ellipsis.
 pub fn clip(text: &str, chars: usize) -> String {
-    arkui::fit::tail(text, chars)
+    arkui::fit::middle(text, chars)
 }
 
 /// A column of `chars` characters, in pixels, with its gap.
@@ -143,7 +146,7 @@ impl Grid {
 
     /// The heading of column `c`, cut to its width.
     pub fn heading(&self, c: usize) -> String {
-        clip(&self.headings[c], self.widths[c])
+        arkui::fit::tail(&self.headings[c], self.widths[c])
     }
 
     /// The cell at row `r`, column `c`, as drawn: cut to its column.

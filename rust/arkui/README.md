@@ -28,13 +28,13 @@ browser draws no text at all.
 | `picker` | `Picker<T>` of `Choice { value, name, on }` and an optional trailing "new" row. It has `width_for`, `activate` (which returns `Picked::Toggled` or `Picked::Naming`), `view` taking `Messages`, and `focus_naming`. |
 | `context` | `Context<M, T>`: a menu, its submenu, or a picker on its own, and the rules for them. `focus()` says which `Layer` has the keys. It also has `open_menu`, `close_menu` (which takes its submenu with it), `open_picker`, `land`, `picker_at`, `tick` (the dwell), `chosen`, `activate_picker`, `cancel` (`<Esc>` closes both), and `travel` (`l` into a submenu, `h` back out). |
 | `layer` | `backdrop` and `dimmed` close on a click and swallow the wheel. Also `pinned` and `centred`. |
-| `table` | `cell`, `heading` (each cut to its column at layout, with an ellipsis, and `SPACING` after it), `section`, `gutter`, `row`, `GUTTER`. |
+| `table` | `cell`, `heading` (each cut to its column at layout — a cell its middle, a heading its end — with `SPACING` after it), `section`, `gutter`, `row`, `GUTTER`. |
 | `cards` | `Shelf` (`columns`, `grid`, `room`, where the scrollbar is subtracted), `Card<M>`, `view`, `view_card`, `header`, `empty_page`. |
 | `art` | `hash` (FNV-1a over UTF-16, the same as the phone's), `pair`, `square` (the derived square), and `picture` (the real one if it has arrived, the square until then). |
 | `images` | `Images::new(name)` with `want(url) -> Option<Task<Loaded>>`, `loaded`, `handle`. Pictures are decoded and bounded (`BOUND` is 384) off the render thread. The cache is a disk directory natively and the Cache API plus `createImageBitmap` in a browser. A failure is remembered. |
 | `route` | `trait Route { fragment, parse }`, `join`/`split`, `Router<R>` with `sync` (reconciled, not pushed), `replace_next` (a scrub is one entry) and `poll` (the back button, once there is something to resolve against), `AddressBar`, `Browser`. |
 | `scroll` | `reveal(id, grid, at)` keeps a keyboard cursor on screen. |
-| `fit`, `format`, `url` | `tail`/`middle`/`within` (the longest start that fits a width in pixels); `clock`/`spell`/`plural`/`span`; `encode`/`encoded`/`decode`. |
+| `fit`, `format`, `url` | `Cut` (`End`, `Middle`), `tail`/`middle`, `within` (the widest cut that fits a width in pixels); `clock`/`spell`/`plural`/`span`; `encode`/`encoded`/`decode`. |
 
 ## Using it
 

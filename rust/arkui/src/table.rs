@@ -52,24 +52,30 @@ pub const HEADING_SIZE: f32 = 11.0;
 /// every other: beside a docked panel the columns are a few hundred pixels
 /// narrower, and a cell cut for the wide table drew `Johann Seba` straight
 /// into `Goldberg Variatio`. A value that fits is drawn whole, as it was;
-/// one that does not loses its end ([`fit::tail`]), so it ends in the
-/// ellipsis that says so.
+/// one that does not loses its middle ([`fit::Cut::Middle`]), because a
+/// cell's value is a name and its ends are what identify it — a movement
+/// keeps its catalogue number.
 ///
 /// `on_cursor` is the accent-filled row; `accent` draws the text in the accent
 /// (the one playing, a ticked name); `dim` is a secondary column.
 pub fn cell<'a, M: 'a>(body: String, width: Length, on_cursor: bool, accent: bool, dim: bool) -> Element<'a, M> {
     in_column(
-        Line::new(body, CELL_SIZE, move |theme| style::on_row(theme, on_cursor, accent, dim)),
+        Line::new(body, CELL_SIZE, fit::Cut::Middle, move |theme| {
+            style::on_row(theme, on_cursor, accent, dim)
+        }),
         width,
     )
 }
 
-/// A column heading, in the same grid as the cells under it, cut and spaced
-/// the way they are.
+/// A column heading, in the same grid as the cells under it, spaced the way
+/// they are. Cut at its end ([`fit::Cut::End`]), not its middle: a heading
+/// is a word, and `Perfo…` reads where `Per…er` does not.
 pub fn heading<'a, M: 'a>(label: impl Into<String>, width: Length) -> Element<'a, M> {
     let faint = style::faint(0.55);
     in_column(
-        Line::new(label.into(), HEADING_SIZE, move |theme| faint(theme).color.unwrap_or_default()),
+        Line::new(label.into(), HEADING_SIZE, fit::Cut::End, move |theme| {
+            faint(theme).color.unwrap_or_default()
+        }),
         width,
     )
 }
@@ -104,14 +110,16 @@ fn in_column<'a, M: 'a>(line: Line<'a>, width: Length) -> Element<'a, M> {
 struct Line<'a> {
     body: String,
     size: f32,
+    cut: fit::Cut,
     color: Box<dyn Fn(&Theme) -> iced::Color + 'a>,
 }
 
 impl<'a> Line<'a> {
-    fn new(body: String, size: f32, color: impl Fn(&Theme) -> iced::Color + 'a) -> Self {
+    fn new(body: String, size: f32, cut: fit::Cut, color: impl Fn(&Theme) -> iced::Color + 'a) -> Self {
         Line {
             body,
             size,
+            cut,
             color: Box::new(color),
         }
     }
@@ -120,8 +128,8 @@ impl<'a> Line<'a> {
 /// What a [`Line`] keeps between layouts: what it was last cut for, the cut,
 /// and the cut shaped.
 #[derive(Default)]
-struct Cut<P: Paragraph> {
-    for_: Option<(String, f32, f32)>,
+struct Shaped<P: Paragraph> {
+    for_: Option<(String, f32, f32, fit::Cut)>,
     shown: String,
     paragraph: core_text::paragraph::Plain<P>,
 }
@@ -131,11 +139,11 @@ where
     R: core_text::Renderer,
 {
     fn tag(&self) -> tree::Tag {
-        tree::Tag::of::<Cut<R::Paragraph>>()
+        tree::Tag::of::<Shaped<R::Paragraph>>()
     }
 
     fn state(&self) -> tree::State {
-        tree::State::new(Cut::<R::Paragraph>::default())
+        tree::State::new(Shaped::<R::Paragraph>::default())
     }
 
     fn size(&self) -> Size<Length> {
@@ -143,13 +151,13 @@ where
     }
 
     fn layout(&mut self, tree: &mut Tree, renderer: &R, limits: &layout::Limits) -> layout::Node {
-        let cut = tree.state.downcast_mut::<Cut<R::Paragraph>>();
+        let cut = tree.state.downcast_mut::<Shaped<R::Paragraph>>();
         let max = limits.max();
         let (size, font) = (self.size, renderer.default_font());
 
-        let key = (self.body.clone(), max.width, self.size);
+        let key = (self.body.clone(), max.width, self.size, self.cut);
         if cut.for_.as_ref() != Some(&key) {
-            cut.shown = fit::within(&self.body, max.width, |s| {
+            cut.shown = fit::within(&self.body, max.width, self.cut, |s| {
                 R::Paragraph::with_text(one_line(s, size, font, max.height)).min_bounds().width
             });
             cut.for_ = Some(key);
@@ -168,7 +176,7 @@ where
         _cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
-        let cut = tree.state.downcast_ref::<Cut<R::Paragraph>>();
+        let cut = tree.state.downcast_ref::<Shaped<R::Paragraph>>();
         widget::text::draw(
             renderer,
             defaults,

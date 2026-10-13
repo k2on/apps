@@ -702,7 +702,12 @@ fn a_long_value_never_exceeds_its_column() {
     }
     let at = g.rows.iter().position(|r| r[1] == Value::text(long.clone())).expect("the long row");
     assert_eq!(g.widths[1], cells::MAX_CHARS, "a long column stops at the most");
-    assert!(g.cell(at, 1).ends_with('\u{2026}'), "{}", g.cell(at, 1));
+    let drawn = g.cell(at, 1);
+    let (start, end) = drawn.split_once('\u{2026}').expect("the long value is cut");
+    assert!(
+        long.starts_with(start) && long.ends_with(end) && !end.is_empty(),
+        "{drawn}: its start and its end"
+    );
     assert_eq!(g.widths[3], cells::MIN_CHARS, "a column of booleans is narrow");
     assert_eq!(g.cell(at, 0), "00000000", "an id is its first eight hex digits");
     assert_eq!(g.detail(at, 1), Some(format!("name: {long}")), "the detail line is the whole value");
