@@ -253,6 +253,10 @@ pub struct Peer {
     /// which was wrong both ways (the demo has no wire; a real client's first
     /// library comes out of its own replica).
     pub art_gen: u64,
+    /// Bumped whenever the store moved at all — what a refresh took was not
+    /// nothing. The explorer diffs what it shows against what it last drew
+    /// when this moves, and not on a tick where nothing did.
+    pub store_gen: u64,
 }
 
 impl Peer {
@@ -295,6 +299,7 @@ impl Peer {
             on: Vec::new(),
             moved: Vec::new(),
             art_gen: 1,
+            store_gen: 1,
         };
         let v = &peer.views;
         v.library.fill(&mut peer.items, Item::from_value);
@@ -350,6 +355,9 @@ impl Peer {
     /// (§1.7); that costs a comparison each.
     pub fn refresh(&mut self) -> bool {
         let changes = self.client.take_changes();
+        if !matches!(&changes, Changes::Applied(c) if c.is_empty()) {
+            self.store_gen += 1;
+        }
         let (c, v) = (&self.client, &mut self.views);
         let mut moved = Vec::new();
         let mut note = |name: &'static str, m: Option<Moved>| match m {

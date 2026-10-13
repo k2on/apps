@@ -1296,3 +1296,125 @@ fn a_click_outside_the_table_ends_the_edit() {
     assert_eq!(w.authored.last().unwrap().1["name"], Value::text("anne"));
     assert_eq!(w.authored.len(), 2);
 }
+
+// -- what changed, lit as it lands --------------------------------------------
+
+fn user(m: &ark::ir::Module, k: u8, name: &str, team: &str) -> ark::store::Row {
+    row_of(
+        &m.clone(),
+        "user",
+        &[
+            ("id", uid(k)),
+            ("name", Value::text(name)),
+            ("team", Value::text(team)),
+            ("admin", Value::Bool(false)),
+            ("email", Value::Null),
+        ],
+    )
+}
+
+/// A table on screen: when the host's store moves, a changed cell is lit,
+/// and only it; a new row is lit whole; a removed row is drawn, as gone,
+/// while it fades; all of it fades out over FADE_MS. By key, not by place:
+/// a row added above every other moves them all down one and lights none of
+/// them. Falsified by diffing by place: the row added at the top was
+/// compared with ann, who used to be there, and lit only where the two
+/// differ — [1, 1, 1, 0, 0] — rather than whole, as new.
+#[test]
+fn a_change_in_the_store_is_lit_by_key_and_fades() {
+    let m = module();
+    let st = store(&m);
+    let mut w = writer(&m, false);
+    let mut ex = Explorer::new();
+    ex.update(Msg::Open("user".into()), &source(&m, &st), &mut w);
+    ex.observe(&source(&m, &st), 1, 0);
+    let (_, quiet) = ex.lit_table(&source(&m, &st), "user");
+    assert!(quiet.iter().all(|l| l.cells.iter().all(|s| *s == 0.0)), "nothing is lit on first sight");
+    // bob renamed, dan added above everyone, cat gone.
+    let mut moved = st.clone();
+    moved.put("user", user(&m, 2, "robert", "blue")).unwrap();
+    moved.put("user", user(&m, 0, "dan", "red")).unwrap();
+    moved.delete("user", &[uid(3)]).unwrap();
+    // The same generation is not a move: nothing is diffed.
+    ex.observe(&source(&m, &moved), 1, 500);
+    assert!(!ex.fading());
+    ex.observe(&source(&m, &moved), 2, 1000);
+    let (g, lights) = ex.lit_table(&source(&m, &moved), "user");
+    let name_of = |r: &Vec<Value>| r[1].as_text().to_string();
+    let drawn: Vec<(String, Option<usize>)> = g.rows.iter().zip(&lights).map(|(r, l)| (name_of(r), l.origin)).collect();
+    assert_eq!(
+        drawn,
+        [
+            ("dan".into(), Some(0)),
+            ("ann".into(), Some(1)),
+            ("cat".into(), None),
+            ("robert".into(), Some(2))
+        ],
+        "the gone row is drawn where it was"
+    );
+    assert!(lights[0].cells.iter().all(|s| *s == 1.0), "a new row is lit whole: {:?}", lights[0]);
+    assert!(
+        lights[1].cells.iter().all(|s| *s == 0.0),
+        "ann did not change, only moved: {:?}",
+        lights[1]
+    );
+    assert_eq!(lights[2].gone, 1.0, "cat is drawn as gone");
+    assert_eq!(lights[3].cells, [0.0, 1.0, 0.0, 0.0, 0.0], "only robert's name is lit");
+    assert!(ex.fading());
+    // Half way, fading; past FADE_MS, nothing lit and the gone row gone.
+    ex.observe(&source(&m, &moved), 2, 1000 + crate::flash::FADE_MS / 2);
+    let (_, lights) = ex.lit_table(&source(&m, &moved), "user");
+    assert!((lights[3].cells[1] - 0.75).abs() < 1e-6, "{:?}", lights[3]);
+    ex.observe(&source(&m, &moved), 2, 1000 + crate::flash::FADE_MS + 1);
+    let (g, lights) = ex.lit_table(&source(&m, &moved), "user");
+    assert_eq!(g.rows.len(), 3, "the gone row has gone");
+    assert!(lights.iter().all(|l| l.cells.iter().all(|s| *s == 0.0) && l.gone == 0.0));
+    assert!(!ex.fading());
+    // Another table is only remembered, not lit as new.
+    ex.update(Msg::Open("team".into()), &source(&m, &moved), &mut w);
+    ex.observe(&source(&m, &moved), 3, 5000);
+    assert!(!ex.fading(), "a table seen for the first time lights nothing");
+    let _ = ex.view(&source(&m, &moved), &w);
+}
+
+/// A query's answer on its form is run again when the store moves, and its
+/// rows are lit the same way: a new row whole, a changed cell alone, by the
+/// column that names its rows. Falsified by not running the answer again:
+/// it stayed two rows and nothing was lit.
+#[test]
+fn a_query_answer_is_run_again_and_lit() {
+    let m = module();
+    let st = store(&m);
+    let mut w = writer(&m, false);
+    let mut ex = Explorer::new();
+    let at = form::callables(&m).iter().position(|c| c.name == "members").unwrap();
+    ex.update(Msg::Function(at), &source(&m, &st), &mut w);
+    ex.update(Msg::FormText(vec![0], "blue".into()), &source(&m, &st), &mut w);
+    ex.update(Msg::Call, &source(&m, &st), &mut w);
+    ex.observe(&source(&m, &st), 1, 0);
+    let mut moved = st.clone();
+    moved.put("user", user(&m, 5, "abe", "blue")).unwrap();
+    moved.put("user", user(&m, 2, "bobby", "blue")).unwrap();
+    ex.observe(&source(&m, &moved), 2, 100);
+    let (g, lights) = ex.lit_answer().expect("an answer");
+    let name = g.columns.iter().position(|c| c == "name").unwrap();
+    let lit: Vec<(String, Vec<f32>)> = g
+        .rows
+        .iter()
+        .zip(&lights)
+        .map(|(r, l)| (r[name].as_text().to_string(), l.cells.clone()))
+        .collect();
+    assert_eq!(lit.len(), 3, "{lit:?}");
+    for (who, cells) in &lit {
+        match who.as_str() {
+            "abe" => assert!(cells.iter().all(|s| *s > 0.99), "{lit:?}"),
+            "ann" => assert!(cells.iter().all(|s| *s == 0.0), "{lit:?}"),
+            "bobby" => {
+                assert!(cells[name] > 0.99, "{lit:?}");
+                assert_eq!(cells.iter().filter(|s| **s > 0.0).count(), 1, "{lit:?}");
+            }
+            other => panic!("{other}"),
+        }
+    }
+    let _ = ex.view(&source(&m, &moved), &w);
+}

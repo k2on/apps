@@ -28,7 +28,10 @@
 //! A table's cells are cut to their columns and the whole of the one under
 //! the cursor is said below it ([`cells`]); every query and mutation of the
 //! module is callable from a form ([`form`]), a mutation authored through the
-//! host's writer as a button would author it and never raw.
+//! host's writer as a button would author it and never raw. What changes in
+//! the host's store while a table or an answer is on screen is lit in the
+//! host's accent and fades ([`flash`]): the host says the time and its
+//! store's generation through [`Explorer::observe`].
 //!
 //! The colours are the host's: it
 //! installs its palette with `arkui::theme::install` (or hands one to
@@ -46,6 +49,8 @@ pub mod wire;
 pub mod admin;
 #[cfg(feature = "ui")]
 pub mod cells;
+#[cfg(feature = "ui")]
+pub mod flash;
 #[cfg(feature = "ui")]
 pub mod form;
 #[cfg(feature = "ui")]

@@ -153,6 +153,8 @@ pub enum Message {
     Answered(usize, Result<String, String>),
     Explorer(Msg),
     Refresh,
+    /// The clock, while something lit is fading.
+    Tick,
 }
 
 /// The page.
@@ -169,6 +171,9 @@ pub struct Page {
     pub sent: Vec<Request>,
     /// The server's answer to each, by its place in `sent`.
     pub answers: BTreeMap<usize, Result<String, String>>,
+    /// Bumped with every state read: the explorer diffs what it shows when
+    /// this moves, and lights what changed.
+    pub generation: u64,
 }
 
 impl Page {
@@ -182,6 +187,7 @@ impl Page {
             busy: false,
             sent: vec![],
             answers: BTreeMap::new(),
+            generation: 0,
         }
     }
 
@@ -245,6 +251,8 @@ impl Page {
                 match r.and_then(|t| State::from_json(&t)).and_then(Loaded::of) {
                     Ok(l) => {
                         self.loaded = Some(l);
+                        self.generation += 1;
+                        self.observe();
                         if self.note.starts_with("reading") {
                             self.note.clear();
                         }
@@ -275,10 +283,30 @@ impl Page {
                 // back to, so the explorer stays.
                 let _: Outcome = self.explorer.update(msg, &src, &mut w);
                 let queued = std::mem::take(&mut w.queued);
+                // A table or an answer newly on screen is remembered as drawn.
+                self.observe();
                 self.send(queued)
             }
             Message::Refresh => self.get_state(),
+            Message::Tick => {
+                self.observe();
+                Task::none()
+            }
         }
+    }
+
+    /// The explorer's clock and the state's generation: what changed since
+    /// it last drew is lit, and fades.
+    pub fn observe(&mut self) {
+        let Some(l) = &self.loaded else { return };
+        let src = Source {
+            store: &l.store,
+            schema: &l.module.schema,
+            module: &l.module,
+            log: l,
+            ctx: Ctx::new(l.state.who.clone(), "admin"),
+        };
+        self.explorer.observe(&src, self.generation, now_ms());
     }
 
     pub fn view(&self) -> Element<'_, Message> {
@@ -309,6 +337,11 @@ impl Page {
             arkui::vim::presses().map(|(k, m)| Message::Explorer(Msg::Key(k, m))),
             // What the log and the connections are now, every few seconds.
             iced::time::every(Duration::from_secs(5)).map(|_| Message::Refresh),
+            // A clock only while something lit is fading.
+            match self.explorer.fading() {
+                true => iced::time::every(Duration::from_millis(50)).map(|_| Message::Tick),
+                false => Subscription::none(),
+            },
         ])
     }
 }
@@ -432,5 +465,20 @@ fn sign_in(server: Option<String>) -> Task<Message> {
         Task::done(Message::Token(Err(format!(
             "this admin page asks for a login holding admin: sign in at {server} and set ARK_ADMIN_TOKEN"
         ))))
+    }
+}
+
+/// Milliseconds from some start, for what fades: the browser's clock, or a
+/// monotonic one natively (`Instant` panics on wasm32-unknown-unknown).
+fn now_ms() -> u64 {
+    #[cfg(target_arch = "wasm32")]
+    {
+        js_sys::Date::now() as u64
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use std::sync::OnceLock;
+        static START: OnceLock<std::time::Instant> = OnceLock::new();
+        START.get_or_init(std::time::Instant::now).elapsed().as_millis() as u64
     }
 }

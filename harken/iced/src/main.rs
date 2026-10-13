@@ -1477,6 +1477,8 @@ impl App {
 
     /// Everything the 50ms clock does besides pumping.
     fn tick(&mut self) -> Option<Task<Message>> {
+        // The explorer lights what changed in the store and fades it.
+        self.observe_explorer();
         if let Some(q) = self.quiet {
             match q + 1 >= Self::QUIET_TICKS {
                 true => {

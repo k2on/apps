@@ -15,6 +15,7 @@ use ark::value::{TableName, Value};
 use crate::cells;
 use crate::data::{CrudVerbs, Source, Writer};
 use crate::edit::{self, Route};
+use crate::flash;
 use crate::form::{self, Call, Called, Form, Picker};
 
 /// How many rows of a table are drawn at once: the page the cursor is on.
@@ -157,6 +158,14 @@ pub struct Explorer {
     /// The keys walk a query's answer rather than its form, and where in it.
     pub in_answer: bool,
     pub answer_at: (usize, usize),
+    /// The time the host last said, and the generation of its store it last
+    /// said: what is lit fades against the first, and the second says when
+    /// there is anything to diff.
+    pub now: u64,
+    pub generation: Option<u64>,
+    /// What was last drawn of the table on screen, and of a query's answer.
+    pub table_seen: flash::Tracker,
+    pub answer_seen: flash::Tracker,
     /// Whether the keyboard is the explorer's: a host that docks it beside
     /// the app says when the app has it, and every cursor here is then drawn
     /// as a selection that has lost the keys rather than lit.
@@ -191,6 +200,10 @@ impl Explorer {
             in_answer: false,
             answer_at: (0, 0),
             has_keys: true,
+            now: 0,
+            generation: None,
+            table_seen: flash::Tracker::default(),
+            answer_seen: flash::Tracker::default(),
         }
     }
 
@@ -249,6 +262,81 @@ impl Explorer {
         let (t, row) = self.row_under(src)?;
         let column = Explorer::columns(src, &t).get(self.column_at)?.clone();
         Some(format!("{column}: {}", row.get(&column).map(edit::cell_text).unwrap_or_default()))
+    }
+
+    /// What a host says on every tick (`docs/plan-guards.md` D4): the time,
+    /// and the generation of its store — a number it moves whenever the store
+    /// moved. When it moved, the table on screen is diffed by key against
+    /// what was last drawn, and a query's answer on screen is run again with
+    /// its arguments and diffed the same way; what changed is lit and fades.
+    /// Something shown for the first time is only remembered.
+    pub fn observe(&mut self, src: &Source, generation: u64, now: u64) {
+        self.now = now;
+        let moved = self.generation.is_some_and(|g| g != generation);
+        self.generation = Some(generation);
+        match self.screen.clone() {
+            Screen::Table(t) => {
+                let columns = Explorer::columns(src, &t);
+                let what = format!("table {t}");
+                if moved || !self.table_seen.tracks(&what, &columns) {
+                    let rows = table_rows(src, &t, &columns);
+                    self.table_seen.observe(&what, &columns, rows, now);
+                }
+            }
+            Screen::Call(f) => {
+                let Some(i) = self.calls.iter().rposition(|c| c.function == f) else {
+                    return;
+                };
+                if moved && self.calls[i].kind == FnKind::Query {
+                    let args = self.calls[i].args.clone();
+                    self.calls[i].called = match query(src, &f, &args) {
+                        Ok(v) => Called::Answer(v),
+                        Err(why) => Called::Failed(why),
+                    };
+                }
+                if let Called::Answer(v) = &self.calls[i].called {
+                    let g = cells::Grid::of_value(v);
+                    let k = flash::key_column(&g.rows, g.columns.len());
+                    let what = format!("answer {i} {k:?}");
+                    if moved || !self.answer_seen.tracks(&what, &g.columns) {
+                        let rows = g.rows.iter().map(|r| (answer_key(r, k), r.clone())).collect();
+                        self.answer_seen.observe(&what, &g.columns, rows, now);
+                    }
+                }
+            }
+            _ => {}
+        }
+        self.table_seen.prune(now);
+        self.answer_seen.prune(now);
+    }
+
+    /// Whether anything is still lit, so a host that redraws only when
+    /// asked keeps a clock running.
+    pub fn fading(&self) -> bool {
+        self.table_seen.fading(self.now) || self.answer_seen.fading(self.now)
+    }
+
+    /// A table's page as drawn, lit: its grid with the rows that went put back
+    /// where they were while they fade, and how each drawn row is lit.
+    pub fn lit_table(&self, src: &Source, t: &str) -> (cells::Grid, Vec<flash::RowLight>) {
+        let grid = self.table_grid(src, t);
+        let all = src.store.scan(t).len();
+        let (page, pages) = self.page(all);
+        let from = (page * PAGE_ROWS).min(all);
+        let tbl = src.store.schema().lookup_table(t);
+        let keys: Vec<flash::Key> = src.store.scan(t)[from..(from + PAGE_ROWS).min(all)]
+            .iter()
+            .map(|r| tbl.map(|tbl| tbl.key_of(r)).unwrap_or_default())
+            .collect();
+        flash::light(&grid, &keys, from, page + 1 >= pages, &self.table_seen, self.now)
+    }
+
+    /// The last call's answer, lit, where it was a query's.
+    pub fn lit_answer(&self) -> Option<(cells::Grid, Vec<flash::RowLight>)> {
+        let g = self.answer_grid()?;
+        let k = flash::key_column(&g.rows, g.columns.len());
+        let keys: Vec<flash::Key> = g.rows.iter().map(|r| answer_key(r, k)).collect();
+        Some(flash::light(&g, &keys, 0, true, &self.answer_seen, self.now))
     }
 
     /// Every function a person can call, by router.
@@ -858,4 +946,26 @@ fn query(src: &Source, name: &str, args: &ark::eval::Args) -> Result<Value, Stri
         ark::eval::EvalFault::Verdict(r) => format!("refused: {}", ark::protocol::refusal_text(&r)),
         ark::eval::EvalFault::Bug(b) => format!("a bug: {b:?}"),
     })
+}
+
+/// A table's rows as the diff takes them: each its key and its columns'
+/// values, in the store's order.
+fn table_rows(src: &Source, t: &str, columns: &[String]) -> Vec<(flash::Key, Vec<Value>)> {
+    let tbl = src.store.schema().lookup_table(t);
+    src.store
+        .scan(t)
+        .iter()
+        .map(|r| {
+            let key = tbl.map(|tbl| tbl.key_of(r)).unwrap_or_default();
+            (key, columns.iter().map(|c| r.get(c).cloned().unwrap_or(Value::Null)).collect())
+        })
+        .collect()
+}
+
+/// What names a row of an answer: its key column's value, or all of it.
+fn answer_key(row: &[Value], k: Option<usize>) -> flash::Key {
+    match k {
+        Some(c) => vec![row[c].clone()],
+        None => row.to_vec(),
+    }
 }

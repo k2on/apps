@@ -12,6 +12,7 @@ use ark::schema::Ty;
 
 use crate::cells::{self, Grid};
 use crate::data::{Source, Writer};
+use crate::flash::RowLight;
 use crate::form::{self, Called, Input};
 use crate::model::{Explorer, Msg, Screen, PAGE_ROWS};
 
@@ -136,15 +137,16 @@ impl Explorer {
         let all = src.store.scan(t).len();
         let (page, pages) = self.page(all);
         let from = page * PAGE_ROWS;
-        let grid = self.table_grid(src, t);
         // The editor is drawn on the row it edits, found by its key.
         let editing = self.editing.as_ref().filter(|e| e.table == t).and_then(|e| {
             let at = self.editing_at(src)?.checked_sub(from)?;
             let column = Explorer::columns(src, t).iter().position(|c| *c == e.column)?;
             Some((at, column, e.text.clone()))
         });
+        let (grid, lights) = self.lit_table(src, t);
         let body = view_grid(
             grid,
+            lights,
             Some((self.row_at.saturating_sub(from), self.column_at)),
             self.has_keys,
             editing,
@@ -307,10 +309,10 @@ impl Explorer {
         .align_y(Alignment::Center);
         let form = container(scrollable(lines).style(style::bars)).max_height(FORM_HEIGHT);
         let mut out = column![title, form, run].spacing(8);
-        if let Some(g) = self.answer_grid() {
+        if let Some((g, lights)) = self.lit_answer() {
             let (r, c) = self.answer_at;
-            let detail = g.detail(r, c);
-            out = out.push(view_grid(g, Some((r, c)), self.in_answer && self.has_keys, None, Msg::AnswerCell));
+            let detail = self.answer_grid().and_then(|g| g.detail(r, c));
+            out = out.push(view_grid(g, lights, Some((r, c)), self.in_answer && self.has_keys, None, Msg::AnswerCell));
             out = out.push(detail_line(detail));
         } else {
             out = out.push(Space::new().height(Length::Fill));
@@ -697,6 +699,7 @@ fn detail_line<'a>(detail: Option<String>) -> Element<'a, Msg> {
 /// with the accent when `focused`; `editing` is a cell drawn as its editor.
 fn view_grid<'a>(
     g: Grid,
+    lights: Vec<RowLight>,
     cursor: Option<(usize, usize)>,
     focused: bool,
     editing: Option<(usize, usize, String)>,
@@ -722,34 +725,52 @@ fn view_grid<'a>(
         .width(Length::Fixed(width))
         .padding(Padding::from([0.0, table::ROW_PADDING[1]]));
     let mut rows = Column::new();
-    for r in 0..g.rows.len() {
-        let on_row = cursor.is_some_and(|(cr, _)| cr == r);
+    for d in 0..g.rows.len() {
+        // Which row of the grid this drawn row is: a row that is gone, drawn
+        // while it fades, is none, and takes no cursor and no click.
+        let light = lights.get(d).cloned().unwrap_or(RowLight {
+            origin: Some(d),
+            cells: vec![],
+            gone: 0.0,
+        });
+        let gone = light.gone;
+        let on_row = light.origin.is_some() && cursor.is_some_and(|(cr, _)| Some(cr) == light.origin);
         let mut line = Row::new().align_y(Alignment::Center);
         for c in 0..g.columns.len() {
             let on = on_row && cursor.is_some_and(|(_, cc)| cc == c);
-            let cell: Element<'a, Msg> = match &editing {
-                Some((er, ec, t)) if *er == r && *ec == c => text_input(&g.columns[c], t)
+            let lit = light.cells.get(c).copied().unwrap_or(0.0).max(gone);
+            let cell: Element<'a, Msg> = match (&editing, light.origin) {
+                (Some((er, ec, t)), Some(r)) if *er == r && *ec == c => text_input(&g.columns[c], t)
                     .on_input(Msg::EditText)
                     .on_submit(Msg::Commit)
                     .size(13)
                     .width(cell_box(g.widths[c].max(24)))
                     .into(),
-                _ => mouse_area(
-                    container(
-                        text(g.cell(r, c))
+                _ => {
+                    let body = container(
+                        text(g.cell(d, c))
                             .size(13)
                             .wrapping(text::Wrapping::None)
                             .style(move |theme| text::Style {
-                                color: Some(style::on_row(theme, on && focused, on_row && !on, false)),
+                                color: Some(match gone > 0.0 {
+                                    // A row that is gone is drawn faint under its light.
+                                    true => style::on_row(theme, false, false, true).scale_alpha(0.7),
+                                    false => style::on_row(theme, on && focused, on_row && !on, false),
+                                }),
                             }),
                     )
                     .width(cell_box(g.widths[c]))
                     .padding(pad)
                     .clip(true)
-                    .style(move |theme| style::row(theme, on, focused, false)),
-                )
-                .on_press(on_cell(r, c))
-                .into(),
+                    .style(move |theme| match on {
+                        true => style::row(theme, on, focused, false),
+                        false => lit_cell(theme, lit),
+                    });
+                    match light.origin {
+                        Some(r) => mouse_area(body).on_press(on_cell(r, c)).into(),
+                        None => body.into(),
+                    }
+                }
             };
             line = line.push(cell);
         }
@@ -757,7 +778,7 @@ fn view_grid<'a>(
             container(line)
                 .width(Length::Fixed(width))
                 .padding(Padding::from(table::ROW_PADDING))
-                .style(move |theme| style::row(theme, false, focused, r % 2 == 1)),
+                .style(move |theme| style::row(theme, false, focused, d % 2 == 1)),
         );
     }
     if g.rows.is_empty() {
@@ -773,4 +794,14 @@ fn view_grid<'a>(
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
+}
+
+/// A cell lit by a change, `strength` from 1 as it lands to 0: the host's
+/// accent, washed over the row's zebra and fading with it. Nothing is lit at
+/// 0, so a quiet table draws as it always did.
+fn lit_cell(theme: &iced::Theme, strength: f32) -> container::Style {
+    container::Style {
+        background: (strength > 0.0).then(|| iced::Background::Color(arkui::theme::of(theme).primary.base.color.scale_alpha(0.55 * strength))),
+        ..container::Style::default()
+    }
 }

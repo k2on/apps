@@ -225,3 +225,49 @@ fn the_docked_explorer_resizes_and_remembers_its_width() {
     press(&mut app, "E");
     assert_eq!(app.dock.width_in(app.screen), width, "as wide as it was left");
 }
+
+/// A change made in the app beside the docked explorer lights the row it
+/// made in the table on screen, by the replica's own clock: one tick for the
+/// store to move, one for the explorer to see it, and it fades from there.
+/// Falsified by never bumping the store's generation: the explorer was not
+/// told anything moved and lit nothing.
+#[test]
+fn a_change_in_the_app_lights_the_explorers_row() {
+    let mut app = App::with_peer(super::peer(Options::alone("alice")), String::new(), None);
+    app.peer.ensure_playlist();
+    let _ = app.update(Message::Tick);
+    press(&mut app, "E");
+    let _ = app.update(Message::Explore(ark_explorer::Msg::Open("playlist".into())));
+    let _ = app.update(Message::Tick);
+    assert!(!app.explore.as_ref().unwrap().ui.fading(), "nothing lit on first sight");
+    app.peer
+        .client
+        .mutate("create_playlist", ark_client::args([("name", ark_client::Value::text("Made beside"))]))
+        .expect("made");
+    let _ = app.update(Message::Tick);
+    let _ = app.update(Message::Tick);
+    let x = app.explore.as_ref().unwrap();
+    assert!(x.ui.fading(), "the new row is lit");
+    let client = &app.peer.client;
+    let src = ark_explorer::Source {
+        store: client.store(),
+        schema: client.schema(),
+        module: client.domain().module(),
+        log: &ark_explorer::NoLog,
+        ctx: client.ctx().clone(),
+    };
+    let (g, lights) = x.ui.lit_table(&src, "playlist");
+    let name = g.columns.iter().position(|c| c == "name").unwrap();
+    let made = g
+        .rows
+        .iter()
+        .position(|r| r[name] == ark_client::Value::text("Made beside"))
+        .expect("drawn");
+    assert!(lights[made].cells.iter().all(|s| *s > 0.0), "{:?}", lights[made]);
+    let other = 1 - made.min(1);
+    assert!(
+        lights[other].cells.iter().all(|s| *s == 0.0),
+        "the default playlist did not change: {:?}",
+        lights[other]
+    );
+}

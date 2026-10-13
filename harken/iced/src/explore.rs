@@ -230,6 +230,22 @@ impl App {
         }
     }
 
+    /// The explorer's clock and the replica's generation, every tick: what
+    /// changed in the store since it last drew is lit, and what is lit fades.
+    pub fn observe_explorer(&mut self) {
+        let Some(x) = self.explore.as_mut() else { return };
+        let client = &self.peer.client;
+        let log = Seen { client, names: &x.names };
+        let src = Source {
+            store: client.store(),
+            schema: client.schema(),
+            module: client.domain().module(),
+            log: &log,
+            ctx: client.ctx().clone(),
+        };
+        x.ui.observe(&src, self.peer.store_gen, ark_client::autos::monotonic_ms());
+    }
+
     /// What `view` draws in place of the page while the explorer is open.
     pub fn view_explorer(&self) -> Option<iced::Element<'_, Message>> {
         let x = self.explore.as_ref()?;
