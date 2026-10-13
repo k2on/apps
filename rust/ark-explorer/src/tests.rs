@@ -600,3 +600,84 @@ fn the_admin_page_asks_the_server_for_its_writes() {
     );
     assert_eq!(hello_of(r#"{"open":true,"server":null}"#), Ok((true, None)));
 }
+
+// -- the table's cells ------------------------------------------------------
+
+use crate::cells::{self, Grid};
+
+fn row_of(m: &ark::ir::Module, table: &str, pairs: &[(&str, Value)]) -> ark::store::Row {
+    let tbl = m.schema.lookup_table(table).unwrap();
+    ark::store::Row::of(tbl, pairs.iter().map(|(k, v)| (k.to_string(), v.clone())))
+}
+
+/// A long value is cut to its column and never drawn past it; a column is as
+/// wide as its header and its values, within the bounds; an id is drawn as
+/// eight hex digits; and the detail line holds the whole of any of them.
+/// Falsified by returning the shown text uncut from `Grid::cell`: the
+/// two-hundred-character name came out 200 characters into a column of 36.
+#[test]
+fn a_long_value_never_exceeds_its_column() {
+    let m = module();
+    let mut st = store(&m);
+    let long = "Variatio 25 a 2 Clav. (Adagio), from the Goldberg Variations, BWV 988 ".repeat(3);
+    st.put(
+        "user",
+        row_of(
+            &m,
+            "user",
+            &[
+                ("id", uid(9)),
+                ("name", Value::text(long.clone())),
+                ("team", Value::text("red")),
+                ("admin", Value::Bool(true)),
+                ("email", Value::Null),
+            ],
+        ),
+    )
+    .unwrap();
+    let src = source(&m, &st);
+    let mut w = writer(&m, false);
+    let mut ex = Explorer::new();
+    ex.update(Msg::Open("user".into()), &src, &mut w);
+    let g = ex.table_grid(&src, "user");
+    assert_eq!(g.columns, ["id", "name", "team", "admin", "email"]);
+    assert_eq!(g.headings[0], "id \u{b7} key");
+    for (c, w) in g.widths.iter().enumerate() {
+        assert!((cells::MIN_CHARS..=cells::MAX_CHARS).contains(w), "column {c}: {w}");
+        assert!(g.heading(c).chars().count() <= *w);
+        for r in 0..g.rows.len() {
+            assert!(g.cell(r, c).chars().count() <= *w, "{} is wider than {w}", g.cell(r, c));
+        }
+    }
+    let at = g.rows.iter().position(|r| r[1] == Value::text(long.clone())).expect("the long row");
+    assert_eq!(g.widths[1], cells::MAX_CHARS, "a long column stops at the most");
+    assert!(g.cell(at, 1).ends_with('\u{2026}'), "{}", g.cell(at, 1));
+    assert_eq!(g.widths[3], cells::MIN_CHARS, "a column of booleans is narrow");
+    assert_eq!(g.cell(at, 0), "00000000", "an id is its first eight hex digits");
+    assert_eq!(g.detail(at, 1), Some(format!("name: {long}")), "the detail line is the whole value");
+    assert_eq!(g.detail(at, 0), Some("id: 00000000-0000-0000-0000-000000000009".into()));
+    // And the explorer's own detail line follows the cursor.
+    ex.update(Msg::Cell(at, 1), &src, &mut w);
+    assert_eq!(ex.detail(&src), Some(format!("name: {long}")));
+    assert!(g.width_px() >= g.widths.iter().map(|w| cells::px(*w)).sum::<f32>());
+}
+
+/// A query's answer as a table: a list of structs is a row each under the
+/// union of their fields; a list of values one column; one value one row.
+/// Falsified by taking the columns from the first struct alone: the second
+/// row's `extra` had no column.
+#[test]
+fn a_query_answer_is_a_grid() {
+    let s = |pairs: &[(&str, Value)]| Value::Struct(Box::new(pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()));
+    let g = Grid::of_value(&Value::list(vec![
+        s(&[("name", Value::text("ann"))]),
+        s(&[("name", Value::text("bob")), ("extra", Value::Int(2))]),
+    ]));
+    assert_eq!(g.columns, ["name", "extra"]);
+    assert_eq!(g.rows[0][1], Value::Null);
+    assert_eq!(g.cell(1, 1), "2");
+    let g = Grid::of_value(&Value::list(vec![Value::Int(1), Value::Int(2)]));
+    assert_eq!((g.columns.as_slice(), g.rows.len()), (&["value".to_string()][..], 2));
+    let g = Grid::of_value(&Value::Int(7));
+    assert_eq!(g.rows, vec![vec![Value::Int(7)]]);
+}

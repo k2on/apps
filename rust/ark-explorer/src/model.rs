@@ -8,6 +8,7 @@ use iced::keyboard::{Key, Modifiers};
 use ark::store::Row;
 use ark::value::{TableName, Value};
 
+use crate::cells;
 use crate::data::{CrudVerbs, Source, Writer};
 use crate::edit::{self, Route};
 
@@ -158,6 +159,31 @@ impl Explorer {
     /// Which page of the rows the cursor is on, and how many there are.
     pub fn page(&self, rows: usize) -> (usize, usize) {
         (self.row_at / PAGE_ROWS, rows.div_ceil(PAGE_ROWS).max(1))
+    }
+
+    /// A table's page as the view draws it: the page's rows, every column
+    /// as wide as its header and its first [`cells::SAMPLE`] rows.
+    pub fn table_grid(&self, src: &Source, table: &str) -> cells::Grid {
+        let columns = Explorer::columns(src, table);
+        let key: Vec<String> = src.store.schema().lookup_table(table).map(|t| t.key.clone()).unwrap_or_default();
+        let labels: Vec<String> = columns
+            .iter()
+            .map(|c| if key.contains(c) { format!("{c} \u{b7} key") } else { c.clone() })
+            .collect();
+        let all = src.store.scan(table);
+        let (page, _) = self.page(all.len());
+        let from = (page * PAGE_ROWS).min(all.len());
+        let to = (from + PAGE_ROWS).min(all.len());
+        let sample = &all[..all.len().min(cells::SAMPLE)];
+        cells::Grid::of_rows(&columns, &labels, &all[from..to], sample)
+    }
+
+    /// The whole of the cell under the cursor, on a table's screen: what the
+    /// detail line says.
+    pub fn detail(&self, src: &Source) -> Option<String> {
+        let (t, row) = self.row_under(src)?;
+        let column = Explorer::columns(src, &t).get(self.column_at)?.clone();
+        Some(format!("{column}: {}", row.get(&column).map(edit::cell_text).unwrap_or_default()))
     }
 
     /// What an edit of a cell of `table` would go through here, as a person

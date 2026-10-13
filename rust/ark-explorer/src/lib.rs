@@ -25,6 +25,9 @@
 //! installs its palette with `arkui::theme::install` (or hands one to
 //! [`Theme::install`]), and nothing here writes one down.
 //!
+//! A table's cells are cut to their columns and the whole of the one under
+//! the cursor is said below it ([`cells`]).
+//!
 //! Without the `ui` feature only what needs no window is built — [`data`],
 //! [`edit`], [`wire`] — which is what a server links to answer its admin
 //! page.
@@ -35,6 +38,8 @@ pub mod wire;
 
 #[cfg(feature = "ui")]
 pub mod admin;
+#[cfg(feature = "ui")]
+pub mod cells;
 #[cfg(feature = "ui")]
 pub mod model;
 #[cfg(feature = "ui")]

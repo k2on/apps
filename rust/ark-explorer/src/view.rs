@@ -4,11 +4,12 @@
 //! switch says are answered in [`crate::model`].
 
 use arkui::{fit, style, table};
-use iced::widget::{button, column, container, mouse_area, row, rule, scrollable, text, text_input, Column, Row};
-use iced::{Alignment, Element, Length};
+use iced::widget::scrollable::{Direction, Scrollbar};
+use iced::widget::{button, column, container, mouse_area, row, rule, scrollable, text, text_input, Column, Row, Space};
+use iced::{Alignment, Element, Length, Padding};
 
+use crate::cells::{self, Grid};
 use crate::data::{Source, Writer};
-use crate::edit::cell_text;
 use crate::model::{Explorer, Msg, Screen, PAGE_ROWS};
 
 const NAME: Length = Length::FillPortion(3);
@@ -111,58 +112,38 @@ impl Explorer {
     }
 
     fn view_table<'a>(&'a self, src: &Source<'_>, w: &dyn Writer, t: &str) -> Element<'a, Msg> {
-        let columns = Explorer::columns(src, t);
-        let key: Vec<String> = src.store.schema().lookup_table(t).map(|tbl| tbl.key.clone()).unwrap_or_default();
-        let all = src.store.scan(t);
-        let (page, pages) = self.page(all.len());
+        let all = src.store.scan(t).len();
+        let (page, pages) = self.page(all);
         let from = page * PAGE_ROWS;
-        let head = columns.iter().fold(Row::new(), |r, c| {
-            let label = if key.contains(c) { format!("{c} \u{b7} key") } else { c.clone() };
-            r.push(table::heading(label, Length::Fill))
-        });
-        let rows = all.iter().enumerate().skip(from).take(PAGE_ROWS).fold(Column::new(), |col, (i, r)| {
-            let on_row = i == self.row_at;
-            let line = columns.iter().enumerate().fold(Row::new().align_y(Alignment::Center), |line, (j, c)| {
-                let editing = self.editing.as_ref().filter(|e| on_row && e.column == *c && e.table == t);
-                let cell: Element<'a, Msg> = match editing {
-                    Some(e) => text_input(c, &e.text)
-                        .on_input(Msg::EditText)
-                        .on_submit(Msg::Commit)
-                        .size(13)
-                        .width(Length::Fill)
-                        .into(),
-                    None => mouse_area(table::cell(
-                        r.get(c).map(cell_text).unwrap_or_default(),
-                        Length::Fill,
-                        on_row && j == self.column_at,
-                        on_row,
-                        !on_row,
-                    ))
-                    .on_press(Msg::Cell(i, j))
-                    .into(),
-                };
-                line.push(container(cell).width(Length::Fill))
-            });
-            col.push(table::row(line, false, true, i % 2 == 1))
-        });
+        let grid = self.table_grid(src, t);
+        let editing = self
+            .editing
+            .as_ref()
+            .filter(|e| e.table == t)
+            .map(|e| (self.row_at - from, self.column_at, e.text.clone()));
+        let body = view_grid(
+            grid,
+            Some((self.row_at.saturating_sub(from), self.column_at)),
+            true,
+            editing,
+            move |r, c| Msg::Cell(from + r, c),
+        );
         let through = self.writes_through(w, t);
         let foot = row![
             small(format!(
                 "{t}: rows {}\u{2013}{} of {} \u{b7} page {} of {pages} \u{b7} {through}",
-                if all.is_empty() { 0 } else { from + 1 },
-                (from + PAGE_ROWS).min(all.len()),
-                all.len(),
+                if all == 0 { 0 } else { from + 1 },
+                (from + PAGE_ROWS).min(all),
+                all,
                 page + 1
             )),
-            container(text("")).width(Length::Fill),
+            Space::new().width(Length::Fill),
             button(text("edit").size(12)).style(button::text).on_press(Msg::Edit),
             button(text("delete row").size(12)).style(button::text).on_press(Msg::Delete),
         ]
         .spacing(8)
         .align_y(Alignment::Center);
-        column![head, scrollable(rows).style(style::bars).height(Length::Fill), foot]
-            .spacing(4)
-            .into()
+        column![body, detail_line(self.detail(src)), foot].spacing(4).into()
     }
 
     fn view_console(&self) -> Element<'_, Msg> {
@@ -274,4 +255,104 @@ impl Explorer {
         }
         scrollable(out).style(style::bars).height(Length::Fill).into()
     }
+}
+
+/// The whole of the cell under the cursor, on a line of its own: what a cell
+/// cut to its column leaves out.
+fn detail_line<'a>(detail: Option<String>) -> Element<'a, Msg> {
+    container(
+        text(detail.unwrap_or_default())
+            .size(12)
+            .wrapping(text::Wrapping::WordOrGlyph)
+            .style(style::dim),
+    )
+    .width(Length::Fill)
+    .max_height(52.0)
+    .clip(true)
+    .into()
+}
+
+/// A [`Grid`] as a table: every column its own width, every cell clipped to
+/// it on one line, the headings in the same columns as the cells, rows
+/// scrolling under the headings and both scrolling sideways together when
+/// the columns are wider than the pane. `cursor` is the cell lit, filled
+/// with the accent when `focused`; `editing` is a cell drawn as its editor.
+fn view_grid<'a>(
+    g: Grid,
+    cursor: Option<(usize, usize)>,
+    focused: bool,
+    editing: Option<(usize, usize, String)>,
+    on_cell: impl Fn(usize, usize) -> Msg + 'a,
+) -> Element<'a, Msg> {
+    let width = g.width_px() + table::ROW_PADDING[1] * 2.0;
+    let cell_box = |chars: usize| Length::Fixed(cells::px(chars));
+    let pad = Padding {
+        top: 0.0,
+        bottom: 0.0,
+        left: 3.0,
+        right: cells::GAP_PX - 3.0,
+    };
+    let head = (0..g.columns.len()).fold(Row::new(), |r, c| {
+        r.push(
+            container(table::heading(g.heading(c), Length::Shrink))
+                .width(cell_box(g.widths[c]))
+                .padding(pad)
+                .clip(true),
+        )
+    });
+    let head = container(head)
+        .width(Length::Fixed(width))
+        .padding(Padding::from([0.0, table::ROW_PADDING[1]]));
+    let mut rows = Column::new();
+    for r in 0..g.rows.len() {
+        let on_row = cursor.is_some_and(|(cr, _)| cr == r);
+        let mut line = Row::new().align_y(Alignment::Center);
+        for c in 0..g.columns.len() {
+            let on = on_row && cursor.is_some_and(|(_, cc)| cc == c);
+            let cell: Element<'a, Msg> = match &editing {
+                Some((er, ec, t)) if *er == r && *ec == c => text_input(&g.columns[c], t)
+                    .on_input(Msg::EditText)
+                    .on_submit(Msg::Commit)
+                    .size(13)
+                    .width(cell_box(g.widths[c].max(24)))
+                    .into(),
+                _ => mouse_area(
+                    container(
+                        text(g.cell(r, c))
+                            .size(13)
+                            .wrapping(text::Wrapping::None)
+                            .style(move |theme| text::Style {
+                                color: Some(style::on_row(theme, on && focused, on_row && !on, false)),
+                            }),
+                    )
+                    .width(cell_box(g.widths[c]))
+                    .padding(pad)
+                    .clip(true)
+                    .style(move |theme| style::row(theme, on, focused, false)),
+                )
+                .on_press(on_cell(r, c))
+                .into(),
+            };
+            line = line.push(cell);
+        }
+        rows = rows.push(
+            container(line)
+                .width(Length::Fixed(width))
+                .padding(Padding::from(table::ROW_PADDING))
+                .style(move |theme| style::row(theme, false, focused, r % 2 == 1)),
+        );
+    }
+    if g.rows.is_empty() {
+        rows = rows.push(container(small("no rows")).padding(4));
+    }
+    let body = scrollable(rows)
+        .style(style::bars)
+        .height(Length::Fill)
+        .width(Length::Fixed(width + arkui::SCROLLBAR + 4.0));
+    scrollable(column![head, body].spacing(2))
+        .direction(Direction::Horizontal(Scrollbar::default()))
+        .style(style::bars)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
 }
