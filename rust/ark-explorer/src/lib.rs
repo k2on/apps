@@ -19,14 +19,20 @@
 //!
 //! The keyboard is `arkui`'s vim grammar: `j`/`k` and `h`/`l`, counts,
 //! `gg`/`G`; `<Enter>` opens a table or edits a cell, `e` edits, `x`
-//! deletes a row, `R` flips the raw switch, `<Tab>` (or `1`, `2`, `3`) goes
-//! between the tables, the log and the console, and `<Esc>` goes back —
-//! out of the explorer from the top. The colours are the host's: it
-//! installs its palette with `arkui::theme::install` (or hands one to
-//! [`Theme::install`]), and nothing here writes one down.
+//! deletes a row, `R` flips the raw switch, `<Tab>` goes between the tables,
+//! the log, the console and the functions (`f` goes straight to them), and
+//! `<Esc>` goes back — out of the explorer from the top. On a function's
+//! form `j`/`k` walk its fields, `<Enter>` toggles, chooses, adds or opens
+//! an id's picker (where `/` filters), `r` calls and `.` calls again.
 //!
 //! A table's cells are cut to their columns and the whole of the one under
-//! the cursor is said below it ([`cells`]).
+//! the cursor is said below it ([`cells`]); every query and mutation of the
+//! module is callable from a form ([`form`]), a mutation authored through the
+//! host's writer as a button would author it and never raw.
+//!
+//! The colours are the host's: it
+//! installs its palette with `arkui::theme::install` (or hands one to
+//! [`Theme::install`]), and nothing here writes one down.
 //!
 //! Without the `ui` feature only what needs no window is built — [`data`],
 //! [`edit`], [`wire`] — which is what a server links to answer its admin
@@ -41,11 +47,13 @@ pub mod admin;
 #[cfg(feature = "ui")]
 pub mod cells;
 #[cfg(feature = "ui")]
+pub mod form;
+#[cfg(feature = "ui")]
 pub mod model;
 #[cfg(feature = "ui")]
 pub mod view;
 
-pub use data::{crud_of, function_names, Connection, CrudVerbs, Line, LogView, NoLog, Source, Verified, Writer};
+pub use data::{crud_of, function_names, Connection, CrudVerbs, Line, LogView, NoLog, Source, Ticket, Verdict, Verified, Writer};
 pub use edit::Route;
 #[cfg(feature = "ui")]
 pub use model::{Explorer, Msg, Outcome, Screen};

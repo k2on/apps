@@ -15,6 +15,7 @@
 //! does — through the server's `/auth/login`, back here with a code it
 //! trades for a token — and carries the token as a bearer.
 
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use ark::eval::{Args, Ctx};
@@ -25,7 +26,7 @@ use ark::value::TableName;
 use iced::widget::{column, container, text};
 use iced::{Element, Length, Subscription, Task};
 
-use crate::data::{Connection, CrudVerbs, Line, LogView, Source, Verified, Writer};
+use crate::data::{Connection, CrudVerbs, Line, LogView, Source, Ticket, Verdict, Verified, Writer};
 use crate::model::{Explorer, Msg, Outcome};
 use crate::wire::{author_body, raw_body, State};
 
@@ -86,15 +87,29 @@ pub struct Outbox {
     raw: bool,
     who: String,
     pub queued: Vec<Request>,
+    /// Where the next request goes among every one the page has sent: a
+    /// ticket is that place.
+    next: usize,
+    /// The server's answers so far, by a request's place.
+    answers: BTreeMap<usize, Result<String, String>>,
 }
 
 impl Writer for Outbox {
     fn exposed(&self) -> Vec<(TableName, CrudVerbs)> {
         self.exposed.clone()
     }
-    fn author(&mut self, function: &str, args: Args) -> Result<(), String> {
+    fn author(&mut self, function: &str, args: Args) -> Result<Ticket, String> {
+        let ticket = Ticket((self.next + self.queued.len()).to_string());
         self.queued.push(Request::Author(function.into(), args));
-        Ok(())
+        Ok(ticket)
+    }
+    fn verdict(&self, ticket: &Ticket) -> Verdict {
+        let Ok(i) = ticket.0.parse::<usize>() else { return Verdict::Unknown };
+        match self.answers.get(&i) {
+            None => Verdict::Pending,
+            Some(Ok(seq)) => Verdict::Logged(seq.trim().parse().ok()),
+            Some(Err(why)) => Verdict::Refused(why.clone()),
+        }
     }
     fn raw(&mut self, change: Change) -> Result<(), String> {
         if !self.raw {
@@ -112,13 +127,16 @@ impl Writer for Outbox {
 }
 
 impl Outbox {
-    /// The writer a state says this page is.
-    pub fn of(state: &State) -> Outbox {
+    /// The writer a state says this page is, `sent` requests in, with the
+    /// server's answers to them.
+    pub fn of(state: &State, sent: usize, answers: &BTreeMap<usize, Result<String, String>>) -> Outbox {
         Outbox {
             exposed: state.exposed.clone(),
             raw: state.raw,
             who: state.who.clone(),
             queued: vec![],
+            next: sent,
+            answers: answers.clone(),
         }
     }
 }
@@ -130,7 +148,9 @@ pub enum Message {
     /// A login came back from the code in the address.
     Token(Result<String, String>),
     Loaded(Result<String, String>),
-    Answered(Result<String, String>),
+    /// The server's answer to the request at this place among those sent:
+    /// the sequence it was logged at, or the refusal.
+    Answered(usize, Result<String, String>),
     Explorer(Msg),
     Refresh,
 }
@@ -147,6 +167,8 @@ pub struct Page {
     busy: bool,
     /// Every write this page has asked of the server, oldest first.
     pub sent: Vec<Request>,
+    /// The server's answer to each, by its place in `sent`.
+    pub answers: BTreeMap<usize, Result<String, String>>,
 }
 
 impl Page {
@@ -159,6 +181,7 @@ impl Page {
             note: "reading the server\u{2026}".into(),
             busy: false,
             sent: vec![],
+            answers: BTreeMap::new(),
         }
     }
 
@@ -184,12 +207,13 @@ impl Page {
 
     /// Send what the explorer queued, one request each, answered in turn.
     fn send(&mut self, queued: Vec<Request>) -> Task<Message> {
+        let from = self.sent.len();
         self.sent.extend(queued.iter().cloned());
-        Task::batch(queued.into_iter().map(|r| {
+        Task::batch(queued.into_iter().enumerate().map(|(k, r)| {
             let (path, body) = r.to();
             Task::perform(
                 fetch("POST", format!("{}{path}", self.base), self.token.clone(), Some(body)),
-                Message::Answered,
+                move |answer| Message::Answered(from + k, answer),
             )
         }))
     }
@@ -229,11 +253,12 @@ impl Page {
                 }
                 Task::none()
             }
-            Message::Answered(r) => {
-                self.explorer.note = match r {
+            Message::Answered(i, r) => {
+                self.explorer.note = match &r {
                     Ok(seq) => format!("written, at {seq}"),
                     Err(why) => format!("refused: {why}"),
                 };
+                self.answers.insert(i, r);
                 self.get_state()
             }
             Message::Explorer(msg) => {
@@ -245,7 +270,7 @@ impl Page {
                     log: l,
                     ctx: Ctx::new(l.state.who.clone(), "admin"),
                 };
-                let mut w = Outbox::of(&l.state);
+                let mut w = Outbox::of(&l.state, self.sent.len(), &self.answers);
                 // Esc from the top: there is nothing behind the page to go
                 // back to, so the explorer stays.
                 let _: Outcome = self.explorer.update(msg, &src, &mut w);
@@ -267,7 +292,7 @@ impl Page {
                     log: l,
                     ctx: Ctx::new(l.state.who.clone(), "admin"),
                 };
-                let w = Outbox::of(&l.state);
+                let w = Outbox::of(&l.state, self.sent.len(), &self.answers);
                 let page = self.explorer.view(&src, &w).map(Message::Explorer);
                 if self.note.is_empty() {
                     page

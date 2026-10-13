@@ -3,6 +3,7 @@
 //! drawn over what the replica holds — and read-only here, since harken
 //! exposes no CRUD and a client has no raw write.
 
+use ark_client::ark::store::Store;
 use ark_client::Options;
 use iced::keyboard::{key::Named, Key, Modifiers};
 
@@ -59,4 +60,59 @@ fn e_opens_the_explorer_read_only() {
     assert!(app.explore.is_some(), "<Esc> on a table goes back to the tables");
     press_named(&mut app, Named::Escape);
     assert!(app.explore.is_none(), "and from the top, out");
+}
+
+/// Every query and mutation is callable from the explorer: a mutation from
+/// its form is authored through the client as the signed-in person, exactly
+/// as a button authors it — the row is alice's — and a query answers from
+/// the replica with the row in it; an id field is chosen from the
+/// replica's rows. Falsified by authoring through the drawing writer (which
+/// writes nothing): the call was refused with "drawing writes nothing" and
+/// no playlist appeared.
+#[test]
+fn a_function_from_the_explorer_is_authored_as_the_signed_in_person() {
+    let mut app = App::with_peer(super::peer(Options::alone("alice")), String::new(), None);
+    press(&mut app, "E");
+    press(&mut app, "f");
+    let module = app.peer.client.domain().module().clone();
+    let all = ark_explorer::form::callables(&module);
+    let at = |name: &str| all.iter().position(|c| c.name == name).unwrap();
+    let explore = |app: &mut App, m: ark_explorer::Msg| {
+        let _ = app.update(Message::Explore(m));
+    };
+    explore(&mut app, ark_explorer::Msg::Function(at("create_playlist")));
+    explore(&mut app, ark_explorer::Msg::FormText(vec![0], "From the explorer".into()));
+    explore(&mut app, ark_explorer::Msg::Call);
+    let made = app
+        .peer
+        .client
+        .store()
+        .scan("playlist")
+        .into_iter()
+        .find(|r| r.get("name") == Some(&ark_client::Value::text("From the explorer")))
+        .expect("the playlist was authored");
+    assert_eq!(made.get("user_id"), Some(&ark_client::Value::text("alice")));
+    let note = &app.explore.as_ref().unwrap().ui.note;
+    assert!(note.starts_with("create_playlist: "), "{note}");
+    assert!(!note.contains("refused"), "{note}");
+    // The query sees it.
+    explore(&mut app, ark_explorer::Msg::Function(at("playlists")));
+    explore(&mut app, ark_explorer::Msg::Call);
+    let ui = &app.explore.as_ref().unwrap().ui;
+    let g = ui.answer_grid().expect("an answer");
+    let name = g.columns.iter().position(|c| c == "name").unwrap();
+    assert!(
+        g.rows.iter().any(|r| r[name] == ark_client::Value::text("From the explorer")),
+        "{:?}",
+        g.rows
+    );
+    // An id is chosen from the replica's playlists.
+    explore(&mut app, ark_explorer::Msg::Function(at("add_all_to_playlist")));
+    explore(&mut app, ark_explorer::Msg::Pick(vec![0]));
+    explore(&mut app, ark_explorer::Msg::PickFilter("from the".into()));
+    explore(&mut app, ark_explorer::Msg::Picked(0));
+    let ui = &mut app.explore.as_mut().unwrap().ui;
+    let (args, bad) = ui.form().unwrap().read();
+    assert!(bad.is_empty(), "{bad:?}");
+    assert_eq!(args["playlist_id"], made.get("id").cloned().unwrap());
 }

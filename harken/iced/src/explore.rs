@@ -1,21 +1,25 @@
 //! `E` — the explorer, over this device's own replica (`docs/plan-guards.md`
-//! D4): every table the replica holds, the log as a client knows it, and a
-//! read-only query console. `ark_explorer` draws it and decides what an
-//! edit becomes; this file is what it is handed.
+//! D4): every table the replica holds, the log as a client knows it, a
+//! read-only query console, and every query and mutation of the module,
+//! callable from a form. `ark_explorer` draws it and decides what an edit or
+//! a call becomes; this file is what it is handed.
 //!
-//! A client writes only through the CRUD the domain exposes, authored as
-//! the signed-in person like any button, and never raw: a client has no raw
-//! writer, connected or alone, so what it does here is pushed and judged
-//! like any other work. harken declares `crud` on no table, so here the
-//! explorer is read-only, and says so; the raw switch is not drawn.
+//! A client writes only through domain mutations, authored as the signed-in
+//! person exactly as a button authors them, and never raw: a client has no
+//! raw writer, connected or alone, so what it does here is pushed and judged
+//! like any other work. A cell edit goes through the CRUD the domain exposes
+//! and harken declares `crud` on no table, so the table browser is read-only
+//! here and says so; the raw switch is not drawn. A mutation called from its
+//! form is authored like any other, and its standing — pending, in the log,
+//! refused — is what [`ark_client::Peer::standing`] says of its id.
 
 use std::collections::BTreeMap;
 
 use ark_client::ark::hash::FnHash;
 use ark_client::ark::store::Change;
 use ark_client::ark::value::hex;
-use ark_client::Args;
-use ark_explorer::{Connection, CrudVerbs, Explorer, Line, LogView, Source, Verified, Writer};
+use ark_client::{Args, Standing};
+use ark_explorer::{Connection, CrudVerbs, Explorer, Line, LogView, Source, Ticket, Verdict, Verified, Writer};
 
 use crate::{App, Edit, Message};
 
@@ -53,6 +57,21 @@ fn who(client: &ark_client::Peer) -> String {
     }
 }
 
+/// Where an intent the explorer authored stands, by its id: pending until
+/// the authority answers, then in the log or refused with the reason every
+/// replica reaches.
+fn verdict(client: &ark_client::Peer, ticket: &Ticket) -> Verdict {
+    let Some(id) = ark_client::ark::value::decode_hex(&ticket.0).and_then(|b| <[u8; 16]>::try_from(b).ok()) else {
+        return Verdict::Unknown;
+    };
+    match client.standing(&id) {
+        Standing::Pending => Verdict::Pending,
+        Standing::Confirmed => Verdict::Logged(None),
+        Standing::Rejected(why) => Verdict::Refused(why),
+        Standing::Unknown => Verdict::Unknown,
+    }
+}
+
 /// The client as a writer: the domain's exposed CRUD, authored as the
 /// signed-in person and remembered as any change this window makes; no raw
 /// write.
@@ -66,13 +85,16 @@ impl Writer for Writes<'_> {
     fn exposed(&self) -> Vec<(String, CrudVerbs)> {
         self.exposed.to_vec()
     }
-    fn author(&mut self, function: &str, args: Args) -> Result<(), String> {
+    fn author(&mut self, function: &str, args: Args) -> Result<Ticket, String> {
         let id = self.client.mutate(function, args).map_err(|e| e.to_string())?;
         self.edits.push(Edit {
             id,
             what: format!("{function}, from the explorer"),
         });
-        Ok(())
+        Ok(Ticket(hex(&id)))
+    }
+    fn verdict(&self, ticket: &Ticket) -> Verdict {
+        verdict(self.client, ticket)
     }
     fn raw(&mut self, _change: Change) -> Result<(), String> {
         Err("not the authority".into())
@@ -92,8 +114,11 @@ impl Writer for Shown<'_> {
     fn exposed(&self) -> Vec<(String, CrudVerbs)> {
         self.exposed.to_vec()
     }
-    fn author(&mut self, _function: &str, _args: Args) -> Result<(), String> {
+    fn author(&mut self, _function: &str, _args: Args) -> Result<Ticket, String> {
         Err("drawing writes nothing".into())
+    }
+    fn verdict(&self, ticket: &Ticket) -> Verdict {
+        verdict(self.client, ticket)
     }
     fn raw(&mut self, _change: Change) -> Result<(), String> {
         Err("not the authority".into())

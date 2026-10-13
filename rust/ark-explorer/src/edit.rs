@@ -76,7 +76,7 @@ impl Route {
     /// Hand it to the writer.
     pub fn send(self, w: &mut dyn Writer) -> Result<(), String> {
         match self {
-            Route::Author { function, args } => w.author(&function, args),
+            Route::Author { function, args } => w.author(&function, args).map(|_| ()),
             Route::Raw(change) => w.raw(change),
         }
     }

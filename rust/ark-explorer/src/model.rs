@@ -2,15 +2,20 @@
 //! the component makes, tested without a window. The view only draws what
 //! is decided here.
 
+use std::collections::BTreeMap;
+
 use arkui::vim::{self, Action, Grid, Motion};
 use iced::keyboard::{Key, Modifiers};
 
+use ark::ir::FnKind;
+use ark::schema::Ty;
 use ark::store::Row;
 use ark::value::{TableName, Value};
 
 use crate::cells;
 use crate::data::{CrudVerbs, Source, Writer};
 use crate::edit::{self, Route};
+use crate::form::{self, Call, Called, Form, Picker};
 
 /// How many rows of a table are drawn at once: the page the cursor is on.
 pub const PAGE_ROWS: usize = 50;
@@ -27,15 +32,22 @@ pub enum Screen {
     Console,
     /// The log: its lines, the connections, the `Verify` answers.
     Log,
+    /// Every query and mutation of the module, by router, and the calls
+    /// made this session.
+    Functions,
+    /// One function's form, and what calling it came to.
+    Call(String),
 }
 
 impl Screen {
-    /// `<Tab>`'s order: a table belongs with the tables.
+    /// `<Tab>`'s order: a table belongs with the tables, a form with the
+    /// functions.
     fn next(&self) -> Screen {
         match self {
             Screen::Tables | Screen::Table(_) => Screen::Log,
             Screen::Log => Screen::Console,
-            Screen::Console => Screen::Tables,
+            Screen::Console => Screen::Functions,
+            Screen::Functions | Screen::Call(_) => Screen::Tables,
         }
     }
 }
@@ -81,6 +93,33 @@ pub enum Msg {
     Args(String),
     Run,
     Close,
+    /// Open function `i` of the list ([`form::callables`]) in its form.
+    Function(usize),
+    /// Type into the form's input at a path.
+    FormText(Vec<usize>, String),
+    /// Flip a bool, or an option between none and a value.
+    FormToggle(Vec<usize>),
+    /// Choose an enum's variant.
+    FormChoose(Vec<usize>, usize),
+    /// Add an item to a list; take one out.
+    FormAdd(Vec<usize>),
+    FormRemove(Vec<usize>),
+    /// Put the form's cursor on a line.
+    FormAt(usize),
+    /// Open the picker for the id field at a path.
+    Pick(Vec<usize>),
+    PickFilter(String),
+    PickAt(usize),
+    /// Choose the picker's row at this place among those the filter leaves.
+    Picked(usize),
+    ClosePicker,
+    /// Call the open form's function.
+    Call,
+    /// Call a recent call again, as it was; or put it back in its form.
+    Again(usize),
+    Recall(usize),
+    /// A click on a cell of a query's answer.
+    AnswerCell(usize, usize),
 }
 
 /// The explorer: where it is and what it is in the middle of. Everything
@@ -103,6 +142,18 @@ pub struct Explorer {
     /// The last thing worth saying: what an edit became, or why not.
     pub note: String,
     pub keys: vim::Keys,
+    /// The cursor on the list of functions.
+    pub functions_at: usize,
+    /// A form per function opened this session, so leaving one keeps what
+    /// was typed.
+    pub forms: BTreeMap<String, Form>,
+    /// The picker, open on an id field of the form on screen.
+    pub picker: Option<Picker>,
+    /// Every call made this session, oldest first.
+    pub calls: Vec<Call>,
+    /// The keys walk a query's answer rather than its form, and where in it.
+    pub in_answer: bool,
+    pub answer_at: (usize, usize),
 }
 
 impl Default for Explorer {
@@ -126,6 +177,12 @@ impl Explorer {
             answer: None,
             note: String::new(),
             keys: vim::Keys::new(),
+            functions_at: 0,
+            forms: BTreeMap::new(),
+            picker: None,
+            calls: vec![],
+            in_answer: false,
+            answer_at: (0, 0),
         }
     }
 
@@ -186,6 +243,59 @@ impl Explorer {
         Some(format!("{column}: {}", row.get(&column).map(edit::cell_text).unwrap_or_default()))
     }
 
+    /// Every function a person can call, by router.
+    pub fn callables(src: &Source) -> Vec<form::Callable> {
+        form::callables(src.module)
+    }
+
+    /// The form of the function on screen.
+    pub fn form(&self) -> Option<&Form> {
+        let Screen::Call(f) = &self.screen else { return None };
+        self.forms.get(f)
+    }
+
+    fn form_mut(&mut self) -> Option<&mut Form> {
+        let Screen::Call(f) = &self.screen else { return None };
+        self.forms.get_mut(f)
+    }
+
+    /// The last call of the function on screen, if it has been called.
+    pub fn last_call(&self) -> Option<&Call> {
+        let Screen::Call(f) = &self.screen else { return None };
+        self.calls.iter().rev().find(|c| &c.function == f)
+    }
+
+    /// The last call's answer, as a table, where it was a query's.
+    pub fn answer_grid(&self) -> Option<cells::Grid> {
+        match &self.last_call()?.called {
+            Called::Answer(v) => Some(cells::Grid::of_value(v)),
+            _ => None,
+        }
+    }
+
+    /// What a call came to, as a person would say it: a mutation's verdict
+    /// asked of the host now, so a server's answer is said when it arrives.
+    pub fn outcome(call: &Call, w: &dyn Writer) -> String {
+        match &call.called {
+            Called::Answer(v) => match v {
+                Value::List(xs) => format!("{} row{}", xs.len(), if xs.len() == 1 { "" } else { "s" }),
+                _ => "one value".into(),
+            },
+            Called::Failed(why) => why.clone(),
+            Called::Authored(t) => w.verdict(t).describe(),
+            Called::Refused(why) => format!("refused: {why}"),
+        }
+    }
+
+    /// The rows the picker offers, labelled, and which of them the filter
+    /// leaves.
+    pub fn pick_rows(&self, src: &Source) -> (Vec<form::Pickable>, Vec<usize>) {
+        let Some(p) = &self.picker else { return (vec![], vec![]) };
+        let all = form::pickables(src.store, &p.table);
+        let shown = form::filter(&all, &p.filter);
+        (all, shown)
+    }
+
     /// What an edit of a cell of `table` would go through here, as a person
     /// would say it — so the switch says what it switches.
     pub fn writes_through(&self, w: &dyn Writer, table: &str) -> String {
@@ -203,9 +313,25 @@ impl Explorer {
     pub fn update(&mut self, msg: Msg, src: &Source, w: &mut dyn Writer) -> Outcome {
         match msg {
             Msg::Key(key, mods) => {
-                let Some(action) = self.keys.press(&key, mods) else {
+                let searching = matches!(self.keys.mode(), vim::Mode::Search(_));
+                let action = self.keys.press(&key, mods);
+                // A `/` search on the picker filters as it is typed.
+                if let (Some(p), vim::Mode::Search(q)) = (&mut self.picker, self.keys.mode()) {
+                    if p.filter != *q {
+                        p.filter = q.clone();
+                        p.at = 0;
+                    }
+                }
+                let Some(action) = action else {
                     return Outcome::Stay;
                 };
+                // `<Esc>` out of a search drops what it typed, and leaves the
+                // picker up.
+                if let (true, Action::Cancel, Some(p)) = (searching, &action, &mut self.picker) {
+                    p.filter.clear();
+                    p.at = 0;
+                    return Outcome::Stay;
+                }
                 return self.act(action, src, w);
             }
             Msg::Show(s) => self.show(s),
@@ -248,8 +374,166 @@ impl Explorer {
                 self.answer = Some(edit::console(src, &self.query, &self.args).map(|v| ark::json::json(&v)));
             }
             Msg::Close => return Outcome::Close,
+            Msg::Function(i) => self.open_function(src, i),
+            Msg::FormText(path, text) => self.on_form(src, |f| f.set_text(&path, text)),
+            Msg::FormToggle(path) => self.on_form(src, |f| f.toggle(&path)),
+            Msg::FormChoose(path, i) => self.on_form(src, |f| f.choose(&path, i)),
+            Msg::FormAdd(path) => self.on_form(src, |f| f.add(&path)),
+            Msg::FormRemove(path) => self.on_form(src, |f| f.remove(&path)),
+            Msg::FormAt(i) => {
+                self.in_answer = false;
+                if let Some(f) = self.form_mut() {
+                    f.at = i;
+                }
+            }
+            Msg::Pick(path) => self.open_picker(src, path),
+            Msg::PickFilter(text) => {
+                if let Some(p) = &mut self.picker {
+                    p.filter = text;
+                    p.at = 0;
+                }
+            }
+            Msg::PickAt(i) => {
+                if let Some(p) = &mut self.picker {
+                    p.at = i;
+                }
+            }
+            Msg::Picked(i) => self.picked(src, i),
+            Msg::ClosePicker => self.picker = None,
+            Msg::Call => self.call(src, w),
+            Msg::Again(i) => self.again(src, w, i),
+            Msg::Recall(i) => self.recall(src, i),
+            Msg::AnswerCell(r, c) => {
+                self.in_answer = true;
+                self.answer_at = (r, c);
+            }
         }
         Outcome::Stay
+    }
+
+    /// Open function `i` of the list in its form, kept from before if it was
+    /// opened this session.
+    fn open_function(&mut self, src: &Source, i: usize) {
+        let Some(c) = Explorer::callables(src).into_iter().nth(i) else { return };
+        self.functions_at = i;
+        self.forms.entry(c.name.clone()).or_insert_with(|| Form::new(&c));
+        self.picker = None;
+        self.in_answer = false;
+        self.answer_at = (0, 0);
+        self.note = format!(
+            "{}: j and k walk the fields, <Enter> chooses, toggles or adds, r calls, <Esc> goes back",
+            c.name
+        );
+        self.screen = Screen::Call(c.name);
+    }
+
+    /// Change the form on screen, and check it again.
+    fn on_form(&mut self, src: &Source, change: impl FnOnce(&mut Form)) {
+        let Some(f) = self.form_mut() else { return };
+        change(f);
+        let n = f.slots().len();
+        f.at = f.at.min(n);
+        f.validate(src.module, src.store.schema(), &src.ctx, src.store);
+    }
+
+    /// The picker, on the id field at `path`: the rows of its table.
+    fn open_picker(&mut self, src: &Source, path: Vec<usize>) {
+        let Some(f) = self.form_mut() else { return };
+        let Some((Ty::Id(table), _)) = f.at_mut(&path) else { return };
+        let table = table.clone();
+        if let Some(i) = f.slots().iter().position(|s| s.path == path) {
+            f.at = i;
+        }
+        self.note = match form::pickables(src.store, &table).len() {
+            0 => format!("{table} holds no rows here"),
+            n => format!(
+                "{n} row{} of {table}: j and k walk, / filters, <Enter> chooses",
+                if n == 1 { "" } else { "s" }
+            ),
+        };
+        self.picker = Some(Picker {
+            path,
+            table,
+            filter: String::new(),
+            at: 0,
+        });
+    }
+
+    /// Choose the picker's row at `i` among those its filter leaves: its id
+    /// goes in the field.
+    fn picked(&mut self, src: &Source, i: usize) {
+        let (all, shown) = self.pick_rows(src);
+        let Some(p) = self.picker.take() else { return };
+        let Some(row) = shown.get(i).map(|&k| &all[k]) else {
+            self.note = format!("nothing of {} to choose", p.table);
+            self.picker = Some(p);
+            return;
+        };
+        let text = form::id_text(&row.id);
+        self.note = format!("{}: {}", p.table, row.line());
+        self.on_form(src, |f| f.set_text(&p.path, text));
+    }
+
+    /// Call the form on screen: checked first, with the module's messages;
+    /// then a query run on the host's store, or a mutation authored through
+    /// the host's writer as a button would author it.
+    fn call(&mut self, src: &Source, w: &mut dyn Writer) {
+        let Some(f) = self.form_mut() else { return };
+        let Some(args) = f.validate(src.module, src.store.schema(), &src.ctx, src.store) else {
+            let said: Vec<String> = f.messages.iter().map(|(_, m)| m.clone()).collect();
+            self.note = format!("not called: {}", said.join("; "));
+            return;
+        };
+        let (name, kind) = (f.function.clone(), f.kind);
+        self.run_call(src, w, name, kind, args);
+    }
+
+    fn run_call(&mut self, src: &Source, w: &mut dyn Writer, function: String, kind: FnKind, args: ark::eval::Args) {
+        let called = match kind {
+            FnKind::Query => match query(src, &function, &args) {
+                Ok(v) => Called::Answer(v),
+                Err(why) => Called::Failed(why),
+            },
+            _ => match w.author(&function, args.clone()) {
+                Ok(t) => Called::Authored(t),
+                Err(why) => Called::Refused(why),
+            },
+        };
+        let call = Call {
+            function,
+            kind,
+            args,
+            called,
+        };
+        self.note = format!("{}: {}", call.function, Explorer::outcome(&call, w));
+        self.in_answer = matches!(&call.called, Called::Answer(_));
+        self.answer_at = (0, 0);
+        self.calls.push(call);
+    }
+
+    /// Call recent call `i` again, with the arguments it had.
+    fn again(&mut self, src: &Source, w: &mut dyn Writer, i: usize) {
+        let Some(c) = self.calls.get(i).cloned() else { return };
+        if let Some(callable) = Explorer::callables(src).into_iter().find(|x| x.name == c.function) {
+            self.forms.insert(c.function.clone(), Form::filled(&callable, &c.args));
+            self.screen = Screen::Call(c.function.clone());
+        }
+        self.picker = None;
+        self.run_call(src, w, c.function, c.kind, c.args);
+    }
+
+    /// Put recent call `i`'s arguments back in its form, to change and call.
+    fn recall(&mut self, src: &Source, i: usize) {
+        let Some(c) = self.calls.get(i).cloned() else { return };
+        let Some(callable) = Explorer::callables(src).into_iter().find(|x| x.name == c.function) else {
+            return;
+        };
+        let mut f = Form::filled(&callable, &c.args);
+        f.validate(src.module, src.store.schema(), &src.ctx, src.store);
+        self.forms.insert(c.function.clone(), f);
+        self.picker = None;
+        self.in_answer = false;
+        self.screen = Screen::Call(c.function);
     }
 
     fn show(&mut self, s: Screen) {
@@ -261,11 +545,23 @@ impl Explorer {
             }
         }
         self.editing = None;
+        self.picker = None;
         self.screen = s;
     }
 
     /// A finished command of the vim grammar (`arkui::vim`).
     pub fn act(&mut self, action: Action, src: &Source, w: &mut dyn Writer) -> Outcome {
+        // The picker, while it is open, has the keys: it walks, filters,
+        // chooses and closes, and nothing behind it moves.
+        if self.picker.is_some() {
+            self.act_picker(action, src);
+            return Outcome::Stay;
+        }
+        if let Screen::Call(_) = self.screen {
+            if let Some(o) = self.act_form(action.clone(), src, w) {
+                return o;
+            }
+        }
         match action {
             Action::Move(m) => self.travel(m, src),
             Action::Activate => match &self.screen {
@@ -278,7 +574,8 @@ impl Explorer {
                 Screen::Console => {
                     return self.update(Msg::Run, src, w);
                 }
-                Screen::Log => {}
+                Screen::Functions => self.open_function(src, self.functions_at),
+                Screen::Log | Screen::Call(_) => {}
             },
             Action::Cancel => {
                 if self.editing.take().is_some() {
@@ -286,6 +583,7 @@ impl Explorer {
                 }
                 match self.screen {
                     Screen::Table(_) => self.show(Screen::Tables),
+                    Screen::Call(_) => self.show(Screen::Functions),
                     _ => return Outcome::Close,
                 }
             }
@@ -299,9 +597,104 @@ impl Explorer {
             Action::Key('1') => self.show(Screen::Tables),
             Action::Key('2') => self.show(Screen::Log),
             Action::Key('3') => self.show(Screen::Console),
+            Action::Key('f') => self.show(Screen::Functions),
+            // Again: the last call, as it was.
+            Action::Key('.') if matches!(self.screen, Screen::Functions) => {
+                if let Some(i) = self.calls.len().checked_sub(1) {
+                    self.again(src, w, i);
+                }
+            }
             _ => {}
         }
         Outcome::Stay
+    }
+
+    /// The keys on a form: `j` and `k` walk its lines (and a query's answer,
+    /// once it is called, until `<Esc>` hands them back), `<Enter>` does
+    /// what the line under the cursor does, `x` takes an item out of its
+    /// list, `r` calls, `.` calls the last call again. `None` for what the
+    /// screens share.
+    fn act_form(&mut self, action: Action, src: &Source, w: &mut dyn Writer) -> Option<Outcome> {
+        if self.in_answer {
+            if let Some(g) = self.answer_grid() {
+                match action {
+                    Action::Move(m @ (Motion::Left(_) | Motion::Right(_))) => {
+                        self.answer_at.1 = Grid::row(g.columns.len()).step(self.answer_at.1, m).unwrap_or(self.answer_at.1);
+                        return Some(Outcome::Stay);
+                    }
+                    Action::Move(m) => {
+                        self.answer_at.0 = Grid::column(g.rows.len()).step(self.answer_at.0, m).unwrap_or(self.answer_at.0);
+                        return Some(Outcome::Stay);
+                    }
+                    Action::Cancel => {
+                        self.in_answer = false;
+                        return Some(Outcome::Stay);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let f = self.form_mut()?;
+        let slots = f.slots();
+        match action {
+            Action::Move(m @ (Motion::Up(_) | Motion::Down(_) | Motion::First | Motion::Last | Motion::To(_))) => {
+                // One past the last line is the button that calls.
+                f.at = Grid::column(slots.len() + 1).step(f.at, m).unwrap_or(f.at);
+                Some(Outcome::Stay)
+            }
+            Action::Activate | Action::Toggle => {
+                let Some(slot) = slots.get(f.at) else {
+                    self.call(src, w);
+                    return Some(Outcome::Stay);
+                };
+                if matches!(slot.ty, Ty::Id(_)) && action == Action::Activate {
+                    self.open_picker(src, slot.path.clone());
+                } else {
+                    let path = slot.path.clone();
+                    self.on_form(src, |f| f.activate(&path));
+                }
+                Some(Outcome::Stay)
+            }
+            Action::Key('x') => {
+                if let Some(slot) = slots.get(f.at).filter(|s| s.item) {
+                    let path = slot.path.clone();
+                    self.on_form(src, |f| f.remove(&path));
+                }
+                Some(Outcome::Stay)
+            }
+            Action::Key('r') => {
+                self.call(src, w);
+                Some(Outcome::Stay)
+            }
+            Action::Key('.') => {
+                let Screen::Call(name) = &self.screen else { return None };
+                if let Some(i) = self.calls.iter().rposition(|c| &c.function == name) {
+                    self.again(src, w, i);
+                }
+                Some(Outcome::Stay)
+            }
+            _ => None,
+        }
+    }
+
+    /// The keys on the picker: walk, `/` to filter (as it is typed), choose,
+    /// close.
+    fn act_picker(&mut self, action: Action, src: &Source) {
+        let (_, shown) = self.pick_rows(src);
+        let Some(p) = &mut self.picker else { return };
+        match action {
+            Action::Move(m) => p.at = Grid::column(shown.len()).step(p.at, m).unwrap_or(p.at),
+            Action::Activate => {
+                let at = p.at;
+                self.picked(src, at);
+            }
+            Action::Search(q) => {
+                p.filter = q;
+                p.at = 0;
+            }
+            Action::Cancel => self.picker = None,
+            _ => {}
+        }
     }
 
     // A motion in whichever list is on screen; on a table `h` and `l` walk
@@ -321,7 +714,8 @@ impl Explorer {
                     self.row_at = column(n, self.row_at);
                 }
             },
-            Screen::Console => {}
+            Screen::Functions => self.functions_at = column(Explorer::callables(src).len(), self.functions_at),
+            Screen::Console | Screen::Call(_) => {}
         }
     }
 
@@ -387,4 +781,18 @@ impl Explorer {
             Err(why) => why,
         };
     }
+}
+
+/// A query by name, run on the host's store as who the explorer reads as —
+/// the console's path, with the arguments a form read.
+fn query(src: &Source, name: &str, args: &ark::eval::Args) -> Result<Value, String> {
+    let f = src.module.lookup_function(name).ok_or_else(|| format!("no function {name}"))?;
+    if f.kind != FnKind::Query {
+        return Err(format!("{name} is a {}, not a query", f.kind.name()));
+    }
+    let c = ark::hash::closure(src.module, f);
+    ark::eval::query_closure(src.store.schema(), &c, &src.ctx, args, src.store).map_err(|e| match e {
+        ark::eval::EvalFault::Verdict(r) => format!("refused: {}", ark::protocol::refusal_text(&r)),
+        ark::eval::EvalFault::Bug(b) => format!("a bug: {b:?}"),
+    })
 }

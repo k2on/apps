@@ -12,7 +12,7 @@ use ark::store::{Change, MemoryStore, Store};
 use ark::value::{TableName, Value};
 use iced::keyboard::{key::Named, Key, Modifiers};
 
-use crate::data::{crud_of, CrudVerbs, NoLog, Source, Writer};
+use crate::data::{crud_of, CrudVerbs, NoLog, Source, Ticket, Writer};
 use crate::edit::{cell_text, console, parse_cell, route_delete, route_edit, Route, Via};
 use crate::model::{Explorer, Msg, Outcome, Screen};
 
@@ -86,16 +86,64 @@ impl Input for OfTeam {
     }
 }
 
-/// A user table with its CRUD exposed, a team table with none, and one
-/// query.
+pub struct NewTeam {
+    pub name: Text,
+    pub size: Int,
+}
+impl Input for NewTeam {
+    fn schema() -> Object<Self> {
+        object()
+            .field("name", text().trim().min(1).why("a team needs a name").max(12))
+            .field("size", int().range(1, 10))
+    }
+}
+
+pub struct Level;
+impl Variants for Level {
+    const VARIANTS: &'static [&'static str] = &["low", "high"];
+}
+
+/// A mutation over every kind of field a form draws.
+pub struct Kick {
+    pub user: Id<User>,
+    pub why: Opt<Text>,
+    pub tags: List<Text>,
+    pub level: Text,
+    pub loud: Bool,
+}
+impl Input for Kick {
+    fn schema() -> Object<Self> {
+        object()
+            .field("user", id::<User>().exists())
+            .field("why", opt(text()))
+            .field("tags", text().list().non_empty())
+            .field("level", enum_::<Level>())
+            .field("loud", bool_())
+    }
+}
+
+/// A user table with its CRUD exposed, a team table with none, one query,
+/// and two mutations of the module's own on a second router.
 fn module() -> ark::ir::Module {
     let people = router::<People>("people");
-    Module::new(people.routes((
-        people.crud::<User>(),
-        people.input::<OfTeam>().query("members", |_ctx, db, input| {
-            db.user.filter(User::team.eq(input.team)).order_by(User::name.asc())
-        }),
-    )))
+    let teams = router::<People>("teams");
+    Module::new((
+        people.routes((
+            people.crud::<User>(),
+            people.input::<OfTeam>().query("members", |_ctx, db, input| {
+                db.user.filter(User::team.eq(input.team)).order_by(User::name.asc())
+            }),
+        )),
+        teams.routes((
+            teams.input::<NewTeam>().mutation("make_team", |_ctx, db, input| {
+                db.team.insert(Team {
+                    name: input.name,
+                    size: input.size,
+                })
+            }),
+            teams.input::<Kick>().mutation("kick", |_ctx, db, input| db.user.delete((input.user,))),
+        )),
+    ))
     .build()
     .clone()
 }
@@ -143,9 +191,9 @@ impl Writer for Recorder {
     fn exposed(&self) -> Vec<(TableName, CrudVerbs)> {
         self.exposed.clone()
     }
-    fn author(&mut self, function: &str, args: Args) -> Result<(), String> {
+    fn author(&mut self, function: &str, args: Args) -> Result<Ticket, String> {
         self.authored.push((function.into(), args));
-        Ok(())
+        Ok(Ticket(self.authored.len().to_string()))
     }
     fn raw(&mut self, change: Change) -> Result<(), String> {
         self.asked_raw += 1;
@@ -601,9 +649,12 @@ fn the_admin_page_asks_the_server_for_its_writes() {
     assert_eq!(hello_of(r#"{"open":true,"server":null}"#), Ok((true, None)));
 }
 
-// -- the table's cells ------------------------------------------------------
+// -- the table's cells, the functions, their forms and the picker ----------
 
 use crate::cells::{self, Grid};
+use crate::form::{self, Callable, Called, Form};
+use ark::ir::{Field, FnKind};
+use ark::schema::Ty;
 
 fn row_of(m: &ark::ir::Module, table: &str, pairs: &[(&str, Value)]) -> ark::store::Row {
     let tbl = m.schema.lookup_table(table).unwrap();
@@ -680,4 +731,462 @@ fn a_query_answer_is_a_grid() {
     assert_eq!((g.columns.as_slice(), g.rows.len()), (&["value".to_string()][..], 2));
     let g = Grid::of_value(&Value::Int(7));
     assert_eq!(g.rows, vec![vec![Value::Int(7)]]);
+}
+
+/// The Functions screen lists every query and mutation of the module, by
+/// router in the order each router first appears, with its input and its
+/// checks as they are said. Falsified by listing mutations alone: `members`
+/// was missing.
+#[test]
+fn every_query_and_mutation_is_listed_by_router() {
+    let m = module();
+    let all = form::callables(&m);
+    let names: Vec<(&str, &str)> = all.iter().map(|c| (c.router.as_str(), c.name.as_str())).collect();
+    let routers: Vec<&str> = names.iter().map(|(r, _)| *r).collect();
+    let first_teams = routers.iter().position(|r| *r == "teams").unwrap();
+    assert!(routers[..first_teams].iter().all(|r| *r == "people"), "{names:?}");
+    assert!(routers[first_teams..].iter().all(|r| *r == "teams"), "{names:?}");
+    for want in ["members", "insert_user", "update_user", "delete_user", "put_user", "make_team", "kick"] {
+        assert!(names.iter().any(|(_, n)| *n == want), "{want} in {names:?}");
+    }
+    assert!(all.iter().all(|c| matches!(c.kind, FnKind::Query | FnKind::Mutator)));
+    let kick = all.iter().find(|c| c.name == "kick").unwrap();
+    let said: Vec<String> = kick.input.iter().map(|(n, f)| format!("{n}: {}", form::ty_name(&f.ty))).collect();
+    assert_eq!(
+        said,
+        [
+            "user: id(user)",
+            "why: option(text)",
+            "tags: list(text)",
+            "level: enum(low | high)",
+            "loud: bool"
+        ]
+    );
+    let make = all.iter().find(|c| c.name == "make_team").unwrap();
+    assert_eq!(
+        form::checks_said(&make.input[0].1),
+        ["trimmed", "min 1 char (\u{201c}a team needs a name\u{201d})", "max 12 chars"]
+    );
+    assert_eq!(form::checks_said(&make.input[1].1), ["1 to 10"]);
+}
+
+/// Every type reads from its input as its value, and what does not read is
+/// said with the field's name: a text, an int (a word refused), a bool, an
+/// enum, an option (none and some), a list (items added and taken out), a
+/// struct, an id (pasted with dashes, or refused), bytes. Falsified by
+/// dropping the option's "none" reading: `note`, at none, was refused as not
+/// an input of its type rather than read as none.
+#[test]
+fn every_type_reads_from_its_input() {
+    let fs = |pairs: &[(&str, Ty)]| Ty::Struct(pairs.iter().map(|(k, t)| (k.to_string(), t.clone())).collect());
+    let callable = Callable {
+        router: "r".into(),
+        name: "f".into(),
+        kind: FnKind::Mutator,
+        input: [
+            ("title", Ty::Text),
+            ("count", Ty::Int),
+            ("on", Ty::Bool),
+            ("level", Ty::Enum(vec!["low".into(), "high".into()])),
+            ("note", Ty::Option(Box::new(Ty::Text))),
+            ("tags", Ty::List(Box::new(Ty::Int))),
+            ("at", fs(&[("x", Ty::Int), ("label", Ty::Text)])),
+            ("who", Ty::Id("user".into())),
+            ("blob", Ty::Bytes),
+        ]
+        .into_iter()
+        .map(|(n, t)| (n.to_string(), Field::plain(t)))
+        .collect(),
+    };
+    let mut f = Form::new(&callable);
+    let p = |xs: &[usize]| xs.to_vec();
+    f.set_text(&p(&[0]), "a title".into());
+    f.set_text(&p(&[1]), "twelve".into());
+    f.toggle(&p(&[2]));
+    f.choose(&p(&[3]), 1);
+    f.set_text(&p(&[4, 0]), "x".into()); // typed while it is none
+    f.add(&p(&[5]));
+    f.add(&p(&[5]));
+    f.add(&p(&[5]));
+    f.set_text(&p(&[5, 0]), "1".into());
+    f.set_text(&p(&[5, 1]), "2".into());
+    f.set_text(&p(&[5, 2]), "3".into());
+    f.remove(&p(&[5, 1]));
+    f.set_text(&p(&[6, 1]), "4".into()); // the struct's fields are in its type's order: label, x
+    f.set_text(&p(&[6, 0]), "here".into());
+    f.set_text(&p(&[7]), "00000000-0000-0000-0000-000000000002".into());
+    f.set_text(&p(&[8]), "beef".into());
+    let (args, bad) = f.read();
+    assert_eq!(bad, [("count".to_string(), "count: a whole number".to_string())]);
+    assert_eq!(args["title"], Value::text("a title"));
+    assert_eq!(args["on"], Value::Bool(true));
+    assert_eq!(args["level"], Value::text("high"));
+    assert_eq!(args["note"], Value::Null, "an option at none is none, whatever was typed");
+    assert_eq!(args["tags"], Value::list(vec![Value::Int(1), Value::Int(3)]));
+    assert_eq!(args["at"].field("x"), Value::Int(4));
+    assert_eq!(args["at"].field("label"), Value::text("here"));
+    assert_eq!(args["who"], uid(2));
+    assert_eq!(args["blob"], Value::Bytes(vec![0xbe, 0xef].into()));
+    f.set_text(&p(&[1]), " 12 ".into());
+    f.toggle(&p(&[4]));
+    f.set_text(&p(&[7]), "not an id".into());
+    let (args, bad) = f.read();
+    assert_eq!(args["count"], Value::Int(12));
+    assert_eq!(args["note"], Value::text("x"));
+    assert_eq!(bad, [("who".to_string(), "who: an id, 32 hex digits".to_string())]);
+    // Every line of the form, nested ones under their field.
+    let labels: Vec<(usize, String)> = f.slots().into_iter().map(|s| (s.depth, s.label)).collect();
+    assert!(labels.contains(&(1, "value".into())), "the option's value, now it has one");
+    assert!(labels.contains(&(1, "2".into())), "the list's second item");
+    assert!(labels.contains(&(1, "label".into())) && labels.contains(&(1, "x".into())));
+    // `<Enter>` on a line: a bool flips, an enum moves on, a list grows.
+    f.activate(&p(&[2]));
+    f.activate(&p(&[3]));
+    f.activate(&p(&[5]));
+    let (args, _) = f.read();
+    assert_eq!(args["on"], Value::Bool(false));
+    assert_eq!(args["level"], Value::text("low"));
+    assert!(
+        f.read().1.iter().any(|(n, m)| n == "tags" && m == "tags.3: a whole number"),
+        "{:?}",
+        f.read().1
+    );
+}
+
+/// The checks run before calling, with the module's own messages, and a call
+/// that fails them reaches no writer. Falsified by calling whatever the
+/// checks said: `make_team` was authored with an empty name.
+#[test]
+fn the_checks_run_before_calling_with_the_modules_messages() {
+    let m = module();
+    let st = store(&m);
+    let src = source(&m, &st);
+    let mut w = writer(&m, false);
+    let mut ex = Explorer::new();
+    let at = form::callables(&m).iter().position(|c| c.name == "make_team").unwrap();
+    ex.update(Msg::Function(at), &src, &mut w);
+    assert_eq!(ex.screen, Screen::Call("make_team".into()));
+    ex.update(Msg::FormText(vec![0], "   ".into()), &src, &mut w);
+    ex.update(Msg::FormText(vec![1], "11".into()), &src, &mut w);
+    let f = ex.form().unwrap();
+    assert_eq!(f.message("name"), Some("a team needs a name"));
+    assert_eq!(f.message("size"), Some("size: between 1 and 10"));
+    ex.update(Msg::Call, &src, &mut w);
+    assert!(w.authored.is_empty(), "nothing is called that the checks refuse");
+    assert!(ex.note.starts_with("not called: a team needs a name"), "{}", ex.note);
+    ex.update(Msg::FormText(vec![0], "  green ".into()), &src, &mut w);
+    ex.update(Msg::FormText(vec![1], "4".into()), &src, &mut w);
+    assert_eq!(ex.form().unwrap().messages, vec![]);
+    ex.update(key("r"), &src, &mut w);
+    let (f, args) = w.authored.last().expect("called");
+    assert_eq!(f, "make_team");
+    assert_eq!(args["name"], Value::text("green"), "sent as the checks normalised it");
+    assert_eq!(args["size"], Value::Int(4));
+}
+
+/// A query called from its form runs on the host's store with those
+/// arguments, and its rows are a table; the keys walk the answer until
+/// `<Esc>` hands them back to the form. Falsified by running it with no
+/// arguments: the query refused the missing team and there was no answer.
+#[test]
+fn a_query_call_returns_rows() {
+    let m = module();
+    let st = store(&m);
+    let src = source(&m, &st);
+    let mut w = writer(&m, false);
+    let mut ex = Explorer::new();
+    ex.update(key("f"), &src, &mut w);
+    assert_eq!(ex.screen, Screen::Functions);
+    let at = form::callables(&m).iter().position(|c| c.name == "members").unwrap();
+    for _ in 0..at {
+        ex.update(key("j"), &src, &mut w);
+    }
+    ex.update(named(Named::Enter), &src, &mut w);
+    assert_eq!(ex.screen, Screen::Call("members".into()));
+    ex.update(Msg::FormText(vec![0], "blue".into()), &src, &mut w);
+    ex.update(Msg::Call, &src, &mut w);
+    let g = ex.answer_grid().expect("an answer");
+    let name = g.columns.iter().position(|c| c == "name").unwrap();
+    assert_eq!(
+        g.rows.iter().map(|r| r[name].clone()).collect::<Vec<_>>(),
+        [Value::text("ann"), Value::text("bob")]
+    );
+    assert!(ex.note.contains("2 rows"), "{}", ex.note);
+    assert!(ex.in_answer);
+    ex.update(key("j"), &src, &mut w);
+    assert_eq!(ex.answer_at.0, 1);
+    ex.update(named(Named::Escape), &src, &mut w);
+    assert!(!ex.in_answer && ex.screen == Screen::Call("members".into()));
+    assert!(w.authored.is_empty() && w.raws.is_empty(), "a query writes nothing");
+    // Kept for the session, and called again as it was.
+    ex.update(named(Named::Escape), &src, &mut w);
+    assert_eq!(ex.screen, Screen::Functions);
+    ex.update(key("."), &src, &mut w);
+    assert_eq!(ex.calls.len(), 2);
+    assert_eq!(ex.calls[1].args, ex.calls[0].args);
+}
+
+/// A writer that refuses a mutation now, or authors it and says later that
+/// it was refused: a client's two ways of saying no.
+struct Refusing {
+    now: bool,
+}
+
+impl Writer for Refusing {
+    fn exposed(&self) -> Vec<(TableName, CrudVerbs)> {
+        vec![]
+    }
+    fn author(&mut self, _f: &str, _a: Args) -> Result<Ticket, String> {
+        match self.now {
+            true => Err("kick: not yours to kick".into()),
+            false => Ok(Ticket("t1".into())),
+        }
+    }
+    fn verdict(&self, _t: &Ticket) -> crate::data::Verdict {
+        crate::data::Verdict::Refused("the authority says no".into())
+    }
+    fn raw(&mut self, _c: Change) -> Result<(), String> {
+        Err("not the authority".into())
+    }
+}
+
+/// A mutation called from its form reaches the writer with exactly the
+/// arguments typed — an id chosen in the picker, an option, a list, an
+/// enum, a bool — as the host's author would author it; what it came to is
+/// the writer's verdict; a refusal now is said with its text. Falsified by
+/// not filling the field the picker chose: the checks refused the call and
+/// no writer was reached.
+#[test]
+fn a_mutation_call_reaches_the_writer_and_its_verdict_is_said() {
+    let m = module();
+    let st = store(&m);
+    let src = source(&m, &st);
+    let fill = |ex: &mut Explorer, w: &mut dyn Writer| {
+        let at = form::callables(&m).iter().position(|c| c.name == "kick").unwrap();
+        ex.update(Msg::Function(at), &src, w);
+        ex.update(Msg::Pick(vec![0]), &src, w);
+        ex.update(Msg::PickFilter("bob".into()), &src, w);
+        ex.update(Msg::Picked(0), &src, w);
+        ex.update(Msg::FormToggle(vec![1]), &src, w);
+        ex.update(Msg::FormText(vec![1, 0], "late".into()), &src, w);
+        ex.update(Msg::FormAdd(vec![2]), &src, w);
+        ex.update(Msg::FormText(vec![2, 0], "a".into()), &src, w);
+        ex.update(Msg::FormChoose(vec![3], 1), &src, w);
+        ex.update(Msg::FormToggle(vec![4]), &src, w);
+        ex.update(Msg::Call, &src, w);
+    };
+    let mut w = writer(&m, false);
+    let mut ex = Explorer::new();
+    fill(&mut ex, &mut w);
+    let (f, args) = w.authored.last().expect("authored");
+    assert_eq!(f, "kick");
+    let mut want = Args::new();
+    want.insert("user".into(), uid(2));
+    want.insert("why".into(), Value::text("late"));
+    want.insert("tags".into(), Value::list(vec![Value::text("a")]));
+    want.insert("level".into(), Value::text("high"));
+    want.insert("loud".into(), Value::Bool(true));
+    assert_eq!(args, &want);
+    assert!(w.raws.is_empty(), "a client never writes raw");
+    assert!(matches!(&ex.calls.last().unwrap().called, Called::Authored(_)));
+    assert_eq!(
+        Explorer::outcome(ex.calls.last().unwrap(), &w),
+        "authored",
+        "the recorder keeps no verdict"
+    );
+    // Refused now, with its text; refused later, the verdict's.
+    for (now, says) in [(true, "refused: kick: not yours to kick"), (false, "refused: the authority says no")] {
+        let mut w = Refusing { now };
+        let mut ex = Explorer::new();
+        fill(&mut ex, &mut w);
+        let call = ex.calls.last().expect("a call");
+        assert_eq!(Explorer::outcome(call, &w), says);
+        assert!(ex.note.ends_with(says), "{}", ex.note);
+    }
+}
+
+/// The picker: a table's rows labelled by the column that tells them apart
+/// and a second where there is one, the short id otherwise; filtered by a
+/// substring of the label; walked and chosen with the keys, `/` filtering as
+/// it is typed; and a table with no rows says so. Pasting an id works too.
+/// Falsified by labelling by the first text column that holds anything: the
+/// table whose rows all share one name was labelled by that name.
+#[test]
+fn the_picker_labels_filters_and_chooses() {
+    let m = module();
+    let mut st = store(&m);
+    // `email` tells two of them apart; nobody's is the null.
+    for (k, email) in [(1, "ann@x"), (3, "cat@y")] {
+        let mut r = st.get("user", &[uid(k)]).unwrap();
+        r = r.with("email", Value::text(email));
+        st.put("user", r).unwrap();
+    }
+    assert_eq!(form::label_columns(&st, "user"), (Some("name".into()), Some("email".into())));
+    let picks = form::pickables(&st, "user");
+    let lines: Vec<String> = picks.iter().map(|p| p.line()).collect();
+    assert_eq!(lines[0], "ann \u{b7} ann@x \u{b7} 00000000");
+    assert_eq!(picks[1].secondary, None);
+    assert_eq!(form::filter(&picks, "CAT"), [2]);
+    assert_eq!(form::filter(&picks, ""), [0, 1, 2]);
+    assert_eq!(form::filter(&picks, "zzz"), Vec::<usize>::new());
+    // A column holding one value on every row is passed over for one that
+    // tells rows apart.
+    let mut same = MemoryStore::empty(m.schema.clone());
+    same.put("team", row_of(&m, "team", &[("name", Value::text("t")), ("size", Value::Int(1))]))
+        .unwrap();
+    for (k, name) in [(1, "x"), (2, "y")] {
+        same.put(
+            "user",
+            row_of(
+                &m,
+                "user",
+                &[
+                    ("id", uid(k)),
+                    ("name", Value::text("same")),
+                    ("team", Value::text("t")),
+                    ("admin", Value::Bool(false)),
+                    ("email", Value::text(name)),
+                ],
+            ),
+        )
+        .unwrap();
+    }
+    assert_eq!(form::label_columns(&same, "user"), (Some("email".into()), None));
+    // By the keys.
+    let src = source(&m, &st);
+    let mut w = writer(&m, false);
+    let mut ex = Explorer::new();
+    let at = form::callables(&m).iter().position(|c| c.name == "kick").unwrap();
+    ex.update(Msg::Function(at), &src, &mut w);
+    ex.update(named(Named::Enter), &src, &mut w);
+    assert!(ex.picker.is_some(), "<Enter> on an id field opens the picker");
+    for c in ["/", "c", "a"] {
+        ex.update(key(c), &src, &mut w);
+    }
+    assert_eq!(ex.picker.as_ref().unwrap().filter, "ca", "filtered as it is typed");
+    assert_eq!(ex.pick_rows(&src).1, [2]);
+    ex.update(named(Named::Enter), &src, &mut w); // accepts the search
+    ex.update(named(Named::Enter), &src, &mut w); // chooses
+    assert!(ex.picker.is_none());
+    let (args, _) = ex.form().unwrap().read();
+    assert_eq!(args["user"], uid(3));
+    // `j` walks it, `<Esc>` closes it and leaves the field as it was.
+    ex.update(named(Named::Enter), &src, &mut w);
+    ex.update(key("j"), &src, &mut w);
+    assert_eq!(ex.picker.as_ref().unwrap().at, 1);
+    ex.update(named(Named::Escape), &src, &mut w);
+    assert!(ex.picker.is_none() && ex.screen == Screen::Call("kick".into()));
+    assert_eq!(ex.form().unwrap().read().0["user"], uid(3));
+    // Pasted, with dashes; and refused when it is not one.
+    ex.update(Msg::FormText(vec![0], "00000000-0000-0000-0000-000000000001".into()), &src, &mut w);
+    assert_eq!(ex.form().unwrap().read().0["user"], uid(1));
+    ex.update(Msg::FormText(vec![0], "0001".into()), &src, &mut w);
+    assert_eq!(ex.form().unwrap().message("user"), Some("user: an id, 32 hex digits"));
+    // A table with no rows says so.
+    let empty = MemoryStore::empty(m.schema.clone());
+    let src = source(&m, &empty);
+    let mut ex = Explorer::new();
+    ex.update(Msg::Function(at), &src, &mut w);
+    ex.update(Msg::Pick(vec![0]), &src, &mut w);
+    assert_eq!(ex.note, "user holds no rows here");
+    assert_eq!(ex.pick_rows(&src).0.len(), 0);
+}
+
+/// A recent call is put back in its form, every field as it was called.
+/// Falsified by filling the form blank: the team's name was empty.
+#[test]
+fn a_recent_call_is_put_back_in_its_form() {
+    let m = module();
+    let st = store(&m);
+    let src = source(&m, &st);
+    let mut w = writer(&m, false);
+    let mut ex = Explorer::new();
+    let at = form::callables(&m).iter().position(|c| c.name == "make_team").unwrap();
+    ex.update(Msg::Function(at), &src, &mut w);
+    ex.update(Msg::FormText(vec![0], "green".into()), &src, &mut w);
+    ex.update(Msg::FormText(vec![1], "3".into()), &src, &mut w);
+    ex.update(Msg::Call, &src, &mut w);
+    ex.forms.clear();
+    ex.update(Msg::Recall(0), &src, &mut w);
+    let f = ex.form().expect("the form, again");
+    assert_eq!(f.values[0], form::Input::Text("green".into()));
+    assert_eq!(f.values[1], form::Input::Text("3".into()));
+    ex.update(Msg::Again(0), &src, &mut w);
+    assert_eq!(w.authored.len(), 2);
+    assert_eq!(w.authored[0], w.authored[1]);
+}
+
+/// The form, the picker and an answer all draw. Falsified by a panic in
+/// the picker's view: the test failed.
+#[test]
+fn the_functions_screens_draw() {
+    let m = module();
+    let st = store(&m);
+    let src = source(&m, &st);
+    let mut w = writer(&m, false);
+    let mut ex = Explorer::new();
+    ex.update(key("f"), &src, &mut w);
+    let _ = ex.view(&src, &w);
+    let kick = form::callables(&m).iter().position(|c| c.name == "kick").unwrap();
+    ex.update(Msg::Function(kick), &src, &mut w);
+    ex.update(Msg::FormAdd(vec![2]), &src, &mut w);
+    ex.update(Msg::FormToggle(vec![1]), &src, &mut w);
+    ex.update(Msg::Pick(vec![0]), &src, &mut w);
+    let _ = ex.view(&src, &w);
+    let members = form::callables(&m).iter().position(|c| c.name == "members").unwrap();
+    ex.update(Msg::Function(members), &src, &mut w);
+    ex.update(Msg::FormText(vec![0], "blue".into()), &src, &mut w);
+    ex.update(Msg::Call, &src, &mut w);
+    let _ = ex.view(&src, &w);
+}
+
+/// On the admin page a mutation is asked of the server's author route and
+/// its verdict is the server's answer when it arrives: pending until then,
+/// in the log at the sequence it names, or refused with the server's text.
+/// Falsified by answering every ticket from the first answer: the second
+/// call read "in the log, at 12" though the server refused it.
+#[test]
+fn the_admin_page_says_the_servers_verdict_when_it_arrives() {
+    use crate::admin::{Message, Outbox, Page, Request};
+    use crate::wire::State;
+    let m = module();
+    let st = store(&m);
+    let state = State {
+        module: ark::canon::encode(&ark::ir::module_value(&m)),
+        store: st.store_value(),
+        head: 0,
+        lines: vec![],
+        connections: vec![],
+        verifies: vec![],
+        exposed: vec![],
+        raw: true,
+        who: ark::raw::AUTHOR.into(),
+    };
+    let mut page = Page::new("http://127.0.0.1:8788".into(), None);
+    let _ = page.update(Message::Loaded(Ok(state.to_json())));
+    let at = form::callables(&m).iter().position(|c| c.name == "make_team").unwrap();
+    let call = |page: &mut Page, name: &str| {
+        let _ = page.update(Message::Explorer(Msg::Function(at)));
+        let _ = page.update(Message::Explorer(Msg::FormText(vec![0], name.into())));
+        let _ = page.update(Message::Explorer(Msg::FormText(vec![1], "2".into())));
+        let _ = page.update(Message::Explorer(Msg::Call));
+    };
+    let said = |page: &Page| {
+        let w = Outbox::of(&state, page.sent.len(), &page.answers);
+        Explorer::outcome(page.explorer.calls.last().unwrap(), &w)
+    };
+    call(&mut page, "green");
+    assert!(
+        matches!(page.sent.as_slice(), [Request::Author(f, _)] if f == "make_team"),
+        "{:?}",
+        page.sent
+    );
+    assert_eq!(said(&page), "accepted, pending");
+    let _ = page.update(Message::Answered(0, Ok("12".into())));
+    assert_eq!(said(&page), "in the log, at 12");
+    call(&mut page, "blue");
+    let _ = page.update(Message::Answered(1, Err("team: a row with this key exists".into())));
+    assert_eq!(said(&page), "refused: team: a row with this key exists");
+    let first = Explorer::outcome(&page.explorer.calls[0], &Outbox::of(&state, page.sent.len(), &page.answers));
+    assert_eq!(first, "in the log, at 12", "each call keeps its own answer");
 }

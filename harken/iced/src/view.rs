@@ -1046,7 +1046,10 @@ fn view_help() -> Element<'static, Message> {
         ("a", "which playlists this track is on \u{2014} and make one"),
         ("d", "which device is making the sound, and move it"),
         ("D", "every number the session holds, and where your changes stand"),
-        ("E", "the explorer: every table this device holds, the log, a query console"),
+        (
+            "E",
+            "the explorer: every table this device holds, the log, a query console, every function callable",
+        ),
         ("/", "search this pane; <Enter> accepts, <Esc> drops it"),
         ("n  N", "the next match, the one before"),
         ("{  }", "the previous track, the next one"),

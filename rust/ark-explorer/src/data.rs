@@ -65,8 +65,17 @@ pub trait Writer {
 
     /// Author a domain mutation as this host's identity: the signed-in
     /// person on a client, the authority on a server. `Ok` once it is
-    /// authored — what becomes of it is the log's to say.
-    fn author(&mut self, function: &str, args: Args) -> Result<(), String>;
+    /// authored, with a [`Ticket`] to ask [`Writer::verdict`] about — what
+    /// becomes of it is the log's to say; `Err` with the refusal's text when
+    /// it is refused here and now.
+    fn author(&mut self, function: &str, args: Args) -> Result<Ticket, String>;
+
+    /// What has become of an authored call, as this host knows it now: a
+    /// client's standing for the intent, an admin page's answer from the
+    /// server. A host that keeps nothing says it cannot say.
+    fn verdict(&self, _ticket: &Ticket) -> Verdict {
+        Verdict::Unknown
+    }
 
     /// The authority's raw write ([`ark::raw`]): a client host answers
     /// `Err("not the authority")`.
@@ -81,6 +90,37 @@ pub trait Writer {
     /// Who this host writes as, as a line for the header.
     fn who(&self) -> String {
         String::new()
+    }
+}
+
+/// What a host hands back for a call it authored, to be asked about later
+/// ([`Writer::verdict`]): an intent's id on a client, a request's place on
+/// the admin page. Opaque to the explorer, which only keeps it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Ticket(pub String);
+
+/// What has become of a mutation the explorer authored
+/// (`docs/plan-guards.md` D4): written here and waiting for the authority,
+/// in the log (at a sequence, where the host knows it), refused with the
+/// refusal's text, or nothing the host can say.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Verdict {
+    Pending,
+    Logged(Option<Seq>),
+    Refused(String),
+    Unknown,
+}
+
+impl Verdict {
+    /// As a person would say it.
+    pub fn describe(&self) -> String {
+        match self {
+            Verdict::Pending => "accepted, pending".into(),
+            Verdict::Logged(Some(n)) => format!("in the log, at {n}"),
+            Verdict::Logged(None) => "in the log".into(),
+            Verdict::Refused(why) => format!("refused: {why}"),
+            Verdict::Unknown => "authored".into(),
+        }
     }
 }
 
