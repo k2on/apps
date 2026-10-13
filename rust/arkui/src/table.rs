@@ -29,19 +29,29 @@ pub const GUTTER: f32 = 31.0;
 /// A row's padding, top and bottom then either side.
 pub const ROW_PADDING: [f32; 2] = [3.0, 4.0];
 
-/// One cell: a single line, shortened to its width rather than wrapped.
+/// One cell: a single line, shortened to its width rather than wrapped, and
+/// clipped to it.
+///
+/// The shortening is an estimate in characters ([`fit::PER_PORTION`]) made
+/// before layout, and a portion is narrower than the estimate whenever the
+/// table is — beside a docked panel, in a small window — so the cell also
+/// clips: an estimate that errs costs the end of a word, never the column
+/// next to it.
 ///
 /// `on_cursor` is the accent-filled row; `accent` draws the text in the accent
 /// (the one playing, a ticked name); `dim` is a secondary column.
 pub fn cell<'a, M: 'a>(body: String, width: Length, on_cursor: bool, accent: bool, dim: bool) -> Element<'a, M> {
-    text(fit::to_width(&body, width))
-        .size(13)
-        .width(width)
-        .wrapping(text::Wrapping::None)
-        .style(move |theme| text::Style {
-            color: Some(style::on_row(theme, on_cursor, accent, dim)),
-        })
-        .into()
+    container(
+        text(fit::to_width(&body, width))
+            .size(13)
+            .wrapping(text::Wrapping::None)
+            .style(move |theme| text::Style {
+                color: Some(style::on_row(theme, on_cursor, accent, dim)),
+            }),
+    )
+    .width(width)
+    .clip(true)
+    .into()
 }
 
 /// A column heading, in the same grid as the cells under it.
