@@ -37,9 +37,18 @@
 //! (`Peer::open_path`), signed in the way the desktop signs in under dev
 //! auth (`ark_auth::client::login` with a name, which a dev server answers
 //! with a code and no browser), the login remembered in `DIR/login.json` so
-//! a restart reuses it, the sync socket dialled and pumped on the desktop's
-//! fifty milliseconds. Without `--user` it opens signed out, authoring as
+//! a restart reuses it, the sync socket dialled and pumped as the desktop's
+//! is — **when something happens and at no other time**
+//! (`docs/plan-reactive.md`): when the socket wakes it (opened, a frame,
+//! closed), after every command, and at the one deadline the peer asks for,
+//! the redial after a close. Nothing here runs on a clock, so a fleet of
+//! these is the test of the wakes: a frame nobody drained is a fleet that
+//! does not converge. Without `--user` it opens signed out, authoring as
 //! nobody and dialling nothing, until `sign_in`.
+//!
+//! `--pump-ms` was the pump's period. It is now how long `settle` waits
+//! with no wake before it counts the cursor as still — the one thing the
+//! period was also measuring.
 //!
 //! **It reads commands as JSON lines on stdin and answers each with one JSON
 //! line on stdout**, so a test — or a shell — drives it with no socket of
@@ -73,12 +82,15 @@
 //! link — opened, dropped, denied — goes to stderr, one line each, prefixed
 //! `harken-peer:`, so a test can attach it to a failure.
 //!
-//! `wait` and `settle` pump while they wait and read no more commands until
-//! they answer: a driver sends one command and reads one answer.
+//! `wait` and `settle` pump on every wake while they wait and read no more
+//! commands until they answer: a driver sends one command and reads one
+//! answer.
 
+use std::collections::VecDeque;
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{channel, Receiver, RecvTimeoutError};
+use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use ark::hash::state_hash;
@@ -86,6 +98,7 @@ use ark::json;
 use ark::value::{hex, Value};
 use ark_auth::client::Patience;
 use ark_auth::Login;
+use ark_client::autos::monotonic_ms;
 use ark_client::{Args, Domain, Options, Peer, Standing, Timing};
 
 const USAGE: &str =
@@ -384,7 +397,16 @@ struct Headless {
     server: Option<String>,
     /// How long a sign-in waits on the server.
     patience: Patience,
-    pump: Duration,
+    /// How long `settle` waits with no wake before the cursor counts as
+    /// still for a turn (`--pump-ms`).
+    still: Duration,
+    /// Where the socket's wakes and stdin's lines arrive, in one queue…
+    events: Receiver<Ev>,
+    /// …and its other end, for stdin's thread.
+    inbox: Sender<Ev>,
+    /// Lines that arrived while `wait` or `settle` was waiting on a wake:
+    /// answered after it, in order.
+    held: VecDeque<Ev>,
     /// Verdicts collected and not yet asked for. Every one is also appended
     /// to `DIR/rejections.jsonl` the pump it arrives in, because the engine
     /// keeps a verdict in memory only: a peer killed before anybody asked
@@ -393,6 +415,14 @@ struct Headless {
     unasked: Vec<String>,
     /// `--roles`: what this device's `Ctx` carries beside its login's.
     roles: Vec<String>,
+}
+
+/// What wakes the loop: the peer's socket, or a line of stdin.
+enum Ev {
+    Wake,
+    Line(String),
+    /// The end of stdin, which is a quit.
+    Eof,
 }
 
 impl Headless {
@@ -430,6 +460,13 @@ impl Headless {
         let mut peer = Peer::open_path(domain, f.dir.join("replica"), opts)
             .map_err(|e| format!("opening {}: {e}", f.dir.display()))?;
         peer.set_roles(roles.iter().chain(&f.roles).cloned());
+        // Before the link exists, so it and every one after hands this to
+        // its transport.
+        let (inbox, events) = channel();
+        let tx = inbox.clone();
+        peer.set_waker(Arc::new(move || {
+            let _ = tx.send(Ev::Wake);
+        }));
         if let Some(server) = &f.server {
             peer.connect(&ark_auth::socket_url(server));
         }
@@ -438,7 +475,10 @@ impl Headless {
             dir: f.dir.clone(),
             server: f.server.clone(),
             patience: f.patience,
-            pump: f.pump,
+            still: f.pump,
+            inbox,
+            events,
+            held: VecDeque::new(),
             unasked: vec![],
             roles: f.roles.clone(),
         })
@@ -496,21 +536,66 @@ impl Headless {
         self.unasked.extend(fresh);
     }
 
-    /// Pump until `done`, or the timeout. Whether it was done.
-    fn pump_until(&mut self, timeout: Duration, mut done: impl FnMut(&Peer) -> bool) -> bool {
+    /// Wait until `done`, or the timeout, pumping on every wake and at the
+    /// peer's deadline and at no other time — so a frame the socket did not
+    /// wake anyone for is a wait that never ends, which is the point. With
+    /// `step`, that long passing with no wake is a turn `done` may count; it
+    /// is looked at and not pumped. Whether it was done.
+    fn pump_until(
+        &mut self,
+        timeout: Duration,
+        step: Option<Duration>,
+        mut done: impl FnMut(&Peer) -> bool,
+    ) -> bool {
         let deadline = Instant::now() + timeout;
         loop {
-            self.pump();
             if done(&self.peer) {
                 return true;
             }
-            if Instant::now() >= deadline {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
                 return false;
             }
-            std::thread::sleep(
-                self.pump
-                    .min(deadline.saturating_duration_since(Instant::now())),
-            );
+            let due = self.until_due();
+            let mut wait = left.min(due.unwrap_or(left));
+            if let Some(s) = step {
+                wait = wait.min(s);
+            }
+            match self.events.recv_timeout(wait) {
+                Ok(Ev::Wake) => self.pump(),
+                Ok(other) => self.held.push_back(other),
+                Err(_) if due.is_some_and(|d| d <= wait) => self.pump(),
+                Err(_) => {}
+            }
+        }
+    }
+
+    /// How long until the peer's deadline, if it has one.
+    fn until_due(&self) -> Option<Duration> {
+        self.peer
+            .deadline()
+            .map(|at| Duration::from_millis(at.saturating_sub(monotonic_ms())))
+    }
+
+    /// The next thing to answer: a line held over from a wait, or whatever
+    /// wakes the loop — pumping at the peer's deadline on the way.
+    fn next(&mut self) -> Ev {
+        if let Some(e) = self.held.pop_front() {
+            return e;
+        }
+        loop {
+            let got = match self.until_due() {
+                Some(d) => self.events.recv_timeout(d),
+                None => self
+                    .events
+                    .recv()
+                    .map_err(|_| RecvTimeoutError::Disconnected),
+            };
+            match got {
+                Ok(e) => return e,
+                Err(RecvTimeoutError::Timeout) => self.pump(),
+                Err(RecvTimeoutError::Disconnected) => return Ev::Eof,
+            }
         }
     }
 
@@ -556,15 +641,17 @@ impl Headless {
                     .text("view", &hex(&state_hash(&r.view)))
             }
             Cmd::Wait { cursor, timeout } => {
-                let ok = self.pump_until(timeout, |p| p.cursor() >= cursor);
+                let ok = self.pump_until(timeout, None, |p| p.cursor() >= cursor);
                 Answer::ok(ok).num("cursor", self.peer.cursor())
             }
             Cmd::Settle { timeout } => {
                 // Linked, nothing pending, and the cursor still for two
-                // pumps: what "caught up" can mean from this end alone. The
-                // fleet compares against the server's head as well.
+                // turns — a turn being a wake, or `--pump-ms` with none:
+                // what "caught up" can mean from this end alone. The fleet
+                // compares against the server's head as well.
                 let (mut last, mut still) = (-1, 0);
-                let ok = self.pump_until(timeout, |p| {
+                let step = self.still;
+                let ok = self.pump_until(timeout, Some(step), |p| {
                     if p.cursor() == last {
                         still += 1;
                     } else {
@@ -701,19 +788,18 @@ impl Headless {
     }
 }
 
-/// Every line of stdin, on a thread of its own, so the peer pumps while
-/// nothing is said. The channel closing is the end of stdin.
-fn lines() -> Receiver<String> {
-    let (tx, rx) = channel();
+/// Every line of stdin, on a thread of its own, into the queue the
+/// socket's wakes arrive in, then `Eof`.
+fn lines(tx: Sender<Ev>) {
     std::thread::spawn(move || {
         for line in std::io::stdin().lock().lines() {
             let Ok(line) = line else { break };
-            if tx.send(line).is_err() {
-                break;
+            if tx.send(Ev::Line(line)).is_err() {
+                return;
             }
         }
+        let _ = tx.send(Ev::Eof);
     });
-    rx
 }
 
 fn run(f: Flags) -> Result<(), String> {
@@ -722,23 +808,21 @@ fn run(f: Flags) -> Result<(), String> {
         Some(p) => harken_server::domain(Some(p)).map_err(|e| format!("{e:#}"))?,
     };
     let mut h = Headless::open(&f, domain)?;
-    let input = lines();
+    lines(h.inbox.clone());
     let mut out = std::io::stdout().lock();
-    // The pump keeps its own clock rather than waiting for a quiet stdin:
-    // a driver asking `status` every ten milliseconds would otherwise be a
-    // peer that never pumps, and a test polling for progress would be what
-    // stopped it.
-    let mut due = Instant::now();
+    // One queue, so a driver asking `status` every ten milliseconds is a
+    // peer that still pumps on every wake between its lines: the socket's
+    // wakes and the lines are answered in the order they arrived.
+    h.pump();
     loop {
-        if Instant::now() >= due {
-            h.pump();
-            due = Instant::now() + h.pump;
-        }
-        let line = match input.recv_timeout(due.saturating_duration_since(Instant::now())) {
-            Ok(l) => l,
-            Err(RecvTimeoutError::Timeout) => continue,
+        let line = match h.next() {
+            Ev::Wake => {
+                h.pump();
+                continue;
+            }
+            Ev::Line(l) => l,
             // The end of stdin is a quit.
-            Err(RecvTimeoutError::Disconnected) => {
+            Ev::Eof => {
                 h.handle(Cmd::Quit);
                 return Ok(());
             }
@@ -746,12 +830,22 @@ fn run(f: Flags) -> Result<(), String> {
         if line.trim().is_empty() {
             continue;
         }
-        let (answer, quit) = match parse(&line) {
+        let (answer, quit, reads) = match parse(&line) {
             Ok(cmd) => {
                 let quit = cmd == Cmd::Quit;
-                (h.handle(cmd), quit)
+                let reads = matches!(
+                    cmd,
+                    Cmd::Status
+                        | Cmd::Hash
+                        | Cmd::Query { .. }
+                        | Cmd::Rejections { .. }
+                        | Cmd::Standing { .. }
+                        | Cmd::Wait { .. }
+                        | Cmd::Settle { .. }
+                );
+                (h.handle(cmd), quit, reads)
             }
-            Err(why) => (Answer::refused(why), false),
+            Err(why) => (Answer::refused(why), false, true),
         };
         // A reader that has gone is a driver that has gone: stop, with what
         // is pending written down (Drop persists).
@@ -761,6 +855,13 @@ fn run(f: Flags) -> Result<(), String> {
             || quit
         {
             return Ok(());
+        }
+        // What a command asked of the peer goes now — the engine's frames to
+        // the socket, the store to disk — as an app's own call is a wake. A
+        // read asks nothing, so it pumps nothing: a driver asking `status`
+        // in a loop must not be what drains the socket.
+        if !reads {
+            h.pump();
         }
     }
 }
