@@ -82,14 +82,27 @@ mod imp {
 // twice: what is playing, and whether it is. Written here rather than in
 // Rust because both are the page's, the way the <audio> element is.
 //
-// The remote is a mailbox and not a callback. A handler runs on the
-// browser's stack, and the app's state lives behind iced's update loop, so
-// what a lock-screen button can do is leave a note; the tick that already
-// watches for the end of a track collects it. Last one wins: two presses
-// inside 50ms are one instruction, which is what a person pressing twice
-// meant anyway.
+// The remote is a mailbox and a bell. A handler runs on the browser's
+// stack, and the app's state lives behind iced's update loop, so what a
+// lock-screen button can do is leave a note and ring: the update the ring
+// asks for collects it (docs/plan-reactive.md). Last one wins: two presses
+// before that update are one instruction, which is what a person pressing
+// twice meant anyway. The element rings as well whenever it starts, stops
+// or ends on its own — a stall, the end of a stream — so a window with no
+// clock still hears it.
 let pending = "";
 let wired = false;
+let ring = () => {};
+
+export function set_ring(f) {
+  ring = f;
+}
+
+export function watch(el) {
+  for (const name of ["play", "playing", "pause", "ended", "waiting", "seeked"]) {
+    el.addEventListener(name, () => ring());
+  }
+}
 
 function on(name, fn) {
   // An action the browser does not know throws rather than being ignored,
@@ -104,13 +117,14 @@ function on(name, fn) {
 function wire() {
   if (wired) return;
   wired = true;
-  on("play", () => { pending = "play"; });
-  on("pause", () => { pending = "pause"; });
-  on("stop", () => { pending = "pause"; });
-  on("nexttrack", () => { pending = "next"; });
-  on("previoustrack", () => { pending = "prev"; });
+  on("play", () => { pending = "play"; ring(); });
+  on("pause", () => { pending = "pause"; ring(); });
+  on("stop", () => { pending = "pause"; ring(); });
+  on("nexttrack", () => { pending = "next"; ring(); });
+  on("previoustrack", () => { pending = "prev"; ring(); });
   on("seekto", (d) => {
     if (d && typeof d.seekTime === "number") pending = "seek:" + d.seekTime;
+    ring();
   });
 }
 
@@ -160,12 +174,21 @@ export function take_remote() {
         fn position_js(duration: f64, at: f64);
         #[wasm_bindgen(js_name = take_remote)]
         fn take_remote_js() -> String;
+        #[wasm_bindgen(js_name = set_ring)]
+        fn set_ring_js(f: &JsValue);
+        #[wasm_bindgen(js_name = watch)]
+        fn watch_js(el: &HtmlAudioElement);
+    }
+
+    /// What the media session's handlers and the element's events call.
+    pub fn ring_with(f: fn()) {
+        set_ring_js(&Closure::<dyn Fn()>::new(f).into_js_value());
     }
 
     pub struct Sink {
         el: Option<HtmlAudioElement>,
-        /// What the page was last told, so a tick that changed nothing does
-        /// not rebuild the metadata twenty times a second. The element
+        /// What the page was last told, so an update that changed nothing
+        /// does not rebuild the metadata. The element
         /// decides on its own when it is playing — buffering, a stall, the
         /// end of a stream — so this cannot be kept only where the app
         /// changes something.
@@ -198,6 +221,7 @@ export function take_remote() {
                     .dyn_into::<HtmlAudioElement>()
                     .ok()?;
                 el.set_preload("none");
+                watch_js(&el);
                 self.el = Some(el);
             }
             self.el.as_ref()
@@ -272,6 +296,11 @@ export function take_remote() {
         }
     }
 }
+
+/// Ring the window with `f` whenever the media session or the `<audio>`
+/// element says something happened (`wake.rs`).
+#[cfg(target_arch = "wasm32")]
+pub use imp::ring_with;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod imp {
@@ -353,10 +382,12 @@ impl Player {
     /// Say what is playing, where the platform shows such things: the tab's
     /// title, and the controller Windows draws beside the clock.
     ///
-    /// Called from the tick rather than from each place that changes
+    /// Called after every update rather than from each place that changes
     /// something, because the element changes it too — a stream that stalls
     /// or runs out was nobody's button press, and a controller still showing
-    /// "playing" for it is worse than one that is a frame behind.
+    /// "playing" for it is worse than one that is a frame behind. The
+    /// element rings the window when it does (`watch` above), and while it
+    /// plays the window's clock moves the controller's scrubber.
     #[cfg(target_arch = "wasm32")]
     pub fn announce(&mut self) {
         let playing = self.is_playing();
@@ -364,7 +395,7 @@ impl Player {
         self.sink.announce(self.track.as_ref(), playing, duration, at);
     }
 
-    /// What a lock-screen button asked for since the last tick, if anything.
+    /// What a lock-screen button asked for since the last update, if anything.
     #[cfg(target_arch = "wasm32")]
     pub fn take_remote(&self) -> Option<Remote> {
         self.sink.take_remote()

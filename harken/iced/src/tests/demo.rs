@@ -48,7 +48,7 @@ fn the_seeded_art_reaches_a_fetch() {
 fn the_window_asks_for_the_covers_the_lists_carry() {
     let mut app = super::demo_app();
     assert_eq!(app.art_seen, 0);
-    let _ = app.update(crate::Message::Tick);
+    let _ = app.update(crate::Message::Wake);
     assert_eq!(app.art_seen, app.peer.art_gen, "the generation was seen");
     let url = media_url("", &app.peer.albums.iter().find(|a| a.name == "Water Music").unwrap().art);
     assert!(app.covers.want(url).is_none(), "…because it was already asked for");

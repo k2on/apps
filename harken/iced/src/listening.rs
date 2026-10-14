@@ -151,8 +151,9 @@ impl Remote {
         self.epoch
     }
 
-    /// What is waiting for the next pump. Anything but 0 for more than a tick
-    /// is a pump that is not running.
+    /// What is waiting for the next pump. Every update ends by saying it
+    /// (`App::react`), so anything but 0 on screen is a pump that is not
+    /// running.
     pub fn outbox(&self) -> usize {
         self.out.len()
     }
@@ -295,7 +296,7 @@ impl Remote {
 
     /// Say what this device is doing, if it is the one doing it.
     ///
-    /// Called from the tick rather than from each button, for the reason the
+    /// Called after every update rather than from each button, for the reason the
     /// media session's announcement is: the element pauses itself when a
     /// stream stalls or runs out, and that was nobody's button press.
     pub fn report(&mut self, queue: &[Track], at: u32, playing: bool, position_ms: i64) {

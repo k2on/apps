@@ -5,6 +5,7 @@
 mod explorer;
 mod geometry;
 mod signing_in;
+mod wake;
 
 #[cfg(feature = "demo")]
 mod bench;

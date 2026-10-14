@@ -85,7 +85,7 @@ fn a_refusal_names_what_was_refused() {
         id: edit.id,
         reason: "not your playlist".into(),
     });
-    let _ = app.update(Message::Tick);
+    let _ = app.update(Message::Wake);
     assert_eq!(app.note, "the server refused to put Air on Favorites: not your playlist");
     assert_eq!(
         app.refused.last(),
@@ -98,29 +98,41 @@ fn a_refusal_names_what_was_refused() {
 /// Signed in, the default "Favorites" waits until the log has been heard —
 /// a second of quiet after the link opened — because a device that has not
 /// heard the log sees no playlists for want of news, and a second
-/// "Favorites" would come back renamed. Nineteen ticks is not enough; the
-/// twentieth makes it; and a person who already has one gets none.
+/// "Favorites" would come back renamed. The second is a deadline now
+/// (`docs/plan-reactive.md`): the link opening sets it a second out, 999 ms
+/// is not enough, the thousandth makes it, and a person who already has one
+/// gets none.
 ///
-/// The tick counts are numbers, not `QUIET_TICKS`: written against the
-/// constant, setting it to 1 would empty the "not yet" loop. Falsified by
-/// setting `QUIET_TICKS` to 1 (the first assertion fails) and to 30 (the
-/// second does).
+/// The numbers are numbers, not `QUIET_MS`: written against the constant
+/// the window would agree with itself whatever it was. Falsified by setting
+/// `QUIET_MS` to 1 (the deadline is not a second out) and to 1500 (likewise).
 #[test]
 fn the_default_playlist_waits_for_the_log() {
+    use ark_client::autos::monotonic_ms;
+    use ark_client::link::{BoxTransport, Event, Queues};
     let mut app = App::with_peer(peer(Options::dev("alice")), "http://127.0.0.1:9".into(), Some(login("alice")));
+    let q = Queues::default();
+    let socket = q.clone();
+    app.peer
+        .client
+        .connect_with("queues", Box::new(move |_: &str| Box::new(socket.clone()) as BoxTransport));
+    let _ = app.update(Message::Due);
     assert!(app.peer.playlists().is_empty(), "nothing is made before anything is heard");
-    app.quiet = Some(0);
-    for _ in 0..19 {
-        let _ = app.update(Message::Tick);
-    }
-    assert!(app.peer.playlists().is_empty(), "nineteen ticks is not a second of quiet");
-    let _ = app.update(Message::Tick);
+    let opened = monotonic_ms();
+    q.push(Event::Opened);
+    let _ = app.update(Message::Wake);
+    let at = app.quiet.expect("the open set the quiet deadline");
+    assert!((opened + 1_000..opened + 1_100).contains(&at), "a second out: {} ms", at - opened);
+    assert_eq!(app.deadline(), Some(at), "the window's one timer");
+    app.due_at(at - 1);
+    assert!(app.peer.playlists().is_empty(), "999 ms is not a second of quiet");
+    app.due_at(at);
+    let _ = app.update(Message::Due);
     assert_eq!(app.peer.playlists().iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["Favorites"]);
+    assert_eq!(app.quiet, None, "and no timer left");
 
     // Somebody who has one — arrived with the log — gets no second.
-    app.quiet = Some(0);
-    for _ in 0..40 {
-        let _ = app.update(Message::Tick);
-    }
+    app.quiet = Some(at);
+    app.due_at(at + 5_000);
     assert_eq!(app.peer.playlists().len(), 1);
 }

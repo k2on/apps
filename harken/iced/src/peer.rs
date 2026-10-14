@@ -255,7 +255,7 @@ pub struct Peer {
     pub art_gen: u64,
     /// Bumped whenever the store moved at all — what a refresh took was not
     /// nothing. The explorer diffs what it shows against what it last drew
-    /// when this moves, and not on a tick where nothing did.
+    /// when this moves, and not on an update where nothing did.
     pub store_gen: u64,
 }
 

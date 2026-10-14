@@ -37,6 +37,7 @@ mod rows;
 #[cfg(feature = "demo")]
 mod seed;
 mod view;
+mod wake;
 
 #[cfg(test)]
 mod tests;
@@ -155,7 +156,19 @@ pub enum Message {
     /// `None` is the last row: stop it everywhere.
     PickDevice(Option<listening::DeviceId>),
     CloseDevices,
-    /// Pump the replica and the player. Nothing else drives a sans-io peer.
+    /// Something said it happened (`docs/plan-reactive.md`): the sync
+    /// socket opened, closed or brought a frame — the log, an ack, the
+    /// listening session — or, in a browser, the back button, a lock-screen
+    /// button, or the `<audio>` element starting, pausing or ending. What it
+    /// was is whatever the update after it finds; see [`App::react`].
+    Wake,
+    /// A deadline this window armed came due: the redial after a close, or
+    /// the second of quiet [`App::default_playlist`] waits for.
+    Due,
+    /// A clock, running only while something on screen moves by itself: 50
+    /// ms while the explorer fades a highlight or a submenu's dwell counts,
+    /// 250 ms while audio plays (the scrubber and the media session) —
+    /// [`App::clock`]. At rest there is none.
     Tick,
     /// A wheel over a context window's backdrop, whose whole job is not to
     /// reach the page: a menu is pinned to a window coordinate, and a list
@@ -269,10 +282,14 @@ pub struct App {
     pub connect: String,
     /// Offline on purpose.
     pub offline: bool,
-    /// Ticks the link has been quiet since it opened, while this window waits
-    /// to know whether the person signed in already has a playlist — see
+    /// When the link will have been quiet for [`App::QUIET_MS`] since it
+    /// opened, as a monotonic millisecond — a deadline, while this window
+    /// waits to know whether the person signed in already has a playlist; see
     /// `default_playlist`. `None` when not waiting.
-    pub quiet: Option<u32>,
+    pub quiet: Option<u64>,
+    /// What wakes this window: the peer's socket rings it, and in a browser
+    /// the page's own events do (`wake.rs`).
+    pub bell: arkui::wake::Bell,
     pub peer: Peer,
     /// This window's own changes, for saying which one was refused.
     pub edits: Vec<Edit>,
@@ -283,7 +300,10 @@ pub struct App {
 
 impl App {
     /// A window over `peer`, with everything else at rest.
-    pub fn with_peer(peer: Peer, server: String, login: Option<Login>) -> App {
+    pub fn with_peer(mut peer: Peer, server: String, login: Option<Login>) -> App {
+        let bell = arkui::wake::Bell::new();
+        peer.client.set_waker(wake::waker(&bell));
+        wake::page(&bell);
         App {
             pane: Pane::Tracks,
             cursors: [0; 2],
@@ -314,6 +334,7 @@ impl App {
             connect: String::new(),
             offline: false,
             quiet: None,
+            bell,
             peer,
             edits: Vec::new(),
             refused: Vec::new(),
@@ -399,7 +420,7 @@ impl App {
     ///
     /// The address bar is reconciled after every update, and the first update
     /// is whatever iced sends first — a resize, the pointer. Reconciled before
-    /// the tick had read the fragment, `#album/Water%20Music` was overwritten
+    /// the address bar had been read, `#album/Water%20Music` was overwritten
     /// with `#library` and the link went nowhere; so the window reads it here,
     /// once, as it opens. Seen in a browser, which is the only place this
     /// shows.
@@ -581,11 +602,12 @@ impl App {
         self.login = Some(login);
     }
 
-    /// How long the link has to have been quiet, in ticks, before this window
-    /// believes it has heard the whole log: a second. The server sends the
-    /// backlog the moment `Hello` lands, so a second of nothing after the
-    /// socket opened is a second of nothing left to send.
-    pub const QUIET_TICKS: u32 = 20;
+    /// How long the link has to have been quiet before this window believes
+    /// it has heard the whole log: a second. The server sends the backlog the
+    /// moment `Hello` lands, so a second of nothing after the socket opened is
+    /// a second of nothing left to send. A deadline, moved by every frame —
+    /// it was twenty ticks of a clock that no longer runs.
+    pub const QUIET_MS: u64 = 1_000;
 
     /// Make the default "Favorites" — but only once it is known that this
     /// person has no playlist at all.
@@ -596,7 +618,7 @@ impl App {
     /// ("Favorites (1)", in the server's order), so every device making its
     /// own on first run would leave the person a numbered Favorites per
     /// device. So a signed-in window waits until the link has opened and then
-    /// been quiet for [`App::QUIET_TICKS`]; signed out (or alone, the demo)
+    /// been quiet for [`App::QUIET_MS`]; signed out (or alone, the demo)
     /// the replica is the whole truth and it is made at once. A window that
     /// never reaches its server makes none, and "New playlist…" is still
     /// there.
@@ -1130,13 +1152,15 @@ impl App {
         Task::none()
     }
 
-    /// Do the thing, then make the address bar agree with what is on screen —
-    /// here, after every message, rather than at the places that change what
-    /// is shown: a rule each call site has to remember is already broken.
+    /// Do the thing, then whatever follows from it ([`App::react`]), then make
+    /// the address bar agree with what is on screen — here, after every
+    /// message, rather than at the places that change what is shown: a rule
+    /// each call site has to remember is already broken.
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.step(message);
+        let reacted = self.react();
         self.router.sync(&self.peer.source.place());
-        Task::batch([task, self.want_covers_if_moved()])
+        Task::batch([task, reacted, self.want_covers_if_moved()])
     }
 
     /// Ask for covers when the lists have been rebuilt since the last ask.
@@ -1465,34 +1489,48 @@ impl App {
                     }
                 }
             }
+            // A submenu opens by being pointed at, after a beat: arkui counts
+            // the rest and answers the entry's message, and the picker it opens
+            // is shown rather than entered. The clock runs only while it can.
             Message::Tick => {
-                if let Some(task) = self.tick() {
-                    return task;
+                if let Some(m) = self.ctx.tick() {
+                    return self.update(m);
                 }
             }
+            // What woke the window is whatever `react` finds.
+            Message::Wake | Message::Due => {}
         }
-        self.pump();
         Task::none()
     }
 
-    /// Everything the 50ms clock does besides pumping.
-    fn tick(&mut self) -> Option<Task<Message>> {
-        // The explorer lights what changed in the store and fades it.
-        self.observe_explorer();
-        if let Some(q) = self.quiet {
-            match q + 1 >= Self::QUIET_TICKS {
-                true => {
-                    self.quiet = None;
-                    self.default_playlist();
-                }
-                false => self.quiet = Some(q + 1),
+    /// What every update ends with, whatever the message was
+    /// (`docs/plan-reactive.md`): the peer pumped — frames in, the
+    /// settle, what this window authored sent — the deadlines looked at, the
+    /// listening session moved both ways, the player's own changes noticed,
+    /// the explorer shown what moved, and the address bar read. It used to
+    /// be the 50 ms tick's work; it is done when something has happened,
+    /// which is the only time any of it has anything to do.
+    fn react(&mut self) -> Task<Message> {
+        let mut tasks = Vec::new();
+        self.due_at(ark_client::autos::monotonic_ms());
+        self.pump();
+        // A lock-screen button leaves a note and rings; it goes where every
+        // transport button goes.
+        #[cfg(target_arch = "wasm32")]
+        {
+            let command = match self.player.take_remote() {
+                Some(Remote::Play) => Some(listening::Command::Play),
+                Some(Remote::Pause) => Some(listening::Command::Pause),
+                Some(Remote::Next) => Some(listening::Command::Next),
+                Some(Remote::Previous) => Some(listening::Command::Previous),
+                Some(Remote::Seek(secs)) => Some(listening::Command::Seek {
+                    position_ms: (secs * 1000.0) as i64,
+                }),
+                None => None,
+            };
+            if let Some(command) = command {
+                tasks.push(self.ask(command));
             }
-        }
-        // A submenu opens by being pointed at, after a beat: arkui counts the
-        // rest and answers the entry's message, and the picker it opens is
-        // shown rather than entered.
-        if let Some(m) = self.ctx.tick() {
-            return Some(self.update(m));
         }
         if self.player.ended() {
             self.skip(1);
@@ -1500,7 +1538,7 @@ impl App {
         // The listening session: first what this device has been told to do
         // — the server only ever tells the output — then what it is doing.
         for command in self.listening.pump(&mut self.peer.client) {
-            let _ = self.obey(command);
+            tasks.push(self.obey(command));
         }
         // Silent unless it is the output: losing the sound is not something
         // this device does, it is told, and this is the one place that can
@@ -1518,36 +1556,61 @@ impl App {
             self.listening.report(&queue, at, playing, position_ms);
             self.queue = queue;
         }
+        // What that came to is said now, not on a tick that may never come.
+        if self.listening.outbox() > 0 {
+            for command in self.listening.pump(&mut self.peer.client) {
+                tasks.push(self.obey(command));
+            }
+        }
+        // The explorer lights what changed in the store and fades it.
+        self.observe_explorer();
         // The back button, and a link somebody was sent — consumed only once
-        // the sidebar has something to resolve it against.
+        // the sidebar has something to resolve it against, which is why it is
+        // asked after every update and not only when the bar moved.
         let ready = !self.peer.choices.is_empty();
         if let Some(place) = self.router.poll(ready) {
             let wanted = self.peer.source_of(&place);
             if wanted != self.peer.source {
-                return Some(self.update(Message::Select(wanted)));
+                tasks.push(self.update(Message::Select(wanted)));
             }
         }
-        // A lock-screen button leaves a note; the tick collects it, and it
-        // goes where every transport button goes.
         #[cfg(target_arch = "wasm32")]
-        {
-            let remote = self.player.take_remote();
-            self.player.announce();
-            let command = match remote {
-                Some(Remote::Play) => Some(listening::Command::Play),
-                Some(Remote::Pause) => Some(listening::Command::Pause),
-                Some(Remote::Next) => Some(listening::Command::Next),
-                Some(Remote::Previous) => Some(listening::Command::Previous),
-                Some(Remote::Seek(secs)) => Some(listening::Command::Seek {
-                    position_ms: (secs * 1000.0) as i64,
-                }),
-                None => None,
-            };
-            if let Some(command) = command {
-                return Some(self.ask(command));
-            }
+        self.player.announce();
+        Task::batch(tasks)
+    }
+
+    /// The quiet deadline, at `now`: a second of nothing since the link
+    /// opened, and the default playlist is decided.
+    pub fn due_at(&mut self, now: u64) {
+        if self.quiet.is_some_and(|at| now >= at) {
+            self.quiet = None;
+            self.default_playlist();
         }
-        None
+    }
+
+    /// The one timer this window may need for something that has not
+    /// happened: the earlier of the peer's redial and the quiet deadline.
+    pub fn deadline(&self) -> Option<u64> {
+        match (self.peer.client.deadline(), self.quiet) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
+    }
+
+    /// How often the window needs a clock, if at all: only while something on
+    /// screen moves without anything having happened. A highlight fading in
+    /// the explorer and a submenu's dwell are animations (50 ms); audio
+    /// playing here, or on another device this one is drawing, moves the
+    /// scrubber and the media session's position, and `D` counts how long ago
+    /// the room spoke (250 ms). `None` is a window at rest, which runs no
+    /// timer at all.
+    pub fn clock(&self) -> Option<Duration> {
+        let fading = self.explore.as_ref().is_some_and(|x| x.ui.fading());
+        if fading || self.ctx.dwelling() {
+            return Some(Duration::from_millis(50));
+        }
+        let sounding = self.player.is_playing() || (self.listening.elsewhere() && self.listening.playing());
+        (sounding || self.debug).then_some(Duration::from_millis(250))
     }
 
     /// Move frames, and bring the lists up to date with whatever moved —
@@ -1557,7 +1620,7 @@ impl App {
         // The link opened, or something arrived while waiting: the quiet
         // starts again.
         if pumped.opened || (pumped.moved && self.quiet.is_some()) {
-            self.quiet = Some(0);
+            self.quiet = Some(ark_client::autos::monotonic_ms() + Self::QUIET_MS);
         }
         if let Some(note) = pumped.note {
             self.note = note;
@@ -1587,9 +1650,12 @@ impl App {
         self.peer.refresh();
     }
 
-    fn subscription(&self) -> Subscription<Message> {
-        Subscription::batch([
-            iced::time::every(Duration::from_millis(50)).map(|_| Message::Tick),
+    /// Everything that can start an update, and no clock unless one is
+    /// needed (`wake.rs`, `docs/plan-reactive.md`).
+    pub fn subscription(&self) -> Subscription<Message> {
+        let mut subs = vec![
+            // The socket, and in a browser the page's own events.
+            self.bell.subscription().map(|()| Message::Wake),
             iced::window::resize_events().map(|(_, size)| Message::Resized(size)),
             // Only the presses no widget took: a focused text box consumes its
             // own, so typing a playlist's name cannot walk the cursor.
@@ -1602,7 +1668,18 @@ impl App {
                 iced::Event::Mouse(iced::mouse::Event::ButtonReleased(_)) => Some(Message::Released),
                 _ => None,
             }),
-        ])
+        ];
+        // One timer for the next deadline, keyed by it: the same deadline on
+        // every call is the timer already running. Two milliseconds late
+        // rather than one early, so that it is due when it fires.
+        if let Some(at) = self.deadline() {
+            let delay = Duration::from_millis(at.saturating_sub(ark_client::autos::monotonic_ms()) + 2);
+            subs.push(arkui::wake::at(at, delay).map(|()| Message::Due));
+        }
+        if let Some(every) = self.clock() {
+            subs.push(iced::time::every(every).map(|_| Message::Tick));
+        }
+        Subscription::batch(subs)
     }
 }
 

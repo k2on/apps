@@ -227,8 +227,9 @@ fn the_docked_explorer_resizes_and_remembers_its_width() {
 }
 
 /// A change made in the app beside the docked explorer lights the row it
-/// made in the table on screen, by the replica's own clock: one tick for the
-/// store to move, one for the explorer to see it, and it fades from there.
+/// made in the table on screen, by the replica's own clock: the update after
+/// it moves the store and shows the explorer, and it fades from there (on a
+/// clock that runs only while it does — `tests/wake.rs`).
 /// Falsified by never bumping the store's generation: the explorer was not
 /// told anything moved and lit nothing.
 #[test]
