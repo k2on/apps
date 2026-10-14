@@ -73,7 +73,7 @@ entry here runs by a raw write, by its closure, or not at all.
 |---|---|---|
 | `Storage.kt` | `storage.rs` | `Storage` (a `Keys`), `MemoryStorage`, `DirStorage`; the `replica`, `facts.<n>`, `pending`, `pending.<n>` and `who` records, `Records.load` |
 | `Writer.kt` | `peer.rs` (`persist` and its helpers) | what is written and when: a journal page or a snapshot, compaction once the pages outgrow it, the intents by generation |
-| `Peer.kt` | `peer.rs`, `domain.rs` | `Domain`; `Peer` — open from a storage (carried across alone and back), mutate by name, query, check, sign-in, leave and join with the local history in the alone journal, `connect`, `pump`, `status`, `standing`, verify; the sans-io `connected`, `recvFrame`, `takeOutgoingFrames` for a transport of the caller's |
+| `Peer.kt` | `peer.rs`, `domain.rs` | `Domain`; `Peer` — open from a storage (carried across alone and back), mutate by name, query, check, sign-in, leave and join with the local history in the alone journal, `connect`, `pump` and what it moved (`Pumped.quiet`), the wake (`setWaker`) and the redial's `deadline`, `status`, `standing`, verify, `say`; the sans-io `connected`, `recvFrame`, `takeOutgoingFrames` for a transport of the caller's |
 | `ClientView.kt` | `view.rs` | a query held as a list: the middleware run first and the tables it reads kept, every change pushed as patches, `Reset` when a signer or the middleware's outcome moves; `splice` |
 | `Link.kt` | `link/mod.rs` | `Link`: dial when due, back off half a second doubling to thirty, reset when a connection opens, stop and resume; `Timing`; `QueuedSocket`, a transport's callbacks kept until polled; `platformDial` |
 | `Transport.kt`, `WebSocketTransport.kt` | `link/native.rs` | one connection carrying frames; OkHttp's WebSocket, pinging every `pingEveryMs` and giving up when a ping goes unanswered, its handshake bounded by `connectTimeoutMs` |
@@ -139,11 +139,16 @@ directory per server — and its pending intents stay, so signing in again as
 the same person pushes them.
 
 `ArkSession` is the Kotlin `Peer` over that replica, signed in, linked to
-the server's `/sync`, pumped every fifty milliseconds on a thread of its
-own. A screen may read `status` (linked, the link in a word, how much is
-not synced); everything else touches the peer on its thread — `post`,
-`run`, and `onPump`, called after every pump, which is where an app splices
-its views.
+the server's `/sync`, on a thread of its own that runs only when something
+happens (`docs/plan-reactive.md`): one drain — a pump — when the socket
+wakes it, after a `post`, and at the peer's one deadline (the redial after
+a close, one one-shot timer). Connected and idle it has no timer at all;
+the keepalive is OkHttp's pings. A screen may read `status` (linked, the
+link in a word, how much is not synced), published when it changes;
+everything else touches the peer on its thread — `post`, `run` (a read,
+which drains nothing), and `onChange`, called with what moved after every
+drain that moved something and never after one that did not, which is
+where an app splices its views.
 
 The steps are a pure machine (`Onboarding`: a step and an event in, a step
 and the effects to run out), run by `ArkHost`, a `ViewModel`; the screens

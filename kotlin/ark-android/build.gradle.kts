@@ -1,7 +1,8 @@
 // `ark-android` (dev.arkdb.android): the onboarding every Ark app on Android
 // shares — the server, signing in through the server's own page in a
 // Custom Tab, the permissions — and the session it hands the app: the
-// Kotlin `Peer` over that server, pumped on its own thread (kotlin/README.md).
+// Kotlin `Peer` over that server, on its own thread, which runs when it is
+// woken and not on a clock (kotlin/README.md).
 //
 // An Android library, so it is not a project of the Kotlin workspace here,
 // which is the JVM's and builds without an SDK: an app's build includes it

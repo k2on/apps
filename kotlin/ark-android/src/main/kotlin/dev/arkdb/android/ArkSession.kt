@@ -1,16 +1,23 @@
 // What the onboarding hands an app: the Kotlin `Peer`, opened over a
 // replica at the server it found and signed in as the login it got, linked
-// to the server's `/sync`, and pumped every fifty milliseconds on a thread
-// of its own.
+// to the server's `/sync`, on a thread of its own.
 //
 // A peer is single-threaded, so everything that touches it runs on that
-// thread: the pump, and whatever the app hands [post] or [run]. After each
-// pump every [onPump] listener is called there, with the peer — which is
-// where an app takes its changes and splices its views. What a screen may
-// ask without the thread is [status]: linked, how much is not synced, and
-// whether the replica holds what the server had. A `Denied` from the
-// server is the onboarding's, not the app's: the session stops and says so
-// to its host, which goes back to *Sign in*.
+// thread: the pump, and whatever the app hands [post] or [run]. **The thread
+// sleeps until something happens** (`docs/plan-reactive.md`): it drains —
+// one pump — when the socket wakes it (opened, a frame or a burst of them,
+// closed), after a [post], and at the one deadline the peer asks for, the
+// redial after a close, which is one one-shot timer replaced when it moves
+// and cancelled when the link opens. Connected and idle, it has no timer and
+// runs nothing; the keepalive is OkHttp's pings, which wake nobody. After a
+// drain that moved something every [onChange] listener is called there,
+// with the peer and what moved — which is where an app takes its changes and
+// splices its views; a drain that moved nothing tells nobody. What a screen
+// may ask without the thread is [status]: linked, how much is not synced,
+// and whether the replica holds what the server had, published when it
+// changes by value. A `Denied` from the server is the onboarding's, not the
+// app's: the session stops and says so to its host, which goes back to
+// *Sign in*.
 //
 // **The session exists at once; its peer opens on its thread.** [open]
 // returns before anything is read: the module is decoded (and verified,
@@ -33,15 +40,19 @@ import dev.arkdb.client.Domain
 import dev.arkdb.client.LaunchBinding
 import dev.arkdb.client.LaunchView
 import dev.arkdb.client.LaunchViews
+import dev.arkdb.client.Link
 import dev.arkdb.client.Login
 import dev.arkdb.client.Options
 import dev.arkdb.client.Peer
+import dev.arkdb.client.Pumped
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -93,16 +104,37 @@ private constructor(
         Executors.newSingleThreadScheduledExecutor { r ->
             Thread(r, "ark-peer").apply { isDaemon = true }
         }
-    private val listeners = CopyOnWriteArrayList<(Peer) -> Unit>()
+    private val listeners = CopyOnWriteArrayList<(Peer, Pumped) -> Unit>()
     private val _status = MutableStateFlow(SessionStatus())
     private val _ready = MutableStateFlow(false)
-    private var ticking: ScheduledFuture<*>? = null
     @Volatile private var closed = false
+
+    // A drain is asked for and not yet begun: a burst of wakes and posts is one.
+    private val draining = AtomicBoolean(false)
+    // The one timer, and the monotonic millisecond it is for; on the peer's thread only.
+    private var due: ScheduledFuture<*>? = null
+    @Volatile private var dueAt: Long? = null
+
+    /** Drains run (pumps), for the tests and the measurements that count them. */
+    internal val drains = AtomicInteger()
+
+    /** Drains that moved something, and so told the listeners. */
+    internal val changes = AtomicInteger()
+
+    /** One-shot timers armed for a deadline. */
+    internal val armed = AtomicInteger()
+
+    /** Whether a timer is armed now: a link waiting to redial, and nothing else. */
+    internal val timed: Boolean
+        get() = dueAt != null
 
     // Set on the peer's thread, by its first task; read there only.
     private var peer: Peer? = null
 
-    /** Linked, how much is not synced, and whether it holds what the server had; every pump. */
+    /**
+     * Linked, how much is not synced, and whether it holds what the server had; published when one
+     * of them changes, and only then.
+     */
     public val status: StateFlow<SessionStatus> = _status.asStateFlow()
 
     /**
@@ -184,52 +216,116 @@ private constructor(
         launches?.clear()
     }
 
+    // The peer is open: the socket's wakes ask for a drain, and the first
+    // drain dials.
     private fun start(p: Peer) {
         peer = p
-        ticking = thread.scheduleWithFixedDelay({ tick() }, 0, PUMP_MS, TimeUnit.MILLISECONDS)
+        p.setWaker { drainSoon() }
+        drain()
     }
 
-    private fun tick() {
+    // Ask the peer's thread for one drain, unless one is already asked for
+    // and not begun: what the socket's wake and every post come to.
+    private fun drainSoon() {
+        if (closed || inline || draining.getAndSet(true)) return
+        try {
+            thread.execute { drain() }
+        } catch (e: RejectedExecutionException) {
+            // Closed: nothing to drain.
+        }
+    }
+
+    // One pump, on the peer's thread, and whatever it moved told: the
+    // status if it changed, the listeners if anything did, the deadline
+    // re-armed if it moved.
+    private fun drain() {
+        draining.set(false)
         val peer = this.peer
         if (closed || peer == null) return
+        drains.incrementAndGet()
         val pumped =
             try {
                 peer.pump()
             } catch (e: Exception) {
                 null
             }
-        val s = peer.status()
-        val c = peer.client
-        val synced = (c.served && !c.more) || (s.cursor > 0 && !c.more)
-        val now = SessionStatus(linked = s.linked, link = s.link, pending = s.pending, synced)
-        if (now != _status.value) _status.value = now
-        for (l in listeners) {
-            try {
-                l(peer)
-            } catch (e: Exception) {
-                // A listener's failure is the listener's: the pump goes on.
+        if (pumped != null && !pumped.quiet()) {
+            changes.incrementAndGet()
+            val s = peer.status()
+            val c = peer.client
+            val synced = (c.served && !c.more) || (s.cursor > 0 && !c.more)
+            val now = SessionStatus(linked = s.linked, link = s.link, pending = s.pending, synced)
+            if (now != _status.value) _status.value = now
+            for (l in listeners) {
+                try {
+                    l(peer, pumped)
+                } catch (e: Exception) {
+                    // A listener's failure is the listener's: the session goes on.
+                }
             }
         }
+        arm(peer.deadline())
         val denied = pumped?.denied
         if (denied != null) onDenied(denied)
     }
 
-    /** Called on the peer's thread after every pump; returns what removes it. */
-    public fun onPump(listener: (Peer) -> Unit): () -> Unit {
+    // The one timer: armed for `at` when it moves, cancelled when there is
+    // none — which is the link dialling or open.
+    private fun arm(at: Long?) {
+        if (at == dueAt) return
+        due?.cancel(false)
+        due = null
+        dueAt = at
+        if (at == null || closed) return
+        val wait = maxOf(at - Link.monotonicMs(), 0)
+        due =
+            try {
+                armed.incrementAndGet()
+                thread.schedule({ drainAt(at) }, wait, TimeUnit.MILLISECONDS)
+            } catch (e: RejectedExecutionException) {
+                null
+            }
+    }
+
+    // The timer for `at` fired: a drain, unless something already moved it.
+    private fun drainAt(at: Long) {
+        if (dueAt != at) return
+        due = null
+        dueAt = null
+        drain()
+    }
+
+    /**
+     * Called on the peer's thread after every drain that moved something — a frame, the link, a
+     * verdict, the store, the status — with what moved; never for one that moved nothing. Returns
+     * what removes it.
+     */
+    public fun onChange(listener: (Peer, Pumped) -> Unit): () -> Unit {
         listeners.add(listener)
         return { listeners.remove(listener) }
     }
 
-    /** Run `f` on the peer's thread, once the peer is open, and return. */
+    /**
+     * Run `f` on the peer's thread, once the peer is open, and return; then one drain, so whatever
+     * `f` asked of the peer is told — a mutation's own push has already gone, by `mutate`.
+     */
     public fun post(f: (Peer) -> Unit) {
         if (closed) return
         if (inline) return peer?.let(f) ?: Unit
-        thread.execute { peer?.takeIf { !closed }?.let(f) }
+        try {
+            thread.execute {
+                peer?.takeIf { !closed }?.let(f)
+                drainSoon()
+            }
+        } catch (e: RejectedExecutionException) {
+            // Closed: nothing to run.
+        }
     }
 
     /**
-     * Run `f` on the peer's thread and wait for what it returns. A session that closed — or whose
-     * replica could not be opened — never answers: the wait is cancelled.
+     * Run `f` on the peer's thread and wait for what it returns: a read, which drains nothing. A
+     * session that closed — or whose replica could not be opened — never answers: the wait is
+     * cancelled.
      */
     public suspend fun <T> run(f: (Peer) -> T): T {
         if (inline && !closed)
@@ -262,7 +358,7 @@ private constructor(
         onSignOut()
     }
 
-    /** Stop the pump and close the peer, written down; its storage stays for the next session. */
+    /** Stop the thread and close the peer, written down; its storage stays for the next session. */
     public fun close() {
         if (closed) return
         launcher.shutdown()
@@ -273,7 +369,7 @@ private constructor(
         }
         try {
             thread.execute {
-                ticking?.cancel(false)
+                due?.cancel(false)
                 closed = true
                 try {
                     peer?.close()
@@ -288,9 +384,6 @@ private constructor(
     }
 
     public companion object {
-        /** How often the peer is pumped: what every client here uses. */
-        public const val PUMP_MS: Long = 50
-
         /** How long after the last change a launch view is written. */
         public const val SAVE_AFTER_MS: Long = 1000
 
@@ -300,7 +393,7 @@ private constructor(
 
         /**
          * A session over a peer the caller opened, and links itself if at all — a test, or a
-         * transport of the caller's own — pumped like any other.
+         * transport of the caller's own — woken like any other.
          */
         public fun over(peer: Peer, server: String, login: Login): ArkSession =
             ArkSession(server, login, {}, {}).also { s -> s.thread.execute { s.start(peer) } }
@@ -308,14 +401,14 @@ private constructor(
         /**
          * A session over a peer with no thread of its own: every post and run happens at once on
          * the caller's thread, and nothing pumps — a test that drives a screen on one clock and
-         * cannot have the peer answer on another. The peer is the caller's to close.
+         * cannot have the peer answer on another. The peer is the caller's to close, and to pump.
          */
         public fun inline(peer: Peer, server: String, login: Login): ArkSession =
             ArkSession(server, login, {}, {}, inline = true).also { it.peer = peer }
 
         /**
          * The session over `server`'s replica under `root`, as `login`, at once; on its thread,
-         * first, the module from `domain` and the peer opened over the replica, linked and pumped.
+         * first, the module from `domain` and the peer opened over the replica, linked and woken.
          * If that fails — a module that does not verify, a replica that does not read — the session
          * closes, nothing posted to it runs, and `onFailed` says why.
          */
