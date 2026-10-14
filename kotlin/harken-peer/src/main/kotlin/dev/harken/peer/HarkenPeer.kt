@@ -21,6 +21,15 @@
 //   reference writes, byte for byte (`kotlin/ark-client`), and `DIR/login.json`
 //   and `DIR/rejections.jsonl` are the same files.
 // - What happens on the link goes to stderr prefixed `harken-peer-kt:`.
+//
+// It is pumped as the reference is — **when something happens and at no
+// other time** (`docs/plan-reactive.md`): when the socket wakes it (opened, a
+// frame, closed), after every command that asks something of the peer, and
+// at the one deadline the peer asks for, the redial after a close. A read
+// pumps nothing, and `wait` and `settle` pump only on wakes, so a frame the
+// transport did not wake anyone for is a fleet that does not converge.
+// `--pump-ms` is, as there, how long `settle` waits with no wake before the
+// cursor counts as still.
 package dev.harken.peer
 
 import dev.arkdb.Hash
@@ -33,6 +42,7 @@ import dev.arkdb.client.Auth
 import dev.arkdb.client.AuthError
 import dev.arkdb.client.DirStorage
 import dev.arkdb.client.Domain
+import dev.arkdb.client.Link
 import dev.arkdb.client.Login
 import dev.arkdb.client.Options
 import dev.arkdb.client.Patience
@@ -279,7 +289,12 @@ internal class Headless(f: Flags, domain: Domain) {
     val dir: File = f.dir
     var server: String? = f.server
     private val patience = f.patience
-    val pumpMs: Long = f.pumpMs
+    /** How long `settle` waits with no wake before the cursor counts as still for a turn. */
+    private val stillMs: Long = f.pumpMs
+    /** Where the socket's wakes and stdin's lines arrive, in one queue: [WAKE], a line, [END]. */
+    val events = LinkedBlockingQueue<Any>()
+    /** Lines that arrived while `wait` or `settle` was waiting on a wake: answered after it. */
+    private val held = ArrayDeque<Any>()
     /** Verdicts collected and not yet asked for; each also appended to `DIR/rejections.jsonl`. */
     private val unasked = ArrayList<String>()
     /** `--roles`: what this device's `Ctx` carries beside its login's. */
@@ -314,6 +329,8 @@ internal class Headless(f: Flags, domain: Domain) {
             }
         peer = Peer.open(domain, DirStorage(File(dir, "replica")), opts.withTiming(f.timing))
         peer.setRoles(loginRoles + roles)
+        // Before the link exists, so it and every one after hands this to its socket.
+        peer.setWaker { events.put(WAKE) }
         f.server?.let { peer.connect(Auth.socketUrl(it)) }
     }
 
@@ -345,15 +362,45 @@ internal class Headless(f: Flags, domain: Domain) {
         unasked.addAll(fresh)
     }
 
-    /** Pump until `done`, or the timeout. Whether it was done. */
-    private fun pumpUntil(timeoutMs: Long, done: (Peer) -> Boolean): Boolean {
+    /**
+     * Wait until `done`, or the timeout, pumping on every wake and at the peer's deadline and at no
+     * other time — so a frame the socket did not wake anyone for is a wait that never ends, which
+     * is the point. With `stepMs`, that long passing with no wake is a turn `done` may count; it is
+     * looked at and not pumped. Whether it was done.
+     */
+    private fun pumpUntil(timeoutMs: Long, stepMs: Long?, done: (Peer) -> Boolean): Boolean {
         val deadline = System.nanoTime() + timeoutMs * 1_000_000
         while (true) {
-            pump()
             if (done(peer)) return true
-            val left = deadline - System.nanoTime()
+            val left = (deadline - System.nanoTime()).coerceAtLeast(0) / 1_000_000
             if (left <= 0) return false
-            Thread.sleep(minOf(pumpMs, (left + 999_999) / 1_000_000))
+            val due = untilDue()
+            var wait = minOf(left, due ?: left)
+            if (stepMs != null) wait = minOf(wait, stepMs)
+            when (val got = events.poll(wait, TimeUnit.MILLISECONDS)) {
+                WAKE -> pump()
+                null -> if (due != null && due <= wait) pump()
+                else -> held.addLast(got)
+            }
+        }
+    }
+
+    /** How long until the peer's deadline, in milliseconds, if it has one. */
+    private fun untilDue(): Long? = peer.deadline()?.let { maxOf(it - Link.monotonicMs(), 0) }
+
+    /**
+     * The next thing to answer: a line held over from a wait, or whatever wakes the loop — pumping
+     * at the peer's deadline on the way.
+     */
+    fun next(): Any {
+        held.removeFirstOrNull()?.let {
+            return it
+        }
+        while (true) {
+            val due = untilDue()
+            val got = if (due != null) events.poll(due, TimeUnit.MILLISECONDS) else events.take()
+            if (got != null) return got
+            pump()
         }
     }
 
@@ -397,16 +444,17 @@ internal class Headless(f: Flags, domain: Domain) {
                     .text("view", Hex.encode(Hash.stateHash(r.view)))
             }
             is Cmd.Wait -> {
-                val ok = pumpUntil(cmd.timeoutMs) { it.cursor >= cmd.cursor }
+                val ok = pumpUntil(cmd.timeoutMs, null) { it.cursor >= cmd.cursor }
                 Answer.ok(ok).num("cursor", peer.cursor)
             }
             is Cmd.Settle -> {
-                // Linked, nothing pending, and the cursor still for two pumps:
+                // Linked, nothing pending, and the cursor still for two
+                // turns — a turn being a wake, or `--pump-ms` with none:
                 // what "caught up" can mean from this end alone.
                 var last = -1L
                 var still = 0
                 val ok =
-                    pumpUntil(cmd.timeoutMs) { p ->
+                    pumpUntil(cmd.timeoutMs, stillMs) { p ->
                         if (p.cursor == last) still++
                         else {
                             last = p.cursor
@@ -542,14 +590,17 @@ internal fun domain(module: File?): Domain {
     }
 }
 
+/** The socket asked for a pump. */
+private val WAKE = Any()
+
+/** The end of stdin, which is a quit. */
 private val END = Any()
 
 /**
- * Every line of stdin, on a thread of its own, so the peer pumps while nothing is said; [END] after
- * the last.
+ * Every line of stdin, on a thread of its own, into the queue the socket's wakes arrive in, then
+ * [END].
  */
-private fun lines(): LinkedBlockingQueue<Any> {
-    val q = LinkedBlockingQueue<Any>()
+private fun lines(q: LinkedBlockingQueue<Any>) {
     val t = Thread {
         val r = System.`in`.bufferedReader(Charsets.UTF_8)
         while (true) {
@@ -565,24 +616,36 @@ private fun lines(): LinkedBlockingQueue<Any> {
     }
     t.isDaemon = true
     t.start()
-    return q
 }
+
+/** What only reads: answered from what the peer has, pumping nothing. */
+private fun reads(cmd: Cmd): Boolean =
+    when (cmd) {
+        is Cmd.Status,
+        is Cmd.HashCmd,
+        is Cmd.Query,
+        is Cmd.Rejections,
+        is Cmd.StandingOf,
+        is Cmd.Wait,
+        is Cmd.Settle -> true
+        else -> false
+    }
 
 private fun run(f: Flags) {
     val h = Headless(f, domain(f.module))
-    val input = lines()
+    lines(h.events)
     val out =
         java.io.PrintStream(java.io.FileOutputStream(java.io.FileDescriptor.out), false, "UTF-8")
-    // The pump keeps its own clock rather than waiting for a quiet stdin: a
-    // driver asking `status` every ten milliseconds would otherwise be a peer
-    // that never pumps.
-    var due = System.nanoTime()
+    // One queue, so a driver asking `status` every ten milliseconds is a peer
+    // that still pumps on every wake between its lines: the socket's wakes and
+    // the lines are answered in the order they arrived.
+    h.pump()
     while (true) {
-        if (System.nanoTime() >= due) {
+        val got = h.next()
+        if (got === WAKE) {
             h.pump()
-            due = System.nanoTime() + h.pumpMs * 1_000_000
+            continue
         }
-        val got = input.poll(maxOf(due - System.nanoTime(), 0), TimeUnit.NANOSECONDS) ?: continue
         if (got === END) {
             h.handle(Cmd.Quit)
             h.peer.close()
@@ -591,10 +654,12 @@ private fun run(f: Flags) {
         val line = got as String
         if (line.isBlank()) continue
         var quit = false
+        var read = true
         val answer =
             try {
                 val cmd = parse(line)
                 quit = cmd == Cmd.Quit
+                read = reads(cmd)
                 h.handle(cmd)
             } catch (e: ParseError) {
                 Answer.refused(e.message ?: "not a command")
@@ -607,6 +672,11 @@ private fun run(f: Flags) {
             h.peer.close()
             return
         }
+        // What a command asked of the peer goes now — the engine's frames to
+        // the socket, the store to disk — as an app's own call is a wake. A
+        // read asks nothing, so it pumps nothing: a driver asking `status` in
+        // a loop must not be what drains the socket.
+        if (!read) h.pump()
     }
 }
 
