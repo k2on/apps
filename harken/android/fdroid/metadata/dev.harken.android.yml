@@ -8,20 +8,11 @@ IssueTracker: https://github.com/k2on/apps/issues
 Name: Harken
 Summary: A music library of your own, synced from your own server
 Description: |-
-    Harken plays the music library a harken server holds: albums, artists,
-    playlists and a queue, with the lock screen, the notification and
-    Bluetooth as the media session's. The library lives on the phone and
-    syncs with the server, so what is already here keeps playing when the
-    server cannot be reached, and a playlist made offline lands when it
-    can.
+    Harken plays the music library a harken server holds: albums, artists, playlists and a queue, with the lock screen, the notification and Bluetooth as the media session's. The library lives on the phone and syncs with the server, so what is already here keeps playing when the server cannot be reached, and a playlist made offline lands when it can.
 
-    It needs a harken server to sign in to; there is no account anywhere
-    else. The server, the desktop client and the browser client are in the
-    same repository.
+    It needs a harken server to sign in to; there is no account anywhere else. The server, the desktop client and the browser client are in the same repository.
 
-    This build is debug-signed with a key committed to that repository, so
-    anyone could sign an APK as this app. It is for the one person running
-    the server.
+    This build is debug-signed with a key committed to that repository, so anyone could sign an APK as this app. It is for the one person running the server.
 
 AutoUpdateMode: None
 UpdateCheckMode: None

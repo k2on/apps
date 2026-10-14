@@ -32,6 +32,14 @@ let
   androguard = py.androguard.overridePythonAttrs (old: {
     dependencies = with py; [ asn1crypto click colorama future lxml pygments ];
     pythonRemoveDeps = [ "networkx" "matplotlib" "pydot" "ipython" ];
+    # The two bytes after a type spec's id were padding when 3.4 was
+    # written and are its `typesCount` since aapt2 for Android 13; ours
+    # (nix/aapt2.nix, platform 35) fills them in, and 3.4 refuses the APK
+    # as malformed.
+    postPatch = (old.postPatch or "") + ''
+      substituteInPlace androguard/core/bytecodes/axml/__init__.py --replace-fail \
+        'raise ResParserError("res1 must be zero!")' 'pass'
+    '';
     nativeCheckInputs = [ ];
     doCheck = false;
     pythonImportsCheck = [ "androguard.core.bytecodes.apk" ];
@@ -97,10 +105,11 @@ let
         # Everything with a password in it lives here, and goes with it.
         work=$(mktemp -d -p "''${RUNNER_TEMP:-''${TMPDIR:-/tmp}}" harken-fdroid.XXXXXX)
         trap 'rm -rf "$work"' EXIT
-        mkdir -p "$work/repo/icons" "$work/metadata/${appid}/en-US" "$work/fetched"
+        mkdir -p "$work/repo" "$work/metadata/${appid}/en-US" "$work/fetched"
         cp ${../harken/android/fdroid/metadata}/${appid}.yml "$work/metadata/"
         cp ${icon} "$work/metadata/${appid}/en-US/icon.png"
-        cp ${icon} "$work/repo/icons/harken.png"
+        # Relative to where fdroid runs; it copies it into repo/icons itself.
+        cp ${icon} "$work/harken.png"
 
         local apk id code
         for apk in "$@"; do
@@ -178,6 +187,8 @@ let
 
         mkdir -p "$out"
         cp -r "$work/repo/." "$out/"
+        # fdroid's own log of the run, naming the machine and its paths.
+        rm -rf "$out/status"
         rm -rf "$work"
         trap - EXIT
         ${helper} check "$out"
