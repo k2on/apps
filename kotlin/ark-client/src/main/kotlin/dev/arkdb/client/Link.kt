@@ -2,15 +2,21 @@
 // is the reference's: a socket that moves binary frames, polled, and a `Link`
 // around it that dials, notices a drop, and dials again with a backoff (half a
 // second, doubling to thirty). The engine is sans-io, so everything here
-// happens on `Link.poll`, which the peer's `pump` calls — twenty times a
-// second, typically, from a UI's tick or a loop of its own.
+// happens on `Link.poll`, which the peer's `pump` calls.
+//
+// **Nothing here runs on a clock of the host's** (`docs/plan-reactive.md`).
+// A socket given a [Wake] calls it whenever it has queued something to
+// report — the socket opened, a frame, the socket closed — and the host
+// answers by pumping once; the redial after a close is a deadline,
+// [Link.deadline], which the host arms one timer for and which an open
+// clears. Connected and idle, a host has no timer and is never woken.
 //
 // The socket is a WebSocket over OkHttp (`WebSocketTransport`), on the JVM
 // and on Android alike: one dependency both platforms have, rather than an
 // interface with the JDK's `java.net.http` behind it on one and OkHttp on the
 // other. OkHttp calls back on threads of its own; `QueuedSocket` keeps what
-// they said until the link polls, so the peer is only ever touched from its
-// own loop.
+// they said until the link polls, and rings the host's wake after each, so
+// the peer is only ever touched from its own thread.
 //
 // **Keepalive** is the server's — it pings — and the socket's: OkHttp pings
 // every `Timing.pingEveryMs` and fails the connection when a pong does not
@@ -32,6 +38,14 @@ public data class Timing(
     /** How long a dial waits for the TCP connection and the WebSocket handshake. */
     val connectTimeoutMs: Long = 5_000,
 )
+
+/**
+ * What a socket calls when it has queued an [Event] (`link::Wake`): the host's signal to pump
+ * (`docs/plan-reactive.md`). Called from OkHttp's threads, or a test's; it must not pump itself,
+ * only ask for one. A burst of calls is one wake for whoever coalesces them — the peer does
+ * ([Peer.setWaker]).
+ */
+public typealias Wake = () -> Unit
 
 /** What a socket reports (`link::Event`). */
 public sealed class Event {
@@ -55,6 +69,13 @@ public interface Socket {
 
     /** Close it; nothing more is reported. */
     public fun close()
+
+    /**
+     * From now on, call `wake` after queueing every event — and once now if one may already be
+     * waiting, since the link hands this over after the dial that may have started the socket. The
+     * default ignores it: a socket polled by hand is only drained by a host that pumps on its own.
+     */
+    public fun setWaker(wake: Wake) {}
 }
 
 /** How a link opens a socket to a URL (`link::Dial`). */
@@ -91,6 +112,9 @@ public class Link(public val url: String, private val dial: Dial, private val ti
         private set
 
     private var backoff: Long = timing.firstBackoffMs
+    // Handed to every socket this link dials.
+    private var waker: Wake? = null
+
     /** Connections opened so far. */
     public var opens: Long = 0
         private set
@@ -101,6 +125,25 @@ public class Link(public val url: String, private val dial: Dial, private val ti
 
     public val isOpen: Boolean
         get() = state == LinkState.Open
+
+    /**
+     * When this link next wants a [poll] with nothing having woken it: the redial after a close, as
+     * a monotonic millisecond — `0` is now. Null while it is dialling, open or stopped, which is
+     * when the socket's own wakes are all there is (`docs/plan-reactive.md`). The host arms one
+     * timer for it; the value does not move until the link does, so a host keyed by it re-arms
+     * nothing.
+     */
+    public val deadline: Long?
+        get() = (state as? LinkState.Waiting)?.at
+
+    /**
+     * Wake the host when the socket has something to report: handed to the socket open now, and to
+     * every one dialled after.
+     */
+    public fun setWaker(wake: Wake) {
+        socket?.setWaker(wake)
+        waker = wake
+    }
 
     /** Stop, and stay stopped until [resume]. Whether a socket that was open went. */
     public fun stop(why: String): Boolean {
@@ -134,7 +177,9 @@ public class Link(public val url: String, private val dial: Dial, private val ti
         val out = Polled()
         val s = state
         if (s is LinkState.Waiting && now >= s.at) {
-            socket = dial(url)
+            val d = dial(url)
+            waker?.let(d::setWaker)
+            socket = d
             state = LinkState.Connecting
         }
         val t = socket ?: return out
@@ -170,29 +215,39 @@ public class Link(public val url: String, private val dial: Dial, private val ti
 
 /**
  * A [Transport]'s callbacks, kept until polled: what a link reads from a connection whose events
- * arrive on another thread. It reports `Opened`, then frames, then exactly one `Closed`.
+ * arrive on another thread. It reports `Opened`, then frames, then exactly one `Closed` — and,
+ * given a [Wake], rings it after queueing each, which is how the host learns there is something to
+ * poll (`docs/plan-reactive.md`).
  */
 public class QueuedSocket(transport: Transport) : Socket {
     private val events = ConcurrentLinkedQueue<Event>()
     @Volatile private var done = false
+    @Volatile private var wake: Wake? = null
     private val connection: Connection
 
     init {
         connection =
             transport.open(
                 object : ConnectionListener {
-                    override fun onOpen() {
-                        events.add(Event.Opened)
-                    }
+                    override fun onOpen() = queue(Event.Opened)
 
-                    override fun onFrame(frame: ByteArray) {
-                        events.add(Event.Frame(frame))
-                    }
+                    override fun onFrame(frame: ByteArray) = queue(Event.Frame(frame))
 
-                    override fun onClose(reason: String) {
-                        events.add(Event.Closed(reason))
-                    }
+                    override fun onClose(reason: String) = queue(Event.Closed(reason))
                 })
+    }
+
+    // Queued first, then the wake, so the pump it asks for finds it.
+    private fun queue(e: Event) {
+        events.add(e)
+        wake?.invoke()
+    }
+
+    // The transport opened before this was handed over, and may already have
+    // said something: ring once for it.
+    override fun setWaker(wake: Wake) {
+        this.wake = wake
+        if (!events.isEmpty()) wake()
     }
 
     override fun send(frame: ByteArray) {
@@ -223,12 +278,25 @@ public class QueuedSocket(transport: Transport) : Socket {
 
 /**
  * A socket over two queues, for a test or an in-process server (`link::Queues`): what the link
- * sends goes to [sent], and what is pushed onto [events] is what it reports.
+ * sends goes to [sent], and what is pushed onto [events] is what it reports — waking the link's
+ * host when it is pushed with [push], as a socket's reader does.
  */
 public class Queues : Socket {
     public val sent: MutableList<ByteArray> = java.util.Collections.synchronizedList(ArrayList())
     public val events: ConcurrentLinkedQueue<Event> = ConcurrentLinkedQueue()
     @Volatile public var closed: Boolean = false
+    @Volatile private var waker: Wake? = null
+
+    /** Report `e`, and wake whoever is listening — what a socket's reader does with a frame. */
+    public fun push(e: Event) {
+        events.add(e)
+        waker?.invoke()
+    }
+
+    override fun setWaker(wake: Wake) {
+        waker = wake
+        if (!events.isEmpty()) wake()
+    }
 
     override fun send(frame: ByteArray) {
         sent.add(frame)

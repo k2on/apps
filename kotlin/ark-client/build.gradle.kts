@@ -73,6 +73,18 @@ val launchViewTests by tasks.registering(JavaExec::class) {
     args(rootProject.file("../harken/domain/harken.ark").absolutePath)
 }
 
+// A peer driven by its wakes (docs/plan-reactive.md): nothing rings at rest,
+// a burst is one wake and one settle, a close arms one redial.
+val wakeTests by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Holds the peer to its wakes: no loop, and nothing published at rest."
+    dependsOn(tasks.named("testClasses"))
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("dev.arkdb.client.WakeTests")
+    jvmArgs("-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8")
+    args(rootProject.file("../harken/domain/harken.ark").absolutePath)
+}
+
 tasks.named("check") {
-    dependsOn(storageTests, clientTests, launchViewTests)
+    dependsOn(storageTests, clientTests, launchViewTests, wakeTests)
 }

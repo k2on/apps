@@ -10,6 +10,13 @@
 // arrived, settles once, sends what it queued and writes what moved. The
 // sans-io half is still here for a transport of the caller's own:
 // `connected`, `recvFrame` and `takeOutgoingFrames`.
+//
+// **No loop** (`docs/plan-reactive.md`). A host hands the peer a `Wake`
+// ([Peer.setWaker]) and pumps when it is rung — the socket opened, a frame
+// arrived, it closed — after anything it asks of the peer, and at
+// [Peer.deadline], the one timer there is (the redial after a close). What a
+// pump moved is in its [Pumped], so a host publishes nothing when nothing
+// did. Connected and idle, nothing runs.
 package dev.arkdb.client
 
 import dev.arkdb.Authority
@@ -142,7 +149,11 @@ public sealed class Standing {
     public object Unknown : Standing()
 }
 
-/** What one [Peer.pump] came to (`ark_client::Pumped`). */
+/**
+ * What one [Peer.pump] came to (`ark_client::Pumped`) — precisely what moved, so that a host
+ * publishes nothing when nothing did (`docs/plan-reactive.md`): a screen is told *what* moved,
+ * never that a pump happened. [quiet] is the whole of "nothing".
+ */
 public class Pumped {
     /** A frame arrived. */
     public var moved: Boolean = false
@@ -156,6 +167,57 @@ public class Pumped {
     public var rejected: Int = 0
     /** Something worth a status line: a frame that did not decode, a write that failed. */
     public var note: String? = null
+    /**
+     * The optimistic store moved since the last pump — by this pump's frames, or by whatever the
+     * app authored in between: [Peer.takeChanges] has something new for the views. False is a pump
+     * no view needs to hear of.
+     */
+    public var views: Boolean = false
+    /** Live frames that arrived, for [Peer.heard]. */
+    public var heard: Int = 0
+    /**
+     * [Peer.status], when it differs by value from what the last pump reported: the one way a
+     * status line learns it changed.
+     */
+    public var status: Status? = null
+    /**
+     * When to pump again if nothing wakes the host first: the link's redial ([Link.deadline]), a
+     * monotonic millisecond. Null is no timer at all, which is a link dialling, open, or stopped.
+     */
+    public var deadline: Long? = null
+
+    /**
+     * Nothing moved: no frame, no change of the link, no verdict, no note, nothing for a view,
+     * nothing heard, the status as it was. A host answering a wake with a quiet pump publishes
+     * nothing.
+     */
+    public fun quiet(): Boolean =
+        !moved &&
+            !opened &&
+            dropped == null &&
+            denied == null &&
+            rejected == 0 &&
+            note == null &&
+            !views &&
+            heard == 0 &&
+            status == null
+}
+
+/**
+ * The host's [Wake] behind a "drain requested" flag (`docs/plan-reactive.md`): the first event
+ * after a pump rings it, and every event after that until the next pump is already answered — so a
+ * burst of fifty frames is one wake, one pump, one settle. The flag is cleared as a pump starts,
+ * before it drains, so an event that lands during the drain rings again rather than waiting for
+ * somebody else.
+ */
+private class Coalesced(host: Wake) {
+    private val asked = java.util.concurrent.atomic.AtomicBoolean(false)
+    val wake: Wake = { if (!asked.getAndSet(true)) host() }
+
+    /** A pump is starting: the next event asks again. */
+    fun answered() {
+        asked.set(false)
+    }
 }
 
 /** Everything a status line or a debug screen shows (`ark_client::Status`). */
@@ -245,6 +307,19 @@ private constructor(
 
     private var heardFrames: Long = 0
     private var badFrames: Long = 0
+
+    // The host's wake, coalesced: handed to every link this peer makes.
+    private var waker: Coalesced? = null
+    // The status the last pump reported, for `Pumped.status`.
+    private var published: Status? = null
+    // What the store's untaken changes were when the last pump ended — how
+    // many, and whether rebuilt — so `Pumped.views` says what moved since,
+    // whether or not the host has taken them.
+    private var told: Pair<Int, Boolean> = 0 to false
+
+    /** Settles run, for the tests that count a wake's. */
+    public var settles: Long = 0
+        private set
 
     private class AloneLog(
         val journal: Journal,
@@ -463,11 +538,20 @@ private constructor(
         collectRejections()
         persistLog()
         writer.persistPending(client.replica.pending)
+        // Asked for is done at once, the push with it: the intent is durable,
+        // so it can go (`docs/plan-reactive.md`, "the app asks").
+        flush()
         return id
     }
 
-    /** What a view of the optimistic store is told (`take_changes`). */
-    public fun takeChanges(): Changes = client.replica.takeChanges()
+    /**
+     * What a view of the optimistic store is told (`take_changes`): everything since the last ask,
+     * or `Rebuilt`. Hand it to every [ClientView.update].
+     */
+    public fun takeChanges(): Changes {
+        told = 0 to false
+        return client.replica.takeChanges()
+    }
 
     /** `query`: a query by name over the optimistic store, as this peer's user. */
     public fun query(name: String, args: Map<String, Value>): Value {
@@ -544,6 +628,15 @@ private constructor(
     /** What the room said since the last ask; never durable. */
     public fun heard(): List<ByteArray> = client.takeHeard()
 
+    /**
+     * `say`: a live frame into the room, sent now if linked and dropped if not — a room is what is
+     * true *now*, and nothing about it is worth saying later.
+     */
+    public fun say(frame: ByteArray) {
+        client.say(frame)
+        flush()
+    }
+
     // -- the socket ---------------------------------------------------------------
 
     /**
@@ -555,8 +648,41 @@ private constructor(
         disconnect()
         client.denied = null
         val l = Link(url, dial, timing)
+        waker?.let { l.setWaker(it.wake) }
         if (signedOut) l.stop("signed out")
         link = l
+    }
+
+    /**
+     * Wake the host whenever the socket has something to report — it opened, a frame arrived, it
+     * closed — instead of being polled for it (`docs/plan-reactive.md`). `wake` must only *ask* for
+     * a pump: it is called from OkHttp's threads, and a burst of events calls it once until the
+     * next [pump] starts. Handed to the link there is and to every one made after. A host so woken
+     * pumps when woken, after anything it asks of the peer, and at [deadline] — and at no other
+     * time.
+     */
+    public fun setWaker(wake: Wake) {
+        val c = Coalesced(wake)
+        link?.setWaker(c.wake)
+        waker = c
+    }
+
+    /**
+     * When this peer wants a [pump] with nothing having woken its host: the link's redial after a
+     * close, a monotonic millisecond ([Link.monotonicMs]; `0` is now). Null — dialling, open,
+     * stopped, alone — is no timer at all. The host arms one timer for it, and the open that
+     * follows clears it.
+     */
+    public fun deadline(): Long? = link?.deadline
+
+    /**
+     * Send what the engine has queued, now: a push, a live frame, a verify. [mutate], [say] and
+     * [verify] do it themselves; a pump does it last.
+     */
+    public fun flush() {
+        val l = link ?: return
+        if (!l.isOpen) return
+        for (f in takeOutgoingFrames()) l.send(f)
     }
 
     /** Go offline: close the socket and stop dialling. Everything authored meanwhile is pending. */
@@ -581,15 +707,24 @@ private constructor(
 
     /**
      * `pump`: one turn of the link — dial if due, hand the engine what arrived, settle it once
-     * (R8), send what it queued, and write whatever moved. Call it on a tick; fifty milliseconds is
-     * what the clients here use. Without a link it still writes, and a peer alone needs nothing
-     * else.
+     * (R8), send what it queued, and write whatever moved. It is the unit of work of a wake
+     * (`docs/plan-reactive.md`): a host given [setWaker] calls it when woken, after asking the peer
+     * for anything, and at [deadline]; one without a waker — a test, a headless driver — calls it
+     * by hand, as often as it likes, and a pump with nothing to do is [Pumped.quiet]. Without a
+     * link it still writes, and a peer alone needs nothing else.
      */
-    public fun pump(): Pumped {
+    public fun pump(): Pumped = pumpAt(Link.monotonicMs())
+
+    /**
+     * [pump] at a given monotonic millisecond, so that the backoff and the deadline are testable.
+     */
+    public fun pumpAt(now: Long): Pumped {
+        waker?.answered()
+        val heardBefore = heardFrames
         val p = Pumped()
         val l = link
         if (l != null) {
-            val polled = l.poll()
+            val polled = l.pollAt(now)
             if (polled.opened) {
                 client.connected()
                 p.opened = true
@@ -628,6 +763,17 @@ private constructor(
         } catch (e: Exception) {
             p.note = e.message ?: e.javaClass.simpleName
         }
+        val r = client.replica
+        val now = r.changes.size to r.rebuilt
+        p.views = now != told
+        told = now
+        p.heard = (heardFrames - heardBefore).toInt()
+        val s = status()
+        if (s != published) {
+            published = s
+            p.status = s
+        }
+        p.deadline = deadline()
         return p
     }
 
@@ -747,6 +893,7 @@ private constructor(
         val a = authority
         if (a == null) {
             askVerify(false)
+            flush()
             return
         }
         val (n, h) = client.replica.verifyAt()
@@ -772,6 +919,7 @@ private constructor(
 
     /** `settle`: the client settled, verify answers sorted, and a verify asked after a page. */
     private fun settle(): List<Seq> {
+        settles++
         val paging = client.more
         client.settle()
         thisConnection()
