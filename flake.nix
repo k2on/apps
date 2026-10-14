@@ -512,6 +512,8 @@
             default = ark;
             inherit harken-apk harken-android-screens;
             harken-apk-deps = harken-apk.mitmCache.updateScript;
+            # Its F-Droid repository, and a key for it (nix/fdroid.nix).
+            inherit (import ./nix/fdroid.nix { inherit lib pkgs harken-apk; }) harken-fdroid-repo harken-fdroid fdroid-keygen;
           } // lib.listToAttrs (map (v: lib.nameValuePair "harken-server-${v.name}" v.server) versions)
           // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
             # The two pieces an ARM Linux needed, on their own.
