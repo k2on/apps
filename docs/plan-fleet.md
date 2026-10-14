@@ -46,7 +46,9 @@ It opens the replica in `DIR` (`Peer::open_path`), signs in the way the
 desktop does in dev auth (`ark_auth::client::login(server, Some(name),
 |_| {})` — a dev server answers the first request with the code and opens no
 browser; the login is remembered under `DIR` so a restart reuses it),
-connects to `ws://…/sync`, pumps on a timer (the desktop's 50 ms), and reads
+connects to `ws://…/sync`, pumps on a timer (the desktop's 50 ms; since
+`docs/plan-reactive.md`, when its socket wakes it and at the redial
+deadline instead, as the desktop does), and reads
 **commands as JSON lines on stdin, answering one JSON line each on stdout**,
 so a test drives it without a socket of its own:
 

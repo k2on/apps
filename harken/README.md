@@ -197,7 +197,10 @@ against a server being pushed to (`docs/plan-db.md` D6).
 `harken-peer` is a peer with no screen, built beside the server (the
 `harken-server` package ships both). It opens a replica in a directory,
 signs in the way the desktop does in dev auth, dials the sync socket and
-pumps; it reads commands as JSON lines on stdin and answers one line each,
+pumps when the socket wakes it, after a command that asks something of it,
+and at the redial deadline — never on a clock, as the desktop does not
+(`docs/plan-reactive.md`), so a frame nobody was woken for is a fleet that
+does not converge; it reads commands as JSON lines on stdin and answers one line each,
 ids and rows in the vectors' dialect (`ark::json`):
 
     harken-peer --dir /tmp/alice --server http://127.0.0.1:8787 --user alice
