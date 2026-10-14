@@ -34,3 +34,13 @@ application {
 tasks.named<ProcessResources>("processResources") {
     from(rootProject.file("../harken/domain/harken.ark"))
 }
+
+// What a phone's launch costs, stage by stage, over a replica the client
+// wrote (src/test/.../ColdOpen.kt). A measurement, not a check: it is run by
+// hand, a fresh JVM per launch, with the classpath this task prints.
+val coldOpenClasspath by tasks.registering {
+    group = "verification"
+    description = "Prints the classpath ColdOpen runs on."
+    dependsOn(tasks.named("testClasses"))
+    doLast { println("classpath=" + sourceSets["test"].runtimeClasspath.asPath) }
+}
