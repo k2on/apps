@@ -90,7 +90,7 @@ public class Id(bytes: ByteArray) : Comparable<Id> {
     /** Lowercase 8-4-4-4-12, as `Std.textOfId` spells it. */
     public val text: String
         get() {
-            val h = Hex.encode(bytes)
+            val h = hex
             return h.substring(0, 8) +
                 "-" +
                 h.substring(8, 12) +
@@ -102,9 +102,14 @@ public class Id(bytes: ByteArray) : Comparable<Id> {
                 h.substring(20)
         }
 
+    // Spelt on the first asking and kept: a list keys its rows by an id's hex, and asks again for
+    // every row it lays out. Two threads asking at once may both spell it, the same; a String is
+    // safe to share without a lock.
+    private var spelt: String? = null
+
     /** Thirty-two lowercase hex digits, no dashes. */
     public val hex: String
-        get() = Hex.encode(bytes)
+        get() = spelt ?: Hex.encode(bytes).also { spelt = it }
 
     override fun equals(other: Any?): Boolean = other is Id && bytes.contentEquals(other.bytes)
 
