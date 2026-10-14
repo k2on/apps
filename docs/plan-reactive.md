@@ -176,7 +176,154 @@ SwiftShader's, not a GPU's. A lock-screen button and the element's own
 events ringing the window are wired and compiled, not exercised — headless
 Chromium has no media session to press. The Kotlin and Swift fleets
 (`fleet_kotlin.rs`, `fleet_swift.rs`) were skipped here for want of their
-binaries, so the mixed fleets have not run against a waking `harken-peer`.
+binaries, so the mixed fleets have not run against a waking `harken-peer`
+(they have since: see the Kotlin half).
 The native transport's thread still reads in 20 ms slices so it can write;
 that is inside the transport and wakes no host, but it is a thread that
 runs.
+
+## Landed: the Kotlin half
+
+`kotlin/ark-client`, `kotlin/ark-android`, `kotlin/harken-peer` and
+`harken/android`. The engine, the protocol, `spec/vectors` and the trace
+corpus did not change.
+
+**The client** mirrors the Rust one. A `Socket` handed a `Wake` calls it
+after every event it queues: `QueuedSocket` from OkHttp's `onOpen`,
+`onMessage` and `onClosed`/`onFailure`, `Queues` from `push`. A socket that
+already queued something when the wake is handed over rings once at once,
+since `QueuedSocket` opens its transport in its constructor. `Peer.setWaker`
+puts the host's wake behind the same "drain requested" flag, cleared as a
+pump starts, so a burst is one wake, one pump and one settle. The redial is
+`Peer.deadline()` (`Link.deadline`), a monotonic millisecond while `Waiting`
+and null otherwise. `mutate`, `say` (new on the Kotlin peer; it was only on
+the engine's `Client`) and `verify` send at once through `flush`. `Pumped`
+carries `views`, `heard`, `status` (by value) and `deadline`, and
+`Pumped.quiet()` is "nothing". `pumpAt(now)` is the tests'. The keepalive
+is still OkHttp's ping interval, which wakes nobody.
+
+**The session.** `ArkSession` has no `scheduleWithFixedDelay` and no
+`PUMP_MS`. The peer's single thread runs a drain (one pump) when the
+socket's wake asks for one, after every `post`, and at the deadline. A
+second flag in the session makes a burst of wakes and posts one queued
+drain. The deadline is one one-shot `schedule`, re-armed only when the
+value moves and cancelled when it goes away, which is the link dialling.
+`onPump` is now `onChange(peer, what)`, called only after a drain that was
+not quiet. `status` is computed only then, and the `StateFlow` publishes it
+only when it differs. `run` is a read and drains nothing. Launch views and
+the splash hand-off are untouched (`LaunchTests` still pass).
+
+**harken.** `Library` splices on `onChange`. Each list is still published
+only when its rows moved. The diagnostics screen polled
+`library.diagnostics()` every 500 ms. It now reads again when
+`Library.moved`, a count of the session's changes, moves. The player's
+position left `PlayerState` for `Playback.position`, a `StateFlow` of its
+own. Media3's position ticker runs only while the controller is playing,
+and is cancelled on the first event that says it is not. Only two leaves
+read the position: the hairline under the mini player (counted inside its
+`BoxWithConstraints`, where the read is) and the full player's scrubber.
+`HarkenApp`, `Chrome`, the screens and `MiniPlayer` take the flow and never
+read it.
+
+**The listening session, both ways**, has nothing to move on this client.
+`harken/android` has no listening session yet: nothing says `Here`, reports
+or hears a room. So playing touches the peer not at all, and a live frame,
+if one came, is a wake like any other (`Pumped.heard`). When the session is
+built here, it should ride `say` (which sends at once) and `onChange` (which
+carries `heard`), and add nothing timed beyond the position ticker it
+already has.
+
+**`harken-peer-kt`** is driven like `harken-peer` since db553ac. Stdin's
+lines and the socket's wakes share one queue. The peer pumps on a wake,
+after a command that is not a read, and at the deadline. `wait` and
+`settle` pump only on wakes. `--pump-ms` is how long `settle` waits with no
+wake before the cursor counts as still.
+
+**Measured** on the JVM (HotSpot, this machine), the real `ArkSession` and
+its thread over a socket the test holds, open, linked, served, then left
+alone (`SessionWakeTests.measureTenSecondsAtRest`, `ARK_MEASURE=1`). The
+"before" run is the same test against the previous `ArkSession` (HEAD
+before 2d68d75) over the new client.
+
+| 10 s open and idle | pumps (socket polls) | listener calls | timers |
+|---|---|---|---|
+| before: the 50 ms loop | 199 | 199 | one, every 50 ms |
+| after | **0** | **0** | **none** |
+
+While a track plays, this client's session does exactly what it does at
+rest, because nothing playing says anything to the peer. Over four position
+ticks, `ScrollTests` counts:
+
+| composed, per four ticks | before (the position in `PlayerState`) | after |
+|---|---|---|
+| `HarkenApp`'s top | 4 | **0** |
+| `Chrome` | 4 | **0** |
+| `MiniPlayer` | 4 | **0** |
+| `LibraryScreen`, `TrackRow`, `RecordCard` | 0 | 0 |
+| the position's leaf (`Progress`) | 4 | 4 |
+| anything, for a second at rest | — | **0** |
+
+The "before" column is a reproduction, not the old commit: `showPosition`
+falsified to move `PlayerState` with every tick, which is what the old
+ticker did. The ticker runs 2 times a second while playing and not at all
+otherwise, before and after.
+
+**Tests, each falsified once:**
+
+- `ark-client` `WakeTests` (in `checks.kotlin`). At rest, a linked peer is
+  a minute of simulated seconds with no wake, no deadline and every pump
+  quiet. Falsified by publishing the status on every pump (66 problems:
+  every second loud), and by `Link.deadline` answering 0 while open
+  ("second n has a timer, 0"). A mutation is pushed by `mutate`
+  (falsified by removing the flush: "pushed by the call, 0"). Fifty pages
+  are one wake and one settle (falsified by ringing per event: "50 frames,
+  50 wakes"; by settling per frame: "51 settles"). A close arms one redial
+  at 1,500 that does not move until due, and the dial and the open clear it
+  (falsified by `deadline` null while waiting: "one redial … null"). The
+  status is said once when it changes (falsified by never publishing:
+  "the first pump says it").
+- `ark-android` `SessionWakeTests`, over the real thread. Open and idle for
+  2 s: no drain, no poll, no listener, no status, no timer (falsified by
+  the 50 ms loop put back: "drains at rest expected 5 but was 44").
+  Fifty pages with the thread held are one drain, one settle, one change
+  (falsified by dropping the session's flag: 2 drains). A close arms one
+  timer that fires once and dials, and nothing runs after the open
+  (falsified by never arming: "never redialled"). A dial before the
+  deadline cancels the timer (falsified by `arm(null)` not cancelling:
+  "the timer cancelled expected false but was true"). `mutate` inside a
+  `run` sends with no drain (falsified by removing the client's flush), and
+  a post that changes nothing tells nobody (falsified by telling on quiet
+  drains: 5, not 4).
+- `harken/android` `ScrollTests`: as above (falsified by the position in
+  the state: `HarkenApp`, `Chrome`, `MiniPlayer` 4 each; and by a 500 ms
+  beat read at the app's top: "composed at rest … {HarkenApp=2}").
+- The process fleet with `harken-peer-kt` on wakes: `fleet-kotlin` 7 of 7
+  pass. It also passed before this change against the waking harness,
+  since a peer that polls is a superset. With `QueuedSocket` not ringing,
+  6 of 7 fail: k1 "not converged after 60s", the Kotlin peer stuck at
+  cursor 0, `link connecting`.
+
+**What ran green here:** `nix build .#checks.x86_64-linux.kotlin` (ktfmt,
+122 of 130 vectors, 2,565 traces twice, the storage fixture, `ClientTests`,
+`LaunchViewTests`, `WakeTests`); `.#harken-apk` (`:ark-android:testDebugUnitTest`
+with `SessionWakeTests`, then `assembleDebug`, 13,804,986 bytes);
+`.#harken-android-screens` (83 files, the player's position drawn from the
+new flow); `.#checks.x86_64-linux.fleet-kotlin`; `.#checks.x86_64-linux.fleet-swift`
+(7 of 7).
+
+**Swift was not changed.** `harken-peer-swift` still pumps every
+`--pump-ms`, and it passes against the waking harness. A peer that polls
+drains everything a waking one would, only more often. So `fleet-swift`
+says the Swift client agrees with the fleet. It does not say the Swift
+client wakes, because it does not, and no Swift app drives it yet.
+
+**Not verified.** No phone, no emulator, no ART. Every number above is
+HotSpot on a JVM, and Paparazzi's frame clock rather than a device's
+Choreographer. In particular, nothing here has seen any of these on a
+device: OkHttp's callbacks waking the thread across Doze and app standby;
+the one-shot redial timer surviving the process being frozen in the
+background (a `ScheduledExecutorService` does not wake a dozing phone, and
+the next wake after thaw is what runs it); the battery or radio effect of
+removing the loop; Media3's `onEvents` stopping the ticker on a real pause
+or a lost audio focus. The splash hand-off and launch views are held by
+`LaunchTests` and were not looked at on a screen.
