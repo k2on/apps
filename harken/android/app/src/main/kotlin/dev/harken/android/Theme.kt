@@ -26,6 +26,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -197,7 +198,7 @@ val LocalHarken = staticCompositionLocalOf { HarkenExtras(Palette.LightArt, dark
 @Composable
 fun HarkenTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
     val extras = HarkenExtras(if (dark) Palette.DarkArt else Palette.LightArt, dark)
-    CompositionLocalProvider(LocalHarken provides extras) {
+    CompositionLocalProvider(LocalHarken provides extras, LocalMoreGlyph provides rememberVectorPainter(Glyphs.More)) {
         MaterialTheme(colorScheme = if (dark) Palette.DarkScheme else Palette.LightScheme, typography = HarkenType, content = content)
     }
 }

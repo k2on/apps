@@ -398,3 +398,53 @@ Not done: a release variant. The recorded Maven graph holds `profileinstaller`
 but not `com.android.tools:r8`, so `assembleRelease` with minification needs a
 re-recording with `:app:assembleRelease` among the recorded tasks. A
 generated baseline profile needs a device.
+
+### A fast fling
+
+With the ticks gone, the Songs list was still choppy when flung hard. A fling
+brings several rows on screen in a frame, so what one entering row costs is
+what matters. `FlingTests.aFastFlingThroughEverySong` measures it, run when
+`HARKEN_FLING_BENCH` is set. It drives the real `HarkenApp` over 2,000 songs
+in 200 albums, each with its cover decoded, at three rows a frame. Each pass
+starts from the top: four warm the JIT and the covers, and two are reported.
+The cost is this thread's CPU time and HotSpot's byte count, for the compose
+and measure a scroll does and for one software draw of each frame. These are
+HotSpot and layoutlib numbers, a relative proxy. They are not frame times on
+a phone.
+
+| after                              | compose+measure, per entering row | draw, per frame (≈13 rows) |
+|------------------------------------|-----------------------------------|----------------------------|
+| before                             | 424 µs, 40.0 KB                   | 7.5 ms, 36.7 KB            |
+| `albumOf` by name                  | (within noise), 40.0 KB           | 7.5 ms, 36.7 KB            |
+| `Id.hex` kept                      | (within noise), 38.7 KB           | 7.3 ms, 36.7 KB            |
+| `Cover` launches only to load; `Square` draws from a cache | 400 µs, 37.9 KB | 7.5 ms, 31.0 KB |
+| `MoreButton`; `clock` by hand      | 370 µs, 34.9 KB                   | 7.2 ms, 27.7 KB            |
+| one painter for the menu glyph     | **386 µs, 32.7 KB**               | **7.1 ms, 27.7 KB**        |
+
+The bytes repeat to within 0.5% from run to run. The times are medians, and
+they move by about 10% with the machine's load, so a single step's time is
+not to be read on its own. In the profile of the compose and measure,
+`String.format` in `Media.clock` was 4% and is gone. `IconButton` was 9%, and
+`MoreButton` in its place is 4%. The scan of every album was 1.9% at 200
+albums, and the map lookup is about half of that. `Id.hex` went from 1.2% to
+0.4%. What remains is Compose's own: applying an entering row's nodes,
+placing it, and laying out its three lines of text. No `contentType` was
+added: every row of the list is one type, so the default already reuses
+every row that leaves for the next that enters.
+
+- `RowTests.theAlbumByNameIsTheAlbumTheScanFound`: over a seeded library of
+  49 songs and 7 albums, the album by name equals the old scan's for every
+  song. It also does with an album's row missing, and is none for a song on
+  no album.
+  - Falsified: no made-up album when the row is missing.
+- `RowTests.anIdsHexIsSpeltOnce`: the same spelling, and the same string.
+  - Falsified: the cache removed.
+- `FlingTests.aCoverAlreadyDecodedLaunchesNothing`: five covers already in
+  memory launch nothing, and three only on disk launch one each and share
+  one read.
+  - Falsified: launching for every cover (8, not 3).
+- `ScrollTests` still composes nothing per tick.
+  - Falsified: `albumOf` remade per tick.
+
+The build type is the rest, and it is not on this list yet.
+

@@ -26,11 +26,19 @@ object Media {
         return out.toString()
     }
 
-    /** A track's length as a row shows it: `m:ss`, or `h:mm:ss` past an hour. */
+    /**
+     * A track's length as a row shows it: `m:ss`, or `h:mm:ss` past an hour. Spelt by hand rather
+     * than by `String.format`, which parses its pattern on every call: every row entering a list
+     * asks for one.
+     */
     fun clock(ms: Long): String {
-        val s = (ms.coerceAtLeast(0) / 1000)
-        return if (s >= 3600) "%d:%02d:%02d".format(s / 3600, s / 60 % 60, s % 60) else "%d:%02d".format(s / 60, s % 60)
+        val s = ms.coerceAtLeast(0) / 1000
+        val out = StringBuilder(8)
+        if (s >= 3600) two(out.append(s / 3600).append(':'), s / 60 % 60) else out.append(s / 60)
+        return two(out.append(':'), s % 60).toString()
     }
+
+    private fun two(out: StringBuilder, n: Long): StringBuilder = out.append(if (n < 10) "0" else "").append(n)
 
     /** A record's length, as a header says it: `48 min`, `2 hr 30 min`. */
     fun spell(ms: Long): String {

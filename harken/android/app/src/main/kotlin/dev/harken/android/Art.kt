@@ -11,9 +11,9 @@
 // arrive simply appears over it.
 package dev.harken.android
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -25,6 +25,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -48,27 +49,36 @@ object Art {
     fun <T> pick(set: List<T>, seed: String): T = set[(hash(seed).toLong() and 0xffffffffL).rem(set.size).toInt()]
 }
 
-/** The derived square, filling its box: a gradient in the name's tint and a note on it. */
+/**
+ * The derived square, filling its box: a gradient in the name's tint and a note on it. What it draws
+ * with is made when its size or its tint changes, and kept: a row redrawn as a list moves allocates
+ * nothing for it.
+ */
 @Composable
 fun Square(seed: String, modifier: Modifier = Modifier) {
     val tint = Art.pick(LocalHarken.current.art, seed).first
-    Canvas(modifier) {
-        drawRect(Brush.linearGradient(listOf(tint, tint.copy(alpha = 0.33f)), Offset.Zero, Offset(size.width, size.height)))
-        // The desktop's note, in its 100-unit box: a head, a stem and a flag.
-        val u = size.width / 100f
-        val ink = tint.copy(alpha = 0.35f)
-        drawCircle(ink, radius = 8 * u, center = Offset(44 * u, 62 * u))
-        drawRect(ink, topLeft = Offset(50 * u, 26 * u), size = Size(4 * u, 36 * u))
-        val flag =
-            Path().apply {
-                moveTo(50 * u, 26 * u)
-                lineTo(68 * u, 32 * u)
-                lineTo(68 * u, 40 * u)
-                lineTo(50 * u, 34 * u)
-                close()
+    Spacer(
+        modifier.drawWithCache {
+            val gradient = Brush.linearGradient(listOf(tint, tint.copy(alpha = 0.33f)), Offset.Zero, Offset(size.width, size.height))
+            // The desktop's note, in its 100-unit box: a head, a stem and a flag.
+            val u = size.width / 100f
+            val ink = tint.copy(alpha = 0.35f)
+            val flag =
+                Path().apply {
+                    moveTo(50 * u, 26 * u)
+                    lineTo(68 * u, 32 * u)
+                    lineTo(68 * u, 40 * u)
+                    lineTo(50 * u, 34 * u)
+                    close()
+                }
+            onDrawBehind {
+                drawRect(gradient)
+                drawCircle(ink, radius = 8 * u, center = Offset(44 * u, 62 * u))
+                drawRect(ink, topLeft = Offset(50 * u, 26 * u), size = Size(4 * u, 36 * u))
+                drawPath(flag, ink)
             }
-        drawPath(flag, ink)
-    }
+        }
+    )
 }
 
 /**
@@ -81,11 +91,22 @@ fun Cover(seed: String, art: String, side: Dp, modifier: Modifier = Modifier, ro
     Box(modifier.clip(shape)) {
         Square(seed, Modifier.fillMaxSize())
         val covers = LocalCovers.current
-        val url = covers?.urlOf(art)
+        val url = remember(covers, art) { covers?.urlOf(art) }
         if (covers != null && url != null) {
-            var bitmap by remember(url) { mutableStateOf<ImageBitmap?>(covers.cached(url)) }
-            LaunchedEffect(url) { if (bitmap == null) bitmap = covers.load(url, side) }
-            bitmap?.let { Image(it, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
+            // A cover already decoded is drawn at once, and nothing is launched for it: a fling
+            // brings several rows in a frame, and a coroutine each to find what was already there
+            // was a cost per row.
+            val cached = remember(url) { covers.cached(url) }
+            if (cached != null) {
+                Image(cached, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            } else {
+                var bitmap by remember(url) { mutableStateOf<ImageBitmap?>(null) }
+                LaunchedEffect(url) {
+                    covers.launches.incrementAndGet()
+                    bitmap = covers.load(url, side)
+                }
+                bitmap?.let { Image(it, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
+            }
         }
     }
 }

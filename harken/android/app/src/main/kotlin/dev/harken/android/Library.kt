@@ -407,12 +407,6 @@ class Library(private val session: ArkSession) {
     /** What `create_playlist`'s own checks say of a name as it is typed; null when it would pass. */
     suspend fun nameProblem(name: String): String? = session.run { p -> Phone.nameProblem(p, name) }
 
-    /** The album a song is on, by the details. */
-    fun albumOf(track: Track): Album? {
-        val name = details.value[track.id]?.album?.takeIf { it.isNotEmpty() } ?: return null
-        return albums.value.firstOrNull { it.name == name } ?: Album(name, track.creator, "", 0)
-    }
-
     // Writing -----------------------------------------------------------------
 
     private fun write(f: (Peer) -> Unit) =

@@ -30,6 +30,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -171,10 +172,11 @@ fun HarkenApp(
     // and making a fresh one per composition is what made every screen, every lazy list and every
     // visible row recompose on each of the player's position ticks: an anonymous object is a new
     // value to Compose every time, and every row's `onClick` captured it (`ScrollTests`).
-    val albumOf: (Track) -> Album? =
-        remember(session) {
-            { t -> details[t.id]?.album?.takeIf { it.isNotEmpty() }?.let { name -> albums.firstOrNull { it.name == name } ?: Album(name, t.creator, "", 0) } }
-        }
+    //
+    // The albums by name are made when the albums change, and only then: every row entering a list
+    // asks for its album, and a scan of every album per row was a cost that grew with the library.
+    val albumsByName by remember(session) { derivedStateOf { albums.associateBy { it.name } } }
+    val albumOf: (Track) -> Album? = remember(session) { { t -> Album.ofTrack(t, details, albumsByName) } }
 
     playback.onStart = { p ->
         val l = LastPlayed(p, startedFrom)
@@ -315,7 +317,7 @@ fun HarkenApp(
                             val page = Page.parse("album/" + back.arguments?.getString("arg")) as? Page.ForAlbum
                             if (page != null) {
                                 val rows by held(library, page)
-                                AlbumPage(page.name, albums.firstOrNull { it.name == page.name }, rows, details, playing, act)
+                                AlbumPage(page.name, albumsByName[page.name], rows, details, playing, act)
                             }
                         }
                         composable("artist/{arg}") { back ->

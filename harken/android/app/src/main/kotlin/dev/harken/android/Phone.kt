@@ -52,6 +52,16 @@ data class Album(val name: String, val creator: String, val art: String, val tra
                 art = v.field("art").asText(),
                 tracks = v.field("tracks").asInt(),
             )
+
+        /**
+         * The album `track` is on, by its details: the album's own row, found by its name — or,
+         * while the albums have not caught up with a song that names a new one, an album made of
+         * the name.
+         */
+        fun ofTrack(track: Track, details: Map<Id, TrackDetail>, byName: Map<String, Album>): Album? {
+            val name = details[track.id]?.album?.takeIf { it.isNotEmpty() } ?: return null
+            return byName[name] ?: Album(name, track.creator, "", 0)
+        }
     }
 }
 

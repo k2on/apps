@@ -31,15 +31,22 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -121,7 +128,32 @@ fun TrackRow(
             Text(under, style = quiet(MaterialTheme.typography.bodyMedium), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Text(Media.clock(track.durationMs), style = quiet(MaterialTheme.typography.bodySmall), modifier = Modifier.padding(horizontal = Space.s))
-        IconButton(onClick = onMore) { Glyph(Glyphs.More, "More for ${track.title}", size = 20.dp) }
+        MoreButton(track.title, onMore)
+    }
+}
+
+/**
+ * The menu's glyph, drawn: one painter for every row of every list, which `HarkenTheme` makes. A
+ * vector's painter is a tree of the vector's paths, and a row making its own was the most a row
+ * allocated after its text.
+ */
+val LocalMoreGlyph = staticCompositionLocalOf<Painter?> { null }
+
+/**
+ * A row's menu: the glyph in a 48 dp target, Material's minimum, with an unbounded ripple, and the
+ * role and the label a screen reader says — spelt only when one asks. What `IconButton` is, less
+ * what a list pays for on every row entering it: a clip layer, a colour lookup, and a layout to
+ * reach the minimum it could simply be.
+ */
+@Composable
+private fun MoreButton(title: String, onClick: () -> Unit) {
+    Box(
+        Modifier.size(48.dp)
+            .clickable(interactionSource = null, indication = ripple(bounded = false, radius = 20.dp), role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = "More for $title" },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(LocalMoreGlyph.current ?: rememberVectorPainter(Glyphs.More), contentDescription = null, modifier = Modifier.size(20.dp))
     }
 }
 

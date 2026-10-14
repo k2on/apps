@@ -49,6 +49,9 @@ class Covers(context: Context, private val server: String) {
     /** How many times a cover was read off the disk (or fetched), and decoded: for the tests. */
     internal val reads = AtomicInteger()
     internal val decodes = AtomicInteger()
+
+    /** How many covers on screen went looking for their picture, rather than finding it decoded: for the tests. */
+    internal val launches = AtomicInteger()
     private val memory =
         object : LruCache<String, ImageBitmap>(MEMORY_BYTES) {
             override fun sizeOf(key: String, value: ImageBitmap): Int = value.width * value.height * 4
