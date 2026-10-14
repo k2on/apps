@@ -83,8 +83,29 @@ writable, because stdenv unlocks only the source root and gradle writes
 `.gradle/` and `build/` inside the included build at `../../kotlin` too —
 read-only, the build *ends* after loading settings with no task run and no
 message; and a writable `HOME`, because AGP keeps its state and the debug
-keystore under `~/.android`. The APK is signed with the debug key every
-Android toolchain shares: it installs anywhere and belongs nowhere public.
+keystore under `~/.android`.
+
+**One debug key, committed, and public on purpose.** That keystore was
+random: AGP makes one on first use, so every machine had its own, and the
+nix builder — a new home each time — had a new one on every build. Android
+refuses an update signed by anybody but the installed app's signer, so each
+new APK failed with "App not installed" and had to replace the old one by
+uninstalling it. `debug.keystore`, beside this file, is the key every debug
+build signs with now (`signingConfigs` in `app/build.gradle.kts`, the usual
+`android` / `androiddebugkey` / `android`), nix or local, so one installs
+over the last. The cost is the one every debug-signed build pays, stated
+rather than inherited: anyone can sign an APK as this app, so it installs
+anywhere and belongs nowhere public. A real release key belongs outside the
+nix store, which is world-readable, and is applied after the build.
+
+The version code rises with each commit: `harken-apk` passes the flake's
+source time in minutes as `-PversionCode` and `0.1.<date>` as
+`-PversionName`, which CI's and a tag's APKs get too, since both are this
+same `nix build`. A local gradle build passes neither and is `1`, `0.1`.
+
+**The first install of this build still needs one uninstall.** The APK
+already on a phone carries the random key of the build that made it; from
+this one on, updates install over each other.
 
 With Android Studio (Ladybug or later) or a command-line SDK with platform 35
 and build-tools 35.0.0, plus JDK 21, the same project builds directly:

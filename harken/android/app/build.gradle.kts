@@ -22,11 +22,41 @@ android {
         applicationId = "dev.harken.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1"
+        // Rises with every commit when nix builds it: `harken-apk` passes the
+        // flake's source time in minutes as `-PversionCode`, and Android
+        // refuses an update whose code is lower than the one installed. A
+        // local build says neither and is 1, as it always was.
+        versionCode = providers.gradleProperty("versionCode").map { it.toInt() }.getOrElse(1)
+        versionName = providers.gradleProperty("versionName").getOrElse("0.1")
+    }
+
+    // One key for every debug build, committed beside this file, and public
+    // on purpose. AGP otherwise signs with a key it makes up on first use
+    // under ~/.android — a different one on every machine, and under nix a
+    // different one on every build, since the builder's home is new each
+    // time — and Android refuses an update whose signer differs from the
+    // installed app's: "App not installed", and an uninstall that takes the
+    // phone's replica with it. Signing identically everywhere is what lets
+    // one APK install over the last.
+    //
+    // It is the same trade every debug-signed build makes, said plainly:
+    // anyone can read this file, so anyone can sign an APK as this app. It
+    // must never sign anything published as trusted. A real release key does
+    // not belong here or anywhere in the nix store, which is world-readable;
+    // it means building unsigned and signing outside the build.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = rootProject.file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+        }
         release {
             isMinifyEnabled = false
         }

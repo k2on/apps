@@ -379,10 +379,21 @@
           # recorded Maven graph (harken/android/deps.json; `nix run
           # .#harken-apk-deps` re-records it, for this and for the
           # screenshots below). The onboarding's JVM tests run first, so an
-          # APK is not built over a machine that fails them. Debug-signed,
-          # like any assembleDebug; it installs anywhere and belongs nowhere
-          # public. The Kotlin build reads the Unicode tables out of
-          # rust/ark, so that file is a source too.
+          # APK is not built over a machine that fails them. The Kotlin build
+          # reads the Unicode tables out of rust/ark, so that file is a source
+          # too.
+          #
+          # Debug-signed, but with one key rather than a new one per build:
+          # harken/android/debug.keystore, committed and public on purpose
+          # (app/build.gradle.kts says why), so that each APK installs over
+          # the last instead of failing with "App not installed". It installs
+          # anywhere and belongs nowhere public. And a version code that rises
+          # with each commit: the flake's own source time, in minutes since
+          # the epoch — about thirty million today, and Android's ceiling is
+          # 2,100,000,000 — so a newer build is never refused as a downgrade.
+          # The first install of this build over one made before it still
+          # needs one uninstall, because the APK already on the phone was
+          # signed with a key AGP made up for that build alone.
           harken-apk = pkgs.stdenv.mkDerivation (final: {
             pname = "harken-apk";
             version = "0.1.0";
@@ -411,9 +422,15 @@
               # AGP would fetch its own aapt2 from Maven, an unpatched binary
               # that cannot run here; the SDK's is patched and can.
               "-Pandroid.aapt2FromMavenOverride=${sdkRoot}/build-tools/35.0.0/aapt2"
+            ] ++ final.versionFlags;
+            # Read by app/build.gradle.kts; a local build falls back to 1.
+            versionFlags = [
+              "-PversionCode=${toString (self.lastModified / 60)}"
+              "-PversionName=0.1.${self.lastModifiedDate}"
             ];
-            # AGP keeps its own state (analytics settings, the debug keystore it
-            # signs with) under ~/.android, and the builder has no home.
+            # AGP keeps its own state (analytics settings, and the debug keystore
+            # it would sign with were the build not given one) under
+            # ~/.android, and the builder has no home.
             preBuild = ''
               export HOME="$TMPDIR/home" ANDROID_USER_HOME="$TMPDIR/home/.android"
               mkdir -p "$ANDROID_USER_HOME"
@@ -441,6 +458,9 @@
           harken-android-screens = harken-apk.overrideAttrs (old: {
             pname = "harken-android-screens";
             gradleBuildTask = ":app:recordPaparazziDebug";
+            # A screen does not draw the version, so the commit time is not an
+            # input here: a prose commit does not re-render every screen.
+            versionFlags = [ ];
             installPhase = ''
               mkdir -p $out
               shots=app/src/test/snapshots/images
