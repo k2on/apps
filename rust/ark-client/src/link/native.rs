@@ -1,16 +1,20 @@
 //! A WebSocket on a thread of its own: blocking `tungstenite`, a short
 //! read timeout so the thread gets a turn to write, and two channels to
-//! whoever polls it.
+//! whoever polls it — with the host's [`Wake`] called after every event the
+//! thread queues, so a host waits on that rather than polling
+//! (`docs/plan-reactive.md`). The thread's own read slice and its ping are
+//! the transport's business and wake nobody.
 
 use std::io::ErrorKind;
 use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{Error as WsError, Message, WebSocket};
 
-use super::{BoxTransport, Event, Timing, Transport};
+use super::{BoxTransport, Event, Timing, Transport, Wake};
 
 /// How long a read blocks before the thread looks at what is to be sent.
 const SLICE: Duration = Duration::from_millis(20);
@@ -19,6 +23,23 @@ struct Native {
     out: Option<Sender<Vec<u8>>>,
     events: Receiver<Event>,
     done: bool,
+    /// Shared with the thread, which calls it after each event it queues.
+    waker: Slot,
+}
+
+/// Where the thread finds the host's [`Wake`]: set after the dial, so
+/// empty for the first instant of a connection.
+type Slot = Arc<Mutex<Option<Wake>>>;
+
+/// Queue `e` for the poller, then wake it. The send comes first, so a host
+/// woken always finds the event.
+fn report(events: &Sender<Event>, slot: &Slot, e: Event) -> bool {
+    let sent = events.send(e).is_ok();
+    let w = slot.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    if let Some(w) = w {
+        w();
+    }
+    sent
 }
 
 impl Transport for Native {
@@ -60,6 +81,13 @@ impl Transport for Native {
         self.out = None;
         self.done = true;
     }
+
+    /// Kept for the thread, and rung once now: the thread may already have
+    /// queued `Opened` (or a refusal) before there was anyone to wake.
+    fn set_waker(&mut self, wake: Wake) {
+        *self.waker.lock().unwrap_or_else(|e| e.into_inner()) = Some(wake.clone());
+        wake();
+    }
 }
 
 /// Start dialling `url` (`ws://` or `wss://`) on a thread; it reports
@@ -69,9 +97,11 @@ pub fn dial(url: &str, timing: &Timing) -> BoxTransport {
     let (out_tx, out_rx) = channel::<Vec<u8>>();
     let url = url.to_string();
     let timing = timing.clone();
+    let waker: Slot = Arc::default();
+    let slot = waker.clone();
     let spawned = std::thread::Builder::new().name("ark-link".into()).spawn(move || {
-        let why = run(&url, &timing, &ev_tx, &out_rx);
-        let _ = ev_tx.send(Event::Closed(why));
+        let why = run(&url, &timing, &ev_tx, &out_rx, &slot);
+        report(&ev_tx, &slot, Event::Closed(why));
     });
     if let Err(e) = spawned {
         let (tx, rx) = channel();
@@ -80,12 +110,14 @@ pub fn dial(url: &str, timing: &Timing) -> BoxTransport {
             out: None,
             events: rx,
             done: false,
+            waker,
         });
     }
     Box::new(Native {
         out: Some(out_tx),
         events: ev_rx,
         done: false,
+        waker,
     })
 }
 
@@ -180,13 +212,13 @@ fn quiet(e: &WsError) -> bool {
 }
 
 // One connection, until it ends; why it did.
-fn run(url: &str, timing: &Timing, events: &Sender<Event>, out: &Receiver<Vec<u8>>) -> String {
+fn run(url: &str, timing: &Timing, events: &Sender<Event>, out: &Receiver<Vec<u8>>, slot: &Slot) -> String {
     let mut ws = match connect(url, timing) {
         Ok(ws) => ws,
         Err(e) => return e,
     };
     set_slice(&mut ws);
-    if events.send(Event::Opened).is_err() {
+    if !report(events, slot, Event::Opened) {
         let _ = ws.close(None);
         return "the peer went away".into();
     }
@@ -197,7 +229,7 @@ fn run(url: &str, timing: &Timing, events: &Sender<Event>, out: &Receiver<Vec<u8
         match ws.read() {
             Ok(Message::Binary(b)) => {
                 heard = Instant::now();
-                if events.send(Event::Frame(b.to_vec())).is_err() {
+                if !report(events, slot, Event::Frame(b.to_vec())) {
                     break "the peer went away".to_string();
                 }
             }

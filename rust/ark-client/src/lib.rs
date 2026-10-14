@@ -9,21 +9,37 @@
 //!
 //! A peer is opened over a [`Domain`] — an app's authored module and its
 //! procedures, run natively — and a [`storage::Storage`]. A screen calls
-//! [`Peer::mutate`] and [`Peer::query`] by name, holds lists as
-//! [`View`]s, and calls [`Peer::pump`] on a tick; the pump dials, moves
-//! frames, reconnects with a backoff, and writes whatever moved. Live rooms
-//! ride the same socket: [`Peer::say`] and [`Peer::heard`].
+//! [`Peer::mutate`] and [`Peer::query`] by name and holds lists as
+//! [`View`]s; [`Peer::pump`] dials, moves frames, reconnects with a backoff,
+//! and writes whatever moved. Live rooms ride the same socket:
+//! [`Peer::say`] and [`Peer::heard`].
+//!
+//! **No loop** (`docs/plan-reactive.md`). A host hands the peer a
+//! [`link::Wake`] and pumps when it is rung — the socket opened, a frame
+//! arrived, it closed — after anything it asks of the peer, and at
+//! [`Peer::deadline`], the one timer there is (the redial after a close).
+//! What a pump moved is in its [`Pumped`], so a host publishes nothing when
+//! nothing did. Connected and idle, nothing runs.
 //!
 //! ```no_run
 //! use ark_client::{args, demo, Options, Peer};
 //! use ark::value::Value;
+//! use std::sync::{mpsc, Arc};
+//! use std::time::Duration;
 //!
 //! let mut peer = Peer::open_memory(demo::domain(), Options::dev("alice")).unwrap();
+//! let (tx, woken) = mpsc::channel();
+//! peer.set_waker(Arc::new(move || {
+//!     let _ = tx.send(());
+//! }));
 //! peer.connect("ws://127.0.0.1:8787/sync");
 //! peer.mutate("create_playlist", args([("name", Value::text("Road trip"))])).unwrap();
 //! loop {
-//!     peer.pump();
-//!     std::thread::sleep(std::time::Duration::from_millis(50));
+//!     let p = peer.pump();
+//!     match p.deadline.map(|at| at.saturating_sub(ark_client::autos::monotonic_ms())) {
+//!         Some(ms) => drop(woken.recv_timeout(Duration::from_millis(ms))),
+//!         None => drop(woken.recv()),
+//!     }
 //! }
 //! ```
 //!
@@ -42,10 +58,12 @@ pub mod storage;
 #[cfg(test)]
 mod versions_tests;
 mod view;
+#[cfg(test)]
+mod wake_tests;
 
 pub use autos::Autos;
 pub use domain::Domain;
-pub use link::Timing;
+pub use link::{Timing, Wake};
 pub use peer::{refusal_text, Login, Options, Peer, Pumped, Rejection, Standing, Status};
 pub use storage::Fork;
 pub use view::{splice, Update, View};

@@ -2,7 +2,14 @@
 //! and a [`Link`] around it that dials, notices a drop, and dials again
 //! with a backoff (half a second, doubling to thirty). The engine is
 //! sans-io, so everything here happens on [`Link::poll`], which the peer's
-//! `pump` calls — twenty times a second, typically, from a UI's tick.
+//! `pump` calls.
+//!
+//! **Nothing here runs on a clock of the host's** (`docs/plan-reactive.md`).
+//! A transport given a [`Wake`] calls it whenever it has queued something
+//! to report — the socket opened, a frame, the socket closed — and the host
+//! answers by pumping once; the redial after a close is a deadline,
+//! [`Link::deadline`], which the host arms one timer for and which an open
+//! clears. Connected and idle, a host has no timer and is never woken.
 //!
 //! Two transports ship: [`native`] — a WebSocket on a thread of its own,
 //! blocking `tungstenite`, `ws://` and `wss://` — and [`web`], the
@@ -34,6 +41,16 @@ pub enum Event {
     Closed(String),
 }
 
+/// What a transport calls when it has queued an [`Event`]: the host's
+/// signal to pump (`docs/plan-reactive.md`). Called from the transport's own
+/// thread natively, and from the `WebSocket`'s callbacks in a browser; it
+/// must not pump itself, only ask for one. A burst of calls is one wake for
+/// whoever coalesces them — the peer does ([`crate::Peer::set_waker`]).
+#[cfg(not(target_arch = "wasm32"))]
+pub type Wake = std::sync::Arc<dyn Fn() + Send + Sync>;
+#[cfg(target_arch = "wasm32")]
+pub type Wake = std::rc::Rc<dyn Fn()>;
+
 /// One connection's worth of socket. Made by a [`Dial`], polled by a
 /// [`Link`], dropped when it closes.
 pub trait Transport {
@@ -44,6 +61,14 @@ pub trait Transport {
     fn poll(&mut self) -> Vec<Event>;
     /// Close it; nothing more is reported.
     fn close(&mut self);
+    /// From now on, call `wake` after queueing every event — and once now
+    /// if one may already be waiting, since the link hands this over after
+    /// the dial that may have started the socket. The default ignores it: a
+    /// transport polled by hand, as `ark-server`'s in-process one is, is
+    /// only drained by a host that pumps on its own.
+    fn set_waker(&mut self, wake: Wake) {
+        let _ = wake;
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -117,6 +142,8 @@ pub struct Link {
     transport: Option<BoxTransport>,
     state: State,
     backoff: u64,
+    /// Handed to every transport this link dials.
+    waker: Option<Wake>,
     /// Connections opened so far.
     pub opens: u64,
     /// Why the last connection ended, or the last attempt failed.
@@ -153,6 +180,7 @@ impl Link {
             timing,
             transport: None,
             state: State::Waiting(0),
+            waker: None,
             opens: 0,
             last_close: None,
         }
@@ -168,6 +196,28 @@ impl Link {
 
     pub fn is_open(&self) -> bool {
         self.state == State::Open
+    }
+
+    /// When this link next wants a [`Link::poll`] with nothing having woken
+    /// it: the redial after a close, as a monotonic millisecond — `0` is
+    /// now. `None` while it is dialling, open or stopped, which is when the
+    /// transport's own wakes are all there is (`docs/plan-reactive.md`).
+    /// The host arms one timer for it; the value does not move until the
+    /// link does, so a host keyed by it re-arms nothing.
+    pub fn deadline(&self) -> Option<u64> {
+        match self.state {
+            State::Waiting(at) => Some(at),
+            _ => None,
+        }
+    }
+
+    /// Wake the host when the socket has something to report: handed to
+    /// the transport open now, and to every one dialled after.
+    pub fn set_waker(&mut self, wake: Wake) {
+        if let Some(t) = &mut self.transport {
+            t.set_waker(wake.clone());
+        }
+        self.waker = Some(wake);
     }
 
     /// Stop, and stay stopped until [`Link::resume`]. Reports whether a
@@ -210,7 +260,11 @@ impl Link {
         let mut out = Polled::default();
         if let State::Waiting(at) = self.state {
             if now >= at {
-                self.transport = Some((self.dial)(&self.url));
+                let mut t = (self.dial)(&self.url);
+                if let Some(w) = &self.waker {
+                    t.set_waker(w.clone());
+                }
+                self.transport = Some(t);
                 self.state = State::Connecting;
             }
         }
@@ -254,12 +308,27 @@ impl Drop for Link {
 
 /// A transport over two queues, for a test or an in-process server: what
 /// the link sends goes to `sent`, and what is pushed onto `events` is what
-/// it reports.
+/// it reports — waking the link's host when it is pushed with
+/// [`Queues::push`], as a socket's reader does.
 #[derive(Clone, Default)]
 pub struct Queues {
     pub sent: std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>,
     pub events: std::sync::Arc<std::sync::Mutex<Vec<Event>>>,
     pub closed: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    #[allow(clippy::type_complexity)]
+    pub waker: std::sync::Arc<std::sync::Mutex<Option<Wake>>>,
+}
+
+impl Queues {
+    /// Report `e`, and wake whoever is listening — what a socket's reader
+    /// does with a frame.
+    pub fn push(&self, e: Event) {
+        self.events.lock().unwrap_or_else(|e| e.into_inner()).push(e);
+        let w = self.waker.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if let Some(w) = w {
+            w();
+        }
+    }
 }
 
 impl Transport for Queues {
@@ -271,6 +340,12 @@ impl Transport for Queues {
     }
     fn close(&mut self) {
         self.closed.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+    fn set_waker(&mut self, wake: Wake) {
+        *self.waker.lock().unwrap_or_else(|e| e.into_inner()) = Some(wake.clone());
+        if !self.events.lock().unwrap_or_else(|e| e.into_inner()).is_empty() {
+            wake();
+        }
     }
 }
 

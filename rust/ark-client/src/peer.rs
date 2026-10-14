@@ -28,7 +28,7 @@ use ark::store::{MemoryStore, Refusal, Store};
 use ark::value::{Id, Value};
 
 use crate::autos::Autos;
-use crate::link::{platform_dial, Dial, Link, State, Timing};
+use crate::link::{platform_dial, Dial, Link, State, Timing, Wake};
 use crate::storage::{
     count_pages, encode_page, encode_pending_page, encode_pending_snapshot, encode_replica_held, encode_who, load_pending, BoxStorage, Fork, Memory,
     PendingStored, ReplicaFile, Stored,
@@ -170,7 +170,10 @@ pub enum Standing {
     Unknown,
 }
 
-/// What one [`Peer::pump`] came to.
+/// What one [`Peer::pump`] came to — precisely what moved, so that a host
+/// publishes nothing when nothing did (`docs/plan-reactive.md`): a screen is
+/// told *what* moved, never that a pump happened. [`Pumped::quiet`] is the
+/// whole of "nothing".
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Pumped {
     /// A frame arrived (the log, an ack, a live frame).
@@ -187,6 +190,37 @@ pub struct Pumped {
     /// Something went wrong that is worth a status line: a frame that did
     /// not decode, a replica that could not be written.
     pub note: Option<String>,
+    /// The optimistic store moved since the last pump — by this pump's
+    /// frames, or by whatever the app authored in between:
+    /// [`Peer::take_changes`] has something new for the views. False is a
+    /// pump no view needs to hear of.
+    pub views: bool,
+    /// Live frames that arrived, for [`Peer::heard`].
+    pub heard: usize,
+    /// [`Peer::status`], when it differs by value from what the last pump
+    /// reported: the one way a status line learns it changed.
+    pub status: Option<Status>,
+    /// When to pump again if nothing wakes the host first: the link's
+    /// redial ([`Link::deadline`]), a monotonic millisecond. `None` is no
+    /// timer at all, which is a link dialling, open, or stopped.
+    pub deadline: Option<u64>,
+}
+
+impl Pumped {
+    /// Nothing moved: no frame, no change of the link, no verdict, no note,
+    /// nothing for a view, nothing heard, the status as it was. A host
+    /// answering a wake with a quiet pump publishes nothing.
+    pub fn quiet(&self) -> bool {
+        !self.moved
+            && !self.opened
+            && self.dropped.is_none()
+            && self.denied.is_none()
+            && self.rejected == 0
+            && self.note.is_none()
+            && !self.views
+            && self.heard == 0
+            && self.status.is_none()
+    }
 }
 
 /// Everything a status line or a debug screen shows.
@@ -279,6 +313,51 @@ pub struct Peer {
     /// Verify after every settle (`docs/plan-db.md` D3): what this
     /// connection has asked and been answered.
     checks: Checks,
+    /// The host's wake, coalesced: handed to every link this peer makes.
+    waker: Option<Coalesced>,
+    /// The status the last pump reported, for [`Pumped::status`].
+    published: Option<Status>,
+    /// What the store's untaken changes were when the last pump ended — how
+    /// many, and whether rebuilt — so [`Pumped::views`] says what moved
+    /// since, whether or not the host has taken them.
+    told: (usize, bool),
+}
+
+/// The host's [`Wake`] behind a "drain requested" flag
+/// (`docs/plan-reactive.md`): the first event after a pump rings it, and
+/// every event after that until the next pump is already answered — so a
+/// burst of fifty frames is one wake, one pump, one settle. The flag is
+/// cleared as a pump starts, before it drains, so an event that lands
+/// during the drain rings again rather than waiting for somebody else.
+#[derive(Clone)]
+struct Coalesced {
+    asked: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    wake: Wake,
+}
+
+impl Coalesced {
+    fn new(host: Wake) -> Coalesced {
+        let asked = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = asked.clone();
+        #[cfg(not(target_arch = "wasm32"))]
+        let wake: Wake = std::sync::Arc::new(move || {
+            if !flag.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                host();
+            }
+        });
+        #[cfg(target_arch = "wasm32")]
+        let wake: Wake = std::rc::Rc::new(move || {
+            if !flag.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                host();
+            }
+        });
+        Coalesced { asked, wake }
+    }
+
+    /// A pump is starting: the next event asks again.
+    fn answered(&self) {
+        self.asked.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 /// The verifies of one connection (`docs/plan-db.md` D3). Since the state
@@ -395,6 +474,8 @@ fn same_id(a: &Id, b: &Id) -> bool {
 #[cfg(test)]
 thread_local! {
     static COMPARED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Settles run on this thread, for the tests that count a wake's.
+    pub(crate) static SETTLES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 impl Peer {
@@ -534,6 +615,9 @@ impl Peer {
             alone_log: None,
             local: BTreeSet::new(),
             checks: Checks::default(),
+            waker: None,
+            published: None,
+            told: (0, false),
         };
         match (had_log, opts.alone) {
             (true, _) => peer.resume_alone()?,
@@ -751,6 +835,9 @@ impl Peer {
         // authoring costs the intent, not the store.
         self.persist_log()?;
         self.persist_pending()?;
+        // Asked for is done at once, the push with it: the intent is
+        // durable, so it can go (`docs/plan-reactive.md`, "the app asks").
+        self.flush();
         Ok(id)
     }
 
@@ -801,6 +888,7 @@ impl Peer {
     /// top, which no list of changes describes. Hand it to every
     /// [`View::update`].
     pub fn take_changes(&mut self) -> Changes {
+        self.told = (0, false);
         self.client.replica.take_changes()
     }
 
@@ -846,6 +934,7 @@ impl Peer {
     pub fn verify(&mut self) {
         let Some(a) = &self.authority else {
             self.ask_verify(false);
+            self.flush();
             return;
         };
         let (n, h) = self.client.replica.verify_at();
@@ -901,6 +990,8 @@ impl Peer {
     /// (`docs/plan-db.md` D3). The disagreements it brought, as `(seq,
     /// false)`.
     fn settle(&mut self) -> Vec<Seq> {
+        #[cfg(test)]
+        SETTLES.with(|n| n.set(n.get() + 1));
         let paging = self.client.more;
         self.client.settle();
         self.this_connection();
@@ -936,6 +1027,7 @@ impl Peer {
     /// unlinked: "pause" is not worth saying on Friday.
     pub fn say(&mut self, frame: Vec<u8>) {
         self.client.say(frame);
+        self.flush();
     }
 
     /// Say an ArkDB value, as its canonical CBOR.
@@ -992,10 +1084,53 @@ impl Peer {
         self.disconnect();
         self.client.denied = None;
         let mut link = Link::new(url, dial, self.timing.clone());
+        if let Some(w) = &self.waker {
+            link.set_waker(w.wake.clone());
+        }
         if self.signed_out {
             link.stop("signed out");
         }
         self.link = Some(link);
+    }
+
+    /// Wake the host whenever the socket has something to report — it
+    /// opened, a frame arrived, it closed — instead of being polled for it
+    /// (`docs/plan-reactive.md`). `wake` must only *ask* for a pump: it is
+    /// called from the transport's thread natively and from the
+    /// `WebSocket`'s callbacks in a browser, and a burst of events calls it
+    /// once until the next [`Peer::pump`] starts. Handed to the link there
+    /// is and to every one made after. A host so woken pumps when woken,
+    /// after anything it asks of the peer, and at [`Peer::deadline`] — and
+    /// at no other time.
+    pub fn set_waker(&mut self, wake: Wake) {
+        let c = Coalesced::new(wake);
+        if let Some(link) = &mut self.link {
+            link.set_waker(c.wake.clone());
+        }
+        self.waker = Some(c);
+    }
+
+    /// When this peer wants a [`Peer::pump`] with nothing having woken its
+    /// host: the link's redial after a close, a monotonic millisecond
+    /// ([`crate::autos::monotonic_ms`]; `0` is now). `None` — dialling,
+    /// open, stopped, alone — is no timer at all. The host arms one timer
+    /// for it, and the open that follows clears it.
+    pub fn deadline(&self) -> Option<u64> {
+        self.link.as_ref().and_then(Link::deadline)
+    }
+
+    /// Send what the engine has queued, now: a push, a live frame, a
+    /// verify. [`Peer::mutate`] and [`Peer::say`] do it themselves; a pump
+    /// does it last.
+    pub fn flush(&mut self) {
+        if self.link.as_ref().is_some_and(Link::is_open) {
+            let frames = self.take_outgoing_frames();
+            if let Some(link) = &mut self.link {
+                for f in frames {
+                    link.send(f);
+                }
+            }
+        }
     }
 
     /// Go offline: close the socket and stop dialling. Everything authored
@@ -1031,8 +1166,12 @@ impl Peer {
     }
 
     /// One turn of the link: dial if due, hand the engine what arrived,
-    /// settle it once, send what it queued, and write whatever moved. Call
-    /// it on a tick (fifty milliseconds is what the clients here use).
+    /// settle it once, send what it queued, and write whatever moved. It is
+    /// the unit of work of a wake (`docs/plan-reactive.md`): a host given
+    /// [`Peer::set_waker`] calls it when woken, after asking the peer for
+    /// anything, and at [`Peer::deadline`]; one without a waker — a test, a
+    /// simulation, a headless driver — calls it by hand, as often as it
+    /// likes, and a pump with nothing to do is [`Pumped::quiet`].
     ///
     /// The one [`ark::protocol::Client::settle`] of a pump is here, after
     /// the last frame the link polled (`docs/plan-perf.md` R8): every
@@ -1042,9 +1181,19 @@ impl Peer {
     /// only the driver knows where a pump ends; the sans-io `Client` gets
     /// its frames one at a time and is told.
     pub fn pump(&mut self) -> Pumped {
+        self.pump_at(crate::autos::monotonic_ms())
+    }
+
+    /// [`Peer::pump`] at a given monotonic millisecond, so that the backoff
+    /// and the deadline are testable without waiting for them.
+    pub fn pump_at(&mut self, now: u64) -> Pumped {
+        if let Some(w) = &self.waker {
+            w.answered();
+        }
+        let heard_before = self.heard_frames;
         let mut p = Pumped::default();
         if let Some(link) = &mut self.link {
-            let polled = link.poll();
+            let polled = link.poll_at(now);
             if polled.opened {
                 self.client.connected();
                 p.opened = true;
@@ -1083,6 +1232,17 @@ impl Peer {
         if let Err(e) = self.persist() {
             p.note = Some(e.to_string());
         }
+        let r = &self.client.replica;
+        let now = (r.changes.len(), r.rebuilt);
+        p.views = now != self.told;
+        self.told = now;
+        p.heard = (self.heard_frames - heard_before) as usize;
+        let status = self.status();
+        if self.published.as_ref() != Some(&status) {
+            self.published = Some(status.clone());
+            p.status = Some(status);
+        }
+        p.deadline = self.deadline();
         p
     }
 

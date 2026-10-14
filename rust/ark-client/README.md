@@ -39,6 +39,7 @@ let mut peer = Peer::open_path(domain, data_dir, opts)?;       // natively
 // let mut peer = Peer::open_local(domain, "myapp", opts)?;    // in a browser
 // let mut peer = Peer::open_memory(domain, opts)?;            // a test, the demo
 
+peer.set_waker(Arc::new(move || ring_my_event_loop()));       // the socket asks for a pump
 peer.connect("wss://app.example/sync");                        // reconnects on its own
 
 let id = peer.mutate("create_playlist", args([("name", Value::text("Road trip"))]))?;
@@ -46,8 +47,10 @@ let rows = peer.query("items", &args([("playlist_id", Value::Id(list))]))?;
 let checked = peer.check("create_playlist", &args([("name", Value::text(" "))]))?; // the form validator
 let mut items: View = peer.view("items", args([("playlist_id", Value::Id(list))]))?;
 
-// on every tick (50 ms):
+// when woken, after asking the peer for anything, and at `pumped.deadline`
+// (the redial after a close) — never on a clock (docs/plan-reactive.md):
 let pumped = peer.pump();              // dial, frames in and out, persist
+if pumped.quiet() { return }           // nothing moved: publish nothing
 let changes = peer.take_changes();     // Applied(changes) | Rebuilt
 match items.update(&peer, &changes)? {
     Update::Unchanged => {}
@@ -138,7 +141,11 @@ if peer.epoch() != introduced_on { /* a new connection: say who you are again */
   re-hydrate (an empty list on a refusal) and `Update::Reset`, as a store
   replaced whole (`Rebuilt`) is. A rebase is not: it is patches.
 - **The link**: `connect(url)` dials on the next `pump`; a drop dials again
-  after half a second, doubling to thirty (`Timing`). A denial (`Denied`, a
+  after half a second, doubling to thirty (`Timing`) — a deadline,
+  `peer.deadline()` and `Pumped::deadline`, which the host arms one timer
+  for and which the open clears. The transport rings the waker
+  `set_waker` gave it when it opens, closes or brings a frame, once per
+  burst until the next pump; `mutate` and `say` send at once. A denial (`Denied`, a
   token the server does not accept) stops the link: `set_token` and
   `reconnect` are the way back, and nothing pending is lost. `disconnect`
   goes offline on purpose. The server pings every twenty seconds and a
@@ -241,7 +248,7 @@ here.
 | `client.take_rejections()` → `Rejection { id, reason }` | `peer.take_rejections()`, the same shape; and `peer.standing(&id)` for one item |
 | `client.take_denial()` | `pump().denied`, or `peer.denied()` until the next `reconnect` |
 | `Link::connect(&socket_url(server))` + `client.connected()` | `peer.connect(&ark_auth::socket_url(server))` — the link says `connected` itself, and reconnects |
-| the pump: `take_outgoing` → `link.send`, `link.try_recv` → `client.recv`, `link.is_alive()` | `peer.pump()` → `Pumped { moved, opened, dropped, denied, rejected, note }` |
+| the pump: `take_outgoing` → `link.send`, `link.try_recv` → `client.recv`, `link.is_alive()` | `peer.pump()` → `Pumped { moved, opened, dropped, denied, rejected, note, views, heard, status, deadline }`, run when the `set_waker` wake rings |
 | `link = None` to go offline; a new `Link` to come back | `peer.disconnect()` / `peer.reconnect()` |
 | `client.linked()`, `client.epoch()` | `peer.linked()`, `peer.epoch()` |
 | `client.say(&say)` (serde) / `client.heard::<Hear>()` | `peer.say(bytes)` / `peer.heard()` — or `say_value(&Value)` / `heard_values()`, canonical CBOR of an ArkDB value |
