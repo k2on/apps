@@ -67,7 +67,9 @@ let
   };
 
   # The icon the app already has: the trumpet the browser's tab draws.
-  # The APK declares none, so F-Droid takes this from the metadata.
+  # The APK's own is an adaptive icon, XML and nothing else (minSdk 26),
+  # and fdroidserver takes an icon out of an APK only as a PNG of the same
+  # name, so F-Droid takes this from the metadata.
   icon = pkgs.runCommand "harken-fdroid-icon.png" { nativeBuildInputs = [ pkgs.librsvg ]; } ''
     rsvg-convert -w 512 -h 512 ${../harken/iced/web/favicon.svg} -o $out
   '';
