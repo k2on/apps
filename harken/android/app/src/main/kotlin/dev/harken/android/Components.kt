@@ -103,6 +103,7 @@ fun TrackRow(
     onMore: () -> Unit,
     leading: @Composable () -> Unit,
 ) {
+    Recompositions.hit("TrackRow")
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(start = Space.page, end = Space.xs).height(64.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -137,6 +138,7 @@ fun TrackNumber(n: Long, playing: Boolean) {
 /** One record on a shelf or in a grid: its cover, its name, and a line under it. */
 @Composable
 fun RecordCard(seed: String, art: String, title: String, under: String, side: Dp, onClick: () -> Unit, round: Boolean = false) {
+    Recompositions.hit("RecordCard")
     Column(Modifier.width(side).clickable(onClick = onClick)) {
         Cover(seed, art, side, Modifier.size(side), round = round)
         Spacer(Modifier.height(Space.s))

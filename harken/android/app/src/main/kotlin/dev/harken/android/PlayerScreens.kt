@@ -80,6 +80,7 @@ private fun seedOf(p: Playing): String = p.album.ifEmpty { p.title }
 @Composable
 fun MiniPlayer(state: PlayerState, controls: Controls) {
     val now = state.now ?: return
+    Recompositions.hit("MiniPlayer")
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         shape = RoundedCornerShape(Space.corner),

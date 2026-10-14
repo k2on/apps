@@ -70,6 +70,8 @@ private constructor(
     public val login: Login,
     private val onDenied: (String) -> Unit,
     private val onSignOut: () -> Unit,
+    // Every post run at once on the caller's thread, and no pump: a test's (`inline`).
+    private val inline: Boolean = false,
 ) {
     private val thread =
         Executors.newSingleThreadScheduledExecutor { r ->
@@ -137,6 +139,7 @@ private constructor(
     /** Run `f` on the peer's thread, once the peer is open, and return. */
     public fun post(f: (Peer) -> Unit) {
         if (closed) return
+        if (inline) return peer?.let(f) ?: Unit
         thread.execute { peer?.takeIf { !closed }?.let(f) }
     }
 
@@ -145,6 +148,10 @@ private constructor(
      * replica could not be opened — never answers: the wait is cancelled.
      */
     public suspend fun <T> run(f: (Peer) -> T): T {
+        if (inline && !closed)
+            peer?.let {
+                return f(it)
+            }
         val d = CompletableDeferred<T>()
         try {
             thread.execute {
@@ -174,6 +181,11 @@ private constructor(
     /** Stop the pump and close the peer, written down; its storage stays for the next session. */
     public fun close() {
         if (closed) return
+        if (inline) {
+            closed = true
+            thread.shutdown()
+            return
+        }
         try {
             thread.execute {
                 ticking?.cancel(false)
@@ -204,6 +216,14 @@ private constructor(
          */
         public fun over(peer: Peer, server: String, login: Login): ArkSession =
             ArkSession(server, login, {}, {}).also { s -> s.thread.execute { s.start(peer) } }
+
+        /**
+         * A session over a peer with no thread of its own: every post and run happens at once on
+         * the caller's thread, and nothing pumps — a test that drives a screen on one clock and
+         * cannot have the peer answer on another. The peer is the caller's to close.
+         */
+        public fun inline(peer: Peer, server: String, login: Login): ArkSession =
+            ArkSession(server, login, {}, {}, inline = true).also { it.peer = peer }
 
         /**
          * The session over `server`'s replica under `root`, as `login`, at once; on its thread,

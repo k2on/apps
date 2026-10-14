@@ -129,7 +129,12 @@ data class PlayerState(
 )
 
 /** The screens' end: a controller of the service's session, and what it says as [PlayerState]. */
-class Playback(private val context: Context, private val server: String) {
+class Playback(
+    private val context: Context,
+    private val server: String,
+    /** Connect to the media session; a test that drives [show] itself does not. */
+    connect: Boolean = true,
+) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val _state = MutableStateFlow(PlayerState())
     val state: StateFlow<PlayerState> = _state.asStateFlow()
@@ -139,11 +144,18 @@ class Playback(private val context: Context, private val server: String) {
     /** Called with the track and the page it was started from, whenever a new one starts. */
     var onStart: (Playing) -> Unit = {}
 
-    private val future: ListenableFuture<MediaController> =
-        MediaController.Builder(context, SessionToken(context, ComponentName(context, PlaybackService::class.java))).buildAsync()
+    private val future: ListenableFuture<MediaController>? =
+        if (!connect) null
+        else MediaController.Builder(context, SessionToken(context, ComponentName(context, PlaybackService::class.java))).buildAsync()
+
+    /** What the screens are shown, set directly — a test's position ticking, with no player behind it. */
+    internal fun show(state: PlayerState) {
+        _state.value = state
+    }
 
     init {
-        future.addListener(
+        val future = future
+        if (future != null) future.addListener(
             {
                 val c = runCatching { future.get() }.getOrNull() ?: return@addListener
                 controller = c
@@ -291,7 +303,7 @@ class Playback(private val context: Context, private val server: String) {
     /** Let go of the controller; the service, and the music, go on. */
     fun close() {
         ticking?.cancel()
-        MediaController.releaseFuture(future)
+        future?.let { MediaController.releaseFuture(it) }
         controller = null
     }
 

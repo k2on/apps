@@ -1,0 +1,182 @@
+// While a track plays, the player publishes its position twice a second, and
+// that must move the mini player and nothing else: no row of the list on
+// screen is composed again for it. The real `HarkenApp` — its library over a
+// peer holding sixty songs authored through `add_song`, its wiring, its
+// screens — on Paparazzi's frame clock, with the position ticked through
+// `Playback.show` where the media session would, over a session with no
+// thread of its own so the peer and the frame clock cannot race. And the covers: the rows of
+// one album on screen read the file and decode it once between them.
+package dev.harken.android
+
+import androidx.activity.OnBackPressedDispatcher
+import androidx.activity.OnBackPressedDispatcherOwner
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.ViewModelStoreOwner
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
+import app.cash.paparazzi.DeviceConfig
+import app.cash.paparazzi.Paparazzi
+import app.cash.paparazzi.Snapshot
+import app.cash.paparazzi.SnapshotHandler
+import dev.arkdb.Value
+import dev.arkdb.android.ArkSession
+import dev.arkdb.client.Account
+import dev.arkdb.client.Autos
+import dev.arkdb.client.Domain
+import dev.arkdb.client.Login
+import dev.arkdb.client.MemoryStorage
+import dev.arkdb.client.Options
+import dev.arkdb.client.Peer
+import java.io.File
+import java.lang.reflect.Proxy
+import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Rule
+import org.junit.Test
+
+class ScrollTests {
+    @get:Rule
+    val paparazzi =
+        Paparazzi(deviceConfig = DeviceConfig.PIXEL_5, theme = "android:Theme.Material.NoActionBar", useDeviceResolution = true, snapshotHandler = Discard)
+
+    /** The frames are rendered and thrown away: the counts are the result. */
+    private object Discard : SnapshotHandler {
+        override fun newFrameHandler(snapshot: Snapshot, frameCount: Int, fps: Int): SnapshotHandler.FrameHandler =
+            Proxy.newProxyInstance(SnapshotHandler::class.java.classLoader, arrayOf(SnapshotHandler.FrameHandler::class.java)) { _, _, _ -> null }
+                as SnapshotHandler.FrameHandler
+
+        override fun close() {}
+    }
+
+    private fun harken(): ByteArray {
+        var dir: File? = File("").absoluteFile
+        while (dir != null) {
+            File(dir, "domain/harken.ark").takeIf { it.isFile }?.let { return it.readBytes() }
+            File(dir, "harken/domain/harken.ark").takeIf { it.isFile }?.let { return it.readBytes() }
+            dir = dir.parentFile
+        }
+        error("no harken.ark above ${File("").absolutePath}")
+    }
+
+    private fun song(i: Int): Map<String, Value> =
+        mapOf(
+            "title" to Value.text("Song $i"),
+            "artist" to Value.text("Artist ${i / 10}"),
+            "album" to Value.text("Album ${i / 5}"),
+            "duration_ms" to Value.int(180_000),
+            "file" to Value.text("music/$i.flac"),
+            "track" to Value.int((i % 5 + 1).toLong()),
+            "part" to Value.text(""),
+            "catalogue" to Value.text(""),
+            "performer" to Value.text(""),
+            "bpm" to Value.int(0),
+            "album_art" to Value.text(""),
+            "artist_art" to Value.text(""),
+            "disc" to Value.int(1),
+            "work_title" to Value.text(""),
+            "movement_no" to Value.int(0),
+        )
+
+    private val counts = ConcurrentHashMap<String, Int>()
+
+    private fun count(what: String): Int = counts[what] ?: 0
+
+    private var clock = 0L
+
+
+    private suspend fun frames(ms: Long) {
+        if (clock == 0L) clock = withFrameNanos { it }
+        val target = clock + ms * 1_000_000
+        while (clock < target) clock = withFrameNanos { it }
+    }
+
+    @Test
+    fun thePositionTickingRecomposesNoRow() {
+        val peer = Peer.open(Domain.fromBytes(harken()), MemoryStorage(), Options.alone("library").copy(autos = Autos.Seeded(5)))
+        peer.setRoles(listOf("library"))
+        repeat(60) { peer.mutate("add_song", song(it)) }
+        // No thread of its own: the library is read on this one, as the screen composes, so the
+        // peer and the frame clock cannot race.
+        val session = ArkSession.inline(peer, "https://music.example.com", Login("t", "s", Account("library"), 0))
+        var playback: Playback? = null
+        var rowsDrawn = -1
+        var rowsDuring = -1
+        var playerDuring = -1
+        Recompositions.sink = { what -> counts.merge(what, 1, Int::plus) }
+        try {
+            val view = ComposeView(paparazzi.context)
+            view.setContent {
+                val owner = LocalLifecycleOwner.current
+                val back =
+                    object : OnBackPressedDispatcherOwner {
+                        override val onBackPressedDispatcher = OnBackPressedDispatcher()
+                        override val lifecycle = owner.lifecycle
+                    }
+                val store = remember { object : ViewModelStoreOwner { override val viewModelStore = ViewModelStore() } }
+                CompositionLocalProvider(LocalViewModelStoreOwner provides store, LocalOnBackPressedDispatcherOwner provides back) {
+                    HarkenApp(session, playbackOf = { c, s -> Playback(c, s, connect = false).also { playback = it } }, start = LibraryTab.Songs)
+                }
+                LaunchedEffect(Unit) {
+                    frames(300)
+                    rowsDrawn = count("TrackRow")
+                    val p = playback!!
+                    p.show(PlayerState(now = Demo.playing(Demo.tracks[0]), playing = true, positionMs = 1_000, durationMs = 180_000))
+                    frames(300)
+                    counts.clear()
+                    // Four of the player's ticks, half a second apart.
+                    repeat(4) { k ->
+                        p.show(p.state.value.copy(positionMs = 1_500L + 500L * k))
+                        frames(500)
+                    }
+                    rowsDuring = count("TrackRow")
+                    playerDuring = count("MiniPlayer")
+                }
+            }
+            paparazzi.gif(view, "ticks", 0L, 4_000L, 20)
+        } finally {
+            Recompositions.sink = null
+            session.close()
+            peer.close()
+        }
+        assertTrue("rows were drawn before the ticks: $rowsDrawn", rowsDrawn > 0)
+        // The ticks did reach the screen: what shows the position was composed for each.
+        assertTrue("the mini player followed the position: $playerDuring", playerDuring >= 4)
+        assertEquals("rows recomposed while the position ticked", 0, rowsDuring)
+    }
+
+    /** Eleven rows of one album ask for its cover at once: one read off the disk, one decode. */
+    @Test
+    fun oneAlbumsRowsShareOneReadAndOneDecode() {
+        val server = "https://music.example.com"
+        val covers = Covers(paparazzi.context, server)
+        val url = covers.urlOf("covers/one.png")!!
+        val dir = File(paparazzi.context.cacheDir, "covers")
+        dir.mkdirs()
+        val file = File(dir, "%08x".format(Art.hash(url)))
+        file.writeBytes(java.util.Base64.getDecoder().decode(PNG))
+        try {
+            runBlocking { (1..11).map { async { covers.load(url, 56.dp) } }.awaitAll() }
+            assertEquals("disk reads", 1, covers.reads.get())
+            assertEquals("decodes", 1, covers.decodes.get())
+        } finally {
+            file.delete()
+        }
+    }
+
+    private companion object {
+        /** A 64×64 PNG, one colour. */
+        const val PNG =
+            "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAmElEQVR4nO3QMREAIBDAsBeGTjThCmRkoEP2XufsdX82OkBrgA7QGqADtAboAK0BOkBrgA7QGqADtAboAK0BOkBrgA7QGqADtAboAK0BOkBrgA7QGqADtAboAK0BOkBrgA7QGqADtAboAK0BOkBrgA7QGqADtAboAK0BOkBrgA7QGqADtAboAK0BOkBrgA7QGqADtAboAK0BOkBrgA7QGqADtAboAO0BKKKSaMNRZVkAAAAASUVORK5CYII="
+    }
+}

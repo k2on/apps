@@ -5,6 +5,7 @@
 // each screen draws is the screen's, from plain values.
 package dev.harken.android
 
+import android.content.Context
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
@@ -70,6 +71,7 @@ fun Chrome(
     snackbar: SnackbarHostState? = null,
     page: @Composable () -> Unit,
 ) {
+    Recompositions.hit("Chrome")
     Scaffold(
         snackbarHost = { if (snackbar != null) SnackbarHost(snackbar) },
         containerColor = MaterialTheme.colorScheme.background,
@@ -115,10 +117,16 @@ private fun NavHostController.tab(t: Tab) =
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HarkenApp(session: ArkSession) {
+fun HarkenApp(
+    session: ArkSession,
+    /** The player's end of it: the media session's, except in a test that drives the position itself. */
+    playbackOf: (Context, String) -> Playback = ::Playback,
+    /** A tab of the Library to open on instead of Home — every song, say (a test's). */
+    start: LibraryTab? = null,
+) {
     val context = LocalContext.current.applicationContext
     val library = remember(session) { Library(session) }
-    val playback = remember(session) { Playback(context, session.server) }
+    val playback = remember(session) { playbackOf(context, session.server) }
     val covers = remember(session) { Covers(context, session.server) }
     val device = remember { Device(context) }
     DisposableEffect(session) {
@@ -142,7 +150,7 @@ fun HarkenApp(session: ArkSession) {
     val notice by library.notice.collectAsStateWithLifecycle()
     val player by playback.state.collectAsStateWithLifecycle()
     var last by remember { mutableStateOf(device.lastPlayed) }
-    var libraryTab by rememberSaveable { mutableStateOf(LibraryTab.Playlists) }
+    var libraryTab by rememberSaveable { mutableStateOf(start ?: LibraryTab.Playlists) }
     var expanded by rememberSaveable { mutableStateOf(false) }
     var queue by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf<Pair<Track, Page?>?>(null) }
@@ -153,9 +161,16 @@ fun HarkenApp(session: ArkSession) {
     val offline = if (status.link == "waiting" || status.link == "offline") session.server.substringAfter("://") else null
     val fetching = if (!status.synced) session.server.substringAfter("://") else null
     val playing = player.now?.id
-    val albumOf: (Track) -> Album? = { t ->
-        details[t.id]?.album?.takeIf { it.isNotEmpty() }?.let { name -> albums.firstOrNull { it.name == name } ?: Album(name, t.creator, "", 0) }
-    }
+
+    // `albumOf`, `act` and `controls` are made once per session, as `library` and `playback` are.
+    // Each reads the state above through its delegate when it is called, so it never goes stale —
+    // and making a fresh one per composition is what made every screen, every lazy list and every
+    // visible row recompose on each of the player's position ticks: an anonymous object is a new
+    // value to Compose every time, and every row's `onClick` captured it (`ScrollTests`).
+    val albumOf: (Track) -> Album? =
+        remember(session) {
+            { t -> details[t.id]?.album?.takeIf { it.isNotEmpty() }?.let { name -> albums.firstOrNull { it.name == name } ?: Album(name, t.creator, "", 0) } }
+        }
 
     playback.onStart = { p ->
         val l = LastPlayed(p, startedFrom)
@@ -169,7 +184,7 @@ fun HarkenApp(session: ArkSession) {
         library.dismiss()
     }
 
-    val act =
+    val act = remember(session) {
         object : Do {
             override fun open(page: Page) {
                 // Every song is a tab of the Library, not a page of its own.
@@ -213,8 +228,9 @@ fun HarkenApp(session: ArkSession) {
                 nav.popBackStack()
             }
         }
+    }
 
-    val controls =
+    val controls = remember(session) {
         object : Controls {
             override fun open() {
                 expanded = true
@@ -247,6 +263,7 @@ fun HarkenApp(session: ArkSession) {
                 tracks.firstOrNull { it.id.hex == now.id }?.let { menu = it to null }
             }
         }
+    }
 
     CompositionLocalProvider(LocalCovers provides covers) {
         HarkenTheme {
@@ -255,7 +272,7 @@ fun HarkenApp(session: ArkSession) {
             val tab = Tab.entries.firstOrNull { it.route == route }
             Box(Modifier.fillMaxSize()) {
                 Chrome(tab, player, controls, onTab = { nav.tab(it) }, snackbar) {
-                    NavHost(nav, startDestination = Tab.Home.route) {
+                    NavHost(nav, startDestination = if (start != null) Tab.Library.route else Tab.Home.route) {
                         composable(Tab.Home.route) {
                             HomeScreen(HomeData(loaded, last, tracks, playlists, albums, offline, fetching), albumOf, act)
                         }

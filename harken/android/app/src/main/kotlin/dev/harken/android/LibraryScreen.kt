@@ -35,6 +35,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -47,7 +48,8 @@ enum class LibraryTab(val title: String) {
     Songs("Songs"),
 }
 
-/** What the Library draws. */
+/** What the Library draws: a snapshot, its lists copies, so an equal one is the same one to Compose. */
+@Immutable
 data class LibraryData(
     val loaded: Boolean,
     val playlists: List<Playlist>,

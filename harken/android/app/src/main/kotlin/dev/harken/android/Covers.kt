@@ -27,16 +27,28 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URI
 import java.util.Collections
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 
 class Covers(context: Context, private val server: String) {
     private val dir = File(context.cacheDir, "covers")
     private val density = context.resources.displayMetrics.density
     private val missing: MutableSet<String> = Collections.synchronizedSet(HashSet())
-    private val fetching = Mutex()
+    // One fetch and one decode per URL, however many rows ask at once. The rows of one album all
+    // miss the memory cache in the same frame, and each used to read the file and decode it again
+    // — and every cover in the app waited on one mutex while the first was fetched.
+    private val loading = ConcurrentHashMap<String, Deferred<ImageBitmap?>>()
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** How many times a cover was read off the disk (or fetched), and decoded: for the tests. */
+    internal val reads = AtomicInteger()
+    internal val decodes = AtomicInteger()
     private val memory =
         object : LruCache<String, ImageBitmap>(MEMORY_BYTES) {
             override fun sizeOf(key: String, value: ImageBitmap): Int = value.width * value.height * 4
@@ -52,17 +64,34 @@ class Covers(context: Context, private val server: String) {
     suspend fun load(url: String, side: Dp): ImageBitmap? {
         memory.get(url)?.let { return it }
         if (url in missing) return null
-        return withContext(Dispatchers.IO) {
-            val bytes = fetching.withLock { onDisk(url) } ?: return@withContext null.also { missing.add(url) }
-            val want = minOf(BOUND, (side.value * density).toInt().coerceAtLeast(64))
-            val bitmap = decode(bytes, want)?.asImageBitmap()
-            if (bitmap == null) missing.add(url) else memory.put(url, bitmap)
-            bitmap
-        }
+        val want = minOf(BOUND, (side.value * density).toInt().coerceAtLeast(64))
+        // Started only once it is the one in the map, so its `finally` cannot run before it is
+        // there and leave a finished one behind.
+        val shared =
+            loading.computeIfAbsent(url) {
+                scope.async(start = CoroutineStart.LAZY) {
+                    try {
+                        // Asked again here, where it is the one in the map: a row that missed
+                        // both before the last load ended must not start another.
+                        memory.get(url)?.let { return@async it }
+                        if (url in missing) return@async null
+                        val bytes = onDisk(url) ?: return@async null.also { missing.add(url) }
+                        decodes.incrementAndGet()
+                        val bitmap = decode(bytes, want)?.asImageBitmap()
+                        if (bitmap == null) missing.add(url) else memory.put(url, bitmap)
+                        bitmap
+                    } finally {
+                        loading.remove(url)
+                    }
+                }
+            }
+        shared.start()
+        return shared.await()
     }
 
     // The encoded original: from the disk, or fetched and written there.
     private fun onDisk(url: String): ByteArray? {
+        reads.incrementAndGet()
         val file = File(dir, "%08x".format(Art.hash(url)))
         if (file.exists()) return file.readBytes()
         val bytes =

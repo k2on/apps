@@ -22,12 +22,15 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
-/** What Home draws. */
+/** What Home draws: a snapshot, its lists copies, so an equal one is the same one to Compose. */
+@Immutable
 data class HomeData(
     val loaded: Boolean,
     val last: LastPlayed?,
@@ -46,6 +49,9 @@ const val RECENT = 12
 
 @Composable
 fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do, placeholderDelayMs: Long = FETCHING_DELAY_MS) {
+    // Derived once per library, not once per composition: the shelf's cards skip only while the
+    // list they were given is the same one.
+    val recent = remember(data.tracks) { data.tracks.takeLast(RECENT).reversed() }
     LazyColumn(Modifier.fillMaxSize()) {
         item {
             TabTitle("Home") { IconButton(onClick = act::settings) { Glyph(Glyphs.Settings, "Settings") } }
@@ -77,7 +83,6 @@ fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do, placeholderD
                         }
                     item { LastCard(last, from, onResume = { act.resume(last) }) }
                 }
-                val recent = data.tracks.takeLast(RECENT).reversed()
                 item { Heading("Recently added", action = "All songs", onAction = { act.library(LibraryTab.Songs) }) }
                 item {
                     Shelf(recent, key = { it.id.hex }) { t ->
