@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The launcher icon's mark: Pictogrammers' Material Design Icons trumpet
+     (Apache 2.0) — the path mark.xml and the desktop's favicon
+     (harken/iced/web/favicon.svg) carry, at their -18 degrees — in the dark
+     scheme's gold (Palette.DarkScheme). On the adaptive icon's 108dp canvas:
+     scaled 2.66 about the glyph's centre, so the turned trumpet's bounding box
+     is centred, as the favicon's is, and its farthest point is 32dp out —
+     inside the 33dp safe zone every launcher mask leaves whole, about 62dp of
+     the 108 across. Also the themed (monochrome) layer, which the system
+     tints by alpha alone, so the gold here does not reach it. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:pivotX="12"
+        android:pivotY="12"
+        android:rotation="-18"
+        android:scaleX="2.66"
+        android:scaleY="2.66"
+        android:translateX="40.36"
+        android:translateY="43.2">
+        <path
+            android:fillColor="#FFE9BB45"
+            android:pathData="M22 6C21 11 15 11 15 11H4C3 11 2 10 2 10H1V14H2C2 14 3 13 4 13H4.3C4.1 13.3 4 13.6 4 14V16C4 17.1 4.9 18 6 18H7V19H9V18H10V19H12V18H13V19H15V18H16C17.1 18 18 17.1 18 16V14C18 13.9 18 13.7 17.9 13.6C19.6 14.2 21.4 15.4 22 18H23V6H22M6 16.5C5.7 16.5 5.5 16.3 5.5 16V14C5.5 13.7 5.7 13.5 6 13.5H7V16.5H6M9 16.5V13.5H10V16.5H9M12 16.5V13.5H13V16.5H12M16.5 16C16.5 16.3 16.3 16.5 16 16.5H15V13.5H16C16.3 13.5 16.5 13.7 16.5 14V16M9 10H7V9H9V10M12 10H10V9H12V10M15 10H13V9H15V10Z" />
+    </group>
+</vector>

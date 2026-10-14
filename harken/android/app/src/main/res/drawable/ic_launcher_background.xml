@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The launcher icon's ground: the dark scheme's page (Palette.DarkScheme,
+     values-night/colors.xml), whatever the phone's own theme, so the gold
+     always has the ground it was chosen against. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FF1E1E1E"
+        android:pathData="M0 0H108V108H0Z" />
+</vector>
