@@ -25,10 +25,10 @@ let
 
   # nixpkgs' fdroidserver is 2.2 GB, almost none of it what `fdroid update`
   # runs: libvirt, samba and xen for the build server, and scipy, pandas and
-  # matplotlib for androguard's analysis tools. Pages caches 2 GB of store
-  # (.github/workflows/pages.yml), so it is built without them — two pure
-  # Python packages, a minute — and comes to under a gigabyte, more than half
-  # of it the JDK that verifies the APKs and signs the index.
+  # matplotlib for androguard's analysis tools. Pages fetches it on every
+  # deploy (.github/workflows/pages.yml), so it is built without them — two
+  # pure Python packages, a minute — and comes to under a gigabyte, more
+  # than half of it the JDK that verifies the APKs and signs the index.
   androguard = py.androguard.overridePythonAttrs (old: {
     dependencies = with py; [ asn1crypto click colorama future lxml pygments ];
     pythonRemoveDeps = [ "networkx" "matplotlib" "pydot" "ipython" ];
@@ -51,7 +51,7 @@ let
     pythonRemoveDeps = old.pythonRemoveDeps ++ [ "apache-libcloud" "paramiko" "python-vagrant" ];
     pythonImportsCheck = [ "fdroidserver.update" "fdroidserver.signindex" ];
   });
-  python = pkgs.python3.withPackages (_: [ androguard ]);
+  python = pkgs.python3.withPackages (_: [ (py.toPythonModule fdroidserver) ]);
 
   appid = "dev.harken.android";
   # How many versions the repository offers: the new one and two to go back
@@ -216,7 +216,7 @@ let
       up=$probe
       while :; do
         if [ -e "$up/.git" ] || git -C "$up" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-          echo "fdroid-keygen: $dir is inside the git tree at $up; a private key is not written where it could be committed" >&2
+          echo "fdroid-keygen: $dir is inside a git work tree (from $up up); a private key is not written where it could be committed" >&2
           exit 1
         fi
         [ "$up" != / ] || break

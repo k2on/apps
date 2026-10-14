@@ -6,7 +6,8 @@
                                      and sha256, one per line
     fdroid.py check DIR [FINGERPRINT]
                                      the chain the F-Droid client walks:
-                                     entry.jar signed, entry.json naming
+                                     entry.jar signed (by FINGERPRINT,
+                                     if given), entry.json naming
                                      index-v2.json by its hash, and every
                                      APK the index lists by its hash
 
@@ -17,7 +18,7 @@ import hashlib
 import json
 import logging
 import re
-import subprocess
+import shutil
 import sys
 import zipfile
 from pathlib import Path
@@ -63,23 +64,19 @@ def fail(why):
 def check(repo, fingerprint=None):
     repo = Path(repo)
     jar = repo / "entry.jar"
-    verified = subprocess.run(
-        ["jarsigner", "-verify", str(jar)], capture_output=True, text=True
-    )
-    if verified.returncode != 0 or "jar verified." not in verified.stdout:
-        fail(f"{jar} does not verify:\n{verified.stdout}{verified.stderr}")
-    # The repository's fingerprint is the SHA-256 of the certificate that
-    # signed entry.jar, which is what `?fingerprint=` pins.
-    printed = subprocess.run(
-        ["keytool", "-printcert", "-jarfile", str(jar)],
-        capture_output=True, text=True, check=True,
-    ).stdout
-    found = re.search(r"SHA256:\s*([0-9A-F:]+)", printed)
-    if not found:
-        fail(f"no certificate in {jar}")
-    signer = found.group(1).replace(":", "")
-    if fingerprint and signer != fingerprint.upper():
-        fail(f"entry.jar is signed by {signer}, not {fingerprint.upper()}")
+    # fdroidserver's own reading of an index JAR, the one `fdroid` uses on
+    # a mirror: jarsigner -strict, signed exactly once, and the signer's
+    # certificate against the fingerprint, which is what `?fingerprint=`
+    # pins.
+    from fdroidserver import common
+    from fdroidserver import index as fdroid_index
+    from fdroidserver.exception import VerificationException
+
+    common.config = {"jarsigner": shutil.which("jarsigner")}
+    try:
+        _, _, signer = fdroid_index.get_index_from_jar(str(jar), fingerprint)
+    except VerificationException as e:
+        fail(f"{jar}: {e}")
 
     with zipfile.ZipFile(jar) as z:
         entry = json.loads(z.read("entry.json"))

@@ -147,6 +147,24 @@ under this build's plugin versions.
   where 26 has it (a directory synced after a rename), no `java.net.http`;
   its HTTP is `HttpURLConnection` and its WebSocket OkHttp's.
 
+## Through F-Droid
+
+The APK CI builds from `main` is also an F-Droid repository, served with
+the browser peer by GitHub Pages:
+
+    https://k2on.github.io/apps/fdroid/repo?fingerprint=E48F7E6E1AB9C74C4F0404835580DE590334C636EAF654680E1BF0D250BEF3DD
+
+Add it in F-Droid (Settings → Repositories → **+**) and every later build
+arrives as an update. `nix build .#harken-fdroid-repo` is the repository
+for this flake's APK, signed and checked; `fdroid/README.md` is how it is
+published, why its index key is committed, and how to move to a private
+one.
+
+The first install from F-Droid over a copy installed by hand works without
+an uninstall, because both are signed with the committed debug key — as
+long as that copy was built at or after 59fd287. A copy from before it
+carries its own build's random key and needs one uninstall, as above.
+
 ## What it does
 
 `MainActivity` is one line of harken and the rest is the shared onboarding:
