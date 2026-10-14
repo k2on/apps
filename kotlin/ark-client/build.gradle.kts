@@ -61,6 +61,18 @@ val clientTests by tasks.registering(JavaExec::class) {
     args(rootProject.file("../harken/domain/harken.ark").absolutePath)
 }
 
+// Launch views over harken's module: a file is the list the opened peer
+// hydrates, corrected when stale, refused when bound elsewhere or torn.
+val launchViewTests by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Holds launch views to the live views they stand in for."
+    dependsOn(tasks.named("testClasses"))
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("dev.arkdb.client.LaunchViewTests")
+    jvmArgs("-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8")
+    args(rootProject.file("../harken/domain/harken.ark").absolutePath)
+}
+
 tasks.named("check") {
-    dependsOn(storageTests, clientTests)
+    dependsOn(storageTests, clientTests, launchViewTests)
 }

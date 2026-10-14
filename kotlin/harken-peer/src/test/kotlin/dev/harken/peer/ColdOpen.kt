@@ -8,6 +8,10 @@
 //                               times over, for the warm numbers; with the
 //                               module remembered as verified
 //     ColdOpen parts DIR        the replica's open taken apart
+//     ColdOpen write DIR        Home's launch views written (and the floor's file)
+//     ColdOpen launch DIR       a launch that publishes them first, then goes live
+//     ColdOpen floor DIR        Home's lists off disk with no engine: the floor
+//     ColdOpen empty            nothing: what the JVM costs before main
 //
 // **Seeded through the module.** Every song is `add_song` authored by the
 // library account (the role the scanner's login holds), sequenced by an
@@ -41,11 +45,14 @@ import dev.arkdb.client.Autos
 import dev.arkdb.client.ClientView
 import dev.arkdb.client.DirStorage
 import dev.arkdb.client.Domain
+import dev.arkdb.client.LaunchBinding
+import dev.arkdb.client.LaunchViews
 import dev.arkdb.client.MemoryStorage
 import dev.arkdb.client.Options
 import dev.arkdb.client.Peer
 import dev.arkdb.client.Records
 import dev.arkdb.client.ReplicaFile
+import dev.arkdb.client.Update
 import dev.arkdb.localCommit
 import java.io.File
 
@@ -182,6 +189,80 @@ object ColdOpen {
         for ((k, v) in out) println("%-46s %9.1f ms".format(k, v))
     }
 
+    private fun launches(dir: File, bytes: ByteArray): LaunchViews =
+        // Inside the replica's directory, so that each size here has its own; the app keeps them
+        // beside it (`LaunchViews.directory`).
+        LaunchViews(File(dir, "launch-owner"), LaunchBinding.of(bytes, "owner", emptyList()))
+
+    /** Open, hydrate Home's three, and write their launch views — each write timed. */
+    fun write(dir: File) {
+        val bytes = module()
+        val p =
+            Peer.open(
+                Domain.fromBytes(bytes), DirStorage(dir), Options.server("owner", "phone", null))
+        val ls = launches(dir, bytes)
+        val home = views.take(3).map { (n, a) -> ls.view(n, n, a).also { it.live(p, null) } }
+        for (round in 1..3) for (v in home) {
+            var t = System.nanoTime()
+            val c = v.capture(p)!!
+            val taken = ms(t)
+            t = System.nanoTime()
+            v.write(c)
+            println(
+                "%-46s %9.1f ms"
+                    .format("write ${v.name} (take %.1f ms), round $round".format(taken), ms(t)))
+        }
+        // The floor's file: exactly Home's three lists, one plain CBOR value, nothing bound.
+        File(dir, "home.cbor")
+            .writeBytes(Canon.encode(Value.VList(home.map { Value.VList(it.view!!.rows) })))
+    }
+
+    /**
+     * A launch with launch views: the three files read, checked and decoded — the first publish —
+     * then the module, the peer and the live views, which answer against what was shown.
+     */
+    fun launch(dir: File) {
+        val out = LinkedHashMap<String, Double>()
+        out["jvm: start to main"] = uptime.toDouble()
+        val start = System.nanoTime()
+        var t = System.nanoTime()
+        val bytes = module()
+        val ls = launches(dir, bytes)
+        val home = views.take(3).map { (n, a) -> ls.view(n, n, a) }
+        val shown = home.map { it.provisional() }
+        check(shown.all { it != null })
+        out["launch views: read, check, decode"] = ms(t)
+        out["  first publish, from main"] = ms(start)
+        t = System.nanoTime()
+        val domain = Domain(Verify.prepare(Decode.module(Canon.decode(bytes))))
+        out["module: decode, prepare, hash"] = ms(t)
+        t = System.nanoTime()
+        val p = Peer.open(domain, DirStorage(dir), Options.server("owner", "phone", null))
+        out["Peer.open"] = ms(t)
+        t = System.nanoTime()
+        val answers = home.zip(shown).map { (v, s) -> v.live(p, s) }
+        out["live views, against what was shown"] = ms(t)
+        check(answers.all { it == Update.Unchanged }) { "the live views moved: $answers" }
+        out["  live, from main (nothing published)"] = ms(start)
+        for ((k, v) in out) println("%-46s %9.1f ms".format(k, v))
+    }
+
+    /** The floor: Home's three lists off disk, one file, no engine but the decoder. */
+    fun floor(dir: File) {
+        val up = uptime
+        val t = System.nanoTime()
+        val v = Canon.decode(File(dir, "home.cbor").readBytes()) as Value.VList
+        val lists = v.items.map { (it as Value.VList).items.toList() }
+        println("%-46s %9.1f ms".format("jvm: start to main", up.toDouble()))
+        println(
+            "%-46s %9.1f ms"
+                .format(
+                    "floor: read and decode Home's lists (${lists.sumOf { it.size }} rows)", ms(t)))
+    }
+
+    private val uptime: Long
+        get() = java.lang.management.ManagementFactory.getRuntimeMXBean().uptime
+
     fun parts(dir: File) {
         val domain = Domain.fromBytes(module())
         val schema = domain.module.schema
@@ -222,6 +303,10 @@ object ColdOpen {
                     open(File(args[1]), "trusted" in args)
                 }
             "parts" -> parts(File(args[1]))
+            "write" -> write(File(args[1]))
+            "launch" -> launch(File(args[1]))
+            "floor" -> floor(File(args[1]))
+            "empty" -> println("%-46s %9.1f ms".format("jvm: start to main", uptime.toDouble()))
             else -> println("usage: ColdOpen seed DIR N | open DIR [TIMES] [trusted] | parts DIR")
         }
     }

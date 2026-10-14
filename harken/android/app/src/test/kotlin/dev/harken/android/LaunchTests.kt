@@ -4,7 +4,9 @@
 // through `add_song` as the library account.
 package dev.harken.android
 
+import dev.arkdb.Authority
 import dev.arkdb.Value
+import dev.arkdb.localCommit
 import dev.arkdb.android.ArkSession
 import dev.arkdb.client.Account
 import dev.arkdb.client.Autos
@@ -14,11 +16,14 @@ import dev.arkdb.client.MemoryStorage
 import dev.arkdb.client.Options
 import dev.arkdb.client.Peer
 import java.io.File
+import java.nio.file.Files
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -89,5 +94,80 @@ class LaunchTests {
         assertFalse(library.tracks.value.isEmpty())
         library.close()
         session.close()
+    }
+
+    // A replica as a phone keeps it, at `root`: thirty songs confirmed, as the server confirms the
+    // scanner's — written by the client's own writer, then laid out as the session's directory.
+    private fun seeded(root: File, server: String, bytes: ByteArray) {
+        val domain = Domain.fromBytes(bytes)
+        val mem = MemoryStorage()
+        val p = Peer.open(domain, mem, Options.server("library", "scanner", null).copy(autos = Autos.Seeded(2)))
+        p.setRoles(listOf("library"))
+        repeat(30) { p.mutate("add_song", song(it)) }
+        localCommit(Authority(domain.module.schema, domain.closures), p.replica)
+        p.persist()
+        val dir = ArkSession.directory(root, server)
+        dir.mkdirs()
+        for (k in mem.keys()) File(dir, k).writeBytes(mem.load(k)!!)
+    }
+
+    private fun await(what: String, ok: () -> Boolean) {
+        val deadline = System.currentTimeMillis() + 15_000
+        while (!ok() && System.currentTimeMillis() < deadline) Thread.sleep(5)
+        assertTrue(what, ok())
+    }
+
+    /**
+     * A remembered launch with its launch views written: Home is published from them before the
+     * peer has opened — the peer held shut here — and when it opens the live views find the same
+     * lists and publish nothing. A playlist made in that window is made once, after the open.
+     */
+    @Test
+    fun aLaunchViewIsHomeBeforeThePeerOpens() {
+        val bytes = harken()
+        val root = Files.createTempDirectory("harken").toFile()
+        val server = "https://music.example.invalid"
+        val login = Login("t", "s", Account("owner"), 0)
+        try {
+            seeded(root, server, bytes)
+            // The first launch: no files yet; they are written when the app goes to the background.
+            val first = ArkSession.open({ Domain.fromBytes(bytes) }, root, server, login, {}, {}, module = bytes)
+            val one = Library(first)
+            await("the first launch hydrated") { one.complete.value }
+            val saved = CountDownLatch(1)
+            first.saveLaunchViews { saved.countDown() }
+            assertTrue(saved.await(10, TimeUnit.SECONDS))
+            one.close()
+            first.close()
+
+            // The second, with the peer's open held until the test lets it go.
+            val gate = CountDownLatch(1)
+            val second = ArkSession.open({ gate.await(); Domain.fromBytes(bytes) }, root, server, login, {}, {}, module = bytes)
+            val two = Library(second)
+            await("Home was published from the launch views") { two.loaded.value }
+            assertTrue("provisional", two.provisional.value)
+            assertTrue("the splash may go", second.isReady.value)
+            assertEquals(30, two.tracks.value.size)
+            assertEquals(6, two.albums.value.size)
+            val shown = two.tracks.value
+            val shownAlbums = two.albums.value
+            assertEquals("three lists published, from the files", 3, two.homePublishes.get())
+            // A tap before the peer is open: posted, and run after it.
+            two.createPlaylist("Tapped")
+            gate.countDown()
+            await("the live views answered") { !two.provisional.value && two.complete.value }
+            await("the playlist is there") { two.playlists.value.any { it.name == "Tapped" } }
+            assertSame("the live library equals what was shown: nothing was published", shown, two.tracks.value)
+            assertSame("nor the albums", shownAlbums, two.albums.value)
+            assertEquals(1, two.playlists.value.count { it.name == "Tapped" })
+            // The live views published nothing; the playlists moved once, for the tap.
+            assertEquals("publishes after the files: the tap's alone", 4, two.homePublishes.get())
+            val pending = runBlocking { second.run { it.replica.pending.size } }
+            assertEquals("the tap is one intent", 1, pending)
+            two.close()
+            second.close()
+        } finally {
+            root.deleteRecursively()
+        }
     }
 }

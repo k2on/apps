@@ -69,9 +69,14 @@ public class ArkHost(app: Application) : AndroidViewModel(app) {
     // have not passed before (`ModuleMemory`).
     private val modules = ModuleMemory(PrefsShelf(app))
     private val domainLock = Any()
+    private var moduleRead: ByteArray? = null
+    private var closing: ArkSession? = null
+
+    private fun moduleBytes(): ByteArray =
+        synchronized(domainLock) { moduleRead ?: module().also { moduleRead = it } }
 
     private fun loadDomain(): Domain =
-        synchronized(domainLock) { domain ?: modules.domain(module()).also { domain = it } }
+        synchronized(domainLock) { domain ?: modules.domain(moduleBytes()).also { domain = it } }
 
     private val _ready = MutableStateFlow(false)
     /**
@@ -129,7 +134,12 @@ public class ArkHost(app: Application) : AndroidViewModel(app) {
                     send(answer)
                 }
             is Effect.RememberLogin -> remembered.login = e.login
-            is Effect.ForgetLogin -> remembered.login = null
+            is Effect.ForgetLogin -> {
+                remembered.login = null
+                // What the closed session's screens kept is the login's: gone with it.
+                closing?.forgetLaunchViews()
+                closing = null
+            }
             is Effect.Request -> _request.value = e.permission
             is Effect.MarkAsked -> remembered.markAsked(e.key)
             is Effect.OpenSession -> {
@@ -144,6 +154,9 @@ public class ArkHost(app: Application) : AndroidViewModel(app) {
                         onDenied = { why -> viewModelScope.launch { send(Event.Denied(why)) } },
                         onSignOut = { viewModelScope.launch { send(Event.SignOut) } },
                         onFailed = { viewModelScope.launch { failed(e.server) } },
+                        // What the app's launch views are bound to: read here, 50 KB, so that
+                        // the first file is read before anything is decoded.
+                        module = moduleBytes(),
                     )
                 _session.value = s
                 viewModelScope.launch {
@@ -158,6 +171,7 @@ public class ArkHost(app: Application) : AndroidViewModel(app) {
                 }
             }
             is Effect.CloseSession -> {
+                closing = _session.value
                 _session.value?.close()
                 _session.value = null
             }
@@ -175,6 +189,11 @@ public class ArkHost(app: Application) : AndroidViewModel(app) {
                 error =
                     "This phone's copy of the library couldn't be opened. Sign in to try again.")
         _ready.value = true
+    }
+
+    /** The app went to the background: its launch views written now, the write that matters. */
+    public fun stopped() {
+        _session.value?.saveLaunchViews()
     }
 
     override fun onCleared() {

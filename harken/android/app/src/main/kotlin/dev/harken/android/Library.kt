@@ -25,6 +25,7 @@ import dev.arkdb.Value
 import dev.arkdb.android.ArkSession
 import dev.arkdb.android.SessionStatus
 import dev.arkdb.client.ClientView
+import dev.arkdb.client.LaunchView
 import dev.arkdb.client.Peer
 import dev.arkdb.client.PeerError
 import dev.arkdb.client.Standing
@@ -109,6 +110,13 @@ class Library(private val session: ArkSession) {
     /** Whether Home's views — the songs, the playlists, the albums — have been read once. */
     val loaded: StateFlow<Boolean> = _loaded.asStateFlow()
 
+    private val _provisional = MutableStateFlow(false)
+    /**
+     * Whether what Home shows came from the launch views' files and the live views have not yet
+     * answered (Zero's `unknown`). harken draws it the same; a screen could tell.
+     */
+    val provisional: StateFlow<Boolean> = _provisional.asStateFlow()
+
     private val _complete = MutableStateFlow(false)
     /** Whether the rest — the artists, the songs' details — have been read too, after. */
     val complete: StateFlow<Boolean> = _complete.asStateFlow()
@@ -132,15 +140,28 @@ class Library(private val session: ArkSession) {
     /** The last refusal or rejection, in a sentence; cleared by [dismiss]. */
     val notice: StateFlow<String?> = noticeFlow.asStateFlow()
 
-    // On the peer's thread only.
-    private class Held<T>(val name: String, val args: Map<String, Value>, val of: (Value) -> T) {
+    // On the peer's thread only — except, until the live view is there, the
+    // launch view's provisional rows, under the held's own lock.
+    private inner class Held<T>(val name: String, val args: Map<String, Value>, val of: (Value) -> T, val set: (List<T>) -> Unit = {}) {
+        fun publish(rows: List<T>) {
+            homePublishes.incrementAndGet()
+            set(rows)
+        }
+
         var view: ClientView? = null
         val rows = ArrayList<T>()
+        var launch: LaunchView? = null
+        var shown: List<Value>? = null
+        var live = false
     }
 
-    private val library = Held("library", Phone.libraryArgs(null), Track::of)
-    private val playlistsHeld = Held("playlists", emptyMap(), Playlist::of)
-    private val albumsHeld = Held("albums", emptyMap(), Album::of)
+    /** How many times one of Home's lists was published: a test counts them across a launch. */
+    internal val homePublishes = java.util.concurrent.atomic.AtomicInteger()
+
+    private val library = Held("library", Phone.libraryArgs(null), Track::of) { tracksFlow.value = it }
+    private val playlistsHeld = Held("playlists", emptyMap(), Playlist::of) { playlistsFlow.value = it }
+    private val albumsHeld = Held("albums", emptyMap(), Album::of) { albumsFlow.value = it }
+    private val home = listOf<Held<*>>(library, playlistsHeld, albumsHeld)
     private val artistsHeld = Held("artists", emptyMap(), Artist::of)
     private val detailsHeld = Held("track_details", emptyMap(), TrackDetail::of)
 
@@ -164,16 +185,27 @@ class Library(private val session: ArkSession) {
     // Artists tab and a row's album ask for and which cost as much again.
     // A pump between the two splices what it can; a view not yet hydrated
     // has nothing to splice, and hydrates from the store as it then is.
+    //
+    // **And before that, from disk.** Home's three are launch views
+    // (`dev.arkdb.client.LaunchView`): what they held when the app last went
+    // to the background is read on a thread of its own while the peer opens,
+    // and published as provisional — Home, populated, before the replica has
+    // been read at all. When the peer is open the live views answer against
+    // what was shown: equal, and nothing is published; different, and the
+    // difference is spliced in. What a tap does in that window: playing a
+    // provisional row starts at once (it needs only the row's file); a
+    // change (a playlist made, a song added to one) is posted to the peer's
+    // thread like any other, runs after the open, against the real replica,
+    // and its own checks refuse a row that is gone — no queue of our own.
     init {
+        for (h in home) launch(h)
         session.post { p ->
             p.takeChanges()
-            for (h in listOf<Held<*>>(library, playlistsHeld, albumsHeld)) hydrate(p, h)
-            tracksFlow.value = library.rows.toList()
-            playlistsFlow.value = playlistsHeld.rows.toList()
-            albumsFlow.value = albumsHeld.rows.toList()
-            _loaded.value = true
-            // Home has what it draws: the splash may go.
-            session.ready()
+            var moved = false
+            for (h in home) moved = goLive(p, h) || moved
+            _provisional.value = false
+            homeShown()
+            if (moved) session.launchChanged()
             unhook = session.onPump { tick(it) }
             session.post { q ->
                 hydrate(q, artistsHeld)
@@ -181,6 +213,74 @@ class Library(private val session: ArkSession) {
                 artistsFlow.value = artistsHeld.rows.toList()
                 detailsFlow.value = detailsHeld.rows.associateBy { it.mediaId }
                 _complete.value = true
+            }
+        }
+    }
+
+    private fun <T> launch(h: Held<T>) {
+        h.launch =
+            session.launchView(h.name, h.name, h.args) { rows ->
+                val mapped =
+                    try {
+                        rows.map(h.of)
+                    } catch (e: Exception) {
+                        return@launchView
+                    }
+                synchronized(h) {
+                    if (h.live) return@launchView
+                    h.shown = rows
+                    h.rows.clear()
+                    h.rows.addAll(mapped)
+                    h.publish(mapped)
+                }
+                if (home.all { synchronized(it) { it.shown != null || it.live } }) {
+                    _provisional.value = home.none { synchronized(it) { it.live } }
+                    homeShown()
+                }
+            }
+    }
+
+    // Home has what it draws: the splash may go.
+    private fun homeShown() {
+        _loaded.value = true
+        session.ready()
+    }
+
+    // The live view, against whatever was shown provisionally; true when its
+    // rows moved (and were published), so the files are written again.
+    private fun <T> goLive(p: Peer, h: Held<T>): Boolean {
+        val shown = synchronized(h) {
+            h.live = true
+            h.shown
+        }
+        val lv = h.launch
+        if (lv == null) {
+            hydrate(p, h)
+            h.publish(h.rows.toList())
+            return false
+        }
+        val u =
+            try {
+                lv.live(p, shown)
+            } catch (e: PeerError) {
+                h.view = null
+                h.rows.clear()
+                h.publish(emptyList())
+                return shown != null
+            }
+        h.view = lv.view
+        return when (u) {
+            is Update.Unchanged -> false
+            is Update.Patched -> {
+                ClientView.splice(h.rows, u.patches, h.of)
+                h.publish(h.rows.toList())
+                true
+            }
+            is Update.Reset -> {
+                h.rows.clear()
+                lv.view?.rows?.mapTo(h.rows, h.of)
+                h.publish(h.rows.toList())
+                true
             }
         }
     }
@@ -194,6 +294,13 @@ class Library(private val session: ArkSession) {
             }
         h.rows.clear()
         h.view?.rows?.mapTo(h.rows, h.of)
+    }
+
+    // A Home view, handed what moved: spliced and published when it moved.
+    private fun <T> moveHome(p: Peer, h: Held<T>, ch: Changes): Boolean {
+        if (!update(p, h, ch)) return false
+        h.publish(h.rows.toList())
+        return true
     }
 
     // Hand what moved to a view, and splice its list; true when it moved.
@@ -216,9 +323,9 @@ class Library(private val session: ArkSession) {
     private fun splice(p: Peer) {
         val ch = p.takeChanges()
         if (ch is Changes.Applied && ch.changes.isEmpty()) return
-        if (update(p, library, ch)) tracksFlow.value = library.rows.toList()
-        if (update(p, playlistsHeld, ch)) playlistsFlow.value = playlistsHeld.rows.toList()
-        if (update(p, albumsHeld, ch)) albumsFlow.value = albumsHeld.rows.toList()
+        var moved = false
+        for (h in home) if (moveHome(p, h, ch)) moved = true
+        if (moved) session.launchChanged()
         if (update(p, artistsHeld, ch)) artistsFlow.value = artistsHeld.rows.toList()
         if (update(p, detailsHeld, ch)) detailsFlow.value = detailsHeld.rows.associateBy { it.mediaId }
         for (o in pages.values) if (update(p, o.held, ch)) o.flow.value = o.held.rows.toList()

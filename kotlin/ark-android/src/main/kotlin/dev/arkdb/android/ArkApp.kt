@@ -112,6 +112,7 @@ public fun ArkApp(
     DisposableEffect(owner) {
         val o = LifecycleEventObserver { _, e ->
             if (e == Lifecycle.Event.ON_RESUME) host.send(Event.Returned)
+            if (e == Lifecycle.Event.ON_STOP) host.stopped()
         }
         owner.lifecycle.addObserver(o)
         onDispose { owner.lifecycle.removeObserver(o) }

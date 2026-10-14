@@ -26,15 +26,20 @@
 // a denial finds their pending intents where they left them.
 package dev.arkdb.android
 
+import dev.arkdb.Value
 import dev.arkdb.client.Auth
 import dev.arkdb.client.DirStorage
 import dev.arkdb.client.Domain
+import dev.arkdb.client.LaunchBinding
+import dev.arkdb.client.LaunchView
+import dev.arkdb.client.LaunchViews
 import dev.arkdb.client.Login
 import dev.arkdb.client.Options
 import dev.arkdb.client.Peer
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.cancellation.CancellationException
@@ -72,7 +77,18 @@ private constructor(
     private val onSignOut: () -> Unit,
     // Every post run at once on the caller's thread, and no pump: a test's (`inline`).
     private val inline: Boolean = false,
+    // The account's launch views, when the session was opened with its module's bytes.
+    private val launches: LaunchViews? = null,
 ) {
+    // Reads and writes launch views: off the UI thread, and off the peer's, which is busy
+    // opening while the first are read.
+    private val launcher =
+        Executors.newSingleThreadScheduledExecutor { r ->
+            Thread(r, "ark-launch").apply { isDaemon = true }
+        }
+    private val launchViews = CopyOnWriteArrayList<LaunchView>()
+    private var saving: ScheduledFuture<*>? = null
+
     private val thread =
         Executors.newSingleThreadScheduledExecutor { r ->
             Thread(r, "ark-peer").apply { isDaemon = true }
@@ -98,6 +114,74 @@ private constructor(
     /** Say the first screen has what it draws: the splash may go. Once is enough; more is no-op. */
     public fun ready() {
         _ready.value = true
+    }
+
+    /**
+     * A launch view of the query `name` with `args`, kept under `key`
+     * (`dev.arkdb.client.LaunchView`): its file read now, on a thread of its own and not behind the
+     * peer's open, and handed to `onProvisional` if it is there, whole and bound to this module and
+     * this login — then, once the peer is open, the app's [LaunchView.live] over it says what the
+     * live view makes of what was shown. Null when this session keeps none.
+     */
+    public fun launchView(
+        key: String,
+        name: String,
+        args: Map<String, Value>,
+        onProvisional: (List<Value>) -> Unit,
+    ): LaunchView? {
+        val ls = launches ?: return null
+        val v = ls.view(key, name, args)
+        launchViews.add(v)
+        try {
+            launcher.execute { v.provisional()?.let(onProvisional) }
+        } catch (e: RejectedExecutionException) {
+            // Closed: nothing to read.
+        }
+        return v
+    }
+
+    /** A launch view's rows moved: write them all a beat after the last such move. */
+    public fun launchChanged() {
+        if (launches == null || closed) return
+        synchronized(launchViews) {
+            saving?.cancel(false)
+            saving =
+                try {
+                    launcher.schedule({ saveLaunchViews() }, SAVE_AFTER_MS, TimeUnit.MILLISECONDS)
+                } catch (e: RejectedExecutionException) {
+                    null
+                }
+        }
+    }
+
+    /**
+     * Write every launch view now: their rows and where the replica stands taken on the peer's
+     * thread, written on the launch views' — what the app does when it goes to the background, the
+     * write that matters most. `done` is called after, on that thread.
+     */
+    public fun saveLaunchViews(done: () -> Unit = {}) {
+        if (launches == null || launchViews.isEmpty()) return done()
+        post { p ->
+            val taken = launchViews.mapNotNull { v -> v.capture(p)?.let { v to it } }
+            try {
+                launcher.execute {
+                    for ((v, c) in taken) try {
+                        v.write(c)
+                    } catch (e: Exception) {
+                        // A write that failed leaves the last one, or none: the next launch
+                        // takes the ordinary path for that view.
+                    }
+                    done()
+                }
+            } catch (e: RejectedExecutionException) {
+                done()
+            }
+        }
+    }
+
+    /** Forget this account's launch views: on signing out, or a denial. */
+    public fun forgetLaunchViews() {
+        launches?.clear()
     }
 
     private fun start(p: Peer) {
@@ -181,6 +265,7 @@ private constructor(
     /** Stop the pump and close the peer, written down; its storage stays for the next session. */
     public fun close() {
         if (closed) return
+        launcher.shutdown()
         if (inline) {
             closed = true
             thread.shutdown()
@@ -205,6 +290,9 @@ private constructor(
     public companion object {
         /** How often the peer is pumped: what every client here uses. */
         public const val PUMP_MS: Long = 50
+
+        /** How long after the last change a launch view is written. */
+        public const val SAVE_AFTER_MS: Long = 1000
 
         /** The replica's directory for `server` under `root` (the app's files): one per server. */
         public fun directory(root: File, server: String): File =
@@ -239,8 +327,16 @@ private constructor(
             onDenied: (String) -> Unit,
             onSignOut: () -> Unit,
             onFailed: (Exception) -> Unit = {},
+            /** The module's bytes, which a launch view is bound to; none, and none are kept. */
+            module: ByteArray? = null,
         ): ArkSession {
-            val s = ArkSession(server, login, onDenied, onSignOut)
+            val launches =
+                module?.let {
+                    LaunchViews(
+                        LaunchViews.directory(directory(root, server), login.user.id),
+                        LaunchBinding.of(it, login.user.id, login.user.roles))
+                }
+            val s = ArkSession(server, login, onDenied, onSignOut, launches = launches)
             s.thread.execute {
                 try {
                     val peer =
