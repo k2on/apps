@@ -383,11 +383,16 @@
           # reads the Unicode tables out of rust/ark, so that file is a source
           # too.
           #
-          # Debug-signed, but with one key rather than a new one per build:
-          # harken/android/debug.keystore, committed and public on purpose
-          # (app/build.gradle.kts says why), so that each APK installs over
-          # the last instead of failing with "App not installed". It installs
-          # anywhere and belongs nowhere public. And a version code that rises
+          # The release build, `harken.apk`: not debuggable, so ART compiles
+          # it as it would any app rather than holding back for a debugger,
+          # and with the baseline profiles Compose's libraries ship, which
+          # profileinstaller installs. Not minified: R8 is not in the
+          # recorded graph. Signed with one key rather than a new one per
+          # build: harken/android/debug.keystore, committed and public on
+          # purpose (app/build.gradle.kts says why), the key every APK built
+          # here since has carried, so that each installs over the last
+          # instead of failing with "App not installed". It installs anywhere
+          # and belongs nowhere public. And a version code that rises
           # with each commit: the flake's own source time, in minutes since
           # the epoch — about thirty million today, and Android's ceiling is
           # 2,100,000,000 — so a newer build is never refused as a downgrade.
@@ -435,16 +440,17 @@
               export HOME="$TMPDIR/home" ANDROID_USER_HOME="$TMPDIR/home/.android"
               mkdir -p "$ANDROID_USER_HOME"
             '';
-            gradleBuildTask = ":ark-android:testDebugUnitTest :app:assembleDebug";
+            gradleBuildTask = ":ark-android:testDebugUnitTest :app:assembleRelease";
             # The recording runs the same tasks rather than resolving every
             # configuration — AGP's androidTest classpaths cannot be resolved
             # in isolation, and what the build fetches is the whole graph —
-            # and the screenshots' too, so that one recording serves both.
-            gradleUpdateTask = ":ark-android:testDebugUnitTest :app:recordPaparazziDebug :app:assembleDebug";
+            # and the screenshots' too, and the debug build a laptop makes, so
+            # that one recording serves all three.
+            gradleUpdateTask = ":ark-android:testDebugUnitTest :app:recordPaparazziDebug :app:assembleDebug :app:assembleRelease";
             doCheck = false;
             installPhase = ''
               mkdir -p $out
-              cp app/build/outputs/apk/debug/app-debug.apk $out/harken-debug.apk
+              cp app/build/outputs/apk/release/app-release.apk $out/harken.apk
             '';
           });
 

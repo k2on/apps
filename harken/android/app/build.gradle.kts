@@ -30,8 +30,8 @@ android {
         versionName = providers.gradleProperty("versionName").getOrElse("0.1")
     }
 
-    // One key for every debug build, committed beside this file, and public
-    // on purpose. AGP otherwise signs with a key it makes up on first use
+    // One key for every build, committed beside this file, and public on
+    // purpose. AGP otherwise signs with a key it makes up on first use
     // under ~/.android — a different one on every machine, and under nix a
     // different one on every build, since the builder's home is new each
     // time — and Android refuses an update whose signer differs from the
@@ -39,11 +39,14 @@ android {
     // phone's replica with it. Signing identically everywhere is what lets
     // one APK install over the last.
     //
-    // It is the same trade every debug-signed build makes, said plainly:
-    // anyone can read this file, so anyone can sign an APK as this app. It
-    // must never sign anything published as trusted. A real release key does
-    // not belong here or anywhere in the nix store, which is world-readable;
-    // it means building unsigned and signing outside the build.
+    // The release build signs with it too, and that is load-bearing: the
+    // APKs already installed carry this key, and a release signed with any
+    // other would not install over them. It is the same trade a debug key
+    // makes, said plainly: anyone can read this file, so anyone can sign an
+    // APK as this app. It must never sign anything published as trusted. A
+    // real release key does not belong here or anywhere in the nix store,
+    // which is world-readable; it means building unsigned and signing
+    // outside the build.
     signingConfigs {
         getByName("debug") {
             storeFile = rootProject.file("debug.keystore")
@@ -54,12 +57,29 @@ android {
     }
 
     buildTypes {
+        // For a phone on the desk and for the tests: the screenshots and the
+        // unit tests run against this one.
         debug {
             signingConfig = signingConfigs.getByName("debug")
         }
+        // What `harken-apk` ships. Not debuggable: ART runs a debuggable app
+        // with its compiler held back for a debugger, and Compose is several
+        // times slower for it — a fast fling through the songs most of all.
+        // And with the baseline profiles Compose's own libraries ship, which
+        // AGP compiles into the APK for a variant that is not debuggable and
+        // profileinstaller hands to ART on install. Not minified: R8 is not
+        // in the recorded Maven graph (deps.json), and shrinking is not what
+        // a fling needs.
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug")
         }
+    }
+
+    // Lint's release check would fetch lint itself, which the recorded graph
+    // does not hold, and a build that cannot reach Maven fails on it.
+    lint {
+        checkReleaseBuilds = false
     }
 
     // 21, as the runtime and the client are built: D8 takes Java 21 class
@@ -117,6 +137,10 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.navigation:navigation-compose:2.8.5")
     implementation("androidx.core:core-ktx:1.15.0")
+    // Compose brings it already; named, because the release build relies on
+    // it: it installs the APK's baseline profile, so the first fling after an
+    // install is compiled rather than interpreted.
+    implementation("androidx.profileinstaller:profileinstaller:1.3.1")
     // The player: ExoPlayer streaming /media/…, inside a MediaSessionService
     // whose session is the notification, the lock screen and Bluetooth.
     implementation("androidx.media3:media3-exoplayer:1.5.1")

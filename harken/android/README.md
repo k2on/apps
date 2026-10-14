@@ -27,22 +27,23 @@ permission are the parts only a phone can say anything about.
 
 From the repository root, with nothing but nix:
 
-    nix build .#harken-apk              # result/harken-debug.apk
-    adb install result/harken-debug.apk
+    nix build .#harken-apk              # result/harken.apk
+    adb install result/harken.apk
     nix build .#harken-android-screens  # result/index.html and the PNGs
 
 That is gradle over an SDK the flake assembles itself (`nix/android-sdk.nix`):
 the platform 35 and build-tools 35.0.0 zips from Google, which are jars and
-scripts, and `aapt2` — the one native program AGP runs for `assembleDebug`
+scripts, and `aapt2` — the one native program AGP runs to assemble an APK
 (d8, apksigner and the rest are Java) — compiled from the Android sources
 for whatever machine is building (`nix/aapt2.nix`). The app's whole Maven
 graph — AGP, Compose, the Kotlin plugins, OkHttp, Media3, the browser
 library, Paparazzi and the layoutlib it renders with — is recorded in
 `deps.json` and replayed offline, the way nixpkgs builds every gradle
 project; the Kotlin runtime and client come in through the composite build
-as they do on a laptop. One recording serves the APK and the screenshots:
-it runs the onboarding's tests, `recordPaparazziDebug` and
-`assembleDebug`. A new dependency moves that file:
+as they do on a laptop. One recording serves the APK, the screenshots and
+a laptop's debug build: it runs the onboarding's tests,
+`recordPaparazziDebug`, `assembleDebug` and `assembleRelease`. A new
+dependency moves that file:
 
     $(nix build .#harken-apk-deps --print-out-paths)   # from the repository root; needs the network
 
@@ -85,17 +86,30 @@ read-only, the build *ends* after loading settings with no task run and no
 message; and a writable `HOME`, because AGP keeps its state and the debug
 keystore under `~/.android`.
 
-**One debug key, committed, and public on purpose.** That keystore was
+**The APK is a release build.** `harken-apk` runs `assembleRelease`, not
+`assembleDebug`: a debuggable app runs on ART with its compiler held back
+for a debugger, and Compose is several times slower for it — a fling
+through the songs most of all. A release build is not debuggable, and it
+carries the baseline profiles Compose's own libraries ship, compiled by AGP
+into `assets/dexopt/baseline.prof`, which profileinstaller hands to ART on
+install. It is not minified: R8 is not in the recorded graph, and a fling
+does not need shrinking. Lint's release check is off for the same reason,
+since it would fetch lint. The debug build stays what a laptop builds and
+what the screenshots and the tests run against.
+
+**One key, committed, and public on purpose.** That keystore was
 random: AGP makes one on first use, so every machine had its own, and the
 nix builder — a new home each time — had a new one on every build. Android
 refuses an update signed by anybody but the installed app's signer, so each
 new APK failed with "App not installed" and had to replace the old one by
-uninstalling it. `debug.keystore`, beside this file, is the key every debug
-build signs with now (`signingConfigs` in `app/build.gradle.kts`, the usual
-`android` / `androiddebugkey` / `android`), nix or local, so one installs
-over the last. The cost is the one every debug-signed build pays, stated
-rather than inherited: anyone can sign an APK as this app, so it installs
-anywhere and belongs nowhere public. A real release key belongs outside the
+uninstalling it. `debug.keystore`, beside this file, is the key every build
+signs with now, debug and release (`signingConfigs` in
+`app/build.gradle.kts`, the usual `android` / `androiddebugkey` /
+`android`), nix or local, so one installs over the last. Its name is AGP's
+convention; what matters is that it is the key the APKs already installed
+carry, certificate SHA-256 `1a8859fb…df431139`. The cost is the one a debug
+key's build pays, stated rather than inherited: anyone can sign an APK as
+this app, so it installs anywhere and belongs nowhere public. A real release key belongs outside the
 nix store, which is world-readable, and is applied after the build.
 
 The version code rises with each commit: `harken-apk` passes the flake's

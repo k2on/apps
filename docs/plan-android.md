@@ -446,5 +446,41 @@ every row that leaves for the next that enters.
 - `ScrollTests` still composes nothing per tick.
   - Falsified: `albumOf` remade per tick.
 
-The build type is the rest, and it is not on this list yet.
+### The release build
+
+The rest is the build type, and on a phone it is likely the larger part: the
+APK was `assembleDebug`, debuggable, with no profile installed. ART runs a
+debuggable app with its compiler held back for a debugger, so the JVM
+numbers above do not show it. `harken-apk` now runs `assembleRelease` and
+ships `result/harken.apk`, which apk.yml uploads as `harken-apk`:
+
+- not debuggable: neither `aapt2 dump badging` nor the manifest says
+  `debuggable`, and fdroid's "debuggable or testOnly set in
+  AndroidManifest.xml", which the debug APK raises, is gone from
+  `harken-fdroid-repo`;
+- with Compose's own baseline profiles, which AGP compiles into
+  `assets/dexopt/baseline.prof` (7,845 bytes) and `baseline.profm` for a
+  variant that is not debuggable. profileinstaller 1.3.1, already in the
+  graph through Compose and now named, merges its `ProfileInstallReceiver`
+  and initializer into the manifest;
+- signed with the same committed key, certificate SHA-256
+  `1a8859fb49cfacceb8984f7a70ac3993f9eda207c1fe2d72fe6627b8df431139`, as
+  `apksigner` reports for both the debug APK and this one. It installs over
+  what the F-Droid repository and a hand install already put on a phone;
+- version code `self.lastModified / 60` as before: 29866923 for the tree
+  this was built from, above the live 29866861;
+- 10,418,060 bytes, where the debug APK was 13,824,048.
+
+It needed nothing the recorded graph lacks. Minification is off: R8
+(`com.android.tools:r8`) is not in `deps.json`. Turning it on means
+`isMinifyEnabled = true`, keep rules for what the app reaches by
+reflection (the media session service and its receiver are in the
+manifest; Compose and Media3 ship their own rules), and a re-recording with
+`harken-apk-deps`, whose task list now includes `assembleRelease`. Lint's
+release check is off for the same reason: it would fetch lint. The debug
+build stays what a laptop builds and what the screenshots and unit tests run
+against.
+
+Not verified: the scroll on a phone. Nothing here can run an APK, and every
+number above is the JVM's.
 

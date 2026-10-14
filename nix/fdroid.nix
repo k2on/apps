@@ -10,7 +10,7 @@
 #
 # **The index is signed with a key committed beside the metadata**
 # (harken/android/fdroid/repo.keystore, `harken` / `harken`), public on
-# purpose, the same trade the debug APK key makes. The client refuses an
+# purpose, the same trade the APKs' own committed key makes. The client refuses an
 # unsigned index, and a key nobody may read would be a secret for CI to
 # hold before the first repository could exist. What a key that anyone can
 # read does not protect is the index's origin, so that is protected
@@ -175,7 +175,8 @@ let
       repo_name: harken
       repo_description: >-
         A personal repository for the Harken app: the APK built from each
-        commit of https://github.com/k2on/apps, debug-signed.
+        commit of https://github.com/k2on/apps: a release build, signed with a
+        key that is public.
       repo_icon: harken.png
       archive_older: 0
       make_current_version_link: false
@@ -263,7 +264,7 @@ let
     passthru = { inherit fdroidserver; fingerprint = repoKey.fingerprint; };
   } ''
     export HOME=$TMPDIR
-    harken-fdroid repo $out ${harken-apk}/harken-debug.apk
+    harken-fdroid repo $out ${harken-apk}/harken.apk
     harken-fdroid check $out ${repoKey.fingerprint}
   '';
 in

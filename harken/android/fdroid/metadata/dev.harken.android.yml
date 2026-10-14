@@ -12,7 +12,7 @@ Description: |-
 
     It needs a harken server to sign in to; there is no account anywhere else. The server, the desktop client and the browser client are in the same repository.
 
-    This build is debug-signed with a key committed to that repository, so anyone could sign an APK as this app. It is for the one person running the server.
+    This is a release build signed with a key committed to that repository, so anyone could sign an APK as this app. It is for the one person running the server.
 
 AutoUpdateMode: None
 UpdateCheckMode: None

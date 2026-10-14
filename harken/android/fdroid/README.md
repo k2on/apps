@@ -29,10 +29,13 @@ address above, or open it in the phone's browser and let F-Droid take it.
 Then install Harken from F-Droid.
 
 **A copy installed by hand keeps working.** Every APK since 59fd287 is
-signed with the one committed debug key, and so is every APK this
-repository offers, so F-Droid updates a hand-installed copy in place. A
-copy installed before 59fd287 was signed with a key its own build made up;
-that one needs uninstalling once.
+signed with the one committed key, `harken/android/debug.keystore` (the
+name is AGP's; it signs the release builds too), and so is every APK this
+repository offers, so F-Droid updates a hand-installed copy in place. What
+it offers now are release builds, not debuggable, and they install over the
+debug builds offered before them like any update. A copy installed before
+59fd287 was signed with a key its own build made up; that one needs
+uninstalling once.
 
 No secret is needed for any of this.
 
@@ -58,14 +61,14 @@ repository is the new APK alone, never a failed deploy.
 On a laptop, the first of these does what CI does and the second checks
 any repository against a fingerprint:
 
-    nix run .#harken-fdroid -- repo --keep https://k2on.github.io/apps/fdroid/repo out result/harken-debug.apk
+    nix run .#harken-fdroid -- repo --keep https://k2on.github.io/apps/fdroid/repo out result/harken.apk
     nix run .#harken-fdroid -- check out E48F7E6E1AB9C74C4F0404835580DE590334C636EAF654680E1BF0D250BEF3DD
 
 ## The index key is public, on purpose
 
 `repo.keystore`, beside this file, signs the index: alias `harken`,
 password `harken`. Anyone can read it, so anyone can sign an index with
-it — the same trade the debug APK key makes, and made for the same reason:
+it — the same trade the APKs' committed key makes, and made for the same reason:
 the client refuses an unsigned index, and a key nobody may read is a secret
 CI would have to hold before the first repository could exist.
 
