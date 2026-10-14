@@ -3,8 +3,10 @@
 // "A remembered session opens straight into Home").
 //
 //     ColdOpen seed DIR N       a replica of N songs at DIR, as a phone keeps it
-//     ColdOpen open DIR [K]     one launch over it, every stage timed; K
-//                               times over, for the warm numbers
+//     ColdOpen open DIR [K] [trusted]
+//                               one launch over it, every stage timed; K
+//                               times over, for the warm numbers; with the
+//                               module remembered as verified
 //     ColdOpen parts DIR        the replica's open taken apart
 //
 // **Seeded through the module.** Every song is `add_song` authored by the
@@ -28,9 +30,11 @@ package dev.harken.peer
 
 import dev.arkdb.Canon
 import dev.arkdb.Decode
+import dev.arkdb.Hex
 import dev.arkdb.Id
 import dev.arkdb.MemoryStore
 import dev.arkdb.Replica
+import dev.arkdb.Sha256
 import dev.arkdb.Value
 import dev.arkdb.Verify
 import dev.arkdb.client.Autos
@@ -131,7 +135,7 @@ object ColdOpen {
             "track_details" to emptyMap<String, Value>(),
         )
 
-    fun open(dir: File) {
+    fun open(dir: File, trusted: Boolean) {
         val out = LinkedHashMap<String, Double>()
         val start = System.nanoTime()
         var t = System.nanoTime()
@@ -141,8 +145,14 @@ object ColdOpen {
         val decoded = Decode.module(Canon.decode(bytes))
         out["module: decode"] = ms(t)
         t = System.nanoTime()
-        val verified = Verify.verify(decoded)
-        out["module: verify"] = ms(t)
+        // A launch with the bytes that passed before (`ModuleMemory`): their
+        // SHA-256 checked, and prepared as the verifier prepares them.
+        val verified =
+            if (trusted) {
+                check(Hex.encode(Sha256.hash(bytes)).isNotEmpty())
+                Verify.prepare(decoded)
+            } else Verify.verify(decoded)
+        out[if (trusted) "module: verify (remembered: hash, prepare)" else "module: verify"] = ms(t)
         t = System.nanoTime()
         val domain = Domain(verified)
         out["module: closures and hash"] = ms(t)
@@ -156,11 +166,17 @@ object ColdOpen {
             val cv = p.view(v.first, v.second)
             held.add(cv)
             out["hydrate ${v.first} (${cv.rows.size} rows)"] = ms(t)
-            if (i == 2) out["  first three, from launch"] = ms(start)
+            if (i == 2) {
+                t = System.nanoTime()
+                val home = held.map { it.rows.toList() }
+                out["first publish (Home's three)"] = ms(t)
+                check(home.size == 3)
+                out["  first publish, from launch"] = ms(start)
+            }
         }
         t = System.nanoTime()
         val copies = held.map { it.rows.toList() }
-        out["publish (copy the lists)"] = ms(t)
+        out["second publish (the rest)"] = ms(t)
         out["total"] = ms(start)
         check(copies.isNotEmpty())
         for ((k, v) in out) println("%-46s %9.1f ms".format(k, v))
@@ -201,9 +217,12 @@ object ColdOpen {
     fun main(args: Array<String>) {
         when (args.getOrNull(0)) {
             "seed" -> seed(File(args[1]), args[2].toInt())
-            "open" -> repeat(args.getOrNull(2)?.toInt() ?: 1) { open(File(args[1])) }
+            "open" ->
+                repeat(args.getOrNull(2)?.toIntOrNull() ?: 1) {
+                    open(File(args[1]), "trusted" in args)
+                }
             "parts" -> parts(File(args[1]))
-            else -> println("usage: ColdOpen seed DIR N | open DIR [TIMES] | parts DIR")
+            else -> println("usage: ColdOpen seed DIR N | open DIR [TIMES] [trusted] | parts DIR")
         }
     }
 }

@@ -87,6 +87,15 @@ public class Domain(public val module: Module) {
         /** `Domain::from_bytes`: the canonical bytes of an `.ark` file, verified. */
         public fun fromBytes(bytes: ByteArray): Domain =
             Domain(Verify.verify(Decode.module(Canon.decode(bytes))))
+
+        /**
+         * Bytes [fromBytes] verified before: the same module — decoded, its orders completed and
+         * its functions normalized as `verify` does — without the checks, whose answer is a
+         * function of the bytes. Only for bytes known to have passed; an app remembers which
+         * (`dev.arkdb.android.ModuleMemory`, by the bytes' SHA-256).
+         */
+        public fun fromVerifiedBytes(bytes: ByteArray): Domain =
+            Domain(Verify.prepare(Decode.module(Canon.decode(bytes))))
     }
 }
 

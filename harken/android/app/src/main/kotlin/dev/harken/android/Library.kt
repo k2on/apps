@@ -6,7 +6,7 @@
 //
 // **The lists are spliced, not re-read.** The library, the playlists, the
 // albums, the artists and the songs' details are maintained views
-// (`ClientView`), hydrated once and handed every `Changes` the peer
+// (`ClientView`), hydrated once — Home's three first — and handed every `Changes` the peer
 // reports; the patches each answers with are applied to the list the
 // screens hold (`ClientView.splice`), and only a `Reset` reads one again.
 // A page — an album, an artist, a playlist — is a view too, held while a
@@ -106,8 +106,12 @@ class Library(private val session: ArkSession) {
     val status: StateFlow<SessionStatus> = session.status
 
     private val _loaded = MutableStateFlow(false)
-    /** Whether the views have been read once: before, a screen says it is opening. */
+    /** Whether Home's views — the songs, the playlists, the albums — have been read once. */
     val loaded: StateFlow<Boolean> = _loaded.asStateFlow()
+
+    private val _complete = MutableStateFlow(false)
+    /** Whether the rest — the artists, the songs' details — have been read too, after. */
+    val complete: StateFlow<Boolean> = _complete.asStateFlow()
 
     private val tracksFlow = MutableStateFlow<List<Track>>(emptyList())
     private val playlistsFlow = MutableStateFlow<List<Playlist>>(emptyList())
@@ -153,13 +157,29 @@ class Library(private val session: ArkSession) {
     private var verdictsSeen = 0
     private var unhook: () -> Unit = {}
 
+    // **What the first screen draws is read first.** Home is the songs, the
+    // playlists and the albums: those are hydrated and published, and only
+    // then — on a later turn of the peer's thread, so nothing that published
+    // waits on it — the artists and every song's details, which Library's
+    // Artists tab and a row's album ask for and which cost as much again.
+    // A pump between the two splices what it can; a view not yet hydrated
+    // has nothing to splice, and hydrates from the store as it then is.
     init {
         session.post { p ->
             p.takeChanges()
-            for (h in listOf<Held<*>>(library, playlistsHeld, albumsHeld, artistsHeld, detailsHeld)) hydrate(p, h)
-            publish()
+            for (h in listOf<Held<*>>(library, playlistsHeld, albumsHeld)) hydrate(p, h)
+            tracksFlow.value = library.rows.toList()
+            playlistsFlow.value = playlistsHeld.rows.toList()
+            albumsFlow.value = albumsHeld.rows.toList()
             _loaded.value = true
             unhook = session.onPump { tick(it) }
+            session.post { q ->
+                hydrate(q, artistsHeld)
+                hydrate(q, detailsHeld)
+                artistsFlow.value = artistsHeld.rows.toList()
+                detailsFlow.value = detailsHeld.rows.associateBy { it.mediaId }
+                _complete.value = true
+            }
         }
     }
 
@@ -189,14 +209,6 @@ class Library(private val session: ArkSession) {
                 true
             }
         }
-    }
-
-    private fun publish() {
-        tracksFlow.value = library.rows.toList()
-        playlistsFlow.value = playlistsHeld.rows.toList()
-        albumsFlow.value = albumsHeld.rows.toList()
-        artistsFlow.value = artistsHeld.rows.toList()
-        detailsFlow.value = detailsHeld.rows.associateBy { it.mediaId }
     }
 
     private fun splice(p: Peer) {

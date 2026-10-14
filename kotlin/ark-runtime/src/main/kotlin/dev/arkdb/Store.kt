@@ -522,30 +522,64 @@ private class Trigrams(val column: String) {
 }
 
 // One table: its rows by key, its secondaries and text indexes, and its
-// digest (§8.1), which moves with every row written.
+// digest (§8.1). The secondaries move with every row written. The text
+// indexes and the digest are built from the rows the first time something
+// asks — a text read, a state hash — and move with every write after: a
+// store loaded whole and never searched or hashed (a phone's launch) pays
+// for neither, and one that is asks once. Either way each answers what it
+// would have answered built eagerly, row by row.
 private class TableState(
+    val table: String,
     val rows: TreeMap<List<Value>, Row>,
     val indexes: List<Secondary>,
-    val texts: List<Trigrams>,
-    val digest: Digest,
+    private val textColumns: List<String>,
+    private var textsHeld: List<Trigrams>?,
+    private var digestHeld: Digest?,
 ) {
-    fun set(t: String, k: List<Value>, row: Row?) {
+    /** The text indexes, built from the rows on the first read that asks. */
+    val texts: List<Trigrams>
+        get() =
+            textsHeld
+                ?: textColumns
+                    .map { c -> Trigrams(c).also { ix -> for ((k, r) in rows) ix.set(k, null, r) } }
+                    .also { textsHeld = it }
+
+    /** The digest, summed over the rows on the first ask. */
+    val digest: Digest
+        get() =
+            digestHeld
+                ?: Digest()
+                    .also { d -> for (r in rows.values) d.add(leaf(table, r)) }
+                    .also { digestHeld = it }
+
+    /** Whether the digest and the text indexes are held yet (for the tests). */
+    val held: Pair<Boolean, Boolean>
+        get() = (digestHeld != null) to (textsHeld != null)
+
+    fun set(k: List<Value>, row: Row?) {
         val old: Row?
         if (row != null) {
             old = rows.put(k, row)
         } else {
             old = rows.remove(k) ?: return
         }
-        if (old != row) {
-            if (old != null) digest.sub(leaf(t, old))
-            if (row != null) digest.add(leaf(t, row))
+        val d = digestHeld
+        if (d != null && old != row) {
+            if (old != null) d.sub(leaf(table, old))
+            if (row != null) d.add(leaf(table, row))
         }
-        for (ix in texts) ix.set(k, old, row)
+        textsHeld?.let { for (ix in it) ix.set(k, old, row) }
         for (ix in indexes) ix.set(k, old, row)
     }
 
     fun copy(): TableState =
-        TableState(TreeMap(rows), indexes.map { it.copy() }, texts.map { it.copy() }, digest.copy())
+        TableState(
+            table,
+            TreeMap(rows),
+            indexes.map { it.copy() },
+            textColumns,
+            textsHeld?.map { it.copy() },
+            digestHeld?.copy())
 
     companion object {
         fun of(tbl: Table): TableState {
@@ -555,7 +589,7 @@ private class TableState(
                 lists
                     .filter { it.isNotEmpty() && it != tbl.key && seen.add(it) }
                     .map { Secondary(it) }
-            return TableState(TreeMap(KeyOrder), indexes, tbl.text.map { Trigrams(it) }, Digest())
+            return TableState(tbl.name, TreeMap(KeyOrder), indexes, tbl.text, null, null)
         }
     }
 }
@@ -719,13 +753,20 @@ private constructor(
         val tbl = schema.lookupTable(change.table) ?: return
         val st = tables[change.table] ?: return
         when (change) {
-            is Change.Add -> st.set(change.table, tbl.keyOf(change.row), change.row)
-            is Change.Edit -> st.set(change.table, tbl.keyOf(change.new), change.new)
-            is Change.Remove -> st.set(change.table, tbl.keyOf(change.row), null)
+            is Change.Add -> st.set(tbl.keyOf(change.row), change.row)
+            is Change.Edit -> st.set(tbl.keyOf(change.new), change.new)
+            is Change.Remove -> st.set(tbl.keyOf(change.row), null)
         }
     }
 
     override fun digest(table: String): Digest? = tables[table]?.digest?.copy()
+
+    /**
+     * How many tables hold their digest, and how many their text indexes, built yet — a store
+     * loaded and never hashed or searched holds none. For the tests: both are derived.
+     */
+    public fun derivedHeld(): Pair<Int, Int> =
+        tables.values.count { it.held.first } to tables.values.count { it.held.second }
 
     // D4 The keys a text index says may hold the needles: per branch, the
     // postings of every trigram of every needle on an indexed column,

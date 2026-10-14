@@ -13,6 +13,7 @@ import dev.arkdb.Change
 import dev.arkdb.CmpOp
 import dev.arkdb.Column
 import dev.arkdb.Dir
+import dev.arkdb.Hash
 import dev.arkdb.Index
 import dev.arkdb.Keep
 import dev.arkdb.MemoryStore
@@ -145,8 +146,73 @@ object StoreHints {
         }
     }
 
+    /**
+     * The digests and the text indexes are derived, and built the first time something asks: a
+     * store written and loaded and copied without a hash or a search holds neither, and when one is
+     * asked it is what the store would have kept had it built it eagerly and moved it with every
+     * write — the digest the sum of the rows' leaves, every needle the same rows.
+     */
+    private fun derived() {
+        val start = rng
+        fun written(eager: Boolean): MemoryStore {
+            rng = start
+            val st = MemoryStore.empty(schema)
+            if (eager) {
+                Hash.stateHash(st)
+                st.scanWhereText(
+                    "t", emptyList(), emptyList(), listOf(listOf("b" to "ba")), { true })
+            }
+            for (k in 0..2) st.applyChange(
+                Change.Add("p", Value.VStruct(mapOf("id" to Value.VInt(k.toLong())))))
+            repeat(400) { write(st) }
+            return st
+        }
+        val lazy = written(false)
+        val eager = written(true)
+        if (lazy.derivedHeld() != (0 to 0))
+            fail("derived: a store only written holds ${lazy.derivedHeld()} built")
+        if (eager.derivedHeld() != (2 to 1))
+            fail("derived: a store hashed and searched holds ${eager.derivedHeld()} built")
+        val loaded = MemoryStore.fromValue(schema, eager.storeValue())
+        val copied = lazy.copy()
+        for ((what, st) in listOf("loaded" to loaded, "copied" to copied)) if (st.derivedHeld() !=
+            (0 to 0))
+            fail("derived: a store $what holds ${st.derivedHeld()} built")
+        for (st in listOf(lazy, loaded, copied)) {
+            for (t in listOf("p", "t")) {
+                val want = Hash.tableDigest(t, st.scan(t))
+                if (st.digest(t) != want || eager.digest(t) != want)
+                    fail("derived: the digest of $t is not the sum of its rows' leaves")
+            }
+            for (w in words) {
+                val n = fold(w.take(3))
+                val keep: Keep = { r -> fold((r.fields["b"] as Value.VText).value).contains(n) }
+                val has = listOf(listOf("b" to n))
+                val got = st.scanWhereText("t", emptyList(), emptyList(), has, keep)
+                if (got != eager.scanWhereText("t", emptyList(), emptyList(), has, keep) ||
+                    got != st.scan("t").filter(keep))
+                    fail("derived: the needle '$n' answers another set of rows")
+            }
+        }
+        if (!Hash.stateHash(lazy).contentEquals(Hash.stateHash(eager)))
+            fail("derived: two stores of the same rows hash apart")
+        // Built, then moved by every write after.
+        repeat(200) {
+            val s0 = rng
+            write(lazy)
+            rng = s0
+            write(eager)
+        }
+        for (t in listOf("p", "t")) if (lazy.digest(t) != Hash.tableDigest(t, lazy.scan(t)) ||
+            lazy.digest(t) != eager.digest(t))
+            fail("derived: a digest built and then written through is not the rows' sum")
+        println(
+            "store hints: digests and text indexes built when first asked, each what writing it eagerly kept")
+    }
+
     @JvmStatic
     fun main(args: Array<String>) {
+        derived()
         val st = MemoryStore.empty(schema)
         for (k in 0..2) st.applyChange(
             Change.Add("p", Value.VStruct(mapOf("id" to Value.VInt(k.toLong())))))

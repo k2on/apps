@@ -137,6 +137,7 @@ fun HarkenApp(session: ArkSession) {
     val artists by library.artists.collectAsStateWithLifecycle()
     val details by library.details.collectAsStateWithLifecycle()
     val loaded by library.loaded.collectAsStateWithLifecycle()
+    val complete by library.complete.collectAsStateWithLifecycle()
     val status by library.status.collectAsStateWithLifecycle()
     val notice by library.notice.collectAsStateWithLifecycle()
     val player by playback.state.collectAsStateWithLifecycle()
@@ -286,7 +287,7 @@ fun HarkenApp(session: ArkSession) {
                             )
                         }
                         composable(Tab.Library.route) {
-                            LibraryScreen(libraryTab, { libraryTab = it }, LibraryData(loaded, playlists, albums, artists, tracks, offline), albumOf, playing, act)
+                            LibraryScreen(libraryTab, { libraryTab = it }, LibraryData(loaded, playlists, albums, artists, tracks, offline, complete), albumOf, playing, act)
                         }
                         composable("album/{arg}") { back ->
                             val page = Page.parse("album/" + back.arguments?.getString("arg")) as? Page.ForAlbum

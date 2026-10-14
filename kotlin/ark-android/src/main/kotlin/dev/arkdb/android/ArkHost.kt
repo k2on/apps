@@ -63,9 +63,12 @@ public class ArkHost(app: Application) : AndroidViewModel(app) {
         apply(m.start(remembered.server, remembered.login, remembered.asked))
     }
 
-    // The app's module, read and verified once, off the main thread.
+    // The app's module, read once, off the main thread — and verified only when
+    // these bytes have not passed before (`ModuleMemory`).
+    private val modules = ModuleMemory(PrefsShelf(app))
+
     private suspend fun domain(): Domain =
-        domain ?: withContext(Dispatchers.IO) { Domain.fromBytes(module()) }.also { domain = it }
+        domain ?: withContext(Dispatchers.IO) { modules.domain(module()) }.also { domain = it }
 
     /** An event from a screen, a redirect or a dialog. */
     public fun send(event: Event) {

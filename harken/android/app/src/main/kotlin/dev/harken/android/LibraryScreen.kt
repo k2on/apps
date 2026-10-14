@@ -55,6 +55,8 @@ data class LibraryData(
     val artists: List<Artist>,
     val tracks: List<Track>,
     val offline: String?,
+    /** Whether the artists have been read: they are read after Home's lists, milliseconds later. */
+    val complete: Boolean = true,
 )
 
 @Composable
@@ -86,7 +88,8 @@ fun LibraryScreen(tab: LibraryTab, onTab: (LibraryTab) -> Unit, data: LibraryDat
         when (tab) {
             LibraryTab.Playlists -> Playlists(data.playlists, act)
             LibraryTab.Albums -> Albums(data.albums, act)
-            LibraryTab.Artists -> Artists(data.artists, act)
+            // Before the artists arrive, nothing — not "no artists": they are milliseconds away.
+            LibraryTab.Artists -> if (data.complete) Artists(data.artists, act)
             LibraryTab.Songs -> Songs(data.tracks, albumOf, playing, act)
         }
     }

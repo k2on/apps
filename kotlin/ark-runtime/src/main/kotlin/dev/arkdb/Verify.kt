@@ -225,8 +225,18 @@ public object Verify {
         // D2 What a client runs names only what its person holds.
         if (errs.isEmpty()) errs.addAll(ScopeCheck.check(m, named))
         if (errs.isNotEmpty()) throw VerifyFailed(errs)
-        return m.copy(functions = m.functions.map(Normalize::function))
+        return normalized(m)
     }
+
+    /**
+     * What [verify] makes of a module — its orders completed, its functions normalized — without
+     * its checks: for bytes that passed them before, whose answer is a function of the bytes. A
+     * module that has not passed is never to be handed here.
+     */
+    public fun prepare(m0: Module): Module = normalized(completeOrders(m0))
+
+    private fun normalized(m: Module): Module =
+        m.copy(functions = m.functions.map(Normalize::function))
 
     private fun duplicates(names: List<String>): List<String> {
         val seen = HashSet<String>()

@@ -150,6 +150,13 @@ private constructor(
             File(root, "ark/server-" + server.replace(Regex("[^A-Za-z0-9]"), "_") + "/replica")
 
         /**
+         * A session over a peer the caller opened, and links itself if at all — a test, or a
+         * transport of the caller's own — pumped like any other.
+         */
+        public fun over(peer: Peer, server: String, login: Login): ArkSession =
+            ArkSession(server, login, peer, {}, {}).also { it.start() }
+
+        /**
          * Open the peer over `server`'s replica under `root`, as `login`, link it, and start
          * pumping. Blocking: the replica is read from storage.
          */
