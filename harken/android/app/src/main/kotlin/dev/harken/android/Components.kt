@@ -23,15 +23,20 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -40,6 +45,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 
 /** What a screen can ask for. Every one does nothing unless the app says otherwise. */
 interface Do {
@@ -257,13 +263,29 @@ fun Empty(icon: ImageVector, title: String, sentence: String, modifier: Modifier
     }
 }
 
-/** Before the library has been read once. */
+/** How long [Fetching] waits before it says anything. */
+const val FETCHING_DELAY_MS = 600L
+
+/**
+ * The library is not on this phone yet — the replica has never had the server's snapshot — and is
+ * on its way from `host`: said quietly, and only after a beat, so a snapshot that lands at once
+ * never shows it. A remembered launch with the library here never draws it: the splash is up until
+ * Home has its lists.
+ */
 @Composable
-fun Loading() {
-    Column(Modifier.fillMaxSize().padding(top = 96.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        CircularProgressIndicator()
+fun Fetching(host: String, delayMs: Long = FETCHING_DELAY_MS) {
+    var shown by remember { mutableStateOf(delayMs <= 0) }
+    LaunchedEffect(Unit) {
+        if (!shown) {
+            delay(delayMs)
+            shown = true
+        }
+    }
+    if (!shown) return
+    Column(Modifier.fillMaxWidth().padding(horizontal = Space.xxl, vertical = 48.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("Getting your library from $host…", style = quiet(MaterialTheme.typography.bodyMedium), textAlign = TextAlign.Center)
         Spacer(Modifier.height(Space.l))
-        Text("Opening your library…", style = quiet(MaterialTheme.typography.bodyMedium))
+        LinearProgressIndicator(Modifier.width(96.dp), color = MaterialTheme.colorScheme.primary, trackColor = MaterialTheme.colorScheme.surfaceVariant)
     }
 }
 

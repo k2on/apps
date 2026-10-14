@@ -17,6 +17,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -63,12 +64,22 @@ public class ArkHost(app: Application) : AndroidViewModel(app) {
         apply(m.start(remembered.server, remembered.login, remembered.asked))
     }
 
-    // The app's module, read once, off the main thread — and verified only when
-    // these bytes have not passed before (`ModuleMemory`).
+    // The app's module, read once — on the session's thread at launch, off the
+    // main thread for the server step — and verified only when these bytes
+    // have not passed before (`ModuleMemory`).
     private val modules = ModuleMemory(PrefsShelf(app))
+    private val domainLock = Any()
 
-    private suspend fun domain(): Domain =
-        domain ?: withContext(Dispatchers.IO) { modules.domain(module()) }.also { domain = it }
+    private fun loadDomain(): Domain =
+        synchronized(domainLock) { domain ?: modules.domain(module()).also { domain = it } }
+
+    private val _ready = MutableStateFlow(false)
+    /**
+     * Whether the first frame worth showing is there: a step of the onboarding, which draws at
+     * once, or — over a session — the app having said its first screen has what it draws
+     * ([ArkSession.ready]). What the activity's splash waits for (`holdSplash`).
+     */
+    public val ready: StateFlow<Boolean> = _ready.asStateFlow()
 
     /** An event from a screen, a redirect or a dialog. */
     public fun send(event: Event) {
@@ -87,6 +98,7 @@ public class ArkHost(app: Application) : AndroidViewModel(app) {
 
     private fun apply(move: Move) {
         _step.value = move.step
+        if (move.step !is Step.Running) _ready.value = true
         for (e in move.effects) run(e)
     }
 
@@ -94,7 +106,7 @@ public class ArkHost(app: Application) : AndroidViewModel(app) {
         when (e) {
             is Effect.FindServer ->
                 viewModelScope.launch {
-                    val hash = domain().hash
+                    val hash = withContext(Dispatchers.IO) { loadDomain() }.hash
                     val found =
                         withContext(Dispatchers.IO) {
                             Probe.find(e.typed, hash, appName, Probe::http)
@@ -121,34 +133,28 @@ public class ArkHost(app: Application) : AndroidViewModel(app) {
             is Effect.Request -> _request.value = e.permission
             is Effect.MarkAsked -> remembered.markAsked(e.key)
             is Effect.OpenSession -> {
+                // At once: the peer opens on the session's own thread, and the app's
+                // first screen is composed meanwhile.
+                val s =
+                    ArkSession.open(
+                        ::loadDomain,
+                        getApplication<Application>().filesDir,
+                        e.server,
+                        e.login,
+                        onDenied = { why -> viewModelScope.launch { send(Event.Denied(why)) } },
+                        onSignOut = { viewModelScope.launch { send(Event.SignOut) } },
+                        onFailed = { viewModelScope.launch { failed(e.server) } },
+                    )
+                _session.value = s
                 viewModelScope.launch {
-                    val d = domain()
-                    val s =
-                        withContext(Dispatchers.IO) {
-                            try {
-                                ArkSession.open(
-                                    d,
-                                    getApplication<Application>().filesDir,
-                                    e.server,
-                                    e.login,
-                                    onDenied = { why ->
-                                        viewModelScope.launch { send(Event.Denied(why)) }
-                                    },
-                                    onSignOut = { viewModelScope.launch { send(Event.SignOut) } },
-                                )
-                            } catch (x: Exception) {
-                                null
-                            }
-                        }
-                    if (s == null) {
-                        // A replica that cannot be opened is not a reason to lose the login:
-                        // signing in again opens it again.
-                        _step.value =
-                            Step.SignIn(
-                                e.server,
-                                error =
-                                    "This phone's copy of the library couldn't be opened. Sign in to try again.")
-                    } else _session.value = s
+                    s.isReady.first { it }
+                    _ready.value = true
+                }
+                // Signed in just now: opening, until the replica has what the server had —
+                // or the server cannot be reached, and there is nothing more to wait for.
+                viewModelScope.launch {
+                    s.status.first { it.synced || it.link == "waiting" }
+                    if (_session.value === s) send(Event.Synced)
                 }
             }
             is Effect.CloseSession -> {
@@ -156,6 +162,19 @@ public class ArkHost(app: Application) : AndroidViewModel(app) {
                 _session.value = null
             }
         }
+    }
+
+    // A replica that cannot be opened is not a reason to lose the login:
+    // signing in again opens it again.
+    private fun failed(server: String) {
+        _session.value?.close()
+        _session.value = null
+        _step.value =
+            Step.SignIn(
+                server,
+                error =
+                    "This phone's copy of the library couldn't be opened. Sign in to try again.")
+        _ready.value = true
     }
 
     override fun onCleared() {

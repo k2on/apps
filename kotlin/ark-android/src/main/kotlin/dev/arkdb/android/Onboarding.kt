@@ -9,7 +9,17 @@
 //
 // What it remembers decides where it starts: nothing is the server step, a
 // server alone is signing in, a server and a login is the app — by way of
-// any permission the app declares that has not been asked for yet. A
+// any permission the app declares that has not been asked for yet.
+//
+// **A remembered login goes straight to the app; only a sign-in opens.**
+// A launch with a login remembered is the app at once, over a session
+// whose replica is already on the phone — there is nothing to wait for
+// that a screen should say, and the activity holds the system splash
+// over the few hundred milliseconds it takes (`holdSplash`). Signing in,
+// though, is the one time the library may genuinely not be here yet: the
+// replica is empty until the server's snapshot arrives. So a sign-in goes
+// to [Step.Opening], which says so, and on to the app when the session has
+// what the server had ([Event.Synced]). A
 // server's `Denied` (a revoked or expired session) and signing out both
 // come back to *Sign in* with the server kept; the replica and its pending
 // intents are never the onboarding's to touch, so signing in again as the
@@ -64,9 +74,22 @@ public sealed class Step {
         val error: String? = null
     ) : Step()
 
-    /** One permission, asked once. */
-    public data class Ask(val server: String, val login: Login, val permission: Permission) :
-        Step()
+    /**
+     * One permission, asked once — on the way to the app over a login that was `remembered` at
+     * launch, or one just signed in.
+     */
+    public data class Ask(
+        val server: String,
+        val login: Login,
+        val permission: Permission,
+        val remembered: Boolean = false,
+    ) : Step()
+
+    /**
+     * Signed in just now: the session is open and the server's snapshot is on its way, until
+     * [Event.Synced]. Never the step of a launch with a login remembered.
+     */
+    public data class Opening(val server: String, val login: Login) : Step()
 
     /** The app, over a session at `server` as `login`. */
     public data class Running(val server: String, val login: Login) : Step()
@@ -117,6 +140,12 @@ public sealed class Event {
 
     /** The server turned the session away. */
     public data class Denied(val reason: String) : Event()
+
+    /**
+     * The session holds what the server had — or the server cannot be reached, and nothing more is
+     * coming soon: either way, what there is to show is there.
+     */
+    public object Synced : Event()
 
     public object SignOut : Event()
 }
@@ -175,20 +204,42 @@ public class Onboarding(
         when {
             server == null -> Move(Step.Server())
             login == null -> Move(Step.SignIn(server))
-            else -> onward(server, login, asked, emptyList())
+            else -> onward(server, login, asked, emptyList(), remembered = true)
         }
 
-    // Signed in: the next permission to ask, or the app.
+    // Signed in: the next permission to ask, then the app — at once over a
+    // login remembered, by way of opening over one just signed in.
     private fun onward(
         server: String,
         login: Login,
         asked: Set<String>,
-        before: List<Effect>
+        before: List<Effect>,
+        remembered: Boolean,
     ): Move {
         val next = pending(asked).firstOrNull()
-        return if (next != null) Move(Step.Ask(server, login, next), before)
-        else Move(Step.Running(server, login), before + Effect.OpenSession(server, login))
+        val open = before + Effect.OpenSession(server, login)
+        return when {
+            next != null -> Move(Step.Ask(server, login, next, remembered), before)
+            remembered -> Move(Step.Running(server, login), open)
+            else -> Move(Step.Opening(server, login), open)
+        }
     }
+
+    // The server turned the session away, or the person signed out: back to
+    // signing in, the server kept, the session closed and the login forgotten.
+    private fun out(server: String, event: Event): Move? =
+        when (event) {
+            is Event.Denied ->
+                Move(
+                    Step.SignIn(
+                        server,
+                        error =
+                            "The server signed you out (${event.reason}). Sign in again — what's on this phone is kept, and syncs once you do."),
+                    listOf(Effect.CloseSession, Effect.ForgetLogin))
+            is Event.SignOut ->
+                Move(Step.SignIn(server), listOf(Effect.CloseSession, Effect.ForgetLogin))
+            else -> null
+        }
 
     /** One event, at one step; an event that means nothing there leaves it as it was. */
     public fun next(step: Step, event: Event, asked: Set<String>): Move {
@@ -242,7 +293,8 @@ public class Onboarding(
                                 step.server,
                                 event.login,
                                 asked,
-                                listOf(Effect.RememberLogin(event.login)))
+                                listOf(Effect.RememberLogin(event.login)),
+                                remembered = false)
                     is Event.SignInFailed ->
                         if (step.phase != Step.Phase.Exchanging) same
                         else Move(step.copy(phase = Step.Phase.Idle, error = event.why))
@@ -259,24 +311,16 @@ public class Onboarding(
                             step.server,
                             step.login,
                             asked + step.permission.key,
-                            listOf(Effect.MarkAsked(step.permission.key)))
+                            listOf(Effect.MarkAsked(step.permission.key)),
+                            step.remembered)
                     else -> same
                 }
-            is Step.Running ->
+            is Step.Opening ->
                 when (event) {
-                    is Event.Denied ->
-                        Move(
-                            Step.SignIn(
-                                step.server,
-                                error =
-                                    "The server signed you out (${event.reason}). Sign in again — what's on this phone is kept, and syncs once you do."),
-                            listOf(Effect.CloseSession, Effect.ForgetLogin))
-                    is Event.SignOut ->
-                        Move(
-                            Step.SignIn(step.server),
-                            listOf(Effect.CloseSession, Effect.ForgetLogin))
-                    else -> same
+                    is Event.Synced -> Move(Step.Running(step.server, step.login))
+                    else -> out(step.server, event) ?: same
                 }
+            is Step.Running -> out(step.server, event) ?: same
         }
     }
 }

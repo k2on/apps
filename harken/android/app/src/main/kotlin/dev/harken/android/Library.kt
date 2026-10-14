@@ -172,6 +172,8 @@ class Library(private val session: ArkSession) {
             playlistsFlow.value = playlistsHeld.rows.toList()
             albumsFlow.value = albumsHeld.rows.toList()
             _loaded.value = true
+            // Home has what it draws: the splash may go.
+            session.ready()
             unhook = session.onPump { tick(it) }
             session.post { q ->
                 hydrate(q, artistsHeld)

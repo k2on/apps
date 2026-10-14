@@ -39,13 +39,16 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Typography
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.util.Consumer
@@ -137,7 +140,13 @@ public fun ArkApp(
             val open = session
             when {
                 s is Step.Running && open != null -> app(open)
-                s is Step.Running -> Opening(identity)
+                // The session is made with the step, so this is a frame at most; the
+                // splash is over it. Never a page that says it is opening.
+                s is Step.Running ->
+                    Surface(
+                        color = MaterialTheme.colorScheme.background,
+                        modifier = Modifier.fillMaxSize()) {}
+                s is Step.Opening -> Opening(identity, s.server)
                 s is Step.Server ->
                     ServerStep(
                         identity,

@@ -151,6 +151,7 @@ fun HarkenApp(session: ArkSession) {
     var startedFrom by remember { mutableStateOf<Page?>(null) }
 
     val offline = if (status.link == "waiting" || status.link == "offline") session.server.substringAfter("://") else null
+    val fetching = if (!status.synced) session.server.substringAfter("://") else null
     val playing = player.now?.id
     val albumOf: (Track) -> Album? = { t ->
         details[t.id]?.album?.takeIf { it.isNotEmpty() }?.let { name -> albums.firstOrNull { it.name == name } ?: Album(name, t.creator, "", 0) }
@@ -256,7 +257,7 @@ fun HarkenApp(session: ArkSession) {
                 Chrome(tab, player, controls, onTab = { nav.tab(it) }, snackbar) {
                     NavHost(nav, startDestination = Tab.Home.route) {
                         composable(Tab.Home.route) {
-                            HomeScreen(HomeData(loaded, last, tracks, playlists, albums, offline), albumOf, act)
+                            HomeScreen(HomeData(loaded, last, tracks, playlists, albums, offline, fetching), albumOf, act)
                         }
                         composable(Tab.Search.route) {
                             var needle by rememberSaveable { mutableStateOf("") }

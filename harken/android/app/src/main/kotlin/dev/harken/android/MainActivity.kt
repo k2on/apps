@@ -3,7 +3,7 @@
 // scheme its sign-in comes back on, the mark, the module — and the one
 // permission the player wants. `launchMode="singleTask"` and the
 // `harken://auth` filter in the manifest are what bring the sign-in's code
-// back here.
+// back here. The activity's theme is the splash's (res/values/themes.xml).
 package dev.harken.android
 
 import android.os.Bundle
@@ -14,12 +14,16 @@ import androidx.compose.ui.res.painterResource
 import dev.arkdb.android.AppIdentity
 import dev.arkdb.android.ArkApp
 import dev.arkdb.android.Permission
+import dev.arkdb.android.holdSplash
 
 /** Why harken asks for notifications, in the onboarding's words. */
 const val WHY_NOTIFY = "So what's playing, and its controls, can be in a notification and on the lock screen."
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        // The system splash, kept until Home has what it draws (or 1.5 s): a remembered
+        // launch opens on Home, populated, and never on a page that says it is opening.
+        holdSplash()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {

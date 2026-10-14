@@ -336,6 +336,10 @@
    "module": "sha256-vum0RmT/N+LiIuvN5LMOOClKP5J0Ue3GEf7H9FT/pEI=",
    "pom": "sha256-QXxqoCeex42wL+OV1AGgm8qqnYLZNRSKPi3pD9842Uw="
   },
+  "androidx/core#core-splashscreen/1.0.1": {
+   "module": "sha256-DQK4vu4v9ir9Onk5O0/TzLfJ9zJm2/3Sk1CHXVQwq8c=",
+   "pom": "sha256-keX0dPnlaURuo1xbE1fr75e4KLKZ7druT54buso4Zik="
+  },
   "androidx/core#core/1.1.0": {
    "pom": "sha256-2uRhMs3NRreYQl98t4/WWJCGm20mEBzNzUNGGk9RdUw="
   },
@@ -360,6 +364,9 @@
   },
   "androidx/core/core-ktx/1.15.0/core-ktx-1.15.0": {
    "aar": "sha256-xyyX/0oyMIvK8wYe6l3fM0Vc5BPO5KodXIJEDFdZ1Lw="
+  },
+  "androidx/core/core-splashscreen/1.0.1/core-splashscreen-1.0.1": {
+   "aar": "sha256-JcgTrneVyZ3SBihScEP40EJesugm5sQst3rLtsAd3mg="
   },
   "androidx/core/core/1.13.1/core-1.13.1": {
    "aar": "sha256-LCfeGZU1Z1AFVTBmWXpLIPoe6nwiirTvazK1/jnKH1k="

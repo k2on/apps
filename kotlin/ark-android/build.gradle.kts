@@ -55,6 +55,10 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     // The sign-in's Custom Tab.
     implementation("androidx.browser:browser:1.8.0")
+    // The system splash, held over a remembered launch until the app's first
+    // screen has what it draws (`holdSplash`); `api`, because the app's theme
+    // is a `Theme.SplashScreen`.
+    api("androidx.core:core-splashscreen:1.0.1")
 
     testImplementation("junit:junit:4.13.2")
 }

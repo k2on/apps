@@ -37,20 +37,25 @@ data class HomeData(
     val albums: List<Album>,
     /** The server's host while it cannot be reached; null while it can. */
     val offline: String?,
+    /** The server's host while the library has never arrived from it; null once it has. */
+    val fetching: String? = null,
 )
 
 /** How many of the newest songs Home's shelf shows. */
 const val RECENT = 12
 
 @Composable
-fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do) {
+fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do, placeholderDelayMs: Long = FETCHING_DELAY_MS) {
     LazyColumn(Modifier.fillMaxSize()) {
         item {
             TabTitle("Home") { IconButton(onClick = act::settings) { Glyph(Glyphs.Settings, "Settings") } }
         }
         if (data.offline != null) item { Offline(data.offline) }
         when {
-            !data.loaded -> item { Loading() }
+            // Not read yet: the splash is over this for a remembered launch, and past its
+            // ceiling the shell shows with what it has — the lists fill in.
+            !data.loaded -> {}
+            data.tracks.isEmpty() && data.fetching != null -> item { Fetching(data.fetching, placeholderDelayMs) }
             data.tracks.isEmpty() ->
                 item {
                     Empty(

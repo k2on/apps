@@ -25,12 +25,18 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ColorFilter
@@ -38,13 +44,38 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 
-/** Where the session is being opened: the mark, and nothing to press. */
+/** How long [Opening] waits before it says anything: a replica already here never shows it. */
+public const val OPENING_DELAY_MS: Long = 600
+
+/**
+ * Signed in just now, and the library on its way from the server (`Step.Opening`): the mark and a
+ * sentence saying where from, quietly, and only after [OPENING_DELAY_MS] — the page's own ground
+ * until then. Never drawn for a launch with a login remembered: the splash covers that one.
+ */
 @Composable
-public fun Opening(identity: AppIdentity) {
-    Page(identity, title = identity.name, sentence = "Opening your library…") {
-        CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
+public fun Opening(identity: AppIdentity, server: String, delayMs: Long = OPENING_DELAY_MS) {
+    var shown by remember { mutableStateOf(delayMs <= 0) }
+    LaunchedEffect(Unit) {
+        if (!shown) {
+            delay(delayMs)
+            shown = true
+        }
     }
+    if (!shown) {
+        Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {}
+        return
+    }
+    Page(
+        identity,
+        title = identity.name,
+        sentence = "Getting your library from ${Probe.display(server)}…") {
+            LinearProgressIndicator(
+                Modifier.width(96.dp).align(Alignment.CenterHorizontally),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.surfaceVariant)
+        }
 }
 
 /** Step one: the server's address. */

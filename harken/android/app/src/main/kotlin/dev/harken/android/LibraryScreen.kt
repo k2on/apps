@@ -81,10 +81,8 @@ fun LibraryScreen(tab: LibraryTab, onTab: (LibraryTab) -> Unit, data: LibraryDat
             }
         }
         if (data.offline != null) Offline(data.offline)
-        if (!data.loaded) {
-            Loading()
-            return@Column
-        }
+        // Not read yet: nothing, not a loading page — it is milliseconds away.
+        if (!data.loaded) return@Column
         when (tab) {
             LibraryTab.Playlists -> Playlists(data.playlists, act)
             LibraryTab.Albums -> Albums(data.albums, act)

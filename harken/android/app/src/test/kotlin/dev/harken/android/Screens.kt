@@ -37,6 +37,7 @@ import dev.arkdb.android.PermissionStep
 import dev.arkdb.android.ServerStep
 import dev.arkdb.android.SignInStep
 import dev.arkdb.android.Permission
+import dev.arkdb.android.Opening
 import dev.arkdb.android.Step
 import dev.arkdb.client.Account
 import dev.arkdb.client.Login
@@ -135,6 +136,13 @@ class Screens {
         shot("notifications") { PermissionStep(identity(), Step.Ask(server, login, Permission.Notifications(WHY_NOTIFY)), {}, {}) }
     }
 
+    // Signed in just now, the server's snapshot on its way, after the page's beat: the one
+    // place the onboarding says it is opening, and never on a remembered launch.
+    @Test
+    fun a4_opening() {
+        shot("first-sign-in") { Opening(identity(), server, delayMs = 0) }
+    }
+
     // The tabs ---------------------------------------------------------------
 
     @Test
@@ -150,8 +158,13 @@ class Screens {
         shot("empty") {
             tab(Tab.Home, PlayerState()) { HomeScreen(HomeData(true, null, emptyList(), emptyList(), emptyList(), null), Demo::albumOf, Idle) }
         }
+        // The library not here yet — the server's snapshot on its way — as it reads after its
+        // beat. A remembered launch with the library on the phone never draws this: the splash
+        // is up until Home has its lists.
         shot("loading") {
-            tab(Tab.Home, PlayerState()) { HomeScreen(HomeData(false, null, emptyList(), emptyList(), emptyList(), null), Demo::albumOf, Idle) }
+            tab(Tab.Home, PlayerState()) {
+                HomeScreen(HomeData(true, null, emptyList(), emptyList(), emptyList(), null, fetching = "music.example.com"), Demo::albumOf, Idle, placeholderDelayMs = 0)
+            }
         }
     }
 

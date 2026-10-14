@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The launch: the system splash (androidx.core:core-splashscreen) on the
+         page's own ground with the mark in the gold, held by `holdSplash` until
+         Home has what it draws, then the theme the app draws in. -->
+    <style name="Theme.Harken.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/splash_ground</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash</item>
+        <item name="postSplashScreenTheme">@android:style/Theme.DeviceDefault.NoActionBar</item>
+    </style>
+</resources>

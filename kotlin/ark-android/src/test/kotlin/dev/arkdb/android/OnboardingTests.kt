@@ -24,7 +24,8 @@ class OnboardingTests {
         assertEquals(Move(Step.Server()), machine.start(null, login, emptySet()))
         assertEquals(Move(Step.SignIn(server)), machine.start(server, null, emptySet()))
         assertEquals(
-            Move(Step.Ask(server, login, notify)), machine.start(server, login, emptySet()))
+            Move(Step.Ask(server, login, notify, remembered = true)),
+            machine.start(server, login, emptySet()))
         assertEquals(
             Move(Step.Running(server, login), listOf(Effect.OpenSession(server, login))),
             machine.start(server, login, setOf("notifications")))
@@ -94,9 +95,10 @@ class OnboardingTests {
         assertEquals(
             Move(Step.Ask(server, login, notify), listOf(Effect.RememberLogin(login))),
             machine.next(exchanging, Event.SignedIn(login), emptySet()))
+        // Signed in just now: opening, until the session has what the server had.
         assertEquals(
             Move(
-                Step.Running(server, login),
+                Step.Opening(server, login),
                 listOf(Effect.RememberLogin(login), Effect.OpenSession(server, login))),
             machine.next(exchanging, Event.SignedIn(login), setOf("notifications")))
         assertEquals(
@@ -118,12 +120,18 @@ class OnboardingTests {
         val ask = Step.Ask(server, login, notify)
         assertEquals(
             Move(ask, listOf(Effect.Request(notify))), machine.next(ask, Event.Allow, emptySet()))
-        // Allowed or not, answered is answered: marked, and on to the app.
+        // Allowed or not, answered is answered: marked, and on to the app — opening, after a
+        // sign-in; at once, over a login that was remembered.
+        assertEquals(
+            Move(
+                Step.Opening(server, login),
+                listOf(Effect.MarkAsked("notifications"), Effect.OpenSession(server, login))),
+            machine.next(ask, Event.Answered, emptySet()))
         assertEquals(
             Move(
                 Step.Running(server, login),
                 listOf(Effect.MarkAsked("notifications"), Effect.OpenSession(server, login))),
-            machine.next(ask, Event.Answered, emptySet()))
+            machine.next(ask.copy(remembered = true), Event.Answered, emptySet()))
         assertEquals(Move(ask), machine.next(ask, Event.SignOut, emptySet()))
         // Two permissions: one screen each, in order.
         val two =
@@ -159,6 +167,52 @@ class OnboardingTests {
         assertEquals(listOf(Effect.CloseSession, Effect.ForgetLogin), m.effects)
     }
 
+    /**
+     * A launch with a login remembered never opens: whatever the permissions, and whatever happens
+     * while it runs, no move from it is [Step.Opening] — the splash covers the session opening, and
+     * Home is what lifts it. Only a sign-in opens, and [Event.Synced] ends it.
+     */
+    @Test
+    fun aRememberedLaunchNeverOpens() {
+        val events =
+            listOf(
+                Event.Answered,
+                Event.Allow,
+                Event.Synced,
+                Event.Returned,
+                Event.Code("c"),
+                Event.Check,
+                Event.OpenSignIn)
+        for (m in listOf(machine, old)) for (asked in listOf(emptySet(), setOf("notifications"))) {
+            var move = m.start(server, login, asked)
+            var seen = asked
+            val steps = mutableListOf(move.step)
+            for (e in events) {
+                move = m.next(move.step, e, seen)
+                if (e == Event.Answered) seen = seen + "notifications"
+                steps.add(move.step)
+            }
+            assertEquals(
+                "a remembered launch went by way of opening: $steps",
+                emptyList<Step>(),
+                steps.filterIsInstance<Step.Opening>())
+            assertEquals(Step.Running(server, login), steps.last())
+        }
+        // Opening is a sign-in's, and ends when the session has what the server had.
+        val opening = Step.Opening(server, login)
+        assertEquals(
+            Move(Step.Running(server, login)), machine.next(opening, Event.Synced, emptySet()))
+        for (e in listOf(Event.Answered, Event.Returned, Event.Code("c"))) assertEquals(
+            Move(opening), machine.next(opening, e, emptySet()))
+        // And it can be turned away or signed out of like the app.
+        assertEquals(
+            listOf(Effect.CloseSession, Effect.ForgetLogin),
+            machine.next(opening, Event.Denied("revoked"), emptySet()).effects)
+        assertEquals(
+            Move(Step.SignIn(server), listOf(Effect.CloseSession, Effect.ForgetLogin)),
+            machine.next(opening, Event.SignOut, emptySet()))
+    }
+
     @Test
     fun signingOutKeepsTheServer() {
         val running = Step.Running(server, login)
@@ -174,6 +228,7 @@ class OnboardingTests {
                 Event.Code("c"),
                 Event.Answered,
                 Event.Allow,
+                Event.Synced,
                 Event.ChangeServer)) assertEquals(
             Move(running), machine.next(running, e, emptySet()))
     }
@@ -201,6 +256,8 @@ class OnboardingTests {
         go(Event.Code("c"))
         go(Event.SignedIn(login))
         go(Event.Answered)
+        assertEquals(Step.Opening(server, login), step)
+        go(Event.Synced)
         assertEquals(Step.Running(server, login), step)
         // The next launch goes straight in.
         assertEquals(Step.Running(server, login), machine.start(r.server, r.login, r.asked).step)

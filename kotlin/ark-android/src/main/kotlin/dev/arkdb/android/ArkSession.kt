@@ -7,9 +7,19 @@
 // thread: the pump, and whatever the app hands [post] or [run]. After each
 // pump every [onPump] listener is called there, with the peer — which is
 // where an app takes its changes and splices its views. What a screen may
-// ask without the thread is [status]: linked, and how much is not synced.
-// A `Denied` from the server is the onboarding's, not the app's: the
-// session stops and says so to its host, which goes back to *Sign in*.
+// ask without the thread is [status]: linked, how much is not synced, and
+// whether the replica holds what the server had. A `Denied` from the
+// server is the onboarding's, not the app's: the session stops and says so
+// to its host, which goes back to *Sign in*.
+//
+// **The session exists at once; its peer opens on its thread.** [open]
+// returns before anything is read: the module is decoded (and verified,
+// unless these bytes passed before), the replica loaded and what was
+// pending replayed as the thread's first task, and everything the app
+// posts runs after it, in order. So the app's first screen is composed
+// while the peer opens rather than after, and says it has what it draws
+// with [ready] — which is what the activity's splash waits for. A replica
+// that cannot be opened ends the session and says so ([open]'s `onFailed`).
 //
 // The replica is one directory per server, not per person: the log is the
 // server's and every person reads it, and a person signing in again after
@@ -27,6 +37,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -43,6 +54,12 @@ public data class SessionStatus(
     val link: String = "connecting",
     /** Changes made here the server has not answered yet. */
     val pending: Int = 0,
+    /**
+     * The replica holds what the server had: it confirmed something before and is not partway
+     * through a page, or the server has served this connection to the end. False on a first sign-in
+     * until the server's snapshot has arrived.
+     */
+    val synced: Boolean = false,
 )
 
 public class ArkSession
@@ -51,7 +68,6 @@ private constructor(
     public val server: String,
     /** Who is signed in. */
     public val login: Login,
-    private val peer: Peer,
     private val onDenied: (String) -> Unit,
     private val onSignOut: () -> Unit,
 ) {
@@ -61,18 +77,35 @@ private constructor(
         }
     private val listeners = CopyOnWriteArrayList<(Peer) -> Unit>()
     private val _status = MutableStateFlow(SessionStatus())
+    private val _ready = MutableStateFlow(false)
     private var ticking: ScheduledFuture<*>? = null
     @Volatile private var closed = false
 
-    /** Linked, and how much is not synced; moved by every pump. */
+    // Set on the peer's thread, by its first task; read there only.
+    private var peer: Peer? = null
+
+    /** Linked, how much is not synced, and whether it holds what the server had; every pump. */
     public val status: StateFlow<SessionStatus> = _status.asStateFlow()
 
-    private fun start() {
+    /**
+     * The app has what its first screen draws ([ready] was called): what the activity's splash
+     * waits for (`holdSplash`).
+     */
+    public val isReady: StateFlow<Boolean> = _ready.asStateFlow()
+
+    /** Say the first screen has what it draws: the splash may go. Once is enough; more is no-op. */
+    public fun ready() {
+        _ready.value = true
+    }
+
+    private fun start(p: Peer) {
+        peer = p
         ticking = thread.scheduleWithFixedDelay({ tick() }, 0, PUMP_MS, TimeUnit.MILLISECONDS)
     }
 
     private fun tick() {
-        if (closed) return
+        val peer = this.peer
+        if (closed || peer == null) return
         val pumped =
             try {
                 peer.pump()
@@ -80,7 +113,9 @@ private constructor(
                 null
             }
         val s = peer.status()
-        val now = SessionStatus(linked = s.linked, link = s.link, pending = s.pending)
+        val c = peer.client
+        val synced = (c.served && !c.more) || (s.cursor > 0 && !c.more)
+        val now = SessionStatus(linked = s.linked, link = s.link, pending = s.pending, synced)
         if (now != _status.value) _status.value = now
         for (l in listeners) {
             try {
@@ -99,26 +134,35 @@ private constructor(
         return { listeners.remove(listener) }
     }
 
-    /** Run `f` on the peer's thread, and return. */
+    /** Run `f` on the peer's thread, once the peer is open, and return. */
     public fun post(f: (Peer) -> Unit) {
         if (closed) return
-        thread.execute { if (!closed) f(peer) }
+        thread.execute { peer?.takeIf { !closed }?.let(f) }
     }
 
-    /** Run `f` on the peer's thread and wait for what it returns. */
+    /**
+     * Run `f` on the peer's thread and wait for what it returns. A session that closed — or whose
+     * replica could not be opened — never answers: the wait is cancelled.
+     */
     public suspend fun <T> run(f: (Peer) -> T): T {
         val d = CompletableDeferred<T>()
-        thread.execute {
-            try {
-                d.complete(f(peer))
-            } catch (e: Throwable) {
-                d.completeExceptionally(e)
+        try {
+            thread.execute {
+                val p = peer
+                if (closed || p == null) d.cancel(CancellationException("the session is closed"))
+                else
+                    try {
+                        d.complete(f(p))
+                    } catch (e: Throwable) {
+                        d.completeExceptionally(e)
+                    }
             }
+        } catch (e: java.util.concurrent.RejectedExecutionException) {
+            d.cancel(CancellationException("the session is closed"))
         }
         return d.await()
     }
 
-    /** Stop the pump and close the peer, written down; its storage stays for the next session. */
     /**
      * Sign out: the onboarding forgets the login, closes this session — its replica and whatever is
      * pending kept — and goes back to *Sign in* with the server kept.
@@ -127,16 +171,21 @@ private constructor(
         onSignOut()
     }
 
+    /** Stop the pump and close the peer, written down; its storage stays for the next session. */
     public fun close() {
         if (closed) return
-        thread.execute {
-            ticking?.cancel(false)
-            closed = true
-            try {
-                peer.close()
-            } catch (e: Exception) {
-                // Written down as far as it could be; the next open replays the rest.
+        try {
+            thread.execute {
+                ticking?.cancel(false)
+                closed = true
+                try {
+                    peer?.close()
+                } catch (e: Exception) {
+                    // Written down as far as it could be; the next open replays the rest.
+                }
             }
+        } catch (e: java.util.concurrent.RejectedExecutionException) {
+            closed = true
         }
         thread.shutdown()
     }
@@ -154,28 +203,41 @@ private constructor(
          * transport of the caller's own — pumped like any other.
          */
         public fun over(peer: Peer, server: String, login: Login): ArkSession =
-            ArkSession(server, login, peer, {}, {}).also { it.start() }
+            ArkSession(server, login, {}, {}).also { s -> s.thread.execute { s.start(peer) } }
 
         /**
-         * Open the peer over `server`'s replica under `root`, as `login`, link it, and start
-         * pumping. Blocking: the replica is read from storage.
+         * The session over `server`'s replica under `root`, as `login`, at once; on its thread,
+         * first, the module from `domain` and the peer opened over the replica, linked and pumped.
+         * If that fails — a module that does not verify, a replica that does not read — the session
+         * closes, nothing posted to it runs, and `onFailed` says why.
          */
         public fun open(
-            domain: Domain,
+            domain: () -> Domain,
             root: File,
             server: String,
             login: Login,
             onDenied: (String) -> Unit,
             onSignOut: () -> Unit,
+            onFailed: (Exception) -> Unit = {},
         ): ArkSession {
-            val peer =
-                Peer.open(
-                    domain,
-                    DirStorage(directory(root, server)),
-                    Options.server(login.user.id, login.session, login.token))
-            peer.setRoles(login.user.roles)
-            peer.connect(Auth.socketUrl(server))
-            return ArkSession(server, login, peer, onDenied, onSignOut).also { it.start() }
+            val s = ArkSession(server, login, onDenied, onSignOut)
+            s.thread.execute {
+                try {
+                    val peer =
+                        Peer.open(
+                            domain(),
+                            DirStorage(directory(root, server)),
+                            Options.server(login.user.id, login.session, login.token))
+                    peer.setRoles(login.user.roles)
+                    peer.connect(Auth.socketUrl(server))
+                    s.start(peer)
+                } catch (e: Exception) {
+                    s.closed = true
+                    s.thread.shutdown()
+                    onFailed(e)
+                }
+            }
+            return s
         }
     }
 }
