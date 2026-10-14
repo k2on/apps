@@ -1,11 +1,14 @@
 // While a track plays, the player publishes its position twice a second, and
-// that must move the mini player and nothing else: no row of the list on
-// screen is composed again for it. The real `HarkenApp` — its library over a
-// peer holding sixty songs authored through `add_song`, its wiring, its
-// screens — on Paparazzi's frame clock, with the position ticked through
-// `Playback.show` where the media session would, over a session with no
-// thread of its own so the peer and the frame clock cannot race. And the covers: the rows of
-// one album on screen read the file and decode it once between them.
+// that must move the progress under the mini player and nothing else: not
+// the app's top, not the screen, not the mini player around it, no row of
+// the list on screen. At rest — nothing playing, nothing arriving — nothing
+// is composed again at all (`docs/plan-reactive.md`). The real `HarkenApp` —
+// its library over a peer holding sixty songs authored through `add_song`,
+// its wiring, its screens — on Paparazzi's frame clock, with the position
+// ticked through `Playback.showPosition` where the media session would, over
+// a session with no thread of its own so the peer and the frame clock cannot
+// race. And the covers: the rows of one album on screen read the file and
+// decode it once between them.
 package dev.harken.android
 
 import androidx.activity.OnBackPressedDispatcher
@@ -112,7 +115,9 @@ class ScrollTests {
         var playback: Playback? = null
         var rowsDrawn = -1
         var rowsDuring = -1
-        var playerDuring = -1
+        var progressDuring = -1
+        var atRest: Map<String, Int>? = null
+        var during: Map<String, Int>? = null
         Recompositions.sink = { what -> counts.merge(what, 1, Int::plus) }
         try {
             val view = ComposeView(paparazzi.context)
@@ -130,29 +135,41 @@ class ScrollTests {
                 LaunchedEffect(Unit) {
                     frames(300)
                     rowsDrawn = count("TrackRow")
+                    // A second at rest: nothing playing, nothing arriving.
+                    counts.clear()
+                    frames(1_000)
+                    atRest = HashMap(counts)
                     val p = playback!!
-                    p.show(PlayerState(now = Demo.playing(Demo.tracks[0]), playing = true, positionMs = 1_000, durationMs = 180_000))
+                    p.show(PlayerState(now = Demo.playing(Demo.tracks[0]), playing = true, durationMs = 180_000))
+                    p.showPosition(1_000)
                     frames(300)
                     counts.clear()
                     // Four of the player's ticks, half a second apart.
                     repeat(4) { k ->
-                        p.show(p.state.value.copy(positionMs = 1_500L + 500L * k))
+                        p.showPosition(1_500L + 500L * k)
                         frames(500)
                     }
+                    during = HashMap(counts)
                     rowsDuring = count("TrackRow")
-                    playerDuring = count("MiniPlayer")
+                    progressDuring = count("Progress")
                 }
             }
-            paparazzi.gif(view, "ticks", 0L, 4_000L, 20)
+            paparazzi.gif(view, "ticks", 0L, 5_000L, 20)
         } finally {
             Recompositions.sink = null
             session.close()
             peer.close()
         }
+        println("ticks: at rest for a second $atRest; over four position ticks $during")
         assertTrue("rows were drawn before the ticks: $rowsDrawn", rowsDrawn > 0)
+        assertEquals("composed at rest", emptyMap<String, Int>(), atRest)
         // The ticks did reach the screen: what shows the position was composed for each.
-        assertTrue("the mini player followed the position: $playerDuring", playerDuring >= 4)
+        assertTrue("the progress followed the position: $progressDuring", progressDuring >= 4)
         assertEquals("rows recomposed while the position ticked", 0, rowsDuring)
+        // And nothing above it: per tick, the app's top, its frame, the screen and the mini player
+        // around the hairline are each composed 0 times.
+        for (what in listOf("HarkenApp", "Chrome", "LibraryScreen", "MiniPlayer", "RecordCard"))
+            assertEquals("$what recomposed while the position ticked ($during)", 0, during!![what] ?: 0)
     }
 
     /** Eleven rows of one album ask for its cover at once: one read off the disk, one decode. */

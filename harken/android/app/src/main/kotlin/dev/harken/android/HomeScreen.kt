@@ -49,6 +49,7 @@ const val RECENT = 12
 
 @Composable
 fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do, placeholderDelayMs: Long = FETCHING_DELAY_MS) {
+    Recompositions.hit("HomeScreen")
     // Derived once per library, not once per composition: the shelf's cards skip only while the
     // list they were given is the same one.
     val recent = remember(data.tracks) { data.tracks.takeLast(RECENT).reversed() }

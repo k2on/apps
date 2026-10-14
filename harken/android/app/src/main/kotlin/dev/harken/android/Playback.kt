@@ -17,6 +17,14 @@
 // arriving does not redirect what is playing — and reads back what the
 // player says into one [PlayerState] the mini player and the full player
 // both draw.
+//
+// **The position is its own flow** ([Playback.position]), apart from the
+// state: it is the one thing that moves while nothing else does, twice a
+// second while a track plays, and only the hairline under the mini player
+// and the full player's scrubber read it — so a tick recomposes those two
+// and nothing above them, not the app's top and not a screen. The ticker
+// runs only while the player is playing; paused, stopped or with nothing
+// loaded, nothing here runs (`docs/plan-reactive.md`).
 package dev.harken.android
 
 import android.app.PendingIntent
@@ -115,12 +123,11 @@ enum class Repeat {
     One,
 }
 
-/** The player as the screens see it. */
+/** The player as the screens see it — all of it but the position, which is [Playback.position]. */
 data class PlayerState(
     val now: Playing? = null,
     val playing: Boolean = false,
     val buffering: Boolean = false,
-    val positionMs: Long = 0,
     val durationMs: Long = 0,
     val shuffle: Boolean = false,
     val repeat: Repeat = Repeat.Off,
@@ -138,6 +145,10 @@ class Playback(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val _state = MutableStateFlow(PlayerState())
     val state: StateFlow<PlayerState> = _state.asStateFlow()
+    private val _position = MutableStateFlow(0L)
+
+    /** Where in the track the player is, in milliseconds: moved while it plays, and on a seek. */
+    val position: StateFlow<Long> = _position.asStateFlow()
     private var controller: MediaController? = null
     private var ticking: Job? = null
 
@@ -148,10 +159,19 @@ class Playback(
         if (!connect) null
         else MediaController.Builder(context, SessionToken(context, ComponentName(context, PlaybackService::class.java))).buildAsync()
 
-    /** What the screens are shown, set directly — a test's position ticking, with no player behind it. */
+    /** What the screens are shown, set directly — a test's, with no player behind it. */
     internal fun show(state: PlayerState) {
         _state.value = state
     }
+
+    /** Where the screens are shown the player is — a test's position ticking. */
+    internal fun showPosition(ms: Long) {
+        _position.value = ms
+    }
+
+    /** Whether the position ticker is running: only while the player plays. */
+    internal val ticks: Boolean
+        get() = ticking?.isActive == true
 
     init {
         val future = future
@@ -172,8 +192,9 @@ class Playback(
             MoreExecutors.directExecutor())
     }
 
-    // What the player says, as one value; and while it plays, the position
-    // twice a second, since nothing else moves the scrubber.
+    // What the player says, as one value; and while it plays — and only
+    // then — the position twice a second, since nothing else moves the
+    // scrubber.
     private fun read() {
         val c = controller ?: return
         val tl = c.currentTimeline
@@ -190,7 +211,6 @@ class Playback(
                 now = c.currentMediaItem?.let(::playing),
                 playing = c.isPlaying,
                 buffering = c.playbackState == Player.STATE_BUFFERING,
-                positionMs = c.currentPosition.coerceAtLeast(0),
                 durationMs = c.duration.takeIf { it != C.TIME_UNSET }?.coerceAtLeast(0) ?: 0,
                 shuffle = c.shuffleModeEnabled,
                 repeat =
@@ -201,13 +221,17 @@ class Playback(
                     },
                 upNext = next,
             )
-        if (c.isPlaying && ticking?.isActive != true) {
+        _position.value = c.currentPosition.coerceAtLeast(0)
+        if (!c.isPlaying) {
+            ticking?.cancel()
+            ticking = null
+        } else if (ticking?.isActive != true) {
             ticking =
                 scope.launch {
                     while (isActive) {
-                        delay(500)
+                        delay(TICK_MS)
                         val now = controller ?: break
-                        _state.value = _state.value.copy(positionMs = now.currentPosition.coerceAtLeast(0))
+                        _position.value = now.currentPosition.coerceAtLeast(0)
                         if (!now.isPlaying) break
                     }
                 }
@@ -270,7 +294,7 @@ class Playback(
 
     fun seek(ms: Long) {
         controller?.seekTo(ms)
-        _state.value = _state.value.copy(positionMs = ms)
+        _position.value = ms
     }
 
     fun shuffle() {
@@ -310,5 +334,8 @@ class Playback(
     private companion object {
         /** How much of what is to come the queue sheet shows. */
         const val UP_NEXT = 100
+
+        /** How often the position is read while a track plays. */
+        const val TICK_MS = 500L
     }
 }

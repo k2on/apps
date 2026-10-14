@@ -142,8 +142,12 @@ signs in on the server's own page in a Custom Tab
 on a `singleTask` activity, and harken's server allows `harken://`),
 exchanges the code, asks for notifications once, and remembers the server
 and the login. Only then is there a session: the Kotlin `Peer` over a
-replica directory per server, signed in, linked to `/sync`, pumped every
-fifty milliseconds on a thread of its own. A server's `Denied` and
+replica directory per server, signed in, linked to `/sync`, on a thread of
+its own that runs only when the socket wakes it, when the app asks for
+something, and at the redial after a close (`docs/plan-reactive.md`); the
+library splices what each change moved, and the player's position ticks
+only while a track plays, read by the mini player's hairline and the full
+player's scrubber alone. A server's `Denied` and
 *Sign out* both come back to *Sign in* with the server and the replica
 kept, so whatever was pending goes when the same person signs in again.
 

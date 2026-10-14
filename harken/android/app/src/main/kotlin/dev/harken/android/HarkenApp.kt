@@ -49,6 +49,7 @@ import androidx.navigation.compose.rememberNavController
 import dev.arkdb.Id
 import dev.arkdb.android.ArkSession
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
 /** The three tabs. */
@@ -69,6 +70,8 @@ fun Chrome(
     controls: Controls,
     onTab: (Tab) -> Unit,
     snackbar: SnackbarHostState? = null,
+    /** Where in the track the player is: handed down to the mini player's hairline, never read here. */
+    position: StateFlow<Long> = still(),
     page: @Composable () -> Unit,
 ) {
     Recompositions.hit("Chrome")
@@ -77,7 +80,7 @@ fun Chrome(
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
             Column {
-                MiniPlayer(player, controls)
+                MiniPlayer(player, controls, position)
                 NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
                     for (t in Tab.entries) {
                         NavigationBarItem(
@@ -124,6 +127,7 @@ fun HarkenApp(
     /** A tab of the Library to open on instead of Home — every song, say (a test's). */
     start: LibraryTab? = null,
 ) {
+    Recompositions.hit("HarkenApp")
     val context = LocalContext.current.applicationContext
     val library = remember(session) { Library(session) }
     val playback = remember(session) { playbackOf(context, session.server) }
@@ -271,7 +275,7 @@ fun HarkenApp(
             val route = entry?.destination?.route
             val tab = Tab.entries.firstOrNull { it.route == route }
             Box(Modifier.fillMaxSize()) {
-                Chrome(tab, player, controls, onTab = { nav.tab(it) }, snackbar) {
+                Chrome(tab, player, controls, onTab = { nav.tab(it) }, snackbar, playback.position) {
                     NavHost(nav, startDestination = if (start != null) Tab.Library.route else Tab.Home.route) {
                         composable(Tab.Home.route) {
                             HomeScreen(HomeData(loaded, last, tracks, playlists, albums, offline, fetching), albumOf, act)
@@ -361,18 +365,15 @@ fun HarkenApp(
                         }
                         composable("diagnostics") {
                             var d by remember { mutableStateOf<Diagnostics?>(null) }
-                            LaunchedEffect(Unit) {
-                                while (true) {
-                                    d = library.diagnostics()
-                                    delay(500)
-                                }
-                            }
+                            // Read again when the session reports a change, not on a clock.
+                            val moved by library.moved.collectAsStateWithLifecycle()
+                            LaunchedEffect(moved) { d = library.diagnostics() }
                             DiagnosticsScreen(d, onBack = act::back, onVerify = library::verify)
                         }
                     }
                 }
                 AnimatedVisibility(expanded, enter = slideInVertically { it }, exit = slideOutVertically { it }) {
-                    FullPlayer(player, controls)
+                    FullPlayer(player, controls, playback.position)
                 }
             }
             BackHandler(expanded) { expanded = false }

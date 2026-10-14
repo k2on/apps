@@ -77,14 +77,14 @@ class Screens {
         PlayerState(
             now = Demo.playing(hornpipe),
             playing = true,
-            positionMs = 82_000,
             durationMs = hornpipe.durationMs,
             upNext = Demo.tracks.subList(1, 9).map(Demo::playing),
         )
+    private val at = still(82_000)
     private val last = LastPlayed(Demo.playing(Demo.tracks[17]), Page.ForAlbum("The Four Seasons"))
 
     @Composable
-    private fun tab(t: Tab, state: PlayerState = player, page: @Composable () -> Unit) = Chrome(t, state, Still, onTab = {}) { page() }
+    private fun tab(t: Tab, state: PlayerState = player, page: @Composable () -> Unit) = Chrome(t, state, Still, onTab = {}, position = at) { page() }
 
     // The onboarding ---------------------------------------------------------
 
@@ -240,12 +240,12 @@ class Screens {
         shot("mini") {
             Column(Modifier.fillMaxSize()) {
                 Spacer(Modifier.weight(1f))
-                MiniPlayer(player.copy(playing = false), Still)
+                MiniPlayer(player.copy(playing = false), Still, at)
                 Spacer(Modifier.height(Space.xl))
             }
         }
-        shot("full") { FullPlayer(player, Still) }
-        shot("full-shuffle-repeat-one") { FullPlayer(player.copy(playing = false, shuffle = true, repeat = Repeat.One, positionMs = 201_000), Still) }
+        shot("full") { FullPlayer(player, Still, at) }
+        shot("full-shuffle-repeat-one") { FullPlayer(player.copy(playing = false, shuffle = true, repeat = Repeat.One), Still, still(201_000)) }
         shot("queue") { Sheet { QueueSheet(player.copy(shuffle = true), Still) } }
     }
 

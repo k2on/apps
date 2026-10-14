@@ -63,6 +63,7 @@ data class LibraryData(
 
 @Composable
 fun LibraryScreen(tab: LibraryTab, onTab: (LibraryTab) -> Unit, data: LibraryData, albumOf: (Track) -> Album?, playing: String?, act: Do) {
+    Recompositions.hit("LibraryScreen")
     Column(Modifier.fillMaxSize()) {
         TabTitle("Library") { IconButton(onClick = act::newPlaylist) { Glyph(Glyphs.Plus, "New playlist") } }
         Row(

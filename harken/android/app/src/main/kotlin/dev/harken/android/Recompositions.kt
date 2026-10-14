@@ -1,7 +1,9 @@
-// How often a list's rows and cards are composed, for the test that holds
-// the scroll fix (`ScrollTests`): a hit per composition of a `TrackRow` or a
-// `RecordCard`, while a test has installed a sink — and nothing at all
-// otherwise, which is every run of the app: one volatile read per row.
+// How often the app's parts are composed, for the tests that hold the scroll
+// fix and the position's own flow (`ScrollTests`): a hit per composition of
+// `HarkenApp`'s top, the frame (`Chrome`), each screen, the mini player and
+// the position's two leaves (`Progress`), a `TrackRow` or a `RecordCard`,
+// while a test has installed a sink — and nothing at all otherwise, which is
+// every run of the app: one volatile read per composition.
 package dev.harken.android
 
 import androidx.compose.runtime.Composable

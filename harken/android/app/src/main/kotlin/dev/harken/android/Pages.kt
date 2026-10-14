@@ -26,6 +26,7 @@ private fun length(tracks: List<Track>): String? = tracks.sumOf { it.durationMs 
 
 @Composable
 fun AlbumPage(name: String, album: Album?, tracks: List<Track>, details: Map<Id, TrackDetail>, playing: String?, act: Do) {
+    Recompositions.hit("AlbumPage")
     val page = Page.ForAlbum(name)
     val creator = album?.creator ?: tracks.firstOrNull()?.creator
     // Sections only where the album has more than one part: a heading over
@@ -71,6 +72,7 @@ fun AlbumPage(name: String, album: Album?, tracks: List<Track>, details: Map<Id,
 
 @Composable
 fun ArtistPage(name: String, artist: Artist?, tracks: List<Track>, albums: List<Album>, albumOf: (Track) -> Album?, playing: String?, act: Do) {
+    Recompositions.hit("ArtistPage")
     val page = Page.ForArtist(name)
     LazyColumn(Modifier.fillMaxSize()) {
         item { PageBar("", onBack = act::back) }
@@ -112,6 +114,7 @@ fun ArtistPage(name: String, artist: Artist?, tracks: List<Track>, albums: List<
 
 @Composable
 fun PlaylistPage(id: Id, playlist: Playlist?, tracks: List<Track>, albumOf: (Track) -> Album?, playing: String?, act: Do) {
+    Recompositions.hit("PlaylistPage")
     val page = Page.ForPlaylist(id)
     val name = playlist?.name ?: "Playlist"
     LazyColumn(Modifier.fillMaxSize()) {

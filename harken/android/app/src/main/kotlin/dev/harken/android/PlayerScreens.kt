@@ -3,7 +3,9 @@
 // foot — and the full player it opens into: the cover, the title and who
 // made it, a scrubber with the time gone and the time left, previous,
 // play or pause and next, shuffle and repeat, and the queue. Both draw one
-// [PlayerState]; neither knows there is a service behind it.
+// [PlayerState]; neither knows there is a service behind it. The position
+// is a flow beside it, read only by the two leaves that draw it — the
+// hairline and the scrubber — so a tick recomposes those and nothing else.
 package dev.harken.android
 
 import androidx.compose.foundation.background
@@ -46,6 +48,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 /** What the player's controls do. */
 interface Controls {
@@ -75,10 +80,15 @@ interface Controls {
 /** Controls that do nothing: what a screenshot hands the player. */
 object Still : Controls
 
+/** A position that never moves: the start of the track, or `ms` into it (a screenshot's). */
+fun still(ms: Long = 0): StateFlow<Long> = MutableStateFlow(ms)
+
+private val Start = still()
+
 private fun seedOf(p: Playing): String = p.album.ifEmpty { p.title }
 
 @Composable
-fun MiniPlayer(state: PlayerState, controls: Controls) {
+fun MiniPlayer(state: PlayerState, controls: Controls, position: StateFlow<Long> = Start) {
     val now = state.now ?: return
     Recompositions.hit("MiniPlayer")
     Surface(
@@ -102,18 +112,28 @@ fun MiniPlayer(state: PlayerState, controls: Controls) {
                     Glyph(Glyphs.Next, "Next", size = 20.dp)
                 }
             }
-            // The progress, as a hairline along the foot.
-            BoxWithConstraints(Modifier.fillMaxWidth().height(2.dp).padding(horizontal = Space.s)) {
-                val done = if (state.durationMs > 0) (state.positionMs.toFloat() / state.durationMs).coerceIn(0f, 1f) else 0f
-                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.outlineVariant))
-                Box(Modifier.width(maxWidth * done).height(2.dp).background(MaterialTheme.colorScheme.primary))
-            }
+            Hairline(state.durationMs, position)
         }
     }
 }
 
+// The progress, as a hairline along the foot: the one part of the mini
+// player that reads the position, so the one part a tick recomposes.
 @Composable
-fun FullPlayer(state: PlayerState, controls: Controls) {
+private fun Hairline(durationMs: Long, position: StateFlow<Long>) {
+    val at by position.collectAsStateWithLifecycle()
+    BoxWithConstraints(Modifier.fillMaxWidth().height(2.dp).padding(horizontal = Space.s)) {
+        // Counted here, where the position is read: a tick recomposes this and not even the
+        // function around it.
+        Recompositions.hit("Progress")
+        val done = if (durationMs > 0) (at.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
+        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.outlineVariant))
+        Box(Modifier.width(maxWidth * done).height(2.dp).background(MaterialTheme.colorScheme.primary))
+    }
+}
+
+@Composable
+fun FullPlayer(state: PlayerState, controls: Controls, position: StateFlow<Long> = Start) {
     val now = state.now
     Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = Space.xl)) {
@@ -140,7 +160,7 @@ fun FullPlayer(state: PlayerState, controls: Controls) {
             )
             Text(now?.artist ?: "", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, maxLines = 1)
             Spacer(Modifier.height(Space.l))
-            Scrubber(state, controls)
+            Scrubber(state, position, controls)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Toggle(Glyphs.Shuffle, if (state.shuffle) "Shuffle is on" else "Shuffle is off", state.shuffle, controls::shuffle)
                 IconButton(onClick = controls::previous, modifier = Modifier.size(56.dp)) { Glyph(Glyphs.Previous, "Previous", size = 28.dp) }
@@ -181,10 +201,12 @@ fun FullPlayer(state: PlayerState, controls: Controls) {
 // A scrubber that follows the finger while it is dragged, and the player
 // otherwise: the time gone under its start and the time left under its end.
 @Composable
-private fun Scrubber(state: PlayerState, controls: Controls) {
+private fun Scrubber(state: PlayerState, position: StateFlow<Long>, controls: Controls) {
+    val ms by position.collectAsStateWithLifecycle()
+    Recompositions.hit("Progress")
     var dragging by remember { mutableStateOf<Float?>(null) }
     val total = state.durationMs.coerceAtLeast(1)
-    val at = dragging ?: (state.positionMs.toFloat() / total).coerceIn(0f, 1f)
+    val at = dragging ?: (ms.toFloat() / total).coerceIn(0f, 1f)
     Slider(
         value = at,
         onValueChange = { dragging = it },

@@ -63,6 +63,7 @@ fun SearchScreen(
     offline: String?,
     act: Do,
 ) {
+    Recompositions.hit("SearchScreen")
     LazyColumn(Modifier.fillMaxSize()) {
         item { TabTitle("Search") }
         item {

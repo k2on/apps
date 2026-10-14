@@ -1,8 +1,10 @@
 // The library, as the screens see it: harken's queries over the session the
 // onboarding opened (`kotlin/ark-android`'s `ArkSession`) — the Kotlin
-// `Peer` over `harken.ark`, signed in, linked, pumped on a thread of its
-// own. Everything that touches the peer runs on that thread: every
-// mutation, every read, and the splice after each pump.
+// `Peer` over `harken.ark`, signed in, linked, on a thread of its own that
+// runs only when something happens (`docs/plan-reactive.md`). Everything
+// that touches the peer runs on that thread: every mutation, every read,
+// and the splice after each change the session reports (`onChange`) —
+// never on a clock, so a library at rest runs nothing at all.
 //
 // **The lists are spliced, not re-read.** The library, the playlists, the
 // albums, the artists and the songs' details are maintained views
@@ -140,6 +142,13 @@ class Library(private val session: ArkSession) {
     /** The last refusal or rejection, in a sentence; cleared by [dismiss]. */
     val notice: StateFlow<String?> = noticeFlow.asStateFlow()
 
+    private val movedFlow = MutableStateFlow(0L)
+    /**
+     * How many changes the session has reported: what the diagnostics read again on, rather than
+     * on a clock.
+     */
+    val moved: StateFlow<Long> = movedFlow.asStateFlow()
+
     // On the peer's thread only — except, until the live view is there, the
     // launch view's provisional rows, under the held's own lock.
     private inner class Held<T>(val name: String, val args: Map<String, Value>, val of: (Value) -> T, val set: (List<T>) -> Unit = {}) {
@@ -206,7 +215,7 @@ class Library(private val session: ArkSession) {
             _provisional.value = false
             homeShown()
             if (moved) session.launchChanged()
-            unhook = session.onPump { tick(it) }
+            unhook = session.onChange { q, _ -> tick(q) }
             session.post { q ->
                 hydrate(q, artistsHeld)
                 hydrate(q, detailsHeld)
@@ -331,7 +340,10 @@ class Library(private val session: ArkSession) {
         for (o in pages.values) if (update(p, o.held, ch)) o.flow.value = o.held.rows.toList()
     }
 
+    // What a change the session reported comes to here: the views spliced
+    // (a list is published only when its rows moved), a verdict said once.
     private fun tick(p: Peer) {
+        movedFlow.value++
         splice(p)
         val rejected = p.takeRejections()
         if (rejected.isNotEmpty()) noticeFlow.value = "Not saved: ${rejected.last().reason}"
@@ -464,7 +476,7 @@ class Library(private val session: ArkSession) {
             is Standing.Rejected -> "not saved: ${st.why}"
         }
 
-    /** Ask the server whether it agrees with this phone; the answer arrives on a later pump. */
+    /** Ask the server whether it agrees with this phone; the answer arrives as a change. */
     fun verify() = write { p -> p.verify() }
 
     fun signOut() = session.signOut()
