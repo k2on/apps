@@ -169,6 +169,15 @@ impl<M: Clone, T: Clone> Context<M, T> {
         }
     }
 
+    /// Whether [`Context::tick`] can still answer something: a menu is up,
+    /// its cursor rests on an entry that owns a submenu, and that submenu has
+    /// not been offered for this rest. The only time a window needs the
+    /// dwell's clock (`docs/plan-reactive.md`); otherwise it runs none.
+    pub fn dwelling(&self) -> bool {
+        let Some(menu) = &self.menu else { return false };
+        self.picker.is_none() && !menu.offered && menu.entries.get(menu.at).is_some_and(|e| e.opens_submenu())
+    }
+
     /// One tick of the app's clock (50ms). When the cursor has rested on an
     /// entry that owns a submenu for [`menu::DWELL`] ticks, answers that
     /// entry's message: run it the way any message is run, and the picker it

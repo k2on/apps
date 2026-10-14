@@ -6,8 +6,8 @@
 //! ([`route::Route`]), its messages (every view is generic over `M`) and its
 //! screens, and gets the parts of a window that are the same in every app —
 //! the keyboard grammar, the table, the menus and pickers and the rules for who
-//! has the keyboard, the card grid, the derived square, a picture cache and
-//! the address bar.
+//! has the keyboard, the card grid, the derived square, a picture cache, the
+//! address bar, and what wakes a window that runs no loop ([`wake`]).
 //!
 //! Most of it is lifted from harken's iced client, where each rule was paid
 //! for; the doc comments keep the reasons, because a rule whose reason has
@@ -39,6 +39,7 @@ pub mod table;
 pub mod theme;
 pub mod url;
 pub mod vim;
+pub mod wake;
 
 /// iced's default scrollbar width, which it takes out of the content's.
 ///

@@ -31,8 +31,9 @@ ureq = { version = "2", default-features = false, features = ["tls"] }
 # WebGL rather than WebGPU, for reach. Without it wgpu finds no backend and
 # the software fallback cannot have the canvas WebGL already claimed.
 iced = { version = "0.14", features = ["webgl", "svg", "image", "advanced", "fira-sans"] }
-# The address bar: reading the fragment and writing it through the history.
-web-sys = { version = "0.3", features = ["Window", "History", "Location"] }
+# The address bar: reading the fragment and writing it through the history,
+# and hearing the browser move it (`wake::page_changes`).
+web-sys = { version = "0.3", features = ["Window", "History", "Location", "EventTarget"] }
 wasm-bindgen = "0.2"
 # The browser half of the picture fetch: a promise from the snippet in
 # `images.rs`, awaited, and the `Uint8Array` it resolves to copied out.

@@ -16,15 +16,17 @@
 //! which also decides what a stale link does: land somewhere that is a page,
 //! rather than on a heading with nothing under it.
 //!
-//! **Read by polling, not by listening.** Hearing `popstate` means a closure
-//! kept alive for the life of the page publishing into a channel iced can
-//! subscribe to. An app with a tick already has a loop; reading
-//! `location.hash` on it is a string compare that gives the same answer a
-//! frame later. See [`Router::poll`].
+//! **Read when it moves, not on a clock.** It used to be polled on the app's
+//! 50 ms tick, on the reasoning that an app with a tick already has a loop;
+//! an app with no loop (`docs/plan-reactive.md`) has nothing to poll on. So
+//! the browser's `popstate` and `hashchange` wake it
+//! ([`crate::wake::page_changes`]) and the app calls [`Router::poll`] after
+//! every update — a string compare, which also catches a deep link that was
+//! not yet resolvable when it arrived.
 //!
 //! **The history API, not `location.hash = …`.** Both change the URL; the
-//! second also fires a `hashchange` the poll would read back as somebody
-//! pressing the back button.
+//! second also fires a `hashchange` that would read back as somebody pressing
+//! the back button.
 //!
 //! **The bar is reconciled, not pushed.** There are several ways what is shown
 //! can change — a click, a key, a menu's "Go to", the back button itself — and
@@ -128,11 +130,10 @@ impl AddressBar for Browser {
 /// Keeps the address bar and what an app is showing in agreement.
 pub struct Router<R, B = Browser> {
     bar: B,
-    /// The last route this app acted on or wrote. Without it the tick would
-    /// re-resolve the same fragment twenty times a second — and a fragment
-    /// naming something this peer has not got resolves to home every time, so
-    /// it would re-read the page twenty times a second for as long as the URL
-    /// said so.
+    /// The last route this app acted on or wrote. Without it every update
+    /// would re-resolve the same fragment — and a fragment naming something
+    /// this peer has not got resolves to home every time, so it would re-read
+    /// the page on every update for as long as the URL said so.
     routed: Option<R>,
     /// Reset to [`Nav::Push`] by every [`Router::sync`], so only the step that
     /// meant otherwise gets it.
