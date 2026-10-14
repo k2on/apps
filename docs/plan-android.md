@@ -205,7 +205,8 @@ that Media3 shows its notification and lock-screen controls and answers
 Bluetooth; that `POST_NOTIFICATIONS` is asked at the right moment on
 Android 13+ and skipped below; streaming and seeking over `/media` from a
 real server; covers from a real server (the screenshots draw only the
-derived squares); how the full player animates in and out; the
+derived squares); how the full player animates in and out (since drawn
+and tested, "Motion" below, but not felt); the
 diagnostics' numbers against a live peer. The screenshots are layoutlib's
 rendering of the composables — faithful to layout, type and colour, not to
 a device's insets, fonts or animation — and the sheets and the dialog are
@@ -484,3 +485,153 @@ against.
 Not verified: the scroll on a phone. Nothing here can run an APK, and every
 number above is the JVM's.
 
+
+### Motion
+
+What the owner asked for, in the owner's words: a back swipe that shows the
+page it goes back to; no fade; a tap on an album's or a playlist's art that
+turns into its page, the way Pinterest moves between pages rather than
+sliding in from the side; and the player's bar swiped up and down the same
+way.
+
+**Pages** (`Motion.kt`). Every move of the NavHost says its transitions, all
+four of them `None`, so its own cross-fade is gone everywhere. What moves is
+drawn by the page (`Moving`, around every destination):
+
+- A page opened from art grows out of it. The tapped cover notes where it is
+  (`Hero`, a node that keeps its coordinates and nothing else), and the page
+  is drawn scaled, offset and clipped so that its header's art sits exactly
+  on the tapped cover, then opens out to the screen, its corner going from
+  the cover's to none. The page it came from stays and dims to 25%. Going
+  back runs the same move the other way, into the same cover: an origin is
+  kept per back stack entry. A page scrolled past its header shrinks its top
+  square into the cover instead.
+- A page opened from no art (an artist from a song's menu, an album's
+  artist, settings) grows from 80% of the screen at its middle, fading in
+  over the first third.
+- The tabs switch at once: no animation, and the tab leaving is not drawn
+  for the frames it is still composed.
+- The move is one number per destination, `animateFloat` on the NavHost
+  entry's own transition, so whatever seeks that transition moves the page:
+  navigation-compose 2.8.5's predictive back seeks it with the edge swipe's
+  progress, and `enableOnBackInvokedCallback` in the manifest turns that on.
+  Letting go past the system's threshold finishes it; cancelling runs it
+  back.
+- A page pulled down from its top goes back the same way (`Pull`): the pull
+  is dispatched to the activity's `OnBackPressedDispatcher` as a back
+  gesture — `dispatchOnBackStarted`, `…Progressed`, then `onBackPressed` or
+  `dispatchOnBackCancelled`, all public in activity 1.9.3 — so the drag and
+  the edge swipe are one transition. It engages only through nested scroll's
+  post-scroll, which is what the list has left over at its top, only from a
+  finger (never a fling arriving at the top), and only for a drag at least
+  twice as vertical as it is horizontal. A pull past a fifth of the way, or
+  let go faster than 1.2 page heights a second, goes back; short of that it
+  springs back.
+- 400 ms, on a curve close to linear for its first third (so the gesture
+  moves the page as soon as the finger does) that then settles.
+
+It is not `SharedTransitionLayout`. Wrapping the NavHost in one, with no
+shared element anywhere, cost the Songs list 43% per entering row in the
+fling bench (525 and 515 µs against 365 and 359, 36.5 KB against 32.8 KB):
+a lookahead scope measures everything under it twice. The page is instead
+laid out once at its full size and the move is a scale, an offset and a clip
+applied as it is drawn, after layout, which is also the first moment its
+header's place is known on the frame it appears. Only album, playlist and
+artist art that opens a page carries a `Hero`; a song row's thumbnail does
+not.
+
+**The player** (`PlayerSheet.kt`). The bar and the full player are one card
+and one number `p`, the offset of an `AnchoredDraggableState` (foundation
+1.7.6's constructor, with positional and velocity thresholds and a decay).
+The card's bounds go from the bar's to the screen's and its corner from the
+bar's to none; the bar's face goes out by 20% of the way and the full face
+comes in over the last 40%; the art, one `Cover` the card draws itself,
+travels from the thumbnail to the big square, its corner from 4 to 12 dp;
+the tab bar slides away under it and the page dims to 40%. A tap on the bar
+animates along the same path. The anchored drag is on the card, which is
+laid out at the card's size, so it touches only what it covers; the faces
+inside it are laid out once and moved. A sideways drag on the bar skips —
+left the next track, right the one before — and leaves `p` alone, split
+from the vertical drag by each detector's own axis. (There was no skip
+swipe in the Kotlin app before; this is it.) Collapsed, the full face is not
+composed at all, so it takes no touch and no tick, and the bar's face is not
+placed past 20%, so its buttons cannot be pressed through the full player.
+The edge's back gesture takes the full player down under the finger
+(`PredictiveBackHandler`, progress onto `p`). This is the Expo player's
+shape: one shared value, two faces, the tab bar under it.
+
+`p` and each page's number are read in layout and drawing, never in
+composition, except where they flip (whether the full face exists, whether
+the bar is at rest): the card moving composes nothing and the page behind
+it is not composed again.
+
+The bar's static layout did not move: the card draws it now, rather than the
+bottom bar, on the same pixels. The 30 screenshots
+with a player (Home full and offline, every Search state, each Library tab,
+both albums, the artist, the playlist) differ from the last build's at the
+bar's shadow and corners only, by at most 8 of 255, over about 6,000 pixels:
+the shadow and the clip are one layer now, where `Surface` drew a background
+under a separate shadow. The other 52 are byte for byte what they were. The
+ten new ones are the player held at 0, 25, 50, 75 and 100% of the way up,
+light and dark (`d2_player_rising`).
+
+The fling bench (`FlingTests`, HARKEN_FLING_BENCH=2000, the reported two
+passes), on this machine, with other work running:
+
+| | compose+measure, per entering row | draw, per frame |
+|---|---|---|
+| before (cccf421) | 365 / 359 µs, 32,752 B | 6.9 / 7.0 ms, 27,707 B |
+| `SharedTransitionLayout` around the NavHost, nothing else | 525 / 515 µs, 36,532 B | 7.1 / 7.4 ms, 27,705 B |
+| after, first run | 379 / 361 µs, 32,951 B | 7.1 / 6.9 ms, 27,977 B |
+| after, final | 356 / 354 µs, 33,229 B | 7.1 / 7.0 ms, 27,984 B |
+
+About 1.5% more bytes per entering row and 1% per frame, from the Library
+tab's destination wrapper (a background and a draw block); the times are
+within the bench's noise. `ScrollTests` still composes nothing per position
+tick and nothing at rest.
+
+Tests (`MotionTests`, the real `HarkenApp` over a peer holding the demo's
+songs, and `Chrome` for the player, on Paparazzi's frame clock with real
+`MotionEvent`s), each falsified once:
+
+- `aPageGrowsOutOfItsCardAndTheBackGestureSeeksIt`: a tap on Home's
+  Brandenburg card opens the album through in-between frames; back progress
+  0.3 and 0.6 draw it part-way and further; a cancel puts it back at 1 and
+  keeps it; a finished gesture goes back to Home.
+  - Falsified: the page's animation snapped for anything but a grow —
+    "seeked at 0.3: 0.0".
+- `aPagePulledDownFromItsTopGoesBack`: scrolled down, a drag down scrolls the
+  list and pulls nothing; from the top, a pull shrinks the page and goes
+  back; a short pull moves it and springs back.
+  - Falsified: the pull always cancelled — "and far enough goes back".
+- `aTabArrivesWithNoFrameInBetween`: Home to Library draws no frame mid-move;
+  opening an album draws some.
+  - Falsified: a tab grown like a page — 24 frames drawn mid-move.
+- `theBarFollowsTheFingerAndSettlesToTheNearerEnd`: held at 0.29 and let go,
+  back to 0; at 0.69, up to 1; dragged down on the full player, back to 0.
+  - Falsified: a positional threshold of a tenth — "short of half, back to
+    the bar", was 1.
+- `aSidewaysDragOnTheBarSkipsAndStaysDown`: left skips ahead once, right back
+  once, `p` stays 0.
+  - Falsified: the sideways drag disabled — no skip.
+- `theCollapsedPlayerTakesNoTouch`: open, the full player's menu answers;
+  collapsed, a tap there reaches the page, a tap on the bar opens it, and
+  the full face is not in the tree.
+  - Falsified: the full face always composed and placed — the bar's tap no
+    longer reached the bar (and the tap-to-open and skip tests failed with
+    it: an invisible face over the bar swallowed both).
+- `theBarOpensOnATapAlongTheSamePath`: `p` through the in-between to 1.
+
+With HARKEN_MOTION_FRAMES set to a directory, these tests write the frames:
+a page opening at 0, 25, 50, 75 and 100% open, the back gesture at 0.3 and
+0.6, a page halfway back into its card, the player halfway up. All were
+looked at.
+
+Not verified: how any of it feels on a phone, and real frame times — every
+number above is HotSpot's and layoutlib's. The in-app preview of predictive
+back needs Android 14 or later with the gesture navigation; below that the
+back button and the pull run the same move without the preview, which is
+untested on a device. The player's back gesture over a page that is itself
+mid-move, a rotation mid-move, and a page reopened after the process was
+killed (it grows from the middle: origins are not saved) are reasoned, not
+tested.

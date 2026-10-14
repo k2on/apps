@@ -25,8 +25,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import app.cash.paparazzi.DeviceConfig
@@ -247,6 +249,21 @@ class Screens {
         shot("full") { FullPlayer(player, Still, at) }
         shot("full-shuffle-repeat-one") { FullPlayer(player.copy(playing = false, shuffle = true, repeat = Repeat.One), Still, still(201_000)) }
         shot("queue") { Sheet { QueueSheet(player.copy(shuffle = true), Still) } }
+    }
+
+    // The player on its way up from the bar, held at each quarter: the card between the bar's
+    // bounds and the screen's, the bar's face gone by a fifth of the way, the full face in over the
+    // last two fifths, the art between the two, the tabs sliding away and the page dimming.
+    @Test
+    fun d2_player_rising() {
+        for (p in listOf(0f, 0.25f, 0.5f, 0.75f, 1f)) {
+            shot("p" + (p * 100).toInt()) {
+                val density = LocalDensity.current
+                Chrome(Tab.Home, player, Still, onTab = {}, position = at, sheet = remember { PlayerSheet.held(p, density) }) {
+                    HomeScreen(HomeData(true, last, Demo.tracks, Demo.playlists, Demo.albums, null), Demo::albumOf, Idle)
+                }
+            }
+        }
     }
 
     // What rises over a page -------------------------------------------------

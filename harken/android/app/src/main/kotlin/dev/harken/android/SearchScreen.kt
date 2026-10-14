@@ -130,7 +130,7 @@ fun SearchScreen(
                     item { Heading("Albums") }
                     item {
                         Shelf(found.albums, key = { it.name }) { a ->
-                            RecordCard(a.name, a.art, a.name, a.creator, 128.dp, onClick = {
+                            RecordCard(a.name, a.art, a.name, a.creator, 128.dp, opens = true, onClick = {
                                 onSearched(needle)
                                 act.open(Page.ForAlbum(a.name))
                             })
@@ -141,7 +141,7 @@ fun SearchScreen(
                     item { Heading("Artists") }
                     item {
                         Shelf(found.artists, key = { it.name }) { a ->
-                            RecordCard(a.name, a.art, a.name, Media.count(a.tracks.toInt(), "song"), 112.dp, round = true, onClick = {
+                            RecordCard(a.name, a.art, a.name, Media.count(a.tracks.toInt(), "song"), 112.dp, round = true, opens = true, onClick = {
                                 onSearched(needle)
                                 act.open(Page.ForArtist(a.name))
                             })

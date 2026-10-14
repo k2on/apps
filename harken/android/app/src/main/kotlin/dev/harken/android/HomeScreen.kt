@@ -105,7 +105,7 @@ fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do, placeholderD
                 } else {
                     item {
                         Shelf(data.playlists, key = { it.id.hex }) { p ->
-                            RecordCard(p.name, "", p.name, "Playlist", Space.shelf, onClick = { act.open(Page.ForPlaylist(p.id)) })
+                            RecordCard(p.name, "", p.name, "Playlist", Space.shelf, onClick = { act.open(Page.ForPlaylist(p.id)) }, opens = true)
                         }
                     }
                 }
@@ -113,7 +113,7 @@ fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do, placeholderD
                     item { Heading("Albums", action = "See all", onAction = { act.library(LibraryTab.Albums) }) }
                     item {
                         Shelf(data.albums, key = { it.name }) { a ->
-                            RecordCard(a.name, a.art, a.name, a.creator, Space.shelf, onClick = { act.open(Page.ForAlbum(a.name)) })
+                            RecordCard(a.name, a.art, a.name, a.creator, Space.shelf, onClick = { act.open(Page.ForAlbum(a.name)) }, opens = true)
                         }
                     }
                 }

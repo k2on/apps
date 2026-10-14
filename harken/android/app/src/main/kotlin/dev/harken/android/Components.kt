@@ -167,12 +167,16 @@ fun TrackNumber(n: Long, playing: Boolean) {
     }
 }
 
-/** One record on a shelf or in a grid: its cover, its name, and a line under it. */
+/**
+ * One record on a shelf or in a grid: its cover, its name, and a line under it. One that `opens` a
+ * page opens it out of its cover (`Motion.kt`); one that plays is only a card.
+ */
 @Composable
-fun RecordCard(seed: String, art: String, title: String, under: String, side: Dp, onClick: () -> Unit, round: Boolean = false) {
+fun RecordCard(seed: String, art: String, title: String, under: String, side: Dp, onClick: () -> Unit, round: Boolean = false, opens: Boolean = false) {
     Recompositions.hit("RecordCard")
-    Column(Modifier.width(side).clickable(onClick = onClick)) {
-        Cover(seed, art, side, Modifier.size(side), round = round)
+    val hero = if (opens) rememberHero(round = round) else null
+    Column(Modifier.width(side).clickable(onClick = if (hero == null) onClick else hero.lifting(onClick))) {
+        Cover(seed, art, side, Modifier.size(side).then(hero?.modifier ?: Modifier), round = round)
         Spacer(Modifier.height(Space.s))
         Text(
             title,
@@ -224,7 +228,8 @@ fun PageHeader(
 ) {
     Column(Modifier.fillMaxWidth().padding(horizontal = Space.page), horizontalAlignment = Alignment.CenterHorizontally) {
         Spacer(Modifier.height(Space.s))
-        cover()
+        // Where the art a page grew from lands.
+        Box(LocalPageFrame.current?.art?.modifier ?: Modifier) { cover() }
         Spacer(Modifier.height(Space.l))
         Text(kind.uppercase(), style = quiet(MaterialTheme.typography.labelMedium))
         Spacer(Modifier.height(Space.xs))

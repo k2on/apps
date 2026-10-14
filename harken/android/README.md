@@ -250,10 +250,18 @@ exactly what the app draws):
   percent-encoded, a whole URL passed through); the notification, the lock
   screen and Bluetooth are the media session's. The screens hold a
   `MediaController` (`Playback`): the queue is the list a track was started
-  from, snapshotted; shuffle; repeat off, all, one. A mini player above the
-  tab bar opens into the full player — cover, title, artist, a scrubber
+  from, snapshotted; shuffle; repeat off, all, one. A bar above the tab
+  bar is the full player's other face — cover, title, artist, a scrubber
   with the time gone and the time left, previous / play-pause / next,
-  shuffle, repeat — and the queue is a sheet over it.
+  shuffle, repeat — and the queue is a sheet over it. The bar is dragged
+  up into the full player under the finger, or tapped; dragged sideways,
+  it skips.
+- **Motion** — a page grows out of the cover that was tapped, and goes
+  back into it: by the back button, by the system's back gesture
+  (Android 14 and later draw the page shrinking under the finger), or
+  pulled down from its top. A page opened from no cover grows from the
+  middle of the screen. The tabs switch at once. `Motion.kt` and
+  `PlayerSheet.kt` say how, and `docs/plan-android.md` why.
 - **Settings** — the account, the server and whether it is reached, sign
   out, about. **Diagnostics** — every number the old settings screen had,
   each change this phone made with where it stands, and verify — are
@@ -283,7 +291,8 @@ Paparazzi (1.3.5) renders every screen and state on the JVM through
 layoutlib — the onboarding's three steps and their errors, Home (full,
 offline, empty, loading), Search (recent, nothing yet, typing, results,
 none), each Library tab, an album, an artist, a playlist (and an empty
-and a missing one), the mini player, the full player, the queue, a song's
+and a missing one), the mini player, the full player, the player held at
+each quarter of the way up, the queue, a song's
 menu, adding to a playlist, naming one (and a name refused), Settings and
 diagnostics — in light and dark, at a Pixel 5's 1080×2340, from
 `app/src/test/.../Demo.kt`: rows taken from harken's demo seed

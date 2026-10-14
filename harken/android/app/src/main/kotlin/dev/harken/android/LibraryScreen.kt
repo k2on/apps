@@ -114,8 +114,9 @@ private fun Playlists(playlists: List<Playlist>, act: Do) {
             }
         }
         items(playlists, key = { it.id.hex }) { p ->
-            ListRow(onClick = { act.open(Page.ForPlaylist(p.id)) }, title = p.name, under = "Playlist") {
-                Cover(p.name, "", 56.dp, Modifier.size(56.dp))
+            val hero = rememberHero()
+            ListRow(onClick = hero.lifting { act.open(Page.ForPlaylist(p.id)) }, title = p.name, under = "Playlist") {
+                Cover(p.name, "", 56.dp, Modifier.size(56.dp).then(hero.modifier))
             }
         }
     }
@@ -135,8 +136,9 @@ private fun Albums(albums: List<Album>, act: Do) {
         modifier = Modifier.fillMaxSize(),
     ) {
         items(albums, key = { it.name }) { a ->
-            Column(Modifier.clickable { act.open(Page.ForAlbum(a.name)) }) {
-                Cover(a.name, a.art, 180.dp, Modifier.fillMaxWidth().aspectRatio(1f))
+            val hero = rememberHero()
+            Column(Modifier.clickable(onClick = hero.lifting { act.open(Page.ForAlbum(a.name)) })) {
+                Cover(a.name, a.art, 180.dp, Modifier.fillMaxWidth().aspectRatio(1f).then(hero.modifier))
                 Spacer(Modifier.height(Space.s))
                 Text(a.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(a.creator, style = quiet(MaterialTheme.typography.bodySmall), maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -154,8 +156,9 @@ private fun Artists(artists: List<Artist>, act: Do) {
     }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = Space.s)) {
         items(artists, key = { it.name }) { a ->
-            ListRow(onClick = { act.open(Page.ForArtist(a.name)) }, title = a.name, under = Media.count(a.tracks.toInt(), "song")) {
-                Cover(a.name, a.art, 56.dp, Modifier.size(56.dp), round = true)
+            val hero = rememberHero(round = true)
+            ListRow(onClick = hero.lifting { act.open(Page.ForArtist(a.name)) }, title = a.name, under = Media.count(a.tracks.toInt(), "song")) {
+                Cover(a.name, a.art, 56.dp, Modifier.size(56.dp).then(hero.modifier), round = true)
             }
         }
     }

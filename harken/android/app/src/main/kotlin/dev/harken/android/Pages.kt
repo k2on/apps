@@ -93,7 +93,7 @@ fun ArtistPage(name: String, artist: Artist?, tracks: List<Track>, albums: List<
             item { Heading("Albums") }
             item {
                 Shelf(albums, key = { it.name }) { a ->
-                    RecordCard(a.name, a.art, a.name, Media.count(a.tracks.toInt(), "song"), 136.dp, onClick = { act.open(Page.ForAlbum(a.name)) })
+                    RecordCard(a.name, a.art, a.name, Media.count(a.tracks.toInt(), "song"), 136.dp, onClick = { act.open(Page.ForAlbum(a.name)) }, opens = true)
                 }
             }
         }
