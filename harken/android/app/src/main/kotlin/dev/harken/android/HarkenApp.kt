@@ -68,7 +68,12 @@ import kotlinx.coroutines.launch
 enum class Tab(val route: String, val title: String) {
     Home("home", "Home"),
     Search("search", "Search"),
-    Library("library", "Library"),
+    Library("library", "Library");
+
+    companion object {
+        /** The routes that switch at once, where every other route is a page that grows (`Motion.kt`). */
+        val routes: Set<String> = entries.map { it.route }.toSet()
+    }
 }
 
 /**
@@ -156,7 +161,7 @@ fun HarkenApp(
     /** A tab of the Library to open on instead of Home — every song, say (a test's). */
     start: LibraryTab? = null,
     /** How the pages move, and how far up the player is: the app's own, or a test's to watch. */
-    motion: PageMotion = remember { PageMotion() },
+    motion: PageMotion = remember { PageMotion(Tab.routes) },
     sheet: PlayerSheet = rememberPlayerSheet(),
     /** Told what a song's menu can do as it opens: a test's way to choose from a sheet it cannot reach. */
     onMenu: (MenuActions) -> Unit = {},
@@ -190,7 +195,7 @@ fun HarkenApp(
     var last by remember { mutableStateOf(device.lastPlayed) }
     var libraryTab by rememberSaveable { mutableStateOf(start ?: LibraryTab.Playlists) }
     var queue by remember { mutableStateOf(false) }
-    var menu by remember { mutableStateOf<Pair<Track, Page?>?>(null) }
+    var menu by remember { mutableStateOf<Menu?>(null) }
     var adding by remember { mutableStateOf<Track?>(null) }
     var naming by remember { mutableStateOf<Pair<Boolean, Track?>?>(null) }
     var startedFrom by remember { mutableStateOf<Page?>(null) }
@@ -242,7 +247,8 @@ fun HarkenApp(
             }
 
             override fun more(track: Track, from: Page?) {
-                menu = track to from
+                // The row says where it is as its menu opens: what a page the menu goes to grows from.
+                menu = Menu(track, from, motion.tapped)
             }
 
             override fun resume(last: LastPlayed) {
@@ -300,7 +306,7 @@ fun HarkenApp(
 
             override fun more() {
                 val now = player.now ?: return
-                tracks.firstOrNull { it.id.hex == now.id }?.let { menu = it to null }
+                tracks.firstOrNull { it.id.hex == now.id }?.let { menu = Menu(it, null, null) }
             }
         }
     }
@@ -310,134 +316,141 @@ fun HarkenApp(
             val entry by nav.currentBackStackEntryAsState()
             val route = entry?.destination?.route
             val tab = Tab.entries.firstOrNull { it.route == route }
+            // Before the player, so that the player's own back gesture registers after it and is asked
+            // first; and stood down while the player is up, whatever the order.
+            PageBack(motion, blocked = { sheet.p > 0f })
             Box(Modifier.fillMaxSize()) {
                 Chrome(tab, player, controls, onTab = { nav.tab(it) }, snackbar, playback.position, sheet) {
                     // Said for every move, so the NavHost's own cross-fade is nowhere: a page grows
                     // or shrinks, drawn by the page (`Moving`), and a tab arrives at once. Which it
                     // is, is decided here, where both ends of the move are known.
-                    NavHost(
-                        nav,
-                        startDestination = if (start != null) Tab.Library.route else Tab.Home.route,
-                        enterTransition = {
-                            motion.push(initialState, targetState)
-                            EnterTransition.None
-                        },
-                        exitTransition = {
-                            motion.push(initialState, targetState)
-                            ExitTransition.None
-                        },
-                        popEnterTransition = {
-                            motion.pop(initialState, targetState)
-                            EnterTransition.None
-                        },
-                        popExitTransition = {
-                            motion.pop(initialState, targetState)
-                            ExitTransition.None
-                        },
-                    ) {
-                        screen(Tab.Home.route, motion) { _ ->
-                            HomeScreen(HomeData(loaded, last, tracks, playlists, albums, offline, fetching), albumOf, act)
-                        }
-                    screen(Tab.Search.route, motion) { _ ->
-                            var needle by rememberSaveable { mutableStateOf("") }
-                            var recent by remember { mutableStateOf(device.searches) }
-                            // Asked again only when the needle or the library moved: coming back to
-                            // the tab finds the answer it left, on its first frame, so its list has
-                            // the rows to restore its scroll into.
-                            LaunchedEffect(needle, tracks, albums, artists) {
-                                if (needle.isBlank() || searched.answers(needle, tracks, albums, artists)) return@LaunchedEffect
-                                delay(150)
-                                searched.answer(needle, tracks, albums, artists, library.search(needle.trim()))
-                                searched.results?.let { r -> covers.warm(searchArt(r, albumOf)) }
+                    Relayed(motion) {
+                        NavHost(
+                            nav,
+                            startDestination = if (start != null) Tab.Library.route else Tab.Home.route,
+                            enterTransition = {
+                                motion.push(initialState, targetState)
+                                EnterTransition.None
+                            },
+                            exitTransition = {
+                                motion.push(initialState, targetState)
+                                ExitTransition.None
+                            },
+                            popEnterTransition = {
+                                motion.pop(initialState, targetState)
+                                EnterTransition.None
+                            },
+                            popExitTransition = {
+                                motion.pop(initialState, targetState)
+                                ExitTransition.None
+                            },
+                        ) {
+                            screen(Tab.Home.route, motion) { _ ->
+                                HomeScreen(HomeData(loaded, last, tracks, playlists, albums, offline, fetching), albumOf, act)
                             }
-                            SearchScreen(
-                                needle,
-                                searched.results,
-                                recent,
-                                onNeedle = { needle = it },
-                                onSearched = {
-                                    device.searched(it)
-                                    recent = device.searches
-                                },
-                                onForget = {
-                                    device.searches = emptyList()
-                                    recent = emptyList()
-                                },
-                                albumOf,
-                                playing,
-                                offline,
-                                act,
-                            )
-                        }
-                        screen(Tab.Library.route, motion) { _ ->
-                            LibraryScreen(libraryTab, { libraryTab = it }, LibraryData(loaded, playlists, albums, artists, tracks, offline, complete), albumOf, playing, act)
-                        }
-                        screen("album/{arg}", motion) { back ->
-                            val page = Page.parse("album/" + back.arguments?.getString("arg")) as? Page.ForAlbum
-                            if (page != null) {
-                                val rows by held(library, page, back)
-                                AlbumPage(page.name, albumsByName[page.name], rows, details, playing, act)
-                            }
-                        }
-                        screen("artist/{arg}", motion) { back ->
-                            val page = Page.parse("artist/" + back.arguments?.getString("arg")) as? Page.ForArtist
-                            if (page != null) {
-                                val rows by held(library, page, back)
-                                val theirs = rows.mapNotNull { details[it.id]?.album?.takeIf(String::isNotEmpty) }.distinct()
-                                ArtistPage(
-                                    page.name,
-                                    artists.firstOrNull { it.name == page.name },
-                                    rows,
-                                    theirs.mapNotNull { n -> albums.firstOrNull { it.name == n } },
+                            screen(Tab.Search.route, motion) { _ ->
+                                var needle by rememberSaveable { mutableStateOf("") }
+                                var recent by remember { mutableStateOf(device.searches) }
+                                // Asked again only when the needle or the library moved: coming back to
+                                // the tab finds the answer it left, on its first frame, so its list has
+                                // the rows to restore its scroll into.
+                                LaunchedEffect(needle, tracks, albums, artists) {
+                                    if (needle.isBlank() || searched.answers(needle, tracks, albums, artists)) return@LaunchedEffect
+                                    delay(150)
+                                    searched.answer(needle, tracks, albums, artists, library.search(needle.trim()))
+                                    searched.results?.let { r -> covers.warm(searchArt(r, albumOf)) }
+                                }
+                                SearchScreen(
+                                    needle,
+                                    searched.results,
+                                    recent,
+                                    onNeedle = { needle = it },
+                                    onSearched = {
+                                        device.searched(it)
+                                        recent = device.searches
+                                    },
+                                    onForget = {
+                                        device.searches = emptyList()
+                                        recent = emptyList()
+                                    },
                                     albumOf,
                                     playing,
+                                    offline,
                                     act,
                                 )
                             }
-                        }
-                        screen("playlist/{arg}", motion) { back ->
-                            val page = Page.parse("playlist/" + back.arguments?.getString("arg")) as? Page.ForPlaylist
-                            if (page != null) {
-                                val rows by held(library, page, back)
-                                PlaylistPage(page.id, playlists.firstOrNull { it.id == page.id }, rows, albumOf, playing, act)
+                            screen(Tab.Library.route, motion) { _ ->
+                                LibraryScreen(libraryTab, { libraryTab = it }, LibraryData(loaded, playlists, albums, artists, tracks, offline, complete), albumOf, playing, act)
                             }
-                        }
-                        screen("settings", motion) { _ ->
-                            var taps by remember { mutableIntStateOf(0) }
-                            var unlocked by remember { mutableStateOf(device.diagnostics) }
-                            SettingsScreen(
-                                SettingsData(library.name, library.user, library.email, library.server, status.linked, version(context), unlocked),
-                                onBack = act::back,
-                                onSignOut = library::signOut,
-                                onVersion = {
-                                    taps++
-                                    when {
-                                        taps >= 7 -> {
-                                            taps = 0
-                                            unlocked = true
-                                            device.diagnostics = true
-                                            nav.navigate("diagnostics")
+                            screen("album/{arg}", motion) { back ->
+                                val page = Page.parse("album/" + back.arguments?.getString("arg")) as? Page.ForAlbum
+                                if (page != null) {
+                                    val rows by held(library, page, back)
+                                    AlbumPage(page.name, albumsByName[page.name], rows, details, playing, act)
+                                }
+                            }
+                            screen("artist/{arg}", motion) { back ->
+                                val page = Page.parse("artist/" + back.arguments?.getString("arg")) as? Page.ForArtist
+                                if (page != null) {
+                                    val rows by held(library, page, back)
+                                    val theirs = rows.mapNotNull { details[it.id]?.album?.takeIf(String::isNotEmpty) }.distinct()
+                                    ArtistPage(
+                                        page.name,
+                                        artists.firstOrNull { it.name == page.name },
+                                        rows,
+                                        theirs.mapNotNull { n -> albums.firstOrNull { it.name == n } },
+                                        albumOf,
+                                        playing,
+                                        act,
+                                    )
+                                }
+                            }
+                            screen("playlist/{arg}", motion) { back ->
+                                val page = Page.parse("playlist/" + back.arguments?.getString("arg")) as? Page.ForPlaylist
+                                if (page != null) {
+                                    val rows by held(library, page, back)
+                                    PlaylistPage(page.id, playlists.firstOrNull { it.id == page.id }, rows, albumOf, playing, act)
+                                }
+                            }
+                            screen("settings", motion) { _ ->
+                                var taps by remember { mutableIntStateOf(0) }
+                                var unlocked by remember { mutableStateOf(device.diagnostics) }
+                                SettingsScreen(
+                                    SettingsData(library.name, library.user, library.email, library.server, status.linked, version(context), unlocked),
+                                    onBack = act::back,
+                                    onSignOut = library::signOut,
+                                    onVersion = {
+                                        taps++
+                                        when {
+                                            taps >= 7 -> {
+                                                taps = 0
+                                                unlocked = true
+                                                device.diagnostics = true
+                                                nav.navigate("diagnostics")
+                                            }
+                                            taps >= 4 && !unlocked -> scope.launch { snackbar.showSnackbar("${7 - taps} more taps for diagnostics") }
                                         }
-                                        taps >= 4 && !unlocked -> scope.launch { snackbar.showSnackbar("${7 - taps} more taps for diagnostics") }
-                                    }
-                                },
-                                onDiagnostics = { nav.navigate("diagnostics") },
-                            )
-                        }
-                        screen("diagnostics", motion) { _ ->
-                            var d by remember { mutableStateOf<Diagnostics?>(null) }
-                            // Read again when the session reports a change, not on a clock.
-                            val moved by library.moved.collectAsStateWithLifecycle()
-                            LaunchedEffect(moved) { d = library.diagnostics() }
-                            DiagnosticsScreen(d, onBack = act::back, onVerify = library::verify)
+                                    },
+                                    onDiagnostics = { nav.navigate("diagnostics") },
+                                )
+                            }
+                            screen("diagnostics", motion) { _ ->
+                                var d by remember { mutableStateOf<Diagnostics?>(null) }
+                                // Read again when the session reports a change, not on a clock.
+                                val moved by library.moved.collectAsStateWithLifecycle()
+                                LaunchedEffect(moved) { d = library.diagnostics() }
+                                DiagnosticsScreen(d, onBack = act::back, onVerify = library::verify)
+                            }
                         }
                     }
                 }
             }
 
-            menu?.let { (track, page) ->
+            menu?.let { m ->
+                val track = m.track
+                val page = m.from
                 val actions =
-                    remember(track, page) {
+                    remember(m) {
                         object : MenuActions {
                             override fun playNext() {
                                 playback.playNext(track, albumOf(track))
@@ -450,6 +463,9 @@ fun HarkenApp(
                             }
 
                             override fun goTo(page: Page) {
+                                // The page grows out of the row the menu was about, and the sheet
+                                // goes in the same frame, so the two do not overlap.
+                                motion.from(m.origin(page))
                                 menu = null
                                 scope.launch { sheet.close() }
                                 nav.navigate(page.route)
@@ -555,6 +571,16 @@ class Searched {
 /** Every cover a search's results draw, at the size each is drawn: the songs' first, as they come first. */
 private fun searchArt(r: Results, albumOf: (Track) -> Album?): List<Pair<String, androidx.compose.ui.unit.Dp>> =
     r.songs.take(SEARCH_SONGS).mapNotNull { t -> albumOf(t)?.art?.let { it to Space.thumb } } + r.albums.map { it.art to SEARCH_ALBUM } + r.artists.map { it.art to SEARCH_ARTIST }
+
+/** A song's menu: the song, the page its row was on, and where the row was when it opened. */
+class Menu(val track: Track, val from: Page?, val tapped: Tapped?) {
+    /**
+     * What a page the menu goes to grows out of: its album out of the row's cover, which is that
+     * album's art; anything else — its artist — out of the row itself; and nothing, for a menu that
+     * came from no row (the full player's), so that page rises.
+     */
+    fun origin(to: Page): Origin? = if (to is Page.ForAlbum) tapped?.art ?: tapped?.row else tapped?.row
+}
 
 /** "0.1 (1)", from the package. */
 private fun version(context: android.content.Context): String =

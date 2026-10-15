@@ -64,6 +64,7 @@ fun AlbumPage(name: String, album: Album?, tracks: List<Track>, details: Map<Id,
                 playing = t.id.hex == playing,
                 onClick = { act.play(tracks, i, page) },
                 onMore = { act.more(t, page) },
+                art = false,
             ) { TrackNumber(d?.track ?: 0, t.id.hex == playing) }
         }
         item { Spacer(Modifier.height(Space.xl)) }

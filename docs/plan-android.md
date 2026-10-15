@@ -506,9 +506,10 @@ drawn by the page (`Moving`, around every destination):
   back runs the same move the other way, into the same cover: an origin is
   kept per back stack entry. A page scrolled past its header shrinks its top
   square into the cover instead.
-- A page opened from no art (an artist from a song's menu, an album's
-  artist, settings) grows from 80% of the screen at its middle, fading in
-  over the first third.
+- A page opened from no art (an album's artist, settings) grew from 80% of
+  the screen at its middle, fading in over the first third. It rises now,
+  and a song's menu grows its pages out of the song's row ("Motion,
+  tightened", below).
 - The tabs switch at once: no animation, and the tab leaving is not drawn
   for the frames it is still composed.
 - The move is one number per destination, `animateFloat` on the NavHost
@@ -516,7 +517,8 @@ drawn by the page (`Moving`, around every destination):
   navigation-compose 2.8.5's predictive back seeks it with the edge swipe's
   progress, and `enableOnBackInvokedCallback` in the manifest turns that on.
   Letting go past the system's threshold finishes it; cancelling runs it
-  back.
+  back. (Now the gesture previews toward a limit, and the NavHost hears only
+  that it began and how it ended: below.)
 - A page pulled down from its top goes back the same way (`Pull`): the pull
   is dispatched to the activity's `OnBackPressedDispatcher` as a back
   gesture — `dispatchOnBackStarted`, `…Progressed`, then `onBackPressed` or
@@ -528,7 +530,8 @@ drawn by the page (`Moving`, around every destination):
   let go faster than 1.2 page heights a second, goes back; short of that it
   springs back.
 - 400 ms, on a curve close to linear for its first third (so the gesture
-  moves the page as soon as the finger does) that then settles.
+  moves the page as soon as the finger does) that then settles. (Springs
+  now: below.)
 
 It is not `SharedTransitionLayout`. Wrapping the NavHost in one, with no
 shared element anywhere, cost the Songs list 43% per entering row in the
@@ -697,3 +700,129 @@ covered), and only a phone can say.
   first result to the last sends 0 of 40 entering rows looking for a cover.
   - Falsified: no warm-up — 12.
 
+**Springs, one set of numbers** (`Springs.kt`): stiffness 700, damping 0.88
+for where a thing is, 1 (critically damped) for how large it is and what of
+it shows, a rest threshold of 0.0005 of the way (Compose's default, 0.01,
+left a last jump of several pixels on a page), a 300 ms cap on a settle.
+Nothing in that file knows what moves.
+
+- A page's size, clip, corner and dim run on the critically damped spring and
+  its place on the 0.88 one (about 0.3% of overshoot, two pixels on a page);
+  the 400 ms tween and `PAGE_MS` are gone. Opening the Brandenburg album from
+  Home's card: the first moving frame 33 ms after the tap, within half a
+  percent 283 ms later.
+  - `aPageGrowsOutOfItsCardAndTheBackGesturePreviewsIt` holds 200–340 ms.
+    Falsified with the old tween: 350.
+- The player settles on the 0.88 spring from the release's own speed, capped
+  at 300 ms, and never on a decay (`Springs.noDecay`: a draggable's settle
+  then always takes the spring branch). Let go at 59% of the way closed,
+  held still: on the bar in 216 ms; flicked from the same place: 133 ms. The
+  old settle, critically damped at stiffness 400, took 700 ms for the same
+  slow release. The sideways skip springs back on the same numbers.
+  - `aSlowReleaseLandsWithinTheCapAndAFlickSooner`. Falsified with the old
+    spec: 700 ms.
+- Frame by frame, at 60 fps (ms from the release, or from the tap; `shown`
+  is a page's size progress, `p` the player's):
+
+  | ms  | page opening, `shown` | player, slow release, `p` | player, flicked, `p` |
+  |-----|-----------------------|---------------------------|----------------------|
+  | 0   | 1 (not yet drawn)     | 0.411                     | 0.411                |
+  | 33  | 0.000                 | 0.317                     | 0.181                |
+  | 66  | 0.218                 | 0.181                     | 0.065                |
+  | 100 | 0.521                 | 0.083                     | 0.016                |
+  | 133 | 0.741                 | 0.032                     | 0                    |
+  | 166 | 0.866                 | 0.010                     |                      |
+  | 216 | 0.954                 | 0                         |                      |
+  | 283 | 0.990                 |                           |                      |
+  | 316 | 0.995                 |                           |                      |
+
+**The back gesture previews, then commits.** Its raw progress `r` is mapped
+to a preview `v = L · (1 − e^(−r / L'))` with `L = 0.1` and `L' = 0.12`:
+0.057 at r 0.1, 0.092 at 0.3, 0.098 at 0.5, 0.0999 at 0.9. The page sheds
+`v` of its size about its middle (never below 0.9 scale), moves aside toward
+where the finger goes by up to Android's own `width / 20 − 8 dp` (down, for a
+pull), rounds its corners to up to 28 dp, and the page it goes back to shows
+around it at the 25% dim. Let go past the threshold — the system's for the
+edge swipe, the pull's own fifth for a pull — and the page goes the rest of
+the way into its card on the size spring, from the preview (the preview fades
+with the shrink, so it lands on the card exactly); short of it, it springs
+back to 0. The player's back gesture is the same curve on `p`.
+
+How: the NavHost's own handler would seek the transition with `r`, which is
+the page following the finger all the way into its card. `PageBack` takes the
+gesture on the activity's dispatcher instead and hands the NavHost a
+dispatcher of its own (`Relayed`), on which it says only that a gesture began
+— at progress 0, which is what composes the page underneath — and then that
+it finished, or, once the preview has sprung back, that it was cancelled. The
+NavHost's pop then runs the springs from there. `PageBack` is composed
+before the player, so the player's handler, registered after it, is asked
+first, and it stands down while the player is up whatever the order. The
+pages' own content gets the activity's dispatcher back, so a pull reaches
+`PageBack` like the edge swipe.
+
+Found on the way: the player's back gesture never finished. Its handler ran
+`close()` in its own coroutine; closing turns the sheet toward the bar, which
+disables the handler, which cancels that coroutine, whose catch reopened the
+player. It closes from the composition's scope now.
+
+- `thePreviewSaturates`: 0.3 and 0.9 both within `L`, 0.9 less than 15%
+  past 0.3, and free at first. Falsified with `L · r`: 0.09 against 0.03.
+- `aPageGrowsOutOfItsCardAndTheBackGesturePreviewsIt`: 0.092 at 0.3, 0.0999
+  at 0.9, Home composed under it, a cancel back to 0 keeping the page,
+  released at 0.098 and closed all the way to 0.
+  `aPagePulledDownFromItsTopGoesBack`: the pull previews (0.098) and goes
+  back; a short one (0.046) springs back.
+- `thePlayersBackGesturePreviewsAndSaturates`: 0.092 at 0.3, 0.0999 at 0.9,
+  a cancel back to full, a finish to the bar. Falsified by the linear curve
+  (0.09 at 0.9), and the finish failed before the fix above.
+
+**A page grows out of what was acted on.** A song's menu now says where its
+row was as it opened (`PageMotion.tapped`, read off the menu button's own
+node — no node of its own on the row): "Go to album" grows the album out of
+the row's cover, which is that album's art, exactly as a card's tap does;
+"Go to artist" grows the page out of the row, a container whose rectangle the
+top of the page opens out of. The bounds are the row's in the page behind,
+taken as the menu opened; the sheet goes in the frame the page starts. A page
+with no origin at all (settings, a page restored after the process was
+killed, a deep link, the full player's menu) rises 24 dp and fades in over
+about 120 ms on the same springs, with no 80% scale from the middle. No sheet
+opens a playlist today — the playlists sheet ticks and unticks — so "grow
+from that sheet's row" has nothing to attach to yet.
+
+- `aMenuOpensItsPageOutOfTheRow`: from Every song's Alla Hornpipe, the album
+  grew from (44, 341)–(176, 473), the row's cover, and did not rise; the artist
+  from (0, 319)–(1080, 495), the row; settings had no origin and rose. The
+  entries are chosen through `onMenu`, as above. Falsified: the menu's page
+  opened from no origin.
+
+**Generic, for `kotlin/ark-ui`.** `Springs.kt` and `Motion.kt` name no harken
+type: `PageMotion` is told which routes are tabs (`Tab.routes`), `rememberHero`
+takes its corner, and the back plumbing (`PageBack`, `Relayed`, `Pull`), the
+origins (`Origin`, `Tapped`, `Hero`, `Spot`) and the settle (`Springs.settle`,
+`Capped`, `noDecay`, `preview`) depend on Compose, activity and navigation
+only. What is harken's — which rectangle of a track row is its cover, which
+menu entry grows from which — stays in `Components.kt` and `HarkenApp.kt`.
+
+**The fling bench** (HARKEN_FLING_BENCH=2000, the reported two passes; the
+times move by tens of percent with this machine's load, so each "after" is
+read against a "before" run beside it):
+
+| | compose+measure, per entering row | draw, per frame |
+|---|---|---|
+| before (2d2cebb), first run | 365 / 334 µs, 32,720 B | 7.4 / 7.1 ms, 27,977 B |
+| before, four runs each beside an after run | 375–521 µs, 32,697–32,892 B | 7.4–9.3 ms, 27,977 B |
+| the row's place kept by a node of its own on every row (not kept) | 434 / 443 µs, 33,202 B | 8.0 / 8.4 ms, 27,977 B |
+| a node on the menu button, kept by a `remember` (not kept) | 416–744 µs, 32,947–33,215 B | 7.3–9.0 ms, 27,977 B |
+| after, final: the place asked of the button's own label node on the tap | 411 / 412 µs, 32,717 B | 7.8 / 8.0 ms, 27,977 B |
+
+Bytes are the steady number here, to within about 150 from run to run, and
+the final row allocates what it did: its label's node now also answers where
+the button is, in place of the `semantics` element and lambda it replaced.
+The times are this machine's load; nothing about the scroll's own path
+changed, and the draw did not move.
+
+`ScrollTests` still composes nothing per position tick and nothing at rest.
+
+Not verified: the feel of any of it on a phone — the stiffness, the preview's
+limit and give, the cap, the rise — and whether the second report was the
+covers or the keyboard. Every number above is HotSpot's and layoutlib's.

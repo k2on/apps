@@ -67,6 +67,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
+private const val FPS = 60
+
 class MotionTests {
     private val shots = Shots()
 
@@ -252,7 +254,7 @@ class MotionTests {
         val peer = demo()
         val login = Login("t", "s", Account("library"), 0)
         val session = if (threaded) ArkSession.over(peer, "https://music.example.com", login) else ArkSession.inline(peer, "https://music.example.com", login)
-        val motion = PageMotion()
+        val motion = PageMotion(Tab.routes)
         val back = OnBackPressedDispatcher()
         var done = false
         try {
@@ -266,7 +268,7 @@ class MotionTests {
                     done = true
                 }
             }
-            paparazzi.gif(view, "motion", 0L, ms, 30)
+            paparazzi.gif(view, "motion", 0L, ms, FPS)
         } finally {
             session.close()
             peer.close()
@@ -278,14 +280,44 @@ class MotionTests {
 
     private fun at(p: Float) = BackEventCompat(1080f * p, 1200f, p, BackEventCompat.EDGE_LEFT)
 
+    /** The frames from now until `done` holds, as (ms since now, what `of` read): a curve to print. */
+    private suspend fun curve(of: () -> Float, max: Long = 1_000L, done: (Float) -> Boolean = { false }): List<Pair<Long, Float>> {
+        val t0 = clock
+        val seen = mutableListOf(0L to of())
+        while (clock - t0 < max * 1_000_000) {
+            frame()
+            seen += (clock - t0) / 1_000_000 to of()
+            if (done(seen.last().second)) break
+        }
+        return seen
+    }
+
+    private fun table(name: String, c: List<Pair<Long, Float>>) = println("$name: " + c.joinToString(" ") { (t, v) -> "%d:%.4f".format(t, v) })
+
     @Test
-    fun aPageGrowsOutOfItsCardAndTheBackGestureSeeksIt() {
-        val grew = mutableListOf<Float>()
+    fun thePreviewSaturates() {
+        val a = Springs.preview(0.3f)
+        val b = Springs.preview(0.9f)
+        println("preview: 0.1 → ${Springs.preview(0.1f)}, 0.2 → ${Springs.preview(0.2f)}, 0.3 → $a, 0.5 → ${Springs.preview(0.5f)}, 0.9 → $b, 1 → ${Springs.preview(1f)}")
+        assertTrue("both within the limit: $a, $b", a <= Springs.PREVIEW && b <= Springs.PREVIEW)
+        // Three times the gesture is barely more preview: it has stiffened.
+        assertTrue("0.9 only a little past 0.3: $b against $a", b - a < 0.15f * a)
+        // And free at first: the first tenth of the gesture is most of a tenth of the limit's worth.
+        assertTrue("free at first: ${Springs.preview(0.02f)}", Springs.preview(0.02f) > 0.15f * Springs.PREVIEW)
+    }
+
+    @Test
+    fun aPageGrowsOutOfItsCardAndTheBackGesturePreviewsIt() {
+        var opening = emptyList<Pair<Long, Float>>()
         var opened = false
-        var seeked30 = -1f
-        var seeked60 = -1f
+        var at30 = -1f
+        var at90 = -1f
+        var drawnUnder = false
         var afterCancel = -1f
         var keptAfterCancel = false
+        var shrink = emptyList<Pair<Long, Float>>()
+        var releasedAt = -1f
+        var closedFully = false
         var gone = false
         app(
             { view, motion, back ->
@@ -295,37 +327,38 @@ class MotionTests {
                     frame()
                     shots.series = "open"
                     click(view, "Brandenburg Concertos")
-                    repeat(18) {
-                        frame()
-                        grew += motion.drawnAt
-                    }
+                    opening = curve({ motion.drawnAt }, 600)
                     shots.series = null
-                    frames(300)
+                    frames(200)
                     opened = has(view, "ALBUM")
 
+                    // The edge swipe: the page shrinks toward the limit, with Home under it.
                     back.dispatchOnBackStarted(start)
-                    back.dispatchOnBackProgressed(at(0.3f))
-                    frames(200)
-                    seeked30 = motion.drawnAt
-                    shots.keep = "page-back-30"
-                    frames(100)
-                    back.dispatchOnBackProgressed(at(0.6f))
-                    frames(200)
-                    seeked60 = motion.drawnAt
-                    shots.keep = "page-back-60"
-                    frames(100)
+                    for (r in listOf(0.2f, 0.3f, 0.5f, 0.9f)) {
+                        back.dispatchOnBackProgressed(at(r))
+                        frames(100)
+                        if (r == 0.3f) at30 = motion.previewDrawn
+                        if (r == 0.9f) at90 = motion.previewDrawn
+                        if (r != 0.3f) shots.keep = "page-back-${(r * 100).toInt()}"
+                        frame()
+                    }
+                    drawnUnder = has(view, "Recently added")
                     back.dispatchOnBackCancelled()
-                    frames(PAGE_MS * 2L)
-                    afterCancel = motion.drawnAt
+                    frames(600)
+                    afterCancel = motion.previewDrawn
                     keptAfterCancel = has(view, "ALBUM")
 
-                    // And through: past the threshold, the page goes back into its card.
-                    shots.series = "shrink"
+                    // Through: past the threshold, the page goes the rest of the way into its card.
                     back.dispatchOnBackStarted(start)
-                    back.dispatchOnBackProgressed(at(0.4f))
+                    back.dispatchOnBackProgressed(at(0.5f))
                     frames(150)
+                    releasedAt = motion.previewDrawn
+                    shots.meta = { motion.drawnAt }
+                    shots.series = "shrink"
                     back.onBackPressed()
-                    frames(PAGE_MS + 300L)
+                    shrink = curve({ motion.drawnAt }, 700) { it <= 0f }
+                    closedFully = shrink.any { it.second <= 0.01f }
+                    frames(300)
                     shots.series = null
                     gone = !has(view, "ALBUM") && has(view, "Recently added")
                 }
@@ -333,25 +366,34 @@ class MotionTests {
             8_000L,
         )
         shots.pick("open", listOf(0f, 0.25f, 0.5f, 0.75f, 1f), "page-open")
-        shots.pick("shrink", listOf(0.5f), "page-shrink")
-        println("open: drawn at $grew; back at 0.3: $seeked30, at 0.6: $seeked60, after cancel: $afterCancel")
+        shots.pick("shrink", listOf(0.75f, 0.5f, 0.25f, 0.05f), "page-back-done")
+        table("curve page-open (ms:shown)", opening)
+        table("curve page-back-done (ms:shown)", shrink)
+        println("back preview at 0.3: $at30, at 0.9: $at90 (limit ${Springs.PREVIEW}); after cancel: $afterCancel; released at $releasedAt")
         assertTrue("the page opened", opened)
-        assertTrue("it grew through the in-between: $grew", grew.any { it > 0.05f && it < 0.95f })
-        assertEquals("and ended open", 1f, grew.last(), 0f)
-        // The gesture seeks the move: part-way at 0.3, further at 0.6, and back to open when let go.
-        assertTrue("seeked at 0.3: $seeked30", seeked30 > 0f && seeked30 < 1f)
-        assertTrue("further at 0.6: $seeked60 < $seeked30", seeked60 < seeked30)
-        assertEquals("a cancelled gesture puts the page back", 1f, afterCancel, 0f)
-        assertTrue("and keeps it", keptAfterCancel)
-        assertTrue("a finished gesture goes back", gone)
+        assertTrue("it grew through the in-between: $opening", opening.any { it.second > 0.05f && it.second < 0.95f })
+        assertEquals("and ended open", 1f, opening.last().second, 0f)
+        // From the first frame the page is drawn moving: the navigation composes it a frame or two after the tap.
+        val began = opening.first { it.second < 1f }.first
+        val settled = opening.first { it.first > began && it.second >= 0.995f }.first - began
+        assertTrue("open to within half a percent in about 250–320 ms: $settled", settled in 200L..340L)
+        // The gesture previews: within the limit, and stiffer as it goes.
+        assertTrue("at 0.3: $at30", at30 > 0f && at30 <= Springs.PREVIEW)
+        assertTrue("at 0.9: $at90, only a little past 0.3's $at30", at90 <= Springs.PREVIEW && at90 > at30 && at90 - at30 < 0.15f * at30)
+        assertTrue("and the page it goes back to is there under it", drawnUnder)
+        assertEquals("a cancelled gesture springs back", 0f, afterCancel, 0f)
+        assertTrue("and keeps the page", keptAfterCancel)
+        assertTrue("released mid-preview: $releasedAt", releasedAt > 0f)
+        assertTrue("let go past the threshold, it closes all the way into its card: $shrink", closedFully)
+        assertTrue("and goes back", gone)
     }
 
     @Test
     fun aPagePulledDownFromItsTopGoesBack() {
         var scrolledNotPulled = true
-        var pulled = 1f
+        var pulled = 0f
         var gone = false
-        var smallPull = 1f
+        var smallPull = 0f
         var kept = false
         var restored = -1f
         app(
@@ -360,34 +402,34 @@ class MotionTests {
                     val w = view.width.toFloat()
                     val h = view.height.toFloat()
                     click(view, "Brandenburg Concertos")
-                    frames(PAGE_MS + 300L)
+                    frames(600)
                     // Scrolled down a way: a drag down scrolls the list back before it pulls anything.
                     drag(view, Offset(w / 2, h * 0.7f), Offset(w / 2, h * 0.4f), 10)
                     frames(300)
-                    drag(view, Offset(w / 2, h * 0.3f), Offset(w / 2, h * 0.45f), 6) { if (motion.drawnAt < 1f) scrolledNotPulled = false }
+                    drag(view, Offset(w / 2, h * 0.3f), Offset(w / 2, h * 0.45f), 6) { if (motion.previewDrawn > 0f || motion.drawnAt < 1f) scrolledNotPulled = false }
                     frames(300)
-                    // Then from the top: the page shrinks under the finger, and far enough goes back.
-                    drag(view, Offset(w / 2, h * 0.3f), Offset(w / 2, h * 0.62f), 10) { pulled = minOf(pulled, motion.drawnAt) }
-                    frames(PAGE_MS + 300L)
+                    // Then from the top: the page previews under the finger, and far enough goes back.
+                    drag(view, Offset(w / 2, h * 0.3f), Offset(w / 2, h * 0.62f), 10) { pulled = maxOf(pulled, motion.previewDrawn) }
+                    frames(700)
                     gone = !has(view, "ALBUM")
                     // A little way, and let go: it springs back.
                     if (gone) click(view, "Brandenburg Concertos")
-                    frames(PAGE_MS + 300L)
-                    drag(view, Offset(w / 2, h * 0.3f), Offset(w / 2, h * 0.35f), 4) { smallPull = minOf(smallPull, motion.drawnAt) }
-                    frames(PAGE_MS * 2L)
+                    frames(600)
+                    drag(view, Offset(w / 2, h * 0.3f), Offset(w / 2, h * 0.35f), 4) { smallPull = maxOf(smallPull, motion.previewDrawn) }
+                    frames(600)
                     kept = has(view, "ALBUM")
-                    restored = motion.drawnAt
+                    restored = motion.previewDrawn
                 }
             },
             9_000L,
         )
         println("pull: scrolled, not pulled $scrolledNotPulled; pulled to $pulled; small pull to $smallPull, restored to $restored")
         assertTrue("a drag down a scrolled list scrolls it and pulls nothing", scrolledNotPulled)
-        assertTrue("a pull from the top shrinks the page: $pulled", pulled < 1f)
+        assertTrue("a pull from the top previews the page: $pulled", pulled > 0f && pulled <= Springs.PREVIEW)
         assertTrue("and far enough goes back", gone)
-        assertTrue("a short pull moved it too: $smallPull", smallPull < 1f)
+        assertTrue("a short pull moved it too: $smallPull", smallPull > 0f)
         assertTrue("and let go, keeps the page", kept)
-        assertEquals("open again", 1f, restored, 0f)
+        assertEquals("sprung back", 0f, restored, 0f)
     }
 
     @Test
@@ -408,13 +450,13 @@ class MotionTests {
                     }
                     homeGone = n
                     libraryShown = has(view, "Playlists")
-                    frames(PAGE_MS + 200L)
+                    frames(600)
                     moving = motion.movingFrames
                     // A page does move, so the count is not empty for want of counting.
                     click(view, "Albums")
                     frames(200)
                     click(view, "Brandenburg Concertos")
-                    frames(PAGE_MS + 200L)
+                    frames(600)
                     opening = motion.movingFrames
                 }
             },
@@ -539,6 +581,83 @@ class MotionTests {
         assertEquals("and still there", left, back?.second)
     }
 
+    /** The row with `title` on screen, where its menu button is, and its own bounds. */
+    private fun row(view: ComposeView, title: String): Pair<SemanticsNode, androidx.compose.ui.geometry.Rect> {
+        val more = described(view, "More for $title").first()
+        val row = all(root(view)).first { title in texts(it) && it.config.getOrNull(SemanticsActions.OnClick) != null }
+        return more to row.boundsInRoot
+    }
+
+    @Test
+    fun aMenuOpensItsPageOutOfTheRow() {
+        var album: Origin? = null
+        var albumExpected: androidx.compose.ui.geometry.Rect? = null
+        var albumRose = -1
+        var artist: Origin? = null
+        var artistExpected: androidx.compose.ui.geometry.Rect? = null
+        var settings: Origin? = Origin(androidx.compose.ui.geometry.Rect.Zero, 0f)
+        var settingsRose = -1
+        val d = paparazzi.context.resources.displayMetrics.density
+        app(
+            { view, motion, b ->
+                {
+                    // Every song: a row's menu, then its album, out of the row's cover.
+                    val (more, bounds) = row(view, "Alla Hornpipe")
+                    albumExpected = androidx.compose.ui.geometry.Rect(bounds.left + 16 * d, bounds.top + (bounds.height - 48 * d) / 2, bounds.left + 64 * d, bounds.top + (bounds.height + 48 * d) / 2)
+                    more.config[SemanticsActions.OnClick].action!!.invoke()
+                    frames(300)
+                    motion.rose = 0
+                    shots.meta = { motion.drawnAt }
+                    shots.series = "menu-album"
+                    // The sheet is a window of its own, which layoutlib does not raise: its entry, by hand.
+                    menu!!.goTo(Page.ForAlbum("Water Music"))
+                    frames(500)
+                    shots.series = null
+                    album = motion.taken
+                    albumRose = motion.rose
+                    b.onBackPressed()
+                    frames(600)
+                    // Its artist, out of the row itself.
+                    val (more2, bounds2) = row(view, "Alla Hornpipe")
+                    artistExpected = bounds2
+                    more2.config[SemanticsActions.OnClick].action!!.invoke()
+                    frames(300)
+                    shots.series = "menu-artist"
+                    menu!!.goTo(Page.ForArtist("George Frideric Handel"))
+                    frames(500)
+                    shots.series = null
+                    artist = motion.taken
+                    b.onBackPressed()
+                    frames(600)
+                    // Settings has nothing to grow from: it rises.
+                    click(view, "Home")
+                    frames(300)
+                    motion.rose = 0
+                    shots.series = "rise"
+                    described(view, "Settings").first().config[SemanticsActions.OnClick].action!!.invoke()
+                    frames(500)
+                    shots.series = null
+                    settings = motion.taken
+                    settingsRose = motion.rose
+                }
+            },
+            8_000L,
+            start = LibraryTab.Songs,
+        )
+        shots.pick("menu-album", listOf(0.05f, 0.25f, 0.5f, 0.75f, 1f), "menu-album")
+        shots.pick("menu-artist", listOf(0.05f, 0.25f, 0.5f, 0.75f, 1f), "menu-artist")
+        shots.pick("rise", listOf(0.05f, 0.25f, 0.5f, 0.75f, 1f), "rise")
+        println("menu: album grew from $album (the cover $albumExpected), artist from $artist (the row $artistExpected), settings from $settings rising $settingsRose frames")
+        assertTrue("the album grew out of the row's cover: $album against $albumExpected", album != null && album!!.art && near(album!!.bounds, albumExpected!!))
+        assertEquals("and did not rise", 0, albumRose)
+        assertTrue("the artist grew out of the row: $artist against $artistExpected", artist != null && !artist!!.art && near(artist!!.bounds, artistExpected!!))
+        assertEquals("settings had nothing to grow from", null, settings)
+        assertTrue("so it rose: $settingsRose", settingsRose > 0)
+    }
+
+    private fun near(a: androidx.compose.ui.geometry.Rect, b: androidx.compose.ui.geometry.Rect) =
+        abs(a.left - b.left) <= 1f && abs(a.top - b.top) <= 1f && abs(a.right - b.right) <= 1f && abs(a.bottom - b.bottom) <= 1f
+
     // The player -------------------------------------------------------------
 
     /** What the player's controls were asked to do. */
@@ -574,6 +693,8 @@ class MotionTests {
     private val playing =
         PlayerState(now = Demo.playing(Demo.tracks[0]), playing = true, durationMs = Demo.tracks[0].durationMs, upNext = Demo.tracks.subList(1, 5).map(Demo::playing))
 
+    private val playerBack = OnBackPressedDispatcher()
+
     private fun player(test: (ComposeView, () -> PlayerSheet, Asked, () -> Int) -> suspend () -> Unit, ms: Long) {
         var sheet: PlayerSheet? = null
         var taps = 0
@@ -581,7 +702,7 @@ class MotionTests {
         val view = ComposeView(paparazzi.context)
         lateinit var asked: Asked
         view.setContent {
-            Host(OnBackPressedDispatcher()) {
+            Host(playerBack) {
                 HarkenTheme(dark = false) {
                     val s = rememberPlayerSheet().also { sheet = it }
                     val scope = rememberCoroutineScope()
@@ -597,7 +718,7 @@ class MotionTests {
                 done = true
             }
         }
-        paparazzi.gif(view, "player", 0L, ms, 30)
+        paparazzi.gif(view, "player", 0L, ms, FPS)
         assertTrue("the script ran to its end", done)
     }
 
@@ -741,5 +862,92 @@ class MotionTests {
         println("tap: p went $seen")
         assertTrue("through the in-between: $seen", seen.any { it > 0.1f && it < 0.9f })
         assertEquals("to full", 1f, seen.last(), 0.001f)
+    }
+
+    /** When `c` first reads `at` or less, in ms: when a settle toward 0 lands. */
+    private fun landed(c: List<Pair<Long, Float>>, at: Float = 0f): Long = c.firstOrNull { it.second <= at }?.first ?: Long.MAX_VALUE
+
+    @Test
+    fun aSlowReleaseLandsWithinTheCapAndAFlickSooner() {
+        var slow = emptyList<Pair<Long, Float>>()
+        var fast = emptyList<Pair<Long, Float>>()
+        var slowFrom = -1f
+        var fastFrom = -1f
+        player(
+            { view, sheet, _, _ ->
+                {
+                    val s = sheet()
+                    s.open()
+                    frames(500)
+                    val from = Offset(view.width / 2f, view.height * 0.3f)
+                    val to = from + Offset(0f, s.travel * 0.6f)
+                    // Drawn down to 60% of the way to the bar, held still, and let go: the nearer end.
+                    shots.meta = { sheet().p }
+                    shots.series = "settle-slow"
+                    drag(view, from, to, 20) { slowFrom = sheet().p }
+                    slow = curve({ sheet().p }, 1_000) { it <= 0f }
+                    shots.series = null
+                    frames(300)
+                    s.open()
+                    frames(500)
+                    // The same place, flicked: let go still moving.
+                    shots.series = "settle-fast"
+                    drag(view, from, to, 4, rest = false) { fastFrom = sheet().p }
+                    fast = curve({ sheet().p }, 1_000) { it <= 0f }
+                    shots.series = null
+                }
+            },
+            5_000L,
+        )
+        shots.pick("settle-slow", listOf(0.4f, 0.3f, 0.2f, 0.1f, 0f), "player-settle-slow")
+        shots.pick("settle-fast", listOf(0.4f, 0.2f, 0f), "player-settle-fast")
+        table("curve player-slow-release (ms:p)", slow)
+        table("curve player-fast-flick (ms:p)", fast)
+        val a = landed(slow)
+        val b = landed(fast)
+        println("settle: a slow release from p=$slowFrom landed in $a ms, a flick from p=$fastFrom in $b ms")
+        assertTrue("let go at about 60% closed: $slowFrom, $fastFrom", slowFrom in 0.3f..0.5f && fastFrom in 0.3f..0.5f)
+        // A frame of the drag's own release before the curve starts, at 60 fps.
+        assertTrue("a slow release lands within the cap: $a ms", a + 17 <= Springs.CAP_MS)
+        assertTrue("a flick lands sooner: $b ms against $a", b < a)
+    }
+
+    @Test
+    fun thePlayersBackGesturePreviewsAndSaturates() {
+        var at30 = -1f
+        var at90 = -1f
+        var cancelled = -1f
+        var finished = -1f
+        player(
+            { _, sheet, _, _ ->
+                {
+                    val s = sheet()
+                    s.open()
+                    frames(500)
+                    playerBack.dispatchOnBackStarted(start)
+                    playerBack.dispatchOnBackProgressed(at(0.3f))
+                    frames(100)
+                    at30 = 1f - s.p
+                    playerBack.dispatchOnBackProgressed(at(0.9f))
+                    frames(100)
+                    at90 = 1f - s.p
+                    playerBack.dispatchOnBackCancelled()
+                    frames(500)
+                    cancelled = s.p
+                    playerBack.dispatchOnBackStarted(start)
+                    playerBack.dispatchOnBackProgressed(at(0.5f))
+                    frames(100)
+                    playerBack.onBackPressed()
+                    frames(500)
+                    finished = s.p
+                }
+            },
+            3_000L,
+        )
+        println("player back: previewed ${at30} at 0.3, ${at90} at 0.9; cancelled to $cancelled; finished at $finished")
+        assertTrue("at 0.3, within the limit: $at30", at30 > 0f && at30 <= Springs.PREVIEW + 0.001f)
+        assertTrue("at 0.9, only a little further: $at90", at90 <= Springs.PREVIEW + 0.001f && at90 - at30 < 0.15f * at30)
+        assertEquals("a cancel puts it back up", 1f, cancelled, 0f)
+        assertEquals("a finished one takes it to the bar", 0f, finished, 0f)
     }
 }

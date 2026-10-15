@@ -1,33 +1,45 @@
-// How a page arrives and how it goes. A page grows out of the art that was
-// tapped — the album's cover on a shelf, a playlist's square in a list — to
-// fill the screen, the art becoming the page's own header as it grows; the
-// page it came from stays where it is and dims a little under it. Going
-// back is the same move run the other way: the page shrinks into its card,
-// its corners rounding as it does. A page opened from no art at all (an
-// artist from a row's menu, settings) grows from the middle of the screen
-// in the same way. The three tabs switch at once.
+// How a page arrives and how it goes. A page grows out of what was tapped —
+// the album's cover on a shelf, a playlist's square in a list, a song's row
+// when its menu went to the song's artist — to fill the screen, the art
+// becoming the page's own header as it grows; the page it came from stays
+// where it is and dims a little under it. Going back is the same move run
+// the other way: the page shrinks into what it came from, its corners
+// rounding as it does. A page with nothing to grow from (one restored after
+// the process was killed, a deep link) rises a little way and fades in. The
+// tabs switch at once.
 //
-// It is the navigation's own transition, so everything that seeks it moves
-// it: the system's back gesture on Android 14 and later, which follows the
-// finger with the page underneath showing, and a page pulled down from its
-// top, which says the same thing to the same dispatcher. One transition
-// serves both gestures and the back button.
+// The back gesture previews before it commits, the way Android's own does:
+// the edge swipe, or a page pulled down from its top, shrinks the page
+// toward a limit — free at first, harder as it goes, never past it — with
+// the page it goes back to showing, dimmed, around it. Let go past the
+// threshold and the page finishes the whole shrink into its card from
+// wherever the preview was; short of it, it springs back.
+//
+// Everything is a spring (`Springs.kt`): a page's size and clip on a
+// critically damped one, where it is on one with a whisper of overshoot,
+// and the dim under it on the size's.
 //
 // Drawn, not laid out: the page is laid out once at its full size and the
 // move is a scale, an offset and a clip as it is drawn, so a page moving costs
 // a frame of drawing and no measuring. Nothing about it is in the lists.
+//
+// Nothing here knows what a page is about: the app says which routes are its
+// tabs, puts a `Hero` on the art that opens a page and a `Spot` where the
+// header's art lands, and says when something over the pages (a player)
+// takes the back gesture instead.
 package dev.harken.android
 
 import androidx.activity.BackEventCompat
 import androidx.activity.OnBackPressedDispatcher
+import androidx.activity.OnBackPressedDispatcherOwner
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.EnterExitState
-import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.snap
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -37,7 +49,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
@@ -59,6 +78,7 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.positionInRoot
@@ -71,21 +91,16 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
+import androidx.lifecycle.Lifecycle
 import androidx.navigation.NavBackStackEntry
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.abs
-
-/** How long a page takes to grow or shrink, when nothing is holding it. */
-const val PAGE_MS = 400
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 
 /** How dark the page underneath gets while a page covers it. */
 const val PAGE_DIM = 0.25f
-
-/**
- * The curve a page moves on: close to in step with its progress for the first third, so a back
- * gesture that seeks it moves the page with the finger, then slowing into place, so a page opened
- * by a tap lands rather than stops.
- */
-val Settle = CubicBezierEasing(0.5f, 0.5f, 0.2f, 1f)
 
 /** What one navigation does: a page grows over the one it came from, shrinks back off it, or neither. */
 enum class Move {
@@ -94,16 +109,30 @@ enum class Move {
     Shrink,
 }
 
-/** Where a page grows from: the tapped art's bounds in the window, and its corner there. */
-class Origin(val bounds: Rect, val corner: Float)
+/**
+ * Where a page grows from: a rectangle in the window and its corner there. Art (a cover) is where
+ * the page's own header art lands; anything else — a row — is a container the top of the page
+ * opens out of.
+ */
+class Origin(val bounds: Rect, val corner: Float, val art: Boolean = true) {
+    override fun equals(other: Any?) = other is Origin && other.bounds == bounds && other.corner == corner && other.art == art
+
+    override fun hashCode() = (bounds.hashCode() * 31 + corner.hashCode()) * 31 + art.hashCode()
+
+    override fun toString() = "Origin($bounds, corner $corner, ${if (art) "art" else "container"})"
+}
+
+/** What a row's menu was about, as it opened: the row's art and the row, where they were in the window. */
+class Tapped(val art: Origin?, val row: Origin?)
 
 /**
- * The navigation's motion, one per session: which page is moving and which is under it, and the art
- * the next page grows from. The move is decided by the NavHost's transitions, the one place both
- * ends of a navigation are known, and read by every page's own animation as it starts.
+ * The navigation's motion, one per session: which page is moving and which is under it, the art the
+ * next page grows from, and the back gesture's preview. The move is decided by the NavHost's
+ * transitions, the one place both ends of a navigation are known, and read by every page's own
+ * animation as it starts. `tabs` are the routes that switch at once; every other is a page.
  */
 @Stable
-class PageMotion {
+class PageMotion(private val tabs: Set<String> = emptySet()) {
     /** The art the next page opens from, set by the tap and taken by the page it opens. */
     private var pending: Origin? = null
 
@@ -124,11 +153,26 @@ class PageMotion {
     var drawnAt = 1f
         internal set
 
+    /** How far the back preview had shrunk the page when it was last drawn: a test's view of it. */
+    var previewDrawn = 0f
+        internal set
+
+    /** Frames drawn of a page rising with nothing to grow from: a test's view of it. */
+    var rose = 0
+        internal set
+
+    /** What the last page to open grew from: a test's view of it. */
+    var taken: Origin? = null
+        private set
+
+    /** What the last row whose menu opened was, and where: set by the row, read by its menu. */
+    var tapped: Tapped? = null
+
     fun from(origin: Origin?) {
         pending = origin
     }
 
-    internal fun originOf(id: String): Origin? = origins.getOrPut(id) { pending.also { pending = null } }
+    internal fun originOf(id: String): Origin? = origins.getOrPut(id) { pending.also { pending = null; taken = it } }
 
     /** A push: a page grows over whatever it came from; a tab arrives at once. */
     fun push(from: NavBackStackEntry, to: NavBackStackEntry) = decide(if (isPage(to)) Move.Grow else Move.Cut, to)
@@ -141,11 +185,63 @@ class PageMotion {
         top = if (m == Move.Cut) null else moving.id
     }
 
-    /** How a page's animation runs for the move under way: not at all, for a cut. */
-    fun <T> spec(): FiniteAnimationSpec<T> = if (move == Move.Cut) snap() else tween(PAGE_MS, easing = Settle)
+    /** How a page's size, clip and dim run for the move under way: not at all, for a cut. */
+    fun size(): FiniteAnimationSpec<Float> = if (move == Move.Cut) snap() else Springs.size()
+
+    /** How a page's place runs for the move under way. */
+    fun place(): FiniteAnimationSpec<Float> = if (move == Move.Cut) snap() else Springs.move()
+
+    fun isPage(entry: NavBackStackEntry): Boolean = entry.destination.route !in tabs
+
+    // The back preview ---------------------------------------------------------------------------
+
+    /** How far the back gesture's preview has come, 0 to [Springs.PREVIEW]: the share of its size the page sheds. */
+    internal var preview by mutableFloatStateOf(0f)
+
+    /** Which way the preview leans: from the left edge it moves right, from the right left, and a pull down moves it down. */
+    internal var edge = BackEventCompat.EDGE_LEFT
+    internal var down = false
+
+    /** Set by a [Pull] while it is pulling: the gesture it starts is a pull's, and leans down. */
+    internal var pulling = false
+
+    /** The preview as it was let go past the threshold, and the page it was of: the shrink into the card starts there. */
+    internal var released = 0f
+    internal var releasedOf: String? = null
+
+    /** Whether a back gesture is between its start and its end. */
+    internal var gesturing = false
+
+    /** The spring back from a cancelled preview, which the NavHost hears about only once it is home. */
+    internal var springing: Job? = null
+
+    /** The activity's dispatcher, and the NavHost's own, which only this hands anything to. */
+    internal var real: OnBackPressedDispatcherOwner? = null
+    internal var relay: OnBackPressedDispatcherOwner? = null
+
+    /** Whether the NavHost has anything to go back to. */
+    internal var relayed by mutableStateOf(false)
+
+    /** The preview for page `id` drawn now: the live one while the gesture is held, its release shrinking with the page after. */
+    internal fun previewOf(id: String, shown: Float): Float =
+        when {
+            top != id -> 0f
+            releasedOf == id -> released * shown.coerceIn(0f, 1f)
+            else -> preview
+        }
 
     companion object {
-        fun isPage(entry: NavBackStackEntry): Boolean = Tab.entries.none { it.route == entry.destination.route }
+        /** How far a page with nothing to grow from rises as it comes. */
+        val RISE = 24.dp
+
+        /** A rising page is opaque by this much of the way: about 120 ms on the size spring. */
+        const val RISE_FADE = 0.7f
+
+        /** How far the preview moves the page aside at its limit, less this: Android's own `width / 20 − 8 dp`. */
+        val PREVIEW_INSET = 8.dp
+
+        /** The preview's corners at its limit. */
+        val PREVIEW_CORNER = 28.dp
     }
 }
 
@@ -205,7 +301,7 @@ class Hero(private val motion: PageMotion?, private val corner: Float, private v
 }
 
 @Composable
-fun rememberHero(corner: Dp = Space.corner, round: Boolean = false): Hero {
+fun rememberHero(corner: Dp, round: Boolean = false): Hero {
     val motion = LocalPageMotion.current
     val px = with(LocalDensity.current) { corner.toPx() }
     return remember(motion, px, round) { Hero(motion, px, round) }
@@ -220,7 +316,7 @@ private class RoundRectAt(val rect: Rect, val radius: Float) : Shape {
 private fun lerp(a: Rect, b: Rect, t: Float) = Rect(lerp(a.left, b.left, t), lerp(a.top, b.top, t), lerp(a.right, b.right, t), lerp(a.bottom, b.bottom, t))
 
 /** Where a moving page is drawn: scaled by `s` from its corner, offset, and clipped to `clip`, said in its own units. */
-private class Placing(val s: Float, val dx: Float, val dy: Float, val clip: Rect, val radius: Float, val alpha: Float) {
+private class Placing(val s: Float, val dx: Float, val dy: Float, val clip: Rect, val radius: Float, val alpha: Float, val lift: Float) {
     /** The clip as it lands on the screen. */
     val onScreen: Rect
         get() = Rect(dx + s * clip.left, dy + s * clip.top, dx + s * clip.right, dy + s * clip.bottom)
@@ -233,63 +329,90 @@ private class Placing(val s: Float, val dx: Float, val dy: Float, val clip: Rect
  * dims. Worked out as the page is drawn, after it is laid out: on the first frame of a move the
  * header has only just been placed, and drawing is the first moment its place is known.
  */
-class PageFrame internal constructor(private val motion: PageMotion, private val id: String, private val origin: Origin?, private val centreCorner: Float) {
+class PageFrame internal constructor(private val motion: PageMotion, private val id: String, private val origin: Origin?, private val density: Density) {
     internal val outer = Spot()
     internal val inner = Spot()
 
     /** The header's art: what lands on the tapped art. */
     val art = Spot()
 
-    private fun placing(size: Size, shown: Float): Placing? {
-        if (motion.top != id) return null
-        val e = shown.coerceIn(0f, 1f)
-        if (e >= 1f || size.width <= 0f || size.height <= 0f) return null
+    private val rise = with(density) { PageMotion.RISE.toPx() }
+    private val inset = with(density) { PageMotion.PREVIEW_INSET.toPx() }
+    private val previewCorner = with(density) { PageMotion.PREVIEW_CORNER.toPx() }
+
+    // The grow: `e` is how open the page's size is, `p` where it is (the one that may overshoot).
+    private fun growing(size: Size, e: Float, p: Float): Placing? {
+        if (e >= 1f && p == 1f) return null
         val w = size.width
         val h = size.height
         val page = Rect(0f, 0f, w, h)
-        val at = outer.coords?.takeIf { it.isAttached }?.positionInRoot() ?: Offset.Zero
-        val from = origin?.bounds?.translate(-at)
-        // What lands on the art: the header's own art where the page has laid it out, or, scrolled
-        // past it, the top of the page. Without any art to land on, the whole page, from the middle.
+        val from = origin?.bounds?.translate(-(outer.coords?.takeIf { it.isAttached }?.positionInRoot() ?: Offset.Zero))
+        // Nothing to grow from: the page rises a little way and fades in.
+        if (from == null) {
+            motion.rose++
+            return Placing(1f, 0f, rise * (1f - p), page, 0f, (e / PageMotion.RISE_FADE).coerceIn(0f, 1f), 0f)
+        }
+        // What lands on the origin: the header's own art where the page has laid it out, or,
+        // scrolled past it, the top of the page; for a container, the top of the page in its shape.
         val hero =
-            if (from == null) page
-            else
+            if (origin!!.art)
                 inner.coords?.takeIf { it.isAttached }?.let { i ->
                     art.coords?.takeIf { it.isAttached }?.let { i.localBoundingBoxOf(it, clipBounds = false) }
                 }?.takeIf { it.width > 0f } ?: Rect(0f, 0f, w, w)
-        val o = from ?: Rect(page.center - Offset(w, h) * (CENTRE / 2), Size(w * CENTRE, h * CENTRE))
-        val s0 = o.width / hero.width
+            else Rect(0f, 0f, w, w * from.height / from.width.coerceAtLeast(1f))
+        val s0 = from.width / hero.width
         val s = lerp(s0, 1f, e)
         // The clip opens from the art to the page; its corner goes from the art's to none, said in
         // the page's own units, which the scale then shrinks.
+        return Placing(s, lerp(from.left - s0 * hero.left, 0f, p), lerp(from.top - s0 * hero.top, 0f, p), lerp(hero, page, e), lerp(origin.corner, 0f, e) / s, 1f, e * (1f - e))
+    }
+
+    // The grow, then the back preview around it: scaled about the page's middle by what the preview
+    // has shed, moved aside toward where the finger is going, its corners rounded.
+    private fun placing(size: Size, shown: Float, placed: Float): Placing? {
+        if (motion.top != id || size.width <= 0f || size.height <= 0f) return null
+        val e = shown.coerceIn(0f, 1f)
+        val g = growing(size, e, placed)
+        val v = motion.previewOf(id, e)
+        if (v <= 0f) return g
+        val q = v / Springs.PREVIEW
+        val sp = 1f - v
+        val aside = q * (size.width / 20f - inset).coerceAtLeast(0f)
+        val tx = if (motion.down) 0f else if (motion.edge == BackEventCompat.EDGE_RIGHT) -aside else aside
+        val ty = if (motion.down) q * (size.height / 20f - inset).coerceAtLeast(0f) else 0f
+        val s = g?.s ?: 1f
+        val big = sp * s
         return Placing(
-            s,
-            lerp(o.left - s0 * hero.left, 0f, e),
-            lerp(o.top - s0 * hero.top, 0f, e),
-            lerp(if (from == null) page else hero, page, e),
-            lerp(origin?.corner ?: centreCorner, 0f, e) / s,
-            if (from == null) (e / 0.35f).coerceIn(0f, 1f) else 1f,
+            big,
+            size.width / 2f * (1f - sp) + sp * (g?.dx ?: 0f) + tx,
+            size.height / 2f * (1f - sp) + sp * (g?.dy ?: 0f) + ty,
+            g?.clip ?: Rect(0f, 0f, size.width, size.height),
+            maxOf(g?.radius ?: 0f, q * previewCorner / big),
+            g?.alpha ?: 1f,
+            maxOf(g?.lift ?: 0f, q / 3f),
         )
     }
 
     // The layer: what can only be a layer's, a shadow under the moving card — lifted while it
-    // moves and flat at both ends, so its first frame casts none — and, from the middle, its alpha.
-    internal fun layer(g: GraphicsLayerScope, shown: Float) {
-        val m = placing(g.size, shown) ?: return
-        val e = shown.coerceIn(0f, 1f)
+    // moves and flat at both ends, so its first frame casts none — and, as it rises, its alpha.
+    internal fun layer(g: GraphicsLayerScope, shown: Float, placed: Float) {
+        val m = placing(g.size, shown, placed) ?: return
         with(g) {
             alpha = m.alpha
             shape = RoundRectAt(m.onScreen, m.radius * m.s)
-            shadowElevation = 24f * e * (1f - e) * density
+            shadowElevation = 24f * m.lift * density
         }
     }
 
-    internal fun draw(d: ContentDrawScope, shown: Float, leaving: Boolean, scrim: Color) =
+    internal fun draw(d: ContentDrawScope, shown: Float, placed: Float, leaving: Boolean, scrim: Color) =
         with(d) {
-            if (motion.top == id) motion.drawnAt = shown.coerceIn(0f, 1f)
+            if (motion.top == id) {
+                motion.drawnAt = shown.coerceIn(0f, 1f)
+                motion.previewDrawn = motion.previewOf(id, shown)
+            }
             // A tab left at once is not drawn for the frame it is still there: what arrives is.
             if (motion.move == Move.Cut && leaving) return
-            val m = placing(size, shown)
+            val m = placing(size, shown, placed)
             if (m == null) drawContent()
             else {
                 motion.movingFrames++
@@ -312,11 +435,6 @@ class PageFrame internal constructor(private val motion: PageMotion, private val
         if (motion.move == Move.Cut || motion.top == id || shown >= 1f) return 0f
         return PAGE_DIM * (1f - shown.coerceIn(0f, 1f))
     }
-
-    private companion object {
-        /** How large a page with no art to grow from starts, of the screen. */
-        const val CENTRE = 0.8f
-    }
 }
 
 /**
@@ -326,38 +444,127 @@ class PageFrame internal constructor(private val motion: PageMotion, private val
  */
 @Composable
 fun AnimatedVisibilityScope.Moving(motion: PageMotion, entry: NavBackStackEntry, content: @Composable () -> Unit) {
-    val page = PageMotion.isPage(entry)
-    // One number per destination: 1 while it is the page shown, 0 while it is not. A page that is
-    // the one moving is drawn as open as this says; one under a page is darker by what it lacks.
-    // It is the navigation's own transition, so a gesture that seeks the transition seeks this.
-    val shown = transition.animateFloat({ motion.spec() }, label = "shown") { if (it == EnterExitState.Visible) 1f else 0f }
+    val page = motion.isPage(entry)
+    // Two numbers per destination, 1 while it is the page shown and 0 while it is not: how open its
+    // size is, and where it is. A page that is the one moving is drawn as open as they say; one under
+    // a page is darker by what the size lacks. They are the navigation's own transition, so whatever
+    // runs or seeks the transition runs them.
+    val shown = transition.animateFloat({ motion.size() }, label = "shown") { if (it == EnterExitState.Visible) 1f else 0f }
+    val placed: State<Float>? = if (page) transition.animateFloat({ motion.place() }, label = "placed") { if (it == EnterExitState.Visible) 1f else 0f } else null
     val transition = transition
     val density = LocalDensity.current
-    val frame = remember(entry.id) { PageFrame(motion, entry.id, if (page) motion.originOf(entry.id) else null, with(density) { 28.dp.toPx() }) }
-    val back = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
-    val pull = remember(back) { back?.let(::Pull) }
+    val frame = remember(entry.id) { PageFrame(motion, entry.id, if (page) motion.originOf(entry.id) else null, density) }
+    val real = motion.real
+    val pull = remember(real) { real?.let { Pull(it.onBackPressedDispatcher, motion) } }
     val scrim = MaterialTheme.colorScheme.scrim
     Box(
         Modifier.fillMaxSize()
             .then(frame.outer.modifier)
             .then(if (page && pull != null) Modifier.pointerInput(pull) { pull.watch(this) }.nestedScroll(pull) else Modifier)
-            .then(if (page) Modifier.graphicsLayer { frame.layer(this, shown.value) } else Modifier)
-            .drawWithContent { frame.draw(this, shown.value, transition.targetState != EnterExitState.Visible, scrim) }
+            .then(if (page) Modifier.graphicsLayer { frame.layer(this, shown.value, placed!!.value) } else Modifier)
+            .drawWithContent { frame.draw(this, shown.value, placed?.value ?: 1f, transition.targetState != EnterExitState.Visible, scrim) }
             .background(MaterialTheme.colorScheme.background)
             .then(frame.inner.modifier)
     ) {
-        if (page) CompositionLocalProvider(LocalPageFrame provides frame) { content() } else content()
+        val inside: @Composable () -> Unit = { if (page) CompositionLocalProvider(LocalPageFrame provides frame) { content() } else content() }
+        // The page's own back — a pull, a sheet's — is the activity's, not the NavHost's.
+        if (real == null) inside() else CompositionLocalProvider(LocalOnBackPressedDispatcherOwner provides real) { inside() }
     }
 }
 
 /**
- * A page pulled down from its top goes back, the way the back gesture takes it: the pull is said to
- * the activity's back dispatcher as a back gesture's progress, so the page shrinks toward its card
- * under the finger, and letting go far enough — or fast enough — finishes it; short of that it
- * springs back. Only once the page's list is at its top and has nothing more to give, only for a
- * downward drag that is mostly vertical, and never for a fling that reaches the top on its own.
+ * The back gesture, for the pages: the preview it draws, and when the NavHost hears about it. Put it
+ * where it is composed before anything that takes back ahead of the pages — a player over them — so
+ * that registers after it and is asked first, and say [blocked] while such a thing is up; put
+ * [Relayed] around the NavHost.
+ *
+ * The NavHost would seek its transition along the gesture's progress, which is the page following
+ * the finger all the way into its card. It is handed a dispatcher of its own instead, and told
+ * only that a gesture began (at progress 0, so the page it goes back to is composed and shows under
+ * the preview), and then either that it finished — and the page shrinks the rest of the way into
+ * its card on its spring, from the preview — or, once the preview has sprung back, that it did not.
  */
-class Pull(private val back: OnBackPressedDispatcher) : NestedScrollConnection {
+@Composable
+fun PageBack(motion: PageMotion, blocked: () -> Boolean = { false }) {
+    val owner = LocalOnBackPressedDispatcherOwner.current ?: return
+    val relay = remember(owner) { Relay(owner.lifecycle) { motion.relayed = it }.also { motion.relayed = it.onBackPressedDispatcher.hasEnabledCallbacks() } }
+    motion.real = owner
+    motion.relay = relay
+    val off by remember { derivedStateOf(blocked) }
+    val scope = rememberCoroutineScope()
+    PredictiveBackHandler(enabled = motion.relayed && !off) { events ->
+        val to = relay.onBackPressedDispatcher
+        var started = false
+        try {
+            events.collect { e ->
+                if (!started) {
+                    started = true
+                    motion.begin(e, to)
+                }
+                motion.edge = e.swipeEdge
+                motion.preview = Springs.preview(e.progress)
+            }
+            if (started) motion.release()
+            motion.gesturing = false
+            to.onBackPressed()
+        } catch (c: CancellationException) {
+            if (started) motion.springBack(scope, to)
+            throw c
+        }
+    }
+}
+
+/** The NavHost, handed the dispatcher [PageBack] relays to: the only one it hears the back gesture from. */
+@Composable
+fun Relayed(motion: PageMotion, content: @Composable () -> Unit) {
+    val relay = motion.relay
+    if (relay == null) content() else CompositionLocalProvider(LocalOnBackPressedDispatcherOwner provides relay) { content() }
+}
+
+private class Relay(override val lifecycle: Lifecycle, changed: (Boolean) -> Unit) : OnBackPressedDispatcherOwner {
+    override val onBackPressedDispatcher = OnBackPressedDispatcher(null) { changed(it) }
+}
+
+private fun PageMotion.begin(e: BackEventCompat, to: OnBackPressedDispatcher) {
+    releasedOf = null
+    gesturing = true
+    down = pulling
+    val back = springing
+    springing = null
+    // Caught on its way back: the NavHost was never told it ended, so it is the same gesture still.
+    if (back != null && back.isActive) {
+        back.cancel()
+        return
+    }
+    val start = BackEventCompat(e.touchX, e.touchY, 0f, e.swipeEdge)
+    to.dispatchOnBackStarted(start)
+    to.dispatchOnBackProgressed(start)
+}
+
+private fun PageMotion.release() {
+    released = preview
+    releasedOf = top
+    preview = 0f
+}
+
+private fun PageMotion.springBack(scope: CoroutineScope, to: OnBackPressedDispatcher) {
+    gesturing = false
+    springing =
+        scope.launch {
+            animate(preview, 0f, animationSpec = Springs.size()) { v, _ -> preview = v }
+            to.dispatchOnBackCancelled()
+        }
+}
+
+/**
+ * A page pulled down from its top goes back, the way the back gesture takes it: the pull is said to
+ * the activity's back dispatcher as a back gesture's progress, so the page previews under the finger
+ * exactly as it does for the edge swipe, and letting go far enough — or fast enough — finishes it;
+ * short of that it springs back. Only once the page's list is at its top and has nothing more to
+ * give, only for a downward drag that is mostly vertical, and never for a fling that reaches the top
+ * on its own.
+ */
+class Pull(private val back: OnBackPressedDispatcher, private val motion: PageMotion? = null) : NestedScrollConnection {
     private var down = Offset.Zero
     private var now = Offset.Zero
     private var pulling = false
@@ -370,7 +577,7 @@ class Pull(private val back: OnBackPressedDispatcher) : NestedScrollConnection {
 
     // Where the finger went down and where it is: the angle of the drag so far. Watched on the
     // way in, consuming nothing, so the list scrolls exactly as it did.
-    internal suspend fun watch(scope: androidx.compose.ui.input.pointer.PointerInputScope) {
+    internal suspend fun watch(scope: PointerInputScope) {
         height = scope.size.height.toFloat().coerceAtLeast(1f)
         scope.awaitEachGesture {
             down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial).position
@@ -400,6 +607,7 @@ class Pull(private val back: OnBackPressedDispatcher) : NestedScrollConnection {
     override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
         if (pulling || source != NestedScrollSource.UserInput || available.y <= 0f || !vertical) return Offset.Zero
         pulling = true
+        motion?.pulling = true
         pulled = available.y
         back.dispatchOnBackStarted(BackEventCompat(now.x, now.y, 0f, BackEventCompat.EDGE_LEFT))
         back.dispatchOnBackProgressed(event())
@@ -412,12 +620,13 @@ class Pull(private val back: OnBackPressedDispatcher) : NestedScrollConnection {
         pulling = false
         pulled = 0f
         if (far) back.onBackPressed() else back.dispatchOnBackCancelled()
+        motion?.pulling = false
         // The fling was the pull's: the list does not go on to scroll with it.
         return available
     }
 
     private companion object {
-        /** How far down, as a share of the page's height, a pull runs to reach the card. */
+        /** How far down, as a share of the page's height, a pull runs for a progress of 1. */
         const val REACH = 0.6f
 
         /** A pull let go past this much of the way goes back. */

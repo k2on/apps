@@ -114,7 +114,7 @@ private fun Playlists(playlists: List<Playlist>, act: Do) {
             }
         }
         items(playlists, key = { it.id.hex }) { p ->
-            val hero = rememberHero()
+            val hero = rememberHero(Space.corner)
             ListRow(onClick = hero.lifting { act.open(Page.ForPlaylist(p.id)) }, title = p.name, under = "Playlist") {
                 Cover(p.name, "", 56.dp, Modifier.size(56.dp).then(hero.modifier))
             }
@@ -136,7 +136,7 @@ private fun Albums(albums: List<Album>, act: Do) {
         modifier = Modifier.fillMaxSize(),
     ) {
         items(albums, key = { it.name }) { a ->
-            val hero = rememberHero()
+            val hero = rememberHero(Space.corner)
             Column(Modifier.clickable(onClick = hero.lifting { act.open(Page.ForAlbum(a.name)) })) {
                 Cover(a.name, a.art, 180.dp, Modifier.fillMaxWidth().aspectRatio(1f).then(hero.modifier))
                 Spacer(Modifier.height(Space.s))
@@ -156,7 +156,7 @@ private fun Artists(artists: List<Artist>, act: Do) {
     }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = Space.s)) {
         items(artists, key = { it.name }) { a ->
-            val hero = rememberHero(round = true)
+            val hero = rememberHero(Space.corner, round = true)
             ListRow(onClick = hero.lifting { act.open(Page.ForArtist(a.name)) }, title = a.name, under = Media.count(a.tracks.toInt(), "song")) {
                 Cover(a.name, a.art, 56.dp, Modifier.size(56.dp).then(hero.modifier), round = true)
             }

@@ -9,9 +9,12 @@
 // same shape, for the same reason: a bar and a sheet drawn as two things
 // show the seam between them, and what you drag up is not what arrives.
 //
-// `p` is the offset of an anchored drag, so the finger moves it, a fling
-// settles it to the nearer end, a tap on the bar runs it up along the same
-// path, and the system's back gesture runs it down under the finger. It is
+// `p` is the offset of an anchored drag, so the finger moves it, a release
+// settles it to the nearer end — or the end it was flung toward — on a
+// spring that starts at the release's speed and is done within 300 ms
+// however slowly it was let go, a tap on the bar runs it up along the same
+// path, and the system's back gesture previews it down a little way — no
+// further, however far the finger goes — and finishes or springs back. It is
 // read in layout and drawing only: the card moving composes nothing, and
 // the page behind it is not composed again at all.
 @file:OptIn(ExperimentalFoundationApi::class)
@@ -20,7 +23,6 @@ package dev.harken.android
 
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.core.animate
-import androidx.compose.animation.core.exponentialDecay
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
@@ -93,8 +95,10 @@ class PlayerSheet(initial: Face, density: Density, private val held: Float? = nu
             // The nearer end, unless the finger was moving: then the end it was moving toward.
             positionalThreshold = { distance -> distance * 0.5f },
             velocityThreshold = { with(density) { 400.dp.toPx() } },
-            snapAnimationSpec = spring(dampingRatio = 1f, stiffness = 400f),
-            decayAnimationSpec = exponentialDecay(),
+            // Always the spring, from the release's own speed, and never longer than its cap: a slow
+            // release does not crawl to the end at the finger's pace, and a flick lands sooner.
+            snapAnimationSpec = Springs.settle(),
+            decayAnimationSpec = Springs.noDecay(),
         )
 
     /** How far the bar's top has to travel to reach the screen's: the drag's whole range. */
@@ -205,16 +209,19 @@ fun PlayerCard(sheet: PlayerSheet, state: PlayerState, controls: Controls, posit
     val resting by remember(sheet) { derivedStateOf { sheet.p == 0f } }
     val up by remember(sheet) { derivedStateOf { sheet.drag.targetValue == Face.Full && !sheet.isHeld } }
 
-    // The edge's back gesture takes the full player down under the finger; let go short of the
-    // system's threshold and it goes back up.
+    // The edge's back gesture previews the full player down a little way, toward a limit it never
+    // passes; let go past the system's threshold and it settles to the bar from there, short of it
+    // and it goes back up.
     PredictiveBackHandler(enabled = up) { events ->
         try {
-            sheet.drag.anchoredDrag { _ -> events.collect { e -> dragTo(sheet.travel * e.progress) } }
-            sheet.close()
+            sheet.drag.anchoredDrag { _ -> events.collect { e -> dragTo(sheet.travel * Springs.preview(e.progress)) } }
         } catch (e: CancellationException) {
             scope.launch { sheet.open() }
             throw e
         }
+        // Not in this handler's own coroutine: the settle turns the sheet toward the bar, which
+        // stands the handler down, which cancels it — and a cancel here is the gesture undone.
+        scope.launch { sheet.close() }
     }
 
     val scrim = MaterialTheme.colorScheme.scrim
@@ -246,7 +253,7 @@ fun PlayerCard(sheet: PlayerSheet, state: PlayerState, controls: Controls, posit
                                             // Far enough, or fast enough: left is the next track, right the one before.
                                             val wide = WIDE * (g.w - 2 * g.s)
                                             if (sheet.swipe < -wide || v < -g.far) controls.next() else if (sheet.swipe > wide || v > g.far) controls.previous()
-                                            animate(sheet.swipe, 0f, animationSpec = spring(dampingRatio = 0.8f, stiffness = 500f)) { x, _ -> sheet.swipe = x }
+                                            animate(sheet.swipe, 0f, animationSpec = spring(Springs.MOVE, Springs.STIFFNESS)) { x, _ -> sheet.swipe = x }
                                         },
                                     ),
                         )

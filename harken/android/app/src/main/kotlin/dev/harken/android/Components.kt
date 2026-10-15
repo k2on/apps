@@ -41,12 +41,23 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.node.CompositionLocalConsumerModifierNode
+import androidx.compose.ui.node.ModifierNodeElement
+import androidx.compose.ui.node.SemanticsModifierNode
+import androidx.compose.ui.node.currentValueOf
+import androidx.compose.ui.node.requireLayoutCoordinates
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.SemanticsPropertyReceiver
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -100,6 +111,8 @@ fun Heading(title: String, modifier: Modifier = Modifier, action: String? = null
 /**
  * One track, as every list draws it: what stands at its start (a cover, or its number on the
  * release), its title — in the gold while it plays — whoever made it, its length, and its menu.
+ * Opening the menu says where the row is (`PageMotion.tapped`), and where its cover is when what
+ * stands at its start is the album's art (`art`): a page the menu goes to grows out of them.
  */
 @Composable
 fun TrackRow(
@@ -108,11 +121,12 @@ fun TrackRow(
     playing: Boolean,
     onClick: () -> Unit,
     onMore: () -> Unit,
+    art: Boolean = true,
     leading: @Composable () -> Unit,
 ) {
     Recompositions.hit("TrackRow")
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(start = Space.page, end = Space.xs).height(64.dp),
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(start = Space.page, end = Space.xs).height(ROW),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(Space.thumb), contentAlignment = Alignment.Center) { leading() }
@@ -128,9 +142,12 @@ fun TrackRow(
             Text(under, style = quiet(MaterialTheme.typography.bodyMedium), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Text(Media.clock(track.durationMs), style = quiet(MaterialTheme.typography.bodySmall), modifier = Modifier.padding(horizontal = Space.s))
-        MoreButton(track.title, onMore)
+        MoreButton(track.title, art, onMore)
     }
 }
+
+/** A track row's height. */
+val ROW = 64.dp
 
 /**
  * The menu's glyph, drawn: one painter for every row of every list, which `HarkenTheme` makes. A
@@ -146,16 +163,81 @@ val LocalMoreGlyph = staticCompositionLocalOf<Painter?> { null }
  * reach the minimum it could simply be.
  */
 @Composable
-private fun MoreButton(title: String, onClick: () -> Unit) {
+private fun MoreButton(title: String, art: Boolean, onMore: () -> Unit) {
+    val at = MoreAt()
     Box(
         Modifier.size(48.dp)
-            .clickable(interactionSource = null, indication = ripple(bounded = false, radius = 20.dp), role = Role.Button, onClick = onClick)
-            .semantics { contentDescription = "More for $title" },
+            .clickable(interactionSource = null, indication = ripple(bounded = false, radius = 20.dp), role = Role.Button) { at.tap(art, onMore) }
+            .then(MoreElement(title, at)),
         contentAlignment = Alignment.Center,
     ) {
         Icon(LocalMoreGlyph.current ?: rememberVectorPainter(Glyphs.More), contentDescription = null, modifier = Modifier.size(20.dp))
     }
 }
+
+/**
+ * What a row says as its menu opens: where the row is, and its cover when what stands at its start
+ * is the album's art (`PageMotion.tapped`), which a page the menu goes to grows out of. Asked of the
+ * button's own node on the tap and never before, and that node is the one that already gave the
+ * button its label: a row entering a list pays nothing for it (the fling bench's bytes per entering
+ * row are what they were; a node of its own on the row cost about 270).
+ */
+private class MoreAt {
+    var node: MoreNode? = null
+
+    fun tap(art: Boolean, onMore: () -> Unit) {
+        node?.let { n -> n.motion()?.tapped = n.row()?.let { tapped(it, art, n.density()) } }
+        onMore()
+    }
+}
+
+/** The menu button's label for a screen reader — spelt only when one asks — and, on a tap, where it is. */
+private class MoreElement(val title: String, val at: MoreAt) : ModifierNodeElement<MoreNode>() {
+    override fun create() = MoreNode(title, at)
+
+    override fun update(node: MoreNode) {
+        node.title = title
+        node.at = at
+        at.node = node
+    }
+
+    override fun hashCode() = title.hashCode() * 31 + at.hashCode()
+
+    override fun equals(other: Any?) = other is MoreElement && other.title == title && other.at === at
+}
+
+private class MoreNode(var title: String, var at: MoreAt) : Modifier.Node(), SemanticsModifierNode, CompositionLocalConsumerModifierNode {
+    override fun onAttach() {
+        at.node = this
+    }
+
+    override fun SemanticsPropertyReceiver.applySemantics() {
+        contentDescription = "More for $title"
+    }
+
+    fun motion(): PageMotion? = if (isAttached) currentValueOf(LocalPageMotion) else null
+
+    fun density(): Density = currentValueOf(LocalDensity)
+
+    // The row: what the row lays out inside its margins, which is where the button stands, and the
+    // margins put back.
+    fun row(): Rect? {
+        if (!isAttached) return null
+        val inner = requireLayoutCoordinates().parentLayoutCoordinates ?: return null
+        val d = density()
+        val r = Rect(inner.positionInRoot(), Size(inner.size.width.toFloat(), inner.size.height.toFloat()))
+        return with(d) { Rect(r.left - Space.page.toPx(), r.top, r.right + Space.xs.toPx(), r.bottom) }
+    }
+}
+
+// The row and its cover, laid out as the row lays them out: the cover `Space.thumb` square, inset by
+// the page's margin and centred down the row, its corner a row cover's.
+private fun tapped(row: Rect, art: Boolean, d: Density): Tapped =
+    with(d) {
+        val side = Space.thumb.toPx()
+        val cover = Rect(Offset(row.left + Space.page.toPx(), row.top + (row.height - side) / 2), Size(side, side))
+        Tapped(art = if (art) Origin(cover, 4.dp.toPx()) else null, row = Origin(row, 0f, art = false))
+    }
 
 /** The number a track has on its release, or the playing mark, in the leading column. */
 @Composable
@@ -174,7 +256,7 @@ fun TrackNumber(n: Long, playing: Boolean) {
 @Composable
 fun RecordCard(seed: String, art: String, title: String, under: String, side: Dp, onClick: () -> Unit, round: Boolean = false, opens: Boolean = false) {
     Recompositions.hit("RecordCard")
-    val hero = if (opens) rememberHero(round = round) else null
+    val hero = if (opens) rememberHero(Space.corner, round = round) else null
     Column(Modifier.width(side).clickable(onClick = if (hero == null) onClick else hero.lifting(onClick))) {
         Cover(seed, art, side, Modifier.size(side).then(hero?.modifier ?: Modifier), round = round)
         Spacer(Modifier.height(Space.s))
