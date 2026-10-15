@@ -315,7 +315,7 @@
             __darwinAllowLocalNetworking = true;
             gradleFlags = [ "-Dorg.gradle.java.home=${pkgs.jdk21}" "-ParkTraceCorpus=${trace-corpus}" ];
             preBuild = ''
-              ${fmt.kotlin} --dry-run --set-exit-if-changed $(find ark-runtime ark-client ark-android harken-peer -name '*.kt' -not -path '*/build/*' | sort)
+              ${fmt.kotlin} --dry-run --set-exit-if-changed $(find ark-runtime ark-client ark-android ark-ui harken-peer -name '*.kt' -not -path '*/build/*' | sort)
             '';
             gradleBuildTask = "build";
             doCheck = false;
@@ -373,15 +373,16 @@
 
           # The phone (docs/plan-phones.md round 4, docs/plan-android.md): gradle
           # over the SDK, the Kotlin runtime and client as a composite build,
-          # the shared onboarding (kotlin/ark-android) as a project of the
-          # app's build, and harken.ark in the APK's assets — which the app
+          # the shared onboarding (kotlin/ark-android) and the look and motion
+          # every Ark app shares (kotlin/ark-ui) as projects of the app's
+          # build, and harken.ark in the APK's assets — which the app
           # loads, verifies and interprets — assembled offline from a
           # recorded Maven graph (harken/android/deps.json; `nix run
           # .#harken-apk-deps` re-records it, for this and for the
-          # screenshots below). The onboarding's JVM tests run first, so an
-          # APK is not built over a machine that fails them. The Kotlin build
-          # reads the Unicode tables out of rust/ark, so that file is a source
-          # too.
+          # screenshots below). ark-ui's and the onboarding's JVM tests run
+          # first, so an APK is not built over a library that fails them. The
+          # Kotlin build reads the Unicode tables out of rust/ark, so that file
+          # is a source too.
           #
           # The release build, `harken.apk`: not debuggable, so ART compiles
           # it as it would any app rather than holding back for a debugger,
@@ -440,13 +441,13 @@
               export HOME="$TMPDIR/home" ANDROID_USER_HOME="$TMPDIR/home/.android"
               mkdir -p "$ANDROID_USER_HOME"
             '';
-            gradleBuildTask = ":ark-android:testDebugUnitTest :app:assembleRelease";
+            gradleBuildTask = ":ark-ui:testDebugUnitTest :ark-android:testDebugUnitTest :app:assembleRelease";
             # The recording runs the same tasks rather than resolving every
             # configuration — AGP's androidTest classpaths cannot be resolved
             # in isolation, and what the build fetches is the whole graph —
             # and the screenshots' too, and the debug build a laptop makes, so
             # that one recording serves all three.
-            gradleUpdateTask = ":ark-android:testDebugUnitTest :app:recordPaparazziDebug :app:assembleDebug :app:assembleRelease";
+            gradleUpdateTask = ":ark-ui:testDebugUnitTest :ark-android:testDebugUnitTest :app:recordPaparazziDebug :app:assembleDebug :app:assembleRelease";
             doCheck = false;
             installPhase = ''
               mkdir -p $out

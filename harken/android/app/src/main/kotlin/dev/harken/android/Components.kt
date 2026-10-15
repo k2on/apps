@@ -1,69 +1,52 @@
-// The pieces every screen is made of: a track's row, a shelf of covers, a
-// section's heading, a page's header, the sentence an empty list says, and
-// the banner a server that cannot be reached puts over everything. Drawn
-// from plain values and the theme, so a screen is a function of its data
-// and can be rendered without a phone (the screenshots).
+// The pieces harken's screens are made of that are harken's: a track's row
+// and its number, a page's header with Play and Shuffle, and the banner a
+// server that cannot be reached puts over everything. The rest — headings,
+// shelves, cards, rows that open something, a row's menu button, what an
+// empty list says — is `ark-ui`'s (`dev.arkdb.ui`). Drawn from plain values
+// and the theme, so a screen is a function of its data and can be rendered
+// without a phone (the screenshots).
 package dev.harken.android
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.layout.positionInRoot
-import androidx.compose.ui.node.CompositionLocalConsumerModifierNode
-import androidx.compose.ui.node.ModifierNodeElement
-import androidx.compose.ui.node.SemanticsModifierNode
-import androidx.compose.ui.node.currentValueOf
-import androidx.compose.ui.node.requireLayoutCoordinates
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.semantics.SemanticsPropertyReceiver
-import androidx.compose.ui.unit.Density
-import androidx.compose.ui.graphics.painter.Painter
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.graphics.vector.rememberVectorPainter
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.delay
+import dev.arkdb.ui.Glyph
+import dev.arkdb.ui.LocalPageFrame
+import dev.arkdb.ui.MoreButton
+import dev.arkdb.ui.Origin
+import dev.arkdb.ui.Recompositions
+import dev.arkdb.ui.RowOrigin
+import dev.arkdb.ui.Space
+import dev.arkdb.ui.Tapped
+import dev.arkdb.ui.quiet
 
 /** What a screen can ask for. Every one does nothing unless the app says otherwise. */
 interface Do {
@@ -89,24 +72,6 @@ interface Do {
 
 /** A [Do] that does nothing: what a screenshot hands a screen. */
 object Idle : Do
-
-/** A glyph, at the size a row's controls are. */
-@Composable
-fun Glyph(icon: ImageVector, description: String?, modifier: Modifier = Modifier, size: Dp = 24.dp) {
-    Icon(icon, contentDescription = description, modifier = modifier.size(size))
-}
-
-/** A heading over a section, with an optional action at its end. */
-@Composable
-fun Heading(title: String, modifier: Modifier = Modifier, action: String? = null, onAction: () -> Unit = {}) {
-    Row(
-        modifier.fillMaxWidth().padding(start = Space.page, end = Space.s, top = Space.xl, bottom = Space.s),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-        if (action != null) TextButton(onClick = onAction) { Text(action) }
-    }
-}
 
 /**
  * One track, as every list draws it: what stands at its start (a cover, or its number on the
@@ -142,7 +107,7 @@ fun TrackRow(
             Text(under, style = quiet(MaterialTheme.typography.bodyMedium), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Text(Media.clock(track.durationMs), style = quiet(MaterialTheme.typography.bodySmall), modifier = Modifier.padding(horizontal = Space.s))
-        MoreButton(track.title, art, onMore)
+        MoreButton(track.title, if (art) TrackArt else TrackPlain, onMore)
     }
 }
 
@@ -150,94 +115,24 @@ fun TrackRow(
 val ROW = 64.dp
 
 /**
- * The menu's glyph, drawn: one painter for every row of every list, which `HarkenTheme` makes. A
- * vector's painter is a tree of the vector's paths, and a row making its own was the most a row
- * allocated after its text.
+ * Where a track's row and its cover are when its menu opens, from what the row lays out inside its
+ * margins (where the menu button stands): the cover `Space.thumb` square, inset by the page's
+ * margin and centred down the row, its corner a row cover's. One for a row whose leading picture
+ * is the album's art, which a page the menu goes to grows out of, and one for a row whose is not.
  */
-val LocalMoreGlyph = staticCompositionLocalOf<Painter?> { null }
-
-/**
- * A row's menu: the glyph in a 48 dp target, Material's minimum, with an unbounded ripple, and the
- * role and the label a screen reader says — spelt only when one asks. What `IconButton` is, less
- * what a list pays for on every row entering it: a clip layer, a colour lookup, and a layout to
- * reach the minimum it could simply be.
- */
-@Composable
-private fun MoreButton(title: String, art: Boolean, onMore: () -> Unit) {
-    val at = MoreAt()
-    Box(
-        Modifier.size(48.dp)
-            .clickable(interactionSource = null, indication = ripple(bounded = false, radius = 20.dp), role = Role.Button) { at.tap(art, onMore) }
-            .then(MoreElement(title, at)),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(LocalMoreGlyph.current ?: rememberVectorPainter(Glyphs.More), contentDescription = null, modifier = Modifier.size(20.dp))
-    }
+private class TrackOrigin(val art: Boolean) : RowOrigin {
+    override fun tapped(inner: Rect, density: Density): Tapped =
+        with(density) {
+            // The row: the margins put back.
+            val row = Rect(inner.left - Space.page.toPx(), inner.top, inner.right + Space.xs.toPx(), inner.bottom)
+            val side = Space.thumb.toPx()
+            val cover = Rect(Offset(row.left + Space.page.toPx(), row.top + (row.height - side) / 2), Size(side, side))
+            Tapped(art = if (art) Origin(cover, 4.dp.toPx()) else null, row = Origin(row, 0f, art = false))
+        }
 }
 
-/**
- * What a row says as its menu opens: where the row is, and its cover when what stands at its start
- * is the album's art (`PageMotion.tapped`), which a page the menu goes to grows out of. Asked of the
- * button's own node on the tap and never before, and that node is the one that already gave the
- * button its label: a row entering a list pays nothing for it (the fling bench's bytes per entering
- * row are what they were; a node of its own on the row cost about 270).
- */
-private class MoreAt {
-    var node: MoreNode? = null
-
-    fun tap(art: Boolean, onMore: () -> Unit) {
-        node?.let { n -> n.motion()?.tapped = n.row()?.let { tapped(it, art, n.density()) } }
-        onMore()
-    }
-}
-
-/** The menu button's label for a screen reader — spelt only when one asks — and, on a tap, where it is. */
-private class MoreElement(val title: String, val at: MoreAt) : ModifierNodeElement<MoreNode>() {
-    override fun create() = MoreNode(title, at)
-
-    override fun update(node: MoreNode) {
-        node.title = title
-        node.at = at
-        at.node = node
-    }
-
-    override fun hashCode() = title.hashCode() * 31 + at.hashCode()
-
-    override fun equals(other: Any?) = other is MoreElement && other.title == title && other.at === at
-}
-
-private class MoreNode(var title: String, var at: MoreAt) : Modifier.Node(), SemanticsModifierNode, CompositionLocalConsumerModifierNode {
-    override fun onAttach() {
-        at.node = this
-    }
-
-    override fun SemanticsPropertyReceiver.applySemantics() {
-        contentDescription = "More for $title"
-    }
-
-    fun motion(): PageMotion? = if (isAttached) currentValueOf(LocalPageMotion) else null
-
-    fun density(): Density = currentValueOf(LocalDensity)
-
-    // The row: what the row lays out inside its margins, which is where the button stands, and the
-    // margins put back.
-    fun row(): Rect? {
-        if (!isAttached) return null
-        val inner = requireLayoutCoordinates().parentLayoutCoordinates ?: return null
-        val d = density()
-        val r = Rect(inner.positionInRoot(), Size(inner.size.width.toFloat(), inner.size.height.toFloat()))
-        return with(d) { Rect(r.left - Space.page.toPx(), r.top, r.right + Space.xs.toPx(), r.bottom) }
-    }
-}
-
-// The row and its cover, laid out as the row lays them out: the cover `Space.thumb` square, inset by
-// the page's margin and centred down the row, its corner a row cover's.
-private fun tapped(row: Rect, art: Boolean, d: Density): Tapped =
-    with(d) {
-        val side = Space.thumb.toPx()
-        val cover = Rect(Offset(row.left + Space.page.toPx(), row.top + (row.height - side) / 2), Size(side, side))
-        Tapped(art = if (art) Origin(cover, 4.dp.toPx()) else null, row = Origin(row, 0f, art = false))
-    }
+private val TrackArt = TrackOrigin(art = true)
+private val TrackPlain = TrackOrigin(art = false)
 
 /** The number a track has on its release, or the playing mark, in the leading column. */
 @Composable
@@ -246,49 +141,6 @@ fun TrackNumber(n: Long, playing: Boolean) {
         Icon(Glyphs.Playing, contentDescription = "Playing", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
     } else {
         Text(if (n > 0) n.toString() else "", style = quiet(MaterialTheme.typography.bodyMedium))
-    }
-}
-
-/**
- * One record on a shelf or in a grid: its cover, its name, and a line under it. One that `opens` a
- * page opens it out of its cover (`Motion.kt`); one that plays is only a card.
- */
-@Composable
-fun RecordCard(seed: String, art: String, title: String, under: String, side: Dp, onClick: () -> Unit, round: Boolean = false, opens: Boolean = false) {
-    Recompositions.hit("RecordCard")
-    val hero = if (opens) rememberHero(Space.corner, round = round) else null
-    Column(Modifier.width(side).clickable(onClick = if (hero == null) onClick else hero.lifting(onClick))) {
-        Cover(seed, art, side, Modifier.size(side).then(hero?.modifier ?: Modifier), round = round)
-        Spacer(Modifier.height(Space.s))
-        Text(
-            title,
-            style = MaterialTheme.typography.titleSmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = if (round) TextAlign.Center else TextAlign.Start,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        if (under.isNotEmpty()) {
-            Text(
-                under,
-                style = quiet(MaterialTheme.typography.bodySmall),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = if (round) TextAlign.Center else TextAlign.Start,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-    }
-}
-
-/** A row of cards that scrolls sideways, inset like the rest of the page. */
-@Composable
-fun <T> Shelf(items: List<T>, key: (T) -> Any, card: @Composable (T) -> Unit) {
-    LazyRow(
-        contentPadding = PaddingValues(horizontal = Space.page),
-        horizontalArrangement = Arrangement.spacedBy(Space.l),
-    ) {
-        items(items, key = key) { card(it) }
     }
 }
 
@@ -343,73 +195,6 @@ fun PageHeader(
     }
 }
 
-/** A page's own bar: back, and what else the page offers. */
-@Composable
-fun PageBar(title: String, onBack: () -> Unit, actions: @Composable RowScope.() -> Unit = {}) {
-    Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = Space.xs), verticalAlignment = Alignment.CenterVertically) {
-        IconButton(onClick = onBack) { Glyph(Glyphs.Back, "Back") }
-        Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-        actions()
-    }
-}
-
-/** A tab's own title, large, with what it offers at the end. */
-@Composable
-fun TabTitle(title: String, actions: @Composable RowScope.() -> Unit = {}) {
-    Row(
-        Modifier.fillMaxWidth().padding(start = Space.page, end = Space.xs, top = Space.l, bottom = Space.xs).height(48.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(title, style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
-        actions()
-    }
-}
-
-/** What an empty list says: what it is waiting for, and what to do about it. */
-@Composable
-fun Empty(icon: ImageVector, title: String, sentence: String, modifier: Modifier = Modifier, action: String? = null, onAction: () -> Unit = {}) {
-    Column(
-        modifier.fillMaxWidth().padding(horizontal = Space.xxl, vertical = 48.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(40.dp))
-        Spacer(Modifier.height(Space.l))
-        Text(title, style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
-        Spacer(Modifier.height(Space.s))
-        Text(sentence, style = quiet(MaterialTheme.typography.bodyMedium), textAlign = TextAlign.Center)
-        if (action != null) {
-            Spacer(Modifier.height(Space.l))
-            Button(onClick = onAction) { Text(action) }
-        }
-    }
-}
-
-/** How long [Fetching] waits before it says anything. */
-const val FETCHING_DELAY_MS = 600L
-
-/**
- * The library is not on this phone yet — the replica has never had the server's snapshot — and is
- * on its way from `host`: said quietly, and only after a beat, so a snapshot that lands at once
- * never shows it. A remembered launch with the library here never draws it: the splash is up until
- * Home has its lists.
- */
-@Composable
-fun Fetching(host: String, delayMs: Long = FETCHING_DELAY_MS) {
-    var shown by remember { mutableStateOf(delayMs <= 0) }
-    LaunchedEffect(Unit) {
-        if (!shown) {
-            delay(delayMs)
-            shown = true
-        }
-    }
-    if (!shown) return
-    Column(Modifier.fillMaxWidth().padding(horizontal = Space.xxl, vertical = 48.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("Getting your library from $host…", style = quiet(MaterialTheme.typography.bodyMedium), textAlign = TextAlign.Center)
-        Spacer(Modifier.height(Space.l))
-        LinearProgressIndicator(Modifier.width(96.dp), color = MaterialTheme.colorScheme.primary, trackColor = MaterialTheme.colorScheme.surfaceVariant)
-    }
-}
-
 /**
  * Over every tab while the server cannot be reached: which one, and that what is on the phone
  * still works.
@@ -426,19 +211,5 @@ fun Offline(host: String) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-    }
-}
-
-/** A row in a sheet or a menu: a glyph and what it does. */
-@Composable
-fun SheetRow(icon: ImageVector, label: String, onClick: () -> Unit, trailing: @Composable () -> Unit = {}, emphasis: Boolean = false) {
-    Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = Space.xl).height(52.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(icon, contentDescription = null, tint = if (emphasis) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp))
-        Spacer(Modifier.width(Space.l))
-        Text(label, style = MaterialTheme.typography.bodyLarge, fontWeight = if (emphasis) FontWeight.SemiBold else null, modifier = Modifier.weight(1f))
-        trailing()
     }
 }

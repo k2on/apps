@@ -17,22 +17,22 @@ import android.graphics.Canvas
 import androidx.activity.OnBackPressedDispatcher
 import androidx.activity.OnBackPressedDispatcherOwner
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
-import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -50,6 +50,10 @@ import dev.arkdb.client.Login
 import dev.arkdb.client.MemoryStorage
 import dev.arkdb.client.Options
 import dev.arkdb.client.Peer
+import dev.arkdb.ui.Art
+import dev.arkdb.ui.Cover
+import dev.arkdb.ui.LocalCoverLoader
+import dev.arkdb.ui.Recompositions
 import java.io.File
 import java.lang.reflect.Proxy
 import java.util.concurrent.ConcurrentHashMap
@@ -348,7 +352,7 @@ class FlingTests {
             assertEquals(1, covers.reads.get())
             val view = ComposeView(paparazzi.context)
             view.setContent {
-                CompositionLocalProvider(LocalCovers provides covers) {
+                CompositionLocalProvider(LocalCoverLoader provides covers) {
                     Column {
                         repeat(5) { Cover("one", "covers/in-memory.png", 48.dp, Modifier.size(48.dp)) }
                         repeat(3) { Cover("two", "covers/on-disk.png", 48.dp, Modifier.size(48.dp)) }

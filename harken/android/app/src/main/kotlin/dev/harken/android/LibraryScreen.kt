@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -40,6 +39,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.arkdb.ui.Cover
+import dev.arkdb.ui.Empty
+import dev.arkdb.ui.Glyph
+import dev.arkdb.ui.ListRow
+import dev.arkdb.ui.Recompositions
+import dev.arkdb.ui.Space
+import dev.arkdb.ui.TabTitle
+import dev.arkdb.ui.quiet
+import dev.arkdb.ui.rememberHero
 
 enum class LibraryTab(val title: String) {
     Playlists("Playlists"),
@@ -181,22 +189,5 @@ private fun Songs(tracks: List<Track>, albumOf: (Track) -> Album?, playing: Stri
                 onMore = { act.more(t, Page.Songs) },
             ) { Cover(album?.name ?: t.title, album?.art ?: "", Space.thumb, Modifier.size(Space.thumb), corner = 4.dp) }
         }
-    }
-}
-
-/** A row that opens something: its picture, its name, a line under it, and a chevron. */
-@Composable
-fun ListRow(onClick: () -> Unit, title: String, under: String?, picture: @Composable () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = Space.page, vertical = Space.s),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        picture()
-        Spacer(Modifier.width(Space.l))
-        Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (under != null) Text(under, style = quiet(MaterialTheme.typography.bodyMedium), maxLines = 1)
-        }
-        Icon(Glyphs.Chevron, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
     }
 }

@@ -37,6 +37,8 @@ import dev.arkdb.client.Login
 import dev.arkdb.client.MemoryStorage
 import dev.arkdb.client.Options
 import dev.arkdb.client.Peer
+import dev.arkdb.ui.Art
+import dev.arkdb.ui.Recompositions
 import java.io.File
 import java.lang.reflect.Proxy
 import java.util.concurrent.ConcurrentHashMap
@@ -168,7 +170,7 @@ class ScrollTests {
         assertEquals("rows recomposed while the position ticked", 0, rowsDuring)
         // And nothing above it: per tick, the app's top, its frame, the screen and the mini player
         // around the hairline are each composed 0 times.
-        for (what in listOf("HarkenApp", "Chrome", "LibraryScreen", "MiniPlayer", "RecordCard"))
+        for (what in listOf("HarkenApp", "Chrome", "LibraryScreen", "MiniPlayer", "CoverCard"))
             assertEquals("$what recomposed while the position ticked ($during)", 0, during!![what] ?: 0)
     }
 

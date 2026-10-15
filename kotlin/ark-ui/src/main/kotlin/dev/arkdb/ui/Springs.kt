@@ -14,7 +14,7 @@
 // preview lets the page come only so far — free at first, then harder and
 // harder, never past a limit — and letting go finishes the move or springs it
 // back; [preview] is that curve, `limit · (1 − e^(−r / give))`.
-package dev.harken.android
+package dev.arkdb.ui
 
 import androidx.compose.animation.core.AnimationVector
 import androidx.compose.animation.core.DecayAnimationSpec
@@ -26,62 +26,66 @@ import androidx.compose.animation.core.exponentialDecay
 import androidx.compose.animation.core.spring
 import kotlin.math.exp
 
-object Springs {
+public object Springs {
     /**
      * How stiff every spring is: a page or the player let go from rest settles to within half a
      * percent of the way in about 280 ms (critically damped), and crosses its end in about 210 ms
      * with the [MOVE] damping. Between Compose's `StiffnessMediumLow` (400) and `StiffnessMedium`
      * (1500).
      */
-    const val STIFFNESS = 700f
+    public const val STIFFNESS: Float = 700f
 
     /**
      * Where a thing is: a whisper of overshoot, about 0.3% of the way, so a page or the player
      * lands rather than stops.
      */
-    const val MOVE = 0.88f
+    public const val MOVE: Float = 0.88f
 
     /**
      * How large a thing is and what of it shows — a scale, a clip, a dim: none. A page scaled past
      * its size, or clipped past its bounds, would show it.
      */
-    const val SIZE = 1f
+    public const val SIZE: Float = 1f
 
     /**
-     * Where a spring over a 0..1 progress counts as there: a twentieth of a pixel of a page. Compose's
-     * default is a hundredth of the way, which on a page is a last jump of several pixels.
+     * Where a spring over a 0..1 progress counts as there: a twentieth of a pixel of a page.
+     * Compose's default is a hundredth of the way, which on a page is a last jump of several
+     * pixels.
      */
-    const val REST = 0.0005f
+    public const val REST: Float = 0.0005f
 
     /** The most a settle takes, however slowly it was let go: it is where it was going by then. */
-    const val CAP_MS = 300
+    public const val CAP_MS: Int = 300
 
     /** Where a thing is, over a 0..1 progress. */
-    fun move(): SpringSpec<Float> = spring(MOVE, STIFFNESS, REST)
+    public fun move(): SpringSpec<Float> = spring(MOVE, STIFFNESS, REST)
 
     /** How large a thing is, over a 0..1 progress. */
-    fun size(): SpringSpec<Float> = spring(SIZE, STIFFNESS, REST)
+    public fun size(): SpringSpec<Float> = spring(SIZE, STIFFNESS, REST)
 
-    /** A settle of something dragged in pixels: [MOVE], from the release's speed, done by [CAP_MS]. */
-    fun settle(): FiniteAnimationSpec<Float> = Capped(spring(MOVE, STIFFNESS, 0.5f), CAP_MS)
+    /**
+     * A settle of something dragged in pixels: [MOVE], from the release's speed, done by [CAP_MS].
+     */
+    public fun settle(): FiniteAnimationSpec<Float> = Capped(spring(MOVE, STIFFNESS, 0.5f), CAP_MS)
 
     /**
      * A fling that goes nowhere: a draggable's settle is then always its spring, carrying the
      * release's speed, never a decay that coasts the rest of the way at whatever speed was left.
      */
-    fun noDecay(): DecayAnimationSpec<Float> = exponentialDecay(frictionMultiplier = 1e6f)
+    public fun noDecay(): DecayAnimationSpec<Float> = exponentialDecay(frictionMultiplier = 1e6f)
 
     /** How far a back gesture's preview comes, at most, as a share of what it previews. */
-    const val PREVIEW = 0.1f
+    public const val PREVIEW: Float = 0.1f
 
     /** How soon the preview stiffens: it has come 63% of [PREVIEW] by this much of the gesture. */
-    const val GIVE = 0.12f
+    public const val GIVE: Float = 0.12f
 
     /**
-     * A gesture's raw progress `r`, 0 to 1, as how far its preview has come: in step with the finger
-     * at first, then harder and harder, and never past [limit].
+     * A gesture's raw progress `r`, 0 to 1, as how far its preview has come: in step with the
+     * finger at first, then harder and harder, and never past [limit].
      */
-    fun preview(r: Float, limit: Float = PREVIEW, give: Float = GIVE): Float = limit * (1f - exp(-r.coerceAtLeast(0f) / give))
+    public fun preview(r: Float, limit: Float = PREVIEW, give: Float = GIVE): Float =
+        limit * (1f - exp(-r.coerceAtLeast(0f) / give))
 }
 
 /**
@@ -89,21 +93,41 @@ object Springs {
  * all but there by then, the cut is under a pixel; what it bounds is the case the tuning did not
  * see, a release so slow and so far that the spring's tail would otherwise be what is watched.
  */
-class Capped<T>(private val spec: FiniteAnimationSpec<T>, private val ms: Int) : FiniteAnimationSpec<T> {
-    override fun <V : AnimationVector> vectorize(converter: TwoWayConverter<T, V>): VectorizedFiniteAnimationSpec<V> =
+public class Capped<T>(private val spec: FiniteAnimationSpec<T>, private val ms: Int) :
+    FiniteAnimationSpec<T> {
+    override fun <V : AnimationVector> vectorize(
+        converter: TwoWayConverter<T, V>
+    ): VectorizedFiniteAnimationSpec<V> =
         CappedVectorized(spec.vectorize(converter), ms * 1_000_000L)
 
-    override fun equals(other: Any?) = other is Capped<*> && other.spec == spec && other.ms == ms
+    override fun equals(other: Any?): Boolean =
+        other is Capped<*> && other.spec == spec && other.ms == ms
 
-    override fun hashCode() = spec.hashCode() * 31 + ms
+    override fun hashCode(): Int = spec.hashCode() * 31 + ms
 }
 
-private class CappedVectorized<V : AnimationVector>(private val inner: VectorizedFiniteAnimationSpec<V>, private val cap: Long) : VectorizedFiniteAnimationSpec<V> {
-    override fun getValueFromNanos(playTimeNanos: Long, initialValue: V, targetValue: V, initialVelocity: V): V =
-        if (playTimeNanos >= cap) targetValue else inner.getValueFromNanos(playTimeNanos, initialValue, targetValue, initialVelocity)
+private class CappedVectorized<V : AnimationVector>(
+    private val inner: VectorizedFiniteAnimationSpec<V>,
+    private val cap: Long
+) : VectorizedFiniteAnimationSpec<V> {
+    override fun getValueFromNanos(
+        playTimeNanos: Long,
+        initialValue: V,
+        targetValue: V,
+        initialVelocity: V
+    ): V =
+        if (playTimeNanos >= cap) targetValue
+        else inner.getValueFromNanos(playTimeNanos, initialValue, targetValue, initialVelocity)
 
-    override fun getVelocityFromNanos(playTimeNanos: Long, initialValue: V, targetValue: V, initialVelocity: V): V =
-        inner.getVelocityFromNanos(minOf(playTimeNanos, cap), initialValue, targetValue, initialVelocity)
+    override fun getVelocityFromNanos(
+        playTimeNanos: Long,
+        initialValue: V,
+        targetValue: V,
+        initialVelocity: V
+    ): V =
+        inner.getVelocityFromNanos(
+            minOf(playTimeNanos, cap), initialValue, targetValue, initialVelocity)
 
-    override fun getDurationNanos(initialValue: V, targetValue: V, initialVelocity: V): Long = minOf(cap, inner.getDurationNanos(initialValue, targetValue, initialVelocity))
+    override fun getDurationNanos(initialValue: V, targetValue: V, initialVelocity: V): Long =
+        minOf(cap, inner.getDurationNanos(initialValue, targetValue, initialVelocity))
 }

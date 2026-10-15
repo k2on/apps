@@ -32,6 +32,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import dev.arkdb.client.Status
+import dev.arkdb.ui.Glyph
+import dev.arkdb.ui.PageBar
+import dev.arkdb.ui.Space
+import dev.arkdb.ui.quiet
 
 /** What Settings draws. */
 data class SettingsData(

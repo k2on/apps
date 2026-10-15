@@ -1,6 +1,6 @@
 // The splash stays while nothing is ready and the ceiling has not passed,
 // and goes on whichever comes first.
-package dev.arkdb.android
+package dev.arkdb.ui
 
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

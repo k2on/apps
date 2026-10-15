@@ -1,6 +1,5 @@
-// A record's picture: the cover the server has for it, and the desktop's
-// derived square until it arrives or when there is none
-// (`rust/arkui/src/art.rs`).
+// A picture: the one an app has for a thing, and `rust/arkui`'s derived
+// square until it arrives or when there is none (`rust/arkui/src/art.rs`).
 //
 // The square is drawn the desktop's way: the name's tint from the first
 // stop of its pair, a diagonal from full strength to a third, and a note
@@ -9,7 +8,12 @@
 // so one album is one square on every screen. It is not a placeholder to
 // be replaced by a spinner: it is right on its own, and a cover that does
 // arrive simply appears over it.
-package dev.harken.android
+//
+// Where a picture comes from is the app's: a `CoverLoader` it provides
+// (`LocalCoverLoader`), which says where a thing's art is, hands back one
+// already decoded at once, and loads the rest. With none — a screenshot —
+// only the squares are drawn.
+package dev.arkdb.ui
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
@@ -19,10 +23,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.ProvidableCompositionLocal
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
@@ -34,9 +40,9 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
 
-object Art {
+public object Art {
     /** FNV-1a over UTF-16 code units: `arkui::art::hash`, which both clients pin. */
-    fun hash(text: String): Int {
+    public fun hash(text: String): Int {
         var h = 0x811c9dc5.toInt()
         for (unit in text) {
             h = h xor unit.code
@@ -46,20 +52,25 @@ object Art {
     }
 
     /** The pair `seed` draws as, out of `set`. */
-    fun <T> pick(set: List<T>, seed: String): T = set[(hash(seed).toLong() and 0xffffffffL).rem(set.size).toInt()]
+    public fun <T> pick(set: List<T>, seed: String): T =
+        set[(hash(seed).toLong() and 0xffffffffL).rem(set.size).toInt()]
 }
 
 /**
- * The derived square, filling its box: a gradient in the name's tint and a note on it. What it draws
- * with is made when its size or its tint changes, and kept: a row redrawn as a list moves allocates
- * nothing for it.
+ * The derived square, filling its box: a gradient in the name's tint and a note on it. What it
+ * draws with is made when its size or its tint changes, and kept: a row redrawn as a list moves
+ * allocates nothing for it.
  */
 @Composable
-fun Square(seed: String, modifier: Modifier = Modifier) {
-    val tint = Art.pick(LocalHarken.current.art, seed).first
+public fun Square(seed: String, modifier: Modifier = Modifier) {
+    val tint = Art.pick(LocalArkTheme.current.art, seed).first
     Spacer(
         modifier.drawWithCache {
-            val gradient = Brush.linearGradient(listOf(tint, tint.copy(alpha = 0.33f)), Offset.Zero, Offset(size.width, size.height))
+            val gradient =
+                Brush.linearGradient(
+                    listOf(tint, tint.copy(alpha = 0.33f)),
+                    Offset.Zero,
+                    Offset(size.width, size.height))
             // The desktop's note, in its 100-unit box: a head, a stem and a flag.
             val u = size.width / 100f
             val ink = tint.copy(alpha = 0.35f)
@@ -77,20 +88,26 @@ fun Square(seed: String, modifier: Modifier = Modifier) {
                 drawRect(ink, topLeft = Offset(50 * u, 26 * u), size = Size(4 * u, 36 * u))
                 drawPath(flag, ink)
             }
-        }
-    )
+        })
 }
 
 /**
- * A record's picture, `side` across: the server's cover at `art` (a path under the media root, or a
- * whole URL), over the square derived from `seed`. Round for a person.
+ * A picture, `side` across: the cover the app's [CoverLoader] has at `art` (for harken, a path
+ * under the media root, or a whole URL), over the square derived from `seed`. Round for a person.
  */
 @Composable
-fun Cover(seed: String, art: String, side: Dp, modifier: Modifier = Modifier, round: Boolean = false, corner: Dp = Space.corner) {
+public fun Cover(
+    seed: String,
+    art: String,
+    side: Dp,
+    modifier: Modifier = Modifier,
+    round: Boolean = false,
+    corner: Dp = Space.corner
+) {
     val shape = if (round) CircleShape else RoundedCornerShape(corner)
     Box(modifier.clip(shape)) {
         Square(seed, Modifier.fillMaxSize())
-        val covers = LocalCovers.current
+        val covers = LocalCoverLoader.current
         val url = remember(covers, art) { covers?.urlOf(art) }
         if (covers != null && url != null) {
             // A cover already decoded is drawn at once, and nothing is launched for it: a fling
@@ -98,15 +115,51 @@ fun Cover(seed: String, art: String, side: Dp, modifier: Modifier = Modifier, ro
             // was a cost per row.
             val cached = remember(url) { covers.cached(url) }
             if (cached != null) {
-                Image(cached, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                Image(
+                    cached,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize())
             } else {
                 var bitmap by remember(url) { mutableStateOf<ImageBitmap?>(null) }
                 LaunchedEffect(url) {
-                    covers.launches.incrementAndGet()
+                    covers.launched()
                     bitmap = covers.load(url, side)
                 }
-                bitmap?.let { Image(it, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
+                bitmap?.let {
+                    Image(
+                        it,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize())
+                }
             }
         }
     }
+}
+
+/**
+ * Where an app's pictures come from, for [Cover]: an image library's, or one of the app's own. A
+ * cover already decoded is drawn in the frame its row enters, so [cached] is asked first and must
+ * not wait; [load] is asked only for what it did not have.
+ */
+public interface CoverLoader {
+    /** Where the picture named `art` is, or null when there is none. */
+    public fun urlOf(art: String): String?
+
+    /** The picture at `url` if it is already decoded, without waiting. */
+    public fun cached(url: String): ImageBitmap?
+
+    /** The picture at `url`, decoded to about `side` across, or null when there is none. */
+    public suspend fun load(url: String, side: Dp): ImageBitmap?
+
+    /**
+     * Told each time a cover on screen went looking for its picture rather than finding it decoded.
+     */
+    public fun launched() {}
+}
+
+/** The app's pictures, or none — in a screenshot, where only the squares are drawn. */
+public val LocalCoverLoader: ProvidableCompositionLocal<CoverLoader?> = staticCompositionLocalOf {
+    null
 }

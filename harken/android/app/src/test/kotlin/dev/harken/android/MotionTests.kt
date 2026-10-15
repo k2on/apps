@@ -57,6 +57,9 @@ import dev.arkdb.client.Login
 import dev.arkdb.client.MemoryStorage
 import dev.arkdb.client.Options
 import dev.arkdb.client.Peer
+import dev.arkdb.ui.Origin
+import dev.arkdb.ui.PageMotion
+import dev.arkdb.ui.Springs
 import java.io.File
 import java.lang.reflect.Proxy
 import kotlin.math.abs
@@ -293,18 +296,6 @@ class MotionTests {
     }
 
     private fun table(name: String, c: List<Pair<Long, Float>>) = println("$name: " + c.joinToString(" ") { (t, v) -> "%d:%.4f".format(t, v) })
-
-    @Test
-    fun thePreviewSaturates() {
-        val a = Springs.preview(0.3f)
-        val b = Springs.preview(0.9f)
-        println("preview: 0.1 → ${Springs.preview(0.1f)}, 0.2 → ${Springs.preview(0.2f)}, 0.3 → $a, 0.5 → ${Springs.preview(0.5f)}, 0.9 → $b, 1 → ${Springs.preview(1f)}")
-        assertTrue("both within the limit: $a, $b", a <= Springs.PREVIEW && b <= Springs.PREVIEW)
-        // Three times the gesture is barely more preview: it has stiffened.
-        assertTrue("0.9 only a little past 0.3: $b against $a", b - a < 0.15f * a)
-        // And free at first: the first tenth of the gesture is most of a tenth of the limit's worth.
-        assertTrue("free at first: ${Springs.preview(0.02f)}", Springs.preview(0.02f) > 0.15f * Springs.PREVIEW)
-    }
 
     @Test
     fun aPageGrowsOutOfItsCardAndTheBackGesturePreviewsIt() {

@@ -1,8 +1,8 @@
 // `ark-android` (dev.arkdb.android): the onboarding every Ark app on Android
 // shares — the server, signing in through the server's own page in a
-// Custom Tab, the permissions — and the session it hands the app: the
-// Kotlin `Peer` over that server, on its own thread, which runs when it is
-// woken and not on a clock (kotlin/README.md).
+// Custom Tab, the permissions, drawn with `ark-ui`'s screens — and the
+// session it hands the app: the Kotlin `Peer` over that server, on its own
+// thread, which runs when it is woken and not on a clock (kotlin/README.md).
 //
 // An Android library, so it is not a project of the Kotlin workspace here,
 // which is the JVM's and builds without an SDK: an app's build includes it
@@ -46,6 +46,9 @@ android {
 
 dependencies {
     api("dev.arkdb:ark-client")
+    // What the onboarding's screens look like, and the splash's keeping
+    // (kotlin/ark-ui, a project of the app's build, as this one is).
+    api(project(":ark-ui"))
 
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
     api(composeBom)

@@ -1,5 +1,6 @@
 // Covers, fetched once and shrunk before anything draws them — the
-// desktop's `covers.rs`, on a phone.
+// desktop's `covers.rs`, on a phone, and the `CoverLoader` `ark-ui`'s
+// `Cover` draws from.
 //
 // Two caches: the encoded original on disk, under the app's cache
 // directory, keyed by the URL's FNV-1a (a cache: the system may sweep it,
@@ -19,10 +20,11 @@ package dev.harken.android
 import android.content.Context
 import android.graphics.BitmapFactory
 import android.util.LruCache
-import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.Dp
+import dev.arkdb.ui.Art
+import dev.arkdb.ui.CoverLoader
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URI
@@ -37,7 +39,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 
-class Covers(context: Context, private val server: String) {
+class Covers(context: Context, private val server: String) : CoverLoader {
     private val dir = File(context.cacheDir, "covers")
     private val density = context.resources.displayMetrics.density
     private val missing: MutableSet<String> = Collections.synchronizedSet(HashSet())
@@ -53,16 +55,20 @@ class Covers(context: Context, private val server: String) {
 
     /** How many covers on screen went looking for their picture, rather than finding it decoded: for the tests. */
     internal val launches = AtomicInteger()
+
+    override fun launched() {
+        launches.incrementAndGet()
+    }
     private val memory =
         object : LruCache<String, ImageBitmap>(MEMORY_BYTES) {
             override fun sizeOf(key: String, value: ImageBitmap): Int = value.width * value.height * 4
         }
 
     /** The URL a record's `art` is at, or null when it has none. */
-    fun urlOf(art: String): String? = if (art.isBlank()) null else Media.url(server, art)
+    override fun urlOf(art: String): String? = if (art.isBlank()) null else Media.url(server, art)
 
     /** A cover already decoded, without waiting. */
-    fun cached(url: String): ImageBitmap? = memory.get(url)
+    override fun cached(url: String): ImageBitmap? = memory.get(url)
 
     /**
      * Start decoding the covers of a list that has just arrived, `side` across each, so the rows
@@ -89,7 +95,7 @@ class Covers(context: Context, private val server: String) {
     internal val warming = AtomicInteger()
 
     /** The cover at `url`, decoded to about `side` (and never past [BOUND] pixels), or null. */
-    suspend fun load(url: String, side: Dp): ImageBitmap? {
+    override suspend fun load(url: String, side: Dp): ImageBitmap? {
         memory.get(url)?.let { return it }
         if (url in missing) return null
         val want = minOf(BOUND, (side.value * density).toInt().coerceAtLeast(64))
@@ -167,6 +173,3 @@ class Covers(context: Context, private val server: String) {
         }
     }
 }
-
-/** The covers of the session, or none — in a screenshot, where only the squares are drawn. */
-val LocalCovers = staticCompositionLocalOf<Covers?> { null }

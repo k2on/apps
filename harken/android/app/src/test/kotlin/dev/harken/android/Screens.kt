@@ -35,14 +35,15 @@ import app.cash.paparazzi.DeviceConfig
 import app.cash.paparazzi.Paparazzi
 import dev.arkdb.Id
 import dev.arkdb.android.AppIdentity
+import dev.arkdb.android.Opening
+import dev.arkdb.android.Permission
 import dev.arkdb.android.PermissionStep
 import dev.arkdb.android.ServerStep
 import dev.arkdb.android.SignInStep
-import dev.arkdb.android.Permission
-import dev.arkdb.android.Opening
 import dev.arkdb.android.Step
 import dev.arkdb.client.Account
 import dev.arkdb.client.Login
+import dev.arkdb.ui.Space
 import org.junit.Rule
 import org.junit.Test
 

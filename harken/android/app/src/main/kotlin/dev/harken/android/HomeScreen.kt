@@ -28,6 +28,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.arkdb.ui.Cover
+import dev.arkdb.ui.CoverCard
+import dev.arkdb.ui.Empty
+import dev.arkdb.ui.FETCHING_DELAY_MS
+import dev.arkdb.ui.Fetching
+import dev.arkdb.ui.Glyph
+import dev.arkdb.ui.Heading
+import dev.arkdb.ui.Recompositions
+import dev.arkdb.ui.Shelf
+import dev.arkdb.ui.Space
+import dev.arkdb.ui.TabTitle
+import dev.arkdb.ui.quiet
 
 /** What Home draws: a snapshot, its lists copies, so an equal one is the same one to Compose. */
 @Immutable
@@ -88,7 +100,7 @@ fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do, placeholderD
                 item {
                     Shelf(recent, key = { it.id.hex }) { t ->
                         val album = albumOf(t)
-                        RecordCard(album?.name ?: t.title, album?.art ?: "", t.title, t.creator, Space.shelf, onClick = {
+                        CoverCard(album?.name ?: t.title, album?.art ?: "", t.title, t.creator, Space.shelf, onClick = {
                             act.play(recent, recent.indexOf(t), null)
                         })
                     }
@@ -105,7 +117,7 @@ fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do, placeholderD
                 } else {
                     item {
                         Shelf(data.playlists, key = { it.id.hex }) { p ->
-                            RecordCard(p.name, "", p.name, "Playlist", Space.shelf, onClick = { act.open(Page.ForPlaylist(p.id)) }, opens = true)
+                            CoverCard(p.name, "", p.name, "Playlist", Space.shelf, onClick = { act.open(Page.ForPlaylist(p.id)) }, opens = true)
                         }
                     }
                 }
@@ -113,7 +125,7 @@ fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do, placeholderD
                     item { Heading("Albums", action = "See all", onAction = { act.library(LibraryTab.Albums) }) }
                     item {
                         Shelf(data.albums, key = { it.name }) { a ->
-                            RecordCard(a.name, a.art, a.name, a.creator, Space.shelf, onClick = { act.open(Page.ForAlbum(a.name)) }, opens = true)
+                            CoverCard(a.name, a.art, a.name, a.creator, Space.shelf, onClick = { act.open(Page.ForAlbum(a.name)) }, opens = true)
                         }
                     }
                 }

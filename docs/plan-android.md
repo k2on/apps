@@ -795,7 +795,7 @@ from that sheet's row" has nothing to attach to yet.
   entries are chosen through `onMenu`, as above. Falsified: the menu's page
   opened from no origin.
 
-**Generic, for `kotlin/ark-ui`.** `Springs.kt` and `Motion.kt` name no harken
+**Generic, for `kotlin/ark-ui`** (where they now are: "ark-ui", below). `Springs.kt` and `Motion.kt` name no harken
 type: `PageMotion` is told which routes are tabs (`Tab.routes`), `rememberHero`
 takes its corner, and the back plumbing (`PageBack`, `Relayed`, `Pull`), the
 origins (`Origin`, `Tapped`, `Hero`, `Spot`) and the settle (`Springs.settle`,
@@ -826,3 +826,128 @@ changed, and the draw did not move.
 Not verified: the feel of any of it on a phone — the stiffness, the preview's
 limit and give, the cap, the rise — and whether the second report was the
 covers or the keyboard. Every number above is HotSpot's and layoutlib's.
+
+### ark-ui
+
+The owner asked for the components, the animations and their timing, and
+some of the onboarding, in a library other apps reuse: `kotlin/ark-ui`,
+package `dev.arkdb.ui`, Gradle project `:ark-ui` — an Android library on
+Compose alone, with no ArkDB in it, the Kotlin twin of `rust/arkui`
+(`kotlin/ark-ui/README.md`). The SwiftUI twin is a plan,
+`docs/plan-arkui-swift.md`. Nothing about how anything looks or moves
+changed: the move was held to byte-identical screenshots.
+
+**What moved, and where:**
+
+- `harken/android/…/Springs.kt` → `ark-ui/Springs.kt`, as it was:
+  `Springs`, `Capped`.
+- `harken/android/…/Motion.kt` → `ark-ui/Motion.kt`, as it was: `PageMotion`,
+  `Moving`, `Origin`, `Tapped`, `Hero`, `rememberHero`, `Spot`, `PageFrame`,
+  `PageBack`, `Relayed`, `Pull`, `LocalPageMotion`, `LocalPageFrame`,
+  `PAGE_DIM`. `PageMotion.rose` is settable from outside now, because
+  harken's `MotionTests` resets it.
+- `harken/android/…/PlayerSheet.kt` → `ark-ui/ExpandingCard.kt`, made
+  generic: `ExpandingCardState` (was `PlayerSheet`; `CardFace.Collapsed` /
+  `Expanded` were `Face.Bar` / `Full`), `rememberExpandingCard`, and
+  `ExpandingCard(state, stand, onOpen, collapsed, expanded, traveler,
+  onSwipeLeft, onSwipeRight, openLabel, spec)` — the anchored drag, the
+  capped settle, the axis split, the back gesture onto `p`, the faces laid
+  out once and moved, the travelling piece — with every number of the old
+  `Geometry` in `ExpandingCardSpec`, whose defaults are harken's. The bar's
+  height is a list (56 dp and 2 dp), each rounded before they are summed,
+  as the old `Geometry` did, so the card sits on the face's own pixels at
+  any density. harken's `PlayerSheet.kt` is now a `typealias PlayerSheet =
+  ExpandingCardState` and `PlayerCard`, which hands the card `MiniFace`,
+  `FullFace` and the cover.
+- `harken/android/…/Art.kt` → `ark-ui/Art.kt`: `Art.hash`, `Art.pick`,
+  `Square`, `Cover`. `Cover` asks a `CoverLoader` (`LocalCoverLoader`) where
+  it asked harken's `Covers` (`LocalCovers`, gone); `Covers` implements it,
+  and counts its launches through `launched()`. `Square` reads the
+  gradients from `LocalArkTheme` where it read `LocalHarken`
+  (`HarkenExtras`, gone); `HarkenTheme` provides `ArkTheme(Palette.DarkArt
+  or LightArt)` — a data class, as `HarkenExtras` was, so a theme made again
+  is not a change to every screen under it.
+- `harken/android/…/Recompositions.kt` → `ark-ui/Recompositions.kt`.
+- From `Components.kt`: `Glyph`, `Heading`, `TabTitle`, `PageBar`, `Empty`,
+  `Shelf`, `SheetRow`, `Fetching` and `FETCHING_DELAY_MS`, `LocalMoreGlyph`,
+  and the menu button, `MoreButton(about, origin, onMore)`: where a track
+  row and its cover are is harken's (`TrackOrigin`, a `RowOrigin`, two
+  singletons), asked of the button's node on the tap as before. `RecordCard`
+  is `CoverCard`, and its count is `"CoverCard"` in `ScrollTests`. From
+  `LibraryScreen.kt`: `ListRow`, whose chevron is now a `trailing` slot that
+  defaults to it.
+- From `Theme.kt`: `Space` and `quiet`. The palette, the type and
+  `HarkenTheme` stay.
+- The menu, back and chevron glyphs are `ArkGlyphs` (the same Lucide paths);
+  harken's `Glyphs.More`, `Back` and `Chevron` name them.
+- From `kotlin/ark-android`: the onboarding's screens without their state —
+  `OnboardingPage`, `ServerScreen`, `SignInScreen` (`SignInPhase`),
+  `PermissionScreen`, `OpeningScreen` — and the splash's keeping,
+  `holdSplashUntil` and `keepsSplash`. `ark-android` keeps `ArkApp`, the
+  machine, `ServerStep`, `SignInStep`, `PermissionStep` and `Opening` as
+  adapters that read a `Step` into them, and `holdSplash`, which holds it
+  until `ArkHost.ready`; it depends on `ark-ui` (`api`).
+
+What stayed harken's: `Track`, `Album`, `Playlist`, `Library`, the player
+and its faces, the palette, the glyphs only harken draws, `TrackRow`,
+`PageHeader`, `Offline`, `HarkenApp`'s wiring, the screens. What stayed
+`ark-android`'s: the session, the host, `Remembered`, `Probe`,
+`ModuleMemory`, `Auth`.
+
+**Its public API**, `explicitApi()` and a KDoc on each: `Springs`,
+`Capped`; `PageMotion`, `Move`, `Origin`, `Tapped`, `Spot`, `Hero`,
+`rememberHero`, `PageFrame`, `Moving`, `PageBack`, `Relayed`, `Pull`,
+`LocalPageMotion`, `LocalPageFrame`, `PAGE_DIM`; `CardFace`,
+`ExpandingCardState`, `rememberExpandingCard`, `ExpandingCardSpec`,
+`ExpandingCard`; `Art`, `Square`, `Cover`, `CoverLoader`,
+`LocalCoverLoader`; `Glyph`, `Heading`, `TabTitle`, `PageBar`, `Empty`,
+`Shelf`, `CoverCard`, `ListRow`, `Chevron`, `SheetRow`, `Fetching`,
+`FETCHING_DELAY_MS`, `MoreButton`, `RowOrigin`, `LocalMoreGlyph`;
+`OnboardingPage`, `ServerScreen`, `SignInScreen`, `SignInPhase`,
+`PermissionScreen`, `OpeningScreen`, `OPENING_DELAY_MS`; `holdSplashUntil`,
+`keepsSplash`, `SPLASH_CEILING_MS`; `Space`, `ArkTheme`, `LocalArkTheme`,
+`quiet`; `ArkGlyphs`; `Recompositions`.
+
+**Its tests**, JVM unit tests run by `harken-apk` before the APK
+(`:ark-ui:testDebugUnitTest`): `ArtTests` (the art hash's five pins, moved
+from `MediaTests`, and the pick read unsigned), `SpringsTests`
+(`thePreviewSaturates`, moved from `MotionTests`, and the cap), and
+`SplashTests` (moved from `ark-android`). The rest of `MotionTests`,
+`ScrollTests` and `FlingTests` drive the real `HarkenApp` and stay
+harken's. Falsified once from the new place: FNV's prime changed in
+`Art.hash` — `theDerivedSquareMatchesTheDesktop` and
+`aNamePicksOneOfTheSetByItsHash` failed, 5 run, 2 failed.
+
+**The build.** `harken/android/settings.gradle.kts` includes `:ark-ui` by
+path as it does `:ark-android`; `checks.kotlin` holds its sources to ktfmt
+with the rest; `harken-apk`'s task list and its recording's begin with
+`:ark-ui:testDebugUnitTest`. The source filters already took all of
+`kotlin/`. The recorded graph needed nothing new, with one line: on its
+own, `ark-ui`'s test classpath took kotlinx-coroutines 1.7.3's word for
+`kotlin-stdlib-jdk8:1.8.20`, which no other configuration asks for and
+`deps.json` does not hold, so its build pins `kotlin-stdlib-jdk7` and
+`-jdk8` to 2.0.21, the version every other module resolves. `deps.json`
+was not re-recorded.
+
+**Held to:**
+
+- `harken-android-screens`: all 92 PNGs (and `index.html`) byte for byte
+  what c87689a's build drew, compared file by file: 0 differ.
+- `ScrollTests`: at rest for a second `{}`; over four position ticks
+  `{Progress=4}` — no row, screen, frame or card composed again.
+- `MotionTests`, as before: the slow release lands in 216 ms and the flick
+  in 133; the player's back previews 0.0918 at 0.3 and 0.0999 at 0.9; the
+  menu's album grew from the row's cover, (44, 341)–(176, 473).
+- The fling bench (HARKEN_FLING_BENCH=2000, passes 5 and 6), the
+  unchanged tree and this one run side by side:
+
+  | | compose+measure, per entering row | draw, per frame |
+  |---|---|---|
+  | before (c87689a) | 424 / 397 µs, 32,820–32,822 B | 8.5 / 8.0 ms, 27,977 B |
+  | after | 452 / 437 µs, 32,887 B | 8.4 / 8.3 ms, 27,977 B |
+
+  The bytes per entering row are what they were to within 70 (an earlier
+  pair read 32,836 before and 32,729 after); the draw is the same to the
+  byte. One run of the moved tree read 29,289 B a frame for the draw and did
+  not repeat in two more (with and without a profiler attached); the times
+  are this machine's load.

@@ -23,30 +23,23 @@
 // hostage to a slow open.
 package dev.arkdb.android
 
-import android.os.SystemClock
 import androidx.activity.ComponentActivity
-import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.ViewModelProvider
+import dev.arkdb.ui.holdSplashUntil
 
 /** How long the splash may be held for, at most. */
-public const val SPLASH_CEILING_MS: Long = 1500
+public const val SPLASH_CEILING_MS: Long = dev.arkdb.ui.SPLASH_CEILING_MS
 
 /**
  * Install the system splash and keep it until [ArkHost.ready], or `ceilingMs` — called before
- * `super.onCreate`.
+ * `super.onCreate`. The keeping is `ark-ui`'s (`holdSplashUntil`); what it waits for is the host's.
  */
 public fun ComponentActivity.holdSplash(ceilingMs: Long = SPLASH_CEILING_MS) {
-    val splash = installSplashScreen()
-    val since = SystemClock.uptimeMillis()
     var host: ArkHost? = null
-    splash.setKeepOnScreenCondition {
+    holdSplashUntil(ceilingMs) {
         // Asked on every frame the splash would let through, from the first, after
         // `onCreate`: the host is the one `ArkApp` holds, from the same store.
         val h = host ?: ViewModelProvider(this)[ArkHost::class.java].also { host = it }
-        keepsSplash(h.ready.value, SystemClock.uptimeMillis() - since, ceilingMs)
+        h.ready.value
     }
 }
-
-/** Whether the splash stays: nothing ready yet, and the ceiling not reached. */
-internal fun keepsSplash(ready: Boolean, elapsedMs: Long, ceilingMs: Long): Boolean =
-    !ready && elapsedMs < ceilingMs

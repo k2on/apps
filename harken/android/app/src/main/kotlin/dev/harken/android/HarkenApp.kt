@@ -1,8 +1,8 @@
 // harken, once the onboarding has handed it a session: three tabs — Home,
 // Search, Library — under one bar, the pages they open growing over them
-// (Motion.kt), the player's bar above the tabs and the full player it grows
-// into over everything (PlayerSheet.kt), and the sheets a song's menu
-// raises. This file wires; what each screen draws is the screen's, from
+// (`ark-ui`'s `PageMotion`), the player's bar above the tabs and the full
+// player it grows into over everything (PlayerSheet.kt, an `ExpandingCard`),
+// and the sheets a song's menu raises. This file wires; what each screen draws is the screen's, from
 // plain values.
 package dev.harken.android
 
@@ -60,6 +60,16 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import dev.arkdb.Id
 import dev.arkdb.android.ArkSession
+import dev.arkdb.ui.LocalCoverLoader
+import dev.arkdb.ui.LocalPageMotion
+import dev.arkdb.ui.Moving
+import dev.arkdb.ui.Origin
+import dev.arkdb.ui.PageBack
+import dev.arkdb.ui.PageMotion
+import dev.arkdb.ui.Recompositions
+import dev.arkdb.ui.Relayed
+import dev.arkdb.ui.Space
+import dev.arkdb.ui.Tapped
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -71,7 +81,7 @@ enum class Tab(val route: String, val title: String) {
     Library("library", "Library");
 
     companion object {
-        /** The routes that switch at once, where every other route is a page that grows (`Motion.kt`). */
+        /** The routes that switch at once, where every other route is a page that grows (`ark-ui`'s `PageMotion`). */
         val routes: Set<String> = entries.map { it.route }.toSet()
     }
 }
@@ -311,7 +321,7 @@ fun HarkenApp(
         }
     }
 
-    CompositionLocalProvider(LocalCovers provides covers, LocalPageMotion provides motion) {
+    CompositionLocalProvider(LocalCoverLoader provides covers, LocalPageMotion provides motion) {
         HarkenTheme {
             val entry by nav.currentBackStackEntryAsState()
             val route = entry?.destination?.route

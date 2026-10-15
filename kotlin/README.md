@@ -11,9 +11,10 @@ file, and to every trace of `packages.trace-corpus`, by `checks.kotlin`
 the peer around it, a port of `rust/ark-client`: the storage a replica
 survives a restart in, written byte for byte as the Rust writes it, the
 peer that writes it and goes alone and back, its link to a server and its
-sign-in, and maintained views. `ark-android` (package `dev.arkdb.android`)
-is the onboarding every Ark app on Android shares, and the session it hands
-the app. `harken-peer` is harken's headless peer on it, speaking
+sign-in, and maintained views. `ark-ui` (package `dev.arkdb.ui`) is what an
+Ark app on Android looks like and how it moves, and `ark-android` (package
+`dev.arkdb.android`) the onboarding every Ark app on Android shares, drawn
+with it, and the session it hands the app. `harken-peer` is harken's headless peer on it, speaking
 `harken-peer`'s lines, which the fleet runs beside Rust peers;
 `harken/android` is the app on it.
 
@@ -166,6 +167,17 @@ by path (`include(":ark-android")`, its `projectDir` here) and supplies the
 plugin versions, as `harken/android` does. Its sources are held to ktfmt's
 kotlinlang style by `checks.kotlin` with the rest; its tests run in the
 app's build (`nix build .#harken-apk` runs them before assembling).
+
+## `ark-ui`
+
+What an Ark app on Android looks like and how it moves (`dev.arkdb.ui`,
+`ark-ui/README.md`): the springs, pages grown out of what was tapped and the
+back gesture that previews them, a card that expands under the finger, the
+derived square and the cover over it, the rows and shelves a list is made of,
+and the onboarding's screens with no state of their own, which `ark-android`
+draws from its steps. Compose only — no ArkDB — and an Android library like
+`ark-android`, so a project of the app's build; `checks.kotlin` holds its
+sources to ktfmt, and `harken-apk` runs its tests.
 
 ## `harken-peer`
 

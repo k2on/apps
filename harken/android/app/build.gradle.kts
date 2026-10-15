@@ -126,6 +126,10 @@ dependencies {
     // The onboarding every Ark app on Android shares, and the session it opens
     // (kotlin/ark-android, a project of this build).
     implementation(project(":ark-android"))
+    // What it looks like and how it moves, where that is not harken's own: the
+    // springs, the pages grown out of their art, the expanding card the player
+    // is, the derived square and the rows (kotlin/ark-ui).
+    implementation(project(":ark-ui"))
 
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
     implementation(composeBom)

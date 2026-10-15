@@ -126,7 +126,7 @@ and build-tools 35.0.0, plus JDK 21, the same project builds directly:
 
     cd harken/android
     gradle assembleDebug          # or open the directory in Android Studio
-    gradle :ark-android:testDebugUnitTest :app:testDebugUnitTest
+    gradle :ark-ui:testDebugUnitTest :ark-android:testDebugUnitTest :app:testDebugUnitTest
     gradle :app:recordPaparazziDebug   # app/src/test/snapshots/images, gitignored
     adb install app/build/outputs/apk/debug/app-debug.apk
 
@@ -151,7 +151,9 @@ keeps its own settings, plugin versions and toolchain. The onboarding,
 `kotlin/ark-android`, is an Android library and so cannot be a project of
 that JVM-only build: it is a project of this one, included by path
 (`include(":ark-android")`, its `projectDir` set to `../../kotlin/ark-android`),
-under this build's plugin versions.
+under this build's plugin versions. So is `kotlin/ark-ui`, the look and the
+motion `ark-android` and the app are drawn with (`include(":ark-ui")`), on
+Compose alone.
 
 - The Kotlin build sets `jvmToolchain(21)`, so the libraries arrive as Java
   21 class files; AGP 8.7's D8 accepts them, and the app is built for 21 too.
@@ -259,9 +261,11 @@ exactly what the app draws):
 - **Motion** — a page grows out of the cover that was tapped, and goes
   back into it: by the back button, by the system's back gesture
   (Android 14 and later draw the page shrinking under the finger), or
-  pulled down from its top. A page opened from no cover grows from the
-  middle of the screen. The tabs switch at once. `Motion.kt` and
-  `PlayerSheet.kt` say how, and `docs/plan-android.md` why.
+  pulled down from its top. A page opened from no cover rises. The tabs
+  switch at once. How is `kotlin/ark-ui` (`Motion.kt`, `ExpandingCard.kt`,
+  `Springs.kt`), which every Ark app on Android shares; `PlayerSheet.kt`
+  here says which faces the player's card has, and `docs/plan-android.md`
+  why.
 - **Settings** — the account, the server and whether it is reached, sign
   out, about. **Diagnostics** — every number the old settings screen had,
   each change this phone made with where it stands, and verify — are

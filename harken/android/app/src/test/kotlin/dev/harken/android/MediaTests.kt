@@ -1,7 +1,8 @@
 // The two things about a track's bytes a phone could get wrong without
 // anybody noticing until a song would not play: where they are (`Media.url`,
 // the desktop's `media_url`, each segment percent-encoded), and how a cover
-// is shrunk before it is decoded (`Covers.sampleSize`).
+// is shrunk before it is decoded (`Covers.sampleSize`). The derived square's
+// hash is `ark-ui`'s, and pinned there (`ArtTests`).
 package dev.harken.android
 
 import org.junit.Assert.assertEquals
@@ -38,15 +39,5 @@ class MediaTests {
         assertEquals(1, Covers.sampleSize(1000, 600))
         assertEquals(2, Covers.sampleSize(1200, 600))
         assertEquals(4, Covers.sampleSize(3000, 600))
-    }
-
-    @Test
-    fun theDerivedSquareMatchesTheDesktop() {
-        // `arkui::art::hash`'s own pins: the desktop and the phone draw one album as one square.
-        assertEquals(0x811c9dc5.toInt(), Art.hash(""))
-        assertEquals(0xe40c292c.toInt(), Art.hash("a"))
-        assertEquals(0x74417273, Art.hash("Water Music"))
-        assertEquals(0x939e323b.toInt(), Art.hash("Für Elise"))
-        assertEquals(0x442e75ca, Art.hash("🎵"))
     }
 }

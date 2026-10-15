@@ -30,6 +30,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import dev.arkdb.ui.Cover
+import dev.arkdb.ui.CoverCard
+import dev.arkdb.ui.Empty
+import dev.arkdb.ui.Glyph
+import dev.arkdb.ui.Heading
+import dev.arkdb.ui.Recompositions
+import dev.arkdb.ui.Shelf
+import dev.arkdb.ui.Space
+import dev.arkdb.ui.TabTitle
 
 /** What a needle found, in three groups. */
 data class Results(val needle: String, val songs: List<Track>, val albums: List<Album>, val artists: List<Artist>) {
@@ -131,7 +140,7 @@ fun SearchScreen(
                     item { Heading("Albums") }
                     item {
                         Shelf(found.albums, key = { it.name }) { a ->
-                            RecordCard(a.name, a.art, a.name, a.creator, SEARCH_ALBUM, opens = true, onClick = {
+                            CoverCard(a.name, a.art, a.name, a.creator, SEARCH_ALBUM, opens = true, onClick = {
                                 onSearched(needle)
                                 act.open(Page.ForAlbum(a.name))
                             })
@@ -142,7 +151,7 @@ fun SearchScreen(
                     item { Heading("Artists") }
                     item {
                         Shelf(found.artists, key = { it.name }) { a ->
-                            RecordCard(a.name, a.art, a.name, Media.count(a.tracks.toInt(), "song"), SEARCH_ARTIST, round = true, opens = true, onClick = {
+                            CoverCard(a.name, a.art, a.name, Media.count(a.tracks.toInt(), "song"), SEARCH_ARTIST, round = true, opens = true, onClick = {
                                 onSearched(needle)
                                 act.open(Page.ForArtist(a.name))
                             })

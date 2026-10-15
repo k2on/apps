@@ -31,3 +31,11 @@ include(":app")
 // workspace, which builds without an SDK.
 include(":ark-android")
 project(":ark-android").projectDir = file("../../kotlin/ark-android")
+
+// What an Ark app on Android looks like and how it moves (kotlin/ark-ui):
+// the springs, the pages that grow out of what was tapped, the expanding
+// card, the derived square, the rows and the onboarding's screens. An
+// Android library too, and Compose only; `ark-android` draws its
+// onboarding with it, and the app the rest.
+include(":ark-ui")
+project(":ark-ui").projectDir = file("../../kotlin/ark-ui")

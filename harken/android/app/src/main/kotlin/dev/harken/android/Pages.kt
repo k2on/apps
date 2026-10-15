@@ -19,6 +19,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import dev.arkdb.Id
+import dev.arkdb.ui.Cover
+import dev.arkdb.ui.CoverCard
+import dev.arkdb.ui.Empty
+import dev.arkdb.ui.Heading
+import dev.arkdb.ui.PageBar
+import dev.arkdb.ui.Recompositions
+import dev.arkdb.ui.Shelf
+import dev.arkdb.ui.Space
 
 private fun facts(vararg parts: String?): String = parts.filterNotNull().filter { it.isNotEmpty() }.joinToString(" · ")
 
@@ -94,7 +102,7 @@ fun ArtistPage(name: String, artist: Artist?, tracks: List<Track>, albums: List<
             item { Heading("Albums") }
             item {
                 Shelf(albums, key = { it.name }) { a ->
-                    RecordCard(a.name, a.art, a.name, Media.count(a.tracks.toInt(), "song"), 136.dp, onClick = { act.open(Page.ForAlbum(a.name)) }, opens = true)
+                    CoverCard(a.name, a.art, a.name, Media.count(a.tracks.toInt(), "song"), 136.dp, onClick = { act.open(Page.ForAlbum(a.name)) }, opens = true)
                 }
             }
         }

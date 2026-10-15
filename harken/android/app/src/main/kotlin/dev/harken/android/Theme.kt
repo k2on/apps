@@ -1,6 +1,7 @@
 // harken's look on the phone: the desktop's palette (`harken/iced/src/palette.rs`)
 // — AppKit's neutral greys and the gold — as a Material 3 colour scheme in
-// light and dark, one type scale, and one set of spacings.
+// light and dark, and one type scale. The spacings are `ark-ui`'s (`Space`),
+// which is drawn in these colours.
 //
 // **The only file in this app that writes a colour down.** Every screen asks
 // `MaterialTheme.colorScheme` or [Harken], which is what makes the dark
@@ -23,14 +24,13 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.Immutable
-import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.arkdb.ui.ArkTheme
+import dev.arkdb.ui.LocalArkTheme
+import dev.arkdb.ui.LocalMoreGlyph
 
 /** The palette, both sides. */
 object Palette {
@@ -118,8 +118,8 @@ object Palette {
 
     /**
      * The derived square's gradients — the desktop's `DARK_ART` and `LIGHT_ART` — as their two
-     * stops. Which one a name picks is [Art.hash], FNV-1a over UTF-16, so the phone and the desktop
-     * draw one album as one square.
+     * stops, handed to `ark-ui` as its `ArkTheme`. Which one a name picks is `Art.hash`, FNV-1a
+     * over UTF-16, so the phone and the desktop draw one album as one square.
      */
     val DarkArt: List<Pair<Color, Color>> =
         listOf(
@@ -163,46 +163,15 @@ val HarkenType: Typography =
         )
     }
 
-/** The spacings, so that every screen has the same rhythm. */
-object Space {
-    val xs = 4.dp
-    val s = 8.dp
-    val m = 12.dp
-    val l = 16.dp
-    val xl = 24.dp
-    val xxl = 32.dp
-
-    /** Where a page's content starts from its edges. */
-    val page = 16.dp
-
-    /** A cover on a shelf, and a card in the albums grid at its narrowest. */
-    val shelf = 148.dp
-
-    /** A cover beside a row. */
-    val thumb = 48.dp
-
-    /** A page's header cover. */
-    val header = 200.dp
-
-    /** Corners: a cover, a card, a sheet's row. */
-    val corner = 8.dp
-}
-
-/** Colours a scheme has no slot for, per side. */
-@Immutable
-data class HarkenExtras(val art: List<Pair<Color, Color>>, val dark: Boolean)
-
-val LocalHarken = staticCompositionLocalOf { HarkenExtras(Palette.LightArt, dark = false) }
-
-/** The theme: the scheme for the side asked (the system's by default), the type, the extras. */
+/**
+ * The theme: the scheme for the side asked (the system's by default), the type, and what `ark-ui`
+ * draws that a scheme has no slot for — the squares' gradients, and the one painter every row's
+ * menu button shares.
+ */
 @Composable
 fun HarkenTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
-    val extras = HarkenExtras(if (dark) Palette.DarkArt else Palette.LightArt, dark)
-    CompositionLocalProvider(LocalHarken provides extras, LocalMoreGlyph provides rememberVectorPainter(Glyphs.More)) {
+    val extras = ArkTheme(if (dark) Palette.DarkArt else Palette.LightArt)
+    CompositionLocalProvider(LocalArkTheme provides extras, LocalMoreGlyph provides rememberVectorPainter(Glyphs.More)) {
         MaterialTheme(colorScheme = if (dark) Palette.DarkScheme else Palette.LightScheme, typography = HarkenType, content = content)
     }
 }
-
-/** A text style one step quieter than `base`: the same size, the secondary colour. */
-@Composable
-fun quiet(base: TextStyle): TextStyle = base.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)

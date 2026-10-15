@@ -7,6 +7,8 @@
 //
 // Geometry only: every glyph is drawn in a placeholder ink that `Icon`
 // replaces with the content colour, so its colour is always the theme's.
+// The three `ark-ui` draws itself — the menu, back, the chevron — are its
+// (`ArkGlyphs`), the same paths, named here so a screen asks one table.
 package dev.harken.android
 
 import androidx.compose.ui.graphics.SolidColor
@@ -15,6 +17,7 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.unit.dp
+import dev.arkdb.ui.ArkGlyphs
 
 object Glyphs {
     // A 24-unit glyph from SVG path data, stroked two units wide — or filled,
@@ -96,9 +99,9 @@ object Glyphs {
     val Album = glyph("disc-3", circle(12f, 12f, 10f), "M6 12c0-1.7.7-3.2 1.8-4.2", circle(12f, 12f, 2f), "M18 12c0 1.7-.7 3.2-1.8 4.2")
     val Artist = glyph("user", "M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2", circle(12f, 7f, 4f))
     val Note = glyph("music", "M9 18V5l12-2v13", circle(6f, 18f, 3f), circle(18f, 16f, 3f))
-    val More = glyph("more", circle(12f, 12f, 1f), circle(12f, 5f, 1f), circle(12f, 19f, 1f))
-    val Back = glyph("chevron-left", "m15 18-6-6 6-6")
-    val Chevron = glyph("chevron-right", "m9 18 6-6-6-6")
+    val More = ArkGlyphs.More
+    val Back = ArkGlyphs.Back
+    val Chevron = ArkGlyphs.Chevron
     val Down = glyph("chevron-down", "m6 9 6 6 6-6")
     val Close = glyph("x", "M18 6 6 18", "m6 6 12 12")
     val Plus = glyph("plus", "M5 12h14", "M12 5v14")
