@@ -90,7 +90,10 @@ jobs:
       #
       # Nothing here fails the deploy. No APK anywhere, the live repository
       # unreachable, or fdroid itself failing, and the site goes up without
-      # fdroid/, saying so.
+      # fdroid/, saying so. The artifact is `harken-apk` (`harken.apk`); a
+      # newest apk.yml run from before that name uploaded `harken-debug-apk`,
+      # which is not looked for, and the repository offers what it already had
+      # until the next apk.yml run.
       - name: Lay out the F-Droid repository
         env:
           GH_TOKEN: ${{ github.token }}
@@ -102,8 +105,8 @@ jobs:
           run=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow apk.yml --branch main \
             --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty' || true)
           if [ -n "$run" ] && gh run download "$run" --repo "$GITHUB_REPOSITORY" \
-            --name harken-debug-apk --dir "$RUNNER_TEMP/apk"; then
-            apks=("$RUNNER_TEMP/apk/harken-debug.apk")
+            --name harken-apk --dir "$RUNNER_TEMP/apk"; then
+            apks=("$RUNNER_TEMP/apk/harken.apk")
           else
             echo "::notice::No APK from apk.yml; the F-Droid repository offers what it already had."
           fi

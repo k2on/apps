@@ -1,5 +1,7 @@
-# The Android app, as `nix build .#harken-apk` assembles it: debug-signed,
-# from a recorded Maven graph (harken/android/deps.json), with aapt2 compiled
+# The Android app, as `nix build .#harken-apk` assembles it: a release build,
+# not debuggable, signed with the key committed beside the app
+# (harken/android/debug.keystore), from a recorded Maven graph
+# (harken/android/deps.json), with aapt2 compiled
 # from the Android sources (nix/aapt2.nix) and an SDK assembled by hand
 # (nix/android-sdk.nix).
 #
@@ -59,15 +61,16 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: harken-debug-apk
-          path: result/harken-debug.apk
+          name: harken-apk
+          path: result/harken.apk
           if-no-files-found: error
 
-      # A tag is a release: the same APK, attached to it. Debug-signed, so it
-      # installs anywhere and belongs nowhere public (harken/android/README.md).
+      # A tag is a release: the same APK, attached to it. Its key is public, so
+      # it installs anywhere and belongs nowhere public
+      # (harken/android/README.md).
       - name: Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: result/harken-debug.apk
+          files: result/harken.apk
           generate_release_notes: true
