@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.IconButton
@@ -41,7 +40,9 @@ import dev.arkdb.ui.ScrollsToTop
 import dev.arkdb.ui.Shelf
 import dev.arkdb.ui.Space
 import dev.arkdb.ui.TabTitle
+import dev.arkdb.ui.destinationKeepsAPlace
 import dev.arkdb.ui.quiet
+import dev.arkdb.ui.rememberDestinationListState
 
 /** What Home draws: a snapshot, its lists copies, so an equal one is the same one to Compose. */
 @Immutable
@@ -67,7 +68,10 @@ fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do, placeholderD
     // Derived once per library, not once per composition: the shelf's cards skip only while the
     // list they were given is the same one.
     val recent = remember(data.tracks) { data.tracks.takeLast(RECENT).reversed() }
-    val list = rememberLazyListState()
+    // Come back to with a place to go back to and nothing read yet — after the process was
+    // killed, under the splash — nothing, rather than a list too short to hold the place.
+    if (!data.loaded && destinationKeepsAPlace()) return
+    val list = rememberDestinationListState("home")
     ScrollsToTop(list)
     LazyColumn(Modifier.fillMaxSize(), state = list) {
         item {
@@ -102,7 +106,7 @@ fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do, placeholderD
                 }
                 item { Heading("Recently added", action = "All songs", onAction = { act.library(LibraryTab.Songs) }) }
                 item {
-                    Shelf(recent, key = { it.id.hex }) { t ->
+                    Shelf("recent", recent, key = { it.id.hex }) { t ->
                         val album = albumOf(t)
                         CoverCard(album?.name ?: t.title, album?.art ?: "", t.title, t.creator, Space.shelf, onClick = {
                             act.play(recent, recent.indexOf(t), null)
@@ -120,7 +124,7 @@ fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do, placeholderD
                     }
                 } else {
                     item {
-                        Shelf(data.playlists, key = { it.id.hex }) { p ->
+                        Shelf("playlists", data.playlists, key = { it.id.hex }) { p ->
                             CoverCard(p.name, "", p.name, "Playlist", Space.shelf, onClick = { act.open(Page.ForPlaylist(p.id)) }, opens = true)
                         }
                     }
@@ -128,7 +132,7 @@ fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do, placeholderD
                 if (data.albums.isNotEmpty()) {
                     item { Heading("Albums", action = "See all", onAction = { act.library(LibraryTab.Albums) }) }
                     item {
-                        Shelf(data.albums, key = { it.name }) { a ->
+                        Shelf("albums", data.albums, key = { it.name }) { a ->
                             CoverCard(a.name, a.art, a.name, a.creator, Space.shelf, onClick = { act.open(Page.ForAlbum(a.name)) }, opens = true)
                         }
                     }

@@ -28,10 +28,11 @@ call says `public` (`explicitApi()`).
 |---|---|
 | `Springs.kt` | the numbers everything moves by, said once: `Springs.STIFFNESS` 700, `MOVE` 0.88 (where a thing is: a whisper of overshoot), `SIZE` 1 (how large it is and what of it shows), `REST` 0.0005 of the way, `CAP_MS` 300; `move()`, `size()`, `settle()` (from the release's speed, capped), `noDecay()`; the back gesture's preview curve, `preview(r) = PREVIEW · (1 − e^(−r / GIVE))` with 0.1 and 0.12; `Capped`, any finite spec cut at a time |
 | `Motion.kt` | pages: `PageMotion` (told which routes are tabs), `Moving` around every NavHost destination, a page grown out of what was tapped (`Hero`, `rememberHero`, `Origin`, `Tapped`, `Spot`, `PageFrame`, `LocalPageFrame`), a page with no origin rising; the back gesture that previews and then commits (`PageBack` before the NavHost, `Relayed` around it); a page pulled down from its top going back (`Pull`) |
-| `Tabs.kt` | tabs as a phone's tab bar has them: `TabStack` (each tab its own NavHost and stack, its state kept while another is shown, a switch instant), `Reselect` and `ScrollsToTop` (the tab already shown, at its root, to its top), and the first tab drawn under one going back to it (`PageBack`'s `toFirst`) |
+| `Tabs.kt` | tabs as a phone's tab bar has them: `TabStack` (each tab its own NavHost and stack, its state kept while another is shown, a switch instant; each tab one movable composition wherever it is drawn, with a lifecycle of its own), `Reselect` and `ScrollsToTop` (the tab already shown, at its root, to its top), and the first tab drawn under one going back to it (`PageBack`'s `toFirst`) |
+| `Destination.kt` | where a destination's state lives: `destinations` (a graph built from the app's list of routes, each `Moving` and a `Destination`), `Destination` and `LocalDestination` (a back stack entry's `DestinationState`, its containers' places kept on the entry and saved with it), `rememberDestinationListState`, `…GridState`, `…ScrollState` (every destination's scrolling container), `destinationKeepsAPlace`, `rememberTransientListState` and `…ScrollState` (a sheet's, an onboarding page's), `LifecycleCapped` (what is under something drawn over it is started, not resumed), `NavGraph.routes()`, and `Destinations.sink`, a test's view of every destination drawn |
 | `ExpandingCard.kt` | a bar that expands under the finger into the whole screen: `ExpandingCardState` (an anchored drag whose offset is one number `p`), `rememberExpandingCard`, `ExpandingCard` with slots for the collapsed face, the expanded face and the piece that travels between them, `ExpandingCardSpec` for its measurements; the settle, the axis split (a sideways drag on the bar is the bar's), the back gesture mapped onto `p` |
 | `Art.kt` | the derived square (`Square`, `Art.hash` — FNV-1a over UTF-16, `arkui::art::hash` byte for byte — and `Art.pick`), and `Cover`, a picture over it from the app's `CoverLoader` (`LocalCoverLoader`) |
-| `Components.kt` | `Glyph`, `Heading`, `TabTitle`, `PageBar`, `Empty`, `Shelf`, `CoverCard` (a card that opens its page out of its cover), `ListRow` (a picture, two lines, a chevron or what the caller puts at its end), `SheetRow`, `Fetching`, and a row's `MoreButton` with the one shared painter (`LocalMoreGlyph`) and the `RowOrigin` its row says it grows from |
+| `Components.kt` | `Glyph`, `Heading`, `TabTitle`, `PageBar`, `Empty`, `Shelf` (named by its section, so its place is its destination's), `CoverCard` (a card that opens its page out of its cover), `ListRow` (a picture, two lines, a chevron or what the caller puts at its end), `SheetRow`, `Fetching`, and a row's `MoreButton` with the one shared painter (`LocalMoreGlyph`) and the `RowOrigin` its row says it grows from |
 | `Onboarding.kt` | the onboarding's screens with no state of their own: `ServerScreen`, `SignInScreen` (`SignInPhase`), `PermissionScreen`, `OpeningScreen`, and the `OnboardingPage` they are made of |
 | `Splash.kt` | `holdSplashUntil(ceilingMs) { ready }`, the system splash kept until the app says, and `keepsSplash` |
 | `Theme.kt` | `Space` (the spacings and the corner), `ArkTheme` / `LocalArkTheme` (the squares' gradients; neutral by default, `rust/arkui`'s), `quiet` |
@@ -112,3 +113,64 @@ ExpandingCard(
 or along the same path for a tap; it is read in layout and drawing only, so
 the card moving composes nothing. `ExpandingCardState.held(p, density)` is a
 card that stays at `p`, for a screenshot.
+
+## Where a destination's state lives
+
+A destination — a tab's root, a page — is a back stack entry, and where its
+lists were left is the entry's, not the composition's that happens to be
+drawing it. The same tab is drawn in front, under a tab going back to it,
+and in front again when that back lands; a page is drawn under the page
+going back off it; after the process is killed it is composed again from
+what was saved. Each place has to show the destination as it was left, on
+its first frame.
+
+```kotlin
+NavHost(nav, "home") {
+    // Every route the app has, each a `Moving` and a `Destination`: the list is the graph.
+    destinations(Route.entries, motion, Route::pattern) { r, entry -> Screen(r, entry) }
+}
+
+// In a destination, every scrolling container, by a name of its own:
+LazyColumn(state = rememberDestinationListState("songs")) { … }
+LazyVerticalGrid(state = rememberDestinationGridState("albums"), …) { … }
+Column(Modifier.verticalScroll(rememberDestinationScrollState("settings"))) { … }
+Shelf("recent", items, key = { it.id }) { … }      // its place is "shelf:recent"
+
+// What is not a destination opens at its top every time, and says so:
+LazyColumn(state = rememberTransientListState()) { … }   // a sheet
+```
+
+- **Nothing else makes a scroll state.** `rememberLazyListState()` keeps a
+  place by where in the tree it is called from, so a destination drawn from
+  somewhere else — the first tab under the tab back preview, before this —
+  finds nothing there and draws its top. The destination's state is held by
+  a `ViewModel` on the entry and saved with the entry's own saved state, so
+  it is the same answer wherever and however often it is composed. Outside
+  any destination (a screenshot of a screen on its own) the helpers are the
+  composition's, as `rememberLazyListState` is. harken's `SourceTests` scans
+  the sources for anything else.
+- **One composition per destination.** `TabStack` draws each tab as one
+  movable content called from one place, with only the values handed to it
+  differing; `Moving` does the same for a page. A tab under a back preview
+  is the composition that becomes the tab shown when it lands.
+- **A destination's first frame has its rows.** Its lists come from holders
+  that outlive the composition (on the entry, or the session), never from a
+  `remember` that starts empty and is filled by an effect: a list restored
+  into rows that are not there yet is clamped to its top. Where the rows can
+  genuinely not be there yet — read again after the process was killed — a
+  destination asks `destinationKeepsAPlace()` and draws nothing for those
+  milliseconds rather than its top.
+- **It knows whether it is in front.** Its content sees the lifecycle of
+  where it is: resumed in front at rest; started while it is drawn and not
+  in front — under a back preview, either end of a move, behind a card that
+  is up (`LifecycleCapped`); created while it is not drawn. A NavHost moves
+  its own entries so; `TabStack` gives each tab a lifecycle that says the
+  same, and the tab's NavHost hands it on.
+
+**Video, an animation, anything that costs while it runs** is owned at the
+entry (a `ViewModel`, or a holder like it) and outlives the composition
+moving; the composition only attaches its surface; and it plays while the
+lifecycle is resumed (`LifecycleResumeEffect`, `repeatOnLifecycle`). A
+destination under a back preview then shows the frame it was on, paused, at
+once, and goes on when the back lands in it.
+

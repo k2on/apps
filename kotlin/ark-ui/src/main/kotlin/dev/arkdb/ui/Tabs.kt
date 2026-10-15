@@ -28,13 +28,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ProvidableCompositionLocal
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -43,6 +47,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.flow.drop
 
@@ -86,8 +91,20 @@ public fun ScrollsToTop(state: LazyGridState) {
  * [Reselect] in [LocalReselect]. `first` is the tab back goes to from any other tab's root
  * ([PageBack]'s `toFirst`); while that back is under way, it is drawn under the tab shown.
  *
- * The tab shown hears the back gesture through [Relayed]; the first tab, drawn under it, hears
- * nothing — its NavHost has a dispatcher of its own that nothing dispatches to.
+ * **A tab is one composition wherever it is drawn.** In front, under the tab leaving, and in front
+ * again when that back lands, a tab's content is the same movable content, called from the same
+ * place with the same wrappers: only the values handed to it differ — which back dispatcher it
+ * hears and which lifecycle it sees. So the first tab under a back preview is the composition that
+ * becomes the tab shown when it lands, not a second one, and what it shows under the preview —
+ * every list where it was left — is what it shows after. The tab shown hears the back gesture
+ * through [Relayed]'s dispatcher; the first tab, drawn under it, hears nothing — its NavHost has a
+ * dispatcher of its own that nothing dispatches to.
+ *
+ * **And each tab has a lifecycle of its own**, under the one this is drawn in: resumed while it is
+ * the tab shown and nothing is moving, started while back from a root is under way (the tab leaving
+ * and the first tab under it alike: both drawn, neither taking a touch), and created while it is
+ * not drawn. A tab's NavHost hands it on to its entries, so a destination's content —
+ * `collectAsStateWithLifecycle`, `LifecycleResumeEffect` — knows whether it is in front.
  */
 @Composable
 public fun <T : Any> TabStack(
@@ -103,12 +120,31 @@ public fun <T : Any> TabStack(
     val inset = with(density) { PageMotion.PREVIEW_INSET.toPx() }
     val corner = with(density) { PageMotion.PREVIEW_CORNER.toPx() }
     val scrim = MaterialTheme.colorScheme.scrim
-    val owner = LocalLifecycleOwner.current
-    val deaf = remember(owner) { Deaf(owner.lifecycle) }
+    val parent = LocalLifecycleOwner.current
+    val deaf = remember(parent) { Deaf(parent.lifecycle) }
+    val heard = LocalOnBackPressedDispatcherOwner.current
+    val latest by rememberUpdatedState(content)
+    // One movable content and one lifecycle per tab, for as long as this is composed.
+    val bodies = remember { HashMap<T, @Composable () -> Unit>() }
+    val lifecycles = remember(parent) { HashMap<T, CappedLifecycle>() }
+    val backing = motion.tabBacking
+    fun capOf(t: T): Lifecycle.State =
+        when {
+            t !in tabs -> Lifecycle.State.CREATED
+            backing -> Lifecycle.State.STARTED
+            else -> Lifecycle.State.RESUMED
+        }
+    SideEffect { for ((t, l) in lifecycles) l.cap = capOf(t) }
+    DisposableEffect(lifecycles) { onDispose { for (l in lifecycles.values) l.stop() } }
     Box(Modifier.fillMaxSize()) {
         for (t in tabs) {
             key(t) {
                 val front = t == shown
+                val life = lifecycles.getOrPut(t) { CappedLifecycle(parent.lifecycle, capOf(t)) }
+                DisposableEffect(life) {
+                    life.start()
+                    onDispose { life.stop() }
+                }
                 val layer =
                     if (!front) {
                         // The first tab, under the one leaving: dimmed as a page's underneath is,
@@ -141,16 +177,19 @@ public fun <T : Any> TabStack(
                             shadowElevation = 24f * (q / 3f) * density.density
                             alpha = 1f - c
                         }
+                // What the tab hears back from: one call, whichever it is.
+                val ears: OnBackPressedDispatcherOwner? = if (front) motion.relay ?: heard else deaf
+                val locals =
+                    listOfNotNull(
+                        LocalReselect provides reselect(t),
+                        LocalLifecycleOwner provides life,
+                        ears?.let { LocalOnBackPressedDispatcherOwner provides it },
+                    )
                 Box(layer) {
-                    CompositionLocalProvider(LocalReselect provides reselect(t)) {
-                        holder.SaveableStateProvider(t) {
-                            if (front) Relayed(motion) { content(t) }
-                            else
-                                CompositionLocalProvider(
-                                    LocalOnBackPressedDispatcherOwner provides deaf) {
-                                        content(t)
-                                    }
-                        }
+                    CompositionLocalProvider(*locals.toTypedArray()) {
+                        bodies.getOrPut(t) {
+                            movableContentOf { holder.SaveableStateProvider(t) { latest(t) } }
+                        }()
                     }
                 }
             }

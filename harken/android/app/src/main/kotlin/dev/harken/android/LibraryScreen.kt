@@ -23,10 +23,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -50,6 +47,9 @@ import dev.arkdb.ui.ScrollsToTop
 import dev.arkdb.ui.Space
 import dev.arkdb.ui.TabTitle
 import dev.arkdb.ui.quiet
+import dev.arkdb.ui.rememberDestinationGridState
+import dev.arkdb.ui.rememberDestinationListState
+import dev.arkdb.ui.rememberDestinationScrollState
 import dev.arkdb.ui.rememberHero
 
 enum class LibraryTab(val title: String) {
@@ -78,7 +78,7 @@ fun LibraryScreen(tab: LibraryTab, onTab: (LibraryTab) -> Unit, data: LibraryDat
     Column(Modifier.fillMaxSize()) {
         TabTitle("Library") { IconButton(onClick = act::newPlaylist) { Glyph(Glyphs.Plus, "New playlist") } }
         Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = Space.page),
+            Modifier.fillMaxWidth().horizontalScroll(rememberDestinationScrollState("chips")).padding(horizontal = Space.page),
             horizontalArrangement = Arrangement.spacedBy(Space.s),
         ) {
             for (t in LibraryTab.entries) {
@@ -109,7 +109,7 @@ fun LibraryScreen(tab: LibraryTab, onTab: (LibraryTab) -> Unit, data: LibraryDat
 
 @Composable
 private fun Playlists(playlists: List<Playlist>, act: Do) {
-    val list = rememberLazyListState()
+    val list = rememberDestinationListState("playlists")
     ScrollsToTop(list)
     LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(vertical = Space.s)) {
         item {
@@ -141,7 +141,7 @@ private fun Albums(albums: List<Album>, act: Do) {
         Empty(Glyphs.Album, "No albums yet", "An album appears here when the server finds a song that names one.")
         return
     }
-    val grid = rememberLazyGridState()
+    val grid = rememberDestinationGridState("albums")
     ScrollsToTop(grid)
     LazyVerticalGrid(
         state = grid,
@@ -170,7 +170,7 @@ private fun Artists(artists: List<Artist>, act: Do) {
         Empty(Glyphs.Artist, "No artists yet", "Whoever made what the server finds appears here.")
         return
     }
-    val list = rememberLazyListState()
+    val list = rememberDestinationListState("artists")
     ScrollsToTop(list)
     LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(vertical = Space.s)) {
         items(artists, key = { it.name }) { a ->
@@ -188,7 +188,7 @@ private fun Songs(tracks: List<Track>, albumOf: (Track) -> Album?, playing: Stri
         Empty(Glyphs.Note, "No songs yet", "Harken plays what your server finds. Put music in its media folder, under music/, and it appears here.")
         return
     }
-    val list = rememberLazyListState()
+    val list = rememberDestinationListState("songs")
     ScrollsToTop(list)
     LazyColumn(Modifier.fillMaxSize(), state = list) {
         items(tracks, key = { it.id.hex }) { t ->

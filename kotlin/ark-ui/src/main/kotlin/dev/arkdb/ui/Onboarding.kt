@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -253,7 +252,7 @@ public fun OnboardingPage(
             contentAlignment = Alignment.Center) {
                 Column(
                     Modifier.fillMaxWidth()
-                        .verticalScroll(rememberScrollState())
+                        .verticalScroll(rememberTransientScrollState())
                         .padding(horizontal = 32.dp, vertical = 24.dp)) {
                         Image(
                             mark,

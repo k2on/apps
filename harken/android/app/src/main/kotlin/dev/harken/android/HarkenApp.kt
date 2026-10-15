@@ -47,20 +47,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavBackStackEntry
-import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import dev.arkdb.Id
 import dev.arkdb.android.ArkSession
+import dev.arkdb.ui.LifecycleCapped
 import dev.arkdb.ui.LocalCoverLoader
 import dev.arkdb.ui.LocalPageMotion
-import dev.arkdb.ui.Moving
 import dev.arkdb.ui.Origin
 import dev.arkdb.ui.PageBack
 import dev.arkdb.ui.PageMotion
@@ -69,6 +68,8 @@ import dev.arkdb.ui.Reselect
 import dev.arkdb.ui.TabStack
 import dev.arkdb.ui.Space
 import dev.arkdb.ui.Tapped
+import dev.arkdb.ui.destinationKeepsAPlace
+import dev.arkdb.ui.destinations
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -117,7 +118,12 @@ fun Chrome(
                     TabBar(tab, onTab, sheet)
                 }
             },
-        ) { padding -> Box(Modifier.padding(padding).fillMaxSize()) { page() } }
+        ) { padding ->
+            Box(Modifier.padding(padding).fillMaxSize()) {
+                // Under the player while it is up or on its way: drawn, not in front.
+                LifecycleCapped({ if (sheet.p > 0f) Lifecycle.State.STARTED else Lifecycle.State.RESUMED }) { page() }
+            }
+        }
         PlayerCard(sheet, player, controls, position, tabs)
     }
 }
@@ -167,6 +173,8 @@ fun HarkenApp(
     sheet: PlayerSheet = rememberPlayerSheet(),
     /** Told what a song's menu can do as it opens: a test's way to choose from a sheet it cannot reach. */
     onMenu: (MenuActions) -> Unit = {},
+    /** Told each tab's stack once: a test's way to reach a destination, and to read the graphs back. */
+    onNavs: (Map<Tab, NavHostController>) -> Unit = {},
 ) {
     Recompositions.hit("HarkenApp")
     val context = LocalContext.current.applicationContext
@@ -186,6 +194,7 @@ fun HarkenApp(
     var tab by rememberSaveable { mutableStateOf(if (start != null) Tab.Library else Tab.Home) }
     val navs = Tab.entries.associateWith { rememberNavController() }
     val reselects = remember { Tab.entries.associateWith { Reselect() } }
+    LaunchedEffect(navs) { onNavs(navs) }
 
     /** The shown tab's stack. */
     fun nav(): NavHostController = navs.getValue(tab)
@@ -294,7 +303,7 @@ fun HarkenApp(
                 show(Tab.Library)
             }
 
-            override fun settings() = nav().navigate("settings")
+            override fun settings() = nav().navigate(Route.Settings.pattern)
 
             override fun back() {
                 nav().popBackStack()
@@ -369,101 +378,114 @@ fun HarkenApp(
                                 ExitTransition.None
                             },
                         ) {
-                            if (t == Tab.Home) screen(Tab.Home.route, motion) { _ ->
-                                HomeScreen(HomeData(loaded, last, tracks, playlists, albums, offline, fetching), albumOf, act)
-                            }
-                            if (t == Tab.Search) screen(Tab.Search.route, motion) { _ ->
-                                var needle by rememberSaveable { mutableStateOf("") }
-                                var recent by remember { mutableStateOf(device.searches) }
-                                // Asked again only when the needle or the library moved: coming back to
-                                // the tab finds the answer it left, on its first frame, so its list has
-                                // the rows to restore its scroll into.
-                                LaunchedEffect(needle, tracks, albums, artists) {
-                                    if (needle.isBlank() || searched.answers(needle, tracks, albums, artists)) return@LaunchedEffect
-                                    delay(150)
-                                    searched.answer(needle, tracks, albums, artists, library.search(needle.trim()))
-                                    searched.results?.let { r -> covers.warm(searchArt(r, albumOf)) }
-                                }
-                                SearchScreen(
-                                    needle,
-                                    searched.results,
-                                    recent,
-                                    onNeedle = { needle = it },
-                                    onSearched = {
-                                        device.searched(it)
-                                        recent = device.searches
-                                    },
-                                    onForget = {
-                                        device.searches = emptyList()
-                                        recent = emptyList()
-                                    },
-                                    albumOf,
-                                    playing,
-                                    offline,
-                                    act,
-                                )
-                            }
-                            if (t == Tab.Library) screen(Tab.Library.route, motion) { _ ->
-                                LibraryScreen(libraryTab, { libraryTab = it }, LibraryData(loaded, playlists, albums, artists, tracks, offline, complete), albumOf, playing, act)
-                            }
-                            screen("album/{arg}", motion) { back ->
-                                val page = Page.parse("album/" + back.arguments?.getString("arg")) as? Page.ForAlbum
-                                if (page != null) {
-                                    val rows by held(library, page, back)
-                                    AlbumPage(page.name, albumsByName[page.name], rows, details, playing, act)
-                                }
-                            }
-                            screen("artist/{arg}", motion) { back ->
-                                val page = Page.parse("artist/" + back.arguments?.getString("arg")) as? Page.ForArtist
-                                if (page != null) {
-                                    val rows by held(library, page, back)
-                                    val theirs = rows.mapNotNull { details[it.id]?.album?.takeIf(String::isNotEmpty) }.distinct()
-                                    ArtistPage(
-                                        page.name,
-                                        artists.firstOrNull { it.name == page.name },
-                                        rows,
-                                        theirs.mapNotNull { n -> albums.firstOrNull { it.name == n } },
-                                        albumOf,
-                                        playing,
-                                        act,
-                                    )
-                                }
-                            }
-                            screen("playlist/{arg}", motion) { back ->
-                                val page = Page.parse("playlist/" + back.arguments?.getString("arg")) as? Page.ForPlaylist
-                                if (page != null) {
-                                    val rows by held(library, page, back)
-                                    PlaylistPage(page.id, playlists.firstOrNull { it.id == page.id }, rows, albumOf, playing, act)
-                                }
-                            }
-                            screen("settings", motion) { _ ->
-                                var taps by remember { mutableIntStateOf(0) }
-                                var unlocked by remember { mutableStateOf(device.diagnostics) }
-                                SettingsScreen(
-                                    SettingsData(library.name, library.user, library.email, library.server, status.linked, version(context), unlocked),
-                                    onBack = act::back,
-                                    onSignOut = library::signOut,
-                                    onVersion = {
-                                        taps++
-                                        when {
-                                            taps >= 7 -> {
-                                                taps = 0
-                                                unlocked = true
-                                                device.diagnostics = true
-                                                nav().navigate("diagnostics")
-                                            }
-                                            taps >= 4 && !unlocked -> scope.launch { snackbar.showSnackbar("${7 - taps} more taps for diagnostics") }
+                            // Every route this tab's stack can show, each a destination keeping
+                            // its own places (`ark-ui`'s `destinations`); what each draws is below.
+                            destinations(Route.entries.filter { it.on(t) }, motion, Route::pattern) { r, back ->
+                                when (r) {
+                                    Route.Home ->
+                                        HomeScreen(HomeData(loaded, last, tracks, playlists, albums, offline, fetching), albumOf, act)
+                                    Route.Search -> {
+                                        var needle by rememberSaveable { mutableStateOf("") }
+                                        var recent by remember { mutableStateOf(device.searches) }
+                                        // Asked again only when the needle or the library moved: coming back to
+                                        // the tab finds the answer it left, on its first frame, so its list has
+                                        // the rows to restore its scroll into. With no answer at all — the
+                                        // process was killed — it asks at once rather than after the typing beat.
+                                        LaunchedEffect(needle, tracks, albums, artists) {
+                                            if (needle.isBlank() || searched.answers(needle, tracks, albums, artists)) return@LaunchedEffect
+                                            if (searched.results != null) delay(150)
+                                            searched.answer(needle, tracks, albums, artists, library.search(needle.trim()))
+                                            searched.results?.let { r -> covers.warm(searchArt(r, albumOf)) }
                                         }
-                                    },
-                                    onDiagnostics = { nav().navigate("diagnostics") },
-                                )
-                            }
-                            screen("diagnostics", motion) { _ ->
-                                var d by remember { mutableStateOf<Diagnostics?>(null) }
-                                // Read again when the session reports a change, not on a clock.
-                                val moved by library.moved.collectAsStateWithLifecycle()
-                                LaunchedEffect(moved) { d = library.diagnostics() }
-                                DiagnosticsScreen(d, onBack = act::back, onVerify = library::verify)
+                                        // A place to go back to and no answer to show it in: nothing, until there is.
+                                        if (needle.isNotBlank() && searched.results == null && destinationKeepsAPlace()) return@destinations
+                                        SearchScreen(
+                                            needle,
+                                            searched.results,
+                                            recent,
+                                            onNeedle = { needle = it },
+                                            onSearched = {
+                                                device.searched(it)
+                                                recent = device.searches
+                                            },
+                                            onForget = {
+                                                device.searches = emptyList()
+                                                recent = emptyList()
+                                            },
+                                            albumOf,
+                                            playing,
+                                            offline,
+                                            act,
+                                        )
+                                    }
+                                    Route.Library ->
+                                        LibraryScreen(libraryTab, { libraryTab = it }, LibraryData(loaded, playlists, albums, artists, tracks, offline, complete), albumOf, playing, act)
+                                    Route.Album -> {
+                                        val page = Page.parse("album/" + back.arguments?.getString("arg")) as? Page.ForAlbum
+                                        if (page != null) {
+                                            val rows by held(library, page, back)
+                                            Ready(rows) { AlbumPage(page.name, albumsByName[page.name], it.orEmpty(), details, playing, act) }
+                                        }
+                                    }
+                                    Route.Artist -> {
+                                        val page = Page.parse("artist/" + back.arguments?.getString("arg")) as? Page.ForArtist
+                                        if (page != null) {
+                                            val rows by held(library, page, back)
+                                            Ready(rows) { read ->
+                                                val tracks = read.orEmpty()
+                                                val theirs = tracks.mapNotNull { details[it.id]?.album?.takeIf(String::isNotEmpty) }.distinct()
+                                                ArtistPage(
+                                                    page.name,
+                                                    artists.firstOrNull { it.name == page.name },
+                                                    tracks,
+                                                    theirs.mapNotNull { n -> albums.firstOrNull { it.name == n } },
+                                                    albumOf,
+                                                    playing,
+                                                    act,
+                                                )
+                                            }
+                                        }
+                                    }
+                                    Route.Playlist -> {
+                                        val page = Page.parse("playlist/" + back.arguments?.getString("arg")) as? Page.ForPlaylist
+                                        if (page != null) {
+                                            val rows by held(library, page, back)
+                                            Ready(rows) { r -> PlaylistPage(page.id, playlists.firstOrNull { it.id == page.id }, r.orEmpty(), albumOf, playing, act) }
+                                        }
+                                    }
+                                    Route.Settings -> {
+                                        var taps by remember { mutableIntStateOf(0) }
+                                        var unlocked by remember { mutableStateOf(device.diagnostics) }
+                                        SettingsScreen(
+                                            SettingsData(library.name, library.user, library.email, library.server, status.linked, version(context), unlocked),
+                                            onBack = act::back,
+                                            onSignOut = library::signOut,
+                                            onVersion = {
+                                                taps++
+                                                when {
+                                                    taps >= 7 -> {
+                                                        taps = 0
+                                                        unlocked = true
+                                                        device.diagnostics = true
+                                                        nav().navigate(Route.Diagnostics.pattern)
+                                                    }
+                                                    taps >= 4 && !unlocked -> scope.launch { snackbar.showSnackbar("${7 - taps} more taps for diagnostics") }
+                                                }
+                                            },
+                                            onDiagnostics = { nav().navigate(Route.Diagnostics.pattern) },
+                                        )
+                                    }
+                                    Route.Diagnostics -> {
+                                        // Held by the entry, as a page's rows are, and read again when the
+                                        // session reports a change, not on a clock: come back to, it has its
+                                        // numbers on its first frame.
+                                        val reading = remember(back) { kept(back, "diagnostics") { Reading(library) } }
+                                        val d by reading.diagnostics.collectAsStateWithLifecycle()
+                                        val moved by library.moved.collectAsStateWithLifecycle()
+                                        LaunchedEffect(moved) { reading.read() }
+                                        Ready(d) { DiagnosticsScreen(it, onBack = act::back, onVerify = library::verify) }
+                                    }
+                                }
                             }
                         }
                     }
@@ -548,15 +570,51 @@ fun HarkenApp(
     }
 }
 
-// A destination, drawn in the navigation's motion (`Moving`).
-private fun NavGraphBuilder.screen(route: String, motion: PageMotion, content: @Composable (NavBackStackEntry) -> Unit) =
-    composable(route) { back -> Moving(motion, back) { content(back) } }
+/**
+ * Every destination: the tabs' roots and every page. Each tab's NavHost is built from this list
+ * (`ark-ui`'s `destinations`), so nothing is drawn on a stack without being one — keeping its
+ * places, seeing its own lifecycle — and the restoration tests walk the same list, so a new route
+ * is covered the day it is added.
+ */
+enum class Route(val pattern: String, val tab: Tab?) {
+    Home("home", Tab.Home),
+    Search("search", Tab.Search),
+    Library("library", Tab.Library),
+    Album("album/{arg}", null),
+    Artist("artist/{arg}", null),
+    Playlist("playlist/{arg}", null),
+    Settings("settings", null),
+    Diagnostics("diagnostics", null);
+
+    /** Whether `t`'s stack can show it: that tab's own root, or any page. */
+    fun on(t: Tab): Boolean = tab == null || tab == t
+}
+
+/**
+ * `content`, once what it draws is there — or at once, with nothing, when the destination has no
+ * place to go back to. A destination come back to with its rows not yet read (after the process was
+ * killed) draws nothing for those milliseconds rather than a list too short to hold its place, which
+ * would clamp it to the top.
+ */
+@Composable
+private fun <T : Any> Ready(value: T?, content: @Composable (T?) -> Unit) {
+    if (value == null && destinationKeepsAPlace()) return
+    content(value)
+}
+
+/** A holder that lives as long as `entry` is on its stack: made once, by `make`, under `key`. */
+@Suppress("UNCHECKED_CAST")
+private fun <V : ViewModel> kept(entry: NavBackStackEntry, key: String, make: () -> V): V =
+    ViewModelProvider(entry, object : ViewModelProvider.Factory {
+        override fun <T : ViewModel> create(modelClass: Class<T>): T = make() as T
+    })[key, ViewModel::class.java] as V
 
 /**
  * A page's list, held for as long as its entry is on the back stack — not only while it is drawn —
- * so that coming back to it, from a page it opened, finds its rows on the first frame: its list
- * restores its scroll into rows that are there, rather than into an empty list that clamps it to
- * the top. Let go when the entry is popped.
+ * so that coming back to it, from a page it opened or from another tab, finds its rows on the first
+ * frame: its list restores its place into rows that are there, rather than into an empty list that
+ * clamps it to the top. Null until the page's view has first been read. Let go when the entry is
+ * popped.
  */
 private class Holding(val library: Library, val page: Page) : ViewModel() {
     val rows = library.hold(page)
@@ -565,14 +623,18 @@ private class Holding(val library: Library, val page: Page) : ViewModel() {
 }
 
 @Composable
-private fun held(library: Library, page: Page, entry: NavBackStackEntry): androidx.compose.runtime.State<List<Track>> {
-    val holding =
-        remember(entry, page) {
-            ViewModelProvider(entry, object : ViewModelProvider.Factory {
-                @Suppress("UNCHECKED_CAST") override fun <T : ViewModel> create(modelClass: Class<T>): T = Holding(library, page) as T
-            })["held:" + page.route, Holding::class.java]
-        }
+private fun held(library: Library, page: Page, entry: NavBackStackEntry): androidx.compose.runtime.State<List<Track>?> {
+    val holding = remember(entry, page) { kept(entry, "held:" + page.route) { Holding(library, page) } }
     return holding.rows.collectAsStateWithLifecycle()
+}
+
+/** The diagnostics' numbers, held by their entry as a page's rows are. */
+private class Reading(val library: Library) : ViewModel() {
+    val diagnostics = kotlinx.coroutines.flow.MutableStateFlow<Diagnostics?>(null)
+
+    suspend fun read() {
+        diagnostics.value = library.diagnostics()
+    }
 }
 
 /** What a search last found, and what it was asked of: one per session, so it outlives the tab. */

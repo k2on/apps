@@ -176,7 +176,8 @@ class Library(private val session: ArkSession) {
 
     // A page's view, and how many screens hold it. The map is shared with the
     // main thread; each entry's view is touched on the peer's thread only.
-    private class Opened(val held: Held<Track>, val flow: MutableStateFlow<List<Track>>) {
+    // Null until the page's view has been read: a page told "none yet" from "none".
+    private class Opened(val held: Held<Track>, val flow: MutableStateFlow<List<Track>?>) {
         var refs = 0
     }
 
@@ -366,9 +367,9 @@ class Library(private val session: ArkSession) {
         }
 
     /** A page's tracks, kept up to date while it is held; [release] it when the screen goes. */
-    fun hold(page: Page): StateFlow<List<Track>> {
+    fun hold(page: Page): StateFlow<List<Track>?> {
         if (page is Page.Songs) return tracks
-        val o = pages.computeIfAbsent(page) { Opened(pageView(page)!!, MutableStateFlow(emptyList())) }
+        val o = pages.computeIfAbsent(page) { Opened(pageView(page)!!, MutableStateFlow(null)) }
         synchronized(o) { o.refs++ }
         session.post { p ->
             if (o.held.view == null) {

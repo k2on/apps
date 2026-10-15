@@ -1049,3 +1049,197 @@ commit run the same hour: 32,803–32,805 B per entering row against
 
 Not verified on a phone: the system's own back-to-home at Home's root, and
 how 150 ms of fade feels.
+
+### Where a destination's state lives
+
+The owner, on the release APK: "when i swipe back from library to home and
+ive scrolled down in home, it still shows it at the top, then switches to
+the scroll position. this has happened before, so make sure that the
+architecture fixes this so its not duct taped or one off fixed for a single
+screen, but for everything".
+
+It had happened twice before, each time fixed for the one screen:
+
+- **Search came back at its top after an album** (e284554): its results
+  were a `remember` in the screen, empty on the frame it came back, so its
+  restored scroll had no rows to land in. They moved to a holder the
+  session keeps (`Searched`).
+- **An album, an artist or a playlist came back at its top after a page it
+  opened**: the same, for a page's rows. They moved to a `ViewModel` on the
+  page's back stack entry (`Holding`).
+- **Home, under the tab back preview from the Library**, which is this.
+
+**The cause, measured.** `TabStack` drew the tab shown through
+`Relayed(motion) { content(t) }` and the first tab, under a tab going back
+to it, through `CompositionLocalProvider(… provides deaf) { content(t) }`.
+Two call paths, so every `rememberSaveable` inside — each screen's
+`rememberLazyListState()`, and the NavHost's own state holder — had a
+different key in each: Home's place, saved while it was the tab shown, was
+not found where the preview drew it. And when the back landed Home changed
+branch again, so the composition the person had been looking at was thrown
+away and a third made, which did find the place. A probe at the parent
+commit, on a phone-sized screen, Home scrolled to (3, 20):
+
+| | Home's list | its state |
+|---|---|---|
+| left | (3, 20) | #545448164 |
+| under the preview, 8 frames | (0, 0) | #371694173, a second |
+| after the release, 13 frames (the fade) | (0, 0) | the second |
+| then | (3, 20) | #2110370842, a third |
+
+The same probe with only the two wrappers made one call: (3, 20) on every
+frame, one state from the preview to the end. That is the root cause; the
+fix is the rule below, so that the next screen cannot have it.
+
+**The rule** (`kotlin/ark-ui`'s `Destination.kt`, `Tabs.kt`, `Motion.kt`):
+
+1. **One identity per destination, wherever it is drawn.** A tab's content
+   is one movable content, called from one place with one set of
+   wrappers; only the values handed to it differ (which back dispatcher it
+   hears, which lifecycle it sees, which `Reselect` it answers). `Moving`
+   is one call for a page, whatever it is. A tab under the back preview is
+   the composition that becomes the tab shown when it lands. Audited: the
+   page under a page going back is the NavHost's own composition of that
+   entry, one call (`Moving`); `PageFrame` holds no state of a
+   destination's; the expanding card draws no page behind it — the page is
+   its sibling and is never composed again by it.
+2. **One owner of every scroll state: the destination's entry.** Every
+   NavHost destination is made by `destinations(routes, motion, route)`,
+   which is `Moving` and `Destination` around each: a `ViewModel` on the
+   back stack entry holds a `DestinationState`, the places of its
+   containers by name, saved with the entry's own saved state. Every
+   scrolling container takes its state from it —
+   `rememberDestinationListState(name)`, `…GridState`, `…ScrollState` — so
+   a destination drawn anywhere, as often as it is, starts where it was
+   left on its first frame, and so after the process is killed. A tab's
+   root is its NavHost's start entry, so a tab is the same case. Horizontal
+   shelves keep their places too: `Shelf(section, …)` is
+   `"shelf:" + section` in its destination, so a shelf scrolled out of its
+   list and back, or left and come back to, is where it was. The Library's
+   four lists are four names, so each keeps its own. Sheets and the
+   onboarding say they are not destinations:
+   `rememberTransientListState`, `…ScrollState`, at their top each time.
+3. **A destination's first frame has its rows.** Its lists come from
+   holders that outlive the composition: Home's and the Library's from the
+   session, a page's from its entry (`Holding`), Search's from the session
+   (`Searched`), the diagnostics' from their entry (`Reading`, new: they
+   were a `remember` filled by an effect, and came back from another tab
+   clamped to the top of "Opening…"). Where the rows can genuinely not be
+   there yet — read again after the process was killed — the destination
+   asks `destinationKeepsAPlace()` and draws nothing for those milliseconds
+   rather than a list too short to hold the place: Home before its lists
+   are read (under the splash), a page before its view is read (`Ready`),
+   Search before its restored needle is answered (which it now asks at
+   once, not after the typing beat).
+4. **A destination knows whether it is in front.** Its content sees the
+   lifecycle of where it is (`LocalLifecycleOwner`): RESUMED in front at
+   rest; STARTED while it is drawn and not in front; CREATED, with its
+   composition gone and its places kept, while it is not drawn at all. A
+   NavHost already moves its entries so, through our relayed back: on the
+   gesture's start it calls `prepareForTransition` on both entries, which
+   holds each at STARTED until the move completes, then the one shown is
+   RESUMED and the other CREATED; that is used as it is. `TabStack` gives
+   each tab a lifecycle of its own under the activity's — RESUMED as the
+   tab shown at rest, STARTED for both tabs while back from a root is
+   under way, CREATED while not drawn — and the tab's NavHost hands it on
+   to its entries, so a page on a tab's stack is held the same. Everything
+   under the player while it is up or on its way is STARTED
+   (`LifecycleCapped` around the page in `Chrome`, reading the card's `p`
+   as a snapshot, never in composition).
+
+**Video, an animation, anything that costs while it runs**: owned at the
+entry (a `ViewModel`, or an entry-scoped holder like `Holding`), so it
+survives the composition moving; the composition only attaches a surface;
+and it plays while the lifecycle is RESUMED (`LifecycleResumeEffect`,
+`repeatOnLifecycle`). The preview of a back then shows the video's current
+frame at once, paused, and it goes on when the back lands in it.
+
+**What holds it** (each falsified once):
+
+- `SourceTests`, a scan of every Kotlin file under harken's app and
+  ark-ui: no `rememberLazyListState(`, `rememberLazyGridState(`,
+  `rememberLazyStaggeredGridState(` or `rememberScrollState(`; no state
+  made by hand outside `Destination.kt`; no lazy list or grid without a
+  `state =`, whose default is the same bug with nothing to scan for. Its
+  second test holds the scan itself to the shapes it is for. Falsified:
+  Home's list made by `rememberLazyListState()` — "HomeScreen.kt calls
+  rememberLazyListState(".
+- `RestorationTests`, parametrized over `Route` — the list every tab's
+  NavHost is built from — and the Library's root once per list: 11 cases
+  (Home, Search, Library × Playlists, Albums, Artists, Songs, Album,
+  Artist, Playlist, Settings, Diagnostics). A route added to `Route` does
+  not compile without a case (`reach` is a `when` over it). Each runs the
+  real `HarkenApp` over the demo's songs and enough more that every list
+  and shelf scrolls (48 songs in 24 albums by six artists, 16 playlists,
+  one with 30 songs), at a phone 1,400 px tall so Settings scrolls too.
+  First it checks every scrolling node on screen scrolls by a state its
+  destination keeps — reflection on the node, against the destination's
+  own — then scrolls every container off its top, and takes it through:
+  the tab switched away and back; a page opened from it and gone back from
+  by the page's arrow, by the edge (its preview at 0.3 and 0.9 drawn over
+  it), and by a pull from the page's top; the tab back preview from the
+  Library (0.3, 0.9, cancelled; then 0.3, 0.9, let go) with it underneath,
+  or, for Search's and the Library's roots, as the tab leaving, and then
+  its tab chosen again; its tab reselected from a page above it (roots);
+  its shelves scrolled out of its list and back (Home, Artist, Search);
+  and the process killed (everything saved through a
+  `SaveableStateRegistry`, the composition and every `ViewModel` thrown
+  away, composed again from what was saved). The assertion, every frame
+  the destination is drawn on from the first, previews included: every
+  container it had, at the index and offset it had. 142 transitions over
+  the 11 cases (Home 15, Artist 14, Search, Album, Playlist, Settings and
+  Diagnostics 13, each Library list 12), every one green; and where the
+  back lands, the composition is the one that was under the preview
+  (`entered` unchanged, the same state objects). The Library's chips row
+  fits a 1,080 px screen, so it is held at 0 and said to be.
+- `LifecycleTests`: under the tab back preview Home is STARTED and the
+  Library leaving is STARTED, never RESUMED, on every frame from 0.3 to
+  0.9; cancelled, Home is not composed and CREATED, the Library RESUMED;
+  let go, Home RESUMED — the same composition and the same list it was
+  under the preview — and the Library CREATED. A page under a page's back
+  preview is STARTED, as the NavHost says; cancelled, CREATED; landed,
+  RESUMED. With the player down Home is RESUMED; half up, STARTED. And
+  each tab's graph, read back from its NavController, is exactly the
+  routes `Route` lists for it, and every route is a restoration case.
+
+Falsified:
+
+- The two wrappers put back in `TabStack`: every case on Home's stack
+  fails — "Home: composed again from scratch when the tab back landed",
+  and the same for Album, Artist, Playlist, Settings and Diagnostics — and
+  `LifecycleTests` fails with Home's composition entered 4 times where it
+  was 3. (The places themselves survive that alone now, since they are the
+  entry's; with the helpers also made the composition's again, the first
+  check fails on Home: "a scrolling node whose state the destination does
+  not keep".)
+- The diagnostics' numbers back in a `remember` filled by an effect: every
+  transition of the Diagnostics case fails on its first frame, at 96 where
+  it was left at 137 — the top of "Opening…" is as far as it can go.
+- `TabStack` leaving both tabs RESUMED while back is under way: "at 0.3
+  Home under the preview is RESUMED", "the Library leaving is RESUMED".
+- A screen's `rememberLazyListState()`: `SourceTests`, as above.
+
+**Held to:**
+
+- The screenshots: all 92 byte for byte what the parent commit draws,
+  recorded side by side and compared: identical.
+- `ScrollTests`: at rest for a second `{}`; over four position ticks
+  `{Progress=4}`. The lifecycle under the player is read as a snapshot in
+  an effect, so the card moving composes nothing.
+- `MotionTests`, all 17, as before.
+- The fling bench (HARKEN_FLING_BENCH=2000, passes 5 and 6), the parent
+  commit and this one run side by side, twice, once in each order:
+
+  | | compose+measure, per entering row | draw, per frame |
+  |---|---|---|
+  | before | 395–500 µs, 32,664–32,788 B | 7.9–9.3 ms, 27,977–27,978 B |
+  | after | 419–505 µs, 32,782–32,802 B | 7.9–8.3 ms, 27,977–27,978 B |
+
+  The bytes per entering row are what they were to within the run-to-run
+  spread (about 150 B); the draw is the same to the byte. A song's row
+  makes no scroll state; a shelf makes one, once.
+
+Not verified on a phone: how the preview looks now (it is the same frames,
+at the place Home was left), and a real process death — the test throws
+the composition and every `ViewModel` away and composes again from the
+saved values, but does not parcel them.

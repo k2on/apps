@@ -27,6 +27,7 @@ import dev.arkdb.ui.PageBar
 import dev.arkdb.ui.Recompositions
 import dev.arkdb.ui.Shelf
 import dev.arkdb.ui.Space
+import dev.arkdb.ui.rememberDestinationListState
 
 private fun facts(vararg parts: String?): String = parts.filterNotNull().filter { it.isNotEmpty() }.joinToString(" · ")
 
@@ -41,7 +42,7 @@ fun AlbumPage(name: String, album: Album?, tracks: List<Track>, details: Map<Id,
     // every row of a one-work album would say its name twice.
     val parts = tracks.map { details[it.id]?.part ?: "" }
     val sectioned = parts.distinct().size > 1
-    LazyColumn(Modifier.fillMaxSize()) {
+    LazyColumn(Modifier.fillMaxSize(), state = rememberDestinationListState("album")) {
         item { PageBar("", onBack = act::back) }
         item {
             PageHeader(
@@ -83,7 +84,7 @@ fun AlbumPage(name: String, album: Album?, tracks: List<Track>, details: Map<Id,
 fun ArtistPage(name: String, artist: Artist?, tracks: List<Track>, albums: List<Album>, albumOf: (Track) -> Album?, playing: String?, act: Do) {
     Recompositions.hit("ArtistPage")
     val page = Page.ForArtist(name)
-    LazyColumn(Modifier.fillMaxSize()) {
+    LazyColumn(Modifier.fillMaxSize(), state = rememberDestinationListState("artist")) {
         item { PageBar("", onBack = act::back) }
         item {
             PageHeader(
@@ -101,7 +102,7 @@ fun ArtistPage(name: String, artist: Artist?, tracks: List<Track>, albums: List<
         if (albums.isNotEmpty()) {
             item { Heading("Albums") }
             item {
-                Shelf(albums, key = { it.name }) { a ->
+                Shelf("albums", albums, key = { it.name }) { a ->
                     CoverCard(a.name, a.art, a.name, Media.count(a.tracks.toInt(), "song"), 136.dp, onClick = { act.open(Page.ForAlbum(a.name)) }, opens = true)
                 }
             }
@@ -126,7 +127,7 @@ fun PlaylistPage(id: Id, playlist: Playlist?, tracks: List<Track>, albumOf: (Tra
     Recompositions.hit("PlaylistPage")
     val page = Page.ForPlaylist(id)
     val name = playlist?.name ?: "Playlist"
-    LazyColumn(Modifier.fillMaxSize()) {
+    LazyColumn(Modifier.fillMaxSize(), state = rememberDestinationListState("playlist")) {
         item { PageBar("", onBack = act::back) }
         item {
             PageHeader(

@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -41,6 +40,7 @@ import dev.arkdb.ui.ScrollsToTop
 import dev.arkdb.ui.Shelf
 import dev.arkdb.ui.Space
 import dev.arkdb.ui.TabTitle
+import dev.arkdb.ui.rememberDestinationListState
 
 /** What a needle found, in three groups. */
 data class Results(val needle: String, val songs: List<Track>, val albums: List<Album>, val artists: List<Artist>) {
@@ -75,7 +75,7 @@ fun SearchScreen(
     act: Do,
 ) {
     Recompositions.hit("SearchScreen")
-    val list = rememberLazyListState()
+    val list = rememberDestinationListState("search")
     ScrollsToTop(list)
     LazyColumn(Modifier.fillMaxSize(), state = list) {
         item { TabTitle("Search") }
@@ -143,7 +143,7 @@ fun SearchScreen(
                 if (found.albums.isNotEmpty()) {
                     item { Heading("Albums") }
                     item {
-                        Shelf(found.albums, key = { it.name }) { a ->
+                        Shelf("albums", found.albums, key = { it.name }) { a ->
                             CoverCard(a.name, a.art, a.name, a.creator, SEARCH_ALBUM, opens = true, onClick = {
                                 onSearched(needle)
                                 act.open(Page.ForAlbum(a.name))
@@ -154,7 +154,7 @@ fun SearchScreen(
                 if (found.artists.isNotEmpty()) {
                     item { Heading("Artists") }
                     item {
-                        Shelf(found.artists, key = { it.name }) { a ->
+                        Shelf("artists", found.artists, key = { it.name }) { a ->
                             CoverCard(a.name, a.art, a.name, Media.count(a.tracks.toInt(), "song"), SEARCH_ARTIST, round = true, opens = true, onClick = {
                                 onSearched(needle)
                                 act.open(Page.ForArtist(a.name))

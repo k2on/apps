@@ -162,10 +162,20 @@ public fun Empty(
     }
 }
 
-/** A row of cards that scrolls sideways, inset like the rest of the page. */
+/**
+ * A row of cards that scrolls sideways, inset like the rest of the page. Where it was scrolled to
+ * is the destination's, as `section` ([rememberDestinationListState]): scrolled out of its list and
+ * back, or left and come back to, it is where it was.
+ */
 @Composable
-public fun <T> Shelf(items: List<T>, key: (T) -> Any, card: @Composable (T) -> Unit) {
+public fun <T> Shelf(
+    section: String,
+    items: List<T>,
+    key: (T) -> Any,
+    card: @Composable (T) -> Unit
+) {
     LazyRow(
+        state = rememberDestinationListState("shelf:$section"),
         contentPadding = PaddingValues(horizontal = Space.page),
         horizontalArrangement = Arrangement.spacedBy(Space.l),
     ) {

@@ -35,6 +35,7 @@ import dev.arkdb.ui.Cover
 import dev.arkdb.ui.SheetRow
 import dev.arkdb.ui.Space
 import dev.arkdb.ui.quiet
+import dev.arkdb.ui.rememberTransientListState
 
 /** What a song's menu can do. */
 interface MenuActions {
@@ -72,7 +73,7 @@ fun TrackMenu(track: Track, album: Album?, from: Page?, actions: MenuActions) {
 /** Every playlist, ticked where `track` is on it; "New playlist" first. */
 @Composable
 fun AddToPlaylist(track: Track, playlists: List<Playlist>, on: Set<Id>?, onToggle: (Playlist) -> Unit, onNew: () -> Unit) {
-    LazyColumn(Modifier.fillMaxWidth().padding(bottom = Space.l)) {
+    LazyColumn(Modifier.fillMaxWidth().padding(bottom = Space.l), state = rememberTransientListState()) {
         item {
             Text(
                 "Add “${track.title}” to",

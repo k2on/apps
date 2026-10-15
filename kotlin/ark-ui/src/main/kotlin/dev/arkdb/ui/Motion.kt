@@ -630,16 +630,15 @@ public fun AnimatedVisibilityScope.Moving(
             }
             .background(MaterialTheme.colorScheme.background)
             .then(frame.inner.modifier)) {
-            val inside: @Composable () -> Unit = {
-                if (page) CompositionLocalProvider(LocalPageFrame provides frame) { content() }
-                else content()
-            }
-            // The page's own back — a pull, a sheet's — is the activity's, not the NavHost's.
-            if (real == null) inside()
-            else
-                CompositionLocalProvider(LocalOnBackPressedDispatcherOwner provides real) {
-                    inside()
-                }
+            // One call, whatever the destination is and wherever it is drawn: what differs is
+            // only what is handed to it (`Destination.kt`). The page's own back — a pull, a
+            // sheet's — is the activity's, not the NavHost's.
+            val locals =
+                listOfNotNull(
+                    LocalPageFrame provides (if (page) frame else null),
+                    real?.let { LocalOnBackPressedDispatcherOwner provides it },
+                )
+            CompositionLocalProvider(*locals.toTypedArray()) { content() }
         }
 }
 

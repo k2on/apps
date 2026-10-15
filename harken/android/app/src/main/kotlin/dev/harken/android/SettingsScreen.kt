@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -36,6 +35,7 @@ import dev.arkdb.ui.Glyph
 import dev.arkdb.ui.PageBar
 import dev.arkdb.ui.Space
 import dev.arkdb.ui.quiet
+import dev.arkdb.ui.rememberDestinationScrollState
 
 /** What Settings draws. */
 data class SettingsData(
@@ -52,7 +52,7 @@ data class SettingsData(
 fun SettingsScreen(data: SettingsData, onBack: () -> Unit, onSignOut: () -> Unit, onVersion: () -> Unit, onDiagnostics: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
         PageBar("Settings", onBack)
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = Space.page)) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberDestinationScrollState("settings")).padding(horizontal = Space.page)) {
             Group("Account") {
                 Row(Modifier.padding(Space.l), verticalAlignment = Alignment.CenterVertically) {
                     Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = CircleShape, modifier = Modifier.size(48.dp)) {
@@ -129,7 +129,7 @@ private fun Line(title: String, under: String, onClick: (() -> Unit)? = null, ch
 fun DiagnosticsScreen(d: Diagnostics?, onBack: () -> Unit, onVerify: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
         PageBar("Diagnostics", onBack)
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = Space.page)) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberDestinationScrollState("diagnostics")).padding(horizontal = Space.page)) {
             val s = d?.status
             Group("Peer") {
                 if (s == null) Line("Opening", "…") else for ((k, v) in numbers(s)) Number(k, v)

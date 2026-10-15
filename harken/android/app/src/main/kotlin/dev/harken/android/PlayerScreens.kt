@@ -56,6 +56,7 @@ import dev.arkdb.ui.Glyph
 import dev.arkdb.ui.Recompositions
 import dev.arkdb.ui.Space
 import dev.arkdb.ui.quiet
+import dev.arkdb.ui.rememberTransientListState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -271,7 +272,7 @@ private fun Toggle(icon: androidx.compose.ui.graphics.vector.ImageVector, descri
 /** The queue: what is playing, and what plays after it in the order it will. */
 @Composable
 fun QueueSheet(state: PlayerState, controls: Controls) {
-    LazyColumn(Modifier.fillMaxWidth().padding(bottom = Space.xl)) {
+    LazyColumn(Modifier.fillMaxWidth().padding(bottom = Space.xl), state = rememberTransientListState()) {
         item { Text("Now playing", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = Space.xl, vertical = Space.s)) }
         state.now?.let { now -> item { QueueRow(now, current = true, onClick = {}) } }
         item {
