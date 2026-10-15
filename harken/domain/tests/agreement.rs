@@ -173,10 +173,18 @@ fn the_module_verifies_and_is_the_committed_file() {
 /// old hashes — which run no guard, so an entry a client authors at one
 /// of them is judged as it always was (closure provenance,
 /// `docs/plan-db.md` D1).
+///
+/// `add_song` moved again in the commit "harken: add_song is an upsert by
+/// file, and the scanner finds covers": a file the library already has is
+/// that song retagged rather than nothing, and what it leaves goes with it
+/// when nothing else holds it. It was `cdc45e72…725d`. The meaning moved
+/// with the hash, on purpose: an entry at the old hash runs the old closure
+/// wherever a server kept it, and a later one for a known file is no longer
+/// a no-op.
 #[test]
 fn every_mutator_hashes_as_it_did_at_spec_v3() {
     let v3 = [
-        ("add_song", "cdc45e72840b44394c3373fb829d4fe5821809e492c6f55eee39f929a1d2725d"),
+        ("add_song", "95cb06aefe04890efaecc79d908ff4f084fe7485045d53320ddedd081386a90e"),
         ("describe_work", "f6e51bdd15826720cca2d8efcccddf52bc24d6093c4d310e0168a26e4afd21c3"),
         ("describe_recording", "f44887b825466b41135a66e942eabce540ce985587ed859a770b987de9dfdb2f"),
         ("describe_person", "0b9abbcbfb74ff17374e6d5d9babf05621591a3122299d05a2ae6b92f91a2dd6"),
@@ -269,19 +277,21 @@ fn every_procedure_agrees_with_the_interpreter() {
         c.mutate("alice", "add_song", Song::new("", "x", "").args()),
         Err("a song needs a title".into())
     );
-    // The same file again is nothing at all.
-    assert_eq!(
-        c.mutate(
-            "alice",
-            "add_song",
-            Song {
-                file: "music/p.mp3".into(),
-                ..Song::new("Other", "Y", "Z")
-            }
-            .args()
-        ),
-        Ok(0)
-    );
+    // The same file saying the same is nothing at all…
+    let low_tide = Song {
+        file: "music/p.mp3".into(),
+        ..Song::new("Low Tide", "The Quiet Hours", "")
+    };
+    assert_eq!(c.mutate("alice", "add_song", low_tide.args()), Ok(0));
+    // …and saying something else is that song, retagged: its recording and
+    // the credit on it go, since nothing else is part of them, and the song
+    // is part of another.
+    let retagged = Song {
+        file: "music/p.mp3".into(),
+        ..Song::new("Other", "Y", "Z")
+    };
+    assert!(c.mutate("alice", "add_song", retagged.args()).unwrap() > 0);
+    assert_eq!(c.mutate("alice", "add_song", retagged.args()), Ok(0));
 
     let lib = c.library(favs);
     assert_eq!(lib.len(), 12);

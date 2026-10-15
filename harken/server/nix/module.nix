@@ -347,8 +347,11 @@ in
         `''${mediaPath}/music/Bach/air.flac` is served as
         `/media/music/Bach/air.flac`, and that relative path is what the log
         carries. The server walks `music/` at startup and watches the root
-        after, so a file copied in appears without a rescan; a restart authors
-        nothing already in the library. A file removed is not a song removed.
+        after, so a file copied in appears without a rescan; a restart reads
+        only the files that changed, and a retagged file is the same song. A
+        record's cover is a `cover`, `folder`, `front` or `album` picture
+        beside its tracks, or the picture inside one, which is kept in the
+        state directory. A file removed is not a song removed.
 
         The service reads it and never writes to it; it has to be readable by
         a dynamic user. `null` serves and scans no files at all.
@@ -438,8 +441,10 @@ in
       after = [ "network.target" ];
 
       environment = {
-        # The log, the kept rooms, the sessions and the scanner's replica:
-        # the whole of the state, in the state directory.
+        # The log, the kept rooms, the sessions, and the scanner's replica,
+        # its prints and the covers it took out of files (served at
+        # /media/.art/, since the media below is bound read-only): the whole
+        # of the state, in the state directory.
         HARKEN_DATA = "%S/harken";
         HARKEN_PUBLIC_URL = cfg.publicUrl;
         HARKEN_REDIRECTS = lib.concatStringsSep "," cfg.redirects;

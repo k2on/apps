@@ -477,7 +477,9 @@ fn perf_rows_read_per_mutation() {
 /// printed: every read these mutations make is served by an index, so the
 /// rows they examine are a handful at a library of 8,000 and the same at
 /// 500. At 8,000: `add_song` examines one row (the last by `pos`; the file
-/// is new, so its lookup finds none) and fourteen gets; `add_to_playlist`
+/// is new, so its lookup finds none) and fifteen gets — fourteen until it
+/// became an upsert by file and asked for the song the file already is,
+/// which a new file has not; `add_to_playlist`
 /// onto a playlist of 7,999 examines one (its last item) and seven gets,
 /// onto an empty one none; `create_playlist` two (the last playlist, and
 /// alice's one other) and two gets. Before the indexes these were 16,000,
@@ -500,7 +502,7 @@ fn perf_rows_read_per_mutation() {
 #[test]
 fn a_mutation_examines_the_rows_it_needs_not_the_library() {
     let h = harken();
-    let want = [(14, 1), (7, 0), (7, 1), (2, 1), (2, 102)];
+    let want = [(15, 1), (7, 0), (7, 1), (2, 1), (2, 102)];
     for ((label, name, make), (gets, rows)) in read_cases(&h).iter().zip(want) {
         let (small, big) = (reads_of(&h, 500, name, &**make), reads_of(&h, 8000, name, &**make));
         assert_eq!((big.gets, big.rows), (gets, rows), "{label} at 8,000");

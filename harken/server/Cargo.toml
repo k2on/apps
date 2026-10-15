@@ -35,6 +35,11 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync",
 # `notify` is the watch, so a file added after boot does not wait for a
 # rescan that may never come.
 lofty = "0.25"
+# A picture inside a file is kept once, named by its hash, and served from
+# the data directory beside `/media` — the same `ServeDir` ark-server serves
+# the media root with.
+sha2 = { workspace = true }
+tower-http = { version = "0.5", features = ["fs"] }
 notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
 # Home Assistant, over its REST API: blocking, on a thread of its own. The
 # same ureq ark-auth talks to an identity provider with.

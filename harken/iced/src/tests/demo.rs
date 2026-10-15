@@ -54,6 +54,44 @@ fn the_window_asks_for_the_covers_the_lists_carry() {
     assert!(app.covers.want(url).is_none(), "…because it was already asked for");
 }
 
+/// A scanned library's covers are paths, as its tracks are — a picture
+/// taken out of a file at `.art/…`, one beside a record at `.cover/<v>/…`
+/// — and the window asks for each at `<server>/media/<path>`, the join it
+/// makes for a track, then draws whatever arrives under that URL. The
+/// server's half (`harken-server`'s `tests/library.rs`) fetches the same
+/// values through the same join, `harken::listening::url`.
+///
+/// Falsified by asking for the bare `art` in `want_covers`: nothing was
+/// asked at the media route.
+#[test]
+fn a_scanned_cover_is_asked_for_at_the_media_route_and_drawn() {
+    let mut app = super::demo_app();
+    app.server = "https://harken.example.com".into();
+    let (extracted, beside) = (".art/5f3c.png", ".cover/0123456789abcdef/music/Handel/Water Music/cover.jpg");
+    app.peer.albums.iter_mut().find(|a| a.name == "Water Music").unwrap().art = extracted.into();
+    app.peer.artists.iter_mut().find(|a| a.name == "George Frideric Handel").unwrap().art = beside.into();
+    let _ = app.want_covers();
+    let at = |path: &str| format!("https://harken.example.com/media/{path}");
+    let beside_url = at(".cover/0123456789abcdef/music/Handel/Water%20Music/cover.jpg");
+    for url in [at(extracted), beside_url.clone()] {
+        assert_eq!(app.art_url(if url.contains(".art") { extracted } else { beside }), url);
+        assert!(app.covers.want(url.clone()).is_none(), "{url} was already asked for");
+    }
+    assert!(app.covers.handle(&app.art_url(extracted)).is_none(), "nothing to draw until it arrives");
+    app.covers.loaded(arkui::images::Loaded {
+        url: at(extracted),
+        image: Ok(arkui::images::Rgba {
+            width: 1,
+            height: 1,
+            pixels: vec![0; 4],
+        }),
+    });
+    assert!(
+        app.covers.handle(&app.art_url(extracted)).is_some(),
+        "what arrived is what the card draws"
+    );
+}
+
 /// The demo is composers with works: the Goldbergs one work, one recording,
 /// thirty-two movements. Falsified by sending `catalogue` empty in the seed:
 /// BWV 988 is gone.

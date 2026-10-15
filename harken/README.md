@@ -104,7 +104,14 @@ and a scoped module (`docs/plan-fleet.md`).
     nix run .#harken-iced -- --server http://127.0.0.1:8787 --user bob
 
 The scanner adds whatever audio is under `music/` in `HARKEN_MEDIA`, and
-anything dropped there later. Make a playlist in one window and add to it in the other; stop the
+anything dropped there later; a file retagged is the same song with its new
+tags. A record's cover is a `cover`, `folder`, `front` or `album` picture
+beside its tracks (`.jpg`, `.jpeg`, `.png`, `.webp`), else the only picture
+there, else the picture inside a track; an artist's is an `artist.*` beside
+the record or above it, or the `folder.*` of a directory named for them
+(`server/README.md` has the rest, and what `HARKEN_DATA` holds).
+
+Make a playlist in one window and add to it in the other; stop the
 server, add on both sides, start it again, and each window's offline
 additions land after the other's, in the order the server sequenced them.
 A window with no remembered login opens signed out and offers a sign-in
@@ -175,7 +182,9 @@ the log's snapshot, then its journal as long as it was once the snapshot
 had been read, so what the server appends meanwhile is not in the copy
 and the copy is the log at one moment. Then the cursors, the sign-in
 sessions, the rooms and the modules run. The scanner's `library/`
-replica is not copied; it is a peer, and catches up from the log.
+replica is not copied; it is a peer, and catches up from the log. Nor are
+its prints or the covers it took out of files: restored, it reads every
+file once and writes them again.
 `restore` refuses a directory with anything in it and writes the log
 **unnamed**, so the server started on it names the log afresh. Every
 device is then sent the snapshot once and rebases its pending work onto

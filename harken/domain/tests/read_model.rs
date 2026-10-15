@@ -254,25 +254,116 @@ fn a_track_knows_which_playlists_it_is_on() {
     assert_eq!(c.mutate("alice", "add_to_playlist", on(evening, &air)), Ok(0));
 }
 
-/// A rescan is a no-op, decided in `apply` rather than by the scanner.
+/// A file is one song however many times it is offered, decided in `apply`
+/// rather than by the scanner: `add_song` is an upsert by `file`. The same
+/// entry again writes nothing; an empty file is no path and is a new song
+/// every time.
 #[test]
 fn the_same_file_twice_is_one_song() {
     let mut c = Lib::new();
     let favs = c.playlist("library", "Favorites");
-    let add = |c: &mut Lib, title: &'static str, file: &str| c.add(with(file, Song::new(title, "Beethoven", "Bagatelles")));
-    add(&mut c, "Für Elise", "beethoven/fur-elise.mp3");
-    add(&mut c, "Für Elise", "beethoven/fur-elise.mp3");
-    add(&mut c, "Fur Elise (again)", " beethoven/fur-elise.mp3 ");
+    let elise = |title: &'static str, file: &str| with(file, Song::new(title, "Beethoven", "Bagatelles"));
+    c.add(elise("Für Elise", "beethoven/fur-elise.mp3"));
+    assert_eq!(
+        c.mutate("alice", "add_song", elise("Für Elise", "beethoven/fur-elise.mp3").args()),
+        Ok(0),
+        "the same entry again writes no row at all"
+    );
+    c.add(elise("Fur Elise (again)", " beethoven/fur-elise.mp3 "));
     assert_eq!(c.library(favs).len(), 1, "one file is one song, however many times it is offered");
-    add(&mut c, "Für Elise", "beethoven/fur-elise-live.mp3");
+    c.add(elise("Für Elise", "beethoven/fur-elise-live.mp3"));
     assert_eq!(c.library(favs).len(), 2);
-    add(&mut c, "Untitled", "");
-    add(&mut c, "Untitled", "");
-    assert_eq!(c.library(favs).len(), 4, "no file means no collision");
+    for n in 3..=5 {
+        assert!(c.mutate("alice", "add_song", Song::new("Untitled", "", "").args()).unwrap() > 0);
+        assert_eq!(c.library(favs).len(), n, "no file means no collision, even saying the same");
+    }
     assert_eq!(
         c.mutate("alice", "add_song", Song::new("  ", "X", "").args()),
         Err("a song needs a title".into())
     );
+}
+
+/// A retagged file is the song it was: the same id, the same place in the
+/// library, the same entry on a playlist — showing what the tags say now.
+/// Falsified by minting the id afresh for a known file: the playlist went
+/// on naming the old row, and the library held two.
+#[test]
+fn a_retagged_file_is_the_same_song_saying_the_new_tags() {
+    let mut c = Lib::new();
+    let favs = c.playlist("alice", "Favorites");
+    c.add(with("music/a.flac", Song::new("Glue", "Bicep", "Isles")));
+    c.add(with("music/b.flac", Song::new("Opal", "Bicep", "Isles")));
+    let before = c.library(favs);
+    let glue = before[0].field("id");
+    let on = args([("playlist_id", Value::Id(favs)), ("media_id", glue.clone())]);
+    c.mutate("alice", "add_to_playlist", on).unwrap();
+
+    c.add(Song {
+        duration_ms: 242_000,
+        track: 3,
+        ..with("music/a.flac", Song::new("Glue (Remastered)", "Bicep", "Isles"))
+    });
+    let after = c.library(favs);
+    assert_eq!(texts(&after, "title"), ["Glue (Remastered)", "Opal"], "in its place, retitled");
+    assert_eq!(after[0].field("id"), glue, "the same song");
+    assert_eq!(after[0].field("added_ms"), before[0].field("added_ms"), "added when it was added");
+    assert_eq!(after[0].field("duration_ms"), Value::int(242_000));
+    let playlist = c.list("playlist", args([("playlist_id", Value::Id(favs))]));
+    assert_eq!(texts(&playlist, "title"), ["Glue (Remastered)"], "the playlist holds it still");
+    let details = c.list("track_details", args([]));
+    assert_eq!(details[0].field("track"), Value::int(3));
+    assert_eq!(
+        ark::store::Store::scan(&c.store, "recording").len(),
+        2,
+        "the old title's recording went with nothing left on it"
+    );
+}
+
+/// A file whose tags move it to another album is on that album, and what it
+/// was part of goes when nothing else is: its recording, its movement, and
+/// a work no movement and no recording is of. An album row stays — `albums`
+/// is what the songs name, so the old one is drawn nowhere — as does
+/// whatever another song still holds.
+/// Falsified by never deleting a work: four of them were left where three
+/// are, the Goldberg Variations with nothing of it in the library.
+#[test]
+fn a_file_moved_to_another_album_takes_nothing_with_it_that_is_still_used() {
+    let mut c = Lib::new();
+    let favs = c.playlist("alice", "Favorites");
+    let bach = |file: &str, album: &'static str, catalogue: &'static str, title: &'static str, no: i64| {
+        track(title, "Johann Sebastian Bach", album, catalogue, "Kimiko Ishizaka", file, no, "", no)
+    };
+    c.add(bach("music/g1.flac", "Goldberg Variations", "BWV 988", "Aria", 1));
+    c.add(bach("music/g2.flac", "Goldberg Variations", "BWV 988", "Variatio 1", 2));
+    c.add(bach("music/i1.flac", "Inventions", "BWV 772", "Invention 1", 1));
+    let tables = |c: &Lib| ["album", "work", "movement", "recording", "credit"].map(|t| ark::store::Store::scan(&c.store, t).len());
+    assert_eq!(tables(&c), [2, 2, 3, 2, 2]);
+
+    // One Goldberg track becomes an Invention: the Goldberg work keeps its
+    // other movement and its recording; the moved track's movement goes.
+    c.add(bach("music/g2.flac", "Inventions", "BWV 773", "Invention 2", 2));
+    assert_eq!(tables(&c), [2, 3, 3, 3, 3]);
+    let album = |c: &Lib, name: &str| {
+        texts(
+            &c.list("album", args([("playlist_id", Value::Id(favs)), ("name", Value::text(name))])),
+            "title",
+        )
+    };
+    assert_eq!(album(&c, "Goldberg Variations"), ["Aria"]);
+    assert_eq!(album(&c, "Inventions"), ["Invention 1", "Invention 2"]);
+
+    // The last one leaves too: the Goldberg work, its movement, its
+    // recording and the credit on it go; its album row stays, and is not
+    // on the albums page.
+    c.add(bach("music/g1.flac", "Inventions", "BWV 774", "Invention 3", 3));
+    assert_eq!(tables(&c), [2, 3, 3, 3, 3]);
+    let works = c.list("works", args([("composer", Value::text("Johann Sebastian Bach"))]));
+    assert_eq!(texts(&works, "catalogue"), ["BWV 772", "BWV 773", "BWV 774"]);
+    assert!(works.iter().all(|w| w.field("tracks") == Value::int(1)));
+    assert_eq!(texts(&c.list("albums", args([])), "name"), ["Inventions"]);
+    let composers = c.list("composers", args([]));
+    assert_eq!(ints(&composers, "works"), [3]);
+    assert_eq!(c.library(favs).len(), 3, "three files, three songs");
 }
 
 /// `art_to_write`'s three cases: no row makes one; a picture replaces a

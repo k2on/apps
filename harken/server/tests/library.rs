@@ -5,7 +5,10 @@
 //! code runs: a directory of audio becomes songs in the log, a file that
 //! appears later becomes one too, a new album directory is walked, a file
 //! that is not audio — or is audio outside `music/` — is not a song, and a
-//! rescan on a fresh scanner over the same log authors nothing at all.
+//! rescan on a fresh scanner over the same log authors nothing at all. And
+//! the covers: beside a record or inside its tracks, served where the log
+//! says; a file retagged, or given a cover, is the same song said again;
+//! and a rescan of nothing new reads nothing.
 //!
 //! The files are written here rather than checked in. A WAV is a header and
 //! some samples, so a test can make one lofty will really parse — which is
@@ -18,7 +21,9 @@ use common::*;
 use harken_server::Server;
 use lofty::config::WriteOptions;
 use lofty::file::{AudioFile, TaggedFileExt};
+use lofty::picture::{MimeType, Picture, PictureType};
 use lofty::tag::{Accessor, ItemKey, Tag, TagType};
+use sha2::{Digest, Sha256};
 
 /// `(title, file)` for every song the server's log holds.
 fn songs(server: &Server) -> Vec<(String, String)> {
@@ -186,7 +191,12 @@ fn a_directory_of_audio_becomes_songs_and_a_rescan_adds_none() {
     assert_eq!(
         again.authored(),
         0,
-        "a rescan offers nothing already a song"
+        "a rescan authors nothing the library already says"
+    );
+    assert_eq!(
+        again.read(),
+        5,
+        "a scanner that never kept a print reads every file, once"
     );
     assert_eq!(head(&server), before, "and the log did not move");
     assert_eq!(songs(&server).len(), 5);
@@ -257,5 +267,420 @@ fn a_songs_file_is_served_at_the_path_the_log_carries() {
     std::io::Read::read_to_end(&mut res.into_reader(), &mut body).unwrap();
     assert_eq!(body, b"RIFF");
     // …with no sign-in: which is what lets a speaker fetch it.
+    rt.block_on(server.stop());
+}
+
+/// A JPEG and a PNG as far as anything here asks: the bytes a picture
+/// starts with, and some more. Nothing decodes them.
+const JPEG: &[u8] = b"\xFF\xD8\xFF\xE0 a cover beside the tracks";
+const PNG: &[u8] = b"\x89PNG\r\n\x1a\n a picture inside the tracks";
+
+/// A tagged WAV at `path`, made beside and renamed in so a watch sees it
+/// whole: a title, an artist, an album, and a front cover when one is
+/// given.
+fn put(
+    root: &std::path::Path,
+    path: &std::path::Path,
+    title: &str,
+    artist: &str,
+    album: &str,
+    picture: Option<&[u8]>,
+) {
+    let staging = root.join("staging").join(path.file_name().unwrap());
+    wav(&staging, 300);
+    let mut file = lofty::read_from_path(&staging).unwrap();
+    let mut tag = Tag::new(TagType::Id3v2);
+    tag.set_title(title.into());
+    tag.set_artist(artist.into());
+    tag.set_album(album.into());
+    if let Some(p) = picture {
+        tag.push_picture(
+            Picture::unchecked(p.to_vec())
+                .pic_type(PictureType::CoverFront)
+                .mime_type(MimeType::Png)
+                .build(),
+        );
+    }
+    file.insert_tag(tag);
+    file.save_to_path(&staging, WriteOptions::default())
+        .unwrap();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::rename(&staging, path).unwrap();
+}
+
+/// Beside and renamed in, for a picture.
+fn picture(path: &std::path::Path, bytes: &[u8]) {
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let tmp = path.with_extension("partial");
+    std::fs::write(&tmp, bytes).unwrap();
+    std::fs::rename(&tmp, path).unwrap();
+}
+
+/// A row's `art`, by its table and its name.
+fn art(server: &Server, table: &str, name: &str) -> Option<String> {
+    let table = table.to_string();
+    let rows = server
+        .running
+        .hub
+        .read_blocking(move |h| h.rows(&table))
+        .unwrap();
+    rows.iter()
+        .find(|r| r["name"] == Value::text(name))
+        .map(|r| r["art"].as_text().to_string())
+}
+
+/// The status line's code for a GET of `path` exactly as written: no
+/// client between, to tidy a `..` away before the server sees it.
+fn raw_status(server: &Server, path: &str) -> u16 {
+    use std::io::{Read, Write};
+    let addr = server.url().trim_start_matches("http://").to_string();
+    let mut s = std::net::TcpStream::connect(&addr).unwrap();
+    write!(
+        s,
+        "GET {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n"
+    )
+    .unwrap();
+    let mut out = vec![];
+    let _ = s.read_to_end(&mut out);
+    String::from_utf8_lossy(&out)
+        .split_whitespace()
+        .nth(1)
+        .and_then(|c| c.parse().ok())
+        .unwrap_or(0)
+}
+
+fn fetch(server: &Server, art: &str) -> (String, Vec<u8>) {
+    let url = harken_domain::listening::url(&server.url(), art);
+    let res = ureq::get(&url)
+        .call()
+        .unwrap_or_else(|e| panic!("{url}: {e}"));
+    let kind = res.content_type().to_string();
+    let mut body = vec![];
+    std::io::Read::read_to_end(&mut res.into_reader(), &mut body).unwrap();
+    (kind, body)
+}
+
+/// A cover beside a record is its album's, and an `artist.jpg` above it the
+/// artist's; a record with none takes the picture inside its tracks, kept
+/// once in the data directory by its hash and served under `/media/.art/`
+/// with its type. Each is fetched from `<server>/media/<art>` — the join
+/// every client already makes for a track. Nothing reaches outside either
+/// directory by `..`, written or encoded.
+///
+/// Falsified by offering the picture inside a track before the cover
+/// beside it: Goldberg's art was `.art/…`, not its `cover.jpg`; by naming
+/// an extracted picture without its extension, which is all that tells
+/// `/media` its type: the value had none; and by keeping the pictures in
+/// the data directory itself rather than in its `art`:
+/// `/media/.art/library-files.json` answered 200.
+#[test]
+fn a_record_takes_its_cover_from_beside_it_or_from_inside_its_tracks() {
+    let rt = runtime();
+    let root = tempfile::tempdir().unwrap();
+    let (media, data) = (root.path().join("media"), root.path().join("data"));
+    let music = media.join("music");
+    let goldberg = music.join("Bach/Goldberg");
+    put(
+        root.path(),
+        &goldberg.join("01.wav"),
+        "Aria",
+        "Bach",
+        "Goldberg Variations",
+        Some(PNG),
+    );
+    put(
+        root.path(),
+        &goldberg.join("02.wav"),
+        "Variatio 1",
+        "Bach",
+        "Goldberg Variations",
+        Some(PNG),
+    );
+    picture(&goldberg.join("cover.jpg"), JPEG);
+    picture(
+        &music.join("Bach/artist.jpg"),
+        b"\xFF\xD8\xFF\xE0 Bach himself",
+    );
+    let satie = music.join("Satie/Gymnopedies");
+    put(
+        root.path(),
+        &satie.join("1.wav"),
+        "Gymnopedie No. 1",
+        "Satie",
+        "Gymnopedies",
+        Some(PNG),
+    );
+    put(
+        root.path(),
+        &satie.join("2.wav"),
+        "Gymnopedie No. 2",
+        "Satie",
+        "Gymnopedies",
+        Some(PNG),
+    );
+
+    let server = serve(&rt, &data, |c| c.media = Some(media.clone()));
+    settle(&server, 4);
+    let ready = || art(&server, "album", "Gymnopedies").filter(|a| !a.is_empty());
+    let extracted = eventually(10, ready).expect("the picture inside the tracks is the album's");
+
+    let beside = art(&server, "album", "Goldberg Variations").unwrap();
+    assert!(beside.starts_with(".cover/"), "{beside}");
+    assert!(
+        beside.ends_with("/music/Bach/Goldberg/cover.jpg"),
+        "the cover beside, before the picture inside: {beside}"
+    );
+    assert_eq!(
+        fetch(&server, &beside),
+        ("image/jpeg".to_string(), JPEG.to_vec())
+    );
+    let bach = art(&server, "person", "Bach").unwrap();
+    assert!(bach.ends_with("/music/Bach/artist.jpg"), "{bach}");
+    assert_eq!(
+        art(&server, "person", "Satie").as_deref(),
+        Some(""),
+        "an artist's picture is never invented"
+    );
+
+    let sha: String = Sha256::digest(PNG)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    assert_eq!(extracted, format!(".art/{sha}.png"));
+    assert_eq!(
+        fetch(&server, &extracted),
+        ("image/png".to_string(), PNG.to_vec())
+    );
+
+    // Nothing above either directory, however it is spelt.
+    assert_eq!(
+        raw_status(&server, &format!("/media/.art/{sha}.png")),
+        200,
+        "the probe reaches the server"
+    );
+    for path in [
+        "/media/.art/library-files.json",
+        "/media/.art/../library-files.json",
+        "/media/.art/%2e%2e/library-files.json",
+        "/media/.art/..%2flibrary-files.json",
+        "/media/.cover/x/../../data/library-files.json",
+        "/media/.cover/x/%2e%2e/data/library-files.json",
+        "/media/%2e%2e/data/library-files.json",
+    ] {
+        assert_ne!(raw_status(&server, path), 200, "{path}");
+    }
+    let kept: Vec<_> = std::fs::read_dir(data.join("art"))
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name())
+        .collect();
+    assert_eq!(
+        kept,
+        [std::ffi::OsString::from(format!("{sha}.png"))],
+        "tracks carrying one picture are one file"
+    );
+    rt.block_on(server.stop());
+}
+
+/// The library over its own media from the media's own events: a retagged
+/// file is the same song — the same id, still on the playlist that held it
+/// — saying its new title; a cover put beside a record later is its album's,
+/// and a cover replaced under the same name is a new value, so no client
+/// goes on drawing the one it fetched first.
+///
+/// Falsified by authoring a known file only when it is not yet a song (the
+/// scanner's old rule): the title never moved; and by leaving the covers'
+/// prints out of a track's: the cover put beside it later never reached
+/// the album.
+#[test]
+fn a_retagged_file_or_a_new_cover_is_the_same_song_said_again() {
+    let rt = runtime();
+    let root = tempfile::tempdir().unwrap();
+    let (media, data) = (root.path().join("media"), root.path().join("data"));
+    let isles = media.join("music/Bicep/Isles");
+    put(
+        root.path(),
+        &isles.join("01.wav"),
+        "Glue",
+        "Bicep",
+        "Isles",
+        None,
+    );
+    put(
+        root.path(),
+        &isles.join("02.wav"),
+        "Opal",
+        "Bicep",
+        "Isles",
+        None,
+    );
+    let server = serve(&rt, &data, |c| c.media = Some(media.clone()));
+    settle(&server, 2);
+    let id_of = |title: &str| {
+        let rows = server
+            .running
+            .hub
+            .read_blocking(|h| h.rows("media"))
+            .unwrap();
+        rows.iter()
+            .find(|r| r["title"] == Value::text(title))
+            .map(|r| r["id"].clone())
+    };
+    let glue = id_of("Glue").unwrap();
+
+    let mut alice = signed_in(&server, "alice");
+    pump_until(&mut [&mut alice], 10, |p| {
+        ark::store::Store::scan(p[0].store(), "media").len() == 2
+    });
+    alice
+        .mutate(
+            "create_playlist",
+            ark_client::args([("name", Value::text("Mine"))]),
+        )
+        .unwrap();
+    let list = alice.query("playlists", &ark_client::args([])).unwrap();
+    let mine = list.as_list()[0].field("id");
+    let on = ark_client::args([("playlist_id", mine.clone()), ("media_id", glue.clone())]);
+    alice.mutate("add_to_playlist", on).unwrap();
+    let titles = |p: &ark_client::Peer| {
+        let rows = p
+            .query(
+                "playlist",
+                &ark_client::args([("playlist_id", mine.clone())]),
+            )
+            .unwrap();
+        rows.as_list()
+            .iter()
+            .map(|r| r.field("title").as_text().to_string())
+            .collect::<Vec<_>>()
+    };
+    pump_until(&mut [&mut alice], 10, |p| p[0].pending_len() == 0);
+
+    put(
+        root.path(),
+        &isles.join("01.wav"),
+        "Glue (Remastered)",
+        "Bicep",
+        "Isles",
+        None,
+    );
+    assert_eq!(
+        eventually(10, || id_of("Glue (Remastered)")),
+        Some(glue.clone()),
+        "retagged, and the same song"
+    );
+    assert_eq!(songs(&server).len(), 2, "and not a second one");
+    pump_until(&mut [&mut alice], 10, |p| {
+        titles(p[0]) == ["Glue (Remastered)"]
+    });
+
+    assert_eq!(art(&server, "album", "Isles").as_deref(), Some(""));
+    picture(&isles.join("cover.jpg"), JPEG);
+    let first = eventually(10, || {
+        art(&server, "album", "Isles").filter(|a| !a.is_empty())
+    })
+    .expect("a cover put beside the record later is its album's");
+    assert!(first.ends_with("/music/Bicep/Isles/cover.jpg"), "{first}");
+    let better = b"\xFF\xD8\xFF\xE0 a better cover, and a longer one";
+    picture(&isles.join("cover.jpg"), better);
+    let second = eventually(10, || {
+        art(&server, "album", "Isles").filter(|a| *a != first)
+    })
+    .expect("a cover replaced under its name replaces the album's");
+    assert!(second.ends_with("/music/Bicep/Isles/cover.jpg"), "{second}");
+    assert_eq!(fetch(&server, &second).1, better.to_vec());
+    assert_eq!(songs(&server).len(), 2);
+    drop(alice);
+    rt.block_on(server.stop());
+}
+
+/// What the scanner has been through survives it, and costs nothing when
+/// nothing moved: a rescan reads no tags and authors nothing, and neither
+/// does a restart over the same data. A library scanned before any cover
+/// was found — no prints at all, as on the first start of a server that
+/// never kept them — is read once, and a cover beside a record is one entry
+/// for the whole record. A file of prints that cannot be read is a full
+/// read, and nothing worse.
+///
+/// Falsified by skipping no file however its print stood: the rescan read
+/// three; by keeping the prints only in memory: the restart read three;
+/// and by refusing to start over an unreadable file of them: the last
+/// start failed.
+#[test]
+fn a_rescan_of_nothing_new_reads_nothing() {
+    let rt = runtime();
+    let root = tempfile::tempdir().unwrap();
+    let (media, data) = (root.path().join("media"), root.path().join("data"));
+    let album = media.join("music/Satie/Gymnopedies");
+    for n in 1..=3 {
+        put(
+            root.path(),
+            &album.join(format!("{n}.wav")),
+            &format!("Gymnopedie No. {n}"),
+            "Satie",
+            "Gymnopedies",
+            None,
+        );
+    }
+    let server = serve(&rt, &data, |c| c.media = Some(media.clone()));
+    settle(&server, 3);
+    let scanner = server.scanner.as_ref().unwrap();
+    assert_eq!((scanner.read(), scanner.authored()), (3, 3));
+    let before = head(&server);
+    scanner.rescan();
+    std::thread::sleep(std::time::Duration::from_millis(1_000));
+    assert_eq!(
+        (scanner.read(), scanner.authored()),
+        (3, 3),
+        "a rescan of nothing new reads nothing"
+    );
+    assert_eq!(head(&server), before);
+    rt.block_on(server.stop());
+
+    let server = serve(&rt, &data, |c| c.media = Some(media.clone()));
+    std::thread::sleep(std::time::Duration::from_millis(1_500));
+    let scanner = server.scanner.as_ref().unwrap();
+    assert_eq!(
+        (scanner.read(), scanner.authored()),
+        (0, 0),
+        "nor does a restart"
+    );
+    assert_eq!(head(&server), before);
+    rt.block_on(server.stop());
+
+    // A library from before covers were found: the cover is there now, and
+    // no file of prints says what was offered.
+    picture(&album.join("folder.jpg"), JPEG);
+    std::fs::remove_file(data.join("library-files.json")).unwrap();
+    let server = serve(&rt, &data, |c| c.media = Some(media.clone()));
+    let got = eventually(10, || {
+        art(&server, "album", "Gymnopedies").filter(|a| !a.is_empty())
+    });
+    assert!(
+        got.is_some_and(|a| a.ends_with("/folder.jpg")),
+        "the first start that keeps prints gives the record its cover"
+    );
+    std::thread::sleep(std::time::Duration::from_millis(600));
+    let scanner = server.scanner.as_ref().unwrap();
+    assert_eq!(
+        (scanner.read(), scanner.authored()),
+        (3, 1),
+        "every file read once, and one entry for one cover"
+    );
+    assert_eq!(songs(&server).len(), 3, "and no song twice");
+    let after = head(&server);
+    rt.block_on(server.stop());
+
+    std::fs::write(data.join("library-files.json"), b"{ not json").unwrap();
+    let server = serve(&rt, &data, |c| c.media = Some(media.clone()));
+    let scanner = server.scanner.as_ref().unwrap();
+    eventually(10, || (scanner.read() == 3).then_some(()));
+    std::thread::sleep(std::time::Duration::from_millis(600));
+    assert_eq!(
+        (scanner.read(), scanner.authored()),
+        (3, 0),
+        "an unreadable file of prints is one full read"
+    );
+    assert_eq!(head(&server), after);
     rt.block_on(server.stop());
 }

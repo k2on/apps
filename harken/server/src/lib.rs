@@ -28,6 +28,7 @@
 //! the engine `Auth::owns`.
 
 pub mod assistant;
+pub mod covers;
 pub mod grown;
 pub mod library;
 pub mod listening;
@@ -536,9 +537,19 @@ pub async fn start(config: Config) -> Result<Server> {
     // track's path relative to this directory, and `/media/` serves that
     // same path back — with range requests, which is what makes seeking
     // work — and with no authentication at all, which is what lets a
-    // speaker fetch it.
+    // speaker fetch it. Under it, `/media/.art/` is the pictures the
+    // scanner took out of files, from the data directory: the media root
+    // may be read-only, and a cover is spelt the way a file is, so every
+    // client joins it the same way (`covers`).
     if let Some(dir) = &config.media {
-        builder = builder.media(dir);
+        let art = library::art_dir(&config.data);
+        eprintln!(
+            "harken-server: serving {} at /media, and {} at /media/{}, unauthenticated",
+            dir.display(),
+            art.display(),
+            covers::ART
+        );
+        builder = builder.merge(covers::routes(dir, &art));
     }
     // Everything the routes above do not match falls through to the page,
     // with the build as its validator: a store path cannot be one, since nix
@@ -587,7 +598,7 @@ pub async fn start(config: Config) -> Result<Server> {
                 dir.clone(),
                 domain.clone(),
                 hub.clone(),
-                config.data.join("library"),
+                config.data.clone(),
                 login,
             )?)
         }

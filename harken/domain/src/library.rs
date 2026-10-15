@@ -667,146 +667,192 @@ pub fn library() -> Router<Harken> {
         // Put a song in the library, and everything it belongs to as rows:
         // the album, the artist, the work and movement it is of, the
         // recording it is part of and the one credit its lumped performer
-        // string can honestly give. The same file twice is the first entry's
-        // (a rescan is free); an empty file is no path and never collides.
+        // string can honestly give.
+        //
+        // An upsert by `file`: a file the library already has is the song it
+        // already is, said again — retagged, or with a cover it did not have —
+        // so the media row keeps its id, its place, when it was added and who
+        // added it (every playlist holding it still holds it), and the rest
+        // is what this entry says. The same file with nothing new writes no
+        // row at all, so a rescan is free. An empty file is no path and never
+        // collides: a song typed in by hand is a new song every time.
+        //
+        // What the song was part of and no longer is — a recording, a
+        // movement, a work — goes when nothing else is part of it, in this
+        // entry: `works`, `recordings` and `composers` list those tables, and
+        // a recording with nothing in it would be a row of a work's page that
+        // plays nothing. An album or a person is left where it is, because
+        // `albums` and `artists` are what the songs name, and an album row a
+        // song moved off shows nowhere.
+        //
         // Both reads go through an index (`media (file)`, `media (pos)`;
         // docs/plan-perf.md R1): into a library of 8,000 a new file
         // examines one row, where it was every row twice — 16,000.
         is_library.input::<AddSong>().mutation("add_song", |ctx, db, input| {
-            let media = db.media.filter(Media::file.eq(input.file)).first();
-            unless(input.file.is_empty().not().and(media.is_some()), || {
-                let media_2 = db.media.order_by(Media::pos.desc()).first();
-                db.media.insert(Media {
-                    id: ctx.new_id("id"),
-                    kind: "song".into(),
+            let was = db
+                .media
+                .filter(Media::file.eq(input.file))
+                .first()
+                .filter(|row| row.file.is_empty().not());
+            let id = was.map_or(ctx.new_id("id"), |row| row.id);
+            let media_2 = db.media.order_by(Media::pos.desc()).first();
+            db.media.upsert(Media {
+                id,
+                kind: was.map_or("song", |row| row.kind),
+                title: input.title,
+                creator: input.artist,
+                duration_ms: input.duration_ms,
+                file: input.file,
+                pos: was.map_or(media_2.map_or(0, |row| row.pos).add(1), |row| row.pos),
+                added_ms: was.map_or(ctx.now("added_ms"), |row| row.added_ms),
+                user_id: was.map_or(ctx.user, |row| row.user_id),
+            });
+            // art_to_write: no row yet makes one; a picture replaces a
+            // picture; nothing (or the same picture) replaces nothing.
+            when(input.album.is_empty().not(), || {
+                let album = db.album.get((input.album,));
+                when(
+                    album.map_or(true, |row| input.album_art.is_empty().not().and(row.art.ne(input.album_art))),
+                    || {
+                        db.album.upsert(Album {
+                            name: input.album,
+                            label: album.map_or("", |row| row.label),
+                            released: album.map_or(0, |row| row.released),
+                            art: input.album_art,
+                            added_ms: ctx.now("added_ms"),
+                            user_id: ctx.user,
+                        })
+                    },
+                )
+            });
+            when(input.artist.is_empty().not(), || {
+                let person = db.person.get((input.artist,));
+                when(
+                    person.map_or(true, |row| input.artist_art.is_empty().not().and(row.art.ne(input.artist_art))),
+                    || {
+                        db.person.upsert(Person {
+                            name: input.artist,
+                            sort_name: person.map_or("", |row| row.sort_name),
+                            born: person.map_or(0, |row| row.born),
+                            died: person.map_or(0, |row| row.died),
+                            art: input.artist_art,
+                            added_ms: person.map_or(ctx.now("added_ms"), |row| row.added_ms),
+                            user_id: person.map_or(ctx.user, |row| row.user_id),
+                        })
+                    },
+                )
+            });
+            // What the track is of — the work's name, its key if it has
+            // one, the recording, the lumped credit — once each. Natively a
+            // helper runs where it is called, and these were called about
+            // fifteen times apiece; emitted, a `let` of a pure expression
+            // is inlined where it is used (§6), so the module is the bytes
+            // it was (`docs/plan-perf.md` R6).
+            let work_named = work_title(input.work_title, input.album, input.catalogue, input.part);
+            let work_of = work_id(input.artist, input.catalogue, work_named);
+            when(work_of.is_some(), || {
+                // The work's key, and the movement's number and key,
+                // once each where they are needed.
+                let key = work_key(input.artist, input.catalogue, work_named);
+                let no = pick(input.movement_no.eq(0), input.track, input.movement_no);
+                let movement_ref = movement_key(key, no);
+                let work = db.work.get((key,));
+                db.work.upsert(Work {
+                    id: key,
+                    composer: input.artist,
+                    title: work_named,
+                    catalogue: input.catalogue,
+                    opus: work.map_or("", |row| row.opus),
+                    key_sig: work.map_or("", |row| row.key_sig),
+                    form: work.map_or("", |row| row.form),
+                    period: work.map_or("", |row| row.period),
+                    composed: work.map_or(0, |row| row.composed),
+                    art: work.map_or("", |row| row.art),
+                    added_ms: work.map_or(ctx.now("added_ms"), |row| row.added_ms),
+                    user_id: work.map_or(ctx.user, |row| row.user_id),
+                });
+                let movement = db.movement.get((movement_ref,));
+                db.movement.upsert(Movement {
+                    id: movement_ref,
+                    work_id: key,
+                    no,
                     title: input.title,
-                    creator: input.artist,
-                    duration_ms: input.duration_ms,
-                    file: input.file,
-                    pos: media_2.map_or(0, |row| row.pos).add(1),
-                    added_ms: ctx.now("added_ms"),
-                    user_id: ctx.user,
-                });
-                // art_to_write: no row yet makes one; a picture replaces a
-                // picture; nothing (or the same picture) replaces nothing.
-                when(input.album.is_empty().not(), || {
-                    let album = db.album.get((input.album,));
-                    when(
-                        album.map_or(true, |row| input.album_art.is_empty().not().and(row.art.ne(input.album_art))),
-                        || {
-                            db.album.upsert(Album {
-                                name: input.album,
-                                label: album.map_or("", |row| row.label),
-                                released: album.map_or(0, |row| row.released),
-                                art: input.album_art,
-                                added_ms: ctx.now("added_ms"),
-                                user_id: ctx.user,
-                            })
-                        },
-                    )
-                });
-                when(input.artist.is_empty().not(), || {
-                    let person = db.person.get((input.artist,));
-                    when(
-                        person.map_or(true, |row| input.artist_art.is_empty().not().and(row.art.ne(input.artist_art))),
-                        || {
-                            db.person.upsert(Person {
-                                name: input.artist,
-                                sort_name: person.map_or("", |row| row.sort_name),
-                                born: person.map_or(0, |row| row.born),
-                                died: person.map_or(0, |row| row.died),
-                                art: input.artist_art,
-                                added_ms: person.map_or(ctx.now("added_ms"), |row| row.added_ms),
-                                user_id: person.map_or(ctx.user, |row| row.user_id),
-                            })
-                        },
-                    )
-                });
-                // What the track is of — the work's name, its key if it has
-                // one, the recording, the lumped credit — once each. Natively a
-                // helper runs where it is called, and these were called about
-                // fifteen times apiece; emitted, a `let` of a pure expression
-                // is inlined where it is used (§6), so the module is the bytes
-                // it was (`docs/plan-perf.md` R6).
-                let work_named = work_title(input.work_title, input.album, input.catalogue, input.part);
-                let work_of = work_id(input.artist, input.catalogue, work_named);
-                when(work_of.is_some(), || {
-                    // The work's key, and the movement's number and key,
-                    // once each where they are needed.
-                    let key = work_key(input.artist, input.catalogue, work_named);
-                    let no = pick(input.movement_no.eq(0), input.track, input.movement_no);
-                    let movement_ref = movement_key(key, no);
-                    let work = db.work.get((key,));
-                    db.work.upsert(Work {
-                        id: key,
-                        composer: input.artist,
-                        title: work_named,
-                        catalogue: input.catalogue,
-                        opus: work.map_or("", |row| row.opus),
-                        key_sig: work.map_or("", |row| row.key_sig),
-                        form: work.map_or("", |row| row.form),
-                        period: work.map_or("", |row| row.period),
-                        composed: work.map_or(0, |row| row.composed),
-                        art: work.map_or("", |row| row.art),
-                        added_ms: work.map_or(ctx.now("added_ms"), |row| row.added_ms),
-                        user_id: work.map_or(ctx.user, |row| row.user_id),
-                    });
-                    let movement = db.movement.get((movement_ref,));
-                    db.movement.upsert(Movement {
-                        id: movement_ref,
-                        work_id: key,
-                        no,
-                        title: input.title,
-                        part: input.part,
-                        added_ms: movement.map_or(ctx.now("added_ms"), |row| row.added_ms),
-                        user_id: movement.map_or(ctx.user, |row| row.user_id),
-                    })
-                });
-                // After the work, not before: a helper is emitted where it is
-                // first called, and the module keeps its order.
-                let recording = recording_id(work_of, input.album, input.title, input.artist, input.performer);
-                let credited = credited_as(work_of, input.artist, input.performer);
-                db.recording.insert(Recording {
-                    id: recording,
-                    work_id: work_of,
-                    recorded: 0.into(),
-                    venue: "".into(),
-                    label: "".into(),
-                    licence: "".into(),
+                    part: input.part,
+                    added_ms: movement.map_or(ctx.now("added_ms"), |row| row.added_ms),
+                    user_id: movement.map_or(ctx.user, |row| row.user_id),
+                })
+            });
+            // After the work, not before: a helper is emitted where it is
+            // first called, and the module keeps its order.
+            let recording = recording_id(work_of, input.album, input.title, input.artist, input.performer);
+            let credited = credited_as(work_of, input.artist, input.performer);
+            db.recording.insert(Recording {
+                id: recording,
+                work_id: work_of,
+                recorded: 0.into(),
+                venue: "".into(),
+                label: "".into(),
+                licence: "".into(),
+                art: "".into(),
+                added_ms: ctx.now("added_ms"),
+                user_id: ctx.user,
+            });
+            // The fallback credit: `pos` 0 is what marks it as the lumped
+            // string standing in until `credit_recording` says who is who.
+            when(credited.is_empty().not(), || {
+                db.person.insert(Person {
+                    name: credited,
+                    sort_name: "".into(),
+                    born: 0.into(),
+                    died: 0.into(),
                     art: "".into(),
                     added_ms: ctx.now("added_ms"),
                     user_id: ctx.user,
                 });
-                // The fallback credit: `pos` 0 is what marks it as the lumped
-                // string standing in until `credit_recording` says who is who.
-                when(credited.is_empty().not(), || {
-                    db.person.insert(Person {
-                        name: credited,
-                        sort_name: "".into(),
-                        born: 0.into(),
-                        died: 0.into(),
-                        art: "".into(),
-                        added_ms: ctx.now("added_ms"),
-                        user_id: ctx.user,
-                    });
-                    db.credit.insert(Credit {
-                        recording_id: recording,
-                        person_name: credited,
-                        role: pick(work_of.is_some(), "performer", "artist"),
-                        instrument: "".into(),
-                        pos: 0.into(),
-                        added_ms: ctx.now("added_ms"),
-                        user_id: ctx.user,
-                    })
-                });
-                db.song.insert(Song {
-                    media_id: ctx.new_id("id"),
-                    album_name: pick(input.album.is_empty(), none::<Text>(), some(input.album)),
-                    disc: pick(input.disc.gt(0), input.disc.min(99), 1),
-                    track: input.track.clamp(0, 999),
+                db.credit.insert(Credit {
                     recording_id: recording,
-                    movement_id: movement_id(work_of, input.movement_no, input.track),
-                    bpm: pick(input.bpm.ge(20).and(input.bpm.le(300)), input.bpm, 0),
+                    person_name: credited,
+                    role: pick(work_of.is_some(), "performer", "artist"),
+                    instrument: "".into(),
+                    pos: 0.into(),
+                    added_ms: ctx.now("added_ms"),
+                    user_id: ctx.user,
+                })
+            });
+            let movement = movement_id(work_of, input.movement_no, input.track);
+            let song = db.song.get((id,));
+            db.song.upsert(Song {
+                media_id: id,
+                album_name: pick(input.album.is_empty(), none::<Text>(), some(input.album)),
+                disc: pick(input.disc.gt(0), input.disc.min(99), 1),
+                track: input.track.clamp(0, 999),
+                recording_id: recording,
+                movement_id: movement,
+                bpm: pick(input.bpm.ge(20).and(input.bpm.le(300)), input.bpm, 0),
+            });
+            // The recording the song has left, with its credits, when no
+            // song is part of it any more. Before the movement, since a
+            // recording names the work the movement's emptying may take.
+            let left = song.map(|row| row.recording_id).filter(|row| row.ne(recording));
+            when(left.is_some(), || {
+                let others = db.song.filter(Song::recording_id.eq(left.unwrap())).first();
+                when(others.is_none(), || {
+                    let credits = db.credit.filter(Credit::recording_id.eq(left.unwrap())).all();
+                    for_each(credits, |row| db.credit.delete((row.recording_id, row.person_name, row.role)));
+                    db.recording.delete((left.unwrap(),))
+                })
+            });
+            // The movement it has left, when no song is it; and that
+            // movement's work, when no movement and no recording is of it.
+            let moved = song.map_or(none::<Text>(), |row| row.movement_id).filter(|row| some(row).ne(movement));
+            when(moved.is_some(), || {
+                let others = db.song.filter(Song::movement_id.eq(moved)).first();
+                when(others.is_none(), || {
+                    let of = db.movement.get((moved.unwrap(),)).map_or("", |row| row.work_id);
+                    db.movement.delete((moved.unwrap(),));
+                    let movements = db.movement.filter(Movement::work_id.eq(of)).first();
+                    let recordings = db.recording.filter(Recording::work_id.eq(some(of))).first();
+                    when(movements.is_none().and(recordings.is_none()), || db.work.delete((of,)))
                 })
             })
         }),

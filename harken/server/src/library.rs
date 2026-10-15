@@ -15,14 +15,25 @@
 //! entry to a session, and "the server wrote it" is not an exemption — as
 //! the account [`ACCOUNT`].
 //!
-//! **Idempotency is not this file's doing.** `add_song` does nothing for a
-//! file the library already has, inside the procedure, so a rescan is a
-//! no-op for every peer replaying the log rather than only for the scanner
-//! that happened to author it. What this file adds is not asking: the
-//! replica says which files are already songs, and those are not offered —
-//! so a restart over ten thousand files authors nothing at all.
+//! **A file is one song, and that is not this file's doing.** `add_song` is
+//! an upsert by `file`, inside the procedure: a file the library already has
+//! is that song said again, retagged or with a cover it did not have, and
+//! the same file saying nothing new writes nothing — for every peer
+//! replaying the log, not only for the scanner that authored it.
+//!
+//! What this file adds is not asking. It keeps, beside its replica, what
+//! each file was when it was last offered — its size, when it was modified,
+//! and the same of the covers it was offered with ([`Prints`]). A file whose
+//! print has not moved, and which the replica has as a song, is not read at
+//! all; one whose print has moved is read, and authored only if the entry
+//! would change something the replica holds. So a restart over ten thousand
+//! untouched files reads no tags and authors nothing, a retagged file is one
+//! entry, and the first start of a server that never kept prints reads
+//! every file once — which is what gives a library scanned before covers
+//! were found its covers. The prints are this server's, never the log's: a
+//! missing or unreadable file of them is a full read, and nothing worse.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
@@ -31,12 +42,16 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use ark::store::Store;
+use ark::eval::Args;
+use ark::ir::Auto;
+use ark::store::{Overlay, Store};
 use ark::value::Value;
 use ark_auth::Login;
 use ark_client::{args, Domain, Options, Peer};
 use ark_server::HubHandle;
 use notify::{RecursiveMode, Watcher};
+
+use crate::covers::{self, Covers};
 
 /// What the scanner will look at. Everything else in the directory —
 /// artwork, playlists, the stray `.DS_Store` — is not a track and is skipped
@@ -74,8 +89,27 @@ enum Nudge {
     /// Look at everything. Sent once at boot, because whatever happened
     /// while the server was down produced no events to watch.
     All,
-    /// Look at one path the watcher saw appear or change.
+    /// Look at one path the watcher saw appear, change or — for a picture
+    /// — go.
     One(PathBuf),
+}
+
+/// Where the scanner keeps what is its own under the server's data: its
+/// replica, the prints of the files it has offered, and the pictures it
+/// took out of them.
+pub fn replica_dir(data: &Path) -> PathBuf {
+    data.join("library")
+}
+
+/// The prints ([`Prints`]): a file of this server's, not of the log's.
+pub fn prints_file(data: &Path) -> PathBuf {
+    data.join("library-files.json")
+}
+
+/// The pictures taken out of files, which `/media/.art/` serves
+/// ([`covers::routes`]).
+pub fn art_dir(data: &Path) -> PathBuf {
+    data.join("art")
 }
 
 /// The scanner, running. Dropping it stops the watch and the thread, and
@@ -87,8 +121,18 @@ pub struct Scanner {
     _watcher: Option<notify::RecommendedWatcher>,
     tx: Sender<Nudge>,
     stop: Arc<AtomicBool>,
-    authored: Arc<AtomicUsize>,
+    counts: Arc<Counts>,
     thread: Option<JoinHandle<()>>,
+}
+
+/// What the scanner has done since it started, for what it prints and for
+/// the tests.
+#[derive(Default)]
+struct Counts {
+    /// Entries authored.
+    authored: AtomicUsize,
+    /// Files whose tags were read.
+    read: AtomicUsize,
 }
 
 impl Drop for Scanner {
@@ -102,7 +146,9 @@ impl Drop for Scanner {
 
 impl Scanner {
     /// Scan `music/` under `root` and watch `root`, authoring through the
-    /// hub as `login`, with the peer's replica kept in `dir`.
+    /// hub as `login`, with the scanner's own state — the replica, the
+    /// prints, the pictures taken out of files — under `data`
+    /// ([`replica_dir`], [`prints_file`], [`art_dir`]).
     ///
     /// The walk is narrow and the watch is wide, on purpose: only `music/`
     /// holds tracks, but watching the root is what notices that directory
@@ -115,7 +161,7 @@ impl Scanner {
         root: PathBuf,
         domain: Domain,
         hub: HubHandle,
-        dir: PathBuf,
+        data: PathBuf,
         login: Login,
     ) -> Result<Scanner> {
         let opts = Options::server(
@@ -123,6 +169,7 @@ impl Scanner {
             login.session.clone(),
             Some(login.token.clone()),
         );
+        let dir = replica_dir(&data);
         let mut peer = Peer::open_path(domain, &dir, opts)
             .map_err(|e| anyhow::anyhow!("the scanner's replica in {}: {e}", dir.display()))?;
         // `docs/plan-auth.md` The scanner is the library, by construction: it
@@ -141,12 +188,18 @@ impl Scanner {
         );
         let (tx, rx) = channel();
         let stop = Arc::new(AtomicBool::new(false));
-        let authored = Arc::new(AtomicUsize::new(0));
+        let counts = Arc::new(Counts::default());
         let thread = {
-            let (root, stop, authored) = (root.clone(), stop.clone(), authored.clone());
+            let (stop, counts) = (stop.clone(), counts.clone());
+            let scan = Scan {
+                music: root.join(MUSIC),
+                root: root.clone(),
+                art: art_dir(&data),
+                prints: Prints::load(prints_file(&data)),
+            };
             std::thread::Builder::new()
                 .name("harken-scanner".into())
-                .spawn(move || run(root, peer, hub, rx, &stop, &authored))
+                .spawn(move || run(scan, peer, hub, rx, &stop, &counts))
                 .context("starting the scanner")?
         };
         tx.send(Nudge::All)
@@ -159,18 +212,25 @@ impl Scanner {
         let watcher =
             match notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
                 let Ok(event) = event else { return };
-                // Creates and writes only. A removal is not handled on purpose:
-                // the log is permanent, and a file disappearing is not evidence
-                // that somebody meant to delete the song — an unplugged disk
-                // looks exactly the same.
-                if !matches!(
-                    event.kind,
-                    notify::EventKind::Create(_) | notify::EventKind::Modify(_)
-                ) {
+                // Creates and writes, and a picture going. A removed *track* is
+                // not handled on purpose: the log is permanent, and a file
+                // disappearing is not evidence that somebody meant to delete
+                // the song — an unplugged disk looks exactly the same. A
+                // removed cover is only a directory whose tracks are offered
+                // again, with whatever cover they have now.
+                let gone = matches!(event.kind, notify::EventKind::Remove(_));
+                if !gone
+                    && !matches!(
+                        event.kind,
+                        notify::EventKind::Create(_) | notify::EventKind::Modify(_)
+                    )
+                {
                     return;
                 }
                 for path in event.paths {
-                    let _ = events.send(Nudge::One(path));
+                    if !gone || covers::is_image(&path) {
+                        let _ = events.send(Nudge::One(path));
+                    }
                 }
             }) {
                 Ok(mut w) => match w.watch(&root, RecursiveMode::Recursive) {
@@ -193,36 +253,162 @@ impl Scanner {
             _watcher: watcher,
             tx,
             stop,
-            authored,
+            counts,
             thread: Some(thread),
         })
     }
 
-    /// Walk the whole directory again. Safe at any time: nothing already a
-    /// song is offered, and `add_song` would do nothing with it if it were.
+    /// Walk the whole directory again. Safe at any time: a file whose print
+    /// has not moved is not read, and one that has is authored only if it
+    /// says something new.
     pub fn rescan(&self) {
         let _ = self.tx.send(Nudge::All);
     }
 
-    /// How many songs this scanner has authored since it started.
+    /// How many entries this scanner has authored since it started.
     pub fn authored(&self) -> usize {
-        self.authored.load(Ordering::Relaxed)
+        self.counts.authored.load(Ordering::Relaxed)
     }
+
+    /// How many files' tags this scanner has read since it started.
+    pub fn read(&self) -> usize {
+        self.counts.read.load(Ordering::Relaxed)
+    }
+}
+
+/// What one file was when it was last offered: its size and modification
+/// time, and [`covers::Found::print`] of the pictures beside it. Any of the
+/// three moving is a reason to read it again. The artist its tags named is
+/// kept too, because whose a picture in the directory above is depends on
+/// it — so the pictures are looked at as that artist's until the tags are
+/// read again, and a file whose tags moved has moved anyway.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Print {
+    pub size: u64,
+    pub mtime: u128,
+    pub artist: String,
+    pub covers: String,
+}
+
+/// Every file's [`Print`], by the path the log carries, kept in one JSON
+/// file and written whole — beside and renamed in — after any look that
+/// moved one. Lost or unreadable, it is empty: every file is read once
+/// more, and the procedure keeps the library right.
+pub struct Prints {
+    path: PathBuf,
+    files: BTreeMap<String, Print>,
+    dirty: bool,
+}
+
+impl Prints {
+    pub fn load(path: PathBuf) -> Prints {
+        let files = match std::fs::read(&path) {
+            Ok(bytes) => Prints::decode(&bytes).unwrap_or_else(|| {
+                eprintln!(
+                    "harken-server: library: {} is not readable; every file is read again",
+                    path.display()
+                );
+                BTreeMap::new()
+            }),
+            Err(_) => BTreeMap::new(),
+        };
+        Prints {
+            path,
+            files,
+            dirty: false,
+        }
+    }
+
+    fn decode(bytes: &[u8]) -> Option<BTreeMap<String, Print>> {
+        let v: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+        let mut out = BTreeMap::new();
+        for (file, p) in v.get("files")?.as_object()? {
+            out.insert(
+                file.clone(),
+                Print {
+                    size: p.get("size")?.as_u64()?,
+                    mtime: p.get("mtime")?.as_str()?.parse().ok()?,
+                    artist: p.get("artist")?.as_str()?.to_string(),
+                    covers: p.get("covers")?.as_str()?.to_string(),
+                },
+            );
+        }
+        Some(out)
+    }
+
+    pub fn get(&self, file: &str) -> Option<&Print> {
+        self.files.get(file)
+    }
+
+    fn set(&mut self, file: String, print: Print) {
+        if self.files.get(&file) != Some(&print) {
+            self.files.insert(file, print);
+            self.dirty = true;
+        }
+    }
+
+    /// Written whole, beside and renamed in, so a crash leaves the old file
+    /// or the new one and never half of either.
+    fn save(&mut self) {
+        if !self.dirty {
+            return;
+        }
+        let files: serde_json::Map<String, serde_json::Value> = self
+            .files
+            .iter()
+            .map(|(f, p)| {
+                (
+                    f.clone(),
+                    serde_json::json!({
+                        "size": p.size,
+                        // A string: nanoseconds since 1970 are past what a
+                        // JSON number promises to hold exactly.
+                        "mtime": p.mtime.to_string(),
+                        "artist": p.artist,
+                        "covers": p.covers,
+                    }),
+                )
+            })
+            .collect();
+        let bytes = serde_json::to_vec(&serde_json::json!({ "files": files }))
+            .expect("a map of strings and numbers encodes");
+        let tmp = self.path.with_extension("json.partial");
+        let done = self
+            .path
+            .parent()
+            .map_or(Ok(()), std::fs::create_dir_all)
+            .and_then(|()| std::fs::write(&tmp, bytes))
+            .and_then(|()| std::fs::rename(&tmp, &self.path));
+        match done {
+            Ok(()) => self.dirty = false,
+            Err(e) => eprintln!(
+                "harken-server: library: cannot keep {}: {e}",
+                self.path.display()
+            ),
+        }
+    }
+}
+
+/// The scanner's own state on its thread: where things are, and the prints.
+struct Scan {
+    root: PathBuf,
+    music: PathBuf,
+    art: PathBuf,
+    prints: Prints,
 }
 
 /// The scanner's whole life: a peer, and a loop over what it is told to
 /// look at.
 fn run(
-    root: PathBuf,
+    mut scan: Scan,
     mut peer: Peer,
     hub: HubHandle,
     rx: Receiver<Nudge>,
     stop: &AtomicBool,
-    authored: &AtomicUsize,
+    counts: &Counts,
 ) {
     peer.connect_with("local", hub.dial());
     catch_up(&mut peer, &hub, stop);
-    let music = root.join(MUSIC);
 
     while !stop.load(Ordering::Relaxed) {
         let first = match rx.recv_timeout(IDLE) {
@@ -238,10 +424,11 @@ fn run(
                 std::thread::sleep(SETTLE);
             }
             nudges.extend(rx.try_iter());
-            let added = look(&mut peer, &root, &music, nudges);
-            if added > 0 {
-                authored.fetch_add(added, Ordering::Relaxed);
-                println!("harken-server: library +{added}");
+            let (authored, read) = look(&mut peer, &mut scan, nudges);
+            counts.read.fetch_add(read, Ordering::Relaxed);
+            if authored > 0 {
+                counts.authored.fetch_add(authored, Ordering::Relaxed);
+                println!("harken-server: library +{authored}");
             }
         }
         // Whatever that produced, and whatever the log has for us. Not
@@ -284,12 +471,13 @@ fn catch_up(peer: &mut Peer, hub: &HubHandle, stop: &AtomicBool) {
     }
 }
 
-/// One look at whatever the nudges name. Says how many songs it authored.
-fn look(peer: &mut Peer, root: &Path, music: &Path, nudges: Vec<Nudge>) -> usize {
+/// One look at whatever the nudges name. Says how many entries it authored
+/// and how many files it read.
+fn look(peer: &mut Peer, scan: &mut Scan, nudges: Vec<Nudge>) -> (usize, usize) {
     let mut paths = BTreeSet::new();
     for n in nudges {
         match n {
-            Nudge::All => walk(music, &mut paths),
+            Nudge::All => walk(&scan.music, &mut paths),
             // A *directory* appearing is the case that matters, and it is not
             // the same as a file appearing. Dropping an album folder in
             // creates the directory and its tracks in the same breath, and a
@@ -298,18 +486,33 @@ fn look(peer: &mut Peer, root: &Path, music: &Path, nudges: Vec<Nudge>) -> usize
             // and are never announced. What is announced is the directory, so
             // that is what gets walked.
             Nudge::One(p) if p.is_dir() => walk(&p, &mut paths),
+            // A picture added, replaced or taken away is every track below
+            // its directory offered again: an album's cover is its own
+            // directory's, and an artist's picture is the albums' under it.
+            Nudge::One(p) if covers::is_image(&p) => {
+                if let Some(dir) = p.parent() {
+                    walk(dir, &mut paths)
+                }
+            }
             Nudge::One(p) => {
                 paths.insert(p);
             }
         }
     }
-    let mut added = 0;
+    let mut covers = Covers::new(&scan.root, &scan.music, &scan.art);
+    let (mut authored, mut read) = (0, 0);
     for p in &paths {
-        if offer(peer, root, music, p) {
-            added += 1;
+        match offer(peer, scan, &mut covers, p) {
+            Offered::Authored => {
+                authored += 1;
+                read += 1;
+            }
+            Offered::Read => read += 1,
+            Offered::Not => {}
         }
     }
-    added
+    scan.prints.save();
+    (authored, read)
 }
 
 /// Whether the library already has a file: asked of the replica's view,
@@ -325,6 +528,42 @@ fn known_file(peer: &Peer, file: &str) -> bool {
             row.get("file") == Some(&f)
         })
         .is_empty()
+}
+
+/// Whether an entry would write anything over what the replica holds: the
+/// mutation, applied to a copy that is thrown away. What the procedure does
+/// with an entry saying nothing new is write nothing, so not authoring one
+/// is the same library with one entry fewer in the log.
+fn would_change(peer: &Peer, name: &str, args: &Args) -> bool {
+    let domain = peer.domain();
+    let Ok((h, f)) = domain.mutator(name) else {
+        return true;
+    };
+    let autos: Args = f
+        .autos
+        .iter()
+        .map(|(n, a)| {
+            let v = match a {
+                Auto::NewId(_) => Value::Id([0xff; 16]),
+                Auto::Now => Value::int(0),
+            };
+            (n.clone(), v)
+        })
+        .collect();
+    let store = peer.store();
+    let mut copy = Overlay::new(store);
+    let out = match domain.natives().get(h) {
+        Some(p) => p.apply(peer.ctx(), &autos, args, &mut copy),
+        None => ark::eval::apply_closure(
+            store.schema(),
+            &domain.closures()[h],
+            peer.ctx(),
+            &autos,
+            args,
+            &mut copy,
+        ),
+    };
+    !matches!(out, Ok(Ok(changes)) if changes.is_empty())
 }
 
 /// Every file under `dir`. A directory that cannot be read is skipped rather
@@ -362,26 +601,70 @@ pub fn is_track(music: &Path, path: &Path) -> bool {
     ext.is_some_and(|e| AUDIO.contains(&e.as_str()))
 }
 
-/// Offer one path to the log. Says whether it authored anything.
-fn offer(peer: &mut Peer, root: &Path, music: &Path, path: &Path) -> bool {
-    if !is_track(music, path) {
-        return false;
+/// What offering one path came to.
+enum Offered {
+    /// Not a track, not readable, or unchanged since it was last offered:
+    /// its tags were not read.
+    Not,
+    /// Read, and the library already says what it says.
+    Read,
+    /// Read, and authored.
+    Authored,
+}
+
+/// Offer one path to the log.
+fn offer(peer: &mut Peer, scan: &mut Scan, covers: &mut Covers, path: &Path) -> Offered {
+    if !is_track(&scan.music, path) {
+        return Offered::Not;
     }
-    let Some(rel) = relative(root, path) else {
-        return false;
+    let Some(rel) = relative(&scan.root, path) else {
+        return Offered::Not;
     };
-    if known_file(peer, &rel) {
-        return false;
+    // Gone since it was announced, or never there: nothing to say about it.
+    let Ok(meta) = std::fs::metadata(path) else {
+        return Offered::Not;
+    };
+    let Some(dir) = path.parent() else {
+        return Offered::Not;
+    };
+    let (size, mtime) = (meta.len(), covers::mtime(&meta));
+    if let Some(was) = scan.prints.get(&rel) {
+        let now = Print {
+            size,
+            mtime,
+            artist: was.artist.clone(),
+            covers: covers.beside(dir, &was.artist).print(),
+        };
+        if *was == now && known_file(peer, &rel) {
+            return Offered::Not;
+        }
     }
-    let Some(track) = read(path) else {
-        return false;
+    let Some((track, embedded)) = read_with_picture(path) else {
+        return Offered::Not;
     };
+    let found = covers.beside(dir, &track.artist);
+    let print = Print {
+        size,
+        mtime,
+        artist: track.artist.clone(),
+        covers: found.print(),
+    };
+    // A cover beside the track first, then the picture inside it — taken
+    // out only for a track on a record, since a cover is an album's.
+    let album_art = match &found.album {
+        Some(i) => i.value(),
+        None => embedded
+            .filter(|_| !track.album.is_empty())
+            .and_then(|bytes| covers.extract(&bytes))
+            .unwrap_or_default(),
+    };
+    let artist_art = found.artist.map(|i| i.value()).unwrap_or_default();
     let call = args([
         ("title", Value::text(track.title)),
         ("artist", Value::text(track.artist)),
         ("album", Value::text(track.album)),
         ("duration_ms", Value::int(track.duration_ms)),
-        ("file", Value::text(rel)),
+        ("file", Value::text(rel.clone())),
         ("track", Value::int(track.number)),
         // Neither is in a standard tag: a part is a division of a work and a
         // catalogue number is a scholarly index, and no file carries either.
@@ -390,12 +673,12 @@ fn offer(peer: &mut Peer, root: &Path, music: &Path, path: &Path) -> bool {
         ("catalogue", Value::text("")),
         ("performer", Value::text(track.performer)),
         ("bpm", Value::int(track.bpm)),
-        // No cover, from a scanner that cannot yet find one. Empty rather
-        // than absent, and the procedure reads empty as "this entry has no
-        // picture to offer" and leaves whatever is already on the row — so a
-        // rescan of a library somebody has given covers to does not wipe them.
-        ("album_art", Value::text("")),
-        ("artist_art", Value::text("")),
+        // The covers found for it, or empty: the procedure reads empty as
+        // "this entry has no picture to offer" and leaves whatever is
+        // already on the row, so a track with none does not wipe the one its
+        // album already has.
+        ("album_art", Value::text(album_art)),
+        ("artist_art", Value::text(artist_art)),
         // No disc, no work, no movement number — none of which a plain tag
         // carries. 0 and empty are "nobody said": the track becomes a
         // recording of its own, which is what a pop track is.
@@ -403,14 +686,21 @@ fn offer(peer: &mut Peer, root: &Path, music: &Path, path: &Path) -> bool {
         ("work_title", Value::text("")),
         ("movement_no", Value::int(0)),
     ]);
+    if !would_change(peer, "add_song", &call) {
+        scan.prints.set(rel, print);
+        return Offered::Read;
+    }
     match peer.mutate("add_song", call) {
-        Ok(_) => true,
+        Ok(_) => {
+            scan.prints.set(rel, print);
+            Offered::Authored
+        }
         Err(e) => {
             eprintln!(
                 "harken-server: library: {} was refused: {e}",
                 path.display()
             );
-            false
+            Offered::Read
         }
     }
 }
@@ -464,6 +754,12 @@ pub struct Track {
 /// untagged file gets a title and nothing else rather than a confident
 /// mistake.
 pub fn read(path: &Path) -> Option<Track> {
+    read_with_picture(path).map(|(track, _)| track)
+}
+
+/// [`read`], and the picture the tags carry ([`covers::embedded`]), from
+/// the one reading.
+pub fn read_with_picture(path: &Path) -> Option<(Track, Option<Vec<u8>>)> {
     use lofty::file::{AudioFile, TaggedFileExt};
     use lofty::probe::Probe;
     use lofty::tag::{Accessor, ItemKey};
@@ -488,7 +784,7 @@ pub fn read(path: &Path) -> Option<Track> {
         .and_then(|t| t.get_string(ItemKey::Bpm))
         .and_then(|v| v.trim().parse::<i64>().ok())
         .unwrap_or(0);
-    Some(Track {
+    let track = Track {
         title,
         artist: text(tag.and_then(|t| t.artist())),
         album: text(tag.and_then(|t| t.album())),
@@ -504,7 +800,8 @@ pub fn read(path: &Path) -> Option<Track> {
             .trim()
             .to_string(),
         bpm: bpm.max(0),
-    })
+    };
+    Some((track, covers::embedded(&tagged)))
 }
 
 #[cfg(test)]

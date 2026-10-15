@@ -7,13 +7,44 @@ are the shared crates'; what is here is what only harken has:
 
 - **`library.rs`** — the media directory as a peer. `music/` under the root
   is walked at start and the whole root is watched after; each audio file
-  whose path is not already a song is read with lofty and authored as
-  `add_song` by an `ark_client::Peer` in this process, dialling the hub
-  (no socket), signed in as the account `library`. A new *directory* is
-  walked (its tracks land before a watch on it exists); audio outside
-  `music/` is not a track; a removal is ignored (the log is permanent, and an
-  unplugged disk looks the same). The replica catches up with the log
-  before the first walk, so a restart authors nothing.
+  is read with lofty and authored as `add_song` by an `ark_client::Peer` in
+  this process, dialling the hub (no socket), signed in as the account
+  `library`. `add_song` is an upsert by `file`: a file the library already
+  has is that song said again — retagged, or with a cover it lacked — and
+  keeps its id, so a playlist holding it still does; the same file saying
+  nothing new writes nothing. What a file was when it was last offered —
+  its size, its modification time, and the same of the covers beside it —
+  is kept in `DATA/library-files.json`, and a file whose print has not
+  moved is not read at all; one that has moved is authored only if the
+  entry would change what the replica holds. So a restart over an
+  untouched library reads no tags and authors nothing, and a missing or
+  unreadable `library-files.json` is one full read and nothing worse. A
+  new *directory* is walked (its tracks land before a watch on it exists);
+  a picture added, replaced or removed offers the tracks under its
+  directory again; audio outside `music/` is not a track; a removed track
+  is ignored (the log is permanent, and an unplugged disk looks the same).
+- **`covers.rs`** — where a cover comes from, in this order, per track:
+  1. a picture beside it: `cover`, `folder`, `front` or `album` (`.jpg`,
+     `.jpeg`, `.png`, `.webp`, any case), else the only picture in the
+     directory that is not `artist.*`; a disc directory (`CD1`, `Disc 2`)
+     with none asks the record's directory above it. Spelt
+     `.cover/<v>/music/…/cover.jpg`, which `/media/.cover/<v>/` serves from
+     the media root with `<v>` ignored: `<v>` is the file's size and
+     modification time, hashed, so a cover replaced under the same name is
+     a new value, and no client goes on drawing the one it cached;
+  2. else the picture inside the file — the front cover, else the first —
+     written once into `DATA/art/<sha256>.<ext>` and spelt
+     `.art/<sha256>.<ext>`, which `/media/.art/` serves. The media root may
+     be read-only (it is, under the NixOS module), and a hundred tracks
+     carrying one picture are one file.
+
+  An artist's picture is only ever a file: `artist.*` beside the record or
+  in the directory above it, or `folder.*` in that directory above when it
+  is named for the artist (`Artist/Album/track`, Jellyfin's and Kodi's
+  layout). Files directly in `music/` are nobody's record. Every value is a
+  path every client already joins to `<server>/media/` as it does a track,
+  so no client changed; `/media/.art` and `/media/.cover` are reserved, and
+  `ServeDir` refuses a `..` in either, written or encoded.
 - **`listening.rs`** — the `Desk`: one audio session per account, as an
   `ark_server::Live` over live rooms. Exactly one output; the output
   survives its socket; a command goes to the output, unless it cannot be
@@ -38,7 +69,7 @@ HARKEN_DEV_AUTH=1 harken-server [127.0.0.1:8787]
 
 | variable | |
 |---|---|
-| `HARKEN_DATA` | the log, kept rooms, sessions, the scanner's replica (default: `$TMPDIR/harken-server`) |
+| `HARKEN_DATA` | the log, kept rooms, sessions, the scanner's replica, its prints and the covers it took out of files (default: `$TMPDIR/harken-server`; below) |
 | `HARKEN_DEV_AUTH=1` | anyone is whoever they say — a laptop only, said loudly at start |
 | `HARKEN_OIDC_ISSUER`, `HARKEN_OIDC_CLIENT_ID`, `HARKEN_OIDC_CLIENT_SECRET_FILE` | all three or none; the secret is a file (a systemd credential); `HARKEN_OIDC_SCOPES` |
 | `HARKEN_PUBLIC_URL` | where a browser reaches this server (default `http://ADDR`) |
@@ -51,6 +82,38 @@ HARKEN_DEV_AUTH=1 harken-server [127.0.0.1:8787]
 | `HARKEN_ROLES` | who holds which role: `library=alice,bob;admin=alice` |
 | `HARKEN_ADMIN_BIND` | where the admin page listens (none without it): loopback asks nothing, wider asks for a login holding `admin` (`docs/plan-guards.md` D4) |
 | `HARKEN_ADMIN_WEB` | the admin page's build (`nix build .#ark-admin`); without it the admin API alone |
+
+What is in `HARKEN_DATA` (`/var/lib/harken` under the NixOS module), and
+whose it is:
+
+| path | |
+|---|---|
+| `log.ark-log`, `log.ark-journal` | the log: the library, every playlist, every person's work. This *is* the database |
+| `modules.cbor` | the modules this server has run, so an older client's entry still applies |
+| `cursors.cbor` | how far each session has read, for what the log may forget |
+| `live.cbor` | each account's kept listening session (a queue and a place in it) |
+| `sessions.json` | the sign-ins: every login this server issued |
+| `library/` | the scanner's replica, a peer like any other |
+| `library-files.json` | the scanner's prints; local, never the log's |
+| `art/` | the pictures taken out of files, by hash |
+
+A library scanned before covers were found needs nothing: the first start
+of a server that keeps prints has none, so it reads every file once and
+authors an entry for each record whose cover it finds. Dropping the
+database is never needed for covers. If it is wanted anyway — to start the
+library over — stop the service and delete `log.ark-log` and
+`log.ark-journal`, which is every song *and every playlist*; `library/`,
+`library-files.json`, `cursors.cbor` and `live.cbor` may go with them,
+and keeping `sessions.json` keeps everybody signed in. Nothing on a device
+needs clearing: a client's `Hello` names the log it was confirmed on, a
+server whose log is another answers with its snapshot, and the device
+re-bases what it had pending onto that (`fleet.rs`
+`a_server_that_lost_its_log_re_bases_everyone_onto_what_it_has`) — so what
+the old log held is gone from every device, and its pending work is
+authored again on the new one, where an entry naming a song or a playlist
+the new log does not have does nothing or is refused, saying why. The scanner's replica is re-based the same
+way, and with no song for any file it reads and authors the whole library
+again.
 
 A server with neither a provider nor `HARKEN_DEV_AUTH=1` refuses to start.
 Nothing assumes a peer arrived signed in: a client used before anybody
@@ -81,12 +144,16 @@ an entry authored under an older login of the same person is accepted
 `cargo test -p harken-server`: the desk's rules against a hub with standing
 devices (`tests/listening.rs`); the bridge the whole way round over real
 sockets against a stand-in Home Assistant (`tests/bridge.rs`); the scanner
-over real WAV files, tags written and read by lofty, and `/media` range
-requests (`tests/library.rs`); sign-in, signed-out and older-login work,
+over real WAV files, tags written and read by lofty, covers beside a
+record and inside its tracks fetched where the log says, a retagged file
+the same song, a rescan of nothing new reading nothing, and `/media` range
+requests and `..` (`tests/library.rs`); sign-in, signed-out and older-login work,
 restarts (`tests/server.rs`); the web validator through this server
 (`tests/web.rs`). Each was falsified once by breaking what it holds.
 
 Not verified: a real Home Assistant or speaker (the stand-in is written from
 the REST API's documentation), a real OpenID Connect provider, the NixOS
-module on a machine (it is evaluated, never booted), inotify on a real
-library of thousands of files, a TLS proxy in front.
+module on a machine (it is evaluated, never booted), covers in a real
+library's files (the tests write the tags, the pictures are a few bytes
+nothing decodes, and an MP4's or an Ogg's picture has not been read here),
+inotify on a real library of thousands of files, a TLS proxy in front.
