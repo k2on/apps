@@ -442,7 +442,16 @@ class MotionTests {
                     homeGone = n
                     libraryShown = has(view, "Playlists")
                     frames(600)
-                    moving = motion.movingFrames
+                    // Between the other roots too, and back.
+                    click(view, "Search")
+                    frames(300)
+                    click(view, "Library")
+                    frames(300)
+                    click(view, "Home")
+                    frames(300)
+                    click(view, "Library")
+                    frames(300)
+                    moving = motion.movingFrames + motion.tabFrames
                     // A page does move, so the count is not empty for want of counting.
                     click(view, "Albums")
                     frames(200)
@@ -451,13 +460,180 @@ class MotionTests {
                     opening = motion.movingFrames
                 }
             },
-            4_000L,
+            6_000L,
         )
         println("tab: Home was gone from the tree after $homeGone frames, none of them drawn")
         assertEquals("frames drawn mid-move switching tabs", 0, moving)
         assertTrue("Home went: $homeGone", homeGone in 0..9)
         assertTrue("Library came", libraryShown)
         assertTrue("frames drawn mid-move opening a page: $opening", opening > 0)
+    }
+
+    /** The tab bar's item for `tab`, and whether it is the one lit. */
+    private fun lit(view: ComposeView, tab: String): Boolean =
+        all(root(view)).first { tab in texts(it) && it.config.getOrNull(SemanticsActions.OnClick) != null }.config.getOrNull(SemanticsProperties.Selected) == true
+
+    @Test
+    fun aTabKeepsItsOwnStack() {
+        var opened = false
+        var onLibrary = false
+        var backOnFirstFrame = false
+        var moving = -1
+        var stillThere = false
+        app(
+            { view, motion, _ ->
+                {
+                    click(view, "Brandenburg Concertos")
+                    frames(600)
+                    opened = has(view, "ALBUM")
+                    click(view, "Library")
+                    frames(300)
+                    onLibrary = !has(view, "ALBUM") && lit(view, "Library")
+                    motion.movingFrames = 0
+                    click(view, "Home")
+                    frame()
+                    backOnFirstFrame = has(view, "ALBUM")
+                    frames(600)
+                    moving = motion.movingFrames
+                    stillThere = has(view, "ALBUM") && lit(view, "Home")
+                }
+            },
+            4_000L,
+        )
+        println("tabs: Home's album back on the first frame $backOnFirstFrame, $moving frames drawn mid-move")
+        assertTrue("the album opened", opened)
+        assertTrue("Library is its own", onLibrary)
+        assertTrue("Home's album is there again on the first frame", backOnFirstFrame)
+        assertEquals("with no frame of a move", 0, moving)
+        assertTrue("and stays", stillThere)
+    }
+
+    @Test
+    fun reselectingATabOnAPageGoesBackToItsRoot() {
+        var shrink = emptyList<Pair<Long, Float>>()
+        var atRoot = false
+        app(
+            { view, motion, _ ->
+                {
+                    click(view, "Brandenburg Concertos")
+                    frames(600)
+                    motion.movingFrames = 0
+                    click(view, "Home")
+                    shrink = curve({ motion.drawnAt }, 700) { it <= 0f }
+                    frames(300)
+                    atRoot = !has(view, "ALBUM") && has(view, "Recently added") && lit(view, "Home")
+                }
+            },
+            3_000L,
+        )
+        table("curve reselect (ms:shown)", shrink)
+        assertTrue("the page shrank back through the in-between: $shrink", shrink.any { it.second > 0.05f && it.second < 0.95f })
+        assertTrue("into its card", shrink.any { it.second <= 0.01f })
+        assertTrue("and Home's root is shown", atRoot)
+    }
+
+    @Test
+    fun reselectingATabAtItsRootScrollsToTheTop() {
+        var down: Pair<Int, Int>? = null
+        var top: Pair<Int, Int>? = null
+        app(
+            { view, _, _ ->
+                {
+                    // Every song, at the Library's root: far down it, then the Library tapped again.
+                    val st = listWith(view) { n -> "Alla Hornpipe" in texts(n) }!!
+                    st.scrollToItem(st.layoutInfo.totalItemsCount - 1)
+                    frames(300)
+                    down = st.firstVisibleItemIndex to st.firstVisibleItemScrollOffset
+                    click(view, "Library")
+                    frames(800)
+                    top = st.firstVisibleItemIndex to st.firstVisibleItemScrollOffset
+                }
+            },
+            3_000L,
+            start = LibraryTab.Songs,
+        )
+        println("reselect at the root: scrolled to $down, then $top")
+        assertTrue("scrolled down: $down", (down?.first ?: 0) > 0)
+        assertEquals("and back at the top", 0 to 0, top)
+    }
+
+    @Test
+    fun backAtTheLibrarysRootPreviewsAndLandsOnHome() {
+        var taken = false
+        var at30 = -1f
+        var at90 = -1f
+        var homeUnder = false
+        var cancelled = -1f
+        var keptLibrary = false
+        var landed = false
+        var gone = emptyList<Pair<Long, Float>>()
+        app(
+            { view, motion, back ->
+                {
+                    click(view, "Library")
+                    frames(300)
+                    taken = back.hasEnabledCallbacks()
+                    // A preview, cancelled: it springs back, and the Library stays.
+                    back.dispatchOnBackStarted(start)
+                    back.dispatchOnBackProgressed(at(0.5f))
+                    frames(150)
+                    back.dispatchOnBackCancelled()
+                    frames(500)
+                    cancelled = motion.tabDrawnScale
+                    keptLibrary = lit(view, "Library") && !motion.tabBacking
+                    // Then through.
+                    back.dispatchOnBackStarted(start)
+                    for (r in listOf(0.3f, 0.6f, 0.9f)) {
+                        back.dispatchOnBackProgressed(at(r))
+                        frames(100)
+                        if (r == 0.3f) at30 = motion.tabDrawnScale
+                        if (r == 0.9f) at90 = motion.tabDrawnScale
+                        shots.keep = "tab-back-${(r * 100).toInt()}"
+                        frame()
+                    }
+                    homeUnder = has(view, "Recently added")
+                    shots.meta = { 1f - motion.tabDrawnScale }
+                    shots.series = "tab-back-done"
+                    back.onBackPressed()
+                    gone = curve({ motion.tabDrawnScale }, 500) { !motion.tabBacking }
+                    shots.series = null
+                    frames(300)
+                    landed = lit(view, "Home") && has(view, "Recently added") && !motion.tabBacking
+                }
+            },
+            4_000L,
+        )
+        shots.pick("tab-back-done", listOf(0.11f, 0.13f, 0.15f), "tab-back-done")
+        table("curve tab-back-done (ms:scale)", gone)
+        println("tab back: taken $taken; scale ${at30} at 0.3, ${at90} at 0.9; cancelled back to $cancelled; landed on Home $landed")
+        assertTrue("back at the Library's root is taken", taken)
+        assertEquals("a cancel springs back", 1f, cancelled, 0f)
+        assertTrue("and keeps the Library", keptLibrary)
+        assertTrue("at 0.3 it has shrunk: $at30", at30 < 1f && at30 > 0.9f)
+        // The preview's limit: at most a tenth of its size, all but reached by 0.9.
+        assertTrue("at 0.9 it is at about 0.9: $at90", at90 >= 0.9f - 1e-4f && at90 < 0.901f && at90 < at30)
+        assertTrue("with Home under it", homeUnder)
+        assertTrue("let go, it went: $gone", gone.isNotEmpty() && gone.last().first <= 300)
+        assertTrue("and Home is the tab", landed)
+    }
+
+    @Test
+    fun atHomesRootNoBackIsTaken() {
+        var atHome = true
+        var onPage = false
+        app(
+            { view, _, back ->
+                {
+                    atHome = back.hasEnabledCallbacks()
+                    click(view, "Brandenburg Concertos")
+                    frames(600)
+                    onPage = back.hasEnabledCallbacks()
+                }
+            },
+            2_500L,
+        )
+        assertFalse("at Home's root nothing takes back: the system's own runs", atHome)
+        assertTrue("on a page, back is taken", onPage)
     }
 
     /** The vertical list with a node `marker` holds somewhere under it, as its state: the screen keeps it to itself. */

@@ -261,8 +261,10 @@ exactly what the app draws):
 - **Motion** — a page grows out of the cover that was tapped, and goes
   back into it: by the back button, by the system's back gesture
   (Android 14 and later draw the page shrinking under the finger), or
-  pulled down from its top. A page opened from no cover rises. The tabs
-  switch at once. How is `kotlin/ark-ui` (`Motion.kt`, `ExpandingCard.kt`,
+  pulled down from its top. A page opened from no cover rises. Each tab
+  keeps its own stack and switches to it at once; the tab already shown
+  goes back to its root, or scrolls its root to the top; back at Search's
+  or the Library's root goes Home, previewed like a page. How is `kotlin/ark-ui` (`Motion.kt`, `ExpandingCard.kt`,
   `Springs.kt`), which every Ark app on Android shares; `PlayerSheet.kt`
   here says which faces the player's card has, and `docs/plan-android.md`
   why.

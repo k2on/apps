@@ -257,6 +257,34 @@ public class PageMotion(private val tabs: Set<String> = emptySet()) {
     /** Whether the NavHost has anything to go back to. */
     internal var relayed by mutableStateOf(false)
 
+    // Back from a tab's root to the first tab
+    // ------------------------------------------------------
+
+    /**
+     * Whether a back from a tab's root is under way: the first tab is drawn under it while it is.
+     */
+    public var tabBacking: Boolean by mutableStateOf(false)
+        internal set
+
+    /**
+     * How far that back's preview has come, 0 to [Springs.PREVIEW]: the share of its size the tab
+     * sheds.
+     */
+    internal var tabPreview by mutableFloatStateOf(0f)
+
+    /** How far the tab has gone once that back was let go past the threshold, 0 to 1. */
+    internal var tabGone by mutableFloatStateOf(0f)
+
+    /** The spring back from a cancelled tab back. */
+    internal var tabSpringing: Job? = null
+
+    /** The scale the leaving tab was last drawn at, 1 when none is: a test's view of it. */
+    public var tabDrawnScale: Float = 1f
+        internal set
+
+    /** Frames drawn of a tab leaving for the first: a test's view of it. */
+    public var tabFrames: Int = 0
+
     /**
      * The preview for page `id` drawn now: the live one while the gesture is held, its release
      * shrinking with the page after.
@@ -621,6 +649,12 @@ public fun AnimatedVisibilityScope.Moving(
  * so that registers after it and is asked first, and say [blocked] while such a thing is up; put
  * [Relayed] around the NavHost.
  *
+ * At the root of a tab that is not the first, back goes to the first (`toFirst`), previewed the
+ * same way: the tab sheds its size toward the limit with the first tab, dimmed, behind it
+ * ([TabStack] draws both), and let go past the threshold it shrinks a little further and fades out
+ * on [Springs.fade] before the first tab is the one shown; short of it, it springs back. At the
+ * first tab's root nothing here takes back, so the system's own back runs.
+ *
  * The NavHost would seek its transition along the gesture's progress, which is the page following
  * the finger all the way into its card. It is handed a dispatcher of its own instead, and told only
  * that a gesture began (at progress 0, so the page it goes back to is composed and shows under the
@@ -628,7 +662,11 @@ public fun AnimatedVisibilityScope.Moving(
  * card on its spring, from the preview — or, once the preview has sprung back, that it did not.
  */
 @Composable
-public fun PageBack(motion: PageMotion, blocked: () -> Boolean = { false }) {
+public fun PageBack(
+    motion: PageMotion,
+    blocked: () -> Boolean = { false },
+    toFirst: (() -> Unit)? = null,
+) {
     val owner = LocalOnBackPressedDispatcherOwner.current ?: return
     val relay =
         remember(owner) {
@@ -639,7 +677,14 @@ public fun PageBack(motion: PageMotion, blocked: () -> Boolean = { false }) {
     motion.relay = relay
     val off by remember { derivedStateOf(blocked) }
     val scope = rememberCoroutineScope()
-    PredictiveBackHandler(enabled = motion.relayed && !off) { events ->
+    // At a tab's root the NavHost has nothing to go back to; at the first tab's, nothing here
+    // takes back at all, and the system's own back runs.
+    PredictiveBackHandler(enabled = (motion.relayed || toFirst != null) && !off) { events ->
+        val first = toFirst
+        if (!motion.relayed && first != null) {
+            motion.backToFirst(events, scope, first)
+            return@PredictiveBackHandler
+        }
         val to = relay.onBackPressedDispatcher
         var started = false
         try {
@@ -658,6 +703,43 @@ public fun PageBack(motion: PageMotion, blocked: () -> Boolean = { false }) {
             if (started) motion.springBack(scope, to)
             throw c
         }
+    }
+}
+
+// Back from a tab's root: the tab previews as a page does, with the first tab under it, and let go
+// past the threshold it shrinks a little further and fades, and the first tab is the one shown.
+private suspend fun PageMotion.backToFirst(
+    events: kotlinx.coroutines.flow.Flow<BackEventCompat>,
+    scope: CoroutineScope,
+    first: () -> Unit,
+) {
+    val back = tabSpringing
+    tabSpringing = null
+    back?.cancel()
+    tabBacking = true
+    tabGone = 0f
+    try {
+        events.collect { e ->
+            edge = e.swipeEdge
+            tabPreview = Springs.preview(e.progress)
+        }
+    } catch (c: CancellationException) {
+        tabSpringing =
+            scope.launch {
+                animate(tabPreview, 0f, animationSpec = Springs.size()) { v, _ -> tabPreview = v }
+                tabBacking = false
+                tabDrawnScale = 1f
+            }
+        throw c
+    }
+    // Not in the handler's own coroutine: going to the first tab stands the handler down.
+    scope.launch {
+        animate(0f, 1f, animationSpec = Springs.fade()) { v, _ -> tabGone = v }
+        first()
+        tabBacking = false
+        tabPreview = 0f
+        tabGone = 0f
+        tabDrawnScale = 1f
     }
 }
 

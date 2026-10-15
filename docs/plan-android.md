@@ -511,7 +511,8 @@ drawn by the page (`Moving`, around every destination):
   and a song's menu grows its pages out of the song's row ("Motion,
   tightened", below).
 - The tabs switch at once: no animation, and the tab leaving is not drawn
-  for the frames it is still composed.
+  for the frames it is still composed. (Each tab keeps its own stack now,
+  and a switch is not a navigation at all: "Motion: tabs", below.)
 - The move is one number per destination, `animateFloat` on the NavHost
   entry's own transition, so whatever seeks that transition moves the page:
   navigation-compose 2.8.5's predictive back seeks it with the edge swipe's
@@ -951,3 +952,100 @@ was not re-recorded.
   byte. One run of the moved tree read 29,289 B a frame for the draw and did
   not repeat in two more (with and without a profiler attached); the times
   are this machine's load.
+
+### Motion: tabs
+
+The owner, on the release APK: "if i am on the home screen, and then tap an
+album, and then tap library on the nav bar, and then tap the home, it still
+animates the album when i tap home. and when i tap home again, it stays on
+the album. … tapping any nav item again should bring them back to that
+screen. also if im on search or library and swipe back to preview, it
+instantly changes to the previous screen without the standard backswipe
+animation."
+
+Both came from one NavHost holding all three tabs, switched by
+`navigate(route) { popUpTo(start) { saveState }; restoreState }`. Home is
+that graph's start, so its own pages were saved under the destination every
+other tab's state was saved under too, and a tap on Home restored the album
+as a fresh navigation — a page growing — then found nothing to restore the
+second time. And a tab's root was a page of nothing: back from Library's
+root was the NavHost popping to Home, which `PageMotion` called a cut.
+
+What it does now, which is what Material's bottom-navigation guidance, iOS's
+tab bars, YouTube and Instagram do:
+
+- **Each tab keeps its own stack.** One NavController per tab, and one
+  NavHost per tab drawn by `ark-ui`'s `TabStack`; only the tab shown is
+  composed, and the others' state — their stacks, their pages' held rows,
+  every list's scroll — is kept by a `SaveableStateHolder` while they are
+  not. A tab switch is not a navigation of any NavHost, so it cannot
+  animate: Home → album → Library → Home shows the album again on the first
+  frame, with nothing moving. "Tab switch" is a property of the change
+  (the tab shown moved), not of a route.
+- **The tab already shown goes to its root.** From a page it pops to the
+  root with back's own motion — the page shrinks into its origin card, or
+  reverses its rise. At the root its list scrolls to the top
+  (`Reselect`, `ScrollsToTop`, an animated scroll), on Home, Search and
+  each of the Library's lists.
+- **Back at the root of Search or of the Library goes Home**, previewed
+  exactly as a page is: the tab sheds up to a tenth of its size toward the
+  limit on the same curve (`Springs.preview`), moves aside, rounds to
+  28 dp, and Home — whatever its stack shows — is drawn under it at the
+  page dim. Let go past the threshold and it sheds 5% more and fades out on
+  a critically damped spring at stiffness 2,500 (`Springs.fade`, about
+  150 ms), and Home is the tab, lit in the bar. Cancelled, it springs back.
+  The pull-down applies only to pages, so not at a root.
+- **Back at Home's root is not taken at all.** No callback is enabled, so
+  the system's own back-to-home animation runs
+  (`enableOnBackInvokedCallback` is already on). On a page of Home's stack
+  back is the page's, as before.
+- The player and the sheets keep priority: `PageBack` is composed before
+  them and stands down while the player is up, as before.
+
+`PageBack` takes `toFirst` — what back at a root does — and decides between
+the page's path and the tab's when the gesture starts. The tab under the
+one leaving hears no back (its NavHost has a dispatcher nothing dispatches
+to); the one shown is `Relayed` as before.
+
+Measured on the frame clock, at 60 fps, from the back gesture's release at
+r = 0.9 (scale): 0.900 at 0 and 16 ms, 0.891 at 33, 0.864 at 66, 0.854 at
+100, 0.851 at 133, and 0.850 by 166 ms, gone and Home shown at 233 ms (the
+spring's own rest). Reselecting Home on the Brandenburg album: the page's
+size from 0.93 at 50 ms to 0.01 at 283 ms, the same curve as a back.
+
+Tests (`MotionTests`, each falsified once):
+
+- `aTabKeepsItsOwnStack`: Home → album → Library → Home has the album on
+  the first frame and draws 0 frames mid-move. Falsified: the tab's stack
+  popped on a switch — "Home's album is there again on the first frame".
+- `reselectingATabOnAPageGoesBackToItsRoot`: Home tapped on the album runs
+  the page's size through the in-between to 0 and lands on Home's root.
+  Falsified: reselect only asking the root to scroll — the page never moved.
+- `reselectingATabAtItsRootScrollsToTheTop`: every song scrolled to (40,
+  135), Library tapped: (0, 0). Falsified: `ScrollsToTop` doing nothing —
+  still (40, 135).
+- `backAtTheLibrarysRootPreviewsAndLandsOnHome`: back is taken at the
+  Library's root; a cancel springs back to scale 1 and keeps the Library;
+  the preview reads 0.908 at r = 0.3 and 0.9001 at 0.9 — the limit, a tenth
+  of the size, all but reached — with Home under it; let go, it is gone by
+  233 ms and Home is the lit tab. Falsified: no `toFirst` — "back at the
+  Library's root is taken".
+- `atHomesRootNoBackIsTaken`: no enabled callback on the dispatcher at Home's
+  root, one on a page. Falsified: `toFirst` always given.
+- `aTabArrivesWithNoFrameInBetween` now also walks Library → Search →
+  Library → Home → Library: 0 frames of a page or a tab moving. Falsified:
+  a tab switch that ran the tab preview's spring — 36 frames.
+
+The frames — back from the Library at r = 0.3, 0.6 and 0.9, and three of
+its completion — are written with HARKEN_MOTION_FRAMES set
+(`tab-back-30`, `-60`, `-90`, `tab-back-done-11`, `-13`, `-15`, by how much
+of its size it had shed).
+
+The screenshots are byte for byte what they were (92, 0 differ):
+the screens did not change, only how they are reached. `ScrollTests` still
+composes nothing per tick or at rest. The fling bench, beside the ark-ui
+commit run the same hour: 32,803–32,805 B per entering row against
+32,822, 27,977 B a frame for the draw against 27,977.
+
+Not verified on a phone: the system's own back-to-home at Home's root, and
+how 150 ms of fade feels.

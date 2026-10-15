@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.IconButton
@@ -36,6 +37,7 @@ import dev.arkdb.ui.Fetching
 import dev.arkdb.ui.Glyph
 import dev.arkdb.ui.Heading
 import dev.arkdb.ui.Recompositions
+import dev.arkdb.ui.ScrollsToTop
 import dev.arkdb.ui.Shelf
 import dev.arkdb.ui.Space
 import dev.arkdb.ui.TabTitle
@@ -65,7 +67,9 @@ fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do, placeholderD
     // Derived once per library, not once per composition: the shelf's cards skip only while the
     // list they were given is the same one.
     val recent = remember(data.tracks) { data.tracks.takeLast(RECENT).reversed() }
-    LazyColumn(Modifier.fillMaxSize()) {
+    val list = rememberLazyListState()
+    ScrollsToTop(list)
+    LazyColumn(Modifier.fillMaxSize(), state = list) {
         item {
             TabTitle("Home") { IconButton(onClick = act::settings) { Glyph(Glyphs.Settings, "Settings") } }
         }

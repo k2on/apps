@@ -23,7 +23,9 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilterChip
@@ -44,6 +46,7 @@ import dev.arkdb.ui.Empty
 import dev.arkdb.ui.Glyph
 import dev.arkdb.ui.ListRow
 import dev.arkdb.ui.Recompositions
+import dev.arkdb.ui.ScrollsToTop
 import dev.arkdb.ui.Space
 import dev.arkdb.ui.TabTitle
 import dev.arkdb.ui.quiet
@@ -106,7 +109,9 @@ fun LibraryScreen(tab: LibraryTab, onTab: (LibraryTab) -> Unit, data: LibraryDat
 
 @Composable
 private fun Playlists(playlists: List<Playlist>, act: Do) {
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = Space.s)) {
+    val list = rememberLazyListState()
+    ScrollsToTop(list)
+    LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(vertical = Space.s)) {
         item {
             ListRow(onClick = act::newPlaylist, title = "New playlist", under = null) {
                 Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = RoundedCornerShape(Space.corner), modifier = Modifier.size(56.dp)) {
@@ -136,7 +141,10 @@ private fun Albums(albums: List<Album>, act: Do) {
         Empty(Glyphs.Album, "No albums yet", "An album appears here when the server finds a song that names one.")
         return
     }
+    val grid = rememberLazyGridState()
+    ScrollsToTop(grid)
     LazyVerticalGrid(
+        state = grid,
         columns = GridCells.Adaptive(150.dp),
         contentPadding = PaddingValues(Space.page),
         horizontalArrangement = Arrangement.spacedBy(Space.l),
@@ -162,7 +170,9 @@ private fun Artists(artists: List<Artist>, act: Do) {
         Empty(Glyphs.Artist, "No artists yet", "Whoever made what the server finds appears here.")
         return
     }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = Space.s)) {
+    val list = rememberLazyListState()
+    ScrollsToTop(list)
+    LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(vertical = Space.s)) {
         items(artists, key = { it.name }) { a ->
             val hero = rememberHero(Space.corner, round = true)
             ListRow(onClick = hero.lifting { act.open(Page.ForArtist(a.name)) }, title = a.name, under = Media.count(a.tracks.toInt(), "song")) {
@@ -178,7 +188,9 @@ private fun Songs(tracks: List<Track>, albumOf: (Track) -> Album?, playing: Stri
         Empty(Glyphs.Note, "No songs yet", "Harken plays what your server finds. Put music in its media folder, under music/, and it appears here.")
         return
     }
-    LazyColumn(Modifier.fillMaxSize()) {
+    val list = rememberLazyListState()
+    ScrollsToTop(list)
+    LazyColumn(Modifier.fillMaxSize(), state = list) {
         items(tracks, key = { it.id.hex }) { t ->
             val album = albumOf(t)
             TrackRow(

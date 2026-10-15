@@ -74,6 +74,15 @@ public object Springs {
      */
     public fun noDecay(): DecayAnimationSpec<Float> = exponentialDecay(frictionMultiplier = 1e6f)
 
+    /**
+     * How stiff a fade is: critically damped, it is all but done in about 150 ms — a tab let go
+     * past the back gesture's threshold, going.
+     */
+    public const val FADE_STIFFNESS: Float = 2500f
+
+    /** Something going, quickly: critically damped at [FADE_STIFFNESS]. */
+    public fun fade(): SpringSpec<Float> = spring(SIZE, FADE_STIFFNESS, REST)
+
     /** How far a back gesture's preview comes, at most, as a share of what it previews. */
     public const val PREVIEW: Float = 0.1f
 

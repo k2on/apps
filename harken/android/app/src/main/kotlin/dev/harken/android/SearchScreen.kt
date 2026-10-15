@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -36,6 +37,7 @@ import dev.arkdb.ui.Empty
 import dev.arkdb.ui.Glyph
 import dev.arkdb.ui.Heading
 import dev.arkdb.ui.Recompositions
+import dev.arkdb.ui.ScrollsToTop
 import dev.arkdb.ui.Shelf
 import dev.arkdb.ui.Space
 import dev.arkdb.ui.TabTitle
@@ -73,7 +75,9 @@ fun SearchScreen(
     act: Do,
 ) {
     Recompositions.hit("SearchScreen")
-    LazyColumn(Modifier.fillMaxSize()) {
+    val list = rememberLazyListState()
+    ScrollsToTop(list)
+    LazyColumn(Modifier.fillMaxSize(), state = list) {
         item { TabTitle("Search") }
         item {
             OutlinedTextField(

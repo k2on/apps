@@ -51,12 +51,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavBackStackEntry
-import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import dev.arkdb.Id
 import dev.arkdb.android.ArkSession
@@ -67,7 +65,8 @@ import dev.arkdb.ui.Origin
 import dev.arkdb.ui.PageBack
 import dev.arkdb.ui.PageMotion
 import dev.arkdb.ui.Recompositions
-import dev.arkdb.ui.Relayed
+import dev.arkdb.ui.Reselect
+import dev.arkdb.ui.TabStack
 import dev.arkdb.ui.Space
 import dev.arkdb.ui.Tapped
 import kotlinx.coroutines.delay
@@ -153,13 +152,6 @@ private fun TabBar(tab: Tab?, onTab: (Tab) -> Unit, sheet: PlayerSheet) {
     }
 }
 
-private fun NavHostController.tab(t: Tab) =
-    navigate(t.route) {
-        popUpTo(graph.findStartDestination().id) { saveState = true }
-        launchSingleTop = true
-        restoreState = true
-    }
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HarkenApp(
@@ -189,7 +181,31 @@ fun HarkenApp(
         }
     }
 
-    val nav = rememberNavController()
+    // One stack per tab, each its own NavHost (`TabStack`): switching tabs is not a navigation, so
+    // what was on a tab is there again, at once, where it was left.
+    var tab by rememberSaveable { mutableStateOf(if (start != null) Tab.Library else Tab.Home) }
+    val navs = Tab.entries.associateWith { rememberNavController() }
+    val reselects = remember { Tab.entries.associateWith { Reselect() } }
+
+    /** The shown tab's stack. */
+    fun nav(): NavHostController = navs.getValue(tab)
+
+    fun show(t: Tab) {
+        tab = t
+    }
+
+    /**
+     * A tab tapped: another tab is shown as it was left; the one already shown goes back to its root,
+     * with back's own motion, or, at its root, its list to its top.
+     */
+    fun select(t: Tab) {
+        if (t != tab) {
+            tab = t
+            return
+        }
+        val n = navs.getValue(t)
+        if (n.previousBackStackEntry != null) n.popBackStack(t.route, inclusive = false) else reselects.getValue(t).ask()
+    }
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     val tracks by library.tracks.collectAsStateWithLifecycle()
@@ -243,7 +259,7 @@ fun HarkenApp(
         object : Do {
             override fun open(page: Page) {
                 // Every song is a tab of the Library, not a page of its own.
-                if (page is Page.Songs) library(LibraryTab.Songs) else nav.navigate(page.route)
+                if (page is Page.Songs) library(LibraryTab.Songs) else nav().navigate(page.route)
             }
 
             override fun play(queue: List<Track>, at: Int, from: Page?) {
@@ -275,13 +291,13 @@ fun HarkenApp(
 
             override fun library(tab: LibraryTab) {
                 libraryTab = tab
-                nav.tab(Tab.Library)
+                show(Tab.Library)
             }
 
-            override fun settings() = nav.navigate("settings")
+            override fun settings() = nav().navigate("settings")
 
             override fun back() {
-                nav.popBackStack()
+                nav().popBackStack()
             }
         }
     }
@@ -323,21 +339,19 @@ fun HarkenApp(
 
     CompositionLocalProvider(LocalCoverLoader provides covers, LocalPageMotion provides motion) {
         HarkenTheme {
-            val entry by nav.currentBackStackEntryAsState()
-            val route = entry?.destination?.route
-            val tab = Tab.entries.firstOrNull { it.route == route }
             // Before the player, so that the player's own back gesture registers after it and is asked
-            // first; and stood down while the player is up, whatever the order.
-            PageBack(motion, blocked = { sheet.p > 0f })
+            // first; and stood down while the player is up, whatever the order. At the root of Search
+            // or of the Library, back goes Home; at Home's, it is the system's.
+            PageBack(motion, blocked = { sheet.p > 0f }, toFirst = if (tab != Tab.Home) ({ tab = Tab.Home }) else null)
             Box(Modifier.fillMaxSize()) {
-                Chrome(tab, player, controls, onTab = { nav.tab(it) }, snackbar, playback.position, sheet) {
+                Chrome(tab, player, controls, onTab = { select(it) }, snackbar, playback.position, sheet) {
                     // Said for every move, so the NavHost's own cross-fade is nowhere: a page grows
-                    // or shrinks, drawn by the page (`Moving`), and a tab arrives at once. Which it
-                    // is, is decided here, where both ends of the move are known.
-                    Relayed(motion) {
+                    // or shrinks, drawn by the page (`Moving`). Which it is, is decided here, where
+                    // both ends of the move are known. A tab is not a move of any NavHost at all.
+                    TabStack(motion, tab, Tab.Home, reselect = { reselects.getValue(it) }) { t ->
                         NavHost(
-                            nav,
-                            startDestination = if (start != null) Tab.Library.route else Tab.Home.route,
+                            navs.getValue(t),
+                            startDestination = t.route,
                             enterTransition = {
                                 motion.push(initialState, targetState)
                                 EnterTransition.None
@@ -355,10 +369,10 @@ fun HarkenApp(
                                 ExitTransition.None
                             },
                         ) {
-                            screen(Tab.Home.route, motion) { _ ->
+                            if (t == Tab.Home) screen(Tab.Home.route, motion) { _ ->
                                 HomeScreen(HomeData(loaded, last, tracks, playlists, albums, offline, fetching), albumOf, act)
                             }
-                            screen(Tab.Search.route, motion) { _ ->
+                            if (t == Tab.Search) screen(Tab.Search.route, motion) { _ ->
                                 var needle by rememberSaveable { mutableStateOf("") }
                                 var recent by remember { mutableStateOf(device.searches) }
                                 // Asked again only when the needle or the library moved: coming back to
@@ -389,7 +403,7 @@ fun HarkenApp(
                                     act,
                                 )
                             }
-                            screen(Tab.Library.route, motion) { _ ->
+                            if (t == Tab.Library) screen(Tab.Library.route, motion) { _ ->
                                 LibraryScreen(libraryTab, { libraryTab = it }, LibraryData(loaded, playlists, albums, artists, tracks, offline, complete), albumOf, playing, act)
                             }
                             screen("album/{arg}", motion) { back ->
@@ -436,12 +450,12 @@ fun HarkenApp(
                                                 taps = 0
                                                 unlocked = true
                                                 device.diagnostics = true
-                                                nav.navigate("diagnostics")
+                                                nav().navigate("diagnostics")
                                             }
                                             taps >= 4 && !unlocked -> scope.launch { snackbar.showSnackbar("${7 - taps} more taps for diagnostics") }
                                         }
                                     },
-                                    onDiagnostics = { nav.navigate("diagnostics") },
+                                    onDiagnostics = { nav().navigate("diagnostics") },
                                 )
                             }
                             screen("diagnostics", motion) { _ ->
@@ -478,7 +492,7 @@ fun HarkenApp(
                                 motion.from(m.origin(page))
                                 menu = null
                                 scope.launch { sheet.close() }
-                                nav.navigate(page.route)
+                                nav().navigate(page.route)
                             }
 
                             override fun remove() {
