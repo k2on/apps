@@ -34,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -46,6 +47,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -148,17 +151,21 @@ fun HarkenApp(
     session: ArkSession,
     /** The player's end of it: the media session's, except in a test that drives the position itself. */
     playbackOf: (Context, String) -> Playback = ::Playback,
+    /** Where the covers come from: the server's, except in a test that counts them. */
+    coversOf: (Context, String) -> Covers = ::Covers,
     /** A tab of the Library to open on instead of Home — every song, say (a test's). */
     start: LibraryTab? = null,
     /** How the pages move, and how far up the player is: the app's own, or a test's to watch. */
     motion: PageMotion = remember { PageMotion() },
     sheet: PlayerSheet = rememberPlayerSheet(),
+    /** Told what a song's menu can do as it opens: a test's way to choose from a sheet it cannot reach. */
+    onMenu: (MenuActions) -> Unit = {},
 ) {
     Recompositions.hit("HarkenApp")
     val context = LocalContext.current.applicationContext
     val library = remember(session) { Library(session) }
     val playback = remember(session) { playbackOf(context, session.server) }
-    val covers = remember(session) { Covers(context, session.server) }
+    val covers = remember(session) { coversOf(context, session.server) }
     val device = remember { Device(context) }
     DisposableEffect(session) {
         onDispose {
@@ -202,6 +209,8 @@ fun HarkenApp(
     // asks for its album, and a scan of every album per row was a cost that grew with the library.
     val albumsByName by remember(session) { derivedStateOf { albums.associateBy { it.name } } }
     val albumOf: (Track) -> Album? = remember(session) { { t -> Album.ofTrack(t, details, albumsByName) } }
+    // What the search last found: the app's, not the tab's, so leaving the tab keeps it.
+    val searched = remember(session) { Searched() }
 
     playback.onStart = { p ->
         val l = LastPlayed(p, startedFrom)
@@ -329,18 +338,21 @@ fun HarkenApp(
                         screen(Tab.Home.route, motion) { _ ->
                             HomeScreen(HomeData(loaded, last, tracks, playlists, albums, offline, fetching), albumOf, act)
                         }
-                        screen(Tab.Search.route, motion) { _ ->
+                    screen(Tab.Search.route, motion) { _ ->
                             var needle by rememberSaveable { mutableStateOf("") }
-                            var results by remember { mutableStateOf<Results?>(null) }
                             var recent by remember { mutableStateOf(device.searches) }
+                            // Asked again only when the needle or the library moved: coming back to
+                            // the tab finds the answer it left, on its first frame, so its list has
+                            // the rows to restore its scroll into.
                             LaunchedEffect(needle, tracks, albums, artists) {
-                                if (needle.isBlank()) return@LaunchedEffect
+                                if (needle.isBlank() || searched.answers(needle, tracks, albums, artists)) return@LaunchedEffect
                                 delay(150)
-                                results = Results.of(needle, library.search(needle.trim()), albums, artists)
+                                searched.answer(needle, tracks, albums, artists, library.search(needle.trim()))
+                                searched.results?.let { r -> covers.warm(searchArt(r, albumOf)) }
                             }
                             SearchScreen(
                                 needle,
-                                results,
+                                searched.results,
                                 recent,
                                 onNeedle = { needle = it },
                                 onSearched = {
@@ -363,14 +375,14 @@ fun HarkenApp(
                         screen("album/{arg}", motion) { back ->
                             val page = Page.parse("album/" + back.arguments?.getString("arg")) as? Page.ForAlbum
                             if (page != null) {
-                                val rows by held(library, page)
+                                val rows by held(library, page, back)
                                 AlbumPage(page.name, albumsByName[page.name], rows, details, playing, act)
                             }
                         }
                         screen("artist/{arg}", motion) { back ->
                             val page = Page.parse("artist/" + back.arguments?.getString("arg")) as? Page.ForArtist
                             if (page != null) {
-                                val rows by held(library, page)
+                                val rows by held(library, page, back)
                                 val theirs = rows.mapNotNull { details[it.id]?.album?.takeIf(String::isNotEmpty) }.distinct()
                                 ArtistPage(
                                     page.name,
@@ -386,7 +398,7 @@ fun HarkenApp(
                         screen("playlist/{arg}", motion) { back ->
                             val page = Page.parse("playlist/" + back.arguments?.getString("arg")) as? Page.ForPlaylist
                             if (page != null) {
-                                val rows by held(library, page)
+                                val rows by held(library, page, back)
                                 PlaylistPage(page.id, playlists.firstOrNull { it.id == page.id }, rows, albumOf, playing, act)
                             }
                         }
@@ -424,11 +436,8 @@ fun HarkenApp(
             }
 
             menu?.let { (track, page) ->
-                ModalBottomSheet(onDismissRequest = { menu = null }) {
-                    TrackMenu(
-                        track,
-                        albumOf(track),
-                        page,
+                val actions =
+                    remember(track, page) {
                         object : MenuActions {
                             override fun playNext() {
                                 playback.playNext(track, albumOf(track))
@@ -450,9 +459,10 @@ fun HarkenApp(
                                 (page as? Page.ForPlaylist)?.let { library.removeFromPlaylist(track, it.id) }
                                 menu = null
                             }
-                        },
-                    )
-                }
+                        }
+                    }
+                LaunchedEffect(actions) { onMenu(actions) }
+                ModalBottomSheet(onDismissRequest = { menu = null }) { TrackMenu(track, albumOf(track), page, actions) }
             }
             adding?.let { track ->
                 var on by remember(track) { mutableStateOf<Set<Id>?>(null) }
@@ -502,13 +512,49 @@ fun HarkenApp(
 private fun NavGraphBuilder.screen(route: String, motion: PageMotion, content: @Composable (NavBackStackEntry) -> Unit) =
     composable(route) { back -> Moving(motion, back) { content(back) } }
 
-// A page's list, held while the page is shown.
-@Composable
-private fun held(library: Library, page: Page): androidx.compose.runtime.State<List<Track>> {
-    val flow = remember(page) { library.hold(page) }
-    DisposableEffect(page) { onDispose { library.release(page) } }
-    return flow.collectAsStateWithLifecycle()
+/**
+ * A page's list, held for as long as its entry is on the back stack — not only while it is drawn —
+ * so that coming back to it, from a page it opened, finds its rows on the first frame: its list
+ * restores its scroll into rows that are there, rather than into an empty list that clamps it to
+ * the top. Let go when the entry is popped.
+ */
+private class Holding(val library: Library, val page: Page) : ViewModel() {
+    val rows = library.hold(page)
+
+    override fun onCleared() = library.release(page)
 }
+
+@Composable
+private fun held(library: Library, page: Page, entry: NavBackStackEntry): androidx.compose.runtime.State<List<Track>> {
+    val holding =
+        remember(entry, page) {
+            ViewModelProvider(entry, object : ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST") override fun <T : ViewModel> create(modelClass: Class<T>): T = Holding(library, page) as T
+            })["held:" + page.route, Holding::class.java]
+        }
+    return holding.rows.collectAsStateWithLifecycle()
+}
+
+/** What a search last found, and what it was asked of: one per session, so it outlives the tab. */
+@Stable
+class Searched {
+    var results by mutableStateOf<Results?>(null)
+        private set
+
+    private var asked: List<Any?> = emptyList()
+
+    /** Whether the results here are already the answer for this needle over these lists. */
+    fun answers(needle: String, vararg over: List<*>): Boolean = asked.size == over.size + 1 && asked[0] == needle.trim() && over.indices.all { asked[it + 1] === over[it] }
+
+    fun answer(needle: String, tracks: List<Track>, albums: List<Album>, artists: List<Artist>, songs: List<Track>) {
+        results = Results.of(needle, songs, albums, artists)
+        asked = listOf(needle.trim(), tracks, albums, artists)
+    }
+}
+
+/** Every cover a search's results draw, at the size each is drawn: the songs' first, as they come first. */
+private fun searchArt(r: Results, albumOf: (Track) -> Album?): List<Pair<String, androidx.compose.ui.unit.Dp>> =
+    r.songs.take(SEARCH_SONGS).mapNotNull { t -> albumOf(t)?.art?.let { it to Space.thumb } } + r.albums.map { it.art to SEARCH_ALBUM } + r.artists.map { it.art to SEARCH_ARTIST }
 
 /** "0.1 (1)", from the package. */
 private fun version(context: android.content.Context): String =

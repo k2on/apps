@@ -22,6 +22,7 @@ import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
@@ -38,6 +39,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.text.AnnotatedString
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -238,9 +240,18 @@ class MotionTests {
         CompositionLocalProvider(LocalViewModelStoreOwner provides store, LocalOnBackPressedDispatcherOwner provides dispatcher) { content() }
     }
 
-    private fun app(test: (ComposeView, PageMotion, OnBackPressedDispatcher) -> suspend () -> Unit, ms: Long) {
+    /** What the last song's menu to open can do. */
+    private var menu: MenuActions? = null
+
+    /**
+     * The real app over the demo's songs, running `test`. `threaded`, its session reads on a thread
+     * of its own, as a phone's does — so a page's rows arrive a moment after the page — rather than
+     * at once on the frame clock's.
+     */
+    private fun app(test: (ComposeView, PageMotion, OnBackPressedDispatcher) -> suspend () -> Unit, ms: Long, start: LibraryTab? = null, threaded: Boolean = false) {
         val peer = demo()
-        val session = ArkSession.inline(peer, "https://music.example.com", Login("t", "s", Account("library"), 0))
+        val login = Login("t", "s", Account("library"), 0)
+        val session = if (threaded) ArkSession.over(peer, "https://music.example.com", login) else ArkSession.inline(peer, "https://music.example.com", login)
         val motion = PageMotion()
         val back = OnBackPressedDispatcher()
         var done = false
@@ -248,7 +259,7 @@ class MotionTests {
             val view = ComposeView(paparazzi.context)
             val script = test(view, motion, back)
             view.setContent {
-                Host(back) { HarkenApp(session, playbackOf = { c, s -> Playback(c, s, connect = false) }, motion = motion) }
+                Host(back) { HarkenApp(session, playbackOf = { c, s -> Playback(c, s, connect = false) }, start = start, motion = motion, onMenu = { menu = it }) }
                 LaunchedEffect(Unit) {
                     frames(800)
                     script()
@@ -414,6 +425,118 @@ class MotionTests {
         assertTrue("Home went: $homeGone", homeGone in 0..9)
         assertTrue("Library came", libraryShown)
         assertTrue("frames drawn mid-move opening a page: $opening", opening > 0)
+    }
+
+    /** The vertical list with a node `marker` holds somewhere under it, as its state: the screen keeps it to itself. */
+    private fun listWith(view: ComposeView, marker: (SemanticsNode) -> Boolean): LazyListState? {
+        val root = (view.getChildAt(0) as ViewRootForTest).semanticsOwner.unmergedRootSemanticsNode
+        val node = all(root).firstOrNull { n -> n.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange) != null && all(n).any(marker) } ?: return null
+        for (info in node.layoutInfo.getModifierInfo()) {
+            var c: Class<*>? = info.modifier.javaClass
+            while (c != null) {
+                for (f in c.declaredFields) {
+                    if (f.type.isPrimitive) continue
+                    f.isAccessible = true
+                    (f.get(info.modifier) as? LazyListState)?.let { return it }
+                }
+                c = c.superclass
+            }
+        }
+        return null
+    }
+
+    /** A row's menu button, of the rows on screen. */
+    private fun more(view: ComposeView): SemanticsNode =
+        all(root(view)).first { n -> n.config.getOrNull(SemanticsProperties.ContentDescription)?.any { it.startsWith("More for ") } == true && n.boundsInRoot.top > 0f }
+
+    /** Back, and the place the list `marker` finds is at on the first frame it is there again, and once settled. */
+    private suspend fun backTo(view: ComposeView, b: OnBackPressedDispatcher, marker: (SemanticsNode) -> Boolean): Pair<Pair<Int, Int>?, Pair<Int, Int>?> {
+        b.onBackPressed()
+        var first: Pair<Int, Int>? = null
+        for (i in 0 until 60) {
+            frame()
+            val st = listWith(view, marker) ?: continue
+            first = st.firstVisibleItemIndex to st.firstVisibleItemScrollOffset
+            break
+        }
+        frames(700)
+        val after = listWith(view, marker)?.let { it.firstVisibleItemIndex to it.firstVisibleItemScrollOffset }
+        return first to after
+    }
+
+    @Test
+    fun theSearchKeepsItsPlaceAcrossAPage() {
+        var left: Pair<Int, Int>? = null
+        var opened = false
+        var back: Pair<Pair<Int, Int>?, Pair<Int, Int>?>? = null
+        val field = { n: SemanticsNode -> n.config.getOrNull(SemanticsActions.SetText) != null }
+        // The results' last heading: still there scrolled down, where the field is not.
+        val results = { n: SemanticsNode -> "Artists" in texts(n) }
+        app(
+            { view, _, b ->
+                {
+                    click(view, "Search")
+                    frames(300)
+                    all(root(view)).first(field).config[SemanticsActions.SetText].action!!.invoke(AnnotatedString("Bach"))
+                    frames(600)
+                    val st = listWith(view, field)!!
+                    // Down to the albums, past every song.
+                    st.scrollToItem(st.layoutInfo.totalItemsCount - 1)
+                    frames(300)
+                    left = st.firstVisibleItemIndex to st.firstVisibleItemScrollOffset
+                    // To an album, from a row's menu (a card's tap also notes the search on the
+                    // phone, which layoutlib's preferences cannot hold).
+                    more(view).config[SemanticsActions.OnClick].action!!.invoke()
+                    frames(300)
+                    menu!!.goTo(Page.ForAlbum("Brandenburg Concertos"))
+                    frames(700)
+                    opened = has(view, "ALBUM")
+                    back = backTo(view, b, results)
+                }
+            },
+            5_000L,
+        )
+        println("search: left at $left; back at ${back?.first} on its first frame, ${back?.second} settled")
+        assertTrue("scrolled down: $left", (left?.first ?: 0) > 3)
+        assertTrue("the album opened", opened)
+        assertEquals("on its first frame back, where it was left", left, back?.first)
+        assertEquals("and still there", left, back?.second)
+    }
+
+    @Test
+    fun aPageKeepsItsPlaceAcrossAPageItOpened() {
+        var left: Pair<Int, Int>? = null
+        var opened = false
+        var back: Pair<Pair<Int, Int>?, Pair<Int, Int>?>? = null
+        // A part's heading: the album page draws them, and the composer's page, with the same songs, does not.
+        val album = { n: SemanticsNode -> texts(n).any { it.startsWith("Suite No.") } }
+        app(
+            { view, _, b ->
+                {
+                    click(view, "Water Music")
+                    frames(700)
+                    val st = listWith(view, album)!!
+                    st.scrollToItem(8, 40)
+                    frames(300)
+                    left = st.firstVisibleItemIndex to st.firstVisibleItemScrollOffset
+                    // A row's menu, to the album's composer.
+                    more(view).config[SemanticsActions.OnClick].action!!.invoke()
+                    frames(300)
+                    menu!!.goTo(Page.ForArtist("George Frideric Handel"))
+                    frames(700)
+                    opened = has(view, "ARTIST")
+                    back = backTo(view, b, album)
+                }
+            },
+            5_000L,
+            start = LibraryTab.Albums,
+            threaded = true,
+        )
+        println("album: left at $left; back at ${back?.first} on its first frame, ${back?.second} settled")
+        assertTrue("scrolled down: $left", (left?.first ?: 0) >= 4)
+        assertTrue("the artist opened", opened)
+        assertEquals("on its first frame back, where it was left", left, back?.first)
+        assertEquals("and still there", left, back?.second)
     }
 
     // The player -------------------------------------------------------------

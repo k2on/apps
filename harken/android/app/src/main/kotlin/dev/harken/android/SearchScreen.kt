@@ -106,13 +106,14 @@ fun SearchScreen(
                         }
                     }
                 }
-            found == null || found.needle != needle.trim() -> item { Spacer(Modifier.height(Space.xl)) }
+            // While a new needle is asked, what the last one found stays: no frame of nothing.
+            found == null -> item { Spacer(Modifier.height(Space.xl)) }
             found.isEmpty ->
                 item { Empty(Glyphs.Search, "Nothing found", "Nothing in your library matches “${found.needle}”.") }
             else -> {
                 if (found.songs.isNotEmpty()) {
                     item { Heading("Songs") }
-                    items(found.songs.take(SONGS), key = { "song:" + it.id.hex }) { t ->
+                    items(found.songs.take(SEARCH_SONGS), key = { "song:" + it.id.hex }) { t ->
                         val album = albumOf(t)
                         TrackRow(
                             t,
@@ -130,7 +131,7 @@ fun SearchScreen(
                     item { Heading("Albums") }
                     item {
                         Shelf(found.albums, key = { it.name }) { a ->
-                            RecordCard(a.name, a.art, a.name, a.creator, 128.dp, opens = true, onClick = {
+                            RecordCard(a.name, a.art, a.name, a.creator, SEARCH_ALBUM, opens = true, onClick = {
                                 onSearched(needle)
                                 act.open(Page.ForAlbum(a.name))
                             })
@@ -141,7 +142,7 @@ fun SearchScreen(
                     item { Heading("Artists") }
                     item {
                         Shelf(found.artists, key = { it.name }) { a ->
-                            RecordCard(a.name, a.art, a.name, Media.count(a.tracks.toInt(), "song"), 112.dp, round = true, opens = true, onClick = {
+                            RecordCard(a.name, a.art, a.name, Media.count(a.tracks.toInt(), "song"), SEARCH_ARTIST, round = true, opens = true, onClick = {
                                 onSearched(needle)
                                 act.open(Page.ForArtist(a.name))
                             })
@@ -155,4 +156,8 @@ fun SearchScreen(
 }
 
 /** How many songs a search lists. */
-private const val SONGS = 50
+const val SEARCH_SONGS = 50
+
+/** An album's card in the results, and an artist's. */
+val SEARCH_ALBUM = 128.dp
+val SEARCH_ARTIST = 112.dp

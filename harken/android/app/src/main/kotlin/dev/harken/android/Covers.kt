@@ -35,6 +35,7 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 
 class Covers(context: Context, private val server: String) {
     private val dir = File(context.cacheDir, "covers")
@@ -62,6 +63,30 @@ class Covers(context: Context, private val server: String) {
 
     /** A cover already decoded, without waiting. */
     fun cached(url: String): ImageBitmap? = memory.get(url)
+
+    /**
+     * Start decoding the covers of a list that has just arrived, `side` across each, so the rows
+     * that draw them find them decoded. A row that has to go looking draws the derived square and
+     * the picture lands after it: a fling through a fresh list of search results brings rows to the
+     * middle of the screen before their covers have been read.
+     */
+    fun warm(arts: List<Pair<String, Dp>>) {
+        for ((art, side) in arts) {
+            val url = urlOf(art) ?: continue
+            if (memory.get(url) != null || url in missing || loading.containsKey(url)) continue
+            warming.incrementAndGet()
+            scope.launch {
+                try {
+                    load(url, side)
+                } finally {
+                    warming.decrementAndGet()
+                }
+            }
+        }
+    }
+
+    /** How many covers [warm] is still decoding: for the tests. */
+    internal val warming = AtomicInteger()
 
     /** The cover at `url`, decoded to about `side` (and never past [BOUND] pixels), or null. */
     suspend fun load(url: String, side: Dp): ImageBitmap? {

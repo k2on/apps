@@ -28,9 +28,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.ViewRootForTest
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.text.AnnotatedString
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -241,6 +243,89 @@ class FlingTests {
         passes.forEachIndexed { i, p -> println("fling over $n songs, pass ${i + 1}${if (i < 4) " (warming)" else ""}: $p") }
         assertEquals("passes", 6, passes.size)
         assertTrue("rows entered while flinging", passes.all { it.rows > 0 })
+    }
+
+    /**
+     * Search results arrive with their covers already being decoded: a fling straight through a fresh
+     * search, from its first row to its last, sends no row looking for its cover. A row that has to
+     * look draws the derived square and its picture lands after it — on a phone, a read and a decode
+     * of a real cover later, which a fast fling brings to the middle of the screen.
+     */
+    @Test
+    fun searchResultsArriveWithTheirCoversDecoded() {
+        val n = 300
+        val server = "https://music.example.com"
+        val peer = Peer.open(Domain.fromBytes(harken()), MemoryStorage(), Options.alone("library").copy(autos = Autos.Seeded(5)))
+        peer.setRoles(listOf("library"))
+        repeat(n) { peer.mutate("add_song", song(it)) }
+        val png = java.util.Base64.getDecoder().decode(PNG)
+        val dirs = setOf(File(paparazzi.context.cacheDir, "covers"), File(paparazzi.context.applicationContext.cacheDir, "covers"))
+        for (d in dirs) {
+            d.mkdirs()
+            for (a in 0..(n - 1) / 10) File(d, "%08x".format(Art.hash(Media.url(server, "covers/$a.png")))).writeBytes(png)
+        }
+        val session = ArkSession.inline(peer, server, Login("t", "s", Account("library"), 0))
+        var covers: Covers? = null
+        var looked = -1
+        var rows = -1
+        var reached = false
+        Recompositions.sink = { what -> counts.merge(what, 1, Int::plus) }
+        val view = ComposeView(paparazzi.context)
+        try {
+            view.setContent {
+                val owner = LocalLifecycleOwner.current
+                val back =
+                    remember {
+                        object : OnBackPressedDispatcherOwner {
+                            override val onBackPressedDispatcher = OnBackPressedDispatcher()
+                            override val lifecycle = owner.lifecycle
+                        }
+                    }
+                val store = remember { object : ViewModelStoreOwner { override val viewModelStore = ViewModelStore() } }
+                CompositionLocalProvider(LocalViewModelStoreOwner provides store, LocalOnBackPressedDispatcherOwner provides back) {
+                    HarkenApp(session, playbackOf = { c, s -> Playback(c, s, connect = false) }, coversOf = { c, s -> Covers(c, s).also { covers = it } })
+                }
+                LaunchedEffect(Unit) {
+                    frames(500)
+                    val root = (view.getChildAt(0) as ViewRootForTest).semanticsOwner
+                    fun all(x: SemanticsNode): Sequence<SemanticsNode> = sequenceOf(x) + x.children.asSequence().flatMap { all(it) }
+                    all(root.rootSemanticsNode).first { it.config.getOrNull(SemanticsProperties.Text)?.any { t -> t.text == "Search" } == true && it.config.getOrNull(SemanticsActions.OnClick) != null }
+                        .config[SemanticsActions.OnClick].action!!.invoke()
+                    frames(300)
+                    all(root.unmergedRootSemanticsNode).first { it.config.getOrNull(SemanticsActions.SetText) != null }.config[SemanticsActions.SetText].action!!.invoke(AnnotatedString("1"))
+                    // The answer, and as long as it takes to decode what it draws: real time, on the
+                    // covers' own threads.
+                    frames(300)
+                    var waited = 0
+                    while (covers!!.warming.get() > 0 && waited++ < 400) {
+                        Thread.sleep(5)
+                        frame()
+                    }
+                    val before = covers!!.launches.get()
+                    counts.clear()
+                    val state = list(view)
+                    val step = 64 * view.resources.displayMetrics.density * 3
+                    var i = 0
+                    while (state.canScrollForward && i++ < 200) {
+                        state.dispatchRawDelta(step)
+                        frame()
+                    }
+                    reached = !state.canScrollForward
+                    looked = covers!!.launches.get() - before
+                    rows = counts["TrackRow"] ?: 0
+                }
+            }
+            paparazzi.gif(view, "search", 0L, 6_000L, 60)
+        } finally {
+            Recompositions.sink = null
+            session.close()
+            peer.close()
+            for (d in dirs) d.deleteRecursively()
+        }
+        println("search fling: $rows rows entered, $looked went looking for their cover")
+        assertTrue("flung to the end", reached)
+        assertTrue("rows entered: $rows", rows > 20)
+        assertEquals("rows that went looking for a cover", 0, looked)
     }
 
     /**

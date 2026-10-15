@@ -635,3 +635,65 @@ untested on a device. The player's back gesture over a page that is itself
 mid-move, a rotation mid-move, and a page reopened after the process was
 killed (it grows from the middle: origins are not saved) are reasoned, not
 tested.
+
+### Motion, tightened
+
+The owner tried f35cbec's release APK: "This fixed a lot of the performance
+problems and the animations look good." Then six things, each answered
+here.
+
+**Search forgot where it was** (an album opened from scrolled-down results,
+then back, landed at the top). The results were `remember`ed inside the
+Search destination, so coming back composed it with none: for the 150 ms
+debounce and the query the list held three items, its restored scroll
+clamped to them, and stayed there when the rows came. The answer is now the
+app's (`Searched`, one per session), with what it was asked of — the needle
+and the identity of the three lists it filtered — so returning finds it on
+its first frame and asks nothing again; a changed needle or library asks
+again while the last answer stays on screen, with no frame of nothing in
+between. Pages had the same bug, hidden from the tests by the inline session:
+an album's rows were held while its page was composed and let go when a page
+it opened covered it, so coming back started from an empty list while the
+peer's thread hydrated a new view. They are held per back stack entry now
+(a `ViewModel` on the entry, cleared when it is popped). Home and the
+Library's tabs read the app's lists and were already right; every list keeps
+`rememberLazyListState`'s saveable default.
+
+- `MotionTests.theSearchKeepsItsPlaceAcrossAPage`: searched "Bach", scrolled
+  to the end (14, 58), an album opened and back: (14, 58) on the first frame
+  the list is there again, and after.
+  - Falsified: the results `remember`ed in the destination again — back at
+    the top, the results' last heading nowhere.
+- `MotionTests.aPageKeepsItsPlaceAcrossAPageItOpened`: Water Music scrolled
+  to (6, 102), its composer opened from a row's menu, back: (6, 102). Run
+  over a session with a thread of its own (`ArkSession.over`), as a phone's.
+  The menu is a window of its own, which layoutlib does not raise, so its
+  entry is chosen through `HarkenApp(onMenu = …)`, which hands a test the
+  `MenuActions` the sheet is given.
+  - Falsified: the old hold-while-composed — (0, 0).
+
+**Search results "do not show up until a split second after" a fast swipe.**
+Not reproduced as missing rows. A probe (kept out of the tree) flung the real
+`HarkenApp`'s results for "1" over 2,000 songs — 50 songs, an albums shelf
+and an artists shelf, with the motion wrapper in place — four times, hard,
+both ways, at about two rows a frame, and measured every frame's pixels row
+by row: 382 frames, no row and no shelf drawn empty in any frame it was on
+screen. Timed at three rows a frame, the frame a shelf enters costs about
+twice a frame of rows (7–8 ms against 4 ms of compose and measure, on this
+machine), and finishes inside it. The one thing in that list that is not
+drawn in the frame its row enters is the cover: in the first fling through
+fresh results, 12 of the 39 rows that entered went looking for theirs and
+drew the derived square until it was read off the disk and decoded. On a
+phone that is a real cover, hundreds of kilobytes of JPEG, and a fast fling
+brings the row to the middle of the screen before it lands; a slow scroll
+gives it the time. So the results start decoding every cover they draw the
+moment they arrive (`Covers.warm`, at the size each is drawn), and a fling
+finds them decoded. If what was seen was the rows themselves, the JVM cannot
+show it: the keyboard is the other candidate (a focused search field leaving
+the list stops its input, and the keyboard animates away over the rows it
+covered), and only a phone can say.
+
+- `FlingTests.searchResultsArriveWithTheirCoversDecoded`: a fling from the
+  first result to the last sends 0 of 40 entering rows looking for a cover.
+  - Falsified: no warm-up — 12.
+
