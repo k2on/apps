@@ -1,46 +1,24 @@
-// What this phone remembers that is nobody else's business: what was
-// played last and where it was played from, the last few searches, and
-// whether diagnostics have been unlocked. In the app's private
-// preferences, never in the log — none of it is worth replaying on
-// another device, and none of it should be.
+// What this phone remembers that is nobody else's business: the last few
+// searches, and whether diagnostics have been unlocked. In the app's private
+// preferences, never in the log — neither is worth replaying on another
+// device, and neither should be. What was played last is not here any more:
+// it is the log's (`record_play`, `last_played`) and the listening
+// session's, the same on every device (docs/plan-live.md).
+//
+// And what this phone is called in somebody else's device picker.
 package dev.harken.android
 
 import android.content.Context
-import org.json.JSONObject
-
-/** What was playing last, and the page it was started from, so Home can offer it back. */
-data class LastPlayed(val track: Playing, val from: Page?)
+import android.os.Build
+import android.provider.Settings
 
 class Device(context: Context) {
     private val prefs = context.getSharedPreferences("harken-device", Context.MODE_PRIVATE)
 
-    var lastPlayed: LastPlayed?
-        get() =
-            prefs.getString(LAST, null)?.let {
-                try {
-                    val j = JSONObject(it)
-                    LastPlayed(
-                        Playing(j.getString("id"), j.getString("title"), j.getString("artist"), j.optString("album"), j.optString("art")),
-                        Page.parse(j.optString("from")),
-                    )
-                } catch (e: Exception) {
-                    null
-                }
-            }
-        set(v) {
-            val j =
-                v?.let {
-                    JSONObject()
-                        .put("id", it.track.id)
-                        .put("title", it.track.title)
-                        .put("artist", it.track.artist)
-                        .put("album", it.track.album)
-                        .put("art", it.track.art)
-                        .put("from", it.from?.route ?: "")
-                        .toString()
-                }
-            prefs.edit().putString(LAST, j).apply()
-        }
+    init {
+        // What an older build kept here, now the log's.
+        if (prefs.contains(LAST)) prefs.edit().remove(LAST).apply()
+    }
 
     /** The last few searches, newest first. */
     var searches: List<String>
@@ -63,10 +41,20 @@ class Device(context: Context) {
             prefs.edit().putBoolean(DIAGNOSTICS, v).apply()
         }
 
-    private companion object {
-        const val LAST = "last-played"
-        const val SEARCHES = "searches"
-        const val DIAGNOSTICS = "diagnostics"
-        const val RECENT = 8
+    companion object {
+        private const val LAST = "last-played"
+        private const val SEARCHES = "searches"
+        private const val DIAGNOSTICS = "diagnostics"
+        private const val RECENT = 8
+
+        /**
+         * What this phone is called in a device picker: the name its owner gave it in the system's
+         * settings ("Ana's Pixel"), else its model, else "Phone". Nothing is guessed beyond what the
+         * system says.
+         */
+        fun name(context: Context): String =
+            runCatching { Settings.Global.getString(context.contentResolver, Settings.Global.DEVICE_NAME) }.getOrNull()?.takeIf { it.isNotBlank() }
+                ?: Build.MODEL?.takeIf { it.isNotBlank() }
+                ?: "Phone"
     }
 }

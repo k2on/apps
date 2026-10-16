@@ -6,6 +6,8 @@
 // sentence is shown under the field.
 package dev.harken.android
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -126,5 +128,57 @@ fun NewPlaylist(name: String, problem: String?, onName: (String) -> Unit) {
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(Space.xs))
+    }
+}
+
+/**
+ * Where the sound is, and everywhere it could be (docs/plan-live.md): a row per device of this
+ * account, ticked where the sound is — or, while it is nowhere, on this phone, which is where the
+ * next press plays — the desktop's picker (23c40a0), with no row that stops it everywhere, since
+ * pausing is the transport's. A device that cannot make a sound, or whose socket has gone, is drawn
+ * and not selectable: the laptop the music still belongs to is the one row most worth drawing. The
+ * cursor starts on the output, or on this phone, so a tap straight away changes nothing.
+ */
+@Composable
+fun DevicesSheet(rows: List<DeviceRow>, cursor: Int, onPick: (DeviceRow) -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(bottom = Space.l)) {
+        Text("Playing on", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = Space.xl, vertical = Space.s))
+        if (rows.isEmpty())
+            Text(
+                "Nothing else is listening. A device signed in as you appears here once it is open.",
+                style = quiet(MaterialTheme.typography.bodyMedium),
+                modifier = Modifier.padding(horizontal = Space.xl, vertical = Space.s),
+            )
+        rows.forEachIndexed { i, r -> DeviceLine(r, at = i == cursor, onPick) }
+    }
+}
+
+// One device: its kind, its name, what it cannot do, and a tick where the sound is.
+@Composable
+private fun DeviceLine(r: DeviceRow, at: Boolean, onPick: (DeviceRow) -> Unit) {
+    val ink = if (r.ticked && !r.away) MaterialTheme.colorScheme.primary else if (r.takeable) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+    val under =
+        when {
+            r.away -> "not answering"
+            r.moving -> "connecting…"
+            !r.takeable -> "can't make a sound"
+            r.me -> "this phone"
+            else -> null
+        }
+    Row(
+        Modifier.fillMaxWidth()
+            .let { if (at) it.background(MaterialTheme.colorScheme.surfaceContainerHighest) else it }
+            .let { if (r.takeable) it.clickable { onPick(r) } else it }
+            .padding(horizontal = Space.xl)
+            .height(60.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Glyphs.device(r.kind, r.name), contentDescription = null, tint = ink, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.width(Space.l))
+        Column(Modifier.weight(1f)) {
+            Text(r.name, style = MaterialTheme.typography.bodyLarge, color = ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (under != null) Text(under, style = quiet(MaterialTheme.typography.bodySmall), maxLines = 1)
+        }
+        if (r.ticked) Icon(Glyphs.Tick, contentDescription = "Playing here", tint = ink, modifier = Modifier.size(20.dp))
     }
 }

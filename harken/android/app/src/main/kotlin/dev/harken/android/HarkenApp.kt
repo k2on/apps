@@ -2,8 +2,9 @@
 // Search, Library — under one bar, the pages they open growing over them
 // (`ark-ui`'s `PageMotion`), the player's bar above the tabs and the full
 // player it grows into over everything (PlayerSheet.kt, an `ExpandingCard`),
-// and the sheets a song's menu raises. This file wires; what each screen draws is the screen's, from
-// plain values.
+// and the sheets a song's menu raises — and the account's listening session (Listen.kt), which the
+// player draws while this phone is part of it, and the device picker that moves the sound. This file
+// wires; what each screen draws is the screen's, from plain values.
 package dev.harken.android
 
 import android.content.Context
@@ -100,6 +101,8 @@ fun Chrome(
     snackbar: SnackbarHostState? = null,
     /** Where in the track the player is: handed down to the mini player's hairline, never read here. */
     position: StateFlow<Long> = still(),
+    /** Where another device's scrubber is: handed down to the full player's, never read here. */
+    scrubbing: StateFlow<Long?> = nobody(),
     /** How far up the player is: read where the tab bar and the player are drawn, never here. */
     sheet: PlayerSheet = rememberPlayerSheet(),
     page: @Composable () -> Unit,
@@ -124,7 +127,7 @@ fun Chrome(
                 LifecycleCapped({ if (sheet.p > 0f) Lifecycle.State.STARTED else Lifecycle.State.RESUMED }) { page() }
             }
         }
-        PlayerCard(sheet, player, controls, position, tabs)
+        PlayerCard(sheet, player, controls, position, tabs, scrubbing)
     }
 }
 
@@ -182,8 +185,14 @@ fun HarkenApp(
     val playback = remember(session) { playbackOf(context, session.server) }
     val covers = remember(session) { coversOf(context, session.server) }
     val device = remember { Device(context) }
+    // The listening session, on the session's own socket: made with it, followed by the player and
+    // by the media service, and let go with it.
+    val listen = remember(session) { Listen(session, Device.name(context)) }
     DisposableEffect(session) {
+        playback.follow(listen)
+        Listen.current.value = listen
         onDispose {
+            listen.close()
             library.close()
             playback.close()
         }
@@ -227,13 +236,14 @@ fun HarkenApp(
     val status by library.status.collectAsStateWithLifecycle()
     val notice by library.notice.collectAsStateWithLifecycle()
     val player by playback.state.collectAsStateWithLifecycle()
-    var last by remember { mutableStateOf(device.lastPlayed) }
+    val heard by listen.heard.collectAsStateWithLifecycle()
+    val played by library.lastPlayed.collectAsStateWithLifecycle()
     var libraryTab by rememberSaveable { mutableStateOf(start ?: LibraryTab.Playlists) }
     var queue by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf<Menu?>(null) }
     var adding by remember { mutableStateOf<Track?>(null) }
     var naming by remember { mutableStateOf<Pair<Boolean, Track?>?>(null) }
-    var startedFrom by remember { mutableStateOf<Page?>(null) }
+    var devices by remember { mutableStateOf(false) }
 
     val offline = if (status.link == "waiting" || status.link == "offline") session.server.substringAfter("://") else null
     val fetching = if (!status.synced) session.server.substringAfter("://") else null
@@ -251,12 +261,13 @@ fun HarkenApp(
     val albumOf: (Track) -> Album? = remember(session) { { t -> Album.ofTrack(t, details, albumsByName) } }
     // What the search last found: the app's, not the tab's, so leaving the tab keeps it.
     val searched = remember(session) { Searched() }
-
-    playback.onStart = { p ->
-        val l = LastPlayed(p, startedFrom)
-        device.lastPlayed = l
-        last = l
+    // An album's cover by its name, for what the session carries — which names an album, not a row.
+    LaunchedEffect(albums) {
+        val art = albums.associate { it.name to it.art }
+        listen.art = { name -> art[name] ?: "" }
     }
+    // What Home says was played last: the session's track, else the log's newest play.
+    val last = remember(heard, played, albumsByName, playlists) { lastPlayed(heard, played, playlists, { albumsByName[it]?.art ?: "" }, session.server, listen.name) }
 
     LaunchedEffect(notice) {
         val n = notice ?: return@LaunchedEffect
@@ -272,13 +283,11 @@ fun HarkenApp(
             }
 
             override fun play(queue: List<Track>, at: Int, from: Page?) {
-                startedFrom = from
-                playback.play(queue, at, albumOf)
+                playback.play(queue, at, albumOf, from = from?.place(playlists) ?: "")
             }
 
             override fun shuffle(queue: List<Track>, from: Page?) {
-                startedFrom = from
-                playback.play(queue, queue.indices.random(), albumOf, shuffled = true)
+                playback.play(queue, queue.indices.random(), albumOf, shuffled = true, from = from?.place(playlists) ?: "")
             }
 
             override fun more(track: Track, from: Page?) {
@@ -287,6 +296,12 @@ fun HarkenApp(
             }
 
             override fun resume(last: LastPlayed) {
+                // The session's own track: resumed where the session has it, and the player opened.
+                if (last.live) {
+                    if (!player.playing) playback.resume()
+                    scope.launch { sheet.open() }
+                    return
+                }
                 scope.launch {
                     val list = last.from?.let { library.read(it) } ?: library.tracks.value
                     val at = list.indexOfFirst { it.id.hex == last.track.id }
@@ -339,6 +354,12 @@ fun HarkenApp(
 
             override fun skipAhead(n: Int) = playback.skipAhead(n)
 
+            override fun devices() {
+                devices = true
+            }
+
+            override fun scrub(ms: Long) = playback.scrub(ms)
+
             override fun more() {
                 val now = player.now ?: return
                 tracks.firstOrNull { it.id.hex == now.id }?.let { menu = Menu(it, null, null) }
@@ -353,7 +374,7 @@ fun HarkenApp(
             // or of the Library, back goes Home; at Home's, it is the system's.
             PageBack(motion, blocked = { sheet.p > 0f }, toFirst = if (tab != Tab.Home) ({ tab = Tab.Home }) else null)
             Box(Modifier.fillMaxSize()) {
-                Chrome(tab, player, controls, onTab = { select(it) }, snackbar, playback.position, sheet) {
+                Chrome(tab, player, controls, onTab = { select(it) }, snackbar, playback.position, playback.scrubbing, sheet) {
                     // Said for every move, so the NavHost's own cross-fade is nowhere: a page grows
                     // or shrinks, drawn by the page (`Moving`). Which it is, is decided here, where
                     // both ends of the move are known. A tab is not a move of any NavHost at all.
@@ -483,7 +504,7 @@ fun HarkenApp(
                                         val d by reading.diagnostics.collectAsStateWithLifecycle()
                                         val moved by library.moved.collectAsStateWithLifecycle()
                                         LaunchedEffect(moved) { reading.read() }
-                                        Ready(d) { DiagnosticsScreen(it, onBack = act::back, onVerify = library::verify) }
+                                        Ready(d) { DiagnosticsScreen(it, onBack = act::back, onVerify = library::verify, heard = heard) }
                                     }
                                 }
                             }
@@ -565,6 +586,15 @@ fun HarkenApp(
             }
             if (queue) {
                 ModalBottomSheet(onDismissRequest = { queue = false }) { QueueSheet(player, controls) }
+            }
+            if (devices) {
+                val rows = heard.listening?.let { Picker.rows(it, heard.me) }.orEmpty()
+                ModalBottomSheet(onDismissRequest = { devices = false }) {
+                    DevicesSheet(rows, Picker.cursor(rows)) { r ->
+                        Picker.pick(r, heard.listening)?.let { (it as? Press.Transfer)?.let { t -> playback.transfer(t.to) } }
+                        devices = false
+                    }
+                }
             }
         }
     }

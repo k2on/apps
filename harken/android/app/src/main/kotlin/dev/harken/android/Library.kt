@@ -63,7 +63,35 @@ sealed class Page {
         override val route: String = "songs"
     }
 
+    /**
+     * Where a track was played from, as the listening session and the plays carry it — the
+     * desktop's address-bar spelling (`rust/arkui`'s route: `#album/Water%20Music`), so a page
+     * named on one device is the same page on another. A playlist by its name, as there; one this
+     * phone cannot name is nowhere in particular.
+     */
+    fun place(playlists: List<Playlist>): String =
+        when (this) {
+            is ForAlbum -> "#album/" + Places.encode(name)
+            is ForArtist -> "#artist/" + Places.encode(name)
+            is ForPlaylist -> playlists.firstOrNull { it.id == id }?.let { "#playlist/" + Places.encode(it.name) } ?: ""
+            is Songs -> "#library"
+        }
+
     companion object {
+        /** The page a place names (`#album/…`, [place]); null for nowhere, or a page this phone has not got. */
+        fun ofPlace(place: String, playlists: List<Playlist>): Page? {
+            val body = place.removePrefix("#")
+            val kind = body.substringBefore('/')
+            val name = Places.decode(body.substringAfter('/', ""))
+            return when (kind) {
+                "album" -> name.takeIf { it.isNotEmpty() }?.let { ForAlbum(it) }
+                "artist" -> name.takeIf { it.isNotEmpty() }?.let { ForArtist(it) }
+                "playlist" -> playlists.firstOrNull { it.name == name }?.let { ForPlaylist(it.id) }
+                "library" -> Songs
+                else -> null
+            }
+        }
+
         /** The page a route names, or null. */
         fun parse(route: String): Page? {
             val kind = route.substringBefore('/')
@@ -81,6 +109,38 @@ sealed class Page {
                 null
             }
         }
+    }
+}
+
+/** A place's name, percent-encoded as `rust/arkui`'s `url::encode` writes it: what is not unreserved. */
+object Places {
+    fun encode(s: String): String {
+        val out = StringBuilder()
+        for (b in s.toByteArray(Charsets.UTF_8)) {
+            val c = b.toInt() and 0xff
+            val ch = c.toChar()
+            if (ch in 'A'..'Z' || ch in 'a'..'z' || ch in '0'..'9' || ch in "-_.~") out.append(ch) else out.append('%').append("%02X".format(c))
+        }
+        return out.toString()
+    }
+
+    fun decode(s: String): String {
+        val bytes = java.io.ByteArrayOutputStream()
+        var i = 0
+        while (i < s.length) {
+            val c = s[i]
+            if (c == '%' && i + 2 < s.length) {
+                val n = s.substring(i + 1, i + 3).toIntOrNull(16)
+                if (n != null) {
+                    bytes.write(n)
+                    i += 3
+                    continue
+                }
+            }
+            bytes.write(c.toString().toByteArray(Charsets.UTF_8))
+            i++
+        }
+        return bytes.toString("UTF-8")
     }
 }
 
@@ -173,6 +233,15 @@ class Library(private val session: ArkSession) {
     private val home = listOf<Held<*>>(library, playlistsHeld, albumsHeld)
     private val artistsHeld = Held("artists", emptyMap(), Artist::of)
     private val detailsHeld = Held("track_details", emptyMap(), TrackDetail::of)
+    private val playedHeld = Held("last_played", emptyMap(), Played::of)
+    private val lastFlow = MutableStateFlow<Played?>(null)
+
+    /**
+     * The newest play in the log, this person's: what Home says was last played while the
+     * listening session has nothing of its own to say — the same on every device, and there
+     * offline.
+     */
+    val lastPlayed: StateFlow<Played?> = lastFlow.asStateFlow()
 
     // A page's view, and how many screens hold it. The map is shared with the
     // main thread; each entry's view is touched on the peer's thread only.
@@ -220,8 +289,10 @@ class Library(private val session: ArkSession) {
             session.post { q ->
                 hydrate(q, artistsHeld)
                 hydrate(q, detailsHeld)
+                hydrate(q, playedHeld)
                 artistsFlow.value = artistsHeld.rows.toList()
                 detailsFlow.value = detailsHeld.rows.associateBy { it.mediaId }
+                lastFlow.value = playedHeld.rows.firstOrNull()
                 _complete.value = true
             }
         }
@@ -338,6 +409,7 @@ class Library(private val session: ArkSession) {
         if (moved) session.launchChanged()
         if (update(p, artistsHeld, ch)) artistsFlow.value = artistsHeld.rows.toList()
         if (update(p, detailsHeld, ch)) detailsFlow.value = detailsHeld.rows.associateBy { it.mediaId }
+        if (update(p, playedHeld, ch)) lastFlow.value = playedHeld.rows.firstOrNull()
         for (o in pages.values) if (update(p, o.held, ch)) o.flow.value = o.held.rows.toList()
     }
 

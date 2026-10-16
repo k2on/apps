@@ -44,6 +44,12 @@ import dev.arkdb.android.Step
 import dev.arkdb.client.Account
 import dev.arkdb.client.Login
 import dev.arkdb.ui.Space
+import dev.harken.android.listening.Clock
+import dev.harken.android.listening.Listening
+import dev.harken.android.listening.ListeningDevices
+import dev.harken.android.listening.Output
+import dev.harken.android.listening.Session
+import dev.harken.android.listening.Track as Queued
 import org.junit.Rule
 import org.junit.Test
 
@@ -324,6 +330,70 @@ class Screens {
                 "at 1280 the server agrees",
             )
         shot("numbers") { DiagnosticsScreen(d, {}, {}) }
+        shot("listening") { DiagnosticsScreen(d, {}, {}, heard(session(Output.Device("s-web", false), playing = false), scrub = mapOf("s-web" to 201_000L))) }
+    }
+
+    // The listening session --------------------------------------------------
+    //
+    // The account's devices: this phone, a desktop with no speakers, a browser tab and a speaker
+    // in the house; and a session of the Water Music, 82 s into the Alla Hornpipe.
+
+    private val devices =
+        listOf(
+                ListeningDevices(true, "s-phone", "phone", "Pixel 7", "ana"),
+                ListeningDevices(false, "s-desktop", "computer", "Desktop", "ana"),
+                ListeningDevices(true, "s-web", "computer", "Browser", "ana"),
+                ListeningDevices(true, "media_player.kitchen", "speaker", "Kitchen", "ana"),
+            )
+            .associateBy { it.id }
+
+    private fun session(output: Output, playing: Boolean): Session.Active {
+        val queue = Demo.album("Water Music").take(8).map { t -> Queued("Water Music", t.creator, t.durationMs, t.file, t.id, t.title) }
+        val clock = if (playing) Clock.Playing(82_000, System.currentTimeMillis()) else Clock.Paused(82_000)
+        return Session.Active(0, clock, "#album/Water%20Music", output, queue)
+    }
+
+    private fun heard(s: Session, scrub: Map<String, Long> = emptyMap()): Heard =
+        Heard(me = "s-phone", joined = true, listening = Listening(devices, scrub, s), linked = true, epoch = 3, status = dev.arkdb.client.LiveStatus(41, 0, true))
+
+    @Test
+    fun g1_listening() {
+        val desktop = player.copy(on = Where("Browser", "computer", here = false))
+        // The sound on the browser tab: the phone a remote for it, its own speaker silent.
+        shot("full-elsewhere") { FullPlayer(desktop, Still, at) }
+        shot("mini-elsewhere") {
+            Column(Modifier.fillMaxSize()) {
+                Spacer(Modifier.weight(1f))
+                MiniPlayer(desktop, Still, at)
+                Spacer(Modifier.height(Space.xl))
+            }
+        }
+        // The sound here, and the chip lit.
+        shot("full-here") { FullPlayer(player.copy(on = Where("Pixel 7", "phone", here = true)), Still, at) }
+        // Handed to the speaker, which has not said it has started.
+        shot("full-connecting") { FullPlayer(player.copy(on = Where("Kitchen", "speaker", here = false, moving = true)), Still, at) }
+        // The browser's scrubber held at 3:21 while the track is at 1:22: the phone's shows 3:21.
+        shot("scrub-from-elsewhere") { FullPlayer(desktop, Still, at, scrubbing = nobody(201_000)) }
+        // The picker while the browser plays; while nothing does, this phone ticked; and with the
+        // laptop the sound belongs to gone.
+        val playing = heard(session(Output.Device("s-web", false), playing = true))
+        shot("picker") {
+            val rows = Picker.rows(playing.listening!!, "s-phone")
+            Sheet { DevicesSheet(rows, Picker.cursor(rows)) {} }
+        }
+        shot("picker-nothing-playing") {
+            val rows = Picker.rows(heard(Session.Idle).listening!!, "s-phone")
+            Sheet { DevicesSheet(rows, Picker.cursor(rows)) {} }
+        }
+        shot("picker-not-answering") {
+            val rows = Picker.rows(heard(session(Output.Away("s-laptop", "Laptop"), playing = false)).listening!!, "s-phone")
+            Sheet { DevicesSheet(rows, Picker.cursor(rows)) {} }
+        }
+        // Home, while the browser is playing: last played is the session's track, and where.
+        shot("home-last-played") {
+            val live = lastPlayed(playing, null, Demo.playlists, { "" }, server, "Pixel 7")
+            tab(Tab.Home, desktop) { HomeScreen(HomeData(true, live, Demo.tracks, Demo.playlists, Demo.albums, null), Demo::albumOf, Idle) }
+        }
     }
 }
 

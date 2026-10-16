@@ -35,7 +35,7 @@ val BAR = 58.dp
  * is the tab bar's height, which the bar stands on.
  */
 @Composable
-fun PlayerCard(sheet: PlayerSheet, state: PlayerState, controls: Controls, position: StateFlow<Long>, tabs: Dp) {
+fun PlayerCard(sheet: PlayerSheet, state: PlayerState, controls: Controls, position: StateFlow<Long>, tabs: Dp, scrubbing: StateFlow<Long?> = nobody()) {
     val now = state.now ?: return
     val seed = now.album.ifEmpty { now.title }
     ExpandingCard(
@@ -43,7 +43,7 @@ fun PlayerCard(sheet: PlayerSheet, state: PlayerState, controls: Controls, posit
         stand = tabs,
         onOpen = controls::open,
         collapsed = { m -> MiniFace(state, controls, position, art = false, modifier = m) },
-        expanded = { slot, m -> FullFace(state, controls, position, slot = slot, modifier = m) },
+        expanded = { slot, m -> FullFace(state, controls, position, slot = slot, modifier = m, scrubbing = scrubbing) },
         traveler = { m -> Cover(seed, now.art, 360.dp, m, corner = 0.dp) },
         onSwipeLeft = controls::next,
         onSwipeRight = controls::previous,

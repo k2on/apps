@@ -2,6 +2,12 @@
 // back to it — the same list, from the same track — then what arrived most
 // recently, the person's playlists, and the albums, each a shelf of covers
 // opening its page. Settings is the one thing in its bar.
+//
+// **What was played last is the account's, not the phone's** (docs/plan-live.md):
+// the listening session's track while there is a session to be part of — what
+// is playing, or paused, on whichever device — and otherwise the newest play
+// in the log (`last_played`), which is the same on every device and is there
+// offline. Nothing of it is kept on the phone.
 package dev.harken.android
 
 import androidx.compose.foundation.clickable
@@ -43,6 +49,34 @@ import dev.arkdb.ui.TabTitle
 import dev.arkdb.ui.destinationKeepsAPlace
 import dev.arkdb.ui.quiet
 import dev.arkdb.ui.rememberDestinationListState
+
+/**
+ * What was played last, and the page it was started from, so Home can offer it back. `live` when it
+ * is the listening session's own track — then `on` says where it is playing, if it is.
+ */
+data class LastPlayed(val track: Playing, val from: Page?, val live: Boolean = false, val on: String? = null)
+
+/**
+ * Home's last played: the session's track while this phone is part of a session that has one,
+ * else the newest play in the log. `art` is an album's cover by its name; `server` what it is
+ * joined to.
+ */
+fun lastPlayed(h: Heard, played: Played?, playlists: List<Playlist>, art: (String) -> String, server: String, here: String): LastPlayed? {
+    fun cover(album: String): String = art(album).takeIf { it.isNotEmpty() }?.let { Media.url(server, it) } ?: ""
+    val a = if (h.joined) h.listening?.active else null
+    if (a != null) {
+        val t = a.now
+        val s = h.listening!!
+        val on =
+            if (!s.sounding) null
+            else (a.output as? dev.harken.android.listening.Output.Device)?.id?.let { id ->
+                if (id == h.me) "Playing on $here" else "Playing on ${s.devices[id]?.name ?: "another device"}"
+            }
+        return LastPlayed(Playing(t.id.hex, t.title, t.creator, t.album, cover(t.album)), Page.ofPlace(a.from, playlists), live = true, on = on)
+    }
+    val p = played ?: return null
+    return LastPlayed(Playing(p.track?.hex ?: "", p.title, p.creator, p.album, cover(p.album)), Page.ofPlace(p.from, playlists))
+}
 
 /** What Home draws: a snapshot, its lists copies, so an equal one is the same one to Compose. */
 @Immutable
@@ -102,7 +136,7 @@ fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do, placeholderD
                             is Page.ForPlaylist -> data.playlists.firstOrNull { it.id == f.id }?.let { "From ${it.name}" } ?: "From a playlist"
                             else -> "From your library"
                         }
-                    item { LastCard(last, from, onResume = { act.resume(last) }) }
+                    item { LastCard(last, last.on ?: from, onResume = { act.resume(last) }) }
                 }
                 item { Heading("Recently added", action = "All songs", onAction = { act.library(LibraryTab.Songs) }) }
                 item {

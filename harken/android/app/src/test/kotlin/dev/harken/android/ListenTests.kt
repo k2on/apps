@@ -1,0 +1,236 @@
+// The listening session's ends that are not the reconciler: the picker
+// (Remote.kt's `Picker`), Home's last played (`lastPlayed`), the scrub
+// another device drags arriving here (`Listen`, over a real session), and
+// the lock screen's player (`RemotePlayer`), whose every command is a
+// transition. The session is the module's, run by the test's server
+// (`Hall`), and the devices real Kotlin peers.
+//
+// Each was falsified once by breaking what it holds; the comment beside
+// each says how, and what failed.
+package dev.harken.android
+
+import android.os.Looper
+import app.cash.paparazzi.DeviceConfig
+import app.cash.paparazzi.Paparazzi
+import dev.arkdb.android.ArkSession
+import dev.arkdb.client.Account
+import dev.arkdb.client.Login
+import dev.arkdb.client.Peer
+import dev.harken.android.listening.Clock
+import dev.harken.android.listening.Output
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Rule
+import org.junit.Test
+
+class ListenTests {
+    // For layoutlib's Looper, which the lock screen's player is built on.
+    @get:Rule val paparazzi = Paparazzi(deviceConfig = DeviceConfig.PIXEL_5, theme = "android:Theme.Material.NoActionBar")
+
+    private val queue = listOf(queuedTrack("a", 1), queuedTrack("b", 2), queuedTrack("c", 3))
+
+    // A device's end of the session, as the app has it: a `Listen` over a session with no thread
+    // of its own, so a press is previewed and published before it returns.
+    private fun listen(hall: Hall, peer: Peer, session: String, name: String): Listen =
+        Listen(ArkSession.inline(peer, "https://music.example.com", Login("t", session, Account("alice"), 0)), name).also { hall.carry() }
+
+    /**
+     * The picker, as the desktop's: while nothing plays, this phone is the default — ticked, the
+     * cursor on it — and there is no row that stops it everywhere; while something plays, the
+     * output is ticked and the cursor on it; a device that cannot play is drawn and not
+     * selectable; the output that has gone is drawn, not answering; and picking a device is a
+     * hand-off, which the session shows as connecting until that device says it has started.
+     *
+     * Falsified by ticking the output alone, with no default: nothing was ticked while nothing
+     * played.
+     */
+    @Test
+    fun thePickerDefaultsToThisPhoneAndTransfers() {
+        val hall = Hall()
+        val desk = hall.device("desk", false, "computer")
+        val phone = hall.device("phone", true)
+        val laptop = hall.device("laptop", true, "computer")
+        val r = Remote("phone", "Phone")
+
+        val idle = Picker.rows(r.session(phone)!!, "phone")
+        assertEquals("a row per device and no other", listOf("desk", "laptop", "phone"), idle.map { it.id })
+        assertEquals("nothing plays: this phone is ticked", listOf("phone"), idle.filter { it.ticked }.map { it.id })
+        assertEquals("and the cursor is on it", "phone", idle[Picker.cursor(idle)].id)
+        assertFalse("a desktop with no speakers is not selectable", idle.first { it.id == "desk" }.takeable)
+
+        assertNull(r.press(phone, Press.Start(queue, 0, 0, ""), null))
+        hall.carry()
+        val playing = Picker.rows(r.session(phone)!!, "phone")
+        assertEquals("the output is ticked", listOf("phone"), playing.filter { it.ticked }.map { it.id })
+        val to = Picker.pick(playing.first { it.id == "laptop" }, r.session(phone))
+        assertEquals(Press.Transfer("laptop"), to)
+        assertNull("picking the device that has it asks nothing", Picker.pick(playing.first { it.id == "phone" }, r.session(phone)))
+        assertNull("nor a device that cannot play", Picker.pick(playing.first { it.id == "desk" }, r.session(phone)))
+        assertNull(r.press(phone, to!!, null))
+        hall.carry()
+        val moving = Picker.rows(r.session(phone)!!, "phone")
+        assertTrue("connecting, until it says it has started", moving.first { it.id == "laptop" }.let { it.moving && it.ticked })
+        assertEquals("laptop", moving[Picker.cursor(moving)].id)
+
+        // The laptop's socket goes: it keeps the sound, and is drawn not answering.
+        hall.drop(laptop)
+        val away = Picker.rows(r.session(phone)!!, "phone")
+        val row = away.first { it.id == "laptop" }
+        assertTrue("drawn, away, ticked, and not selectable", row.away && row.ticked && !row.takeable)
+        assertTrue(desk.linked)
+    }
+
+    /**
+     * Home's last played is the session's track while there is a session with one — what is
+     * playing or paused on whichever device, and where — and otherwise the newest play in the log,
+     * which is what a phone offline, or one whose session is idle, has to say.
+     *
+     * Falsified by preferring the log's play whenever there was one: Home said "Air" while the
+     * session was playing "b" on the laptop.
+     */
+    @Test
+    fun homesLastPlayedIsTheSessionsElseTheLogs() {
+        val hall = Hall()
+        val phone = hall.device("phone", true)
+        val laptop = hall.device("laptop", true, "computer")
+        val air = Played(queue[0].id, "Air", "Handel", "Water Music", 100_000, "music/air.mp3", 1, "#album/Water%20Music")
+        val r = Remote("phone", "Phone")
+        val heard = { Heard(me = "phone", joined = r.joined(phone), listening = r.session(phone)) }
+        val noArt: (String) -> String = { "" }
+
+        val fromLog = lastPlayed(heard(), air, emptyList(), noArt, "https://m", "Phone")!!
+        assertEquals("an idle session: the log's", "Air", fromLog.track.title)
+        assertEquals(Page.ForAlbum("Water Music"), fromLog.from)
+        assertFalse(fromLog.live)
+
+        val lr = Remote("laptop", "Laptop")
+        assertNull(lr.press(laptop, Press.Start(queue, 1, 0, "#album/Water%20Music"), null))
+        hall.carry()
+        val live = lastPlayed(heard(), air, emptyList(), noArt, "https://m", "Phone")!!
+        assertEquals("the session's track", "b", live.track.title)
+        assertTrue(live.live)
+        assertEquals("and where it plays", "Playing on laptop", live.on)
+        assertEquals(Page.ForAlbum("Water Music"), live.from)
+
+        assertNull(lr.press(laptop, Press.Pause, null))
+        hall.carry()
+        assertNull("paused: no device to name", lastPlayed(heard(), air, emptyList(), noArt, "https://m", "Phone")!!.on)
+
+        hall.drop(phone)
+        assertEquals("offline: the log's again", "Air", lastPlayed(heard(), air, emptyList(), noArt, "https://m", "Phone")!!.track.title)
+        assertNull("nothing anywhere: nothing", lastPlayed(heard(), null, emptyList(), noArt, "https://m", "Phone"))
+    }
+
+    /**
+     * A scrubber dragged on a tablet reaches this phone's `Listen` as the ephemeral slot it is —
+     * relayed, never sequenced — and is what the phone's scrubber shows; its own slot is not
+     * another's, and letting go empties it.
+     *
+     * Falsified by `Heard.scrubbing` reading every slot, this phone's own included: the phone's
+     * own drag came back to it as somebody else's.
+     */
+    @Test
+    fun aScrubOnAnotherDeviceIsShownHere() {
+        val hall = Hall()
+        val phonePeer = hall.device("phone", true)
+        val tabletPeer = hall.device("tablet", true, "computer")
+        val phone = listen(hall, phonePeer, "phone", "Phone")
+        val tablet = listen(hall, tabletPeer, "tablet", "Tablet")
+        phone.press(Press.Start(queue, 0, 0, ""))
+        hall.carry()
+        val seq = phonePeer.liveStatus(LISTENING)!!.seq
+        tablet.press(Press.Scrub(61_000))
+        hall.carry()
+        phone.poke()
+        assertEquals("the tablet's scrubber, here", 61_000L, phone.heard.value.scrubbing)
+        assertEquals("relayed, not sequenced", seq, phonePeer.liveStatus(LISTENING)!!.seq)
+        phone.press(Press.Scrub(10_000))
+        hall.carry()
+        assertEquals("this phone's own slot is not another's", 61_000L, phone.heard.value.scrubbing)
+        tablet.press(Press.Scrub(null))
+        // Within the throttle's window of the last: held, and sent by the pump at its deadline —
+        // the final value always goes.
+        Thread.sleep(dev.arkdb.client.THROTTLE_MS + 10)
+        tabletPeer.pump()
+        hall.carry()
+        phone.press(Press.Scrub(null))
+        hall.carry()
+        phone.poke()
+        assertNull("let go: nobody is scrubbing", phone.heard.value.scrubbing)
+    }
+
+    /**
+     * The lock screen's player while the sound is elsewhere: the session drawn — its track, its
+     * queue, playing or not — and every command a transition: pause, a seek, next and previous, a
+     * track of the queue, a queue set from outside, play next, and a headset's stop, which is a
+     * pause. With nothing queued it is empty: no notification.
+     *
+     * Falsified by `Forward.seek` taking a seek within the track for a jump to it: the session
+     * went back to the start of the track, playing, where the lock screen asked for 45 s, paused.
+     * And by a stop that was answered with nothing: the session went on playing.
+     */
+    @Test
+    fun theLockScreensPlayerForwardsEveryCommandAsATransition() {
+        val hall = Hall()
+        val phonePeer = hall.device("phone", true)
+        val laptopPeer = hall.device("laptop", true, "computer")
+        val phone = listen(hall, phonePeer, "phone", "Phone")
+        val laptop = Remote("laptop", "Laptop")
+        val player = RemotePlayer(Looper.myLooper() ?: Looper.getMainLooper())
+        player.listen = phone
+        player.show(phone.heard.value)
+        assertEquals("nothing queued: empty, so no notification", 0, player.mediaItemCount)
+        assertEquals(androidx.media3.common.Player.STATE_IDLE, player.playbackState)
+
+        assertNull(laptop.press(laptopPeer, Press.Start(queue, 0, 30_000, "#album/Water%20Music"), null))
+        hall.carry()
+        phone.poke()
+        player.show(phone.heard.value)
+        assertEquals("the session's queue", 3, player.mediaItemCount)
+        assertEquals("b", queue[1].title)
+        assertTrue("playing, on the laptop", player.playWhenReady)
+        assertTrue(player.currentPosition >= 30_000)
+
+        fun session() = hall.state().active!!
+
+        player.pause()
+        hall.carry()
+        assertFalse("pause is a transition", session().clock.playing)
+        assertTrue("and the sound stayed where it was", hall.state().outputs("laptop"))
+        player.show(phone.heard.value)
+        player.seekTo(45_000)
+        hall.carry()
+        assertEquals("a seek is a seek", Clock.Paused(45_000), session().clock)
+        player.play()
+        hall.carry()
+        assertTrue("play is play, on the laptop", session().clock.playing && hall.state().outputs("laptop"))
+        player.show(phone.heard.value)
+        player.seekToNext()
+        hall.carry()
+        assertEquals("next is a skip", 1L, session().at)
+        player.show(phone.heard.value)
+        player.seekToNextMediaItem()
+        hall.carry()
+        assertEquals(2L, session().at)
+        player.show(phone.heard.value)
+        player.seekTo(0, 0)
+        hall.carry()
+        assertEquals("a track of the queue is a jump", 0L, session().at)
+        player.show(phone.heard.value)
+        player.stop()
+        hall.carry()
+        assertFalse("a headset's stop is a pause", session().clock.playing)
+        assertTrue("and never forgets the queue", hall.state().active != null)
+
+        player.show(phone.heard.value)
+        val d = queuedTrack("d", 4)
+        player.setMediaItems(listOf(Items.of(d, "https://m", "", "#library")), 0, 0)
+        hall.carry()
+        assertEquals("a queue set from outside is a track pressed", listOf("d"), session().queue.map { it.title })
+        assertEquals("#library", session().from)
+        assertTrue("and, nothing sounding, plays here", hall.state().outputs("phone"))
+        assertTrue(session().output is Output.Device)
+    }
+}

@@ -653,10 +653,17 @@
               installPhase = "touch $out";
             };
             # harken.ark is what the domain crate emits, and the reference
-            # verifies it.
+            # verifies it. And the phone's typed reading of the listening
+            # session (docs/plan-live.md phase 3) is what `arkc gen kotlin`
+            # prints of that module, byte for byte: a domain change that moves
+            # a field of the session moves harken.ark, and then this, rather
+            # than the phone reading a field that is no longer there.
             harken-domain = pkgs.runCommand "check-harken-domain" { nativeBuildInputs = [ ark ]; } ''
               diff ${harken-domain}/harken.ark ${./harken/domain/harken.ark}
               arkc verify ${./harken/domain/harken.ark}
+              arkc gen kotlin ${./harken/domain/harken.ark} dev.harken.android.listening printed.kt
+              diff printed.kt ${./harken/android/app/src/main/kotlin/dev/harken/android/listening/Listening.kt} \
+                || { echo "harken/android's listening/Listening.kt is not what arkc gen kotlin prints of harken.ark: print it again"; exit 1; }
               touch $out
             '';
           } // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {

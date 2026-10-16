@@ -124,9 +124,14 @@ private fun Line(title: String, under: String, onClick: (() -> Unit)? = null, ch
     }
 }
 
-/** Every number the old settings screen showed, and every change this phone made with where it stands. */
+/**
+ * Every number the old settings screen showed, every change this phone made with where it stands,
+ * and every number this end of the listening session holds — the desktop's `D`: the instance's
+ * sequence, what is pending and whether the server's snapshot has come, the server's clock against
+ * this phone's, who is here, where the sound is, everybody's scrubber, and what was refused.
+ */
 @Composable
-fun DiagnosticsScreen(d: Diagnostics?, onBack: () -> Unit, onVerify: () -> Unit) {
+fun DiagnosticsScreen(d: Diagnostics?, onBack: () -> Unit, onVerify: () -> Unit, heard: Heard = Heard()) {
     Column(Modifier.fillMaxSize()) {
         PageBar("Diagnostics", onBack)
         Column(Modifier.fillMaxWidth().verticalScroll(rememberDestinationScrollState("diagnostics")).padding(horizontal = Space.page)) {
@@ -134,6 +139,7 @@ fun DiagnosticsScreen(d: Diagnostics?, onBack: () -> Unit, onVerify: () -> Unit)
             Group("Peer") {
                 if (s == null) Line("Opening", "…") else for ((k, v) in numbers(s)) Number(k, v)
             }
+            Group("Listening") { for ((k, v) in listeningNumbers(heard)) Number(k, v) }
             Group("Verify") {
                 Line("Ask the server whether it agrees", d?.verdict ?: "Not asked yet; the answer arrives on a later pump", onClick = onVerify)
             }
@@ -168,6 +174,47 @@ fun numbers(s: Status): List<Pair<String, String>> =
         "live frames" to s.heardFrames.toString(),
         "bad frames" to s.badFrames.toString(),
     )
+
+/** The listening session's numbers, by name: what `D` draws on the desktop. */
+fun listeningNumbers(h: Heard): List<Pair<String, String>> {
+    val s = h.listening
+    val a = s?.active
+    val out =
+        mutableListOf(
+            "device" to h.me.ifEmpty { "—" },
+            "part of the session" to h.joined.toString(),
+            "linked" to h.linked.toString(),
+            "epoch" to h.epoch.toString(),
+            "seq" to (h.status?.seq?.toString() ?: "—"),
+            "pending" to (h.status?.pending?.toString() ?: "—"),
+            "synced" to (h.status?.synced?.toString() ?: "—"),
+            "server offset" to "${h.offsetMs} ms",
+            "calls" to h.stats.calls.toString(),
+            "refused" to h.stats.refused.toString(),
+            "plays recorded" to h.stats.plays.toString(),
+            "came back playing" to h.stats.cameBackPlaying.toString(),
+            "last refusal" to (h.refused ?: h.stats.lastRefusal ?: "—"),
+        )
+    out +=
+        "session" to
+            when {
+                s == null -> "—"
+                a == null -> "idle"
+                else -> "${a.at.toInt() + 1} of ${a.queue.size}, ${if (a.clock.playing) "playing" else "paused"} at ${Media.clock(a.clock.position(h.serverNow()))}"
+            }
+    out +=
+        "output" to
+            when (val o = a?.output) {
+                null -> "—"
+                is dev.harken.android.listening.Output.Device -> o.id + if (o.moving) " (moving)" else ""
+                is dev.harken.android.listening.Output.Away -> "${o.id} (away)"
+                dev.harken.android.listening.Output.Nowhere -> "nowhere"
+            }
+    for (d in s?.devices?.values.orEmpty()) out += "device ${d.name}" to "${d.kind}, ${if (d.canPlay) "can play" else "cannot play"}, ${d.id}"
+    if (s != null && s.scrub.isEmpty()) out += "scrub" to "none"
+    for ((id, at) in s?.scrub.orEmpty()) out += "scrub ${if (id == h.me) "(this phone)" else id}" to Media.clock(at)
+    return out
+}
 
 @Composable
 private fun Number(name: String, value: String) {

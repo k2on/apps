@@ -5,9 +5,17 @@
 // play or pause and next, shuffle and repeat, and the queue. They are the
 // two faces of one card (PlayerSheet.kt), which draws the cover itself as
 // it travels between them. Both draw one [PlayerState]; neither knows
-// there is a service behind it. The position is a flow beside it, read
-// only by the two leaves that draw it — the hairline and the scrubber — so
-// a tick recomposes those and nothing else.
+// there is a service behind it, or that the sound may be on another device
+// of the account. The position is a flow beside it, read only by the two
+// leaves that draw it — the hairline and the scrubber — so a tick
+// recomposes those and nothing else; so is where another device's scrubber
+// is being dragged to, read by the scrubber alone.
+//
+// While the phone is part of the listening session the full player says
+// where the sound is (`PlayerState.on`): a chip beside the queue's, the
+// device's kind and name, that opens the picker; and the mini player says it
+// under the title when the sound is somewhere else. The session has no
+// shuffle and no repeat, so neither toggle is drawn then.
 package dev.harken.android
 
 import androidx.compose.foundation.background
@@ -83,6 +91,12 @@ interface Controls {
     fun skipAhead(n: Int) {}
 
     fun more() {}
+
+    /** Open the device picker. */
+    fun devices() {}
+
+    /** The scrubber is being dragged to `ms`: said to the session's other devices. */
+    fun scrub(ms: Long) {}
 }
 
 /** Controls that do nothing: what a screenshot hands the player. */
@@ -91,7 +105,20 @@ object Still : Controls
 /** A position that never moves: the start of the track, or `ms` into it (a screenshot's). */
 fun still(ms: Long = 0): StateFlow<Long> = MutableStateFlow(ms)
 
+/** Nobody else scrubbing — or, for a screenshot, another device holding its scrubber at `ms`. */
+fun nobody(ms: Long? = null): StateFlow<Long?> = MutableStateFlow(ms)
+
 private val Start = still()
+
+private val Nobody = nobody()
+
+/** What the device chip says of where the sound is. */
+fun Where.label(): String =
+    when {
+        moving -> "Connecting to $name…"
+        away -> "$name (not answering)"
+        else -> name
+    }
 
 private fun seedOf(p: Playing): String = p.album.ifEmpty { p.title }
 
@@ -123,7 +150,17 @@ fun MiniFace(state: PlayerState, controls: Controls, position: StateFlow<Long> =
             Spacer(Modifier.width(Space.m))
             Column(Modifier.weight(1f)) {
                 Text(now.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(now.artist, style = quiet(MaterialTheme.typography.bodySmall), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                val on = state.on
+                // The sound somewhere else: said where the artist was, in the accent.
+                if (on != null && !on.here)
+                    Text(
+                        if (on.moving || on.away) on.label() else "On ${on.name}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                else Text(now.artist, style = quiet(MaterialTheme.typography.bodySmall), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             IconButton(onClick = controls::toggle) {
                 Glyph(if (state.playing) Glyphs.Pause else Glyphs.Play, if (state.playing) "Pause" else "Play", size = 20.dp)
@@ -153,8 +190,8 @@ private fun Hairline(durationMs: Long, position: StateFlow<Long>) {
 
 /** The full player on a page of its own: what a screenshot draws. In the app it is the player's open face. */
 @Composable
-fun FullPlayer(state: PlayerState, controls: Controls, position: StateFlow<Long> = Start) {
-    Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) { FullFace(state, controls, position) }
+fun FullPlayer(state: PlayerState, controls: Controls, position: StateFlow<Long> = Start, scrubbing: StateFlow<Long?> = Nobody) {
+    Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) { FullFace(state, controls, position, scrubbing = scrubbing) }
 }
 
 /**
@@ -162,7 +199,14 @@ fun FullPlayer(state: PlayerState, controls: Controls, position: StateFlow<Long>
  * is: the player draws the art there itself, having brought it up from the bar.
  */
 @Composable
-fun FullFace(state: PlayerState, controls: Controls, position: StateFlow<Long> = Start, slot: Modifier? = null, modifier: Modifier = Modifier) {
+fun FullFace(
+    state: PlayerState,
+    controls: Controls,
+    position: StateFlow<Long> = Start,
+    slot: Modifier? = null,
+    modifier: Modifier = Modifier,
+    scrubbing: StateFlow<Long?> = Nobody,
+) {
     val now = state.now
     Column(modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = Space.xl)) {
         Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -189,9 +233,13 @@ fun FullFace(state: PlayerState, controls: Controls, position: StateFlow<Long> =
         )
         Text(now?.artist ?: "", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, maxLines = 1)
         Spacer(Modifier.height(Space.l))
-        Scrubber(state, position, controls)
+        Scrubber(state, position, scrubbing, controls)
+        // The session has no shuffle and no repeat: neither is drawn while the phone is part of it,
+        // and the transport keeps its place.
+        val alone = state.on == null
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Toggle(Glyphs.Shuffle, if (state.shuffle) "Shuffle is on" else "Shuffle is off", state.shuffle, controls::shuffle)
+            if (alone) Toggle(Glyphs.Shuffle, if (state.shuffle) "Shuffle is on" else "Shuffle is off", state.shuffle, controls::shuffle)
+            else Spacer(Modifier.size(48.dp))
             IconButton(onClick = controls::previous, modifier = Modifier.size(56.dp)) { Glyph(Glyphs.Previous, "Previous", size = 28.dp) }
             FilledIconButton(
                 onClick = controls::toggle,
@@ -202,7 +250,7 @@ fun FullFace(state: PlayerState, controls: Controls, position: StateFlow<Long> =
                 Glyph(if (state.playing) Glyphs.Pause else Glyphs.Play, if (state.playing) "Pause" else "Play", size = 30.dp)
             }
             IconButton(onClick = controls::next, modifier = Modifier.size(56.dp)) { Glyph(Glyphs.Next, "Next", size = 28.dp) }
-            Toggle(
+            if (alone) Toggle(
                 if (state.repeat == Repeat.One) Glyphs.RepeatOne else Glyphs.Repeat,
                 when (state.repeat) {
                     Repeat.Off -> "Repeat is off"
@@ -212,32 +260,66 @@ fun FullFace(state: PlayerState, controls: Controls, position: StateFlow<Long> =
                 state.repeat != Repeat.Off,
                 controls::repeat,
             )
+            else Spacer(Modifier.size(48.dp))
         }
         Spacer(Modifier.height(Space.l))
-        Row(
-            Modifier.align(Alignment.CenterHorizontally).clip(RoundedCornerShape(50)).clickable(onClick = controls::queue).padding(horizontal = Space.l, vertical = Space.s),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Glyph(Glyphs.Queue, null, size = 18.dp)
-            Spacer(Modifier.width(Space.s))
-            Text(if (state.upNext.isEmpty()) "Nothing up next" else "Up next: ${state.upNext.first().title}", style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
+        val on = state.on
+        if (on == null) Box(Modifier.align(Alignment.CenterHorizontally)) { QueueChip(state, controls) }
+        else
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                DeviceChip(on, controls, Modifier.weight(1f, fill = false))
+                Spacer(Modifier.width(Space.s))
+                QueueChip(state, controls, Modifier.weight(1f, fill = false))
+            }
         Spacer(Modifier.height(Space.l))
     }
 }
 
-// A scrubber that follows the finger while it is dragged, and the player
-// otherwise: the time gone under its start and the time left under its end.
+// What plays after this: the queue's sheet.
 @Composable
-private fun Scrubber(state: PlayerState, position: StateFlow<Long>, controls: Controls) {
+private fun QueueChip(state: PlayerState, controls: Controls, modifier: Modifier = Modifier) {
+    Row(
+        modifier.clip(RoundedCornerShape(50)).clickable(onClick = controls::queue).padding(horizontal = Space.l, vertical = Space.s),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Glyph(Glyphs.Queue, null, size = 18.dp)
+        Spacer(Modifier.width(Space.s))
+        Text(if (state.upNext.isEmpty()) "Nothing up next" else "Up next: ${state.upNext.first().title}", style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+// Where the sound is, and the way to move it: lit while it is this phone's — or nowhere, which is
+// where the next press plays.
+@Composable
+private fun DeviceChip(on: Where, controls: Controls, modifier: Modifier = Modifier) {
+    val tint = if (on.here && !on.away) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+    Row(
+        modifier.clip(RoundedCornerShape(50)).clickable(onClick = controls::devices).padding(horizontal = Space.l, vertical = Space.s),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Glyphs.device(on.kind, on.name), contentDescription = "Playing on", tint = tint, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(Space.s))
+        Text(on.label(), style = MaterialTheme.typography.labelLarge, color = tint, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+// A scrubber that follows the finger while it is dragged, another device's while one is dragging
+// it, and the player otherwise: the time gone under its start and the time left under its end.
+// Dragged, it says where to the session's other devices (`scrub`), and seeks on release.
+@Composable
+private fun Scrubber(state: PlayerState, position: StateFlow<Long>, scrubbing: StateFlow<Long?>, controls: Controls) {
     val ms by position.collectAsStateWithLifecycle()
+    val theirs by scrubbing.collectAsStateWithLifecycle()
     Recompositions.hit("Progress")
     var dragging by remember { mutableStateOf<Float?>(null) }
     val total = state.durationMs.coerceAtLeast(1)
-    val at = dragging ?: (ms.toFloat() / total).coerceIn(0f, 1f)
+    val at = dragging ?: ((theirs ?: ms).toFloat() / total).coerceIn(0f, 1f)
     Slider(
         value = at,
-        onValueChange = { dragging = it },
+        onValueChange = {
+            dragging = it
+            controls.scrub((it * total).toLong())
+        },
         onValueChangeFinished = {
             dragging?.let { controls.seek((it * total).toLong()) }
             dragging = null

@@ -3,7 +3,10 @@
 // with the same butt caps and miter joins, so a play button is one shape
 // on every client. A circle or a rect there is a path here, written out.
 // `repeat`, `repeat-1`, `bell` and `settings` are Lucide's too, drawn the
-// same way; the desktop has no use for them.
+// same way; the desktop has no use for them. The devices of the listening
+// session's picker — `smartphone`, `laptop`, `speaker`, and `cast` for the
+// button that opens it — are the desktop's own; `globe`, for a browser, is
+// Lucide's, drawn the same way.
 //
 // Geometry only: every glyph is drawn in a placeholder ink that `Icon`
 // replaces with the content colour, so its colour is always the theme's.
@@ -123,6 +126,36 @@ object Glyphs {
     val Playing = glyph("audio-lines", "M2 10v3", "M6 6v11", "M10 3v18", "M14 8v7", "M18 5v13", "M22 10v3")
     val Remove = glyph("list-minus", "M16 5H3", "M11 12H3", "M16 19H3", "M21 12h-6")
     val PlayNext = glyph("list-start", "M16 12H3", "M16 18H3", "M10 6H3", "M21 18V8a2 2 0 0 0-2-2h-5", "m16 8-2-2 2-2")
+    val Phone = glyph("smartphone", rect(5f, 2f, 14f, 20f), "M12 18h.01")
+    val Computer =
+        glyph(
+            "laptop",
+            "M18 5a2 2 0 0 1 2 2v8.526a2 2 0 0 0 .212.897l1.068 2.127a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45l1.068-2.127A2 2 0 0 0 4 15.526V7a2 2 0 0 1 2-2z",
+            "M20.054 15.987H3.946",
+        )
+    val Speaker = glyph("speaker", rect(4f, 2f, 16f, 20f), "M12 6h.01", circle(12f, 14f, 4f), "M12 14h.01")
+    val Browser = glyph("globe", circle(12f, 12f, 10f), "M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20", "M2 12h20")
+    val Devices =
+        glyph(
+            "cast",
+            "M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6",
+            "M2 12a9 9 0 0 1 8 8",
+            "M2 16a5 5 0 0 1 4 4",
+            "M2 20h.01",
+        )
+
+    /**
+     * A device of the listening session, by what it declared itself: a phone, a speaker, a browser.
+     * The web build declares a computer named "Browser" (`harken/iced`), so that name is a browser too.
+     */
+    fun device(kind: String, name: String = ""): androidx.compose.ui.graphics.vector.ImageVector =
+        when (kind) {
+            "phone" -> Phone
+            "speaker" -> Speaker
+            "browser" -> Browser
+            else -> if (name == "Browser") Browser else Computer
+        }
+
     val Bell =
         glyph(
             "bell",

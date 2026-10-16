@@ -108,6 +108,35 @@ data class Playlist(val id: Id, val name: String, val userId: String, val create
     }
 }
 
+/**
+ * A row of `last_played` and `recently_played`: a track as it was heard — `record_play`'s, so the
+ * track need not be in the library — when, and the page it was played from (`#album/…`).
+ */
+data class Played(
+    val track: Id?,
+    val title: String,
+    val creator: String,
+    val album: String,
+    val durationMs: Long,
+    val file: String,
+    val playedMs: Long,
+    val from: String,
+) {
+    companion object {
+        fun of(v: Value): Played =
+            Played(
+                track = Id.ofText(v.field("track").asText()),
+                title = v.field("title").asText(),
+                creator = v.field("creator").asText(),
+                album = v.field("album").asText(),
+                durationMs = v.field("duration_ms").asInt(),
+                file = v.field("file").asText(),
+                playedMs = v.field("played_ms").asInt(),
+                from = v.field("from").asText(),
+            )
+    }
+}
+
 /** What a write came to: the entry, whose standing `Peer.standing` answers, or the local refusal. */
 sealed class Wrote {
     data class Entry(val id: Id) : Wrote()
