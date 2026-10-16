@@ -40,7 +40,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 
 class Covers(context: Context, private val server: String) : CoverLoader {
-    private val dir = File(context.cacheDir, "covers")
+    private val dir = folder(context)
     private val density = context.resources.displayMetrics.density
     private val missing: MutableSet<String> = Collections.synchronizedSet(HashSet())
     // One fetch and one decode per URL, however many rows ask at once. The rows of one album all
@@ -126,30 +126,42 @@ class Covers(context: Context, private val server: String) : CoverLoader {
     // The encoded original: from the disk, or fetched and written there.
     private fun onDisk(url: String): ByteArray? {
         reads.incrementAndGet()
-        val file = File(dir, "%08x".format(Art.hash(url)))
-        if (file.exists()) return file.readBytes()
-        val bytes =
-            try {
-                val c = URI(url).toURL().openConnection() as HttpURLConnection
-                c.connectTimeout = 10_000
-                c.readTimeout = 20_000
-                try {
-                    if (c.responseCode / 100 != 2) return null
-                    c.inputStream.use { it.readBytes() }
-                } finally {
-                    c.disconnect()
-                }
-            } catch (e: Exception) {
-                return null
-            }
-        dir.mkdirs()
-        val tmp = File(dir, file.name + ".tmp")
-        tmp.writeBytes(bytes)
-        tmp.renameTo(file)
-        return bytes
+        return original(dir, url)
     }
 
     companion object {
+        /**
+         * The encoded original of the cover at `url`, kept under `dir` by its URL's FNV-1a: from
+         * the disk, or fetched and written there — the screens' cache and the car's
+         * (CoverProvider.kt) one and the same. Null when it cannot be had.
+         */
+        fun original(dir: File, url: String): ByteArray? {
+            val file = File(dir, "%08x".format(Art.hash(url)))
+            if (file.exists()) return file.readBytes()
+            val bytes =
+                try {
+                    val c = URI(url).toURL().openConnection() as HttpURLConnection
+                    c.connectTimeout = 10_000
+                    c.readTimeout = 20_000
+                    try {
+                        if (c.responseCode / 100 != 2) return null
+                        c.inputStream.use { it.readBytes() }
+                    } finally {
+                        c.disconnect()
+                    }
+                } catch (e: Exception) {
+                    return null
+                }
+            dir.mkdirs()
+            val tmp = File(dir, file.name + ".tmp")
+            tmp.writeBytes(bytes)
+            tmp.renameTo(file)
+            return bytes
+        }
+
+        /** Where the covers' originals are kept. */
+        fun folder(context: Context): File = File(context.cacheDir, "covers")
+
         /** The most pixels a cover is decoded to across: the full player's, at a phone's density. */
         const val BOUND = 768
 

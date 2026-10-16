@@ -42,14 +42,33 @@
                 <data android:scheme="harken" android:host="auth" />
             </intent-filter>
         </activity>
+        <!-- The player and the media library (Playback.kt, Car.kt): what the
+             notification, the lock screen, a headset and Android Auto reach.
+             A car finds it by the two library actions, the platform's and
+             Media3's; the session's own stays for a controller that asks for
+             a session rather than a library. -->
         <service
             android:name=".PlaybackService"
             android:exported="true"
             android:foregroundServiceType="mediaPlayback">
             <intent-filter>
+                <action android:name="androidx.media3.session.MediaLibraryService" />
+                <action android:name="android.media.browse.MediaBrowserService" />
                 <action android:name="androidx.media3.session.MediaSessionService" />
             </intent-filter>
         </service>
+        <!-- The covers, for a car, by content:// URI (CoverProvider.kt). Not
+             exported: each URI is granted to the car it is handed to. -->
+        <provider
+            android:name=".CoverProvider"
+            android:authorities="dev.harken.android.art"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+        <!-- Android Auto: harken is a media app (res/xml/automotive_app_desc.xml).
+             Its icon there is the launcher's, the trumpet. -->
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
     </application>
 
 </manifest>

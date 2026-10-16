@@ -1384,3 +1384,161 @@ session's socket — alive while it plays with no activity (Media3 starts it
 in the foreground for that, which is the documented behaviour); and how
 soon a paused, unbound service is stopped, which is when the session
 closes and the server marks the phone away.
+
+### Android Auto
+
+harken is an Android Auto media app: the car browses the phone's library,
+searches it, takes "play … on Harken" by voice and plays on the phone.
+No Car App Library — a media app is a media library service, which Media3
+already is.
+
+**The service is a library** (`PlaybackService`, now a
+`MediaLibraryService` with a `MediaLibrarySession`). The manifest declares
+it for `androidx.media3.session.MediaLibraryService` and
+`android.media.browse.MediaBrowserService` (the session's own action
+stays), and names the app a media app for cars
+(`com.google.android.gms.car.application` →
+`res/xml/automotive_app_desc.xml`, `<uses name="media"/>`); its icon in the
+car is the launcher's, the trumpet. A car binding to it with no activity
+finds the session through the process's `Sessions` ("The session outlives
+the activity", above), opening it from the remembered login if nothing has.
+Signed out, the tabs are still there and every list says "Sign in to
+Harken on your phone." (`ERROR_SESSION_AUTHENTICATION_EXPIRED`).
+
+**The browse tree** (`Car.kt`) is read from the replica, through the
+library's own views and the domain's own queries — `albums`, `artists`,
+`playlists`, the library, `album`, `artist`, `playlist`, `search`,
+`recently_played` — never a second layer of reads, so a car with no signal
+browses what the phone has:
+
+- **the root**: Home, Playlists, Albums, Artists — the four tabs Android
+  Auto draws — and Songs as a fifth only for a car whose root hints say it
+  draws more (`EXTRAS_KEY_ROOT_CHILDREN_LIMIT`); otherwise every song is a
+  row at the end of Home. Albums and artists are grids, everything else
+  lists (`EXTRAS_KEY_CONTENT_STYLE_BROWSABLE`/`_PLAYABLE`, on the root and
+  on each tab).
+- **Home**: the listening session's queue from where it is, "Playing now"
+  then "Up next" — or, with no session, the last thing played — then
+  "Recently played", newest first and a track once (group titles,
+  `EXTRAS_KEY_CONTENT_STYLE_GROUP_TITLE`); twenty-five of each at most.
+- **a playlist, an album, an artist** open to their tracks, playable; an
+  album in its own order.
+- **paging** is a slice of the list (`page × pageSize`), and nothing past
+  its end.
+
+An id says where a track was found: `t|<list>|<n>|<track>` — a page's
+route, `songs`, the session's `queue`, the `last` or a `recent` play, a
+`search:` and its words — so choosing it plays that list from there, as a
+tap on the phone does, and a list that has moved since finds the track by
+its id. A page's id is its route (`album/…`).
+
+**Artwork** is a `content://` URI, because Android Auto draws a browse list
+in its own process from a URI and will not load an `http` one there.
+`CoverProvider` answers `content://dev.harken.android.art/<px>/<name>/<url>`
+(hex): the cover's original from the screens' own disk cache (`Covers.kt`,
+the same files — fetched once if it is not there), its middle cropped
+square and scaled to the size the car asked for at its root
+(`EXTRAS_KEY_MEDIA_ART_SIZE_PIXELS`, at most 768), kept beside it as a PNG
+so the next ask is a file read. A record with no cover, or one that cannot
+be fetched, is the derived square the screens draw, rendered to a bitmap
+(`ark-ui`'s `squareBitmap`, in the dark gradients a car's screen wants). The
+provider is not exported: every URI is granted to the controller's package
+as it is handed over (`grantUriPermission`, the provider declaring
+`grantUriPermissions`), so nothing else can make it fetch anything. The
+now-playing item keeps its cover's `http` URL, which Media3 loads into a
+bitmap itself, and a track with no cover now carries the square's URI
+there too, so the notification and the car's player draw the square rather
+than nothing.
+
+**Search and voice.** `onSearch` is the phone's own search, grouped as its
+screen groups it (`Results.of`): albums, artists, songs. "Play X on
+Harken" arrives as `onSetMediaItems` with `requestMetadata.searchQuery`
+(and the assistant's guess, `EXTRA_MEDIA_FOCUS`, taken when it gives one):
+an album or a playlist named exactly plays in its order; an artist named
+exactly plays every track of theirs, shuffled; anything else is the songs
+`search` finds, the one whose title is the words first, else the first;
+failing that, an album, artist or playlist whose name holds the words.
+Nothing at all ("play Harken") is carrying on: the session's queue where
+it is, else the last play from the page it was played from, else every
+song shuffled — which is also `onPlaybackResumption`. Nothing found is said
+to the car in a sentence (`sendError`).
+
+**The car's rule** (decided): a choice made in a car plays on this phone,
+whatever is sounding elsewhere. In a car the phone is the speaker, and a
+song chosen there playing on a laptop at home would be wrong. The media
+session says which controller is asking
+(`controllerForCurrentRequest`, `isAutomotiveController` or
+`isAutoCompanionController`), and the session's player
+(`RemotePlayer.fromCar`) presses accordingly:
+
+- choosing a track is `start(queue, at, …)` and then `Here` — a transfer
+  to this phone if the sound is anywhere else, nothing if it is here or on
+  its way here;
+- play is `Here` and then `play`; pause, next, previous and a seek are
+  what they are from anywhere, transitions as on the lock screen.
+
+Every other controller keeps the existing rules. Offline — no session to be
+part of — the media session's player is the ExoPlayer, this phone's own,
+and a car's choice is loaded into it as any queue is. A stream that cannot
+be fetched (the server out of reach) is said to the car in a sentence
+(`sendError`, `ERROR_IO`: "Harken can't reach <host>. Your library is on
+this phone; playing it needs the server.") rather than a silence. There is
+no audio cache, so offline the car browses and cannot play.
+
+While the sound is on another device, the now-playing item says where
+("Playing on Laptop", as its subtitle); under the car's rule that is
+seldom what a car sees. No custom commands.
+
+**Tests** (`CarTests`, on layoutlib for a `Bundle`, a `Uri`, a `Bitmap` and
+a `Looper`), over the demo's records and more (`RestorationTests`'
+`Fixture`) and, for the rule, the test's server (`Hall`) with real Kotlin
+peers. Each falsified once:
+
+- `theBrowseTreeIsTheReplicas`: four tabs, five for a car that draws five,
+  every song at the end of Home with four; albums and artists grids,
+  tracks lists; the albums the `albums` view's; Water Music's tracks the
+  `album` query's in its order, five a page, nothing past the end; the
+  first playlist's thirty the `playlist` query's; choosing the third track
+  plays Water Music from it, from `#album/Water%20Music`. Falsified by
+  paging from the page number rather than page × size: "the second page
+  of Water Music" began at its second track.
+- `aCoverIsAContentUriTheProviderAnswers`: a 200 × 120 original in the
+  screens' cache comes back 96 × 96 for a 96-pixel ask, its middle, with
+  neither band at its edge; no cover is the derived square in the name's
+  tint; a URI not ours is nothing; and an album's item carries such a URI.
+  Falsified by the provider ignoring the size: 120 across.
+- `searchAndVoicePlayWhatWasAskedFor`: search grouped, albums first; "Water
+  Music" is the album in its order; "antonio vivaldi" every track of his,
+  shuffled (a seeded `Random`); a song's title that song; the assistant's
+  focus on an album taken; nothing matching is nothing; nothing asked
+  carries on. Falsified by an artist in its own order, and by asking
+  `search`'s songs before a name asked for exactly — "Vivaldi, shuffled"
+  both times.
+- `aChoiceInTheCarPlaysOnThisPhone`: with the laptop playing, a queue set
+  on the session's player by a car starts it and hands the sound to the
+  phone; set by anything else, it starts where the sound was; pause from
+  the car stays a pause on the laptop; play from the car brings the sound
+  here, playing. Falsified twice by the player not asking who was asking
+  ("and handed to this phone", "play in the car brings the sound here").
+- What the service itself does with Media3 — the library session, the
+  callbacks wiring these to a controller, the grants — is not run here:
+  Media3 1.5.1's test utilities are a separate artifact
+  (`media3-test-utils`) that the recorded graph does not hold, and a
+  `MediaLibrarySession` needs a service to be built in. Nothing was
+  re-recorded; no dependency was added (`MediaLibraryService` is in
+  `media3-session`).
+
+**Held to**: every test of the app's (`ScrollTests`, `RestorationTests`,
+`LifecycleTests`, `SourceTests`, `MotionTests`, `LaunchTests`, `RemoteTests`,
+`ListenTests`, `KeptTests`, the screenshots); the fling bench
+(HARKEN_FLING_BENCH=2000, passes 5 and 6) at 32,804–32,805 B per entering
+row and the draw at 27,977 B a frame, as before.
+
+**Not verified**: the car itself. There is no Desktop Head Unit and no car
+here, so what Android Auto draws of the tree, whether it shows the fifth
+tab, the grids, the group titles and the covers, how it pages, what it
+shows of a `sendError`, and voice through a real assistant are all
+unseen; so are the grants as a car's process sees them, the legacy
+controller's package name Media3 reports for it, and the service and the
+session staying alive with the screen off in a car. Installing outside the
+Play Store needs Android Auto's "Unknown sources" (`harken/android/README.md`).

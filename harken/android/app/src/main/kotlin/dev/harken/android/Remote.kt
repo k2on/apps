@@ -205,6 +205,12 @@ sealed class Press {
 
     /** The sound to another device. */
     data class Transfer(val to: String) : Press()
+
+    /**
+     * The sound to this device, if it is anywhere else; nothing if it is here, on its way here,
+     * or there is nothing to move. What a car asks before it plays (Car.kt).
+     */
+    object Here : Press()
 }
 
 /** Every number this end of the session holds that the peer does not, for the diagnostics. */
@@ -314,6 +320,7 @@ class Remote(
                 is Press.Start -> "start" to Inputs.start(press.queue, press.at, press.positionMs, press.from)
                 is Press.Scrub -> "scrub" to Inputs.scrub(press.atMs)
                 is Press.Transfer -> "transfer" to Inputs.transfer(press.to)
+                Press.Here -> if (a == null || s.outputs(me)) return null else "transfer" to Inputs.transfer(me)
                 is Press.Next -> {
                     if (a == null) return call(peer, "start", Inputs.start(listOf(press.track), 0, 0, ""))
                     // There is no insert: the queue is started again with it next, where it was —

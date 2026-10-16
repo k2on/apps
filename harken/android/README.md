@@ -247,7 +247,7 @@ exactly what the app draws):
   ticked by `playlists_of`, a tap putting it on or taking it off), go to
   the album or the artist, and on a playlist, remove from it.
 - **The player** — Media3's ExoPlayer in `PlaybackService`, a
-  `MediaSessionService`, streaming `/media/<file>` from the session's
+  `MediaLibraryService` (a car browses it, "In a car" below), streaming `/media/<file>` from the session's
   server (`Media.url`, the desktop's `media_url`: each segment
   percent-encoded, a whole URL passed through); the notification, the lock
   screen and Bluetooth are the media session's. The screens hold a
@@ -288,6 +288,42 @@ dark schemes, one type scale, one set of spacings — and the glyphs are the
 desktop's Lucide paths (`Glyphs.kt`). An empty library says where music
 comes from; a server that cannot be reached is one sentence over every
 tab, and what is on the phone keeps playing.
+
+## In a car
+
+harken is an Android Auto media app (`docs/plan-android.md`, "Android
+Auto"): `PlaybackService` is a Media3 `MediaLibraryService`, and the car
+browses Home, Playlists, Albums and Artists, searches, takes "play … on
+Harken" by voice and plays on the phone — from the replica, so browsing
+works with no signal; playing streams from the server, and a car out of
+its reach says so. Nothing here has been run in a car or on the Desktop
+Head Unit.
+
+**Android Auto hides an app it did not get from the Play Store**, which is
+every way this APK arrives (F-Droid, a hand install, CI). To let it in, on
+the phone, once:
+
+1. Open Android Auto's settings: on Android 10 and later, Settings → Apps
+   → See all apps → Android Auto → Additional settings in the app (on some
+   phones Settings → Connected devices → Connection preferences → Android
+   Auto); on Android 9 and earlier, the Android Auto app's menu → Settings.
+2. Scroll to **Version** at the bottom and tap **Version and permission
+   info** ten times; answer **OK** to "Allow development settings?".
+3. Open the **⋮** menu at the top right → **Developer settings**, and turn
+   on **Unknown sources** near the bottom.
+4. Back in Android Auto's settings, **Customize launcher** (or "Customise
+   launcher"), and tick **Harken** if it is not ticked.
+5. Disconnect from the car and connect again; if Harken still is not
+   there, restart the phone, which some phones need before the change
+   shows.
+
+Steps 1 and 2 are Google's own (developer.android.com, "Test Android
+apps for cars"); Google's page says the developer option exists and that
+it covers media apps but does not spell out its label or where it sits,
+so steps 3 to 5 are as the option is commonly described for current
+versions of Android Auto, and the wording may differ on yours. The setting
+applies to media apps like this one; it does nothing for apps built with
+the Car App Library.
 
 ## The screens as images
 

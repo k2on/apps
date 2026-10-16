@@ -9,7 +9,16 @@
 // being bound — so the activity going is not the phone leaving the
 // account's listening session: the socket, the device and the sound stay.
 // With no activity at all, it opens the session itself from the login the
-// onboarding remembered. What it plays is
+// onboarding remembered.
+//
+// **It is a media library** (`MediaLibraryService`), which is what a car
+// browses (Car.kt): the tree, search, voice and resumption are read from the
+// replica, and what a car chooses is handed to whichever player the media
+// session has — the session's, as a press, or this phone's own — the same
+// way as anything else that sets a queue. One rule is the car's alone: a
+// choice made in it plays on this phone, whatever is sounding elsewhere
+// ([RemotePlayer.fromCar]); a car's covers are `content://` URIs
+// (CoverProvider.kt), granted to it as it is handed them. What it plays is
 // `/media/<file>` from the session's server (`Media.url`), streamed with
 // range requests, which is what makes seeking work. Notifications are the
 // one permission the onboarding asks for, because they are what the
@@ -67,10 +76,15 @@ import androidx.media3.common.Player
 import androidx.media3.common.SimpleBasePlayer
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.session.LibraryResult
+import androidx.media3.session.MediaConstants
 import androidx.media3.session.MediaController
+import androidx.media3.session.MediaLibraryService
+import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.MediaSession
-import androidx.media3.session.MediaSessionService
+import androidx.media3.session.SessionError
 import androidx.media3.session.SessionToken
+import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
@@ -97,10 +111,10 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-/** The service: one ExoPlayer, the session's player beside it, and the media session around them. */
+/** The service: one ExoPlayer, the session's player beside it, and the media library session around them. */
 @OptIn(UnstableApi::class)
-class PlaybackService : MediaSessionService() {
-    private var session: MediaSession? = null
+class PlaybackService : MediaLibraryService() {
+    private var session: MediaLibrarySession? = null
     private lateinit var exo: ExoPlayer
     private lateinit var sound: ExoSound
     private lateinit var remote: RemotePlayer
@@ -128,7 +142,20 @@ class PlaybackService : MediaSessionService() {
                 0,
                 Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        session = MediaSession.Builder(this, exo).setSessionActivity(open).setCallback(Callback).build()
+        val made = MediaLibrarySession.Builder(this, exo, Browsing()).setSessionActivity(open).build()
+        session = made
+        // A choice in a car plays here: the media session says which controller is asking.
+        remote.fromCar = { made.controllerForCurrentRequest?.let { isCar(made, it) } == true }
+        // Streaming needs the server: a stream that cannot be fetched is said, in a sentence, to
+        // whatever is showing the player — a car's screen most of all — rather than a silence.
+        exo.addListener(
+            object : Player.Listener {
+                override fun onPlayerError(error: PlaybackException) {
+                    if (error.errorCode / 1000 != 2) return
+                    val host = Uri.parse(hold?.session?.server ?: "").host ?: "the server"
+                    made.sendError(SessionError(SessionError.ERROR_IO, "Harken can't reach $host. Your library is on this phone; playing it needs the server."))
+                }
+            })
         // Whichever session the app has open, followed; none, and the ExoPlayer is this phone's own.
         scope.launch { Listen.current.collectLatest { follow(it) } }
         // The app's session, held: the one the activity has open, or — with none, and a login
@@ -194,24 +221,182 @@ class PlaybackService : MediaSessionService() {
         if (s.player !== p) s.player = p
     }
 
-    // A controller in another process — a watch, a car — hands items without
-    // their URI; the request metadata carries it.
-    private object Callback : MediaSession.Callback {
-        override fun onAddMediaItems(
-            mediaSession: MediaSession,
-            controller: MediaSession.ControllerInfo,
-            mediaItems: MutableList<MediaItem>,
-        ): ListenableFuture<MutableList<MediaItem>> =
-            Futures.immediateFuture(
-                mediaItems
-                    .map { item ->
-                        if (item.localConfiguration != null) item
-                        else item.requestMetadata.mediaUri?.let { item.buildUpon().setUri(it).build() } ?: item
-                    }
-                    .toMutableList())
+    private fun isCar(s: MediaSession, c: MediaSession.ControllerInfo): Boolean = s.isAutomotiveController(c) || s.isAutoCompanionController(c)
+
+    /** What the car reads, over the session held; none while nobody is signed in. */
+    private fun car(): Car? {
+        val s = ensure() ?: return null
+        val c = cars
+        if (c != null && c.first === s) return c.second
+        return Car(Kept.of(s, Device.name(this)), s.server).also {
+            it.artPx = artPx
+            cars = s to it
+        }
     }
 
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
+    private var cars: Pair<ArkSession, Car>? = null
+
+    /** How many tabs the car draws, and how big its pictures are: as it said at its root. */
+    private var tabs = Car.TABS
+    private var artPx = CarArt.SIZE
+
+    /** What the last searches found, by their words: a car asks for the results after the search. */
+    private val searched = LinkedHashMap<String, List<MediaItem>>()
+
+    // A suspended read, as the future Media3 waits on; on the main thread, as the callbacks are.
+    private fun <T> later(f: suspend () -> T): ListenableFuture<T> {
+        val out = SettableFuture.create<T>()
+        scope.launch {
+            try {
+                out.set(f())
+            } catch (e: Exception) {
+                out.setException(e)
+            }
+        }
+        return out
+    }
+
+    // A car reads only the pictures it was handed: each granted to it as it is.
+    private fun grant(c: MediaSession.ControllerInfo, items: List<MediaItem>) {
+        val to = c.packageName
+        if (to == packageName || to == MediaSession.ControllerInfo.LEGACY_CONTROLLER_PACKAGE_NAME) return
+        for (i in items) {
+            val uri = i.mediaMetadata.artworkUri ?: continue
+            if (uri.authority != CarArt.AUTHORITY) continue
+            try {
+                grantUriPermission(to, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } catch (e: SecurityException) {
+                // A package this phone cannot name: it draws no picture.
+            }
+        }
+    }
+
+    private val signIn = SessionError(SessionError.ERROR_SESSION_AUTHENTICATION_EXPIRED, "Sign in to Harken on your phone.")
+
+    private fun <T : Any> signedOut(): LibraryResult<T> = LibraryResult.ofError<T>(signIn)
+
+    // A pick as the media session hands it to its player: every track with its URL, its cover
+    // and the page it came from.
+    private fun items(s: ArkSession, p: Pick): MediaSession.MediaItemsWithStartPosition {
+        val art = Kept.of(s, Device.name(this)).library.artOf
+        return MediaSession.MediaItemsWithStartPosition(p.queue.map { Items.of(it, s.server, art(it.album), p.from) }, p.at, p.positionMs)
+    }
+
+    /**
+     * The media library: the car's tree, its search, voice, resumption — and, as before, a
+     * controller in another process handing items without their URI, the request metadata
+     * carrying it.
+     */
+    private inner class Browsing : MediaLibrarySession.Callback {
+        override fun onGetLibraryRoot(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, params: MediaLibraryService.LibraryParams?): ListenableFuture<LibraryResult<MediaItem>> {
+            val extras = params?.extras
+            tabs = extras?.getInt(MediaConstants.EXTRAS_KEY_ROOT_CHILDREN_LIMIT, Car.TABS)?.takeIf { it > 0 } ?: Car.TABS
+            artPx = extras?.getInt(MediaConstants.EXTRAS_KEY_MEDIA_ART_SIZE_PIXELS, CarArt.SIZE)?.takeIf { it > 0 } ?: CarArt.SIZE
+            cars?.second?.artPx = artPx
+            // The session opened now, if it can be, so the tabs it is about to ask for are read.
+            ensure()
+            return Futures.immediateFuture(LibraryResult.ofItem(Car.rootItem(), MediaLibraryService.LibraryParams.Builder().setExtras(Car.rootExtras()).build()))
+        }
+
+        override fun onGetChildren(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, parentId: String, page: Int, pageSize: Int, params: MediaLibraryService.LibraryParams?): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
+            val car = car() ?: return Futures.immediateFuture(signedOut())
+            return later {
+                val list = car.children(parentId, page, pageSize, tabs) ?: return@later LibraryResult.ofError(SessionError.ERROR_BAD_VALUE)
+                grant(browser, list)
+                LibraryResult.ofItemList(list, params)
+            }
+        }
+
+        override fun onGetItem(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, mediaId: String): ListenableFuture<LibraryResult<MediaItem>> {
+            val car = car() ?: return Futures.immediateFuture(signedOut())
+            return later {
+                val item = car.item(mediaId) ?: return@later LibraryResult.ofError(SessionError.ERROR_BAD_VALUE)
+                grant(browser, listOf(item))
+                LibraryResult.ofItem(item, null)
+            }
+        }
+
+        override fun onSearch(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, query: String, params: MediaLibraryService.LibraryParams?): ListenableFuture<LibraryResult<Void>> {
+            val car = car() ?: return Futures.immediateFuture(signedOut())
+            scope.launch {
+                val found = car.search(query)
+                searched[query] = found
+                while (searched.size > 8) searched.remove(searched.keys.first())
+                session.notifySearchResultChanged(browser, query, found.size, params)
+            }
+            return Futures.immediateFuture(LibraryResult.ofVoid())
+        }
+
+        override fun onGetSearchResult(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, query: String, page: Int, pageSize: Int, params: MediaLibraryService.LibraryParams?): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
+            val car = car() ?: return Futures.immediateFuture(signedOut())
+            return later {
+                val all = searched[query] ?: car.search(query)
+                val from = page.toLong() * pageSize
+                val list = if (page < 0 || pageSize <= 0 || from >= all.size) emptyList() else all.subList(from.toInt(), minOf(all.size.toLong(), from + pageSize).toInt())
+                grant(browser, list)
+                LibraryResult.ofItemList(list, params)
+            }
+        }
+
+        // One item a car or a voice asks to play: a browse id, the words of a search, or a track
+        // with its URI. What it plays is the list the track was in, from it.
+        override fun onSetMediaItems(mediaSession: MediaSession, controller: MediaSession.ControllerInfo, mediaItems: MutableList<MediaItem>, startIndex: Int, startPositionMs: Long): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+            val one = mediaItems.singleOrNull()
+            if (one == null || one.localConfiguration != null || one.requestMetadata.mediaUri != null || Items.queued(one) != null)
+                return Futures.immediateFuture(MediaSession.MediaItemsWithStartPosition(withUris(mediaItems), startIndex, startPositionMs))
+            val s = ensure() ?: return Futures.immediateFailedFuture(UnsupportedOperationException(signIn.message))
+            val car = car() ?: return Futures.immediateFailedFuture(UnsupportedOperationException(signIn.message))
+            return later {
+                val query = one.requestMetadata.searchQuery
+                val pick = if (query != null) car.voice(query, one.requestMetadata.extras) else car.resolve(one.mediaId)
+                if (pick == null) {
+                    mediaSession.sendError(controller, SessionError(SessionError.ERROR_BAD_VALUE, if (query != null) "Nothing in your library matches \"$query\"." else "That isn't in your library any more."))
+                    throw UnsupportedOperationException("nothing to play")
+                }
+                items(s, pick)
+            }
+        }
+
+        override fun onAddMediaItems(mediaSession: MediaSession, controller: MediaSession.ControllerInfo, mediaItems: MutableList<MediaItem>): ListenableFuture<MutableList<MediaItem>> {
+            if (mediaItems.all { it.localConfiguration != null || Items.queued(it) != null }) return Futures.immediateFuture(withUris(mediaItems))
+            val s = ensure() ?: return Futures.immediateFuture(withUris(mediaItems))
+            val car = car() ?: return Futures.immediateFuture(withUris(mediaItems))
+            return later {
+                val out = ArrayList<MediaItem>()
+                for (m in mediaItems) {
+                    if (m.localConfiguration != null || Items.queued(m) != null) {
+                        out.addAll(withUris(listOf(m)))
+                        continue
+                    }
+                    val q = m.requestMetadata.searchQuery
+                    val pick = (if (q != null) car.voice(q, m.requestMetadata.extras) else car.resolve(m.mediaId)) ?: continue
+                    // A track added is that track; a search's words, everything they found.
+                    val p = if (q != null) pick else Pick(listOf(pick.queue[pick.at]), 0, 0, pick.from)
+                    out.addAll(items(s, p).mediaItems)
+                }
+                out
+            }
+        }
+
+        // Play pressed with nothing loaded — a car starting, a headset's button: carrying on.
+        override fun onPlaybackResumption(mediaSession: MediaSession, controller: MediaSession.ControllerInfo): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+            val s = ensure() ?: return Futures.immediateFailedFuture(UnsupportedOperationException(signIn.message))
+            val car = car() ?: return Futures.immediateFailedFuture(UnsupportedOperationException(signIn.message))
+            return later { car.resume()?.let { items(s, it) } ?: throw UnsupportedOperationException("nothing to resume") }
+        }
+    }
+
+    // A controller in another process — a watch — hands items without their URI; the request
+    // metadata carries it.
+    private fun withUris(items: List<MediaItem>): MutableList<MediaItem> =
+        items
+            .map { item ->
+                if (item.localConfiguration != null) item
+                else item.requestMetadata.mediaUri?.let { item.buildUpon().setUri(it).build() } ?: item
+            }
+            .toMutableList()
+
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = session
 
     // Swiped away from the recents while nothing plays: nothing to keep.
     override fun onTaskRemoved(rootIntent: Intent?) {
@@ -241,7 +426,11 @@ object Items {
     private const val DURATION = "harken.duration_ms"
     private const val FROM = "harken.from"
 
-    /** `t` as a media item for `server`, with its cover's path and the route it was played from. */
+    /**
+     * `t` as a media item for `server`, with its cover's path and the route it was played from. A
+     * track whose album has no cover carries the derived square, as a URI the app answers itself
+     * (CoverProvider.kt): what the notification and a car draw, where the screens draw the square.
+     */
     fun of(t: Queued, server: String, art: String, from: String): MediaItem {
         val uri = Uri.parse(Media.url(server, t.file))
         val extras = Bundle().apply {
@@ -258,7 +447,7 @@ object Items {
                     .setTitle(t.title)
                     .setArtist(t.creator)
                     .setAlbumTitle(t.album)
-                    .setArtworkUri(art.takeIf { it.isNotEmpty() }?.let { Uri.parse(Media.url(server, it)) })
+                    .setArtworkUri(art.takeIf { it.isNotEmpty() }?.let { Uri.parse(Media.url(server, it)) } ?: CarArt.uri(null, t.album.ifEmpty { t.title }))
                     .setIsPlayable(true)
                     .setIsBrowsable(false)
                     .setExtras(extras)
@@ -282,6 +471,10 @@ object Items {
 
     /** Where a media item was played from. */
     fun from(m: MediaItem?): String = m?.mediaMetadata?.extras?.getString(FROM) ?: ""
+
+    /** `m`, saying where it is playing: what a car, a lock screen, draw under the title. */
+    fun on(m: MediaItem, device: String): MediaItem =
+        m.buildUpon().setMediaMetadata(m.mediaMetadata.buildUpon().setSubtitle("Playing on $device").build()).build()
 }
 
 /**
@@ -452,6 +645,13 @@ class RemotePlayer(looper: Looper) : SimpleBasePlayer(looper) {
     /** The listening it presses; null, and every press is answered with nothing. */
     var listen: Listen? = null
 
+    /**
+     * Whether the controller asking now is a car's (the service asks the media session). A car's
+     * choice, and a car's play, bring the sound to this phone first: in a car the phone is the
+     * speaker, and a song chosen there playing on a laptop at home would be wrong.
+     */
+    var fromCar: () -> Boolean = { false }
+
     private val handler = Handler(looper)
 
     fun show(h: Heard) {
@@ -469,7 +669,7 @@ class RemotePlayer(looper: Looper) : SimpleBasePlayer(looper) {
             .setPlaylist(
                 shown.queue.mapIndexed { i, t ->
                     MediaItemData.Builder("$i:${t.id.hex}")
-                        .setMediaItem(Items.of(t, server, art(t.album), shown.from))
+                        .setMediaItem(Items.of(t, server, art(t.album), shown.from).let { m -> if (i == shown.at && shown.on != null) Items.on(m, shown.on) else m })
                         .setDurationUs(t.durationMs * 1000)
                         .setIsSeekable(true)
                         .build()
@@ -482,12 +682,14 @@ class RemotePlayer(looper: Looper) : SimpleBasePlayer(looper) {
             .build()
     }
 
-    // A press, answered once it has been previewed and the session published again.
-    private fun press(p: Press?): ListenableFuture<*> {
+    // Presses, in order, answered once the last has been previewed and the session published again.
+    private fun press(vararg ps: Press?): ListenableFuture<*> {
         val l = listen ?: return Futures.immediateVoidFuture()
-        if (p == null) return Futures.immediateVoidFuture()
+        val all = ps.filterNotNull()
+        if (all.isEmpty()) return Futures.immediateVoidFuture()
         val done = SettableFuture.create<Unit>()
-        l.press(p) {
+        for (p in all.dropLast(1)) l.press(p)
+        l.press(all.last()) {
             handler.post {
                 heard = l.heard.value
                 done.set(Unit)
@@ -496,13 +698,19 @@ class RemotePlayer(looper: Looper) : SimpleBasePlayer(looper) {
         return done
     }
 
-    override fun handleSetPlayWhenReady(playWhenReady: Boolean): ListenableFuture<*> = press(if (playWhenReady) Press.Play else Press.Pause)
+    // Play from a car is the sound brought here first; a pause is a pause, wherever it is asked.
+    override fun handleSetPlayWhenReady(playWhenReady: Boolean): ListenableFuture<*> =
+        if (!playWhenReady) press(Press.Pause) else if (fromCar()) press(Press.Here, Press.Play) else press(Press.Play)
 
     override fun handleSeek(mediaItemIndex: Int, positionMs: Long, seekCommand: Int): ListenableFuture<*> =
         press(Forward.seek(heard, mediaItemIndex, positionMs))
 
-    override fun handleSetMediaItems(mediaItems: MutableList<MediaItem>, startIndex: Int, startPositionMs: Long): ListenableFuture<*> =
-        press(Forward.start(mediaItems, startIndex, startPositionMs))
+    // A queue chosen in a car is started and the sound brought here; chosen anywhere else, it
+    // plays where the session plays.
+    override fun handleSetMediaItems(mediaItems: MutableList<MediaItem>, startIndex: Int, startPositionMs: Long): ListenableFuture<*> {
+        val start = Forward.start(mediaItems, startIndex, startPositionMs) ?: return Futures.immediateVoidFuture()
+        return if (fromCar()) press(start, Press.Here) else press(start)
+    }
 
     override fun handleAddMediaItems(index: Int, mediaItems: MutableList<MediaItem>): ListenableFuture<*> =
         press(mediaItems.firstOrNull()?.let(Items::queued)?.let { Press.Next(it) })
@@ -546,12 +754,22 @@ object Forward {
      * the server's clock — and whether it plays. Null, and it is empty: no notification, since
      * nothing is queued anywhere, or this phone is not part of a session at all.
      */
-    data class Shown(val queue: List<Queued>, val at: Int, val positionMs: Long, val playing: Boolean, val from: String)
+    data class Shown(
+        val queue: List<Queued>,
+        val at: Int,
+        val positionMs: Long,
+        val playing: Boolean,
+        val from: String,
+        /** The device the sound is on, while that is not this phone: "Playing on Laptop". */
+        val on: String? = null,
+    )
 
     fun shown(h: Heard): Shown? {
-        val a = h.listening?.active
+        val s = h.listening
+        val a = s?.active
         if (!h.joined || a == null) return null
-        return Shown(a.queue, a.at.toInt().coerceIn(0, a.queue.size - 1), a.clock.position(h.serverNow()), a.clock.playing, a.from)
+        val on = a.output.id?.takeIf { it != h.me }?.let { id -> s.devices[id]?.name ?: (a.output as? Output.Away)?.name ?: id }
+        return Shown(a.queue, a.at.toInt().coerceIn(0, a.queue.size - 1), a.clock.position(h.serverNow()), a.clock.playing, a.from, on)
     }
 
     /**

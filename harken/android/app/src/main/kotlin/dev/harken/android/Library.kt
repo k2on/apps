@@ -37,6 +37,8 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** Somewhere a screen goes, and a list it plays from. */
 sealed class Page {
@@ -491,6 +493,28 @@ class Library(private val session: ArkSession) {
                     emptyList()
                 }
             }
+
+    /**
+     * This person's plays, newest first — the domain's `recently_played`, the last fifty, a track as
+     * often as it was played: what a car's Home lists after what is playing (Car.kt).
+     */
+    suspend fun recentlyPlayed(): List<Played> =
+        session.run { p ->
+            try {
+                p.query("recently_played", emptyMap()).asList().map(Played::of)
+            } catch (e: PeerError) {
+                emptyList()
+            }
+        }
+
+    /**
+     * Every list read once — the artists and the songs' details come a turn after Home's — or ten
+     * seconds gone, whichever is first: what a car waits on before it reads them, when it binds to a
+     * session that has only just opened.
+     */
+    suspend fun whole() {
+        withTimeoutOrNull(10_000) { complete.first { it } }
+    }
 
     /** The library's songs matching `needle`, by the module's own text index. */
     suspend fun search(needle: String): List<Track> = session.run { p -> Phone.search(p, needle) }
