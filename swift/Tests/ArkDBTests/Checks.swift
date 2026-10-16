@@ -262,6 +262,47 @@ enum Checks {
         }
     }
 
+    /// `check_live` (`eval/live-*`, `docs/plan-live.md`): a live state's
+    /// closure and type hashes, every transition's kind, its init and the hash
+    /// of it, and a life of it — each step run over the state the last left,
+    /// as the engine runs it (`Runner.run`: a leave empties the leaver's
+    /// ephemeral slots first), its new state and that state's hash with the
+    /// ephemeral fields left out, or the refusal's words.
+    static func evalLive(_ v: Value) throws {
+        let m = try moduleOf(try v.field("module"))
+        let name = try v.field("live").text()
+        guard let st = m.lookupState(name) else { throw Failed("the module has no state \(name)") }
+        let c = Hash.liveClosure(m, st)
+        try ensureEq(Hex.encode(Hash.liveHash(c)), try v.field("live_hash").text(), "the live hash")
+        try ensureEq(Hex.encode(Hash.stateTypeHash(c)), try v.field("type_hash").text(), "the type hash")
+        for (t, k) in try v.field("kinds").record().pairs {
+            try ensureEq(Value.text(c.kind(t).rawValue), k, "the kind of \(t)")
+        }
+        let r = Runner.ofModule(m)
+        var s = try r.initial(name)
+        try ensureEq(s, try v.field("init"), "the init")
+        try ensureEq(Hex.encode(r.hash(name, s)), try v.field("init_hash").text(), "the init's hash")
+        for (k, step) in try v.field("steps").list().enumerated() {
+            let t = try step.field("transition").text()
+            let cv = try step.field("ctx")
+            let ctx = LiveCtx(user: try cv.field("user").text(), session: try cv.field("session").text(), roles: try cv.field("roles").list().map { try $0.text() }, device: try cv.field("device").text(), now: try cv.field("now").int())
+            let want = step.opt("refused")
+            let got: Value
+            do {
+                got = try r.run(name, t, s, ctx, try argsOf(try step.field("input")))
+            } catch EvalFault.verdict(let refusal) {
+                guard case .refused(let why) = refusal else { throw Failed("step \(k) (\(t)): refused \(refusal)") }
+                guard let w = want else { throw Failed("step \(k) (\(t)): refused \(why), the vector says it applies") }
+                try ensureEq(why, try w.text(), "step \(k) (\(t)): the refusal")
+                continue
+            }
+            if let w = want { throw Failed("step \(k) (\(t)): applied, the vector says refused \(w.show())") }
+            try ensureEq(got, try step.field("state"), "step \(k) (\(t)): the state")
+            try ensureEq(Hex.encode(r.hash(name, got)), try step.field("hash").text(), "step \(k) (\(t)): its hash")
+            s = got
+        }
+    }
+
     // views -----------------------------------------------------------------
 
     /// `check_view`: a query kept up to date — its plan as the module writes

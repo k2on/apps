@@ -11,6 +11,12 @@
 // sans-io half is still here for a transport of the caller's own:
 // `connected`, `recvFrame` and `takeOutgoingFrames`.
 import ArkDB
+import Foundation
+
+/// `THROTTLE_MS`: the least time between two ephemeral calls
+/// `Peer.callThrottled` sends for one transition, in milliseconds — twenty a
+/// second, under the server's thirty, the final value always sent.
+public let throttleMs: Int64 = 50
 
 /// What a peer cannot do, or found wrong (`ark_client::Error`).
 public struct PeerError: Error, CustomStringConvertible {
@@ -37,6 +43,8 @@ public final class Domain {
     private let byName: [String: String]
     /// `Domain::hash`: the module hash of the module stripped of private blocks.
     public let hash: [UInt8]
+    /// `Domain::live`: the module's live states, interpreted (`docs/plan-live.md`).
+    public let live: Runner
 
     public init(_ module: Module) {
         self.module = module
@@ -49,6 +57,7 @@ public final class Domain {
         closures = cs
         byName = names
         hash = Hash.moduleHash(stripModule(module))
+        live = Runner.ofModule(module)
     }
 
     /// A function by name: its hash and its definition.
@@ -86,14 +95,27 @@ public struct Options {
     public var alone: Bool
     public var autos: Autos
     public var timing: Timing
+    /// `docs/plan-live.md` The device this peer declares at `hello`: it
+    /// subscribes to the live instances its scope gives it. Nil — the
+    /// default — and it holds no live state and says nothing it did not say.
+    public var device: DeviceDecl?
 
-    public init(_ user: String, _ session: String, _ token: String?, alone: Bool = false, autos: Autos = .system(), timing: Timing = Timing()) {
+    public init(_ user: String, _ session: String, _ token: String?, alone: Bool = false, autos: Autos = .system(), timing: Timing = Timing(), device: DeviceDecl? = nil) {
         self.user = user
         self.session = session
         self.token = token
         self.alone = alone
         self.autos = autos
         self.timing = timing
+        self.device = device
+    }
+
+    /// `with_device`: declare this peer a device — its id (empty is the
+    /// login's session), its kind, its name, and whether it can play.
+    public func withDevice(_ d: DeviceDecl) -> Options {
+        var o = self
+        o.device = d
+        return o
     }
 
     /// The same, with a link's numbers (`with_timing`).
@@ -139,6 +161,9 @@ public struct Pumped {
     public var rejected = 0
     /// Something worth a status line: a frame that did not decode, a write that failed.
     public var note: String? = nil
+    /// `docs/plan-live.md` A live instance's view moved, or a verdict on a
+    /// call arrived: `Peer.live` and `Peer.takeLiveRefusals` have something new.
+    public var live = false
 }
 
 /// Everything a status line or a debug screen shows (`ark_client::Status`).
@@ -172,7 +197,7 @@ public struct Status: Equatable {
     public let diverged: Int
     public let denied: String?
     public let lastClose: String?
-    /// Live frames received, decoded or not.
+    /// Live state frames received (`applied`, `refused`, `live_snapshot`).
     public let heardFrames: Int64
     public let badFrames: Int64
 }
@@ -181,6 +206,10 @@ public struct Status: Equatable {
 public struct Rejection: Equatable {
     public let id: Id
     public let reason: String
+    public init(id: Id, reason: String) {
+        self.id = id
+        self.reason = reason
+    }
 }
 
 /// A peer (`ark_client::Peer`): opened over a storage, authoring by name,
@@ -214,6 +243,26 @@ public final class Peer {
     var badFrames: Int64 = 0
     /// The link, if `connect` made one.
     public private(set) var link: Link? = nil
+    // `docs/plan-live.md` What this peer knows of the server's clock: the `at`
+    // of every ordered `applied` it heard, less its own clock when it heard
+    // it, the latest few.
+    private var offsets = [Int64]()
+    // The counter of this device's ephemeral calls: from the wall clock at
+    // open, so a peer started again goes on above where it was.
+    private var counter: Int64 = Peer.wallMs() &* 1000
+    // Ephemeral calls held back by `callThrottled`, each with when it may go.
+    private var throttled = [Throttled]()
+    // A live view moved since the last pump.
+    private var liveMoved = false
+
+    // An ephemeral call `callThrottled` holds until it may go: the newest per
+    // transition of a state, sent at most once per `throttleMs`, the last always.
+    private struct Throttled {
+        let state: String
+        let transition: String
+        var waiting: [String: Value]?
+        var sent: Int64
+    }
 
     private final class AloneLog {
         let journal: Journal
@@ -305,6 +354,8 @@ public final class Peer {
         }
         r.logId = writer.namedLog
         let client = Client.open(r, .whole, opts.token).withSchema(schema)
+        // `docs/plan-live.md` A device of a module with live state holds it.
+        if !domain.live.isEmpty, let d = opts.device { _ = client.withLive(Watch(domain.live, d)) }
         client.module = domain.hash
         _ = client.replica.takeConfirmed()
         var ctx = Ctx(opts.user, opts.session)
@@ -479,8 +530,133 @@ public final class Peer {
     /// Why the server last turned this login away, until a reconnect.
     public var denied: String? { client.denied }
 
-    /// What the room said since the last ask; never durable.
-    public func heard() -> [[UInt8]] { client.takeHeard() }
+    // -- live state ----------------------------------------------------------------
+
+    /// `docs/plan-live.md` `instance`: the instance of the live state `name`
+    /// this peer's login holds — its scope's first key — if this peer is a
+    /// device of a module with that state.
+    public func instance(_ name: String) -> Instance? { client.live?.instanceOf(name, ctx) }
+
+    /// `live`: the state `name` as this device sees it — what the server
+    /// confirmed with this device's own calls on top, ephemeral slots and
+    /// all. Nil before anything is known of it: a call, or the snapshot the
+    /// server sends on connecting.
+    public func live(_ name: String) -> Value? {
+        guard let i = instance(name) else { return nil }
+        return client.live?.view(i)
+    }
+
+    /// `call`: a transition of the live state `name`, run over this device's
+    /// view at once — so `live` has moved before this returns — at its guess
+    /// of the server's clock (`serverNow`), and sent if linked. An ordered
+    /// call is pending until the server answers, and said again on every
+    /// connection until it does; an ephemeral one is applied and done, and
+    /// dropped while unlinked. One path for both: the kind is the module's.
+    /// A refusal here is the preview's, thrown as `Refused`, and nothing is sent.
+    @discardableResult
+    public func call(_ name: String, _ transition: String, _ input: [String: Value]) throws -> Kind {
+        let kind = try callNow(name, transition, input)
+        flush()
+        return kind
+    }
+
+    // The call previewed and queued; what `call` and the throttle share.
+    private func callNow(_ name: String, _ transition: String, _ input: [String: Value]) throws -> Kind {
+        guard let i = instance(name) else { throw PeerError("no live state \(name) on this peer") }
+        let id = autos.newId()
+        let now = serverNow()
+        counter += 1
+        do {
+            let kind = try client.call(ctx, i, transition, input, id, now, counter)
+            liveMoved = true
+            return kind
+        } catch let e as LiveRefusal {
+            throw Refused(e.refusal)
+        }
+    }
+
+    /// `call_throttled`: `call` for an ephemeral transition a finger drives —
+    /// a pointer dragged, a scrubber held — at most one send per `throttleMs`
+    /// for this transition, trailing edge, so the final value always goes.
+    /// The view moves at once whatever is sent; what is held is sent by a
+    /// `pump` at `deadline`. An ordered call is never held: its order is the
+    /// point of it.
+    @discardableResult
+    public func callThrottled(_ name: String, _ transition: String, _ input: [String: Value]) throws -> Kind {
+        try callThrottledAt(Link.monotonicMs(), name, transition, input)
+    }
+
+    /// `callThrottled` at a given monotonic millisecond, so that the throttle is testable.
+    @discardableResult
+    public func callThrottledAt(_ now: Int64, _ name: String, _ transition: String, _ input: [String: Value]) throws -> Kind {
+        if domain.live.kind(name, transition) == .ordered { return try call(name, transition, input) }
+        let at = throttled.firstIndex { $0.state == name && $0.transition == transition }
+        if let k = at, now < throttled[k].sent + throttleMs {
+            // The view moves now; the send waits for the window.
+            guard let i = instance(name), client.live != nil else { throw PeerError("no live state \(name) on this peer") }
+            let id = autos.newId()
+            let stamp = serverNow()
+            counter += 1
+            do {
+                let called = try client.live!.call(ctx, i, transition, input, id, stamp, counter)
+                throttled[k].waiting = input
+                liveMoved = true
+                return called.kind
+            } catch let e as LiveRefusal {
+                throw Refused(e.refusal)
+            }
+        }
+        let kind = try call(name, transition, input)
+        if let k = at {
+            throttled[k].sent = now
+            throttled[k].waiting = nil
+        } else {
+            throttled.append(Throttled(state: name, transition: transition, waiting: nil, sent: now))
+        }
+        return kind
+    }
+
+    // What the throttle held and is now due, sent.
+    private func releaseThrottled(_ now: Int64) {
+        for k in throttled.indices {
+            guard let input = throttled[k].waiting, now >= throttled[k].sent + throttleMs else { continue }
+            throttled[k].sent = now
+            throttled[k].waiting = nil
+            _ = try? callNow(throttled[k].state, throttled[k].transition, input)
+        }
+    }
+
+    /// When the throttle next has a call to send, a monotonic millisecond; nil
+    /// when nothing waits. A host on a tick sends it at the next `pump`.
+    public func deadline() -> Int64? {
+        throttled.filter { $0.waiting != nil }.map { $0.sent + throttleMs }.min()
+    }
+
+    /// `take_live_refusals`: the verdicts the server gave this device's live calls since the last ask.
+    public func takeLiveRefusals() -> [Rejection] {
+        guard client.live != nil else { return [] }
+        return client.live!.takeRefused().map { Rejection(id: $0.0, reason: $0.1) }
+    }
+
+    /// `server_offset`: the server's clock less this peer's, in milliseconds,
+    /// as the `at` stamps of what it has heard say — the largest of the latest
+    /// few, which is the one that waited least on the way. Nil before any.
+    /// What an app computes a moving position with.
+    public var serverOffset: Int64? { offsets.max() }
+
+    /// `server_now`: this peer's guess at the server's clock now — its own,
+    /// moved by `serverOffset`.
+    public func serverNow() -> Int64 { Peer.wallMs() + (serverOffset ?? 0) }
+
+    /// The wall clock, in milliseconds since the epoch.
+    static func wallMs() -> Int64 { Int64((Date().timeIntervalSince1970 * 1000).rounded(.down)) }
+
+    /// Send what the engine has queued, now, if the socket is open: a live
+    /// call goes when it is made; a pump sends whatever else is queued.
+    public func flush() {
+        guard let l = link, l.isOpen else { return }
+        for f in takeOutgoingFrames() { l.send(f) }
+    }
 
     // Intents a join re-queued that are still pending.
     func joining() -> Int { local.isEmpty ? 0 : client.replica.pending.filter { local.contains($0.id) }.count }
@@ -522,10 +698,16 @@ public final class Peer {
     /// moved. Call it on a tick; fifty milliseconds is what the clients here
     /// use. Without a link it still writes, and a peer alone needs nothing else.
     @discardableResult
-    public func pump() -> Pumped {
+    public func pump() -> Pumped { pumpAt(Link.monotonicMs()) }
+
+    /// `pump` at a given monotonic millisecond, so that the throttle and the
+    /// link's backoff are testable.
+    @discardableResult
+    public func pumpAt(_ at: Int64) -> Pumped {
         var p = Pumped()
+        releaseThrottled(at)
         if let l = link {
-            let polled = l.poll()
+            let polled = l.pollAt(at)
             if polled.opened {
                 client.connected()
                 p.opened = true
@@ -559,6 +741,9 @@ public final class Peer {
         } catch {
             p.note = "\(error)"
         }
+        let moved = client.live?.takeMoved() ?? false
+        p.live = liveMoved || moved
+        liveMoved = false
         return p
     }
 
@@ -615,7 +800,16 @@ public final class Peer {
     func placeFrame(_ bytes: [UInt8]) throws {
         switch try ServerMsg.decodeFor(bytes, client.schema) {
         case .msg(let m):
-            if case .heard = m { heardFrames += 1 }
+            switch m {
+            case .applied, .refused, .liveSnapshot: heardFrames += 1
+            default: break
+            }
+            // `docs/plan-live.md` The server's clock, as an ordered call
+            // stamps it: a sample of the offset, the latest sixteen kept.
+            if case .applied(let a) = m, case .ordered(_, _, _, _, _, let at, _) = a.order {
+                offsets.append(at - Peer.wallMs())
+                if offsets.count > 16 { offsets.removeFirst(offsets.count - 16) }
+            }
             switch m {
             case .batch, .snapshotOf: served()
             default: break

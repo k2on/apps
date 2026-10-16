@@ -23,8 +23,59 @@ public enum Decode {
             let f = try tagged(["frame"], "frame", x)
             return LiveFrame(name: try text(["frame", "name"], try field(f, "name")), ty: try ty(try field(f, "ty")))
         }
-        return Module(spec: spec, schema: schema, functions: functions, routers: routers, live: live)
+        // `docs/plan-live.md` Present only where a module has one: an empty
+        // list is not a second spelling of its absence.
+        var types = [Named<Ty>]()
+        if let v = fs["types"] {
+            types = try list(["module", "types"], v, typeDecl)
+            if types.isEmpty { throw err(["module", "types"], "an empty type section is written as no field") }
+        }
+        var states = [LiveStateDecl]()
+        if let v = fs["states"] {
+            states = try list(["module", "states"], v, state)
+            if states.isEmpty { throw err(["module", "states"], "no states is written as no field") }
+        }
+        return Module(spec: spec, schema: schema, functions: functions, routers: routers, live: live, types: types, states: states)
     }
+
+    private static func typeDecl(_ x: Value) throws -> Named<Ty> {
+        let fs = try tagged(["type"], "type", x)
+        return Named(try text(["type", "name"], try field(fs, "name")), try ty(try field(fs, "ty")))
+    }
+
+    /// `state_from_value`: §3.12 a live state.
+    public static func state(_ v: Value) throws -> LiveStateDecl {
+        let fs = try tagged(["state"], "state", v)
+        let name = try text(["state", "name"], try field(fs, "name"))
+        let here = ["state", name]
+        func p(_ k: String) -> [String] { here + [k] }
+        func hook(_ k: String) throws -> Transition? { try fs[k].map { try transition(p(k), $0) } }
+        return LiveStateDecl(
+            name: name,
+            ty: try ty(try field(fs, "ty")),
+            initial: try expr(p("init"), try field(fs, "init")),
+            scope: try expr(p("scope"), try field(fs, "scope")),
+            transitions: try list(p("transitions"), try field(fs, "transitions")) { try transition(p("transitions"), $0) },
+            onJoin: try hook("on_join"),
+            onLeave: try hook("on_leave"),
+            onRestore: try hook("on_restore"))
+    }
+
+    private static func transition(_ at: [String], _ v: Value) throws -> Transition {
+        let fs = try tagged(at, "transition", v)
+        let name = try text(at, try field(fs, "name"))
+        let here = at + [name]
+        let input = try list(here, try field(fs, "input")) { try inputField(here, $0) }
+        let guards = try list(here, try field(fs, "guards")) { x -> Guard in
+            let g = try tagged(here, "guard", x)
+            return Guard(e: try expr(here, try field(g, "e")), why: try text(here, try field(g, "why")))
+        }
+        let body = try list(here, try field(fs, "body")) { try stmt(here, $0) }
+        return Transition(name: name, input: input, guards: guards, body: body)
+    }
+
+    /// `expr_from_value`: an expression from its value, outside any function.
+    public static func expr(_ v: Value) throws -> Expr { try expr([], v) }
 
     /// `router_from_value`.
     public static func router(_ v: Value) throws -> Router {
@@ -107,6 +158,16 @@ public enum Decode {
         case "struct":
             let m = try structMap(["ty", "struct"], try field(fs, "fields"))
             return .structure(TyFields(try zip(m.names, m.values).map { ($0.0, try ty($0.1)) }))
+        case "named": return .named(try text(["ty", "named"], try field(fs, "name")))
+        case "non_empty_list": return .nonEmpty(try ty(try field(fs, "of")))
+        case "per_device": return .perDevice(try ty(try field(fs, "of")))
+        case "ephemeral": return .ephemeral(try ty(try field(fs, "of")))
+        case "sum":
+            let m = try structMap(["ty", "sum"], try field(fs, "variants"))
+            return .sum(TySum(try m.pairs.map { k, v in
+                let f = try structMap(["ty", "sum", k], v)
+                return (k, TyFields(try f.pairs.map { ($0.0, try ty($0.1)) }))
+            }))
         default: throw err(["ty"], "unknown type tag \(t)")
         }
     }
@@ -270,6 +331,20 @@ public enum Decode {
         case "select": return .select(try plan(p, try field(fs, "plan")))
         case "get": return .get(try tx("table"), try es("key"))
         case "exists": return .exists(try tx("table"), try es("key"))
+        case "variant":
+            let m = try structMap(p, try field(fs, "fields"))
+            return .variant(try ty(try field(fs, "ty")), try tx("name"), ExprFields(sorted: m.names, try m.values.map { try expr(p, $0) }))
+        case "case":
+            return .caseOf(try e("e"), try list(p, try field(fs, "arms")) { x -> Arm in
+                let a = try tagged(p, "arm", x)
+                return Arm(name: try text(p, try field(a, "name")), sym: try sym(p, try field(a, "sym")), e: try expr(p, try field(a, "e")))
+            })
+        case "live_state": return .liveState
+        case "ctx_now": return .ctxNow
+        case "ctx_device": return .ctxDevice
+        case "slot": return .slot(try e("e"), try e("key"))
+        case "set_slot": return .setSlot(try e("e"), try e("key"), try e("v"))
+        case "slots": return .slots(try e("e"))
         default: throw err(here, "unknown expression \(t)")
         }
     }

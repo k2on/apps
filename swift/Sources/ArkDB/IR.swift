@@ -24,13 +24,23 @@ public struct Module: Hashable {
     public var routers: [Router]
     /// §3.9 The live section: the frame types an app's realtime channel carries, by name.
     public var live: [LiveFrame]
+    /// §2.2 The type section (`docs/plan-live.md`): the records and sums a
+    /// live state is made of, each by its name, which `Ty.named` refers to.
+    /// On the wire `types`, written only when not empty, so a module without
+    /// one is the bytes it was.
+    public var types: [Named<Ty>]
+    /// §3.12 The live states: a typed state machine per scope. `states`,
+    /// written only when there is one.
+    public var states: [LiveStateDecl]
 
-    public init(spec: Int64, schema: Schema, functions: [Function], routers: [Router], live: [LiveFrame]) {
+    public init(spec: Int64, schema: Schema, functions: [Function], routers: [Router], live: [LiveFrame], types: [Named<Ty>] = [], states: [LiveStateDecl] = []) {
         self.spec = spec
         self.schema = schema
         self.functions = functions
         self.routers = routers
         self.live = live
+        self.types = types
+        self.states = states
     }
 
     /// `Module::lookup_function`.
@@ -38,6 +48,103 @@ public struct Module: Hashable {
 
     /// `Module::lookup_router`.
     public func lookupRouter(_ name: String) -> Router? { routers.first { $0.name == name } }
+
+    /// `Module::lookup_state`.
+    public func lookupState(_ name: String) -> LiveStateDecl? { states.first { $0.name == name } }
+
+    /// `Module::type_map`: the type section as a map, which is how a named type is resolved.
+    public func typeMap() -> [String: Ty] {
+        var out = [String: Ty]()
+        for t in types where out[t.name] == nil { out[t.name] = t.value }
+        return out
+    }
+}
+
+/// §3.12 A live state (`ir::State`, `docs/plan-live.md`): one current value
+/// per instance, an instance per scope key, held by the server and never
+/// replayed. Its value is of `ty`; it starts as `initial`; `scope` names the
+/// instances a person is subscribed to, as a function of who they are; and
+/// it moves only by its transitions. The three hooks are transitions the
+/// engine runs itself: a device arriving, a device leaving, a snapshot
+/// restored at start.
+public struct LiveStateDecl: Hashable {
+    public var name: String
+    public var ty: Ty
+    /// A constant expression of `ty`.
+    public var initial: Expr
+    /// A `Text`, or a `List` of them, of the context alone.
+    public var scope: Expr
+    public var transitions: [Transition]
+    public var onJoin: Transition?
+    public var onLeave: Transition?
+    public var onRestore: Transition?
+
+    public init(name: String, ty: Ty, initial: Expr, scope: Expr, transitions: [Transition], onJoin: Transition?, onLeave: Transition?, onRestore: Transition?) {
+        self.name = name
+        self.ty = ty
+        self.initial = initial
+        self.scope = scope
+        self.transitions = transitions
+        self.onJoin = onJoin
+        self.onLeave = onLeave
+        self.onRestore = onRestore
+    }
+
+    /// `State::transition`: a transition by name, a hook by its reserved name.
+    public func transition(_ name: String) -> Transition? {
+        switch name {
+        case onJoinName: return onJoin
+        case onLeaveName: return onLeave
+        case onRestoreName: return onRestore
+        default: return transitions.first { $0.name == name }
+        }
+    }
+
+    /// Every transition and hook: declared ones first, then join, leave, restore.
+    public var allTransitions: [Transition] { transitions + [onJoin, onLeave, onRestore].compactMap { $0 } }
+}
+
+/// The reserved names of the three hooks, which no declared transition may have.
+public let onJoinName = "on_join"
+public let onLeaveName = "on_leave"
+public let onRestoreName = "on_restore"
+
+/// Whether a name is one of the three hooks'.
+public func isHook(_ name: String) -> Bool { name == onJoinName || name == onLeaveName || name == onRestoreName }
+
+/// §3.12 One way a live state moves (`ir::Transition`): its input with the
+/// checks a procedure's input has; its guards, each a `Bool` refusing with
+/// its message when false; and a body that returns the new state or refuses.
+/// It reads no table and draws no auto.
+public struct Transition: Hashable {
+    public var name: String
+    public var input: [Named<Field>]
+    public var guards: [Guard]
+    public var body: Block
+
+    public init(name: String, input: [Named<Field>], guards: [Guard], body: Block) {
+        self.name = name
+        self.input = input
+        self.guards = guards
+        self.body = body
+    }
+}
+
+/// One guard of a transition: a `Bool`, and the message it refuses with.
+public struct Guard: Hashable {
+    public let e: Expr
+    public let why: String
+    public init(e: Expr, why: String) {
+        self.e = e
+        self.why = why
+    }
+}
+
+/// §3.12 A hook's `device` (`ir::device_ty`): one device standing in an
+/// instance as it declared itself at `Hello`, and the user the server
+/// verified it as.
+public func deviceTy() -> Ty {
+    .structOf([("can_play", .bool), ("id", .text), ("kind", .text), ("name", .text), ("user", .text)])
 }
 
 /// One frame type of the live section.
@@ -307,6 +414,38 @@ public indirect enum Expr: Hashable {
     case select(Plan)
     case get(String, [Expr])
     case exists(String, [Expr])
+    /// §2.2 A value of a sum: the variant of the sum `ty`, with these fields;
+    /// its value is the struct of the fields with `t` the variant's name.
+    /// `{"t":"variant","ty","name","fields"}`.
+    case variant(Ty, String, ExprFields)
+    /// §2.2 A sum taken apart: one arm per variant, in the sum's variant
+    /// order, each binding the variant's record to its symbol.
+    /// `{"t":"case","e","arms":[{"t":"arm","name","sym","e"}]}`.
+    case caseOf(Expr, [Arm])
+    /// §3.12 The state a transition runs over. `{"t":"live_state"}`.
+    case liveState
+    /// §3.12 The time a transition runs at, in ms since the epoch. `{"t":"ctx_now"}`.
+    case ctxNow
+    /// §3.12 The id of the device calling. `{"t":"ctx_device"}`.
+    case ctxDevice
+    /// §2.2 One device's slot of a `PerDevice`, an option. `{"t":"slot","e","key"}`.
+    case slot(Expr, Expr)
+    /// §2.2 A `PerDevice` with one slot set, or emptied by none. `{"t":"set_slot","e","key","v"}`.
+    case setSlot(Expr, Expr, Expr)
+    /// §2.2 A `PerDevice`'s filled slots as `{device, value}` records in id order. `{"t":"slots","e"}`.
+    case slots(Expr)
+}
+
+/// One arm of a `case`: the variant it takes, the symbol its record is bound to, and its body.
+public struct Arm: Hashable {
+    public var name: String
+    public var sym: Sym
+    public var e: Expr
+    public init(name: String, sym: Sym, e: Expr) {
+        self.name = name
+        self.sym = sym
+        self.e = e
+    }
 }
 
 /// Arithmetic and boolean operators; integer arithmetic is checked (`ir::Op`).

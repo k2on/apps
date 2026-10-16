@@ -12,16 +12,77 @@ public enum Encode {
     private static func int(_ n: Int64) -> Value { .int(n) }
     private static func texts(_ xs: [String]) -> Value { .list(xs.map { .text($0) }) }
 
-    /// `module_value`: functions carried without their dependency hashes.
+    /// `module_value`: functions carried without their dependency hashes; the
+    /// type section and the live states only when a module declares one, so a
+    /// module without live state is the bytes it was.
     public static func module(_ m: Module) -> Value {
         let live: [Value] = m.live.map { node("frame", [("name", txt($0.name)), ("ty", ty($0.ty))]) }
-        return node("module", [
+        var fields: [(String, Value)] = [
             ("spec", int(m.spec)),
             ("schema", schema(m.schema)),
             ("functions", .list(m.functions.map { function([], $0) })),
             ("routers", .list(m.routers.map(router))),
             ("live", .list(live)),
+        ]
+        if !m.types.isEmpty { fields.append(("types", .list(m.types.map { typeDecl($0.name, $0.value) }))) }
+        if !m.states.isEmpty { fields.append(("states", .list(m.states.map { state([], $0) }))) }
+        return node("module", fields)
+    }
+
+    /// `type_decl_value`: one declaration of the type section, `{"t":"type","name","ty"}`.
+    public static func typeDecl(_ name: String, _ t: Ty) -> Value { node("type", [("name", txt(name)), ("ty", ty(t))]) }
+
+    /// `state_value`: a live state, every transition normalised, with the
+    /// hashes of the helpers it reaches directly as `deps`; the hooks only
+    /// where present. A module writes it with none.
+    public static func state(_ deps: [(String, Value)], _ s: LiveStateDecl) -> Value {
+        var fields: [(String, Value)] = [
+            ("name", txt(s.name)),
+            ("deps", .record(Record(deps))),
+            ("ty", ty(s.ty)),
+            ("init", expr(s.initial)),
+            ("scope", expr(s.scope)),
+            ("transitions", .list(s.transitions.map(transition))),
+        ]
+        if let t = s.onJoin { fields.append(("on_join", transition(t))) }
+        if let t = s.onLeave { fields.append(("on_leave", transition(t))) }
+        if let t = s.onRestore { fields.append(("on_restore", transition(t))) }
+        return node("state", fields)
+    }
+
+    /// `transition_value`: one transition, normalised.
+    public static func transition(_ t0: Transition) -> Value {
+        let t = Normalize.transition(t0)
+        return node("transition", [
+            ("name", txt(t.name)),
+            ("input", .list(t.input.map { field($0.name, $0.value) })),
+            ("guards", .list(t.guards.map { node("guard", [("e", expr($0.e)), ("why", txt($0.why))]) })),
+            ("body", .list(t.body.map(stmt))),
         ])
+    }
+
+    /// `transition_calls`: the helpers a transition calls directly, sorted.
+    public static func transitionCalls(_ t: Transition) -> [String] {
+        var acc = SortedSet<CodePoints>()
+        for i in t.input {
+            for c in i.value.checks {
+                if case .refine(let e, _) = c { exprCalls(e, &acc) }
+            }
+        }
+        for g in t.guards { exprCalls(g.e, &acc) }
+        for s in t.body { stmtCalls(s, &acc) }
+        return acc.items.map { $0.s }
+    }
+
+    /// `state_calls`: the helpers a live state reaches directly, sorted.
+    public static func stateCalls(_ s: LiveStateDecl) -> [String] {
+        var acc = SortedSet<CodePoints>()
+        exprCalls(s.initial, &acc)
+        exprCalls(s.scope, &acc)
+        for t in s.allTransitions {
+            for n in transitionCalls(t) { acc.insert(CodePoints(n)) }
+        }
+        return acc.items.map { $0.s }
     }
 
     /// `router_value`.
@@ -54,6 +115,12 @@ public enum Encode {
         case .option(let o): return node("option", [("of", ty(o))])
         case .list(let o): return node("list", [("of", ty(o))])
         case .structure(let fs): return node("struct", [("fields", .record(Record(sorted: fs.names, fs.types.map(ty))))])
+        case .named(let n): return node("named", [("name", txt(n))])
+        case .nonEmpty(let o): return node("non_empty_list", [("of", ty(o))])
+        case .perDevice(let o): return node("per_device", [("of", ty(o))])
+        case .ephemeral(let o): return node("ephemeral", [("of", ty(o))])
+        case .sum(let vs):
+            return node("sum", [("variants", .record(Record(sorted: vs.names, vs.variants.map { .record(Record(sorted: $0.names, $0.types.map(ty))) })))])
         }
     }
 
@@ -173,6 +240,16 @@ public enum Encode {
         case .select(let p): return node("select", [("plan", plan(p))])
         case .get(let t, let k): return node("get", [("table", txt(t)), ("key", .list(k.map(expr)))])
         case .exists(let t, let k): return node("exists", [("table", txt(t)), ("key", .list(k.map(expr)))])
+        case .variant(let t, let n, let fs):
+            return node("variant", [("ty", ty(t)), ("name", txt(n)), ("fields", .record(Record(sorted: fs.names, fs.exprs.map(expr))))])
+        case .caseOf(let x, let arms):
+            return node("case", [("e", expr(x)), ("arms", .list(arms.map { node("arm", [("name", txt($0.name)), ("sym", int($0.sym)), ("e", expr($0.e))]) }))])
+        case .liveState: return node("live_state")
+        case .ctxNow: return node("ctx_now")
+        case .ctxDevice: return node("ctx_device")
+        case .slot(let x, let k): return node("slot", [("e", expr(x)), ("key", expr(k))])
+        case .setSlot(let x, let k, let v): return node("set_slot", [("e", expr(x)), ("key", expr(k)), ("v", expr(v))])
+        case .slots(let x): return node("slots", [("e", expr(x))])
         }
     }
 
@@ -302,8 +379,12 @@ public enum Encode {
 /// inside a `Select` is not looked into (`view::children`).
 public func children(_ e: Expr) -> [Expr] {
     switch e {
-    case .lit, .arg, .auto, .variable, .ctxUser, .ctxSession, .hasRole, .provided, .none, .select: return []
-    case .field(let x, _), .some(let x): return [x]
+    case .lit, .arg, .auto, .variable, .ctxUser, .ctxSession, .hasRole, .provided, .none, .select, .liveState, .ctxNow, .ctxDevice: return []
+    case .field(let x, _), .some(let x), .slots(let x): return [x]
+    case .variant(_, _, let fs): return fs.exprs
+    case .caseOf(let x, let arms): return [x] + arms.map { $0.e }
+    case .slot(let a, let b): return [a, b]
+    case .setSlot(let a, let b, let c): return [a, b, c]
     case .structE(let fs): return fs.exprs
     case .listE(let xs), .op(_, let xs), .call(_, let xs), .std(_, let xs), .get(_, let xs), .exists(_, let xs): return xs
     case .match(let x, _, let a, let n): return [x, a, n]
@@ -317,7 +398,12 @@ public func children(_ e: Expr) -> [Expr] {
 /// An expression with `f` applied to each of its direct children (`children`), the rest as it was.
 public func mapChildren(_ e: Expr, _ f: (Expr) throws -> Expr) rethrows -> Expr {
     switch e {
-    case .lit, .arg, .auto, .variable, .ctxUser, .ctxSession, .hasRole, .provided, .none, .select: return e
+    case .lit, .arg, .auto, .variable, .ctxUser, .ctxSession, .hasRole, .provided, .none, .select, .liveState, .ctxNow, .ctxDevice: return e
+    case .variant(let t, let n, let fs): return .variant(t, n, try fs.map(f))
+    case .caseOf(let x, let arms): return .caseOf(try f(x), try arms.map { Arm(name: $0.name, sym: $0.sym, e: try f($0.e)) })
+    case .slot(let a, let b): return .slot(try f(a), try f(b))
+    case .setSlot(let a, let b, let c): return .setSlot(try f(a), try f(b), try f(c))
+    case .slots(let x): return .slots(try f(x))
     case .field(let x, let n): return .field(try f(x), n)
     case .some(let x): return .some(try f(x))
     case .structE(let fs): return .structE(try fs.map(f))

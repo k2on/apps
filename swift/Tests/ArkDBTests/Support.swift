@@ -85,3 +85,34 @@ func hexBytes(_ v: Value) throws -> [UInt8] {
 
 /// Milliseconds on a monotonic clock.
 func nowMs() -> Double { Double(DispatchTime.now().uptimeNanoseconds) / 1_000_000 }
+
+/// One vector as the manifest lists it.
+struct Vector {
+    let path: String
+    let kind: String
+    let form: String
+    let side: String
+    let expect: String
+}
+
+/// `MANIFEST.json`, as every runner here reads it (spec/RUNNERS.md): the list
+/// of every vector, and which of its sides this runtime runs.
+enum Manifest {
+    /// The sides this runtime runs: every client's, and `rust-for-now`'s —
+    /// live state, which this runtime holds (`docs/plan-live.md`), so it runs
+    /// those as a client's.
+    static let sides: Set<String> = ["client", "rust-for-now"]
+
+    /// Why a vector of a side not run is skipped, as the manifest's `side` says.
+    static func skipReason(_ side: String) -> String {
+        side == "rust-only" ? "a fleet through Rust's simulator and its scheduler" : "a side this runtime does not run"
+    }
+
+    /// Every vector `MANIFEST.json` under `root` lists.
+    static func read(_ root: String) throws -> [Vector] {
+        let manifest = try readJson(root + "/MANIFEST.json")
+        return try manifest.field("vectors").list().map {
+            Vector(path: try $0.field("path").text(), kind: try $0.field("kind").text(), form: try $0.field("form").text(), side: try $0.field("side").text(), expect: try $0.field("expect").text())
+        }
+    }
+}

@@ -144,8 +144,10 @@ final class Env {
     let locals: Frame?
     // §13 In a plan's node (and a helper one calls), a sum's fold is judged on its result alone.
     let wide: Bool
+    // §3.12 Inside a live state's transition: the state, the time and the device.
+    let live: LiveEnv?
 
-    init(_ schema: Schema, _ helpers: [Function], _ kind: FnKind, _ ctx: Ctx, _ args: [String: Value], _ autos: [String: Value], _ provided: [String: Value], _ node: [(Sym, Value)], _ locals: Frame?, _ wide: Bool) {
+    init(_ schema: Schema, _ helpers: [Function], _ kind: FnKind, _ ctx: Ctx, _ args: [String: Value], _ autos: [String: Value], _ provided: [String: Value], _ node: [(Sym, Value)], _ locals: Frame?, _ wide: Bool, _ live: LiveEnv? = nil) {
         self.schema = schema
         self.helpers = helpers
         self.kind = kind
@@ -156,6 +158,7 @@ final class Env {
         self.node = node
         self.locals = locals
         self.wide = wide
+        self.live = live
     }
 
     func local(_ x: Sym) -> Value? {
@@ -174,13 +177,41 @@ final class Env {
 
     // This scope with one more local. Binding one leaves the node's sum rule, as the reference's does.
     func under(_ sym: Sym, _ v: Value) -> Env {
-        Env(schema, helpers, kind, ctx, args, autos, provided, node, Frame(sym, v, locals), false)
+        Env(schema, helpers, kind, ctx, args, autos, provided, node, Frame(sym, v, locals), false, live)
     }
 
-    func withFrame(_ f: Frame) -> Env { Env(schema, helpers, kind, ctx, args, autos, provided, node, f, false) }
+    func withFrame(_ f: Frame) -> Env { Env(schema, helpers, kind, ctx, args, autos, provided, node, f, false, live) }
 
     func copy(kind: FnKind? = nil, args: [String: Value]? = nil, node: [(Sym, Value)]? = nil, locals: Frame?? = nil, wide: Bool? = nil, autos: [String: Value]? = nil, provided: [String: Value]? = nil) -> Env {
-        Env(schema, helpers, kind ?? self.kind, ctx, args ?? self.args, autos ?? self.autos, provided ?? self.provided, node ?? self.node, locals ?? self.locals, wide ?? self.wide)
+        Env(schema, helpers, kind ?? self.kind, ctx, args ?? self.args, autos ?? self.autos, provided ?? self.provided, node ?? self.node, locals ?? self.locals, wide ?? self.wide, live)
+    }
+}
+
+// §3.12 What a transition reads beside its input and its author.
+struct LiveEnv {
+    let state: Value
+    let now: Int64
+    let device: String
+}
+
+/// §3.12 Who calls a transition, and when (`eval::LiveCtx`): the author, as
+/// an entry's is, the device calling, and the time — the server's when it
+/// sequences the call, the device's own guess of the server's when it
+/// previews one.
+public struct LiveCtx: Hashable {
+    public var user: String
+    public var session: String
+    /// In code point order.
+    public var roles: [String]
+    public var device: String
+    public var now: Int64
+
+    public init(user: String = "", session: String = "", roles: [String] = [], device: String = "", now: Int64 = 0) {
+        self.user = user
+        self.session = session
+        self.roles = roles
+        self.device = device
+        self.now = now
     }
 }
 
@@ -473,6 +504,74 @@ public enum Eval {
     }
 
     /// `refusal_text`: the message of a `refuse`, otherwise the refusal shown.
+    /// §3.12 `run_transition`: a transition of a live state by name — a hook
+    /// by its reserved name — over `state`: its input held to its declared
+    /// types and checked as a procedure's is, its guards in order, its body;
+    /// and the new state held to the state's type. A verdict is a refusal
+    /// every runtime reaches, in the same words. A hook the state does not
+    /// declare leaves the state as it was.
+    public static func runTransition(_ c: LiveClosure, _ name: String, _ state: Value, _ ctx: LiveCtx, _ input: [String: Value]) throws -> Value {
+        func refused(_ t: String) -> EvalFault { verdict(.refused(t)) }
+        guard let t = c.state.transition(name) else {
+            if isHook(name) { return state }
+            throw refused("\(c.state.name): no transition \(name)")
+        }
+        // The input, held to its types: a call crosses a boundary.
+        for k in input.keys.sorted(by: { compareText($0, $1) < 0 }) where !t.input.contains(where: { $0.name == k }) {
+            throw refused("\(k): not an input of \(name)")
+        }
+        var args = [String: Value]()
+        for i in t.input {
+            guard let v = input[i.name] else { throw refused("\(i.name): missing") }
+            if let why = Types.whyNot(c.types, i.value.ty, v) { throw refused("\(i.name): \(why)") }
+            args[i.name] = v
+        }
+        let schema = Schema([])
+        let author = Ctx(ctx.user, ctx.session, roles: ctx.roles)
+        let live = LiveEnv(state: state, now: ctx.now, device: ctx.device)
+        func env(_ a: [String: Value]) -> Env { Env(schema, c.helpers, .provide, author, a, [:], [:], [], nil, false, live) }
+        // The checks, each over its own field as it stands.
+        for i in t.input {
+            let n = i.name
+            let local = args
+            let (v2, msg) = try checkField(n, i.value, args[n]!, { _, _ in false }) { e, x in
+                var own = local
+                own[n] = x
+                return try pureBool(St(NoStore(schema)), env(own), e)
+            }
+            if let m = msg { throw refused(m) }
+            args[n] = v2
+        }
+        let st = St(NoStore(schema))
+        let e = env(args)
+        for g in t.guards where try !pureBool(st, e, g.e) { throw refused(g.why) }
+        guard let out = try block(st, e, t.body)?.v else { throw bug(.noReturn(name)) }
+        if let why = Types.whyNot(c.types, c.state.ty, out) {
+            throw refused("\(name): the state it makes is not a \(c.state.name): \(why)")
+        }
+        return out
+    }
+
+    /// §3.12 `constant`: a constant expression's value — a live state's init.
+    public static func constant(_ e: Expr) throws -> Value {
+        try pure(Env(Schema([]), [], .helper, .nobody, [:], [:], [:], [], nil, false), e)
+    }
+
+    /// §3.12 `scope_keys`: the keys of the instances `ctx` holds of a live
+    /// state, a text or a list of them, in the order the scope gives them,
+    /// without repeats.
+    public static func scopeKeys(_ c: LiveClosure, _ ctx: Ctx) throws -> [String] {
+        let env = Env(Schema([]), c.helpers, .helper, ctx, [:], [:], [:], [], nil, false)
+        var out = [String]()
+        func add(_ v: Value) throws {
+            guard case .text(let t) = v else { throw bug(.typeError("a scope key is text, not \(v.show())")) }
+            if !out.contains(where: { textEquals($0, t) }) { out.append(t) }
+        }
+        let v = try pure(env, c.state.scope)
+        if case .list(let xs) = v { for x in xs { try add(x) } } else { try add(v) }
+        return out
+    }
+
     public static func refusalText(_ r: Refusal) -> String {
         if case .refused(let w) = r { return w }
         return r.show()
@@ -657,6 +756,44 @@ public enum Eval {
         case .select(let p):
             try reading(env)
             return .list(try View.read(env.schema, p, Scope(env), st.store))
+        case .liveState:
+            guard let l = env.live else { throw bug(.typeError("the state outside a transition")) }
+            return l.state
+        case .ctxNow:
+            guard let l = env.live else { throw bug(.typeError("ctx.now outside a transition")) }
+            return .int(l.now)
+        case .ctxDevice:
+            guard let l = env.live else { throw bug(.typeError("ctx.device outside a transition")) }
+            return .text(l.device)
+        // §2.2 A sum's value: its fields, and its variant's name under `t`.
+        case .variant(_, let n, let fs):
+            var vs = [Value]()
+            for x in fs.exprs { vs.append(try eval(st, env, x)) }
+            var r = Record(sorted: fs.names, vs)
+            r.set(Types.tag, .text(n))
+            return .record(r)
+        // The arm the value's tag names, over the variant's record.
+        case .caseOf(let x, let arms):
+            var r = try strct(try eval(st, env, x))
+            guard case .text(let tag)? = r[Types.tag] else { throw bug(.typeError("a sum's tag, not \(r[Types.tag]?.show() ?? "none")")) }
+            guard let arm = arms.first(where: { textEquals($0.name, tag) }) else { throw bug(.typeError("no arm for the variant \(tag)")) }
+            r.remove(Types.tag)
+            return try eval(st, env.under(arm.sym, .record(r)), arm.e)
+        // §2.2 A device's slot, none where it holds nothing.
+        case .slot(let m, let k):
+            let pd = try eval(st, env, m)
+            let key = try text(try eval(st, env, k))
+            guard case .record(let r) = pd else { throw typeError("a map of devices", pd) }
+            return r[key] ?? .null
+        case .setSlot(let m, let k, let v):
+            var r = try strct(try eval(st, env, m))
+            let key = try text(try eval(st, env, k))
+            let x = try eval(st, env, v)
+            if x.isNull { r.remove(key) } else { r.set(key, x) }
+            return .record(r)
+        case .slots(let m):
+            let r = try strct(try eval(st, env, m))
+            return .list(r.pairs.map { .record(Record([("device", .text($0.0)), ("value", $0.1)])) })
         case .exists(let t, let k):
             try reading(env)
             return .bool(st.store.exists(t, try evalMany(st, env, k)))

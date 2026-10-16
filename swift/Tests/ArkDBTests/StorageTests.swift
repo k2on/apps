@@ -9,8 +9,8 @@
 //    opened by the Swift peer at each `open`, which must find the state the
 //    Rust peer reported. The fixture is round 3's, read where it was
 //    committed (`kotlin/ark-client/fixtures/rust-peer.json`), never copied.
-// 2. The semantics. Every trace — spec/vectors/trace/ and, when named, the
-//    corpus — replayed with the client's durable copy kept through a
+// 2. The semantics. Every trace MANIFEST.json gives this runtime and, when
+//    named, the corpus — replayed with the client's durable copy kept through a
 //    `Storage` in these records (`StoredCopy`) rather than in memory: a
 //    reopen opens what the records say, so a record that loses anything a
 //    trace's reopen needs fails that trace at the step after it.
@@ -171,29 +171,38 @@ enum StorageTests {
         if problems.count == before { print("storage: DirStorage writes, replaces and removes, the directory synced") }
     }
 
-    /// Every trace replayed with the durable copy kept in these records.
+    /// Every trace the manifest gives this runtime replayed with the durable
+    /// copy kept in these records: what `MANIFEST.json` lists of kind `trace`
+    /// on a side this runtime runs, each passed or failed as its `expect`
+    /// says, and every other one skipped by name — the manifest is the list
+    /// (spec/RUNNERS.md), so a trace of a side this runtime does not run is
+    /// never replayed by walking a directory.
     static func traces(_ vectors: String, _ corpus: String?) throws {
-        let dir = vectors + "/trace"
-        let files = try FileManager.default.contentsOfDirectory(atPath: dir).filter { $0.hasSuffix(".json") }.sorted()
+        let mine = try Manifest.read(vectors).filter { $0.kind == "trace" }
         var ran = 0
-        for f in files {
+        for t in mine {
+            if !Manifest.sides.contains(t.side) {
+                print("storage: skipped \(t.path) (\(t.side): \(Manifest.skipReason(t.side)))")
+                continue
+            }
+            var failure: String? = nil
             do {
-                try ClientChecks.trace(try readJson(dir + "/" + f), { StoredCopy() })
-                ran += 1
+                try ClientChecks.trace(try readJson(vectors + "/" + t.path), { StoredCopy() })
             } catch {
-                problems.append("trace/\(f) through storage: \(error)")
+                failure = "\(error)"
+            }
+            ran += 1
+            if t.expect == "pass", let f = failure { problems.append("\(t.path) through storage: \(f)") }
+            if t.expect == "fail" {
+                if let f = failure {
+                    print("storage: \(t.path) fails, as it must (\(String(f.prefix(120))))")
+                } else {
+                    problems.append("\(t.path) replayed through storage and must not")
+                }
             }
         }
-        print("storage: trace/ \(ran) of \(files.count) replayed with the durable copy in storage records")
-        let falsify = (try? FileManager.default.contentsOfDirectory(atPath: dir + "/falsify")) ?? []
-        for f in falsify.filter({ $0.hasSuffix(".json") }).sorted() {
-            do {
-                try ClientChecks.trace(try readJson(dir + "/falsify/" + f), { StoredCopy() })
-                problems.append("trace/falsify/\(f) replayed through storage and must not")
-            } catch {
-                print("storage: trace/falsify/\(f) fails, as it must (\(String("\(error)".prefix(120))))")
-            }
-        }
+        print("storage: trace: \(ran) of \(mine.count) the manifest names replayed with the durable copy in storage records")
+        if ran == 0 { problems.append("the manifest gave this runtime no trace") }
         if let c = corpus {
             let (n, failed, ms) = try ClientChecks.corpus(c, { StoredCopy() })
             print("storage: trace corpus \(c) through storage records: \(n - failed.count) of \(n) replayed in \(ms) ms")

@@ -35,21 +35,29 @@ public struct Covers {
 
 /// A frame a client writes (`protocol::ClientMsg`).
 public enum ClientMsg {
-    case hello(Subscription, String?, Int64)
+    /// The last: §14 the device this connection is (`docs/plan-live.md`),
+    /// present only when declared, so a client that never uses live state
+    /// says the bytes it said.
+    case hello(Subscription, String?, Int64, DeviceDecl?)
     case push([LogEntry])
     case needFacts([Seq])
     case needClosures([[UInt8]])
     /// Whether the authority holds the state `hash` at `seq`, of the log `logId`.
     case verify(Seq, [UInt8], Id?, Bool)
     case say([UInt8])
+    /// §14 Run a transition of a live instance (`call`).
+    case call(LiveCall)
+    /// §14 Send this instance whole (`resync`): a gap, or a hash that did not match.
+    case resync(Instance)
 
     /// The frame as a value; its wire form is `Canon.encode` of this.
     public func toValue() -> Value {
         switch self {
-        case .hello(let sub, let token, let spec):
+        case .hello(let sub, let token, let spec, let device):
             var f: [(String, Value)] = [("since", .int(sub.since)), ("mode", .text(sub.mode.rawValue)), ("token", token.map { .text($0) } ?? .null), ("spec", .int(spec))]
             named(&f, sub.logId)
             flagged(&f, "partial", sub.partial)
+            if let d = device { f.append(("device", d.toValue())) }
             return node("hello", f)
         case .push(let es): return node("push", [("entries", .list(es.map(entryValue)))])
         case .needFacts(let ns): return node("need_facts", [("seqs", .list(ns.map { .int($0) }))])
@@ -60,6 +68,8 @@ public enum ClientMsg {
             flagged(&f, "partial", partial)
             return node("verify", f)
         case .say(let b): return node("say", [("say", .bytes(b))])
+        case .call(let c): return c.toValue()
+        case .resync(let i): return resyncValue(i)
         }
     }
 
@@ -73,12 +83,14 @@ public enum ClientMsg {
         switch t {
         case "hello":
             let tok = try need(m, "token")
-            return .hello(try sub(m), tok.isNull ? nil : try text(tok), try int64(try need(m, "spec")))
+            return .hello(try sub(m), tok.isNull ? nil : try text(tok), try int64(try need(m, "spec")), try m["device"].map(DeviceDecl.fromValue))
         case "push": return .push(try list(try need(m, "entries"), entryFromValue))
         case "need_facts": return .needFacts(try list(try need(m, "seqs"), int64))
         case "need_closures": return .needClosures(try list(try need(m, "hashes"), bytes))
         case "verify": return .verify(try int64(try need(m, "seq")), try bytes(try need(m, "hash")), try logOf(m), try flag(m, "partial"))
         case "say": return .say(try bytes(try need(m, "say")))
+        case "call": return .call(try LiveCall.fromFields(m))
+        case "resync": return .resync(try resyncInstance(m))
         default: throw bad("unknown client frame \(t)")
         }
     }
@@ -109,6 +121,12 @@ public enum ServerMsg {
     /// The answer to a `verify`; `unknown`, the authority could not say.
     case agree(Seq, [UInt8], Bool, Bool)
     case heard([UInt8])
+    /// §14 A call a live instance took (`applied`), ordered or ephemeral.
+    case applied(LiveApplied)
+    /// §14 A call it did not, to its author (`refused`).
+    case refused(LiveRefused)
+    /// §14 An instance whole (`live_snapshot`).
+    case liveSnapshot(LiveSnapshot)
 
     /// The frame as a value.
     public func toValue() -> Value {
@@ -150,6 +168,9 @@ public enum ServerMsg {
             if unknown { f.append(("unknown", .bool(true))) }
             return node("agree", f)
         case .heard(let b): return node("heard", [("hear", .bytes(b))])
+        case .applied(let a): return a.toValue()
+        case .refused(let r): return r.toValue()
+        case .liveSnapshot(let s): return s.toValue()
         }
     }
 
@@ -192,6 +213,9 @@ public enum ServerMsg {
             }
             return .agree(try int64(try need(m, "seq")), try bytes(try need(m, "hash")), try boolean(try need(m, "ok")), unknown)
         case "heard": return .heard(try bytes(try need(m, "hear")))
+        case "applied": return .applied(try LiveApplied.fromFields(m))
+        case "refused": return .refused(try LiveRefused.fromFields(m))
+        case "live_snapshot": return .liveSnapshot(try LiveSnapshot.fromFields(m))
         default: throw bad("unknown server frame \(t)")
         }
     }
@@ -437,7 +461,6 @@ public final class Client {
     public var epoch: Int64 = 0
     /// Oldest first.
     public var out = [ClientMsg]()
-    public var heard = [[UInt8]]()
     public var denied: String? = nil
     /// Every answer to a `verify`, oldest first: true, false, or nil where it could not say.
     public var agreed = [(Seq, Bool?)]()
@@ -455,6 +478,10 @@ public final class Client {
     public var served = false
     /// This connection has brought a snapshot.
     public var started = false
+    /// §14 Live state (`docs/plan-live.md`): the instances this client holds
+    /// and the device it declares. Nil — every client of a module without
+    /// live state — and nothing here says a byte it did not say before.
+    public var live: Watch? = nil
 
     public init(_ replica: Replica, _ mode: Mode, _ token: String?) {
         self.replica = replica
@@ -465,6 +492,12 @@ public final class Client {
 
     /// `Client::open`: over the replica as opened from what was durable.
     public static func open(_ replica: Replica, _ mode: Mode, _ token: String?) -> Client { Client(replica, mode, token) }
+
+    /// `with_live`: hold live state, as the device `watch` declares (or as none).
+    public func withLive(_ watch: Watch) -> Client {
+        live = watch
+        return self
+    }
 
     /// `with_schema`: the module's schema, for a client opened over a union.
     public func withSchema(_ module: Schema) -> Client {
@@ -502,7 +535,7 @@ public final class Client {
     }
 
     private func hello() -> ClientMsg {
-        .hello(Subscription(since: replica.cursor, mode: mode, logId: replica.logId, partial: replica.partial != nil), token, SPEC_VERSION)
+        .hello(Subscription(since: replica.cursor, mode: mode, logId: replica.logId, partial: replica.partial != nil), token, SPEC_VERSION, live?.device)
     }
 
     /// §12.1 `connected`: hello at the cursor, then everything pending pushed.
@@ -513,16 +546,40 @@ public final class Client {
         more = false
         served = false
         started = false
-        heard.removeAll()
         emit(hello())
         if !replica.pending.isEmpty { emit(.push(replica.pending)) }
+        // §14 Every live call still pending, said again in order: the server
+        // answers one it already took with the `applied` it was.
+        if live != nil {
+            for c in live!.connected() { emit(.call(c)) }
+        }
     }
 
     public func disconnected() {
         linked = false
         out.removeAll()
         more = false
-        heard.removeAll()
+    }
+
+    /// §14 `call`: this device calls a transition of a live instance, run over
+    /// its view at once with `now` its guess at the server's clock, and sent
+    /// if linked — an ordered call kept pending and said again on the next
+    /// connection until the server answers; an ephemeral one applied and
+    /// done, `counter` its place among this device's, and dropped while
+    /// unlinked. A refusal here is the preview's, thrown as a `LiveRefusal`,
+    /// and nothing is sent.
+    public func call(_ who: Ctx, _ i: Instance, _ transition: String, _ input: [String: Value], _ id: Id, _ now: Int64, _ counter: Int64) throws -> Kind {
+        guard live != nil else { throw LiveRefusal(refusal: .refused("this client holds no live state")) }
+        let called = try live!.call(who, i, transition, input, id, now, counter)
+        emit(.call(called.call))
+        return called.kind
+    }
+
+    // What the server said of live state, applied; a snapshot asked for where
+    // the replica fell out of step.
+    private func heardLive(_ said: Said) {
+        guard live != nil else { return }
+        for i in live!.heard(said) { emit(.resync(i)) }
     }
 
     /// `mutate`: author an intent and push it if linked. A refusal here is
@@ -537,7 +594,12 @@ public final class Client {
     /// and applied by `settle` (`docs/plan-perf.md` R8).
     public func recv(_ msg: ServerMsg) {
         switch msg {
-        case .heard(let f): heard.append(f)
+        // §14 The opaque rooms' frame: nothing in this runtime listens to one.
+        case .heard: break
+        // §14 Not the log: nothing here waits for a settle.
+        case .applied(let a): heardLive(.applied(a))
+        case .refused(let r): heardLive(.refused(r))
+        case .liveSnapshot(let s): heardLive(.snapshot(s))
         case .denied(let reason):
             denied = reason
             linked = false
@@ -649,9 +711,6 @@ public final class Client {
         }
     }
 
-    /// A live frame; dropped while unlinked, never queued.
-    public func say(_ frame: [UInt8]) { emit(.say(frame)) }
-
     /// `verify_all`: ask whether the authority agrees with the confirmed state.
     public func verifyAll() {
         let partial = replica.partial != nil
@@ -664,11 +723,5 @@ public final class Client {
         let o = out
         out.removeAll()
         return o
-    }
-
-    public func takeHeard() -> [[UInt8]] {
-        let h = heard
-        heard.removeAll()
-        return h
     }
 }

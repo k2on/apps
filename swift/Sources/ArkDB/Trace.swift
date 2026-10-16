@@ -20,7 +20,8 @@ public struct ViewSpec {
 
 /// One input to a client (`trace::Input`).
 public enum Input {
-    case open(Mode, Bool, String?)
+    /// The last: §14 the device its `hello` declares, for a client of a module with live state.
+    case open(Mode, Bool, String?, DeviceDecl?)
     case reopen
     case connected
     case disconnected
@@ -33,6 +34,10 @@ public enum Input {
     case alone
     case join(Ctx)
     case hydrate([ViewSpec])
+    /// §14 `Client.call`: a transition of a live instance, by this author,
+    /// with the time it guessed for the server's and the id and counter it
+    /// drew — frozen, as a mutation's autos are.
+    case call(Ctx, Instance, String, [String: Value], Id, Int64, Int64)
 
     /// `Input::from_value`: an input read back; a `TraceError` names what is not one.
     public static func fromValue(_ v: Value) throws -> Input {
@@ -54,7 +59,11 @@ public enum Input {
         case "open":
             guard case .text(let mw) = try get("mode"), let mode = Mode(rawValue: mw) else { throw TraceError("mode is neither whole nor facts") }
             guard case .bool(let cl) = try get("closures") else { throw TraceError("closures is not a bool") }
-            return .open(mode, cl, try token("token"))
+            var device: DeviceDecl? = nil
+            if let d = m["device"] {
+                do { device = try DeviceDecl.fromValue(d) } catch { throw TraceError("\(error)") }
+            }
+            return .open(mode, cl, try token("token"), device)
         case "reopen": return .reopen
         case "connected": return .connected
         case "disconnected": return .disconnected
@@ -72,6 +81,14 @@ public enum Input {
         case "verify": return .verify
         case "alone": return .alone
         case "join": return .join(try ctxOf(try get("ctx")))
+        case "call":
+            guard case .text(let live) = try get("live") else { throw TraceError("live is not text") }
+            guard case .text(let key) = try get("key") else { throw TraceError("key is not text") }
+            guard case .text(let tr) = try get("transition") else { throw TraceError("transition is not text") }
+            guard case .id(let id) = try get("id") else { throw TraceError("id is not an id") }
+            guard case .int(let now) = try get("now") else { throw TraceError("now is not an int") }
+            guard case .int(let counter) = try get("counter") else { throw TraceError("counter is not an int") }
+            return .call(try ctxOf(try get("ctx")), Instance(live, key), tr, try args("input"), id, now, counter)
         case "hydrate":
             guard case .list(let vs) = try get("views") else { throw TraceError("views is not a list") }
             return .hydrate(try vs.map { s in
@@ -232,7 +249,11 @@ public func reopenFrom(_ old: Client, _ store: MemoryStore, _ cursor: Seq, _ log
         r.partial = m
     }
     r.through = cursor
-    return Client.open(r, old.mode, old.token).withSchema(old.schema)
+    let c = Client.open(r, old.mode, old.token).withSchema(old.schema)
+    // §14 Live state is about now and nothing of it is durable: a client
+    // started again holds none of it, and is told it whole when it next connects.
+    guard let w = old.live else { return c }
+    return c.withLive(Watch(w.runner, w.device))
 }
 
 /// `client_bodies`: the module's closures as a client holds them — private blocks stripped (D3).
@@ -353,7 +374,28 @@ public func state(_ c: Client) -> [(String, Value)] {
         ("union", union),
         ("hash", .bytes(Hash.stateHash(r.confirmed))),
         ("view_hash", .bytes(Hash.stateHash(r.view))),
-    ]
+    ] + liveState(c)
+}
+
+// §14 A client holding live state is held to it too: each instance's
+// sequence, whether a snapshot has come on this connection, the hash of what
+// is confirmed, its view whole and the ids still pending; and the server's
+// verdicts on its calls. Absent for every client that holds none.
+private func liveState(_ c: Client) -> [(String, Value)] {
+    guard let w = c.live else { return [] }
+    let instances: [Value] = w.instances.entries.map { e in
+        .record(Record([
+            ("live", .text(e.key.state)),
+            ("key", .text(e.key.key)),
+            ("seq", .int(e.value.seq)),
+            ("synced", .bool(e.value.synced)),
+            ("hash", .bytes(w.runner.hash(e.key.state, e.value.confirmed))),
+            ("view", e.value.view),
+            ("pending", .list(e.value.pending.map { .id($0.id) })),
+        ]))
+    }
+    let refused: [Value] = w.refused.map { .record(Record([("id", .id($0.0)), ("reason", .text($0.1))])) }
+    return [("live", .list(instances)), ("live_refused", .list(refused))]
 }
 
 /// A client driven by nothing but a trace's inputs (`trace::Player`): what
@@ -361,6 +403,7 @@ public func state(_ c: Client) -> [(String, Value)] {
 /// trace's own copy by default.
 public final class Player {
     private let moduleSchema: Schema
+    private let live: Runner
     private let bodies: [String: Closure]
     private let observer: Observer
     private let durable: Durable
@@ -369,6 +412,7 @@ public final class Player {
 
     public init(_ m: Module, _ durable: Durable = KeptStore()) {
         moduleSchema = m.schema
+        live = Runner.ofModule(m)
         var bs = [String: Closure]()
         for (k, v) in Hash.closures(m) { bs[k] = v }
         bodies = bs
@@ -382,10 +426,16 @@ public final class Player {
     /// One input, and what the client did after it.
     public func step(_ input: Input) throws -> Value {
         var refusal: Refusal? = nil
-        if case .open(let mode, let closures, let token) = input {
+        if case .open(let mode, let closures, let token, let device) = input {
             let bs = closures ? clientBodies(bodies) : [:]
             let r = Replica.open(moduleSchema, bs, MemoryStore.empty(moduleSchema), 0, [])
-            client = Client.open(r, mode, token)
+            let c = Client.open(r, mode, token)
+            // §14 A client of a module with live state that declares a device
+            // holds it, as that device. One that declares none holds none and
+            // reports none (spec/RUNNERS.md, `live`), however much live state
+            // its module has.
+            if !live.isEmpty, let d = device { _ = c.withLive(Watch(live, d)) }
+            client = c
             durable.clear()
             alone = nil
             observer.reset()
@@ -417,6 +467,12 @@ public final class Player {
             alone = nil
             join(c, a, who)
         case .hydrate(let specs): observer.hydrate(specs, c.replica.view)
+        case .call(let ctx, let i, let transition, let input, let id, let now, let counter):
+            do {
+                _ = try c.call(ctx, i, transition, input, id, now, counter)
+            } catch let e as LiveRefusal {
+                refusal = e.refusal
+            }
         }
         let frames = c.takeOutgoing()
         let changes = c.replica.takeChanges()

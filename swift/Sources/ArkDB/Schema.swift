@@ -15,6 +15,24 @@ public indirect enum Ty: Hashable, CustomStringConvertible {
     case list(Ty)
     /// Fields in code point order of their names.
     case structure(TyFields)
+    /// §2.2 A type of the module's type section, by its name (`Ty::Named`,
+    /// `docs/plan-live.md`). `{"t":"named","name"}`.
+    case named(String)
+    /// §2.2 A list of at least one element: a list to the checker, held to
+    /// its one element wherever a value crosses a boundary.
+    /// `{"t":"non_empty_list","of"}`.
+    case nonEmpty(Ty)
+    /// §2.2 A sum of records: its value is a struct of the variant's fields
+    /// with the variant's name under `t`, so no variant has a field `t`.
+    /// `{"t":"sum","variants":{name: {field: ty}}}`.
+    case sum(TySum)
+    /// §2.2 One value per device standing in a live instance, by device id: a
+    /// struct keyed by the ids, an empty slot a key that is not there.
+    /// `{"t":"per_device","of"}`.
+    case perDevice(Ty)
+    /// §2.2 A field of a live state's record that is ephemeral: left out of
+    /// the state's hash and of what a server keeps. `{"t":"ephemeral","of"}`.
+    case ephemeral(Ty)
 
     /// A struct type from fields in any order.
     public static func structOf(_ fields: [(String, Ty)]) -> Ty { .structure(TyFields(fields)) }
@@ -45,7 +63,57 @@ public indirect enum Ty: Hashable, CustomStringConvertible {
         case .list(let t): return "List(\(t))"
         case .structure(let f):
             return "Struct({" + zip(f.names, f.types).map { debugString($0.0) + ": " + $0.1.description }.joined(separator: ", ") + "})"
+        case .named(let n): return "Named(\(debugString(n)))"
+        case .nonEmpty(let t): return "NonEmpty(\(t))"
+        case .perDevice(let t): return "PerDevice(\(t))"
+        case .ephemeral(let t): return "Ephemeral(\(t))"
+        case .sum(let s):
+            return "Sum({" + zip(s.names, s.variants).map { v in
+                debugString(v.0) + ": {" + zip(v.1.names, v.1.types).map { debugString($0.0) + ": " + $0.1.description }.joined(separator: ", ") + "}"
+            }.joined(separator: ", ") + "})"
         }
+    }
+}
+
+/// §2.2 A sum type's variants, in code point order of their names, each a
+/// record of its own fields.
+public struct TySum: Hashable {
+    public private(set) var names: [String]
+    public private(set) var variants: [TyFields]
+
+    public init(_ variants: [(String, TyFields)]) {
+        let sorted = variants.enumerated().sorted { a, b in
+            let c = compareText(a.element.0, b.element.0)
+            return c != 0 ? c < 0 : a.offset < b.offset
+        }
+        var ns = [String]()
+        var vs = [TyFields]()
+        for (_, v) in sorted {
+            if let l = ns.last, textEquals(l, v.0) {
+                vs[vs.count - 1] = v.1
+            } else {
+                ns.append(v.0)
+                vs.append(v.1)
+            }
+        }
+        names = ns
+        self.variants = vs
+    }
+
+    public var count: Int { names.count }
+    public var isEmpty: Bool { names.isEmpty }
+
+    /// A variant's fields by its name.
+    public subscript(name: String) -> TyFields? {
+        guard let i = names.firstIndex(where: { textEquals($0, name) }) else { return nil }
+        return variants[i]
+    }
+
+    public var pairs: [(String, TyFields)] { Array(zip(names, variants)) }
+
+    /// Every variant's fields mapped.
+    public func mapTypes(_ f: (Ty) throws -> Ty) rethrows -> TySum {
+        TySum(try pairs.map { ($0.0, TyFields(try $0.1.pairs.map { ($0.0, try f($0.1)) })) })
     }
 }
 

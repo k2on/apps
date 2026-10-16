@@ -48,11 +48,37 @@ public enum Normalize {
         return g
     }
 
-    /// `normalize_module`: every function normalised.
+    /// `normalize_module`: every function and every live state normalised.
     public static func module(_ m: Module) -> Module {
         var n = m
         n.functions = m.functions.map(function)
+        n.states = m.states.map(state)
         return n
+    }
+
+    /// `normalize_transition`: a transition numbered as a function would be —
+    /// its checks, its guards (as a function's refinements are), then its body.
+    public static func transition(_ t: Transition) -> Transition {
+        let f = function(transitionFunction(t))
+        return Transition(name: t.name, input: f.input, guards: f.refine.map { Guard(e: $0.e, why: $0.why ?? "") }, body: f.body)
+    }
+
+    /// `normalize_state`: its init, its scope and each transition normalised, each on its own.
+    public static func state(_ s: LiveStateDecl) -> LiveStateDecl {
+        var n = s
+        n.initial = expr([:], 0, s.initial).0
+        n.scope = expr([:], 0, s.scope).0
+        n.transitions = s.transitions.map(transition)
+        n.onJoin = s.onJoin.map(transition)
+        n.onLeave = s.onLeave.map(transition)
+        n.onRestore = s.onRestore.map(transition)
+        return n
+    }
+
+    /// `transition_function`: a transition as the function the verifier and
+    /// the numbering read it as — its input, its guards as refinements, its body.
+    public static func transitionFunction(_ t: Transition) -> Function {
+        Function(name: t.name, kind: .provide, router: nil, uses: [], autos: [], input: t.input, refine: t.guards.map { Refinement(e: $0.e, why: $0.why) }, ret: nil, body: t.body, plan: nil, holds: [], isPrivate: false)
     }
 
     private static func block(_ ren: Ren, _ next: Sym, _ blk: Block) -> (Block, Ren) {
@@ -146,6 +172,7 @@ public enum Normalize {
             return [s] + exprBinders(o) + exprBinders(b)
         case .fold(let o, let z, let a, let s, let b): return [a, s] + [o, z, b].flatMap(exprBinders)
         case .select(let p): return planBinders(p)
+        case .caseOf(let x, let arms): return exprBinders(x) + arms.flatMap { [$0.sym] + exprBinders($0.e) }
         default: return children(e).flatMap(exprBinders)
         }
     }
@@ -257,7 +284,41 @@ public enum Normalize {
         case .exists(let t, let k):
             let (ks, n) = many(ren, next, k)
             return (.exists(t, ks), n)
-        case .lit, .arg, .auto, .ctxUser, .ctxSession, .hasRole, .provided, .none:
+        // A sum built: its fields in name order, as a struct's.
+        case .variant(let t, let name, let fs):
+            var n = next
+            var out = [Expr]()
+            for x in fs.exprs {
+                let (v2, n2) = expr(ren, n, x)
+                out.append(v2)
+                n = n2
+            }
+            return (.variant(t, name, ExprFields(sorted: fs.names, out)), n)
+        // The scrutinee, then each arm in order: its binder, then its body.
+        case .caseOf(let x, let arms):
+            let (e2, k0) = expr(ren, next, x)
+            var k = k0
+            var out = [Arm]()
+            for a in arms {
+                let (b2, k2) = expr(bind(ren, a.sym, k), k + 1, a.e)
+                out.append(Arm(name: a.name, sym: k, e: b2))
+                k = k2
+            }
+            return (.caseOf(e2, out), k)
+        case .slot(let a, let b):
+            let (a2, n1) = expr(ren, next, a)
+            let (b2, n2) = expr(ren, n1, b)
+            return (.slot(a2, b2), n2)
+        case .setSlot(let a, let b, let c):
+            let (a2, n1) = expr(ren, next, a)
+            let (b2, n2) = expr(ren, n1, b)
+            let (c2, n3) = expr(ren, n2, c)
+            return (.setSlot(a2, b2, c2), n3)
+        case .slots(let a):
+            let (a2, n1) = expr(ren, next, a)
+            return (.slots(a2), n1)
+        case .liveState, .ctxNow, .ctxDevice,
+             .lit, .arg, .auto, .ctxUser, .ctxSession, .hasRole, .provided, .none:
             return (e, next)
         }
     }

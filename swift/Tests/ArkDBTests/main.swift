@@ -20,14 +20,6 @@ import Foundation
 
 setvbuf(stdout, nil, _IOLBF, 0)
 
-/// One vector as the manifest lists it.
-struct Vector {
-    let path: String
-    let kind: String
-    let form: String
-    let side: String
-    let expect: String
-}
 
 let arguments = CommandLine.arguments
 let root = arguments.count > 1 ? arguments[1] : "../spec/vectors"
@@ -45,6 +37,7 @@ let claimed: [(String, (Vector, Value) throws -> Void)] = [
         case "apply": try Checks.evalApply(v)
         case "cases": try Checks.evalCases(v)
         case "raw": try Checks.evalRaw(v)
+        case "live": try Checks.evalLive(v)
         default: throw Failed("eval: unknown form \(x.form)")
         }
     }),
@@ -63,10 +56,7 @@ let notYet: [String: String] = [:]
 var problems = [String]()
 var vectors = [Vector]()
 do {
-    let manifest = try readJson(root + "/MANIFEST.json")
-    for it in try manifest.field("vectors").list() {
-        vectors.append(Vector(path: try it.field("path").text(), kind: try it.field("kind").text(), form: try it.field("form").text(), side: try it.field("side").text(), expect: try it.field("expect").text()))
-    }
+    vectors = try Manifest.read(root)
 } catch {
     print("conformance: cannot read \(root)/MANIFEST.json: \(error)")
     exit(1)
@@ -117,8 +107,8 @@ var ran = [String: [String]]()
 var skipped = [String: [String]]()
 for v in vectors {
     let check = claimed.first { $0.0 == v.kind }?.1
-    if v.side != "client" {
-        skipped[v.kind, default: []].append("\(v.path) (\(v.side): Rust's simulator and its scheduler)")
+    if !Manifest.sides.contains(v.side) {
+        skipped[v.kind, default: []].append("\(v.path) (\(v.side): \(Manifest.skipReason(v.side)))")
     } else if let check = check {
         let (failure, bug) = run(v, check)
         var line: String
@@ -198,6 +188,10 @@ problems += StorageTests.run(root, fixturePath, corpusDir).map { "storage: " + $
 // harken's module, and the WebSocket.
 let harkenArk = arguments.count > 4 && !arguments[4].isEmpty ? arguments[4] : "../harken/domain/harken.ark"
 problems += ClientTests.run(harkenArk).map { "client: " + $0 }
+
+// A device's live state (docs/plan-live.md): its calls, its counters, its
+// resyncs, its throttle and the server's clock, over the demo's room.
+problems += LiveTests.run(root).map { "live: " + $0 }
 
 let total = ran.values.reduce(0) { $0 + $1.count }
 let skippedTotal = skipped.values.reduce(0) { $0 + $1.count }

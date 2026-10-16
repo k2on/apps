@@ -15,6 +15,16 @@ public enum VerifyError: Hashable {
     case inRouter(String, String)
     /// Function, then the complaint.
     case inFunction(String, Complaint)
+    /// `docs/plan-live.md` Two declarations of one name in the type section.
+    case duplicateType(String)
+    /// Two live states of one name.
+    case duplicateState(String)
+    /// A declaration of the type section, then the complaint.
+    case inType(String, Complaint)
+    /// A live state, then the complaint.
+    case inState(String, Complaint)
+    /// A live state, one of its transitions, then the complaint.
+    case inTransition(String, String, Complaint)
 }
 
 /// What is wrong inside one function (`verify::Complaint`), by the reference's names.
@@ -81,6 +91,39 @@ public enum Complaint: Hashable {
     case nestedPrivate
     case returnInPrivate
     case privateUndeclared
+    // `docs/plan-live.md`
+    /// A named type the section does not declare, or one that refers to itself.
+    case unknownType(String)
+    /// A sum with no variant.
+    case emptySum
+    /// A variant with a field named `t`, where a sum's value carries its variant's name.
+    case tagField(String)
+    /// An ephemeral marker anywhere but on a `PerDevice` field of a live state's record.
+    case ephemeralNotOnState
+    /// The state, `ctx.now`, `ctx.device` read outside a transition.
+    case liveOutsideState
+    /// A variant of a type that is not a sum, or of a sum without it.
+    case noSuchVariant(String)
+    /// A variant built without exactly its fields: the field named.
+    case variantFields(String)
+    /// A case whose arms are not the sum's variants, once each, in order.
+    case caseArms([String])
+    /// A slot of something that is not a `PerDevice`.
+    case notPerDevice
+    /// A read of a table, an auto or a provided value in a live state.
+    case transitionReads(String)
+    /// An init that is not a constant.
+    case initNotConstant(String)
+    /// An init that is not a value of the state's type.
+    case initNotAValue(String)
+    /// A scope that is not a `Text` or a `List` of them of the context alone.
+    case badScope(String)
+    /// A transition named as a hook is, or two of one name.
+    case transitionName(String)
+    /// A hook whose input is not what the engine hands it.
+    case hookInput(String)
+    /// An ordered transition that reads an ephemeral field (named, or "the whole state").
+    case orderedReadsEphemeral(String)
 }
 
 /// A module that did not verify, and every reason.
@@ -154,6 +197,18 @@ public enum Verify {
         let rdups = duplicates(m.routers.map { $0.name })
         if !rdups.isEmpty { throw VerifyFailed(errors: rdups.map { .duplicateRouter($0) }) }
         var errs = [VerifyError]()
+        // `docs/plan-live.md` The type section and the live states.
+        if let d = duplicates(m.types.map { $0.name }).first { throw VerifyFailed(errors: [.duplicateType(d)]) }
+        if let d = duplicates(m.states.map { $0.name }).first { throw VerifyFailed(errors: [.duplicateState(d)]) }
+        let types = m.typeMap()
+        for t in m.types {
+            do {
+                try typeDeclOk(types, m.states, t.name, t.value)
+            } catch let c as Complain {
+                errs.append(.inType(t.name, c.c))
+            }
+        }
+        for st in m.states { errs.append(contentsOf: stateOk(m, types, st)) }
         for r in m.routers {
             for u in r.uses where m.lookupFunction(u)?.kind.isMiddleware != true {
                 errs.append(.inRouter(r.name, u))
@@ -174,6 +229,7 @@ public enum Verify {
         if !errs.isEmpty { throw VerifyFailed(errors: errs) }
         var out = m
         out.functions = m.functions.map(Normalize.function)
+        out.states = m.states.map(Normalize.state)
         return out
     }
 
@@ -212,6 +268,10 @@ public enum Verify {
         var provided: [String: Ty]
         var locals: [Sym: Ty]
         var isPrivate: Bool
+        // `docs/plan-live.md` The type section, which a named type is read through.
+        var types: [String: Ty] = [:]
+        // Inside a live state's transition: the state's type, resolved and unmarked.
+        var live: Ty? = nil
 
         var schema: Schema { m.schema }
 
@@ -271,19 +331,20 @@ public enum Verify {
         if f.isPrivate && f.kind != .mutator { throw complain(.privateOutsideMutator) }
         if !f.isPrivate && hasPrivate(f.body) { throw complain(.privateUndeclared) }
         if let d = duplicates(f.input.map { $0.name } + f.autos.map { $0.name }).first { throw complain(.duplicateName(d)) }
-        for i in f.input { try noNestedOption(i.value.ty) }
+        let types = m.typeMap()
+        for i in f.input { _ = try plainTy(types, i.value.ty) }
         for a in f.autos {
             if case .newId(let t) = a.value, sch.lookupTable(t) == nil { throw complain(.unknownAutoTable(t)) }
         }
-        if let r = f.ret { try noNestedOption(r) }
+        if let r = f.ret { _ = try plainTy(types, r) }
         var args = [String: Ty]()
-        for i in f.input { args[i.name] = i.value.ty }
+        for i in f.input { args[i.name] = try plainTy(types, i.value.ty) }
         var provided = [String: Ty]()
         for u in f.uses {
             guard let g = m.lookupFunction(u) else { continue }
-            if g.kind == .provide, let r = g.ret { provided[g.name] = r }
+            if g.kind == .provide, let r = g.ret { provided[g.name] = try plainTy(types, r) }
         }
-        let g = G(m: m, named: named, index: i, f: f, kind: f.kind, args: args, provided: provided, locals: [:], isPrivate: false)
+        let g = G(m: m, named: named, index: i, f: f, kind: f.kind, args: args, provided: provided, locals: [:], isPrivate: false, types: types)
         // The input's checks, each over its own field as it stands.
         for inp in f.input {
             var inner = inp.value.ty
@@ -332,13 +393,48 @@ public enum Verify {
 
     private static func noNestedOption(_ t: Ty) throws {
         switch t {
-        case .option(let o):
+        case .option(let o), .perDevice(let o):
+            // A slot reads as an option of its type, which may not be one.
             if case .option = o { throw complain(.nestedOption) }
             try noNestedOption(o)
-        case .list(let o): try noNestedOption(o)
+        case .list(let o), .nonEmpty(let o), .ephemeral(let o): try noNestedOption(o)
         case .structure(let fs): for x in fs.types { try noNestedOption(x) }
+        case .sum(let vs): for fs in vs.variants { for x in fs.types { try noNestedOption(x) } }
         default: break
         }
+    }
+
+    // A declared type as the checker reads it: named types resolved, no option
+    // of an option, and no ephemeral marker — which belongs on a live state's
+    // own fields alone.
+    private static func plainTy(_ types: [String: Ty], _ t: Ty) throws -> Ty {
+        let r: Ty
+        do {
+            r = try Types.resolve(types, t)
+        } catch let e as Types.TypeError {
+            throw complain(.unknownType(e.why))
+        }
+        try noNestedOption(r)
+        if marked(r) { throw complain(.ephemeralNotOnState) }
+        return r
+    }
+
+    // Whether a type carries an ephemeral marker anywhere.
+    private static func marked(_ t: Ty) -> Bool {
+        switch t {
+        case .ephemeral: return true
+        case .option(let x), .list(let x), .nonEmpty(let x), .perDevice(let x): return marked(x)
+        case .structure(let fs): return fs.types.contains(where: marked)
+        case .sum(let vs): return vs.variants.contains { $0.types.contains(where: marked) }
+        default: return false
+        }
+    }
+
+    // A value read where it is declared a non-empty list is a list to the
+    // checker: what it was promised is held at the boundary (`Types`).
+    private static func readAs(_ t: Ty) -> Ty {
+        if case .nonEmpty(let x) = t { return .list(x) }
+        return t
     }
 
     // A block definitely returns when its last statement does, or is an `if`
@@ -406,7 +502,7 @@ public enum Verify {
             case (nil, nil): break
             case (nil, _): throw complain(.returnTypeOnMutator)
             case (_, nil): throw complain(.noReturnType)
-            case (let want?, let e?): try expect(g, "return", want, e)
+            case (let want?, let e?): try expect(g, "return", try plainTy(g.types, want), e)
             }
         // D3 Typed as the body around it is; what it names goes nowhere.
         case .privateS(let body):
@@ -471,7 +567,10 @@ public enum Verify {
         if a == b { return true }
         switch (a, b) {
         case (.option(let x), .option(let y)): return same(sch, x, y)
-        case (.list(let x), .list(let y)): return same(sch, x, y)
+        case (.list(let x), .list(let y)), (.perDevice(let x), .perDevice(let y)): return same(sch, x, y)
+        // `docs/plan-live.md` A non-empty list is a list to the checker, and
+        // held to its one element where it crosses a boundary.
+        case (.nonEmpty(let x), .list(let y)), (.list(let x), .nonEmpty(let y)), (.nonEmpty(let x), .nonEmpty(let y)): return same(sch, x, y)
         case (.structure(let x), .structure(let y)):
             let (wide, narrow) = x.count >= y.count ? (x, y) : (y, x)
             for (k, t) in narrow.pairs {
@@ -503,7 +602,7 @@ public enum Verify {
         case .lit(let v): return try lit(want, v)
         case .arg(let n):
             guard let t = g.args[n] else { throw complain(.unknownArg(n)) }
-            return t
+            return readAs(t)
         case .auto(let n):
             let a = g.f.autos.first { $0.name == n }?.value
             switch a {
@@ -526,8 +625,14 @@ public enum Verify {
             guard case .structure(let fs) = t else { throw complain(.notAStruct(name)) }
             guard let ft = fs[name] else { throw complain(.noSuchField(name)) }
             g.named.fields.append((fs, name))
-            return ft
+            return readAs(ft)
         case .structE(let fs):
+            // `docs/plan-live.md` A struct written where a `PerDevice` is
+            // wanted is its slots, by device id: `{}` is every slot empty.
+            if case .perDevice(let t)? = want {
+                for (k, x) in zip(fs.names, fs.exprs) { try expect(g, "slot \(k)", t, x) }
+                return .perDevice(t)
+            }
             let wf = want?.structFields
             var out = [(String, Ty)]()
             for (k, x) in zip(fs.names, fs.exprs) { out.append((k, try infer(g, wf?[k], x))) }
@@ -535,6 +640,7 @@ public enum Verify {
         case .listE(let items):
             var we: Ty? = nil
             if case .list(let o)? = want { we = o }
+            if case .nonEmpty(let o)? = want { we = o }
             let ts = try items.map { try infer(g, we, $0) }
             if ts.isEmpty {
                 if let w = we { return .list(w) }
@@ -550,7 +656,7 @@ public enum Verify {
             if case .option = t { throw complain(.nestedOption) }
             return .option(t)
         case .none(let t):
-            let o = Ty.option(t)
+            let o = Ty.option(try plainTy(g.types, t))
             try noNestedOption(o)
             return o
         case .match(let x, let s, let a, let n):
@@ -593,9 +699,9 @@ public enum Verify {
             if f.kind != .helper { throw complain(.notAHelper(fn)) }
             if j >= g.index { throw complain(.helperNotYetDeclared(fn)) }
             if args.count != f.input.count { throw complain(.arity(fn, f.input.count, args.count)) }
-            for (p, x) in zip(f.input, args) { try expect(g, "argument of \(fn)", p.value.ty, x) }
+            for (p, x) in zip(f.input, args) { try expect(g, "argument of \(fn)", try plainTy(g.types, p.value.ty), x) }
             guard let r = f.ret else { throw complain(.notAHelper(fn)) }
-            return r
+            return try plainTy(g.types, r)
         case .std(let f, let args):
             return try stdTy(f, try args.map { try infer(g, nil, $0) }, want)
         case .map(let o, let s, let b):
@@ -622,6 +728,54 @@ public enum Verify {
             return a
         case .select, .get, .exists:
             throw complain(.readNotBound)
+        // `docs/plan-live.md` A sum built: one of its variants, with exactly
+        // that variant's fields, each of its type.
+        case .variant(let t, let n, let fs):
+            let sum = try plainTy(g.types, t)
+            guard case .sum(let vs) = sum, let wantFs = vs[n] else { throw complain(.noSuchVariant(n)) }
+            if let k = fs.names.first(where: { !wantFs.has($0) }) ?? wantFs.names.first(where: { k in !fs.names.contains(where: { textEquals($0, k) }) }) {
+                throw complain(.variantFields(k))
+            }
+            for (k, x) in zip(fs.names, fs.exprs) { try expect(g, "variant \(n).\(k)", wantFs[k]!, x) }
+            return sum
+        // A sum taken apart: an arm per variant, in order, each over the variant's record.
+        case .caseOf(let x, let arms):
+            guard case .sum(let vs) = try infer(g, nil, x) else { throw complain(.caseArms(arms.map { $0.name })) }
+            let names = arms.map { $0.name }
+            if names.count != vs.names.count || !zip(names, vs.names).allSatisfy({ textEquals($0.0, $0.1) }) { throw complain(.caseArms(names)) }
+            var out: Ty? = nil
+            for a in arms {
+                let t = try infer(g.bind(a.sym, .structure(vs[a.name]!)), out ?? want, a.e)
+                if let o = out {
+                    if !same(g.schema, o, t) { throw complain(.typeMismatch("case arms", o, t)) }
+                } else {
+                    out = t
+                }
+            }
+            guard let o = out else { throw complain(.emptySum) }
+            return o
+        case .liveState:
+            guard let l = g.live else { throw complain(.liveOutsideState) }
+            return l
+        case .ctxNow:
+            if g.live == nil { throw complain(.liveOutsideState) }
+            return .int
+        case .ctxDevice:
+            if g.live == nil { throw complain(.liveOutsideState) }
+            return .text
+        case .slot(let m, let k):
+            guard case .perDevice(let t) = try infer(g, nil, m) else { throw complain(.notPerDevice) }
+            try expect(g, "slot key", .text, k)
+            return .option(t)
+        case .setSlot(let m, let k, let v):
+            let pd = try infer(g, nil, m)
+            guard case .perDevice(let t) = pd else { throw complain(.notPerDevice) }
+            try expect(g, "slot key", .text, k)
+            try expect(g, "slot value", .option(t), v)
+            return pd
+        case .slots(let m):
+            guard case .perDevice(let t) = try infer(g, nil, m) else { throw complain(.notPerDevice) }
+            return .list(.structOf([("device", .text), ("value", t)]))
         }
     }
 
@@ -891,6 +1045,266 @@ public enum Verify {
     }
 
     // §9.3 Signatures of the standard library.
+    // `docs/plan-live.md` One declaration of the type section: it resolves —
+    // every name it reaches is declared, and none refers to itself — a sum has
+    // a variant and no variant a field named `t`, and an ephemeral marker is on
+    // a `PerDevice` field of a record some live state is.
+    private static func typeDeclOk(_ types: [String: Ty], _ states: [LiveStateDecl], _ name: String, _ t: Ty) throws {
+        let r: Ty
+        do {
+            r = try Types.resolve(types, t)
+        } catch let e as Types.TypeError {
+            throw complain(.unknownType(e.why))
+        }
+        try noNestedOption(r)
+        try sumsOk(r)
+        if marked(r) {
+            let isState = states.contains { $0.ty == .named(name) }
+            if !isState || !stateMarksOk(r) { throw complain(.ephemeralNotOnState) }
+        }
+    }
+
+    // Every sum in a type has a variant, and no variant a field named `t`.
+    private static func sumsOk(_ t: Ty) throws {
+        switch t {
+        case .sum(let vs):
+            if vs.isEmpty { throw complain(.emptySum) }
+            for (v, fs) in vs.pairs {
+                if fs.has(Types.tag) { throw complain(.tagField(v)) }
+                for x in fs.types { try sumsOk(x) }
+            }
+        case .option(let x), .list(let x), .nonEmpty(let x), .perDevice(let x), .ephemeral(let x): try sumsOk(x)
+        case .structure(let fs): for x in fs.types { try sumsOk(x) }
+        default: break
+        }
+    }
+
+    // A state's resolved type marks ephemeral only its own record's fields,
+    // each a `PerDevice`, with nothing marked beneath.
+    private static func stateMarksOk(_ t: Ty) -> Bool {
+        guard case .structure(let fs) = t else { return !marked(t) }
+        return fs.types.allSatisfy { f in
+            if case .ephemeral(let x) = f {
+                if case .perDevice = x { return !marked(x) }
+                return false
+            }
+            return !marked(f)
+        }
+    }
+
+    /// `docs/plan-live.md` `state_ok`: its type resolves and marks only what it
+    /// may; its init is a constant value of it; its scope is a `Text` or a
+    /// list of them of the context alone; and every transition and hook is
+    /// typed over the state, its context and its input, reads nothing else,
+    /// and — ordered — reads no ephemeral field.
+    private static func stateOk(_ m: Module, _ types: [String: Ty], _ st: LiveStateDecl) -> [VerifyError] {
+        func here(_ c: Complaint) -> VerifyError { .inState(st.name, c) }
+        let markedTy: Ty
+        do {
+            markedTy = try Types.resolve(types, st.ty)
+        } catch {
+            return [here(.unknownType("\(error)"))]
+        }
+        do {
+            try noNestedOption(markedTy)
+            try sumsOk(markedTy)
+        } catch let c as Complain {
+            return [here(c.c)]
+        } catch {
+            return [here(.unknownType("\(error)"))]
+        }
+        if !stateMarksOk(markedTy) { return [here(.ephemeralNotOnState)] }
+        let ty = Types.unmarked(markedTy)
+        let g = G(m: m, named: NamedColumns(), index: m.functions.count, f: transitionShell(st.name, ty), kind: .helper, args: [:], provided: [:], locals: [:], isPrivate: false, types: types)
+        var errs = [VerifyError]()
+        // The init: a constant of the state's type, and a value of it.
+        if let c = constantOrNot(st.initial) {
+            errs.append(here(.initNotConstant(c)))
+        } else {
+            do {
+                try expect(g, "init", ty, st.initial)
+                do {
+                    if let why = Types.whyNot(types, st.ty, try Eval.constant(st.initial)) { errs.append(here(.initNotAValue(why))) }
+                } catch {
+                    errs.append(here(.initNotAValue("\(error)")))
+                }
+            } catch let c as Complain {
+                errs.append(here(c.c))
+            } catch {
+                errs.append(here(.initNotAValue("\(error)")))
+            }
+        }
+        // The scope: of the context alone.
+        do {
+            try ctxOnlyScope(st.scope)
+            let t = try infer(g, nil, st.scope)
+            if t != .text && t != .list(.text) { errs.append(here(.badScope("a scope is text or a list of text, not \(t)"))) }
+        } catch let c as Complain {
+            errs.append(here(c.c))
+        } catch {
+            errs.append(here(.badScope("\(error)")))
+        }
+        if let d = duplicates(st.transitions.map { $0.name }).first { errs.append(here(.transitionName(d))) }
+        for t in st.transitions where isHook(t.name) {
+            errs.append(.inTransition(st.name, t.name, .transitionName(t.name)))
+        }
+        var all: [(Transition, String?)] = st.transitions.map { ($0, nil) }
+        if let t = st.onJoin { all.append((t, onJoinName)) }
+        if let t = st.onLeave { all.append((t, onLeaveName)) }
+        if let t = st.onRestore { all.append((t, onRestoreName)) }
+        for (t, hook) in all {
+            do {
+                try transitionOk(m, types, markedTy, ty, t, hook)
+            } catch let c as Complain {
+                errs.append(.inTransition(st.name, t.name, c.c))
+            } catch {
+                errs.append(.inTransition(st.name, t.name, .transitionReads("\(error)")))
+            }
+        }
+        return errs
+    }
+
+    // The function a transition is typed as: a body returning the state.
+    private static func transitionShell(_ name: String, _ ret: Ty) -> Function {
+        var f = Normalize.transitionFunction(Transition(name: name, input: [], guards: [], body: []))
+        f.ret = ret
+        return f
+    }
+
+    private static func transitionOk(_ m: Module, _ types: [String: Ty], _ markedTy: Ty, _ ty: Ty, _ t: Transition, _ hook: String?) throws {
+        // A hook is handed what the engine has: a device's record, or nothing.
+        if let h = hook {
+            if h == onRestoreName {
+                if !t.input.isEmpty { throw complain(.hookInput(h)) }
+            } else {
+                let ok = t.input.count == 1 && t.input[0].name == "device" && t.input[0].value.checks.isEmpty && t.input[0].value.ty == deviceTy()
+                if !ok { throw complain(.hookInput(h)) }
+            }
+            if t.name != h { throw complain(.transitionName(t.name)) }
+        }
+        if let d = duplicates(t.input.map { $0.name }).first { throw complain(.duplicateName(d)) }
+        var args = [String: Ty]()
+        for i in t.input { args[i.name] = try plainTy(types, i.value.ty) }
+        // A function of the state, its context and its input alone.
+        var exprs = t.guards.map { $0.e }
+        for i in t.input {
+            for c in i.value.checks {
+                switch c {
+                case .exists: throw complain(.transitionReads("an exists check"))
+                case .refine(let e, _): exprs.append(e)
+                default: break
+                }
+            }
+        }
+        blockExprs(t.body, &exprs)
+        for e in exprs {
+            if let what = transitionForbidden(e) { throw complain(.transitionReads(what)) }
+        }
+        let g = G(m: m, named: NamedColumns(), index: m.functions.count, f: transitionShell(t.name, ty), kind: .provide, args: args, provided: [:], locals: [:], isPrivate: false, types: types, live: ty)
+        for i in t.input {
+            var inner = args[i.name]!
+            if case .option(let o) = inner { inner = o }
+            for c in i.value.checks {
+                var fits: Bool
+                switch c {
+                case .trim, .minLen, .maxLen: fits = inner == .text
+                case .range: fits = inner == .int
+                case .nonEmpty:
+                    switch inner {
+                    case .list, .nonEmpty: fits = true
+                    default: fits = false
+                    }
+                case .exists: fits = false
+                case .refine(let e, _):
+                    var gc = g
+                    gc.args[i.name] = readAs(inner)
+                    try expect(gc, "refine", .bool, e)
+                    fits = true
+                }
+                if !fits { throw complain(.checkOnWrongType(i.name, c.description)) }
+            }
+        }
+        for gd in t.guards { try expect(g, "guard", .bool, gd.e) }
+        try block(g, t.body)
+        if !returns(t.body) { throw complain(.mayNotReturn) }
+        if Ordering.classify(markedTy, t) == .ordered, let f = Ordering.orderedReadsEphemeral(markedTy, t) {
+            throw complain(.orderedReadsEphemeral(f))
+        }
+    }
+
+    // Every expression a block holds, at any depth.
+    private static func blockExprs(_ b: Block, _ out: inout [Expr]) {
+        for s in b {
+            switch s {
+            case .letS(_, let e), .refuse(let e), .insert(_, let e, _), .upsert(_, let e, _): out.append(e)
+            case .ret(let e): if let e = e { out.append(e) }
+            case .ifS(let c, let a, let e):
+                out.append(c)
+                blockExprs(a, &out)
+                blockExprs(e, &out)
+            case .forS(_, let xs, let body):
+                out.append(xs)
+                blockExprs(body, &out)
+            case .update(_, let ks, _, let e):
+                out.append(contentsOf: ks)
+                out.append(e)
+            case .delete(_, let ks): out.append(contentsOf: ks)
+            case .privateS(let body): blockExprs(body, &out)
+            }
+        }
+    }
+
+    // What a transition may not reach for, named: a read, an auto, a provided value.
+    private static func transitionForbidden(_ e: Expr) -> String? {
+        switch e {
+        case .select, .get, .exists: return "a read"
+        case .auto: return "an auto"
+        case .provided: return "a provided value"
+        default:
+            for c in children(e) {
+                if let w = transitionForbidden(c) { return w }
+            }
+            return nil
+        }
+    }
+
+    // The first thing an init reaches that is not a constant, named.
+    private static func constantOrNot(_ e: Expr) -> String? {
+        switch e {
+        case .arg: return "an argument"
+        case .auto: return "an auto"
+        case .variable: return "a local"
+        case .provided: return "a provided value"
+        case .ctxUser, .ctxSession, .hasRole, .ctxNow, .ctxDevice, .liveState: return "the context"
+        case .select, .get, .exists: return "a read"
+        case .call: return "a call"
+        case .match, .map, .filter, .any, .all, .sortBy, .fold, .caseOf: return "a binder"
+        default:
+            for c in children(e) {
+                if let w = constantOrNot(c) { return w }
+            }
+            return nil
+        }
+    }
+
+    // A scope's expression: the context, literals, lists of them, and the
+    // operators, comparisons and standard functions over them.
+    private static func ctxOnlyScope(_ e: Expr) throws {
+        switch e {
+        case .listE(let es), .std(_, let es): for x in es { try ctxOnlyScope(x) }
+        case .ife(let c, let a, let b):
+            try ctxOnlyScope(c)
+            try ctxOnlyScope(a)
+            try ctxOnlyScope(b)
+        default:
+            do {
+                try ctxOnly(e)
+            } catch let c as Complain {
+                throw complain(.badScope("\(c.c)"))
+            }
+        }
+    }
+
     private static func stdTy(_ f: StdFn, _ ts: [Ty], _ want: Ty?) throws -> Ty {
         func option(_ t: Ty) throws -> Ty {
             if case .option = t { throw complain(.nestedOption) }

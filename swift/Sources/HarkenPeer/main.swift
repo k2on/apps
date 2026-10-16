@@ -331,8 +331,6 @@ final class Headless {
         if let d = p.dropped { say("dropped: \(d)") }
         if let d = p.denied { say("denied: \(d)") }
         if let n = p.note { say(n) }
-        // Nothing here listens to the room; what it said is not kept.
-        _ = peer.heard()
         collect()
     }
 

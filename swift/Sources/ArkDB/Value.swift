@@ -251,6 +251,13 @@ public struct Record: Hashable {
         values.insert(v, at: lo)
     }
 
+    /// This record without a field, where it had one.
+    public mutating func remove(_ name: String) {
+        guard let i = index(name) else { return }
+        names.remove(at: i)
+        values.remove(at: i)
+    }
+
     /// The fields in code point order of their names.
     public var pairs: [(String, Value)] { Array(zip(names, values)) }
 
