@@ -6,9 +6,8 @@
 //! DATA/cursors.cbor   canonical CBOR of
 //!                     { t: "cursors",
 //!                       sessions: [ { user, session, cursor: Int, heard: Int } … ] }
-//!                     — beside `live.cbor`, not in it: that file is a map of
-//!                     rooms to what each kept, and a session's cursor is not
-//!                     a room's
+//!                     — beside the log, not in it: a session's cursor is
+//!                     where it is in the log, not a part of the log
 //! ```
 //!
 //! **A session is `(user, session)`**, not the session id alone: dev auth
@@ -52,7 +51,7 @@ use ark::canon;
 use ark::log::Seq;
 use ark::value::Value;
 
-/// The file, beside `live.cbor`.
+/// The file, beside the log.
 pub const FILE: &str = "cursors.cbor";
 
 /// How often a cursor that only moved is written: often enough that a

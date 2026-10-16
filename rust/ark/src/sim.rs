@@ -22,7 +22,7 @@ use crate::authoring::Procedure;
 use crate::eval::{Args, Ctx};
 use crate::hash::{state_hash, Closure, FnHash};
 use crate::journal::{self, Journal, Keys, Layout};
-use crate::live::{ConnId, Silent};
+use crate::live::ConnId;
 use crate::log::{Log, Seq};
 use crate::peer::{Authority, Changes, Replica, Sequenced};
 use crate::protocol::{dev_identity, open_access, trusting, Client, ClientMsg, Identity, Mode, Server, ServerMsg};
@@ -32,7 +32,7 @@ use crate::trace::{Alone, Input, Trace, ViewSpec};
 use crate::value::{hex, Id, Value};
 
 pub struct Sim {
-    pub server: Server<Silent>,
+    pub server: Server,
     pub clients: BTreeMap<i64, Client>,
     /// The connection each client currently has, if linked.
     pub conn: BTreeMap<i64, ConnId>,
@@ -333,10 +333,9 @@ impl Sim {
     }
 
     // The server over `a`, with the fleet's clock and its live states.
-    fn server_of(a: Authority, clock: &std::sync::Arc<std::sync::atomic::AtomicI64>, live: &Option<crate::live::state::Runner>) -> Server<Silent> {
+    fn server_of(a: Authority, clock: &std::sync::Arc<std::sync::atomic::AtomicI64>, live: &Option<crate::live::state::Runner>) -> Server {
         let at = clock.clone();
-        let s =
-            Server::open(trusting(), open_access(), Silent, a).with_clock(std::sync::Arc::new(move || at.load(std::sync::atomic::Ordering::SeqCst)));
+        let s = Server::open(trusting(), open_access(), a).with_clock(std::sync::Arc::new(move || at.load(std::sync::atomic::Ordering::SeqCst)));
         match live {
             Some(r) => s.with_live(r.clone()),
             None => s,

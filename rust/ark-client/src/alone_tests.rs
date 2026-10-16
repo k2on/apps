@@ -9,7 +9,7 @@ use std::time::Instant;
 
 use ark::hash::state_hash;
 use ark::journal::{self, Layout};
-use ark::live::{ConnId, Silent};
+use ark::live::ConnId;
 use ark::log::Seq;
 use ark::peer::{Authority, Changes};
 use ark::protocol::{open_access, trusting, ClientMsg, Server, ServerMsg};
@@ -36,16 +36,16 @@ fn add(p: &mut Peer, list: &Value, track: &str) {
         .unwrap();
 }
 
-fn hub() -> Server<Silent> {
+fn hub() -> Server {
     let d = demo::domain();
     let mut a = Authority::new(d.module().schema.clone(), d.closures().clone());
     a.hold(d.native_list());
     a.log.name_if_unnamed([9; 16]);
-    Server::open(trusting(), open_access(), Silent, a)
+    Server::open(trusting(), open_access(), a)
 }
 
 /// Move frames between the hub and the peers until nothing moves.
-fn settle(s: &mut Server<Silent>, peers: &mut [(ConnId, &mut Peer)]) {
+fn settle(s: &mut Server, peers: &mut [(ConnId, &mut Peer)]) {
     loop {
         let mut moved = false;
         for (c, p) in peers.iter_mut() {

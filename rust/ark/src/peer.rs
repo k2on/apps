@@ -2398,10 +2398,9 @@ mod tests {
     /// ignored): the acknowledgement carries them.
     #[test]
     fn the_authority_stamps_the_roles_an_entry_is_logged_with() {
-        use crate::live::Silent;
         use crate::protocol::{open_access, trusting, Client, Mode, Server, ServerMsg};
         let d = demo();
-        let mut sv = Server::open(trusting(), open_access(), Silent, d.authority());
+        let mut sv = Server::open(trusting(), open_access(), d.authority());
         let believes = Ctx::new("alice", "dev").with_roles(["editor"]);
         let mut c = Client::open(d.replica(true), Mode::Whole, Some("alice:library".into()));
         c.connected();
@@ -2478,7 +2477,7 @@ mod tests {
     }
 
     // Pump a client against a server on connection 1 until it is quiet.
-    fn pump(sv: &mut crate::protocol::Server<crate::live::Silent>, c: &mut crate::protocol::Client) {
+    fn pump(sv: &mut crate::protocol::Server, c: &mut crate::protocol::Client) {
         for _ in 0..6 {
             for m in c.take_outgoing() {
                 sv.recv(1, m);
@@ -2501,7 +2500,6 @@ mod tests {
     /// not pending, and the authority never sees it.
     #[test]
     fn a_pending_intent_with_no_closure_is_kept_and_confirmed_by_facts() {
-        use crate::live::Silent;
         use crate::protocol::{open_access, trusting, Client, Mode, Server};
         let d = demo();
         let e = old_intent(&d, 1, "Old");
@@ -2509,7 +2507,7 @@ mod tests {
         assert_eq!(r.pending, vec![e.clone()], "kept");
         assert!(r.rejections.is_empty(), "{:?}", r.rejections);
         assert!(r.view.scan("playlist").is_empty(), "no preview: its facts are not known here");
-        let mut sv = Server::open(trusting(), open_access(), Silent, d.authority());
+        let mut sv = Server::open(trusting(), open_access(), d.authority());
         let mut c = Client::open(r, Mode::Whole, Some("alice".into()));
         c.connected();
         pump(&mut sv, &mut c);
@@ -2528,7 +2526,6 @@ mod tests {
     /// empty in `fork_back`): the row leaves the view at the join.
     #[test]
     fn local_history_with_no_closure_previews_by_the_facts_it_kept() {
-        use crate::live::Silent;
         use crate::protocol::{open_access, trusting, Client, Mode, Server};
         let d = demo();
         // Alone, with the closure: one intent sequenced locally.
@@ -2543,7 +2540,7 @@ mod tests {
         assert!(r.confirmed.scan("playlist").is_empty(), "taken back out of the confirmed store");
         assert_eq!(r.view.scan("playlist").len(), 1, "previewed by the facts it kept");
         assert!(r.known.contains_key(&e.id));
-        let mut sv = Server::open(trusting(), open_access(), Silent, d.authority());
+        let mut sv = Server::open(trusting(), open_access(), d.authority());
         let mut c = Client::open(r, Mode::Whole, Some("alice".into()));
         c.connected();
         pump(&mut sv, &mut c);

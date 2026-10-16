@@ -9,7 +9,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use ark::canon;
-use ark::live::Silent;
 use ark::protocol::{open_access, trusting, ClientMsg, Server, ServerMsg};
 use ark::store::Store;
 
@@ -22,7 +21,7 @@ struct Rig {
     peer: Peer,
     made: Arc<Mutex<Vec<Queues>>>,
     wakes: Arc<AtomicUsize>,
-    server: Server<Silent>,
+    server: Server,
 }
 
 const BOB: i64 = 2;
@@ -32,7 +31,7 @@ impl Rig {
         let d = demo::domain();
         let mut a = ark::peer::Authority::new(d.module().schema.clone(), d.closures().clone());
         a.hold(d.native_list());
-        let server = Server::open(trusting(), open_access(), Silent, a);
+        let server = Server::open(trusting(), open_access(), a);
         let mut peer = Peer::open_memory(d, Options::dev("bob").with_timing(Timing::default())).unwrap();
         let wakes = Arc::new(AtomicUsize::new(0));
         let w = wakes.clone();

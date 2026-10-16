@@ -418,13 +418,12 @@ fn a_client_never_names_a_column_it_does_not_hold() {
 
 // Serving the union ----------------------------------------------------------
 
-use ark::live::Silent;
 use ark::peer::{Authority, Replica};
 use ark::protocol::{open_access, trusting, Client, Mode, Server, ServerMsg};
 
 struct Fleet {
     m: ir::Module,
-    sv: Server<Silent>,
+    sv: Server,
     clients: Vec<Client>,
     /// Every frame the server sent each client, in order.
     sent: Vec<Vec<ServerMsg>>,
@@ -436,7 +435,7 @@ impl Fleet {
         let m = authored.build().clone();
         let mut a = Authority::new(m.schema.clone(), closures(&m));
         a.hold(authored.procedures());
-        let mut sv = Server::open(trusting(), open_access(), Silent, a);
+        let mut sv = Server::open(trusting(), open_access(), a);
         if scoped {
             sv = sv.with_scopes(Scopes::of(&m));
         }

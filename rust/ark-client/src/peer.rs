@@ -207,8 +207,6 @@ pub struct Pumped {
     /// [`Peer::take_changes`] has something new for the views. False is a
     /// pump no view needs to hear of.
     pub views: bool,
-    /// Live frames that arrived, for [`Peer::heard`].
-    pub heard: usize,
     /// `docs/plan-live.md` A live instance's view moved, or a verdict on a
     /// call arrived: [`Peer::live`] has something new.
     pub live: bool,
@@ -223,7 +221,7 @@ pub struct Pumped {
 
 impl Pumped {
     /// Nothing moved: no frame, no change of the link, no verdict, no note,
-    /// nothing for a view, nothing heard, the status as it was. A host
+    /// nothing for a view or a live instance, the status as it was. A host
     /// answering a wake with a quiet pump publishes nothing.
     pub fn quiet(&self) -> bool {
         !self.moved
@@ -233,7 +231,6 @@ impl Pumped {
             && self.rejected == 0
             && self.note.is_none()
             && !self.views
-            && self.heard == 0
             && !self.live
             && self.status.is_none()
     }
@@ -289,8 +286,7 @@ pub struct Status {
     pub diverged: usize,
     pub denied: Option<String>,
     pub last_close: Option<String>,
-    /// Live frames received, decoded or not.
-    pub heard_frames: u64,
+    /// Frames from the server that did not decode.
     pub bad_frames: u64,
 }
 
@@ -326,7 +322,6 @@ pub struct Peer {
     authored: BTreeSet<Id>,
     /// Every verdict, by intent, kept for [`Peer::standing`].
     rejected: BTreeMap<Id, String>,
-    heard_frames: u64,
     bad_frames: u64,
     /// Where this replica last shared a log with a server
     /// (`docs/plan-alone.md` §1); alone, the base of its local history.
@@ -668,7 +663,6 @@ impl Peer {
             rejections: vec![],
             authored,
             rejected: BTreeMap::new(),
-            heard_frames: 0,
             bad_frames: 0,
             fork,
             alone_log: None,
@@ -1084,39 +1078,6 @@ impl Peer {
         disagreed
     }
 
-    // -- the live channel -------------------------------------------------------
-
-    /// Say a frame to this account's room. Dropped, not queued, while
-    /// unlinked: "pause" is not worth saying on Friday.
-    pub fn say(&mut self, frame: Vec<u8>) {
-        self.client.say(frame);
-        self.flush();
-    }
-
-    /// Say an ArkDB value, as its canonical CBOR.
-    pub fn say_value(&mut self, v: &Value) {
-        self.say(canon::encode(v));
-    }
-
-    /// What the room said since the last ask. Never durable: a frame is
-    /// about now, and a reconnect clears what was not taken.
-    pub fn heard(&mut self) -> Vec<Vec<u8>> {
-        self.client.take_heard()
-    }
-
-    /// [`Peer::heard`], each decoded as canonical CBOR; a frame that does
-    /// not decode is dropped (a newer peer's sentence) and counted.
-    pub fn heard_values(&mut self) -> Vec<Value> {
-        let mut out = vec![];
-        for f in self.heard() {
-            match canon::decode(&f) {
-                Ok(v) => out.push(v),
-                Err(_) => self.bad_frames += 1,
-            }
-        }
-        out
-    }
-
     // -- live state ------------------------------------------------------------
 
     /// `docs/plan-live.md` The instance of the live state `name` this
@@ -1405,7 +1366,6 @@ impl Peer {
         if let Some(w) = &self.waker {
             w.answered();
         }
-        let heard_before = self.heard_frames;
         let mut p = Pumped::default();
         self.release_throttled(now);
         if let Some(link) = &mut self.link {
@@ -1452,7 +1412,6 @@ impl Peer {
         let now = (r.changes.len(), r.rebuilt);
         p.views = now != self.told;
         self.told = now;
-        p.heard = (self.heard_frames - heard_before) as usize;
         let moved = self.client.live.as_mut().is_some_and(|w| w.take_moved());
         p.live = std::mem::take(&mut self.live_moved) || moved;
         let status = self.status();
@@ -1499,9 +1458,6 @@ impl Peer {
     // A message to the engine, not yet settled: what `pump` does with each
     // frame before its one settle.
     fn place(&mut self, msg: ServerMsg) {
-        if matches!(msg, ServerMsg::Heard { .. }) {
-            self.heard_frames += 1;
-        }
         // `docs/plan-live.md` The server's clock, as an ordered call stamps
         // it: a sample of the offset, the latest sixteen kept.
         if let ServerMsg::Applied(a) = &msg {
@@ -1783,7 +1739,6 @@ impl Peer {
             diverged: self.client.replica.diverged.len(),
             denied: self.client.denied.clone(),
             last_close: self.link.as_ref().and_then(|l| l.last_close.clone()),
-            heard_frames: self.heard_frames,
             bad_frames: self.bad_frames,
         }
     }
@@ -2135,14 +2090,13 @@ mod tests {
     #[test]
     fn a_peer_learns_the_log_it_holds_and_writes_it_down() {
         use crate::storage::Stored;
-        use ark::live::Silent;
         use ark::protocol::{open_access, trusting, Server};
         let d = demo::domain();
         let schema = d.module().schema.clone();
         let mut a = ark::peer::Authority::new(schema.clone(), d.closures().clone());
         a.hold(d.native_list());
-        let mut sv = Server::open(trusting(), open_access(), Silent, a);
-        let exchange = |p: &mut Peer, sv: &mut Server<Silent>| loop {
+        let mut sv = Server::open(trusting(), open_access(), a);
+        let exchange = |p: &mut Peer, sv: &mut Server| loop {
             let up = p.take_outgoing();
             for m in up.iter().cloned() {
                 sv.recv(1, m);
@@ -2200,16 +2154,15 @@ mod tests {
     /// no verify is said and the divergence goes unreported.
     #[test]
     fn a_linked_peer_verifies_after_every_settle_and_reports_a_divergence() {
-        use ark::live::Silent;
         use ark::protocol::{open_access, trusting, Server};
         use ark::store::{Change, Row};
         let d = demo::domain();
         let schema = d.module().schema.clone();
         let mut a = ark::peer::Authority::new(schema.clone(), d.closures().clone());
         a.hold(d.native_list());
-        let mut sv = Server::open(trusting(), open_access(), Silent, a);
+        let mut sv = Server::open(trusting(), open_access(), a);
         let said = std::cell::Cell::new(0);
-        let exchange = |p: &mut Peer, sv: &mut Server<Silent>| loop {
+        let exchange = |p: &mut Peer, sv: &mut Server| loop {
             let up = p.take_outgoing();
             said.set(said.get() + up.iter().filter(|m| matches!(m, ClientMsg::Verify { .. })).count());
             for m in up.iter().cloned() {
@@ -2258,15 +2211,14 @@ mod tests {
     /// `ok: false`: the automatic one is reported as `(1, false)`.
     #[test]
     fn a_verify_answered_cannot_say_reports_no_divergence() {
-        use ark::live::Silent;
         use ark::protocol::{open_access, trusting, Server};
         let d = demo::domain();
         let mut a = ark::peer::Authority::new(d.module().schema.clone(), d.closures().clone());
         a.hold(d.native_list());
-        let mut sv = Server::open(trusting(), open_access(), Silent, a);
+        let mut sv = Server::open(trusting(), open_access(), a);
         // Every frame to the server but a `Verify`, which is answered here,
         // as an authority past whose horizon the cursor has fallen would.
-        let exchange = |p: &mut Peer, sv: &mut Server<Silent>| loop {
+        let exchange = |p: &mut Peer, sv: &mut Server| loop {
             let up = p.take_outgoing();
             let mut cannot = vec![];
             for m in up.iter().cloned() {
@@ -2338,12 +2290,11 @@ mod tests {
     #[test]
     fn a_pump_is_one_rebase_however_many_frames_it_polled() {
         use crate::link::{BoxTransport, Event, Queues};
-        use ark::live::Silent;
         use ark::protocol::{open_access, trusting, Server};
         let d = demo::domain();
         let mut a = ark::peer::Authority::new(d.module().schema.clone(), d.closures().clone());
         a.hold(d.native_list());
-        let mut sv = Server::open(trusting(), open_access(), Silent, a);
+        let mut sv = Server::open(trusting(), open_access(), a);
         let frame = |m: &ServerMsg| Event::Frame(canon::encode(&m.to_value()));
         let decode = |f: &[u8]| ClientMsg::from_value(&canon::decode(f).unwrap()).unwrap();
 
@@ -2352,12 +2303,12 @@ mod tests {
         let mut bob = Peer::open_memory(d.clone(), Options::dev("bob")).unwrap();
         bob.connect_with("queues", Box::new(move |_: &str| Box::new(dialled.clone()) as BoxTransport));
         let events = |es: Vec<Event>| q.events.lock().unwrap().extend(es);
-        let up = |sv: &mut Server<Silent>| {
+        let up = |sv: &mut Server| {
             for f in std::mem::take(&mut *q.sent.lock().unwrap()) {
                 sv.recv(2, decode(&f));
             }
         };
-        let down = |sv: &mut Server<Silent>| -> Vec<Event> { sv.take_outgoing().iter().filter(|(c, _)| *c == 2).map(|(_, m)| frame(m)).collect() };
+        let down = |sv: &mut Server| -> Vec<Event> { sv.take_outgoing().iter().filter(|(c, _)| *c == 2).map(|(_, m)| frame(m)).collect() };
         bob.pump();
         events(vec![Event::Opened]);
         bob.pump();
@@ -2366,7 +2317,7 @@ mod tests {
         let mut alice = Peer::open_memory(d.clone(), Options::dev("alice")).unwrap();
         alice.connected();
         let mut to_bob = vec![];
-        let exchange = |alice: &mut Peer, sv: &mut Server<Silent>, to_bob: &mut Vec<Event>| {
+        let exchange = |alice: &mut Peer, sv: &mut Server, to_bob: &mut Vec<Event>| {
             for m in alice.take_outgoing() {
                 sv.recv(1, m);
             }

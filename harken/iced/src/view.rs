@@ -773,7 +773,6 @@ impl App {
                 ),
             ),
             ("last refusal".into(), stats.last_refusal.clone().unwrap_or_else(|| "none".into())),
-            ("heard frames (wire)".into(), status.heard_frames.to_string()),
             (String::new(), String::new()),
         ];
         match session.and_then(|s| s.session.as_ref()) {

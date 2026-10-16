@@ -353,7 +353,6 @@ fn the_verifier_refuses_what_v2_forbids() {
 /// reaches the author as a sentence a screen can show.
 #[test]
 fn a_push_is_held_to_its_login_and_every_refusal_says_why() {
-    use ark::live::Silent;
     use ark::log::Entry;
     use ark::peer::Authority;
     use ark::protocol::{open_access, ClientMsg, Identity, Mode, Server, ServerMsg, Subscription};
@@ -367,7 +366,7 @@ fn a_push_is_held_to_its_login_and_every_refusal_says_why() {
             let (user, session) = tok?.split_once(':')?;
             Some(Identity::new(user, session))
         });
-        let sv = Server::open(auth, open_access(), Silent, Authority::new(built.schema.clone(), bodies.clone()));
+        let sv = Server::open(auth, open_access(), Authority::new(built.schema.clone(), bodies.clone()));
         if owns {
             sv.with_owns(Box::new(|user, session| user == "alice" && session == "old"))
         } else {
@@ -398,7 +397,7 @@ fn a_push_is_held_to_its_login_and_every_refusal_says_why() {
         autos: args([("id", idv(k))]),
     };
     // The verdict each entry got, in order: Ok(seq) or Err(reason).
-    let verdicts = |sv: &mut Server<Silent>| -> Vec<Result<i64, String>> {
+    let verdicts = |sv: &mut Server| -> Vec<Result<i64, String>> {
         sv.take_outgoing()
             .into_iter()
             .flat_map(|(_, f)| match f {
@@ -448,7 +447,6 @@ fn a_push_is_held_to_its_login_and_every_refusal_says_why() {
 /// whose they are. Pushed without signing in, every entry is refused.
 #[test]
 fn work_done_before_signing_in_becomes_the_signers() {
-    use ark::live::Silent;
     use ark::peer::{Authority, Replica};
     use ark::protocol::{open_access, trusting, Client, Mode, Server, ServerMsg};
 
@@ -490,7 +488,7 @@ fn work_done_before_signing_in_becomes_the_signers() {
 
     // Everything the client says reaches the server; what came back.
     let run = |mut client: Client| {
-        let mut sv = Server::open(trusting(), open_access(), Silent, Authority::new(sch.clone(), bodies.clone()));
+        let mut sv = Server::open(trusting(), open_access(), Authority::new(sch.clone(), bodies.clone()));
         client.connected();
         for f in client.take_outgoing() {
             sv.recv(7, f);

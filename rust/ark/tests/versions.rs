@@ -20,7 +20,6 @@
 use ark::authoring::*;
 use ark::eval::{Args, Ctx};
 use ark::hash::{closures, module_hash};
-use ark::live::Silent;
 use ark::peer::{Authority, Replica};
 use ark::protocol::{open_access, trusting, unknown_function, Client, ClientMsg, Mode, Server, ServerMsg};
 use ark::store::{project_row, MemoryStore, Refusal, Store};
@@ -328,8 +327,8 @@ impl Held {
         a.ran(self.hash.clone(), closures(&self.module));
         a
     }
-    fn server(&self, a: Authority) -> Server<Silent> {
-        Server::open(trusting(), open_access(), Silent, a).with_module(self.hash.clone())
+    fn server(&self, a: Authority) -> Server {
+        Server::open(trusting(), open_access(), a).with_module(self.hash.clone())
     }
     fn client(&self, mode: Mode) -> Client {
         let sch = self.module.schema.clone();
@@ -349,7 +348,7 @@ impl Held {
 
 /// Frames both ways until neither side has anything to say; what the
 /// server sent this client, in order.
-fn exchange(c: &mut Client, conn: ark::live::ConnId, sv: &mut Server<Silent>) -> Vec<ServerMsg> {
+fn exchange(c: &mut Client, conn: ark::live::ConnId, sv: &mut Server) -> Vec<ServerMsg> {
     let mut heard = vec![];
     loop {
         let up = c.take_outgoing();

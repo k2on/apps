@@ -36,10 +36,8 @@ fn a_login_is_a_token_the_socket_accepts_until_it_is_revoked() {
     assert_eq!(p.denied(), None);
     let rows = rt.block_on(running.hub.rows("playlist")).unwrap();
     assert_eq!(rows[0]["user_id"], Value::text("alice"), "the actor is who the server verified");
-    // A session is a device: the room names this one by it.
-    let who = rt
-        .block_on(running.hub.read(|h| h.rooms()["alice"].iter().map(|p| p.who.clone()).collect::<Vec<_>>()))
-        .unwrap();
+    // A session is a device: the account's connections name this one by it.
+    let who = rt.block_on(running.hub.read(|h| h.rooms()["alice"].clone())).unwrap();
     assert_eq!(who, std::slice::from_ref(&login.session));
 
     // Signed out: the same token is turned away, the link stops dialling,

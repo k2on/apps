@@ -24,7 +24,7 @@ use ark::authoring::*;
 use ark::canon;
 use ark::eval::{Args, Ctx};
 use ark::hash::{closures, state_hash, Closure, FnHash};
-use ark::live::{ConnId, Silent};
+use ark::live::ConnId;
 use ark::log::{Entry, Facts, Seq};
 use ark::peer::{local_commit, Authority, Procedure, Replica, Sequenced};
 use ark::protocol::{open_access, trusting, ClientMsg, Mode, Server, ServerMsg, Subscription, BATCH_LIMIT};
@@ -455,7 +455,7 @@ fn perf_d_initial_sync() {
     header("(d) initial sync: the server paging a connection from 0 (Hello, Batch, Hello …)");
     for &n in &SIZES {
         let (a, log) = d.log(10, n);
-        let mut s = Server::open(trusting(), open_access(), Silent, a);
+        let mut s = Server::open(trusting(), open_access(), a);
         let c: ConnId = 1;
         let mut since = 0;
         let mut pages = 0;
@@ -710,7 +710,7 @@ fn perf_g_authority_and_fanout() {
     for c in [10i64, 40, 160] {
         for s in [500u64, 8000] {
             let (a, log) = d.log(10, s);
-            let mut srv = Server::open(trusting(), open_access(), Silent, a);
+            let mut srv = Server::open(trusting(), open_access(), a);
             for conn in 0..c {
                 srv.recv(conn, hello(log.len() as Seq, Mode::Whole));
             }
@@ -769,7 +769,7 @@ fn perf_g_authority_and_fanout() {
     for &n in &SIZES {
         let (a, _) = d.log(10, n);
         let (seq, hash) = (a.log.head_seq(), state_hash(&a.store));
-        let mut s = Server::open(trusting(), open_access(), Silent, a);
+        let mut s = Server::open(trusting(), open_access(), a);
         s.recv(1, hello(seq, Mode::Whole));
         let _ = s.take_outgoing();
         let t = Instant::now();
@@ -829,7 +829,7 @@ fn perf_i_partial_fanout() {
         for s in [500u64, 8000] {
             for partial in [true, false] {
                 let (a, log) = d.log(10, s);
-                let mut srv = Server::open(trusting(), open_access(), Silent, a);
+                let mut srv = Server::open(trusting(), open_access(), a);
                 if partial {
                     srv = srv.with_scopes(scopes.clone());
                 }

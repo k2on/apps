@@ -72,7 +72,7 @@ pub enum SignIn {
 pub struct Config {
     /// `host:port`; port 0 takes an ephemeral one.
     pub listen: String,
-    /// The log, the rooms' kept sessions, the sign-in sessions and the
+    /// The log, the kept listening sessions, the sign-in sessions and the
     /// scanner's replica.
     pub data: PathBuf,
     /// An `.ark` module to host instead of harken's own: functions whose

@@ -3,7 +3,8 @@
 //! The frames two peers exchange, as values (so that [`crate::canon`] is
 //! their wire form), and the two state machines around them: a [`Client`]
 //! holding a replica of the log, and a [`Server`] holding its authority,
-//! the connections it has identified, and the live rooms. Both are sans-io.
+//! the connections it has identified, and the live instances. Both are
+//! sans-io.
 //!
 //! Identity is asked once, at `Hello`; every pushed entry is held to it (or
 //! to an older login of the same user, where [`Server::with_owns`] says
@@ -23,7 +24,7 @@ use crate::live::state::{
     self as lstate, Applied as LiveApplied, Call, Desk, DeviceDecl, Instance, Refused as LiveRefused, Said, Snapshot as LiveSnapshot, Watch,
     Who as LiveWho,
 };
-use crate::live::{self, ConnId, Machine, Rooms};
+use crate::live::ConnId;
 use crate::log::{snapshot_of, widened, Entry, Facts, Page, Seq};
 use crate::peer::{Authority, Replica, Sequenced};
 use crate::schema::Schema;
@@ -101,6 +102,9 @@ pub enum ClientMsg {
         /// the wire `partial: true`, absent otherwise.
         partial: bool,
     },
+    /// §14 What a peer of an older revision said to its account's room,
+    /// before rooms were live state: read, so that such a peer is not cut
+    /// off for it, and dropped. Nothing here sends one.
     Say {
         frame: Vec<u8>,
     },
@@ -222,6 +226,9 @@ pub enum ServerMsg {
         ok: bool,
         unknown: bool,
     },
+    /// §14 What an older server relayed from an account's room: read, so
+    /// that a peer of this build is not cut off by one, and dropped.
+    /// Nothing here sends one.
     Heard {
         frame: Vec<u8>,
     },
@@ -966,13 +973,11 @@ pub struct Client {
     pub mode: Mode,
     pub token: Option<String>,
     pub linked: bool,
-    /// Counts connections, so a live room that has never heard of this
-    /// device can be told apart from one that has.
+    /// Counts connections, so that something which must be said once per
+    /// connection can tell a new one from the one it said it on.
     pub epoch: i64,
     /// Oldest first.
     pub out: Vec<ClientMsg>,
-    /// Oldest first.
-    pub heard: Vec<Vec<u8>>,
     pub denied: Option<String>,
     /// Every answer to a `Verify`, oldest first: `Some(agreed)`, or `None`
     /// where the authority could not say (`ServerMsg::Agree::unknown`).
@@ -1027,7 +1032,6 @@ impl Client {
             linked: false,
             epoch: 0,
             out: vec![],
-            heard: vec![],
             denied: None,
             agreed: vec![],
             paged: false,
@@ -1129,7 +1133,6 @@ impl Client {
         self.more = false;
         self.served = false;
         self.started = false;
-        self.heard.clear();
         let hello = self.hello();
         self.emit(hello);
         if !self.replica.pending.is_empty() {
@@ -1187,7 +1190,6 @@ impl Client {
         self.linked = false;
         self.out.clear();
         self.more = false;
-        self.heard.clear();
     }
 
     /// Author an intent and push it if linked. A refusal here is the
@@ -1212,7 +1214,8 @@ impl Client {
     /// advancing on each cost the K pending intents' re-runs per frame.
     pub fn recv(&mut self, msg: ServerMsg) {
         match msg {
-            ServerMsg::Heard { frame } => self.heard.push(frame),
+            // §14 An older server's room; nothing reads it.
+            ServerMsg::Heard { .. } => {}
             // §14 Not the log: nothing here waits for a settle.
             ServerMsg::Applied(a) => self.heard_live(Said::Applied(a)),
             ServerMsg::Refused(r) => self.heard_live(Said::Refused(r)),
@@ -1437,11 +1440,6 @@ impl Client {
         }
     }
 
-    /// A live frame; dropped while unlinked, never queued.
-    pub fn say(&mut self, frame: Vec<u8>) {
-        self.emit(ClientMsg::Say { frame });
-    }
-
     /// Ask the authority whether it agrees with the replica's confirmed
     /// state.
     ///
@@ -1459,10 +1457,6 @@ impl Client {
 
     pub fn take_outgoing(&mut self) -> Vec<ClientMsg> {
         std::mem::take(&mut self.out)
-    }
-
-    pub fn take_heard(&mut self) -> Vec<Vec<u8>> {
-        std::mem::take(&mut self.heard)
     }
 }
 
@@ -1595,14 +1589,12 @@ struct Conn {
 }
 
 /// An authority's end of every connection (`Ark.Protocol.Server`).
-pub struct Server<M: Machine> {
+pub struct Server {
     auth: Authenticate,
     owns: Owns,
     access: Access,
     pub authority: Authority,
     conns: BTreeMap<ConnId, Conn>,
-    machine: M,
-    pub rooms: Rooms<M::State>,
     /// Oldest first.
     out: Vec<(ConnId, ServerMsg)>,
     /// The hash of the module this server runs ([`Server::with_module`]):
@@ -1634,10 +1626,10 @@ pub struct Server<M: Machine> {
 /// What a server reads the time from.
 pub type Clock = std::sync::Arc<dyn Fn() -> i64 + Send + Sync>;
 
-impl<M: Machine> Server<M> {
+impl Server {
     /// A server that is the authority for the log (`openServer`). By
     /// default an entry must carry the connection's own session.
-    pub fn open(auth: Authenticate, access: Access, machine: M, mut authority: Authority) -> Server<M> {
+    pub fn open(auth: Authenticate, access: Access, mut authority: Authority) -> Server {
         // `docs/plan-guards.md` D3 A server's authority runs the private
         // blocks: its facts are the whole run's.
         authority.private = true;
@@ -1647,8 +1639,6 @@ impl<M: Machine> Server<M> {
             access,
             authority,
             conns: BTreeMap::new(),
-            machine,
-            rooms: Rooms::new(),
             out: vec![],
             module: None,
             role_readers: BTreeMap::new(),
@@ -1660,14 +1650,14 @@ impl<M: Machine> Server<M> {
 
     /// §14 Run the module's live states: what a server built from a module
     /// with any does.
-    pub fn with_live(mut self, runner: lstate::Runner) -> Server<M> {
+    pub fn with_live(mut self, runner: lstate::Runner) -> Server {
         self.desk = Desk::new(runner);
         self
     }
 
     /// §14 The clock live transitions run at: the server's time is the only
     /// time a sequenced call has.
-    pub fn with_clock(mut self, clock: Clock) -> Server<M> {
+    pub fn with_clock(mut self, clock: Clock) -> Server {
         self.clock = clock;
         self
     }
@@ -1720,7 +1710,7 @@ impl<M: Machine> Server<M> {
     /// holds of the module's scopes: a server built from a module with any
     /// says so. With none, every connection is whole and this changes
     /// nothing.
-    pub fn with_scopes(mut self, scopes: Scopes) -> Server<M> {
+    pub fn with_scopes(mut self, scopes: Scopes) -> Server {
         self.set_scopes(scopes);
         self
     }
@@ -1753,7 +1743,7 @@ impl<M: Machine> Server<M> {
 
     /// Say this module hash on every page and snapshot (`docs/plan-db.md`
     /// D1): a server built from a module always does.
-    pub fn with_module(mut self, module: Vec<u8>) -> Server<M> {
+    pub fn with_module(mut self, module: Vec<u8>) -> Server {
         self.module = Some(module);
         self
     }
@@ -1762,19 +1752,13 @@ impl<M: Machine> Server<M> {
     /// store knows and the engine does not (`withOwns`). With it, an entry
     /// authored offline under one login and pushed after the same person
     /// signed in again is still theirs.
-    pub fn with_owns(mut self, owns: Owns) -> Server<M> {
+    pub fn with_owns(mut self, owns: Owns) -> Server {
         self.owns = owns;
         self
     }
 
     fn send(&mut self, c: ConnId, m: ServerMsg) {
         self.out.push((c, m));
-    }
-
-    fn deliver(&mut self, post: live::Post) {
-        for (to, f) in post.out {
-            self.send(to, ServerMsg::Heard { frame: f });
-        }
     }
 
     /// §12.3 A frame from a connection.
@@ -1822,8 +1806,9 @@ impl<M: Machine> Server<M> {
                 ),
                 Some(who) => {
                     // A second Hello on one connection is the log paging,
-                    // and says where to continue from; the room already has
-                    // this peer, and arriving again changes nothing.
+                    // and says where to continue from; the live instances
+                    // already have this device, and arriving again changes
+                    // nothing (`Desk::hello`).
                     //
                     // A cursor is a place in one log, and the one this
                     // peer names may not be this authority's (Round 4).
@@ -1845,11 +1830,6 @@ impl<M: Machine> Server<M> {
                     let again = self.conns.get(&c).is_none_or(|was| was.sent != sub.since || !was.more_owed);
                     let partial = holdings.is_some();
                     let elsewhere = elsewhere || (sub.partial && !partial);
-                    let peer = live::Peer {
-                        conn: c,
-                        room: who.user.clone(),
-                        who: who.session.clone(),
-                    };
                     self.conns.insert(
                         c,
                         Conn {
@@ -1862,8 +1842,6 @@ impl<M: Machine> Server<M> {
                             more_owed: false,
                         },
                     );
-                    let post = live::arrive(&self.machine, &mut self.rooms, peer);
-                    self.deliver(post);
                     let before = self.out.len();
                     self.fanout();
                     // A server that says its module says it in answer to
@@ -2101,10 +2079,9 @@ impl<M: Machine> Server<M> {
                 };
                 self.send(c, ServerMsg::Agree { seq, hash, ok, unknown });
             }
-            ClientMsg::Say { frame } => {
-                let post = live::speak(&self.machine, &mut self.rooms, c, &frame);
-                self.deliver(post);
-            }
+            // §14 An older peer speaking to a room there is no longer any
+            // such thing as: dropped, never a reason to cut it off.
+            ClientMsg::Say { .. } => {}
             ClientMsg::Call(call) => {
                 let now = self.now();
                 let out = self.desk.call(c, call, now);
@@ -2149,11 +2126,10 @@ impl<M: Machine> Server<M> {
             .collect()
     }
 
-    /// A connection closed: the room hears it, the cursor is forgotten.
+    /// A connection closed: the cursor is forgotten, and the live
+    /// instances it stood in hear it (`on_leave`).
     pub fn disconnect(&mut self, c: ConnId) {
-        let post = live::depart(&self.machine, &mut self.rooms, c);
         self.conns.remove(&c);
-        self.deliver(post);
         let now = self.now();
         let out = self.desk.part(c, now);
         self.said(out);
@@ -2420,7 +2396,6 @@ impl<M: Machine> Server<M> {
 mod tests {
     use super::*;
     use crate::hash::state_hash;
-    use crate::live::Silent;
 
     /// `docs/plan-db.md` D2 A `verify` names the log its sequence is of,
     /// and an authority on another log answers it `unknown` — never
@@ -2438,7 +2413,7 @@ mod tests {
         let mut a = Authority::new(sch.clone(), BTreeMap::new());
         a.log.name_if_unnamed(log_b);
         let hash = state_hash(&a.store);
-        let mut sv = Server::open(trusting(), open_access(), Silent, a);
+        let mut sv = Server::open(trusting(), open_access(), a);
         let hello = ClientMsg::Hello {
             sub: Subscription {
                 partial: false,

@@ -503,8 +503,6 @@ impl Headless {
         if let Some(note) = p.note {
             eprintln!("harken-peer: {note}");
         }
-        // Nothing here listens to the room; what it said is not kept.
-        drop(self.peer.heard());
         self.collect();
     }
 

@@ -7,7 +7,7 @@
 //!                       modules: [ { module: Bytes (its hash),
 //!                                    private: Bytes (absent unless it has one),
 //!                                    closures: [ { hash: Bytes, closure } … ] } … ] }
-//!                     — beside `live.cbor` and `cursors.cbor`, in the order
+//!                     — beside the log and `cursors.cbor`, in the order
 //!                     the modules were first started with
 //! ```
 //!
@@ -49,7 +49,7 @@ use ark::ir::decode::closure_from_value;
 use ark::ir::encode::closure_value;
 use ark::value::Value;
 
-/// The file, beside `live.cbor`.
+/// The file, beside the log.
 pub const FILE: &str = "modules.cbor";
 
 /// One module this server has run: its hash, the hash of its private half

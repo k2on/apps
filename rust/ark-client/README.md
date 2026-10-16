@@ -60,10 +60,9 @@ match items.update(&peer, &changes)? {
 for r in peer.take_rejections() { /* the server refused r.id: r.reason */ }
 if let Standing::Rejected(why) = peer.standing(&id) { /* show why beside the item */ }
 
-// the live channel, on the same socket
-peer.say(frame_bytes);                 // dropped, not queued, while unlinked
-for f in peer.heard() { /* … */ }
-if peer.epoch() != introduced_on { /* a new connection: say who you are again */ }
+// live state, on the same socket (docs/plan-live.md): the module's, by name
+peer.call("listening", "pause", args)?;        // optimistic, sequenced by the server
+let session = peer.live("listening");          // confirmed, then pending
 ```
 
 - **Autos** are drawn at the origin, once, and frozen in the entry: a
@@ -145,7 +144,7 @@ if peer.epoch() != introduced_on { /* a new connection: say who you are again */
   `peer.deadline()` and `Pumped::deadline`, which the host arms one timer
   for and which the open clears. The transport rings the waker
   `set_waker` gave it when it opens, closes or brings a frame, once per
-  burst until the next pump; `mutate` and `say` send at once. A denial (`Denied`, a
+  burst until the next pump; `mutate` and `call` send at once. A denial (`Denied`, a
   token the server does not accept) stops the link: `set_token` and
   `reconnect` are the way back, and nothing pending is lost. `disconnect`
   goes offline on purpose. The server pings every twenty seconds and a
@@ -248,11 +247,11 @@ here.
 | `client.take_rejections()` → `Rejection { id, reason }` | `peer.take_rejections()`, the same shape; and `peer.standing(&id)` for one item |
 | `client.take_denial()` | `pump().denied`, or `peer.denied()` until the next `reconnect` |
 | `Link::connect(&socket_url(server))` + `client.connected()` | `peer.connect(&ark_auth::socket_url(server))` — the link says `connected` itself, and reconnects |
-| the pump: `take_outgoing` → `link.send`, `link.try_recv` → `client.recv`, `link.is_alive()` | `peer.pump()` → `Pumped { moved, opened, dropped, denied, rejected, note, views, heard, status, deadline }`, run when the `set_waker` wake rings |
+| the pump: `take_outgoing` → `link.send`, `link.try_recv` → `client.recv`, `link.is_alive()` | `peer.pump()` → `Pumped { moved, opened, dropped, denied, rejected, note, views, live, status, deadline }`, run when the `set_waker` wake rings |
 | `link = None` to go offline; a new `Link` to come back | `peer.disconnect()` / `peer.reconnect()` |
 | `client.linked()`, `client.epoch()` | `peer.linked()`, `peer.epoch()` |
-| `client.say(&say)` (serde) / `client.heard::<Hear>()` | `peer.say(bytes)` / `peer.heard()` — or `say_value(&Value)` / `heard_values()`, canonical CBOR of an ArkDB value |
-| `ServerMsg::Heard` counted by hand | `status().heard_frames`, `status().bad_frames` |
+| `client.say(&say)` (serde) / `client.heard::<Hear>()` | a live state the module declares (`docs/plan-live.md`): `peer.call(state, transition, input)` / `peer.live(state)` |
+| `ServerMsg::Heard` counted by hand | `peer.live_status(state)`, `status().bad_frames` |
 | `petros::encode` / `decode` | `ark::canon::encode(&value)` / `decode` |
 | `transport::web::Link` vs `transport::ws::Link` by `cfg` | one `Peer::connect`; the platform's transport is chosen inside |
 | (nothing: a petros peer needed a login to author) | `Options::signed_out()`, then `peer.sign_in(user, session, token)`; `peer.sign_out()` |

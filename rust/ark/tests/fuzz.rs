@@ -214,14 +214,13 @@ fn every_open_finding_still_fails() {
 /// in `Client::recv`: the client knows no log.
 #[test]
 fn an_ack_names_the_log() {
-    use ark::live::Silent;
     use ark::peer::{Authority, Replica};
     use ark::protocol::{open_access, trusting, Client, ServerMsg};
     let (m, _) = fuzz::demo_module();
     let mut a = Authority::new(m.schema.clone(), closures(&m));
     let name = [7u8; 16];
     a.log.name_if_unnamed(name);
-    let mut server = ark::protocol::Server::open(trusting(), open_access(), Silent, a);
+    let mut server = ark::protocol::Server::open(trusting(), open_access(), a);
     let r = Replica::open(m.schema.clone(), closures(&m), MemoryStore::empty(m.schema.clone()), 0, vec![]);
     let mut c = Client::open(r, Mode::Whole, Some("alice".into()));
     c.connected();

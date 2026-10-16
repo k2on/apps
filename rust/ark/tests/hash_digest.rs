@@ -12,7 +12,6 @@ use ark::authoring::*;
 use ark::canon::encode;
 use ark::eval::{Args, Ctx};
 use ark::hash::{leaf, state_hash, table_digest};
-use ark::live::Silent;
 use ark::peer::{Authority, Replica, Sequenced};
 use ark::protocol::{open_access, trusting, Client, ClientMsg, Mode, Server, ServerMsg};
 use ark::schema::{Column, Index, Ref, Schema, Table as SchemaTable, Ty};
@@ -259,7 +258,7 @@ fn sequenced(n: u32) -> (Authority, Replica) {
 /// Frames between one client and the server until neither has anything to
 /// say, the client settling after each turn as a pump does; the `Agree`s
 /// it was sent.
-fn exchange(sv: &mut Server<Silent>, peer: &mut Client) -> Vec<(i64, bool)> {
+fn exchange(sv: &mut Server, peer: &mut Client) -> Vec<(i64, bool)> {
     let mut agreed = vec![];
     loop {
         let up = peer.take_outgoing();
@@ -290,7 +289,7 @@ fn exchange(sv: &mut Server<Silent>, peer: &mut Client) -> Vec<(i64, bool)> {
 #[test]
 fn a_verify_after_a_settle_reads_no_row() {
     let (a, fresh) = sequenced(2000);
-    let mut sv = Server::open(trusting(), open_access(), Silent, a);
+    let mut sv = Server::open(trusting(), open_access(), a);
     let mut peer = Client::open(fresh, Mode::Whole, Some("alice".into()));
     peer.connected();
     exchange(&mut sv, &mut peer);
@@ -320,7 +319,7 @@ fn a_verify_below_the_horizon_is_answered_cannot_say() {
     let (mut a, _) = sequenced(20);
     assert!(a.compact(10));
     let hash = state_hash(&a.store);
-    let mut sv = Server::open(trusting(), open_access(), Silent, a);
+    let mut sv = Server::open(trusting(), open_access(), a);
     let hello = ClientMsg::Hello {
         sub: ark::protocol::Subscription {
             partial: false,
@@ -475,7 +474,7 @@ fn perf_verify_at_8000_rows() {
     eprintln!("  hash_at(head - 100), facts taken back        {below:>10.1}");
     eprintln!("  …as replayed from the base (before D3)       {replay:>10.1}");
 
-    let mut sv = Server::open(trusting(), open_access(), Silent, a);
+    let mut sv = Server::open(trusting(), open_access(), a);
     let hash = state_hash(&st);
     let hello = ClientMsg::Hello {
         sub: ark::protocol::Subscription {

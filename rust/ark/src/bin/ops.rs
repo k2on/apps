@@ -12,7 +12,7 @@
 //!                  into place
 //! cursors.cbor     every session's place in the log and when it was heard
 //! sessions.json    the sign-in sessions (ark-auth)
-//! live.cbor        the rooms' kept snapshots
+//! live-states.cbor the live instances' kept ordered state
 //! modules.cbor     every module the server has run, and its closures
 //! ```
 //!

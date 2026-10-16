@@ -3,11 +3,11 @@
 //! ```text
 //! axum ── /sync ─────── the socket ──┐
 //!      ── /healthz                   ├── HubHandle ── the hub's thread:
-//!      ── /auth/* (ark-auth)         │     ark::protocol::Server<Relay>
+//!      ── /auth/* (ark-auth)         │     ark::protocol::Server
 //!      ── /media  (a directory)      │       the Authority, natives held
-//!      ── /*      (a web build)      │       live rooms → the app's `Live`
-//!      ── the app's own routes ──────┘     the log and kept rooms, written after each
-//!                                          message and before anything is said of it
+//!      ── /*      (a web build)      │       the module's live states
+//!      ── the app's own routes ──────┘     the log and kept live state, written after
+//!                                          each message and before anything is said of it
 //! axum ── /admin/ (its own listener,       the explorer over the authority, writing as
 //!          loopback by default) ── HubHandle   it: `admin`, `docs/plan-guards.md` D4
 //! ```
@@ -27,7 +27,6 @@
 //!     .name("demo")
 //!     .data(&data)
 //!     .auth(auth)
-//!     .live(ark_server::Echo)
 //!     .media("/srv/media")
 //!     .web("/srv/web")
 //!     .merge(axum::Router::new().route("/version", axum::routing::get(|| async { "1" })))
@@ -39,7 +38,6 @@
 pub mod admin;
 pub mod hooks;
 mod hub;
-pub mod live;
 pub mod modules;
 pub mod persist;
 pub mod retain;
@@ -68,10 +66,7 @@ pub use ark::retention::Retention;
 pub use ark_client::Domain;
 pub use hooks::Hook;
 pub use hub::{Health, Hub, HubHandle, SessionHealth, REVOKED};
-pub use live::{Echo, Live, Peer, Post, Quiet};
 pub use sync::Keepalive;
-
-use live::Relay;
 
 /// The session the engine's dev `trusting` gives every login.
 pub const DEV_SESSION: &str = "dev";
@@ -87,7 +82,6 @@ pub fn builder(domain: Domain) -> Builder {
         auth: None,
         announce: None,
         access: None,
-        live: None,
         web: None,
         media: None,
         routes: Router::new(),
@@ -110,7 +104,6 @@ pub struct Builder {
     auth: Option<Arc<ark_auth::server::Auth>>,
     announce: Option<String>,
     access: Option<Access>,
-    live: Option<Box<dyn Live>>,
     web: Option<(PathBuf, Option<String>)>,
     media: Option<PathBuf>,
     routes: Router,
@@ -148,8 +141,8 @@ impl Builder {
     }
 
     /// Keep the log (`log.ark-log`, a snapshot, and `log.ark-journal`, the
-    /// entries since it: [`persist`]), the rooms' kept snapshots
-    /// (`live.cbor`) and every session's place in the log (`cursors.cbor`:
+    /// entries since it: [`persist`]), the live instances' kept state
+    /// (`live-states.cbor`) and every session's place in the log (`cursors.cbor`:
     /// [`retain`]) here, and read them back at start. Without it nothing
     /// survives a restart.
     pub fn data(mut self, dir: impl AsRef<Path>) -> Builder {
@@ -194,12 +187,6 @@ impl Builder {
     /// Who may read the log; everyone signed in, without it.
     pub fn access(mut self, a: Access) -> Builder {
         self.access = Some(a);
-        self
-    }
-
-    /// The app's live machine: what happens in each account's room.
-    pub fn live(mut self, live: impl Live) -> Builder {
-        self.live = Some(Box::new(live));
         self
     }
 
@@ -295,23 +282,13 @@ impl Builder {
         for n in &notes {
             eprintln!("{n}");
         }
-        let (domain, data, access, owns, live) = (self.domain.clone(), self.data.clone(), self.access, self.owns, self.live);
+        let (domain, data, access, owns) = (self.domain.clone(), self.data.clone(), self.access, self.owns);
         let check = authenticate.clone();
         let authenticate: Authenticate = Box::new(move |t: Option<&str>| authenticate(t));
         let ran_before = self.ran_before;
         let hooks = self.hooks;
         let hub = HubHandle::spawn(move || {
-            open_hub(
-                &name,
-                &domain,
-                data,
-                authenticate,
-                owns,
-                access.unwrap_or_else(open_access),
-                live.unwrap_or_else(|| Box::new(Quiet)),
-                ran_before,
-            )
-            .map(|mut hub| {
+            open_hub(&name, &domain, data, authenticate, owns, access.unwrap_or_else(open_access), ran_before).map(|mut hub| {
                 hub.retention = r;
                 hub.hook(hooks);
                 hub
@@ -369,10 +346,8 @@ fn open_hub(
     auth: Authenticate,
     owns: Option<Owns>,
     access: Access,
-    live: Box<dyn Live>,
     ran_before: Vec<modules::Ran>,
 ) -> Result<Hub> {
-    let relay = Relay::new(live);
     let schema = &domain.module().schema;
     let mut a = Authority::new(schema.clone(), domain.closures().clone());
     a.hold(domain.native_list());
@@ -436,7 +411,7 @@ fn open_hub(
     // `docs/plan-guards.md` D2 Each connection is served what its identity
     // holds of the module's scopes; a module with none, everything, as
     // ever.
-    let mut server = Server::open(auth, access, relay.clone(), a)
+    let mut server = Server::open(auth, access, a)
         .with_module(module)
         .with_scopes(ark::scope::Scopes::of(domain.module()))
         // `docs/plan-live.md` The module's live states, sequenced at this
@@ -446,7 +421,7 @@ fn open_hub(
     if let Some(owns) = owns {
         server = server.with_owns(owns);
     }
-    Hub::new(server, relay, data, file)
+    Hub::new(server, data, file)
 }
 
 /// A server that is built and not yet listening: its hub, and the router

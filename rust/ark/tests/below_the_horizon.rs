@@ -9,7 +9,6 @@
 use ark::authoring::*;
 use ark::eval::{Args, Ctx};
 use ark::hash::state_hash;
-use ark::live::Silent;
 use ark::peer::{Authority, Replica, Sequenced};
 use ark::protocol::{open_access, trusting, Client, Mode, Server, ServerMsg};
 use ark::store::MemoryStore;
@@ -105,7 +104,7 @@ fn a_peer_below_the_horizon_of_a_quiet_server_reaches_the_head() {
     }
     assert!(a.compact(300));
     let head_hash = state_hash(&a.store);
-    let mut sv = Server::open(trusting(), open_access(), Silent, a);
+    let mut sv = Server::open(trusting(), open_access(), a);
 
     let mut peer = Client::open(
         Replica::open(sch.clone(), bodies, MemoryStore::empty(sch), 0, vec![]),

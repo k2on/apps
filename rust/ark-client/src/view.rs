@@ -576,11 +576,11 @@ mod tests {
     /// replay it was (`Rebuilt`): the first reconnect is a `Reset`.
     #[test]
     fn a_rebase_is_patches_to_the_demos_items() {
-        use ark::live::{ConnId, Silent};
+        use ark::live::ConnId;
         use ark::peer::Authority;
         use ark::protocol::{open_access, trusting, Server};
 
-        fn settle(s: &mut Server<Silent>, peers: &mut [(ConnId, &mut Peer)]) {
+        fn settle(s: &mut Server, peers: &mut [(ConnId, &mut Peer)]) {
             loop {
                 let mut moved = false;
                 for (c, p) in peers.iter_mut() {
@@ -604,7 +604,7 @@ mod tests {
         let d = demo::domain();
         let mut a = Authority::new(d.module().schema.clone(), d.closures().clone());
         a.hold(d.native_list());
-        let mut s = Server::open(trusting(), open_access(), Silent, a);
+        let mut s = Server::open(trusting(), open_access(), a);
         let dev = |u: &str| Options::dev(u).with_autos(crate::Autos::seeded(u.as_bytes()[0] as u64));
         let mut alice = Peer::open_memory(demo::domain(), dev("alice")).unwrap();
         let mut bob = Peer::open_memory(demo::domain(), dev("bob")).unwrap();

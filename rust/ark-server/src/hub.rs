@@ -4,7 +4,7 @@
 //! write would stall every socket waiting on it; so one thread owns it and
 //! everything — a WebSocket handler, an in-process peer, a standing device,
 //! `/healthz` — talks to it through a [`HubHandle`]. That thread is also
-//! where the log and the rooms' kept snapshots are written, after the
+//! where the log and the live instances' kept state are written, after the
 //! message that moved them.
 //!
 //! **An acknowledgement follows the write.** What a message moved in the log
@@ -30,7 +30,7 @@
 //! succeeds. A peer sees a closed link, keeps its pending intents on its
 //! own disk, dials again with its backoff, and re-pushes them — the path a
 //! restart already takes — and an intent the log holds is answered as the
-//! duplicate it is, once the disk holds it. A standing device is not a
+//! duplicate it is, once the disk holds it. A participant is not a
 //! replica and hears no log, so it stays.
 //!
 //! **A revoked session's connections are closed at once.** The token is
@@ -47,7 +47,7 @@
 //! **The log is kept to what somebody may still ask for** (`ark::retention`,
 //! `docs/plan-alone.md` §3). Every session's place in the log and when it
 //! was last heard are recorded as it says `Hello` and as pages reach it
-//! ([`crate::retain`], `cursors.cbor` beside `live.cbor`), and after every
+//! ([`crate::retain`], `cursors.cbor` beside the log), and after every
 //! message — so after each batch of appends — the rule is asked whether to
 //! move the horizon. When it says so the authority compacts in memory and
 //! the write that follows is the journal's own compaction: a snapshot at the
@@ -58,9 +58,10 @@
 //!
 //! Three kinds of connection, one numbering: a **socket** (frames go to its
 //! writer task), a **local** peer (an `ark_client::Peer` in this process,
-//! through [`HubHandle::dial`]: the scanner's shape), and a **standing**
-//! peer — a device the server stands in for, a speaker, which is in a room
-//! and not in the log and receives only live frames ([`HubHandle::stand`]).
+//! through [`HubHandle::dial`]: the scanner's shape), and a **participant**
+//! — a device the server stands in for, a speaker, which is in live
+//! instances and not in the log and receives only their frames
+//! ([`HubHandle::participate`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -69,7 +70,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
-use ark::live::{self, ConnId, Peer};
+use ark::live::ConnId;
 use ark::log::Seq;
 use ark::peer::Authority;
 use ark::protocol::{ClientMsg, Identity, Server, ServerMsg};
@@ -78,7 +79,6 @@ use ark::store::{Row, Store};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::hooks::Hooks;
-use crate::live::{decode_kept, encode_kept, Relay};
 use crate::persist::LogFile;
 use crate::retain::{self, Cursors, Heard};
 
@@ -88,8 +88,6 @@ enum Sink {
     /// lets the connection go.
     Socket(SocketSink),
     Local(std::sync::mpsc::Sender<ServerMsg>),
-    /// Live frames only, raw.
-    Standing(Box<dyn Fn(Vec<u8>) + Send>),
     /// `docs/plan-live.md` A device the server stands in for — a speaker a
     /// bridge reconciles — in live instances, and not in the log: every
     /// live frame addressed to it ([`HubHandle::participate`]).
@@ -193,8 +191,7 @@ impl Outbox {
 /// The machine and everything around it, on its thread. What
 /// [`HubHandle::read`] hands a closure.
 pub struct Hub {
-    server: Server<Relay>,
-    relay: Relay,
+    server: Server,
     sinks: BTreeMap<ConnId, Sink>,
     data: Option<PathBuf>,
     /// The log's files, where there is a data directory.
@@ -211,8 +208,6 @@ pub struct Hub {
     /// What a connection closed for the disk is told, where the
     /// [`HubHandle`] can read it without the hub's thread.
     failure: Arc<Mutex<Option<String>>>,
-    /// The rooms' kept snapshots as last written.
-    kept: BTreeMap<String, Vec<u8>>,
     /// How much of the log is kept (the module docs).
     pub(crate) retention: Retention,
     /// Every session's place in the log and when it was heard, as
@@ -324,7 +319,8 @@ pub struct Health {
     pub head: Seq,
     /// The log's horizon: the snapshot it stands on (`ark::retention`).
     pub horizon: Seq,
-    /// Open rooms and how many peers each has.
+    /// Every account with a replica connection open, and how many it has:
+    /// what `/healthz` calls a room, the devices of one account.
     pub rooms: Vec<(String, usize)>,
     /// The hash of every module this server has run, in hash order
     /// (`crate::modules`), and the one it runs now.
@@ -353,8 +349,6 @@ pub struct SessionHealth {
     pub open: usize,
 }
 
-const KEPT: &str = "live.cbor";
-
 /// How long the hub holds what it would say while its log cannot be
 /// written, before it closes every connection. Long enough for a
 /// transient failure — a disk freed by a log rotation, a network
@@ -382,16 +376,7 @@ struct Failing {
 }
 
 impl Hub {
-    pub(crate) fn new(mut server: Server<Relay>, relay: Relay, data: Option<PathBuf>, log: Option<LogFile>) -> Result<Hub> {
-        let mut kept = BTreeMap::new();
-        if let Some(dir) = &data {
-            match std::fs::read(dir.join(KEPT)) {
-                Ok(b) => kept = decode_kept(&b).map_err(|e| anyhow!("{}: {e}", dir.join(KEPT).display()))?,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => return Err(e).with_context(|| format!("reading {}", dir.join(KEPT).display())),
-            }
-        }
-        server.rooms.kept = kept.clone();
+    pub(crate) fn new(mut server: Server, data: Option<PathBuf>, log: Option<LogFile>) -> Result<Hub> {
         // `docs/plan-live.md` The live instances kept from before.
         let mut live_kept = None;
         if let Some(dir) = &data {
@@ -424,7 +409,6 @@ impl Hub {
         let authority = Identity::new(ark::raw::AUTHOR, ark::value::hex(&ark_client::Autos::system().new_id())).with_roles([crate::admin::ROLE]);
         Ok(Hub {
             server,
-            relay,
             sinks: BTreeMap::new(),
             data,
             log,
@@ -432,7 +416,6 @@ impl Hub {
             failing: None,
             give_up: GIVE_UP_AFTER,
             failure: Arc::default(),
-            kept,
             retention: Retention::default(),
             cursors,
             at: BTreeMap::new(),
@@ -544,14 +527,17 @@ impl Hub {
         &self.server.desk
     }
 
-    /// Every open room and who is in it.
-    pub fn rooms(&self) -> BTreeMap<String, Vec<Peer>> {
-        self.server.rooms.open.iter().map(|(r, (_, ps))| (r.clone(), ps.clone())).collect()
-    }
-
-    /// The snapshot kept for a room that is not open.
-    pub fn kept(&self, room: &str) -> Option<&[u8]> {
-        self.server.rooms.kept.get(room).map(Vec::as_slice)
+    /// Every account with a replica connection open, and the session of
+    /// each of its connections, in connection order: the devices of one
+    /// account, which is what a room was.
+    pub fn rooms(&self) -> BTreeMap<String, Vec<String>> {
+        let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for (c, who, _, _) in self.server.connections() {
+            if self.sinks.get(&c).is_some_and(Sink::is_replica) {
+                out.entry(who.user).or_default().push(who.session);
+            }
+        }
+        out
     }
 
     pub fn health(&self) -> Health {
@@ -559,7 +545,7 @@ impl Hub {
             connections: self.sinks.values().filter(|s| s.is_replica()).count(),
             head: self.server.authority.log.head_seq(),
             horizon: self.server.authority.log.horizon(),
-            rooms: self.server.rooms.open.iter().map(|(r, (_, ps))| (r.clone(), ps.len())).collect(),
+            rooms: self.rooms().into_iter().map(|(user, sessions)| (user, sessions.len())).collect(),
             modules: self.server.authority.modules.keys().cloned().collect(),
             module: self.server.module.clone(),
             log_id: self.server.authority.log.id(),
@@ -643,9 +629,6 @@ impl Hub {
     fn detach(&mut self, c: ConnId) {
         if matches!(self.sinks.get(&c), Some(Sink::Participant(_))) {
             self.server.disconnect(c);
-        } else if matches!(self.sinks.get(&c), Some(Sink::Standing(_))) {
-            let post = live::depart(&self.relay, &mut self.server.rooms, c);
-            self.deliver(post);
         } else {
             // Heard until now; and a session leaving is worth writing down.
             self.touch(c);
@@ -661,12 +644,6 @@ impl Hub {
         if matches!(self.sinks.get(&c), Some(Sink::Participant(_))) {
             // A participant only calls, and the machine knows it as one.
             self.server.recv(c, msg);
-        } else if matches!(self.sinks.get(&c), Some(Sink::Standing(_))) {
-            // A standing peer only speaks.
-            if let ClientMsg::Say { frame } = msg {
-                let post = live::speak(&self.relay, &mut self.server.rooms, c, &frame);
-                self.deliver(post);
-            }
         } else {
             // The cursor a `Hello` names, if it is a place in this log: one
             // naming another log is sent the snapshot at the head, and that
@@ -767,19 +744,6 @@ impl Hub {
         }
     }
 
-    fn stand(&mut self, c: ConnId, room: String, who: String, sink: Box<dyn Fn(Vec<u8>) + Send>) {
-        self.sinks.insert(c, Sink::Standing(sink));
-        let post = live::arrive(&self.relay, &mut self.server.rooms, Peer { conn: c, room, who });
-        self.deliver(post);
-        self.after();
-    }
-
-    fn deliver(&mut self, post: live::Post) {
-        for (to, frame) in post.out {
-            self.send(to, ServerMsg::Heard { frame });
-        }
-    }
-
     fn send(&self, to: ConnId, m: ServerMsg) {
         match self.sinks.get(&to) {
             // A writer that has gone is a disconnect on its way.
@@ -787,11 +751,6 @@ impl Hub {
             Some(Sink::Participant(f)) => f(m),
             Some(Sink::Local(tx)) => {
                 let _ = tx.send(m);
-            }
-            Some(Sink::Standing(f)) => {
-                if let ServerMsg::Heard { frame } = m {
-                    f(frame);
-                }
             }
             None => {}
         }
@@ -918,28 +877,15 @@ impl Hub {
         self.after();
     }
 
-    /// Write the log and the rooms; `Err` where the log is not on the disk.
+    /// Write the log and the live instances; `Err` where the log is not on
+    /// the disk.
     fn persist(&mut self) -> Result<()> {
         let Some(dir) = self.data.clone() else {
-            self.relay.keeps.lock().unwrap_or_else(|e| e.into_inner()).clear();
             return Ok(());
         };
         let mut wrote = Ok(());
         if let Some(file) = &mut self.log {
             wrote = file.write(&self.server.authority.log);
-        }
-        // The rooms: what the engine keeps for rooms that emptied, what a
-        // hook asked to keep of an open one, and nothing for a room that is
-        // neither any more.
-        let mut kept = self.kept.clone();
-        for (room, snap) in std::mem::take(&mut *self.relay.keeps.lock().unwrap_or_else(|e| e.into_inner())) {
-            match snap {
-                Some(b) => kept.insert(room, b),
-                None => kept.remove(&room),
-            };
-        }
-        for (room, b) in &self.server.rooms.kept {
-            kept.insert(room.clone(), b.clone());
         }
         // `docs/plan-live.md` The live instances, when one's ordered part
         // moved and what would be written is not what was.
@@ -955,19 +901,6 @@ impl Hub {
                     Ok(()) => self.live_kept = Some(bytes),
                     Err(e) => eprintln!("ark-server: could not write {}: {e}", path.display()),
                 }
-            }
-        }
-        let live: BTreeSet<&String> = self.server.rooms.kept.keys().chain(self.server.rooms.open.keys()).collect();
-        kept.retain(|r, _| live.contains(r));
-        if kept != self.kept {
-            let path = dir.join(KEPT);
-            let tmp = dir.join(format!(".{KEPT}.tmp"));
-            let wrote = std::fs::create_dir_all(&dir)
-                .and_then(|_| std::fs::write(&tmp, encode_kept(&kept)))
-                .and_then(|_| std::fs::rename(&tmp, &path));
-            match wrote {
-                Ok(()) => self.kept = kept,
-                Err(e) => eprintln!("ark-server: could not write {}: {e}", path.display()),
             }
         }
         wrote
@@ -991,7 +924,6 @@ enum Cmd {
     Attach(ConnId, Sink),
     Detach(ConnId),
     Recv(ConnId, ClientMsg),
-    Stand(ConnId, String, String, Box<dyn Fn(Vec<u8>) + Send>),
     Read(Reader),
     Write(Changer),
     Revoked(String),
@@ -1070,7 +1002,6 @@ impl HubHandle {
                         Cmd::Attach(c, s) => hub.attach(c, s),
                         Cmd::Detach(c) => hub.detach(c),
                         Cmd::Recv(c, m) => hub.recv(c, m),
-                        Cmd::Stand(c, room, who, sink) => hub.stand(c, room, who, sink),
                         Cmd::Read(f) => f(&hub),
                         // The answer after the write, as an acknowledgement
                         // follows it (the module docs).
@@ -1150,23 +1081,6 @@ impl HubHandle {
     /// A frame from a connection.
     pub fn recv(&self, c: ConnId, msg: ClientMsg) -> Result<()> {
         self.send(Cmd::Recv(c, msg))
-    }
-
-    /// Stand a device in `room` as `who`, with no socket and no replica:
-    /// every live frame addressed to it is handed to `hears`, raw. Say
-    /// things as it with [`HubHandle::say`]; take it out with
-    /// [`HubHandle::detach`]. A standing peer keeps a room open like any
-    /// other; an app that wants a room to close when its last *client*
-    /// leaves takes its devices out in [`crate::Live::part`].
-    pub fn stand(&self, room: &str, who: &str, hears: impl Fn(Vec<u8>) + Send + 'static) -> Result<ConnId> {
-        let c = self.fresh();
-        self.send(Cmd::Stand(c, room.into(), who.into(), Box::new(hears)))?;
-        Ok(c)
-    }
-
-    /// Say a frame as a standing peer.
-    pub fn say(&self, c: ConnId, frame: Vec<u8>) -> Result<()> {
-        self.recv(c, ClientMsg::Say { frame })
     }
 
     /// `docs/plan-live.md` Stand a device the server stands in for — a
@@ -1345,11 +1259,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (file, log) = LogFile::open(dir.path(), &schema).unwrap();
         assert!(log.is_none());
-        let relay = Relay::new(Box::new(crate::Quiet));
         let mut a = Authority::new(schema.clone(), d.closures().clone());
         a.hold(d.native_list());
-        let server = Server::open(trusting(), open_access(), relay.clone(), a);
-        let mut hub = Hub::new(server, relay, Some(dir.path().to_path_buf()), Some(file)).unwrap();
+        let server = Server::open(trusting(), open_access(), a);
+        let mut hub = Hub::new(server, Some(dir.path().to_path_buf()), Some(file)).unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
         hub.attach(1, Sink::Local(tx));
 
@@ -1400,15 +1313,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let open = |dir: &std::path::Path, heard: Arc<Mutex<Vec<String>>>, calls: Arc<AtomicUsize>| {
             let (file, log) = LogFile::open(dir, &schema).unwrap();
-            let relay = Relay::new(Box::new(crate::Quiet));
             let mut a = Authority::new(schema.clone(), d.closures().clone());
             a.hold(d.native_list());
             if let Some(log) = log {
                 a.store = log.state_at(log.head_seq()).unwrap();
                 a.log = log;
             }
-            let server = Server::open(trusting(), open_access(), relay.clone(), a);
-            let mut hub = Hub::new(server, relay, Some(dir.to_path_buf()), Some(file)).unwrap();
+            let server = Server::open(trusting(), open_access(), a);
+            let mut hub = Hub::new(server, Some(dir.to_path_buf()), Some(file)).unwrap();
             hub.hook(vec![
                 (
                     "create_playlist".into(),
@@ -1490,11 +1402,10 @@ mod tests {
         let (data, make_schema, make_domain) = (dir.path().to_path_buf(), schema.clone(), d.clone());
         let hub = HubHandle::spawn(move || {
             let (file, _) = LogFile::open(&data, &make_schema)?;
-            let relay = Relay::new(Box::new(crate::Quiet));
             let mut a = Authority::new(make_schema.clone(), make_domain.closures().clone());
             a.hold(make_domain.native_list());
-            let server = Server::open(trusting(), open_access(), relay.clone(), a);
-            let mut h = Hub::new(server, relay, Some(data), Some(file))?;
+            let server = Server::open(trusting(), open_access(), a);
+            let mut h = Hub::new(server, Some(data), Some(file))?;
             h.give_up = Duration::from_millis(100);
             Ok(h)
         })
@@ -1561,12 +1472,11 @@ mod tests {
             Some(Identity::new(user, session))
         });
         let hub = HubHandle::spawn(move || {
-            let relay = Relay::new(Box::new(crate::Quiet));
             let schema = make_domain.module().schema.clone();
             let mut a = Authority::new(schema, make_domain.closures().clone());
             a.hold(make_domain.native_list());
-            let server = Server::open(by_token, open_access(), relay.clone(), a);
-            Hub::new(server, relay, None, None)
+            let server = Server::open(by_token, open_access(), a);
+            Hub::new(server, None, None)
         })
         .unwrap();
         let quick = ark_client::Timing {
@@ -1622,15 +1532,14 @@ mod tests {
         let d = demo::domain();
         let schema = d.module().schema.clone();
         let (file, log) = LogFile::open(dir, &schema).unwrap();
-        let relay = Relay::new(Box::new(crate::Quiet));
         let mut a = Authority::new(schema.clone(), d.closures().clone());
         a.hold(d.native_list());
         if let Some(log) = log {
             a.store = log.state_at(log.head_seq()).unwrap();
             a.log = log;
         }
-        let server = Server::open(trusting(), open_access(), relay.clone(), a);
-        let mut hub = Hub::new(server, relay, Some(dir.to_path_buf()), Some(file)).unwrap();
+        let server = Server::open(trusting(), open_access(), a);
+        let mut hub = Hub::new(server, Some(dir.to_path_buf()), Some(file)).unwrap();
         hub.retention = retain;
         hub
     }
@@ -1805,7 +1714,7 @@ mod tests {
     fn a_blocked_socket_is_owed_the_latest_pointer_and_every_ordered_call() {
         use ark::live::state::{DeviceDecl, Order};
         let d = demo::live_domain();
-        let mut hub = crate::open_hub("t", &d, None, trusting(), None, open_access(), Box::new(crate::Quiet), vec![]).unwrap();
+        let mut hub = crate::open_hub("t", &d, None, trusting(), None, open_access(), vec![]).unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
         hub.attach(1, Sink::Local(tx));
         let outbox = Outbox::new();

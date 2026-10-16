@@ -14,7 +14,6 @@ use ark::authoring::*;
 use ark::eval::{self, Args};
 use ark::hash::{closures, state_hash, Closure, FnHash};
 use ark::ir::{StdFn, Stmt};
-use ark::live::Silent;
 use ark::peer::{Authority, Replica};
 use ark::protocol::{open_access, trusting, Client, ClientMsg, Mode, Server, ServerMsg};
 use ark::store::{MemoryStore, Refusal, Store};
@@ -268,7 +267,7 @@ fn private_runs_last_and_only_at_the_authority() {
 }
 
 struct Fleet {
-    sv: Server<Silent>,
+    sv: Server,
     clients: Vec<Client>,
 }
 
@@ -281,7 +280,7 @@ impl Fleet {
         let bodies = closures(&built);
         let mut a = Authority::new(built.schema.clone(), bodies.clone());
         a.hold(m.procedures());
-        let sv = Server::open(trusting(), open_access(), Silent, a);
+        let sv = Server::open(trusting(), open_access(), a);
         let theirs = ark::sim::client_bodies(&bodies);
         let clients = (0..n)
             .map(|i| {

@@ -4,7 +4,7 @@
 //! half is `ark/tests/versions.rs`; this is what an app sees of it. Each
 //! test says what falsified it.
 
-use ark::live::{ConnId, Silent};
+use ark::live::ConnId;
 use ark::peer::Authority;
 use ark::protocol::{open_access, trusting, ClientMsg, Server};
 use ark::value::Value;
@@ -13,7 +13,7 @@ use crate::{args, demo, Options, Peer};
 
 /// A server over the demo's schema holding `keep` of its closures, saying
 /// `module` as its own.
-fn server(keep: impl Fn(&str) -> bool, module: Vec<u8>) -> Server<Silent> {
+fn server(keep: impl Fn(&str) -> bool, module: Vec<u8>) -> Server {
     let d = demo::domain();
     let bodies = d
         .closures()
@@ -23,11 +23,11 @@ fn server(keep: impl Fn(&str) -> bool, module: Vec<u8>) -> Server<Silent> {
         .collect();
     let mut a = Authority::new(d.module().schema.clone(), bodies);
     a.log.name_if_unnamed([7; 16]);
-    Server::open(trusting(), open_access(), Silent, a).with_module(module)
+    Server::open(trusting(), open_access(), a).with_module(module)
 }
 
 /// Frames both ways until nothing moves; what the peer said.
-fn settle(s: &mut Server<Silent>, c: ConnId, p: &mut Peer) -> Vec<ClientMsg> {
+fn settle(s: &mut Server, c: ConnId, p: &mut Peer) -> Vec<ClientMsg> {
     let mut said = vec![];
     loop {
         let up = p.take_outgoing();

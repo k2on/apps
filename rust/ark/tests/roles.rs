@@ -11,7 +11,6 @@ use ark::authoring::*;
 use ark::eval::{self, Args};
 use ark::hash::{closures, state_hash};
 use ark::ir::{Expr, Stmt};
-use ark::live::Silent;
 use ark::peer::{Authority, Replica};
 use ark::protocol::{open_access, trusting, Client, Mode, Server, ServerMsg};
 use ark::store::{MemoryStore, Refusal, Store};
@@ -176,9 +175,9 @@ fn the_stamp_decides_what_a_body_reading_a_role_writes() {
     let (fh, _) = m.procedure("write").unwrap();
     let mut a = Authority::new(built.schema.clone(), bodies.clone());
     a.hold(m.procedures());
-    let mut sv = Server::open(trusting(), open_access(), Silent, a);
+    let mut sv = Server::open(trusting(), open_access(), a);
     let replica = || Replica::open(built.schema.clone(), bodies.clone(), MemoryStore::empty(built.schema.clone()), 0, vec![]);
-    let pump = |sv: &mut Server<Silent>, c: &mut Client, conn: i64, keep: &dyn Fn(&ServerMsg) -> bool| {
+    let pump = |sv: &mut Server, c: &mut Client, conn: i64, keep: &dyn Fn(&ServerMsg) -> bool| {
         for f in c.take_outgoing() {
             sv.recv(conn, f);
         }
@@ -264,7 +263,7 @@ fn the_stamps_facts_arrive_with_the_log_they_are_of() {
         let mut a = Authority::new(built.schema.clone(), bodies.clone());
         a.hold(m.procedures());
         a.log.name_if_unnamed([name; 16]);
-        Server::open(trusting(), open_access(), Silent, a)
+        Server::open(trusting(), open_access(), a)
     };
     let replica = || Replica::open(built.schema.clone(), bodies.clone(), MemoryStore::empty(built.schema.clone()), 0, vec![]);
     let note = |text: &str| args([("text", Value::text(text))]);

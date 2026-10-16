@@ -16,7 +16,6 @@
 use ark::authoring::*;
 use ark::eval::{Args, Ctx};
 use ark::hash::state_hash;
-use ark::live::Silent;
 use ark::peer::{Authority, Replica, Sequenced};
 use ark::protocol::{open_access, trusting, Client, Mode, Server, ServerMsg};
 use ark::store::{MemoryStore, Store};
@@ -132,7 +131,7 @@ fn args<const N: usize>(pairs: [(&str, Value); N]) -> Args {
 
 /// Frames both ways until neither side has anything to say; what the
 /// server sent, in order.
-fn exchange(c: &mut Client, sv: &mut Server<Silent>) -> Vec<ServerMsg> {
+fn exchange(c: &mut Client, sv: &mut Server) -> Vec<ServerMsg> {
     let mut heard = vec![];
     loop {
         let up = c.take_outgoing();
@@ -217,7 +216,7 @@ fn a_cursor_past_the_head_is_re_based_onto_the_head() {
         Mode::Whole,
         Some("alice".into()),
     );
-    let mut was = Server::open(trusting(), open_access(), Silent, old);
+    let mut was = Server::open(trusting(), open_access(), old);
     peer.connected();
     exchange(&mut peer, &mut was);
     assert_eq!(peer.replica.cursor, 30);
@@ -238,7 +237,7 @@ fn a_cursor_past_the_head_is_re_based_onto_the_head() {
     for e in &entries[..10] {
         assert!(matches!(new.sequence_entry(e), Sequenced::Appended(..)));
     }
-    let mut sv = Server::open(trusting(), open_access(), Silent, new);
+    let mut sv = Server::open(trusting(), open_access(), new);
     peer.connected();
     let heard = exchange(&mut peer, &mut sv);
 
@@ -341,7 +340,7 @@ fn a_cursor_on_another_log_is_re_based_onto_this_one() {
         Mode::Whole,
         Some("alice".into()),
     );
-    let mut was = Server::open(trusting(), open_access(), Silent, a);
+    let mut was = Server::open(trusting(), open_access(), a);
     peer.connected();
     exchange(&mut peer, &mut was);
     assert_eq!(
@@ -361,7 +360,7 @@ fn a_cursor_on_another_log_is_re_based_onto_this_one() {
         peer.mutate(id, &alice, fh, &autos, &xs).unwrap();
     }
 
-    let mut sv = Server::open(trusting(), open_access(), Silent, b);
+    let mut sv = Server::open(trusting(), open_access(), b);
     peer.connected();
     let heard = exchange(&mut peer, &mut sv);
     assert!(
@@ -421,7 +420,7 @@ fn a_peer_that_names_no_log_is_served_as_before_and_learns_it() {
                 .unwrap();
             assert!(matches!(a.sequence_entry(&e), Sequenced::Appended(..)));
         }
-        let mut sv = Server::open(trusting(), open_access(), Silent, a);
+        let mut sv = Server::open(trusting(), open_access(), a);
         let mut c = Client::open(
             Replica::open(sch.clone(), bodies.clone(), MemoryStore::empty(sch.clone()), 0, vec![]),
             Mode::Whole,

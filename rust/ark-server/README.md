@@ -7,10 +7,10 @@ app is named here, and an app's server is a builder and its own routes.
 ```text
 axum ── /sync ─────── the socket (binary canonical CBOR, pings) ──┐
      ── /healthz                                                  ├── HubHandle ── the hub's thread:
-     ── /auth/*   (ark-auth, when given)                          │     ark::protocol::Server<Relay>
+     ── /auth/*   (ark-auth, when given)                          │     ark::protocol::Server
      ── /media    (a directory, range requests)                   │       the Authority, procedures native
-     ── /*        (a web build, the build as its validator)       │       live rooms → the app's `Live`
-     ── the app's own routes ─────────────────────────────────────┘     the log and the kept rooms, on disk
+     ── /*        (a web build, the build as its validator)       │       the module's live states
+     ── the app's own routes ─────────────────────────────────────┘     the log and the kept live state, on disk
 ```
 
 ## An app's server
@@ -29,9 +29,8 @@ async fn main() -> anyhow::Result<()> {
 
     let app = ark_server::builder(Domain::new(&my_domain::module()))
         .name("myapp")
-        .data(&data)                      // log.ark-log, live.cbor
+        .data(&data)                      // log.ark-log, live-states.cbor
         .auth(auth.clone())               // /auth/*, and the authenticator at Hello
-        .live(MyDesk::new())              // the app's rooms
         .media("/srv/media")              // /media
         .web(web_dir).web_module("pkg/myapp_bg.wasm")
         .merge(Router::new().route("/api/thing", get(thing)))
@@ -45,9 +44,9 @@ async fn main() -> anyhow::Result<()> {
         Options::server(login.user.id, login.session, Some(login.token)))?;
     scanner.connect_with("local", hub.dial());   // no socket; pump it on a thread
 
-    // A device the server stands in for (a speaker), in an account's room:
-    let conn = hub.stand("alice", "media_player.kitchen", |frame| { /* to the device */ })?;
-    hub.say(conn, frame)?;  hub.detach(conn)?;
+    // A device the server stands in for (a speaker), in live instances:
+    let conn = hub.participate(who, device, instances, |frame| { /* applied, refused, live_snapshot */ })?;
+    hub.call(conn, call)?;  hub.detach(conn)?;
 
     tokio::signal::ctrl_c().await?;
     running.stop().await;
@@ -62,29 +61,28 @@ in again), `.trusting()` for the engine's dev auth (a token is a name, every
 session is `"dev"`, no routes), or `.authenticate(f, announcement)`. Whatever
 it is is printed at startup, every time.
 
-## Live rooms
+## Live state
 
-A room is one account: every connection the server verified as the same
-user. The app's `Live` is one value holding every room, told — on the hub's
-thread, one call at a time —
+The module's live states (`docs/plan-live.md`, spec §14) are served on
+`/sync` beside the log: the hub sequences each instance's calls at its own
+clock, relays what each instance took to the devices in it, and keeps each
+instance's ordered part in `live-states.cbor` beside the log, restored at
+start through the state's `on_restore`. Nothing of the app's is asked: the
+module says it all.
 
-- `open(room, kept)` when a room's first peer arrives, with the snapshot it
-  kept last time (possibly before a restart);
-- `join`, `say(peer, frame)`, `part` — each with a `Post` to `tell(who, ..)`
-  a device by its stable name (a login's session, or a standing device's
-  name), `tell_conn`, `tell_room`, and `keep()` to write the room's snapshot
-  now;
-- `snapshot(room)` when asked to keep and when the room empties, then
-  `close(room)`.
+A device the server stands in for — a speaker a bridge reconciles — is a
+**participant** (`HubHandle::participate`): in the instances it is given,
+as the identity it is given, hearing their frames, calling with
+`HubHandle::call`, leaving with `detach`. It is not a replica, and hears
+no log.
 
-The snapshots are `live.cbor` beside the log. Frames are opaque bytes; an
-ArkDB app makes them canonical CBOR of a `Value`. A repeated `Hello` on one
-connection — a client paging a long log — leaves the peer where it is: the
-room hears nothing (`tests/live.rs` holds it with 301 entries). A standing
-peer keeps a room open like any other; an app that wants a room to close
-with its last *client* takes its devices out in `part`.
-
-`Echo` (every frame to the rest of the room) and `Quiet` are provided.
+It replaced opaque rooms — a room per account, frames the server never
+looked inside, an app's `Live` told who arrived, spoke and left, its
+snapshots in `live.cbor` — which nothing uses since harken's listening
+session became a live state (`docs/plan-live.md` phase 2). A `say` from a
+peer of an older revision is read and dropped rather than cutting it off,
+and nothing is sent as `heard`. A `live.cbor` an older server left is not
+read, and can be deleted.
 
 ## Serving a web build
 
@@ -100,15 +98,15 @@ harken's `server/src/web.rs` made generic.
 
 | before | ark-server |
 |---|---|
-| `petros_axum::Hub::<App>::open_live(conn, auth, desk)` + `Router::new().route("/sync", get(petros_axum::sync::<App>))` | `ark_server::builder(domain).data(dir).auth(auth).live(desk).build()?` — `/sync` and `/healthz` included |
-| `petros::Live` (`join`, `say`, `part`, `snapshot`, `wake`, `close`; `Post::{tell, tell_room, keep, peers, here}`) | `ark_server::Live` (`open(room, kept)` is `wake` + the room opening; the rest the same, over bytes) |
-| `Hub::stand(identity, tx)`, `Hub::say`, `Hub::unstand` | `HubHandle::stand(room, who, callback)`, `say`, `detach` |
+| `petros_axum::Hub::<App>::open_live(conn, auth, desk)` + `Router::new().route("/sync", get(petros_axum::sync::<App>))` | `ark_server::builder(domain).data(dir).auth(auth).build()?` — `/sync` and `/healthz` included |
+| `petros::Live` (`join`, `say`, `part`, `snapshot`, `wake`, `close`; `Post::{tell, tell_room, keep, peers, here}`) | a live state in the module (`docs/plan-live.md`): transitions and the `on_join`, `on_leave` and `on_restore` hooks, run by the server |
+| `Hub::stand(identity, tx)`, `Hub::say`, `Hub::unstand` | `HubHandle::participate(who, device, instances, callback)`, `call`, `detach` |
 | `Hub::local()` + `Hub::exchange` for the scanner | `HubHandle::dial()` → an `ark_client::Peer` transport |
 | `hub.server()` under a mutex | `hub.read(|h| ..)` on the hub's thread (`authority()`, `rows(table)`, `rooms()`, `identity(conn)`, `health()`) |
 | `web::router(dir)`, `web::build_tag(dir)` | `web::router_with_module(dir, module)`, `web::build_tag(dir, module)` |
 | `.nest_service("/media", ServeDir::new(dir))` | `.media(dir)` |
 | harken's `persist.rs` (`<scope>.ark-log`) | `persist.rs`: one log, a snapshot `log.ark-log` and the append-only `log.ark-journal` after it, synced before anything it holds is acknowledged |
-| `/healthz` per scope | `/healthz`: `ok`, `connections N`, `head N`, `room R peers N` |
+| `/healthz` per scope | `/healthz`: `ok`, `connections N`, `head N`, `room R peers N` (an account and its open replica connections) |
 
 `/healthz` under `Accept: application/json` is one object
 (`ark_server::health_json`): head, horizon, log id, modules run,
@@ -127,10 +125,8 @@ two peers syncing and an offline edit rebased on reconnect; a maintained
 view following the log patch by patch; pending intents, the confirmed store
 and the server's log across restarts; a peer alone; a frame that is not the
 protocol closing that socket and nothing else, and `/healthz`; a peer in the
-server's process with no socket; live frames within an account and not
-across, dropped while unlinked; a repeated Hello that is paging and not a
-departure; a room's snapshot kept when it empties and across a restart; a
-standing device hearing and speaking; the ark-auth login on the socket, a
+server's process with no socket; live state across a fleet of devices
+(`tests/live_fleet.rs`); the ark-auth login on the socket, a
 revoked token denied with the link stopped and the pending entry kept,
 somebody else's token refused, an entry from an earlier login of the same
 person accepted after signing in again; a server with no sign-in refusing to

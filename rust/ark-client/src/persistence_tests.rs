@@ -5,7 +5,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use ark::live::{ConnId, Silent};
+use ark::live::ConnId;
 use ark::peer::Authority;
 use ark::protocol::{open_access, trusting, Server};
 use ark::store::Store;
@@ -85,15 +85,15 @@ fn reopens_as(live: &Peer, disk: &Memory, opts: Options, what: &str) {
 
 /// A server to sync with, sans-io: trusting, so a token is the user and
 /// every login is `dev`.
-fn server() -> Server<Silent> {
+fn server() -> Server {
     let d = demo::domain();
     let mut a = Authority::new(d.module().schema.clone(), d.closures().clone());
     a.hold(d.native_list());
-    Server::open(trusting(), open_access(), Silent, a)
+    Server::open(trusting(), open_access(), a)
 }
 
 /// Move frames between the server and the peers until nothing moves.
-fn settle(s: &mut Server<Silent>, peers: &mut [(ConnId, &mut Peer)]) {
+fn settle(s: &mut Server, peers: &mut [(ConnId, &mut Peer)]) {
     loop {
         let mut moved = false;
         for (c, p) in peers.iter_mut() {
@@ -185,7 +185,7 @@ fn reopening_after_every_write_is_the_live_replica() {
     let mut bob = Peer::open(demo::domain(), Box::new(db.clone()), dev("bobby")).unwrap();
     alice.connected();
     bob.connected();
-    let step = |s: &mut Server<Silent>, alice: &mut Peer, bob: &mut Peer, what: &str, linked: bool| {
+    let step = |s: &mut Server, alice: &mut Peer, bob: &mut Peer, what: &str, linked: bool| {
         if linked {
             settle(s, &mut [(1, alice), (2, bob)]);
         } else {

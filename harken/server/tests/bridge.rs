@@ -36,7 +36,7 @@ use harken_server::Server;
 use serde_json::{json, Value as Json_};
 
 /// Every service call the house was asked for, and what each player says
-/// it is doing.
+/// it is doing: what a test sets, and a pause or a play it was told.
 #[derive(Clone, Default)]
 struct Fake {
     calls: Arc<Mutex<Vec<(String, Json_)>>>,
@@ -63,6 +63,19 @@ async fn service(
 ) -> StatusCode {
     if !authorised(&fake, &headers) {
         return StatusCode::UNAUTHORIZED;
+    }
+    // A pause or a play is done at once, as a speaker would a moment
+    // later: otherwise the poll after it reads the speaker as moved by
+    // hand, and the bridge says so.
+    let now = match service.as_str() {
+        "media_pause" => Some("paused"),
+        "media_play" => Some("playing"),
+        _ => None,
+    };
+    if let (Some(now), Some(entity)) = (now, body["entity_id"].as_str()) {
+        if let Some(st) = fake.states.lock().unwrap().get_mut(entity) {
+            st["state"] = json!(now);
+        }
     }
     fake.calls.lock().unwrap().push((service, body));
     StatusCode::OK
@@ -350,12 +363,9 @@ fn a_speaker_is_a_device_the_whole_way_round() {
     assert!(session.sounding());
     fake.take();
 
-    // A pause on the phone is a pause in the kitchen. (The stand-in house
-    // does not act on what it is told, so it is told to be paused first, as
-    // a real speaker would be a moment after.)
+    // A pause on the phone is a pause in the kitchen.
     std::thread::sleep(Duration::from_millis(200));
     fake.take();
-    fake.playing(KITCHEN, "paused", &media_url("music/c.mp3"), 1.2);
     call(&mut phone, "pause", input::none());
     told(&mut phone, "paused", |s| !s.sounding());
     let calls = fake.calls(1);
@@ -585,6 +595,13 @@ fn a_browser_a_desktop_and_a_speaker_share_one_session() {
     told_among(&mut [&mut desktop, &mut browser], 0, "three devices", |s| {
         s.devices.len() == 3
     });
+    // …and so does the browser, before it calls on what it holds.
+    told_among(
+        &mut [&mut browser, &mut desktop],
+        0,
+        "three devices, to the browser",
+        |s| s.devices.len() == 3,
+    );
     let d = me(&desktop);
     assert!(
         !told_among(&mut [&mut desktop, &mut browser], 0, "the desktop", |_| {
@@ -617,7 +634,6 @@ fn a_browser_a_desktop_and_a_speaker_share_one_session() {
         |s| s.outputs(KITCHEN) && !s.moving_to(KITCHEN) && s.sounding(),
     );
     fake.take();
-    fake.playing(KITCHEN, "paused", &media_url("music/a.mp3"), 11.0);
     call(&mut desktop, "pause", input::none());
     told_among(
         &mut [&mut browser, &mut desktop],
@@ -703,7 +719,6 @@ fn a_browser_a_desktop_and_a_speaker_share_one_session() {
         "the browser gone",
         |s| s.device(&b).is_none(),
     );
-    fake.playing(KITCHEN, "paused", &media_url("music/a.mp3"), 13.0);
     call(&mut desktop, "pause", input::none());
     told_among(
         &mut [&mut desktop, &mut browser],

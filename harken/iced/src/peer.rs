@@ -794,7 +794,6 @@ mod tests {
     /// `Replica::fork_back`): every list is `Reset`.
     #[test]
     fn a_window_alone_joins_a_server_in_place() {
-        use ark_client::ark::live::Silent;
         use ark_client::ark::peer::Authority;
         use ark_client::ark::protocol::{open_access, trusting, Server};
         let domain = Domain::new(&harken_domain::module());
@@ -830,7 +829,7 @@ mod tests {
 
         let mut a = Authority::new(domain.module().schema.clone(), domain.closures().clone());
         a.hold(domain.native_list());
-        let mut hub = Server::open(trusting(), open_access(), Silent, a);
+        let mut hub = Server::open(trusting(), open_access(), a);
         // The songs are the library's to write (`docs/plan-guards.md` D1),
         // and the server judges them under the roles it stamps: dev auth's
         // `name:role` is a login holding it.

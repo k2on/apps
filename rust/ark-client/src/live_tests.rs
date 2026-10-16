@@ -13,7 +13,7 @@ fn peer(name: &str) -> Peer {
     Peer::open_memory(demo::live_domain(), opts).unwrap()
 }
 
-fn server() -> Server<ark::live::Silent> {
+fn server() -> Server {
     let d = demo::live_domain();
     let mut a = ark::peer::Authority::new(d.module().schema.clone(), d.closures().clone());
     a.hold(d.native_list());
@@ -22,12 +22,12 @@ fn server() -> Server<ark::live::Silent> {
         let (user, session) = t.split_once('@')?;
         Some(ark::protocol::Identity::new(user, session))
     });
-    Server::open(auth, open_access(), ark::live::Silent, a).with_live(d.live().clone())
+    Server::open(auth, open_access(), a).with_live(d.live().clone())
 }
 
 // Everything each peer said, to the server; everything the server said, to
 // its peer; until nothing moves.
-fn exchange(sv: &mut Server<ark::live::Silent>, peers: &mut [(&mut Peer, i64)]) {
+fn exchange(sv: &mut Server, peers: &mut [(&mut Peer, i64)]) {
     for _ in 0..20 {
         let mut moved = false;
         for (p, c) in peers.iter_mut() {

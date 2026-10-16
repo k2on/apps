@@ -17,7 +17,7 @@ use ark::canon::{decode, encode};
 use ark::eval::{Args, Ctx};
 use ark::hash::closures;
 use ark::ir::SPEC_VERSION;
-use ark::live::{ConnId, Silent};
+use ark::live::ConnId;
 use ark::log::Entry;
 use ark::peer::{Authority, Replica};
 use ark::protocol::{open_access, trusting, Client, ClientMsg, Mode, Server, ServerMsg, Subscription};
@@ -37,7 +37,7 @@ fn is_verdict(m: &ServerMsg) -> bool {
 }
 
 /// What a server said to one connection that was a verdict.
-fn verdicts(sv: &mut Server<Silent>, c: ConnId) -> Vec<ServerMsg> {
+fn verdicts(sv: &mut Server, c: ConnId) -> Vec<ServerMsg> {
     sv.take_outgoing()
         .into_iter()
         .filter(|(to, m)| *to == c && is_verdict(m))
@@ -272,7 +272,7 @@ pub fn protocol(out: &Out) {
 
     // An entry from an older session of the same user is accepted only
     // where ownership is installed; a stranger's never is.
-    let server = || Server::open(trusting(), open_access(), Silent, Authority::new(m.schema.clone(), bodies.clone()));
+    let server = || Server::open(trusting(), open_access(), Authority::new(m.schema.clone(), bodies.clone()));
     let signed_in = |owns: Option<ark::protocol::Owns>| {
         let mut sv = server();
         sv.recv(
@@ -305,7 +305,7 @@ pub fn protocol(out: &Out) {
         args: args([("name", Value::text("Road"))]),
         autos: args([("id", Value::Id(id_n(21)))]),
     };
-    let verdict_on = |mut sv: Server<Silent>, e: &Entry| {
+    let verdict_on = |mut sv: Server, e: &Entry| {
         sv.recv(1, ClientMsg::Push { entries: vec![e.clone()] });
         match verdicts(&mut sv, 1).as_slice() {
             [ServerMsg::Ack { .. }] => "ack".to_string(),
@@ -460,7 +460,7 @@ pub fn protocol(out: &Out) {
     // head always was.
     let mut named = Authority::new(m.schema.clone(), bodies.clone());
     named.log.name_if_unnamed(log_a);
-    let mut sv = Server::open(trusting(), open_access(), Silent, named);
+    let mut sv = Server::open(trusting(), open_access(), named);
     for (conn, said) in [(1, Some(log_b)), (2, Some(log_a)), (3, None)] {
         sv.recv(
             conn,
@@ -495,8 +495,7 @@ pub fn protocol(out: &Out) {
     // head is answered with an empty page carrying the module, where one
     // that says none is answered with nothing; and an intent at a hash no
     // module it ran shipped is held, not refused.
-    let mut said =
-        Server::open(trusting(), open_access(), Silent, Authority::new(m.schema.clone(), bodies.clone())).with_module(ark::hash::module_hash(&m));
+    let mut said = Server::open(trusting(), open_access(), Authority::new(m.schema.clone(), bodies.clone())).with_module(ark::hash::module_hash(&m));
     said.recv(
         1,
         ClientMsg::Hello {
@@ -600,7 +599,7 @@ pub fn protocol(out: &Out) {
 /// `token`, its device believing `believed`: the roles the log holds for
 /// it, and what that connection was sent (`docs/plan-guards.md` D1).
 fn stamp_on(a: Authority, e: &Entry, token: &str, believed: &[&str]) -> (Vec<String>, String) {
-    let mut sv = Server::open(trusting(), open_access(), Silent, a);
+    let mut sv = Server::open(trusting(), open_access(), a);
     sv.recv(
         1,
         ClientMsg::Hello {
@@ -661,8 +660,8 @@ pub fn scoped(out: &Out) {
     let h_create = hash_of(&dm, "create_playlist");
     let h_add = hash_of(&dm, "add_to_playlist");
     let a = Authority::new(sm.schema.clone(), bodies.clone());
-    let mut sv = Server::open(trusting(), open_access(), Silent, a).with_scopes(ark::scope::Scopes::of(&sm));
-    let push = |sv: &mut Server<Silent>, c: ConnId, who: &str, k: u8, fh: &Vec<u8>, args: Args, autos: Args| {
+    let mut sv = Server::open(trusting(), open_access(), a).with_scopes(ark::scope::Scopes::of(&sm));
+    let push = |sv: &mut Server, c: ConnId, who: &str, k: u8, fh: &Vec<u8>, args: Args, autos: Args| {
         let e = Entry {
             id: id_n(k),
             actor: who.into(),
@@ -734,8 +733,7 @@ pub fn scoped(out: &Out) {
     sv.disconnect(1);
     let hello_partial = hello(true, 3);
     sv.recv(1, hello_partial.clone());
-    let to_alice =
-        |sv: &mut Server<Silent>| -> Vec<ServerMsg> { sv.take_outgoing().into_iter().filter(|(to, _)| *to == 1).map(|(_, m)| m).collect() };
+    let to_alice = |sv: &mut Server| -> Vec<ServerMsg> { sv.take_outgoing().into_iter().filter(|(to, _)| *to == 1).map(|(_, m)| m).collect() };
     let started = to_alice(&mut sv);
     let snapshot = started
         .iter()
@@ -880,7 +878,7 @@ pub fn private(out: &Out) {
     let h_create = hash_of(&pm, "create_playlist");
     let h_audited = hash_of(&pm, "create_audited");
     let h_add = hash_of(&pm, "add_to_playlist");
-    let mut sv = Server::open(trusting(), open_access(), Silent, Authority::new(pm.schema.clone(), bodies.clone()));
+    let mut sv = Server::open(trusting(), open_access(), Authority::new(pm.schema.clone(), bodies.clone()));
     let hello = |who: &str| ClientMsg::Hello {
         sub: Subscription {
             since: 0,
@@ -1008,7 +1006,7 @@ pub fn raw(out: &Out) {
     use ark::raw::{self, Raw};
     let m = demo::module();
     let bodies = closures(&m);
-    let mut sv = Server::open(trusting(), open_access(), Silent, Authority::new(m.schema.clone(), bodies.clone()));
+    let mut sv = Server::open(trusting(), open_access(), Authority::new(m.schema.clone(), bodies.clone()));
     let hello = |who: &str| ClientMsg::Hello {
         sub: Subscription {
             since: 0,
