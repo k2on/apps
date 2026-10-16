@@ -15,17 +15,14 @@
     # reason above: the API is the part that may be unreachable. Each
     # follows this flake's nixpkgs and toolchain overlay, so an old
     # revision is the old code under today's compiler — what a matrix of
-    # the code, rather than of the compilers, wants.
-    harken-v4-journal = {
-      url = "git+https://github.com/k2on/apps?ref=main&rev=abbf861feed6468baea238babc7baa8e1750d3bc";
-      inputs.nixpkgs.follows = "nixpkgs";
-      inputs.rust-overlay.follows = "rust-overlay";
-    };
-    harken-v4-rows = {
-      url = "git+https://github.com/k2on/apps?ref=main&rev=71f7b0c40e81a226d980f52d20c259d73ee4e055";
-      inputs.nixpkgs.follows = "nixpkgs";
-      inputs.rust-overlay.follows = "rust-overlay";
-    };
+    # the code, rather than of the compilers, wants. None at the moment
+    # (nix/versions.nix is empty); one is written as
+    #
+    #   harken-<name> = {
+    #     url = "git+https://github.com/k2on/apps?ref=main&rev=<rev>";
+    #     inputs.nixpkgs.follows = "nixpkgs";
+    #     inputs.rust-overlay.follows = "rust-overlay";
+    #   };
   };
 
   outputs = { self, nixpkgs, rust-overlay, ... }@inputs:
@@ -497,7 +494,11 @@
             })
             (import ./nix/versions.nix);
           # What the fleet reads to find them (harken/server/tests/support/fleet.rs).
-          oldEnv = lib.concatImapStrings (n: v: ''
+          # With none pinned it says so, and the scenarios that need an older
+          # binary say they are skipped; the ones that need none still run.
+          oldEnv = if versions == [ ] then ''
+            echo "nix/versions.nix pins no previous revision: the version scenarios that need one are skipped"
+          '' else lib.concatImapStrings (n: v: ''
             export HARKEN_OLD_${toString n}_NAME=${v.name}
             export HARKEN_OLD_${toString n}_SERVER=${v.server}/bin/harken-server
             export HARKEN_OLD_${toString n}_PEER=${v.server}/bin/harken-peer
@@ -536,8 +537,9 @@
               # Both binaries: the server, and harken-peer beside it.
               harken-server = crate { pname = "harken-server"; };
               # The previous pinned revision's, for the machines run mixed
-              # (docs/plan-db.md D1).
-              old = (lib.last versions).server;
+              # (docs/plan-db.md D1); none while nix/versions.nix is empty,
+              # and the mixed machines and subtests are left out.
+              old = if versions == [ ] then null else (lib.last versions).server;
             };
           };
 
@@ -549,6 +551,9 @@
             # upgraded in place under its peers, a client upgraded in place,
             # a schema grown under running peers. In the sandbox, on
             # loopback, in release; the scenarios' own timings are printed.
+            # With nix/versions.nix empty it runs the scenarios that need no
+            # older binary (a schema grown, a module updated over a retained
+            # log) and the others say they are skipped and why.
             versions = crate {
               pname = "harken-versions";
               flags = [ "-p" "harken-server" "--test" "versions" ];

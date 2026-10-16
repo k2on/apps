@@ -28,7 +28,9 @@
 # on and converge. And bob runs the previous revision's peer against this
 # revision's `server`. Peers of two revisions are compared by what they
 # read, not by their state hashes, which are not comparable across them.
-{ pkgs, module, harken-server, old }:
+# With no revision pinned `old` is null: there is no `oldserver`, and the
+# script says the mixed subtests are skipped and why.
+{ pkgs, module, harken-server, old ? null }:
 let
   # A WAV is a header and some samples; lofty reads a real one, so the
   # scanner does too. Four seconds of silence each, made at build time.
@@ -74,6 +76,7 @@ pkgs.testers.runNixOSTest {
     };
     alice = peer;
     bob = peer;
+  } // pkgs.lib.optionalAttrs (old != null) {
     # The previous revision's server, and the same machine on this one's:
     # what `switch-to-configuration` moves it to mid-test.
     oldserver = { lib, ... }: {
@@ -175,7 +178,9 @@ pkgs.testers.runNixOSTest {
         rows = run(alice, "alice", {"cmd": "query", "name": "library", "args": {"playlist_id": {"$id": "00000000-0000-0000-0000-000000000000"}}})[0]["rows"]
         files = sorted(r["file"] for r in rows)
         assert files == ["music/copied-one.wav", "music/copied-two.wav", "music/seeded-one.wav", "music/seeded-two.wav"], files
-
+  '' + pkgs.lib.optionalString (old == null) ''
+    print("mixed: skipped — nix/versions.nix pins no previous revision (docs/plan-db.md D1)")
+  '' + pkgs.lib.optionalString (old != null) ''
     # -- run mixed (docs/plan-db.md D1) ----------------------------------------
 
     OLD = "${old}/bin/harken-peer"

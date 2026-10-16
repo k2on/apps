@@ -1408,7 +1408,8 @@ pub fn olds_or_skip(scenario: &str) -> Vec<Old> {
     if olds.is_empty() {
         println!(
             "fleet: {scenario}: skipped — no pinned revision named (HARKEN_OLD_1_SERVER and \
-             HARKEN_OLD_1_PEER unset; `nix flake check` sets them in checks.versions)"
+             HARKEN_OLD_1_PEER unset; checks.versions sets them from nix/versions.nix, which \
+             is empty until a shipped revision is pinned)"
         );
     }
     olds

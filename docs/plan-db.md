@@ -188,6 +188,17 @@ column, and the two hash apart over rows that say the same thing. The
 store's own `apply_change` is unchanged — a fact is still applied raw
 (§4.5) — and the projection lives where `behind` is known.
 
+**The matrix, emptied** (`docs/plan-live.md` phase 2). The two revisions
+below were development revisions, not releases, and nobody runs either;
+they were dropped, inputs and lock and all. `nix/versions.nix` is an empty
+list with its mechanism and comment kept, and the matrix is empty until a
+shipped revision is pinned. With it empty, `checks.versions` runs scenarios
+6 and 7, which need no older binary, and 1–5 each say they are skipped and
+why (`HARKEN_OLD_1_SERVER` unset; nothing pinned); `packages.fleet-vm` has
+no `oldserver` and its script says the mixed subtests are skipped;
+`checks.fleet-kotlin` and `checks.fleet-swift` skip K4 and K5 the same way.
+Everything below is the record of the matrix while it held them.
+
 **The matrix.** `nix/versions.nix`: `v4-journal` at
 `abbf861feed6468baea238babc7baa8e1750d3bc` and `v4-rows` at
 `71f7b0c40e81a226d980f52d20c259d73ee4e055`, the head when this began. One

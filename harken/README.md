@@ -274,11 +274,15 @@ column. `server/tests/versions.rs` runs the process fleet with older
 binaries beside this build's (`docs/plan-db.md` D1); the older ones are
 **pinned previous revisions of this repository**, listed in
 `nix/versions.nix` and built by nix from each revision's own flake.
+**The matrix is empty until a shipped revision is pinned**: the two it held
+were development revisions nobody runs, and were dropped
+(`docs/plan-db.md` D1). Until one is, `checks.versions` runs the two
+scenarios that need no older binary and the rest say they are skipped.
 
     nix flake check                       # checks.versions: every pinned revision, every scenario
-    nix build .#harken-server-v4-journal  # one pinned revision's two binaries
-    HARKEN_OLD_1_SERVER=$(nix build --print-out-paths .#harken-server-v4-journal)/bin/harken-server \
-    HARKEN_OLD_1_PEER=$(nix build --print-out-paths .#harken-server-v4-journal)/bin/harken-peer \
+    nix build .#harken-server-<name>      # one pinned revision's two binaries
+    HARKEN_OLD_1_SERVER=$(nix build --print-out-paths .#harken-server-<name>)/bin/harken-server \
+    HARKEN_OLD_1_PEER=$(nix build --print-out-paths .#harken-server-<name>)/bin/harken-peer \
       cargo test -p harken-server --test versions -- --nocapture
 
 `HARKEN_OLD_<n>_SERVER` and `HARKEN_OLD_<n>_PEER` (and `HARKEN_OLD_<n>_NAME`

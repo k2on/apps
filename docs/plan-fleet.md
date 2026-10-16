@@ -261,7 +261,8 @@ invariants (or, across revisions, on `converged_across`):
 
 `checks.fleet-kotlin` builds `harken-peer-kt`, sets `FLEET_KOTLIN_PEER`
 and the pinned revisions as `checks.versions` does, and runs the six one
-at a time; without the variable each says it is skipped and passes, and
+at a time (K4 and K5 say they are skipped while `nix/versions.nix` pins no
+revision, `docs/plan-db.md` D1); without the variable each says it is skipped and passes, and
 `checks.rust` and `checks.versions` run no Kotlin peer. Each was falsified
 once with the Kotlin peer broken (the scenario's doc comment says how);
 none found a disagreement between the two runtimes.

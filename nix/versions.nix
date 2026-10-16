@@ -10,9 +10,10 @@
 # flake.nix with the same `rev`, run `nix flake lock`. The matrix grows by
 # one: the fleet's version scenarios run once more, as `HARKEN_OLD_<n>_*`
 # with `n` the entry's place here, counting from 1.
+#
+# The matrix is empty until a shipped revision is pinned: the two
+# development revisions it held (v4-journal at abbf861, v4-rows at
+# 71f7b0c) were dropped, so `checks.versions` runs only the scenarios that
+# need no older binary, and fleet-vm leaves its mixed machines out.
 [
-  # The log gained its identity and the server its journal (Round 4).
-  { name = "v4-journal"; rev = "abbf861feed6468baea238babc7baa8e1750d3bc"; }
-  # The head when versions landed: the positional row (plan-perf R11).
-  { name = "v4-rows"; rev = "71f7b0c40e81a226d980f52d20c259d73ee4e055"; }
 ]

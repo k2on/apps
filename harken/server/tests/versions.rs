@@ -10,7 +10,9 @@
 //! (`nix/versions.nix`), which `checks.versions` builds and hands over as
 //! `HARKEN_OLD_<n>_SERVER` and `HARKEN_OLD_<n>_PEER` ([`olds`]). Without
 //! them, scenarios 1–5 say they are skipped and pass, so `cargo test` on a
-//! laptop is unchanged. Scenarios 6 and 7 need no older binary: "the next
+//! laptop is unchanged — and so does `checks.versions` while
+//! `nix/versions.nix` is empty, which it is until a shipped revision is
+//! pinned (`docs/plan-db.md` D1). Scenarios 6 and 7 need no older binary: "the next
 //! release" there is this build hosting the grown domain
 //! (`harken_server::grown`, `HARKEN_MODULE` and `harken-peer --module`),
 //! since no pinned revision has a different schema yet.
@@ -402,6 +404,13 @@ fn alone_upgraded(o: &Old) {
 /// Falsified once, against `v4-rows`, by `ark::journal` checking every
 /// snapshot by this build's construction alone: `storage: reading log: the
 /// snapshot's hash does not match its rows`, the directory not opened.
+///
+/// And the snapshot was written under a schema with no `play` table, which
+/// harken's has had since `docs/plan-live.md` phase 2: it is checked over
+/// the tables it names and held hashed under this schema
+/// (`ark::journal::log_from_parts`). Checked over every table of this one
+/// it failed against `v4-rows` with those same words — found by this
+/// scenario, the last time it ran against a pinned revision.
 #[test]
 fn version_5b_an_alone_directory_upgraded_in_place() {
     for o in olds_or_skip("5b alone directory upgraded in place") {
