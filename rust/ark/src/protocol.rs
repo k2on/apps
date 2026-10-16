@@ -19,6 +19,10 @@ use crate::eval::{Args, Ctx};
 use crate::hash::{Closure, FnHash};
 use crate::ir::decode::{closure_from_value, DecodeError};
 use crate::ir::encode::closure_value;
+use crate::live::state::{
+    self as lstate, Applied as LiveApplied, Call, Desk, DeviceDecl, Instance, Refused as LiveRefused, Said, Snapshot as LiveSnapshot, Watch,
+    Who as LiveWho,
+};
 use crate::live::{self, ConnId, Machine, Rooms};
 use crate::log::{snapshot_of, widened, Entry, Facts, Page, Seq};
 use crate::peer::{Authority, Replica, Sequenced};
@@ -64,6 +68,11 @@ pub enum ClientMsg {
         sub: Subscription,
         token: Option<String>,
         spec: i64,
+        /// §14 The device this connection is (`docs/plan-live.md`): it
+        /// subscribes to the live instances its scope gives it, and stands in
+        /// them as this. On the wire `device`, present only when declared,
+        /// so a client that never uses live state says the bytes it said.
+        device: Option<DeviceDecl>,
     },
     Push {
         entries: Vec<Entry>,
@@ -95,6 +104,11 @@ pub enum ClientMsg {
     Say {
         frame: Vec<u8>,
     },
+    /// §14 Run a transition of a live instance (`call`).
+    Call(Call),
+    /// §14 Send this instance whole (`resync`): a gap, or a hash that did
+    /// not match.
+    Resync(Instance),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -211,6 +225,12 @@ pub enum ServerMsg {
     Heard {
         frame: Vec<u8>,
     },
+    /// §14 A call a live instance took (`applied`), ordered or ephemeral.
+    Applied(LiveApplied),
+    /// §14 A call it did not, to its author (`refused`).
+    Refused(LiveRefused),
+    /// §14 An instance whole (`live_snapshot`).
+    LiveSnapshot(LiveSnapshot),
 }
 
 /// `docs/plan-guards.md` D2 What a partial page covers: the sequences
@@ -313,9 +333,8 @@ impl ClientMsg {
     /// The frame as a value; its wire form is `canon::encode` of this.
     pub fn to_value(&self) -> Value {
         match self {
-            ClientMsg::Hello { sub, token, spec } => node(
-                "hello",
-                flagged(
+            ClientMsg::Hello { sub, token, spec, device } => {
+                let mut fields = flagged(
                     named(
                         vec![
                             ("since", int(sub.since)),
@@ -327,8 +346,12 @@ impl ClientMsg {
                     ),
                     "partial",
                     sub.partial,
-                ),
-            ),
+                );
+                if let Some(d) = device {
+                    fields.push(("device", d.to_value()));
+                }
+                node("hello", fields)
+            }
             ClientMsg::Push { entries } => node("push", vec![("entries", Value::List(entries.iter().map(entry_value).collect()))]),
             ClientMsg::NeedFacts { seqs } => node("need_facts", vec![("seqs", Value::List(seqs.iter().map(|n| int(*n)).collect()))]),
             ClientMsg::NeedClosures { hashes } => node(
@@ -344,6 +367,8 @@ impl ClientMsg {
                 ),
             ),
             ClientMsg::Say { frame } => node("say", vec![("say", Value::Bytes(frame[..].into()))]),
+            ClientMsg::Call(c) => c.to_value(),
+            ClientMsg::Resync(i) => lstate::resync_value(i),
         }
     }
 
@@ -359,6 +384,7 @@ impl ClientMsg {
                     x => Some(text(x)?),
                 },
                 spec: int64(need(m, "spec")?)?,
+                device: m.get("device").map(DeviceDecl::from_value).transpose().or_else(bad)?,
             },
             "push" => ClientMsg::Push {
                 entries: list(entry_from_value, need(m, "entries")?)?,
@@ -378,6 +404,8 @@ impl ClientMsg {
             "say" => ClientMsg::Say {
                 frame: bytes(need(m, "say")?)?,
             },
+            "call" => ClientMsg::Call(Call::from_fields(m).or_else(bad)?),
+            "resync" => ClientMsg::Resync(lstate::instance_of(m).or_else(bad)?),
             other => return bad(format!("unknown client frame {other}")),
         })
     }
@@ -586,6 +614,9 @@ impl ServerMsg {
                 node("agree", fields)
             }
             ServerMsg::Heard { frame } => node("heard", vec![("hear", Value::Bytes(frame[..].into()))]),
+            ServerMsg::Applied(a) => a.to_value(),
+            ServerMsg::Refused(r) => r.to_value(),
+            ServerMsg::LiveSnapshot(s) => s.to_value(),
         }
     }
 
@@ -673,6 +704,9 @@ impl ServerMsg {
             "heard" => ServerMsg::Heard {
                 frame: bytes(need(m, "hear")?)?,
             },
+            "applied" => ServerMsg::Applied(LiveApplied::from_fields(m).or_else(bad)?),
+            "refused" => ServerMsg::Refused(LiveRefused::from_fields(m).or_else(bad)?),
+            "live_snapshot" => ServerMsg::LiveSnapshot(LiveSnapshot::from_fields(m).or_else(bad)?),
             other => return bad(format!("unknown server frame {other}")),
         })
     }
@@ -974,6 +1008,11 @@ pub struct Client {
     /// for: it is dropped, and the peer asks again, which a server answers
     /// by starting it over (D2).
     pub started: bool,
+    /// §14 Live state (`docs/plan-live.md`): the instances this client
+    /// holds and the device it declares. `None` — every client before live
+    /// state, and every one of a module without it — and nothing here says a
+    /// byte it did not say before.
+    pub live: Option<Watch>,
 }
 
 impl Client {
@@ -998,7 +1037,16 @@ impl Client {
             held_ids: BTreeSet::new(),
             served: false,
             started: false,
+            live: None,
         }
+    }
+
+    /// §14 Hold live state: the module's states, and the device this
+    /// client's `hello` declares — `None` for none, which subscribes to
+    /// nothing.
+    pub fn with_live(mut self, watch: Watch) -> Client {
+        self.live = Some(watch);
+        self
     }
 
     /// `docs/plan-guards.md` D2 The module's schema, for a client opened
@@ -1068,6 +1116,7 @@ impl Client {
             },
             token: self.token.clone(),
             spec: crate::ir::SPEC_VERSION,
+            device: self.live.as_ref().and_then(|w| w.device.clone()),
         }
     }
 
@@ -1086,6 +1135,51 @@ impl Client {
         if !self.replica.pending.is_empty() {
             let entries = self.replica.pending.clone();
             self.emit(ClientMsg::Push { entries });
+        }
+        // §14 Every live call still pending, said again in order: the
+        // server answers one it already took with the `applied` it was.
+        if let Some(w) = &mut self.live {
+            let calls = w.connected();
+            for c in calls {
+                self.emit(ClientMsg::Call(c));
+            }
+        }
+    }
+
+    /// §14 This device calls a transition of a live instance (`docs/plan-live.md`):
+    /// run over its view at once, with `now` its guess at the server's
+    /// clock, and sent if linked — an ordered call kept pending, and said
+    /// again on the next connection, until the server answers; an ephemeral
+    /// one applied and done, `counter` its place among this device's, and
+    /// dropped while unlinked. A refusal here is the preview's, and nothing
+    /// is sent.
+    #[allow(clippy::too_many_arguments)]
+    pub fn call(
+        &mut self,
+        who: &Ctx,
+        i: &Instance,
+        transition: &str,
+        input: &Args,
+        id: Id,
+        now: i64,
+        counter: i64,
+    ) -> Result<crate::ir::ordering::Kind, Refusal> {
+        let w = self
+            .live
+            .as_mut()
+            .ok_or_else(|| Refusal::Refused("this client holds no live state".into()))?;
+        let called = w.call(who, i, transition, input, id, now, counter)?;
+        self.emit(ClientMsg::Call(called.call));
+        Ok(called.kind)
+    }
+
+    // What the server said of live state, applied; a snapshot asked for
+    // where the replica fell out of step.
+    fn heard_live(&mut self, said: Said) {
+        let Some(w) = &mut self.live else { return };
+        let ask = w.heard(said);
+        for i in ask {
+            self.emit(ClientMsg::Resync(i));
         }
     }
 
@@ -1119,6 +1213,10 @@ impl Client {
     pub fn recv(&mut self, msg: ServerMsg) {
         match msg {
             ServerMsg::Heard { frame } => self.heard.push(frame),
+            // §14 Not the log: nothing here waits for a settle.
+            ServerMsg::Applied(a) => self.heard_live(Said::Applied(a)),
+            ServerMsg::Refused(r) => self.heard_live(Said::Refused(r)),
+            ServerMsg::LiveSnapshot(s) => self.heard_live(Said::Snapshot(s)),
             ServerMsg::Denied { reason } => {
                 self.denied = Some(reason);
                 self.linked = false;
@@ -1523,7 +1621,18 @@ pub struct Server<M: Machine> {
     /// what each connection holds is computed from them at its `Hello`.
     /// `None`, or a module with none, and every connection is whole.
     scopes: Option<Scopes>,
+    /// §14 Live state (`docs/plan-live.md`): every instance, the devices
+    /// standing in them, the sequencer and the relay. Empty for a module
+    /// without live state, and then nothing here says a byte.
+    pub desk: Desk,
+    /// The time a live transition runs at, in milliseconds since the Unix
+    /// epoch: the engine has no clock, so a server is handed one
+    /// ([`Server::with_clock`]); `0` until it is.
+    clock: Clock,
 }
+
+/// What a server reads the time from.
+pub type Clock = std::sync::Arc<dyn Fn() -> i64 + Send + Sync>;
 
 impl<M: Machine> Server<M> {
     /// A server that is the authority for the log (`openServer`). By
@@ -1544,7 +1653,67 @@ impl<M: Machine> Server<M> {
             module: None,
             role_readers: BTreeMap::new(),
             scopes: None,
+            desk: Desk::default(),
+            clock: std::sync::Arc::new(|| 0),
         }
+    }
+
+    /// §14 Run the module's live states: what a server built from a module
+    /// with any does.
+    pub fn with_live(mut self, runner: lstate::Runner) -> Server<M> {
+        self.desk = Desk::new(runner);
+        self
+    }
+
+    /// §14 The clock live transitions run at: the server's time is the only
+    /// time a sequenced call has.
+    pub fn with_clock(mut self, clock: Clock) -> Server<M> {
+        self.clock = clock;
+        self
+    }
+
+    /// The time now, as the clock says.
+    pub fn now(&self) -> i64 {
+        (self.clock)()
+    }
+
+    fn said(&mut self, out: lstate::Out) {
+        for (c, s) in out {
+            let m = match s {
+                Said::Applied(a) => ServerMsg::Applied(a),
+                Said::Refused(r) => ServerMsg::Refused(r),
+                Said::Snapshot(s) => ServerMsg::LiveSnapshot(s),
+            };
+            self.send(c, m);
+        }
+    }
+
+    /// §14 A device the server itself stands in (a speaker a bridge
+    /// reconciles): connection `c`, as `who`, in these instances. Its frames
+    /// are queued for `c` as a client's are; it calls with
+    /// [`Server::recv`] of a `call`, and is taken out with
+    /// [`Server::disconnect`].
+    pub fn participate(&mut self, c: ConnId, who: &Identity, device: DeviceDecl, instances: Vec<Instance>) {
+        let now = self.now();
+        let w = LiveWho {
+            user: who.user.clone(),
+            session: who.session.clone(),
+            roles: who.roles.clone(),
+        };
+        let out = self.desk.stand(c, w, device, instances, now);
+        self.said(out);
+    }
+
+    /// §14 When the next coalesced live relay is due, by the clock.
+    pub fn deadline(&self) -> Option<i64> {
+        self.desk.deadline()
+    }
+
+    /// §14 Relay what is due now.
+    pub fn tick(&mut self) {
+        let now = self.now();
+        let out = self.desk.tick(now);
+        self.said(out);
     }
 
     /// `docs/plan-guards.md` D2 Serve each connection what its identity
@@ -1610,6 +1779,18 @@ impl<M: Machine> Server<M> {
 
     /// §12.3 A frame from a connection.
     pub fn recv(&mut self, c: ConnId, msg: ClientMsg) {
+        // §14 A participant the server stands in has no log connection, and
+        // only calls.
+        if !self.conns.contains_key(&c) && self.desk.stands(c) {
+            let now = self.now();
+            let out = match msg {
+                ClientMsg::Call(call) => self.desk.call(c, call, now),
+                ClientMsg::Resync(i) => self.desk.resync(c, &i),
+                _ => vec![],
+            };
+            self.said(out);
+            return;
+        }
         if !matches!(msg, ClientMsg::Hello { .. }) && !self.conns.contains_key(&c) {
             self.send(
                 c,
@@ -1620,7 +1801,7 @@ impl<M: Machine> Server<M> {
             return;
         }
         match msg {
-            ClientMsg::Hello { sub, token, .. } => match (self.auth)(token.as_deref()) {
+            ClientMsg::Hello { sub, token, device, .. } => match (self.auth)(token.as_deref()) {
                 None => self.send(
                     c,
                     ServerMsg::Denied {
@@ -1708,6 +1889,19 @@ impl<M: Machine> Server<M> {
                                 covers,
                             },
                         );
+                    }
+                    // §14 A device: subscribed to what its scope gives it,
+                    // after the log has been answered.
+                    if let (Some(d), true) = (device, self.desk.is_live()) {
+                        let who = &self.conns[&c].who;
+                        let w = LiveWho {
+                            user: who.user.clone(),
+                            session: who.session.clone(),
+                            roles: who.roles.clone(),
+                        };
+                        let now = self.now();
+                        let out = self.desk.hello(c, w, d, now);
+                        self.said(out);
                     }
                 }
             },
@@ -1911,6 +2105,15 @@ impl<M: Machine> Server<M> {
                 let post = live::speak(&self.machine, &mut self.rooms, c, &frame);
                 self.deliver(post);
             }
+            ClientMsg::Call(call) => {
+                let now = self.now();
+                let out = self.desk.call(c, call, now);
+                self.said(out);
+            }
+            ClientMsg::Resync(i) => {
+                let out = self.desk.resync(c, &i);
+                self.said(out);
+            }
         }
     }
 
@@ -1951,6 +2154,9 @@ impl<M: Machine> Server<M> {
         let post = live::depart(&self.machine, &mut self.rooms, c);
         self.conns.remove(&c);
         self.deliver(post);
+        let now = self.now();
+        let out = self.desk.part(c, now);
+        self.said(out);
     }
 
     /// §12.4 Fan-out: every connection, everything above what it has been
@@ -2242,6 +2448,7 @@ mod tests {
             },
             token: Some("alice".into()),
             spec: crate::ir::SPEC_VERSION,
+            device: None,
         };
         sv.recv(1, hello);
         let _ = sv.take_outgoing();

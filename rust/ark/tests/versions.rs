@@ -647,6 +647,7 @@ fn a_verify_below_the_head_over_older_facts_agrees() {
             },
             token: Some("alice".into()),
             spec: ark::ir::SPEC_VERSION,
+            device: None,
         },
     );
     let _ = sv.take_outgoing();

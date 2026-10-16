@@ -16,6 +16,9 @@ struct Inner {
     closures: BTreeMap<FnHash, Closure>,
     by_name: BTreeMap<String, FnHash>,
     natives: BTreeMap<FnHash, Procedure>,
+    /// `docs/plan-live.md` The module's live states, and those this build
+    /// runs natively.
+    live: ark::live::state::Runner,
 }
 
 /// An app's module, shared cheaply: clone it into every peer, the server and
@@ -36,7 +39,27 @@ impl Domain {
     /// An authored module (`spec/AUTHORING.md`): its emitted IR, and every
     /// procedure native. What an app passes: `Domain::new(&my_domain::module())`.
     pub fn new(m: &authoring::Module) -> Domain {
-        Domain::of(m.build().clone(), m.procedures())
+        Domain::of(m.build().clone(), m.procedures()).with_lives(m.lives())
+    }
+
+    /// `docs/plan-live.md` Run these live states natively; one whose hash
+    /// the module does not name is dropped and interpreted.
+    pub fn with_lives(self, lives: Vec<authoring::NativeLive>) -> Domain {
+        let mut inner = Arc::try_unwrap(self.0).unwrap_or_else(|a| Inner {
+            module: a.module.clone(),
+            closures: a.closures.clone(),
+            by_name: a.by_name.clone(),
+            natives: a.natives.clone(),
+            live: a.live.clone(),
+        });
+        inner.live.hold(lives);
+        Domain(Arc::new(inner))
+    }
+
+    /// `docs/plan-live.md` The module's live states, as a peer and a server
+    /// run them.
+    pub fn live(&self) -> &ark::live::state::Runner {
+        &self.0.live
     }
 
     /// A module and the procedures this build holds; a procedure whose hash
@@ -46,11 +69,13 @@ impl Domain {
         let closures = closures(&module);
         let by_name = closures.iter().map(|(h, c)| (c.function.name.clone(), h.clone())).collect();
         let natives = procedures.into_iter().filter(|(h, _)| closures.contains_key(h)).collect();
+        let live = ark::live::state::Runner::of_module(&module);
         Domain(Arc::new(Inner {
             module,
             closures,
             by_name,
             natives,
+            live,
         }))
     }
 

@@ -84,10 +84,110 @@ use crate::retain::{self, Cursors, Heard};
 
 /// Where a connection's frames go.
 enum Sink {
-    Socket(mpsc::UnboundedSender<ServerMsg>),
+    /// A socket's writer task, through its [`Outbox`]; closed when the hub
+    /// lets the connection go.
+    Socket(SocketSink),
     Local(std::sync::mpsc::Sender<ServerMsg>),
     /// Live frames only, raw.
     Standing(Box<dyn Fn(Vec<u8>) + Send>),
+    /// `docs/plan-live.md` A device the server stands in for — a speaker a
+    /// bridge reconciles — in live instances, and not in the log: every
+    /// live frame addressed to it ([`HubHandle::participate`]).
+    Participant(Box<dyn Fn(ServerMsg) + Send>),
+}
+
+impl Sink {
+    /// A replica: a connection that holds the log.
+    fn is_replica(&self) -> bool {
+        matches!(self, Sink::Socket(_) | Sink::Local(_))
+    }
+}
+
+/// The hub's end of a socket's [`Outbox`]: the hub dropping it — letting the
+/// connection go — closes the outbox, and the writer closes the socket.
+pub(crate) struct SocketSink(pub(crate) Outbox);
+
+impl Drop for SocketSink {
+    fn drop(&mut self) {
+        self.0.close();
+    }
+}
+
+/// `docs/plan-live.md` What waits to be written to one socket, in order.
+/// Every frame goes out, in the order it was queued, but one: an ephemeral
+/// live frame (`applied` with a counter) is coalesced — queued again while
+/// an older one of the same instance, device and transition still waits,
+/// the older is dropped and the newer goes to the back. So a slow receiver
+/// is sent the latest pointer rather than a backlog, nothing ever overtakes
+/// what was queued before it, and the log's frames and the ordered live
+/// ones are never dropped or reordered.
+#[derive(Clone, Default)]
+pub struct Outbox(Arc<OutboxInner>);
+
+#[derive(Default)]
+struct OutboxInner {
+    queue: Mutex<std::collections::VecDeque<ServerMsg>>,
+    ready: tokio::sync::Notify,
+    closed: std::sync::atomic::AtomicBool,
+}
+
+// What a frame coalesces by: an ephemeral applied's instance, device and
+// transition; nothing else coalesces.
+fn coalesces(m: &ServerMsg) -> Option<(&ark::live::state::Instance, &str, &str)> {
+    match m {
+        ServerMsg::Applied(a) if matches!(a.order, ark::live::state::Order::Ephemeral { .. }) => {
+            Some((&a.instance, a.device.as_str(), a.transition.as_str()))
+        }
+        _ => None,
+    }
+}
+
+impl Outbox {
+    pub fn new() -> Outbox {
+        Outbox::default()
+    }
+
+    /// Queue a frame, coalescing an ephemeral one (the type docs).
+    pub fn push(&self, m: ServerMsg) {
+        {
+            let mut q = self.0.queue.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(key) = coalesces(&m) {
+                q.retain(|w| coalesces(w) != Some(key));
+            }
+            q.push_back(m);
+        }
+        self.0.ready.notify_one();
+    }
+
+    /// Everything waiting, oldest first.
+    pub fn take(&self) -> Vec<ServerMsg> {
+        self.0.queue.lock().unwrap_or_else(|e| e.into_inner()).drain(..).collect()
+    }
+
+    /// How many frames wait.
+    pub fn len(&self) -> usize {
+        self.0.queue.lock().unwrap_or_else(|e| e.into_inner()).len()
+    }
+
+    /// Whether none waits.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Until something is queued, or the outbox is closed.
+    pub async fn ready(&self) {
+        self.0.ready.notified().await
+    }
+
+    /// The hub has let the connection go.
+    pub fn close(&self) {
+        self.0.closed.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.0.ready.notify_one();
+    }
+
+    pub fn is_closed(&self) -> bool {
+        self.0.closed.load(std::sync::atomic::Ordering::SeqCst)
+    }
 }
 
 /// The machine and everything around it, on its thread. What
@@ -142,6 +242,75 @@ pub struct Hub {
     /// asked, at what sequence, and whether the authority agreed (`None`:
     /// it could not say).
     verified: std::collections::VecDeque<(String, Seq, Option<bool>)>,
+    /// `docs/plan-live.md` The live instances' kept snapshots as last
+    /// written (`live-states.cbor`), and the hub's own way back to its
+    /// thread, for the tick a coalesced live relay is due at.
+    live_kept: Option<Vec<u8>>,
+    ticker: Option<mpsc::WeakUnboundedSender<Cmd>>,
+    tick_at: Option<i64>,
+}
+
+const LIVE_KEPT: &str = "live-states.cbor";
+
+/// `docs/plan-live.md` What a server keeps of its live instances, as a file:
+/// canonical CBOR of `{state: {type: bytes, instances: {key: {seq, value}}}}`
+/// — each state's instances under the hash of its type, so that a state
+/// whose type changed is dropped at start rather than misread, and each
+/// instance its sequence and the ordered part of its value, ephemeral
+/// fields left out.
+fn encode_live(desk: &ark::live::state::Desk) -> Vec<u8> {
+    use ark::value::Value;
+    let mut by_state: BTreeMap<String, BTreeMap<String, Value>> = BTreeMap::new();
+    for (i, seq, v) in desk.kept() {
+        by_state
+            .entry(i.state.clone())
+            .or_default()
+            .insert(i.key.clone(), Value::record(vec![("seq", Value::Int(seq)), ("value", v)]));
+    }
+    let states: BTreeMap<String, Value> = by_state
+        .into_iter()
+        .filter_map(|(st, instances)| {
+            let c = desk.runner.closures.get(&st)?;
+            Some((
+                st,
+                Value::record(vec![
+                    ("type", Value::bytes(ark::hash::state_type_hash(c))),
+                    ("instances", Value::from(instances)),
+                ]),
+            ))
+        })
+        .collect();
+    ark::canon::encode(&Value::from(states))
+}
+
+/// The kept instances read back, each restored into the desk at `now` as a
+/// restart restores it: ordered part, empty slots, `on_restore`. A state the
+/// module no longer has, or whose type it no longer has, is dropped, and
+/// said.
+fn restore_live(desk: &mut ark::live::state::Desk, bytes: &[u8], now: i64) -> std::result::Result<usize, String> {
+    use ark::value::Value;
+    let v = ark::canon::decode(bytes).map_err(|e| e.to_string())?;
+    let Value::Struct(states) = v else {
+        return Err("not a map of states".into());
+    };
+    let mut n = 0;
+    for (st, kept) in states.iter() {
+        let Some(c) = desk.runner.closures.get(st) else {
+            eprintln!("ark-server: dropping the kept live state {st}: the module has none");
+            continue;
+        };
+        if kept.field("type") != Value::bytes(ark::hash::state_type_hash(c)) {
+            eprintln!("ark-server: dropping the kept live state {st}: its type changed");
+            continue;
+        }
+        let Value::Struct(instances) = kept.field("instances") else { continue };
+        for (key, inst) in instances.iter() {
+            let Value::Int(seq) = inst.field("seq") else { continue };
+            desk.restore(ark::live::state::Instance::new(st.clone(), key.clone()), seq, inst.field("value"), now);
+            n += 1;
+        }
+    }
+    Ok(n)
 }
 
 /// How many `Verify` answers the hub keeps for the admin page.
@@ -223,6 +392,20 @@ impl Hub {
             }
         }
         server.rooms.kept = kept.clone();
+        // `docs/plan-live.md` The live instances kept from before.
+        let mut live_kept = None;
+        if let Some(dir) = &data {
+            match std::fs::read(dir.join(LIVE_KEPT)) {
+                Ok(b) => {
+                    let now = server.now();
+                    let n = restore_live(&mut server.desk, &b, now).map_err(|e| anyhow!("{}: {e}", dir.join(LIVE_KEPT).display()))?;
+                    eprintln!("ark-server: {n} live instances restored");
+                    live_kept = Some(encode_live(&server.desk));
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e).with_context(|| format!("reading {}", dir.join(LIVE_KEPT).display())),
+            }
+        }
         let cursors = data.as_deref().map(retain::load).unwrap_or_default();
         // A log is named once, when it is created: here, for a new one or
         // one loaded from a directory written before logs had names — the
@@ -261,7 +444,44 @@ impl Hub {
             due: vec![],
             authority,
             verified: Default::default(),
+            live_kept,
+            ticker: None,
+            tick_at: None,
         })
+    }
+
+    /// `docs/plan-live.md` A coalesced live relay is waiting: a tick is
+    /// sent back to this thread when it is due, once per time it is due at.
+    fn schedule(&mut self) {
+        let Some(at) = self.server.deadline() else {
+            self.tick_at = None;
+            return;
+        };
+        if self.tick_at == Some(at) {
+            return;
+        }
+        self.tick_at = Some(at);
+        let Some(tx) = self.ticker.clone() else { return };
+        let wait = (at - self.server.now()).max(0) as u64;
+        let _ = std::thread::Builder::new().name("ark-hub-tick".into()).spawn(move || {
+            std::thread::sleep(Duration::from_millis(wait));
+            if let Some(tx) = tx.upgrade() {
+                let _ = tx.send(Cmd::Tick);
+            }
+        });
+    }
+
+    fn participate(
+        &mut self,
+        c: ConnId,
+        who: Identity,
+        device: ark::live::state::DeviceDecl,
+        instances: Vec<ark::live::state::Instance>,
+        sink: Box<dyn Fn(ServerMsg) + Send>,
+    ) {
+        self.sinks.insert(c, Sink::Participant(sink));
+        self.server.participate(c, &who, device, instances);
+        self.after();
     }
 
     /// `docs/plan-guards.md` D3 Hand every entry of these functions,
@@ -329,7 +549,7 @@ impl Hub {
 
     pub fn health(&self) -> Health {
         Health {
-            connections: self.sinks.values().filter(|s| !matches!(s, Sink::Standing(_))).count(),
+            connections: self.sinks.values().filter(|s| s.is_replica()).count(),
             head: self.server.authority.log.head_seq(),
             horizon: self.server.authority.log.horizon(),
             rooms: self.server.rooms.open.iter().map(|(r, (_, ps))| (r.clone(), ps.len())).collect(),
@@ -347,7 +567,7 @@ impl Hub {
                     open: self
                         .sinks
                         .iter()
-                        .filter(|(_, s)| !matches!(s, Sink::Standing(_)))
+                        .filter(|(_, s)| s.is_replica())
                         .filter(|(c, _)| self.server.identity(**c).is_some_and(|w| &w.user == user && &w.session == session))
                         .count(),
                 })
@@ -414,7 +634,9 @@ impl Hub {
     }
 
     fn detach(&mut self, c: ConnId) {
-        if matches!(self.sinks.get(&c), Some(Sink::Standing(_))) {
+        if matches!(self.sinks.get(&c), Some(Sink::Participant(_))) {
+            self.server.disconnect(c);
+        } else if matches!(self.sinks.get(&c), Some(Sink::Standing(_))) {
             let post = live::depart(&self.relay, &mut self.server.rooms, c);
             self.deliver(post);
         } else {
@@ -429,7 +651,10 @@ impl Hub {
     }
 
     fn recv(&mut self, c: ConnId, msg: ClientMsg) {
-        if matches!(self.sinks.get(&c), Some(Sink::Standing(_))) {
+        if matches!(self.sinks.get(&c), Some(Sink::Participant(_))) {
+            // A participant only calls, and the machine knows it as one.
+            self.server.recv(c, msg);
+        } else if matches!(self.sinks.get(&c), Some(Sink::Standing(_))) {
             // A standing peer only speaks.
             if let ClientMsg::Say { frame } = msg {
                 let post = live::speak(&self.relay, &mut self.server.rooms, c, &frame);
@@ -551,9 +776,8 @@ impl Hub {
     fn send(&self, to: ConnId, m: ServerMsg) {
         match self.sinks.get(&to) {
             // A writer that has gone is a disconnect on its way.
-            Some(Sink::Socket(tx)) => {
-                let _ = tx.send(m);
-            }
+            Some(Sink::Socket(out)) => out.0.push(m),
+            Some(Sink::Participant(f)) => f(m),
             Some(Sink::Local(tx)) => {
                 let _ = tx.send(m);
             }
@@ -646,12 +870,7 @@ impl Hub {
     /// Past [`GIVE_UP_AFTER`]: every connection that is a replica closed,
     /// and nothing said to any of them (the module docs).
     fn close_for_the_disk(&mut self) {
-        let conns: Vec<ConnId> = self
-            .sinks
-            .iter()
-            .filter(|(_, s)| !matches!(s, Sink::Standing(_)))
-            .map(|(c, _)| *c)
-            .collect();
+        let conns: Vec<ConnId> = self.sinks.iter().filter(|(_, s)| s.is_replica()).map(|(c, _)| *c).collect();
         for c in &conns {
             // Dropping the sender is the close: the socket's task, or the
             // in-process transport, sees its channel end.
@@ -676,7 +895,7 @@ impl Hub {
         let gone: Vec<ConnId> = self
             .sinks
             .iter()
-            .filter(|(_, s)| !matches!(s, Sink::Standing(_)))
+            .filter(|(_, s)| s.is_replica())
             .map(|(c, _)| *c)
             .filter(|c| self.server.identity(*c).is_some_and(|who| who.session == session))
             .collect();
@@ -714,6 +933,22 @@ impl Hub {
         }
         for (room, b) in &self.server.rooms.kept {
             kept.insert(room.clone(), b.clone());
+        }
+        // `docs/plan-live.md` The live instances, when one's ordered part
+        // moved and what would be written is not what was.
+        if self.server.desk.take_moved() {
+            let bytes = encode_live(&self.server.desk);
+            if self.live_kept.as_ref() != Some(&bytes) {
+                let path = dir.join(LIVE_KEPT);
+                let tmp = dir.join(format!(".{LIVE_KEPT}.tmp"));
+                let wrote = std::fs::create_dir_all(&dir)
+                    .and_then(|_| std::fs::write(&tmp, &bytes))
+                    .and_then(|_| std::fs::rename(&tmp, &path));
+                match wrote {
+                    Ok(()) => self.live_kept = Some(bytes),
+                    Err(e) => eprintln!("ark-server: could not write {}: {e}", path.display()),
+                }
+            }
         }
         let live: BTreeSet<&String> = self.server.rooms.kept.keys().chain(self.server.rooms.open.keys()).collect();
         kept.retain(|r, _| live.contains(r));
@@ -753,6 +988,17 @@ enum Cmd {
     Read(Reader),
     Write(Changer),
     Revoked(String),
+    /// `docs/plan-live.md` A device the server stands in for, in live
+    /// instances.
+    Participate(
+        ConnId,
+        Identity,
+        ark::live::state::DeviceDecl,
+        Vec<ark::live::state::Instance>,
+        Box<dyn Fn(ServerMsg) + Send>,
+    ),
+    /// A coalesced live relay is due.
+    Tick,
 }
 
 /// The async (and sync) side's handle on the hub's thread. Cheap to clone;
@@ -778,12 +1024,14 @@ impl HubHandle {
         let (built, ready) = std::sync::mpsc::channel::<Result<()>>();
         let failure: Arc<Mutex<Option<String>>> = Arc::default();
         let shared = failure.clone();
+        let ticker = tx.downgrade();
         std::thread::Builder::new()
             .name("ark-hub".into())
             .spawn(move || {
                 let mut hub = match make() {
                     Ok(mut h) => {
                         h.failure = shared;
+                        h.ticker = Some(ticker);
                         let _ = built.send(Ok(()));
                         h
                     }
@@ -825,7 +1073,14 @@ impl HubHandle {
                             answer();
                         }
                         Cmd::Revoked(session) => hub.revoked(&session),
+                        Cmd::Participate(c, who, device, instances, sink) => hub.participate(c, who, device, instances, sink),
+                        Cmd::Tick => {
+                            hub.tick_at = None;
+                            hub.server.tick();
+                            hub.after();
+                        }
                     }
+                    hub.schedule();
                 }
             })
             .context("spawning the hub thread")?;
@@ -853,8 +1108,8 @@ impl HubHandle {
     }
 
     /// A socket opened: its frames go down `tx`.
-    pub fn attach_socket(&self, c: ConnId, tx: mpsc::UnboundedSender<ServerMsg>) -> Result<()> {
-        self.send(Cmd::Attach(c, Sink::Socket(tx)))
+    pub fn attach_socket(&self, c: ConnId, out: Outbox) -> Result<()> {
+        self.send(Cmd::Attach(c, Sink::Socket(SocketSink(out))))
     }
 
     /// A connection in this process: its frames go down a std channel.
@@ -905,6 +1160,29 @@ impl HubHandle {
     /// Say a frame as a standing peer.
     pub fn say(&self, c: ConnId, frame: Vec<u8>) -> Result<()> {
         self.recv(c, ClientMsg::Say { frame })
+    }
+
+    /// `docs/plan-live.md` Stand a device the server stands in for — a
+    /// speaker a bridge reconciles — in these live instances, as `who`,
+    /// whoever's scope they are in: it is in presence as `device`, its
+    /// frames — `applied`, `refused`, `live_snapshot` — are handed to
+    /// `hears`, it calls with [`HubHandle::call`], and it leaves with
+    /// [`HubHandle::detach`].
+    pub fn participate(
+        &self,
+        who: Identity,
+        device: ark::live::state::DeviceDecl,
+        instances: Vec<ark::live::state::Instance>,
+        hears: impl Fn(ServerMsg) + Send + 'static,
+    ) -> Result<ConnId> {
+        let c = self.fresh();
+        self.send(Cmd::Participate(c, who, device, instances, Box::new(hears)))?;
+        Ok(c)
+    }
+
+    /// `docs/plan-live.md` Call a transition as a participant.
+    pub fn call(&self, c: ConnId, call: ark::live::state::Call) -> Result<()> {
+        self.recv(c, ClientMsg::Call(call))
     }
 
     /// Run `f` against the hub on its thread and hand back what it says.
@@ -1504,5 +1782,100 @@ mod tests {
             }
             assert_eq!(hub.cursors()[&phone], heard, "a session nobody heard again stays as it was");
         }
+    }
+
+    /// `docs/plan-live.md` Coalescing under a blocked socket: a laptop
+    /// whose socket takes nothing while the phone moves its pointer five
+    /// times, bumps, and moves it once more, is owed the bump and the last
+    /// pointer, in that order — the five before the bump are dropped, the
+    /// sixth having said all they did, since nothing ordered can read a
+    /// pointer — and its view, once it reads them, is the phone's.
+    /// Falsified twice: by `Outbox::push` not coalescing (seven frames
+    /// waited), and by its replacing a waiting frame where it stood rather
+    /// than going to the back (the last pointer arrived before the bump
+    /// it came after).
+    #[test]
+    fn a_blocked_socket_is_owed_the_latest_pointer_and_every_ordered_call() {
+        use ark::live::state::{DeviceDecl, Order};
+        let d = demo::live_domain();
+        let mut hub = crate::open_hub("t", &d, None, trusting(), None, open_access(), Box::new(crate::Quiet), vec![]).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        hub.attach(1, Sink::Local(tx));
+        let outbox = Outbox::new();
+        hub.attach(2, Sink::Socket(SocketSink(outbox.clone())));
+        let open = |name: &str| {
+            let opts = Options::dev("alice").with_device(DeviceDecl::new(name, "phone", name, true));
+            let mut p = Device::open_memory(d.clone(), opts).unwrap();
+            p.connected();
+            p
+        };
+        let (mut phone, mut laptop) = (open("phone"), open("laptop"));
+        let settle = |hub: &mut Hub, phone: &mut Device, laptop: Option<&mut Device>| {
+            let mut laptop = laptop;
+            loop {
+                let mut quiet = true;
+                for m in phone.take_outgoing() {
+                    quiet = false;
+                    hub.recv(1, m);
+                }
+                for m in rx.try_iter() {
+                    quiet = false;
+                    phone.recv(m);
+                }
+                if let Some(l) = laptop.as_deref_mut() {
+                    for m in l.take_outgoing() {
+                        quiet = false;
+                        hub.recv(2, m);
+                    }
+                    for m in outbox.take() {
+                        quiet = false;
+                        l.recv(m);
+                    }
+                }
+                if quiet {
+                    return;
+                }
+            }
+        };
+        settle(&mut hub, &mut phone, Some(&mut laptop));
+        assert_eq!(laptop.live("room").unwrap().field("devices").as_struct().len(), 2);
+
+        // The laptop's socket stops taking. Each pointer is spaced past the
+        // relay's rate, so that the hub sends every one and only the
+        // outbox can coalesce them.
+        let point = |phone: &mut Device, at: i64| {
+            std::thread::sleep(Duration::from_millis(50));
+            phone.call("room", "point", args([("at", Value::Int(at))])).unwrap();
+        };
+        for at in 1..=5 {
+            point(&mut phone, at);
+            settle(&mut hub, &mut phone, None);
+        }
+        phone.call("room", "bump", args([("by", Value::Int(1))])).unwrap();
+        settle(&mut hub, &mut phone, None);
+        point(&mut phone, 6);
+        settle(&mut hub, &mut phone, None);
+
+        let frames = outbox.take();
+        let waiting: Vec<(String, bool, Value)> = frames
+            .iter()
+            .map(|m| match m {
+                ServerMsg::Applied(a) => {
+                    let at = a.input.get("at").cloned().unwrap_or(Value::Null);
+                    (a.transition.clone(), matches!(a.order, Order::Ephemeral { .. }), at)
+                }
+                other => panic!("only applied frames wait: {other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            waiting,
+            vec![("bump".to_string(), false, Value::Null), ("point".to_string(), true, Value::Int(6)),]
+        );
+        // What the laptop makes of what it was owed: the phone's room.
+        for m in frames {
+            laptop.recv(m);
+        }
+        assert_eq!(laptop.live("room"), phone.live("room"));
+        assert_eq!(laptop.live("room").unwrap().field("pointer").field("phone"), Value::Int(6));
     }
 }

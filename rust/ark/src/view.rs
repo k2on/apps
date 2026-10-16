@@ -1259,6 +1259,12 @@ pub(crate) fn children(e: &Expr) -> Vec<&Expr> {
         Expr::Cmp(_, a, b) => vec![a, b],
         Expr::Map(xs, _, b) | Expr::Filter(xs, _, b) | Expr::Any(xs, _, b) | Expr::All(xs, _, b) | Expr::SortBy(xs, _, b) => vec![xs, b],
         Expr::Fold(xs, z, _, _, b) => vec![xs, z, b],
+        Expr::Variant(_, _, fs) => fs.values().collect(),
+        Expr::Case(v, arms) => std::iter::once(&**v).chain(arms.iter().map(|(_, _, b)| b)).collect(),
+        Expr::Slot(a, b) => vec![a, b],
+        Expr::SetSlot(a, b, c) => vec![a, b, c],
+        Expr::Slots(a) => vec![a],
+        Expr::LiveState | Expr::CtxNow | Expr::CtxDevice => vec![],
     }
 }
 
@@ -1298,6 +1304,12 @@ fn map_expr(e: &Expr, f: &mut dyn FnMut(&Expr) -> Option<Expr>) -> Expr {
         Expr::All(xs, x, b) => Expr::All(m(xs), *x, m(b)),
         Expr::SortBy(xs, x, b) => Expr::SortBy(m(xs), *x, m(b)),
         Expr::Fold(xs, z, a, x, b) => Expr::Fold(m(xs), m(z), *a, *x, m(b)),
+        Expr::Variant(t, n, fs) => Expr::Variant(t.clone(), n.clone(), fs.iter().map(|(k, v)| (k.clone(), *m(v))).collect()),
+        Expr::Case(v, arms) => Expr::Case(m(v), arms.iter().map(|(n, x, b)| (n.clone(), *x, *m(b))).collect()),
+        Expr::Slot(a, b) => Expr::Slot(m(a), m(b)),
+        Expr::SetSlot(a, b, c) => Expr::SetSlot(m(a), m(b), m(c)),
+        Expr::Slots(a) => Expr::Slots(m(a)),
+        Expr::LiveState | Expr::CtxNow | Expr::CtxDevice => e.clone(),
     }
 }
 

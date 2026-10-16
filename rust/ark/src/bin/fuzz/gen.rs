@@ -444,6 +444,8 @@ impl ModuleGen<'_> {
             .filter(|r| r.name == "api" || guarded)
             .collect(),
             live: vec![],
+            types: vec![],
+            states: vec![],
         }
     }
 
@@ -540,6 +542,9 @@ impl ModuleGen<'_> {
             Ty::Struct(fs) => {
                 let fs = fs.clone();
                 Expr::Struct(fs.iter().map(|(k, t)| (k.clone(), self.lit(t))).collect())
+            }
+            Ty::Named(_) | Ty::NonEmpty(_) | Ty::Sum(_) | Ty::PerDevice(_) | Ty::Ephemeral(_) => {
+                unreachable!("no column or input generated here is of a live state's type")
             }
         }
     }

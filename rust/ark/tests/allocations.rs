@@ -407,6 +407,8 @@ fn spin() -> ir::Module {
         functions: vec![f],
         routers: vec![],
         live: vec![],
+        types: vec![],
+        states: vec![],
     }
 }
 
@@ -465,6 +467,8 @@ fn std_over_a_local(f: ir::StdFn, ret: Ty) -> ir::Module {
         functions: vec![g],
         routers: vec![],
         live: vec![],
+        types: vec![],
+        states: vec![],
     }
 }
 

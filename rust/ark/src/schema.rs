@@ -25,6 +25,36 @@ pub enum Ty {
     Option(Box<Ty>),
     List(Box<Ty>),
     Struct(BTreeMap<FieldName, Ty>),
+    /// §2.2 A type declared in the module's type section
+    /// ([`crate::ir::Module::types`]), by its name: a record or a sum a
+    /// live state is made of (`docs/plan-live.md`). On the wire
+    /// `{"t":"named","name"}`, written only where a module declares one,
+    /// so no module before live state moves.
+    Named(String),
+    /// §2.2 A list of at least one element: a `List` to the type checker,
+    /// and held to having one wherever a value crosses a boundary — an
+    /// input, a snapshot, a transition's result ([`crate::conform`]). On
+    /// the wire `{"t":"non_empty_list","of"}`.
+    NonEmpty(Box<Ty>),
+    /// §2.2 A sum of records: exactly one of the named variants, each a
+    /// record of its own fields. Its value is a struct of the variant's
+    /// fields with the variant's name under `"t"` — the tag the IR's own
+    /// nodes carry — so no variant has a field named `t`. On the wire
+    /// `{"t":"sum","variants":{name: {field: ty}}}`.
+    Sum(BTreeMap<String, BTreeMap<FieldName, Ty>>),
+    /// §2.2 One value per device standing in a live instance, by device id
+    /// (`docs/plan-live.md`): a map, whose value is a struct keyed by the
+    /// ids in code-point order. A slot that holds nothing is a key that is
+    /// not there, so a slot reads as an `Option` of `T`, and `T` is never
+    /// one. On the wire `{"t":"per_device","of"}`.
+    PerDevice(Box<Ty>),
+    /// §2.2 A field of a live state's record that is ephemeral
+    /// (`docs/plan-live.md`, "Ordered and ephemeral fields"): a
+    /// `PerDevice` each device writes its own slot of, with no order among
+    /// devices, left out of the state's hash and of what the server keeps.
+    /// Only directly as a field of the state's own record. On the wire
+    /// `{"t":"ephemeral","of"}`.
+    Ephemeral(Box<Ty>),
 }
 
 /// The types a column may have (before nullability).

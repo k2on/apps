@@ -20,7 +20,8 @@
 //! | [`protocol`] | `Ark.Protocol`: the frames, the client and server machines |
 //! | [`raw`] | the authority's raw writes, `ark.put_row` and `ark.delete_row`: in every module by construction, named by fixed hashes (`docs/plan-guards.md` D4) |
 //! | [`view`] | `Ark.View`: [`view::pull`], the one evaluator of plans (spec v4), and incremental views with their contract |
-//! | [`live`] | `Ark.Live`: rooms per account over opaque frames |
+//! | [`live`] | `Ark.Live`: live state — a typed state machine per scope, sequenced per instance beside the log — and the rooms over opaque frames it supersedes |
+//! | [`types`] | the type section, a value held to a type, and the ephemeral part of a live state |
 //! | [`sim`] | `Ark.Sim`: the seeded fleet |
 //! | [`json`] | the vectors' JSON dialect (`spec/README.md`), printed and read back |
 //! | [`authoring`] | `spec/AUTHORING.md`: the vocabulary a domain is written in; a mutator run `Emit` or `Native`, a query described under `Emit` as its plan |
@@ -60,6 +61,7 @@ pub mod sim;
 pub mod stdlib;
 pub mod store;
 pub mod trace;
+pub mod types;
 pub mod unicode_tables;
 pub mod value;
 pub mod verify;

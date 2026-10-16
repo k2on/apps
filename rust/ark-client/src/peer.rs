@@ -54,6 +54,10 @@ pub struct Options {
     pub alone: bool,
     pub autos: Autos,
     pub timing: Timing,
+    /// `docs/plan-live.md` The device this peer declares at `hello`: it
+    /// subscribes to the live instances its scope gives it. `None` — the
+    /// default — and it holds no live state and says nothing it did not say.
+    pub device: Option<ark::live::state::DeviceDecl>,
 }
 
 impl Options {
@@ -67,6 +71,7 @@ impl Options {
             alone: false,
             autos: Autos::system(),
             timing: Timing::default(),
+            device: None,
         }
     }
 
@@ -118,6 +123,13 @@ impl Options {
 
     pub fn with_timing(mut self, timing: Timing) -> Options {
         self.timing = timing;
+        self
+    }
+
+    /// `docs/plan-live.md` Declare this peer a device: its id (empty is the
+    /// login's session), its kind, its name, and whether it can play.
+    pub fn with_device(mut self, device: ark::live::state::DeviceDecl) -> Options {
+        self.device = Some(device);
         self
     }
 }
@@ -197,6 +209,9 @@ pub struct Pumped {
     pub views: bool,
     /// Live frames that arrived, for [`Peer::heard`].
     pub heard: usize,
+    /// `docs/plan-live.md` A live instance's view moved, or a verdict on a
+    /// call arrived: [`Peer::live`] has something new.
+    pub live: bool,
     /// [`Peer::status`], when it differs by value from what the last pump
     /// reported: the one way a status line learns it changed.
     pub status: Option<Status>,
@@ -219,6 +234,7 @@ impl Pumped {
             && self.note.is_none()
             && !self.views
             && self.heard == 0
+            && !self.live
             && self.status.is_none()
     }
 }
@@ -321,7 +337,37 @@ pub struct Peer {
     /// many, and whether rebuilt — so [`Pumped::views`] says what moved
     /// since, whether or not the host has taken them.
     told: (usize, bool),
+    /// `docs/plan-live.md` What this peer knows of the server's clock: the
+    /// `at` of every ordered `applied` it heard, less its own clock when it
+    /// heard it, the latest few.
+    offsets: VecDeque<i64>,
+    /// The counter of this device's ephemeral calls: from the wall clock at
+    /// open, so a peer started again goes on above where it was.
+    counter: i64,
+    /// Ephemeral calls held back by [`Peer::call_throttled`], each with when
+    /// it may go.
+    throttled: Vec<Throttled>,
+    /// A live view moved since the last pump.
+    live_moved: bool,
 }
+
+/// An ephemeral call [`Peer::call_throttled`] holds until it may go: the
+/// newest per transition of a state, sent at most once per
+/// [`THROTTLE_MS`], the last always.
+#[derive(Clone, Debug)]
+struct Throttled {
+    state: String,
+    transition: String,
+    /// The input waiting, if one is.
+    waiting: Option<Args>,
+    /// When the last went, by [`crate::autos::monotonic_ms`].
+    sent: u64,
+}
+
+/// The least time between two ephemeral calls [`Peer::call_throttled`] sends
+/// for one transition, in milliseconds: twenty a second, under the server's
+/// thirty, and the final value always goes.
+pub const THROTTLE_MS: u64 = 50;
 
 /// The host's [`Wake`] behind a "drain requested" flag
 /// (`docs/plan-reactive.md`): the first event after a pump rings it, and
@@ -569,6 +615,10 @@ impl Peer {
         r.log_id = durable.log_id;
         r.hold(natives.iter().cloned());
         let mut client = Client::open(r, Mode::Whole, opts.token.clone()).with_schema(schema.clone());
+        // `docs/plan-live.md` A device of a module with live state holds it.
+        if let (false, Some(d)) = (domain.live().is_empty(), opts.device.clone()) {
+            client = client.with_live(ark::live::state::Watch::new(domain.live().clone(), Some(d)));
+        }
         // What the server's module is compared with (`behind`,
         // `docs/plan-db.md` D1).
         client.module = Some(domain.hash());
@@ -618,6 +668,10 @@ impl Peer {
             waker: None,
             published: None,
             told: (0, false),
+            offsets: VecDeque::new(),
+            counter: crate::autos::now_ms().saturating_mul(1000),
+            throttled: vec![],
+            live_moved: false,
         };
         match (had_log, opts.alone) {
             (true, _) => peer.resume_alone()?,
@@ -1054,6 +1108,136 @@ impl Peer {
         out
     }
 
+    // -- live state ------------------------------------------------------------
+
+    /// `docs/plan-live.md` The instance of the live state `name` this
+    /// peer's login holds — its scope's first key — if this peer is a
+    /// device of a module with that state.
+    pub fn instance(&self, name: &str) -> Option<ark::live::state::Instance> {
+        self.client.live.as_ref()?.instance_of(name, &self.ctx)
+    }
+
+    /// `docs/plan-live.md` The state `name` as this device sees it: what
+    /// the server confirmed with this device's own calls on top, ephemeral
+    /// slots and all. `None` before anything is known of it — a call, or
+    /// the snapshot the server sends on connecting.
+    pub fn live(&self, name: &str) -> Option<Value> {
+        let i = self.instance(name)?;
+        self.client.live.as_ref()?.view(&i).cloned()
+    }
+
+    /// `docs/plan-live.md` Call a transition of the live state `name`: run
+    /// over this device's view at once — so [`Peer::live`] has moved before
+    /// this returns — at its guess of the server's clock
+    /// ([`Peer::server_now`]), and sent if linked. An ordered call is
+    /// pending until the server answers, and said again on every
+    /// connection until it does; an ephemeral one is applied and done, and
+    /// dropped while unlinked. One path for both: the kind is the module's
+    /// (`ark::ir::ordering`). A refusal here is the preview's, and nothing
+    /// is sent.
+    pub fn call(&mut self, name: &str, transition: &str, input: Args) -> Result<ark::ir::ordering::Kind, Error> {
+        let i = self.instance(name).ok_or_else(|| Error::UnknownFunction(format!("live state {name}")))?;
+        let id = self.autos.new_id();
+        let now = self.server_now();
+        self.counter += 1;
+        let kind = self
+            .client
+            .call(&self.ctx, &i, transition, &input, id, now, self.counter)
+            .map_err(Error::Refused)?;
+        self.live_moved = true;
+        self.flush();
+        Ok(kind)
+    }
+
+    /// `docs/plan-live.md` [`Peer::call`] for an ephemeral transition a
+    /// finger drives — a pointer dragged, a scrubber held — throttled: at
+    /// most one send per [`THROTTLE_MS`] for this transition, trailing edge,
+    /// so the final value always goes. The view moves at once whatever is
+    /// sent; what is held is sent by a [`Peer::pump`] at [`Peer::deadline`].
+    pub fn call_throttled(&mut self, name: &str, transition: &str, input: Args) -> Result<ark::ir::ordering::Kind, Error> {
+        // An ordered call is never held: its order is the point of it.
+        if self.domain.live().kind(name, transition) == ark::ir::ordering::Kind::Ordered {
+            return self.call(name, transition, input);
+        }
+        let now = crate::autos::monotonic_ms();
+        let at = self.throttled.iter().position(|t| t.state == name && t.transition == transition);
+        match at {
+            Some(k) if now < self.throttled[k].sent + THROTTLE_MS => {
+                // The view moves now; the send waits for the window.
+                let i = self.instance(name).ok_or_else(|| Error::UnknownFunction(format!("live state {name}")))?;
+                let id = self.autos.new_id();
+                let at_ms = self.server_now();
+                self.counter += 1;
+                let w = self
+                    .client
+                    .live
+                    .as_mut()
+                    .ok_or_else(|| Error::UnknownFunction(format!("live state {name}")))?;
+                let called = w
+                    .call(&self.ctx, &i, transition, &input, id, at_ms, self.counter)
+                    .map_err(Error::Refused)?;
+                self.throttled[k].waiting = Some(input);
+                self.live_moved = true;
+                Ok(called.kind)
+            }
+            _ => {
+                let kind = self.call(name, transition, input)?;
+                match at {
+                    Some(k) => {
+                        self.throttled[k].sent = now;
+                        self.throttled[k].waiting = None;
+                    }
+                    None => self.throttled.push(Throttled {
+                        state: name.into(),
+                        transition: transition.into(),
+                        waiting: None,
+                        sent: now,
+                    }),
+                }
+                Ok(kind)
+            }
+        }
+    }
+
+    // What the throttle held and is now due, sent.
+    fn release_throttled(&mut self, now: u64) {
+        let due: Vec<(String, String, Args)> = self
+            .throttled
+            .iter_mut()
+            .filter(|t| t.waiting.is_some() && now >= t.sent + THROTTLE_MS)
+            .map(|t| {
+                t.sent = now;
+                (t.state.clone(), t.transition.clone(), t.waiting.take().expect("filtered"))
+            })
+            .collect();
+        for (s, t, input) in due {
+            let _ = self.call(&s, &t, input);
+        }
+    }
+
+    /// `docs/plan-live.md` The verdicts the server gave this device's live
+    /// calls since the last ask.
+    pub fn take_live_refusals(&mut self) -> Vec<Rejection> {
+        match &mut self.client.live {
+            Some(w) => w.take_refused().into_iter().map(|(id, reason)| Rejection { id, reason }).collect(),
+            None => vec![],
+        }
+    }
+
+    /// `docs/plan-live.md` The server's clock less this peer's, in
+    /// milliseconds, as the `at` stamps of what it has heard say: the
+    /// largest of the latest few, which is the one that waited least on the
+    /// way. `None` before any. What an app computes a moving position with.
+    pub fn server_offset(&self) -> Option<i64> {
+        self.offsets.iter().copied().max()
+    }
+
+    /// This peer's guess at the server's clock now: its own, moved by
+    /// [`Peer::server_offset`].
+    pub fn server_now(&self) -> i64 {
+        crate::autos::now_ms() + self.server_offset().unwrap_or(0)
+    }
+
     /// How many connections this peer has had: a live room that has never
     /// heard of this device is one whose epoch this peer has not introduced
     /// itself on.
@@ -1116,7 +1300,12 @@ impl Peer {
     /// open, stopped, alone — is no timer at all. The host arms one timer
     /// for it, and the open that follows clears it.
     pub fn deadline(&self) -> Option<u64> {
-        self.link.as_ref().and_then(Link::deadline)
+        let link = self.link.as_ref().and_then(Link::deadline);
+        let held = self.throttled.iter().filter(|t| t.waiting.is_some()).map(|t| t.sent + THROTTLE_MS).min();
+        match (link, held) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
     }
 
     /// Send what the engine has queued, now: a push, a live frame, a
@@ -1192,6 +1381,7 @@ impl Peer {
         }
         let heard_before = self.heard_frames;
         let mut p = Pumped::default();
+        self.release_throttled(now);
         if let Some(link) = &mut self.link {
             let polled = link.poll_at(now);
             if polled.opened {
@@ -1237,6 +1427,8 @@ impl Peer {
         p.views = now != self.told;
         self.told = now;
         p.heard = (self.heard_frames - heard_before) as usize;
+        let moved = self.client.live.as_mut().is_some_and(|w| w.take_moved());
+        p.live = std::mem::take(&mut self.live_moved) || moved;
         let status = self.status();
         if self.published.as_ref() != Some(&status) {
             self.published = Some(status.clone());
@@ -1283,6 +1475,16 @@ impl Peer {
     fn place(&mut self, msg: ServerMsg) {
         if matches!(msg, ServerMsg::Heard { .. }) {
             self.heard_frames += 1;
+        }
+        // `docs/plan-live.md` The server's clock, as an ordered call stamps
+        // it: a sample of the offset, the latest sixteen kept.
+        if let ServerMsg::Applied(a) = &msg {
+            if let ark::live::state::Order::Ordered { at, .. } = &a.order {
+                self.offsets.push_back(at - crate::autos::now_ms());
+                while self.offsets.len() > 16 {
+                    self.offsets.pop_front();
+                }
+            }
         }
         if matches!(msg, ServerMsg::Batch { .. } | ServerMsg::SnapshotOf { .. }) {
             self.served();

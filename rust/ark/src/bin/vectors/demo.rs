@@ -300,6 +300,19 @@ pub fn guarded() -> ark::ir::Module {
     Module::new((demo(), curated())).build().clone()
 }
 
+/// `docs/plan-live.md` The demo with its live state: the demo's router and
+/// `now`, which declares the room (`demo_live.rs`). What `module/live.json`
+/// and every live vector are over.
+pub fn live_module() -> ark::ir::Module {
+    Module::new((demo(), super::demo_live::live::<Demo>())).build().clone()
+}
+
+/// The live module's native states, to run as a peer that links the
+/// domain does.
+pub fn live_natives() -> Vec<ark::authoring::NativeLive> {
+    Module::new((demo(), super::demo_live::live::<Demo>())).lives()
+}
+
 /// The module, verified: orders completed and every function normalised,
 /// which is the form every hash is of.
 pub fn module() -> ark::ir::Module {

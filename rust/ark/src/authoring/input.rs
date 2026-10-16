@@ -106,6 +106,12 @@ pub fn id<T: Row>() -> FieldB<Id<T>> {
     field(<Id<T> as Data>::ty())
 }
 
+/// `docs/plan-live.md` A field of any type of the vocabulary — a record,
+/// a sum, a `NonEmpty`, a `PerDevice` — as its type says it.
+pub fn typed<V: Data>() -> FieldB<V> {
+    field(V::ty())
+}
+
 /// The variants of an enum.
 pub trait Variants {
     const VARIANTS: &'static [&'static str];

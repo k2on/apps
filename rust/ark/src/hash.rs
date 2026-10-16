@@ -102,6 +102,196 @@ pub fn closures(m: &Module) -> BTreeMap<FnHash, Closure> {
         .collect()
 }
 
+/// §8.4 A live state with everything it runs (`docs/plan-live.md`): the
+/// state, normalised; the declarations of every named type it reaches, by
+/// name; and every helper its init, scope and transitions reach, in the
+/// module's order — a complete program [`crate::eval::run_transition`] runs
+/// without consulting any module, as a function's closure is.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LiveClosure {
+    pub state: crate::ir::State,
+    pub types: BTreeMap<String, crate::schema::Ty>,
+    pub helpers: Vec<Function>,
+}
+
+impl LiveClosure {
+    /// The state's type, resolved, its ephemeral markers kept.
+    pub fn state_ty(&self) -> crate::schema::Ty {
+        crate::types::resolve(&self.types, &self.state.ty).unwrap_or_else(|_| self.state.ty.clone())
+    }
+
+    /// The fields of the state that are ephemeral.
+    pub fn ephemeral(&self) -> std::collections::BTreeSet<String> {
+        crate::types::ephemeral_fields(&self.state_ty())
+    }
+
+    /// The kind of a transition (`crate::ir::ordering`): a hook, and a
+    /// name the state does not declare, are ordered.
+    pub fn kind(&self, name: &str) -> crate::ir::ordering::Kind {
+        match self.state.transitions.iter().find(|t| t.name == name) {
+            Some(t) => crate::ir::ordering::classify(&self.state_ty(), t),
+            None => crate::ir::ordering::Kind::Ordered,
+        }
+    }
+
+    /// §8.4 The hash of an instance's value: SHA-256 of the canonical
+    /// encoding of its ordered part, every ephemeral field left out — what
+    /// an `applied` frame carries and a replica compares.
+    pub fn value_hash(&self, v: &Value) -> Vec<u8> {
+        sha256(&encode(&crate::types::ordered_part(&self.ephemeral(), v)))
+    }
+}
+
+/// §8.4 The closure of a live state within a module.
+pub fn live_closure(m: &Module, st: &crate::ir::State) -> LiveClosure {
+    let mut seen: Vec<String> = Vec::new();
+    let mut todo: Vec<String> = crate::ir::state_calls(st);
+    todo.reverse();
+    while let Some(n) = todo.pop() {
+        if seen.contains(&n) {
+            continue;
+        }
+        if let Some(h) = m.lookup_function(&n) {
+            seen.push(n);
+            let mut more = reaches(h);
+            more.reverse();
+            todo.extend(more);
+        }
+    }
+    let all = m.type_map();
+    let mut types = BTreeMap::new();
+    let mut want: Vec<crate::schema::Ty> = vec![st.ty.clone()];
+    let mut exprs: Vec<&crate::ir::Expr> = vec![&st.init, &st.scope];
+    for t in st.all_transitions() {
+        want.extend(t.input.iter().map(|(_, f)| f.ty.clone()));
+        exprs.extend(t.guards.iter().map(|(e, _)| e));
+        for s in &t.body {
+            stmt_types(s, &mut want);
+        }
+    }
+    for e in exprs {
+        expr_types(e, &mut want);
+    }
+    while let Some(t) = want.pop() {
+        named_in(&t, &mut |n| {
+            if !types.contains_key(n) {
+                if let Some(d) = all.get(n) {
+                    types.insert(n.to_string(), d.clone());
+                    want.push(d.clone());
+                }
+            }
+        });
+    }
+    LiveClosure {
+        state: crate::ir::normalize_state(st),
+        types,
+        helpers: m.functions.iter().filter(|h| seen.contains(&h.name)).map(normalize).collect(),
+    }
+}
+
+/// Every live state of a module, by name, with its closure.
+pub fn live_closures(m: &Module) -> BTreeMap<String, LiveClosure> {
+    m.states.iter().map(|s| (s.name.clone(), live_closure(m, s))).collect()
+}
+
+fn named_in(t: &crate::schema::Ty, f: &mut dyn FnMut(&str)) {
+    use crate::schema::Ty;
+    match t {
+        Ty::Named(n) => f(n),
+        Ty::Option(x) | Ty::List(x) | Ty::NonEmpty(x) | Ty::PerDevice(x) | Ty::Ephemeral(x) => named_in(x, f),
+        Ty::Struct(fs) => fs.values().for_each(|x| named_in(x, f)),
+        Ty::Sum(vs) => vs.values().flat_map(|fs| fs.values()).for_each(|x| named_in(x, f)),
+        _ => {}
+    }
+}
+
+fn stmt_types(s: &crate::ir::Stmt, out: &mut Vec<crate::schema::Ty>) {
+    use crate::ir::Stmt;
+    match s {
+        Stmt::Let(_, e) | Stmt::Refuse(e) | Stmt::Return(Some(e)) => expr_types(e, out),
+        Stmt::If(c, a, b) => {
+            expr_types(c, out);
+            a.iter().chain(b).for_each(|s| stmt_types(s, out));
+        }
+        Stmt::For(_, xs, b) => {
+            expr_types(xs, out);
+            b.iter().for_each(|s| stmt_types(s, out));
+        }
+        _ => {}
+    }
+}
+
+fn expr_types(e: &crate::ir::Expr, out: &mut Vec<crate::schema::Ty>) {
+    use crate::ir::Expr;
+    match e {
+        Expr::Variant(t, _, _) | Expr::None(t) => out.push(t.clone()),
+        _ => {}
+    }
+    for c in crate::view::children(e) {
+        expr_types(c, out);
+    }
+}
+
+/// §8.4 The hash of a live state's closure: of the state's value — its
+/// transitions normalised — with the hashes of the helpers it reaches as
+/// `deps`, and the declarations of the types it reaches. What says two
+/// builds run one state machine.
+pub fn live_hash(c: &LiveClosure) -> FnHash {
+    sha256(&encode(&live_closure_value(c, &c.state)))
+}
+
+fn live_closure_value(c: &LiveClosure, st: &crate::ir::State) -> Value {
+    let mut deps = BTreeMap::new();
+    for n in crate::ir::state_calls(st) {
+        if let Some(h) = c.helpers.iter().find(|h| h.name == n) {
+            deps.insert(
+                n,
+                Value::bytes(function_hash(&Closure {
+                    function: h.clone(),
+                    helpers: c.helpers.clone(),
+                })),
+            );
+        }
+    }
+    let types = Value::List(c.types.iter().map(|(n, t)| crate::ir::type_decl_value(n, t)).collect());
+    Value::record(vec![
+        ("t", Value::text("live_closure")),
+        ("state", crate::ir::state_value(&deps, st)),
+        ("types", types),
+    ])
+}
+
+/// §8.4 The hash of one transition: the closure of a state carrying that
+/// transition alone — its init, scope and type with it — so a transition
+/// is named by everything it runs and nothing its siblings do.
+pub fn transition_hash(c: &LiveClosure, name: &str) -> Option<FnHash> {
+    let t = c.state.transition(name)?.clone();
+    let only = crate::ir::State {
+        transitions: vec![],
+        on_join: None,
+        on_leave: None,
+        on_restore: None,
+        ..c.state.clone()
+    };
+    let only = match name {
+        crate::ir::ON_JOIN => crate::ir::State { on_join: Some(t), ..only },
+        crate::ir::ON_LEAVE => crate::ir::State { on_leave: Some(t), ..only },
+        crate::ir::ON_RESTORE => crate::ir::State { on_restore: Some(t), ..only },
+        _ => crate::ir::State {
+            transitions: vec![t],
+            ..only
+        },
+    };
+    Some(sha256(&encode(&live_closure_value(c, &only))))
+}
+
+/// §8.4 The hash of a live state's type, resolved: what names the snapshot
+/// a server keeps of an instance, so that a state whose type changed is
+/// dropped at start rather than misread. Ephemeral markers are part of it.
+pub fn state_type_hash(c: &LiveClosure) -> Vec<u8> {
+    sha256(&encode(&crate::ir::ty_value(&c.state_ty())))
+}
+
 /// §8.1 A row's leaf: `sha256(enc(Text table) ‖ enc(Struct row))`, read
 /// as a 256-bit big-endian integer when it is summed.
 pub fn leaf(table: &str, row: &Row) -> [u8; 32] {

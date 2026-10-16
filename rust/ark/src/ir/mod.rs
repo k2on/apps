@@ -28,6 +28,7 @@
 pub mod decode;
 pub mod encode;
 pub mod normalize;
+pub mod ordering;
 pub mod reads;
 
 use std::collections::BTreeMap;
@@ -37,14 +38,14 @@ use crate::value::{FieldName, TableName, Value};
 
 pub use crate::hash::{closure, closures, function_hash, module_hash, Closure, FnHash};
 pub use decode::{
-    closure_from_value, function_from_value, hold_from_value, module_from_value, plan_from_value, router_from_value, schema_from_value,
-    ty_from_value, DecodeError,
+    closure_from_value, expr_from_value, function_from_value, hold_from_value, module_from_value, plan_from_value, router_from_value,
+    schema_from_value, state_from_value, ty_from_value, DecodeError,
 };
 pub use encode::{
-    calls, check_value, closure_value, field_value, function_value, hold_value, module_value, plan_value, reaches, router_value, schema_value,
-    ty_value,
+    calls, check_value, closure_value, expr_value, field_value, function_value, hold_value, module_value, plan_value, reaches, router_value,
+    schema_value, state_calls, state_value, transition_calls, transition_value, ty_value, type_decl_value,
 };
-pub use normalize::{normalize, normalize_module};
+pub use normalize::{normalize, normalize_module, normalize_state, normalize_transition};
 pub use reads::reads;
 
 /// The version of this specification a module was written against.
@@ -66,6 +67,17 @@ pub struct Module {
     /// §3.9 The live section: the frame types an app's realtime channel
     /// carries, by name.
     pub live: Vec<(String, Ty)>,
+    /// §2.2 The type section (`docs/plan-live.md`): the records and sums a
+    /// live state is made of, each by its name, which [`Ty::Named`]
+    /// refers to — what a generator prints as a type of its own. No type
+    /// refers to itself, through any number of others. On the wire
+    /// `types`, a list of `{"t":"type","name","ty"}`, written only when
+    /// not empty: a module without one is the bytes it was.
+    pub types: Vec<(String, Ty)>,
+    /// §3.12 The live states (`docs/plan-live.md`): a typed state machine
+    /// per scope, beside the log. On the wire `states`, written only when
+    /// not empty.
+    pub states: Vec<State>,
 }
 
 impl Module {
@@ -78,6 +90,112 @@ impl Module {
     pub fn lookup_router(&self, name: &str) -> Option<&Router> {
         self.routers.iter().find(|r| r.name == name)
     }
+
+    /// A live state by name.
+    pub fn lookup_state(&self, name: &str) -> Option<&State> {
+        self.states.iter().find(|s| s.name == name)
+    }
+
+    /// The type section as a map, which is how a named type is resolved.
+    pub fn type_map(&self) -> BTreeMap<String, Ty> {
+        self.types.iter().cloned().collect()
+    }
+}
+
+/// §3.12 A live state (`docs/plan-live.md`): one current value per
+/// instance, an instance per scope key, held by the server and never
+/// replayed tomorrow. Its value is of `ty`; it starts as `init`; `scope`
+/// names the instances a person is subscribed to, as a function of who
+/// they are; and it moves only by its transitions, each a pure function of
+/// the state, the call's context and its input, which the server sequences
+/// per instance. The three hooks are transitions the engine runs itself: a
+/// device arriving, a device leaving, and a snapshot restored at start.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct State {
+    pub name: String,
+    pub ty: Ty,
+    /// A constant expression of `ty`: the value an instance starts as.
+    pub init: Expr,
+    /// A `Text`, or a `List` of them, of the context alone (`ctx.user`,
+    /// `ctx.session`, roles, literals): the keys of the instances a person
+    /// holds, as a scope's holds are a function of who they are.
+    pub scope: Expr,
+    pub transitions: Vec<Transition>,
+    /// Run by the server when a device first stands in an instance; its
+    /// input is `device`, the device's record ([`device_ty`]) as it
+    /// declared itself at `Hello`.
+    pub on_join: Option<Transition>,
+    /// Run by the server when a device's last connection to an instance
+    /// goes, its input `device` as for `on_join`. Before it runs, the
+    /// engine clears the device's slot of every ephemeral field; its
+    /// ordered fields are the hook's to clear.
+    pub on_leave: Option<Transition>,
+    /// Run by the server over a snapshot it restores at start, with no
+    /// input and nobody present.
+    pub on_restore: Option<Transition>,
+}
+
+impl State {
+    /// A transition by name, a hook by its reserved name.
+    pub fn transition(&self, name: &str) -> Option<&Transition> {
+        match name {
+            ON_JOIN => self.on_join.as_ref(),
+            ON_LEAVE => self.on_leave.as_ref(),
+            ON_RESTORE => self.on_restore.as_ref(),
+            _ => self.transitions.iter().find(|t| t.name == name),
+        }
+    }
+
+    /// Every transition and hook, declared ones first, then the hooks in
+    /// the order join, leave, restore.
+    pub fn all_transitions(&self) -> impl Iterator<Item = &Transition> {
+        self.transitions
+            .iter()
+            .chain(self.on_join.iter())
+            .chain(self.on_leave.iter())
+            .chain(self.on_restore.iter())
+    }
+}
+
+/// The reserved names of the three hooks: what an `applied` frame names a
+/// system transition by, and what no declared transition may be called.
+pub const ON_JOIN: &str = "on_join";
+pub const ON_LEAVE: &str = "on_leave";
+pub const ON_RESTORE: &str = "on_restore";
+
+/// §3.12 One way a live state moves: its input, with the checks a
+/// procedure's input has; its guards, each a `Bool` over the state, the
+/// context and the input that refuses with its message when false; and a
+/// body over the same, which returns the new state or refuses. It reads no
+/// table and draws no auto: the server's clock is `ctx.now`
+/// ([`Expr::CtxNow`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Transition {
+    pub name: String,
+    pub input: Vec<(String, Field)>,
+    pub guards: Vec<(Expr, String)>,
+    pub body: Block,
+    /// The author's names for symbols; not hashed.
+    pub names: BTreeMap<Sym, String>,
+}
+
+/// §3.12 A hook's `device`: one device standing in an instance, as it
+/// declared itself at `Hello` — its id, which survives its reconnects,
+/// what kind of thing it is, its name, and whether it can play — and the
+/// user the server verified it as. Who is here is an app's own field (a
+/// `PerDevice` of this, kept by its hooks), not the engine's.
+pub fn device_ty() -> Ty {
+    Ty::Struct(
+        [
+            ("can_play".to_string(), Ty::Bool),
+            ("id".to_string(), Ty::Text),
+            ("kind".to_string(), Ty::Text),
+            ("name".to_string(), Ty::Text),
+            ("user".to_string(), Ty::Text),
+        ]
+        .into_iter()
+        .collect(),
+    )
 }
 
 /// §1.1 A router: a group of procedures sharing middleware.
@@ -413,6 +531,36 @@ pub enum Expr {
     Select(Box<Plan>),
     Get(TableName, Vec<Expr>),
     Exists(TableName, Vec<Expr>),
+    /// §2.2 A value of a sum: the variant `name` of the sum `ty` (usually
+    /// [`Ty::Named`]), with these fields. Its value is the struct of the
+    /// fields with `"t"` the variant's name. On the wire
+    /// `{"t":"variant","ty","name","fields"}`, written only where used.
+    Variant(Ty, String, BTreeMap<FieldName, Expr>),
+    /// §2.2 A sum taken apart: one arm per variant, in the sum's variant
+    /// order (by name), each binding the variant's record — its fields,
+    /// without the tag — to its symbol. On the wire
+    /// `{"t":"case","e","arms":[{"t":"arm","name","sym","e"}]}`.
+    Case(Box<Expr>, Vec<(String, Sym, Expr)>),
+    /// §3.12 The state a transition runs over. On the wire
+    /// `{"t":"live_state"}`; only in a transition.
+    LiveState,
+    /// §3.12 The time a transition runs at, in milliseconds since the Unix
+    /// epoch: the server's clock when it sequences a call, the device's own
+    /// guess of the server's when it previews one. `{"t":"ctx_now"}`; only
+    /// in a transition.
+    CtxNow,
+    /// §3.12 The id of the device calling — for a hook, the device
+    /// arriving or leaving. `{"t":"ctx_device"}`; only in a transition.
+    CtxDevice,
+    /// §2.2 One device's slot of a `PerDevice`: an `Option` of its value
+    /// type, `None` where the slot holds nothing. `{"t":"slot","e","key"}`.
+    Slot(Box<Expr>, Box<Expr>),
+    /// §2.2 A `PerDevice` with one slot set to the option's value, or
+    /// emptied by `None`. `{"t":"set_slot","e","key","v"}`.
+    SetSlot(Box<Expr>, Box<Expr>, Box<Expr>),
+    /// §2.2 A `PerDevice`'s filled slots as a list of `{device, value}`
+    /// records in device-id order. `{"t":"slots","e"}`.
+    Slots(Box<Expr>),
 }
 
 /// Arithmetic and boolean operators. Integer arithmetic is checked:

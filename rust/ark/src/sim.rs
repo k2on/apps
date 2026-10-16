@@ -104,6 +104,17 @@ pub struct Sim {
     /// `docs/plan-phones.md` S2 Every client's life written down as it
     /// happens, when the fleet was opened recording ([`Sim::recorded`]).
     pub recording: Option<Recording>,
+    /// §14 The module's live states, where the fleet runs them
+    /// ([`Sim::live`]): the server sequences them and every client stands
+    /// in its instances as a device named after it.
+    pub live: Option<crate::live::state::Runner>,
+    /// The server's clock: a millisecond per message it is handed, so a
+    /// fleet's times are a function of its seed and its script.
+    pub clock: std::sync::Arc<std::sync::atomic::AtomicI64>,
+    /// §14 Every client signs in as this one user, each its own device —
+    /// one account's phone, laptop and speaker — where it is set
+    /// ([`Sim::live`]); otherwise client `i` is the user `peer-i`.
+    pub account: Option<String>,
 }
 
 /// `docs/plan-phones.md` S2 What a recording fleet keeps: one [`Trace`] per
@@ -252,6 +263,16 @@ pub enum Op {
         eid: Id,
         change: crate::store::Change,
     },
+    /// §14 A client calls a transition of its instance of a live state
+    /// ([`Sim::call`]); one its own preview refuses is dropped.
+    Call {
+        peer: i64,
+        state: String,
+        transition: String,
+        input: Args,
+        id: Id,
+        counter: i64,
+    },
 }
 
 /// `docs/plan-guards.md` D4 Who a simulated server's raw writes are by: the
@@ -264,30 +285,94 @@ fn name(i: i64) -> String {
     format!("peer-{i}")
 }
 
-// What a client's token says to dev auth: its name, and the roles its login
-// holds after a colon.
-fn token(i: i64, roles: Option<&BTreeSet<String>>) -> String {
-    match roles.filter(|r| !r.is_empty()) {
-        None => name(i),
-        Some(rs) => format!("{}:{}", name(i), rs.iter().cloned().collect::<Vec<_>>().join(",")),
-    }
-}
-
 impl Sim {
     /// A fleet: a trusting server that is the log's authority, and `n`
     /// clients each holding the log whole, all connected.
     pub fn new(sch: Schema, bodies: BTreeMap<FnHash, Closure>, n: i64, seed: u64) -> Sim {
-        Sim::open(sch, bodies, n, seed, false)
+        Sim::open(sch, bodies, n, seed, false, None)
+    }
+
+    /// §14 A fleet that runs live state too (`docs/plan-live.md`): the
+    /// server sequences `runner`'s states, and every client holds them as a
+    /// device named after it, standing in the instances its scope gives it.
+    /// Recording, when `record` says so.
+    pub fn live(sch: Schema, bodies: BTreeMap<FnHash, Closure>, runner: crate::live::state::Runner, n: i64, seed: u64, record: bool) -> Sim {
+        Sim::open(sch, bodies, n, seed, record, Some(runner))
+    }
+
+    /// [`Sim::live`], with every client one account's device: `account` is
+    /// every client's user, and its device is still named after it.
+    pub fn live_account(
+        sch: Schema,
+        bodies: BTreeMap<FnHash, Closure>,
+        runner: crate::live::state::Runner,
+        account: &str,
+        n: i64,
+        seed: u64,
+        record: bool,
+    ) -> Sim {
+        Sim::opened(sch, bodies, n, seed, record, Some(runner), Some(account.into()))
+    }
+
+    // Who client `i` is: the account every client shares, or its own name.
+    fn user(&self, i: i64) -> String {
+        self.account.clone().unwrap_or_else(|| name(i))
+    }
+
+    // What client `i`'s login says to dev auth: its user, and its roles.
+    fn token_of(&self, i: i64) -> String {
+        match self.roles.get(&i).filter(|r| !r.is_empty()) {
+            None => self.user(i),
+            Some(rs) => format!("{}:{}", self.user(i), rs.iter().cloned().collect::<Vec<_>>().join(",")),
+        }
+    }
+
+    // The device client `i` declares.
+    fn device(i: i64) -> crate::live::state::DeviceDecl {
+        crate::live::state::DeviceDecl::new(name(i), "computer", name(i), true)
+    }
+
+    // The server over `a`, with the fleet's clock and its live states.
+    fn server_of(a: Authority, clock: &std::sync::Arc<std::sync::atomic::AtomicI64>, live: &Option<crate::live::state::Runner>) -> Server<Silent> {
+        let at = clock.clone();
+        let s =
+            Server::open(trusting(), open_access(), Silent, a).with_clock(std::sync::Arc::new(move || at.load(std::sync::atomic::Ordering::SeqCst)));
+        match live {
+            Some(r) => s.with_live(r.clone()),
+            None => s,
+        }
+    }
+
+    // A client of the fleet, holding its live states if it runs any.
+    fn client_of(&self, i: i64, r: Replica, mode: Mode, token: Option<String>) -> Client {
+        let c = Client::open(r, mode, token);
+        match &self.live {
+            Some(runner) => c.with_live(crate::live::state::Watch::new(runner.clone(), Some(Sim::device(i)))),
+            None => c,
+        }
     }
 
     /// [`Sim::new`], recording every client's trace from its first input
     /// (`docs/plan-phones.md` S2): what `arkc fuzz --traces` runs.
     pub fn recorded(sch: Schema, bodies: BTreeMap<FnHash, Closure>, n: i64, seed: u64) -> Sim {
-        Sim::open(sch, bodies, n, seed, true)
+        Sim::open(sch, bodies, n, seed, true, None)
     }
 
-    fn open(sch: Schema, bodies: BTreeMap<FnHash, Closure>, n: i64, seed: u64, record: bool) -> Sim {
-        let mut server = Server::open(trusting(), open_access(), Silent, Authority::new(sch.clone(), bodies.clone()));
+    fn open(sch: Schema, bodies: BTreeMap<FnHash, Closure>, n: i64, seed: u64, record: bool, live: Option<crate::live::state::Runner>) -> Sim {
+        Sim::opened(sch, bodies, n, seed, record, live, None)
+    }
+
+    fn opened(
+        sch: Schema,
+        bodies: BTreeMap<FnHash, Closure>,
+        n: i64,
+        seed: u64,
+        record: bool,
+        live: Option<crate::live::state::Runner>,
+        account: Option<String>,
+    ) -> Sim {
+        let clock = std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0));
+        let mut server = Sim::server_of(Authority::new(sch.clone(), bodies.clone()), &clock, &live);
         // `docs/plan-guards.md` D2 The scopes the procedures run, served by
         // from the first `Hello`.
         let scopes = Some(crate::scope::Scopes::of_closures(&sch, bodies.values())).filter(|s| !s.is_empty());
@@ -327,6 +412,9 @@ impl Sim {
                 told: BTreeMap::new(),
                 only: None,
             }),
+            live,
+            clock,
+            account,
         };
         for i in 0..n {
             let r = Replica::open(
@@ -336,13 +424,16 @@ impl Sim {
                 0,
                 vec![],
             );
-            sim.clients.insert(i, Client::open(r, Mode::Whole, Some(name(i))));
+            let c = sim.client_of(i, r, Mode::Whole, Some(sim.user(i)));
+            sim.clients.insert(i, c);
+            let device = sim.live.as_ref().map(|_| Sim::device(i));
             sim.record(
                 i,
                 Input::Open {
                     mode: Mode::Whole,
                     closures: true,
-                    token: Some(name(i)),
+                    token: Some(sim.user(i)),
+                    device,
                 },
                 None,
             );
@@ -396,13 +487,13 @@ impl Sim {
     /// held to the login that pushed it, so this is what a client authors
     /// under — with the roles its device believes it holds.
     pub fn ctx_of(&self, i: i64) -> Ctx {
-        Ctx::new(name(i), "dev").with_roles(self.believes.get(&i).cloned().unwrap_or_default())
+        Ctx::new(self.user(i), "dev").with_roles(self.believes.get(&i).cloned().unwrap_or_default())
     }
 
     /// Who the server takes client `i` for: its name and the roles its
     /// login holds.
     pub fn identity_of(&self, i: i64) -> Identity {
-        dev_identity(&token(i, self.roles.get(&i)), "dev")
+        dev_identity(&self.token_of(i), "dev")
     }
 
     /// `docs/plan-guards.md` D2 What client `i` holds of the authority's
@@ -447,7 +538,7 @@ impl Sim {
     pub fn grant(&mut self, i: i64, roles: BTreeSet<String>, believes: BTreeSet<String>) {
         self.roles.insert(i, roles);
         self.believes.insert(i, believes);
-        let t = token(i, self.roles.get(&i));
+        let t = self.token_of(i);
         let nobody = self.nobody.contains(&i);
         let Some(c) = self.clients.get_mut(&i) else { return };
         if !nobody {
@@ -629,6 +720,7 @@ impl Sim {
 
     fn deliver_to_server(&mut self, i: i64, m: ClientMsg) {
         let Some(conn) = self.conn.get(&i).copied() else { return };
+        self.clock.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.server.recv(conn, m);
         self.flush_server();
     }
@@ -728,7 +820,16 @@ impl Sim {
     fn deliver_all(&mut self) -> Result<(), String> {
         for _ in 0..10000 {
             if self.quiet() {
-                return Ok(());
+                // §14 A relay the server is holding back is not quiet: the
+                // clock moves to when it is due, and it goes.
+                match self.server.deadline() {
+                    None => return Ok(()),
+                    Some(at) => {
+                        self.clock.fetch_max(at, std::sync::atomic::Ordering::SeqCst);
+                        self.server.tick();
+                        self.flush_server();
+                    }
+                }
             }
             self.drain();
         }
@@ -788,6 +889,72 @@ impl Sim {
         self.to_server.values().all(|ms| ms.is_empty())
             && self.to_client.values().all(|ms| ms.is_empty())
             && self.clients.iter().all(|(i, c)| c.replica.pending.is_empty() || self.nobody.contains(i))
+            && self
+                .clients
+                .values()
+                .all(|c| c.live.as_ref().is_none_or(|w| w.instances.values().all(|x| x.pending.is_empty())))
+    }
+
+    /// §14 Every client agrees with the server about every live instance it
+    /// holds: the same sequence, the same state — ephemeral slots included,
+    /// since a settle reconnects everyone and a snapshot carries them —
+    /// nothing pending, and its view the confirmed state: every preview
+    /// replaced by what the server made of it. `Err` names the first that
+    /// does not.
+    pub fn live_converged(&self) -> Result<(), String> {
+        for (k, c) in &self.clients {
+            let Some(w) = &c.live else { continue };
+            for (i, x) in &w.instances {
+                let Some(h) = self.server.desk.instances.get(i) else {
+                    return Err(format!("client {k} holds {} {} and the server does not", i.state, i.key));
+                };
+                if !x.pending.is_empty() {
+                    return Err(format!("client {k}: {} calls still pending on {} {}", x.pending.len(), i.state, i.key));
+                }
+                if x.seq != h.seq || x.confirmed != h.value {
+                    return Err(format!(
+                        "client {k}: {} {} at {} is not the server's at {}: {:?} against {:?}",
+                        i.state, i.key, x.seq, h.seq, x.confirmed, h.value
+                    ));
+                }
+                if x.view != x.confirmed {
+                    return Err(format!(
+                        "client {k}: a preview of {} {} was not replaced by what was confirmed",
+                        i.state, i.key
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// §14 Client `i` calls a transition of its instance of `state`, at the
+    /// server's time as the clock last said it: what a device's guess is in
+    /// a fleet with one clock. A call its own preview refuses is dropped.
+    pub fn call(&mut self, i: i64, state: &str, transition: &str, input: &Args, id: Id, counter: i64) {
+        if self.nobody.contains(&i) {
+            return;
+        }
+        let ctx = self.ctx_of(i);
+        let now = self.clock.load(std::sync::atomic::Ordering::SeqCst);
+        let Some(c) = self.clients.get_mut(&i) else { return };
+        let Some(instance) = c.live.as_ref().and_then(|w| w.instance_of(state, &ctx)) else {
+            return;
+        };
+        let made = c.call(&ctx, &instance, transition, input, id, now, counter);
+        let input = Input::Call {
+            ctx,
+            instance,
+            transition: transition.into(),
+            input: input.clone(),
+            id,
+            now,
+            counter,
+        };
+        self.record(i, input, made.as_ref().err().cloned());
+        if made.is_ok() {
+            self.flush_client(i);
+        }
     }
 
     /// Each client's confirmed sequence and hash.
@@ -887,7 +1054,7 @@ impl Sim {
             Op::Join { mode, closures, nobody } => self.join(*mode, *closures, *nobody),
             Op::SignIn(i) => {
                 if self.nobody.remove(i) {
-                    let (ctx, t) = (self.ctx_of(*i), token(*i, self.roles.get(i)));
+                    let (ctx, t) = (self.ctx_of(*i), self.token_of(*i));
                     if let Some(c) = self.clients.get_mut(i) {
                         c.sign_in(&ctx, Some(t.clone()));
                         self.record(*i, Input::SignIn { ctx, token: Some(t) }, None);
@@ -903,6 +1070,14 @@ impl Sim {
                 self.flush_server();
             }
             Op::PushRaw { peer, eid, change } => self.push_raw(*peer, *eid, change),
+            Op::Call {
+                peer,
+                state,
+                transition,
+                input,
+                id,
+                counter,
+            } => self.call(*peer, state, transition, input, *id, *counter),
             Op::Leave(i) => self.leave(*i),
             Op::Rejoin(i) => self.rejoin(*i),
             Op::Verify(i) => {
@@ -925,7 +1100,7 @@ impl Sim {
         let (raw, args) = crate::raw::call_of(&self.schema, change);
         let e = crate::log::Entry {
             id: eid,
-            actor: name(i),
+            actor: self.user(i),
             session: "dev".into(),
             roles: self.roles.get(&i).cloned().unwrap_or_default(),
             fn_hash: raw.hash().clone(),
@@ -1005,7 +1180,15 @@ impl Sim {
             None => self.faults.push(format!("restart: no state at the head {}", log.head_seq())),
         }
         a.log = log;
-        self.server = Server::open(trusting(), open_access(), Silent, a);
+        // §14 What the server kept of its live instances comes back,
+        // restored as a hub restores them: the ordered part, every slot
+        // empty, `on_restore` run.
+        let kept = self.server.desk.kept();
+        self.server = Sim::server_of(a, &self.clock, &self.live);
+        let now = self.server.now();
+        for (i, seq, v) in kept {
+            self.server.desk.restore(i, seq, v, now);
+        }
         if let Some(sc) = &self.scopes {
             self.server.set_scopes(sc.clone());
         }
@@ -1021,14 +1204,24 @@ impl Sim {
         let i = self.clients.keys().next_back().map_or(0, |n| n + 1);
         let bodies = if closures { client_bodies(&self.bodies) } else { BTreeMap::new() };
         let r = Replica::open(self.schema.clone(), bodies, MemoryStore::empty(self.schema.clone()), 0, vec![]);
-        let token = if nobody { None } else { Some(token(i, self.roles.get(&i))) };
-        let mut c = Client::open(r, mode, token.clone());
+        let token = if nobody { None } else { Some(self.token_of(i)) };
+        let mut c = self.client_of(i, r, mode, token.clone());
         if closures && i % 2 == 0 && !self.natives.is_empty() && !self.native_peers.is_empty() {
             c.hold(&self.natives);
             self.native_peers.insert(i);
         }
         self.clients.insert(i, c);
-        self.record(i, Input::Open { mode, closures, token }, None);
+        let device = self.live.as_ref().map(|_| Sim::device(i));
+        self.record(
+            i,
+            Input::Open {
+                mode,
+                closures,
+                token,
+                device,
+            },
+            None,
+        );
         if self.disk.is_some() {
             self.keep(i);
         }
@@ -1085,7 +1278,7 @@ impl Sim {
     // connected.
     fn rejoin(&mut self, i: i64) {
         let Some(a) = self.alone.remove(&i) else { return };
-        let who = Ctx::new(name(i), "dev");
+        let who = Ctx::new(self.user(i), "dev");
         if let Some(c) = self.clients.get_mut(&i) {
             crate::trace::join(c, a, &who);
         }
@@ -1278,6 +1471,22 @@ impl Op {
                 ("eid", Value::Id(*eid)),
                 ("change", crate::protocol::change_value(change)),
             ]),
+            Op::Call {
+                peer: i,
+                state,
+                transition,
+                input,
+                id,
+                counter,
+            } => Value::record(vec![
+                t("call"),
+                peer(i),
+                ("live", Value::text(state.clone())),
+                ("transition", Value::text(transition.clone())),
+                ("input", Value::from(input.clone())),
+                ("id", Value::Id(*id)),
+                ("counter", Value::Int(*counter)),
+            ]),
         }
     }
 
@@ -1367,6 +1576,23 @@ impl Op {
                     },
                 }
             }
+            "call" => Op::Call {
+                peer: int("peer")?,
+                state: match get("live")? {
+                    Value::Text(x) => x.to_string(),
+                    other => return Err(format!("live is not text: {other:?}")),
+                },
+                transition: match get("transition")? {
+                    Value::Text(x) => x.to_string(),
+                    other => return Err(format!("transition is not text: {other:?}")),
+                },
+                input: args("input")?,
+                id: match get("id")? {
+                    Value::Id(i) => *i,
+                    other => return Err(format!("id is not an id: {other:?}")),
+                },
+                counter: int("counter")?,
+            },
             other => return Err(format!("unknown op {other}")),
         })
     }

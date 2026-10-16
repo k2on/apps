@@ -1,0 +1,4 @@
+{
+  "frame": {"device":{"can_play":true,"id":"phone-login","kind":"phone","name":"Phone"},"mode":"whole","since":{"$int":"4"},"spec":{"$int":"4"},"t":"hello","token":"tok"},
+  "bytes": "a661746568656c6c6f646d6f64656577686f6c656473706563046573696e63650465746f6b656e63746f6b66646576696365a46269646b70686f6e652d6c6f67696e646b696e646570686f6e65646e616d656550686f6e656863616e5f706c6179f5"
+}

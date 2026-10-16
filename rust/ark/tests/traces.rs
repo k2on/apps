@@ -72,6 +72,23 @@ fn the_checked_in_traces_replay() {
     }
 }
 
+/// `docs/plan-live.md` The live traces, under `trace/live/` — a directory of
+/// their own, which the client runtimes' storage tests do not walk — replay,
+/// and their `falsify/` does not. Falsified by replaying them without the
+/// device their `open` declares: the first step's `live` output was absent.
+#[test]
+fn the_live_traces_replay() {
+    let dir = vectors().join("live");
+    let (ran, failed) = run_dir(&dir);
+    println!("trace/live/: {} replayed: {}", ran.len(), ran.join(", "));
+    assert!(failed.is_empty(), "live traces that do not replay:\n{}", failed.join("\n"));
+    assert!(ran.len() >= 2, "too few traces under trace/live: {}", ran.len());
+    for p in jsons(&dir.join("falsify")) {
+        let e = check(&p).expect_err(&format!("{} replayed and must not", p.display()));
+        println!("trace/live/falsify/{}: fails, as it must: {e}", p.file_name().unwrap().to_string_lossy());
+    }
+}
+
 /// `ARK_TRACE_CORPUS`: every trace of the generated corpus replays. Says
 /// so and does nothing when the variable is unset.
 #[test]

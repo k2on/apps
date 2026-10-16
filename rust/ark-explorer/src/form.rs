@@ -83,6 +83,20 @@ pub fn ty_name(t: &Ty) -> String {
             "{{{}}}",
             fs.iter().map(|(n, t)| format!("{n}: {}", ty_name(t))).collect::<Vec<_>>().join(", ")
         ),
+        Ty::Named(n) => n.clone(),
+        Ty::NonEmpty(t) => format!("non_empty_list({})", ty_name(t)),
+        Ty::PerDevice(t) => format!("per_device({})", ty_name(t)),
+        Ty::Ephemeral(t) => format!("ephemeral({})", ty_name(t)),
+        Ty::Sum(vs) => format!(
+            "sum({})",
+            vs.iter()
+                .map(|(v, fs)| format!(
+                    "{v} {{{}}}",
+                    fs.iter().map(|(n, t)| format!("{n}: {}", ty_name(t))).collect::<Vec<_>>().join(", ")
+                ))
+                .collect::<Vec<_>>()
+                .join(" | ")
+        ),
     }
 }
 
@@ -136,6 +150,9 @@ impl Input {
             Ty::List(_) => Input::List(vec![]),
             Ty::Struct(fs) => Input::Fields(fs.values().map(Input::blank).collect()),
             Ty::Int | Ty::Text | Ty::Bytes | Ty::Id(_) => Input::Text(String::new()),
+            // A live state's types are no mutation's input: the explorer
+            // forms the log's procedures, and offers them as text.
+            Ty::Named(_) | Ty::NonEmpty(_) | Ty::Sum(_) | Ty::PerDevice(_) | Ty::Ephemeral(_) => Input::Text(String::new()),
         }
     }
 

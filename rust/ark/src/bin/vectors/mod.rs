@@ -11,9 +11,11 @@
 
 mod codec;
 mod demo;
+mod demo_live;
 mod eval;
 mod fuzzed;
 mod json;
+mod live;
 mod module;
 mod protocol;
 mod rebase;
@@ -29,6 +31,9 @@ use std::path::{Path, PathBuf};
 pub struct Out {
     root: PathBuf,
     written: RefCell<Vec<String>>,
+    /// The live vectors (`docs/plan-live.md`), which the manifest marks
+    /// `rust-for-now`: Kotlin and Swift skip them until they hold live state.
+    live: RefCell<std::collections::BTreeSet<String>>,
 }
 
 impl Out {
@@ -44,6 +49,12 @@ impl Out {
         fs::write(&path, text).unwrap_or_else(|e| panic!("writing {}: {e}", path.display()));
         println!("  {}", path.display());
         self.written.borrow_mut().push(rel.to_string());
+    }
+
+    /// Write one live vector: [`Out::write`], marked for the manifest.
+    fn write_live(&self, rel: &str, text: &str) {
+        self.write(rel, text);
+        self.live.borrow_mut().insert(rel.to_string());
     }
 }
 
@@ -64,6 +75,7 @@ pub fn write_all(root: &Path) {
     let out = Out {
         root: root.to_path_buf(),
         written: RefCell::new(vec![]),
+        live: RefCell::new(Default::default()),
     };
     codec::codec(&out);
     codec::order(&out);
@@ -80,6 +92,7 @@ pub fn write_all(root: &Path) {
     fuzzed::fuzzed(&out);
     views::views(&out);
     trace::traces(&out);
+    live::live(&out);
     manifest(&out);
     println!("vectors written");
 }
@@ -90,8 +103,10 @@ pub fn write_all(root: &Path) {
 /// `docs/plan-phones.md` S1): `client`, every runtime that is a client; or
 /// `rust-only`, a fleet run through Rust's simulator and its seeded
 /// scheduler, which reaches the other runtimes through the traces of its
-/// clients instead (`trace/`). Written last, from the files themselves, so
-/// that a vector added anywhere is listed without anyone listing it.
+/// clients instead (`trace/`); or `rust-for-now`, a vector of live state
+/// (`docs/plan-live.md`), which Rust runs and the client runtimes skip until
+/// they hold live state. Written last, from the files themselves, so that a
+/// vector added anywhere is listed without anyone listing it.
 fn manifest(out: &Out) {
     let mut paths = out.written.borrow().clone();
     paths.sort();
@@ -106,6 +121,7 @@ fn manifest(out: &Out) {
             let form = match kind {
                 "eval" if has("cases") => "cases",
                 "eval" if has("raw") => "raw",
+                "eval" if has("live") => "live",
                 "eval" => "apply",
                 "hash" if has("tables") => "parts",
                 "module" if has("stripped") => "stripped",
@@ -116,10 +132,17 @@ fn manifest(out: &Out) {
                 "rebase" => "three-peers",
                 "views" if has("fuzz") => "fuzz",
                 "trace" if file.starts_with("harken-") => "harken",
+                "trace" if rel.starts_with("trace/live/") => "live",
                 "trace" => "fuzz",
                 k => k,
             };
-            let side = if kind == "rebase" && has("script") { "rust-only" } else { "client" };
+            let side = if kind == "rebase" && has("script") {
+                "rust-only"
+            } else if out.live.borrow().contains(rel) {
+                "rust-for-now"
+            } else {
+                "client"
+            };
             let expect = if rel.contains("/falsify/") { "fail" } else { "pass" };
             json::json(&ark::value::Value::record(vec![
                 ("path", ark::value::Value::text(rel.clone())),

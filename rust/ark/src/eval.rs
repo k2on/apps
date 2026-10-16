@@ -175,6 +175,18 @@ struct Env<'a> {
     /// arithmetic step by step (§6.5): its natives run the fold as a Rust
     /// closure, which no recogniser can see into.
     wide: bool,
+    /// §3.12 Inside a live state's transition: the state it runs over and
+    /// its context beyond the author's (`docs/plan-live.md`).
+    live: Option<&'a LiveEnv<'a>>,
+}
+
+/// §3.12 What a transition reads beside its input and its author: the
+/// state, the time, and the device calling.
+#[derive(Clone, Copy)]
+struct LiveEnv<'a> {
+    state: &'a Value,
+    now: i64,
+    device: &'a str,
 }
 
 // §6.4 A local: one per `let`, per element a list function or a `for`
@@ -292,6 +304,7 @@ impl<'a> Env<'a> {
             node: self.node,
             locals: Some(frame),
             wide: false,
+            live: self.live,
         }
     }
 }
@@ -441,6 +454,7 @@ fn procedure(st: &mut St, sch: &Schema, c: &Closure, ctx: &Ctx, autos: &Args, ar
         node: &[],
         locals: None,
         wide: false,
+        live: None,
     };
     // §1.4 A query is its plan: what `pull` answers, over the store the
     // middleware saw.
@@ -496,6 +510,7 @@ fn preamble(st: &mut St, sch: &Schema, c: &Closure, ctx: &Ctx, args0: &Args) -> 
             node: &[],
             locals: None,
             wide: false,
+            live: None,
         };
         match block(st, &env, &mw.body) {
             Ok(()) | Err(Stop::Returned(None)) if mw.kind == FnKind::Guard => {}
@@ -541,6 +556,7 @@ fn checked_input(st: &mut St, sch: &Schema, c: &Closure, ctx: &Ctx, args0: &Args
                     node: &[],
                     locals: None,
                     wide: false,
+                    live: None,
                 };
                 let mut empty = St {
                     store: &mut Overlay::new(&empty_store),
@@ -570,6 +586,7 @@ fn checked_input(st: &mut St, sch: &Schema, c: &Closure, ctx: &Ctx, args0: &Args
             node: &[],
             locals: None,
             wide: false,
+            live: None,
         };
         if !pure_bool(st, &env, e)? {
             return Err(EvalFault::Verdict(Refusal::Refused(why.clone().unwrap_or_else(|| "invalid".into()))));
@@ -745,6 +762,7 @@ pub fn check(sch: &Schema, c: &Closure, ctx: &Ctx, partial: &Args, store: &dyn S
                 node: &[],
                 locals: None,
                 wide: false,
+                live: None,
             };
             let mut st = St {
                 store: &mut Overlay::new(&empty),
@@ -782,6 +800,7 @@ pub fn check(sch: &Schema, c: &Closure, ctx: &Ctx, partial: &Args, store: &dyn S
                 node: &[],
                 locals: None,
                 wide: false,
+                live: None,
             };
             let mut st = St {
                 store: &mut Overlay::new(&empty),
@@ -825,6 +844,7 @@ pub fn eval_helper(m: &Module, name: &str, vals: Vec<Value>) -> Result<Value, Ev
         node: &[],
         locals: None,
         wide: false,
+        live: None,
     };
     let empty = crate::store::MemoryStore::empty(m.schema.clone());
     let mut overlay = Overlay::new(&empty);
@@ -839,6 +859,190 @@ pub fn eval_helper(m: &Module, name: &str, vals: Vec<Value>) -> Result<Value, Ev
         Err(Stop::Returned(_)) => Err(EvalFault::Bug(EvalError::NoReturn(name.into()))),
         Err(Stop::Halt(fault)) => Err(fault),
     }
+}
+
+/// §3.12 Who calls a transition, and when: the author, as an entry's is,
+/// and beside it the device calling and the time — the server's when it
+/// sequences the call, the device's own guess of the server's when it
+/// previews one (`docs/plan-live.md`).
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct LiveCtx {
+    pub user: String,
+    pub session: String,
+    pub roles: BTreeSet<String>,
+    pub device: String,
+    pub now: i64,
+}
+
+/// §3.12 Run a transition of a live state, by name — a hook by its
+/// reserved name — over `state`: its input held to its declared types and
+/// checked as a procedure's is, its guards in order, its body; and the new
+/// state held to the state's type. `Ok` is the new state; a verdict is a
+/// refusal every runtime reaches, in the same words. A hook the state does
+/// not declare leaves the state as it was.
+pub fn run_transition(c: &crate::hash::LiveClosure, name: &str, state: &Value, ctx: &LiveCtx, input: &Args) -> Result<Value, EvalFault> {
+    let refused = |t: String| Err(EvalFault::Verdict(Refusal::Refused(t)));
+    let Some(t) = c.state.transition(name) else {
+        if matches!(name, crate::ir::ON_JOIN | crate::ir::ON_LEAVE | crate::ir::ON_RESTORE) {
+            return Ok(state.clone());
+        }
+        return refused(format!("{}: no transition {name}", c.state.name));
+    };
+    // The input, held to its types: a call crosses a boundary.
+    for k in input.keys() {
+        if !t.input.iter().any(|(n, _)| n == k) {
+            return refused(format!("{k}: not an input of {name}"));
+        }
+    }
+    let mut args = Args::new();
+    for (n, fd) in &t.input {
+        let Some(v) = input.get(n) else {
+            return refused(format!("{n}: missing"));
+        };
+        if let Err(why) = crate::types::conforms(&c.types, &fd.ty, v) {
+            return refused(format!("{n}: {why}"));
+        }
+        args.insert(n.clone(), v.clone());
+    }
+    let schema = Schema::empty();
+    let author = Ctx {
+        user: ctx.user.clone(),
+        session: ctx.session.clone(),
+        roles: ctx.roles.clone(),
+        authority: false,
+    };
+    let live = LiveEnv {
+        state,
+        now: ctx.now,
+        device: &ctx.device,
+    };
+    let none = Args::new();
+    let mut nothing = NoStore(&schema);
+    let mut st = St {
+        store: &mut nothing,
+        changes: Vec::new(),
+        deferred: Vec::new(),
+    };
+    // The checks, each over its own field as it stands.
+    for (n, fd) in &t.input {
+        let v = args[n].clone();
+        let checked = {
+            let local = args.clone();
+            let mut refine = |e: &Expr, v: &Value| -> Result<bool, EvalFault> {
+                let mut own = local.clone();
+                own.insert(n.clone(), v.clone());
+                let env = Env {
+                    schema: &schema,
+                    helpers: &c.helpers,
+                    kind: FnKind::Provide,
+                    ctx: &author,
+                    args: Params::Named(&own),
+                    autos: &none,
+                    provided: &none,
+                    node: &[],
+                    locals: None,
+                    wide: false,
+                    live: Some(&live),
+                };
+                let mut nothing = NoStore(&schema);
+                let mut st = St {
+                    store: &mut nothing,
+                    changes: vec![],
+                    deferred: vec![],
+                };
+                pure_bool(&mut st, &env, e)
+            };
+            check_field(n, fd, v, &|_, _| false, &mut refine)?
+        };
+        match checked {
+            (v, None) => {
+                args.insert(n.clone(), v);
+            }
+            (_, Some(msg)) => return refused(msg),
+        }
+    }
+    let env = Env {
+        schema: &schema,
+        helpers: &c.helpers,
+        kind: FnKind::Provide,
+        ctx: &author,
+        args: Params::Named(&args),
+        autos: &none,
+        provided: &none,
+        node: &[],
+        locals: None,
+        wide: false,
+        live: Some(&live),
+    };
+    for (g, why) in &t.guards {
+        if !pure_bool(&mut st, &env, g)? {
+            return refused(why.clone());
+        }
+    }
+    let out = match block(&mut st, &env, &t.body) {
+        Err(Stop::Returned(Some(v))) => v,
+        Ok(()) | Err(Stop::Returned(None)) => return Err(EvalFault::Bug(EvalError::NoReturn(name.into()))),
+        Err(Stop::Halt(fault)) => return Err(fault),
+    };
+    match crate::types::conforms(&c.types, &c.state.ty, &out) {
+        Ok(()) => Ok(out),
+        Err(why) => refused(format!("{name}: the state it makes is not a {}: {why}", c.state.name)),
+    }
+}
+
+/// §3.12 A constant expression's value — a live state's init — with no
+/// store, no context and no input.
+pub fn constant(e: &Expr) -> Result<Value, EvalFault> {
+    let schema = Schema::empty();
+    let env = Env {
+        schema: &schema,
+        helpers: &[],
+        kind: FnKind::Helper,
+        ctx: &NOBODY,
+        args: Params::Named(&NO_ARGS),
+        autos: &NO_ARGS,
+        provided: &NO_ARGS,
+        node: &[],
+        locals: None,
+        wide: false,
+        live: None,
+    };
+    pure(&env, e)
+}
+
+/// §3.12 A live state's scope: the keys of the instances `ctx` holds, a
+/// text or a list of them, in the order the scope gives them, without
+/// repeats.
+pub fn scope_keys(c: &crate::hash::LiveClosure, ctx: &Ctx) -> Result<Vec<String>, EvalFault> {
+    let schema = Schema::empty();
+    let env = Env {
+        schema: &schema,
+        helpers: &c.helpers,
+        kind: FnKind::Helper,
+        ctx,
+        args: Params::Named(&NO_ARGS),
+        autos: &NO_ARGS,
+        provided: &NO_ARGS,
+        node: &[],
+        locals: None,
+        wide: false,
+        live: None,
+    };
+    let mut out: Vec<String> = vec![];
+    let mut add = |v: &Value| match v {
+        Value::Text(t) => {
+            if !out.iter().any(|o| **o == **t) {
+                out.push(t.to_string());
+            }
+            Ok(())
+        }
+        other => Err(EvalFault::Bug(EvalError::TypeError(format!("a scope key is text, not {other:?}")))),
+    };
+    match pure(&env, &c.state.scope)? {
+        Value::List(xs) => xs.iter().try_for_each(&mut add)?,
+        v => add(&v)?,
+    }
+    Ok(out)
 }
 
 /// §6.6 Pull a plan whose right-hand sides are already values, over a
@@ -899,6 +1103,7 @@ impl<'s> Scope<'s> {
                 node: &[],
                 locals: None,
                 wide: false,
+                live: None,
             },
         }
     }
@@ -925,6 +1130,7 @@ impl<'s> Scope<'s> {
                 node: &[],
                 locals: None,
                 wide: true,
+                live: None,
                 ..self.outer
             },
             bound: Vec::new(),
@@ -1178,6 +1384,10 @@ fn eval_val<'v>(st: &mut St, env: &Env<'v>, e: &'v Expr) -> Run<Val<'v>> {
             Some(v) => Val::Ref(v),
             None => return bug(EvalError::NotProvided(n.clone())),
         },
+        Expr::LiveState => match env.live {
+            Some(l) => Val::Ref(l.state),
+            None => return bug(EvalError::TypeError("the state outside a transition".into())),
+        },
         Expr::Field(e, f) => match eval_val(st, env, e)? {
             Val::Ref(Value::Struct(m)) => match m.get(f) {
                 Some(v) => Val::Ref(v),
@@ -1218,8 +1428,70 @@ fn eval_val<'v>(st: &mut St, env: &Env<'v>, e: &'v Expr) -> Run<Val<'v>> {
 
 fn eval(st: &mut St, env: &Env, e: &Expr) -> Run<Value> {
     match e {
-        Expr::Lit(_) | Expr::Arg(_) | Expr::Auto(_) | Expr::Var(_) | Expr::Provided(_) | Expr::Field(..) | Expr::Get(..) => {
+        Expr::Lit(_) | Expr::Arg(_) | Expr::Auto(_) | Expr::Var(_) | Expr::Provided(_) | Expr::Field(..) | Expr::Get(..) | Expr::LiveState => {
             eval_ref(st, env, e).map(Cow::into_owned)
+        }
+        Expr::CtxNow => match env.live {
+            Some(l) => Ok(Value::Int(l.now)),
+            None => bug(EvalError::TypeError("ctx.now outside a transition".into())),
+        },
+        Expr::CtxDevice => match env.live {
+            Some(l) => Ok(Value::text(l.device)),
+            None => bug(EvalError::TypeError("ctx.device outside a transition".into())),
+        },
+        // §2.2 A sum's value: its fields, and its variant's name under `t`.
+        Expr::Variant(_, n, fs) => {
+            let mut m = BTreeMap::new();
+            for (k, e) in fs {
+                m.insert(k.clone(), eval(st, env, e)?);
+            }
+            m.insert(crate::types::TAG.into(), Value::text(n.clone()));
+            Ok(Value::Struct(Box::new(m)))
+        }
+        // The arm the value's tag names, over the variant's record.
+        Expr::Case(e, arms) => {
+            let v = eval(st, env, e)?;
+            let mut m = strct(v)?;
+            let tag = match m.remove(crate::types::TAG) {
+                Some(Value::Text(t)) => t,
+                other => return bug(EvalError::TypeError(format!("a sum's tag, not {other:?}"))),
+            };
+            let Some((_, x, body)) = arms.iter().find(|(n, _, _)| **n == *tag) else {
+                return bug(EvalError::TypeError(format!("no arm for the variant {tag}")));
+            };
+            let rec = Value::Struct(Box::new(m));
+            let f = Frame {
+                sym: *x,
+                value: Place::Value(&rec),
+                up: env.locals,
+            };
+            eval(st, &env.under(&f), body)
+        }
+        // §2.2 A device's slot, `None` where it holds nothing.
+        Expr::Slot(m, k) => {
+            let m = eval_ref(st, env, m)?;
+            let k = text(eval(st, env, k)?)?;
+            match &*m {
+                Value::Struct(fs) => Ok(fs.get(k.as_str()).cloned().unwrap_or(Value::Null)),
+                other => type_error("a map of devices", other),
+            }
+        }
+        Expr::SetSlot(m, k, v) => {
+            let mut fs = strct(eval(st, env, m)?)?;
+            let k = text(eval(st, env, k)?)?;
+            match eval(st, env, v)? {
+                Value::Null => fs.remove(&k),
+                x => fs.insert(k, x),
+            };
+            Ok(Value::Struct(Box::new(fs)))
+        }
+        Expr::Slots(m) => {
+            let fs = strct(eval(st, env, m)?)?;
+            Ok(Value::from(
+                fs.into_iter()
+                    .map(|(k, v)| Value::record(vec![("device", Value::text(k)), ("value", v)]))
+                    .collect::<Vec<_>>(),
+            ))
         }
         Expr::CtxUser => Ok(Value::Text(env.ctx.user.as_str().into())),
         Expr::CtxSession => Ok(Value::Text(env.ctx.session.as_str().into())),
@@ -1511,6 +1783,7 @@ fn call(st: &mut St, env: &Env, f: &Function, vals: &[Val]) -> Run<Value> {
         node: &[],
         locals: None,
         wide: env.wide,
+        live: None,
     };
     match block(st, &env2, &f.body) {
         Ok(()) | Err(Stop::Returned(None)) => bug(EvalError::NoReturn(f.name.clone())),

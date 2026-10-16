@@ -159,5 +159,21 @@ fn expr(e: &Expr, out: &mut BTreeSet<TableName>) {
             out.insert(t.clone());
             k.iter().for_each(|x| expr(x, out));
         }
+        Expr::Variant(_, _, fs) => fs.values().for_each(|x| expr(x, out)),
+        Expr::Case(a, arms) => {
+            expr(a, out);
+            arms.iter().for_each(|(_, _, b)| expr(b, out));
+        }
+        Expr::Slot(a, b) => {
+            expr(a, out);
+            expr(b, out);
+        }
+        Expr::SetSlot(a, b, c) => {
+            expr(a, out);
+            expr(b, out);
+            expr(c, out);
+        }
+        Expr::Slots(a) => expr(a, out),
+        Expr::LiveState | Expr::CtxNow | Expr::CtxDevice => {}
     }
 }

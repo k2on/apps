@@ -1,10 +1,19 @@
-//! §14 Live rooms, as `Ark.Live` defines them: what is true now.
+//! §14 Live state (`docs/plan-live.md`) and, beside it, the opaque rooms it
+//! supersedes. [`state`] is the typed half: a state machine per scope,
+//! sequenced per instance beside the log, on the one socket — the frames, the
+//! server's sequencer and the client's confirmed-plus-pending view. What
+//! follows here is the older half, §14 as it was: rooms per account over
+//! opaque frames, kept until harken has moved off them (phase 2).
+//!
+//! Live rooms: what is true now.
 //!
 //! The second channel on the one socket. A room is one account: every
 //! connection the authority verified as the same user. The engine's part is
 //! which connections are in which room, what the app's [`Machine`] is told
 //! when one arrives, speaks or leaves, and the one row a room may ask to
 //! keep when it empties. The engine never looks inside a frame.
+
+pub mod state;
 
 use std::collections::BTreeMap;
 

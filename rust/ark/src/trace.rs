@@ -63,6 +63,11 @@ pub enum Input {
         mode: Mode,
         closures: bool,
         token: Option<String>,
+        /// §14 The device its `hello` declares, for a client of a module
+        /// with live state (`docs/plan-live.md`); `device` on the trace,
+        /// present only then, so every trace before live state reads as it
+        /// did.
+        device: Option<crate::live::state::DeviceDecl>,
     },
     /// Stopped and opened again from what it made durable ([`Kept`]): the
     /// confirmed store, the cursor, the log, the union, and the pending
@@ -102,6 +107,18 @@ pub enum Input {
     Join(Ctx),
     /// These views, in place of any held, hydrated over the client's view.
     Hydrate(Vec<ViewSpec>),
+    /// §14 [`Client::call`]: a transition of a live instance, by this
+    /// author, with the time it guessed for the server's and the id and
+    /// counter it drew — frozen, as a mutation's autos are.
+    Call {
+        ctx: Ctx,
+        instance: crate::live::state::Instance,
+        transition: String,
+        input: Args,
+        id: Id,
+        now: i64,
+        counter: i64,
+    },
 }
 
 fn ctx_value(c: &Ctx) -> Value {
@@ -148,11 +165,41 @@ impl Input {
     pub fn value(&self) -> Value {
         let t = |s: &str| ("t", Value::text(s));
         match self {
-            Input::Open { mode, closures, token } => Value::record(vec![
-                t("open"),
-                ("mode", Value::text(if *mode == Mode::Whole { "whole" } else { "facts" })),
-                ("closures", Value::Bool(*closures)),
-                ("token", token_value(token)),
+            Input::Open {
+                mode,
+                closures,
+                token,
+                device,
+            } => {
+                let mut fields = vec![
+                    t("open"),
+                    ("mode", Value::text(if *mode == Mode::Whole { "whole" } else { "facts" })),
+                    ("closures", Value::Bool(*closures)),
+                    ("token", token_value(token)),
+                ];
+                if let Some(d) = device {
+                    fields.push(("device", d.to_value()));
+                }
+                Value::record(fields)
+            }
+            Input::Call {
+                ctx,
+                instance,
+                transition,
+                input,
+                id,
+                now,
+                counter,
+            } => Value::record(vec![
+                t("call"),
+                ("ctx", ctx_value(ctx)),
+                ("live", Value::text(instance.state.clone())),
+                ("key", Value::text(instance.key.clone())),
+                ("transition", Value::text(transition.clone())),
+                ("input", Value::from(input.clone())),
+                ("id", Value::Id(*id)),
+                ("now", Value::Int(*now)),
+                ("counter", Value::Int(*counter)),
             ]),
             Input::Reopen => Value::record(vec![t("reopen")]),
             Input::Connected => Value::record(vec![t("connected")]),
@@ -226,6 +273,7 @@ impl Input {
                     other => return Err(format!("closures is not a bool: {other:?}")),
                 },
                 token: token("token")?,
+                device: m.get("device").map(crate::live::state::DeviceDecl::from_value).transpose()?,
             },
             "reopen" => Input::Reopen,
             "connected" => Input::Connected,
@@ -260,6 +308,27 @@ impl Input {
             "verify" => Input::Verify,
             "alone" => Input::Alone,
             "join" => Input::Join(ctx_of(get("ctx")?)?),
+            "call" => Input::Call {
+                ctx: ctx_of(get("ctx")?)?,
+                instance: crate::live::state::instance_of(m)?,
+                transition: match get("transition")? {
+                    Value::Text(t) => t.to_string(),
+                    other => return Err(format!("transition is not text: {other:?}")),
+                },
+                input: args("input")?,
+                id: match get("id")? {
+                    Value::Id(i) => *i,
+                    other => return Err(format!("id is not an id: {other:?}")),
+                },
+                now: match get("now")? {
+                    Value::Int(n) => *n,
+                    other => return Err(format!("now is not an int: {other:?}")),
+                },
+                counter: match get("counter")? {
+                    Value::Int(n) => *n,
+                    other => return Err(format!("counter is not an int: {other:?}")),
+                },
+            },
             "hydrate" => {
                 let Value::List(vs) = get("views")? else {
                     return Err("views is not a list".into());
@@ -327,7 +396,14 @@ pub fn reopen(old: &Client, k: Kept) -> Client {
     r.log_id = k.log_id;
     r.partial = k.partial;
     r.through = k.cursor;
-    Client::open(r, old.mode, old.token.clone()).with_schema(old.schema.clone())
+    let c = Client::open(r, old.mode, old.token.clone()).with_schema(old.schema.clone());
+    // §14 Live state is about now and nothing of it is durable: a client
+    // started again holds none of it, and is told it whole when it next
+    // connects.
+    match &old.live {
+        Some(w) => c.with_live(crate::live::state::Watch::new(w.runner.clone(), w.device.clone())),
+        None => c,
+    }
 }
 
 /// A client that is its own authority (`docs/plan-alone.md` §1): where it
@@ -568,7 +644,7 @@ impl Observer {
 fn state(c: &Client) -> Vec<(&'static str, Value)> {
     let r = &c.replica;
     let opt_id = |i: &Option<Id>| i.map_or(Value::Null, Value::Id);
-    vec![
+    let mut out = vec![
         ("cursor", Value::Int(r.cursor)),
         ("log", opt_id(&r.log_id)),
         ("pending", Value::from(r.pending.iter().map(|e| Value::Id(e.id)).collect::<Vec<_>>())),
@@ -605,7 +681,44 @@ fn state(c: &Client) -> Vec<(&'static str, Value)> {
         ),
         ("hash", Value::bytes(state_hash(&r.confirmed))),
         ("view_hash", Value::bytes(state_hash(&r.view))),
-    ]
+    ];
+    // §14 A client holding live state is held to it too: each instance's
+    // sequence, whether a snapshot has come on this connection, the hash of
+    // what is confirmed, its view whole — ephemeral slots and pending calls
+    // on top — and the ids still pending; and the server's verdicts on its
+    // calls. Absent for every client that holds none, so no trace before
+    // live state moves.
+    if let Some(w) = &c.live {
+        out.push((
+            "live",
+            Value::from(
+                w.instances
+                    .iter()
+                    .map(|(i, x)| {
+                        Value::record(vec![
+                            ("live", Value::text(i.state.clone())),
+                            ("key", Value::text(i.key.clone())),
+                            ("seq", Value::Int(x.seq)),
+                            ("synced", Value::Bool(x.synced)),
+                            ("hash", Value::bytes(w.runner.hash(&i.state, &x.confirmed))),
+                            ("view", x.view.clone()),
+                            ("pending", Value::from(x.pending.iter().map(|p| Value::Id(p.id)).collect::<Vec<_>>())),
+                        ])
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+        ));
+        out.push((
+            "live_refused",
+            Value::from(
+                w.refused
+                    .iter()
+                    .map(|(id, why)| Value::record(vec![("id", Value::Id(*id)), ("reason", Value::text(why.clone()))]))
+                    .collect::<Vec<_>>(),
+            ),
+        ));
+    }
+    out
 }
 
 // ---------------------------------------------------------------------
@@ -671,6 +784,7 @@ pub fn read(text: &str) -> Result<(Module, Vec<(Value, Value)>), String> {
 /// language is, written in this one.
 pub struct Player {
     module_schema: crate::schema::Schema,
+    live: crate::live::state::Runner,
     bodies: BTreeMap<FnHash, Closure>,
     client: Option<Client>,
     kept: Option<Kept>,
@@ -683,6 +797,7 @@ impl Player {
         let bodies = closures(m);
         Player {
             module_schema: m.schema.clone(),
+            live: crate::live::state::Runner::of_module(m),
             observer: Observer::new(&bodies),
             bodies,
             client: None,
@@ -694,11 +809,24 @@ impl Player {
     /// One input, and what the client did after it.
     pub fn step(&mut self, input: &Input) -> Result<Value, String> {
         let mut refusal = None;
-        if let Input::Open { mode, closures, token } = input {
+        if let Input::Open {
+            mode,
+            closures,
+            token,
+            device,
+        } = input
+        {
             let bodies = if *closures { client_bodies(&self.bodies) } else { BTreeMap::new() };
             let st = MemoryStore::empty(self.module_schema.clone());
             let r = Replica::open(self.module_schema.clone(), bodies, st, 0, vec![]);
-            self.client = Some(Client::open(r, *mode, token.clone()));
+            let mut c = Client::open(r, *mode, token.clone());
+            // §14 A client of a module with live state holds it, as the
+            // device it declares — interpreted, as a runner in another
+            // language does.
+            if !self.live.is_empty() {
+                c = c.with_live(crate::live::state::Watch::new(self.live.clone(), device.clone()));
+            }
+            self.client = Some(c);
             self.kept = None;
             self.alone = None;
             self.observer.reset();
@@ -742,6 +870,19 @@ impl Player {
                 join(c, a, who);
             }
             Input::Hydrate(specs) => self.observer.hydrate(specs.clone(), &c.replica.view),
+            Input::Call {
+                ctx,
+                instance,
+                transition,
+                input,
+                id,
+                now,
+                counter,
+            } => {
+                if let Err(r) = c.call(ctx, instance, transition, input, *id, *now, *counter) {
+                    refusal = Some(r);
+                }
+            }
         }
         let frames = c.take_outgoing();
         let changes = c.replica.take_changes();

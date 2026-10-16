@@ -330,6 +330,7 @@ fn a_verify_below_the_horizon_is_answered_cannot_say() {
         },
         token: Some("alice".into()),
         spec: ark::ir::SPEC_VERSION,
+        device: None,
     };
     sv.recv(1, hello);
     let _ = sv.take_outgoing();
@@ -485,6 +486,7 @@ fn perf_verify_at_8000_rows() {
         },
         token: Some("alice".into()),
         spec: ark::ir::SPEC_VERSION,
+        device: None,
     };
     sv.recv(1, hello);
     let _ = sv.take_outgoing();

@@ -101,6 +101,8 @@ struct Core {
     tables: fn() -> Vec<IrTable>,
     middleware: RefCell<Vec<MwDecl>>,
     routes: RefCell<Vec<RouteDecl>>,
+    /// `docs/plan-live.md` The live states declared on this router.
+    lives: super::live::Lives,
 }
 
 /// A router over the tables `S`, or a middleware chain built on one: every
@@ -131,6 +133,7 @@ pub fn router<S: Tables>(name: &str) -> Router<S> {
             tables: super::schema::tables_of::<S>,
             middleware: RefCell::new(vec![]),
             routes: RefCell::new(vec![]),
+            lives: Default::default(),
         }),
         chain: vec![],
         _t: PhantomData,
@@ -208,6 +211,13 @@ impl<S: Tables, P> Router<S, P> {
             }),
             holds: None,
         })
+    }
+
+    /// `docs/plan-live.md` A live state, beside the router's mutations: one
+    /// current value of `T` per instance, an instance per scope key, moved
+    /// by transitions the server sequences ([`super::live::LiveB`]).
+    pub fn live<T: Data>(&self, name: &str) -> super::live::LiveB<T> {
+        super::live::declare_live(&self.core.lives, name)
     }
 
     /// The input the next procedure takes.
@@ -656,6 +666,7 @@ routers_tuple!(A.0, B.1, C.2, D.3, E.4, F.5, G.6, H.7);
 struct Built {
     module: ir::Module,
     procedures: Vec<(FnHash, Procedure)>,
+    lives: Vec<super::live::NativeLive>,
 }
 
 /// A domain: its routers, in order. Run under `Emit` once, it is the
@@ -738,6 +749,15 @@ impl Module {
     pub fn procedure(&self, name: &str) -> Option<(FnHash, Procedure)> {
         self.procedures().into_iter().find(|(_, p)| p.name() == name)
     }
+
+    /// `docs/plan-live.md` Every live state, to run natively.
+    pub fn lives(&self) -> Vec<super::live::NativeLive> {
+        self.build();
+        match self.built() {
+            Ok(b) => b.lives.clone(),
+            Err(_) => unreachable!("built above"),
+        }
+    }
 }
 
 fn build(cores: &[Rc<Core>]) -> Result<Built, Vec<String>> {
@@ -755,6 +775,7 @@ fn build(cores: &[Rc<Core>]) -> Result<Built, Vec<String>> {
         }
     }
     let prev = super::helper::begin();
+    super::live::begin_types();
     for core in cores {
         let mws = core.middleware.borrow().clone();
         routers.push(ir::Router {
@@ -782,7 +803,21 @@ fn build(cores: &[Rc<Core>]) -> Result<Built, Vec<String>> {
             decls.push((r.clone(), chain));
         }
     }
+    // `docs/plan-live.md` The live states, after every function: a helper
+    // only a transition calls is placed after the functions that do not.
+    let mut states = vec![];
+    let mut lives = vec![];
+    for core in cores {
+        let decls = core.lives.borrow().clone();
+        let (ss, es) = super::live::emit_states(&decls);
+        functions.extend(super::helper::drain());
+        states.extend(ss);
+        errors.extend(es);
+        lives.extend(decls);
+    }
     super::helper::end(prev);
+    let (declared, clashes) = super::live::end_types();
+    errors.extend(clashes);
     let schema = Schema { tables };
     if !errors.is_empty() {
         return Err(errors);
@@ -793,6 +828,8 @@ fn build(cores: &[Rc<Core>]) -> Result<Built, Vec<String>> {
         functions,
         routers,
         live: vec![],
+        types: declared.into_iter().collect(),
+        states,
     };
     // `docs/plan-guards.md` D4 A generated write names every column, so a
     // table a scope projects refuses it for whoever does not hold one — as it
@@ -826,7 +863,8 @@ fn build(cores: &[Rc<Core>]) -> Result<Built, Vec<String>> {
             (h, p)
         })
         .collect();
-    Ok(Built { module, procedures })
+    let lives = super::live::natives(&module, &lives);
+    Ok(Built { module, procedures, lives })
 }
 
 // §2.5 `fnNames`: the host exposes no names, so each symbol is `_n`.

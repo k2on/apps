@@ -17,7 +17,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::ir::{Block, Check, Expr, Field, Function, Key, Lookup, Module, Plan, Pred, Related, Stmt, Sym};
+use crate::ir::{Block, Check, Expr, Field, FnKind, Function, Key, Lookup, Module, Plan, Pred, Related, State, Stmt, Sym, Transition};
 
 type Ren = BTreeMap<Sym, Sym>;
 
@@ -68,11 +68,60 @@ pub fn normalize(f: &Function) -> Function {
     }
 }
 
-/// Every function of a module normalised.
+/// Every function and every live state of a module normalised.
 pub fn normalize_module(m: &Module) -> Module {
     Module {
         functions: m.functions.iter().map(normalize).collect(),
+        states: m.states.iter().map(normalize_state).collect(),
         ..m.clone()
+    }
+}
+
+/// §3.12 A transition as a function would be numbered: its checks, its
+/// guards (as a function's refinements are), then its body.
+pub fn normalize_transition(t: &Transition) -> Transition {
+    let f = normalize(&transition_function(t));
+    Transition {
+        name: t.name.clone(),
+        input: f.input,
+        guards: f.refine.into_iter().map(|(e, why)| (e, why.unwrap_or_default())).collect(),
+        body: f.body,
+        names: f.names,
+    }
+}
+
+/// §3.12 A live state with its init, its scope and each transition
+/// normalised, each a numbering of its own.
+pub fn normalize_state(s: &State) -> State {
+    let expr = |e: &Expr| renumber_expr(&Ren::new(), 0, e).0;
+    State {
+        init: expr(&s.init),
+        scope: expr(&s.scope),
+        transitions: s.transitions.iter().map(normalize_transition).collect(),
+        on_join: s.on_join.as_ref().map(normalize_transition),
+        on_leave: s.on_leave.as_ref().map(normalize_transition),
+        on_restore: s.on_restore.as_ref().map(normalize_transition),
+        ..s.clone()
+    }
+}
+
+/// A transition as the function the verifier and the numbering read it
+/// as: its input, its guards as refinements, its body.
+pub(crate) fn transition_function(t: &Transition) -> Function {
+    Function {
+        name: t.name.clone(),
+        kind: FnKind::Provide,
+        router: None,
+        uses: vec![],
+        autos: vec![],
+        input: t.input.clone(),
+        refine: t.guards.iter().map(|(e, why)| (e.clone(), Some(why.clone()))).collect(),
+        ret: None,
+        body: t.body.clone(),
+        plan: None,
+        holds: vec![],
+        private: false,
+        names: t.names.clone(),
     }
 }
 
@@ -261,6 +310,19 @@ fn expr_binders(e: &Expr) -> Vec<Sym> {
             v
         }
         Expr::Select(p) => plan_binders(p),
+        Expr::Variant(_, _, fs) => fs.values().flat_map(expr_binders).collect(),
+        Expr::Case(e, arms) => {
+            let mut v = expr_binders(e);
+            for (_, x, b) in arms {
+                v.push(*x);
+                v.extend(expr_binders(b));
+            }
+            v
+        }
+        Expr::Slot(a, b) => [a, b].iter().flat_map(|e| expr_binders(e)).collect(),
+        Expr::SetSlot(a, b, c) => [a, b, c].iter().flat_map(|e| expr_binders(e)).collect(),
+        Expr::Slots(e) => expr_binders(e),
+        Expr::LiveState | Expr::CtxNow | Expr::CtxDevice => vec![],
         Expr::Lit(_)
         | Expr::Arg(_)
         | Expr::Auto(_)
@@ -401,9 +463,56 @@ fn renumber_expr(ren: &Ren, next: Sym, e: &Expr) -> (Expr, Sym) {
             let (ks2, n) = renumber_many(ren, next, ks);
             (Expr::Exists(t.clone(), ks2), n)
         }
-        Expr::Lit(_) | Expr::Arg(_) | Expr::Auto(_) | Expr::CtxUser | Expr::CtxSession | Expr::HasRole(_) | Expr::Provided(_) | Expr::None(_) => {
-            (e.clone(), next)
+        // A sum built: its fields in name order, as a struct's.
+        Expr::Variant(t, n, fs) => {
+            let mut k = next;
+            let mut out = BTreeMap::new();
+            for (f, v) in fs {
+                let (v2, k2) = renumber_expr(ren, k, v);
+                out.insert(f.clone(), v2);
+                k = k2;
+            }
+            (Expr::Variant(t.clone(), n.clone(), out), k)
         }
+        // The scrutinee, then each arm in order: its binder, then its body.
+        Expr::Case(e, arms) => {
+            let (e2, mut k) = renumber_expr(ren, next, e);
+            let mut out = Vec::with_capacity(arms.len());
+            for (n, x, b) in arms {
+                let mut ren2 = ren.clone();
+                ren2.insert(*x, k);
+                let (b2, k2) = renumber_expr(&ren2, k + 1, b);
+                out.push((n.clone(), k, b2));
+                k = k2;
+            }
+            (Expr::Case(bx(e2), out), k)
+        }
+        Expr::Slot(a, b) => {
+            let (a2, n1) = renumber_expr(ren, next, a);
+            let (b2, n2) = renumber_expr(ren, n1, b);
+            (Expr::Slot(bx(a2), bx(b2)), n2)
+        }
+        Expr::SetSlot(a, b, c) => {
+            let (a2, n1) = renumber_expr(ren, next, a);
+            let (b2, n2) = renumber_expr(ren, n1, b);
+            let (c2, n3) = renumber_expr(ren, n2, c);
+            (Expr::SetSlot(bx(a2), bx(b2), bx(c2)), n3)
+        }
+        Expr::Slots(a) => {
+            let (a2, n1) = renumber_expr(ren, next, a);
+            (Expr::Slots(bx(a2)), n1)
+        }
+        Expr::Lit(_)
+        | Expr::Arg(_)
+        | Expr::Auto(_)
+        | Expr::CtxUser
+        | Expr::CtxSession
+        | Expr::HasRole(_)
+        | Expr::Provided(_)
+        | Expr::None(_)
+        | Expr::LiveState
+        | Expr::CtxNow
+        | Expr::CtxDevice => (e.clone(), next),
     }
 }
 

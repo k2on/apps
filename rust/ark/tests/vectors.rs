@@ -432,11 +432,68 @@ fn eval() {
             eval_cases(&p, &v);
         } else if v.get("raw").is_some() {
             check_raw(&v).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
+        } else if v.get("live").is_some() {
+            check_live(&v).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
         } else {
             check_eval(&v).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
         }
     }
-    falsified("eval", |_, v| check_eval(v));
+    falsified("eval", |_, v| if v.get("live").is_some() { check_live(v) } else { check_eval(v) });
+}
+
+/// `eval/live-*` (`docs/plan-live.md`): a live state's closure and type
+/// hashes, every transition's kind, its init and the hash of it, and a life
+/// of it — each step run over the state the last left, as the engine runs it
+/// (`ark::live::state::Runner::run`: a leave empties the leaver's ephemeral
+/// slots first), its new state and that state's hash with the ephemeral
+/// fields left out, or the refusal's words.
+fn check_live(v: &serde_json::Value) -> Result<(), String> {
+    use ark::live::state::Runner;
+    let m = module_of(&v["module"]);
+    let name = v["live"].as_str().ok_or("live names the state")?;
+    let st = m.lookup_state(name).ok_or("the module has the state")?;
+    let c = ark::hash::live_closure(&m, st);
+    ensure_eq!(hex(&ark::hash::live_hash(&c)), v["live_hash"].as_str().unwrap_or(""), "the live hash");
+    ensure_eq!(
+        hex(&ark::hash::state_type_hash(&c)),
+        v["type_hash"].as_str().unwrap_or(""),
+        "the type hash"
+    );
+    let kinds = value(&v["kinds"]);
+    for (t, k) in kinds.as_struct() {
+        ensure_eq!(Value::text(c.kind(t).name()), k.clone(), "the kind of {t}");
+    }
+    let r = Runner::of_module(&m);
+    let mut s = r.init(name).map_err(|e| format!("{e:?}"))?;
+    ensure_eq!(s, value(&v["init"]), "the init");
+    ensure_eq!(hex(&r.hash(name, &s)), v["init_hash"].as_str().unwrap_or(""), "the init's hash");
+    for (k, step) in v["steps"].as_array().ok_or("steps")?.iter().enumerate() {
+        let t = step["transition"].as_str().ok_or("a transition")?;
+        let cv = value(&step["ctx"]);
+        let ctx = ark::eval::LiveCtx {
+            user: cv.field("user").as_text().to_string(),
+            session: cv.field("session").as_text().to_string(),
+            roles: cv.field("roles").as_list().iter().map(|r| r.as_text().to_string()).collect(),
+            device: cv.field("device").as_text().to_string(),
+            now: match cv.field("now") {
+                Value::Int(n) => n,
+                other => return Err(format!("step {k}: now {other:?}")),
+            },
+        };
+        let input = args_of(&value(&step["input"]));
+        match (r.run(name, t, &s, &ctx, &input), step.get("refused")) {
+            (Ok(next), None) => {
+                ensure_eq!(next, value(&step["state"]), "step {k} ({t}): the state");
+                ensure_eq!(hex(&r.hash(name, &next)), step["hash"].as_str().unwrap_or(""), "step {k} ({t}): its hash");
+                s = next;
+            }
+            (Err(ark::eval::EvalFault::Verdict(ark::store::Refusal::Refused(why))), Some(want)) => {
+                ensure_eq!(Some(why.as_str()), want.as_str(), "step {k} ({t}): the refusal");
+            }
+            (got, want) => return Err(format!("step {k} ({t}): {got:?}, the vector says {want:?}")),
+        }
+    }
+    Ok(())
 }
 
 // eval/ with `cases`: the input checks as verdicts, and the form validator.
@@ -936,7 +993,27 @@ fn the_manifest_names_every_vector() {
         let fails = path.contains("/falsify/");
         assert_eq!(e["expect"].as_str(), Some(if fails { "fail" } else { "pass" }), "{path}");
         let fleet = path.starts_with("rebase/") && read(&vectors().join(path)).get("script").is_some();
-        assert_eq!(e["side"].as_str(), Some(if fleet { "rust-only" } else { "client" }), "{path}");
+        // `docs/plan-live.md` A live vector is Rust's until the client
+        // runtimes hold live state.
+        let file = path.rsplit('/').next().unwrap_or("");
+        let live = file.starts_with("live")
+            || path.starts_with("trace/live/")
+            || [
+                "client-call",
+                "client-hello-device",
+                "client-resync",
+                "server-applied",
+                "server-refused",
+                "server-live-snapshot",
+            ]
+            .iter()
+            .any(|p| file.starts_with(p));
+        let side = match (fleet, live) {
+            (true, _) => "rust-only",
+            (_, true) => "rust-for-now",
+            _ => "client",
+        };
+        assert_eq!(e["side"].as_str(), Some(side), "{path}");
         *sides.entry(e["side"].as_str().unwrap_or("").to_string()).or_default() += 1;
     }
     fn walk(dir: &Path, root: &Path, out: &mut Vec<String>) {

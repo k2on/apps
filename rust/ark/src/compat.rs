@@ -348,6 +348,8 @@ mod tests {
                 uses: vec![],
             }],
             live: vec![],
+            types: vec![],
+            states: vec![],
         }
     }
 

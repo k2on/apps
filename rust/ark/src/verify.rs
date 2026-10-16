@@ -57,7 +57,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::ir::normalize::normalize;
-use crate::ir::{Auto, Block, Check, Expr, FnKind, Function, Key, Module, Op, Plan, Pred, Source, StdFn, Stmt, Sym, SPEC_VERSION};
+use crate::ir::{Auto, Block, Check, Expr, FnKind, Function, Key, Module, Op, Plan, Pred, Source, State, StdFn, Stmt, Sym, Transition, SPEC_VERSION};
 use crate::schema::{check_schema, Schema, SchemaError, Table, Ty};
 use crate::value::{FieldName, TableName, Value};
 
@@ -71,6 +71,16 @@ pub enum VerifyError {
     InRouter(String, RouterComplaint),
     /// Function, then the complaint.
     In(String, Complaint),
+    /// `docs/plan-live.md` Two declarations of one name in the type
+    /// section, or two live states of one name.
+    DuplicateType(String),
+    DuplicateState(String),
+    /// A declaration of the type section, then the complaint.
+    InType(String, Complaint),
+    /// A live state, then the complaint.
+    InState(String, Complaint),
+    /// A live state, one of its transitions, then the complaint.
+    InTransition(String, String, Complaint),
 }
 
 impl std::fmt::Display for VerifyError {
@@ -208,6 +218,52 @@ pub enum Complaint {
     /// `private`: a client's module would not know to take its entries by
     /// the authority's facts.
     PrivateUndeclared,
+    // `docs/plan-live.md`
+    /// A named type the type section does not declare, or one that refers
+    /// to itself, with what resolving it said.
+    UnknownType(String),
+    /// A sum with no variant: no value would be one.
+    EmptySum,
+    /// A variant with a field named `t`, which is where a sum's value
+    /// carries its variant's name.
+    TagField(String),
+    /// An ephemeral marker anywhere but directly on a field of a live
+    /// state's record, or on a field that is not a `PerDevice`.
+    EphemeralNotOnState,
+    /// The state, its context (`ctx.now`, `ctx.device`) or a slot read
+    /// outside a transition.
+    LiveOutsideState,
+    /// A variant of a type that is not a sum, or a sum with no such
+    /// variant.
+    NoSuchVariant(String),
+    /// A variant built without exactly its fields: the field named.
+    VariantFields(String),
+    /// A case whose arms are not the sum's variants, once each, in order.
+    CaseArms(Vec<String>),
+    /// A slot of something that is not a `PerDevice`.
+    NotPerDevice,
+    /// A read of a table, an auto or a provided value in a live state's
+    /// init, scope or transition: a transition is a function of the state,
+    /// its context and its input alone.
+    TransitionReads(String),
+    /// An init that is not a constant: it reads the context or an input.
+    InitNotConstant(String),
+    /// An init that is not a value of the state's type, with why.
+    InitNotAValue(String),
+    /// A scope that is not a `Text` or a `List` of them of the context
+    /// alone, with why.
+    BadScope(String),
+    /// A transition named as a hook is (`on_join`, `on_leave`,
+    /// `on_restore`), or two of one name.
+    TransitionName(String),
+    /// A hook whose input is not what the engine hands it: `device`, a
+    /// device's record, for `on_join` and `on_leave`; nothing for
+    /// `on_restore`.
+    HookInput(String),
+    /// An ordered transition that reads an ephemeral field (named, or "the
+    /// whole state"): devices may disagree about one at any instant, and an
+    /// ordered transition must reach the same state on every replica.
+    OrderedReadsEphemeral(String),
 }
 
 /// Verify a module. On success, the module as it is to be hashed and run:
@@ -230,6 +286,22 @@ pub fn verify(m0: &Module) -> Result<Module, Vec<VerifyError>> {
         return Err(rdups.into_iter().map(VerifyError::DuplicateRouter).collect());
     }
     let mut errs = Vec::new();
+    // `docs/plan-live.md` The type section and the live states.
+    if let Some(d) = duplicates(m.types.iter().map(|(n, _)| n.clone())).into_iter().next() {
+        return Err(vec![VerifyError::DuplicateType(d)]);
+    }
+    if let Some(d) = duplicates(m.states.iter().map(|s| s.name.clone())).into_iter().next() {
+        return Err(vec![VerifyError::DuplicateState(d)]);
+    }
+    let types = m.type_map();
+    for (n, t) in &m.types {
+        if let Err(cs) = type_decl_ok(&types, &m.states, n, t) {
+            errs.extend(cs.into_iter().map(|c| VerifyError::InType(n.clone(), c)));
+        }
+    }
+    for st in &m.states {
+        errs.extend(state_ok(&m, &types, st));
+    }
     for r in &m.routers {
         for u in &r.uses {
             let ok = m.lookup_function(u).is_some_and(|f| f.kind.is_middleware());
@@ -254,6 +326,7 @@ pub fn verify(m0: &Module) -> Result<Module, Vec<VerifyError>> {
     if errs.is_empty() {
         Ok(Module {
             functions: m.functions.iter().map(normalize).collect(),
+            states: m.states.iter().map(crate::ir::normalize_state).collect(),
             ..m
         })
     } else {
@@ -423,8 +496,9 @@ fn verify_function_naming(m: &Module, i: usize, f: &Function, named: &RefCell<Na
     if let Some(d) = duplicates(names.into_iter()).into_iter().next() {
         return err(Complaint::DuplicateName(d));
     }
+    let types = m.type_map();
     for (_, fd) in &f.input {
-        no_nested_option(&fd.ty)?;
+        plain_ty(&types, &fd.ty)?;
     }
     for (_, a) in &f.autos {
         if let Auto::NewId(t) = a {
@@ -434,16 +508,21 @@ fn verify_function_naming(m: &Module, i: usize, f: &Function, named: &RefCell<Na
         }
     }
     if let Some(t) = &f.ret {
-        no_nested_option(t)?;
+        plain_ty(&types, t)?;
     }
-    let args: BTreeMap<String, Ty> = f.input.iter().map(|(n, fd)| (n.clone(), fd.ty.clone())).collect();
+    let args: BTreeMap<String, Ty> = f
+        .input
+        .iter()
+        .map(|(n, fd)| Ok((n.clone(), plain_ty(&types, &fd.ty)?)))
+        .collect::<Check_<_>>()?;
     let provided: BTreeMap<String, Ty> = f
         .uses
         .iter()
         .filter_map(|u| m.lookup_function(u))
         .filter(|g| g.kind == FnKind::Provide)
         .filter_map(|g| g.ret.clone().map(|t| (g.name.clone(), t)))
-        .collect();
+        .map(|(n, t)| Ok((n, plain_ty(&types, &t)?)))
+        .collect::<Check_<_>>()?;
     let g = G {
         m,
         named,
@@ -454,6 +533,8 @@ fn verify_function_naming(m: &Module, i: usize, f: &Function, named: &RefCell<Na
         provided: &provided,
         locals: BTreeMap::new(),
         private: false,
+        types: &types,
+        live: None,
     };
     // The input's checks, each over its own field as it stands.
     for (n, fd) in &f.input {
@@ -535,6 +616,12 @@ struct G<'a> {
     locals: BTreeMap<Sym, Ty>,
     /// Inside a private block (`docs/plan-guards.md` D3).
     private: bool,
+    /// `docs/plan-live.md` The type section, which a named type is read
+    /// through wherever the checker meets one.
+    types: &'a BTreeMap<String, Ty>,
+    /// Inside a live state's transition: the state's type, resolved and
+    /// unmarked.
+    live: Option<&'a Ty>,
 }
 
 impl G<'_> {
@@ -560,9 +647,47 @@ fn no_nested_option(t: &Ty) -> Check_<()> {
             Ty::Option(_) => err(Complaint::NestedOption),
             other => no_nested_option(other),
         },
-        Ty::List(t) => no_nested_option(t),
+        Ty::List(t) | Ty::NonEmpty(t) | Ty::Ephemeral(t) => no_nested_option(t),
+        // A slot reads as an option of its type, which may not be one.
+        Ty::PerDevice(t) => match &**t {
+            Ty::Option(_) => err(Complaint::NestedOption),
+            other => no_nested_option(other),
+        },
         Ty::Struct(fs) => fs.values().try_for_each(no_nested_option),
+        Ty::Sum(vs) => vs.values().flat_map(|fs| fs.values()).try_for_each(no_nested_option),
         _ => Ok(()),
+    }
+}
+
+/// A declared type as the checker reads it: named types resolved, no
+/// option of an option, and no ephemeral marker — which belongs on a live
+/// state's own fields alone.
+fn plain_ty(types: &BTreeMap<String, Ty>, t: &Ty) -> Check_<Ty> {
+    let r = crate::types::resolve(types, t).map_err(|e| vec![Complaint::UnknownType(e)])?;
+    no_nested_option(&r)?;
+    if marked(&r) {
+        return err(Complaint::EphemeralNotOnState);
+    }
+    Ok(r)
+}
+
+// Whether a type carries an ephemeral marker anywhere.
+fn marked(t: &Ty) -> bool {
+    match t {
+        Ty::Ephemeral(_) => true,
+        Ty::Option(x) | Ty::List(x) | Ty::NonEmpty(x) | Ty::PerDevice(x) => marked(x),
+        Ty::Struct(fs) => fs.values().any(marked),
+        Ty::Sum(vs) => vs.values().flat_map(|fs| fs.values()).any(marked),
+        _ => false,
+    }
+}
+
+// A value read where it is declared a non-empty list is a list to the
+// checker: what it was promised is held at the boundary (`crate::types`).
+fn read_as(t: Ty) -> Ty {
+    match t {
+        Ty::NonEmpty(x) => Ty::List(x),
+        other => other,
     }
 }
 
@@ -675,7 +800,7 @@ fn stmt<'a>(g: &G<'a>, s: &Stmt) -> Check_<G<'a>> {
                 (None, None) => {}
                 (None, Some(_)) => return err(Complaint::ReturnTypeOnMutator),
                 (Some(_), None) => return err(Complaint::NoReturnType),
-                (Some(want), Some(e)) => expect(g, "return", want, e)?,
+                (Some(want), Some(e)) => expect(g, "return", &plain_ty(g.types, want)?, e)?,
             }
             Ok(g.clone())
         }
@@ -772,7 +897,10 @@ fn same(sch: &Schema, a: &Ty, b: &Ty) -> bool {
         return true;
     }
     match (a, b) {
-        (Ty::Option(x), Ty::Option(y)) | (Ty::List(x), Ty::List(y)) => same(sch, x, y),
+        (Ty::Option(x), Ty::Option(y)) | (Ty::List(x), Ty::List(y)) | (Ty::PerDevice(x), Ty::PerDevice(y)) => same(sch, x, y),
+        // `docs/plan-live.md` A non-empty list is a list to the checker,
+        // and held to its one element where it crosses a boundary.
+        (Ty::NonEmpty(x), Ty::List(y)) | (Ty::List(x), Ty::NonEmpty(y)) | (Ty::NonEmpty(x), Ty::NonEmpty(y)) => same(sch, x, y),
         (Ty::Struct(fa), Ty::Struct(fb)) => {
             let (wide, narrow) = if fa.len() >= fb.len() { (fa, fb) } else { (fb, fa) };
             if !narrow.iter().all(|(k, t)| wide.get(k).is_some_and(|w| same(sch, w, t))) {
@@ -812,7 +940,12 @@ fn elem_of(site: &str, t: Ty) -> Check_<Ty> {
 fn infer(g: &G, want: Option<&Ty>, e: &Expr) -> Check_<Ty> {
     match e {
         Expr::Lit(v) => lit(want, v),
-        Expr::Arg(a) => g.args.get(a).cloned().map_or_else(|| err(Complaint::UnknownArg(a.clone())), Ok),
+        Expr::Arg(a) => g
+            .args
+            .get(a)
+            .cloned()
+            .map(read_as)
+            .map_or_else(|| err(Complaint::UnknownArg(a.clone())), Ok),
         Expr::Auto(a) => match g.f.autos.iter().find(|(n, _)| n == a) {
             Some((_, Auto::NewId(t))) if g.kind == FnKind::Mutator => Ok(Ty::Id(t.clone())),
             Some((_, Auto::Now)) if g.kind == FnKind::Mutator => Ok(Ty::Int),
@@ -827,10 +960,19 @@ fn infer(g: &G, want: Option<&Ty>, e: &Expr) -> Check_<Ty> {
             Ty::Struct(fs) => {
                 let t = fs.get(f).cloned().map_or_else(|| err(Complaint::NoSuchField(f.clone())), Ok)?;
                 g.named.borrow_mut().fields.push((fs, f.clone()));
-                Ok(t)
+                Ok(read_as(t))
             }
             _ => err(Complaint::NotAStruct(f.clone())),
         },
+        // `docs/plan-live.md` A struct written where a `PerDevice` is wanted
+        // is its slots, by device id: `{}` is every slot empty.
+        Expr::Struct(fs) if matches!(want, Some(Ty::PerDevice(_))) => {
+            let Some(Ty::PerDevice(t)) = want else { unreachable!("matched above") };
+            for (k, e) in fs {
+                expect(g, &format!("slot {k}"), t, e)?;
+            }
+            Ok(Ty::PerDevice(t.clone()))
+        }
         Expr::Struct(fs) => {
             let wf = match want {
                 Some(Ty::Struct(ws)) => Some(ws),
@@ -844,7 +986,7 @@ fn infer(g: &G, want: Option<&Ty>, e: &Expr) -> Check_<Ty> {
         }
         Expr::List(es) => {
             let we = match want {
-                Some(Ty::List(t)) => Some(&**t),
+                Some(Ty::List(t)) | Some(Ty::NonEmpty(t)) => Some(&**t),
                 _ => None,
             };
             let mut ts = Vec::with_capacity(es.len());
@@ -875,7 +1017,7 @@ fn infer(g: &G, want: Option<&Ty>, e: &Expr) -> Check_<Ty> {
             }
         }
         Expr::None(t) => {
-            let o = Ty::Option(Box::new(t.clone()));
+            let o = Ty::Option(Box::new(plain_ty(g.types, t)?));
             no_nested_option(&o)?;
             Ok(o)
         }
@@ -933,9 +1075,10 @@ fn infer(g: &G, want: Option<&Ty>, e: &Expr) -> Check_<Ty> {
                 return err(Complaint::Arity(name.clone(), f.input.len(), es.len()));
             }
             for ((_, fd), e) in f.input.iter().zip(es) {
-                expect(g, &format!("argument of {name}"), &fd.ty, e)?;
+                expect(g, &format!("argument of {name}"), &plain_ty(g.types, &fd.ty)?, e)?;
             }
-            f.ret.clone().map_or_else(|| err(Complaint::NotAHelper(name.clone())), Ok)
+            let ret = f.ret.clone().map_or_else(|| err(Complaint::NotAHelper(name.clone())), Ok)?;
+            plain_ty(g.types, &ret)
         }
         Expr::Std(f, es) => {
             let mut ts = Vec::with_capacity(es.len());
@@ -975,6 +1118,78 @@ fn infer(g: &G, want: Option<&Ty>, e: &Expr) -> Check_<Ty> {
             Ok(a)
         }
         Expr::Select(_) | Expr::Get(_, _) | Expr::Exists(_, _) => err(Complaint::ReadNotBound),
+        // `docs/plan-live.md` A sum built: one of its variants, with
+        // exactly that variant's fields, each of its type.
+        Expr::Variant(t, n, fs) => {
+            let sum = plain_ty(g.types, t)?;
+            let Ty::Sum(vs) = &sum else {
+                return err(Complaint::NoSuchVariant(n.clone()));
+            };
+            let Some(want_fs) = vs.get(n) else {
+                return err(Complaint::NoSuchVariant(n.clone()));
+            };
+            if let Some(k) = fs
+                .keys()
+                .find(|k| !want_fs.contains_key(*k))
+                .or_else(|| want_fs.keys().find(|k| !fs.contains_key(*k)))
+            {
+                return err(Complaint::VariantFields(k.clone()));
+            }
+            for (k, e) in fs {
+                expect(g, &format!("variant {n}.{k}"), &want_fs[k], e)?;
+            }
+            Ok(sum)
+        }
+        // A sum taken apart: an arm per variant, in order, each over the
+        // variant's record.
+        Expr::Case(e, arms) => {
+            let Ty::Sum(vs) = infer(g, None, e)? else {
+                return err(Complaint::CaseArms(arms.iter().map(|(n, _, _)| n.clone()).collect()));
+            };
+            let names: Vec<&String> = arms.iter().map(|(n, _, _)| n).collect();
+            if names != vs.keys().collect::<Vec<_>>() {
+                return err(Complaint::CaseArms(arms.iter().map(|(n, _, _)| n.clone()).collect()));
+            }
+            let mut out: Option<Ty> = None;
+            for (n, x, b) in arms {
+                let rec = Ty::Struct(vs[n].clone());
+                let t = infer(&g.bind(*x, rec), out.as_ref().or(want), b)?;
+                match &out {
+                    None => out = Some(t),
+                    Some(o) if same(g.schema(), o, &t) => {}
+                    Some(o) => return err(Complaint::TypeMismatch("case arms".into(), o.clone(), t)),
+                }
+            }
+            out.map_or_else(|| err(Complaint::EmptySum), Ok)
+        }
+        Expr::LiveState => g.live.cloned().map_or_else(|| err(Complaint::LiveOutsideState), Ok),
+        Expr::CtxNow if g.live.is_some() => Ok(Ty::Int),
+        Expr::CtxDevice if g.live.is_some() => Ok(Ty::Text),
+        Expr::CtxNow | Expr::CtxDevice => err(Complaint::LiveOutsideState),
+        Expr::Slot(m, k) => {
+            let Ty::PerDevice(t) = infer(g, None, m)? else {
+                return err(Complaint::NotPerDevice);
+            };
+            expect(g, "slot key", &Ty::Text, k)?;
+            Ok(Ty::Option(t))
+        }
+        Expr::SetSlot(m, k, v) => {
+            let pd = infer(g, None, m)?;
+            let Ty::PerDevice(t) = &pd else {
+                return err(Complaint::NotPerDevice);
+            };
+            expect(g, "slot key", &Ty::Text, k)?;
+            expect(g, "slot value", &Ty::Option(t.clone()), v)?;
+            Ok(pd)
+        }
+        Expr::Slots(m) => {
+            let Ty::PerDevice(t) = infer(g, None, m)? else {
+                return err(Complaint::NotPerDevice);
+            };
+            Ok(Ty::List(Box::new(Ty::Struct(
+                [("device".to_string(), Ty::Text), ("value".to_string(), *t)].into(),
+            ))))
+        }
     }
 }
 
@@ -1223,6 +1438,12 @@ fn forbidden(e: &Expr) -> Option<Complaint> {
             any([&**a, &**b].into_iter())
         }
         Expr::Fold(a, b, _, _, c) => any([&**a, &**b, &**c].into_iter()),
+        Expr::Variant(_, _, fs) => any(fs.values()),
+        Expr::Case(a, arms) => any(std::iter::once(&**a).chain(arms.iter().map(|(_, _, b)| b))),
+        Expr::Slot(a, b) => any([&**a, &**b].into_iter()),
+        Expr::SetSlot(a, b, c) => any([&**a, &**b, &**c].into_iter()),
+        Expr::Slots(a) => forbidden(a),
+        Expr::LiveState | Expr::CtxNow | Expr::CtxDevice => None,
         Expr::Lit(_) | Expr::Arg(_) | Expr::Var(_) | Expr::CtxUser | Expr::CtxSession | Expr::HasRole(_) | Expr::Provided(_) | Expr::None(_) => None,
     }
 }
@@ -1296,6 +1517,8 @@ fn scope_ok(m: &Module, i: usize, f: &Function) -> Result<(), Vec<Complaint>> {
         provided: &none,
         locals: BTreeMap::new(),
         private: false,
+        types: &none,
+        live: None,
     };
     for h in &f.holds {
         let t = table(&g, &h.table)?;
@@ -1381,6 +1604,325 @@ fn ctx_only(e: &Expr) -> Check_<()> {
         Expr::Select(_) | Expr::Get(..) | Expr::Exists(..) => beyond("a read"),
         Expr::Call(..) => beyond("a call"),
         _ => beyond("an expression of more than the context"),
+    }
+}
+
+// `docs/plan-live.md` One declaration of the type section: it resolves —
+// every name it reaches is declared, and none refers to itself — a sum has
+// a variant and no variant a field named `t`, and an ephemeral marker is on
+// a `PerDevice` field of a record some live state is.
+fn type_decl_ok(types: &BTreeMap<String, Ty>, states: &[State], name: &str, t: &Ty) -> Check_<()> {
+    let r = crate::types::resolve(types, t).map_err(|e| vec![Complaint::UnknownType(e)])?;
+    no_nested_option(&r)?;
+    sums_ok(&r)?;
+    if marked(&r) {
+        let is_state = states.iter().any(|s| s.ty == Ty::Named(name.into()));
+        if !is_state || !state_marks_ok(&r) {
+            return err(Complaint::EphemeralNotOnState);
+        }
+    }
+    Ok(())
+}
+
+// Every sum in a type has a variant, and no variant a field named `t`.
+fn sums_ok(t: &Ty) -> Check_<()> {
+    match t {
+        Ty::Sum(vs) => {
+            if vs.is_empty() {
+                return err(Complaint::EmptySum);
+            }
+            for (v, fs) in vs {
+                if fs.contains_key(crate::types::TAG) {
+                    return err(Complaint::TagField(v.clone()));
+                }
+                fs.values().try_for_each(sums_ok)?;
+            }
+            Ok(())
+        }
+        Ty::Option(x) | Ty::List(x) | Ty::NonEmpty(x) | Ty::PerDevice(x) | Ty::Ephemeral(x) => sums_ok(x),
+        Ty::Struct(fs) => fs.values().try_for_each(sums_ok),
+        _ => Ok(()),
+    }
+}
+
+// A state's resolved type marks ephemeral only its own record's fields, each
+// a `PerDevice`, with nothing marked beneath.
+fn state_marks_ok(t: &Ty) -> bool {
+    match t {
+        Ty::Struct(fs) => fs.values().all(|f| match f {
+            Ty::Ephemeral(x) => matches!(&**x, Ty::PerDevice(_)) && !marked(x),
+            other => !marked(other),
+        }),
+        other => !marked(other),
+    }
+}
+
+/// `docs/plan-live.md` A live state: its type resolves and marks only what
+/// it may; its init is a constant value of it; its scope is a `Text` or a
+/// list of them of the context alone; and every transition and hook is
+/// typed over the state, its context and its input, reads nothing else,
+/// and — ordered — reads no ephemeral field.
+fn state_ok(m: &Module, types: &BTreeMap<String, Ty>, st: &State) -> Vec<VerifyError> {
+    let here = |c: Complaint| VerifyError::InState(st.name.clone(), c);
+    let marked_ty = match crate::types::resolve(types, &st.ty) {
+        Ok(t) => t,
+        Err(e) => return vec![here(Complaint::UnknownType(e))],
+    };
+    if let Err(cs) = no_nested_option(&marked_ty).and_then(|_| sums_ok(&marked_ty)) {
+        return cs.into_iter().map(here).collect();
+    }
+    if !state_marks_ok(&marked_ty) {
+        return vec![here(Complaint::EphemeralNotOnState)];
+    }
+    let ty = crate::types::unmarked(&marked_ty);
+    let none = BTreeMap::new();
+    let unnamed = RefCell::new(Named::default());
+    let shell = transition_shell(&st.name, ty.clone());
+    let g = G {
+        m,
+        named: &unnamed,
+        index: m.functions.len(),
+        f: &shell,
+        kind: FnKind::Helper,
+        args: &none,
+        provided: &none,
+        locals: BTreeMap::new(),
+        private: false,
+        types,
+        live: None,
+    };
+    let mut errs = vec![];
+    // The init: a constant of the state's type, and a value of it.
+    if let Some(c) = constant(&st.init) {
+        errs.push(here(Complaint::InitNotConstant(c)));
+    } else if let Err(cs) = expect(&g, "init", &ty, &st.init) {
+        errs.extend(cs.into_iter().map(here));
+    } else {
+        match crate::eval::constant(&st.init) {
+            Ok(v) => {
+                if let Err(why) = crate::types::conforms(types, &st.ty, &v) {
+                    errs.push(here(Complaint::InitNotAValue(why)));
+                }
+            }
+            Err(e) => errs.push(here(Complaint::InitNotAValue(format!("{e:?}")))),
+        }
+    }
+    // The scope: of the context alone.
+    match ctx_only_scope(&st.scope) {
+        Err(cs) => errs.extend(cs.into_iter().map(here)),
+        Ok(()) => match infer(&g, None, &st.scope) {
+            Ok(Ty::Text) => {}
+            Ok(Ty::List(t)) if *t == Ty::Text => {}
+            Ok(other) => errs.push(here(Complaint::BadScope(format!("a scope is text or a list of text, not {other:?}")))),
+            Err(cs) => errs.extend(cs.into_iter().map(here)),
+        },
+    }
+    let names = st.transitions.iter().map(|t| t.name.clone());
+    if let Some(d) = duplicates(names).into_iter().next() {
+        errs.push(here(Complaint::TransitionName(d)));
+    }
+    let hooks = [
+        (crate::ir::ON_JOIN, &st.on_join),
+        (crate::ir::ON_LEAVE, &st.on_leave),
+        (crate::ir::ON_RESTORE, &st.on_restore),
+    ];
+    for t in &st.transitions {
+        if hooks.iter().any(|(h, _)| *h == t.name) {
+            errs.push(VerifyError::InTransition(
+                st.name.clone(),
+                t.name.clone(),
+                Complaint::TransitionName(t.name.clone()),
+            ));
+        }
+    }
+    let declared = st.transitions.iter().map(|t| (t, None));
+    let hooked = hooks.iter().filter_map(|(h, t)| t.as_ref().map(|t| (t, Some(*h))));
+    for (t, hook) in declared.chain(hooked) {
+        if let Err(cs) = transition_ok(m, types, &marked_ty, &ty, t, hook) {
+            errs.extend(cs.into_iter().map(|c| VerifyError::InTransition(st.name.clone(), t.name.clone(), c)));
+        }
+    }
+    errs
+}
+
+// The function a transition is typed as: a body returning the state.
+fn transition_shell(name: &str, ret: Ty) -> Function {
+    Function {
+        ret: Some(ret),
+        ..crate::ir::normalize::transition_function(&Transition {
+            name: name.into(),
+            input: vec![],
+            guards: vec![],
+            body: vec![],
+            names: BTreeMap::new(),
+        })
+    }
+}
+
+fn transition_ok(m: &Module, types: &BTreeMap<String, Ty>, marked_ty: &Ty, ty: &Ty, t: &Transition, hook: Option<&str>) -> Check_<()> {
+    // A hook is handed what the engine has: a device's record, or nothing.
+    match hook {
+        Some(h) if h == crate::ir::ON_RESTORE => {
+            if !t.input.is_empty() {
+                return err(Complaint::HookInput(h.into()));
+            }
+        }
+        Some(h) => {
+            let ok = matches!(&t.input[..], [(n, f)] if n == "device" && f.checks.is_empty() && f.ty == crate::ir::device_ty());
+            if !ok {
+                return err(Complaint::HookInput(h.into()));
+            }
+        }
+        None => {}
+    }
+    if let Some(name) = hook {
+        if t.name != name {
+            return err(Complaint::TransitionName(t.name.clone()));
+        }
+    }
+    if let Some(d) = duplicates(t.input.iter().map(|(n, _)| n.clone())).into_iter().next() {
+        return err(Complaint::DuplicateName(d));
+    }
+    let args: BTreeMap<String, Ty> = t
+        .input
+        .iter()
+        .map(|(n, fd)| Ok((n.clone(), plain_ty(types, &fd.ty)?)))
+        .collect::<Check_<_>>()?;
+    // A function of the state, its context and its input alone.
+    let mut exprs: Vec<&Expr> = t.guards.iter().map(|(e, _)| e).collect();
+    for (_, fd) in &t.input {
+        for c in &fd.checks {
+            match c {
+                Check::Exists(_) => return err(Complaint::TransitionReads("an exists check".into())),
+                Check::Refine(e, _) => exprs.push(e),
+                _ => {}
+            }
+        }
+    }
+    block_exprs(&t.body, &mut exprs);
+    for e in exprs {
+        if let Some(what) = transition_forbidden(e) {
+            return err(Complaint::TransitionReads(what));
+        }
+    }
+    let f = transition_shell(&t.name, ty.clone());
+    let none = BTreeMap::new();
+    let unnamed = RefCell::new(Named::default());
+    let g = G {
+        m,
+        named: &unnamed,
+        index: m.functions.len(),
+        f: &f,
+        kind: FnKind::Provide,
+        args: &args,
+        provided: &none,
+        locals: BTreeMap::new(),
+        private: false,
+        types,
+        live: Some(ty),
+    };
+    for (n, fd) in &t.input {
+        let inner = match &args[n] {
+            Ty::Option(x) => (**x).clone(),
+            x => x.clone(),
+        };
+        for c in &fd.checks {
+            let fits = match c {
+                Check::Trim | Check::MinLen(..) | Check::MaxLen(..) => inner == Ty::Text,
+                Check::Range(..) => inner == Ty::Int,
+                Check::NonEmpty(_) => matches!(inner, Ty::List(_) | Ty::NonEmpty(_)),
+                Check::Exists(_) => false,
+                Check::Refine(e, _) => {
+                    let mut own = args.clone();
+                    own.insert(n.clone(), read_as(inner.clone()));
+                    expect(&G { args: &own, ..g.clone() }, "refine", &Ty::Bool, e)?;
+                    true
+                }
+            };
+            if !fits {
+                return err(Complaint::CheckOnWrongType(n.clone(), format!("{c:?}")));
+            }
+        }
+    }
+    for (e, _) in &t.guards {
+        expect(&g, "guard", &Ty::Bool, e)?;
+    }
+    block(&g, &t.body)?;
+    if !returns(&t.body) {
+        return err(Complaint::MayNotReturn);
+    }
+    if crate::ir::ordering::classify(marked_ty, t) == crate::ir::ordering::Kind::Ordered {
+        if let Some(f) = crate::ir::ordering::ordered_reads_ephemeral(marked_ty, t) {
+            return err(Complaint::OrderedReadsEphemeral(f));
+        }
+    }
+    Ok(())
+}
+
+// Every expression a block holds, at any depth.
+fn block_exprs<'a>(b: &'a Block, out: &mut Vec<&'a Expr>) {
+    for s in b {
+        match s {
+            Stmt::Let(_, e) | Stmt::Refuse(e) | Stmt::Insert(_, e, _) | Stmt::Upsert(_, e, _) => out.push(e),
+            Stmt::Return(e) => out.extend(e.iter()),
+            Stmt::If(c, a, e) => {
+                out.push(c);
+                block_exprs(a, out);
+                block_exprs(e, out);
+            }
+            Stmt::For(_, xs, body) => {
+                out.push(xs);
+                block_exprs(body, out);
+            }
+            Stmt::Update(_, ks, _, e) => {
+                out.extend(ks.iter());
+                out.push(e);
+            }
+            Stmt::Delete(_, ks) => out.extend(ks.iter()),
+            Stmt::Private(body) => block_exprs(body, out),
+        }
+    }
+}
+
+// What a transition may not reach for, named: a read, an auto, a provided
+// value. A write is refused by the checker as outside a mutator.
+fn transition_forbidden(e: &Expr) -> Option<String> {
+    match e {
+        Expr::Select(_) | Expr::Get(..) | Expr::Exists(..) => Some("a read".into()),
+        Expr::Auto(_) => Some("an auto".into()),
+        Expr::Provided(_) => Some("a provided value".into()),
+        _ => crate::view::children(e).into_iter().find_map(transition_forbidden),
+    }
+}
+
+// The first thing an init reaches that is not a constant, named.
+fn constant(e: &Expr) -> Option<String> {
+    match e {
+        Expr::Arg(_) => Some("an argument".into()),
+        Expr::Auto(_) => Some("an auto".into()),
+        Expr::Var(_) => Some("a local".into()),
+        Expr::Provided(_) => Some("a provided value".into()),
+        Expr::CtxUser | Expr::CtxSession | Expr::HasRole(_) | Expr::CtxNow | Expr::CtxDevice | Expr::LiveState => Some("the context".into()),
+        Expr::Select(_) | Expr::Get(..) | Expr::Exists(..) => Some("a read".into()),
+        Expr::Call(..) => Some("a call".into()),
+        Expr::Match(..) | Expr::Map(..) | Expr::Filter(..) | Expr::Any(..) | Expr::All(..) | Expr::SortBy(..) | Expr::Fold(..) | Expr::Case(..) => {
+            Some("a binder".into())
+        }
+        _ => crate::view::children(e).into_iter().find_map(constant),
+    }
+}
+
+// A scope's expression: the context, literals, lists of them, and the
+// operators, comparisons and standard functions over them.
+fn ctx_only_scope(e: &Expr) -> Check_<()> {
+    match e {
+        Expr::List(es) | Expr::Std(_, es) => es.iter().try_for_each(ctx_only_scope),
+        Expr::If(c, a, b) => {
+            ctx_only_scope(c)?;
+            ctx_only_scope(a)?;
+            ctx_only_scope(b)
+        }
+        other => ctx_only(other).map_err(|cs| cs.into_iter().map(|c| Complaint::BadScope(format!("{c:?}"))).collect()),
     }
 }
 
@@ -1489,6 +2031,22 @@ fn complete_expr(sch: &Schema, e: &mut Expr) {
             complete_expr(sch, z);
             complete_expr(sch, b);
         }
+        Expr::Variant(_, _, fs) => fs.values_mut().for_each(|e| complete_expr(sch, e)),
+        Expr::Case(a, arms) => {
+            complete_expr(sch, a);
+            arms.iter_mut().for_each(|(_, _, b)| complete_expr(sch, b));
+        }
+        Expr::Slot(a, b) => {
+            complete_expr(sch, a);
+            complete_expr(sch, b);
+        }
+        Expr::SetSlot(a, b, c) => {
+            complete_expr(sch, a);
+            complete_expr(sch, b);
+            complete_expr(sch, c);
+        }
+        Expr::Slots(a) => complete_expr(sch, a),
+        Expr::LiveState | Expr::CtxNow | Expr::CtxDevice => {}
         Expr::Lit(_)
         | Expr::Arg(_)
         | Expr::Auto(_)

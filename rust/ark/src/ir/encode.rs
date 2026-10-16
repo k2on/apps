@@ -7,7 +7,9 @@ use std::collections::BTreeMap;
 
 use crate::hash::Closure;
 use crate::ir::normalize::normalize;
-use crate::ir::{Auto, Check, Expr, Field, FnKind, Function, Hold, Key, Lookup, Module, Plan, Pred, Projection, Related, Router, Source, Stmt};
+use crate::ir::{
+    Auto, Check, Expr, Field, FnKind, Function, Hold, Key, Lookup, Module, Plan, Pred, Projection, Related, Router, Source, State, Stmt, Transition,
+};
 use crate::schema::{Dir, Schema, Ty};
 use crate::value::{FieldName, Value};
 
@@ -35,16 +37,103 @@ fn list<T>(f: impl Fn(&T) -> Value, xs: &[T]) -> Value {
 /// The whole module (`Ark.Encode.toValue`). Functions are carried without
 /// their dependency hashes, because the module carries the helpers.
 pub fn module_value(m: &Module) -> Value {
+    let mut fields = vec![
+        ("spec", int(m.spec)),
+        ("schema", schema_value(&m.schema)),
+        ("functions", list(|f| function_value(&BTreeMap::new(), f), &m.functions)),
+        ("routers", list(router_value, &m.routers)),
+        ("live", list(|(n, t)| node("frame", vec![("name", txt(n)), ("ty", ty_value(t))]), &m.live)),
+    ];
+    // `docs/plan-live.md` The type section and the live states, each
+    // written only when there is one: a module without live state is the
+    // bytes it was.
+    if !m.types.is_empty() {
+        fields.push(("types", list(|(n, t)| type_decl_value(n, t), &m.types)));
+    }
+    if !m.states.is_empty() {
+        fields.push(("states", list(|s| state_value(&BTreeMap::new(), s), &m.states)));
+    }
+    node("module", fields)
+}
+
+/// §2.2 One declaration of the type section: `{"t":"type","name","ty"}`.
+pub fn type_decl_value(name: &str, t: &Ty) -> Value {
+    node("type", vec![("name", txt(name)), ("ty", ty_value(t))])
+}
+
+/// §3.12 A live state, every transition normalised, with the hashes of the
+/// helpers its transitions reach directly (`deps`, as a function's): `{"t":
+/// "state","name","deps","ty","init","scope","transitions"}`, and
+/// `on_join`, `on_leave` and `on_restore` only where present.
+/// The module writes it with no `deps`, as it writes its functions.
+pub fn state_value(deps: &BTreeMap<String, Value>, s: &State) -> Value {
+    let mut fields = vec![
+        ("name", txt(&s.name)),
+        ("deps", Value::from(deps.clone())),
+        ("ty", ty_value(&s.ty)),
+        ("init", expr(&s.init)),
+        ("scope", expr(&s.scope)),
+        ("transitions", list(transition_value, &s.transitions)),
+    ];
+    if let Some(t) = &s.on_join {
+        fields.push(("on_join", transition_value(t)));
+    }
+    if let Some(t) = &s.on_leave {
+        fields.push(("on_leave", transition_value(t)));
+    }
+    if let Some(t) = &s.on_restore {
+        fields.push(("on_restore", transition_value(t)));
+    }
+    node("state", fields)
+}
+
+/// §3.12 One transition, normalised: `{"t":"transition","name","input",
+/// "guards":[{"t":"guard","e","why"}],"body"}`.
+pub fn transition_value(t0: &Transition) -> Value {
+    let t = crate::ir::normalize::normalize_transition(t0);
     node(
-        "module",
+        "transition",
         vec![
-            ("spec", int(m.spec)),
-            ("schema", schema_value(&m.schema)),
-            ("functions", list(|f| function_value(&BTreeMap::new(), f), &m.functions)),
-            ("routers", list(router_value, &m.routers)),
-            ("live", list(|(n, t)| node("frame", vec![("name", txt(n)), ("ty", ty_value(t))]), &m.live)),
+            ("name", txt(&t.name)),
+            ("input", list(|(n, fd)| field_value(n, fd), &t.input)),
+            (
+                "guards",
+                list(|(e, why)| node("guard", vec![("e", expr(e)), ("why", txt(why))]), &t.guards),
+            ),
+            ("body", list(stmt, &t.body)),
         ],
     )
+}
+
+/// The names of the helpers a transition calls directly, sorted.
+pub fn transition_calls(t: &Transition) -> Vec<String> {
+    let mut acc = std::collections::BTreeSet::new();
+    for (_, fd) in &t.input {
+        for c in &fd.checks {
+            if let Check::Refine(e, _) = c {
+                expr_calls(e, &mut acc);
+            }
+        }
+    }
+    for (e, _) in &t.guards {
+        expr_calls(e, &mut acc);
+    }
+    for s in &t.body {
+        stmt_calls(s, &mut acc);
+    }
+    acc.into_iter().collect()
+}
+
+/// The names of the helpers a live state reaches directly: its init, its
+/// scope and every transition's, sorted.
+pub fn state_calls(s: &State) -> Vec<String> {
+    let mut acc = std::collections::BTreeSet::new();
+    expr_calls(&s.init, &mut acc);
+    expr_calls(&s.scope, &mut acc);
+    for t in s.all_transitions() {
+        acc.extend(transition_calls(t));
+    }
+    acc.into_iter().collect()
 }
 
 /// §1.1 A router (`{"t":"router","name","uses"}`).
@@ -119,14 +208,23 @@ pub fn ty_value(t: &Ty) -> Value {
         Ty::Enum(vs) => node("enum", vec![("variants", list(|v| txt(v), vs))]),
         Ty::Option(t) => node("option", vec![("of", ty_value(t))]),
         Ty::List(t) => node("list", vec![("of", ty_value(t))]),
-        Ty::Struct(fs) => node(
-            "struct",
+        Ty::Struct(fs) => node("struct", vec![("fields", ty_fields(fs))]),
+        Ty::Named(n) => node("named", vec![("name", txt(n))]),
+        Ty::NonEmpty(t) => node("non_empty_list", vec![("of", ty_value(t))]),
+        Ty::PerDevice(t) => node("per_device", vec![("of", ty_value(t))]),
+        Ty::Ephemeral(t) => node("ephemeral", vec![("of", ty_value(t))]),
+        Ty::Sum(vs) => node(
+            "sum",
             vec![(
-                "fields",
-                Value::Struct(Box::new(fs.iter().map(|(k, v)| (k.clone(), ty_value(v))).collect())),
+                "variants",
+                Value::Struct(Box::new(vs.iter().map(|(k, fs)| (k.clone(), ty_fields(fs))).collect())),
             )],
         ),
     }
+}
+
+fn ty_fields(fs: &BTreeMap<FieldName, Ty>) -> Value {
+    Value::Struct(Box::new(fs.iter().map(|(k, v)| (k.clone(), ty_value(v))).collect()))
 }
 
 /// One function, normalised, with the hashes of the helpers and middleware
@@ -290,7 +388,37 @@ fn expr(e: &Expr) -> Value {
         Expr::Select(p) => node("select", vec![("plan", plan(p))]),
         Expr::Get(t, ks) => node("get", vec![("table", txt(t)), ("key", list(expr, ks))]),
         Expr::Exists(t, ks) => node("exists", vec![("table", txt(t)), ("key", list(expr, ks))]),
+        Expr::Variant(t, n, fs) => node(
+            "variant",
+            vec![
+                ("ty", ty_value(t)),
+                ("name", txt(n)),
+                ("fields", Value::Struct(Box::new(fs.iter().map(|(k, v)| (k.clone(), expr(v))).collect()))),
+            ],
+        ),
+        Expr::Case(e, arms) => node(
+            "case",
+            vec![
+                ("e", expr(e)),
+                (
+                    "arms",
+                    list(|(n, x, b)| node("arm", vec![("name", txt(n)), ("sym", int(*x)), ("e", expr(b))]), arms),
+                ),
+            ],
+        ),
+        Expr::LiveState => node("live_state", vec![]),
+        Expr::CtxNow => node("ctx_now", vec![]),
+        Expr::CtxDevice => node("ctx_device", vec![]),
+        Expr::Slot(e, k) => node("slot", vec![("e", expr(e)), ("key", expr(k))]),
+        Expr::SetSlot(e, k, v) => node("set_slot", vec![("e", expr(e)), ("key", expr(k)), ("v", expr(v))]),
+        Expr::Slots(e) => node("slots", vec![("e", expr(e))]),
     }
+}
+
+/// An expression as a value, outside any function: what a live state's
+/// init and a snapshot's checks are read with.
+pub fn expr_value(e: &Expr) -> Value {
+    expr(e)
 }
 
 fn dir(d: &Dir) -> Value {
@@ -466,6 +594,15 @@ fn expr_calls(e: &Expr, acc: &mut std::collections::BTreeSet<String>) {
         }
         Expr::Fold(xs, z, _, _, b) => [xs, z, b].iter().for_each(|e| expr_calls(e, acc)),
         Expr::Select(p) => plan_calls(p, acc),
+        Expr::Variant(_, _, fs) => fs.values().for_each(|e| expr_calls(e, acc)),
+        Expr::Case(e, arms) => {
+            expr_calls(e, acc);
+            arms.iter().for_each(|(_, _, b)| expr_calls(b, acc));
+        }
+        Expr::Slot(a, b) => [a, b].iter().for_each(|e| expr_calls(e, acc)),
+        Expr::SetSlot(a, b, c) => [a, b, c].iter().for_each(|e| expr_calls(e, acc)),
+        Expr::Slots(e) => expr_calls(e, acc),
+        Expr::LiveState | Expr::CtxNow | Expr::CtxDevice => {}
         Expr::Lit(_)
         | Expr::Arg(_)
         | Expr::Auto(_)

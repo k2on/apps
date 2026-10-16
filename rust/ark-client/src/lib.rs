@@ -51,6 +51,8 @@ pub mod autos;
 pub mod demo;
 mod domain;
 pub mod link;
+#[cfg(test)]
+mod live_tests;
 mod peer;
 #[cfg(test)]
 mod persistence_tests;
@@ -64,7 +66,7 @@ mod wake_tests;
 pub use autos::Autos;
 pub use domain::Domain;
 pub use link::{Timing, Wake};
-pub use peer::{refusal_text, Login, Options, Peer, Pumped, Rejection, Standing, Status};
+pub use peer::{refusal_text, Login, Options, Peer, Pumped, Rejection, Standing, Status, THROTTLE_MS};
 pub use storage::Fork;
 pub use view::{splice, Update, View};
 

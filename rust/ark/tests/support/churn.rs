@@ -206,6 +206,9 @@ impl<'a> Churn<'a> {
             Ty::Option(t) => self.fresh(t),
             Ty::List(_) => Value::list(vec![]),
             Ty::Struct(_) => Value::from(BTreeMap::new()),
+            Ty::Named(_) | Ty::NonEmpty(_) | Ty::Sum(_) | Ty::PerDevice(_) | Ty::Ephemeral(_) => {
+                unreachable!("no column or input generated here is of a live state's type")
+            }
         }
     }
 

@@ -515,6 +515,7 @@ fn hello(since: Seq, mode: Mode) -> ClientMsg {
         },
         token: Some("alice".into()),
         spec: ark::ir::SPEC_VERSION,
+        device: None,
     }
 }
 
@@ -856,6 +857,7 @@ fn perf_i_partial_fanout() {
                             },
                             token: Some(token),
                             spec: ark::ir::SPEC_VERSION,
+                            device: None,
                         },
                     );
                 }

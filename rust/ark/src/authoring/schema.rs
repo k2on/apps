@@ -86,6 +86,9 @@ pub trait Record: Sized + 'static {
 /// A record's fields, by name and type, in declaration order.
 pub struct Fields<R> {
     pub(crate) fields: Vec<(String, Ty)>,
+    /// `docs/plan-live.md` The name the record is declared under in the
+    /// module's type section ([`Fields::named`]), where it is one.
+    pub(crate) name: Option<String>,
     _r: PhantomData<fn() -> R>,
 }
 
@@ -93,6 +96,7 @@ pub struct Fields<R> {
 pub fn fields<R>() -> Fields<R> {
     Fields {
         fields: vec![],
+        name: None,
         _r: PhantomData,
     }
 }
@@ -109,6 +113,25 @@ impl<R> Fields<R> {
         self.fields.push((name.into(), f.ty));
         self
     }
+
+    /// `docs/plan-live.md` Declare the record in the module's type section
+    /// under `name`, and refer to it by that name: what a generator prints
+    /// as a type of its own. A record not named is a struct type written
+    /// out wherever it is used, as every record before live state is.
+    pub fn named(mut self, name: &str) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+
+    /// `docs/plan-live.md` ("Ordered and ephemeral fields") The next field,
+    /// ephemeral: a `PerDevice` each device writes its own slot of, left
+    /// out of the state's hash and of what a server keeps. Only on the
+    /// record that is a live state's type.
+    pub fn ephemeral<V: Data>(mut self, name: &str, f: super::input::FieldB<V>) -> Self {
+        assert!(f.checks.is_empty(), "{name}: a record's field carries no checks");
+        self.fields.push((name.into(), Ty::Ephemeral(Box::new(f.ty))));
+        self
+    }
 }
 
 impl<T: Row> Record for T {
@@ -123,6 +146,7 @@ impl<T: Row> Record for T {
                     (c.name, ty)
                 })
                 .collect(),
+            name: None,
             _r: PhantomData,
         }
     }
@@ -151,7 +175,13 @@ fn record_what<T: Record>() -> &'static str {
 
 impl<T: Record> Data for T {
     fn ty() -> Ty {
-        Ty::Struct(T::fields().fields.into_iter().collect())
+        let f = T::fields();
+        match f.name {
+            // `docs/plan-live.md` A named record is declared once, in the
+            // type section, and referred to by its name.
+            Some(n) => super::live::declare(&n, || Ty::Struct(T::fields().fields.into_iter().collect())),
+            None => Ty::Struct(f.fields.into_iter().collect()),
+        }
     }
     fn from_h(h: H) -> Self {
         let names = record_names::<T>();

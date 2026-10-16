@@ -77,6 +77,9 @@ mod churn;
 #[path = "../vectors/demo.rs"]
 mod demo;
 #[allow(clippy::duplicate_mod)]
+#[path = "../vectors/demo_live.rs"]
+mod demo_live;
+#[allow(clippy::duplicate_mod)]
 #[path = "../vectors/json.rs"]
 mod json;
 

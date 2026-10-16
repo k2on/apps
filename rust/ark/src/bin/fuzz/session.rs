@@ -1112,6 +1112,9 @@ impl<'a> Draw<'a> {
             Ty::Enum(vs) => Value::text(vs.get(self.rng.below(vs.len().max(1))).cloned().unwrap_or_else(|| ENUM[0].into())),
             Ty::List(t) => Value::List((0..self.rng.below(3)).map(|_| self.value(t, st)).collect()),
             Ty::Struct(fs) => Value::Struct(Box::new(fs.iter().map(|(k, t)| (k.clone(), self.value(t, st))).collect())),
+            Ty::Named(_) | Ty::NonEmpty(_) | Ty::Sum(_) | Ty::PerDevice(_) | Ty::Ephemeral(_) => {
+                unreachable!("no column or input generated here is of a live state's type")
+            }
         }
     }
 }

@@ -7,8 +7,8 @@ use std::collections::BTreeMap;
 
 use crate::hash::Closure;
 use crate::ir::{
-    Auto, Check, CmpOp, Expr, Field, FnKind, Function, Hold, Key, Lookup, Module, Op, Plan, Pred, Projection, Related, Router, Source, StdFn, Stmt,
-    Sym,
+    Auto, Check, CmpOp, Expr, Field, FnKind, Function, Hold, Key, Lookup, Module, Op, Plan, Pred, Projection, Related, Router, Source, State, StdFn,
+    Stmt, Sym, Transition,
 };
 use crate::schema::{Column, Dir, Index, Ref, Schema, Table, Ty};
 use crate::value::{FieldName, Value};
@@ -55,13 +55,90 @@ pub fn module_from_value(v: &Value) -> D<Module> {
         },
         field(&fs, "live")?,
     )?;
+    // `docs/plan-live.md` Present only where a module has one: an empty
+    // list is not a second spelling of its absence.
+    let types = match fs.get("types") {
+        None => vec![],
+        Some(v) => match list(&["module", "types"], type_decl, v)? {
+            ts if ts.is_empty() => return err(&["module", "types"], "an empty type section is written as no field"),
+            ts => ts,
+        },
+    };
+    let states = match fs.get("states") {
+        None => vec![],
+        Some(v) => match list(&["module", "states"], state_from_value, v)? {
+            ss if ss.is_empty() => return err(&["module", "states"], "no states is written as no field"),
+            ss => ss,
+        },
+    };
     Ok(Module {
         spec,
         schema,
         functions,
         routers,
         live,
+        types,
+        states,
     })
+}
+
+fn type_decl(x: &Value) -> D<(String, Ty)> {
+    let fs = tagged(&["type"], "type", x)?;
+    let n = text(&["type", "name"], field(&fs, "name")?)?;
+    Ok((n, ty_from_value(field(&fs, "ty")?)?))
+}
+
+/// §3.12 A live state from its value.
+pub fn state_from_value(v: &Value) -> D<State> {
+    let fs = tagged(&["state"], "state", v)?;
+    let name = text(&["state", "name"], field(&fs, "name")?)?;
+    let here: Vec<&str> = vec!["state", &name];
+    let p = |k: &'static str| [here.as_slice(), &[k]].concat();
+    let hook = |k: &'static str| -> D<Option<Transition>> {
+        match fs.get(k) {
+            None => Ok(None),
+            Some(v) => Ok(Some(transition(&p(k), v)?)),
+        }
+    };
+    Ok(State {
+        ty: ty_from_value(field(&fs, "ty")?)?,
+        init: expr(&p("init"), field(&fs, "init")?)?,
+        scope: expr(&p("scope"), field(&fs, "scope")?)?,
+        transitions: list(&p("transitions"), |x| transition(&p("transitions"), x), field(&fs, "transitions")?)?,
+        on_join: hook("on_join")?,
+        on_leave: hook("on_leave")?,
+        on_restore: hook("on_restore")?,
+        name,
+    })
+}
+
+fn transition(here: &[&str], v: &Value) -> D<Transition> {
+    let fs = tagged(here, "transition", v)?;
+    let name = text(here, field(&fs, "name")?)?;
+    let inner: Vec<&str> = [here, &[name.as_str()]].concat();
+    let here = inner.as_slice();
+    let input = list(here, |x| input_field(here, x), field(&fs, "input")?)?;
+    let guards = list(
+        here,
+        |x| {
+            let g = tagged(here, "guard", x)?;
+            Ok((expr(here, field(&g, "e")?)?, text(here, field(&g, "why")?)?))
+        },
+        field(&fs, "guards")?,
+    )?;
+    let body = list(here, |x| stmt(here, x), field(&fs, "body")?)?;
+    Ok(Transition {
+        name,
+        input,
+        guards,
+        body,
+        names: BTreeMap::new(),
+    })
+}
+
+/// An expression from its value, outside any function.
+pub fn expr_from_value(v: &Value) -> D<Expr> {
+    expr(&[], v)
 }
 
 /// §1.1 A router.
@@ -153,6 +230,22 @@ pub fn ty_from_value(v: &Value) -> D<Ty> {
                 out.insert(k.clone(), ty_from_value(v)?);
             }
             Ty::Struct(out)
+        }
+        "named" => Ty::Named(text(&["ty", "named"], field(&fs, "name")?)?),
+        "non_empty_list" => Ty::NonEmpty(Box::new(ty_from_value(field(&fs, "of")?)?)),
+        "per_device" => Ty::PerDevice(Box::new(ty_from_value(field(&fs, "of")?)?)),
+        "ephemeral" => Ty::Ephemeral(Box::new(ty_from_value(field(&fs, "of")?)?)),
+        "sum" => {
+            let m = struct_map(&["ty", "sum"], field(&fs, "variants")?)?;
+            let mut out = BTreeMap::new();
+            for (k, v) in m {
+                let mut fields = BTreeMap::new();
+                for (f, t) in struct_map(&["ty", "sum", k], v)? {
+                    fields.insert(f.clone(), ty_from_value(t)?);
+                }
+                out.insert(k.clone(), fields);
+            }
+            Ty::Sum(out)
         }
         other => return err(&["ty"], format!("unknown type tag {other}")),
     })
@@ -381,6 +474,31 @@ fn expr(here: &[&str], v: &Value) -> D<Expr> {
         "select" => Expr::Select(Box::new(plan(&p, field(&fs, "plan")?)?)),
         "get" => Expr::Get(text(&p, field(&fs, "table")?)?, es("key")?),
         "exists" => Expr::Exists(text(&p, field(&fs, "table")?)?, es("key")?),
+        "variant" => {
+            let m = struct_map(&p, field(&fs, "fields")?)?;
+            let mut out = BTreeMap::new();
+            for (k, v) in m {
+                out.insert(k.clone(), expr(&p, v)?);
+            }
+            Expr::Variant(ty_from_value(field(&fs, "ty")?)?, text(&p, field(&fs, "name")?)?, out)
+        }
+        "case" => Expr::Case(
+            e("e")?,
+            list(
+                &p,
+                |x| {
+                    let a = tagged(&p, "arm", x)?;
+                    Ok((text(&p, field(&a, "name")?)?, sym(&p, field(&a, "sym")?)?, expr(&p, field(&a, "e")?)?))
+                },
+                field(&fs, "arms")?,
+            )?,
+        ),
+        "live_state" => Expr::LiveState,
+        "ctx_now" => Expr::CtxNow,
+        "ctx_device" => Expr::CtxDevice,
+        "slot" => Expr::Slot(e("e")?, e("key")?),
+        "set_slot" => Expr::SetSlot(e("e")?, e("key")?, e("v")?),
+        "slots" => Expr::Slots(e("e")?),
         other => return err(here, format!("unknown expression {other}")),
     })
 }

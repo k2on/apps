@@ -81,6 +81,7 @@ pub fn protocol(out: &Out) {
         },
         token: Some("tok".into()),
         spec: SPEC_VERSION,
+        device: None,
     };
     let client_frames: Vec<(&str, ClientMsg)> = vec![
         ("hello", hello(None)),
@@ -95,6 +96,7 @@ pub fn protocol(out: &Out) {
                 },
                 token: None,
                 spec: SPEC_VERSION,
+                device: None,
             },
         ),
         ("hello-named", hello(Some(log_a))),
@@ -284,6 +286,7 @@ pub fn protocol(out: &Out) {
                 },
                 token: Some("alice".into()),
                 spec: SPEC_VERSION,
+                device: None,
             },
         );
         let mut sv = match owns {
@@ -470,6 +473,7 @@ pub fn protocol(out: &Out) {
                 },
                 token: Some("alice".into()),
                 spec: SPEC_VERSION,
+                device: None,
             },
         );
     }
@@ -504,6 +508,7 @@ pub fn protocol(out: &Out) {
             },
             token: Some("alice".into()),
             spec: SPEC_VERSION,
+            device: None,
         },
     );
     let first = said.take_outgoing();
@@ -607,6 +612,7 @@ fn stamp_on(a: Authority, e: &Entry, token: &str, believed: &[&str]) -> (Vec<Str
             },
             token: Some(token.into()),
             spec: SPEC_VERSION,
+            device: None,
         },
     );
     let _ = sv.take_outgoing();
@@ -677,6 +683,7 @@ pub fn scoped(out: &Out) {
         },
         token: Some("alice".into()),
         spec: SPEC_VERSION,
+        device: None,
     };
     // Bob's connection is whole to nobody's eyes but its own: it is the
     // writer here.
@@ -691,6 +698,7 @@ pub fn scoped(out: &Out) {
             },
             token: Some("bob".into()),
             spec: SPEC_VERSION,
+            device: None,
         },
     );
     push(
@@ -882,6 +890,7 @@ pub fn private(out: &Out) {
         },
         token: Some(who.into()),
         spec: SPEC_VERSION,
+        device: None,
     };
     sv.recv(1, hello("alice"));
     sv.recv(2, hello("bob"));
@@ -1009,6 +1018,7 @@ pub fn raw(out: &Out) {
         },
         token: Some(who.into()),
         spec: SPEC_VERSION,
+        device: None,
     };
     sv.recv(1, hello("alice"));
     let _ = sv.take_outgoing();

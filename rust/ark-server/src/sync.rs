@@ -12,15 +12,13 @@
 
 use std::time::Duration;
 
+use crate::hub::{HubHandle, Outbox};
 use anyhow::{Context, Result};
 use ark::canon;
 use ark::protocol::{ClientMsg, ServerMsg};
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
 use axum::response::Response;
-use tokio::sync::mpsc;
-
-use crate::hub::HubHandle;
 
 /// How often the server pings, and how many may go unanswered.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -56,12 +54,17 @@ pub(crate) async fn sync(ws: WebSocketUpgrade, State(st): State<SyncState>) -> R
 /// connection go out, and the server pings. A frame that is not the
 /// protocol closes this socket and nothing else; a denial is the last frame
 /// a socket gets. The hub letting the connection go — its log cannot be
-/// written (`hub.rs`) — ends its channel, and the socket is closed with the
+/// written (`hub.rs`) — closes its outbox, and the socket is closed with the
 /// hub's reason as the close frame's text.
+///
+/// What the hub queues waits in the connection's [`Outbox`] while the socket
+/// is busy sending what came before it, and an ephemeral live frame there is
+/// coalesced to the newest of its kind (`docs/plan-live.md`): a receiver
+/// slower than the frames is sent the latest pointer, not a backlog.
 async fn connection(mut socket: WebSocket, hub: HubHandle, keepalive: Keepalive) -> Result<()> {
-    let (tx, mut rx) = mpsc::unbounded_channel::<ServerMsg>();
+    let outbox = Outbox::new();
     let conn = hub.fresh();
-    hub.attach_socket(conn, tx)?;
+    hub.attach_socket(conn, outbox.clone())?;
     let mut ticker = tokio::time::interval(keepalive.every);
     ticker.tick().await;
     let mut unanswered: u32 = 0;
@@ -84,8 +87,9 @@ async fn connection(mut socket: WebSocket, hub: HubHandle, keepalive: Keepalive)
                 Some(Ok(_)) => unanswered = 0,
                 Some(Err(e)) => break Err(e.into()),
             },
-            msg = rx.recv() => {
-                let Some(msg) = msg else {
+            () = outbox.ready() => {
+                let msgs = outbox.take();
+                if msgs.is_empty() && outbox.is_closed() {
                     let why = hub.failure().unwrap_or_else(|| "the hub closed this connection".into());
                     let mut reason = why.clone();
                     // A close frame's reason is at most 123 bytes.
@@ -95,14 +99,26 @@ async fn connection(mut socket: WebSocket, hub: HubHandle, keepalive: Keepalive)
                     let frame = CloseFrame { code: 1011, reason: reason.into() };
                     let _ = socket.send(Message::Close(Some(frame))).await;
                     break Err(anyhow::anyhow!(why));
-                };
-                let last = matches!(msg, ServerMsg::Denied { .. });
-                if let Err(e) = socket.send(Message::Binary(canon::encode(&msg.to_value()))).await {
-                    break Err(e.into());
                 }
-                if last {
-                    let _ = socket.send(Message::Close(None)).await;
-                    break Ok(());
+                let mut ended = None;
+                for msg in msgs {
+                    let last = matches!(msg, ServerMsg::Denied { .. });
+                    if let Err(e) = socket.send(Message::Binary(canon::encode(&msg.to_value()))).await {
+                        ended = Some(Err(e.into()));
+                        break;
+                    }
+                    if last {
+                        let _ = socket.send(Message::Close(None)).await;
+                        ended = Some(Ok(()));
+                        break;
+                    }
+                }
+                if let Some(out) = ended {
+                    break out;
+                }
+                // Closed while these were written: say why, next turn.
+                if outbox.is_closed() {
+                    outbox.close();
                 }
             }
             _ = ticker.tick() => {

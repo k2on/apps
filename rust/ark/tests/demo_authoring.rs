@@ -383,6 +383,7 @@ fn a_push_is_held_to_its_login_and_every_refusal_says_why() {
         },
         token: Some(tok.into()),
         spec: ark::ir::SPEC_VERSION,
+        device: None,
     };
     let entry = |k: u8, actor: &str, session: &str, name: &str| Entry {
         id: match idv(k) {

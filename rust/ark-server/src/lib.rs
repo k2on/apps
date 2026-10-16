@@ -438,7 +438,11 @@ fn open_hub(
     // ever.
     let mut server = Server::open(auth, access, relay.clone(), a)
         .with_module(module)
-        .with_scopes(ark::scope::Scopes::of(domain.module()));
+        .with_scopes(ark::scope::Scopes::of(domain.module()))
+        // `docs/plan-live.md` The module's live states, sequenced at this
+        // machine's clock: the server's time is a sequenced call's only time.
+        .with_live(domain.live().clone())
+        .with_clock(Arc::new(retain::now_ms));
     if let Some(owns) = owns {
         server = server.with_owns(owns);
     }
