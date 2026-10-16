@@ -114,7 +114,7 @@ impl App {
         }
 
         if let Some(at) = self.devices {
-            let origin = App::devices_origin(self.window, self.listening.devices().len() + 1);
+            let origin = App::devices_origin(self.window, self.listening.devices().len());
             layers = layers
                 .push(layer::backdrop(Message::CloseDevices, Message::Swallow))
                 .push(layer::pinned(self.view_devices(at), origin));
@@ -880,15 +880,17 @@ impl App {
             return None;
         }
         let session = self.listening.session()?;
-        let here = self.listening.outputs_here();
+        // A session with no output is this device's to play on: the next
+        // press plays here and the report claims it, so this device is what
+        // the button says and draws lit, rather than "no device".
+        let here = self.listening.outputs_here() || (session.output.is_none() && session.moving.is_none());
         // Three things a device can be: a hand-off in flight, the output and
         // answering, the output and not answering (the sound stays with it).
         let label = match (session.moving.as_deref(), session.output_device()) {
             (Some(id), _) => format!("{}\u{2026}", fit::middle(session.device(id).map_or(id, |d| d.name.as_str()), 14)),
-            (None, Some(_)) if here => "this device".to_string(),
-            (None, Some(device)) if !device.here => format!("{} (away)", fit::middle(&device.name, 12)),
-            (None, Some(device)) => fit::middle(&device.name, 16),
-            (None, None) => "no device".to_string(),
+            (None, Some(device)) if !here && !device.here => format!("{} (away)", fit::middle(&device.name, 12)),
+            (None, Some(device)) if !here => fit::middle(&device.name, 16),
+            (None, _) => fit::middle(self.listening.name(), 16),
         };
         Some(
             button(
@@ -975,11 +977,13 @@ impl App {
     }
 
     /// Where the sound is, and everywhere it could be: a row per device of
-    /// this account, and a last row that stops it everywhere — the playlist
-    /// picker's shape, so `j` reaches it without a second key to learn.
+    /// this account, ticked where the sound is — and, while it is nowhere,
+    /// on this device, which is where the next press plays. Pausing is the
+    /// transport's; there is no row that stops it everywhere.
     fn view_devices(&self, at: usize) -> Element<'_, Message> {
         let devices = self.listening.devices();
-        let output = self.listening.session().and_then(|s| s.output.as_deref()).unwrap_or("");
+        let me = self.listening.me();
+        let output = self.listening.session().and_then(|s| s.output.as_deref()).unwrap_or(me);
         let mut rows = column![].spacing(0);
         for (i, device) in devices.iter().enumerate() {
             let on_cursor = at == i;
@@ -988,8 +992,8 @@ impl App {
             // listed, and the device the music still belongs to is the one
             // most worth drawing.
             let takeable = device.audible && device.here;
-            let label = if device.id == self.listening.me() {
-                format!("{} (this one)", fit::middle(&device.name, 14))
+            let label = if device.id == me {
+                fit::middle(&device.name, 24)
             } else if self.listening.moving() == Some(device.id.as_str()) {
                 format!("{}\u{2026}", fit::middle(&device.name, 20))
             } else if !device.here {
@@ -1016,35 +1020,12 @@ impl App {
                 true => mouse_area(entry)
                     .on_enter(Message::DeviceAt(i))
                     .on_press(Message::DeviceAt(i))
-                    .on_release(Message::PickDevice(Some(device.id.clone())))
+                    .on_release(Message::PickDevice(device.id.clone()))
                     .into(),
                 false => entry.into(),
             };
             rows = rows.push(entry);
         }
-        let last = devices.len();
-        let on_cursor = at == last;
-        rows = rows.push(
-            mouse_area(
-                panel::entry(
-                    None,
-                    text("Stop everywhere")
-                        .size(13)
-                        .style(move |theme| text::Style {
-                            color: Some(match on_cursor {
-                                true => arkui::theme::of(theme).primary.base.text,
-                                false => arkui::theme::of(theme).background.base.text.scale_alpha(0.7),
-                            }),
-                        })
-                        .into(),
-                    None,
-                )
-                .style(move |theme| style::entry(theme, on_cursor, true)),
-            )
-            .on_enter(Message::DeviceAt(last))
-            .on_press(Message::DeviceAt(last))
-            .on_release(Message::PickDevice(None)),
-        );
         panel::panel(column![panel::title("Playing on".into()), rows].spacing(0), DEVICES_WIDTH).into()
     }
 }

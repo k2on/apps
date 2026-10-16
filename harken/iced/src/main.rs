@@ -153,8 +153,7 @@ pub enum Message {
     /// Which device is making the sound: open the picker, walk it, pick.
     OpenDevices,
     DeviceAt(usize),
-    /// `None` is the last row: stop it everywhere.
-    PickDevice(Option<listening::DeviceId>),
+    PickDevice(listening::DeviceId),
     CloseDevices,
     /// Something said it happened (`docs/plan-reactive.md`): the sync
     /// socket opened, closed or brought a frame — the log, an ack, the
@@ -829,7 +828,7 @@ impl App {
                 None => Task::none(),
             },
             Focus::Devices => {
-                let grid = vim::Grid::column(self.listening.devices().len() + 1);
+                let grid = vim::Grid::column(self.listening.devices().len());
                 if let Some(at) = grid.step(self.devices.unwrap_or(0), motion) {
                     self.devices = Some(at);
                 }
@@ -919,12 +918,10 @@ impl App {
         let Some(at) = self.devices else {
             return Task::none();
         };
-        let to = match self.listening.devices().get(at) {
-            Some(device) if !device.audible || !device.here => return Task::none(),
-            Some(device) => Some(device.id.clone()),
-            None => None,
-        };
-        self.update(Message::PickDevice(to))
+        match self.listening.devices().get(at) {
+            Some(device) if device.audible && device.here => self.update(Message::PickDevice(device.id.clone())),
+            _ => Task::none(),
+        }
     }
 
     /// The row menu's entries, for one track: every one something this
@@ -967,8 +964,8 @@ impl App {
         )
     }
 
-    /// The device picker's height: its padding, its title line, a row per
-    /// device and the one that stops it everywhere — the panel's own numbers.
+    /// The device picker's height: its padding, its title line and a row per
+    /// device — the panel's own numbers.
     pub fn devices_height(rows: usize) -> f32 {
         arkui::panel::titled_height(rows)
     }
@@ -1447,17 +1444,17 @@ impl App {
                 });
             }
             Message::OpenDevices => {
-                // The cursor starts on the device that has the sound, so
-                // `<Enter>` straight away changes nothing.
+                // The cursor starts on the device that has the sound — or,
+                // while it is nowhere, on this one — so `<Enter>` straight
+                // away changes nothing.
                 let output = self.listening.session().and_then(|s| s.output.clone());
-                let at = output
-                    .and_then(|id| self.listening.devices().iter().position(|d| d.id == id))
-                    .unwrap_or(self.listening.devices().len());
+                let id = output.unwrap_or_else(|| self.listening.me().to_string());
+                let at = self.listening.devices().iter().position(|d| d.id == id).unwrap_or(0);
                 self.devices = Some(at);
             }
             Message::DeviceAt(at) => self.devices = Some(at),
             Message::PickDevice(to) => {
-                self.listening.transfer(to);
+                self.listening.transfer(Some(to));
                 self.devices = None;
             }
             Message::CloseDevices => self.devices = None,
