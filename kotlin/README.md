@@ -154,6 +154,23 @@ which drains nothing), and `onChange`, called with what moved after every
 drain that moved something and never after one that did not, which is
 where an app splices its views.
 
+**The session is the process's, not the activity's** (`Sessions.kt`). A
+media service plays on after the app is swiped away, and a car or a headset
+binds to it with no activity at all; each needs the same peer, and two
+peers over one replica would be two devices racing over its files. So
+`ArkSessions.of(context, spec)` is the process's `Sessions`: one session per
+server and login, opened by whichever end asks first — `ArkHost` for the
+activity, an app's service for itself, from the login the onboarding
+remembered (`ArkSessions.remembered`) — each end holding it (`Hold`) and
+letting go, and the session closing when the last does. Signing out and a
+denial close it for everyone, and a denial forgets the login whoever heard
+it. What opening needs that is the app's own and not a screen's is a
+`SessionSpec`: its module and the device it declares. What an app keeps as
+long as the session — its maintained views, a reconciler — is
+`ArkSession.kept(key) { … }`, made by the first to ask and closed with it.
+`SessionsTests` holds the sharing, the last release, the close and the
+denial.
+
 The steps are a pure machine (`Onboarding`: a step and an event in, a step
 and the effects to run out), run by `ArkHost`, a `ViewModel`; the screens
 (`ServerStep`, `SignInStep`, `PermissionStep`) draw a step and nothing

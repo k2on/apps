@@ -12,7 +12,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.ui.res.painterResource
-import dev.arkdb.DeviceDecl
 import dev.arkdb.android.AppIdentity
 import dev.arkdb.android.ArkApp
 import dev.arkdb.android.Permission
@@ -38,9 +37,10 @@ class MainActivity : ComponentActivity() {
                     dark = Palette.DarkScheme,
                     typography = HarkenType,
                     // A phone, which can play, named as its owner named it; its id is its login's
-                    // session, so that a device is a login (docs/plan-live.md).
-                    device = DeviceDecl("", "phone", Device.name(this), true),
-                    module = { assets.open("harken.ark").use { it.readBytes() } },
+                    // session, so that a device is a login (docs/plan-live.md). The same two the
+                    // media service opens the session with when it is the first to (Kept.kt).
+                    device = Kept.device(this),
+                    module = Kept.module(this),
                 )
             ArkApp(identity, listOf(Permission.Notifications(why = WHY_NOTIFY))) { session -> HarkenApp(session) }
         }

@@ -4,10 +4,11 @@
 // as the log's do, through `ArkSession.onChange` — and what the screens and
 // the media session draw, published as one value ([Heard]) whenever it moves.
 //
-// Two ends hold one: the app, which makes it with the session and drops it
-// when the session goes, and the media service, which finds it through
-// [Listen.current] and attaches its player ([attach]) — so the player is
-// reconciled while there is a session to reconcile against, and is this
+// It is kept with the session (Kept.kt), made by whichever end asks first —
+// the app's screens or the media service — and closed when the session is;
+// the media service finds it through [Listen.current] and attaches its
+// player ([attach]) — so the player is reconciled while there is a session
+// to reconcile against, however many screens are open on it, and is this
 // phone's own the rest of the time. A press from anywhere — a button, a
 // row, the lock screen, a headset — is [press], one way in.
 package dev.harken.android

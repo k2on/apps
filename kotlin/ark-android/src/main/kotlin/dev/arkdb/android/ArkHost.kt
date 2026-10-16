@@ -1,9 +1,17 @@
 // The onboarding, running: the [Onboarding] machine's step as state, and
 // its effects carried out — the probe and the exchange off the main
 // thread, the remembered store written, the browser opened, the session
-// opened and closed. A `ViewModel`, so a configuration change keeps the
+// held and closed. A `ViewModel`, so a configuration change keeps the
 // step and the session; the activity is only how a browser, a permission
 // dialog and a redirect reach it.
+//
+// **It holds the session; the process owns it** (Sessions.kt). Opening is
+// a [Hold] on the process's session for the login, which a media service
+// may already have open — then the app attaches to it as it is, its
+// screens' state already read — and the activity going is letting go of
+// that hold, not closing the session: whatever else holds it (a player
+// playing, a car bound to it) keeps it, its socket and its place in any
+// live state. Signing out and a denial close it for everyone.
 package dev.arkdb.android
 
 import android.app.Application
@@ -34,10 +42,9 @@ public class PrefsShelf(context: Context, name: String = "ark") : Shelf {
 
 public class ArkHost(app: Application) : AndroidViewModel(app) {
     private var machine: Onboarding? = null
-    private var domain: Domain? = null
-    private var module: () -> ByteArray = { ByteArray(0) }
     private var appName: String = ""
-    private var device: dev.arkdb.DeviceDecl? = null
+    private var sessions: Sessions? = null
+    private var hold: Hold? = null
     private val remembered = Remembered(PrefsShelf(app))
 
     private val _step = MutableStateFlow<Step>(Step.Server())
@@ -59,26 +66,19 @@ public class ArkHost(app: Application) : AndroidViewModel(app) {
     public fun begin(identity: AppIdentity, permissions: List<Permission>) {
         if (machine != null) return
         appName = identity.name
-        module = identity.module
-        device = identity.device
+        sessions = ArkSessions.of(getApplication(), SessionSpec(identity.module, identity.device))
         val m = Onboarding(permissions, Build.VERSION.SDK_INT, identity.scheme)
         machine = m
         apply(m.start(remembered.server, remembered.login, remembered.asked))
     }
 
-    // The app's module, read once — on the session's thread at launch, off the
-    // main thread for the server step — and verified only when these bytes
-    // have not passed before (`ModuleMemory`).
-    private val modules = ModuleMemory(PrefsShelf(app))
-    private val domainLock = Any()
-    private var moduleRead: ByteArray? = null
+    // The session closed last, whose launch views go with the login it was for.
     private var closing: ArkSession? = null
 
-    private fun moduleBytes(): ByteArray =
-        synchronized(domainLock) { moduleRead ?: module().also { moduleRead = it } }
-
-    private fun loadDomain(): Domain =
-        synchronized(domainLock) { domain ?: modules.domain(moduleBytes()).also { domain = it } }
+    // The app's module, read once for the process — on the session's thread
+    // at launch, off the main thread for the server step — and verified only
+    // when these bytes have not passed before (`ModuleMemory`).
+    private fun loadDomain(): Domain = ArkSessions.domain()
 
     private val _ready = MutableStateFlow(false)
     /**
@@ -145,22 +145,28 @@ public class ArkHost(app: Application) : AndroidViewModel(app) {
             is Effect.Request -> _request.value = e.permission
             is Effect.MarkAsked -> remembered.markAsked(e.key)
             is Effect.OpenSession -> {
-                // At once: the peer opens on the session's own thread, and the app's
-                // first screen is composed meanwhile.
-                val s =
-                    ArkSession.open(
-                        ::loadDomain,
-                        getApplication<Application>().filesDir,
-                        e.server,
-                        e.login,
-                        onDenied = { why -> viewModelScope.launch { send(Event.Denied(why)) } },
-                        onSignOut = { viewModelScope.launch { send(Event.SignOut) } },
-                        onFailed = { viewModelScope.launch { failed(e.server) } },
-                        // What the app's launch views are bound to: read here, 50 KB, so that
-                        // the first file is read before anything is decoded.
-                        module = moduleBytes(),
-                        device = device,
-                    )
+                // At once: the session the process has open for this login — a media
+                // service's, say — or one opened now, whose peer opens on its own thread
+                // while the app's first screen is composed.
+                val server = e.server
+                val events =
+                    object : SessionEvents {
+                        override fun denied(reason: String) {
+                            viewModelScope.launch { send(Event.Denied(reason)) }
+                        }
+
+                        override fun signOut() {
+                            viewModelScope.launch { send(Event.SignOut) }
+                        }
+
+                        override fun failed(e: Exception) {
+                            viewModelScope.launch { failed(server) }
+                        }
+                    }
+                hold?.release()
+                val h = sessions!!.hold(e.server, e.login, "app", events)
+                hold = h
+                val s = h.session
                 _session.value = s
                 viewModelScope.launch {
                     s.isReady.first { it }
@@ -175,8 +181,7 @@ public class ArkHost(app: Application) : AndroidViewModel(app) {
             }
             is Effect.CloseSession -> {
                 closing = _session.value
-                _session.value?.close()
-                _session.value = null
+                closeHeld()
             }
         }
     }
@@ -184,8 +189,7 @@ public class ArkHost(app: Application) : AndroidViewModel(app) {
     // A replica that cannot be opened is not a reason to lose the login:
     // signing in again opens it again.
     private fun failed(server: String) {
-        _session.value?.close()
-        _session.value = null
+        closeHeld()
         _step.value =
             Step.SignIn(
                 server,
@@ -199,7 +203,20 @@ public class ArkHost(app: Application) : AndroidViewModel(app) {
         _session.value?.saveLaunchViews()
     }
 
+    // Closed for everyone: signing out, a denial, a replica that cannot be opened.
+    private fun closeHeld() {
+        _session.value?.let { sessions?.close(it) }
+        hold = null
+        _session.value = null
+    }
+
+    /**
+     * The activity is gone for good: this hold let go. The session closes unless something else
+     * holds it — a player playing, a car bound to the player — which keeps it, its socket and its
+     * place in the app's live state, and the next launch attaches to it as it is.
+     */
     override fun onCleared() {
-        _session.value?.close()
+        hold?.release()
+        hold = null
     }
 }

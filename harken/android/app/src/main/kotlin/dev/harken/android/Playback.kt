@@ -4,7 +4,12 @@
 // The service owns the sound, so it outlives every screen and the activity
 // itself: leaving the app does not stop the music, and the notification,
 // the lock screen and a Bluetooth headset's buttons are the media
-// session's, which Media3 draws and answers. What it plays is
+// session's, which Media3 draws and answers. **It holds the app's session
+// for as long as it lives** (Kept.kt) — which Android ties to its playing or
+// being bound — so the activity going is not the phone leaving the
+// account's listening session: the socket, the device and the sound stay.
+// With no activity at all, it opens the session itself from the login the
+// onboarding remembered. What it plays is
 // `/media/<file>` from the session's server (`Media.url`), streamed with
 // range requests, which is what makes seeking work. Notifications are the
 // one permission the onboarding asks for, because they are what the
@@ -71,6 +76,10 @@ import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import com.google.common.util.concurrent.SettableFuture
 import dev.arkdb.Id
+import dev.arkdb.android.ArkSession
+import dev.arkdb.android.ArkSessions
+import dev.arkdb.android.Hold
+import dev.arkdb.android.Sessions
 import dev.harken.android.listening.Output
 import dev.harken.android.listening.Track as Queued
 import java.util.concurrent.atomic.AtomicBoolean
@@ -96,6 +105,10 @@ class PlaybackService : MediaSessionService() {
     private lateinit var sound: ExoSound
     private lateinit var remote: RemotePlayer
     private val scope = MainScope()
+    private lateinit var sessions: Sessions
+
+    /** The app's session, held for as long as this service lives; none while nobody is signed in. */
+    private var hold: Hold? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -118,6 +131,39 @@ class PlaybackService : MediaSessionService() {
         session = MediaSession.Builder(this, exo).setSessionActivity(open).setCallback(Callback).build()
         // Whichever session the app has open, followed; none, and the ExoPlayer is this phone's own.
         scope.launch { Listen.current.collectLatest { follow(it) } }
+        // The app's session, held: the one the activity has open, or — with none, and a login
+        // remembered — one opened here.
+        sessions = Kept.sessions(this)
+        scope.launch { sessions.current.collect { adopt(it) } }
+        ensure()
+    }
+
+    // Hold the session the process has open, if this service does not already; let go of one
+    // that was closed for everyone.
+    private fun adopt(s: ArkSession?) {
+        val h = hold
+        if (s == null || s.isClosed) {
+            if (h != null && h.session.isClosed) hold = null
+            return
+        }
+        if (h?.session === s) return
+        h?.release()
+        hold = sessions.hold(s.server, s.login, "playback")
+        Kept.of(s, Device.name(this))
+    }
+
+    /** A session to play from and browse: held, or opened from the remembered login; none signed out. */
+    private fun ensure(): ArkSession? {
+        hold?.session?.takeIf { !it.isClosed }?.let { return it }
+        sessions.current.value?.takeIf { !it.isClosed }?.let {
+            adopt(it)
+            return it
+        }
+        val (server, login) = ArkSessions.remembered(this) ?: return null
+        val h = sessions.hold(server, login, "playback")
+        hold = h
+        Kept.of(h.session, Device.name(this))
+        return h.session
     }
 
     private suspend fun follow(l: Listen?) {
@@ -182,6 +228,9 @@ class PlaybackService : MediaSessionService() {
         exo.release()
         remote.release()
         session = null
+        // Nothing plays and nothing is bound: the session closes, unless the activity holds it.
+        hold?.release()
+        hold = null
         super.onDestroy()
     }
 }

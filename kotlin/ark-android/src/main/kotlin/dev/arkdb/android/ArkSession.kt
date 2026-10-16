@@ -212,6 +212,52 @@ private constructor(
         }
     }
 
+    // What an app keeps with the session (`kept`), by key, in the order it was made.
+    private val kept = LinkedHashMap<Any, Any>()
+
+    /**
+     * What the app keeps as long as the session: made by `make` the first time `key` is asked for,
+     * and the same one after, whoever asks — a screen, a service — and closed with the session,
+     * newest first, when it is [AutoCloseable]. A session already closed makes one and keeps
+     * nothing.
+     */
+    public fun <T : Any> kept(key: Any, make: () -> T): T {
+        synchronized(kept) {
+            @Suppress("UNCHECKED_CAST")
+            (kept[key] as T?)?.let {
+                return it
+            }
+            val made = make()
+            if (!isClosed) kept[key] = made
+            return made
+        }
+    }
+
+    /** Close and forget what is kept under `key`: the next [kept] makes it again. */
+    public fun drop(key: Any) {
+        val gone = synchronized(kept) { kept.remove(key) }
+        (gone as? AutoCloseable)?.close()
+    }
+
+    // Everything kept, closed newest first, before the peer's thread is told to stop: what they
+    // post on their way out still runs.
+    private fun closeKept() {
+        val all = synchronized(kept) { kept.values.toList().also { kept.clear() } }
+        for (k in all.asReversed()) {
+            try {
+                (k as? AutoCloseable)?.close()
+            } catch (e: Exception) {
+                // Its own failure; the session closes regardless.
+            }
+        }
+    }
+
+    /** Whether [close] was called. */
+    public val isClosed: Boolean
+        get() = closed || closing
+
+    @Volatile private var closing = false
+
     /** Forget this account's launch views: on signing out, or a denial. */
     public fun forgetLaunchViews() {
         launches?.clear()
@@ -361,7 +407,9 @@ private constructor(
 
     /** Stop the thread and close the peer, written down; its storage stays for the next session. */
     public fun close() {
-        if (closed) return
+        if (closed || closing) return
+        closing = true
+        closeKept()
         launcher.shutdown()
         if (inline) {
             closed = true

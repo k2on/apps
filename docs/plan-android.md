@@ -1251,9 +1251,9 @@ saved values, but does not parcel them.
 `docs/plan-live.md` "Landed: phase 3" is the whole of it; this is where it
 sits among the rules above.
 
-- **Its state lives where the session does.** `Listen` is made with the
-  `ArkSession` (`remember(session)` in `HarkenApp`) and let go with it,
-  beside `Library` and `Playback`; the media service finds it through
+- **Its state lives where the session does.** `Listen` is kept with the
+  `ArkSession` (`Kept`, below: "The session outlives the activity"),
+  beside `Library`, and closed with it; the media service finds it through
   `Listen.current`. What a screen draws of it is one value, `Heard`,
   published only when it moves — a press, a frame, a player's event — so a
   destination composes nothing from it at rest. The picker is a sheet, not
@@ -1282,3 +1282,105 @@ sits among the rules above.
   (27,977 B a frame).
 - **Dependencies**: none added. Media3's `SimpleBasePlayer` is in
   `media3-common` 1.5.1, already in the recorded graph.
+
+### The session outlives the activity
+
+Swiping the app away while the phone was the output took the phone out of
+the account's listening session and left the music playing: the session —
+the peer, its socket, the phone as a device — was the activity's
+`ViewModel`'s, so it closed with the activity, the server ran `on_leave`
+and marked the output away and paused, and every other device said
+"paused" over the ExoPlayer still playing through its queue. And Android
+Auto binds to the media service with no activity at all, so the service
+needs the session without one.
+
+**The session is the process's** (`kotlin/ark-android`, `Sessions.kt`;
+`kotlin/README.md` has the API). `ArkSessions.of(context, spec)` is one
+`Sessions` per process: one session per server and login, opened by
+whichever end asks first and shared by every end that asks after. Each end
+holds it (`Hold`) and lets go; the last to let go closes it, as the
+activity used to. Signing out and a denial close it for everyone, and a
+denial forgets the remembered login whoever heard it, as the onboarding
+does. Two ends hold it in harken:
+
+- **the activity**, through `ArkHost`: opening is a hold named `app`, and
+  `onCleared` lets go of it. Nothing else about the onboarding moved.
+- **the media service**, for as long as it lives — which Android ties to
+  its being bound (the app's own controller, a car, a watch) or started
+  for playback, Media3 starting it in the foreground while it plays. It
+  holds the session the process has open, and with none open and a login
+  remembered — a car binding to it cold — it opens one itself. Its
+  `onDestroy` lets go.
+
+**What lives with it** is `Kept` (harken's `Kept.kt`), made by the first
+end to ask through `ArkSession.kept` and closed with the session: the
+`Library` — every maintained view — and the `Listen` reconciler, which the
+media service attaches its ExoPlayer to. `HarkenApp` takes them from there
+and keeps only what is the screens' own: the `Playback` controller and the
+covers it decodes, disposed with the composition. So the activity going
+leaves the phone in the session, its output, playing; the next launch
+attaches to the session as it is, Home already read.
+
+**A launch is not slower, and cannot be by construction**: `ArkHost` does
+what it did, through a hold — the same `ArkSession.open`, the same
+`Library` reading the same launch views first. A launch with the service
+already holding the session (music playing, the app swiped away and
+opened again) opens nothing at all. Measured anyway, `LaunchTests.launchBench`
+(HARKEN_LAUNCH_BENCH=N): launch → Home's lists from the launch views, and
+→ every view hydrated, over a replica with its launch views written, the
+parent's way (`ArkSession.open` and a `Library` of its own) and the
+process's (a hold on `Sessions`, `Kept`) turn about in one warm HotSpot,
+ten of each after two thrown away, medians:
+
+| µs, median of 10            | Home's lists | hydrated |
+|-----------------------------|-------------:|---------:|
+| 200 songs, the parent's     |        2,485 |   38,739 |
+| 200 songs, the process's    |        2,746 |   43,389 |
+| 2,000 songs, the parent's   |        9,387 |  182,526 |
+| 2,000 songs, the process's  |       11,024 |  170,531 |
+
+The spread within each row is wider than the difference between rows
+(2,000 songs, Home's lists: 6.6–70 ms the parent's way, 7.3–29 ms the
+process's; a first run of the same bench read 8,682 and 9,184), and the
+two halves of each pair are the same calls in the same order but for the
+hold and the `kept` lookup. HotSpot, warm, and the JVM's — not a phone's
+cold start; `ColdOpen` stops at the client, where nothing moved, so it was
+not run again. At 20,000 songs the bench did not finish: the unit tests'
+JVM, at its default heap, did not hydrate the second session it opened
+over the same replica (the one that writes the launch views, opened the
+parent's way) within two minutes — not investigated further; no number is
+given for it.
+
+Held by:
+
+- `KeptTests.theActivityGoingLeavesThePhoneInTheSessionPlaying`: the
+  process's `Sessions` over a session that is a real Kotlin peer in the
+  test's server (`Hall`), its socket going when the session closes. The
+  app and the service hold it; the phone plays; the real `HarkenApp` is
+  composed and disposed and the app's hold let go. The phone is still
+  linked, the session open and held by `playback` alone, the laptop sees
+  the phone as the output, here and playing, and a pause on the laptop
+  still reaches the phone's player; the service letting go then closes it,
+  and the laptop sees the phone away, as before. Falsified twice: a
+  release that closed the session whatever else held it ("the phone left
+  the session with the activity"), and the screens closing the listening
+  session on their way out, as they did ("the player is no longer
+  reconciled").
+- `SessionsTests` (ark-android): one session for two holds, open until the
+  last lets go and a new one after; a close or a denial is everyone's, the
+  denial forgetting the login; what is kept is made once and closed with
+  it. Falsified by the same release: "open while the service holds it".
+- `RestorationTests`' process kill now drops what is kept with the
+  session too, so the library is read again as a launch reads it, rather
+  than surviving the "process" it is supposed to have died with.
+
+One trap, paid for in the test: `session.kept(key) { … }` used as a
+statement — inside an `also`, say — infers its type from the statement,
+`Unit`, and keeps `Unit`; the closer written in the lambda is never kept
+and never runs. Say the type (`kept<AutoCloseable>`) or use the result.
+
+Not verified on a phone: that Android keeps the service — and so the
+session's socket — alive while it plays with no activity (Media3 starts it
+in the foreground for that, which is the documented behaviour); and how
+soon a paused, unbound service is stopped, which is when the session
+closes and the server marks the phone away.

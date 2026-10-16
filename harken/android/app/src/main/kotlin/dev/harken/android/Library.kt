@@ -196,6 +196,27 @@ class Library(private val session: ArkSession) {
     val albums: StateFlow<List<Album>> = albumsFlow.asStateFlow()
     val artists: StateFlow<List<Artist>> = artistsFlow.asStateFlow()
 
+    /**
+     * An album's cover by its name, "" for none: the albums by name, made again only when the list
+     * is another one. What the listening session's tracks — which name an album, not a row — are
+     * drawn with, and asked from any thread.
+     */
+    val artOf: (String) -> String =
+        object : (String) -> String {
+            private var of: List<Album>? = null
+            private var byName: Map<String, String> = emptyMap()
+
+            @Synchronized
+            override fun invoke(name: String): String {
+                val now = albumsFlow.value
+                if (now !== of) {
+                    of = now
+                    byName = now.associate { it.name to it.art }
+                }
+                return byName[name] ?: ""
+            }
+        }
+
     /** What only a song has, by its media id. */
     val details: StateFlow<Map<Id, TrackDetail>> = detailsFlow.asStateFlow()
 

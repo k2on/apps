@@ -1,7 +1,10 @@
 // A launch reads what Home draws first: the songs, the playlists and the
 // albums are published before the artists and the songs' details are so
 // much as hydrated — over harken.ark, a peer holding thirty songs authored
-// through `add_song` as the library account.
+// through `add_song` as the library account. And, run when
+// HARKEN_LAUNCH_BENCH names a library's size, what the process owning the
+// session (Kept.kt) costs a launch against opening it the way the activity
+// used to.
 package dev.harken.android
 
 import dev.arkdb.Authority
@@ -25,6 +28,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 
 class LaunchTests {
@@ -166,6 +170,95 @@ class LaunchTests {
             assertEquals("the tap is one intent", 1, pending)
             two.close()
             second.close()
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    /**
+     * Launch → Home's lists, and launch → everything hydrated, over a replica of N songs with its
+     * launch views written: the activity's old way — `ArkSession.open` and a `Library` of its own —
+     * and the process's — a hold on `Sessions`, and what is kept with the session — run turn about
+     * in one JVM, twelve of each, the first two of each thrown away. HotSpot's numbers, warm: a
+     * relative measure of what the ownership adds, not a phone's launch.
+     */
+    @Test
+    fun launchBench() {
+        val n = System.getenv("HARKEN_LAUNCH_BENCH")?.toIntOrNull()
+        assumeTrue("set HARKEN_LAUNCH_BENCH to a library size to run it", n != null)
+        val bytes = harken()
+        val root = Files.createTempDirectory("harken-bench").toFile()
+        val server = "https://music.example.invalid"
+        val login = Login("t", "s", Account("owner"), 0)
+        try {
+            val domain = Domain.fromBytes(bytes)
+            val mem = MemoryStorage()
+            val p = Peer.open(domain, mem, Options.server("library", "scanner", null).copy(autos = Autos.Seeded(2)))
+            p.setRoles(listOf("library"))
+            repeat(n!!) { p.mutate("add_song", song(it)) }
+            localCommit(Authority(domain.module.schema, domain.closures), p.replica)
+            p.persist()
+            val dir = ArkSession.directory(root, server)
+            dir.mkdirs()
+            for (k in mem.keys()) File(dir, k).writeBytes(mem.load(k)!!)
+            val open = { ev: dev.arkdb.android.SessionEvents ->
+                ArkSession.open({ Domain.fromVerifiedBytes(bytes) }, root, server, login, ev::denied, ev::signOut, ev::failed, module = bytes)
+            }
+            val sessions = dev.arkdb.android.Sessions(open = { _, _, ev -> open(ev) })
+            val times = mapOf("direct" to ArrayList<Pair<Long, Long>>(), "held" to ArrayList())
+            fun once(how: String, i: Int) {
+                val t0 = System.nanoTime()
+                val close: () -> Unit
+                val library: Library
+                if (how == "direct") {
+                    val s = open(dev.arkdb.android.SessionEvents.None)
+                    library = Library(s)
+                    close = {
+                        library.close()
+                        s.close()
+                    }
+                } else {
+                    val h = sessions.hold(server, login, "app")
+                    library = Kept.of(h.session, "Phone").library
+                    close = { h.release() }
+                }
+                while (!library.loaded.value) Thread.sleep(0, 100_000)
+                val t1 = System.nanoTime()
+                while (!library.complete.value) Thread.sleep(0, 100_000)
+                val t2 = System.nanoTime()
+                close()
+                // A closed session writes itself down on its own thread: room for that before the
+                // next opens the same replica.
+                val rest = if (n >= 10_000) 2_000L else 150L
+                Thread.sleep(rest)
+                if (i == 0 && how == "direct") {
+                    val saved = CountDownLatch(1)
+                    // The launch views, written once, as the app going to the background writes them.
+                    var failed: Exception? = null
+                    val s = open(object : dev.arkdb.android.SessionEvents {
+                        override fun failed(e: Exception) {
+                            failed = e
+                        }
+                    })
+                    val l = Library(s)
+                    val deadline = System.currentTimeMillis() + 120_000
+                    while (!l.complete.value && System.currentTimeMillis() < deadline) Thread.sleep(5)
+                    assertTrue("the first launch hydrated: ${failed?.stackTraceToString()}", l.complete.value)
+                    s.saveLaunchViews { saved.countDown() }
+                    assertTrue(saved.await(60, TimeUnit.SECONDS))
+                    l.close()
+                    s.close()
+                    Thread.sleep(rest)
+                }
+                if (i >= 2) times.getValue(how).add((t1 - t0) / 1000 to (t2 - t0) / 1000)
+            }
+            for (i in 0 until 12) {
+                once("direct", i)
+                once("held", i)
+            }
+            fun med(l: List<Long>) = l.sorted()[l.size / 2]
+            for ((how, t) in times)
+                println("launch bench, $n songs, $how: Home's lists ${med(t.map { it.first })} µs median ${t.map { it.first }.sorted()}; hydrated ${med(t.map { it.second })} µs median ${t.map { it.second }.sorted()}")
         } finally {
             root.deleteRecursively()
         }

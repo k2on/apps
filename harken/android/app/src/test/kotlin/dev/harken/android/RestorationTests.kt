@@ -322,6 +322,9 @@ class Driver(private val paparazzi: Paparazzi) {
                 saved = save()
                 alive = false
                 frame()
+                // What the process kept with the session goes with the process: the library is
+                // read again, as a launch reads it.
+                Kept.drop(session)
                 alive = true
                 frame()
             }

@@ -181,21 +181,19 @@ fun HarkenApp(
 ) {
     Recompositions.hit("HarkenApp")
     val context = LocalContext.current.applicationContext
-    val library = remember(session) { Library(session) }
+    // The library and the listening session live as long as the session does, not as long as
+    // this composition (Kept.kt): the media service holds them too, and the activity going is
+    // not the music going. The screens' own ends — the player's controller, the covers they
+    // decode — are this composition's, and go with it.
+    val kept = remember(session) { Kept.of(session, Device.name(context)) }
+    val library = kept.library
+    val listen = kept.listen
     val playback = remember(session) { playbackOf(context, session.server) }
     val covers = remember(session) { coversOf(context, session.server) }
     val device = remember { Device(context) }
-    // The listening session, on the session's own socket: made with it, followed by the player and
-    // by the media service, and let go with it.
-    val listen = remember(session) { Listen(session, Device.name(context)) }
     DisposableEffect(session) {
         playback.follow(listen)
-        Listen.current.value = listen
-        onDispose {
-            listen.close()
-            library.close()
-            playback.close()
-        }
+        onDispose { playback.close() }
     }
 
     // One stack per tab, each its own NavHost (`TabStack`): switching tabs is not a navigation, so
@@ -261,11 +259,6 @@ fun HarkenApp(
     val albumOf: (Track) -> Album? = remember(session) { { t -> Album.ofTrack(t, details, albumsByName) } }
     // What the search last found: the app's, not the tab's, so leaving the tab keeps it.
     val searched = remember(session) { Searched() }
-    // An album's cover by its name, for what the session carries — which names an album, not a row.
-    LaunchedEffect(albums) {
-        val art = albums.associate { it.name to it.art }
-        listen.art = { name -> art[name] ?: "" }
-    }
     // What Home says was played last: the session's track, else the log's newest play.
     val last = remember(heard, played, albumsByName, playlists) { lastPlayed(heard, played, playlists, { albumsByName[it]?.art ?: "" }, session.server, listen.name) }
 

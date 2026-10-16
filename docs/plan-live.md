@@ -945,7 +945,10 @@ draws, but `f2_diagnostics_numbers`, which gains the "Listening" group.
   keeps the sound with it, away and paused, and the ExoPlayer — the media
   session's player again — plays on through the queue it holds, this
   phone's own; opening the app again is coming back, and the decided rule
-  applies.
+  applies. *Since changed*: the session is the process's now, held by the
+  activity and by the media service (`docs/plan-android.md`, "The session
+  outlives the activity"), so the activity going while the phone plays
+  leaves it in the session, the output, playing.
 
 ### What ran green
 
