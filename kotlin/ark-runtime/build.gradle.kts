@@ -154,6 +154,23 @@ val storeHints by tasks.registering(JavaExec::class) {
     mainClass.set("dev.arkdb.conformance.StoreHints")
 }
 
+// What `arkc gen kotlin` prints of the demo's room, which the vectors keep
+// (`spec/vectors/gen/Room.kt`, `docs/plan-live.md`): compiled with the tests,
+// and every state of the room read through it and written back.
+// A Kotlin source directory reads its `.kt` alone, so `Room.swift` beside it
+// is not a source here.
+sourceSets["test"].kotlin.srcDir(rootProject.file("../spec/vectors/gen"))
+val printed by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Reads every state of the room through the printed Kotlin and back."
+    dependsOn(tasks.named("testClasses"))
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("dev.arkdb.conformance.Printed")
+    val vectors = providers.gradleProperty("arkVectors")
+        .orElse(rootProject.file("../spec/vectors").absolutePath)
+    args(vectors.get())
+}
+
 tasks.named("check") {
-    dependsOn(conformance, keptNumbers, storeHints)
+    dependsOn(conformance, keptNumbers, storeHints, printed)
 }

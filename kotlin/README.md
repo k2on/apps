@@ -54,6 +54,9 @@ comments name the reference function for each piece.
 | `Trace.kt` | `trace.rs` | `Input`, the durable copy (`Durable`, `KeptStore`), `reopenFrom`, alone, commit, join, `Observer`, `Player`, `replay`, `differs` |
 | `Reads.kt` | `ir/reads.rs` | the tables a function reads outside its plan: what a maintained view's middleware is re-run on |
 | `Json.kt` | `json.rs` | the JSON dialect a headless peer reads and answers in: `decode`, strict where the reference is; printing is `Value.show` |
+| `Types.kt` | `types.rs` | the type section (`docs/plan-live.md`): `resolve`, `conforms` with the reference's sentences, a state's ephemeral fields and its ordered part |
+| `Ordering.kt` | `ir/ordering.rs` | which transitions need an order, read off their bodies, and the one rule binding an ordered one: it reads no ephemeral field |
+| `Live.kt` | `live/state.rs` | live state: instances, devices, calls and the live frames' parts; the `Runner` that runs a transition or a hook and holds its result to the state's type; a device's `Watch` of its instances, confirmed with its own calls on top |
 
 Three representations differ from the Rust and say nothing different. A row
 is a `Value.VStruct` of every column — the Rust lays one out positionally
@@ -74,7 +77,7 @@ entry here runs by a raw write, by its closure, or not at all.
 |---|---|---|
 | `Storage.kt` | `storage.rs` | `Storage` (a `Keys`), `MemoryStorage`, `DirStorage`; the `replica`, `facts.<n>`, `pending`, `pending.<n>` and `who` records, `Records.load` |
 | `Writer.kt` | `peer.rs` (`persist` and its helpers) | what is written and when: a journal page or a snapshot, compaction once the pages outgrow it, the intents by generation |
-| `Peer.kt` | `peer.rs`, `domain.rs` | `Domain`; `Peer` — open from a storage (carried across alone and back), mutate by name, query, check, sign-in, leave and join with the local history in the alone journal, `connect`, `pump` and what it moved (`Pumped.quiet`), the wake (`setWaker`) and the redial's `deadline`, `status`, `standing`, verify, `say`; the sans-io `connected`, `recvFrame`, `takeOutgoingFrames` for a transport of the caller's |
+| `Peer.kt` | `peer.rs`, `domain.rs` | `Domain`; `Peer` — open from a storage (carried across alone and back), mutate by name, query, check, sign-in, leave and join with the local history in the alone journal, `connect`, `pump` and what it moved (`Pumped.quiet`), the wake (`setWaker`) and the redial's `deadline`, `status`, `standing`, verify; live state — `live`, `call`, the throttled call, `serverOffset` and `serverNow`, `takeLiveRefusals`; the sans-io `connected`, `recvFrame`, `takeOutgoingFrames` for a transport of the caller's |
 | `ClientView.kt` | `view.rs` | a query held as a list: the middleware run first and the tables it reads kept, every change pushed as patches, `Reset` when a signer or the middleware's outcome moves; `splice` |
 | `Link.kt` | `link/mod.rs` | `Link`: dial when due, back off half a second doubling to thirty, reset when a connection opens, stop and resume; `Timing`; `QueuedSocket`, a transport's callbacks kept until polled; `platformDial` |
 | `Transport.kt`, `WebSocketTransport.kt` | `link/native.rs` | one connection carrying frames; OkHttp's WebSocket, pinging every `pingEveryMs` and giving up when a ping goes unanswered, its handshake bounded by `connectTimeoutMs` |
@@ -203,7 +206,7 @@ Unicode version is regenerating the Rust file; this build follows.
         -ParkTraceCorpus=$(nix build .#trace-corpus --print-out-paths)    # from kotlin/
 
 `checks.kotlin` holds every source to `ktfmt --kotlinlang-style` (checked,
-never written), then runs `gradle build`, whose `check` runs five plain
+never written), then runs `gradle build`, whose `check` runs plain
 `main`s — no test framework is on the classpath:
 
 - **the conformance runner** (`dev.arkdb.conformance.Conformance`,
@@ -214,8 +217,8 @@ never written), then runs `gradle build`, whose `check` runs five plain
   `falsify/` vector to fail its check (a crash is a bug, not a pass), skips
   by name the 8 `rust-only` fleets and the two steps of `three-peers` that
   are a server's (adopting a log, compaction), prints what it ran and
-  skipped, and fails on a claimed kind with nothing run: 122 of the 130
-  vectors run. It replays every trace of the corpus `-ParkTraceCorpus` or
+  skipped, and fails on a claimed kind with nothing run: 140 of the 148
+  vectors run, the live ones (`docs/plan-live.md`) among them. It replays every trace of the corpus `-ParkTraceCorpus` or
   `ARK_TRACE_CORPUS` names: `packages.trace-corpus`, 2,565 traces, in the
   check;
 - **KeptNumbers**: a plan whose kept lists keep lists of their own, three
@@ -234,10 +237,20 @@ never written), then runs `gradle build`, whose `check` runs five plain
   Rust `ark_client::Peer` (`fixtures/rust-peer.rs`, a scratch program over
   `rust/ark-client` that no build here compiles), replayed into a Kotlin
   `Peer` with the storage compared key for key and byte for byte after
-  each of its 73 steps; and every trace again with the client's durable
-  copy kept in these records (`StoredCopy`), so a reopen opens what they
-  say; and a `DirStorage` on this machine, the directory synced after every
-  rename.
+  each of its 73 steps; every trace the manifest names, and the corpus's,
+  again with the client's durable copy kept in these records
+  (`StoredCopy`), so a reopen opens what they say; and a `DirStorage` on
+  this machine, the directory synced after every rename;
+- **LiveTests** (`ark-client`): a peer's live state over the demo's room
+  (`docs/plan-live.md`), against frames written by hand — the hello's
+  device, pending calls said again on every connection, an ephemeral call
+  never pending, counters, a resync on a gap or a wrong hash, a refusal,
+  the throttle, the server's clock, and an `applied` with both a seq and a
+  counter refused;
+- **Printed**: what `arkc gen kotlin` prints of the room
+  (`spec/vectors/gen/Room.kt`, compiled with the tests), every state of
+  `eval/live-room.json` read through it and written back as the same
+  value.
 
 The build is offline: `kotlin/deps.json` is the recorded Maven graph,
 replayed as a `mitmCache` the way nixpkgs builds every gradle project, and

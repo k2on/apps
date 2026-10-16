@@ -24,7 +24,7 @@ Each entry:
 | `path` | the file, relative to `vectors/` |
 | `kind` | its directory: `codec`, `order`, `hash`, `module`, `verify`, `eval`, `views`, `protocol`, `rebase`, `trace` |
 | `form` | which of the kind's shapes the file is, named in the sections below |
-| `side` | `client`: every runtime runs it. `rust-only`: a fleet run through Rust's simulator and its seeded scheduler, which no other runtime reproduces; its coverage reaches them through the traces of its clients (§ trace). `rust-for-now`: live state (`docs/plan-live.md`), a client's in time and Rust's alone today; a runtime that holds no live state skips it, naming it, and one that does runs it as `client` (each kind's `live` form, below) |
+| `side` | `client`: every runtime runs it. `rust-only`: a fleet run through Rust's simulator and its seeded scheduler, which no other runtime reproduces; its coverage reaches them through the traces of its clients (§ trace). Live state (`docs/plan-live.md`) is `client`: it was `rust-for-now` until Kotlin and Swift held it (phase 1b), and that side is gone |
 | `expect` | `pass`, or `fail` for a `falsify/` vector: a deliberately wrong expectation that a runner which reads the expected value must reject |
 
 A runner walks the manifest rather than the directories, and fails if a
@@ -138,7 +138,7 @@ with `args` over the store: either it applies and its changes are
 `changes`, or it is refused and the refusal's text (§12.5) is `refused`
 and the store did not move; then `store_after` and `hash_after`.
 
-`form: live` (`eval/live-room.json`) — rust-for-now. `{module, live,
+`form: live` (`eval/live-room.json`) — client. `{module, live,
 live_hash, type_hash, kinds, init, init_hash, steps}` — a live state of the
 module (§14.1) run transition by transition. **Do**: decode and verify the
 module; take the live state named `live`. **Compare**: its closure's hash
@@ -193,7 +193,7 @@ The live frames (`client-hello-device`, `client-call`,
 `client-call-ephemeral`, `client-resync`, `server-applied`,
 `server-applied-hook`, `server-applied-ephemeral`, `server-refused`,
 `server-live-snapshot`, and the falsify of an `applied` with both a
-sequence and a counter) are the same two forms and **rust-for-now**. An
+sequence and a counter) are the same two forms, and client. An
 `applied` carries `seq` or `counter` and never both; what it carries
 decides how it is read (§14.1).
 
@@ -258,7 +258,7 @@ and `playlist` views kept. `packages.trace-corpus` is thousands more in the
 same format, every client of every session of a fixed fuzz run, not
 checked in; a runtime's check runs it as it runs these.
 
-`form: live` (`trace/live/`, and its `falsify/`) — rust-for-now: a device's life in
+`form: live` (`trace/live/`, and its `falsify/`) — client: a device's life in
 a fleet of devices of one account calling the demo's `room`, written by
 `bin/vectors/live.rs`. The inputs and outputs below marked *live*.
 

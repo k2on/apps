@@ -429,3 +429,78 @@ rewritten so that only the sequence can tell.
 - A transport for ephemeral frames that is not the socket, if thirty a
   second over a WebSocket ever proves too little.
 - A non-user scope with a membership guard, when a party is wanted.
+
+## Landed: phase 1b
+
+Kotlin and Swift hold live state, and every vector phase 1 marked
+`rust-for-now` — eighteen of them, in `verify/`, `module/`, `eval/`,
+`protocol/` and `trace/live/` — is `client` now. Both conformance runners
+run 140 of the 148 vectors the manifest names, skipping the eight
+`rust-only` fleets by name; both replay the corpus's 2,565 traces. The side
+`rust-for-now` is gone from the generator, the manifest's test and
+`RUNNERS.md`.
+
+**The runtimes** (`kotlin/ark-runtime`, `swift/Sources/ArkDB`) are ports
+of phase 1's engine, file for file: the type section and `conforms` with
+the reference's sentences (`Types`), the IR's states, transitions, guards,
+hooks and the new expressions through decode, encode, normalize, verify —
+`OrderedReadsEphemeral` included — and the three hashes (`Hash`), the
+classifier (`Ordering`), the interpreter's live half (`Eval`), and the
+frames, an `applied` with both a seq and a counter refused (`Live`,
+`Protocol`). The trace player runs `call` inputs and reports `live` and
+`live_refused`.
+
+**The clients** (`ark-client`'s `Peer.kt`, `ArkDBClient`'s `Peer.swift`)
+hold each instance as the Rust peer does, and say so in the house style:
+`live(name)`, `call(name, transition, input)` — which throws a preview's
+refusal, where Rust returns it — a throttled call, `serverOffset` and
+`serverNow`, `takeLiveRefusals`, and `Pumped.live` for a view that moved.
+Neither has a timer: a held call goes out on the pump after its window.
+
+**`say` and `heard` are gone from both peers.** Their only callers were
+the headless peers' drains (`kotlin/harken-peer`, `swift/Sources/HarkenPeer`),
+which threw what they read away; `harken/android` reads
+`Status.heardFrames`, which stays and now counts live frames, and
+`harken/ios` reads neither. The codec still reads and writes the opaque
+`say` and `heard` frames — their vectors are the codec's — and a client
+ignores a `heard`.
+
+**`arkc gen kotlin|swift`** prints the type section and each state's type:
+a record as a data class or a struct, a sum as a sealed class or an enum,
+read from the runtime's `Value` and written back as one, with `LiveStates`
+naming every state. The plan said "as tables are printed now", and nothing
+printed tables: `print` and `gen` went with v4 (`AUTHORING.md` §4), so this
+is a printer of types alone, beside `arkc`'s other commands. The demo's
+room, printed, is `spec/vectors/gen/` — written by `ark-vectors`, held
+byte for byte by `checks.vectors`, not in the manifest because it is not a
+vector — and each runtime compiles it and reads every state of
+`eval/live-room.json` through it and back (`Printed`).
+
+### Decisions
+
+- **The live traces stay in `trace/live/`.** Both storage tests read the
+  manifest now rather than every file of `trace/`, which was the only
+  reason for the directory; moving them would rename three vectors every
+  runner's report names, for nothing.
+- **A trace holds live state only where its `open` declares a device.**
+  That is the rule the Rust player has in phase 2's working tree, where
+  harken's module gains a state and its traces, recorded before, declare
+  none; Kotlin and Swift follow it, so the harken traces replay with or
+  without phase 2.
+- **Swift's peer has no waker**, so its `deadline()` is the throttle's
+  window alone and a host pumps on its own tick, as it already does for
+  the link. Kotlin's is the sooner of the link's and the throttle's, as
+  Rust's is.
+- **The printed names are bare.** `Mode`, `Room` and `LiveStates` are
+  printed as the module names them, so in Swift a printed type shadows one
+  of `ArkDB`'s of the same name in the module that holds it — the demo's
+  `Mode` shadows the protocol's in the test target, where nothing names
+  the protocol's. A prefix is one argument away when an app needs it.
+
+**Tested**, each test falsified once, and the doc comment beside each says
+how: `LiveTests` in both clients — the hello's device, an ordered call
+said again on the next connection, an ephemeral call never pending, stale
+and equal counters, a gap asking a resync and applying nothing, a refusal
+taking a call out of pending, the throttle, the server's clock, and both
+orders on one `applied` — and `Printed` in both, falsified by printing
+`can_play` as `canPlay`.

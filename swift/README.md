@@ -44,6 +44,8 @@ sign-in, `harken-peer-swift` in the fleet, and the iOS app rewired onto it
 | `Protocol.swift` | `protocol.rs` | every frame to and from its value, and the `Client` |
 | `Journal.swift` | `journal.rs` | a log's snapshot and pages, in both layouts |
 | `Trace.swift` | `trace.rs` | the trace player: inputs, the durable copy, reopen, alone and join |
+| `Types.swift`, `Ordering.swift` | `types.rs`, `ir/ordering.rs` | the type section and a value held to it; which transitions need an order (`docs/plan-live.md`) |
+| `Live.swift` | `live/state.rs` | live state: instances, devices, calls, the live frames' parts, the `Runner`, a device's `Watch` |
 
 `ArkDBClient` is `rust/ark-client`:
 
@@ -52,7 +54,7 @@ sign-in, `harken-peer-swift` in the fleet, and the iOS app rewired onto it
 | `Storage.swift` | `storage.rs` | `Storage` (memory, a directory written whole and synced), the replica, journal, pending and login records, `load` |
 | `Writer.swift` | `peer.rs` (`persist`…) | what is written when: a page or a snapshot, for the journal and for the intents |
 | `Autos.swift` | `autos.rs` | ids and times, from the platform or a seed |
-| `Peer.swift` | `peer.rs` | a peer over a storage: open, sign in and out, mutate, query, check, standing, leave and join, connect and pump, status, the sans-io frames |
+| `Peer.swift` | `peer.rs` | a peer over a storage: open, sign in and out, mutate, query, check, standing, leave and join, connect and pump, status, the sans-io frames; live state — `live`, `call`, the throttled call, `serverOffset` and `serverNow`, `takeLiveRefusals` |
 | `ClientView.swift` | `view.rs` | a query held as a list: hydrated once, patched, its middleware re-run when its `Ctx` or a table it reads moves |
 | `Link.swift` | `link/mod.rs` | the link: dial, backoff, stop; `Queues` for a test; `platformDial` |
 | `WebSocket.swift` | `link/native.rs` | `NativeSocket` (Linux) and `SessionSocket` (Apple), and RFC 6455's wire |
@@ -118,7 +120,7 @@ Swift 5.8 and runs `ArkDBTests`, an executable (there is no XCTest here):
   `spec/vectors/MANIFEST.json`, fails on a file the manifest does not name
   or one it names that is missing, runs every vector of the kinds it claims
   — `codec`, `order`, `hash`, `module`, `verify`, `eval`, `views`,
-  `protocol`, `rebase` and `trace`, 122 of 130, skipping only the eight
+  `protocol`, `rebase` and `trace`, 140 of 148, skipping only the eight
   rust-only fleets — requires each `falsify/` vector to fail its check (a crash is a bug, not
   a pass), skips the rest by name with the reason, prints what it ran and
   skipped, and fails on a claimed kind with nothing run;
@@ -127,12 +129,20 @@ Swift 5.8 and runs `ArkDBTests`, an executable (there is no XCTest here):
 - **the storage**: round 3's Rust-written peer fixture
   (`kotlin/ark-client/fixtures/rust-peer.json`, read in place) replayed into
   a Swift `Peer`, every record compared byte for byte after every step;
-  `DirStorage` on this machine; and every trace and the corpus again with
-  the client's durable copy kept in the storage records;
+  `DirStorage` on this machine; and every trace the manifest names, and
+  the corpus, again with the client's durable copy kept in the storage
+  records;
 - **the driver half** (`ClientTests`): the link's backoff over `Queues`,
   the dialect, the sign-in's URLs, views over `harken.ark` spliced against
   a fresh read, RFC 6455's own examples, and `NativeSocket` against a
   loopback server in the process;
+- **live state** (`LiveTests`, `docs/plan-live.md`): a peer's calls,
+  counters, resyncs, refusals, throttle and the server's clock over the
+  demo's room, against frames written by hand;
+- **the printed room** (`Printed`): `DemoRoom.swift`, a copy of what `arkc
+  gen swift` prints (`spec/vectors/gen/Room.swift`) held to be the same
+  text, and every state of `eval/live-room.json` read through it and
+  written back as the same value;
 - **the iOS app's non-SwiftUI files** (`harken/ios/tools/typecheck.sh`),
   type-checked against the modules just built;
 - **StoreHints**: 600 reads through the store's indexes, over a

@@ -31,9 +31,6 @@ use std::path::{Path, PathBuf};
 pub struct Out {
     root: PathBuf,
     written: RefCell<Vec<String>>,
-    /// The live vectors (`docs/plan-live.md`), which the manifest marks
-    /// `rust-for-now`: Kotlin and Swift skip them until they hold live state.
-    live: RefCell<std::collections::BTreeSet<String>>,
 }
 
 impl Out {
@@ -51,10 +48,13 @@ impl Out {
         self.written.borrow_mut().push(rel.to_string());
     }
 
-    /// Write one live vector: [`Out::write`], marked for the manifest.
-    fn write_live(&self, rel: &str, text: &str) {
-        self.write(rel, text);
-        self.live.borrow_mut().insert(rel.to_string());
+    /// Write one printed source file, which is not a vector and is not in
+    /// the manifest: `gen/`, what `arkc gen` makes of the live module, which
+    /// the runtimes compile and round-trip (`docs/plan-live.md`).
+    fn write_source(&self, rel: &str, text: &str) {
+        let path = self.root.join(rel);
+        fs::write(&path, text).unwrap_or_else(|e| panic!("writing {}: {e}", path.display()));
+        println!("  {}", path.display());
     }
 }
 
@@ -72,10 +72,11 @@ pub fn write_all(root: &Path) {
         let p = root.join(d).join("falsify");
         fs::create_dir_all(&p).unwrap_or_else(|e| panic!("creating {}: {e}", p.display()));
     }
+    let g = root.join("gen");
+    fs::create_dir_all(&g).unwrap_or_else(|e| panic!("creating {}: {e}", g.display()));
     let out = Out {
         root: root.to_path_buf(),
         written: RefCell::new(vec![]),
-        live: RefCell::new(Default::default()),
     };
     codec::codec(&out);
     codec::order(&out);
@@ -103,9 +104,7 @@ pub fn write_all(root: &Path) {
 /// `docs/plan-phones.md` S1): `client`, every runtime that is a client; or
 /// `rust-only`, a fleet run through Rust's simulator and its seeded
 /// scheduler, which reaches the other runtimes through the traces of its
-/// clients instead (`trace/`); or `rust-for-now`, a vector of live state
-/// (`docs/plan-live.md`), which Rust runs and the client runtimes skip until
-/// they hold live state. Written last, from the files themselves, so that a
+/// clients instead (`trace/`). Written last, from the files themselves, so that a
 /// vector added anywhere is listed without anyone listing it.
 fn manifest(out: &Out) {
     let mut paths = out.written.borrow().clone();
@@ -136,13 +135,7 @@ fn manifest(out: &Out) {
                 "trace" => "fuzz",
                 k => k,
             };
-            let side = if kind == "rebase" && has("script") {
-                "rust-only"
-            } else if out.live.borrow().contains(rel) {
-                "rust-for-now"
-            } else {
-                "client"
-            };
+            let side = if kind == "rebase" && has("script") { "rust-only" } else { "client" };
             let expect = if rel.contains("/falsify/") { "fail" } else { "pass" };
             json::json(&ark::value::Value::record(vec![
                 ("path", ark::value::Value::text(rel.clone())),

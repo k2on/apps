@@ -27,8 +27,10 @@ dependencies {
 
 // The runtime's conformance runner — the trace reader and replayer, the
 // JSON dialect — is what these tests drive the storage through, so its
-// sources are compiled into this test source set too.
+// sources are compiled into this test source set too — and with them the
+// printed room theirs read (`Printed.kt`, spec/vectors/gen).
 sourceSets["test"].kotlin.srcDir(project(":ark-runtime").file("src/test/kotlin"))
+sourceSets["test"].kotlin.srcDir(rootProject.file("../spec/vectors/gen"))
 
 // The storage's tests are a plain `main`, like the runtime's conformance
 // runner: the Rust-written fixture byte for byte, and every trace with the

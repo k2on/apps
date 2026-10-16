@@ -698,11 +698,20 @@ form an entry's hash names:
   new one before a change that could move a retained entry's meaning.
 - `arkc vectors OUTDIR`: write the conformance vectors, as `ark-vectors`
   does.
+- `arkc gen kotlin M PACKAGE OUT`, `arkc gen swift M OUT`: the module's type
+  section and live states as Kotlin and Swift types (`docs/plan-live.md`),
+  so an app on a phone reads a live state as a typed value: each record a
+  data class or a struct, each sum a sealed class or an enum, a record or
+  sum written in place named for where it is, each read from the runtime's
+  `Value` and written back as one; and `LiveStates`, every state by name.
+  The demo's room, printed, is `spec/vectors/gen/`, which the runtimes
+  compile and round-trip every state of `eval/live-room.json` through.
 
-There is no `print`, `gen` or `roundtrip`: they existed to hand a phone a
-domain in its own language, and with Swift and Kotlin frozen at spec v3
-there is nobody to print for (`docs/plan-v4.md`, decision 4). A domain's
-source is the Rust a person wrote; its `.ark` is what that source emits.
+There is no `print` or `roundtrip`, and `gen` prints types, never a domain:
+those existed to hand a phone a domain in its own language, and with the
+phones interpreting the module there is nothing of a domain to print
+(`docs/plan-v4.md`, decision 4). A domain's source is the Rust a person
+wrote; its `.ark` is what that source emits.
 
 ## 5. The checks that hold it together
 

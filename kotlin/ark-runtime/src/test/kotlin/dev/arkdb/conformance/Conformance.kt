@@ -84,11 +84,8 @@ object Conformance {
             "trace" to { _, v -> ClientChecks.trace(v) },
         )
 
-    /**
-     * The sides this runtime runs (spec/RUNNERS.md): every client's, and `rust-for-now`'s — live
-     * state, which this runtime holds (`docs/plan-live.md`), so it runs those as a client's.
-     */
-    val sides = setOf("client", "rust-for-now")
+    /** The sides this runtime runs (spec/RUNNERS.md): every client's. */
+    val sides = setOf("client")
 
     /** Why a vector of a side not run is skipped, as the manifest's `side` says. */
     fun skipReason(side: String): String =

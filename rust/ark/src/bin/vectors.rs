@@ -6,6 +6,9 @@
 #[allow(dead_code)]
 #[path = "fuzz/mod.rs"]
 mod fuzz;
+// The Kotlin and Swift printers, which write `gen/` (`docs/plan-live.md`).
+#[path = "gen/mod.rs"]
+mod gen;
 #[path = "vectors/mod.rs"]
 mod vectors;
 

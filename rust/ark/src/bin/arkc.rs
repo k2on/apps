@@ -7,6 +7,8 @@
 //! arkc strip   M OUT      the module a client loads: every private block taken out
 //! arkc check   OLD NEW    log compatibility (§17): every break, exit 1; or nothing
 //! arkc vectors OUTDIR     write the conformance vectors, as ark-vectors does
+//! arkc gen kotlin M PACKAGE OUT   the module's type section and live states as Kotlin
+//! arkc gen swift  M OUT           …and as Swift (`gen/mod.rs`)
 //!
 //! arkc backup DIR OUT                 a running server's data directory, copied consistently
 //! arkc restore BACKUP DIR [--same-log] put a backup into an empty directory, as a new log
@@ -30,6 +32,8 @@
 
 #[path = "fuzz/mod.rs"]
 mod fuzz;
+#[path = "gen/mod.rs"]
+mod gen;
 #[path = "vectors/mod.rs"]
 mod vectors;
 
@@ -45,7 +49,7 @@ use ark::hash::{closure, function_hash, module_hash};
 use ark::ir::{module_from_value, strip_module, Module};
 use ark::value::hex;
 
-const USAGE: &str = "usage: arkc verify M | hash M | strip M OUT | check OLD NEW | vectors OUTDIR\n       arkc backup DIR OUT | restore BACKUP DIR [--same-log] | verify-log DIR [M]\n       arkc fuzz [--seed N] [--seconds S] [--cases K] [--out DIR] [--without OP,…] [--traces DIR] | fuzz --replay FILE";
+const USAGE: &str = "usage: arkc verify M | hash M | strip M OUT | check OLD NEW | vectors OUTDIR\n       arkc gen kotlin M PACKAGE OUT | gen swift M OUT\n       arkc backup DIR OUT | restore BACKUP DIR [--same-log] | verify-log DIR [M]\n       arkc fuzz [--seed N] [--seconds S] [--cases K] [--out DIR] [--without OP,…] [--traces DIR] | fuzz --replay FILE";
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -87,6 +91,9 @@ fn main() {
             println!("{}", hex(&module_hash(&public)));
         }
         ["vectors", out] => vectors::write_all(std::path::Path::new(out)),
+        // `docs/plan-live.md` What an app reads a live state as.
+        ["gen", "kotlin", path, package, out] => write(out, &gen::kotlin(&load(path), package)),
+        ["gen", "swift", path, out] => write(out, &gen::swift(&load(path))),
         ["fuzz", rest @ ..] => exit(fuzz::main(rest)),
         // A server's data directory (D6, `ops.rs`).
         ["backup", dir, out] => print!("{}", ops::backup(dir.as_ref(), out.as_ref()).unwrap_or_else(|e| die(&e))),
@@ -104,6 +111,10 @@ fn load(path: &str) -> Module {
     let v = ark::canon::decode(&bytes).unwrap_or_else(|e| die(&format!("not canonical CBOR: {e}")));
     let m = module_from_value(&v).unwrap_or_else(|e| die(&format!("not a module: {e}")));
     ark::verify::verify(&m).unwrap_or_else(|es| die(&es.iter().map(|e| format!("{e}\n")).collect::<String>()))
+}
+
+fn write(out: &str, text: &str) {
+    std::fs::write(out, text).unwrap_or_else(|e| die(&format!("{out}: {e}")));
 }
 
 fn die(s: &str) -> ! {

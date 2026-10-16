@@ -993,26 +993,9 @@ fn the_manifest_names_every_vector() {
         let fails = path.contains("/falsify/");
         assert_eq!(e["expect"].as_str(), Some(if fails { "fail" } else { "pass" }), "{path}");
         let fleet = path.starts_with("rebase/") && read(&vectors().join(path)).get("script").is_some();
-        // `docs/plan-live.md` A live vector is Rust's until the client
-        // runtimes hold live state.
-        let file = path.rsplit('/').next().unwrap_or("");
-        let live = file.starts_with("live")
-            || path.starts_with("trace/live/")
-            || [
-                "client-call",
-                "client-hello-device",
-                "client-resync",
-                "server-applied",
-                "server-refused",
-                "server-live-snapshot",
-            ]
-            .iter()
-            .any(|p| file.starts_with(p));
-        let side = match (fleet, live) {
-            (true, _) => "rust-only",
-            (_, true) => "rust-for-now",
-            _ => "client",
-        };
+        // `docs/plan-live.md` A live vector is every runtime's since phase
+        // 1b, so nothing is Rust's but the fleets.
+        let side = if fleet { "rust-only" } else { "client" };
         assert_eq!(e["side"].as_str(), Some(side), "{path}");
         *sides.entry(e["side"].as_str().unwrap_or("").to_string()).or_default() += 1;
     }

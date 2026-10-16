@@ -98,10 +98,8 @@ struct Vector {
 /// `MANIFEST.json`, as every runner here reads it (spec/RUNNERS.md): the list
 /// of every vector, and which of its sides this runtime runs.
 enum Manifest {
-    /// The sides this runtime runs: every client's, and `rust-for-now`'s —
-    /// live state, which this runtime holds (`docs/plan-live.md`), so it runs
-    /// those as a client's.
-    static let sides: Set<String> = ["client", "rust-for-now"]
+    /// The sides this runtime runs: every client's.
+    static let sides: Set<String> = ["client"]
 
     /// Why a vector of a side not run is skipped, as the manifest's `side` says.
     static func skipReason(_ side: String) -> String {

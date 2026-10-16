@@ -193,6 +193,9 @@ problems += ClientTests.run(harkenArk).map { "client: " + $0 }
 // resyncs, its throttle and the server's clock, over the demo's room.
 problems += LiveTests.run(root).map { "live: " + $0 }
 
+// The room as `arkc gen swift` prints it, read through and written back.
+problems += Printed.run(root).map { "printed: " + $0 }
+
 let total = ran.values.reduce(0) { $0 + $1.count }
 let skippedTotal = skipped.values.reduce(0) { $0 + $1.count }
 print("conformance: \(vectors.count) vectors, \(total) run, \(skippedTotal) skipped; claimed: \(claimed.map { $0.0 }.joined(separator: " "))")

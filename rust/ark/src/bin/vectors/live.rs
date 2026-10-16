@@ -1,6 +1,5 @@
-//! Live state (`docs/plan-live.md`): the demo's room as vectors, every one
-//! marked `rust-for-now` in the manifest — Rust runs them, and Kotlin and
-//! Swift skip them until they hold live state (phase 1b).
+//! Live state (`docs/plan-live.md`): the demo's room as vectors, which every
+//! runtime runs — Rust, and since phase 1b Kotlin and Swift.
 //!
 //! - `module/live.json`: the demo with its room, its type section and its
 //!   state on the wire;
@@ -14,10 +13,13 @@
 //!   ordered and ephemeral, `resync`, `applied` ordered, ephemeral and of a
 //!   hook, `refused`, `live_snapshot` — and a `falsify/`;
 //! - `trace/live/`: devices of one account through a scripted fleet, their
-//!   inputs and outputs, and a `falsify/`. A directory of their own because
-//!   the client runtimes' storage tests replay every file of `trace/` and
-//!   `trace/falsify/` without reading the manifest, and these are not theirs
-//!   yet.
+//!   inputs and outputs, and a `falsify/`. A directory of their own, kept
+//!   when the client runtimes came to run them: their storage tests read the
+//!   manifest now, and the paths are what a runner's report names;
+//! - `gen/Room.kt`, `gen/Room.swift`: the room's types as `arkc gen` prints
+//!   them, which the runtimes compile and read every state of
+//!   `eval/live-room.json` through, and write back as the same value. Not
+//!   vectors, so not in the manifest.
 
 use std::collections::BTreeMap;
 
@@ -65,6 +67,14 @@ pub fn live(out: &Out) {
     eval(out, &m);
     protocol(out);
     traces(out, &m);
+    printed(out, &m);
+}
+
+// What `arkc gen` prints of the room: the Kotlin in the package the Kotlin
+// tests compile it under, and the Swift.
+fn printed(out: &Out, m: &ark::ir::Module) {
+    out.write_source("gen/Room.kt", &crate::gen::kotlin(m, "dev.arkdb.demo"));
+    out.write_source("gen/Room.swift", &crate::gen::swift(m));
 }
 
 fn module(out: &Out, m: &ark::ir::Module) {
@@ -75,7 +85,7 @@ fn module(out: &Out, m: &ark::ir::Module) {
         "the demo's module has no live state",
         demo::module().types.is_empty() && demo::module().states.is_empty(),
     );
-    out.write_live(
+    out.write(
         "module/live.json",
         &obj(&[
             ("module", json(&v)),
@@ -86,7 +96,7 @@ fn module(out: &Out, m: &ark::ir::Module) {
 }
 
 fn verify(out: &Out, m: &ark::ir::Module) {
-    out.write_live(
+    out.write(
         "verify/live-room.json",
         &obj(&[("module", json(&module_value(m))), ("verifies", "true".into())]),
     );
@@ -110,7 +120,7 @@ fn verify(out: &Out, m: &ark::ir::Module) {
         &format!("an ordered read of an ephemeral field is refused: {refused:?}"),
         refused.iter().any(|e| matches!(e, ark::verify::VerifyError::InTransition(_, t, ark::verify::Complaint::OrderedReadsEphemeral(f)) if t == "bump" && f == "pointer")),
     );
-    out.write_live(
+    out.write(
         "verify/falsify/live-ordered-reads-a-pointer.json",
         &obj(&[
             ("module", json(&module_value(&broken))),
@@ -209,7 +219,7 @@ fn eval(out: &Out, m: &ark::ir::Module) {
             ("steps", format!("[\n{}\n]", steps.iter().map(json).collect::<Vec<_>>().join(",\n"))),
         ]
     };
-    out.write_live("eval/live-room.json", &obj(&parts(&written)));
+    out.write("eval/live-room.json", &obj(&parts(&written)));
     // The same life with every hash taken of the whole value, pointers and
     // labels in it: a runner must fail it.
     let wrong: Vec<Value> = written
@@ -227,7 +237,7 @@ fn eval(out: &Out, m: &ark::ir::Module) {
     claim("a whole-value hash differs somewhere", wrong != written);
     let mut p = parts(&wrong);
     p.push(("expect", quoted("fail")));
-    out.write_live("eval/falsify/live-room-hashing-every-field.json", &obj(&p));
+    out.write("eval/falsify/live-room-hashing-every-field.json", &obj(&p));
 }
 
 fn protocol(out: &Out) {
@@ -271,7 +281,7 @@ fn protocol(out: &Out) {
     for (name, f) in client {
         let v = f.to_value();
         claim(&format!("client-{name} reads back"), ClientMsg::from_value(&v).as_ref() == Ok(&f));
-        out.write_live(
+        out.write(
             &format!("protocol/client-{name}.json"),
             &obj(&[("frame", json(&v)), ("bytes", quoted(&hex(&encode(&v))))]),
         );
@@ -342,7 +352,7 @@ fn protocol(out: &Out) {
     for (name, f) in server {
         let v = f.to_value();
         claim(&format!("server-{name} reads back"), ServerMsg::from_value(&v).as_ref() == Ok(&f));
-        out.write_live(
+        out.write(
             &format!("protocol/server-{name}.json"),
             &obj(&[("frame", json(&v)), ("bytes", quoted(&hex(&encode(&v))))]),
         );
@@ -353,7 +363,7 @@ fn protocol(out: &Out) {
     both.insert("seq".into(), Value::Int(5));
     let both = Value::from(both);
     claim("an applied with a seq and a counter is refused", ServerMsg::from_value(&both).is_err());
-    out.write_live(
+    out.write(
         "protocol/falsify/server-applied-ephemeral-and-ordered.json",
         &obj(&[("frame", json(&v)), ("bytes", quoted(&hex(&encode(&both)))), ("expect", quoted("fail"))]),
     );
@@ -391,7 +401,7 @@ fn traces(out: &Out, m: &ark::ir::Module) {
         let t = &rec.traces[&i];
         let replayed = ark::trace::replay(m, &t.steps);
         claim(&format!("trace/live/{name}.json replays: {replayed:?}"), replayed.is_ok());
-        out.write_live(&format!("trace/live/{name}.json"), &ark::trace::write(m, &from(i), &t.steps, &[]));
+        out.write(&format!("trace/live/{name}.json"), &ark::trace::write(m, &from(i), &t.steps, &[]));
     }
     // The partitioned device's life with the view of its first live output
     // changed: a runner must fail it.
@@ -404,7 +414,7 @@ fn traces(out: &Out, m: &ark::ir::Module) {
     f.insert("live".into(), Value::from(vec![Value::text("not the room")]));
     *o = Value::from(f);
     claim("trace/live/falsify fails to replay", ark::trace::replay(m, &steps).is_err());
-    out.write_live(
+    out.write(
         "trace/live/falsify/the-view-changed.json",
         &ark::trace::write(m, &from(1), &steps, &[("expect", "\"fail\"".into())]),
     );
