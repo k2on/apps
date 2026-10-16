@@ -7,6 +7,7 @@
 //     harken-peer-kt --dir DIR --alone [--user NAME]          its own authority
 //       [--pump-ms 50] [--ping-ms 20000] [--backoff-ms 500,30000]
 //       [--auth-patience-ms N] [--module FILE] [--roles ROLE,ROLE]
+//       [--device KIND,NAME,CAN_PLAY]
 //
 // The flags, the commands and the answers are the reference's, line for line;
 // its first page is the documentation, and this file says only where it is
@@ -32,11 +33,13 @@
 // cursor counts as still.
 package dev.harken.peer
 
+import dev.arkdb.DeviceDecl
 import dev.arkdb.Hash
 import dev.arkdb.Hex
 import dev.arkdb.Id
 import dev.arkdb.Json
 import dev.arkdb.JsonError
+import dev.arkdb.Kind
 import dev.arkdb.Value
 import dev.arkdb.client.Auth
 import dev.arkdb.client.AuthError
@@ -59,6 +62,7 @@ private const val USAGE =
     """usage: harken-peer-kt --dir DIR (--server URL [--user NAME] | --alone [--user NAME])
                       [--pump-ms 50] [--ping-ms 20000] [--backoff-ms 500,30000]
                       [--auth-patience-ms N] [--module FILE] [--roles ROLE,ROLE]
+                      [--device KIND,NAME,CAN_PLAY]
 Commands are JSON lines on stdin; see harken/server/src/bin/harken-peer.rs."""
 
 /** What the command line says. */
@@ -72,6 +76,8 @@ internal data class Flags(
     val patience: Patience,
     val module: File?,
     val roles: List<String>,
+    /** `--device`: what this peer declares itself as at `hello` (`docs/plan-live.md`). */
+    val device: DeviceDecl? = null,
 )
 
 internal class FlagError(what: String) : Exception(what)
@@ -86,6 +92,7 @@ internal fun flags(args: List<String>): Flags {
     var patience = Patience.DEFAULT
     var module: File? = null
     var roles = emptyList<String>()
+    var device: DeviceDecl? = null
     val it = args.iterator()
     fun next(what: String): String = if (it.hasNext()) it.next() else throw FlagError(what)
     fun ms(name: String): Long =
@@ -118,6 +125,22 @@ internal fun flags(args: List<String>): Flags {
                         .split(',')
                         .map { it.trim() }
                         .filter { it.isNotEmpty() }
+            "--device" -> {
+                // The kind before the first comma, whether it can play after the last, and the
+                // name — which may hold commas of its own — between.
+                val v = next("--device needs KIND,NAME,CAN_PLAY")
+                val first = v.indexOf(',')
+                val last = v.lastIndexOf(',')
+                if (first < 0 || last == first) throw FlagError("--device takes KIND,NAME,CAN_PLAY")
+                val canPlay =
+                    when (v.substring(last + 1)) {
+                        "true" -> true
+                        "false" -> false
+                        else -> throw FlagError("--device's CAN_PLAY is true or false")
+                    }
+                device =
+                    DeviceDecl("", v.substring(0, first), v.substring(first + 1, last), canPlay)
+            }
             "-h",
             "--help" -> throw FlagError(USAGE)
             else -> throw FlagError("unexpected argument $a\n$USAGE")
@@ -126,7 +149,7 @@ internal fun flags(args: List<String>): Flags {
     val d = dir ?: throw FlagError("--dir is required\n$USAGE")
     if (alone && server != null) throw FlagError("--alone has no server")
     if (!alone && server == null) throw FlagError("--server or --alone\n$USAGE")
-    return Flags(d, server, user, alone, pump, timing, patience, module, roles)
+    return Flags(d, server, user, alone, pump, timing, patience, module, roles, device)
 }
 
 // -- the login, remembered under DIR ------------------------------------------------
@@ -193,6 +216,13 @@ internal sealed class Cmd {
 
     object Leave : Cmd()
 
+    data class Call(val live: String, val transition: String, val input: Map<String, Value>) :
+        Cmd()
+
+    data class Live(val name: String) : Cmd()
+
+    object LiveRefusals : Cmd()
+
     object Persist : Cmd()
 
     object Quit : Cmd()
@@ -256,6 +286,17 @@ internal fun parse(line: String): Cmd {
                     else -> text("user")
                 })
         "leave" -> Cmd.Leave
+        "call" ->
+            Cmd.Call(
+                text("live"),
+                text("transition"),
+                when (val x = m["input"]) {
+                    is Value.VStruct -> x.fields
+                    null -> emptyMap()
+                    else -> throw ParseError("`input` is an object")
+                })
+        "live" -> Cmd.Live(text("name"))
+        "live_refusals" -> Cmd.LiveRefusals
         "persist" -> Cmd.Persist
         "quit" -> Cmd.Quit
         else -> throw ParseError("no command ${Json.quoted(c)}")
@@ -327,7 +368,11 @@ internal class Headless(f: Flags, domain: Domain) {
                     Options.server(login.user.id, login.session, login.token)
                 } else Options.signedOut()
             }
-        peer = Peer.open(domain, DirStorage(File(dir, "replica")), opts.withTiming(f.timing))
+        peer =
+            Peer.open(
+                domain,
+                DirStorage(File(dir, "replica")),
+                opts.withTiming(f.timing).let { o -> f.device?.let(o::withDevice) ?: o })
         peer.setRoles(loginRoles + roles)
         // Before the link exists, so it and every one after hands this to its socket.
         peer.setWaker { events.put(WAKE) }
@@ -510,6 +555,28 @@ internal class Headless(f: Flags, domain: Domain) {
                 } catch (e: Exception) {
                     Answer.refused(why(e))
                 }
+            is Cmd.Call ->
+                try {
+                    val kind = peer.call(cmd.live, cmd.transition, cmd.input)
+                    Answer.ok(true)
+                        .text("kind", if (kind == Kind.Ordered) "ordered" else "ephemeral")
+                } catch (e: Exception) {
+                    Answer.refused(why(e))
+                }
+            is Cmd.Live -> {
+                val st = peer.liveStatus(cmd.name)
+                Answer()
+                    .raw("value", peer.live(cmd.name)?.let(Json::json) ?: "null")
+                    .text("device", peer.ctx.session)
+                    .num("seq", st?.seq ?: 0)
+                    .num("pending", (st?.pending ?: 0).toLong())
+                    .raw("synced", (st?.synced ?: false).toString())
+            }
+            is Cmd.LiveRefusals ->
+                Answer()
+                    .raw(
+                        "refusals",
+                        Json.array(peer.takeLiveRefusals().map { Json.quoted(it.reason) }))
             is Cmd.Persist,
             is Cmd.Quit -> {
                 pump()
@@ -625,7 +692,9 @@ private fun reads(cmd: Cmd): Boolean =
         is Cmd.Rejections,
         is Cmd.StandingOf,
         is Cmd.Wait,
-        is Cmd.Settle -> true
+        is Cmd.Settle,
+        is Cmd.Live,
+        is Cmd.LiveRefusals -> true
         else -> false
     }
 

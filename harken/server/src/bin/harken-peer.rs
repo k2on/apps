@@ -5,7 +5,14 @@
 //! harken-peer --dir DIR --alone [--user NAME]          its own authority
 //!   [--pump-ms 50] [--ping-ms 20000] [--backoff-ms 500,30000]
 //!   [--auth-patience-ms N] [--module FILE] [--roles ROLE,ROLE]
+//!   [--device KIND,NAME,CAN_PLAY]
 //! ```
+//!
+//! `--device` declares this peer a device of the account's live state at
+//! `hello` (`docs/plan-live.md`): `phone,Phone,true` is a phone called Phone
+//! that can play. Its id is its login's session, so a device is a login, as
+//! every client declares it. Without it the peer is no device, holds no live
+//! state, and says the bytes it always did.
 //!
 //! `--roles` names roles this device's `Ctx` carries beside the ones its
 //! login says (`docs/plan-auth.md`): a peer alone, or signed out, has no
@@ -73,6 +80,12 @@
 //! {"cmd":"join","server":URL,"user":"…"}   {"ok":b,"pending":K,…} — alone → that server;
 //!                              without `user`, signed out
 //! {"cmd":"leave"}              {"ok":b,"cursor":N} — the server → alone
+//! {"cmd":"call","live":"listening","transition":"pause","input":{}}
+//!                              {"ok":true,"kind":"ordered|ephemeral"} | {"ok":false,"why":"…"}
+//!                              — previewed at once, and sent if linked
+//! {"cmd":"live","name":"listening"}
+//!                              {"value":…|null,"device":"…","seq":N,"pending":K,"synced":b}
+//! {"cmd":"live_refusals"}      {"refusals":["…"]} — the server's, since last asked
 //! {"cmd":"persist"}            {"ok":true}  — a pump and a write, now
 //! {"cmd":"quit"}               {"ok":true}, then exit 0 after a persist
 //! ```
@@ -105,6 +118,7 @@ const USAGE: &str =
     "usage: harken-peer --dir DIR (--server URL [--user NAME] | --alone [--user NAME])
                    [--pump-ms 50] [--ping-ms 20000] [--backoff-ms 500,30000]
                    [--auth-patience-ms N] [--module FILE] [--roles ROLE,ROLE]
+                   [--device KIND,NAME,CAN_PLAY]
 Commands are JSON lines on stdin; see the source's first page.";
 
 /// What the command line says.
@@ -119,6 +133,8 @@ struct Flags {
     patience: Patience,
     module: Option<PathBuf>,
     roles: Vec<String>,
+    /// `--device`: what this peer declares itself as at `hello`.
+    device: Option<ark::live::state::DeviceDecl>,
 }
 
 fn flags(args: &[String]) -> Result<Flags, String> {
@@ -132,6 +148,7 @@ fn flags(args: &[String]) -> Result<Flags, String> {
         patience: Patience::DEFAULT,
         module: None,
         roles: vec![],
+        device: None,
     };
     let mut dir = None;
     let mut it = args.iter();
@@ -182,6 +199,22 @@ fn flags(args: &[String]) -> Result<Flags, String> {
                     .filter(|r| !r.is_empty())
                     .map(str::to_string)
                     .collect()
+            }
+            "--device" => {
+                let v = it.next().ok_or("--device needs KIND,NAME,CAN_PLAY")?;
+                // The kind before the first comma, whether it can play after the last, and
+                // the name — which may hold commas of its own — between.
+                let (Some((kind, rest)), true) = (v.split_once(','), v.matches(',').count() >= 2)
+                else {
+                    return Err("--device takes KIND,NAME,CAN_PLAY".into());
+                };
+                let (name, can) = rest.rsplit_once(',').expect("two commas");
+                let can_play = match can {
+                    "true" => true,
+                    "false" => false,
+                    _ => return Err("--device's CAN_PLAY is true or false".into()),
+                };
+                f.device = Some(ark::live::state::DeviceDecl::new("", kind, name, can_play));
             }
             "-h" | "--help" => return Err(USAGE.into()),
             other => return Err(format!("unexpected argument {other}\n{USAGE}")),
@@ -279,6 +312,15 @@ enum Cmd {
         user: Option<String>,
     },
     Leave,
+    Call {
+        live: String,
+        transition: String,
+        input: Args,
+    },
+    Live {
+        name: String,
+    },
+    LiveRefusals,
     Persist,
     Quit,
 }
@@ -348,6 +390,19 @@ fn parse(line: &str) -> Result<Cmd, String> {
             },
         },
         "leave" => Cmd::Leave,
+        "call" => Cmd::Call {
+            live: text("live")?,
+            transition: text("transition")?,
+            input: match m.get("input") {
+                Some(Value::Struct(a)) => (**a).clone(),
+                Some(_) => return Err("`input` is an object".into()),
+                None => Args::new(),
+            },
+        },
+        "live" => Cmd::Live {
+            name: text("name")?,
+        },
+        "live_refusals" => Cmd::LiveRefusals,
         "persist" => Cmd::Persist,
         "quit" => Cmd::Quit,
         other => return Err(format!("no command {other:?}")),
@@ -457,6 +512,10 @@ impl Headless {
             (None, false) => unreachable!("flags() requires one"),
         }
         .with_timing(f.timing.clone());
+        let opts = match &f.device {
+            Some(d) => opts.with_device(d.clone()),
+            None => opts,
+        };
         let mut peer = Peer::open_path(domain, f.dir.join("replica"), opts)
             .map_err(|e| format!("opening {}: {e}", f.dir.display()))?;
         peer.set_roles(roles.iter().chain(&f.roles).cloned());
@@ -775,6 +834,43 @@ impl Headless {
                 }
                 Err(e) => Answer::refused(e),
             },
+            Cmd::Call {
+                live,
+                transition,
+                input,
+            } => match self.peer.call(&live, &transition, input) {
+                Ok(kind) => Answer::ok(true).text(
+                    "kind",
+                    match kind {
+                        ark::ir::ordering::Kind::Ordered => "ordered",
+                        ark::ir::ordering::Kind::Ephemeral => "ephemeral",
+                    },
+                ),
+                Err(e) => Answer::refused(e),
+            },
+            Cmd::Live { name } => {
+                let st = self.peer.live_status(&name).unwrap_or_default();
+                Answer::default()
+                    .raw(
+                        "value",
+                        self.peer
+                            .live(&name)
+                            .map_or("null".into(), |v| json::json(&v)),
+                    )
+                    .text("device", &self.peer.ctx().session)
+                    .num("seq", st.seq)
+                    .num("pending", st.pending as i64)
+                    .raw("synced", st.synced.to_string())
+            }
+            Cmd::LiveRefusals => {
+                let all: Vec<String> = self
+                    .peer
+                    .take_live_refusals()
+                    .into_iter()
+                    .map(|r| json::quoted(&r.reason))
+                    .collect();
+                Answer::default().raw("refusals", format!("[{}]", all.join(",")))
+            }
             Cmd::Persist | Cmd::Quit => {
                 self.pump();
                 match self.peer.persist() {
@@ -840,6 +936,8 @@ fn run(f: Flags) -> Result<(), String> {
                         | Cmd::Standing { .. }
                         | Cmd::Wait { .. }
                         | Cmd::Settle { .. }
+                        | Cmd::Live { .. }
+                        | Cmd::LiveRefusals
                 );
                 (h.handle(cmd), quit, reads)
             }
@@ -927,6 +1025,33 @@ mod tests {
         assert!(flags(&a(&["--dir", "/d"])).is_err());
         assert!(flags(&a(&["--dir", "/d", "--alone", "--what"])).is_err());
         assert!(flags(&a(&["--dir", "/d", "--alone"])).unwrap().alone);
+        assert_eq!(
+            flags(&a(&[
+                "--dir",
+                "/d",
+                "--alone",
+                "--device",
+                "phone,Ana's phone, with a comma,true"
+            ]))
+            .unwrap()
+            .device,
+            Some(ark::live::state::DeviceDecl::new(
+                "",
+                "phone",
+                "Ana's phone, with a comma",
+                true
+            )),
+            "the name may hold commas; the last field is whether it can play"
+        );
+        assert!(flags(&a(&["--dir", "/d", "--alone", "--device", "phone,Phone"])).is_err());
+        assert!(flags(&a(&[
+            "--dir",
+            "/d",
+            "--alone",
+            "--device",
+            "phone,Phone,maybe"
+        ]))
+        .is_err());
     }
 
     /// Every command reads, in the dialect and plainly; what is not a
@@ -993,7 +1118,23 @@ mod tests {
                 user: None
             }
         );
+        assert_eq!(
+            parse(r#"{"cmd":"call","live":"listening","transition":"seek","input":{"ms":5000}}"#)
+                .unwrap(),
+            Cmd::Call {
+                live: "listening".into(),
+                transition: "seek".into(),
+                input: [("ms".to_string(), Value::Int(5000))].into(),
+            }
+        );
+        assert_eq!(
+            parse(r#"{"cmd":"live","name":"listening"}"#).unwrap(),
+            Cmd::Live {
+                name: "listening".into()
+            }
+        );
         for (line, simple) in [
+            ("live_refusals", Cmd::LiveRefusals),
             ("status", Cmd::Status),
             ("hash", Cmd::Hash),
             ("rejections", Cmd::Rejections { all: false }),

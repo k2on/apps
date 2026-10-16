@@ -1,7 +1,9 @@
 //! The fleet, mixed across runtimes, with Kotlin peers (`docs/plan-phones.md`
 //! round 4, `docs/plan-fleet.md` §6): the six scenarios of
 //! `tests/support/mixed.rs`, each with the Kotlin client's `harken-peer-kt`
-//! beside Rust peers. The scenarios are one body for every runtime
+//! beside Rust peers — and a seventh, the listening session across the two
+//! runtimes (`docs/plan-live.md` phase 3), which the Swift client's peer
+//! does not speak yet. The scenarios are one body for every runtime
 //! (`tests/fleet_swift.rs` runs the same six with the Swift client's); what
 //! is the Kotlin peer's own here is how each scenario was falsified for it.
 //!
@@ -98,5 +100,21 @@ fn k5_old_kotlin_peer_new_server() {
 fn k6_a_kotlin_peer_partial_under_a_scoped_module() {
     if let Some(rt) = KOTLIN.or_skip("k6 partial under a scope") {
         mixed::partial_under_a_scope(&rt);
+    }
+}
+
+/// **K7** ([`mixed::listening_across_runtimes`]).
+///
+/// Falsified with a `harken-peer-kt` that declared no device (`--device`
+/// read and dropped): the Kotlin peer held no live state, its `live`
+/// answered null and unsynced, and the scenario failed at its first step,
+/// waiting for both devices to be here. And with a Kotlin client that did
+/// not say its pending live calls again on a new connection
+/// (`Watch.connected`): the play pressed into the black hole never landed,
+/// and the laptop saw the phone back with the sound, paused, for good.
+#[test]
+fn k7_the_listening_session_across_runtimes() {
+    if let Some(rt) = KOTLIN.or_skip("k7 the listening session across runtimes") {
+        mixed::listening_across_runtimes(&rt);
     }
 }

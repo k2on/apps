@@ -347,6 +347,19 @@ pub struct Status {
     pub behind: Option<bool>,
 }
 
+/// A peer's view of one live state (`{"cmd":"live"}`): the value, null
+/// before anything is known of it; this device's id; the instance's
+/// confirmed sequence, its own calls pending, and whether the server's
+/// snapshot has come on this connection.
+#[derive(Clone, Debug)]
+pub struct Live {
+    pub value: Option<Value>,
+    pub device: String,
+    pub seq: i64,
+    pub pending: i64,
+    pub synced: bool,
+}
+
 /// `harken-peer` as a child process, dialling its own [`Proxy`].
 pub struct PeerProc {
     pub name: String,
@@ -667,6 +680,54 @@ impl PeerProc {
                 .collect(),
             other => panic!("rows: {other:?}"),
         }
+    }
+
+    /// `docs/plan-live.md` A transition of the live state `live`, called as
+    /// this peer's device: previewed at once, sent if linked. `Err` with the
+    /// preview's refusal.
+    pub fn call(
+        &mut self,
+        live: &str,
+        transition: &str,
+        input: ark::eval::Args,
+    ) -> Result<(), String> {
+        let a = self.ask(
+            "call",
+            vec![
+                ("live", Value::text(live)),
+                ("transition", Value::text(transition)),
+                ("input", Value::record(input.into_iter().collect())),
+            ],
+        );
+        if field(&a, "ok") == &Value::Bool(true) {
+            Ok(())
+        } else {
+            Err(text(field(&a, "why")))
+        }
+    }
+
+    /// The live state `name` as this peer's device sees it.
+    pub fn live(&mut self, name: &str) -> Live {
+        let a = self.ask("live", vec![("name", Value::text(name))]);
+        Live {
+            value: match field(&a, "value") {
+                Value::Null => None,
+                v => Some(v.clone()),
+            },
+            device: text(field(&a, "device")),
+            seq: int(field(&a, "seq")),
+            pending: int(field(&a, "pending")),
+            synced: field(&a, "synced") == &Value::Bool(true),
+        }
+    }
+
+    /// What the server refused of this peer's live calls since last asked.
+    pub fn live_refusals(&mut self) -> Vec<String> {
+        let a = self.ask("live_refusals", vec![]);
+        let Value::List(items) = field(&a, "refusals") else {
+            panic!("{a:?}")
+        };
+        items.iter().map(text).collect()
     }
 
     /// Every verdict this directory has had, `(id, reason)`.

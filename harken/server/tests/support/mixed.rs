@@ -620,3 +620,181 @@ pub fn partial_under_a_scope(rt: &Foreign) {
         "bob's union is not alice's"
     );
 }
+
+/// The listening session of one account, read off a peer: `None` until the
+/// peer has the server's snapshot of it on this connection.
+// Run by `fleet_kotlin.rs` alone: `harken-peer-swift` speaks no live state yet.
+#[allow(dead_code)]
+fn session(p: &mut PeerProc) -> Option<harken_domain::listening::read::Listening> {
+    let l = p.live(harken_domain::listening::read::STATE);
+    if !l.synced {
+        return None;
+    }
+    l.value
+        .as_ref()
+        .and_then(harken_domain::listening::read::Listening::from_value)
+}
+
+/// Wait for `p`'s view of the session to satisfy `ok`, or fail saying `what`.
+// Run by `fleet_kotlin.rs` alone: `harken-peer-swift` speaks no live state yet.
+#[allow(dead_code)]
+fn sees(
+    p: &mut PeerProc,
+    what: &str,
+    ok: impl Fn(&harken_domain::listening::read::Listening) -> bool,
+) {
+    let mut last = None;
+    let done = eventually(PATIENCE, || {
+        last = session(p);
+        last.as_ref().is_some_and(&ok)
+    });
+    assert!(
+        done,
+        "{} never saw {what}: {last:?}\n{}",
+        p.name,
+        tail(&p.stderr, 20)
+    );
+}
+
+/// **7. The listening session across runtimes** (`docs/plan-live.md`
+/// phase 3): a Rust peer and another runtime's, one account, each declared
+/// a device on the same `/sync` socket as its log. The Rust laptop starts a
+/// queue and is the output; it hands the sound to the other runtime's
+/// phone, which is *connecting* until it says it has started; the laptop
+/// pauses it, and the phone — the output — hears that as every device
+/// does, by the session. Then the phone's socket goes into a black hole:
+/// the server notices, the sound stays the phone's but *away* and paused,
+/// and the laptop sees exactly that. The phone presses play into the black
+/// hole — previewed, pending — and when the network comes back it stands
+/// again, has the sound back, and the play it pressed meanwhile is said
+/// again on the new connection and lands: playing, on the phone. Every
+/// step is read off both devices, so a runtime that read a frame
+/// differently, or ran a transition to another state, fails on the step
+/// that parts them.
+// Run by `fleet_kotlin.rs` alone: `harken-peer-swift` speaks no live state yet.
+#[allow(dead_code)]
+pub fn listening_across_runtimes(rt: &Foreign) {
+    use harken_domain::listening::read::{input, Clock, Output, Track};
+    let f = Fleet::new(&format!("{}7-listening", rt.tag));
+    let t = Instant::now();
+    let mut laptop = f.peer_stopped("laptop", Some("alice"));
+    laptop.args = vec!["--device".into(), "computer,Laptop,true".into()];
+    laptop.start();
+    let mut phone = f.peer_stopped(rt.tag, Some("alice"));
+    phone.args = vec!["--device".into(), format!("phone,{} phone,true", rt.name)];
+    phone.foreign(&rt.bin);
+    phone.start();
+    let me = phone.live(harken_domain::listening::read::STATE).device;
+    let lap = laptop.live(harken_domain::listening::read::STATE).device;
+    assert!(
+        !me.is_empty() && me != lap,
+        "two devices, each its login: {me} {lap}"
+    );
+    for p in [&mut laptop, &mut phone] {
+        sees(p, "both devices here", |s| {
+            s.devices.len() == 2 && s.device(&me).is_some_and(|d| d.can_play)
+        });
+    }
+    measured(
+        &rt.said(7, "a Rust peer and a {} peer stand in one session"),
+        t.elapsed(),
+    );
+
+    let track = |n: u8, title: &str| {
+        let mut id = [0u8; 16];
+        id[15] = n;
+        Track {
+            id,
+            title: title.into(),
+            creator: "Handel".into(),
+            album: "Water Music".into(),
+            duration_ms: 200_000,
+            file: format!("music/{title}.mp3"),
+        }
+    };
+    let queue = vec![track(1, "Air"), track(2, "Bourrée")];
+    laptop
+        .call(
+            "listening",
+            "start",
+            input::start(&queue, 0, 10_000, "#album/Water%20Music"),
+        )
+        .unwrap();
+    for p in [&mut laptop, &mut phone] {
+        sees(p, "the laptop playing", |s| s.outputs(&lap) && s.sounding());
+    }
+
+    let t = Instant::now();
+    laptop
+        .call("listening", "transfer", input::transfer(&me))
+        .unwrap();
+    for p in [&mut laptop, &mut phone] {
+        sees(p, "the sound on its way to the phone", |s| s.moving_to(&me));
+    }
+    assert_eq!(
+        laptop.call("listening", "started", input::at(1)),
+        Err("not the output".into()),
+        "only the device the sound is going to can say it has started"
+    );
+    phone
+        .call("listening", "started", input::at(12_000))
+        .unwrap();
+    for p in [&mut laptop, &mut phone] {
+        sees(p, "the phone the output, settled", |s| {
+            s.outputs(&me) && !s.moving_to(&me) && s.sounding()
+        });
+    }
+    measured(&rt.said(7, "the sound handed to the {} peer"), t.elapsed());
+
+    laptop.call("listening", "pause", input::none()).unwrap();
+    for p in [&mut laptop, &mut phone] {
+        sees(p, "paused on the phone", |s| {
+            s.outputs(&me)
+                && matches!(
+                    s.session.as_ref().map(|a| a.clock),
+                    Some(Clock::Paused { .. })
+                )
+        });
+    }
+
+    // The phone's socket into a black hole: the server notices, and the sound stays the phone's.
+    let t = Instant::now();
+    phone.proxy.blackhole();
+    sees(&mut laptop, "the phone away, keeping the sound", |s| {
+        matches!(s.output(), Some(Output::Away { id, .. }) if *id == me)
+            && s.device(&me).is_none()
+            && !s.sounding()
+    });
+    measured(
+        &rt.said(7, "the {} peer's black hole seen as away"),
+        t.elapsed(),
+    );
+    phone.call("listening", "play", input::none()).unwrap();
+    assert!(
+        phone.live("listening").pending >= 1,
+        "the play pressed into the black hole is pending"
+    );
+
+    let t = Instant::now();
+    phone.proxy.pass();
+    for p in [&mut laptop, &mut phone] {
+        sees(
+            p,
+            "the phone back, the output, and playing what it pressed meanwhile",
+            |s| s.device(&me).is_some() && s.outputs(&me) && s.sounding(),
+        );
+    }
+    assert!(
+        eventually(PATIENCE, || phone.live("listening").pending == 0),
+        "the play said again on the new connection, and answered"
+    );
+    assert!(phone.live_refusals().is_empty(), "and nothing refused");
+    let (a, b) = (session(&mut laptop).unwrap(), session(&mut phone).unwrap());
+    assert_eq!(
+        a.session.as_ref().map(|s| &s.queue),
+        b.session.as_ref().map(|s| &s.queue),
+        "one queue"
+    );
+    assert_eq!(a.output(), b.output(), "one output");
+    measured(&rt.said(7, "the {} peer back, with the sound"), t.elapsed());
+}
