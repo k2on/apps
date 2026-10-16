@@ -9,11 +9,11 @@ date by the rows a change touched.
 
 ```
 domain/    the domain, in the vocabulary of spec/AUTHORING.md (src/); harken.ark,
-           what it emits; listening.rs, the listening session's frames (never
-           the log)
-server/    ark-server with harken's own parts: the scanner, the listening desk,
-           the Home Assistant bridge, sign-in, /media, the web build; the NixOS
-           module (server/README.md)
+           what it emits; listening.rs, the listening session as a live state
+           (never the log) and the plays (the log)
+server/    ark-server with harken's own parts: the scanner, the Home Assistant
+           bridge, sign-in, /media, the web build; the NixOS module
+           (server/README.md)
 iced/      the desktop and browser client, on arkui and ark-client; the `demo`
            feature is the seeded library GitHub Pages publishes
 android/   the phone: Compose over the Kotlin client at spec v4, loading
@@ -33,10 +33,12 @@ ios/          SwiftUI over ArkDBClient and the printed Swift (ios/README.md)
 
 ## The domain
 
-Ten tables in one log: `media` and `song` (a track and what is true of it
-as a song), `album` and `person`, `work`, `movement`, `recording` and
-`credit` (a work is not a recording, and neither is an album), and
-`playlist` and `playlist_item`. Every reference is checked. `library` is
+Eleven tables in one log: `media` and `song` (a track and what is true of
+it as a song), `album` and `person`, `work`, `movement`, `recording` and
+`credit` (a work is not a recording, and neither is an album),
+`playlist` and `playlist_item`, and `play`, a track somebody heard. Every
+reference is checked, and `play` has none: it carries the track as it was
+heard, so a removed track keeps its plays. `library` is
 the router the scanner and the describing verbs are on; `playlists` has the
 `owned` middleware, which hands a body the playlist its input names if it
 is the caller's and refuses `not your playlist` otherwise.
@@ -66,6 +68,58 @@ differs from what the source emits.
 When `domain/src` changes:
 
     cd rust && cargo run -p harken-domain -- ../harken/domain/harken.ark
+
+## The listening session
+
+One per account, across every device of it: the queue, the track, whether
+it is playing and from where, and which device makes the sound. It is not
+the log — an afternoon of pauses and skips is worth nothing tomorrow — but
+the domain's live state (`domain/src/listening.rs`, `docs/plan-live.md`):
+written once beside the mutations, held by the server, sequenced per
+account on `/sync`, kept across a restart paused and with no output, and
+run natively by the server and the desktop and interpreted from
+`harken.ark` by anything else.
+
+**The state is the instruction.** Every button on every device is a
+transition — `start`, `play`, `pause`, `seek`, `skip`, `jump`,
+`transfer`, `stop` — and the device the session names as its output makes
+its player agree with the session; every other device is silent and draws
+it. The output says only what happens to it: `started` when a hand-off
+lands, `advance` when a track ends, `stalled` when the sound stops by
+itself, `release` when it lets the sound go. A playing clock carries the
+server's time it started from, so every device counts the position itself
+and nothing heartbeats.
+
+- **The output survives its socket**: a device that goes keeps the sound,
+  away and paused, and has it back when it returns. Arriving takes
+  nothing.
+- **A press that means a sound** — play, a skip, a track — takes it from an
+  output that is not there, for a device that can play. A track pressed
+  while nothing is sounding plays on the device it was pressed on.
+- **Coming back** (decided): a device that was offline is its own session.
+  If the session is sounding elsewhere when it reconnects, its own sound
+  stops and it is a controller; if nothing is sounding and it was playing,
+  what it was doing becomes the session.
+- **The desktop cannot make a sound** (no audio device is wired up), so it
+  is a remote control and never the output; the browser can be.
+- **A speaker in the house is a device of the session**: the server's Home
+  Assistant bridge stands each configured `media_player` in every session
+  a client is in, hands it the queue, and says what it does
+  (`server/README.md`).
+- **`d`** is the picker — every device, the one away drawn and not a target,
+  no row that stops it everywhere, this device ticked while nothing plays —
+  and **`D`** every number the session holds: the instance's sequence and
+  pending calls, the server's clock offset, the devices, every scrubber
+  being dragged (the one ephemeral field), the calls refused.
+
+**A play is the log's**: `record_play`, authored by the output once a
+track has played thirty seconds or half its length, once per play — so
+`last_played()` and `recently_played()` are there offline and the same on
+every device.
+
+It used to be none of this: a hand-written protocol over opaque frames, a
+`Desk` in the server deciding where each command went, a second socket at
+`/listen` before that, and a copy of the client half in each client.
 
 ## Building
 
@@ -181,7 +235,7 @@ the NixOS module serves it by default.
 the log's snapshot, then its journal as long as it was once the snapshot
 had been read, so what the server appends meanwhile is not in the copy
 and the copy is the log at one moment. Then the cursors, the sign-in
-sessions, the rooms and the modules run. The scanner's `library/`
+sessions, the kept listening sessions and the modules run. The scanner's `library/`
 replica is not copied; it is a peer, and catches up from the log. Nor are
 its prints or the covers it took out of files: restored, it reads every
 file once and writes them again.
@@ -341,3 +395,10 @@ module.
 No desktop window has been opened: the browser build has been drawn in
 headless Chromium, and the desktop only driven through its tests. Nothing
 here has met a real Home Assistant or a real OpenID Connect provider.
+The listening session has run between real sockets, peers and the bridge
+against a stand-in house, and the reconcilers against a stand-in player;
+no browser has played a track through it and no speaker has been handed
+one. The Android app has not moved onto the live state yet
+(`docs/plan-live.md` phase 3), so a phone has no listening session against
+this server; and a speaker's plays are not recorded, since the bridge is
+not a peer of the account.

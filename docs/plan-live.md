@@ -504,3 +504,249 @@ and equal counters, a gap asking a resync and applying nothing, a refusal
 taking a call out of pending, the throttle, the server's clock, and both
 orders on one `applied` — and `Printed` in both, falsified by printing
 `can_play` as `canPlay`.
+
+## Landed: phase 2
+
+Harken's session in the domain (step 2 of the order of work), in
+`harken/domain`, `harken/server` and `harken/iced`. The hand-written
+protocol (`harken_domain::listening`'s frames), the server's `Desk` and its
+`Watch`, and the clients' copy of the client half are gone; the session is
+a live state, the server holds no rule of it, and the desktop and the web
+reconcile against it. Plays are in the log.
+
+**The state** (`harken_domain::listening`, a router of its own after the
+playlists, so its helpers come after every function):
+
+```
+listening {
+    devices: PerDevice<Device>,          // ordered, kept by on_join and on_leave
+    scrub:   PerDevice<Int>   ephemeral, // where each device's scrubber is dragged to
+    session: idle {}
+           | active { at, clock, from, output, queue: NonEmpty<track> },
+}
+clock  = paused { at_ms } | playing { at_ms, since }   // since: the server's clock
+output = device { id, moving } | away { id, name } | nowhere {}
+track  = { album, creator, duration_ms, file, id: Id<media>, title }
+```
+
+**The transitions**, each with the guards that refuse it:
+
+| transition | does | refused |
+|---|---|---|
+| `start(queue, at, position, from)` | this queue, from here, playing; while something is sounding the output keeps it, else the caller takes it if it can play, else a paused output that is here keeps it | `at` past the queue; nothing sounding, nothing reachable, and the caller cannot play |
+| `play` | resume, on the output where it is here, else on the caller | nothing queued; nothing reachable and the caller cannot play |
+| `pause` | the clock stops where it is; nobody takes anything | nothing queued |
+| `seek(ms)` | the clock at `ms`, playing on if it was | nothing queued |
+| `skip(±1)` | the next or previous track from its start, playing; before the first is the first; a press that means a sound | `by` not ±1; nothing after the last; as `play` |
+| `jump(index)` | that track from its start, playing; a press that means a sound | the index past the queue; as `play` |
+| `transfer(to)` | the output becomes `to`, `moving` until it says `started`; the device that already has it, settled, is nothing | nothing queued; `to` not here or cannot play |
+| `stop` | `idle` | — |
+| `started(at_ms)` | the output has the hand-off: `moving` ends and the clock re-anchors at `at_ms` | not the output |
+| `advance(from_track)` | the output's track ended: the next, or paused at the start of the last; about a track no longer playing, nothing | not the output |
+| `stalled(at_ms)` | the output stopped by itself: paused there | not the output |
+| `release` | the output lets the sound go: paused, `nowhere`, the queue kept | not the output |
+| `scrub(at_ms?)` | ephemeral: this device's slot, or empty | — |
+| `on_join(device)` | the device is in `devices`; an `away` output whose id it is gets the sound back, paused | — |
+| `on_leave(device)` | out of `devices`; the output leaving is `away` (named) and the clock pauses | — |
+| `on_restore` | `devices` empty; paused where it had got to (never past the end of the track), `nowhere` | — |
+
+**The `Desk`'s four rules, as properties of these**:
+
+- *Exactly one output*: `active.output` is one value.
+- *The output survives its socket*: `on_leave` makes it `away` and pauses;
+  `on_join` gives it back, still paused.
+- *A command goes to the output*: a command is a state change — `pause`,
+  `seek` and `transfer` move nothing but the session — and the output's
+  reconciler obeys it. Nothing routes anything.
+- *A press that means a sound takes an output that cannot be reached;
+  arriving takes nothing*: `play`, `skip` and `jump` use `pressed`, which
+  keeps an output that is here and otherwise hands it to the caller;
+  `on_join` takes nothing.
+
+Every case `harken/server/tests/listening.rs` held the `Desk` to is a test
+of these transitions in `harken/domain/tests/listening.rs`, run by the
+engine's own sans-io server (`ark::live::state::Desk`) twice over — once
+running the domain's Rust, once interpreting its emit — and the two held
+to the same frames and the same state after every step.
+
+**The decided reconnect rule** is the client's (`harken/iced/src/
+listening.rs`). A device unlinked, or linked before the server's snapshot
+on that connection, is its own session and calls nothing. Coming back: if
+the session is sounding elsewhere its own sound stops; if not, and it was
+playing on its own, it says `start` with its queue, track and position —
+and `start` hands the caller the sound exactly when nothing is sounding,
+which is the same rule for a track pressed.
+
+**The bridge as a participant** (`harken/server/src/assistant.rs`). The
+thread reads every `listening` instance from the hub (`Hub::live`), stands
+each configured speaker as a device (`HubHandle::participate`, kind
+`speaker`, `can_play`) in each one a client is in and in no other — so a
+speaker never keeps a session's presence open — and detaches it when the
+last client goes, pausing what it held there. A participant's frames only
+wake the thread. A pure `Bridge` is handed each session and what the house
+said: a session naming the speaker its output is a hand-off of the whole
+queue from where it was (`clear_playlist`, `play_media` `play` then
+`add`s, `media_seek` after the enqueue, `media_pause` if paused); a
+change of the session after that is `media_pause`, `media_play` or
+`media_seek`, and another queue or place a fresh hand-off; what the
+speaker did is said as it — `started` once it plays what it was handed,
+`advance` or `jump` when it moves itself, `stalled` and `play` when it is
+paused or resumed by hand, `seek` when it is three seconds from where the
+session counts it. `SETTLE` (five polls) before a hand-off that does not
+start is let go, `LAPSE` (three) for one that was playing, and `QUIET`
+(two) after the bridge told the speaker anything, during which a
+difference is the house catching up; letting go is `release`, said as the
+speaker, and printed with what it reported. A session that takes a
+speaker another holds releases the other, once.
+
+**`record_play(track, title, creator, album, duration_ms, file, from)`**,
+the `played_ms` an auto: the device making the sound authors it once a
+track it loaded has played thirty seconds or half its length, whichever is
+first, once per load. A play row (`play`) carries the track as it was
+heard — the media id as text, no reference — so `remove_media` is not
+refused a played track and a play of a track this replica lacks is not
+refused either. `last_played()` and `recently_played()` read it newest
+first, the caller's alone. The log surface moved additively (`arkc check`:
+"every retained entry still applies"); `record_play` is pinned at its
+first hash in `agreement.rs`.
+
+**The desktop and the web.** `Remote::reconcile` after every update: the
+output loads the session's track at its clock's position (copying the
+queue as its own), resumes and pauses with the clock, seeks when it is two
+seconds off, says `started` once a hand-off is loaded, `advance` once per
+end, `stalled` after two and a half seconds asked to play and silent, and
+`record_play`; every other device is silent. Every button, key, row and
+lock-screen button is a transition (`App::press`), or, unlinked, a
+command to the local player. The bar draws the session's track and its
+clock against `server_now`; the slider says `scrub` while dragged
+(throttled, ephemeral) and `seek` on release. `D` shows the link, the
+instance's sequence, pending and synced, the server offset, the calls,
+refusals and plays, the session, the devices and every scrub slot. The
+picker keeps 23c40a0: no stop row, this device the default while nothing
+plays; an away output is drawn and not a target.
+
+**Tested**, each test falsified once, and the doc comment beside each says
+how. `harken/domain/tests/listening.rs`, every case the `Desk` was held
+to and the new ones, on two desks at once: the sound staying with a device
+whose socket went and coming back to it paused, arriving taking nothing,
+a command as a state change, only a press that means a sound taking it
+from a device that has gone, a device that cannot be heard never taking
+it, a track pressed playing where the sound is or here, a speaker picked
+up where the track was, no hand-off to a device gone or mute, a second
+connection keeping a device here, the output's own transitions refused to
+anyone else, a restart paused with no output and nobody here, `stop`, two
+accounts, a call nobody can read, and the scrub, ephemeral and never
+kept. `harken-iced`'s `listening` tests drive the reconciler against a
+stand-in player through real peers and the engine's sans-io server: the
+output obeys and nothing else sounds, a track's end said once, a play
+recorded once by the output alone, and both branches of coming back.
+`harken/server/tests/bridge.rs`, over real sockets with a stand-in house:
+a speaker the whole way round, a speaker taken or sent elsewhere let go
+out loud, paging that leaves the session alone, and a browser, a desktop
+and a speaker in one session with the decided rule both ways;
+`assistant.rs`'s own tests hold the `Bridge`'s rules as values.
+`harken/server/tests/plays.rs`: plays made offline reach every device
+when the device comes back, newest first and the caller's alone.
+`agreement.rs` holds `record_play`, `last_played` and `recently_played`
+native against interpreted.
+
+### Decisions phase 2 had to make
+
+- **A device that was the output, coming back, is the output again** —
+  paused, until somebody presses play. Arriving takes nothing; this is the
+  `Desk`'s "the output survives its socket", which a device's departure
+  and return as two hooks has to say.
+
+- **`output` has a third variant, `nowhere`.** The plan's `Device | Away`
+  cannot say "paused, no output", which `on_restore` must, and which a
+  released speaker leaves.
+- **`away` carries the device's name.** It is the one row a picker most
+  needs to draw, and the device is no longer in `devices` to be named from.
+- **`release` is a transition of its own**, guarded to the output. `stop`
+  from a speaker would stop a session that had already moved its sound
+  elsewhere.
+- **`stop` is `idle`**: nothing queued. A pause is `pause`.
+- **`start` hands the caller the sound when nothing is sounding**, where
+  `play`, `skip` and `jump` hand it only when the output cannot be reached.
+  A track pressed on the phone while the laptop is paused plays on the
+  phone; play pressed there plays the laptop. That is the decided rule's
+  "play pressed on it while nothing is playing", and it makes the
+  reconnect rule's second branch an ordinary `start`.
+- **`from` is a route** (`album/Water Music`), carried on the session and
+  on each play, for a screen to say where a track was played from.
+- **A play's time is an auto**, not an argument: drawn once, at the
+  device, frozen in the entry, like every other clock a mutation reads.
+- **A play is self-contained** (above), and once per *load* of a track.
+- **`scrub` has no UI beyond the desktop's own slider and `D`.**
+- **The bridge reads instances from the hub** rather than keeping a client
+  copy of each from its frames: it is in the hub's process, and a read is
+  the state the server holds.
+- **A repeated `hello` stays paging and nothing else.** Answering one with
+  a snapshot was considered (a client that took it for a new connection
+  would otherwise wait for one), and left: no client does that, and every
+  live trace would have moved.
+
+### Found on the way, in the engine
+
+- **A native record of some of another's fields** (`Away { id, name }` off
+  a device) came out the whole other record: `authoring::cx::whole` handed
+  back a struct when every field was read off it, without asking whether
+  it had others. Natively `on_leave` refused ("no field can_play") where
+  the interpreter took it — found by the two desks disagreeing. Fixed, and
+  `rust/ark/tests/live.rs` holds it.
+- **The trace player held live state for a client that declared no
+  device**, which `RUNNERS.md` already said it must not; harken's log-only
+  traces would have reported an empty `live` once harken had a state.
+- **`ark_client::Peer::live_status`**: the instance's sequence, pending and
+  whether this connection's snapshot has come — what a reconciler needs to
+  know whether the view is the server's yet, and what `D` draws.
+- **`ark_server::Hub::live`**: the instances, for server code that stands
+  in them.
+- **A snapshot written under a schema since grown by a table did not
+  open.** The state hash names every table of the schema, so a peer
+  alone's `log` written before `play` existed was checked over a table it
+  never had and refused — "the snapshot's hash does not match its rows" —
+  which `checks.versions` scenario 5b found against `v4-rows`, the last
+  time it ran against a pinned revision. The server's own snapshot was
+  never at risk (`persist::rehome` hashes it again under a new module);
+  an alone directory has no such step. `ark::journal` now checks a
+  snapshot over the tables it names, where those are some of the
+  schema's, and holds it hashed under this one; `canon::decode_rows`
+  hands back every table a snapshot names, an empty one as an empty list,
+  so that the names are there to check by. `journal::tests::
+  a_snapshot_written_before_a_table_was_added_opens` holds it.
+
+### What went with the protocol
+
+The opaque rooms nothing used any more (`ark::live`'s `Machine`, `Rooms`,
+`arrive`, `speak` and `depart`; `ark-server`'s `Live`, `Echo`, `Quiet`,
+`Builder::live`, `HubHandle::stand` and `say`, and `live.cbor`;
+`ark_client::Peer`'s `say`, `say_value`, `heard` and `heard_values`, and
+`Status::heard_frames`) are gone, and `ark::protocol::Server` is no longer
+generic over a machine. The frames are not: `say` and `heard` are still
+read, and dropped, so that a peer of an older revision is not cut off by a
+server of this one (a frame that does not decode closes the socket) and a
+peer of this one is not cut off by an older server; nothing sends either.
+`/healthz`'s rooms are each account's open replica connections, which is
+what they counted. Kotlin and Swift dropped their halves of the API in
+phase 1b and decode the two frames as this does, so the vectors that pin
+the decoding, `protocol/client-say` and `protocol/server-heard`, stand
+(spec §14).
+
+### The versions matrix, emptied
+
+`v4-journal` and `v4-rows` were development revisions, not releases: the
+flake inputs and their lock entries are gone and `nix/versions.nix` is an
+empty list, its mechanism and comment kept, until a shipped revision is
+pinned. `checks.versions` then runs scenarios 6 and 7, which need none,
+and 1–5 say they are skipped and why; `packages.fleet-vm` has no
+`oldserver` and says its mixed subtests are skipped (`docs/plan-db.md`
+D1).
+
+### Not verified
+
+No browser has played a track through the session and no speaker has
+been handed one: the reconcilers ran against a stand-in player and the
+bridge against a stand-in house, between real sockets and real peers. A
+speaker's plays are not recorded — the bridge is not a peer of the
+account — and the Android app is phase 3's.
