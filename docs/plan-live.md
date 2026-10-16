@@ -1,7 +1,8 @@
 # Live state: a typed state machine per scope, beside the log
 
-Status: **decided**; phase 1, the spec and the engine, is built (see
-"Landed: phase 1" at the end). Supersedes the opaque live rooms of
+Status: **decided**; phases 1 (the spec and the engine), 1b (Kotlin and
+Swift), 2 (harken's session, the desktop and the web) and 3 (the Android
+app) are built — see the "Landed" sections at the end. Supersedes the opaque live rooms of
 spec §14 (`ark::live`, `ark_server::live`) for anything an app shares in
 real time, starting with harken's listening session.
 
@@ -750,3 +751,222 @@ been handed one: the reconcilers ran against a stand-in player and the
 bridge against a stand-in house, between real sockets and real peers. A
 speaker's plays are not recorded — the bridge is not a peer of the
 account — and the Android app is phase 3's.
+
+## Landed: phase 3
+
+The Android app (step 3 of the order of work), in `harken/android`,
+`kotlin/ark-client`, `kotlin/ark-android`, `kotlin/harken-peer` and the
+headless peer and the fleet in `harken/server`. The phone stands in the
+account's session on the same `/sync` socket as its log, can be its output
+through Media3, and controls it from everywhere: its buttons, its lock
+screen, a headset. Plays are the log's; Home's last played is the
+session's, or the log's.
+
+**Typed access.** `harken/android/app/src/main/kotlin/dev/harken/android/
+listening/Listening.kt` is `arkc gen kotlin harken.ark
+dev.harken.android.listening`, checked in, and `checks.harken-domain` holds
+it to that output byte for byte beside the `harken.ark` check it already
+had — so a domain change that moves a field of the session moves
+`harken.ark`, which fails the check until the file is printed again,
+rather than the phone reading a field that is no longer there. A package of
+its own, because the printed `Track` and `Session` would otherwise meet the
+app's library `Track`. Falsified by a one-byte edit of the printed file
+(`can_play` spelt `canPlay`): "not what arkc gen kotlin prints of
+harken.ark: print it again".
+
+**Joining.** `AppIdentity.device` (ark-android) is what an app declares at
+`hello`; `ArkHost` hands it to `ArkSession.open(device = …)`, which opens
+the peer `Options.withDevice`. harken's is a phone, that can play, named as
+its owner named it in the system's settings — else its model, else
+"Phone" — with an empty id, so the server reads the login's session and a
+device is a login. No second socket and no timer: live changes reach the
+app as the log's do, through `ArkSession.onChange`. The Kotlin client gains
+`Peer.liveStatus(name)`, the Rust peer's `live_status` — the instance's
+sequence, its pending calls, and whether this connection's snapshot has
+come — which is what "part of the session" is read from.
+
+**The reconciler** (`Remote.kt`, Android-free) is the desktop's
+(`harken/iced/src/listening.rs`) one for one, with three differences that
+are the phone's:
+
+| the desktop's `Remote` | the phone's `Remote` |
+|---|---|
+| `joined`: linked, as itself, the snapshot met | the same, through `liveStatus` |
+| `reconcile` after every update | after every change the session reports and every event the player raises (`Listen`) |
+| the output loads one track; its end is `advance` | the output loads the **whole queue** into ExoPlayer, which plays on through it by itself (gapless, and still playing the queue if the socket goes); the player moving on is the end, said once as `advance` and waited for, never fought |
+| `started` once a hand-off is loaded | the same |
+| `stalled` after 2.5 s asked to play and silent | when the player says it stopped by itself — `playWhenReady` cleared for any reason but a press (focus taken by a call, the headphones out), or an error — event-driven, so no timer |
+| seek when 2 s off | 1.5 s off, and not while a buffer fills (a seek then restarts the fill, and a slow stream would chase itself) |
+| `record_play` by the output | by the output, and — the decided rule — **offline too**: a phone unlinked is its own session and its plays are pending intents; a wake (`Sound.wakeIn`, a one-shot on the main thread) at the moment a play will count, since nothing else would reconcile then |
+| coming back: sounding elsewhere, stop; else `start` with its own queue, track and position | the same, its own queue being the player's |
+
+A press (`Press`) is a transition while the phone is part of the session,
+read the desktop's way — the one button pauses what sounds and otherwise
+plays; with nothing queued it plays what the phone last had — and refused
+with `NOT_PART` otherwise, which the caller answers by doing it to the
+player, its own session.
+
+**The ExoPlayer and the lock screen.** `PlaybackService` holds the
+ExoPlayer and a `RemotePlayer`, a Media3 `SimpleBasePlayer`
+(`androidx.media3:media3-common:1.5.1`, already recorded in `deps.json` —
+nothing was re-recorded), and swaps the media session's player between
+them (`MediaSession.setPlayer`): while the phone is part of the session the
+lock screen, the notification and a headset reach the `RemotePlayer`,
+which is the session drawn — its queue the playlist, its track, its clock
+counted on from the server's (`PositionSupplier.getExtrapolating`) — and
+whose every command is a press: play, pause, a seek, next and previous
+(as `skip`, so `next` still means next if the queue moved), a track of the
+queue (`jump`), a queue set from a car or a watch (`start`), an item added
+(play next), and a headset's stop, which is a pause, since `stop` would
+forget the queue. It answers each once the press has been previewed and
+the session published again, so the masked state never flickers back.
+With nothing queued it is empty, and there is no notification. The
+ExoPlayer is then the reconciler's alone (`ExoSound`, a value it keeps of
+what the player last said, read on the session's thread, its commands
+posted to the main thread and written into that value at once); unlinked
+it is the media session's player again, this phone's own, as it always
+was. **When the phone is the output** the lock screen is the same
+`RemotePlayer`, so it is the session, which the ExoPlayer follows.
+
+**The screens.** `Playback` draws the session while the phone is part of
+it — the track, playing or not, up next from its queue, and where the
+sound is (`PlayerState.on`) — and presses it for every button; alone it is
+the controller it was. The position is still its own flow, ticked twice a
+second only while something plays, here or anywhere, and read by the
+hairline and the scrubber alone: `ScrollTests` holds at rest `{}`, over
+four ticks `{Progress=4}`. Another device's scrubber is a third flow,
+`scrubbing`, read by the scrubber alone; dragging this one says `scrub`
+(throttled, ephemeral) and the release says `seek` and empties the slot.
+The session has no shuffle and no repeat: shuffle is a queue in another
+order, this track first, and neither toggle is drawn while joined.
+
+**The picker** (`Picker`, `DevicesSheet`), the desktop's (23c40a0): a row
+per device, by name, with the device's kind as its glyph — phone, computer,
+speaker, and a browser, which the web build declares as a computer named
+"Browser"; a device that cannot play drawn and not selectable ("can't make
+a sound"); the output that has gone drawn, ticked, "not answering";
+"connecting…" while the sound is on its way. No stop row. While nothing
+plays this phone is the default, ticked, and the cursor — the lit row —
+starts on the output or on this phone. Picking a device is `transfer`. It
+opens from a chip beside the queue's in the full player (the kind and the
+name, lit while the sound is here); the mini player says "On Browser"
+where the artist was while the sound is elsewhere.
+
+**Home's last played** (`lastPlayed`): the session's current track while
+the phone is part of a session that has one — "Playing on Browser" while
+it sounds — else the newest play in the log, `last_played()`, a
+maintained view in `Library`. `Device.lastPlayed` and its preference are
+gone (an older build's key is removed on first open); recent searches and
+the diagnostics unlock stay local. A track's `from` is written in the
+desktop's spelling (`#album/Water%20Music`, `Page.place`) so a page named on
+one device is the same page on another. No "Recently played" shelf was
+added: Home already opens on last played, and a second shelf of the same
+records belongs to a later pass of Home's design.
+
+**Diagnostics** gain a "Listening" group: the device, joined, linked, the
+epoch, the instance's sequence, pending and synced, the server offset, the
+calls, refusals and plays, the last refusal, the session, the output,
+every device, and every scrub slot, this phone's marked.
+
+**The headless peers and the fleet.** `harken-peer` (the reference) and
+`harken-peer-kt` take `--device KIND,NAME,CAN_PLAY` and answer three new
+lines, `call`, `live` and `live_refusals` (the reference's first page has
+them). **K7** (`harken/server/tests/fleet_kotlin.rs`,
+`tests/support/mixed.rs`): a Rust server, a Rust peer and a Kotlin peer on
+one account. The Rust laptop starts a queue; it hands the sound to the
+Kotlin phone, which is connecting until it says `started` (the laptop
+saying it is refused, "not the output"); the laptop pauses it; the phone's
+socket goes into a black hole and the laptop sees it away, keeping the
+sound, paused; the phone presses play into the black hole, pending; the
+network comes back, the phone stands again with the sound, and the play
+lands — read off both devices at every step. The Swift peer speaks no live
+state yet, so `fleet_swift.rs` does not run it.
+
+**Tested**, each test falsified once (the comment beside each says how,
+and what failed):
+
+- `RemoteTests` (8), real Kotlin peers against a server in the test
+  (`Hall`: the module's transitions and hooks, sequencing, relays and
+  refusals, interpreted): the output obeys and nobody else sounds
+  (falsified by leaving a device that is not the output alone); a track's
+  end said once and the next one played without a reload (falsified by
+  taking the player's own move for somebody else's, and by saying an end
+  with neither the memory nor the clock — either alone holds it, and each
+  was taken away alone first and passed); a play recorded once, by the
+  output alone, offline too (falsified by counting every reconcile, and by
+  counting from the session's clock on every device — counting the
+  watcher's own player first passed, since it had nothing loaded); both
+  branches of coming back (always and never `start`); unlinked is its own
+  session (`joined` without `linked`); a stall said and not fought; a
+  press as a transition (a toggle that always plays).
+- `ListenTests` (4): the picker's default, tick, cursor, away row and
+  transfer (no default: nothing ticked); Home's last played from the
+  session, else the log (the log preferred); a scrub on another device
+  shown here, relayed and not sequenced, the final value sent by the pump
+  after the throttle's window (every slot read, this phone's own
+  included); the lock screen's player forwarding every command as a
+  transition, on layoutlib's Looper (a seek within the track taken for a
+  jump; a stop answered with nothing).
+- `LiveTests` in ark-client: `liveStatus` (falsified by reading `asked` for
+  `synced`).
+- The fleet's K7 (falsified by a `harken-peer-kt` that dropped
+  `--device`, and by a Kotlin client that did not say its pending live
+  calls again on a new connection).
+- `checks.harken-domain`, the printed types (above).
+
+**Screenshots** (`Screens.g1_listening`, light and dark): the full player
+with the sound on another device, here, and connecting to a speaker; the
+mini player with the sound elsewhere; a scrub from another device; the
+picker playing, with nothing playing, and with the output not answering;
+Home's last played from the session; and the diagnostics' listening
+numbers. Every other screenshot is byte for byte what the parent commit
+draws, but `f2_diagnostics_numbers`, which gains the "Listening" group.
+
+### Decisions phase 3 had to make
+
+- **The lock screen is the session even when the sound is here.** One
+  player for the media session while joined, whichever device plays, so a
+  press there is always a transition and the ExoPlayer is only ever the
+  reconciler's; the cost is that the notification counts the position from
+  the session's clock rather than reading the stream, and does not show a
+  buffer filling.
+- **The phone's output holds the whole queue** (above), and the end of a
+  track is the player's own move, said as `advance` and waited for.
+- **Previous is `skip(-1)`**, as on the desktop, not Media3's "back to the
+  start of this track past three seconds".
+- **Play next is a `start`** of the queue with the track after this one,
+  where it was — and a `pause` after it if it was paused, so nothing
+  sounds. There is no insert; if nothing was sounding, `start` hands the
+  sound to the phone, which is the rule for any track pressed.
+- **A headset's stop is a pause.**
+- **The listening session lives as long as the app's session does**: it is
+  made with the `ArkSession` in the activity's `ViewModel`. With the
+  activity gone the socket goes with it; the server sees the phone leave,
+  keeps the sound with it, away and paused, and the ExoPlayer — the media
+  session's player again — plays on through the queue it holds, this
+  phone's own; opening the app again is coming back, and the decided rule
+  applies.
+
+### What ran green
+
+`checks.harken-domain`, `checks.kotlin`, `harken-apk` (the release
+`harken.apk`, certificate SHA-256 `1a8859fb…df431139`, the committed key),
+`harken-android-screens` (every app test with it: RemoteTests, ListenTests,
+ScrollTests, RestorationTests, LifecycleTests, SourceTests, MotionTests,
+LaunchTests, FlingTests), `checks.fleet-kotlin` (K1–K7, K4 and K5 skipped
+as before, with nothing pinned), `checks.rust`, and `harken-fdroid-repo`.
+The fling bench, run beside the parent commit: 32,874–32,875 B per entering
+row against 33,147–33,151, the draw 27,977 B a frame in both.
+
+### Not verified
+
+No real phone has stood in a real session beside a real browser or a real
+speaker: the reconciler ran against a stand-in player and a server in the
+test, the lock screen's player on layoutlib's Looper with no system UI to
+draw it, and the fleet with headless peers. Not seen: what Android's media
+notification draws for the `RemotePlayer` (and whether a remote's
+"playing" keeps the service in the foreground as Media3 says it does), the
+swap between the two players on a running media session, ExoPlayer's own
+moves through a queue against the reconciler on a device, audio focus and
+"becoming noisy" read as a stall, and the wake that counts a play with
+the screen off.

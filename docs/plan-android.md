@@ -122,8 +122,9 @@ the peer on its own thread with `status`, `post`, `run`, `onPump` and
   server for another app; signing in, waiting for the browser,
   exchanging, or back after a denial with the server's reason; the
   notification permission with harken's reason.
-- **Home**: the last played track and where from, with a button that plays
-  that list again from it; recently added; your playlists; albums. Empty,
+- **Home**: the last played track and where from — the listening session's,
+  else the log's newest play (`docs/plan-live.md` phase 3) — with a button
+  that plays that list again from it; recently added; your playlists; albums. Empty,
   it says where music comes from; before the first read, that it is
   opening; unreachable, a sentence over it.
 - **Search**: as you type, songs from the module's `search`, albums and
@@ -138,7 +139,8 @@ the peer on its own thread with `status`, `post`, `run`, `onPump` and
 - **A song's menu, adding to a playlist, a new playlist** (validated as
   typed by `create_playlist`'s checks, the module's sentence inline).
 - **The player**: the mini player above the tab bar, the full player, the
-  queue sheet.
+  queue sheet; and, while the phone is part of the account's listening
+  session, where the sound is and the device picker.
 - **Settings** and **diagnostics** (seven taps on the version; listed
   under About once found).
 
@@ -1243,3 +1245,40 @@ Not verified on a phone: how the preview looks now (it is the same frames,
 at the place Home was left), and a real process death — the test throws
 the composition and every `ViewModel` away and composes again from the
 saved values, but does not parcel them.
+
+### The listening session
+
+`docs/plan-live.md` "Landed: phase 3" is the whole of it; this is where it
+sits among the rules above.
+
+- **Its state lives where the session does.** `Listen` is made with the
+  `ArkSession` (`remember(session)` in `HarkenApp`) and let go with it,
+  beside `Library` and `Playback`; the media service finds it through
+  `Listen.current`. What a screen draws of it is one value, `Heard`,
+  published only when it moves — a press, a frame, a player's event — so a
+  destination composes nothing from it at rest. The picker is a sheet, not
+  a destination, and keeps no place: a short `Column`, no scroll state, so
+  `SourceTests` has nothing to hold it to and `RestorationTests` no route
+  to add.
+- **The position stays a leaf's.** While the phone is part of the session
+  the position is counted from the session's clock against the server's,
+  twice a second and only while something plays anywhere, into the same
+  `Playback.position` flow; another device's scrubber is a flow beside it
+  (`Playback.scrubbing`) that only the scrubber reads. `ScrollTests` at rest
+  `{}`, over four ticks `{Progress=4}`, as before.
+- **Motion** is unchanged: the picker is a `ModalBottomSheet` as the queue
+  and the menu are; the device chip sits in the full player's last row,
+  beside the queue's, and the mini player's second line says where the
+  sound is in place of the artist. Shuffle and repeat are not drawn while
+  joined — the session has neither — and their places are kept, so the
+  transport does not move.
+- **Held to**: every screenshot byte for byte the parent's but the
+  diagnostics' numbers, which gain the "Listening" group; ten new shots,
+  light and dark (`g1_listening`, `f2_diagnostics_listening`);
+  `RestorationTests`, `LifecycleTests`, `SourceTests`, `MotionTests`,
+  `LaunchTests` green; the fling bench (HARKEN_FLING_BENCH=2000, passes 5
+  and 6) at 32,874–32,875 B per entering row where the parent commit, run
+  beside it, measured 33,147–33,151, and the draw the same to the byte
+  (27,977 B a frame).
+- **Dependencies**: none added. Media3's `SimpleBasePlayer` is in
+  `media3-common` 1.5.1, already in the recorded graph.
