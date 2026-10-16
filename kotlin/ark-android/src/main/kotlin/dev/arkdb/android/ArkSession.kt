@@ -33,6 +33,7 @@
 // a denial finds their pending intents where they left them.
 package dev.arkdb.android
 
+import dev.arkdb.DeviceDecl
 import dev.arkdb.Value
 import dev.arkdb.client.Auth
 import dev.arkdb.client.DirStorage
@@ -422,6 +423,11 @@ private constructor(
             onFailed: (Exception) -> Unit = {},
             /** The module's bytes, which a launch view is bound to; none, and none are kept. */
             module: ByteArray? = null,
+            /**
+             * What this install declares itself as at `hello` (`docs/plan-live.md`); none, and the
+             * peer is no device and holds no live state.
+             */
+            device: DeviceDecl? = null,
         ): ArkSession {
             val launches =
                 module?.let {
@@ -436,7 +442,9 @@ private constructor(
                         Peer.open(
                             domain(),
                             DirStorage(directory(root, server)),
-                            Options.server(login.user.id, login.session, login.token))
+                            Options.server(login.user.id, login.session, login.token).let { o ->
+                                if (device != null) o.withDevice(device) else o
+                            })
                     peer.setRoles(login.user.roles)
                     peer.connect(Auth.socketUrl(server))
                     s.start(peer)

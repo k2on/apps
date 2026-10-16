@@ -282,6 +282,9 @@ public data class Status(
     val badFrames: Long,
 )
 
+/** `docs/plan-live.md` [Peer.liveStatus]: one live instance as this device holds it, in numbers. */
+public data class LiveStatus(val seq: Long, val pending: Int, val synced: Boolean)
+
 /**
  * `THROTTLE_MS`: the least time between two ephemeral calls [Peer.callThrottled] sends for one
  * transition, in milliseconds — twenty a second, under the server's thirty, the final value always
@@ -695,6 +698,20 @@ private constructor(
     public fun live(name: String): Value? {
         val i = instance(name) ?: return null
         return client.live?.view(i)
+    }
+
+    /**
+     * `live_status`: what this device holds of the live state `name` besides its view, for a
+     * reconciler that has to know whether the view is the server's yet and for a screen that says
+     * it in numbers — the sequence it has confirmed, how many of its own ordered calls the server
+     * has not answered, and whether a snapshot has come on this connection. Before one, the view is
+     * this device's own guess and nothing the server says of the instance has been applied. Null
+     * where [live] is.
+     */
+    public fun liveStatus(name: String): LiveStatus? {
+        val i = instance(name) ?: return null
+        val w = client.live?.instances?.get(i) ?: return null
+        return LiveStatus(w.seq, w.pending.size, w.synced)
     }
 
     /**

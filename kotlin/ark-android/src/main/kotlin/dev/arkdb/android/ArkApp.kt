@@ -57,11 +57,15 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.arkdb.DeviceDecl
 
 /**
  * Who the app is, as the onboarding draws it: its name, the scheme its sign-in comes back on
  * (`<scheme>://auth`), its mark, its colours in a light and a dark scheme and its type, and its
- * module — the `.ark` the session's peer interprets, read once.
+ * module — the `.ark` the session's peer interprets, read once. `device` is what this install
+ * declares itself as at `hello` when the module has live state (`docs/plan-live.md`): its kind, a
+ * name for a picker, whether it can play — and an empty id, which the server reads as the login's
+ * session, so a device is a login. Null, and the peer is no device and holds no live state.
  */
 public class AppIdentity(
     public val name: String,
@@ -70,6 +74,7 @@ public class AppIdentity(
     public val light: ColorScheme,
     public val dark: ColorScheme,
     public val typography: Typography = Typography(),
+    public val device: DeviceDecl? = null,
     public val module: () -> ByteArray,
 )
 

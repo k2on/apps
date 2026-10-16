@@ -37,6 +37,7 @@ public class ArkHost(app: Application) : AndroidViewModel(app) {
     private var domain: Domain? = null
     private var module: () -> ByteArray = { ByteArray(0) }
     private var appName: String = ""
+    private var device: dev.arkdb.DeviceDecl? = null
     private val remembered = Remembered(PrefsShelf(app))
 
     private val _step = MutableStateFlow<Step>(Step.Server())
@@ -59,6 +60,7 @@ public class ArkHost(app: Application) : AndroidViewModel(app) {
         if (machine != null) return
         appName = identity.name
         module = identity.module
+        device = identity.device
         val m = Onboarding(permissions, Build.VERSION.SDK_INT, identity.scheme)
         machine = m
         apply(m.start(remembered.server, remembered.login, remembered.asked))
@@ -157,6 +159,7 @@ public class ArkHost(app: Application) : AndroidViewModel(app) {
                         // What the app's launch views are bound to: read here, 50 KB, so that
                         // the first file is read before anything is decoded.
                         module = moduleBytes(),
+                        device = device,
                     )
                 _session.value = s
                 viewModelScope.launch {

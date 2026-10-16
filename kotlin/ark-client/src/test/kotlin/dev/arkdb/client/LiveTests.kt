@@ -119,8 +119,10 @@ object LiveTests {
 
     /**
      * An ordered call moves the view at once, is sent, stays pending — said again on every
-     * connection — until the server's `applied` confirms it, which drops it. Falsified by not
-     * re-sending pending calls in `Watch.connected`: the second connection sent none.
+     * connection — until the server's `applied` confirms it, which drops it; `liveStatus` says each
+     * of those in numbers. Falsified by not re-sending pending calls in `Watch.connected`: the
+     * second connection sent none; and by `liveStatus` reading `asked` for `synced`: a new
+     * connection read as synced before its snapshot.
      */
     fun ordered(domain: Domain) {
         val r = Rig(domain)
@@ -132,13 +134,22 @@ object LiveTests {
         claim("ordered: sent once (${sent.size})", sent.size == 1 && sent[0].counter == null)
         val id = sent.first().id
         claim("ordered: a pump says the view moved", r.peer.pumpAt(0).live)
+        claim(
+            "ordered: the status says one pending on a synced view (${r.peer.liveStatus("room")})",
+            r.peer.liveStatus("room") == LiveStatus(0, 1, true))
         r.peer.disconnected()
         r.peer.connected()
         val again = r.calls()
         claim("ordered: said again on the next connection", again.map { it.id } == listOf(id))
+        claim(
+            "ordered: a new connection is not synced until its snapshot",
+            r.peer.liveStatus("room")?.synced == false)
         r.hear(ServerMsg.SnapshotLive(LiveSnapshot(room, r.seq, r.value, emptyMap())))
         claim("ordered: replayed over the snapshot (${r.count()})", r.count() == 3L)
         r.applied("bump", mapOf("by" to int(3)), id, "phone")
+        claim(
+            "ordered: confirmed, the status says so (${r.peer.liveStatus("room")})",
+            r.peer.liveStatus("room") == LiveStatus(1, 0, true))
         r.peer.connected()
         claim("ordered: confirmed, so not said again", r.calls().isEmpty())
         claim("ordered: the view is the server's (${r.count()})", r.count() == 3L)
