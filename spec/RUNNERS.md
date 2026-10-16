@@ -24,7 +24,7 @@ Each entry:
 | `path` | the file, relative to `vectors/` |
 | `kind` | its directory: `codec`, `order`, `hash`, `module`, `verify`, `eval`, `views`, `protocol`, `rebase`, `trace` |
 | `form` | which of the kind's shapes the file is, named in the sections below |
-| `side` | `client`: every runtime runs it. `rust-only`: a fleet run through Rust's simulator and its seeded scheduler, which no other runtime reproduces; its coverage reaches them through the traces of its clients (§ trace) |
+| `side` | `client`: every runtime runs it. `rust-only`: a fleet run through Rust's simulator and its seeded scheduler, which no other runtime reproduces; its coverage reaches them through the traces of its clients (§ trace). `rust-for-now`: live state (`docs/plan-live.md`), a client's in time and Rust's alone today; a runtime that holds no live state skips it, naming it, and one that does runs it as `client` (each kind's `live` form, below) |
 | `expect` | `pass`, or `fail` for a `falsify/` vector: a deliberately wrong expectation that a runner which reads the expected value must reject |
 
 A runner walks the manifest rather than the directories, and fails if a
@@ -138,6 +138,23 @@ with `args` over the store: either it applies and its changes are
 `changes`, or it is refused and the refusal's text (§12.5) is `refused`
 and the store did not move; then `store_after` and `hash_after`.
 
+`form: live` (`eval/live-room.json`) — rust-for-now. `{module, live,
+live_hash, type_hash, kinds, init, init_hash, steps}` — a live state of the
+module (§14.1) run transition by transition. **Do**: decode and verify the
+module; take the live state named `live`. **Compare**: its closure's hash
+is `live_hash` and its type's `type_hash` (hex, §8); each transition's
+classification (§3.12) is `kinds`' (`ordered` or `ephemeral`, hooks
+included); its initial value is `init` and that value's hash — the
+ordered part only — is `init_hash`. Then per step `{transition, ctx,
+input}`, over the state the last step left (the initial value first), run
+the transition under `ctx` — `{user, session, roles, device, now}` — with
+`input` (a hook's input is `{device}`, `on_restore`'s none): either it
+gives the step's `state`, whose hash is `hash`, or the step says
+`refused` and the run is refused by exactly that text and the state does
+not move. The steps reach every transition and every refusal a live state
+has: an input out of its range, a guard, a slot past `SLOT_CAP`, an input
+of the wrong type, a transition there is not.
+
 ## views — client
 
 `form: views`: `{module, query, plan, ctx, args, store_before,
@@ -171,6 +188,14 @@ closure carries no symbol names). A client runtime reads every server
 frame and writes every client frame, so every file here is a client's —
 `client-push-raw` included: a client never authors a raw write, but its
 codec must still say one.
+
+The live frames (`client-hello-device`, `client-call`,
+`client-call-ephemeral`, `client-resync`, `server-applied`,
+`server-applied-hook`, `server-applied-ephemeral`, `server-refused`,
+`server-live-snapshot`, and the falsify of an `applied` with both a
+sequence and a counter) are the same two forms and **rust-for-now**. An
+`applied` carries `seq` or `counter` and never both; what it carries
+decides how it is read (§14.1).
 
 ## rebase — the scripted half client, the fleets Rust's
 
@@ -233,6 +258,10 @@ and `playlist` views kept. `packages.trace-corpus` is thousands more in the
 same format, every client of every session of a fixed fuzz run, not
 checked in; a runtime's check runs it as it runs these.
 
+`form: live` (`trace/live/`, and its `falsify/`) — rust-for-now: a device's life in
+a fleet of devices of one account calling the demo's `room`, written by
+`bin/vectors/live.rs`. The inputs and outputs below marked *live*.
+
 ### The file
 
 `{from, module, steps}`, and `expect` on a `falsify/` trace. `from` says
@@ -267,7 +296,7 @@ Each `in` is `{"t": …}` and fields. Apply it, then read the outputs.
 
 | `t` | fields | the client |
 |---|---|---|
-| `open` | `mode` (`whole`, `facts`), `closures` (bool), `token` (text or null) | opened at cursor 0 over an empty store of the module's schema, holding the module's closures stripped, or none; no log id; unlinked. It reports itself rebuilt. A fresh durable copy, no fork, no views kept from before |
+| `open` | `mode` (`whole`, `facts`), `closures` (bool), `token` (text or null), and *live* `device` (`{id, kind, name, can_play}`) | opened at cursor 0 over an empty store of the module's schema, holding the module's closures stripped, or none; no log id; unlinked. It reports itself rebuilt. A fresh durable copy, no fork, no views kept from before |
 | `reopen` | — | stopped and opened from its durable copy: the replica over the copy's store at its cursor — under the device's schema when the copy holds a union (§12, `scope::device_schema`) — with its log id, its union, a page horizon (`through`) at the cursor, the pending intents in order, and the closures it held; the client over it with the same mode and token, and the module's schema. Unlinked; its verify answers and denial are gone; it reports itself rebuilt. Alone it stays alone |
 | `connected` | — | `Client::connected`: linked; queued frames dropped; `hello` at its cursor, mode, log id and `partial`, with the token and spec 4; then everything pending pushed |
 | `disconnected` | — | `Client::disconnected` |
@@ -279,6 +308,7 @@ Each `in` is `{"t": …}` and fields. Apply it, then read the outputs.
 | `verify` | — | `Client::verify_all` |
 | `alone` | — | `trace::alone`: the fork is its cursor and log id; an authority over its stripped closures, not a server's (no private block runs), its log based at the cursor with no entries, its state the confirmed store; the replica's log id cleared, and its inbox — what the server sent and was not applied, a page past a sequence that never came — left behind, since applied it would be the local history's own next sequence (`trace/alone-leaves-the-inbox.json`); everything pending sequenced locally |
 | `join` | `ctx` | `trace::join`: every entry the authority sequenced above the fork, in order, re-stamped with `ctx`'s user and session, taken back out of the confirmed store and re-queued ahead of anything pending (`Replica::fork_back`); not alone any more. Connecting is the next input |
+| `call` | *live*: `ctx`, `live` and `key` (the instance), `transition`, `input`, `id`, `now`, `counter` | `Client::call`: previewed over its view of the instance under `ctx`, its device and `now`, then sent if linked — an ordered call kept pending under `id`, an ephemeral one applied at once and sent with `counter`, never pending; a local verdict is the output `refused` |
 | `hydrate` | `views`: `[{query, ctx, args}]` | these views in place of any kept: each query's middleware run under its `ctx` and `args` over the client's optimistic store, and its plan hydrated (§13); a verdict is that view refused |
 
 ### Outputs
@@ -318,6 +348,8 @@ durable copy; then write `out`, a struct of only these fields:
   | `union` | `{table: [column…]}`, the tables it holds in part with the columns held, or `null` for a client that holds the log whole |
   | `hash` | the state hash (§8.1) of its confirmed store, under the schema it holds (the device's, for a union) |
   | `view_hash` | the state hash of its optimistic store |
+  | `live` | *live*, only for a client that declared a device: per instance it holds, in key order, `{live, key, seq, synced, hash, view, pending}` — the sequence it has confirmed, whether a snapshot has come on this connection, the hash of what it confirmed (ordered part only), its view whole (ephemeral slots and pending calls on top), and the ids of its calls still pending |
+  | `live_refused` | *live*: `[{id, reason}]`, the server's verdicts on its own calls, oldest first |
 
 ### Compare
 

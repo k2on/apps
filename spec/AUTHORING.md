@@ -258,6 +258,9 @@ One name per IR node, in `snake_case`; string names in the IR are always
 | option | `Ty::Option` | `Opt<T>` |
 | list | `Ty::List` | `List<T>` |
 | row of T | struct | `T` |
+| non-empty list | `Ty::NonEmpty` | `NonEmpty<T>` (§2.6) |
+| sum of records | `Ty::Sum` | `Sum<V>` (§2.6) |
+| a slot per device | `Ty::PerDevice` | `PerDevice<T>` (§2.6) |
 
 These are the *value types of the vocabulary*, distinct from Rust's
 `bool`/`i64`/`String`: under `Native` they carry data, under `Emit` an
@@ -552,6 +555,103 @@ the procedures for a runtime, and `module().hash()` the module hash.
 `harken/domain/src/{schema.rs,library.rs,playlists.rs,module.rs}`; their
 `emit()` is `harken/domain/harken.ark`.
 
+### 2.6 Live state
+
+`docs/plan-live.md`: a typed state machine per scope, beside the log, on
+the one socket (`spec/README.md` §14.1). It is declared on a router beside
+its mutations, in the same words, and a module without one emits the
+bytes it did.
+
+```rust
+pub struct Room {                            // a record, named in the type section
+    pub count: Int,
+    pub devices: PerDevice<Device>,          // who is here: ordered, kept by the hooks
+    pub mode: Sum<Mode>,
+    pub pointer: PerDevice<Int>,             // where each device points: ephemeral
+}
+impl Record for Room {
+    fn fields() -> Fields<Self> {
+        fields()
+            .named("room")
+            .field("count", int())
+            .field("devices", typed::<PerDevice<Device>>())
+            .field("mode", typed::<Sum<Mode>>())
+            .ephemeral("pointer", typed::<PerDevice<Int>>())
+    }
+}
+
+pub struct Mode;
+impl SumType for Mode {
+    const NAME: &'static str = "mode";
+    fn variants() -> Cases<Self> {
+        cases().of::<Idle>("idle").of::<Counting>("counting")
+    }
+}
+
+now.live::<Room>("room")
+    .scope(|ctx| ctx.user)                                   // one instance per account
+    .init(|| Room { count: 0.into(), devices: PerDevice::empty(),
+                    mode: Sum::of("idle", Idle {}), pointer: PerDevice::empty() })
+    .transition::<Bump>("bump", |s, _ctx, input| Room { count: s.count.add(input.by), ..s })
+    .transition::<()>("stop", |s, _ctx, ()| Room { mode: Sum::of("idle", Idle {}), ..s })
+    .guard::<()>("not counting", |s, _ctx, ()| s.mode.is("counting"))
+    .transition::<At>("point", |s, ctx, input| Room { pointer: s.pointer.put(ctx.device, input.at), ..s })
+    .on_join(|s, _ctx, device| Room { devices: s.devices.put(device.id, device), ..s })
+    .on_leave(|s, _ctx, device| Room { devices: s.devices.clear(device.id), ..s })
+    .on_restore(|s, _ctx| Room { devices: PerDevice::empty(), mode: Sum::of("idle", Idle {}), ..s });
+```
+
+| IR | Rust |
+|---|---|
+| the type section | a record's `.named("room")`, and every `SumType`: declared once by name, referred to by it (`Ty::Named`) |
+| `Ty::Sum` | `Sum<V>` over `impl SumType for V`: `cases().of::<R>("name")…`, a record per variant |
+| `Variant` | `Sum::of("counting", Counting { .. })` |
+| `Case` | `s.mode.case::<T>().on::<Idle>("idle", \|_\| ..).on::<Counting>("counting", \|c\| ..).end()`; `.is("counting")` is the case with a `true` arm |
+| `Ty::NonEmpty` | `NonEmpty<T>`: `.list()` to read it as a list, `list.non_empty()` to claim one |
+| `Ty::PerDevice` | `PerDevice<T>`: `PerDevice::empty()`; `Slot` `.get(device)` → `Opt<T>`; `SetSlot` `.set(device, opt)`, `.put(device, v)`, `.clear(device)`; `Slots` `.slots()` → `List<Slot<T>>`, `{device, value}` in device order |
+| `Ty::Ephemeral` | `.ephemeral(name, typed::<PerDevice<T>>())` on the state's record |
+| `LiveState` | the transition's first parameter |
+| `CtxUser/CtxSession/CtxDevice/CtxNow` | `ctx.user` `ctx.session` `ctx.device` `ctx.now`; `ctx.has_role(r)` |
+| a state | `r.live::<S>(name)` `.scope(..)` `.init(..)` |
+| a transition | `.transition::<I>(name, \|state, ctx, input\| new_state)`, `I` an `Input` (§1.3) or `()`; `refuse(..)` and the input's checks refuse it |
+| a guard | `.guard::<I>(why, \|state, ctx, input\| bool)`, on the transition or hook declared last, refusing with `why` when false |
+| the hooks | `.on_join(\|s, ctx, device\| ..)`, `.on_leave(\|s, ctx, device\| ..)` — `device` a `Device` record: `can_play`, `id`, `kind`, `name`, `user` — and `.on_restore(\|s, ctx\| ..)` |
+
+**A transition's kind is read off its body, not declared.** One that
+reads nothing of the state — only its input and `ctx.device` — and writes
+nothing but the caller's own slot of ephemeral fields (`point`, above) is
+**ephemeral**: relayed, coalesced, never sequenced, applied by its author
+at once and never pending. Every other is **ordered**. An ordered
+transition may not read an ephemeral field, which the verifier refuses by
+name; it may write its caller's own slot (`drop_at` in Appendix B.2, which
+clears the dropper's pointer). Three rules, and the plan's "Ordered and
+ephemeral fields" argues them: no ordered reads of ephemeral fields;
+ephemeral fields are left out of the state's hash and of what a server
+keeps; and an ephemeral call is held to the same guards and type checks as
+any other, with its slot to 1 KiB.
+
+**Write positions in content terms** — an item's id and a fraction along
+it, a time in milliseconds — never in pixels: two devices drawing one
+pointer at two sizes must agree on what it points at.
+
+**Native and Emit.** A transition is run once under `Emit` to be its IR
+and on every call under `Native`, as a mutator's body is, and the two are
+held to agree on every transition and every hook
+(`NativeLive::agrees`; `rust/ark/tests/live.rs`). The router's `lives()`
+are what a runtime is handed beside its procedures.
+
+**What a client calls.** `ark_client::Peer::live(name)` is the state as
+this device sees it; `peer.call(name, transition, input)` runs it over
+that view at once and sends it — one path for both kinds — and
+`peer.call_throttled(..)` is the same for a transition a finger drives, at
+most one send per `THROTTLE_MS` (50) for it, the last always sent;
+`Pumped::live` says the view moved, which is what a host woken by
+`set_waker` reads; `take_live_refusals()` the server's verdicts;
+`server_offset()` the server's clock less this one's, read off the `at`
+stamps, which is what a moving position is computed with. A server stands
+a device it speaks for — a speaker a bridge reconciles — in its instances
+with `HubHandle::participate`, and calls as it with `HubHandle::call`.
+
 ## 3. Native and Emit
 
 The builder implements the vocabulary twice behind one API:
@@ -793,6 +893,40 @@ as the body, before it (input, then refine, then body), so one numbering
 covers the function. `EArg` inside a field's check refers to that field
 after any `trim` before it.
 
+`docs/plan-live.md` adds the type section and live states, each written
+only where a module declares one, so every module before it keeps its
+bytes:
+
+```
+module      : + ("types", [type])          -- only when not empty
+              + ("states", [state])         -- only when not empty
+type        : {"t":"type","name":txt,"ty":ty}
+state       : {"t":"state","name":txt,"deps":{txt:bytes},"ty":ty,"init":expr,"scope":expr,
+               "transitions":[transition]}
+              + ("on_join", transition) | ("on_leave", transition) | ("on_restore", transition)
+                                             -- each only where declared
+transition  : {"t":"transition","name":txt,"input":[field],"guards":[guard],"body":[stmt]}
+guard       : {"t":"guard","e":expr,"why":txt}
+ty          : + {"t":"named","name":txt}
+            | + {"t":"non_empty_list","of":ty}
+            | + {"t":"sum","variants":{txt:{txt:ty}}}     -- each variant its record's fields
+            | + {"t":"per_device","of":ty}
+            | + {"t":"ephemeral","of":ty}                 -- a field of a state's record only
+expr        : + {"t":"variant","ty":ty,"name":txt,"fields":{txt:expr}}
+            | + {"t":"case","e":expr,"arms":[{"t":"arm","name":txt,"sym":int,"e":expr}]}
+            | + {"t":"live_state"} | {"t":"ctx_now"} | {"t":"ctx_device"}
+            | + {"t":"slot","e":expr,"key":expr}
+            | + {"t":"set_slot","e":expr,"key":expr,"v":expr}   -- v an option; none empties it
+            | + {"t":"slots","e":expr}
+```
+
+A state's `deps` are written in its closure, empty in the module, as a
+function's are. A hook's input is the one field `device` (`ir::device_ty`),
+`on_restore`'s none. Symbols are numbered per transition, input then
+guards then body. The value of a sum is a struct of its variant's fields
+with the variant's name under `t`, so no variant has a field `t`; the
+value of a `PerDevice` is a struct keyed by device id.
+
 ### Spec version 4 (`docs/plan-v4.md` §1.8)
 
 ```
@@ -994,3 +1128,166 @@ the `Query` itself: no `.all()`, no statement, and its value is the plan
 `view::pull` evaluates and a client keeps as a view. A domain written
 elsewhere may name its input types otherwise — a name reaches no byte —
 but its `emit` is held to the vector's bytes.
+
+### B.2 The room
+
+The demo's live state, which every live vector is over
+(`spec/vectors/module/live.json`, `eval/live-room.json`): a `room` per
+account, on a router of its own, `now`, declared after the demo's so that
+the demo's module and every vector of it keep their bytes —
+`Module::new((demo(), live::<Demo>()))`. It counts (`bump`, ordered: it reads the
+count); is set counting by a device and stopped (`start` reads the server's
+clock and the caller's device; `stop` is guarded); keeps who is here in an
+ordered `PerDevice`, by its hooks; and carries each device's pointer and a
+label in ephemeral ones — `point` and `label` the ephemeral transitions,
+`drop_at` the ordered one that also clears its caller's pointer. Restored
+at start it is still counted, not counting, and nobody is in it: whoever
+was here when the server stopped never left, and only the app knows
+`devices` is who is here. It is written three times, identically, as the
+demo is — `rust/ark/src/bin/vectors/demo_live.rs`, `rust/ark/tests/live.rs`
+(through `#[path]`) and `rust/ark-client/src/demo.rs` — and held to one set
+of bytes by `module/live.json`.
+
+```rust
+/// The room: a record, named in the type section.
+pub struct Room {
+    pub count: Int,
+    pub devices: PerDevice<Device>,
+    pub label: PerDevice<Text>,
+    pub mode: Sum<Mode>,
+    pub pointer: PerDevice<Int>,
+}
+impl Record for Room {
+    fn fields() -> Fields<Self> {
+        fields()
+            .named("room")
+            .field("count", int())
+            .field("devices", typed::<PerDevice<Device>>())
+            .ephemeral("label", typed::<PerDevice<Text>>())
+            .field("mode", typed::<Sum<Mode>>())
+            .ephemeral("pointer", typed::<PerDevice<Int>>())
+    }
+}
+
+/// Whether the room is counting, and since when, by whom.
+pub struct Mode;
+impl SumType for Mode {
+    const NAME: &'static str = "mode";
+    fn variants() -> Cases<Self> {
+        cases().of::<Idle>("idle").of::<Counting>("counting")
+    }
+}
+
+pub struct Idle {}
+impl Record for Idle {
+    fn fields() -> Fields<Self> {
+        fields()
+    }
+}
+
+pub struct Counting {
+    pub by: Text,
+    pub since: Int,
+}
+impl Record for Counting {
+    fn fields() -> Fields<Self> {
+        fields().field("by", text()).field("since", int())
+    }
+}
+
+pub struct Bump {
+    pub by: Int,
+}
+impl Input for Bump {
+    fn schema() -> Object<Self> {
+        object().field("by", int().range(1, 10))
+    }
+}
+
+pub struct Say {
+    pub text: Text,
+}
+impl Input for Say {
+    fn schema() -> Object<Self> {
+        object().field("text", text())
+    }
+}
+
+pub struct At {
+    pub at: Int,
+}
+impl Input for At {
+    fn schema() -> Object<Self> {
+        object().field("at", int())
+    }
+}
+
+/// The router that declares the room.
+pub fn live<S: Tables>() -> Router<S> {
+    let now = router::<S>("now");
+    now.live::<Room>("room")
+        .scope(|ctx| ctx.user)
+        .init(|| Room {
+            count: 0.into(),
+            devices: PerDevice::empty(),
+            label: PerDevice::empty(),
+            mode: Sum::of("idle", Idle {}),
+            pointer: PerDevice::empty(),
+        })
+        // Ordered: reads the count.
+        .transition::<Bump>("bump", |s, _ctx, input| Room {
+            count: s.count.add(input.by),
+            ..s
+        })
+        // Ordered: reads the server's clock and the caller's device.
+        .transition::<()>("start", |s, ctx, ()| Room {
+            mode: Sum::of(
+                "counting",
+                Counting {
+                    by: ctx.device,
+                    since: ctx.now,
+                },
+            ),
+            ..s
+        })
+        .transition::<()>("stop", |s, _ctx, ()| Room {
+            mode: Sum::of("idle", Idle {}),
+            ..s
+        })
+        .guard::<()>("not counting", |s, _ctx, ()| s.mode.is("counting"))
+        // Ephemeral: the caller's own pointer, and nothing read.
+        .transition::<At>("point", |s, ctx, input| Room {
+            pointer: s.pointer.put(ctx.device, input.at),
+            ..s
+        })
+        // Ephemeral too: what the device says beside its pointer, held to
+        // the slot's size.
+        .transition::<Say>("label", |s, ctx, input| Room {
+            label: s.label.put(ctx.device, input.text),
+            ..s
+        })
+        // Ordered, and writes the caller's pointer: a drop clears it.
+        .transition::<At>("drop_at", |s, ctx, input| Room {
+            count: input.at,
+            pointer: s.pointer.clear(ctx.device),
+            ..s
+        })
+        .on_join(|s, _ctx, device| Room {
+            devices: s.devices.put(device.id, device),
+            ..s
+        })
+        .on_leave(|s, _ctx, device| Room {
+            devices: s.devices.clear(device.id),
+            ..s
+        })
+        // What a room restored at start is: still counted, not counting, and
+        // nobody in it — whoever was here when the server stopped never left,
+        // and only the app knows `devices` is who is here.
+        .on_restore(|s, _ctx| Room {
+            devices: PerDevice::empty(),
+            mode: Sum::of("idle", Idle {}),
+            ..s
+        });
+    now
+}
+```
