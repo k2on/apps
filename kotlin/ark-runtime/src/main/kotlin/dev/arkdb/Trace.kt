@@ -17,7 +17,13 @@ public data class ViewSpec(val query: String, val ctx: Ctx, val args: Map<String
 
 /** One input to a client (`trace::Input`). */
 public sealed class Input {
-    public data class Open(val mode: Mode, val closures: Boolean, val token: String?) : Input()
+    /** `device`: §14 the device its `hello` declares, for a client of a module with live state. */
+    public data class Open(
+        val mode: Mode,
+        val closures: Boolean,
+        val token: String?,
+        val device: DeviceDecl? = null,
+    ) : Input()
 
     public object Reopen : Input()
 
@@ -50,6 +56,20 @@ public sealed class Input {
 
     public data class Hydrate(val views: List<ViewSpec>) : Input()
 
+    /**
+     * §14 `Client.call`: a transition of a live instance, by this author, with the time it guessed
+     * for the server's and the id and counter it drew — frozen, as a mutation's autos are.
+     */
+    public class Call(
+        public val ctx: Ctx,
+        public val instance: Instance,
+        public val transition: String,
+        public val input: Map<String, Value>,
+        public val id: Id,
+        public val now: Long,
+        public val counter: Long,
+    ) : Input()
+
     /** Its `t`, as a trace writes it. */
     public val t: String
         get() =
@@ -67,6 +87,7 @@ public sealed class Input {
                 Alone -> "alone"
                 is Join -> "join"
                 is Hydrate -> "hydrate"
+                is Call -> "call"
             }
 
     public companion object {
@@ -94,7 +115,14 @@ public sealed class Input {
                         },
                         (get("closures") as? Value.VBool)?.value
                             ?: throw TraceError("closures is not a bool"),
-                        token("token"))
+                        token("token"),
+                        m["device"]?.let {
+                            try {
+                                DeviceDecl.fromValue(it)
+                            } catch (e: FactError) {
+                                throw TraceError(e.message ?: "a device")
+                            }
+                        })
                 "reopen" -> Reopen
                 "connected" -> Connected
                 "disconnected" -> Disconnected
@@ -117,6 +145,21 @@ public sealed class Input {
                 "verify" -> Verify
                 "alone" -> Alone
                 "join" -> Join(ctxOf(get("ctx")))
+                "call" ->
+                    Call(
+                        ctxOf(get("ctx")),
+                        Instance(
+                            (get("live") as? Value.VText)?.value
+                                ?: throw TraceError("live is not text"),
+                            (get("key") as? Value.VText)?.value
+                                ?: throw TraceError("key is not text")),
+                        (get("transition") as? Value.VText)?.value
+                            ?: throw TraceError("transition is not text"),
+                        args("input"),
+                        (get("id") as? Value.VId)?.value ?: throw TraceError("id is not an id"),
+                        (get("now") as? Value.VInt)?.value ?: throw TraceError("now is not an int"),
+                        (get("counter") as? Value.VInt)?.value
+                            ?: throw TraceError("counter is not an int"))
                 "hydrate" ->
                     Hydrate(
                         ((get("views") as? Value.VList) ?: throw TraceError("views is not a list"))
@@ -277,7 +320,11 @@ public fun reopenFrom(
             java.util.TreeMap<String, List<String>>(CodePointOrder).apply { putAll(it) }
         }
     r.through = cursor
-    return Client.open(r, old.mode, old.token).withSchema(old.schema)
+    val c = Client.open(r, old.mode, old.token).withSchema(old.schema)
+    // §14 Live state is about now and nothing of it is durable: a client started again holds none
+    // of it, and is told it whole when it next connects.
+    val w = old.live ?: return c
+    return c.withLive(Watch(w.runner, w.device))
 }
 
 /** `client_bodies`: the module's closures as a client holds them — private blocks stripped (D3). */
@@ -414,6 +461,32 @@ public fun state(c: Client): List<Pair<String, Value>> {
             } ?: Value.VNull),
         "hash" to Value.VBytes(Hash.stateHash(r.confirmed)),
         "view_hash" to Value.VBytes(Hash.stateHash(r.view)),
+    ) + liveState(c)
+}
+
+// §14 A client holding live state is held to it too: each instance's sequence, whether a snapshot
+// has come on this connection, the hash of what is confirmed, its view whole and the ids still
+// pending; and the server's verdicts on its calls. Absent for every client that holds none.
+private fun liveState(c: Client): List<Pair<String, Value>> {
+    val w = c.live ?: return emptyList()
+    return listOf(
+        "live" to
+            Value.VList(
+                w.instances.map { (i, x) ->
+                    Value.record(
+                        "live" to Value.VText(i.state),
+                        "key" to Value.VText(i.key),
+                        "seq" to Value.VInt(x.seq),
+                        "synced" to Value.VBool(x.synced),
+                        "hash" to Value.VBytes(w.runner.hash(i.state, x.confirmed)),
+                        "view" to x.view,
+                        "pending" to Value.VList(x.pending.map { Value.VId(it.id) }))
+                }),
+        "live_refused" to
+            Value.VList(
+                w.refused.map { (id, why) ->
+                    Value.record("id" to Value.VId(id), "reason" to Value.VText(why))
+                }),
     )
 }
 
@@ -423,6 +496,7 @@ public fun state(c: Client): List<Pair<String, Value>> {
  */
 public class Player(m: Module, private val durable: Durable = KeptStore()) {
     private val moduleSchema: Schema = m.schema
+    private val live: Runner = Runner.ofModule(m)
     private val bodies: Map<String, Closure> = Hash.closures(m)
     private val observer = Observer(bodies)
     private var client: Client? = null
@@ -438,7 +512,12 @@ public class Player(m: Module, private val durable: Durable = KeptStore()) {
         if (input is Input.Open) {
             val bs = if (input.closures) clientBodies(bodies) else emptyMap()
             val r = Replica.open(moduleSchema, bs, MemoryStore.empty(moduleSchema), 0, emptyList())
-            client = Client.open(r, input.mode, input.token)
+            val c = Client.open(r, input.mode, input.token)
+            // §14 A client of a module with live state that declares a device holds it, as that
+            // device. One that declares none holds none and reports none (spec/RUNNERS.md,
+            // `live`), however much live state its module has.
+            if (!live.isEmpty && input.device != null) c.withLive(Watch(live, input.device))
+            client = c
             durable.clear()
             alone = null
             observer.reset()
@@ -474,6 +553,19 @@ public class Player(m: Module, private val durable: Durable = KeptStore()) {
                 join(c, a, input.ctx)
             }
             is Input.Hydrate -> observer.hydrate(input.views, c.replica.view)
+            is Input.Call ->
+                try {
+                    c.call(
+                        input.ctx,
+                        input.instance,
+                        input.transition,
+                        input.input,
+                        input.id,
+                        input.now,
+                        input.counter)
+                } catch (e: LiveRefusal) {
+                    refusal = e.refusal
+                }
         }
         val frames = c.takeOutgoing()
         val changes = c.replica.takeChanges()

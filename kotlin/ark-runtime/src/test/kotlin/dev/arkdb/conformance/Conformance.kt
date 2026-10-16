@@ -68,6 +68,7 @@ object Conformance {
                         "apply" -> Checks.evalApply(v)
                         "cases" -> Checks.evalCases(v)
                         "raw" -> Checks.evalRaw(v)
+                        "live" -> Checks.evalLive(v)
                         else -> throw Failed("eval: unknown form ${x.form}")
                     }
                 },
@@ -83,6 +84,19 @@ object Conformance {
             "trace" to { _, v -> ClientChecks.trace(v) },
         )
 
+    /**
+     * The sides this runtime runs (spec/RUNNERS.md): every client's, and `rust-for-now`'s — live
+     * state, which this runtime holds (`docs/plan-live.md`), so it runs those as a client's.
+     */
+    val sides = setOf("client", "rust-for-now")
+
+    /** Why a vector of a side not run is skipped, as the manifest's `side` says. */
+    fun skipReason(side: String): String =
+        when (side) {
+            "rust-only" -> "a fleet through Rust's simulator and its scheduler"
+            else -> "a side this runtime does not run"
+        }
+
     /** The kinds no client runs: none — every kind has a check above. */
     private val notYet: Map<String, String> = emptyMap()
 
@@ -93,20 +107,22 @@ object Conformance {
     /** A vector by its path under spec/vectors, parsed. */
     fun vector(path: String): Value = read(File(root, path))
 
+    /** `MANIFEST.json` under `root`: every vector, as it lists them. */
+    fun manifest(root: File): List<Vector> =
+        read(File(root, "MANIFEST.json")).field("vectors").asList().map {
+            Vector(
+                it.field("path").asText(),
+                it.field("kind").asText(),
+                it.field("form").asText(),
+                it.field("side").asText(),
+                it.field("expect").asText(),
+            )
+        }
+
     @JvmStatic
     fun main(args: Array<String>) {
         root = File(args.getOrElse(0) { "../spec/vectors" })
-        val manifest = read(File(root, "MANIFEST.json"))
-        val vectors =
-            manifest.field("vectors").asList().map {
-                Vector(
-                    it.field("path").asText(),
-                    it.field("kind").asText(),
-                    it.field("form").asText(),
-                    it.field("side").asText(),
-                    it.field("expect").asText(),
-                )
-            }
+        val vectors = manifest(root)
         val problems = ArrayList<String>()
         // The manifest is the list: a file it names must be there, and a
         // `.json` it does not name is a manifest out of date.
@@ -127,10 +143,10 @@ object Conformance {
         for (v in vectors) {
             val check = claimed[v.kind]
             when {
-                v.side != "client" ->
+                v.side !in sides ->
                     skipped
                         .getOrPut(v.kind, ::ArrayList)
-                        .add("${v.path} (${v.side}: Rust's simulator and its scheduler)")
+                        .add("${v.path} (${v.side}: ${skipReason(v.side)})")
                 check == null ->
                     skipped
                         .getOrPut(v.kind, ::ArrayList)

@@ -341,8 +341,6 @@ internal class Headless(f: Flags, domain: Domain) {
         p.dropped?.let { say("dropped: $it") }
         p.denied?.let { say("denied: $it") }
         p.note?.let { say(it) }
-        // Nothing here listens to the room; what it said is not kept.
-        peer.heard()
         collect()
     }
 

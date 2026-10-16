@@ -35,8 +35,16 @@ public data class Covers(val after: Seq, val upto: Seq)
 
 /** A frame a client writes (`protocol::ClientMsg`). */
 public sealed class ClientMsg {
-    public data class Hello(val sub: Subscription, val token: String?, val spec: Long) :
-        ClientMsg()
+    /**
+     * `device`: §14 the device this connection is (`docs/plan-live.md`), present only when
+     * declared, so a client that never uses live state says the bytes it said.
+     */
+    public data class Hello(
+        val sub: Subscription,
+        val token: String?,
+        val spec: Long,
+        val device: DeviceDecl? = null,
+    ) : ClientMsg()
 
     public data class Push(val entries: List<LogEntry>) : ClientMsg()
 
@@ -54,6 +62,12 @@ public sealed class ClientMsg {
 
     public class Say(public val frame: ByteArray) : ClientMsg()
 
+    /** §14 Run a transition of a live instance (`call`). */
+    public class CallLive(public val call: Call) : ClientMsg()
+
+    /** §14 Send this instance whole (`resync`): a gap, or a hash that did not match. */
+    public class Resync(public val instance: Instance) : ClientMsg()
+
     /** The frame as a value; its wire form is `Canon.encode` of this. */
     public fun toValue(): Value =
         when (this) {
@@ -66,6 +80,7 @@ public sealed class ClientMsg {
                         "spec" to Value.VInt(spec))
                 named(f, sub.logId)
                 flagged(f, "partial", sub.partial)
+                device?.let { f.add("device" to it.toValue()) }
                 node("hello", f)
             }
             is Push -> node("push", listOf("entries" to Value.VList(entries.map(::entryValue))))
@@ -82,6 +97,8 @@ public sealed class ClientMsg {
                 node("verify", f)
             }
             is Say -> node("say", listOf("say" to Value.VBytes(frame)))
+            is CallLive -> call.toValue()
+            is Resync -> resyncValue(instance)
         }
 
     /** Its canonical bytes. */
@@ -99,7 +116,8 @@ public sealed class ClientMsg {
                             is Value.VNull -> null
                             else -> text(tok)
                         },
-                        int64(need(m, "spec")))
+                        int64(need(m, "spec")),
+                        m["device"]?.let(DeviceDecl::fromValue))
                 "push" -> Push(list(need(m, "entries"), ::entryFromValue))
                 "need_facts" -> NeedFacts(list(need(m, "seqs"), ::int64))
                 "need_closures" -> NeedClosures(list(need(m, "hashes"), ::bytes))
@@ -107,6 +125,8 @@ public sealed class ClientMsg {
                     Verify(
                         int64(need(m, "seq")), bytes(need(m, "hash")), logOf(m), flag(m, "partial"))
                 "say" -> Say(bytes(need(m, "say")))
+                "call" -> CallLive(Call.fromFields(m))
+                "resync" -> Resync(LiveWire.instanceOf(m))
                 else -> bad("unknown client frame $t")
             }
         }
@@ -175,6 +195,15 @@ public sealed class ServerMsg {
     ) : ServerMsg()
 
     public class Heard(public val frame: ByteArray) : ServerMsg()
+
+    /** §14 A call a live instance took (`applied`), ordered or ephemeral. */
+    public class AppliedLive(public val applied: LiveApplied) : ServerMsg()
+
+    /** §14 A call it did not, to its author (`refused`). */
+    public class RefusedLive(public val refused: LiveRefused) : ServerMsg()
+
+    /** §14 An instance whole (`live_snapshot`). */
+    public class SnapshotLive(public val snapshot: LiveSnapshot) : ServerMsg()
 
     /** The frame as a value. */
     public fun toValue(): Value =
@@ -247,6 +276,9 @@ public sealed class ServerMsg {
                 node("agree", f)
             }
             is Heard -> node("heard", listOf("hear" to Value.VBytes(frame)))
+            is AppliedLive -> applied.toValue()
+            is RefusedLive -> refused.toValue()
+            is SnapshotLive -> snapshot.toValue()
         }
 
     public companion object {
@@ -311,6 +343,9 @@ public sealed class ServerMsg {
                             else -> bad("an agree's unknown is true or absent")
                         })
                 "heard" -> Heard(bytes(need(m, "hear")))
+                "applied" -> AppliedLive(LiveApplied.fromFields(m))
+                "refused" -> RefusedLive(LiveRefused.fromFields(m))
+                "live_snapshot" -> SnapshotLive(LiveSnapshot.fromFields(m))
                 else -> bad("unknown server frame $t")
             }
         }
@@ -582,7 +617,6 @@ public class Client(
 
     /** Oldest first. */
     public val out: MutableList<ClientMsg> = ArrayList()
-    public val heard: MutableList<ByteArray> = ArrayList()
     public var denied: String? = null
 
     /** Every answer to a `verify`, oldest first: true, false, or null where it could not say. */
@@ -608,6 +642,16 @@ public class Client(
 
     /** This connection has brought a snapshot. */
     public var started: Boolean = false
+
+    /**
+     * §14 Live state (`docs/plan-live.md`): the instances this client holds and the device it
+     * declares. Null — every client of a module without live state — and nothing here says a byte
+     * it did not say before.
+     */
+    public var live: Watch? = null
+
+    /** `with_live`: hold live state, as the device `watch` declares (or as none). */
+    public fun withLive(watch: Watch): Client = apply { live = watch }
 
     /** `with_schema`: the module's schema, for a client opened over a union. */
     public fun withSchema(module: Schema): Client = apply { schema = module }
@@ -646,7 +690,8 @@ public class Client(
         ClientMsg.Hello(
             Subscription(replica.cursor, mode, replica.logId, replica.partial != null),
             token,
-            SPEC_VERSION)
+            SPEC_VERSION,
+            live?.device)
 
     /** §12.1 `connected`: hello at the cursor, then everything pending pushed. */
     public fun connected() {
@@ -656,16 +701,46 @@ public class Client(
         more = false
         served = false
         started = false
-        heard.clear()
         emit(hello())
         if (replica.pending.isNotEmpty()) emit(ClientMsg.Push(ArrayList(replica.pending)))
+        // §14 Every live call still pending, said again in order: the server answers one it
+        // already took with the `applied` it was.
+        live?.let { w -> for (c in w.connected()) emit(ClientMsg.CallLive(c)) }
     }
 
     public fun disconnected() {
         linked = false
         out.clear()
         more = false
-        heard.clear()
+    }
+
+    /**
+     * §14 `call`: this device calls a transition of a live instance, run over its view at once with
+     * `now` its guess at the server's clock, and sent if linked — an ordered call kept pending and
+     * said again on the next connection until the server answers; an ephemeral one applied and
+     * done, `counter` its place among this device's, and dropped while unlinked. A refusal here is
+     * the preview's, thrown as a `LiveRefusal`, and nothing is sent.
+     */
+    public fun call(
+        who: Ctx,
+        i: Instance,
+        transition: String,
+        input: Map<String, Value>,
+        id: Id,
+        now: Long,
+        counter: Long
+    ): Kind {
+        val w = live ?: throw LiveRefusal(Refusal.Refused("this client holds no live state"))
+        val called = w.call(who, i, transition, input, id, now, counter)
+        emit(ClientMsg.CallLive(called.call))
+        return called.kind
+    }
+
+    // What the server said of live state, applied; a snapshot asked for where the replica fell out
+    // of step.
+    private fun heardLive(said: Said) {
+        val w = live ?: return
+        for (i in w.heard(said)) emit(ClientMsg.Resync(i))
     }
 
     /**
@@ -690,7 +765,12 @@ public class Client(
      */
     public fun recv(msg: ServerMsg) {
         when (msg) {
-            is ServerMsg.Heard -> heard.add(msg.frame)
+            // §14 The opaque rooms' frame: nothing in this runtime listens to one.
+            is ServerMsg.Heard -> {}
+            // §14 Not the log: nothing here waits for a settle.
+            is ServerMsg.AppliedLive -> heardLive(Said.Applied(msg.applied))
+            is ServerMsg.RefusedLive -> heardLive(Said.Refused(msg.refused))
+            is ServerMsg.SnapshotLive -> heardLive(Said.Snapshot(msg.snapshot))
             is ServerMsg.Denied -> {
                 denied = msg.reason
                 linked = false
@@ -807,11 +887,6 @@ public class Client(
         }
     }
 
-    /** A live frame; dropped while unlinked, never queued. */
-    public fun say(frame: ByteArray) {
-        emit(ClientMsg.Say(frame))
-    }
-
     /** `verify_all`: ask whether the authority agrees with the confirmed state. */
     public fun verifyAll() {
         val partial = replica.partial != null
@@ -824,12 +899,6 @@ public class Client(
         val o = ArrayList(out)
         out.clear()
         return o
-    }
-
-    public fun takeHeard(): List<ByteArray> {
-        val h = ArrayList(heard)
-        heard.clear()
-        return h
     }
 
     public companion object {

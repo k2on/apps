@@ -165,6 +165,14 @@ public object Reads {
                 out.add(e.table)
                 e.key.forEach { expr(it, out) }
             }
+            is Expr.Variant,
+            is Expr.Case,
+            is Expr.Slot,
+            is Expr.SetSlot,
+            is Expr.Slots,
+            is Expr.LiveState,
+            is Expr.CtxNow,
+            is Expr.CtxDevice -> children(e).forEach { expr(it, out) }
         }
     }
 }

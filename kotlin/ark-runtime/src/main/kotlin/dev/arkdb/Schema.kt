@@ -54,6 +54,64 @@ public sealed class Ty {
                 "})"
     }
 
+    /**
+     * §2.2 A type of the module's type section, by its name (`Ty::Named`): a record or a sum a live
+     * state is made of (`docs/plan-live.md`). `{"t":"named","name"}`.
+     */
+    public data class TNamed(val name: String) : Ty() {
+        override fun toString(): String = "Named(${debugString(name)})"
+    }
+
+    /**
+     * §2.2 A list of at least one element: a list to the checker, held to its one element wherever
+     * a value crosses a boundary. `{"t":"non_empty_list","of"}`.
+     */
+    public data class TNonEmpty(val of: Ty) : Ty() {
+        override fun toString(): String = "NonEmpty($of)"
+    }
+
+    /**
+     * §2.2 A sum of records: one of the named variants, each a record of its own fields. Its value
+     * is a struct of the variant's fields with the variant's name under `t`, so no variant has a
+     * field `t`. `{"t":"sum","variants":{name: {field: ty}}}`. Variants and fields in code point
+     * order of their names.
+     */
+    public class TSum(variants: Map<String, Map<String, Ty>>) : Ty() {
+        public val variants: SortedMap<String, SortedMap<String, Ty>> =
+            sortedFields(variants.mapValues { sortedFields(it.value) })
+
+        override fun equals(other: Any?): Boolean = other is TSum && variants == other.variants
+
+        override fun hashCode(): Int = variants.hashCode()
+
+        override fun toString(): String =
+            "Sum({" +
+                variants.entries.joinToString(", ") { (n, fs) ->
+                    debugString(n) +
+                        ": {" +
+                        fs.entries.joinToString(", ") { debugString(it.key) + ": " + it.value } +
+                        "}"
+                } +
+                "})"
+    }
+
+    /**
+     * §2.2 One value per device standing in a live instance, by device id: a struct keyed by the
+     * ids, a slot that holds nothing a key that is not there. `{"t":"per_device","of"}`.
+     */
+    public data class TPerDevice(val of: Ty) : Ty() {
+        override fun toString(): String = "PerDevice($of)"
+    }
+
+    /**
+     * §2.2 A field of a live state's record that is ephemeral (`docs/plan-live.md`, "Ordered and
+     * ephemeral fields"): left out of the state's hash and of what a server keeps.
+     * `{"t":"ephemeral","of"}`.
+     */
+    public data class TEphemeral(val of: Ty) : Ty() {
+        override fun toString(): String = "Ephemeral($of)"
+    }
+
     /** `is_scalar`: the types a column may have, before nullability. */
     public val isScalar: Boolean
         get() =

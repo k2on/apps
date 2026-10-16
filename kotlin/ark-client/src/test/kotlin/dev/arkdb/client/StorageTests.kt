@@ -8,8 +8,8 @@
 //    the Rust one's, key for key and byte for byte. Then the Rust peer's
 //    last storage is opened by a Kotlin peer, which must find the state the
 //    Rust peer reported.
-// 2. The semantics. Every trace — spec/vectors/trace/ and, when named, the
-//    corpus — replayed with the client's durable copy kept through a
+// 2. The semantics. Every trace MANIFEST.json gives this runtime and, when
+//    named, the corpus — replayed with the client's durable copy kept through a
 //    `Storage` in these records (`StoredCopy`) rather than in memory: a
 //    reopen opens what the records say, so a record that loses anything a
 //    trace's reopen needs fails that trace at the step after it.
@@ -25,6 +25,7 @@ import dev.arkdb.Hash
 import dev.arkdb.Hex
 import dev.arkdb.Value
 import dev.arkdb.conformance.ClientChecks
+import dev.arkdb.conformance.Conformance
 import dev.arkdb.conformance.Failed
 import dev.arkdb.conformance.Json
 import dev.arkdb.reopenFrom
@@ -170,34 +171,42 @@ object StorageTests {
             "storage fixture ${path.name}: ${steps.size} steps, every record the Rust peer's, byte for byte")
     }
 
-    /** Every trace replayed with the durable copy kept in these records. */
+    /**
+     * Every trace the manifest gives this runtime replayed with the durable copy kept in these
+     * records: what `MANIFEST.json` lists of kind `trace` on a side this runtime runs, each passed
+     * or failed as its `expect` says, and every other one skipped by name — the manifest is the
+     * list (spec/RUNNERS.md), so a trace of a side this runtime does not run is never replayed by
+     * walking a directory.
+     */
     fun traces(vectors: File, corpus: String?) {
-        val dir = File(vectors, "trace")
-        val files =
-            (dir.listFiles() ?: emptyArray())
-                .filter { it.isFile && it.name.endsWith(".json") }
-                .sortedBy { it.name }
+        val mine = Conformance.manifest(vectors).filter { it.kind == "trace" }
         var ran = 0
-        for (f in files) {
-            try {
-                ClientChecks.trace(Json.parse(f.readText(Charsets.UTF_8)), ::StoredCopy)
-                ran += 1
-            } catch (e: Failed) {
-                problems.add("trace/${f.name} through storage: ${e.message}")
+        for (t in mine) {
+            if (t.side !in Conformance.sides) {
+                println("skipped ${t.path} (${t.side}: ${Conformance.skipReason(t.side)})")
+                continue
+            }
+            val failure =
+                try {
+                    ClientChecks.trace(
+                        Json.parse(File(vectors, t.path).readText(Charsets.UTF_8)), ::StoredCopy)
+                    null
+                } catch (e: Failed) {
+                    e.message ?: "failed"
+                }
+            ran += 1
+            when {
+                t.expect == "pass" && failure != null ->
+                    problems.add("${t.path} through storage: $failure")
+                t.expect == "fail" && failure == null ->
+                    problems.add("${t.path} replayed through storage and must not")
+                t.expect == "fail" ->
+                    println("${t.path}: fails, as it must (${failure?.take(120)})")
             }
         }
-        println("trace/: $ran of ${files.size} replayed with the durable copy in storage records")
-        for (f in
-            (File(dir, "falsify").listFiles() ?: emptyArray()).filter {
-                it.name.endsWith(".json")
-            }) {
-            try {
-                ClientChecks.trace(Json.parse(f.readText(Charsets.UTF_8)), ::StoredCopy)
-                problems.add("trace/falsify/${f.name} replayed through storage and must not")
-            } catch (e: Failed) {
-                println("trace/falsify/${f.name}: fails, as it must (${e.message?.take(120)})")
-            }
-        }
+        println(
+            "trace: $ran of ${mine.size} the manifest names replayed with the durable copy in storage records")
+        if (ran == 0) problems.add("the manifest gave this runtime no trace")
         if (corpus != null) {
             val (n, failed, ms) = ClientChecks.corpus(File(corpus), ::StoredCopy)
             println(

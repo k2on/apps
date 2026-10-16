@@ -27,13 +27,17 @@ import dev.arkdb.ClientMsg
 import dev.arkdb.Closure
 import dev.arkdb.Ctx
 import dev.arkdb.Decode
+import dev.arkdb.DeviceDecl
 import dev.arkdb.FactList
 import dev.arkdb.FnKind
 import dev.arkdb.Function
 import dev.arkdb.Hash
 import dev.arkdb.Id
+import dev.arkdb.Instance
 import dev.arkdb.Journal
+import dev.arkdb.Kind
 import dev.arkdb.Layout
+import dev.arkdb.LiveRefusal
 import dev.arkdb.Log
 import dev.arkdb.LogEntry
 import dev.arkdb.LogRecords
@@ -43,11 +47,13 @@ import dev.arkdb.Module
 import dev.arkdb.Received
 import dev.arkdb.Refusal
 import dev.arkdb.Replica
+import dev.arkdb.Runner
 import dev.arkdb.Schema
 import dev.arkdb.Seq
 import dev.arkdb.ServerMsg
 import dev.arkdb.Value
 import dev.arkdb.Verify
+import dev.arkdb.Watch
 import dev.arkdb.localCommit
 import dev.arkdb.refusalText
 import dev.arkdb.stripModule
@@ -71,6 +77,9 @@ public class Domain(public val module: Module) {
 
     /** `Domain::hash`: the module hash of the module stripped of private blocks. */
     public val hash: ByteArray = Hash.moduleHash(stripModule(module))
+
+    /** `Domain::live`: the module's live states, interpreted (`docs/plan-live.md`). */
+    public val live: Runner = Runner.ofModule(module)
 
     /** A function by name: its hash and its definition. */
     public fun function(name: String): Pair<ByteArray, Function>? =
@@ -117,9 +126,21 @@ public data class Options(
     val alone: Boolean = false,
     val autos: Autos = Autos.System(),
     val timing: Timing = Timing(),
+    /**
+     * `docs/plan-live.md` The device this peer declares at `hello`: it subscribes to the live
+     * instances its scope gives it. Null — the default — and it holds no live state and says
+     * nothing it did not say.
+     */
+    val device: DeviceDecl? = null,
 ) {
     /** The same, with a link's numbers (`with_timing`). */
     public fun withTiming(t: Timing): Options = copy(timing = t)
+
+    /**
+     * `with_device`: declare this peer a device — its id (empty is the login's session), its kind,
+     * its name, and whether it can play.
+     */
+    public fun withDevice(d: DeviceDecl): Options = copy(device = d)
 
     public companion object {
         /** A login of a server. */
@@ -173,8 +194,11 @@ public class Pumped {
      * no view needs to hear of.
      */
     public var views: Boolean = false
-    /** Live frames that arrived, for [Peer.heard]. */
-    public var heard: Int = 0
+    /**
+     * `docs/plan-live.md` A live instance's view moved, or a verdict on a call arrived: [Peer.live]
+     * and [Peer.takeLiveRefusals] have something new.
+     */
+    public var live: Boolean = false
     /**
      * [Peer.status], when it differs by value from what the last pump reported: the one way a
      * status line learns it changed.
@@ -188,7 +212,7 @@ public class Pumped {
 
     /**
      * Nothing moved: no frame, no change of the link, no verdict, no note, nothing for a view,
-     * nothing heard, the status as it was. A host answering a wake with a quiet pump publishes
+     * nothing live, the status as it was. A host answering a wake with a quiet pump publishes
      * nothing.
      */
     public fun quiet(): Boolean =
@@ -199,7 +223,7 @@ public class Pumped {
             rejected == 0 &&
             note == null &&
             !views &&
-            heard == 0 &&
+            !live &&
             status == null
 }
 
@@ -253,10 +277,17 @@ public data class Status(
     val diverged: Int,
     val denied: String?,
     val lastClose: String?,
-    /** Live frames received, decoded or not. */
+    /** Live state frames received (`applied`, `refused`, `live_snapshot`). */
     val heardFrames: Long,
     val badFrames: Long,
 )
+
+/**
+ * `THROTTLE_MS`: the least time between two ephemeral calls [Peer.callThrottled] sends for one
+ * transition, in milliseconds — twenty a second, under the server's thirty, the final value always
+ * sent.
+ */
+public const val THROTTLE_MS: Long = 50
 
 /** A verdict against an intent this peer authored (`ark_client::Rejection`). */
 public data class Rejection(val id: Id, val reason: String)
@@ -320,6 +351,26 @@ private constructor(
     /** Settles run, for the tests that count a wake's. */
     public var settles: Long = 0
         private set
+
+    // `docs/plan-live.md` What this peer knows of the server's clock: the `at` of every ordered
+    // `applied` it heard, less its own clock when it heard it, the latest few.
+    private val offsets = ArrayDeque<Long>()
+    // The counter of this device's ephemeral calls: from the wall clock at open, so a peer started
+    // again goes on above where it was.
+    private var counter: Long = java.lang.System.currentTimeMillis() * 1000
+    // Ephemeral calls held back by `callThrottled`, each with when it may go.
+    private val throttled = ArrayList<Throttled>()
+    // A live view moved since the last pump.
+    private var liveMoved = false
+
+    // An ephemeral call `callThrottled` holds until it may go: the newest per transition of a
+    // state, sent at most once per THROTTLE_MS, the last always.
+    private class Throttled(
+        val state: String,
+        val transition: String,
+        var waiting: Map<String, Value>?,
+        var sent: Long
+    )
 
     private class AloneLog(
         val journal: Journal,
@@ -402,6 +453,9 @@ private constructor(
             r.partial = partial?.let { java.util.TreeMap(it) }
             r.logId = writer.namedLog
             val client = Client.open(r, Mode.Whole, opts.token).withSchema(schema)
+            // `docs/plan-live.md` A device of a module with live state holds it.
+            if (!domain.live.isEmpty && opts.device != null)
+                client.withLive(Watch(domain.live, opts.device))
             client.module = domain.hash
             client.replica.takeConfirmed()
             var ctx = Ctx(opts.user, opts.session)
@@ -625,17 +679,131 @@ private constructor(
     public val denied: String?
         get() = client.denied
 
-    /** What the room said since the last ask; never durable. */
-    public fun heard(): List<ByteArray> = client.takeHeard()
+    // -- live state ---------------------------------------------------------------
 
     /**
-     * `say`: a live frame into the room, sent now if linked and dropped if not — a room is what is
-     * true *now*, and nothing about it is worth saying later.
+     * `docs/plan-live.md` `instance`: the instance of the live state `name` this peer's login holds
+     * — its scope's first key — if this peer is a device of a module with that state.
      */
-    public fun say(frame: ByteArray) {
-        client.say(frame)
-        flush()
+    public fun instance(name: String): Instance? = client.live?.instanceOf(name, ctx)
+
+    /**
+     * `live`: the state `name` as this device sees it — what the server confirmed with this
+     * device's own calls on top, ephemeral slots and all. Null before anything is known of it: a
+     * call, or the snapshot the server sends on connecting.
+     */
+    public fun live(name: String): Value? {
+        val i = instance(name) ?: return null
+        return client.live?.view(i)
     }
+
+    /**
+     * `call`: a transition of the live state `name`, run over this device's view at once — so
+     * [live] has moved before this returns — at its guess of the server's clock ([serverNow]), and
+     * sent if linked. An ordered call is pending until the server answers, and said again on every
+     * connection until it does; an ephemeral one is applied and done, and dropped while unlinked.
+     * One path for both: the kind is the module's. A refusal here is the preview's, thrown as
+     * `Refused`, and nothing is sent.
+     */
+    public fun call(name: String, transition: String, input: Map<String, Value>): Kind {
+        val kind = callNow(name, transition, input)
+        flush()
+        return kind
+    }
+
+    // The call previewed and queued; what `call` and the throttle share.
+    private fun callNow(name: String, transition: String, input: Map<String, Value>): Kind {
+        val i = instance(name) ?: throw PeerError("no live state $name on this peer")
+        val id = autos.newId()
+        val now = serverNow()
+        counter += 1
+        val kind =
+            try {
+                client.call(ctx, i, transition, input, id, now, counter)
+            } catch (e: LiveRefusal) {
+                throw Refused(e.refusal)
+            }
+        liveMoved = true
+        return kind
+    }
+
+    /**
+     * `call_throttled`: [call] for an ephemeral transition a finger drives — a pointer dragged, a
+     * scrubber held — at most one send per [THROTTLE_MS] for this transition, trailing edge, so the
+     * final value always goes. The view moves at once whatever is sent; what is held is sent by a
+     * [pump] at [deadline]. An ordered call is never held: its order is the point of it.
+     */
+    public fun callThrottled(name: String, transition: String, input: Map<String, Value>): Kind =
+        callThrottledAt(Link.monotonicMs(), name, transition, input)
+
+    /** [callThrottled] at a given monotonic millisecond, so that the throttle is testable. */
+    public fun callThrottledAt(
+        now: Long,
+        name: String,
+        transition: String,
+        input: Map<String, Value>
+    ): Kind {
+        if (domain.live.kind(name, transition) == Kind.Ordered) return call(name, transition, input)
+        val t = throttled.firstOrNull { it.state == name && it.transition == transition }
+        if (t != null && now < t.sent + THROTTLE_MS) {
+            // The view moves now; the send waits for the window.
+            val w = client.live ?: throw PeerError("no live state $name on this peer")
+            val i = instance(name) ?: throw PeerError("no live state $name on this peer")
+            val id = autos.newId()
+            val at = serverNow()
+            counter += 1
+            val called =
+                try {
+                    w.call(ctx, i, transition, input, id, at, counter)
+                } catch (e: LiveRefusal) {
+                    throw Refused(e.refusal)
+                }
+            t.waiting = input
+            liveMoved = true
+            return called.kind
+        }
+        val kind = call(name, transition, input)
+        if (t != null) {
+            t.sent = now
+            t.waiting = null
+        } else throttled.add(Throttled(name, transition, null, now))
+        return kind
+    }
+
+    // What the throttle held and is now due, sent.
+    private fun releaseThrottled(now: Long) {
+        for (t in throttled) {
+            val input = t.waiting ?: continue
+            if (now < t.sent + THROTTLE_MS) continue
+            t.sent = now
+            t.waiting = null
+            try {
+                callNow(t.state, t.transition, input)
+            } catch (e: PeerError) {
+                // The state no longer takes it; the next value will say.
+            }
+        }
+    }
+
+    /**
+     * `take_live_refusals`: the verdicts the server gave this device's live calls since the last
+     * ask.
+     */
+    public fun takeLiveRefusals(): List<Rejection> =
+        client.live?.takeRefused()?.map { (id, why) -> Rejection(id, why) } ?: emptyList()
+
+    /**
+     * `server_offset`: the server's clock less this peer's, in milliseconds, as the `at` stamps of
+     * what it has heard say — the largest of the latest few, which is the one that waited least on
+     * the way. Null before any. What an app computes a moving position with.
+     */
+    public val serverOffset: Long?
+        get() = offsets.maxOrNull()
+
+    /**
+     * `server_now`: this peer's guess at the server's clock now — its own, moved by [serverOffset].
+     */
+    public fun serverNow(): Long = java.lang.System.currentTimeMillis() + (serverOffset ?: 0)
 
     // -- the socket ---------------------------------------------------------------
 
@@ -673,10 +841,14 @@ private constructor(
      * stopped, alone — is no timer at all. The host arms one timer for it, and the open that
      * follows clears it.
      */
-    public fun deadline(): Long? = link?.deadline
+    public fun deadline(): Long? {
+        val l = link?.deadline
+        val held = throttled.filter { it.waiting != null }.minOfOrNull { it.sent + THROTTLE_MS }
+        return if (l != null && held != null) minOf(l, held) else l ?: held
+    }
 
     /**
-     * Send what the engine has queued, now: a push, a live frame, a verify. [mutate], [say] and
+     * Send what the engine has queued, now: a push, a live call, a verify. [mutate], [call] and
      * [verify] do it themselves; a pump does it last.
      */
     public fun flush() {
@@ -720,8 +892,8 @@ private constructor(
      */
     public fun pumpAt(now: Long): Pumped {
         waker?.answered()
-        val heardBefore = heardFrames
         val p = Pumped()
+        releaseThrottled(now)
         val l = link
         if (l != null) {
             val polled = l.pollAt(now)
@@ -767,7 +939,9 @@ private constructor(
         val now = r.changes.size to r.rebuilt
         p.views = now != told
         told = now
-        p.heard = (heardFrames - heardBefore).toInt()
+        val moved = client.live?.takeMoved() ?: false
+        p.live = liveMoved || moved
+        liveMoved = false
         val s = status()
         if (s != published) {
             published = s
@@ -863,7 +1037,18 @@ private constructor(
     private fun placeFrame(bytes: ByteArray) {
         when (val got = ServerMsg.decodeFor(bytes, client.schema)) {
             is Received.Msg -> {
-                if (got.msg is ServerMsg.Heard) heardFrames++
+                val msg = got.msg
+                if (msg is ServerMsg.AppliedLive ||
+                    msg is ServerMsg.RefusedLive ||
+                    msg is ServerMsg.SnapshotLive)
+                    heardFrames++
+                // `docs/plan-live.md` The server's clock, as an ordered call stamps it: a sample of
+                // the offset, the latest sixteen kept.
+                val order = (msg as? ServerMsg.AppliedLive)?.applied?.order
+                if (order is dev.arkdb.Order.Ordered) {
+                    offsets.addLast(order.at - java.lang.System.currentTimeMillis())
+                    while (offsets.size > 16) offsets.removeFirst()
+                }
                 if (got.msg is ServerMsg.Batch || got.msg is ServerMsg.SnapshotOf) served()
                 client.recv(got.msg)
             }

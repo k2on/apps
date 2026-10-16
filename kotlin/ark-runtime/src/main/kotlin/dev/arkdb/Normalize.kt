@@ -46,8 +46,47 @@ public object Normalize {
         return f.copy(input = input, refine = refine, body = body, plan = plan)
     }
 
-    /** `normalize_module`: every function normalised. */
-    public fun module(m: Module): Module = m.copy(functions = m.functions.map(::function))
+    /** `normalize_module`: every function and every live state normalised. */
+    public fun module(m: Module): Module =
+        m.copy(functions = m.functions.map(::function), states = m.states.map(::state))
+
+    /**
+     * `normalize_transition`: a transition numbered as a function would be — its checks, its guards
+     * (as a function's refinements are), then its body.
+     */
+    public fun transition(t: Transition): Transition {
+        val f = function(transitionFunction(t))
+        return Transition(t.name, f.input, f.refine.map { (e, why) -> e to (why ?: "") }, f.body)
+    }
+
+    /** `normalize_state`: its init, its scope and each transition normalised, each on its own. */
+    public fun state(s: State): State =
+        s.copy(
+            init = expr(emptyMap(), 0, s.init).first,
+            scope = expr(emptyMap(), 0, s.scope).first,
+            transitions = s.transitions.map(::transition),
+            onJoin = s.onJoin?.let(::transition),
+            onLeave = s.onLeave?.let(::transition),
+            onRestore = s.onRestore?.let(::transition))
+
+    /**
+     * `transition_function`: a transition as the function the verifier and the numbering read it as
+     * — its input, its guards as refinements, its body.
+     */
+    public fun transitionFunction(t: Transition): Function =
+        Function(
+            t.name,
+            FnKind.Provide,
+            null,
+            emptyList(),
+            emptyList(),
+            t.input,
+            t.guards.map { (e, why) -> e to why },
+            null,
+            t.body,
+            null,
+            emptyList(),
+            false)
 
     private fun block(ren: Ren, next: Sym, blk: Block): Pair<Block, Ren> {
         var r = ren
@@ -152,6 +191,7 @@ public object Normalize {
             is Expr.Fold ->
                 listOf(e.acc, e.sym) + listOf(e.over, e.init, e.body).flatMap(::exprBinders)
             is Expr.Select -> planBinders(e.plan)
+            is Expr.Case -> exprBinders(e.e) + e.arms.flatMap { listOf(it.sym) + exprBinders(it.e) }
             else -> children(e).flatMap(::exprBinders)
         }
 
@@ -254,6 +294,45 @@ public object Normalize {
             is Expr.Get -> many(ren, next, e.key).let { (ks, n) -> Expr.Get(e.table, ks) to n }
             is Expr.ExistsE ->
                 many(ren, next, e.key).let { (ks, n) -> Expr.ExistsE(e.table, ks) to n }
+            // A sum built: its fields in name order, as a struct's.
+            is Expr.Variant -> {
+                var n = next
+                val out = LinkedHashMap<String, Expr>()
+                for ((k, v) in e.fields) {
+                    val (v2, n2) = expr(ren, n, v)
+                    out[k] = v2
+                    n = n2
+                }
+                Expr.Variant(e.ty, e.name, out) to n
+            }
+            // The scrutinee, then each arm in order: its binder, then its body.
+            is Expr.Case -> {
+                val (e2, k0) = expr(ren, next, e.e)
+                var k = k0
+                val arms =
+                    e.arms.map { a ->
+                        val (b2, k2) = expr(bind(ren, a.sym, k), k + 1, a.e)
+                        val arm = Expr.Arm(a.name, k, b2)
+                        k = k2
+                        arm
+                    }
+                Expr.Case(e2, arms) to k
+            }
+            is Expr.Slot -> {
+                val (a2, n1) = expr(ren, next, e.e)
+                val (b2, n2) = expr(ren, n1, e.key)
+                Expr.Slot(a2, b2) to n2
+            }
+            is Expr.SetSlot -> {
+                val (a2, n1) = expr(ren, next, e.e)
+                val (b2, n2) = expr(ren, n1, e.key)
+                val (c2, n3) = expr(ren, n2, e.v)
+                Expr.SetSlot(a2, b2, c2) to n3
+            }
+            is Expr.Slots -> expr(ren, next, e.e).let { (a2, n) -> Expr.Slots(a2) to n }
+            is Expr.LiveState,
+            is Expr.CtxNow,
+            is Expr.CtxDevice,
             is Expr.Lit,
             is Expr.Arg,
             is Expr.AutoE,

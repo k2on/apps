@@ -23,6 +23,40 @@ public typealias FnHash = ByteArray
  */
 public data class Closure(val function: Function, val helpers: List<Function>)
 
+/**
+ * §8.4 A live state with everything it runs (`hash::LiveClosure`): the state, normalised; the
+ * declarations of every named type it reaches, by name; and every helper its init, scope and
+ * transitions reach, in the module's order — a complete program run without consulting any module.
+ */
+public class LiveClosure(
+    public val state: State,
+    public val types: Map<String, Ty>,
+    public val helpers: List<Function>,
+) {
+    /** `state_ty`: the state's type, resolved, its ephemeral markers kept. */
+    public val stateTy: Ty =
+        try {
+            Types.resolve(types, state.ty)
+        } catch (e: Types.TypeError) {
+            state.ty
+        }
+
+    /** The fields of the state that are ephemeral. */
+    public val ephemeral: Set<String> = Types.ephemeralFields(stateTy)
+
+    /** `kind`: a hook, and a name the state does not declare, are ordered. */
+    public fun kind(name: String): Kind =
+        state.transitions.firstOrNull { it.name == name }?.let { Ordering.classify(stateTy, it) }
+            ?: Kind.Ordered
+
+    /**
+     * §8.4 `value_hash`: SHA-256 of the canonical encoding of an instance's ordered part, every
+     * ephemeral field left out — what an `applied` frame carries and a replica compares.
+     */
+    public fun valueHash(v: Value): ByteArray =
+        Sha256.hash(Canon.encode(Types.orderedPart(ephemeral, v)))
+}
+
 /** §8.1 A row's leaf: `sha256(enc(Text table) ‖ enc(Struct row))` (`hash::leaf`). */
 public fun leaf(table: String, row: Row): ByteArray {
     val md = java.security.MessageDigest.getInstance("SHA-256")
@@ -174,6 +208,112 @@ public object Hash {
             .filter { it.kind != FnKind.Guard && it.kind != FnKind.Scope }
             .any { asks(Encode.function(emptyMap(), it)) }
     }
+
+    /** §8.4 `live_closure`: the closure of a live state within a module. */
+    public fun liveClosure(m: Module, st: State): LiveClosure {
+        val seen = ArrayList<String>()
+        val todo = ArrayList(Encode.stateCalls(st).reversed())
+        while (todo.isNotEmpty()) {
+            val n = todo.removeAt(todo.size - 1)
+            if (n in seen) continue
+            val h = m.lookupFunction(n) ?: continue
+            seen.add(n)
+            todo.addAll(Encode.reaches(h).reversed())
+        }
+        val all = m.typeMap()
+        val types = java.util.TreeMap<String, Ty>(CodePointOrder)
+        val want = ArrayList<Ty>()
+        want.add(st.ty)
+        val exprs = ArrayList<Expr>(listOf(st.init, st.scope))
+        for (t in st.allTransitions()) {
+            want.addAll(t.input.map { it.second.ty })
+            exprs.addAll(t.guards.map { it.first })
+            for (s in t.body) stmtTypes(s, want)
+        }
+        for (e in exprs) exprTypes(e, want)
+        while (want.isNotEmpty()) {
+            val t = want.removeAt(want.size - 1)
+            namedIn(t) { n ->
+                if (!types.containsKey(n)) {
+                    all[n]?.let { d ->
+                        types[n] = d
+                        want.add(d)
+                    }
+                }
+            }
+        }
+        return LiveClosure(
+            Normalize.state(st),
+            types,
+            m.functions.filter { it.name in seen }.map(Normalize::function))
+    }
+
+    /** `live_closures`: every live state of a module, by name, with its closure. */
+    public fun liveClosures(m: Module): Map<String, LiveClosure> =
+        m.states.associate { it.name to liveClosure(m, it) }
+
+    private fun namedIn(t: Ty, f: (String) -> Unit) {
+        when (t) {
+            is Ty.TNamed -> f(t.name)
+            is Ty.TOption -> namedIn(t.of, f)
+            is Ty.TList -> namedIn(t.of, f)
+            is Ty.TNonEmpty -> namedIn(t.of, f)
+            is Ty.TPerDevice -> namedIn(t.of, f)
+            is Ty.TEphemeral -> namedIn(t.of, f)
+            is Ty.TStruct -> t.fields.values.forEach { namedIn(it, f) }
+            is Ty.TSum -> t.variants.values.forEach { fs -> fs.values.forEach { namedIn(it, f) } }
+            else -> {}
+        }
+    }
+
+    private fun stmtTypes(s: Stmt, out: MutableList<Ty>) {
+        when (s) {
+            is Stmt.Let -> exprTypes(s.e, out)
+            is Stmt.Refuse -> exprTypes(s.e, out)
+            is Stmt.Return -> s.e?.let { exprTypes(it, out) }
+            is Stmt.If -> {
+                exprTypes(s.c, out)
+                (s.then + s.els).forEach { stmtTypes(it, out) }
+            }
+            is Stmt.For -> {
+                exprTypes(s.over, out)
+                s.body.forEach { stmtTypes(it, out) }
+            }
+            else -> {}
+        }
+    }
+
+    private fun exprTypes(e: Expr, out: MutableList<Ty>) {
+        if (e is Expr.Variant) out.add(e.ty)
+        if (e is Expr.NoneE) out.add(e.ty)
+        for (c in children(e)) exprTypes(c, out)
+    }
+
+    /**
+     * §8.4 `live_hash`: the hash of a live state's closure — the state's value, transitions
+     * normalised, with the hashes of the helpers it reaches as `deps`, and the declarations of the
+     * types it reaches.
+     */
+    public fun liveHash(c: LiveClosure): FnHash = Sha256.hash(Canon.encode(liveClosureValue(c)))
+
+    private fun liveClosureValue(c: LiveClosure): Value {
+        val deps = LinkedHashMap<String, Value>()
+        for (n in Encode.stateCalls(c.state)) {
+            val h = c.helpers.firstOrNull { it.name == n } ?: continue
+            deps[n] = Value.VBytes(functionHash(Closure(h, c.helpers)))
+        }
+        return Value.record(
+            "t" to Value.VText("live_closure"),
+            "state" to Encode.state(deps, c.state),
+            "types" to Value.VList(c.types.map { (n, t) -> Encode.typeDecl(n, t) }))
+    }
+
+    /**
+     * §8.4 `state_type_hash`: the hash of a live state's type, resolved — what names the snapshot a
+     * server keeps of an instance. Ephemeral markers are part of it.
+     */
+    public fun stateTypeHash(c: LiveClosure): ByteArray =
+        Sha256.hash(Canon.encode(Encode.ty(c.stateTy)))
 
     /** `module_hash`: the hash of a whole module, normalised. */
     public fun moduleHash(m: Module): ByteArray =

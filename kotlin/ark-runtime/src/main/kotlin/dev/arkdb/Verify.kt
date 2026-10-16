@@ -21,6 +21,25 @@ public sealed class VerifyError {
 
     /** Function, then the complaint. */
     public data class In(val function: String, val complaint: Complaint) : VerifyError()
+
+    /** `docs/plan-live.md` Two declarations of one name in the type section. */
+    public data class DuplicateType(val name: String) : VerifyError()
+
+    /** Two live states of one name. */
+    public data class DuplicateState(val name: String) : VerifyError()
+
+    /** A declaration of the type section, then the complaint. */
+    public data class InType(val type: String, val complaint: Complaint) : VerifyError()
+
+    /** A live state, then the complaint. */
+    public data class InState(val state: String, val complaint: Complaint) : VerifyError()
+
+    /** A live state, one of its transitions, then the complaint. */
+    public data class InTransition(
+        val state: String,
+        val transition: String,
+        val complaint: Complaint
+    ) : VerifyError()
 }
 
 /** What is wrong inside one function (`verify::Complaint`), by the reference's names. */
@@ -151,6 +170,56 @@ public sealed class Complaint {
     public object ReturnInPrivate : Complaint()
 
     public object PrivateUndeclared : Complaint()
+
+    // `docs/plan-live.md`
+
+    /** A named type the section does not declare, or one that refers to itself. */
+    public data class UnknownType(val why: String) : Complaint()
+
+    /** A sum with no variant. */
+    public object EmptySum : Complaint()
+
+    /** A variant with a field named `t`, where a sum's value carries its variant's name. */
+    public data class TagField(val variant: String) : Complaint()
+
+    /** An ephemeral marker anywhere but on a `PerDevice` field of a live state's record. */
+    public object EphemeralNotOnState : Complaint()
+
+    /** The state, `ctx.now`, `ctx.device` read outside a transition. */
+    public object LiveOutsideState : Complaint()
+
+    /** A variant of a type that is not a sum, or of a sum without it. */
+    public data class NoSuchVariant(val name: String) : Complaint()
+
+    /** A variant built without exactly its fields: the field named. */
+    public data class VariantFields(val field: String) : Complaint()
+
+    /** A case whose arms are not the sum's variants, once each, in order. */
+    public data class CaseArms(val arms: List<String>) : Complaint()
+
+    /** A slot of something that is not a `PerDevice`. */
+    public object NotPerDevice : Complaint()
+
+    /** A read of a table, an auto or a provided value in a live state. */
+    public data class TransitionReads(val what: String) : Complaint()
+
+    /** An init that is not a constant. */
+    public data class InitNotConstant(val what: String) : Complaint()
+
+    /** An init that is not a value of the state's type. */
+    public data class InitNotAValue(val why: String) : Complaint()
+
+    /** A scope that is not a `Text` or a `List` of them of the context alone. */
+    public data class BadScope(val why: String) : Complaint()
+
+    /** A transition named as a hook is, or two of one name. */
+    public data class TransitionName(val name: String) : Complaint()
+
+    /** A hook whose input is not what the engine hands it. */
+    public data class HookInput(val hook: String) : Complaint()
+
+    /** An ordered transition that reads an ephemeral field (named, or "the whole state"). */
+    public data class OrderedReadsEphemeral(val field: String) : Complaint()
 }
 
 /** A module that did not verify, and every reason. */
@@ -206,6 +275,22 @@ public object Verify {
         val rdups = duplicates(m.routers.map { it.name })
         if (rdups.isNotEmpty()) throw VerifyFailed(rdups.map { VerifyError.DuplicateRouter(it) })
         val errs = ArrayList<VerifyError>()
+        // `docs/plan-live.md` The type section and the live states.
+        duplicates(m.types.map { it.first }).firstOrNull()?.let {
+            throw VerifyFailed(listOf(VerifyError.DuplicateType(it)))
+        }
+        duplicates(m.states.map { it.name }).firstOrNull()?.let {
+            throw VerifyFailed(listOf(VerifyError.DuplicateState(it)))
+        }
+        val types = m.typeMap()
+        for ((n, t) in m.types) {
+            try {
+                typeDeclOk(types, m.states, n, t)
+            } catch (c: Complain) {
+                errs.add(VerifyError.InType(n, c.c))
+            }
+        }
+        for (st in m.states) errs.addAll(stateOk(m, types, st))
         for (r in m.routers) {
             for (u in r.uses) {
                 if (m.lookupFunction(u)?.kind?.isMiddleware != true)
@@ -236,7 +321,9 @@ public object Verify {
     public fun prepare(m0: Module): Module = normalized(completeOrders(m0))
 
     private fun normalized(m: Module): Module =
-        m.copy(functions = m.functions.map(Normalize::function))
+        m.copy(
+            functions = m.functions.map(Normalize::function),
+            states = m.states.map(Normalize::state))
 
     private fun duplicates(names: List<String>): List<String> {
         val seen = HashSet<String>()
@@ -270,6 +357,10 @@ public object Verify {
         val provided: Map<String, Ty>,
         val locals: Map<Sym, Ty>,
         val private: Boolean,
+        // `docs/plan-live.md` The type section, which a named type is read through.
+        val types: Map<String, Ty> = emptyMap(),
+        // Inside a live state's transition: the state's type, resolved and unmarked.
+        val live: Ty? = null,
     ) {
         val schema: Schema
             get() = m.schema
@@ -336,17 +427,18 @@ public object Verify {
         duplicates(f.input.map { it.first } + f.autos.map { it.first }).firstOrNull()?.let {
             complain(Complaint.DuplicateName(it))
         }
-        for ((_, fd) in f.input) noNestedOption(fd.ty)
+        val types = m.typeMap()
+        for ((_, fd) in f.input) plainTy(types, fd.ty)
         for ((_, a) in f.autos) if (a is Auto.NewId && sch.lookupTable(a.table) == null)
             complain(Complaint.UnknownAutoTable(a.table))
-        f.ret?.let(::noNestedOption)
-        val args = f.input.associate { (n, fd) -> n to fd.ty }
+        f.ret?.let { plainTy(types, it) }
+        val args = f.input.associate { (n, fd) -> n to plainTy(types, fd.ty) }
         val provided = LinkedHashMap<String, Ty>()
         for (u in f.uses) {
             val g = m.lookupFunction(u) ?: continue
-            if (g.kind == FnKind.Provide) g.ret?.let { provided[g.name] = it }
+            if (g.kind == FnKind.Provide) g.ret?.let { provided[g.name] = plainTy(types, it) }
         }
-        val g = G(m, named, i, f, f.kind, args, provided, emptyMap(), false)
+        val g = G(m, named, i, f, f.kind, args, provided, emptyMap(), false, types)
         // The input's checks, each over its own field as it stands.
         for ((n, fd) in f.input) {
             val inner = (fd.ty as? Ty.TOption)?.of ?: fd.ty
@@ -399,10 +491,47 @@ public object Verify {
             is Ty.TOption ->
                 if (t.of is Ty.TOption) complain(Complaint.NestedOption) else noNestedOption(t.of)
             is Ty.TList -> noNestedOption(t.of)
+            is Ty.TNonEmpty -> noNestedOption(t.of)
+            is Ty.TEphemeral -> noNestedOption(t.of)
+            // A slot reads as an option of its type, which may not be one.
+            is Ty.TPerDevice ->
+                if (t.of is Ty.TOption) complain(Complaint.NestedOption) else noNestedOption(t.of)
             is Ty.TStruct -> t.fields.values.forEach(::noNestedOption)
+            is Ty.TSum -> t.variants.values.forEach { it.values.forEach(::noNestedOption) }
             else -> {}
         }
     }
+
+    // A declared type as the checker reads it: named types resolved, no option of an option, and
+    // no ephemeral marker — which belongs on a live state's own fields alone.
+    private fun plainTy(types: Map<String, Ty>, t: Ty): Ty {
+        val r =
+            try {
+                Types.resolve(types, t)
+            } catch (e: Types.TypeError) {
+                complain(Complaint.UnknownType(e.why))
+            }
+        noNestedOption(r)
+        if (marked(r)) complain(Complaint.EphemeralNotOnState)
+        return r
+    }
+
+    // Whether a type carries an ephemeral marker anywhere.
+    private fun marked(t: Ty): Boolean =
+        when (t) {
+            is Ty.TEphemeral -> true
+            is Ty.TOption -> marked(t.of)
+            is Ty.TList -> marked(t.of)
+            is Ty.TNonEmpty -> marked(t.of)
+            is Ty.TPerDevice -> marked(t.of)
+            is Ty.TStruct -> t.fields.values.any(::marked)
+            is Ty.TSum -> t.variants.values.any { it.values.any(::marked) }
+            else -> false
+        }
+
+    // A value read where it is declared a non-empty list is a list to the checker: what it was
+    // promised is held at the boundary (`Types`).
+    private fun readAs(t: Ty): Ty = if (t is Ty.TNonEmpty) Ty.TList(t.of) else t
 
     // A block definitely returns when its last statement does, or is an `if` both of whose branches
     // do.
@@ -483,7 +612,7 @@ public object Verify {
                     want == null && e == null -> {}
                     want == null -> complain(Complaint.ReturnTypeOnMutator)
                     e == null -> complain(Complaint.NoReturnType)
-                    else -> expect(g, "return", want, e)
+                    else -> expect(g, "return", plainTy(g.types, want), e)
                 }
             }
             // D3 Typed as the body around it is; what it names goes nowhere.
@@ -550,6 +679,12 @@ public object Verify {
         return when {
             a is Ty.TOption && b is Ty.TOption -> same(sch, a.of, b.of)
             a is Ty.TList && b is Ty.TList -> same(sch, a.of, b.of)
+            a is Ty.TPerDevice && b is Ty.TPerDevice -> same(sch, a.of, b.of)
+            // `docs/plan-live.md` A non-empty list is a list to the checker, and held to its one
+            // element where it crosses a boundary.
+            a is Ty.TNonEmpty && b is Ty.TList -> same(sch, a.of, b.of)
+            a is Ty.TList && b is Ty.TNonEmpty -> same(sch, a.of, b.of)
+            a is Ty.TNonEmpty && b is Ty.TNonEmpty -> same(sch, a.of, b.of)
             a is Ty.TStruct && b is Ty.TStruct -> {
                 val (wide, narrow) =
                     if (a.fields.size >= b.fields.size) a.fields to b.fields
@@ -580,7 +715,7 @@ public object Verify {
     private fun infer(g: G, want: Ty?, e: Expr): Ty =
         when (e) {
             is Expr.Lit -> lit(want, e.v)
-            is Expr.Arg -> g.args[e.name] ?: complain(Complaint.UnknownArg(e.name))
+            is Expr.Arg -> g.args[e.name]?.let(::readAs) ?: complain(Complaint.UnknownArg(e.name))
             is Expr.AutoE -> {
                 val a = g.f.autos.firstOrNull { it.first == e.name }?.second
                 when {
@@ -599,14 +734,20 @@ public object Verify {
                 if (t !is Ty.TStruct) complain(Complaint.NotAStruct(e.name))
                 val ft = t.fields[e.name] ?: complain(Complaint.NoSuchField(e.name))
                 g.named.fields.add(t.fields to e.name)
-                ft
+                readAs(ft)
             }
-            is Expr.StructE -> {
-                val wf = (want as? Ty.TStruct)?.fields
-                Ty.TStruct(e.fields.mapValues { (k, x) -> infer(g, wf?.get(k), x) })
-            }
+            // `docs/plan-live.md` A struct written where a `PerDevice` is wanted is its slots, by
+            // device id: `{}` is every slot empty.
+            is Expr.StructE ->
+                if (want is Ty.TPerDevice) {
+                    for ((k, x) in e.fields) expect(g, "slot $k", want.of, x)
+                    want
+                } else {
+                    val wf = (want as? Ty.TStruct)?.fields
+                    Ty.TStruct(e.fields.mapValues { (k, x) -> infer(g, wf?.get(k), x) })
+                }
             is Expr.ListE -> {
-                val we = (want as? Ty.TList)?.of
+                val we = (want as? Ty.TList)?.of ?: (want as? Ty.TNonEmpty)?.of
                 val ts = e.items.map { infer(g, we, it) }
                 when {
                     ts.isEmpty() && we != null -> Ty.TList(we)
@@ -625,7 +766,7 @@ public object Verify {
                 Ty.TOption(t)
             }
             is Expr.NoneE -> {
-                val o = Ty.TOption(e.ty)
+                val o = Ty.TOption(plainTy(g.types, e.ty))
                 noNestedOption(o)
                 o
             }
@@ -672,8 +813,9 @@ public object Verify {
                 if (j >= g.index) complain(Complaint.HelperNotYetDeclared(e.fn))
                 if (e.args.size != f.input.size)
                     complain(Complaint.Arity(e.fn, f.input.size, e.args.size))
-                for ((p, x) in f.input.zip(e.args)) expect(g, "argument of ${e.fn}", p.second.ty, x)
-                f.ret ?: complain(Complaint.NotAHelper(e.fn))
+                for ((p, x) in f.input.zip(e.args)) expect(
+                    g, "argument of ${e.fn}", plainTy(g.types, p.second.ty), x)
+                plainTy(g.types, f.ret ?: complain(Complaint.NotAHelper(e.fn)))
             }
             is Expr.StdE -> stdTy(e.fn, e.args.map { infer(g, null, it) }, want)
             is Expr.MapE -> {
@@ -709,6 +851,57 @@ public object Verify {
             is Expr.Select,
             is Expr.Get,
             is Expr.ExistsE -> complain(Complaint.ReadNotBound)
+            // `docs/plan-live.md` A sum built: one of its variants, with exactly that variant's
+            // fields, each of its type.
+            is Expr.Variant -> {
+                val sum = plainTy(g.types, e.ty)
+                val wantFs =
+                    (sum as? Ty.TSum)?.variants?.get(e.name)
+                        ?: complain(Complaint.NoSuchVariant(e.name))
+                (e.fields.keys.firstOrNull { it !in wantFs }
+                        ?: wantFs.keys.firstOrNull { it !in e.fields })
+                    ?.let { complain(Complaint.VariantFields(it)) }
+                for ((k, x) in e.fields) expect(g, "variant ${e.name}.$k", wantFs[k]!!, x)
+                sum
+            }
+            // A sum taken apart: an arm per variant, in order, each over the variant's record.
+            is Expr.Case -> {
+                val vs =
+                    (infer(g, null, e.e) as? Ty.TSum)?.variants
+                        ?: complain(Complaint.CaseArms(e.arms.map { it.name }))
+                if (e.arms.map { it.name } != vs.keys.toList())
+                    complain(Complaint.CaseArms(e.arms.map { it.name }))
+                var out: Ty? = null
+                for (a in e.arms) {
+                    val t = infer(g.bind(a.sym, Ty.TStruct(vs[a.name]!!)), out ?: want, a.e)
+                    val o = out
+                    when {
+                        o == null -> out = t
+                        same(g.schema, o, t) -> {}
+                        else -> complain(Complaint.TypeMismatch("case arms", o, t))
+                    }
+                }
+                out ?: complain(Complaint.EmptySum)
+            }
+            is Expr.LiveState -> g.live ?: complain(Complaint.LiveOutsideState)
+            is Expr.CtxNow -> if (g.live != null) Ty.TInt else complain(Complaint.LiveOutsideState)
+            is Expr.CtxDevice ->
+                if (g.live != null) Ty.TText else complain(Complaint.LiveOutsideState)
+            is Expr.Slot -> {
+                val pd = infer(g, null, e.e) as? Ty.TPerDevice ?: complain(Complaint.NotPerDevice)
+                expect(g, "slot key", Ty.TText, e.key)
+                Ty.TOption(pd.of)
+            }
+            is Expr.SetSlot -> {
+                val pd = infer(g, null, e.e) as? Ty.TPerDevice ?: complain(Complaint.NotPerDevice)
+                expect(g, "slot key", Ty.TText, e.key)
+                expect(g, "slot value", Ty.TOption(pd.of), e.v)
+                pd
+            }
+            is Expr.Slots -> {
+                val pd = infer(g, null, e.e) as? Ty.TPerDevice ?: complain(Complaint.NotPerDevice)
+                Ty.TList(Ty.TStruct(mapOf("device" to Ty.TText, "value" to pd.of)))
+            }
         }
 
     private fun lit(want: Ty?, v: Value): Ty =
@@ -998,6 +1191,308 @@ public object Verify {
         }
     }
 
+    // `docs/plan-live.md` One declaration of the type section: it resolves — every name it reaches
+    // is declared, and none refers to itself — a sum has a variant and no variant a field named
+    // `t`, and an ephemeral marker is on a `PerDevice` field of a record some live state is.
+    private fun typeDeclOk(types: Map<String, Ty>, states: List<State>, name: String, t: Ty) {
+        val r =
+            try {
+                Types.resolve(types, t)
+            } catch (e: Types.TypeError) {
+                complain(Complaint.UnknownType(e.why))
+            }
+        noNestedOption(r)
+        sumsOk(r)
+        if (marked(r)) {
+            val isState = states.any { it.ty == Ty.TNamed(name) }
+            if (!isState || !stateMarksOk(r)) complain(Complaint.EphemeralNotOnState)
+        }
+    }
+
+    // Every sum in a type has a variant, and no variant a field named `t`.
+    private fun sumsOk(t: Ty) {
+        when (t) {
+            is Ty.TSum -> {
+                if (t.variants.isEmpty()) complain(Complaint.EmptySum)
+                for ((v, fs) in t.variants) {
+                    if (fs.containsKey(Types.TAG)) complain(Complaint.TagField(v))
+                    fs.values.forEach(::sumsOk)
+                }
+            }
+            is Ty.TOption -> sumsOk(t.of)
+            is Ty.TList -> sumsOk(t.of)
+            is Ty.TNonEmpty -> sumsOk(t.of)
+            is Ty.TPerDevice -> sumsOk(t.of)
+            is Ty.TEphemeral -> sumsOk(t.of)
+            is Ty.TStruct -> t.fields.values.forEach(::sumsOk)
+            else -> {}
+        }
+    }
+
+    // A state's resolved type marks ephemeral only its own record's fields, each a `PerDevice`,
+    // with nothing marked beneath.
+    private fun stateMarksOk(t: Ty): Boolean =
+        if (t is Ty.TStruct)
+            t.fields.values.all { f ->
+                if (f is Ty.TEphemeral) f.of is Ty.TPerDevice && !marked(f.of) else !marked(f)
+            }
+        else !marked(t)
+
+    /**
+     * `docs/plan-live.md` `state_ok`: its type resolves and marks only what it may; its init is a
+     * constant value of it; its scope is a `Text` or a list of them of the context alone; and every
+     * transition and hook is typed over the state, its context and its input, reads nothing else,
+     * and — ordered — reads no ephemeral field.
+     */
+    private fun stateOk(m: Module, types: Map<String, Ty>, st: State): List<VerifyError> {
+        fun here(c: Complaint) = VerifyError.InState(st.name, c)
+        val markedTy =
+            try {
+                Types.resolve(types, st.ty)
+            } catch (e: Types.TypeError) {
+                return listOf(here(Complaint.UnknownType(e.why)))
+            }
+        try {
+            noNestedOption(markedTy)
+            sumsOk(markedTy)
+        } catch (c: Complain) {
+            return listOf(here(c.c))
+        }
+        if (!stateMarksOk(markedTy)) return listOf(here(Complaint.EphemeralNotOnState))
+        val ty = Types.unmarked(markedTy)
+        val shell = transitionShell(st.name, ty)
+        val g =
+            G(
+                m,
+                Named(),
+                m.functions.size,
+                shell,
+                FnKind.Helper,
+                emptyMap(),
+                emptyMap(),
+                emptyMap(),
+                false,
+                types)
+        val errs = ArrayList<VerifyError>()
+        // The init: a constant of the state's type, and a value of it.
+        val notConstant = constantOrNot(st.init)
+        if (notConstant != null) errs.add(here(Complaint.InitNotConstant(notConstant)))
+        else
+            try {
+                expect(g, "init", ty, st.init)
+                try {
+                    Types.whyNot(types, st.ty, Eval.constant(st.init))?.let {
+                        errs.add(here(Complaint.InitNotAValue(it)))
+                    }
+                } catch (e: EvalFault) {
+                    errs.add(here(Complaint.InitNotAValue(e.toString())))
+                }
+            } catch (c: Complain) {
+                errs.add(here(c.c))
+            }
+        // The scope: of the context alone.
+        try {
+            ctxOnlyScope(st.scope)
+            when (val t = infer(g, null, st.scope)) {
+                Ty.TText -> {}
+                Ty.TList(Ty.TText) -> {}
+                else ->
+                    errs.add(here(Complaint.BadScope("a scope is text or a list of text, not $t")))
+            }
+        } catch (c: Complain) {
+            errs.add(here(c.c))
+        }
+        duplicates(st.transitions.map { it.name }).firstOrNull()?.let {
+            errs.add(here(Complaint.TransitionName(it)))
+        }
+        val hooks = listOf(ON_JOIN to st.onJoin, ON_LEAVE to st.onLeave, ON_RESTORE to st.onRestore)
+        for (t in st.transitions) if (hooks.any { it.first == t.name })
+            errs.add(VerifyError.InTransition(st.name, t.name, Complaint.TransitionName(t.name)))
+        val all =
+            st.transitions.map { it to null } + hooks.mapNotNull { (h, t) -> t?.let { it to h } }
+        for ((t, hook) in all) {
+            try {
+                transitionOk(m, types, markedTy, ty, t, hook)
+            } catch (c: Complain) {
+                errs.add(VerifyError.InTransition(st.name, t.name, c.c))
+            }
+        }
+        return errs
+    }
+
+    // The function a transition is typed as: a body returning the state.
+    private fun transitionShell(name: String, ret: Ty): Function =
+        Normalize.transitionFunction(Transition(name, emptyList(), emptyList(), emptyList()))
+            .copy(ret = ret)
+
+    private fun transitionOk(
+        m: Module,
+        types: Map<String, Ty>,
+        markedTy: Ty,
+        ty: Ty,
+        t: Transition,
+        hook: String?
+    ) {
+        // A hook is handed what the engine has: a device's record, or nothing.
+        when (hook) {
+            null -> {}
+            ON_RESTORE -> if (t.input.isNotEmpty()) complain(Complaint.HookInput(hook))
+            else -> {
+                val only = t.input.singleOrNull()
+                val ok =
+                    only != null &&
+                        only.first == "device" &&
+                        only.second.checks.isEmpty() &&
+                        only.second.ty == deviceTy()
+                if (!ok) complain(Complaint.HookInput(hook))
+            }
+        }
+        if (hook != null && t.name != hook) complain(Complaint.TransitionName(t.name))
+        duplicates(t.input.map { it.first }).firstOrNull()?.let {
+            complain(Complaint.DuplicateName(it))
+        }
+        val args = t.input.associate { (n, fd) -> n to plainTy(types, fd.ty) }
+        // A function of the state, its context and its input alone.
+        val exprs = ArrayList<Expr>(t.guards.map { it.first })
+        for ((_, fd) in t.input) for (c in fd.checks) {
+            when (c) {
+                is Check.Exists -> complain(Complaint.TransitionReads("an exists check"))
+                is Check.Refine -> exprs.add(c.e)
+                else -> {}
+            }
+        }
+        blockExprs(t.body, exprs)
+        for (e in exprs) transitionForbidden(e)?.let { complain(Complaint.TransitionReads(it)) }
+        val f = transitionShell(t.name, ty)
+        val g =
+            G(
+                m,
+                Named(),
+                m.functions.size,
+                f,
+                FnKind.Provide,
+                args,
+                emptyMap(),
+                emptyMap(),
+                false,
+                types,
+                ty)
+        for ((n, fd) in t.input) {
+            val inner = (args[n] as? Ty.TOption)?.of ?: args[n]!!
+            for (c in fd.checks) {
+                val fits =
+                    when (c) {
+                        is Check.Trim,
+                        is Check.MinLen,
+                        is Check.MaxLen -> inner == Ty.TText
+                        is Check.Range -> inner == Ty.TInt
+                        is Check.NonEmpty -> inner is Ty.TList || inner is Ty.TNonEmpty
+                        is Check.Exists -> false
+                        is Check.Refine -> {
+                            expect(
+                                g.copy(args = args + (n to readAs(inner))), "refine", Ty.TBool, c.e)
+                            true
+                        }
+                    }
+                if (!fits) complain(Complaint.CheckOnWrongType(n, c.toString()))
+            }
+        }
+        for ((e, _) in t.guards) expect(g, "guard", Ty.TBool, e)
+        block(g, t.body)
+        if (!returns(t.body)) complain(Complaint.MayNotReturn)
+        if (Ordering.classify(markedTy, t) == Kind.Ordered)
+            Ordering.orderedReadsEphemeral(markedTy, t)?.let {
+                complain(Complaint.OrderedReadsEphemeral(it))
+            }
+    }
+
+    // Every expression a block holds, at any depth.
+    private fun blockExprs(b: Block, out: MutableList<Expr>) {
+        for (s in b) {
+            when (s) {
+                is Stmt.Let -> out.add(s.e)
+                is Stmt.Refuse -> out.add(s.e)
+                is Stmt.Insert -> out.add(s.row)
+                is Stmt.Upsert -> out.add(s.row)
+                is Stmt.Return -> s.e?.let(out::add)
+                is Stmt.If -> {
+                    out.add(s.c)
+                    blockExprs(s.then, out)
+                    blockExprs(s.els, out)
+                }
+                is Stmt.For -> {
+                    out.add(s.over)
+                    blockExprs(s.body, out)
+                }
+                is Stmt.Update -> {
+                    out.addAll(s.key)
+                    out.add(s.row)
+                }
+                is Stmt.Delete -> out.addAll(s.key)
+                is Stmt.Private -> blockExprs(s.body, out)
+            }
+        }
+    }
+
+    // What a transition may not reach for, named: a read, an auto, a provided value.
+    private fun transitionForbidden(e: Expr): String? =
+        when (e) {
+            is Expr.Select,
+            is Expr.Get,
+            is Expr.ExistsE -> "a read"
+            is Expr.AutoE -> "an auto"
+            is Expr.Provided -> "a provided value"
+            else -> children(e).firstNotNullOfOrNull(::transitionForbidden)
+        }
+
+    // The first thing an init reaches that is not a constant, named.
+    private fun constantOrNot(e: Expr): String? =
+        when (e) {
+            is Expr.Arg -> "an argument"
+            is Expr.AutoE -> "an auto"
+            is Expr.Var -> "a local"
+            is Expr.Provided -> "a provided value"
+            is Expr.CtxUser,
+            is Expr.CtxSession,
+            is Expr.HasRole,
+            is Expr.CtxNow,
+            is Expr.CtxDevice,
+            is Expr.LiveState -> "the context"
+            is Expr.Select,
+            is Expr.Get,
+            is Expr.ExistsE -> "a read"
+            is Expr.Call -> "a call"
+            is Expr.Match,
+            is Expr.MapE,
+            is Expr.FilterE,
+            is Expr.AnyE,
+            is Expr.AllE,
+            is Expr.SortBy,
+            is Expr.Fold,
+            is Expr.Case -> "a binder"
+            else -> children(e).firstNotNullOfOrNull(::constantOrNot)
+        }
+
+    // A scope's expression: the context, literals, lists of them, and the operators, comparisons
+    // and standard functions over them.
+    private fun ctxOnlyScope(e: Expr) {
+        when (e) {
+            is Expr.ListE -> e.items.forEach(::ctxOnlyScope)
+            is Expr.StdE -> e.args.forEach(::ctxOnlyScope)
+            is Expr.IfE -> {
+                ctxOnlyScope(e.c)
+                ctxOnlyScope(e.then)
+                ctxOnlyScope(e.els)
+            }
+            else ->
+                try {
+                    ctxOnly(e)
+                } catch (c: Complain) {
+                    complain(Complaint.BadScope(c.c.toString()))
+                }
+        }
+    }
+
     // §9.3 Signatures of the standard library.
     private fun stdTy(f: StdFn, ts: List<Ty>, want: Ty?): Ty {
         fun option(t: Ty): Ty =
@@ -1190,7 +1685,15 @@ public fun mapChildren(e: Expr, f: (Expr) -> Expr): Expr =
         is Expr.HasRole,
         is Expr.Provided,
         is Expr.NoneE,
-        is Expr.Select -> e
+        is Expr.Select,
+        is Expr.LiveState,
+        is Expr.CtxNow,
+        is Expr.CtxDevice -> e
+        is Expr.Variant -> Expr.Variant(e.ty, e.name, e.fields.mapValues { f(it.value) })
+        is Expr.Case -> Expr.Case(f(e.e), e.arms.map { Expr.Arm(it.name, it.sym, f(it.e)) })
+        is Expr.Slot -> Expr.Slot(f(e.e), f(e.key))
+        is Expr.SetSlot -> Expr.SetSlot(f(e.e), f(e.key), f(e.v))
+        is Expr.Slots -> Expr.Slots(f(e.e))
         is Expr.FieldE -> Expr.FieldE(f(e.e), e.name)
         is Expr.SomeE -> Expr.SomeE(f(e.e))
         is Expr.StructE -> Expr.StructE(e.fields.mapValues { f(it.value) })

@@ -13,11 +13,13 @@ import dev.arkdb.EvalFault
 import dev.arkdb.Facts
 import dev.arkdb.Hash
 import dev.arkdb.Hex
+import dev.arkdb.LiveCtx
 import dev.arkdb.MemoryStore
 import dev.arkdb.Module
 import dev.arkdb.Ran
 import dev.arkdb.Raw
 import dev.arkdb.Refusal
+import dev.arkdb.Runner
 import dev.arkdb.SPEC_VERSION
 import dev.arkdb.Sha256
 import dev.arkdb.Value
@@ -329,6 +331,58 @@ object Checks {
             ensureEq(st.storeValue(), step.field("store_after"), "step $i store")
             ensureEq(
                 Hex.encode(Hash.stateHash(st)), step.field("hash_after").asText(), "step $i hash")
+        }
+    }
+
+    /**
+     * `check_live` (`eval/live-*`, `docs/plan-live.md`): a live state's closure and type hashes,
+     * every transition's kind, its init and the hash of it, and a life of it — each step run over
+     * the state the last left, as the engine runs it (`Runner.run`: a leave empties the leaver's
+     * ephemeral slots first), its new state and that state's hash with the ephemeral fields left
+     * out, or the refusal's words.
+     */
+    fun evalLive(v: Value) {
+        val m = moduleOf(v.field("module"))
+        val name = v.field("live").asText()
+        val st = m.lookupState(name) ?: throw Failed("the module has no state $name")
+        val c = Hash.liveClosure(m, st)
+        ensureEq(Hex.encode(Hash.liveHash(c)), v.field("live_hash").asText(), "the live hash")
+        ensureEq(Hex.encode(Hash.stateTypeHash(c)), v.field("type_hash").asText(), "the type hash")
+        for ((t, k) in v.field("kinds").asStruct().fields) ensureEq(
+            Value.VText(c.kind(t).wire), k, "the kind of $t")
+        val r = Runner.ofModule(m)
+        var s = r.init(name)
+        ensureEq(s, v.field("init"), "the init")
+        ensureEq(Hex.encode(r.hash(name, s)), v.field("init_hash").asText(), "the init's hash")
+        for ((k, step) in v.field("steps").asList().withIndex()) {
+            val t = step.field("transition").asText()
+            val cv = step.field("ctx")
+            val ctx =
+                LiveCtx(
+                    cv.field("user").asText(),
+                    cv.field("session").asText(),
+                    cv.field("roles").asList().map { it.asText() }.toSet(),
+                    cv.field("device").asText(),
+                    cv.field("now").asInt())
+            val want = step.asStruct().fields["refused"]
+            val got =
+                try {
+                    r.run(name, t, s, ctx, argsOf(step.field("input")))
+                } catch (e: EvalFault.Verdict) {
+                    val why = (e.refusal as? Refusal.Refused)?.why
+                    if (want == null)
+                        throw Failed("step $k ($t): refused $why, the vector says it applies")
+                    ensureEq(why, want.asText(), "step $k ($t): the refusal")
+                    continue
+                }
+            if (want != null)
+                throw Failed("step $k ($t): applied, the vector says refused ${want.show()}")
+            ensureEq(got, step.field("state"), "step $k ($t): the state")
+            ensureEq(
+                Hex.encode(r.hash(name, got)),
+                step.field("hash").asText(),
+                "step $k ($t): its hash")
+            s = got
         }
     }
 

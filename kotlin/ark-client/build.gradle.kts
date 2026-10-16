@@ -85,6 +85,21 @@ val wakeTests by tasks.registering(JavaExec::class) {
     args(rootProject.file("../harken/domain/harken.ark").absolutePath)
 }
 
+// A device's live state (docs/plan-live.md): calls ordered and ephemeral, the
+// counter rule, a resync on a gap or a wrong hash, pending calls said again,
+// the throttle, and the server's clock, over the demo's room.
+val liveTests by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Holds a device's live state: its calls, its counters, its resyncs, its throttle."
+    dependsOn(tasks.named("testClasses"))
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("dev.arkdb.client.LiveTests")
+    jvmArgs("-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8")
+    val vectors = providers.gradleProperty("arkVectors")
+        .orElse(rootProject.file("../spec/vectors").absolutePath)
+    args(vectors.get())
+}
+
 tasks.named("check") {
-    dependsOn(storageTests, clientTests, launchViewTests, wakeTests)
+    dependsOn(storageTests, clientTests, launchViewTests, wakeTests, liveTests)
 }

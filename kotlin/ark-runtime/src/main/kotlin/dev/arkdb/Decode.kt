@@ -24,8 +24,70 @@ public object Decode {
                 val f = tagged(listOf("frame"), "frame", x)
                 text(listOf("frame", "name"), field(f, "name")) to ty(field(f, "ty"))
             }
-        return Module(spec, schema, functions, routers, live)
+        // `docs/plan-live.md` Present only where a module has one: an empty list is not a second
+        // spelling of its absence.
+        val types =
+            when (val v = fs["types"]) {
+                null -> emptyList()
+                else ->
+                    list(listOf("module", "types"), v, ::typeDecl).also {
+                        if (it.isEmpty())
+                            err(
+                                listOf("module", "types"),
+                                "an empty type section is written as no field")
+                    }
+            }
+        val states =
+            when (val v = fs["states"]) {
+                null -> emptyList()
+                else ->
+                    list(listOf("module", "states"), v, ::state).also {
+                        if (it.isEmpty())
+                            err(listOf("module", "states"), "no states is written as no field")
+                    }
+            }
+        return Module(spec, schema, functions, routers, live, types, states)
     }
+
+    private fun typeDecl(x: Value): Pair<String, Ty> {
+        val fs = tagged(listOf("type"), "type", x)
+        return text(listOf("type", "name"), field(fs, "name")) to ty(field(fs, "ty"))
+    }
+
+    /** `state_from_value`: §3.12 a live state. */
+    public fun state(v: Value): State {
+        val fs = tagged(listOf("state"), "state", v)
+        val name = text(listOf("state", "name"), field(fs, "name"))
+        val here = listOf("state", name)
+        fun p(k: String) = here + k
+        fun hook(k: String): Transition? = fs[k]?.let { transition(p(k), it) }
+        return State(
+            name,
+            ty(field(fs, "ty")),
+            expr(p("init"), field(fs, "init")),
+            expr(p("scope"), field(fs, "scope")),
+            list(p("transitions"), field(fs, "transitions")) { transition(p("transitions"), it) },
+            hook("on_join"),
+            hook("on_leave"),
+            hook("on_restore"))
+    }
+
+    private fun transition(at: List<String>, v: Value): Transition {
+        val fs = tagged(at, "transition", v)
+        val name = text(at, field(fs, "name"))
+        val here = at + name
+        val input = list(here, field(fs, "input")) { inputField(here, it) }
+        val guards =
+            list(here, field(fs, "guards")) { x ->
+                val g = tagged(here, "guard", x)
+                expr(here, field(g, "e")) to text(here, field(g, "why"))
+            }
+        val body = list(here, field(fs, "body")) { stmt(here, it) }
+        return Transition(name, input, guards, body)
+    }
+
+    /** `expr_from_value`: an expression from its value, outside any function. */
+    public fun expr(v: Value): Expr = expr(emptyList(), v)
 
     /** `router_from_value`. */
     public fun router(v: Value): Router {
@@ -120,6 +182,15 @@ public object Decode {
                 Ty.TStruct(
                     structMap(listOf("ty", "struct"), field(fs, "fields")).mapValues {
                         ty(it.value)
+                    })
+            "named" -> Ty.TNamed(text(listOf("ty", "named"), field(fs, "name")))
+            "non_empty_list" -> Ty.TNonEmpty(ty(field(fs, "of")))
+            "per_device" -> Ty.TPerDevice(ty(field(fs, "of")))
+            "ephemeral" -> Ty.TEphemeral(ty(field(fs, "of")))
+            "sum" ->
+                Ty.TSum(
+                    structMap(listOf("ty", "sum"), field(fs, "variants")).mapValues { (k, x) ->
+                        structMap(listOf("ty", "sum", k), x).mapValues { ty(it.value) }
                     })
             else -> err(listOf("ty"), "unknown type tag $t")
         }
@@ -292,6 +363,27 @@ public object Decode {
             "select" -> Expr.Select(plan(p, field(fs, "plan")))
             "get" -> Expr.Get(tx("table"), es("key"))
             "exists" -> Expr.ExistsE(tx("table"), es("key"))
+            "variant" ->
+                Expr.Variant(
+                    ty(field(fs, "ty")),
+                    tx("name"),
+                    structMap(p, field(fs, "fields")).mapValues { expr(p, it.value) })
+            "case" ->
+                Expr.Case(
+                    e("e"),
+                    list(p, field(fs, "arms")) { x ->
+                        val a = tagged(p, "arm", x)
+                        Expr.Arm(
+                            text(p, field(a, "name")),
+                            sym(p, field(a, "sym")),
+                            expr(p, field(a, "e")))
+                    })
+            "live_state" -> Expr.LiveState
+            "ctx_now" -> Expr.CtxNow
+            "ctx_device" -> Expr.CtxDevice
+            "slot" -> Expr.Slot(e("e"), e("key"))
+            "set_slot" -> Expr.SetSlot(e("e"), e("key"), e("v"))
+            "slots" -> Expr.Slots(e("e"))
             else -> err(here, "unknown expression $t")
         }
     }

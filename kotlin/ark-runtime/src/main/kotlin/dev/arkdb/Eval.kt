@@ -116,6 +116,8 @@ internal class Env(
     val locals: Frame?,
     // §13 In a plan's node (and a helper one calls), a sum's fold is judged on its result alone.
     val wide: Boolean,
+    // §3.12 Inside a live state's transition: the state, the time and the device.
+    val live: LiveEnv? = null,
 ) {
     fun local(x: Sym): Value? {
         var at = locals
@@ -130,10 +132,21 @@ internal class Env(
     // This scope with one more local. Binding one leaves the node's sum rule, as the reference's
     // does.
     fun under(sym: Sym, v: Value): Env =
-        Env(schema, helpers, kind, ctx, args, autos, provided, node, Frame(sym, v, locals), false)
+        Env(
+            schema,
+            helpers,
+            kind,
+            ctx,
+            args,
+            autos,
+            provided,
+            node,
+            Frame(sym, v, locals),
+            false,
+            live)
 
     fun withFrame(f: Frame): Env =
-        Env(schema, helpers, kind, ctx, args, autos, provided, node, f, false)
+        Env(schema, helpers, kind, ctx, args, autos, provided, node, f, false, live)
 
     fun copy(
         kind: FnKind = this.kind,
@@ -143,8 +156,24 @@ internal class Env(
         wide: Boolean = this.wide,
         autos: Map<String, Value> = this.autos,
         provided: Map<String, Value> = this.provided,
-    ): Env = Env(schema, helpers, kind, ctx, args, autos, provided, node, locals, wide)
+    ): Env = Env(schema, helpers, kind, ctx, args, autos, provided, node, locals, wide, live)
 }
+
+// §3.12 What a transition reads beside its input and its author.
+internal class LiveEnv(val state: Value, val now: Long, val device: String)
+
+/**
+ * §3.12 Who calls a transition, and when (`eval::LiveCtx`): the author, as an entry's is, the
+ * device calling, and the time — the server's when it sequences the call, the device's own guess of
+ * the server's when it previews one.
+ */
+public data class LiveCtx(
+    val user: String = "",
+    val session: String = "",
+    val roles: Set<String> = emptySet(),
+    val device: String = "",
+    val now: Long = 0,
+)
 
 // The store as it stands, the changes made so far, and the private blocks the
 // authority's run reached, each with the locals it was written among.
@@ -574,6 +603,122 @@ public object Eval {
         return Checked(messages, values)
     }
 
+    /**
+     * §3.12 `run_transition`: a transition of a live state by name — a hook by its reserved name —
+     * over `state`: its input held to its declared types and checked as a procedure's is, its
+     * guards in order, its body; and the new state held to the state's type. A verdict is a refusal
+     * every runtime reaches, in the same words. A hook the state does not declare leaves the state
+     * as it was.
+     */
+    public fun runTransition(
+        c: LiveClosure,
+        name: String,
+        state: Value,
+        ctx: LiveCtx,
+        input: Map<String, Value>
+    ): Value {
+        fun refused(t: String): Nothing = verdict(Refusal.Refused(t))
+        val t =
+            c.state.transition(name)
+                ?: if (name == ON_JOIN || name == ON_LEAVE || name == ON_RESTORE) return state
+                else refused("${c.state.name}: no transition $name")
+        // The input, held to its types: a call crosses a boundary.
+        for (k in input.keys) if (t.input.none { it.first == k })
+            refused("$k: not an input of $name")
+        val args = LinkedHashMap<String, Value>()
+        for ((n, fd) in t.input) {
+            val v = input[n] ?: refused("$n: missing")
+            Types.whyNot(c.types, fd.ty, v)?.let { refused("$n: $it") }
+            args[n] = v
+        }
+        val schema = Schema(emptyList())
+        val author = Ctx(ctx.user, ctx.session, ctx.roles)
+        val live = LiveEnv(state, ctx.now, ctx.device)
+        fun env(a: Map<String, Value>): Env =
+            Env(
+                schema,
+                c.helpers,
+                FnKind.Provide,
+                author,
+                a,
+                emptyMap(),
+                emptyMap(),
+                emptyList(),
+                null,
+                false,
+                live)
+        // The checks, each over its own field as it stands.
+        for ((n, fd) in t.input) {
+            val local = LinkedHashMap(args)
+            val (v2, msg) =
+                checkField(n, fd, args[n]!!, { _, _ -> false }) { e, x ->
+                    val own = LinkedHashMap(local)
+                    own[n] = x
+                    pureBool(St(NoStore(schema)), env(own), e)
+                }
+            if (msg != null) refused(msg)
+            args[n] = v2
+        }
+        val st = St(NoStore(schema))
+        val e = env(args)
+        for ((g, why) in t.guards) if (!pureBool(st, e, g)) refused(why)
+        val out = block(st, e, t.body)?.v ?: bug(EvalError.NoReturn(name))
+        Types.whyNot(c.types, c.state.ty, out)?.let {
+            refused("$name: the state it makes is not a ${c.state.name}: $it")
+        }
+        return out
+    }
+
+    /** §3.12 `constant`: a constant expression's value — a live state's init. */
+    public fun constant(e: Expr): Value {
+        val schema = Schema(emptyList())
+        return pure(
+            Env(
+                schema,
+                emptyList(),
+                FnKind.Helper,
+                Ctx.nobody,
+                emptyMap(),
+                emptyMap(),
+                emptyMap(),
+                emptyList(),
+                null,
+                false),
+            e)
+    }
+
+    /**
+     * §3.12 `scope_keys`: the keys of the instances `ctx` holds of a live state, a text or a list
+     * of them, in the order the scope gives them, without repeats.
+     */
+    public fun scopeKeys(c: LiveClosure, ctx: Ctx): List<String> {
+        val schema = Schema(emptyList())
+        val env =
+            Env(
+                schema,
+                c.helpers,
+                FnKind.Helper,
+                ctx,
+                emptyMap(),
+                emptyMap(),
+                emptyMap(),
+                emptyList(),
+                null,
+                false)
+        val out = ArrayList<String>()
+        fun add(v: Value) {
+            val t =
+                v as? Value.VText
+                    ?: bug(EvalError.TypeError("a scope key is text, not ${v.show()}"))
+            if (t.value !in out) out.add(t.value)
+        }
+        when (val v = pure(env, c.state.scope)) {
+            is Value.VList -> v.items.forEach(::add)
+            else -> add(v)
+        }
+        return out
+    }
+
     /** `refusal_text`: the message of a `refuse`, otherwise the refusal shown. */
     public fun refusalText(r: Refusal): String = if (r is Refusal.Refused) r.why else r.show()
 
@@ -772,6 +917,53 @@ public object Eval {
                 reading(env)
                 Value.VBool(st.store.exists(e.table, evalMany(st, env, e.key)))
             }
+            is Expr.LiveState ->
+                env.live?.state ?: bug(EvalError.TypeError("the state outside a transition"))
+            is Expr.CtxNow ->
+                Value.VInt(
+                    env.live?.now ?: bug(EvalError.TypeError("ctx.now outside a transition")))
+            is Expr.CtxDevice ->
+                Value.VText(
+                    env.live?.device ?: bug(EvalError.TypeError("ctx.device outside a transition")))
+            // §2.2 A sum's value: its fields, and its variant's name under `t`.
+            is Expr.Variant -> {
+                val m = LinkedHashMap<String, Value>()
+                for ((k, x) in e.fields) m[k] = eval(st, env, x)
+                m[Types.TAG] = Value.VText(e.name)
+                Value.VStruct(m)
+            }
+            // The arm the value's tag names, over the variant's record.
+            is Expr.Case -> {
+                val m = strct(eval(st, env, e.e)).fields
+                val tag =
+                    m[Types.TAG] as? Value.VText
+                        ?: bug(EvalError.TypeError("a sum's tag, not ${m[Types.TAG]?.show()}"))
+                val arm =
+                    e.arms.firstOrNull { it.name == tag.value }
+                        ?: bug(EvalError.TypeError("no arm for the variant ${tag.value}"))
+                eval(st, env.under(arm.sym, Value.VStruct(m.filterKeys { it != Types.TAG })), arm.e)
+            }
+            // §2.2 A device's slot, none where it holds nothing.
+            is Expr.Slot -> {
+                val m = eval(st, env, e.e)
+                val k = text(eval(st, env, e.key))
+                (m as? Value.VStruct ?: typeError("a map of devices", m)).fields[k] ?: Value.VNull
+            }
+            is Expr.SetSlot -> {
+                val fs = java.util.TreeMap<String, Value>(CodePointOrder)
+                fs.putAll(strct(eval(st, env, e.e)).fields)
+                val k = text(eval(st, env, e.key))
+                when (val v = eval(st, env, e.v)) {
+                    is Value.VNull -> fs.remove(k)
+                    else -> fs[k] = v
+                }
+                Value.VStruct(fs)
+            }
+            is Expr.Slots ->
+                Value.VList(
+                    strct(eval(st, env, e.e)).fields.map { (k, v) ->
+                        Value.record("device" to Value.VText(k), "value" to v)
+                    })
         }
 
     private fun op(st: St, env: Env, e: Expr.OpE): Value {

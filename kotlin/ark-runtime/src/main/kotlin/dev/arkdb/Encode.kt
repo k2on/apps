@@ -23,16 +23,79 @@ public object Encode {
 
     private fun texts(xs: List<String>): Value = Value.VList(xs.map { Value.VText(it) })
 
-    /** `module_value`: functions carried without their dependency hashes. */
-    public fun module(m: Module): Value =
-        node(
-            "module",
-            "spec" to int(m.spec),
-            "schema" to schema(m.schema),
-            "functions" to list(m.functions) { function(emptyMap(), it) },
-            "routers" to list(m.routers, ::router),
-            "live" to list(m.live) { (n, t) -> node("frame", "name" to txt(n), "ty" to ty(t)) },
+    /**
+     * `module_value`: functions carried without their dependency hashes; the type section and the
+     * live states only when a module declares one, so a module without live state is the bytes it
+     * was.
+     */
+    public fun module(m: Module): Value {
+        val fields =
+            mutableListOf(
+                "spec" to int(m.spec),
+                "schema" to schema(m.schema),
+                "functions" to list(m.functions) { function(emptyMap(), it) },
+                "routers" to list(m.routers, ::router),
+                "live" to list(m.live) { (n, t) -> node("frame", "name" to txt(n), "ty" to ty(t)) },
+            )
+        if (m.types.isNotEmpty()) fields.add("types" to list(m.types) { (n, t) -> typeDecl(n, t) })
+        if (m.states.isNotEmpty()) fields.add("states" to list(m.states) { state(emptyMap(), it) })
+        return node("module", fields)
+    }
+
+    /** `type_decl_value`: one declaration of the type section, `{"t":"type","name","ty"}`. */
+    public fun typeDecl(name: String, t: Ty): Value =
+        node("type", "name" to txt(name), "ty" to ty(t))
+
+    /**
+     * `state_value`: a live state, every transition normalised, with the hashes of the helpers it
+     * reaches directly as `deps`; the hooks only where present. A module writes it with none.
+     */
+    public fun state(deps: Map<String, Value>, s: State): Value {
+        val fields =
+            mutableListOf(
+                "name" to txt(s.name),
+                "deps" to Value.VStruct(deps),
+                "ty" to ty(s.ty),
+                "init" to expr(s.init),
+                "scope" to expr(s.scope),
+                "transitions" to list(s.transitions, ::transition),
+            )
+        s.onJoin?.let { fields.add("on_join" to transition(it)) }
+        s.onLeave?.let { fields.add("on_leave" to transition(it)) }
+        s.onRestore?.let { fields.add("on_restore" to transition(it)) }
+        return node("state", fields)
+    }
+
+    /** `transition_value`: one transition, normalised. */
+    public fun transition(t0: Transition): Value {
+        val t = Normalize.transition(t0)
+        return node(
+            "transition",
+            "name" to txt(t.name),
+            "input" to list(t.input) { (n, fd) -> field(n, fd) },
+            "guards" to
+                list(t.guards) { (e, why) -> node("guard", "e" to expr(e), "why" to txt(why)) },
+            "body" to list(t.body, ::stmt),
         )
+    }
+
+    /** `transition_calls`: the helpers a transition calls directly, sorted. */
+    public fun transitionCalls(t: Transition): List<String> {
+        val acc = sortedSetOf<String>(CodePointOrder)
+        for ((_, fd) in t.input) for (c in fd.checks) if (c is Check.Refine) exprCalls(c.e, acc)
+        for ((e, _) in t.guards) exprCalls(e, acc)
+        for (s in t.body) stmtCalls(s, acc)
+        return acc.toList()
+    }
+
+    /** `state_calls`: the helpers a live state reaches directly, sorted. */
+    public fun stateCalls(s: State): List<String> {
+        val acc = sortedSetOf<String>(CodePointOrder)
+        exprCalls(s.init, acc)
+        exprCalls(s.scope, acc)
+        for (t in s.allTransitions()) acc.addAll(transitionCalls(t))
+        return acc.toList()
+    }
 
     /** `router_value`. */
     public fun router(r: Router): Value =
@@ -87,6 +150,18 @@ public object Encode {
             is Ty.TList -> node("list", "of" to ty(t.of))
             is Ty.TStruct ->
                 node("struct", "fields" to Value.VStruct(t.fields.mapValues { ty(it.value) }))
+            is Ty.TNamed -> node("named", "name" to txt(t.name))
+            is Ty.TNonEmpty -> node("non_empty_list", "of" to ty(t.of))
+            is Ty.TPerDevice -> node("per_device", "of" to ty(t.of))
+            is Ty.TEphemeral -> node("ephemeral", "of" to ty(t.of))
+            is Ty.TSum ->
+                node(
+                    "sum",
+                    "variants" to
+                        Value.VStruct(
+                            t.variants.mapValues { (_, fs) ->
+                                Value.VStruct(fs.mapValues { ty(it.value) })
+                            }))
         }
 
     /**
@@ -249,6 +324,28 @@ public object Encode {
             is Expr.Select -> node("select", "plan" to plan(e.plan))
             is Expr.Get -> node("get", "table" to txt(e.table), "key" to list(e.key, ::expr))
             is Expr.ExistsE -> node("exists", "table" to txt(e.table), "key" to list(e.key, ::expr))
+            is Expr.Variant ->
+                node(
+                    "variant",
+                    "ty" to ty(e.ty),
+                    "name" to txt(e.name),
+                    "fields" to Value.VStruct(e.fields.mapValues { expr(it.value) }))
+            is Expr.Case ->
+                node(
+                    "case",
+                    "e" to expr(e.e),
+                    "arms" to
+                        list(e.arms) { a ->
+                            node(
+                                "arm", "name" to txt(a.name), "sym" to int(a.sym), "e" to expr(a.e))
+                        })
+            is Expr.LiveState -> node("live_state")
+            is Expr.CtxNow -> node("ctx_now")
+            is Expr.CtxDevice -> node("ctx_device")
+            is Expr.Slot -> node("slot", "e" to expr(e.e), "key" to expr(e.key))
+            is Expr.SetSlot ->
+                node("set_slot", "e" to expr(e.e), "key" to expr(e.key), "v" to expr(e.v))
+            is Expr.Slots -> node("slots", "e" to expr(e.e))
         }
 
     private fun dir(d: Dir): Value = txt(if (d == Dir.Asc) "asc" else "desc")
@@ -415,7 +512,15 @@ public fun children(e: Expr): List<Expr> =
         is Expr.HasRole,
         is Expr.Provided,
         is Expr.NoneE,
-        is Expr.Select -> emptyList()
+        is Expr.Select,
+        is Expr.LiveState,
+        is Expr.CtxNow,
+        is Expr.CtxDevice -> emptyList()
+        is Expr.Variant -> e.fields.values.toList()
+        is Expr.Case -> listOf(e.e) + e.arms.map { it.e }
+        is Expr.Slot -> listOf(e.e, e.key)
+        is Expr.SetSlot -> listOf(e.e, e.key, e.v)
+        is Expr.Slots -> listOf(e.e)
         is Expr.FieldE -> listOf(e.e)
         is Expr.SomeE -> listOf(e.e)
         is Expr.StructE -> e.fields.values.toList()

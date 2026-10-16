@@ -28,13 +28,90 @@ public data class Module(
     val routers: List<Router>,
     /** §3.9 The live section: the frame types an app's realtime channel carries, by name. */
     val live: List<Pair<String, Ty>>,
+    /**
+     * §2.2 The type section (`docs/plan-live.md`): the records and sums a live state is made of,
+     * each by its name, which `Ty.TNamed` refers to. On the wire `types`, written only when not
+     * empty, so a module without one is the bytes it was.
+     */
+    val types: List<Pair<String, Ty>> = emptyList(),
+    /** §3.12 The live states: a typed state machine per scope. `states`, written only when any. */
+    val states: List<State> = emptyList(),
 ) {
     /** `Module::lookup_function`. */
     public fun lookupFunction(name: String): Function? = functions.firstOrNull { it.name == name }
 
     /** `Module::lookup_router`. */
     public fun lookupRouter(name: String): Router? = routers.firstOrNull { it.name == name }
+
+    /** `Module::lookup_state`. */
+    public fun lookupState(name: String): State? = states.firstOrNull { it.name == name }
+
+    /** `Module::type_map`: the type section as a map, which is how a named type is resolved. */
+    public fun typeMap(): Map<String, Ty> = types.toMap()
 }
+
+/**
+ * §3.12 A live state (`ir::State`, `docs/plan-live.md`): one current value per instance, an
+ * instance per scope key, held by the server and never replayed. Its value is of `ty`; it starts as
+ * `init`; `scope` names the instances a person is subscribed to, as a function of who they are; and
+ * it moves only by its transitions. The three hooks are transitions the engine runs itself: a
+ * device arriving, a device leaving, a snapshot restored at start.
+ */
+public data class State(
+    val name: String,
+    val ty: Ty,
+    /** A constant expression of `ty`. */
+    val init: Expr,
+    /** A `Text`, or a `List` of them, of the context alone. */
+    val scope: Expr,
+    val transitions: List<Transition>,
+    val onJoin: Transition?,
+    val onLeave: Transition?,
+    val onRestore: Transition?,
+) {
+    /** `State::transition`: a transition by name, a hook by its reserved name. */
+    public fun transition(name: String): Transition? =
+        when (name) {
+            ON_JOIN -> onJoin
+            ON_LEAVE -> onLeave
+            ON_RESTORE -> onRestore
+            else -> transitions.firstOrNull { it.name == name }
+        }
+
+    /** Every transition and hook: declared ones first, then join, leave, restore. */
+    public fun allTransitions(): List<Transition> =
+        transitions + listOfNotNull(onJoin, onLeave, onRestore)
+}
+
+/** The reserved names of the three hooks, which no declared transition may have. */
+public const val ON_JOIN: String = "on_join"
+public const val ON_LEAVE: String = "on_leave"
+public const val ON_RESTORE: String = "on_restore"
+
+/**
+ * §3.12 One way a live state moves (`ir::Transition`): its input with the checks a procedure's
+ * input has; its guards, each a `Bool` refusing with its message when false; and a body that
+ * returns the new state or refuses. It reads no table and draws no auto.
+ */
+public data class Transition(
+    val name: String,
+    val input: List<Pair<String, Field>>,
+    val guards: List<Pair<Expr, String>>,
+    val body: Block,
+)
+
+/**
+ * §3.12 A hook's `device` (`ir::device_ty`): one device standing in an instance as it declared
+ * itself at `Hello`, and the user the server verified it as.
+ */
+public fun deviceTy(): Ty =
+    Ty.TStruct(
+        mapOf(
+            "can_play" to Ty.TBool,
+            "id" to Ty.TText,
+            "kind" to Ty.TText,
+            "name" to Ty.TText,
+            "user" to Ty.TText))
 
 /** §1.1 A router: a group of procedures sharing middleware, its `uses` in order. */
 public data class Router(val name: String, val uses: List<String>)
@@ -288,6 +365,61 @@ public sealed class Expr {
     public data class Get(val table: String, val key: Exprs) : Expr()
 
     public data class ExistsE(val table: String, val key: Exprs) : Expr()
+
+    /**
+     * §2.2 A value of a sum: the variant `name` of the sum `ty`, with these fields; its value is
+     * the struct of the fields with `t` the variant's name. `{"t":"variant","ty","name","fields"}`.
+     */
+    public class Variant(public val ty: Ty, public val name: String, fields: Map<String, Expr>) :
+        Expr() {
+        public val fields: SortedMap<String, Expr> = sortedFields(fields)
+
+        override fun equals(other: kotlin.Any?): Boolean =
+            other is Variant && ty == other.ty && name == other.name && fields == other.fields
+
+        override fun hashCode(): Int = fields.hashCode() * 31 + name.hashCode()
+
+        override fun toString(): String = "Variant($ty, $name, $fields)"
+    }
+
+    /**
+     * §2.2 A sum taken apart: one arm per variant, in the sum's variant order, each binding the
+     * variant's record — its fields without the tag — to its symbol.
+     * `{"t":"case","e","arms":[{"t":"arm","name","sym","e"}]}`.
+     */
+    public data class Case(val e: Expr, val arms: List<Arm>) : Expr()
+
+    /** One arm of a `Case`. */
+    public data class Arm(val name: String, val sym: Sym, val e: Expr)
+
+    /** §3.12 The state a transition runs over. `{"t":"live_state"}`. */
+    public object LiveState : Expr() {
+        override fun toString(): String = "LiveState"
+    }
+
+    /** §3.12 The time a transition runs at, in ms since the epoch. `{"t":"ctx_now"}`. */
+    public object CtxNow : Expr() {
+        override fun toString(): String = "CtxNow"
+    }
+
+    /** §3.12 The id of the device calling. `{"t":"ctx_device"}`. */
+    public object CtxDevice : Expr() {
+        override fun toString(): String = "CtxDevice"
+    }
+
+    /** §2.2 One device's slot of a `PerDevice`, an option. `{"t":"slot","e","key"}`. */
+    public data class Slot(val e: Expr, val key: Expr) : Expr()
+
+    /**
+     * §2.2 A `PerDevice` with one slot set, or emptied by none. `{"t":"set_slot","e","key","v"}`.
+     */
+    public data class SetSlot(val e: Expr, val key: Expr, val v: Expr) : Expr()
+
+    /**
+     * §2.2 A `PerDevice`'s filled slots as `{device, value}` records in id order.
+     * `{"t":"slots","e"}`.
+     */
+    public data class Slots(val e: Expr) : Expr()
 }
 
 /** Arithmetic and boolean operators; integer arithmetic is checked (`ir::Op`). */
