@@ -537,6 +537,13 @@ impl Hub {
         self.retention
     }
 
+    /// `docs/plan-live.md` Every live instance as the server holds it: its
+    /// value, its sequence, and the devices standing in it. What server code
+    /// that stands in instances (`HubHandle::participate`) reads them by.
+    pub fn live(&self) -> &ark::live::state::Desk {
+        &self.server.desk
+    }
+
     /// Every open room and who is in it.
     pub fn rooms(&self) -> BTreeMap<String, Vec<Peer>> {
         self.server.rooms.open.iter().map(|(r, (_, ps))| (r.clone(), ps.clone())).collect()

@@ -239,6 +239,15 @@ impl Pumped {
     }
 }
 
+/// `docs/plan-live.md` [`Peer::live_status`]: one live instance as this
+/// device holds it, in numbers.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LiveStatus {
+    pub seq: i64,
+    pub pending: usize,
+    pub synced: bool,
+}
+
 /// Everything a status line or a debug screen shows.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Status {
@@ -1124,6 +1133,23 @@ impl Peer {
     pub fn live(&self, name: &str) -> Option<Value> {
         let i = self.instance(name)?;
         self.client.live.as_ref()?.view(&i).cloned()
+    }
+
+    /// `docs/plan-live.md` What this device holds of the live state `name`
+    /// besides its view, for a screen that says it in numbers: the sequence
+    /// it has confirmed, how many of its own ordered calls the server has
+    /// not answered, and whether a snapshot has come on this connection —
+    /// before one, the view is this device's own guess and nothing the
+    /// server says of the instance has been applied. `None` where
+    /// [`Peer::live`] is.
+    pub fn live_status(&self, name: &str) -> Option<LiveStatus> {
+        let i = self.instance(name)?;
+        let w = self.client.live.as_ref()?.instances.get(&i)?;
+        Some(LiveStatus {
+            seq: w.seq,
+            pending: w.pending.len(),
+            synced: w.synced,
+        })
     }
 
     /// `docs/plan-live.md` Call a transition of the live state `name`: run

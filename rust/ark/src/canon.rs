@@ -162,9 +162,12 @@ pub type RowSink<'s, 'a> = dyn FnMut(&str, &mut Vec<(&'a str, Value)>) + 's;
 /// same bytes are refused, for the same reasons.
 ///
 /// What is not a list of structs is kept: the value at `path` comes back
-/// as a struct of only the tables whose value is not a list, as they are,
-/// and of the elements of a table's list that are not structs, in order —
-/// what a reader that checks its rows' shapes refuses, and nothing else.
+/// as a struct of every table it named — a table whose value is not a list
+/// as it is, and any other as the elements of its list that are not
+/// structs, in order, so a table of rows alone is an empty list. What a
+/// reader that checks its rows' shapes refuses is there, and so are the
+/// tables' names, which a snapshot's hash covers (`journal`), and nothing
+/// else.
 /// The rows of a table are handed over in order, tables in key order: the
 /// order a reader walking the decoded struct would put them in.
 pub fn decode_rows<'a>(input: &'a [u8], path: &[&str], row: &mut RowSink<'_, 'a>) -> Result<Value, DecodeError> {
@@ -416,9 +419,10 @@ impl<'a> Parser<'a> {
                 })?;
                 row(t, &mut fields);
             }
-            if !odd.is_empty() {
-                kept.insert(t.to_string(), Value::from(odd));
-            }
+            // Kept whether or not anything odd was in it: the tables a
+            // snapshot names are what its hash was taken over
+            // (`journal::log_from_parts`), and an empty one names one too.
+            kept.insert(t.to_string(), Value::from(odd));
             Ok(())
         })?;
         Ok(Value::Struct(Box::new(kept)))
@@ -481,10 +485,11 @@ mod tests {
     /// `docs/plan-db.md` D7.4 `decode_rows` hands over exactly the rows
     /// `decode` would have built, in order — the fields of each struct in a
     /// table's list, tables in key order — keeps what is not a list of
-    /// structs where it was, decodes everything off the path as `decode`
-    /// does, and refuses what `decode` refuses: here a row whose keys are
-    /// out of order. Falsified by dropping the elements that are not
-    /// structs instead of keeping them: the kept struct lost `a`'s `7`.
+    /// structs where it was, and every table's name (`c`, all rows, as an
+    /// empty list), decodes everything off the path as `decode` does, and
+    /// refuses what `decode` refuses: here a row whose keys are out of
+    /// order. Falsified by dropping the elements that are not structs
+    /// instead of keeping them: the kept struct lost `a`'s `7`.
     #[test]
     fn rows_decoded_in_place_are_the_rows_decoded() {
         let row = |i: i64| Value::record(vec![("id", Value::Int(i)), ("nm", Value::text(format!("n{i}"))), ("tg", Value::Null)]);
@@ -506,7 +511,11 @@ mod tests {
         let kept = Value::record(vec![
             (
                 "confirmed",
-                Value::record(vec![("a", Value::list(vec![Value::Int(7)])), ("b", Value::Int(1))]),
+                Value::record(vec![
+                    ("a", Value::list(vec![Value::Int(7)])),
+                    ("b", Value::Int(1)),
+                    ("c", Value::list(vec![])),
+                ]),
             ),
             ("t", Value::text("replica")),
         ]);

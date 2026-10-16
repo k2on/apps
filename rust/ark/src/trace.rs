@@ -820,10 +820,13 @@ impl Player {
             let st = MemoryStore::empty(self.module_schema.clone());
             let r = Replica::open(self.module_schema.clone(), bodies, st, 0, vec![]);
             let mut c = Client::open(r, *mode, token.clone());
-            // §14 A client of a module with live state holds it, as the
-            // device it declares — interpreted, as a runner in another
-            // language does.
-            if !self.live.is_empty() {
+            // §14 A client of a module with live state that declares a
+            // device holds it, as that device — interpreted, as a runner in
+            // another language does. One that declares none holds none and
+            // reports none (spec/RUNNERS.md, `live`), however much live
+            // state its module has: harken's sessions of the log alone are
+            // the bytes they were before harken had any.
+            if !self.live.is_empty() && device.is_some() {
                 c = c.with_live(crate::live::state::Watch::new(self.live.clone(), device.clone()));
             }
             self.client = Some(c);

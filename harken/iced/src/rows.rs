@@ -239,47 +239,9 @@ impl TrackDetail {
     }
 }
 
-/// An id as the hyphenated lowercase text a queue carries between devices:
-/// a [`harken_domain::listening::Track`]'s `id` crosses three languages, and
-/// a sixteen-byte array is a Rust type.
-pub fn id_text(id: &Id) -> String {
-    let h = ark_client::ark::value::hex(id);
-    format!("{}-{}-{}-{}-{}", &h[0..8], &h[8..12], &h[12..16], &h[16..20], &h[20..32])
-}
-
-/// …and back. A queue handed over by a device whose library does not overlap
-/// this one's may carry anything: that is `None`, which matches no row and
-/// highlights nothing, and the track still plays from the file it brought.
-pub fn parse_id(s: &str) -> Option<Id> {
-    let hex: Vec<u8> = s.bytes().filter(|b| *b != b'-').collect();
-    if hex.len() != 32 {
-        return None;
-    }
-    let mut out = [0u8; 16];
-    for (i, pair) in hex.chunks(2).enumerate() {
-        let s = std::str::from_utf8(pair).ok()?;
-        out[i] = u8::from_str_radix(s, 16).ok()?;
-    }
-    Some(out)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// An id survives the trip through a queue's text, and text that is not
-    /// one is nothing rather than a zero id that might match a row.
-    ///
-    /// Falsified by dropping the hyphens from `id_text`: the length check in
-    /// the literal comparison fails.
-    #[test]
-    fn an_id_survives_a_queue() {
-        let id: Id = [0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 1, 2, 3, 4, 5, 6, 7, 8];
-        assert_eq!(id_text(&id), "12345678-9abc-def0-0102-030405060708");
-        assert_eq!(parse_id(&id_text(&id)), Some(id));
-        assert_eq!(parse_id("not an id"), None);
-        assert_eq!(parse_id(""), None);
-    }
 
     /// A row with a field missing reads as empty rather than panicking in a
     /// frame. Falsified by reading with `Value::field`: it panics.

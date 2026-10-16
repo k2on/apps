@@ -79,6 +79,23 @@ fn the_module_verifies_and_is_the_committed_file() {
             "playlists",
             "playlists_of",
             "playlist",
+            // `docs/plan-live.md` phase 2: the plays, and after every
+            // function the helpers the listening session's transitions
+            // reach, in the order the state's build first calls them.
+            "record_play",
+            "last_played",
+            "recently_played",
+            "sounding",
+            "reachable",
+            "can_play",
+            "here",
+            "position",
+            "pressed",
+            "paused_at",
+            "clock_at",
+            "is_output",
+            "returned",
+            "duration_at",
         ],
         "a helper sits immediately before the first function that calls it"
     );
@@ -181,6 +198,10 @@ fn the_module_verifies_and_is_the_committed_file() {
 /// with the hash, on purpose: an entry at the old hash runs the old closure
 /// wherever a server kept it, and a later one for a known file is no longer
 /// a no-op.
+///
+/// `record_play` is new in the commit that moved the listening session into
+/// the domain (`docs/plan-live.md` phase 2), and is pinned at the hash it was
+/// born with.
 #[test]
 fn every_mutator_hashes_as_it_did_at_spec_v3() {
     let v3 = [
@@ -194,6 +215,7 @@ fn every_mutator_hashes_as_it_did_at_spec_v3() {
         ("add_to_playlist", "29ef6578cbda8f224d8b279461e1544a8fcf910ee259c32379edcbc4da32d2c1"),
         ("add_all_to_playlist", "ca05acf23e131c0ffbecb7f302224cd690a2da78a9d41ef10185dcc846d1587a"),
         ("remove_from_playlist", "e6b2807ee3556a5e85dbab34795fb8abdbfe951d3fa994065fc2542cd6e2230e"),
+        ("record_play", "f28ce0b6ff45e894e391b59432f43ca2d8d7117c3ccd6101fef3d72a25f6ac01"),
     ];
     let built = module();
     let committed = std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("harken.ark")).unwrap();
@@ -408,6 +430,42 @@ fn every_procedure_agrees_with_the_interpreter() {
         c.query("alice", q, args([])).unwrap();
     }
     c.list("works", bach);
+
+    // A play, as the device making the sound authors it: anybody's, no
+    // role, and the track need not be in the library — this one has just
+    // left it. Read back newest first, and only by whoever played it.
+    let play = |c: &mut Lib, id: &Value, from: &str| {
+        let autos = c.autos("record_play");
+        c.mutate_holding(
+            "alice",
+            &[],
+            "record_play",
+            autos,
+            args([
+                ("track", id.clone()),
+                ("title", Value::text("Aria")),
+                ("creator", Value::text("Bach")),
+                ("album", Value::text("Goldberg Variations")),
+                ("duration_ms", Value::int(180_000)),
+                ("file", Value::text("music/aria.mp3")),
+                ("from", Value::text(from)),
+            ]),
+        )
+    };
+    assert_eq!(play(&mut c, &ids[0], "album/Goldberg Variations"), Ok(1));
+    assert_eq!(play(&mut c, &ids[5], ""), Ok(1));
+    let last = c.list("last_played", args([]));
+    assert_eq!(last.len(), 1);
+    assert_eq!(last[0].field("track"), Value::text(ark::stdlib::text_of_id(&ids[5].as_id())));
+    let recent = c.list("recently_played", args([]));
+    assert_eq!(
+        recent.iter().map(|r| r.field("from")).collect::<Vec<_>>(),
+        [Value::text(""), Value::text("album/Goldberg Variations")]
+    );
+    assert!(
+        c.query("bob", "last_played", args([])).unwrap().as_list().is_empty(),
+        "bob played nothing"
+    );
 
     let procedures: std::collections::BTreeSet<String> = c.procs.keys().cloned().collect();
     assert_eq!(*c.called.borrow(), procedures, "every procedure was run both ways");

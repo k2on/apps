@@ -1138,11 +1138,20 @@ fn a_replayed_push_or_hello_changes_nothing() {
         s.linked && s.epoch == epoch + 1
     }));
     assert!(p.settle(PATIENCE));
-    let frame = p.proxy.last_payload().expect("a frame was sent");
+    // The connection's `Hello`, whatever followed it: a settled peer may
+    // already have said a `Verify` after it, and that is not the frame this
+    // replays.
+    let hello = |b: &[u8]| {
+        ark::canon::decode(b)
+            .ok()
+            .and_then(|v| ClientMsg::from_value(&v).ok())
+            .is_some_and(|m| matches!(m, ClientMsg::Hello { .. }))
+    };
+    let frame = p.proxy.last_payload_where(hello).expect("a hello was sent");
     let msg = ClientMsg::from_value(&ark::canon::decode(&frame).unwrap()).unwrap();
     assert!(matches!(msg, ClientMsg::Hello { .. }), "{msg:?}");
     assert!(eventually(PATIENCE, || f.server.room("alice") == 2));
-    assert!(p.proxy.replay_last());
+    assert!(p.proxy.replay_where(hello));
     p.author("create_playlist", named("After the second hello"));
     f.converged(&mut [&mut p, &mut q]);
     let s = p.status();

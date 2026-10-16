@@ -1,532 +1,1285 @@
-//! One account, one thing playing, however many devices are watching it.
+//! One account, one thing playing, however many devices are watching it —
+//! as a live state (`docs/plan-live.md`), and the plays that are worth
+//! keeping, as the log.
 //!
 //! A person with a phone, a laptop and a browser tab has **one** listening
-//! session, not three. Any of them can say what should happen; exactly one
-//! of them is making the sound; and moving the sound from one to another is
-//! a sentence in this protocol rather than a track started again somewhere
-//! else.
+//! session, not three. Any of them can change it; exactly one of them is
+//! making the sound; and moving the sound from one to another is a
+//! transition rather than a track started again somewhere else.
 //!
-//! **None of this is in the log, and none of it ever will be.** The log is
-//! permanent and totally ordered: every peer replays every entry, forever.
-//! An afternoon of listening is thousands of pauses, seeks and skips, and
-//! not one of them is worth replaying tomorrow. So it lives in a live room
-//! (`ark::live`), in the server's memory, and the domain's procedures are
-//! still the only `apply`.
+//! **The state is the instruction.** Nothing here routes a command to the
+//! device making the sound. Pause on the phone makes the session paused;
+//! the laptop is the output, its player is reconciled against the session,
+//! and it pauses. The output reports what happens to it — `started` when a
+//! hand-off lands, `advance` when a track ends, `stalled` when the sound
+//! stops by itself, `release` when it is no longer the session's to make —
+//! and nothing else: no heartbeat, because `Playing { at_ms, since }` is
+//! enough for every device to count the position for itself against the
+//! server's clock (`ark_client::Peer::server_now`).
 //!
-//! **It rides the sync socket.** A second socket is a second thing to
-//! authenticate, reconnect and keep alive, and a second answer to "am I
-//! online" that disagrees with the first at the worst moment.
+//! **None of the session is in the log, and none of it ever will be.** An
+//! afternoon of listening is thousands of pauses, seeks and skips, and not
+//! one of them is worth replaying tomorrow. It is held by the server, one
+//! instance per account (`scope(|ctx| ctx.user)`), on the sync socket, and
+//! kept across a restart — paused, with no output (`on_restore`). What *is*
+//! worth replaying is that a track was played, once: `record_play`, a
+//! mutation like any other, authored by the output.
 //!
-//! **It is here, in the domain crate, because that is the only vocabulary
-//! the server and the clients already share.** It is not the domain:
-//! nothing below writes a row, and it is plain Rust, not the vocabulary.
+//! The four rules the old hand-written desk was built around are properties
+//! of the transitions below rather than code anybody calls:
 //!
-//! **Canonical CBOR, the engine's own encoding** ([`ark::canon`]): every
-//! frame is a [`Value`] — a struct with a `"t"` tag for each variant, as the
-//! IR's own nodes are — so one frame has one byte string everywhere, and
-//! the decoder refuses anything that is not canonical.
+//! - **One output.** `Active.output` is one value: a present device, a
+//!   device that has gone (`away`), or nowhere.
+//! - **The output survives its socket.** `on_leave` keeps the sound with the
+//!   device that left — `away`, the clock paused, because nothing is on the
+//!   other end to be making a sound — and `on_join` gives it back to that
+//!   device, still paused. A lid closing is not a decision to move the music.
+//! - **A command is a state change, which the output obeys.** `pause`,
+//!   `seek` and `transfer` move nothing but the session.
+//! - **A press that means a sound takes an output that cannot answer; a
+//!   device arriving takes nothing.** `play`, `skip` and `jump` hand the
+//!   sound to the caller when the output is away or nowhere and the caller
+//!   can play; `start` — a track pressed — does when nothing is sounding.
+//!   `on_join` only adds the device to `devices`.
+//!
+//! Beside the declaration is a plain-Rust reading of it ([`read`]) for the
+//! code that drives a player or a speaker from it, and [`url`], which every
+//! device joins a track's file to its own server with.
 
 use std::collections::BTreeMap;
 
-use ark::value::Value;
+use ark::authoring::*;
 
-/// One device, as everything here names it: whatever names one output
-/// stably. For a client it is the login's session id, which is "one login
-/// on one device"; for a speaker in the kitchen it is the entity that names
-/// it (`media_player.kitchen`), which is still the same speaker tomorrow. It
-/// is a live room's `who`, so no device ever says its own id.
-pub type DeviceId = String;
+use crate::schema::*;
 
-/// A frame that does not decode: what was wrong, and where.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Malformed(pub String);
+// ---------------------------------------------------------------------------
+// The state
 
-impl std::fmt::Display for Malformed {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "a listening frame that does not decode: {}", self.0)
+/// The live state: who is here, where each of them is dragging a scrubber,
+/// and the session.
+pub struct Listening {
+    /// Who is here, kept by `on_join` and `on_leave`: ordered, and authored
+    /// by nobody — the server runs the hooks as its connections come and go.
+    pub devices: PerDevice<Device>,
+    /// Where each device's scrubber is being dragged to, in milliseconds
+    /// into the current track: ephemeral, each device writing its own slot
+    /// many times a second (`scrub`), never ordered and never kept.
+    pub scrub: PerDevice<Int>,
+    pub session: Sum<Session>,
+}
+impl Record for Listening {
+    fn fields() -> Fields<Self> {
+        fields()
+            .named("listening")
+            .field("devices", typed::<PerDevice<Device>>())
+            .ephemeral("scrub", typed::<PerDevice<Int>>())
+            .field("session", typed::<Sum<Session>>())
     }
 }
 
-impl std::error::Error for Malformed {}
-
-type Decoded<T> = Result<T, Malformed>;
-
-fn bad<T>(what: impl Into<String>) -> Decoded<T> {
-    Err(Malformed(what.into()))
-}
-
-fn record(tag: Option<&str>, fields: Vec<(&str, Value)>) -> Value {
-    let mut m: BTreeMap<String, Value> = fields.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
-    if let Some(t) = tag {
-        m.insert("t".into(), Value::text(t));
-    }
-    Value::from(m)
-}
-
-fn fields(v: &Value) -> Decoded<&BTreeMap<String, Value>> {
-    match v {
-        Value::Struct(m) => Ok(m),
-        other => bad(format!("expected a struct, got {other:?}")),
+/// Nothing queued, or a queue with somewhere in it.
+pub struct Session;
+impl SumType for Session {
+    const NAME: &'static str = "session";
+    fn variants() -> Cases<Self> {
+        cases().of::<Active>("active").of::<Idle>("idle")
     }
 }
 
-fn get<'a>(m: &'a BTreeMap<String, Value>, k: &str) -> Decoded<&'a Value> {
-    m.get(k).map_or_else(|| bad(format!("no field {k:?}")), Ok)
-}
-
-fn text(m: &BTreeMap<String, Value>, k: &str) -> Decoded<String> {
-    match get(m, k)? {
-        Value::Text(t) => Ok(t.to_string()),
-        other => bad(format!("{k}: expected text, got {other:?}")),
+pub struct Idle {}
+impl Record for Idle {
+    fn fields() -> Fields<Self> {
+        fields()
     }
 }
 
-fn int(m: &BTreeMap<String, Value>, k: &str) -> Decoded<i64> {
-    match get(m, k)? {
-        Value::Int(n) => Ok(*n),
-        other => bad(format!("{k}: expected an int, got {other:?}")),
+/// A queue, where in it, whether it is playing, and on which device.
+pub struct Active {
+    /// The track playing: always inside the queue.
+    pub at: Int,
+    pub clock: Sum<Clock>,
+    /// Where the queue was taken from, as the client that pressed it names
+    /// it (a route: `album/Water Music`); empty for nowhere in particular.
+    pub from: Text,
+    pub output: Sum<Output>,
+    pub queue: NonEmpty<Track>,
+}
+impl Record for Active {
+    fn fields() -> Fields<Self> {
+        fields()
+            .field("at", int())
+            .field("clock", typed::<Sum<Clock>>())
+            .field("from", text())
+            .field("output", typed::<Sum<Output>>())
+            .field("queue", typed::<NonEmpty<Track>>())
     }
 }
 
-fn index(m: &BTreeMap<String, Value>, k: &str) -> Decoded<u32> {
-    u32::try_from(int(m, k)?).or_else(|_| bad(format!("{k}: not an index")))
-}
-
-fn boolean(m: &BTreeMap<String, Value>, k: &str) -> Decoded<bool> {
-    match get(m, k)? {
-        Value::Bool(b) => Ok(*b),
-        other => bad(format!("{k}: expected a bool, got {other:?}")),
+/// How far into the track, and whether that is moving: paused at a point,
+/// or playing from a point since a moment of the server's clock.
+pub struct Clock;
+impl SumType for Clock {
+    const NAME: &'static str = "clock";
+    fn variants() -> Cases<Self> {
+        cases().of::<Paused>("paused").of::<Playing>("playing")
     }
 }
 
-fn opt_text(m: &BTreeMap<String, Value>, k: &str) -> Decoded<Option<String>> {
-    match get(m, k)? {
-        Value::Null => Ok(None),
-        Value::Text(t) => Ok(Some(t.to_string())),
-        other => bad(format!("{k}: expected text or null, got {other:?}")),
+pub struct Paused {
+    pub at_ms: Int,
+}
+impl Record for Paused {
+    fn fields() -> Fields<Self> {
+        fields().field("at_ms", int())
     }
 }
 
-fn opt(v: &Option<String>) -> Value {
-    v.as_ref().map_or(Value::Null, |t| Value::text(t.clone()))
+pub struct Playing {
+    pub at_ms: Int,
+    pub since: Int,
 }
-
-fn items<T>(m: &BTreeMap<String, Value>, k: &str, each: fn(&Value) -> Decoded<T>) -> Decoded<Vec<T>> {
-    match get(m, k)? {
-        Value::List(xs) => xs.iter().map(each).collect(),
-        other => bad(format!("{k}: expected a list, got {other:?}")),
+impl Record for Playing {
+    fn fields() -> Fields<Self> {
+        fields().field("at_ms", int()).field("since", int())
     }
 }
 
-fn tag(m: &BTreeMap<String, Value>) -> Decoded<String> {
-    text(m, "t")
+/// Which device the sound belongs to: one that is here (and, until it says
+/// it has started, `moving`), one that has gone and keeps it, or none.
+pub struct Output;
+impl SumType for Output {
+    const NAME: &'static str = "output";
+    fn variants() -> Cases<Self> {
+        cases().of::<Away>("away").of::<OutputDevice>("device").of::<Nowhere>("nowhere")
+    }
 }
 
-/// Encode a frame as canonical CBOR: what a live room carries.
-pub fn encode(v: &Value) -> Vec<u8> {
-    ark::canon::encode(v)
+/// The device the sound belongs to, gone: its name is kept beside its id,
+/// because "Laptop, not answering" is the one row a picker most needs to
+/// draw and the device is no longer in `devices` to be named from.
+pub struct Away {
+    pub id: Text,
+    pub name: Text,
+}
+impl Record for Away {
+    fn fields() -> Fields<Self> {
+        fields().field("id", text()).field("name", text())
+    }
 }
 
-/// Decode canonical CBOR into a value; a frame's own `from_value` reads it.
-pub fn decode(bytes: &[u8]) -> Decoded<Value> {
-    ark::canon::decode(bytes).map_err(|e| Malformed(format!("{e:?}")))
+pub struct OutputDevice {
+    pub id: Text,
+    pub moving: Bool,
+}
+impl Record for OutputDevice {
+    fn fields() -> Fields<Self> {
+        fields().field("id", text()).field("moving", bool_())
+    }
+}
+
+pub struct Nowhere {}
+impl Record for Nowhere {
+    fn fields() -> Fields<Self> {
+        fields()
+    }
 }
 
 /// A track, carried rather than looked up: everything needed to play it,
 /// so a device handed the session need not find it in its own replica
-/// first. `file` travels for the same reason: the receiving device joins
-/// it to *its* server, the way [`url`] does. `id` is the media id's text,
-/// kept only so a client can find the row if it happens to have one.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// first. `file` is the log's path, which each device joins to its own
+/// server ([`url`]).
 pub struct Track {
-    pub id: String,
-    pub title: String,
-    pub creator: String,
-    pub album: String,
-    pub duration_ms: i64,
-    pub file: String,
+    pub album: Text,
+    pub creator: Text,
+    pub duration_ms: Int,
+    pub file: Text,
+    pub id: Id<Media>,
+    pub title: Text,
+}
+impl Record for Track {
+    fn fields() -> Fields<Self> {
+        fields()
+            .named("track")
+            .field("album", text())
+            .field("creator", text())
+            .field("duration_ms", int())
+            .field("file", text())
+            .field("id", id::<Media>())
+            .field("title", text())
+    }
 }
 
-impl Track {
-    pub fn to_value(&self) -> Value {
-        record(
-            None,
-            vec![
-                ("id", Value::text(self.id.clone())),
-                ("title", Value::text(self.title.clone())),
-                ("creator", Value::text(self.creator.clone())),
+// The inputs -------------------------------------------------------------------
+
+pub struct Start {
+    pub at: Int,
+    pub from: Text,
+    pub position: Int,
+    pub queue: NonEmpty<Track>,
+}
+impl Input for Start {
+    fn schema() -> Object<Self> {
+        object()
+            .field("at", int().at_least(0))
+            .field("from", text())
+            .field("position", int().at_least(0))
+            .field("queue", typed::<NonEmpty<Track>>())
+    }
+}
+
+pub struct Seek {
+    pub ms: Int,
+}
+impl Input for Seek {
+    fn schema() -> Object<Self> {
+        object().field("ms", int().at_least(0))
+    }
+}
+
+pub struct Skip {
+    pub by: Int,
+}
+impl Input for Skip {
+    fn schema() -> Object<Self> {
+        object().field("by", int().range(-1, 1).refine(|by| by.ne(0)).why("a skip is one track either way"))
+    }
+}
+
+pub struct Jump {
+    pub index: Int,
+}
+impl Input for Jump {
+    fn schema() -> Object<Self> {
+        object().field("index", int().at_least(0))
+    }
+}
+
+pub struct Transfer {
+    pub to: Text,
+}
+impl Input for Transfer {
+    fn schema() -> Object<Self> {
+        object().field("to", text())
+    }
+}
+
+/// What the output says of where it is: `started` and `stalled`.
+pub struct At {
+    pub at_ms: Int,
+}
+impl Input for At {
+    fn schema() -> Object<Self> {
+        object().field("at_ms", int().at_least(0))
+    }
+}
+
+pub struct Advance {
+    pub from_track: Int,
+}
+impl Input for Advance {
+    fn schema() -> Object<Self> {
+        object().field("from_track", int())
+    }
+}
+
+pub struct Scrub {
+    pub at_ms: Opt<Int>,
+}
+impl Input for Scrub {
+    fn schema() -> Object<Self> {
+        object().field("at_ms", opt(int().at_least(0)))
+    }
+}
+
+// The helpers ------------------------------------------------------------------
+
+/// How far into the track a clock is at `now`: where it was paused, or
+/// where it was playing from and for how long since.
+pub fn position(clock: Sum<Clock>, now: Int) -> Int {
+    helper("position", (("clock", clock), ("now", now)), |clock: Sum<Clock>, now: Int| {
+        clock
+            .case::<Int>()
+            .on::<Paused>("paused", |p| p.at_ms)
+            .on::<Playing>("playing", |p| p.at_ms.add(now.sub(p.since)).max(p.at_ms))
+            .end()
+    })
+}
+
+/// The clock paused where it is at `now`.
+pub fn paused_at(clock: Sum<Clock>, now: Int) -> Sum<Clock> {
+    helper("paused_at", (("clock", clock), ("now", now)), |clock: Sum<Clock>, now: Int| {
+        Sum::of("paused", Paused { at_ms: position(clock, now) })
+    })
+}
+
+/// The clock at `ms`, playing on from there if it was playing.
+pub fn clock_at(clock: Sum<Clock>, ms: Int, now: Int) -> Sum<Clock> {
+    helper(
+        "clock_at",
+        (("clock", clock), ("ms", ms), ("now", now)),
+        |clock: Sum<Clock>, ms: Int, now: Int| {
+            clock
+                .case::<Sum<Clock>>()
+                .on::<Paused>("paused", |_| Sum::of("paused", Paused { at_ms: ms }))
+                .on::<Playing>("playing", |_| Sum::of("playing", Playing { at_ms: ms, since: now }))
+                .end()
+        },
+    )
+}
+
+/// Whether the session has an output that is here to answer.
+pub fn reachable(session: Sum<Session>) -> Bool {
+    helper("reachable", ("session", session), |session: Sum<Session>| {
+        session
+            .case::<Bool>()
+            .on::<Active>("active", |a| a.output.is("device"))
+            .on::<Idle>("idle", |_| false.into())
+            .end()
+    })
+}
+
+/// Whether something is making a sound: a clock running on an output that
+/// is here. An output that has gone is always paused (`on_leave`).
+pub fn sounding(session: Sum<Session>) -> Bool {
+    helper("sounding", ("session", session), |session: Sum<Session>| {
+        session
+            .case::<Bool>()
+            .on::<Active>("active", |a| a.output.is("device").and(a.clock.is("playing")))
+            .on::<Idle>("idle", |_| false.into())
+            .end()
+    })
+}
+
+/// Whether the device is here and can make a sound.
+pub fn can_play(devices: PerDevice<Device>, id: Text) -> Bool {
+    helper("can_play", (("devices", devices), ("id", id)), |devices: PerDevice<Device>, id: Text| {
+        devices.get(id).map_or(false, |d| d.can_play)
+    })
+}
+
+/// Whether the device is the session's output and here.
+pub fn is_output(session: Sum<Session>, id: Text) -> Bool {
+    helper("is_output", (("session", session), ("id", id)), |session: Sum<Session>, id: Text| {
+        session
+            .case::<Bool>()
+            .on::<Active>("active", |a| {
+                a.output
+                    .case::<Bool>()
+                    .on::<Away>("away", |_| false.into())
+                    .on::<OutputDevice>("device", |d| d.id.eq(id))
+                    .on::<Nowhere>("nowhere", |_| false.into())
+                    .end()
+            })
+            .on::<Idle>("idle", |_| false.into())
+            .end()
+    })
+}
+
+/// The output a press that means a sound leaves: the one there is, where it
+/// can answer, or the caller.
+pub fn pressed(output: Sum<Output>, caller: Text) -> Sum<Output> {
+    helper(
+        "pressed",
+        (("output", output), ("caller", caller)),
+        |output: Sum<Output>, caller: Text| pick(output.is("device"), output, here(caller)),
+    )
+}
+
+/// The sound on this device, which has it.
+pub fn here(id: Text) -> Sum<Output> {
+    helper("here", ("id", id), |id: Text| {
+        Sum::of("device", OutputDevice { id, moving: false.into() })
+    })
+}
+
+/// The output once `id` has come back: given back to it, if it was the one
+/// that went.
+pub fn returned(output: Sum<Output>, id: Text) -> Sum<Output> {
+    helper("returned", (("output", output), ("id", id)), |output: Sum<Output>, id: Text| {
+        output
+            .case::<Sum<Output>>()
+            .on::<Away>("away", |a| pick(a.id.eq(id), here(a.id), output))
+            .on::<OutputDevice>("device", |_| output)
+            .on::<Nowhere>("nowhere", |_| output)
+            .end()
+    })
+}
+
+/// How long the track at `at` is: the queue counted through once, since a
+/// list is not indexed.
+pub fn duration_at(queue: List<Track>, at: Int) -> Int {
+    helper("duration_at", (("queue", queue), ("at", at)), |queue: List<Track>, at: Int| {
+        queue
+            .fold(Counted { i: 0.into(), ms: 0.into() }, |acc: Counted, t| Counted {
+                i: acc.i.add(1),
+                ms: pick(acc.i.eq(at), t.duration_ms, acc.ms),
+            })
+            .ms
+    })
+}
+
+/// The fold of [`duration_at`]: how many tracks counted, and the one found.
+pub struct Counted {
+    pub i: Int,
+    pub ms: Int,
+}
+impl Record for Counted {
+    fn fields() -> Fields<Self> {
+        fields().field("i", int()).field("ms", int())
+    }
+}
+
+/// A session at a new place in its queue, playing from the start of it, on
+/// whichever device a press leaves the sound with.
+fn moved_to(a: Active, at: Int, caller: Text, now: Int) -> Sum<Session> {
+    Sum::of(
+        "active",
+        Active {
+            at,
+            clock: Sum::of("playing", Playing { at_ms: 0.into(), since: now }),
+            output: pressed(a.output, caller),
+            ..a
+        },
+    )
+}
+
+/// The session as it is, for the arm that changes nothing.
+fn idle() -> Sum<Session> {
+    Sum::of("idle", Idle {})
+}
+
+// ---------------------------------------------------------------------------
+// The plays
+
+/// What `record_play` takes: the track as the session carried it, and
+/// where it was played from.
+pub struct RecordPlay {
+    pub track: Id<Media>,
+    pub title: Text,
+    pub creator: Text,
+    pub album: Text,
+    pub duration_ms: Int,
+    pub file: Text,
+    pub from: Text,
+}
+impl Input for RecordPlay {
+    fn schema() -> Object<Self> {
+        object()
+            .field("track", id::<Media>())
+            .field("title", text())
+            .field("creator", text())
+            .field("album", text())
+            .field("duration_ms", int().at_least(0))
+            .field("file", text())
+            .field("from", text())
+    }
+}
+
+/// How many plays `recently_played` lists.
+pub const RECENT: i64 = 50;
+
+/// The router: the listening session, and the plays.
+pub fn listening() -> Router<Harken> {
+    let r = router::<Harken>("listening");
+    r.live::<Listening>("listening")
+        // One instance per account.
+        .scope(|ctx| ctx.user)
+        .init(|| Listening {
+            devices: PerDevice::empty(),
+            scrub: PerDevice::empty(),
+            session: idle(),
+        })
+        // A track pressed: this queue, from here, at this point, playing.
+        // While something is sounding the press goes to the device making
+        // it; otherwise the caller takes the sound if it can play, and a
+        // paused output that is here keeps it if the caller cannot. This
+        // is also what a device that was playing offline says when it comes
+        // back to a session with nothing sounding: its queue and position
+        // become the session.
+        .transition::<Start>("start", |s, ctx, input| {
+            let keep = sounding(s.session).or(can_play(s.devices, ctx.device).not());
+            let output = s
+                .session
+                .case::<Sum<Output>>()
+                .on::<Active>("active", |a| pick(keep, a.output, here(ctx.device)))
+                .on::<Idle>("idle", |_| here(ctx.device))
+                .end();
+            Listening {
+                session: Sum::of(
+                    "active",
+                    Active {
+                        at: input.at,
+                        clock: Sum::of(
+                            "playing",
+                            Playing {
+                                at_ms: input.position,
+                                since: ctx.now,
+                            },
+                        ),
+                        from: input.from,
+                        output,
+                        queue: input.queue,
+                    },
+                ),
+                ..s
+            }
+        })
+        .guard::<Start>("the track is not in the queue", |_s, _ctx, input| input.at.lt(input.queue.list().len()))
+        .guard::<Start>("nothing here can play it", |s, ctx, _input| {
+            sounding(s.session).or(reachable(s.session)).or(can_play(s.devices, ctx.device))
+        })
+        // Resume, on the output where it can answer, else on the caller.
+        .transition::<()>("play", |s, ctx, ()| Listening {
+            session: s
+                .session
+                .case::<Sum<Session>>()
+                .on::<Active>("active", |a| {
+                    Sum::of(
+                        "active",
+                        Active {
+                            clock: Sum::of(
+                                "playing",
+                                Playing {
+                                    at_ms: position(a.clock, ctx.now),
+                                    since: ctx.now,
+                                },
+                            ),
+                            output: pressed(a.output, ctx.device),
+                            ..a
+                        },
+                    )
+                })
+                .on::<Idle>("idle", |_| idle())
+                .end(),
+            ..s
+        })
+        .guard::<()>("nothing is queued", |s, _ctx, ()| s.session.is("active"))
+        .guard::<()>("nothing here can play it", |s, ctx, ()| {
+            reachable(s.session).or(can_play(s.devices, ctx.device))
+        })
+        // Pause, wherever the sound is. Nobody takes anything.
+        .transition::<()>("pause", |s, ctx, ()| Listening {
+            session: s
+                .session
+                .case::<Sum<Session>>()
+                .on::<Active>("active", |a| {
+                    Sum::of(
+                        "active",
+                        Active {
+                            clock: paused_at(a.clock, ctx.now),
+                            ..a
+                        },
+                    )
+                })
+                .on::<Idle>("idle", |_| idle())
+                .end(),
+            ..s
+        })
+        .guard::<()>("nothing is queued", |s, _ctx, ()| s.session.is("active"))
+        // Somewhere else in the track, playing on if it was.
+        .transition::<Seek>("seek", |s, ctx, input| Listening {
+            session: s
+                .session
+                .case::<Sum<Session>>()
+                .on::<Active>("active", |a| {
+                    Sum::of(
+                        "active",
+                        Active {
+                            clock: clock_at(a.clock, input.ms, ctx.now),
+                            ..a
+                        },
+                    )
+                })
+                .on::<Idle>("idle", |_| idle())
+                .end(),
+            ..s
+        })
+        .guard::<Seek>("nothing is queued", |s, _ctx, _input| s.session.is("active"))
+        // The next track or the one before, from its start; before the first
+        // is the first again. A press that means a sound.
+        .transition::<Skip>("skip", |s, ctx, input| Listening {
+            session: s
+                .session
+                .case::<Sum<Session>>()
+                .on::<Active>("active", |a| {
+                    let at = a.at.add(input.by).max(0);
+                    moved_to(a, at, ctx.device, ctx.now)
+                })
+                .on::<Idle>("idle", |_| idle())
+                .end(),
+            ..s
+        })
+        .guard::<Skip>("nothing is queued", |s, _ctx, _input| s.session.is("active"))
+        .guard::<Skip>("nothing comes after this", |s, _ctx, input| {
+            s.session
+                .case::<Bool>()
+                .on::<Active>("active", |a| input.by.lt(0).or(a.at.add(1).lt(a.queue.list().len())))
+                .on::<Idle>("idle", |_| false.into())
+                .end()
+        })
+        .guard::<Skip>("nothing here can play it", |s, ctx, _input| {
+            reachable(s.session).or(can_play(s.devices, ctx.device))
+        })
+        // A track of the queue, from its start. A press that means a sound.
+        .transition::<Jump>("jump", |s, ctx, input| Listening {
+            session: s
+                .session
+                .case::<Sum<Session>>()
+                .on::<Active>("active", |a| moved_to(a, input.index, ctx.device, ctx.now))
+                .on::<Idle>("idle", |_| idle())
+                .end(),
+            ..s
+        })
+        .guard::<Jump>("nothing is queued", |s, _ctx, _input| s.session.is("active"))
+        .guard::<Jump>("the track is not in the queue", |s, _ctx, input| {
+            s.session
+                .case::<Bool>()
+                .on::<Active>("active", |a| input.index.lt(a.queue.list().len()))
+                .on::<Idle>("idle", |_| false.into())
+                .end()
+        })
+        .guard::<Jump>("nothing here can play it", |s, ctx, _input| {
+            reachable(s.session).or(can_play(s.devices, ctx.device))
+        })
+        // Move the sound to a device that is here and can play. It is
+        // `moving` until it says it has started; handing it to the device
+        // that already has it, settled, changes nothing. The device losing
+        // it is told nothing: it reads the session and goes quiet.
+        .transition::<Transfer>("transfer", |s, _ctx, input| Listening {
+            session: s
+                .session
+                .case::<Sum<Session>>()
+                .on::<Active>("active", |a| {
+                    Sum::of(
+                        "active",
+                        Active {
+                            output: pick(
+                                a.output.eq(here(input.to)),
+                                a.output,
+                                Sum::of(
+                                    "device",
+                                    OutputDevice {
+                                        id: input.to,
+                                        moving: true.into(),
+                                    },
+                                ),
+                            ),
+                            ..a
+                        },
+                    )
+                })
+                .on::<Idle>("idle", |_| idle())
+                .end(),
+            ..s
+        })
+        .guard::<Transfer>("nothing is playing to move", |s, _ctx, _input| s.session.is("active"))
+        .guard::<Transfer>("that device is not here, or cannot play", |s, _ctx, input| can_play(s.devices, input.to))
+        // Nothing queued, nothing playing, nowhere.
+        .transition::<()>("stop", |s, _ctx, ()| Listening { session: idle(), ..s })
+        // The output has the hand-off, at this point in the track.
+        .transition::<At>("started", |s, ctx, input| Listening {
+            session: s
+                .session
+                .case::<Sum<Session>>()
+                .on::<Active>("active", |a| {
+                    Sum::of(
+                        "active",
+                        Active {
+                            clock: clock_at(a.clock, input.at_ms, ctx.now),
+                            output: here(ctx.device),
+                            ..a
+                        },
+                    )
+                })
+                .on::<Idle>("idle", |_| idle())
+                .end(),
+            ..s
+        })
+        .guard::<At>("not the output", |s, ctx, _input| is_output(s.session, ctx.device))
+        // The output's track ended: the next one, or paused at the start of
+        // the last when there is none. Said about a track that is no longer
+        // the one playing — somebody moved the session first — it is nothing.
+        .transition::<Advance>("advance", |s, ctx, input| Listening {
+            session: s
+                .session
+                .case::<Sum<Session>>()
+                .on::<Active>("active", |a| {
+                    pick(
+                        a.at.ne(input.from_track),
+                        s.session,
+                        pick::<Sum<Session>>(
+                            a.at.add(1).lt(a.queue.list().len()),
+                            Sum::of(
+                                "active",
+                                Active {
+                                    at: a.at.add(1),
+                                    clock: Sum::of(
+                                        "playing",
+                                        Playing {
+                                            at_ms: 0.into(),
+                                            since: ctx.now,
+                                        },
+                                    ),
+                                    ..a
+                                },
+                            ),
+                            Sum::of(
+                                "active",
+                                Active {
+                                    clock: Sum::of("paused", Paused { at_ms: 0.into() }),
+                                    ..a
+                                },
+                            ),
+                        ),
+                    )
+                })
+                .on::<Idle>("idle", |_| idle())
+                .end(),
+            ..s
+        })
+        .guard::<Advance>("not the output", |s, ctx, _input| is_output(s.session, ctx.device))
+        // The output stopped making a sound by itself, here: a stream that
+        // ran out, a speaker paused by hand.
+        .transition::<At>("stalled", |s, _ctx, input| Listening {
+            session: s
+                .session
+                .case::<Sum<Session>>()
+                .on::<Active>("active", |a| {
+                    Sum::of(
+                        "active",
+                        Active {
+                            clock: Sum::of("paused", Paused { at_ms: input.at_ms }),
+                            ..a
+                        },
+                    )
+                })
+                .on::<Idle>("idle", |_| idle())
+                .end(),
+            ..s
+        })
+        .guard::<At>("not the output", |s, ctx, _input| is_output(s.session, ctx.device))
+        // The output lets the sound go: a speaker somebody else took, or one
+        // playing something that is not this queue, or not answering. The
+        // queue stays, paused, and nothing is the output.
+        .transition::<()>("release", |s, ctx, ()| Listening {
+            session: s
+                .session
+                .case::<Sum<Session>>()
+                .on::<Active>("active", |a| {
+                    Sum::of(
+                        "active",
+                        Active {
+                            clock: paused_at(a.clock, ctx.now),
+                            output: Sum::of("nowhere", Nowhere {}),
+                            ..a
+                        },
+                    )
+                })
+                .on::<Idle>("idle", |_| idle())
+                .end(),
+            ..s
+        })
+        .guard::<()>("not the output", |s, ctx, ()| is_output(s.session, ctx.device))
+        // Ephemeral: where this device's scrubber is being dragged to, or
+        // nowhere once it is let go. It reads nothing of the state.
+        .transition::<Scrub>("scrub", |s, ctx, input| Listening {
+            scrub: s.scrub.set(ctx.device, input.at_ms),
+            ..s
+        })
+        // A device arriving takes nothing; one the sound stayed with gets it
+        // back, still paused.
+        .on_join(|s, _ctx, device| {
+            let id = device.id;
+            Listening {
+                devices: s.devices.put(id, device),
+                session: s
+                    .session
+                    .case::<Sum<Session>>()
+                    .on::<Active>("active", |a| {
+                        Sum::of(
+                            "active",
+                            Active {
+                                output: returned(a.output, id),
+                                ..a
+                            },
+                        )
+                    })
+                    .on::<Idle>("idle", |_| idle())
+                    .end(),
+                ..s
+            }
+        })
+        // A device leaving is gone from `devices`; the output leaving keeps
+        // the sound, away, and the clock stops, because nothing is on the
+        // other end to be making one.
+        .on_leave(|s, ctx, device| {
+            let (id, name) = (device.id, device.name);
+            Listening {
+                devices: s.devices.clear(id),
+                session: s
+                    .session
+                    .case::<Sum<Session>>()
+                    .on::<Active>("active", |a| {
+                        pick(
+                            is_output(s.session, id),
+                            Sum::of(
+                                "active",
+                                Active {
+                                    clock: paused_at(a.clock, ctx.now),
+                                    output: Sum::of("away", Away { id, name }),
+                                    ..a
+                                },
+                            ),
+                            s.session,
+                        )
+                    })
+                    .on::<Idle>("idle", |_| idle())
+                    .end(),
+                ..s
+            }
+        })
+        // A restart: the queue as it was, paused where it had got to (never
+        // past the end of the track), with no output and nobody here —
+        // whoever was here when the server stopped never left, and nothing
+        // is making a sound for a session nobody has rejoined.
+        .on_restore(|s, ctx| Listening {
+            devices: PerDevice::empty(),
+            session: s
+                .session
+                .case::<Sum<Session>>()
+                .on::<Active>("active", |a| {
+                    Sum::of(
+                        "active",
+                        Active {
+                            clock: Sum::of(
+                                "paused",
+                                Paused {
+                                    at_ms: position(a.clock, ctx.now).min(duration_at(a.queue.list(), a.at)),
+                                },
+                            ),
+                            output: Sum::of("nowhere", Nowhere {}),
+                            ..a
+                        },
+                    )
+                })
+                .on::<Idle>("idle", |_| idle())
+                .end(),
+            ..s
+        });
+    r.routes((
+        // A track was played: authored by the device making the sound, once
+        // a track has played thirty seconds or half its length, whichever is
+        // first, once per play. When is the author's clock, frozen in the
+        // entry as an auto (`played_ms`), so a play made offline is dated
+        // when it was made and reaches the server whenever the device does.
+        // The track is carried as it was heard, and need not be in the
+        // library (`schema::Play`).
+        r.input::<RecordPlay>().mutation("record_play", |ctx, db, input| {
+            db.play.insert(Play {
+                id: ctx.new_id("id"),
+                user_id: ctx.user,
+                track: input.track.to_text(),
+                title: input.title,
+                creator: input.creator,
+                album: input.album,
+                duration_ms: input.duration_ms,
+                file: input.file,
+                played_ms: ctx.now("played_ms"),
+                from: input.from,
+            })
+        }),
+        // The caller's newest play: what Home says was last played when
+        // nothing is playing now — the same on every device, and there
+        // offline.
+        r.query("last_played", |ctx, db, _input: ()| {
+            db.play
+                .filter(Play::user_id.eq(ctx.user))
+                .order_by((Play::played_ms.desc(), Play::id.desc()))
+                .limit(1)
+        }),
+        // The caller's plays, newest first, the last [`RECENT`] of them.
+        r.query("recently_played", |ctx, db, _input: ()| {
+            db.play
+                .filter(Play::user_id.eq(ctx.user))
+                .order_by((Play::played_ms.desc(), Play::id.desc()))
+                .limit(RECENT)
+        }),
+    ))
+}
+
+// ---------------------------------------------------------------------------
+// Reading it
+
+/// The state as plain Rust: what a player, a speaker or a screen is driven
+/// from. Decoded from the value `ark_client::Peer::live` hands back; the
+/// shapes are the declaration's above, one for one, and a value that is not
+/// one is `None` rather than a guess.
+pub mod read {
+    use super::*;
+    use ark::value::{Id, Value};
+
+    /// The name of the live state.
+    pub const STATE: &str = "listening";
+
+    /// What sort of thing a device is, for the glyph a picker draws.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    pub enum Kind {
+        #[default]
+        Computer,
+        Phone,
+        /// Something in the house, reached through Home Assistant.
+        Speaker,
+    }
+
+    impl Kind {
+        pub fn name(self) -> &'static str {
+            match self {
+                Kind::Computer => "computer",
+                Kind::Phone => "phone",
+                Kind::Speaker => "speaker",
+            }
+        }
+
+        /// A kind this build has never heard of reads as a computer, so an
+        /// older client still lists a newer device.
+        pub fn parse(s: &str) -> Kind {
+            match s {
+                "phone" => Kind::Phone,
+                "speaker" => Kind::Speaker,
+                _ => Kind::Computer,
+            }
+        }
+    }
+
+    /// A device standing in the session.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct Device {
+        pub id: String,
+        pub name: String,
+        pub kind: Kind,
+        pub can_play: bool,
+        pub user: String,
+    }
+
+    /// A track of the queue.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct Track {
+        pub id: Id,
+        pub title: String,
+        pub creator: String,
+        pub album: String,
+        pub duration_ms: i64,
+        pub file: String,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Clock {
+        Paused {
+            at_ms: i64,
+        },
+        /// Playing from `at_ms` since `since`, the server's clock.
+        Playing {
+            at_ms: i64,
+            since: i64,
+        },
+    }
+
+    impl Clock {
+        /// How far in at `now`, the server's clock.
+        pub fn position(&self, now: i64) -> i64 {
+            match *self {
+                Clock::Paused { at_ms } => at_ms,
+                Clock::Playing { at_ms, since } => at_ms + (now - since).max(0),
+            }
+        }
+
+        pub fn playing(&self) -> bool {
+            matches!(self, Clock::Playing { .. })
+        }
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum Output {
+        Device { id: String, moving: bool },
+        Away { id: String, name: String },
+        Nowhere,
+    }
+
+    impl Output {
+        /// The device the sound belongs to, here or not.
+        pub fn id(&self) -> Option<&str> {
+            match self {
+                Output::Device { id, .. } | Output::Away { id, .. } => Some(id),
+                Output::Nowhere => None,
+            }
+        }
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct Active {
+        pub queue: Vec<Track>,
+        pub at: usize,
+        pub clock: Clock,
+        pub output: Output,
+        pub from: String,
+    }
+
+    impl Active {
+        /// The track playing.
+        pub fn now(&self) -> &Track {
+            &self.queue[self.at.min(self.queue.len() - 1)]
+        }
+    }
+
+    /// The whole state.
+    #[derive(Debug, Clone, PartialEq, Eq, Default)]
+    pub struct Listening {
+        pub devices: Vec<Device>,
+        /// Where each device is dragging its scrubber, by device id.
+        pub scrub: BTreeMap<String, i64>,
+        pub session: Option<Active>,
+    }
+
+    impl Listening {
+        pub fn device(&self, id: &str) -> Option<&Device> {
+            self.devices.iter().find(|d| d.id == id)
+        }
+
+        /// The output, if anything is queued.
+        pub fn output(&self) -> Option<&Output> {
+            self.session.as_ref().map(|a| &a.output)
+        }
+
+        /// Whether `id` is the output and here.
+        pub fn outputs(&self, id: &str) -> bool {
+            matches!(self.output(), Some(Output::Device { id: o, .. }) if o == id)
+        }
+
+        /// Whether a hand-off to `id` is in flight.
+        pub fn moving_to(&self, id: &str) -> bool {
+            matches!(self.output(), Some(Output::Device { id: o, moving: true }) if o == id)
+        }
+
+        /// Whether something is making a sound.
+        pub fn sounding(&self) -> bool {
+            matches!(&self.session, Some(a) if a.clock.playing() && matches!(a.output, Output::Device { .. }))
+        }
+    }
+
+    fn text(v: &Value, k: &str) -> Option<String> {
+        match v.as_struct().get(k)? {
+            Value::Text(t) => Some(t.to_string()),
+            _ => None,
+        }
+    }
+
+    fn int(v: &Value, k: &str) -> Option<i64> {
+        match v.as_struct().get(k)? {
+            Value::Int(n) => Some(*n),
+            _ => None,
+        }
+    }
+
+    fn tag(v: &Value) -> Option<String> {
+        text(v, ark::types::TAG)
+    }
+
+    fn is_struct(v: &Value) -> bool {
+        matches!(v, Value::Struct(_))
+    }
+
+    impl Track {
+        pub fn from_value(v: &Value) -> Option<Track> {
+            if !is_struct(v) {
+                return None;
+            }
+            Some(Track {
+                id: match v.as_struct().get("id")? {
+                    Value::Id(i) => *i,
+                    _ => return None,
+                },
+                title: text(v, "title")?,
+                creator: text(v, "creator")?,
+                album: text(v, "album")?,
+                duration_ms: int(v, "duration_ms")?,
+                file: text(v, "file")?,
+            })
+        }
+
+        pub fn to_value(&self) -> Value {
+            Value::record(vec![
                 ("album", Value::text(self.album.clone())),
-                ("duration_ms", Value::int(self.duration_ms)),
+                ("creator", Value::text(self.creator.clone())),
+                ("duration_ms", Value::Int(self.duration_ms)),
                 ("file", Value::text(self.file.clone())),
-            ],
-        )
-    }
-
-    pub fn from_value(v: &Value) -> Decoded<Track> {
-        let m = fields(v)?;
-        Ok(Track {
-            id: text(m, "id")?,
-            title: text(m, "title")?,
-            creator: text(m, "creator")?,
-            album: text(m, "album")?,
-            duration_ms: int(m, "duration_ms")?,
-            file: text(m, "file")?,
-        })
-    }
-}
-
-/// What sort of thing a device is, for the one glyph a picker draws.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Kind {
-    #[default]
-    Computer,
-    Phone,
-    /// Something in the house, reached through Home Assistant.
-    Speaker,
-}
-
-impl Kind {
-    pub fn name(self) -> &'static str {
-        match self {
-            Kind::Computer => "computer",
-            Kind::Phone => "phone",
-            Kind::Speaker => "speaker",
+                ("id", Value::Id(self.id)),
+                ("title", Value::text(self.title.clone())),
+            ])
         }
     }
 
-    /// A kind this build has never heard of reads as a computer, so an
-    /// older client still lists a newer device.
-    pub fn parse(s: &str) -> Kind {
-        match s {
-            "phone" => Kind::Phone,
-            "speaker" => Kind::Speaker,
-            _ => Kind::Computer,
-        }
-    }
-}
-
-/// Somewhere this account listens. Every device the session knows about,
-/// which is not every device that is connected: the one the music belongs
-/// to stays in the list after its socket goes (`here: false`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Device {
-    pub id: DeviceId,
-    /// What the picker draws. The client says it; nothing here interprets it.
-    pub name: String,
-    /// Whether it can make a sound at all: a device with none is a remote
-    /// control and never the output.
-    pub audible: bool,
-    /// Whether its socket is open right now.
-    pub here: bool,
-    pub kind: Kind,
-}
-
-impl Device {
-    pub fn to_value(&self) -> Value {
-        record(
-            None,
-            vec![
-                ("id", Value::text(self.id.clone())),
-                ("name", Value::text(self.name.clone())),
-                ("audible", Value::bool(self.audible)),
-                ("here", Value::bool(self.here)),
-                ("kind", Value::text(self.kind.name())),
-            ],
-        )
-    }
-
-    pub fn from_value(v: &Value) -> Decoded<Device> {
-        let m = fields(v)?;
-        Ok(Device {
-            id: text(m, "id")?,
-            name: text(m, "name")?,
-            audible: boolean(m, "audible")?,
-            here: boolean(m, "here")?,
-            kind: Kind::parse(&text(m, "kind")?),
-        })
-    }
-}
-
-/// The whole session. Small enough to send entire on every change, so a
-/// client that receives the whole truth cannot drift from it.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct Session {
-    /// Which device the sound belongs to. `None` only when nothing has
-    /// played yet, or somebody stopped it everywhere. It survives that
-    /// device's socket going: a laptop lid closing is not a decision to
-    /// move the music.
-    pub output: Option<DeviceId>,
-    /// A hand-off in flight: the sound has been given to this device and it
-    /// has not reported since.
-    pub moving: Option<DeviceId>,
-    pub devices: Vec<Device>,
-    /// What is playing and what comes after it: the snapshot taken when play
-    /// was pressed.
-    pub queue: Vec<Track>,
-    pub at: u32,
-    pub playing: bool,
-    /// How far into [`Session::now`] the output last said it was. No
-    /// timestamp beside it: clocks do not agree, so a client counts from
-    /// when *it* received this, and the output resends about once a second.
-    pub position_ms: i64,
-}
-
-impl Session {
-    /// What is playing, if anything.
-    pub fn now(&self) -> Option<&Track> {
-        self.queue.get(self.at as usize)
-    }
-
-    /// Whether `device` is the one the sound belongs to.
-    pub fn outputs(&self, device: &str) -> bool {
-        self.output.as_deref() == Some(device)
-    }
-
-    /// The device the sound belongs to, as the picker names it.
-    pub fn output_device(&self) -> Option<&Device> {
-        let id = self.output.as_deref()?;
-        self.devices.iter().find(|d| d.id == id)
-    }
-
-    /// Whether the device the sound belongs to is actually there: the
-    /// difference between sending a transport button and obeying it here.
-    pub fn output_here(&self) -> bool {
-        self.output_device().is_some_and(|d| d.here)
-    }
-
-    /// Whether `device` is waiting to take the sound.
-    pub fn moving_to(&self, device: &str) -> bool {
-        self.moving.as_deref() == Some(device)
-    }
-
-    pub fn device(&self, id: &str) -> Option<&Device> {
-        self.devices.iter().find(|d| d.id == id)
-    }
-
-    pub fn to_value(&self) -> Value {
-        record(
-            None,
-            vec![
-                ("output", opt(&self.output)),
-                ("moving", opt(&self.moving)),
-                ("devices", Value::list(self.devices.iter().map(Device::to_value).collect())),
-                ("queue", Value::list(self.queue.iter().map(Track::to_value).collect())),
-                ("at", Value::int(self.at.into())),
-                ("playing", Value::bool(self.playing)),
-                ("position_ms", Value::int(self.position_ms)),
-            ],
-        )
-    }
-
-    pub fn from_value(v: &Value) -> Decoded<Session> {
-        let m = fields(v)?;
-        Ok(Session {
-            output: opt_text(m, "output")?,
-            moving: opt_text(m, "moving")?,
-            devices: items(m, "devices", Device::from_value)?,
-            queue: items(m, "queue", Track::from_value)?,
-            at: index(m, "at")?,
-            playing: boolean(m, "playing")?,
-            position_ms: int(m, "position_ms")?,
-        })
-    }
-}
-
-/// Something to be done, wherever the sound is coming from. Play and pause
-/// are two verbs rather than one toggle: the device asking is not the
-/// device doing, so "the other one of whatever you are" means nothing.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Command {
-    Play,
-    Pause,
-    Next,
-    Previous,
-    Seek {
-        position_ms: i64,
-    },
-    /// Take this session: this queue, from here, at this point, playing or
-    /// not. Somebody pressing a track and the session moving to another
-    /// device are the same sentence with different numbers in it.
-    Start {
-        queue: Vec<Track>,
-        at: u32,
-        position_ms: i64,
-        playing: bool,
-    },
-}
-
-impl Command {
-    pub fn to_value(&self) -> Value {
-        match self {
-            Command::Play => record(Some("play"), vec![]),
-            Command::Pause => record(Some("pause"), vec![]),
-            Command::Next => record(Some("next"), vec![]),
-            Command::Previous => record(Some("previous"), vec![]),
-            Command::Seek { position_ms } => record(Some("seek"), vec![("position_ms", Value::int(*position_ms))]),
-            Command::Start {
-                queue,
-                at,
-                position_ms,
-                playing,
-            } => record(
-                Some("start"),
-                vec![
-                    ("queue", Value::list(queue.iter().map(Track::to_value).collect())),
-                    ("at", Value::int((*at).into())),
-                    ("position_ms", Value::int(*position_ms)),
-                    ("playing", Value::bool(*playing)),
-                ],
-            ),
+    fn clock(v: &Value) -> Option<Clock> {
+        match tag(v)?.as_str() {
+            "paused" => Some(Clock::Paused { at_ms: int(v, "at_ms")? }),
+            "playing" => Some(Clock::Playing {
+                at_ms: int(v, "at_ms")?,
+                since: int(v, "since")?,
+            }),
+            _ => None,
         }
     }
 
-    pub fn from_value(v: &Value) -> Decoded<Command> {
-        let m = fields(v)?;
-        Ok(match tag(m)?.as_str() {
-            "play" => Command::Play,
-            "pause" => Command::Pause,
-            "next" => Command::Next,
-            "previous" => Command::Previous,
-            "seek" => Command::Seek {
-                position_ms: int(m, "position_ms")?,
-            },
-            "start" => Command::Start {
-                queue: items(m, "queue", Track::from_value)?,
-                at: index(m, "at")?,
-                position_ms: int(m, "position_ms")?,
-                playing: boolean(m, "playing")?,
-            },
-            other => return bad(format!("no command {other:?}")),
-        })
-    }
-}
-
-/// What a device says.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Say {
-    /// The first frame: what to call this device and what it can do. No
-    /// token and no id: the socket this rides on is already authenticated.
-    Here { name: String, audible: bool, kind: Kind },
-    /// I am the output, and this is what I am doing. Sent when something
-    /// changes and about once a second while playing.
-    Report {
-        queue: Vec<Track>,
-        at: u32,
-        playing: bool,
-        position_ms: i64,
-    },
-    /// Do this — here, or wherever the sound actually is.
-    Do { command: Command },
-    /// Move the sound to `to`, or stop it everywhere with `None`.
-    Transfer { to: Option<DeviceId> },
-}
-
-impl Say {
-    pub fn to_value(&self) -> Value {
-        match self {
-            Say::Here { name, audible, kind } => record(
-                Some("here"),
-                vec![
-                    ("name", Value::text(name.clone())),
-                    ("audible", Value::bool(*audible)),
-                    ("kind", Value::text(kind.name())),
-                ],
-            ),
-            Say::Report {
-                queue,
-                at,
-                playing,
-                position_ms,
-            } => record(
-                Some("report"),
-                vec![
-                    ("queue", Value::list(queue.iter().map(Track::to_value).collect())),
-                    ("at", Value::int((*at).into())),
-                    ("playing", Value::bool(*playing)),
-                    ("position_ms", Value::int(*position_ms)),
-                ],
-            ),
-            Say::Do { command } => record(Some("do"), vec![("command", command.to_value())]),
-            Say::Transfer { to } => record(Some("transfer"), vec![("to", opt(to))]),
+    fn output(v: &Value) -> Option<Output> {
+        match tag(v)?.as_str() {
+            "device" => Some(Output::Device {
+                id: text(v, "id")?,
+                moving: matches!(v.as_struct().get("moving")?, Value::Bool(true)),
+            }),
+            "away" => Some(Output::Away {
+                id: text(v, "id")?,
+                name: text(v, "name")?,
+            }),
+            "nowhere" => Some(Output::Nowhere),
+            _ => None,
         }
     }
 
-    pub fn from_value(v: &Value) -> Decoded<Say> {
-        let m = fields(v)?;
-        Ok(match tag(m)?.as_str() {
-            "here" => Say::Here {
-                name: text(m, "name")?,
-                audible: boolean(m, "audible")?,
-                kind: Kind::parse(&text(m, "kind")?),
-            },
-            "report" => Say::Report {
-                queue: items(m, "queue", Track::from_value)?,
-                at: index(m, "at")?,
-                playing: boolean(m, "playing")?,
-                position_ms: int(m, "position_ms")?,
-            },
-            "do" => Say::Do {
-                command: Command::from_value(get(m, "command")?)?,
-            },
-            "transfer" => Say::Transfer { to: opt_text(m, "to")? },
-            other => return bad(format!("nothing is said as {other:?}")),
-        })
-    }
-
-    /// The frame's bytes.
-    pub fn encode(&self) -> Vec<u8> {
-        encode(&self.to_value())
-    }
-
-    pub fn decode(bytes: &[u8]) -> Decoded<Say> {
-        Say::from_value(&decode(bytes)?)
-    }
-}
-
-/// What the server says back.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Hear {
-    /// The session, entire, to every device of this account.
-    State { session: Session },
-    /// You are the output. Do this.
-    Do { command: Command },
-}
-
-impl Hear {
-    pub fn to_value(&self) -> Value {
-        match self {
-            Hear::State { session } => record(Some("state"), vec![("session", session.to_value())]),
-            Hear::Do { command } => record(Some("do"), vec![("command", command.to_value())]),
+    impl Listening {
+        /// The state from its value, or `None` for a value that is not one.
+        pub fn from_value(v: &Value) -> Option<Listening> {
+            if !is_struct(v) {
+                return None;
+            }
+            let m = v.as_struct();
+            let mut devices = vec![];
+            if let Value::Struct(ds) = m.get("devices")? {
+                for d in ds.values() {
+                    if !is_struct(d) {
+                        return None;
+                    }
+                    devices.push(Device {
+                        id: text(d, "id")?,
+                        name: text(d, "name")?,
+                        kind: Kind::parse(&text(d, "kind")?),
+                        can_play: matches!(d.as_struct().get("can_play")?, Value::Bool(true)),
+                        user: text(d, "user").unwrap_or_default(),
+                    });
+                }
+            }
+            let mut scrub = BTreeMap::new();
+            if let Some(Value::Struct(ss)) = m.get("scrub") {
+                for (k, x) in ss.iter() {
+                    if let Value::Int(n) = x {
+                        scrub.insert(k.to_string(), *n);
+                    }
+                }
+            }
+            let s = m.get("session")?;
+            let session = match tag(s)?.as_str() {
+                "idle" => None,
+                "active" => {
+                    let queue: Option<Vec<Track>> = match s.as_struct().get("queue")? {
+                        Value::List(xs) => xs.iter().map(Track::from_value).collect(),
+                        _ => None,
+                    };
+                    let queue = queue?;
+                    let at = usize::try_from(int(s, "at")?).ok()?;
+                    if queue.is_empty() || at >= queue.len() {
+                        return None;
+                    }
+                    Some(Active {
+                        queue,
+                        at,
+                        clock: clock(&s.field("clock"))?,
+                        output: output(&s.field("output"))?,
+                        from: text(s, "from")?,
+                    })
+                }
+                _ => return None,
+            };
+            Some(Listening { devices, scrub, session })
         }
     }
 
-    pub fn from_value(v: &Value) -> Decoded<Hear> {
-        let m = fields(v)?;
-        Ok(match tag(m)?.as_str() {
-            "state" => Hear::State {
-                session: Session::from_value(get(m, "session")?)?,
-            },
-            "do" => Hear::Do {
-                command: Command::from_value(get(m, "command")?)?,
-            },
-            other => return bad(format!("nothing is heard as {other:?}")),
-        })
+    /// The inputs, as a call takes them.
+    pub mod input {
+        use super::*;
+        use ark::eval::Args;
+
+        fn args(fields: Vec<(&str, Value)>) -> Args {
+            fields.into_iter().map(|(k, v)| (k.to_string(), v)).collect()
+        }
+
+        pub fn start(queue: &[Track], at: usize, position_ms: i64, from: &str) -> Args {
+            args(vec![
+                ("at", Value::Int(at as i64)),
+                ("from", Value::text(from)),
+                ("position", Value::Int(position_ms.max(0))),
+                ("queue", Value::list(queue.iter().map(Track::to_value).collect())),
+            ])
+        }
+
+        pub fn none() -> Args {
+            Args::new()
+        }
+
+        pub fn seek(ms: i64) -> Args {
+            args(vec![("ms", Value::Int(ms.max(0)))])
+        }
+
+        pub fn skip(by: i64) -> Args {
+            args(vec![("by", Value::Int(by))])
+        }
+
+        pub fn jump(index: usize) -> Args {
+            args(vec![("index", Value::Int(index as i64))])
+        }
+
+        pub fn transfer(to: &str) -> Args {
+            args(vec![("to", Value::text(to))])
+        }
+
+        /// `started` and `stalled`.
+        pub fn at(at_ms: i64) -> Args {
+            args(vec![("at_ms", Value::Int(at_ms.max(0)))])
+        }
+
+        pub fn advance(from_track: usize) -> Args {
+            args(vec![("from_track", Value::Int(from_track as i64))])
+        }
+
+        pub fn scrub(at_ms: Option<i64>) -> Args {
+            args(vec![("at_ms", at_ms.map_or(Value::Null, |n| Value::Int(n.max(0))))])
+        }
+
+        /// `record_play`'s arguments.
+        pub fn record_play(track: &Track, from: &str) -> Args {
+            args(vec![
+                ("album", Value::text(track.album.clone())),
+                ("creator", Value::text(track.creator.clone())),
+                ("duration_ms", Value::Int(track.duration_ms.max(0))),
+                ("file", Value::text(track.file.clone())),
+                ("from", Value::text(from)),
+                ("title", Value::text(track.title.clone())),
+                ("track", Value::Id(track.id)),
+            ])
+        }
     }
 
-    /// The frame's bytes.
-    pub fn encode(&self) -> Vec<u8> {
-        encode(&self.to_value())
-    }
-
-    pub fn decode(bytes: &[u8]) -> Decoded<Hear> {
-        Hear::from_value(&decode(bytes)?)
+    /// How long a track has to have played before it counts as a play:
+    /// thirty seconds or half its length, whichever is first.
+    pub fn counts_after(duration_ms: i64) -> i64 {
+        if duration_ms <= 0 {
+            return 30_000;
+        }
+        (duration_ms / 2).min(30_000)
     }
 }
 
-/// Where a [`Track::file`] is, from where a server is. The column is a
-/// *path*, and every device joins it to its own server — which is what
-/// makes a hand-off work between a phone and a speaker that only knows a
-/// LAN address. An absolute URL is already an answer and passes through.
+/// Where a track's file is, from where a server is. The column is a *path*,
+/// and every device joins it to its own server — which is what makes a
+/// hand-off work between a phone and a speaker that only knows a LAN
+/// address. An absolute URL is already an answer and passes through.
 pub fn url(base: &str, file: &str) -> String {
     if file.is_empty() || file.starts_with("http://") || file.starts_with("https://") {
         return file.to_string();
@@ -555,100 +1308,6 @@ fn encode_segment(part: &str, out: &mut String) {
 mod tests {
     use super::*;
 
-    fn track(title: &str) -> Track {
-        Track {
-            id: String::new(),
-            title: title.into(),
-            creator: "Bach".into(),
-            album: String::new(),
-            duration_ms: 1000,
-            file: "music/a.mp3".into(),
-        }
-    }
-
-    trait Bytes {
-        fn to_value_bytes(&self) -> Vec<u8>;
-    }
-    impl Bytes for Value {
-        fn to_value_bytes(&self) -> Vec<u8> {
-            encode(self)
-        }
-    }
-
-    fn device(id: &str, here: bool) -> Device {
-        Device {
-            id: id.into(),
-            name: id.into(),
-            audible: true,
-            here,
-            kind: Kind::Computer,
-        }
-    }
-
-    /// Every frame survives the wire the engine carries it on, and its
-    /// bytes are canonical: decoding and encoding again is the same bytes.
-    #[test]
-    fn the_frames_survive_canonical_cbor() {
-        let says = [
-            Say::Here {
-                name: "Phone".into(),
-                audible: true,
-                kind: Kind::Phone,
-            },
-            Say::Report {
-                queue: vec![track("Air"), track("Gigue")],
-                at: 1,
-                playing: true,
-                position_ms: 12_345,
-            },
-            Say::Do {
-                command: Command::Start {
-                    queue: vec![track("Air")],
-                    at: 0,
-                    position_ms: 0,
-                    playing: false,
-                },
-            },
-            Say::Do { command: Command::Previous },
-            Say::Transfer { to: None },
-            Say::Transfer {
-                to: Some("media_player.kitchen".into()),
-            },
-        ];
-        for say in says {
-            let bytes = say.encode();
-            assert!(ark::canon::round_trip(&bytes));
-            assert_eq!(Say::decode(&bytes).unwrap(), say);
-        }
-        let hears = [
-            Hear::Do {
-                command: Command::Seek { position_ms: 4200 },
-            },
-            Hear::State {
-                session: Session {
-                    output: Some("d".into()),
-                    moving: Some("k".into()),
-                    devices: vec![device("d", true), device("k", false)],
-                    queue: vec![track("Air"), track("Gigue")],
-                    at: 1,
-                    playing: true,
-                    position_ms: 12,
-                },
-            },
-            Hear::State { session: Session::default() },
-        ];
-        for hear in hears {
-            let bytes = hear.encode();
-            assert!(ark::canon::round_trip(&bytes));
-            assert_eq!(Hear::decode(&bytes).unwrap(), hear);
-        }
-        // A frame that is not one is said to be not one, not guessed at.
-        assert!(Say::decode(&Hear::State { session: Session::default() }.encode()).is_err());
-        assert!(Say::decode(&record(Some("do"), vec![("command", record(Some("rewind"), vec![]))]).to_value_bytes()).is_err());
-        assert!(Say::decode(b"\xff").is_err());
-        assert!(Hear::from_value(&record(Some("state"), vec![])).is_err());
-    }
-
     /// A path becomes a URL against whichever server is asking, and a URL
     /// is already an answer.
     #[test]
@@ -673,31 +1332,12 @@ mod tests {
         assert_eq!(url("http://h", ""), "", "nothing to stream is not a URL");
     }
 
-    /// The derived facts, and the one that decides whether a button is an
-    /// instruction or a message.
+    /// Thirty seconds or half the track, whichever is first.
     #[test]
-    fn the_session_says_what_is_playing_and_whether_it_can_be_reached() {
-        let mut session = Session {
-            queue: vec![track("Air"), track("Gigue")],
-            at: 1,
-            ..Session::default()
-        };
-        assert_eq!(session.now().map(|t| t.title.as_str()), Some("Gigue"));
-        assert!(!session.outputs("d"), "nobody has it yet");
-
-        session.devices = vec![device("d", true)];
-        session.output = Some("d".into());
-        assert!(session.outputs("d"));
-        assert!(session.output_here());
-
-        // The device the sound belongs to has gone, and it still belongs to it.
-        session.devices = vec![device("d", false)];
-        assert!(session.outputs("d"), "still its sound");
-        assert!(!session.output_here(), "and still nowhere to send a button");
-
-        session.moving = Some("k".into());
-        assert!(session.moving_to("k"));
-        session.at = 9;
-        assert!(session.now().is_none(), "past the end is nothing playing");
+    fn a_play_counts_after_thirty_seconds_or_half_the_track() {
+        assert_eq!(read::counts_after(300_000), 30_000);
+        assert_eq!(read::counts_after(40_000), 20_000);
+        assert_eq!(read::counts_after(60_000), 30_000);
+        assert_eq!(read::counts_after(0), 30_000, "a length nobody knows is the thirty seconds");
     }
 }

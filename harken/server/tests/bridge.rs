@@ -1,13 +1,15 @@
-//! A speaker reaches the picker the way it does in production: through the
-//! whole server, a room the desk announced, a peer the server stands in for,
-//! and a Home Assistant that answers over HTTP.
+//! The listening session over real sockets, the way production runs it:
+//! the whole server, clients that sign in and declare themselves devices,
+//! the session as the domain's live state on `/sync`, a speaker the Home
+//! Assistant bridge stands in for, and a Home Assistant that answers over
+//! HTTP.
 //!
-//! `tests/listening.rs` holds the desk's rules against a bare hub; the
-//! bridge's own rules are unit tests beside it. This is the plumbing above
-//! both, which neither can see and which is where a device goes missing
-//! without any rule being wrong — a `Watch` nobody receives, a `Hello` that
-//! never entered a room, a frame addressed to a peer nobody holds, a service
-//! call with the wrong body.
+//! The session's rules are transition tests in `harken/domain/tests/
+//! listening.rs`, and the bridge's are unit tests beside it. This is the
+//! plumbing above both, which neither can see and which is where a device
+//! goes missing without any rule being wrong — a participant that never
+//! stood, a frame addressed to a connection nobody holds, a session read
+//! before it moved, a service call with the wrong body.
 //!
 //! The Home Assistant here is a stand-in, written from its REST API's
 //! documentation: `POST /api/services/media_player/<service>` with a JSON
@@ -20,14 +22,17 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use ark_client::Peer;
+use ark::live::state::DeviceDecl;
+use ark_auth::Account;
+use ark_client::{Options, Peer};
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use common::*;
-use harken_domain::listening::{Command, Hear, Kind, Say, Session, Track};
+use harken_domain::listening::read::{input, Clock, Kind, Listening, Output, Track, STATE};
 use harken_server::assistant::ha;
+use harken_server::Server;
 use serde_json::{json, Value as Json_};
 
 /// Every service call the house was asked for, and what each player says
@@ -98,10 +103,11 @@ impl Fake {
         std::mem::take(&mut *self.calls.lock().unwrap())
     }
 
-    /// Wait for the house to have been asked for `n` calls.
+    /// Wait for the house to have been asked for `n` calls, then a little
+    /// longer for any it should not have been asked for.
     fn calls(&self, n: usize) -> Vec<(String, Json_)> {
         eventually(5, || (self.calls.lock().unwrap().len() >= n).then_some(()));
-        std::thread::sleep(Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(150));
         self.take()
     }
 
@@ -130,33 +136,84 @@ fn house(url: String) -> ha::Config {
     }
 }
 
-/// Say something, and send it: a frame goes out on the next pump.
-fn say(p: &mut Peer, s: Say) {
-    p.say(s.encode());
+/// `user` signed in on this server as a device: what a browser, a desktop
+/// or a phone declares at `hello`.
+fn device(server: &Server, user: &str, kind: Kind, name: &str, can_play: bool) -> Peer {
+    let login = server
+        .auth
+        .issue(&Account {
+            id: user.into(),
+            ..Account::default()
+        })
+        .unwrap();
+    let opts = Options::server(login.user.id, login.session, Some(login.token))
+        .with_timing(quick())
+        .with_device(DeviceDecl::new("", kind.name(), name, can_play));
+    let mut p = Peer::open_memory(server.domain.clone(), opts).unwrap();
+    p.connect(&server.running.sync_url());
+    p
+}
+
+/// This peer's device id: its login.
+fn me(p: &Peer) -> String {
+    p.ctx().session.clone()
+}
+
+/// Pump until this peer's view of the session, confirmed by the server,
+/// satisfies `want`.
+fn told(p: &mut Peer, what: &str, want: impl FnMut(&Listening) -> bool) -> Listening {
+    told_among(&mut [p], 0, what, want)
+}
+
+/// [`told`] of `peers[who]`, every one of them pumped meanwhile.
+fn told_among(
+    peers: &mut [&mut Peer],
+    who: usize,
+    what: &str,
+    mut want: impl FnMut(&Listening) -> bool,
+) -> Listening {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let mut last = None;
+    loop {
+        for p in peers.iter_mut() {
+            p.pump();
+        }
+        let p = &mut *peers[who];
+        let settled = p.linked()
+            && p.live_status(STATE)
+                .is_some_and(|s| s.synced && s.pending == 0);
+        if let Some(l) = p.live(STATE).and_then(|v| Listening::from_value(&v)) {
+            if settled && want(&l) {
+                return l;
+            }
+            last = Some(l);
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "never told {what}; last {last:#?}; {:?}; refused {:?}",
+            p.live_status(STATE),
+            p.take_live_refusals()
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+fn call(p: &mut Peer, transition: &str, i: ark::eval::Args) {
+    if let Err(e) = p.call(STATE, transition, i) {
+        let view = p.live(STATE).and_then(|v| Listening::from_value(&v));
+        panic!(
+            "{transition}: {e}; the view was {view:#?}, {:?}",
+            p.live_status(STATE)
+        );
+    }
     p.pump();
 }
 
-/// Pump until this peer has been told a session that satisfies `want`.
-fn told(p: &mut Peer, what: &str, mut want: impl FnMut(&Session) -> bool) -> Session {
-    let mut last = None;
-    let mut found = None;
-    pump_until(&mut [p], 10, |ps| {
-        for f in ps[0].heard() {
-            if let Ok(Hear::State { session }) = Hear::decode(&f) {
-                if want(&session) {
-                    found = Some(session.clone());
-                }
-                last = Some(session);
-            }
-        }
-        found.is_some()
-    });
-    found.unwrap_or_else(|| panic!("never told {what}; last {last:?}"))
-}
-
-fn track(t: &str) -> Track {
+fn track(t: &str, n: u8) -> Track {
+    let mut id = [0u8; 16];
+    id[15] = n;
     Track {
-        id: t.into(),
+        id,
         title: t.into(),
         creator: "Bach".into(),
         album: String::new(),
@@ -165,23 +222,45 @@ fn track(t: &str) -> Track {
     }
 }
 
-fn here(p: &mut Peer, name: &str) {
-    say(
-        p,
-        Say::Here {
-            name: name.into(),
-            audible: true,
-            kind: Kind::Phone,
-        },
-    );
+fn queue(names: &[&str]) -> Vec<Track> {
+    names
+        .iter()
+        .enumerate()
+        .map(|(i, n)| track(n, i as u8))
+        .collect()
+}
+
+fn media_url(file: &str) -> String {
+    format!("{MEDIA}/media/{file}")
+}
+
+/// The session as the hub holds it.
+fn held(server: &Server, user: &str) -> Option<Listening> {
+    let user = user.to_string();
+    server
+        .running
+        .hub
+        .read_blocking(move |h| {
+            h.live()
+                .instances
+                .iter()
+                .find(|(i, _)| i.state == STATE && i.key == user)
+                .and_then(|(_, held)| Listening::from_value(&held.value))
+        })
+        .unwrap()
 }
 
 /// The whole way round: a phone arrives and the kitchen stands beside it;
 /// the phone hands the kitchen the sound, and the house is asked to play the
-/// whole queue from where it was; the kitchen says where it is and the phone
-/// hears it; a pause on the phone is a pause in the kitchen; taking the sound
-/// back pauses the kitchen; and when the phone goes, so does the kitchen, and
-/// the room closes rather than being kept open by a speaker.
+/// whole queue from where it was; the kitchen says it has started and where
+/// it goes next, and the phone hears it; a pause on the phone is a pause in
+/// the kitchen; taking the sound back pauses the kitchen; and when the phone
+/// goes, so does the kitchen — a speaker does not keep a session's presence
+/// open — and the sound stays with the phone, away.
+///
+/// Falsified by the bridge standing in every session it can read rather
+/// than only where a client is: the kitchen stayed in `devices` after the
+/// phone went.
 #[test]
 fn a_speaker_is_a_device_the_whole_way_round() {
     let rt = runtime();
@@ -189,12 +268,9 @@ fn a_speaker_is_a_device_the_whole_way_round() {
     let url = fake.serve(&rt);
     let data = tempfile::tempdir().unwrap();
     let server = serve(&rt, data.path(), |c| c.house = Some(house(url)));
-    let hub = server.running.hub.clone();
 
-    let mut phone = signed_in(&server, "max");
-    let me = phone.ctx().session.clone();
-    pump_until(&mut [&mut phone], 10, |ps| ps[0].linked());
-    here(&mut phone, "Pixel");
+    let mut phone = device(&server, "max", Kind::Phone, "Pixel", true);
+    let me = me(&phone);
     let session = told(&mut phone, "the kitchen standing beside the phone", |s| {
         s.devices.len() == 2
     });
@@ -202,7 +278,7 @@ fn a_speaker_is_a_device_the_whole_way_round() {
         .device(KITCHEN)
         .expect("the speaker is in the picker");
     assert_eq!(
-        (kitchen.name.as_str(), kitchen.kind, kitchen.here),
+        (kitchen.name.as_str(), kitchen.kind, kitchen.can_play),
         ("Kitchen", Kind::Speaker, true)
     );
     assert!(
@@ -215,40 +291,17 @@ fn a_speaker_is_a_device_the_whole_way_round() {
     );
 
     // Playing on the phone, then handed to the kitchen halfway through.
-    say(
+    call(
         &mut phone,
-        Say::Do {
-            command: Command::Start {
-                queue: vec![track("a"), track("b"), track("c")],
-                at: 1,
-                position_ms: 0,
-                playing: true,
-            },
-        },
+        "start",
+        input::start(&queue(&["a", "b", "c"]), 1, 42_500, "album/Brandenburg"),
     );
     told(&mut phone, "the phone as the output", |s| s.outputs(&me));
-    say(
-        &mut phone,
-        Say::Report {
-            queue: vec![track("a"), track("b"), track("c")],
-            at: 1,
-            playing: true,
-            position_ms: 42_500,
-        },
-    );
-    told(&mut phone, "where the phone got to", |s| {
-        s.position_ms == 42_500
-    });
-    say(
-        &mut phone,
-        Say::Transfer {
-            to: Some(KITCHEN.into()),
-        },
-    );
+    call(&mut phone, "transfer", input::transfer(KITCHEN));
     let session = told(&mut phone, "the kitchen, connecting", |s| {
-        s.outputs(KITCHEN)
+        s.moving_to(KITCHEN)
     });
-    assert_eq!(session.moving.as_deref(), Some(KITCHEN));
+    assert_eq!(session.session.as_ref().unwrap().at, 1);
 
     let calls = fake.calls(4);
     let names: Vec<&str> = calls.iter().map(|(s, _)| s.as_str()).collect();
@@ -262,7 +315,7 @@ fn a_speaker_is_a_device_the_whole_way_round() {
         calls[1].1,
         json!({
             "entity_id": KITCHEN,
-            "media_content_id": format!("{MEDIA}/media/music/b.mp3"),
+            "media_content_id": media_url("music/b.mp3"),
             "media_content_type": "music",
             "enqueue": "play",
         }),
@@ -270,53 +323,50 @@ fn a_speaker_is_a_device_the_whole_way_round() {
     );
     assert_eq!(
         calls[2].1["media_content_id"],
-        json!(format!("{MEDIA}/media/music/c.mp3"))
+        json!(media_url("music/c.mp3"))
     );
     assert_eq!(
         calls[2].1["enqueue"],
         json!("add"),
         "the rest after it, so the speaker's own next works"
     );
-    assert_eq!(
-        calls[3].1["seek_position"],
-        json!(42.5),
-        "and from where it had got to"
+    let at = calls[3].1["seek_position"].as_f64().unwrap();
+    assert!(
+        (42.5..44.5).contains(&at),
+        "and from where it had got to, counted on: {at}"
     );
 
-    // The kitchen starts, and says so: the phone hears where it is.
-    fake.playing(
-        KITCHEN,
-        "playing",
-        &format!("{MEDIA}/media/music/c.mp3"),
-        3.0,
-    );
-    let session = told(&mut phone, "the kitchen playing the third track", |s| {
-        s.at == 2 && s.moving.is_none()
+    // The kitchen starts, and says so; then it moves on by itself, and the
+    // phone hears that too.
+    fake.playing(KITCHEN, "playing", &media_url("music/b.mp3"), 43.0);
+    let session = told(&mut phone, "the kitchen started", |s| {
+        s.outputs(KITCHEN) && !s.moving_to(KITCHEN)
     });
-    assert!(session.playing);
-    assert_eq!(session.position_ms, 3_000);
+    assert!(session.sounding());
+    fake.playing(KITCHEN, "playing", &media_url("music/c.mp3"), 1.0);
+    let session = told(&mut phone, "the kitchen on the third track", |s| {
+        s.session.as_ref().is_some_and(|a| a.at == 2)
+    });
+    assert!(session.sounding());
+    fake.take();
 
-    // A pause on the phone is a pause in the kitchen.
-    say(
-        &mut phone,
-        Say::Do {
-            command: Command::Pause,
-        },
-    );
+    // A pause on the phone is a pause in the kitchen. (The stand-in house
+    // does not act on what it is told, so it is told to be paused first, as
+    // a real speaker would be a moment after.)
+    std::thread::sleep(Duration::from_millis(200));
+    fake.take();
+    fake.playing(KITCHEN, "paused", &media_url("music/c.mp3"), 1.2);
+    call(&mut phone, "pause", input::none());
+    told(&mut phone, "paused", |s| !s.sounding());
     let calls = fake.calls(1);
     assert_eq!(
         calls,
         [("media_pause".to_string(), json!({ "entity_id": KITCHEN }))]
     );
 
-    // Taking the sound back: the kitchen is told by the broadcast, and a
-    // speaker has nobody to go quiet for it, so the bridge pauses it.
-    say(
-        &mut phone,
-        Say::Transfer {
-            to: Some(me.clone()),
-        },
-    );
+    // Taking the sound back: the kitchen reads the session, and a speaker
+    // has nobody to go quiet for it, so the bridge pauses it.
+    call(&mut phone, "transfer", input::transfer(&me));
     told(&mut phone, "the phone as the output again", |s| {
         s.outputs(&me)
     });
@@ -331,32 +381,29 @@ fn a_speaker_is_a_device_the_whole_way_round() {
         "every call carried the token"
     );
 
-    // The phone goes. The kitchen is taken out with it, so the room closes
-    // and is written down, rather than being held open by a speaker.
+    // The phone goes. The kitchen goes with it, and the sound stays with the
+    // phone, away.
     drop(phone);
-    let closed = eventually(10, || {
-        let rooms = hub.read_blocking(|h| h.rooms()).unwrap();
-        rooms.is_empty().then_some(())
+    let left = eventually(10, || held(&server, "max").filter(|s| s.devices.is_empty()));
+    let left = left.unwrap_or_else(|| {
+        panic!(
+            "a speaker kept the session's presence open: {:?}",
+            held(&server, "max")
+        )
     });
-    assert!(
-        closed.is_some(),
-        "a standing speaker kept the room open: {:?}",
-        hub.read_blocking(|h| h.rooms())
-    );
-    let kept = hub
-        .read_blocking(|h| h.kept("max").map(<[u8]>::to_vec))
-        .unwrap()
-        .expect("the room is kept");
-    let woken = harken_server::listening::woken(&kept).unwrap();
-    assert_eq!(woken.output.as_deref(), Some(me.as_str()));
+    assert_eq!(left.output().and_then(Output::id), Some(me.as_str()));
+    assert!(matches!(left.output(), Some(Output::Away { .. })));
     rt.block_on(server.stop());
 }
 
-/// A speaker is one piece of hardware and a room is one account, so two
+/// A speaker is one piece of hardware and a session is one account's, so two
 /// people can both pick the kitchen: the second gets it, and the first is
-/// told — by the speaker, in their room — rather than left drawing a
+/// told — by the speaker, in their session — rather than left drawing a
 /// transport for somebody else's music. And a speaker that goes on playing
 /// something that is not ours is let go the same way, after its grace.
+///
+/// Falsified by the bridge not releasing the first session when the second
+/// took the speaker: alice's session still named the kitchen.
 #[test]
 fn a_speaker_taken_or_sent_elsewhere_is_let_go_out_loud() {
     let rt = runtime();
@@ -365,165 +412,326 @@ fn a_speaker_taken_or_sent_elsewhere_is_let_go_out_loud() {
     let data = tempfile::tempdir().unwrap();
     let server = serve(&rt, data.path(), |c| c.house = Some(house(url)));
 
-    let mut alice = signed_in(&server, "alice");
-    let mut bob = signed_in(&server, "bob");
-    pump_until(&mut [&mut alice, &mut bob], 10, |ps| {
-        ps.iter().all(|p| p.linked())
-    });
-    here(&mut alice, "Alice's phone");
-    here(&mut bob, "Bob's phone");
-    told(&mut alice, "the kitchen in alice's room", |s| {
+    let mut alice = device(&server, "alice", Kind::Phone, "Alice's phone", true);
+    let mut bob = device(&server, "bob", Kind::Phone, "Bob's phone", true);
+    told(&mut alice, "the kitchen in alice's session", |s| {
         s.device(KITCHEN).is_some()
     });
-    told(&mut bob, "the kitchen in bob's room", |s| {
+    told(&mut bob, "the kitchen in bob's session", |s| {
         s.device(KITCHEN).is_some()
     });
 
-    // Pressing a track, and then — as the output, which is what pressing it
-    // made the phone — saying what it is playing, the way a client does.
-    let start = |p: &mut Peer, t: &str| {
-        let me = p.ctx().session.clone();
-        say(
-            p,
-            Say::Do {
-                command: Command::Start {
-                    queue: vec![track(t)],
-                    at: 0,
-                    position_ms: 0,
-                    playing: true,
-                },
-            },
-        );
+    let take = |p: &mut Peer, t: &str, fake: &Fake| {
+        let me = me(p);
+        call(p, "start", input::start(&queue(&[t]), 0, 0, ""));
         told(p, "the phone as the output", |s| s.outputs(&me));
-        say(
-            p,
-            Say::Report {
-                queue: vec![track(t)],
-                at: 0,
-                playing: true,
-                position_ms: 0,
-            },
+        // A quick speaker: playing what it is handed by the first poll.
+        fake.playing(
+            KITCHEN,
+            "playing",
+            &media_url(&format!("music/{t}.mp3")),
+            0.5,
         );
-        told(p, "the phone playing", |s| s.queue.len() == 1);
+        call(p, "transfer", input::transfer(KITCHEN));
+        told(p, "the kitchen playing it", |s| {
+            s.outputs(KITCHEN) && !s.moving_to(KITCHEN)
+        });
     };
-    start(&mut alice, "a");
-    // A quick speaker: playing what it is handed by the first poll.
-    fake.playing(
-        KITCHEN,
-        "playing",
-        &format!("{MEDIA}/media/music/a.mp3"),
-        1.0,
-    );
-    say(
-        &mut alice,
-        Say::Transfer {
-            to: Some(KITCHEN.into()),
-        },
-    );
-    told(&mut alice, "alice's kitchen", |s| s.outputs(KITCHEN));
-    assert_eq!(
-        fake.calls(2).len(),
-        2,
-        "the queue cleared and alice's track put on"
-    );
-    told(&mut alice, "the kitchen playing alice's", |s| {
-        s.moving.is_none() && s.outputs(KITCHEN)
-    });
-
-    start(&mut bob, "b");
-    fake.playing(
-        KITCHEN,
-        "playing",
-        &format!("{MEDIA}/media/music/b.mp3"),
-        1.0,
-    );
-    say(
-        &mut bob,
-        Say::Transfer {
-            to: Some(KITCHEN.into()),
-        },
-    );
-    told(&mut bob, "bob's kitchen", |s| s.outputs(KITCHEN));
+    take(&mut alice, "a", &fake);
+    take(&mut bob, "b", &fake);
     let session = told(&mut alice, "alice let go of the kitchen", |s| {
-        s.output.is_none()
+        matches!(s.output(), Some(Output::Nowhere))
     });
-    assert!(!session.playing);
-    let calls = fake.calls(2);
-    assert_eq!(calls.len(), 2, "{calls:#?}");
+    assert!(!session.sounding());
     assert_eq!(
-        calls[1].1["media_content_id"],
-        json!(format!("{MEDIA}/media/music/b.mp3")),
+        session.session.unwrap().queue,
+        queue(&["a"]),
+        "her queue stays"
+    );
+    let calls = fake.take();
+    assert!(
+        calls
+            .iter()
+            .any(|(s, b)| s == "play_media"
+                && b["media_content_id"] == json!(media_url("music/b.mp3"))),
         "{calls:#?}"
     );
-    told(&mut bob, "the kitchen playing bob's", |s| {
-        s.moving.is_none() && s.outputs(KITCHEN)
-    });
 
     // Somebody puts the radio on in the kitchen. Once the grace is spent,
-    // bob's room is told the kitchen is not his any more.
+    // bob's session is told the kitchen is not his any more.
     fake.playing(KITCHEN, "playing", "http://radio.example/stream", 0.0);
     let session = told(&mut bob, "bob let go of the kitchen", |s| {
-        s.output.is_none()
+        matches!(s.output(), Some(Output::Nowhere))
     });
-    assert!(!session.playing);
+    assert!(!session.sounding());
     rt.block_on(server.stop());
 }
 
-/// The bug the debug screen found. A library longer than one batch has the
-/// client send a *second* `Hello` on the same socket to ask for the rest —
-/// and a `Hello` used to be a departure and an arrival, so the desk dropped
-/// the browser from its own picker, saw nobody listening, sent the speakers
-/// away, and answered every `State` after that with no devices at all.
+/// The bug the debug screen found, which the engine now owns: a library
+/// longer than one batch has the client say `Hello` a *second* time on the
+/// same socket to ask for the rest, and that must not be a departure and an
+/// arrival — or the session drops the browser from its own presence, and
+/// with it the speaker beside it. Three hundred songs is two batches.
+///
+/// Falsified by `Desk::hello` parting a connection that says the same
+/// device again: the session's sequence moved by the browser's leave and
+/// its join while it paged.
 #[test]
-fn asking_for_the_next_batch_does_not_leave_the_room() {
+fn asking_for_the_next_batch_does_not_leave_the_session() {
     let rt = runtime();
     let fake = Fake::default();
     let url = fake.serve(&rt);
     let data = tempfile::tempdir().unwrap();
     let server = serve(&rt, data.path(), |c| c.house = Some(house(url)));
-    let mut browser = signed_in(&server, "max");
-    pump_until(&mut [&mut browser], 10, |ps| ps[0].linked());
-    here(&mut browser, "Browser");
+    // A library of two batches, authored by the library's own account.
+    let login = server
+        .auth
+        .issue(&Account {
+            id: "library".into(),
+            roles: vec![harken_domain::schema::LIBRARY.into()],
+            ..Account::default()
+        })
+        .unwrap();
+    let opts =
+        Options::server(login.user.id, login.session, Some(login.token)).with_timing(quick());
+    let mut library = Peer::open_memory(server.domain.clone(), opts).unwrap();
+    library.set_roles([harken_domain::schema::LIBRARY]);
+    library.connect(&server.running.sync_url());
+    for i in 0..(ark::protocol::BATCH_LIMIT + 44) {
+        let song = |t: &str| {
+            ark::eval::Args::from_iter(
+                [
+                    ("title", ark::value::Value::text(t)),
+                    ("artist", ark::value::Value::text("The Fleet")),
+                    ("album", ark::value::Value::text("Loopback")),
+                    ("duration_ms", ark::value::Value::int(1000)),
+                    ("file", ark::value::Value::text(format!("typed/{t}.wav"))),
+                    ("track", ark::value::Value::int(0)),
+                    ("part", ark::value::Value::text("")),
+                    ("catalogue", ark::value::Value::text("")),
+                    ("performer", ark::value::Value::text("")),
+                    ("bpm", ark::value::Value::int(0)),
+                    ("album_art", ark::value::Value::text("")),
+                    ("artist_art", ark::value::Value::text("")),
+                    ("disc", ark::value::Value::int(0)),
+                    ("work_title", ark::value::Value::text("")),
+                    ("movement_no", ark::value::Value::int(0)),
+                ]
+                .map(|(k, v)| (k.to_string(), v)),
+            )
+        };
+        library
+            .mutate("add_song", song(&format!("song-{i:03}")))
+            .unwrap();
+    }
+    pump_until(&mut [&mut library], 30, |ps| {
+        ps[0].linked() && ps[0].pending_len() == 0
+    });
+
+    let mut browser = device(&server, "max", Kind::Computer, "Browser", true);
     told(&mut browser, "the browser and the kitchen", |s| {
         s.devices.len() == 2
     });
-
-    // The next batch, please: another Hello on the same connection.
-    browser.connected();
-    let mut heard = vec![];
-    let deadline = std::time::Instant::now() + Duration::from_millis(600);
-    while std::time::Instant::now() < deadline {
-        browser.pump();
-        heard.extend(
-            browser
-                .heard()
-                .into_iter()
-                .filter_map(|f| Hear::decode(&f).ok()),
-        );
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    for h in &heard {
-        if let Hear::State { session } = h {
-            assert_eq!(
-                session.devices.len(),
-                2,
-                "a resumed connection is still in the room: {session:?}"
-            );
-        }
-    }
-    let rooms = server.running.hub.read_blocking(|h| h.rooms()).unwrap();
-    assert_eq!(
-        rooms["max"].len(),
-        2,
-        "the browser and the kitchen, each once"
-    );
-    here(&mut browser, "Browser");
-    let session = told(&mut browser, "the room", |_| true);
+    let seq = browser.live_status(STATE).unwrap().seq;
+    pump_until(&mut [&mut browser], 30, |ps| {
+        ps[0].cursor() as usize >= ark::protocol::BATCH_LIMIT + 44
+    });
+    let session = told(&mut browser, "the session", |_| true);
     let mut ids: Vec<&str> = session.devices.iter().map(|d| d.id.as_str()).collect();
     ids.sort_unstable();
-    let me = browser.ctx().session.clone();
+    let me = me(&browser);
     let mut want = vec![me.as_str(), KITCHEN];
     want.sort_unstable();
     assert_eq!(ids, want);
+    assert_eq!(
+        browser.live_status(STATE).unwrap().seq,
+        seq,
+        "nobody left and nobody came while it paged"
+    );
+    rt.block_on(server.stop());
+}
+
+/// One account, three devices, over real sockets: a browser that can play,
+/// a desktop that cannot (the remote control it is), and the kitchen.
+/// The desktop hands the browser's sound to the kitchen and pauses it from
+/// where it sits, which pauses the kitchen; hands it back to the browser;
+/// and the browser's socket drops, which leaves the sound with the browser,
+/// away, paused. Then the decided rule for coming back, both ways: with the
+/// kitchen playing meanwhile, the browser's return takes nothing and the
+/// kitchen plays on; and with nothing playing, the browser — which was
+/// playing on its own while it was away — offers what it was doing as a
+/// `start`, and the session becomes that, on the browser.
+///
+/// The browser's half of the rule — its own sound going quiet when the
+/// session is sounding elsewhere — is its reconciler's, and tested there
+/// (`harken-iced`'s `listening` tests); what is held here is that the
+/// session the browser comes back to says so, and takes its `start` when
+/// nothing is sounding.
+///
+/// Falsified by an `on_join` that gave a present output to whoever joined
+/// (`returned`'s `device` arm answering `here(id)`): the browser's return
+/// took the sound from the playing kitchen.
+#[test]
+fn a_browser_a_desktop_and_a_speaker_share_one_session() {
+    let rt = runtime();
+    let fake = Fake::default();
+    let url = fake.serve(&rt);
+    let data = tempfile::tempdir().unwrap();
+    let server = serve(&rt, data.path(), |c| c.house = Some(house(url)));
+
+    let mut browser = device(&server, "max", Kind::Computer, "Browser", true);
+    let mut desktop = device(&server, "max", Kind::Computer, "Desktop", false);
+    let b = me(&browser);
+    told_among(&mut [&mut desktop, &mut browser], 0, "three devices", |s| {
+        s.devices.len() == 3
+    });
+    let d = me(&desktop);
+    assert!(
+        !told_among(&mut [&mut desktop, &mut browser], 0, "the desktop", |_| {
+            true
+        })
+        .device(&d)
+        .unwrap()
+        .can_play
+    );
+
+    call(
+        &mut browser,
+        "start",
+        input::start(&queue(&["a", "b"]), 0, 10_000, "album/Water Music"),
+    );
+    told_among(
+        &mut [&mut desktop, &mut browser],
+        0,
+        "the browser playing",
+        |s| s.outputs(&b) && s.sounding(),
+    );
+
+    // The desktop moves the sound to the kitchen, and pauses it there.
+    fake.playing(KITCHEN, "playing", &media_url("music/a.mp3"), 10.0);
+    call(&mut desktop, "transfer", input::transfer(KITCHEN));
+    told_among(
+        &mut [&mut desktop, &mut browser],
+        0,
+        "the kitchen playing",
+        |s| s.outputs(KITCHEN) && !s.moving_to(KITCHEN) && s.sounding(),
+    );
+    fake.take();
+    fake.playing(KITCHEN, "paused", &media_url("music/a.mp3"), 11.0);
+    call(&mut desktop, "pause", input::none());
+    told_among(
+        &mut [&mut browser, &mut desktop],
+        0,
+        "paused, the browser hears",
+        |s| s.outputs(KITCHEN) && !s.sounding(),
+    );
+    let calls = fake.calls(1);
+    assert!(calls.iter().any(|(c, _)| c == "media_pause"), "{calls:#?}");
+
+    // Back to the browser, which says it has it.
+    call(&mut desktop, "transfer", input::transfer(&b));
+    told_among(
+        &mut [&mut browser, &mut desktop],
+        0,
+        "the browser connecting",
+        |s| s.moving_to(&b),
+    );
+    call(&mut browser, "started", input::at(11_000));
+    told_among(
+        &mut [&mut desktop, &mut browser],
+        0,
+        "the browser has it",
+        |s| s.outputs(&b) && !s.moving_to(&b),
+    );
+    call(&mut desktop, "play", input::none());
+    told_among(
+        &mut [&mut browser, &mut desktop],
+        0,
+        "playing on the browser",
+        |s| s.outputs(&b) && s.sounding(),
+    );
+
+    // The browser's socket drops: the sound stays with it, away and paused.
+    browser.disconnect();
+    let s = told_among(
+        &mut [&mut desktop, &mut browser],
+        0,
+        "the browser away",
+        |s| matches!(s.output(), Some(Output::Away { .. })),
+    );
+    assert_eq!(s.output().and_then(Output::id), Some(b.as_str()));
+    assert!(
+        matches!(s.output(), Some(Output::Away { name, .. }) if name == "Browser"),
+        "named, for the picker"
+    );
+    assert!(!s.sounding());
+    assert!(s.device(&b).is_none());
+
+    // Meanwhile the desktop plays the kitchen: a press that means a sound on
+    // a device that cannot make one goes to… nobody here, so it picks the
+    // kitchen first.
+    fake.playing(KITCHEN, "playing", &media_url("music/a.mp3"), 12.0);
+    call(&mut desktop, "transfer", input::transfer(KITCHEN));
+    call(&mut desktop, "play", input::none());
+    told_among(
+        &mut [&mut desktop, &mut browser],
+        0,
+        "the kitchen sounding",
+        |s| s.outputs(KITCHEN) && !s.moving_to(KITCHEN) && s.sounding(),
+    );
+
+    // The browser comes back while the kitchen is playing: it takes nothing.
+    browser.reconnect();
+    let s = told_among(
+        &mut [&mut browser, &mut desktop],
+        0,
+        "the browser back, a controller",
+        |s| s.device(&b).is_some(),
+    );
+    assert!(
+        s.outputs(KITCHEN) && s.sounding(),
+        "the kitchen plays on: {s:?}"
+    );
+
+    // …and away again; the kitchen is stopped; and the browser, which went
+    // on playing on its own, comes back to nothing sounding and offers what
+    // it was doing.
+    browser.disconnect();
+    told_among(
+        &mut [&mut desktop, &mut browser],
+        0,
+        "the browser gone",
+        |s| s.device(&b).is_none(),
+    );
+    fake.playing(KITCHEN, "paused", &media_url("music/a.mp3"), 13.0);
+    call(&mut desktop, "pause", input::none());
+    told_among(
+        &mut [&mut desktop, &mut browser],
+        0,
+        "nothing sounding",
+        |s| !s.sounding(),
+    );
+    browser.reconnect();
+    let s = told_among(&mut [&mut browser, &mut desktop], 0, "back", |s| {
+        s.device(&b).is_some()
+    });
+    assert!(
+        !s.sounding(),
+        "nothing is sounding, so the browser's own sound becomes the session"
+    );
+    call(
+        &mut browser,
+        "start",
+        input::start(&queue(&["x", "y"]), 1, 95_000, ""),
+    );
+    let s = told_among(
+        &mut [&mut desktop, &mut browser],
+        0,
+        "the browser's queue, on the browser",
+        |s| s.outputs(&b) && s.sounding(),
+    );
+    let a = s.session.unwrap();
+    assert_eq!((a.queue, a.at), (queue(&["x", "y"]), 1));
+    assert!(matches!(a.clock, Clock::Playing { at_ms: 95_000, .. }));
     rt.block_on(server.stop());
 }

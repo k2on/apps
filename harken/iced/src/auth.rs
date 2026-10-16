@@ -211,10 +211,13 @@ pub fn open_alone(domain: Domain) -> Result<ark_client::Peer, Error> {
 /// (nobody, on a device where nobody ever signed in) and dials nothing.
 #[cfg_attr(feature = "demo", allow(dead_code))]
 pub fn options(login: Option<&Login>) -> Options {
-    match login {
+    // A device of the account's listening session, as its login: what makes
+    // its peer hold the session (`listening`).
+    let opts = match login {
         Some(l) => Options::server(l.user.id.clone(), l.session.clone(), Some(l.token.clone())),
         None => Options::signed_out(),
-    }
+    };
+    opts.with_device(crate::listening::device())
 }
 
 /// This server's replica on this device: a directory natively, the page's

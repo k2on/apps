@@ -42,9 +42,12 @@ fn pinned() -> Vec<(&'static str, u64, usize, i64, Box<dyn Fn(&Read) -> bool>)> 
     vec![("alone-leaves-the-inbox", 9046, 1, 0, Box::new(|r: &Read| r.left_an_inbox()))]
 }
 
-/// harken's sessions: this many from this seed, its two views kept.
+/// harken's sessions: this many from this seed, its two views kept. A
+/// hundred and twenty since `record_play` (`docs/plan-live.md` phase 2): a
+/// mutator more is fewer playlist edits a session, and at twenty-four none
+/// patched both views and rebased.
 const HARKEN_SEED: u64 = 0x4a7e_7000;
-const HARKEN_SESSIONS: u64 = 24;
+const HARKEN_SESSIONS: u64 = 120;
 
 /// The module harken's clients load, as the domain crate writes it.
 const HARKEN: &[u8] = include_bytes!("../../../../../harken/domain/harken.ark");

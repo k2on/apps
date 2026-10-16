@@ -110,8 +110,11 @@ pub enum Message {
     PlayItem(Id),
     PlayPause,
     Skip(i32),
-    /// Dragging the bar's progress, in seconds.
+    /// Dragging the bar's progress, in seconds: where this device's
+    /// scrubber is, said to the session as the ephemeral `scrub`…
     Seek(f32),
+    /// …and let go: a seek, there.
+    SeekDone,
     SignIn,
     /// What the connect entry says: the server a window alone would join.
     ConnectUrl(String),
@@ -153,7 +156,7 @@ pub enum Message {
     /// Which device is making the sound: open the picker, walk it, pick.
     OpenDevices,
     DeviceAt(usize),
-    PickDevice(listening::DeviceId),
+    PickDevice(String),
     CloseDevices,
     /// Something said it happened (`docs/plan-reactive.md`): the sync
     /// socket opened, closed or brought a frame — the log, an ack, the
@@ -183,6 +186,86 @@ pub enum Message {
     Pointer(Point),
     Pressed,
     Released,
+}
+
+/// A transport button, wherever it was pressed ([`App::press`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Press {
+    PlayPause,
+    Play,
+    Pause,
+    Skip(i32),
+    /// Milliseconds into the track.
+    Seek(i64),
+    /// The queue as it now stands, from this track.
+    Start(usize),
+}
+
+/// This device's player, as the listening reconciler drives it.
+struct Sounding<'a> {
+    player: &'a mut Player,
+    server: &'a str,
+}
+
+impl listening::Sound for Sounding<'_> {
+    fn loaded(&self) -> Option<Id> {
+        self.player.track().map(|t| t.id)
+    }
+    fn playing(&self) -> bool {
+        self.player.is_playing()
+    }
+    fn position_ms(&self) -> i64 {
+        (self.player.position() * 1000.0) as i64
+    }
+    fn ended(&self) -> bool {
+        self.player.ended()
+    }
+    fn load(&mut self, track: &listening::Track, position_ms: i64, playing: bool) {
+        self.player.play(
+            Track {
+                id: track.id,
+                title: track.title.clone(),
+                creator: track.creator.clone(),
+                album: track.album.clone(),
+                ms: track.duration_ms,
+            },
+            &media_url(self.server, &track.file),
+        );
+        if position_ms > 0 {
+            self.player.seek(position_ms as f64 / 1000.0);
+        }
+        if !playing {
+            self.player.pause();
+        }
+    }
+    fn resume(&mut self) {
+        self.player.resume();
+    }
+    fn pause(&mut self) {
+        self.player.pause();
+    }
+    fn seek(&mut self, position_ms: i64) {
+        self.player.seek(position_ms as f64 / 1000.0);
+    }
+}
+
+/// This device's own clock, in milliseconds: how long its player has sat
+/// paused while asked to play.
+fn clock_ms() -> f64 {
+    ark_client::autos::monotonic_ms() as f64
+}
+
+/// One row of the device picker: a device standing in the session, or the
+/// one the sound stayed with after its socket went.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PickerRow {
+    pub id: String,
+    pub name: String,
+    /// Here, and able to play: what a click or `<Enter>` can hand the sound
+    /// to.
+    pub takeable: bool,
+    /// Its socket has gone; the sound stays with it.
+    pub away: bool,
 }
 
 /// One change this window made, kept so its fate can be said about *it*.
@@ -257,10 +340,17 @@ pub struct App {
     pub cursor: Point,
     pub player: Player,
     /// What `Skip` moves through: the list as it stood when play was pressed,
-    /// as the tracks a hand-off carries.
+    /// as the tracks a hand-off carries — this device's own while it is its
+    /// own session, and the session's copied here while it is the output.
     pub queue: Vec<listening::Track>,
-    /// This account's listening session.
+    /// This device's end of the account's listening session.
     pub listening: listening::Remote,
+    /// The session as it stood after the last update, when this device is
+    /// part of it (`listening::Remote::session`): what the bar, the picker
+    /// and `D` draw.
+    pub session: Option<listening::Listening>,
+    /// Where this device's scrubber is being dragged to, in seconds.
+    pub scrubbing: Option<f32>,
     /// Covers, fetched once and kept.
     pub covers: Images,
     /// The `Peer::art_gen` covers were last asked for.
@@ -323,6 +413,8 @@ impl App {
             player: Player::new(),
             queue: Vec::new(),
             listening: listening::Remote::new(),
+            session: None,
+            scrubbing: None,
             covers: Images::new("harken/covers"),
             art_seen: 0,
             server,
@@ -828,7 +920,7 @@ impl App {
                 None => Task::none(),
             },
             Focus::Devices => {
-                let grid = vim::Grid::column(self.listening.devices().len());
+                let grid = vim::Grid::column(self.picker_rows().len());
                 if let Some(at) = grid.step(self.devices.unwrap_or(0), motion) {
                     self.devices = Some(at);
                 }
@@ -918,10 +1010,40 @@ impl App {
         let Some(at) = self.devices else {
             return Task::none();
         };
-        match self.listening.devices().get(at) {
-            Some(device) if device.audible && device.here => self.update(Message::PickDevice(device.id.clone())),
+        match self.picker_rows().get(at) {
+            Some(row) if row.takeable => self.update(Message::PickDevice(row.id.clone())),
             _ => Task::none(),
         }
+    }
+
+    /// The device picker's rows: every device of this account standing in the
+    /// session, and — drawn, and not a target — the one the sound stayed
+    /// with after its socket went, because that is the row somebody most
+    /// needs to see.
+    pub fn picker_rows(&self) -> Vec<PickerRow> {
+        let Some(s) = &self.session else {
+            return vec![];
+        };
+        let mut rows: Vec<PickerRow> = s
+            .devices
+            .iter()
+            .map(|d| PickerRow {
+                id: d.id.clone(),
+                name: d.name.clone(),
+                takeable: d.can_play,
+                away: false,
+            })
+            .collect();
+        if let Some(listening::Output::Away { id, name }) = s.output() {
+            rows.push(PickerRow {
+                id: id.clone(),
+                name: name.clone(),
+                takeable: false,
+                away: true,
+            });
+        }
+        rows.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id)));
+        rows
     }
 
     /// The row menu's entries, for one track: every one something this
@@ -1082,7 +1204,7 @@ impl App {
 
     /// Where in the queue the player is; zero when nothing is playing.
     fn playing_at(&self) -> usize {
-        let Some(id) = self.player.track().map(|t| rows::id_text(&t.id)) else {
+        let Some(id) = self.player.track().map(|t| t.id) else {
             return 0;
         };
         self.queue.iter().position(|t| t.id == id).unwrap_or(0)
@@ -1096,7 +1218,7 @@ impl App {
         };
         self.player.play(
             Track {
-                id: rows::parse_id(&track.id).unwrap_or([0; 16]),
+                id: track.id,
                 title: track.title.clone(),
                 creator: track.creator.clone(),
                 album: track.album.clone(),
@@ -1115,38 +1237,58 @@ impl App {
         }
     }
 
-    /// Where a transport button goes, and the only place that is decided: a
-    /// *message* to the device making the sound if that is another one, an
-    /// instruction here otherwise — including when nothing is the output,
-    /// which is the start of every day.
-    fn ask(&mut self, command: listening::Command) -> Task<Message> {
-        if self.listening.elsewhere() {
-            self.listening.ask(command);
+    /// Where a transport button goes — the bar, a key, a row, a lock
+    /// screen — and the only place that is decided.
+    ///
+    /// Part of the session, it is a transition, made by anybody and obeyed
+    /// by the device the session names as its output — this one, or another
+    /// — through nothing but the session ([`App::react`] reconciles). Its own
+    /// session, unlinked, it is done here, to this device's player.
+    fn press(&mut self, press: Press) -> Task<Message> {
+        let Some(session) = self.listening.session(&self.peer.client) else {
+            self.obey(press);
             return Task::none();
-        }
-        self.obey(command)
-    }
-
-    /// Do it here. Reached from `ask` and from the server, which only ever
-    /// sends a command to the output.
-    fn obey(&mut self, command: listening::Command) -> Task<Message> {
-        match command {
-            listening::Command::Play => self.player.resume(),
-            listening::Command::Pause => self.player.pause(),
-            listening::Command::Next => self.skip(1),
-            listening::Command::Previous => self.skip(-1),
-            listening::Command::Seek { position_ms } => self.player.seek(position_ms as f64 / 1000.0),
-            listening::Command::Start {
-                queue,
-                at,
-                position_ms,
-                playing,
-            } => {
-                self.queue = queue;
-                self.start_at(at as usize, position_ms, playing);
+        };
+        let (transition, input) = match press {
+            Press::PlayPause if session.sounding() => ("pause", listening::input::none()),
+            Press::PlayPause | Press::Play if session.session.is_some() => ("play", listening::input::none()),
+            Press::PlayPause | Press::Play => {
+                // Nothing queued in the session: what this device last had,
+                // pressed again.
+                if self.queue.is_empty() {
+                    return Task::none();
+                }
+                let at = self.playing_at();
+                ("start", listening::input::start(&self.queue, at, 0, &self.from()))
             }
+            Press::Pause => ("pause", listening::input::none()),
+            Press::Skip(by) => ("skip", listening::input::skip(by.signum() as i64)),
+            Press::Seek(ms) => ("seek", listening::input::seek(ms)),
+            Press::Start(at) => ("start", listening::input::start(&self.queue, at, 0, &self.from())),
+        };
+        if let Err(why) = self.listening.call(&mut self.peer.client, transition, input) {
+            self.note = why;
         }
         Task::none()
+    }
+
+    /// Where a queue was pressed from: the page it was on, as the address
+    /// bar names it.
+    fn from(&self) -> String {
+        use arkui::route::Route;
+        self.peer.source.place().fragment()
+    }
+
+    /// Do it here: this device is its own session, unlinked.
+    fn obey(&mut self, press: Press) {
+        match press {
+            Press::PlayPause if self.player.is_playing() => self.player.pause(),
+            Press::PlayPause | Press::Play => self.player.resume(),
+            Press::Pause => self.player.pause(),
+            Press::Skip(by) => self.skip(by),
+            Press::Seek(ms) => self.player.seek(ms as f64 / 1000.0),
+            Press::Start(at) => self.start_at(at, 0, true),
+        }
     }
 
     /// Do the thing, then whatever follows from it ([`App::react`]), then make
@@ -1390,32 +1532,33 @@ impl App {
                     }
                 }
             }
-            // Play and pause are two verbs, decided here against whichever
-            // device is actually making the sound.
-            Message::PlayPause => {
-                let playing = match self.listening.elsewhere() {
-                    true => self.listening.playing(),
-                    false => self.player.is_playing(),
-                };
-                return self.ask(match playing {
-                    true => listening::Command::Pause,
-                    false => listening::Command::Play,
-                });
-            }
+            // Play and pause are two verbs, decided against whatever is
+            // actually sounding.
+            Message::PlayPause => return self.press(Press::PlayPause),
+            // A scrubber being dragged: where this device's is, to everybody,
+            // as the ephemeral `scrub` — and the seek when it is let go.
             Message::Seek(secs) => {
-                return self.ask(listening::Command::Seek {
-                    position_ms: (secs as f64 * 1000.0) as i64,
-                })
+                self.scrubbing = Some(secs);
+                if self.listening.joined(&self.peer.client) {
+                    let _ = self.listening.call(
+                        &mut self.peer.client,
+                        "scrub",
+                        listening::input::scrub(Some((secs as f64 * 1000.0) as i64)),
+                    );
+                }
             }
-            Message::Skip(delta) => {
-                return self.ask(match delta > 0 {
-                    true => listening::Command::Next,
-                    false => listening::Command::Previous,
-                })
+            Message::SeekDone => {
+                if let Some(secs) = self.scrubbing.take() {
+                    if self.listening.joined(&self.peer.client) {
+                        let _ = self.listening.call(&mut self.peer.client, "scrub", listening::input::scrub(None));
+                    }
+                    return self.press(Press::Seek((secs as f64 * 1000.0) as i64));
+                }
             }
+            Message::Skip(delta) => return self.press(Press::Skip(delta)),
             // The queue is what is on screen, taken now: skipping follows the
             // list you pressed play in. The rows are copied rather than
-            // referred to — a device receiving a hand-off may not have that
+            // referred to — a device handed the session may not have that
             // album yet.
             Message::PlayItem(id) => {
                 self.queue = self
@@ -1423,7 +1566,7 @@ impl App {
                     .rows()
                     .iter()
                     .map(|i| listening::Track {
-                        id: rows::id_text(&i.id),
+                        id: i.id,
                         title: i.title.clone(),
                         creator: i.creator.clone(),
                         album: self.peer.detail_of(i.id).album,
@@ -1433,28 +1576,23 @@ impl App {
                         file: i.file.clone(),
                     })
                     .collect();
-                let wanted = rows::id_text(&id);
-                let at = self.queue.iter().position(|t| t.id == wanted).unwrap_or(0) as u32;
-                let queue = self.queue.clone();
-                return self.ask(listening::Command::Start {
-                    queue,
-                    at,
-                    position_ms: 0,
-                    playing: true,
-                });
+                let at = self.queue.iter().position(|t| t.id == id).unwrap_or(0);
+                return self.press(Press::Start(at));
             }
             Message::OpenDevices => {
                 // The cursor starts on the device that has the sound — or,
                 // while it is nowhere, on this one — so `<Enter>` straight
                 // away changes nothing.
-                let output = self.listening.session().and_then(|s| s.output.clone());
+                let output = self.session.as_ref().and_then(|s| s.output()).and_then(|o| o.id()).map(str::to_string);
                 let id = output.unwrap_or_else(|| self.listening.me().to_string());
-                let at = self.listening.devices().iter().position(|d| d.id == id).unwrap_or(0);
+                let at = self.picker_rows().iter().position(|r| r.id == id).unwrap_or(0);
                 self.devices = Some(at);
             }
             Message::DeviceAt(at) => self.devices = Some(at),
             Message::PickDevice(to) => {
-                self.listening.transfer(Some(to));
+                if let Err(why) = self.listening.call(&mut self.peer.client, "transfer", listening::input::transfer(&to)) {
+                    self.note = why;
+                }
                 self.devices = None;
             }
             Message::CloseDevices => self.devices = None,
@@ -1515,50 +1653,39 @@ impl App {
         // transport button goes.
         #[cfg(target_arch = "wasm32")]
         {
-            let command = match self.player.take_remote() {
-                Some(Remote::Play) => Some(listening::Command::Play),
-                Some(Remote::Pause) => Some(listening::Command::Pause),
-                Some(Remote::Next) => Some(listening::Command::Next),
-                Some(Remote::Previous) => Some(listening::Command::Previous),
-                Some(Remote::Seek(secs)) => Some(listening::Command::Seek {
-                    position_ms: (secs * 1000.0) as i64,
-                }),
+            let press = match self.player.take_remote() {
+                Some(Remote::Play) => Some(Press::Play),
+                Some(Remote::Pause) => Some(Press::Pause),
+                Some(Remote::Next) => Some(Press::Skip(1)),
+                Some(Remote::Previous) => Some(Press::Skip(-1)),
+                Some(Remote::Seek(secs)) => Some(Press::Seek((secs * 1000.0) as i64)),
                 None => None,
             };
-            if let Some(command) = command {
-                tasks.push(self.ask(command));
+            if let Some(press) = press {
+                tasks.push(self.press(press));
             }
         }
-        if self.player.ended() {
+        // The listening session. Its own session, a track that ran out moves
+        // on here; part of the session, the reconciler says it ended.
+        if self.player.ended() && !self.listening.joined(&self.peer.client) {
             self.skip(1);
         }
-        // The listening session: first what this device has been told to do
-        // — the server only ever tells the output — then what it is doing.
-        for command in self.listening.pump(&mut self.peer.client) {
-            tasks.push(self.obey(command));
+        let at = self.playing_at();
+        let from = self.from();
+        let App {
+            listening,
+            peer,
+            player,
+            server,
+            queue,
+            ..
+        } = self;
+        let mut sound = Sounding { player, server };
+        listening.reconcile(&mut peer.client, &mut sound, queue, at, &from, clock_ms());
+        if let Some(why) = self.listening.refusals(&mut self.peer.client).pop() {
+            self.note = format!("the session refused that: {why}");
         }
-        // Silent unless it is the output: losing the sound is not something
-        // this device does, it is told, and this is the one place that can
-        // notice.
-        if self.listening.elsewhere() && self.player.is_playing() {
-            self.player.pause();
-        }
-        // A device that has never played anything says nothing, so opening a
-        // second tab does not claim the sound from the one using it.
-        if self.player.track().is_some() {
-            let at = self.playing_at() as u32;
-            let playing = self.player.is_playing();
-            let position_ms = (self.player.position() * 1000.0) as i64;
-            let queue = std::mem::take(&mut self.queue);
-            self.listening.report(&queue, at, playing, position_ms);
-            self.queue = queue;
-        }
-        // What that came to is said now, not on a tick that may never come.
-        if self.listening.outbox() > 0 {
-            for command in self.listening.pump(&mut self.peer.client) {
-                tasks.push(self.obey(command));
-            }
-        }
+        self.session = self.listening.session(&self.peer.client);
         // The explorer lights what changed in the store and fades it.
         self.observe_explorer();
         // The back button, and a link somebody was sent — consumed only once
@@ -1606,7 +1733,7 @@ impl App {
         if fading || self.ctx.dwelling() {
             return Some(Duration::from_millis(50));
         }
-        let sounding = self.player.is_playing() || (self.listening.elsewhere() && self.listening.playing());
+        let sounding = self.player.is_playing() || self.session.as_ref().is_some_and(|s| s.sounding());
         (sounding || self.debug).then_some(Duration::from_millis(250))
     }
 

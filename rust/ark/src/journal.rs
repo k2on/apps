@@ -59,7 +59,7 @@
 use std::collections::BTreeMap;
 
 use crate::canon;
-use crate::hash::{state_hash_by, HASH_VERSION};
+use crate::hash::{state_hash_by, state_hash_over, HASH_VERSION};
 use crate::log::{snapshot_of, Entry, Facts, Log, Seq};
 use crate::protocol::{change_from_value, change_value, entry_from_value, entry_value};
 use crate::schema::Schema;
@@ -289,8 +289,26 @@ fn log_from_parts(v: &Value, store: MemoryStore) -> Result<Log, String> {
     };
     // Checked by the construction it was hashed by, and held hashed by
     // this one ([`HASH_VERSION`]): a snapshot written before `docs/plan-db.md`
-    // D3 opens, its hash checked as it was written.
-    let claimed = state_hash_by(hashing_of(base)?, &store);
+    // D3 opens, its hash checked as it was written. And over the tables it
+    // names, where those are some of this schema's: a snapshot written
+    // under a module since grown by a table — a peer alone's `log`, opened
+    // after an update; the server's is hashed again before it is read
+    // (`ark_server::persist::rehome`) — is checked as it was written too,
+    // and held hashed under this schema (`snapshot_of`).
+    let named: Vec<&str> = match base.get("rows") {
+        Some(Value::Struct(rows)) => store
+            .schema()
+            .tables()
+            .map(|t| t.name.as_str())
+            .filter(|t| rows.contains_key(*t))
+            .collect(),
+        _ => vec![],
+    };
+    let whole = store.schema().tables().count();
+    let claimed = match base.get("rows") {
+        Some(Value::Struct(rows)) if named.len() < whole && named.len() == rows.len() => state_hash_over(hashing_of(base)?, &store, &named),
+        _ => state_hash_by(hashing_of(base)?, &store),
+    };
     match need(base, "hash")? {
         Value::Bytes(h) if Some(&h[..]) == claimed.as_deref() => {}
         _ => return Err("the snapshot's hash does not match its rows".into()),
@@ -909,6 +927,64 @@ mod tests {
         assert!(claimed.contains("hash"), "{claimed}");
         let newer = log_from_value(&schema(), &with(log.base.hash.clone(), Some(3))).unwrap_err();
         assert!(newer.contains("does not know"), "{newer}");
+    }
+
+    /// A snapshot written under a module since grown by a table — a peer
+    /// alone's `log`, opened after an update — opens, by either
+    /// construction of the state hash: checked over the tables it names,
+    /// as it was written, and held hashed under the grown schema. One that
+    /// lost a table it was hashed over is still refused. Falsified by
+    /// checking it over every table of the grown schema, as before: "the
+    /// snapshot's hash does not match its rows", which is what an alone
+    /// directory of a revision before `play` said under harken's.
+    #[test]
+    fn a_snapshot_written_before_a_table_was_added_opens() {
+        let grown = {
+            let mut s = schema();
+            let mut u = s.tables[0].clone();
+            u.name = "u".into();
+            s.tables.push(u);
+            s
+        };
+        let mut st = MemoryStore::empty(schema());
+        for i in 1..=3 {
+            st.apply_change(&Change::Add("t".into(), [("id".to_string(), Value::int(i))].into_iter().collect()));
+        }
+        let log = Log {
+            base: snapshot_of(3, st.clone()),
+            entries: BTreeMap::new(),
+            ids: BTreeMap::new(),
+            below: Default::default(),
+        };
+        let mut keys = Mem::default();
+        Journal::create(&mut keys, Layout::alone(), &log).unwrap();
+        let opened = load(&keys, &Layout::alone(), &grown).expect("it opens").expect("a log");
+        let mut wide = MemoryStore::empty(grown.clone());
+        for r in st.scan("t") {
+            wide.apply_change(&Change::Add("t".into(), r));
+        }
+        assert_eq!(opened.base.hash, crate::hash::state_hash(&wide), "held hashed under the grown schema");
+        assert_ne!(opened.base.hash, log.base.hash);
+        // Hashed the old way, and read whole rather than as it is decoded.
+        let mut v = log_to_value(&log);
+        if let Value::Struct(m) = &mut v {
+            if let Some(Value::Struct(b)) = m.get_mut("base") {
+                b.insert("hash".into(), Value::bytes(crate::hash::state_hash_v1(&st)));
+                b.remove("hashing");
+            }
+        }
+        assert!(log_from_value(&grown, &v).is_ok(), "the old construction, under the grown schema");
+        // A table it was hashed over, gone from its rows: refused.
+        let mut lost = log_to_value(&log);
+        if let Value::Struct(m) = &mut lost {
+            if let Some(Value::Struct(b)) = m.get_mut("base") {
+                if let Some(Value::Struct(rows)) = b.get_mut("rows") {
+                    rows.remove("t");
+                }
+            }
+        }
+        let refused = log_from_value(&grown, &lost).unwrap_err();
+        assert!(refused.contains("hash"), "{refused}");
     }
 
     #[test]

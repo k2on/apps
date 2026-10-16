@@ -455,3 +455,59 @@ fn a_seeded_fleet_converges_on_every_instance() {
         }
     }
 }
+
+/// A record of some of another record's fields is that smaller record,
+/// natively as well as interpreted: `Seen { id, name }` built off the
+/// device a hook is handed is two fields, not the device's five. Natively a
+/// record whose fields are all read in place off one struct is handed back
+/// as that struct, uncopied — which is right for a row given back whole and
+/// was wrong for a record of some of its fields, which came out the whole
+/// device and was refused as not the state's type, by the native run alone
+/// (found by harken's `on_leave`, `Away { id, name }`). Falsified by
+/// dropping the field count from `authoring::cx::whole`: native refused
+/// with "no field can_play" where the interpreter took it.
+#[test]
+fn a_record_of_some_fields_of_another_is_built_natively_as_interpreted() {
+    use ark::authoring::*;
+
+    // The records are the vocabulary's: read only natively.
+    #[allow(dead_code)]
+    pub struct Seen {
+        pub id: Text,
+        pub name: Text,
+    }
+    impl Record for Seen {
+        fn fields() -> Fields<Self> {
+            fields().field("id", text()).field("name", text())
+        }
+    }
+    #[allow(dead_code)]
+    pub struct Last {
+        pub seen: Opt<Seen>,
+    }
+    impl Record for Last {
+        fn fields() -> Fields<Self> {
+            fields().named("last").field("seen", opt(typed::<Seen>()))
+        }
+    }
+    let r = router::<demo::Demo>("last");
+    r.live::<Last>("last")
+        .scope(|ctx| ctx.user)
+        .init(|| Last { seen: none() })
+        .on_join(|_s, _ctx, device| Last {
+            seen: some(Seen {
+                id: device.id,
+                name: device.name,
+            }),
+        });
+    let m = Module::new((demo::demo(), r));
+    let natives = m.lives();
+    let n = natives.iter().find(|n| n.name() == "last").expect("the state");
+    let s = ark::eval::constant(&m.build().lookup_state("last").unwrap().init).unwrap();
+    let input = args([("device", decl("phone").record("alice"))]);
+    let out = n.agrees("on_join", &s, &lctx("phone", 1), &input).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(
+        out.unwrap().field("seen"),
+        Value::record(vec![("id", Value::text("phone")), ("name", Value::text("phone"))])
+    );
+}

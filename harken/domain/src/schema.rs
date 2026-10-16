@@ -40,6 +40,7 @@ pub struct Harken {
     pub song: Table<Song>,
     pub playlist: Table<Playlist>,
     pub playlist_item: Table<PlaylistItem>,
+    pub play: Table<Play>,
 }
 impl Tables for Harken {
     fn open() -> Self {
@@ -54,6 +55,7 @@ impl Tables for Harken {
             song: table(),
             playlist: table(),
             playlist_item: table(),
+            play: table(),
         }
     }
 }
@@ -448,4 +450,63 @@ impl PlaylistItem {
     pub const pos: Col<Self, Int> = col("pos");
     pub const added_ms: Col<Self, Int> = col("added_ms");
     pub const user_id: Col<Self, Text> = col("user_id");
+}
+
+/// A track that was played: one row per play, authored by the device that
+/// made the sound once it had played long enough to count
+/// (`listening::record_play`). The log's, because last played and recently
+/// played have to be there offline and the same on every device; tens a
+/// day, where the session's own changes are thousands.
+///
+/// A play carries the track as it was heard — its title, who made it, its
+/// record, its length and its file — and the media id as text, which
+/// references nothing, on purpose. A reference would refuse `remove_media`
+/// a track anybody had played (a parent with children is not deleted) and
+/// refuse a play of a track this replica has not got yet; a play is a fact
+/// about what was heard, not a hold on the library, and reading one needs
+/// no join.
+pub struct Play {
+    pub id: Id<Play>,
+    pub user_id: Text,
+    pub track: Text,
+    pub title: Text,
+    pub creator: Text,
+    pub album: Text,
+    pub duration_ms: Int,
+    pub file: Text,
+    pub played_ms: Int,
+    pub from: Text,
+}
+impl Row for Play {
+    const NAME: &str = "play";
+    type Key = (Id<Play>,);
+    fn columns() -> Columns<Self> {
+        columns()
+            .id(Self::id)
+            .text(Self::user_id)
+            .text(Self::track)
+            .text(Self::title)
+            .text(Self::creator)
+            .text(Self::album)
+            .int(Self::duration_ms)
+            .text(Self::file)
+            .int(Self::played_ms)
+            .text(Self::from)
+            .key((Self::id,))
+            // `last_played` and `recently_played`: one person's, newest
+            // first.
+            .index((Self::user_id, Self::played_ms))
+    }
+}
+impl Play {
+    pub const id: Col<Self, Id<Self>> = col("id");
+    pub const user_id: Col<Self, Text> = col("user_id");
+    pub const track: Col<Self, Text> = col("track");
+    pub const title: Col<Self, Text> = col("title");
+    pub const creator: Col<Self, Text> = col("creator");
+    pub const album: Col<Self, Text> = col("album");
+    pub const duration_ms: Col<Self, Int> = col("duration_ms");
+    pub const file: Col<Self, Text> = col("file");
+    pub const played_ms: Col<Self, Int> = col("played_ms");
+    pub const from: Col<Self, Text> = col("from");
 }

@@ -45,20 +45,26 @@ are the shared crates'; what is here is what only harken has:
   path every client already joins to `<server>/media/` as it does a track,
   so no client changed; `/media/.art` and `/media/.cover` are reserved, and
   `ServeDir` refuses a `..` in either, written or encoded.
-- **`listening.rs`** — the `Desk`: one audio session per account, as an
-  `ark_server::Live` over live rooms. Exactly one output; the output
-  survives its socket; a command goes to the output, unless it cannot be
-  reached and the asker is audible and pressed something that means a
-  sound; a hand-off is one `Start` and reads *connecting* until the new
-  output reports; a room that empties is kept (paused, only its output,
-  away) and woken from on the next join, across restarts.
-- **`assistant.rs`** — Home Assistant's media players as devices. A pure
-  `Bridge` (who holds a speaker, what a command becomes, `SETTLE` polls of
-  grace after a hand-off, `LAPSE` polls before letting a playing speaker
-  go, the second taker releasing the first) and `ha`, the thread that
-  stands each speaker in every room somebody is listening in, drives the
-  six service calls, polls only what it holds, and says every hand-off,
-  release and pause out loud.
+- **The listening session is not here.** It is the domain's live state
+  (`harken_domain::listening`, `docs/plan-live.md`): one instance per
+  account on `/sync`, sequenced by the engine's own server
+  (`ark::live::state::Desk` inside the hub), its transitions written once
+  and run natively here and interpreted wherever the module is loaded,
+  kept in `live-states.cbor` and restored paused with no output. This crate
+  holds no rule of it.
+- **`assistant.rs`** — Home Assistant's media players as devices of that
+  session. A pure `Bridge`, handed the session and what the house said:
+  who holds a speaker, what a change of the session becomes (a hand-off of
+  the whole queue from where it was, a pause, a play, a seek), what the
+  speaker did that the session does not know said as its own transition
+  (`started`, `advance`, `jump`, `stalled`, `play`, `seek`), `SETTLE` polls
+  of grace after a hand-off, `LAPSE` polls before letting a playing speaker
+  go (`release`, said as it), `QUIET` polls after telling it anything, and
+  the second taker releasing the first. And `ha`, the thread: each speaker
+  a participant (`HubHandle::participate`) in each session a client is in
+  and in no other — a speaker never keeps a session's presence open — the
+  service calls, polling only what it holds, and every hand-off, release
+  and pause said out loud.
 - **`lib.rs`** — `Config` from the environment and `start`.
 
 ## Running
@@ -69,7 +75,7 @@ HARKEN_DEV_AUTH=1 harken-server [127.0.0.1:8787]
 
 | variable | |
 |---|---|
-| `HARKEN_DATA` | the log, kept rooms, sessions, the scanner's replica, its prints and the covers it took out of files (default: `$TMPDIR/harken-server`; below) |
+| `HARKEN_DATA` | the log, the kept listening sessions, sign-ins, the scanner's replica, its prints and the covers it took out of files (default: `$TMPDIR/harken-server`; below) |
 | `HARKEN_DEV_AUTH=1` | anyone is whoever they say — a laptop only, said loudly at start |
 | `HARKEN_OIDC_ISSUER`, `HARKEN_OIDC_CLIENT_ID`, `HARKEN_OIDC_CLIENT_SECRET_FILE` | all three or none; the secret is a file (a systemd credential); `HARKEN_OIDC_SCOPES` |
 | `HARKEN_PUBLIC_URL` | where a browser reaches this server (default `http://ADDR`) |
@@ -91,7 +97,7 @@ whose it is:
 | `log.ark-log`, `log.ark-journal` | the log: the library, every playlist, every person's work. This *is* the database |
 | `modules.cbor` | the modules this server has run, so an older client's entry still applies |
 | `cursors.cbor` | how far each session has read, for what the log may forget |
-| `live.cbor` | each account's kept listening session (a queue and a place in it) |
+| `live-states.cbor` | each account's listening session as the engine keeps it — its ordered part, under the hash of its type (a queue, a place in it, the clock), restored paused with no output |
 | `sessions.json` | the sign-ins: every login this server issued |
 | `library/` | the scanner's replica, a peer like any other |
 | `library-files.json` | the scanner's prints; local, never the log's |
@@ -103,7 +109,7 @@ authors an entry for each record whose cover it finds. Dropping the
 database is never needed for covers. If it is wanted anyway — to start the
 library over — stop the service and delete `log.ark-log` and
 `log.ark-journal`, which is every song *and every playlist*; `library/`,
-`library-files.json`, `cursors.cbor` and `live.cbor` may go with them,
+`library-files.json`, `cursors.cbor` and `live-states.cbor` may go with them,
 and keeping `sessions.json` keeps everybody signed in. Nothing on a device
 needs clearing: a client's `Hello` names the log it was confirmed on, a
 server whose log is another answers with its snapshot, and the device
@@ -141,9 +147,13 @@ an entry authored under an older login of the same person is accepted
 
 ## Tests
 
-`cargo test -p harken-server`: the desk's rules against a hub with standing
-devices (`tests/listening.rs`); the bridge the whole way round over real
-sockets against a stand-in Home Assistant (`tests/bridge.rs`); the scanner
+`cargo test -p harken-server`: the bridge's rules against values
+(`assistant.rs`); the session over real sockets — the bridge the whole way
+round against a stand-in Home Assistant, two accounts taking one speaker,
+paging under a library of two batches, and a browser, a desktop and a
+speaker sharing one session through transfers, a dropped socket and both
+ways of coming back (`tests/bridge.rs`); the session's own rules are the
+domain's transition tests (`harken/domain/tests/listening.rs`); the scanner
 over real WAV files, tags written and read by lofty, covers beside a
 record and inside its tracks fetched where the log says, a retagged file
 the same song, a rescan of nothing new reading nothing, and `/media` range

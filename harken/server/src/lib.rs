@@ -8,8 +8,10 @@
 //!
 //! - [`library`]: the media directory as a peer — walked, watched, and
 //!   authored as `add_song`;
-//! - [`listening`]: one audio session per account, as a live room;
-//! - [`assistant`]: the house's speakers, as devices in those sessions;
+//! - [`assistant`]: the house's speakers, as devices in each account's
+//!   listening session — which is the domain's live state
+//!   (`harken_domain::listening`), sequenced by the engine, and needs
+//!   nothing of this crate;
 //! - and [`start`], which is the wiring: a [`Config`] read from the
 //!   environment (what the NixOS module sets) and the server built from it.
 //!
@@ -31,7 +33,6 @@ pub mod assistant;
 pub mod covers;
 pub mod grown;
 pub mod library;
-pub mod listening;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -46,7 +47,6 @@ use ark_server::Running;
 
 use assistant::ha;
 use library::Scanner;
-use listening::Desk;
 
 /// The phone's URL scheme: a login may always send its code back there.
 pub const PHONE_SCHEME: &str = "harken://";
@@ -380,6 +380,7 @@ pub fn domain(module: Option<&Path>) -> Result<Domain> {
             let bytes =
                 std::fs::read(p).with_context(|| format!("reading the module {}", p.display()))?;
             Domain::from_bytes(&bytes, harken_domain::module().procedures())
+                .map(|d| d.with_lives(harken_domain::module().lives()))
                 .map_err(|e| anyhow!("the module {}: {e}", p.display()))
         }
     }
@@ -491,22 +492,10 @@ pub async fn start(config: Config) -> Result<Server> {
     }
     let auth = Arc::new(auth);
 
-    // What each account is listening to, and where: the hub's live machine,
-    // on the same socket as the log, in a room per account, held in memory.
-    // The bridge's watch is registered *before* the desk is handed over,
-    // because after that it belongs to the hub.
-    let mut desk = Desk::new();
-    let rooms = config.house.as_ref().map(|_| {
-        let (tx, rx) = std::sync::mpsc::channel();
-        desk.watch(tx);
-        rx
-    });
-
     let mut builder = ark_server::builder(domain.clone())
         .name("harken-server")
         .data(&config.data)
         .auth(auth.clone())
-        .live(desk)
         .keepalive(config.keepalive)
         .retain(config.retain);
     // No server hook (`docs/plan-guards.md` D3): nothing harken does reaches
@@ -573,15 +562,12 @@ pub async fn start(config: Config) -> Result<Server> {
     let running = app.serve(&config.listen).await?;
 
     // Every `media_player` named becomes a device in every listening
-    // session: it stands in each room as a peer of the live channel, which
-    // is how it is a device rather than a client.
-    let house = match (config.house.clone(), rooms) {
-        (Some(house), Some(rooms)) => {
-            eprintln!("harken-server: the house: {house}");
-            Some(ha::start(house, hub.clone(), rooms))
-        }
-        _ => None,
-    };
+    // session somebody is in: a participant of the live state, which is how
+    // it is a device rather than a client.
+    let house = config.house.clone().map(|house| {
+        eprintln!("harken-server: the house: {house}");
+        ha::start(house, hub.clone())
+    });
 
     // The scanner signs in like everything else, as the account `library`.
     let scanner = match &config.media {
@@ -605,7 +591,7 @@ pub async fn start(config: Config) -> Result<Server> {
         None => None,
     };
 
-    eprintln!("harken-server: one listening session per account, on the sync socket");
+    eprintln!("harken-server: one listening session per account, a live state on the sync socket");
     match &config.media {
         Some(dir) => eprintln!(
             "harken-server: media from {} (music in music/)",

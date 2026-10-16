@@ -13,6 +13,7 @@ use arkui::{art, cards, fit, glyphs, icon, layer, menu, panel, picker, style, ta
 use iced::widget::{button, column, container, mouse_area, row, rule, scrollable, slider, stack, text, text_input, Row};
 use iced::{Alignment, Element, Length, Padding};
 
+use crate::listening::{self, Clock, Output};
 use crate::places::{Focus, Pane, Source};
 use crate::player::Player;
 use crate::{credit, App, Message, BAR_HEIGHT, DEVICES_WIDTH, PAGE_PADDING, PANE_GAP, SHELF, SIDEBAR, SIDEBAR_WIDTH, TRACKS};
@@ -114,7 +115,7 @@ impl App {
         }
 
         if let Some(at) = self.devices {
-            let origin = App::devices_origin(self.window, self.listening.devices().len());
+            let origin = App::devices_origin(self.window, self.picker_rows().len());
             layers = layers
                 .push(layer::backdrop(Message::CloseDevices, Message::Swallow))
                 .push(layer::pinned(self.view_devices(at), origin));
@@ -727,8 +728,10 @@ impl App {
     fn view_debug(&self) -> Element<'_, Message> {
         let l = &self.listening;
         let stats = l.stats();
-        let status = self.peer.client.status();
-        let session = l.session();
+        let client = &self.peer.client;
+        let status = client.status();
+        let live = client.live_status(harken_domain::listening::read::STATE);
+        let session = self.session.as_ref();
         let yes = |b: bool| if b { "yes" } else { "no" };
         let mut rows: Vec<(String, String)> = vec![
             ("server".into(), self.server.clone()),
@@ -740,88 +743,112 @@ impl App {
                     .unwrap_or_else(|| "none".into()),
             ),
             ("this device".into(), format!("{} \u{b7} {}", l.name(), l.me())),
-            ("audible".into(), yes(Player::AUDIBLE).into()),
+            ("can play".into(), yes(Player::AUDIBLE).into()),
             (String::new(), String::new()),
             ("link".into(), status.link.clone()),
-            ("client linked".into(), yes(status.linked).into()),
             (
-                "epoch \u{b7} introduced on".into(),
-                format!("{} \u{b7} {}", status.epoch, l.introduced_on()),
+                "client linked \u{b7} epoch".into(),
+                format!("{} \u{b7} {}", yes(status.linked), status.epoch),
             ),
             (
-                "said here \u{b7} report \u{b7} do \u{b7} transfer".into(),
+                "live seq \u{b7} pending \u{b7} synced".into(),
+                match live {
+                    Some(s) => format!("{} \u{b7} {} \u{b7} {}", s.seq, s.pending, yes(s.synced)),
+                    None => "no instance".into(),
+                },
+            ),
+            (
+                "server offset".into(),
+                match client.server_offset() {
+                    Some(ms) => format!("{ms:+} ms"),
+                    None => "not heard yet".into(),
+                },
+            ),
+            ("part of the session".into(), yes(l.joined(client)).into()),
+            (
+                "calls \u{b7} refused \u{b7} plays \u{b7} came back playing".into(),
                 format!(
                     "{} \u{b7} {} \u{b7} {} \u{b7} {}",
-                    stats.said_here, stats.said_report, stats.said_do, stats.said_transfer
+                    stats.calls, stats.refused, stats.plays, stats.came_back_playing
                 ),
             ),
-            ("outbox".into(), l.outbox().to_string()),
+            ("last refusal".into(), stats.last_refusal.clone().unwrap_or_else(|| "none".into())),
             ("heard frames (wire)".into(), status.heard_frames.to_string()),
-            (
-                "heard state \u{b7} do (decoded)".into(),
-                format!("{} \u{b7} {}", stats.heard_state, stats.heard_do),
-            ),
-            (
-                "last state".into(),
-                match l.state_age_ms() {
-                    Some(ms) => format!("{:.1}s ago", ms / 1000.0),
-                    None => "never".into(),
-                },
-            ),
             (String::new(), String::new()),
-            ("session".into(), yes(session.is_some()).into()),
-            (
-                "output \u{b7} moving".into(),
-                format!(
-                    "{} \u{b7} {}",
-                    session.and_then(|s| s.output.as_deref()).unwrap_or("none"),
-                    session.and_then(|s| s.moving.as_deref()).unwrap_or("none"),
-                ),
-            ),
-            (
-                "here \u{b7} elsewhere".into(),
-                format!("{} \u{b7} {}", yes(l.outputs_here()), yes(l.elsewhere())),
-            ),
-            (
-                "playing \u{b7} at \u{b7} queue \u{b7} position".into(),
-                match session {
-                    Some(s) => format!(
-                        "{} \u{b7} {} \u{b7} {} \u{b7} {}",
-                        yes(s.playing),
-                        s.at,
-                        s.queue.len(),
-                        clock(l.position_ms() as f64 / 1000.0)
-                    ),
-                    None => "\u{2014}".into(),
-                },
-            ),
-            (
-                "player".into(),
-                format!(
-                    "{} \u{b7} {}",
-                    self.player.track().map(|t| t.title.as_str()).unwrap_or("nothing loaded"),
-                    if self.player.is_playing() { "playing" } else { "paused" }
-                ),
-            ),
-            (
-                "devices".into(),
-                match l.devices().len() {
-                    0 => "none".into(),
-                    n => n.to_string(),
-                },
-            ),
         ];
-        for d in l.devices() {
+        match session.and_then(|s| s.session.as_ref()) {
+            None => rows.push(("session".into(), if session.is_some() { "idle".into() } else { "none".into() })),
+            Some(a) => {
+                rows.push((
+                    "output".into(),
+                    match &a.output {
+                        Output::Device { id, moving } => format!("{id}{}", if *moving { " (moving)" } else { "" }),
+                        Output::Away { id, name } => format!("{name} \u{b7} {id} (away)"),
+                        Output::Nowhere => "nowhere".into(),
+                    },
+                ));
+                rows.push((
+                    "here \u{b7} elsewhere".into(),
+                    format!(
+                        "{} \u{b7} {}",
+                        yes(session.is_some_and(|s| l.outputs_here(s))),
+                        yes(session.is_some_and(|s| l.elsewhere(s)))
+                    ),
+                ));
+                rows.push((
+                    "clock".into(),
+                    match a.clock {
+                        Clock::Paused { at_ms } => format!("paused at {}", clock(at_ms as f64 / 1000.0)),
+                        Clock::Playing { at_ms, since } => {
+                            format!("playing from {} since {since}", clock(at_ms as f64 / 1000.0))
+                        }
+                    },
+                ));
+                rows.push((
+                    "at \u{b7} queue \u{b7} position".into(),
+                    format!(
+                        "{} \u{b7} {} \u{b7} {}",
+                        a.at,
+                        a.queue.len(),
+                        clock(listening::Remote::position_ms(client, a) as f64 / 1000.0)
+                    ),
+                ));
+                rows.push(("from".into(), a.from.clone()));
+            }
+        }
+        rows.push((
+            "player".into(),
+            format!(
+                "{} \u{b7} {}",
+                self.player.track().map(|t| t.title.as_str()).unwrap_or("nothing loaded"),
+                if self.player.is_playing() { "playing" } else { "paused" }
+            ),
+        ));
+        let devices = session.map(|s| s.devices.as_slice()).unwrap_or_default();
+        rows.push((
+            "devices".into(),
+            match devices.len() {
+                0 => "none".into(),
+                n => n.to_string(),
+            },
+        ));
+        for d in devices {
             rows.push((
                 format!("  {}", d.name),
-                format!(
-                    "{} \u{b7} {:?} \u{b7} audible {} \u{b7} here {}",
-                    d.id,
-                    d.kind,
-                    yes(d.audible),
-                    yes(d.here)
-                ),
+                format!("{} \u{b7} {} \u{b7} can play {}", d.id, d.kind.name(), yes(d.can_play)),
             ));
+        }
+        // The ephemeral slots: where each device's scrubber is being dragged.
+        let scrub = session.map(|s| &s.scrub);
+        rows.push((
+            "scrubbing (ephemeral)".into(),
+            match scrub.map_or(0, |m| m.len()) {
+                0 => "nobody".into(),
+                n => n.to_string(),
+            },
+        ));
+        for (device, ms) in scrub.into_iter().flatten() {
+            rows.push((format!("  {device}"), clock(*ms as f64 / 1000.0)));
         }
         rows.push((String::new(), String::new()));
         rows.push((
@@ -848,18 +875,21 @@ impl App {
             .into()
     }
 
-    /// What the bar is drawing, whichever device is making it: the *session*,
-    /// so a laptop watching a phone draws the phone's track, and the local
-    /// player when the sound is here (or nowhere yet), a frame fresher than
-    /// any broadcast.
+    /// What the bar is drawing, whichever device is making it: the
+    /// *session* when this device is part of one with something in it — its
+    /// track, and its clock counted against the server's — so a laptop
+    /// watching a phone draws the phone's track; and the local player while
+    /// this device is its own session. A scrubber being dragged draws where
+    /// it is being dragged to.
     fn bar(&self) -> Option<Bar> {
-        if self.listening.elsewhere() {
-            let track = self.listening.now()?;
+        if let Some(a) = self.session.as_ref().and_then(|s| s.session.as_ref()) {
+            let track = a.now();
+            let counted = listening::Remote::position_ms(&self.peer.client, a) as f64 / 1000.0;
             return Some(Bar {
                 title: track.title.clone(),
                 creator: track.creator.clone(),
-                playing: self.listening.playing(),
-                position: self.listening.position_ms() as f64 / 1000.0,
+                playing: a.clock.playing(),
+                position: self.scrubbing.map_or(counted, f64::from),
                 duration: track.duration_ms as f64 / 1000.0,
             });
         }
@@ -868,7 +898,7 @@ impl App {
             title: track.title.clone(),
             creator: track.creator.clone(),
             playing: self.player.is_playing(),
-            position: self.player.position(),
+            position: self.scrubbing.map_or(self.player.position(), f64::from),
             duration: self.player.duration(),
         })
     }
@@ -876,21 +906,17 @@ impl App {
     /// Which device has the sound, as the button that opens the picker —
     /// drawn only where there is a session to draw.
     fn view_output(&self) -> Option<Element<'_, Message>> {
-        if !self.listening.live() {
-            return None;
-        }
-        let session = self.listening.session()?;
+        let s = self.session.as_ref()?;
+        let me = self.listening.me();
+        let name_of = |id: &str| s.device(id).map_or(id.to_string(), |d| d.name.clone());
         // A session with no output is this device's to play on: the next
-        // press plays here and the report claims it, so this device is what
-        // the button says and draws lit, rather than "no device".
-        let here = self.listening.outputs_here() || (session.output.is_none() && session.moving.is_none());
-        // Three things a device can be: a hand-off in flight, the output and
-        // answering, the output and not answering (the sound stays with it).
-        let label = match (session.moving.as_deref(), session.output_device()) {
-            (Some(id), _) => format!("{}\u{2026}", fit::middle(session.device(id).map_or(id, |d| d.name.as_str()), 14)),
-            (None, Some(device)) if !here && !device.here => format!("{} (away)", fit::middle(&device.name, 12)),
-            (None, Some(device)) if !here => fit::middle(&device.name, 16),
-            (None, _) => fit::middle(self.listening.name(), 16),
+        // press plays here, so this device is what the button says and draws
+        // lit, rather than "no device".
+        let (label, here) = match s.output() {
+            Some(Output::Device { id, moving: true }) => (format!("{}\u{2026}", fit::middle(&name_of(id), 14)), id == me),
+            Some(Output::Device { id, .. }) if id != me => (fit::middle(&name_of(id), 16), false),
+            Some(Output::Away { name, .. }) => (format!("{} (away)", fit::middle(name, 12)), false),
+            _ => (fit::middle(self.listening.name(), 16), true),
         };
         Some(
             button(
@@ -939,7 +965,7 @@ impl App {
         // Enabled whenever there is a session to send it to: being a remote
         // control is a use, and `AUDIBLE` only decides whether *this* device
         // can be the one playing.
-        let workable = Player::AUDIBLE || self.listening.elsewhere();
+        let workable = Player::AUDIBLE || self.session.is_some();
         let transport = row![
             button(icon::plain(glyphs::PREVIOUS, true))
                 .style(button::text)
@@ -958,6 +984,7 @@ impl App {
                 .width(Length::Fixed(260.0)),
             text(clock(bar.position)).size(11).style(style::dim),
             slider(0.0..=duration as f32, bar.position as f32, Message::Seek)
+                .on_release(Message::SeekDone)
                 .style(style::seek)
                 .width(Length::Fill),
             text(clock(duration)).size(11).style(style::dim),
@@ -981,22 +1008,23 @@ impl App {
     /// on this device, which is where the next press plays. Pausing is the
     /// transport's; there is no row that stops it everywhere.
     fn view_devices(&self, at: usize) -> Element<'_, Message> {
-        let devices = self.listening.devices();
-        let me = self.listening.me();
-        let output = self.listening.session().and_then(|s| s.output.as_deref()).unwrap_or(me);
+        let rows_ = self.picker_rows();
+        let me = self.listening.me().to_string();
+        let session = self.session.as_ref();
+        let output = session.and_then(|s| s.output()).and_then(|o| o.id()).unwrap_or(&me).to_string();
         let mut rows = column![].spacing(0);
-        for (i, device) in devices.iter().enumerate() {
+        for (i, device) in rows_.into_iter().enumerate() {
             let on_cursor = at == i;
             // Drawn, and not a target, when it cannot be heard or is not
             // answering: a laptop controlling the session should see itself
             // listed, and the device the music still belongs to is the one
             // most worth drawing.
-            let takeable = device.audible && device.here;
+            let takeable = device.takeable;
             let label = if device.id == me {
                 fit::middle(&device.name, 24)
-            } else if self.listening.moving() == Some(device.id.as_str()) {
+            } else if session.is_some_and(|s| s.moving_to(&device.id)) {
                 format!("{}\u{2026}", fit::middle(&device.name, 20))
-            } else if !device.here {
+            } else if device.away {
                 format!("{} (not answering)", fit::middle(&device.name, 14))
             } else {
                 fit::middle(&device.name, 24)

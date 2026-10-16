@@ -382,15 +382,15 @@ pub const HASH_VERSION: i64 = 2;
 /// written before the change ([`HASH_VERSION`] 1) when it is opened — and
 /// O(rows), which is why it is the state hash no longer.
 pub fn state_hash_v1(st: &dyn Store) -> Vec<u8> {
-    let tables: Vec<Value> = st
-        .schema()
-        .tables()
-        .map(|t| {
-            Value::list(vec![
-                Value::text(&t.name),
-                Value::List(st.scan(&t.name).into_iter().map(Row::into_value).collect()),
-            ])
-        })
+    let tables: Vec<&str> = st.schema().tables().map(|t| t.name.as_str()).collect();
+    state_hash_v1_over(st, &tables)
+}
+
+// [`state_hash_v1`] over the tables named, in the order given.
+fn state_hash_v1_over(st: &dyn Store, tables: &[&str]) -> Vec<u8> {
+    let tables: Vec<Value> = tables
+        .iter()
+        .map(|t| Value::list(vec![Value::text(*t), Value::List(st.scan(t).into_iter().map(Row::into_value).collect())]))
         .collect();
     sha256(&encode(&Value::from(tables)))
 }
@@ -398,9 +398,21 @@ pub fn state_hash_v1(st: &dyn Store) -> Vec<u8> {
 /// The state hash of a store by the construction `version` names
 /// ([`HASH_VERSION`]); `None` for one this build does not know.
 pub fn state_hash_by(version: i64, st: &dyn Store) -> Option<Vec<u8>> {
+    let tables: Vec<&str> = st.schema().tables().map(|t| t.name.as_str()).collect();
+    state_hash_over(version, st, &tables)
+}
+
+/// [`state_hash_by`] over only the tables named, in the order given — the
+/// schema a snapshot was written under, where that had fewer tables than
+/// the one reading it (`journal::log_from_parts`): a table it did not have
+/// contributes nothing, where under this schema it would contribute its
+/// name.
+pub fn state_hash_over(version: i64, st: &dyn Store, tables: &[&str]) -> Option<Vec<u8>> {
     match version {
-        1 => Some(state_hash_v1(st)),
-        HASH_VERSION => Some(state_hash(st)),
+        1 => Some(state_hash_v1_over(st, tables)),
+        HASH_VERSION => Some(state_hash_of(
+            tables.iter().map(|t| (*t, st.digest(t).unwrap_or_else(|| table_digest(t, &st.scan(t))))),
+        )),
         _ => None,
     }
 }

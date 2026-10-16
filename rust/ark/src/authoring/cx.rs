@@ -265,8 +265,10 @@ pub(crate) fn shared(h: H) -> Rc<Value> {
 }
 
 /// Native: the struct these handles are the fields of, read in place and
-/// unchanged — exactly `names`, in order, off one struct — so a row given
-/// back is the row, not a copy rebuilt field by field.
+/// unchanged — exactly `names`, in order, off one struct, and that struct
+/// has no other field — so a row given back is the row, not a copy rebuilt
+/// field by field. A record of some of another's fields (`Away { id, name }`
+/// off a device) is not that record: it is built, as Emit builds it.
 pub(crate) fn whole(fields: &[H], names: &[Rc<str>]) -> Option<H> {
     if fields.is_empty() || fields.len() != names.len() {
         return None;
@@ -283,7 +285,7 @@ pub(crate) fn whole(fields: &[H], names: &[Rc<str>]) -> Option<H> {
                 _ => return None,
             }
         }
-        base
+        base.filter(|b| matches!(resolve(cx, *b), Value::Struct(m) if m.len() == names.len()))
     })
 }
 

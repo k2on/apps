@@ -66,7 +66,7 @@ mod wake_tests;
 pub use autos::Autos;
 pub use domain::Domain;
 pub use link::{Timing, Wake};
-pub use peer::{refusal_text, Login, Options, Peer, Pumped, Rejection, Standing, Status, THROTTLE_MS};
+pub use peer::{refusal_text, LiveStatus, Login, Options, Peer, Pumped, Rejection, Standing, Status, THROTTLE_MS};
 pub use storage::Fork;
 pub use view::{splice, Update, View};
 
