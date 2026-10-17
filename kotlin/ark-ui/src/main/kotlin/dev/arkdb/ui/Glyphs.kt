@@ -1,5 +1,5 @@
 // The few drawings this library's own pieces draw — a row's menu, the
-// chevron at a row's end, a page's way back — as `rust/arkui`'s Lucide
+// chevron at a row's end, a page's way back, a volume's mute — as `rust/arkui`'s Lucide
 // glyphs (ISC; the licence is `rust/arkui/src/LICENSE.lucide`): the same
 // paths, stroked two units wide with butt caps and miter joins, so one
 // menu button is one shape on every client. Every other glyph is the
@@ -55,4 +55,15 @@ public object ArkGlyphs {
 
     /** A row that opens something. */
     public val Chevron: ImageVector = glyph("chevron-right", "m9 18 6-6-6-6")
+
+    // A loudspeaker, as Lucide draws it, with its compact arcs written out: the same shape.
+    private const val CONE: String =
+        "M11 4.702a0.705 0.705 0 0 0 -1.203 -0.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0 -1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 0.997 0.413l3.383 3.384A0.705 0.705 0 0 0 11 19.298z"
+
+    /** A volume that sounds: the loudspeaker and two waves (`volume-2`). */
+    public val Volume: ImageVector =
+        glyph("volume-2", CONE, "M16 9a5 5 0 0 1 0 6", "M19.364 18.364a9 9 0 0 0 0 -12.728")
+
+    /** A volume muted: the loudspeaker struck through (`volume-x`). */
+    public val Muted: ImageVector = glyph("volume-x", CONE, "M22 9l-6 6", "M16 9l6 6")
 }

@@ -2,7 +2,9 @@
 // (Remote.kt's `Picker`), Home's last played (`lastPlayed`), the scrub
 // another device drags arriving here (`Listen`, over a real session), and
 // the lock screen's player (`RemotePlayer`), whose every command is a
-// transition. The session is the module's, run by the test's server
+// transition — its volume too, which is what the phone's buttons and the
+// system's volume panel reach while the sound is on a speaker — and the
+// picker's volumes and groups. The session is the module's, run by the test's server
 // (`Hall`), and the devices real Kotlin peers.
 //
 // Each was falsified once by breaking what it holds; the comment beside
@@ -17,6 +19,7 @@ import dev.arkdb.client.Account
 import dev.arkdb.client.Login
 import dev.arkdb.client.Peer
 import dev.harken.android.listening.Clock
+import androidx.media3.common.DeviceInfo
 import dev.harken.android.listening.Output
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -232,5 +235,167 @@ class ListenTests {
         assertEquals("#library", session().from)
         assertTrue("and, nothing sounding, plays here", hall.state().outputs("phone"))
         assertTrue(session().output is Output.Device)
+    }
+
+    // Three speakers of one family in the house — the kitchen at 40, the bedroom at 60, the study at
+    // 20 — each saying what it can do as the bridge says it for them.
+    private fun house(hall: Hall) {
+        for ((id, level) in listOf("kitchen" to 40, "bedroom" to 60, "study" to 20)) {
+            val p = hall.device(id, true, "speaker")
+            assertNull(Remote(id, id).call(p, "equip", Volumes.equip(true, "sonos", level, false)))
+            hall.carry()
+        }
+    }
+
+    /**
+     * The phone's buttons, while the sound is on a speaker: the session's player says it plays
+     * remotely, 0 to 100, at the speaker's level, so the media session hands the buttons and the
+     * system's panel to it — a press up or down is `nudge_volume` by five, the panel's slider
+     * `set_volume`, its mute `set_mute`; while the speaker leads a group, the group's level and the
+     * group's transitions. A car's own knob is the car's: nothing it asks reaches a speaker. And
+     * with the sound on this phone it plays locally, so the buttons are the phone's own stream.
+     *
+     * Falsified by a player that said it played remotely whatever the output: with nothing playing,
+     * the buttons were a remote's ("nothing plays: the buttons are the phone's"). And by a group's
+     * buttons being the output's alone: the player stood at the kitchen's 70 where the group's 65
+     * was wanted.
+     */
+    @Test
+    fun theButtonsMoveTheSpeakerTheSoundIsOn() {
+        val hall = Hall()
+        val phonePeer = hall.device("phone", true)
+        val phone = listen(hall, phonePeer, "phone", "Phone")
+        // The phone has a volume of its own, as it says once it joins.
+        assertNull(Remote("phone", "Phone").call(phonePeer, "equip", Volumes.equip(true, null, 50, false)))
+        house(hall)
+        val player = RemotePlayer(Looper.myLooper() ?: Looper.getMainLooper())
+        player.listen = phone
+        fun show() {
+            hall.carry()
+            phone.poke()
+            player.show(phone.heard.value)
+        }
+        fun kitchen() = hall.state().devices.getValue("kitchen")
+        fun bedroomOf() = hall.state().devices.getValue("bedroom")
+
+        show()
+        assertEquals("nothing plays: the buttons are the phone's", DeviceInfo.PLAYBACK_TYPE_LOCAL, player.deviceInfo.playbackType)
+        phone.press(Press.Start(queue, 0, 0, ""))
+        phone.press(Press.Transfer("kitchen"))
+        show()
+        assertEquals("the sound on the kitchen: remote", DeviceInfo.PLAYBACK_TYPE_REMOTE, player.deviceInfo.playbackType)
+        assertEquals(100, player.deviceInfo.maxVolume)
+        assertEquals("at the kitchen's level", 40, player.deviceVolume)
+
+        player.increaseDeviceVolume(0)
+        show()
+        assertEquals("a press up is a nudge of five", 45L, kitchen().volume)
+        player.decreaseDeviceVolume(0)
+        player.decreaseDeviceVolume(0)
+        show()
+        assertEquals(35L, kitchen().volume)
+        assertEquals(35, player.deviceVolume)
+        player.setDeviceVolume(70, 0)
+        show()
+        assertEquals("the panel's slider is a level", 70L, kitchen().volume)
+        player.setDeviceMuted(true, 0)
+        show()
+        assertTrue("and its mute a mute", kitchen().muted && player.isDeviceMuted)
+        assertEquals("the bedroom untouched", 60L, bedroomOf().volume)
+
+        // The bedroom joins: the buttons are the group's.
+        phone.press(Press.Join("bedroom"))
+        show()
+        assertEquals("bedroom follows the kitchen", "kitchen", bedroomOf().follows)
+        assertEquals("the group's level, the mean of its members'", 65, player.deviceVolume)
+        assertFalse("not every member is muted", player.isDeviceMuted)
+        player.increaseDeviceVolume(0)
+        show()
+        assertEquals("a press up is the group's nudge", 70, hall.state().groupLevel("kitchen"))
+        assertTrue("the bedroom moved with it", bedroomOf().volume > 60)
+        assertFalse("and moving a volume unmutes", kitchen().muted)
+
+        // In a car, the knob is the car's.
+        val before = hall.state().groupLevel("kitchen")
+        player.fromCar = { true }
+        player.increaseDeviceVolume(0)
+        player.setDeviceVolume(10, 0)
+        show()
+        assertEquals("nothing a car asks of a volume reaches a speaker", before, hall.state().groupLevel("kitchen"))
+        player.fromCar = { false }
+
+        // The sound here: the buttons are the phone's own stream again.
+        phone.press(Press.Transfer("phone"))
+        show()
+        assertEquals("with the sound here, the buttons are the phone's", DeviceInfo.PLAYBACK_TYPE_LOCAL, player.deviceInfo.playbackType)
+    }
+
+    /**
+     * The picker's volumes and groups: every row with a volume carries it, the group that plays
+     * comes first as a whole — "Kitchen + 1", every member ticked — and its slider is the group's
+     * (`set_group_volume`); a row's mute is that device's (`set_mute`); a speaker of the leader's
+     * family that is here and not in the group can join (`join`), one in it can leave (`unjoin`), and
+     * nothing else offers either — not the leader, not this phone, not a laptop.
+     *
+     * Falsified by the group row's controls being a device's: its slider asked `set_volume` of a
+     * device the session has not got, and was refused ("that device is not here, or has no
+     * volume"). And by offering a join to every speaker that can play, family or none: the phone,
+     * which has none, was offered one ("not this phone").
+     */
+    @Test
+    fun thePickerMovesVolumesAndJoinsSpeakers() {
+        val hall = Hall()
+        val phonePeer = hall.device("phone", true)
+        hall.device("laptop", true, "computer")
+        val r = Remote("phone", "Phone")
+        assertNull(r.call(phonePeer, "equip", Volumes.equip(true, null, 50, false)))
+        hall.carry()
+        house(hall)
+        assertNull(r.press(phonePeer, Press.Start(queue, 0, 0, ""), null))
+        assertNull(r.press(phonePeer, Press.Transfer("kitchen"), null))
+        assertNull(r.press(phonePeer, Press.Join("bedroom"), null))
+        hall.carry()
+        fun rows() = Picker.rows(r.session(phonePeer)!!, "phone")
+
+        val rows = rows()
+        val group = rows.first()
+        assertTrue("the group first", group.group)
+        assertEquals("named for its leader and how many follow it", "kitchen + 1", group.name)
+        assertEquals("its level the mean of its members'", 50, group.volume)
+        assertEquals("every member ticked", setOf("kitchen", "bedroom"), rows.filter { it.ticked }.map { it.id }.toSet())
+        assertEquals("and the cursor on the output", "kitchen", rows[Picker.cursor(rows)].id)
+        fun row(id: String) = rows().first { it.id == id }
+        assertEquals("a speaker of the family, here, outside the group: join", true, row("study").join)
+        assertEquals("one in it: leave", false, row("bedroom").join)
+        assertNull("not the leader", row("kitchen").join)
+        assertNull("not this phone", row("phone").join)
+        assertNull("not a laptop", row("laptop").join)
+        assertEquals("a row with a volume carries it", 50, row("phone").volume)
+        assertNull("one without, none", row("laptop").volume)
+        assertNull("the group row hands nothing over", Picker.pick(group, r.session(phonePeer)))
+        val numbers = listeningNumbers(Heard(me = "phone", joined = true, listening = r.session(phonePeer)))
+        assertTrue("the diagnostics say the group", ("group" to "kitchen + bedroom · volume 50") in numbers)
+        assertTrue("and a member's leader", ("  volume" to "60 · family sonos · follows kitchen") in numbers)
+
+        assertNull(r.press(phonePeer, Picker.level(group, 50 + 20)!!, null))
+        hall.carry()
+        assertEquals("the group's slider is the group's", 70, hall.state().groupLevel("kitchen"))
+        assertEquals("both moved", listOf(56L, 84L), listOf(hall.state().devices.getValue("kitchen").volume, hall.state().devices.getValue("bedroom").volume))
+        assertNull(r.press(phonePeer, Picker.mute(row("bedroom"))!!, null))
+        hall.carry()
+        assertTrue("a row's mute is that device's", hall.state().devices.getValue("bedroom").muted)
+        assertFalse(hall.state().devices.getValue("kitchen").muted)
+        assertNull(r.press(phonePeer, Picker.level(row("study"), 35)!!, null))
+        hall.carry()
+        assertEquals("a row's slider that device's", 35L, hall.state().devices.getValue("study").volume)
+
+        assertNull(r.press(phonePeer, Picker.join(row("study"))!!, null))
+        hall.carry()
+        assertEquals("joined", "kitchen", hall.state().devices.getValue("study").follows)
+        assertEquals("kitchen + 2", rows().first().name)
+        assertNull(r.press(phonePeer, Picker.join(row("bedroom"))!!, null))
+        hall.carry()
+        assertNull("and left", hall.state().devices.getValue("bedroom").follows)
+        assertEquals(true, row("bedroom").join)
     }
 }

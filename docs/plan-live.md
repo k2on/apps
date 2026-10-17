@@ -979,8 +979,8 @@ the screen off.
 ## Volume and groups
 
 Each device's volume, and speakers joined into one group, as the session
-holds them (`harken/domain`, `harken/server`, `harken/iced`; the phone
-follows from these types). Like every other part of the session, it is
+holds them (`harken/domain`, `harken/server`, `harken/iced`, and the phone,
+`harken/android`, below). Like every other part of the session, it is
 state: anybody changes it, the device obeys it, and what was done on the
 device itself is said back as the device's own transition.
 
@@ -1127,6 +1127,57 @@ On a row `+`, `-` and `M` are the row's and `J` joins or unjoins it; the
 name is what hands the sound over, the controls beside it their own
 targets. `D` draws each device's volume, family and leader, and the group.
 
+**The phone** (`harken/android`; `docs/plan-android.md`, "Volume and
+groups", has where it sits among the app's rules) is a device of the session
+with a volume, and a remote for every other device's.
+
+- **Its own volume is its media stream.** Once a connection, after the
+  snapshot, the reconciler says `equip(true, null, level, muted)` at the
+  level `STREAM_MUSIC` is at, read as 0 to 100; from then on the stream
+  follows the phone's entry, set without a flag so no panel rises, and a
+  stream moved behind the session's back — the buttons while the sound is
+  here, the system's panel, another app — is said once as `report_volume`.
+  **Never its own write**: a stream has fewer steps than a hundred, fifteen
+  on most phones, so the 30 another device asks for is the fifth step and
+  reads back as 33 — and 33 compared with the 30 asked for would be said
+  back, and the 30 would become 33. What the stream reads is compared with
+  what it read after the phone's own last write, never with the level asked
+  for. What rings the reconciler is a `ContentObserver` on
+  `Settings.System`, which the system writes a stream's level to whatever
+  moved it: public, where `VOLUME_CHANGED_ACTION` is hidden and its extras
+  undocumented; its cost is the half second the system takes to write the
+  setting down, and a mute that is not written down is read at the next
+  reconcile. Phones have no family, so a phone joins no group.
+- **The buttons are whatever is playing's**, by Android's own mechanism for
+  a remote, the way Cast does it. While the sound is on another device with
+  a volume, the media session's player (`RemotePlayer`, which is the session
+  whenever the phone is part of it) says it plays remotely —
+  `DeviceInfo.PLAYBACK_TYPE_REMOTE`, 0 to 100, at the output's level, its
+  group's while it leads one — and offers Media3 1.5.1's device-volume
+  commands (`COMMAND_GET_DEVICE_VOLUME`, `COMMAND_SET_DEVICE_VOLUME_WITH_FLAGS`,
+  `COMMAND_ADJUST_DEVICE_VOLUME_WITH_FLAGS`, and the two older ones). The
+  media session then gives the platform a volume provider rather than the
+  stream, so the buttons and the system's panel reach the player: a press
+  is `nudge_volume(output, ±5)` — `nudge_group_volume` for a group — the
+  panel's slider `set_volume` (or `set_group_volume`), throttled as the
+  screen's is, and its mute `set_mute`. While the sound is here or nowhere
+  it plays locally and the buttons move the phone's stream natively, which
+  the phone then reports. **In a car** the phone is the output by the car's
+  rule, so it is local there; and a volume a car's controller asks for is
+  never sent to a speaker, since the car's knob is the car's.
+- **On screen**: the full player draws a mute and a slider under the
+  transport (ark-ui's `VolumeSlider`, which springs to a level that arrives
+  from elsewhere and follows the finger exactly while dragged) — the group's,
+  the output's, this phone's own while the sound is here or nowhere, and its
+  stream alone. A drag is throttled ordered calls, 50 ms trailing, the last
+  always, by the app (`Drag`). The picker keeps its rules and gains the
+  desktop's: a slider and a mute on every row with a volume, every member of
+  the playing group ticked, `+` on a speaker that can join and `−` on one in
+  the group, and the group first ("Kitchen + 1") with the group's slider;
+  the device chip names a group the same way. The mini player is unchanged.
+  The diagnostics draw each device's volume, family and leader, and the
+  group.
+
 ### Tested
 
 Each falsified once; the doc comment beside each says how. In
@@ -1145,7 +1196,14 @@ client, the bridge and two stand-in Sonos: equip, join, a group volume told
 per speaker, a hand on a knob, the Sonos app's grouping both ways, unjoin.
 In `harken-iced`: the player following its volume and a change behind it
 said, through real peers and the engine's desk; the picker's rows for a
-group, the keys on a row, the transition a control calls.
+group, the keys on a row, the transition a control calls. On the phone, with
+real Kotlin peers and the test's server (`Hall`): the phone's volume said once
+a connection, followed, a hand said once and its own write never
+(`RemoteTests`); the buttons a speaker's, a group's, nothing from a car, and
+local with the sound here (`ListenTests`, `RemotePlayer` on layoutlib's
+Looper); the picker's sliders, mutes, group row and joins (`ListenTests`); a
+stream's steps and the drag's throttle (`VolumeTests`). The falsifications
+are in `docs/plan-android.md`.
 
 ### Found on the way, in the engine
 
@@ -1180,5 +1238,8 @@ as the real one does. Its own commit, ahead of this section's.
 No real Home Assistant and no real Sonos: the service calls and the
 attributes are as the documentation gives them, and the template that names
 the integration is unasked of a real house. No browser has had its
-element's volume set by another device. The phone neither declares a
-volume nor follows one yet — that is the next step, from these types.
+element's volume set by another device. No real phone has had its
+volume panel handed to a real speaker: what Android's panel draws for the
+remote volume, whether a real phone's buttons reach the `RemotePlayer` while
+the screen is off, and the settings observer ringing on a real phone are
+unseen (`docs/plan-android.md`).

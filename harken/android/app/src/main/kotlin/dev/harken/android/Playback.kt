@@ -55,20 +55,38 @@
 // stopped or with nothing loaded, nothing here runs (`docs/plan-reactive.md`).
 // What another device's scrubber is being dragged to is a flow of its own
 // ([Playback.scrubbing]), read by the scrubber alone.
+//
+// **The volume keys are whatever is playing's** (docs/plan-live.md "Volume
+// and groups"), by Android's own mechanism for a remote, the way Cast does
+// it: while the sound is on another device that has a volume, the session's
+// player says it plays remotely (`DeviceInfo.PLAYBACK_TYPE_REMOTE`, 0 to 100)
+// at that device's level — its group's, while it leads one — so the media
+// session hands the buttons and the system's volume panel to the player
+// rather than to the phone's own stream, and each is a transition: a press
+// `nudge_volume` (or `nudge_group_volume`) by [NUDGE], the panel's slider
+// `set_volume`, its mute `set_mute`. While the sound is here, or nowhere, it
+// plays locally and the buttons move the phone's media stream, as they
+// always did — which the phone, a device of the session with a volume, says
+// as `report_volume` (Remote.kt). A car's own knob is the car's: a volume a
+// car's controller asks for is never sent to a speaker.
 package dev.harken.android
 
 import android.app.PendingIntent
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.database.ContentObserver
+import android.media.AudioManager
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.Settings
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.DeviceInfo
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
@@ -124,6 +142,9 @@ class PlaybackService : MediaLibraryService() {
     /** The app's session, held for as long as this service lives; none while nobody is signed in. */
     private var hold: Hold? = null
 
+    /** Stop ringing the reconciler when the phone's media stream moves. */
+    private var unwatch: () -> Unit = {}
+
     override fun onCreate() {
         super.onCreate()
         exo =
@@ -135,6 +156,12 @@ class PlaybackService : MediaLibraryService() {
                 .setWakeMode(C.WAKE_MODE_NETWORK)
                 .build()
         sound = ExoSound(exo, Handler(mainLooper))
+        // The phone's own volume, a device's of the session: its media stream, which the
+        // reconciler follows and reports — rung whenever a volume setting moves, since what moved
+        // it is read from the stream itself.
+        val stream = MusicStream(this)
+        sound.stream = StreamLevel(stream)
+        unwatch = stream.watch { Listen.current.value?.poke() }
         remote = RemotePlayer(mainLooper)
         val open =
             PendingIntent.getActivity(
@@ -406,6 +433,7 @@ class PlaybackService : MediaLibraryService() {
 
     override fun onDestroy() {
         scope.cancel()
+        unwatch()
         Listen.current.value?.detach(sound)
         session?.run {
             release()
@@ -507,6 +535,9 @@ class ExoSound(private val exo: ExoPlayer, private val main: Handler) : Sound {
 
     /** Told of every event, so it reconciles; null while there is no session. */
     @Volatile var listen: Listen? = null
+
+    /** The phone's media stream, as the session's 0 to 100: this player's volume. */
+    @Volatile var stream: StreamLevel? = null
 
     private val tick = Runnable { poke(false) }
 
@@ -627,6 +658,68 @@ class ExoSound(private val exo: ExoPlayer, private val main: Handler) : Sound {
         main.removeCallbacks(tick)
         main.postDelayed(tick, ms)
     }
+
+    // AudioManager's calls are the system's and safe from any thread: read and written here, on the
+    // session's, so the reconciler reads back what it has just set.
+    override fun volume(): Pair<Int, Boolean>? = stream?.read()
+
+    override fun setVolume(level: Int, muted: Boolean) {
+        stream?.apply(level, muted)
+    }
+}
+
+/**
+ * The phone's media stream (`STREAM_MUSIC`), as `AudioManager` has it: written without a flag, so no
+ * panel rises for a volume another device set. Do Not Disturb, or a device policy, can refuse a
+ * write; refused, it stays where it was, which the next read says.
+ */
+class MusicStream(context: Context) : Stream {
+    private val audio = context.getSystemService(AudioManager::class.java)
+    private val resolver = context.contentResolver
+
+    override val min: Int
+        get() = if (android.os.Build.VERSION.SDK_INT >= 28) audio.getStreamMinVolume(AudioManager.STREAM_MUSIC) else 0
+
+    override val max: Int
+        get() = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+
+    override val index: Int
+        get() = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
+
+    override val muted: Boolean
+        get() = audio.isStreamMute(AudioManager.STREAM_MUSIC)
+
+    override fun set(index: Int) {
+        try {
+            audio.setStreamVolume(AudioManager.STREAM_MUSIC, index, 0)
+        } catch (e: SecurityException) {}
+    }
+
+    override fun mute(muted: Boolean) {
+        try {
+            audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, if (muted) AudioManager.ADJUST_MUTE else AudioManager.ADJUST_UNMUTE, 0)
+        } catch (e: SecurityException) {}
+    }
+
+    /**
+     * `onChange`, on the main thread, whenever the system writes a volume setting down — which it does
+     * for every stream's level on every device, whatever moved it: the buttons, the system's panel,
+     * the settings, another app. A doorbell, not a reading: what rang it is read from the stream. A
+     * `ContentObserver` on `Settings.System` rather than `VOLUME_CHANGED_ACTION`, which is hidden —
+     * no part of the SDK, its extras undocumented — where a settings observer is public and has
+     * always rung; its cost is that the system writes the setting down half a second after the
+     * change, so the report is that late. A mute is not written down on every version, so a mute
+     * alone may ring nothing; the next reconcile — any change of the session, any event of the
+     * player — reads it.
+     */
+    fun watch(onChange: () -> Unit): () -> Unit {
+        val o =
+            object : ContentObserver(Handler(Looper.getMainLooper())) {
+                override fun onChange(selfChange: Boolean) = onChange()
+            }
+        resolver.registerContentObserver(Settings.System.CONTENT_URI, true, o)
+        return { resolver.unregisterContentObserver(o) }
+    }
 }
 
 /**
@@ -654,6 +747,10 @@ class RemotePlayer(looper: Looper) : SimpleBasePlayer(looper) {
 
     private val handler = Handler(looper)
 
+    /** The system's volume panel, dragged: throttled as the full player's slider is. */
+    private val panel =
+        Drag(SystemClock::uptimeMillis, { ms, f -> handler.postDelayed(f, ms) }) { of, level -> listen?.press(Press.Loud(of, Change.To(level))) }
+
     fun show(h: Heard) {
         if (h == heard) return
         heard = h
@@ -661,7 +758,13 @@ class RemotePlayer(looper: Looper) : SimpleBasePlayer(looper) {
     }
 
     override fun getState(): State {
-        val b = State.Builder().setAvailableCommands(Forward.commands)
+        val loud = Forward.loud(heard)
+        val b =
+            State.Builder()
+                .setAvailableCommands(if (loud != null) Forward.remoteCommands else Forward.commands)
+                .setDeviceInfo(Forward.deviceInfo(loud))
+                .setDeviceVolume(loud?.level ?: 0)
+                .setIsDeviceMuted(loud?.muted ?: false)
         val shown = Forward.shown(heard) ?: return b.setPlaybackState(Player.STATE_IDLE).setPlaylist(emptyList()).build()
         val server = listen?.server ?: ""
         val art = listen?.art ?: { "" }
@@ -690,10 +793,13 @@ class RemotePlayer(looper: Looper) : SimpleBasePlayer(looper) {
         val done = SettableFuture.create<Unit>()
         for (p in all.dropLast(1)) l.press(p)
         l.press(all.last()) {
-            handler.post {
+            val answer = Runnable {
                 heard = l.heard.value
                 done.set(Unit)
             }
+            // On this player's own thread already — a session with no thread of its own — answered
+            // at once; otherwise on it.
+            if (Looper.myLooper() == handler.looper) answer.run() else handler.post(answer)
         }
         return done
     }
@@ -717,6 +823,22 @@ class RemotePlayer(looper: Looper) : SimpleBasePlayer(looper) {
 
     // A headset's stop is a pause: stopping the session would forget a queue nobody asked to lose.
     override fun handleStop(): ListenableFuture<*> = press(Press.Pause)
+
+    // The volume of whatever is playing, while that is another device: the buttons, the system's
+    // panel. A car's own knob is the car's — in a car the phone is the speaker — so what a car's
+    // controller asks of a volume is never sent to one.
+    override fun handleIncreaseDeviceVolume(flags: Int): ListenableFuture<*> = press(Forward.nudge(heard, NUDGE, fromCar()))
+
+    override fun handleDecreaseDeviceVolume(flags: Int): ListenableFuture<*> = press(Forward.nudge(heard, -NUDGE, fromCar()))
+
+    override fun handleSetDeviceMuted(muted: Boolean, flags: Int): ListenableFuture<*> =
+        press(Forward.loud(heard)?.takeIf { !fromCar() }?.let { Press.Loud(it.of, Change.Mute(muted)) })
+
+    override fun handleSetDeviceVolume(deviceVolume: Int, flags: Int): ListenableFuture<*> {
+        val loud = Forward.loud(heard)?.takeIf { !fromCar() } ?: return Futures.immediateVoidFuture()
+        panel.to(loud.of, deviceVolume.coerceIn(0, 100))
+        return Futures.immediateVoidFuture()
+    }
 
     override fun handlePrepare(): ListenableFuture<*> = Futures.immediateVoidFuture()
 
@@ -748,6 +870,42 @@ object Forward {
                 Player.COMMAND_RELEASE,
             )
             .build()
+
+    /**
+     * …and, while the sound is on another device with a volume, that volume too: read, set, moved a
+     * step, muted — what a media session needs to hand the buttons and the system's panel to this
+     * player rather than to the phone's own stream. Both the flagged commands and the older ones, so
+     * a controller of either age finds the one it calls.
+     */
+    @Suppress("DEPRECATION")
+    val remoteCommands: Player.Commands =
+        commands
+            .buildUpon()
+            .addAll(
+                Player.COMMAND_GET_DEVICE_VOLUME,
+                Player.COMMAND_SET_DEVICE_VOLUME,
+                Player.COMMAND_SET_DEVICE_VOLUME_WITH_FLAGS,
+                Player.COMMAND_ADJUST_DEVICE_VOLUME,
+                Player.COMMAND_ADJUST_DEVICE_VOLUME_WITH_FLAGS,
+            )
+            .build()
+
+    /**
+     * The volume the buttons are, while they are another device's: the output's — its group's, while
+     * it leads one — when that is not this phone and it has a volume. Null, and the phone plays
+     * locally: the buttons are its own stream's, as they are whenever the sound is here — in a car
+     * above all — or nowhere.
+     */
+    fun loud(h: Heard): Volume? = if (!h.joined) null else h.listening?.volume(h.me)?.takeIf { it.remote }
+
+    /** Remote, 0 to 100, while the buttons are another device's; local otherwise. */
+    fun deviceInfo(loud: Volume?): DeviceInfo =
+        if (loud == null) DeviceInfo.Builder(DeviceInfo.PLAYBACK_TYPE_LOCAL).build()
+        else DeviceInfo.Builder(DeviceInfo.PLAYBACK_TYPE_REMOTE).setMinVolume(0).setMaxVolume(100).build()
+
+    /** A volume button: the remote's volume moved a step — nothing from a car, whose knob is its own. */
+    fun nudge(h: Heard, delta: Int, fromCar: Boolean = false): Press? =
+        if (fromCar) null else loud(h)?.let { Press.Loud(it.of, Change.By(delta)) }
 
     /**
      * What the player shows of the session: its queue, the track, where in it — counted on from
@@ -830,6 +988,11 @@ data class PlayerState(
     val upNext: List<Playing> = emptyList(),
     /** Where the sound is, while this phone is part of the session; null alone, and no device button. */
     val on: Where? = null,
+    /**
+     * What is playing's volume — the group's, while the output leads one; this phone's own stream,
+     * alone — which the full player draws a slider and a mute for. Null, and none is drawn.
+     */
+    val volume: Volume? = null,
 )
 
 /** The screens' end: the session while this phone is part of it, a controller of the service's player otherwise. */
@@ -854,6 +1017,14 @@ class Playback(
 
     private var controller: MediaController? = null
     private var ticking: Job? = null
+
+    /** The phone's own media stream: the volume the slider moves while this phone is its own session. */
+    private val stream: StreamLevel?
+    private val unwatch: () -> Unit
+
+    /** A volume slider dragged — the full player's, a picker row's — sent as throttled transitions. */
+    private val drag =
+        Drag(SystemClock::uptimeMillis, { ms, f -> scope.launch { delay(ms); f() } }) { of, level -> listen?.press(Press.Loud(of, Change.To(level))) }
     private var listen: Listen? = null
     private var heard = Heard()
     private var following: Job? = null
@@ -882,6 +1053,9 @@ class Playback(
         get() = ticking?.isActive == true
 
     init {
+        val music = if (connect) MusicStream(context) else null
+        stream = music?.let(::StreamLevel)
+        unwatch = music?.watch { if (!joined) showVolume() } ?: {}
         val future = future
         if (future != null) future.addListener(
             {
@@ -921,7 +1095,7 @@ class Playback(
         val s = h.listening
         val a = s?.active
         if (s == null || a == null) {
-            _state.value = PlayerState(on = where(h))
+            _state.value = PlayerState(on = where(h), volume = s?.volume(h.me))
             stopTicking()
             return
         }
@@ -933,6 +1107,7 @@ class Playback(
                 durationMs = a.now.durationMs,
                 upNext = a.queue.drop(at + 1).take(UP_NEXT).map { playing(it, l) },
                 on = where(h),
+                volume = s.volume(h.me),
             )
         _position.value = a.clock.position(h.serverNow())
         if (!a.clock.playing) stopTicking()
@@ -963,7 +1138,13 @@ class Playback(
         return when (val o = s?.active?.output) {
             is Output.Device ->
                 if (o.id == h.me) Where(name, "phone", here = true, moving = o.moving)
-                else s.devices[o.id].let { d -> Where(d?.name ?: o.id, d?.kind ?: "computer", here = false, moving = o.moving) }
+                else
+                    s.devices[o.id].let { d ->
+                        // A group is named for its leader and how many follow it: "Kitchen + 1".
+                        val n = s.followers(o.id).size
+                        val named = d?.name ?: o.id
+                        Where(if (n > 0) "$named + $n" else named, d?.kind ?: "computer", here = false, moving = o.moving)
+                    }
             is Output.Away -> Where(o.name, "computer", here = o.id == h.me, away = true)
             Output.Nowhere, null -> Where(name, "phone", here = true)
         }
@@ -997,6 +1178,7 @@ class Playback(
                         else -> Repeat.Off
                     },
                 upNext = next,
+                volume = local(),
             )
         _position.value = c.currentPosition.coerceAtLeast(0)
         if (!c.isPlaying) stopTicking()
@@ -1123,8 +1305,49 @@ class Playback(
         if (i != C.INDEX_UNSET) c.seekTo(i, 0)
     }
 
+    // This phone's own stream as the slider draws it, alone.
+    private fun local(): Volume? = stream?.read()?.let { (level, muted) -> Volume(Level.Here, level, muted, remote = false) }
+
+    private fun showVolume() {
+        if (!joined) _state.value = _state.value.copy(volume = local())
+    }
+
+    /**
+     * What is playing's volume, dragged to `level`: a throttled transition while this phone is part of
+     * the session — the group's, the output's, or this phone's own while the sound is nowhere — and,
+     * alone, this phone's media stream.
+     */
+    fun volume(level: Int) {
+        val v = _state.value.volume ?: return
+        if (v.of != Level.Here) return drag.to(v.of, level)
+        stream?.apply(level, false)
+        showVolume()
+    }
+
+    /** A volume slider let go: whatever the throttle held goes now. */
+    fun volumeDone() = drag.done()
+
+    /** What is playing's mute, the other way from how it is. */
+    fun mute() {
+        val v = _state.value.volume ?: return
+        if (v.of != Level.Here) return press(Press.Loud(v.of, Change.Mute(!v.muted))) {}
+        stream?.apply(v.level, !v.muted)
+        showVolume()
+    }
+
+    /** A picker row's slider dragged to `level`: throttled, as the full player's is. */
+    fun level(of: Level, level: Int) {
+        if (joined) drag.to(of, level)
+    }
+
+    /** A press of the session from the picker — a mute, a join, an unjoin; nothing alone. */
+    fun ask(p: Press) {
+        if (joined) listen?.press(p)
+    }
+
     /** Let go of the controller; the service, and the music, go on. */
     fun close() {
+        unwatch()
         stopTicking()
         following?.cancel()
         scope.cancel()

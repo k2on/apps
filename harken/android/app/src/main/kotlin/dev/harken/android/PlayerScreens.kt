@@ -16,6 +16,12 @@
 // device's kind and name, that opens the picker; and the mini player says it
 // under the title when the sound is somewhere else. The session has no
 // shuffle and no repeat, so neither toggle is drawn then.
+//
+// Under the transport the full player draws what is playing's volume
+// (`PlayerState.volume`): a mute and a slider, ark-ui's `VolumeSlider` — the
+// group's while the output leads one, the output's while it is another
+// device, this phone's own while the sound is here or nowhere, and its media
+// stream while it is its own session. The mini player draws none.
 package dev.harken.android
 
 import androidx.compose.foundation.background
@@ -63,6 +69,7 @@ import dev.arkdb.ui.Cover
 import dev.arkdb.ui.Glyph
 import dev.arkdb.ui.Recompositions
 import dev.arkdb.ui.Space
+import dev.arkdb.ui.VolumeSlider
 import dev.arkdb.ui.quiet
 import dev.arkdb.ui.rememberTransientListState
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -97,6 +104,15 @@ interface Controls {
 
     /** The scrubber is being dragged to `ms`: said to the session's other devices. */
     fun scrub(ms: Long) {}
+
+    /** What is playing's volume dragged to `level`, 0 to 100. */
+    fun volume(level: Int) {}
+
+    /** …and let go. */
+    fun volumeDone() {}
+
+    /** What is playing's mute, the other way from how it is. */
+    fun mute() {}
 }
 
 /** Controls that do nothing: what a screenshot hands the player. */
@@ -261,6 +277,10 @@ fun FullFace(
                 controls::repeat,
             )
             else Spacer(Modifier.size(48.dp))
+        }
+        state.volume?.let { v ->
+            Spacer(Modifier.height(Space.s))
+            VolumeSlider(v.level, v.muted, controls::volume, controls::volumeDone, controls::mute, Modifier.fillMaxWidth(), about = state.on?.name ?: "this phone")
         }
         Spacer(Modifier.height(Space.l))
         val on = state.on

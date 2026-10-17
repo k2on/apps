@@ -1580,3 +1580,141 @@ unseen; so are the grants as a car's process sees them, the legacy
 controller's package name Media3 reports for it, and the service and the
 session staying alive with the screen off in a car. Installing outside the
 Play Store needs Android Auto's "Unknown sources" (`harken/android/README.md`).
+
+### Volume and groups
+
+`docs/plan-live.md` "Volume and groups" is the whole of it, the phone's half
+under "The clients"; this is where it sits among the rules above.
+
+**The volume keys reach the speaker the way Cast's do.** The media session's
+player while the phone is part of the session is `RemotePlayer`, whichever
+device sounds. While the sound is on another device with a volume, its
+state says `DeviceInfo.PLAYBACK_TYPE_REMOTE`, 0 to 100, at that device's
+level — the group's mean while it leads one — and offers Media3 1.5.1's
+device-volume commands: `COMMAND_GET_DEVICE_VOLUME`,
+`COMMAND_SET_DEVICE_VOLUME_WITH_FLAGS` and
+`COMMAND_ADJUST_DEVICE_VOLUME_WITH_FLAGS`, and the older two without flags
+for a controller that calls those. Media3's session then gives the platform a
+volume provider rather than `STREAM_MUSIC` (read in `PlayerWrapper`'s
+bytecode: remote and both kinds of command is an absolute provider), so the
+buttons, the system's volume panel and its mute reach the player:
+`handleIncreaseDeviceVolume` and `handleDecreaseDeviceVolume` are
+`nudge_volume(output, ±5)`, five being the desktop's `+` and `-` (`NUDGE`);
+`handleSetDeviceVolume` — the panel's slider — `set_volume`, through the
+same throttle the screen's slider uses; `handleSetDeviceMuted` `set_mute`;
+for a group, `nudge_group_volume`, `set_group_volume` and `set_group_mute`.
+With the sound here, nowhere, or on a device with no volume, the state says
+`PLAYBACK_TYPE_LOCAL` and offers none of them, so the buttons move the
+phone's own stream natively. A press answered on the player's own thread
+(a session with no thread of its own, in the tests) is answered at once, so
+the device volume the player masks while a press is pending comes back.
+
+**The phone's own volume** is its media stream (`MusicStream`, over
+`AudioManager`), read and written as the session's 0 to 100 (`StreamLevel`,
+the nearest of the stream's steps). The service hands it to the player the
+reconciler drives (`ExoSound.stream`), so it is `Sound.volume()`, the
+desktop's shape: `equip(true, null, level, muted)` once a connection after
+the snapshot, the stream set to the phone's entry without a flag whoever
+moved it, and `report_volume` for a stream moved by anything else. **The echo
+rule**: a move is what the stream reads against what it read after this
+phone's own last write — never against the level asked for, which a stream
+of fifteen steps cannot hold (30 is the fifth step, read back as 33). The
+reconciler is rung by a `ContentObserver` on `Settings.System`, registered
+by the service, which rings when the system writes any stream's level down;
+`VOLUME_CHANGED_ACTION` was the other candidate, and it is hidden — not in
+the SDK, its extras undocumented — where the observer is public and has rung
+on every version. It rings half a second late (the system writes the setting
+down after that delay), and a mute alone is not written down on every
+version; the reconciler reads the stream itself at every reconcile, so the
+next change of the session or event of the player says it. Alone, the full
+player's slider is the stream itself, read again when the observer rings.
+
+**The car**: the phone is the output there by the car's rule, so its player
+is local and the car's knob is the car's audio, as it should be. And a
+volume a car's controller asks of the player (`fromCar`) is dropped, never
+sent to a speaker.
+
+**The screens.** `PlayerState.volume` is what is playing's (`Volume`: what a
+control moves, its level, its mute, and whether it is another device's);
+the full player draws ark-ui's new `VolumeSlider` under the transport — the
+mute (Lucide's `volume-2` and `volume-x`, now `ArkGlyphs.Volume` and
+`.Muted`) and a slider that follows the finger exactly and springs
+(`Springs.move`) to a level that arrives from elsewhere. A drag sends
+ordered `set_volume` calls through `Drag`: one at once, the rest held, the
+last at the end of each 50 ms window and on release — the client never
+holds an ordered call, so the throttle is the app's, as on the desktop. The
+picker (`Picker`, `DevicesSheet`) keeps every rule it had and gains a slider
+and a mute under each row with a volume, every member of the playing group
+ticked, `+` and `−` beside a speaker that can join or leave (their column
+kept whether or not the row is ticked), and the group's own row first,
+"Kitchen + 1", whose slider and mute are the group's and which hands
+nothing over; it scrolls now (`rememberTransientScrollState`), for a house
+taller than the screen. The device chip names a group the same way. The
+mini player is unchanged. The diagnostics' "Listening" group gains a line
+per device — its volume, family and leader — and the group.
+
+**Tests**, each falsified once (the comment beside each says how):
+
+- `RemoteTests.thePhonesVolumeIsItsEntryAndOnlyAHandIsSaid`: `equip` once
+  a connection, at the stream's level and with no family; a level set on the
+  desktop is the stream's nearest step, and the 33 it reads is not said
+  back; a mute is a mute; a hand on the stream said once, heard by the
+  desktop, not fought; said again on a new connection. Over `FakeStream`,
+  `AudioManager` behind `Stream`. Falsified by remembering the level asked
+  for rather than what the stream read: "and the 33 it reads is not said
+  back", 33 where 30; and by an equip at every reconcile: "once a
+  connection, not once a reconcile", 4 calls where 1.
+- `ListenTests.theButtonsMoveTheSpeakerTheSoundIsOn` (`RemotePlayer` on
+  layoutlib's Looper): local with nothing playing; remote, 0 to 100, at the
+  kitchen's 40 once it has the sound; up and down are nudges of five, the
+  panel's slider a level, its mute a mute; joined with the bedroom, the
+  group's mean and the group's nudge, both moving; nothing a car asks; local
+  again with the sound here. Falsified by a player remote whatever the
+  output: "nothing plays: the buttons are the phone's"; and by a group's
+  buttons being the output's alone: 70 where the group's 65.
+- `ListenTests.thePickerMovesVolumesAndJoinsSpeakers`: the group first,
+  "kitchen + 1", at the mean; every member ticked and the cursor on the
+  output; join offered to the study alone, leave to the bedroom, nothing to
+  the leader, the phone or a laptop; the group's slider `set_group_volume`
+  (56 and 84 for 70), a row's mute and slider that device's; join and
+  unjoin; the diagnostics' group and a member's leader. Falsified by the
+  group row's controls being a device's: refused, "that device is not here,
+  or has no volume"; and by offering a join to any speaker that can play:
+  "not this phone".
+- `VolumeTests`: a stream's fifteen steps as the hundred, each step read and
+  set again the same, the same step written once (falsified by truncating:
+  4 where 5); the drag's throttle, the first at once, the last at the
+  window's end, everything on release, the held one first when another
+  slider moves (falsified by keeping the first value held: 20 where 30).
+
+**Screenshots** (`Screens.g2_volume`, light and dark): the full player with
+the kitchen's volume, with the group's, and with the group muted; the
+picker with the kitchen leading the bedroom and the study joinable and
+muted; and with nothing grouped, two speakers joinable. Every other
+screenshot is byte for byte what the parent commit draws (112 of 112;
+the diagnostics' new lines are below the fold of `f2_diagnostics_listening`,
+so they are held by the picker test instead).
+
+**Held to**: every app test (`ScrollTests`, `RestorationTests`,
+`LifecycleTests`, `SourceTests`, `MotionTests`, `LaunchTests`, `RemoteTests`,
+`ListenTests`, `KeptTests`, `CarTests`, `OverlapTests`, the screenshots); the
+fling bench (HARKEN_FLING_BENCH=2000, passes 5 and 6) at 32,886 B per
+entering row where the parent commit, run beside it, measured 32,965–32,968,
+and the draw 27,978 B a frame against 27,977. No dependency was added:
+`DeviceInfo` and the device-volume commands are in `media3-common` 1.5.1.
+
+**What ran green**: `checks.kotlin` (ktfmt over ark-ui's new file
+included), `checks.harken-domain`, `harken-apk` (the release `harken.apk`,
+certificate SHA-256 `1a8859fb…df431139`, the committed key),
+`harken-android-screens` (122 PNGs, the ten new ones the only ones that
+moved), `checks.fleet-kotlin` (K1–K7, K4 and K5 skipped as before, with
+nothing pinned) and `harken-fdroid-repo`.
+
+**Not verified**: a real phone and a real speaker. What Android's volume
+panel draws for the remote — the speaker's name, the level, whether the
+buttons reach it with the screen off or from the lock screen — the
+settings observer ringing on a real phone, a real stream's step count, Do
+Not Disturb refusing a write, and a car's head unit leaving the player's
+volume alone are all unseen; the media session's own wiring of the volume
+provider was read from Media3's bytecode, not run (Media3's test utilities
+are not in the recorded graph).

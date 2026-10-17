@@ -108,6 +108,7 @@ object Glyphs {
     val Down = glyph("chevron-down", "m6 9 6 6 6-6")
     val Close = glyph("x", "M18 6 6 18", "m6 6 12 12")
     val Plus = glyph("plus", "M5 12h14", "M12 5v14")
+    val Minus = glyph("minus", "M5 12h14")
     val Tick = glyph("check", "M20 6 9 17l-5-5")
     val Ticked = glyph("circle-check", circle(12f, 12f, 10f), "m16 9-5.5 5.5L8 12")
     val Untick = glyph("circle", circle(12f, 12f, 10f))

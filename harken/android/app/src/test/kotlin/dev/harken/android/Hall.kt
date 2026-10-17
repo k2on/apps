@@ -54,8 +54,30 @@ fun queuedTrack(title: String, n: Int, ms: Long = 100_000): Queued {
     return Queued("Water Music", "Handel", ms, "music/$title.mp3", dev.arkdb.Id(b), title)
 }
 
-/** A player that does what it is told, and moves only when a test says so. */
-class FakeSound : Sound {
+/**
+ * A phone's media stream as `AudioManager` keeps it, in a test: fifteen steps, as most phones have,
+ * and a mute; every write counted, so a test can say nothing was written.
+ */
+class FakeStream(override var index: Int = 7, override val max: Int = 15) : Stream {
+    override val min: Int = 0
+    override var muted: Boolean = false
+    var writes = 0
+
+    override fun set(index: Int) {
+        this.index = index.coerceIn(min, max)
+        writes++
+    }
+
+    override fun mute(muted: Boolean) {
+        this.muted = muted
+        writes++
+    }
+}
+
+/** A player that does what it is told, and moves only when a test says so — with a volume, given a stream. */
+class FakeSound(val stream: FakeStream? = null) : Sound {
+    private val level = stream?.let(::StreamLevel)
+
     override var queue: List<Queued> = emptyList()
     override var index: Int = -1
     override var playing: Boolean = false
@@ -105,6 +127,12 @@ class FakeSound : Sound {
 
     override fun wakeIn(ms: Long) {
         wake = ms
+    }
+
+    override fun volume(): Pair<Int, Boolean>? = level?.read()
+
+    override fun setVolume(level: Int, muted: Boolean) {
+        this.level?.apply(level, muted)
     }
 
     /** The track played to its end, and the player went on to the next as ExoPlayer does — or, at the last, stopped there. */

@@ -5,7 +5,7 @@
 // else sounding, a track's end said once, a play recorded once by the output
 // alone, both branches of coming back, and a device unlinked being its own
 // session — and the phone's own: the player moving on by itself, a stall,
-// a play counted offline, and a press of the session.
+// a play counted offline, a press of the session, and its own volume.
 //
 // Each was falsified once by breaking what it holds; the comment beside
 // each says how, and what failed.
@@ -24,9 +24,9 @@ import org.junit.Test
 class RemoteTests {
     private val queue = listOf(queuedTrack("a", 1), queuedTrack("b", 2))
 
-    private class Device(val hall: Hall, val peer: Peer, session: String) {
+    private class Device(val hall: Hall, val peer: Peer, session: String, stream: FakeStream? = null) {
         val remote = Remote(session, session)
-        val sound = FakeSound()
+        val sound = FakeSound(stream)
 
         fun reconcile() {
             remote.reconcile(peer, sound)
@@ -46,7 +46,8 @@ class RemoteTests {
         fun session() = remote.session(peer)
     }
 
-    private fun Hall.on(session: String, canPlay: Boolean, kind: String = "phone") = Device(this, device(session, canPlay, kind), session)
+    private fun Hall.on(session: String, canPlay: Boolean, kind: String = "phone", stream: FakeStream? = null) =
+        Device(this, device(session, canPlay, kind), session, stream)
 
     /**
      * The one rule this phone lives by: the output's player is made to agree with the session, and
@@ -320,5 +321,66 @@ class RemoteTests {
         assertEquals(42_000L, Heard(me = "phone", joined = true, listening = phone.session()).scrubbing)
         assertNull("its own slot is not another's", Heard(me = "laptop", joined = true, listening = phone.session()).scrubbing)
         assertTrue(phone.session()!!.active!!.output is Output.Device)
+    }
+
+    /**
+     * The phone's own volume is its entry in the session: said once a connection (`equip`) — a
+     * volume anybody can move, no family, at its media stream's level — and followed whoever moves
+     * it; the stream moved by anything else — the buttons, the system's panel — is said once, as
+     * `report_volume`. Never what the phone set itself: a stream has fifteen steps, so the 30 the
+     * desktop asks for is the fifth, and the 33 that reads back is where the phone left it, not a
+     * hand.
+     *
+     * Falsified by a follow that compared the stream with the level the session asked for rather
+     * than with what it read after its own write: the phone said 33 back, and the desktop's 30
+     * became 33 ("and the 33 it reads is not said back"). And by an equip said at every reconcile
+     * rather than once a connection: "once a connection, not once a reconcile".
+     */
+    @Test
+    fun thePhonesVolumeIsItsEntryAndOnlyAHandIsSaid() {
+        val hall = Hall()
+        val stream = FakeStream(index = 9)
+        val phone = hall.on("phone", true, stream = stream)
+        val desk = hall.on("desktop", false, "computer")
+        fun me() = hall.state().devices.getValue("phone")
+        assertFalse("nothing has a volume until it says so", me().canVolume)
+        phone.reconcile()
+        assertTrue("said once it joined", me().canVolume)
+        assertEquals("at its stream's level: the ninth of fifteen steps", 60L, me().volume)
+        assertNull("and no family: a phone joins no group", me().family)
+        val calls = phone.remote.stats.calls
+        repeat(3) { phone.reconcile() }
+        assertEquals("once a connection, not once a reconcile", calls, phone.remote.stats.calls)
+        assertEquals("and nothing written to the stream", 0, stream.writes)
+
+        desk.call("set_volume", Volumes.call(Level.Device("phone"), Change.To(30))!!.second)
+        phone.reconcile()
+        assertEquals("a level set on the desktop is the stream's nearest step", 5, stream.index)
+        repeat(3) { phone.reconcile() }
+        assertEquals("and the 33 it reads is not said back", 30L, me().volume)
+        assertEquals(calls, phone.remote.stats.calls)
+        desk.call("set_mute", Volumes.call(Level.Device("phone"), Change.Mute(true))!!.second)
+        phone.reconcile()
+        assertTrue("a mute is a mute", stream.muted)
+        assertEquals("the step left where it was", 5, stream.index)
+
+        // The buttons, while the sound is here: the stream moved by a hand.
+        stream.index = 12
+        stream.muted = false
+        repeat(3) { phone.reconcile() }
+        assertEquals("said once", calls + 1, phone.remote.stats.calls)
+        assertEquals(80L, me().volume)
+        assertFalse(me().muted)
+        assertEquals("and the desktop hears it", 80L, desk.session()!!.devices.getValue("phone").volume)
+        assertEquals("not fought", 12, stream.index)
+
+        // A new connection is a room that has never heard what this phone can do.
+        hall.drop(phone.peer)
+        hall.relink(phone.peer)
+        assertFalse(me().canVolume)
+        phone.reconcile()
+        assertTrue("said again on the new connection", me().canVolume)
+        assertEquals(80L, me().volume)
+        assertEquals(calls + 2, phone.remote.stats.calls)
     }
 }

@@ -210,7 +210,20 @@ fun listeningNumbers(h: Heard): List<Pair<String, String>> {
                 is dev.harken.android.listening.Output.Away -> "${o.id} (away)"
                 dev.harken.android.listening.Output.Nowhere -> "nowhere"
             }
-    for (d in s?.devices?.values.orEmpty()) out += "device ${d.name}" to "${d.kind}, ${if (d.canPlay) "can play" else "cannot play"}, ${d.id}"
+    for (d in s?.devices?.values.orEmpty()) {
+        out += "device ${d.name}" to "${d.kind}, ${if (d.canPlay) "can play" else "cannot play"}, ${d.id}"
+        // Its volume, its family and its leader: the desktop's `D`, a line per device.
+        val volume = if (!d.canVolume) "none" else if (d.muted) "${d.volume} (muted)" else "${d.volume}"
+        out += "  volume" to "$volume · family ${d.family ?: "none"} · follows ${d.follows ?: "nobody"}"
+    }
+    // The group that plays: its leader, who follows it, and its level.
+    if (s != null)
+        out +=
+            "group" to
+                (s.leader?.takeIf { s.grouped }?.let { l ->
+                    val level = s.groupLevel(l)?.toString() ?: "none"
+                    "$l + ${s.followers(l).joinToString(", ") { it.id }} · volume $level${if (s.groupMuted(l)) " (muted)" else ""}"
+                } ?: "none")
     if (s != null && s.scrub.isEmpty()) out += "scrub" to "none"
     for ((id, at) in s?.scrub.orEmpty()) out += "scrub ${if (id == h.me) "(this phone)" else id}" to Media.clock(at)
     return out

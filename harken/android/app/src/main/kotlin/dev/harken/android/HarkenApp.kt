@@ -353,6 +353,12 @@ fun HarkenApp(
 
             override fun scrub(ms: Long) = playback.scrub(ms)
 
+            override fun volume(level: Int) = playback.volume(level)
+
+            override fun volumeDone() = playback.volumeDone()
+
+            override fun mute() = playback.mute()
+
             override fun more() {
                 val now = player.now ?: return
                 tracks.firstOrNull { it.id.hex == now.id }?.let { menu = Menu(it, null, null) }
@@ -583,10 +589,28 @@ fun HarkenApp(
             if (devices) {
                 val rows = heard.listening?.let { Picker.rows(it, heard.me) }.orEmpty()
                 ModalBottomSheet(onDismissRequest = { devices = false }) {
-                    DevicesSheet(rows, Picker.cursor(rows)) { r ->
-                        Picker.pick(r, heard.listening)?.let { (it as? Press.Transfer)?.let { t -> playback.transfer(t.to) } }
-                        devices = false
-                    }
+                    DevicesSheet(
+                        rows,
+                        Picker.cursor(rows),
+                        object : PickerActions {
+                            override fun pick(row: DeviceRow) {
+                                Picker.pick(row, heard.listening)?.let { (it as? Press.Transfer)?.let { t -> playback.transfer(t.to) } }
+                                devices = false
+                            }
+
+                            override fun level(row: DeviceRow, level: Int) = playback.level(row.level, level)
+
+                            override fun levelDone() = playback.volumeDone()
+
+                            override fun mute(row: DeviceRow) {
+                                Picker.mute(row)?.let(playback::ask)
+                            }
+
+                            override fun join(row: DeviceRow) {
+                                Picker.join(row)?.let(playback::ask)
+                            }
+                        },
+                    )
                 }
             }
         }

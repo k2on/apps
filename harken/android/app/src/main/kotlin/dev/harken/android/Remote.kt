@@ -176,6 +176,15 @@ interface Sound {
 
     /** Reconcile again in `ms`: the moment a play would count. Nothing here has a clock. */
     fun wakeIn(ms: Long) {}
+
+    /**
+     * Where its volume is, 0 to 100, and whether it is muted: null where it has none anybody can set
+     * — the phone's media stream ([StreamLevel]), as the session reads it.
+     */
+    fun volume(): Pair<Int, Boolean>? = null
+
+    /** Put its volume there, without a panel; nothing where it has none. */
+    fun setVolume(level: Int, muted: Boolean) {}
 }
 
 /** What a button, a key, a row or a lock screen asks of the session — or, alone, of the player. */
@@ -211,6 +220,15 @@ sealed class Press {
      * or there is nothing to move. What a car asks before it plays (Car.kt).
      */
     object Here : Press()
+
+    /** A volume moved: a slider, a mute, a volume button, the system's panel. */
+    data class Loud(val level: Level, val change: Change) : Press()
+
+    /** A speaker joins the group that is playing. */
+    data class Join(val device: String) : Press()
+
+    /** A speaker leaves whatever group it is in, and goes quiet. */
+    data class Unjoin(val device: String) : Press()
 }
 
 /** Every number this end of the session holds that the peer does not, for the diagnostics. */
@@ -249,6 +267,17 @@ class Remote(
 
     /** Where this reconciler last put the player in its queue: a move it did not make is the player's own. */
     private var expect = -1
+
+    /** The connection this phone said what it can do on (`equip`): below the peer's epoch, not yet. */
+    private var equipped = 0L
+
+    /**
+     * The phone's own volume in the session, as this reconciler last left it: the entry it last put
+     * the stream at — or said, or found at `equip` — and what the stream read after. A stream that
+     * reads otherwise than [seen] was moved by something else.
+     */
+    private var wanted: Pair<Int, Boolean>? = null
+    private var seen: Pair<Int, Boolean>? = null
 
     /** Every load of a track is a play: the track loaded, this load's number, and the last counted. */
     private var loaded: Pair<Int, Id>? = null
@@ -320,6 +349,9 @@ class Remote(
                 is Press.Start -> "start" to Inputs.start(press.queue, press.at, press.positionMs, press.from)
                 is Press.Scrub -> "scrub" to Inputs.scrub(press.atMs)
                 is Press.Transfer -> "transfer" to Inputs.transfer(press.to)
+                is Press.Loud -> Volumes.call(press.level, press.change) ?: return NOT_PART
+                is Press.Join -> "join" to Volumes.member(press.device)
+                is Press.Unjoin -> "unjoin" to Volumes.member(press.device)
                 Press.Here -> if (a == null || s.outputs(me)) return null else "transfer" to Inputs.transfer(me)
                 is Press.Next -> {
                     if (a == null) return call(peer, "start", Inputs.start(listOf(press.track), 0, 0, ""))
@@ -355,6 +387,7 @@ class Remote(
             return
         }
         val s = session(peer) ?: return
+        equip(peer, sound, s)
         if (met != peer.epoch) {
             // The first sight of the session on this connection: the rule for coming back.
             met = peer.epoch
@@ -373,6 +406,7 @@ class Remote(
             }
         }
         val now = session(peer) ?: s
+        follow(peer, sound, now)
         val a = now.active
         if (a != null && now.outputs(me)) {
             drive(peer, sound, a)
@@ -382,6 +416,43 @@ class Remote(
         // and this is the one place that can notice.
         if (sound.playing) sound.pause()
         startedFor = null
+    }
+
+    // What this phone can do, said once a connection: a volume anybody can move, at the level its
+    // stream is at, and no family — a phone joins no group. Its entry starts as whatever `on_join`
+    // assumed, which is nothing; a player with no volume says nothing and stays that.
+    private fun equip(peer: Peer, sound: Sound, s: Listening) {
+        if (equipped == peer.epoch || s.devices[me] == null) return
+        val now = sound.volume() ?: return
+        if (call(peer, "equip", Volumes.equip(true, null, now.first, now.second)) != null) return
+        equipped = peer.epoch
+        wanted = now
+        seen = now
+    }
+
+    /**
+     * The stream at this phone's own entry in the session, whoever moved it there — and the stream
+     * moved by anything else, said. Moved is read against what the stream read after this phone's
+     * own last write, so its own write is never said back: the session asks for 30, the stream
+     * takes its nearest step and reads 27, and 27 is where this phone left it, not a hand.
+     */
+    private fun follow(peer: Peer, sound: Sound, s: Listening) {
+        val mine = s.devices[me]?.takeIf { it.canVolume } ?: return
+        val now = sound.volume() ?: return
+        val want = mine.volume.toInt() to mine.muted
+        val was = seen
+        if (was != null && now != was) {
+            // Moved, and not by this: the buttons, the system's panel, another app.
+            seen = now
+            wanted = now
+            if (now != want) call(peer, "report_volume", Volumes.report(now.first, now.second))
+            return
+        }
+        if (want != wanted) {
+            sound.setVolume(want.first, want.second)
+            wanted = want
+            seen = sound.volume()
+        } else if (was == null) seen = now
     }
 
     // This phone is the output: its player made to agree with the session, and what happened to
@@ -478,7 +549,7 @@ class Remote(
     }
 }
 
-/** One row of the picker: a device of this account, and what it can be asked. */
+/** One row of the picker: a device of this account — or the group that plays — and what it can be asked. */
 data class DeviceRow(
     val id: String,
     val name: String,
@@ -489,36 +560,105 @@ data class DeviceRow(
     val away: Boolean,
     /** The sound is on its way to it. */
     val moving: Boolean,
-    /** Where the sound is — or, while it is nowhere, this phone, where the next press plays. */
+    /**
+     * Where the sound is — the output and every speaker following it — or, while it is nowhere, this
+     * phone, where the next press plays.
+     */
     val ticked: Boolean,
     val me: Boolean,
-)
+    /** Its volume, where anybody can move it: a row with none draws no slider. */
+    val volume: Int? = null,
+    val muted: Boolean = false,
+    /** What its button does: join it to the group that plays (true), take it out (false), or nothing. */
+    val join: Boolean? = null,
+    /** The row for the group as a whole, "Kitchen + 1", its volume every member's. */
+    val group: Boolean = false,
+) {
+    /** What its volume controls move. */
+    val level: Level
+        get() = if (group) Level.Group else Level.Device(id)
+}
 
-/** The picker, as the desktop's (23c40a0): no row that stops it everywhere; this phone the default. */
+/**
+ * The picker, as the desktop's (23c40a0, and "Volume and groups"): no row that stops it everywhere;
+ * this phone the default; a slider and a mute on every row with a volume; join and unjoin on a
+ * speaker that can; and the group that plays first, as a whole.
+ */
 object Picker {
     /**
      * A row per device of the account, by name — and the output that has gone, which is the one
-     * row most worth drawing, drawn and not selectable.
+     * row most worth drawing, drawn and not selectable. While the output leads a group, the group
+     * comes first, named for its leader and how many follow it.
      */
     fun rows(s: Listening, me: String): List<DeviceRow> {
         val output = s.active?.output
         val ticked = output?.id ?: me
+        val leader = s.leader
         val rows =
-            s.devices.values.map { d ->
-                DeviceRow(d.id, d.name, d.kind, d.canPlay, away = false, moving = s.movingTo(d.id), ticked = d.id == ticked, me = d.id == me)
-            }.toMutableList()
+            s.devices.values
+                .map { d ->
+                    val follows = leader != null && d.follows == leader
+                    DeviceRow(
+                        d.id,
+                        d.name,
+                        d.kind,
+                        d.canPlay,
+                        away = false,
+                        moving = s.movingTo(d.id),
+                        ticked = d.id == ticked || follows,
+                        me = d.id == me,
+                        volume = if (d.canVolume) d.volume.toInt() else null,
+                        muted = d.muted,
+                        join = if (follows) false else if (s.joinable(d.id)) true else null,
+                    )
+                }
+                .toMutableList()
         if (output is Output.Away && rows.none { it.id == output.id })
             rows.add(DeviceRow(output.id, output.name, "computer", takeable = false, away = true, moving = false, ticked = true, me = output.id == me))
-        return rows.sortedWith(compareBy<DeviceRow> { it.name }.thenBy { it.id })
+        val sorted = rows.sortedWith(compareBy<DeviceRow> { it.name }.thenBy { it.id })
+        if (leader == null || !s.grouped) return sorted
+        val head = s.devices[leader]
+        val all =
+            DeviceRow(
+                id = "",
+                name = "${head?.name ?: leader} + ${s.followers(leader).size}",
+                kind = head?.kind ?: "speaker",
+                takeable = false,
+                away = false,
+                moving = false,
+                ticked = false,
+                me = false,
+                volume = s.groupLevel(leader),
+                muted = s.groupMuted(leader),
+                group = true,
+            )
+        return listOf(all) + sorted
     }
 
-    /** Where the cursor starts: on the output, or on this phone, so that a tap straight away changes nothing. */
-    fun cursor(rows: List<DeviceRow>): Int = rows.indexOfFirst { it.ticked }.takeIf { it >= 0 } ?: 0
+    /**
+     * Where the cursor starts: on the output — not the group's row, nor a speaker following it — or on
+     * this phone, so that a tap straight away changes nothing.
+     */
+    fun cursor(rows: List<DeviceRow>): Int = rows.indexOfFirst { it.ticked && !it.group && it.join != false }.takeIf { it >= 0 } ?: 0
 
     /** What picking `row` asks: a hand-off, or nothing — the device that has it, or one that cannot. */
     fun pick(row: DeviceRow, s: Listening?): Press? {
-        if (!row.takeable || s?.active == null) return null
+        if (row.group || !row.takeable || s?.active == null) return null
         if (s.outputs(row.id) && !s.movingTo(row.id)) return null
         return Press.Transfer(row.id)
     }
+
+    /** What a row's slider, let go or dragged to `level`, asks. */
+    fun level(row: DeviceRow, level: Int): Press? = row.volume?.let { Press.Loud(row.level, Change.To(level)) }
+
+    /** What a row's mute asks: the other way from how it is. */
+    fun mute(row: DeviceRow): Press? = row.volume?.let { Press.Loud(row.level, Change.Mute(!row.muted)) }
+
+    /** What a row's join button asks: join, leave, or nothing. */
+    fun join(row: DeviceRow): Press? =
+        when (row.join) {
+            true -> Press.Join(row.id)
+            false -> Press.Unjoin(row.id)
+            null -> null
+        }
 }
