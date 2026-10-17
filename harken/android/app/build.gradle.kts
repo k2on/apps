@@ -150,3 +150,8 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.5.1")
     implementation("androidx.media3:media3-session:1.5.1")
 }
+
+// `ark-ui`'s guards against a mistake in how the app uses it throw here
+// (`dev.arkdb.ui.Strict`), as in a debuggable build; a release says them once
+// in the log and keeps working.
+tasks.withType<Test>().configureEach { systemProperty("dev.arkdb.ui.strict", "true") }

@@ -75,3 +75,7 @@ dependencies {
         implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8:2.0.21")
     }
 }
+
+// A mistake in how an app uses this library throws in a test (`Strict`), where
+// it is a failure to read, and not in a release, where it is a person's app.
+tasks.withType<Test>().configureEach { systemProperty("dev.arkdb.ui.strict", "true") }

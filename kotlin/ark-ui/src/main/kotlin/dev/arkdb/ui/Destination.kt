@@ -27,6 +27,9 @@
 package dev.arkdb.ui
 
 import android.os.Bundle
+import android.os.Looper
+import android.util.Log
+import android.view.Choreographer
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.LazyGridState
@@ -58,6 +61,8 @@ import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavGraph
 import androidx.navigation.NavGraphBuilder
 import androidx.navigation.compose.composable
+import java.util.IdentityHashMap
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * One destination's places: where each of its scrolling containers was, by name, kept on its back
@@ -72,7 +77,16 @@ internal constructor(
     restored: Map<String, IntArray> = emptyMap(),
 ) {
     private val kept = HashMap(restored)
+    // The state drawing each name now: the newest attached under it.
     private val live = LinkedHashMap<String, Any>()
+    // States still attached under a name a newer one has taken, oldest first. The same container
+    // composed again before its old composition has let go: an item of a lazy list keyed by its
+    // index whose rows above it went, so the slot that drew the row before it draws it now and is
+    // applied before the slot that drew it — remembered there before it is forgotten here. Gone
+    // within the frame; still there a frame later, it was two containers under one name.
+    private var under: HashMap<String, ArrayList<Any>>? = null
+    // A state moved to a name of its own after it was found sharing one, by identity.
+    private var moved: IdentityHashMap<Any, String>? = null
 
     /** How many compositions of this destination there are now: never more than one. */
     public var composed: Int = 0
@@ -110,25 +124,62 @@ internal constructor(
         get() = live.keys.toSet()
 
     internal fun list(key: String): LazyListState =
-        kept[key].let { LazyListState(it?.getOrNull(0) ?: 0, it?.getOrNull(1) ?: 0) }
+        placeFor(key).let { LazyListState(it?.getOrNull(0) ?: 0, it?.getOrNull(1) ?: 0) }
 
     internal fun grid(key: String): LazyGridState =
-        kept[key].let { LazyGridState(it?.getOrNull(0) ?: 0, it?.getOrNull(1) ?: 0) }
+        placeFor(key).let { LazyGridState(it?.getOrNull(0) ?: 0, it?.getOrNull(1) ?: 0) }
 
-    internal fun scroll(key: String): ScrollState = ScrollState(kept[key]?.getOrNull(0) ?: 0)
+    internal fun scroll(key: String): ScrollState = ScrollState(placeFor(key)?.getOrNull(0) ?: 0)
+
+    // Where a container made now starts: where the one drawing that name is — the same container,
+    // composed again while the old composition is still there — else where it was left.
+    private fun placeFor(key: String): IntArray? =
+        live[key]?.let { Snapshot.withoutReadObservation { placeOf(it) } } ?: kept[key]
 
     internal fun attach(key: String, state: Any) {
         val there = live[key]
-        check(there == null || there === state) {
-            "two containers of $name are both kept as \"$key\": give each its own name"
+        if (there === state) return
+        if (there != null) {
+            val older = under ?: HashMap<String, ArrayList<Any>>().also { under = it }
+            older.getOrPut(key) { ArrayList(1) }.add(there)
+            verify(key, there, state)
         }
         live[key] = state
     }
 
     internal fun detach(key: String, state: Any) {
-        if (live[key] !== state) return
-        kept[key] = placeOf(state)
-        live.remove(key)
+        val k = moved?.remove(state) ?: key
+        val older = under?.get(k)
+        if (live[k] === state) {
+            // The newest let go: the place is its, and an older one still there draws the name.
+            kept[k] = placeOf(state)
+            if (older.isNullOrEmpty()) live.remove(k) else live[k] = older.removeAt(older.lastIndex)
+        } else {
+            // An older one let go after a newer took its name over, from where it was.
+            older?.removeAll { it === state }
+        }
+        if (older != null && older.isEmpty()) under?.remove(k)
+    }
+
+    // A name taken over while another state still has it: the next frame says which it was. Both
+    // still attached then is two containers under one name — a mistake in the app ([Strict]),
+    // lived with in a release by giving the newer one a name of its own, so each keeps its place.
+    private fun verify(key: String, older: Any, newer: Any) {
+        if (Looper.myLooper() == null) return
+        Choreographer.getInstance().postFrameCallback {
+            if (live[key] !== newer || under?.get(key)?.any { it === older } != true)
+                return@postFrameCallback
+            Strict.mistake(
+                "two containers of $name are both kept as \"$key\": give each its own name")
+            var n = 2
+            while ("$key#$n" in live || "$key#$n" in kept) n++
+            val own = "$key#$n"
+            live[own] = newer
+            (moved ?: IdentityHashMap<Any, String>().also { moved = it })[newer] = own
+            val rest = under?.get(key)!!
+            live[key] = rest.removeAt(rest.lastIndex)
+            if (rest.isEmpty()) under?.remove(key)
+        }
     }
 
     /** Every place, the live ones read now: what is saved with the entry. */
@@ -141,6 +192,26 @@ internal constructor(
             is ScrollState -> intArrayOf(s.value)
             else -> error("not a scroll state: $s")
         }
+}
+
+/**
+ * Whether a mistake in how an app uses this library — two containers of one destination under one
+ * name — throws, or is said once and lived with. On in every build's unit tests (the
+ * `dev.arkdb.ui.strict` property their Gradle test tasks set) and in a debuggable app (which turns
+ * it on); off in a release, where the one to find it would be a person whose app closed.
+ */
+public object Strict {
+    @Volatile public var on: Boolean = System.getProperty("dev.arkdb.ui.strict") == "true"
+
+    /** Where a mistake is said while [on] is off, each once: the log, or a test listening. */
+    @Volatile public var say: (String) -> Unit = { Log.w("ark-ui", it) }
+
+    private val said = ConcurrentHashMap.newKeySet<String>()
+
+    internal fun mistake(message: String) {
+        check(!on) { message }
+        if (said.add(message)) say(message)
+    }
 }
 
 /** The destination being drawn, or none outside one (a screenshot of a screen on its own). */

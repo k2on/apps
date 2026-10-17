@@ -7,6 +7,7 @@
 // back here. The activity's theme is the splash's (res/values/themes.xml).
 package dev.harken.android
 
+import android.content.pm.ApplicationInfo
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -16,6 +17,7 @@ import dev.arkdb.android.AppIdentity
 import dev.arkdb.android.ArkApp
 import dev.arkdb.android.Permission
 import dev.arkdb.android.holdSplash
+import dev.arkdb.ui.Strict
 
 /** Why harken asks for notifications, in the onboarding's words. */
 const val WHY_NOTIFY = "So what's playing, and its controls, can be in a notification and on the lock screen."
@@ -26,6 +28,9 @@ class MainActivity : ComponentActivity() {
         // launch opens on Home, populated, and never on a page that says it is opening.
         holdSplash()
         super.onCreate(savedInstanceState)
+        // A debuggable build is the developer's: a mistake in how the screens use ark-ui throws
+        // there, as in a test. A release says it once in the log and keeps working.
+        if (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) Strict.on = true
         enableEdgeToEdge()
         setContent {
             val identity =

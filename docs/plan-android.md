@@ -1246,6 +1246,44 @@ at the place Home was left), and a real process death — the test throws
 the composition and every `ViewModel` away and composes again from the
 saved values, but does not parcel them.
 
+**The same container, composed twice for a moment.** The release APK
+closed on the owner's phone a few seconds after launch, and again on
+coming back to it: "two containers of home are both kept as
+"shelf:recent"", from `attach`, out of the recomposer's apply. Home has
+one shelf of that name. Its rows are items of a lazy list keyed by their
+index, and the offline line is one of them: the session's link starts
+waiting, so a launch draws the line, and it goes when the link opens —
+as it does again after the link dropped in the background. A row going
+from above the shelves moves each up a slot, and the slot that drew the
+heading over a shelf now draws the shelf. Each slot is a composition of
+its own, recomposed and applied in the order they were first composed, so the
+shelf's new state was remembered in the slot above before the slot that
+drew it forgot the old one. The last played card going does the same,
+two slots. A row arriving moves things down and is applied the other
+way round, which is why nothing had caught it: no test took a row away
+above a shelf while Home was drawn (`OverlapTests` does, through the
+link opening at launch and again after the background, and fails on the
+parent with the phone's message).
+
+So a name can be held by two states for a moment, and `DestinationState`
+keeps them in the order they came: the newest draws the name and starts
+where the one drawing it was (it used to start where the name was last
+left, which a row arriving had been quietly losing); the older letting go
+changes nothing; the newest letting go hands the name back to the older;
+and the place kept is the last one's to let go. Both still attached a
+frame later is what the guard was for — two containers under one name —
+and that is a mistake in the app, not a state the library cannot go on
+from, so it was wrong to close anybody's app over it. **The rule for such
+a guard (`Strict`):** it throws where a developer reads it — every unit
+test (`dev.arkdb.ui.strict`, set by both builds' test tasks) and a
+debuggable build — and in a release it says so once in the log, tag
+`ark-ui`, and keeps working: here, the newer container gets a name of its
+own (`shelf:recent#2`), so each keeps its place. The rest of ark-ui's
+`check`, `error`, `!!` and rethrows were read for the same thing; none
+guards a mistake an app can make (an `error` for a state the library
+never makes, two `!!` on what the line before established, three
+cancellations passed on).
+
 ### The listening session
 
 `docs/plan-live.md` "Landed: phase 3" is the whole of it; this is where it
