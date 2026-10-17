@@ -82,7 +82,37 @@ pub struct Playing {
     /// What it says it is playing, which is how it says where it is in the
     /// queue it was given. Empty when it is playing nothing.
     pub url: String,
+    /// `media_position`: where it was **when the house last updated it**,
+    /// which is not now. Home Assistant refreshes a player's position on a
+    /// change of state — a play, a pause, a seek, a new track — and not
+    /// while it plays on, so a playing Sonos says the same position for the
+    /// whole of a track.
     pub position_ms: i64,
+    /// `media_position_updated_at`, on the server's clock: the moment
+    /// `position_ms` was true. `None` where the house did not say, and then
+    /// a playing speaker's position cannot be dated and is not used.
+    pub updated_ms: Option<i64>,
+    /// `media_duration`, where the house says one: no count runs past it.
+    pub duration_ms: Option<i64>,
+}
+
+impl Playing {
+    /// Where it is at `now` (the server's clock): the position the house
+    /// gave, counted on from when it was true while it plays, and as it is
+    /// while it does not. `None` for a playing speaker whose position the
+    /// house did not date — nothing is reported off a value nobody can
+    /// place in time.
+    pub fn position_at(&self, now: i64) -> Option<i64> {
+        let at = self.position_ms.max(0);
+        if self.state != "playing" {
+            return Some(at);
+        }
+        let counted = at + (now - self.updated_ms?).max(0);
+        Some(match self.duration_ms {
+            Some(d) if d > 0 => counted.min(d),
+            _ => counted,
+        })
+    }
 }
 
 /// What the bridge wants done. The thread performs these; this module never
@@ -380,7 +410,11 @@ impl Bridge {
             input,
             why: why.to_string(),
         };
-        let position = p.position_ms.max(0);
+        // Where it is now, counted on from when the house last said so.
+        // Undated, it is taken to be where the session counts it — so it is
+        // never the reason for a seek.
+        let dated = p.position_at(now);
+        let position = dated.unwrap_or_else(|| h.clock.position(now));
         let playing = p.state == "playing";
         let mut acts = vec![];
         if !h.started {
@@ -425,7 +459,8 @@ impl Bridge {
                     "it stopped by itself, or by hand",
                 ),
             });
-        } else if playing && (position - h.clock.position(now)).abs() > DRIFT_MS {
+        } else if playing && dated.is_some() && (position - h.clock.position(now)).abs() > DRIFT_MS
+        {
             h.quiet = QUIET;
             acts.push(call(
                 "seek",
@@ -475,6 +510,130 @@ impl Bridge {
             verb: "media_pause",
             why: "nobody is listening there any more",
         }]
+    }
+}
+
+/// Home Assistant's timestamps, read with no date library: the two
+/// spellings it uses, and the house's clock moved onto the server's.
+pub mod when {
+    /// Days from 1970-01-01 to a civil date (Howard Hinnant's algorithm).
+    fn days(y: i64, m: i64, d: i64) -> i64 {
+        let y = if m <= 2 { y - 1 } else { y };
+        let era = y.div_euclid(400);
+        let yoe = y - era * 400;
+        let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+        let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+        era * 146_097 + doe - 719_468
+    }
+
+    fn num(s: &str) -> Option<i64> {
+        (!s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+            .then(|| s.parse().ok())
+            .flatten()
+    }
+
+    /// RFC 3339, as Home Assistant writes `media_position_updated_at`:
+    /// `2024-05-01T12:34:56.789012+00:00`, or with a `Z`. Milliseconds since
+    /// the Unix epoch.
+    pub fn rfc3339_ms(s: &str) -> Option<i64> {
+        let s = s.trim();
+        let (date, rest) = s.split_at_checked(10)?;
+        let mut d = date.split('-');
+        let (y, mo, da) = (num(d.next()?)?, num(d.next()?)?, num(d.next()?)?);
+        let rest = rest.strip_prefix(['T', 't', ' '])?;
+        let (time, zone) = rest.split_at(rest.find(['Z', 'z', '+', '-'])?);
+        let (hms, frac) = time.split_once('.').unwrap_or((time, ""));
+        let mut t = hms.split(':');
+        let (h, mi, se) = (num(t.next()?)?, num(t.next()?)?, num(t.next()?)?);
+        let ms = match frac {
+            "" => 0,
+            f if f.bytes().all(|b| b.is_ascii_digit()) => num(&format!("{f:0<3}")[..3])?,
+            _ => return None,
+        };
+        let offset = match zone {
+            "Z" | "z" => 0,
+            z => {
+                let sign = if z.starts_with('-') { -1 } else { 1 };
+                let (oh, om) = z[1..].split_once(':')?;
+                sign * (num(oh)? * 60 + num(om)?)
+            }
+        };
+        let secs = days(y, mo, da) * 86_400 + h * 3_600 + mi * 60 + se - offset * 60;
+        Some(secs * 1_000 + ms)
+    }
+
+    /// An HTTP `Date` header, `Sun, 06 Nov 1994 08:49:37 GMT`: milliseconds
+    /// since the Unix epoch, to the second.
+    pub fn http_date_ms(s: &str) -> Option<i64> {
+        let parts: Vec<&str> = s.split_whitespace().collect();
+        let [_, day, month, year, time, "GMT"] = parts[..] else {
+            return None;
+        };
+        let month = [
+            "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+        ]
+        .iter()
+        .position(|m| *m == month)? as i64
+            + 1;
+        let mut t = time.split(':');
+        let (h, mi, se) = (num(t.next()?)?, num(t.next()?)?, num(t.next()?)?);
+        Some((days(num(year)?, month, num(day)?) * 86_400 + h * 3_600 + mi * 60 + se) * 1_000)
+    }
+
+    /// A moment the house stamped, on the server's clock: as long before
+    /// `server_now` as it was before the house's own now, which its answer's
+    /// `Date` says — to the second, so taken at the middle of it. With no
+    /// `Date` the two clocks are taken to agree, which on one LAN with NTP
+    /// they do to well inside the three seconds anything here is measured
+    /// against.
+    pub fn on_our_clock(stamped: i64, house_now: Option<i64>, server_now: i64) -> i64 {
+        match house_now {
+            Some(date) => server_now - (date + 500 - stamped),
+            None => stamped,
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        /// Both of Home Assistant's spellings, and a house whose clock is
+        /// a minute out still placing a moment right. Falsified by reading
+        /// the offset with its sign flipped: the `+02:00` stamp came out
+        /// four hours late.
+        #[test]
+        fn the_houses_timestamps_are_read_and_moved_onto_our_clock() {
+            assert_eq!(rfc3339_ms("1970-01-01T00:00:01+00:00"), Some(1_000));
+            assert_eq!(
+                rfc3339_ms("2024-05-01T12:34:56.789012+00:00"),
+                Some(1_714_566_896_789)
+            );
+            assert_eq!(
+                rfc3339_ms("2024-05-01T14:34:56.789+02:00"),
+                Some(1_714_566_896_789)
+            );
+            assert_eq!(rfc3339_ms("2024-05-01T12:34:56Z"), Some(1_714_566_896_000));
+            assert_eq!(rfc3339_ms("yesterday"), None);
+            assert_eq!(
+                rfc3339_ms("2024-05-01T12:34:56.1\u{20ac}+00:00"),
+                None,
+                "and nothing panics on one"
+            );
+            assert_eq!(
+                http_date_ms("Wed, 01 May 2024 12:34:56 GMT"),
+                Some(1_714_566_896_000)
+            );
+            assert_eq!(http_date_ms("Wed, 01 May 2024 12:34:56"), None);
+            // The house a minute fast: stamped ten seconds before its now
+            // is ten seconds before ours.
+            let ours = 1_714_566_896_000;
+            let house = ours + 60_000;
+            assert_eq!(
+                on_our_clock(house - 10_000, Some(house), ours),
+                ours - 10_500
+            );
+            assert_eq!(on_our_clock(42, None, ours), 42);
+        }
     }
 }
 
@@ -562,11 +721,14 @@ mod tests {
         Clock::Playing { at_ms, since: NOW }
     }
 
+    /// Playing `url`, at `position_ms` as of `NOW`.
     fn playing(url: &str, position_ms: i64) -> Playing {
         Playing {
             state: "playing".into(),
             url: url.into(),
             position_ms,
+            updated_ms: Some(NOW),
+            duration_ms: None,
         }
     }
 
@@ -746,7 +908,11 @@ mod tests {
             &session(&files, 0, playing_at(0), kitchen(true)),
             NOW,
         );
-        let acts = b.heard(KITCHEN, Some(&playing(&url_of(files[0]), 100)), NOW + 5_000);
+        let late = Playing {
+            updated_ms: Some(NOW + 5_000),
+            ..playing(&url_of(files[0]), 100)
+        };
+        let acts = b.heard(KITCHEN, Some(&late), NOW + 5_000);
         assert_eq!(calls(&acts), [("alice", "started")]);
         let slow = session(
             &files,
@@ -878,6 +1044,8 @@ mod tests {
             state: "idle".into(),
             url: String::new(),
             position_ms: 0,
+            updated_ms: None,
+            duration_ms: None,
         };
         for tick in 0..3 {
             assert!(
@@ -974,6 +1142,88 @@ mod tests {
             unreachable!()
         };
         assert!(why.contains("bob"));
+    }
+
+    /// A Sonos playing on through a track says the same `media_position`
+    /// the whole way — Home Assistant refreshes it on a change of state, and
+    /// dates it — so where it is, is that position counted on from its date.
+    /// Twenty seconds of polls of a speaker playing on are twenty seconds of
+    /// nothing to report; the bug was a `seek` back to where the track
+    /// started, every six seconds, on every device.
+    ///
+    /// Falsified by reading `media_position` as now (the old raw read): the
+    /// fourth poll reported `seek` "it is somewhere else in the track", to 0.
+    #[test]
+    fn a_speaker_playing_on_reports_no_seek_from_a_frozen_position() {
+        let mut b = bridge();
+        started(&mut b, "alice", &["music/a.mp3"], 0);
+        let anchored = session(&["music/a.mp3"], 0, playing_at(0), kitchen(false));
+        assert!(b.wants("alice", KITCHEN, &anchored, NOW).is_empty());
+        // What the house says for the whole of it: 0, as of the start.
+        let frozen = playing(&url_of("music/a.mp3"), 0);
+        for second in 1..=20 {
+            let now = NOW + second * 1_000;
+            let acts = b.heard(KITCHEN, Some(&frozen), now);
+            assert!(calls(&acts).is_empty(), "{second} s in: {acts:?}");
+            assert!(b.wants("alice", KITCHEN, &anchored, now).is_empty());
+        }
+        assert_eq!(
+            frozen.position_at(NOW + 20_000),
+            Some(20_000),
+            "counted on, not stuck"
+        );
+        // Undated, a playing position is not a reason for anything.
+        let undated = Playing {
+            updated_ms: None,
+            ..frozen.clone()
+        };
+        assert!(calls(&b.heard(KITCHEN, Some(&undated), NOW + 60_000)).is_empty());
+        // Paused, it is where it says; and no count runs past the track.
+        let paused = Playing {
+            state: "paused".into(),
+            ..playing(&url_of("music/a.mp3"), 12_000)
+        };
+        assert_eq!(paused.position_at(NOW + 99_000), Some(12_000));
+        let short = Playing {
+            duration_ms: Some(5_000),
+            ..frozen
+        };
+        assert_eq!(short.position_at(NOW + 99_000), Some(5_000));
+    }
+
+    /// …and a jump made on the speaker itself is still one: a position the
+    /// house dated, counted on, three seconds or more from where the session
+    /// counts it, is said as the speaker's `seek`.
+    ///
+    /// Falsified by dropping the drift branch's `seek`: nothing was said.
+    #[test]
+    fn a_seek_made_on_the_speaker_is_reported() {
+        let mut b = bridge();
+        started(&mut b, "alice", &["music/a.mp3"], 0);
+        let anchored = session(&["music/a.mp3"], 0, playing_at(0), kitchen(false));
+        b.wants("alice", KITCHEN, &anchored, NOW);
+        for second in 1..=3 {
+            b.heard(
+                KITCHEN,
+                Some(&playing(&url_of("music/a.mp3"), 0)),
+                NOW + second * 1_000,
+            );
+        }
+        // Somebody drags the Sonos app to 90 s, five seconds in.
+        let jumped = Playing {
+            updated_ms: Some(NOW + 5_000),
+            ..playing(&url_of("music/a.mp3"), 90_000)
+        };
+        let acts = b.heard(KITCHEN, Some(&jumped), NOW + 5_500);
+        assert_eq!(calls(&acts), [("alice", "seek")]);
+        let Act::Call { input, .. } = &acts[0] else {
+            unreachable!()
+        };
+        assert_eq!(
+            input,
+            &input::seek(90_500),
+            "where it is now: 90 s, half a second on"
+        );
     }
 
     /// The session moving its sound elsewhere pauses the speaker, and nobody
@@ -1411,14 +1661,17 @@ pub mod ha {
 
         /// What one player is doing, or `None` if it will not say.
         fn state(&self, entity: &str) -> Option<Playing> {
-            let body: serde_json::Value = self
+            let response = self
                 .agent
                 .get(&format!("{}/api/states/{entity}", self.base))
                 .set("Authorization", &self.bearer)
                 .call()
-                .ok()?
-                .into_json()
                 .ok()?;
+            // The house's clock, as its answer is dated: what its timestamps
+            // are read against, so a house whose clock is not the server's
+            // still places a position right.
+            let house_now = response.header("date").and_then(super::when::http_date_ms);
+            let body: serde_json::Value = response.into_json().ok()?;
             let state = body.get("state")?.as_str()?.to_string();
             if state == "unavailable" || state == "unknown" {
                 return None;
@@ -1431,14 +1684,24 @@ pub mod ha {
                     .and_then(|v| v.as_str())
                     .unwrap_or_default()
                     .to_string(),
-                // As the house last measured it. Not counted forward from
-                // `media_position_updated_at`: within a poll it does not
-                // matter, and past one the next poll says again.
+                // As the house last measured it — at a change of state, and
+                // not since: a playing Sonos says the position its track
+                // started at for the whole of the track. [`Playing::position_at`]
+                // counts it on from `media_position_updated_at`.
                 position_ms: (attrs
                     .get("media_position")
                     .and_then(|v| v.as_f64())
                     .unwrap_or(0.0)
                     * 1000.0) as i64,
+                updated_ms: attrs
+                    .get("media_position_updated_at")
+                    .and_then(|v| v.as_str())
+                    .and_then(super::when::rfc3339_ms)
+                    .map(|at| super::when::on_our_clock(at, house_now, now_ms())),
+                duration_ms: attrs
+                    .get("media_duration")
+                    .and_then(|v| v.as_f64())
+                    .map(|d| (d * 1000.0) as i64),
             })
         }
     }

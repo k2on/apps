@@ -57,7 +57,11 @@ are the shared crates'; what is here is what only harken has:
   who holds a speaker, what a change of the session becomes (a hand-off of
   the whole queue from where it was, a pause, a play, a seek), what the
   speaker did that the session does not know said as its own transition
-  (`started`, `advance`, `jump`, `stalled`, `play`, `seek`), `SETTLE` polls
+  (`started`, `advance`, `jump`, `stalled`, `play`, `seek`) — where a
+  playing speaker is being its `media_position` counted on from
+  `media_position_updated_at`, which is when the house last refreshed it,
+  read against the house's own clock as its `Date` says; an undated one is
+  never a seek — `SETTLE` polls
   of grace after a hand-off, `LAPSE` polls before letting a playing speaker
   go (`release`, said as it), `QUIET` polls after telling it anything, and
   the second taker releasing the first. And `ha`, the thread: each speaker

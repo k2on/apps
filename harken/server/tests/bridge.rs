@@ -74,11 +74,68 @@ async fn service(
     };
     if let (Some(now), Some(entity)) = (now, body["entity_id"].as_str()) {
         if let Some(st) = fake.states.lock().unwrap().get_mut(entity) {
+            // A change of state is when the house dates the position again:
+            // where it had got to, as of now.
+            let at = position_now(st);
             st["state"] = json!(now);
+            date_position(st, at);
+        }
+    }
+    if let ("media_seek", Some(entity)) = (service.as_str(), body["entity_id"].as_str()) {
+        if let Some(st) = fake.states.lock().unwrap().get_mut(entity) {
+            let at = body["seek_position"].as_f64().unwrap_or(0.0);
+            date_position(st, at);
         }
     }
     fake.calls.lock().unwrap().push((service, body));
     StatusCode::OK
+}
+
+/// The time as Home Assistant writes it: RFC 3339, in UTC, to the
+/// microsecond.
+fn stamp(ms: i64) -> String {
+    let (secs, ms) = (ms.div_euclid(1000), ms.rem_euclid(1000));
+    let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
+    // Civil from days (Howard Hinnant's algorithm).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!(
+        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}.{ms:03}000+00:00",
+        rem / 3600,
+        rem / 60 % 60,
+        rem % 60
+    )
+}
+
+fn wall_ms() -> i64 {
+    ark_client::autos::now_ms()
+}
+
+/// Where a player is now, as a real house would know it: its dated
+/// position, counted on while it plays.
+fn position_now(st: &Json_) -> f64 {
+    let at = st["attributes"]["media_position"].as_f64().unwrap_or(0.0);
+    let since = st["attributes"]["media_position_updated_at"]
+        .as_str()
+        .and_then(harken_server::assistant::when::rfc3339_ms);
+    match (st["state"].as_str(), since) {
+        (Some("playing"), Some(since)) => at + (wall_ms() - since).max(0) as f64 / 1000.0,
+        _ => at,
+    }
+}
+
+/// The position set, and dated now — what Home Assistant does at a change of
+/// state, and only then.
+fn date_position(st: &mut Json_, at_s: f64) {
+    st["attributes"]["media_position"] = json!(at_s);
+    st["attributes"]["media_position_updated_at"] = json!(stamp(wall_ms()));
 }
 
 async fn state(
@@ -124,15 +181,17 @@ impl Fake {
         self.take()
     }
 
+    /// A player playing `url` from `position_s`, dated now — and from then
+    /// on saying that same position, as Home Assistant does until the next
+    /// change of state.
     fn playing(&self, entity: &str, state: &str, url: &str, position_s: f64) {
-        self.states.lock().unwrap().insert(
-            entity.into(),
-            json!({
-                "entity_id": entity,
-                "state": state,
-                "attributes": { "media_content_id": url, "media_position": position_s },
-            }),
-        );
+        let mut st = json!({
+            "entity_id": entity,
+            "state": state,
+            "attributes": { "media_content_id": url },
+        });
+        date_position(&mut st, position_s);
+        self.states.lock().unwrap().insert(entity.into(), st);
     }
 }
 
@@ -748,5 +807,62 @@ fn a_browser_a_desktop_and_a_speaker_share_one_session() {
     let a = s.session.unwrap();
     assert_eq!((a.queue, a.at), (queue(&["x", "y"]), 1));
     assert!(matches!(a.clock, Clock::Playing { at_ms: 95_000, .. }));
+    rt.block_on(server.stop());
+}
+
+/// The bug as somebody heard it: a track played on the speaker, playing
+/// fine, while every bar's position ran to six seconds and went back to
+/// nothing, over and over. The house says a playing speaker's position as it
+/// was at the last change of state, with its date — as this stand-in now
+/// does — and the bridge read it as now, so once the session had counted
+/// three seconds past it the speaker was "somewhere else in the track" and
+/// the session was sought back to 0.
+///
+/// Here the speaker plays on for five seconds — the old bug fired at about
+/// three — and the session's position runs on with it, unsought.
+///
+/// Falsified by the old raw read of `media_position`: "the session was
+/// sought back: 1504 ms, five seconds in".
+#[test]
+fn a_speaker_playing_on_is_never_sought_back_by_its_own_stale_position() {
+    let rt = runtime();
+    let fake = Fake::default();
+    let url = fake.serve(&rt);
+    let data = tempfile::tempdir().unwrap();
+    let server = serve(&rt, data.path(), |c| c.house = Some(house(url)));
+
+    let mut phone = device(&server, "max", Kind::Phone, "Pixel", true);
+    told(&mut phone, "the kitchen beside the phone", |s| {
+        s.devices.len() == 2
+    });
+    call(&mut phone, "start", input::start(&queue(&["a"]), 0, 0, ""));
+    fake.playing(KITCHEN, "playing", &media_url("music/a.mp3"), 0.0);
+    call(&mut phone, "transfer", input::transfer(KITCHEN));
+    told(&mut phone, "the kitchen playing", |s| {
+        s.outputs(KITCHEN) && !s.moving_to(KITCHEN) && s.sounding()
+    });
+    fake.take();
+    let started = std::time::Instant::now();
+    let mut lowest_after = i64::MAX;
+    while started.elapsed() < Duration::from_secs(5) {
+        phone.pump();
+        if let Some(s) = phone.live(STATE).and_then(|v| Listening::from_value(&v)) {
+            let a = s.session.as_ref().unwrap();
+            let at = a.clock.position(phone.server_now());
+            if started.elapsed() > Duration::from_millis(4_500) {
+                lowest_after = lowest_after.min(at);
+            }
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        lowest_after >= 4_000,
+        "the session was sought back: {lowest_after} ms, five seconds in"
+    );
+    let calls = fake.take();
+    assert!(
+        !calls.iter().any(|(c, _)| c == "media_seek"),
+        "nothing was sought on the speaker after the hand-off either: {calls:#?}"
+    );
     rt.block_on(server.stop());
 }
