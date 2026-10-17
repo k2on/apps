@@ -34,9 +34,27 @@ fn count(p: &Peer) -> Value {
     p.live("room").map(|v| v.field("count")).unwrap_or(Value::Null)
 }
 
+/// Every ordered call this device made on the room has been answered by
+/// the server. Its view is no evidence of that: a call moves the view
+/// before it has left the device. Nor is `pending_len`, which counts the
+/// log's intents and never a live call.
+fn answered(p: &Peer) -> bool {
+    p.live_status("room").is_some_and(|s| s.synced && s.pending == 0)
+}
+
 /// Falsified by dropping a device's pending calls on reconnect
 /// (`Watch::connected` returning none): the partitioned laptop's calls
 /// never reached the server and the three never agreed.
+///
+/// Two calls from two devices that have not heard of each other are taken
+/// in the order they reach the server, and nothing else orders them. So
+/// where the story needs one before the other — the phone's stop before
+/// the laptop's start, the laptop's stop before the tv's — it waits for the
+/// first to be answered before the second can be said. It used to wait on
+/// a view, which a call moves before it is sent, and some runs the second
+/// arrived first: the laptop's start taken before the phone's stop, so the
+/// room idle; or the tv's stop taken and the laptop refused, so the tv
+/// waited for a refusal that had gone elsewhere.
 #[test]
 fn three_devices_agree_after_a_partition() {
     let rt = runtime();
@@ -64,12 +82,17 @@ fn three_devices_agree_after_a_partition() {
     // counting by then.
     laptop.call("room", "start", args([])).unwrap();
     assert_eq!(laptop.live("room").unwrap().field("mode").field("t"), Value::text("counting"));
-    // The phone stops it, so the laptop's start is taken after all.
+    // The phone stops it, so the laptop's start is taken after all — once
+    // the server has taken the stop, which is what orders the two.
     phone.call("room", "stop", args([])).unwrap();
+    pump_until(&mut [&mut phone, &mut tv], |ps| answered(ps[0]));
 
     laptop.reconnect();
     pump_until(&mut [&mut phone, &mut laptop, &mut tv], |ps| {
-        ps.iter().all(|p| count(p) == Value::Int(8)) && ps[0].live("room") == ps[1].live("room") && ps[1].live("room") == ps[2].live("room")
+        answered(ps[1])
+            && ps.iter().all(|p| count(p) == Value::Int(8))
+            && ps[0].live("room") == ps[1].live("room")
+            && ps[1].live("room") == ps[2].live("room")
     });
     let room = laptop.live("room").unwrap();
     assert_eq!(room.field("devices").as_struct().len(), 3, "the laptop is back, once");
@@ -87,7 +110,7 @@ fn three_devices_agree_after_a_partition() {
     tv.call("room", "stop", args([])).unwrap();
     laptop.call("room", "stop", args([])).unwrap();
     pump_until(&mut [&mut laptop], |ps| {
-        ps[0].live("room").is_some_and(|v| v.field("mode").field("t") == Value::text("idle"))
+        answered(ps[0]) && ps[0].live("room").is_some_and(|v| v.field("mode").field("t") == Value::text("idle"))
     });
     tv.reconnect();
     let mut refused = vec![];
@@ -103,6 +126,12 @@ fn three_devices_agree_after_a_partition() {
 /// keeps the room's ordered part, its pointer gone and `on_restore` run —
 /// which empties who is here, the speaker never having left.
 /// Falsified by not restoring the kept file: the restarted room counted 0.
+///
+/// What the speaker hears is waited for, not read once: it used to be
+/// drained the moment the phone saw the speaker's bump, after waiting on
+/// `pending_len` — the log's intents, of which this test makes none, so it
+/// held at once — and the bump was often taken before the phone's start,
+/// and the start and the point heard after the drain.
 #[test]
 fn a_participant_calls_and_a_restart_keeps_the_room() {
     let rt = runtime();
@@ -128,7 +157,7 @@ fn a_participant_calls_and_a_restart_keeps_the_room() {
     });
     phone.call("room", "start", args([])).unwrap();
     phone.call("room", "point", args([("at", Value::Int(4))])).unwrap();
-    pump_until(&mut [&mut phone], |ps| ps[0].pending_len() == 0 && count(ps[0]) == Value::Int(0));
+    pump_until(&mut [&mut phone], |ps| answered(ps[0]) && count(ps[0]) == Value::Int(0));
     let call = ark::live::state::Call {
         instance: Instance::new("room", "alice"),
         transition: "bump".into(),
@@ -138,10 +167,21 @@ fn a_participant_calls_and_a_restart_keeps_the_room() {
     };
     running.hub.call(speaker, call).unwrap();
     pump_until(&mut [&mut phone], |ps| count(ps[0]) == Value::Int(7));
-    let mut kinds = vec![];
-    while let Ok(m) = heard.try_recv() {
-        if let ServerMsg::Applied(a) = m {
-            kinds.push((a.transition.clone(), matches!(a.order, Order::Ephemeral { .. })));
+    // The participant is told on the hub's thread, as each is applied:
+    // listen until it has heard all three, or ten seconds.
+    let mut kinds: Vec<(String, bool)> = vec![];
+    let all = |k: &[(String, bool)]| {
+        [("start", false), ("point", true), ("bump", false)]
+            .iter()
+            .all(|(t, e)| k.iter().any(|(kt, ke)| kt == t && ke == e))
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !all(&kinds) {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        match heard.recv_timeout(left) {
+            Ok(ServerMsg::Applied(a)) => kinds.push((a.transition.clone(), matches!(a.order, Order::Ephemeral { .. }))),
+            Ok(_) => {}
+            Err(_) => break,
         }
     }
     assert!(kinds.contains(&("start".into(), false)), "{kinds:?}");
