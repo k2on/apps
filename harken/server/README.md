@@ -64,11 +64,19 @@ are the shared crates'; what is here is what only harken has:
   never a seek — `SETTLE` polls
   of grace after a hand-off, `LAPSE` polls before letting a playing speaker
   go (`release`, said as it), `QUIET` polls after telling it anything, and
-  the second taker releasing the first. And `ha`, the thread: each speaker
-  a participant (`HubHandle::participate`) in each session a client is in
-  and in no other — a speaker never keeps a session's presence open — the
-  service calls, polling only what it holds, and every hand-off, release
-  and pause said out loud.
+  the second taker releasing the first. Its volume and its group are
+  reconciled the same way (`tune`): what the house says it supports is said
+  once as the speaker's `equip`; a volume or a group that moved in the
+  session is told to the house (`volume_set`, `volume_mute`, `join`,
+  `unjoin`), and one that moved in the house while the session stood still
+  is said as the speaker (`report_volume`, `report_group`), outside `QUIET`;
+  a member is never handed a queue. And `ha`, the thread: each speaker a
+  participant (`HubHandle::participate`) in each session a client is in and
+  in no other — a speaker never keeps a session's presence open — the
+  service calls, polling every speaker standing anywhere (its volume and
+  group; what it plays only where it is held), the integration it groups
+  in read once through the template API, and every hand-off, release,
+  pause, join and unjoin said out loud.
 - **`lib.rs`** — `Config` from the environment and `start`.
 
 ## Running

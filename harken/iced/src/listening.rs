@@ -33,6 +33,14 @@
 //! declares itself one that cannot play: it is never the output, and every
 //! one of its buttons is a remote control.
 //!
+//! **The volume is the session's too.** A device whose player has a volume
+//! it can set says so once a connection (`equip`, with the level its player
+//! is at), and from then on its player follows its own entry of the
+//! session — whoever moved it, from whichever device — as the output
+//! follows the clock. A change nobody in the session made (an extension,
+//! the platform) is said back as `report_volume`. The desktop sounds
+//! nothing and says nothing, so it has no volume to draw.
+//!
 //! **A play counts once**, in the log: the output authors `record_play`
 //! once a track it loaded has played thirty seconds or half its length,
 //! whichever is first ([`read::counts_after`]). Offline it is pending like
@@ -42,7 +50,7 @@ use ark_client::ark::live::state::DeviceDecl;
 use ark_client::{Id, Peer};
 use harken_domain::listening::read::{self, STATE};
 // What the rest of this program asks *this* module about.
-pub use harken_domain::listening::read::{input, Active, Clock, Kind, Listening, Output, Track};
+pub use harken_domain::listening::read::{input, Active, Clock, Device, Kind, Listening, Output, Track};
 
 /// How far the player may be from where the session counts it before the
 /// output seeks to agree: a seek on another device moves the clock by more
@@ -66,6 +74,10 @@ pub trait Sound {
     fn resume(&mut self);
     fn pause(&mut self);
     fn seek(&mut self, position_ms: i64);
+    /// The level it sounds at, 0 to 100, and whether it is muted: `None`
+    /// where it has no volume anybody can set.
+    fn volume(&mut self) -> Option<(i64, bool)>;
+    fn set_volume(&mut self, level: i64, muted: bool);
 }
 
 /// Every number this end of the session holds that the peer does not, for
@@ -104,6 +116,9 @@ pub struct Remote {
     counted: u64,
     /// When this device last asked its player to play, by its own clock.
     asked: Option<f64>,
+    /// The volume its player was last given, or last found at: what tells a
+    /// change the session asked for from one made behind its back.
+    applied: Option<(i64, bool)>,
     stats: Stats,
 }
 
@@ -232,9 +247,10 @@ impl Remote {
         }
         let Some(s) = self.session(peer) else { return };
         if self.met != peer.epoch() {
-            // The first sight of the session on this connection: the rule for
-            // coming back.
+            // The first sight of the session on this connection: what this
+            // device can do, said, and the rule for coming back.
             self.met = peer.epoch();
+            self.equip(peer, sound, &s);
             if self.alone_playing && !queue.is_empty() {
                 self.alone_playing = false;
                 if s.sounding() && !self.outputs_here(&s) {
@@ -253,6 +269,7 @@ impl Remote {
             }
         }
         let s = self.session(peer).unwrap_or(s);
+        self.follow_volume(peer, sound, &s);
         match &s.session {
             Some(a) if self.outputs_here(&s) => self.drive(peer, sound, queue, a, clock),
             // Not the output: silent. Losing the sound is not something this
@@ -265,6 +282,39 @@ impl Remote {
                 self.asked = None;
             }
         }
+    }
+
+    /// Say what this device can do, once a connection: a player with a
+    /// volume says so, at the level it is at — the session's entry for it
+    /// starts as whatever `on_join` assumed, which is nothing. A device with
+    /// no volume says nothing, and stays that.
+    fn equip(&mut self, peer: &mut Peer, sound: &mut impl Sound, s: &Listening) {
+        let Some((level, muted)) = sound.volume() else { return };
+        if s.device(&self.me).is_none() {
+            return;
+        }
+        self.applied = Some((level, muted));
+        let _ = self.call(peer, "equip", input::equip(true, None, level, muted));
+    }
+
+    /// The player at this device's own volume in the session — and a volume
+    /// the player was moved to behind the session's back, said.
+    fn follow_volume(&mut self, peer: &mut Peer, sound: &mut impl Sound, s: &Listening) {
+        let Some(me) = s.device(&self.me).filter(|d| d.can_volume) else { return };
+        let Some(now) = sound.volume() else { return };
+        let want = (me.volume, me.muted);
+        if self.applied.is_some_and(|was| was != now) {
+            // Moved, and not by this: the platform, an extension, a page.
+            self.applied = Some(now);
+            if now != want {
+                let _ = self.call(peer, "report_volume", input::report_volume(now.0, now.1));
+            }
+            return;
+        }
+        if now != want {
+            sound.set_volume(want.0, want.1);
+        }
+        self.applied = Some(want);
     }
 
     // This device is the output: its player made to agree with the session,
@@ -369,6 +419,8 @@ mod tests {
         at_ms: i64,
         ended: bool,
         loads: usize,
+        /// Its volume, where it has one.
+        volume: Option<(i64, bool)>,
     }
 
     impl Sound for Fake {
@@ -400,6 +452,14 @@ mod tests {
         }
         fn seek(&mut self, position_ms: i64) {
             self.at_ms = position_ms;
+        }
+        fn volume(&mut self) -> Option<(i64, bool)> {
+            self.volume
+        }
+        fn set_volume(&mut self, level: i64, muted: bool) {
+            if self.volume.is_some() {
+                self.volume = Some((level, muted));
+            }
         }
     }
 
@@ -765,5 +825,63 @@ mod tests {
         rb.reconcile(net.peer(b), &mut sb, &mut qb, 0, "", 1.0);
         assert!(!sb.playing, "the stale session, which says playing, is not obeyed");
         assert!(rb.session(net.peer(b)).is_none());
+    }
+
+    /// A browser's player follows its own volume in the session, whoever
+    /// moved it: it says what it can do and where it is once it has joined,
+    /// a level set on the desktop is the level it plays at, a mute is a
+    /// mute — and a volume the element was moved to behind the session's
+    /// back is said back, once, as the browser's own. The desktop, which
+    /// sounds nothing, says nothing and has no volume to move.
+    ///
+    /// Falsified by a `follow_volume` that did not remember what it applied:
+    /// the element's own move was taken for the session's old level and put
+    /// back to 30, never reported.
+    #[test]
+    fn the_players_volume_follows_the_session_and_a_change_behind_it_is_said() {
+        let mut net = Net::new();
+        let b = net.device("browser", true);
+        let d = net.device("desktop", false);
+        let (mut rb, mut rd) = (Remote::new(), Remote::new());
+        rb.open("browser");
+        rd.open("desktop");
+        let mut sb = Fake {
+            volume: Some((70, false)),
+            ..Fake::default()
+        };
+        let mut sd = Fake::default();
+        let (mut qb, mut qd) = (vec![], vec![]);
+        rb.reconcile(net.peer(b), &mut sb, &mut qb, 0, "", 0.0);
+        rd.reconcile(net.peer(d), &mut sd, &mut qd, 0, "", 0.0);
+        net.carry();
+        let s = rd.session(net.peer(d)).unwrap();
+        let browser = s.device("browser").unwrap();
+        assert_eq!(
+            (browser.can_volume, browser.volume, browser.muted),
+            (true, 70, false),
+            "said once it joined"
+        );
+        assert!(!s.device("desktop").unwrap().can_volume, "the desktop has no volume to say");
+
+        rd.call(net.peer(d), "set_volume", input::set_volume("browser", 30)).unwrap();
+        net.carry();
+        rb.reconcile(net.peer(b), &mut sb, &mut qb, 0, "", 1.0);
+        assert_eq!(sb.volume, Some((30, false)), "a level set on the desktop is the browser's");
+        rd.call(net.peer(d), "set_mute", input::set_mute("browser", true)).unwrap();
+        net.carry();
+        rb.reconcile(net.peer(b), &mut sb, &mut qb, 0, "", 2.0);
+        assert_eq!(sb.volume, Some((30, true)), "and a mute is a mute");
+
+        // Something moved the element itself.
+        sb.volume = Some((55, false));
+        let calls = rb.stats().calls;
+        rb.reconcile(net.peer(b), &mut sb, &mut qb, 0, "", 3.0);
+        net.carry();
+        rb.reconcile(net.peer(b), &mut sb, &mut qb, 0, "", 4.0);
+        assert_eq!(sb.volume, Some((55, false)), "not fought");
+        assert_eq!(rb.stats().calls, calls + 1, "said, once");
+        let s = rd.session(net.peer(d)).unwrap();
+        let browser = s.device("browser").unwrap();
+        assert_eq!((browser.volume, browser.muted), (55, false), "and the desktop hears it");
     }
 }

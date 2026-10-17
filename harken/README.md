@@ -106,11 +106,32 @@ and nothing heartbeats.
   Assistant bridge stands each configured `media_player` in every session
   a client is in, hands it the queue, and says what it does
   (`server/README.md`).
+- **Volume is the session's, per device.** A device that has a volume
+  says so once it stands in the session (`equip`, with its level) — the
+  browser's `<audio>` element, a speaker whose house says it takes
+  `volume_set` — and from then on anybody can move it (`set_volume`,
+  `nudge_volume`, `set_mute`), the device obeys it as the output obeys the
+  clock, and a change made on the device itself is reported
+  (`report_volume`). The desktop sounds nothing and has no volume.
+- **Speakers of one family join** (a Sonos is a `sonos`): a member follows a
+  leader and plays what it plays, so the output is a group when anything
+  follows it (`join`, `unjoin`, and the leader's `report_group` for a group
+  made in the Sonos app). Handing the sound to a member makes it the
+  leader, the rest following it, as Sonos does. A group's volume moves every
+  member in proportion (`set_group_volume`, `nudge_group_volume`,
+  `set_group_mute`). A phone, a browser and a desktop have no family —
+  nothing keeps their audio in step with anybody's — so nothing joins them.
 - **`d`** is the picker — every device, the one away drawn and not a target,
-  no row that stops it everywhere, this device ticked while nothing plays —
-  and **`D`** every number the session holds: the instance's sequence and
-  pending calls, the server's clock offset, the devices, every scrubber
-  being dragged (the one ephemeral field), the calls refused.
+  no row that stops it everywhere, this device ticked while nothing plays,
+  every member of a playing group ticked, each row with its volume, a `+`
+  on a speaker that can join and a `−` on one that can leave, and the group
+  first as itself — and **`D`** every number the session holds: the
+  instance's sequence and pending calls, the server's clock offset, the
+  devices with their volumes, families and leaders, the group, every
+  scrubber being dragged (the one ephemeral field), the calls refused. On
+  the bar, a mute and a slider for what is playing; **`+`** and **`-`**
+  nudge it and **`M`** mutes it — in the picker, the row's; **`J`** there
+  joins or unjoins the row.
 
 **A play is the log's**: `record_play`, authored by the output once a
 track has played thirty seconds or half its length, once per play — so
@@ -398,7 +419,10 @@ here has met a real Home Assistant or a real OpenID Connect provider.
 The listening session has run between real sockets, peers and the bridge
 against a stand-in house, and the reconcilers against a stand-in player;
 no browser has played a track through it and no speaker has been handed
-one. The Android app has not moved onto the live state yet
+one, nor had its volume set or been joined to another: the volume and the
+groups are held against a stand-in house's `volume_set`, `volume_mute`,
+`join`, `unjoin` and template API, written from Home Assistant's
+documentation. The Android app has not moved onto the live state yet
 (`docs/plan-live.md` phase 3), so a phone has no listening session against
 this server; and a speaker's plays are not recorded, since the bridge is
 not a peer of the account.

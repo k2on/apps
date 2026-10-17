@@ -33,6 +33,17 @@
 //! few polls after the bridge itself told the speaker something
 //! ([`QUIET`]): a house a second behind its own speaker would otherwise
 //! report the bridge's own pause back to it as somebody's hand.
+//!
+//! **A speaker's volume and its group are the session's too** (the "Volume
+//! and groups" section of `docs/plan-live.md`), reconciled the same way and
+//! by the same rule: what moved in the session since the bridge last looked
+//! is told to the house (`volume_set`, `volume_mute`, `join`, `unjoin`), and
+//! what differs in the house while the session stood still — outside
+//! [`QUIET`] — was somebody's hand, said as the speaker (`report_volume`,
+//! `report_group`). What a speaker can do is read off what Home Assistant
+//! says it supports ([`VOLUME_SET`], [`GROUPING`]) and said once as its
+//! `equip`. A member of a group is never handed a queue: it plays whatever
+//! its leader plays, which is the house's to arrange.
 
 use std::collections::{HashMap, HashSet};
 
@@ -71,6 +82,51 @@ pub const QUIET: u8 = 2;
 /// said as it), and the session is right about where somebody asked it to
 /// be (`media_seek` told to it).
 pub const DRIFT_MS: i64 = 3_000;
+
+/// `MediaPlayerEntityFeature.VOLUME_SET` in Home Assistant's
+/// `homeassistant/components/media_player/const.py`: the player takes
+/// `media_player.volume_set`. A bit of the entity's `supported_features`.
+pub const VOLUME_SET: u64 = 4;
+
+/// `MediaPlayerEntityFeature.GROUPING`, the same file: the player takes
+/// `media_player.join` and `media_player.unjoin`, and says who it is
+/// grouped with as `group_members`.
+pub const GROUPING: u64 = 524_288;
+
+/// What Home Assistant says of a player's volume and its group, and what
+/// it supports.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Speaker {
+    /// `volume_level`, 0 to 1 on the wire, as 0 to 100. `None` where the
+    /// house says none, as an entity that is off does.
+    pub volume: Option<i64>,
+    /// `is_volume_muted`.
+    pub muted: bool,
+    /// [`VOLUME_SET`] is among its `supported_features`.
+    pub can_volume: bool,
+    /// The family it groups in: its integration, where it supports
+    /// [`GROUPING`] — `None` where it does not.
+    pub family: Option<String>,
+    /// `group_members`: everything it plays with, the leader first, itself
+    /// included. Empty, or itself alone, for a player in no group.
+    pub members: Vec<String>,
+}
+
+impl Speaker {
+    /// What it can do, as its `equip` says it.
+    fn caps(&self) -> (bool, Option<String>) {
+        (
+            self.can_volume && self.volume.is_some(),
+            self.family.clone(),
+        )
+    }
+
+    /// Whether it leads whatever group it is in: first of its members, or
+    /// in none.
+    fn leads(&self, entity: &str) -> bool {
+        self.members.first().is_none_or(|l| l == entity)
+    }
+}
 
 /// How Home Assistant describes a player, pared down to what decides
 /// anything.
@@ -141,6 +197,25 @@ pub enum Act {
         entity: String,
         position_ms: i64,
     },
+    /// `media_player.volume_set`, at a level of 0 to 100.
+    Volume {
+        entity: String,
+        level: i64,
+    },
+    /// `media_player.volume_mute`.
+    Mute {
+        entity: String,
+        muted: bool,
+    },
+    /// `media_player.join`: these follow `leader`.
+    Join {
+        leader: String,
+        members: Vec<String>,
+    },
+    /// `media_player.unjoin`: it leaves whatever group it is in.
+    Unjoin {
+        entity: String,
+    },
     /// A transition of `key`'s session, called as the speaker standing in it.
     Call {
         key: String,
@@ -180,6 +255,25 @@ struct Holding {
     heard: Option<(i64, i64)>,
 }
 
+/// What the house last said of a speaker's volume and group, and how many
+/// more polls a difference is the house catching up with what it was told.
+#[derive(Debug, Clone, Default)]
+struct Tuning {
+    reading: Option<Speaker>,
+    quiet: u8,
+}
+
+/// What the bridge last saw of one speaker in one session: what it said the
+/// speaker can do, and the volume and followers the session had the last
+/// time the two were reconciled — so the bridge can tell the session moving
+/// from the house moving.
+#[derive(Debug, Clone, Default)]
+struct Seen {
+    equipped: Option<(bool, Option<String>)>,
+    volume: Option<(i64, bool)>,
+    followers: Option<Vec<String>>,
+}
+
 /// Home Assistant, as a shelf of devices.
 pub struct Bridge {
     /// The entities offered, and what to call each.
@@ -192,6 +286,10 @@ pub struct Bridge {
     /// Sessions a speaker has already let go of while still named their
     /// output — somebody else took it — so the release is said once.
     released: HashSet<(String, String)>,
+    /// Each speaker's volume and group, as the house last said them.
+    tuning: HashMap<String, Tuning>,
+    /// …and as each session last had them.
+    seen: HashMap<(String, String), Seen>,
 }
 
 impl Bridge {
@@ -203,6 +301,8 @@ impl Bridge {
             media: media.trim_end_matches('/').to_string(),
             held: HashMap::new(),
             released: HashSet::new(),
+            tuning: HashMap::new(),
+            seen: HashMap::new(),
         }
     }
 
@@ -277,7 +377,16 @@ impl Bridge {
             // back, somebody stopped it — and a speaker has nobody to go
             // quiet for it.
             self.released.remove(&(key.to_string(), entity.to_string()));
-            if self.holder(entity) == Some(key) {
+            // …unless it follows the device the sound went to: the sound was
+            // handed to a member of its group, which leads it now, and a
+            // pause said to a member is a pause of its whole group.
+            let follows_it = state
+                .device(entity)
+                .and_then(|d| d.follows.as_deref())
+                .is_some_and(|l| state.leader() == Some(l));
+            if self.holder(entity) == Some(key) && follows_it {
+                self.held.remove(entity);
+            } else if self.holder(entity) == Some(key) {
                 self.held.remove(entity);
                 acts.push(Act::Verb {
                     entity: entity.into(),
@@ -496,10 +605,167 @@ impl Bridge {
         }]
     }
 
+    /// Home Assistant said what a standing player's volume and group are —
+    /// or `None`, it did not answer — which spends a poll of its quiet.
+    pub fn polled(&mut self, entity: &str, reading: Option<&Speaker>) {
+        let t = self.tuning.entry(entity.to_string()).or_default();
+        t.reading = reading.cloned();
+        t.quiet = t.quiet.saturating_sub(1);
+    }
+
+    /// `key`'s session as it now is, read for `entity`'s volume and group:
+    /// what the speaker says it can do, if the session does not know it
+    /// yet; what moved in the session since the last look, told to the
+    /// house; and what moved in the house while the session stood still,
+    /// said as the speaker — after its quiet, since a house a moment behind
+    /// what it was just told is not somebody's hand.
+    ///
+    /// The group is reconciled from its leader's side alone: who follows
+    /// this speaker in the session against who plays with it in the house.
+    /// A member's own reading says only that it is a member, which its
+    /// leader's already says.
+    pub fn tune(&mut self, key: &str, entity: &str, state: &Listening) -> Vec<Act> {
+        if !self.has(entity) {
+            return vec![];
+        }
+        let Some(reading) = self.tuning.get(entity).and_then(|t| t.reading.clone()) else {
+            return vec![];
+        };
+        let Some(me) = state.device(entity) else {
+            return vec![];
+        };
+        let quiet = self.tuning[entity].quiet;
+        let seen = self
+            .seen
+            .entry((key.to_string(), entity.to_string()))
+            .or_default();
+        let call = |transition: &'static str, input: Args, why: &str| Act::Call {
+            key: key.to_string(),
+            entity: entity.to_string(),
+            transition,
+            input,
+            why: why.to_string(),
+        };
+        let mut acts = vec![];
+        // What it can do, once a session has it standing: until the session
+        // says so, nothing else here can be read off it.
+        let caps = reading.caps();
+        if (me.can_volume, me.family.clone()) != caps {
+            if seen.equipped.as_ref() != Some(&caps) {
+                let volume = reading
+                    .volume
+                    .unwrap_or(harken_domain::listening::UNSAID_VOLUME);
+                seen.equipped = Some(caps.clone());
+                seen.volume = Some((volume, reading.muted));
+                acts.push(call(
+                    "equip",
+                    input::equip(caps.0, caps.1.as_deref(), volume, reading.muted),
+                    "what the house says it can do",
+                ));
+            }
+            return acts;
+        }
+        seen.equipped = Some(caps);
+        let mut told = false;
+        if let (true, Some(level)) = (me.can_volume, reading.volume) {
+            let session = (me.volume, me.muted);
+            let house = (level, reading.muted);
+            if session == house {
+                seen.volume = Some(session);
+            } else if seen.volume.is_some_and(|v| v != session) {
+                // The session moved: the house is told.
+                if me.volume != level {
+                    acts.push(Act::Volume {
+                        entity: entity.into(),
+                        level: me.volume,
+                    });
+                }
+                if me.muted != reading.muted {
+                    acts.push(Act::Mute {
+                        entity: entity.into(),
+                        muted: me.muted,
+                    });
+                }
+                seen.volume = Some(session);
+                told = true;
+            } else if quiet == 0 || seen.volume.is_none() {
+                // The house moved, or this is the first look: the knob on the
+                // speaker, the Sonos app.
+                acts.push(call(
+                    "report_volume",
+                    input::report_volume(level, reading.muted),
+                    "its volume was changed by hand",
+                ));
+                seen.volume = Some(house);
+            }
+        }
+        if me.family.is_some() {
+            let mut session: Vec<String> = state
+                .followers(entity)
+                .iter()
+                .map(|d| d.id.clone())
+                .collect();
+            let mut house: Vec<String> = match reading.leads(entity) {
+                true => reading
+                    .members
+                    .iter()
+                    .filter(|m| *m != entity && state.device(m).is_some())
+                    .cloned()
+                    .collect(),
+                false => vec![],
+            };
+            session.sort();
+            house.sort();
+            if session == house {
+                seen.followers = Some(session);
+            } else if seen.followers.as_ref().is_some_and(|f| *f != session) {
+                let join: Vec<String> = session
+                    .iter()
+                    .filter(|m| !house.contains(m))
+                    .cloned()
+                    .collect();
+                if !join.is_empty() {
+                    acts.push(Act::Join {
+                        leader: entity.into(),
+                        members: join,
+                    });
+                }
+                // Let go of only what the session has in no group at all: a
+                // member another leader has taken is that leader's to join,
+                // and an unjoin would undo it.
+                for m in house.iter().filter(|m| !session.contains(m)) {
+                    let alone = state
+                        .device(m)
+                        .is_some_and(|d| d.follows.is_none() && state.followers(m).is_empty());
+                    if alone {
+                        acts.push(Act::Unjoin { entity: m.clone() });
+                    }
+                }
+                seen.followers = Some(session);
+                told = true;
+            } else if reading.leads(entity) && (quiet == 0 || seen.followers.is_none()) {
+                let members: Vec<&str> = house.iter().map(String::as_str).collect();
+                acts.push(call(
+                    "report_group",
+                    input::report_group(&members),
+                    "it was grouped by hand",
+                ));
+                seen.followers = Some(house);
+            }
+        }
+        if told {
+            if let Some(t) = self.tuning.get_mut(entity) {
+                t.quiet = QUIET;
+            }
+        }
+        acts
+    }
+
     /// Nobody is listening as `key` any more, so the speaker stops standing
     /// in that session — and anything it was playing for it stops, because
     /// nothing else would ever tell it to.
     pub fn left(&mut self, key: &str, entity: &str) -> Vec<Act> {
+        self.seen.remove(&(key.to_string(), entity.to_string()));
         self.released.remove(&(key.to_string(), entity.to_string()));
         if self.holder(entity) != Some(key) {
             return vec![];
@@ -688,13 +954,7 @@ mod tests {
     /// A session whose output is `output`, on `files` from `at`.
     fn session(files: &[&str], at: usize, clock: Clock, output: Output) -> Listening {
         Listening {
-            devices: vec![Device {
-                id: "phone".into(),
-                name: "Phone".into(),
-                kind: Kind::Phone,
-                can_play: true,
-                user: "alice".into(),
-            }],
+            devices: vec![Device::new("phone", "Phone", Kind::Phone, true)],
             scrub: Default::default(),
             session: Some(Active {
                 queue: files
@@ -1144,6 +1404,258 @@ mod tests {
         assert!(why.contains("bob"));
     }
 
+    // Volume and groups ------------------------------------------------------
+
+    const STUDY: &str = "media_player.study";
+
+    /// A speaker as the session has it once it has said what it can do.
+    fn stood(id: &str, volume: i64, follows: Option<&str>) -> Device {
+        Device {
+            can_volume: true,
+            volume,
+            family: Some("sonos".into()),
+            follows: follows.map(str::to_string),
+            ..Device::new(id, id, Kind::Speaker, true)
+        }
+    }
+
+    /// A session with the phone and these speakers in it, playing on
+    /// `output`.
+    fn house_of(speakers: Vec<Device>, output: &str) -> Listening {
+        let mut s = session(
+            &["music/a.mp3"],
+            0,
+            playing_at(0),
+            Output::Device {
+                id: output.into(),
+                moving: false,
+            },
+        );
+        s.devices.extend(speakers);
+        s
+    }
+
+    /// What the house says of a Sonos.
+    fn sonos(volume: i64, muted: bool, members: &[&str]) -> Speaker {
+        Speaker {
+            volume: Some(volume),
+            muted,
+            can_volume: true,
+            family: Some("sonos".into()),
+            members: members.iter().map(|m| m.to_string()).collect(),
+        }
+    }
+
+    fn acts_but_calls(acts: &[Act]) -> Vec<&Act> {
+        acts.iter()
+            .filter(|a| !matches!(a, Act::Call { .. }))
+            .collect()
+    }
+
+    /// What a speaker can do is read off the house and said once, as the
+    /// speaker's `equip`, carrying the volume the house reports — and nothing
+    /// else is said or told of it until the session has it.
+    ///
+    /// Falsified by forgetting what was equipped: the equip was said again
+    /// on every read until it landed.
+    #[test]
+    fn what_a_speaker_can_do_is_said_once_as_its_equip() {
+        let mut b = bridge();
+        let fresh = house_of(
+            vec![Device::new(KITCHEN, "Kitchen", Kind::Speaker, true)],
+            "phone",
+        );
+        assert!(
+            b.tune("alice", KITCHEN, &fresh).is_empty(),
+            "nothing read yet, nothing said"
+        );
+        b.polled(KITCHEN, Some(&sonos(35, false, &[])));
+        let acts = b.tune("alice", KITCHEN, &fresh);
+        assert_eq!(calls(&acts), [("alice", "equip")]);
+        let Act::Call { input, .. } = &acts[0] else {
+            unreachable!()
+        };
+        assert_eq!(input, &input::equip(true, Some("sonos"), 35, false));
+        assert!(
+            b.tune("alice", KITCHEN, &fresh).is_empty(),
+            "said once, while it lands"
+        );
+        let landed = house_of(vec![stood(KITCHEN, 35, None)], "phone");
+        assert!(
+            b.tune("alice", KITCHEN, &landed).is_empty(),
+            "and then the two agree"
+        );
+    }
+
+    /// A volume that moved in the session is told to the house; one that
+    /// moved in the house while the session stood still was somebody's
+    /// hand, said as the speaker — but not while the house is still
+    /// catching up with what it was just told.
+    ///
+    /// Falsified by reporting a difference whatever the quiet: the house's
+    /// stale 35, read the poll after `volume_set 60`, went back to the
+    /// session as a hand.
+    #[test]
+    fn a_volume_is_told_and_a_hand_on_the_knob_is_reported_after_the_quiet() {
+        let mut b = bridge();
+        b.polled(KITCHEN, Some(&sonos(35, false, &[])));
+        b.tune(
+            "alice",
+            KITCHEN,
+            &house_of(vec![stood(KITCHEN, 35, None)], "phone"),
+        );
+        let moved = house_of(vec![stood(KITCHEN, 60, None)], "phone");
+        assert_eq!(
+            acts_but_calls(&b.tune("alice", KITCHEN, &moved)),
+            [&Act::Volume {
+                entity: KITCHEN.into(),
+                level: 60
+            }]
+        );
+        // The house a poll behind: quiet.
+        for _ in 0..QUIET - 1 {
+            b.polled(KITCHEN, Some(&sonos(35, false, &[])));
+            assert!(
+                b.tune("alice", KITCHEN, &moved).is_empty(),
+                "the house catching up"
+            );
+        }
+        // It caught up, and then somebody turned the knob and muted it.
+        b.polled(KITCHEN, Some(&sonos(60, false, &[])));
+        assert!(b.tune("alice", KITCHEN, &moved).is_empty());
+        b.polled(KITCHEN, Some(&sonos(22, true, &[])));
+        let acts = b.tune("alice", KITCHEN, &moved);
+        assert_eq!(calls(&acts), [("alice", "report_volume")]);
+        let Act::Call { input, .. } = &acts[0] else {
+            unreachable!()
+        };
+        assert_eq!(input, &input::report_volume(22, true));
+        // Muting in the session is a mute in the house, and nothing else.
+        let muted = house_of(
+            vec![Device {
+                muted: true,
+                ..stood(KITCHEN, 22, None)
+            }],
+            "phone",
+        );
+        let mut b2 = bridge();
+        b2.polled(KITCHEN, Some(&sonos(22, false, &[])));
+        b2.tune(
+            "alice",
+            KITCHEN,
+            &house_of(vec![stood(KITCHEN, 22, None)], "phone"),
+        );
+        assert_eq!(
+            acts_but_calls(&b2.tune("alice", KITCHEN, &muted)),
+            [&Act::Mute {
+                entity: KITCHEN.into(),
+                muted: true
+            }]
+        );
+    }
+
+    /// The group is reconciled from its leader's side: a follower added in
+    /// the session is a `join` on the leader, one dropped an `unjoin` on it;
+    /// a group made in the Sonos app is reported as the leader's; and the
+    /// first look at a speaker takes the group the house already has rather
+    /// than breaking it up.
+    ///
+    /// Falsified by treating the first look as the session having moved:
+    /// standing the kitchen in a session unjoined the study the Sonos app
+    /// had grouped with it.
+    #[test]
+    fn a_group_is_told_to_the_house_and_a_group_made_by_hand_is_reported() {
+        let mut b = bridge();
+        // The Sonos app already has the study playing with the kitchen.
+        b.polled(KITCHEN, Some(&sonos(30, false, &[KITCHEN, STUDY])));
+        let apart = house_of(
+            vec![stood(KITCHEN, 30, None), stood(STUDY, 30, None)],
+            KITCHEN,
+        );
+        let acts = b.tune("alice", KITCHEN, &apart);
+        assert_eq!(calls(&acts), [("alice", "report_group")], "{acts:?}");
+        let Act::Call { input, .. } = &acts[0] else {
+            unreachable!()
+        };
+        assert_eq!(input, &input::report_group(&[STUDY]));
+        let together = house_of(
+            vec![stood(KITCHEN, 30, None), stood(STUDY, 30, Some(KITCHEN))],
+            KITCHEN,
+        );
+        assert!(b.tune("alice", KITCHEN, &together).is_empty());
+        // Unjoined in the session: an unjoin of the study.
+        assert_eq!(
+            acts_but_calls(&b.tune("alice", KITCHEN, &apart)),
+            [&Act::Unjoin {
+                entity: STUDY.into()
+            }]
+        );
+        b.polled(KITCHEN, Some(&sonos(30, false, &[])));
+        b.polled(KITCHEN, Some(&sonos(30, false, &[])));
+        assert!(b.tune("alice", KITCHEN, &apart).is_empty());
+        // Joined in the session: a join on the kitchen, naming the study.
+        assert_eq!(
+            acts_but_calls(&b.tune("alice", KITCHEN, &together)),
+            [&Act::Join {
+                leader: KITCHEN.into(),
+                members: vec![STUDY.into()]
+            }]
+        );
+    }
+
+    /// A member the session has handed to another leader is not unjoined by
+    /// its old one — the new leader's `join` takes it, and an unjoin would
+    /// undo that — and the old leader, now a member, is not paused when the
+    /// sound moves to the member that leads it: a pause said to a member is
+    /// a pause of its whole group.
+    ///
+    /// Falsified by unjoining every follower the session dropped: the
+    /// kitchen unjoined the study the moment the study became its leader.
+    #[test]
+    fn the_sound_handed_to_a_member_regroups_the_house_without_a_pause() {
+        let mut b = bridge();
+        started(&mut b, "alice", &["music/a.mp3"], 0);
+        b.polled(KITCHEN, Some(&sonos(30, false, &[KITCHEN, STUDY])));
+        b.polled(STUDY, Some(&sonos(30, false, &[KITCHEN, STUDY])));
+        let led = house_of(
+            vec![stood(KITCHEN, 30, None), stood(STUDY, 30, Some(KITCHEN))],
+            KITCHEN,
+        );
+        b.tune("alice", KITCHEN, &led);
+        b.tune("alice", STUDY, &led);
+        // Handed to the study, which leads now.
+        let mut moved = house_of(
+            vec![stood(KITCHEN, 30, Some(STUDY)), stood(STUDY, 30, None)],
+            STUDY,
+        );
+        if let Some(a) = moved.session.as_mut() {
+            a.output = Output::Device {
+                id: STUDY.into(),
+                moving: true,
+            };
+        }
+        assert!(
+            acts_but_calls(&b.tune("alice", KITCHEN, &moved)).is_empty(),
+            "the kitchen lets go of nothing"
+        );
+        assert_eq!(
+            acts_but_calls(&b.tune("alice", STUDY, &moved)),
+            [&Act::Join {
+                leader: STUDY.into(),
+                members: vec![KITCHEN.into()]
+            }]
+        );
+        assert!(
+            b.wants("alice", KITCHEN, &moved, NOW).is_empty(),
+            "no pause for a member of the new leader"
+        );
+        assert!(!b.holds(KITCHEN));
+        assert!(matches!(
+            &b.wants("alice", STUDY, &moved, NOW)[..],
+            [Act::Start { .. }]
+        ));
+    }
+
     /// A Sonos playing on through a track says the same `media_position`
     /// the whole way — Home Assistant refreshes it on a change of state, and
     /// dates it — so where it is, is that position counted on from its date.
@@ -1296,7 +1808,7 @@ pub mod ha {
     use ark_server::HubHandle;
     use harken_domain::listening::read::{Kind, Listening, STATE};
 
-    use super::{listening, Act, Bridge, Playing};
+    use super::{listening, Act, Bridge, Playing, Speaker, GROUPING, VOLUME_SET};
 
     /// How often a held player is asked what it is doing.
     pub const TICK: Duration = Duration::from_millis(1_000);
@@ -1472,24 +1984,36 @@ pub mod ha {
                     acts.push(act);
                 }
             }
-            // What each session wants of each speaker standing in it.
+            // What each session wants of each speaker standing in it: its
+            // volume and its group first, because a member about to lead is
+            // made the leader in the house before anything is handed to it —
+            // a queue handed to a member is its leader's.
+            for (key, state) in &listened {
+                for (entity, _) in bridge.players().to_vec() {
+                    acts.extend(bridge.tune(key, &entity, state));
+                }
+            }
             for (key, state) in &listened {
                 for (entity, _) in bridge.players().to_vec() {
                     acts.extend(bridge.wants(key, &entity, state, now));
                 }
             }
-            // …and, a tick at a time, what the held ones are actually doing.
+            // …and, a tick at a time, what the standing ones are actually
+            // doing: every one's volume and group, and what the held ones
+            // are playing. A speaker stands only where somebody is
+            // listening, so a house nobody is listening in is asked nothing.
             if polled.elapsed() >= config.tick {
                 polled = Instant::now();
-                let held: Vec<String> = bridge
+                let standing: Vec<String> = bridge
                     .players()
                     .iter()
                     .map(|(e, _)| e.clone())
-                    .filter(|e| bridge.holds(e))
+                    .filter(|e| wires.keys().any(|(_, w)| w == e))
                     .collect();
-                for entity in held {
-                    let now_playing = house.state(&entity);
-                    acts.extend(bridge.heard(&entity, now_playing.as_ref(), now_ms()));
+                for entity in standing {
+                    let reading = house.read(&entity);
+                    bridge.polled(&entity, reading.as_ref().map(|(_, s)| s));
+                    acts.extend(bridge.heard(&entity, reading.as_ref().map(|(p, _)| p), now_ms()));
                 }
             }
             for act in acts {
@@ -1558,6 +2082,37 @@ pub mod ha {
             } => {
                 house.call(&entity, "media_seek", Some(seek(position_ms)));
             }
+            Act::Volume { entity, level } => {
+                // A level of 0 to 1 on the wire: a float to the house, never
+                // in anything a replica applies.
+                house.call(
+                    &entity,
+                    "volume_set",
+                    Some(serde_json::json!({ "volume_level": level.clamp(0, 100) as f64 / 100.0 })),
+                );
+            }
+            Act::Mute { entity, muted } => {
+                house.call(
+                    &entity,
+                    "volume_mute",
+                    Some(serde_json::json!({ "is_volume_muted": muted })),
+                );
+            }
+            Act::Join { leader, members } => {
+                println!(
+                    "harken-server: house: {leader}: joined by {}",
+                    members.join(", ")
+                );
+                house.call(
+                    &leader,
+                    "join",
+                    Some(serde_json::json!({ "group_members": members })),
+                );
+            }
+            Act::Unjoin { entity } => {
+                println!("harken-server: house: {entity}: unjoined");
+                house.call(&entity, "unjoin", None);
+            }
             Act::Start {
                 entity,
                 urls,
@@ -1618,11 +2173,20 @@ pub mod ha {
         })
     }
 
-    /// Home Assistant's REST API, the two calls of it this needs.
+    /// The family of a player that groups, where Home Assistant will not
+    /// say which integration it is: one family for the whole house. Right
+    /// for a house of one make, and harmless in one of two — the house
+    /// refuses a join across makes, and the group it reports back is the
+    /// truth the session then takes.
+    const HOUSE_FAMILY: &str = "home-assistant";
+
+    /// Home Assistant's REST API, the three calls of it this needs.
     struct House {
         base: String,
         bearer: String,
         agent: ureq::Agent,
+        /// Each grouping player's family, asked once.
+        families: std::sync::Mutex<HashMap<String, String>>,
     }
 
     impl House {
@@ -1631,7 +2195,41 @@ pub mod ha {
                 base: config.url.trim_end_matches('/').to_string(),
                 bearer: format!("Bearer {}", config.token),
                 agent: ureq::AgentBuilder::new().timeout(TIMEOUT).build(),
+                families: Default::default(),
             }
+        }
+
+        /// Which integration a player is, which is the family it groups in:
+        /// Home Assistant's state for an entity does not say, and its
+        /// template API does — `config_entry_attr(config_entry_id(e),
+        /// 'domain')` is `sonos` for a Sonos. Asked once per player; a house
+        /// that cannot answer it (an older Home Assistant) puts every
+        /// grouping player in [`HOUSE_FAMILY`].
+        fn family(&self, entity: &str) -> String {
+            if let Some(f) = self
+                .families
+                .lock()
+                .ok()
+                .and_then(|m| m.get(entity).cloned())
+            {
+                return f;
+            }
+            let template =
+                format!("{{{{ config_entry_attr(config_entry_id('{entity}'), 'domain') }}}}");
+            let answer = self
+                .agent
+                .post(&format!("{}/api/template", self.base))
+                .set("Authorization", &self.bearer)
+                .send_json(serde_json::json!({ "template": template }))
+                .ok()
+                .and_then(|r| r.into_string().ok())
+                .map(|t| t.trim().to_string())
+                .filter(|t| !t.is_empty() && t != "None" && !t.contains(char::is_whitespace));
+            let family = answer.unwrap_or_else(|| HOUSE_FAMILY.to_string());
+            if let Ok(mut m) = self.families.lock() {
+                m.insert(entity.to_string(), family.clone());
+            }
+            family
         }
 
         /// `media_player.<service>` on `entity`. Whether it went through, and
@@ -1659,8 +2257,9 @@ pub mod ha {
             sent.is_ok()
         }
 
-        /// What one player is doing, or `None` if it will not say.
-        fn state(&self, entity: &str) -> Option<Playing> {
+        /// What one player is doing, and its volume and group, or `None`
+        /// if it will not say.
+        fn read(&self, entity: &str) -> Option<(Playing, Speaker)> {
             let response = self
                 .agent
                 .get(&format!("{}/api/states/{entity}", self.base))
@@ -1677,7 +2276,34 @@ pub mod ha {
                 return None;
             }
             let attrs = body.get("attributes")?;
-            Some(Playing {
+            let features = attrs
+                .get("supported_features")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let speaker = Speaker {
+                // As 0 to 100, rounded: the one float read from the house,
+                // and never in anything a replica applies.
+                volume: attrs
+                    .get("volume_level")
+                    .and_then(|v| v.as_f64())
+                    .map(|v| (v * 100.0).round().clamp(0.0, 100.0) as i64),
+                muted: attrs
+                    .get("is_volume_muted")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+                can_volume: features & VOLUME_SET != 0,
+                family: (features & GROUPING != 0).then(|| self.family(entity)),
+                members: attrs
+                    .get("group_members")
+                    .and_then(|v| v.as_array())
+                    .map(|xs| {
+                        xs.iter()
+                            .filter_map(|x| x.as_str().map(str::to_string))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            };
+            let playing = Playing {
                 state,
                 url: attrs
                     .get("media_content_id")
@@ -1702,7 +2328,8 @@ pub mod ha {
                     .get("media_duration")
                     .and_then(|v| v.as_f64())
                     .map(|d| (d * 1000.0) as i64),
-            })
+            };
+            Some((playing, speaker))
         }
     }
 }

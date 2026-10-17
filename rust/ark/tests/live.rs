@@ -511,3 +511,78 @@ fn a_record_of_some_fields_of_another_is_built_natively_as_interpreted() {
         Value::record(vec![("id", Value::text("phone")), ("name", Value::text("phone"))])
     );
 }
+
+/// A slot whose value is a record can be walked: `slots()` hands each one
+/// back as a device and its record, natively as interpreted. A slot was a
+/// record of two handles, and a record value is a handle per field, so a
+/// `PerDevice` of records could be read by `get` and not walked at all —
+/// found by harken's groups, which fold over every device's entry. Falsified
+/// by putting `Slot` back as a `Record`: the build panicked, "is 12 bytes,
+/// not 2 values of the vocabulary".
+#[test]
+fn the_slots_of_a_per_device_of_records_can_be_walked() {
+    use ark::authoring::*;
+
+    #[allow(dead_code)]
+    #[derive(Clone, Copy)]
+    pub struct Seat {
+        pub id: Text,
+        pub level: Int,
+    }
+    impl Record for Seat {
+        fn fields() -> Fields<Self> {
+            fields().field("id", text()).field("level", int())
+        }
+    }
+    #[allow(dead_code)]
+    pub struct Hall {
+        pub seats: PerDevice<Seat>,
+        pub total: Int,
+    }
+    impl Record for Hall {
+        fn fields() -> Fields<Self> {
+            fields().named("hall").field("seats", typed::<PerDevice<Seat>>()).field("total", int())
+        }
+    }
+    let r = router::<demo::Demo>("hall");
+    r.live::<Hall>("hall")
+        .scope(|ctx| ctx.user)
+        .init(|| Hall {
+            seats: PerDevice::empty(),
+            total: 0.into(),
+        })
+        .on_join(|s, _ctx, device| {
+            let seats = s.seats.put(
+                device.id,
+                Seat {
+                    id: device.id,
+                    level: 7.into(),
+                },
+            );
+            // Every seat raised by one, and the levels summed: a fold over
+            // the slots whose values are records, twice.
+            let seats = seats.slots().fold(seats, |acc: PerDevice<Seat>, slot| {
+                let seat = slot.value;
+                acc.put(
+                    slot.device,
+                    Seat {
+                        level: seat.level.add(1),
+                        ..seat
+                    },
+                )
+            });
+            Hall {
+                total: seats.slots().fold(Int::from(0), |n: Int, slot| n.add(slot.value.level)),
+                seats,
+            }
+        });
+    let m = Module::new((demo::demo(), r));
+    let natives = m.lives();
+    let n = natives.iter().find(|n| n.name() == "hall").expect("the state");
+    let mut s = ark::eval::constant(&m.build().lookup_state("hall").unwrap().init).unwrap();
+    for d in ["phone", "laptop"] {
+        let input = args([("device", decl(d).record("alice"))]);
+        s = n.agrees("on_join", &s, &lctx(d, 1), &input).unwrap_or_else(|e| panic!("{e}")).unwrap();
+    }
+    assert_eq!(s.field("total"), Value::Int(8 + 9), "the phone raised twice, the laptop once");
+}

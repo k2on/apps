@@ -5,6 +5,7 @@
 mod explorer;
 mod geometry;
 mod signing_in;
+mod volume;
 mod wake;
 
 #[cfg(feature = "demo")]

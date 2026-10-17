@@ -2,7 +2,9 @@
 
 Status: **decided**; phases 1 (the spec and the engine), 1b (Kotlin and
 Swift), 2 (harken's session, the desktop and the web) and 3 (the Android
-app) are built — see the "Landed" sections at the end. Supersedes the opaque live rooms of
+app) are built — see the "Landed" sections at the end — and so are each
+device's volume and joined speakers on the desktop, the web and the bridge
+("Volume and groups", last). Supersedes the opaque live rooms of
 spec §14 (`ark::live`, `ark_server::live`) for anything an app shares in
 real time, starting with harken's listening session.
 
@@ -973,3 +975,210 @@ swap between the two players on a running media session, ExoPlayer's own
 moves through a queue against the reconciler on a device, audio focus and
 "becoming noisy" read as a stall, and the wake that counts a play with
 the screen off.
+
+## Volume and groups
+
+Each device's volume, and speakers joined into one group, as the session
+holds them (`harken/domain`, `harken/server`, `harken/iced`; the phone
+follows from these types). Like every other part of the session, it is
+state: anybody changes it, the device obeys it, and what was done on the
+device itself is said back as the device's own transition.
+
+**The state.** `devices` keeps a harken record per device now — what the
+engine's hook hands `on_join` (`can_play`, `id`, `kind`, `name`, `user`)
+and five fields of the app's own:
+
+```
+devices: PerDevice<{ can_play, can_volume, family: Option<Text>,
+                     follows: Option<Text>, id, kind, muted, name, user,
+                     volume: Int }>
+```
+
+The record is written in place rather than named, so the Kotlin printer
+keeps calling it `ListeningDevices`, whose constructor gained the five.
+
+| transition | does | refused |
+|---|---|---|
+| `equip(can_volume, family?, volume, muted)` | the caller's entry: what it can do and where its volume is; a family that moves takes it out of any group | the caller is not here |
+| `set_volume(device, level)` | that device at `level` (0–100), unmuted | not here, or no volume |
+| `nudge_volume(device, delta)` | moved by `delta` (±100, not 0), clamped, unmuted — what a volume button sends | as `set_volume` |
+| `set_mute(device, muted)` | | as `set_volume` |
+| `report_volume(level, muted)` | the caller's own entry, ordered, since everybody reads it | the caller has no volume |
+| `join(device)` | the speaker follows the output; whoever followed it follows nobody | no output that is here; not joinable |
+| `unjoin(device)` | it follows nobody, and goes quiet | it is in no group |
+| `report_group(members)` | the caller's word on who follows it: each member that is here and of its family follows it, anybody it no longer names follows nobody, and so does anybody who followed a device that is a member now; names it cannot take are passed over | the caller has no family |
+| `set_group_volume(level)` | every member of the output's group with a volume, in proportion, unmuted | nothing in the group has a volume |
+| `nudge_group_volume(delta)` | the same, to the group's level moved by `delta`, clamped | as `set_group_volume` |
+| `set_group_mute(muted)` | every member with a volume | as `set_group_volume` |
+
+`transfer(to)` gained one thing: a `to` that follows a leader leads that
+group now — the old leader and every other member follow it, as Sonos makes
+a member the coordinator — and a `to` that leads keeps its group.
+`on_join` writes the new fields as nothing said: no volume anybody can move,
+drawn at 100, no family, following nobody. `on_leave` takes the leaver's
+group with it: whoever followed it follows nobody.
+
+### Decisions this had to make
+
+- **A group is who follows whom, not a list on the output.** Each device
+  holds at most the one leader it follows, so a device in two groups cannot
+  be written down; a leader follows nobody, a member leads nothing, and a
+  member shares its leader's family — those three are held by the
+  transitions (`joinable`, `followed`, `regrouped`, `led_by`, `dissolved`)
+  and asserted over every device after each step of the domain's tests. It
+  is also what lets `transfer` to a leader keep a group the output never
+  had: speakers grouped in the Sonos app are a group in the session before
+  harken plays anything on them, and stay one after the sound moves away.
+- **The output is a group when anything follows it.** The group's volume is
+  the mean of its members' that have one, rounded down, as Sonos reads a
+  group's level; moving it scales each member by the new level over the old,
+  rounded to the nearest and clamped at 0 and 100 — integers only, so every
+  replica reaches the same numbers — and from a group at 0, where there is
+  no proportion, every member takes the level. A group of one is its
+  leader, so the bar always calls the group transitions while something is
+  the output.
+- **A leader is not unjoined.** The sound handed to a member first makes
+  that member the leader, which is how the Sonos app removes a coordinator.
+- **The family is named `family`**, not `group`, because a group is what a
+  set of joined speakers is.
+- **Moving a volume unmutes**, as a volume button does on every phone; a
+  report sets both, since it says what the device is.
+- **Nothing has a volume until it says so**, once a connection, with
+  `equip`. Defaulting a device that can play to having one would put a
+  slider on the phone that moved nothing until the phone learns to follow
+  it, and would set a browser that just joined to 100 before it said where
+  it was.
+- **No ephemeral "being dragged" slot.** A slider drag is throttled ordered
+  `set_volume` calls — the speaker has to change while the finger moves,
+  which an ephemeral slot set only on release would not do — and those
+  already reach every device twenty times a second. `call_throttled` sends
+  an ordered call at once, its order being its point, so the throttle is
+  the client's: 50 ms (`ark_client::THROTTLE_MS`), trailing edge, the last
+  value sent on release or by the clock.
+- **Only speakers group.** A phone's, a browser's and a desktop's audio
+  cannot be kept in step with another device's, so they declare no family
+  and `joinable` refuses them; a speaker's family is the integration Home
+  Assistant reports.
+
+### The bridge
+
+`Bridge::tune` reconciles each standing speaker's volume and group against
+each session it stands in, by the playback's rule: what moved in the
+session since the bridge last looked is told to the house, and what moved
+in the house while the session stood still — outside `QUIET` — was a hand,
+said as the speaker.
+
+| the session | the house |
+|---|---|
+| `equip`, once a session has it standing | `supported_features` & `VOLUME_SET` (4) and & `GROUPING` (524288), `MediaPlayerEntityFeature` in `homeassistant/components/media_player/const.py`; `volume_level` (0–1, read as 0–100), `is_volume_muted` |
+| `set_volume`, `nudge_volume`, the group's | `media_player.volume_set {volume_level: level/100}` per member |
+| `set_mute`, `set_group_mute` | `media_player.volume_mute {is_volume_muted}` |
+| `join` | `media_player.join {entity_id: leader, group_members: [..]}` |
+| `unjoin` | `media_player.unjoin {entity_id: member}` |
+| `report_volume`, when the house differs and the session did not move | `volume_level`, `is_volume_muted` |
+| `report_group`, likewise, from the leader | `group_members`, the leader first |
+
+- **The family is the integration**, read once per grouping player through
+  the template API — `config_entry_attr(config_entry_id(entity), 'domain')`,
+  which is `sonos` — because an entity's state does not name its platform.
+  A house that cannot answer (a Home Assistant older than that template)
+  puts every grouping player in one family, `home-assistant`: right for a
+  house of one make, and harmless in one of two, since the house refuses a
+  join across makes and the group it then reports is what the session takes.
+- **Groups are reconciled from the leader's side**: who follows the speaker
+  in the session against who plays with it in the house. An unjoin is said
+  only of a speaker the session has in no group at all, since a member
+  another leader took is that leader's `join` — which is what keeps a
+  `transfer` to a member from unjoining it while it is made the leader. The
+  first look at a speaker takes the group the house already has rather than
+  breaking it up.
+- **A member is never handed a queue.** It plays what its leader plays,
+  which the house arranges; and a leader that becomes a member when the
+  sound moves to one of its group is not paused, since a pause said to a
+  member is a pause of its whole group. The group calls go out before the
+  hand-off on each pass, so a member about to lead is the leader in the
+  house before its queue arrives.
+- **Every standing speaker is polled**, not only held ones: its volume and
+  group are worth reading while somebody is listening. A speaker stands
+  only where a client is, so a house nobody is listening in is still asked
+  nothing.
+
+### The clients
+
+The browser's `<audio>` element follows the browser's own entry: it says
+`equip` once a connection with the element's level, sets the element to
+whatever the session says, and says `report_volume` when the element moved
+behind the session's back (it rings the window on `volumechange`). Setting
+a volume or a mute is not what an autoplay policy refuses — starting a sound
+is — so it needs no gesture. iOS keeps a media element's volume at 1, so the
+element is probed once (moved, read back) and a browser where it does not
+move says it has no volume. The desktop sounds nothing and says nothing.
+
+The bar draws a mute and a slider for what is playing — the group's while
+the output is one, this device's while nothing is the output, the local
+player while unlinked. `+` (or `=`) and `-` nudge it by five, `M` mutes it,
+over the page or a menu as the transport keys are. The picker (`d`, now 336
+wide) keeps 23c40a0 — no stop row, this device the default while nothing
+plays — and gains, per row, its slider and mute where it has a volume,
+every member of the playing group ticked, a `+` on a speaker that can join
+and a `−` on one that can leave, and, while the output is a group, a first
+row for the group as a whole ("Kitchen + 1") whose slider is the group's.
+On a row `+`, `-` and `M` are the row's and `J` joins or unjoins it; the
+name is what hands the sound over, the controls beside it their own
+targets. `D` draws each device's volume, family and leader, and the group.
+
+### Tested
+
+Each falsified once; the doc comment beside each says how. In
+`harken/domain/tests/listening.rs`, on the native and the interpreted desk
+at once: nothing has a volume until it says so; a volume set, nudged,
+clamped and muted, and moved unmutes; a report is the caller's own and
+ordered; a speaker joins only its own family and only while here; a group
+never in a state Sonos cannot be in; the sound handed to a member makes it
+the leader; a group's volume in proportion, exactly; a leader's report.
+In `rust/ark/tests/live.rs`: the slots of a `PerDevice` of records can be
+walked (below). In `assistant.rs`: the equip said once; a volume told, and
+a hand reported only after the quiet; a group told and a group made by hand
+reported, and the first look taking the house's; a member regrouped without
+an unjoin or a pause. In `server/tests/bridge.rs`, over real sockets, a
+client, the bridge and two stand-in Sonos: equip, join, a group volume told
+per speaker, a hand on a knob, the Sonos app's grouping both ways, unjoin.
+In `harken-iced`: the player following its volume and a change behind it
+said, through real peers and the engine's desk; the picker's rows for a
+group, the keys on a row, the transition a control calls.
+
+### Found on the way, in the engine
+
+`PerDevice::slots()` of a record could not be walked: `Slot<T>` was a
+record, read as one handle per field, and a record value is many handles,
+so the build panicked ("is 44 bytes, not 2 values of the vocabulary").
+`Slot` is its own `Data` now, one handle taken apart by field, its value
+whatever its type makes of the field — no IR, no runtime and no vector
+moved.
+
+`arkc gen kotlin` printed an optional field of a record as
+`"family" to (family)?.let { .. } ?: Value.VNull`, and `?:` binds looser
+than `to`: the entry was a pair or a value, `Any`, and the APK did not
+compile (found by `harken-apk`; no printed type had had an optional field).
+The option is parenthesised whole now, in Kotlin and in Swift; the demo's
+printed room has none, so `spec/vectors/gen/` is unmoved.
+
+**And in the bridge, before this: a playing speaker's position was read
+as now.** Home Assistant refreshes `media_position` at a change of state and
+dates it `media_position_updated_at`; a Sonos playing on says the position
+its track started at for the whole track. Read as now, the session's clock
+was three seconds ahead of it a few seconds in, and the bridge said `seek`
+back to 0 — every bar ran to six seconds and reset, over and over, while the
+speaker played on. `Playing::position_at` counts it on from its date, read
+against the house's own clock as its answer's `Date` says (to the second,
+taken at its middle); an undated playing position is never a seek. The
+stand-in house in `server/tests/bridge.rs` freezes and dates its positions
+as the real one does. Its own commit, ahead of this section's.
+
+### Not verified
+
+No real Home Assistant and no real Sonos: the service calls and the
+attributes are as the documentation gives them, and the template that names
+the integration is unasked of a real house. No browser has had its
+element's volume set by another device. The phone neither declares a
+volume nor follows one yet — that is the next step, from these types.

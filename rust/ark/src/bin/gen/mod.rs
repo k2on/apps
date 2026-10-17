@@ -413,7 +413,13 @@ fn kt_enc(d: &mut Decls, hint: &str, t: &Ty, e: &str, k: usize) -> String {
         Ty::Text | Ty::Enum(_) => format!("Value.VText({e})"),
         Ty::Bytes => format!("Value.VBytes({e})"),
         Ty::Id(_) => format!("Value.VId({e})"),
-        Ty::Option(x) => format!("({e})?.let {{ o{k} -> {} }} ?: Value.VNull", kt_enc(d, hint, x, &format!("o{k}"), k + 1)),
+        // Parenthesised whole: `?:` binds looser than `to`, so unwrapped a
+        // record's `"k" to x?.let { .. } ?: Value.VNull` is a pair or a
+        // value, `Any`, which a record of an optional field met in harken.
+        Ty::Option(x) => format!(
+            "(({e})?.let {{ o{k} -> {} }} ?: Value.VNull)",
+            kt_enc(d, hint, x, &format!("o{k}"), k + 1)
+        ),
         Ty::List(x) | Ty::NonEmpty(x) => format!("Value.VList({e}.map {{ x{k} -> {} }})", kt_enc(d, hint, x, &format!("x{k}"), k + 1)),
         Ty::PerDevice(x) => format!(
             "Value.VStruct({e}.mapValues {{ (_, x{k}) -> {} }})",
@@ -710,7 +716,7 @@ fn sw_enc(d: &mut Decls, hint: &str, t: &Ty, e: &str) -> String {
         Ty::Text | Ty::Enum(_) => format!(".text({e})"),
         Ty::Bytes => format!(".bytes({e})"),
         Ty::Id(_) => format!(".id({e})"),
-        Ty::Option(x) => format!("{e}.map {{ {} }} ?? .null", sw_enc(d, hint, x, "$0")),
+        Ty::Option(x) => format!("({e}.map {{ {} }} ?? .null)", sw_enc(d, hint, x, "$0")),
         Ty::List(x) | Ty::NonEmpty(x) => format!(".list({e}.map {{ {} }})", sw_enc(d, hint, x, "$0")),
         Ty::PerDevice(x) => format!(".record(Record({e}.map {{ ($0.key, {}) }}))", sw_enc(d, hint, x, "$0.value")),
         Ty::Ephemeral(x) => sw_enc(d, hint, x, e),

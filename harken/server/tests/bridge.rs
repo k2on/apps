@@ -13,8 +13,11 @@
 //!
 //! The Home Assistant here is a stand-in, written from its REST API's
 //! documentation: `POST /api/services/media_player/<service>` with a JSON
-//! body, `GET /api/states/<entity>`, a bearer token on both. What a real one
-//! and a real Sonos make of these calls is not verified here.
+//! body, `GET /api/states/<entity>`, `POST /api/template`, a bearer token on
+//! each. Its players take `volume_set`, `volume_mute`, `join` and `unjoin`
+//! and say `volume_level`, `is_volume_muted`, `group_members` and
+//! `supported_features` as the documentation says a Sonos does. What a real
+//! one and a real Sonos make of these calls is not verified here.
 
 mod common;
 
@@ -66,29 +69,91 @@ async fn service(
     }
     // A pause or a play is done at once, as a speaker would a moment
     // later: otherwise the poll after it reads the speaker as moved by
-    // hand, and the bridge says so.
+    // hand, and the bridge says so. So is a volume, a mute, a join and an
+    // unjoin.
     let now = match service.as_str() {
         "media_pause" => Some("paused"),
         "media_play" => Some("playing"),
         _ => None,
     };
-    if let (Some(now), Some(entity)) = (now, body["entity_id"].as_str()) {
-        if let Some(st) = fake.states.lock().unwrap().get_mut(entity) {
+    let entity = body["entity_id"].as_str().unwrap_or_default().to_string();
+    {
+        let mut states = fake.states.lock().unwrap();
+        if let (Some(now), Some(st)) = (now, states.get_mut(&entity)) {
             // A change of state is when the house dates the position again:
             // where it had got to, as of now.
             let at = position_now(st);
             st["state"] = json!(now);
             date_position(st, at);
         }
-    }
-    if let ("media_seek", Some(entity)) = (service.as_str(), body["entity_id"].as_str()) {
-        if let Some(st) = fake.states.lock().unwrap().get_mut(entity) {
-            let at = body["seek_position"].as_f64().unwrap_or(0.0);
-            date_position(st, at);
+        match service.as_str() {
+            "media_seek" => {
+                if let Some(st) = states.get_mut(&entity) {
+                    let at = body["seek_position"].as_f64().unwrap_or(0.0);
+                    date_position(st, at);
+                }
+            }
+            "volume_set" => {
+                if let Some(st) = states.get_mut(&entity) {
+                    st["attributes"]["volume_level"] = body["volume_level"].clone();
+                }
+            }
+            "volume_mute" => {
+                if let Some(st) = states.get_mut(&entity) {
+                    st["attributes"]["is_volume_muted"] = body["is_volume_muted"].clone();
+                }
+            }
+            "join" => {
+                let mut group = vec![entity.clone()];
+                for m in body["group_members"].as_array().into_iter().flatten() {
+                    group.extend(m.as_str().map(str::to_string));
+                }
+                for e in &group {
+                    if let Some(st) = states.get_mut(e) {
+                        st["attributes"]["group_members"] = json!(group);
+                    }
+                }
+            }
+            "unjoin" => {
+                let group: Vec<String> = states
+                    .get(&entity)
+                    .and_then(|st| st["attributes"]["group_members"].as_array().cloned())
+                    .unwrap_or_default()
+                    .iter()
+                    .filter_map(|m| m.as_str().map(str::to_string))
+                    .filter(|m| *m != entity)
+                    .collect();
+                for e in &group {
+                    if let Some(st) = states.get_mut(e) {
+                        st["attributes"]["group_members"] = json!(group);
+                    }
+                }
+                if let Some(st) = states.get_mut(&entity) {
+                    st["attributes"]["group_members"] = json!([entity]);
+                }
+            }
+            _ => {}
         }
     }
     fake.calls.lock().unwrap().push((service, body));
     StatusCode::OK
+}
+
+/// The template API, for the one template the bridge renders: which
+/// integration a player is. Every player here is a Sonos.
+async fn template(
+    State(fake): State<Fake>,
+    headers: HeaderMap,
+    Json(body): Json<Json_>,
+) -> Result<String, StatusCode> {
+    if !authorised(&fake, &headers) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    let asked = body["template"].as_str().unwrap_or_default();
+    match asked.contains("config_entry_attr(config_entry_id(") {
+        true => Ok("sonos".into()),
+        false => Err(StatusCode::BAD_REQUEST),
+    }
 }
 
 /// The time as Home Assistant writes it: RFC 3339, in UTC, to the
@@ -160,6 +225,7 @@ impl Fake {
         let router = Router::new()
             .route("/api/services/media_player/:service", post(service))
             .route("/api/states/:entity", get(state))
+            .route("/api/template", post(template))
             .with_state(self.clone());
         let listener = rt
             .block_on(tokio::net::TcpListener::bind("127.0.0.1:0"))
@@ -181,17 +247,47 @@ impl Fake {
         self.take()
     }
 
-    /// A player playing `url` from `position_s`, dated now — and from then
-    /// on saying that same position, as Home Assistant does until the next
-    /// change of state.
+    /// What a player is playing, from `position_s`, dated now — and from
+    /// then on saying that same position, as Home Assistant does until the
+    /// next change of state. Its volume and its group stay as they were.
     fn playing(&self, entity: &str, state: &str, url: &str, position_s: f64) {
-        let mut st = json!({
-            "entity_id": entity,
-            "state": state,
-            "attributes": { "media_content_id": url },
-        });
-        date_position(&mut st, position_s);
-        self.states.lock().unwrap().insert(entity.into(), st);
+        let mut states = self.states.lock().unwrap();
+        let st = states
+            .entry(entity.into())
+            .or_insert_with(|| json!({ "entity_id": entity, "attributes": {} }));
+        st["state"] = json!(state);
+        st["attributes"]["media_content_id"] = json!(url);
+        date_position(st, position_s);
+    }
+
+    /// A Sonos, idle: its volume, its group, and what Home Assistant says a
+    /// Sonos supports — `PAUSE | SEEK | VOLUME_SET | VOLUME_MUTE |
+    /// PREVIOUS_TRACK | NEXT_TRACK | PLAY_MEDIA | CLEAR_PLAYLIST | PLAY |
+    /// GROUPING`, among others.
+    fn sonos(&self, entity: &str, volume: f64, members: &[&str]) {
+        self.states.lock().unwrap().insert(
+            entity.into(),
+            json!({
+                "entity_id": entity,
+                "state": "idle",
+                "attributes": {
+                    "volume_level": volume,
+                    "is_volume_muted": false,
+                    "group_members": members,
+                    "supported_features": 1 | 2 | 4 | 8 | 16 | 32 | 512 | 8192 | 16384 | 524_288,
+                },
+            }),
+        );
+    }
+
+    /// One attribute of a player, as the house now has it.
+    fn attribute(&self, entity: &str, name: &str) -> Json_ {
+        self.states.lock().unwrap()[entity]["attributes"][name].clone()
+    }
+
+    /// A hand on the house: an attribute changed outside harken.
+    fn set(&self, entity: &str, name: &str, value: Json_) {
+        self.states.lock().unwrap().get_mut(entity).unwrap()["attributes"][name] = value;
     }
 }
 
@@ -205,6 +301,19 @@ fn house(url: String) -> ha::Config {
         players: vec![(KITCHEN.into(), "Kitchen".into())],
         media: MEDIA.into(),
         tick: Duration::from_millis(40),
+    }
+}
+
+const STUDY: &str = "media_player.study";
+
+/// The house with two Sonos in it.
+fn two_sonos(url: String) -> ha::Config {
+    ha::Config {
+        players: vec![
+            (KITCHEN.into(), "Kitchen".into()),
+            (STUDY.into(), "Study".into()),
+        ],
+        ..house(url)
     }
 }
 
@@ -807,6 +916,158 @@ fn a_browser_a_desktop_and_a_speaker_share_one_session() {
     let a = s.session.unwrap();
     assert_eq!((a.queue, a.at), (queue(&["x", "y"]), 1));
     assert!(matches!(a.clock, Clock::Playing { at_ms: 95_000, .. }));
+    rt.block_on(server.stop());
+}
+
+/// Volume and groups the whole way round, over real sockets, with a client,
+/// the bridge and two stand-in Sonos: each speaker says what it can do and
+/// where its volume is; the phone joins the study to the kitchen it is
+/// playing on, and the house is asked to join them; the phone moves the
+/// group's volume, and each speaker is told its own share of it; somebody
+/// turns the study's knob, and the phone hears it; the Sonos app groups and
+/// ungroups by hand, and the session follows; and the phone unjoins the
+/// study, and the house is asked to let it go.
+///
+/// Falsified by a bridge whose `tune` was never called: the speakers stood
+/// in the session with no volume at all.
+#[test]
+fn a_group_of_speakers_and_its_volume_over_real_sockets() {
+    let rt = runtime();
+    let fake = Fake::default();
+    fake.sonos(KITCHEN, 0.3, &[KITCHEN]);
+    fake.sonos(STUDY, 0.6, &[STUDY]);
+    let url = fake.serve(&rt);
+    let data = tempfile::tempdir().unwrap();
+    let server = serve(&rt, data.path(), |c| c.house = Some(two_sonos(url)));
+
+    let mut phone = device(&server, "max", Kind::Phone, "Pixel", true);
+    let s = told(&mut phone, "two speakers that say what they can do", |s| {
+        [KITCHEN, STUDY].iter().all(|e| {
+            s.device(e)
+                .is_some_and(|d| d.can_volume && d.family.is_some())
+        })
+    });
+    let (k, st) = (s.device(KITCHEN).unwrap(), s.device(STUDY).unwrap());
+    assert_eq!(
+        (k.volume, st.volume),
+        (30, 60),
+        "the levels the house reports"
+    );
+    assert_eq!(
+        k.family.as_deref(),
+        Some("sonos"),
+        "the integration, from the template"
+    );
+    assert!(
+        fake.take().is_empty(),
+        "standing and saying so tells the house nothing"
+    );
+
+    // Playing on the kitchen.
+    call(&mut phone, "start", input::start(&queue(&["a"]), 0, 0, ""));
+    fake.playing(KITCHEN, "playing", &media_url("music/a.mp3"), 0.5);
+    call(&mut phone, "transfer", input::transfer(KITCHEN));
+    told(&mut phone, "the kitchen playing", |s| {
+        s.outputs(KITCHEN) && !s.moving_to(KITCHEN)
+    });
+    fake.take();
+
+    // The study joins it.
+    call(&mut phone, "join", input::member(STUDY));
+    told(&mut phone, "the study in the kitchen's group", |s| {
+        s.grouped()
+    });
+    let calls = fake.calls(1);
+    assert_eq!(
+        calls,
+        [(
+            "join".to_string(),
+            json!({ "entity_id": KITCHEN, "group_members": [STUDY] })
+        )]
+    );
+    assert_eq!(
+        fake.attribute(STUDY, "group_members"),
+        json!([KITCHEN, STUDY])
+    );
+
+    // The group's volume: 30 and 60 are a group at 45, so 90 is 60 and 120,
+    // the second clamped — each told to its own speaker.
+    call(&mut phone, "set_group_volume", input::set_group_volume(90));
+    let s = told(&mut phone, "the group at 90", |s| {
+        s.group_volume(KITCHEN) == Some(80)
+    });
+    assert_eq!(
+        (
+            s.device(KITCHEN).unwrap().volume,
+            s.device(STUDY).unwrap().volume
+        ),
+        (60, 100)
+    );
+    let mut calls = fake.calls(2);
+    calls.sort_by(|a, b| a.1["entity_id"].as_str().cmp(&b.1["entity_id"].as_str()));
+    assert_eq!(
+        calls,
+        [
+            (
+                "volume_set".to_string(),
+                json!({ "entity_id": KITCHEN, "volume_level": 0.6 })
+            ),
+            (
+                "volume_set".to_string(),
+                json!({ "entity_id": STUDY, "volume_level": 1.0 })
+            ),
+        ]
+    );
+    // Quiet past the house catching up: nothing comes back as a hand.
+    std::thread::sleep(Duration::from_millis(300));
+    let s = told(&mut phone, "still 60 and 100", |_| true);
+    assert_eq!(
+        (
+            s.device(KITCHEN).unwrap().volume,
+            s.device(STUDY).unwrap().volume
+        ),
+        (60, 100)
+    );
+    assert!(
+        fake.take().is_empty(),
+        "and the house is told nothing twice"
+    );
+
+    // A hand on the study's knob.
+    fake.set(STUDY, "volume_level", json!(0.25));
+    fake.set(STUDY, "is_volume_muted", json!(true));
+    let s = told(&mut phone, "the study turned down by hand", |s| {
+        s.device(STUDY).is_some_and(|d| d.volume == 25 && d.muted)
+    });
+    assert_eq!(s.device(KITCHEN).unwrap().volume, 60);
+    assert!(
+        fake.take().is_empty(),
+        "a hand is reported, not argued with"
+    );
+
+    // The Sonos app takes the study out, then puts it back.
+    fake.set(KITCHEN, "group_members", json!([KITCHEN]));
+    fake.set(STUDY, "group_members", json!([STUDY]));
+    told(&mut phone, "the study ungrouped by hand", |s| !s.grouped());
+    fake.set(KITCHEN, "group_members", json!([KITCHEN, STUDY]));
+    fake.set(STUDY, "group_members", json!([KITCHEN, STUDY]));
+    told(&mut phone, "the study grouped by hand", |s| s.grouped());
+    assert!(fake.take().is_empty());
+
+    // The phone unjoins it.
+    call(&mut phone, "unjoin", input::member(STUDY));
+    told(&mut phone, "the study alone", |s| !s.grouped());
+    let calls = fake.calls(1);
+    assert_eq!(
+        calls,
+        [("unjoin".to_string(), json!({ "entity_id": STUDY }))]
+    );
+    assert_eq!(fake.attribute(STUDY, "group_members"), json!([STUDY]));
+    assert_eq!(
+        *fake.unauthorised.lock().unwrap(),
+        0,
+        "every call carried the token"
+    );
     rt.block_on(server.stop());
 }
 

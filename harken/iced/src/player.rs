@@ -88,8 +88,8 @@ mod imp {
 // asks for collects it (docs/plan-reactive.md). Last one wins: two presses
 // before that update are one instruction, which is what a person pressing
 // twice meant anyway. The element rings as well whenever it starts, stops
-// or ends on its own — a stall, the end of a stream — so a window with no
-// clock still hears it.
+// or ends on its own — a stall, the end of a stream — or its volume moves,
+// so a window with no clock still hears it.
 let pending = "";
 let wired = false;
 let ring = () => {};
@@ -99,7 +99,7 @@ export function set_ring(f) {
 }
 
 export function watch(el) {
-  for (const name of ["play", "playing", "pause", "ended", "waiting", "seeked"]) {
+  for (const name of ["play", "playing", "pause", "ended", "waiting", "seeked", "volumechange"]) {
     el.addEventListener(name, () => ring());
   }
 }
@@ -196,6 +196,14 @@ export function take_remote() {
         /// …and the whole second the controller's scrubber was last moved to,
         /// which moves once a second where the rest of it moves on a tap.
         timed: i64,
+        /// The volume the element was last given, 0 to 1, and whether it is
+        /// muted: kept, so an element made after it was set still has it.
+        level: f64,
+        muted: bool,
+        /// Whether the element's volume can be set at all, found out once.
+        /// iOS keeps a media element's volume at 1 and hands the volume to
+        /// the hardware buttons, so there a page can mute and not much else.
+        settable: Option<bool>,
     }
 
     impl Sink {
@@ -206,6 +214,9 @@ export function take_remote() {
                 el: None,
                 said: None,
                 timed: -1,
+                level: 1.0,
+                muted: false,
+                settable: None,
             }
         }
 
@@ -221,10 +232,46 @@ export function take_remote() {
                     .dyn_into::<HtmlAudioElement>()
                     .ok()?;
                 el.set_preload("none");
+                el.set_volume(self.level);
+                el.set_muted(self.muted);
                 watch_js(&el);
                 self.el = Some(el);
             }
             self.el.as_ref()
+        }
+
+        /// The element's volume, 0 to 1, and whether it is muted — `None`
+        /// where a page cannot set it.
+        pub fn volume(&mut self) -> Option<(f64, bool)> {
+            let el = self.el()?.clone();
+            let settable = *self.settable.get_or_insert_with(|| {
+                // Moved and read back: on a platform that keeps the volume
+                // for itself, the read is the old value.
+                let was = el.volume();
+                el.set_volume(if was > 0.5 { 0.25 } else { 0.75 });
+                let moved = (el.volume() - was).abs() > 0.01;
+                el.set_volume(was);
+                moved
+            });
+            settable.then(|| (el.volume(), el.muted()))
+        }
+
+        /// What the element was last given.
+        pub fn level(&self) -> (f64, bool) {
+            (self.level, self.muted)
+        }
+
+        /// Give the element a volume. Setting a volume or a mute is never
+        /// what an autoplay policy refuses — that is starting a sound — so
+        /// this needs no gesture.
+        pub fn set_volume(&mut self, level: f64, muted: bool) {
+            self.level = level.clamp(0.0, 1.0);
+            self.muted = muted;
+            let (level, muted) = (self.level, self.muted);
+            if let Some(el) = self.el() {
+                el.set_volume(level);
+                el.set_muted(muted);
+            }
         }
 
         pub fn play(&mut self, url: &str) {
@@ -330,6 +377,14 @@ mod imp {
             None
         }
         pub fn seek(&mut self, _secs: f64) {}
+        /// Nothing to turn up or down.
+        pub fn volume(&mut self) -> Option<(f64, bool)> {
+            None
+        }
+        pub fn set_volume(&mut self, _level: f64, _muted: bool) {}
+        pub fn level(&self) -> (f64, bool) {
+            (1.0, false)
+        }
     }
 }
 
@@ -427,5 +482,23 @@ impl Player {
 
     pub fn seek(&mut self, secs: f64) {
         self.sink.seek(secs);
+    }
+
+    /// The volume this device sounds at, 0 to 100, and whether it is muted
+    /// — `None` where this build cannot set one: the desktop, which sounds
+    /// nothing, and a browser that keeps the volume for itself.
+    pub fn volume(&mut self) -> Option<(i64, bool)> {
+        self.sink.volume().map(|(level, muted)| ((level * 100.0).round() as i64, muted))
+    }
+
+    pub fn set_volume(&mut self, level: i64, muted: bool) {
+        self.sink.set_volume(level.clamp(0, 100) as f64 / 100.0, muted);
+    }
+
+    /// The volume it was last given, 0 to 100, and its mute: what a bar
+    /// draws for a device that is its own session.
+    pub fn level(&self) -> (i64, bool) {
+        let (level, muted) = self.sink.level();
+        ((level * 100.0).round() as i64, muted)
     }
 }

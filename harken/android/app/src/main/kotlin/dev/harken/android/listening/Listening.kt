@@ -159,19 +159,29 @@ public data class Track(
 /** Written in place in a type above, and named for where it is: a record. */
 public data class ListeningDevices(
     public val canPlay: Boolean,
+    public val canVolume: Boolean,
+    public val family: String?,
+    public val follows: String?,
     public val id: String,
     public val kind: String,
+    public val muted: Boolean,
     public val name: String,
     public val user: String,
+    public val volume: Long,
 ) {
     /** As the runtime's value. */
     public fun toValue(): Value =
         Value.record(
             "can_play" to Value.VBool(canPlay),
+            "can_volume" to Value.VBool(canVolume),
+            "family" to ((family)?.let { o0 -> Value.VText(o0) } ?: Value.VNull),
+            "follows" to ((follows)?.let { o0 -> Value.VText(o0) } ?: Value.VNull),
             "id" to Value.VText(id),
             "kind" to Value.VText(kind),
+            "muted" to Value.VBool(muted),
             "name" to Value.VText(name),
             "user" to Value.VText(user),
+            "volume" to Value.VInt(volume),
         )
 
     public companion object {
@@ -179,10 +189,15 @@ public data class ListeningDevices(
         public fun of(v: Value): ListeningDevices =
             ListeningDevices(
                 v.field("can_play").asBool(),
+                v.field("can_volume").asBool(),
+                v.field("family").let { o0 -> if (o0.isNull()) null else o0.asText() },
+                v.field("follows").let { o0 -> if (o0.isNull()) null else o0.asText() },
                 v.field("id").asText(),
                 v.field("kind").asText(),
+                v.field("muted").asBool(),
                 v.field("name").asText(),
                 v.field("user").asText(),
+                v.field("volume").asInt(),
             )
     }
 }

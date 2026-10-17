@@ -42,6 +42,19 @@
 //!   can play; `start` — a track pressed — does when nothing is sounding.
 //!   `on_join` only adds the device to `devices`.
 //!
+//! **Volume is state, per device, and so is a group.** Every device that
+//! has a volume keeps it in its own entry of `devices` — a level and
+//! whether it is muted — and anybody can move it (`set_volume`,
+//! `nudge_volume`, `set_mute`); the device obeys it as the output obeys the
+//! clock, and says what was done to it by hand (`report_volume`). Speakers
+//! of one family (a Sonos is a `sonos`) can be joined: a member *follows* a
+//! leader, which plays and is followed, Sonos's coordinator model — so the
+//! output is a group when anything follows it (`join`, `unjoin`,
+//! `report_group`), and the group's volume moves every member together,
+//! keeping their proportions (`set_group_volume`, `nudge_group_volume`,
+//! `set_group_mute`). A phone, a browser and a desktop have no family: their
+//! audio cannot be kept in step with anybody else's, so nothing joins them.
+//!
 //! Beside the declaration is a plain-Rust reading of it ([`read`]) for the
 //! code that drives a player or a speaker from it, and [`url`], which every
 //! device joins a track's file to its own server with.
@@ -58,9 +71,11 @@ use crate::schema::*;
 /// The live state: who is here, where each of them is dragging a scrubber,
 /// and the session.
 pub struct Listening {
-    /// Who is here, kept by `on_join` and `on_leave`: ordered, and authored
-    /// by nobody — the server runs the hooks as its connections come and go.
-    pub devices: PerDevice<Device>,
+    /// Who is here, kept by `on_join` and `on_leave`, with each device's
+    /// volume and group: ordered — the server runs the hooks as its
+    /// connections come and go, and every change of a volume or a group is a
+    /// transition like any other.
+    pub devices: PerDevice<Present>,
     /// Where each device's scrubber is being dragged to, in milliseconds
     /// into the current track: ephemeral, each device writing its own slot
     /// many times a second (`scrub`), never ordered and never kept.
@@ -71,11 +86,58 @@ impl Record for Listening {
     fn fields() -> Fields<Self> {
         fields()
             .named("listening")
-            .field("devices", typed::<PerDevice<Device>>())
+            .field("devices", typed::<PerDevice<Present>>())
             .ephemeral("scrub", typed::<PerDevice<Int>>())
             .field("session", typed::<Sum<Session>>())
     }
 }
+
+/// A device standing in the session: what it said it is at `hello`, what it
+/// can do, and where its volume and its group are.
+///
+/// Written in place in `devices` rather than named in the type section, so
+/// a runtime's printed type keeps the name it had (`ListeningDevices` in
+/// Kotlin).
+#[derive(Clone, Copy)]
+pub struct Present {
+    pub can_play: Bool,
+    /// Whether anybody can move its volume: what it said of itself
+    /// (`equip`). Nothing has a volume until it says so.
+    pub can_volume: Bool,
+    /// Which speakers it can be joined with: the same family, present on
+    /// both. None for anything that is not a speaker that groups — a phone,
+    /// a browser, a desktop — whose audio cannot be kept in step with
+    /// another's.
+    pub family: Opt<Text>,
+    /// The leader whose playback it follows, while it is joined to one.
+    /// A device follows one leader at most, and a leader follows nobody.
+    pub follows: Opt<Text>,
+    pub id: Text,
+    pub kind: Text,
+    pub muted: Bool,
+    pub name: Text,
+    pub user: Text,
+    /// 0 to 100.
+    pub volume: Int,
+}
+impl Record for Present {
+    fn fields() -> Fields<Self> {
+        fields()
+            .field("can_play", bool_())
+            .field("can_volume", bool_())
+            .field("family", opt(text()))
+            .field("follows", opt(text()))
+            .field("id", text())
+            .field("kind", text())
+            .field("muted", bool_())
+            .field("name", text())
+            .field("user", text())
+            .field("volume", int())
+    }
+}
+
+/// The level a device that has said nothing of its volume is drawn at.
+pub const UNSAID_VOLUME: i64 = 100;
 
 /// Nothing queued, or a queue with somewhere in it.
 pub struct Session;
@@ -291,6 +353,120 @@ impl Input for Scrub {
     }
 }
 
+/// What a device says of itself once it stands in the session: whether its
+/// volume can be moved, which family of speakers it joins, and where its
+/// volume is now.
+pub struct Equip {
+    pub can_volume: Bool,
+    pub family: Opt<Text>,
+    pub muted: Bool,
+    pub volume: Int,
+}
+impl Input for Equip {
+    fn schema() -> Object<Self> {
+        object()
+            .field("can_volume", bool_())
+            .field("family", opt(text().min(1)))
+            .field("muted", bool_())
+            .field("volume", int().range(0, 100))
+    }
+}
+
+/// `set_volume`: a device's level, from anywhere.
+pub struct SetVolume {
+    pub device: Text,
+    pub level: Int,
+}
+impl Input for SetVolume {
+    fn schema() -> Object<Self> {
+        object().field("device", text()).field("level", int().range(0, 100))
+    }
+}
+
+/// `nudge_volume`: a device's level moved by `delta`, clamped — what a
+/// volume button sends, since it knows which way and not where to.
+pub struct NudgeVolume {
+    pub delta: Int,
+    pub device: Text,
+}
+impl Input for NudgeVolume {
+    fn schema() -> Object<Self> {
+        object()
+            .field("delta", int().range(-100, 100).refine(|d| d.ne(0)).why("a nudge moves the volume"))
+            .field("device", text())
+    }
+}
+
+pub struct SetMute {
+    pub device: Text,
+    pub muted: Bool,
+}
+impl Input for SetMute {
+    fn schema() -> Object<Self> {
+        object().field("device", text()).field("muted", bool_())
+    }
+}
+
+/// `report_volume`: the device's own word on its volume, changed on the
+/// speaker or by the operating system.
+pub struct ReportVolume {
+    pub level: Int,
+    pub muted: Bool,
+}
+impl Input for ReportVolume {
+    fn schema() -> Object<Self> {
+        object().field("level", int().range(0, 100)).field("muted", bool_())
+    }
+}
+
+/// `join` and `unjoin`: which speaker.
+pub struct Member {
+    pub device: Text,
+}
+impl Input for Member {
+    fn schema() -> Object<Self> {
+        object().field("device", text())
+    }
+}
+
+/// `report_group`: the leader's word on who follows it, changed outside
+/// harken — the Sonos app, Home Assistant.
+pub struct ReportGroup {
+    pub members: List<Text>,
+}
+impl Input for ReportGroup {
+    fn schema() -> Object<Self> {
+        object().field("members", list(text()))
+    }
+}
+
+pub struct GroupVolume {
+    pub level: Int,
+}
+impl Input for GroupVolume {
+    fn schema() -> Object<Self> {
+        object().field("level", int().range(0, 100))
+    }
+}
+
+pub struct GroupNudge {
+    pub delta: Int,
+}
+impl Input for GroupNudge {
+    fn schema() -> Object<Self> {
+        object().field("delta", int().range(-100, 100).refine(|d| d.ne(0)).why("a nudge moves the volume"))
+    }
+}
+
+pub struct GroupMute {
+    pub muted: Bool,
+}
+impl Input for GroupMute {
+    fn schema() -> Object<Self> {
+        object().field("muted", bool_())
+    }
+}
+
 // The helpers ------------------------------------------------------------------
 
 /// How far into the track a clock is at `now`: where it was paused, or
@@ -351,8 +527,8 @@ pub fn sounding(session: Sum<Session>) -> Bool {
 }
 
 /// Whether the device is here and can make a sound.
-pub fn can_play(devices: PerDevice<Device>, id: Text) -> Bool {
-    helper("can_play", (("devices", devices), ("id", id)), |devices: PerDevice<Device>, id: Text| {
+pub fn can_play(devices: PerDevice<Present>, id: Text) -> Bool {
+    helper("can_play", (("devices", devices), ("id", id)), |devices: PerDevice<Present>, id: Text| {
         devices.get(id).map_or(false, |d| d.can_play)
     })
 }
@@ -446,6 +622,301 @@ fn moved_to(a: Active, at: Int, caller: Text, now: Int) -> Sum<Session> {
 /// The session as it is, for the arm that changes nothing.
 fn idle() -> Sum<Session> {
     Sum::of("idle", Idle {})
+}
+
+// Volumes and groups ------------------------------------------------------------
+
+/// A device as `on_join` first writes it: what it declared, and nothing it
+/// has not said — no volume anybody can move, no family, following nobody.
+pub fn arrived(device: Device) -> Present {
+    Present {
+        can_play: device.can_play,
+        can_volume: false.into(),
+        family: none(),
+        follows: none(),
+        id: device.id,
+        kind: device.kind,
+        muted: false.into(),
+        name: device.name,
+        user: device.user,
+        volume: UNSAID_VOLUME.into(),
+    }
+}
+
+/// The output, where it is a device that is here: the one a group is led
+/// by.
+pub fn output_id(session: Sum<Session>) -> Opt<Text> {
+    helper("output_id", ("session", session), |session: Sum<Session>| {
+        session
+            .case::<Opt<Text>>()
+            .on::<Active>("active", |a| {
+                a.output
+                    .case::<Opt<Text>>()
+                    .on::<Away>("away", |_| none())
+                    .on::<OutputDevice>("device", |d| some(d.id))
+                    .on::<Nowhere>("nowhere", |_| none())
+                    .end()
+            })
+            .on::<Idle>("idle", |_| none())
+            .end()
+    })
+}
+
+/// Whether the device can have its volume moved: here, and said it has one.
+pub fn has_volume(devices: PerDevice<Present>, id: Text) -> Bool {
+    helper(
+        "has_volume",
+        (("devices", devices), ("id", id)),
+        |devices: PerDevice<Present>, id: Text| devices.get(id).map_or(false, |d| d.can_volume),
+    )
+}
+
+/// Whether `d` is in the group `leader` leads: the leader, or following it.
+pub fn in_group(d: Present, leader: Text) -> Bool {
+    helper("in_group", (("d", d), ("leader", leader)), |d: Present, leader: Text| {
+        d.id.eq(leader).or(d.follows.eq(some(leader)))
+    })
+}
+
+/// Whether `id` can be joined to the group `leader` leads now: a speaker
+/// that is here, can play, and is of the leader's family — which both have
+/// — and not the leader itself, which follows nobody.
+pub fn joinable(devices: PerDevice<Present>, leader: Text, id: Text) -> Bool {
+    helper(
+        "joinable",
+        (("devices", devices), ("leader", leader), ("id", id)),
+        |devices: PerDevice<Present>, leader: Text, id: Text| {
+            let family = devices
+                .get(leader)
+                .map_or(none::<Text>(), |l| -> Opt<Text> { pick(l.follows.is_none(), l.family, none::<Text>()) });
+            devices.get(id).map_or(false, |d| {
+                d.id.ne(leader).and(d.can_play).and(d.family.is_some()).and(d.family.eq(family))
+            })
+        },
+    )
+}
+
+/// The fold of [`group_level`]: how many members have a volume, and its sum.
+#[derive(Clone, Copy)]
+pub struct Tally {
+    pub n: Int,
+    pub sum: Int,
+}
+impl Record for Tally {
+    fn fields() -> Fields<Self> {
+        fields().field("n", int()).field("sum", int())
+    }
+}
+
+/// How many of the group `leader` leads have a volume, and their sum.
+pub fn group_tally(devices: PerDevice<Present>, leader: Text) -> Tally {
+    helper(
+        "group_tally",
+        (("devices", devices), ("leader", leader)),
+        |devices: PerDevice<Present>, leader: Text| {
+            devices.slots().fold(Tally { n: 0.into(), sum: 0.into() }, |acc: Tally, s| {
+                pick(
+                    in_group(s.value, leader).and(s.value.can_volume),
+                    Tally {
+                        n: acc.n.add(1),
+                        sum: acc.sum.add(s.value.volume),
+                    },
+                    acc,
+                )
+            })
+        },
+    )
+}
+
+/// The group's volume: the mean of its members', as Sonos reads a group's
+/// level — rounded down, and 0 for a group with no volume at all.
+pub fn group_level(devices: PerDevice<Present>, leader: Text) -> Int {
+    helper(
+        "group_level",
+        (("devices", devices), ("leader", leader)),
+        |devices: PerDevice<Present>, leader: Text| {
+            let t = group_tally(devices, leader);
+            t.sum.div(t.n.max(1))
+        },
+    )
+}
+
+/// One member's level once the group's moves from `from` to `to`: in
+/// proportion, rounded to the nearest, clamped to 0 and 100 — and, from a
+/// group at 0, where there is no proportion to keep, `to` itself.
+pub fn scaled(volume: Int, from: Int, to: Int) -> Int {
+    helper(
+        "scaled",
+        (("volume", volume), ("from", from), ("to", to)),
+        |volume: Int, from: Int, to: Int| pick(from.eq(0), to, volume.mul(to).mul(2).add(from).div(from.max(1).mul(2)).clamp(0, 100)),
+    )
+}
+
+/// The group `leader` leads at the level `to`, every member with a volume
+/// moved in proportion and unmuted.
+pub fn group_at(devices: PerDevice<Present>, leader: Text, to: Int) -> PerDevice<Present> {
+    helper(
+        "group_at",
+        (("devices", devices), ("leader", leader), ("to", to)),
+        |devices: PerDevice<Present>, leader: Text, to: Int| {
+            let from = group_level(devices, leader);
+            devices.slots().fold(devices, |acc: PerDevice<Present>, s| {
+                let d = s.value;
+                acc.put(
+                    s.device,
+                    pick::<Present>(
+                        in_group(d, leader).and(d.can_volume),
+                        Present {
+                            volume: scaled(d.volume, from, to),
+                            muted: false.into(),
+                            ..d
+                        },
+                        d,
+                    ),
+                )
+            })
+        },
+    )
+}
+
+/// The group `leader` leads, every member with a volume muted or not.
+pub fn group_muted(devices: PerDevice<Present>, leader: Text, muted: Bool) -> PerDevice<Present> {
+    helper(
+        "group_muted",
+        (("devices", devices), ("leader", leader), ("muted", muted)),
+        |devices: PerDevice<Present>, leader: Text, muted: Bool| {
+            devices.slots().fold(devices, |acc: PerDevice<Present>, s| {
+                let d = s.value;
+                acc.put(
+                    s.device,
+                    pick::<Present>(in_group(d, leader).and(d.can_volume), Present { muted, ..d }, d),
+                )
+            })
+        },
+    )
+}
+
+/// `id` follows nobody, and nobody follows it: its group, whichever side of
+/// it it was on, is gone.
+pub fn dissolved(devices: PerDevice<Present>, id: Text) -> PerDevice<Present> {
+    helper(
+        "dissolved",
+        (("devices", devices), ("id", id)),
+        |devices: PerDevice<Present>, id: Text| {
+            devices.slots().fold(devices, |acc: PerDevice<Present>, s| {
+                let d = s.value;
+                acc.put(
+                    s.device,
+                    pick::<Present>(d.id.eq(id).or(d.follows.eq(some(id))), Present { follows: none(), ..d }, d),
+                )
+            })
+        },
+    )
+}
+
+/// `id` follows `leader`; whoever followed `id` follows nobody, since a
+/// member leads nothing.
+pub fn followed(devices: PerDevice<Present>, id: Text, leader: Text) -> PerDevice<Present> {
+    helper(
+        "followed",
+        (("devices", devices), ("id", id), ("leader", leader)),
+        |devices: PerDevice<Present>, id: Text, leader: Text| {
+            devices.slots().fold(devices, |acc: PerDevice<Present>, s| {
+                let d = s.value;
+                acc.put(
+                    s.device,
+                    pick::<Present>(
+                        d.id.eq(id),
+                        Present { follows: some(leader), ..d },
+                        pick::<Present>(d.follows.eq(some(id)), Present { follows: none(), ..d }, d),
+                    ),
+                )
+            })
+        },
+    )
+}
+
+/// The sound handed to `to`: if it was following a leader, it leads that
+/// group now — the old leader and every other member follow it — as Sonos
+/// makes a member the coordinator when it is picked. A device that follows
+/// nobody leads whatever follows it already, which is a leader keeping its
+/// group.
+pub fn led_by(devices: PerDevice<Present>, to: Text) -> PerDevice<Present> {
+    helper("led_by", (("devices", devices), ("to", to)), |devices: PerDevice<Present>, to: Text| {
+        let old = devices.get(to).map_or(none::<Text>(), |t| -> Opt<Text> { t.follows });
+        devices.slots().fold(devices, |acc: PerDevice<Present>, s| {
+            let d = s.value;
+            let was = old.is_some().and(some(d.id).eq(old).or(d.follows.eq(old)));
+            acc.put(
+                s.device,
+                pick::<Present>(
+                    d.id.eq(to),
+                    Present { follows: none(), ..d },
+                    pick::<Present>(was, Present { follows: some(to), ..d }, d),
+                ),
+            )
+        })
+    })
+}
+
+/// The leader `caller`'s word on who follows it: each of `members` that is
+/// here and of its family follows it, whoever followed it and is not named
+/// follows nobody, and so does whoever followed a device that is a member
+/// now. The caller itself leads, and follows nobody.
+pub fn regrouped(devices: PerDevice<Present>, caller: Text, members: List<Text>) -> PerDevice<Present> {
+    helper(
+        "regrouped",
+        (("devices", devices), ("caller", caller), ("members", members)),
+        |devices: PerDevice<Present>, caller: Text, members: List<Text>| {
+            let family = devices.get(caller).map_or(none::<Text>(), |c| -> Opt<Text> { c.family });
+            devices.slots().fold(devices, |acc: PerDevice<Present>, s| {
+                let d = s.value;
+                let named = members
+                    .contains(d.id)
+                    .and(d.id.ne(caller))
+                    .and(d.can_play)
+                    .and(family.is_some())
+                    .and(d.family.eq(family));
+                let behind = d.follows.map_or(false, |l| members.contains(l));
+                let follows = pick::<Opt<Text>>(
+                    d.id.eq(caller),
+                    none::<Text>(),
+                    pick::<Opt<Text>>(
+                        named,
+                        some(caller),
+                        pick::<Opt<Text>>(d.follows.eq(some(caller)).or(behind), none::<Text>(), d.follows),
+                    ),
+                );
+                acc.put(s.device, Present { follows, ..d })
+            })
+        },
+    )
+}
+
+/// A device's entry with its volume moved: what `set_volume`,
+/// `nudge_volume`, `set_mute` and `report_volume` write.
+fn tuned(s: Listening, id: Text, f: impl FnOnce(Present) -> Present) -> Listening {
+    let d = s.devices.get(id).unwrap();
+    Listening {
+        devices: s.devices.put(id, f(d)),
+        ..s
+    }
+}
+
+/// The group the output leads, moved by `f`: what the group transitions
+/// write.
+fn grouped(s: Listening, f: impl FnOnce(PerDevice<Present>, Text) -> PerDevice<Present>) -> Listening {
+    let leader = output_id(s.session).unwrap();
+    Listening {
+        devices: f(s.devices, leader),
+        ..s
+    }
+}
+
+/// Whether the output is a device that is here and something in its group
+/// has a volume: what every group transition is guarded by.
+fn group_has_volume(s: Listening) -> Bool {
+    output_id(s.session).map_or(false, |leader| group_tally(s.devices, leader).n.gt(0))
 }
 
 // ---------------------------------------------------------------------------
@@ -646,6 +1117,9 @@ pub fn listening() -> Router<Harken> {
         // that already has it, settled, changes nothing. The device losing
         // it is told nothing: it reads the session and goes quiet.
         .transition::<Transfer>("transfer", |s, _ctx, input| Listening {
+            // A speaker that was following another leads its group now;
+            // a leader keeps the group it has.
+            devices: led_by(s.devices, input.to),
             session: s
                 .session
                 .case::<Sum<Session>>()
@@ -780,6 +1254,111 @@ pub fn listening() -> Router<Harken> {
             ..s
         })
         .guard::<()>("not the output", |s, ctx, ()| is_output(s.session, ctx.device))
+        // What a device says of itself once it stands here: whether its
+        // volume can be moved, which family of speakers it joins, and where
+        // its volume is. Said once a connection, so it describes the device
+        // and not whatever `on_join` assumed. A family that moves takes the
+        // device out of any group it was in.
+        .transition::<Equip>("equip", |s, ctx, input| {
+            let me = s.devices.get(ctx.device).unwrap();
+            let devices = pick::<PerDevice<Present>>(me.family.eq(input.family), s.devices, dissolved(s.devices, ctx.device));
+            let me = devices.get(ctx.device).unwrap();
+            Listening {
+                devices: devices.put(
+                    ctx.device,
+                    Present {
+                        can_volume: input.can_volume,
+                        family: input.family,
+                        muted: input.muted,
+                        volume: input.volume,
+                        ..me
+                    },
+                ),
+                ..s
+            }
+        })
+        .guard::<Equip>("not here", |s, ctx, _input| s.devices.get(ctx.device).is_some())
+        // A device's volume, from anywhere: a slider dragged, a level
+        // picked. Moving the volume unmutes, as a volume button does.
+        .transition::<SetVolume>("set_volume", |s, _ctx, input| {
+            tuned(s, input.device, |d| Present {
+                volume: input.level,
+                muted: false.into(),
+                ..d
+            })
+        })
+        .guard::<SetVolume>("that device is not here, or has no volume", |s, _ctx, input| {
+            has_volume(s.devices, input.device)
+        })
+        // …moved by so much, clamped: what a volume button sends.
+        .transition::<NudgeVolume>("nudge_volume", |s, _ctx, input| {
+            tuned(s, input.device, |d| Present {
+                volume: d.volume.add(input.delta).clamp(0, 100),
+                muted: false.into(),
+                ..d
+            })
+        })
+        .guard::<NudgeVolume>("that device is not here, or has no volume", |s, _ctx, input| {
+            has_volume(s.devices, input.device)
+        })
+        .transition::<SetMute>("set_mute", |s, _ctx, input| {
+            tuned(s, input.device, |d| Present { muted: input.muted, ..d })
+        })
+        .guard::<SetMute>("that device is not here, or has no volume", |s, _ctx, input| {
+            has_volume(s.devices, input.device)
+        })
+        // The device's own word: its volume was changed on the speaker, or
+        // by the operating system. Its own entry only — and ordered, because
+        // everybody else reads it.
+        .transition::<ReportVolume>("report_volume", |s, ctx, input| {
+            tuned(s, ctx.device, |d| Present {
+                volume: input.level,
+                muted: input.muted,
+                ..d
+            })
+        })
+        .guard::<ReportVolume>("not here, or no volume", |s, ctx, _input| has_volume(s.devices, ctx.device))
+        // A speaker joins the output's group: it follows the output, playing
+        // what it plays. Whatever followed the speaker follows nobody.
+        .transition::<Member>("join", |s, _ctx, input| {
+            grouped(s, |devices, leader| followed(devices, input.device, leader))
+        })
+        .guard::<Member>("nothing is playing to join", |s, _ctx, _input| output_id(s.session).is_some())
+        .guard::<Member>("that device cannot join this one", |s, _ctx, input| {
+            output_id(s.session).map_or(false, |leader| joinable(s.devices, leader, input.device))
+        })
+        // …and leaves whatever group it is in, and goes quiet. A leader
+        // follows nobody, so it is not unjoined: the sound handed to a
+        // member first makes that member the leader.
+        .transition::<Member>("unjoin", |s, _ctx, input| tuned(s, input.device, |d| Present { follows: none(), ..d }))
+        .guard::<Member>("that device is not in a group", |s, _ctx, input| {
+            s.devices.get(input.device).map_or(false, |d| d.follows.is_some())
+        })
+        // A leader's word on who follows it, changed outside harken.
+        .transition::<ReportGroup>("report_group", |s, ctx, input| Listening {
+            devices: regrouped(s.devices, ctx.device, input.members),
+            ..s
+        })
+        .guard::<ReportGroup>("not here, or not a speaker that groups", |s, ctx, _input| {
+            s.devices.get(ctx.device).map_or(false, |d| d.family.is_some())
+        })
+        // The output's group at a level: every member with a volume moved
+        // in proportion — Sonos's group volume — and unmuted. A group of one
+        // is its leader's volume.
+        .transition::<GroupVolume>("set_group_volume", |s, _ctx, input| {
+            grouped(s, |devices, leader| group_at(devices, leader, input.level))
+        })
+        .guard::<GroupVolume>("nothing playing has a volume", |s, _ctx, _input| group_has_volume(s))
+        .transition::<GroupNudge>("nudge_group_volume", |s, _ctx, input| {
+            grouped(s, |devices, leader| {
+                group_at(devices, leader, group_level(devices, leader).add(input.delta).clamp(0, 100))
+            })
+        })
+        .guard::<GroupNudge>("nothing playing has a volume", |s, _ctx, _input| group_has_volume(s))
+        .transition::<GroupMute>("set_group_mute", |s, _ctx, input| {
+            grouped(s, |devices, leader| group_muted(devices, leader, input.muted))
+        })
+        .guard::<GroupMute>("nothing playing has a volume", |s, _ctx, _input| group_has_volume(s))
         // Ephemeral: where this device's scrubber is being dragged to, or
         // nowhere once it is let go. It reads nothing of the state.
         .transition::<Scrub>("scrub", |s, ctx, input| Listening {
@@ -791,7 +1370,7 @@ pub fn listening() -> Router<Harken> {
         .on_join(|s, _ctx, device| {
             let id = device.id;
             Listening {
-                devices: s.devices.put(id, device),
+                devices: s.devices.put(id, arrived(device)),
                 session: s
                     .session
                     .case::<Sum<Session>>()
@@ -809,13 +1388,14 @@ pub fn listening() -> Router<Harken> {
                 ..s
             }
         })
-        // A device leaving is gone from `devices`; the output leaving keeps
-        // the sound, away, and the clock stops, because nothing is on the
-        // other end to be making one.
+        // A device leaving is gone from `devices`, and so is its group —
+        // whoever followed it follows nobody; the output leaving keeps the
+        // sound, away, and the clock stops, because nothing is on the other
+        // end to be making one.
         .on_leave(|s, ctx, device| {
             let (id, name) = (device.id, device.name);
             Listening {
-                devices: s.devices.clear(id),
+                devices: dissolved(s.devices, id).clear(id),
                 session: s
                     .session
                     .case::<Sum<Session>>()
@@ -959,6 +1539,35 @@ pub mod read {
         pub kind: Kind,
         pub can_play: bool,
         pub user: String,
+        /// Whether anybody can move its volume.
+        pub can_volume: bool,
+        /// 0 to 100.
+        pub volume: i64,
+        pub muted: bool,
+        /// Which speakers it joins: none for anything that is not a
+        /// speaker that groups.
+        pub family: Option<String>,
+        /// The leader it follows, while it is joined to one.
+        pub follows: Option<String>,
+    }
+
+    impl Device {
+        /// A device as it declared itself, with nothing said of its volume
+        /// or its group: what `on_join` writes.
+        pub fn new(id: &str, name: &str, kind: Kind, can_play: bool) -> Device {
+            Device {
+                id: id.into(),
+                name: name.into(),
+                kind,
+                can_play,
+                user: String::new(),
+                can_volume: false,
+                volume: super::UNSAID_VOLUME,
+                muted: false,
+                family: None,
+                follows: None,
+            }
+        }
     }
 
     /// A track of the queue.
@@ -1064,6 +1673,56 @@ pub mod read {
         pub fn sounding(&self) -> bool {
             matches!(&self.session, Some(a) if a.clock.playing() && matches!(a.output, Output::Device { .. }))
         }
+
+        /// The output, where it is a device that is here: the leader of
+        /// whatever group plays.
+        pub fn leader(&self) -> Option<&str> {
+            match self.output()? {
+                Output::Device { id, .. } => Some(id),
+                _ => None,
+            }
+        }
+
+        /// Who follows `leader`, in id order.
+        pub fn followers(&self, leader: &str) -> Vec<&Device> {
+            let mut out: Vec<&Device> = self.devices.iter().filter(|d| d.follows.as_deref() == Some(leader)).collect();
+            out.sort_by(|a, b| a.id.cmp(&b.id));
+            out
+        }
+
+        /// The group `leader` leads: it, then whoever follows it.
+        pub fn group(&self, leader: &str) -> Vec<&Device> {
+            self.device(leader).into_iter().chain(self.followers(leader)).collect()
+        }
+
+        /// Whether the output is a group: something follows it.
+        pub fn grouped(&self) -> bool {
+            self.leader().is_some_and(|l| !self.followers(l).is_empty())
+        }
+
+        /// The level of the group `leader` leads, as the domain reads it:
+        /// the mean of the members' that have a volume, rounded down. `None`
+        /// for a group in which nothing has one.
+        pub fn group_volume(&self, leader: &str) -> Option<i64> {
+            let levels: Vec<i64> = self.group(leader).iter().filter(|d| d.can_volume).map(|d| d.volume).collect();
+            (!levels.is_empty()).then(|| levels.iter().sum::<i64>() / levels.len() as i64)
+        }
+
+        /// Whether every member of `leader`'s group with a volume is muted.
+        pub fn group_muted(&self, leader: &str) -> bool {
+            let members: Vec<&Device> = self.group(leader).into_iter().filter(|d| d.can_volume).collect();
+            !members.is_empty() && members.iter().all(|d| d.muted)
+        }
+
+        /// Whether `id` can be joined to the output's group now: the
+        /// domain's `joinable`, read the same way.
+        pub fn joinable(&self, id: &str) -> bool {
+            let Some(leader) = self.leader().and_then(|l| self.device(l)) else {
+                return false;
+            };
+            let Some(d) = self.device(id) else { return false };
+            leader.follows.is_none() && d.id != leader.id && d.can_play && d.family.is_some() && d.family == leader.family
+        }
     }
 
     fn text(v: &Value, k: &str) -> Option<String> {
@@ -1157,12 +1816,18 @@ pub mod read {
                     if !is_struct(d) {
                         return None;
                     }
+                    let flag = |k: &str| matches!(d.as_struct().get(k), Some(Value::Bool(true)));
                     devices.push(Device {
                         id: text(d, "id")?,
                         name: text(d, "name")?,
                         kind: Kind::parse(&text(d, "kind")?),
                         can_play: matches!(d.as_struct().get("can_play")?, Value::Bool(true)),
                         user: text(d, "user").unwrap_or_default(),
+                        can_volume: flag("can_volume"),
+                        volume: int(d, "volume").unwrap_or(super::UNSAID_VOLUME),
+                        muted: flag("muted"),
+                        family: text(d, "family"),
+                        follows: text(d, "follows"),
                     });
                 }
             }
@@ -1250,6 +1915,52 @@ pub mod read {
 
         pub fn scrub(at_ms: Option<i64>) -> Args {
             args(vec![("at_ms", at_ms.map_or(Value::Null, |n| Value::Int(n.max(0))))])
+        }
+
+        pub fn equip(can_volume: bool, family: Option<&str>, volume: i64, muted: bool) -> Args {
+            args(vec![
+                ("can_volume", Value::Bool(can_volume)),
+                ("family", family.map_or(Value::Null, Value::text)),
+                ("muted", Value::Bool(muted)),
+                ("volume", Value::Int(volume.clamp(0, 100))),
+            ])
+        }
+
+        pub fn set_volume(device: &str, level: i64) -> Args {
+            args(vec![("device", Value::text(device)), ("level", Value::Int(level.clamp(0, 100)))])
+        }
+
+        pub fn nudge_volume(device: &str, delta: i64) -> Args {
+            args(vec![("delta", Value::Int(delta.clamp(-100, 100))), ("device", Value::text(device))])
+        }
+
+        pub fn set_mute(device: &str, muted: bool) -> Args {
+            args(vec![("device", Value::text(device)), ("muted", Value::Bool(muted))])
+        }
+
+        pub fn report_volume(level: i64, muted: bool) -> Args {
+            args(vec![("level", Value::Int(level.clamp(0, 100))), ("muted", Value::Bool(muted))])
+        }
+
+        /// `join` and `unjoin`.
+        pub fn member(device: &str) -> Args {
+            args(vec![("device", Value::text(device))])
+        }
+
+        pub fn report_group(members: &[&str]) -> Args {
+            args(vec![("members", Value::list(members.iter().map(|m| Value::text(*m)).collect()))])
+        }
+
+        pub fn set_group_volume(level: i64) -> Args {
+            args(vec![("level", Value::Int(level.clamp(0, 100)))])
+        }
+
+        pub fn nudge_group_volume(delta: i64) -> Args {
+            args(vec![("delta", Value::Int(delta.clamp(-100, 100)))])
+        }
+
+        pub fn set_group_mute(muted: bool) -> Args {
+            args(vec![("muted", Value::Bool(muted))])
         }
 
         /// `record_play`'s arguments.

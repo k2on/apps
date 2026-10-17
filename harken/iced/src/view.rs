@@ -16,7 +16,7 @@ use iced::{Alignment, Element, Length, Padding};
 use crate::listening::{self, Clock, Output};
 use crate::places::{Focus, Pane, Source};
 use crate::player::Player;
-use crate::{credit, App, Message, BAR_HEIGHT, DEVICES_WIDTH, PAGE_PADDING, PANE_GAP, SHELF, SIDEBAR, SIDEBAR_WIDTH, TRACKS};
+use crate::{credit, App, Level, Message, BAR_HEIGHT, DEVICES_WIDTH, PAGE_PADDING, PANE_GAP, SHELF, SIDEBAR, SIDEBAR_WIDTH, TRACKS};
 
 // The table's columns. Portions rather than pixels, so the text columns share
 // whatever is left after the fixed ones and none can push another off a
@@ -55,6 +55,32 @@ fn devices<'a>(here: bool) -> iced::widget::Svg<'a> {
         true => p.primary.base.color,
         false => p.background.base.text.scale_alpha(0.75),
     })
+}
+
+/// How wide the bar's volume slider is, and a picker row's.
+const VOLUME_WIDTH: f32 = 84.0;
+
+/// The mute button: the speaker, or the speaker struck through. Dimmed
+/// beside the transport, which it should not compete with for the eye; on a
+/// lit picker row, the one colour legible there.
+fn mute_button<'a>(level: Level, muted: bool, lit: bool) -> Element<'a, Message> {
+    let glyph = if muted { glyphs::MUTED } else { glyphs::VOLUME };
+    let drawn = match lit {
+        true => icon::line(glyph, true),
+        false => icon::plain(glyph, !muted),
+    };
+    button(drawn).style(button::text).padding(2).on_press(Message::Mute(level)).into()
+}
+
+/// A volume slider, 0 to 100, sending as it is dragged and once more when
+/// it is let go.
+fn volume_slider<'a>(level: Level, at: f32) -> Element<'a, Message> {
+    let dragged = level.clone();
+    slider(0.0..=100.0, at, move |v| Message::Volume(dragged.clone(), v))
+        .on_release(Message::VolumeDone)
+        .style(style::seek)
+        .width(Length::Fixed(VOLUME_WIDTH))
+        .into()
 }
 
 impl App {
@@ -836,7 +862,33 @@ impl App {
                 format!("  {}", d.name),
                 format!("{} \u{b7} {} \u{b7} can play {}", d.id, d.kind.name(), yes(d.can_play)),
             ));
+            rows.push((
+                String::new(),
+                format!(
+                    "volume {} \u{b7} family {} \u{b7} follows {}",
+                    match (d.can_volume, d.muted) {
+                        (false, _) => "none".to_string(),
+                        (true, false) => d.volume.to_string(),
+                        (true, true) => format!("{} (muted)", d.volume),
+                    },
+                    d.family.as_deref().unwrap_or("none"),
+                    d.follows.as_deref().unwrap_or("nobody"),
+                ),
+            ));
         }
+        // The group that plays: its leader, its members and its level.
+        rows.push((
+            "group".into(),
+            match session.and_then(|s| s.leader().map(|l| (s, l))) {
+                Some((s, l)) if s.grouped() => format!(
+                    "{l} + {} \u{b7} volume {}{}",
+                    s.followers(l).iter().map(|d| d.id.as_str()).collect::<Vec<_>>().join(", "),
+                    s.group_volume(l).map_or("none".to_string(), |v| v.to_string()),
+                    if s.group_muted(l) { " (muted)" } else { "" }
+                ),
+                _ => "none".into(),
+            },
+        ));
         // The ephemeral slots: where each device's scrubber is being dragged.
         let scrub = session.map(|s| &s.scrub);
         rows.push((
@@ -940,6 +992,31 @@ impl App {
         )
     }
 
+    /// Where a slider for `level` draws: where it is being dragged, or
+    /// where its volume is.
+    fn slider_at(&self, level: &Level, volume: i64) -> f32 {
+        match &self.volume_drag {
+            Some((dragged, at)) if dragged == level => *at,
+            _ => volume as f32,
+        }
+    }
+
+    /// The volume of whatever is playing — the group's when it is one — as a
+    /// mute and a slider; nothing where there is nothing to turn up.
+    fn view_volume(&self) -> Option<Element<'_, Message>> {
+        let v = self.volumed(&Level::Output)?;
+        let (volume, muted) = self.level_of(&v)?;
+        Some(
+            row![
+                mute_button(Level::Output, muted, false),
+                volume_slider(Level::Output, self.slider_at(&Level::Output, volume)),
+            ]
+            .spacing(4)
+            .align_y(Alignment::Center)
+            .into(),
+        )
+    }
+
     /// The now-playing bar, honest about silence: a build with no audio
     /// device says so rather than drawing a transport that does nothing.
     fn view_bar(&self) -> Element<'_, Message> {
@@ -950,9 +1027,12 @@ impl App {
             })
             .size(12)
             .style(style::dim);
-            let mut line = row![idle].spacing(12).align_y(Alignment::Center);
+            let mut line = row![idle, container(text("")).width(Length::Fill)].spacing(12).align_y(Alignment::Center);
+            if let Some(volume) = self.view_volume() {
+                line = line.push(volume);
+            }
             if let Some(output) = self.view_output() {
-                line = line.push(container(text("")).width(Length::Fill)).push(output);
+                line = line.push(output);
             }
             return container(line)
                 .padding([8, 4])
@@ -990,6 +1070,9 @@ impl App {
         ]
         .spacing(12)
         .align_y(Alignment::Center);
+        if let Some(volume) = self.view_volume() {
+            line = line.push(volume);
+        }
         if let Some(output) = self.view_output() {
             line = line.push(output);
         }
@@ -1003,9 +1086,12 @@ impl App {
     }
 
     /// Where the sound is, and everywhere it could be: a row per device of
-    /// this account, ticked where the sound is — and, while it is nowhere,
-    /// on this device, which is where the next press plays. Pausing is the
-    /// transport's; there is no row that stops it everywhere.
+    /// this account, ticked where the sound is — every member of the group
+    /// that plays, when it is one, and, while it is nowhere, this device,
+    /// which is where the next press plays. Each row carries its volume, and
+    /// a speaker that can join what plays a `+`, one in its group a `−`; a
+    /// group comes first as itself, its slider every member's. Pausing is
+    /// the transport's; there is no row that stops it everywhere.
     fn view_devices(&self, at: usize) -> Element<'_, Message> {
         let rows_ = self.picker_rows();
         let me = self.listening.me().to_string();
@@ -1020,38 +1106,53 @@ impl App {
             // most worth drawing.
             let takeable = device.takeable;
             let label = if device.id == me {
-                fit::middle(&device.name, 24)
+                fit::middle(&device.name, 18)
             } else if session.is_some_and(|s| s.moving_to(&device.id)) {
-                format!("{}\u{2026}", fit::middle(&device.name, 20))
+                format!("{}\u{2026}", fit::middle(&device.name, 15))
             } else if device.away {
-                format!("{} (not answering)", fit::middle(&device.name, 14))
+                format!("{} (not answering)", fit::middle(&device.name, 8))
             } else {
-                fit::middle(&device.name, 24)
+                fit::middle(&device.name, 18)
             };
-            let mark = (device.id == output).then(|| Element::from(icon::tick(on_cursor)));
-            let entry = panel::entry(
-                mark,
-                text(label)
-                    .size(13)
-                    .style(move |theme| text::Style {
-                        color: Some(match (on_cursor, takeable) {
-                            (false, false) => arkui::theme::of(theme).background.base.text.scale_alpha(0.4),
-                            (lit, _) => style::entry_text(theme, lit),
-                        }),
-                    })
-                    .into(),
-                None,
-            )
-            .style(move |theme| style::entry(theme, on_cursor, true));
-            let entry: Element<'_, Message> = match takeable {
-                true => mouse_area(entry)
-                    .on_enter(Message::DeviceAt(i))
+            let mark = match device.group {
+                true => Some(Element::from(icon::line(glyphs::PLAYING, on_cursor))),
+                false => (device.id == output || device.playing).then(|| Element::from(icon::tick(on_cursor))),
+            };
+            let name = text(label)
+                .size(13)
+                .width(Length::Fill)
+                .wrapping(text::Wrapping::None)
+                .style(move |theme| text::Style {
+                    color: Some(match (on_cursor, takeable || device.group) {
+                        (false, false) => arkui::theme::of(theme).background.base.text.scale_alpha(0.4),
+                        (lit, _) => style::entry_text(theme, lit),
+                    }),
+                });
+            // The name is what hands the sound over; the controls beside it
+            // are their own targets.
+            let name: Element<'_, Message> = match takeable {
+                true => mouse_area(name)
                     .on_press(Message::DeviceAt(i))
                     .on_release(Message::PickDevice(device.id.clone()))
                     .into(),
-                false => entry.into(),
+                false => name.into(),
             };
-            rows = rows.push(entry);
+            let mut controls = row![].spacing(2).align_y(Alignment::Center);
+            if let Some(join) = device.join {
+                let (glyph, message) = match join {
+                    true => (glyphs::PLUS, Message::Join(device.id.clone())),
+                    false => (glyphs::MINUS, Message::Unjoin(device.id.clone())),
+                };
+                controls = controls.push(button(icon::line(glyph, on_cursor)).style(button::text).padding(2).on_press(message));
+            }
+            if let Some(volume) = device.volume {
+                let level = device.level();
+                controls = controls
+                    .push(mute_button(level.clone(), device.muted, on_cursor))
+                    .push(volume_slider(level.clone(), self.slider_at(&level, volume)));
+            }
+            let entry = panel::entry(mark, name, Some(controls.into())).style(move |theme| style::entry(theme, on_cursor, true));
+            rows = rows.push(mouse_area(entry).on_enter(Message::DeviceAt(i)));
         }
         panel::panel(column![panel::title("Playing on".into()), rows].spacing(0), DEVICES_WIDTH).into()
     }
@@ -1075,7 +1176,13 @@ fn view_help() -> Element<'static, Message> {
         ("<Space>", "play or pause"),
         ("m", "this track's menu"),
         ("a", "which playlists this track is on \u{2014} and make one"),
-        ("d", "which device is making the sound, and move it"),
+        ("d", "which device is making the sound, and move it; each one's volume"),
+        (
+            "+  -",
+            "the volume of what is playing \u{2014} the group's, when it is one; in the picker, the row's",
+        ),
+        ("M", "mute it, or unmute it"),
+        ("J", "in the picker: join this speaker to what is playing, or take it out"),
         ("D", "every number the session holds, and where your changes stand"),
         (
             "E",

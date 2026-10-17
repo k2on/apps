@@ -87,8 +87,8 @@ fn a_right_click_opens_on_the_pointer_and_the_dots_open_on_the_dots() {
 /// move it: `devices_origin` takes no pointer.
 ///
 /// **Said twice, the second time as literals**, because against the
-/// constants both sides move together. 628 and 423 are this panel at 860×600
-/// with two devices and the stop row, by hand: 860 − 16 − 216, and
+/// constants both sides move together. 508 and 423 are this panel at 860×600
+/// with three rows, by hand: 860 − 16 − 336, and
 /// 600 − 16 − 48 − (8 + 24 + 27 × 3). Falsified by leaving `BAR_HEIGHT` out
 /// of `devices_origin`: the literals fail.
 #[test]
@@ -97,7 +97,7 @@ fn the_device_picker_hangs_off_the_speaker_button() {
     let at = App::devices_origin(window, 3);
     assert_eq!(at.x + DEVICES_WIDTH, window.width - PAGE_PADDING);
     assert_eq!(at.y + App::devices_height(3), window.height - PAGE_PADDING - BAR_HEIGHT);
-    assert_eq!((at.x, at.y), (628.0, 423.0));
+    assert_eq!((at.x, at.y), (508.0, 423.0));
 }
 
 /// …and it stays on the glass with a house full of speakers on a window too

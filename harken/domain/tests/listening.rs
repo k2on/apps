@@ -171,6 +171,31 @@ impl House {
         self.state_of("alice")
     }
 
+    /// A speaker of the house: here, able to play, a volume anybody can
+    /// move, and of `family`.
+    fn speaker(&mut self, id: &str, family: &str, volume: i64) {
+        self.arrive_as("alice", id, "speaker", true);
+        self.ok(id, "equip", input::equip(true, Some(family), volume, false));
+    }
+
+    /// Something playing on `speaker`, handed there from the phone and
+    /// started.
+    fn playing_in(&mut self, speaker: &str) {
+        self.playing_on("phone", 0);
+        self.ok("phone", "transfer", input::transfer(speaker));
+        self.ok(speaker, "started", input::at(0));
+    }
+
+    fn volume(&self, id: &str) -> (i64, bool) {
+        let s = self.state();
+        let d = s.device(id).unwrap_or_else(|| panic!("{id} is not here"));
+        (d.volume, d.muted)
+    }
+
+    fn follows(&self, id: &str) -> Option<String> {
+        self.state().device(id).and_then(|d| d.follows.clone())
+    }
+
     /// Something playing on `device`: pressed there, from two tracks in.
     fn playing_on(&mut self, device: &str, position_ms: i64) {
         self.ok(device, "start", input::start(&queue(), 0, position_ms, "album/Brandenburg"));
@@ -192,6 +217,11 @@ fn track(title: &str, n: u8) -> Track {
 
 fn queue() -> Vec<Track> {
     vec![track("a", 1), track("b", 2)]
+}
+
+/// An input written by hand, past what `input`'s helpers would clamp.
+fn input_of(fields: &[(&str, Value)]) -> Args {
+    fields.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
 }
 
 fn output(l: &Listening) -> Output {
@@ -725,7 +755,29 @@ fn a_scrub_is_ephemeral_relayed_and_never_kept() {
     let m = harken_domain::module();
     let c = ark::hash::live_closure(m.build(), m.build().lookup_state(STATE).unwrap());
     for t in [
-        "start", "play", "pause", "seek", "skip", "jump", "transfer", "stop", "started", "advance", "stalled", "release",
+        "start",
+        "play",
+        "pause",
+        "seek",
+        "skip",
+        "jump",
+        "transfer",
+        "stop",
+        "started",
+        "advance",
+        "stalled",
+        "release",
+        "equip",
+        "set_volume",
+        "nudge_volume",
+        "set_mute",
+        "report_volume",
+        "join",
+        "unjoin",
+        "report_group",
+        "set_group_volume",
+        "nudge_group_volume",
+        "set_group_mute",
     ] {
         assert_eq!(c.kind(t), Kind::Ordered, "{t}");
     }
@@ -745,4 +797,341 @@ fn a_scrub_is_ephemeral_relayed_and_never_kept() {
     assert_eq!(h.desks[0].instances[&Instance::new(STATE, "alice")].seq, seq, "not sequenced");
     h.leave("phone");
     assert!(h.state().scrub.is_empty(), "emptied when the phone left");
+}
+
+// ---------------------------------------------------------------------------
+// Volume and groups
+
+/// Nothing has a volume until it says so: a device arrives with none
+/// anybody can move, drawn at the level nobody has said, and following
+/// nobody. A device that says it has one (`equip`) has the level it said;
+/// moving one that has not, or one that is not here, is refused — as is a
+/// report from a device with no volume to report.
+///
+/// Falsified by an `on_join` that gave every device that can play a volume:
+/// the phone's `set_volume` was taken.
+#[test]
+fn nothing_has_a_volume_until_it_says_so() {
+    let mut h = House::new();
+    h.arrive("phone", true);
+    h.arrive("browser", true);
+    let s = h.state();
+    let phone = s.device("phone").unwrap();
+    assert_eq!(
+        (phone.can_volume, phone.volume, phone.muted, phone.family.clone(), phone.follows.clone()),
+        (false, 100, false, None, None)
+    );
+    for to in ["phone", "nobody"] {
+        assert_eq!(
+            h.call("browser", "set_volume", input::set_volume(to, 30)),
+            Err("that device is not here, or has no volume".to_string()),
+            "{to}"
+        );
+    }
+    assert_eq!(
+        h.call("phone", "report_volume", input::report_volume(10, false)),
+        Err("not here, or no volume".to_string())
+    );
+    h.ok("browser", "equip", input::equip(true, None, 64, true));
+    let b = h.state().device("browser").cloned().unwrap();
+    assert_eq!((b.can_volume, b.volume, b.muted, b.family), (true, 64, true, None));
+    assert_eq!(
+        h.call(
+            "browser",
+            "set_volume",
+            input_of(&[("device", Value::text("browser")), ("level", Value::Int(101))])
+        )
+        .map(|_| ()),
+        Err("level: between 0 and 100".to_string()),
+        "a level is 0 to 100"
+    );
+}
+
+/// A device's volume, moved from anywhere: set, nudged either way and
+/// clamped at both ends, muted and unmuted — and moving it unmutes, as a
+/// volume button does. Nobody else's entry moves.
+///
+/// Falsified by `nudge_volume` without its clamp: the browser came out at
+/// 130.
+#[test]
+fn a_volume_is_set_nudged_clamped_and_muted() {
+    let mut h = House::new();
+    h.arrive("phone", true);
+    h.arrive("browser", true);
+    h.ok("browser", "equip", input::equip(true, None, 50, false));
+    h.ok("phone", "set_volume", input::set_volume("browser", 30));
+    assert_eq!(h.volume("browser"), (30, false));
+    h.ok("phone", "nudge_volume", input::nudge_volume("browser", 100));
+    assert_eq!(h.volume("browser"), (100, false), "clamped at the top");
+    h.ok("phone", "nudge_volume", input::nudge_volume("browser", -7));
+    assert_eq!(h.volume("browser"), (93, false));
+    h.ok("phone", "nudge_volume", input::nudge_volume("browser", -100));
+    assert_eq!(h.volume("browser"), (0, false), "and at the bottom");
+    h.ok("phone", "set_mute", input::set_mute("browser", true));
+    assert_eq!(h.volume("browser"), (0, true));
+    h.ok("phone", "nudge_volume", input::nudge_volume("browser", 5));
+    assert_eq!(h.volume("browser"), (5, false), "a volume moved is a volume unmuted");
+    h.ok("phone", "set_mute", input::set_mute("browser", true));
+    h.ok("phone", "set_mute", input::set_mute("browser", false));
+    assert_eq!(h.volume("browser"), (5, false));
+    assert_eq!(
+        h.call("phone", "nudge_volume", input::nudge_volume("browser", 0)),
+        Err("a nudge moves the volume".to_string())
+    );
+    assert_eq!(h.volume("phone"), (100, false), "the phone's own entry never moved");
+}
+
+/// What a device says of its own volume — the knob on the speaker, the
+/// operating system's slider — is written to its own entry and nobody
+/// else's, and everybody hears it as an ordered call.
+///
+/// Falsified by a `report_volume` that wrote `ctx.device`'s level into every
+/// device with a volume: the browser came out at 20 as well.
+#[test]
+fn a_report_of_a_volume_is_the_callers_own() {
+    let mut h = House::new();
+    let phone = h.arrive("phone", true);
+    h.arrive("browser", true);
+    h.ok("browser", "equip", input::equip(true, None, 50, false));
+    h.speaker("media_player.kitchen", "sonos", 35);
+    let out = h.ok("media_player.kitchen", "report_volume", input::report_volume(20, true));
+    assert!(
+        out.iter()
+            .any(|(c, said)| *c == phone && matches!(said, Said::Applied(a) if a.transition == "report_volume" && a.seq().is_some())),
+        "the phone hears it, in order"
+    );
+    assert_eq!(h.volume("media_player.kitchen"), (20, true));
+    assert_eq!(h.volume("browser"), (50, false));
+}
+
+/// A speaker joins the output's group when it is here, can play, and is of
+/// the output's family — never a phone, a browser or a desktop, never a
+/// speaker of another make, never one that has gone, never the output
+/// itself — and leaves it by `unjoin`, which a device in no group is
+/// refused.
+///
+/// Falsified by a `joinable` that did not compare families: the study, a
+/// Sonos, joined the phone, which has no family at all.
+#[test]
+fn a_speaker_joins_only_its_own_family_and_only_while_here() {
+    let mut h = House::new();
+    h.arrive_as("alice", "phone", "phone", true);
+    h.speaker("media_player.kitchen", "sonos", 30);
+    h.speaker("media_player.study", "sonos", 30);
+    h.speaker("media_player.den", "sonos", 30);
+    h.speaker("media_player.cast", "cast", 30);
+    assert_eq!(
+        h.call("phone", "join", input::member("media_player.study")),
+        Err("nothing is playing to join".to_string())
+    );
+    h.playing_on("phone", 0);
+    assert_eq!(
+        h.call("phone", "join", input::member("media_player.study")),
+        Err("that device cannot join this one".to_string()),
+        "a phone has no family: nothing joins it"
+    );
+    h.ok("phone", "transfer", input::transfer("media_player.kitchen"));
+    h.ok("media_player.kitchen", "started", input::at(0));
+    h.leave("media_player.den");
+    for who in ["media_player.cast", "phone", "media_player.kitchen", "media_player.den", "nobody"] {
+        assert_eq!(
+            h.call("phone", "join", input::member(who)),
+            Err("that device cannot join this one".to_string()),
+            "{who}"
+        );
+    }
+    h.ok("phone", "join", input::member("media_player.study"));
+    assert_eq!(h.follows("media_player.study").as_deref(), Some("media_player.kitchen"));
+    assert!(h.state().grouped());
+    assert_eq!(h.state().group("media_player.kitchen").len(), 2);
+    h.ok("phone", "unjoin", input::member("media_player.study"));
+    assert_eq!(h.follows("media_player.study"), None);
+    for who in ["media_player.study", "media_player.kitchen"] {
+        assert_eq!(
+            h.call("phone", "unjoin", input::member(who)),
+            Err("that device is not in a group".to_string()),
+            "{who}: a leader is not unjoined; the sound handed to a member makes it the leader"
+        );
+    }
+}
+
+/// The states a group must never be in, held by the transitions rather
+/// than by the type: a device follows one leader at most, so a leader's
+/// report naming somebody else's member takes it; a member leads nothing,
+/// so a leader joined to the output leaves its own followers behind; a
+/// leader that goes takes its group with it; and a speaker whose family
+/// moves is in no group.
+///
+/// Falsified by a `followed` that did not let go of whoever followed the
+/// device joining: the hall went on following the den once the den
+/// followed the kitchen — a chain.
+#[test]
+fn a_group_is_never_in_a_state_sonos_cannot_be_in() {
+    let mut h = House::new();
+    h.arrive_as("alice", "phone", "phone", true);
+    for id in ["media_player.kitchen", "media_player.study", "media_player.den", "media_player.hall"] {
+        h.speaker(id, "sonos", 40);
+    }
+    h.playing_in("media_player.kitchen");
+    h.ok("phone", "join", input::member("media_player.study"));
+    // The den leads the hall, grouped outside harken; its report takes the
+    // study too, which follows one leader at a time.
+    h.ok(
+        "media_player.den",
+        "report_group",
+        input::report_group(&["media_player.hall", "media_player.study"]),
+    );
+    assert_eq!(h.follows("media_player.study").as_deref(), Some("media_player.den"));
+    assert_eq!(h.follows("media_player.hall").as_deref(), Some("media_player.den"));
+    assert!(!h.state().grouped(), "the kitchen's group lost its only member");
+    // The den joins the kitchen: its own followers follow nobody.
+    h.ok("phone", "join", input::member("media_player.den"));
+    assert_eq!(h.follows("media_player.den").as_deref(), Some("media_player.kitchen"));
+    assert_eq!(h.follows("media_player.hall"), None, "a member leads nothing");
+    assert_eq!(h.follows("media_player.study"), None);
+    // A speaker's family moving takes it out of its group.
+    h.ok("media_player.den", "equip", input::equip(true, Some("heos"), 40, false));
+    assert_eq!(h.follows("media_player.den"), None);
+    // The leader going takes its group with it.
+    h.ok("phone", "join", input::member("media_player.hall"));
+    h.leave("media_player.kitchen");
+    assert_eq!(h.follows("media_player.hall"), None, "nobody follows a device that is not here");
+    for d in &h.state().devices {
+        if let Some(l) = &d.follows {
+            assert!(h.state().device(l).is_some_and(|l| l.follows.is_none()), "{} follows a member", d.id);
+        }
+    }
+}
+
+/// The sound handed to a member makes it the leader, and the rest of the
+/// group — the old leader too — follows it, as Sonos makes a member the
+/// coordinator. Handed to a leader, it keeps its group; and a group the
+/// sound leaves stays a group of speakers.
+///
+/// Falsified by a `transfer` that wrote the output and left `devices`
+/// alone: the study came out the output and still following the kitchen.
+#[test]
+fn the_sound_handed_to_a_member_makes_it_the_leader() {
+    let mut h = House::new();
+    h.arrive_as("alice", "phone", "phone", true);
+    for id in ["media_player.kitchen", "media_player.study", "media_player.den"] {
+        h.speaker(id, "sonos", 40);
+    }
+    h.playing_in("media_player.kitchen");
+    h.ok("phone", "join", input::member("media_player.study"));
+    h.ok("phone", "join", input::member("media_player.den"));
+    h.ok("phone", "transfer", input::transfer("media_player.study"));
+    let s = h.state();
+    assert_eq!(
+        output(&s),
+        Output::Device {
+            id: "media_player.study".into(),
+            moving: true
+        }
+    );
+    assert_eq!(h.follows("media_player.study"), None);
+    assert_eq!(h.follows("media_player.kitchen").as_deref(), Some("media_player.study"));
+    assert_eq!(h.follows("media_player.den").as_deref(), Some("media_player.study"));
+    h.ok("media_player.study", "started", input::at(0));
+    // To the phone and back: the speakers stay one group, led by the study.
+    h.ok("phone", "transfer", input::transfer("phone"));
+    assert!(!h.state().grouped(), "the phone leads nothing");
+    assert_eq!(h.state().followers("media_player.study").len(), 2, "the speakers are still a group");
+    h.ok("phone", "transfer", input::transfer("media_player.study"));
+    assert!(h.state().grouped(), "a leader keeps its group");
+    assert_eq!(h.state().group("media_player.study").len(), 3);
+}
+
+/// The group's volume moves every member together, keeping their
+/// proportions, as Sonos's does: the level is the mean of the members',
+/// each member is scaled to it and rounded, clamped at 0 and 100, and
+/// unmuted. From a group at 0 there is no proportion, so every member takes
+/// the level. A group of one is its leader. Deterministic: the numbers are
+/// exact, on both desks.
+///
+/// Falsified by a `scaled` that set every member to the level: 20 and 60
+/// at 60 came out 60 and 60, where 30 and 90 is Sonos's.
+#[test]
+fn a_groups_volume_moves_every_member_in_proportion() {
+    let mut h = House::new();
+    h.arrive_as("alice", "phone", "phone", true);
+    h.speaker("media_player.kitchen", "sonos", 20);
+    h.speaker("media_player.study", "sonos", 60);
+    h.speaker("media_player.den", "sonos", 70);
+    h.playing_in("media_player.kitchen");
+    h.ok("phone", "join", input::member("media_player.study"));
+    assert_eq!(h.state().group_volume("media_player.kitchen"), Some(40));
+    h.ok("media_player.study", "report_volume", input::report_volume(60, true));
+    h.ok("phone", "set_group_volume", input::set_group_volume(60));
+    assert_eq!(
+        (h.volume("media_player.kitchen"), h.volume("media_player.study")),
+        ((30, false), (90, false)),
+        "60 over 40, each, and unmuted"
+    );
+    assert_eq!(h.volume("media_player.den"), (70, false), "not in the group, not moved");
+    h.ok("phone", "nudge_group_volume", input::nudge_group_volume(20));
+    assert_eq!(
+        (h.volume("media_player.kitchen").0, h.volume("media_player.study").0),
+        (40, 100),
+        "80 over 60: 40, and 120 clamped"
+    );
+    h.ok("phone", "nudge_group_volume", input::nudge_group_volume(-100));
+    assert_eq!((h.volume("media_player.kitchen").0, h.volume("media_player.study").0), (0, 0));
+    h.ok("phone", "set_group_volume", input::set_group_volume(25));
+    assert_eq!(
+        (h.volume("media_player.kitchen").0, h.volume("media_player.study").0),
+        (25, 25),
+        "from nothing there is no proportion to keep"
+    );
+    h.ok("phone", "set_group_mute", input::set_group_mute(true));
+    assert_eq!((h.volume("media_player.kitchen").1, h.volume("media_player.study").1), (true, true));
+    assert!(h.state().group_muted("media_player.kitchen"));
+    // A group of one: the study unjoined, the kitchen alone.
+    h.ok("phone", "unjoin", input::member("media_player.study"));
+    h.ok("phone", "set_group_volume", input::set_group_volume(55));
+    assert_eq!(h.volume("media_player.kitchen"), (55, false));
+    assert_eq!(h.volume("media_player.study"), (25, true));
+
+    // Nothing in the group has a volume: refused.
+    let mut h = House::new();
+    h.arrive_as("alice", "phone", "phone", true);
+    h.playing_on("phone", 0);
+    assert_eq!(
+        h.call("phone", "set_group_volume", input::set_group_volume(10)),
+        Err("nothing playing has a volume".to_string())
+    );
+}
+
+/// A leader's word on its group, changed in the Sonos app: whoever it names
+/// that is here and of its family follows it, anybody it no longer names
+/// follows nobody, and names it cannot follow — another make, a device not
+/// here — are passed over rather than refusing the report. A device that
+/// does not group has no group to report.
+///
+/// Falsified by a `regrouped` that left a member it no longer named
+/// following it: the study stayed in the kitchen's group.
+#[test]
+fn a_leader_reports_its_group() {
+    let mut h = House::new();
+    h.arrive_as("alice", "phone", "phone", true);
+    h.speaker("media_player.kitchen", "sonos", 20);
+    h.speaker("media_player.study", "sonos", 20);
+    h.speaker("media_player.den", "sonos", 20);
+    h.speaker("media_player.cast", "cast", 20);
+    h.ok(
+        "media_player.kitchen",
+        "report_group",
+        input::report_group(&["media_player.study", "media_player.den", "media_player.cast", "media_player.ghost"]),
+    );
+    let s = h.state();
+    let mut members: Vec<&str> = s.followers("media_player.kitchen").iter().map(|d| d.id.as_str()).collect();
+    members.sort_unstable();
+    assert_eq!(members, ["media_player.den", "media_player.study"]);
+    h.ok("media_player.kitchen", "report_group", input::report_group(&["media_player.den"]));
+    assert_eq!(h.follows("media_player.study"), None);
+    assert_eq!(h.follows("media_player.den").as_deref(), Some("media_player.kitchen"));
+    assert_eq!(
+        h.call("phone", "report_group", input::report_group(&["media_player.den"])),
+        Err("not here, or not a speaker that groups".to_string())
+    );
 }

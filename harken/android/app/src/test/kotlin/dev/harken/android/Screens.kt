@@ -340,10 +340,10 @@ class Screens {
 
     private val devices =
         listOf(
-                ListeningDevices(true, "s-phone", "phone", "Pixel 7", "ana"),
-                ListeningDevices(false, "s-desktop", "computer", "Desktop", "ana"),
-                ListeningDevices(true, "s-web", "computer", "Browser", "ana"),
-                ListeningDevices(true, "media_player.kitchen", "speaker", "Kitchen", "ana"),
+                ListeningDevices(true, false, null, null, "s-phone", "phone", false, "Pixel 7", "ana", 100),
+                ListeningDevices(false, false, null, null, "s-desktop", "computer", false, "Desktop", "ana", 100),
+                ListeningDevices(true, false, null, null, "s-web", "computer", false, "Browser", "ana", 100),
+                ListeningDevices(true, false, null, null, "media_player.kitchen", "speaker", false, "Kitchen", "ana", 100),
             )
             .associateBy { it.id }
 

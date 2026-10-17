@@ -158,6 +158,19 @@ pub enum Message {
     DeviceAt(usize),
     PickDevice(String),
     CloseDevices,
+    /// A volume slider dragged, 0 to 100: the bar's, or a picker row's.
+    /// Sent to the session at most every [`ark_client::THROTTLE_MS`], and
+    /// the last value always.
+    Volume(Level, f32),
+    /// …and let go: whatever the throttle held goes now.
+    VolumeDone,
+    /// Mute it, or unmute it.
+    Mute(Level),
+    /// Up or down by so much: `+` and `-`.
+    Nudge(Level, i64),
+    /// A speaker joins the group that is playing, or leaves it.
+    Join(String),
+    Unjoin(String),
     /// Something said it happened (`docs/plan-reactive.md`): the sync
     /// socket opened, closed or brought a frame — the log, an ack, the
     /// listening session — or, in a browser, the back button, a lock-screen
@@ -186,6 +199,51 @@ pub enum Message {
     Pointer(Point),
     Pressed,
     Released,
+}
+
+/// What a volume control moves.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Level {
+    /// Whatever is playing: the output's group — a group of one is its
+    /// leader — or, with no output, this device; alone, this device's
+    /// player. The bar's, and `+`, `-` and `M`'s.
+    Output,
+    /// The output's group, every member in proportion.
+    Group,
+    /// One device of the session.
+    Device(String),
+}
+
+/// What a [`Level`] comes to, now: the transitions it calls, or this
+/// device's own player while it is its own session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Volumed {
+    Group,
+    Device(String),
+    Local,
+}
+
+/// How far `+` and `-` move a volume.
+pub const NUDGE: i64 = 5;
+
+/// How a volume control moves what it moves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Change {
+    To(i64),
+    By(i64),
+    /// Muted the other way from how it is.
+    Mute,
+}
+
+/// The volume keys: `+` (or `=`, the same key unshifted) up, `-` down,
+/// `M` the mute.
+pub fn volume_key(c: char, level: Level) -> Option<Message> {
+    match c {
+        '+' | '=' => Some(Message::Nudge(level, NUDGE)),
+        '-' => Some(Message::Nudge(level, -NUDGE)),
+        'M' => Some(Message::Mute(level)),
+        _ => None,
+    }
 }
 
 /// A transport button, wherever it was pressed ([`App::press`]).
@@ -247,6 +305,12 @@ impl listening::Sound for Sounding<'_> {
     fn seek(&mut self, position_ms: i64) {
         self.player.seek(position_ms as f64 / 1000.0);
     }
+    fn volume(&mut self) -> Option<(i64, bool)> {
+        self.player.volume()
+    }
+    fn set_volume(&mut self, level: i64, muted: bool) {
+        self.player.set_volume(level, muted);
+    }
 }
 
 /// This device's own clock, in milliseconds: how long its player has sat
@@ -255,9 +319,10 @@ fn clock_ms() -> f64 {
     ark_client::autos::monotonic_ms() as f64
 }
 
-/// One row of the device picker: a device standing in the session, or the
-/// one the sound stayed with after its socket went.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// One row of the device picker: a device standing in the session, the
+/// one the sound stayed with after its socket went — or, first, the group
+/// that is playing, as a whole, when the output is one.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PickerRow {
     pub id: String,
     pub name: String,
@@ -266,6 +331,27 @@ pub struct PickerRow {
     pub takeable: bool,
     /// Its socket has gone; the sound stays with it.
     pub away: bool,
+    /// Its volume, where anybody can move it: a row with none draws no
+    /// slider.
+    pub volume: Option<i64>,
+    pub muted: bool,
+    /// Playing what the output plays: the output, or a speaker following it.
+    pub playing: bool,
+    /// What `J` and its button do: join it to the output's group (`Some(true)`),
+    /// take it out (`Some(false)`), or nothing.
+    pub join: Option<bool>,
+    /// The row for the group as a whole, its volume every member's.
+    pub group: bool,
+}
+
+impl PickerRow {
+    /// What its volume controls move.
+    pub fn level(&self) -> Level {
+        match self.group {
+            true => Level::Group,
+            false => Level::Device(self.id.clone()),
+        }
+    }
 }
 
 /// One change this window made, kept so its fate can be said about *it*.
@@ -292,8 +378,9 @@ pub const SHELF: Shelf = Shelf::DEFAULT;
 /// How tall the play bar is — declared because the device picker sits on it
 /// and is placed before anything is laid out.
 pub const BAR_HEIGHT: f32 = 48.0;
-/// What the device picker draws a row at.
-pub const DEVICES_WIDTH: f32 = 216.0;
+/// What the device picker draws a row at: a name, and beside it the row's
+/// join button, its mute and its volume slider.
+pub const DEVICES_WIDTH: f32 = 336.0;
 /// Where a menu asked for with `m` opens, down the window: by key there is no
 /// pointer, and nothing can say where the cursor's row currently is.
 pub const MENU_BY_KEY_Y: f32 = 120.0;
@@ -351,6 +438,12 @@ pub struct App {
     pub session: Option<listening::Listening>,
     /// Where this device's scrubber is being dragged to, in seconds.
     pub scrubbing: Option<f32>,
+    /// A volume slider being dragged, and where to: what it draws until it
+    /// is let go.
+    pub volume_drag: Option<(Level, f32)>,
+    /// …what the throttle is holding back of it, and when it last sent.
+    pub volume_held: Option<(Level, i64)>,
+    pub volume_sent: u64,
     /// Covers, fetched once and kept.
     pub covers: Images,
     /// The `Peer::art_gen` covers were last asked for.
@@ -415,6 +508,9 @@ impl App {
             listening: listening::Remote::new(),
             session: None,
             scrubbing: None,
+            volume_drag: None,
+            volume_held: None,
+            volume_sent: 0,
             covers: Images::new("harken/covers"),
             art_seen: 0,
             server,
@@ -828,6 +924,17 @@ impl App {
         let focus = self.focus();
         if !matches!(focus, Focus::Pane(_)) {
             return match action {
+                // In the device picker the volume keys are the row's, and `J`
+                // joins it or takes it out; over anything else they are what
+                // is playing's, as the transport is.
+                vim::Action::Key(c) if focus == Focus::Devices => match self.device_key(c) {
+                    Some(m) => self.update(m),
+                    None => Task::none(),
+                },
+                vim::Action::Key(c) => match volume_key(c, Level::Output) {
+                    Some(m) => self.update(m),
+                    None => Task::none(),
+                },
                 vim::Action::Activate => match focus {
                     Focus::Menu => self.update(Message::MenuActivate),
                     Focus::Picker => self.update(Message::PickerActivate),
@@ -904,7 +1011,10 @@ impl App {
                 'd' => self.update(Message::OpenDevices),
                 '}' => self.update(Message::Skip(1)),
                 '{' => self.update(Message::Skip(-1)),
-                _ => Task::none(),
+                other => match volume_key(other, Level::Output) {
+                    Some(m) => self.update(m),
+                    None => Task::none(),
+                },
             },
         }
     }
@@ -1019,11 +1129,16 @@ impl App {
     /// The device picker's rows: every device of this account standing in the
     /// session, and — drawn, and not a target — the one the sound stayed
     /// with after its socket went, because that is the row somebody most
-    /// needs to see.
+    /// needs to see. Each says its volume, whether it plays what the output
+    /// plays, and whether it can join the output's group or leave it; and
+    /// when the output is a group, the group itself comes first, its volume
+    /// every member's.
     pub fn picker_rows(&self) -> Vec<PickerRow> {
         let Some(s) = &self.session else {
             return vec![];
         };
+        let leader = s.leader();
+        let follows_output = |d: &listening::Device| leader.is_some_and(|l| d.follows.as_deref() == Some(l));
         let mut rows: Vec<PickerRow> = s
             .devices
             .iter()
@@ -1032,18 +1147,136 @@ impl App {
                 name: d.name.clone(),
                 takeable: d.can_play,
                 away: false,
+                volume: d.can_volume.then_some(d.volume),
+                muted: d.muted,
+                playing: leader == Some(d.id.as_str()) || follows_output(d),
+                join: match follows_output(d) {
+                    true => Some(false),
+                    false => s.joinable(&d.id).then_some(true),
+                },
+                group: false,
             })
             .collect();
         if let Some(listening::Output::Away { id, name }) = s.output() {
             rows.push(PickerRow {
                 id: id.clone(),
                 name: name.clone(),
-                takeable: false,
                 away: true,
+                ..PickerRow::default()
             });
         }
         rows.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id)));
+        if let Some(l) = leader.filter(|_| s.grouped()) {
+            let name = s.device(l).map_or(l, |d| d.name.as_str());
+            rows.insert(
+                0,
+                PickerRow {
+                    name: format!("{name} + {}", s.followers(l).len()),
+                    volume: s.group_volume(l),
+                    muted: s.group_muted(l),
+                    playing: true,
+                    group: true,
+                    ..PickerRow::default()
+                },
+            );
+        }
         rows
+    }
+
+    /// What a key does on the device picker's row under the cursor: `+` and
+    /// `-` its volume, `M` its mute, `J` joins it to what is playing or
+    /// takes it out.
+    pub fn device_key(&self, c: char) -> Option<Message> {
+        let row = self.picker_rows().into_iter().nth(self.devices?)?;
+        match c {
+            'J' => row.join.map(|join| match join {
+                true => Message::Join(row.id.clone()),
+                false => Message::Unjoin(row.id.clone()),
+            }),
+            _ => row.volume.and_then(|_| volume_key(c, row.level())),
+        }
+    }
+
+    /// What a volume control moves comes to, now — `None` where there is
+    /// nothing it could move: a device with no volume, a group with no
+    /// output, a desktop alone.
+    pub fn volumed(&self, level: &Level) -> Option<Volumed> {
+        let Some(s) = &self.session else {
+            return (*level == Level::Output && Player::AUDIBLE).then_some(Volumed::Local);
+        };
+        let device = |id: &str| s.device(id).filter(|d| d.can_volume).map(|_| Volumed::Device(id.to_string()));
+        match level {
+            Level::Group => s.leader().and_then(|l| s.group_volume(l)).map(|_| Volumed::Group),
+            Level::Device(id) => device(id),
+            Level::Output => match s.leader() {
+                Some(l) => s.group_volume(l).map(|_| Volumed::Group),
+                None => device(self.listening.me()),
+            },
+        }
+    }
+
+    /// Where it is now, 0 to 100, and whether it is muted.
+    pub fn level_of(&self, v: &Volumed) -> Option<(i64, bool)> {
+        let s = self.session.as_ref();
+        match v {
+            Volumed::Group => {
+                let s = s?;
+                let l = s.leader()?;
+                Some((s.group_volume(l)?, s.group_muted(l)))
+            }
+            Volumed::Device(id) => s?.device(id).map(|d| (d.volume, d.muted)),
+            Volumed::Local => Some(self.player.level()),
+        }
+    }
+
+    /// The transition a volume control calls: to this level, by so much, or
+    /// muted the other way. `None` for this device's own player, which is
+    /// moved here and not in the session.
+    pub fn volume_call(&self, v: &Volumed, change: Change) -> Option<(&'static str, ark_client::Args)> {
+        use listening::input;
+        let muted = self.level_of(v).is_some_and(|(_, m)| m);
+        Some(match (v, change) {
+            (Volumed::Local, _) => return None,
+            (Volumed::Group, Change::To(level)) => ("set_group_volume", input::set_group_volume(level)),
+            (Volumed::Group, Change::By(delta)) => ("nudge_group_volume", input::nudge_group_volume(delta)),
+            (Volumed::Group, Change::Mute) => ("set_group_mute", input::set_group_mute(!muted)),
+            (Volumed::Device(id), Change::To(level)) => ("set_volume", input::set_volume(id, level)),
+            (Volumed::Device(id), Change::By(delta)) => ("nudge_volume", input::nudge_volume(id, delta)),
+            (Volumed::Device(id), Change::Mute) => ("set_mute", input::set_mute(id, !muted)),
+        })
+    }
+
+    /// Move a volume: a transition, or this device's own player alone.
+    fn change_volume(&mut self, level: &Level, change: Change) {
+        let Some(v) = self.volumed(level) else { return };
+        match self.volume_call(&v, change) {
+            Some((transition, input)) => {
+                if let Err(why) = self.listening.call(&mut self.peer.client, transition, input) {
+                    self.note = why;
+                }
+            }
+            None => {
+                let (was, muted) = self.player.level();
+                match change {
+                    Change::To(level) => self.player.set_volume(level, false),
+                    Change::By(delta) => self.player.set_volume((was + delta).clamp(0, 100), false),
+                    Change::Mute => self.player.set_volume(was, !muted),
+                }
+            }
+        }
+    }
+
+    /// What the throttle is holding of a dragged slider, sent if its window
+    /// has passed — or now, when `force`d by letting go.
+    fn release_volume(&mut self, force: bool) {
+        let now = ark_client::autos::monotonic_ms();
+        if !force && now < self.volume_sent + ark_client::THROTTLE_MS {
+            return;
+        }
+        if let Some((level, to)) = self.volume_held.take() {
+            self.volume_sent = now;
+            self.change_volume(&level, Change::To(to));
+        }
     }
 
     /// The row menu's entries, for one track: every one something this
@@ -1596,6 +1829,31 @@ impl App {
                 self.devices = None;
             }
             Message::CloseDevices => self.devices = None,
+            // A slider dragged: drawn where it is at once, and sent at most
+            // once a throttle's window — the last value whenever it lands.
+            // `call_throttled` sends an ordered call at once, its order being
+            // the point of it, so the throttle for a volume is this window's.
+            Message::Volume(level, to) => {
+                self.volume_drag = Some((level.clone(), to));
+                self.volume_held = Some((level, to.round() as i64));
+                self.release_volume(false);
+            }
+            Message::VolumeDone => {
+                self.release_volume(true);
+                self.volume_drag = None;
+            }
+            Message::Mute(level) => self.change_volume(&level, Change::Mute),
+            Message::Nudge(level, by) => self.change_volume(&level, Change::By(by)),
+            Message::Join(id) => {
+                if let Err(why) = self.listening.call(&mut self.peer.client, "join", listening::input::member(&id)) {
+                    self.note = why;
+                }
+            }
+            Message::Unjoin(id) => {
+                if let Err(why) = self.listening.call(&mut self.peer.client, "unjoin", listening::input::member(&id)) {
+                    self.note = why;
+                }
+            }
             Message::Swallow => {}
             Message::Select(source) => {
                 // A click moves the cursor as well, or the keyboard would carry
@@ -1628,6 +1886,7 @@ impl App {
             // the rest and answers the entry's message, and the picker it opens
             // is shown rather than entered. The clock runs only while it can.
             Message::Tick => {
+                self.release_volume(false);
                 if let Some(m) = self.ctx.tick() {
                     return self.update(m);
                 }
@@ -1730,7 +1989,9 @@ impl App {
     /// timer at all.
     pub fn clock(&self) -> Option<Duration> {
         let fading = self.explore.as_ref().is_some_and(|x| x.ui.fading());
-        if fading || self.ctx.dwelling() {
+        // A volume the throttle holds is sent by the clock, the last value
+        // of a drag that stopped moving without being let go.
+        if fading || self.ctx.dwelling() || self.volume_held.is_some() {
             return Some(Duration::from_millis(50));
         }
         let sounding = self.player.is_playing() || self.session.as_ref().is_some_and(|s| s.sounding());

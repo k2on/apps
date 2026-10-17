@@ -363,14 +363,43 @@ impl<T: Data> Data for PerDevice<T> {
 }
 
 /// One filled slot of a [`PerDevice`], as [`PerDevice::slots`] lists them.
+///
+/// Its own [`Data`] rather than a [`Record`]: a record is read as one
+/// handle per field, and a slot's value may itself be a record — harken's
+/// devices are — which is many. So the slot is one handle, taken apart by
+/// field, and the value is whatever its type makes of the field `value`.
 pub struct Slot<T> {
     pub device: Text,
     pub value: T,
 }
 
-impl<T: Data> Record for Slot<T> {
-    fn fields() -> super::Fields<Self> {
-        super::fields().field("device", super::text()).field("value", super::input::typed::<T>())
+impl<T: Data> Data for Slot<T> {
+    fn ty() -> Ty {
+        Ty::Struct([("device".to_string(), Ty::Text), ("value".to_string(), T::ty())].into_iter().collect())
+    }
+    fn from_h(h: H) -> Self {
+        let part = |name: &str| {
+            if cx::emitting() {
+                cx::e(Expr::Field(Box::new(cx::expr(h)), name.into()))
+            } else {
+                cx::field(h, name.into())
+            }
+        };
+        Slot {
+            device: Text::from_h(part("device")),
+            value: T::from_h(part("value")),
+        }
+    }
+    fn to_h(&self) -> H {
+        let (device, value) = (self.device.to_h(), self.value.to_h());
+        if cx::emitting() {
+            return cx::e(Expr::Struct(
+                [("device".to_string(), cx::expr(device)), ("value".to_string(), cx::expr(value))]
+                    .into_iter()
+                    .collect(),
+            ));
+        }
+        cx::lit(Value::record(vec![("device", cx::value(device)), ("value", cx::value(value))]))
     }
 }
 
