@@ -517,6 +517,67 @@ fn picking_a_speaker_picks_up_where_the_track_was() {
     assert_eq!(h.value("alice"), before);
 }
 
+/// A hand-off is a pause, not a second sound and not a restart: at the
+/// `transfer` the clock stops where the track was — counted on from when it
+/// last started, to the server's moment of the transfer — and stands there,
+/// on every device, until the device the sound went to says it has started;
+/// then it runs on from wherever that device says it is. A pause pressed
+/// meanwhile pauses it there, and so does the device going; a transfer back
+/// before it started hands back that same point. The same for a sound that
+/// was paused: it stays where it was.
+///
+/// Falsified by a `transfer` that left the clock running (the hand-off
+/// stood at the anchor it had before: 90 000 where 91 500 was right), and by
+/// a `standing` that ignored `moving` (the pause, seven seconds into the
+/// hand-off, landed at 98 500).
+#[test]
+fn a_hand_off_stands_still_where_the_track_was_until_it_has_started() {
+    let mut h = House::new();
+    h.arrive_as("alice", "phone", "phone", true);
+    h.arrive_as("alice", "browser", "computer", true);
+    h.arrive_as("alice", "media_player.kitchen", "speaker", true);
+    h.playing_on("phone", 90_000);
+    h.wait(1_500);
+    h.ok("phone", "transfer", input::transfer("media_player.kitchen"));
+    assert_eq!(clock(&h.state()), Clock::Playing { at_ms: 91_500, since: h.now }, "stopped where it was");
+    h.wait(5_000);
+    let s = h.state();
+    let a = s.session.as_ref().unwrap();
+    assert_eq!(a.position(h.now), 91_500, "and standing there while the speaker fetches");
+    assert!(!s.outputs("phone"), "the phone is not the output: it goes quiet now, not at `started`");
+
+    // A pause meanwhile pauses it where it stands, and play plays on from
+    // there, still waiting for the speaker.
+    h.wait(2_000);
+    h.ok("browser", "pause", input::none());
+    assert_eq!(clock(&h.state()), Clock::Paused { at_ms: 91_500 });
+    h.ok("browser", "play", input::none());
+    h.wait(3_000);
+    assert_eq!(h.state().session.unwrap().position(h.now), 91_500);
+
+    // Handed on to the browser before the speaker started: the same point.
+    h.ok("phone", "transfer", input::transfer("browser"));
+    h.wait(4_000);
+    assert_eq!(h.state().session.unwrap().position(h.now), 91_500);
+    h.ok("browser", "started", input::at(91_520));
+    h.wait(1_000);
+    let s = h.state();
+    assert_eq!(s.session.as_ref().unwrap().position(h.now), 92_520, "running on from where it started");
+    assert!(s.outputs("browser") && !s.moving_to("browser"));
+
+    // A paused session handed over stays paused where it was.
+    h.ok("phone", "pause", input::none());
+    h.wait(10_000);
+    h.ok("phone", "transfer", input::transfer("phone"));
+    assert_eq!(clock(&h.state()), Clock::Paused { at_ms: 92_520 });
+    // …and the device it went to going before it started keeps that point.
+    h.ok("browser", "play", input::none());
+    h.ok("phone", "transfer", input::transfer("media_player.kitchen"));
+    h.wait(6_000);
+    h.leave("media_player.kitchen");
+    assert_eq!(clock(&h.state()), Clock::Paused { at_ms: 92_520 });
+}
+
 /// The sound cannot be handed to something that is not answering, which is
 /// the one way to lose it entirely — nor to something that cannot be heard,
 /// nor to nothing at all.

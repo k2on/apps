@@ -66,6 +66,9 @@ struct Queue {
     heard: Option<usize>,
     /// What the speaker reports a URL it was given as: its `TrackURI`.
     spell: fn(&str) -> String,
+    /// Until when the item it is on is still loading: a seek before then is
+    /// dropped, as a Sonos drops one sent before it has read the stream.
+    loading: Option<std::time::Instant>,
 }
 
 const TOKEN: &str = "a-long-lived-token";
@@ -109,6 +112,7 @@ async fn service(
             date_position(st, at);
         }
         match service.as_str() {
+            "media_seek" if fake.still_loading(&entity) => {}
             "media_seek" => {
                 if let Some(st) = states.get_mut(&entity) {
                     let at = body["seek_position"].as_f64().unwrap_or(0.0);
@@ -253,6 +257,7 @@ impl Fake {
                 at: None,
                 heard: None,
                 spell,
+                loading: None,
             },
         );
         self.sonos(entity, 0.3, &[entity]);
@@ -314,6 +319,7 @@ impl Fake {
             let q = queues.get_mut(entity).unwrap();
             q.at = at;
             q.heard = at.map(|a| a + 1).or(q.heard);
+            q.loading = Some(std::time::Instant::now() + LOADING);
             (at.map(|a| (q.spell)(&q.urls[a])), at.map(|a| a + 1))
         };
         let mut states = self.states.lock().unwrap();
@@ -341,6 +347,21 @@ impl Fake {
             q.at.map(|a| a + 1).filter(|n| *n < q.urls.len())
         };
         self.on_item(entity, next);
+    }
+
+    /// Whether the item this player is on is still loading.
+    fn still_loading(&self, entity: &str) -> bool {
+        self.queues
+            .lock()
+            .unwrap()
+            .get(entity)
+            .and_then(|q| q.loading)
+            .is_some_and(|until| std::time::Instant::now() < until)
+    }
+
+    /// Where a player is now, in milliseconds.
+    fn at_ms(&self, entity: &str) -> i64 {
+        (position_now(&self.states.lock().unwrap()[entity]) * 1000.0) as i64
     }
 
     /// The URLs a player's own queue holds, as it was given them.
@@ -419,6 +440,10 @@ impl Fake {
 }
 
 const KITCHEN: &str = "media_player.kitchen";
+
+/// How long a player that keeps a queue takes to load a track: longer than
+/// it takes the bridge to ask it to seek.
+const LOADING: Duration = Duration::from_millis(150);
 const MEDIA: &str = "http://10.0.0.2:8787";
 
 fn house(url: String) -> ha::Config {
@@ -1383,4 +1408,151 @@ fn a_speaker_plays_through_the_queue_it_was_handed() {
 #[test]
 fn a_speaker_plays_through_the_queue_however_it_spells_it() {
     a_speaker_plays_through(respelt);
+}
+
+/// Where `p`'s session stands now, by its own clock of the server's, if
+/// anything is queued.
+fn standing(p: &mut Peer) -> Option<i64> {
+    let now = p.server_now();
+    let s = p.live(STATE).and_then(|v| Listening::from_value(&v))?;
+    Some(s.session?.position(now))
+}
+
+/// The second bug as somebody heard it: playing a track on one device and
+/// picking a speaker, the first device played on until the speaker answered,
+/// and then the speaker started the track again from the beginning. A
+/// hand-off is a pause where the track was and the same point picked up on
+/// the device it went to.
+///
+/// Here a browser is forty seconds into a track and hands it to the kitchen,
+/// which drops a seek sent before it has loaded the track ([`LOADING`]), as
+/// a Sonos does. From the transfer on the browser is not the output — its
+/// reconciler goes quiet on that, which `harken-iced`'s tests hold — and the
+/// session stands still where the track was while the kitchen fetches; the
+/// kitchen ends up there and not at 0; and on no device does the session's
+/// position ever go back. Then the same handed back to the browser, which
+/// says it has started where the kitchen was, and the kitchen is paused.
+///
+/// Falsified by a `transfer` that left the clock as it was (the session
+/// stood at where the track had been started, behind where it had got to:
+/// "went back 344 ms on device 1"), and by a bridge that said `started` at
+/// the first position the kitchen reported ("went back 39857 ms on device
+/// 0": the kitchen at the beginning, and every device with it).
+#[test]
+fn a_hand_off_picks_up_where_the_track_stopped() {
+    let rt = runtime();
+    let fake = Fake::default();
+    fake.keeps_a_queue(KITCHEN, as_given);
+    let url = fake.serve(&rt);
+    let data = tempfile::tempdir().unwrap();
+    let server = serve(&rt, data.path(), |c| c.house = Some(house(url)));
+
+    let mut browser = device(&server, "max", Kind::Computer, "Browser", true);
+    let mut desktop = device(&server, "max", Kind::Computer, "Desktop", false);
+    let b = me(&browser);
+    for who in 0..2 {
+        told_among(
+            &mut [&mut browser, &mut desktop],
+            who,
+            "three devices",
+            |s| s.devices.len() == 3,
+        );
+    }
+    call(
+        &mut browser,
+        "start",
+        input::start(&queue(&["a", "b"]), 0, 40_000, "album/Mixed"),
+    );
+    for who in 0..2 {
+        told_among(
+            &mut [&mut browser, &mut desktop],
+            who,
+            "the browser forty seconds in",
+            |s| s.outputs(&b) && s.sounding(),
+        );
+    }
+    std::thread::sleep(Duration::from_millis(300));
+    call(&mut browser, "transfer", input::transfer(KITCHEN));
+    let s = browser
+        .live(STATE)
+        .and_then(|v| Listening::from_value(&v))
+        .unwrap();
+    assert!(
+        !s.outputs(&b) && s.moving_to(KITCHEN),
+        "the browser is not the output from the transfer on, before anybody answers"
+    );
+    let handed = standing(&mut browser).unwrap();
+    assert!(
+        (40_000..41_000).contains(&handed),
+        "handed where it was: {handed}"
+    );
+
+    // Until the kitchen has started: every device's position, sampled.
+    let mut last = [handed; 2];
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        for (i, p) in [&mut browser, &mut desktop].into_iter().enumerate() {
+            p.pump();
+            let Some(at) = standing(p) else { continue };
+            assert!(
+                at + 300 >= last[i],
+                "went back {} ms on device {i}",
+                last[i] - at
+            );
+            last[i] = last[i].max(at);
+        }
+        let settled = [&mut browser, &mut desktop].into_iter().all(|p| {
+            p.live(STATE)
+                .and_then(|v| Listening::from_value(&v))
+                .is_some_and(|s| s.outputs(KITCHEN) && !s.moving_to(KITCHEN))
+        });
+        if settled && std::time::Instant::now() > deadline - Duration::from_secs(8) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the kitchen never started"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let kitchen = fake.at_ms(KITCHEN);
+    assert!(
+        (handed..handed + 4_000).contains(&kitchen),
+        "the kitchen picked up where the track was: {kitchen} ms, handed at {handed}"
+    );
+    let calls = fake.take();
+    let seeks = calls.iter().filter(|(c, _)| c == "media_seek").count();
+    assert!(
+        seeks >= 2,
+        "the first seek was dropped and it was told again: {calls:#?}"
+    );
+
+    // …and back to the browser, which starts where the kitchen was.
+    call(&mut desktop, "transfer", input::transfer(&b));
+    let s = told_among(
+        &mut [&mut browser, &mut desktop],
+        0,
+        "the browser connecting",
+        |s| s.moving_to(&b),
+    );
+    assert!(!s.outputs(KITCHEN));
+    let from = standing(&mut browser).unwrap();
+    assert!(
+        from + 300 >= last[0],
+        "the hand-back stands where the kitchen was: {from}"
+    );
+    call(&mut browser, "started", input::at(from));
+    let s = told_among(
+        &mut [&mut desktop, &mut browser],
+        0,
+        "the browser playing",
+        |s| s.outputs(&b) && !s.moving_to(&b) && s.sounding(),
+    );
+    assert!(s.session.unwrap().position(desktop.server_now()) + 300 >= from);
+    let calls = fake.calls(1);
+    assert!(
+        calls.iter().any(|(c, _)| c == "media_pause"),
+        "the kitchen is quiet once it is not the output: {calls:#?}"
+    );
+    rt.block_on(server.stop());
 }

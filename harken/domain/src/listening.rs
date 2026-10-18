@@ -481,11 +481,56 @@ pub fn position(clock: Sum<Clock>, now: Int) -> Int {
     })
 }
 
+/// Where the session stands at `now`: its clock's position — except while
+/// the sound is on its way to a device (`moving`), when it stands where it
+/// was handed over. Nothing is making a sound in between: the device that
+/// had it went quiet at the `transfer`, and the one it went to has not said
+/// it has `started`, so a clock that ran on through a speaker's few seconds
+/// of fetching would be counting a sound nobody heard — and the speaker
+/// would be told to start that far past where the track stopped.
+pub fn standing(clock: Sum<Clock>, output: Sum<Output>, now: Int) -> Int {
+    helper(
+        "standing",
+        (("clock", clock), ("output", output), ("now", now)),
+        |clock: Sum<Clock>, output: Sum<Output>, now: Int| {
+            let moving = output
+                .case::<Bool>()
+                .on::<Away>("away", |_| false.into())
+                .on::<OutputDevice>("device", |d| d.moving)
+                .on::<Nowhere>("nowhere", |_| false.into())
+                .end();
+            let anchor = clock
+                .case::<Int>()
+                .on::<Paused>("paused", |p| p.at_ms)
+                .on::<Playing>("playing", |p| p.at_ms)
+                .end();
+            pick(moving, anchor, position(clock, now))
+        },
+    )
+}
+
 /// The clock paused where it is at `now`.
 pub fn paused_at(clock: Sum<Clock>, now: Int) -> Sum<Clock> {
     helper("paused_at", (("clock", clock), ("now", now)), |clock: Sum<Clock>, now: Int| {
         Sum::of("paused", Paused { at_ms: position(clock, now) })
     })
+}
+
+/// The session's clock paused where the session stands at `now`
+/// ([`standing`]).
+pub fn halted(clock: Sum<Clock>, output: Sum<Output>, now: Int) -> Sum<Clock> {
+    helper(
+        "halted",
+        (("clock", clock), ("output", output), ("now", now)),
+        |clock: Sum<Clock>, output: Sum<Output>, now: Int| {
+            Sum::of(
+                "paused",
+                Paused {
+                    at_ms: standing(clock, output, now),
+                },
+            )
+        },
+    )
 }
 
 /// The clock at `ms`, playing on from there if it was playing.
@@ -1011,7 +1056,7 @@ pub fn listening() -> Router<Harken> {
                             clock: Sum::of(
                                 "playing",
                                 Playing {
-                                    at_ms: position(a.clock, ctx.now),
+                                    at_ms: standing(a.clock, a.output, ctx.now),
                                     since: ctx.now,
                                 },
                             ),
@@ -1037,7 +1082,7 @@ pub fn listening() -> Router<Harken> {
                     Sum::of(
                         "active",
                         Active {
-                            clock: paused_at(a.clock, ctx.now),
+                            clock: halted(a.clock, a.output, ctx.now),
                             ..a
                         },
                     )
@@ -1116,7 +1161,13 @@ pub fn listening() -> Router<Harken> {
         // `moving` until it says it has started; handing it to the device
         // that already has it, settled, changes nothing. The device losing
         // it is told nothing: it reads the session and goes quiet.
-        .transition::<Transfer>("transfer", |s, _ctx, input| Listening {
+        //
+        // The clock stops where it is, playing or not, and stands there
+        // until the device it went to says it has started ([`standing`]):
+        // the device losing the sound goes quiet at once, the one gaining it
+        // starts where it stopped, and in between is a pause, never two
+        // sounds and never a track counted on that nobody heard.
+        .transition::<Transfer>("transfer", |s, ctx, input| Listening {
             // A speaker that was following another leads its group now;
             // a leader keeps the group it has.
             devices: led_by(s.devices, input.to),
@@ -1124,11 +1175,13 @@ pub fn listening() -> Router<Harken> {
                 .session
                 .case::<Sum<Session>>()
                 .on::<Active>("active", |a| {
+                    let same = a.output.eq(here(input.to));
                     Sum::of(
                         "active",
                         Active {
+                            clock: pick(same, a.clock, clock_at(a.clock, standing(a.clock, a.output, ctx.now), ctx.now)),
                             output: pick(
-                                a.output.eq(here(input.to)),
+                                same,
                                 a.output,
                                 Sum::of(
                                     "device",
@@ -1243,7 +1296,7 @@ pub fn listening() -> Router<Harken> {
                     Sum::of(
                         "active",
                         Active {
-                            clock: paused_at(a.clock, ctx.now),
+                            clock: halted(a.clock, a.output, ctx.now),
                             output: Sum::of("nowhere", Nowhere {}),
                             ..a
                         },
@@ -1405,7 +1458,7 @@ pub fn listening() -> Router<Harken> {
                             Sum::of(
                                 "active",
                                 Active {
-                                    clock: paused_at(a.clock, ctx.now),
+                                    clock: halted(a.clock, a.output, ctx.now),
                                     output: Sum::of("away", Away { id, name }),
                                     ..a
                                 },
@@ -1434,7 +1487,7 @@ pub fn listening() -> Router<Harken> {
                             clock: Sum::of(
                                 "paused",
                                 Paused {
-                                    at_ms: position(a.clock, ctx.now).min(duration_at(a.queue.list(), a.at)),
+                                    at_ms: standing(a.clock, a.output, ctx.now).min(duration_at(a.queue.list(), a.at)),
                                 },
                             ),
                             output: Sum::of("nowhere", Nowhere {}),
@@ -1637,6 +1690,18 @@ pub mod read {
         /// The track playing.
         pub fn now(&self) -> &Track {
             &self.queue[self.at.min(self.queue.len() - 1)]
+        }
+
+        /// Where the session stands at `now`, the server's clock: the
+        /// clock's position, except that a hand-off in flight stands still
+        /// where it was handed until its device says it has started — the
+        /// domain's `standing`, read the same way. What every bar draws and
+        /// every device that takes the sound starts from.
+        pub fn position(&self, now: i64) -> i64 {
+            match (&self.output, self.clock) {
+                (Output::Device { moving: true, .. }, Clock::Playing { at_ms, .. } | Clock::Paused { at_ms }) => at_ms,
+                (_, clock) => clock.position(now),
+            }
         }
     }
 

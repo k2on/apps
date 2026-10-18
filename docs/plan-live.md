@@ -1298,3 +1298,66 @@ are escaped (a build before this one prints the same line without the
 parenthesis). The same line with a URL of another file, or `"" which is
 not ours` repeated, is a different cause (a speaker sent elsewhere, or
 silent longer than `LAPSE` between tracks).
+
+## A hand-off is a pause where the track was
+
+Reported as "playing a song on a device and connecting to a speaker, it
+keeps playing and then connects to the speaker and restarts the song". Two
+defects, one in the domain and one in the bridge.
+
+**The clock ran on through the hand-off.** `transfer` set the output to the
+target, `moving`, and left the clock as it was — `playing`, counting from its
+`since`. Every reconciler was already right that the device losing the sound
+is not the output from that moment (`outputs` is any `device` with that id,
+moving or not, in iced, on Android and in the bridge; `harken-iced`'s
+`the_output_obeys_the_session_and_nobody_else_makes_a_sound` holds it), so
+the old device went quiet; but nothing was making a sound, and every bar —
+the old device's too — went on counting a track nobody heard for as long as
+the speaker took to fetch it, which over Home Assistant is seconds. That is
+the "keeps playing". Now `transfer` re-anchors the clock at where the
+session stands at the server's moment of the transfer, and a session whose
+output is `moving` *stands*: its position is the clock's anchor, playing or
+not, until the target says `started` (`standing`, and `read::Active::
+position` and Android's `Session.Active.position` reading it the same way).
+A pause meanwhile pauses it there (`halted`, which `pause`, `release`,
+`on_leave` and `on_restore` use where they used `paused_at`), play plays on
+from there, a transfer elsewhere hands on that same point. The target loads
+the track where the session stands, so a browser or a phone taking the
+sound starts where it stopped; `started` re-anchors at what the target says.
+
+**The speaker started the track from the beginning, and the session went
+with it.** The bridge's hand-off enqueued the queue and sent `media_seek`
+straight after, against a speaker that had not read a byte of the stream; a
+Sonos drops a seek then. The speaker played from 0, the bridge said
+`started` at what it reported — 0 — and `started` re-anchored every device
+there. Now a speaker that reports the handed track from its beginning, when
+it was handed from more than `DRIFT_MS` in, is told to seek again once it
+has the track (`SEEKS`, three, a `QUIET` apart), and has not started until it
+is where the track was; then `started` is said at that position. One that
+never goes there is believed after three tries. The session stands still
+meanwhile, so nothing goes back.
+
+Decided: the old output goes quiet at the `transfer`, not at `started` —
+the gap is a pause, never two sounds. A transfer to the device that already
+has it, settled, still changes nothing, clock included.
+
+**Tested**, each falsified once: `a_hand_off_stands_still_where_the_track_was_until_it_has_started`
+(the domain, both desks: falsified by a `transfer` that kept the clock as it
+was — it stood at 90 000 where 91 500 was right — and by a `standing` that
+ignored `moving` — a pause seven seconds into the hand-off landed at
+98 500); `a_speaker_that_starts_the_track_from_its_beginning_is_sent_where_it_was`
+(the bridge's rule: falsified by saying `started` at the first report, at
+0); `a_hand_off_picks_up_where_the_track_stopped` (over real sockets, with a
+stand-in Sonos that keeps a queue and drops a seek sent before it has loaded
+the track: a browser forty seconds in hands to the kitchen and back, no
+device's position ever goes back, the kitchen ends up at forty seconds and
+not at 0, and is paused once the browser has it — falsified both ways
+above: "went back 344 ms on device 1", "went back 39857 ms on device 0");
+and `a_hand_off_between_two_players_picks_up_where_the_track_stopped`
+(`harken-iced`, through real peers and the engine's desk: the browser silent
+on its next reconcile, the session standing at forty seconds through a
+slow laptop, the laptop loading there — falsified by loading where the
+clock counts, 41 506).
+
+Not verified: a real Sonos dropping, or keeping, the early seek; the phone
+as a target on a device.

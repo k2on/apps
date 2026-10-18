@@ -77,6 +77,13 @@ pub const LAPSE: u8 = 3;
 /// house catching up with its own speaker is not somebody pressing pause.
 pub const QUIET: u8 = 2;
 
+/// How many times a speaker that started a hand-off at the beginning of the
+/// track is told again to go where the track was, before it is believed.
+/// The seek that follows the enqueue reaches a speaker that may not have read
+/// a byte of the stream yet, and a Sonos then drops it: the track starts from
+/// the beginning, and the session — told `started` at 0 — went back with it.
+pub const SEEKS: u8 = 3;
+
 /// How far a playing speaker may be from where the session counts it before
 /// one is told the other: the speaker is right about where it is (`seek`
 /// said as it), and the session is right about where somebody asked it to
@@ -338,6 +345,13 @@ struct Holding {
     quiet: u8,
     /// Where it last said it was, and when.
     heard: Option<(i64, i64)>,
+    /// Where in the track it was handed from: what `started` is said at once
+    /// it is there, and what it is told to seek to until it is.
+    from_ms: i64,
+    /// Seeks to `from_ms` said since the hand-off ([`SEEKS`] at most), and
+    /// polls to wait before the next.
+    sought: u8,
+    seek_wait: u8,
 }
 
 impl Holding {
@@ -436,7 +450,8 @@ impl Bridge {
 
     fn hand(&mut self, key: &str, entity: &str, a: &Active, now: i64) -> Act {
         let urls = self.urls(a);
-        let position_ms = a.clock.position(now);
+        // Where the session stands — still, while the sound is on its way.
+        let position_ms = a.position(now);
         self.held.insert(
             entity.to_string(),
             Holding {
@@ -451,6 +466,9 @@ impl Bridge {
                 settling: SETTLE,
                 quiet: QUIET,
                 heard: None,
+                from_ms: position_ms,
+                sought: 0,
+                seek_wait: 0,
             },
         );
         Act::Start {
@@ -555,7 +573,7 @@ impl Bridge {
         if a.clock != h.clock {
             // Where the speaker is now, counted on from where it last said it
             // was, as it was then: playing or not.
-            let want = a.clock.position(now);
+            let want = a.position(now);
             let speaker = match h.heard {
                 Some((at_ms, when)) if h.playing => at_ms + (now - when).max(0),
                 Some((at_ms, _)) => at_ms,
@@ -628,7 +646,6 @@ impl Bridge {
         // Undated, it is taken to be where the session counts it — so it is
         // never the reason for a seek.
         let dated = p.position_at(now);
-        let position = dated.unwrap_or_else(|| h.clock.position(now));
         let playing = p.state == "playing";
         let mut acts = vec![];
         if !h.started {
@@ -637,12 +654,35 @@ impl Bridge {
             if at != h.handed_at {
                 return self.lapse(entity, poll);
             }
+            let position = dated.unwrap_or(h.from_ms);
+            // Playing the track it was handed, but from its beginning when it
+            // was handed from half way: the seek after the enqueue reached it
+            // before it had loaded and was dropped. It is told again, once it
+            // has the track, and it has not started until it is there —
+            // `started` at 0 would take every device's clock back to the
+            // beginning with it. The session stands where it was meanwhile.
+            if h.from_ms > DRIFT_MS && position < h.from_ms - DRIFT_MS && h.sought < SEEKS {
+                if h.seek_wait > 0 {
+                    h.seek_wait -= 1;
+                    return acts;
+                }
+                h.sought += 1;
+                h.seek_wait = QUIET;
+                h.settling = SETTLE;
+                acts.push(Act::Seek {
+                    entity: entity.into(),
+                    position_ms: h.from_ms,
+                });
+                return acts;
+            }
             h.started = true;
             h.settling = LAPSE;
+            h.quiet = QUIET;
             h.heard = Some((position, now));
             acts.push(call("started", input::at(position), "it has the hand-off"));
             return acts;
         }
+        let position = dated.unwrap_or_else(|| h.clock.position(now));
         h.settling = LAPSE;
         h.heard = Some((position, now));
         if at != h.at {
@@ -1142,10 +1182,12 @@ mod tests {
     /// A hand-off is the whole queue as URLs the speaker can fetch —
     /// resolved against the address the *speaker* can reach, which is not
     /// the one a phone uses — from the track it was on, at the point in it
-    /// the session had got to.
+    /// the session stands at: still, while the sound is on its way, so a
+    /// speaker that took a second and a half to be asked is not told to
+    /// start a second and a half past where the track stopped.
     ///
-    /// Falsified by handing the position as the clock's anchor rather than
-    /// counted to now: the speaker was told 42 000 where 43 500 was right.
+    /// Falsified by handing the clock counted on to now: the speaker was
+    /// told 43 500 where 42 000 was right.
     #[test]
     fn a_hand_off_is_the_whole_queue_as_urls_the_speaker_can_fetch() {
         let mut b = bridge();
@@ -1166,11 +1208,74 @@ mod tests {
                 entity: KITCHEN.into(),
                 urls: vec![url_of("music/a.mp3"), url_of("music/b.mp3")],
                 at: 1,
-                position_ms: 43_500,
+                position_ms: 42_000,
                 playing: true,
             }]
         );
         assert_eq!(b.holder(KITCHEN), Some("alice"));
+    }
+
+    /// A speaker handed a track from half way that starts it from the
+    /// beginning — the seek after the enqueue reached it before it had
+    /// loaded, and a Sonos drops it — is told again where the track was,
+    /// once it has the track, and has not started until it is there. The
+    /// session hears `started` at the point it was handed from, never at 0.
+    /// One that will not go there after three tries is believed.
+    ///
+    /// Falsified by saying `started` at whatever the speaker first reports:
+    /// the session was told the track had started at 0.
+    #[test]
+    fn a_speaker_that_starts_the_track_from_its_beginning_is_sent_where_it_was() {
+        let mut b = bridge();
+        let files = ["music/a.mp3", "music/b.mp3"];
+        let handed = session(&files, 0, playing_at(90_000), kitchen(true));
+        b.wants("alice", KITCHEN, &handed, NOW);
+        let seek = [Act::Seek {
+            entity: KITCHEN.into(),
+            position_ms: 90_000,
+        }];
+        let at_start = playing(&url_of(files[0]), 0);
+        assert_eq!(
+            b.heard(KITCHEN, Some(&at_start), NOW),
+            seek,
+            "told again, now it has the track"
+        );
+        for _ in 0..2 {
+            assert!(
+                b.heard(KITCHEN, Some(&at_start), NOW).is_empty(),
+                "a moment for it to get there"
+            );
+        }
+        assert_eq!(b.heard(KITCHEN, Some(&at_start), NOW), seek, "and again");
+        let there = playing(&url_of(files[0]), 90_200);
+        let acts = b.heard(KITCHEN, Some(&there), NOW);
+        assert_eq!(calls(&acts), [("alice", "started")]);
+        let Act::Call { input, .. } = &acts[0] else {
+            unreachable!()
+        };
+        assert_eq!(input, &input::at(90_200), "started where the track was");
+
+        // A speaker that never goes: believed after three tries.
+        let mut b = bridge();
+        b.wants("alice", KITCHEN, &handed, NOW);
+        let mut seeks = 0;
+        for _ in 0..20 {
+            let acts = b.heard(KITCHEN, Some(&at_start), NOW);
+            seeks += acts
+                .iter()
+                .filter(|a| matches!(a, Act::Seek { .. }))
+                .count();
+            if !calls(&acts).is_empty() {
+                assert_eq!(calls(&acts), [("alice", "started")]);
+                break;
+            }
+        }
+        assert_eq!(seeks, 3);
+        assert!(b.holds(KITCHEN), "and never let go while it was being told");
+
+        // From the beginning, nothing to seek: it starts at once.
+        let mut b = bridge();
+        started(&mut b, "alice", &files, 0);
     }
 
     /// An entity this server was not told to offer is not a device, so a

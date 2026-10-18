@@ -196,9 +196,11 @@ impl Remote {
     }
 
     /// How far into the track, counted on from the session's clock against
-    /// the server's: what a scrubber drawn from any device shows.
+    /// the server's — and standing still while the sound is on its way to
+    /// another device ([`Active::position`]): what a scrubber drawn from any
+    /// device shows.
     pub fn position_ms(peer: &Peer, a: &Active) -> i64 {
-        a.clock.position(peer.server_now())
+        a.position(peer.server_now())
     }
 
     /// Call a transition of the session. A refusal — the preview's, here —
@@ -322,7 +324,10 @@ impl Remote {
     fn drive(&mut self, peer: &mut Peer, sound: &mut impl Sound, queue: &mut Vec<Track>, a: &Active, clock: f64) {
         let now = peer.server_now();
         let track = a.now().clone();
-        let want = a.clock.position(now);
+        // Where the session stands: a hand-off to this device stands where
+        // the track was until this device says it has started, so the track
+        // is loaded where it stopped on the device that had it.
+        let want = a.position(now);
         if sound.loaded() != Some(track.id) || *queue != a.queue {
             *queue = a.queue.clone();
             if sound.loaded() != Some(track.id) {
@@ -638,6 +643,65 @@ mod tests {
         assert!(sl.playing && sl.loaded() == Some(queue()[0].id));
         let s = rl.session(net.peer(l)).unwrap();
         assert!(s.outputs("laptop") && !s.moving_to("laptop"), "the laptop said it had started");
+    }
+
+    /// A hand-off between two players is a pause where the track was and the
+    /// same point picked up on the other: the browser forty seconds in hands
+    /// it to the laptop, and is silent on its next reconcile — not when the
+    /// laptop answers; the session stands at forty seconds meanwhile however
+    /// long the laptop takes; the laptop loads the track there and says it
+    /// started there; and at no point does any device's position go back.
+    ///
+    /// Falsified by loading the track where the session's clock counts it
+    /// rather than where the session stands: the laptop, a second and a half
+    /// late to reconcile, loaded at 41 506 where the track had stopped at
+    /// 40 000.
+    #[test]
+    fn a_hand_off_between_two_players_picks_up_where_the_track_stopped() {
+        let mut net = Net::new();
+        let b = net.device("browser", true);
+        let l = net.device("laptop", true);
+        let (mut rb, mut rl) = (Remote::new(), Remote::new());
+        rb.open("browser");
+        rl.open("laptop");
+        let (mut sb, mut sl) = (Fake::default(), Fake::default());
+        let (mut qb, mut ql) = (vec![], vec![]);
+        rb.call(net.peer(b), "start", input::start(&queue(), 0, 40_000, "")).unwrap();
+        net.carry();
+        rb.reconcile(net.peer(b), &mut sb, &mut qb, 0, "", 0.0);
+        assert!(sb.playing);
+        let stands = |r: &Remote, p: &mut Peer| {
+            let now = p.server_now();
+            r.session(p).and_then(|s| s.session).map(|a| a.position(now)).unwrap()
+        };
+
+        rb.call(net.peer(b), "transfer", input::transfer("laptop")).unwrap();
+        rb.reconcile(net.peer(b), &mut sb, &mut qb, 0, "", 1.0);
+        assert!(!sb.playing, "silent on the reconcile after its own transfer, before anybody answers");
+        net.carry();
+        let handed = stands(&rb, net.peer(b));
+        assert!((40_000..40_500).contains(&handed), "{handed}");
+        // The laptop is slow to get to it.
+        std::thread::sleep(std::time::Duration::from_millis(1_500));
+        assert_eq!(
+            stands(&rb, net.peer(b)),
+            handed,
+            "standing where it was, not counting a sound nobody hears"
+        );
+        rl.reconcile(net.peer(l), &mut sl, &mut ql, 0, "", 2.0);
+        assert_eq!(sl.loaded, Some((queue()[0].id, handed)), "loaded where the track stopped");
+        net.carry();
+        let s = rl.session(net.peer(l)).unwrap();
+        assert!(s.outputs("laptop") && !s.moving_to("laptop"));
+        let a = s.session.unwrap();
+        assert!(
+            matches!(a.clock, Clock::Playing { at_ms, .. } if at_ms == handed),
+            "started there: {:?}",
+            a.clock
+        );
+        assert!(stands(&rl, net.peer(l)) >= handed, "and never back");
+        rb.reconcile(net.peer(b), &mut sb, &mut qb, 0, "", 3.0);
+        assert!(!sb.playing, "and the browser stays quiet");
     }
 
     /// The output says what happens to it, and only that, each once: a

@@ -90,8 +90,11 @@ fn the_module_verifies_and_is_the_committed_file() {
             "can_play",
             "here",
             "position",
+            // …and where a session stands while its sound is on its way to
+            // another device, which a hand-off waits at.
+            "standing",
             "pressed",
-            "paused_at",
+            "halted",
             "clock_at",
             // …with the volumes and groups (the "Volume and groups" section
             // of docs/plan-live.md) in the order their transitions reach them.

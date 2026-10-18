@@ -64,7 +64,11 @@ are the shared crates'; what is here is what only harken has:
   never a seek; which track it is on read from the URL it reports
   compared as an address, never as a string (`address`: decoded, entities
   and all, the scheme and host in one case, a default port dropped), or
-  from its `queue_position` where the URL names its queue — `SETTLE` polls
+  from its `queue_position` where the URL names its queue; a hand-off from
+  half way through a track that the speaker starts from the beginning (the
+  seek after the enqueue dropped before it loaded) is sought again once it
+  has the track, `SEEKS` times at most, and `started` is said only once it
+  is there — `SETTLE` polls
   of grace after a hand-off, `LAPSE` polls before letting a playing speaker
   go (`release`, said as it), `QUIET` polls after telling it anything, and
   the second taker releasing the first. Its volume and its group are

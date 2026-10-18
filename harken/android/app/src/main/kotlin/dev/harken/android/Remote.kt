@@ -66,6 +66,24 @@ fun Clock.position(now: Long): Long =
 val Clock.playing: Boolean
     get() = this is Clock.Playing
 
+/**
+ * Where the session stands at `now`, the server's clock: the clock's position — except while the
+ * sound is on its way to a device (`moving`), when it stands where it was handed over until that
+ * device says it has started. The domain's `standing`, read the same way: what the bar draws, and
+ * where a phone the sound is handed to loads the track.
+ */
+fun Session.Active.position(now: Long): Long =
+    if ((output as? Output.Device)?.moving == true) {
+        when (val c = clock) {
+            is Clock.Paused -> c.atMs
+            is Clock.Playing -> c.atMs
+        }
+    } else clock.position(now)
+
+/** Whether its position is moving: playing, and not waiting on a hand-off. */
+val Session.Active.counting: Boolean
+    get() = clock.playing && (output as? Output.Device)?.moving != true
+
 /** The device an output names, here or not; none for nowhere. */
 val Output.id: String?
     get() =
@@ -359,7 +377,7 @@ class Remote(
                     // and, if it was paused, paused again, in order, so nothing sounds.
                     val at = a.at.toInt()
                     val queue = a.queue.take(at + 1) + press.track + a.queue.drop(at + 1)
-                    val why = call(peer, "start", Inputs.start(queue, at, a.clock.position(peer.serverNow()), a.from))
+                    val why = call(peer, "start", Inputs.start(queue, at, a.position(peer.serverNow()), a.from))
                     if (why != null || a.clock.playing) return why
                     "pause" to Inputs.none
                 }
@@ -462,7 +480,7 @@ class Remote(
         val at = a.at.toInt()
         val track = a.now
         val here = a.at to track.id
-        val want = a.clock.position(now)
+        val want = a.position(now)
         if (sound.queue.map { it.id } != a.queue.map { it.id }) {
             // Another queue: the session's, loaded as this phone's own, so that going offline
             // mid-track leaves it playing what it was.

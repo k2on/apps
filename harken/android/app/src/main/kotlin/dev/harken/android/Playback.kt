@@ -779,7 +779,7 @@ class RemotePlayer(looper: Looper) : SimpleBasePlayer(looper) {
                 })
             .setCurrentMediaItemIndex(shown.at)
             .setContentPositionMs(
-                if (shown.playing) PositionSupplier.getExtrapolating(shown.positionMs, 1f) else PositionSupplier.getConstant(shown.positionMs))
+                if (shown.counting) PositionSupplier.getExtrapolating(shown.positionMs, 1f) else PositionSupplier.getConstant(shown.positionMs))
             .setPlayWhenReady(shown.playing, Player.PLAY_WHEN_READY_CHANGE_REASON_REMOTE)
             .setPlaybackState(Player.STATE_READY)
             .build()
@@ -920,6 +920,8 @@ object Forward {
         val from: String,
         /** The device the sound is on, while that is not this phone: "Playing on Laptop". */
         val on: String? = null,
+        /** Whether the position moves: playing, and not standing while the sound is handed over. */
+        val counting: Boolean = playing,
     )
 
     fun shown(h: Heard): Shown? {
@@ -927,7 +929,7 @@ object Forward {
         val a = s?.active
         if (!h.joined || a == null) return null
         val on = a.output.id?.takeIf { it != h.me }?.let { id -> s.devices[id]?.name ?: (a.output as? Output.Away)?.name ?: id }
-        return Shown(a.queue, a.at.toInt().coerceIn(0, a.queue.size - 1), a.clock.position(h.serverNow()), a.clock.playing, a.from, on)
+        return Shown(a.queue, a.at.toInt().coerceIn(0, a.queue.size - 1), a.position(h.serverNow()), a.clock.playing, a.from, on, a.counting)
     }
 
     /**
@@ -1109,16 +1111,16 @@ class Playback(
                 on = where(h),
                 volume = s.volume(h.me),
             )
-        _position.value = a.clock.position(h.serverNow())
-        if (!a.clock.playing) stopTicking()
+        _position.value = a.position(h.serverNow())
+        if (!a.counting) stopTicking()
         else if (ticking?.isActive != true)
             ticking =
                 scope.launch {
                     while (isActive) {
                         delay(TICK_MS)
-                        val clock = heard.listening?.active?.clock ?: break
-                        if (!heard.joined || !clock.playing) break
-                        _position.value = clock.position(heard.serverNow())
+                        val active = heard.listening?.active ?: break
+                        if (!heard.joined || !active.counting) break
+                        _position.value = active.position(heard.serverNow())
                     }
                 }
     }

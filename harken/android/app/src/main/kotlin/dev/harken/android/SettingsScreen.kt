@@ -200,7 +200,7 @@ fun listeningNumbers(h: Heard): List<Pair<String, String>> {
             when {
                 s == null -> "—"
                 a == null -> "idle"
-                else -> "${a.at.toInt() + 1} of ${a.queue.size}, ${if (a.clock.playing) "playing" else "paused"} at ${Media.clock(a.clock.position(h.serverNow()))}"
+                else -> "${a.at.toInt() + 1} of ${a.queue.size}, ${if (a.clock.playing) "playing" else "paused"} at ${Media.clock(a.position(h.serverNow()))}"
             }
     out +=
         "output" to

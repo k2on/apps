@@ -324,7 +324,7 @@ class Car(
     suspend fun resume(): Pick? {
         val h = kept.listen.heard.value
         val a = if (h.joined) h.listening?.active else null
-        if (a != null) return Pick(a.queue, a.at.toInt().coerceIn(0, a.queue.size - 1), a.clock.position(h.serverNow()), a.from)
+        if (a != null) return Pick(a.queue, a.at.toInt().coerceIn(0, a.queue.size - 1), a.position(h.serverNow()), a.from)
         library.whole()
         library.lastPlayed.value?.let {
             return again(it)

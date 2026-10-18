@@ -93,6 +93,11 @@ and nothing heartbeats.
 - **The output survives its socket**: a device that goes keeps the sound,
   away and paused, and has it back when it returns. Arriving takes
   nothing.
+- **A hand-off is a pause where the track was.** At `transfer` the clock
+  stops where the track had got to and stands there — on every device's bar
+  — until the device it went to says it has `started`; the one that had the
+  sound goes quiet at once, and the one taking it starts at that point (a
+  speaker that dropped the seek is told again once it has the track).
 - **A press that means a sound** — play, a skip, a track — takes it from an
   output that is not there, for a device that can play. A track pressed
   while nothing is sounding plays on the device it was pressed on.
