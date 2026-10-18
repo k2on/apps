@@ -90,12 +90,46 @@ public enum Std {
         case .Len: return .int(Int64(try list(a).count))
         case .Contains: return .bool(try list(a).contains(b))
         case .Reverse: return .list(try list(a).reversed())
+        case .ListConcat: return .list(try list(a) + list(b))
+        case .Insert:
+            var xs = try list(a)
+            let at = try place("insert", try int(b), xs.count, end: true)
+            xs.insert(c, at: at)
+            return .list(xs)
+        case .RemoveAt:
+            var xs = try list(a)
+            let at = try place("remove_at", try int(b), xs.count, end: false)
+            xs.remove(at: at)
+            return .list(xs)
+        case .Move:
+            var xs = try list(a)
+            let from = try place("move", try int(b), xs.count, end: false)
+            let to = try place("move", try int(c), xs.count, end: false)
+            xs.insert(xs.remove(at: from), at: to)
+            return .list(xs)
+        case .Slice:
+            let xs = try list(a)
+            let start = try int(b)
+            let end = try int(c)
+            if start < 0 || start > end || end > Int64(xs.count) {
+                throw StdError.fault("slice: \(start)..\(end) out of range for a list of \(xs.count)")
+            }
+            return .list(Array(xs[Int(start)..<Int(end)]))
         case .IsSome: return .bool(!a.isNull)
         case .UnwrapOr: return a.isNull ? b : a
         case .Unwrap:
             if a.isNull { throw StdError.fault("unwrapped none") }
             return a
         }
+    }
+
+    /// `stdlib::place` (§5.1): an index into a list of `n`, `0..<n` — or
+    /// `0...n` where the end is a place too, as `insert`'s is — or the
+    /// refusal `<f>: index <i> out of range for a list of <n>`. Never clamped.
+    static func place(_ f: String, _ i: Int64, _ n: Int, end: Bool) throws -> Int {
+        let bound = Int64(n) + (end ? 1 : 0)
+        if i < 0 || i >= bound { throw StdError.fault("\(f): index \(i) out of range for a list of \(n)") }
+        return Int(i)
     }
 
     /// `trim_matches(is_white_space)`: white space by the pinned tables, off both ends.

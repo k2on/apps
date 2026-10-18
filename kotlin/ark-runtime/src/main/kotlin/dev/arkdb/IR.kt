@@ -591,6 +591,18 @@ public enum class StdFn(public val arity: Int) {
     Len(1),
     Contains(2),
     Reverse(1),
+    /** `ListConcat(a, b)`: `a`'s elements, then `b`'s (§5.1). `Concat` is the text one. */
+    ListConcat(2),
+    /** `Insert(xs, i, x)`: `x` at `i`, which is `0..=len`; anything else a refusal. */
+    Insert(3),
+    /** `RemoveAt(xs, i)`: the element at `i`, which is `0..len`, taken out. */
+    RemoveAt(2),
+    /** `Move(xs, from, to)`: the element at `from` moved to `to`, both `0..len`. */
+    Move(3),
+    /**
+     * `Slice(xs, start, end)`: the elements from `start` up to `end`, `0 <= start <= end <= len`.
+     */
+    Slice(3),
     IsSome(1),
     UnwrapOr(2),
     Unwrap(1);

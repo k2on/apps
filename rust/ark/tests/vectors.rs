@@ -429,7 +429,7 @@ fn eval() {
     for p in files("eval") {
         let v = read(&p);
         if v.get("cases").is_some() {
-            eval_cases(&p, &v);
+            check_cases(&v).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
         } else if v.get("raw").is_some() {
             check_raw(&v).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
         } else if v.get("live").is_some() {
@@ -438,7 +438,15 @@ fn eval() {
             check_eval(&v).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
         }
     }
-    falsified("eval", |_, v| if v.get("live").is_some() { check_live(v) } else { check_eval(v) });
+    falsified("eval", |_, v| {
+        if v.get("live").is_some() {
+            check_live(v)
+        } else if v.get("cases").is_some() {
+            check_cases(v)
+        } else {
+            check_eval(v)
+        }
+    });
 }
 
 /// `eval/live-*` (`docs/plan-live.md`): a live state's closure and type
@@ -497,19 +505,24 @@ fn check_live(v: &serde_json::Value) -> Result<(), String> {
 }
 
 // eval/ with `cases`: the input checks as verdicts, and the form validator.
-fn eval_cases(p: &Path, v: &serde_json::Value) {
+/// `form: cases`: one store, each case over a fresh copy of it — a mutator
+/// that must apply (its changes compared where given) or be refused by
+/// exactly a text; or the form validator's messages and normalised values.
+/// A result rather than a panic, so that a `falsify/` vector of this form
+/// (`eval/falsify/list-ops-clamping.json`) is held to failing it.
+fn check_cases(v: &serde_json::Value) -> Result<(), String> {
     let m = module_of(&v["module"]);
     let bodies = closures(&m);
-    let by_name = |n: &str| bodies.values().find(|c| c.function.name == n).unwrap_or_else(|| panic!("{n}"));
+    let by_name = |n: &str| bodies.values().find(|c| c.function.name == n).ok_or(format!("no function {n}"));
     let ctx = match v.get("ctx") {
         Some(c) => ctx_of(&value(c)),
         None => Ctx::new("alice", "session-1"),
     };
     let store_key = if v.get("store_before").is_some() { "store_before" } else { "store" };
     let st = MemoryStore::from_value(m.schema.clone(), &value(&v[store_key]));
-    for case in v["cases"].as_array().unwrap() {
-        let name = case["name"].as_str().unwrap();
-        let c = by_name(case["function"].as_str().unwrap());
+    for case in v["cases"].as_array().ok_or("cases is a list")? {
+        let name = case["name"].as_str().ok_or("a case has a name")?;
+        let c = by_name(case["function"].as_str().ok_or("a case names its function")?)?;
         // A case may be authored by its own `ctx`, with `roles`
         // (`eval/has-role.json`, `docs/plan-guards.md` D1).
         let ctx = case.get("ctx").map_or_else(|| ctx.clone(), |c| ctx_of(&value(c)));
@@ -517,30 +530,36 @@ fn eval_cases(p: &Path, v: &serde_json::Value) {
             let autos = args_of(&value(&case["autos"]));
             let a = args_of(&value(&case["args"]));
             let mut s2 = st.clone();
-            let got = ark::eval::apply_closure(&m.schema, c, &ctx, &autos, &a, &mut s2).unwrap_or_else(|e| panic!("{name}: bug {e:?}"));
+            let got = ark::eval::apply_closure(&m.schema, c, &ctx, &autos, &a, &mut s2).map_err(|e| format!("{name}: bug {e:?}"))?;
             match (refused.as_str(), got) {
                 (None, Ok(chs)) => {
                     if let Some(want) = case.get("changes") {
                         let got = Value::List(chs.iter().map(change_value).collect());
-                        assert_eq!(got, value(want), "{}: {name} changes", p.display());
+                        ensure_eq!(got, value(want), "{name} changes");
                     }
                 }
-                (Some(want), Err(ark::store::Refusal::Refused(t))) => assert_eq!(t, want, "{}: {name}", p.display()),
-                (want, got) => panic!("{}: {name}: wanted {want:?}, got {got:?}", p.display()),
+                (Some(want), Err(ark::store::Refusal::Refused(t))) => ensure_eq!(t.as_str(), want, "{name}"),
+                (want, got) => return Err(format!("{name}: wanted {want:?}, got {got:?}")),
             }
         } else {
             let input = args_of(&value(&case["input"]));
-            let got = ark::eval::check(&m.schema, c, &ctx, &input, &st).unwrap_or_else(|e| panic!("{name}: bug {e:?}"));
+            let got = ark::eval::check(&m.schema, c, &ctx, &input, &st).map_err(|e| format!("{name}: bug {e:?}"))?;
             let want: Vec<(String, String)> = case["messages"]
                 .as_array()
-                .unwrap()
+                .ok_or("messages is a list")?
                 .iter()
-                .map(|x| (x["field"].as_str().unwrap().to_string(), x["message"].as_str().unwrap().to_string()))
+                .map(|x| {
+                    (
+                        x["field"].as_str().unwrap_or("").to_string(),
+                        x["message"].as_str().unwrap_or("").to_string(),
+                    )
+                })
                 .collect();
-            assert_eq!(got.messages, want, "{}: {name} messages", p.display());
-            assert_eq!(Value::from(got.values), value(&case["normalised"]), "{}: {name} normalised", p.display());
+            ensure_eq!(got.messages, want, "{name} messages");
+            ensure_eq!(Value::from(got.values), value(&case["normalised"]), "{name} normalised");
         }
     }
+    Ok(())
 }
 
 // views/ ------------------------------------------------------------------

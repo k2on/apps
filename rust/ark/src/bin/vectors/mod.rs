@@ -15,6 +15,7 @@ mod demo_live;
 mod eval;
 mod fuzzed;
 mod json;
+mod lists;
 mod live;
 mod module;
 mod protocol;
@@ -94,6 +95,7 @@ pub fn write_all(root: &Path) {
     views::views(&out);
     trace::traces(&out);
     live::live(&out);
+    lists::lists_vectors(&out);
     manifest(&out);
     println!("vectors written");
 }

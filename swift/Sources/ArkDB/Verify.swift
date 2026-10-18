@@ -1392,6 +1392,19 @@ public enum Verify {
         case .Reverse:
             try arity(1)
             if isList(a) != nil { return a! }
+        // §5.1 The list editors, over `List t`, which a `NonEmpty t` is read as.
+        case .ListConcat:
+            try arity(2)
+            if isList(a) != nil, a == b { return a! }
+        case .Insert:
+            try arity(3)
+            if let o = isList(a), b == .int, o == ts[2] { return a! }
+        case .RemoveAt:
+            try arity(2)
+            if isList(a) != nil, b == .int { return a! }
+        case .Move, .Slice:
+            try arity(3)
+            if isList(a) != nil, b == .int, ts[2] == .int { return a! }
         case .IsSome:
             try arity(1)
             if isOption(a) != nil { return .bool }

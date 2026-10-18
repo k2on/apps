@@ -98,10 +98,53 @@ public object Std {
             StdFn.Len -> Value.VInt((a as? Value.VList ?: mismatch()).items.size.toLong())
             StdFn.Contains -> Value.VBool((a as? Value.VList ?: mismatch()).items.any { it == b })
             StdFn.Reverse -> Value.VList((a as? Value.VList ?: mismatch()).items.reversed())
+            StdFn.ListConcat -> {
+                if (a !is Value.VList || b !is Value.VList) mismatch()
+                Value.VList(a.items + b.items)
+            }
+            StdFn.Insert -> {
+                if (a !is Value.VList || b !is Value.VInt || c == null) mismatch()
+                val xs = a.items
+                val at = place("insert", b.value, xs.size, true)
+                Value.VList(xs.subList(0, at) + listOf(c) + xs.subList(at, xs.size))
+            }
+            StdFn.RemoveAt -> {
+                if (a !is Value.VList || b !is Value.VInt) mismatch()
+                val xs = a.items
+                val at = place("remove_at", b.value, xs.size, false)
+                Value.VList(xs.subList(0, at) + xs.subList(at + 1, xs.size))
+            }
+            StdFn.Move -> {
+                if (a !is Value.VList || b !is Value.VInt || c !is Value.VInt) mismatch()
+                val from = place("move", b.value, a.items.size, false)
+                val to = place("move", c.value, a.items.size, false)
+                val xs = a.items.toMutableList()
+                xs.add(to, xs.removeAt(from))
+                Value.VList(xs)
+            }
+            StdFn.Slice -> {
+                if (a !is Value.VList || b !is Value.VInt || c !is Value.VInt) mismatch()
+                val n = a.items.size
+                if (b.value < 0 || b.value > c.value || c.value > n)
+                    throw StdError.Fault(
+                        "slice: ${b.value}..${c.value} out of range for a list of $n")
+                Value.VList(a.items.subList(b.value.toInt(), c.value.toInt()).toList())
+            }
             StdFn.IsSome -> Value.VBool(a !is Value.VNull)
             StdFn.UnwrapOr -> if (a is Value.VNull) b!! else a!!
             StdFn.Unwrap -> if (a is Value.VNull) throw StdError.Fault("unwrapped none") else a!!
         }
+    }
+
+    /**
+     * `stdlib::place` (§5.1): an index into a list of `n`, `0..n` — or `0..=n` where the end is a
+     * place too, as `insert`'s is — or the refusal `<f>: index <i> out of range for a list of <n>`.
+     * Never clamped.
+     */
+    private fun place(f: String, i: Long, n: Int, end: Boolean): Int {
+        val bound = n.toLong() + if (end) 1 else 0
+        if (i < 0 || i >= bound) throw StdError.Fault("$f: index $i out of range for a list of $n")
+        return i.toInt()
     }
 
     /** `trim_matches(is_white_space)`: white space by the pinned tables, off both ends. */

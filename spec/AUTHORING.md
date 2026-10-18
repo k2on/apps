@@ -280,6 +280,7 @@ expression. A host `if` on one does not compile. Literals lift through
 | `Std TextOfInt/TextOfId/IdOfText/Hex/Fnv1a64/Sha256/NilId` | `.to_text()` `.to_text()` `id_of_text(t)` `.hex()` `.fnv1a64()` `.sha256()` `nil_id()` |
 | `Std Min/Max/Clamp/Abs` | `.min(b)` `.max(b)` `.clamp(lo, hi)` `.abs()` |
 | `Std First/Last/Len/Contains/Reverse` | `.first()` `.last()` `.len()` `.contains(x)` `.reverse()` |
+| `Std ListConcat/Insert/RemoveAt/Move/Slice` | `.concat(ys)` `.insert(i, x)` `.remove_at(i)` `.move_at(from, to)` `.slice(start, end)` — the list editors (below) |
 | `Std IsSome/UnwrapOr/Unwrap` | `.is_some()` `.unwrap_or(d)`; `.or_refuse("why")` (statements, in a body) and `.unwrap()` (an expression, for a projection behind a `having` that holds `is_some()`) |
 | `Match` | `.map_or(d, \|x\| e)` and `.map(\|x\| e)` (option) |
 | `Map/Filter/Any/All/SortBy` | `.map(\|x\| e)` `.filter(\|x\| e)` `.any(..)` `.all(..)` `.sort_by(..)` |
@@ -292,6 +293,47 @@ expression. A host `if` on one does not compile. Literals lift through
 | `HasRole` | `ctx.has_role("library")` → `Bool`, whether the entry's author holds the role (`docs/plan-guards.md` D1) |
 | `Auto` | `ctx.now("added_ms")` `ctx.new_id("id")` |
 | `Provided` | the extra body parameter |
+
+**The list editors.** A list is edited by value, as everything is: each
+editor returns a new list and leaves the one it was given alone.
+
+```rust
+queue.insert(at.add(1), track)              // after the track at `at`
+queue.remove_at(index)                      // the track at `index` taken out
+queue.move_at(from, to)                     // ends at `to`; those between shift over
+queue.slice(0, at.add(1))                   // up to and with `at`
+queue.slice(0, cut).concat(tracks).concat(queue.slice(cut, queue.len()))  // several, at `cut`
+```
+
+- **An index out of range is a refusal**, never clamped, as an overflow is
+  (§6.5 of the evaluator): `insert` takes `0..=len` (`len` is the end),
+  `remove_at` and `move_at` take `0..len`, `slice` takes `0 <= start <=
+  end <= len`, and anything else refuses the run with
+  `insert: index 4 out of range for a list of 3` — the function's IR name in
+  snake_case (`move`, for `move_at`), the index and the length — or
+  `slice: 3..1 out of range for a list of 4`. A function of two indices
+  names the first that is out of range. A body that computes an index it
+  has not checked should check it, or clamp it itself (`.min(xs.len())`),
+  and say so: a refusal is what a peer that took a stale index sees.
+- **Natively both arms of a `pick` are computed** (§2.4), so an editor in
+  the arm not taken still refuses there while the IR, which runs only the
+  arm taken, does not, and `Native` and `Emit` disagree. An index a guard
+  has not already held in range is clamped before it is used.
+- **`NonEmpty<T>`** has the editors too, typed by what they can leave:
+  `insert`, `concat` and `move_at` of one are a `NonEmpty<T>`, since none of
+  them can empty it; `remove_at` and `slice` of one are a `List<T>`, which
+  `.non_empty()` declares one again — held where it crosses a boundary, so
+  a transition whose result empties it is refused there
+  (`discard: the state it makes is not a deck: hand: an empty list where a
+  non-empty one is declared`). To the checker both are lists (`spec/README.md`
+  §2.2), so this is the vocabulary's typing, and the module is the same
+  either way.
+- **`move` is Rust's**, so the method is `move_at`; the IR and the
+  refusal say `Move` and `move`.
+
+Every other edit is made of these: there is no `insert_all`, because
+`slice`, `concat`, `slice` is one, and no indexed read, because
+`.slice(i, i.add(1)).first()` is one.
 
 ### 2.3 Tables and plans (`db.<table>` is a `Table<Row>`)
 
@@ -607,7 +649,7 @@ now.live::<Room>("room")
 | `Ty::Sum` | `Sum<V>` over `impl SumType for V`: `cases().of::<R>("name")…`, a record per variant |
 | `Variant` | `Sum::of("counting", Counting { .. })` |
 | `Case` | `s.mode.case::<T>().on::<Idle>("idle", \|_\| ..).on::<Counting>("counting", \|c\| ..).end()`; `.is("counting")` is the case with a `true` arm |
-| `Ty::NonEmpty` | `NonEmpty<T>`: `.list()` to read it as a list, `list.non_empty()` to claim one |
+| `Ty::NonEmpty` | `NonEmpty<T>`: `.list()` to read it as a list, `list.non_empty()` to claim one; `.insert(i, x)`, `.concat(ys)`, `.move_at(from, to)` keep it one, `.remove_at(i)` and `.slice(start, end)` are a `List<T>` (§2.2) |
 | `Ty::PerDevice` | `PerDevice<T>`: `PerDevice::empty()`; `Slot` `.get(device)` → `Opt<T>`; `SetSlot` `.set(device, opt)`, `.put(device, v)`, `.clear(device)`; `Slots` `.slots()` → `List<Slot<T>>`, `{device, value}` in device order |
 | `Ty::Ephemeral` | `.ephemeral(name, typed::<PerDevice<T>>())` on the state's record |
 | `LiveState` | the transition's first parameter |

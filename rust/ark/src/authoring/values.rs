@@ -564,6 +564,34 @@ impl<T: Data> List<T> {
     pub fn reverse(self) -> List<T> {
         std1(StdFn::Reverse, self.0)
     }
+    /// `EStd ListConcat`: these elements, then `more`'s.
+    pub fn concat(self, more: List<T>) -> List<T> {
+        std2(StdFn::ListConcat, self.0, more.0)
+    }
+    /// `EStd Insert`: `x` put in at `at`, which is `0..=len` — `len` is the
+    /// end — or the refusal `insert: index <at> out of range for a list of
+    /// <len>`.
+    pub fn insert(self, at: impl Into<Int>, x: impl Into<T>) -> List<T> {
+        List::from_h(cx::std_op(StdFn::Insert, &[self.0, at.into().0, x.into().to_h()]))
+    }
+    /// `EStd RemoveAt`: the element at `at` taken out; `at` is `0..len`, or
+    /// the refusal `remove_at: index <at> out of range for a list of <len>`.
+    pub fn remove_at(self, at: impl Into<Int>) -> List<T> {
+        std2(StdFn::RemoveAt, self.0, at.into().0)
+    }
+    /// `EStd Move`: the element at `from` moved to `to`, every one between
+    /// one place over; both are `0..len`, or the refusal `move: index <i> out
+    /// of range for a list of <len>`, `from`'s first. Not `move`, which Rust
+    /// keeps for itself.
+    pub fn move_at(self, from: impl Into<Int>, to: impl Into<Int>) -> List<T> {
+        List::from_h(cx::std_op(StdFn::Move, &[self.0, from.into().0, to.into().0]))
+    }
+    /// `EStd Slice`: the elements from `start` up to and without `end`, where
+    /// `0 <= start <= end <= len`, or the refusal `slice: <start>..<end> out of
+    /// range for a list of <len>`.
+    pub fn slice(self, start: impl Into<Int>, end: impl Into<Int>) -> List<T> {
+        List::from_h(cx::std_op(StdFn::Slice, &[self.0, start.into().0, end.into().0]))
+    }
 
     // Native: `f` over every element, read in place, each iteration's
     // scratch forgotten once its result is copied out; then `native` of

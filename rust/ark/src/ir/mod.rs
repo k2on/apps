@@ -863,6 +863,26 @@ pub enum StdFn {
     Len,
     Contains,
     Reverse,
+    /// `ListConcat(a, b)`: the elements of `a`, then those of `b`. `Concat`
+    /// is the text one, which joins a list of texts. Like the four below,
+    /// added after spec version 4 was written and a name a module that does
+    /// not use it never carries, so no module before it moves.
+    ListConcat,
+    /// `Insert(xs, i, x)`: `xs` with `x` at index `i` and every element from
+    /// `i` on one place later; `i` is `0..=len`, `len` being the end. Any
+    /// other index is a refusal ([`crate::stdlib`]).
+    Insert,
+    /// `RemoveAt(xs, i)`: `xs` without the element at `i`, which is
+    /// `0..len`; any other index is a refusal.
+    RemoveAt,
+    /// `Move(xs, from, to)`: `xs` with the element at `from` taken out and
+    /// put back so that it is at `to`, every element between them one place
+    /// over; both are `0..len`, and any other index is a refusal, `from`'s
+    /// first.
+    Move,
+    /// `Slice(xs, start, end)`: the elements from `start` up to and without
+    /// `end`, where `0 <= start <= end <= len`; anything else is a refusal.
+    Slice,
     IsSome,
     UnwrapOr,
     /// The option's value, or the refusal `unwrapped none`
@@ -872,7 +892,7 @@ pub enum StdFn {
 
 impl StdFn {
     /// Every function, in the spec's order.
-    pub const ALL: [StdFn; 29] = [
+    pub const ALL: [StdFn; 34] = [
         StdFn::Trim,
         StdFn::IsEmpty,
         StdFn::Concat,
@@ -899,6 +919,11 @@ impl StdFn {
         StdFn::Len,
         StdFn::Contains,
         StdFn::Reverse,
+        StdFn::ListConcat,
+        StdFn::Insert,
+        StdFn::RemoveAt,
+        StdFn::Move,
+        StdFn::Slice,
         StdFn::IsSome,
         StdFn::UnwrapOr,
         StdFn::Unwrap,
@@ -933,6 +958,11 @@ impl StdFn {
             StdFn::Len => "Len",
             StdFn::Contains => "Contains",
             StdFn::Reverse => "Reverse",
+            StdFn::ListConcat => "ListConcat",
+            StdFn::Insert => "Insert",
+            StdFn::RemoveAt => "RemoveAt",
+            StdFn::Move => "Move",
+            StdFn::Slice => "Slice",
             StdFn::IsSome => "IsSome",
             StdFn::UnwrapOr => "UnwrapOr",
             StdFn::Unwrap => "Unwrap",
@@ -946,8 +976,15 @@ impl StdFn {
     /// How many arguments each function takes (`Ark.Std.arity`).
     pub fn arity(self) -> usize {
         match self {
-            StdFn::StartsWith | StdFn::SplitOnce | StdFn::Min | StdFn::Max | StdFn::Contains | StdFn::UnwrapOr => 2,
-            StdFn::Clamp => 3,
+            StdFn::StartsWith
+            | StdFn::SplitOnce
+            | StdFn::Min
+            | StdFn::Max
+            | StdFn::Contains
+            | StdFn::UnwrapOr
+            | StdFn::ListConcat
+            | StdFn::RemoveAt => 2,
+            StdFn::Clamp | StdFn::Insert | StdFn::Move | StdFn::Slice => 3,
             StdFn::NilId => 0,
             _ => 1,
         }

@@ -325,6 +325,29 @@ impl<T: Data> NonEmpty<T> {
     pub fn list(self) -> List<T> {
         List::from_h(self.0)
     }
+    /// [`List::insert`], which leaves a non-empty list non-empty.
+    pub fn insert(self, at: impl Into<Int>, x: impl Into<T>) -> NonEmpty<T> {
+        self.list().insert(at, x).non_empty()
+    }
+    /// [`List::concat`], which leaves a non-empty list non-empty.
+    pub fn concat(self, more: List<T>) -> NonEmpty<T> {
+        self.list().concat(more).non_empty()
+    }
+    /// [`List::move_at`], which leaves a list as long as it was.
+    pub fn move_at(self, from: impl Into<Int>, to: impl Into<Int>) -> NonEmpty<T> {
+        self.list().move_at(from, to).non_empty()
+    }
+    /// [`List::remove_at`]: a list, since taking out the one element leaves
+    /// none — `.non_empty()` declares it one again, held where it crosses a
+    /// boundary.
+    pub fn remove_at(self, at: impl Into<Int>) -> List<T> {
+        self.list().remove_at(at)
+    }
+    /// [`List::slice`]: a list, which may have no element, as
+    /// [`NonEmpty::remove_at`]'s.
+    pub fn slice(self, start: impl Into<Int>, end: impl Into<Int>) -> List<T> {
+        self.list().slice(start, end)
+    }
 }
 
 impl<T: Data> List<T> {

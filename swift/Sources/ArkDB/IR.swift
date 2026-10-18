@@ -609,13 +609,17 @@ public indirect enum Pred: Hashable {
 
 /// §3.4 The standard library, by name, spelled as the constructors' `show` (`ir::StdFn`).
 public enum StdFn: String, Hashable, CaseIterable {
-    case Trim, IsEmpty, Concat, Lower, IsAlnum, Chars, TextLen, StartsWith, SplitOnce, TextOfInt, Hex, Min, Max, Clamp, Abs, Fnv1a64, Sha256, IdOfText, TextOfId, NilId, Utf8, First, Last, Len, Contains, Reverse, IsSome, UnwrapOr, Unwrap
+    case Trim, IsEmpty, Concat, Lower, IsAlnum, Chars, TextLen, StartsWith, SplitOnce, TextOfInt, Hex, Min, Max, Clamp, Abs, Fnv1a64, Sha256, IdOfText, TextOfId, NilId, Utf8, First, Last, Len, Contains, Reverse
+    /// §5.1 The list editors: `ListConcat(a, b)`, `Insert(xs, i, x)`,
+    /// `RemoveAt(xs, i)`, `Move(xs, from, to)`, `Slice(xs, start, end)`.
+    case ListConcat, Insert, RemoveAt, Move, Slice
+    case IsSome, UnwrapOr, Unwrap
 
     public var arity: Int {
         switch self {
         case .NilId: return 0
-        case .StartsWith, .SplitOnce, .Min, .Max, .Contains, .UnwrapOr: return 2
-        case .Clamp: return 3
+        case .StartsWith, .SplitOnce, .Min, .Max, .Contains, .UnwrapOr, .ListConcat, .RemoveAt: return 2
+        case .Clamp, .Insert, .Move, .Slice: return 3
         default: return 1
         }
     }

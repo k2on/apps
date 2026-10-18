@@ -1964,6 +1964,13 @@ fn std_ty(f: StdFn, ts: &[Ty], want: Option<&Ty>) -> Check_<Ty> {
         (Len, [Ty::List(_)]) => Ok(Ty::Int),
         (Contains, [Ty::List(t), t2]) if **t == *t2 => Ok(Ty::Bool),
         (Reverse, [Ty::List(t)]) => Ok(Ty::List(t.clone())),
+        // §5.1 The list editors: over `List t`, which a `NonEmpty t` is read
+        // as, and returning one; an index is an `Int`, and what one out of
+        // range does is the evaluator's (a refusal), never the checker's.
+        (ListConcat, [Ty::List(a), Ty::List(b)]) if a == b => Ok(Ty::List(a.clone())),
+        (Insert, [Ty::List(t), Ty::Int, x]) if **t == *x => Ok(Ty::List(t.clone())),
+        (RemoveAt, [Ty::List(t), Ty::Int]) => Ok(Ty::List(t.clone())),
+        (Move | Slice, [Ty::List(t), Ty::Int, Ty::Int]) => Ok(Ty::List(t.clone())),
         (IsSome, [Ty::Option(_)]) => Ok(Ty::Bool),
         (UnwrapOr, [Ty::Option(t), t2]) if **t == *t2 => Ok(t2.clone()),
         (Unwrap, [Ty::Option(t)]) => Ok((**t).clone()),

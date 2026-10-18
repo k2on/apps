@@ -1601,6 +1601,24 @@ public object Verify {
                 arity(1)
                 if (a is Ty.TList) a else misuse()
             }
+            // §5.1 The list editors, over `List t`, which a `NonEmpty t` is read as.
+            StdFn.ListConcat -> {
+                arity(2)
+                if (a is Ty.TList && a == b) a else misuse()
+            }
+            StdFn.Insert -> {
+                arity(3)
+                if (a is Ty.TList && b == Ty.TInt && a.of == ts[2]) a else misuse()
+            }
+            StdFn.RemoveAt -> {
+                arity(2)
+                if (a is Ty.TList && b == Ty.TInt) a else misuse()
+            }
+            StdFn.Move,
+            StdFn.Slice -> {
+                arity(3)
+                if (a is Ty.TList && b == Ty.TInt && ts[2] == Ty.TInt) a else misuse()
+            }
             StdFn.IsSome -> {
                 arity(1)
                 if (a is Ty.TOption) Ty.TBool else misuse()
