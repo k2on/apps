@@ -578,6 +578,76 @@ fn a_hand_off_stands_still_where_the_track_was_until_it_has_started() {
     assert_eq!(clock(&h.state()), Clock::Paused { at_ms: 92_520 });
 }
 
+/// The output says where it is when it has come apart from the clock — a
+/// player that buffered, a speaker whose house dates its position to the
+/// second — and the clock is re-anchored there, at the server's moment,
+/// playing on: the output is right about where it is. Nobody else may say
+/// it; and a report about a clock that has moved since it was measured
+/// against (a seek landed first), about a paused clock, or while a hand-off
+/// is in flight is nothing, so a report can never undo somebody's seek or
+/// end a hand-off that only `started` ends.
+///
+/// Falsified by a `report_position` that ignored `since`: the report made
+/// against the clock before the seek took the session back to 41 200, where
+/// 120 000 was right. And by one that ignored `moving`: the kitchen's report
+/// ran the clock on at 5 000 while the hand-off still stood at 91 500.
+#[test]
+fn the_output_says_where_it_is_and_the_clock_follows_it_and_nothing_else() {
+    let mut h = House::new();
+    h.arrive_as("alice", "phone", "phone", true);
+    h.arrive_as("alice", "laptop", "computer", false);
+    h.arrive_as("alice", "media_player.kitchen", "speaker", true);
+    h.playing_on("phone", 40_000);
+    let since = match clock(&h.state()) {
+        Clock::Playing { since, .. } => since,
+        c => panic!("not playing: {c:?}"),
+    };
+    h.wait(1_000);
+    assert_eq!(
+        h.call("laptop", "report_position", input::report_position(40_400, since)),
+        Err("not the output".to_string())
+    );
+    h.ok("phone", "report_position", input::report_position(40_400, since));
+    assert_eq!(
+        clock(&h.state()),
+        Clock::Playing { at_ms: 40_400, since: h.now },
+        "re-anchored where the phone is"
+    );
+    h.wait(500);
+    assert_eq!(h.state().session.unwrap().position(h.now), 40_900, "and playing on from there");
+
+    // A seek lands first; the report made against the clock before it is
+    // about nothing.
+    let Clock::Playing { since: stale, .. } = clock(&h.state()) else {
+        panic!("not playing")
+    };
+    h.wait(200);
+    h.ok("laptop", "seek", input::seek(120_000));
+    let sought = clock(&h.state());
+    h.ok("phone", "report_position", input::report_position(41_200, stale));
+    assert_eq!(clock(&h.state()), sought, "a report never undoes a seek");
+
+    // Paused, there is no clock to come apart from.
+    h.ok("laptop", "pause", input::none());
+    let paused = clock(&h.state());
+    h.ok("phone", "report_position", input::report_position(3_000, h.now));
+    assert_eq!(clock(&h.state()), paused);
+
+    // While the sound is on its way, only `started` ends the hand-off.
+    h.ok("laptop", "play", input::none());
+    h.playing_on("phone", 90_000);
+    h.wait(1_500);
+    h.ok("phone", "transfer", input::transfer("media_player.kitchen"));
+    let handed = clock(&h.state());
+    let Clock::Playing { since, .. } = handed else {
+        panic!("not playing: {handed:?}")
+    };
+    h.ok("media_player.kitchen", "report_position", input::report_position(5_000, since));
+    assert_eq!(clock(&h.state()), handed, "the hand-off still stands where the track was");
+    h.wait(2_000);
+    assert_eq!(h.state().session.unwrap().position(h.now), 91_500);
+}
+
 fn titles(l: &Listening) -> Vec<String> {
     l.session.as_ref().expect("a session").queue.iter().map(|t| t.title.clone()).collect()
 }

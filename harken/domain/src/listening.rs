@@ -12,10 +12,12 @@
 //! the laptop is the output, its player is reconciled against the session,
 //! and it pauses. The output reports what happens to it — `started` when a
 //! hand-off lands, `advance` when a track ends, `stalled` when the sound
-//! stops by itself, `release` when it is no longer the session's to make —
-//! and nothing else: no heartbeat, because `Playing { at_ms, since }` is
-//! enough for every device to count the position for itself against the
-//! server's clock (`ark_client::Peer::server_now`).
+//! stops by itself, `release` when it is no longer the session's to make,
+//! and `report_position` when what it is playing has come apart from the
+//! clock by more than [`read::SYNC_MS`] — and nothing else: no heartbeat,
+//! because `Playing { at_ms, since }` is enough for every device to count
+//! the position for itself against the server's clock
+//! (`ark_client::Peer::server_now`).
 //!
 //! **None of the session is in the log, and none of it ever will be.** An
 //! afternoon of listening is thousands of pauses, seeks and skips, and not
@@ -332,6 +334,19 @@ pub struct At {
 impl Input for At {
     fn schema() -> Object<Self> {
         object().field("at_ms", int().at_least(0))
+    }
+}
+
+/// Where the output, playing, says it is — and the clock it measured that
+/// against, by the server's moment that clock started playing from: a
+/// report about a clock somebody has since moved is about nothing.
+pub struct Report {
+    pub at_ms: Int,
+    pub since: Int,
+}
+impl Input for Report {
+    fn schema() -> Object<Self> {
+        object().field("at_ms", int().at_least(0)).field("since", int())
     }
 }
 
@@ -1600,6 +1615,56 @@ pub fn listening() -> Router<Harken> {
             ..s
         })
         .guard::<At>("not the output", |s, ctx, _input| is_output(s.session, ctx.device))
+        // The output, playing, is somewhere other than the clock counts — a
+        // player that buffered, a speaker whose house dates its position to
+        // the second — and the output is right about where it is: the clock
+        // is re-anchored there, and nothing is told to any player. Not a
+        // seek: a seek is somebody asking for another point, which the
+        // output then goes to; this is the output saying where it already
+        // is. About a clock that has moved since it was measured against —
+        // a seek, a skip, a pause landed first — or while a hand-off is in
+        // flight, which only `started` ends, it is nothing.
+        .transition::<Report>("report_position", |s, ctx, input| Listening {
+            session: s
+                .session
+                .case::<Sum<Session>>()
+                .on::<Active>("active", |a| {
+                    let current = a
+                        .clock
+                        .case::<Bool>()
+                        .on::<Paused>("paused", |_| false.into())
+                        .on::<Playing>("playing", |p| p.since.eq(input.since))
+                        .end();
+                    let settled = a
+                        .output
+                        .case::<Bool>()
+                        .on::<Away>("away", |_| false.into())
+                        .on::<OutputDevice>("device", |d| d.moving.not())
+                        .on::<Nowhere>("nowhere", |_| false.into())
+                        .end();
+                    pick(
+                        current.and(settled),
+                        Sum::of(
+                            "active",
+                            Active {
+                                clock: Sum::of(
+                                    "playing",
+                                    Playing {
+                                        at_ms: input.at_ms,
+                                        since: ctx.now,
+                                    },
+                                ),
+                                ..a
+                            },
+                        ),
+                        s.session,
+                    )
+                })
+                .on::<Idle>("idle", |_| idle())
+                .end(),
+            ..s
+        })
+        .guard::<Report>("not the output", |s, ctx, _input| is_output(s.session, ctx.device))
         // The output lets the sound go: a speaker somebody else took, or one
         // playing something that is not this queue, or not answering. The
         // queue stays, paused, and nothing is the output.
@@ -1868,6 +1933,24 @@ pub mod read {
 
     /// The name of the live state.
     pub const STATE: &str = "listening";
+
+    /// How far the output's player may be from where the session counts it
+    /// before one is put right: the session is told where the output is
+    /// (`report_position`) when it is the player that came apart from the
+    /// clock, and the player is sent where the session is when it is the
+    /// session that moved. The same bound for every output, so every bar on
+    /// every device is within it of what is actually heard.
+    ///
+    /// Six hundred milliseconds, because the coarsest output is a speaker
+    /// read through Home Assistant: a Sonos says its position to the whole
+    /// second, which, taken at the middle of that second, is within 500 ms
+    /// of where it is; the house's clock, read off its answers' `Date`, and
+    /// the request itself take most of the rest. Anything further apart
+    /// than that is a real difference and not the reading's grain — and a
+    /// player that is right to the millisecond (a browser's element, a
+    /// phone's) is held to the same bound rather than a tighter one, so a
+    /// correction is never a matter of which device is making the sound.
+    pub const SYNC_MS: i64 = 600;
 
     /// What sort of thing a device is, for the glyph a picker draws.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -2287,6 +2370,12 @@ pub mod read {
         /// `started` and `stalled`.
         pub fn at(at_ms: i64) -> Args {
             args(vec![("at_ms", Value::Int(at_ms.max(0)))])
+        }
+
+        /// `report_position`: where the output is, measured against the
+        /// clock that started playing at `since`.
+        pub fn report_position(at_ms: i64, since: i64) -> Args {
+            args(vec![("at_ms", Value::Int(at_ms.max(0))), ("since", Value::Int(since))])
         }
 
         pub fn advance(from_track: usize) -> Args {
