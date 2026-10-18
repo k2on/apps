@@ -136,6 +136,62 @@ class RemoteTests {
     }
 
     /**
+     * The phone is right about where it is. ExoPlayer a second behind a clock nobody touched — it
+     * started a moment after `started` was said, or its buffer ran dry — is followed: the session is
+     * told where the player is (`report_position`), so every bar draws what is heard, and the player
+     * is not sent a second ahead, which was a second of the track skipped. Within the bound nothing
+     * is said; filling a buffer, nothing either; a seek on another device is the session moving, and
+     * the player goes there.
+     *
+     * Falsified by the old rule, the player always sent where the clock counts: "not sent ahead to
+     * where the clock counts" failed, the player sought a second on over what it had not played.
+     */
+    @Test
+    fun theSessionFollowsThePhoneAndThePhoneFollowsASeek() {
+        val hall = Hall()
+        val phone = hall.on("phone", true)
+        val desk = hall.on("desktop", false, "computer")
+        phone.call("start", Inputs.start(queue, 0, 40_000, ""))
+        phone.reconcile()
+        val loaded = phone.sound.positionMs
+        assertTrue("loaded where it was pressed: $loaded", loaded in 40_000L until 40_100L)
+        fun counted(): Long = phone.session()!!.active!!.position(phone.peer.serverNow())
+
+        // A second on the clock, and the player has played none of it.
+        Thread.sleep(1_000)
+        hall.now = System.currentTimeMillis()
+        val seeks = phone.sound.seeks
+        phone.reconcile()
+        assertEquals("not sent ahead to where the clock counts", loaded, phone.sound.positionMs)
+        assertEquals(seeks, phone.sound.seeks)
+        val at = counted()
+        assertTrue("the session is where the player is: $at", kotlin.math.abs(at - loaded) <= Remote.SYNC_MS)
+        val calls = phone.remote.stats.calls
+        phone.reconcile()
+        assertEquals("and says it once", calls, phone.remote.stats.calls)
+
+        // Within the bound, nothing either way; filling a buffer, nothing either.
+        phone.sound.positionMs = counted() - Remote.SYNC_MS / 2
+        phone.reconcile()
+        assertEquals(calls, phone.remote.stats.calls)
+        assertEquals(seeks, phone.sound.seeks)
+        phone.sound.positionMs = counted() - 3_000
+        phone.sound.buffering = true
+        phone.reconcile()
+        assertEquals(calls, phone.remote.stats.calls)
+        assertEquals(seeks, phone.sound.seeks)
+        phone.sound.buffering = false
+        phone.sound.positionMs = counted()
+
+        // A seek on the desktop is the session moving: the player goes.
+        hall.now = System.currentTimeMillis()
+        desk.call("seek", Inputs.seek(100_000))
+        phone.reconcile()
+        assertTrue("sought where the session is: ${phone.sound.positionMs}", kotlin.math.abs(phone.sound.positionMs - 100_000) <= Remote.SYNC_MS)
+        assertEquals("and nothing said back", calls, phone.remote.stats.calls)
+    }
+
+    /**
      * A play counts once it has played thirty seconds or half the track, once per load of a track,
      * and only on the device making the sound — and offline too, as a pending intent the server
      * gets later. Short of the threshold the reconciler asks to be woken when it will be reached,

@@ -1685,7 +1685,9 @@ followed with nothing told to the house, and the trace says each poll
 kitchen"; three seconds as the only bound: "after the drift, device 0 is
 -1022 ms from the kitchen"). `harken-iced`:
 `the_session_follows_the_output_and_the_output_follows_a_seek` (the old
-rule: the element sought to 41 006 over what the network had held up).
+rule: the element sought to 41 006 over what the network had held up). The
+phone: `theSessionFollowsThePhoneAndThePhoneFollowsASeek` (the old rule: the
+player sought a second on over what it had not played).
 
 Not verified: a real Sonos through a real Home Assistant — whether its
 first reports after a hand-off are the stand-in's (undated while the

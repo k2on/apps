@@ -141,6 +141,10 @@ object Inputs {
     /** `started` and `stalled`. */
     fun at(atMs: Long): Map<String, Value> = mapOf("at_ms" to Value.int(maxOf(atMs, 0)))
 
+    /** `report_position`: where the output is, measured against the clock that started playing at `since`. */
+    fun reportPosition(atMs: Long, since: Long): Map<String, Value> =
+        mapOf("at_ms" to Value.int(maxOf(atMs, 0)), "since" to Value.int(since))
+
     fun advance(fromTrack: Int): Map<String, Value> = mapOf("from_track" to Value.int(fromTrack.toLong()))
 
     fun scrub(atMs: Long?): Map<String, Value> = mapOf("at_ms" to Value.opt(atMs?.let { Value.int(maxOf(it, 0)) }))
@@ -315,6 +319,16 @@ class Remote(
      */
     private var wanted: Pair<Int, Boolean>? = null
     private var seen: Pair<Int, Boolean>? = null
+
+    /**
+     * The track and the clock the player was last made to agree with: a difference with the clock
+     * still this one is the player's, and the session is told; with another, the session moved, and
+     * the player is.
+     */
+    private var against: Triple<Long, Id, Clock>? = null
+
+    /** When this phone last said where its player is, by the server's clock as it reads it. */
+    private var reported: Long? = null
 
     /** Every load of a track is a play: the track loaded, this load's number, and the last counted. */
     private var loaded: Pair<Int, Id>? = null
@@ -546,8 +560,28 @@ class Remote(
             a.clock.playing && !sound.playing -> sound.resume()
             !a.clock.playing && sound.playing -> sound.pause()
         }
-        // Somewhere else in the track than the session counts: a seek made on another device.
-        if (!sound.buffering && abs(sound.positionMs - want) > DRIFT_MS) sound.seek(want)
+        // Somewhere else in the track than the session counts, by more than the bound. If the
+        // session moved since the player was last made to agree — a seek on another device — the
+        // player goes where it is now; if it is the player that came apart from a clock nobody
+        // touched — ExoPlayer starting a moment after `started` was said, a buffer that ran dry —
+        // the player is right about where it is, and the session is told (`report_position`), at
+        // most once a second, against that clock. Filling a buffer, neither.
+        val clock = a.clock
+        val moved = against != Triple(a.at, track.id, clock)
+        against = Triple(a.at, track.id, clock)
+        if (!sound.buffering && abs(sound.positionMs - want) > SYNC_MS) {
+            when {
+                !moved && clock is Clock.Playing && sound.playing -> {
+                    val last = reported
+                    if (last == null || now - last >= REPORT_MS) {
+                        reported = now
+                        call(peer, "report_position", Inputs.reportPosition(sound.positionMs, clock.since))
+                    }
+                }
+                !moved && clock is Clock.Playing -> {}
+                else -> sound.seek(want)
+            }
+        }
         count(peer, sound, track, a.from)
     }
 
@@ -574,11 +608,14 @@ class Remote(
 
     companion object {
         /**
-         * How far the player may be from where the session counts it before the output seeks to
-         * agree: a seek on another device moves the clock by more than this, and a player's own
-         * jitter never does.
+         * How far the player may be from where the session counts it before one is put right: the
+         * domain's `read::SYNC_MS`, the bound every output is held to — the browser's element and
+         * the bridge's speakers too.
          */
-        const val DRIFT_MS = 1_500L
+        const val SYNC_MS = 600L
+
+        /** How often, at most, a player that stays apart from the clock is said again. */
+        const val REPORT_MS = 1_000L
     }
 }
 
