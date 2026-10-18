@@ -71,7 +71,26 @@ struct Queue {
     /// Until when the item it is on is still loading: a seek before then is
     /// dropped, as a Sonos drops one sent before it has read the stream.
     loading: Option<std::time::Instant>,
+    /// Whether a new queue arrives the way a Sonos's does through Home
+    /// Assistant ([`Fake::keeps_a_queue_as_a_sonos`]), and the one arriving.
+    sonos: bool,
+    arriving: Option<Arrival>,
+    /// What it said it was playing before the last `clear_playlist`.
+    before: Json_,
 }
+
+/// A queue a Sonos has just been handed, on its way to playing — as Home
+/// Assistant reports it, a [`STEP`] at a time ([`Fake::arrive`]).
+struct Arrival {
+    from: std::time::Instant,
+    /// What it will say it plays, spelt its way, and what it said before.
+    url: String,
+    stale: Json_,
+}
+
+/// How long each step of a Sonos taking a new queue lasts, as Home Assistant
+/// says it: two or so of the bridge's polls here.
+const STEP: Duration = Duration::from_millis(90);
 
 const TOKEN: &str = "a-long-lived-token";
 
@@ -103,6 +122,7 @@ async fn service(
         _ => None,
     };
     let entity = body["entity_id"].as_str().unwrap_or_default().to_string();
+    fake.arrive(&entity);
     fake.queue_service(&entity, &service, &body);
     {
         let mut states = fake.states.lock().unwrap();
@@ -245,6 +265,7 @@ async fn state(
         .unwrap()
         .entry(entity.clone())
         .or_default() += 1;
+    fake.arrive(&entity);
     fake.states
         .lock()
         .unwrap()
@@ -266,9 +287,72 @@ impl Fake {
                 heard: None,
                 spell,
                 loading: None,
+                sonos: false,
+                arriving: None,
+                before: json!(""),
             },
         );
         self.sonos(entity, 0.3, &[entity]);
+    }
+
+    /// …and takes a new one the way a Sonos does through Home Assistant,
+    /// which is not at once. After `clear_playlist` and `play_media` the
+    /// house says `idle` with nothing playing; then `buffering`, still naming
+    /// whatever it played before; then `playing` the new track, with no
+    /// position at all — the integration clears it while the stream's length
+    /// is unknown; and only then a position, 0, dated at that moment. A seek
+    /// sent before that last step is dropped, and one sent after it lands,
+    /// dated again.
+    fn keeps_a_queue_as_a_sonos(&self, entity: &str) {
+        self.keeps_a_queue(entity, as_given);
+        self.queues.lock().unwrap().get_mut(entity).unwrap().sonos = true;
+    }
+
+    /// Where a Sonos taking a new queue has got to, written into what the
+    /// house says of it: called before anything reads or tells it anything.
+    fn arrive(&self, entity: &str) {
+        let (step, url, stale) = {
+            let mut queues = self.queues.lock().unwrap();
+            let Some(a) = queues.get_mut(entity).and_then(|q| q.arriving.as_ref()) else {
+                return;
+            };
+            let elapsed = a.from.elapsed();
+            let step = (elapsed.as_millis() / STEP.as_millis()).min(3);
+            let (url, stale) = (a.url.clone(), a.stale.clone());
+            if step == 3 {
+                queues.get_mut(entity).unwrap().arriving = None;
+            }
+            (step, url, stale)
+        };
+        let mut states = self.states.lock().unwrap();
+        let st = states.get_mut(entity).unwrap();
+        let unplaced = |st: &mut Json_| {
+            let attrs = st["attributes"].as_object_mut().unwrap();
+            attrs.remove("media_position");
+            attrs.remove("media_position_updated_at");
+        };
+        match step {
+            0 => {
+                st["state"] = json!("idle");
+                st["attributes"]["media_content_id"] = json!("");
+                unplaced(st);
+            }
+            1 => {
+                st["state"] = json!("buffering");
+                st["attributes"]["media_content_id"] = stale;
+                unplaced(st);
+            }
+            2 => {
+                st["state"] = json!("playing");
+                st["attributes"]["media_content_id"] = json!(url);
+                unplaced(st);
+            }
+            _ => {
+                st["state"] = json!("playing");
+                st["attributes"]["media_content_id"] = json!(url);
+                date_position(st, 0.0);
+            }
+        }
     }
 
     /// What a service call does to a player that keeps a queue.
@@ -281,6 +365,12 @@ impl Fake {
             "clear_playlist" => {
                 q.urls.clear();
                 q.at = None;
+                q.before = self
+                    .states
+                    .lock()
+                    .unwrap()
+                    .get(entity)
+                    .map_or(json!(""), |st| st["attributes"]["media_content_id"].clone());
                 drop(queues);
                 self.on_item(entity, None);
             }
@@ -300,8 +390,12 @@ impl Fake {
                         let at = (pos - 1).min(q.urls.len());
                         q.urls.insert(at, url);
                         q.at = Some(at);
+                        let sonos = q.sonos;
                         drop(queues);
                         self.on_item(entity, Some(at));
+                        if sonos {
+                            self.arriving(entity);
+                        }
                     }
                     _ => {}
                 }
@@ -336,6 +430,22 @@ impl Fake {
         st["attributes"]["media_content_id"] = json!(url.unwrap_or_default());
         st["attributes"]["queue_position"] = json!(position);
         date_position(st, 0.0);
+    }
+
+    /// The item just put on is a new queue arriving, the way a Sonos's does.
+    fn arriving(&self, entity: &str) {
+        let mut queues = self.queues.lock().unwrap();
+        let q = queues.get_mut(entity).unwrap();
+        let stale = q.before.clone();
+        let url = q.at.map(|a| (q.spell)(&q.urls[a])).unwrap_or_default();
+        q.loading = Some(std::time::Instant::now() + STEP * 3);
+        q.arriving = Some(Arrival {
+            from: std::time::Instant::now(),
+            url,
+            stale,
+        });
+        drop(queues);
+        self.arrive(entity);
     }
 
     /// The track playing runs out, and the speaker moves to the next item of
@@ -467,6 +577,7 @@ fn house(url: String) -> ha::Config {
         media: MEDIA.into(),
         tick: Duration::from_millis(40),
         idle: ha::IDLE,
+        trace: ha::Trace::Off,
     }
 }
 
@@ -654,7 +765,7 @@ fn a_speaker_is_a_device_the_whole_way_round() {
     let names: Vec<&str> = calls.iter().map(|(s, _)| s.as_str()).collect();
     assert_eq!(
         names,
-        ["clear_playlist", "play_media", "play_media", "media_seek"],
+        ["clear_playlist", "play_media", "media_seek", "play_media"],
         "{calls:#?}"
     );
     assert_eq!(calls[0].1, json!({ "entity_id": KITCHEN }));
@@ -668,19 +779,19 @@ fn a_speaker_is_a_device_the_whole_way_round() {
         }),
         "from the track it was on, at the address a *speaker* can reach"
     );
+    let at = calls[2].1["seek_position"].as_f64().unwrap();
+    assert!(
+        (42.5..44.5).contains(&at),
+        "from where it had got to, before the rest of the queue: {at}"
+    );
     assert_eq!(
-        calls[2].1["media_content_id"],
+        calls[3].1["media_content_id"],
         json!(media_url("music/c.mp3"))
     );
     assert_eq!(
-        calls[2].1["enqueue"],
+        calls[3].1["enqueue"],
         json!("add"),
         "the rest after it, so the speaker's own next works"
-    );
-    let at = calls[3].1["seek_position"].as_f64().unwrap();
-    assert!(
-        (42.5..44.5).contains(&at),
-        "and from where it had got to, counted on: {at}"
     );
 
     // The kitchen starts, and says so; then it moves on by itself, and the
@@ -1568,6 +1679,199 @@ fn a_hand_off_picks_up_where_the_track_stopped() {
         calls.iter().any(|(c, _)| c == "media_pause"),
         "the kitchen is quiet once it is not the output: {calls:#?}"
     );
+    rt.block_on(server.stop());
+}
+
+/// Where `p` draws the session now, and the speaker's own position, apart.
+fn apart(p: &mut Peer, fake: &Fake) -> Option<i64> {
+    let at = standing(p)?;
+    Some(at - fake.at_ms(KITCHEN))
+}
+
+/// The two reports as somebody heard them, after the hand-off stood still:
+/// "it stops, then starts playing on the speaker, but the position still
+/// isn't moving, until it starts moving, but it's a few seconds behind what
+/// the speaker is playing", and "it still resets when I start casting".
+///
+/// The kitchen here takes the queue the way a Sonos does through Home
+/// Assistant ([`Fake::keeps_a_queue_as_a_sonos`]): idle with nothing
+/// playing, then buffering still naming the radio it played before, then
+/// playing the track with no position, then a position of 0 dated at that
+/// moment — and a seek sent before that is dropped. A browser forty seconds
+/// into a track hands it over. From the transfer to the end no device ever
+/// draws less than where the track was handed, by more than the bound; the
+/// hand-off stands still until the kitchen is where the track was, and then
+/// moves on from where the kitchen *measurably is*; from then on every
+/// device is within the bound of what the kitchen plays. Then the kitchen
+/// drifts a second ahead by itself, and every device follows it without the
+/// house being told anything. And the trace says each poll.
+///
+/// Falsified by a bridge that said `started` at the hand-off's position off
+/// a playing report the house had not dated (the old `unwrap_or(from_ms)`):
+/// the session ran on from forty seconds while the kitchen played from the
+/// beginning — "device 0 came out of the hand-off 40321 ms from the kitchen",
+/// which is the few seconds behind, and then the reset, as reported. And by
+/// a bridge that said nothing of a drift under three seconds (the old
+/// `DRIFT_MS` as the only bound): "after the drift, device 0 is -1022 ms from
+/// the kitchen".
+#[test]
+fn a_cast_is_where_the_speaker_is_and_never_the_beginning() {
+    let rt = runtime();
+    let fake = Fake::default();
+    fake.keeps_a_queue_as_a_sonos(KITCHEN);
+    // Paused on somebody's radio, which it goes on naming for a moment.
+    fake.playing(KITCHEN, "paused", "http://radio.example/stream", 12.0);
+    let url = fake.serve(&rt);
+    let data = tempfile::tempdir().unwrap();
+    let (lines, traced) = std::sync::mpsc::channel();
+    let server = serve(&rt, data.path(), |c| {
+        c.house = Some(ha::Config {
+            trace: ha::Trace::Lines(lines),
+            ..house(url)
+        })
+    });
+    let bound = harken_domain::listening::read::SYNC_MS;
+
+    let mut browser = device(&server, "max", Kind::Computer, "Browser", true);
+    let mut desktop = device(&server, "max", Kind::Computer, "Desktop", false);
+    let b = me(&browser);
+    for who in 0..2 {
+        told_among(
+            &mut [&mut browser, &mut desktop],
+            who,
+            "three devices",
+            |s| s.devices.len() == 3,
+        );
+    }
+    call(
+        &mut browser,
+        "start",
+        input::start(&queue(&["a", "b"]), 0, 40_000, "album/Mixed"),
+    );
+    for who in 0..2 {
+        told_among(
+            &mut [&mut browser, &mut desktop],
+            who,
+            "the browser forty seconds in",
+            |s| s.outputs(&b) && s.sounding(),
+        );
+    }
+    std::thread::sleep(Duration::from_millis(300));
+    call(&mut browser, "transfer", input::transfer(KITCHEN));
+    let handed = standing(&mut browser).unwrap();
+
+    // Until it has started: never the beginning, on any device.
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let started = loop {
+        let mut settled = true;
+        for (i, p) in [&mut browser, &mut desktop].into_iter().enumerate() {
+            p.pump();
+            let Some(at) = standing(p) else { continue };
+            assert!(
+                at + bound >= handed,
+                "device {i} drew {at} ms, handed at {handed}"
+            );
+            settled &= p
+                .live(STATE)
+                .and_then(|v| Listening::from_value(&v))
+                .is_some_and(|s| s.outputs(KITCHEN) && !s.moving_to(KITCHEN));
+        }
+        if settled {
+            break std::time::Instant::now();
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the kitchen never started"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    };
+    // The moment it ends, it ends where the kitchen is, measured.
+    for (i, p) in [&mut browser, &mut desktop].into_iter().enumerate() {
+        let off = apart(p, &fake).unwrap();
+        assert!(
+            off.abs() <= bound,
+            "device {i} came out of the hand-off {off} ms from the kitchen"
+        );
+    }
+    let calls = fake.take();
+    assert!(
+        calls.iter().filter(|(c, _)| c == "media_seek").count() >= 2,
+        "the first seek was dropped and it was told again: {calls:#?}"
+    );
+
+    // From then on, within the bound of what the kitchen plays.
+    let watch = |browser: &mut Peer, desktop: &mut Peer, what: &str, until: Duration| {
+        let from = std::time::Instant::now();
+        while from.elapsed() < until {
+            for (i, p) in [&mut *browser, &mut *desktop].into_iter().enumerate() {
+                p.pump();
+                let off = apart(p, &fake).unwrap();
+                assert!(
+                    off.abs() <= bound + 100,
+                    "{what}, device {i} is {off} ms from the kitchen"
+                );
+                assert!(
+                    standing(p).unwrap() + bound >= handed,
+                    "{what}, device {i} went back"
+                );
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    };
+    watch(
+        &mut browser,
+        &mut desktop,
+        "playing on",
+        Duration::from_secs(2),
+    );
+    assert!(started.elapsed() > Duration::from_secs(2));
+
+    // A second ahead, by itself — the house dates where it now is.
+    fake.take();
+    {
+        let mut states = fake.states.lock().unwrap();
+        let st = states.get_mut(KITCHEN).unwrap();
+        let ahead = position_now(st) + 1.0;
+        date_position(st, ahead);
+    }
+    std::thread::sleep(Duration::from_millis(400));
+    watch(
+        &mut browser,
+        &mut desktop,
+        "after the drift",
+        Duration::from_secs(1),
+    );
+    let told: Vec<String> = fake.take().into_iter().map(|(c, _)| c).collect();
+    assert!(
+        told.is_empty(),
+        "followed without the house being told anything: {told:?}"
+    );
+
+    // And the trace said every poll: what the house said, and what was done.
+    let lines: Vec<String> = traced.try_iter().collect();
+    assert!(lines
+        .iter()
+        .all(|l| l.starts_with("harken-server: house: trace: media_player.kitchen: ")));
+    let started_line = lines
+        .iter()
+        .find(|l| l.contains("did started "))
+        .unwrap_or_else(|| panic!("no poll said started: {lines:#?}"));
+    for said in [
+        "state \"playing\"",
+        "media_content_id \"http://10.0.0.2:8787/media/music/a.mp3\"",
+        "media_position 4",
+        "media_position_updated_at \"",
+        "Date ",
+        "speaker ",
+        "session ",
+    ] {
+        assert!(started_line.contains(said), "{said} in {started_line}");
+    }
+    assert!(
+        lines.iter().any(|l| l.contains("did report_position ")),
+        "the drift: {lines:#?}"
+    );
+    assert!(lines.iter().any(|l| l.contains("state \"buffering\"")));
     rt.block_on(server.stop());
 }
 

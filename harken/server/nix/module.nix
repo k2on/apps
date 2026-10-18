@@ -317,6 +317,22 @@ in
             '';
           };
 
+          trace = lib.mkOption {
+            type = lib.types.bool;
+            default = false;
+            description = ''
+              One line in the journal per poll per speaker: what Home
+              Assistant said of it — `state`, `media_content_id`,
+              `media_position`, `media_position_updated_at` and its answer's
+              `Date` — where the bridge reads the speaker as being and has
+              the session, and what it did about it. Off by default, being a
+              line a second for every speaker standing; turned on for as long
+              as it takes to see a speaker go wrong, then read with
+              `journalctl -u harken | grep 'house: trace'`. Sets
+              `HARKEN_BRIDGE_TRACE=1`.
+            '';
+          };
+
           mediaUrl = lib.mkOption {
             type = lib.types.nullOr lib.types.str;
             default = null;
@@ -479,6 +495,8 @@ in
         HARKEN_HA_PLAYERS = lib.concatStringsSep "," cfg.homeAssistant.players;
       } // lib.optionalAttrs (cfg.homeAssistant != null && cfg.homeAssistant.mediaUrl != null) {
         HARKEN_HA_MEDIA = cfg.homeAssistant.mediaUrl;
+      } // lib.optionalAttrs (cfg.homeAssistant != null && cfg.homeAssistant.trace) {
+        HARKEN_BRIDGE_TRACE = "1";
       };
 
       serviceConfig = {

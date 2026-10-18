@@ -1514,3 +1514,182 @@ them, now through `enqueue`.
 Not verified: no window has drawn the queue panel; no phone has been
 handed a queue edited from a car; no real speaker has been sent
 `enqueue: next`.
+
+## The position, the same on every device
+
+Reported, after the hand-off stood still: "if I'm playing in the browser
+and I select a speaker, it stops, then starts playing on the speaker, but
+the position still isn't moving, until it starts moving — but it's a few
+seconds behind what the speaker is playing", "make sure the track position
+will always be the same for any speaker", and "I think I'm also still
+having issues with it resetting when I start casting". And the edge case
+left open: a speaker that reaches the second track before the bridge's
+first poll after a hand-off was let go.
+
+**The rule** (decided): the output is right about where it is, and every
+device's position is within one bound of it — [`read::SYNC_MS`], 600 ms —
+from the moment it has `started`, on every kind of output. When it is the
+output that came apart from the clock, the session is told where the
+output is; when it is the session that moved (a seek, a skip, a hand-off),
+the output is sent there. Which of the two happened is whether the clock is
+still the one the output last saw.
+
+### The root causes
+
+**`started` was said at the point handed, off a position nobody had
+dated.** The bridge read a playing report with no `media_position_updated_at`
+as the point the track was handed at (`dated.unwrap_or(from_ms)`) and said
+`started` there — and the Sonos integration clears the position while a
+new stream's length is unknown, so the first report of a fresh hand-off is
+exactly that. The speaker was in fact playing from the beginning (the seek
+after the enqueue dropped, as 3275824 found), so the session ran on from
+forty seconds while the kitchen played from zero: "a few seconds behind" is
+the speaker's two or three seconds of fetching, stood still and then
+counted from the wrong end. The first report the house did date put the
+kitchen at the beginning, more than `DRIFT_MS` from the session, and the
+bridge said that as the kitchen's own `seek`: every bar went back to the
+start — "resetting when I start casting". Reproduced over real sockets
+against a stand-in that takes a queue the way a Sonos does through Home
+Assistant (below): with the old line back, "device 0 came out of the
+hand-off 40321 ms from the kitchen".
+
+**Three seconds was the only bound.** Anything the speaker and the session
+disagreed by under `DRIFT_MS` was never said either way, so a session that
+came out of a hand-off two seconds off stayed two seconds off for the rest
+of the track — and a browser's or a phone's player that fell behind was
+sent forward to the clock instead (2 s on the desktop, 1.5 s on the phone),
+skipping what the network had held up while the session went on counting
+what nobody heard.
+
+**A blink was a stall.** One poll of `paused` or `idle` after the quiet —
+a Sonos between a seek and its stream, the house a moment behind — said
+`stalled` at `media_position` as the house last had it, which on a fresh
+track is its beginning, and the next poll played it on from there. Another
+way back to zero.
+
+**Everything the bridge told the house went after the polls of the same
+pass**, so a reading could be of the speaker's last queue, and a hand-off
+pushed its whole queue — up to two hundred `play_media` calls, each a round
+trip to the speaker — before its seek and before anything else in the
+house was read: the hand-off stood still for as long as the push took, and
+the seek landed on whichever track the speaker had reached.
+
+**And the house's clock was read to the second.** One `Date` places a
+moment the house stamped only to within half a second either way, which is
+nearly the whole bound by itself.
+
+### What changed
+
+- **`report_position(at_ms, since)`** (the domain, its own commit): the
+  output, playing, says where it is, and the clock is re-anchored there at
+  the server's moment — no player is told anything, and it is not a seek,
+  which is somebody asking for another point. It carries the `since` of the
+  clock it was measured against, and is nothing about a clock somebody has
+  moved since (a seek landed first), about a paused clock, or while a
+  hand-off is in flight, which only `started` ends. Guarded to the output.
+  `seek` stays for what it was: somebody's hand on the speaker, past
+  `DRIFT_MS`.
+- **`started` is said where the speaker measurably is.** A playing report
+  with no date is no position: the hand-off waits for one (`WAIT` polls,
+  fifteen, before it stops waiting and guesses). A dated one short of where
+  the track was handed is sought again (`SEEKS`, a `QUIET` apart, counting
+  the house's own count even when it was dated before the seek — a seek the
+  speaker dropped moves nothing, so nothing is dated again); one at or past
+  it is `started` at that position counted on to the poll, and on again to
+  the moment it is said (`Act::Call::as_of`), so the session is re-anchored
+  at where the speaker is *then*. The session stands still until that
+  moment and then moves on from the measured point, never from the point
+  handed.
+- **Any track of the handed queue is ours**, from the one handed on: a
+  speaker that reached the second track before the first poll is followed
+  — `advance` (or `jump`) and then `started` where it is in that track —
+  and never let go. A later track reported from before the hand-off may be
+  what it played before, so it waits for a report the house dated since.
+  Saying it plays nothing, or `buffering`, is fetching, spent from `WAIT`
+  rather than from the grace a speaker sent elsewhere gets.
+- **Within the bound, both ways.** A playing speaker more than `SYNC_MS`
+  from where the session counts it is said where it is (`report_position`,
+  at most once a poll, against the clock it was compared with); a session
+  that moved by more than `SYNC_MS` is told to the speaker (`media_seek`);
+  so the two can never pull against each other. A position the house dated
+  before the bridge last told the speaker something is not believed for
+  `STALE` polls.
+- **A stall is two silent polls in a row** (`STALL`), at the point the
+  house dated since a poll last heard it playing — a stop is a change of
+  state, which the house dates — and otherwise where it had been counted to
+  when it fell silent: never a stale date's beginning of the track.
+  `buffering` is neither a sound nor a stall.
+- **The house is told before it is read**, every pass; a hand-off sends
+  `clear_playlist`, the first track, its seek and a pause at once, and the
+  rest of the queue `ha::PUSH` (eight) at a time between polls, so a long
+  queue neither freezes the bridge nor has its seek land on track two.
+- **The house's clock, narrowed answer by answer** (`when::Skew`): each
+  answer's `Date` was written between asking and hearing back, so the
+  intersection of what they say closes in on the house's clock to within
+  the round trip — a millisecond's widening per answer follows a drift, and
+  answers that cannot both be true start it again. `Playing::slack_ms` is
+  what is still unknown, and a date within it of a command may be from
+  either side.
+- **The browser and the phone follow the same rule.** Each reconciler keeps
+  the track and the clock it last made its player agree with: the clock
+  still that one and the player more than `SYNC_MS` off, the player is
+  right — `report_position` against that clock, at most once a second; the
+  clock another, the session moved, and the player is sought. Filling a
+  buffer (the element's `readyState` short of `HAVE_FUTURE_DATA`,
+  ExoPlayer's buffering), neither. The browser's element, which starts a
+  moment after `started` is said, and ExoPlayer's, which does the same, are
+  followed instead of being sent forward over the moment they missed.
+
+**The bound, 600 ms**: the coarsest output is a Sonos read through Home
+Assistant, whose position is a whole second, read by the house at the
+change of state that made it; the house's clock, narrowed over its answers,
+and the request add the rest. Anything further apart than that is a real
+difference and not the reading's grain. The browser and the phone are held
+to the same bound rather than a tighter one, so whether a bar is corrected
+never depends on which device is making the sound.
+
+**The trace** (`HARKEN_BRIDGE_TRACE=1`, or
+`services.harken.homeAssistant.trace = true`): one line per poll per
+speaker — the house's answer as it gave it (`state`, `media_content_id`,
+`media_position`, `media_position_updated_at`, `Date`), where the bridge
+counts the speaker and has the session, where in the queue and the
+hand-off, and what it did. `harken/server/README.md` says how to turn it on
+and what to send back. Every one of these bugs has differed between the
+stand-in and a real Sonos; the trace is how the next one is read rather
+than guessed.
+
+**Tested**, each falsified once. The domain, on both desks:
+`the_output_says_where_it_is_and_the_clock_follows_it_and_nothing_else`
+(a `report_position` that ignored `since` took the session back to 41 200
+where a seek had put it at 120 000; one that ignored `moving` ran the clock
+on at 5 000 under a hand-off standing at 91 500). The bridge, as values:
+`a_hand_off_is_not_over_until_the_house_says_where_the_speaker_is` (the old
+`unwrap_or(from_ms)`: `started` on the first, undated poll);
+`a_speaker_already_on_a_later_track_is_followed_and_not_let_go` (only the
+track handed taken: nothing said of the second);
+`a_speaker_drifting_from_the_session_is_followed_and_told_nothing` (three
+seconds as the only bound: a second apart said nothing);
+`a_blink_is_not_a_stall_and_a_stall_is_never_a_stale_beginning` (`STALL`
+of one: stalled on the blink); `the_houses_clock_is_narrowed_answer_by_answer`
+(the latest answer alone: 505 ms of slack). Over real sockets,
+`a_cast_is_where_the_speaker_is_and_never_the_beginning`: a stand-in Sonos
+that, after `clear_playlist` and `play_media`, says `idle` with nothing,
+then `buffering` still naming the radio it played before, then `playing`
+with no position, then 0 dated at that moment, and drops a seek sent before
+that; a browser forty seconds in casts to it, and no device ever draws less
+than the point handed by more than the bound, the hand-off ends within the
+bound of where the kitchen measurably is, every device stays within the
+bound of it for two seconds after, a second's drift by the kitchen is
+followed with nothing told to the house, and the trace says each poll
+(the old line: "device 0 came out of the hand-off 40321 ms from the
+kitchen"; three seconds as the only bound: "after the drift, device 0 is
+-1022 ms from the kitchen"). `harken-iced`:
+`the_session_follows_the_output_and_the_output_follows_a_seek` (the old
+rule: the element sought to 41 006 over what the network had held up).
+
+Not verified: a real Sonos through a real Home Assistant — whether its
+first reports after a hand-off are the stand-in's (undated while the
+stream's length is unknown, `buffering` in between), whether it drops the
+early seek and takes the later one, and how its whole-second positions sit
+against the bound. The trace is there to say. No browser and no phone has
+had its player followed rather than sought on real hardware.

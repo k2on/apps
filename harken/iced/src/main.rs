@@ -287,6 +287,9 @@ impl listening::Sound for Sounding<'_> {
     fn playing(&self) -> bool {
         self.player.is_playing()
     }
+    fn buffering(&self) -> bool {
+        self.player.buffering()
+    }
     fn position_ms(&self) -> i64 {
         (self.player.position() * 1000.0) as i64
     }

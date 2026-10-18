@@ -170,6 +170,8 @@ impl Config {
     /// HARKEN_WEB, HARKEN_WEB_MODULE the browser client
     /// HARKEN_HA_URL, HARKEN_HA_TOKEN_FILE, HARKEN_HA_PLAYERS
     ///                               all three, or none; HARKEN_HA_MEDIA
+    /// HARKEN_BRIDGE_TRACE=1         a line per poll per speaker: what the
+    ///                               house said and what the bridge did
     /// HARKEN_KEEPALIVE_MS           the sync socket's ping interval (20000)
     /// HARKEN_KEEPALIVE_MISSED       pings unanswered before it closes (3)
     /// HARKEN_RETAIN_DAYS            how long a device's place holds the log (30)
@@ -185,7 +187,11 @@ impl Config {
     /// [`Config::from_env`] over any lookup; blank is unset.
     pub fn from_vars(listen: &str, var: impl Fn(&str) -> Option<String>) -> Result<Config> {
         let env = |k: &str| var(k).filter(|v| !v.trim().is_empty());
-        let sign_in = match (env("HARKEN_OIDC_ISSUER"), env("HARKEN_OIDC_CLIENT_ID"), env("HARKEN_OIDC_CLIENT_SECRET_FILE")) {
+        let sign_in = match (
+            env("HARKEN_OIDC_ISSUER"),
+            env("HARKEN_OIDC_CLIENT_ID"),
+            env("HARKEN_OIDC_CLIENT_SECRET_FILE"),
+        ) {
             (Some(issuer), Some(client_id), Some(file)) => SignIn::Oidc {
                 issuer,
                 client_id,
@@ -334,6 +340,10 @@ fn house(env: &impl Fn(&str) -> Option<String>) -> Result<Option<ha::Config>> {
                 media,
                 tick: ha::TICK,
                 idle: ha::IDLE,
+                trace: match env("HARKEN_BRIDGE_TRACE").is_some_and(|v| v != "0") {
+                    true => ha::Trace::Out,
+                    false => ha::Trace::Off,
+                },
             }))
         }
         (None, None, None) => Ok(None),
@@ -850,6 +860,20 @@ mod tests {
             !house.to_string().contains("sekrit"),
             "the token is never printed"
         );
+        assert!(
+            matches!(house.trace, ha::Trace::Off),
+            "the bridge's trace is off unless asked for"
+        );
+        let mut traced = with_media.clone();
+        traced.push(("HARKEN_BRIDGE_TRACE", "1"));
+        assert!(matches!(
+            Config::from_vars("x:1", vars(&traced))
+                .unwrap()
+                .house
+                .unwrap()
+                .trace,
+            ha::Trace::Out
+        ));
         // The public URL stands in for a speaker's when nothing else is said.
         let mut public = three.to_vec();
         public.push(("HARKEN_PUBLIC_URL", "http://10.0.0.2:8787"));

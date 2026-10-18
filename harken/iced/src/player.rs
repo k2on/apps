@@ -297,6 +297,13 @@ export function take_remote() {
             self.el.as_ref().is_some_and(|el| !el.paused() && !el.ended())
         }
 
+        /// Asked to play and waiting for data: `readyState` short of
+        /// `HAVE_FUTURE_DATA`, so the position is standing still for the
+        /// network and not for anybody's reason.
+        pub fn buffering(&self) -> bool {
+            self.el.as_ref().is_some_and(|el| !el.paused() && !el.ended() && el.ready_state() < 3)
+        }
+
         pub fn ended(&self) -> bool {
             self.el.as_ref().is_some_and(|el| el.ended())
         }
@@ -365,6 +372,9 @@ mod imp {
         pub fn resume(&mut self) {}
         pub fn pause(&mut self) {}
         pub fn is_playing(&self) -> bool {
+            false
+        }
+        pub fn buffering(&self) -> bool {
             false
         }
         pub fn ended(&self) -> bool {
@@ -462,6 +472,11 @@ impl Player {
 
     pub fn is_playing(&self) -> bool {
         self.sink.is_playing()
+    }
+
+    /// Asked to play, and waiting for the stream.
+    pub fn buffering(&self) -> bool {
+        self.sink.buffering()
     }
 
     /// The current track has run out, so the bar should move on.

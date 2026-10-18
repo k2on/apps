@@ -57,18 +57,29 @@ are the shared crates'; what is here is what only harken has:
   who holds a speaker, what a change of the session becomes (a hand-off of
   the whole queue from where it was, a pause, a play, a seek), what the
   speaker did that the session does not know said as its own transition
-  (`started`, `advance`, `jump`, `stalled`, `play`, `seek`) — where a
-  playing speaker is being its `media_position` counted on from
-  `media_position_updated_at`, which is when the house last refreshed it,
-  read against the house's own clock as its `Date` says; an undated one is
-  never a seek; which track it is on read from the URL it reports
+  (`started`, `advance`, `jump`, `stalled`, `play`, `seek`,
+  `report_position`) — where a playing speaker is being its
+  `media_position` counted on from `media_position_updated_at`, which is
+  when the house last refreshed it, read against the house's own clock as
+  its answers' `Date`s narrow it down (`when::Skew`); an undated one is no
+  position at all, and one dated before the bridge last told the speaker
+  something is not believed for `STALE` polls; a speaker more than
+  `SYNC_MS` (600 ms, every output's bound) from where the session counts it
+  is said where it is (`report_position`, the clock re-anchored and no
+  player told anything), more than `DRIFT_MS` its own `seek`, and a
+  session that moved by more than the bound is told to it; a stall is two
+  silent polls in a row (`STALL`), at a point the house dated since it last
+  played; which track it is on read from the URL it reports
   compared as an address, never as a string (`address`: decoded, entities
   and all, the scheme and host in one case, a default port dropped), or
   from its `queue_position` where the URL names its queue; a hand-off from
   half way through a track that the speaker starts from the beginning (the
   seek after the enqueue dropped before it loaded) is sought again once it
   has the track, `SEEKS` times at most, and `started` is said only once it
-  is there — `SETTLE` polls
+  is there and the house has dated where — at that measured point, counted
+  on to when it is said (`as_of`), on the track handed or any after it
+  (`advance` or `jump` first), never at the point handed; `WAIT` polls of
+  fetching before it stops waiting — `SETTLE` polls
   of grace after a hand-off, `LAPSE` polls before letting a playing speaker
   go (`release`, said as it), `QUIET` polls after telling it anything, and
   the second taker releasing the first. Its volume and its group are
@@ -91,7 +102,11 @@ are the shared crates'; what is here is what only harken has:
   service calls, polling every speaker standing anywhere (its volume and
   group; what it plays only where it is held), the integration it groups
   in read once through the template API, and every hand-off, release,
-  pause, join and unjoin said out loud.
+  pause, join and unjoin said out loud. Everything it tells the house goes
+  before the next poll, so a reading is always of what was told; a handed
+  queue's first track and its seek go at once and the rest `ha::PUSH` at a
+  time between polls; and with `HARKEN_BRIDGE_TRACE=1` each poll of each
+  speaker is a line (below).
 - **`lib.rs`** — `Config` from the environment and `start`.
 
 ## Running
@@ -112,6 +127,7 @@ HARKEN_DEV_AUTH=1 harken-server [127.0.0.1:8787]
 | `HARKEN_MODULE` | an `.ark` to host instead of harken's own |
 | `HARKEN_HA_URL`, `HARKEN_HA_TOKEN_FILE`, `HARKEN_HA_PLAYERS` | all three or none; players are `media_player.x[=Name]`, comma-separated |
 | `HARKEN_HA_MEDIA` | where a *speaker* fetches from (default: the public URL) |
+| `HARKEN_BRIDGE_TRACE=1` | a line per poll per speaker: what the house said of it and what the bridge did (below) |
 | `HARKEN_ROLES` | who holds which role: `library=alice,bob;admin=alice` |
 | `HARKEN_ADMIN_BIND` | where the admin page listens (none without it): loopback asks nothing, wider asks for a login holding `admin` (`docs/plan-guards.md` D4) |
 | `HARKEN_ADMIN_WEB` | the admin page's build (`nix build .#ark-admin`); without it the admin API alone |
@@ -154,6 +170,39 @@ signed in dials nothing, and pushes its re-stamped work once somebody does;
 an entry authored under an older login of the same person is accepted
 (`Auth::owns`, through `.auth(..)`).
 
+### When a speaker is not where the bars say
+
+The bridge is tested against a stand-in Home Assistant, and a real house
+with a real Sonos has differed from it each time something went wrong. The
+trace is what shows the difference: one line per poll of each speaker
+standing, saying exactly what the house said and what the bridge made of
+it. Turn it on with `services.harken.homeAssistant.trace = true;` (which
+sets `HARKEN_BRIDGE_TRACE=1`) and rebuild, or set that variable by hand
+for a server run any other way. Then:
+
+1. Play something on a browser or a phone, half a minute into a track.
+2. Note the time, and pick the speaker.
+3. Wait half a minute with the speaker playing; if the bars are behind or
+   jumped back, say by how much and when.
+4. Send back the journal from a few seconds before the time noted to the
+   end — `journalctl -u harken --since "HH:MM:SS" | grep 'house:'` — and
+   what you saw and when.
+
+A line reads:
+
+```
+harken-server: house: trace: media_player.kitchen: state "playing", media_content_id "http://10.0.0.2:8787/media/music/a.mp3", media_position 41.0, media_position_updated_at "2026-10-18T21:07:23.112000+00:00", Date Sun, 18 Oct 2026 21:07:24 GMT; speaker 41934 ms; session 41890 ms; track 0 of 12 (handed 0); started; quiet 0, waited 3, sought 1, silent 0; nothing done
+```
+
+— the house's answer as it gave it, then where the bridge counts the
+speaker (`(dated before the last command)` when the house has not yet
+dated anything since it was told something; `undated` when it gave no
+position), where it has the session (`standing` while the hand-off is in
+flight, at the point handed), where in the queue, and what it did:
+`started`, `report_position`, `seek`, `stalled` with the point each was
+said at, `media_seek` and the rest told to the house. Turn it off again
+afterwards: it is a line a second for every speaker standing.
+
 ## Nix
 
 - `nix/module.nix` — the NixOS service, `services.harken`: dev auth or an
@@ -161,8 +210,8 @@ an entry authored under an older login of the same person is accepted
   directory made by tmpfiles and bound read-only, the state in
   `StateDirectory` (`HARKEN_DATA=%S/harken`), the house with its token as a
   credential, the assertion that a speaker is never handed a URL on this
-  machine, and the warning when it is handed a LAN URL this server is not
-  bound to. `web` defaults to null: which build a server should serve is the
+  machine, the warning when it is handed a LAN URL this server is not
+  bound to, and `homeAssistant.trace` for the bridge's trace. `web` defaults to null: which build a server should serve is the
   flake's to say. `admin.bind` is the admin page's listener,
   `127.0.0.1:8788` by default and null for none, and `admin.page` its
   build, `ark-admin` by default; a bind wider than loopback that nobody in
@@ -179,7 +228,12 @@ an entry authored under an older login of the same person is accepted
 round against a stand-in Home Assistant, two accounts taking one speaker,
 paging under a library of two batches, and a browser, a desktop and a
 speaker sharing one session through transfers, a dropped socket and both
-ways of coming back (`tests/bridge.rs`); the session's own rules are the
+ways of coming back, and a cast to a stand-in that takes a queue the way a
+Sonos does through Home Assistant — idle, buffering, playing with no
+position, then a position, an early seek dropped — never drawn at the
+beginning on any device and within the bound of the speaker from the
+moment it starts, a drift followed without a command, and the trace
+(`tests/bridge.rs`); the session's own rules are the
 domain's transition tests (`harken/domain/tests/listening.rs`); the scanner
 over real WAV files, tags written and read by lofty, covers beside a
 record and inside its tracks fetched where the log says, a retagged file

@@ -88,9 +88,16 @@ none of which interrupts the track playing — and the device the session names 
 its player agree with the session; every other device is silent and draws
 it. The output says only what happens to it: `started` when a hand-off
 lands, `advance` when a track ends, `stalled` when the sound stops by
-itself, `release` when it lets the sound go. A playing clock carries the
-server's time it started from, so every device counts the position itself
-and nothing heartbeats.
+itself, `release` when it lets the sound go, and `report_position` when its
+player has come apart from the clock by more than 600 ms. A playing clock
+carries the server's time it started from, so every device counts the
+position itself and nothing heartbeats.
+
+- **Every bar is within 600 ms of what is heard** (`read::SYNC_MS`), on
+  every kind of output. The output is right about where it is: a player
+  that drifted from a clock nobody touched is followed (`report_position`,
+  no player told anything), and a player is sent where the session is only
+  when the session moved — a seek, a skip, a hand-off.
 
 - **The output survives its socket**: a device that goes keeps the sound,
   away and paused, and has it back when it returns. Arriving takes
@@ -99,7 +106,9 @@ and nothing heartbeats.
   stops where the track had got to and stands there — on every device's bar
   — until the device it went to says it has `started`; the one that had the
   sound goes quiet at once, and the one taking it starts at that point (a
-  speaker that dropped the seek is told again once it has the track).
+  speaker that dropped the seek is told again once it has the track). The
+  hand-off ends where the device measurably is — for a speaker, a position
+  its house has dated — and never at the point handed or the beginning.
 - **A press that means a sound** — play, a skip, a track — takes it from an
   output that is not there, for a device that can play. A track pressed
   while nothing is sounding plays on the device it was pressed on.

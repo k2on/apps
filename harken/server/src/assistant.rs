@@ -84,11 +84,44 @@ pub const QUIET: u8 = 2;
 /// the beginning, and the session — told `started` at 0 — went back with it.
 pub const SEEKS: u8 = 3;
 
-/// How far a playing speaker may be from where the session counts it before
-/// one is told the other: the speaker is right about where it is (`seek`
-/// said as it), and the session is right about where somebody asked it to
-/// be (`media_seek` told to it).
+/// How far a playing speaker may be from where the session counts it
+/// before one is told the other ([`SYNC_MS`], the same bound every output
+/// is held to): the speaker is right about where it is, so the session is
+/// told (`report_position`, said as the speaker, and nothing told to any
+/// player); and the session is right about where somebody asked it to be,
+/// so the speaker is told (`media_seek`) when it is the session that moved.
+pub use harken_domain::listening::read::SYNC_MS;
+
+/// How far a playing speaker may be from the session before what moved it
+/// was somebody's hand on the speaker — a seek in the Sonos app — said as
+/// the speaker's own `seek` rather than as where it has drifted to.
 pub const DRIFT_MS: i64 = 3_000;
+
+/// How many polls in a row a speaker handed the sound must say it is not
+/// playing before that is a stall. One is a blink: a Sonos between a seek
+/// and the stream, or Home Assistant catching up with a state it had for a
+/// moment, says `paused` or `idle` for a poll and plays on — and read as a
+/// stall, that blink paused every bar where the house last dated the
+/// position, the beginning of the track, and the next poll played it on
+/// from there.
+pub const STALL: u8 = 2;
+
+/// How many polls after the bridge told a speaker something before a
+/// position the house dated *before* that is believed. The house dates a
+/// position at a change of state and not while it plays on, and only when
+/// it has moved more than a second and a half from what it would have
+/// counted; so a speaker sought by a little, or one the house has not heard
+/// from yet, goes on showing a date from before the command. For a moment
+/// that is a position from before the seek — read as now, the beginning of
+/// the track — and after it, the house's own count, which is right.
+pub const STALE: u8 = 4;
+
+/// How many polls a speaker handed the sound may spend fetching it —
+/// saying it plays nothing, buffering, idle while asked to play, or playing
+/// with a position nobody can place yet — before the bridge stops waiting:
+/// it says `started` at its best guess if the speaker is on the track, and
+/// lets the session go if it never got there.
+pub const WAIT: u8 = 15;
 
 /// `MediaPlayerEntityFeature.VOLUME_SET` in Home Assistant's
 /// `homeassistant/components/media_player/const.py`: the player takes
@@ -161,9 +194,40 @@ pub struct Playing {
     /// where in the speaker's own queue it is, from 1. Read only where the
     /// URL names the queue rather than the track ([`Holding::index`]).
     pub queue_position: Option<usize>,
+    /// How far either way `updated_ms` may be from the moment the house
+    /// stamped, on the server's clock: what is still unknown of the house's
+    /// clock ([`when::Skew`]). A position dated within this of a command
+    /// may be from either side of it.
+    pub slack_ms: i64,
+}
+
+/// What a state says of the sound, which is all a state decides here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Sound {
+    /// `playing`.
+    Playing,
+    /// `paused`, `idle`, `off`, `standby`: nothing is coming out of it.
+    Stopped,
+    /// `buffering`, `on`, anything else: on its way to one or the other,
+    /// which is neither a stall nor a sound to count a position from.
+    Between,
 }
 
 impl Playing {
+    pub fn sound(&self) -> Sound {
+        match self.state.as_str() {
+            "playing" => Sound::Playing,
+            "paused" | "idle" | "off" | "standby" => Sound::Stopped,
+            _ => Sound::Between,
+        }
+    }
+
+    /// Whether the house dated its position after `told` (the server's
+    /// clock), as far as the house's clock is known.
+    pub fn dated_after(&self, told: i64) -> bool {
+        self.updated_ms.is_some_and(|u| u >= told - self.slack_ms)
+    }
+
     /// Where it is at `now` (the server's clock): the position the house
     /// gave, counted on from when it was true while it plays, and as it is
     /// while it does not. `None` for a playing speaker whose position the
@@ -187,10 +251,10 @@ impl Playing {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Act {
     /// Put this list on, from `at`, at this point. The thread clears the
-    /// queue, turns it into one `play_media` with `enqueue: play` and the
-    /// rest as `enqueue: add` — which is what leaves the speaker's own next
-    /// and previous working — seeks after the enqueue, and pauses when the
-    /// session is paused.
+    /// queue, puts the track on with `play_media` and `enqueue: play`, seeks
+    /// it, pauses it when the session is paused, and then pushes the rest as
+    /// `enqueue: add` a few at a time between polls ([`ha::PUSH`]) — which
+    /// is what leaves the speaker's own next and previous working.
     Start {
         entity: String,
         urls: Vec<String>,
@@ -243,6 +307,12 @@ pub enum Act {
         transition: &'static str,
         input: Args,
         why: String,
+        /// The moment (the server's clock) the position in `input` — its
+        /// `at_ms` or `ms` — was where a playing speaker was: said later, it
+        /// is counted on to when it is said, so the session is re-anchored at
+        /// where the speaker is *then* and not where it was a few requests
+        /// ago. `None` for an input that is not a moving position.
+        as_of: Option<i64>,
     },
 }
 
@@ -361,6 +431,22 @@ struct Holding {
     /// polls to wait before the next.
     sought: u8,
     seek_wait: u8,
+    /// When it was handed the queue, and when it was last told anything that
+    /// moves where it is (the queue, a seek, a play or a pause) — the server's
+    /// clock — and how many polls since: a position dated before that is
+    /// from before it ([`STALE`]).
+    handed_ms: i64,
+    told_ms: i64,
+    since_told: u8,
+    /// Polls spent fetching the hand-off ([`WAIT`]).
+    waited: u8,
+    /// Polls in a row it has said it is not playing while it should be
+    /// ([`STALL`]), and where it was counted to at the first of them.
+    silent: u8,
+    stopped_at: Option<i64>,
+    /// When a poll last heard it playing, the server's clock: a stopped
+    /// position the house dated before that is not where it stopped.
+    sounding_ms: Option<i64>,
 }
 
 impl Holding {
@@ -478,6 +564,13 @@ impl Bridge {
                 from_ms: position_ms,
                 sought: 0,
                 seek_wait: 0,
+                handed_ms: now,
+                told_ms: now,
+                since_told: 0,
+                waited: 0,
+                silent: 0,
+                stopped_at: None,
+                sounding_ms: None,
             },
         );
         Act::Start {
@@ -543,6 +636,7 @@ impl Bridge {
                         transition: "release",
                         input: input::none(),
                         why: format!("taken by {key}'s session"),
+                        as_of: None,
                     });
                     self.released.remove(&(key.to_string(), entity.to_string()));
                     self.released.insert((other, entity.to_string()));
@@ -556,6 +650,7 @@ impl Bridge {
                         transition: "release",
                         input: input::none(),
                         why: format!("held by {other}'s session"),
+                        as_of: None,
                     });
                 }
             }
@@ -596,6 +691,12 @@ impl Bridge {
             // Where the speaker is now, counted on from where it last said it
             // was, as it was then: playing or not.
             let want = a.position(now);
+            if !h.started {
+                // Moved while the sound is still on its way — a seek, a pause
+                // — and the hand-off now stands somewhere else: that is where
+                // the speaker is to be, and where `started` waits for it.
+                h.from_ms = want;
+            }
             let speaker = match h.heard {
                 Some((at_ms, when)) if h.playing => at_ms + (now - when).max(0),
                 Some((at_ms, _)) => at_ms,
@@ -618,10 +719,13 @@ impl Bridge {
                     },
                 });
             }
-            // A seek in the session is a seek on the speaker; a clock
-            // re-anchored at where the speaker said it was (`started`, the
-            // bridge's own `seek`) is not one.
-            if (speaker - want).abs() > DRIFT_MS {
+            // A seek in the session is a seek on the speaker — by more than
+            // the bound, which is also how far apart the bridge lets the
+            // speaker drift before it says where the speaker is, so the two
+            // can never pull against each other. A clock re-anchored at where
+            // the speaker said it was (`started`, `report_position`, its own
+            // `seek`) is not one: the speaker is already there.
+            if (speaker - want).abs() > SYNC_MS {
                 acts.push(Act::Seek {
                     entity: entity.into(),
                     position_ms: want,
@@ -631,6 +735,9 @@ impl Bridge {
             h.clock = a.clock;
             if !acts.is_empty() {
                 h.quiet = QUIET;
+                h.told_ms = now;
+                h.since_told = 0;
+                h.silent = 0;
             }
         }
         acts
@@ -682,75 +789,57 @@ impl Bridge {
         let Some(h) = self.held.get_mut(entity) else {
             return vec![];
         };
+        h.since_told = h.since_told.saturating_add(1);
         // Where it says it is. A URL that is not one of ours means either that
         // it has not started yet or that it has been sent somewhere else
         // entirely — a radio stream, a doorbell chime — and the only thing
         // that tells those apart is how long ago we handed it something.
         let at = poll.and_then(|p| h.index(p));
+        if !h.started {
+            return self.fetching(entity, poll, at, now);
+        }
         let (Some(at), Some(p)) = (at, poll) else {
             return self.lapse(entity, poll);
         };
+        let h = self.held.get_mut(entity).expect("held");
         let key = h.key.clone();
-        let call = |transition: &'static str, input: Args, why: &str| Act::Call {
-            key: key.clone(),
-            entity: entity.to_string(),
-            transition,
-            input,
-            why: why.to_string(),
-        };
-        // Where it is now, counted on from when the house last said so.
-        // Undated, it is taken to be where the session counts it — so it is
-        // never the reason for a seek.
-        let dated = p.position_at(now);
-        let playing = p.state == "playing";
+        let call =
+            |transition: &'static str, input: Args, why: &str, as_of: Option<i64>| Act::Call {
+                key: key.clone(),
+                entity: entity.to_string(),
+                transition,
+                input,
+                why: why.to_string(),
+                as_of,
+            };
+        // Where it is now, while it plays, counted on from when the house
+        // last said so — a position the house dated, and not one it dated
+        // before the bridge last told the speaker something, for the polls
+        // the house takes to hear of it ([`STALE`]). Anything else is no
+        // position at all: it is never the reason for a seek or a report.
+        let trusted = p.dated_after(h.told_ms) || h.since_told >= STALE;
+        let position = p
+            .position_at(now)
+            .filter(|_| trusted && p.sound() == Sound::Playing);
         let mut acts = vec![];
-        if !h.started {
-            // Still fetching: what it says is whatever it played before, even
-            // a track of this same queue, until it says the one it was handed.
-            if at != h.handed_at {
-                return self.lapse(entity, poll);
-            }
-            let position = dated.unwrap_or(h.from_ms);
-            // Playing the track it was handed, but from its beginning when it
-            // was handed from half way: the seek after the enqueue reached it
-            // before it had loaded and was dropped. It is told again, once it
-            // has the track, and it has not started until it is there —
-            // `started` at 0 would take every device's clock back to the
-            // beginning with it. The session stands where it was meanwhile.
-            if h.from_ms > DRIFT_MS && position < h.from_ms - DRIFT_MS && h.sought < SEEKS {
-                if h.seek_wait > 0 {
-                    h.seek_wait -= 1;
-                    return acts;
-                }
-                h.sought += 1;
-                h.seek_wait = QUIET;
-                h.settling = SETTLE;
-                acts.push(Act::Seek {
-                    entity: entity.into(),
-                    position_ms: h.from_ms,
-                });
-                return acts;
-            }
-            h.started = true;
-            h.settling = LAPSE;
-            h.quiet = QUIET;
-            h.heard = Some((position, now));
-            acts.push(call("started", input::at(position), "it has the hand-off"));
-            return acts;
-        }
-        let position = dated.unwrap_or_else(|| h.clock.position(now));
         h.settling = LAPSE;
-        h.heard = Some((position, now));
+        if let Some(position) = position {
+            h.heard = Some((position, now));
+        }
+        if p.sound() == Sound::Playing {
+            h.sounding_ms = Some(now);
+        }
         if at != h.at {
             // It moved on its own: the end of a track, or somebody's finger
             // on the speaker or in the Sonos app.
             let was = h.at;
             h.at = at;
             h.quiet = QUIET;
+            h.silent = 0;
             acts.push(if at == was + 1 {
-                call("advance", input::advance(was), "the track ended")
+                call("advance", input::advance(was), "the track ended", None)
             } else {
-                call("jump", input::jump(at), "it was moved by hand")
+                call("jump", input::jump(at), "it was moved by hand", None)
             });
             return acts;
         }
@@ -758,26 +847,222 @@ impl Bridge {
             h.quiet -= 1;
             return acts;
         }
-        if playing != h.playing {
-            h.playing = playing;
-            h.quiet = QUIET;
-            acts.push(match playing {
-                true => call("play", input::none(), "it was resumed by hand"),
+        match p.sound() {
+            // Fetching, or buffering: neither a sound to count from nor a
+            // stall.
+            Sound::Between => {}
+            Sound::Stopped if !h.playing => h.silent = 0,
+            Sound::Stopped => {
+                // Not playing while the session says it is. Once is a blink;
+                // twice in a row it has stopped, by itself or by hand — at the
+                // point the house says, where that is a position it dated
+                // since a poll last heard it playing (a stop is a change of
+                // state, which the house dates), and otherwise where it had
+                // been counted to when it fell silent: never a stale date's
+                // beginning of the track.
+                let counted = match h.heard {
+                    Some((at_ms, when)) => at_ms + (now - when).max(0),
+                    None => h.clock.position(now),
+                };
+                let stopped_at = *h.stopped_at.get_or_insert(counted);
+                h.silent += 1;
+                if h.silent >= STALL {
+                    let at_ms = match p.dated_after(h.sounding_ms.unwrap_or(h.told_ms)) {
+                        true => p.position_ms.max(0),
+                        false => stopped_at,
+                    };
+                    h.playing = false;
+                    h.quiet = QUIET;
+                    h.silent = 0;
+                    h.stopped_at = None;
+                    h.heard = Some((at_ms, now));
+                    acts.push(call(
+                        "stalled",
+                        input::at(at_ms),
+                        "it stopped by itself, or by hand",
+                        None,
+                    ));
+                }
+            }
+            Sound::Playing => {
+                h.silent = 0;
+                h.stopped_at = None;
+                if !h.playing {
+                    h.playing = true;
+                    h.quiet = QUIET;
+                    acts.push(call("play", input::none(), "it was resumed by hand", None));
+                    return acts;
+                }
+                let Some(position) = position else {
+                    return acts;
+                };
+                // Where the session counts it, as the bridge last read the
+                // session: the speaker is right about where it is.
+                let session = h.clock.position(now);
+                let off = position - session;
+                if off.abs() > DRIFT_MS {
+                    h.quiet = QUIET;
+                    acts.push(call(
+                        "seek",
+                        input::seek(position),
+                        "it is somewhere else in the track",
+                        Some(now),
+                    ));
+                } else if off.abs() > SYNC_MS {
+                    if let Clock::Playing { since, .. } = h.clock {
+                        acts.push(call(
+                            "report_position",
+                            input::report_position(position, since),
+                            "it is not where the session counts it",
+                            Some(now),
+                        ));
+                    }
+                }
+            }
+        }
+        acts
+    }
+
+    /// A poll of a speaker that has not yet said it has what it was handed:
+    /// `started` once it is playing the queue — on the track it was handed or
+    /// any after it, since a short track can end before the first poll — at
+    /// the point where it actually is, which is measured, never assumed.
+    fn fetching(
+        &mut self,
+        entity: &str,
+        poll: Option<&Playing>,
+        at: Option<usize>,
+        now: i64,
+    ) -> Vec<Act> {
+        let h = self.held.get_mut(entity).expect("held");
+        let Some(p) = poll else {
+            return self.lapse(entity, poll);
+        };
+        // The queue it was handed, at or after where it was handed from — but
+        // a later track only once the house has dated it since the hand-off:
+        // until then it may be what the speaker was playing before, which can
+        // be a track of this same queue.
+        let ours =
+            at.filter(|at| *at == h.handed_at || (*at > h.handed_at && p.dated_after(h.handed_ms)));
+        let wanted = match h.playing {
+            true => Sound::Playing,
+            false => Sound::Stopped,
+        };
+        let Some(at) = ours else {
+            // Saying it plays nothing, or nothing yet, is fetching; naming
+            // something that is not ours is perhaps being sent elsewhere.
+            if p.url.is_empty() || p.sound() == Sound::Between {
+                return self.wait(entity, None, now);
+            }
+            return self.lapse(entity, poll);
+        };
+        if p.sound() != wanted {
+            return self.wait(entity, Some(at), now);
+        }
+        // The point it is at, counted on from when the house dated it. A
+        // playing report the house did not date is no point at all — the
+        // Sonos integration clears the position while a new stream's length
+        // is unknown — and the hand-off waits for one it did. One the house
+        // dated before the last seek is still the house's own count: a seek
+        // the speaker dropped moves nothing, so nothing is dated again.
+        let Some(position) = p.position_at(now) else {
+            return self.wait(entity, Some(at), now);
+        };
+        // On the track it was handed, but at its beginning when it was
+        // handed from half way — playing, or paused there for a session
+        // handed over paused: the seek after the enqueue reached it before
+        // it had loaded and was dropped. It is told again, once it
+        // has the track, and it has not started until it is there —
+        // `started` at 0 would take every device's clock back to the
+        // beginning with it. The session stands where it was meanwhile.
+        if at == h.handed_at
+            && h.from_ms > SYNC_MS
+            && position < h.from_ms - SYNC_MS
+            && h.sought < SEEKS
+        {
+            if h.seek_wait > 0 {
+                h.seek_wait -= 1;
+                return vec![];
+            }
+            h.sought += 1;
+            h.seek_wait = QUIET;
+            h.told_ms = now;
+            h.since_told = 0;
+            return vec![Act::Seek {
+                entity: entity.into(),
+                position_ms: h.from_ms,
+            }];
+        }
+        self.start(entity, at, position, now)
+    }
+
+    /// A poll of the hand-off that was ours but not yet sounding as asked —
+    /// spent from [`WAIT`]. Run out on a track of the queue, it is believed
+    /// started where it would be had the last thing it was told landed when
+    /// it was told; run out anywhere else, it never got there.
+    fn wait(&mut self, entity: &str, at: Option<usize>, now: i64) -> Vec<Act> {
+        let h = self.held.get_mut(entity).expect("held");
+        h.waited = h.waited.saturating_add(1);
+        if h.waited < WAIT {
+            return vec![];
+        }
+        match at {
+            Some(at) => {
+                let guess = match at == h.handed_at {
+                    true => h.from_ms + (now - h.told_ms).max(0) * i64::from(h.playing),
+                    false => 0,
+                };
+                self.start(entity, at, guess, now)
+            }
+            None => {
+                h.settling = 0;
+                self.lapse(entity, None)
+            }
+        }
+    }
+
+    /// The hand-off has landed: `started` at `position` in track `at`, said
+    /// as of `now` — after an `advance` or a `jump` to that track when it is
+    /// past the one it was handed.
+    fn start(&mut self, entity: &str, at: usize, position: i64, now: i64) -> Vec<Act> {
+        let h = self.held.get_mut(entity).expect("held");
+        let call =
+            |transition: &'static str, input: Args, why: &str, as_of: Option<i64>| Act::Call {
+                key: h.key.clone(),
+                entity: entity.to_string(),
+                transition,
+                input,
+                why: why.to_string(),
+                as_of,
+            };
+        let mut acts = vec![];
+        if at != h.handed_at {
+            acts.push(match at == h.handed_at + 1 {
+                true => call(
+                    "advance",
+                    input::advance(h.handed_at),
+                    "it has the hand-off, a track on",
+                    None,
+                ),
                 false => call(
-                    "stalled",
-                    input::at(position),
-                    "it stopped by itself, or by hand",
+                    "jump",
+                    input::jump(at),
+                    "it has the hand-off, tracks on",
+                    None,
                 ),
             });
-        } else if playing && dated.is_some() && (position - h.clock.position(now)).abs() > DRIFT_MS
-        {
-            h.quiet = QUIET;
-            acts.push(call(
-                "seek",
-                input::seek(position),
-                "it is somewhere else in the track",
-            ));
         }
+        acts.push(call(
+            "started",
+            input::at(position),
+            "it has the hand-off",
+            h.playing.then_some(now),
+        ));
+        h.started = true;
+        h.at = at;
+        h.settling = LAPSE;
+        h.quiet = QUIET;
+        h.heard = Some((position, now));
         acts
     }
 
@@ -801,6 +1086,7 @@ impl Bridge {
             .cloned()
             .unwrap_or_default();
         let next = h.urls.get(h.at + 1).filter(|_| h.started).cloned();
+        let never = !h.started && h.waited >= WAIT;
         self.held.remove(entity);
         let why = match poll {
             Some(p) => match next {
@@ -813,6 +1099,7 @@ impl Bridge {
                     p.state, p.url
                 ),
             },
+            None if never => format!("it never started {expected:?}"),
             None => "not answering".to_string(),
         };
         vec![Act::Call {
@@ -821,7 +1108,38 @@ impl Bridge {
             transition: "release",
             input: input::none(),
             why,
+            as_of: None,
         }]
+    }
+
+    /// One line on what the bridge made of a poll of `entity` at `now`: where
+    /// it reads the speaker as being, where it has the session, and where it
+    /// is in the hand-off — for the trace ([`ha::Config::trace`]).
+    pub fn describe(&self, entity: &str, poll: Option<&Playing>, now: i64) -> String {
+        let Some(h) = self.held.get(entity) else {
+            return "not held".to_string();
+        };
+        let speaker = match poll.map(|p| (p.position_at(now), p.dated_after(h.told_ms))) {
+            Some((Some(ms), true)) => format!("{ms} ms"),
+            Some((Some(ms), false)) => format!("{ms} ms (dated before the last command)"),
+            Some((None, _)) => "undated".to_string(),
+            None => "no answer".to_string(),
+        };
+        let session = match h.started {
+            true => format!("{} ms", h.clock.position(now)),
+            false => format!("{} ms, standing", h.from_ms),
+        };
+        format!(
+            "speaker {speaker}; session {session}; track {} of {} (handed {}); {}; quiet {}, waited {}, sought {}, silent {}",
+            h.at,
+            h.urls.len(),
+            h.handed_at,
+            if h.started { "started" } else { "fetching" },
+            h.quiet,
+            h.waited,
+            h.sought,
+            h.silent
+        )
     }
 
     /// Home Assistant said what a standing player's volume and group are —
@@ -864,6 +1182,7 @@ impl Bridge {
             transition,
             input,
             why: why.to_string(),
+            as_of: None,
         };
         let mut acts = vec![];
         // What it can do, once a session has it standing: until the session
@@ -1066,16 +1385,40 @@ pub mod when {
         Some((days(num(year)?, month, num(day)?) * 86_400 + h * 3_600 + mi * 60 + se) * 1_000)
     }
 
-    /// A moment the house stamped, on the server's clock: as long before
-    /// `server_now` as it was before the house's own now, which its answer's
-    /// `Date` says — to the second, so taken at the middle of it. With no
-    /// `Date` the two clocks are taken to agree, which on one LAN with NTP
-    /// they do to well inside the three seconds anything here is measured
-    /// against.
-    pub fn on_our_clock(stamped: i64, house_now: Option<i64>, server_now: i64) -> i64 {
-        match house_now {
-            Some(date) => server_now - (date + 500 - stamped),
-            None => stamped,
+    /// The house's clock less the server's, narrowed answer by answer.
+    ///
+    /// One `Date` says the house's clock to the second, so read alone — and
+    /// taken at the middle of its second, as the bridge did — it places a
+    /// moment the house stamped only to within half a second either way,
+    /// which is most of the bound every output is held to. But each answer also says *when*: the house wrote its `Date`
+    /// somewhere between the server asking (`sent`) and hearing back (`got`),
+    /// so the house's clock less the server's lies between `date - got` and
+    /// `date + 1000 - sent`. Answers land at every phase of the second, and
+    /// the intersection of what they say closes in on the truth to within
+    /// the round trip. Each answer widens what is known by a millisecond
+    /// first, so two clocks drifting apart are followed; answers that cannot
+    /// both be true — a clock stepped — start it again from the latest.
+    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+    pub struct Skew {
+        bounds: Option<(i64, i64)>,
+    }
+
+    impl Skew {
+        /// An answer dated `date` (the house's clock, to the second), asked
+        /// for at `sent` and heard at `got` (the server's).
+        pub fn answer(&mut self, date: i64, sent: i64, got: i64) {
+            let (lo, hi) = (date - got, date + 1_000 - sent);
+            self.bounds = Some(match self.bounds {
+                Some((l, h)) if lo <= h + 1 && hi >= l - 1 => ((l - 1).max(lo), (h + 1).min(hi)),
+                _ => (lo, hi),
+            });
+        }
+
+        /// A moment the house stamped, on the server's clock, and how far
+        /// either way it may be: `None` before any answer was dated.
+        pub fn ours(&self, stamped: i64) -> Option<(i64, i64)> {
+            let (lo, hi) = self.bounds?;
+            Some((stamped - (lo + hi) / 2, (hi - lo + 1) / 2))
         }
     }
 
@@ -1111,14 +1454,57 @@ pub mod when {
             );
             assert_eq!(http_date_ms("Wed, 01 May 2024 12:34:56"), None);
             // The house a minute fast: stamped ten seconds before its now
-            // is ten seconds before ours.
+            // is ten seconds before ours, to within the half second one
+            // answer can say.
             let ours = 1_714_566_896_000;
             let house = ours + 60_000;
+            let mut skew = Skew::default();
             assert_eq!(
-                on_our_clock(house - 10_000, Some(house), ours),
-                ours - 10_500
+                skew.ours(house - 10_000),
+                None,
+                "nothing known before an answer"
             );
-            assert_eq!(on_our_clock(42, None, ours), 42);
+            skew.answer(house, ours - 20, ours + 20);
+            let (at, slack) = skew.ours(house - 10_000).unwrap();
+            assert!(
+                (at - (ours - 10_000)).abs() <= slack && slack <= 520,
+                "{at} ± {slack}"
+            );
+        }
+
+        /// Answers at every phase of the house's second close in on its
+        /// clock to within the round trip, where one answer alone is half a
+        /// second either way — and a clock stepped starts it again rather
+        /// than leaving nothing true.
+        ///
+        /// Falsified by an `answer` that kept only the latest answer: the
+        /// slack stayed at 505 ms.
+        #[test]
+        fn the_houses_clock_is_narrowed_answer_by_answer() {
+            // The house 1 234 ms ahead of the server; a 10 ms round trip.
+            let ahead: i64 = 1_234;
+            let mut skew = Skew::default();
+            for i in 0..40 {
+                let sent = 1_700_000_000_000 + i * 1_037;
+                let date = (sent + 5 + ahead).div_euclid(1_000) * 1_000;
+                skew.answer(date, sent, sent + 10);
+            }
+            let stamped = 1_700_000_050_000 + ahead;
+            let (at, slack) = skew.ours(stamped).unwrap();
+            assert!(slack <= 50, "narrowed to {slack} ms");
+            assert!((at - 1_700_000_050_000).abs() <= slack, "placed at {at}");
+            // The house's clock stepped back a minute.
+            let sent = 1_700_000_100_000;
+            skew.answer(
+                (sent + ahead - 60_000).div_euclid(1_000) * 1_000,
+                sent,
+                sent + 10,
+            );
+            let (at, slack) = skew.ours(stamped - 60_000).unwrap();
+            assert!(
+                slack > 400 && (at - 1_700_000_050_000).abs() <= slack,
+                "{at} ± {slack}"
+            );
         }
     }
 }
@@ -1228,6 +1614,7 @@ mod tests {
             updated_ms: Some(NOW),
             duration_ms: None,
             queue_position: None,
+            slack_ms: 0,
         }
     }
 
@@ -1423,6 +1810,286 @@ mod tests {
         assert_eq!(input, &input::at(1_200));
     }
 
+    /// The house says a speaker is playing before it says where: the Sonos
+    /// integration clears the position while a new stream's length is
+    /// unknown. That is no position at all, and the hand-off is not over:
+    /// `started` was said off it at the point the track was handed, while
+    /// the speaker played from the beginning — the session ran on from there
+    /// a few seconds ahead of what anybody heard, and the first position the
+    /// house did date took every device back to the beginning. It waits for
+    /// one it can place, and that is where the hand-off ends.
+    ///
+    /// Falsified by reading an undated report as the point it was handed at
+    /// (the old `unwrap_or(from_ms)`): `started` at 90 000 on the first poll,
+    /// with the speaker at the beginning.
+    #[test]
+    fn a_hand_off_is_not_over_until_the_house_says_where_the_speaker_is() {
+        let mut b = bridge();
+        let files = ["music/a.mp3", "music/b.mp3"];
+        b.wants(
+            "alice",
+            KITCHEN,
+            &session(&files, 0, playing_at(90_000), kitchen(true)),
+            NOW,
+        );
+        let undated = Playing {
+            updated_ms: None,
+            ..playing(&url_of(files[0]), 0)
+        };
+        for poll in 0..3 {
+            assert!(
+                b.heard(KITCHEN, Some(&undated), NOW + 100 * poll)
+                    .is_empty(),
+                "playing, but nobody can say where: poll {poll}"
+            );
+        }
+        let buffering = Playing {
+            state: "buffering".into(),
+            ..playing(&url_of(files[0]), 0)
+        };
+        assert!(b.heard(KITCHEN, Some(&buffering), NOW + 300).is_empty());
+        // Dated at last, and at the beginning: told where the track was.
+        let at_start = Playing {
+            updated_ms: Some(NOW + 400),
+            ..playing(&url_of(files[0]), 0)
+        };
+        assert!(matches!(
+            &b.heard(KITCHEN, Some(&at_start), NOW + 500)[..],
+            [Act::Seek {
+                position_ms: 90_000,
+                ..
+            }]
+        ));
+        // The house goes on dating the beginning: the seek was dropped, so
+        // nothing moved to date again. A moment for it, and it is told again.
+        for poll in 0..2 {
+            assert!(b
+                .heard(KITCHEN, Some(&at_start), NOW + 1_000 + 100 * poll)
+                .is_empty());
+        }
+        assert!(matches!(
+            &b.heard(KITCHEN, Some(&at_start), NOW + 1_300)[..],
+            [Act::Seek {
+                position_ms: 90_000,
+                ..
+            }]
+        ));
+        let there = Playing {
+            updated_ms: Some(NOW + 2_000),
+            ..playing(&url_of(files[0]), 90_000)
+        };
+        let acts = b.heard(KITCHEN, Some(&there), NOW + 2_300);
+        assert_eq!(calls(&acts), [("alice", "started")]);
+        let Act::Call { input, as_of, .. } = &acts[0] else {
+            unreachable!()
+        };
+        assert_eq!(
+            input,
+            &input::at(90_300),
+            "where it measurably is, counted to the poll"
+        );
+        assert_eq!(
+            *as_of,
+            Some(NOW + 2_300),
+            "and on from there, to when it is said"
+        );
+    }
+
+    /// A short track can end before the bridge first hears of a hand-off —
+    /// a queue still being pushed, a house slow to answer — and the speaker
+    /// is then on the second track of what it was handed: ours, followed
+    /// (`advance`, then `started` where it is in that track), never let go.
+    /// A later track reported from before the hand-off, though, may be what
+    /// it was playing before, so that waits for a report dated since.
+    ///
+    /// Falsified by taking only the track it was handed as having started:
+    /// the second track was a lapse, and nothing was said of it.
+    #[test]
+    fn a_speaker_already_on_a_later_track_is_followed_and_not_let_go() {
+        let mut b = bridge();
+        let files = ["music/a.mp3", "music/b.mp3", "music/c.mp3"];
+        b.wants(
+            "alice",
+            KITCHEN,
+            &session(&files, 0, playing_at(0), kitchen(true)),
+            NOW,
+        );
+        // The third track, dated before the hand-off: perhaps the last queue.
+        let old = Playing {
+            updated_ms: Some(NOW - 30_000),
+            ..playing(&url_of(files[2]), 0)
+        };
+        assert!(b.heard(KITCHEN, Some(&old), NOW + 100).is_empty());
+        assert!(b.holds(KITCHEN));
+        // The second, dated since: it got there by itself.
+        let on = Playing {
+            updated_ms: Some(NOW + 2_000),
+            ..playing(&url_of(files[1]), 0)
+        };
+        let mut said = vec![];
+        for poll in 0..3 {
+            said.extend(b.heard(KITCHEN, Some(&on), NOW + 2_500 + 100 * poll));
+        }
+        assert_eq!(calls(&said), [("alice", "advance"), ("alice", "started")]);
+        let Act::Call { input, .. } = &said[0] else {
+            unreachable!()
+        };
+        assert_eq!(input, &input::advance(0));
+        let Act::Call { input, .. } = &said[1] else {
+            unreachable!()
+        };
+        assert_eq!(input, &input::at(500), "where it is in that track");
+        assert_eq!(b.holder(KITCHEN), Some("alice"));
+        // The session following it hands it nothing again.
+        let followed = session(
+            &files,
+            1,
+            Clock::Playing {
+                at_ms: 500,
+                since: NOW + 2_500,
+            },
+            kitchen(false),
+        );
+        assert!(b.wants("alice", KITCHEN, &followed, NOW + 2_600).is_empty());
+        for poll in 0..8 {
+            assert!(b
+                .heard(KITCHEN, Some(&on), NOW + 3_000 + 1_000 * poll)
+                .is_empty());
+        }
+        assert_eq!(b.holder(KITCHEN), Some("alice"));
+        // …and two tracks on is a jump.
+        let mut b = bridge();
+        b.wants(
+            "alice",
+            KITCHEN,
+            &session(&files, 0, playing_at(0), kitchen(true)),
+            NOW,
+        );
+        let two_on = Playing {
+            updated_ms: Some(NOW + 1_000),
+            ..playing(&url_of(files[2]), 0)
+        };
+        let acts = b.heard(KITCHEN, Some(&two_on), NOW + 1_000);
+        assert_eq!(calls(&acts), [("alice", "jump"), ("alice", "started")]);
+    }
+
+    /// A speaker that has come apart from the session by more than the
+    /// bound — a house that dated where it really is — is followed: the
+    /// session is told where it is (`report_position`, against the clock it
+    /// was measured against), and the speaker is told nothing, then or when
+    /// the session re-anchors there. Within the bound it is left alone; past
+    /// three seconds it was moved by hand, and that is its `seek`.
+    ///
+    /// Falsified by the old bound, three seconds for everything: a second
+    /// apart reported nothing.
+    #[test]
+    fn a_speaker_drifting_from_the_session_is_followed_and_told_nothing() {
+        let mut b = bridge();
+        let files = ["music/a.mp3"];
+        started(&mut b, "alice", &files, 0);
+        let anchored = session(&files, 0, playing_at(0), kitchen(false));
+        assert!(b.wants("alice", KITCHEN, &anchored, NOW + 100).is_empty());
+        for poll in 0..2 {
+            b.heard(
+                KITCHEN,
+                Some(&playing(&url_of(files[0]), 0)),
+                NOW + 1_000 + poll,
+            );
+        }
+        // A second ahead of the session, as the house now dates it.
+        let ahead = Playing {
+            updated_ms: Some(NOW + 9_000),
+            ..playing(&url_of(files[0]), 10_000)
+        };
+        let acts = b.heard(KITCHEN, Some(&ahead), NOW + 10_000);
+        assert_eq!(acts.len(), 1, "{acts:?}");
+        let Act::Call {
+            transition,
+            input,
+            as_of,
+            ..
+        } = &acts[0]
+        else {
+            panic!("not a transition: {acts:?}")
+        };
+        assert_eq!(*transition, "report_position");
+        assert_eq!(input, &input::report_position(11_000, NOW));
+        assert_eq!(*as_of, Some(NOW + 10_000));
+        // The session re-anchored there: nothing to tell the speaker.
+        let followed = session(
+            &files,
+            0,
+            Clock::Playing {
+                at_ms: 11_000,
+                since: NOW + 10_000,
+            },
+            kitchen(false),
+        );
+        assert!(b
+            .wants("alice", KITCHEN, &followed, NOW + 10_050)
+            .is_empty());
+        assert!(
+            b.heard(KITCHEN, Some(&ahead), NOW + 11_000).is_empty(),
+            "and it is not said twice"
+        );
+        // Within the bound, nothing.
+        let near = Playing {
+            updated_ms: Some(NOW + 12_000),
+            ..playing(&url_of(files[0]), 13_400)
+        };
+        assert!(b.heard(KITCHEN, Some(&near), NOW + 12_000).is_empty());
+        // Far beyond it, a hand on the speaker.
+        let moved = Playing {
+            updated_ms: Some(NOW + 13_000),
+            ..playing(&url_of(files[0]), 60_000)
+        };
+        assert_eq!(
+            calls(&b.heard(KITCHEN, Some(&moved), NOW + 13_000)),
+            [("alice", "seek")]
+        );
+    }
+
+    /// One poll of `paused` or `idle` from a speaker playing on is a blink —
+    /// a Sonos between a seek and its stream, the house a moment behind — and
+    /// not a stall: read as one it paused every bar where the house had last
+    /// dated a position, which on a fresh track is its beginning, and the
+    /// next poll played it on from there. Two in a row is a stall, at the
+    /// point the house dated since it was last told anything, and otherwise
+    /// where it had been counted to when it fell silent — never a stale date.
+    ///
+    /// Falsified by a stall on the first silent poll: `stalled` at 0.
+    #[test]
+    fn a_blink_is_not_a_stall_and_a_stall_is_never_a_stale_beginning() {
+        let mut b = bridge();
+        let files = ["music/a.mp3"];
+        started(&mut b, "alice", &files, 0);
+        let a = url_of(files[0]);
+        for poll in 0..2 {
+            b.heard(KITCHEN, Some(&playing(&a, 0)), NOW + 1_000 + poll);
+        }
+        let blink = Playing {
+            state: "idle".into(),
+            updated_ms: Some(NOW - 60_000),
+            ..playing(&a, 0)
+        };
+        assert!(b.heard(KITCHEN, Some(&blink), NOW + 4_000).is_empty());
+        assert!(b
+            .heard(KITCHEN, Some(&playing(&a, 0)), NOW + 5_000)
+            .is_empty());
+        // Stopped for real, the house still dating the beginning.
+        assert!(b.heard(KITCHEN, Some(&blink), NOW + 6_000).is_empty());
+        let acts = b.heard(KITCHEN, Some(&blink), NOW + 7_000);
+        assert_eq!(calls(&acts), [("alice", "stalled")]);
+        let Act::Call { input, .. } = &acts[0] else {
+            unreachable!()
+        };
+        assert_eq!(
+            input,
+            &input::at(6_000),
+            "where it was counted to when it fell silent"
+        );
+    }
+
     /// Where the speaker says it is, is where it is — including when nobody
     /// asked it to move. Somebody pressing the button on the speaker moves
     /// every phone: the next track is `advance`, anywhere else `jump`, a
@@ -1446,8 +2113,16 @@ mod tests {
         };
         assert!(b.heard(KITCHEN, Some(&paused), NOW).is_empty());
         assert!(b.heard(KITCHEN, Some(&paused), NOW).is_empty());
+        assert!(
+            b.heard(KITCHEN, Some(&paused), NOW).is_empty(),
+            "one poll of it is a blink"
+        );
         let acts = b.heard(KITCHEN, Some(&paused), NOW);
         assert_eq!(calls(&acts), [("alice", "stalled")]);
+        let Act::Call { input, .. } = &acts[0] else {
+            unreachable!()
+        };
+        assert_eq!(input, &input::at(4_200), "where the house says it stopped");
     }
 
     /// A session that moved is told to the speaker: a pause becomes
@@ -1589,12 +2264,14 @@ mod tests {
     /// itself half a second after it was asked for — so the tell is a speaker
     /// somebody picked handing the music straight back.
     ///
-    /// The counts here are numbers rather than `SETTLE`: written in terms of
-    /// the constant, setting it to zero makes the first loop empty and the
-    /// "not yet" assertion never runs, so the test would shrink with the thing
-    /// it holds.
+    /// The counts here are numbers rather than `WAIT` and `LAPSE`: written in
+    /// terms of the constants, setting one to zero makes its loop empty and
+    /// the "not yet" assertion never runs, so the test would shrink with the
+    /// thing it holds.
     ///
-    /// Falsified by setting `SETTLE` to 1: the second quiet poll released it.
+    /// Falsified by setting `WAIT` to 1: the first quiet poll of the hand-off
+    /// released it. (It was `SETTLE` while a speaker saying it plays nothing
+    /// spent the grace for one sent elsewhere; fetching has its own now.)
     #[test]
     fn a_speaker_is_given_a_moment_to_start_before_it_is_let_go() {
         let mut b = bridge();
@@ -1611,6 +2288,7 @@ mod tests {
             updated_ms: None,
             duration_ms: None,
             queue_position: None,
+            slack_ms: 0,
         };
         for tick in 0..3 {
             assert!(
@@ -2252,7 +2930,7 @@ mod tests {
 /// only the speakers standing: a server whose house nobody is listening in
 /// makes no requests at all.
 pub mod ha {
-    use std::collections::HashMap;
+    use std::collections::{HashMap, VecDeque};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc::{channel, Receiver, Sender};
     use std::sync::Arc;
@@ -2262,10 +2940,19 @@ pub mod ha {
     use ark::live::state::{Call, DeviceDecl, Instance};
     use ark::live::ConnId;
     use ark::protocol::Identity;
+    use ark::value::Value;
     use ark_server::HubHandle;
     use harken_domain::listening::read::{Kind, Listening, STATE};
 
     use super::{listening, playing, Act, Bridge, Playing, Speaker, GROUPING, VOLUME_SET};
+
+    /// How many of a handed queue's tracks are pushed at a speaker on one
+    /// pass of the bridge. The first track goes at once, with its seek; the
+    /// rest follow this many at a time between polls, so a queue of two
+    /// hundred — two hundred requests, each a round trip to the speaker —
+    /// does not leave every session in the house unread, and the hand-off
+    /// standing still, for the minute it takes.
+    pub const PUSH: usize = 8;
 
     /// How often a held player is asked what it is doing.
     pub const TICK: Duration = Duration::from_millis(1_000);
@@ -2306,6 +2993,24 @@ pub mod ha {
         /// How long a silent speaker stands where nobody is listening;
         /// [`IDLE`] outside a test.
         pub idle: Duration,
+        /// One line per poll per speaker: what the house said — state,
+        /// `media_content_id`, `media_position`, `media_position_updated_at`,
+        /// its `Date` — where the bridge reads the speaker as being and has
+        /// the session, and what it did about it. `HARKEN_BRIDGE_TRACE=1`
+        /// prints them; off by default, being a line a second for every
+        /// speaker standing.
+        pub trace: Trace,
+    }
+
+    /// Where the bridge's trace goes ([`Config::trace`]).
+    #[derive(Clone, Debug, Default)]
+    pub enum Trace {
+        #[default]
+        Off,
+        /// Standard output, so the journal: `journalctl -u harken`.
+        Out,
+        /// Each line sent here, for a test to read.
+        Lines(Sender<String>),
     }
 
     impl std::fmt::Display for Config {
@@ -2397,6 +3102,8 @@ pub mod ha {
         // Since when each session with nobody listening and a speaker
         // standing has been silent.
         let mut silent: HashMap<String, Instant> = HashMap::new();
+        // The rest of each handed queue, still to be pushed at its speaker.
+        let mut pushing: HashMap<String, VecDeque<String>> = HashMap::new();
         loop {
             if stop.load(Ordering::Relaxed) {
                 for (_, c) in wires.drain() {
@@ -2506,6 +3213,13 @@ pub mod ha {
                     acts.extend(bridge.wants(key, entity, state, now));
                 }
             }
+            // Told before anything is read back, so that what a poll below
+            // says is always after what the house was told: a reading taken
+            // before a hand-off was performed is the speaker's last queue.
+            for act in acts {
+                perform(house, hub, &wires, &mut autos, &mut pushing, act);
+            }
+            push(house, &mut pushing);
             // …and, a tick at a time, what the standing ones are actually
             // doing: every one's volume and group, and what the held ones
             // are playing. A speaker stands only where somebody is listening
@@ -2521,21 +3235,77 @@ pub mod ha {
                     .collect();
                 for entity in standing {
                     let reading = house.read(&entity);
-                    bridge.polled(&entity, reading.as_ref().map(|(_, s)| s));
-                    acts.extend(bridge.heard(&entity, reading.as_ref().map(|(p, _)| p), now_ms()));
+                    let poll = reading.as_ref().map(|r| &r.playing);
+                    bridge.polled(&entity, reading.as_ref().map(|r| &r.speaker));
+                    let now = now_ms();
+                    let heard = bridge.heard(&entity, poll, now);
+                    if !matches!(config.trace, Trace::Off) {
+                        let line = format!(
+                            "harken-server: house: trace: {entity}: {}; {}; {}",
+                            reading
+                                .as_ref()
+                                .map_or("no answer".to_string(), |r| r.said.clone()),
+                            bridge.describe(&entity, poll, now),
+                            done(&heard)
+                        );
+                        match &config.trace {
+                            Trace::Lines(to) => {
+                                let _ = to.send(line);
+                            }
+                            _ => println!("{line}"),
+                        }
+                    }
+                    // Said at once, each poll's: a position is as of the poll.
+                    for act in heard {
+                        perform(house, hub, &wires, &mut autos, &mut pushing, act);
+                    }
                 }
             }
-            for act in acts {
-                perform(house, hub, &wires, &mut autos, act);
-            }
-            // Until a frame, the next poll, or a stop.
-            let wait = config
-                .tick
-                .saturating_sub(polled.elapsed())
-                .max(Duration::from_millis(10));
+            // Until a frame, the next poll, or a stop — or at once, while a
+            // queue is still being pushed.
+            let wait = match pushing.is_empty() {
+                true => config
+                    .tick
+                    .saturating_sub(polled.elapsed())
+                    .max(Duration::from_millis(10)),
+                false => Duration::ZERO,
+            };
             let _ = woken.recv_timeout(wait);
             while woken.try_recv().is_ok() {}
         }
+    }
+
+    /// What a poll's acts were, for the trace: the transitions said as the
+    /// speaker, with the point each was said at, and what the house was told.
+    fn done(acts: &[Act]) -> String {
+        if acts.is_empty() {
+            return "nothing done".to_string();
+        }
+        let each: Vec<String> = acts
+            .iter()
+            .map(|a| match a {
+                Act::Call {
+                    transition, input, ..
+                } => match input.get("at_ms").or(input.get("ms")) {
+                    Some(Value::Int(ms)) => format!("{transition} {ms} ms"),
+                    _ => transition.to_string(),
+                },
+                Act::Seek { position_ms, .. } => format!("media_seek {position_ms} ms"),
+                Act::Verb { verb, .. } => verb.to_string(),
+                other => format!("{other:?}"),
+            })
+            .collect();
+        format!("did {}", each.join(", "))
+    }
+
+    /// The next few tracks of each queue still being pushed ([`PUSH`]).
+    fn push(house: &House, pushing: &mut HashMap<String, VecDeque<String>>) {
+        for (entity, rest) in pushing.iter_mut() {
+            for url in rest.drain(..rest.len().min(PUSH)).collect::<Vec<_>>() {
+                house.call(entity, "play_media", Some(media(&url, "add")));
+            }
+        }
+        pushing.retain(|_, rest| !rest.is_empty());
     }
 
     fn seek(position_ms: i64) -> serde_json::Value {
@@ -2549,6 +3319,7 @@ pub mod ha {
         hub: &HubHandle,
         wires: &HashMap<(String, String), ConnId>,
         autos: &mut ark_client::autos::Autos,
+        pushing: &mut HashMap<String, VecDeque<String>>,
         act: Act,
     ) {
         match act {
@@ -2556,9 +3327,20 @@ pub mod ha {
                 key,
                 entity,
                 transition,
-                input,
+                mut input,
                 why,
+                as_of,
             } => {
+                // A playing speaker's point, counted on from when it was
+                // measured to now, when it is said.
+                if let Some(at) = as_of {
+                    let gone = (now_ms() - at).max(0);
+                    for field in ["at_ms", "ms"] {
+                        if let Some(Value::Int(ms)) = input.get_mut(field) {
+                            *ms += gone;
+                        }
+                    }
+                }
                 // A release is said out loud, because a speaker being let go
                 // looks exactly like one that stopped for no reason, and the
                 // reason is only ever known here.
@@ -2580,6 +3362,12 @@ pub mod ha {
                 );
             }
             Act::Enqueue { entity, urls, next } => {
+                // At the end of a queue still being pushed is after what is
+                // still to come.
+                if let (false, Some(rest)) = (next, pushing.get_mut(&entity)) {
+                    rest.extend(urls);
+                    return;
+                }
                 println!(
                     "harken-server: house: {entity}: {} track(s) {}",
                     urls.len(),
@@ -2669,23 +3457,29 @@ pub mod ha {
                     urls.len(),
                     if playing { "playing" } else { "paused" }
                 );
+                pushing.remove(&entity);
                 house.call(&entity, "clear_playlist", None);
                 if !house.call(&entity, "play_media", Some(media(first, "play"))) {
                     return;
                 }
-                for url in urls.iter().skip(at + 1).take(WINDOW) {
-                    house.call(&entity, "play_media", Some(media(url, "add")));
-                }
                 // Halfway through a track is where it picks up: the queue
                 // starts the track from the beginning and this moves it to
                 // where the session actually is. Issued against a speaker that
-                // may not have read any of the stream yet, which Home
-                // Assistant queues rather than refuses.
+                // may not have read any of the stream yet, which a Sonos drops
+                // — the bridge tells it again once it reports the track
+                // (`SEEKS`) — and sent before the rest of the queue, which is
+                // pushed a few at a time from here on, so that it lands on the
+                // track it is about.
                 if position_ms > 0 {
                     house.call(&entity, "media_seek", Some(seek(position_ms)));
                 }
                 if !playing {
                     house.call(&entity, "media_pause", None);
+                }
+                let rest: VecDeque<String> =
+                    urls.iter().skip(at + 1).take(WINDOW).cloned().collect();
+                if !rest.is_empty() {
+                    pushing.insert(entity.clone(), rest);
                 }
             }
         }
@@ -2716,6 +3510,16 @@ pub mod ha {
         agent: ureq::Agent,
         /// Each grouping player's family, asked once.
         families: std::sync::Mutex<HashMap<String, String>>,
+        /// The house's clock, as its answers have narrowed it.
+        skew: std::sync::Mutex<super::when::Skew>,
+    }
+
+    /// One answer about a player: what it is doing, its volume and group,
+    /// and — for the trace — what the house said, as it said it.
+    struct Reading {
+        playing: Playing,
+        speaker: Speaker,
+        said: String,
     }
 
     impl House {
@@ -2725,6 +3529,7 @@ pub mod ha {
                 bearer: format!("Bearer {}", config.token),
                 agent: ureq::AgentBuilder::new().timeout(TIMEOUT).build(),
                 families: Default::default(),
+                skew: Default::default(),
             }
         }
 
@@ -2788,17 +3593,29 @@ pub mod ha {
 
         /// What one player is doing, and its volume and group, or `None`
         /// if it will not say.
-        fn read(&self, entity: &str) -> Option<(Playing, Speaker)> {
+        fn read(&self, entity: &str) -> Option<Reading> {
+            let sent = now_ms();
             let response = self
                 .agent
                 .get(&format!("{}/api/states/{entity}", self.base))
                 .set("Authorization", &self.bearer)
                 .call()
                 .ok()?;
-            // The house's clock, as its answer is dated: what its timestamps
-            // are read against, so a house whose clock is not the server's
-            // still places a position right.
-            let house_now = response.header("date").and_then(super::when::http_date_ms);
+            let got = now_ms();
+            // The house's clock, as its answers are dated: what its
+            // timestamps are read against, so a house whose clock is not the
+            // server's still places a position right — to the round trip,
+            // once a few answers have narrowed it ([`super::when::Skew`]).
+            let date = response.header("date").map(str::to_string);
+            let house_now = date.as_deref().and_then(super::when::http_date_ms);
+            let skew = match (house_now, self.skew.lock()) {
+                (Some(d), Ok(mut skew)) => {
+                    skew.answer(d, sent, got);
+                    *skew
+                }
+                (_, Ok(skew)) => *skew,
+                (_, Err(_)) => Default::default(),
+            };
             let body: serde_json::Value = response.into_json().ok()?;
             let state = body.get("state")?.as_str()?.to_string();
             if state == "unavailable" || state == "unknown" {
@@ -2832,6 +3649,10 @@ pub mod ha {
                     })
                     .unwrap_or_default(),
             };
+            let stamped = attrs
+                .get("media_position_updated_at")
+                .and_then(|v| v.as_str())
+                .and_then(super::when::rfc3339_ms);
             let playing = Playing {
                 state,
                 url: attrs
@@ -2848,11 +3669,7 @@ pub mod ha {
                     .and_then(|v| v.as_f64())
                     .unwrap_or(0.0)
                     * 1000.0) as i64,
-                updated_ms: attrs
-                    .get("media_position_updated_at")
-                    .and_then(|v| v.as_str())
-                    .and_then(super::when::rfc3339_ms)
-                    .map(|at| super::when::on_our_clock(at, house_now, now_ms())),
+                updated_ms: stamped.map(|at| skew.ours(at).map_or(at, |(ms, _)| ms)),
                 duration_ms: attrs
                     .get("media_duration")
                     .and_then(|v| v.as_f64())
@@ -2861,8 +3678,25 @@ pub mod ha {
                     .get("queue_position")
                     .and_then(|v| v.as_u64())
                     .and_then(|n| usize::try_from(n).ok()),
+                // With no `Date` at all the two clocks are taken to agree,
+                // which on one LAN with NTP they do to well inside the bound.
+                slack_ms: stamped
+                    .and_then(|at| skew.ours(at))
+                    .map_or(0, |(_, slack)| slack),
             };
-            Some((playing, speaker))
+            let said = format!(
+                "state {:?}, media_content_id {:?}, media_position {}, media_position_updated_at {}, Date {}",
+                playing.state,
+                playing.url,
+                attrs.get("media_position").map_or("none".to_string(), |v| v.to_string()),
+                attrs.get("media_position_updated_at").map_or("none".to_string(), |v| v.to_string()),
+                date.as_deref().unwrap_or("none"),
+            );
+            Some(Reading {
+                playing,
+                speaker,
+                said,
+            })
         }
     }
 }

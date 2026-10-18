@@ -11,10 +11,17 @@
 //!
 //! What the output says back is only what happens to it, each a transition
 //! of its own: `started` once it has a hand-off loaded, `advance` when a
-//! track ends, `stalled` when the sound stops by itself. There is no
-//! heartbeat: a playing clock carries the server's time it started from, so
-//! every device counts the position for itself ([`Remote::position_ms`],
-//! against [`ark_client::Peer::server_now`]).
+//! track ends, `stalled` when the sound stops by itself, and
+//! `report_position` when its player has come apart from the clock by more
+//! than [`read::SYNC_MS`] — an element that waited on the network, or one
+//! that started a moment after `started` was said — because the output is
+//! right about where it is, and every bar should draw what is heard. There
+//! is no heartbeat: a playing clock carries the server's time it started
+//! from, so every device counts the position for itself
+//! ([`Remote::position_ms`], against [`ark_client::Peer::server_now`]).
+//! The player is sent where the session is only when it is the *session*
+//! that moved — a seek, a skip, a hand-off — which is told apart from the
+//! player drifting by whether the clock is still the one it last saw.
 //!
 //! **A device unlinked is its own session.** While the socket is down, or
 //! before the server's snapshot has come on a new one, the player is this
@@ -52,10 +59,16 @@ use harken_domain::listening::read::{self, STATE};
 // What the rest of this program asks *this* module about.
 pub use harken_domain::listening::read::{input, Active, Clock, Device, Kind, Listening, Output, Track};
 
-/// How far the player may be from where the session counts it before the
-/// output seeks to agree: a seek on another device moves the clock by more
-/// than this, and a player's own jitter never does.
-const DRIFT_MS: i64 = 2_000;
+/// How far the player may be from where the session counts it before one
+/// is put right — the bound every output is held to, the bridge's speakers
+/// too.
+const SYNC_MS: i64 = read::SYNC_MS;
+
+/// How often, at most, the output says where its player is while it stays
+/// apart from the clock: once is enough when it lands, and a player that
+/// keeps coming apart — a stream that keeps stalling — is said again a
+/// second later rather than on every update.
+const REPORT_MS: f64 = 1_000.0;
 
 /// How long the output's player may sit paused while the session says it is
 /// playing before the output says it has stalled: long enough for a stream
@@ -67,6 +80,11 @@ pub trait Sound {
     /// The id of the track loaded, if any.
     fn loaded(&self) -> Option<Id>;
     fn playing(&self) -> bool;
+    /// Asked to play and waiting for data: where it is cannot be compared
+    /// with where it should be.
+    fn buffering(&self) -> bool {
+        false
+    }
     fn position_ms(&self) -> i64;
     fn ended(&self) -> bool;
     /// Load this track, at this point, playing or not.
@@ -119,6 +137,12 @@ pub struct Remote {
     /// The volume its player was last given, or last found at: what tells a
     /// change the session asked for from one made behind its back.
     applied: Option<(i64, bool)>,
+    /// The track and the clock the player was last reconciled against: a
+    /// difference with the clock still this one is the player's, and the
+    /// session is told; with another, the session moved, and the player is.
+    seen: Option<(usize, Id, Clock)>,
+    /// When this device last said where its player is, by its own clock.
+    reported: Option<f64>,
     stats: Stats,
 }
 
@@ -379,10 +403,28 @@ impl Remote {
             (true, true) => self.asked = None,
             (false, false) => {}
         }
-        // Somewhere else in the track than the session counts: a seek made
-        // on another device.
-        if (sound.position_ms() - want).abs() > DRIFT_MS {
-            sound.seek(want);
+        // Somewhere else in the track than the session counts, by more than
+        // the bound. If the session moved since the player was last made to
+        // agree — a seek on another device — the player goes where it is
+        // now; if it is the player that came apart from a clock nobody
+        // touched, the player is right about where it is and the session is
+        // told (`report_position`), at most once a second, against that
+        // clock. Waiting on the network, neither: it is standing still for
+        // the stream, and will say so if it comes out of it behind.
+        let moved = self.seen != Some((a.at, track.id, a.clock));
+        self.seen = Some((a.at, track.id, a.clock));
+        let off = sound.position_ms() - want;
+        if off.abs() > SYNC_MS && !sound.buffering() {
+            match (moved, a.clock, sound.playing()) {
+                (false, Clock::Playing { since, .. }, true) => {
+                    if self.reported.is_none_or(|t| clock - t >= REPORT_MS) {
+                        self.reported = Some(clock);
+                        let _ = self.call(peer, "report_position", input::report_position(sound.position_ms(), since));
+                    }
+                }
+                (false, Clock::Playing { .. }, false) => {}
+                _ => sound.seek(want),
+            }
         }
         // A play, once it has played long enough, once.
         if a.clock.playing() && self.counted != self.play && sound.position_ms() >= read::counts_after(track.duration_ms) {
@@ -702,6 +744,63 @@ mod tests {
         assert!(stands(&rl, net.peer(l)) >= handed, "and never back");
         rb.reconcile(net.peer(b), &mut sb, &mut qb, 0, "", 3.0);
         assert!(!sb.playing, "and the browser stays quiet");
+    }
+
+    /// The output is right about where it is. A browser's element that
+    /// waited a second on the network is a second behind a clock nobody
+    /// touched: the session is told where the element is
+    /// (`report_position`), so every bar draws what is heard, and the
+    /// element is not sent a second ahead to catch a clock up — which was a
+    /// second of the track skipped. Within the bound nothing is said. A seek
+    /// on another device is the session moving, and the element goes there.
+    ///
+    /// Falsified by the old rule, the element always sent where the clock
+    /// counts: it was sought to 41 006, skipping what the network had held
+    /// up, and the session never heard where it was.
+    #[test]
+    fn the_session_follows_the_output_and_the_output_follows_a_seek() {
+        let mut net = Net::new();
+        let b = net.device("browser", true);
+        let d = net.device("desktop", false);
+        let (mut rb, mut rd) = (Remote::new(), Remote::new());
+        rb.open("browser");
+        rd.open("desktop");
+        let (mut sb, mut qb) = (Fake::default(), vec![]);
+        rb.call(net.peer(b), "start", input::start(&queue(), 0, 40_000, "")).unwrap();
+        net.carry();
+        rb.reconcile(net.peer(b), &mut sb, &mut qb, 0, "", 0.0);
+        let loaded = sb.at_ms;
+        assert!((40_000..40_100).contains(&loaded) && sb.playing, "{loaded}");
+        let counted = |r: &Remote, p: &mut Peer| {
+            let now = p.server_now();
+            r.session(p).and_then(|s| s.session).map(|a| a.position(now)).unwrap()
+        };
+
+        // A second on the clock, and the element has played none of it.
+        std::thread::sleep(std::time::Duration::from_millis(1_000));
+        net.now = ark_client::autos::now_ms();
+        rb.reconcile(net.peer(b), &mut sb, &mut qb, 0, "", 1_000.0);
+        assert_eq!(sb.at_ms, loaded, "not sent ahead to where the clock counts");
+        net.carry();
+        let at = counted(&rb, net.peer(b));
+        assert!((at - loaded).abs() <= SYNC_MS, "the session is where the element is: {at}");
+        let calls = rb.stats().calls;
+        rb.reconcile(net.peer(b), &mut sb, &mut qb, 0, "", 1_001.0);
+        assert_eq!(rb.stats().calls, calls, "and says it once");
+
+        // Within the bound, nothing either way.
+        sb.at_ms = counted(&rb, net.peer(b)) - SYNC_MS / 2;
+        let was = sb.at_ms;
+        rb.reconcile(net.peer(b), &mut sb, &mut qb, 0, "", 2_500.0);
+        assert_eq!((rb.stats().calls, sb.at_ms), (calls, was));
+
+        // A seek on the desktop is the session moving: the element goes.
+        rd.call(net.peer(d), "seek", input::seek(100_000)).unwrap();
+        net.now = ark_client::autos::now_ms();
+        net.carry();
+        rb.reconcile(net.peer(b), &mut sb, &mut qb, 0, "", 3_000.0);
+        assert!((sb.at_ms - 100_000).abs() <= SYNC_MS, "sought where the session is: {}", sb.at_ms);
+        assert_eq!(rb.stats().calls, calls, "and nothing said back");
     }
 
     /// The output says what happens to it, and only that, each once: a

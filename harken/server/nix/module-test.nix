@@ -43,6 +43,7 @@ let
     address = "0.0.0.0";
     homeAssistant = { url = "http://ha:8123"; tokenFile = "/run/secrets/ha"; players = [ "media_player.kitchen" ]; mediaUrl = "http://10.0.0.2:8787"; };
   };
+  traced = house { mediaUrl = "http://10.0.0.2:8787"; trace = true; };
   noMedia = eval { devAuth = true; mediaPath = null; };
   roles = eval { devAuth = true; roles = { library = [ "alice" "bob" ]; admin = [ "alice" ]; }; };
   oldModules = eval { devAuth = true; oldModules = [ "/srv/old/a.ark" "/srv/old/b.ark" ]; };
@@ -69,6 +70,7 @@ let
     [ (failing lanUnbound == [ ] && warns lanUnbound "answers on this machine and nowhere else") "a LAN mediaUrl on a loopback bind is a warning" ]
     [ ((env lanUnbound).HARKEN_HA_TOKEN_FILE == "%d/ha-token" && lib.elem "ha-token:/run/secrets/ha" (unit lanUnbound).serviceConfig.LoadCredential) "the house's token is a credential" ]
     [ ((env lanUnbound).HARKEN_HA_MEDIA == "http://10.0.0.2:8787") "and speakers fetch from the LAN" ]
+    [ ((env traced).HARKEN_BRIDGE_TRACE == "1" && !(env lanUnbound ? HARKEN_BRIDGE_TRACE)) "the bridge's trace is on only when asked for" ]
     [ (failing bound == [ ] && bound.warnings == [ ]) "bound to every interface, nothing to warn about" ]
     [ (!(lib.any (lib.hasInfix "/srv/media") noMedia.systemd.tmpfiles.rules) && !(env noMedia ? HARKEN_MEDIA) && (unit noMedia).serviceConfig.BindReadOnlyPaths == [ ]) "no media path, no media" ]
     [ ((env roles).HARKEN_ROLES == "admin=alice;library=alice,bob") "roles reach the server, role by role" ]
