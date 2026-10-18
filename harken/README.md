@@ -109,7 +109,10 @@ and nothing heartbeats.
   is a remote control and never the output; the browser can be.
 - **A speaker in the house is a device of the session**: the server's Home
   Assistant bridge stands each configured `media_player` in every session
-  a client is in, hands it the queue, and says what it does
+  a client is in, hands it the queue, and says what it does — and a
+  speaker that is playing goes on playing the queue with every browser
+  closed, standing in the session alone until it has been silent ten
+  minutes
   (`server/README.md`). Where it is in the queue is read from the URL it
   says it is playing, compared as an address: a speaker spells back what
   it was handed its own way.

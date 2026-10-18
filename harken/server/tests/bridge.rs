@@ -49,6 +49,8 @@ struct Fake {
     /// `clear_playlist` and `play_media` do to it, and how the speaker spells
     /// back what it was given. A player not here only says what a test sets.
     queues: Arc<Mutex<BTreeMap<String, Queue>>>,
+    /// How many times each player was asked what it is doing.
+    reads: Arc<Mutex<BTreeMap<String, usize>>>,
 }
 
 /// A Sonos's own queue, as Home Assistant's Sonos integration drives it
@@ -237,6 +239,12 @@ async fn state(
     if !authorised(&fake, &headers) {
         return Err(StatusCode::UNAUTHORIZED);
     }
+    *fake
+        .reads
+        .lock()
+        .unwrap()
+        .entry(entity.clone())
+        .or_default() += 1;
     fake.states
         .lock()
         .unwrap()
@@ -349,6 +357,11 @@ impl Fake {
         self.on_item(entity, next);
     }
 
+    /// How many times the house was asked what any player is doing.
+    fn reads(&self) -> usize {
+        self.reads.lock().unwrap().values().sum()
+    }
+
     /// Whether the item this player is on is still loading.
     fn still_loading(&self, entity: &str) -> bool {
         self.queues
@@ -453,6 +466,7 @@ fn house(url: String) -> ha::Config {
         players: vec![(KITCHEN.into(), "Kitchen".into())],
         media: MEDIA.into(),
         tick: Duration::from_millis(40),
+        idle: ha::IDLE,
     }
 }
 
@@ -1553,6 +1567,201 @@ fn a_hand_off_picks_up_where_the_track_stopped() {
     assert!(
         calls.iter().any(|(c, _)| c == "media_pause"),
         "the kitchen is quiet once it is not the output: {calls:#?}"
+    );
+    rt.block_on(server.stop());
+}
+
+/// The house with one Sonos that keeps a queue, and a silent speaker let go
+/// after `idle` where nobody is listening.
+fn quick_to_idle(url: String, idle: Duration) -> ha::Config {
+    ha::Config { idle, ..house(url) }
+}
+
+/// The third thing the user asked for: the music in the kitchen is the
+/// kitchen's, not the browser's that sent it there. A browser hands three
+/// tracks to the kitchen and is closed; the kitchen goes on standing in the
+/// session with nobody listening, plays on through the queue — the session
+/// following it track by track, said by the bridge as the kitchen's own
+/// `advance` — and is never paused, well past the `idle` that would let a
+/// silent one go; and a browser opened later finds the session on the third
+/// track, playing, from where the kitchen is.
+///
+/// Falsified by a bridge that stood only where a client is (the old rule):
+/// the kitchen left with the browser, away and paused, and its `advance`
+/// was never said — "never on track 1".
+#[test]
+fn a_speaker_plays_on_through_the_queue_with_nobody_listening() {
+    let rt = runtime();
+    let fake = Fake::default();
+    fake.keeps_a_queue(KITCHEN, as_given);
+    let url = fake.serve(&rt);
+    let data = tempfile::tempdir().unwrap();
+    let idle = Duration::from_millis(300);
+    let server = serve(&rt, data.path(), |c| {
+        c.house = Some(quick_to_idle(url, idle))
+    });
+
+    let mut browser = device(&server, "max", Kind::Computer, "Browser", true);
+    told(&mut browser, "the kitchen beside the browser", |s| {
+        s.devices.len() == 2
+    });
+    call(
+        &mut browser,
+        "start",
+        input::start(&queue(&["a", "b", "c"]), 0, 0, "album/Mixed"),
+    );
+    call(&mut browser, "transfer", input::transfer(KITCHEN));
+    told(&mut browser, "the kitchen playing", |s| {
+        s.outputs(KITCHEN) && !s.moving_to(KITCHEN) && s.sounding()
+    });
+    drop(browser);
+    let alone = eventually(10, || {
+        held(&server, "max").filter(|s| s.devices.iter().all(|d| d.id == KITCHEN))
+    })
+    .expect("the browser left");
+    assert!(
+        alone.device(KITCHEN).is_some(),
+        "the kitchen goes on standing: {alone:#?}"
+    );
+    // Well past `idle`, and still playing: a speaker making the sound is not
+    // a silent one.
+    std::thread::sleep(idle * 3);
+    for at in 1..3 {
+        fake.track_ends(KITCHEN, Duration::ZERO);
+        let s = eventually(10, || {
+            held(&server, "max").filter(|s| s.session.as_ref().is_some_and(|a| a.at == at))
+        })
+        .unwrap_or_else(|| panic!("never on track {at}: {:#?}", held(&server, "max")));
+        assert!(
+            s.outputs(KITCHEN) && s.sounding(),
+            "playing on, on the kitchen: {s:#?}"
+        );
+    }
+    let calls = fake.take();
+    assert!(
+        !calls.iter().any(|(c, _)| c == "media_pause"),
+        "never paused: {calls:#?}"
+    );
+    // Somebody opens a browser again.
+    std::thread::sleep(Duration::from_millis(500));
+    let mut later = device(&server, "max", Kind::Computer, "Browser", true);
+    let s = told(&mut later, "the session as the kitchen has it", |s| {
+        s.device(KITCHEN).is_some()
+    });
+    let a = s.session.as_ref().unwrap();
+    assert_eq!(a.at, 2, "on the third track");
+    assert!(s.outputs(KITCHEN) && s.sounding());
+    let at = a.position(later.server_now());
+    let kitchen = fake.at_ms(KITCHEN);
+    assert!(
+        (at - kitchen).abs() < 1_500,
+        "where the kitchen is: {at} against {kitchen}"
+    );
+    rt.block_on(server.stop());
+}
+
+/// …and a kitchen left paused with nobody listening stands only for `idle`:
+/// then it leaves the session — kept, paused, with the sound away on the
+/// kitchen, as any session is when its output goes — and the house is asked
+/// nothing more about it.
+///
+/// Falsified by a bridge that never let a silent speaker go: "the kitchen
+/// never went".
+#[test]
+fn a_speaker_left_paused_with_nobody_listening_goes_after_a_while() {
+    let rt = runtime();
+    let fake = Fake::default();
+    fake.keeps_a_queue(KITCHEN, as_given);
+    let url = fake.serve(&rt);
+    let data = tempfile::tempdir().unwrap();
+    let idle = Duration::from_millis(1_200);
+    let server = serve(&rt, data.path(), |c| {
+        c.house = Some(quick_to_idle(url, idle))
+    });
+
+    let mut browser = device(&server, "max", Kind::Computer, "Browser", true);
+    told(&mut browser, "the kitchen beside the browser", |s| {
+        s.devices.len() == 2
+    });
+    call(
+        &mut browser,
+        "start",
+        input::start(&queue(&["a", "b"]), 0, 0, ""),
+    );
+    call(&mut browser, "transfer", input::transfer(KITCHEN));
+    told(&mut browser, "the kitchen playing", |s| {
+        s.outputs(KITCHEN) && !s.moving_to(KITCHEN) && s.sounding()
+    });
+    call(&mut browser, "pause", input::none());
+    told(&mut browser, "paused", |s| !s.sounding());
+    drop(browser);
+    let gone_at = std::time::Instant::now();
+    eventually(10, || {
+        held(&server, "max").filter(|s| s.devices.iter().all(|d| d.id == KITCHEN))
+    })
+    .expect("the browser left");
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(
+        held(&server, "max").unwrap().device(KITCHEN).is_some(),
+        "still standing a moment after the browser went"
+    );
+    let left = eventually(10, || held(&server, "max").filter(|s| s.devices.is_empty()))
+        .unwrap_or_else(|| panic!("the kitchen never went: {:#?}", held(&server, "max")));
+    assert!(gone_at.elapsed() >= idle, "not before `idle`");
+    assert!(
+        matches!(left.output(), Some(Output::Away { id, .. }) if id == KITCHEN) && !left.sounding(),
+        "kept, paused, the sound away on the kitchen: {left:#?}"
+    );
+    std::thread::sleep(Duration::from_millis(200));
+    let reads = fake.reads();
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(fake.reads(), reads, "and asked nothing more");
+    rt.block_on(server.stop());
+}
+
+/// A house nobody is listening in, and in which nothing plays, is asked
+/// nothing: not before anybody has signed in, and not once the only client
+/// has gone while the sound was its own.
+///
+/// Falsified by polling every configured speaker whether or not it stands:
+/// the house was asked about the kitchen thirteen times before anybody had
+/// signed in.
+#[test]
+fn an_idle_house_is_asked_nothing() {
+    let rt = runtime();
+    let fake = Fake::default();
+    fake.sonos(KITCHEN, 0.3, &[KITCHEN]);
+    let url = fake.serve(&rt);
+    let data = tempfile::tempdir().unwrap();
+    let server = serve(&rt, data.path(), |c| c.house = Some(house(url)));
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(fake.reads(), 0, "nobody has signed in");
+
+    let mut browser = device(&server, "max", Kind::Computer, "Browser", true);
+    told(&mut browser, "the kitchen beside the browser", |s| {
+        s.devices.len() == 2
+    });
+    assert!(
+        eventually(5, || (fake.reads() > 0).then_some(())).is_some(),
+        "a speaker standing beside somebody is asked about"
+    );
+    let b = me(&browser);
+    call(
+        &mut browser,
+        "start",
+        input::start(&queue(&["a"]), 0, 0, ""),
+    );
+    told(&mut browser, "the browser playing", |s| s.outputs(&b));
+    drop(browser);
+    eventually(10, || held(&server, "max").filter(|s| s.devices.is_empty()))
+        .expect("the kitchen went with the browser, since the sound was the browser's");
+    std::thread::sleep(Duration::from_millis(200));
+    let reads = fake.reads();
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(fake.reads(), reads, "and the house is asked nothing more");
+    assert!(
+        fake.take().iter().all(|(c, _)| c != "media_pause"),
+        "nor told anything"
     );
     rt.block_on(server.stop());
 }

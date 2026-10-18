@@ -1361,3 +1361,65 @@ clock counts, 41 506).
 
 Not verified: a real Sonos dropping, or keeping, the early seek; the phone
 as a target on a device.
+
+## A speaker plays on with nobody listening
+
+Asked for as "when I play to a speaker it will keep playing the session and
+the queue even if I close the browser". It did not: a speaker stood only in
+a session a client was in, so that a speaker never kept a session's presence
+open, and the bridge detached it when the last client left — `on_leave` made
+it `away`, its clock paused, and `left` paused the speaker in the house. A
+closed tab stopped the music in the kitchen.
+
+**The rule now** (`assistant::playing`, `ha::run`): where a client is, every
+configured speaker stands, as before. Where none is, the speakers *making
+the sound* go on standing — the session's output, here or on its way, and
+whoever follows it — and the bridge goes on reconciling them and saying what
+they do: `advance` at the end of each track, `stalled`, a volume, a group.
+Once such a session has been silent — paused, at the end of its queue, or
+moved off the speaker — for `ha::IDLE`, ten minutes, its speakers go: the
+bridge detaches them, `on_leave` makes the output `away`, already paused, and
+`left` pauses what the speaker held; the session is kept as any is and
+snapshotted with it. A speaker that is not making the sound still stands
+only where a client is, so a house nobody is listening in and that plays
+nothing is asked nothing.
+
+The server side needed nothing: an instance is never dropped by the
+engine's desk, a participant's calls are sequenced as any connection's,
+and the last client leaving runs `on_leave` for that client alone, which
+touches the session only when the leaver is its output — and the speaker
+is. Held by the first test below, which reads the session from the hub
+after the browser has gone.
+
+**A restart keeps it paused** (decided): `on_restore` leaves every session
+`nowhere` and paused, and that stays. The server stopping is not a choice
+to resume a speaker, and a house starting to play by itself when a server
+comes back up — after an update at three in the morning — is worse than one
+that waits for a press. The speaker itself, which nobody told to stop, may
+play on to the end of the queue it holds; the session picks it up as soon
+as somebody plays it again.
+
+Ten minutes: long enough that a pause to answer the door, or a queue that
+ran out while somebody chose the next, finds the speaker standing and the
+session as it was; short enough that a house left paused at night is not
+being asked about by morning.
+
+**Tested**, each falsified once, in `server/tests/bridge.rs` over real
+sockets with the stand-in Sonos: `a_speaker_plays_on_through_the_queue_with_nobody_listening`
+(a browser hands three tracks to the kitchen and closes; the kitchen plays
+on past three `idle`s, `at` 1 then 2 as the bridge says its `advance`s,
+never paused, and a browser opened later finds the third track playing
+where the kitchen is — falsified by standing only where a client is: the
+kitchen left with the browser and its `advance` was never said, "never on
+track 1");
+`a_speaker_left_paused_with_nobody_listening_goes_after_a_while` (still
+standing a moment after the browser goes, gone not before `idle`, the
+session kept paused and `away` on the kitchen, the house asked nothing more
+— falsified by never letting a silent speaker go: "the kitchen never
+went"); `an_idle_house_is_asked_nothing` (no reads before anybody signs in,
+and none once the only client has gone with the sound its own — falsified
+by polling every configured speaker: thirteen reads before anybody signed
+in).
+
+Not verified: a real Sonos left playing overnight with no browser; how long
+Home Assistant keeps answering about it.

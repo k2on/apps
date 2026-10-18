@@ -924,8 +924,9 @@ impl Bridge {
         acts
     }
 
-    /// Nobody is listening as `key` any more, so the speaker stops standing
-    /// in that session — and anything it was playing for it stops, because
+    /// The speaker stops standing in `key`'s session — nobody is listening
+    /// there and it is not making the sound, or has made none for
+    /// [`ha::IDLE`] — and anything it was playing for it stops, because
     /// nothing else would ever tell it to.
     pub fn left(&mut self, key: &str, entity: &str) -> Vec<Act> {
         self.seen.remove(&(key.to_string(), entity.to_string()));
@@ -1067,15 +1068,33 @@ pub mod when {
 }
 
 /// Whether anybody is *listening* in a session, as opposed to standing in it:
-/// a client of any kind but a speaker. A speaker is in the session when
-/// somebody is listening, not the other way round — so a speaker never opens
-/// a session's presence nor keeps it, and the bridge stands only where this
-/// holds.
+/// a client of any kind but a speaker. Where this holds every speaker stands
+/// beside them; where it does not, only the ones playing ([`playing`]).
 pub fn listening(state: &Listening) -> bool {
     state
         .devices
         .iter()
         .any(|d| d.kind != harken_domain::listening::read::Kind::Speaker)
+}
+
+/// Which of `entities` are making the session's sound: its output, here —
+/// handed the sound or on its way to it — and whoever follows it. These go on
+/// standing in a session nobody is listening in, so that closing the last
+/// browser does not stop the music in the kitchen: the bridge goes on
+/// reconciling them and saying what they do (`advance` at the end of each
+/// track, a stall, a volume, a group) for as long as the session sounds, and
+/// for [`ha::IDLE`] after it stops.
+pub fn playing<'a>(state: &Listening, entities: impl IntoIterator<Item = &'a str>) -> Vec<String> {
+    let Some(leader) = state.leader() else {
+        return vec![];
+    };
+    entities
+        .into_iter()
+        .filter(|e| {
+            *e == leader || state.device(e).and_then(|d| d.follows.as_deref()) == Some(leader)
+        })
+        .map(str::to_string)
+        .collect()
 }
 
 #[cfg(test)]
@@ -2110,12 +2129,15 @@ mod tests {
 /// is told every frame of the instance, which is only a wake-up here: the
 /// thread reads the sessions whole from the hub, which is in this process.
 ///
-/// It stands in a session only while a client is in it ([`listening`]), so
-/// the presence a person sees is theirs and the speakers beside it, never a
-/// shelf of speakers in an account nobody has opened. It polls only the
-/// players it is *holding*: a speaker nobody in a session handed anything to
-/// costs nothing, and a server whose house is asleep makes no requests at
-/// all.
+/// Every speaker stands in a session while a client is in it
+/// ([`listening`]), so the presence a person sees is theirs and the speakers
+/// beside it, never a shelf of speakers in an account nobody has opened.
+/// Where no client is, the speakers making the sound go on standing
+/// ([`playing`]) — the music is the kitchen's, not the browser's that sent it
+/// there — for as long as the session sounds and for [`IDLE`] after it stops;
+/// then they go too, and the session is kept, paused, as any is. It polls
+/// only the speakers standing: a server whose house nobody is listening in
+/// makes no requests at all.
 pub mod ha {
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -2130,10 +2152,17 @@ pub mod ha {
     use ark_server::HubHandle;
     use harken_domain::listening::read::{Kind, Listening, STATE};
 
-    use super::{listening, Act, Bridge, Playing, Speaker, GROUPING, VOLUME_SET};
+    use super::{listening, playing, Act, Bridge, Playing, Speaker, GROUPING, VOLUME_SET};
 
     /// How often a held player is asked what it is doing.
     pub const TICK: Duration = Duration::from_millis(1_000);
+
+    /// How long a speaker making no sound goes on standing in a session no
+    /// client is in. Long enough that a pause to answer the door, or a queue
+    /// that ran out while somebody chose the next, finds the speaker there
+    /// and the session as it was; short enough that a house left paused at
+    /// night stops being asked about by morning.
+    pub const IDLE: Duration = Duration::from_secs(10 * 60);
 
     /// How much of a queue is pushed at a speaker. Enough that nobody reaches
     /// the end of it by hand, and few enough that starting a track is not a
@@ -2161,6 +2190,9 @@ pub mod ha {
         pub media: String,
         /// How often to poll; [`TICK`] outside a test.
         pub tick: Duration,
+        /// How long a silent speaker stands where nobody is listening;
+        /// [`IDLE`] outside a test.
+        pub idle: Duration,
     }
 
     impl std::fmt::Display for Config {
@@ -2249,6 +2281,9 @@ pub mod ha {
         let mut wires: HashMap<(String, String), ConnId> = HashMap::new();
         let mut polled = Instant::now() - config.tick;
         let mut autos = ark_client::autos::Autos::system();
+        // Since when each session with nobody listening and a speaker
+        // standing has been silent.
+        let mut silent: HashMap<String, Instant> = HashMap::new();
         loop {
             if stop.load(Ordering::Relaxed) {
                 for (_, c) in wires.drain() {
@@ -2259,18 +2294,55 @@ pub mod ha {
             let now = now_ms();
             let mut acts = vec![];
             let states = sessions(hub);
-            let listened: Vec<&(String, Listening)> =
-                states.iter().filter(|(_, s)| listening(s)).collect();
-            // Stand where somebody is listening…
-            for (key, _) in &listened {
-                for (entity, name) in bridge.players().to_vec() {
-                    let k = (key.clone(), entity.clone());
+            // Where to stand, and which speakers: every one beside a client;
+            // where no client is, the ones making the sound, until it has
+            // been silent for `idle`.
+            let entities: Vec<String> = bridge.players().iter().map(|(e, _)| e.clone()).collect();
+            let mut stood: Vec<(&String, &Listening, Vec<String>)> = vec![];
+            for (key, s) in &states {
+                if listening(s) {
+                    silent.remove(key);
+                    stood.push((key, s, entities.clone()));
+                    continue;
+                }
+                let making = playing(s, entities.iter().map(String::as_str));
+                if making.is_empty() {
+                    silent.remove(key);
+                    continue;
+                }
+                if s.sounding() {
+                    silent.remove(key);
+                } else if silent
+                    .entry(key.clone())
+                    .or_insert_with(Instant::now)
+                    .elapsed()
+                    >= config.idle
+                {
+                    continue;
+                }
+                stood.push((key, s, making));
+            }
+            let wanted = |key: &String, entity: &String| {
+                stood
+                    .iter()
+                    .any(|(k, _, es)| *k == key && es.contains(entity))
+            };
+            // Stand where wanted…
+            for (key, _, es) in &stood {
+                for entity in es {
+                    let k = ((*key).clone(), entity.clone());
                     if wires.contains_key(&k) {
                         continue;
                     }
+                    let name = bridge
+                        .players()
+                        .iter()
+                        .find(|(e, _)| e == entity)
+                        .map(|(_, n)| n.clone())
+                        .unwrap_or_default();
                     let tell = waker.clone();
                     let who = Identity {
-                        user: key.clone(),
+                        user: (*key).clone(),
                         session: format!("house:{entity}"),
                         roles: Default::default(),
                     };
@@ -2278,7 +2350,7 @@ pub mod ha {
                     if let Ok(c) = hub.participate(
                         who,
                         device,
-                        vec![Instance::new(STATE, key.clone())],
+                        vec![Instance::new(STATE, (*key).clone())],
                         move |_| {
                             let _ = tell.send(());
                         },
@@ -2287,11 +2359,12 @@ pub mod ha {
                     }
                 }
             }
-            // …and nowhere else: a speaker does not keep a session's presence
-            // open, and what one was playing for nobody stops.
+            // …and nowhere else: a speaker that is not making the sound does
+            // not keep a session's presence open, and one silent where nobody
+            // is listening for longer than `idle` goes, pausing what it held.
             let gone: Vec<(String, String)> = wires
                 .keys()
-                .filter(|(key, _)| !listened.iter().any(|(k, _)| k == key))
+                .filter(|(key, entity)| !wanted(key, entity))
                 .cloned()
                 .collect();
             for k in gone {
@@ -2300,7 +2373,7 @@ pub mod ha {
                 }
                 for act in bridge.left(&k.0, &k.1) {
                     println!(
-                        "harken-server: house: {}: nobody is listening as {} any more; paused",
+                        "harken-server: house: {}: nobody is listening as {} and it is not playing; paused",
                         k.1, k.0
                     );
                     acts.push(act);
@@ -2310,20 +2383,21 @@ pub mod ha {
             // volume and its group first, because a member about to lead is
             // made the leader in the house before anything is handed to it —
             // a queue handed to a member is its leader's.
-            for (key, state) in &listened {
-                for (entity, _) in bridge.players().to_vec() {
-                    acts.extend(bridge.tune(key, &entity, state));
+            for (key, state, es) in &stood {
+                for entity in es {
+                    acts.extend(bridge.tune(key, entity, state));
                 }
             }
-            for (key, state) in &listened {
-                for (entity, _) in bridge.players().to_vec() {
-                    acts.extend(bridge.wants(key, &entity, state, now));
+            for (key, state, es) in &stood {
+                for entity in es {
+                    acts.extend(bridge.wants(key, entity, state, now));
                 }
             }
             // …and, a tick at a time, what the standing ones are actually
             // doing: every one's volume and group, and what the held ones
-            // are playing. A speaker stands only where somebody is
-            // listening, so a house nobody is listening in is asked nothing.
+            // are playing. A speaker stands only where somebody is listening
+            // or where it is playing, so a house nobody is listening in, and
+            // that plays nothing, is asked nothing.
             if polled.elapsed() >= config.tick {
                 polled = Instant::now();
                 let standing: Vec<String> = bridge

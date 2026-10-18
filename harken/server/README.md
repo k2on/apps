@@ -78,8 +78,12 @@ are the shared crates'; what is here is what only harken has:
   `unjoin`), and one that moved in the house while the session stood still
   is said as the speaker (`report_volume`, `report_group`), outside `QUIET`;
   a member is never handed a queue. And `ha`, the thread: each speaker a
-  participant (`HubHandle::participate`) in each session a client is in and
-  in no other — a speaker never keeps a session's presence open — the
+  participant (`HubHandle::participate`) in each session a client is in;
+  where no client is, the speakers making the sound — the output and
+  whoever follows it — go on standing, reconciled and reporting, while it
+  sounds and for `IDLE` (ten minutes) after it stops, and then go, pausing
+  what they held, the session kept paused as any is; a speaker that is not
+  making the sound never keeps a session's presence open — the
   service calls, polling every speaker standing anywhere (its volume and
   group; what it plays only where it is held), the integration it groups
   in read once through the template API, and every hand-off, release,

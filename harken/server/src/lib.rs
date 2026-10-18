@@ -333,6 +333,7 @@ fn house(env: &impl Fn(&str) -> Option<String>) -> Result<Option<ha::Config>> {
                 players,
                 media,
                 tick: ha::TICK,
+                idle: ha::IDLE,
             }))
         }
         (None, None, None) => Ok(None),
