@@ -818,8 +818,27 @@ class RemotePlayer(looper: Looper) : SimpleBasePlayer(looper) {
         return if (fromCar()) press(start, Press.Here) else press(start)
     }
 
-    override fun handleAddMediaItems(index: Int, mediaItems: MutableList<MediaItem>): ListenableFuture<*> =
-        press(mediaItems.firstOrNull()?.let(Items::queued)?.let { Press.Next(it) })
+    // Items added from a car or a watch: at the end of the queue, `enqueue` at its end; anywhere
+    // else, after what is playing, which is the one place the session puts anything but the end.
+    override fun handleAddMediaItems(index: Int, mediaItems: MutableList<MediaItem>): ListenableFuture<*> {
+        val tracks = mediaItems.mapNotNull(Items::queued)
+        if (tracks.isEmpty()) return Futures.immediateVoidFuture()
+        val size = heard.listening?.active?.queue?.size ?: 0
+        return press(if (index >= size) Press.Append(tracks) else Press.Next(tracks))
+    }
+
+    // Items taken out, last first, so every place named is still the one it was.
+    override fun handleRemoveMediaItems(fromIndex: Int, toIndex: Int): ListenableFuture<*> =
+        press(*(toIndex - 1 downTo fromIndex).map { Press.Remove(it) }.toTypedArray())
+
+    // One item moved is one `move`; a run of them, each in turn, from the end of the run nearest
+    // where it goes.
+    override fun handleMoveMediaItems(fromIndex: Int, toIndex: Int, newIndex: Int): ListenableFuture<*> {
+        val n = toIndex - fromIndex
+        val moves = if (newIndex < fromIndex) (0 until n).map { Press.Move(fromIndex + it, newIndex + it) }
+        else (n - 1 downTo 0).map { Press.Move(fromIndex + it, newIndex + it) }
+        return press(*moves.toTypedArray())
+    }
 
     // A headset's stop is a pause: stopping the session would forget a queue nobody asked to lose.
     override fun handleStop(): ListenableFuture<*> = press(Press.Pause)
@@ -1243,6 +1262,16 @@ class Playback(
             val c = controller ?: return@press
             if (c.mediaItemCount == 0) return@press play(listOf(track), 0, { album })
             c.addMediaItem(c.currentMediaItemIndex + 1, Items.of(q, server, album?.art ?: "", Items.from(c.currentMediaItem)))
+        }
+    }
+
+    /** Put `track` at the end of the queue; or play it, when nothing is. */
+    fun addToQueue(track: Track, album: Album?) {
+        val q = queued(track) { album }
+        press(Press.Append(listOf(q))) {
+            val c = controller ?: return@press
+            if (c.mediaItemCount == 0) return@press play(listOf(track), 0, { album })
+            c.addMediaItem(Items.of(q, server, album?.art ?: "", Items.from(c.currentMediaItem)))
         }
     }
 

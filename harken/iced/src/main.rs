@@ -153,6 +153,21 @@ pub enum Message {
     /// A key nothing on screen wanted.
     Key(iced::keyboard::Key, iced::keyboard::Modifiers),
     Resized(Size),
+    /// The queue: open it, or close it — `q`, and the button on the bar.
+    OpenQueue,
+    CloseQueue,
+    /// The cursor onto a row of it, from the top: the track playing, then
+    /// what plays after it.
+    QueueAt(usize),
+    /// Play the track at this place in the queue.
+    QueueJump(usize),
+    /// Take the track at this place out of the queue.
+    QueueRemove(usize),
+    /// Move the track at the first place to the second.
+    QueueMove(usize, usize),
+    /// Put this track after the one playing, or at the end of the queue.
+    PlayNext(Id),
+    AddToQueue(Id),
     /// Which device is making the sound: open the picker, walk it, pick.
     OpenDevices,
     DeviceAt(usize),
@@ -387,6 +402,13 @@ pub const MENU_BY_KEY_Y: f32 = 120.0;
 /// The two scrollables a cursor keeps itself inside of.
 pub const SIDEBAR: &str = "sidebar";
 pub const TRACKS: &str = "tracks";
+/// The queue panel's list, for keeping its cursor on screen.
+pub const QUEUE: &str = "queue";
+/// How wide the queue panel is: the device picker's width, beside which it
+/// opens.
+pub const QUEUE_WIDTH: f32 = 336.0;
+/// How many of the queue's rows the panel shows before it scrolls.
+pub const QUEUE_ROWS: usize = 12;
 /// The last row of the playlist picker, which is a row and not a key.
 pub const NEW_PLAYLIST: &str = "New playlist\u{2026}";
 
@@ -419,6 +441,8 @@ pub struct App {
     pub picker_about: Option<Id>,
     /// The device picker, when it is up; the last row is "nowhere".
     pub devices: Option<usize>,
+    /// The queue panel, when it is up: where its cursor is, from the top.
+    pub queue_panel: Option<usize>,
     /// How big the window is, so a panel near an edge opens the other way.
     pub window: Size,
     /// The address bar, reconciled after every update.
@@ -498,6 +522,7 @@ impl App {
             menu_about: None,
             picker_about: None,
             devices: None,
+            queue_panel: None,
             window: Size::new(860.0, 600.0),
             screen: Size::new(860.0, 600.0),
             dock: explore::Dock::default(),
@@ -842,6 +867,9 @@ impl App {
         if self.devices.is_some() {
             return Focus::Devices;
         }
+        if self.queue_panel.is_some() {
+            return Focus::Queue;
+        }
         match self.ctx.focus() {
             Some(Layer::Picker) => Focus::Picker,
             Some(Layer::Menu) => Focus::Menu,
@@ -931,6 +959,12 @@ impl App {
                     Some(m) => self.update(m),
                     None => Task::none(),
                 },
+                // In the queue: `x` takes the row out, `J` and `K` move it
+                // down and up, `q` closes it.
+                vim::Action::Key(c) if focus == Focus::Queue => match self.queue_key(c) {
+                    Some(m) => self.update(m),
+                    None => Task::none(),
+                },
                 vim::Action::Key(c) => match volume_key(c, Level::Output) {
                     Some(m) => self.update(m),
                     None => Task::none(),
@@ -938,10 +972,15 @@ impl App {
                 vim::Action::Activate => match focus {
                     Focus::Menu => self.update(Message::MenuActivate),
                     Focus::Picker => self.update(Message::PickerActivate),
+                    Focus::Queue => match self.queue_rows().get(self.queue_panel.unwrap_or(0)) {
+                        Some((index, _)) => self.update(Message::QueueJump(*index)),
+                        None => Task::none(),
+                    },
                     _ => self.pick_device(),
                 },
                 vim::Action::Cancel => match focus {
                     Focus::Devices => self.update(Message::CloseDevices),
+                    Focus::Queue => self.update(Message::CloseQueue),
                     // A menu and its submenu are one thing, so `<Esc>` takes
                     // both; `a`'s picker has no parent and is only itself.
                     _ => {
@@ -1009,6 +1048,7 @@ impl App {
                     None => Task::none(),
                 },
                 'd' => self.update(Message::OpenDevices),
+                'q' => self.update(Message::OpenQueue),
                 '}' => self.update(Message::Skip(1)),
                 '{' => self.update(Message::Skip(-1)),
                 other => match volume_key(other, Level::Output) {
@@ -1035,6 +1075,16 @@ impl App {
                     self.devices = Some(at);
                 }
                 Task::none()
+            }
+            Focus::Queue => {
+                let grid = vim::Grid::column(self.queue_rows().len());
+                match grid.step(self.queue_panel.unwrap_or(0), motion) {
+                    Some(at) => {
+                        self.queue_panel = Some(at);
+                        arkui::scroll::reveal(QUEUE, grid, at)
+                    }
+                    None => Task::none(),
+                }
             }
             Focus::Pane(pane) => match self.shape(pane).step(self.at(pane), motion) {
                 Some(at) => self.land(pane, at),
@@ -1124,6 +1174,131 @@ impl App {
             Some(row) if row.takeable => self.update(Message::PickDevice(row.id.clone())),
             _ => Task::none(),
         }
+    }
+
+    /// The queue panel's rows, from the top: the track playing and every one
+    /// after it, each with its place in the queue — the session's, or, this
+    /// device being its own session, its own.
+    pub fn queue_rows(&self) -> Vec<(usize, listening::Track)> {
+        let (queue, at) = match self.session.as_ref().and_then(|s| s.session.as_ref()) {
+            Some(a) => (a.queue.clone(), a.at),
+            None if self.session.is_none() && self.player.track().is_some() => (self.queue.clone(), self.playing_at()),
+            None => return vec![],
+        };
+        queue.into_iter().enumerate().skip(at).collect()
+    }
+
+    /// What a key does on the queue row under the cursor: `x` takes it out,
+    /// `J` moves it one down and `K` one up — only what plays after the
+    /// track playing moves, and only among itself — and `q` closes.
+    pub fn queue_key(&self, c: char) -> Option<Message> {
+        let rows = self.queue_rows();
+        let row = self.queue_panel?;
+        let (index, _) = rows.get(row)?;
+        match c {
+            'q' => Some(Message::CloseQueue),
+            'x' => Some(Message::QueueRemove(*index)),
+            'J' if row >= 1 && row + 1 < rows.len() => Some(Message::QueueMove(*index, index + 1)),
+            'K' if row >= 2 => Some(Message::QueueMove(*index, index - 1)),
+            _ => None,
+        }
+    }
+
+    /// A row of the page as a track of the queue: copied rather than referred
+    /// to, since a device handed the session may not have that album yet,
+    /// and its file the path as the log carries it, which each device joins
+    /// to *its* server.
+    fn queued(&self, id: Id) -> Option<listening::Track> {
+        let i = self.peer.rows().iter().find(|i| i.id == id)?;
+        Some(listening::Track {
+            id: i.id,
+            title: i.title.clone(),
+            creator: i.creator.clone(),
+            album: self.peer.detail_of(i.id).album,
+            duration_ms: i.duration_ms,
+            file: i.file.clone(),
+        })
+    }
+
+    /// Put a track after the one playing (`next`) or at the end of the queue:
+    /// the session's `enqueue`, part of it — and, this device its own session,
+    /// its own queue, played at once when nothing is playing, as `enqueue`
+    /// starts a session with nothing queued.
+    fn enqueue(&mut self, id: Id, next: bool) {
+        let Some(track) = self.queued(id) else { return };
+        if self.listening.session(&self.peer.client).is_some() {
+            if let Err(why) = self
+                .listening
+                .call(&mut self.peer.client, "enqueue", listening::input::enqueue(&[track], next))
+            {
+                self.note = why;
+            }
+            return;
+        }
+        if self.player.track().is_none() {
+            self.queue = vec![track];
+            self.start_at(0, 0, true);
+            return;
+        }
+        let at = match next {
+            true => self.playing_at() + 1,
+            false => self.queue.len(),
+        };
+        self.queue.insert(at.min(self.queue.len()), track);
+    }
+
+    /// The session's transition for an edit of the queue: what `<Enter>`,
+    /// `x`, `J` and `K` in the queue panel call, part of a session.
+    pub fn queue_call(message: &Message) -> Option<(&'static str, ark_client::Args)> {
+        Some(match *message {
+            Message::QueueJump(i) => ("jump", listening::input::jump(i)),
+            Message::QueueRemove(i) => ("remove", listening::input::remove(i)),
+            Message::QueueMove(from, to) => ("move", listening::input::move_track(from, to)),
+            _ => return None,
+        })
+    }
+
+    /// An edit of the queue: the session's transition, part of it; this
+    /// device's own queue otherwise.
+    fn edit_queue(&mut self, message: &Message) {
+        if self.listening.session(&self.peer.client).is_some() {
+            let Some((transition, input)) = Self::queue_call(message) else { return };
+            if let Err(why) = self.listening.call(&mut self.peer.client, transition, input) {
+                self.note = why;
+            }
+            return;
+        }
+        let at = self.playing_at();
+        match *message {
+            Message::QueueJump(i) => self.start_at(i, 0, true),
+            Message::QueueRemove(i) if i < self.queue.len() && i != at => {
+                self.queue.remove(i);
+            }
+            Message::QueueRemove(_) => self.skip(1),
+            Message::QueueMove(from, to) if from < self.queue.len() && to < self.queue.len() => {
+                let t = self.queue.remove(from);
+                self.queue.insert(to, t);
+            }
+            _ => {}
+        }
+    }
+
+    /// Where the queue panel goes: hanging off the bar at its right-hand end,
+    /// as the device picker does, a row per track up to [`QUEUE_ROWS`] and
+    /// two title lines.
+    pub fn queue_origin(window: Size, rows: usize) -> Point {
+        arkui::panel::hang_above(
+            window.width - PAGE_PADDING,
+            window.height - PAGE_PADDING - BAR_HEIGHT,
+            QUEUE_WIDTH,
+            Self::queue_height(rows),
+        )
+    }
+
+    /// The queue panel's height: its padding, the "Now playing" and "Up
+    /// next" lines, and a row per track up to [`QUEUE_ROWS`].
+    pub fn queue_height(rows: usize) -> f32 {
+        arkui::panel::titled_height(rows.clamp(1, QUEUE_ROWS)) + arkui::panel::TITLE
     }
 
     /// The device picker's rows: every device of this account standing in the
@@ -1289,6 +1464,9 @@ impl App {
         let mut entries = vec![
             Entry::run(glyphs::PLAY, "Play", Message::PlayItem(id)),
             Entry::submenu(glyphs::ADD_TO, "Add to playlist", Message::OpenPicker),
+            // The session's queue: after the track playing, or at its end.
+            Entry::run(glyphs::NEXT, "Play next", Message::PlayNext(id)),
+            Entry::run(glyphs::PLAYLIST, "Add to queue", Message::AddToQueue(id)),
         ];
         // "Go to" takes the glyph of the *place* it goes, which is the one
         // table the sidebar draws from too.
@@ -1812,7 +1990,32 @@ impl App {
                 let at = self.queue.iter().position(|t| t.id == id).unwrap_or(0);
                 return self.press(Press::Start(at));
             }
+            Message::OpenQueue if self.queue_panel.is_some() => self.queue_panel = None,
+            Message::OpenQueue => {
+                self.devices = None;
+                self.queue_panel = Some(0);
+            }
+            Message::CloseQueue => self.queue_panel = None,
+            Message::QueueAt(at) => self.queue_panel = Some(at),
+            Message::QueueJump(_) | Message::QueueRemove(_) => {
+                self.edit_queue(&message);
+                // The cursor stays on a row there is.
+                let n = self.queue_rows().len();
+                if let Some(at) = self.queue_panel.as_mut() {
+                    *at = (*at).min(n.saturating_sub(1));
+                }
+            }
+            Message::QueueMove(from, to) => {
+                self.edit_queue(&message);
+                // The cursor goes with the track it moved.
+                if let Some(at) = self.queue_panel.as_mut() {
+                    *at = if to > from { *at + 1 } else { at.saturating_sub(1) };
+                }
+            }
+            Message::PlayNext(id) => self.enqueue(id, true),
+            Message::AddToQueue(id) => self.enqueue(id, false),
             Message::OpenDevices => {
+                self.queue_panel = None;
                 // The cursor starts on the device that has the sound — or,
                 // while it is nowhere, on this one — so `<Enter>` straight
                 // away changes nothing.

@@ -130,6 +130,14 @@ object Inputs {
 
     fun transfer(to: String): Map<String, Value> = mapOf("to" to Value.text(to))
 
+    /** Tracks after the one playing (`next`), or at the end of the queue. */
+    fun enqueue(tracks: List<Queued>, next: Boolean): Map<String, Value> =
+        mapOf("next" to Value.bool(next), "tracks" to Value.list(tracks.map { it.toValue() }))
+
+    fun remove(index: Int): Map<String, Value> = mapOf("index" to Value.int(index.toLong()))
+
+    fun move(from: Int, to: Int): Map<String, Value> = mapOf("from" to Value.int(from.toLong()), "to" to Value.int(to.toLong()))
+
     /** `started` and `stalled`. */
     fun at(atMs: Long): Map<String, Value> = mapOf("at_ms" to Value.int(maxOf(atMs, 0)))
 
@@ -224,8 +232,19 @@ sealed class Press {
     /** A track pressed: this queue, from here. */
     data class Start(val queue: List<Queued>, val at: Int, val positionMs: Long, val from: String) : Press()
 
-    /** Put `track` after what is playing: the queue started again, with it next, where it was. */
-    data class Next(val track: Queued) : Press()
+    /** Put these after what is playing — the session's `enqueue`, the track playing playing on. */
+    data class Next(val tracks: List<Queued>) : Press() {
+        constructor(track: Queued) : this(listOf(track))
+    }
+
+    /** Put these at the end of the queue. */
+    data class Append(val tracks: List<Queued>) : Press()
+
+    /** Take the track at this place out of the queue. */
+    data class Remove(val index: Int) : Press()
+
+    /** Move the track at `from` to `to`. */
+    data class Move(val from: Int, val to: Int) : Press()
 
     /** Where this phone's scrubber is being dragged to, or none: ephemeral, and throttled. */
     data class Scrub(val atMs: Long?) : Press()
@@ -371,16 +390,12 @@ class Remote(
                 is Press.Join -> "join" to Volumes.member(press.device)
                 is Press.Unjoin -> "unjoin" to Volumes.member(press.device)
                 Press.Here -> if (a == null || s.outputs(me)) return null else "transfer" to Inputs.transfer(me)
-                is Press.Next -> {
-                    if (a == null) return call(peer, "start", Inputs.start(listOf(press.track), 0, 0, ""))
-                    // There is no insert: the queue is started again with it next, where it was —
-                    // and, if it was paused, paused again, in order, so nothing sounds.
-                    val at = a.at.toInt()
-                    val queue = a.queue.take(at + 1) + press.track + a.queue.drop(at + 1)
-                    val why = call(peer, "start", Inputs.start(queue, at, a.position(peer.serverNow()), a.from))
-                    if (why != null || a.clock.playing) return why
-                    "pause" to Inputs.none
-                }
+                // The session's own edits of its queue: the track playing plays on. Into a session
+                // with nothing queued, `enqueue` starts it, as a track pressed does.
+                is Press.Next -> "enqueue" to Inputs.enqueue(press.tracks, true)
+                is Press.Append -> "enqueue" to Inputs.enqueue(press.tracks, false)
+                is Press.Remove -> "remove" to Inputs.remove(press.index)
+                is Press.Move -> "move" to Inputs.move(press.from, press.to)
             }
         return call(peer, transition, input)
     }

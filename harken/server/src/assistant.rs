@@ -198,6 +198,15 @@ pub enum Act {
         position_ms: i64,
         playing: bool,
     },
+    /// Tracks put into the queue the speaker holds, without touching what
+    /// it plays: `play_media` with `enqueue: next` for each, last first, so
+    /// they land in order after the item playing — or `enqueue: add`, each
+    /// at the end.
+    Enqueue {
+        entity: String,
+        urls: Vec<String>,
+        next: bool,
+    },
     /// `media_player.<verb>` on `entity`, with nothing else to say.
     Verb {
         entity: String,
@@ -561,10 +570,23 @@ impl Bridge {
     fn reconcile(&mut self, entity: &str, a: &Active, now: i64) -> Vec<Act> {
         let urls = self.urls(a);
         let key = self.held[entity].key.clone();
+        // The same place in a queue with tracks put after the one playing,
+        // or at its end: the speaker's own queue gets them, and plays on.
+        let edited = {
+            let h = &self.held[entity];
+            a.at == h.at && urls != h.urls
+        };
+        if edited {
+            if let Some(acts) = self.enqueued(entity, &urls, a.at) {
+                return acts;
+            }
+        }
         let h = &self.held[entity];
         // Another queue, or another place in it, than the speaker was given
         // or has said it reached: the session moved, so the speaker is handed
-        // it again from there.
+        // it again from there — a track taken out, or moved, too: the house
+        // has no call for either that a Sonos and a Chromecast both take, and
+        // a hand-off from where the track is is right on every one.
         if urls != h.urls || a.at != h.at {
             return vec![self.hand(&key, entity, a, now)];
         }
@@ -612,6 +634,40 @@ impl Bridge {
             }
         }
         acts
+    }
+
+    /// `urls` is the queue the speaker holds with tracks put in after `at`,
+    /// at its end, or both — the same tracks in the same order around them —
+    /// and nothing else moved: those tracks, as the speaker's own queue takes
+    /// them. `None` for any other change, which is a fresh hand-off, and for
+    /// a queue longer than what the speaker was handed ([`ha::WINDOW`]).
+    fn enqueued(&mut self, entity: &str, urls: &[String], at: usize) -> Option<Vec<Act>> {
+        let h = self.held.get_mut(entity)?;
+        let old = &h.urls;
+        if !h.started
+            || urls.len() <= old.len()
+            || old.len() - h.handed_at > ha::WINDOW
+            || urls[..=at] != old[..=at]
+        {
+            return None;
+        }
+        let (was, now) = (&old[at + 1..], &urls[at + 1..]);
+        let j = (0..=now.len() - was.len()).find(|j| now[*j..*j + was.len()] == *was)?;
+        let (next, last) = (now[..j].to_vec(), now[j + was.len()..].to_vec());
+        h.urls = urls.to_vec();
+        h.addresses = urls.iter().map(|u| address(u)).collect();
+        h.quiet = QUIET;
+        let mut acts = vec![];
+        for (urls, next) in [(next, true), (last, false)] {
+            if !urls.is_empty() {
+                acts.push(Act::Enqueue {
+                    entity: entity.into(),
+                    urls,
+                    next,
+                });
+            }
+        }
+        Some(acts)
     }
 
     /// Home Assistant said what a held player is doing — or `None`, it did
@@ -1711,6 +1767,63 @@ mod tests {
         );
     }
 
+    /// The session's queue edited while the speaker plays it: tracks put
+    /// after the one playing are `enqueue: next`, last first so they land in
+    /// order; tracks put at the end are `enqueue: add`; both at once are
+    /// both; and anything else — a track taken out, one moved — is a fresh
+    /// hand-off from where the track playing is.
+    ///
+    /// Falsified by an `enqueued` that read only a pure append: putting one
+    /// next and one last at once was handed again.
+    #[test]
+    fn tracks_put_into_the_queue_reach_the_speakers_own_queue() {
+        let mut b = bridge();
+        let files = ["music/a.mp3", "music/b.mp3"];
+        started(&mut b, "alice", &files, 0);
+        let enq = |urls: &[&str], next: bool| Act::Enqueue {
+            entity: KITCHEN.into(),
+            urls: urls.iter().map(|f| url_of(f)).collect(),
+            next,
+        };
+        let at = |files: &[&str]| session(files, 0, playing_at(0), kitchen(false));
+        assert_eq!(
+            b.wants(
+                "alice",
+                KITCHEN,
+                &at(&["music/a.mp3", "music/n.mp3", "music/b.mp3", "music/z.mp3"]),
+                NOW
+            ),
+            [enq(&["music/n.mp3"], true), enq(&["music/z.mp3"], false)]
+        );
+        assert_eq!(
+            b.wants(
+                "alice",
+                KITCHEN,
+                &at(&[
+                    "music/a.mp3",
+                    "music/n.mp3",
+                    "music/b.mp3",
+                    "music/z.mp3",
+                    "music/y.mp3"
+                ]),
+                NOW
+            ),
+            [enq(&["music/y.mp3"], false)]
+        );
+        assert!(
+            matches!(
+                &b.wants(
+                    "alice",
+                    KITCHEN,
+                    &at(&["music/a.mp3", "music/b.mp3", "music/z.mp3", "music/y.mp3"]),
+                    NOW
+                )[..],
+                [Act::Start { at: 0, .. }]
+            ),
+            "a track taken out is handed again"
+        );
+    }
+
     /// Two people can both pick the kitchen, because a kitchen is one room.
     /// The second gets it and the first is told — by the speaker, in the
     /// first one's session — and told once, however often the first
@@ -2167,7 +2280,7 @@ pub mod ha {
     /// How much of a queue is pushed at a speaker. Enough that nobody reaches
     /// the end of it by hand, and few enough that starting a track is not a
     /// hundred service calls.
-    const WINDOW: usize = 200;
+    pub const WINDOW: usize = 200;
 
     /// How long one request to the house may take. A house that does not
     /// answer is asked again next tick; a request that never returns would
@@ -2465,6 +2578,26 @@ pub mod ha {
                         counter: None,
                     },
                 );
+            }
+            Act::Enqueue { entity, urls, next } => {
+                println!(
+                    "harken-server: house: {entity}: {} track(s) {}",
+                    urls.len(),
+                    if next { "put next" } else { "added to the end" }
+                );
+                // `next` puts each after the item playing, so the last goes
+                // in first and the first ends up next.
+                let ordered: Vec<&String> = match next {
+                    true => urls.iter().rev().collect(),
+                    false => urls.iter().collect(),
+                };
+                for url in ordered {
+                    house.call(
+                        &entity,
+                        "play_media",
+                        Some(media(url, if next { "next" } else { "add" })),
+                    );
+                }
             }
             Act::Verb { entity, verb, why } => {
                 if verb == "media_pause" {

@@ -243,7 +243,10 @@ exactly what the app draws):
   their albums and then their songs; **a playlist** in the order it was
   made. Each opens with its cover, what it is, the numbers true of the
   whole of it, and Play and Shuffle.
-- **A song's menu** — play next, add to a playlist (every playlist,
+- **A song's menu** — play next and add to queue (the session's
+  `enqueue`, the track playing playing on; and a car's or a watch's
+  added, removed and moved items are `enqueue`, `remove` and `move`),
+  add to a playlist (every playlist,
   ticked by `playlists_of`, a tap putting it on or taking it off), go to
   the album or the artist, and on a playlist, remove from it.
 - **The player** — Media3's ExoPlayer in `PlaybackService`, a

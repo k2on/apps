@@ -16,7 +16,10 @@ use iced::{Alignment, Element, Length, Padding};
 use crate::listening::{self, Clock, Output};
 use crate::places::{Focus, Pane, Source};
 use crate::player::Player;
-use crate::{credit, App, Level, Message, BAR_HEIGHT, DEVICES_WIDTH, PAGE_PADDING, PANE_GAP, SHELF, SIDEBAR, SIDEBAR_WIDTH, TRACKS};
+use crate::{
+    credit, App, Level, Message, BAR_HEIGHT, DEVICES_WIDTH, PAGE_PADDING, PANE_GAP, QUEUE, QUEUE_ROWS, QUEUE_WIDTH, SHELF, SIDEBAR, SIDEBAR_WIDTH,
+    TRACKS,
+};
 
 // The table's columns. Portions rather than pixels, so the text columns share
 // whatever is left after the fixed ones and none can push another off a
@@ -138,6 +141,13 @@ impl App {
                     .push(layer::dimmed(Message::ClosePicker, Message::Swallow))
                     .push(layer::centred(drawn)),
             };
+        }
+
+        if let Some(at) = self.queue_panel {
+            let origin = App::queue_origin(self.window, self.queue_rows().len());
+            layers = layers
+                .push(layer::backdrop(Message::CloseQueue, Message::Swallow))
+                .push(layer::pinned(self.view_queue(at), origin));
         }
 
         if let Some(at) = self.devices {
@@ -729,6 +739,7 @@ impl App {
             Focus::Menu => "menu",
             Focus::Picker => "playlists",
             Focus::Devices => "devices",
+            Focus::Queue => "queue",
         };
         row![
             text(line).size(12).style(style::dim).width(Length::Fill),
@@ -992,6 +1003,58 @@ impl App {
         )
     }
 
+    /// The button that opens the queue, beside the device picker's.
+    fn view_queue_button(&self) -> Element<'_, Message> {
+        let open = self.queue_panel.is_some();
+        button(icon::line(glyphs::PLAYLIST, open))
+            .style(button::text)
+            .padding(2)
+            .on_press(Message::OpenQueue)
+            .into()
+    }
+
+    /// The queue: the track playing, then what plays after it, in the order
+    /// it will — the session's, or this device's own. A click or `<Enter>`
+    /// plays a row; `x` takes it out, `J` and `K` move it.
+    fn view_queue(&self, at: usize) -> Element<'_, Message> {
+        let rows_ = self.queue_rows();
+        let width = QUEUE_WIDTH;
+        let chars = panel::chars(width, panel::ENTRY_CHROME);
+        let row_of = |i: usize, index: usize, track: &crate::listening::Track| -> Element<'_, Message> {
+            let on_cursor = at == i;
+            let mark = (i == 0).then(|| Element::from(icon::line(glyphs::PLAYING, on_cursor)));
+            let label = format!("{} \u{2014} {}", track.title, track.creator);
+            let entry =
+                panel::entry(mark, panel::label(fit::tail(&label, chars), on_cursor), None).style(move |theme| style::entry(theme, on_cursor, true));
+            mouse_area(entry)
+                .on_enter(Message::QueueAt(i))
+                .on_press(Message::QueueAt(i))
+                .on_release(Message::QueueJump(index))
+                .into()
+        };
+        let mut body = column![panel::title("Now playing".into())].spacing(0);
+        let mut upcoming = column![].spacing(0);
+        match rows_.first() {
+            Some((index, track)) => body = body.push(row_of(0, *index, track)),
+            None => body = body.push(panel::entry(None, panel::label("nothing queued".into(), false), None)),
+        }
+        for (i, (index, track)) in rows_.iter().enumerate().skip(1) {
+            upcoming = upcoming.push(row_of(i, *index, track));
+        }
+        body = body.push(panel::title(match rows_.len() {
+            0 | 1 => "Up next \u{2014} nothing after this one".into(),
+            n => format!("Up next \u{2014} {}", plural((n - 1) as i64, "track")),
+        }));
+        let visible = rows_.len().saturating_sub(1).min(QUEUE_ROWS - 1);
+        body = body.push(
+            scrollable(upcoming)
+                .id(QUEUE)
+                .style(style::bars)
+                .height(Length::Fixed(panel::ENTRY * visible as f32)),
+        );
+        panel::panel(body, width).into()
+    }
+
     /// Where a slider for `level` draws: where it is being dragged, or
     /// where its volume is.
     fn slider_at(&self, level: &Level, volume: i64) -> f32 {
@@ -1073,6 +1136,7 @@ impl App {
         if let Some(volume) = self.view_volume() {
             line = line.push(volume);
         }
+        line = line.push(self.view_queue_button());
         if let Some(output) = self.view_output() {
             line = line.push(output);
         }
@@ -1177,6 +1241,7 @@ fn view_help() -> Element<'static, Message> {
         ("m", "this track's menu"),
         ("a", "which playlists this track is on \u{2014} and make one"),
         ("d", "which device is making the sound, and move it; each one's volume"),
+        ("q", "the queue: <Enter> plays a row, x takes it out, J and K move it down and up"),
         (
             "+  -",
             "the volume of what is playing \u{2014} the group's, when it is one; in the picker, the row's",

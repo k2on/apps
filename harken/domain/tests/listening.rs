@@ -578,6 +578,114 @@ fn a_hand_off_stands_still_where_the_track_was_until_it_has_started() {
     assert_eq!(clock(&h.state()), Clock::Paused { at_ms: 92_520 });
 }
 
+fn titles(l: &Listening) -> Vec<String> {
+    l.session.as_ref().expect("a session").queue.iter().map(|t| t.title.clone()).collect()
+}
+
+fn at(l: &Listening) -> usize {
+    l.session.as_ref().expect("a session").at
+}
+
+/// The queue is the session's, and so is editing it: a track put after the
+/// one playing, one put at the end, one moved, one taken out, everything
+/// after the track playing cleared — and through all of it the track playing
+/// plays on, uninterrupted, with `at` still naming it wherever it now is.
+///
+/// Falsified by an `enqueue` that put "next" tracks at the end (`[a, b, c,
+/// d]` where `[a, c, b, d]` was right), and by a `move` that left `at` where
+/// it was when the track playing moved (`at` 0, on `d`).
+#[test]
+fn the_queue_is_edited_and_the_track_playing_plays_on() {
+    let mut h = House::new();
+    h.arrive_as("alice", "phone", "phone", true);
+    h.arrive("desktop", false);
+    h.playing_on("phone", 12_000);
+    let playing = clock(&h.state());
+    let (c, d) = (track("c", 3), track("d", 4));
+    h.ok("desktop", "enqueue", input::enqueue(std::slice::from_ref(&c), true));
+    h.ok("desktop", "enqueue", input::enqueue(std::slice::from_ref(&d), false));
+    let s = h.state();
+    assert_eq!(titles(&s), ["a", "c", "b", "d"]);
+    assert_eq!((at(&s), clock(&s)), (0, playing), "the track playing plays on, untouched");
+    // Up next reordered: `d` to just after the track playing.
+    h.ok("desktop", "move", input::move_track(3, 1));
+    assert_eq!(titles(&h.state()), ["a", "d", "c", "b"]);
+    // The track playing moved: `at` goes with it.
+    h.ok("desktop", "move", input::move_track(0, 2));
+    let s = h.state();
+    assert_eq!(
+        (titles(&s), at(&s), clock(&s)),
+        (vec!["d".into(), "c".into(), "a".into(), "b".into()], 2, playing)
+    );
+    // One before it taken out: it plays on, one place earlier.
+    h.ok("desktop", "remove", input::remove(0));
+    let s = h.state();
+    assert_eq!((titles(&s), at(&s), clock(&s)), (vec!["c".into(), "a".into(), "b".into()], 1, playing));
+    // Everything after it cleared.
+    h.ok("desktop", "clear_upcoming", input::none());
+    let s = h.state();
+    assert_eq!((titles(&s), at(&s), clock(&s)), (vec!["c".into(), "a".into()], 1, playing));
+    assert!(s.outputs("phone"), "on the phone all along");
+}
+
+/// Taking the track playing out moves on to the next one, from its start,
+/// playing as it was — or, with nothing after it, to the one before, paused
+/// at its start, which is how a queue ends; and the last track of all taken
+/// out leaves nothing queued.
+///
+/// Falsified by a `remove` that kept the clock of the track taken out: the
+/// next track was told to play from 12 s.
+#[test]
+fn taking_the_track_playing_out_moves_on_or_stops_at_the_end() {
+    let mut h = House::new();
+    h.arrive_as("alice", "phone", "phone", true);
+    h.playing_on("phone", 12_000);
+    h.ok("phone", "enqueue", input::enqueue(&[track("c", 3)], false));
+    h.wait(1_000);
+    h.ok("phone", "remove", input::remove(0));
+    let s = h.state();
+    assert_eq!((titles(&s), at(&s)), (vec!["b".into(), "c".into()], 0));
+    assert_eq!(clock(&s), Clock::Playing { at_ms: 0, since: h.now }, "the next one, from its start");
+    h.ok("phone", "jump", input::jump(1));
+    h.ok("phone", "remove", input::remove(1));
+    let s = h.state();
+    assert_eq!((titles(&s), at(&s), clock(&s)), (vec!["b".into()], 0, Clock::Paused { at_ms: 0 }));
+    h.ok("phone", "remove", input::remove(0));
+    assert!(h.state().session.is_none(), "nothing queued");
+    assert_eq!(h.call("phone", "remove", input::remove(0)), Err("nothing is queued".to_string()));
+}
+
+/// Into a session with nothing queued, `enqueue` starts it — a press that
+/// means a sound, the same rule `start` follows: on the caller where it can
+/// play, refused where nothing can. And a place that is not in the queue is
+/// refused for `remove` and `move` alike.
+///
+/// Falsified by an `enqueue` with no guard: the desktop, which cannot play,
+/// started a session on itself.
+#[test]
+fn enqueueing_into_nothing_starts_it_and_a_place_not_in_the_queue_is_refused() {
+    let mut h = House::new();
+    h.arrive_as("alice", "phone", "phone", true);
+    h.arrive("desktop", false);
+    assert_eq!(
+        h.call("desktop", "enqueue", input::enqueue(&queue(), false)),
+        Err("nothing here can play it".to_string())
+    );
+    h.ok("phone", "enqueue", input::enqueue(&queue(), true));
+    let s = h.state();
+    assert_eq!((titles(&s), at(&s)), (vec!["a".into(), "b".into()], 0));
+    assert!(s.outputs("phone") && s.sounding());
+    assert_eq!(
+        h.call("desktop", "remove", input::remove(2)),
+        Err("the track is not in the queue".to_string())
+    );
+    assert_eq!(
+        h.call("desktop", "move", input::move_track(0, 2)),
+        Err("the track is not in the queue".to_string())
+    );
+    assert_eq!(titles(&h.state()), ["a", "b"]);
+}
+
 /// The sound cannot be handed to something that is not answering, which is
 /// the one way to lose it entirely — nor to something that cannot be heard,
 /// nor to nothing at all.

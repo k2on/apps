@@ -49,6 +49,8 @@ import dev.arkdb.ui.rememberTransientScrollState
 interface MenuActions {
     fun playNext() {}
 
+    fun addToQueue() {}
+
     fun addTo() {}
 
     fun goTo(page: Page) {}
@@ -70,6 +72,7 @@ fun TrackMenu(track: Track, album: Album?, from: Page?, actions: MenuActions) {
         }
         HorizontalDivider(Modifier.padding(vertical = Space.s), color = MaterialTheme.colorScheme.outlineVariant)
         SheetRow(Glyphs.PlayNext, "Play next", actions::playNext)
+        SheetRow(Glyphs.Queue, "Add to queue", actions::addToQueue)
         SheetRow(Glyphs.AddTo, "Add to playlist", actions::addTo, trailing = { Icon(Glyphs.Chevron, null, Modifier.size(18.dp)) })
         if (album != null && from != Page.ForAlbum(album.name)) SheetRow(Glyphs.Album, "Go to album", { actions.goTo(Page.ForAlbum(album.name)) })
         if (track.creator.isNotEmpty() && from != Page.ForArtist(track.creator))

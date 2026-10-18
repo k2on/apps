@@ -231,6 +231,7 @@ pub enum Focus {
     Menu,
     Picker,
     Devices,
+    Queue,
 }
 
 #[cfg(test)]

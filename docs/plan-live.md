@@ -939,7 +939,8 @@ draws, but `f2_diagnostics_numbers`, which gains the "Listening" group.
 - **Play next is a `start`** of the queue with the track after this one,
   where it was — and a `pause` after it if it was paused, so nothing
   sounds. There is no insert; if nothing was sounding, `start` hands the
-  sound to the phone, which is the rule for any track pressed.
+  sound to the phone, which is the rule for any track pressed. *Since
+  changed*: it is `enqueue` ("The queue, edited", last).
 - **A headset's stop is a pause.**
 - **The listening session lives as long as the app's session does**: it is
   made with the `ArkSession` in the activity's `ViewModel`. With the
@@ -1423,3 +1424,93 @@ in).
 
 Not verified: a real Sonos left playing overnight with no browser; how long
 Home Assistant keeps answering about it.
+
+## The queue, edited
+
+The session always had a queue — `active { queue, at, … }` — and a phone
+had a sheet of it, but nothing edited it in place: Android's "play next"
+was a `start` of an edited queue, which restarted the track's clock from
+wherever the phone counted it, and the desktop had no queue to look at.
+
+**Four ordered transitions**, each keeping the track playing playing and
+`at` naming it wherever it now is:
+
+| transition | does | refused |
+|---|---|---|
+| `enqueue(tracks, next)` | `next`: after the track playing ("Play next"); else at the end ("Add to queue"). Into a session with nothing queued, `start` of those tracks from the first, playing, on the caller | nothing queued and the caller cannot play |
+| `remove(index)` | that track out; before `at`, `at` moves back one. The track playing taken out is the next one from its start, playing as it was — or, with none after it, the one before, paused at its start, as a queue ends; the last track of all leaves nothing queued | nothing queued; not in the queue |
+| `move(from, to)` | that track to `to`, those between one place over; `at` follows the track playing | nothing queued; either place not in the queue |
+| `clear_upcoming` | everything after the track playing, gone | nothing queued |
+
+Decided: `enqueue` into an idle session follows `start`'s rule — a press
+that means a sound, on the caller where it can play, refused where nothing
+can — because "Play next" with nothing playing is what Android already
+did, and a session that starts paused on nobody would need a second press
+to mean the first.
+
+**A list that grows, in a vocabulary without one.** The IR maps, filters,
+sorts and folds a list; nothing joins two or inserts into one. A
+`PerDevice` is the one value that grows by a key and reads back in key
+order (`Slots`), so the edits place each track under a key that sorts where
+it goes — its place offset to seven digits (`PLACE`), so text order is
+number order — and read the slots back (`shifted`, `kept`, `rearranged`,
+then `spliced`, `without`, `moved`, `through`). No IR, runtime or vector
+moved. Each fold starts from `unplaced(from)`, a helper whose declared
+`Placing` is what tells the verifier an empty record is an empty
+`PerDevice`; written inline the verifier read it as a record and refused
+the slots (`NotPerDevice`). Found on the way: a record's fields must be
+declared in the struct's own order — `Placing { i, at }` beside
+`fields().field("at").field("i")` came out with the two swapped.
+
+**The bridge** puts tracks into the speaker's own queue in place where
+that is what happened: tracks after the one playing are `play_media`
+`enqueue: next`, last first, so they land in order after the item playing
+(Home Assistant's Sonos integration inserts after its `queue_position`);
+tracks at the end `enqueue: add`; both at once, both. The speaker plays on
+and its own next and previous keep working. A track taken out or moved is
+a fresh hand-off from where the track playing is (the "hand-off is a
+pause" rules above pick it up there): no call takes a track out of a
+queue on every `media_player`, and a hand-off is right on all of them.
+
+**The desktop and the web**: `q`, or the button beside the device picker's
+on the bar, opens the queue panel — "Now playing", then "Up next" with how
+many, scrolling past twelve rows — from arkui's `panel`, `entry`, `label`
+and `title`, hung above the bar as the picker is, with the picker's fills
+and no colour of its own. `j`/`k`, counts, `gg` and `G` walk it; `<Enter>`
+or a click plays a row (`jump`); `x` takes it out (`remove`); `J` and `K`
+move it down and up among what plays after the track playing (`move`);
+`<Esc>` or `q` closes it. The row menu gains **Play next** and **Add to
+queue**, after "Add to playlist", so the submenu keeps its place. A window
+alone does all of it to its own queue. `?` lists `q`.
+
+**The phone**: "Play next" is `enqueue(next)` and the song's menu gains
+"Add to queue"; `RemotePlayer`'s added items are `enqueue` (at the end
+when added at the end, after the track playing otherwise), its removed
+items `remove`, last first, and its moved items `move` — Media3 asked for
+either before and the player had no answer. The queue sheet is unchanged.
+
+`Listening.kt` prints the type section and the states, not a transition's
+input, so `arkc gen kotlin` prints it as it was; `harken.ark` and the
+harken traces move.
+
+**Tested**, each falsified once. The domain, on both desks:
+`the_queue_is_edited_and_the_track_playing_plays_on` (falsified by
+"next" at the end, `[a, b, c, d]`, and by a `move` that left `at`, 0 on
+`d`); `taking_the_track_playing_out_moves_on_or_stops_at_the_end` (by a
+`remove` that kept the clock: the next track from 12 s);
+`enqueueing_into_nothing_starts_it_and_a_place_not_in_the_queue_is_refused`
+(by an `enqueue` with no guard: the desktop started a session). The
+bridge: `tracks_put_into_the_queue_reach_the_speakers_own_queue` (by an
+`enqueued` that read only a pure append) and, over real sockets with the
+stand-in Sonos, `the_queue_edited_reaches_the_speaker_without_a_gap` (the
+same falsification: "handed once"). The desktop:
+`the_queue_panel_draws_the_track_playing_then_up_next` (rows from the top
+of the queue), `the_keys_on_a_queue_row_take_it_out_move_it_or_play_it`
+(`K` above the track playing), `q_opens_the_queue_and_the_row_menu_puts_a_track_next_or_last`
+(no "Play next" entry; "next" at the end alone, `[a, b, c, a, c]`).
+Android's existing tests stand, `aPressIsATransition`'s play next among
+them, now through `enqueue`.
+
+Not verified: no window has drawn the queue panel; no phone has been
+handed a queue edited from a car; no real speaker has been sent
+`enqueue: next`.

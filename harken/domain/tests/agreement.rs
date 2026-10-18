@@ -96,9 +96,21 @@ fn the_module_verifies_and_is_the_committed_file() {
             "pressed",
             "halted",
             "clock_at",
+            "led_by",
+            // …the queue's edits (`enqueue`, `remove`, `move`,
+            // `clear_upcoming`), which place a queue by key and read it back
+            // in key order…
+            "unplaced",
+            "shifted",
+            "spliced",
+            "kept",
+            "without",
+            "moved_place",
+            "rearranged",
+            "moved",
+            "through",
             // …with the volumes and groups (the "Volume and groups" section
             // of docs/plan-live.md) in the order their transitions reach them.
-            "led_by",
             "is_output",
             "dissolved",
             "has_volume",

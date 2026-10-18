@@ -1765,3 +1765,79 @@ fn an_idle_house_is_asked_nothing() {
     );
     rt.block_on(server.stop());
 }
+
+/// The session's queue edited while the kitchen plays it: a track put next
+/// and one added at the end reach the kitchen's own queue in place — `play_media`
+/// with `enqueue: next` and `enqueue: add` — without a fresh hand-off or a
+/// gap; a track taken out is a fresh hand-off from where the track playing
+/// is, picked up there; and the kitchen then plays on through the queue as
+/// the session now has it.
+///
+/// Falsified by an `enqueued` that read only a pure append: the track put
+/// next was a fresh hand-off, the kitchen's queue cleared ("handed once").
+#[test]
+fn the_queue_edited_reaches_the_speaker_without_a_gap() {
+    let rt = runtime();
+    let fake = Fake::default();
+    fake.keeps_a_queue(KITCHEN, as_given);
+    let url = fake.serve(&rt);
+    let data = tempfile::tempdir().unwrap();
+    let server = serve(&rt, data.path(), |c| c.house = Some(house(url)));
+
+    let mut browser = device(&server, "max", Kind::Computer, "Browser", true);
+    told(&mut browser, "the kitchen beside the browser", |s| {
+        s.devices.len() == 2
+    });
+    call(
+        &mut browser,
+        "start",
+        input::start(&queue(&["a", "b"]), 0, 0, ""),
+    );
+    call(&mut browser, "transfer", input::transfer(KITCHEN));
+    told(&mut browser, "the kitchen playing", |s| {
+        s.outputs(KITCHEN) && !s.moving_to(KITCHEN) && s.sounding()
+    });
+    let url_of = |t: &str| harken_domain::listening::url(MEDIA, &format!("music/{t}.mp3"));
+    call(
+        &mut browser,
+        "enqueue",
+        input::enqueue(&[track("n", 7)], true),
+    );
+    call(
+        &mut browser,
+        "enqueue",
+        input::enqueue(&[track("z", 9)], false),
+    );
+    let want = [url_of("a"), url_of("n"), url_of("b"), url_of("z")];
+    assert!(
+        eventually(10, || (fake.queued(KITCHEN) == want).then_some(())).is_some(),
+        "the kitchen's queue is the session's: {:?}",
+        fake.queued(KITCHEN)
+    );
+    let calls = fake.take();
+    let named = |n: &str| calls.iter().filter(|(c, _)| c == n).count();
+    assert_eq!(named("clear_playlist"), 1, "handed once: {calls:#?}");
+    assert!(calls
+        .iter()
+        .any(|(c, b)| c == "play_media" && b["enqueue"] == json!("next")));
+    // `b` taken out while `a` plays: handed again from `a`, where it is.
+    call(&mut browser, "remove", input::remove(2));
+    let want = [url_of("a"), url_of("n"), url_of("z")];
+    assert!(
+        eventually(10, || (fake.queued(KITCHEN) == want).then_some(())).is_some(),
+        "{:?}",
+        fake.queued(KITCHEN)
+    );
+    // A track does not end a moment after it was handed: the bridge hears
+    // the kitchen start it first.
+    std::thread::sleep(Duration::from_millis(400));
+    for (at, t) in [(1, "n"), (2, "z")] {
+        fake.track_ends(KITCHEN, Duration::ZERO);
+        let s = told(&mut browser, &format!("the kitchen on {t}"), |s| {
+            s.session.as_ref().is_some_and(|a| a.at == at)
+        });
+        assert_eq!(s.session.unwrap().now().title, t);
+    }
+    assert!(!fake.take().iter().any(|(c, _)| c == "media_pause"));
+    rt.block_on(server.stop());
+}

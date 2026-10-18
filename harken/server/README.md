@@ -77,7 +77,11 @@ are the shared crates'; what is here is what only harken has:
   session is told to the house (`volume_set`, `volume_mute`, `join`,
   `unjoin`), and one that moved in the house while the session stood still
   is said as the speaker (`report_volume`, `report_group`), outside `QUIET`;
-  a member is never handed a queue. And `ha`, the thread: each speaker a
+  a member is never handed a queue. Tracks put into the session's queue
+  after the one playing or at its end reach the speaker's own queue in
+  place (`play_media` with `enqueue: next`, last first, and `enqueue:
+  add`), so nothing stops; a track taken out or moved is a fresh hand-off
+  from where the track playing is. And `ha`, the thread: each speaker a
   participant (`HubHandle::participate`) in each session a client is in;
   where no client is, the speakers making the sound — the output and
   whoever follows it — go on standing, reconciled and reporting, while it

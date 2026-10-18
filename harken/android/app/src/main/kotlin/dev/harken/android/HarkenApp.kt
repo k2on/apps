@@ -518,6 +518,10 @@ fun HarkenApp(
                 val actions =
                     remember(m) {
                         object : MenuActions {
+                            override fun addToQueue() {
+                                playback.addToQueue(track, albumOf(track))
+                            }
+
                             override fun playNext() {
                                 playback.playNext(track, albumOf(track))
                                 menu = null

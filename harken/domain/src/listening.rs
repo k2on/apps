@@ -344,6 +344,38 @@ impl Input for Advance {
     }
 }
 
+/// `enqueue`: tracks put after the one playing, or at the end.
+pub struct Enqueue {
+    pub next: Bool,
+    pub tracks: NonEmpty<Track>,
+}
+impl Input for Enqueue {
+    fn schema() -> Object<Self> {
+        object().field("next", bool_()).field("tracks", typed::<NonEmpty<Track>>())
+    }
+}
+
+/// `remove`: a track of the queue, by where it is in it.
+pub struct Remove {
+    pub index: Int,
+}
+impl Input for Remove {
+    fn schema() -> Object<Self> {
+        object().field("index", int().at_least(0))
+    }
+}
+
+/// `move`: a track of the queue from one place in it to another.
+pub struct Move {
+    pub from: Int,
+    pub to: Int,
+}
+impl Input for Move {
+    fn schema() -> Object<Self> {
+        object().field("from", int().at_least(0)).field("to", int().at_least(0))
+    }
+}
+
 pub struct Scrub {
     pub at_ms: Opt<Int>,
 }
@@ -662,6 +694,160 @@ fn moved_to(a: Active, at: Int, caller: Text, now: Int) -> Sum<Session> {
             ..a
         },
     )
+}
+
+// The queue, edited ----------------------------------------------------------------
+//
+// The vocabulary has no list that grows: a list is mapped, filtered, sorted
+// and folded, never joined to another. What does grow by a key is a
+// `PerDevice`, and its slots read back in key order — so a queue is edited by
+// writing each track under a key that sorts where it is to go, and reading
+// the slots back. A key is the place, offset to a fixed width
+// ([`PLACE`]), so that text order is number order.
+
+/// What a place is offset by to make its key: seven digits for every queue
+/// shorter than nine million tracks.
+pub const PLACE: i64 = 1_000_000;
+
+/// The fold that places a queue: how many tracks counted, and where each
+/// went.
+pub struct Placing {
+    pub at: PerDevice<Track>,
+    pub i: Int,
+}
+impl Record for Placing {
+    fn fields() -> Fields<Self> {
+        fields().field("at", typed::<PerDevice<Track>>()).field("i", int())
+    }
+}
+
+/// The tracks placed, read back in the order of their places.
+fn placed(at: PerDevice<Track>) -> List<Track> {
+    at.slots().map(|s| s.value)
+}
+
+/// The key of place `i`.
+fn place(i: Int) -> Text {
+    i.add(PLACE).to_text()
+}
+
+/// A placing that has placed nothing yet, counting from `from`. Every fold
+/// that places a queue starts from one: an empty `PerDevice` is written as
+/// an empty record, and only a helper's declared type tells the verifier it
+/// is one.
+pub fn unplaced(from: Int) -> Placing {
+    helper("unplaced", ("from", from), |from: Int| Placing {
+        i: from,
+        at: PerDevice::empty(),
+    })
+}
+
+/// `queue` placed with every track from `cut` on moved `n` places along, to
+/// make room.
+pub fn shifted(queue: List<Track>, cut: Int, n: Int) -> Placing {
+    helper(
+        "shifted",
+        (("queue", queue), ("cut", cut), ("n", n)),
+        |queue: List<Track>, cut: Int, n: Int| {
+            queue.fold(unplaced(0.into()), |acc: Placing, t| Placing {
+                i: acc.i.add(1),
+                at: acc.at.put(place(pick::<Int>(acc.i.lt(cut), acc.i, acc.i.add(n))), t),
+            })
+        },
+    )
+}
+
+/// `queue` placed without the tracks from `lo` to `hi`, both included.
+pub fn kept(queue: List<Track>, lo: Int, hi: Int) -> Placing {
+    helper(
+        "kept",
+        (("queue", queue), ("lo", lo), ("hi", hi)),
+        |queue: List<Track>, lo: Int, hi: Int| {
+            queue.fold(unplaced(0.into()), |acc: Placing, t| Placing {
+                i: acc.i.add(1),
+                at: pick::<PerDevice<Track>>(acc.i.ge(lo).and(acc.i.le(hi)), acc.at, acc.at.put(place(acc.i), t)),
+            })
+        },
+    )
+}
+
+/// `queue` placed with the track at `from` moved to `to` ([`moved_place`]).
+pub fn rearranged(queue: List<Track>, from: Int, to: Int) -> Placing {
+    helper(
+        "rearranged",
+        (("queue", queue), ("from", from), ("to", to)),
+        |queue: List<Track>, from: Int, to: Int| {
+            queue.fold(unplaced(0.into()), |acc: Placing, t| Placing {
+                i: acc.i.add(1),
+                at: acc.at.put(place(moved_place(acc.i, from, to)), t),
+            })
+        },
+    )
+}
+
+/// `queue` with `tracks` put in before the track at `cut` — at its end, for
+/// a `cut` past it.
+pub fn spliced(queue: List<Track>, cut: Int, tracks: List<Track>) -> List<Track> {
+    helper(
+        "spliced",
+        (("queue", queue), ("cut", cut), ("tracks", tracks)),
+        |queue: List<Track>, cut: Int, tracks: List<Track>| {
+            let room = shifted(queue, cut, tracks.len());
+            let all = tracks.fold(
+                Placing {
+                    i: cut.min(queue.len()),
+                    at: room.at,
+                },
+                |acc: Placing, t| Placing {
+                    i: acc.i.add(1),
+                    at: acc.at.put(place(acc.i), t),
+                },
+            );
+            placed(all.at)
+        },
+    )
+}
+
+/// `queue` without the track at `index`.
+pub fn without(queue: List<Track>, index: Int) -> List<Track> {
+    helper("without", (("queue", queue), ("index", index)), |queue: List<Track>, index: Int| {
+        placed(kept(queue, index, index).at)
+    })
+}
+
+/// `queue` up to and with the track at `at`, and nothing after it.
+pub fn through(queue: List<Track>, at: Int) -> List<Track> {
+    helper("through", (("queue", queue), ("at", at)), |queue: List<Track>, at: Int| {
+        placed(kept(queue, at.add(1), queue.len()).at)
+    })
+}
+
+/// Where the track at `i` goes when the one at `from` moves to `to`: that
+/// one to `to`, and every one between them one place over to make room.
+pub fn moved_place(i: Int, from: Int, to: Int) -> Int {
+    helper("moved_place", (("i", i), ("from", from), ("to", to)), |i: Int, from: Int, to: Int| {
+        let between = pick::<Int>(to.lt(from).and(i.ge(to)).and(i.lt(from)), i.add(1), i);
+        let after = pick::<Int>(from.lt(to).and(i.gt(from)).and(i.le(to)), i.sub(1), between);
+        pick::<Int>(i.eq(from), to, after)
+    })
+}
+
+/// `queue` with the track at `from` moved to `to`.
+pub fn moved(queue: List<Track>, from: Int, to: Int) -> List<Track> {
+    helper(
+        "moved",
+        (("queue", queue), ("from", from), ("to", to)),
+        |queue: List<Track>, from: Int, to: Int| placed(rearranged(queue, from, to).at),
+    )
+}
+
+/// Whether `index` is a place in the session's queue.
+fn in_queue(session: Sum<Session>, index: Int) -> Bool {
+    session
+        .case::<Bool>()
+        .on::<Active>("active", |a| index.lt(a.queue.list().len()))
+        .on::<Idle>("idle", |_| false.into())
+        .end()
 }
 
 /// The session as it is, for the arm that changes nothing.
@@ -1203,6 +1389,135 @@ pub fn listening() -> Router<Harken> {
         .guard::<Transfer>("that device is not here, or cannot play", |s, _ctx, input| can_play(s.devices, input.to))
         // Nothing queued, nothing playing, nowhere.
         .transition::<()>("stop", |s, _ctx, ()| Listening { session: idle(), ..s })
+        // Tracks put after the one playing ("Play next") or at the end of the
+        // queue ("Add to queue"); the track playing plays on, and `at` still
+        // names it. Into a session with nothing queued it is `start` of
+        // those tracks from the first — a press that means a sound, on the
+        // caller where it can play, and refused where nothing can.
+        .transition::<Enqueue>("enqueue", |s, ctx, input| Listening {
+            session: s
+                .session
+                .case::<Sum<Session>>()
+                .on::<Active>("active", |a| {
+                    let cut = pick(input.next, a.at.add(1), a.queue.list().len());
+                    Sum::of(
+                        "active",
+                        Active {
+                            queue: spliced(a.queue.list(), cut, input.tracks.list()).non_empty(),
+                            ..a
+                        },
+                    )
+                })
+                .on::<Idle>("idle", |_| {
+                    Sum::of(
+                        "active",
+                        Active {
+                            at: 0.into(),
+                            clock: Sum::of(
+                                "playing",
+                                Playing {
+                                    at_ms: 0.into(),
+                                    since: ctx.now,
+                                },
+                            ),
+                            from: Text::from(""),
+                            output: here(ctx.device),
+                            queue: input.tracks,
+                        },
+                    )
+                })
+                .end(),
+            ..s
+        })
+        .guard::<Enqueue>("nothing here can play it", |s, ctx, _input| {
+            s.session.is("active").or(can_play(s.devices, ctx.device))
+        })
+        // A track out of the queue. The one playing taken out is the next
+        // one playing, from its start — or, with nothing after it, the one
+        // before, paused at its start, as the end of a queue is; the last
+        // track of all taken out is nothing queued.
+        .transition::<Remove>("remove", |s, ctx, input| Listening {
+            session: s
+                .session
+                .case::<Sum<Session>>()
+                .on::<Active>("active", |a| {
+                    let n = a.queue.list().len();
+                    let current = input.index.eq(a.at);
+                    let last = a.at.add(1).ge(n);
+                    let start = pick::<Sum<Clock>>(
+                        a.clock.is("playing").and(last.not()),
+                        Sum::of(
+                            "playing",
+                            Playing {
+                                at_ms: 0.into(),
+                                since: ctx.now,
+                            },
+                        ),
+                        Sum::of("paused", Paused { at_ms: 0.into() }),
+                    );
+                    pick(
+                        n.le(1),
+                        idle(),
+                        Sum::of(
+                            "active",
+                            Active {
+                                at: pick(input.index.lt(a.at).or(current.and(last)), a.at.sub(1), a.at),
+                                clock: pick(current, start, a.clock),
+                                queue: without(a.queue.list(), input.index).non_empty(),
+                                ..a
+                            },
+                        ),
+                    )
+                })
+                .on::<Idle>("idle", |_| idle())
+                .end(),
+            ..s
+        })
+        .guard::<Remove>("nothing is queued", |s, _ctx, _input| s.session.is("active"))
+        .guard::<Remove>("the track is not in the queue", |s, _ctx, input| in_queue(s.session, input.index))
+        // A track of the queue somewhere else in it; the one playing plays
+        // on, wherever it is now.
+        .transition::<Move>("move", |s, _ctx, input| Listening {
+            session: s
+                .session
+                .case::<Sum<Session>>()
+                .on::<Active>("active", |a| {
+                    Sum::of(
+                        "active",
+                        Active {
+                            at: moved_place(a.at, input.from, input.to),
+                            queue: moved(a.queue.list(), input.from, input.to).non_empty(),
+                            ..a
+                        },
+                    )
+                })
+                .on::<Idle>("idle", |_| idle())
+                .end(),
+            ..s
+        })
+        .guard::<Move>("nothing is queued", |s, _ctx, _input| s.session.is("active"))
+        .guard::<Move>("the track is not in the queue", |s, _ctx, input| {
+            in_queue(s.session, input.from).and(in_queue(s.session, input.to))
+        })
+        // Everything after the track playing, gone; it plays on.
+        .transition::<()>("clear_upcoming", |s, _ctx, ()| Listening {
+            session: s
+                .session
+                .case::<Sum<Session>>()
+                .on::<Active>("active", |a| {
+                    Sum::of(
+                        "active",
+                        Active {
+                            queue: through(a.queue.list(), a.at).non_empty(),
+                            ..a
+                        },
+                    )
+                })
+                .on::<Idle>("idle", |_| idle())
+                .end(),
+            ..s
+        })
+        .guard::<()>("nothing is queued", |s, _ctx, ()| s.session.is("active"))
         // The output has the hand-off, at this point in the track.
         .transition::<At>("started", |s, ctx, input| Listening {
             session: s
@@ -1976,6 +2291,23 @@ pub mod read {
 
         pub fn advance(from_track: usize) -> Args {
             args(vec![("from_track", Value::Int(from_track as i64))])
+        }
+
+        /// `enqueue`: after the track playing (`next`), or at the end.
+        pub fn enqueue(tracks: &[Track], next: bool) -> Args {
+            args(vec![
+                ("next", Value::Bool(next)),
+                ("tracks", Value::list(tracks.iter().map(Track::to_value).collect())),
+            ])
+        }
+
+        pub fn remove(index: usize) -> Args {
+            args(vec![("index", Value::Int(index as i64))])
+        }
+
+        /// `move`, a transition's name and not this function's.
+        pub fn move_track(from: usize, to: usize) -> Args {
+            args(vec![("from", Value::Int(from as i64)), ("to", Value::Int(to as i64))])
         }
 
         pub fn scrub(at_ms: Option<i64>) -> Args {

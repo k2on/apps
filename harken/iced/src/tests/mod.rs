@@ -4,6 +4,7 @@
 
 mod explorer;
 mod geometry;
+mod queue;
 mod signing_in;
 mod volume;
 mod wake;
