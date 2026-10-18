@@ -150,6 +150,10 @@ pub struct Playing {
     pub updated_ms: Option<i64>,
     /// `media_duration`, where the house says one: no count runs past it.
     pub duration_ms: Option<i64>,
+    /// `queue_position`, which the Sonos integration says beside the URL:
+    /// where in the speaker's own queue it is, from 1. Read only where the
+    /// URL names the queue rather than the track ([`Holding::index`]).
+    pub queue_position: Option<usize>,
 }
 
 impl Playing {
@@ -226,6 +230,85 @@ pub enum Act {
     },
 }
 
+/// A URL as an address rather than as a spelling: what two spellings of one
+/// file have in common, so that what a speaker says it is playing can be
+/// matched with what it was handed.
+///
+/// A speaker does not say back the bytes it was given. The Sonos
+/// integration reports the speaker's own `TrackURI`, and between harken's
+/// `%20` and that lie a speaker's firmware, an XML envelope each way and
+/// Home Assistant: a space or a parenthesis may come back decoded, an
+/// escape in lower case, an `&` as `&amp;`, the scheme and host in another
+/// case, a default port written out. Every one of those is the same file
+/// to the server that serves it, and compared byte for byte every one of
+/// them was "not ours" — the speaker let go, paused, on the first track.
+///
+/// So: HTML entities decoded (twice escaped is still `&`), the scheme and
+/// the host lower-cased and a default port dropped, a fragment dropped, and
+/// the path and query percent-decoded. `x-sonos-http:` and `x-sonos-https:`,
+/// which Sonos writes for a stream it fetches itself, are read as `http:`
+/// and `https:`. Anything that is not a URL with a host is itself, decoded.
+pub fn address(url: &str) -> String {
+    let mut s = url.trim().to_string();
+    for _ in 0..3 {
+        let decoded = s
+            .replace("&amp;", "&")
+            .replace("&#38;", "&")
+            .replace("&#x26;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&#39;", "'")
+            .replace("&apos;", "'");
+        if decoded == s {
+            break;
+        }
+        s = decoded;
+    }
+    let decode = |part: &str| -> String {
+        let b = part.as_bytes();
+        let mut out = Vec::with_capacity(b.len());
+        let mut i = 0;
+        while i < b.len() {
+            let hex = |c: u8| (c as char).to_digit(16);
+            match (
+                b[i],
+                b.get(i + 1).copied().and_then(hex),
+                b.get(i + 2).copied().and_then(hex),
+            ) {
+                (b'%', Some(hi), Some(lo)) => {
+                    out.push((hi * 16 + lo) as u8);
+                    i += 3;
+                }
+                (c, _, _) => {
+                    out.push(c);
+                    i += 1;
+                }
+            }
+        }
+        String::from_utf8_lossy(&out).into_owned()
+    };
+    let Some((scheme, rest)) = s.split_once("://") else {
+        return decode(&s);
+    };
+    let scheme = match scheme.to_ascii_lowercase().as_str() {
+        "x-sonos-http" => "http".to_string(),
+        "x-sonos-https" => "https".to_string(),
+        other => other.to_string(),
+    };
+    let rest = rest.split('#').next().unwrap_or_default();
+    let cut = rest.find(['/', '?']).unwrap_or(rest.len());
+    let (host, tail) = rest.split_at(cut);
+    let mut host = host.to_ascii_lowercase();
+    for (sch, port) in [("http", ":80"), ("https", ":443")] {
+        if scheme == sch && host.ends_with(port) {
+            host.truncate(host.len() - port.len());
+        }
+    }
+    let tail = if tail.is_empty() { "/" } else { tail };
+    format!("{scheme}://{host}{}", decode(tail))
+}
+
 /// What one speaker was handed, by whose session, and what the bridge
 /// believes of it.
 #[derive(Debug, Clone)]
@@ -234,6 +317,8 @@ struct Holding {
     /// The queue as the speaker was given it, so what it reports back can be
     /// matched to an index without re-deriving anything.
     urls: Vec<String>,
+    /// …each as an [`address`], which is what a report is matched against.
+    addresses: Vec<String>,
     /// Where in that list it was handed from: until it says it is playing
     /// that, it is fetching, and nothing else it says is news.
     handed_at: usize,
@@ -253,6 +338,25 @@ struct Holding {
     quiet: u8,
     /// Where it last said it was, and when.
     heard: Option<(i64, i64)>,
+}
+
+impl Holding {
+    /// Where in the queue the speaker says it is: the track whose address
+    /// is the one it reports ([`address`]), or — where what it reports names
+    /// the speaker's own queue (`x-rincon-queue:…`) rather than a track —
+    /// its `queue_position` counted from where it was handed, since its
+    /// queue is ours from there on.
+    fn index(&self, p: &Playing) -> Option<usize> {
+        if p.url.is_empty() {
+            return None;
+        }
+        if p.url.starts_with("x-rincon-queue:") {
+            let at = self.handed_at + p.queue_position?.checked_sub(1)?;
+            return (at < self.urls.len()).then_some(at);
+        }
+        let reported = address(&p.url);
+        self.addresses.iter().position(|a| *a == reported)
+    }
 }
 
 /// What the house last said of a speaker's volume and group, and how many
@@ -337,6 +441,7 @@ impl Bridge {
             entity.to_string(),
             Holding {
                 key: key.to_string(),
+                addresses: urls.iter().map(|u| address(u)).collect(),
                 urls: urls.clone(),
                 handed_at: a.at,
                 started: false,
@@ -507,7 +612,7 @@ impl Bridge {
         // it has not started yet or that it has been sent somewhere else
         // entirely — a radio stream, a doorbell chime — and the only thing
         // that tells those apart is how long ago we handed it something.
-        let at = poll.and_then(|p| h.urls.iter().position(|u| *u == p.url));
+        let at = poll.and_then(|p| h.index(p));
         let (Some(at), Some(p)) = (at, poll) else {
             return self.lapse(entity, poll);
         };
@@ -591,9 +696,27 @@ impl Bridge {
             return vec![];
         }
         let key = h.key.clone();
+        // What it was expected to say, beside what it said: a URL that is
+        // ours spelt some other way reads, in the journal, as two strings
+        // that differ only in their escapes.
+        let expected = h
+            .urls
+            .get(if h.started { h.at } else { h.handed_at })
+            .cloned()
+            .unwrap_or_default();
+        let next = h.urls.get(h.at + 1).filter(|_| h.started).cloned();
         self.held.remove(entity);
         let why = match poll {
-            Some(p) => format!("{} {:?}, which is not ours", p.state, p.url),
+            Some(p) => match next {
+                Some(next) => format!(
+                    "{} {:?}, which is not ours (playing {expected:?}, next {next:?})",
+                    p.state, p.url
+                ),
+                None => format!(
+                    "{} {:?}, which is not ours (playing {expected:?})",
+                    p.state, p.url
+                ),
+            },
             None => "not answering".to_string(),
         };
         vec![Act::Call {
@@ -989,6 +1112,7 @@ mod tests {
             position_ms,
             updated_ms: Some(NOW),
             duration_ms: None,
+            queue_position: None,
         }
     }
 
@@ -1306,6 +1430,7 @@ mod tests {
             position_ms: 0,
             updated_ms: None,
             duration_ms: None,
+            queue_position: None,
         };
         for tick in 0..3 {
             assert!(
@@ -1368,6 +1493,98 @@ mod tests {
         let acts = b.heard(KITCHEN, None, NOW);
         assert_eq!(calls(&acts), [("alice", "release")]);
         assert_eq!(b.holder(KITCHEN), None);
+    }
+
+    /// One address, however the speaker spells it back: decoded where it was
+    /// escaped, escaped in lower case, an ampersand escaped for XML, the
+    /// scheme and host in capitals, a default port written out — each the
+    /// same file, and each a different string.
+    ///
+    /// Falsified by an `address` that returned its argument: every
+    /// re-spelling was a different address.
+    #[test]
+    fn an_address_is_the_same_however_it_is_spelt() {
+        let ours = harken_domain::listening::url(
+            "http://10.0.0.2:8787",
+            "music/Bach/Air (BWV 1068) & Café d'Été.mp3",
+        );
+        assert_eq!(
+            ours,
+            "http://10.0.0.2:8787/media/music/Bach/Air%20%28BWV%201068%29%20%26%20Caf%C3%A9%20d%27%C3%89t%C3%A9.mp3"
+        );
+        for spelt in [
+            "http://10.0.0.2:8787/media/music/Bach/Air (BWV 1068) & Café d'Été.mp3",
+            "http://10.0.0.2:8787/media/music/Bach/Air%20(BWV%201068)%20&amp;%20Caf%c3%a9%20d'%c3%89t%c3%a9.mp3",
+            "HTTP://10.0.0.2:8787/media/music/Bach/Air (BWV 1068) &amp;amp; Caf%C3%A9 d&#39;%C3%89t%C3%A9.mp3",
+            " http://10.0.0.2:8787/media/music/Bach/Air%20%28BWV%201068%29%20%26%20Caf%C3%A9%20d%27%C3%89t%C3%A9.mp3#t=0",
+        ] {
+            assert_eq!(address(spelt), address(&ours), "{spelt}");
+        }
+        assert_eq!(
+            address("x-sonos-http://Box.lan:80/media/a%20b.mp3"),
+            address("http://box.lan/media/a b.mp3")
+        );
+        assert_ne!(
+            address("http://10.0.0.2:8787/media/music/a.mp3"),
+            address("http://10.0.0.2:8787/media/music/b.mp3"),
+            "and two files are still two"
+        );
+        assert_ne!(
+            address("http://10.0.0.3:8787/media/music/a.mp3"),
+            address("http://10.0.0.2:8787/media/music/a.mp3"),
+            "nor is another host the same"
+        );
+    }
+
+    /// A speaker that spells back what it was handed its own way still
+    /// starts, and still moves through the queue — and a report that names
+    /// the speaker's own queue rather than a track is read by its
+    /// `queue_position`, counted from where it was handed.
+    ///
+    /// Falsified by matching the report byte for byte: the re-spelt first
+    /// track was not ours, and nothing was said.
+    #[test]
+    fn a_speaker_that_spells_its_queue_its_own_way_is_still_playing_it() {
+        let mut b = bridge();
+        let files = ["music/Air (1).mp3", "music/B & C.mp3", "music/D.mp3"];
+        b.wants(
+            "alice",
+            KITCHEN,
+            &session(&files, 0, playing_at(0), kitchen(true)),
+            NOW,
+        );
+        let spelt = |f: &str| {
+            url_of(f)
+                .replace("%20", " ")
+                .replace("%28", "(")
+                .replace("%29", ")")
+                .replace("%26", "&amp;")
+        };
+        assert_eq!(
+            calls(&b.heard(KITCHEN, Some(&playing(&spelt(files[0]), 0)), NOW)),
+            [("alice", "started")]
+        );
+        assert_eq!(
+            calls(&b.heard(KITCHEN, Some(&playing(&spelt(files[1]), 0)), NOW)),
+            [("alice", "advance")]
+        );
+        let queued = Playing {
+            queue_position: Some(3),
+            ..playing("x-rincon-queue:RINCON_000E58C0FFEE01400#0", 0)
+        };
+        assert_eq!(
+            calls(&b.heard(KITCHEN, Some(&queued), NOW)),
+            [("alice", "advance")],
+            "the third item of a queue handed from the first"
+        );
+        let past = Playing {
+            queue_position: Some(4),
+            ..queued
+        };
+        assert!(
+            b.heard(KITCHEN, Some(&past), NOW).is_empty(),
+            "past the end is not ours: a lapse"
+        );
     }
 
     /// Two people can both pick the kitchen, because a kitchen is one room.
@@ -2328,6 +2545,10 @@ pub mod ha {
                     .get("media_duration")
                     .and_then(|v| v.as_f64())
                     .map(|d| (d * 1000.0) as i64),
+                queue_position: attrs
+                    .get("queue_position")
+                    .and_then(|v| v.as_u64())
+                    .and_then(|n| usize::try_from(n).ok()),
             };
             Some((playing, speaker))
         }

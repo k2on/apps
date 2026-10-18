@@ -61,7 +61,10 @@ are the shared crates'; what is here is what only harken has:
   playing speaker is being its `media_position` counted on from
   `media_position_updated_at`, which is when the house last refreshed it,
   read against the house's own clock as its `Date` says; an undated one is
-  never a seek — `SETTLE` polls
+  never a seek; which track it is on read from the URL it reports
+  compared as an address, never as a string (`address`: decoded, entities
+  and all, the scheme and host in one case, a default port dropped), or
+  from its `queue_position` where the URL names its queue — `SETTLE` polls
   of grace after a hand-off, `LAPSE` polls before letting a playing speaker
   go (`release`, said as it), `QUIET` polls after telling it anything, and
   the second taker releasing the first. Its volume and its group are

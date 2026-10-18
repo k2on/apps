@@ -45,6 +45,27 @@ struct Fake {
     calls: Arc<Mutex<Vec<(String, Json_)>>>,
     states: Arc<Mutex<BTreeMap<String, Json_>>>,
     unauthorised: Arc<Mutex<usize>>,
+    /// The players that keep a queue of their own, as a Sonos does: what
+    /// `clear_playlist` and `play_media` do to it, and how the speaker spells
+    /// back what it was given. A player not here only says what a test sets.
+    queues: Arc<Mutex<BTreeMap<String, Queue>>>,
+}
+
+/// A Sonos's own queue, as Home Assistant's Sonos integration drives it
+/// (`homeassistant/components/sonos/media_player.py`, `_play_media`):
+/// `enqueue: play` inserts after the integration's `queue_position` — what
+/// it last heard, which a `clear_playlist` a moment before has not reached
+/// yet — and plays from there; `enqueue: add` appends; `enqueue: next`
+/// inserts after the one playing.
+struct Queue {
+    urls: Vec<String>,
+    /// The item playing, from 0.
+    at: Option<usize>,
+    /// `queue_position` as the integration last heard it, 1-based: stale
+    /// across a `clear_playlist`, which it learns of from an event later.
+    heard: Option<usize>,
+    /// What the speaker reports a URL it was given as: its `TrackURI`.
+    spell: fn(&str) -> String,
 }
 
 const TOKEN: &str = "a-long-lived-token";
@@ -77,6 +98,7 @@ async fn service(
         _ => None,
     };
     let entity = body["entity_id"].as_str().unwrap_or_default().to_string();
+    fake.queue_service(&entity, &service, &body);
     {
         let mut states = fake.states.lock().unwrap();
         if let (Some(now), Some(st)) = (now, states.get_mut(&entity)) {
@@ -221,6 +243,111 @@ async fn state(
 }
 
 impl Fake {
+    /// This player keeps a queue of its own and spells back what it was
+    /// given through `spell`.
+    fn keeps_a_queue(&self, entity: &str, spell: fn(&str) -> String) {
+        self.queues.lock().unwrap().insert(
+            entity.into(),
+            Queue {
+                urls: vec![],
+                at: None,
+                heard: None,
+                spell,
+            },
+        );
+        self.sonos(entity, 0.3, &[entity]);
+    }
+
+    /// What a service call does to a player that keeps a queue.
+    fn queue_service(&self, entity: &str, service: &str, body: &Json_) {
+        let mut queues = self.queues.lock().unwrap();
+        let Some(q) = queues.get_mut(entity) else {
+            return;
+        };
+        match service {
+            "clear_playlist" => {
+                q.urls.clear();
+                q.at = None;
+                drop(queues);
+                self.on_item(entity, None);
+            }
+            "play_media" => {
+                let url = body["media_content_id"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string();
+                match body["enqueue"].as_str() {
+                    Some("add") => q.urls.push(url),
+                    Some("next") => {
+                        let at = q.at.map_or(q.urls.len(), |a| a + 1).min(q.urls.len());
+                        q.urls.insert(at, url);
+                    }
+                    Some("play") => {
+                        let pos = q.heard.unwrap_or(0) + 1;
+                        let at = (pos - 1).min(q.urls.len());
+                        q.urls.insert(at, url);
+                        q.at = Some(at);
+                        drop(queues);
+                        self.on_item(entity, Some(at));
+                    }
+                    _ => {}
+                }
+            }
+            "media_next_track" => {
+                let next = q.at.map(|a| a + 1).filter(|n| *n < q.urls.len());
+                if next.is_some() {
+                    q.at = next;
+                    drop(queues);
+                    self.on_item(entity, next);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The speaker on item `at` of its queue, from its start, playing — or
+    /// on nothing, idle — as the house then says it: the item's URL as the
+    /// speaker spells it, `queue_position`, and the position dated now.
+    fn on_item(&self, entity: &str, at: Option<usize>) {
+        let (url, position) = {
+            let mut queues = self.queues.lock().unwrap();
+            let q = queues.get_mut(entity).unwrap();
+            q.at = at;
+            q.heard = at.map(|a| a + 1).or(q.heard);
+            (at.map(|a| (q.spell)(&q.urls[a])), at.map(|a| a + 1))
+        };
+        let mut states = self.states.lock().unwrap();
+        let st = states.get_mut(entity).unwrap();
+        st["state"] = json!(if url.is_some() { "playing" } else { "idle" });
+        st["attributes"]["media_content_id"] = json!(url.unwrap_or_default());
+        st["attributes"]["queue_position"] = json!(position);
+        date_position(st, 0.0);
+    }
+
+    /// The track playing runs out, and the speaker moves to the next item of
+    /// its queue by itself — after `blink` of saying it is playing nothing,
+    /// as a Sonos between two tracks can; at the end of its queue it stops.
+    fn track_ends(&self, entity: &str, blink: Duration) {
+        if !blink.is_zero() {
+            let mut states = self.states.lock().unwrap();
+            let st = states.get_mut(entity).unwrap();
+            st["attributes"]["media_content_id"] = json!("");
+            drop(states);
+            std::thread::sleep(blink);
+        }
+        let next = {
+            let queues = self.queues.lock().unwrap();
+            let q = &queues[entity];
+            q.at.map(|a| a + 1).filter(|n| *n < q.urls.len())
+        };
+        self.on_item(entity, next);
+    }
+
+    /// The URLs a player's own queue holds, as it was given them.
+    fn queued(&self, entity: &str) -> Vec<String> {
+        self.queues.lock().unwrap()[entity].urls.clone()
+    }
+
     fn serve(&self, rt: &tokio::runtime::Runtime) -> String {
         let router = Router::new()
             .route("/api/services/media_player/:service", post(service))
@@ -1126,4 +1253,134 @@ fn a_speaker_playing_on_is_never_sought_back_by_its_own_stale_position() {
         "nothing was sought on the speaker after the hand-off either: {calls:#?}"
     );
     rt.block_on(server.stop());
+}
+
+/// What a speaker gives back for a URL it was handed, as it spells it: the
+/// identity, for a speaker that says exactly what it was given.
+fn as_given(url: &str) -> String {
+    url.to_string()
+}
+
+/// …and as a Sonos might spell the same address back: a space, a
+/// parenthesis and an apostrophe decoded, an ampersand decoded and then
+/// escaped for the XML it travelled in, every other escape in lower-case
+/// hex, and the scheme and host in capitals. Every one of these is the same
+/// address to the server that serves it.
+fn respelt(url: &str) -> String {
+    let (scheme, rest) = url.split_once("://").unwrap();
+    let (host, path) = rest.split_at(rest.find('/').unwrap());
+    let mut out = format!("{}://{}", scheme.to_uppercase(), host.to_uppercase());
+    let bytes = path.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let b = u8::from_str_radix(&path[i + 1..i + 3], 16).unwrap();
+            match b {
+                b' ' | b'(' | b')' | b'\'' => out.push(b as char),
+                b'&' => out.push_str("&amp;"),
+                _ => out.push_str(&format!("%{b:02x}")),
+            }
+            i += 3;
+        } else {
+            out.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+    out
+}
+
+/// A browser starts three tracks, hands them to the kitchen, and the
+/// kitchen plays through all three by itself — the way the bug was
+/// reported, "it stops at the first song" — with the session following it
+/// track by track on every device, and nothing let go, paused or handed
+/// again. The kitchen here keeps a queue of its own as a Sonos does
+/// ([`Fake::keeps_a_queue`]), moves to its next item when a track runs out,
+/// says it is playing nothing for a moment between the two, and reports
+/// what it plays as `spell` spells it.
+fn a_speaker_plays_through(spell: fn(&str) -> String) {
+    let rt = runtime();
+    let fake = Fake::default();
+    fake.keeps_a_queue(KITCHEN, spell);
+    let url = fake.serve(&rt);
+    let data = tempfile::tempdir().unwrap();
+    let server = serve(&rt, data.path(), |c| c.house = Some(house(url)));
+
+    let mut browser = device(&server, "max", Kind::Computer, "Browser", true);
+    let mut desktop = device(&server, "max", Kind::Computer, "Desktop", false);
+    let b = me(&browser);
+    for who in 0..2 {
+        told_among(
+            &mut [&mut browser, &mut desktop],
+            who,
+            "three devices",
+            |s| s.devices.len() == 3,
+        );
+    }
+    // Names a real library has, each spelt three ways by somebody.
+    let names = ["Air (BWV 1068)", "Ballade & Polonaise", "Café d'Été"];
+    call(
+        &mut browser,
+        "start",
+        input::start(&queue(&names), 0, 0, "album/Mixed"),
+    );
+    told_among(
+        &mut [&mut browser, &mut desktop],
+        0,
+        "the browser playing",
+        |s| s.outputs(&b) && s.sounding(),
+    );
+    call(&mut browser, "transfer", input::transfer(KITCHEN));
+    for at in 0..3 {
+        if at > 0 {
+            // Two polls of nothing, which is fewer than the three a speaker
+            // that was playing ours is allowed.
+            fake.track_ends(KITCHEN, Duration::from_millis(80));
+        }
+        for who in 0..2 {
+            told_among(
+                &mut [&mut browser, &mut desktop],
+                who,
+                &format!("the kitchen playing track {at}"),
+                |s| {
+                    s.outputs(KITCHEN)
+                        && !s.moving_to(KITCHEN)
+                        && s.sounding()
+                        && s.session.as_ref().is_some_and(|a| a.at == at)
+                },
+            );
+        }
+    }
+    let files: Vec<String> = queue(&names)
+        .iter()
+        .map(|t| harken_domain::listening::url(MEDIA, &t.file))
+        .collect();
+    assert_eq!(fake.queued(KITCHEN), files, "the speaker's queue is ours");
+    let calls = fake.take();
+    let named = |n: &str| calls.iter().filter(|(c, _)| c == n).count();
+    assert_eq!(named("clear_playlist"), 1, "handed once: {calls:#?}");
+    assert_eq!(named("media_pause"), 0, "never paused: {calls:#?}");
+    let s = held(&server, "max").unwrap();
+    assert!(s.outputs(KITCHEN) && s.sounding(), "never let go: {s:#?}");
+    rt.block_on(server.stop());
+}
+
+/// A speaker that says back exactly the URL it was handed.
+#[test]
+fn a_speaker_plays_through_the_queue_it_was_handed() {
+    a_speaker_plays_through(as_given);
+}
+
+/// …and one that spells the same addresses its own way. The bridge compared
+/// what the speaker reported with what it was handed byte for byte, so an
+/// address spelt the speaker's way was "not ours": a few polls of it and
+/// the session let the speaker go — `release`, paused, `nowhere` — on the
+/// first track, every bar stuck at the first song while the speaker played
+/// on by itself. (A first track whose name has nothing to spell otherwise
+/// starts, and the same happens at the first one that has.)
+///
+/// Falsified by comparing them byte for byte again: "never told the kitchen
+/// playing track 0", the session let go of it.
+#[test]
+fn a_speaker_plays_through_the_queue_however_it_spells_it() {
+    a_speaker_plays_through(respelt);
 }

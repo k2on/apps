@@ -1243,3 +1243,58 @@ volume panel handed to a real speaker: what Android's panel draws for the
 remote volume, whether a real phone's buttons reach the `RemotePlayer` while
 the screen is off, and the settings observer ringing on a real phone are
 unseen (`docs/plan-android.md`).
+
+## The speaker that stopped at the first song
+
+Reported as "if I cast from the browser to the speaker, it stops at the
+first song". The bridge found where a speaker was in the queue by
+comparing the URL Home Assistant reports (`media_content_id`, which the
+Sonos integration takes from the speaker's own `TrackURI`) with the URLs
+it was handed, byte for byte. harken hands every path segment
+percent-encoded outside RFC 3986's unreserved set, so a library's names —
+a space, a parenthesis, an apostrophe, an `&`, an accent — are all
+escapes; a speaker that says back the same address spelt another way (a
+space or a parenthesis decoded, an escape in lower case, an `&` escaped
+again for the XML it travelled in, a host in capitals) was playing
+something "not ours". After the grace (`SETTLE` for a hand-off that has
+not started, `LAPSE` for one that was playing) the bridge let it go:
+`release`, said as the speaker — the session paused, `nowhere`, on the
+track it was at — while the speaker played on through the queue it holds,
+so every bar sat on the first song. A first track whose name has nothing
+to spell starts and the same happens at the first one that has.
+
+Compared as an address now (`assistant::address`): HTML entities decoded,
+twice escaped is still `&`; the scheme and host lower-cased and a default
+port dropped; a fragment dropped; path and query percent-decoded;
+`x-sonos-http(s):` read as `http(s):`. A report that names the speaker's
+queue rather than a track (`x-rincon-queue:…`) is read by the
+integration's `queue_position`, counted from where it was handed, since
+the speaker's queue is ours from there. The release line in the journal
+now says what was expected beside what was reported.
+
+**What is confirmed and what is not.** Every other candidate was checked
+and holds over real sockets against a stand-in house that keeps a queue
+as the Sonos integration drives it (`enqueue: play` inserting after the
+integration's possibly stale `queue_position` and playing from there,
+`add` appending), moves to its next item when a track ends, and says it
+is playing nothing for two polls in between: with the URLs said back as
+given, the speaker plays through three tracks and the session follows it
+0, 1, 2 on two devices, with one hand-off, no pause and no release
+(`a_speaker_plays_through_the_queue_it_was_handed`). Advance and jump are
+reported; the next track's `advance` lands before the bridge reads the
+session again (the hub answers commands in order), so no reconcile pulls
+the speaker back; the window pushes the whole queue from `at`; the old
+output's reconciler is silent once it is not the output; and `advance` is
+the speaker's, guarded to the output. The same speaker spelling the URLs
+back its own way failed before and passes now
+(`a_speaker_plays_through_the_queue_however_it_spells_it`). That a real
+Sonos spells them back differently is not seen from here: the line to
+look for in `journalctl -u harken` is
+
+    harken-server: house: media_player.<x>: playing "<url>", which is not ours (playing "<url>", next "<url>"); let go of <account>'s session
+
+where the reported URL and one of the expected differ only in how they
+are escaped (a build before this one prints the same line without the
+parenthesis). The same line with a URL of another file, or `"" which is
+not ours` repeated, is a different cause (a speaker sent elsewhere, or
+silent longer than `LAPSE` between tracks).

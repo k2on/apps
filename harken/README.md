@@ -105,7 +105,9 @@ and nothing heartbeats.
 - **A speaker in the house is a device of the session**: the server's Home
   Assistant bridge stands each configured `media_player` in every session
   a client is in, hands it the queue, and says what it does
-  (`server/README.md`).
+  (`server/README.md`). Where it is in the queue is read from the URL it
+  says it is playing, compared as an address: a speaker spells back what
+  it was handed its own way.
 - **Volume is the session's, per device.** A device that has a volume
   says so once it stands in the session (`equip`, with its level) — the
   browser's `<audio>` element, a speaker whose house says it takes
