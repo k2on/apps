@@ -713,129 +713,11 @@ fn moved_to(a: Active, at: Int, caller: Text, now: Int) -> Sum<Session> {
 
 // The queue, edited ----------------------------------------------------------------
 //
-// The vocabulary has no list that grows: a list is mapped, filtered, sorted
-// and folded, never joined to another. What does grow by a key is a
-// `PerDevice`, and its slots read back in key order — so a queue is edited by
-// writing each track under a key that sorts where it is to go, and reading
-// the slots back. A key is the place, offset to a fixed width
-// ([`PLACE`]), so that text order is number order.
-
-/// What a place is offset by to make its key: seven digits for every queue
-/// shorter than nine million tracks.
-pub const PLACE: i64 = 1_000_000;
-
-/// The fold that places a queue: how many tracks counted, and where each
-/// went.
-pub struct Placing {
-    pub at: PerDevice<Track>,
-    pub i: Int,
-}
-impl Record for Placing {
-    fn fields() -> Fields<Self> {
-        fields().field("at", typed::<PerDevice<Track>>()).field("i", int())
-    }
-}
-
-/// The tracks placed, read back in the order of their places.
-fn placed(at: PerDevice<Track>) -> List<Track> {
-    at.slots().map(|s| s.value)
-}
-
-/// The key of place `i`.
-fn place(i: Int) -> Text {
-    i.add(PLACE).to_text()
-}
-
-/// A placing that has placed nothing yet, counting from `from`. Every fold
-/// that places a queue starts from one: an empty `PerDevice` is written as
-/// an empty record, and only a helper's declared type tells the verifier it
-/// is one.
-pub fn unplaced(from: Int) -> Placing {
-    helper("unplaced", ("from", from), |from: Int| Placing {
-        i: from,
-        at: PerDevice::empty(),
-    })
-}
-
-/// `queue` placed with every track from `cut` on moved `n` places along, to
-/// make room.
-pub fn shifted(queue: List<Track>, cut: Int, n: Int) -> Placing {
-    helper(
-        "shifted",
-        (("queue", queue), ("cut", cut), ("n", n)),
-        |queue: List<Track>, cut: Int, n: Int| {
-            queue.fold(unplaced(0.into()), |acc: Placing, t| Placing {
-                i: acc.i.add(1),
-                at: acc.at.put(place(pick::<Int>(acc.i.lt(cut), acc.i, acc.i.add(n))), t),
-            })
-        },
-    )
-}
-
-/// `queue` placed without the tracks from `lo` to `hi`, both included.
-pub fn kept(queue: List<Track>, lo: Int, hi: Int) -> Placing {
-    helper(
-        "kept",
-        (("queue", queue), ("lo", lo), ("hi", hi)),
-        |queue: List<Track>, lo: Int, hi: Int| {
-            queue.fold(unplaced(0.into()), |acc: Placing, t| Placing {
-                i: acc.i.add(1),
-                at: pick::<PerDevice<Track>>(acc.i.ge(lo).and(acc.i.le(hi)), acc.at, acc.at.put(place(acc.i), t)),
-            })
-        },
-    )
-}
-
-/// `queue` placed with the track at `from` moved to `to` ([`moved_place`]).
-pub fn rearranged(queue: List<Track>, from: Int, to: Int) -> Placing {
-    helper(
-        "rearranged",
-        (("queue", queue), ("from", from), ("to", to)),
-        |queue: List<Track>, from: Int, to: Int| {
-            queue.fold(unplaced(0.into()), |acc: Placing, t| Placing {
-                i: acc.i.add(1),
-                at: acc.at.put(place(moved_place(acc.i, from, to)), t),
-            })
-        },
-    )
-}
-
-/// `queue` with `tracks` put in before the track at `cut` — at its end, for
-/// a `cut` past it.
-pub fn spliced(queue: List<Track>, cut: Int, tracks: List<Track>) -> List<Track> {
-    helper(
-        "spliced",
-        (("queue", queue), ("cut", cut), ("tracks", tracks)),
-        |queue: List<Track>, cut: Int, tracks: List<Track>| {
-            let room = shifted(queue, cut, tracks.len());
-            let all = tracks.fold(
-                Placing {
-                    i: cut.min(queue.len()),
-                    at: room.at,
-                },
-                |acc: Placing, t| Placing {
-                    i: acc.i.add(1),
-                    at: acc.at.put(place(acc.i), t),
-                },
-            );
-            placed(all.at)
-        },
-    )
-}
-
-/// `queue` without the track at `index`.
-pub fn without(queue: List<Track>, index: Int) -> List<Track> {
-    helper("without", (("queue", queue), ("index", index)), |queue: List<Track>, index: Int| {
-        placed(kept(queue, index, index).at)
-    })
-}
-
-/// `queue` up to and with the track at `at`, and nothing after it.
-pub fn through(queue: List<Track>, at: Int) -> List<Track> {
-    helper("through", (("queue", queue), ("at", at)), |queue: List<Track>, at: Int| {
-        placed(kept(queue, at.add(1), queue.len()).at)
-    })
-}
+// A queue is edited with the list editors (`spec/AUTHORING.md` §2.2): a
+// track put in, taken out or moved, and the run kept between two places.
+// Each index they are handed is one a guard has held in the queue, or one
+// clamped to its length here, because natively both arms of a `pick` are
+// computed and an editor refuses an index out of range wherever it stands.
 
 /// Where the track at `i` goes when the one at `from` moves to `to`: that
 /// one to `to`, and every one between them one place over to make room.
@@ -845,15 +727,6 @@ pub fn moved_place(i: Int, from: Int, to: Int) -> Int {
         let after = pick::<Int>(from.lt(to).and(i.gt(from)).and(i.le(to)), i.sub(1), between);
         pick::<Int>(i.eq(from), to, after)
     })
-}
-
-/// `queue` with the track at `from` moved to `to`.
-pub fn moved(queue: List<Track>, from: Int, to: Int) -> List<Track> {
-    helper(
-        "moved",
-        (("queue", queue), ("from", from), ("to", to)),
-        |queue: List<Track>, from: Int, to: Int| placed(rearranged(queue, from, to).at),
-    )
 }
 
 /// Whether `index` is a place in the session's queue.
@@ -1414,11 +1287,13 @@ pub fn listening() -> Router<Harken> {
                 .session
                 .case::<Sum<Session>>()
                 .on::<Active>("active", |a| {
-                    let cut = pick(input.next, a.at.add(1), a.queue.list().len());
+                    let q = a.queue.list();
+                    let n = q.len();
+                    let cut = pick::<Int>(input.next, a.at.add(1), n).min(n);
                     Sum::of(
                         "active",
                         Active {
-                            queue: spliced(a.queue.list(), cut, input.tracks.list()).non_empty(),
+                            queue: q.slice(0, cut).concat(input.tracks.list()).concat(q.slice(cut, n)).non_empty(),
                             ..a
                         },
                     )
@@ -1478,7 +1353,7 @@ pub fn listening() -> Router<Harken> {
                             Active {
                                 at: pick(input.index.lt(a.at).or(current.and(last)), a.at.sub(1), a.at),
                                 clock: pick(current, start, a.clock),
-                                queue: without(a.queue.list(), input.index).non_empty(),
+                                queue: a.queue.remove_at(input.index).non_empty(),
                                 ..a
                             },
                         ),
@@ -1501,7 +1376,7 @@ pub fn listening() -> Router<Harken> {
                         "active",
                         Active {
                             at: moved_place(a.at, input.from, input.to),
-                            queue: moved(a.queue.list(), input.from, input.to).non_empty(),
+                            queue: a.queue.move_at(input.from, input.to),
                             ..a
                         },
                     )
@@ -1523,7 +1398,7 @@ pub fn listening() -> Router<Harken> {
                     Sum::of(
                         "active",
                         Active {
-                            queue: through(a.queue.list(), a.at).non_empty(),
+                            queue: a.queue.slice(0, a.at.add(1).min(a.queue.list().len())).non_empty(),
                             ..a
                         },
                     )

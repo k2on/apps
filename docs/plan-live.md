@@ -1448,19 +1448,29 @@ can — because "Play next" with nothing playing is what Android already
 did, and a session that starts paused on nobody would need a second press
 to mean the first.
 
-**A list that grows, in a vocabulary without one.** The IR maps, filters,
-sorts and folds a list; nothing joins two or inserts into one. A
-`PerDevice` is the one value that grows by a key and reads back in key
-order (`Slots`), so the edits place each track under a key that sorts where
-it goes — its place offset to seven digits (`PLACE`), so text order is
-number order — and read the slots back (`shifted`, `kept`, `rearranged`,
-then `spliced`, `without`, `moved`, `through`). No IR, runtime or vector
-moved. Each fold starts from `unplaced(from)`, a helper whose declared
-`Placing` is what tells the verifier an empty record is an empty
-`PerDevice`; written inline the verifier read it as a record and refused
-the slots (`NotPerDevice`). Found on the way: a record's fields must be
+**A list that grows, in a vocabulary without one — and then with one.**
+The IR mapped, filtered, sorted and folded a list; nothing joined two or
+inserted into one. A `PerDevice` was the one value that grew by a key and
+read back in key order (`Slots`), so the edits first placed each track
+under a key that sorted where it went — its place offset to seven digits
+(`PLACE`), so text order was number order — and read the slots back
+(`shifted`, `kept`, `rearranged`, then `spliced`, `without`, `moved`,
+`through`), each fold starting from `unplaced(from)`, a helper whose
+declared `Placing` was what told the verifier an empty record was an empty
+`PerDevice`. Found on the way, and still true: a record's fields must be
 declared in the struct's own order — `Placing { i, at }` beside
 `fields().field("at").field("i")` came out with the two swapped.
+
+That was a workaround for a missing feature, and the engine has the feature
+now: the list editors (`spec/AUTHORING.md` §2.2, `stdlib.rs` §5.1) —
+`concat`, `insert`, `remove_at`, `move_at`, `slice`, an index out of range a
+refusal. `enqueue` is the queue sliced at the cut with the tracks
+concatenated between, `remove` is `remove_at`, `move` is `move_at`, and
+`clear_upcoming` is a slice through the track playing; only `moved_place`,
+where the track playing ends up, is still a helper. Every index an editor is
+handed is held in the queue by a guard or clamped to its length first,
+since natively both arms of a `pick` are computed. The behaviour is the
+same, test for test; harken.ark's hash moved with the closures.
 
 **The bridge** puts tracks into the speaker's own queue in place where
 that is what happened: tracks after the one playing are `play_media`
