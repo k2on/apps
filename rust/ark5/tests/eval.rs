@@ -70,7 +70,11 @@ fn step(lib: &Lib, sch: &Schema, store: &mut Store, f: &Function, c: &Ctx, input
         Ok(cs) => parts.push(("changes", array(cs.iter().map(|c| change(sch, c))))),
         Err(r) => parts.push(("refused", quoted(&r.0))),
     }
-    parts.extend([("hash_after", quoted(&store.state_hash().hex())), ("input", input_json(f, &input)), ("input_bytes", hexed(&input))]);
+    parts.extend([
+        ("hash_after", quoted(&store.state_hash().hex())),
+        ("input", input_json(f, &input)),
+        ("input_bytes", hexed(&input)),
+    ]);
     parts.sort_by_key(|p| p.0);
     parts.push(("store_after", jstore(sch, store)));
     parts
@@ -176,7 +180,13 @@ fn checks() {
         "eval",
         "checks.json",
         &[
-            ("functions", object(&[("add_to_playlist", quoted(&add.hash().hex())), ("create_playlist", quoted(&create.hash().hex()))])),
+            (
+                "functions",
+                object(&[
+                    ("add_to_playlist", quoted(&add.hash().hex())),
+                    ("create_playlist", quoted(&create.hash().hex())),
+                ]),
+            ),
             ("store_before", jstore(&schema(), &s)),
             ("ctx", ctx_json(&c)),
             ("cases", format!("[{}]", cases.join("\n,"))),
@@ -195,7 +205,9 @@ fn form_check() {
             Ok(v) => (vec![], val(&cx, &t, &v)),
             Err(fails) => (fails, "null".into()),
         };
-        let messages = messages.iter().map(|(at, m)| object(&[("at", array(at.iter().map(|i| jint(*i as i64)))), ("message", quoted(m))]));
+        let messages = messages
+            .iter()
+            .map(|(at, m)| object(&[("at", array(at.iter().map(|i| jint(*i as i64)))), ("message", quoted(m))]));
         object(&[
             ("function", quoted(&f.hash().hex())),
             ("input_bytes", hexed(&input)),
@@ -250,12 +262,21 @@ fn has_role() {
     vector(
         "eval",
         "has-role.json",
-        &[("function_bytes", hexed(&f.to_bytes())), ("store_before", jstore(&schema(), &s)), ("cases", format!("[{}]", cases.join("\n,")))],
+        &[
+            ("function_bytes", hexed(&f.to_bytes())),
+            ("store_before", jstore(&schema(), &s)),
+            ("cases", format!("[{}]", cases.join("\n,"))),
+        ],
     );
 }
 
 fn row_ty(t: &Table) -> Ty {
-    Ty::Tuple(t.columns.iter().map(|c| if c.decl == "Int" { c.ty.clone() } else { named(&c.decl) }).collect())
+    Ty::Tuple(
+        t.columns
+            .iter()
+            .map(|c| if c.decl == "Int" { c.ty.clone() } else { named(&c.decl) })
+            .collect(),
+    )
 }
 
 /// The authority's raw write of a row: put it — an edit when its key has a
@@ -274,7 +295,9 @@ fn put_row(table: &str) -> Function {
 fn delete_row(table: &str) -> Function {
     let t = schema().table(table).unwrap().1.clone();
     let key = Ty::Tuple(row_ty(&t).as_tuple()[..t.key].to_vec());
-    func(vec![id_decl()], &[("key", key)], Ty::unit(), Effect::Write, |b| Expr::Delete(table.into(), Box::new(b.v("key"))))
+    func(vec![id_decl()], &[("key", key)], Ty::unit(), Effect::Write, |b| {
+        Expr::Delete(table.into(), Box::new(b.v("key")))
+    })
 }
 
 trait AsTuple {
@@ -316,7 +339,11 @@ fn raw_writes() {
     let before = jstore(&sch, &s);
     let mut key = bytes_enc(&pid(1));
     key.extend(bytes_enc(b"t7"));
-    let deletes = [(delete_row("item"), key.clone()), (delete_row("item"), key), (delete_row("playlist"), bytes_enc(&pid(1)))];
+    let deletes = [
+        (delete_row("item"), key.clone()),
+        (delete_row("item"), key),
+        (delete_row("playlist"), bytes_enc(&pid(1))),
+    ];
     let mut steps = vec![];
     for (i, (f, k)) in deletes.iter().enumerate() {
         let mut p = step(&lib, &sch, &mut s, f, &entry("authority", &[], i as i64 + 1), k.clone());
@@ -324,7 +351,11 @@ fn raw_writes() {
         p.sort_by_key(|x| x.0);
         steps.push(object(&p));
     }
-    vector("eval", "raw-delete-row.json", &[("store_before", before), ("steps", format!("[{}]", steps.join("\n,")))]);
+    vector(
+        "eval",
+        "raw-delete-row.json",
+        &[("store_before", before), ("steps", format!("[{}]", steps.join("\n,")))],
+    );
 }
 
 // * The list editors, over a module of their own.
@@ -388,7 +419,10 @@ fn list_cases(clamp: bool) -> Vec<(&'static str, String)> {
         list_op("move", Std::Move, &["from", "to"]),
         list_op("slice", Std::Slice, &["start", "end"]),
     );
-    let cat = Function { params: vec![Ty::list(text_ty()), Ty::list(text_ty())], ..cat };
+    let cat = Function {
+        params: vec![Ty::list(text_ty()), Ty::list(text_ty())],
+        ..cat
+    };
     let cases: Vec<(&str, &Function, Vec<u8>)> = vec![
         ("concat-two", &cat, concat(&["a", "b"], &["c"])),
         ("concat-onto-empty", &cat, concat(&[], &abc)),
@@ -435,7 +469,10 @@ fn list_cases(clamp: bool) -> Vec<(&'static str, String)> {
         p.sort_by_key(|x| x.0);
         object(&p)
     });
-    vec![("schema", support::json::schema(&sch)), ("cases", format!("[{}]", out.collect::<Vec<_>>().join("\n,")))]
+    vec![
+        ("schema", support::json::schema(&sch)),
+        ("cases", format!("[{}]", out.collect::<Vec<_>>().join("\n,"))),
+    ]
 }
 
 /// `eval/list-ops`: the five list editors, every edge an index has and its
@@ -463,7 +500,11 @@ fn a_body_reads_what_it_wrote() {
             Expr::Seq(vec![
                 insert("playlist", vec![b.v("id"), b.v("name"), ctx(CtxField::User)]),
                 if_(std(Std::IsSome, vec![lookup("playlist", key())]), nothing(), refuse("not read back")),
-                if_(op(Op::Eq, std(Std::Len, vec![scan("playlist")]), int(1)), nothing(), refuse("not scanned")),
+                if_(
+                    op(Op::Eq, std(Std::Len, vec![scan("playlist")]), int(1)),
+                    nothing(),
+                    refuse("not scanned"),
+                ),
                 Expr::Update("playlist".into(), Box::new(Expr::Tuple(key())), Box::new(rename)),
                 Expr::Delete("playlist".into(), Box::new(Expr::Tuple(key()))),
             ])
@@ -519,7 +560,10 @@ fn the_standard_library() {
     assert_eq!(ap(SplitOnce, vec![t("abc"), t("")]), Ok(V::none()));
     assert_eq!(ap(Fnv1a64, vec![t("a")]), Ok(V::Int(0xaf63dc4c8601ec8cu64 as i64)));
     let id = ap(IdOfText, vec![t("00000000-0000-0000-0000-00000000000A")]).unwrap();
-    assert_eq!(ap(TextOfId, vec![id.variant().1[0].clone()]), Ok(t("00000000-0000-0000-0000-00000000000a")));
+    assert_eq!(
+        ap(TextOfId, vec![id.variant().1[0].clone()]),
+        Ok(t("00000000-0000-0000-0000-00000000000a"))
+    );
     assert_eq!(ap(IdOfText, vec![t("nope")]), Ok(V::none()));
     assert_eq!(ap(Unwrap, vec![V::none()]), Err("unwrapped none".into()));
     assert_eq!(ap(UnwrapOr, vec![V::none(), V::Int(3)]), Ok(V::Int(3)));

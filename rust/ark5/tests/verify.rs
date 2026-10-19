@@ -29,7 +29,14 @@ fn verdict(sch: &Schema, fs: &[(&str, Function)]) -> Result<(), String> {
     let mut bindings = vec![];
     for (name, f) in fs {
         let callee = |h: &_| lib.get(h);
-        check(f, &Env { schema: sch, callee: &callee }).map_err(|r| format!("{name}: {r}"))?;
+        check(
+            f,
+            &Env {
+                schema: sch,
+                callee: &callee,
+            },
+        )
+        .map_err(|r| format!("{name}: {r}"))?;
         bindings.push((name.to_string(), lib.install(sch, f.clone()).unwrap()));
     }
     bindings.sort();
@@ -47,7 +54,9 @@ fn verdict(sch: &Schema, fs: &[(&str, Function)]) -> Result<(), String> {
 
 fn parts(sch: &Schema, fs: &[(&str, Function)], claim: Option<bool>) -> Vec<(&'static str, String)> {
     let v = verdict(sch, fs);
-    let functions = fs.iter().map(|(n, f)| object(&[("bytes", hexed(&f.to_bytes())), ("hash", quoted(&f.hash().hex())), ("name", quoted(n))]));
+    let functions = fs
+        .iter()
+        .map(|(n, f)| object(&[("bytes", hexed(&f.to_bytes())), ("hash", quoted(&f.hash().hex())), ("name", quoted(n))]));
     vec![
         ("schema", jschema(sch)),
         ("functions", array(functions)),
@@ -102,7 +111,9 @@ fn helper() -> Function {
 }
 
 fn caller(arg: Ty) -> Function {
-    func(vec![name_decl()], &[("n", arg)], Ty::bool(), Effect::Pure, |b| Expr::Call(helper().hash(), vec![b.v("n")]))
+    func(vec![name_decl()], &[("n", arg)], Ty::bool(), Effect::Pure, |b| {
+        Expr::Call(helper().hash(), vec![b.v("n")])
+    })
 }
 
 fn joined() -> Schema {
@@ -145,7 +156,9 @@ fn modules_that_verify() {
             _ => &[("xs", named("Texts")), ("i", Ty::Int), ("j", Ty::Int)],
         };
         let names: Vec<&str> = args.iter().map(|a| a.0).collect();
-        func(vec![non_empty()], args, named("Texts"), Effect::Pure, |b| std(f, names.iter().map(|n| b.v(n)).collect()))
+        func(vec![non_empty()], args, named("Texts"), Effect::Pure, |b| {
+            std(f, names.iter().map(|n| b.v(n)).collect())
+        })
     });
     let mut fs: Vec<(&str, Function)> = ["reverse", "insert", "concat", "move"].into_iter().zip(kept).collect();
     fs.extend([("helper", helper()), ("caller", caller(named("Name")))]);
@@ -153,7 +166,13 @@ fn modules_that_verify() {
 }
 
 /// One function the checker refuses, with the words it refuses it in.
-fn one(types: Vec<(String, Decl)>, params: &[(&str, Ty)], ret: Ty, effect: Effect, body: impl FnOnce(&mut B) -> Expr) -> Vec<(&'static str, Function)> {
+fn one(
+    types: Vec<(String, Decl)>,
+    params: &[(&str, Ty)],
+    ret: Ty,
+    effect: Effect,
+    body: impl FnOnce(&mut B) -> Expr,
+) -> Vec<(&'static str, Function)> {
     vec![("f", func(types, params, ret, effect, body))]
 }
 
@@ -165,12 +184,18 @@ fn one(types: Vec<(String, Decl)>, params: &[(&str, Ty)], ret: Ty, effect: Effec
 #[test]
 fn what_the_checker_refuses() {
     let (sch, unit, w) = (schema(), Ty::unit(), Effect::Write);
-    let reads = vec![("scope.playlist", scope(|b| std(Std::IsSome, vec![lookup("playlist", vec![field(b.v("p"), 0)])])))];
+    let reads = vec![(
+        "scope.playlist",
+        scope(|b| std(Std::IsSome, vec![lookup("playlist", vec![field(b.v("p"), 0)])])),
+    )];
     refused("a-scope-reading-the-store.json", &sch, &reads, "the body's effect is Read, above Pure");
     let right = parts(&sch, &reads, None);
     falsify("verify", "a-scope-reading-the-store.json", &parts(&sch, &reads, Some(true)), &right);
     let wrong_element = one(vec![], &[("xs", texts())], unit.clone(), w, |b| {
-        insert("joined", vec![text("x"), std(Std::Concat, vec![std(Std::Insert, vec![b.v("xs"), int(0), int(1)])])])
+        insert(
+            "joined",
+            vec![text("x"), std(Std::Concat, vec![std(Std::Insert, vec![b.v("xs"), int(0), int(1)])])],
+        )
     });
     refused("list-ops-wrong-element.json", &joined(), &wrong_element, "Insert: argument 2 is Int");
     let text_into_id = one(vec![id_decl(), name_decl()], &[("name", named("Name"))], unit.clone(), w, |b| {
@@ -198,15 +223,27 @@ fn what_the_checker_refuses() {
     let looped = ("Loop".to_string(), decl(Ty::Tuple(vec![Ty::Int, named("Loop")]), &[]));
     let tree = ("Tree".to_string(), decl(Ty::Sum(vec![vec![], vec![Ty::list(named("Tree"))]]), &[]));
     let loops = one(vec![looped, tree], &[], unit.clone(), Effect::Pure, |_| nothing());
-    refused("a-type-containing-itself.json", &sch, &loops, "Loop contains itself outside a list or a sum");
+    refused(
+        "a-type-containing-itself.json",
+        &sch,
+        &loops,
+        "Loop contains itself outside a list or a sum",
+    );
     let under = vec![
         ("A".to_string(), decl(named("B"), &[])),
         ("B".to_string(), decl(Ty::Tuple(vec![named("B")]), &[])),
     ];
     let loops = one(under, &[], Ty::unit(), Effect::Pure, |_| nothing());
     refused("a-cycle-under-another-type.json", &sch, &loops, "B contains itself");
-    let query_writes = one(vec![], &[("x", text_ty())], unit.clone(), Effect::Read, |b| insert("joined", vec![b.v("x"), b.v("x")]));
-    refused("a-write-in-a-query.json", &joined(), &query_writes, "the body's effect is Write, above Read");
+    let query_writes = one(vec![], &[("x", text_ty())], unit.clone(), Effect::Read, |b| {
+        insert("joined", vec![b.v("x"), b.v("x")])
+    });
+    refused(
+        "a-write-in-a-query.json",
+        &joined(),
+        &query_writes,
+        "the body's effect is Write, above Read",
+    );
     let undeclared = one(vec![], &[("x", named("Nope"))], unit.clone(), Effect::Pure, |_| nothing());
     refused("an-undeclared-type.json", &sch, &undeclared, "Nope is not declared");
     let unsorted = one(vec![name_decl(), id_decl()], &[], unit.clone(), Effect::Pure, |_| nothing());

@@ -199,7 +199,13 @@ pub fn insert(t: &str, row: Vec<Expr>) -> Expr {
 pub fn decl(ty: Ty, rules: &[(Rule, Option<&str>)]) -> Decl {
     Decl {
         ty,
-        refine: rules.iter().map(|(rule, why)| Refine { rule: rule.clone(), why: why.map(Into::into) }).collect(),
+        refine: rules
+            .iter()
+            .map(|(rule, why)| Refine {
+                rule: rule.clone(),
+                why: why.map(Into::into),
+            })
+            .collect(),
     }
 }
 
@@ -272,7 +278,11 @@ pub fn rename_playlist() -> Function {
     mutator(vec![id_decl(), name_decl()], &params, |b| {
         let new = b.lam(&["p"], |b| Expr::Tuple(vec![field(b.v("p"), 0), b.v("name"), field(b.v("p"), 2)]));
         let update = Expr::Update("playlist".into(), Box::new(Expr::Tuple(vec![b.v("id")])), Box::new(new));
-        if_(std(Std::IsSome, vec![lookup("playlist", vec![b.v("id")])]), update, refuse("no such playlist"))
+        if_(
+            std(Std::IsSome, vec![lookup("playlist", vec![b.v("id")])]),
+            update,
+            refuse("no such playlist"),
+        )
     })
 }
 

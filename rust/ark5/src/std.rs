@@ -43,9 +43,7 @@ pub fn sig(cx: &Types, f: Std, args: &[Ty]) -> Result<Ty, String> {
     let keeps = |keep: &dyn Fn(&Rule) -> bool| -> Result<Ty, String> {
         let e = elem(0)?;
         Ok(match &args[0] {
-            Ty::Named(n) if matches!(cx.decl(n), Some(d) if matches!(d.ty, Ty::List(_)) && d.refine.iter().all(|r| keep(&r.rule))) => {
-                args[0].clone()
-            }
+            Ty::Named(n) if matches!(cx.decl(n), Some(d) if matches!(d.ty, Ty::List(_)) && d.refine.iter().all(|r| keep(&r.rule))) => args[0].clone(),
             _ => Ty::list(e),
         })
     };
@@ -100,7 +98,9 @@ fn place(f: &str, i: i64, n: usize, end: bool) -> Result<usize, Refusal> {
 }
 
 pub fn fnv1a64(bytes: &[u8]) -> u64 {
-    bytes.iter().fold(0xcbf29ce484222325u64, |h, b| (h ^ (*b as u64)).wrapping_mul(0x00000100000001b3))
+    bytes
+        .iter()
+        .fold(0xcbf29ce484222325u64, |h, b| (h ^ (*b as u64)).wrapping_mul(0x00000100000001b3))
 }
 
 /// White space off both ends, by the pinned table.
@@ -111,7 +111,10 @@ pub fn trim(t: &str) -> &str {
 fn id_of_text(t: &str) -> Option<Vec<u8>> {
     let parts: Vec<&str> = t.split('-').collect();
     let ok = parts.len() == 5
-        && parts.iter().zip([8, 4, 4, 4, 12]).all(|(p, n)| p.len() == n && p.chars().all(|c| c.is_ascii_hexdigit()));
+        && parts
+            .iter()
+            .zip([8, 4, 4, 4, 12])
+            .all(|(p, n)| p.len() == n && p.chars().all(|c| c.is_ascii_hexdigit()));
     let h = parts.concat();
     ok.then(|| (0..32).step_by(2).map(|i| u8::from_str_radix(&h[i..i + 2], 16).unwrap()).collect())
 }

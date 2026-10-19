@@ -201,8 +201,12 @@ impl Cx<'_> {
 
     /// A lambda over `params`: its body's type and effect.
     fn lam(&mut self, e: &Expr, params: Vec<Ty>) -> Out {
-        let Expr::Lambda(n, body) = e else { return Err(format!("{e:?} is not a lambda")) };
-        want(*n as usize == params.len(), || format!("a lambda of {n} where {} are bound", params.len()))?;
+        let Expr::Lambda(n, body) = e else {
+            return Err(format!("{e:?} is not a lambda"));
+        };
+        want(*n as usize == params.len(), || {
+            format!("a lambda of {n} where {} are bound", params.len())
+        })?;
         let depth = self.stack.len();
         self.stack.extend(params);
         let r = self.infer(body);
@@ -241,7 +245,9 @@ impl Cx<'_> {
             }
             Expr::Match(s, arms) => {
                 let (t, mut f) = self.infer(s)?;
-                let Ty::Sum(vs) = self.types.structure(&t) else { return Err(format!("a match on {t:?}")) };
+                let Ty::Sum(vs) = self.types.structure(&t) else {
+                    return Err(format!("a match on {t:?}"));
+                };
                 want(vs.len() == arms.len(), || format!("{} arms for {} variants", arms.len(), vs.len()))?;
                 let mut out = Ty::Sum(vec![]);
                 for (v, arm) in vs.into_iter().zip(arms) {
@@ -263,12 +269,17 @@ impl Cx<'_> {
             }
             Expr::Tuple(es) => {
                 let mut f = Pure;
-                let ts = es.iter().map(|e| self.infer(e).map(|(t, g)| (t, f = f.max(g)).0)).collect::<Result<_, _>>()?;
+                let ts = es
+                    .iter()
+                    .map(|e| self.infer(e).map(|(t, g)| (t, f = f.max(g)).0))
+                    .collect::<Result<_, _>>()?;
                 (Ty::Tuple(ts), f)
             }
             Expr::Variant(t, i, es) => {
                 self.wf(t)?;
-                let Ty::Sum(vs) = self.types.structure(t) else { return Err(format!("{t:?} is not a sum")) };
+                let Ty::Sum(vs) = self.types.structure(t) else {
+                    return Err(format!("{t:?} is not a sum"));
+                };
                 let fields = vs.get(*i as usize).ok_or_else(|| format!("no variant {i} of {t:?}"))?;
                 want(fields.len() == es.len(), || format!("variant {i} of {t:?} has {} fields", fields.len()))?;
                 let mut f = Pure;
@@ -317,14 +328,19 @@ impl Cx<'_> {
             }
             Expr::Std(s, es) => {
                 let mut f = Pure;
-                let ts: Vec<Ty> = es.iter().map(|e| self.infer(e).map(|(t, g)| (t, f = f.max(g)).0)).collect::<Result<_, _>>()?;
+                let ts: Vec<Ty> = es
+                    .iter()
+                    .map(|e| self.infer(e).map(|(t, g)| (t, f = f.max(g)).0))
+                    .collect::<Result<_, _>>()?;
                 (sig(self.types, *s, &ts)?, f)
             }
             Expr::Call(h, es) => {
                 want(!self.bare, || "a call in a refinement".into())?;
                 let c = (self.env.callee)(h).ok_or_else(|| format!("no function {h}"))?;
                 for (n, d) in &c.f.types {
-                    want(self.decls.iter().any(|(m, e)| m == n && e == d), || format!("{h} declares {n}, which this function does not"))?;
+                    want(self.decls.iter().any(|(m, e)| m == n && e == d), || {
+                        format!("{h} declares {n}, which this function does not")
+                    })?;
                 }
                 want(c.f.params.len() == es.len(), || format!("{h} takes {} arguments", c.f.params.len()))?;
                 let mut f = c.f.effect;
@@ -451,7 +467,10 @@ impl Cx<'_> {
         }
         let s = self.types.structure(&d.ty);
         for (i, r) in d.refine.iter().enumerate() {
-            let before = Decl { ty: d.ty.clone(), refine: d.refine[..i].to_vec() };
+            let before = Decl {
+                ty: d.ty.clone(),
+                refine: d.refine[..i].to_vec(),
+            };
             let ok = match &r.rule {
                 Rule::Utf8 => s == Ty::Bytes,
                 Rule::Trim => self.types.texty(&before),
@@ -483,7 +502,9 @@ pub fn check(f: &Function, env: &Env) -> Result<Types, Refusal> {
         bare: false,
     };
     let r = (|| {
-        want(f.types.windows(2).all(|w| w[0].0 < w[1].0), || "the declarations are not sorted, each once".into())?;
+        want(f.types.windows(2).all(|w| w[0].0 < w[1].0), || {
+            "the declarations are not sorted, each once".into()
+        })?;
         want(types.decl("Text") == Some(&text_decl()), || "Text is Bytes where utf8".into())?;
         for (n, d) in &f.types {
             cx.decl(n, d)?;

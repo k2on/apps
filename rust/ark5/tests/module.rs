@@ -62,7 +62,11 @@ fn spellings(add: impl Fn([&str; 4]) -> Function) -> Vec<(&'static str, String)>
 #[test]
 fn two_spellings_one_hash() {
     let right = spellings(|n| add_to_playlist_as(1, n));
-    assert_eq!(add_to_playlist_as(1, ["a", "b", "c", "d"]), add_to_playlist(), "the names are not in the function");
+    assert_eq!(
+        add_to_playlist_as(1, ["a", "b", "c", "d"]),
+        add_to_playlist(),
+        "the names are not in the function"
+    );
     vector("module", "de-bruijn.json", &right);
     let by_name = spellings(|n| {
         let mut f = add_to_playlist_as(1, n);
@@ -70,7 +74,12 @@ fn two_spellings_one_hash() {
         f.body = Expr::Seq(vec![Expr::Lit(Ty::Bytes, salted.to_vec()), f.body]);
         f
     });
-    falsify("module", "de-bruijn-by-name.json", &[right[0].clone(), by_name[1].clone(), right[2].clone()], &right);
+    falsify(
+        "module",
+        "de-bruijn-by-name.json",
+        &[right[0].clone(), by_name[1].clone(), right[2].clone()],
+        &right,
+    );
 }
 
 /// `#[derive(Node)]`: the types of the IR and `Ty` itself as the codec
@@ -83,7 +92,14 @@ fn the_derive() {
     let ty = || Ty::Named("Ty".into());
     assert_eq!(
         t,
-        Ty::Sum(vec![vec![], vec![], vec![ty()], vec![Ty::list(ty())], vec![Ty::list(Ty::list(ty()))], vec![Ty::Bytes]])
+        Ty::Sum(vec![
+            vec![],
+            vec![],
+            vec![ty()],
+            vec![Ty::list(ty())],
+            vec![Ty::list(Ty::list(ty()))],
+            vec![Ty::Bytes]
+        ])
     );
     let f = add_to_playlist();
     for v in [Ty::Sum(vec![vec![Ty::Int], vec![Ty::Named("x".into())]]), Function::ty(), Expr::ty()] {

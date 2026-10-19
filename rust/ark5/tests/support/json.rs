@@ -165,11 +165,6 @@ pub fn change(sch: &Schema, c: &ark5::store::Change) -> String {
     match c {
         Change::Add { row: r, .. } => object(&[("row", row(t, r)), ("t", tag("add")), ("table", quoted(&t.name))]),
         Change::Remove { row: r, .. } => object(&[("row", row(t, r)), ("t", tag("remove")), ("table", quoted(&t.name))]),
-        Change::Edit { old, new, .. } => object(&[
-            ("new", row(t, new)),
-            ("old", row(t, old)),
-            ("t", tag("edit")),
-            ("table", quoted(&t.name)),
-        ]),
+        Change::Edit { old, new, .. } => object(&[("new", row(t, new)), ("old", row(t, old)), ("t", tag("edit")), ("table", quoted(&t.name))]),
     }
 }

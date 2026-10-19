@@ -135,7 +135,12 @@ impl Reading<'_> {
                 }
                 V::List(xs)
             }
-            Ty::Tuple(ts) => V::Tup(ts.iter().enumerate().map(|(i, t)| self.at(i, |s| s.val(t, r))).collect::<Result<_, _>>()?),
+            Ty::Tuple(ts) => V::Tup(
+                ts.iter()
+                    .enumerate()
+                    .map(|(i, t)| self.at(i, |s| s.val(t, r)))
+                    .collect::<Result<_, _>>()?,
+            ),
             Ty::Sum(vs) => {
                 let i = r.variant(vs.len())?;
                 let fs = vs[i as usize].iter().enumerate().map(|(k, t)| self.at(k, |s| s.val(t, r)));
@@ -198,7 +203,12 @@ impl Reading<'_> {
 /// asked: what the checker or the store vouched for already.
 pub fn decode(cx: &Types, t: &Ty, b: &[u8]) -> Result<V, Refusal> {
     let mut r = Reader::new(b);
-    let mut s = Reading { cx, refine: false, path: vec![], fails: vec![] };
+    let mut s = Reading {
+        cx,
+        refine: false,
+        path: vec![],
+        fails: vec![],
+    };
     let v = s.val(t, &mut r)?;
     r.end()?;
     Ok(v)
@@ -208,7 +218,12 @@ pub fn decode(cx: &Types, t: &Ty, b: &[u8]) -> Result<V, Refusal> {
 /// that fails, each by its path of positions and its message.
 pub fn check_form(cx: &Types, t: &Ty, b: &[u8]) -> Result<V, Vec<(Vec<u32>, String)>> {
     let mut r = Reader::new(b);
-    let mut s = Reading { cx, refine: true, path: vec![], fails: vec![] };
+    let mut s = Reading {
+        cx,
+        refine: true,
+        path: vec![],
+        fails: vec![],
+    };
     match s.val(t, &mut r).and_then(|v| r.end().map(|_| v)) {
         Err(e) => Err(vec![(vec![], e.0)]),
         Ok(_) if !s.fails.is_empty() => Err(s.fails),
@@ -254,11 +269,24 @@ fn refuse<T>(why: impl Into<String>) -> Result<T, Refusal> {
 impl<'a> Machine<'a> {
     /// A run of `Pure` code alone: a refinement's predicate.
     pub fn bare(cx: &'a Types) -> Machine<'a> {
-        Machine { store: None, ctx: None, callee: None, cx, stack: vec![], changes: vec![], draws: 0 }
+        Machine {
+            store: None,
+            ctx: None,
+            callee: None,
+            cx,
+            stack: vec![],
+            changes: vec![],
+            draws: 0,
+        }
     }
 
     pub fn new(store: &'a dyn Read, ctx: &'a Ctx, callee: Callee<'a>, cx: &'a Types) -> Machine<'a> {
-        Machine { store: Some(store), ctx: Some(ctx), callee: Some(callee), ..Machine::bare(cx) }
+        Machine {
+            store: Some(store),
+            ctx: Some(ctx),
+            callee: Some(callee),
+            ..Machine::bare(cx)
+        }
     }
 
     /// This run's store, entry and functions, under other declarations.
@@ -266,7 +294,12 @@ impl<'a> Machine<'a> {
     where
         'a: 'b,
     {
-        Machine { store: self.store, ctx: self.ctx, callee: self.callee, ..Machine::bare(cx) }
+        Machine {
+            store: self.store,
+            ctx: self.ctx,
+            callee: self.callee,
+            ..Machine::bare(cx)
+        }
     }
 
     fn store(&self) -> &'a dyn Read {
@@ -297,8 +330,12 @@ impl<'a> Machine<'a> {
 
     /// A table's rows in key order, likewise.
     fn rows(&self, table: &str) -> Vec<Vec<u8>> {
-        let mut m: BTreeMap<Vec<u8>, Vec<u8>> =
-            self.store().scan(table, &Scan::all()).into_iter().map(|r| (self.key_of(table, &r), r)).collect();
+        let mut m: BTreeMap<Vec<u8>, Vec<u8>> = self
+            .store()
+            .scan(table, &Scan::all())
+            .into_iter()
+            .map(|r| (self.key_of(table, &r), r))
+            .collect();
         for c in self.changes.iter().filter(|c| c.table() == table) {
             match c {
                 Change::Add { row, .. } | Change::Edit { new: row, .. } => m.insert(self.key_of(table, row), row.clone()),
@@ -346,7 +383,9 @@ impl<'a> Machine<'a> {
                 false => self.eval(b)?,
             },
             Expr::Match(s, arms) => {
-                let V::Sum(i, fs) = self.eval(s)? else { return refuse("a match on no sum") };
+                let V::Sum(i, fs) = self.eval(s)? else {
+                    return refuse("a match on no sum");
+                };
                 let depth = self.stack.len();
                 self.stack.extend(fs);
                 let r = self.eval(&arms[i as usize]);
@@ -392,7 +431,12 @@ impl<'a> Machine<'a> {
                 let c = callee(h).ok_or_else(|| Refusal(format!("no function {h}")))?;
                 let args = es.iter().map(|e| self.eval(e)).collect::<Result<Vec<_>, _>>()?;
                 // The callee runs under its own declarations, on this run's changes.
-                let mut m = Machine { stack: args, changes: std::mem::take(&mut self.changes), draws: self.draws, ..self.at(&c.cx) };
+                let mut m = Machine {
+                    stack: args,
+                    changes: std::mem::take(&mut self.changes),
+                    draws: self.draws,
+                    ..self.at(&c.cx)
+                };
                 let r = m.eval(&c.f.body);
                 (self.changes, self.draws) = (m.changes, m.draws);
                 r?
@@ -447,7 +491,9 @@ impl<'a> Machine<'a> {
                     let k = self.apply(by, vec![x.clone()])?;
                     groups.entry(k.to_bytes()).or_insert((k, vec![])).1.push(x);
                 }
-                let each = groups.into_values().map(|(k, xs)| Ok(V::Tup(vec![k.clone(), self.apply(agg, vec![k, V::List(xs)])?])));
+                let each = groups
+                    .into_values()
+                    .map(|(k, xs)| Ok(V::Tup(vec![k.clone(), self.apply(agg, vec![k, V::List(xs)])?])));
                 V::List(each.collect::<Result<_, Refusal>>()?)
             }
             Expr::Sort(l, keys, dirs) => {
@@ -460,7 +506,11 @@ impl<'a> Machine<'a> {
                     keyed.push((k, x));
                 }
                 keyed.sort_by(|(a, _), (b, _)| {
-                    let each = a.iter().zip(b).zip(dirs).map(|((x, y), d)| if *d == Dir::Asc { x.cmp(y) } else { y.cmp(x) });
+                    let each = a
+                        .iter()
+                        .zip(b)
+                        .zip(dirs)
+                        .map(|((x, y), d)| if *d == Dir::Asc { x.cmp(y) } else { y.cmp(x) });
                     each.fold(Ordering::Equal, Ordering::then)
                 });
                 V::List(keyed.into_iter().map(|(_, x)| x).collect())
@@ -480,7 +530,9 @@ impl<'a> Machine<'a> {
             }
             Expr::Update(t, k, f) => {
                 let key = self.eval(k)?.to_bytes();
-                let Some(old) = self.get(t, &key) else { return refuse(format!("{t}: no row has this key")) };
+                let Some(old) = self.get(t, &key) else {
+                    return refuse(format!("{t}: no row has this key"));
+                };
                 let v = self.row(t, &old)?;
                 let new = self.apply(f, vec![v])?.to_bytes();
                 if new != old {
@@ -512,7 +564,7 @@ impl<'a> Machine<'a> {
 /// changes returned.
 pub struct Interp {
     pub f: Arc<Loaded>,
-    pub callee: Arc<dyn Fn(&FnHash) -> Option<Arc<Loaded>> + Send + Sync>,
+    pub lib: crate::module::Lib,
 }
 
 impl Interp {
@@ -530,7 +582,7 @@ impl Procedure for Interp {
         let (f, cx) = (&self.f.f, &self.f.cx);
         let ty = Interp::input_ty(f);
         let v = decode(cx, &ty, parse(cx, &ty, input)?.bytes())?;
-        let callee = |h: &FnHash| (self.callee)(h);
+        let callee = |h: &FnHash| self.lib.get(h);
         let mut m = Machine::new(store, ctx, &callee, cx);
         m.stack = match (v, f.params.len()) {
             (V::Tup(vs), n) if n != 1 => vs,

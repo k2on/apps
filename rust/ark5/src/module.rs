@@ -75,9 +75,10 @@ impl Lib {
 
     /// The function as the kernel runs it.
     pub fn procedure(&self, h: &FnHash) -> Option<Arc<dyn Procedure>> {
-        let lib = self.clone();
-        let f = self.get(h)?;
-        Some(Arc::new(Interp { f, callee: Arc::new(move |h| lib.get(h)) }))
+        Some(Arc::new(Interp {
+            f: self.get(h)?,
+            lib: self.clone(),
+        }))
     }
 
     /// What the content store loads a body it is sent with.
@@ -100,7 +101,14 @@ pub fn verify(m: &Module, lib: &Lib) -> Result<(), Refusal> {
         let at = |why: String| Refusal(format!("{name}: {why}"));
         let f = lib.get(h).ok_or_else(|| at(format!("no function {h}")))?;
         let callee = |h: &FnHash| lib.get(h);
-        check(&f.f, &Env { schema: &m.schema, callee: &callee }).map_err(|r| at(r.0))?;
+        check(
+            &f.f,
+            &Env {
+                schema: &m.schema,
+                callee: &callee,
+            },
+        )
+        .map_err(|r| at(r.0))?;
         if let Some((n, _)) = f.f.types.iter().find(|t| !m.types.contains(t)) {
             return Err(at(format!("{n} is not the module's")));
         }
