@@ -1,0 +1,19 @@
+{
+  "bytes": "030133d0f2fe2ff43b34227ea401f1de8f630000800000000000000600",
+  "frame": {
+    "fields": [
+      {
+        "fields": [],
+        "variant": 1
+      },
+      "33d0f2fe2ff43b34227ea401f1de8f63",
+      6,
+      {
+        "fields": [],
+        "variant": 0
+      }
+    ],
+    "variant": 3
+  },
+  "name": "server-ack-volatile"
+}

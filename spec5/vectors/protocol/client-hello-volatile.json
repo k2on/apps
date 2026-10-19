@@ -1,0 +1,26 @@
+{
+  "bytes": "000180000000000000000100ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00000170686f6e650000",
+  "frame": {
+    "fields": [
+      {
+        "fields": [],
+        "variant": 1
+      },
+      0,
+      {
+        "fields": [
+          "0000000000000000000000000000000000000000000000000000000000000000"
+        ],
+        "variant": 1
+      },
+      {
+        "fields": [
+          "70686f6e65"
+        ],
+        "variant": 1
+      }
+    ],
+    "variant": 0
+  },
+  "name": "client-hello-volatile"
+}

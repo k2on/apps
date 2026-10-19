@@ -1,0 +1,19 @@
+{
+  "bytes": "030033d0f2fe2ff43b34227ea401f1de8f630000800000000000000100",
+  "frame": {
+    "fields": [
+      {
+        "fields": [],
+        "variant": 0
+      },
+      "33d0f2fe2ff43b34227ea401f1de8f63",
+      1,
+      {
+        "fields": [],
+        "variant": 0
+      }
+    ],
+    "variant": 3
+  },
+  "name": "server-ack-durable"
+}

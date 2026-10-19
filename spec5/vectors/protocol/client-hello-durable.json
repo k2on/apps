@@ -1,0 +1,24 @@
+{
+  "bytes": "000080000000000000000100ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff000000",
+  "frame": {
+    "fields": [
+      {
+        "fields": [],
+        "variant": 0
+      },
+      0,
+      {
+        "fields": [
+          "0000000000000000000000000000000000000000000000000000000000000000"
+        ],
+        "variant": 1
+      },
+      {
+        "fields": [],
+        "variant": 0
+      }
+    ],
+    "variant": 0
+  },
+  "name": "client-hello-durable"
+}
