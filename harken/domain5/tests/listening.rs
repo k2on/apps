@@ -58,13 +58,7 @@ impl House {
     }
 
     /// An entry of `name`, authored as `user` on `session`.
-    fn author(
-        &mut self,
-        user: &str,
-        session: &str,
-        name: &str,
-        input: &impl Node,
-    ) -> Result<(), String> {
+    fn author(&mut self, user: &str, session: &str, name: &str, input: &impl Node) -> Result<(), String> {
         self.local += 1;
         let ctx = Ctx {
             id: EntryId::of(session, self.local),
@@ -74,16 +68,9 @@ impl House {
             now: self.now,
         };
         let changes = domain()
-            .run(
-                &self.store,
-                &ctx,
-                &format!("listening.{name}"),
-                &input.to_bytes(),
-            )
+            .run(&self.store, &ctx, &format!("listening.{name}"), &input.to_bytes())
             .map_err(|r| r.0)?;
-        self.store
-            .apply_all(&changes)
-            .unwrap_or_else(|r| panic!("{name}: the store refused {r}"));
+        self.store.apply_all(&changes).unwrap_or_else(|r| panic!("{name}: the store refused {r}"));
         Ok(())
     }
 
@@ -96,8 +83,7 @@ impl House {
             name: device.into(),
             user: user.into(),
         };
-        self.author("authority", "authority", "on_join", &d)
-            .unwrap();
+        self.author("authority", "authority", "on_join", &d).unwrap();
         self.devices.insert(device.into(), d);
     }
 
@@ -108,16 +94,12 @@ impl House {
     /// Its connection goes: `on_leave`. Not a decision about the music.
     fn leave(&mut self, device: &str) {
         let d = self.devices.remove(device).expect("standing");
-        self.author("authority", "authority", "on_leave", &d)
-            .unwrap();
+        self.author("authority", "authority", "on_leave", &d).unwrap();
     }
 
     /// Call as `device`: nothing, or the refusal.
     fn call(&mut self, device: &str, transition: &str, input: &impl Node) -> Result<(), String> {
-        let user = self
-            .devices
-            .get(device)
-            .map_or("alice".to_string(), |d| d.user.clone());
+        let user = self.devices.get(device).map_or("alice".to_string(), |d| d.user.clone());
         self.author(&user, device, transition, input)
     }
 
@@ -170,11 +152,7 @@ impl House {
 
     /// Something playing on `device`, pressed there.
     fn playing_on(&mut self, device: &str, position_ms: i64) {
-        self.ok(
-            device,
-            "start",
-            &start(&queue(), 0, position_ms, "album/Brandenburg"),
-        );
+        self.ok(device, "start", &start(&queue(), 0, position_ms, "album/Brandenburg"));
     }
 }
 
@@ -213,9 +191,7 @@ fn at_ms(at_ms: i64) -> At {
 }
 
 fn member(device: &str) -> Member {
-    Member {
-        device: device.into(),
-    }
+    Member { device: device.into() }
 }
 
 fn output(l: &Listening) -> Output {
@@ -227,13 +203,7 @@ fn clock(l: &Listening) -> Clock {
 }
 
 fn titles(l: &Listening) -> Vec<String> {
-    l.session
-        .as_ref()
-        .expect("a session")
-        .queue
-        .iter()
-        .map(|t| t.title.clone())
-        .collect()
+    l.session.as_ref().expect("a session").queue.iter().map(|t| t.title.clone()).collect()
 }
 
 fn at(l: &Listening) -> i64 {
@@ -241,10 +211,7 @@ fn at(l: &Listening) -> i64 {
 }
 
 fn here(id: &str, moving: bool) -> Output {
-    Output::Device {
-        id: id.into(),
-        moving,
-    }
+    Output::Device { id: id.into(), moving }
 }
 
 /// A laptop is playing; its connection goes; the sound is still the
@@ -323,33 +290,16 @@ fn a_command_is_a_state_change_the_output_obeys() {
     assert_eq!(output(&s).id(), Some("laptop"), "asking did not move it");
     assert_eq!(clock(&s), Clock::Paused { at_ms: 5_000 });
     h.ok("phone", "seek", &Seek { ms: 90_000 });
-    assert_eq!(
-        clock(&h.state()),
-        Clock::Paused { at_ms: 90_000 },
-        "a paused seek stays paused"
-    );
+    assert_eq!(clock(&h.state()), Clock::Paused { at_ms: 90_000 }, "a paused seek stays paused");
     h.ok("phone", "play", &());
     let s = h.state();
-    assert_eq!(
-        output(&s).id(),
-        Some("laptop"),
-        "play resumes on the output that is here"
-    );
-    assert_eq!(
-        clock(&s),
-        Clock::Playing {
-            at_ms: 90_000,
-            since: h.now
-        }
-    );
+    assert_eq!(output(&s).id(), Some("laptop"), "play resumes on the output that is here");
+    assert_eq!(clock(&s), Clock::Playing { at_ms: 90_000, since: h.now });
     h.wait(1_000);
     h.ok("phone", "seek", &Seek { ms: 5_000 });
     assert_eq!(
         clock(&h.state()),
-        Clock::Playing {
-            at_ms: 5_000,
-            since: h.now
-        },
+        Clock::Playing { at_ms: 5_000, since: h.now },
         "a playing seek plays on from there"
     );
 }
@@ -364,23 +314,12 @@ fn the_output_hears_a_command() {
     let mut w = Wire::new();
     let laptop = w.arrive("laptop", true);
     w.arrive("phone", true);
-    w.call(
-        "laptop",
-        "start",
-        &start(&queue(), 0, 0, "album/Brandenburg"),
-    );
+    w.call("laptop", "start", &start(&queue(), 0, 0, "album/Brandenburg"));
     w.call("phone", "pause", &());
-    assert_eq!(
-        w.heard(laptop).last().map(String::as_str),
-        Some("pause"),
-        "the laptop hears the pause"
-    );
+    assert_eq!(w.heard(laptop).last().map(String::as_str), Some("pause"), "the laptop hears the pause");
     let s = w.seen_by(laptop);
     assert_eq!(output(&s).id(), Some("laptop"));
-    assert!(
-        matches!(clock(&s), Clock::Paused { .. }),
-        "and its session is paused"
-    );
+    assert!(matches!(clock(&s), Clock::Paused { .. }), "and its session is paused");
     w.converged();
 }
 
@@ -410,13 +349,7 @@ fn only_a_press_that_means_a_sound_takes_it_from_a_device_that_has_gone() {
     );
     let a = s.session.as_ref().unwrap();
     assert_eq!(a.at, 1, "and the press it made");
-    assert_eq!(
-        a.clock,
-        Clock::Playing {
-            at_ms: 0,
-            since: h.now
-        }
-    );
+    assert_eq!(a.clock, Clock::Playing { at_ms: 0, since: h.now });
     assert_eq!(a.queue, queue(), "the queue the laptop had");
 
     let mut h = House::new();
@@ -427,14 +360,7 @@ fn only_a_press_that_means_a_sound_takes_it_from_a_device_that_has_gone() {
     h.ok("phone", "play", &());
     let s = h.state();
     assert_eq!(output(&s).id(), Some("phone"));
-    assert_eq!(
-        clock(&s),
-        Clock::Playing {
-            at_ms: 30_000,
-            since: h.now
-        },
-        "from where the laptop left it"
-    );
+    assert_eq!(clock(&s), Clock::Playing { at_ms: 30_000, since: h.now }, "from where the laptop left it");
 }
 
 /// A device that cannot make a sound never takes it. Falsified by dropping
@@ -454,11 +380,7 @@ fn a_device_that_cannot_be_heard_never_takes_the_sound() {
         _ => h.call("desktop", t, &()),
     };
     for t in ["play", "start", "skip", "jump"] {
-        assert_eq!(
-            refused(&mut h, t),
-            Err("nothing here can play it".to_string()),
-            "{t}"
-        );
+        assert_eq!(refused(&mut h, t), Err("nothing here can play it".to_string()), "{t}");
     }
     assert_eq!(output(&h.state()).id(), Some("laptop"));
 
@@ -489,34 +411,16 @@ fn a_track_pressed_plays_where_the_sound_is_or_here_when_it_is_nowhere() {
     h.arrive("laptop", true);
     h.arrive("phone", true);
     h.playing_on("laptop", 0);
-    h.ok(
-        "phone",
-        "start",
-        &start(&queue(), 1, 0, "playlist/Favorites"),
-    );
+    h.ok("phone", "start", &start(&queue(), 1, 0, "playlist/Favorites"));
     let s = h.state();
-    assert_eq!(
-        output(&s).id(),
-        Some("laptop"),
-        "something is sounding, so the press goes there"
-    );
+    assert_eq!(output(&s).id(), Some("laptop"), "something is sounding, so the press goes there");
     assert_eq!(s.session.as_ref().unwrap().at, 1);
     assert_eq!(s.session.as_ref().unwrap().from, "playlist/Favorites");
     h.ok("phone", "pause", &());
     h.ok("phone", "start", &start(&queue(), 0, 61_000, ""));
     let s = h.state();
-    assert_eq!(
-        output(&s).id(),
-        Some("phone"),
-        "nothing is sounding, so the press is a sound here"
-    );
-    assert_eq!(
-        clock(&s),
-        Clock::Playing {
-            at_ms: 61_000,
-            since: h.now
-        }
-    );
+    assert_eq!(output(&s).id(), Some("phone"), "nothing is sounding, so the press is a sound here");
+    assert_eq!(clock(&s), Clock::Playing { at_ms: 61_000, since: h.now });
 }
 
 /// Picking a speaker halfway through a track picks up there, connecting
@@ -531,35 +435,18 @@ fn picking_a_speaker_picks_up_where_the_track_was() {
     h.wait(1_500);
     h.ok("phone", "transfer", &to("media_player.kitchen"));
     let s = h.state();
-    assert_eq!(
-        output(&s),
-        here("media_player.kitchen", true),
-        "still connecting"
-    );
+    assert_eq!(output(&s), here("media_player.kitchen", true), "still connecting");
     assert_eq!(clock(&s).position(h.now), 91_500, "where the track was");
     assert!(s.moving_to("media_player.kitchen"));
-    assert_eq!(
-        h.call("phone", "started", &at_ms(1)),
-        Err("not the output".to_string())
-    );
+    assert_eq!(h.call("phone", "started", &at_ms(1)), Err("not the output".to_string()));
     h.wait(2_000);
     h.ok("media_player.kitchen", "started", &at_ms(92_100));
     let s = h.state();
     assert_eq!(output(&s), here("media_player.kitchen", false));
-    assert_eq!(
-        clock(&s),
-        Clock::Playing {
-            at_ms: 92_100,
-            since: h.now
-        }
-    );
+    assert_eq!(clock(&s), Clock::Playing { at_ms: 92_100, since: h.now });
     let before = h.state();
     h.ok("phone", "transfer", &to("media_player.kitchen"));
-    assert_eq!(
-        h.state(),
-        before,
-        "handing it to the device that has it, settled, is nothing"
-    );
+    assert_eq!(h.state(), before, "handing it to the device that has it, settled, is nothing");
 }
 
 /// A hand-off is a pause standing where the track was until the device it
@@ -574,14 +461,7 @@ fn a_hand_off_stands_still_where_the_track_was_until_it_has_started() {
     h.playing_on("phone", 90_000);
     h.wait(1_500);
     h.ok("phone", "transfer", &to("media_player.kitchen"));
-    assert_eq!(
-        clock(&h.state()),
-        Clock::Playing {
-            at_ms: 91_500,
-            since: h.now
-        },
-        "stopped where it was"
-    );
+    assert_eq!(clock(&h.state()), Clock::Playing { at_ms: 91_500, since: h.now }, "stopped where it was");
     h.wait(5_000);
     let s = h.state();
     assert_eq!(
@@ -602,11 +482,7 @@ fn a_hand_off_stands_still_where_the_track_was_until_it_has_started() {
     h.ok("browser", "started", &at_ms(91_520));
     h.wait(1_000);
     let s = h.state();
-    assert_eq!(
-        s.session.as_ref().unwrap().position(h.now),
-        92_520,
-        "running on from where it started"
-    );
+    assert_eq!(s.session.as_ref().unwrap().position(h.now), 92_520, "running on from where it started");
     assert!(s.outputs("browser") && !s.moving_to("browser"));
     h.ok("phone", "pause", &());
     h.wait(10_000);
@@ -634,64 +510,29 @@ fn the_output_says_where_it_is_and_the_clock_follows_it_and_nothing_else() {
     };
     h.wait(1_000);
     assert_eq!(
-        h.call(
-            "laptop",
-            "report_position",
-            &Report {
-                at_ms: 40_400,
-                since
-            }
-        ),
+        h.call("laptop", "report_position", &Report { at_ms: 40_400, since }),
         Err("not the output".to_string())
     );
-    h.ok(
-        "phone",
-        "report_position",
-        &Report {
-            at_ms: 40_400,
-            since,
-        },
-    );
+    h.ok("phone", "report_position", &Report { at_ms: 40_400, since });
     assert_eq!(
         clock(&h.state()),
-        Clock::Playing {
-            at_ms: 40_400,
-            since: h.now
-        },
+        Clock::Playing { at_ms: 40_400, since: h.now },
         "re-anchored where the phone is"
     );
     h.wait(500);
-    assert_eq!(
-        h.state().session.unwrap().position(h.now),
-        40_900,
-        "and playing on from there"
-    );
+    assert_eq!(h.state().session.unwrap().position(h.now), 40_900, "and playing on from there");
     let Clock::Playing { since: stale, .. } = clock(&h.state()) else {
         panic!("not playing")
     };
     h.wait(200);
     h.ok("laptop", "seek", &Seek { ms: 120_000 });
     let sought = clock(&h.state());
-    h.ok(
-        "phone",
-        "report_position",
-        &Report {
-            at_ms: 41_200,
-            since: stale,
-        },
-    );
+    h.ok("phone", "report_position", &Report { at_ms: 41_200, since: stale });
     assert_eq!(clock(&h.state()), sought, "a report never undoes a seek");
     h.ok("laptop", "pause", &());
     let paused = clock(&h.state());
     let now = h.now;
-    h.ok(
-        "phone",
-        "report_position",
-        &Report {
-            at_ms: 3_000,
-            since: now,
-        },
-    );
+    h.ok("phone", "report_position", &Report { at_ms: 3_000, since: now });
     assert_eq!(clock(&h.state()), paused);
     h.ok("laptop", "play", &());
     h.playing_on("phone", 90_000);
@@ -701,19 +542,8 @@ fn the_output_says_where_it_is_and_the_clock_follows_it_and_nothing_else() {
     let Clock::Playing { since, .. } = handed else {
         panic!("not playing: {handed:?}")
     };
-    h.ok(
-        "media_player.kitchen",
-        "report_position",
-        &Report {
-            at_ms: 5_000,
-            since,
-        },
-    );
-    assert_eq!(
-        clock(&h.state()),
-        handed,
-        "the hand-off still stands where the track was"
-    );
+    h.ok("media_player.kitchen", "report_position", &Report { at_ms: 5_000, since });
+    assert_eq!(clock(&h.state()), handed, "the hand-off still stands where the track was");
     h.wait(2_000);
     assert_eq!(h.state().session.unwrap().position(h.now), 91_500);
 }
@@ -747,35 +577,21 @@ fn the_queue_is_edited_and_the_track_playing_plays_on() {
     );
     let s = h.state();
     assert_eq!(titles(&s), ["a", "c", "b", "d"]);
-    assert_eq!(
-        (at(&s), clock(&s)),
-        (0, playing),
-        "the track playing plays on, untouched"
-    );
+    assert_eq!((at(&s), clock(&s)), (0, playing), "the track playing plays on, untouched");
     h.ok("desktop", "move", &Move { from: 3, to: 1 });
     assert_eq!(titles(&h.state()), ["a", "d", "c", "b"]);
     h.ok("desktop", "move", &Move { from: 0, to: 2 });
     let s = h.state();
     assert_eq!(
         (titles(&s), at(&s), clock(&s)),
-        (
-            vec!["d".into(), "c".into(), "a".into(), "b".into()],
-            2,
-            playing
-        )
+        (vec!["d".into(), "c".into(), "a".into(), "b".into()], 2, playing)
     );
     h.ok("desktop", "remove", &Remove { index: 0 });
     let s = h.state();
-    assert_eq!(
-        (titles(&s), at(&s), clock(&s)),
-        (vec!["c".into(), "a".into(), "b".into()], 1, playing)
-    );
+    assert_eq!((titles(&s), at(&s), clock(&s)), (vec!["c".into(), "a".into(), "b".into()], 1, playing));
     h.ok("desktop", "clear_upcoming", &());
     let s = h.state();
-    assert_eq!(
-        (titles(&s), at(&s), clock(&s)),
-        (vec!["c".into(), "a".into()], 1, playing)
-    );
+    assert_eq!((titles(&s), at(&s), clock(&s)), (vec!["c".into(), "a".into()], 1, playing));
     assert!(s.outputs("phone"), "on the phone all along");
 }
 
@@ -799,27 +615,14 @@ fn taking_the_track_playing_out_moves_on_or_stops_at_the_end() {
     h.ok("phone", "remove", &Remove { index: 0 });
     let s = h.state();
     assert_eq!((titles(&s), at(&s)), (vec!["b".into(), "c".into()], 0));
-    assert_eq!(
-        clock(&s),
-        Clock::Playing {
-            at_ms: 0,
-            since: h.now
-        },
-        "the next one, from its start"
-    );
+    assert_eq!(clock(&s), Clock::Playing { at_ms: 0, since: h.now }, "the next one, from its start");
     h.ok("phone", "jump", &Jump { index: 1 });
     h.ok("phone", "remove", &Remove { index: 1 });
     let s = h.state();
-    assert_eq!(
-        (titles(&s), at(&s), clock(&s)),
-        (vec!["b".into()], 0, Clock::Paused { at_ms: 0 })
-    );
+    assert_eq!((titles(&s), at(&s), clock(&s)), (vec!["b".into()], 0, Clock::Paused { at_ms: 0 }));
     h.ok("phone", "remove", &Remove { index: 0 });
     assert!(h.state().session.is_none(), "nothing queued");
-    assert_eq!(
-        h.call("phone", "remove", &Remove { index: 0 }),
-        Err("nothing is queued".to_string())
-    );
+    assert_eq!(h.call("phone", "remove", &Remove { index: 0 }), Err("nothing is queued".to_string()));
 }
 
 /// Into nothing queued, `enqueue` starts it; a place not in the queue is
@@ -900,21 +703,14 @@ fn a_device_on_a_second_connection_is_still_here_when_the_first_goes() {
     let mut w = Wire::new();
     let old = w.arrive("laptop", true);
     w.arrive("phone", true);
-    w.call(
-        "laptop",
-        "start",
-        &start(&queue(), 0, 5_000, "album/Brandenburg"),
-    );
+    w.call("laptop", "start", &start(&queue(), 0, 5_000, "album/Brandenburg"));
     let new = w.arrive("laptop", true);
     w.net.run(&Op::Partition(old));
     w.net.deliver();
     let s = w.state();
     assert!(s.device("laptop").is_some(), "still here");
     assert_eq!(output(&s).id(), Some("laptop"));
-    assert!(
-        matches!(clock(&s), Clock::Playing { .. }),
-        "still playing: nothing left"
-    );
+    assert!(matches!(clock(&s), Clock::Playing { .. }), "still playing: nothing left");
     w.net.run(&Op::Partition(new));
     w.net.deliver();
     let s = w.state();
@@ -933,31 +729,13 @@ fn the_output_says_what_happens_to_it_and_nobody_else_may() {
     h.arrive("laptop", true);
     h.arrive("phone", true);
     h.playing_on("laptop", 0);
-    assert_eq!(
-        h.call("phone", "advance", &Advance { from_track: 0 }),
-        Err("not the output".to_string())
-    );
-    assert_eq!(
-        h.call("phone", "stalled", &at_ms(1)),
-        Err("not the output".to_string())
-    );
-    assert_eq!(
-        h.call("phone", "release", &()),
-        Err("not the output".to_string())
-    );
+    assert_eq!(h.call("phone", "advance", &Advance { from_track: 0 }), Err("not the output".to_string()));
+    assert_eq!(h.call("phone", "stalled", &at_ms(1)), Err("not the output".to_string()));
+    assert_eq!(h.call("phone", "release", &()), Err("not the output".to_string()));
     h.wait(300_000);
     h.ok("laptop", "advance", &Advance { from_track: 0 });
     let a = h.state().session.unwrap();
-    assert_eq!(
-        (a.at, a.clock),
-        (
-            1,
-            Clock::Playing {
-                at_ms: 0,
-                since: h.now
-            }
-        )
-    );
+    assert_eq!((a.at, a.clock), (1, Clock::Playing { at_ms: 0, since: h.now }));
     let before = h.state();
     h.ok("laptop", "advance", &Advance { from_track: 0 });
     assert_eq!(h.state(), before, "a stale advance is nothing");
@@ -966,23 +744,12 @@ fn the_output_says_what_happens_to_it_and_nobody_else_may() {
     h.ok("laptop", "play", &());
     h.ok("laptop", "advance", &Advance { from_track: 1 });
     let a = h.state().session.unwrap();
-    assert_eq!(
-        (a.at, a.clock),
-        (1, Clock::Paused { at_ms: 0 }),
-        "the end of the queue"
-    );
-    assert_eq!(
-        h.call("laptop", "skip", &Skip { by: 1 }),
-        Err("nothing comes after this".to_string())
-    );
+    assert_eq!((a.at, a.clock), (1, Clock::Paused { at_ms: 0 }), "the end of the queue");
+    assert_eq!(h.call("laptop", "skip", &Skip { by: 1 }), Err("nothing comes after this".to_string()));
     h.ok("laptop", "skip", &Skip { by: -1 });
     assert_eq!(h.state().session.unwrap().at, 0);
     h.ok("laptop", "skip", &Skip { by: -1 });
-    assert_eq!(
-        h.state().session.unwrap().at,
-        0,
-        "before the first is the first again"
-    );
+    assert_eq!(h.state().session.unwrap().at, 0, "before the first is the first again");
     h.ok("laptop", "release", &());
     let a = h.state().session.unwrap();
     assert_eq!(a.output, Output::Nowhere);
@@ -1006,21 +773,14 @@ fn a_restart_restores_the_session_paused_with_no_output_and_nobody_here() {
         let mut back = House::new();
         back.store = Store::from_rows(domain().schema.clone(), &kept).unwrap();
         back.now = later;
-        back.author("authority", "authority", "on_restore", &())
-            .unwrap();
+        back.author("authority", "authority", "on_restore", &()).unwrap();
         back
     };
     let mut h = House::new();
     h.arrive("laptop", true);
     h.arrive("phone", true);
     h.playing_on("laptop", 33_000);
-    h.ok(
-        "phone",
-        "scrub",
-        &Scrub {
-            at_ms: Some(Ms(50_000)),
-        },
-    );
+    h.ok("phone", "scrub", &Scrub { at_ms: Some(Ms(50_000)) });
     assert_eq!(h.state().scrub.get("phone"), Some(&50_000));
     h.wait(4_000);
     let back = restart(&h, h.now + 60_000);
@@ -1029,22 +789,14 @@ fn a_restart_restores_the_session_paused_with_no_output_and_nobody_here() {
     assert!(s.scrub.is_empty());
     let a = s.session.unwrap();
     assert_eq!(a.output, Output::Nowhere);
-    assert_eq!(
-        a.clock,
-        Clock::Paused { at_ms: 97_000 },
-        "where it had got to, the minute away and all"
-    );
+    assert_eq!(a.clock, Clock::Paused { at_ms: 97_000 }, "where it had got to, the minute away and all");
     assert_eq!(a.queue, queue());
 
     let mut h = House::new();
     h.arrive("laptop", true);
     h.playing_on("laptop", 0);
     let back = restart(&h, h.now + 3_600_000);
-    assert_eq!(
-        clock(&back.state()),
-        Clock::Paused { at_ms: 300_000 },
-        "never past the end of the track"
-    );
+    assert_eq!(clock(&back.state()), Clock::Paused { at_ms: 300_000 }, "never past the end of the track");
 }
 
 /// Stopping is the session gone. Falsified by a `stop` that only paused:
@@ -1058,10 +810,7 @@ fn stopping_leaves_nothing() {
     let s = h.state();
     assert!(s.session.is_none());
     assert!(!s.sounding());
-    assert_eq!(
-        h.call("laptop", "play", &()),
-        Err("nothing is queued".to_string())
-    );
+    assert_eq!(h.call("laptop", "play", &()), Err("nothing is queued".to_string()));
 }
 
 /// One session per account. Falsified by `start` keying the session by
@@ -1076,17 +825,9 @@ fn two_accounts_are_two_sessions() {
     let bob = h.state_of("bob");
     assert!(bob.session.is_none());
     assert_eq!(bob.devices.len(), 1);
-    assert_eq!(
-        h.state().devices.len(),
-        2,
-        "alice's laptop and phone, in one"
-    );
+    assert_eq!(h.state().devices.len(), 2, "alice's laptop and phone, in one");
     assert_eq!(h.state_of("alice").session.map(|a| a.queue.len()), Some(2));
-    assert_eq!(
-        h.store.rows("listening").count(),
-        1,
-        "one session row: alice's"
-    );
+    assert_eq!(h.store.rows("listening").count(), 1, "one session row: alice's");
 }
 
 /// A call this module cannot read is refused and changes nothing: no
@@ -1098,22 +839,13 @@ fn a_call_nobody_can_read_changes_nothing() {
     h.arrive("laptop", true);
     h.playing_on("laptop", 0);
     let before = h.state();
-    assert!(
-        domain().module.get("listening.rewind").is_none(),
-        "no transition rewind"
-    );
+    assert!(domain().module.get("listening.rewind").is_none(), "no transition rewind");
     assert_eq!(
         h.call("laptop", "skip", &Skip { by: 0 }),
         Err("a skip is one track either way".to_string())
     );
-    assert!(
-        h.call("laptop", "seek", &()).is_err(),
-        "an input of the wrong shape"
-    );
-    assert!(
-        h.call("laptop", "start", &start(&[], 0, 0, "")).is_err(),
-        "an empty queue is not one"
-    );
+    assert!(h.call("laptop", "seek", &()).is_err(), "an input of the wrong shape");
+    assert!(h.call("laptop", "start", &start(&[], 0, 0, "")).is_err(), "an empty queue is not one");
     assert_eq!(
         h.call("laptop", "start", &start(&queue(), 2, 0, "")),
         Err("the track is not in the queue".to_string())
@@ -1154,10 +886,7 @@ fn touches(name: &str) -> (Vec<String>, Vec<String>) {
 #[test]
 fn a_scrub_is_ephemeral_and_nothing_ordered_reads_it() {
     let (reads, writes) = touches("listening.scrub");
-    assert!(
-        reads.is_empty() && writes.iter().all(|t| t == "listening_scrub"),
-        "{reads:?} {writes:?}"
-    );
+    assert!(reads.is_empty() && writes.iter().all(|t| t == "listening_scrub"), "{reads:?} {writes:?}");
     let ordered = [
         "start",
         "play",
@@ -1192,10 +921,7 @@ fn a_scrub_is_ephemeral_and_nothing_ordered_reads_it() {
     ];
     for t in ordered {
         let name = format!("listening.{t}");
-        assert!(
-            !touches(&name).0.contains(&"listening_scrub".to_string()),
-            "{t} reads the scrubbers"
-        );
+        assert!(!touches(&name).0.contains(&"listening_scrub".to_string()), "{t} reads the scrubbers");
         assert_eq!(domain().lib.get(&domain().get(&name)).map(|_| ()), Some(()));
     }
     let lives = domain()
@@ -1209,13 +935,7 @@ fn a_scrub_is_ephemeral_and_nothing_ordered_reads_it() {
     h.arrive("laptop", true);
     h.arrive("phone", true);
     h.playing_on("laptop", 0);
-    h.ok(
-        "phone",
-        "scrub",
-        &Scrub {
-            at_ms: Some(Ms(120_000)),
-        },
-    );
+    h.ok("phone", "scrub", &Scrub { at_ms: Some(Ms(120_000)) });
     assert_eq!(h.state().scrub.get("phone"), Some(&120_000));
     h.ok("phone", "scrub", &Scrub { at_ms: None });
     assert!(h.state().scrub.is_empty(), "let go");
@@ -1235,28 +955,14 @@ fn a_scrub_is_relayed_and_never_sequenced() {
     let mut w = Wire::new();
     let laptop = w.arrive("laptop", true);
     w.arrive("phone", true);
-    w.call(
-        "laptop",
-        "start",
-        &start(&queue(), 0, 0, "album/Brandenburg"),
-    );
+    w.call("laptop", "start", &start(&queue(), 0, 0, "album/Brandenburg"));
     let (head, hash) = (w.net.hub.log.log.head(), w.net.hub.log.store.state_hash());
     for ms in [120_000, 130_000, 140_000] {
-        w.call(
-            "phone",
-            "scrub",
-            &Scrub {
-                at_ms: Some(Ms(ms)),
-            },
-        );
+        w.call("phone", "scrub", &Scrub { at_ms: Some(Ms(ms)) });
     }
     w.net.run(&Op::Wait(RELAY_MS));
     w.net.deliver();
-    assert_eq!(
-        w.seen_by(laptop).scrub.get("phone"),
-        Some(&140_000),
-        "relayed to the laptop, the newest"
-    );
+    assert_eq!(w.seen_by(laptop).scrub.get("phone"), Some(&140_000), "relayed to the laptop, the newest");
     assert_eq!(
         w.heard(laptop).iter().filter(|t| *t == "scrub").count(),
         2,
@@ -1270,10 +976,7 @@ fn a_scrub_is_relayed_and_never_sequenced() {
     w.converged();
     w.net.run(&Op::Partition(w.devices["phone"]));
     w.net.deliver();
-    assert!(
-        w.seen_by(laptop).scrub.is_empty(),
-        "emptied when the phone left"
-    );
+    assert!(w.seen_by(laptop).scrub.is_empty(), "emptied when the phone left");
 }
 
 // * Volume and groups
@@ -1289,38 +992,18 @@ fn nothing_has_a_volume_until_it_says_so() {
     let s = h.state();
     let phone = s.device("phone").unwrap();
     assert_eq!(
-        (
-            phone.can_volume,
-            phone.volume,
-            phone.muted,
-            phone.family.clone(),
-            phone.follows.clone()
-        ),
+        (phone.can_volume, phone.volume, phone.muted, phone.family.clone(), phone.follows.clone()),
         (false, 100, false, None, None)
     );
     for d in ["phone", "nobody"] {
         assert_eq!(
-            h.call(
-                "browser",
-                "set_volume",
-                &SetVolume {
-                    device: d.into(),
-                    level: 30
-                }
-            ),
+            h.call("browser", "set_volume", &SetVolume { device: d.into(), level: 30 }),
             Err("that device is not here, or has no volume".to_string()),
             "{d}"
         );
     }
     assert_eq!(
-        h.call(
-            "phone",
-            "report_volume",
-            &ReportVolume {
-                level: 10,
-                muted: false
-            }
-        ),
+        h.call("phone", "report_volume", &ReportVolume { level: 10, muted: false }),
         Err("not here, or no volume".to_string())
     );
     h.ok(
@@ -1334,10 +1017,7 @@ fn nothing_has_a_volume_until_it_says_so() {
         },
     );
     let b = h.state().device("browser").cloned().unwrap();
-    assert_eq!(
-        (b.can_volume, b.volume, b.muted, b.family),
-        (true, 64, true, None)
-    );
+    assert_eq!((b.can_volume, b.volume, b.muted, b.family), (true, 64, true, None));
     assert_eq!(
         h.call(
             "browser",
@@ -1407,23 +1087,12 @@ fn a_volume_is_set_nudged_clamped_and_muted() {
     mute(&mut h, true);
     assert_eq!(h.volume("browser"), (0, true));
     nudge(&mut h, 5).unwrap();
-    assert_eq!(
-        h.volume("browser"),
-        (5, false),
-        "a volume moved is a volume unmuted"
-    );
+    assert_eq!(h.volume("browser"), (5, false), "a volume moved is a volume unmuted");
     mute(&mut h, true);
     mute(&mut h, false);
     assert_eq!(h.volume("browser"), (5, false));
-    assert_eq!(
-        nudge(&mut h, 0),
-        Err("a nudge moves the volume".to_string())
-    );
-    assert_eq!(
-        h.volume("phone"),
-        (100, false),
-        "the phone's own entry never moved"
-    );
+    assert_eq!(nudge(&mut h, 0), Err("a nudge moves the volume".to_string()));
+    assert_eq!(h.volume("phone"), (100, false), "the phone's own entry never moved");
 }
 
 /// What a device says of its own volume is its own entry's. Falsified by a
@@ -1445,14 +1114,7 @@ fn a_report_of_a_volume_is_the_callers_own() {
         },
     );
     h.speaker("media_player.kitchen", "sonos", 35);
-    h.ok(
-        "media_player.kitchen",
-        "report_volume",
-        &ReportVolume {
-            level: 20,
-            muted: true,
-        },
-    );
+    h.ok("media_player.kitchen", "report_volume", &ReportVolume { level: 20, muted: true });
     assert_eq!(h.volume("media_player.kitchen"), (20, true));
     assert_eq!(h.volume("browser"), (50, false));
 }
@@ -1473,31 +1135,12 @@ fn a_report_of_a_volume_is_heard_in_order() {
         volume: 35,
     };
     w.call("media_player.kitchen", "equip", &equip);
-    w.call(
-        "media_player.kitchen",
-        "report_volume",
-        &ReportVolume {
-            level: 20,
-            muted: true,
-        },
-    );
-    assert_eq!(
-        w.heard(phone).last().map(String::as_str),
-        Some("report_volume"),
-        "the phone hears it"
-    );
+    w.call("media_player.kitchen", "report_volume", &ReportVolume { level: 20, muted: true });
+    assert_eq!(w.heard(phone).last().map(String::as_str), Some("report_volume"), "the phone hears it");
     let live = |i: i64| w.net.clients[&i].live.as_ref().unwrap().log.head();
-    assert_eq!(
-        live(phone),
-        w.net.hub.live.as_ref().unwrap().log.head(),
-        "in order: at the hub's head"
-    );
+    assert_eq!(live(phone), w.net.hub.live.as_ref().unwrap().log.head(), "in order: at the hub's head");
     assert_eq!(live(kitchen), live(phone));
-    let d = w
-        .seen_by(phone)
-        .device("media_player.kitchen")
-        .cloned()
-        .unwrap();
+    let d = w.seen_by(phone).device("media_player.kitchen").cloned().unwrap();
     assert_eq!((d.volume, d.muted), (20, true));
     w.converged();
 }
@@ -1585,8 +1228,7 @@ impl Wire {
     /// A call from the device's newest connection, and everything delivered.
     fn call(&mut self, id: &str, transition: &str, input: &impl Node) {
         let f = domain().get(&format!("listening.{transition}"));
-        self.net
-            .run(&Op::Call(self.devices[id], f, input.to_bytes()));
+        self.net.run(&Op::Call(self.devices[id], f, input.to_bytes()));
         self.net.deliver();
         assert!(self.net.refused.is_empty(), "{:?}", self.net.refused);
     }
@@ -1603,20 +1245,11 @@ impl Wire {
 
     /// The transitions client `i`'s volatile machine applied, in order.
     fn heard(&self, i: i64) -> Vec<String> {
-        let names: BTreeMap<_, _> = domain()
-            .module
-            .bindings
-            .iter()
-            .map(|(n, h)| (*h, n.clone()))
-            .collect();
+        let names: BTreeMap<_, _> = domain().module.bindings.iter().map(|(n, h)| (*h, n.clone())).collect();
         let log = &self.net.clients[&i].live.as_ref().unwrap().log;
         log.entries
             .iter()
-            .map(|l| {
-                names[&l.entry.func]
-                    .trim_start_matches("listening.")
-                    .to_string()
-            })
+            .map(|l| names[&l.entry.func].trim_start_matches("listening.").to_string())
             .collect()
     }
 
@@ -1649,13 +1282,7 @@ fn a_speaker_joins_only_its_own_family_and_only_while_here() {
     h.ok("phone", "transfer", &to("media_player.kitchen"));
     h.ok("media_player.kitchen", "started", &at_ms(0));
     h.leave("media_player.den");
-    for who in [
-        "media_player.cast",
-        "phone",
-        "media_player.kitchen",
-        "media_player.den",
-        "nobody",
-    ] {
+    for who in ["media_player.cast", "phone", "media_player.kitchen", "media_player.den", "nobody"] {
         assert_eq!(
             h.call("phone", "join", &member(who)),
             Err("that device cannot join this one".to_string()),
@@ -1663,10 +1290,7 @@ fn a_speaker_joins_only_its_own_family_and_only_while_here() {
         );
     }
     h.ok("phone", "join", &member("media_player.study"));
-    assert_eq!(
-        h.follows("media_player.study").as_deref(),
-        Some("media_player.kitchen")
-    );
+    assert_eq!(h.follows("media_player.study").as_deref(), Some("media_player.kitchen"));
     assert!(h.state().grouped());
     assert_eq!(h.state().group("media_player.kitchen").len(), 2);
     h.ok("phone", "unjoin", &member("media_player.study"));
@@ -1687,12 +1311,7 @@ fn a_speaker_joins_only_its_own_family_and_only_while_here() {
 fn a_group_is_never_in_a_state_sonos_cannot_be_in() {
     let mut h = House::new();
     h.arrive_as("alice", "phone", "phone", true);
-    for id in [
-        "media_player.kitchen",
-        "media_player.study",
-        "media_player.den",
-        "media_player.hall",
-    ] {
+    for id in ["media_player.kitchen", "media_player.study", "media_player.den", "media_player.hall"] {
         h.speaker(id, "sonos", 40);
     }
     h.playing_in("media_player.kitchen");
@@ -1704,28 +1323,12 @@ fn a_group_is_never_in_a_state_sonos_cannot_be_in() {
             members: vec!["media_player.hall".into(), "media_player.study".into()],
         },
     );
-    assert_eq!(
-        h.follows("media_player.study").as_deref(),
-        Some("media_player.den")
-    );
-    assert_eq!(
-        h.follows("media_player.hall").as_deref(),
-        Some("media_player.den")
-    );
-    assert!(
-        !h.state().grouped(),
-        "the kitchen's group lost its only member"
-    );
+    assert_eq!(h.follows("media_player.study").as_deref(), Some("media_player.den"));
+    assert_eq!(h.follows("media_player.hall").as_deref(), Some("media_player.den"));
+    assert!(!h.state().grouped(), "the kitchen's group lost its only member");
     h.ok("phone", "join", &member("media_player.den"));
-    assert_eq!(
-        h.follows("media_player.den").as_deref(),
-        Some("media_player.kitchen")
-    );
-    assert_eq!(
-        h.follows("media_player.hall"),
-        None,
-        "a member leads nothing"
-    );
+    assert_eq!(h.follows("media_player.den").as_deref(), Some("media_player.kitchen"));
+    assert_eq!(h.follows("media_player.hall"), None, "a member leads nothing");
     assert_eq!(h.follows("media_player.study"), None);
     h.ok(
         "media_player.den",
@@ -1740,18 +1343,10 @@ fn a_group_is_never_in_a_state_sonos_cannot_be_in() {
     assert_eq!(h.follows("media_player.den"), None);
     h.ok("phone", "join", &member("media_player.hall"));
     h.leave("media_player.kitchen");
-    assert_eq!(
-        h.follows("media_player.hall"),
-        None,
-        "nobody follows a device that is not here"
-    );
+    assert_eq!(h.follows("media_player.hall"), None, "nobody follows a device that is not here");
     for d in &h.state().devices {
         if let Some(l) = &d.follows {
-            assert!(
-                h.state().device(l).is_some_and(|l| l.follows.is_none()),
-                "{} follows a member",
-                d.id
-            );
+            assert!(h.state().device(l).is_some_and(|l| l.follows.is_none()), "{} follows a member", d.id);
         }
     }
 }
@@ -1763,11 +1358,7 @@ fn a_group_is_never_in_a_state_sonos_cannot_be_in() {
 fn the_sound_handed_to_a_member_makes_it_the_leader() {
     let mut h = House::new();
     h.arrive_as("alice", "phone", "phone", true);
-    for id in [
-        "media_player.kitchen",
-        "media_player.study",
-        "media_player.den",
-    ] {
+    for id in ["media_player.kitchen", "media_player.study", "media_player.den"] {
         h.speaker(id, "sonos", 40);
     }
     h.playing_in("media_player.kitchen");
@@ -1776,22 +1367,12 @@ fn the_sound_handed_to_a_member_makes_it_the_leader() {
     h.ok("phone", "transfer", &to("media_player.study"));
     assert_eq!(output(&h.state()), here("media_player.study", true));
     assert_eq!(h.follows("media_player.study"), None);
-    assert_eq!(
-        h.follows("media_player.kitchen").as_deref(),
-        Some("media_player.study")
-    );
-    assert_eq!(
-        h.follows("media_player.den").as_deref(),
-        Some("media_player.study")
-    );
+    assert_eq!(h.follows("media_player.kitchen").as_deref(), Some("media_player.study"));
+    assert_eq!(h.follows("media_player.den").as_deref(), Some("media_player.study"));
     h.ok("media_player.study", "started", &at_ms(0));
     h.ok("phone", "transfer", &to("phone"));
     assert!(!h.state().grouped(), "the phone leads nothing");
-    assert_eq!(
-        h.state().followers("media_player.study").len(),
-        2,
-        "the speakers are still a group"
-    );
+    assert_eq!(h.state().followers("media_player.study").len(), 2, "the speakers are still a group");
     h.ok("phone", "transfer", &to("media_player.study"));
     assert!(h.state().grouped(), "a leader keeps its group");
     assert_eq!(h.state().group("media_player.study").len(), 3);
@@ -1810,45 +1391,17 @@ fn a_groups_volume_moves_every_member_in_proportion() {
     h.playing_in("media_player.kitchen");
     h.ok("phone", "join", &member("media_player.study"));
     assert_eq!(h.state().group_volume("media_player.kitchen"), Some(40));
-    h.ok(
-        "media_player.study",
-        "report_volume",
-        &ReportVolume {
-            level: 60,
-            muted: true,
-        },
-    );
-    let both = |h: &House| {
-        (
-            h.volume("media_player.kitchen"),
-            h.volume("media_player.study"),
-        )
-    };
+    h.ok("media_player.study", "report_volume", &ReportVolume { level: 60, muted: true });
+    let both = |h: &House| (h.volume("media_player.kitchen"), h.volume("media_player.study"));
     h.ok("phone", "set_group_volume", &GroupVolume { level: 60 });
-    assert_eq!(
-        both(&h),
-        ((30, false), (90, false)),
-        "60 over 40, each, and unmuted"
-    );
-    assert_eq!(
-        h.volume("media_player.den"),
-        (70, false),
-        "not in the group, not moved"
-    );
+    assert_eq!(both(&h), ((30, false), (90, false)), "60 over 40, each, and unmuted");
+    assert_eq!(h.volume("media_player.den"), (70, false), "not in the group, not moved");
     h.ok("phone", "nudge_group_volume", &GroupNudge { delta: 20 });
-    assert_eq!(
-        (both(&h).0 .0, both(&h).1 .0),
-        (40, 100),
-        "80 over 60: 40, and 120 clamped"
-    );
+    assert_eq!((both(&h).0 .0, both(&h).1 .0), (40, 100), "80 over 60: 40, and 120 clamped");
     h.ok("phone", "nudge_group_volume", &GroupNudge { delta: -100 });
     assert_eq!((both(&h).0 .0, both(&h).1 .0), (0, 0));
     h.ok("phone", "set_group_volume", &GroupVolume { level: 25 });
-    assert_eq!(
-        (both(&h).0 .0, both(&h).1 .0),
-        (25, 25),
-        "from nothing there is no proportion to keep"
-    );
+    assert_eq!((both(&h).0 .0, both(&h).1 .0), (25, 25), "from nothing there is no proportion to keep");
     h.ok("phone", "set_group_mute", &GroupMute { muted: true });
     assert_eq!((both(&h).0 .1, both(&h).1 .1), (true, true));
     assert!(h.state().group_muted("media_player.kitchen"));
@@ -1883,31 +1436,15 @@ fn a_leader_reports_its_group() {
     h.ok(
         "media_player.kitchen",
         "report_group",
-        &names(&[
-            "media_player.study",
-            "media_player.den",
-            "media_player.cast",
-            "media_player.ghost",
-        ]),
+        &names(&["media_player.study", "media_player.den", "media_player.cast", "media_player.ghost"]),
     );
     let s = h.state();
-    let mut members: Vec<&str> = s
-        .followers("media_player.kitchen")
-        .iter()
-        .map(|d| d.id.as_str())
-        .collect();
+    let mut members: Vec<&str> = s.followers("media_player.kitchen").iter().map(|d| d.id.as_str()).collect();
     members.sort_unstable();
     assert_eq!(members, ["media_player.den", "media_player.study"]);
-    h.ok(
-        "media_player.kitchen",
-        "report_group",
-        &names(&["media_player.den"]),
-    );
+    h.ok("media_player.kitchen", "report_group", &names(&["media_player.den"]));
     assert_eq!(h.follows("media_player.study"), None);
-    assert_eq!(
-        h.follows("media_player.den").as_deref(),
-        Some("media_player.kitchen")
-    );
+    assert_eq!(h.follows("media_player.den").as_deref(), Some("media_player.kitchen"));
     assert_eq!(
         h.call("phone", "report_group", &names(&["media_player.den"])),
         Err("not here, or not a speaker that groups".to_string())
