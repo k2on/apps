@@ -205,6 +205,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark5-client"
+version = "0.1.0"
+dependencies = [
+ "ark-auth",
+ "ark5",
+ "tempfile",
+ "tungstenite 0.24.0",
+]
+
+[[package]]
+name = "ark5-dev"
+version = "0.1.0"
+dependencies = [
+ "ark5",
+ "ark5-client",
+ "ark5-server",
+ "serde_json",
+]
+
+[[package]]
 name = "ark5-macros"
 version = "0.1.0"
 dependencies = [
@@ -213,6 +233,20 @@ dependencies = [
  "quote",
  "syn 2.0.119",
  "trybuild",
+]
+
+[[package]]
+name = "ark5-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ark-auth",
+ "ark5",
+ "ark5-client",
+ "axum",
+ "tempfile",
+ "tokio",
+ "tower-http",
 ]
 
 [[package]]

@@ -1,0 +1,18 @@
+[package]
+name = "ark5-server"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "The ArkDB v5 hub (docs/plan-v5.md §1.7, §1.9, §1.11): one authority per space, connections routed, the log on disk, live devices, the sync socket on axum, sign-in and a web build."
+
+[dependencies]
+ark5 = { path = "../ark5" }
+ark5-client = { path = "../ark5-client" }
+ark-auth = { path = "../ark-auth", features = ["server"] }
+anyhow = "1"
+axum = { version = "0.7", features = ["ws"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time"] }
+tower-http = { version = "0.5", features = ["fs"] }
+
+[dev-dependencies]
+tempfile = "3"

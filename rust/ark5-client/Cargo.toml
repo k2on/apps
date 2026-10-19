@@ -1,0 +1,14 @@
+[package]
+name = "ark5-client"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "The ArkDB v5 client driver (docs/plan-v5.md §1.7, §1.9, §1.11): the two peer machines on one connection, the chain on disk, the link with reconnect, the ephemeral relay, maintained views for a UI, and sign-in."
+
+[dependencies]
+ark5 = { path = "../ark5" }
+ark-auth = { path = "../ark-auth", features = ["client"] }
+tungstenite = { version = "0.24", default-features = false, features = ["handshake"] }
+
+[dev-dependencies]
+tempfile = "3"
