@@ -308,13 +308,12 @@ fn edits_and_removes_rebase_too() {
 /// authority held it again and nothing was sequenced.
 #[test]
 fn held_until_the_body_comes() {
-    let loader: ark5::peer::Loader = std::sync::Arc::new(|b: &[u8]| demo::procedure(std::str::from_utf8(b).ok()?));
-    let mut lacking = Cas::default().with_loader(loader.clone());
-    lacking.add_body(CREATE.as_bytes().to_vec());
+    let mut lacking = Cas::default().with_loader(demo::loader());
+    lacking.add_body(demo::body(CREATE));
     let mut server = authority(lacking);
-    let mut knows = Cas::default().with_loader(loader);
-    knows.add_body(CREATE.as_bytes().to_vec());
-    knows.add_body(ADD.as_bytes().to_vec());
+    let mut knows = Cas::default().with_loader(demo::loader());
+    knows.add_body(demo::body(CREATE));
+    knows.add_body(demo::body(ADD));
     let mut alice = replica("alice", knows);
     let o = alice.step(mutate(CREATE, create_input("Road"), 1));
     deliver_up(&mut server, &who("alice"), &o);
