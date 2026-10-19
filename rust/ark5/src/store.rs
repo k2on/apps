@@ -16,7 +16,12 @@
 //! one leaf out and one in per write; the state hash is
 //! `sha256(schema_hash ‖ digests of the durable tables in schema order)`.
 //! The schema hash is in it, so two stores are equal only when their bytes
-//! mean the same. A volatile table is in neither the hash nor a snapshot.
+//! mean the same. A store is of a [`Space`]: its hash and its snapshot are
+//! over that space's tables only, so a durable store's leave the volatile
+//! tables out, and the volatile machine's (§1.9) the durable ones.
+//!
+//! A row another row names by reference is not removed while it does:
+//! the reference is judged at both ends (v4's `StillReferenced`).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Bound;
@@ -143,11 +148,12 @@ pub struct Store {
     schema: Arc<Schema>,
     shash: SchemaHash,
     tables: Vec<Rows>,
+    space: Space,
 }
 
 impl PartialEq for Store {
     fn eq(&self, other: &Store) -> bool {
-        self.shash == other.shash && self.tables == other.tables
+        self.shash == other.shash && self.space == other.space && self.tables == other.tables
     }
 }
 impl Eq for Store {}
@@ -191,7 +197,13 @@ fn ordered<'a, T: 'a>(it: impl DoubleEndedIterator<Item = T> + 'a, dir: Dir) -> 
 }
 
 impl Store {
+    /// An empty durable store.
     pub fn new(schema: Arc<Schema>) -> Store {
+        Store::new_in(schema, Space::Durable)
+    }
+
+    /// An empty store whose hash and snapshot are over `space`'s tables.
+    pub fn new_in(schema: Arc<Schema>, space: Space) -> Store {
         let tables = schema
             .tables
             .iter()
@@ -206,7 +218,12 @@ impl Store {
             shash: schema.hash(),
             schema,
             tables,
+            space,
         }
+    }
+
+    pub fn space(&self) -> Space {
+        self.space
     }
 
     pub fn schema_arc(&self) -> &Arc<Schema> {
@@ -245,7 +262,7 @@ impl Store {
     fn hash_of(&self, digests: impl Iterator<Item = [u8; 32]>) -> StateHash {
         let mut parts: Vec<u8> = self.shash.0.to_vec();
         for (d, t) in digests.zip(&self.schema.tables) {
-            if t.space == Space::Durable {
+            if t.space == self.space {
                 parts.extend_from_slice(&d);
             }
         }
@@ -307,6 +324,8 @@ impl Store {
         }
         if let (Some(n), Some(s)) = (new, &spans) {
             self.judge(tab, n, s, key)?;
+        } else {
+            self.unnamed(tab, key)?;
         }
         let key = key.to_vec();
         self.write(tab, t, &key, old.map(|o| &o[..]), new.map(|n| &n[..]).zip(spans.as_deref()));
@@ -387,6 +406,33 @@ impl Store {
         Ok(())
     }
 
+    // No row names this one, about to be removed, by a reference: through an
+    // index the referring column leads, or the key when it leads it, or
+    // else by reading the referring table.
+    fn unnamed(&self, tab: &Table, key: &[u8]) -> Result<(), Refusal> {
+        for (rt, rows) in self.schema.tables.iter().zip(&self.tables) {
+            for r in rt.refs.iter().filter(|r| r.table == tab.name) {
+                let opt = rt.columns[r.column].ty.is_option();
+                let want = [if opt { &[1u8][..] } else { &[][..] }, key].concat();
+                let first = |it: &mut dyn Iterator<Item = &Vec<u8>>| it.next().is_some_and(|e| e.starts_with(&want));
+                let from = (Bound::Included(&want[..]), Bound::Unbounded);
+                let hit = match rt.indexes.iter().position(|ix| ix.columns.first() == Some(&r.column)) {
+                    Some(i) => first(&mut rows.indexes[i].range::<[u8], _>(from)),
+                    None if r.column == 0 => first(&mut rows.rows.range::<[u8], _>(from).map(|(k, _)| k)),
+                    None => rows.rows.values().any(|row| {
+                        let s = rt.spans(row).expect("a stored row parses");
+                        row[s[r.column].0..s[r.column].1] == want[..]
+                    }),
+                };
+                if hit {
+                    let c = &rt.columns[r.column].name;
+                    return Err(Refusal(format!("{}: named by {}.{c}", tab.name, rt.name)));
+                }
+            }
+        }
+        Ok(())
+    }
+
     // The write itself, judged already: indexes, digest, rows.
     fn write(&mut self, tab: &Table, t: usize, key: &[u8], old: Option<&[u8]>, new: Option<(&[u8], Spans)>) {
         let rows = &mut self.tables[t];
@@ -407,13 +453,14 @@ impl Store {
         }
     }
 
-    /// The durable tables' rows in key order: what a snapshot carries.
+    /// The rows of this store's space's tables in key order: what a snapshot
+    /// carries.
     pub fn snapshot_rows(&self) -> Vec<(String, Vec<Vec<u8>>)> {
         self.schema
             .tables
             .iter()
             .zip(&self.tables)
-            .filter(|(t, _)| t.space == Space::Durable)
+            .filter(|(t, _)| t.space == self.space)
             .map(|(t, r)| (t.name.clone(), r.rows.values().cloned().collect()))
             .collect()
     }
@@ -421,7 +468,12 @@ impl Store {
     /// A store holding exactly these rows, each parsed; constraints are
     /// judged once all are in, so the order tables come in does not matter.
     pub fn from_rows(schema: Arc<Schema>, rows: &[(String, Vec<Vec<u8>>)]) -> Result<Store, Refusal> {
-        let mut s = Store::new(schema.clone());
+        Store::from_rows_in(schema, Space::Durable, rows)
+    }
+
+    /// [`Store::from_rows`], a store of `space`.
+    pub fn from_rows_in(schema: Arc<Schema>, space: Space, rows: &[(String, Vec<Vec<u8>>)]) -> Result<Store, Refusal> {
+        let mut s = Store::new_in(schema.clone(), space);
         for (table, rs) in rows {
             let t = s.find(table)?;
             let tab = &schema.tables[t];

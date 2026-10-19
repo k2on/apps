@@ -170,6 +170,59 @@ fn the_schema_is_in_the_hash_and_volatile_tables_are_not() {
     assert_eq!(s.snapshot_rows().len(), 2);
 }
 
+/// A store of the volatile space is the mirror: its hash and snapshot are
+/// the volatile tables', and a durable row moves neither. Falsified by
+/// `hash_of` keeping the durable tables whatever the store's space: the
+/// volatile store's hash moved with a playlist.
+#[test]
+fn a_volatile_store_hashes_its_own_space() {
+    let mut sch = demo::schema();
+    sch.tables.push(Table::new("presence").col("who", "Text", Ty::Bytes).volatile());
+    let mut s = Store::new_in(Arc::new(sch), ark5::schema::Space::Volatile);
+    let h = s.state_hash();
+    s.put("playlist", playlist_row(&id(1), "x", "alice")).unwrap();
+    assert_eq!(s.state_hash(), h, "a durable row is not the volatile space's");
+    s.put("presence", bytes_enc(b"alice")).unwrap();
+    assert_ne!(s.state_hash(), h);
+    assert_eq!(s.snapshot_rows(), vec![("presence".to_string(), vec![bytes_enc(b"alice")])]);
+}
+
+/// A row others name is not removed while they do (v4's
+/// `StillReferenced`), through an index the referring column leads, the
+/// key it leads, or a scan of the referring table; once they are gone it
+/// is. Falsified by `apply` skipping `unnamed`: the playlist with an item
+/// on it was removed.
+#[test]
+fn a_row_still_named_is_not_removed() {
+    let opt = Ty::option(Ty::Bytes);
+    let mut sch = demo::schema();
+    sch.tables.push(
+        Table::new("pin")
+            .col("n", "Int", Ty::Int)
+            .col("of", "Option<Id<playlist>>", opt)
+            .refs("of", "playlist"),
+    );
+    let mut s = Store::new(Arc::new(sch));
+    s.put("playlist", playlist_row(&id(1), "x", "alice")).unwrap();
+    s.put("playlist", playlist_row(&id(2), "y", "alice")).unwrap();
+    s.put("item", item_row(&id(1), "t", 1)).unwrap();
+    let mut pin = ark5::codec::int_enc(1).to_vec();
+    pin.push(1);
+    put_bytes(&mut pin, &id(2));
+    s.put("pin", pin).unwrap();
+    let before = s.clone();
+    let key = |n| bytes_enc(&id(n));
+    assert!(s.delete("playlist", &key(1)).unwrap_err().0.contains("named by item.playlist_id"));
+    assert!(s.delete("playlist", &key(2)).unwrap_err().0.contains("named by pin.of"));
+    assert_eq!(s, before, "refused, nothing moved");
+    s.delete("pin", &ark5::codec::int_enc(1)).unwrap();
+    s.delete("playlist", &key(2)).unwrap();
+    let mut ik = key(1);
+    put_bytes(&mut ik, b"t");
+    s.delete("item", &ik).unwrap();
+    s.delete("playlist", &key(1)).unwrap();
+}
+
 /// §1.2 compat is a prefix check: appending an `Option` column, a defaulted
 /// one or a table passes; a removal, a retype or a bare appended column
 /// does not. A row written under the older schema is completed under the

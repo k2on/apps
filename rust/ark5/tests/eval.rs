@@ -314,9 +314,11 @@ impl AsTuple for Ty {
 
 /// `eval/raw-put-row` and `raw-delete-row`: the authority's raw writes are
 /// functions like any other, judged by the store as every write is: an
-/// add, an edit, nothing for the same row, a reference refused; a remove,
-/// then nothing. Falsified by `Update` reporting an edit to the same row:
-/// the fourth put showed one.
+/// add, an edit, nothing for the same row, a reference refused; a playlist
+/// an item still names refused (v4's `StillReferenced`), the item removed,
+/// then nothing, then the playlist. Falsified by `Update` reporting an
+/// edit to the same row: the fourth put showed one; and by `Store::apply`
+/// not judging a remove's referrers: the first delete took the playlist.
 #[test]
 fn raw_writes() {
     let (lib, sch) = (Lib::default(), schema());
@@ -340,6 +342,7 @@ fn raw_writes() {
     let mut key = bytes_enc(&pid(1));
     key.extend(bytes_enc(b"t7"));
     let deletes = [
+        (delete_row("playlist"), bytes_enc(&pid(1))),
         (delete_row("item"), key.clone()),
         (delete_row("item"), key),
         (delete_row("playlist"), bytes_enc(&pid(1))),

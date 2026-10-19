@@ -65,7 +65,7 @@ macro_rules! spaces {
 spaces! {
     /// `sha256(enc(function))`: what a function is called by (§1.5).
     FnHash,
-    /// `sha256(schema_hash ‖ durable tables' digests in schema order)` (§1.3).
+    /// `sha256(schema_hash ‖ the space's tables' digests in schema order)` (§1.3).
     StateHash,
     /// `sha256(enc(Module))` (§1.5).
     ModuleHash,
