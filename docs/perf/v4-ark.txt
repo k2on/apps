@@ -1,0 +1,191 @@
+ Downloading crates ...
+  Downloaded memchr v2.8.3
+  Downloaded serde_core v1.0.229
+  Downloaded itoa v1.0.18
+  Downloaded serde_json v1.0.151
+  Downloaded zmij v1.0.23
+   Compiling version_check v0.9.5
+   Compiling typenum v1.20.1
+   Compiling cpufeatures v0.2.17
+   Compiling cfg-if v1.0.5
+   Compiling zmij v1.0.23
+   Compiling serde_core v1.0.229
+   Compiling serde_json v1.0.151
+   Compiling generic-array v0.14.7
+   Compiling itoa v1.0.18
+   Compiling memchr v2.8.3
+   Compiling block-buffer v0.10.4
+   Compiling crypto-common v0.1.7
+   Compiling digest v0.10.7
+   Compiling sha2 v0.10.9
+   Compiling ark v0.1.0 (/home/user/apps/rust/ark)
+    Finished `release` profile [optimized] target(s) in 1m 20s
+     Running tests/perf.rs (target/release/deps/perf-206f0aaca5f6c791)
+
+running 8 tests
+test perf_a_mutate_alone ... 
+== (a) Replica::mutate + local_commit (a peer alone, no storage)
+path                                               n      total    mean µs   first100    last100     l/f
+add_to_playlist, one playlist: whole             500      17.2ms      34.34      63.03      26.87    0.43
+  … Replica::mutate (optimistic apply)           500      12.4ms      24.87      53.11      17.39    0.33
+  … local_commit (authority + confirm)           500       4.7ms       9.48       9.92       9.48    0.96
+add_to_playlist, playlists of 10: whole          500      15.1ms      30.24      21.38      48.76    2.28
+  … Replica::mutate (optimistic apply)           500       9.9ms      19.84      13.96      32.94    2.36
+  … local_commit (authority + confirm)           500       5.2ms      10.40       7.42      15.82    2.13
+add_to_playlist, one playlist: whole            2000      60.0ms      30.02      32.77      27.17    0.83
+  … Replica::mutate (optimistic apply)          2000      38.6ms      19.31      21.05      17.86    0.85
+  … local_commit (authority + confirm)          2000      21.4ms      10.72      11.72       9.31    0.79
+add_to_playlist, playlists of 10: whole         2000      49.9ms      24.93      20.57      28.71    1.40
+  … Replica::mutate (optimistic apply)          2000      31.6ms      15.80      13.21      18.60    1.41
+  … local_commit (authority + confirm)          2000      18.3ms       9.13       7.36      10.10    1.37
+add_to_playlist, one playlist: whole            8000     216.1ms      27.01      25.89      29.43    1.14
+  … Replica::mutate (optimistic apply)          8000     140.0ms      17.50      16.84      18.91    1.12
+  … local_commit (authority + confirm)          8000      76.1ms       9.51       9.05      10.52    1.16
+add_to_playlist, playlists of 10: whole         8000     218.9ms      27.37      22.09      33.32    1.51
+  … Replica::mutate (optimistic apply)          8000     137.2ms      17.15      14.20      20.61    1.45
+  … local_commit (authority + confirm)          8000      81.7ms      10.22       7.89      12.71    1.61
+
+== (a) Replica::mutate offline (pending grows, nothing confirmed)
+path                                               n      total    mean µs   first100    last100     l/f
+add_to_playlist, one playlist, all pending       500       7.6ms      15.15      14.81      14.17    0.96
+add_to_playlist, one playlist, all pending      2000      29.6ms      14.79      14.48      15.89    1.10
+add_to_playlist, one playlist, all pending      8000     125.0ms      15.63      14.96      16.44    1.10
+ok
+test perf_d_initial_sync ... 
+== (d) initial sync: Replica::receive_batch, pages of BATCH_LIMIT
+path                                               n      total    mean µs   first100    last100     l/f
+receive by intent (native)                       510       7.4ms      14.48 first page 14.39 µs/entry, last page 14.45 µs/entry
+receive by intent (interpreted)                  510       6.6ms      12.88 first page 12.30 µs/entry, last page 13.37 µs/entry
+receive intent + facts, compared                 510       7.4ms      14.42 first page 14.02 µs/entry, last page 14.72 µs/entry
+receive by facts alone                           510       1.8ms       3.51 first page 3.47 µs/entry, last page 3.53 µs/entry
+receive by intent (native)                      2010      32.9ms      16.37 first page 15.10 µs/entry, last page 16.83 µs/entry
+receive by intent (interpreted)                 2010      30.7ms      15.30 first page 13.90 µs/entry, last page 15.50 µs/entry
+receive intent + facts, compared                2010      44.2ms      22.01 first page 15.99 µs/entry, last page 33.06 µs/entry
+receive by facts alone                          2010      10.7ms       5.32 first page 7.11 µs/entry, last page 4.46 µs/entry
+receive by intent (native)                      8010     218.6ms      27.29 first page 36.23 µs/entry, last page 24.84 µs/entry
+receive by intent (interpreted)                 8010     185.9ms      23.21 first page 24.34 µs/entry, last page 22.64 µs/entry
+receive intent + facts, compared                8010     266.5ms      33.27 first page 21.62 µs/entry, last page 48.20 µs/entry
+receive by facts alone                          8010      63.5ms       7.92 first page 7.93 µs/entry, last page 5.64 µs/entry
+
+== (d) initial sync: the server paging a connection from 0 (Hello, Batch, Hello …)
+path                                               n      total    mean µs   first100    last100     l/f
+Server: page a fresh connection to the head      510       0.8ms       1.56 2 pages; first 376 µs, last 295 µs
+Server: page a fresh connection to the head     2010       4.0ms       1.98 8 pages; first 817 µs, last 276 µs
+Server: page a fresh connection to the head     8010      15.5ms       1.94 32 pages; first 3845 µs, last 98 µs
+
+== (d) Log::entries_after(cursor, BATCH_LIMIT): one page
+path                                               n      total    mean µs   first100    last100     l/f
+entries_after(0) of 500                            1       0.2ms     155.74 
+entries_after(250) of 500                          1       0.1ms     145.22 
+entries_after(500) of 500                          1       0.0ms       6.40 
+entries_after(0) of 2000                           1       0.2ms     185.76 
+entries_after(1000) of 2000                        1       0.2ms     153.46 
+entries_after(2000) of 2000                        1       0.0ms       6.89 
+entries_after(0) of 8000                           1       0.8ms     833.14 
+entries_after(4000) of 8000                        1       0.4ms     415.99 
+entries_after(8000) of 8000                        1       0.0ms      11.77 
+ok
+test perf_e_rebase ... 
+== (e) rebase: K pending, M landing, over S confirmed rows
+path                                               n      total    mean µs   first100    last100     l/f
+shape                                              S  per entry   per page
+K=10 M=256: one entry at a time, a pump each     500    257.5µs     65.9ms
+K=10 M=256: one entry at a time, one pump        500     36.7µs      9.4ms
+K=10 M=256: one page                             500     33.1µs      8.5ms
+K=100 M=256: one entry at a time, a pump each     500   1971.4µs    504.7ms
+K=100 M=256: one entry at a time, one pump       500     35.2µs      9.0ms
+K=100 M=256: one page                            500     30.0µs      7.7ms
+  … MemoryStore::clone of the confirmed store     500      1.5µs
+ack K=100 own pending, one at a time             500      7.0µs      0.7ms
+ack K=1000 own pending, one at a time            500      7.5µs      7.5ms
+K=10 M=256: one entry at a time, a pump each    2000    196.0µs     50.2ms
+K=10 M=256: one entry at a time, one pump       2000     23.9µs      6.1ms
+K=10 M=256: one page                            2000     23.7µs      6.1ms
+K=100 M=256: one entry at a time, a pump each    2000   2017.5µs    516.5ms
+K=100 M=256: one entry at a time, one pump      2000     29.8µs      7.6ms
+K=100 M=256: one page                           2000     28.5µs      7.3ms
+  … MemoryStore::clone of the confirmed store    2000      1.5µs
+ack K=100 own pending, one at a time            2000      5.5µs      0.6ms
+ack K=1000 own pending, one at a time           2000      7.7µs      7.7ms
+K=10 M=256: one entry at a time, a pump each    8000    254.0µs     65.0ms
+K=10 M=256: one entry at a time, one pump       8000     26.3µs      6.7ms
+K=10 M=256: one page                            8000     24.5µs      6.3ms
+K=100 M=256: one entry at a time, a pump each    8000   2101.9µs    538.1ms
+K=100 M=256: one entry at a time, one pump      8000     33.0µs      8.4ms
+K=100 M=256: one page                           8000     35.6µs      9.1ms
+  … MemoryStore::clone of the confirmed store    8000      1.8µs
+ack K=100 own pending, one at a time            8000     13.0µs      1.3ms
+ack K=1000 own pending, one at a time           8000     13.0µs     13.0ms
+ok
+test perf_g_authority_and_fanout ... 
+== (g) Authority::sequence_entry
+path                                               n      total    mean µs   first100    last100     l/f
+sequence add_to_playlist, one playlist           500       8.1ms      16.28      14.47      17.68    1.22
+sequence add_to_playlist, playlists of 10        500       7.3ms      14.51      13.90      14.72    1.06
+sequence add_to_playlist, one playlist          2000      34.1ms      17.03      14.82      16.21    1.09
+sequence add_to_playlist, playlists of 10       2000      38.2ms      19.09      13.78      21.44    1.56
+sequence add_to_playlist, one playlist          8000     147.6ms      18.45      16.77      15.38    0.92
+sequence add_to_playlist, playlists of 10       8000     134.7ms      16.84      15.03      18.16    1.21
+
+== (g) fan-out of one pushed entry to C connections (Server::recv + encode)
+path                                               n      total    mean µs   first100    last100     l/f
+shape                                              C    recv µs  encode µs   per conn
+log of 500; 1960 B per push                       10       28.5       34.4       6.29
+log of 8000; 1960 B per push                      10       86.1      108.1      19.42
+log of 500; 7720 B per push                       40       89.0      256.8       8.65
+log of 8000; 7720 B per push                      40       96.8      163.0       6.49
+log of 500; 30760 B per push                     160      112.6      456.3       3.56
+log of 8000; 30760 B per push                    160      189.4      553.9       4.65
+
+== (g) Log::state_at(head) — what a Verify costs the server
+path                                               n      total    mean µs   first100    last100     l/f
+state_at + state_hash, log of 500                  1       1.3ms    1266.18 state_at 1261 µs, hash 5 µs (32 B)
+state_at + state_hash, log of 2000                 1       6.2ms    6173.95 state_at 6166 µs, hash 8 µs (32 B)
+state_at + state_hash, log of 8000                 1      37.7ms   37704.44 state_at 37696 µs, hash 10 µs (32 B)
+
+== (g) Server::recv(Verify at the head) — the answer, as served
+path                                               n      total    mean µs   first100    last100     l/f
+Verify at the head, log of 500                     1       0.0ms       9.78 
+Verify at the head, log of 2000                    1       0.0ms      35.55 
+Verify at the head, log of 8000                    1       0.4ms     432.52 
+ok
+test perf_h_frames ... 
+== (h) a Batch of BATCH_LIMIT entries: canon::encode(to_value) and decode
+path                                               n      total    mean µs   first100    last100     l/f
+frame                                        entries      bytes  encode µs  decode µs  enc. allocs  dec. allocs
+Batch, intents only (Whole)                      256      41388      599.1      633.5        13598         7439
+Batch, with facts (ByFacts)                      256      59992     1198.3     1714.3        21534        12559
+Push of one entry                                  1        144       2.14       2.07
+ok
+test perf_i_partial_fanout ... 
+== (i) fan-out of one pushed entry to C partial connections (Server::recv + encode)
+path                                               n      total    mean µs   first100    last100     l/f
+shape                                              C    recv µs  encode µs   per conn per fact/conn
+partial, log of 500; 2600 B per push              10      112.3       61.0      17.34        17.34
+whole, log of 500; 1960 B per push                10       24.3       33.3       5.76            -
+partial, log of 8000; 2600 B per push             10      284.0      148.7      43.27        43.27
+whole, log of 8000; 1960 B per push               10       56.4       66.8      12.32            -
+partial, log of 500; 10280 B per push             40      262.0      173.9      10.90        10.90
+whole, log of 500; 7720 B per push                40       59.8      121.2       4.52            -
+partial, log of 8000; 10280 B per push            40      660.7      401.6      26.56        26.56
+whole, log of 8000; 7720 B per push               40       86.7      149.8       5.91            -
+partial, log of 500; 41000 B per push            160     1082.2      709.4      11.20        11.20
+whole, log of 500; 30760 B per push              160      104.4      456.5       3.51            -
+partial, log of 8000; 41000 B per push           160     2216.7     1046.9      20.40        20.40
+whole, log of 8000; 30760 B per push             160      206.9      573.0       4.87            -
+ok
+test perf_ids_below_the_horizon ... 
+== the ids a log keeps (docs/plan-db.md D6), per id and per million
+   100000 ids: whole 38.9 B/id, by key 16.0 B/id; fold 50.4 ms; seq_of 182 ns exact, 527 ns by key
+  1000000 ids: whole 38.8 B/id, by key 16.0 B/id; fold 573.2 ms; seq_of 558 ns exact, 1432 ns by key
+ok
+test perf_rows_handed_out ... 
+== rows handed out: MemoryStore::scan("item")
+path                                               n      total    mean µs   first100    last100     l/f
+scan of 500 rows                                 500       0.0ms       0.04 (per row)
+scan of 2000 rows                               2000       0.1ms       0.06 (per row)
+scan of 8000 rows                               8000       0.9ms       0.11 (per row)
+ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 27.20s
+

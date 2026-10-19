@@ -1,0 +1,698 @@
+# Spec v5: bytes under types, one language, one machine
+
+The design for the fifth revision of ArkDB, and the plan for landing it
+beside v4 and measuring the two against each other. It follows from one
+principle and the decisions it forces:
+
+> **If the type system is trusted, no code is needed to manage states it
+> rules out.** Every place v4 keeps the same fact twice — a runtime tag
+> beside a static type, five sub-languages each encoded and checked on
+> their own, the peer's lifecycle copied into five places, a `log_id`
+> beside a state hash — is a place v5 keeps it once.
+
+Every core feature stays: the intent log with facts beside it; the
+rebase; snapshots and the horizon; authority as a role, a peer alone
+included; partial sync; versioning by hash; maintained views with
+patches; live state; sign-in; input checks that are a form's validation;
+a canonical encoding; the conformance suite; peers in other languages.
+What changes is how many concepts carry them.
+
+Part 1 is the design. Part 2 is the work, as pieces for implementation
+agents. Part 3 is how the result is measured — size and speed — against
+v4, which stays in the tree untouched until the numbers are in.
+`docs/arkdb.md` remains the architecture's history; where it and this
+document disagree, this one is newer.
+
+---
+
+## Part 1 — Design
+
+### 1.1 Types, and bytes under them
+
+There is no runtime value type. A value is bytes, and a **type** says how
+to read them. The type grammar has five constructors:
+
+```
+Ty = Int                 -- 8 bytes: the i64 with its sign bit flipped, big-endian
+   | Bytes               -- escaped: each 00 byte becomes 00 FF; terminated by 00 00
+   | List Ty             -- each element preceded by 01; terminated by 00
+   | Tuple [Ty]          -- the fields' encodings, concatenated
+   | Sum [Tuple [Ty]]    -- one byte, the variant's index; then that variant's tuple
+```
+
+This encoding is **canonical** (one value, one byte string), **prefix-free**
+(no value's bytes are a proper prefix of another's of the same type) and
+**order-preserving** (for two values of one type, bytewise order of their
+encodings is the spec's order of the values). Consequences, each used:
+
+- `compare(a, b)` is `memcmp`. An index key is column bytes concatenated.
+  The state hash is SHA-256 over row bytes with no re-encoding. There is
+  one codec and no separate order.
+- Tuples order by their first field, then their second — a row orders by
+  its key columns when they come first, which the schema makes so.
+- `Sum` orders by variant index: `None < Some`, `false < true`, an enum by
+  declaration.
+- There are **no mixed-type comparisons**, because the checker (§1.4)
+  guarantees both sides of every comparison and every row of every index
+  have one type. So there is no rank byte and no "total order over all
+  values": there is an order per type, and it is the bytes.
+
+Everything else is a **declaration** over the five, by name, in a
+module's type section:
+
+```
+Bool         = Sum [(), ()]
+Option<T>    = Sum [(), (T)]
+Enum         = Sum [(), (), …]              -- orders by declaration; append-only under compat
+Text         = Bytes   where utf8
+Id<t>        = Bytes   where len 16         -- "the row exists" is a store constraint, not a type (§1.3)
+NonEmpty<T>  = List<T> where len ≥ 1
+Name         = Text    where trim, len 1..=80, "a playlist needs a name"
+Row<t>       = Tuple of t's columns, in schema order; names live in the schema
+```
+
+A `where` clause is a **refinement**: a predicate on the values of a
+structural type. It is checked exactly once, at the boundary where bytes
+enter from outside — an input, a snapshot, a frame, a file — by one
+function, `parse(ty, bytes) -> Result<Typed, Refusal>`, whose refusal
+message is the one a form shows. Inside, the checker tracks refinements as
+types: `concat : Text, Text -> Text` keeps UTF-8 by its signature;
+`filter : NonEmpty<T>, … -> List<T>` loses non-emptiness by its
+signature; a literal in a module is checked by the verifier once and then
+covered by the module's hash. In the host language a refined type is a
+newtype with a private field whose only constructor is `parse`, so an
+unchecked one cannot exist.
+
+**Hash spaces are distinct types**: `FnHash`, `StateHash`, `ModuleHash`,
+`TypeHash`, `EntryHash`, each a newtype over 32 bytes. Comparing across
+them does not compile.
+
+**JSON** (`json.rs`'s dialect) stays as the human form of vectors and
+traces, printed under a type. It is the only self-describing form, and
+nothing on the data path reads it.
+
+### 1.2 The schema
+
+Tables, columns (each a named type from §1.1), keys, declared indexes,
+references. Unchanged in substance; it is now the **only** place that
+knows what a value is.
+
+**Append-only evolution.** `compat`'s additive-only rule becomes: a new
+schema appends columns to a table and appends tables; it never removes,
+reorders or retypes. With rows as tuples in schema order, a row written
+under schema `v+1` is readable under schema `v` **by prefix**: an older
+runtime reads the columns it knows and never sees the rest. There is no
+projection code. A column appended must be an `Option` or have a
+declared default, so that a row written under `v` is complete under
+`v+1` when the prefix ends. The compat check is one function: is the new
+schema a prefix-extension of the old.
+
+### 1.3 The store
+
+One ordered key-value map:
+
+```
+(table, key_bytes)                          -> row_bytes
+(table, index, column_bytes, key_bytes)     -> ()
+```
+
+`get`, `scan(lo, hi, dir, limit, after)`, `put`, `delete`. Writes judge
+constraints — a unique index, a reference (`Id<t>` must name a row of
+`t` at the moment of the write), a non-nullable column — and refuse.
+Every write reports a `Change`:
+
+```
+Change = Add { table, row } | Remove { table, row } | Edit { table, old, new }
+```
+
+A change **inverts exactly**: an `Add` by deleting its key, a `Remove` by
+putting the row back, an `Edit` by putting `old`. That is all the rebase
+(§1.6) needs. There is no overlay store: the optimistic state is the
+confirmed store with the pending change lists applied in order, and the
+rebase undoes them newest-first.
+
+The state hash is kept incrementally: per table, the sum mod 2^256 of
+`sha256(table_name ‖ row_bytes)` over its rows, moved by one leaf in and
+one out per write; the state hash is `sha256(schema_hash ‖ digests in
+schema order)`. **The schema hash is in it**, so two stores are equal only
+when their bytes mean the same thing.
+
+Tables carry a **space**: `Durable` or `Volatile`. A volatile table is
+not journaled, not in snapshots, not in the state hash, and lives in the
+authority's memory. §1.9 is what it is for.
+
+### 1.4 One language
+
+The domain — every mutator, query, helper, guard, provider, scope and
+live transition — is one typed expression language. The relational
+subset is what a query is.
+
+```
+Expr = Lit(bytes)                     -- a value of the expression's type
+     | Var(sym) | Let(sym, Expr, Expr) | If | Match(Expr, [(variant, [sym], Expr)])
+     | Field(Expr, i) | Tuple([Expr]) | Variant(i, [Expr]) | List([Expr])
+     | Op(op, Expr, Expr) | Un(op, Expr)              -- checked arithmetic, comparison, bool
+     | Std(fn, [Expr])                                 -- the standard library, by name
+     | Call(FnHash, [Expr])                            -- a helper, by hash
+     | Ctx(field)                                      -- user, session, roles, now, device
+     | Lambda([sym], Expr)                             -- only as an operator's argument
+     | Scan(table) | Lookup(table, key: Expr)          -- Read
+     | Filter(Expr, Lambda) | Map(Expr, Lambda)
+     | Join(Expr, Expr, on: Lambda) | Group(Expr, by: Lambda, agg: Lambda)
+     | Sort(Expr, keys: Lambda, dirs) | Take(Expr, n)
+     | Insert(table, Expr) | Update(table, key: Expr, Lambda) | Delete(table, key: Expr)   -- Write
+     | Refuse(Expr)                                    -- the message
+     | Seq([Expr])
+```
+
+Every expression has a type and an **effect**, `Pure < Read < Write`.
+What v4 calls kinds are types and effect bounds:
+
+| v4 | v5 |
+|---|---|
+| mutator body (`Stmt`) | `(Ctx, Input) → [Change]`, effect `Write` |
+| query (`Plan`) | the relational subset, effect `Read`, result `List<T>` |
+| scope (`Pred`) | `(Ctx, Row<t>) → Bool`, effect `Pure` |
+| input `Check` | a refinement of the input type (§1.1) |
+| live transition | `(State, Input) → State`, effect `Pure` |
+| guard / provide / helper | ordinary functions with an effect bound |
+| router / middleware | a namespace prefix in the binding map; a call at the top of a body |
+
+**Effects are values.** A mutator evaluates to a list of changes; the
+interpreter does not mutate the store. The list is what the log keeps
+beside the intent, so "run it" and "record what it did" are one
+operation, and rebase re-evaluates pending intents and re-applies their
+lists. (A body that reads what it wrote earlier in the same body reads
+through its own list so far.)
+
+**Total by construction.** A function calls another only by `FnHash`,
+and a hash cannot contain itself, so the call graph is a DAG and every
+function terminates; the checker needs no termination rule. No runtime
+eval. Non-determinism enters at one door: `Ctx(now)` is drawn once at
+origin and frozen in the entry (§1.5). Arithmetic is checked and overflow
+is a refusal.
+
+**One checker** (types, effects, refinements by signature) and **one
+interpreter** replace v4's `verify.rs`, `eval.rs`, `view::pull`,
+`scope::admits`, `Eval.check` and the transition runner.
+
+**The IR is a value.** `Expr`, `Ty`, the schema and every frame are
+`Sum`s of `Tuple`s, so §1.1's codec encodes them, and `#[derive(Node)]`
+on their Rust definitions generates the `Ty` of each. There is no
+hand-written encoder, decoder, normaliser or hash walk for the IR.
+Alpha-normalisation is De Bruijn indices for `sym`, so a function's bytes
+do not depend on names.
+
+### 1.5 Functions by hash; a module is a binding map
+
+`FnHash = sha256(enc(function))`, where the function's encoding names the
+hashes of what it calls. Function bodies live in a **content store**
+keyed by hash. A module is:
+
+```
+Module { spec: Int, schema: Schema, types: [(name, Ty)], bindings: [(name, FnHash)] }
+ModuleHash = sha256(enc(Module))
+```
+
+Two modules binding the same names to the same hashes are the same
+module. "Did this authority run this function?" is "is it in the store."
+Retiring old versions is garbage collection by reachability from retained
+log entries. Compatibility between versions is §1.2's prefix check on the
+schema plus one `verify` per new hash. Sending a function a peer lacks is
+a store fetch. `ran`, `retire`, `check_retained`, `need_closures` and the
+monolithic module codec are gone as separate things.
+
+A binding's name is a path: `playlists.create`. That is what a router is.
+
+### 1.6 The log, chained
+
+```
+Entry { id: EntryId, actor, session, roles, fn: FnHash, input: bytes, now: Int }
+Logged { seq, entry, facts: [Change], state: StateHash, hash: EntryHash }
+EntryHash = sha256(prev.hash ‖ enc(seq, entry, facts, state))
+```
+
+Each logged entry carries the state hash after it and the hash of the
+chain to it. **The chain is the log's identity.** There is no `log_id`,
+no `verify` frame, no `agree`, no `unknown`, no gap check: a `hello` says
+`(cursor, EntryHash)`; the authority either has that hash at that
+sequence and pages from it, or does not and serves a snapshot. Divergence
+is detected per entry, for free, because the hash is already kept.
+
+**Deterministic ids.** `EntryId = sha256(session ‖ local_seq)[..16]`; a
+row id drawn inside an entry is `sha256(entry.id ‖ n)[..16]` for the
+`n`-th draw. The only frozen non-determinism is `now`. Dedupe is
+`(session, local_seq)`, which also detects a gap in a session's pushes.
+
+**Snapshots and the horizon.** A snapshot is `(seq, EntryHash, StateHash,
+rows in key order)`; the chain starts from one. Entries below the horizon
+are dropped; a `hello` below it is answered with the snapshot.
+
+**Confirmed entries apply by facts.** A replica runs code for its own
+pending intents (that is optimistic UI) and for nothing else: every
+confirmed entry arrives with its facts and is applied by them. So a
+replica needs the bodies of the functions it authors, and the authority
+needs the bodies of every function it sequences. The v4 inbox (an entry
+awaiting its facts), `Pending::Known` vs `Ran`, `need_closures` on
+receive, `held` on receive and the behind-on-intent path do not exist.
+`batch` always carries facts. The cost is bandwidth on a bulk mutator
+whose facts outweigh its intent; the chain still catches every
+divergence.
+
+### 1.7 One peer machine
+
+```rust
+struct Peer {
+    log: Log, store: Store, cas: Cas,
+    pending: Vec<(Entry, [Change])>,        // its own, previewed
+    role: Role, feed: Feed,
+}
+enum Role { Replica, Authority { journal: Journal } }   // "alone" = Authority with a local journal
+enum Feed { Whole, Scoped(FnHash) }                     // partial sync: the scope's function (§1.8)
+
+enum Input  { Frame(bytes), Mutate { fn, input, now }, Tick(now), Persisted(seq), Open(Durable) }
+enum Output { Send(bytes), Changes([Change]), Persist(bytes), Refused { id, why }, Confirmed(id) }
+
+impl Peer { fn step(&mut self, input: Input) -> Vec<Output>; }
+```
+
+Sans-io: no sockets, clocks or files inside. The server hub, the client,
+the simulator and the trace player are **drivers** that feed `step` and
+route `Output`. Rebase, sequencing, dedupe, judging, compaction, going
+alone, joining again, and partial feeds are in this one machine, once.
+
+**The rebase.** A confirmed entry arriving under pending intents: undo
+the pending lists newest-first (§1.3 inversion), apply the confirmed
+facts, re-evaluate the still-pending intents over the new store and
+record their new lists. The view is told what happened as changes like
+any other.
+
+**Authority stamps.** The authority writes the roles it judged an entry
+under into the entry before sequencing; a replay anywhere uses what the
+log says. The server half of a mutator and the authority's raw writes are
+entries the authority itself authors, through the same `Mutate` input;
+there is no second door.
+
+**Going alone and joining.** An `Authority { journal }` sequences its own
+intents; `join` hands its chain to a server, which adopts it by applying
+its facts (a chain whose facts disagree with its own run is refused, as
+v4's `FactsDiffer` is) and answers with the sequences it assigned; the
+peer rebases its chain onto them. Both are the machine's own transitions.
+
+### 1.8 Partial sync is a view
+
+A scope is a `Pure` function `(Ctx, Row<t>) → Bool`. "Serve this
+connection its union" is: keep a maintained view (§1.10) of
+`Filter(Scan(t), scope)` per table per connection over the authority's
+store, and send its patches as the facts of the entries that caused them.
+A partial replica is `Feed::Scoped` and, since §1.6, applies facts like
+every replica; its own intents are previewed over what it holds and
+confirmed by the authority's facts, a difference being the authority's
+answer and never a divergence. Whole replicas are the case where the
+view is everything. `scope.rs`, the `held`/`partial`/`upto` fields and
+the projection of facts are gone.
+
+### 1.9 Live state is a second machine over volatile tables
+
+Live state — presence, playback, who is listening — is tables marked
+`Volatile` (§1.3), a second `Peer` over them on the same socket, in the
+same frames with a `space` tag. A transition is a mutator over a table
+keyed by instance; an ephemeral per-device slot is a row keyed by
+`(instance, device)`; `on_join`/`on_leave` are entries the authority
+authors on connect and disconnect; `applied` is `batch`; `resync` is a
+`hello` with a hash the authority lacks, answered with a snapshot of the
+volatile space. Ephemeral calls are the volatile machine's pending
+intents, and relaying them at most every N ms, coalesced to the newest
+per transition, is a transport policy in the driver. `live/state.rs`,
+`ordering.rs`, `PerDevice`, `Ephemeral` and the live frames are gone.
+
+### 1.10 Views, incremental per operator
+
+A query is an expression in the relational subset. A maintained view
+keeps, per operator, what it needs to update itself from a change delta:
+
+| operator | keeps | on a delta |
+|---|---|---|
+| `Scan` | nothing | the table's changes, as is |
+| `Filter`, `Map` | nothing | apply the lambda to each change |
+| `Join` | an index on each side's join key | for a change on one side, probe the other |
+| `Group` | the members per key | recompute the affected group's aggregate |
+| `Sort`, `Take` | an ordered index; the window | reposition; refill the window from the index |
+| `Lookup` | the key it read | re-read when the looked-up row changes |
+
+Composition handles the tree. After each settle the view consumes the
+change lists from §1.7 and emits `Insert{at}` / `Remove{at}` /
+`Update{at}` against the list the UI holds. A rebase is changes like any
+other. The correctness contract — the answer equals a fresh evaluation,
+and the patches splice the old list into the new — is a test over every
+`views/` vector, and the work contract — a change costs the entries it
+hits — is measured (Part 3).
+
+### 1.11 The protocol
+
+Frames are one `Sum` type, encoded by §1.1, derived:
+
+```
+Client: Hello { space, cursor, hash: Option<EntryHash>, device? }
+        Push  { space, entry, body: Option<bytes> }      -- the body when the authority asked
+        Fetch { hashes }
+Server: Ack   { id, seq, facts: Option<[Change]> }       -- facts when they differ from the preview
+        Reject{ id, why } | Held { id, fn }              -- Held: send the body
+        Batch { space, from, logged: [Logged] }
+        Snapshot { space, seq, hash, state, rows }
+        Bodies { [(FnHash, bytes)] }
+```
+
+Two sans-io state machines, client and server, each a driver of a
+`Peer`. The server evaluates each connection's scopes at `Hello` and
+serves it its union (§1.8). Sign-in is as v4 (`ark-auth`): the server is
+the OpenID Connect client; a session is what `Hello` carries.
+
+### 1.12 Authoring
+
+Typed builders, as v4, with the hazards the v4 survey found fixed at
+their source — and **no macro over a function body**. The domain must
+become data (§1.4) because the phones interpret it, the log hashes it,
+the checker checks it and views see into it; how Rust becomes `Expr` is
+a choice, and a parser over function bodies is the riskiest way to make
+it. Every real v4 authoring hazard is on the struct side, and a struct
+derive is the serde pattern — small and well understood:
+
+| v4 hazard | v5 |
+|---|---|
+| fields bound by declaration position | `#[derive(Row)]`, `#[derive(Input)]` read names and offsets from the struct |
+| variants named by string | `#[derive(Sum)]`: `Sum::of(Paused{..})`, `.is::<Active>()` |
+| `guard::<I>` not tied to its transition | typestate: `transition::<I>` returns the builder its guard takes |
+| one `Query` type accepting every method | `Filtered<T> → Query<T> → Plan<T>` typestate |
+| `.nullable()` beside an `Opt` field | derived from the field's type |
+| a second, native execution path | none; the interpreter is the one path |
+
+Bodies are expressions over phantom-typed wrappers — `Expr<Bool>`,
+`Expr<Text>`, `Rows<Playlist>` — so `p.name.eq(5)` is a compile error
+with no macro involved, and control flow is `if_(c, a, b)` and
+`.on::<Variant>(|v| ..)`:
+
+```rust
+r.input::<CreatePlaylist>().mutation("playlists.create", |ctx, db, input| {
+    let dup = db.playlist.filter(|p| p.user_id.eq(ctx.user()) & p.name.eq(input.name)).first();
+    if_(dup.is_some(),
+        refuse("a playlist with this name exists"),
+        db.playlist.insert(Playlist::new(ctx.new_id(), ctx.user(), input.name, ctx.now())))
+})
+```
+
+If harken's port shows the `if_`/`.on` noise matters, an attribute macro
+that lowers `if`/`match`/`let` to these same builders can be added
+later as optional sugar; it would never be load-bearing.
+`spec5/AUTHORING.md` is the builder vocabulary.
+
+### 1.13 What leaves, and why nothing is lost
+
+| v4 | v5 | the feature it carried |
+|---|---|---|
+| `Value` enum, `Null`, `compare_value`, CBOR | bytes under types (§1.1) | canonical encoding, total order |
+| fourteen `Ty` variants, `conforms`, `TypeError` arms | five constructors + refinements | typed inputs, form validation |
+| `Stmt`/`Plan`/`Pred`/`Check`/transitions | one `Expr` with effects | mutators, queries, scopes, checks, live |
+| `verify.rs` (296 complaints), `eval.rs`, `view::pull`, `scope.rs` | one checker, one interpreter | the same |
+| encode/decode/normalize/hash walks | `#[derive(Node)]` | the wire form, the hash |
+| monolithic module, `ran`, `retire`, `check_retained` | bindings over a CAS | versioning by hash |
+| `log_id`, `verify`/`agree`, gap check, `adopt` | the chain | the log's identity, divergence |
+| `Auto::NewId`, frozen ids | deterministic ids | exact replay |
+| inbox, `Known`/`Ran`, `need_closures` on receive | facts-only confirmed | old clients never "update required" |
+| `Replica` + `Authority` + client `Peer` + `Hub` + sim state | one machine, drivers | rebase, authority as a role, alone |
+| `partial`/`through`, `held` frames, `scope` folding | a view per connection | partial sync |
+| `live/state.rs`, `ordering.rs`, live frames, `PerDevice` | a second machine over volatile tables | live state |
+| per-plan-shape maintenance | per-operator deltas | maintained views with patches |
+| positional builders, native path, agreement tests | derives + typed builders, one path | authoring |
+| `journal.rs` pages/merge, `persist.rs` rehome | the chain on disk | durability, alone |
+
+### 1.14 Risks, stated as risks
+
+- **`Sort`/`Take` under a limit and `Group` with ordered members** are
+  where v4's hand-casing earned its lines. V1 prototypes them first and
+  measures against v4's `views` paths before the rest of the engine is
+  built on them.
+- **Builders are noisier than syntax.** `if_` and `.on::<V>` instead of
+  `if` and `match`. harken's port is the test; a body macro stays an
+  option, never a dependency.
+- **Interpreting everything.** No native path for mutators. Part 3's
+  `perf_a` and harken's `perf_add_song` are the numbers; if a hot path is
+  more than 3× v4's, the plan is to make the interpreter faster (typed
+  bytes make a bytecode cheap), not to bring the native path back.
+- **Bandwidth of facts-only.** Measured by `perf_d` and `perf_e` bytes
+  per entry. harken's bulk mutator is `add_song`; its facts are its rows.
+- **The browser.** The iced web build runs the Rust store in wasm today;
+  nothing here needs anything wasm lacks. Not verified until D1.
+
+---
+
+## Part 2 — The work
+
+V5 is built **beside** v4, as new crates, so that v4 keeps compiling,
+its vectors keep passing, and Part 3 can run both. Nothing under
+`rust/ark`, `rust/ark-client`, `rust/ark-server` or `spec/vectors` is
+edited until R1. The crates:
+
+```
+rust/ark5/          the library: §1.1–§1.11, one crate, no dependencies but sha2
+rust/ark5-macros/   the derives: Node (L1), Row, Input, Sum (A1); nothing over bodies
+rust/ark5-dev/      the simulator, the trace player, the fuzzer, the vector writer (dev only)
+rust/ark5-server/   the hub, persistence, the web build, auth glue (thin; drivers)
+rust/ark5-client/   the client driver: link, storage, views for a UI (thin)
+harken/domain5/     harken's domain on §1.12
+spec5/              AUTHORING.md, README.md, RUNNERS.md and vectors/ for v5
+```
+
+All code is written by implementation agents; the coordinator writes this
+document, reviews, runs the checks, commits others' work where noted, and
+pushes. Each piece names what it owns; nobody edits outside their paths.
+The order is forced by APIs:
+
+```
+K1 ──► L1 ──► V1 ──► D1 ──► M1 ──► R1
+         └──► A1 ──┘
+```
+
+### Rules every agent keeps
+
+- **Git**: commit your own paths only — `git add -- <paths>` then
+  `git commit -m "…" -- <paths>` — and never push, reset, checkout,
+  stash, rebase or clean; other agents' uncommitted work shares the tree.
+  Retry on `index.lock`. Every commit message ends with exactly:
+
+      Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+      Claude-Session: https://claude.ai/code/session_01AE6tmNmaVTjG7EGfeLfKBG
+
+  No model names anywhere else; no personal names or emails anywhere.
+- **Build**: `cargo` from `/home/user/apps/rust` works directly;
+  `rust/target` is shared. Add new crates to `rust/Cargo.toml`'s members.
+  The disk is a fixed allowance: when it fills, delete stale test binaries
+  under `rust/target/debug/deps` (keep the newest per name) and say so.
+- **Size is a deliverable.** `tools/loc.sh` is the count. Every piece
+  reports its count when it lands, and a piece that comes in over its
+  budget says why before it lands.
+- **Falsify every new test once** by breaking what it checks, and say in
+  the test's doc comment what broke it.
+- **Say what is not verified.**
+- **Doc comments are the spec**: each module's comment says what it
+  defines and which §1 section it is, as v4's do; no prose elsewhere.
+- When this document does not answer a question, ask the coordinator with
+  a concrete proposal; the answer is added here.
+
+### K1 — the kernel: types, codec, store, chain, machine
+
+Owns: `rust/ark5/src/{lib.rs, ty.rs, codec.rs, hash.rs, schema.rs,
+store.rs, log.rs, peer.rs, frames.rs}`, `rust/ark5/tests/**`,
+`rust/ark5/Cargo.toml`, the member line in `rust/Cargo.toml`.
+
+Builds §1.1, §1.2, §1.3, §1.6, §1.7 (with `Feed::Whole` only) and §1.11
+(the frames, derived by hand for now — `#[derive(Node)]` is L1's; K1
+writes the `Ty` of each frame type once, in a table, and the derive
+replaces it). Functions are opaque to K1: `trait Procedure { fn run(&self,
+store: &dyn Read, ctx, input) -> Result<Vec<Change>, Refuse> }` and a
+`Cas` that maps `FnHash` to one; L1 supplies the interpreter as a
+`Procedure`.
+
+Held to:
+
+- **codec**: a property test that for every `Ty` the encoding is
+  canonical, prefix-free and order-preserving over generated values, and
+  that `parse` refuses every non-canonical byte string it generates
+  (unescaped `00`, a missing terminator, a variant index out of range).
+- **hash**: the v4 `hash/` vectors re-derived — the same demo rows, under
+  the same schema, now as tuples; the vector writer in K1's tests prints
+  them in `json.rs`'s dialect into `spec5/vectors/hash/`.
+- **rebase**: `three-peers` steps 1–4 and `fleet-seed-7`, re-derived,
+  with the demo's four mutators written by hand as `Procedure`s in
+  `rust/ark5/tests/demo.rs` (the interpreter replaces them in L1 and the
+  vectors must not move). `fleet-seed-7` needs the simulator's scheduler:
+  K1 ports `sim.rs`'s network (MMIX, duplicate one in eight, drop one in
+  sixteen) as a test support module under `rust/ark5/tests/support/`,
+  which D1 moves to `ark5-dev`.
+- Going alone, joining with a chain the server adopts, and a chain the
+  server refuses because its facts differ.
+
+Budget: **≤ 3,000** non-blank lines of `src/`. Not in K1: scopes, views,
+the language, live, persistence beyond `Output::Persist`.
+
+### L1 — the language: types with refinements, `Expr`, checker, interpreter, derive
+
+Owns: `rust/ark5/src/{ir.rs, check.rs, interp.rs, std.rs, module.rs}`,
+`rust/ark5-macros/src/derive.rs` (the `Node` derive only), `spec5/README.md`
+§1–§6, and the `Ty` table in `frames.rs` replaced by the derive.
+
+Builds §1.4, §1.5, the refinement half of §1.1 (`parse` with messages),
+and `#[derive(Node)]`. The interpreter is a `Procedure` (K1's trait).
+Standard library: v4's `stdlib.rs` names, with signatures stating the
+refinements they preserve; the Unicode tables come across unchanged
+(generated data, not counted against the budget).
+
+Held to: `eval/` and `verify/` vectors re-derived over the v5 demo —
+the demo's mutators now written in the IR by a small builder in
+`tests/`, and the K1 hand-written `Procedure`s deleted once the
+interpreter reproduces every `rebase` vector byte for byte (the vectors
+must not move). The form validator (`eval/form-check`, `eval/checks`) is
+`parse`. `DeBruijn` normalisation is pinned by a `module/` vector: two
+spellings, one hash.
+
+Budget: **≤ 2,200** (`ir` 300, `check` 600, `interp` 600, `std` 300,
+`module` 200, derive 200).
+
+### V1 — views
+
+Owns: `rust/ark5/src/view.rs`, `spec5/vectors/views/`, and in `peer.rs`
+the `Feed::Scoped` arm (§1.8), coordinated with D1.
+
+Builds §1.10 and §1.8. The operators are generic over the delta; the
+contract test runs every `views/` vector re-derived and asserts the
+answer equals a fresh `interp` evaluation after every settle, and that
+the patches splice. The work contract is a counting store (v4
+`tests/support/counting.rs` ported): a change costs reads proportional to
+the entries it hits, asserted on `playlist-with-items`, `top-two-by-pos`
+and `group-source`.
+
+Prototype first, before anything else in V1: `Sort`+`Take` with refill,
+and `Group` with a `Sort`ed aggregate, each against v4's `view.rs` on the
+same vector, timed. Report the ratio to the coordinator before building
+the rest.
+
+Budget: **≤ 1,300**.
+
+### A1 — authoring: derives and typed builders, harken's domain
+
+Owns: `rust/ark5/src/authoring/**`, `rust/ark5-macros/src/{row.rs,
+input.rs, sum.rs}` (struct and enum derives only; `derive.rs` is L1's),
+`harken/domain5/**`, `spec5/AUTHORING.md`.
+
+Builds §1.12. The derives read a struct's fields by name and offset and
+an enum's variants by declaration; the builders are phantom-typed
+wrappers that construct `Expr`. The vocabulary is a table in
+`AUTHORING.md`, and every row has a test that it emits the IR it says
+and, where a misuse is meant to be a compile error, a `trybuild` test
+that it is. harken's domain is ported function for function;
+`harken/domain/tests/{converge,read_model,views,listening}.rs` are
+ported as its tests, so the domain is held to what it was.
+
+Budget: authoring + derives **≤ 900**; `harken/domain5` reported, not
+budgeted (it is harken's, and its line count beside v4's 3,711 is the
+ergonomics result).
+
+### D1 — drivers: client, server, dev crate, the volatile space
+
+Owns: `rust/ark5-client/**`, `rust/ark5-server/**`, `rust/ark5-dev/**`,
+`spec5/RUNNERS.md`, `spec5/vectors/{protocol,trace,rebase}/` (the fleet
+and fuzz vectors move here from K1's tests), and in `peer.rs` the
+`space` arm (§1.9).
+
+Builds §1.9, §1.11's two machines, the journal (the chain on disk: append
+`Logged` bytes; on open, truncate at the first entry whose hash does not
+check; the snapshot file is rows in key order), the client's link with
+reconnect and the ephemeral relay policy, the hub over tokio with the
+in-process transport the perf tests use, persistence, the web build's
+needs, auth glue (`ark-auth` is reused as is), the simulator and trace
+player and fuzzer in `ark5-dev`. The fuzzer's convergence, replay and
+every-frame's-bytes checks are as v4's.
+
+Held to: the `trace` corpus re-derived (a client as a pure function of
+its inputs), `fleet-seed-7` through the real hub, the fuzzer finding
+nothing in 10,000 sessions, and the browser build drawn once in headless
+Chromium as v4's is.
+
+Budget: client **≤ 1,200**, server **≤ 1,200**, dev **≤ 1,500**.
+
+### M1 — measurement
+
+Owns: `rust/ark5/tests/perf.rs`, `rust/ark5-server/tests/perf.rs`,
+`harken/domain5/tests/perf.rs`, `docs/perf/**`, and Part 3's table in
+this document.
+
+Builds the harnesses Part 3 names, runs both versions, writes the
+numbers. Nothing else.
+
+### R1 — retirement
+
+After M1's numbers are in and the coordinator has decided: `rust/ark5*`
+becomes `rust/ark*`, `spec5` becomes `spec`, v4's crates and vectors are
+deleted, the flake and the READMEs are updated, `kotlin/FROZEN.md` and
+`swift/FROZEN.md` say what a port now carries. Not started in this plan;
+a later document.
+
+---
+
+## Part 3 — Measurement
+
+Every number is recorded under `docs/perf/` by the command that produced
+it, in release, on the same machine within the same hour, v4 and v5
+alternating. A claim in this document that is not under `docs/perf/` is
+not a result.
+
+### Size
+
+`tools/loc.sh`: non-blank, non-comment Rust lines, split into shipped
+source, binaries and tests, per crate. The v4 line is `docs/perf/loc-v4.txt`;
+the v5 line is `docs/perf/loc-v5.txt`. The comparison is **shipped source
+of the library** (`ark` vs `ark5` + `ark5-macros`), **shipped source
+all-in** (plus client, server, auth, and harken's domain), and tests,
+separately. Generated Unicode tables are excluded from both.
+
+### Speed
+
+The same shapes, the same sizes (four and sixteen times apart), the same
+columns (mean, first hundred, last hundred), reported per operation:
+
+| shape | v4 harness | what it measures |
+|---|---|---|
+| a | `ark/tests/perf.rs::perf_a_mutate_alone` | a local mutation, alone, pending depth growing |
+| d | `perf_d_initial_sync` | a client catching up from empty; bytes and time per entry |
+| e | `perf_e_rebase` | a confirmed entry under N pending; per entry and per page |
+| g | `perf_g_authority_and_fanout` | the authority sequencing and fanning out to C connections |
+| h | `perf_h_frames` | encode/decode of each frame; allocations |
+| i | `perf_i_partial_fanout` | the authority serving scoped connections |
+| b, c | `ark-server/tests/perf.rs` | a round trip through the hub; the pump alone; offline pending; storage |
+| harken | `harken/domain/tests/perf.rs` | `add_song`, `playlists`, `playlist_name`, rows examined, allocations |
+| views | new in both | a change against `playlist-with-items`, `top-two-by-pos`, `group-source` at 1k/4k/16k rows: time, entries touched |
+
+The v5 harnesses are written to print the same lines so the two outputs
+diff. Where v5 has no counterpart to a v4 shape (the inbox, the
+`verify` round trip), the line says `n/a` and why.
+
+### The report
+
+A table in this section, filled by M1:
+
+| | v4 | v5 | ratio |
+|---|---|---|---|
+| library source lines | | | |
+| all-in source lines | | | |
+| concepts a port carries | 5 sub-languages, 2 execution paths, lifecycle ×5 | 1 language, 1 path, 1 machine | |
+| a: local mutation µs | | | |
+| d: initial sync µs/entry, bytes/entry | | | |
+| e: rebase µs/entry at depth 400 | | | |
+| g: fan-out µs/conn | | | |
+| h: frame decode allocations | | | |
+| harken `add_song` µs | | | |
+| views: change on `playlist-with-items` at 16k | | | |
+
+## Landed
+
+(Filled in as pieces land, newest first.)

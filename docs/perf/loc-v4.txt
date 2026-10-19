@@ -1,0 +1,8 @@
+crate                 src     bins    tests    total
+ark-auth             1410        0      116     1526
+ark-client           4033        0     1307     5340
+ark-explorer         3201       16     1230     4447
+ark-server           2810        0     2242     5052
+ark                 27880     9758    10884    48522
+arkui                2949        0        0     2949
+domain               3711       10     3892     7613
