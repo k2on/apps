@@ -684,4 +684,21 @@ A table in this section, filled by M1:
 
 ## Landed
 
-(Filled in as pieces land, newest first.)
+**K1** (`1e739f4`…`72b93ac`): `rust/ark5` — 2,030 source lines against
+a budget of 3,000; 28 tests, each falsified once. Held to the `hash/`
+vectors re-derived (`spec5/vectors/hash/`), `three-peers` steps 1–4,
+`fleet-seed-7` through the ported scheduler plus 40 other seeds, and
+alone/join adopt-or-refuse. Decisions it took, now part of the design:
+`Input::Frame { from: Option<Who>, bytes }` (an authority judges by the
+connection's verified identity); `Output::Fanout` beside `Send`;
+lifecycle inputs `Connected`, `Alone`, `Join`, `Compact(seq)`; a `Join`
+frame carrying a chain; confirmation through `Batch` only, `Ack` carries
+no facts; `Entry.local` and `id == EntryId::of(session, local)`;
+`SchemaHash`; a column carries its declared type's name; `scan` takes
+`{index, lo, hi, dir, limit}` with "after" an exclusive bound; a
+snapshot is served at the head. Not verified: `Fetch`/`Bodies`
+untested; `Tick`/`Persisted` are no-ops; pending intents are not
+persisted (`Open` takes them); the volatile space is excluded from hash
+and snapshot but has no second machine yet; no performance measured.
+`Ty` is recursive and hand-encoded; L1's derive must handle recursion
+through `Named`.
