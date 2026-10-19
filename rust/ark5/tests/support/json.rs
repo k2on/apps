@@ -122,3 +122,54 @@ pub fn schema(s: &Schema) -> String {
         ])
     }))
 }
+
+pub fn hexed(b: &[u8]) -> String {
+    quoted(&hex(b))
+}
+
+/// A value of the language under its type: an int, text as itself, an id
+/// (`Id<…>`) as one, other bytes as `$bytes`, a list or a tuple as an
+/// array, a sum as `{"fields", "variant"}`.
+pub fn val(cx: &ark5::check::Types, t: &Ty, v: &ark5::interp::V) -> String {
+    use ark5::interp::V;
+    match (t, v) {
+        (Ty::Named(n), V::Bytes(b)) if n.starts_with("Id<") && b.len() == 16 => id(b),
+        (Ty::Named(n), V::Bytes(b)) if cx.decl(n).is_some_and(|d| cx.texty(d)) => quoted(&String::from_utf8_lossy(b)),
+        (Ty::Named(n), v) => val(cx, &cx.decl(n).unwrap().ty, v),
+        (_, V::Int(n)) => int(*n),
+        (_, V::Bytes(b)) => format!("{{\"$bytes\":\"{}\"}}", hex(b)),
+        (Ty::List(e), V::List(xs)) => array(xs.iter().map(|x| val(cx, e, x))),
+        (Ty::Tuple(ts), V::Tup(xs)) => array(ts.iter().zip(xs).map(|(t, x)| val(cx, t, x))),
+        (Ty::Sum(vs), V::Sum(i, xs)) => object(&[
+            ("fields", array(vs[*i as usize].iter().zip(xs).map(|(t, x)| val(cx, t, x)))),
+            ("variant", int(*i as i64)),
+        ]),
+        (t, v) => panic!("{v:?} is not a {t:?}"),
+    }
+}
+
+/// A store as the dialect writes one: tables by name in code-point order,
+/// rows in key order.
+pub fn store(sch: &Schema, s: &ark5::store::Store) -> String {
+    let mut tables: Vec<_> = sch.tables.iter().collect();
+    tables.sort_by(|a, b| a.name.cmp(&b.name));
+    let parts: Vec<(&str, String)> = tables.iter().map(|t| (&t.name[..], array(s.rows(&t.name).map(|r| row(t, r))))).collect();
+    object(&parts)
+}
+
+/// A change in the protocol's fact form.
+pub fn change(sch: &Schema, c: &ark5::store::Change) -> String {
+    use ark5::store::Change;
+    let t = sch.table(c.table()).unwrap().1;
+    let tag = |s: &str| quoted(s);
+    match c {
+        Change::Add { row: r, .. } => object(&[("row", row(t, r)), ("t", tag("add")), ("table", quoted(&t.name))]),
+        Change::Remove { row: r, .. } => object(&[("row", row(t, r)), ("t", tag("remove")), ("table", quoted(&t.name))]),
+        Change::Edit { old, new, .. } => object(&[
+            ("new", row(t, new)),
+            ("old", row(t, old)),
+            ("t", tag("edit")),
+            ("table", quoted(&t.name)),
+        ]),
+    }
+}

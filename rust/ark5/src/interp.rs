@@ -143,8 +143,10 @@ impl Reading<'_> {
             }
             Ty::Named(n) => {
                 let d = self.cx.decl(n).ok_or_else(|| Refusal(format!("{n} is not declared")))?;
+                let before = self.fails.len();
                 let v = self.val(&d.ty, r)?;
-                match self.refine {
+                // A value already refused underneath is not held to more.
+                match self.refine && self.fails.len() == before {
                     true => self.held(d, v)?,
                     false => v,
                 }
