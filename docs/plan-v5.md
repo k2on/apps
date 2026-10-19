@@ -684,6 +684,39 @@ A table in this section, filled by M1:
 
 ## Landed
 
+**A1** (`5053c19`…`62965d7`): the attribute macros (`rust/ark5-macros`:
+`lower`, `mutator`, `shape`, `query`, `scope`, `live`, `module!`) at
+1,164 source lines, plus a 678-line runtime `ark5::author` the generated
+code calls (a proc-macro crate exports nothing but macros, and resolving
+fields by name needs types in a normal crate): **1,842 against the
+budget of 1,500**, accepted — the runtime is the price of field names
+being rustc's to resolve, and nothing in it is a second execution
+path. The demo written with `#[ark::mutator]` hashes byte for byte as
+`tests/demo.rs` builds it. 22 lowering tests, one per row of
+`spec5/AUTHORING.md`'s subset; 33 `trybuild` compile-fail cases.
+`harken/domain5` is **2,583 source lines against v4's 3,711** (70%),
+every function through the checker, with `read_model`, `listening`,
+`views` and `converge` ported (144 tests across the three crates).
+Decisions now part of the design: an expression is an `Ex<T>` of its
+Rust type with refinements dropped, so a misspelt field or an unmatched
+variant is rustc's own error; each function expands to a `mod` with a
+cached `built()` and a typed `fn` other bodies call, lowering to
+`Call(hash)`; a helper or guard gets the least effect its body has;
+`Option<T>` is a named declaration; a one-field tuple struct is a
+refinement; `#[ark(key)]` marks key columns; `derive(Schema)` writes
+the `Sum` over tables a scope takes; live state is three volatile
+tables (`listening` by user, `listening_device` by (user, device),
+`listening_scrub` ephemeral), and a live function touching a durable
+table is refused at assembly. Not verified: the live transitions run on
+the interpreter over a store, not the volatile machine — four listening
+tests wait on D1 (`#[ignore]`, each saying so); `slug` cannot collapse a
+run of separators (v5 has no fold over neighbouring characters; one
+std function would fix it); the views tests churn by the domain's own
+mutations rather than v4's raw rows; `converge` uses a local copy of
+the simulator with per-client logins; two text indexes on `media` are
+not ported; a cycle of helpers panics at module build rather than at
+compile time.
+
 **V1** (`32ac411`, `3d09aa2`): `view.rs` (624) plus index routing in
 `interp.rs`, the `Feed::Scoped` arm in `peer.rs` and `Std::Sum`: 922
 net source lines against 1,300; 49 tests. Prototype ratios, release,
