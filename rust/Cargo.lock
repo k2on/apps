@@ -1678,6 +1678,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "harken-domain5"
+version = "0.1.0"
+dependencies = [
+ "ark5",
+]
+
+[[package]]
 name = "harken-iced"
 version = "0.1.0"
 dependencies = [

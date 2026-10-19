@@ -24,12 +24,14 @@ use std::collections::BTreeMap;
 use std::marker::PhantomData;
 use std::sync::{Arc, OnceLock};
 
-pub use ark5_macros::{guard, helper, live, module, mutator, query, scope, Input, Row, Schema, Sum};
+pub use ark5_macros::{guard, helper, live, module, mutator, query, scope, Input, Node, Row, Schema, Sum};
+
+pub use crate::ir::Node;
 
 use crate::check::Types;
 use crate::codec::{bytes_enc, int_enc, Reader};
 use crate::hash::FnHash;
-use crate::ir::{CtxField, Decl, Effect, Expr, Function, Node, Op, Refine, Rule, Std, Un};
+use crate::ir::{CtxField, Decl, Effect, Expr, Function, Op, Refine, Rule, Std, Un};
 use crate::module::{Lib, Module, SPEC};
 use crate::peer::Cas;
 use crate::schema::{Schema, Space};
@@ -84,6 +86,17 @@ impl<R> PartialEq for Id<R> {
         self.0 == o.0
     }
 }
+impl<R> Eq for Id<R> {}
+impl<R> PartialOrd for Id<R> {
+    fn partial_cmp(&self, o: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(o))
+    }
+}
+impl<R> Ord for Id<R> {
+    fn cmp(&self, o: &Self) -> std::cmp::Ordering {
+        self.0.cmp(&o.0)
+    }
+}
 impl<R> std::fmt::Debug for Id<R> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         f.write_str(&crate::hash::hex(&self.0))
@@ -98,6 +111,16 @@ impl<R> Node for Id<R> {
     }
     fn take(r: &mut Reader) -> Result<Self, Refusal> {
         r.fixed::<16>().map(Id::new)
+    }
+}
+
+impl Node for () {
+    fn ty() -> Ty {
+        Ty::unit()
+    }
+    fn put(&self, _: &mut Vec<u8>) {}
+    fn take(_: &mut Reader) -> Result<(), Refusal> {
+        Ok(())
     }
 }
 
@@ -133,12 +156,15 @@ impl<R: Row> Shape for Id<R> {
         format!("Id<{}>", R::TABLE)
     }
 }
+/// `Option<T>` is declared by its name, a name for its structure, so a
+/// column of it reads as one wherever a function names it.
 impl<T: Shape> Shape for Option<T> {
     type Base = Option<T::Base>;
     fn ty() -> Ty {
-        Ty::option(T::ty())
+        Ty::Named(Self::name())
     }
     fn decls(d: &mut Decls) {
+        d.insert(Self::name(), Decl { ty: Ty::option(T::ty()), refine: vec![] });
         T::decls(d)
     }
     fn name() -> String {
@@ -363,13 +389,13 @@ pub fn unit() -> Ex<()> {
 }
 
 pub fn some<T: Shape>(x: Ex<T>) -> Ex<Option<T>> {
-    note::<T>();
-    Ex::of(Expr::Variant(Ty::option(T::ty()), 1, vec![x.e]))
+    note::<Option<T>>();
+    Ex::of(Expr::Variant(Option::<T>::ty(), 1, vec![x.e]))
 }
 
 pub fn none<T: Shape>() -> Ex<Option<T>> {
-    note::<T>();
-    Ex::of(Expr::Variant(Ty::option(T::ty()), 0, vec![]))
+    note::<Option<T>>();
+    Ex::of(Expr::Variant(Option::<T>::ty(), 0, vec![]))
 }
 
 pub fn list<T: Shape>(xs: Vec<Ex<T>>) -> Ex<Vec<T>> {
@@ -421,9 +447,18 @@ pub fn seq<T>(first: Vec<Expr>, last: Ex<T>) -> Ex<T> {
     }
 }
 
-/// A statement's expression, its value dropped from the Rust type.
-pub fn stmt<T>(e: Ex<T>) -> Ex<()> {
-    Ex::of(e.e)
+/// A statement's expression, its value dropped: `()` as it is, anything
+/// else followed by `()`.
+pub fn stmt<T: Shape>(e: Ex<T>) -> Ex<()> {
+    match T::ty() == Ty::unit() {
+        true => Ex::of(e.e),
+        false => Ex::of(Expr::Seq(vec![e.e, Expr::Seq(vec![])])),
+    }
+}
+
+/// A refinement of an `Int`: the value `o` the bound.
+pub fn bound(o: Op, n: i64) -> Rule {
+    Rule::Refine(Expr::Op(o, Box::new(Expr::Var(0)), Box::new(int(n).e)))
 }
 
 /// One arm per variant in order: those written, by index, and `wild` for
@@ -675,6 +710,13 @@ impl<T: Shape> Ex<Vec<T>> {
     }
 }
 
+impl Ex<Vec<i64>> {
+    /// The total, judged once (`Std::Sum`).
+    pub fn sum(self) -> Ex<i64> {
+        std(Std::Sum, vec![self.e])
+    }
+}
+
 impl<T: Shape> Ex<Option<T>> {
     pub fn is_some(self) -> Ex<bool> {
         std(Std::IsSome, vec![self.e])
@@ -693,7 +735,7 @@ impl<T: Shape> Ex<Option<T>> {
         Ex::of(Expr::Match(b(self), vec![d.e, f(wit()).e]))
     }
     pub fn map<U: Shape>(self, f: impl FnOnce(Ex<T>) -> Ex<U>) -> Ex<Option<U>> {
-        let some = Expr::Variant(Ty::option(U::ty()), 1, vec![f(wit()).e]);
+        let some = some(f(wit())).e;
         self.map_or(none::<U>(), |_| Ex::of(some))
     }
     /// The value when the predicate holds of it.
@@ -728,12 +770,37 @@ impl Domain {
         c
     }
 
+    /// A function's answer over a store: its input parsed under its
+    /// parameters, its body's value — what a query is asked.
+    pub fn ask(&self, store: &dyn crate::store::Read, ctx: &crate::peer::Ctx, name: &str, input: &[u8]) -> Result<Vec<u8>, Refusal> {
+        let f = self.lib.get(&self.get(name)).expect("an installed function");
+        let ty = crate::interp::Interp::input_ty(&f.f);
+        let v = crate::interp::decode(&f.cx, &ty, crate::interp::parse(&f.cx, &ty, input)?.bytes())?;
+        let callee = |h: &FnHash| self.lib.get(h);
+        let mut m = crate::interp::Machine::new(store, ctx, &callee, &f.cx);
+        m.stack = match (v, f.f.params.len()) {
+            (crate::interp::V::Tup(vs), n) if n != 1 => vs,
+            (v, _) => vec![v],
+        };
+        Ok(m.eval(&f.f.body)?.to_bytes())
+    }
+
+    /// A mutator's changes over a store, as the kernel runs it.
+    pub fn run(&self, store: &dyn crate::store::Read, ctx: &crate::peer::Ctx, name: &str, input: &[u8]) -> Result<Vec<crate::store::Change>, Refusal> {
+        self.lib.procedure(&self.get(name)).expect("an installed function").run(store, ctx, input)
+    }
+
     fn install(&mut self, f: &Built) -> Result<FnHash, Refusal> {
         for c in &f.calls {
             self.install(c)?;
         }
         if f.kind == Kind::Live {
             let mut todo = vec![&f.f.body];
+            let mut fns: Vec<&Built> = f.calls.clone();
+            while let Some(c) = fns.pop() {
+                todo.push(&c.f.body);
+                fns.extend(c.calls.iter().copied());
+            }
             while let Some(e) = todo.pop() {
                 if let Expr::Scan(t) | Expr::Lookup(t, _) | Expr::Insert(t, _) | Expr::Update(t, ..) | Expr::Delete(t, _) = e {
                     if self.schema.table(t).is_some_and(|(_, t)| t.space != Space::Volatile) {

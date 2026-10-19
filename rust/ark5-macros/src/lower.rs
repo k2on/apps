@@ -49,7 +49,7 @@ pub struct Lower {
 const METHODS: &[&str] = &[
     "trim", "is_empty", "lower", "is_alnum", "chars", "len", "starts_with", "split_once", "fnv1a64", "utf8", "to_text", "min", "max",
     "clamp", "abs", "hex", "sha256", "text_of_id", "first", "last", "contains", "reverse", "concat", "insert", "remove_at", "move_at",
-    "slice", "take", "filter", "map", "join", "group", "sort", "is_some", "is_none", "unwrap", "unwrap_or", "map_or",
+    "slice", "take", "filter", "map", "join", "group", "sort", "is_some", "is_none", "unwrap", "unwrap_or", "map_or", "sum",
 ];
 
 fn rv(id: &impl std::fmt::Display) -> Ident {
@@ -414,7 +414,14 @@ impl Lower {
 
     /// `.sort(|r| key)`: a tuple of keys, each `Desc(k)` or `Asc(k)` or `k`.
     fn sort(&mut self, recv: TokenStream, c: &ExprClosure) -> syn::Result<TokenStream> {
-        let keys: Vec<&Expr> = match &*c.body {
+        let mut body = &*c.body;
+        while let Expr::Block(b) = body {
+            match &b.block.stmts[..] {
+                [Stmt::Expr(e, None)] => body = e,
+                _ => break,
+            }
+        }
+        let keys: Vec<&Expr> = match body {
             Expr::Tuple(t) => t.elems.iter().collect(),
             k => vec![k],
         };

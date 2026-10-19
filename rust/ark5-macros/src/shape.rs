@@ -51,6 +51,11 @@ fn ark(attrs: &[Attribute]) -> syn::Result<Vec<Ark>> {
                     }
                     l => return Err(syn::Error::new_spanned(l, "len is n or a range")),
                 }),
+                "min" | "max" | "ne" => {
+                    let n: syn::Expr = m.value()?.parse()?;
+                    let op = format_ident!("{}", match id.as_str() { "min" => "Ge", "max" => "Le", _ => "Ne" });
+                    out.push(Ark::Rule(quote!(::ark5::author::bound(::ark5::ir::Op::#op, #n)), None));
+                }
                 "why" => match out.last_mut() {
                     Some(Ark::Rule(_, why)) => *why = Some(m.value()?.parse::<syn::LitStr>()?.value()),
                     _ => return Err(m.error("why follows the rule it gives words to")),
