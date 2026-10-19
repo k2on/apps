@@ -23,8 +23,11 @@
 //! rows in key order)` and a log stands on one ([`Log::base`]); entries at
 //! or below it are dropped.
 
-use crate::codec::{put_bytes, put_int, put_list, put_variant, Reader};
+use ark5_macros::Node;
+
+use crate::codec::{put_bytes, put_int, Reader};
 use crate::hash::{sha256, EntryHash, FnHash, StateHash};
+use crate::ir::Node;
 use crate::store::Change;
 use crate::Refusal;
 
@@ -64,7 +67,7 @@ impl EntryId {
 /// An intent, as recorded. `actor` and `roles` are what the authority
 /// judged it under: it stamps them before sequencing (§1.7), and a replay
 /// anywhere reads what the log says.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Node)]
 pub struct Entry {
     pub id: EntryId,
     pub actor: String,
@@ -76,35 +79,15 @@ pub struct Entry {
     pub now: i64,
 }
 
-fn put_hash(out: &mut Vec<u8>, h: &[u8; 32]) {
-    put_bytes(out, h);
-}
-
 impl Entry {
     /// `(Bytes id, Bytes actor, Bytes session, Int local, List Bytes roles,
-    /// Bytes fn, Bytes input, Int now)`.
+    /// Bytes fn, Bytes input, Int now)`, derived.
     pub fn enc(&self, out: &mut Vec<u8>) {
-        put_bytes(out, &self.id.0);
-        put_bytes(out, self.actor.as_bytes());
-        put_bytes(out, self.session.as_bytes());
-        put_int(out, self.local);
-        put_list(out, &self.roles, |o, r| put_bytes(o, r.as_bytes()));
-        put_hash(out, &self.func.0);
-        put_bytes(out, &self.input);
-        put_int(out, self.now);
+        self.put(out);
     }
 
     pub fn dec(r: &mut Reader) -> Result<Entry, Refusal> {
-        Ok(Entry {
-            id: EntryId(r.fixed()?),
-            actor: r.text()?,
-            session: r.text()?,
-            local: r.int()?,
-            roles: r.list(|r| r.text())?,
-            func: FnHash(r.fixed()?),
-            input: r.bytes()?,
-            now: r.int()?,
-        })
+        Entry::take(r)
     }
 
     /// Whether the id is the one `(session, local)` names: an id is never
@@ -114,7 +97,7 @@ impl Entry {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Node)]
 pub struct Logged {
     pub seq: Seq,
     pub entry: Entry,
@@ -128,9 +111,9 @@ impl Logged {
     pub fn chain(prev: &EntryHash, seq: Seq, entry: &Entry, facts: &[Change], state: &StateHash) -> EntryHash {
         let mut b = vec![];
         put_int(&mut b, seq);
-        entry.enc(&mut b);
-        put_list(&mut b, facts, |o, c| c.enc(o));
-        put_hash(&mut b, &state.0);
+        entry.put(&mut b);
+        Change::put_list(facts, &mut b);
+        state.put(&mut b);
         EntryHash(sha256(&[&prev.0, &b]))
     }
 
@@ -139,29 +122,19 @@ impl Logged {
         self.hash == Logged::chain(prev, self.seq, &self.entry, &self.facts, &self.state)
     }
 
-    /// `(Int seq, Entry, List Change, Bytes state, Bytes hash)`.
+    /// `(Int seq, Entry, List Change, Bytes state, Bytes hash)`, derived.
     pub fn enc(&self, out: &mut Vec<u8>) {
-        put_int(out, self.seq);
-        self.entry.enc(out);
-        put_list(out, &self.facts, |o, c| c.enc(o));
-        put_hash(out, &self.state.0);
-        put_hash(out, &self.hash.0);
+        self.put(out);
     }
 
     pub fn dec(r: &mut Reader) -> Result<Logged, Refusal> {
-        Ok(Logged {
-            seq: r.int()?,
-            entry: Entry::dec(r)?,
-            facts: r.list(Change::dec)?,
-            state: StateHash(r.fixed()?),
-            hash: EntryHash(r.fixed()?),
-        })
+        Logged::take(r)
     }
 }
 
 /// The state at a sequence: the chain's hash and the state hash there, and
 /// the durable rows, table by table in schema order, each in key order.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Node)]
 pub struct Snapshot {
     pub seq: Seq,
     pub hash: EntryHash,
@@ -170,24 +143,14 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
-    /// `(Int seq, Bytes hash, Bytes state, List (Bytes table, List Bytes))`.
+    /// `(Int seq, Bytes hash, Bytes state, List (Bytes table, List
+    /// Bytes))`, derived.
     pub fn enc(&self, out: &mut Vec<u8>) {
-        put_int(out, self.seq);
-        put_hash(out, &self.hash.0);
-        put_hash(out, &self.state.0);
-        put_list(out, &self.rows, |o, (t, rs)| {
-            put_bytes(o, t.as_bytes());
-            put_list(o, rs, |o, r| put_bytes(o, r));
-        });
+        self.put(out);
     }
 
     pub fn dec(r: &mut Reader) -> Result<Snapshot, Refusal> {
-        Ok(Snapshot {
-            seq: r.int()?,
-            hash: EntryHash(r.fixed()?),
-            state: StateHash(r.fixed()?),
-            rows: r.list(|r| Ok((r.text()?, r.list(|r| r.bytes())?)))?,
-        })
+        Snapshot::take(r)
     }
 }
 
@@ -263,7 +226,7 @@ impl Log {
 
 /// What a peer makes durable, one record per `Persist` (§1.7): a logged
 /// entry appended to the chain, or a snapshot the chain now stands on.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Node)]
 pub enum Record {
     Logged(Logged),
     Snapshot(Snapshot),
@@ -271,28 +234,11 @@ pub enum Record {
 
 impl Record {
     pub fn enc(&self) -> Vec<u8> {
-        let mut out = vec![];
-        match self {
-            Record::Logged(l) => {
-                put_variant(&mut out, 0);
-                l.enc(&mut out);
-            }
-            Record::Snapshot(s) => {
-                put_variant(&mut out, 1);
-                s.enc(&mut out);
-            }
-        }
-        out
+        self.to_bytes()
     }
 
     pub fn dec(b: &[u8]) -> Result<Record, Refusal> {
-        let mut r = Reader::new(b);
-        let rec = match r.variant(2)? {
-            0 => Record::Logged(Logged::dec(&mut r)?),
-            _ => Record::Snapshot(Snapshot::dec(&mut r)?),
-        };
-        r.end()?;
-        Ok(rec)
+        Record::from_bytes(b)
     }
 }
 

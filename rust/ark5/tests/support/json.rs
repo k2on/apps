@@ -84,6 +84,7 @@ pub fn ty(t: &Ty) -> String {
         Ty::List(e) => object(&[("of", ty(e)), ("t", tag("list"))]),
         Ty::Tuple(ts) => object(&[("fields", array(ts.iter().map(ty))), ("t", tag("tuple"))]),
         Ty::Sum(vs) => object(&[("t", tag("sum")), ("variants", array(vs.iter().map(|v| array(v.iter().map(ty)))))]),
+        Ty::Named(n) => object(&[("name", quoted(n)), ("t", tag("named"))]),
     }
 }
 

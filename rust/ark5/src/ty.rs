@@ -7,23 +7,27 @@
 //! are the constructors below. A refinement (`where utf8`, `where len 16`)
 //! is a predicate on a structural type's values and is the language's
 //! (§1.4), checked at the boundary by `parse`; the kernel parses the
-//! structure only.
+//! structure only. `Named` is a declaration's name, which only the
+//! language resolves (`crate::check`); a recursive type recurs through one.
 
-use crate::codec::{put_list, put_variant};
+use ark5_macros::Node;
+
 use crate::hash::TypeHash;
+use crate::ir::Node;
 
 /// A type (§1.1): how to read a value's bytes.
 ///
 /// `Sum`'s variants are each a tuple of fields, so a variant with no
 /// payload is an empty one. A `Sum` has at most 256 variants: its index is
 /// one byte.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Node)]
 pub enum Ty {
     Int,
     Bytes,
     List(Box<Ty>),
     Tuple(Vec<Ty>),
     Sum(Vec<Vec<Ty>>),
+    Named(String),
 }
 
 impl Ty {
@@ -57,27 +61,10 @@ impl Ty {
         matches!(self, Ty::Sum(vs) if vs.len() == 2 && vs[0].is_empty() && vs[1].len() == 1)
     }
 
-    /// The type as a value of its own: `Sum [(), (), (Ty), (List Ty), (List
-    /// (List Ty))]` in declaration order. That type is recursive, which the
-    /// five constructors cannot say, so its encoding is written here by hand
-    /// (`docs/plan-v5.md` §1.4 leaves recursion to the derive).
+    /// The type as a value of its own: `Sum [(), (), (Ty), (List Ty),
+    /// (List (List Ty)), (Bytes)]`, `Ty` recurring by name (derived).
     pub fn enc(&self, out: &mut Vec<u8>) {
-        match self {
-            Ty::Int => put_variant(out, 0),
-            Ty::Bytes => put_variant(out, 1),
-            Ty::List(t) => {
-                put_variant(out, 2);
-                t.enc(out);
-            }
-            Ty::Tuple(ts) => {
-                put_variant(out, 3);
-                put_list(out, ts, |o, t| t.enc(o));
-            }
-            Ty::Sum(vs) => {
-                put_variant(out, 4);
-                put_list(out, vs, |o, v| put_list(o, v, |o, t| t.enc(o)));
-            }
-        }
+        self.put(out);
     }
 
     /// `sha256(enc(ty))`.

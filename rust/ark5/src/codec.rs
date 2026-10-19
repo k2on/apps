@@ -214,13 +214,14 @@ pub fn skip(ty: &Ty, r: &mut Reader) -> Result<(), Refusal> {
             let i = r.variant(vs.len())?;
             vs[i as usize].iter().try_for_each(|t| skip(t, r))
         }
+        Ty::Named(n) => Err(Refusal(format!("{n}: a declared type, which the language reads"))),
     }
 }
 
 /// Bytes [`parse`] accepted: canonical bytes of the type it was given. The
 /// field is private, so one that was not checked cannot be made.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Typed(Vec<u8>);
+pub struct Typed(pub(crate) Vec<u8>);
 
 impl Typed {
     pub fn bytes(&self) -> &[u8] {

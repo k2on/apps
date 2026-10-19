@@ -22,13 +22,16 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Bound;
 use std::sync::Arc;
 
-use crate::codec::{bytes_enc, put_bytes, put_variant, skip, Reader};
+use ark5_macros::Node;
+
+use crate::codec::{bytes_enc, skip, Reader};
 use crate::hash::{add256, sha256, sub256, SchemaHash, StateHash};
+use crate::ir::Node;
 use crate::schema::{Schema, Space, Table};
 use crate::Refusal;
 
 /// One write, as the store reports it and the log keeps it (a fact).
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Node)]
 pub enum Change {
     Add { table: String, row: Vec<u8> },
     Remove { table: String, row: Vec<u8> },
@@ -52,39 +55,17 @@ impl Change {
     }
 
     /// `Sum [(table, row), (table, row), (table, old, new)]`, rows as
-    /// `Bytes` so a change reads without its schema.
+    /// `Bytes` so a change reads without its schema (derived).
     pub fn enc(&self, out: &mut Vec<u8>) {
-        match self {
-            Change::Add { table, row } | Change::Remove { table, row } => {
-                put_variant(out, matches!(self, Change::Remove { .. }) as u8);
-                put_bytes(out, table.as_bytes());
-                put_bytes(out, row);
-            }
-            Change::Edit { table, old, new } => {
-                put_variant(out, 2);
-                put_bytes(out, table.as_bytes());
-                put_bytes(out, old);
-                put_bytes(out, new);
-            }
-        }
+        self.put(out);
     }
 
     pub fn dec(r: &mut Reader) -> Result<Change, Refusal> {
-        let v = r.variant(3)?;
-        let (table, row) = (r.text()?, r.bytes()?);
-        Ok(match v {
-            0 => Change::Add { table, row },
-            1 => Change::Remove { table, row },
-            _ => Change::Edit {
-                table,
-                old: row,
-                new: r.bytes()?,
-            },
-        })
+        Change::take(r)
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Node)]
 pub enum Dir {
     Asc,
     Desc,

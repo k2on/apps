@@ -7,3 +7,4 @@ description = "The ArkDB v5 kernel: bytes under types, the store, the chained lo
 
 [dependencies]
 sha2 = { workspace = true }
+ark5-macros = { path = "../ark5-macros" }

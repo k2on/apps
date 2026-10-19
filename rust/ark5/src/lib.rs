@@ -8,20 +8,31 @@
 //! replica or authority (§1.7, [`peer`]); and the frames (§1.11,
 //! [`frames`]).
 //!
-//! Functions are opaque here: a [`peer::Procedure`] stands for one, found
-//! by its [`hash::FnHash`] in a [`peer::Cas`]. The language that writes
-//! them (§1.4) is another layer's.
+//! The kernel runs a function as a [`peer::Procedure`], found by its
+//! [`hash::FnHash`] in a [`peer::Cas`]. The language is the rest (§1.4,
+//! §1.5): the IR and every type as a value ([`ir`], `#[derive(Node)]`),
+//! one checker ([`check`]), one interpreter, which is a `Procedure`, and
+//! the boundary's `parse` ([`interp`]), the standard library ([`std`]) and
+//! modules as binding maps over the content store ([`module`]).
 
-use std::fmt;
+use ::std::fmt;
 
+extern crate self as ark5;
+
+pub mod check;
 pub mod codec;
 pub mod frames;
 pub mod hash;
+pub mod interp;
+pub mod ir;
 pub mod log;
+pub mod module;
 pub mod peer;
 pub mod schema;
+pub mod std;
 pub mod store;
 pub mod ty;
+pub mod unicode_tables;
 
 /// Why something was not done, as a sentence: a parse that failed, a write
 /// a constraint refused, an intent its function refused. What a form shows

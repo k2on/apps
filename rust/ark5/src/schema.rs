@@ -17,12 +17,15 @@
 //! A table is [`Space::Durable`] or [`Space::Volatile`] (§1.3, §1.9): a
 //! volatile table is not in snapshots and not in the state hash.
 
-use crate::codec::{put_bytes, put_int, put_list, put_option, put_variant, skip, Reader};
+use ark5_macros::Node;
+
+use crate::codec::{skip, Reader};
 use crate::hash::SchemaHash;
+use crate::ir::Node;
 use crate::ty::Ty;
 use crate::Refusal;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Node)]
 pub enum Space {
     Durable,
     Volatile,
@@ -32,7 +35,7 @@ pub enum Space {
 /// `Text`, `Int`: what the type section calls it, and what a human form
 /// prints by), that type's structure, and the value a row written before
 /// the column existed takes.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Node)]
 pub struct Column {
     pub name: String,
     pub decl: String,
@@ -42,7 +45,7 @@ pub struct Column {
 
 /// Columns by position; a unique index refuses a second row with the same
 /// values in them.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Node)]
 pub struct Index {
     pub columns: Vec<usize>,
     pub unique: bool,
@@ -51,13 +54,13 @@ pub struct Index {
 /// A reference: the column's value names a row of `table` by its key (an
 /// `Option` column only when it is `Some`). Judged at every write of the
 /// referring row.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Node)]
 pub struct Ref {
     pub column: usize,
     pub table: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Node)]
 pub struct Table {
     pub name: String,
     pub columns: Vec<Column>,
@@ -68,7 +71,7 @@ pub struct Table {
     pub space: Space,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Node)]
 pub struct Schema {
     pub tables: Vec<Table>,
 }
@@ -78,29 +81,11 @@ impl Schema {
         self.tables.iter().enumerate().find(|(_, t)| t.name == name)
     }
 
-    /// The schema as a value: `List (name, List (name, decl, Ty,
+    /// The schema as a value: `(List (name, List (name, decl, Ty,
     /// Option<Bytes>), key, List (List Int, Bool), List (Int, name),
-    /// Space)`. Hand-written until the derive (§1.4) writes it.
+    /// Space))`, derived.
     pub fn enc(&self, out: &mut Vec<u8>) {
-        put_list(out, &self.tables, |o, t| {
-            put_bytes(o, t.name.as_bytes());
-            put_list(o, &t.columns, |o, c| {
-                put_bytes(o, c.name.as_bytes());
-                put_bytes(o, c.decl.as_bytes());
-                c.ty.enc(o);
-                put_option(o, c.default.as_ref(), |o, d| put_bytes(o, d));
-            });
-            put_int(o, t.key as i64);
-            put_list(o, &t.indexes, |o, i| {
-                put_list(o, &i.columns, |o, c| put_int(o, *c as i64));
-                put_variant(o, i.unique as u8);
-            });
-            put_list(o, &t.refs, |o, r| {
-                put_int(o, r.column as i64);
-                put_bytes(o, r.table.as_bytes());
-            });
-            put_variant(o, t.space as u8);
-        });
+        self.put(out);
     }
 
     pub fn hash(&self) -> SchemaHash {

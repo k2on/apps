@@ -62,6 +62,7 @@ pub fn val(r: &mut Rng, t: &Ty) -> Val {
             let i = r.below(vs.len() as u64) as usize;
             Val::Sum(i as u8, vs[i].iter().map(|t| val(r, t)).collect())
         }
+        Ty::Named(_) => unreachable!("the generator makes structural types"),
     }
 }
 
@@ -94,5 +95,6 @@ pub fn dec(t: &Ty, r: &mut Reader) -> Result<Val, Refusal> {
             let i = r.variant(vs.len())?;
             Val::Sum(i, vs[i as usize].iter().map(|t| dec(t, r)).collect::<Result<_, _>>()?)
         }
+        Ty::Named(n) => return Err(Refusal(format!("{n}: not structural"))),
     })
 }

@@ -200,7 +200,17 @@ dependencies = [
 name = "ark5"
 version = "0.1.0"
 dependencies = [
+ "ark5-macros",
  "sha2",
+]
+
+[[package]]
+name = "ark5-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
