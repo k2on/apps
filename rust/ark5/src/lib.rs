@@ -16,6 +16,8 @@ use std::fmt;
 
 pub mod codec;
 pub mod hash;
+pub mod schema;
+pub mod store;
 pub mod ty;
 
 /// Why something was not done, as a sentence: a parse that failed, a write
