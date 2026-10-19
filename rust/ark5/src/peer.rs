@@ -56,8 +56,11 @@
 //! and turns back into a replica, the chain its pending intents: a server
 //! still at the fork adopts the chain whole when its own run of every
 //! entry gives the entry's facts, and refuses every entry of it when one
-//! does not; a server that moved on sequences them anew as pushes, and the
-//! peer rebases onto what it answers.
+//! does not; a server that moved on sequences them anew as pushes, a gap
+//! in the chain's `local`s being one the device refused itself, and the
+//! peer rebases onto what it answers. Until the server has answered any of
+//! the chain, a new connection hands it over again rather than pushing its
+//! entries one by one, which a gap would hold.
 //!
 //! **Live state is a second machine** (§1.9): a peer [`Peer::in_space`]
 //! `Volatile` is this machine over the volatile tables, sharing the
@@ -69,7 +72,8 @@
 //! `Mutate`, as the driver sees connections come and go. `resync` is a
 //! `Hello` with a hash the authority lacks, answered with a snapshot. A
 //! volatile authority forgets on restart what each session last pushed, so
-//! there a push past a gap is taken: what came before it is gone.
+//! there a push past a gap is taken, and one that comes after it is
+//! refused as overtaken: what was live then is gone.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -169,6 +173,11 @@ impl Cas {
 
     pub fn body(&self, h: &FnHash) -> Option<&Vec<u8>> {
         self.bodies.get(h)
+    }
+
+    /// Every body it holds, in hash order.
+    pub fn bodies(&self) -> impl Iterator<Item = &Vec<u8>> {
+        self.bodies.values()
     }
 }
 
@@ -306,6 +315,9 @@ pub struct Peer {
     pub served: BTreeMap<String, Served>,
     /// What this device says it is, in every `Hello` (§1.9).
     pub device: Option<Vec<u8>>,
+    /// The chain a join handed over, until the server has answered any of
+    /// it: a connection made before then hands it over again.
+    pub joining: Option<(Seq, EntryHash, Vec<Logged>)>,
 }
 
 fn empty_snapshot(store: &Store) -> Snapshot {
@@ -334,6 +346,7 @@ impl Peer {
             asked: None,
             served: BTreeMap::new(),
             device: None,
+            joining: None,
         }
     }
 
@@ -465,8 +478,12 @@ impl Peer {
         };
         let id = entry.id;
         if self.is_authority() {
-            self.local = local;
-            return self.decide(entry, o);
+            // One it refuses draws no `local`: a chain made alone has no gaps.
+            self.decide(entry, o);
+            if let Some(Output::Confirmed(_)) = o.out.last() {
+                self.local = local;
+            }
+            return;
         }
         match self.attempt(&entry, o) {
             Err(why) => o.out.push(Output::Refused { id, why: why.0 }),
@@ -722,6 +739,24 @@ impl Peer {
         }
         // A gap: the ones before it come first, pushed again after a Hello.
         let last = j.last.get(&entry.session).copied().unwrap_or(0);
+        // At or below the last and judged by no verdict here: in the log's
+        // space, sequenced below the horizon by a log opened since (a
+        // refusal's verdict is journaled); in the volatile, overtaken.
+        if entry.local <= last {
+            return o.send(match space {
+                Space::Durable => Frame::Ack {
+                    space,
+                    id,
+                    seq: self.log.base.seq,
+                    facts: None,
+                },
+                Space::Volatile => Frame::Reject {
+                    space,
+                    id,
+                    why: "overtaken by a later one of its session".into(),
+                },
+            });
+        }
         if entry.local != last + 1 && !(space == Space::Volatile && entry.local > last) {
             return;
         }
@@ -747,7 +782,13 @@ impl Peer {
     fn adopt(&mut self, who: &Who, at: (Seq, EntryHash), chain: Vec<Logged>, o: &mut Out) {
         let fresh = !chain.iter().any(|l| self.journal().verdicts.contains_key(&l.entry.id));
         if !fresh || self.log.head() != at {
+            // A chain is its session's whole history above the fork: a gap
+            // in it is an intent the device refused itself, never to come.
             for l in chain {
+                let last = self.journal().last.entry(l.entry.session.clone()).or_insert(0);
+                if l.entry.session == who.session && l.entry.local > *last + 1 {
+                    *last = l.entry.local - 1;
+                }
                 self.push(who, l.entry, None, o);
             }
             return;
@@ -901,7 +942,22 @@ impl Peer {
         }
         self.asked = None;
         self.ask(o);
-        self.repush(o);
+        match self.joining.take() {
+            Some(j) if self.pending.first().map(|p| p.entry.id) == j.2.first().map(|l| l.entry.id) => {
+                let (from, hash, logged) = j.clone();
+                let all = self.pending.clone();
+                self.pending.retain(|p| !logged.iter().any(|l| l.entry.id == p.entry.id));
+                o.send(Frame::Join {
+                    space: self.space,
+                    from,
+                    hash,
+                    logged,
+                });
+                self.repush(o);
+                (self.pending, self.joining) = (all, Some(j));
+            }
+            _ => self.repush(o),
+        }
     }
 
     fn alone(&mut self, o: &mut Out) {
@@ -942,6 +998,7 @@ impl Peer {
             hash: Some(hash),
             device: self.device.clone(),
         });
+        self.joining = Some((at, hash, chain.clone()));
         o.send(Frame::Join {
             space: self.space,
             from: at,

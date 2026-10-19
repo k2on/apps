@@ -169,3 +169,21 @@ fn a_restarted_authority_resyncs_and_takes_the_gap() {
     live.step(down(&f[0]));
     assert!(live.pending.is_empty() && live.store == fresh.store);
 }
+
+/// A volatile push that comes after a later one of its session was taken
+/// is refused as overtaken, and its replica lets it go. Falsified by
+/// `push` without the rule: nothing answered it and it stayed pending.
+#[test]
+fn a_volatile_push_overtaken_is_refused() {
+    let (mut server, mut live) = (authority(), peer(Role::Replica, "alice", Space::Volatile));
+    let first = live.step(waving("phone"));
+    let second = live.step(waving("laptop"));
+    for o in [&second, &first] {
+        let (s, f) = deliver_up(&mut server, &who("alice"), o);
+        for frame in s.iter().chain(&f) {
+            live.step(down(frame));
+        }
+    }
+    assert!(live.pending.is_empty(), "both answered");
+    assert_eq!(server.log.head().0, 1, "only the later one taken");
+}

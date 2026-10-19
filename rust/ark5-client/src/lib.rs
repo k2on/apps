@@ -32,11 +32,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use ark5::frames::Frame;
-use ark5::hash::FnHash;
+use ark5::hash::{EntryHash, FnHash};
 use ark5::ir::Node;
-use ark5::log::{Durable, Entry, EntryId};
+use ark5::log::{Durable, Entry, EntryId, Logged, Seq};
 use ark5::module::Lib;
-use ark5::peer::{Cas, Ctx, Input, Output, Peer, Role, Who};
+use ark5::peer::{Cas, Ctx, Input, Journal, Output, Peer, Role, Who};
 use ark5::schema::{Schema, Space};
 use ark5::store::Change;
 use ark5::view::{Patch, View};
@@ -69,12 +69,42 @@ pub struct Live {
     pub every_ms: i64,
 }
 
-/// One input to one machine, or the login it authors as changing.
+/// What a joined peer hands over again until the server answers it.
+pub type Joining = (Seq, EntryHash, Vec<Logged>);
+
+/// One input to one machine; or both machines opened afresh as a login,
+/// as at [`Client::open`] — the log's alone from its fork when it was
+/// alone, handing its chain over again when it had joined unanswered; or a
+/// sign-in: the log's machine authoring as the login from its first
+/// `local`, the live one afresh.
 #[derive(Clone, Debug)]
 pub enum Act {
+    Open(Who, Option<(Seq, EntryHash)>, Option<Joining>),
+    SignIn(Who),
     Step(Space, Input),
-    Who(Space, Who),
 }
+
+/// Where a machine stands after a step: its head, its state, its pending
+/// intents — what a trace holds a replay to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct At {
+    pub head: (ark5::log::Seq, ark5::hash::EntryHash),
+    pub state: ark5::hash::StateHash,
+    pub pending: Vec<EntryId>,
+}
+
+impl At {
+    pub fn of(p: &Peer) -> At {
+        At {
+            head: p.log.head(),
+            state: p.store.state_hash(),
+            pending: p.pending.iter().map(|x| x.entry.id).collect(),
+        }
+    }
+}
+
+/// One recorded act, what it said, and where its machine stood after.
+pub type Recorded = (Act, Vec<Output>, Option<At>);
 
 /// What a UI is told.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -111,7 +141,7 @@ pub struct Client {
     pub disk: Box<dyn Disk>,
     pub linked: bool,
     /// Every input given, when recording.
-    pub record: Option<Vec<(Act, Vec<Output>)>>,
+    pub record: Option<Vec<Recorded>>,
     /// The last write the disk refused.
     pub disk_error: Option<String>,
     views: Vec<Watch>,
@@ -120,6 +150,14 @@ pub struct Client {
     frames: Vec<Vec<u8>>,
     events: Vec<Event>,
     saved: (i64, Vec<EntryId>),
+    joined: bool,
+}
+
+/// The role of a device alone since `fork`.
+pub fn alone_at(fork: Option<(Seq, EntryHash)>) -> Role {
+    Role::Authority {
+        journal: Journal { fork, ..Journal::default() },
+    }
 }
 
 fn fresh(m: &Module, me: &Who, space: Space) -> Peer {
@@ -128,8 +166,26 @@ fn fresh(m: &Module, me: &Who, space: Space) -> Peer {
 
 impl Client {
     /// A client opened as `me` from what `disk` holds.
-    pub fn open(config: Config, me: Who, mut disk: Box<dyn Disk>, record: bool) -> Client {
+    pub fn open(config: Config, me: Who, disk: Box<dyn Disk>, record: bool) -> Client {
+        Client::opened(config, me, disk, record.then(Vec::new))
+    }
+
+    fn opened(config: Config, me: Who, mut disk: Box<dyn Disk>, mut record: Option<Vec<Recorded>>) -> Client {
+        let fork = disk.get("fork").ok().flatten().and_then(|b| <(Seq, EntryHash)>::from_bytes(&b).ok());
+        let joining = disk
+            .get("joining")
+            .ok()
+            .flatten()
+            .and_then(|b| <((Seq, EntryHash), Vec<Logged>)>::from_bytes(&b).ok());
+        let joining = joining.map(|((n, h), c)| (n, h, c));
+        if let Some(r) = &mut record {
+            r.push((Act::Open(me.clone(), fork, joining.clone()), vec![], None));
+        }
         let mut log = fresh(&config.log, &me, Space::Durable);
+        if fork.is_some() {
+            log.role = alone_at(fork);
+        }
+        log.joining = joining;
         let live = config.live.as_ref().map(|l| {
             let mut p = fresh(&l.module, &me, Space::Volatile);
             p.device = l.device.clone();
@@ -154,7 +210,7 @@ impl Client {
             live,
             disk,
             linked: false,
-            record: record.then(Vec::new),
+            record,
             disk_error: error,
             views: vec![],
             relay: BTreeMap::new(),
@@ -162,7 +218,9 @@ impl Client {
             frames: vec![],
             events: vec![],
             saved: (0, vec![]),
+            joined: false,
         };
+        c.joined = c.log.joining.is_some();
         c.step(Space::Durable, Input::Open(durable));
         c
     }
@@ -170,7 +228,7 @@ impl Client {
     /// This client stopped and opened again from its disk, unlinked.
     pub fn reopen(self) -> Client {
         let me = self.log.me.clone();
-        Client::open(self.config, me, self.disk, self.record.is_some())
+        Client::opened(self.config, me, self.disk, self.record)
     }
 
     pub fn peer(&self, space: Space) -> Option<&Peer> {
@@ -204,15 +262,19 @@ impl Client {
                 _ => {}
             }
         }
-        if let (Some(r), Some(i)) = (&mut self.record, rec) {
-            r.push((Act::Step(space, i), out));
+        if let Some(i) = rec {
+            let at = At::of(self.peer(space).expect("a machine that spoke"));
+            self.record.as_mut().expect("recording").push((Act::Step(space, i), out, Some(at)));
+        }
+        if space == Space::Durable && self.log.joining.is_some() != self.joined {
+            self.joined = self.log.joining.is_some();
+            let b = self.log.joining.clone().map_or(vec![], |(n, h, c)| ((n, h), c).to_bytes());
+            self.blob("joining", &b);
         }
         let now = (self.log.local, self.log.pending.iter().map(|p| p.entry.id).collect());
         if space == Space::Durable && now != self.saved {
             let entries: Vec<Entry> = self.log.pending.iter().map(|p| p.entry.clone()).collect();
-            if let Err(e) = self.disk.put("pending", &(self.log.local, entries).to_bytes()) {
-                self.disk_error = Some(e.to_string());
-            }
+            self.blob("pending", &(self.log.local, entries).to_bytes());
             self.saved = now;
         }
     }
@@ -284,12 +346,27 @@ impl Client {
         self.step(space, Input::Frame { from: None, bytes });
     }
 
+    /// Alone, its fork kept on its disk so that a reopen is alone still.
     pub fn alone(&mut self) {
         self.step(Space::Durable, Input::Alone);
+        if let Role::Authority {
+            journal: Journal { fork: Some(f), .. },
+        } = &self.log.role
+        {
+            let b = f.to_bytes();
+            self.blob("fork", &b);
+        }
     }
 
     pub fn join(&mut self) {
         self.step(Space::Durable, Input::Join);
+        self.blob("fork", &[]);
+    }
+
+    fn blob(&mut self, name: &str, b: &[u8]) {
+        if let Err(e) = self.disk.put(name, b) {
+            self.disk_error = Some(e.to_string());
+        }
     }
 
     /// Another login: every pending intent authored again under it, from
@@ -306,10 +383,8 @@ impl Client {
                 who.roles.clone(),
             );
         }
-        for space in [Space::Durable, Space::Volatile] {
-            if let Some(r) = &mut self.record {
-                r.push((Act::Who(space, who.clone()), vec![]));
-            }
+        if let Some(r) = &mut self.record {
+            r.push((Act::SignIn(who.clone()), vec![], None));
         }
         self.log.me = who.clone();
         self.log.local = 0;

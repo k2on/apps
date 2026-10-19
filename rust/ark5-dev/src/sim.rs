@@ -189,8 +189,10 @@ impl Net {
                 self.partition(i);
                 self.views.retain(|k, _| k.0 != i);
                 let c = self.clients.remove(&i).unwrap().reopen();
+                if !c.log.is_authority() {
+                    self.alone.remove(&i);
+                }
                 self.clients.insert(i, c);
-                self.alone.remove(&i);
                 self.heal(i);
             }
             Op::SignIn(i, w) => {
@@ -383,8 +385,9 @@ impl Net {
         Err("the fleet did not settle in 1,000 rounds".into())
     }
 
-    /// One chain, one state, nothing pending, on every whole client, in
-    /// each space.
+    /// One head, one state, nothing pending, and one chain where both hold
+    /// it (a horizon moves a log's base), on every whole client, in each
+    /// space.
     pub fn converged(&self) -> Result<(), String> {
         for (i, c) in &self.clients {
             let pairs = [(Some(&c.log), Some(&self.hub.log)), (c.live.as_ref(), self.hub.live.as_ref())];
@@ -393,7 +396,9 @@ impl Net {
                 if p.feed != ark5::peer::Feed::Whole {
                     continue;
                 }
-                if p.log != a.log || p.store != a.store || !p.pending.is_empty() {
+                let from = p.log.base.seq.max(a.log.base.seq);
+                let chain = p.log.head().0 < from || p.log.after(from) == a.log.after(from);
+                if p.log.head() != a.log.head() || !chain || p.store != a.store || !p.pending.is_empty() {
                     return Err(format!(
                         "client {i} {space:?} at {:?} with {} pending; the server at {:?}",
                         p.log.head(),

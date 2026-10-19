@@ -24,9 +24,10 @@
 //! (`live`), and `on_restore` is authored over it.
 //!
 //! **The journal** beside the log keeps what the log cannot: each session's
-//! last `local` and the intents refused, so that after a restart a push
-//! past a refusal is not taken for a gap and a refused intent pushed again
-//! is answered again. **The horizon** moves as `keep` says: the log keeps
+//! last `local` and the intents refused, written when either a refusal or
+//! the horizon moves, so that after a restart a push past a refusal is not
+//! taken for a gap, a refused intent pushed again is answered again, and
+//! one sequenced below the horizon is acknowledged there. **The horizon** moves as `keep` says: the log keeps
 //! that many entries above its snapshot.
 
 use std::collections::BTreeMap;
@@ -107,7 +108,8 @@ pub struct Hub {
     held: Vec<Deliver>,
     /// The disk's last refusal, while it lasts.
     pub failure: Option<String>,
-    refused: usize,
+    /// The refusals and the horizon the journal was last written at.
+    refused: (usize, i64),
 }
 
 fn ix(s: Space) -> usize {
@@ -173,7 +175,7 @@ impl Hub {
             unwritten: vec![],
             held: vec![],
             failure: None,
-            refused: 0,
+            refused: (0, 0),
         };
         let kept = hub.disk.get("live").ok().flatten().and_then(|b| Snapshot::from_bytes(&b).ok());
         if let (Some(snapshot), Some(live)) = (kept, &mut hub.live) {
@@ -337,13 +339,15 @@ impl Hub {
                 _ => {}
             }
         }
+        self.horizon(space);
         let refused = journal(&mut self.log)
             .verdicts
             .values()
             .filter(|v| matches!(v, Verdict::Refused(_)))
             .count();
-        if space == Space::Durable && refused != self.refused {
-            self.refused = refused;
+        let mark = (refused, self.log.log.base.seq);
+        if space == Space::Durable && mark != self.refused {
+            self.refused = mark;
             let j = journal(&mut self.log);
             let last: Vec<(String, i64)> = j.last.clone().into_iter().collect();
             let why = |v: &Verdict| match v {
@@ -355,7 +359,6 @@ impl Hub {
                 self.failure = Some(e.to_string());
             }
         }
-        self.horizon(space);
         said
     }
 
