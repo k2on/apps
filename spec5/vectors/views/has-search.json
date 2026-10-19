@@ -1,0 +1,18 @@
+{
+  "query": "has-search",
+  "function_hash": "6683f981b148b24526270515249f6f6a5211243e782f9ffef30c18eaf562754b",
+  "function_bytes": "0001055465787400000002030100010554657874000000011215110f747261636b00000e80000000000000010b1f010b08010b030105018000000000000000800000000000000100010b03010180000000000000010000000e80000000000000010601050180000000000000008000000000000003010501800000000000000080000000000000000001000100000e800000000000000106010501800000000000000080000000000000030105018000000000000000800000000000000100",
+  "schema": [{"columns":[{"decl":"Text","default":null,"name":"name","ty":{"t":"bytes"}},{"decl":"Int","default":null,"name":"born","ty":{"t":"int"}}],"indexes":[],"key":{"$int":"1"},"name":"person","refs":[],"space":"durable"},{"columns":[{"decl":"Text","default":null,"name":"id","ty":{"t":"bytes"}},{"decl":"Text","default":null,"name":"title","ty":{"t":"bytes"}},{"decl":"Text","default":null,"name":"creator","ty":{"t":"bytes"}},{"decl":"Int","default":null,"name":"pos","ty":{"t":"int"}}],"indexes":[{"columns":["creator","pos"],"unique":false}],"key":{"$int":"1"},"name":"track","refs":[],"space":"durable"}],
+  "input": "ari",
+  "ctx": {"session":"dev","user":"alice"},
+  "store_before": {"person":[["Bach",{"$int":"1685"}],["Gould",{"$int":"1932"}],["Handel",{"$int":"1685"}]],"track":[["t1","Aria","Gould",{"$int":"3"}],["t2","Variation 1","Gould",{"$int":"7"}],["t3","Variation 2","Gould",{"$int":"7"}],["t4","Air","Bach",{"$int":"1"}],["t5","Ariadne","Handel",{"$int":"2"}]]},
+  "rows_before": [[{"$int":"2"},"Ariadne"],[{"$int":"3"},"Aria"],[{"$int":"7"},"Variation 1"],[{"$int":"7"},"Variation 2"]],
+  "batches": [[{"row":["t6","ARIA da capo","Gould",{"$int":"9"}],"t":"add","table":"track"}],[{"row":["t6","ARIA da capo","Gould",{"$int":"9"}],"t":"remove","table":"track"}],[{"row":["t2","Variation 1","Gould",{"$int":"7"}],"t":"remove","table":"track"}],[{"new":["t3","Sarabande","Gould",{"$int":"2"}],"old":["t3","Variation 2","Gould",{"$int":"7"}],"t":"edit","table":"track"}],[{"new":["t4","Fair aria","Bach",{"$int":"12"}],"old":["t4","Air","Bach",{"$int":"1"}],"t":"edit","table":"track"}],[{"row":["Nobody",{"$int":"2000"}],"t":"add","table":"person"}],[{"row":["t9","Passing aria","Gould",{"$int":"20"}],"t":"add","table":"track"},{"row":["t9","Passing aria","Gould",{"$int":"20"}],"t":"remove","table":"track"}]],
+  "steps": [{"patches":[{"at":{"$int":"4"},"node":[{"$int":"9"},"ARIA da capo"],"t":"insert"}],"rows":[[{"$int":"2"},"Ariadne"],[{"$int":"3"},"Aria"],[{"$int":"7"},"Variation 1"],[{"$int":"7"},"Variation 2"],[{"$int":"9"},"ARIA da capo"]]}
+,{"patches":[{"at":{"$int":"4"},"t":"remove"}],"rows":[[{"$int":"2"},"Ariadne"],[{"$int":"3"},"Aria"],[{"$int":"7"},"Variation 1"],[{"$int":"7"},"Variation 2"]]}
+,{"patches":[{"at":{"$int":"2"},"t":"remove"}],"rows":[[{"$int":"2"},"Ariadne"],[{"$int":"3"},"Aria"],[{"$int":"7"},"Variation 2"]]}
+,{"patches":[{"at":{"$int":"2"},"t":"remove"}],"rows":[[{"$int":"2"},"Ariadne"],[{"$int":"3"},"Aria"]]}
+,{"patches":[{"at":{"$int":"2"},"node":[{"$int":"12"},"Fair aria"],"t":"insert"}],"rows":[[{"$int":"2"},"Ariadne"],[{"$int":"3"},"Aria"],[{"$int":"12"},"Fair aria"]]}
+,{"patches":[],"rows":[[{"$int":"2"},"Ariadne"],[{"$int":"3"},"Aria"],[{"$int":"12"},"Fair aria"]]}
+,{"patches":[],"rows":[[{"$int":"2"},"Ariadne"],[{"$int":"3"},"Aria"],[{"$int":"12"},"Fair aria"]]}]
+}

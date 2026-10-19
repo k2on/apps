@@ -35,6 +35,21 @@
 //! function is `Held` until its body comes — stamps it with the actor and
 //! roles it judged it under, runs it, and logs it with its facts.
 //!
+//! **Partial sync is a view** (§1.8). A connection the driver says is fed
+//! by a scope (`Input::Feed`) is served its union: the rows a `Pure`
+//! function of a row — `Sum` over the schema's tables in order, each
+//! variant that table's row — holds, under the connection's identity. At
+//! its `Hello` the authority takes the union from its store and sends it as
+//! a snapshot at the head; every entry after is sent to it alone
+//! (`Output::To`) with the facts the scope's filter makes of the entry's
+//! ([`crate::view::scoped`]), the union's state hash after them, and a
+//! chain of its own from that snapshot. `Fanout` is for connections fed
+//! whole. The replica is the same machine: it applies facts like every
+//! replica, its own intents previewed over what it holds and confirmed by
+//! the authority's facts, a difference being the authority's answer. A
+//! union must hold the rows its rows reference; a `Hello` from a
+//! connection whose union does not is answered with nothing.
+//!
 //! **Going alone and joining.** `Alone` makes a replica an authority over
 //! its own log from where it is (the fork), sequencing its pending intents
 //! and every one after. `Join` hands the chain above the fork to a server
@@ -89,6 +104,12 @@ impl Ctx {
 /// A function, opaque to the kernel: its changes, or its refusal.
 pub trait Procedure: Send + Sync {
     fn run(&self, store: &dyn Read, ctx: &Ctx, input: &[u8]) -> Result<Vec<Change>, Refusal>;
+
+    /// A scope's verdict on its input, a row as its table's variant
+    /// (§1.8): whether the union holds it. Only a `Pure` function gives one.
+    fn holds(&self, _ctx: &Ctx, _input: &[u8]) -> Result<bool, Refusal> {
+        Err(Refusal::new("not a scope"))
+    }
 }
 
 /// What turns a function's bytes into something that runs: the language's.
@@ -176,16 +197,35 @@ pub enum Role {
     Authority { journal: Journal },
 }
 
-/// What a replica is fed. `Scoped` (§1.8) is the views' to add.
+/// What a replica is fed: every entry whole, or a scope's union (§1.8),
+/// the scope by hash.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Feed {
     Whole,
+    Scoped(FnHash),
+}
+
+/// A connection an authority serves by a scope: who it is, the scope, the
+/// union it holds, and the head of the chain it was sent.
+#[derive(Clone, Debug)]
+pub struct Served {
+    pub who: Who,
+    pub scope: FnHash,
+    pub union: Store,
+    pub head: Option<(Seq, EntryHash)>,
 }
 
 #[derive(Clone, Debug)]
 pub enum Input {
-    Frame { from: Option<Who>, bytes: Vec<u8> },
-    Mutate { func: FnHash, input: Vec<u8>, now: i64 },
+    Frame {
+        from: Option<Who>,
+        bytes: Vec<u8>,
+    },
+    Mutate {
+        func: FnHash,
+        input: Vec<u8>,
+        now: i64,
+    },
     Tick(i64),
     Persisted(Seq),
     Open(Durable),
@@ -193,15 +233,28 @@ pub enum Input {
     Alone,
     Join,
     Compact(Seq),
+    /// How the connection verified as `who` is fed (an authority's).
+    Feed {
+        who: Who,
+        feed: Feed,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Output {
     Send(Vec<u8>),
     Fanout(Vec<u8>),
+    /// A frame for one connection fed by a scope, by its session.
+    To {
+        session: String,
+        bytes: Vec<u8>,
+    },
     Changes(Vec<Change>),
     Persist(Vec<u8>),
-    Refused { id: EntryId, why: String },
+    Refused {
+        id: EntryId,
+        why: String,
+    },
     Confirmed(EntryId),
 }
 
@@ -237,6 +290,8 @@ pub struct Peer {
     pub diverged: Vec<Seq>,
     /// The cursor a `Hello` is outstanding at.
     asked: Option<Seq>,
+    /// An authority's connections fed by a scope, by session.
+    pub served: BTreeMap<String, Served>,
 }
 
 fn empty_snapshot(store: &Store) -> Snapshot {
@@ -263,6 +318,7 @@ impl Peer {
             local: 0,
             diverged: vec![],
             asked: None,
+            served: BTreeMap::new(),
         }
     }
 
@@ -297,6 +353,19 @@ impl Peer {
             Input::Alone => self.alone(&mut o),
             Input::Join => self.join(&mut o),
             Input::Compact(n) => self.compact(n, &mut o),
+            Input::Feed { who, feed } => match feed {
+                Feed::Whole => drop(self.served.remove(&who.session)),
+                Feed::Scoped(scope) => {
+                    let union = Store::new(self.store.schema_arc().clone());
+                    let s = Served {
+                        who: who.clone(),
+                        scope,
+                        union,
+                        head: None,
+                    };
+                    self.served.insert(who.session, s);
+                }
+            },
         }
         if !o.told.is_empty() {
             o.out.insert(0, Output::Changes(o.told));
@@ -410,6 +479,7 @@ impl Peer {
                     }
                     .enc(),
                 ));
+                self.feed_scoped(&l, o);
                 Ok(l.seq)
             }
         };
@@ -429,7 +499,9 @@ impl Peer {
         if space.is_some_and(|s| s != self.space) {
             return;
         }
+        let scoped = from.as_ref().filter(|w| self.served.contains_key(&w.session)).map(|w| w.session.clone());
         match (f, self.is_authority(), from) {
+            (Frame::Hello { cursor, hash, .. }, true, _) if scoped.is_some() => self.serve_scoped(&scoped.unwrap(), cursor, hash, o),
             (Frame::Hello { cursor, hash, .. }, true, _) => self.serve(cursor, hash, o),
             (Frame::Push { entry, body, .. }, true, Some(who)) => self.push(&who, entry, body, o),
             (Frame::Join { from, hash, logged, .. }, true, Some(who)) => self.adopt(&who, (from, hash), logged, o),
@@ -490,6 +562,99 @@ impl Peer {
                 from: page[0].seq - 1,
                 logged: page.to_vec(),
             });
+        }
+    }
+
+    /// A scope's verdict on a row of `table`, for the connection it serves.
+    fn holder(&self, session: &str) -> impl FnMut(&str, &[u8]) -> Result<bool, Refusal> {
+        let s = &self.served[session];
+        let ctx = Ctx {
+            id: EntryId::default(),
+            actor: s.who.actor.clone(),
+            session: s.who.session.clone(),
+            roles: s.who.roles.clone(),
+            now: 0,
+        };
+        let (scope, schema) = (self.cas.get(&s.scope).cloned(), self.store.schema_arc().clone());
+        move |table, row| {
+            let scope = scope.as_ref().ok_or_else(|| Refusal::new("no such scope"))?;
+            let i = schema.table(table).ok_or_else(|| Refusal(format!("no table {table}")))?.0;
+            scope.holds(&ctx, &[&[i as u8][..], row].concat())
+        }
+    }
+
+    /// A `Hello` from a connection fed by a scope: nothing when it stands at
+    /// the head of what it was sent, and otherwise its union, afresh, as a
+    /// snapshot at the head.
+    fn serve_scoped(&mut self, session: &str, cursor: Seq, hash: Option<EntryHash>, o: &mut Out) {
+        let head = self.log.head();
+        if self.served[session].head == Some(head) && hash == Some(head.1) && cursor == head.0 {
+            return;
+        }
+        let mut holds = self.holder(session);
+        let mut rows = vec![];
+        for (t, rs) in self.store.snapshot_rows() {
+            let mut held = vec![];
+            for r in rs {
+                match holds(&t, &r) {
+                    Ok(true) => held.push(r),
+                    Ok(false) => {}
+                    Err(_) => return,
+                }
+            }
+            rows.push((t, held));
+        }
+        let Ok(union) = Store::from_rows(self.store.schema_arc().clone(), &rows) else {
+            return;
+        };
+        let (seq, hash) = head;
+        let snapshot = Snapshot {
+            seq,
+            hash,
+            state: union.state_hash(),
+            rows: union.snapshot_rows(),
+        };
+        let s = self.served.get_mut(session).unwrap();
+        (s.union, s.head) = (union, Some(head));
+        let bytes = Frame::Snapshot { space: self.space, snapshot }.enc();
+        o.out.push(Output::To {
+            session: session.into(),
+            bytes,
+        });
+    }
+
+    /// A logged entry to every connection fed by a scope that stands just
+    /// below it: its facts through the scope, the union's state after them,
+    /// chained from what the connection was sent.
+    fn feed_scoped(&mut self, l: &Logged, o: &mut Out) {
+        let sessions: Vec<String> = self.served.keys().cloned().collect();
+        for session in sessions {
+            let Some((at, prev)) = self.served[&session].head.filter(|h| h.0 + 1 == l.seq) else {
+                continue;
+            };
+            let facts = crate::view::scoped(&l.facts, &mut self.holder(&session));
+            let s = self.served.get_mut(&session).unwrap();
+            let Some(facts) = facts.ok().filter(|fs| s.union.apply_all(fs).is_ok()) else {
+                s.head = None;
+                continue;
+            };
+            let state = s.union.state_hash();
+            let hash = Logged::chain(&prev, l.seq, &l.entry, &facts, &state);
+            s.head = Some((l.seq, hash));
+            let logged = vec![Logged {
+                seq: l.seq,
+                entry: l.entry.clone(),
+                facts,
+                state,
+                hash,
+            }];
+            let bytes = Frame::Batch {
+                space: self.space,
+                from: at,
+                logged,
+            }
+            .enc();
+            o.out.push(Output::To { session, bytes });
         }
     }
 

@@ -367,6 +367,11 @@ impl<'a> Machine<'a> {
     }
 
     pub fn eval(&mut self, e: &Expr) -> Result<V, Refusal> {
+        if let Expr::Filter(..) | Expr::Sort(..) | Expr::Take(..) = e {
+            if let Some(xs) = self.routed(e)? {
+                return Ok(V::List(xs));
+            }
+        }
         let unit = V::Tup(vec![]);
         Ok(match e {
             Expr::Lit(t, b) => decode(self.cx, t, b)?,
@@ -559,6 +564,219 @@ impl<'a> Machine<'a> {
     }
 }
 
+// * Routing: a read through the store's indexes
+
+/// Every sub-expression of `e`, with how many binders it is under counted
+/// from `e`: `None` inside a `Match` arm, whose binders only the type
+/// knows.
+pub fn walk(e: &Expr, d: Option<u32>, f: &mut dyn FnMut(&Expr, Option<u32>)) {
+    f(e, d);
+    let mut go = |x: &Expr, n: u32| walk(x, d.map(|d| d + n), f);
+    match e {
+        Expr::Let(a, b) => {
+            go(a, 0);
+            go(b, 1);
+        }
+        Expr::Match(x, arms) => {
+            go(x, 0);
+            arms.iter().for_each(|a| walk(a, None, f));
+        }
+        Expr::Lambda(n, b) => go(b, *n),
+        Expr::If(a, b, c) | Expr::Join(a, b, c) | Expr::Group(a, b, c) => [a, b, c].into_iter().for_each(|x| go(x, 0)),
+        Expr::Op(_, a, b) | Expr::Filter(a, b) | Expr::Map(a, b) | Expr::Sort(a, b, _) | Expr::Take(a, b) | Expr::Update(_, a, b) => {
+            go(a, 0);
+            go(b, 0);
+        }
+        Expr::Field(a, _) | Expr::Un(_, a) | Expr::Lookup(_, a) | Expr::Insert(_, a) | Expr::Delete(_, a) | Expr::Refuse(a) => go(a, 0),
+        Expr::Tuple(es) | Expr::Variant(_, _, es) | Expr::List(_, es) | Expr::Std(_, es) | Expr::Call(_, es) | Expr::Seq(es) => {
+            es.iter().for_each(|x| go(x, 0))
+        }
+        Expr::Lit(..) | Expr::Var(_) | Expr::Ctx(_) | Expr::Scan(_) => {}
+    }
+}
+
+/// The variables free in `e`, as indices from outside it; `None` for one
+/// a `Match` arm may or may not bind.
+pub fn free(e: &Expr) -> Vec<Option<u32>> {
+    let mut out = vec![];
+    walk(e, Some(0), &mut |x, d| match (x, d) {
+        (Expr::Var(i), Some(d)) if *i >= d => out.push(Some(i - d)),
+        (Expr::Var(_), None) => out.push(None),
+        _ => {}
+    });
+    out
+}
+
+/// Whether `e` reads or writes, draws an id, or calls (which may).
+pub fn effectful(e: &Expr) -> bool {
+    let mut any = false;
+    walk(e, Some(0), &mut |x, _| {
+        any |= matches!(
+            x,
+            Expr::Scan(_)
+                | Expr::Lookup(..)
+                | Expr::Call(..)
+                | Expr::Ctx(CtxField::NewId(_))
+                | Expr::Insert(..)
+                | Expr::Update(..)
+                | Expr::Delete(..)
+        )
+    });
+    any
+}
+
+/// A row's column, `Field(Var(0), c)`.
+fn column(e: &Expr) -> Option<usize> {
+    match e {
+        Expr::Field(x, c) if **x == Expr::Var(0) => Some(*c as usize),
+        _ => None,
+    }
+}
+
+impl<'a> Machine<'a> {
+    /// A filter's conjuncts `row.c == e`, `e` not of the row and safe to
+    /// evaluate once, as `(c, bytes of e)`; and whether any conjunct is
+    /// something else. One that refuses is left to the filter, which
+    /// refuses only when a row asks it.
+    fn equalities(&mut self, lam: &Expr) -> (Vec<(usize, Vec<u8>)>, bool) {
+        let Expr::Lambda(1, body) = lam else { return (vec![], true) };
+        let (mut todo, mut eqs, mut rest) = (vec![&**body], vec![], false);
+        while let Some(c) = todo.pop() {
+            let eq = match c {
+                Expr::Op(Op::And, a, b) => {
+                    todo.extend([&**b, &**a]);
+                    continue;
+                }
+                Expr::Op(Op::Eq, a, b) => [(a, b), (b, a)].into_iter().find_map(|(a, b)| {
+                    let ok = !effectful(b) && free(b).iter().all(|v| v.is_some_and(|v| v > 0));
+                    column(a).filter(|_| ok).map(|c| (c, &**b))
+                }),
+                _ => None,
+            };
+            let Some((col, x)) = eq.filter(|(c, _)| !eqs.iter().any(|(d, _)| d == c)) else {
+                rest = true;
+                continue;
+            };
+            self.stack.push(V::Tup(vec![]));
+            let v = self.eval(x);
+            self.stack.pop();
+            match v {
+                Ok(v) => eqs.push((col, v.to_bytes())),
+                Err(_) => rest = true,
+            }
+        }
+        (eqs, rest)
+    }
+
+    /// `Filter(Scan t)`, `Scan t`, a `Sort` of one by its columns, or a
+    /// `Take` of a literal of those, read through the key or an index:
+    /// the longest run of the filter's equalities that leads one, in the
+    /// sort's order when that path gives exactly the stable sort's (ties
+    /// impossible past the sorted columns, or broken by the key as the
+    /// stable sort breaks them), a `Take`'s count pushed to the store when
+    /// the equalities are the whole filter. `None` when nothing serves, or
+    /// this run wrote the table, which it reads through its own changes.
+    fn routed(&mut self, e: &Expr) -> Result<Option<Vec<V>>, Refusal> {
+        let (e, limit) = match e {
+            Expr::Take(l, n) => match &**n {
+                Expr::Lit(Ty::Int, b) => (&**l, decode(self.cx, &Ty::Int, b)?.int().max(0) as usize),
+                _ => return Ok(None),
+            },
+            e => (e, usize::MAX),
+        };
+        let (src, sort) = match e {
+            Expr::Sort(l, k, dirs) => (&**l, Some((&**k, dirs))),
+            e => (e, None),
+        };
+        let (table, lam) = match src {
+            Expr::Scan(t) => (t, None),
+            Expr::Filter(l, p) => match &**l {
+                Expr::Scan(t) => (t, Some(&**p)),
+                _ => return Ok(None),
+            },
+            _ => return Ok(None),
+        };
+        if self.store.is_none() || self.changes.iter().any(|c| c.table() == table) {
+            return Ok(None);
+        }
+        let (eqs, rest) = lam.map_or((vec![], false), |p| self.equalities(p));
+        let order: Option<Vec<(usize, Dir)>> = match sort {
+            None => None,
+            Some((Expr::Lambda(1, k), dirs)) => {
+                let cols: Option<Vec<usize>> = match &**k {
+                    Expr::Tuple(ks) if dirs.len() != 1 => ks.iter().map(column).collect(),
+                    k => column(k).map(|c| vec![c]),
+                };
+                match cols {
+                    Some(cs) if cs.len() == dirs.len() => Some(cs.into_iter().zip(dirs.iter().copied()).collect()),
+                    _ => return Ok(None),
+                }
+            }
+            Some(_) => return Ok(None),
+        };
+        let store: &'a dyn Read = self.store();
+        let tab = store.schema().table(table).ok_or_else(|| Refusal(format!("no table {table}")))?.1;
+        let fixed = |c: &usize| eqs.iter().any(|(d, _)| d == c);
+        let key: Vec<usize> = (0..tab.key).collect();
+        let loose: Vec<usize> = key.iter().copied().filter(|c| !fixed(c)).collect();
+        let mut paths = vec![(None, key.clone(), tab.key)];
+        for (i, ix) in tab.indexes.iter().enumerate() {
+            let n = if ix.unique { ix.columns.len() } else { usize::MAX };
+            paths.push((Some(i), [&ix.columns[..], &key[..]].concat(), n));
+        }
+        let uniques: Vec<Vec<usize>> = paths.iter().filter(|p| p.2 != usize::MAX).map(|p| p.1[..p.2].to_vec()).collect();
+        // The lead, the index, the prefix, the direction, whether in order.
+        type Path = (usize, Option<usize>, Vec<u8>, Dir, bool);
+        let mut best: Option<Path> = None;
+        for (index, cols, _) in &paths {
+            let lead = cols.iter().take_while(|c| fixed(c)).count();
+            let rest_cols: Vec<usize> = cols[lead..].iter().copied().filter(|c| !fixed(c)).collect();
+            let (dir, sorted) = match &order {
+                None => (Dir::Asc, index.is_none()),
+                Some(o) => {
+                    let o: Vec<(usize, Dir)> = o.iter().copied().filter(|(c, _)| !fixed(c)).collect();
+                    let unique = |n: usize| uniques.iter().any(|u| u.iter().all(|c| fixed(c) || o[..n].iter().any(|(d, _)| d == c)));
+                    let n = (0..=o.len()).find(|n| unique(*n)).unwrap_or(o.len());
+                    let dir = o.first().map_or(Dir::Asc, |x| x.1);
+                    let served = o[..n].iter().all(|x| x.1 == dir)
+                        && rest_cols.starts_with(&o[..n].iter().map(|x| x.0).collect::<Vec<_>>())
+                        && (unique(n) || (dir == Dir::Asc && rest_cols[n..].starts_with(&loose)));
+                    if !served {
+                        continue;
+                    }
+                    (dir, true)
+                }
+            };
+            if lead == 0 && order.is_none() || best.as_ref().is_some_and(|b| b.0 >= lead) {
+                continue;
+            }
+            let prefix = cols[..lead]
+                .iter()
+                .flat_map(|c| eqs.iter().find(|(d, _)| d == c).unwrap().1.clone())
+                .collect();
+            best = Some((lead, *index, prefix, dir, sorted));
+        }
+        let Some((_, index, prefix, dir, sorted)) = best else { return Ok(None) };
+        let (row_ty, _) = self.row_ty(table)?;
+        let read = if rest || !sorted { usize::MAX } else { limit };
+        let mut out = vec![];
+        for r in store.scan(table, &Scan::prefix(index, &prefix, dir, read)) {
+            let v = decode(self.cx, &row_ty, &r)?;
+            if let Some(p) = lam {
+                if !self.apply(p, vec![v.clone()])?.truth() {
+                    continue;
+                }
+            }
+            out.push((r, v));
+        }
+        if !sorted {
+            out.sort_by(|a, b| a.0[..tab.key_len(&a.0).unwrap()].cmp(&b.0[..tab.key_len(&b.0).unwrap()]));
+        }
+        out.truncate(limit);
+        Ok(Some(out.into_iter().map(|x| x.1).collect()))
+    }
+}
+
 /// A loaded function as the kernel runs it: the input parsed under its
 /// parameters (one, or the tuple of several), the body evaluated, the
 /// changes returned.
@@ -590,5 +808,20 @@ impl Procedure for Interp {
         };
         m.eval(&f.body)?;
         Ok(m.changes)
+    }
+
+    fn holds(&self, ctx: &Ctx, input: &[u8]) -> Result<bool, Refusal> {
+        let (f, cx) = (&self.f.f, &self.f.cx);
+        if f.effect != crate::ir::Effect::Pure || f.params.len() != 1 {
+            return Err(Refusal::new("a scope is a Pure function of a row"));
+        }
+        let callee = |h: &FnHash| self.lib.get(h);
+        let mut m = Machine {
+            ctx: Some(ctx),
+            callee: Some(&callee),
+            ..Machine::bare(cx)
+        };
+        m.stack = vec![decode(cx, &f.params[0], input)?];
+        Ok(m.eval(&f.body)?.truth())
     }
 }

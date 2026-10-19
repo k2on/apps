@@ -1,0 +1,18 @@
+{
+  "query": "kept-max",
+  "function_hash": "7a883510cea5d78dde84bfe80ddb0b1e7baa32d69f06769778f05b343639cbe9",
+  "function_bytes": "00000203010001055465787400000001120f706572736f6e00000e80000000000000010601040b15011615110f747261636b00000e800000000000000109050501800000000000000080000000000000020501800000000000000180000000000000000e800000000000000105018000000000000000800000000000000301010000008000ff00ff00ff00ff00ff00ff010000000100007fffffffffffffff000001050180000000000000008000000000000003000105018000000000000000800000000000000000",
+  "schema": [{"columns":[{"decl":"Text","default":null,"name":"name","ty":{"t":"bytes"}},{"decl":"Int","default":null,"name":"born","ty":{"t":"int"}}],"indexes":[],"key":{"$int":"1"},"name":"person","refs":[],"space":"durable"},{"columns":[{"decl":"Text","default":null,"name":"id","ty":{"t":"bytes"}},{"decl":"Text","default":null,"name":"title","ty":{"t":"bytes"}},{"decl":"Text","default":null,"name":"creator","ty":{"t":"bytes"}},{"decl":"Int","default":null,"name":"pos","ty":{"t":"int"}}],"indexes":[{"columns":["creator","pos"],"unique":false}],"key":{"$int":"1"},"name":"track","refs":[],"space":"durable"}],
+  "input": [],
+  "ctx": {"session":"dev","user":"alice"},
+  "store_before": {"person":[["Bach",{"$int":"1685"}],["Gould",{"$int":"1932"}],["Handel",{"$int":"1685"}]],"track":[["t1","Aria","Gould",{"$int":"3"}],["t2","Variation 1","Gould",{"$int":"7"}],["t3","Variation 2","Gould",{"$int":"7"}],["t4","Air","Bach",{"$int":"1"}],["t5","Ariadne","Handel",{"$int":"2"}]]},
+  "rows_before": [[{"$int":"1"},"Bach"],[{"$int":"7"},"Gould"],[{"$int":"2"},"Handel"]],
+  "batches": [[{"row":["t6","ARIA da capo","Gould",{"$int":"9"}],"t":"add","table":"track"}],[{"row":["t6","ARIA da capo","Gould",{"$int":"9"}],"t":"remove","table":"track"}],[{"row":["t2","Variation 1","Gould",{"$int":"7"}],"t":"remove","table":"track"}],[{"new":["t3","Sarabande","Gould",{"$int":"2"}],"old":["t3","Variation 2","Gould",{"$int":"7"}],"t":"edit","table":"track"}],[{"new":["t4","Fair aria","Bach",{"$int":"12"}],"old":["t4","Air","Bach",{"$int":"1"}],"t":"edit","table":"track"}],[{"row":["Nobody",{"$int":"2000"}],"t":"add","table":"person"}],[{"row":["t9","Passing aria","Gould",{"$int":"20"}],"t":"add","table":"track"},{"row":["t9","Passing aria","Gould",{"$int":"20"}],"t":"remove","table":"track"}]],
+  "steps": [{"patches":[{"at":{"$int":"1"},"node":[{"$int":"9"},"Gould"],"t":"update"}],"rows":[[{"$int":"1"},"Bach"],[{"$int":"9"},"Gould"],[{"$int":"2"},"Handel"]]}
+,{"patches":[{"at":{"$int":"1"},"node":[{"$int":"7"},"Gould"],"t":"update"}],"rows":[[{"$int":"1"},"Bach"],[{"$int":"7"},"Gould"],[{"$int":"2"},"Handel"]]}
+,{"patches":[],"rows":[[{"$int":"1"},"Bach"],[{"$int":"7"},"Gould"],[{"$int":"2"},"Handel"]]}
+,{"patches":[{"at":{"$int":"1"},"node":[{"$int":"3"},"Gould"],"t":"update"}],"rows":[[{"$int":"1"},"Bach"],[{"$int":"3"},"Gould"],[{"$int":"2"},"Handel"]]}
+,{"patches":[{"at":{"$int":"0"},"node":[{"$int":"12"},"Bach"],"t":"update"}],"rows":[[{"$int":"12"},"Bach"],[{"$int":"3"},"Gould"],[{"$int":"2"},"Handel"]]}
+,{"patches":[{"at":{"$int":"3"},"node":[{"$int":"-1"},"Nobody"],"t":"insert"}],"rows":[[{"$int":"12"},"Bach"],[{"$int":"3"},"Gould"],[{"$int":"2"},"Handel"],[{"$int":"-1"},"Nobody"]]}
+,{"patches":[],"rows":[[{"$int":"12"},"Bach"],[{"$int":"3"},"Gould"],[{"$int":"2"},"Handel"],[{"$int":"-1"},"Nobody"]]}]
+}

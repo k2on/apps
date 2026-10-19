@@ -34,6 +34,7 @@ pub mod std;
 pub mod store;
 pub mod ty;
 pub mod unicode_tables;
+pub mod view;
 
 /// Why something was not done, as a sentence: a parse that failed, a write
 /// a constraint refused, an intent its function refused. What a form shows
