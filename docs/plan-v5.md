@@ -684,6 +684,36 @@ A table in this section, filled by M1:
 
 ## Landed
 
+**L1** (`04ef9bb`…`9ec23ef`): the language — `ir`, `check`, `interp`,
+`std`, `module` and the `Node` derive (`rust/ark5-macros`): 1,378 net
+source lines against a budget of 2,200 (1,607 in its modules; K1's files
+shrank by 229 as the derive replaced their hand-written walks). 42 tests.
+The demo's mutators are IR built by plain functions in `tests/demo.rs`,
+run by the interpreter, and every K1 `rebase`, `alone` and `fleet`
+pinned state hash held with the hand-written `Procedure`s deleted.
+`eval/`, `verify/` (18 refused cases with the checker's words) and
+`module/` (De Bruijn: two spellings, one hash) vectors re-derived under
+`spec5/vectors/`. Decisions now part of the design: `Ty::Named`
+appended; a function carries the type declarations its refinements name,
+so its hash covers their meaning; `Lit`, `Variant` and `List` carry
+their types; `CtxField::NewId(table)` has effect `Write` and draws count
+from 0; binding is in order with the last bound as `Var(0)`; the
+interpreter evaluates over the codec's parse tree (ints, bytes, tuples,
+sums, lists — no tags, no null, compared by encoded bytes), which is the
+"typed cursor" §1.1 means; `trim` normalises at `parse` and the entry
+keeps the raw input; form messages carry a path of field positions; a
+refinement's predicate is `Pure` and reads no context; a lambda may
+carry any effect, so `Map` with writes is the loop; `Insert` refuses an
+existing key, `Update` a missing one, `Delete` of a missing key is a
+no-op; a standard function is encoded by index, so new ones append;
+`Group` yields `(key, aggregate)` in key order. Open, for later pieces:
+`Store::apply` checks references only on writes, so a delete can leave
+rows dangling (v4 `StillReferenced`) — **D1 fixes this in `store.rs`**;
+`Filter(Scan)` is O(rows) with no index use — **V1 routes constant
+equalities and orders to the store's indexes**; live vectors and the
+server half are D1's; no `Ctx(device)` yet; checker soundness has no
+fuzz; no performance measured.
+
 **K1** (`1e739f4`…`72b93ac`): `rust/ark5` — 2,030 source lines against
 a budget of 3,000; 28 tests, each falsified once. Held to the `hash/`
 vectors re-derived (`spec5/vectors/hash/`), `three-peers` steps 1–4,
