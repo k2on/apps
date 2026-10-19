@@ -23,9 +23,10 @@ functions beside its four: the query `demo.items` and the scope
 `demo.top_two`. **The room** is live state over volatile tables of its own
 (`rust/ark5-dev/src/demo.rs`): `here(session, name, since)` and
 `pointer(session, x)`; `room.on_join` and `room.on_leave` take
-`Arrival(session, name)`; `room.rename(name)` and `room.point(x)` are a
-device's calls, `point` the ephemeral one. A trace carries the bytes of
-every function it needs, so a runner needs neither module to replay one.
+`Arrival(session, name)`; `room.on_restore` lets every pointer go;
+`room.rename(name)` and `room.point(x)` are a device's calls, `point` the
+ephemeral one. A trace carries the bytes of every function it needs, so a
+runner needs neither module to replay one.
 
 ## protocol — client
 

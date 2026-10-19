@@ -2,8 +2,9 @@
 //! mutators of `rust/ark5/tests/demo.rs`, byte for byte (so its pinned
 //! states hold), a query of a playlist's items and a scope; and a room of
 //! live state over volatile tables of its own (§1.9): who is here, which
-//! `on_join` and `on_leave` write, a name a device renames itself by, and
-//! a pointer each device moves, relayed as ephemeral.
+//! `on_join` and `on_leave` write and `on_restore` keeps, a name a device
+//! renames itself by, and a pointer each device moves, relayed as
+//! ephemeral.
 
 use std::collections::BTreeSet;
 
@@ -180,6 +181,12 @@ pub fn point(ctx: Ctx, db: Room, x: Int) {
     db.pointer.insert(Pointer { session: ctx.session, x });
 }
 
+/// After a restart: who was here is kept, every pointer let go.
+#[ark::live("room.on_restore")]
+pub fn on_restore(db: Room) {
+    db.pointer.map(|p| db.pointer.delete(p.session));
+}
+
 #[ark::query("room.present")]
 pub fn present(db: Room) -> Vec<Here> {
     db.here.filter(|h| h.since >= 0)
@@ -188,7 +195,7 @@ pub fn present(db: Room) -> Vec<Here> {
 pub fn room() -> ark::Domain {
     ark::module! {
         schema: Room,
-        functions: [on_join, on_leave, rename, point, present],
+        functions: [on_join, on_leave, on_restore, rename, point, present],
     }
     .unwrap_or_else(|r| panic!("the room: {r}"))
 }

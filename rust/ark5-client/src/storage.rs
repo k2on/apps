@@ -43,11 +43,11 @@ pub trait Disk: Send {
 /// The records of a chain read in order up to the first that does not read
 /// or link; and how many of them that is.
 fn read(snapshot: Option<&[u8]>, records: &[&[u8]]) -> (Stored, usize) {
-    let mut s = Stored::default();
-    s.snapshot = snapshot.and_then(|b| match Record::dec(b) {
+    let snapshot = snapshot.and_then(|b| match Record::dec(b) {
         Ok(Record::Snapshot(x)) => Some(x),
         _ => None,
     });
+    let mut s = Stored { snapshot, chain: vec![] };
     let (mut seq, mut prev) = s.snapshot.as_ref().map_or((0, Default::default()), |x| (x.seq, x.hash));
     for b in records {
         match Record::dec(b) {

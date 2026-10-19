@@ -298,3 +298,51 @@ async fn a_login_is_the_connection_and_a_sign_out_closes_it() {
     .unwrap();
     running.stop().await;
 }
+
+/// The live space across a restart: what the hub held when it closed is
+/// what it opens with, and `on_restore` is authored over it — the room
+/// keeps who was here and lets every pointer go. Falsified by `Hub::open`
+/// not reading what `close` wrote: the room came back empty.
+#[test]
+fn the_live_space_is_restored_and_on_restore_authored() {
+    use ark5_dev::demo::{arrival, room};
+    let r = room();
+    let mut config = config();
+    config.live = Some(ark5_server::Live {
+        module: module(&r),
+        on_join: Some(r.get("room.on_join")),
+        on_leave: Some(r.get("room.on_leave")),
+        on_restore: Some(r.get("room.on_restore")),
+        device: Arc::new(arrival),
+        keep: 8,
+    });
+    let mut hub = Hub::open(config.clone(), Box::new(Memory::default()), 0);
+    let alice = dev("alice@phone").unwrap();
+    let c = hub.connect(alice.clone());
+    let hello = Frame::Hello {
+        space: Space::Volatile,
+        cursor: 0,
+        hash: None,
+        device: Some(b"phone".to_vec()),
+    };
+    hub.frame(c, hello.enc(), 1);
+    hub.author(Space::Volatile, r.get("room.point"), ark5::codec::int_enc(7).to_vec(), 2)
+        .0
+        .unwrap();
+    let live = |h: &Hub| h.live.as_ref().unwrap().store.snapshot_rows();
+    assert_eq!(
+        live(&hub).iter().map(|(_, rs)| rs.len()).collect::<Vec<_>>(),
+        vec![1, 1],
+        "here, and a pointer"
+    );
+    hub.close();
+    let disk = std::mem::replace(&mut hub.disk, Box::new(Memory::default()));
+    let hub = Hub::open(config, disk, 3);
+    assert_eq!(
+        live(&hub).iter().map(|(_, rs)| rs.len()).collect::<Vec<_>>(),
+        vec![1, 0],
+        "here kept, the pointer let go"
+    );
+    let l = hub.live.as_ref().unwrap();
+    assert_eq!(l.log.head().0, l.log.base.seq + 1, "on_restore, the one entry since the open");
+}

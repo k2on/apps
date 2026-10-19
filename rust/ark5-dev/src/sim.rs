@@ -78,8 +78,12 @@ pub struct Net {
     pub alone: BTreeSet<i64>,
     /// Each view kept, by client and number: what it is of, and the list
     /// its patches made.
-    pub views: BTreeMap<(i64, usize), (Space, FnHash, Vec<u8>, Ctx, Vec<V>)>,
+    pub views: BTreeMap<(i64, usize), Watched>,
 }
+
+/// A view a client keeps: its space, its query and input, who reads it,
+/// and the list its patches made.
+pub type Watched = (Space, FnHash, Vec<u8>, Ctx, Vec<V>);
 
 impl Net {
     /// A hub and `n` clients, each opened as [`who`] with `config`, linked.
