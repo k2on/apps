@@ -75,7 +75,12 @@ impl Lib {
 
     /// Author the entry `ctx`.
     pub fn mutate_as(&mut self, ctx: &Ctx, name: &str, input: &impl Node) -> Result<usize, String> {
-        let changes = domain().run(&self.store, ctx, &full(name), &input.to_bytes()).map_err(|r| r.0)?;
+        self.mutate_bytes(ctx, name, &input.to_bytes())
+    }
+
+    /// Author the entry `ctx`, its input as bytes.
+    pub fn mutate_bytes(&mut self, ctx: &Ctx, name: &str, input: &[u8]) -> Result<usize, String> {
+        let changes = domain().run(&self.store, ctx, &full(name), input).map_err(|r| r.0)?;
         self.store.apply_all(&changes).unwrap_or_else(|r| panic!("{name}: the store refused {r}"));
         self.last = changes;
         Ok(self.last.len())
