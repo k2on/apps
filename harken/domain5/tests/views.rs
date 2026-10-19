@@ -200,7 +200,7 @@ fn churn(c: &mut Lib, r: &mut Rng) {
         .map(|p| p.id)
         .collect();
     let some_media = |r: &mut Rng| media.get(r.below(media.len().max(1))).cloned();
-    let _ = c.last.clear();
+    c.last.clear();
     let out = match r.below(9) {
         0 | 1 => {
             let s = AddSong {

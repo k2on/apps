@@ -18,7 +18,7 @@ mod common;
 
 use std::collections::BTreeMap;
 
-use ark5::author::{children, Id, Kind, Node};
+use ark5::author::{children, Id, Node};
 use ark5::ir::Expr;
 use ark5::log::EntryId;
 use ark5::peer::Ctx;
@@ -897,8 +897,7 @@ fn a_scrub_is_ephemeral_and_nothing_ordered_reads_it() {
         .bindings
         .iter()
         .filter(|b| b.0.starts_with("listening.") && b.0 != "listening.record_play");
-    assert!(lives.clone().count() >= ordered.len() + 1);
-    let _ = Kind::Live;
+    assert!(lives.clone().count() > ordered.len());
 
     let mut h = House::new();
     h.arrive("laptop", true);

@@ -40,7 +40,8 @@ pub struct Harken {
 }
 
 #[derive(Row, Node, Clone, Debug, PartialEq)]
-#[ark(index(file), index(pos))]
+#[ark(index(file))]
+#[ark(index(pos))]
 pub struct Media {
     #[ark(key)]
     pub id: Id<Media>,
@@ -153,7 +154,10 @@ pub struct Song {
 }
 
 #[derive(Row, Node, Clone, Debug, PartialEq)]
-#[ark(unique(user_id, name), index(pos), index(user_id, pos))]
+#[ark(unique(user_id, name))]
+#[ark(index(pos))]
+#[allow(clippy::duplicated_attributes)] // two indexes may share a column
+#[ark(index(user_id, pos))]
 pub struct Playlist {
     #[ark(key)]
     pub id: Id<Playlist>,

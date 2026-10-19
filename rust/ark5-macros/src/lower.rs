@@ -263,9 +263,9 @@ impl Lower {
                     BinOp::And(_) => ("logic", "And"),
                     BinOp::Or(_) => ("logic", "Or"),
                     BinOp::BitAnd(_) | BinOp::BitOr(_) | BinOp::BitXor(_) | BinOp::Shl(_) | BinOp::Shr(_) => {
-                        return Err(no(&b.op, "a bitwise operator"))
+                        return Err(no(b.op, "a bitwise operator"))
                     }
-                    _ => return Err(no(&b.op, "an assignment")),
+                    _ => return Err(no(b.op, "an assignment")),
                 };
                 let (f, op) = (format_ident!("{f}"), format_ident!("{op}"));
                 quote!(::ark5::author::#f(::ark5::ir::Op::#op, #x, #y))
@@ -298,10 +298,7 @@ impl Lower {
                 _ => return Err(no(t, "a tuple of one or of more than four")),
             },
             Expr::If(i) => {
-                let els = match &i.else_branch {
-                    Some((_, e)) => Some(&**e),
-                    None => None,
-                };
+                let els = i.else_branch.as_ref().map(|(_, e)| &**e);
                 if let Expr::Let(l) = &*i.cond {
                     return self.arms(&l.expr, &[(&l.pat, Body::B(&i.then_branch))], els.map(Body::E).or(Some(Body::U)));
                 }
@@ -482,7 +479,7 @@ impl Lower {
             ks => syn::parse_quote!((#(#ks),*)),
         };
         let mut c = c.clone();
-        c.body = Box::new(body);
+        *c.body = body;
         let l = self.closure(&c)?;
         Ok(quote!((#recv).sort(vec![#(::ark5::store::Dir::#dirs),*], #l)))
     }

@@ -5,7 +5,6 @@
 //! its hash moved and `the_demo_authored_is_the_demo_built` failed.
 
 #[path = "../../ark5/tests/demo.rs"]
-#[allow(dead_code)]
 mod demo;
 
 #[allow(dead_code)]

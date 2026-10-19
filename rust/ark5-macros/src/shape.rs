@@ -85,7 +85,10 @@ fn ark(attrs: &[Attribute]) -> syn::Result<Vec<Ark>> {
                 "table" | "refs" => out.push(Ark::Value(id, m.value()?.parse()?)),
                 "index" | "unique" => {
                     let mut cols = vec![];
-                    m.parse_nested_meta(|c| Ok(cols.push(c.path.get_ident().cloned().ok_or_else(|| c.error("a column"))?)))?;
+                    m.parse_nested_meta(|c| {
+                        cols.push(c.path.get_ident().cloned().ok_or_else(|| c.error("a column"))?);
+                        Ok(())
+                    })?;
                     out.push(Ark::Cols(id == "unique", cols));
                 }
                 _ => return Err(m.error(format!("`{id}` is no ark attribute"))),
