@@ -11,14 +11,17 @@
 //! reopened from its own, a sign-in, going alone and joining, a delivery.
 //! [`Net::settle`] reconnects everyone and delivers perfectly until nothing
 //! is in flight or pending. Every frame moved is checked to decode to the
-//! bytes that were sent.
+//! bytes that were sent, and every view a client keeps is mirrored by its
+//! patches ([`Net::watch`], [`Net::views_hold`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use ark5::frames::Frame;
 use ark5::hash::FnHash;
-use ark5::peer::Who;
+use ark5::interp::V;
+use ark5::peer::{Ctx, Who};
 use ark5::schema::Space;
+use ark5::view::{query, splice};
 use ark5_client::{Client, Config, Event, Memory};
 use ark5_server::hub::{Config as HubConfig, ConnId, Deliver, Hub};
 
@@ -73,6 +76,9 @@ pub struct Net {
     pub logins: BTreeMap<String, Who>,
     /// The clients alone.
     pub alone: BTreeSet<i64>,
+    /// Each view kept, by client and number: what it is of, and the list
+    /// its patches made.
+    pub views: BTreeMap<(i64, usize), (Space, FnHash, Vec<u8>, Ctx, Vec<V>)>,
 }
 
 impl Net {
@@ -98,6 +104,7 @@ impl Net {
             misread: vec![],
             logins: BTreeMap::new(),
             alone: BTreeSet::new(),
+            views: BTreeMap::new(),
         };
         for (w, c) in clients {
             net.add(w, c);
@@ -136,8 +143,17 @@ impl Net {
         let (frames, events) = (c.take_frames(), c.take_events());
         for e in events {
             match e {
-                Event::Refused { why, .. } | Event::Dropped { why, .. } => self.refused.push((i, why)),
-                _ => {}
+                Event::Refused { why, .. } => self.refused.push((i, why)),
+                Event::Dropped { why, view } => {
+                    self.views.remove(&(i, view));
+                    self.refused.push((i, why));
+                }
+                Event::Patches { view, patches } => {
+                    if let Some(v) = self.views.get_mut(&(i, view)) {
+                        v.4 = splice(&patches, &v.4);
+                    }
+                }
+                Event::Confirmed { .. } => {}
             }
         }
         if self.conns.contains_key(&i) {
@@ -171,6 +187,7 @@ impl Net {
             Op::Restart => self.restart(),
             Op::Reopen(i) => {
                 self.partition(i);
+                self.views.retain(|k, _| k.0 != i);
                 let c = self.clients.remove(&i).unwrap().reopen();
                 self.clients.insert(i, c);
                 self.alone.remove(&i);
@@ -294,6 +311,32 @@ impl Net {
                 }
             }
         }
+    }
+
+    /// A view client `i` keeps, mirrored here by its patches.
+    pub fn watch(&mut self, i: i64, space: Space, f: FnHash, input: Vec<u8>, ctx: Ctx) -> Result<usize, String> {
+        let c = self.client(i);
+        let v = c.watch(space, &f, &input, ctx.clone()).map_err(|r| r.0)?;
+        let rows = c.rows(v).unwrap_or_default();
+        self.views.insert((i, v), (space, f, input, ctx, rows));
+        Ok(v)
+    }
+
+    /// Every view kept is its patches spliced and a fresh evaluation over
+    /// what its client holds now.
+    pub fn views_hold(&self) -> Result<(), String> {
+        for ((i, v), (space, f, input, ctx, mirror)) in &self.views {
+            let c = &self.clients[i];
+            let lib = match space {
+                Space::Durable => &c.config.log.lib,
+                Space::Volatile => &c.config.live.as_ref().unwrap().module.lib,
+            };
+            let fresh = query(lib, f, input, ctx, &c.peer(*space).unwrap().store).map_err(|r| r.0)?;
+            if c.rows(*v).as_ref() != Some(&fresh) || *mirror != fresh {
+                return Err(format!("client {i}'s view {v} is not a fresh evaluation"));
+            }
+        }
+        Ok(())
     }
 
     /// Nothing in flight and nothing pending, in either space.

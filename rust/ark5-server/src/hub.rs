@@ -207,22 +207,25 @@ impl Hub {
     /// A connection verified as `who`.
     pub fn connect(&mut self, who: Who) -> ConnId {
         let c = self.next;
-        self.next += 1;
+        self.connect_as(c, who);
+        c
+    }
+
+    /// A connection verified as `who`, numbered by the caller.
+    pub fn connect_as(&mut self, c: ConnId, who: Who) {
+        self.next = self.next.max(c + 1);
         let feed = (self.config.feed)(&who);
         if let Feed::Scoped(_) = feed {
             self.log.step(Input::Feed { who: who.clone(), feed });
         }
         let whole = feed == Feed::Whole;
-        self.conns.insert(
-            c,
-            Conn {
-                who,
-                hello: [false; 2],
-                whole,
-                device: None,
-            },
-        );
-        c
+        let conn = Conn {
+            who,
+            hello: [false; 2],
+            whole,
+            device: None,
+        };
+        self.conns.insert(c, conn);
     }
 
     pub fn who(&self, c: ConnId) -> Option<&Who> {

@@ -243,6 +243,7 @@ dependencies = [
  "ark-auth",
  "ark5",
  "ark5-client",
+ "ark5-dev",
  "axum",
  "tempfile",
  "tokio",
