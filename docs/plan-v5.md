@@ -370,41 +370,33 @@ the OpenID Connect client; a session is what `Hello` carries.
 
 ### 1.12 Authoring
 
-Typed builders, as v4, with the hazards the v4 survey found fixed at
-their source — and **no macro over a function body**. The domain must
-become data (§1.4) because the phones interpret it, the log hashes it,
-the checker checks it and views see into it; how Rust becomes `Expr` is
-a choice, and a parser over function bodies is the riskiest way to make
-it. Every real v4 authoring hazard is on the struct side, and a struct
-derive is the serde pattern — small and well understood:
-
-| v4 hazard | v5 |
-|---|---|
-| fields bound by declaration position | `#[derive(Row)]`, `#[derive(Input)]` read names and offsets from the struct |
-| variants named by string | `#[derive(Sum)]`: `Sum::of(Paused{..})`, `.is::<Active>()` |
-| `guard::<I>` not tied to its transition | typestate: `transition::<I>` returns the builder its guard takes |
-| one `Query` type accepting every method | `Filtered<T> → Query<T> → Plan<T>` typestate |
-| `.nullable()` beside an `Opt` field | derived from the field's type |
-| a second, native execution path | none; the interpreter is the one path |
-
-Bodies are expressions over phantom-typed wrappers — `Expr<Bool>`,
-`Expr<Text>`, `Rows<Playlist>` — so `p.name.eq(5)` is a compile error
-with no macro involved, and control flow is `if_(c, a, b)` and
-`.on::<Variant>(|v| ..)`:
+Attribute macros over restricted Rust, producing §1.4's `Expr`:
 
 ```rust
-r.input::<CreatePlaylist>().mutation("playlists.create", |ctx, db, input| {
-    let dup = db.playlist.filter(|p| p.user_id.eq(ctx.user()) & p.name.eq(input.name)).first();
-    if_(dup.is_some(),
-        refuse("a playlist with this name exists"),
-        db.playlist.insert(Playlist::new(ctx.new_id(), ctx.user(), input.name, ctx.now())))
-})
+#[ark::mutator]
+fn create(ctx: Ctx, db: Db, input: CreatePlaylist) -> Result<(), Refuse> {
+    if db.playlist.filter(|p| p.user_id == ctx.user && p.name == input.name).first().is_some() {
+        refuse!("a playlist with this name exists");
+    }
+    db.playlist.insert(Playlist { id: ctx.new_id(), user_id: ctx.user, name: input.name, added_ms: ctx.now() });
+    Ok(())
+}
 ```
 
-If harken's port shows the `if_`/`.on` noise matters, an attribute macro
-that lowers `if`/`match`/`let` to these same builders can be added
-later as optional sugar; it would never be load-bearing.
-`spec5/AUTHORING.md` is the builder vocabulary.
+The macro accepts `let`, `if`, `match` on declared sums, field access,
+the operators, calls to other `#[ark::*]` functions and the standard
+library, the relational combinators on `db.<table>`, and the writes; it
+refuses anything else with a compile error naming the construct. Field
+names are read from the struct, never from declaration order. There is
+one execution path, the interpreter. `spec5/AUTHORING.md` is the subset
+the macro accepts.
+
+Why a macro rather than v4's builders: the domain must become data
+(§1.4) either way, and every v4 authoring hazard the survey found —
+fields bound by position, variants named by string, `guard::<I>` untied
+from its transition — comes from a builder reconstructing by hand what
+the Rust source already says. A macro reads the source. The cost is
+that it is a parser; §1.14 says how that is kept small.
 
 ### 1.13 What leaves, and why nothing is lost
 
@@ -423,7 +415,7 @@ later as optional sugar; it would never be load-bearing.
 | `partial`/`through`, `held` frames, `scope` folding | a view per connection | partial sync |
 | `live/state.rs`, `ordering.rs`, live frames, `PerDevice` | a second machine over volatile tables | live state |
 | per-plan-shape maintenance | per-operator deltas | maintained views with patches |
-| positional builders, native path, agreement tests | derives + typed builders, one path | authoring |
+| builders, native path, agreement tests | attribute macros, one path | authoring |
 | `journal.rs` pages/merge, `persist.rs` rehome | the chain on disk | durability, alone |
 
 ### 1.14 Risks, stated as risks
@@ -432,9 +424,8 @@ later as optional sugar; it would never be load-bearing.
   where v4's hand-casing earned its lines. V1 prototypes them first and
   measures against v4's `views` paths before the rest of the engine is
   built on them.
-- **Builders are noisier than syntax.** `if_` and `.on::<V>` instead of
-  `if` and `match`. harken's port is the test; a body macro stays an
-  option, never a dependency.
+- **The macro is a parser.** Kept small and loud; the accepted subset is
+  a list, and anything off it is a compile error, never a guess.
 - **Interpreting everything.** No native path for mutators. Part 3's
   `perf_a` and harken's `perf_add_song` are the numbers; if a hot path is
   more than 3× v4's, the plan is to make the interpreter faster (typed
@@ -455,7 +446,7 @@ edited until R1. The crates:
 
 ```
 rust/ark5/          the library: §1.1–§1.11, one crate, no dependencies but sha2
-rust/ark5-macros/   the derives: Node (L1), Row, Input, Sum (A1); nothing over bodies
+rust/ark5-macros/   §1.12, a proc-macro crate; also the Node derive (L1)
 rust/ark5-dev/      the simulator, the trace player, the fuzzer, the vector writer (dev only)
 rust/ark5-server/   the hub, persistence, the web build, auth glue (thin; drivers)
 rust/ark5-client/   the client driver: link, storage, views for a UI (thin)
@@ -578,23 +569,21 @@ the rest.
 
 Budget: **≤ 1,300**.
 
-### A1 — authoring: derives and typed builders, harken's domain
+### A1 — authoring macros, harken's domain
 
-Owns: `rust/ark5/src/authoring/**`, `rust/ark5-macros/src/{row.rs,
-input.rs, sum.rs}` (struct and enum derives only; `derive.rs` is L1's),
-`harken/domain5/**`, `spec5/AUTHORING.md`.
+Owns: `rust/ark5-macros/src/{lib.rs, mutator.rs, query.rs, scope.rs,
+live.rs, lower.rs}`, `harken/domain5/**`, `spec5/AUTHORING.md`.
 
-Builds §1.12. The derives read a struct's fields by name and offset and
-an enum's variants by declaration; the builders are phantom-typed
-wrappers that construct `Expr`. The vocabulary is a table in
-`AUTHORING.md`, and every row has a test that it emits the IR it says
-and, where a misuse is meant to be a compile error, a `trybuild` test
-that it is. harken's domain is ported function for function;
-`harken/domain/tests/{converge,read_model,views,listening}.rs` are
-ported as its tests, so the domain is held to what it was.
+Builds §1.12. The lowering from `syn` to `Expr` is one module; each
+attribute is a thin entry. The accepted subset is a table in
+`AUTHORING.md`, and every row has a test that it lowers and a `trybuild`
+test that the nearest thing outside it is refused with a message naming
+it. harken's domain is ported function for function; `harken/domain/tests/
+{converge,read_model,views,listening}.rs` are ported as its tests, so the
+domain is held to what it was.
 
-Budget: authoring + derives **≤ 900**; `harken/domain5` reported, not
-budgeted (it is harken's, and its line count beside v4's 3,711 is the
+Budget: macros **≤ 1,500**; `harken/domain5` reported, not budgeted
+(it is harken's, and its line count beside v4's 3,711 is the
 ergonomics result).
 
 ### D1 — drivers: client, server, dev crate, the volatile space
