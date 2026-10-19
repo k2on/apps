@@ -684,6 +684,32 @@ A table in this section, filled by M1:
 
 ## Landed
 
+**V1** (`32ac411`, `3d09aa2`): `view.rs` (624) plus index routing in
+`interp.rs`, the `Feed::Scoped` arm in `peer.rs` and `Std::Sum`: 922
+net source lines against 1,300; 49 tests. Prototype ratios, release,
+v5/v4 per push: `top-two-by-pos` 0.7 at 1k, 0.2 at 4k, 0.07 at 16k (v4
+grows with n, v5 does not); `group-source` under a sort 1.3–1.7, flat.
+12 `views/` vectors re-derived; after every batch the view equals a
+fresh evaluation and the patches splice; a change costs 3 rows on
+`playlist-with-items` and 0 on the other two at every size; the
+interpreter reads through indexes (`add_to_playlist` 1 row, 3 gets); a
+scoped replica holds exactly its union after every op over three
+seeds. Decisions now part of the design: a scope is one `Pure` function
+over a `Sum` of the schema's tables; the authority learns a connection's
+feed by `Input::Feed { who, feed }` and answers it by `Output::To {
+session, bytes }`, `Fanout` meaning the connections fed whole; a union
+must hold what its rows reference, else it is answered with nothing;
+`Filter` and `Map` keep their output; kept aggregates are `len`, `sum`,
+`sum(map)` pure of the member, or tuples of those; routing takes the
+longest run of equalities leading the key or an index, a sort only when
+the path gives the stable order exactly, a literal `Take` only over a
+pure-equality filter; `None` indexes as a value so a unique index over
+an `Option` column is non-unique. Not verified: hydration cost; a
+refused push leaves a view stale; `Join`/`Group` keys that read the
+store rebuild whole; the authority keeps a `Store` per scoped
+connection, unmeasured and not persisted across restart; `Output::To`
+is D1's to route.
+
 **L1** (`04ef9bb`…`9ec23ef`): the language — `ir`, `check`, `interp`,
 `std`, `module` and the `Node` derive (`rust/ark5-macros`): 1,378 net
 source lines against a budget of 2,200 (1,607 in its modules; K1's files
