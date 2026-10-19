@@ -6,8 +6,9 @@
 //! field positions, setters and arm witnesses. `#[ark(..)]` says the rest:
 //!
 //! - a refinement, in order: `trim`, `utf8`, `non_empty`, `len = 16`, `len
-//!   = "1..=80"` (also `"1.."`, `"..=80"`), each followed by `why = ".."`
-//!   to give its words — on a record's field (a declaration `S.f`), or on a
+//!   = "1..=80"` (also `"1.."`, `"..=80"`); of an `Int`, `min = n`, `max =
+//!   n`, `ne = n`, `range = "lo..=hi"` — each followed by `why = ".."` to
+//!   give its words — on a record's field (a declaration `S.f`), or on a
 //!   one-field tuple struct, which is then a refinement of that field's type;
 //! - on a row: `table = "t"` (else the struct's name in snake case),
 //!   `volatile`, `index(a, b)`, `unique(a, b)`, and on its fields `key`
@@ -51,6 +52,13 @@ fn ark(attrs: &[Attribute]) -> syn::Result<Vec<Ark>> {
                     }
                     l => return Err(syn::Error::new_spanned(l, "len is n or a range")),
                 }),
+                "range" => {
+                    let v = m.value()?.parse::<syn::LitStr>()?.value();
+                    let (lo, hi) = v.split_once("..=").ok_or_else(|| m.error("range is \"lo..=hi\""))?;
+                    let int = |t: &str| t.trim().parse::<i64>().map_err(|_| m.error("a bound is an int"));
+                    let (lo, hi) = (int(lo)?, int(hi)?);
+                    out.push(Ark::Rule(quote!(::ark5::author::within(#lo, #hi)), None));
+                }
                 "min" | "max" | "ne" => {
                     let n: syn::Expr = m.value()?.parse()?;
                     let op = format_ident!("{}", match id.as_str() { "min" => "Ge", "max" => "Le", _ => "Ne" });

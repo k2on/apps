@@ -164,7 +164,7 @@ pub struct Seek {
 
 #[derive(Input, Node, Clone, Debug, PartialEq, Eq)]
 pub struct Skip {
-    #[ark(min = -1, max = 1, ne = 0, why = "a skip is one track either way")]
+    #[ark(range = "-1..=1", why = "a skip is one track either way", ne = 0, why = "a skip is one track either way")]
     pub by: Int,
 }
 
@@ -234,21 +234,21 @@ pub struct Equip {
     pub can_volume: bool,
     pub family: Option<Family>,
     pub muted: bool,
-    #[ark(min = 0, max = 100)]
+    #[ark(range = "0..=100", why = "between 0 and 100")]
     pub volume: Int,
 }
 
 #[derive(Input, Node, Clone, Debug, PartialEq, Eq)]
 pub struct SetVolume {
     pub device: Text,
-    #[ark(min = 0, max = 100)]
+    #[ark(range = "0..=100", why = "between 0 and 100")]
     pub level: Int,
 }
 
 /// A device's level moved by `delta`, clamped: what a volume button sends.
 #[derive(Input, Node, Clone, Debug, PartialEq, Eq)]
 pub struct NudgeVolume {
-    #[ark(min = -100, max = 100, ne = 0, why = "a nudge moves the volume")]
+    #[ark(range = "-100..=100", why = "between -100 and 100", ne = 0, why = "a nudge moves the volume")]
     pub delta: Int,
     pub device: Text,
 }
@@ -262,7 +262,7 @@ pub struct SetMute {
 /// The device's own word on its volume.
 #[derive(Input, Node, Clone, Debug, PartialEq, Eq)]
 pub struct ReportVolume {
-    #[ark(min = 0, max = 100)]
+    #[ark(range = "0..=100", why = "between 0 and 100")]
     pub level: Int,
     pub muted: bool,
 }
@@ -281,13 +281,13 @@ pub struct ReportGroup {
 
 #[derive(Input, Node, Clone, Debug, PartialEq, Eq)]
 pub struct GroupVolume {
-    #[ark(min = 0, max = 100)]
+    #[ark(range = "0..=100", why = "between 0 and 100")]
     pub level: Int,
 }
 
 #[derive(Input, Node, Clone, Debug, PartialEq, Eq)]
 pub struct GroupNudge {
-    #[ark(min = -100, max = 100, ne = 0, why = "a nudge moves the volume")]
+    #[ark(range = "-100..=100", why = "between -100 and 100", ne = 0, why = "a nudge moves the volume")]
     pub delta: Int,
 }
 
@@ -1241,11 +1241,11 @@ pub fn on_leave(ctx: Ctx, db: Harken, device: Device) {
 }
 
 /// A restart: every queue as it was, paused where it had got to (never
-/// past the end of the track), with no output and nobody here.
+/// past the end of the track), with no output and nobody here. Authored
+/// over the ordered tables a restart kept; the scrubbers were never kept.
 #[ark::live("listening.on_restore")]
 pub fn on_restore(ctx: Ctx, db: Harken) {
     db.listening_device.map(|d| db.listening_device.delete((d.user, d.device)));
-    db.listening_scrub.map(|d| db.listening_scrub.delete((d.user, d.device)));
     db.listening.map(|r| {
         let session = match r.session {
             Session::Active(a) => Session::Active(Active {

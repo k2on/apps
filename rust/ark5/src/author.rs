@@ -456,6 +456,12 @@ pub fn stmt<T: Shape>(e: Ex<T>) -> Ex<()> {
     }
 }
 
+/// A refinement of an `Int`: from `lo` to `hi`, both included.
+pub fn within(lo: i64, hi: i64) -> Rule {
+    let (Rule::Refine(a), Rule::Refine(b)) = (bound(Op::Ge, lo), bound(Op::Le, hi)) else { unreachable!() };
+    Rule::Refine(Expr::Op(Op::And, Box::new(a), Box::new(b)))
+}
+
 /// A refinement of an `Int`: the value `o` the bound.
 pub fn bound(o: Op, n: i64) -> Rule {
     Rule::Refine(Expr::Op(o, Box::new(Expr::Var(0)), Box::new(int(n).e)))
