@@ -160,7 +160,8 @@ fn one(types: Vec<(String, Decl)>, params: &[(&str, Ty)], ret: Ty, effect: Effec
 /// Every refusal of the checker, one vector each, and the falsify: a scope
 /// that reads the store claimed to verify. Falsified by dropping the
 /// effect bound (`e <= f.effect` always true): a-scope-reading-the-store
-/// verified.
+/// verified; and, for `a-cycle-under-another-type`, by the cycle search
+/// keeping no visited set: it never ended.
 #[test]
 fn what_the_checker_refuses() {
     let (sch, unit, w) = (schema(), Ty::unit(), Effect::Write);
@@ -198,6 +199,12 @@ fn what_the_checker_refuses() {
     let tree = ("Tree".to_string(), decl(Ty::Sum(vec![vec![], vec![Ty::list(named("Tree"))]]), &[]));
     let loops = one(vec![looped, tree], &[], unit.clone(), Effect::Pure, |_| nothing());
     refused("a-type-containing-itself.json", &sch, &loops, "Loop contains itself outside a list or a sum");
+    let under = vec![
+        ("A".to_string(), decl(named("B"), &[])),
+        ("B".to_string(), decl(Ty::Tuple(vec![named("B")]), &[])),
+    ];
+    let loops = one(under, &[], Ty::unit(), Effect::Pure, |_| nothing());
+    refused("a-cycle-under-another-type.json", &sch, &loops, "B contains itself");
     let query_writes = one(vec![], &[("x", text_ty())], unit.clone(), Effect::Read, |b| insert("joined", vec![b.v("x"), b.v("x")]));
     refused("a-write-in-a-query.json", &joined(), &query_writes, "the body's effect is Write, above Read");
     let undeclared = one(vec![], &[("x", named("Nope"))], unit.clone(), Effect::Pure, |_| nothing());

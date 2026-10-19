@@ -65,11 +65,18 @@ impl Types {
         t
     }
 
-    /// Every name unfolded, for a type that does not recur.
+    /// Every name unfolded, to a depth: a recursive type stays named there.
     pub fn deep(&self, t: &Ty) -> Ty {
-        let each = |ts: &[Ty]| ts.iter().map(|t| self.deep(t)).collect();
+        self.deep_to(t, 16)
+    }
+
+    fn deep_to(&self, t: &Ty, n: u32) -> Ty {
+        if n == 0 {
+            return t.clone();
+        }
+        let each = |ts: &[Ty]| ts.iter().map(|t| self.deep_to(t, n - 1)).collect();
         match self.structure(t) {
-            Ty::List(e) => Ty::list(self.deep(&e)),
+            Ty::List(e) => Ty::list(self.deep_to(&e, n - 1)),
             Ty::Tuple(ts) => Ty::Tuple(each(&ts)),
             Ty::Sum(vs) => Ty::Sum(vs.iter().map(|v| each(v)).collect()),
             t => t,
@@ -430,11 +437,14 @@ impl Cx<'_> {
     /// a list or a sum, and refinements that fit it.
     fn decl(&mut self, n: &str, d: &Decl) -> Result<(), String> {
         self.wf(&d.ty)?;
-        let mut todo = vec![d.ty.clone()];
+        let (mut todo, mut seen) = (vec![d.ty.clone()], vec![]);
         while let Some(t) = todo.pop() {
             match t {
                 Ty::Named(m) if m == n => return Err(format!("{n} contains itself outside a list or a sum")),
-                Ty::Named(m) => todo.extend(self.types.decl(&m).map(|d| d.ty.clone())),
+                Ty::Named(m) if !seen.contains(&m) => {
+                    todo.extend(self.types.decl(&m).map(|d| d.ty.clone()));
+                    seen.push(m);
+                }
                 Ty::Tuple(ts) => todo.extend(ts),
                 _ => {}
             }
