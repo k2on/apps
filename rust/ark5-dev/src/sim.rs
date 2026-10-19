@@ -78,6 +78,11 @@ pub struct Net {
 impl Net {
     /// A hub and `n` clients, each opened as [`who`] with `config`, linked.
     pub fn new(hub: HubConfig, config: impl Fn(i64) -> Config, n: i64, seed: u64) -> Net {
+        Net::of(hub, (0..n).map(|i| (who(i), config(i))).collect(), seed)
+    }
+
+    /// A hub and a client per login, each linked.
+    pub fn of(hub: HubConfig, clients: Vec<(Who, Config)>, seed: u64) -> Net {
         let mut net = Net {
             hub: Hub::open(hub.clone(), Box::new(Memory::default()), 0),
             hub_config: hub,
@@ -94,12 +99,26 @@ impl Net {
             logins: BTreeMap::new(),
             alone: BTreeSet::new(),
         };
-        for i in 0..n {
-            net.logins.insert(who(i).session, who(i));
-            net.clients.insert(i, Client::open(config(i), who(i), Box::new(Memory::default()), true));
-            net.heal(i);
+        for (w, c) in clients {
+            net.add(w, c);
         }
         net
+    }
+
+    /// One more client, linked: its number.
+    pub fn add(&mut self, who: Who, config: Config) -> i64 {
+        let i = self.clients.keys().last().map_or(0, |n| n + 1);
+        self.logins.insert(who.session.clone(), who.clone());
+        self.clients.insert(i, Client::open(config, who, Box::new(Memory::default()), true));
+        self.heal(i);
+        i
+    }
+
+    /// Everything in flight delivered, perfectly, until nothing is.
+    pub fn deliver(&mut self) {
+        while !(self.to_server.values().all(|m| m.is_empty()) && self.to_client.values().all(|m| m.is_empty())) {
+            self.drain();
+        }
     }
 
     fn roll(&mut self) -> u64 {

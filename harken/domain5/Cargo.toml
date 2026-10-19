@@ -15,3 +15,8 @@ path = "src/main.rs"
 
 [dependencies]
 ark5 = { path = "../../rust/ark5" }
+
+[dev-dependencies]
+ark5-client = { path = "../../rust/ark5-client" }
+ark5-server = { path = "../../rust/ark5-server" }
+ark5-dev = { path = "../../rust/ark5-dev" }

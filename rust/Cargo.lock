@@ -1716,6 +1716,9 @@ name = "harken-domain5"
 version = "0.1.0"
 dependencies = [
  "ark5",
+ "ark5-client",
+ "ark5-dev",
+ "ark5-server",
 ]
 
 [[package]]
