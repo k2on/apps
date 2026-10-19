@@ -19,6 +19,7 @@ use ::std::fmt;
 
 extern crate self as ark5;
 
+pub mod author;
 pub mod check;
 pub mod codec;
 pub mod frames;
