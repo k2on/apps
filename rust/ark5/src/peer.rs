@@ -58,6 +58,18 @@
 //! entry gives the entry's facts, and refuses every entry of it when one
 //! does not; a server that moved on sequences them anew as pushes, and the
 //! peer rebases onto what it answers.
+//!
+//! **Live state is a second machine** (§1.9): a peer [`Peer::in_space`]
+//! `Volatile` is this machine over the volatile tables, sharing the
+//! connection, every frame of its log naming its space. Its store hashes and
+//! snapshots those tables only; it makes nothing durable; an intent whose
+//! changes touch a table of the other space is refused, in either space.
+//! A device says what it is in its `Hello` ([`Peer::device`]); its
+//! `on_join` and `on_leave` are entries the authority authors through
+//! `Mutate`, as the driver sees connections come and go. `resync` is a
+//! `Hello` with a hash the authority lacks, answered with a snapshot. A
+//! volatile authority forgets on restart what each session last pushed, so
+//! there a push past a gap is taken: what came before it is gone.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -292,6 +304,8 @@ pub struct Peer {
     asked: Option<Seq>,
     /// An authority's connections fed by a scope, by session.
     pub served: BTreeMap<String, Served>,
+    /// What this device says it is, in every `Hello` (§1.9).
+    pub device: Option<Vec<u8>>,
 }
 
 fn empty_snapshot(store: &Store) -> Snapshot {
@@ -319,7 +333,24 @@ impl Peer {
             diverged: vec![],
             asked: None,
             served: BTreeMap::new(),
+            device: None,
         }
+    }
+
+    /// This peer over `space`'s tables (§1.9), from empty.
+    pub fn in_space(mut self, space: Space) -> Peer {
+        self.space = space;
+        self.store = self.blank();
+        self.log = Log::new(empty_snapshot(&self.store));
+        self
+    }
+
+    fn blank(&self) -> Store {
+        Store::new_in(self.store.schema_arc().clone(), self.space)
+    }
+
+    fn of_rows(&self, rows: &[(String, Vec<Vec<u8>>)]) -> Result<Store, Refusal> {
+        Store::from_rows_in(self.store.schema_arc().clone(), self.space, rows)
     }
 
     pub fn is_authority(&self) -> bool {
@@ -356,7 +387,7 @@ impl Peer {
             Input::Feed { who, feed } => match feed {
                 Feed::Whole => drop(self.served.remove(&who.session)),
                 Feed::Scoped(scope) => {
-                    let union = Store::new(self.store.schema_arc().clone());
+                    let union = self.blank();
                     let s = Served {
                         who: who.clone(),
                         scope,
@@ -370,6 +401,9 @@ impl Peer {
         if !o.told.is_empty() {
             o.out.insert(0, Output::Changes(o.told));
         }
+        if self.space == Space::Volatile {
+            o.out.retain(|x| !matches!(x, Output::Persist(_)));
+        }
         o.out
     }
 
@@ -379,6 +413,10 @@ impl Peer {
     fn attempt(&mut self, e: &Entry, o: &mut Out) -> Result<Vec<Change>, Refusal> {
         let p = self.cas.get(&e.func).cloned().ok_or_else(|| Refusal(format!("no function {}", e.func)))?;
         let changes = p.run(&self.store, &Ctx::of(e), &e.input)?;
+        let schema = self.store.schema_arc().clone();
+        if let Some(c) = changes.iter().find(|c| schema.table(c.table()).is_some_and(|t| t.1.space != self.space)) {
+            return Err(Refusal(format!("{} is not in this space", c.table())));
+        }
         self.store.apply_all(&changes)?;
         o.told.extend(changes.iter().cloned());
         Ok(changes)
@@ -494,6 +532,7 @@ impl Peer {
         let space = match &f {
             Frame::Hello { space, .. } | Frame::Push { space, .. } | Frame::Batch { space, .. } => Some(*space),
             Frame::Snapshot { space, .. } | Frame::Join { space, .. } => Some(*space),
+            Frame::Ack { space, .. } | Frame::Reject { space, .. } | Frame::Held { space, .. } => Some(*space),
             _ => None,
         };
         if space.is_some_and(|s| s != self.space) {
@@ -521,12 +560,12 @@ impl Peer {
                     o.out.push(Output::Confirmed(id));
                 }
             }
-            (Frame::Reject { id, why }, false, _) => {
+            (Frame::Reject { id, why, .. }, false, _) => {
                 if self.settle(&id, o) {
                     o.out.push(Output::Refused { id, why });
                 }
             }
-            (Frame::Held { id, func }, false, _) => {
+            (Frame::Held { id, func, .. }, false, _) => {
                 if let (Some(p), Some(b)) = (self.pending.iter().find(|p| p.entry.id == id), self.cas.body(&func)) {
                     o.send(Frame::Push {
                         space: self.space,
@@ -604,7 +643,7 @@ impl Peer {
             }
             rows.push((t, held));
         }
-        let Ok(union) = Store::from_rows(self.store.schema_arc().clone(), &rows) else {
+        let Ok(union) = self.of_rows(&rows) else {
             return;
         };
         let (seq, hash) = head;
@@ -659,29 +698,38 @@ impl Peer {
     }
 
     fn push(&mut self, who: &Who, mut entry: Entry, body: Option<Vec<u8>>, o: &mut Out) {
-        let id = entry.id;
+        let (id, space) = (entry.id, self.space);
         let asked = body.is_some();
         if let Some(b) = body {
             self.cas.add_body(b);
         }
         let j = self.journal();
         match j.verdicts.get(&id) {
-            Some(Verdict::Seq(seq)) => return o.send(Frame::Ack { id, seq: *seq, facts: None }),
-            Some(Verdict::Refused(why)) => return o.send(Frame::Reject { id, why: why.clone() }),
+            Some(Verdict::Seq(seq)) => {
+                return o.send(Frame::Ack {
+                    space,
+                    id,
+                    seq: *seq,
+                    facts: None,
+                })
+            }
+            Some(Verdict::Refused(why)) => return o.send(Frame::Reject { space, id, why: why.clone() }),
             None => {}
         }
         if !entry.id_checks() || entry.session != who.session {
             let why = "an entry of another session, or an id that is not its own".into();
-            return o.send(Frame::Reject { id, why });
+            return o.send(Frame::Reject { space, id, why });
         }
         // A gap: the ones before it come first, pushed again after a Hello.
-        if entry.local != j.last.get(&entry.session).copied().unwrap_or(0) + 1 {
+        let last = j.last.get(&entry.session).copied().unwrap_or(0);
+        if entry.local != last + 1 && !(space == Space::Volatile && entry.local > last) {
             return;
         }
         if self.cas.get(&entry.func).is_none() {
             return o.send(match asked {
-                false => Frame::Held { id, func: entry.func },
+                false => Frame::Held { space, id, func: entry.func },
                 true => Frame::Reject {
+                    space,
                     id,
                     why: format!("no function {}", entry.func),
                 },
@@ -690,8 +738,8 @@ impl Peer {
         entry.actor = who.actor.clone();
         entry.roles = who.roles.clone();
         match self.sequence(entry, None, o) {
-            Ok(seq) => o.send(Frame::Ack { id, seq, facts: None }),
-            Err(why) => o.send(Frame::Reject { id, why }),
+            Ok(seq) => o.send(Frame::Ack { space, id, seq, facts: None }),
+            Err(why) => o.send(Frame::Reject { space, id, why }),
         }
     }
 
@@ -718,7 +766,11 @@ impl Peer {
                     let last = self.journal().last.entry(s).or_insert(0);
                     *last = (*last).max(n);
                     self.journal().verdicts.insert(id, Verdict::Refused(why.clone()));
-                    o.send(Frame::Reject { id, why: why.clone() });
+                    o.send(Frame::Reject {
+                        space: self.space,
+                        id,
+                        why: why.clone(),
+                    });
                 }
                 return;
             }
@@ -728,6 +780,7 @@ impl Peer {
         let (n, _) = at;
         for (k, l) in chain.iter().enumerate() {
             o.send(Frame::Ack {
+                space: self.space,
                 id: l.entry.id,
                 seq: n + 1 + k as Seq,
                 facts: None,
@@ -781,7 +834,7 @@ impl Peer {
                 space: self.space,
                 cursor: n,
                 hash: Some(h),
-                device: None,
+                device: self.device.clone(),
             });
         }
     }
@@ -791,7 +844,7 @@ impl Peer {
     fn diverge(&mut self, seq: Seq, o: &mut Out) {
         self.diverged.push(seq);
         self.undo_pending(o);
-        let fresh = Store::new(self.store.schema_arc().clone());
+        let fresh = self.blank();
         o.told.extend(self.store.diff(&fresh));
         self.log = Log::new(empty_snapshot(&fresh));
         self.store = fresh;
@@ -801,17 +854,20 @@ impl Peer {
             space: self.space,
             cursor: 0,
             hash: None,
-            device: None,
+            device: self.device.clone(),
         });
     }
 
     /// A snapshot: the store becomes its rows, the log stands on it, the
     /// pending intents run again on top and are pushed again.
     fn reset(&mut self, s: Snapshot, o: &mut Out) {
-        if s.seq <= self.log.head().0 && self.log.has(s.seq, &s.hash) {
+        // One this history passed is a late copy, but a volatile authority
+        // that restarted is behind its replicas: they go back to it.
+        let (n, _) = self.log.head();
+        if (s.seq == n || s.seq < n && self.space == Space::Durable) && self.log.has(s.seq, &s.hash) {
             return;
         }
-        let Ok(new) = Store::from_rows(self.store.schema_arc().clone(), &s.rows) else {
+        let Ok(new) = self.of_rows(&s.rows) else {
             return;
         };
         if new.state_hash() != s.state {
@@ -884,7 +940,7 @@ impl Peer {
             space: self.space,
             cursor: at,
             hash: Some(hash),
-            device: None,
+            device: self.device.clone(),
         });
         o.send(Frame::Join {
             space: self.space,
@@ -922,8 +978,7 @@ impl Peer {
     /// Opens what was made durable: the snapshot, the chain on it as far as
     /// each entry's facts give its state, and the pending intents run again.
     fn open(&mut self, d: Durable, o: &mut Out) {
-        let schema = self.store.schema_arc().clone();
-        let Ok(mut store) = Store::from_rows(schema, &d.snapshot.rows) else {
+        let Ok(mut store) = self.of_rows(&d.snapshot.rows) else {
             return;
         };
         if store.state_hash() != d.snapshot.state {

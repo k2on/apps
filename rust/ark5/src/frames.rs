@@ -1,18 +1,22 @@
 //! §1.11 The frames: one `Sum` type, encoded by §1.1.
 //!
 //! ```text
-//! Client: Hello { space, cursor, hash: Option<EntryHash>, device: Option<Text> }
+//! Client: Hello { space, cursor, hash: Option<EntryHash>, device: Option<Bytes> }
 //!         Push  { space, entry, body: Option<Bytes> }   -- the body when the authority asked
 //!         Fetch { hashes }
-//! Server: Ack   { id, seq, facts: Option<[Change]> }
-//!         Reject{ id, why } | Held { id, fn }           -- Held: send the body
+//! Server: Ack   { space, id, seq, facts: Option<[Change]> }
+//!         Reject{ space, id, why } | Held { space, id, fn }  -- Held: send the body
 //!         Batch { space, from, logged: [Logged] }
 //!         Snapshot { space, seq, hash, state, rows }
 //!         Bodies { [(FnHash, Bytes)] }
 //! Client: Join  { space, from, hash, logged: [Logged] } -- a chain made alone, handed over
 //! ```
 //!
-//! The variants are numbered in that order, `Join` last. The type, the
+//! The variants are numbered in that order, `Join` last. Every frame about
+//! one space's log names it, so two machines share a connection (§1.9): a
+//! verdict's id is `(session, local)`'s, and each space counts its own.
+//! `device` is what a device says it is, the bytes the authority authors
+//! its `on_join` from (the driver's to read). The type, the
 //! encoder and the decoder are `#[derive(Node)]`'s (§1.4), and
 //! `tests/frames.rs` holds every frame's bytes to [`frame_ty`].
 
@@ -32,7 +36,7 @@ pub enum Frame {
         space: Space,
         cursor: Seq,
         hash: Option<EntryHash>,
-        device: Option<String>,
+        device: Option<Vec<u8>>,
     },
     Push {
         space: Space,
@@ -43,15 +47,18 @@ pub enum Frame {
         hashes: Vec<FnHash>,
     },
     Ack {
+        space: Space,
         id: EntryId,
         seq: Seq,
         facts: Option<Vec<Change>>,
     },
     Reject {
+        space: Space,
         id: EntryId,
         why: String,
     },
     Held {
+        space: Space,
         id: EntryId,
         func: FnHash,
     },

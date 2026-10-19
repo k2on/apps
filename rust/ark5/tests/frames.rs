@@ -62,7 +62,7 @@ fn every_frame() -> Vec<Frame> {
             space: Space::Volatile,
             cursor: 4,
             hash: Some(EntryHash([0xFF; 32])),
-            device: Some("phone".into()),
+            device: Some(b"phone\0".to_vec()),
         },
         Frame::Push {
             space: Space::Durable,
@@ -77,17 +77,28 @@ fn every_frame() -> Vec<Frame> {
         Frame::Fetch {
             hashes: vec![FnHash([2; 32]), FnHash::default()],
         },
-        Frame::Ack { id, seq: 3, facts: None },
         Frame::Ack {
+            space: Space::Durable,
+            id,
+            seq: 3,
+            facts: None,
+        },
+        Frame::Ack {
+            space: Space::Volatile,
             id,
             seq: 3,
             facts: Some(facts),
         },
         Frame::Reject {
+            space: Space::Durable,
             id,
             why: "a playlist needs a name".into(),
         },
-        Frame::Held { id, func: FnHash([3; 32]) },
+        Frame::Held {
+            space: Space::Durable,
+            id,
+            func: FnHash([3; 32]),
+        },
         Frame::Batch {
             space: Space::Durable,
             from: 2,
