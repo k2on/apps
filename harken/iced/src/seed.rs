@@ -2688,10 +2688,11 @@ pub const FOUR_SEASONS: &[Seed] = &[
 
 /// Vivaldi's other concertos — six works, two sets of players, one compilation.
 ///
-/// Unlike every other album here, this one is not a record: it is what the
-/// demo has left of Vivaldi once [`FOUR_SEASONS`] is out, gathered under one
-/// name. That is an honest kind of album — a compilation is a release like any
-/// other — and it says two things the rest of the library does not:
+/// Unlike every other album here, this one is not a record: it is the
+/// Modena orchestra's Vivaldi beyond [`FOUR_SEASONS`], and one Milan
+/// recording, gathered under one name. That is an honest kind of album — a
+/// compilation is a release like any other — and it says two things the rest
+/// of the library does not:
 ///
 /// - **A release can carry works nobody grouped.** The Four Seasons are four
 ///   concertos that were *published* as a set; these six were not, and the
@@ -2917,6 +2918,435 @@ pub const CONCERTOS: &[Seed] = &[
     },
 ];
 
+/// Three string concertos by the Advent Chamber Orchestra, whose Brandenburg
+/// Nos. 3, 5 and 6 are in [`BRANDENBURG`] — the same collection on Commons,
+/// under the same CC BY-SA 2.0, so every row carries the `licence` and the
+/// album page draws the credit beside the performer.
+///
+/// Two of these are L'estro armonico Nos. 8 and 11, on a different record from
+/// No. 10 in [`CONCERTOS`]: a set published together and recorded apart is
+/// three works on two albums, and the composer page lists them together all
+/// the same, because a work belongs to its composer and not to a release.
+///
+/// **A soloist is part of who played it.** Each concerto names its own, so the
+/// performer string differs per concerto and the album has three recordings by
+/// three line-ups of one orchestra — which is what it was.
+pub const STRING_CONCERTOS: &[Seed] = &[
+    Seed {
+        title: "I. Allegro",
+        composer: "Antonio Vivaldi",
+        album: "String Concertos",
+        part: "L'estro armonico, Concerto No. 8 in A minor, RV 522",
+        track: 1,
+        catalogue: "RV 522",
+        performer: "Advent Chamber Orchestra, Jacques Israelievitch, Roxana Pavel Goldstein",
+        licence: "CC BY-SA 2.0",
+        bpm: 138,
+        ms: 203870,
+        file: "https://upload.wikimedia.org/wikipedia/commons/transcoded/a/af/Vivaldi_-_Concerto_for_Two_Violins_in_A_minor%2C_Op._3%2C_No._8_-_1._Allegro.ogg/Vivaldi_-_Concerto_for_Two_Violins_in_A_minor%2C_Op._3%2C_No._8_-_1._Allegro.ogg.mp3",
+    },
+    Seed {
+        title: "II. Larghetto e spiritoso",
+        composer: "Antonio Vivaldi",
+        album: "String Concertos",
+        part: "L'estro armonico, Concerto No. 8 in A minor, RV 522",
+        track: 2,
+        catalogue: "RV 522",
+        performer: "Advent Chamber Orchestra, Jacques Israelievitch, Roxana Pavel Goldstein",
+        licence: "CC BY-SA 2.0",
+        bpm: 63,
+        ms: 232977,
+        file: "https://upload.wikimedia.org/wikipedia/commons/transcoded/d/df/Vivaldi_-_Concerto_for_Two_Violins_in_A_minor%2C_Op._3%2C_No._8_-_2._Larghetto_e_spiritoso.ogg/Vivaldi_-_Concerto_for_Two_Violins_in_A_minor%2C_Op._3%2C_No._8_-_2._Larghetto_e_spiritoso.ogg.mp3",
+    },
+    Seed {
+        title: "III. Allegro",
+        composer: "Antonio Vivaldi",
+        album: "String Concertos",
+        part: "L'estro armonico, Concerto No. 8 in A minor, RV 522",
+        track: 3,
+        catalogue: "RV 522",
+        performer: "Advent Chamber Orchestra, Jacques Israelievitch, Roxana Pavel Goldstein",
+        licence: "CC BY-SA 2.0",
+        bpm: 138,
+        ms: 189654,
+        file: "https://upload.wikimedia.org/wikipedia/commons/transcoded/c/c0/Vivaldi_-_Concerto_for_Two_Violins_in_A_minor%2C_Op._3%2C_No._8_-_3._Allegro.ogg/Vivaldi_-_Concerto_for_Two_Violins_in_A_minor%2C_Op._3%2C_No._8_-_3._Allegro.ogg.mp3",
+    },
+    Seed {
+        title: "I. Allegro – Adagio e spiccato – Allegro",
+        composer: "Antonio Vivaldi",
+        album: "String Concertos",
+        part: "L'estro armonico, Concerto No. 11 in D minor, RV 565",
+        track: 4,
+        catalogue: "RV 565",
+        performer: "Advent Chamber Orchestra, David Parry, Roxana Pavel Goldstein",
+        licence: "CC BY-SA 2.0",
+        bpm: 138,
+        ms: 236730,
+        file: "https://upload.wikimedia.org/wikipedia/commons/transcoded/3/32/Antonio_Vivaldi_-_Concerto_for_Two_Violins_in_D_minor_Op._3_No._11_-_1._Allegro_-_Adagio_e_spiccato_-_Allegro.ogg/Antonio_Vivaldi_-_Concerto_for_Two_Violins_in_D_minor_Op._3_No._11_-_1._Allegro_-_Adagio_e_spiccato_-_Allegro.ogg.mp3",
+    },
+    Seed {
+        title: "II. Largo e spiccato",
+        composer: "Antonio Vivaldi",
+        album: "String Concertos",
+        part: "L'estro armonico, Concerto No. 11 in D minor, RV 565",
+        track: 5,
+        catalogue: "RV 565",
+        performer: "Advent Chamber Orchestra, David Parry, Roxana Pavel Goldstein",
+        licence: "CC BY-SA 2.0",
+        bpm: 50,
+        ms: 134240,
+        file: "https://upload.wikimedia.org/wikipedia/commons/transcoded/7/7d/Antonio_Vivaldi_-_Concerto_for_Two_Violins_in_D_minor_Op._3_No._11_-_2._Largo_e_spiccato.ogg/Antonio_Vivaldi_-_Concerto_for_Two_Violins_in_D_minor_Op._3_No._11_-_2._Largo_e_spiccato.ogg.mp3",
+    },
+    Seed {
+        title: "III. Allegro",
+        composer: "Antonio Vivaldi",
+        album: "String Concertos",
+        part: "L'estro armonico, Concerto No. 11 in D minor, RV 565",
+        track: 6,
+        catalogue: "RV 565",
+        performer: "Advent Chamber Orchestra, David Parry, Roxana Pavel Goldstein",
+        licence: "CC BY-SA 2.0",
+        bpm: 138,
+        ms: 146385,
+        file: "https://upload.wikimedia.org/wikipedia/commons/transcoded/b/b8/Antonio_Vivaldi_-_Concerto_for_Two_Violins_in_D_minor_Op._3_No._11_-_3._Allegro.ogg/Antonio_Vivaldi_-_Concerto_for_Two_Violins_in_D_minor_Op._3_No._11_-_3._Allegro.ogg.mp3",
+    },
+    Seed {
+        title: "I. Allegro",
+        composer: "Antonio Vivaldi",
+        album: "String Concertos",
+        part: "Cello Concerto in G major, RV 413",
+        track: 7,
+        catalogue: "RV 413",
+        performer: "Advent Chamber Orchestra, Stephen Balderston",
+        licence: "CC BY-SA 2.0",
+        bpm: 138,
+        ms: 196490,
+        file: "https://upload.wikimedia.org/wikipedia/commons/transcoded/a/a4/Vivaldi_-_Cello_Concerto_Gmaj_-_1._Allegro.ogg/Vivaldi_-_Cello_Concerto_Gmaj_-_1._Allegro.ogg.mp3",
+    },
+    Seed {
+        title: "II. Largo",
+        composer: "Antonio Vivaldi",
+        album: "String Concertos",
+        part: "Cello Concerto in G major, RV 413",
+        track: 8,
+        catalogue: "RV 413",
+        performer: "Advent Chamber Orchestra, Stephen Balderston",
+        licence: "CC BY-SA 2.0",
+        bpm: 50,
+        ms: 237520,
+        file: "https://upload.wikimedia.org/wikipedia/commons/transcoded/0/01/Vivaldi_-_Cello_Concerto_Gmaj_-_2._Largo.ogg/Vivaldi_-_Cello_Concerto_Gmaj_-_2._Largo.ogg.mp3",
+    },
+    Seed {
+        title: "III. Allegro",
+        composer: "Antonio Vivaldi",
+        album: "String Concertos",
+        part: "Cello Concerto in G major, RV 413",
+        track: 9,
+        catalogue: "RV 413",
+        performer: "Advent Chamber Orchestra, Stephen Balderston",
+        licence: "CC BY-SA 2.0",
+        bpm: 138,
+        ms: 159860,
+        file: "https://upload.wikimedia.org/wikipedia/commons/transcoded/5/5c/Vivaldi_-_Cello_Concerto_Gmaj_-_3._Allegro.ogg/Vivaldi_-_Cello_Concerto_Gmaj_-_3._Allegro.ogg.mp3",
+    },
+];
+
+/// The Magnificat, RV 610 — nine movements, one choir and orchestra.
+///
+/// Associazione Culturale Panharmonikon's, under CC BY-SA 3.0. The nine titles
+/// are RV 610's, not RV 611's (the later version swaps several choruses for
+/// arias), which is how the catalogue number was chosen. A sacred work has no
+/// tempo marking in its titles, so every `bpm` is 0, as in [`MESSIAH`].
+pub const MAGNIFICAT: &[Seed] = &[
+    Seed {
+        title: "Magnificat",
+        composer: "Antonio Vivaldi",
+        album: "Magnificat",
+        part: "",
+        track: 1,
+        catalogue: "RV 610",
+        performer: "Associazione Culturale Panharmonikon",
+        licence: "CC BY-SA 3.0",
+        bpm: 0,
+        ms: 65875,
+        file: "https://upload.wikimedia.org/wikipedia/commons/transcoded/9/9c/Vivaldi_-_Magnificat_01_Magnificat.oga/Vivaldi_-_Magnificat_01_Magnificat.oga.mp3",
+    },
+    Seed {
+        title: "Et exultavit",
+        composer: "Antonio Vivaldi",
+        album: "Magnificat",
+        part: "",
+        track: 2,
+        catalogue: "RV 610",
+        performer: "Associazione Culturale Panharmonikon",
+        licence: "CC BY-SA 3.0",
+        bpm: 0,
+        ms: 136625,
+        file: "https://upload.wikimedia.org/wikipedia/commons/transcoded/b/bb/02_-_Et_Exultavit.ogg/02_-_Et_Exultavit.ogg.mp3",
+    },
+    Seed {
+        title: "Et misericordia",
+        composer: "Antonio Vivaldi",
+        album: "Magnificat",
+        part: "",
+        track: 3,
+        catalogue: "RV 610",
+        performer: "Associazione Culturale Panharmonikon",
+        licence: "CC BY-SA 3.0",
+        bpm: 0,
+        ms: 150563,
+        file: "https://upload.wikimedia.org/wikipedia/commons/transcoded/a/a3/03_-_Et_Misericordia.ogg/03_-_Et_Misericordia.ogg.mp3",
+    },
+    Seed {
+        title: "Fecit potentiam",
+        composer: "Antonio Vivaldi",
+        album: "Magnificat",
+        part: "",
+        track: 4,
+        catalogue: "RV 610",
+        performer: "Associazione Culturale Panharmonikon",
+        licence: "CC BY-SA 3.0",
+        bpm: 0,
+        ms: 29500,
+        file: "https://upload.wikimedia.org/wikipedia/commons/transcoded/b/b2/04_-_Fecit_Potentiam.ogg/04_-_Fecit_Potentiam.ogg.mp3",
+    },
+    Seed {
+        title: "Deposuit potentes",
+        composer: "Antonio Vivaldi",
+        album: "Magnificat",
+        part: "",
+        track: 5,
+        catalogue: "RV 610",
+        performer: "Associazione Culturale Panharmonikon",
+        licence: "CC BY-SA 3.0",
+        bpm: 0,
+        ms: 55063,
+        file: "https://upload.wikimedia.org/wikipedia/commons/transcoded/f/f8/05_-_Deposuit_Potentes.ogg/05_-_Deposuit_Potentes.ogg.mp3",
+    },
+    Seed {
+        title: "Esurientes",
+        composer: "Antonio Vivaldi",
+        album: "Magnificat",
+        part: "",
+        track: 6,
+        catalogue: "RV 610",
+        performer: "Associazione Culturale Panharmonikon",
+        licence: "CC BY-SA 3.0",
+        bpm: 0,
+        ms: 100188,
+        file: "https://upload.wikimedia.org/wikipedia/commons/transcoded/3/3c/06_-_Esurientes.ogg/06_-_Esurientes.ogg.mp3",
+    },
+    Seed {
+        title: "Suscepit Israel",
+        composer: "Antonio Vivaldi",
+        album: "Magnificat",
+        part: "",
+        track: 7,
+        catalogue: "RV 610",
+        performer: "Associazione Culturale Panharmonikon",
+        licence: "CC BY-SA 3.0",
+        bpm: 0,
+        ms: 46875,
+        file: "https://upload.wikimedia.org/wikipedia/commons/transcoded/3/3f/07_-_Suscepit_Israel.ogg/07_-_Suscepit_Israel.ogg.mp3",
+    },
+    Seed {
+        title: "Sicut locutus est",
+        composer: "Antonio Vivaldi",
+        album: "Magnificat",
+        part: "",
+        track: 8,
+        catalogue: "RV 610",
+        performer: "Associazione Culturale Panharmonikon",
+        licence: "CC BY-SA 3.0",
+        bpm: 0,
+        ms: 120375,
+        file: "https://upload.wikimedia.org/wikipedia/commons/transcoded/8/83/08_-_Sicut_Locutus.ogg/08_-_Sicut_Locutus.ogg.mp3",
+    },
+    Seed {
+        title: "Gloria Patri",
+        composer: "Antonio Vivaldi",
+        album: "Magnificat",
+        part: "",
+        track: 9,
+        catalogue: "RV 610",
+        performer: "Associazione Culturale Panharmonikon",
+        licence: "CC BY-SA 3.0",
+        bpm: 0,
+        ms: 133688,
+        file: "https://upload.wikimedia.org/wikipedia/commons/transcoded/d/d3/09_-_Gloria.ogg/09_-_Gloria.ogg.mp3",
+    },
+];
+
+/// Dixit Dominus, RV 807, and the two pieces "al Santo Sepolcro", from one
+/// concert at the Escola Superior de Música de Catalunya.
+///
+/// RV 807 was attributed to Galuppi until 2005, which is why its number is so
+/// far past the rest of Vivaldi's sacred music. The ten sections follow the
+/// psalm's verses and the doxology, so their order is the text's. The two
+/// sinfonias are whole works in one file each, like `RV 425` in
+/// [`CONCERTOS`] — an album that is one psalm setting and two single-track
+/// works, folded into three sections by the works themselves.
+///
+/// CC BY-SA 4.0 throughout, so every row carries a `licence`.
+pub const DIXIT_DOMINUS: &[Seed] = &[
+    Seed {
+        title: "Dixit Dominus",
+        composer: "Antonio Vivaldi",
+        album: "Dixit Dominus",
+        part: "Dixit Dominus in D major, RV 807",
+        track: 1,
+        catalogue: "RV 807",
+        performer: "Escola Superior de Música de Catalunya",
+        licence: "CC BY-SA 4.0",
+        bpm: 0,
+        ms: 98500,
+        file: "https://upload.wikimedia.org/wikipedia/commons/transcoded/9/94/Vivaldi_DixitDominus_DixitDominus_RV807_Esmuc.ogg/Vivaldi_DixitDominus_DixitDominus_RV807_Esmuc.ogg.mp3",
+    },
+    Seed {
+        title: "Donec ponam",
+        composer: "Antonio Vivaldi",
+        album: "Dixit Dominus",
+        part: "Dixit Dominus in D major, RV 807",
+        track: 2,
+        catalogue: "RV 807",
+        performer: "Escola Superior de Música de Catalunya",
+        licence: "CC BY-SA 4.0",
+        bpm: 0,
+        ms: 175999,
+        file: "https://upload.wikimedia.org/wikipedia/commons/transcoded/c/c6/Vivaldi_Donecponam_DixitDominus_RV807_Esmuc.ogg/Vivaldi_Donecponam_DixitDominus_RV807_Esmuc.ogg.mp3",
+    },
+    Seed {
+        title: "Virgam virtutis",
+        composer: "Antonio Vivaldi",
+        album: "Dixit Dominus",
+        part: "Dixit Dominus in D major, RV 807",
+        track: 3,
+        catalogue: "RV 807",
+        performer: "Escola Superior de Música de Catalunya",
+        licence: "CC BY-SA 4.0",
+        bpm: 0,
+        ms: 158000,
+        file: "https://upload.wikimedia.org/wikipedia/commons/transcoded/1/19/Vivaldi_Virgamvirlutis_DixitDominus_RV807_Esmuc.ogg/Vivaldi_Virgamvirlutis_DixitDominus_RV807_Esmuc.ogg.mp3",
+    },
+    Seed {
+        title: "Tecum principium",
+        composer: "Antonio Vivaldi",
+        album: "Dixit Dominus",
+        part: "Dixit Dominus in D major, RV 807",
+        track: 4,
+        catalogue: "RV 807",
+        performer: "Escola Superior de Música de Catalunya",
+        licence: "CC BY-SA 4.0",
+        bpm: 0,
+        ms: 109491,
+        file: "https://upload.wikimedia.org/wikipedia/commons/transcoded/3/31/Vivaldi_Tecumprincipium_DixitDominus_RV807_Esmuc.ogg/Vivaldi_Tecumprincipium_DixitDominus_RV807_Esmuc.ogg.mp3",
+    },
+    Seed {
+        title: "Juravit Dominus",
+        composer: "Antonio Vivaldi",
+        album: "Dixit Dominus",
+        part: "Dixit Dominus in D major, RV 807",
+        track: 5,
+        catalogue: "RV 807",
+        performer: "Escola Superior de Música de Catalunya",
+        licence: "CC BY-SA 4.0",
+        bpm: 0,
+        ms: 110500,
+        file: "https://upload.wikimedia.org/wikipedia/commons/transcoded/e/e4/Vivaldi_Juravitdominus_DixitDominus_RV807_Esmuc.ogg/Vivaldi_Juravitdominus_DixitDominus_RV807_Esmuc.ogg.mp3",
+    },
+    Seed {
+        title: "Dominus a dextris tuis",
+        composer: "Antonio Vivaldi",
+        album: "Dixit Dominus",
+        part: "Dixit Dominus in D major, RV 807",
+        track: 6,
+        catalogue: "RV 807",
+        performer: "Escola Superior de Música de Catalunya",
+        licence: "CC BY-SA 4.0",
+        bpm: 0,
+        ms: 116500,
+        file: "https://upload.wikimedia.org/wikipedia/commons/transcoded/d/dc/Vivaldi_Dominusadextristuis_DixitDominus_RV807_Esmuc.ogg/Vivaldi_Dominusadextristuis_DixitDominus_RV807_Esmuc.ogg.mp3",
+    },
+    Seed {
+        title: "Judicabit in nationibus",
+        composer: "Antonio Vivaldi",
+        album: "Dixit Dominus",
+        part: "Dixit Dominus in D major, RV 807",
+        track: 7,
+        catalogue: "RV 807",
+        performer: "Escola Superior de Música de Catalunya",
+        licence: "CC BY-SA 4.0",
+        bpm: 0,
+        ms: 152000,
+        file: "https://upload.wikimedia.org/wikipedia/commons/transcoded/3/3e/Vivaldi_Judicabitinnationibus_DixitDominus_RV807_Esmuc.ogg/Vivaldi_Judicabitinnationibus_DixitDominus_RV807_Esmuc.ogg.mp3",
+    },
+    Seed {
+        title: "De torrente",
+        composer: "Antonio Vivaldi",
+        album: "Dixit Dominus",
+        part: "Dixit Dominus in D major, RV 807",
+        track: 8,
+        catalogue: "RV 807",
+        performer: "Escola Superior de Música de Catalunya",
+        licence: "CC BY-SA 4.0",
+        bpm: 0,
+        ms: 212500,
+        file: "https://upload.wikimedia.org/wikipedia/commons/transcoded/8/85/Vivaldi_Detorrente_DixitDominus_RV807_Esmuc.ogg/Vivaldi_Detorrente_DixitDominus_RV807_Esmuc.ogg.mp3",
+    },
+    Seed {
+        title: "Gloria Patri",
+        composer: "Antonio Vivaldi",
+        album: "Dixit Dominus",
+        part: "Dixit Dominus in D major, RV 807",
+        track: 9,
+        catalogue: "RV 807",
+        performer: "Escola Superior de Música de Catalunya",
+        licence: "CC BY-SA 4.0",
+        bpm: 0,
+        ms: 126500,
+        file: "https://upload.wikimedia.org/wikipedia/commons/transcoded/f/fc/Vivaldi_Gloriapatri_DixitDominus_RV807_Esmuc.ogg/Vivaldi_Gloriapatri_DixitDominus_RV807_Esmuc.ogg.mp3",
+    },
+    Seed {
+        title: "Sicut erat in principio",
+        composer: "Antonio Vivaldi",
+        album: "Dixit Dominus",
+        part: "Dixit Dominus in D major, RV 807",
+        track: 10,
+        catalogue: "RV 807",
+        performer: "Escola Superior de Música de Catalunya",
+        licence: "CC BY-SA 4.0",
+        bpm: 0,
+        ms: 189000,
+        file: "https://upload.wikimedia.org/wikipedia/commons/transcoded/6/64/Vivaldi_Sicuterat_DixitDominus_RV807_Esmuc.ogg/Vivaldi_Sicuterat_DixitDominus_RV807_Esmuc.ogg.mp3",
+    },
+    Seed {
+        title: "Sinfonia al Santo Sepolcro in B minor",
+        composer: "Antonio Vivaldi",
+        album: "Dixit Dominus",
+        part: "",
+        track: 11,
+        catalogue: "RV 169",
+        performer: "Escola Superior de Música de Catalunya",
+        licence: "CC BY-SA 4.0",
+        bpm: 0,
+        ms: 244500,
+        file: "https://upload.wikimedia.org/wikipedia/commons/transcoded/5/54/Vivaldi_SinfoniaalSantoSepolcro_RV169_Esmuc.ogg/Vivaldi_SinfoniaalSantoSepolcro_RV169_Esmuc.ogg.mp3",
+    },
+    Seed {
+        title: "Sonata al Santo Sepolcro in E-flat major",
+        composer: "Antonio Vivaldi",
+        album: "Dixit Dominus",
+        part: "",
+        track: 12,
+        catalogue: "RV 130",
+        performer: "Escola Superior de Música de Catalunya",
+        licence: "CC BY-SA 4.0",
+        bpm: 0,
+        ms: 299500,
+        file: "https://upload.wikimedia.org/wikipedia/commons/transcoded/b/b2/Vivaldi_SonataalSantoSepolcro_RV130_Esmuc.ogg/Vivaldi_SonataalSantoSepolcro_RV130_Esmuc.ogg.mp3",
+    },
+];
+
 /// One picture, for an album or for a person.
 pub struct Art {
     /// `"album"` or `"artist"` — which of the two lists `name` is a name in,
@@ -3073,7 +3503,7 @@ pub struct WorkSeed {
     pub composed: i64,
 }
 
-/// The fifty-three works this library holds something of.
+/// The sixty works this library holds something of.
 pub const WORKS: &[WorkSeed] = &[
     // Vivaldi. Four works on one record, which is what `The Four Seasons`
     // makes visible: each concerto has its own number, its own key and its own
@@ -3160,6 +3590,64 @@ pub const WORKS: &[WorkSeed] = &[
         period: "Baroque",
         key_sig: "B Minor",
         composed: 1711,
+    },
+    WorkSeed {
+        catalogue: "RV 522",
+        title: "L'estro armonico, Concerto No. 8 in A Minor",
+        form: "Concerto",
+        period: "Baroque",
+        key_sig: "A Minor",
+        composed: 1711,
+    },
+    WorkSeed {
+        catalogue: "RV 565",
+        title: "L'estro armonico, Concerto No. 11 in D Minor",
+        form: "Concerto",
+        period: "Baroque",
+        key_sig: "D Minor",
+        composed: 1711,
+    },
+    WorkSeed {
+        catalogue: "RV 413",
+        title: "Cello Concerto in G Major",
+        form: "Concerto",
+        period: "Baroque",
+        key_sig: "G Major",
+        composed: 0,
+    },
+    // Sacred music, which is where a work's movements stop having tempo
+    // markings for titles and start having the text's first words.
+    WorkSeed {
+        catalogue: "RV 610",
+        title: "Magnificat in G Minor",
+        form: "Magnificat",
+        period: "Baroque",
+        key_sig: "G Minor",
+        composed: 0,
+    },
+    WorkSeed {
+        catalogue: "RV 807",
+        title: "Dixit Dominus in D Major",
+        form: "Psalm Setting",
+        period: "Baroque",
+        key_sig: "D Major",
+        composed: 0,
+    },
+    WorkSeed {
+        catalogue: "RV 169",
+        title: "Sinfonia al Santo Sepolcro in B Minor",
+        form: "Sinfonia",
+        period: "Baroque",
+        key_sig: "B Minor",
+        composed: 0,
+    },
+    WorkSeed {
+        catalogue: "RV 130",
+        title: "Sonata al Santo Sepolcro in E-Flat Major",
+        form: "Sonata",
+        period: "Baroque",
+        key_sig: "E-Flat Major",
+        composed: 0,
     },
     // Bach
     WorkSeed {
@@ -3542,8 +4030,78 @@ pub const CREDITS: &[CreditSeed] = &[
         pos: 1,
     },
     CreditSeed {
+        performer: "Advent Chamber Orchestra, David Parry, Roxana Pavel Goldstein",
+        name: "Advent Chamber Orchestra",
+        role: "orchestra",
+        instrument: "",
+        pos: 1,
+    },
+    CreditSeed {
+        performer: "Advent Chamber Orchestra, David Parry, Roxana Pavel Goldstein",
+        name: "David Parry",
+        role: "soloist",
+        instrument: "Violin",
+        pos: 2,
+    },
+    CreditSeed {
+        performer: "Advent Chamber Orchestra, David Parry, Roxana Pavel Goldstein",
+        name: "Roxana Pavel Goldstein",
+        role: "soloist",
+        instrument: "Violin",
+        pos: 3,
+    },
+    CreditSeed {
+        performer: "Advent Chamber Orchestra, Jacques Israelievitch, Roxana Pavel Goldstein",
+        name: "Advent Chamber Orchestra",
+        role: "orchestra",
+        instrument: "",
+        pos: 1,
+    },
+    CreditSeed {
+        performer: "Advent Chamber Orchestra, Jacques Israelievitch, Roxana Pavel Goldstein",
+        name: "Jacques Israelievitch",
+        role: "soloist",
+        instrument: "Violin",
+        pos: 2,
+    },
+    CreditSeed {
+        performer: "Advent Chamber Orchestra, Jacques Israelievitch, Roxana Pavel Goldstein",
+        name: "Roxana Pavel Goldstein",
+        role: "soloist",
+        instrument: "Violin",
+        pos: 3,
+    },
+    CreditSeed {
+        performer: "Advent Chamber Orchestra, Stephen Balderston",
+        name: "Advent Chamber Orchestra",
+        role: "orchestra",
+        instrument: "",
+        pos: 1,
+    },
+    CreditSeed {
+        performer: "Advent Chamber Orchestra, Stephen Balderston",
+        name: "Stephen Balderston",
+        role: "soloist",
+        instrument: "Cello",
+        pos: 2,
+    },
+    CreditSeed {
+        performer: "Associazione Culturale Panharmonikon",
+        name: "Associazione Culturale Panharmonikon",
+        role: "ensemble",
+        instrument: "",
+        pos: 1,
+    },
+    CreditSeed {
         performer: "Busch Chamber Players",
         name: "Busch Chamber Players",
+        role: "ensemble",
+        instrument: "",
+        pos: 1,
+    },
+    CreditSeed {
+        performer: "Escola Superior de Música de Catalunya",
+        name: "Escola Superior de Música de Catalunya",
         role: "ensemble",
         instrument: "",
         pos: 1,
@@ -3813,6 +4371,9 @@ pub fn seeded_times(domain: Domain, copies: usize) -> ark_client::Peer {
             .chain(MESSIAH)
             .chain(FOUR_SEASONS)
             .chain(CONCERTOS)
+            .chain(STRING_CONCERTOS)
+            .chain(MAGNIFICAT)
+            .chain(DIXIT_DOMINUS)
         {
             // The work's own name where this library knows one, and the
             // record's where it does not: twenty-four preludes and fugues stop
