@@ -336,7 +336,9 @@ pub fn paused_at(clock: Clock, now: Int) -> Clock {
 /// The session's clock paused where the session stands at `now`.
 #[ark::helper("listening.halted")]
 pub fn halted(clock: Clock, output: Output, now: Int) -> Clock {
-    Clock::Paused { at_ms: standing(clock, output, now) }
+    Clock::Paused {
+        at_ms: standing(clock, output, now),
+    }
 }
 
 /// The clock at `ms`, playing on from there if it was playing.
@@ -494,7 +496,12 @@ pub fn duration_at(queue: Vec<Track>, at: Int) -> Int {
 /// whichever device a press leaves the sound with.
 #[ark::helper("listening.moved_to")]
 pub fn moved_to(a: Active, at: Int, caller: Text, now: Int) -> Session {
-    Session::Active(Active { at, clock: Clock::Playing { at_ms: 0, since: now }, output: pressed(a.output, caller), ..a })
+    Session::Active(Active {
+        at,
+        clock: Clock::Playing { at_ms: 0, since: now },
+        output: pressed(a.output, caller),
+        ..a
+    })
 }
 
 /// Where the track at `i` goes when the one at `from` moves to `to`.
@@ -566,13 +573,10 @@ pub fn in_group(d: Present, leader: Text) -> bool {
 /// that is here, can play, of the leader's family, and not the leader.
 #[ark::helper("listening.joinable")]
 pub fn joinable(db: Harken, user: Text, leader: Text, id: Text) -> bool {
-    let family = db.listening_device.get((user, leader)).map_or(None, |l| {
-        if l.present.follows.is_none() {
-            l.present.family
-        } else {
-            None
-        }
-    });
+    let family = db
+        .listening_device
+        .get((user, leader))
+        .map_or(None, |l| if l.present.follows.is_none() { l.present.family } else { None });
     db.listening_device.get((user, id)).map_or(false, |d| {
         d.present.id != leader && d.present.can_play && d.present.family.is_some() && d.present.family == family
     })
@@ -594,7 +598,10 @@ pub fn voiced(db: Harken, user: Text, leader: Text) -> Vec<ListeningDevice> {
 #[ark::helper("listening.group_tally")]
 pub fn group_tally(db: Harken, user: Text, leader: Text) -> Tally {
     let members = voiced(db, user, leader);
-    Tally { n: members.len(), sum: members.map(|r| r.present.volume).sum() }
+    Tally {
+        n: members.len(),
+        sum: members.map(|r| r.present.volume).sum(),
+    }
 }
 
 /// The group's volume: the mean of its members', rounded down; 0 for a
@@ -623,7 +630,16 @@ pub fn scaled(volume: Int, from: Int, to: Int) -> Int {
 pub fn group_at(db: Harken, user: Text, leader: Text, to: Int) {
     let from = group_level(db, user, leader);
     voiced(db, user, leader).map(|r| {
-        put_present(db, user, r.device, Present { volume: scaled(r.present.volume, from, to), muted: false, ..r.present })
+        put_present(
+            db,
+            user,
+            r.device,
+            Present {
+                volume: scaled(r.present.volume, from, to),
+                muted: false,
+                ..r.present
+            },
+        )
     });
 }
 
@@ -646,7 +662,15 @@ pub fn dissolved(db: Harken, user: Text, id: Text) {
 pub fn followed(db: Harken, user: Text, id: Text, leader: Text) {
     devices_of(db, user).map(|r| {
         if r.present.id == id {
-            put_present(db, user, r.device, Present { follows: Some(leader), ..r.present })
+            put_present(
+                db,
+                user,
+                r.device,
+                Present {
+                    follows: Some(leader),
+                    ..r.present
+                },
+            )
         } else if r.present.follows == Some(id) {
             put_present(db, user, r.device, Present { follows: None, ..r.present })
         }
@@ -662,7 +686,15 @@ pub fn led_by(db: Harken, user: Text, to: Text) {
         if r.present.id == to {
             put_present(db, user, r.device, Present { follows: None, ..r.present })
         } else if old.is_some() && (Some(r.present.id) == old || r.present.follows == old) {
-            put_present(db, user, r.device, Present { follows: Some(to), ..r.present })
+            put_present(
+                db,
+                user,
+                r.device,
+                Present {
+                    follows: Some(to),
+                    ..r.present
+                },
+            )
         }
     });
 }
@@ -707,7 +739,10 @@ pub fn leader(db: Harken, user: Text) -> Text {
 #[ark::helper("listening.halt")]
 pub fn halt(session: Session, now: Int) -> Session {
     match session {
-        Session::Active(a) => Session::Active(Active { clock: halted(a.clock, a.output, now), ..a }),
+        Session::Active(a) => Session::Active(Active {
+            clock: halted(a.clock, a.output, now),
+            ..a
+        }),
         Session::Idle => Session::Idle,
     }
 }
@@ -742,7 +777,10 @@ pub fn start(ctx: Ctx, db: Harken, input: Start) {
         ctx.user,
         Session::Active(Active {
             at: input.at,
-            clock: Clock::Playing { at_ms: input.position, since: ctx.now },
+            clock: Clock::Playing {
+                at_ms: input.position,
+                since: ctx.now,
+            },
             from: input.from,
             output,
             queue: input.queue,
@@ -762,7 +800,10 @@ pub fn play(ctx: Ctx, db: Harken) {
     }
     let session = match s {
         Session::Active(a) => Session::Active(Active {
-            clock: Clock::Playing { at_ms: standing(a.clock, a.output, ctx.now), since: ctx.now },
+            clock: Clock::Playing {
+                at_ms: standing(a.clock, a.output, ctx.now),
+                since: ctx.now,
+            },
             output: pressed(a.output, ctx.session),
             ..a
         }),
@@ -789,7 +830,10 @@ pub fn seek(ctx: Ctx, db: Harken, input: Seek) {
         refuse!("nothing is queued");
     }
     let session = match s {
-        Session::Active(a) => Session::Active(Active { clock: clock_at(a.clock, input.ms, ctx.now), ..a }),
+        Session::Active(a) => Session::Active(Active {
+            clock: clock_at(a.clock, input.ms, ctx.now),
+            ..a
+        }),
         Session::Idle => Session::Idle,
     };
     put_session(db, ctx.user, session);
@@ -858,7 +902,11 @@ pub fn transfer(ctx: Ctx, db: Harken, input: Transfer) {
         Session::Active(a) => {
             let same = a.output == here(input.to);
             Session::Active(Active {
-                clock: if same { a.clock } else { clock_at(a.clock, standing(a.clock, a.output, ctx.now), ctx.now) },
+                clock: if same {
+                    a.clock
+                } else {
+                    clock_at(a.clock, standing(a.clock, a.output, ctx.now), ctx.now)
+                },
                 output: if same { a.output } else { Output::Device { id: input.to, moving: true } },
                 ..a
             })
@@ -886,7 +934,10 @@ pub fn enqueue(ctx: Ctx, db: Harken, input: Enqueue) {
         Session::Active(a) => {
             let n = a.queue.len();
             let cut = (if input.next { a.at + 1 } else { n }).min(n);
-            Session::Active(Active { queue: a.queue.slice(0, cut).concat(input.tracks).concat(a.queue.slice(cut, n)), ..a })
+            Session::Active(Active {
+                queue: a.queue.slice(0, cut).concat(input.tracks).concat(a.queue.slice(cut, n)),
+                ..a
+            })
         }
         Session::Idle => Session::Active(Active {
             at: 0,
@@ -920,7 +971,11 @@ pub fn remove(ctx: Ctx, db: Harken, input: Remove) {
                 Clock::Playing { .. } => true,
                 Clock::Paused { .. } => false,
             };
-            let start = if playing && !last { Clock::Playing { at_ms: 0, since: ctx.now } } else { Clock::Paused { at_ms: 0 } };
+            let start = if playing && !last {
+                Clock::Playing { at_ms: 0, since: ctx.now }
+            } else {
+                Clock::Paused { at_ms: 0 }
+            };
             if n <= 1 {
                 Session::Idle
             } else {
@@ -966,7 +1021,10 @@ pub fn clear_upcoming(ctx: Ctx, db: Harken) {
         refuse!("nothing is queued");
     }
     let session = match s {
-        Session::Active(a) => Session::Active(Active { queue: a.queue.slice(0, (a.at + 1).min(a.queue.len())), ..a }),
+        Session::Active(a) => Session::Active(Active {
+            queue: a.queue.slice(0, (a.at + 1).min(a.queue.len())),
+            ..a
+        }),
         Session::Idle => Session::Idle,
     };
     put_session(db, ctx.user, session);
@@ -980,7 +1038,11 @@ pub fn started(ctx: Ctx, db: Harken, input: At) {
         refuse!("not the output");
     }
     let session = match s {
-        Session::Active(a) => Session::Active(Active { clock: clock_at(a.clock, input.at_ms, ctx.now), output: here(ctx.session), ..a }),
+        Session::Active(a) => Session::Active(Active {
+            clock: clock_at(a.clock, input.at_ms, ctx.now),
+            output: here(ctx.session),
+            ..a
+        }),
         Session::Idle => Session::Idle,
     };
     put_session(db, ctx.user, session);
@@ -999,9 +1061,16 @@ pub fn advance(ctx: Ctx, db: Harken, input: Advance) {
             if a.at != input.from_track {
                 s
             } else if a.at + 1 < a.queue.len() {
-                Session::Active(Active { at: a.at + 1, clock: Clock::Playing { at_ms: 0, since: ctx.now }, ..a })
+                Session::Active(Active {
+                    at: a.at + 1,
+                    clock: Clock::Playing { at_ms: 0, since: ctx.now },
+                    ..a
+                })
             } else {
-                Session::Active(Active { clock: Clock::Paused { at_ms: 0 }, ..a })
+                Session::Active(Active {
+                    clock: Clock::Paused { at_ms: 0 },
+                    ..a
+                })
             }
         }
         Session::Idle => Session::Idle,
@@ -1017,7 +1086,10 @@ pub fn stalled(ctx: Ctx, db: Harken, input: At) {
         refuse!("not the output");
     }
     let session = match s {
-        Session::Active(a) => Session::Active(Active { clock: Clock::Paused { at_ms: input.at_ms }, ..a }),
+        Session::Active(a) => Session::Active(Active {
+            clock: Clock::Paused { at_ms: input.at_ms },
+            ..a
+        }),
         Session::Idle => Session::Idle,
     };
     put_session(db, ctx.user, session);
@@ -1042,7 +1114,13 @@ pub fn report_position(ctx: Ctx, db: Harken, input: Report) {
                 _ => false,
             };
             if current && settled {
-                Session::Active(Active { clock: Clock::Playing { at_ms: input.at_ms, since: ctx.now }, ..a })
+                Session::Active(Active {
+                    clock: Clock::Playing {
+                        at_ms: input.at_ms,
+                        since: ctx.now,
+                    },
+                    ..a
+                })
             } else {
                 s
             }
@@ -1061,7 +1139,11 @@ pub fn release(ctx: Ctx, db: Harken) {
         refuse!("not the output");
     }
     let session = match s {
-        Session::Active(a) => Session::Active(Active { clock: halted(a.clock, a.output, ctx.now), output: Output::Nowhere, ..a }),
+        Session::Active(a) => Session::Active(Active {
+            clock: halted(a.clock, a.output, ctx.now),
+            output: Output::Nowhere,
+            ..a
+        }),
         Session::Idle => Session::Idle,
     };
     put_session(db, ctx.user, session);
@@ -1082,7 +1164,13 @@ pub fn equip(ctx: Ctx, db: Harken, input: Equip) {
         db,
         ctx.user,
         ctx.session,
-        Present { can_volume: input.can_volume, family: input.family, muted: input.muted, volume: input.volume, ..me },
+        Present {
+            can_volume: input.can_volume,
+            family: input.family,
+            muted: input.muted,
+            volume: input.volume,
+            ..me
+        },
     );
 }
 
@@ -1093,7 +1181,16 @@ pub fn set_volume(ctx: Ctx, db: Harken, input: SetVolume) {
         refuse!("that device is not here, or has no volume");
     }
     let d = present_of(db, ctx.user, input.device);
-    put_present(db, ctx.user, input.device, Present { volume: input.level, muted: false, ..d });
+    put_present(
+        db,
+        ctx.user,
+        input.device,
+        Present {
+            volume: input.level,
+            muted: false,
+            ..d
+        },
+    );
 }
 
 /// …moved by so much, clamped: what a volume button sends.
@@ -1103,7 +1200,16 @@ pub fn nudge_volume(ctx: Ctx, db: Harken, input: NudgeVolume) {
         refuse!("that device is not here, or has no volume");
     }
     let d = present_of(db, ctx.user, input.device);
-    put_present(db, ctx.user, input.device, Present { volume: (d.volume + input.delta).clamp(0, 100), muted: false, ..d });
+    put_present(
+        db,
+        ctx.user,
+        input.device,
+        Present {
+            volume: (d.volume + input.delta).clamp(0, 100),
+            muted: false,
+            ..d
+        },
+    );
 }
 
 #[ark::live("listening.set_mute")]
@@ -1122,7 +1228,16 @@ pub fn report_volume(ctx: Ctx, db: Harken, input: ReportVolume) {
         refuse!("not here, or no volume");
     }
     let d = present_of(db, ctx.user, ctx.session);
-    put_present(db, ctx.user, ctx.session, Present { volume: input.level, muted: input.muted, ..d });
+    put_present(
+        db,
+        ctx.user,
+        ctx.session,
+        Present {
+            volume: input.level,
+            muted: input.muted,
+            ..d
+        },
+    );
 }
 
 /// A speaker joins the output's group; whatever followed it follows nobody.
@@ -1141,7 +1256,11 @@ pub fn join(ctx: Ctx, db: Harken, input: Member) {
 /// …and leaves whatever group it is in.
 #[ark::live("listening.unjoin")]
 pub fn unjoin(ctx: Ctx, db: Harken, input: Member) {
-    if !db.listening_device.get((ctx.user, input.device)).map_or(false, |d| d.present.follows.is_some()) {
+    if !db
+        .listening_device
+        .get((ctx.user, input.device))
+        .map_or(false, |d| d.present.follows.is_some())
+    {
         refuse!("that device is not in a group");
     }
     let d = present_of(db, ctx.user, input.device);
@@ -1151,7 +1270,11 @@ pub fn unjoin(ctx: Ctx, db: Harken, input: Member) {
 /// A leader's word on who follows it, changed outside harken.
 #[ark::live("listening.report_group")]
 pub fn report_group(ctx: Ctx, db: Harken, input: ReportGroup) {
-    if !db.listening_device.get((ctx.user, ctx.session)).map_or(false, |d| d.present.family.is_some()) {
+    if !db
+        .listening_device
+        .get((ctx.user, ctx.session))
+        .map_or(false, |d| d.present.family.is_some())
+    {
         refuse!("not here, or not a speaker that groups");
     }
     regrouped(db, ctx.user, ctx.session, input.members);
@@ -1189,7 +1312,11 @@ pub fn set_group_mute(ctx: Ctx, db: Harken, input: GroupMute) {
 pub fn scrub(ctx: Ctx, db: Harken, input: Scrub) {
     db.listening_scrub.delete((ctx.user, ctx.session));
     match input.at_ms {
-        Some(at) => db.listening_scrub.insert(ListeningScrub { user: ctx.user, device: ctx.session, at_ms: at }),
+        Some(at) => db.listening_scrub.insert(ListeningScrub {
+            user: ctx.user,
+            device: ctx.session,
+            at_ms: at,
+        }),
         None => {}
     }
 }
@@ -1201,9 +1328,16 @@ pub fn on_join(db: Harken, device: Device) {
     let user = device.user;
     let id = device.id;
     db.listening_device.delete((user, id));
-    db.listening_device.insert(ListeningDevice { user, device: id, present: arrived(device) });
+    db.listening_device.insert(ListeningDevice {
+        user,
+        device: id,
+        present: arrived(device),
+    });
     let session = match session_of(db, user) {
-        Session::Active(a) => Session::Active(Active { output: returned(a.output, id), ..a }),
+        Session::Active(a) => Session::Active(Active {
+            output: returned(a.output, id),
+            ..a
+        }),
         Session::Idle => Session::Idle,
     };
     if db.listening.get(user).is_some() {
@@ -1249,7 +1383,9 @@ pub fn on_restore(ctx: Ctx, db: Harken) {
     db.listening.map(|r| {
         let session = match r.session {
             Session::Active(a) => Session::Active(Active {
-                clock: Clock::Paused { at_ms: standing(a.clock, a.output, ctx.now).min(duration_at(a.queue, a.at)) },
+                clock: Clock::Paused {
+                    at_ms: standing(a.clock, a.output, ctx.now).min(duration_at(a.queue, a.at)),
+                },
                 output: Output::Nowhere,
                 ..a
             }),
@@ -1299,13 +1435,19 @@ pub fn record_play(ctx: Ctx, db: Harken, input: RecordPlay) {
 /// The caller's newest play.
 #[ark::query("listening.last_played")]
 pub fn last_played(ctx: Ctx, db: Harken) -> Vec<Play> {
-    db.play.filter(|p| p.user_id == ctx.user).sort(|p| (Desc(p.played_ms), Desc(p.id))).take(1)
+    db.play
+        .filter(|p| p.user_id == ctx.user)
+        .sort(|p| (Desc(p.played_ms), Desc(p.id)))
+        .take(1)
 }
 
 /// The caller's plays, newest first, the last [`RECENT`] of them.
 #[ark::query("listening.recently_played")]
 pub fn recently_played(ctx: Ctx, db: Harken) -> Vec<Play> {
-    db.play.filter(|p| p.user_id == ctx.user).sort(|p| (Desc(p.played_ms), Desc(p.id))).take(50)
+    db.play
+        .filter(|p| p.user_id == ctx.user)
+        .sort(|p| (Desc(p.played_ms), Desc(p.id)))
+        .take(50)
 }
 
 // * Reading it
@@ -1530,10 +1672,22 @@ mod tests {
     /// is already an answer. Falsified by dropping the percent-encoding.
     #[test]
     fn a_file_is_joined_to_the_server_that_is_asking() {
-        assert_eq!(url("http://10.0.0.2:8787", "music/Bach/air.flac"), "http://10.0.0.2:8787/media/music/Bach/air.flac");
-        assert_eq!(url("https://harken.example.com/", "music/a.mp3"), "https://harken.example.com/media/music/a.mp3");
-        assert_eq!(url("http://h", "music/Boléro & co/no #1.mp3"), "http://h/media/music/Bol%C3%A9ro%20%26%20co/no%20%231.mp3");
-        assert_eq!(url("http://h", "https://upload.wikimedia.org/x.mp3"), "https://upload.wikimedia.org/x.mp3");
+        assert_eq!(
+            url("http://10.0.0.2:8787", "music/Bach/air.flac"),
+            "http://10.0.0.2:8787/media/music/Bach/air.flac"
+        );
+        assert_eq!(
+            url("https://harken.example.com/", "music/a.mp3"),
+            "https://harken.example.com/media/music/a.mp3"
+        );
+        assert_eq!(
+            url("http://h", "music/Boléro & co/no #1.mp3"),
+            "http://h/media/music/Bol%C3%A9ro%20%26%20co/no%20%231.mp3"
+        );
+        assert_eq!(
+            url("http://h", "https://upload.wikimedia.org/x.mp3"),
+            "https://upload.wikimedia.org/x.mp3"
+        );
         assert_eq!(url("http://h", ""), "");
     }
 

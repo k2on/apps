@@ -44,30 +44,128 @@ fn seeded() -> Seeded {
     c.playlist("alice", "Other");
     c.playlist("bob", "Favorites");
     for s in [
-        track("Aria", "Johann Sebastian Bach", "Goldberg Variations", "BWV 988", "Glenn Gould", "g1", 1, "Goldberg Variations", 1),
-        track("Variation 1", "Johann Sebastian Bach", "Goldberg Variations", "BWV 988", "Glenn Gould", "g2", 2, "Goldberg Variations", 2),
-        track("Variation 2", "Johann Sebastian Bach", "Goldberg Variations", "BWV 988", "Kimiko Ishizaka", "g3", 3, "Goldberg Variations", 3),
-        track("Allegro", "Johann Sebastian Bach", "Brandenburg Concertos", "BWV 1046", "The English Concert, Trevor Pinnock", "b1", 1, "Brandenburg Concerto No. 1", 1),
-        track("Overture", "George Frideric Handel", "Water Music", "HWV 348", "", "w1", 1, "Water Music Suite No. 1", 1),
-        track("Hallelujah", "George Frideric Handel", "Messiah", "HWV 56", "London Symphony Orchestra, Hermann Scherchen", "m1", 44, "Messiah", 44),
+        track(
+            "Aria",
+            "Johann Sebastian Bach",
+            "Goldberg Variations",
+            "BWV 988",
+            "Glenn Gould",
+            "g1",
+            1,
+            "Goldberg Variations",
+            1,
+        ),
+        track(
+            "Variation 1",
+            "Johann Sebastian Bach",
+            "Goldberg Variations",
+            "BWV 988",
+            "Glenn Gould",
+            "g2",
+            2,
+            "Goldberg Variations",
+            2,
+        ),
+        track(
+            "Variation 2",
+            "Johann Sebastian Bach",
+            "Goldberg Variations",
+            "BWV 988",
+            "Kimiko Ishizaka",
+            "g3",
+            3,
+            "Goldberg Variations",
+            3,
+        ),
+        track(
+            "Allegro",
+            "Johann Sebastian Bach",
+            "Brandenburg Concertos",
+            "BWV 1046",
+            "The English Concert, Trevor Pinnock",
+            "b1",
+            1,
+            "Brandenburg Concerto No. 1",
+            1,
+        ),
+        track(
+            "Overture",
+            "George Frideric Handel",
+            "Water Music",
+            "HWV 348",
+            "",
+            "w1",
+            1,
+            "Water Music Suite No. 1",
+            1,
+        ),
+        track(
+            "Hallelujah",
+            "George Frideric Handel",
+            "Messiah",
+            "HWV 56",
+            "London Symphony Orchestra, Hermann Scherchen",
+            "m1",
+            44,
+            "Messiah",
+            44,
+        ),
     ] {
         c.add(s);
     }
-    for (t, a, al, f) in [("Glue", "Bicep", "Isles", "p1"), ("Opal", "Bicep", "Isles", "p2"), ("Gosh", "Jamie xx", "In Colour", "p3"), ("Loose", "Jamie xx", "", "p4")] {
+    for (t, a, al, f) in [
+        ("Glue", "Bicep", "Isles", "p1"),
+        ("Opal", "Bicep", "Isles", "p2"),
+        ("Gosh", "Jamie xx", "In Colour", "p3"),
+        ("Loose", "Jamie xx", "", "p4"),
+    ] {
         c.add(with(f, song(t, a, al)));
     }
-    let works: Vec<WorkSummary> = c.list("works", &Works { composer: "Johann Sebastian Bach".into() });
+    let works: Vec<WorkSummary> = c.list(
+        "works",
+        &Works {
+            composer: "Johann Sebastian Bach".into(),
+        },
+    );
     let work = works.iter().find(|w| w.catalogue == "BWV 988").expect("the Goldberg").id.clone();
-    let recording = c.list::<RecordingsEntry>("recordings", &Recordings { work_id: work.clone() })[0].id.clone();
-    let credit = CreditRecording { recording_id: recording.clone(), person_name: "Glenn Gould".into(), role: "piano".into(), instrument: "piano".into(), pos: 1 };
+    let recording = c.list::<RecordingsEntry>("recordings", &Recordings { work_id: work.clone() })[0]
+        .id
+        .clone();
+    let credit = CreditRecording {
+        recording_id: recording.clone(),
+        person_name: "Glenn Gould".into(),
+        role: "piano".into(),
+        instrument: "piano".into(),
+        pos: 1,
+    };
     c.mutate("alice", "credit_recording", &credit).unwrap();
-    let bach = DescribePerson { name: "Johann Sebastian Bach".into(), sort_name: "Bach, Johann Sebastian".into(), born: 1685, died: 1750, art: "bach.jpg".into() };
+    let bach = DescribePerson {
+        name: "Johann Sebastian Bach".into(),
+        sort_name: "Bach, Johann Sebastian".into(),
+        born: 1685,
+        died: 1750,
+        art: "bach.jpg".into(),
+    };
     c.mutate("alice", "describe_person", &bach).unwrap();
     let ids: Vec<Id<Media>> = c.library(&favs).iter().map(|r| r.id.clone()).collect();
     for i in [0, 3, 6] {
-        c.mutate("alice", "add_to_playlist", &AddToPlaylist { playlist_id: favs.clone(), media_id: ids[i].clone() }).unwrap();
+        c.mutate(
+            "alice",
+            "add_to_playlist",
+            &AddToPlaylist {
+                playlist_id: favs.clone(),
+                media_id: ids[i].clone(),
+            },
+        )
+        .unwrap();
     }
-    Seeded { media: ids[0].clone(), lib: c, favs, work, recording }
+    Seeded {
+        media: ids[0].clone(),
+        lib: c,
+        favs,
+        work,
+        recording,
+    }
 }
 
 /// Knuth's MMIX generator, as the simulator's.
@@ -95,7 +193,12 @@ fn churn(c: &mut Lib, r: &mut Rng) {
     let people = ["Glenn Gould", "Kimiko Ishizaka", "Johann Sebastian Bach", "Somebody"];
     let media: Vec<Id<Media>> = c.rows::<Media>("media").into_iter().map(|m| m.id).collect();
     let recordings: Vec<String> = c.rows::<Recording>("recording").into_iter().map(|r| r.id).collect();
-    let mine: Vec<Id<Playlist>> = c.rows::<Playlist>("playlist").into_iter().filter(|p| p.user_id == "alice").map(|p| p.id).collect();
+    let mine: Vec<Id<Playlist>> = c
+        .rows::<Playlist>("playlist")
+        .into_iter()
+        .filter(|p| p.user_id == "alice")
+        .map(|p| p.id)
+        .collect();
     let some_media = |r: &mut Rng| media.get(r.below(media.len().max(1))).cloned();
     let _ = c.last.clear();
     let out = match r.below(9) {
@@ -111,32 +214,71 @@ fn churn(c: &mut Lib, r: &mut Rng) {
             };
             c.mutate("alice", "add_song", &s)
         }
-        2 => c.mutate("alice", "create_playlist", &CreatePlaylist { name: r.pick(&["Favorites", "Late", "Mix"]).into() }),
+        2 => c.mutate(
+            "alice",
+            "create_playlist",
+            &CreatePlaylist {
+                name: r.pick(&["Favorites", "Late", "Mix"]).into(),
+            },
+        ),
         3 | 4 => match (some_media(r), mine.get(r.below(mine.len().max(1)))) {
-            (Some(m), Some(p)) => c.mutate("alice", "add_to_playlist", &AddToPlaylist { playlist_id: p.clone(), media_id: m }),
+            (Some(m), Some(p)) => c.mutate(
+                "alice",
+                "add_to_playlist",
+                &AddToPlaylist {
+                    playlist_id: p.clone(),
+                    media_id: m,
+                },
+            ),
             _ => Ok(0),
         },
         5 => match (some_media(r), mine.get(r.below(mine.len().max(1)))) {
-            (Some(m), Some(p)) => c.mutate("alice", "remove_from_playlist", &RemoveFromPlaylist { playlist_id: p.clone(), media_id: m }),
+            (Some(m), Some(p)) => c.mutate(
+                "alice",
+                "remove_from_playlist",
+                &RemoveFromPlaylist {
+                    playlist_id: p.clone(),
+                    media_id: m,
+                },
+            ),
             _ => Ok(0),
         },
         6 => match some_media(r) {
             Some(id) if r.below(2) == 0 => c.mutate("alice", "remove_media", &RemoveMedia { id }),
             _ => {
-                let p = DescribePerson { name: r.pick(&people).into(), art: r.pick(&["", "x.jpg", "y.jpg"]).into(), ..DescribePerson::default() };
+                let p = DescribePerson {
+                    name: r.pick(&people).into(),
+                    art: r.pick(&["", "x.jpg", "y.jpg"]).into(),
+                    ..DescribePerson::default()
+                };
                 c.mutate("alice", "describe_person", &p)
             }
         },
         7 => match recordings.get(r.below(recordings.len().max(1))) {
             Some(id) => {
                 let pos = r.below(3) as i64;
-                let cr = CreditRecording { recording_id: id.clone(), person_name: r.pick(&people).into(), role: r.pick(&["piano", "", "conductor"]).into(), instrument: String::new(), pos };
+                let cr = CreditRecording {
+                    recording_id: id.clone(),
+                    person_name: r.pick(&people).into(),
+                    role: r.pick(&["piano", "", "conductor"]).into(),
+                    instrument: String::new(),
+                    pos,
+                };
                 c.mutate("alice", "credit_recording", &cr)
             }
             None => Ok(0),
         },
         _ => match recordings.get(r.below(recordings.len().max(1))) {
-            Some(id) => c.mutate("alice", "describe_recording", &DescribeRecording { id: id.clone(), recorded: r.below(3) as i64 * 1000, licence: r.pick(&["", "CC0"]).into(), ..DescribeRecording::default() }),
+            Some(id) => c.mutate(
+                "alice",
+                "describe_recording",
+                &DescribeRecording {
+                    id: id.clone(),
+                    recorded: r.below(3) as i64 * 1000,
+                    licence: r.pick(&["", "CC0"]).into(),
+                    ..DescribeRecording::default()
+                },
+            ),
             None => Ok(0),
         },
     };
@@ -162,7 +304,13 @@ struct Tally {
 fn hold(name: &str, input: &impl Node) -> Tally {
     let d = domain();
     let (f, input) = (d.get(&full(name)), input.to_bytes());
-    let ctx = Ctx { id: EntryId::of("q", 0), actor: "alice".into(), session: "q".into(), roles: vec![], now: 0 };
+    let ctx = Ctx {
+        id: EntryId::of("q", 0),
+        actor: "alice".into(),
+        session: "q".into(),
+        roles: vec![],
+        now: 0,
+    };
     let mut sum = Tally::default();
     for seed in 0..SEEDS {
         let mut c = seeded().lib;
@@ -172,7 +320,9 @@ fn hold(name: &str, input: &impl Node) -> Tally {
         let mut r = Rng(seed);
         for step in 0..STEPS {
             churn(&mut c, &mut r);
-            let ps = v.push(&c.last, &c.store).unwrap_or_else(|e| panic!("{name} seed {seed} step {step}: {e}"));
+            let ps = v
+                .push(&c.last, &c.store)
+                .unwrap_or_else(|e| panic!("{name} seed {seed} step {step}: {e}"));
             sum.pushes += 1;
             for p in &ps {
                 match p {
@@ -202,10 +352,22 @@ fn moved(t: &Tally) -> bool {
 fn search() {
     let s = seeded();
     for needle in ["ari", "BACH", "a"] {
-        let t = hold("search", &Search { playlist_id: s.favs.clone(), needle: needle.into() });
+        let t = hold(
+            "search",
+            &Search {
+                playlist_id: s.favs.clone(),
+                needle: needle.into(),
+            },
+        );
         assert!(t.inserts + t.removes + t.updates > 0, "{needle}: {t:?}");
     }
-    let hits: Vec<LibraryEntry> = s.lib.list("search", &Search { playlist_id: s.favs.clone(), needle: "BACH".into() });
+    let hits: Vec<LibraryEntry> = s.lib.list(
+        "search",
+        &Search {
+            playlist_id: s.favs.clone(),
+            needle: "BACH".into(),
+        },
+    );
     assert_eq!(hits.len(), 4, "every track whose creator holds it");
 }
 
@@ -233,14 +395,26 @@ fn track_details() {
 #[test]
 fn album() {
     let s = seeded();
-    let t = hold("album", &AlbumInput { playlist_id: s.favs, name: "Goldberg Variations".into() });
+    let t = hold(
+        "album",
+        &AlbumInput {
+            playlist_id: s.favs,
+            name: "Goldberg Variations".into(),
+        },
+    );
     assert!(t.inserts + t.removes > 0 && t.updates > 0, "{t:?}");
 }
 
 #[test]
 fn artist() {
     let s = seeded();
-    let t = hold("artist", &Artist { playlist_id: s.favs, name: "Bicep".into() });
+    let t = hold(
+        "artist",
+        &Artist {
+            playlist_id: s.favs,
+            name: "Bicep".into(),
+        },
+    );
     assert!(t.inserts + t.removes + t.updates > 0, "{t:?}");
 }
 
@@ -252,7 +426,12 @@ fn composers() {
 
 #[test]
 fn works() {
-    let t = hold("works", &Works { composer: "Johann Sebastian Bach".into() });
+    let t = hold(
+        "works",
+        &Works {
+            composer: "Johann Sebastian Bach".into(),
+        },
+    );
     assert!(t.inserts + t.removes > 0 && t.updates > 0, "{t:?}");
 }
 
@@ -280,7 +459,13 @@ fn credits() {
 #[test]
 fn recording() {
     let s = seeded();
-    let t = hold("recording", &RecordingInput { playlist_id: s.favs, id: s.recording });
+    let t = hold(
+        "recording",
+        &RecordingInput {
+            playlist_id: s.favs,
+            id: s.recording,
+        },
+    );
     assert!(t.inserts + t.removes + t.updates > 0, "{t:?}");
 }
 
@@ -314,7 +499,13 @@ fn the_library_follows_the_mutations_and_a_rollback() {
     let other = c.playlist("alice", "Other");
     let d = domain();
     let (f, input) = (d.get(&full("library")), Library { playlist_id: favs.clone() }.to_bytes());
-    let ctx = Ctx { id: EntryId::of("q", 0), actor: "alice".into(), session: "q".into(), roles: vec![], now: 0 };
+    let ctx = Ctx {
+        id: EntryId::of("q", 0),
+        actor: "alice".into(),
+        session: "q".into(),
+        roles: vec![],
+        now: 0,
+    };
     let mut v = View::new(&d.lib, &f, &input, ctx.clone(), &c.store).unwrap();
     let mut shown = v.rows();
     let mut patched = 0;
@@ -336,7 +527,13 @@ fn the_library_follows_the_mutations_and_a_rollback() {
         step(&mut c, "add_song", with(file, song(t, "X", "Y")).to_bytes());
     }
     let ids: Vec<Id<Media>> = c.library(&favs).iter().map(|r| r.id.clone()).collect();
-    let on = |p: &Id<Playlist>, m: &Id<Media>| AddToPlaylist { playlist_id: p.clone(), media_id: m.clone() }.to_bytes();
+    let on = |p: &Id<Playlist>, m: &Id<Media>| {
+        AddToPlaylist {
+            playlist_id: p.clone(),
+            media_id: m.clone(),
+        }
+        .to_bytes()
+    };
     step(&mut c, "add_to_playlist", on(&favs, &ids[2]));
     step(&mut c, "add_to_playlist", on(&favs, &ids[0]));
     step(&mut c, "add_to_playlist", on(&other, &ids[1]));
@@ -347,7 +544,15 @@ fn the_library_follows_the_mutations_and_a_rollback() {
     assert!(patched > 0);
     let entries: Vec<LibraryEntry> = shown.iter().map(|r| LibraryEntry::from_bytes(&r.to_bytes()).unwrap()).collect();
     let got: Vec<(String, Option<i64>)> = entries.iter().map(|e| (e.title.clone(), e.playlist_pos)).collect();
-    assert_eq!(got, [("Opal".into(), Some(3)), ("Gosh".into(), Some(4)), ("Air".into(), Some(5)), ("Late".into(), None)]);
+    assert_eq!(
+        got,
+        [
+            ("Opal".into(), Some(3)),
+            ("Gosh".into(), Some(4)),
+            ("Air".into(), Some(5)),
+            ("Late".into(), None)
+        ]
+    );
 
     // A rollback: the view made again over the store as it was is the query.
     c.store = kept.expect("a store to roll back to");

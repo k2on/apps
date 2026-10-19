@@ -17,7 +17,13 @@ use ark5::store::Store;
 pub fn eval(name: &str, args: Vec<V>) -> Result<Vec<u8>, ark5::Refusal> {
     static D: OnceLock<Domain> = OnceLock::new();
     let d = D.get_or_init(crate::domain);
-    let ctx = Ctx { id: EntryId::of("host", 0), actor: String::new(), session: String::new(), roles: vec![], now: 0 };
+    let ctx = Ctx {
+        id: EntryId::of("host", 0),
+        actor: String::new(),
+        session: String::new(),
+        roles: vec![],
+        now: 0,
+    };
     d.ask(&Store::new(d.schema.clone()), &ctx, name, &V::Tup(args).to_bytes())
 }
 
@@ -35,7 +41,10 @@ fn answer(name: &str, args: Vec<V>) -> String {
 /// `library::work_key`: a work's key, from its composer, catalogue number
 /// and title.
 pub fn work_key(composer: &str, catalogue: &str, title: &str) -> String {
-    answer("library.work_key", vec![text(composer.trim()), text(catalogue.trim()), text(title.trim())])
+    answer(
+        "library.work_key",
+        vec![text(composer.trim()), text(catalogue.trim()), text(title.trim())],
+    )
 }
 
 /// `library::movement_key`: a movement's key, from its work's and its number.
@@ -63,8 +72,14 @@ mod tests {
     /// keyed with a leading dash.
     #[test]
     fn keys_are_names_every_peer_agrees_on() {
-        assert_eq!(work_key("Johann Sebastian Bach", "BWV 988", "Goldberg Variations"), "johann-sebastian-bach/bwv-988");
-        assert_eq!(work_key("Johann Sebastian Bach", "", " Goldberg Variations "), "johann-sebastian-bach/goldberg-variations");
+        assert_eq!(
+            work_key("Johann Sebastian Bach", "BWV 988", "Goldberg Variations"),
+            "johann-sebastian-bach/bwv-988"
+        );
+        assert_eq!(
+            work_key("Johann Sebastian Bach", "", " Goldberg Variations "),
+            "johann-sebastian-bach/goldberg-variations"
+        );
         let bang = key_part("!!!");
         assert!(bang.starts_with('x') && bang.len() > 1, "{bang}");
         assert_ne!(bang, key_part("???"), "two names of no letters are two keys");
@@ -83,7 +98,10 @@ mod tests {
     #[test]
     #[ignore = "waits for a std function that sees neighbouring characters; v5's slug does not collapse a run"]
     fn a_run_of_separators_is_one_dash() {
-        assert_eq!(key_part("Dvořák: Symphony No. 9, \"From the New World\"!"), "dvořák-symphony-no-9-from-the-new-world");
+        assert_eq!(
+            key_part("Dvořák: Symphony No. 9, \"From the New World\"!"),
+            "dvořák-symphony-no-9-from-the-new-world"
+        );
         assert_eq!(key_part("  --a  b--  "), "a-b", "no dash leads, trails or doubles");
     }
 
@@ -107,7 +125,12 @@ mod tests {
     /// playlists came back "Favorites (1)".
     #[test]
     fn playlist_name_is_what_it_was() {
-        let sets: [&[&str]; 4] = [&[], &["Favorites"], &["Favorites", "Favorites (1)", "Favorites (3)", "Evening"], &["Evening", "Morning"]];
+        let sets: [&[&str]; 4] = [
+            &[],
+            &["Favorites"],
+            &["Favorites", "Favorites (1)", "Favorites (3)", "Evening"],
+            &["Evening", "Morning"],
+        ];
         for names in sets {
             for name in ["Favorites", "Evening", "Night"] {
                 assert_eq!(playlist_name(names, name), playlist_name_was(names, name), "{name:?} among {names:?}");

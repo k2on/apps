@@ -151,7 +151,10 @@ mod src {
 
     #[ark::query]
     pub fn relational(db: S) -> Vec<(T, U)> {
-        db.t.filter(|r| r.n > 0).sort(|r| (Desc(r.n), r.id)).take(2).join(db.u, |a, b| a.id == b.id)
+        db.t.filter(|r| r.n > 0)
+            .sort(|r| (Desc(r.n), r.id))
+            .take(2)
+            .join(db.u, |a, b| a.id == b.id)
     }
 
     #[ark::query]
@@ -255,7 +258,10 @@ fn parameters() {
 /// under its own binder: `a` read `Var(1)` in it.
 #[test]
 fn let_binds_the_rest() {
-    assert_eq!(lets::built().f.body, Expr::Let(b(op(Op::Add, v(0), int(1))), b(op(Op::Mul, v(0), int(2)))));
+    assert_eq!(
+        lets::built().f.body,
+        Expr::Let(b(op(Op::Add, v(0), int(1))), b(op(Op::Mul, v(0), int(2))))
+    );
 }
 
 /// Statements are a `Seq`; a mutator is `Write` and returns `()`.
@@ -272,9 +278,15 @@ fn statements_are_a_seq() {
 /// an `if` alone's else being its then.
 #[test]
 fn if_and_else() {
-    assert_eq!(ifs::built().f.body, Expr::If(b(op(Op::Gt, v(0), int(0))), b(v(0)), b(Expr::Un(Un::Neg, b(v(0))))));
+    assert_eq!(
+        ifs::built().f.body,
+        Expr::If(b(op(Op::Gt, v(0), int(0))), b(v(0)), b(Expr::Un(Un::Neg, b(v(0)))))
+    );
     let del = Expr::Delete("t".into(), b(Expr::Tuple(vec![v(0)])));
-    assert_eq!(if_alone::built().f.body, Expr::If(b(op(Op::Eq, v(0), text(""))), b(del), b(Expr::Seq(vec![]))));
+    assert_eq!(
+        if_alone::built().f.body,
+        Expr::If(b(op(Op::Eq, v(0), text(""))), b(del), b(Expr::Seq(vec![])))
+    );
 }
 
 /// `if let Some(x) = o { a } else { b }` is a `Match` whose `None` arm is
@@ -291,7 +303,10 @@ fn if_let_is_a_match() {
 /// fields in the order the pattern names them: `x - y` read `y - x`.
 #[test]
 fn match_on_a_sum() {
-    assert_eq!(matches::built().f.body, Expr::Match(b(v(0)), vec![op(Op::Sub, v(1), v(0)), int(1), int(2)]));
+    assert_eq!(
+        matches::built().f.body,
+        Expr::Match(b(v(0)), vec![op(Op::Sub, v(1), v(0)), int(1), int(2)])
+    );
     let q = Expr::Std(Std::TextLen, vec![v(0)]);
     assert_eq!(wild::built().f.body, Expr::Match(b(v(0)), vec![int(0), q, int(0)]));
 }
@@ -308,7 +323,11 @@ fn literals_and_tuples() {
 /// short-circuit booleans. Falsified by `!=` lowered as `Eq`.
 #[test]
 fn operators_lower_to_ops() {
-    let left = op(Op::And, op(Op::Eq, op(Op::Mod, v(1), v(0)), int(0)), Expr::Un(Un::Not, b(op(Op::Lt, v(1), v(0)))));
+    let left = op(
+        Op::And,
+        op(Op::Eq, op(Op::Mod, v(1), v(0)), int(0)),
+        Expr::Un(Un::Not, b(op(Op::Lt, v(1), v(0)))),
+    );
     let right = op(Op::Ne, v(1), Expr::Un(Un::Neg, b(v(0))));
     assert_eq!(operators::built().f.body, op(Op::Or, left, right));
 }
@@ -317,7 +336,10 @@ fn operators_lower_to_ops() {
 /// Falsified by the derive numbering fields from 1.
 #[test]
 fn fields_by_name() {
-    assert_eq!(fields::built().f.body, Expr::If(b(op(Op::Gt, field(v(1), 0), int(0))), b(field(v(1), 1)), b(field(v(0), 1))));
+    assert_eq!(
+        fields::built().f.body,
+        Expr::If(b(op(Op::Gt, field(v(1), 0), int(0))), b(field(v(1), 1)), b(field(v(0), 1)))
+    );
 }
 
 /// A struct literal is the tuple of its fields in declaration order, the
@@ -333,11 +355,18 @@ fn struct_literals_by_name() {
 /// position: `P { y: 1, x: 2 }` was built as missing `x`.
 #[test]
 fn variants_and_lists() {
-    let es = vec![Expr::Variant(e_ty(), 1, vec![v(0)]), Expr::Variant(e_ty(), 0, vec![int(2), int(1)]), Expr::Variant(e_ty(), 2, vec![])];
+    let es = vec![
+        Expr::Variant(e_ty(), 1, vec![v(0)]),
+        Expr::Variant(e_ty(), 0, vec![int(2), int(1)]),
+        Expr::Variant(e_ty(), 2, vec![]),
+    ];
     assert_eq!(variants::built().f.body, Expr::List(e_ty(), es));
     let os = vec![Expr::Variant(opt("Int"), 1, vec![int(1)]), Expr::Variant(opt("Int"), 0, vec![])];
     assert_eq!(options::built().f.body, Expr::List(opt("Int"), os));
-    assert!(options::built().f.types.iter().any(|(n, _)| n == "Option<Int>"), "an option is declared by its name");
+    assert!(
+        options::built().f.types.iter().any(|(n, _)| n == "Option<Int>"),
+        "an option is declared by its name"
+    );
 }
 
 /// A call of another `#[ark::*]` function is a `Call` by its hash, its
@@ -362,7 +391,11 @@ fn the_standard_library() {
 #[test]
 fn the_relational_combinators() {
     let filter = Expr::Filter(b(Expr::Scan("t".into())), lam(1, op(Op::Gt, field(v(0), 1), int(0))));
-    let sort = Expr::Sort(b(filter), lam(1, Expr::Tuple(vec![field(v(0), 1), field(v(0), 0)])), vec![Dir::Desc, Dir::Asc]);
+    let sort = Expr::Sort(
+        b(filter),
+        lam(1, Expr::Tuple(vec![field(v(0), 1), field(v(0), 0)])),
+        vec![Dir::Desc, Dir::Asc],
+    );
     let take = Expr::Take(b(sort), b(int(2)));
     let join = Expr::Join(b(take), b(Expr::Scan("u".into())), lam(2, op(Op::Eq, field(v(1), 0), field(v(0), 0))));
     let q = &relational::built().f;
@@ -396,7 +429,12 @@ fn refuse_is_refuse() {
 #[test]
 fn the_context() {
     let roles = Expr::Std(Std::Contains, vec![Expr::Ctx(CtxField::Roles), text("x")]);
-    let t = Expr::Tuple(vec![Expr::Ctx(CtxField::User), Expr::Ctx(CtxField::Session), Expr::Ctx(CtxField::Now), roles]);
+    let t = Expr::Tuple(vec![
+        Expr::Ctx(CtxField::User),
+        Expr::Ctx(CtxField::Session),
+        Expr::Ctx(CtxField::Now),
+        roles,
+    ]);
     assert_eq!(context::built().f.body, t);
 }
 
@@ -405,7 +443,10 @@ fn the_context() {
 #[test]
 fn ok_is_nothing() {
     let f = &ok::built().f;
-    assert_eq!((f.body.clone(), f.ret.clone()), (Expr::Delete("t".into(), b(Expr::Tuple(vec![v(0)]))), Ty::unit()));
+    assert_eq!(
+        (f.body.clone(), f.ret.clone()),
+        (Expr::Delete("t".into(), b(Expr::Tuple(vec![v(0)]))), Ty::unit())
+    );
 }
 
 /// An option's `map`, `filter`, `map_or`, `unwrap_or`, as matches and the
@@ -440,7 +481,13 @@ fn a_scope_holds_rows() {
     use ark5::peer::Ctx;
     let d = ark5::author::assemble(S::schema(), &[scope::built()]).unwrap();
     let p = d.lib.procedure(&scope::built().hash).unwrap();
-    let ctx = Ctx { id: Default::default(), actor: "me".into(), session: "s".into(), roles: vec![], now: 0 };
+    let ctx = Ctx {
+        id: Default::default(),
+        actor: "me".into(),
+        session: "s".into(),
+        roles: vec![],
+        now: 0,
+    };
     let t = |n: i64| [vec![0u8], ("a".to_string(), n).to_bytes(), vec![0]].concat();
     let u = |who: &str| [vec![1u8], ("a".to_string(), who.to_string()).to_bytes()].concat();
     assert_eq!(scope::built().f.effect, Effect::Pure);
@@ -456,10 +503,32 @@ fn a_scope_holds_rows() {
 #[test]
 fn every_lowering_checks() {
     let all = [
-        params::built(), lets::built(), statements::built(), ifs::built(), if_alone::built(), if_let::built(), matches::built(),
-        wild::built(), literals::built(), operators::built(), fields::built(), literal::built(), variants::built(),
-        options::built(), calls::built(), stds::built(), relational::built(), grouped::built(), reads::built(),
-        writes::built(), refuses::built(), context::built(), ok::built(), optional::built(), reader::built(), scope::built(),
+        params::built(),
+        lets::built(),
+        statements::built(),
+        ifs::built(),
+        if_alone::built(),
+        if_let::built(),
+        matches::built(),
+        wild::built(),
+        literals::built(),
+        operators::built(),
+        fields::built(),
+        literal::built(),
+        variants::built(),
+        options::built(),
+        calls::built(),
+        stds::built(),
+        relational::built(),
+        grouped::built(),
+        reads::built(),
+        writes::built(),
+        refuses::built(),
+        context::built(),
+        ok::built(),
+        optional::built(),
+        reader::built(),
+        scope::built(),
     ];
     ark5::author::assemble(S::schema(), &all).unwrap_or_else(|r| panic!("{r}"));
 }

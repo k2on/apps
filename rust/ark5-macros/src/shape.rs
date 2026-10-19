@@ -46,7 +46,13 @@ fn ark(attrs: &[Attribute]) -> syn::Result<Vec<Ark>> {
                     Lit::Str(s) => {
                         let v = s.value();
                         let (lo, hi) = v.split_once("..").ok_or_else(|| m.error("len is n or a range"))?;
-                        let int = |t: &str, d: i64| if t.is_empty() { Ok(d) } else { t.parse::<i64>().map_err(|_| m.error("a bound is an int")) };
+                        let int = |t: &str, d: i64| {
+                            if t.is_empty() {
+                                Ok(d)
+                            } else {
+                                t.parse::<i64>().map_err(|_| m.error("a bound is an int"))
+                            }
+                        };
                         let (lo, hi) = (int(lo, 0)?, int(hi.trim_start_matches('='), i64::MAX)?);
                         rule(quote!(LenRange(#lo, #hi)))
                     }
@@ -61,7 +67,14 @@ fn ark(attrs: &[Attribute]) -> syn::Result<Vec<Ark>> {
                 }
                 "min" | "max" | "ne" => {
                     let n: syn::Expr = m.value()?.parse()?;
-                    let op = format_ident!("{}", match id.as_str() { "min" => "Ge", "max" => "Le", _ => "Ne" });
+                    let op = format_ident!(
+                        "{}",
+                        match id.as_str() {
+                            "min" => "Ge",
+                            "max" => "Le",
+                            _ => "Ne",
+                        }
+                    );
                     out.push(Ark::Rule(quote!(::ark5::author::bound(::ark5::ir::Op::#op, #n)), None));
                 }
                 "why" => match out.last_mut() {
@@ -89,14 +102,26 @@ fn rules(items: &[Ark]) -> Vec<TokenStream> {
         Some(w) => quote!(Some(#w)),
         None => quote!(None),
     };
-    items.iter().filter_map(|a| if let Ark::Rule(r, w) = a { let w = quoted(w); Some(quote!((#r, #w))) } else { None }).collect()
+    items
+        .iter()
+        .filter_map(|a| {
+            if let Ark::Rule(r, w) = a {
+                let w = quoted(w);
+                Some(quote!((#r, #w)))
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 fn named(input: &DeriveInput) -> syn::Result<Vec<(Ident, Type, Vec<Ark>)>> {
     match &input.data {
-        Data::Struct(s) if matches!(s.fields, Fields::Named(_)) => {
-            s.fields.iter().map(|f| Ok((f.ident.clone().unwrap(), f.ty.clone(), ark(&f.attrs)?))).collect()
-        }
+        Data::Struct(s) if matches!(s.fields, Fields::Named(_)) => s
+            .fields
+            .iter()
+            .map(|f| Ok((f.ident.clone().unwrap(), f.ty.clone(), ark(&f.attrs)?)))
+            .collect(),
         _ => Err(no(&input.ident, "a row or record that is no struct with named fields")),
     }
 }
@@ -276,14 +301,20 @@ pub fn sum(input: DeriveInput) -> TokenStream {
 
 fn sum_(input: &DeriveInput) -> syn::Result<TokenStream> {
     let (name, vis) = (&input.ident, &input.vis);
-    let Data::Enum(e) = &input.data else { return Err(no(name, "a sum that is no enum")) };
+    let Data::Enum(e) = &input.data else {
+        return Err(no(name, "a sum that is no enum"));
+    };
     let label = name.to_string();
     let (mut items, mut defs, mut vtys, mut arities, mut decls) = (vec![], vec![], vec![], vec![], vec![]);
     for (i, v) in e.variants.iter().enumerate() {
         let (vn, i) = (&v.ident, i as u8);
         let n = v.fields.len() as u32;
         let arm = format_ident!("__ArkArm_{}_{}", name, vn);
-        let (ci, cn, carm) = (format_ident!("__ark_i_{vn}"), format_ident!("__ark_n_{vn}"), format_ident!("__ark_arm_{vn}"));
+        let (ci, cn, carm) = (
+            format_ident!("__ark_i_{vn}"),
+            format_ident!("__ark_n_{vn}"),
+            format_ident!("__ark_arm_{vn}"),
+        );
         let mut ftys = vec![];
         let mut wits = vec![];
         for (k, f) in v.fields.iter().enumerate() {

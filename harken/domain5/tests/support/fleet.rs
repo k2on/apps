@@ -32,7 +32,11 @@ pub fn lcg(s: u64) -> u64 {
 }
 
 pub fn who(actor: &str, session: &str, roles: &[&str]) -> Who {
-    Who { actor: actor.into(), session: session.into(), roles: roles.iter().map(|r| r.to_string()).collect() }
+    Who {
+        actor: actor.into(),
+        session: session.into(),
+        roles: roles.iter().map(|r| r.to_string()).collect(),
+    }
 }
 
 impl Net {
@@ -42,7 +46,9 @@ impl Net {
         let n = logins.len() as i64;
         let mut net = Net {
             server: Peer::new(schema.clone(), cas.clone(), role, who("server", "server", &[])),
-            clients: (0..n).map(|i| (i, Peer::new(schema.clone(), cas.clone(), Role::Replica, logins[i as usize].clone()))).collect(),
+            clients: (0..n)
+                .map(|i| (i, Peer::new(schema.clone(), cas.clone(), Role::Replica, logins[i as usize].clone())))
+                .collect(),
             logins: (0..n).zip(logins).collect(),
             linked: BTreeSet::new(),
             to_server: BTreeMap::new(),
@@ -106,7 +112,10 @@ impl Net {
 
     fn up(&mut self, i: i64, b: Vec<u8>) {
         if self.linked.contains(&i) {
-            let o = self.server.step(Input::Frame { from: Some(self.logins[&i].clone()), bytes: b });
+            let o = self.server.step(Input::Frame {
+                from: Some(self.logins[&i].clone()),
+                bytes: b,
+            });
             self.told_by_server(i, o);
         }
     }
@@ -147,7 +156,9 @@ impl Net {
     }
 
     pub fn quiet(&self) -> bool {
-        self.to_server.values().all(|m| m.is_empty()) && self.to_client.values().all(|m| m.is_empty()) && self.clients.values().all(|c| c.pending.is_empty())
+        self.to_server.values().all(|m| m.is_empty())
+            && self.to_client.values().all(|m| m.is_empty())
+            && self.clients.values().all(|c| c.pending.is_empty())
     }
 
     fn drain(&mut self) {
@@ -186,7 +197,12 @@ impl Net {
     pub fn converged(&self) -> Result<(), String> {
         for (i, c) in &self.clients {
             if c.log != self.server.log || c.store != self.server.store || !c.pending.is_empty() {
-                return Err(format!("client {i} at {:?} with {} pending; the server at {:?}", c.log.head(), c.pending.len(), self.server.log.head()));
+                return Err(format!(
+                    "client {i} at {:?} with {} pending; the server at {:?}",
+                    c.log.head(),
+                    c.pending.len(),
+                    self.server.log.head()
+                ));
             }
         }
         Ok(())

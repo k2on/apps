@@ -291,7 +291,11 @@ pub fn key_part(text: Text) -> Text {
 /// The key of a work: its composer, and its catalogue number or its title.
 #[ark::helper("library.work_key")]
 pub fn work_key(composer: Text, catalogue: Text, title: Text) -> Text {
-    concat(vec![key_part(composer), "/", key_part(if catalogue.is_empty() { title } else { catalogue })])
+    concat(vec![
+        key_part(composer),
+        "/",
+        key_part(if catalogue.is_empty() { title } else { catalogue }),
+    ])
 }
 
 /// The key of the work a track is of, or none: a work needs a title and a
@@ -416,7 +420,11 @@ pub fn total(counts: Vec<Int>) -> Int {
 /// How many songs are movements of a work.
 #[ark::helper("library.work_tracks")]
 pub fn work_tracks(db: Harken, work_id: Text) -> Int {
-    total(db.movement.filter(|m| m.work_id == work_id).map(|m| db.song.filter(|s| s.movement_id == Some(m.id)).len()))
+    total(
+        db.movement
+            .filter(|m| m.work_id == work_id)
+            .map(|m| db.song.filter(|s| s.movement_id == Some(m.id)).len()),
+    )
 }
 
 /// Works, each with how many recordings of it there are and how many
@@ -585,7 +593,15 @@ pub fn add_song(ctx: Ctx, db: Harken, input: AddSong) {
     // until `credit_recording` says who is who.
     if !credited.is_empty() {
         if db.person.get(credited).is_none() {
-            db.person.insert(Person { name: credited, sort_name: "", born: 0, died: 0, art: "", added_ms: ctx.now, user_id: ctx.user });
+            db.person.insert(Person {
+                name: credited,
+                sort_name: "",
+                born: 0,
+                died: 0,
+                art: "",
+                added_ms: ctx.now,
+                user_id: ctx.user,
+            });
         }
         let role = if work_of.is_some() { "performer" } else { "artist" };
         if db.credit.get((recording, credited, role)).is_none() {
@@ -683,7 +699,11 @@ pub fn describe_person(ctx: Ctx, db: Harken, input: DescribePerson) {
     let person = db.person.get(input.name);
     let row = Person {
         name: input.name,
-        sort_name: if input.sort_name.is_empty() { person.map_or("", |p| p.sort_name) } else { input.sort_name },
+        sort_name: if input.sort_name.is_empty() {
+            person.map_or("", |p| p.sort_name)
+        } else {
+            input.sort_name
+        },
         born: if input.born == 0 { person.map_or(0, |p| p.born) } else { input.born },
         died: if input.died == 0 { person.map_or(0, |p| p.died) } else { input.died },
         art: if input.art.is_empty() { person.map_or("", |p| p.art) } else { input.art },
@@ -707,7 +727,15 @@ pub fn credit_recording(ctx: Ctx, db: Harken, input: CreditRecording) {
         refuse!(concat(vec!["no recording ", input.recording_id, " to credit anybody on"]));
     }
     if db.person.get(input.person_name).is_none() {
-        db.person.insert(Person { name: input.person_name, sort_name: "", born: 0, died: 0, art: "", added_ms: ctx.now, user_id: ctx.user });
+        db.person.insert(Person {
+            name: input.person_name,
+            sort_name: "",
+            born: 0,
+            died: 0,
+            art: "",
+            added_ms: ctx.now,
+            user_id: ctx.user,
+        });
     }
     let role = if input.role.is_empty() { "artist" } else { input.role };
     let credit = db.credit.get((input.recording_id, input.person_name, role));
@@ -715,8 +743,16 @@ pub fn credit_recording(ctx: Ctx, db: Harken, input: CreditRecording) {
         recording_id: input.recording_id,
         person_name: input.person_name,
         role,
-        instrument: if input.instrument.is_empty() { credit.map_or("", |c| c.instrument) } else { input.instrument },
-        pos: if input.pos == 0 { credit.map_or(0, |c| c.pos).max(1) } else { input.pos.max(1) },
+        instrument: if input.instrument.is_empty() {
+            credit.map_or("", |c| c.instrument)
+        } else {
+            input.instrument
+        },
+        pos: if input.pos == 0 {
+            credit.map_or(0, |c| c.pos).max(1)
+        } else {
+            input.pos.max(1)
+        },
         added_ms: ctx.now,
         user_id: ctx.user,
     };
@@ -731,7 +767,9 @@ pub fn credit_recording(ctx: Ctx, db: Harken, input: CreditRecording) {
 #[ark::mutator("library.remove_media")]
 pub fn remove_media(ctx: Ctx, db: Harken, input: RemoveMedia) {
     is_library(ctx);
-    db.playlist_item.filter(|i| i.media_id == input.id).map(|i| db.playlist_item.delete((i.playlist_id, i.media_id)));
+    db.playlist_item
+        .filter(|i| i.media_id == input.id)
+        .map(|i| db.playlist_item.delete((i.playlist_id, i.media_id)));
     db.song.delete(input.id);
     db.media.delete(input.id);
 }
@@ -742,7 +780,9 @@ pub fn remove_media(ctx: Ctx, db: Harken, input: RemoveMedia) {
 /// sits on one playlist.
 #[ark::query("library.library")]
 pub fn library(db: Harken, input: Library) -> Vec<LibraryEntry> {
-    db.media.sort(|m| m.pos).map(|m| library_entry(m, playlist_pos(db, input.playlist_id, m.id)))
+    db.media
+        .sort(|m| m.pos)
+        .map(|m| library_entry(m, playlist_pos(db, input.playlist_id, m.id)))
 }
 
 /// The library's rows whose title or creator holds the needle, case folded,
@@ -760,9 +800,21 @@ pub fn search(db: Harken, input: Search) -> Vec<LibraryEntry> {
 #[ark::query("library.albums")]
 pub fn albums(db: Harken) -> Vec<AlbumsEntry> {
     db.album
-        .map(|a| (a, db.song.filter(|s| s.album_name == Some(a.name)).map(|s| db.media.get(s.media_id).map_or("", |m| m.creator))))
+        .map(|a| {
+            (
+                a,
+                db.song
+                    .filter(|s| s.album_name == Some(a.name))
+                    .map(|s| db.media.get(s.media_id).map_or("", |m| m.creator)),
+            )
+        })
         .filter(|g| g.1.len() > 0)
-        .map(|g| AlbumsEntry { art: g.0.art, creator: g.1.first().unwrap_or(""), name: g.0.name, tracks: g.1.len() })
+        .map(|g| AlbumsEntry {
+            art: g.0.art,
+            creator: g.1.first().unwrap_or(""),
+            name: g.0.name,
+            tracks: g.1.len(),
+        })
 }
 
 /// Everyone who made something in the library, by name, with the picture
@@ -770,7 +822,14 @@ pub fn albums(db: Harken) -> Vec<AlbumsEntry> {
 #[ark::query("library.artists")]
 pub fn artists(db: Harken) -> Vec<ArtistsEntry> {
     db.media
-        .group(|m| m.creator, |c, ms| ArtistsEntry { art: db.person.get(c).map_or("", |p| p.art), name: c, tracks: ms.len() })
+        .group(
+            |m| m.creator,
+            |c, ms| ArtistsEntry {
+                art: db.person.get(c).map_or("", |p| p.art),
+                name: c,
+                tracks: ms.len(),
+            },
+        )
         .map(|g| g.1)
 }
 

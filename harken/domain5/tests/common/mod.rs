@@ -49,7 +49,12 @@ impl Default for Lib {
 
 impl Lib {
     pub fn new() -> Lib {
-        Lib { store: Store::new(domain().schema.clone()), last: vec![], local: 0, now: 1_000 }
+        Lib {
+            store: Store::new(domain().schema.clone()),
+            last: vec![],
+            local: 0,
+            now: 1_000,
+        }
     }
 
     /// A fresh entry's context, as a peer authors one: its id from the
@@ -88,7 +93,13 @@ impl Lib {
 
     /// Ask as `user`: the answer, or the refusal's text.
     pub fn query<T: Node>(&self, user: &str, name: &str, input: &impl Node) -> Result<T, String> {
-        let ctx = Ctx { id: EntryId::of("q", 0), actor: user.into(), session: "q".into(), roles: vec![], now: self.now };
+        let ctx = Ctx {
+            id: EntryId::of("q", 0),
+            actor: user.into(),
+            session: "q".into(),
+            roles: vec![],
+            now: self.now,
+        };
         let b = domain().ask(&self.store, &ctx, &full(name), &input.to_bytes()).map_err(|r| r.0)?;
         Ok(T::from_bytes(&b).unwrap_or_else(|e| panic!("{name}: {e}")))
     }
@@ -100,14 +111,20 @@ impl Lib {
 
     /// Make a playlist as `user` and answer its id: the newest of theirs.
     pub fn playlist(&mut self, user: &str, name: &str) -> Id<Playlist> {
-        self.mutate(user, "create_playlist", &CreatePlaylist { name: name.into() }).unwrap_or_else(|e| panic!("{e}"));
+        self.mutate(user, "create_playlist", &CreatePlaylist { name: name.into() })
+            .unwrap_or_else(|e| panic!("{e}"));
         let mine: Vec<Playlist> = self.query(user, "playlists", &()).unwrap();
         mine.into_iter().max_by_key(|p| p.pos).expect("the playlist just made").id
     }
 
     /// The library read against a playlist.
     pub fn library(&self, playlist: &Id<Playlist>) -> Vec<LibraryEntry> {
-        self.list("library", &harken_domain5::library::Library { playlist_id: playlist.clone() })
+        self.list(
+            "library",
+            &harken_domain5::library::Library {
+                playlist_id: playlist.clone(),
+            },
+        )
     }
 
     /// Add a song as the scanner would: a refusal here is a bug.
@@ -123,7 +140,12 @@ impl Lib {
 
 /// A song with a title, an artist and an album, and nothing else said.
 pub fn song(title: &str, artist: &str, album: &str) -> AddSong {
-    AddSong { title: title.into(), artist: artist.into(), album: album.into(), ..AddSong::default() }
+    AddSong {
+        title: title.into(),
+        artist: artist.into(),
+        album: album.into(),
+        ..AddSong::default()
+    }
 }
 
 /// The classical chain's arguments, as the tests read the music.

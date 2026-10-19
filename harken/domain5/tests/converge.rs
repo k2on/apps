@@ -28,7 +28,10 @@ struct Fleet {
 
 impl Fleet {
     fn new(seed: u64, logins: Vec<Who>) -> Fleet {
-        Fleet { net: Net::new(domain().schema.clone(), domain().cas(), logins, seed), now: 1_000 }
+        Fleet {
+            net: Net::new(domain().schema.clone(), domain().cas(), logins, seed),
+            now: 1_000,
+        }
     }
 
     /// Author on client `i` as whoever it believes it is.
@@ -39,8 +42,16 @@ impl Fleet {
 
     /// What client `i` shows, as `user`: its optimistic view.
     fn query<T: Node>(&self, i: i64, user: &str, name: &str, input: &impl Node) -> T {
-        let ctx = Ctx { id: EntryId::of("q", 0), actor: user.into(), session: "q".into(), roles: vec![], now: 0 };
-        let b = domain().ask(&self.net.clients[&i].store, &ctx, &full(name), &input.to_bytes()).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let ctx = Ctx {
+            id: EntryId::of("q", 0),
+            actor: user.into(),
+            session: "q".into(),
+            roles: vec![],
+            now: 0,
+        };
+        let b = domain()
+            .ask(&self.net.clients[&i].store, &ctx, &full(name), &input.to_bytes())
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
         T::from_bytes(&b).unwrap()
     }
 
@@ -87,7 +98,14 @@ fn the_domain_converges_when_peers_go_dark_and_come_back() {
     for i in [0, 2] {
         let lib: Vec<LibraryEntry> = f.query(i, "peer-0", "library", &Library { playlist_id: favs.clone() });
         for e in lib {
-            f.mutate(i, "add_to_playlist", &AddToPlaylist { playlist_id: favs.clone(), media_id: e.id });
+            f.mutate(
+                i,
+                "add_to_playlist",
+                &AddToPlaylist {
+                    playlist_id: favs.clone(),
+                    media_id: e.id,
+                },
+            );
         }
         f.net.step();
     }
@@ -107,7 +125,10 @@ fn the_domain_converges_when_peers_go_dark_and_come_back() {
     assert_eq!(pos, (1..=17).collect::<Vec<_>>(), "library positions are 1..n after the replay");
     let on: Vec<LibraryEntry> = f.query(0, "peer-0", "playlist", &PlaylistInput { playlist_id: favs });
     assert_eq!(on.len(), 17, "every item once, though both devices added every one");
-    assert_eq!(on.iter().map(|r| r.playlist_pos.unwrap()).collect::<Vec<_>>(), (1..=17).collect::<Vec<_>>());
+    assert_eq!(
+        on.iter().map(|r| r.playlist_pos.unwrap()).collect::<Vec<_>>(),
+        (1..=17).collect::<Vec<_>>()
+    );
 }
 
 /// Two devices of one person each make "Favorites" while apart, and a
@@ -132,7 +153,11 @@ fn same_named_playlists_made_apart_are_numbered_in_log_order() {
     }
     f.net.settle();
     let none = Id::new([0; 16]);
-    let ids: Vec<Id<Media>> = f.query::<Vec<LibraryEntry>>(1, "", "library", &Library { playlist_id: none }).into_iter().map(|e| e.id).collect();
+    let ids: Vec<Id<Media>> = f
+        .query::<Vec<LibraryEntry>>(1, "", "library", &Library { playlist_id: none })
+        .into_iter()
+        .map(|e| e.id)
+        .collect();
     assert_eq!(ids.len(), 6);
 
     for i in 0..3 {
@@ -147,7 +172,14 @@ fn same_named_playlists_made_apart_are_numbered_in_log_order() {
         assert_eq!(on[0].name, "Favorites", "and calls it what it was called");
         let fav = on[0].id.clone();
         for k in [2 * i, 2 * i + 1] {
-            f.mutate(i, "add_to_playlist", &AddToPlaylist { playlist_id: fav.clone(), media_id: ids[k as usize].clone() });
+            f.mutate(
+                i,
+                "add_to_playlist",
+                &AddToPlaylist {
+                    playlist_id: fav.clone(),
+                    media_id: ids[k as usize].clone(),
+                },
+            );
         }
         made.insert(fav, vec![format!("t{}", 2 * i), format!("t{}", 2 * i + 1)]);
     }
@@ -161,13 +193,26 @@ fn same_named_playlists_made_apart_are_numbered_in_log_order() {
     f.converged();
     assert!(f.net.refused.is_empty(), "{:?}", f.net.refused);
     let mine: Vec<Playlist> = f.query(1, "peer-0", "playlists", &());
-    assert_eq!(mine.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["Favorites", "Favorites (1)", "Favorites (2)"], "numbered in log order");
+    assert_eq!(
+        mine.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+        ["Favorites", "Favorites (1)", "Favorites (2)"],
+        "numbered in log order"
+    );
     for p in &mine {
         let on: Vec<LibraryEntry> = f.query(2, "peer-0", "playlist", &PlaylistInput { playlist_id: p.id.clone() });
-        assert_eq!(on.iter().map(|e| e.title.clone()).collect::<Vec<_>>(), made[&p.id], "{} keeps what was put on it", p.name);
+        assert_eq!(
+            on.iter().map(|e| e.title.clone()).collect::<Vec<_>>(),
+            made[&p.id],
+            "{} keeps what was put on it",
+            p.name
+        );
     }
     let theirs: Vec<Playlist> = f.query(3, "peer-3", "playlists", &());
-    assert_eq!(theirs.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["Favorites"], "another person's names are theirs");
+    assert_eq!(
+        theirs.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+        ["Favorites"],
+        "another person's names are theirs"
+    );
 }
 
 /// A track on two people's playlists leaves the library: the library's
@@ -179,24 +224,47 @@ fn same_named_playlists_made_apart_are_numbered_in_log_order() {
 /// items: all six were left.
 #[test]
 fn the_library_takes_a_removed_track_off_everybodys_playlists() {
-    let logins = vec![who("peer-0", "dev-0", &[LIBRARY]), who("peer-1", "dev-1", &[]), who("peer-2", "dev-2", &[LIBRARY]), who("peer-3", "dev-3", &[])];
+    let logins = vec![
+        who("peer-0", "dev-0", &[LIBRARY]),
+        who("peer-1", "dev-1", &[]),
+        who("peer-2", "dev-2", &[LIBRARY]),
+        who("peer-3", "dev-3", &[]),
+    ];
     let mut f = Fleet::new(31, logins);
     for t in ["removed", "attempted", "kept"] {
         f.mutate(0, "add_song", &track(t));
     }
     f.net.settle();
     let none = Id::new([0; 16]);
-    let ids: Vec<Id<Media>> = f.query::<Vec<LibraryEntry>>(0, "peer-0", "library", &Library { playlist_id: none }).into_iter().map(|e| e.id).collect();
+    let ids: Vec<Id<Media>> = f
+        .query::<Vec<LibraryEntry>>(0, "peer-0", "library", &Library { playlist_id: none })
+        .into_iter()
+        .map(|e| e.id)
+        .collect();
     let (removed, attempted) = (ids[0].clone(), ids[1].clone());
     for i in [1, 3] {
         f.mutate(i, "create_playlist", &CreatePlaylist { name: "Mine".into() });
         let list = f.query::<Vec<Playlist>>(i, &format!("peer-{i}"), "playlists", &())[0].id.clone();
         for media in &ids {
-            f.mutate(i, "add_to_playlist", &AddToPlaylist { playlist_id: list.clone(), media_id: media.clone() });
+            f.mutate(
+                i,
+                "add_to_playlist",
+                &AddToPlaylist {
+                    playlist_id: list.clone(),
+                    media_id: media.clone(),
+                },
+            );
         }
     }
     f.net.settle();
-    let items = |f: &Fleet| -> Vec<PlaylistItem> { f.net.server.store.rows("playlist_item").map(|r| PlaylistItem::from_bytes(r).unwrap()).collect() };
+    let items = |f: &Fleet| -> Vec<PlaylistItem> {
+        f.net
+            .server
+            .store
+            .rows("playlist_item")
+            .map(|r| PlaylistItem::from_bytes(r).unwrap())
+            .collect()
+    };
     assert_eq!(items(&f).len(), 6, "three tracks on each of two people's playlists");
 
     f.mutate(0, "remove_media", &RemoveMedia { id: removed.clone() });

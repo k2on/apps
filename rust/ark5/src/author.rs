@@ -149,8 +149,17 @@ impl<R: Row> Shape for Id<R> {
         Ty::Named(Self::name())
     }
     fn decls(d: &mut Decls) {
-        let len = Refine { rule: Rule::Len(16), why: None };
-        d.insert(Self::name(), Decl { ty: Ty::Bytes, refine: vec![len] });
+        let len = Refine {
+            rule: Rule::Len(16),
+            why: None,
+        };
+        d.insert(
+            Self::name(),
+            Decl {
+                ty: Ty::Bytes,
+                refine: vec![len],
+            },
+        );
     }
     fn name() -> String {
         format!("Id<{}>", R::TABLE)
@@ -164,7 +173,13 @@ impl<T: Shape> Shape for Option<T> {
         Ty::Named(Self::name())
     }
     fn decls(d: &mut Decls) {
-        d.insert(Self::name(), Decl { ty: Ty::option(T::ty()), refine: vec![] });
+        d.insert(
+            Self::name(),
+            Decl {
+                ty: Ty::option(T::ty()),
+                refine: vec![],
+            },
+        );
         T::decls(d)
     }
     fn name() -> String {
@@ -316,10 +331,19 @@ pub fn once(cell: &'static OnceLock<Built>, f: impl FnOnce() -> Built) -> &'stat
 pub fn build<R: Shape>(name: &'static str, kind: Kind, body: impl FnOnce() -> Ex<R::Base>) -> Built {
     thread_local!(static BUILDING: RefCell<Vec<&'static str>> = const { RefCell::new(vec![]) });
     BUILDING.with(|s| {
-        assert!(!s.borrow().contains(&name), "{name} calls itself, which a function named by its hash cannot");
+        assert!(
+            !s.borrow().contains(&name),
+            "{name} calls itself, which a function named by its hash cannot"
+        );
         s.borrow_mut().push(name)
     });
-    CX.with(|c| c.borrow_mut().push(Cx { decls: Decls::new(), calls: vec![], params: vec![] }));
+    CX.with(|c| {
+        c.borrow_mut().push(Cx {
+            decls: Decls::new(),
+            calls: vec![],
+            params: vec![],
+        })
+    });
     note::<R>();
     let body = body().e;
     let cx = CX.with(|c| c.borrow_mut().pop().unwrap());
@@ -331,8 +355,20 @@ pub fn build<R: Shape>(name: &'static str, kind: Kind, body: impl FnOnce() -> Ex
         Kind::Helper => effect(&body, &cx.calls),
     };
     let types = cx.decls.into_iter().filter(|(n, _)| n != "Text").collect();
-    let f = Function { types, params: cx.params, ret: R::ty(), effect, body };
-    Built { name, kind, hash: f.hash(), f, calls: cx.calls }
+    let f = Function {
+        types,
+        params: cx.params,
+        ret: R::ty(),
+        effect,
+        body,
+    };
+    Built {
+        name,
+        kind,
+        hash: f.hash(),
+        f,
+        calls: cx.calls,
+    }
 }
 
 /// The least effect `e` has: a read, a write, a fresh id, or a callee's.
@@ -458,7 +494,9 @@ pub fn stmt<T: Shape>(e: Ex<T>) -> Ex<()> {
 
 /// A refinement of an `Int`: from `lo` to `hi`, both included.
 pub fn within(lo: i64, hi: i64) -> Rule {
-    let (Rule::Refine(a), Rule::Refine(b)) = (bound(Op::Ge, lo), bound(Op::Le, hi)) else { unreachable!() };
+    let (Rule::Refine(a), Rule::Refine(b)) = (bound(Op::Ge, lo), bound(Op::Le, hi)) else {
+        unreachable!()
+    };
     Rule::Refine(Expr::Op(Op::And, Box::new(a), Box::new(b)))
 }
 
@@ -471,10 +509,10 @@ pub fn bound(o: Op, n: i64) -> Rule {
 /// the rest, given how many fields each binds.
 pub fn match_<S, R>(s: Ex<S>, arities: &[u32], arms: Vec<(u8, Ex<R>)>, wild: Option<&dyn Fn(u32) -> Ex<R>>) -> Ex<R> {
     let mut arms: BTreeMap<u8, Expr> = arms.into_iter().map(|(i, a)| (i, a.e)).collect();
-    let each = arities.iter().enumerate().map(|(i, n)| {
-        arms.remove(&(i as u8))
-            .unwrap_or_else(|| wild.expect("every variant matched")(*n).e)
-    });
+    let each = arities
+        .iter()
+        .enumerate()
+        .map(|(i, n)| arms.remove(&(i as u8)).unwrap_or_else(|| wild.expect("every variant matched")(*n).e));
     Ex::of(Expr::Match(b(s), each.collect()))
 }
 
@@ -732,7 +770,13 @@ impl Domain {
     }
 
     /// A mutator's changes over a store, as the kernel runs it.
-    pub fn run(&self, store: &dyn crate::store::Read, ctx: &crate::peer::Ctx, name: &str, input: &[u8]) -> Result<Vec<crate::store::Change>, Refusal> {
+    pub fn run(
+        &self,
+        store: &dyn crate::store::Read,
+        ctx: &crate::peer::Ctx,
+        name: &str,
+        input: &[u8],
+    ) -> Result<Vec<crate::store::Change>, Refusal> {
         self.lib.procedure(&self.get(name)).expect("an installed function").run(store, ctx, input)
     }
 
@@ -757,7 +801,9 @@ impl Domain {
             }
         }
         self.bodies.insert(f.hash, f.f.to_bytes());
-        self.lib.install(&self.schema, f.f.clone()).map_err(|r| Refusal(format!("{}: {r}", f.name)))
+        self.lib
+            .install(&self.schema, f.f.clone())
+            .map_err(|r| Refusal(format!("{}: {r}", f.name)))
     }
 }
 
@@ -766,7 +812,12 @@ impl Domain {
 pub fn assemble(schema: Schema, fns: &[&'static Built]) -> Result<Domain, Refusal> {
     let mut d = Domain {
         schema: Arc::new(schema.clone()),
-        module: Module { spec: SPEC, schema, types: vec![], bindings: vec![] },
+        module: Module {
+            spec: SPEC,
+            schema,
+            types: vec![],
+            bindings: vec![],
+        },
         lib: Lib::default(),
         bodies: BTreeMap::new(),
     };
@@ -796,6 +847,12 @@ pub fn column_ty<T: Shape>() -> (String, Ty, Ty) {
 
 /// A declaration of a record's fields, or of a refinement of one type.
 pub fn decl(name: &str, ty: Ty, refine: Vec<(Rule, Option<&str>)>, d: &mut Decls) {
-    let refine = refine.into_iter().map(|(rule, why)| Refine { rule, why: why.map(Into::into) }).collect();
+    let refine = refine
+        .into_iter()
+        .map(|(rule, why)| Refine {
+            rule,
+            why: why.map(Into::into),
+        })
+        .collect();
     d.insert(name.into(), Decl { ty, refine });
 }

@@ -10,7 +10,7 @@ mod demo;
 
 #[allow(dead_code)]
 mod authored {
-    use ark5::author::{self as ark, Id, Int, Row, Input, Schema, Table, Text};
+    use ark5::author::{self as ark, Id, Input, Int, Row, Schema, Table, Text};
 
     #[derive(Row)]
     #[ark(unique(user_id, name))]
@@ -48,7 +48,11 @@ mod authored {
     #[ark::mutator("demo.create_playlist")]
     pub fn create_playlist(ctx: Ctx, db: Demo, name: Name) {
         if db.playlist.filter(|p| p.user_id == ctx.user && p.name == name).len() == 0 {
-            db.playlist.insert(Playlist { id: ctx.new_id(), name, user_id: ctx.user });
+            db.playlist.insert(Playlist {
+                id: ctx.new_id(),
+                name,
+                user_id: ctx.user,
+            });
         }
     }
 
@@ -57,7 +61,12 @@ mod authored {
         if db.playlist.get(playlist_id).is_some() {
             if db.item.get((playlist_id, track_id)).is_some() {
             } else {
-                let last = db.item.filter(|row| row.playlist_id == playlist_id).sort(|row| Desc(row.pos)).take(1).first();
+                let last = db
+                    .item
+                    .filter(|row| row.playlist_id == playlist_id)
+                    .sort(|row| Desc(row.pos))
+                    .take(1)
+                    .first();
                 db.item.insert(Item {
                     playlist_id,
                     track_id,

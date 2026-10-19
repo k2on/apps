@@ -40,11 +40,20 @@ fn go(kind: Kind, args: TokenStream, item: TokenStream) -> syn::Result<TokenStre
         true => name.to_string(),
         false => syn::parse2::<syn::LitStr>(args)?.value(),
     };
-    let mut cx = Lower { scope: vec![], ctx: None, db: None, me: name.to_string() };
+    let mut cx = Lower {
+        scope: vec![],
+        ctx: None,
+        db: None,
+        me: name.to_string(),
+    };
     let (mut params, mut sig, mut pass) = (vec![], vec![], vec![]);
     for a in &f.sig.inputs {
-        let FnArg::Typed(a) = a else { return Err(syn::Error::new_spanned(a, "a method is not in the subset")) };
-        let Pat::Ident(id) = &*a.pat else { return Err(crate::lower::no(&a.pat, "a parameter pattern")) };
+        let FnArg::Typed(a) = a else {
+            return Err(syn::Error::new_spanned(a, "a method is not in the subset"));
+        };
+        let Pat::Ident(id) = &*a.pat else {
+            return Err(crate::lower::no(&a.pat, "a parameter pattern"));
+        };
         let (id, ty) = (&id.ident, &a.ty);
         let is = |n: &str| matches!(&**ty, Type::Path(p) if p.path.segments.last().is_some_and(|s| s.ident == n));
         if is("Ctx") {

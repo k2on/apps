@@ -76,7 +76,11 @@ pub fn numbered(name: Text, n: Int) -> Text {
 #[ark::helper("playlists.free_number")]
 pub fn free_number(names: Vec<Text>, name: Text) -> Int {
     let ranks = names.map(|x| names.filter(|y| y <= x).len());
-    ranks.filter(|n| !names.contains(numbered(name, n))).sort(|n| n).first().unwrap_or(names.len() + 1)
+    ranks
+        .filter(|n| !names.contains(numbered(name, n)))
+        .sort(|n| n)
+        .first()
+        .unwrap_or(names.len() + 1)
 }
 
 /// What a new playlist is called among a person's other playlists: the

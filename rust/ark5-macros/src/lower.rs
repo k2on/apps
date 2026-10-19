@@ -15,8 +15,8 @@
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote, quote_spanned, ToTokens};
-use syn::spanned::Spanned;
 use syn::punctuated::Punctuated;
+use syn::spanned::Spanned;
 use syn::{BinOp, Block, Expr, ExprClosure, ExprStruct, Ident, Lit, Macro, Member, Pat, Path, Stmt, Token, Type, UnOp};
 
 /// A construct outside the subset, named.
@@ -48,9 +48,45 @@ pub struct Lower {
 
 /// The methods an expression may be called with: `ark5::author`'s.
 const METHODS: &[&str] = &[
-    "trim", "is_empty", "lower", "is_alnum", "chars", "len", "starts_with", "split_once", "fnv1a64", "utf8", "to_text", "min", "max",
-    "clamp", "abs", "hex", "sha256", "text_of_id", "first", "last", "contains", "reverse", "concat", "insert", "remove_at", "move_at",
-    "slice", "take", "filter", "map", "join", "group", "sort", "is_some", "is_none", "unwrap", "unwrap_or", "map_or", "sum",
+    "trim",
+    "is_empty",
+    "lower",
+    "is_alnum",
+    "chars",
+    "len",
+    "starts_with",
+    "split_once",
+    "fnv1a64",
+    "utf8",
+    "to_text",
+    "min",
+    "max",
+    "clamp",
+    "abs",
+    "hex",
+    "sha256",
+    "text_of_id",
+    "first",
+    "last",
+    "contains",
+    "reverse",
+    "concat",
+    "insert",
+    "remove_at",
+    "move_at",
+    "slice",
+    "take",
+    "filter",
+    "map",
+    "join",
+    "group",
+    "sort",
+    "is_some",
+    "is_none",
+    "unwrap",
+    "unwrap_or",
+    "map_or",
+    "sum",
 ];
 
 fn rv(id: &impl std::fmt::Display) -> Ident {
@@ -469,8 +505,14 @@ impl Lower {
         }
         if let Some((en, v)) = variant_of(p) {
             let set = (0..args.len()).map(|i| format_ident!("__ark_set_{v}_{i}"));
-            let (i, n, dead) = (format_ident!("__ark_i_{v}"), format_ident!("__ark_n_{v}"), args.iter().map(|_| quote!(unreachable!())));
-            return Ok(quote!({ if false { let _ = #p(#(#dead),*); } ::ark5::author::variant::<#en>(#en::#i, #en::#n, vec![#(#en::#set(#args)),*]) }));
+            let (i, n, dead) = (
+                format_ident!("__ark_i_{v}"),
+                format_ident!("__ark_n_{v}"),
+                args.iter().map(|_| quote!(unreachable!())),
+            );
+            return Ok(
+                quote!({ if false { let _ = #p(#(#dead),*); } ::ark5::author::variant::<#en>(#en::#i, #en::#n, vec![#(#en::#set(#args)),*]) }),
+            );
         }
         match p.get_ident() {
             Some(id) if upper(id) => Err(no(c, "a refined type's constructor (a refinement holds where bytes enter, at parse)")),
@@ -483,7 +525,9 @@ impl Lower {
         let p = &s.path;
         let mut fields = vec![];
         for f in &s.fields {
-            let Member::Named(m) = &f.member else { return Err(no(f, "a field by position")) };
+            let Member::Named(m) = &f.member else {
+                return Err(no(f, "a field by position"));
+            };
             fields.push((m, self.expr(&f.expr)?));
         }
         let dead = fields.iter().map(|(m, _)| quote!(#m: unreachable!()));
@@ -564,7 +608,9 @@ impl Lower {
                         }
                         Pat::Struct(st) => {
                             for f in &st.fields {
-                                let Member::Named(m) = &f.member else { return Err(no(f, "a field by position")) };
+                                let Member::Named(m) = &f.member else {
+                                    return Err(no(f, "a field by position"));
+                                };
                                 let pos = format_ident!("__ark_p_{v}_{m}");
                                 bind(&f.pat, quote!(#m), quote!(#en::#pos))?;
                             }
@@ -572,7 +618,14 @@ impl Lower {
                         _ => {}
                     }
                     let i = format_ident!("__ark_i_{v}");
-                    (quote!(#en::#i), Frame { names, size: quote!(#en::#n) }, quote!(#(#lets)*))
+                    (
+                        quote!(#en::#i),
+                        Frame {
+                            names,
+                            size: quote!(#en::#n),
+                        },
+                        quote!(#(#lets)*),
+                    )
                 }
             };
             if sum.is_none() {
@@ -583,7 +636,13 @@ impl Lower {
         }
         let wild = match wild {
             Some(b) => {
-                let w = self.under(Frame { names: vec![], size: quote!(__wild_n) }, |s| s.body(&b))?;
+                let w = self.under(
+                    Frame {
+                        names: vec![],
+                        size: quote!(__wild_n),
+                    },
+                    |s| s.body(&b),
+                )?;
                 quote!(Some(&|__wild_n: u32| #w))
             }
             None if sum.is_none() && opt != [true; 2] => return Err(no(scrut, "a match on an option without `None`, `Some` or `_`")),
