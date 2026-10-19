@@ -9,5 +9,9 @@ description = "harken's domain on ArkDB v5 (docs/plan-v5.md §1.12): the tables,
 name = "harken_domain5"
 path = "src/lib.rs"
 
+[[bin]]
+name = "harken-domain5"
+path = "src/main.rs"
+
 [dependencies]
 ark5 = { path = "../../rust/ark5" }
