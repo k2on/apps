@@ -1,0 +1,5 @@
+error[E0063]: missing field `b` in initializer of `R`
+  --> tests/ui/missing_field.rs:14:5
+   |
+14 |     R { a: x }
+   |     ^ missing `b`

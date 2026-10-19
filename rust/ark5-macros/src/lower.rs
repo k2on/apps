@@ -14,7 +14,8 @@
 //! a field is read by name, never by position.
 
 use proc_macro2::TokenStream;
-use quote::{format_ident, quote, ToTokens};
+use quote::{format_ident, quote, quote_spanned, ToTokens};
+use syn::spanned::Spanned;
 use syn::punctuated::Punctuated;
 use syn::{BinOp, Block, Expr, ExprClosure, ExprStruct, Ident, Lit, Macro, Member, Pat, Path, Stmt, Token, Type, UnOp};
 
@@ -592,7 +593,7 @@ impl Lower {
         let (arities, check) = match &sum {
             Some(en) => (
                 quote!(&#en::__ark_arities()),
-                quote!(if false { let __x: #en = unreachable!(); match __x { #(#pats => {})* #rest } }),
+                quote_spanned!(scrut.span()=> if false { let __x: #en = unreachable!(); match __x { #(#pats => {})* #rest } }),
             ),
             None => (quote!(&[0u32, 1u32]), quote!()),
         };

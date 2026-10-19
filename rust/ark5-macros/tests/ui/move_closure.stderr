@@ -1,0 +1,5 @@
+error: a `move`, async or const closure is not in the subset ark lowers (spec5/AUTHORING.md)
+ --> tests/ui/move_closure.rs:7:12
+  |
+7 |     xs.map(move |x| x)
+  |            ^^^^^^^^^^

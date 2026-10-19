@@ -1,0 +1,5 @@
+error: the method `push` is not in the subset ark lowers (spec5/AUTHORING.md)
+ --> tests/ui/other_method.rs:7:8
+  |
+7 |     xs.push(1)
+  |        ^^^^

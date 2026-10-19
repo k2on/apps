@@ -1,0 +1,5 @@
+error: a nested pattern is not in the subset ark lowers (spec5/AUTHORING.md)
+ --> tests/ui/nested_pattern.rs:8:14
+  |
+8 |         Some(Some(x)) => x,
+  |              ^^^^^^^
