@@ -7,7 +7,9 @@
 //! `Move` keep every refinement on a list's length (`NonEmpty`, `len`),
 //! since they keep its length; `Insert` and `ListConcat` keep `NonEmpty`
 //! of their first argument, since they only add; every other list
-//! function returns the bare `List<T>`. [`apply`] is the meaning.
+//! function returns the bare `List<T>`. [`apply`] is the meaning. `Sum`,
+//! appended for views, adds in an `i128` and judges the total once
+//! ([`total`]).
 //!
 //! `Trim`, `Lower` and `IsAlnum` consult the pinned tables in
 //! [`crate::unicode_tables`] and nothing of the platform. An index out of
@@ -77,6 +79,7 @@ pub fn sig(cx: &Types, f: Std, args: &[Ty]) -> Result<Ty, String> {
         IsSome => (vec![Ty::option(opt(0)?)], bool),
         UnwrapOr => (vec![Ty::option(opt(0)?), opt(0)?], opt(0)?),
         Unwrap => (vec![Ty::option(opt(0)?)], opt(0)?),
+        Sum => (vec![Ty::list(int.clone())], int),
     };
     if want.len() != args.len() {
         return Err(format!("{f:?} takes {} arguments, not {}", want.len(), args.len()));
@@ -117,6 +120,14 @@ fn id_of_text(t: &str) -> Option<Vec<u8>> {
             .all(|(p, n)| p.len() == n && p.chars().all(|c| c.is_ascii_hexdigit()));
     let h = parts.concat();
     ok.then(|| (0..32).step_by(2).map(|i| u8::from_str_radix(&h[i..i + 2], 16).unwrap()).collect())
+}
+
+/// v4's §6.5 rule for a sum: added in an `i128`, so an overflow on the way,
+/// which depends on the members' order, is none, and only the total must
+/// fit. A view keeps a `Group`'s sum as such a number, moved by members in
+/// no particular order (`crate::view`), and the two answers agree.
+pub fn total(n: i128) -> Result<V, Refusal> {
+    i64::try_from(n).map(V::Int).map_err(|_| Refusal::new("integer overflow"))
 }
 
 /// `f` applied to evaluated arguments the checker typed by [`sig`].
@@ -196,5 +207,6 @@ pub fn apply(f: Std, args: Vec<V>) -> Result<V, Refusal> {
             _ if f == UnwrapOr => a[1].clone(),
             _ => return Err(Refusal::new("unwrapped none")),
         },
+        Std::Sum => total(a[0].list().iter().map(|x| x.int() as i128).sum())?,
     })
 }

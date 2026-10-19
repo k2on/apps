@@ -302,6 +302,9 @@ pub enum Std {
     IsSome,
     UnwrapOr,
     Unwrap,
+    /// Appended by V1: a list's integers added in an `i128`, the total
+    /// judged once (v4's §6.5 rule, [`crate::std`]).
+    Sum,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Node)]
