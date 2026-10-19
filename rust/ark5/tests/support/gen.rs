@@ -5,6 +5,8 @@
 //! writers and read back with its reader. Seeded by Knuth's MMIX
 //! generator, as the simulator is.
 
+#![allow(dead_code)]
+
 use ark5::codec::{put_bytes, put_int, put_variant, Reader};
 use ark5::ty::Ty;
 use ark5::Refusal;

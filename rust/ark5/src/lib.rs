@@ -15,7 +15,10 @@
 use std::fmt;
 
 pub mod codec;
+pub mod frames;
 pub mod hash;
+pub mod log;
+pub mod peer;
 pub mod schema;
 pub mod store;
 pub mod ty;
