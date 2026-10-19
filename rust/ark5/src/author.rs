@@ -575,75 +575,64 @@ impl<R: Row> Table<R> {
 
 // * The standard library and the relational operators, as methods
 
-impl Ex<String> {
-    pub fn trim(self) -> Ex<String> {
-        std(Std::Trim, vec![self.e])
-    }
-    pub fn is_empty(self) -> Ex<bool> {
-        std(Std::IsEmpty, vec![self.e])
-    }
-    pub fn lower(self) -> Ex<String> {
-        std(Std::Lower, vec![self.e])
-    }
-    pub fn is_alnum(self) -> Ex<bool> {
-        std(Std::IsAlnum, vec![self.e])
-    }
-    pub fn chars(self) -> Ex<Vec<String>> {
-        std(Std::Chars, vec![self.e])
-    }
-    pub fn len(self) -> Ex<i64> {
-        std(Std::TextLen, vec![self.e])
-    }
-    pub fn starts_with(self, p: Ex<String>) -> Ex<bool> {
-        std(Std::StartsWith, vec![self.e, p.e])
-    }
-    pub fn split_once(self, p: Ex<String>) -> Ex<Option<(String, String)>> {
-        std(Std::SplitOnce, vec![self.e, p.e])
-    }
-    pub fn fnv1a64(self) -> Ex<i64> {
-        std(Std::Fnv1a64, vec![self.e])
-    }
-    pub fn utf8(self) -> Ex<Bytes> {
-        std(Std::Utf8, vec![self.e])
-    }
-    pub fn id_of_text<R>(self) -> Ex<Option<Id<R>>> {
-        std(Std::IdOfText, vec![self.e])
-    }
+/// Methods that are a standard function of the receiver and the arguments.
+macro_rules! std_methods {
+    ($(impl[$($g:tt)*] $recv:ty { $($name:ident($($a:ident: $at:ty),*) -> $r:ty = $f:ident;)* })*) => {$(
+        impl<$($g)*> Ex<$recv> {
+            $(pub fn $name(self $(, $a: Ex<$at>)*) -> Ex<$r> {
+                std(Std::$f, vec![self.e $(, $a.e)*])
+            })*
+        }
+    )*};
 }
 
-impl Ex<i64> {
-    pub fn to_text(self) -> Ex<String> {
-        std(Std::TextOfInt, vec![self.e])
+std_methods! {
+    impl[] String {
+        trim() -> String = Trim;
+        is_empty() -> bool = IsEmpty;
+        lower() -> String = Lower;
+        is_alnum() -> bool = IsAlnum;
+        chars() -> Vec<String> = Chars;
+        len() -> i64 = TextLen;
+        starts_with(p: String) -> bool = StartsWith;
+        split_once(p: String) -> Option<(String, String)> = SplitOnce;
+        fnv1a64() -> i64 = Fnv1a64;
+        utf8() -> Bytes = Utf8;
     }
-    pub fn min(self, o: Ex<i64>) -> Ex<i64> {
-        std(Std::Min, vec![self.e, o.e])
+    impl[] i64 {
+        to_text() -> String = TextOfInt;
+        min(o: i64) -> i64 = Min;
+        max(o: i64) -> i64 = Max;
+        clamp(lo: i64, hi: i64) -> i64 = Clamp;
+        abs() -> i64 = Abs;
     }
-    pub fn max(self, o: Ex<i64>) -> Ex<i64> {
-        std(Std::Max, vec![self.e, o.e])
+    impl[] Bytes {
+        hex() -> String = Hex;
+        sha256() -> Bytes = Sha256;
     }
-    pub fn clamp(self, lo: Ex<i64>, hi: Ex<i64>) -> Ex<i64> {
-        std(Std::Clamp, vec![self.e, lo.e, hi.e])
+    impl[R] Id<R> {
+        text_of_id() -> String = TextOfId;
+        hex() -> String = Hex;
     }
-    pub fn abs(self) -> Ex<i64> {
-        std(Std::Abs, vec![self.e])
+    impl[T: Shape] Vec<T> {
+        first() -> Option<T> = First;
+        last() -> Option<T> = Last;
+        len() -> i64 = Len;
+        contains(x: T) -> bool = Contains;
+        reverse() -> Vec<T> = Reverse;
+        concat(o: Vec<T>) -> Vec<T> = ListConcat;
+        insert(i: i64, x: T) -> Vec<T> = Insert;
+        remove_at(i: i64) -> Vec<T> = RemoveAt;
+        move_at(from: i64, to: i64) -> Vec<T> = Move;
+        slice(i: i64, j: i64) -> Vec<T> = Slice;
     }
-}
-
-impl Ex<Bytes> {
-    pub fn hex(self) -> Ex<String> {
-        std(Std::Hex, vec![self.e])
+    impl[] Vec<i64> {
+        sum() -> i64 = Sum;
     }
-    pub fn sha256(self) -> Ex<Bytes> {
-        std(Std::Sha256, vec![self.e])
-    }
-}
-
-impl<R> Ex<Id<R>> {
-    pub fn text_of_id(self) -> Ex<String> {
-        std(Std::TextOfId, vec![self.e])
-    }
-    pub fn hex(self) -> Ex<String> {
-        std(Std::Hex, vec![self.e])
+    impl[T: Shape] Option<T> {
+        is_some() -> bool = IsSome;
+        unwrap() -> T = Unwrap;
+        unwrap_or(d: T) -> T = UnwrapOr;
     }
 }
 
@@ -657,38 +646,8 @@ pub fn nil_id<R>() -> Ex<Id<R>> {
 }
 
 impl<T: Shape> Ex<Vec<T>> {
-    pub fn first(self) -> Ex<Option<T>> {
-        std(Std::First, vec![self.e])
-    }
-    pub fn last(self) -> Ex<Option<T>> {
-        std(Std::Last, vec![self.e])
-    }
-    pub fn len(self) -> Ex<i64> {
-        std(Std::Len, vec![self.e])
-    }
     pub fn is_empty(self) -> Ex<bool> {
         cmp(Op::Eq, self.len(), int(0))
-    }
-    pub fn contains(self, x: Ex<T>) -> Ex<bool> {
-        std(Std::Contains, vec![self.e, x.e])
-    }
-    pub fn reverse(self) -> Ex<Vec<T>> {
-        std(Std::Reverse, vec![self.e])
-    }
-    pub fn concat(self, o: Ex<Vec<T>>) -> Ex<Vec<T>> {
-        std(Std::ListConcat, vec![self.e, o.e])
-    }
-    pub fn insert(self, i: Ex<i64>, x: Ex<T>) -> Ex<Vec<T>> {
-        std(Std::Insert, vec![self.e, i.e, x.e])
-    }
-    pub fn remove_at(self, i: Ex<i64>) -> Ex<Vec<T>> {
-        std(Std::RemoveAt, vec![self.e, i.e])
-    }
-    pub fn move_at(self, from: Ex<i64>, to: Ex<i64>) -> Ex<Vec<T>> {
-        std(Std::Move, vec![self.e, from.e, to.e])
-    }
-    pub fn slice(self, i: Ex<i64>, j: Ex<i64>) -> Ex<Vec<T>> {
-        std(Std::Slice, vec![self.e, i.e, j.e])
     }
     pub fn take(self, n: Ex<i64>) -> Ex<Vec<T>> {
         Ex::of(Expr::Take(b(self), b(n)))
@@ -701,14 +660,11 @@ impl<T: Shape> Ex<Vec<T>> {
     }
     /// The pairs the condition admits, in this list's order.
     pub fn join<U>(self, o: Ex<Vec<U>>, on: impl FnOnce(Ex<T>, Ex<U>) -> Ex<bool>) -> Ex<Vec<(T, U)>> {
-        let on = Box::new(Expr::Lambda(2, b(on(wit(), wit()))));
-        Ex::of(Expr::Join(b(self), b(o), on))
+        Ex::of(Expr::Join(b(self), b(o), lam(2, on(wit(), wit()))))
     }
     /// `(key, aggregate)` per key, in key order.
     pub fn group<K, A>(self, by: impl FnOnce(Ex<T>) -> Ex<K>, agg: impl FnOnce(Ex<K>, Ex<Vec<T>>) -> Ex<A>) -> Ex<Vec<(K, A)>> {
-        let by = lam(1, by(wit()));
-        let agg = Box::new(Expr::Lambda(2, b(agg(wit(), wit()))));
-        Ex::of(Expr::Group(b(self), by, agg))
+        Ex::of(Expr::Group(b(self), lam(1, by(wit())), lam(2, agg(wit(), wit()))))
     }
     /// Stable, by the key (each field of a tuple of keys in its direction).
     pub fn sort<K>(self, dirs: Vec<Dir>, keys: impl FnOnce(Ex<T>) -> Ex<K>) -> Ex<Vec<T>> {
@@ -716,25 +672,9 @@ impl<T: Shape> Ex<Vec<T>> {
     }
 }
 
-impl Ex<Vec<i64>> {
-    /// The total, judged once (`Std::Sum`).
-    pub fn sum(self) -> Ex<i64> {
-        std(Std::Sum, vec![self.e])
-    }
-}
-
 impl<T: Shape> Ex<Option<T>> {
-    pub fn is_some(self) -> Ex<bool> {
-        std(Std::IsSome, vec![self.e])
-    }
     pub fn is_none(self) -> Ex<bool> {
         not(self.is_some())
-    }
-    pub fn unwrap(self) -> Ex<T> {
-        std(Std::Unwrap, vec![self.e])
-    }
-    pub fn unwrap_or(self, d: Ex<T>) -> Ex<T> {
-        std(Std::UnwrapOr, vec![self.e, d.e])
     }
     /// `match self { None => d, Some(x) => f(x) }`.
     pub fn map_or<U>(self, d: Ex<U>, f: impl FnOnce(Ex<T>) -> Ex<U>) -> Ex<U> {
