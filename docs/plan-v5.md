@@ -684,6 +684,36 @@ A table in this section, filled by M1:
 
 ## Landed
 
+**D1** (`d223d71`…`1b8384e`): `ark5-client` 680, `ark5-server` 708,
+`ark5-dev` 1,441 (+22 bin) source lines, each within budget; the
+volatile arm in `peer.rs` +79 net, `store.rs` +36 (the still-referenced
+refusal, stores by space). 179 tests across the six v5 crates.
+`fleet-seed-7` through the real hub and client reaches K1's pin; 123
+traces of 41 fleet sessions replay; the fuzzer ran 10,000 sessions
+with traces replayed (746,771 ops, 141,787 entries, 0 failed) and a
+second 10,000 without; `harken/domain5` is green with no `#[ignore]`
+for D1. The fuzzer found and D1 fixed five kernel faults, each now a
+test and a `rebase/fleet-fuzz-seed-N` vector: a refused intent used a
+`local` while alone; a gap inside a joined chain held its tail; a
+`Join` lost in flight; a re-push below a compacted horizon unanswered;
+a volatile push overtaken by a later one. Decisions now part of the
+design: `space` on `Ack`/`Reject`/`Held`; `Hello.device` is bytes an
+app function turns into the `on_join` input with the verified login;
+the volatile chain is a real chain and ephemeral calls are sequenced in
+it, the relay client-side and which functions are ephemeral client
+config; a volatile authority takes a push past a gap and refuses one
+behind as overtaken; the hub keeps the volatile snapshot across
+restarts and authors `on_restore`; the token is the connection's first
+message, close 4401 for nobody; the hub is a sans-io struct on its own
+thread so the simulator drives the same one; a store has a space; a
+trace is per client at `Peer::step`; the hub's journal is a side blob
+of each session's last `local` and refused verdicts. Not verified: the
+browser build (out of scope); `wss`; keepalive and backoff timing;
+`Fetch`/`Bodies`/`Held` only by hand-built vectors; fuzz modules use
+`Int`/`Text` columns and no `Group`/`Join` queries; a scoped connection
+is served afresh after a restart; `converge.rs` keeps A1's local
+simulator copy.
+
 **A1** (`5053c19`…`62965d7`): the attribute macros (`rust/ark5-macros`:
 `lower`, `mutator`, `shape`, `query`, `scope`, `live`, `module!`) at
 1,164 source lines, plus a 678-line runtime `ark5::author` the generated
