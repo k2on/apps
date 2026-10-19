@@ -10,18 +10,20 @@ in Kotlin, and nothing is generated into the app: what the screens call is
 a mutation or a query of the module, by name (`docs/plan-phones.md`). What
 it looks like and how it behaves is `docs/plan-android.md`.
 
-**Assembled and rendered, not run.** `nix build .#harken-apk` compiles
-every Kotlin file here and runs the onboarding's JVM tests before it
-produces the APK; `nix build .#harken-android-screens` renders every
-screen, light and dark, on the JVM (below). Nothing in the container this
-was written in can install or run an APK, and no phone has run this one.
+**Built and rendered here, run on a phone elsewhere.** `nix build
+.#harken-apk` compiles every Kotlin file here and runs the onboarding's JVM
+tests before it produces the APK; `nix build .#harken-android-screens`
+renders every screen, light and dark, on the JVM (below). Nothing in the
+container this was written in can install or run an APK; the app is
+installed from the F-Droid repository (`fdroid/README.md`) and used on a
+phone, and what is known of it there is what was reported back.
 What *has* been exercised is everything under it on the JVM: the runtime
 and the client against every client vector and trace (`checks.kotlin`),
 `harken-peer-kt` in the process fleet beside Rust peers
 (`checks.fleet-kotlin`), the onboarding's machine, and the screens drawn
-by layoutlib. Expect the first run on a real phone to want small fixes —
-the media session, the Custom Tab's redirect and the notification
-permission are the parts only a phone can say anything about.
+by layoutlib. The media session, the Custom Tab's redirect, the
+notification permission, Android Auto and the volume keys are the parts
+only a phone can say anything about.
 
 ## Building
 

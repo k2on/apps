@@ -12,7 +12,7 @@ file and was used as one; the semantics are Rust's.
 A phone's runtime is a **client**: it interprets modules and does not
 author them. The domain is written once, in Rust, and `arkc` emits the
 module (`harken/domain/harken.ark`). The v3 tree's authoring vocabulary and
-the printed domain are gone (`FROZEN.md`).
+the printed domain are gone (below).
 
 Rounds 5–7 of `docs/plan-phones.md` landed it: the core, then the client —
 the replica, the protocol client, the alone authority and the journal in
@@ -157,6 +157,10 @@ the Unicode tables first.
 
 ## Where it came from
 
-This tree was frozen at spec v3 while v4 moved (`FROZEN.md`); it was last
-green at `4bacc8f`, and `git show 4bacc8f:swift` is that runtime, its
-authoring vocabulary and its client.
+This tree was ArkDB for Swift at spec v3, with an authoring vocabulary
+and harken's printed domain, and was set aside while v4 moved. It was last
+green at `4bacc8f`: `git show 4bacc8f:swift` is that runtime, and
+`nix build "git+file://$PWD?rev=$(git rev-parse 4bacc8f)#checks.x86_64-linux.swift"`
+builds its check as it passed. `docs/plan-phones.md` rounds 5–7 brought it
+to v4 as a client; the vocabulary and the printed domain were deleted, not
+ported.

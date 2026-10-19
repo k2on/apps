@@ -16,8 +16,9 @@ parameters travel in `names`, outside the hash.
 Spec version **4** (`docs/plan-v4.md`): every query is a plan. Version 3
 brought routers, middleware and input schemas; version 2 had scopes
 (`docs/scopes.md` says what they were and why they are gone). Swift and
-Kotlin authored the same vocabulary at version 3 and are frozen there
-(`swift/`, `kotlin/`); this document describes the Rust spelling only.
+Kotlin authored the same vocabulary at version 3; at version 4 they are
+clients that load a module and do not author one, so this vocabulary is
+Rust's alone.
 A bare section number (§1.5, §6) is this document's; one that names
 `docs/plan-v4.md` is the design's.
 

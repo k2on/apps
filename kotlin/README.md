@@ -285,12 +285,15 @@ source compiles for the app (`harken/android`).
 A server is not here and will not be: no `Server`, no adopting a log, no
 compaction, no union's server half. `Auth.login` is the desktop's loopback
 flow; a phone signs in through `ark-android`'s Custom Tab and
-`Auth.exchange`. No phone has run any of this: `nix build .#harken-apk`
-compiles the client and the onboarding for Android inside the app, and
-everything above ran on the JVM.
+`Auth.exchange`. The tests above run on the JVM; on Android the client runs
+inside the app (`nix build .#harken-apk`), which is in use on a phone.
 
 ## Where it came from
 
-This tree was frozen at spec v3 while v4 moved (`FROZEN.md`); it was last
-green at `4bacc8f`, and `git show 4bacc8f:kotlin` is that runtime, its
-authoring vocabulary and its client.
+This tree was ArkDB for Kotlin at spec v3, with an authoring vocabulary
+and harken's printed domain, and was set aside while v4 moved. It was last
+green at `4bacc8f`: `git show 4bacc8f:kotlin` is that runtime, and
+`nix build "git+file://$PWD?rev=$(git rev-parse 4bacc8f)#checks.x86_64-linux.kotlin"`
+builds its check as it passed. `docs/plan-phones.md` rounds 2–4 brought it
+to v4 as a client; the vocabulary and the printed domain were deleted, not
+ported.

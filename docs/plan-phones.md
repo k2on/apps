@@ -5,8 +5,8 @@ Both runtimes are at v4 and held to the suite; both headless peers run in
 the fleet beside Rust ones. No phone ran either app: the APK was assembled
 and never installed, and the iOS app was never built.
 
-Swift and Kotlin were frozen at spec v3 (`kotlin/FROZEN.md`,
-`swift/FROZEN.md`) while v4 moved. It has settled — plans and maintained
+Swift and Kotlin were frozen at spec v3 (each README's "Where it came from";
+the FROZEN.md notes, deleted since, are at `a3ea240`) while v4 moved. It has settled — plans and maintained
 views, the rebase by records, the additive digest, roles stamped into
 entries, scopes and unions, private blocks, the authority's raw writes —
 and the owner's decision is to bring both runtimes to it rather than put

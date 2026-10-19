@@ -16,19 +16,11 @@ server/    ark-server with harken's own parts: the scanner, the Home Assistant
            (server/README.md)
 iced/      the desktop and browser client, on arkui and ark-client; the `demo`
            feature is the seeded library GitHub Pages publishes
-android/   the phone: Compose over the Kotlin client at spec v4, loading
-           harken.ark from its assets and interpreting it (android/README.md,
+android/   the phone: Compose over the Kotlin client, loading harken.ark
+           from its assets and interpreting it (android/README.md,
            kotlin/README.md, docs/plan-phones.md)
-```
-
-Frozen at spec v3, with the runtime it is built on (`swift/FROZEN.md`), and
-not following the domain since:
-
-```
-domain/gen/   swift: arkc's print of what the phone called, from the v3
-              harken.ark; there is no printer now (a phone loads harken.ark,
-              docs/plan-phones.md)
-ios/          SwiftUI over ArkDBClient and the printed Swift (ios/README.md)
+ios/       the same app in SwiftUI over the Swift client, loading the same
+           harken.ark (ios/README.md); never built for iOS
 ```
 
 ## The domain
@@ -184,13 +176,15 @@ Everything is `nix`, from the repository root:
                                    # the vectors; the NixOS module
 
 `nixosModules.default` is `services.harken` (`server/README.md` has its
-options). The frozen iOS app is Xcode over `ios/project.yml`, since only a
-Mac can build one.
+options). The iOS app is Xcode over `ios/project.yml`, since only a Mac
+can build one.
 
-Two workflows build from `main`: `pages.yml` publishes `harken-web` at
-<https://k2on.github.io/apps/harken/>, and `apk.yml` builds `harken-apk`,
-the Android app over the Kotlin client (`nix build .#harken-apk`,
-`android/README.md`).
+One workflow, `.github/workflows/build.yaml`, builds from `main`: it
+publishes `harken-web` at <https://k2on.github.io/apps/harken/>, builds
+`harken-apk`, the Android app over the Kotlin client (`nix build
+.#harken-apk`, `android/README.md`), and publishes that as the F-Droid
+repository (`android/fdroid/README.md`). Each build is skipped when its
+inputs have not moved.
 
 The Kotlin client has a headless peer too, `harken-peer-kt`
 (`nix build .#harken-peer-kt`): `harken-peer`'s lines on another runtime,
@@ -427,22 +421,30 @@ a client older than the server's first deploy. Its first start with a new
 module re-hashes the log's snapshot under the new schema
 (`ark_server::persist::rehome`).
 
-The pinned revisions are still frozen at spec version 4 like this one: a
-pinned peer reads this server's frames, and this server reads theirs. Two
+None is pinned now (`nix/versions.nix` is empty, so the scenarios that
+need an older binary are skipped); one is added when a release is shipped
+that later builds must stay compatible with. A pinned revision must speak
+this one's protocol: its peer reads this server's frames, and this server
+reads theirs. Two
 revisions' state hashes are not comparable (a schema, or the hash's own
 definition, may differ between them), so the version scenarios compare
 what each peer reads, not what it hashes.
 
 ## Not verified
 
-No phone has run the Android app: `nix build .#harken-apk` compiles it
-and the APK was installed nowhere. Its client is held to the suite and to
-the fleet on the JVM (`harken-peer-kt`), not on Android. The frozen iOS app
-has not met a compiler; it speaks spec v3, and the server runs a v4
-module.
-No desktop window has been opened: the browser build has been drawn in
-headless Chromium, and the desktop only driven through its tests. Nothing
-here has met a real Home Assistant or a real OpenID Connect provider.
+Nothing in the container this was written in can run a phone, a window or
+a speaker, so what is known of each beyond its tests is what was reported
+back. The Android app is installed from the F-Droid repository and used on
+a phone, and the browser build against a real server and a real Home
+Assistant; that is where the crashes, the scrolling and the speaker's
+position were reported, and each change since is tested on the JVM, in
+headless Chromium and against a stand-in house before it is seen there.
+The latest cast fixes (a speaker's position after a hand-off, kept within
+600 ms) have not yet met a real speaker; `server/README.md` says how to
+turn on the bridge's trace for that. The iOS app has never been built for
+iOS: only its non-SwiftUI half type-checks, on Linux. The desktop window has
+been driven only through its tests, and nothing has met a real OpenID
+Connect provider from here.
 The listening session has run between real sockets, peers and the bridge
 against a stand-in house, and the reconcilers against a stand-in player;
 no browser has played a track through it and no speaker has been handed

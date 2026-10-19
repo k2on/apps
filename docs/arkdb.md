@@ -16,7 +16,8 @@ role. It also split the database into scopes, which spec version 3 removed
 again (`docs/scopes.md` records them): a module has one log, as in Petros.
 Parts 1 and 2 are unchanged. Spec version 4 (`docs/plan-v4.md`) is newer
 than this document where they disagree: every query is a plan, `rust/ark`
-is the specification, and Swift and Kotlin are frozen at version 3.
+is the specification, and Swift and Kotlin are clients that load a module
+rather than author one (`docs/plan-phones.md`).
 
 Nothing here is built. It is the shape of the thing, the reasons, and the
 order to build it in — the same kind of document `docs/decisions.md` and
@@ -1066,9 +1067,9 @@ writes it — and read back by `rust/ark/tests/vectors.rs`: two programs
 against one set of files. They are reviewed like code; a regeneration that
 changes nothing shows nothing in a diff, and `checks.vectors` fails while
 the committed tree differs from what the generator writes. A runtime in
-another language is conformant when it passes them. None does at version
-4: Swift and Kotlin passed the version-3 vectors and are frozen there
-(`swift/FROZEN.md`, `kotlin/FROZEN.md`).
+another language is conformant when it passes them. Kotlin and Swift do,
+as clients: every vector a client reads and every trace of the corpus
+(`checks.kotlin`, `checks.swift`).
 
 | directory | one vector is | holds |
 |---|---|---|
@@ -1118,21 +1119,21 @@ apps/
                   ark-explorer (a database explorer for any module, one iced
                   component: hosted by harken's desktop on a key, and by
                   ark-server as its admin page, compiled to wasm as ark-admin)
-  swift/          frozen at spec v3 (FROZEN.md): ArkDB (the runtime) · ArkAuthoring
-                  (the vocabulary) · ArkDBClient · ArkDBTests
-  kotlin/         frozen at spec v3 (FROZEN.md): ark-runtime (with
-                  dev.arkdb.authoring) · ark-client
+  swift/          ArkDB (the runtime, a client) · ArkDBClient · ArkDBTests ·
+                  harken-peer-swift
+  kotlin/         ark-runtime (the runtime, a client) · ark-client · ark-ui ·
+                  harken-peer
   harken/         the app, one directory per program (harken/README.md):
-    domain/       the domain, written once in Rust (src/), and harken.ark, its emit;
-                  gen/{swift,kotlin}, arkc's print of the v3 module for the phones,
-                  frozen at v3
+    domain/       the domain, written once in Rust (src/), and harken.ark, its emit,
+                  which every peer loads
     server/       ark-server with harken's scanner, listening desk and house bridge;
                   the admin page on its own listener, loopback by default
     iced/         the desktop and browser client on arkui and ark-client; its demo
                   build is published to GitHub Pages
-    ios/          frozen at spec v3: SwiftUI over ArkDBClient and the printed Swift
-    android/      frozen at spec v3: Compose over ark-client and the printed Kotlin;
-                  still assembled by nix build .#harken-apk
+    ios/          SwiftUI over ArkDBClient, interpreting harken.ark; never built
+                  for iOS
+    android/      Compose over ark-client, interpreting harken.ark; nix build
+                  .#harken-apk
   flake.nix       all of the above, as packages, checks and shells
 ```
 
@@ -1140,14 +1141,13 @@ An app depends on one runtime package and carries its domain as source in
 the vocabulary, plus the module that source emits. The harken server and
 its desktop and browser client depend on `rust/ark` (through `ark-server`
 and `ark-client`) and link the Rust domain. The two phone apps depend on
-`swift/` and `kotlin/` and compile `arkc`'s print of harken's version-3
-module; they are frozen with those runtimes and do not follow the domain.
+`swift/` and `kotlin/` and load `harken.ark` itself, interpreting every
+function of it, so they follow the domain with no code of their own.
 
 ### 3.18 The path for harken
 
-Steps 3 to 5 were built at spec version 3 and are **deferred** at version
-4: Swift, Kotlin and the phone apps are frozen there, and what bringing
-them back takes is in `swift/FROZEN.md` and `kotlin/FROZEN.md`.
+Steps 3 to 5 were built at spec version 3, set aside while version 4
+moved, and built again at version 4 as clients (`docs/plan-phones.md`).
 
 1. **Spec, vectors and the Rust runtime**, vectors first: `wire.rs` becomes
    `codec/` and `protocol/`, `converge.rs` becomes `rebase/`, the ivm tests

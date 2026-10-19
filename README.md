@@ -54,7 +54,8 @@ One command holds all of it:
     nix develop .#rust
 
 What is not verified from here: no desktop window has been opened, and the
-browser client has been drawn in headless Chromium only. The frozen phone
-apps have not been run on a device; the Android one is assembled by nix, so
-its code compiles, and of the iOS one only the bridge ever met a compiler.
+browser client has been drawn in headless Chromium here. The Android app
+and the browser client are in use against a real server, and what is known
+of them on a device is what was reported back; the iOS app has never been
+built for iOS, and only its non-SwiftUI half has met a compiler.
 Each app's `README.md` says exactly where the seen part ends.
