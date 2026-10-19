@@ -82,7 +82,8 @@ pub fn sum(input: TokenStream) -> TokenStream {
     shape::sum(syn::parse_macro_input!(input as syn::DeriveInput)).into()
 }
 
-/// The table set: a struct of `Table<Row>`s, in schema order.
+/// The table set: a struct of `Table<Row>`s, in schema order, and the sum
+/// of its rows, `<Name>Row`, which a scope takes.
 #[proc_macro_derive(Schema)]
 pub fn schema(input: TokenStream) -> TokenStream {
     shape::schema(syn::parse_macro_input!(input as syn::DeriveInput)).into()

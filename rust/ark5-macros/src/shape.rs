@@ -359,7 +359,16 @@ pub fn schema(input: DeriveInput) -> TokenStream {
         }
     }
     let ids = fields.iter().map(|f| &f.0);
+    let (vis, sum) = (&input.vis, format_ident!("{}Row", name));
+    let variants = rows.iter().map(|r| match r {
+        syn::GenericArgument::Type(Type::Path(p)) => p.path.segments.last().unwrap().ident.clone(),
+        _ => format_ident!("Row"),
+    });
     quote! {
+        /// A row of any of the tables, as its table's variant, in schema
+        /// order: what a scope is a function of (§1.8).
+        #[derive(::ark5::author::Sum)]
+        #vis enum #sum { #(#variants(#rows)),* }
         impl #name {
             #[doc(hidden)]
             pub fn __ark_open() -> #name { #name { #(#ids: ::std::default::Default::default()),* } }
