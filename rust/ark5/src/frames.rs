@@ -27,16 +27,51 @@ use crate::Refusal;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Frame {
-    Hello { space: Space, cursor: Seq, hash: Option<EntryHash>, device: Option<String> },
-    Push { space: Space, entry: Entry, body: Option<Vec<u8>> },
-    Fetch { hashes: Vec<FnHash> },
-    Ack { id: EntryId, seq: Seq, facts: Option<Vec<Change>> },
-    Reject { id: EntryId, why: String },
-    Held { id: EntryId, func: FnHash },
-    Batch { space: Space, from: Seq, logged: Vec<Logged> },
-    Snapshot { space: Space, snapshot: Snapshot },
-    Bodies { bodies: Vec<(FnHash, Vec<u8>)> },
-    Join { space: Space, from: Seq, hash: EntryHash, logged: Vec<Logged> },
+    Hello {
+        space: Space,
+        cursor: Seq,
+        hash: Option<EntryHash>,
+        device: Option<String>,
+    },
+    Push {
+        space: Space,
+        entry: Entry,
+        body: Option<Vec<u8>>,
+    },
+    Fetch {
+        hashes: Vec<FnHash>,
+    },
+    Ack {
+        id: EntryId,
+        seq: Seq,
+        facts: Option<Vec<Change>>,
+    },
+    Reject {
+        id: EntryId,
+        why: String,
+    },
+    Held {
+        id: EntryId,
+        func: FnHash,
+    },
+    Batch {
+        space: Space,
+        from: Seq,
+        logged: Vec<Logged>,
+    },
+    Snapshot {
+        space: Space,
+        snapshot: Snapshot,
+    },
+    Bodies {
+        bodies: Vec<(FnHash, Vec<u8>)>,
+    },
+    Join {
+        space: Space,
+        from: Seq,
+        hash: EntryHash,
+        logged: Vec<Logged>,
+    },
 }
 
 /// The types, by name: what the derive will write from the definitions.
@@ -133,7 +168,12 @@ impl Frame {
                     put_bytes(o, b);
                 });
             }
-            Frame::Join { space, from, hash, logged: ls } => {
+            Frame::Join {
+                space,
+                from,
+                hash,
+                logged: ls,
+            } => {
                 put_variant(out, 9);
                 put_variant(out, *space as u8);
                 put_int(out, *from);

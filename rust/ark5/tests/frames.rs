@@ -23,9 +23,19 @@ fn every_frame() -> Vec<Frame> {
         now: -5,
     };
     let facts = vec![
-        Change::Add { table: "item".into(), row: vec![0] },
-        Change::Remove { table: "item".into(), row: vec![] },
-        Change::Edit { table: "p".into(), old: vec![1], new: vec![2, 0] },
+        Change::Add {
+            table: "item".into(),
+            row: vec![0],
+        },
+        Change::Remove {
+            table: "item".into(),
+            row: vec![],
+        },
+        Change::Edit {
+            table: "p".into(),
+            old: vec![1],
+            new: vec![2, 0],
+        },
     ];
     let l = Logged {
         seq: 3,
@@ -42,20 +52,65 @@ fn every_frame() -> Vec<Frame> {
     };
     let id = entry.id;
     vec![
-        Frame::Hello { space: Space::Durable, cursor: 0, hash: None, device: None },
-        Frame::Hello { space: Space::Volatile, cursor: 4, hash: Some(EntryHash([0xFF; 32])), device: Some("phone".into()) },
-        Frame::Push { space: Space::Durable, entry: entry.clone(), body: None },
-        Frame::Push { space: Space::Durable, entry, body: Some(b"demo".to_vec()) },
-        Frame::Fetch { hashes: vec![FnHash([2; 32]), FnHash::default()] },
+        Frame::Hello {
+            space: Space::Durable,
+            cursor: 0,
+            hash: None,
+            device: None,
+        },
+        Frame::Hello {
+            space: Space::Volatile,
+            cursor: 4,
+            hash: Some(EntryHash([0xFF; 32])),
+            device: Some("phone".into()),
+        },
+        Frame::Push {
+            space: Space::Durable,
+            entry: entry.clone(),
+            body: None,
+        },
+        Frame::Push {
+            space: Space::Durable,
+            entry,
+            body: Some(b"demo".to_vec()),
+        },
+        Frame::Fetch {
+            hashes: vec![FnHash([2; 32]), FnHash::default()],
+        },
         Frame::Ack { id, seq: 3, facts: None },
-        Frame::Ack { id, seq: 3, facts: Some(facts) },
-        Frame::Reject { id, why: "a playlist needs a name".into() },
+        Frame::Ack {
+            id,
+            seq: 3,
+            facts: Some(facts),
+        },
+        Frame::Reject {
+            id,
+            why: "a playlist needs a name".into(),
+        },
         Frame::Held { id, func: FnHash([3; 32]) },
-        Frame::Batch { space: Space::Durable, from: 2, logged: vec![l.clone(), l.clone()] },
-        Frame::Batch { space: Space::Durable, from: 0, logged: vec![] },
-        Frame::Snapshot { space: Space::Durable, snapshot },
-        Frame::Bodies { bodies: vec![(FnHash([4; 32]), vec![0, 0])] },
-        Frame::Join { space: Space::Durable, from: 0, hash: EntryHash::default(), logged: vec![l] },
+        Frame::Batch {
+            space: Space::Durable,
+            from: 2,
+            logged: vec![l.clone(), l.clone()],
+        },
+        Frame::Batch {
+            space: Space::Durable,
+            from: 0,
+            logged: vec![],
+        },
+        Frame::Snapshot {
+            space: Space::Durable,
+            snapshot,
+        },
+        Frame::Bodies {
+            bodies: vec![(FnHash([4; 32]), vec![0, 0])],
+        },
+        Frame::Join {
+            space: Space::Durable,
+            from: 0,
+            hash: EntryHash::default(),
+            logged: vec![l],
+        },
     ]
 }
 

@@ -110,7 +110,10 @@ impl Procedure for CreatePlaylist {
             return Err(Refusal::new("a playlist needs a name"));
         }
         let row = playlist_row(&ctx.new_id(0), name, &ctx.actor);
-        Ok(vec![Change::Add { table: "playlist".into(), row }])
+        Ok(vec![Change::Add {
+            table: "playlist".into(),
+            row,
+        }])
     }
 }
 
@@ -126,7 +129,11 @@ impl Procedure for AddToPlaylist {
             return Err(Refusal::new("track_id: at least 1 character"));
         }
         let last = store.scan("item", &Scan::prefix(Some(0), &bytes_enc(&pid), Dir::Desc, 1));
-        let pos = last.first().map_or(0, |r| item_of(r).2).checked_add(self.0).ok_or_else(|| Refusal::new("pos overflows"))?;
+        let pos = last
+            .first()
+            .map_or(0, |r| item_of(r).2)
+            .checked_add(self.0)
+            .ok_or_else(|| Refusal::new("pos overflows"))?;
         Ok(vec![Change::Add {
             table: "item".into(),
             row: item_row(&pid, &track, pos),
@@ -142,7 +149,11 @@ impl Procedure for RenamePlaylist {
         let mut r = Reader::new(&old);
         let (_, _, user) = (r.bytes()?, r.text()?, r.text()?);
         let new = playlist_row(&id, name.trim(), &user);
-        Ok(vec![Change::Edit { table: "playlist".into(), old, new }])
+        Ok(vec![Change::Edit {
+            table: "playlist".into(),
+            old,
+            new,
+        }])
     }
 }
 
@@ -152,7 +163,11 @@ impl Procedure for RemoveFromPlaylist {
         let (pid, track) = id_and_text(input)?;
         let mut key = bytes_enc(&pid);
         put_bytes(&mut key, track.as_bytes());
-        Ok(store.get("item", &key).map(|row| Change::Remove { table: "item".into(), row }).into_iter().collect())
+        Ok(store
+            .get("item", &key)
+            .map(|row| Change::Remove { table: "item".into(), row })
+            .into_iter()
+            .collect())
     }
 }
 

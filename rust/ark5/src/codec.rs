@@ -93,7 +93,10 @@ impl<'a> Reader<'a> {
     }
 
     fn byte(&mut self, what: &str) -> Result<u8, Refusal> {
-        let b = *self.bytes.get(self.at).ok_or_else(|| Refusal(format!("{what}: the bytes end at byte {}", self.at)))?;
+        let b = *self
+            .bytes
+            .get(self.at)
+            .ok_or_else(|| Refusal(format!("{what}: the bytes end at byte {}", self.at)))?;
         self.at += 1;
         Ok(b)
     }

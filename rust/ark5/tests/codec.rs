@@ -91,7 +91,7 @@ fn parse_refuses_by_name() {
     };
     refuses(&Ty::Bytes, &[b'a', 0, b'b', 0, 0], "an unescaped 00");
     refuses(&Ty::Bytes, &[b'a', 0, 0xFF], "terminator");
-    refuses(&Ty::Bytes, &[b'a'], "terminator");
+    refuses(&Ty::Bytes, b"a", "terminator");
     refuses(&Ty::bool(), &[2], "variant 2 of a sum of 2");
     refuses(&Ty::Int, &[0x80, 0, 0, 0, 0, 0, 0, 0, 1], "trailing bytes");
     refuses(&Ty::Int, &[0x80, 0, 0], "eight bytes");

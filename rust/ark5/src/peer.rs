@@ -335,7 +335,9 @@ impl Peer {
 
     /// Takes an intent out of the pending ones, the rest rebased.
     fn settle(&mut self, id: &EntryId, o: &mut Out) -> bool {
-        let Some(i) = self.pending.iter().position(|p| p.entry.id == *id) else { return false };
+        let Some(i) = self.pending.iter().position(|p| p.entry.id == *id) else {
+            return false;
+        };
         self.undo_pending(o);
         self.pending.remove(i);
         self.redo_pending(o);
@@ -386,7 +388,9 @@ impl Peer {
         let mut r = self.attempt(&entry, o);
         if let (Ok(facts), Some(x)) = (&r, expect) {
             if facts != x {
-                self.store.apply_all(&facts.iter().rev().map(Change::inverse).collect::<Vec<_>>()).expect("its inverse applies");
+                self.store
+                    .apply_all(&facts.iter().rev().map(Change::inverse).collect::<Vec<_>>())
+                    .expect("its inverse applies");
                 r = Err(Refusal::new("its facts are not what this authority's run of it gives"));
             }
         }
@@ -512,7 +516,10 @@ impl Peer {
         if self.cas.get(&entry.func).is_none() {
             return o.send(match asked {
                 false => Frame::Held { id, func: entry.func },
-                true => Frame::Reject { id, why: format!("no function {}", entry.func) },
+                true => Frame::Reject {
+                    id,
+                    why: format!("no function {}", entry.func),
+                },
             });
         }
         entry.actor = who.actor.clone();
@@ -555,7 +562,11 @@ impl Peer {
         o.out.extend(done.out);
         let (n, _) = at;
         for (k, l) in chain.iter().enumerate() {
-            o.send(Frame::Ack { id: l.entry.id, seq: n + 1 + k as Seq, facts: None });
+            o.send(Frame::Ack {
+                id: l.entry.id,
+                seq: n + 1 + k as Seq,
+                facts: None,
+            });
         }
     }
 
@@ -635,7 +646,9 @@ impl Peer {
         if s.seq <= self.log.head().0 && self.log.has(s.seq, &s.hash) {
             return;
         }
-        let Ok(new) = Store::from_rows(self.store.schema_arc().clone(), &s.rows) else { return };
+        let Ok(new) = Store::from_rows(self.store.schema_arc().clone(), &s.rows) else {
+            return;
+        };
         if new.state_hash() != s.state {
             return;
         }
@@ -676,17 +689,30 @@ impl Peer {
         }
         self.undo_pending(o);
         let fork = Some(self.log.head());
-        self.role = Role::Authority { journal: Journal { fork, ..Journal::default() } };
+        self.role = Role::Authority {
+            journal: Journal { fork, ..Journal::default() },
+        };
         for p in std::mem::take(&mut self.pending) {
             self.decide(p.entry, o);
         }
     }
 
     fn join(&mut self, o: &mut Out) {
-        let Role::Authority { journal: Journal { fork: Some((at, hash)), .. } } = self.role else { return };
+        let Role::Authority {
+            journal: Journal { fork: Some((at, hash)), .. },
+        } = self.role
+        else {
+            return;
+        };
         let chain = self.log.after(at).to_vec();
         self.log.truncate(at);
-        self.pending = chain.iter().map(|l| Pending { entry: l.entry.clone(), changes: l.facts.clone() }).collect();
+        self.pending = chain
+            .iter()
+            .map(|l| Pending {
+                entry: l.entry.clone(),
+                changes: l.facts.clone(),
+            })
+            .collect();
         self.role = Role::Replica;
         self.asked = Some(at);
         o.send(Frame::Hello {
@@ -732,7 +758,9 @@ impl Peer {
     /// each entry's facts give its state, and the pending intents run again.
     fn open(&mut self, d: Durable, o: &mut Out) {
         let schema = self.store.schema_arc().clone();
-        let Ok(mut store) = Store::from_rows(schema, &d.snapshot.rows) else { return };
+        let Ok(mut store) = Store::from_rows(schema, &d.snapshot.rows) else {
+            return;
+        };
         if store.state_hash() != d.snapshot.state {
             return;
         }
@@ -742,7 +770,9 @@ impl Peer {
                 break;
             }
             if store.state_hash() != l.state || log.push(l.clone()).is_err() {
-                store.apply_all(&l.facts.iter().rev().map(Change::inverse).collect::<Vec<_>>()).expect("its inverse applies");
+                store
+                    .apply_all(&l.facts.iter().rev().map(Change::inverse).collect::<Vec<_>>())
+                    .expect("its inverse applies");
                 break;
             }
         }

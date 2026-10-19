@@ -75,7 +75,11 @@ impl Change {
         Ok(match v {
             0 => Change::Add { table, row },
             1 => Change::Remove { table, row },
-            _ => Change::Edit { table, old: row, new: r.bytes()? },
+            _ => Change::Edit {
+                table,
+                old: row,
+                new: r.bytes()?,
+            },
         })
     }
 }
@@ -140,6 +144,9 @@ pub trait Read {
     fn get(&self, table: &str, key: &[u8]) -> Option<Vec<u8>>;
     fn scan(&self, table: &str, scan: &Scan) -> Vec<Vec<u8>>;
 }
+
+/// Each column's span in a row ([`Table::spans`]).
+type Spans<'a> = &'a [(usize, usize)];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Rows {
@@ -230,12 +237,18 @@ impl Store {
     }
 
     fn find(&self, table: &str) -> Result<usize, Refusal> {
-        self.schema.table(table).map(|(i, _)| i).ok_or_else(|| Refusal(format!("no table {table}")))
+        self.schema
+            .table(table)
+            .map(|(i, _)| i)
+            .ok_or_else(|| Refusal(format!("no table {table}")))
     }
 
     /// A table's rows in key order; none for a table the schema lacks.
     pub fn rows(&self, table: &str) -> impl Iterator<Item = &[u8]> {
-        self.find(table).ok().into_iter().flat_map(move |t| self.tables[t].rows.values().map(|r| &r[..]))
+        self.find(table)
+            .ok()
+            .into_iter()
+            .flat_map(move |t| self.tables[t].rows.values().map(|r| &r[..]))
     }
 
     /// `sha256(enc(Bytes table) ‖ row)`, read as a 256-bit integer.
@@ -350,7 +363,11 @@ impl Store {
     /// Deletes the row under `key`.
     pub fn delete(&mut self, table: &str, key: &[u8]) -> Result<Change, Refusal> {
         let t = self.find(table)?;
-        let row = self.tables[t].rows.get(key).cloned().ok_or_else(|| Refusal(format!("{table}: no row has this key")))?;
+        let row = self.tables[t]
+            .rows
+            .get(key)
+            .cloned()
+            .ok_or_else(|| Refusal(format!("{table}: no row has this key")))?;
         let c = Change::Remove { table: table.into(), row };
         self.apply(&c).map(|_| c)
     }
@@ -380,14 +397,17 @@ impl Store {
                 b = &b[1..];
             }
             if !self.tables[self.find(&r.table)?].rows.contains_key(b) {
-                return Err(Refusal(format!("{}.{}: no {} has this key", tab.name, tab.columns[r.column].name, r.table)));
+                return Err(Refusal(format!(
+                    "{}.{}: no {} has this key",
+                    tab.name, tab.columns[r.column].name, r.table
+                )));
             }
         }
         Ok(())
     }
 
     // The write itself, judged already: indexes, digest, rows.
-    fn write(&mut self, tab: &Table, t: usize, key: &[u8], old: Option<&[u8]>, new: Option<(&[u8], &[(usize, usize)])>) {
+    fn write(&mut self, tab: &Table, t: usize, key: &[u8], old: Option<&[u8]>, new: Option<(&[u8], Spans)>) {
         let rows = &mut self.tables[t];
         if let Some(o) = old {
             let spans = tab.spans(o).expect("a stored row parses");
@@ -452,7 +472,10 @@ impl Store {
             let table = || tab.name.clone();
             for (k, row) in a {
                 match b.get(k) {
-                    None => out.push(Change::Remove { table: table(), row: row.clone() }),
+                    None => out.push(Change::Remove {
+                        table: table(),
+                        row: row.clone(),
+                    }),
                     Some(n) if n != row => out.push(Change::Edit {
                         table: table(),
                         old: row.clone(),
@@ -461,7 +484,10 @@ impl Store {
                     _ => {}
                 }
             }
-            out.extend(b.iter().filter(|(k, _)| !a.contains_key(*k)).map(|(_, row)| Change::Add { table: table(), row: row.clone() }));
+            out.extend(b.iter().filter(|(k, _)| !a.contains_key(*k)).map(|(_, row)| Change::Add {
+                table: table(),
+                row: row.clone(),
+            }));
         }
         out
     }
@@ -483,7 +509,10 @@ impl Read for Store {
         }
         let (rows, range) = (&self.tables[t], (bound(&s.lo), bound(&s.hi)));
         match s.index {
-            None => ordered(rows.rows.range::<[u8], _>(range), s.dir).take(s.limit).map(|(_, r)| r.clone()).collect(),
+            None => ordered(rows.rows.range::<[u8], _>(range), s.dir)
+                .take(s.limit)
+                .map(|(_, r)| r.clone())
+                .collect(),
             Some(i) => {
                 let tab = &self.schema.tables[t];
                 let Some(ix) = tab.indexes.get(i) else { return vec![] };

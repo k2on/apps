@@ -142,5 +142,7 @@ fn going_alone_sequences_what_was_pending() {
     assert_eq!(o.iter().filter(|x| matches!(x, Output::Confirmed(_))).count(), 2);
     assert_eq!(eve.log.head().0, 2);
     let o = eve.step(mutate(CREATE, create_input("   "), 3));
-    assert!(o.iter().any(|x| matches!(x, Output::Refused { why, .. } if why == "a playlist needs a name")));
+    assert!(o
+        .iter()
+        .any(|x| matches!(x, Output::Refused { why, .. } if why == "a playlist needs a name")));
 }

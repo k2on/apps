@@ -34,15 +34,24 @@ fn whys(s: &mut Store, c: Change) -> String {
 fn constraints_refuse() {
     let mut s = Store::new(demo::shared());
     let empty = s.clone();
-    let item = |n, t: &str, p| Change::Add { table: "item".into(), row: item_row(&id(n), t, p) };
+    let item = |n, t: &str, p| Change::Add {
+        table: "item".into(),
+        row: item_row(&id(n), t, p),
+    };
     assert!(whys(&mut s, item(1, "t1", 1)).contains("no playlist has this key"));
     s.put("playlist", playlist_row(&id(1), "Favorites", "alice")).unwrap();
-    let dup = Change::Add { table: "playlist".into(), row: playlist_row(&id(2), "Favorites", "alice") };
+    let dup = Change::Add {
+        table: "playlist".into(),
+        row: playlist_row(&id(2), "Favorites", "alice"),
+    };
     assert!(whys(&mut s, dup).contains("another row has this (user_id, name)"));
     s.apply(&item(1, "t1", 1)).unwrap();
     assert!(whys(&mut s, item(1, "t2", 1)).contains("(playlist_id, pos)"));
     assert!(whys(&mut s, item(1, "t1", 2)).contains("a row with this key exists"));
-    let short = Change::Add { table: "item".into(), row: bytes_enc(&id(1)) };
+    let short = Change::Add {
+        table: "item".into(),
+        row: bytes_enc(&id(1)),
+    };
     assert!(whys(&mut s, short).contains("item.track_id"));
     let rekey = Change::Edit {
         table: "item".into(),
@@ -50,7 +59,10 @@ fn constraints_refuse() {
         new: item_row(&id(1), "t9", 1),
     };
     assert!(whys(&mut s, rekey).contains("keeps its key"));
-    let stale = Change::Remove { table: "item".into(), row: item_row(&id(1), "t1", 5) };
+    let stale = Change::Remove {
+        table: "item".into(),
+        row: item_row(&id(1), "t1", 5),
+    };
     assert!(whys(&mut s, stale).contains("not the one"));
     let before = s.clone();
     assert!(s.apply_all(&[item(1, "t2", 2), item(1, "t3", 2)]).is_err());
@@ -81,10 +93,15 @@ fn every_change_inverts_and_the_hash_is_the_rows() {
             _ => {
                 let rows: Vec<Vec<u8>> = s.rows("item").map(|x| x.to_vec()).collect();
                 match rows.get(r.below(rows.len() as u64 + 1) as usize) {
-                    Some(row) => s.apply(&Change::Remove { table: "item".into(), row: row.clone() }).map(|_| Change::Remove {
-                        table: "item".into(),
-                        row: row.clone(),
-                    }),
+                    Some(row) => s
+                        .apply(&Change::Remove {
+                            table: "item".into(),
+                            row: row.clone(),
+                        })
+                        .map(|_| Change::Remove {
+                            table: "item".into(),
+                            row: row.clone(),
+                        }),
                     None => continue,
                 }
             }
@@ -100,7 +117,11 @@ fn every_change_inverts_and_the_hash_is_the_rows() {
     }
     assert!(done.len() > 1000 && done.iter().any(|c| matches!(c, Change::Edit { .. })));
     let full = s.state_hash();
-    assert_eq!(s.hash_beside(done.iter().rev()), empty.state_hash(), "the digests' arithmetic undoes it too");
+    assert_eq!(
+        s.hash_beside(done.iter().rev()),
+        empty.state_hash(),
+        "the digests' arithmetic undoes it too"
+    );
     for c in done.iter().rev() {
         s.apply(&c.inverse()).unwrap();
     }
@@ -170,7 +191,13 @@ fn compat_is_a_prefix_extension() {
     retyped.tables[1].columns[2].ty = Ty::Bytes;
     assert!(compat(&old, &retyped).is_err());
     assert!(compat(&new, &old).is_err());
-    assert!(compat(&old, &Schema { tables: vec![old.tables[0].clone()] }).is_err());
+    assert!(compat(
+        &old,
+        &Schema {
+            tables: vec![old.tables[0].clone()]
+        }
+    )
+    .is_err());
     let row = item_row(&id(1), "t1", 4);
     let full = new.tables[1].complete(&row).unwrap();
     assert_eq!(new.tables[1].spans(&full).unwrap().len(), 5);

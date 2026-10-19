@@ -46,7 +46,11 @@ fn scenario() -> Scenario {
     }
     let name = |p: &Peer| p.store.get_row("playlist", &pid());
     assert_eq!(name(&alice), name(&bob));
-    assert_eq!(name(&alice), Some(demo::playlist_row(&pid(), "Favorites", "alice")), "the name was trimmed");
+    assert_eq!(
+        name(&alice),
+        Some(demo::playlist_row(&pid(), "Favorites", "alice")),
+        "the name was trimmed"
+    );
     assert!(alice.pending.is_empty() && alice.confirmed_hash() == bob.confirmed_hash());
     // step 2: alice goes dark; bob adds two tracks, alice one alone
     for t in ["t1", "t2"] {
@@ -70,18 +74,34 @@ fn scenario() -> Scenario {
     let (s, f) = deliver_up(&mut server, &who("alice"), &o);
     assert!(matches!(s[..], [Frame::Ack { seq: 4, .. }]), "{s:?}");
     let l4 = logged(&f[0]);
-    assert!(matches!(&l4.facts[..], [Change::Add { row, .. }] if demo::item_of(row).2 == 3), "the authority's facts say pos 3 too");
+    assert!(
+        matches!(&l4.facts[..], [Change::Add { row, .. }] if demo::item_of(row).2 == 3),
+        "the authority's facts say pos 3 too"
+    );
     let o = alice.step(down(&f[0]));
-    assert!(changes(&o).is_empty() && o.contains(&Output::Confirmed(l4.entry.id)), "her own entry, as previewed: nothing moves");
+    assert!(
+        changes(&o).is_empty() && o.contains(&Output::Confirmed(l4.entry.id)),
+        "her own entry, as previewed: nothing moves"
+    );
     assert!(alice.step(down(&s[0])).is_empty(), "the ack of what landed is nothing more");
     bob.step(down(&f[0]));
     batches.extend(f);
     assert!(alice.pending.is_empty() && alice.store == bob.store && bob.store == server.store);
     let rows = vec![
         ("playlist".into(), vec![demo::playlist_row(&pid(), "Favorites", "alice")]),
-        ("item".into(), [("t1", 1), ("t2", 2), ("t9", 3)].iter().map(|(t, n)| demo::item_row(&pid(), t, *n)).collect()),
+        (
+            "item".into(),
+            [("t1", 1), ("t2", 2), ("t9", 3)]
+                .iter()
+                .map(|(t, n)| demo::item_row(&pid(), t, *n))
+                .collect(),
+        ),
     ];
-    assert_eq!(server.store, ark5::store::Store::from_rows(demo::shared(), &rows).unwrap(), "the rows the scenario says");
+    assert_eq!(
+        server.store,
+        ark5::store::Store::from_rows(demo::shared(), &rows).unwrap(),
+        "the rows the scenario says"
+    );
     for p in [&server, &alice, &bob] {
         assert_eq!(p.store.state_hash().hex(), FINAL, "three replicas, one hash");
         assert_eq!(p.log.head(), server.log.head(), "one chain");
@@ -104,7 +124,9 @@ impl Row for ark5::store::Store {
 /// entry, confirmed with facts other than his preview's, failed here.
 #[test]
 fn step_4_the_scenario() {
-    let Scenario { mut server, bob, batches, .. } = scenario();
+    let Scenario {
+        mut server, bob, batches, ..
+    } = scenario();
     // a duplicate delivery changes nothing
     let mut b = bob.clone();
     assert!(b.step(down(&batches[1])).is_empty());
@@ -134,9 +156,18 @@ fn step_1_an_authority_sequences_the_transcript() {
     let s = scenario();
     let mut fresh = authority(demo::cas());
     for l in &s.server.log.entries {
-        let (acks, f) = deliver_up(&mut fresh, &who(&l.entry.actor), &[Output::Send(
-            Frame::Push { space: ark5::schema::Space::Durable, entry: l.entry.clone(), body: None }.enc(),
-        )]);
+        let (acks, f) = deliver_up(
+            &mut fresh,
+            &who(&l.entry.actor),
+            &[Output::Send(
+                Frame::Push {
+                    space: ark5::schema::Space::Durable,
+                    entry: l.entry.clone(),
+                    body: None,
+                }
+                .enc(),
+            )],
+        );
         assert!(matches!(acks[..], [Frame::Ack { seq, .. }] if seq == l.seq));
         assert_eq!(&logged(&f[0]), l, "entry {}: its facts, state and hash", l.seq);
     }
@@ -157,7 +188,10 @@ fn step_2_a_replica_given_the_entries_backwards() {
     for f in s.batches.iter().rev() {
         asked.extend(sends(&r.step(down(f))));
     }
-    assert!(matches!(asked[..], [Frame::Hello { cursor: 0, .. }]), "one hello, at the first gap: {asked:?}");
+    assert!(
+        matches!(asked[..], [Frame::Hello { cursor: 0, .. }]),
+        "one hello, at the first gap: {asked:?}"
+    );
     assert_eq!(r.log.head().0, 1);
     let mut server = s.server.clone();
     for f in sends(&server.step(up(&who("rita"), &asked[0]))) {
@@ -196,7 +230,11 @@ fn a_divergence_is_found_at_its_entry_and_healed() {
     l2.hash = Logged::chain(&l1.hash, 2, &l2.entry, &l2.facts, &l2.state);
     let mut carol = replica("carol", demo::cas());
     carol.step(down(&s.batches[0]));
-    let o = carol.step(down(&Frame::Batch { space: ark5::schema::Space::Durable, from: 1, logged: vec![l2] }));
+    let o = carol.step(down(&Frame::Batch {
+        space: ark5::schema::Space::Durable,
+        from: 1,
+        logged: vec![l2],
+    }));
     assert_eq!(carol.diverged, vec![2]);
     let hello = sends(&o);
     assert!(matches!(hello[..], [Frame::Hello { cursor: 0, hash: None, .. }]));
@@ -218,7 +256,12 @@ fn compaction_and_the_horizon() {
     let o = server.step(Input::Compact(2));
     assert!(o.iter().all(|x| matches!(x, Output::Persist(_))));
     assert_eq!(server.log.base.seq, 2);
-    let hello = |cursor, hash| Frame::Hello { space: ark5::schema::Space::Durable, cursor, hash: Some(hash), device: None };
+    let hello = |cursor, hash| Frame::Hello {
+        space: ark5::schema::Space::Durable,
+        cursor,
+        hash: Some(hash),
+        device: None,
+    };
     let at0 = sends(&server.step(up(&who("x"), &hello(0, EntryHash::default()))));
     let mut r = replica("x", Cas::default());
     assert!(matches!(at0[..], [Frame::Snapshot { .. }]));
@@ -235,7 +278,12 @@ fn compaction_and_the_horizon() {
 /// pending changes oldest-first: the first rename's undo was refused.
 #[test]
 fn edits_and_removes_rebase_too() {
-    let Scenario { mut server, mut alice, mut bob, .. } = scenario();
+    let Scenario {
+        mut server,
+        mut alice,
+        mut bob,
+        ..
+    } = scenario();
     let o1 = alice.step(mutate(ADD, pair_input(&pid(), "t4"), 5));
     let o2 = alice.step(mutate(RENAME, pair_input(&pid(), "Old"), 6));
     let o3 = alice.step(mutate(RENAME, pair_input(&pid(), "Older"), 6));
@@ -313,4 +361,28 @@ fn a_peer_opens_from_what_it_persisted() {
     assert_eq!(opened.log, s.bob.log);
     assert_eq!(opened.confirmed_hash().hex(), FINAL);
     assert_eq!(pos_of(&opened.store, &pid(), "t5"), Some(4));
+}
+
+/// A session's pushes are judged in its order: one that arrives ahead of
+/// the one before it waits, unanswered, and is pushed again after the next
+/// hello. Falsified by dropping the gap check in `push`: the add was judged
+/// before the playlist it adds to existed, and refused.
+#[test]
+fn a_sessions_pushes_are_judged_in_order() {
+    let (mut server, mut alice) = (authority(demo::cas()), replica("alice", demo::cas()));
+    let mut pushes = sends(&alice.step(mutate(CREATE, create_input("Road"), 1)));
+    pushes.extend(sends(&alice.step(mutate(ADD, pair_input(&pid(), "t1"), 2))));
+    let mut answers = vec![];
+    for f in pushes.iter().rev() {
+        let o = server.step(up(&who("alice"), f));
+        answers.extend(sends(&o));
+        for b in fanouts(&o) {
+            alice.step(down(&b));
+        }
+    }
+    assert!(matches!(answers[..], [Frame::Ack { seq: 1, .. }]), "the add waits: {answers:?}");
+    let (s, f) = deliver_up(&mut server, &who("alice"), &alice.step(Input::Connected));
+    assert!(matches!(s[..], [Frame::Ack { seq: 2, .. }]), "{s:?}");
+    alice.step(down(&f[0]));
+    assert!(alice.pending.is_empty() && alice.store == server.store);
 }
