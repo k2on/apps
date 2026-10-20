@@ -16,13 +16,14 @@ as one typed language every peer runs — and harken, the first app on it.
   modules), maintained views, ArkLang (`ark::sexp`, the language a
   domain is written in: S-expressions) and `ark::gen`, the typed bindings
   an app generates from a module. `ark-dev` is the development tools: the
-  simulator over the real hub and client, the trace recorder and player,
+  simulator over real peers in both roles, the trace recorder and player,
   the fuzzer (`ark-fuzz`), the vector writer and `arkc`, which checks,
   prints, compares and builds modules. Beside them, what every app shares:
-  `ark-client` (the client driver: storage, the link, maintained views,
-  the live space, signing in later), `ark-server` (the hub on its thread,
-  the sync socket, persistence, the admin page's listener, the web
-  build), `ark-auth` (dev auth and OpenID Connect), `ark-explorer` (the
+  `ark-peer` (the one peer: a device that dials — storage, the link with
+  redial, the views a UI drives and the functions it calls by name, the
+  live relay, signing in later — and a server that listens — the
+  connections routed, the log written before delivered, the sync socket,
+  the admin page's listener, the web build), `ark-auth` (dev auth and OpenID Connect), `ark-explorer` (the
   admin page and the explorer over a replica) and `arkui` (the iced
   components, the vim keyboard, theming).
 - `spec/` — the conformance vectors `rust/ark` and `rust/ark-dev` write

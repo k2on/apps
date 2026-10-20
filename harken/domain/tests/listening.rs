@@ -25,9 +25,8 @@ use ark::ir::Node;
 use ark::log::EntryId;
 use ark::peer::{Ctx, Who};
 use ark::store::Store;
-use ark_client::{Config, Live, Module};
 use ark_dev::sim::{Net, Op};
-use ark_server::hub::{Config as HubConfig, Live as HubLive};
+use ark_peer::{Config, Live, Module};
 use common::domain;
 use harken_domain::domain::host::Listening;
 use harken_domain::domain::Id;
@@ -1137,11 +1136,7 @@ fn a_report_of_a_volume_is_heard_in_order() {
 const RELAY_MS: i64 = 250;
 
 fn module() -> Module {
-    Module {
-        schema: domain().schema.clone(),
-        cas: domain().cas(),
-        lib: domain().lib.clone(),
-    }
+    Module::of(domain())
 }
 
 /// What the hub authors `on_join` and `on_leave` with: what the device
@@ -1162,15 +1157,15 @@ struct Wire {
 
 impl Wire {
     fn new() -> Wire {
-        let mut hub = HubConfig::new(module());
+        let mut hub = Config::new(module());
         let get = |n: &str| Some(domain().get(&format!("listening.{n}")));
-        hub.live = Some(HubLive {
-            module: module(),
+        hub.live = Some(Live {
             on_join: get("on_join"),
             on_leave: get("on_leave"),
             on_restore: get("on_restore"),
-            device: Arc::new(device),
-            keep: 64,
+            arrive: Arc::new(device),
+            keep: Some(64),
+            ..Live::new(module())
         });
         Wire {
             net: Net::of(hub, vec![], 1),
@@ -1189,10 +1184,10 @@ impl Wire {
             user: "alice".into(),
         };
         let live = Live {
-            module: module(),
             device: Some(said.to_bytes()),
             ephemeral: [domain().get("listening.scrub")].into(),
             every_ms: RELAY_MS,
+            ..Live::new(module())
         };
         let who = Who {
             actor: "alice".into(),
@@ -1202,8 +1197,8 @@ impl Wire {
         let i = self.net.add(
             who,
             Config {
-                log: module(),
                 live: Some(live),
+                ..Config::new(module())
             },
         );
         self.net.deliver();

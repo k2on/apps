@@ -14,8 +14,9 @@ use iced::futures::stream::{self, StreamExt};
 
 use super::Queues;
 use super::{alone, signed_in};
-use crate::client::{monotonic_ms, Event};
+use crate::client::monotonic_ms;
 use crate::{App, Message};
+use ark_peer::Event;
 
 /// Every message the window's subscriptions produce in `d` of real time.
 fn heard_within(app: &App, d: Duration) -> Vec<Message> {
@@ -94,7 +95,7 @@ fn a_frame_on_the_socket_is_one_wake_and_a_close_one_timer() {
     pushed.join().unwrap();
     assert_eq!(names(&heard), ["wake"], "the open, once");
     let _ = app.update(Message::Wake);
-    assert!(app.peer.client.linked());
+    assert!(app.peer.client.linked);
     // Linked, the default playlist waits a second of quiet: the one timer.
     assert!(app.quiet.is_some() && app.deadline() == app.quiet);
     app.quiet = None;

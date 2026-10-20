@@ -12,10 +12,10 @@ use ark::ir::{Function, Node};
 use ark::log::EntryId;
 use ark::peer::{Input, Output};
 use ark::schema::Space;
-use ark_client::Act;
 use ark_dev::fuzz::session;
 use ark_dev::trace::{record, replay};
 use ark_dev::vectors::{bytes_of, fleet, fleet_script, json_of, on_disk, op_json, sessions, vector};
+use ark_peer::Act;
 use serde_json::{json, Value};
 
 /// Every name written to `d`, and only those, on disk.

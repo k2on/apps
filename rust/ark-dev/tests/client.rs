@@ -13,21 +13,20 @@ use ark::codec::bytes_enc;
 use ark::log::{EntryId, Origin};
 use ark::peer::{Ctx, Who};
 use ark::schema::Space;
-use ark_client::storage::Stored;
-use ark_client::{Client, Config, Disk, Memory};
-use ark_dev::demo::{arrival, domain, live, module, room};
+use ark_dev::demo::{arrival, domain, live, room};
 use ark_dev::sim::{who, Net, Op};
-use ark_server::hub::{Config as HubConfig, Live as HubLive};
+use ark_peer::disk::Stored;
+use ark_peer::{Config, Disk, Live, Memory, Module, Peer};
 
 fn demo() -> Config {
     Config {
-        log: module(&domain()),
         live: None,
+        ..Config::new(Module::of(&domain()))
     }
 }
 
 fn net(n: i64) -> Net {
-    Net::new(HubConfig::new(module(&domain())), |_| demo(), n, 3)
+    Net::new(Config::new(Module::of(&domain())), |_| demo(), n, 3)
 }
 
 fn create(name: &str) -> Op {
@@ -63,7 +62,7 @@ fn a_sign_in_authors_what_was_pending_as_the_login() {
         session: "anon".into(),
         roles: vec![],
     };
-    let mut n = Net::of(HubConfig::new(module(&domain())), vec![(anon, demo()), (who(1), demo())], 5);
+    let mut n = Net::of(Config::new(Module::of(&domain())), vec![(anon, demo()), (who(1), demo())], 5);
     n.run(&Op::Partition(0));
     n.run(&create("Road"));
     let alice = Who {
@@ -117,7 +116,7 @@ fn a_view_is_its_patches_and_a_fresh_evaluation() {
     }
     n.settle().unwrap();
     n.views_hold().unwrap();
-    assert_eq!(n.clients[&0].rows(0).unwrap().len(), 3);
+    assert_eq!(n.clients[&0].values(0).unwrap().len(), 3);
 }
 
 /// The room: two devices arrive and are here, by `on_join` the hub authored;
@@ -128,18 +127,17 @@ fn a_view_is_its_patches_and_a_fresh_evaluation() {
 #[test]
 fn the_room_comes_and_goes_and_the_pointer_is_relayed() {
     let r = room();
-    let mut hub = HubConfig::new(module(&domain()));
-    hub.live = Some(HubLive {
-        module: module(&r),
+    let mut hub = Config::new(Module::of(&domain()));
+    hub.live = Some(Live {
         on_join: Some(r.get("room.on_join")),
         on_leave: Some(r.get("room.on_leave")),
-        on_restore: None,
-        device: std::sync::Arc::new(arrival),
-        keep: 8,
+        arrive: std::sync::Arc::new(arrival),
+        keep: Some(8),
+        ..Live::new(Module::of(&r))
     });
     let config = |name: &str| Config {
-        log: module(&domain()),
         live: Some(live(name, 100)),
+        ..Config::new(Module::of(&domain()))
     };
     let mut n = Net::of(hub, vec![(who(0), config("phone")), (who(1), config("laptop"))], 9);
     n.deliver();
@@ -151,7 +149,7 @@ fn the_room_comes_and_goes_and_the_pointer_is_relayed() {
         now: 0,
     };
     n.watch(1, Space::Volatile, r.get("room.present"), vec![], ctx).unwrap();
-    assert_eq!(n.clients[&1].rows(0).unwrap().len(), 2, "both here");
+    assert_eq!(n.clients[&1].values(0).unwrap().len(), 2, "both here");
     n.run(&Op::Call(0, r.get("room.rename"), bytes_enc(b"kitchen")));
     for x in [1, 2, 3] {
         n.run(&Op::Call(0, r.get("room.point"), ark::codec::int_enc(x).to_vec()));
@@ -174,7 +172,7 @@ fn the_room_comes_and_goes_and_the_pointer_is_relayed() {
     n.run(&Op::Partition(0));
     n.deliver();
     n.views_hold().unwrap();
-    assert_eq!(n.clients[&1].rows(0).unwrap().len(), 1, "the phone has gone");
+    assert_eq!(n.clients[&1].values(0).unwrap().len(), 1, "the phone has gone");
     assert!(n.refused.is_empty(), "{:?}", n.refused);
 }
 
@@ -212,12 +210,12 @@ impl Disk for Tally {
 #[test]
 fn a_mutate_writes_one_pending_record() {
     let written = Arc::new(AtomicUsize::new(0));
-    let mut c = Client::open(demo(), who(0), Box::new(Tally(Memory::default(), written.clone())), false);
+    let mut c = Peer::open(demo(), who(0), Box::new(Tally(Memory::default(), written.clone())), false);
     let create = domain().get("demo.create_playlist");
     let mut last = 0;
     for i in 0..=8000 {
         let before = written.load(Ordering::Relaxed);
-        c.mutate(create, bytes_enc(format!("List {i}").as_bytes()), i);
+        let _ = c.author(Space::Durable, create, bytes_enc(format!("List {i}").as_bytes()), i);
         last = written.load(Ordering::Relaxed) - before;
     }
     assert_eq!(c.log.pending.len(), 8001);
@@ -226,11 +224,11 @@ fn a_mutate_writes_one_pending_record() {
     let mut c = c.reopen();
     assert_eq!(c.log.pending.iter().map(|p| p.entry.id).collect::<Vec<_>>(), ids);
     let before = written.load(Ordering::Relaxed);
-    c.mutate(create, bytes_enc(b"One more"), 9000);
+    let _ = c.author(Space::Durable, create, bytes_enc(b"One more"), 9000);
     assert!(written.load(Ordering::Relaxed) - before < 512);
     let mut c = c.reopen();
     assert_eq!(c.log.pending.len(), 8002);
     assert_eq!(c.log.pending[8001].entry.local, 8002);
-    c.mutate(create, bytes_enc(b"And one"), 9001);
+    let _ = c.author(Space::Durable, create, bytes_enc(b"And one"), 9001);
     assert_eq!(c.log.pending.last().unwrap().entry.local, 8003, "the session's local read back");
 }

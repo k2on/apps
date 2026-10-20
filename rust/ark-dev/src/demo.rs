@@ -9,7 +9,7 @@
 use std::collections::BTreeSet;
 
 use ark::codec::bytes_enc;
-use ark_client::{Live, Module};
+use ark_peer::{Live, Module};
 
 /// The demo's text.
 pub const DEMO: &str = include_str!("demo.ark");
@@ -27,24 +27,15 @@ pub fn room() -> ark::Domain {
     ark::sexp::build(ROOM).unwrap_or_else(|r| panic!("the room: {r}"))
 }
 
-/// A domain as a client or a hub holds it.
-pub fn module(d: &ark::Domain) -> Module {
-    Module {
-        schema: d.schema.clone(),
-        cas: d.cas(),
-        lib: d.lib.clone(),
-    }
-}
-
 /// The room as a client of it is configured: the device it says it is,
 /// its name; `point` relayed every `every_ms`.
 pub fn live(name: &str, every_ms: i64) -> Live {
     let r = room();
     Live {
-        module: module(&r),
         device: Some(name.as_bytes().to_vec()),
         ephemeral: BTreeSet::from([r.get("room.point")]),
         every_ms,
+        ..Live::new(Module::of(&r))
     }
 }
 

@@ -15,10 +15,10 @@ demo = []
 
 [dependencies]
 ark = { path = "../../rust/ark" }
-ark-client = { path = "../../rust/ark-client" }
+ark-peer = { path = "../../rust/ark-peer" }
 # Signing in: a loopback listener and the browser on the desktop, the page's
 # own address in a browser; and the logins a device remembers.
-ark-auth = { path = "../../rust/ark-auth", features = ["client"] }
+ark-auth = { path = "../../rust/ark-auth" }
 arkui = { path = "../../rust/arkui" }
 # `E`: the database explorer over this device's replica (`docs/plan-guards.md`
 # D4), read-only but for the CRUD the domain exposes.
@@ -48,7 +48,3 @@ js-sys = "0.3"
 
 [build-dependencies]
 ark = { path = "../../rust/ark" }
-
-[dev-dependencies]
-# The tests' server: the hub, sans-io, the frames carried by hand.
-ark-server = { path = "../../rust/ark-server" }

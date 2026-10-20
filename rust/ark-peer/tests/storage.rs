@@ -4,8 +4,8 @@
 //! the log not a table, or every write journaled — is refused.
 
 use ark::log::{Entry, Logged, Record};
-use ark_client::storage::Stored;
-use ark_client::{Disk, Files, Memory};
+use ark_peer::disk::Stored;
+use ark_peer::{Disk, Files, Memory};
 
 /// The `k`-th entry of the log (the disk does not link them: opening is
 /// the peer's).

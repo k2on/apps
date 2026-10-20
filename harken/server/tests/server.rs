@@ -42,7 +42,7 @@ fn a_login_from_the_routes_is_who_the_socket_says_you_are() {
         panic!("dev auth opens no browser: {u}")
     })
     .unwrap();
-    let mut laptop = open(ark_client::auth::who(&login), None);
+    let mut laptop = open(ark_peer::who(&login), None);
     laptop.connect(&url, &login.token);
     laptop.mutate("playlists.create_playlist", &named("Road trip"));
     pump_until(&mut [&mut laptop], 10, |ps| ps[0].pending() == 0);
@@ -133,7 +133,7 @@ fn the_log_and_the_logins_survive_a_restart() {
     let data = tempfile::tempdir().unwrap();
     let server = serve(&rt, data.path(), |_| {});
     let login = ark_auth::client::login(&server.url(), Some("erin"), |_| {}).unwrap();
-    let mut p = open(ark_client::auth::who(&login), None);
+    let mut p = open(ark_peer::who(&login), None);
     p.connect(&server.url(), &login.token);
     p.mutate("playlists.create_playlist", &named("Kept"));
     pump_until(&mut [&mut p], 10, |ps| ps[0].pending() == 0);
@@ -145,7 +145,7 @@ fn the_log_and_the_logins_survive_a_restart() {
         playlists(&server),
         [("Kept".to_string(), "erin".to_string())]
     );
-    let mut again = open(ark_client::auth::who(&login), None);
+    let mut again = open(ark_peer::who(&login), None);
     again.connect(&server.url(), &login.token);
     pump_until(&mut [&mut again], 10, |ps| ps[0].cursor() == 1);
     rt.block_on(server.stop());
@@ -424,11 +424,13 @@ fn a_clients_raw_write_is_refused() {
         old: mine.to_bytes(),
         new: hijacked.to_bytes(),
     };
-    let raw = ark_server::admin::raw(&hosted().domain.module, &edit).unwrap();
+    let raw = ark_peer::admin::raw(&hosted().domain.module, &edit).unwrap();
     let mut bob = signed_in(&server, "bob");
     pump_until(&mut [&mut bob], 10, |ps| ps[0].cursor() == 1);
     let h = bob.client.log.cas.add_body(raw.to_bytes());
-    bob.client.mutate(h, vec![], ark_server::handle::now());
+    let _ = bob
+        .client
+        .author(ark::schema::Space::Durable, h, vec![], ark_peer::now_ms());
     for _ in 0..100 {
         bob.pump();
         std::thread::sleep(std::time::Duration::from_millis(10));

@@ -13,10 +13,10 @@ domain/    the domain, in ArkLang (spec/AUTHORING.md): schema.ark, types.ark,
            queue.ark, devices.ark and groups.ark, the listening session as
            volatile tables (never the log); plays.ark (the log). host.rs is
            the Rust each app includes beside its generated bindings
-server/    ark-server with harken's own parts: the scanner, the Home Assistant
+server/    an ark-peer that listens, with harken's own parts: the scanner, the Home Assistant
            bridge, sign-in, /media, the web build, the admin page's listener;
            the NixOS module (server/README.md)
-iced/      the desktop and browser client, on arkui and ark-client; the `demo`
+iced/      the desktop and browser client, on arkui and ark-peer; the `demo`
            feature is the seeded library GitHub Pages publishes
 ```
 
@@ -59,7 +59,7 @@ Four decisions that each show on screen:
 Every query is a query over the relational subset of the language
 (`spec/AUTHORING.md`; `domain/*.ark` is them all): `library`, `albums`, `composers` and the
 rest say what they read and how it joins, so a client holds any of them as
-a view (`ark_client::Client::watch`) that a change moves by the rows it
+a view (`ark_peer::Peer::view`) that a change moves by the rows it
 touched (`docs/plan-v5.md` §1.10); the desktop's lists are views. The
 domain's tests hold it to what v4's was: the read model, the listening
 session transition for transition, every query maintained against a fresh
@@ -265,7 +265,7 @@ harken exposes none, so here its tables are read-only, and it says so; its
 mutations are callable from their forms as a button would author them.
 
 The server's admin page is the same component compiled to wasm, served by
-`ark_server::admin` on a listener of its own (`HARKEN_ADMIN_BIND`;
+`ark_peer::admin` on a listener of its own (`HARKEN_ADMIN_BIND`;
 `services.harken.admin.bind`, `127.0.0.1:8788` by default) over the
 authority's store and its log, with who is connected. It writes as the
 authority: through a table's CRUD where the domain exposes one, unless `R`

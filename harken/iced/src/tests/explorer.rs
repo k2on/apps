@@ -15,7 +15,7 @@ use crate::{App, Message};
 /// What the explorer reads, over this window's replica.
 fn source(app: &App) -> ark_explorer::Source<'_> {
     ark_explorer::Source {
-        store: &app.peer.client.client.log.store,
+        store: &app.peer.client.log.store,
         module: &domain().module,
         lib: &domain().lib,
         log: &ark_explorer::NoLog,
@@ -93,7 +93,6 @@ fn a_function_from_the_explorer_is_authored_as_the_signed_in_person() {
     explore(&mut app, ark_explorer::Msg::Call);
     let made = app
         .peer
-        .client
         .client
         .log
         .store

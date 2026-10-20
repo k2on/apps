@@ -1,14 +1,14 @@
-//! What a v5 client costs with its storage and the hub in the loop, as
+//! What a v5 device costs with its storage and the server in the loop, as
 //! the data grows, printed rather than asserted: `rust/ark-server/tests/
-//! perf.rs`'s shapes (`docs/plan-v5.md` Part 3), the same sizes, columns
+//! perf.rs`'s shapes, as they were before the one peer crate, (`docs/plan-v5.md` Part 3), the same sizes, columns
 //! and labels, so the two outputs diff. Over the demo of `ark-dev`
 //! (`demo.create_playlist`, `demo.add_to_playlist`).
 //!
 //! The hub is the real one on its thread, reached in this process through
-//! `Handle::dial` (no socket), and the client is `ark_client::Client`
-//! driven by its `Link`, as an app drives it — so the link thread's
-//! polling is in the round trip; a second line drives the in-process
-//! connection directly, without the link, to say how much. Then the
+//! `Handle::dialer` (no socket), and the client is an `ark_peer::Peer`
+//! driven by its link, as an app drives it — so waiting on its bell is in
+//! the round trip; a second line carries the in-process wire's frames by
+//! hand, without the link, to say how much. Then the
 //! storage shapes over harken's `media` table as `harken/domain`
 //! declares it (key `id`, indexes `file` and `pos`; written out here as a
 //! schema, since this crate does not depend on harken): live bytes per
@@ -16,11 +16,12 @@
 //! adopted — each in a process of its own.
 //!
 //! Ignored by default; run with
-//! `cargo test -p ark-server --release --test perf -- --ignored --nocapture --test-threads=1`.
+//! `cargo test -p ark-peer --release --test perf -- --ignored --nocapture --test-threads=1`.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::path::Path;
 use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -34,11 +35,9 @@ use ark::peer::{Cas, Who};
 use ark::schema::{Schema, Space, Table};
 use ark::store::{Change, Store, LOG};
 use ark::ty::Ty;
-use ark_client::link::{Backoff, Conn, Dial, Link, Recv};
-use ark_client::{Client, Config, Disk, Files, Memory, Module};
-use ark_dev::demo::{domain, module};
-use ark_server::handle::now;
-use ark_server::{builder, dev, Hub};
+use ark_dev::demo::domain;
+use ark_peer::link::{bell, wait, Dial, Event, Wire};
+use ark_peer::{dev, now_ms as now, Config, Disk, Files, Handle, Memory, Module, Peer, Server};
 
 // Live bytes, counted, process-wide (v4's allocator, as it is) -----------------
 
@@ -141,18 +140,18 @@ fn na(label: &str, n: usize, why: &str) {
 
 fn config() -> Config {
     Config {
-        log: module(&domain()),
         live: None,
+        ..Config::new(Module::of(&domain()))
     }
 }
 
 /// A client of `token`'s login, its origin seeded by its session.
-fn client(token: &str, mut disk: Box<dyn Disk>) -> Client {
+fn client(token: &str, mut disk: Box<dyn Disk>) -> Peer {
     let who = dev(token).unwrap();
     if disk.get("origin").ok().flatten().is_none() {
         disk.put("origin", &Origin::named(&who.session).to_bytes()).unwrap();
     }
-    Client::open(config(), who, disk, false)
+    Peer::open(config(), who, disk, false)
 }
 
 /// `demo.create_playlist` and `demo.add_to_playlist`, by hash: the domain
@@ -165,8 +164,8 @@ fn fns() -> (FnHash, FnHash) {
     })
 }
 
-fn create(c: &mut Client, j: u64) {
-    c.mutate(fns().0, bytes_enc(format!("P{j:06}").as_bytes()), now());
+fn create(c: &mut Peer, j: u64) {
+    let _ = c.author(Space::Durable, fns().0, bytes_enc(format!("P{j:06}").as_bytes()), now());
 }
 
 /// The playlist the session's `local`-th entry made.
@@ -180,51 +179,58 @@ fn add_input(pl: &[u8; 16], i: u64) -> Vec<u8> {
     b
 }
 
-fn add(c: &mut Client, pl: &[u8; 16], i: u64) {
-    c.mutate(fns().1, add_input(pl, i), now());
+fn add(c: &mut Peer, pl: &[u8; 16], i: u64) {
+    let _ = c.author(Space::Durable, fns().1, add_input(pl, i), now());
 }
 
-fn fast() -> Backoff {
-    Backoff {
-        first: Duration::from_millis(5),
-        most: Duration::from_millis(50),
-    }
+/// `token`'s peer dialling the server in this process, and its bell.
+fn linked(hub: &Handle, token: &str) -> (Peer, Receiver<()>) {
+    let mut c = client(token, Box::new(Memory::default()));
+    let (wake, rx) = bell();
+    c.set_waker(wake);
+    c.link.backoff = (5, 50);
+    c.set_token(Some(token.into()));
+    c.connect_with("", hub.dialer(Arc::new(dev)));
+    (c, rx)
 }
 
 /// Pumps until `done`, or panics after a minute.
-fn pump_until(c: &mut Client, link: &Link, done: impl Fn(&Client) -> bool) {
+fn pump_until(c: &mut (Peer, Receiver<()>), done: impl Fn(&Peer) -> bool) {
     let deadline = Instant::now() + Duration::from_secs(60);
-    while !done(c) {
-        let ev = link.wait(Duration::from_millis(1));
-        c.pump(link, ev, now());
+    while !done(&c.0) {
+        wait(&c.0, &c.1, Duration::from_millis(1));
+        c.0.pump();
         assert!(Instant::now() < deadline, "timed out");
     }
 }
 
-/// The same, over a connection with no link thread: the frames the client
+/// The same, over the in-process wire carried by hand: the frames the peer
 /// has are sent, and what comes is received, here.
-fn drive_until(c: &mut Client, conn: &mut Box<dyn Conn>, done: impl Fn(&Client) -> bool) {
+fn drive_until(c: &mut Peer, wire: &mut (Box<dyn Wire>, Receiver<()>), done: impl Fn(&Peer) -> bool) {
     let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         for f in c.take_frames() {
-            conn.send(f);
+            wire.0.send(f);
         }
         if done(c) {
             return;
         }
-        if let Recv::Frame(b) = conn.recv(Duration::from_millis(1)) {
-            c.receive(b);
+        let _ = wire.1.recv_timeout(Duration::from_millis(1));
+        for e in wire.0.events() {
+            match e {
+                Event::Open => c.connected(),
+                Event::Frame(b) => c.receive(b),
+                Event::Closed(_) => {}
+            }
         }
         assert!(Instant::now() < deadline, "timed out");
     }
 }
 
-fn hub_app(data: Option<&Path>) -> ark_server::App {
-    let mut b = builder(ark_server::Config::new(module(&domain())));
-    if let Some(d) = data {
-        b = b.data(d);
-    }
-    b.build().expect("the server builds")
+fn hub_app(data: Option<&Path>) -> Handle {
+    let mut s = Server::new(Config::new(Module::of(&domain())));
+    s.data = data.map(Path::to_path_buf);
+    s.build().expect("the server builds").0
 }
 
 // (b) Against a server --------------------------------------------------------------
@@ -236,38 +242,37 @@ fn hub_app(data: Option<&Path>) -> ark_server::App {
 #[ignore]
 fn perf_b_round_trip() {
     header("(b) Peer::mutate + pump until confirmed, against the in-process hub");
-    note("Client::mutate + Client::pump through its Link (frames sent from this thread; the link thread receives);");
-    note("`no link thread` is the same over the in-process Conn, sent and received here");
+    note("Peer::author + Peer::pump through its link (frames sent from this thread; the hub's thread rings the bell);");
+    note("`no link thread` is the same over the in-process wire, carried by hand here");
     for (n, keep) in [(500u64, false), (2000, false), (500, true), (2000, true)] {
         for (shape, lists) in [("one playlist", 1u64), ("playlists of 10", n / 10)] {
             let dir = tempfile::tempdir().unwrap();
-            let app = hub_app(keep.then(|| dir.path()));
+            let hub = hub_app(keep.then(|| dir.path()));
             let token = "alice@perf";
-            let mut c = client(token, Box::new(Memory::default()));
-            let link = Link::start(Box::new(app.hub.dial(Arc::new(dev))), token.into(), fast());
-            pump_until(&mut c, &link, |c| c.linked);
+            let mut c = linked(&hub, token);
+            pump_until(&mut c, |c| c.linked);
             for j in 0..lists {
-                create(&mut c, j);
+                create(&mut c.0, j);
             }
-            c.pump(&link, vec![], now());
-            pump_until(&mut c, &link, |c| c.log.pending.is_empty() && c.log.log().head().0 >= lists as Seq);
+            c.0.pump();
+            pump_until(&mut c, |c| c.log.pending.is_empty() && c.log.log().head().0 >= lists as Seq);
             let ls: Vec<[u8; 16]> = (1..=lists).map(|j| pid(token, j)).collect();
             let (mut whole, mut authoring) = (vec![], vec![]);
             for i in 0..n {
                 let t = Instant::now();
-                add(&mut c, &ls[(i % lists) as usize], i);
-                c.pump(&link, vec![], now());
+                add(&mut c.0, &ls[(i % lists) as usize], i);
+                c.0.pump();
                 let t1 = Instant::now();
-                pump_until(&mut c, &link, |c| c.log.pending.is_empty());
+                pump_until(&mut c, |c| c.log.pending.is_empty());
                 authoring.push(t1 - t);
                 whole.push(t.elapsed());
             }
-            drop(link);
-            // The same again, a second session over a Conn of its own.
+            let c = c.0;
+            // The same again, a second session over a wire of its own.
             let token2 = "alice@direct";
             let mut d = client(token2, Box::new(Memory::default()));
-            let mut conn = app.hub.dial(Arc::new(dev)).dial(token2).unwrap();
-            d.connected();
+            let (wake, rx) = bell();
+            let mut conn = (hub.dialer(Arc::new(dev)).dial("", token2, Some(wake)), rx);
             drive_until(&mut d, &mut conn, |d| d.log.log().head() == c.log.log().head());
             let direct: Vec<Duration> = (0..n)
                 .map(|i| {
@@ -293,31 +298,27 @@ fn perf_b_round_trip() {
 fn perf_b_watcher() {
     header("(b) a second peer receiving the first's entries as they land");
     for n in [500u64, 2000] {
-        let app = hub_app(None);
+        let hub = hub_app(None);
         let (ta, tb) = ("alice@perf", "bob@perf");
-        let mut author = client(ta, Box::new(Memory::default()));
-        let mut watcher = client(tb, Box::new(Memory::default()));
-        let la = Link::start(Box::new(app.hub.dial(Arc::new(dev))), ta.into(), fast());
-        let lb = Link::start(Box::new(app.hub.dial(Arc::new(dev))), tb.into(), fast());
-        pump_until(&mut author, &la, |c| c.linked);
-        pump_until(&mut watcher, &lb, |c| c.linked);
+        let (mut author, mut watcher) = (linked(&hub, ta), linked(&hub, tb));
+        pump_until(&mut author, |c| c.linked);
+        pump_until(&mut watcher, |c| c.linked);
         for j in 0..10 {
-            create(&mut author, j);
+            create(&mut author.0, j);
         }
-        author.pump(&la, vec![], now());
-        pump_until(&mut author, &la, |c| c.log.pending.is_empty() && c.log.log().head().0 >= 10);
-        let head = author.log.log().head().0;
-        pump_until(&mut watcher, &lb, |c| c.log.log().head().0 >= head);
+        author.0.pump();
+        pump_until(&mut author, |c| c.log.pending.is_empty() && c.log.log().head().0 >= 10);
+        let head = author.0.log.log().head().0;
+        pump_until(&mut watcher, |c| c.log.log().head().0 >= head);
         let ls: Vec<[u8; 16]> = (1..=10).map(|j| pid(ta, j)).collect();
         let mut per = vec![];
         for i in 0..n {
-            add(&mut author, &ls[(i % 10) as usize], i);
-            author.pump(&la, vec![], now());
-            pump_until(&mut author, &la, |c| c.log.pending.is_empty());
-            let want = author.log.log().head().0;
+            add(&mut author.0, &ls[(i % 10) as usize], i);
+            author.0.pump();
+            pump_until(&mut author, |c| c.log.pending.is_empty());
+            let want = author.0.log.log().head().0;
             let t = Instant::now();
-            pump_until(&mut watcher, &lb, |c| c.log.log().head().0 >= want);
-            let _ = watcher.take_events();
+            pump_until(&mut watcher, |c| c.log.log().head().0 >= want);
             per.push(t.elapsed());
         }
         line("watcher, playlists of 10, nothing pending", &per);
@@ -341,7 +342,7 @@ fn disk_of(dir: Option<&Path>) -> Box<dyn Disk> {
 #[ignore]
 fn perf_c_pump_alone() {
     header("(c) a peer alone: mutate, then pump (persist), per mutation");
-    note("Client::alone, then Client::mutate: the record and the `pending` blob are written in the step itself");
+    note("Peer::alone, then Peer::author: the record and the `pending` blob are written in the step itself");
     for n in [500u64, 2000, 8000] {
         for dir in [false, true] {
             let tmp = tempfile::tempdir().unwrap();
@@ -414,22 +415,22 @@ fn perf_c_offline_pending() {
 
 // (g) through the hub: the fan-out as the hub routes it ------------------------------
 
-/// `rust/ark/tests/perf.rs`'s fan-out, through the real `Hub` (sans-io, on
+/// `rust/ark/tests/perf.rs`'s fan-out, through a real server `Peer` (sans-io, on
 /// this thread): C connections that said `Hello` at the head, one pushing
-/// a single entry. `Hub::frame` is the authority's step and the routing —
+/// a single entry. `Peer::frame` is the authority's step and the routing —
 /// a copy of the one `Batch` per connection fed whole.
 #[test]
 #[ignore]
 fn perf_g_hub_fanout() {
-    eprintln!("\n== (g) fan-out of one pushed entry to C connections, through Hub::frame (v5 only)");
+    eprintln!("\n== (g) fan-out of one pushed entry to C connections, through Peer::frame (v5 only)");
     eprintln!("{:<48} {:>7} {:>10} {:>10}", "shape", "C", "frame µs", "per conn");
     let d = domain();
     let (cr, ad) = (d.get("demo.create_playlist"), d.get("demo.add_to_playlist"));
     for c in [10usize, 40, 160] {
         for s in [500u64, 8000] {
-            let mut hub = Hub::open(ark_server::Config::new(module(&d)), Box::new(Memory::default()), 0);
+            let mut hub = Peer::serve(Config::new(Module::of(&d)), Box::new(Memory::default()), 0);
             let author = dev("alice@dev").unwrap();
-            let a = hub.connect(author.clone());
+            let a = hub.accept(author.clone());
             let mut local = 0;
             for j in 0..10u64 {
                 push(&mut hub, a, &author, &mut local, cr, bytes_enc(format!("P{j}").as_bytes()));
@@ -446,7 +447,7 @@ fn perf_g_hub_fanout() {
                 device: None,
             }
             .enc();
-            let conns: Vec<u64> = (0..c).map(|k| hub.connect(dev(&format!("u{k}@x")).unwrap())).collect();
+            let conns: Vec<u64> = (0..c).map(|k| hub.accept(dev(&format!("u{k}@x")).unwrap())).collect();
             for k in &conns {
                 hub.frame(*k, hello.clone(), 0);
             }
@@ -476,7 +477,7 @@ fn perf_g_hub_fanout() {
 }
 
 /// A `Push` of the session's next entry, through the hub.
-fn push(hub: &mut Hub, conn: u64, w: &Who, local: &mut i64, func: FnHash, input: Vec<u8>) -> Vec<(u64, Vec<u8>)> {
+fn push(hub: &mut Peer, conn: u64, w: &Who, local: &mut i64, func: FnHash, input: Vec<u8>) -> Vec<(u64, Vec<u8>)> {
     *local += 1;
     let entry = Entry {
         id: EntryId::of(Origin::named(&w.session), *local),
@@ -678,9 +679,9 @@ const OPEN_SIZES: [u64; 3] = [10_000, 100_000, 400_000];
 
 /// What opening costs, in time and resident memory, at 10,000, 100,000 and
 /// 400,000 rows: a store alone (the snapshot file read, decoded and built),
-/// a client of a server from its snapshot (`Client::open` over `Files`), a
+/// a client of a server from its snapshot (`Peer::open` over `Files`), a
 /// hub from its log's snapshot at the horizon and the chain above it
-/// (`Hub::open`: every entry's facts applied and its state hash checked),
+/// (`Peer::serve`: every entry's facts applied and its state hash checked),
 /// and a client alone from its fork and its chain of `n`. Each open in a
 /// process of its own ([`perf_d_open_child`]). The split is the snapshot
 /// file read and decoded, and the chain read; "the rest" is building and
@@ -765,16 +766,16 @@ fn perf_d_open_child() {
         }
         "server" => {
             let disk = Box::new(Files::new(dir.join("log")).unwrap());
-            let hub = Hub::open(ark_server::Config::new(media_module()), disk, 0);
+            let hub = Peer::serve(Config::new(media_module()), disk, 0);
             let r = hub.log.store.rows("media").count();
             std::mem::forget(hub);
             r
         }
         _ => {
-            let c = Client::open(
+            let c = Peer::open(
                 Config {
-                    log: media_module(),
                     live: None,
+                    ..Config::new(media_module())
                 },
                 who,
                 Box::new(Files::new(&dir).unwrap()),
@@ -923,7 +924,7 @@ fn build(schema: &Schema, n: u64) -> Store {
 struct Nowhere;
 
 impl Disk for Nowhere {
-    fn load(&mut self) -> std::io::Result<ark_client::storage::Stored> {
+    fn load(&mut self) -> std::io::Result<ark_peer::disk::Stored> {
         Ok(Default::default())
     }
     fn record(&mut self, _: &[u8]) -> std::io::Result<()> {
@@ -940,7 +941,7 @@ impl Disk for Nowhere {
 const FRAME_SIZES: [u64; 2] = [10_000, 100_000];
 
 /// A `Snapshot` frame of `n` media rows — what a peer below the horizon is
-/// sent — received by a fresh client (`Client::receive`: the frame decoded
+/// sent — received by a fresh client (`Peer::receive`: the frame decoded
 /// whole, its rows built into a store, the state hash checked), in a
 /// process of its own ([`perf_d_frame_child`]): the high-water mark of the
 /// live bytes, what is held after, resident memory. v5 has one way; v4's
@@ -994,10 +995,10 @@ fn perf_d_frame_child() {
     let Ok(spec) = std::env::var("ARK_FRAME") else { return };
     let (n, path) = spec.split_once(' ').unwrap();
     let n: u64 = n.parse().unwrap();
-    let mut c = Client::open(
+    let mut c = Peer::open(
         Config {
-            log: media_module(),
             live: None,
+            ..Config::new(media_module())
         },
         Who {
             actor: "alice".into(),

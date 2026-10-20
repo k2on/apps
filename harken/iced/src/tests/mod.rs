@@ -43,7 +43,7 @@ fn lists(mut client: Replica) -> crate::peer::Peer {
 
 /// A replica in memory, its own authority, as `me`.
 pub fn alone(me: &str) -> crate::peer::Peer {
-    let mut client = Replica::memory(who(me), None);
+    let mut client = crate::client::memory(who(me), None);
     client.alone();
     lists(client)
 }
@@ -51,12 +51,12 @@ pub fn alone(me: &str) -> crate::peer::Peer {
 /// A replica in memory, signed in as `me` with a token, reaching no server
 /// until it is given one.
 pub fn signed_in(me: &str) -> crate::peer::Peer {
-    lists(Replica::memory(who(me), Some("dev")))
+    lists(crate::client::memory(who(me), Some("dev")))
 }
 
 /// A replica in memory nobody has signed in on.
 pub fn signed_out() -> crate::peer::Peer {
-    lists(Replica::memory(crate::client::nobody(), None))
+    lists(crate::client::memory(crate::client::nobody(), None))
 }
 
 /// `add_song`'s input, for a track called `title` in `file`.
@@ -91,14 +91,14 @@ pub fn device(id: &str, name: &str, kind: Kind, can_play: bool) -> Device {
 /// what the connection says; what the replica sends is kept.
 #[derive(Clone, Default)]
 pub struct Queues {
-    pub said: std::sync::Arc<std::sync::Mutex<Vec<crate::client::Event>>>,
+    pub said: std::sync::Arc<std::sync::Mutex<Vec<ark_peer::Event>>>,
     pub sent: std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>,
     pub wake: std::sync::Arc<std::sync::Mutex<Option<crate::client::Wake>>>,
 }
 
 impl Queues {
     /// Something the connection says, and the wake rung.
-    pub fn push(&self, e: crate::client::Event) {
+    pub fn push(&self, e: ark_peer::Event) {
         self.said.lock().unwrap().push(e);
         if let Some(w) = &*self.wake.lock().unwrap() {
             w();
@@ -107,21 +107,21 @@ impl Queues {
 
     /// A dialer whose every connection is a fresh pair of queues, each
     /// kept in `made`.
-    pub fn dialer(made: std::sync::Arc<std::sync::Mutex<Vec<Queues>>>) -> crate::client::Dialer {
-        Box::new(move |_url: &str, _token: &str, wake: Option<crate::client::Wake>| {
+    pub fn dialer(made: std::sync::Arc<std::sync::Mutex<Vec<Queues>>>) -> impl ark_peer::link::Dial {
+        move |_url: &str, _token: &str, wake: Option<crate::client::Wake>| {
             let q = Queues::default();
             *q.wake.lock().unwrap() = wake;
             made.lock().unwrap().push(q.clone());
-            Box::new(q) as Box<dyn crate::client::Wire>
-        })
+            Box::new(q) as Box<dyn ark_peer::link::Wire>
+        }
     }
 }
 
-impl crate::client::Wire for Queues {
+impl ark_peer::link::Wire for Queues {
     fn send(&mut self, frame: Vec<u8>) {
         self.sent.lock().unwrap().push(frame);
     }
-    fn events(&mut self) -> Vec<crate::client::Event> {
+    fn events(&mut self) -> Vec<ark_peer::Event> {
         std::mem::take(&mut *self.said.lock().unwrap())
     }
 }
@@ -138,7 +138,7 @@ impl crate::client::Wire for Queues {
 pub fn demo_app() -> crate::App {
     use std::sync::OnceLock;
 
-    static TEMPLATE: OnceLock<ark_client::Memory> = OnceLock::new();
+    static TEMPLATE: OnceLock<ark_peer::Memory> = OnceLock::new();
     let disk = TEMPLATE.get_or_init(|| crate::seed::seeded_disk(1)).clone();
     crate::App::with_peer(crate::peer::Peer::open(crate::seed::open(disk)), String::new(), None)
 }

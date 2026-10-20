@@ -3,7 +3,7 @@ name = "harken-server"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "harken's server on ark-server: the log and the listening session (harken/domain, through its generated bindings) on the hub, sign-in (ark-auth), a media directory authored as a peer, the house's speakers as devices, and the browser client"
+description = "harken's server, an ark-peer that listens: the log and the listening session (harken/domain, through its generated bindings) on the hub, sign-in (ark-auth), a media directory authored as a peer, the house's speakers as devices, and the browser client"
 workspace = "../../rust"
 
 [[bin]]
@@ -20,12 +20,10 @@ path = "src/bin/harken-peer.rs"
 
 [dependencies]
 ark = { path = "../../rust/ark" }
-# The scanner and the house's speakers are clients in this process; they
-# reach the hub through its handle, never a socket.
-ark-client = { path = "../../rust/ark-client" }
-ark-server = { path = "../../rust/ark-server" }
-# `client` for harken-peer, which signs in the way the desktop does.
-ark-auth = { path = "../../rust/ark-auth", features = ["server", "client"] }
+# The server is a peer that listens; the scanner and the house's speakers
+# are peers in this process that reach it through its handle, never a socket.
+ark-peer = { path = "../../rust/ark-peer" }
+ark-auth = { path = "../../rust/ark-auth" }
 anyhow = "1"
 axum = { version = "0.7", features = ["ws"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal"] }
@@ -35,7 +33,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync",
 # rescan that may never come.
 lofty = "0.25"
 # A picture inside a file is kept once, named by its hash, and served from
-# the data directory beside `/media` — the same `ServeDir` ark-server serves
+# the data directory beside `/media` — the same `ServeDir` ark-peer serves
 # the media root with.
 sha2 = { workspace = true }
 tower-http = { version = "0.5", features = ["fs"] }
@@ -49,7 +47,6 @@ serde_json = { workspace = true }
 ark = { path = "../../rust/ark" }
 
 [dev-dependencies]
-ark-auth = { path = "../../rust/ark-auth", features = ["server", "client"] }
 # The fleet stops the server with SIGTERM, which std cannot send.
 libc = "0.2"
 tempfile = "3"

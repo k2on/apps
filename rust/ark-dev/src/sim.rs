@@ -1,5 +1,5 @@
-//! The simulator: the real hub (`ark_server::hub`) and real clients
-//! (`ark_client::Client`, their disks in memory) over a network a seeded
+//! The simulator: a real server and real devices (`ark_peer::Peer` in
+//! each role, their disks in memory) over a network a seeded
 //! scheduler moves one frame at a time — a random frame from a random
 //! direction, arriving twice one time in eight and not at all one in
 //! sixteen, by Knuth's MMIX generator (v4's `ark::sim`, ported by K1). No
@@ -23,8 +23,7 @@ use ark::ir::Node;
 use ark::peer::{Ctx, Who};
 use ark::schema::Space;
 use ark::view::{query, splice};
-use ark_client::{Client, Config, Disk, Event, Memory};
-use ark_server::hub::{Config as HubConfig, ConnId, Deliver, Hub};
+use ark_peer::{Config, ConnId, Deliver, Disk, Memory, Peer, Update};
 
 /// Knuth's MMIX constants: the whole of the simulation's randomness.
 pub fn lcg(s: u64) -> u64 {
@@ -57,9 +56,9 @@ pub enum Op {
 }
 
 pub struct Net {
-    pub hub: Hub,
-    pub hub_config: HubConfig,
-    pub clients: BTreeMap<i64, Client>,
+    pub hub: Peer,
+    pub hub_config: Config,
+    pub clients: BTreeMap<i64, Peer>,
     /// The linked clients' connections.
     pub conns: BTreeMap<i64, ConnId>,
     pub to_server: BTreeMap<i64, Vec<Vec<u8>>>,
@@ -88,14 +87,14 @@ pub type Watched = (Space, FnHash, Vec<u8>, Ctx, Vec<V>);
 
 impl Net {
     /// A hub and `n` clients, each opened as [`who`] with `config`, linked.
-    pub fn new(hub: HubConfig, config: impl Fn(i64) -> Config, n: i64, seed: u64) -> Net {
+    pub fn new(hub: Config, config: impl Fn(i64) -> Config, n: i64, seed: u64) -> Net {
         Net::of(hub, (0..n).map(|i| (who(i), config(i))).collect(), seed)
     }
 
     /// A hub and a client per login, each linked.
-    pub fn of(hub: HubConfig, clients: Vec<(Who, Config)>, seed: u64) -> Net {
+    pub fn of(hub: Config, clients: Vec<(Who, Config)>, seed: u64) -> Net {
         let mut net = Net {
-            hub: Hub::open(hub.clone(), Box::new(Memory::default()), 0),
+            hub: Peer::serve(hub.clone(), Box::new(Memory::default()), 0),
             hub_config: hub,
             clients: BTreeMap::new(),
             conns: BTreeMap::new(),
@@ -124,7 +123,7 @@ impl Net {
         // The origin a device draws once, seeded: its first session's.
         let mut disk = Memory::default();
         let _ = disk.put("origin", &ark::log::Origin::named(&who.session).to_bytes());
-        self.clients.insert(i, Client::open(config, who, Box::new(disk), true));
+        self.clients.insert(i, Peer::open(config, who, Box::new(disk), true));
         self.heal(i);
         i
     }
@@ -141,28 +140,27 @@ impl Net {
         self.seed >> 11
     }
 
-    fn client(&mut self, i: i64) -> &mut Client {
+    fn client(&mut self, i: i64) -> &mut Peer {
         self.clients.get_mut(&i).expect("a client")
     }
 
     /// What a client queued, in flight; what it was told, noted.
     fn told_by_client(&mut self, i: i64) {
         let c = self.clients.get_mut(&i).unwrap();
-        let (frames, events) = (c.take_frames(), c.take_events());
-        for e in events {
-            match e {
-                Event::Refused { why, .. } => self.refused.push((i, why)),
-                Event::Dropped { why, view } => {
-                    self.views.remove(&(i, view));
-                    self.refused.push((i, why));
+        let frames = c.take_frames();
+        let refused = c.take_rejections().into_iter().map(|(_, why)| why).chain(c.take_live_refusals());
+        self.refused.extend(refused.map(|why| (i, why)));
+        let mine: Vec<(i64, usize)> = self.views.range((i, 0)..=(i, usize::MAX)).map(|(k, _)| *k).collect();
+        for k in mine {
+            match c.update(k.1) {
+                Update::Patched(patches) => self.views.entry(k).and_modify(|v| v.4 = splice(&patches, &v.4)),
+                Update::Reset => {
+                    self.views.remove(&k);
+                    self.refused.push((i, format!("view {} dropped", k.1)));
+                    continue;
                 }
-                Event::Patches { view, patches } => {
-                    if let Some(v) = self.views.get_mut(&(i, view)) {
-                        v.4 = splice(&patches, &v.4);
-                    }
-                }
-                Event::Confirmed { .. } => {}
-            }
+                Update::Unchanged => continue,
+            };
         }
         if self.conns.contains_key(&i) {
             self.to_server.entry(i).or_default().extend(frames);
@@ -182,12 +180,12 @@ impl Net {
         match op.clone() {
             Op::Mutate(i, f, input) => {
                 let now = self.now;
-                self.client(i).mutate(f, input, now);
+                let _ = self.client(i).author(Space::Durable, f, input, now);
                 self.told_by_client(i);
             }
             Op::Call(i, f, input) => {
                 let now = self.now;
-                self.client(i).call(f, input, now);
+                let _ = self.client(i).author(Space::Volatile, f, input, now);
                 self.told_by_client(i);
             }
             Op::Partition(i) => self.partition(i),
@@ -237,7 +235,7 @@ impl Net {
     pub fn partition(&mut self, i: i64) {
         if let Some(c) = self.conns.remove(&i) {
             let now = self.now;
-            let out = self.hub.disconnect(c, now);
+            let out = self.hub.leave(c, now);
             self.told_by_server(out);
             self.client(i).disconnected();
         }
@@ -251,7 +249,7 @@ impl Net {
             return;
         }
         let who = self.clients[&i].log.me.clone();
-        let c = self.hub.connect(who);
+        let c = self.hub.accept(who);
         self.conns.insert(i, c);
         self.client(i).connected();
         self.told_by_client(i);
@@ -265,7 +263,7 @@ impl Net {
         }
         self.hub.close();
         let disk = std::mem::replace(&mut self.hub.disk, Box::new(Memory::default()));
-        self.hub = Hub::open(self.hub_config.clone(), disk, self.now);
+        self.hub = Peer::serve(self.hub_config.clone(), disk, self.now);
     }
 
     fn check(&mut self, b: &[u8]) {
@@ -327,7 +325,7 @@ impl Net {
     pub fn watch(&mut self, i: i64, space: Space, f: FnHash, input: Vec<u8>, ctx: Ctx) -> Result<usize, String> {
         let c = self.client(i);
         let v = c.watch(space, &f, &input, ctx.clone()).map_err(|r| r.0)?;
-        let rows = c.rows(v).unwrap_or_default();
+        let rows = c.values(v).unwrap_or_default();
         self.views.insert((i, v), (space, f, input, ctx, rows));
         Ok(v)
     }
@@ -341,8 +339,8 @@ impl Net {
                 Space::Durable => &c.config.log.lib,
                 Space::Volatile => &c.config.live.as_ref().unwrap().module.lib,
             };
-            let fresh = query(lib, f, input, ctx, &c.peer(*space).unwrap().store).map_err(|r| r.0)?;
-            if c.rows(*v).as_ref() != Some(&fresh) || *mirror != fresh {
+            let fresh = query(lib, f, input, ctx, &c.machine(*space).unwrap().store).map_err(|r| r.0)?;
+            if c.values(*v).as_ref() != Some(&fresh) || *mirror != fresh {
                 return Err(format!("client {i}'s view {v} is not a fresh evaluation"));
             }
         }
@@ -351,7 +349,7 @@ impl Net {
 
     /// Nothing in flight and nothing pending, in either space.
     pub fn quiet(&self) -> bool {
-        let pending = |c: &Client| c.log.pending.is_empty() && c.live.as_ref().is_none_or(|l| l.pending.is_empty());
+        let pending = |c: &Peer| c.log.pending.is_empty() && c.live.as_ref().is_none_or(|l| l.pending.is_empty());
         self.to_server.values().all(|m| m.is_empty()) && self.to_client.values().all(|m| m.is_empty()) && self.clients.values().all(pending)
     }
 

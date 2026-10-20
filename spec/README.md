@@ -123,9 +123,10 @@ the module's own.
 | 1.15 | `gen.rs` | bindings generated from a module, types only: a struct per row and record, an enum per sum, a stub per function calling it by name; `fits`, whether a loaded module is one bindings may call (`AUTHORING.md` §9) |
 
 The drivers are not the specification but the reference reading of it:
-`rust/ark-client` (a client: storage, the link, views for a UI, the live
-relay), `rust/ark-server` (the hub on its thread, persistence, the sync
-socket, the admin page's listener) and `rust/ark-dev` (the simulator, the
+`rust/ark-peer` (the one peer, a device that dials — storage, the link,
+views for a UI, the live relay — and a server that listens — the
+connections, persistence, the sync socket, the admin page's listener) and
+`rust/ark-dev` (the simulator, the
 trace recorder and player, the fuzzer, the vector writer, `arkc`).
 
 ## The vectors

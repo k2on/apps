@@ -41,9 +41,9 @@ fn bench_queries() {
     ];
     for (name, input) in &reads {
         let started = Instant::now();
-        let b = crate::client::binding(name).unwrap();
+        let b = client.binding(name).unwrap();
         let v = crate::client::domain()
-            .ask(&client.client.log.store, &client.ctx(), &b, input)
+            .ask(&client.log.store, &client.ctx(), &b, input)
             .unwrap_or_else(|e| panic!("{name}: {e}"));
         eprintln!("{name:>14}: {:>10.1?}  ({} bytes)", started.elapsed(), v.len());
     }
@@ -139,7 +139,7 @@ fn views_at(copies: usize) {
     eprintln!("{:>14} {:>6} {:>10}", "query", "rows", "hydrate");
     for (name, input) in &queries {
         let started = Instant::now();
-        let v = client.watch(name, input).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let v = client.view(name, input).unwrap_or_else(|e| panic!("{name}: {e}"));
         let took = started.elapsed();
         eprintln!("{name:>14} {:>6} {took:>10.1?}", client.rows(v).len());
     }

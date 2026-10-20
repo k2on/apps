@@ -20,7 +20,7 @@ ark = { path = "../ark" }
 arkui = { path = "../arkui", optional = true }
 # Signing the admin page in when it is served wider than loopback: the page's
 # own address and the server's `/auth/login`, as the browser peer does.
-ark-auth = { path = "../ark-auth", features = ["client"], optional = true }
+ark-auth = { path = "../ark-auth", optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 iced = { version = "0.14", features = ["smol", "svg", "image", "advanced", "fira-sans"], optional = true }

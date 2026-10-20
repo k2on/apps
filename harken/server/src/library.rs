@@ -7,9 +7,9 @@
 //! what "add a song" means, and the first time it disagreed with the domain's
 //! procedure the replicas would diverge with nothing to say so.
 //!
-//! So the scanner is an ordinary [`ark_client::Client`], with its own
+//! So the scanner is an ordinary [`ark_peer::Peer`], with its own
 //! replica and its own pending intents on disk, its link dialling the hub
-//! in this process (`Handle::dial`) instead of a socket. It gets its
+//! in this process (`Handle::dialer`) instead of a socket. It gets its
 //! confirmations, it gets the rebase, and a file it adds fans out to every
 //! connected peer without anyone asking. It signs in like everyone else — the engine holds every
 //! entry to a session, and "the server wrote it" is not an exemption — as
@@ -47,10 +47,7 @@ use ark::ir::Node;
 use ark::peer::{Ctx, Who};
 use ark::store::{Dir, Read, Scan as Range, Store};
 use ark_auth::Login;
-use ark_client::link::{Backoff, Link};
-use ark_client::{Client, Event, Files};
-use ark_server::handle::now;
-use ark_server::Handle;
+use ark_peer::{Config, Files, Handle};
 use notify::{RecursiveMode, Watcher};
 
 use crate::covers::{self, Covers};
@@ -188,29 +185,18 @@ impl Scanner {
         let dir = replica_dir(&data);
         let disk = Files::new(&dir)
             .map_err(|e| anyhow::anyhow!("the scanner's replica in {}: {e}", dir.display()))?;
-        let config = ark_client::Config {
-            log: hosted.module.clone(),
-            live: None,
-        };
-        let mut client = Client::open(config, who.clone(), Box::new(disk), false);
+        let config = Config::of(hosted.domain.clone());
+        let mut client = ark_peer::Peer::open(config, who.clone(), Box::new(disk), false);
         // Each start is a login of its own: what the replica kept pending
         // is authored again under it, from its session's first `local`,
         // or the hub would hold the first entry for the ones before it.
         client.sign_in(who.clone());
         // In this process, the token is the scanner's and proves its login.
         let token = login.token.clone();
-        let link = Link::start(
-            Box::new(hub.dial(std::sync::Arc::new(move |t: &str| {
-                (t == token).then(|| who.clone())
-            }))),
-            login.token.clone(),
-            Backoff::default(),
-        );
-        let peer = Peer {
-            client,
-            link,
-            hosted,
-        };
+        let dial = hub.dialer(Arc::new(move |t: &str| (t == token).then(|| who.clone())));
+        client.set_token(Some(login.token.clone()));
+        client.connect_with("", dial);
+        let peer = Peer { client, hosted };
         let (tx, rx) = channel();
         let stop = Arc::new(AtomicBool::new(false));
         let counts = Arc::new(Counts::default());
@@ -424,8 +410,7 @@ struct Scan {
 
 /// The scanner's peer: its client, the link to the hub, and the module.
 struct Peer {
-    client: Client,
-    link: Link,
+    client: ark_peer::Peer,
     hosted: Hosted,
 }
 
@@ -433,12 +418,9 @@ impl Peer {
     /// What the link said, given to the client, and what it says back:
     /// a refused entry said out loud.
     fn pump(&mut self) {
-        let events = self.link.events();
-        self.client.pump(&self.link, events, now());
-        for e in self.client.take_events() {
-            if let Event::Refused { why, .. } = e {
-                eprintln!("harken-server: library: an entry was refused: {why}");
-            }
+        self.client.pump();
+        for (_, why) in self.client.take_rejections() {
+            eprintln!("harken-server: library: an entry was refused: {why}");
         }
     }
 }
@@ -580,7 +562,7 @@ fn would_change(peer: &Peer, name: &str, input: &[u8]) -> bool {
         actor: me.actor.clone(),
         session: me.session.clone(),
         roles: me.roles.clone(),
-        now: now(),
+        now: ark_peer::now_ms(),
     };
     !matches!(peer.hosted.run(&peer.client.log.store, &ctx, name, input), Ok(changes) if changes.is_empty())
 }
@@ -710,21 +692,19 @@ fn offer(peer: &mut Peer, scan: &mut Scan, covers: &mut Covers, path: &Path) -> 
         scan.prints.set(rel, print);
         return Offered::Read;
     }
-    let before = peer.client.log.pending.len();
-    peer.client.mutate(peer.hosted.func(ADD_SONG), call, now());
-    if peer.client.log.pending.len() > before {
-        scan.prints.set(rel, print);
-        return Offered::Authored;
-    }
-    for e in peer.client.take_events() {
-        if let Event::Refused { why, .. } = e {
+    match peer.client.mutate_bytes(ADD_SONG, call) {
+        Ok(_) => {
+            scan.prints.set(rel, print);
+            Offered::Authored
+        }
+        Err(why) => {
             eprintln!(
                 "harken-server: library: {} was refused: {why}",
                 path.display()
             );
+            Offered::Read
         }
     }
-    Offered::Read
 }
 
 /// The path as the log should carry it: relative to the media root, with `/`

@@ -57,7 +57,7 @@ fn a_play_made_offline_reaches_every_device_when_it_comes_back() {
     let server = serve(&rt, data.path(), |_| {});
     let l = login(&server, "max");
     let token = l.token.clone();
-    let mut phone = open(ark_client::auth::who(&l), None);
+    let mut phone = open(ark_peer::who(&l), None);
     phone.connect(&server.url(), &token);
     let mut laptop = signed_in(&server, "max");
     let mut ana = signed_in(&server, "ana");

@@ -1,4 +1,4 @@
-//! The hub as a server: clients over the in-process transport and over a
+//! A peer as a server: devices over the in-process transport and over a
 //! WebSocket converge; a token proving nobody is closed; a revoked session
 //! is closed and its link dials again; the log survives a restart; a disk
 //! that refuses holds every delivery until it writes; the journal keeps a
@@ -7,6 +7,7 @@
 
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -15,118 +16,121 @@ use ark::frames::{Frame, Verdict};
 use ark::log::{Entry, EntryId, Origin};
 use ark::peer::Who;
 use ark::schema::Space;
-use ark_client::link::{Backoff, Dial, Event, Link, Recv, Socket};
-use ark_client::storage::Stored;
-use ark_client::{Client, Config, Disk, Files, Memory};
-use ark_dev::demo::{domain, module};
-use ark_server::handle::now;
-use ark_server::{builder, dev, Handle, Hub};
+use ark_dev::demo::domain;
+use ark_peer::disk::Stored;
+use ark_peer::link::{bell, socket, wait, Dial, Event, Pumped};
+use ark_peer::{dev, now_ms, Config, Disk, Files, Handle, Live, Memory, Module, Peer, Server};
 
-fn config() -> ark_server::Config {
-    ark_server::Config::new(module(&domain()))
+fn config() -> Config {
+    Config::new(Module::of(&domain()))
 }
 
-fn client(name: &str) -> Client {
-    let who = dev(name).unwrap();
-    Client::open(
-        Config {
-            log: module(&domain()),
-            live: None,
-        },
-        who,
-        Box::new(Memory::default()),
-        false,
-    )
+fn peer(who: Who) -> Peer {
+    Peer::open(config(), who, Box::new(Memory::default()), false)
 }
 
-fn fast() -> Backoff {
-    Backoff {
-        first: Duration::from_millis(5),
-        most: Duration::from_millis(20),
-    }
+/// `token`'s peer, dialling `url` through `dial`, and its bell.
+fn linked(token: &str, url: &str, dial: impl Dial + 'static) -> (Peer, Receiver<()>) {
+    let mut c = peer(dev(token).unwrap_or(dev("x@y").unwrap()));
+    let (wake, rx) = bell();
+    c.set_waker(wake);
+    c.link.backoff = (5, 20);
+    c.set_token(Some(token.into()));
+    c.connect_with(url, dial);
+    (c, rx)
 }
 
-/// Pumps a client until `f` holds, or panics after two seconds.
-fn until(c: &mut Client, link: &Link, what: &str, f: impl Fn(&Client, &[Event]) -> bool) {
+/// Pumps a peer until `f` holds, or panics after two seconds.
+fn until(c: &mut (Peer, Receiver<()>), what: &str, f: impl Fn(&Peer, &Pumped) -> bool) {
     for _ in 0..400 {
-        let ev = link.wait(Duration::from_millis(5));
-        let hit = f(c, &ev);
-        c.pump(link, ev, now());
-        if hit || f(c, &[]) {
+        let p = c.0.pump();
+        if f(&c.0, &p) {
             return;
         }
+        wait(&c.0, &c.1, Duration::from_millis(5));
     }
     panic!("never: {what}");
 }
 
-fn create(c: &mut Client, link: &Link, name: &str) {
-    c.mutate(domain().get("demo.create_playlist"), bytes_enc(name.as_bytes()), now());
-    c.pump(link, vec![], now());
+fn create(c: &mut Peer, name: &str) {
+    let _ = c.author(Space::Durable, domain().get("demo.create_playlist"), bytes_enc(name.as_bytes()), now_ms());
+    c.pump();
 }
 
-fn two_clients(a: Box<dyn Dial>, b: Box<dyn Dial>) {
-    let (mut alice, mut bob) = (client("alice@laptop"), client("bob@phone"));
-    let (la, lb) = (Link::start(a, "alice@laptop".into(), fast()), Link::start(b, "bob@phone".into(), fast()));
-    until(&mut alice, &la, "alice linked", |c, _| c.linked);
-    until(&mut bob, &lb, "bob linked", |c, _| c.linked);
-    create(&mut alice, &la, "Road");
-    until(&mut bob, &lb, "bob has alice's playlist", |c, _| c.log.log().head().0 == 1);
-    until(&mut alice, &la, "alice confirmed", |c, _| c.log.pending.is_empty());
-    assert_eq!(alice.log.store, bob.log.store);
-    assert_eq!(bob.log.log().entries()[0].entry.actor, "alice");
+fn two_clients(url: &str, a: impl Dial + 'static, b: impl Dial + 'static) {
+    let (mut alice, mut bob) = (linked("alice@laptop", url, a), linked("bob@phone", url, b));
+    until(&mut alice, "alice linked", |c, _| c.linked);
+    until(&mut bob, "bob linked", |c, _| c.linked);
+    create(&mut alice.0, "Road");
+    until(&mut bob, "bob has alice's playlist", |c, _| c.log.log().head().0 == 1);
+    until(&mut alice, "alice confirmed", |c, _| c.log.pending.is_empty());
+    assert_eq!(alice.0.log.store, bob.0.log.store);
+    assert_eq!(bob.0.log.log().entries()[0].entry.actor, "alice");
 }
 
-/// Two clients, each on its own link to the hub in this process, converge.
-/// Falsified by `InProcess` never forwarding the client's frames: alice's
-/// playlist never reached bob.
+fn hub() -> Handle {
+    Handle::spawn(Peer::serve(config(), Box::new(Memory::default()), 0))
+}
+
+/// Two peers, each dialling the server in this process, converge.
+/// Falsified by the in-process wire never forwarding the peer's frames:
+/// alice's playlist never reached bob.
 #[test]
 fn in_process_clients_converge() {
-    let hub = Handle::spawn(Hub::open(config(), Box::new(Memory::default()), 0));
-    two_clients(Box::new(hub.dial(Arc::new(dev))), Box::new(hub.dial(Arc::new(dev))));
+    let hub = hub();
+    two_clients("", hub.dialer(Arc::new(dev)), hub.dialer(Arc::new(dev)));
 }
 
-/// A linked round trip through the hub in this process waits on nothing:
-/// a playlist created and pumped until confirmed, 100 times, is within
-/// 0.5 ms a round trip (median) of the same over the `Conn` with no link
-/// thread. Falsified by the link's thread sending only between 5 ms waits
-/// for a frame, as before: the linked median was 5.6 ms against 0.9.
+/// A linked round trip through the server in this process waits on
+/// nothing: a playlist created and pumped until confirmed, 100 times, is
+/// within 0.5 ms a round trip (median) of the same over the in-process
+/// wire carried by hand. Falsified by the link's thread sending only
+/// between 5 ms waits for a frame, as before: the linked median was 5.6 ms
+/// against 0.9.
 #[test]
 fn a_linked_round_trip_waits_on_nothing() {
-    let hub = Handle::spawn(Hub::open(config(), Box::new(Memory::default()), 0));
+    let hub = hub();
     let median = |mut ts: Vec<Duration>| {
         ts.sort();
         ts[ts.len() / 2]
     };
-    let mut c = client("alice@laptop");
-    let link = Link::start(Box::new(hub.dial(Arc::new(dev))), "alice@laptop".into(), fast());
-    until(&mut c, &link, "linked", |c, _| c.linked);
+    let mut c = linked("alice@laptop", "", hub.dialer(Arc::new(dev)));
+    until(&mut c, "linked", |c, _| c.linked);
     let linked: Vec<Duration> = (0..100)
         .map(|i| {
             let t = std::time::Instant::now();
-            create(&mut c, &link, &format!("L{i}"));
-            while !c.log.pending.is_empty() {
-                let ev = link.wait(Duration::from_millis(1));
-                c.pump(&link, ev, now());
+            create(&mut c.0, &format!("L{i}"));
+            while !c.0.log.pending.is_empty() {
+                wait(&c.0, &c.1, Duration::from_millis(1));
+                c.0.pump();
             }
             t.elapsed()
         })
         .collect();
-    let mut d = client("bob@phone");
-    let mut conn = hub.dial(Arc::new(dev)).dial("bob@phone").unwrap();
-    d.connected();
+    let mut d = peer(dev("bob@phone").unwrap());
+    let mut wire = hub.dialer(Arc::new(dev)).dial("", "bob@phone", None);
     let direct: Vec<Duration> = (0..100)
         .map(|i| {
             let t = std::time::Instant::now();
-            d.mutate(domain().get("demo.create_playlist"), bytes_enc(format!("D{i}").as_bytes()), now());
+            let _ = d.author(
+                Space::Durable,
+                domain().get("demo.create_playlist"),
+                bytes_enc(format!("D{i}").as_bytes()),
+                now_ms(),
+            );
             loop {
                 for f in d.take_frames() {
-                    conn.send(f);
+                    wire.send(f);
                 }
                 if d.log.pending.is_empty() {
                     break;
                 }
-                if let Recv::Frame(b) = conn.recv(Duration::from_millis(1)) {
-                    d.receive(b);
+                for e in wire.events() {
+                    match e {
+                        Event::Open => d.connected(),
+                        Event::Frame(b) => d.receive(b),
+                        Event::Closed(_) => {}
+                    }
                 }
             }
             t.elapsed()
@@ -135,31 +139,31 @@ fn a_linked_round_trip_waits_on_nothing() {
     let (linked, direct) = (median(linked), median(direct));
     assert!(
         linked <= direct + Duration::from_micros(500),
-        "linked {linked:?}, no link thread {direct:?}"
+        "linked {linked:?}, carried by hand {direct:?}"
     );
 }
 
 /// The same over WebSockets, the token the first message; and an empty
-/// token, which proves nobody, is closed, dialled again and closed again,
-/// and sent nothing. Falsified by the socket taking its first message as a
+/// token, which proves nobody, is closed with 4401, sent nothing, and not
+/// dialled again. Falsified by the socket taking its first message as a
 /// frame: nobody was signed in and no client converged.
 #[tokio::test(flavor = "multi_thread")]
 async fn socket_clients_converge_and_nobody_is_closed() {
-    let running = builder(config()).build().unwrap().serve("127.0.0.1:0").await.unwrap();
+    let running = Server::new(config()).listen("127.0.0.1:0").await.unwrap();
     let url = format!("ws://{}/sync", running.addr);
     let u = url.clone();
     tokio::task::spawn_blocking(move || {
-        two_clients(Box::new(Socket(u.clone())), Box::new(Socket(u.clone())));
-        let mut nobody = client("x@y");
-        let l = Link::start(Box::new(Socket(u)), String::new(), fast());
+        two_clients(&u, socket, socket);
+        let mut nobody = linked("", &u, socket);
         let mut closed = 0;
         for _ in 0..40 {
-            let ev = l.wait(Duration::from_millis(5));
-            assert!(!ev.iter().any(|e| matches!(e, Event::Frame(_))), "nobody is sent nothing");
-            closed += ev.iter().filter(|e| matches!(e, Event::Closed(_))).count();
-            nobody.pump(&l, ev, now());
+            let p = nobody.0.pump();
+            assert_eq!(p.frames, [0, 0], "nobody is sent nothing");
+            closed += p.closed.len();
+            assert!(p.denied.is_none() || nobody.0.is_signed_out(), "and stops dialling");
+            wait(&nobody.0, &nobody.1, Duration::from_millis(5));
         }
-        assert!(closed > 0, "and is closed");
+        assert_eq!(closed, 1, "and is closed, once");
     })
     .await
     .unwrap();
@@ -171,39 +175,36 @@ async fn socket_clients_converge_and_nobody_is_closed() {
 /// in the hub but keeping the sink: alice's link never closed.
 #[test]
 fn a_revoked_session_is_closed_and_dials_again() {
-    let hub = Handle::spawn(Hub::open(config(), Box::new(Memory::default()), 0));
-    let (mut alice, mut bob) = (client("alice@laptop"), client("bob@phone"));
-    let la = Link::start(Box::new(hub.dial(Arc::new(dev))), "alice@laptop".into(), fast());
-    let lb = Link::start(Box::new(hub.dial(Arc::new(dev))), "bob@phone".into(), fast());
-    until(&mut alice, &la, "alice linked", |c, _| c.linked);
-    until(&mut bob, &lb, "bob linked", |c, _| c.linked);
+    let hub = hub();
+    let mut alice = linked("alice@laptop", "", hub.dialer(Arc::new(dev)));
+    let mut bob = linked("bob@phone", "", hub.dialer(Arc::new(dev)));
+    until(&mut alice, "alice linked", |c, _| c.linked);
+    until(&mut bob, "bob linked", |c, _| c.linked);
     hub.revoke("alice@laptop");
-    until(&mut alice, &la, "alice closed", |_, ev| ev.iter().any(|e| matches!(e, Event::Closed(_))));
-    until(&mut alice, &la, "alice open again", |_, ev| ev.contains(&Event::Open));
-    create(&mut bob, &lb, "Mix");
-    until(&mut alice, &la, "alice hears bob", |c, _| c.log.log().head().0 == 1);
-    assert!(lb.events().iter().all(|e| !matches!(e, Event::Closed(_))), "bob stayed");
+    until(&mut alice, "alice closed", |_, p| !p.closed.is_empty());
+    until(&mut alice, "alice open again", |_, p| p.opened);
+    create(&mut bob.0, "Mix");
+    until(&mut alice, "alice hears bob", |c, _| c.log.log().head().0 == 1);
+    assert!(bob.0.pump().closed.is_empty(), "bob stayed");
 }
 
 /// The log on disk: a hub stopped and opened again from its directory holds
 /// the chain it had, and its journal; the authority's own `local` goes on.
-/// Falsified by `Hub::open` not loading its disk: the reopened hub's log
+/// Falsified by `Peer::serve` not loading its disk: the reopened hub's log
 /// was empty.
 #[test]
 fn the_log_survives_a_restart() {
     let dir = tempfile::tempdir().unwrap();
-    let mut hub = Hub::open(config(), Box::new(Files::new(dir.path()).unwrap()), 0);
+    let mut hub = Peer::serve(config(), Box::new(Files::new(dir.path()).unwrap()), 0);
     for name in ["a", "b"] {
         hub.author(Space::Durable, domain().get("demo.create_playlist"), bytes_enc(name.as_bytes()), 1)
-            .0
             .unwrap();
     }
     let store = hub.log.store.clone();
     drop(hub);
-    let mut hub = Hub::open(config(), Box::new(Files::new(dir.path()).unwrap()), 0);
+    let mut hub = Peer::serve(config(), Box::new(Files::new(dir.path()).unwrap()), 0);
     assert_eq!((hub.log.log(), &hub.log.store), (store.log(), &store));
     hub.author(Space::Durable, domain().get("demo.create_playlist"), bytes_enc(b"c"), 1)
-        .0
         .unwrap();
     assert_eq!(hub.log.log().entries()[2].entry.local, 3, "its own count goes on");
 }
@@ -251,13 +252,13 @@ fn push(who: &Who, local: i64, name: &str) -> Vec<u8> {
 #[test]
 fn nothing_is_delivered_before_it_is_written() {
     let fail = Arc::new(AtomicBool::new(true));
-    let mut hub = Hub::open(config(), Box::new(Flaky(Memory::default(), fail.clone())), 0);
+    let mut hub = Peer::serve(config(), Box::new(Flaky(Memory::default(), fail.clone())), 0);
     let alice = dev("alice@laptop").unwrap();
-    let c = hub.connect(alice.clone());
+    let c = hub.accept(alice.clone());
     assert!(hub.frame(c, push(&alice, 1, "Road"), 1).is_empty());
     assert!(hub.failure.as_deref().is_some_and(|f| f.contains("the disk is full")));
     fail.store(false, Ordering::Relaxed);
-    let out = hub.flushed();
+    let out = hub.release();
     let frames: Vec<Frame> = out.iter().map(|(_, b)| Frame::dec(b).unwrap()).collect();
     assert!(
         matches!(
@@ -283,8 +284,8 @@ fn nothing_is_delivered_before_it_is_written() {
 #[test]
 fn the_journal_keeps_a_refusal_across_a_restart() {
     let alice = dev("alice@laptop").unwrap();
-    let mut hub = Hub::open(config(), Box::new(Memory::default()), 0);
-    let c = hub.connect(alice.clone());
+    let mut hub = Peer::serve(config(), Box::new(Memory::default()), 0);
+    let c = hub.accept(alice.clone());
     let refused = |out: &[(u64, Vec<u8>)]| {
         out.iter().any(|(_, b)| {
             matches!(
@@ -298,8 +299,8 @@ fn the_journal_keeps_a_refusal_across_a_restart() {
     };
     assert!(refused(&hub.frame(c, push(&alice, 1, " "), 1)), "a playlist needs a name");
     let disk = std::mem::replace(&mut hub.disk, Box::new(Memory::default()));
-    let mut hub = Hub::open(config(), disk, 0);
-    let c = hub.connect(alice.clone());
+    let mut hub = Peer::serve(config(), disk, 0);
+    let c = hub.accept(alice.clone());
     let out = hub.frame(c, push(&alice, 2, "Road"), 1);
     assert!(
         out.iter().any(|(_, b)| matches!(
@@ -320,7 +321,7 @@ fn the_journal_keeps_a_refusal_across_a_restart() {
 /// written beside it moved the tag.
 #[test]
 fn a_web_build_is_its_own_validator() {
-    use ark_server::web::build_tag;
+    use ark_peer::web::build_tag;
     let store = std::path::Path::new("/nix/store/6ilgmw07dbmi7y4klpgc9v5k1nmfbs66-app-web-0.1.0");
     assert_eq!(build_tag(store, None), "6ilgmw07dbmi7y4klpgc9v5k1nmfbs66");
     let dir = tempfile::tempdir().unwrap();
@@ -351,29 +352,24 @@ async fn a_login_is_the_connection_and_a_sign_out_closes_it() {
             ..Default::default()
         })
         .unwrap();
-    let running = builder(config()).auth(auth.clone()).build().unwrap().serve("127.0.0.1:0").await.unwrap();
+    let running = Server::new(config()).auth(auth.clone()).listen("127.0.0.1:0").await.unwrap();
     let url = format!("ws://{}/sync", running.addr);
     let (token, session) = (login.token.clone(), login.session.clone());
     let hub = running.hub.clone();
     tokio::task::spawn_blocking(move || {
-        let who = ark_client::auth::who(&login);
-        let mut c = Client::open(
-            Config {
-                log: module(&domain()),
-                live: None,
-            },
-            who,
-            Box::new(Memory::default()),
-            false,
-        );
-        let l = Link::start(Box::new(Socket(url)), token.clone(), fast());
-        until(&mut c, &l, "carol linked", |c, _| c.linked);
-        create(&mut c, &l, "Carol's");
-        until(&mut c, &l, "confirmed", |c, _| c.log.log().head().0 == 1);
-        assert_eq!(c.log.log().entries()[0].entry.session, session);
+        let (wake, rx) = bell();
+        let mut c = (peer(ark_peer::who(&login)), rx);
+        c.0.set_waker(wake);
+        c.0.link.backoff = (5, 20);
+        c.0.set_token(Some(token.clone()));
+        c.0.connect(&url);
+        until(&mut c, "carol linked", |c, _| c.linked);
+        create(&mut c.0, "Carol's");
+        until(&mut c, "confirmed", |c, _| c.log.log().head().0 == 1);
+        assert_eq!(c.0.log.log().entries()[0].entry.session, session);
         assert_eq!(hub.with(|h| h.log.log().entries()[0].entry.actor.clone()).unwrap(), "carol");
         auth.revoke(&token).unwrap();
-        until(&mut c, &l, "closed", |_, ev| ev.iter().any(|e| matches!(e, Event::Closed(_))));
+        until(&mut c, "closed", |_, p| !p.closed.is_empty());
     })
     .await
     .unwrap();
@@ -382,24 +378,24 @@ async fn a_login_is_the_connection_and_a_sign_out_closes_it() {
 
 /// The live space across a restart: what the hub held when it closed is
 /// what it opens with, and `on_restore` is authored over it — the room
-/// keeps who was here and lets every pointer go. Falsified by `Hub::open`
+/// keeps who was here and lets every pointer go. Falsified by `Peer::serve`
 /// not reading what `close` wrote: the room came back empty.
 #[test]
 fn the_live_space_is_restored_and_on_restore_authored() {
     use ark_dev::demo::{arrival, room};
     let r = room();
     let mut config = config();
-    config.live = Some(ark_server::Live {
-        module: module(&r),
+    config.live = Some(Live {
         on_join: Some(r.get("room.on_join")),
         on_leave: Some(r.get("room.on_leave")),
         on_restore: Some(r.get("room.on_restore")),
-        device: Arc::new(arrival),
-        keep: 8,
+        arrive: Arc::new(arrival),
+        keep: Some(8),
+        ..Live::new(Module::of(&r))
     });
-    let mut hub = Hub::open(config.clone(), Box::new(Memory::default()), 0);
+    let mut hub = Peer::serve(config.clone(), Box::new(Memory::default()), 0);
     let alice = dev("alice@phone").unwrap();
-    let c = hub.connect(alice.clone());
+    let c = hub.accept(alice.clone());
     let hello = Frame::Hello {
         space: Space::Volatile,
         cursor: 0,
@@ -408,9 +404,8 @@ fn the_live_space_is_restored_and_on_restore_authored() {
     };
     hub.frame(c, hello.enc(), 1);
     hub.author(Space::Volatile, r.get("room.point"), ark::codec::int_enc(7).to_vec(), 2)
-        .0
         .unwrap();
-    let live = |h: &Hub| h.live.as_ref().unwrap().store.snapshot_rows();
+    let live = |h: &Peer| h.live.as_ref().unwrap().store.snapshot_rows();
     assert_eq!(
         live(&hub).iter().map(|(_, rs)| rs.len()).collect::<Vec<_>>(),
         vec![1, 1],
@@ -418,7 +413,7 @@ fn the_live_space_is_restored_and_on_restore_authored() {
     );
     hub.close();
     let disk = std::mem::replace(&mut hub.disk, Box::new(Memory::default()));
-    let hub = Hub::open(config, disk, 3);
+    let hub = Peer::serve(config, disk, 3);
     assert_eq!(
         live(&hub).iter().map(|(_, rs)| rs.len()).collect::<Vec<_>>(),
         vec![1, 0],

@@ -602,7 +602,7 @@ impl App {
     /// the saved one will not open, or before a page knows its server.
     #[cfg(not(feature = "demo"))]
     fn alone_in_memory() -> Replica {
-        let mut r = Replica::memory(client::nobody(), None);
+        let mut r = crate::client::memory(client::nobody(), None);
         r.alone();
         r
     }
@@ -700,9 +700,9 @@ impl App {
                 // A replica that will not open is not a reason to show
                 // nothing. This window works in memory and says so.
                 Err(e) => {
-                    let mut c = Replica::memory(client::nobody(), None);
+                    let mut c = crate::client::memory(client::nobody(), None);
                     if let Some(l) = &login {
-                        c.sign_in(auth::who_of(l), l.token.clone());
+                        c.login(auth::who_of(l), l.token.clone());
                     }
                     (c, format!("the saved library would not open ({e}) — working in memory"))
                 }
@@ -798,7 +798,7 @@ impl App {
         }
         // The roles the sign-in said this login holds, which every intent
         // carries (`docs/plan-guards.md` D1).
-        self.peer.client.sign_in(auth::who_of(&login), login.token.clone());
+        self.peer.client.login(auth::who_of(&login), login.token.clone());
         let pending = self.peer.client.pending_len();
         self.note = match pending {
             0 => format!("signed in as {}", auth::who(&login)),
@@ -1774,7 +1774,7 @@ impl App {
                 }
                 // The replica stays, and goes on authoring as that person,
                 // offline: what they do now is theirs when they sign in again.
-                self.peer.client.sign_out();
+                self.peer.client.set_token(None);
                 // A device is a login, so signing out is leaving the session.
                 self.listening.close();
                 self.devices = None;

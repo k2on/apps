@@ -178,6 +178,12 @@ impl Domain {
         self.module.get(name).unwrap_or_else(|| panic!("no function {name}"))
     }
 
+    /// The binding a name means: itself, or the first whose last part it is.
+    pub fn binding(&self, name: &str) -> Option<&str> {
+        let names = self.module.bindings.iter().map(|(n, _)| n.as_str());
+        names.into_iter().find(|n| *n == name || n.rsplit('.').next() == Some(name))
+    }
+
     /// A content store holding every function, loading what it is sent.
     pub fn cas(&self) -> Cas {
         let mut c = Cas::default().with_loader(self.lib.loader(self.schema.clone()));

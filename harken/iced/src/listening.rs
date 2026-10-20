@@ -204,13 +204,13 @@ impl Remote {
     /// server's snapshot met on this connection. `None` is this device being
     /// its own session.
     pub fn session(&self, peer: &Peer) -> Option<Listening> {
-        self.joined(peer).then(|| peer.listening())
+        self.joined(peer).then(|| crate::client::listening(peer))
     }
 
     /// Whether this device is part of the session now: linked, as the login
     /// it was opened for, and standing in it.
     pub fn joined(&self, peer: &Peer) -> bool {
-        peer.linked() && self.me == peer.me().session && peer.present()
+        peer.linked && self.me == peer.me().session && crate::client::present(peer)
     }
 
     /// Whether this device is the one making the sound.
@@ -231,8 +231,8 @@ impl Remote {
     /// the server's — and standing still while the sound is on its way to
     /// another device ([`Active::position`]): what a scrubber drawn from any
     /// device shows.
-    pub fn position_ms(peer: &Peer, a: &Active) -> i64 {
-        a.position(peer.server_now())
+    pub fn position_ms(a: &Active) -> i64 {
+        a.position(crate::client::now_ms())
     }
 
     /// Call a transition of the session. A refusal — the preview's, here —
@@ -274,10 +274,10 @@ impl Remote {
             return;
         }
         let Some(s) = self.session(peer) else { return };
-        if self.met != peer.epoch() {
+        if self.met != peer.link.epoch {
             // The first sight of the session on this connection: what this
             // device can do, said, and the rule for coming back.
-            self.met = peer.epoch();
+            self.met = peer.link.epoch;
             self.equip(peer, sound, &s);
             if self.alone_playing && !queue.is_empty() {
                 self.alone_playing = false;
@@ -348,7 +348,7 @@ impl Remote {
     // This device is the output: its player made to agree with the session,
     // and what happened to it said.
     fn drive(&mut self, peer: &mut Peer, sound: &mut impl Sound, queue: &mut Vec<Track>, a: &Active, clock: f64) {
-        let now = peer.server_now();
+        let now = crate::client::now_ms();
         let track = a.now().clone();
         // Where the session stands: a hand-off to this device stands where
         // the track was until this device says it has started, so the track
@@ -602,7 +602,7 @@ mod tests {
     use crate::domain::Id as Key;
     use ark::ir::Node;
     use ark::peer::Who;
-    use ark_server::hub::{Config, ConnId, Hub, Live};
+    use ark_peer::{Config, ConnId, Live, Peer as Hub};
 
     /// A player that does what it is told, and a clock it is told about.
     #[derive(Default)]
@@ -684,28 +684,24 @@ mod tests {
     impl Net {
         fn new() -> Net {
             let d = crate::client::domain();
-            let m = ark_client::Module {
-                schema: d.schema.clone(),
-                cas: d.cas(),
-                lib: d.lib.clone(),
-            };
+            let m = ark_peer::Module::of(d);
             let mut c = Config::new(m.clone());
             let get = |n: &str| Some(d.get(&format!("listening.{n}")));
             c.live = Some(Live {
-                module: m,
                 on_join: get("on_join"),
                 on_leave: get("on_leave"),
                 on_restore: get("on_restore"),
                 // What the device says it is, its user and its id the login's.
-                device: Arc::new(|who: &Who, said: &[u8]| {
+                arrive: Arc::new(|who: &Who, said: &[u8]| {
                     let d = Said::from_bytes(said).ok()?;
                     let (user, id) = (who.actor.clone(), who.session.clone());
                     Some(Said { user, id, ..d }.to_bytes())
                 }),
-                keep: 64,
+                keep: Some(64),
+                ..Live::new(m)
             });
             Net {
-                hub: Hub::open(c, Box::new(ark_client::Memory::default()), crate::client::now_ms()),
+                hub: Hub::serve(c, Box::new(ark_peer::Memory::default()), crate::client::now_ms()),
                 peers: vec![],
             }
         }
@@ -718,7 +714,7 @@ mod tests {
                 roles: vec![],
             };
             let said = crate::client::device(can_play, session);
-            let p = Peer::memory_as(who.clone(), Some("t"), said);
+            let p = crate::client::memory_as(who.clone(), Some("t"), said);
             self.peers.push((p, who, 0));
             let k = self.peers.len() - 1;
             self.relink(k);
@@ -727,21 +723,21 @@ mod tests {
 
         fn drop_link(&mut self, k: usize) {
             let (p, _, c) = &mut self.peers[k];
-            p.client.disconnected();
-            let out = self.hub.disconnect(*c, crate::client::now_ms());
+            p.disconnected();
+            let out = self.hub.leave(*c, crate::client::now_ms());
             self.deliver(out);
         }
 
         fn relink(&mut self, k: usize) {
-            let c = self.hub.connect(self.peers[k].1.clone());
+            let c = self.hub.accept(self.peers[k].1.clone());
             self.peers[k].2 = c;
-            self.peers[k].0.opened();
+            self.peers[k].0.connected();
             self.carry();
         }
 
         fn deliver(&mut self, out: Vec<(ConnId, Vec<u8>)>) {
             for (c, b) in out {
-                if let Some((p, _, _)) = self.peers.iter_mut().find(|(p, _, pc)| *pc == c && p.linked()) {
+                if let Some((p, _, _)) = self.peers.iter_mut().find(|(p, _, pc)| *pc == c && p.linked) {
                     p.receive(b);
                 }
             }
@@ -752,11 +748,11 @@ mod tests {
             for _ in 0..16 {
                 let mut out = vec![];
                 for (p, _, c) in self.peers.iter_mut() {
-                    if !p.linked() {
+                    if !p.linked {
                         continue;
                     }
-                    p.client.tick(crate::client::now_ms() + 1_000);
-                    for f in p.client.take_frames() {
+                    p.tick(crate::client::now_ms() + 1_000);
+                    for f in p.take_frames() {
                         out.extend(self.hub.frame(*c, f, crate::client::now_ms()));
                     }
                 }
@@ -859,7 +855,7 @@ mod tests {
         rb.reconcile(net.peer(b), &mut sb, &mut qb, 0, "", 0.0);
         assert!(sb.playing);
         let stands = |r: &Remote, p: &mut Peer| {
-            let now = p.server_now();
+            let now = crate::client::now_ms();
             r.session(p).and_then(|s| s.session).map(|a| a.position(now)).unwrap()
         };
 
@@ -918,7 +914,7 @@ mod tests {
         let loaded = sb.at_ms;
         assert!((40_000..40_100).contains(&loaded) && sb.playing, "{loaded}");
         let counted = |r: &Remote, p: &mut Peer| {
-            let now = p.server_now();
+            let now = crate::client::now_ms();
             r.session(p).and_then(|s| s.session).map(|a| a.position(now)).unwrap()
         };
 

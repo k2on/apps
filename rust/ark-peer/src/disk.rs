@@ -3,8 +3,9 @@
 //! and the log's rows appended since are the one format; an entry's facts
 //! are in its row, and are on disk once.
 //!
-//! Two things, each its own file in a directory ([`Files`]) or its own
-//! buffer ([`Memory`], for tests and the simulator), and blobs beside them:
+//! Two things, each its own file in a directory ([`Files`]), its own
+//! buffer ([`Memory`], for tests and the simulator) or its own key of a
+//! page's `localStorage` (`Local`, in a browser), and blobs beside them:
 //!
 //! - `kv`: the store's rows whole ([`Record::Rows`]), the log's table's
 //!   among them, written (to a temporary file, then renamed) when a
@@ -18,8 +19,8 @@
 //!   rows of the schema's tables are not journaled: the peer writes them
 //!   again as it opens, from each entry's facts, each entry linking onto
 //!   the one before it, and writes `kv` whole when one does not.
-//! - named blobs, each written whole or appended to: a hub's `journal` and
-//!   `live` (`ark-server`), written whole; a client's `pending` (its own
+//! - named blobs, each written whole or appended to: a server's `journal`
+//!   and `live`, written whole; a client's `pending` (its own
 //!   intents not yet confirmed and the last `local` its session drew), a
 //!   journal of records, each a four-byte big-endian length and `((Int
 //!   local, Int gone), List Entry)`: the intents left are those before with
@@ -256,5 +257,66 @@ impl Disk for Files {
 
     fn get(&mut self, name: &str) -> io::Result<Option<Vec<u8>>> {
         file(self.dir.join(name))
+    }
+}
+
+/// The records in the page's `localStorage`, under one key's prefix: a
+/// [`Memory`] read once and written through, each part as hex.
+#[cfg(target_arch = "wasm32")]
+pub struct Local {
+    key: String,
+    mem: Memory,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Local {
+    pub fn open(key: &str) -> Result<Local, String> {
+        let s = ark_auth::web::storage().ok_or("this page has no localStorage")?;
+        let get = |k: &str| s.get_item(&format!("{key}:{k}")).ok().flatten().and_then(|h| ark::hash::unhex(&h));
+        let blobs = get("blobs")
+            .map(|b| <Vec<(String, Vec<u8>)>>::from_bytes(&b))
+            .transpose()
+            .map_err(|e| e.0)?;
+        let mem = Memory {
+            kv: get("kv"),
+            log: get("log").unwrap_or_default(),
+            blobs: blobs.unwrap_or_default().into_iter().collect(),
+        };
+        Ok(Local { key: key.into(), mem })
+    }
+
+    fn save(&self) -> io::Result<()> {
+        let s = ark_auth::web::storage().ok_or_else(|| io::Error::other("no localStorage"))?;
+        let put = |k: &str, b: &[u8]| {
+            s.set_item(&format!("{}:{k}", self.key), &ark::hash::hex(b))
+                .map_err(|e| io::Error::other(format!("{e:?}")))
+        };
+        if let Some(b) = &self.mem.kv {
+            put("kv", b)?;
+        }
+        put("log", &self.mem.log)?;
+        put("blobs", &self.mem.blobs.clone().into_iter().collect::<Vec<_>>().to_bytes())
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Disk for Local {
+    fn load(&mut self) -> io::Result<Stored> {
+        self.mem.load()
+    }
+    fn record(&mut self, bytes: &[u8]) -> io::Result<()> {
+        self.mem.record(bytes)?;
+        self.save()
+    }
+    fn put(&mut self, name: &str, bytes: &[u8]) -> io::Result<()> {
+        self.mem.put(name, bytes)?;
+        self.save()
+    }
+    fn append(&mut self, name: &str, bytes: &[u8]) -> io::Result<()> {
+        self.mem.append(name, bytes)?;
+        self.save()
+    }
+    fn get(&mut self, name: &str) -> io::Result<Option<Vec<u8>>> {
+        self.mem.get(name)
     }
 }

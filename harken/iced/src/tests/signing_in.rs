@@ -45,16 +45,7 @@ fn signing_in_moves_the_same_replica_on() {
     let mut app = App::with_peer(p, "http://127.0.0.1:9".into(), None);
     assert_eq!(app.peer.items.len(), 1, "what was done signed out is on screen");
     assert_eq!(app.peer.client.standing(&id), Standing::Pending);
-    let pending = |app: &App| {
-        app.peer
-            .client
-            .client
-            .log
-            .pending
-            .iter()
-            .map(|p| p.entry.actor.clone())
-            .collect::<Vec<_>>()
-    };
+    let pending = |app: &App| app.peer.client.log.pending.iter().map(|p| p.entry.actor.clone()).collect::<Vec<_>>();
     assert_eq!(pending(&app), [""], "authored as nobody");
 
     let _ = app.update(Message::SignedIn(Ok(login("alice"))));
@@ -63,7 +54,7 @@ fn signing_in_moves_the_same_replica_on() {
     assert_eq!(app.peer.items.len(), 1, "the same replica, not a new one");
     assert_eq!(app.peer.client.pending_len(), 1);
     assert_eq!(pending(&app), ["alice"], "…and the work is hers now");
-    let now = app.peer.client.client.log.pending[0].entry.id;
+    let now = app.peer.client.log.pending[0].entry.id;
     assert_eq!(now, id, "its id kept");
     assert_eq!(app.peer.client.standing(&id), Standing::Pending);
     assert!(app.note.contains("1 change from before"), "{}", app.note);
@@ -129,7 +120,8 @@ fn a_refusal_names_what_was_refused() {
 #[test]
 fn the_default_playlist_waits_for_the_log() {
     use super::Queues;
-    use crate::client::{monotonic_ms, Event};
+    use crate::client::monotonic_ms;
+    use ark_peer::Event;
     let mut app = App::with_peer(signed_in("alice"), "http://127.0.0.1:9".into(), Some(login("alice")));
     let made: std::sync::Arc<std::sync::Mutex<Vec<Queues>>> = Default::default();
     app.peer.client.connect_with("ws://queues", Queues::dialer(made.clone()));

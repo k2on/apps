@@ -195,14 +195,14 @@ pub fn remember_joined(server: &str) -> Result<(), String> {
 /// nobody until somebody signs in at a server it joins.
 #[cfg_attr(feature = "demo", allow(dead_code))]
 pub fn open_alone() -> Result<Replica, String> {
-    let mut r = Replica::open(disk(LOCAL)?, None, crate::listening::device());
+    let mut r = crate::client::open(disk(LOCAL)?, None, crate::listening::device());
     r.alone();
     Ok(r)
 }
 
 /// Who a login is, as the server verifies it and an entry carries it.
 pub fn who_of(l: &Login) -> Who {
-    ark_client::auth::who(l)
+    ark_peer::who(l)
 }
 
 /// This server's replica on this device: a directory natively, the page's
@@ -218,22 +218,22 @@ pub fn open(server: &str, login: Option<&Login>) -> Result<Replica, String> {
         false => server.to_string(),
     };
     let login = login.map(|l| (who_of(l), l.token.clone()));
-    Ok(Replica::open(disk(&place)?, login, crate::listening::device()))
+    Ok(crate::client::open(disk(&place)?, login, crate::listening::device()))
 }
 
 /// Where a place's replica is kept.
 #[cfg_attr(feature = "demo", allow(dead_code))]
-fn disk(place: &str) -> Result<Box<dyn ark_client::Disk>, String> {
+fn disk(place: &str) -> Result<Box<dyn ark_peer::Disk>, String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let dir = data_dir(place);
-        ark_client::Files::new(&dir)
-            .map(|f| Box::new(f) as Box<dyn ark_client::Disk>)
+        ark_peer::Files::new(&dir)
+            .map(|f| Box::new(f) as Box<dyn ark_peer::Disk>)
             .map_err(|e| format!("{}: {e}", dir.display()))
     }
     #[cfg(target_arch = "wasm32")]
     {
-        crate::client::Stored::open(&format!("harken:{place}")).map(|d| Box::new(d) as Box<dyn ark_client::Disk>)
+        ark_peer::disk::Local::open(&format!("harken:{place}")).map(|d| Box::new(d) as Box<dyn ark_peer::Disk>)
     }
 }
 

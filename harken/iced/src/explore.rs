@@ -144,7 +144,7 @@ impl LogView for Seen<'_> {
     }
     fn lines(&self) -> Vec<Line> {
         let name = |f: &FnHash| self.names.get(f).cloned().unwrap_or_else(|| f.hex());
-        let log = &self.client.client.log;
+        let log = &self.client.log;
         let confirmed = log.log().entries().into_iter().map(|l| Line {
             seq: Some(l.seq),
             function: name(&l.entry.func),
@@ -195,7 +195,7 @@ impl App {
     pub fn explore(&mut self, msg: ark_explorer::Msg) {
         let Some(x) = self.explore.as_mut() else { return };
         let client = &mut self.peer.client;
-        let store: Store = client.client.log.store.clone();
+        let store: Store = client.log.store.clone();
         let ctx = client.ctx();
         let log = Owned::of(client, &x.names);
         let d = domain();
@@ -232,7 +232,7 @@ impl App {
         let log = Seen { client, names: &x.names };
         let d = domain();
         let src = Source {
-            store: &client.client.log.store,
+            store: &client.log.store,
             module: &d.module,
             lib: &d.lib,
             log: &log,
@@ -248,7 +248,7 @@ impl App {
         let log = Seen { client, names: &x.names };
         let d = domain();
         let src = Source {
-            store: &client.client.log.store,
+            store: &client.log.store,
             module: &d.module,
             lib: &d.lib,
             log: &log,

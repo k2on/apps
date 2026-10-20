@@ -32,7 +32,7 @@ use std::time::Duration;
 
 use ark::ir::Node;
 use ark_auth::Account;
-use ark_server::handle::now;
+use ark_peer::now_ms as now;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
@@ -992,7 +992,7 @@ fn asking_for_the_next_batch_does_not_leave_the_session() {
             ..Account::default()
         })
         .unwrap();
-    let mut library = open(ark_client::auth::who(&login), None);
+    let mut library = open(ark_peer::who(&login), None);
     library.connect(&server.url(), &login.token);
     for i in 0..SONGS {
         let t = format!("song-{i:03}");

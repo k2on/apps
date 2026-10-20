@@ -4,11 +4,11 @@ Who an ArkDB peer is. `petros-auth`, on ArkDB.
 
 The engine asks one question about identity, once per connection: at
 `Hello`, what does this token prove (`server::Authenticate`, the `ark::peer::Who`
-it proves, as `ark-server` asks it)? This
+it proves, as `ark-peer`'s server asks it)? This
 crate answers it for a server that signs people in with OpenID Connect, and
 gives the clients the other half — how to get a token to send.
 
-- **server** (feature `server`): the one relying party. `Auth` holds the
+- **server** (natively): the one relying party. `Auth` holds the
   mode (`Mode::Oidc(Provider)` or `Mode::Dev`), the session store, the
   pending logins and the one-minute single-use codes; `server::router(auth)`
   is `/auth/login`, `/auth/callback`, `/auth/exchange`, `/auth/me`,
@@ -37,7 +37,7 @@ gives the clients the other half — how to get a token to send.
   for every login at once. `Account.roles` carries them to the client in
   the exchange's and `/auth/me`'s answers (absent when none, so a login
   remembered before roles reads as one holding none); a client hands them
-  to its client as the `Who` it authors as (`ark_client::auth::who`),
+  to its peer as the `Who` it authors as (`ark_peer::who`),
   and the server takes a connection's roles from what it asks here
   whatever the client says.
   `auth.authenticator()` answers `Who { actor, session, roles }`. A
@@ -49,7 +49,7 @@ gives the clients the other half — how to get a token to send.
   `Provider::discover_with_secret_file`) — a systemd credential, never an
   argument, an environment variable or a store path. The crate checks the ID
   token: signature, issuer, audience, expiry and nonce.
-- **client** (feature `client`): natively, `client::login(server, user,
+- **client**: natively, `client::login(server, user,
   open)` listens on a loopback port, asks the server's login without
   following the redirect (a dev server answers with the code at once — no
   browser), otherwise opens the system browser with `open` and waits for the
@@ -82,7 +82,7 @@ let auth = Arc::new(
         // role → the account ids holding it: the provider's `sub`, or a dev name
         .with_roles([("library", vec!["scanner"]), ("admin", vec!["a1b2-sub"])]),
 );
-// ark-server: `.auth(auth.clone())` mounts the routes and asks
+// ark-peer: `Server::new(config).auth(auth.clone())` mounts the routes and asks
 // `auth.authenticator()` at every Hello.
 // A peer the server runs itself signs in like everyone else:
 let scanner_login = auth.issue(&ark_auth::Account {
@@ -98,8 +98,8 @@ let scanner_login = auth.issue(&ark_auth::Account {
 // desktop, off the UI thread (it blocks as long as the person takes)
 let login = ark_auth::client::login(&server, Some("alice"), ark_auth::client::open_browser)?;
 ark_auth::remember::Logins::new("myapp").remember(&server, &login);
-// then an ark-client peer, as that person on that device:
-let opts = ark_client::Options::server(login.user.id.clone(), login.session.clone(), Some(login.token.clone()));
+// then an ark-peer device, as that person on that device:
+peer.login(ark_peer::who(&login), login.token.clone());
 peer.connect(&ark_auth::socket_url(&server));
 
 // browser
@@ -162,7 +162,7 @@ refused the second time and refused a foreign redirect, the dev form), and
 the redirect with PKCE, state, nonce and scopes, the callback's exchange,
 the subject, name and email), and an ID token refused for another login's
 nonce, for a signature not made with the secret, and a state never started.
-ark-server's `tests/auth.rs` takes the token onto the sync socket. The
+ark-peer's `tests/serve.rs` takes the token onto the sync socket. The
 hand-rolled parsing's tests (base64url, a JWT's payload, the claims checks)
 went with it: the crate owns that.
 

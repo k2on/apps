@@ -22,7 +22,7 @@ use ark::module::Lib;
 use ark::peer::{Cas, Input, Output, Peer, Role, Who};
 use ark::schema::{Schema, Space};
 use ark::store::Change;
-use ark_client::{Act, At, Client, Config};
+use ark_peer::{Act, At, Config, Live};
 use serde_json::{json, Value};
 
 /// A space's machine as a trace names it: its schema's bytes and every
@@ -77,7 +77,7 @@ fn state(a: &At) -> Value {
 }
 
 /// A client's recording as a trace file.
-pub fn record(from: &str, c: &Client) -> String {
+pub fn record(from: &str, c: &ark_peer::Peer) -> String {
     let live = c.config.live.as_ref();
     let header = json!({
         "device": live.and_then(|l| l.device.as_ref()).map(|d| hex(d)),
@@ -155,7 +155,7 @@ impl Player {
                 (self.log, self.live) = (self.fresh(w, *o, Space::Durable), self.fresh(w, *o, Space::Volatile));
                 if let Some(l) = &mut self.log {
                     if f.is_some() {
-                        l.role = ark_client::alone_at(*f);
+                        l.role = ark_peer::alone_at(*f);
                     }
                     l.joining = j.clone();
                 }
@@ -198,14 +198,14 @@ fn origin_of(v: &Value) -> Result<Origin, String> {
     Ok(Origin(bytes(v)?.try_into().map_err(|_| "an origin is 16 bytes")?))
 }
 
-fn module_of(v: &Value) -> Result<ark_client::Module, String> {
+fn module_of(v: &Value) -> Result<ark_peer::Module, String> {
     let schema = Arc::new(Schema::from_bytes(&bytes(&v["schema"])?).map_err(|r| r.0)?);
     let lib = Lib::default();
     let mut cas = Cas::default().with_loader(lib.loader(schema.clone()));
     for b in v["functions"].as_array().ok_or("no functions")? {
         cas.add_body(bytes(b)?);
     }
-    Ok(ark_client::Module { schema, cas, lib })
+    Ok(ark_peer::Module { schema, cas, lib })
 }
 
 fn who_of(v: &Value) -> Who {
@@ -276,16 +276,14 @@ pub fn replay(text: &str) -> Result<usize, String> {
     let t: Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
     let live = match &t["live"] {
         Value::Null => None,
-        m => Some(ark_client::Live {
-            module: module_of(m)?,
+        m => Some(Live {
             device: t["device"].as_str().map(|_| bytes(&t["device"])).transpose()?,
-            ephemeral: Default::default(),
-            every_ms: 0,
+            ..Live::new(module_of(m)?)
         }),
     };
     let mut p = Player::new(Config {
-        log: module_of(&t["log"])?,
         live,
+        ..Config::new(module_of(&t["log"])?)
     });
     let steps = t["steps"].as_array().ok_or("no steps")?;
     for (n, s) in steps.iter().enumerate() {

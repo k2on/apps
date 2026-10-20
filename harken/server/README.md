@@ -1,6 +1,6 @@
 # harken-server
 
-harken's server, on `ark-server` and `ark-auth`, hosting
+harken's server, an `ark-peer` that listens, with `ark-auth`, hosting
 `harken-domain`. The log and the listening session's volatile space on
 the hub, the sync socket at `/sync`, the sign-in routes under `/auth`, the
 browser client's validator and the admin page's listener are the shared
@@ -9,7 +9,7 @@ crates'; what is here is what only harken has:
 - **`library.rs`** — the media directory as a peer. `music/` under the root
   is walked at start and the whole root is watched after; each audio file
   is read with lofty and authored as `library.add_song` by an
-  `ark_client::Client` in this process, dialling the hub (no socket),
+  `ark_peer::Peer` in this process, dialling the hub (no socket),
   signed in as the account
   `library`. `add_song` is an upsert by `file`: a file the library already
   has is that song said again — retagged, or with a cover it lacked — and
@@ -142,7 +142,7 @@ HARKEN_DEV_AUTH=1 harken-server [127.0.0.1:8787]
 | `HARKEN_HA_MEDIA` | where a *speaker* fetches from (default: the public URL) |
 | `HARKEN_BRIDGE_TRACE=1` | a line per poll per speaker: what the house said of it and what the bridge did (below) |
 | `HARKEN_ROLES` | who holds which role: `library=alice,bob;admin=alice` |
-| `HARKEN_ADMIN_BIND` | where the admin page listens (none without it): loopback asks nothing, wider asks for a login holding `admin` (`docs/plan-guards.md` D4); `ark_server::admin`, its raw writes and mutations authored by the authority as itself |
+| `HARKEN_ADMIN_BIND` | where the admin page listens (none without it): loopback asks nothing, wider asks for a login holding `admin` (`docs/plan-guards.md` D4); `ark_peer::admin`, its raw writes and mutations authored by the authority as itself |
 | `HARKEN_ADMIN_WEB` | the admin page's build (`nix build .#ark-admin`); without it the admin API alone |
 
 What is in `HARKEN_DATA` (`/var/lib/harken` under the NixOS module), and

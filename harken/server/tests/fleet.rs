@@ -463,7 +463,7 @@ fn a_server_that_lost_its_log_re_bases_everyone_onto_what_it_has() {
 ///
 /// What it holds is that a delivery follows the write: the hub writes what
 /// a step made durable before it delivers anything the step said
-/// (`ark_server::hub`, "Persist to the disk first").
+/// (`ark_peer`'s server role, "Persist to the disk first").
 ///
 /// Falsified on v5 by asserting the log on disk holds less than every
 /// cursor (`st.cursor < on_disk`): round 0 fails, every peer at the head.
@@ -1865,7 +1865,7 @@ fn a_role_granted_by_a_restart_and_revoked_by_another() {
 /// peers — two of alice's devices and bob's — and alice's playlist; one of
 /// her devices goes behind a black hole and makes a playlist there. The
 /// server's admin page renames hers raw (a function of the change, authored
-/// by the authority as itself, `ark_server::admin::raw`) and is refused
+/// by the authority as itself, `ark_peer::admin::raw`) and is refused
 /// one the store refuses — a playlist entry naming no playlist — which is
 /// logged nowhere. The device comes back: every peer converges on the log,
 /// the rename in each one's own `playlists`, the black-holed playlist after

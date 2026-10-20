@@ -150,7 +150,7 @@
             files = "../harken/iced/web/index.html ../harken/iced/web/favicon.svg";
           };
           # The admin page: `ark-explorer`'s `ark-admin` over a server's
-          # authority, which ark-server serves on its admin listener
+          # authority, which ark-peer serves on its admin listener
           # (`services.harken.admin.page`).
           ark-admin = wasmPage {
             pname = "ark-admin";

@@ -20,11 +20,11 @@ use ark::peer::Ctx;
 use ark::store::{Change, Read};
 use ark::{Domain, Refusal};
 
-/// A module assembled, and the same as `ark_client`'s per-space module.
+/// A module assembled, and the same as a peer's per-space module.
 #[derive(Clone)]
 pub struct Hosted {
     pub domain: Arc<Domain>,
-    pub module: ark_client::Module,
+    pub module: ark_peer::Module,
     /// The modules held as run before ([`Hosted::hold`]), by hash.
     pub held: Vec<ModuleHash>,
 }
@@ -41,14 +41,9 @@ impl Hosted {
     }
 
     pub fn of(domain: Domain) -> Hosted {
-        let module = ark_client::Module {
-            schema: domain.schema.clone(),
-            cas: domain.cas(),
-            lib: domain.lib.clone(),
-        };
         Hosted {
+            module: ark_peer::Module::of(&domain),
             domain: Arc::new(domain),
-            module,
             held: vec![],
         }
     }

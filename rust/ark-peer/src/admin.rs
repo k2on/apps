@@ -53,7 +53,7 @@ use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::Router;
 
-use crate::{Authenticate, Handle};
+use crate::{Authenticate, Handle, Peer};
 
 /// The role a login must hold to open a wider-bound admin page.
 pub const ROLE: &str = "admin";
@@ -160,7 +160,7 @@ fn text(code: StatusCode, why: impl Into<String>) -> Response {
 }
 
 /// `f` on the hub's thread, off the runtime's; nothing once the hub is gone.
-async fn on_hub<T: Send + 'static>(hub: &Handle, f: impl FnOnce(&mut crate::Hub) -> T + Send + 'static) -> Option<T> {
+async fn on_hub<T: Send + 'static>(hub: &Handle, f: impl FnOnce(&mut Peer) -> T + Send + 'static) -> Option<T> {
     let hub = hub.clone();
     tokio::task::spawn_blocking(move || hub.with(f)).await.ok().flatten()
 }
@@ -228,7 +228,7 @@ async fn state(With(ctx): With<Ctx>) -> Response {
             connections,
             exposed,
             raw: true,
-            who: h.config.me.actor.clone(),
+            who: h.log.me.actor.clone(),
         }
     });
     match read.await {
@@ -258,32 +258,14 @@ async fn author(With(ctx): With<Ctx>, body: String) -> Response {
     }
 }
 
-/// A module file verified over this schema: its bodies, in an order each
-/// installs in.
+/// A module file verified over this schema ([`ark::Domain::from_file`]):
+/// its bodies.
 pub fn module_bodies(schema: &ark::schema::Schema, bytes: &[u8]) -> Result<Vec<Vec<u8>>, String> {
-    let (m, mut todo) = <(Module, Vec<Vec<u8>>)>::from_bytes(bytes).map_err(|e| e.0)?;
-    if &m.schema != schema {
+    let d = ark::Domain::from_file(bytes).map_err(|e| e.0)?;
+    if *d.schema != *schema {
         return Err("a module loaded runs over this schema; another needs a restart".into());
     }
-    let (lib, mut done) = (Lib::default(), vec![]);
-    while !todo.is_empty() {
-        let before = todo.len();
-        let mut why = String::new();
-        for b in std::mem::take(&mut todo) {
-            match lib.load(schema, &b) {
-                Ok(_) => done.push(b),
-                Err(e) => {
-                    why = e.0;
-                    todo.push(b);
-                }
-            }
-        }
-        if todo.len() == before {
-            return Err(why);
-        }
-    }
-    ark::module::verify(&m, &lib).map_err(|e| e.0)?;
-    Ok(done)
+    Ok(d.bodies.into_values().collect())
 }
 
 async fn load(With(ctx): With<Ctx>, body: String) -> Response {

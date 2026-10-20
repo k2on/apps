@@ -276,9 +276,14 @@ enum Output { Send(bytes), Changes([Change]), Persist(bytes), Refused { id, why 
 impl Peer { fn step(&mut self, input: Input) -> Vec<Output>; }
 ```
 
-Sans-io: no sockets, clocks or files inside. The server hub, the client,
-the simulator and the trace player are **drivers** that feed `step` and
-route `Output`. Rebase, sequencing, dedupe, judging, compaction, going
+Sans-io: no sockets, clocks or files inside. One driver feeds `step` and
+routes `Output`: `ark-peer`'s `Peer`, the two machines (the log's and the
+volatile space's) over one disk, in either role — a device that **dials**
+(the link with redial, its pending intents on disk, the relay, the views
+and the functions an app calls by name) or a server that **listens** (the
+connections with their identity and feed, `Send`/`Fanout`/`To` routed,
+written before delivered, the journal beside the log). The simulator and
+the trace player drive the same `Peer`. Rebase, sequencing, dedupe, judging, compaction, going
 alone, joining again, and partial feeds are in this one machine, once.
 
 **The rebase.** A confirmed entry arriving under pending intents: undo
@@ -363,9 +368,10 @@ Server: Ack   { id, seq, facts: Option<[Change]> }       -- facts when they diff
         Bodies { [(FnHash, bytes)] }
 ```
 
-Two sans-io state machines, client and server, each a driver of a
-`Peer`. The server evaluates each connection's scopes at `Hello` and
-serves it its union (§1.8). Sign-in is as v4 (`ark-auth`): the server is
+One sans-io driver, `ark-peer`'s `Peer` (§1.7): a server is a `Peer` in
+`Role::Authority` that listens, a device one that dials. The server
+evaluates each connection's scopes at `Hello` and serves it its union
+(§1.8). Sign-in is as v4 (`ark-auth`): the server is
 the OpenID Connect client; a session is what `Hello` carries.
 
 ### 1.12 Authoring
@@ -502,6 +508,8 @@ rust/ark5-macros/   §1.12, a proc-macro crate; also the Node derive (L1)
 rust/ark5-dev/      the simulator, the trace player, the fuzzer, the vector writer (dev only)
 rust/ark5-server/   the hub, persistence, the web build, auth glue (thin; drivers)
 rust/ark5-client/   the client driver: link, storage, views for a UI (thin)
+                    — since K3b one crate, rust/ark-peer: the peer that dials
+                    and listens, its storage, link, hub, app kit and server
 harken/domain5/     harken's domain on §1.12
 spec5/              AUTHORING.md, README.md, RUNNERS.md and vectors/ for v5
 ```

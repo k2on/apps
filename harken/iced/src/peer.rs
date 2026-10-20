@@ -52,7 +52,7 @@ pub fn key<T>(id: Id) -> Key<T> {
 struct Open {
     name: &'static str,
     input: Vec<u8>,
-    who: u64,
+    who: ark::peer::Who,
     /// The view, or — while its query refuses (somebody else's playlist,
     /// nobody signed in) — none, which is no rows.
     view: Option<usize>,
@@ -62,11 +62,11 @@ impl Open {
     /// Hydrate once. A refusal is no rows rather than an error: a page that
     /// is not yours is an empty page, as the query's answer was.
     fn hydrate(client: &mut Replica, name: &'static str, input: Vec<u8>) -> Open {
-        let view = client.watch(name, &input).ok();
+        let view = client.view(name, &input).ok();
         Open {
             name,
             input,
-            who: client.who_epoch,
+            who: client.me().clone(),
             view,
         }
     }
@@ -93,7 +93,7 @@ impl Open {
     /// stands for would have been.
     fn update(&mut self, client: &mut Replica, moved: bool) -> Update {
         match self.view {
-            Some(v) if self.who == client.who_epoch => match client.update(v) {
+            Some(v) if self.who == *client.me() => match client.update(v) {
                 Update::Reset => {
                     self.reopen(client);
                     Update::Reset
@@ -104,7 +104,7 @@ impl Open {
                 self.reopen(client);
                 Update::Reset
             }
-            None if !moved && self.who == client.who_epoch => Update::Unchanged,
+            None if !moved && self.who == *client.me() => Update::Unchanged,
             None => {
                 self.reopen(client);
                 match self.view {
@@ -384,7 +384,8 @@ impl Peer {
     /// login the history stays nobody's until a sign-in makes it the
     /// signer's.
     pub fn join(&mut self, url: &str) {
-        self.client.join(url);
+        self.client.join();
+        self.client.connect(url);
         self.refresh();
     }
 
@@ -858,8 +859,8 @@ mod tests {
     /// playlist".
     #[test]
     fn a_window_alone_joins_a_server_in_place() {
-        use ark_server::hub::{Config, Hub};
-        let mut client = Replica::memory(crate::client::nobody(), None);
+        use ark_peer::{Config, Module, Peer as Hub};
+        let mut client = crate::client::memory(crate::client::nobody(), None);
         client.alone();
         client.set_roles([crate::domain::host::LIBRARY]);
         let mut peer = Peer::open(client);
@@ -881,12 +882,7 @@ mod tests {
         assert_eq!(peer.client.pending_len(), 5);
 
         let d = crate::client::domain();
-        let module = ark_client::Module {
-            schema: d.schema.clone(),
-            cas: d.cas(),
-            lib: d.lib.clone(),
-        };
-        let mut hub = Hub::open(Config::new(module), Box::new(ark_client::Memory::default()), 0);
+        let mut hub = Hub::serve(Config::new(Module::of(d)), Box::new(ark_peer::Memory::default()), 0);
         // The songs are the library's to write (`docs/plan-guards.md` D1),
         // and the server judges them under the roles of the login.
         let alice = Who {
@@ -894,12 +890,12 @@ mod tests {
             session: "alice@desktop".into(),
             roles: vec![crate::domain::host::LIBRARY.into()],
         };
-        peer.client.sign_in(alice.clone(), "alice@desktop:library".into());
+        peer.client.login(alice.clone(), "alice@desktop:library".into());
         peer.refresh();
-        let c = hub.connect(alice);
-        peer.client.opened();
+        let c = hub.accept(alice);
+        peer.client.connected();
         loop {
-            let up = peer.client.client.take_frames();
+            let up = peer.client.take_frames();
             let mut down = vec![];
             for f in up.iter().cloned() {
                 down.extend(hub.frame(c, f, crate::client::now_ms()));

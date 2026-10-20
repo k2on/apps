@@ -34,7 +34,7 @@ use ark::ir::Node;
 use ark::log::{EntryId, Record, Snapshot};
 use ark::peer::Ctx;
 use ark::store::Store;
-use ark_client::{Disk, Memory};
+use ark_peer::{Disk, Memory};
 
 use crate::client::{domain, Replica};
 use crate::peer::key;
@@ -4291,17 +4291,17 @@ impl Seeder {
         self.local += 1;
         self.ctx.id = EntryId::of(LOCAL, self.local);
         self.ctx.now += 1;
-        let b = crate::client::binding(name).unwrap_or_else(|| panic!("the demo authors {name}"));
+        let b = domain().binding(name).unwrap_or_else(|| panic!("the demo authors {name}"));
         let changes = domain()
-            .run(&self.store, &self.ctx, &b, &input.to_bytes())
+            .run(&self.store, &self.ctx, b, &input.to_bytes())
             .unwrap_or_else(|r| panic!("the demo could not author {what}: {r}"));
         self.store.apply_all(&changes).unwrap_or_else(|r| panic!("{what}: the store refused {r}"));
     }
 
     fn query<T: Node>(&self, name: &str, input: &impl Node) -> T {
-        let b = crate::client::binding(name).unwrap_or_else(|| panic!("the demo reads {name}"));
+        let b = domain().binding(name).unwrap_or_else(|| panic!("the demo reads {name}"));
         let bytes = domain()
-            .ask(&self.store, &self.ctx, &b, &input.to_bytes())
+            .ask(&self.store, &self.ctx, b, &input.to_bytes())
             .unwrap_or_else(|r| panic!("the demo reads {name}: {r}"));
         T::from_bytes(&bytes).unwrap_or_else(|r| panic!("{name}: {r}"))
     }
@@ -4338,7 +4338,7 @@ pub fn seeded() -> Replica {
 /// The demo's replica opened from its records: its own authority, as the
 /// library's identity.
 pub fn open(disk: Memory) -> Replica {
-    let mut peer = Replica::open(Box::new(disk), None, crate::listening::device());
+    let mut peer = crate::client::open(Box::new(disk), None, crate::listening::device());
     // The demo's identity is the library's, as its seed was
     // (`docs/plan-guards.md` D1).
     peer.set_roles([crate::domain::host::LIBRARY]);

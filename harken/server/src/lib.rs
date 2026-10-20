@@ -1,9 +1,9 @@
-//! harken's server, on `ark-server`.
+//! harken's server: an `ark-peer` that listens.
 //!
 //! Almost nothing here is about sync, and that is the point: the log and
 //! the listening session's volatile space on the hub, the socket at
 //! `/sync`, `/healthz`, the sign-in routes and the web build's validator
-//! are `ark_server`'s and `ark_auth`'s, generic over any app; the domain
+//! are `ark_peer`'s and `ark_auth`'s, generic over any app; the domain
 //! is `harken/domain`'s ArkLang, called through the bindings `build.rs`
 //! generates ([`domain`]). What is harken's is the things only harken has,
 //! each a module a test can reach:
@@ -49,8 +49,7 @@ use ark_auth::oidc::Provider;
 use ark_auth::server::{Auth, Mode};
 use ark_auth::session::SessionStore;
 use ark_auth::Account;
-use ark_server::hub::{Config as HubConfig, Live};
-use ark_server::Running;
+use ark_peer::{Config as HubConfig, Live, Running};
 
 use assistant::ha;
 use hosted::Hosted;
@@ -94,7 +93,7 @@ impl Default for Keepalive {
 }
 
 /// How much of the log the server keeps: `entries` above the snapshot the
-/// log stands on (`ark_server::Config::keep`); a device further behind is
+/// log stands on (`ark_peer::Config::keep`); a device further behind is
 /// sent the snapshot and rebases onto it. `days` is read and checked, and
 /// kept nothing by: v5's horizon is a count of entries, not a device's
 /// place.
@@ -165,7 +164,7 @@ pub struct Config {
     /// `docs/plan-guards.md` D4 Where the admin page listens
     /// (`HARKEN_ADMIN_BIND`, what `services.harken.admin.bind` sets; none
     /// without it): nothing asked on loopback and a login holding `admin`
-    /// anywhere wider (`ark_server::admin`).
+    /// anywhere wider (`ark_peer::admin`).
     pub admin_bind: Option<String>,
     /// The admin page's static build (`HARKEN_ADMIN_WEB`): `ark-admin`
     /// compiled to wasm. Without it the admin listener serves its API alone.
@@ -443,12 +442,12 @@ pub fn hub_config(hosted: &Hosted, keep: usize) -> HubConfig {
     let mut c = HubConfig::new(hosted.module.clone());
     let get = |n: &str| hosted.get(&format!("listening.{n}"));
     c.live = Some(Live {
-        module: hosted.module.clone(),
         on_join: get("on_join"),
         on_leave: get("on_leave"),
         on_restore: get("on_restore"),
-        device: Arc::new(device),
-        keep: 256,
+        arrive: Arc::new(device),
+        keep: Some(256),
+        ..Live::new(hosted.module.clone())
     });
     c.keep = Some(keep);
     c
@@ -458,9 +457,9 @@ pub fn hub_config(hosted: &Hosted, keep: usize) -> HubConfig {
 /// log's head and its horizon (the snapshot it stands on); the module it
 /// runs, `current`, and each it holds as run before (`HARKEN_OLD_MODULES`),
 /// by hash; and every account with a connection open, with how many — what
-/// the fleet and the VM test read. Answered in front of `ark-server`'s own
+/// the fleet and the VM test read. Answered in front of `ark-peer`'s own
 /// `/healthz`, which says `ok` alone.
-pub async fn health(hub: &ark_server::Handle, hosted: &Hosted) -> Option<String> {
+pub async fn health(hub: &ark_peer::Handle, hosted: &Hosted) -> Option<String> {
     let hub = hub.clone();
     let mut modules = format!("module {} current\n", hosted.domain.module.hash());
     for m in &hosted.held {
@@ -491,7 +490,7 @@ pub async fn health(hub: &ark_server::Handle, hosted: &Hosted) -> Option<String>
 }
 
 async fn healthz(
-    axum::extract::State((hub, hosted)): axum::extract::State<(ark_server::Handle, Hosted)>,
+    axum::extract::State((hub, hosted)): axum::extract::State<(ark_peer::Handle, Hosted)>,
     req: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
@@ -617,7 +616,7 @@ pub async fn start(config: Config) -> Result<Server> {
     // sent one when it names a host. A wildcard bind names none, and the
     // address the page is reached at goes in `HARKEN_REDIRECTS`.
     if let Some(bind) = &config.admin_bind {
-        if !ark_server::admin::is_loopback(bind)
+        if !ark_peer::admin::is_loopback(bind)
             && !bind.starts_with("0.0.0.0:")
             && !bind.starts_with("[::]:")
         {
@@ -626,10 +625,9 @@ pub async fn start(config: Config) -> Result<Server> {
     }
     let auth = Arc::new(auth);
 
-    let mut builder = ark_server::builder(hub_config(&hosted, config.retain.entries))
-        .data(&config.data)
-        .auth(auth.clone())
-        .keepalive(config.keepalive.every);
+    let mut server =
+        ark_peer::Server::new(hub_config(&hosted, config.retain.entries)).auth(auth.clone());
+    (server.data, server.keepalive) = (Some(config.data.clone()), config.keepalive.every);
     if config.keepalive != Keepalive::default() {
         eprintln!(
             "harken-server: the sync socket pings every {}ms and gives up after {} unanswered",
@@ -654,11 +652,11 @@ pub async fn start(config: Config) -> Result<Server> {
             art.display(),
             covers::ART
         );
-        builder = builder.merge(covers::routes(dir, &art));
+        server.routes = covers::routes(dir, &art);
     }
     // `docs/plan-guards.md` D4 The admin page, where one is asked for.
     if let Some(bind) = &config.admin_bind {
-        builder = builder.admin(ark_server::admin::Admin {
+        server.admin = Some(ark_peer::admin::Admin {
             bind: bind.clone(),
             page: config.admin_web.clone(),
             server: Some(public_url.clone()),
@@ -670,15 +668,14 @@ pub async fn start(config: Config) -> Result<Server> {
     // with the build as its validator: a store path cannot be one, since nix
     // dates every file in it 1970.
     if let Some(dir) = &config.web {
-        builder = builder.web(dir, config.web_module.clone());
+        server.web = Some((dir.clone(), config.web_module.clone()));
     }
-    let mut app = builder.build()?;
-    let hub = app.hub.clone();
-    app.router = app.router.layer(axum::middleware::from_fn_with_state(
+    let (hub, router, admin) = server.build()?;
+    let router = router.layer(axum::middleware::from_fn_with_state(
         (hub.clone(), hosted.clone()),
         healthz,
     ));
-    let running = app.serve(&config.listen).await?;
+    let running = Running::listen(hub.clone(), router, admin, &config.listen).await?;
     eprintln!("harken-server: listening on http://{}", running.addr);
     if let Some(a) = running.admin_addr {
         eprintln!("harken-server: the admin page on http://{a}/admin/");

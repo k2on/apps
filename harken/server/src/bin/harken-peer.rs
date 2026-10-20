@@ -8,7 +8,7 @@
 //!   [--device KIND,NAME,CAN_PLAY]
 //! ```
 //!
-//! It is an `ark_client::Client` and its link, as the desktop is, minus the
+//! It is an `ark_peer::Peer` and its link, as the desktop is, minus the
 //! window: the replica in `DIR/replica` (the chain on disk), signed in the
 //! way the desktop signs in under dev auth (`ark_auth::client::login` with a
 //! name, which a dev server answers with a code and no browser), the login
@@ -99,16 +99,13 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
-use ark::frames::Frame;
 use ark::hash::hex;
 use ark::ir::Node;
 use ark::log::EntryId;
 use ark::peer::{Ctx, Journal, Role, Who};
-use ark::schema::Space;
 use ark_auth::client::Patience;
 use ark_auth::Login;
-use ark_client::link::{Backoff, Event as LinkEvent, Link, Socket};
-use ark_client::{Client, Event, Files};
+use ark_peer::{now_ms, Config, Files, Live, Peer};
 use harken_server::domain::host::Listening;
 use harken_server::domain::Id;
 use harken_server::hosted::Hosted;
@@ -750,14 +747,14 @@ impl Answer {
 // -- the peer --------------------------------------------------------------------------
 
 struct Headless {
-    client: Client,
-    link: Option<Link>,
+    client: Peer,
+    /// What the link rings.
+    bell: Receiver<()>,
     hosted: Hosted,
     dir: PathBuf,
     server: Option<String>,
     token: Option<String>,
     patience: Patience,
-    backoff: Backoff,
     /// How long `settle` waits with nothing new before the cursor counts
     /// as still for a turn (`--pump-ms`).
     still: Duration,
@@ -775,16 +772,13 @@ struct Headless {
     rejected: BTreeMap<EntryId, String>,
     /// `--roles`: what this device's entries carry beside its login's.
     roles: Vec<String>,
-    /// How many times the link has opened; whether the last opened and has
-    /// heard nothing yet (a token the hub does not know is closed before a
-    /// word); why it was last turned away; whether the hub has paged the
-    /// volatile machine since it opened.
-    opens: i64,
+    /// Whether the last connection opened and has heard nothing yet (a
+    /// token the hub does not know is closed before a word); why it was
+    /// last turned away; whether the hub has paged the volatile machine
+    /// since it opened.
     quiet_open: bool,
     denied: Option<String>,
     synced: bool,
-    /// What the link said that the client has not been given yet.
-    backlog: std::collections::VecDeque<LinkEvent>,
 }
 
 /// How many of the link's events the client is given in one turn.
@@ -811,15 +805,14 @@ impl Headless {
             _ => None,
         };
         let mut who = match (&login, f.alone) {
-            (Some(l), _) => ark_client::auth::who(l),
+            (Some(l), _) => ark_peer::who(l),
             (None, true) => nobody(f.user.as_deref().unwrap_or("me")),
             (None, false) => nobody(""),
         };
         who.roles.extend(f.roles.iter().cloned());
         who.roles.sort();
         who.roles.dedup();
-        let live = f.device.as_ref().map(|d| ark_client::Live {
-            module: hosted.module.clone(),
+        let live = f.device.as_ref().map(|d| Live {
             device: Some(
                 Device {
                     can_play: d.can_play,
@@ -832,14 +825,19 @@ impl Headless {
             ),
             ephemeral: hosted.get("listening.scrub").into_iter().collect(),
             every_ms: 250,
+            ..Live::new(hosted.module.clone())
         });
-        let config = ark_client::Config {
-            log: hosted.module.clone(),
+        let config = Config {
             live,
+            ..Config::of(hosted.domain.clone())
         };
         let disk = Files::new(f.dir.join("replica"))
             .map_err(|e| format!("opening {}: {e}", f.dir.display()))?;
-        let client = Client::open(config, who.clone(), Box::new(disk), false);
+        let mut client = Peer::open(config, who.clone(), Box::new(disk), false);
+        let (wake, bell) = ark_peer::link::bell();
+        client.set_waker(wake);
+        client.link.backoff = (f.backoff.0.max(1), f.backoff.1.max(f.backoff.0).max(1));
+        client.link.chunk = CHUNK;
         let (tx, lines) = channel();
         std::thread::spawn(move || {
             for line in std::io::stdin().lock().lines() {
@@ -852,16 +850,12 @@ impl Headless {
         });
         let mut h = Headless {
             client,
-            link: None,
+            bell,
             hosted,
             dir: f.dir.clone(),
             server: f.server.clone(),
             token: login.map(|l| l.token),
             patience: f.patience,
-            backoff: Backoff {
-                first: Duration::from_millis(f.backoff.0.max(1)),
-                most: Duration::from_millis(f.backoff.1.max(f.backoff.0).max(1)),
-            },
             still: f.pump,
             lines,
             held: vec![],
@@ -869,11 +863,9 @@ impl Headless {
             live_refusals: vec![],
             rejected: BTreeMap::new(),
             roles: f.roles.clone(),
-            opens: 0,
             quiet_open: false,
             denied: None,
             synced: false,
-            backlog: Default::default(),
         };
         match (f.alone, h.is_alone()) {
             (true, false) => h.client.alone(),
@@ -898,127 +890,81 @@ impl Headless {
     /// Off the network, with nothing of the old connection left to give
     /// the client.
     fn drop_link(&mut self) {
-        self.link = None;
-        self.backlog.clear();
-        self.client.disconnected();
+        self.client.set_token(None);
+    }
+
+    /// Whether the link is up or being dialled.
+    fn dialling(&self) -> bool {
+        self.client.link.token.is_some()
     }
 
     fn is_alone(&self) -> bool {
-        matches!(self.client.log.role, Role::Authority { .. })
+        self.client.is_alone()
     }
 
     /// The link up, when there is a server and a login.
     fn dial(&mut self) {
         self.drop_link();
         if let (Some(server), Some(token), false) = (&self.server, &self.token, self.is_alone()) {
-            let socket = Socket(ark_auth::socket_url(server));
-            self.link = Some(Link::start(Box::new(socket), token.clone(), self.backoff));
+            let url = ark_auth::socket_url(server);
+            self.client.set_token(Some(token.clone()));
+            self.client.connect(&url);
         }
     }
 
-    /// What the link said, to the client, and what it came to on stderr.
-    fn pump_with(&mut self, ev: Vec<LinkEvent>) {
-        for e in &ev {
-            match e {
-                LinkEvent::Open => {
-                    self.opens += 1;
-                    self.quiet_open = true;
-                    self.synced = false;
-                    eprintln!(
-                        "harken-peer: linked (epoch {}, cursor {})",
-                        self.opens,
-                        self.client.log.log().head().0
-                    );
-                }
-                LinkEvent::Frame(b) => {
-                    self.quiet_open = false;
-                    self.denied = None;
-                    if let Ok(
-                        Frame::Page {
-                            space: Space::Volatile,
-                            ..
-                        }
-                        | Frame::Snapshot {
-                            space: Space::Volatile,
-                            ..
-                        },
-                    ) = Frame::dec(b)
-                    {
-                        self.synced = true;
-                    }
-                }
-                LinkEvent::Closed(why) => {
-                    eprintln!("harken-peer: dropped: {why}");
-                    if std::mem::take(&mut self.quiet_open) {
-                        self.ask_why();
-                    }
-                }
-            }
+    /// One turn of the link, a chunk of what it said ([`CHUNK`]): a server
+    /// confirming two thousand intents one entry at a time is two thousand
+    /// frames, each a rebase of what is still pending; taken a chunk at a
+    /// time, a command is answered between chunks rather than after all of
+    /// them. What it came to goes on stderr.
+    fn pump(&mut self) {
+        let p = self.client.pump();
+        if p.opened {
+            (self.quiet_open, self.synced) = (true, false);
+            eprintln!(
+                "harken-peer: linked (epoch {}, cursor {})",
+                self.client.link.epoch,
+                self.client.log.log().head().0
+            );
         }
-        match &self.link {
-            Some(link) => self.client.pump(link, ev, ark_server::handle::now()),
-            None => self.client.tick(ark_server::handle::now()),
+        if p.frames != [0, 0] {
+            (self.quiet_open, self.denied) = (false, None);
+        }
+        self.synced |= p.frames[1] > 0;
+        for why in &p.closed {
+            eprintln!("harken-peer: dropped: {why}");
+        }
+        if p.denied.is_some() || !p.closed.is_empty() && std::mem::take(&mut self.quiet_open) {
+            self.ask_why(p.denied.is_some());
         }
         self.collect();
     }
 
     /// The hub closed a connection before saying a word, which is what it
-    /// does to a token that proves nobody — or a server going down. Which
-    /// one is asked of the sign-in routes: a token they no longer know is
-    /// denied, and the peer stops dialling with it until it signs in
-    /// again; its store and its pending intents stay.
-    fn ask_why(&mut self) {
+    /// does to a token that proves nobody (with code 4401, `denied`) — or a
+    /// server going down. Which one is asked of the sign-in routes when it
+    /// did not say: a token they no longer know is denied, and the peer
+    /// stops dialling with it until it signs in again; its store and its
+    /// pending intents stay.
+    fn ask_why(&mut self, denied: bool) {
         let (Some(server), Some(token)) = (&self.server, &self.token) else {
             return;
         };
-        if let Ok(None) = ark_auth::client::whoami(server, token) {
+        if denied || matches!(ark_auth::client::whoami(server, token), Ok(None)) {
             self.denied = Some(REVOKED.into());
-            self.link = None;
-            self.client.disconnected();
-            self.backlog.clear();
+            self.drop_link();
             eprintln!("harken-peer: denied: {REVOKED}");
         }
-    }
-
-    /// One turn, with no waiting: what the link has said, a chunk of it.
-    fn pump(&mut self) {
-        let ev = self.link.as_ref().map(Link::events).unwrap_or_default();
-        self.backlog.extend(ev);
-        self.chunk();
-    }
-
-    /// The next [`CHUNK`] of what the link said, to the client. A server
-    /// confirming two thousand intents one entry at a time is two thousand
-    /// frames, each a rebase of what is still pending; taken a chunk at a
-    /// time, a command is answered between chunks rather than after all
-    /// of them.
-    fn chunk(&mut self) {
-        let n = self.backlog.len().min(CHUNK);
-        let ev: Vec<LinkEvent> = self.backlog.drain(..n).collect();
-        self.pump_with(ev);
     }
 
     /// Take the verdicts that arrived, and write each down.
     fn collect(&mut self) {
         let mut fresh = vec![];
-        for e in self.client.take_events() {
-            match e {
-                Event::Refused {
-                    space: Space::Durable,
-                    id,
-                    why,
-                } => {
-                    self.rejected.insert(id, why.clone());
-                    fresh.push(json!({ "id": id_json(&id.0), "reason": why }));
-                }
-                Event::Refused {
-                    space: Space::Volatile,
-                    why,
-                    ..
-                } => self.live_refusals.push(why),
-                _ => {}
-            }
+        for (id, why) in self.client.take_rejections() {
+            fresh.push(json!({ "id": id_json(&id.0), "reason": why }));
+            self.rejected.insert(id, why);
         }
+        self.live_refusals.extend(self.client.take_live_refusals());
         if fresh.is_empty() {
             return;
         }
@@ -1038,24 +984,14 @@ impl Headless {
     /// Waits on the link for at most `wait` (on stdin when there is no
     /// link), and pumps.
     fn turn(&mut self, wait: Duration) {
-        match &self.link {
-            Some(link) if !self.backlog.is_empty() => {
-                let ev = link.events();
-                self.backlog.extend(ev);
-                self.chunk();
+        if !self.dialling() {
+            if let Ok(l) = self.lines.recv_timeout(wait) {
+                self.held.push(l);
             }
-            Some(link) => {
-                let ev = link.wait(wait);
-                self.backlog.extend(ev);
-                self.chunk();
-            }
-            None => {
-                if let Ok(l) = self.lines.recv_timeout(wait) {
-                    self.held.push(l);
-                }
-                self.pump();
-            }
+        } else if self.client.backlog() == 0 {
+            ark_peer::link::wait(&self.client, &self.bell, wait);
         }
+        self.pump();
     }
 
     /// Pumps until `done`, or the timeout; with `step`, `done` is asked
@@ -1099,13 +1035,14 @@ impl Headless {
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => return None,
                 Err(_) => {}
             }
-            match &self.link {
-                Some(_) => self.turn(Duration::from_millis(2)),
-                None => match self.lines.recv_timeout(Duration::from_millis(50)) {
-                    Ok(l) => return l,
-                    Err(RecvTimeoutError::Disconnected) => return None,
-                    Err(RecvTimeoutError::Timeout) => self.pump(),
-                },
+            if self.dialling() {
+                self.turn(Duration::from_millis(2));
+                continue;
+            }
+            match self.lines.recv_timeout(Duration::from_millis(50)) {
+                Ok(l) => return l,
+                Err(RecvTimeoutError::Disconnected) => return None,
+                Err(RecvTimeoutError::Timeout) => self.pump(),
             }
         }
     }
@@ -1135,12 +1072,12 @@ impl Headless {
 
     fn status(&self) -> Answer {
         let me = &self.client.log.me;
-        let link = match (self.is_alone(), &self.link, self.linked()) {
+        let link = match (self.is_alone(), self.dialling(), self.linked()) {
             (true, _, _) => "alone",
-            (_, None, _) if self.token.is_none() => "signed out",
-            (_, None, _) => "offline",
-            (_, Some(_), true) => "linked",
-            (_, Some(_), false) => "dialling",
+            (_, false, _) if self.token.is_none() => "signed out",
+            (_, false, _) => "offline",
+            (_, true, true) => "linked",
+            (_, true, false) => "dialling",
         };
         Answer::default()
             .set("cursor", json!(self.cursor()))
@@ -1158,9 +1095,9 @@ impl Headless {
                 "signed_out",
                 json!(self.token.is_none() && !self.is_alone()),
             )
-            .set("epoch", json!(self.opens))
+            .set("epoch", json!(self.client.link.epoch))
             .set("link", json!(link))
-            .set("opens", json!(self.opens))
+            .set("opens", json!(self.client.link.epoch))
             .set("diverged", json!(self.client.log.diverged.len()))
             .set(
                 "joining",
@@ -1217,7 +1154,7 @@ impl Headless {
 
     /// Signs in as `login`: the client authors as it, the link dials with it.
     fn signed_in(&mut self, login: &Login) {
-        let mut who = ark_client::auth::who(login);
+        let mut who = ark_peer::who(login);
         who.roles.extend(self.roles.iter().cloned());
         who.roles.sort();
         who.roles.dedup();
@@ -1240,31 +1177,9 @@ impl Headless {
                     Ok(b) => b,
                     Err(e) => return Answer::refused(e),
                 };
-                let before = self.client.log.local;
-                self.client
-                    .mutate(self.hosted.func(&name), bytes, ark_server::handle::now());
-                let mut refused = None;
-                for e in self.client.take_events() {
-                    match e {
-                        Event::Refused {
-                            space: Space::Durable,
-                            why,
-                            ..
-                        } => refused = Some(why),
-                        Event::Refused {
-                            space: Space::Volatile,
-                            why,
-                            ..
-                        } => self.live_refusals.push(why),
-                        _ => {}
-                    }
-                }
-                match refused {
-                    Some(why) if self.client.log.local == before => Answer::refused(why),
-                    _ => {
-                        let id = EntryId::of(self.client.log.origin, self.client.log.local);
-                        Answer::ok(true).set("id", id_json(&id.0))
-                    }
+                match self.client.mutate_bytes(&name, bytes) {
+                    Err(why) => Answer::refused(why),
+                    Ok(id) => Answer::ok(true).set("id", id_json(&id.0)),
                 }
             }
             Cmd::Status => self.status(),
@@ -1306,7 +1221,7 @@ impl Headless {
                     actor: me.actor.clone(),
                     session: me.session.clone(),
                     roles: me.roles.clone(),
-                    now: ark_server::handle::now(),
+                    now: now_ms(),
                 };
                 let answer = input(&name, &args)
                     .and_then(|b| {
@@ -1464,16 +1379,9 @@ impl Headless {
                     .live
                     .as_ref()
                     .is_some_and(|l| l.ephemeral.contains(&func));
-                self.client.call(func, bytes, ark_server::handle::now());
-                let mut refused = None;
-                for e in self.client.take_events() {
-                    if let Event::Refused { why, .. } = e {
-                        refused = Some(why);
-                    }
-                }
-                match refused {
-                    Some(why) => Answer::refused(why),
-                    None => Answer::ok(true).set(
+                match self.client.call(&name, bytes) {
+                    Err(why) => Answer::refused(why),
+                    Ok(()) => Answer::ok(true).set(
                         "kind",
                         json!(if ephemeral { "ephemeral" } else { "ordered" }),
                     ),
@@ -1503,7 +1411,7 @@ impl Headless {
             }
             Cmd::Persist | Cmd::Quit => {
                 self.pump();
-                match self.client.disk_error.clone() {
+                match self.client.failure.clone() {
                     None => Answer::ok(true),
                     Some(e) => Answer::refused(e),
                 }

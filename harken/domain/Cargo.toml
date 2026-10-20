@@ -16,6 +16,5 @@ ark = { path = "../../rust/ark" }
 ark = { path = "../../rust/ark" }
 
 [dev-dependencies]
-ark-client = { path = "../../rust/ark-client" }
-ark-server = { path = "../../rust/ark-server" }
+ark-peer = { path = "../../rust/ark-peer" }
 ark-dev = { path = "../../rust/ark-dev" }

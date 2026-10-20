@@ -3123,7 +3123,7 @@ mod tests {
 /// not a problem worth a runtime.
 ///
 /// **Each speaker is a device**, one connection to the hub per session it
-/// stands in ([`ark_server::Handle::connect`]): a volatile machine of its
+/// stands in ([`ark_peer::Handle::connect`]): a volatile machine of its
 /// own, signed in as the session's account on a session of its own
 /// ([`speaker`]), which says in its `Hello` that it is a speaker — so the
 /// hub authors its `on_join`, and its `on_leave` when the connection
@@ -3162,8 +3162,8 @@ pub mod ha {
     use ark::peer::{Input, Output, Peer, Role, Who};
     use ark::schema::Space;
     use ark::store::{Read, Scan};
-    use ark_server::hub::ConnId;
-    use ark_server::Handle;
+    use ark_peer::Handle;
+    use ark_peer::{now_ms, ConnId};
 
     use super::{input, listening, playing, Act, Bridge, Playing, Speaker, GROUPING, VOLUME_SET};
     use crate::hosted::Hosted;
@@ -3296,13 +3296,6 @@ pub mod ha {
             eprintln!("harken-server: house: could not start its thread");
         }
         Assistant { stop, wake, thread }
-    }
-
-    fn now_ms() -> i64 {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or(0)
     }
 
     /// A speaker's session in `user`'s listening session: its connection's,

@@ -33,8 +33,7 @@ use ark::peer::{Cas, Ctx, Feed, Who};
 use ark::schema::{Schema, Space, Table};
 use ark::store::{Dir, Store};
 use ark::ty::Ty;
-use ark_client::{Config, Module};
-use ark_server::hub::{Config as HubConfig, Live as HubLive};
+use ark_peer::{Config, Live, Module};
 
 use crate::sim::{lcg, Net, Op};
 
@@ -351,7 +350,7 @@ pub fn session(seed: u64, traces: bool) -> Result<(Net, Found), String> {
     let g = Gen::new(&mut r);
     let room = crate::demo::room();
     let live = r.one_in(2);
-    let mut hub = HubConfig::new(g.module.clone());
+    let mut hub = Config::new(g.module.clone());
     let scope = g.scope;
     hub.feed = Arc::new(move |w: &Who| {
         if w.session.starts_with("partial") {
@@ -362,20 +361,19 @@ pub fn session(seed: u64, traces: bool) -> Result<(Net, Found), String> {
     });
     hub.keep = r.one_in(3).then(|| 2 + r.below(4) as usize);
     if live {
-        hub.live = Some(HubLive {
-            module: crate::demo::module(&room),
+        hub.live = Some(Live {
             on_join: Some(room.get("room.on_join")),
             on_leave: Some(room.get("room.on_leave")),
-            on_restore: None,
-            device: Arc::new(crate::demo::arrival),
-            keep: 4,
+            arrive: Arc::new(crate::demo::arrival),
+            keep: Some(4),
+            ..Live::new(Module::of(&room))
         });
     }
     let n = 2 + r.below(3) as i64;
     let partial = r.one_in(2);
     let config = |i: i64| Config {
-        log: g.module.clone(),
         live: live.then(|| crate::demo::live(&format!("d{i}"), 50)),
+        ..Config::new(g.module.clone())
     };
     let logins: Vec<(Who, Config)> = (0..n).map(|i| (login(i + !partial as i64, 0, r.one_in(3)), config(i))).collect();
     let mut net = Net::of(hub, logins, seed);

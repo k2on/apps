@@ -719,7 +719,7 @@ impl App {
                 None => "nobody".into(),
             };
             let joining = p.client.status().joining;
-            let link = match (&self.login, p.client.linked()) {
+            let link = match (&self.login, p.client.linked) {
                 (None, _) => "not signed in",
                 (Some(_), true) if joining => "joining",
                 (Some(_), true) => "online",
@@ -767,7 +767,7 @@ impl App {
         let stats = l.stats();
         let client = &self.peer.client;
         let status = client.status();
-        let live = client.live_status();
+        let live = crate::client::live_status(client);
         let session = self.session.as_ref();
         let yes = |b: bool| if b { "yes" } else { "no" };
         let mut rows: Vec<(String, String)> = vec![
@@ -839,7 +839,7 @@ impl App {
                         "{} \u{b7} {} \u{b7} {}",
                         a.at,
                         a.queue.len(),
-                        clock(listening::Remote::position_ms(client, a) as f64 / 1000.0)
+                        clock(listening::Remote::position_ms(a) as f64 / 1000.0)
                     ),
                 ));
                 rows.push(("from".into(), a.from.clone()));
@@ -944,7 +944,7 @@ impl App {
     fn bar(&self) -> Option<Bar> {
         if let Some(a) = self.session.as_ref().and_then(|s| s.session.as_ref()) {
             let track = a.now();
-            let counted = listening::Remote::position_ms(&self.peer.client, a) as f64 / 1000.0;
+            let counted = listening::Remote::position_ms(a) as f64 / 1000.0;
             return Some(Bar {
                 title: track.title.clone(),
                 creator: track.creator.clone(),

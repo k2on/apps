@@ -34,7 +34,7 @@ let
   ];
 
   # Whether the admin page's bind answers on this machine alone: what
-  # `ark_server::admin::is_loopback` asks of it.
+  # `ark_peer::admin::is_loopback` asks of it.
   adminLoopback = bind:
     lib.any (p: lib.hasPrefix p bind) [ "127." "localhost:" "[::1]:" ];
 

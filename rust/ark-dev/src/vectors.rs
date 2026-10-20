@@ -13,11 +13,10 @@ use ark::hash::{hex, unhex};
 use ark::log::{EntryId, Origin};
 use ark::peer::Who;
 use ark::ty::Ty;
-use ark_client::Config;
-use ark_server::hub::{Config as HubConfig, Live as HubLive};
+use ark_peer::{Config, Live, Module};
 use serde_json::{json, Value};
 
-use crate::demo::{arrival, domain, live, module, room};
+use crate::demo::{arrival, domain, live, room};
 use crate::sim::{who, Net, Op};
 
 /// A value of `ty` as JSON: an `Int` a number, `Bytes` hex, a list or a
@@ -103,8 +102,8 @@ pub fn on_disk(d: &str) -> Vec<(String, String)> {
 
 fn demo() -> Config {
     Config {
-        log: module(&domain()),
         live: None,
+        ..Config::new(Module::of(&domain()))
     }
 }
 
@@ -145,7 +144,7 @@ pub fn fleet_script() -> Vec<Op> {
 /// `fleet-seed-7` (or another seed) run: the playlist, settled, the
 /// script, settled.
 pub fn fleet(seed: u64) -> Net {
-    let mut net = Net::new(HubConfig::new(module(&domain())), |_| demo(), 3, seed);
+    let mut net = Net::new(Config::new(Module::of(&domain())), |_| demo(), 3, seed);
     net.run(&create(0, "Fleet"));
     net.settle().expect("the playlist settles");
     for op in fleet_script() {
@@ -166,8 +165,8 @@ pub fn sessions() -> Vec<(&'static str, Net)> {
         net.settle().expect("a scripted session settles");
         net
     };
-    let two = |seed| Net::new(HubConfig::new(module(&domain())), |_| demo(), 2, seed);
-    let mut keep = HubConfig::new(module(&domain()));
+    let two = |seed| Net::new(Config::new(Module::of(&domain())), |_| demo(), 2, seed);
+    let mut keep = Config::new(Module::of(&domain()));
     keep.keep = Some(1);
     let anon = Who {
         actor: String::new(),
@@ -179,18 +178,17 @@ pub fn sessions() -> Vec<(&'static str, Net)> {
         session: "alice-session".into(),
         roles: vec!["listener".into()],
     };
-    let mut hub = HubConfig::new(module(&domain()));
-    hub.live = Some(HubLive {
-        module: module(&room),
+    let mut hub = Config::new(Module::of(&domain()));
+    hub.live = Some(Live {
         on_join: Some(room.get("room.on_join")),
         on_leave: Some(room.get("room.on_leave")),
-        on_restore: None,
-        device: Arc::new(arrival),
-        keep: 4,
+        arrive: Arc::new(arrival),
+        keep: Some(4),
+        ..Live::new(Module::of(&room))
     });
     let device = |name: &str| Config {
-        log: module(&domain()),
         live: Some(live(name, 100)),
+        ..Config::new(Module::of(&domain()))
     };
     let point = |i, x| Op::Call(i, room.get("room.point"), int_enc(x).to_vec());
     let steps = |n: usize| vec![Op::Step; n];
@@ -221,7 +219,7 @@ pub fn sessions() -> Vec<(&'static str, Net)> {
         (
             "a-sign-in",
             run(
-                Net::of(HubConfig::new(module(&domain())), vec![(anon, demo()), (who(1), demo())], 4),
+                Net::of(Config::new(Module::of(&domain())), vec![(anon, demo()), (who(1), demo())], 4),
                 vec![Op::Partition(0), create(0, "Mine"), Op::SignIn(0, alice)],
             ),
         ),

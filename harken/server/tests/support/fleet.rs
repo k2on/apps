@@ -4,7 +4,7 @@
 //! every scenario ends on.
 //!
 //! The server's log is read where it lies (`HARKEN_DATA/log`, the chain on
-//! disk, `ark_client::Files`), from a copy, so a read never cuts a tail the
+//! disk, `ark_peer::Files`), from a copy, so a read never cuts a tail the
 //! server is writing: its snapshot's rows, each entry's facts applied on
 //! top, is the state at its head.
 //!
@@ -26,8 +26,9 @@ use ark::hash::hex;
 use ark::ir::Node;
 use ark::log::{Logged, Snapshot};
 use ark::peer::Who;
+use ark::schema::Space;
 use ark::store::{Change, Store, LOG};
-use ark_client::{Client, Disk, Files, Memory};
+use ark_peer::{Config, ConnId, Disk, Files, Memory, Peer};
 use harken_server::hosted::Hosted;
 use serde_json::{json, Value};
 
@@ -902,16 +903,16 @@ impl Drop for PeerProc {
 /// directory, with a client of it in this process authoring as the user
 /// asked for, holding the library's role.
 pub struct Seeder {
-    hub: ark_server::Hub,
-    conn: ark_server::hub::ConnId,
-    clients: BTreeMap<String, Client>,
+    hub: Peer,
+    conn: ConnId,
+    clients: BTreeMap<String, Peer>,
     pub ids: BTreeSet<Id>,
 }
 
 impl Seeder {
     fn new(dir: &Path) -> Seeder {
         let disk: Box<dyn Disk> = Box::new(Files::new(dir.join("log")).unwrap());
-        let hub = ark_server::Hub::open(harken_server::hub_config(hosted(), 10_000), disk, 0);
+        let hub = Peer::serve(harken_server::hub_config(hosted(), 10_000), disk, 0);
         Seeder {
             hub,
             conn: 0,
@@ -929,22 +930,19 @@ impl Seeder {
                 session: format!("seeded-{user}"),
                 roles: vec!["library".into()],
             };
-            let mut c = Client::open(
-                ark_client::Config {
-                    log: hosted().module.clone(),
-                    live: None,
-                },
+            let mut c = Peer::open(
+                Config::new(hosted().module.clone()),
                 who.clone(),
                 Box::new(Memory::default()),
                 false,
             );
-            self.conn = self.hub.connect(who);
+            self.conn = self.hub.accept(who);
             c.connected();
             self.clients.insert(user.into(), c);
             self.exchange(user);
         }
         let c = self.clients.get_mut(user).unwrap();
-        c.mutate(hosted().func(name), input.to_bytes(), 1_000);
+        let _ = c.author(Space::Durable, hosted().func(name), input.to_bytes(), 1_000);
         self.exchange(user);
         let c = &self.clients[user];
         assert!(c.log.pending.is_empty(), "seeding {name}: still pending");
