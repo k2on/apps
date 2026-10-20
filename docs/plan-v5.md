@@ -797,6 +797,27 @@ linked round trip 182.2 µs (was 5,520.1; v4 215.1). Source +186 lines.
 
 ## Landed
 
+**K3a** (`791b3d0`…`17322ae`). **Four frames**: `Hello`, `Page`,
+`Snapshot`, `Verdict { Ok | Refused | Held }`; a peer's page is its
+intents (`Logged::intent`, sequence 0; a push is a page of one) or its
+chain made alone, adopted when it links onto the head; an authority's, its
+log. **The log is a table**: the store's `_log`, by sequence, a `Logged`
+per row, its invariant the chain (`Store::apply_kv`: ends only, linking,
+never edited), outside the schema, the state hash and sent snapshots. One
+durable format: `Record::Writes` (facts and the row, appended) and
+`Record::Rows` (the store whole, folding them); the horizon deletes below;
+open replays writes to the first that fails, then writes the rows.
+`ark-client::storage`, the hub's too, is `kv` + `writes` and refuses the
+old `snapshot`/`chain`. **One evaluator**: `interp.rs` has no relational
+arms; `view::read` hydrates a spine once and routes as P1 did. Vectors:
+protocol/ renamed, re-derived; trace/ twice (frames; persist and open
+bytes); `fleet-fuzz-seed-7144` (pushes paged together: other network
+draws); the rest unchanged. Fuzz: 2,000 sessions, 0 failed, 5,975 traces
+replayed. `add_song` 1.13× its instructions (callgrind), a and views at
+par; source +125. Not verified: an old data directory is refused, not
+migrated; facts are on disk twice per entry, unmeasured; perf b–i not
+re-run; a fresh `Join` calls `on` for key partners only.
+
 **R1** (`8bda5c3`…): v5 has the canonical names and v4 is gone.
 `rust/ark5*` → `rust/ark`, `ark-macros`, `ark-client`, `ark-server`,
 `ark-dev`; `harken/domain5` → `harken/domain` (crate `harken-domain`);
