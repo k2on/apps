@@ -231,7 +231,7 @@ fn hub_app(data: Option<&Path>) -> ark5_server::App {
 #[ignore]
 fn perf_b_round_trip() {
     header("(b) Peer::mutate + pump until confirmed, against the in-process hub");
-    note("Client::mutate + Client::pump through its Link (the link thread waits 5 ms for a frame between sends);");
+    note("Client::mutate + Client::pump through its Link (frames sent from this thread; the link thread receives);");
     note("`no link thread` is the same over the in-process Conn, sent and received here");
     for (n, keep) in [(500u64, false), (2000, false), (500, true), (2000, true)] {
         for (shape, lists) in [("one playlist", 1u64), ("playlists of 10", n / 10)] {

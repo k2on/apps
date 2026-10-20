@@ -15,7 +15,7 @@ use ark5::frames::Frame;
 use ark5::log::{Entry, EntryId};
 use ark5::peer::Who;
 use ark5::schema::Space;
-use ark5_client::link::{Backoff, Dial, Event, Link, Socket};
+use ark5_client::link::{Backoff, Dial, Event, Link, Recv, Socket};
 use ark5_client::storage::Stored;
 use ark5_client::{Client, Config, Disk, Files, Memory};
 use ark5_dev::demo::{domain, module};
@@ -83,6 +83,57 @@ fn two_clients(a: Box<dyn Dial>, b: Box<dyn Dial>) {
 fn in_process_clients_converge() {
     let hub = Handle::spawn(Hub::open(config(), Box::new(Memory::default()), 0));
     two_clients(Box::new(hub.dial(Arc::new(dev))), Box::new(hub.dial(Arc::new(dev))));
+}
+
+/// A linked round trip through the hub in this process waits on nothing:
+/// a playlist created and pumped until confirmed, 100 times, is within
+/// 0.5 ms a round trip (median) of the same over the `Conn` with no link
+/// thread. Falsified by the link's thread sending only between 5 ms waits
+/// for a frame, as before: the linked median was 5.6 ms against 0.9.
+#[test]
+fn a_linked_round_trip_waits_on_nothing() {
+    let hub = Handle::spawn(Hub::open(config(), Box::new(Memory::default()), 0));
+    let median = |mut ts: Vec<Duration>| {
+        ts.sort();
+        ts[ts.len() / 2]
+    };
+    let mut c = client("alice@laptop");
+    let link = Link::start(Box::new(hub.dial(Arc::new(dev))), "alice@laptop".into(), fast());
+    until(&mut c, &link, "linked", |c, _| c.linked);
+    let linked: Vec<Duration> = (0..100)
+        .map(|i| {
+            let t = std::time::Instant::now();
+            create(&mut c, &link, &format!("L{i}"));
+            while !c.log.pending.is_empty() {
+                let ev = link.wait(Duration::from_millis(1));
+                c.pump(&link, ev, now());
+            }
+            t.elapsed()
+        })
+        .collect();
+    let mut d = client("bob@phone");
+    let mut conn = hub.dial(Arc::new(dev)).dial("bob@phone").unwrap();
+    d.connected();
+    let direct: Vec<Duration> = (0..100)
+        .map(|i| {
+            let t = std::time::Instant::now();
+            d.mutate(domain().get("demo.create_playlist"), bytes_enc(format!("D{i}").as_bytes()), now());
+            loop {
+                for f in d.take_frames() {
+                    conn.send(f);
+                }
+                if d.log.pending.is_empty() {
+                    break;
+                }
+                if let Recv::Frame(b) = conn.recv(Duration::from_millis(1)) {
+                    d.receive(b);
+                }
+            }
+            t.elapsed()
+        })
+        .collect();
+    let (linked, direct) = (median(linked), median(direct));
+    assert!(linked <= direct + Duration::from_micros(500), "linked {linked:?}, no link thread {direct:?}");
 }
 
 /// The same over WebSockets, the token the first message; and an empty

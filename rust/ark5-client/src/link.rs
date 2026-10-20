@@ -13,11 +13,14 @@
 //!
 //! A transport is a [`Dial`]: [`Socket`] is a WebSocket (`ws://…/sync`),
 //! [`pipe`] two ends in this process, which the hub's in-process transport
-//! and the tests use.
+//! and the tests use. A connection that has a [`Conn::sender`] (an [`End`])
+//! is sent to from the caller's thread, so a frame never waits on the
+//! link's thread receiving; one without (a [`Socket`]) is sent to by the
+//! link's thread between receives.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender, TryRecvError};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -33,7 +36,14 @@ pub trait Conn: Send {
     /// Whether it was sent.
     fn send(&mut self, frame: Vec<u8>) -> bool;
     fn recv(&mut self, wait: Duration) -> Recv;
+    /// A way to send on it from any thread, when it has one.
+    fn sender(&self) -> Option<Sends> {
+        None
+    }
 }
+
+/// A connection's sending half, usable from any thread.
+pub type Sends = Box<dyn Fn(Vec<u8>) -> bool + Send>;
 
 /// How a connection is opened, carrying the token as its first message.
 pub trait Dial: Send {
@@ -63,6 +73,11 @@ impl Conn for End {
             Err(RecvTimeoutError::Timeout) => Recv::Idle,
             Err(RecvTimeoutError::Disconnected) => Recv::Closed,
         }
+    }
+
+    fn sender(&self) -> Option<Sends> {
+        let tx = self.tx.clone();
+        Some(Box::new(move |f| tx.send(f).is_ok()))
     }
 }
 
@@ -131,6 +146,8 @@ impl Default for Backoff {
 /// A connection kept up on a thread of its own.
 pub struct Link {
     out: Sender<Vec<u8>>,
+    /// The open connection's own sender, when it has one.
+    direct: Arc<Mutex<Option<Sends>>>,
     events: Receiver<Event>,
     stop: Arc<AtomicBool>,
 }
@@ -141,6 +158,8 @@ impl Link {
         let (to_client, events) = channel();
         let stop = Arc::new(AtomicBool::new(false));
         let halt = stop.clone();
+        let direct: Arc<Mutex<Option<Sends>>> = Arc::default();
+        let sends = direct.clone();
         thread::spawn(move || {
             let mut wait = backoff.first;
             while !halt.load(Ordering::Relaxed) {
@@ -148,11 +167,12 @@ impl Link {
                     Err(e) => e,
                     Ok(mut conn) => {
                         wait = backoff.first;
+                        *sends.lock().unwrap() = conn.sender();
                         while from_client.try_recv().is_ok() {}
                         if to_client.send(Event::Open).is_err() {
                             return;
                         }
-                        loop {
+                        let why = loop {
                             if halt.load(Ordering::Relaxed) {
                                 return;
                             }
@@ -174,7 +194,9 @@ impl Link {
                                 _ if closed => break "a send failed".into(),
                                 _ => {}
                             }
-                        }
+                        };
+                        *sends.lock().unwrap() = None;
+                        why
                     }
                 };
                 if to_client.send(Event::Closed(why)).is_err() {
@@ -184,11 +206,20 @@ impl Link {
                 wait = (wait * 2).min(backoff.most);
             }
         });
-        Link { out, events, stop }
+        Link { out, direct, stop, events }
     }
 
+    /// A frame to the open connection: sent now when it has a sender of
+    /// its own, else handed to the link's thread.
     pub fn send(&self, frame: Vec<u8>) {
-        let _ = self.out.send(frame);
+        match &*self.direct.lock().unwrap() {
+            Some(s) => {
+                s(frame);
+            }
+            None => {
+                let _ = self.out.send(frame);
+            }
+        }
     }
 
     /// What has happened since the last call.
