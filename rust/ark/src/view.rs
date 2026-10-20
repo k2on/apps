@@ -307,7 +307,7 @@ impl Eval for Fresh<'_, '_> {
     fn routed(&mut self, e: &Expr) -> Result<Vec<V>, Refusal> {
         match routed(self.m, e)? {
             Some(xs) => Ok(xs),
-            None => Ok(hydrate(e, self.m, false)?.list().to_vec()),
+            None => Ok(items(hydrate(e, self.m, false)?)),
         }
     }
 }
@@ -424,7 +424,7 @@ pub fn query(lib: &Lib, f: &FnHash, input: &[u8], ctx: &Ctx, store: &dyn Read) -
     let callee = |h: &FnHash| lib.get(h);
     let mut m = Machine::new(store, ctx, &callee, &f.cx);
     m.stack = args;
-    Ok(m.eval(&f.f.body)?.list().to_vec())
+    Ok(items(m.eval(&f.f.body)?))
 }
 
 /// Whether a fresh read of `e` may be routed: a `Filter` of a `Scan`, a
@@ -530,7 +530,9 @@ fn run(
         let (done, rest) = nodes.split_at_mut(i);
         let hit = hits.remove(&i).unwrap_or_default();
         let at = (i, exprs[i]);
-        let d = prune(step(cx, at, &mut rest[0], (done, exprs), &mut deltas, net, hit)?);
+        let d = step(cx, at, &mut rest[0], (done, exprs), &mut deltas, net, hit)?;
+        // Hydrated, every element is an insert.
+        let d = if net.is_some() { prune(d) } else { d };
         deltas.push(d);
     }
     Ok(deltas.pop().unwrap_or_default())
@@ -750,6 +752,14 @@ fn touched(cx: &dyn Eval, kid: (&Node, &Expr), d: Delta, hit: BTreeSet<Okey>) ->
         }
     }
     out.into_iter().collect()
+}
+
+/// A list's elements, owned.
+fn items(v: V) -> Vec<V> {
+    match v {
+        V::List(xs) => xs,
+        v => panic!("{v:?} is not a list"),
+    }
 }
 
 /// An element of a node's output set, kept when the node keeps its output.
@@ -990,7 +1000,7 @@ fn step(
         }
         _ => {
             if net.is_none() {
-                let xs = cx.at(e, vec![], (ALL, &none))?.list().to_vec();
+                let xs = items(cx.at(e, vec![], (ALL, &none))?);
                 inserted((&mut *out, keeps), &mut d, xs);
             }
         }
