@@ -11,7 +11,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 
-use ark::protocol::{Authenticate, Identity};
+use ark5::peer::Who;
 use axum::extract::{Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Redirect, Response};
@@ -235,7 +235,7 @@ impl Auth {
 
     /// Whether `session` is or was `user`'s — live, expired or revoked. What
     /// the sync server asks of an entry authored under an earlier login of
-    /// the same person (see `owns_fn`).
+    /// the same person.
     pub fn owns(&self, user: &str, session: &str) -> bool {
         self.sessions().owned_by(user, session)
     }
@@ -264,24 +264,37 @@ impl Auth {
     }
 }
 
+/// What the sync server asks of a connection's token: who it proves, or
+/// nobody (`ark5-server`'s `Authenticate`).
+pub type Authenticate = Arc<dyn Fn(&str) -> Option<Who> + Send + Sync>;
+
 impl Auth {
-    /// What the sync server asks at every `Hello`: the login a token
-    /// proves, as the engine's identity — the account's id, the session,
-    /// and the roles it holds now (issued with it, and configured).
+    /// What the sync server asks of every connection's token: the login it
+    /// proves, as the engine's [`Who`] — the account's id, the session, and
+    /// the roles it holds now (issued with it, and configured).
     pub fn authenticator(self: &Arc<Self>) -> Authenticate {
         let auth = self.clone();
-        Box::new(move |token: Option<&str>| {
-            let login = auth.whoami(token?)?;
-            Some(Identity::new(login.user.id, login.session).with_roles(login.user.roles))
+        Arc::new(move |token: &str| {
+            let login = auth.whoami(token)?;
+            Some(Who {
+                actor: login.user.id,
+                session: login.session,
+                roles: login.user.roles,
+            })
         })
     }
+}
 
-    /// [`Auth::owns`], as the engine's ownership check
-    /// (`ark::protocol::Server::with_owns`): an entry authored offline under
-    /// an earlier login of the same person, pushed after signing in again.
-    pub fn owns_fn(self: &Arc<Self>) -> ark::protocol::Owns {
-        let auth = self.clone();
-        Box::new(move |user: &str, session: &str| auth.owns(user, session))
+/// Dev auth's reading of a name: `name:role,role` is `name` holding those
+/// roles, trimmed, empty ones dropped, sorted and once each.
+pub fn dev_account(name: &str) -> Account {
+    let (id, roles) = name.split_once(':').unwrap_or((name, ""));
+    let roles: BTreeSet<String> = roles.split(',').map(str::trim).filter(|r| !r.is_empty()).map(String::from).collect();
+    Account {
+        id: id.trim().into(),
+        name: id.trim().into(),
+        email: String::new(),
+        roles: roles.into_iter().collect(),
     }
 }
 
@@ -322,16 +335,9 @@ async fn login(State(auth): State<Arc<Auth>>, Query(q): Query<LoginQuery>) -> Re
             let Some(user) = q.user.filter(|u| !u.trim().is_empty()) else {
                 return Html(dev_form(&q.redirect)).into_response();
             };
-            // `name:role,role` is a login holding those roles, as the
-            // engine's own dev auth reads a token (`ark::protocol::
-            // dev_identity`), which the announcement says.
-            let who = ark::protocol::dev_identity(user.trim(), "");
-            let account = Account {
-                id: who.user.clone(),
-                name: who.user,
-                email: String::new(),
-                roles: who.roles.into_iter().collect(),
-            };
+            // `name:role,role` is a login holding those roles
+            // ([`dev_account`]), which the announcement says.
+            let account = dev_account(user.trim());
             match auth.finish(&account) {
                 Ok(code) => Redirect::to(&with_code(&q.redirect, &code)).into_response(),
                 Err(e) => failed(e),
@@ -503,12 +509,16 @@ mod tests {
         assert_eq!(login.user.id, "alice");
         assert!(a.redeem(&code).is_none(), "second time");
         let who = a.authenticator();
-        assert_eq!(who(Some(&login.token)), Some(Identity::new("alice", login.session.clone())));
-        assert_eq!(who(Some("forged")), None);
-        assert_eq!(who(None), None);
-        let owns = a.owns_fn();
-        assert!(owns("alice", &login.session));
-        assert!(!owns("bob", &login.session));
+        let alice = Who {
+            actor: "alice".into(),
+            session: login.session.clone(),
+            roles: vec![],
+        };
+        assert_eq!(who(&login.token), Some(alice));
+        assert_eq!(who("forged"), None);
+        assert_eq!(who(""), None);
+        assert!(a.owns("alice", &login.session));
+        assert!(!a.owns("bob", &login.session));
     }
 
     /// `docs/plan-auth.md` A login holds the roles it was issued with and
@@ -531,17 +541,17 @@ mod tests {
             .unwrap();
         let login = a.redeem(&code).expect("redeemed");
         assert_eq!(login.user.roles, ["library", "scanner"]);
-        let who = a.authenticator()(Some(&login.token)).expect("signed in");
-        assert_eq!(who, Identity::new("alice", login.session.clone()).with_roles(["library", "scanner"]));
+        let who = a.authenticator()(&login.token).expect("signed in");
+        assert_eq!((who.actor.as_str(), &who.session, who.roles), ("alice", &login.session, vec!["library".to_string(), "scanner".into()]));
         assert!(a.announce().contains("role library: alice"), "{}", a.announce());
         // The same session store, the configuration moved: the role goes.
         let store = std::mem::replace(&mut *a.sessions(), sessions());
         let b = Arc::new(Auth::new(store, Mode::Dev, "https://app.example/"));
-        let who = b.authenticator()(Some(&login.token)).expect("signed in");
-        assert_eq!(who.roles, ["scanner".to_string()].into_iter().collect());
+        let who = b.authenticator()(&login.token).expect("signed in");
+        assert_eq!(who.roles, ["scanner".to_string()]);
         // Dev auth's name, with roles.
-        let dev = ark::protocol::dev_identity("bob:library, admin,", "s");
-        assert_eq!(dev, Identity::new("bob", "s").with_roles(["admin", "library"]));
+        let dev = dev_account("bob:library, admin,");
+        assert_eq!((dev.id.as_str(), dev.roles), ("bob", vec!["admin".to_string(), "library".into()]));
     }
 
     /// R6: revoking a session tells every listener whose and which, once,

@@ -9,7 +9,7 @@ description = "Who an ArkDB peer is: OpenID Connect on the server as the one rel
 default = []
 # The relying party, the session store, the routes as an axum Router, and
 # what the sync server asks at every Hello.
-server = ["dep:ark", "dep:axum", "dep:tokio", "dep:tower-http", "dep:sha2", "dep:getrandom", "dep:ureq"]
+server = ["dep:ark5", "dep:axum", "dep:tokio", "dep:tower-http", "dep:sha2", "dep:getrandom", "dep:ureq"]
 # Getting a login: a loopback listener and the system browser natively, the
 # page's own address in a browser; and remembering it.
 client = ["dep:ureq", "dep:web-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys"]
@@ -17,7 +17,7 @@ client = ["dep:ureq", "dep:web-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futur
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = { workspace = true }
-ark = { path = "../ark", optional = true }
+ark5 = { path = "../ark5", optional = true }
 axum = { version = "0.7", optional = true }
 tokio = { version = "1", features = ["rt", "sync"], optional = true }
 tower-http = { version = "0.5", features = ["cors"], optional = true }
