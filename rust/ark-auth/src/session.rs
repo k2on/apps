@@ -54,16 +54,6 @@ pub struct SessionStore {
     now: Box<dyn FnMut() -> i64 + Send>,
 }
 
-impl std::fmt::Debug for SessionStore {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SessionStore")
-            .field("path", &self.path)
-            .field("sessions", &self.rows.len())
-            .field("ttl_ms", &self.ttl_ms)
-            .finish_non_exhaustive()
-    }
-}
-
 impl SessionStore {
     /// Kept in `path`, which is read if it is there.
     pub fn open(path: impl AsRef<Path>) -> Result<SessionStore, String> {
@@ -214,67 +204,4 @@ pub(crate) fn now_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::atomic::{AtomicI64, Ordering};
-    use std::sync::Arc;
-
-    fn alice() -> Account {
-        Account {
-            id: "sub-alice".into(),
-            name: "Alice".into(),
-            email: "alice@example".into(),
-            roles: vec![],
-        }
-    }
-
-    #[test]
-    fn a_token_proves_its_session_until_it_does_not() {
-        let clock = Arc::new(AtomicI64::new(1_000));
-        let tick = clock.clone();
-        let mut store = SessionStore::memory().with_ttl(100).with_clock(move || tick.load(Ordering::SeqCst));
-        let login = store.issue(&alice()).unwrap();
-        assert_eq!(login.expires_ms, 1_100);
-        assert_eq!(store.lookup(&login.token).unwrap().session, login.session);
-        assert!(store.lookup("not a token").is_none());
-        clock.store(1_100, Ordering::SeqCst);
-        assert!(store.lookup(&login.token).is_none(), "expired");
-        assert!(store.owned_by("sub-alice", &login.session), "expired is not forgotten");
-        assert!(!store.owned_by("sub-bob", &login.session));
-    }
-
-    #[test]
-    fn revoking_ends_the_token_and_keeps_the_ownership() {
-        let mut store = SessionStore::memory();
-        let login = store.issue(&alice()).unwrap();
-        assert!(store.revoke(&login.token).unwrap());
-        assert!(!store.revoke(&login.token).unwrap(), "already gone");
-        assert!(store.lookup(&login.token).is_none());
-        assert!(store.owned_by("sub-alice", &login.session));
-    }
-
-    #[test]
-    fn the_file_survives_a_restart_and_holds_no_token() {
-        let dir = std::env::temp_dir().join(format!("ark-auth-sessions-{}", std::process::id()));
-        let path = dir.join("sessions.json");
-        let _ = std::fs::remove_dir_all(&dir);
-        let (kept, gone) = {
-            let mut store = SessionStore::open(&path).unwrap();
-            let kept = store.issue(&alice()).unwrap();
-            let gone = store.issue(&alice()).unwrap();
-            store.revoke(&gone.token).unwrap();
-            (kept, gone)
-        };
-        let text = std::fs::read_to_string(&path).unwrap();
-        assert!(!text.contains(&kept.token), "the token itself is never written");
-        assert!(text.contains(&hash(&kept.token)));
-        let mut again = SessionStore::open(&path).unwrap();
-        assert_eq!(again.lookup(&kept.token).map(|l| l.session), Some(kept.session));
-        assert!(again.lookup(&gone.token).is_none(), "a revocation survives the restart");
-        assert!(again.owned_by("sub-alice", &gone.session));
-        let _ = std::fs::remove_dir_all(&dir);
-    }
 }

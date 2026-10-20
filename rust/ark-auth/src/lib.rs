@@ -64,3 +64,6 @@ pub mod web;
 
 pub use login::{Account, Login};
 pub use util::{login_url, percent_decode, percent_encode, query_value, socket_url, with_code};
+
+#[cfg(test)]
+mod tests;

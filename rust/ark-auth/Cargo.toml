@@ -9,7 +9,7 @@ description = "Who an ArkDB peer is: OpenID Connect on the server as the one rel
 default = []
 # The relying party, the session store, the routes as an axum Router, and
 # what the sync server asks at every Hello.
-server = ["dep:ark", "dep:axum", "dep:tokio", "dep:tower-http", "dep:sha2", "dep:getrandom", "dep:ureq"]
+server = ["dep:ark", "dep:axum", "dep:tokio", "dep:tower-http", "dep:sha2", "dep:getrandom", "dep:ureq", "dep:openidconnect"]
 # Getting a login: a loopback listener and the system browser natively, the
 # page's own address in a browser; and remembering it.
 client = ["dep:ureq", "dep:web-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys"]
@@ -17,6 +17,7 @@ client = ["dep:ureq", "dep:web-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futur
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = { workspace = true }
+percent-encoding = "2"
 ark = { path = "../ark", optional = true }
 axum = { version = "0.7", optional = true }
 tokio = { version = "1", features = ["rt", "sync"], optional = true }
@@ -26,6 +27,9 @@ getrandom = { version = "0.2", optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 ureq = { version = "2", default-features = false, features = ["tls"], optional = true }
+# The relying party: discovery, the code exchange and the ID token's checks,
+# over the ureq agent above (its `SyncHttpClient`), never reqwest.
+openidconnect = { version = "4.0.1", default-features = false, features = ["ureq"], optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = { version = "0.3", optional = true }
@@ -37,3 +41,8 @@ web-sys = { version = "0.3", optional = true, features = ["Headers", "History", 
 ark-auth = { path = ".", features = ["server", "client"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
 ureq = { version = "2", default-features = false }
+# A provider in `tests/oidc.rs`: its ID tokens signed HS256 with the client secret.
+hmac = "0.12"
+sha2 = { workspace = true }
+base64 = "0.22"
+serde_json = { workspace = true }

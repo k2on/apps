@@ -196,7 +196,7 @@ impl Auth {
         self.redirects.iter().any(|p| url.starts_with(p))
     }
 
-    fn sessions(&self) -> std::sync::MutexGuard<'_, SessionStore> {
+    pub(crate) fn sessions(&self) -> std::sync::MutexGuard<'_, SessionStore> {
         self.sessions.lock().unwrap_or_else(|e| e.into_inner())
     }
 
@@ -209,7 +209,7 @@ impl Auth {
     }
 
     /// Sign `account` in and mint the code the redirect carries.
-    fn finish(&self, account: &Account) -> Result<String, String> {
+    pub(crate) fn finish(&self, account: &Account) -> Result<String, String> {
         let login = self.sessions().issue(account).map_err(|e| format!("could not record the session: {e}"))?;
         let code = random_token();
         let now = now_ms();
@@ -317,7 +317,6 @@ pub fn router(auth: Arc<Auth>) -> Router {
 #[derive(Debug, Deserialize)]
 struct LoginQuery {
     redirect: String,
-    #[serde(default)]
     user: Option<String>,
 }
 
@@ -345,7 +344,10 @@ async fn login(State(auth): State<Arc<Auth>>, Query(q): Query<LoginQuery>) -> Re
         }
         Mode::Oidc(provider) => {
             let challenge = Challenge::new();
-            let url = provider.authorize_url(&challenge, &callback_url(&auth));
+            let url = match provider.authorize_url(&challenge, &callback_url(&auth)) {
+                Ok(url) => url,
+                Err(e) => return failed(e),
+            };
             let now = now_ms();
             let mut pending = auth.pending.lock().unwrap_or_else(|e| e.into_inner());
             pending.retain(|_, p| now - p.started_ms < PENDING_TTL_MS);
@@ -368,13 +370,9 @@ fn callback_url(auth: &Auth) -> String {
 
 #[derive(Debug, Deserialize)]
 struct CallbackQuery {
-    #[serde(default)]
     code: Option<String>,
-    #[serde(default)]
     state: Option<String>,
-    #[serde(default)]
     error: Option<String>,
-    #[serde(default)]
     error_description: Option<String>,
 }
 
@@ -471,111 +469,4 @@ fn dev_form(redirect: &str) -> String {
          <input name=user placeholder=\"a name\" autofocus autocapitalize=off>\
          <button>sign in</button></form>"
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn auth() -> Auth {
-        Auth::new(SessionStore::memory(), Mode::Dev, "https://app.example/").allow_redirect("myapp://")
-    }
-
-    #[test]
-    fn a_code_goes_only_where_it_is_allowed() {
-        let a = auth();
-        assert!(a.redirect_allowed("http://127.0.0.1:53211/"));
-        assert!(a.redirect_allowed("http://localhost:8080/?x=1"));
-        assert!(a.redirect_allowed("https://app.example/"));
-        assert!(a.redirect_allowed("https://app.example/app/"));
-        assert!(a.redirect_allowed("myapp://auth"));
-        assert!(!a.redirect_allowed("https://app.example.evil/"));
-        assert!(!a.redirect_allowed("http://127.0.0.1.evil/"));
-        assert!(!a.redirect_allowed("http://10.0.0.5:8080/"));
-        assert!(!a.redirect_allowed("https://elsewhere/"));
-    }
-
-    #[test]
-    fn a_code_is_redeemed_once_and_the_engine_is_told_who_it_is() {
-        let a = Arc::new(auth());
-        let code = a
-            .finish(&Account {
-                id: "alice".into(),
-                name: "alice".into(),
-                ..Account::default()
-            })
-            .unwrap();
-        let login = a.redeem(&code).expect("first time");
-        assert_eq!(login.user.id, "alice");
-        assert!(a.redeem(&code).is_none(), "second time");
-        let who = a.authenticator();
-        let alice = Who {
-            actor: "alice".into(),
-            session: login.session.clone(),
-            roles: vec![],
-        };
-        assert_eq!(who(&login.token), Some(alice));
-        assert_eq!(who("forged"), None);
-        assert_eq!(who(""), None);
-        assert!(a.owns("alice", &login.session));
-        assert!(!a.owns("bob", &login.session));
-    }
-
-    /// `docs/plan-auth.md` A login holds the roles it was issued with and
-    /// the ones the configuration grants its account, in what the exchange
-    /// hands the client and in what the engine is told at `Hello`; a
-    /// server started again with other configuration answers the same
-    /// token with the new roles, and the dev form's `name:role,role` is a
-    /// login holding them. Falsified by leaving the configured roles out
-    /// of `completed`: the exchange's login held only `scanner`.
-    #[test]
-    fn a_login_holds_its_own_roles_and_the_configured_ones() {
-        let sessions = || SessionStore::memory();
-        let a = Arc::new(Auth::new(sessions(), Mode::Dev, "https://app.example/").with_roles([("library", vec!["alice"])]));
-        let code = a
-            .finish(&Account {
-                id: "alice".into(),
-                roles: vec!["scanner".into()],
-                ..Account::default()
-            })
-            .unwrap();
-        let login = a.redeem(&code).expect("redeemed");
-        assert_eq!(login.user.roles, ["library", "scanner"]);
-        let who = a.authenticator()(&login.token).expect("signed in");
-        assert_eq!(
-            (who.actor.as_str(), &who.session, who.roles),
-            ("alice", &login.session, vec!["library".to_string(), "scanner".into()])
-        );
-        assert!(a.announce().contains("role library: alice"), "{}", a.announce());
-        // The same session store, the configuration moved: the role goes.
-        let store = std::mem::replace(&mut *a.sessions(), sessions());
-        let b = Arc::new(Auth::new(store, Mode::Dev, "https://app.example/"));
-        let who = b.authenticator()(&login.token).expect("signed in");
-        assert_eq!(who.roles, ["scanner".to_string()]);
-        // Dev auth's name, with roles.
-        let dev = dev_account("bob:library, admin,");
-        assert_eq!((dev.id.as_str(), dev.roles), ("bob", vec!["admin".to_string(), "library".into()]));
-    }
-
-    /// R6: revoking a session tells every listener whose and which, once,
-    /// and a token already revoked or never issued tells nobody. Falsified
-    /// by leaving out the loop over the listeners in `Auth::revoke` (the
-    /// store revoking alone, as `logout` did): the listener hears nothing.
-    #[test]
-    fn a_revocation_is_told_to_whoever_asked() {
-        let a = auth();
-        let heard: Arc<Mutex<Vec<(String, String)>>> = Arc::default();
-        let h = heard.clone();
-        a.on_revoke(move |user, session| h.lock().unwrap().push((user.into(), session.into())));
-        let account = Account {
-            id: "alice".into(),
-            name: "Alice".into(),
-            ..Account::default()
-        };
-        let login = a.issue(&account).unwrap();
-        assert!(a.revoke(&login.token).unwrap());
-        assert!(!a.revoke(&login.token).unwrap(), "already gone");
-        assert!(!a.revoke("no such token").unwrap());
-        assert_eq!(*heard.lock().unwrap(), [("alice".to_string(), login.session.clone())]);
-    }
 }

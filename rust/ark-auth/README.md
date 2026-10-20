@@ -42,13 +42,13 @@ gives the clients the other half — how to get a token to send.
   whatever the client says.
   `auth.authenticator()` answers `Who { actor, session, roles }`. A
   provider's groups claim is not read.
-- **OIDC**: authorization code with PKCE, as a confidential client;
-  discovery from the issuer; the secret read from a file
-  (`oidc::read_secret`, `Provider::discover_with_secret_file`) — a systemd
-  credential, never an argument, an environment variable or a store path.
-  The ID token's signature is not checked, for the reason `oidc.rs` gives
-  (it arrives over TLS in the direct answer to this server's own request);
-  issuer, audience, expiry and nonce are.
+- **OIDC** (the `openidconnect` crate, 4.x, over the same blocking `ureq`
+  agent — its `SyncHttpClient` — and never reqwest): authorization code with
+  PKCE (S256), as a confidential client; discovery from the issuer and its
+  key set; the secret read from a file (`oidc::read_secret`,
+  `Provider::discover_with_secret_file`) — a systemd credential, never an
+  argument, an environment variable or a store path. The crate checks the ID
+  token: signature, issuer, audience, expiry and nonce.
 - **client** (feature `client`): natively, `client::login(server, user,
   open)` listens on a loopback port, asks the server's login without
   following the redirect (a dev server answers with the code at once — no
@@ -124,20 +124,50 @@ if let Some(code) = ark_auth::web::take_code() {
 | `Mode::{Oidc, Dev}`, `Auth::new(..).allow_redirect(..)`, `server::router` | the same (axum 0.7) |
 | a secret passed in | `oidc::read_secret(path)`, `Provider::discover_with_secret_file` |
 
+## What the crate does differently from the hand-rolled client
+
+- **The ID token's signature is checked**, against the provider's key set
+  (or HS256 with the client secret, where the provider offers it). The key
+  set is fetched at discovery and again at every exchange, so a provider
+  rotating its keys is followed without a restart. Before, the signature
+  was not checked (it came over TLS in the answer to this server's own
+  request, which OpenID Connect Core 3.1.3.7 allows).
+- **The issuer is compared exactly**: the configured issuer must be what
+  the provider's discovery document says, trailing slash and all (before,
+  a trailing slash was trimmed on both sides). Auth0's issuer ends in `/`;
+  most others do not.
+- **The audience is stricter**: an ID token naming another audience beside
+  this client is refused (the crate trusts no other audience); before, any
+  `aud` containing the client was taken.
+- **The nonce is required**, as before: a token without one, or with
+  another login's, is refused. `iat` is not checked, as before.
+- **The client secret goes to the token endpoint as HTTP Basic**
+  (`client_secret_basic`, the spec's default every provider supports);
+  before, it was posted in the form body (`client_secret_post`).
+- **userinfo** is asked only when the ID token lacks a name or an email, as
+  before, and now must name the same subject.
+- A provider's error at the token endpoint is reported as its HTTP status
+  (the ureq client gives the crate no body for a 4xx).
+
 ## Tested, and not
 
 `cargo test -p ark-auth` runs the session store (expiry, revocation, a file
 across a reopen holding no token), the redirect rules, a code redeemed once,
 the authenticator, roles (a login's own and the configured ones merged in
 the exchange and at `Hello`, the configuration moved under the same session
-store, dev auth's `name:role,role`), and the whole dev login over real HTTP: login with no
-browser, `whoami`, two logins as two sessions, logout, a code refused the
-second time and refused a foreign redirect, the dev form. ark-server's
-`tests/auth.rs` takes the token onto the sync socket.
+store, dev auth's `name:role,role`), the whole dev login over real HTTP
+(login with no browser, `whoami`, two logins as two sessions, logout, a code
+refused the second time and refused a foreign redirect, the dev form), and
+`tests/oidc.rs`: a login through a provider served in the test (discovery,
+the redirect with PKCE, state, nonce and scopes, the callback's exchange,
+the subject, name and email), and an ID token refused for another login's
+nonce, for a signature not made with the secret, and a state never started.
+ark-server's `tests/auth.rs` takes the token onto the sync socket. The
+hand-rolled parsing's tests (base64url, a JWT's payload, the claims checks)
+went with it: the crate owns that.
 
-Not verified: an OpenID Connect provider — none is reachable from a test
-machine, so `Mode::Oidc` (discovery, the callback, the token exchange) is the
-petros-auth code ported, unit-tested on its claims checks and nothing more;
+Not verified: a real OpenID Connect provider (the test's is HS256 and a few
+routes; RS256 against a provider's key set is the crate's, untested here);
 the desktop's browser flow with a person in it (the loopback listener is only
 exercised by the dev path, which never opens a browser); and the wasm half in
 a browser — it compiles for `wasm32-unknown-unknown` and nobody has run it.
