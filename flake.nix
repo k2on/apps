@@ -207,6 +207,9 @@
             pname = "ark-vectors";
             flags = [ "-p" "ark" "-p" "ark-dev" ];
             doCheck = true;
+            # stdenv makes only the source root (rust/) writable, and the
+            # writer writes beside it.
+            postUnpack = "chmod u+w source";
             preCheck = ''
               rm -rf ../spec/vectors
               export ARK_WRITE_VECTORS=1

@@ -158,11 +158,10 @@ fn text(code: StatusCode, why: impl Into<String>) -> Response {
     (code, why.into()).into_response()
 }
 
-/// `f` on the hub's thread, off the runtime's.
-async fn on_hub<T: Send + 'static>(hub: &Handle, f: impl FnOnce(&mut crate::Hub) -> T + Send + 'static) -> Result<T, Response> {
+/// `f` on the hub's thread, off the runtime's; nothing once the hub is gone.
+async fn on_hub<T: Send + 'static>(hub: &Handle, f: impl FnOnce(&mut crate::Hub) -> T + Send + 'static) -> Option<T> {
     let hub = hub.clone();
-    let r = tokio::task::spawn_blocking(move || hub.with(f)).await.ok().flatten();
-    r.ok_or_else(|| text(StatusCode::SERVICE_UNAVAILABLE, "the hub is gone"))
+    tokio::task::spawn_blocking(move || hub.with(f)).await.ok().flatten()
 }
 
 // The login a request carries, held to the role where one is asked for.
@@ -231,7 +230,10 @@ async fn state(With(ctx): With<Ctx>) -> Response {
             who: h.config.me.actor.clone(),
         }
     });
-    read.await.map_or_else(|r| r, |s| s.to_body().into_response())
+    match read.await {
+        Some(s) => s.to_body().into_response(),
+        None => text(StatusCode::SERVICE_UNAVAILABLE, "the hub is gone"),
+    }
 }
 
 async fn raw_write(With(ctx): With<Ctx>, body: String) -> Response {
