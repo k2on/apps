@@ -145,7 +145,8 @@ fn a_linked_round_trip_waits_on_nothing() {
 /// The same over WebSockets, the token the first message; and an empty
 /// token, which proves nobody, is closed with 4401, sent nothing, and not
 /// dialled again. Falsified by the socket taking its first message as a
-/// frame: nobody was signed in and no client converged.
+/// frame: nobody was signed in and no client converged; and by the link
+/// not reading close code 4401 as a denial: nobody was closed 13 times.
 #[tokio::test(flavor = "multi_thread")]
 async fn socket_clients_converge_and_nobody_is_closed() {
     let running = Server::new(config()).listen("127.0.0.1:0").await.unwrap();
