@@ -7,6 +7,7 @@
 //!      ── /media  (a directory)                                              │    live one; the log on disk,
 //!      ── /*      (a web build, `web`)                                       │    written before anything
 //!      ── the app's own routes                                              ─┘    said of it is delivered
+//! <admin bind> ── /admin (the admin page, [`admin`], on a listener of its own)
 //! ```
 //!
 //! A connection is who its token proves (`ark-auth`'s login, or with no
@@ -15,6 +16,7 @@
 //! a socket that leaves three unanswered. A sign-out closes every
 //! connection of its session at once.
 
+pub mod admin;
 pub mod handle;
 pub mod hub;
 pub mod web;
@@ -60,6 +62,7 @@ pub struct Builder {
     media: Option<PathBuf>,
     routes: Router,
     keepalive: Duration,
+    admin: Option<admin::Admin>,
 }
 
 pub fn builder(config: Config) -> Builder {
@@ -72,6 +75,7 @@ pub fn builder(config: Config) -> Builder {
         media: None,
         routes: Router::new(),
         keepalive: Duration::from_secs(20),
+        admin: None,
     }
 }
 
@@ -120,6 +124,12 @@ impl Builder {
         self
     }
 
+    /// The admin page, on a listener of its own ([`admin`]).
+    pub fn admin(mut self, a: admin::Admin) -> Self {
+        self.admin = Some(a);
+        self
+    }
+
     pub fn build(self) -> Result<App> {
         let disk: Box<dyn Disk> = match &self.data {
             Some(d) => {
@@ -148,10 +158,14 @@ impl Builder {
         if let Some((dir, module)) = self.web {
             router = router.merge(web::router(dir, module));
         }
+        let admin = self
+            .admin
+            .map(|a| (a.bind.clone(), admin::router(a, hub.clone(), self.authenticate.clone())));
         Ok(App {
             hub,
             router,
             authenticate: self.authenticate,
+            admin,
         })
     }
 }
@@ -168,40 +182,58 @@ pub struct App {
     pub hub: Handle,
     pub router: Router,
     pub authenticate: Authenticate,
+    /// The admin page's bind and routes, served beside the rest.
+    pub admin: Option<(String, Router)>,
 }
 
 /// A server serving, until [`Running::stop`].
 pub struct Running {
     pub addr: SocketAddr,
+    /// Where the admin page listens, when there is one.
+    pub admin_addr: Option<SocketAddr>,
     pub hub: Handle,
-    stop: tokio::sync::oneshot::Sender<()>,
-    task: tokio::task::JoinHandle<()>,
+    serving: Vec<(tokio::sync::oneshot::Sender<()>, tokio::task::JoinHandle<()>)>,
+}
+
+/// `router` served on `listener` until told to stop.
+fn serving(listener: tokio::net::TcpListener, router: Router) -> (tokio::sync::oneshot::Sender<()>, tokio::task::JoinHandle<()>) {
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let task = tokio::spawn(async move {
+        let quit = async {
+            let _ = stopped.await;
+        };
+        let _ = axum::serve(listener, router).with_graceful_shutdown(quit).await;
+    });
+    (stop, task)
 }
 
 impl App {
     pub async fn serve(self, addr: &str) -> Result<Running> {
         let listener = tokio::net::TcpListener::bind(addr).await?;
         let addr = listener.local_addr()?;
-        let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
-        let task = tokio::spawn(async move {
-            let quit = async {
-                let _ = stopped.await;
-            };
-            let _ = axum::serve(listener, self.router).with_graceful_shutdown(quit).await;
-        });
+        let mut admin_addr = None;
+        let mut all = vec![];
+        if let Some((bind, router)) = self.admin {
+            let l = tokio::net::TcpListener::bind(&bind).await?;
+            admin_addr = Some(l.local_addr()?);
+            all.push(serving(l, router));
+        }
+        all.push(serving(listener, self.router));
         Ok(Running {
             addr,
+            admin_addr,
             hub: self.hub,
-            stop,
-            task,
+            serving: all,
         })
     }
 }
 
 impl Running {
     pub async fn stop(self) {
-        let _ = self.stop.send(());
-        let _ = self.task.await;
+        for (stop, task) in self.serving {
+            let _ = stop.send(());
+            let _ = task.await;
+        }
     }
 }
 

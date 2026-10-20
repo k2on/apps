@@ -9,6 +9,8 @@ description = "The ArkDB v5 hub (docs/plan-v5.md §1.7, §1.9, §1.11): one auth
 ark5 = { path = "../ark5" }
 ark5-client = { path = "../ark5-client" }
 ark-auth = { path = "../ark-auth", features = ["server"] }
+# The admin page's wire (`admin`): the explorer without its window.
+ark-explorer = { path = "../ark-explorer", default-features = false }
 anyhow = "1"
 axum = { version = "0.7", features = ["ws"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time"] }

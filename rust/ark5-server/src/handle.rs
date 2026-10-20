@@ -15,7 +15,10 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use ark5::hash::FnHash;
+use ark5::log::Seq;
 use ark5::peer::Who;
+use ark5::schema::Space;
 use ark5_client::link::{Conn, Dial, End};
 
 use crate::hub::{ConnId, Deliver, Hub};
@@ -26,7 +29,7 @@ pub type Sink = Box<dyn Fn(Vec<u8>) -> bool + Send>;
 /// Who a token proves, or nobody.
 pub type Authenticate = Arc<dyn Fn(&str) -> Option<Who> + Send + Sync>;
 
-type Job = Box<dyn FnOnce(&mut Hub) + Send>;
+type Job = Box<dyn FnOnce(&mut Hub) -> Vec<Deliver> + Send>;
 
 enum Cmd {
     Connect(ConnId, Who, Sink),
@@ -82,8 +85,9 @@ impl Handle {
                         out
                     }
                     Cmd::Run(job) => {
-                        job(&mut hub);
-                        hub.flushed()
+                        let mut out = job(&mut hub);
+                        out.extend(hub.flushed());
+                        out
                     }
                 };
                 send(&mut sinks, out);
@@ -121,6 +125,21 @@ impl Handle {
         let (tx, rx) = channel();
         let job: Job = Box::new(move |h| {
             let _ = tx.send(f(h));
+            vec![]
+        });
+        self.tx.send(Cmd::Run(job)).ok()?;
+        rx.recv().ok()
+    }
+
+    /// An entry the authority of `space` authors itself ([`Hub::author`]),
+    /// what it says delivered: the head it was sequenced at, or the refusal.
+    pub fn author(&self, space: Space, func: FnHash, input: Vec<u8>) -> Option<Result<Seq, String>> {
+        let (tx, rx) = channel();
+        let job: Job = Box::new(move |h| {
+            let (r, out) = h.author(space, func, input, now());
+            let peer = if space == Space::Durable { Some(&h.log) } else { h.live.as_ref() };
+            let _ = tx.send(r.map(|_| peer.map_or(0, |p| p.log.head().0)));
+            out
         });
         self.tx.send(Cmd::Run(job)).ok()?;
         rx.recv().ok()
