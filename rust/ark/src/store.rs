@@ -389,6 +389,12 @@ impl Store {
             .try_for_each(|row| self.apply_kv(&Change::Add { table: LOG.into(), row }))
     }
 
+    /// A row added at the head of the log by a peer that chained it onto
+    /// the head, or checked that it links there.
+    pub(crate) fn log_push(&mut self, seq: Seq, row: Vec<u8>) {
+        self.log.insert(int_enc(seq).to_vec(), row);
+    }
+
     /// The log's rows above `seq` deleted, newest first.
     pub fn log_truncate(&mut self, seq: Seq) {
         self.log.split_off(&int_enc(seq + 1)[..]);

@@ -479,13 +479,14 @@ impl Peer {
 
     /// A logged entry made part of the log, and durable as its writes: its
     /// facts, already applied, and its row of the log's table.
+    /// The entry links onto the head: this peer chained it, or checked it.
     fn logged(&mut self, l: &Logged, facts: Vec<Change>, o: &mut Out) {
-        let add = Change::Add {
-            table: LOG.into(),
-            row: l.to_bytes(),
-        };
-        self.store.apply_kv(&add).expect("it links");
-        o.persist(Record::Writes([facts, vec![add]].concat()));
+        debug_assert!(l.seq == self.log().head().0 + 1 && l.links(&self.log().head().1));
+        let row = l.to_bytes();
+        self.store.log_push(l.seq, row.clone());
+        let mut writes = facts;
+        writes.push(Change::Add { table: LOG.into(), row });
+        o.persist(Record::Writes(writes));
     }
 
     fn of_rows(&self, rows: &[(String, Vec<Vec<u8>>)]) -> Result<Store, Refusal> {
