@@ -23,12 +23,18 @@
 //! is the stable sort; a position for a leaf. Encodings are prefix-free
 //! (§1.1), so concatenations of them are too.
 //!
-//! **A fresh read is a view hydrated** ([`read`]): every relational
+//! **A fresh read walks the same operators** ([`read`]): every relational
 //! expression the interpreter meets — `Scan`, `Lookup`, `Filter`, `Map`,
-//! `Join`, `Group`, `Sort`, `Take` — is evaluated here, as the nodes of its
-//! spine run once with every row an insert, each lambda evaluated by the
-//! run it is part of (its stack, the changes it wrote so far, which a scan
-//! reads through, its draws). **Routing** (P1) is how a fresh read's scan
+//! `Join`, `Group`, `Sort`, `Take` — is evaluated here, each operator by
+//! the one definition a view's node runs (`each`, `order`, `count`,
+//! `tally` and `aggregate`, `join_key` and `joined`), over its
+//! input as a list in order, every lambda evaluated by the run it is part
+//! of (its stack, the changes it wrote so far, which a scan reads through,
+//! its draws), in the order a view's hydration evaluates them. It keeps
+//! no order keys, deltas or indexes: a `Sort` is a stable sort by the
+//! sort key (under a `Take`, only the window is ordered), a `Group` its
+//! groups, a `Join` with a key equality a one-shot hash of its smaller
+//! side. **Routing** (P1) is how a fresh read's scan
 //! is narrowed: a `Filter` of a `Scan`, a `Sort` of one by its columns and
 //! a `Take` of a literal count of those, or `first` of one, read through
 //! the key or an index — the longest run of the filter's equalities that
@@ -62,11 +68,10 @@
 //! the changes it makes to a connection's union.
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::ops::Bound;
 use std::sync::Arc;
 
-use crate::check::Types;
 use crate::codec::{int_enc, Typed};
 use crate::hash::FnHash;
 use crate::interp::{decode, effectful, free, parse, Interp, Loaded, Machine, V};
@@ -176,25 +181,12 @@ impl Read for Rec<'_> {
     }
 }
 
-/// How a run of the nodes evaluates: a maintained view's own run, each
-/// lambda a machine of its own whose reads are recorded ([`Kept`]); or a
-/// fresh read, part of the run that met it ([`Fresh`]).
+/// How an operator evaluates a lambda: in a maintained view's run, as a
+/// machine of its own whose reads are recorded ([`Kept`]); in a fresh
+/// read, as part of the run that met it ([`Fresh`]).
 trait Eval {
     /// `e` with `vars` bound; its reads kept against `(node, okey)`.
     fn at(&mut self, e: &Expr, vars: Vec<V>, at: (usize, &Okey)) -> Result<V, Refusal>;
-    /// An element gone: what it read no longer matters.
-    fn forget(&mut self, node: usize, k: &Okey);
-    fn schema(&self) -> &Schema;
-    fn types(&self) -> &Types;
-    /// A row by key, as this run reads the store.
-    fn get(&self, table: &str, key: &[u8]) -> Option<Vec<u8>>;
-    /// The first `n` rows of a table in key order, likewise.
-    fn first(&self, table: &str, n: usize) -> Vec<Vec<u8>>;
-    /// A routed node's answer: routed, or hydrated when no route serves.
-    fn routed(&mut self, e: &Expr) -> Result<Vec<V>, Refusal>;
-    /// Whether the nodes keep their output: a fresh read runs once, and
-    /// what a node hands on is its delta.
-    fn keeps(&self) -> bool;
 }
 
 /// A lambda applied.
@@ -203,11 +195,6 @@ fn call(cx: &mut dyn Eval, lam: &Expr, args: Vec<V>, at: (usize, &Okey)) -> Resu
         Expr::Lambda(_, body) => cx.at(body, args, at),
         _ => Err(Refusal::new("not a lambda")),
     }
-}
-
-fn row(cx: &dyn Eval, table: &str, b: &[u8]) -> V {
-    let t = cx.schema().table(table).expect("a table").1;
-    decode(cx.types(), &t.row_ty(), b).expect("a stored row decodes")
 }
 
 /// A maintained view's run.
@@ -235,33 +222,17 @@ impl Eval for Kept<'_> {
         self.seen.push((node, k.clone(), rec.deps.into_inner()));
         Ok(v)
     }
+}
 
+impl Kept<'_> {
+    /// An element gone: what it read no longer matters.
     fn forget(&mut self, node: usize, k: &Okey) {
         self.seen.push((node, k.clone(), vec![]));
     }
 
-    fn schema(&self) -> &Schema {
-        self.store.schema()
-    }
-
-    fn types(&self) -> &Types {
-        &self.f.cx
-    }
-
-    fn get(&self, table: &str, key: &[u8]) -> Option<Vec<u8>> {
-        self.store.get(table, key)
-    }
-
-    fn first(&self, table: &str, n: usize) -> Vec<Vec<u8>> {
-        self.store.scan(table, &Scan { limit: n, ..Scan::all() })
-    }
-
-    fn routed(&mut self, _: &Expr) -> Result<Vec<V>, Refusal> {
-        unreachable!("a maintained view's spine is not routed")
-    }
-
-    fn keeps(&self) -> bool {
-        true
+    fn row(&self, table: &str, b: &[u8]) -> V {
+        let t = self.store.schema().table(table).expect("a table").1;
+        decode(&self.f.cx, &t.row_ty(), b).expect("a stored row decodes")
     }
 }
 
@@ -279,37 +250,109 @@ impl Eval for Fresh<'_, '_> {
         self.m.stack.truncate(depth);
         v
     }
+}
 
-    fn forget(&mut self, _: usize, _: &Okey) {}
+// * The operators, once: what a view's node and a fresh read both run
 
-    fn schema(&self) -> &Schema {
-        self.m.store().schema()
+/// `Filter`'s verdict on an element, or `Map`'s image of it.
+fn each(cx: &mut dyn Eval, filter: bool, lam: &Expr, v: V, at: (usize, &Okey)) -> Result<Option<V>, Refusal> {
+    match filter {
+        true => Ok(call(cx, lam, vec![v.clone()], at)?.truth().then_some(v)),
+        false => Ok(Some(call(cx, lam, vec![v], at)?)),
     }
+}
 
-    fn types(&self) -> &Types {
-        self.m.cx
+/// `Sort`'s key of an element: its sort fields' bytes, complemented where
+/// descending. Ties keep their input order (the stable sort).
+fn order(cx: &mut dyn Eval, keys: &Expr, dirs: &[Dir], v: &V, at: (usize, &Okey)) -> Result<Okey, Refusal> {
+    Ok(sort_key(call(cx, keys, vec![v.clone()], at)?, dirs))
+}
+
+/// `Take`'s count.
+fn count(cx: &mut dyn Eval, n: &Expr) -> Result<usize, Refusal> {
+    Ok(cx.at(n, vec![], (ALL, &vec![]))?.int().max(0) as usize)
+}
+
+/// `Group`'s key of an element.
+fn group_key(cx: &mut dyn Eval, by: &Expr, v: &V) -> Result<V, Refusal> {
+    call(cx, by, vec![v.clone()], (ALL, &vec![]))
+}
+
+/// A member arriving (`sign` 1) or leaving (-1) a group's kept sums.
+fn tally(cx: &mut dyn Eval, parts: &[Part], sums: &mut Vec<i128>, v: &V, sign: i128) -> Result<(), Refusal> {
+    let terms = parts.iter().filter_map(|p| match p {
+        Part::Sum(t) => Some(t),
+        _ => None,
+    });
+    sums.resize(terms.clone().count(), 0);
+    for (s, t) in sums.iter_mut().zip(terms) {
+        let x = match t {
+            None => v.int(),
+            Some(t) => cx.at(t, vec![v.clone()], (ALL, &vec![]))?.int(),
+        };
+        *s += sign * x as i128;
     }
+    Ok(())
+}
 
-    fn get(&self, table: &str, key: &[u8]) -> Option<Vec<u8>> {
-        self.m.get(table, key)
-    }
-
-    fn first(&self, table: &str, n: usize) -> Vec<Vec<u8>> {
-        let mut rows = self.m.rows(table);
-        rows.truncate(n);
-        rows
-    }
-
-    fn keeps(&self) -> bool {
-        false
-    }
-
-    fn routed(&mut self, e: &Expr) -> Result<Vec<V>, Refusal> {
-        match routed(self.m, e)? {
-            Some(xs) => Ok(xs),
-            None => Ok(items(hydrate(e, self.m, false)?)),
+/// A group's element `(key, aggregate)`: from its `n` members' kept sums,
+/// or from the members, which are asked for only when it keeps none.
+#[allow(clippy::too_many_arguments)]
+fn aggregate(
+    cx: &mut dyn Eval,
+    kept: &Option<(Vec<Part>, bool)>,
+    agg: &Expr,
+    key: V,
+    n: i64,
+    sums: &[i128],
+    members: impl FnOnce() -> Vec<V>,
+    at: (usize, &Okey),
+) -> Result<V, Refusal> {
+    let a = match kept {
+        None => call(cx, agg, vec![key.clone(), V::List(members())], at)?,
+        Some((parts, tuple)) => {
+            let (mut vs, mut sums) = (vec![], sums.iter());
+            for p in parts.iter() {
+                vs.push(match p {
+                    Part::Count => V::Int(n),
+                    Part::Sum(_) => crate::std::total(*sums.next().unwrap())?,
+                    Part::Other(e) => cx.at(e, vec![key.clone(), V::List(vec![])], at)?,
+                });
+            }
+            if *tuple {
+                V::Tup(vs)
+            } else {
+                vs.remove(0)
+            }
         }
+    };
+    Ok(V::Tup(vec![key, a]))
+}
+
+/// `Join`'s keys: a conjunct of its condition equating an expression of
+/// each side alone ([`equality`]).
+fn join_keys(on: &Expr) -> Option<(Expr, Expr)> {
+    match on {
+        Expr::Lambda(2, body) => equality(body),
+        _ => None,
     }
+}
+
+/// An element's join key, on side `s` (0 the left).
+fn join_key(cx: &mut dyn Eval, (ka, kb): &(Expr, Expr), s: usize, v: &V) -> Result<Vec<u8>, Refusal> {
+    let vars = if s == 0 {
+        vec![v.clone(), V::Tup(vec![])]
+    } else {
+        vec![V::Tup(vec![]), v.clone()]
+    };
+    Ok(cx.at(if s == 0 { ka } else { kb }, vars, (ALL, &vec![]))?.to_bytes())
+}
+
+/// A pair of partners, joined when the condition holds. Its order key is
+/// the two sides' concatenated: the left's order, then the right's.
+fn joined(cx: &mut dyn Eval, on: &Expr, x: &V, y: &V) -> Result<Option<V>, Refusal> {
+    let holds = call(cx, on, vec![x.clone(), y.clone()], (ALL, &vec![]))?.truth();
+    Ok(holds.then(|| V::Tup(vec![x.clone(), y.clone()])))
 }
 
 /// One part of a kept aggregate.
@@ -378,8 +421,6 @@ enum Keep {
         keys: Option<(Expr, Expr)>,
         sides: Box<[Side; 2]>,
     },
-    /// A fresh read's routed part, an answer whole.
-    Routed,
 }
 
 #[derive(Clone, Debug)]
@@ -440,12 +481,10 @@ fn routable(e: &Expr) -> bool {
 }
 
 /// The spine of `e`: each node's expression and what it keeps, children
-/// first; the root is the last. With `route`, a fresh read's: a part that
-/// may be routed is one node, below the root too when `here`.
-fn spine<'e>(e: &'e Expr, route: bool, here: bool, exprs: &mut Vec<&'e Expr>, nodes: &mut Vec<Node>) -> usize {
-    let mut kid = |l: &'e Expr| spine(l, route, true, exprs, nodes);
+/// first; the root is the last.
+fn spine<'e>(e: &'e Expr, exprs: &mut Vec<&'e Expr>, nodes: &mut Vec<Node>) -> usize {
+    let mut kid = |l: &'e Expr| spine(l, exprs, nodes);
     let (keep, kids) = match e {
-        _ if route && here && routable(e) => (Keep::Routed, vec![]),
         Expr::Scan(_) => (Keep::Plain, vec![]),
         Expr::Filter(l, _) | Expr::Map(l, _) => (Keep::Plain, vec![kid(l)]),
         Expr::Sort(l, ..) => (Keep::Sort(BTreeMap::new()), vec![kid(l)]),
@@ -455,11 +494,7 @@ fn spine<'e>(e: &'e Expr, route: bool, here: bool, exprs: &mut Vec<&'e Expr>, no
             (Keep::Group { kept: kept(agg), groups }, vec![kid(l)])
         }
         Expr::Join(l, r, on) => {
-            let keys = match &**on {
-                Expr::Lambda(2, body) => equality(body),
-                _ => None,
-            };
-            let kids = vec![kid(l), kid(r)];
+            let (kids, keys) = (vec![kid(l), kid(r)], join_keys(on));
             (Keep::Join { keys, sides: Box::default() }, kids)
         }
         _ => (Keep::Plain, vec![]),
@@ -476,13 +511,12 @@ fn spine<'e>(e: &'e Expr, route: bool, here: bool, exprs: &mut Vec<&'e Expr>, no
 /// The expressions of a spine compiled before, node by node.
 fn exprs(e: &Expr) -> Vec<&Expr> {
     let mut out = vec![];
-    spine(e, false, false, &mut out, &mut vec![]);
+    spine(e, &mut out, &mut vec![]);
     out
 }
 
 /// A relational expression evaluated afresh, as part of the run `m`: a
-/// `Lookup` read through what the run wrote; anything else a view of it
-/// hydrated, its answer.
+/// `Lookup` read through what the run wrote; anything else walked.
 pub(crate) fn read(e: &Expr, m: &mut Machine) -> Result<V, Refusal> {
     if let Expr::Lookup(t, k) = e {
         let key = m.eval(k)?.to_bytes();
@@ -492,7 +526,7 @@ pub(crate) fn read(e: &Expr, m: &mut Machine) -> Result<V, Refusal> {
             None => V::none(),
         });
     }
-    hydrate(e, m, true)
+    Ok(V::List(walk(e, m, usize::MAX)?))
 }
 
 /// `first` of a list read afresh, when the list is routed: one row of it.
@@ -503,37 +537,152 @@ pub(crate) fn first(l: &Expr, m: &mut Machine) -> Result<Option<V>, Refusal> {
     }
 }
 
-/// `e`'s spine run once over the store as `m` reads it, every row an
-/// insert; routed at its root when `here`.
-fn hydrate(e: &Expr, m: &mut Machine, here: bool) -> Result<V, Refusal> {
-    let (mut exprs, mut nodes) = (vec![], vec![]);
-    spine(e, true, here, &mut exprs, &mut nodes);
-    let mut cx = Fresh { m };
-    if let [Node { keep: Keep::Routed, .. }] = &nodes[..] {
-        return Ok(V::List(cx.routed(e)?));
+/// The first `n` rows of a table in key order as the run `m` reads them:
+/// through its own changes when it wrote the table.
+fn scan(m: &Machine, t: &str, n: usize) -> Result<Vec<V>, Refusal> {
+    let (ty, _) = m.row_ty(t)?;
+    let rows = match m.changes.iter().any(|c| c.table() == t) {
+        true => m.rows(t).into_iter().take(n).collect(),
+        false => m.store().scan(t, &Scan { limit: n, ..Scan::all() }),
+    };
+    rows.iter().map(|r| decode(m.cx, &ty, r)).collect()
+}
+
+/// A fresh read of `e`, the first `limit` of it: its operators walked once
+/// over lists, in order, each as a view's node runs it and in the order a
+/// view's hydration evaluates its lambdas (a node's input, then its own),
+/// keeping nothing the answer does not need. A part that may be routed is
+/// read through the store's indexes when a route serves.
+fn walk(e: &Expr, m: &mut Machine, limit: usize) -> Result<Vec<V>, Refusal> {
+    if routable(e) {
+        if let Some(mut xs) = routed(m, e)? {
+            xs.truncate(limit);
+            return Ok(xs);
+        }
     }
-    let d = run(&mut cx, &exprs, &mut nodes, None, BTreeMap::new())?;
-    Ok(V::List(d.into_values().filter_map(|(_, n)| n).collect()))
+    let at = (ALL, &vec![]);
+    let mut xs = match e {
+        Expr::Scan(t) => scan(m, t, limit)?,
+        Expr::Filter(l, lam) | Expr::Map(l, lam) => {
+            let filter = matches!(e, Expr::Filter(..));
+            let xs = walk(l, m, usize::MAX)?;
+            let cx = &mut Fresh { m };
+            let mut out = Vec::with_capacity(xs.len());
+            for v in xs {
+                out.extend(each(cx, filter, lam, v, at)?);
+            }
+            out
+        }
+        Expr::Sort(l, keys, dirs) => sort(m, (l, keys, dirs), None, limit)?,
+        Expr::Take(l, n) => match &**l {
+            Expr::Scan(t) => {
+                let n = count(&mut Fresh { m }, n)?;
+                scan(m, t, n.min(limit))?
+            }
+            Expr::Sort(s, keys, dirs) => match routable(l).then(|| routed(m, l)).transpose()?.flatten() {
+                Some(mut xs) => {
+                    xs.truncate(count(&mut Fresh { m }, n)?);
+                    xs
+                }
+                None => sort(m, (s, keys, dirs), Some(n), limit)?,
+            },
+            l => {
+                let mut xs = walk(l, m, usize::MAX)?;
+                xs.truncate(count(&mut Fresh { m }, n)?);
+                xs
+            }
+        },
+        Expr::Group(l, by, agg) => {
+            let xs = walk(l, m, usize::MAX)?;
+            let cx = &mut Fresh { m };
+            let kept = kept(agg);
+            let mut groups: BTreeMap<Okey, (V, i64, Vec<i128>, Vec<V>)> = BTreeMap::new();
+            for v in xs {
+                let g = group_key(cx, by, &v)?;
+                let grp = groups.entry(g.to_bytes()).or_insert_with(|| (g, 0, vec![], vec![]));
+                grp.1 += 1;
+                match &kept {
+                    Some((parts, _)) => tally(cx, parts, &mut grp.2, &v, 1)?,
+                    None => grp.3.push(v),
+                }
+            }
+            let mut out = Vec::with_capacity(groups.len().min(limit));
+            for (_, (key, n, sums, members)) in groups {
+                out.push(aggregate(cx, &kept, agg, key, n, &sums, || members, at)?);
+            }
+            out
+        }
+        Expr::Join(l, r, on) => {
+            let (xs, ys) = (walk(l, m, usize::MAX)?, walk(r, m, usize::MAX)?);
+            let cx = &mut Fresh { m };
+            let pairs: Vec<(usize, usize)> = match join_keys(on) {
+                None => (0..xs.len()).flat_map(|i| (0..ys.len()).map(move |j| (i, j))).collect(),
+                Some(keys) => {
+                    let ka = xs.iter().map(|v| join_key(cx, &keys, 0, v)).collect::<Result<Vec<_>, _>>()?;
+                    let kb = ys.iter().map(|v| join_key(cx, &keys, 1, v)).collect::<Result<Vec<_>, _>>()?;
+                    // A one-shot hash of the smaller side, probed by the other.
+                    let (small, big, flip) = if ka.len() <= kb.len() { (&ka, &kb, true) } else { (&kb, &ka, false) };
+                    let mut by: HashMap<&[u8], Vec<usize>> = HashMap::with_capacity(small.len());
+                    for (i, k) in small.iter().enumerate() {
+                        by.entry(k).or_default().push(i);
+                    }
+                    let mut pairs = vec![];
+                    for (j, k) in big.iter().enumerate() {
+                        for &i in by.get(&k[..]).into_iter().flatten() {
+                            pairs.push(if flip { (i, j) } else { (j, i) });
+                        }
+                    }
+                    if flip {
+                        pairs.sort_unstable();
+                    }
+                    pairs
+                }
+            };
+            let mut out = vec![];
+            for (i, j) in pairs {
+                out.extend(joined(cx, on, &xs[i], &ys[j])?);
+            }
+            out
+        }
+        _ => items(m.eval(e)?),
+    };
+    xs.truncate(limit);
+    Ok(xs)
+}
+
+/// `Sort(l, keys, dirs)` read afresh, the first `limit` of it, or of its
+/// `Take` by `n`, whose count is evaluated after the sort keys, as a view's
+/// node evaluates it: a stable sort, of only the window when there is one.
+fn sort(m: &mut Machine, (l, keys, dirs): (&Expr, &Expr, &[Dir]), n: Option<&Expr>, limit: usize) -> Result<Vec<V>, Refusal> {
+    let xs = walk(l, m, usize::MAX)?;
+    let cx = &mut Fresh { m };
+    let mut keyed = Vec::with_capacity(xs.len());
+    for v in xs {
+        keyed.push((order(cx, keys, dirs, &v, (ALL, &vec![]))?, keyed.len(), v));
+    }
+    let limit = match n {
+        Some(n) => count(cx, n)?.min(limit),
+        None => limit,
+    };
+    let by = |a: &(Okey, usize, V), b: &(Okey, usize, V)| (&a.0, a.1).cmp(&(&b.0, b.1));
+    if limit < keyed.len() {
+        keyed.select_nth_unstable_by(limit, by);
+        keyed.truncate(limit);
+    }
+    keyed.sort_unstable_by(by);
+    Ok(keyed.into_iter().map(|x| x.2).collect())
 }
 
 /// Every node, children first, from their deltas and the elements a read
 /// of theirs was hit at; `net` is `None` at the start.
-fn run(
-    cx: &mut dyn Eval,
-    exprs: &[&Expr],
-    nodes: &mut [Node],
-    net: Option<&Net>,
-    mut hits: BTreeMap<usize, BTreeSet<Okey>>,
-) -> Result<Delta, Refusal> {
+fn run(cx: &mut Kept, exprs: &[&Expr], nodes: &mut [Node], net: Option<&Net>, mut hits: BTreeMap<usize, BTreeSet<Okey>>) -> Result<Delta, Refusal> {
     let mut deltas: Vec<Delta> = Vec::with_capacity(nodes.len());
     for i in 0..nodes.len() {
         let (done, rest) = nodes.split_at_mut(i);
         let hit = hits.remove(&i).unwrap_or_default();
         let at = (i, exprs[i]);
         let d = step(cx, at, &mut rest[0], (done, exprs), &mut deltas, net, hit)?;
-        // Hydrated, every element is an insert.
-        let d = if net.is_some() { prune(d) } else { d };
-        deltas.push(d);
+        deltas.push(prune(d));
     }
     Ok(deltas.pop().unwrap_or_default())
 }
@@ -573,7 +722,7 @@ impl View {
 
     fn start(f: Arc<Loaded>, lib: Lib, ctx: Ctx, args: Vec<V>, store: &dyn Read) -> Result<View, Refusal> {
         let mut nodes = vec![];
-        spine(&f.f.body, false, false, &mut vec![], &mut nodes);
+        spine(&f.f.body, &mut vec![], &mut nodes);
         let (deps, held, list) = (BTreeMap::new(), BTreeMap::new(), vec![]);
         let mut v = View {
             f,
@@ -716,21 +865,21 @@ impl View {
 }
 
 /// An element of a node's output, read again: from the store for a `Scan`.
-fn get(cx: &dyn Eval, (kid, e): (&Node, &Expr), k: &Okey) -> Option<V> {
+fn get(cx: &Kept, (kid, e): (&Node, &Expr), k: &Okey) -> Option<V> {
     match e {
-        Expr::Scan(t) => cx.get(t, k).map(|r| row(cx, t, &r)),
+        Expr::Scan(t) => cx.store.get(t, k).map(|r| cx.row(t, &r)),
         _ => kid.out.get(k).cloned(),
     }
 }
 
 /// The first `n` elements of a node's output.
-fn head(cx: &dyn Eval, (kid, e): (&Node, &Expr), n: usize) -> Vec<(Okey, V)> {
+fn head(cx: &Kept, (kid, e): (&Node, &Expr), n: usize) -> Vec<(Okey, V)> {
     match e {
         Expr::Scan(t) => {
-            let tab = cx.schema().table(t).expect("a table").1;
-            let rows = cx.first(t, n);
+            let tab = cx.store.schema().table(t).expect("a table").1;
+            let rows = cx.store.scan(t, &Scan { limit: n, ..Scan::all() });
             rows.into_iter()
-                .map(|r| (r[..tab.key_len(&r).unwrap()].to_vec(), row(cx, t, &r)))
+                .map(|r| (r[..tab.key_len(&r).unwrap()].to_vec(), cx.row(t, &r)))
                 .collect()
         }
         _ => kid.out.iter().take(n).map(|(k, v)| (k.clone(), v.clone())).collect(),
@@ -739,7 +888,7 @@ fn head(cx: &dyn Eval, (kid, e): (&Node, &Expr), n: usize) -> Vec<(Okey, V)> {
 
 /// What became of each input element touched — by the kid's delta, or by a
 /// read of this node's that was hit — as it is now.
-fn touched(cx: &dyn Eval, kid: (&Node, &Expr), d: Delta, hit: BTreeSet<Okey>) -> Vec<(Okey, Option<V>)> {
+fn touched(cx: &Kept, kid: (&Node, &Expr), d: Delta, hit: BTreeSet<Okey>) -> Vec<(Okey, Option<V>)> {
     let now = d.into_iter().map(|(k, (_, b))| (k, b));
     if hit.is_empty() {
         return now.collect();
@@ -762,27 +911,19 @@ fn items(v: V) -> Vec<V> {
     }
 }
 
-/// An element of a node's output set, kept when the node keeps its output.
-fn set((out, keep): (&mut BTreeMap<Okey, V>, bool), d: &mut Delta, k: Okey, new: Option<V>) {
-    let old = match (&new, keep) {
-        (_, false) => None,
-        (Some(n), _) => out.insert(k.clone(), n.clone()),
-        (None, _) => out.remove(&k),
+/// An element of a node's output set.
+fn set(out: &mut BTreeMap<Okey, V>, d: &mut Delta, k: Okey, new: Option<V>) {
+    let old = match &new {
+        Some(n) => out.insert(k.clone(), n.clone()),
+        None => out.remove(&k),
     };
     put(d, k, old, new);
-}
-
-/// The elements of a list, keyed by their places, as an insert each.
-fn inserted(out: (&mut BTreeMap<Okey, V>, bool), d: &mut Delta, xs: Vec<V>) {
-    for (n, v) in xs.into_iter().enumerate() {
-        set((&mut *out.0, out.1), d, int_enc(n as i64).to_vec(), Some(v));
-    }
 }
 
 /// One node's delta from its input's.
 #[allow(clippy::too_many_arguments)]
 fn step(
-    cx: &mut dyn Eval,
+    cx: &mut Kept,
     (i, e): (usize, &Expr),
     node: &mut Node,
     (done, exprs): (&[Node], &[&Expr]),
@@ -791,21 +932,15 @@ fn step(
     hit: BTreeSet<Okey>,
 ) -> Result<Delta, Refusal> {
     let Node { keep, kids, out } = node;
-    let keeps = cx.keeps();
     // Each kid's delta is its one parent's to take.
     let kid = |j: usize| (&done[kids[j]], exprs[kids[j]]);
     let mut delta = |j: usize| std::mem::take(&mut deltas[kids[j]]);
     let mut d = Delta::new();
-    let none: Okey = vec![];
     match (e, keep) {
-        (_, Keep::Routed) => {
-            let xs = cx.routed(e)?;
-            inserted((&mut *out, keeps), &mut d, xs);
-        }
         (Expr::Scan(t), _) => match net {
             Some(net) => {
                 for (k, (a, b)) in net.get(t).into_iter().flatten() {
-                    d.insert(k.clone(), (a.as_ref().map(|r| row(cx, t, r)), b.as_ref().map(|r| row(cx, t, r))));
+                    d.insert(k.clone(), (a.as_ref().map(|r| cx.row(t, r)), b.as_ref().map(|r| cx.row(t, r))));
                 }
             }
             None => {
@@ -825,23 +960,22 @@ fn step(
                         cx.forget(i, &k);
                         None
                     }
-                    Some(v) if filter => call(cx, lam, vec![v.clone()], (i, &k))?.truth().then_some(v),
-                    Some(v) => Some(call(cx, lam, vec![v], (i, &k))?),
+                    Some(v) => each(cx, filter, lam, v, (i, &k))?,
                 };
-                set((&mut *out, keeps), &mut d, k, new);
+                set(out, &mut d, k, new);
             }
         }
         (Expr::Sort(_, keys, dirs), Keep::Sort(at)) => {
             for (k, v) in touched(cx, kid(0), delta(0), hit) {
                 if let Some(was) = at.remove(&k) {
-                    set((&mut *out, keeps), &mut d, was, None);
+                    set(out, &mut d, was, None);
                 }
                 match v {
                     None => cx.forget(i, &k),
                     Some(v) => {
-                        let place = [sort_key(call(cx, keys, vec![v.clone()], (i, &k))?, dirs), k.clone()].concat();
+                        let place = [order(cx, keys, dirs, &v, (i, &k))?, k.clone()].concat();
                         at.insert(k, place.clone());
-                        set((&mut *out, keeps), &mut d, place, Some(v));
+                        set(out, &mut d, place, Some(v));
                     }
                 }
             }
@@ -849,7 +983,7 @@ fn step(
         (Expr::Take(_, n), Keep::Take(limit)) => {
             let kd = delta(0);
             if net.is_none() {
-                *limit = cx.at(n, vec![], (ALL, &none))?.int().max(0) as usize;
+                *limit = count(cx, n)?;
             } else if kd.is_empty() {
                 return Ok(d);
             }
@@ -869,25 +1003,12 @@ fn step(
             for (k, (a, b)) in &kd {
                 for (v, sign) in [(a, -1), (b, 1)] {
                     let Some(v) = v else { continue };
-                    let g = call(cx, by, vec![v.clone()], (ALL, &none))?;
+                    let g = group_key(cx, by, v)?;
                     let gk = g.to_bytes();
                     let m = groups.entry(gk.clone()).or_default();
                     (m.key, m.n) = (Some(g), m.n + sign);
                     match kept {
-                        Some((parts, _)) => {
-                            let terms = parts.iter().filter_map(|p| match p {
-                                Part::Sum(t) => Some(t),
-                                _ => None,
-                            });
-                            m.sums.resize(terms.clone().count(), 0);
-                            for (s, t) in m.sums.iter_mut().zip(terms) {
-                                let x = match t {
-                                    None => v.int(),
-                                    Some(t) => cx.at(t, vec![v.clone()], (ALL, &none))?.int(),
-                                };
-                                *s += sign as i128 * x as i128;
-                            }
-                        }
+                        Some((parts, _)) => tally(cx, parts, &mut m.sums, v, sign as i128)?,
                         None if sign < 0 => drop(m.rows.remove(k)),
                         None => drop(m.rows.insert(k.clone(), v.clone())),
                     }
@@ -898,43 +1019,19 @@ fn step(
                 let Some(m) = groups.get(&gk).filter(|m| m.n > 0) else {
                     groups.remove(&gk);
                     cx.forget(i, &gk);
-                    set((&mut *out, keeps), &mut d, gk, None);
+                    set(out, &mut d, gk, None);
                     continue;
                 };
                 let key = m.key.clone().expect("a group has its key");
-                let a = match kept {
-                    None => call(cx, agg, vec![key.clone(), V::List(m.rows.values().cloned().collect())], (i, &gk))?,
-                    Some((parts, tuple)) => {
-                        let (mut vs, mut sums) = (vec![], m.sums.iter());
-                        for p in parts.iter() {
-                            vs.push(match p {
-                                Part::Count => V::Int(m.n),
-                                Part::Sum(_) => crate::std::total(*sums.next().unwrap())?,
-                                Part::Other(e) => cx.at(e, vec![key.clone(), V::List(vec![])], (i, &gk))?,
-                            });
-                        }
-                        if *tuple {
-                            V::Tup(vs)
-                        } else {
-                            vs.remove(0)
-                        }
-                    }
-                };
-                set((&mut *out, keeps), &mut d, gk, Some(V::Tup(vec![key, a])));
+                let members = || m.rows.values().cloned().collect();
+                let a = aggregate(cx, kept, agg, key, m.n, &m.sums, members, (i, &gk))?;
+                set(out, &mut d, gk, Some(a));
             }
         }
         (Expr::Join(_, _, on), Keep::Join { keys, sides }) => {
             let (da, db) = (delta(0), delta(1));
             let (da, db) = (&da, &db);
-            let key = |cx: &mut dyn Eval, s: usize, v: &V| -> Result<Option<Vec<u8>>, Refusal> {
-                let Some(ks) = keys.as_ref() else { return Ok(None) };
-                let vars = if s == 0 {
-                    vec![v.clone(), V::Tup(vec![])]
-                } else {
-                    vec![V::Tup(vec![]), v.clone()]
-                };
-                Ok(Some(cx.at(if s == 0 { &ks.0 } else { &ks.1 }, vars, (ALL, &none))?.to_bytes()))
-            };
+            let key = |cx: &mut Kept, s: usize, v: &V| keys.as_ref().map(|ks| join_key(cx, ks, s, v)).transpose();
             let partners = |side: &Side, k: Option<Vec<u8>>| -> Vec<Okey> {
                 match k {
                     Some(k) => side.by.get(&k).into_iter().flatten().cloned().collect(),
@@ -947,12 +1044,12 @@ fn step(
                     .take_while(|(p, _)| p.starts_with(k))
                     .map(|(p, _)| p.clone())
                     .collect();
-                gone.into_iter().for_each(|p| set((&mut *out, keeps), &mut d, p, None));
+                gone.into_iter().for_each(|p| set(out, &mut d, p, None));
             }
             for (k, (old, _)) in db {
                 let Some(y) = old else { continue };
                 for a in partners(&sides[0], key(cx, 1, y)?) {
-                    set((&mut *out, keeps), &mut d, [a, k.clone()].concat(), None);
+                    set(out, &mut d, [a, k.clone()].concat(), None);
                 }
             }
             for (s, dd) in [(0, da), (1, db)] {
@@ -985,14 +1082,14 @@ fn step(
                         if s == 1 && da.contains_key(&p) {
                             continue;
                         }
-                        let w = sides[1 - s].rows[&p].clone();
+                        let w = &sides[1 - s].rows[&p];
                         let (x, y, pk) = if s == 0 {
-                            (v.clone(), w, [k.clone(), p].concat())
+                            (v, w, [k.clone(), p].concat())
                         } else {
-                            (w, v.clone(), [p, k.clone()].concat())
+                            (w, v, [p, k.clone()].concat())
                         };
-                        if call(cx, on, vec![x.clone(), y.clone()], (ALL, &none))?.truth() {
-                            set((&mut *out, keeps), &mut d, pk, Some(V::Tup(vec![x, y])));
+                        if let Some(t) = joined(cx, on, x, y)? {
+                            set(out, &mut d, pk, Some(t));
                         }
                     }
                 }
@@ -1000,8 +1097,10 @@ fn step(
         }
         _ => {
             if net.is_none() {
-                let xs = items(cx.at(e, vec![], (ALL, &none))?);
-                inserted((&mut *out, keeps), &mut d, xs);
+                let xs = items(cx.at(e, vec![], (ALL, &vec![]))?);
+                for (n, v) in xs.into_iter().enumerate() {
+                    set(out, &mut d, int_enc(n as i64).to_vec(), Some(v));
+                }
             }
         }
     }

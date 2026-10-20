@@ -1095,6 +1095,92 @@ fn a_route_answers_as_the_unrouted_read() {
     }
 }
 
+/// A fresh read walks each operator as a view's node runs it (K3c): over
+/// tracks no route reads (behind a `Map`), a join on the creator with the
+/// smaller side on the left and on the right (the one-shot hash on either
+/// side, its pairs in the left's order then the right's), a join with no
+/// key equality, a sort by `pos` descending cut to a count the input gives
+/// (the window, its ties in input order), and groups by creator, with a
+/// kept aggregate and with one of the members — for every creator and
+/// count, `query` is a view hydrated's answer. Falsified by not ordering
+/// the pairs when the left side is hashed (`c0`'s tracks joined with every
+/// track came out in the right side's order) and by choosing the window
+/// by the sort key alone (a count of 1 under `pos` descending gave a tied
+/// track other than the stable sort's first).
+#[test]
+fn a_fresh_read_walks_as_a_view_hydrates() {
+    let rows: Vec<Change> = (0..24)
+        .map(|i| add(track(&format!("t{i:02}"), "x", &format!("c{}", i % 4 / 3 + i % 2), (i / 3) % 4)))
+        .collect();
+    let store = store_of(&tracks(), &rows);
+    fn plain(b: &mut B) -> Expr {
+        map(scan("track"), b.lam(&["t"], |b| b.v("t")))
+    }
+    fn mine(b: &mut B) -> Expr {
+        let on = b.lam(&["t"], |b| op(Op::Eq, field(b.v("t"), 2), b.v("c")));
+        filter(plain(b), on)
+    }
+    fn join(l: Expr, r: Expr, on: Expr) -> Expr {
+        Expr::Join(Box::new(l), Box::new(r), Box::new(on))
+    }
+    fn same(b: &mut B) -> Expr {
+        b.lam(&["x", "y"], |b| op(Op::Eq, field(b.v("x"), 2), field(b.v("y"), 2)))
+    }
+    let pair = Ty::Tuple(vec![track_ty(), track_ty()]);
+    type Body = Box<dyn Fn(&mut B) -> Expr>;
+    let cases: Vec<(&str, Ty, Body)> = vec![
+        ("the smaller side left", pair.clone(), Box::new(|b| join(mine(b), plain(b), same(b)))),
+        ("the smaller side right", pair.clone(), Box::new(|b| join(plain(b), mine(b), same(b)))),
+        (
+            "no key equality",
+            pair,
+            Box::new(|b| {
+                let on = b.lam(&["x", "y"], |b| op(Op::Lt, field(b.v("x"), 3), field(b.v("y"), 3)));
+                join(mine(b), mine(b), on)
+            }),
+        ),
+        (
+            "a window by pos descending",
+            track_ty(),
+            Box::new(|b| {
+                let by = b.lam(&["t"], |b| field(b.v("t"), 3));
+                Expr::Take(Box::new(sort(plain(b), by, &[Dir::Desc])), Box::new(b.v("n")))
+            }),
+        ),
+        (
+            "groups, kept",
+            Ty::Tuple(vec![text_ty(), Ty::Tuple(vec![text_ty(), Ty::Int, Ty::Int])]),
+            Box::new(|b| {
+                let by = b.lam(&["t"], |b| field(b.v("t"), 2));
+                let agg = counted(b, 3);
+                group(plain(b), by, agg)
+            }),
+        ),
+        (
+            "groups, of their members",
+            Ty::Tuple(vec![text_ty(), Ty::list(track_ty())]),
+            Box::new(|b| {
+                let by = b.lam(&["t"], |b| field(b.v("t"), 2));
+                let agg = b.lam(&["k", "ms"], |b| b.v("ms"));
+                group(plain(b), by, agg)
+            }),
+        ),
+    ];
+    let lib = Lib::default();
+    for (name, ret, body) in &cases {
+        let params = [("c", text_ty()), ("n", Ty::Int)];
+        let h = lib.install(&tracks(), query_fn(vec![], &params, ret.clone(), body)).unwrap();
+        for c in ["c0", "c1", "c2", "c9"] {
+            for n in [0, 1, 3, 30] {
+                let mut input = bytes_enc(c.as_bytes()).to_vec();
+                put_int(&mut input, n);
+                let want = View::new(&lib, &h, &input, ctx(), &store).unwrap().rows();
+                assert_eq!(query(&lib, &h, &input, &ctx(), &store).unwrap(), want, "{name}, {c}, {n}");
+            }
+        }
+    }
+}
+
 // * A view told a replica's changes
 
 /// Views over a replica's store, told nothing but its `Output::Changes`,
