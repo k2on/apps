@@ -9,12 +9,13 @@
 //! schema), one that grew a table and a mutator over it, and one that
 //! grew a column on a table a function writes whole.
 //!
-//! **The fleet across versions.** A function whose body moved needs
-//! nothing of the server in v5: an intent at a hash the server lacks is
-//! held and its body sent (§1.11 `Held`), and one at a hash it holds from a
-//! module run before is sequenced at once. A grown *schema* is another
-//! matter: a log written under the narrower one is not read under the
-//! wider ([`version_6_a_schema_grows_under_a_running_server`], a witness).
+//! **The fleet across versions.** No body crosses the wire (K2): an intent
+//! at a hash the server does not run is held — kept pending by its device
+//! and pushed again — until the operator loads a module that has it (a
+//! restart, or `/admin/api/load`), and one at a hash it holds from a module
+//! run before is sequenced at once. A grown *schema* keeps the log: it is
+//! read under the wider one by prefix
+//! ([`version_6_a_schema_grows_under_a_running_server`]).
 //!
 //! Scenarios 1, 4 and 5 run a pinned previous revision beside this build's
 //! (`nix/versions.nix`, which `checks.versions` hands over as

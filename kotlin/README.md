@@ -1,5 +1,13 @@
 # The Kotlin runtime
 
+> **Frozen at spec v4** (`FROZEN.md`): v5 replaced v4 in `rust/ark`;
+> v4's specification, vectors and `harken.ark` are gone from the tree; and
+> `checks.kotlin` and `checks.fleet-kotlin` have left the flake. What follows describes
+> this tree as it was at its last green commit, `a983b3c`: where it names
+> `rust/ark`, `spec/vectors`, `arkc`, `harken/domain/harken.ark` or a flake
+> output, it means them at that commit. `FROZEN.md` says what a v5 port
+> carries instead.
+
 `ark-runtime` (package `dev.arkdb`) is ArkDB's client for the JVM and
 Android, at spec version 4: what a phone needs to load a module it did not
 author, verify it, interpret it, keep its views up to date, hold a replica

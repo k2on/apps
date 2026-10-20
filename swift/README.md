@@ -1,5 +1,13 @@
 # The Swift runtime
 
+> **Frozen at spec v4** (`FROZEN.md`): v5 replaced v4 in `rust/ark`;
+> v4's specification, vectors and `harken.ark` are gone from the tree; and
+> `checks.swift` and `checks.fleet-swift` have left the flake. What follows describes
+> this tree as it was at its last green commit, `a983b3c`: where it names
+> `rust/ark`, `spec/vectors`, `arkc`, `harken/domain/harken.ark` or a flake
+> output, it means them at that commit. `FROZEN.md` says what a v5 port
+> carries instead.
+
 `ArkDB` is ArkDB's client for Swift — iOS and macOS, and Linux, where it is
 built and tested here — at spec version 4: what a phone needs to load a
 module it did not author, verify it, interpret it and keep its views up to

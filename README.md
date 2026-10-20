@@ -1,60 +1,64 @@
 # apps
 
 ArkDB — a local-first sync engine whose domain is written once, in Rust,
-and emitted as one IR every peer applies — and harken, the first app on
-it.
+as one typed language every peer runs — and harken, the first app on it.
 
-- `docs/arkdb.md` — the design: a survey of Petros and how harken used it,
-  what compiling the domain to FFI cost, and the architecture of the
-  successor — a domain written once and emitted as one IR; one intent log
-  with facts retained beside it; snapshots; authority as a role; views
-  maintained from a query's plan; and a conformance suite every runtime is
-  held to. `docs/plan-v4.md` is the design of the current spec version:
-  every query a plan, and Rust the specification.
+- `docs/arkdb.md` — the architecture's history: a survey of Petros and
+  how harken used it, what compiling the domain to FFI cost, and the
+  successor's architecture. `docs/plan-v5.md` is the design of the current
+  spec version, v5 — bytes under types, one language, one machine — and
+  the record of how it landed and replaced v4 (Part 3 measures the two);
+  where the two documents disagree, the plan is newer.
 - `rust/` — `ark`, the runtime and the specification (`spec/README.md`
-  indexes its modules by section), with `ark::authoring`, the vocabulary a
-  domain is written in, and three binaries: `ark-vectors`, `arkc` (verify,
-  hash, check, vectors) and `gen-unicode`. Beside it, what every app
-  shares: `ark-client` (a peer: persistence, the link, live rooms,
-  maintained views, signing in later), `ark-server` (the authority over a
-  socket, live-room relay, the web build), `ark-auth` (dev auth and OpenID
-  Connect) and `arkui` (the iced components, the vim keyboard, theming).
-- `spec/` — the conformance vectors `rust/ark` writes and reads back, the
-  index of the specification (`spec/README.md`), and
-  `spec/AUTHORING.md`, the contract a domain is written against: routers
-  and middleware like tRPC's, input schemas whose checks are also a form's
-  validation, and a query that is a plan.
-- `harken/` — the app: `domain/`, `server/`, `iced/` (desktop and browser).
+  indexes its modules by section): types and the order-preserving codec,
+  the schema and the store, the chained log, the one peer machine, the
+  frames, the language (IR, checker, interpreter, standard library,
+  modules), maintained views, and `ark::author`, which the attribute
+  macros of `ark-macros` (`#[ark::mutator]`, `#[ark::query]`, …,
+  `ark::module!`) write a domain through. `ark-dev` is the development
+  tools: the simulator over the real hub and client, the trace recorder
+  and player, the fuzzer (`ark-fuzz`), the vector writer and `arkc`, which
+  verifies module files. Beside them, what every app shares:
+  `ark-client` (the client driver: storage, the link, maintained views,
+  the live space, signing in later), `ark-server` (the hub on its thread,
+  the sync socket, persistence, the admin page's listener, the web
+  build), `ark-auth` (dev auth and OpenID Connect), `ark-explorer` (the
+  admin page and the explorer over a replica) and `arkui` (the iced
+  components, the vim keyboard, theming).
+- `spec/` — the conformance vectors `rust/ark` and `rust/ark-dev` write
+  and read back, the index of the specification (`spec/README.md`),
+  `spec/RUNNERS.md` (what a runtime in another language does with each
+  vector) and `spec/AUTHORING.md`, the Rust subset the macros accept, row
+  by row.
+- `harken/` — the app: `domain/` (written with `#[ark::*]`; `harken.ark`
+  is the module file it writes), `server/`, `iced/` (desktop and browser).
   `harken/README.md` says what each is and how to run them together; the
   browser demo is published at <https://k2on.github.io/apps/harken/>.
-- `kotlin/` — the Kotlin runtime, being brought to v4 as a phone's client
-  (`docs/plan-phones.md`): its core — codec, hashes, modules, the
-  verifier, the interpreter, the store, maintained views — is held to
-  `spec/vectors` by `checks.kotlin` (`kotlin/README.md`). The client and
-  the Android app (`harken/android`, out of the flake until round 4) are
-  next.
-- `swift/` — the Swift runtime and client at v4, a phone's client
-  (`docs/plan-phones.md` rounds 5–7, `swift/README.md`): held to every
-  client vector of `spec/vectors` and the trace corpus by `checks.swift`;
-  `harken-peer-swift` runs in the fleet beside Rust peers
-  (`checks.fleet-swift`); `harken/ios` is rewired onto it and has never
-  been built for iOS.
+- `kotlin/`, `swift/` — the Kotlin and Swift runtimes, and the phones on
+  them (`harken/android`, `harken/ios`), **frozen at spec v4**
+  (`kotlin/FROZEN.md`, `swift/FROZEN.md`: the last green commit, and what
+  a v5 port carries instead). Their checks have left the flake.
 
 One command holds all of it:
 
-    nix flake check                 # the vectors are what rust/ark writes; fmt,
-                                    # clippy and every test of the Rust workspace;
-                                    # the Kotlin runtime against the vectors;
-                                    # harken.ark is what harken's domain emits and
-                                    # verifies; the NixOS module
+    nix flake check                 # rust: fmt, clippy and every test of the Rust
+                                    #   workspace (and harken-iced's demo feature);
+                                    # vectors: spec/vectors is what the writer writes;
+                                    # traces: spec/vectors/trace/ and a fuzzed trace
+                                    #   corpus replay; fuzz-smoke: 25 fuzzed sessions;
+                                    # versions: harken/server/tests/versions.rs over
+                                    #   the pinned revisions (none pinned now);
+                                    # harken-domain: harken.ark is what the domain
+                                    #   writes, and arkc verifies it;
+                                    # harken-module: the NixOS module evaluates
     nix build .#harken-server       # or harken-iced, harken-web, harken-web-server,
-                                    # harken-domain, ark
+                                    # harken-domain, ark-admin, ark, vectors, trace-corpus
     nix run .#arkc -- verify harken/domain/harken.ark
-    nix run .#vectors -- spec/vectors
+    nix run .#fuzz -- 1000 1 traces
     nix develop .#rust
 
 What is not verified from here: no desktop window has been opened, and the
-browser client has been drawn in headless Chromium only. The frozen phone
-apps have not been run on a device; the Android one is assembled by nix, so
-its code compiles, and of the iOS one only the bridge ever met a compiler.
-Each app's `README.md` says exactly where the seen part ends.
+browser client was drawn in headless Chromium under v4 and has not been
+drawn on v5 (`docs/plan-v5.md`, D1). The frozen phone apps have
+not been run on a device. Each app's `README.md` says exactly where the
+seen part ends.

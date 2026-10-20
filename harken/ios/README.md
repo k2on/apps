@@ -1,5 +1,9 @@
 # harken for iOS
 
+> **Frozen at spec v4** with the runtime it is built on (`swift/FROZEN.md`): it
+> speaks nothing a v5 server reads, and the flake no longer builds it.
+> What follows describes it as it was at its last change, `1e52306`.
+
 SwiftUI over the Swift client at spec v4 (`swift/`: `ArkDB` and
 `ArkDBClient`, `swift/README.md`). The phone is a **client**: it loads
 `harken.ark` — the module the domain crate writes, the one the server, the

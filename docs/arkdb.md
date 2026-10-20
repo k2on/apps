@@ -1,5 +1,14 @@
 # ArkDB
 
+> **v5.** Spec version 5 (`docs/plan-v5.md`) is the current one and is
+> newer than everything below where they disagree: a value is bytes under a
+> type, the domain is one typed language written with `#[ark::*]` and run
+> by one interpreter, the log is a chain whose entries carry their facts,
+> one sans-io machine is replica or authority by role, and views are
+> maintained per operator. `rust/ark` is v5 and the specification; v4 is
+> deleted, and Kotlin and Swift are frozen at v4 (`kotlin/FROZEN.md`,
+> `swift/FROZEN.md`).
+
 A design for the successor to Petros. Three parts: what Petros is and what
 harken does with it, what the compiled-domain-over-FFI approach costs now that
 the phone is becoming two native apps, and the architecture of a system in

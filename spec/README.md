@@ -3,9 +3,14 @@
 `rust/ark` is the specification: its modules are normative, their doc
 comments are the prose, and a runtime in another language is conformant
 when it agrees with them on the vectors under `vectors/`, which
-`rust/ark/tests` write (`ARK_WRITE_VECTORS=1`) and otherwise hold to what
-is on disk. This file is the index. `docs/plan-v5.md` is the design;
-where a module and this file disagree, the module is right.
+`rust/ark/tests` and `rust/ark-dev/tests` write (`ARK_WRITE_VECTORS=1`)
+and otherwise hold to what is on disk; written over an empty `vectors/`
+they are the tree byte for byte, which the flake's `vectors` check holds.
+This file is the index; `RUNNERS.md` says what a runner does with the
+vectors `rust/ark-dev` writes, and `AUTHORING.md` is the Rust subset the
+macros accept. `docs/plan-v5.md` is the design; where a module and this
+file disagree, the module is right. v5 replaced v4 here (R1); v4's
+specification is in the history, at the commits `kotlin/FROZEN.md` names.
 
 ## §1 Types and bytes
 
@@ -65,7 +70,7 @@ bytes. `Sort` is stable, by its key's fields each in its direction;
 
 ## §5 The standard library
 
-`std.rs`, `unicode_tables.rs`: v4's names (`spec/README.md` §5), each with
+`std.rs`, `unicode_tables.rs`: v4's names, each with
 a signature that says which refinements it keeps — a text function returns
 `Text`; `Reverse` and `Move` keep a list's length refinements; `Insert`
 and `ListConcat` keep `NonEmpty` of their first argument; every other list
@@ -74,13 +79,11 @@ exact words, never clamped. `Trim`, `Lower` and `IsAlnum` consult the
 pinned tables (UCD 16.0.0) and nothing of the platform; text is compared
 by its bytes, which is by code point.
 
-**For views (V1).** v4's §6.5 makes one exception to step-by-step
-checking: a sum in a plan's node, `fold` with step `acc + f(x)`, adds in
-an `i128` and checks the total once, because a maintained view moves that
-sum by its members in no particular order and the two evaluations must
-agree. v5's interpreter checks every step; a `Group` aggregate that a view
-maintains as a number will need the same rule, stated where V1 recognises
-it.
+**`Sum`**, appended for views (V1), is v4's §6.5 rule: a list's integers
+added in an `i128` and the total judged once (`integer overflow` only if
+it does not fit), because a maintained view moves a sum by its members in
+no particular order and the two evaluations must agree
+(`views/a-maintained-sum-*`).
 
 ## §6 Modules
 
@@ -94,15 +97,40 @@ when its bindings and types are sorted by name, each once, every bound
 function checks over its schema, and every declaration a function makes is
 the module's own.
 
+## §7 The kernel
+
+| § | `rust/ark/src/` | what it defines |
+|---|---|---|
+| 1.3 | `store.rs` | one ordered map per table, rows by key and index entries; every write judges the constraints (canonical row bytes, unique indexes, a reference names a row that exists, a row still named is not removed) and is a `Change` — `Add`, `Remove`, `Edit` — that inverts exactly; the state hash kept incrementally per table, over the durable space only, the schema hash in it; a store has a space |
+| 1.6 | `log.rs` | the chained log: `Entry { id, actor, session, origin, local, roles, fn, input, now }`, `Logged { seq, entry, facts, state, hash }`, the hash the chain to it; the snapshot and the horizon; the chain is the log's identity |
+| 1.7 | `peer.rs` | the one sans-io machine — `Replica` or `Authority { journal }`, alone being an authority with a fork — `step(Input) -> [Output]`: sequencing, dedupe per `(origin, local)`, judging, the rebase (pending lists undone newest-first, the confirmed facts applied, the pending run again, once per page), compaction, going alone and joining (a chain adopted by its facts or refused), a held intent kept pending and what follows it waiting on the authority, `Input::Loaded` judging what was held; a replica applies confirmed entries by their facts |
+| 1.8 | `peer.rs` (`Feed`), `view.rs` | partial sync: a scope is one `Pure` function over the `Sum` of the schema's rows; an authority keeps a view of it per scoped connection (`Input::Feed`) and answers it by `Output::To`, a union holding what its rows reference |
+| 1.9 | `peer.rs` (the volatile space) | live state: tables marked `Volatile`, a second machine of the same kind over them on the same socket, frames tagged with their `space`; `on_join`, `on_leave` and `on_restore` entries the authority authors; not in the state hash, not journaled |
+| 1.10 | `view.rs` | maintained views: one node per operator of a query's relational spine, each updated from a delta; after every step the answer equals a fresh evaluation and the patches (`Insert`, `Remove`, `Update` at a position) splice the old list into the new |
+| 1.11 | `frames.rs` | the frames, one derived `Sum`: `Hello`, `Push`, `Join` from a client; `Ack`, `Reject`, `Held`, `Batch`, `Snapshot` from a server. No frame carries a function's body (K2) |
+| 1.12 | `author.rs`, `rust/ark-macros` | authoring: `#[ark::mutator]`, `query`, `helper`, `guard`, `scope`, `live` and `ark::module!` lower restricted Rust to §2's `Expr` through `ark::author`; the subset accepted is `AUTHORING.md`'s, and anything outside it a compile error naming it |
+
+The drivers are not the specification but the reference reading of it:
+`rust/ark-client` (a client: storage, the link, views for a UI, the live
+relay), `rust/ark-server` (the hub on its thread, persistence, the sync
+socket, the admin page's listener) and `rust/ark-dev` (the simulator, the
+trace recorder and player, the fuzzer, the vector writer, `arkc`).
+
 ## The vectors
 
-The JSON dialect of `rust/ark/src/json.rs`; a row is a tuple, printed as an
-array in schema order; a value of the language prints under its type.
-Every directory has a `falsify/` vector a conformant runner must fail.
+Printed in the JSON dialect of `rust/ark/tests/support/json.rs` under a
+type (`{"$int": …}`, `{"$bytes": …}`, `{"$id": …}`, text as itself); a row
+is a tuple, printed as an array in schema order. `RUNNERS.md` gives the
+plainer form of `protocol/`, `trace/` and `rebase/`. Every directory but
+`hash/` has a `falsify/` vector a conformant runner must fail.
 
-| directory | one vector is | holds |
-|---|---|---|
-| `hash/` | a store and its hash under its schema | K1 |
-| `eval/` | a function's bytes, a store, inputs applied in turn: the changes, the rows, the hash, or the refusal; `checks` and `form-check`, the boundary's verdicts and words; `has-role`; `raw-*`, the authority's writes as functions; `list-ops`, the list editors' edges | §1.1, §4, §5 |
-| `verify/` | a module's functions and whether they check; `refused/` one per refusal, with its words | §3, §6 |
-| `module/` | the demo module's bytes and hash; `de-bruijn`, two spellings and one hash | §2, §6 |
+| directory | written by | one vector is | holds | since |
+|---|---|---|---|---|
+| `hash/` | `rust/ark/tests/hash.rs` | a store and its hash under its schema; `leaves-and-digests`, each table's digest and the state hash | §1.1, §1.3 | K1; unmoved by K2 |
+| `eval/` | `rust/ark/tests/eval.rs` | a function's bytes, a store, inputs applied in turn: the changes, the rows, the hash, or the refusal; `checks` and `form-check`, the boundary's verdicts and words; `has-role`; `raw-*`, the authority's writes as functions; `list-ops`, the list editors' edges | §1.1, §4, §5 | L1; unmoved by K2 |
+| `verify/` | `rust/ark/tests/verify.rs` | a module's functions and whether they check; `refused/` one per refusal, with its words; `scoped-ok`, a scope | §3, §6 | L1; unmoved by K2 |
+| `module/` | `rust/ark/tests/module.rs` | the demo module's bytes and hash; `de-bruijn`, two spellings and one hash | §2, §6 | L1; unmoved by K2 |
+| `views/` | `rust/ark/tests/views.rs` | a store, a query and a script of batches: after each, the answer and the patches; `top-two-by-pos`, `group-source`, `playlist-with-items` and the rest of v4's shapes, and the maintained sum's overflow both ways | §1.10, §5 | V1; unmoved by K2 |
+| `protocol/` | `rust/ark-dev/tests/vectors.rs` | one frame of each kind each side writes, in each space it is sent in: its bytes and the same value as JSON under the frame type | §1.11 | D1; K2 renumbered the frames to eight (`Fetch`, `Bodies` and `Push`'s body gone) and re-derived every one carrying an entry |
+| `trace/` | `rust/ark-dev/tests/vectors.rs` | one client's life in one session, step by step: what its two machines were given and said, and where they stood | §1.7, §1.9 | D1; K2 re-derived all (ids from an origin, `open` and `sign_in` carrying it) |
+| `rebase/` | `rust/ark-dev/tests/vectors.rs` | a fleet run by the simulator from a seed (Rust's only: `RUNNERS.md`): `fleet-seed-7`, its script and where the hub stands settled, and the five `fleet-fuzz-seed-N` sessions the fuzzer found a kernel fault with, each where it stands once fixed | §1.6, §1.7 | D1; K2 re-derived all (`fleet-seed-7` `ff04f56d…`) |

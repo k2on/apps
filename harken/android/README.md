@@ -1,5 +1,9 @@
 # harken for Android
 
+> **Frozen at spec v4** with the runtime it is built on (`kotlin/FROZEN.md`): it
+> speaks nothing a v5 server reads, and the flake no longer builds it.
+> What follows describes it as it was at its last change, `973c27d`.
+
 Compose over the Kotlin client at spec v4 (`kotlin/ark-runtime`,
 `kotlin/ark-client`, `kotlin/README.md`), inside the onboarding every Ark
 app on Android shares (`kotlin/ark-android`). The phone is a **client**: it
