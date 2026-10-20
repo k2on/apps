@@ -44,151 +44,91 @@ fn bx(e: Expr) -> Box<Expr> {
     Box::new(e)
 }
 
-/// Levels to De Bruijn indices at `depth` binders, and every match arm
-/// built as a `Lambda` of its fields back to its body.
-pub fn close(e: Expr, d: u32) -> Expr {
+/// `e` with each expression directly under it through `f`, told how
+/// many binders `e` puts it under.
+fn kids(e: Expr, f: &mut dyn FnMut(Expr, u32) -> Expr) -> Expr {
     use Expr::*;
-    let c = |e: Box<Expr>, d| bx(close(*e, d));
-    let cs = |es: Vec<Expr>| es.into_iter().map(|e| close(e, d)).collect();
+    let mut b = |x: Box<Expr>, n: u32| bx(f(*x, n));
     match e {
-        Var(v) if v >= MARK => Var(d.checked_sub(v - MARK + 1).expect("a variable used outside its binder")),
-        Let(v, b) => Let(c(v, d), c(b, d + 1)),
-        Lambda(n, b) => Lambda(n, c(b, d + n)),
-        Match(s, arms) => Match(
-            c(s, d),
-            arms.into_iter()
-                .map(|a| match a {
-                    Lambda(k, b) => close(*b, d + k),
-                    a => close(a, d),
-                })
-                .collect(),
-        ),
-        If(a, b, x) => If(c(a, d), c(b, d), c(x, d)),
-        Field(a, i) => Field(c(a, d), i),
-        Tuple(es) => Tuple(cs(es)),
-        Variant(t, i, es) => Variant(t, i, cs(es)),
-        List(t, es) => List(t, cs(es)),
-        Op(o, a, b) => Op(o, c(a, d), c(b, d)),
-        Un(o, a) => Un(o, c(a, d)),
-        Std(f, es) => Std(f, cs(es)),
-        Call(h, es) => Call(h, cs(es)),
-        Lookup(t, k) => Lookup(t, c(k, d)),
-        Filter(a, b) => Filter(c(a, d), c(b, d)),
-        Map(a, b) => Map(c(a, d), c(b, d)),
-        Join(a, b, x) => Join(c(a, d), c(b, d), c(x, d)),
-        Group(a, b, x) => Group(c(a, d), c(b, d), c(x, d)),
-        Sort(a, b, ds) => Sort(c(a, d), c(b, d), ds),
-        Take(a, b) => Take(c(a, d), c(b, d)),
-        Insert(t, a) => Insert(t, c(a, d)),
-        Update(t, a, b) => Update(t, c(a, d), c(b, d)),
-        Delete(t, a) => Delete(t, c(a, d)),
-        Refuse(a) => Refuse(c(a, d)),
-        Seq(es) => Seq(cs(es)),
+        Let(v, x) => Let(b(v, 0), b(x, 1)),
+        Lambda(n, x) => Lambda(n, b(x, n)),
+        Field(a, i) => Field(b(a, 0), i),
+        Op(o, x, y) => Op(o, b(x, 0), b(y, 0)),
+        Un(o, a) => Un(o, b(a, 0)),
+        Lookup(t, k) => Lookup(t, b(k, 0)),
+        Filter(x, y) => Filter(b(x, 0), b(y, 0)),
+        Map(x, y) => Map(b(x, 0), b(y, 0)),
+        Sort(x, y, ds) => Sort(b(x, 0), b(y, 0), ds),
+        Take(x, y) => Take(b(x, 0), b(y, 0)),
+        Insert(t, a) => Insert(t, b(a, 0)),
+        Update(t, x, y) => Update(t, b(x, 0), b(y, 0)),
+        Delete(t, a) => Delete(t, b(a, 0)),
+        Refuse(a) => Refuse(b(a, 0)),
+        If(x, y, z) => If(b(x, 0), b(y, 0), b(z, 0)),
+        Join(x, y, z) => Join(b(x, 0), b(y, 0), b(z, 0)),
+        Group(x, y, z) => Group(b(x, 0), b(y, 0), b(z, 0)),
+        Match(x, es) => Match(b(x, 0), es.into_iter().map(|e| f(e, 0)).collect()),
+        Tuple(es) => Tuple(es.into_iter().map(|e| f(e, 0)).collect()),
+        Variant(t, i, es) => Variant(t, i, es.into_iter().map(|e| f(e, 0)).collect()),
+        List(t, es) => List(t, es.into_iter().map(|e| f(e, 0)).collect()),
+        Std(g, es) => Std(g, es.into_iter().map(|e| f(e, 0)).collect()),
+        Call(h, es) => Call(h, es.into_iter().map(|e| f(e, 0)).collect()),
+        Seq(es) => Seq(es.into_iter().map(|e| f(e, 0)).collect()),
         e => e,
+    }
+}
+
+/// Levels to De Bruijn indices at `d` binders, and every match arm built
+/// as a `Lambda` of its fields back to its body.
+pub fn close(e: Expr, d: u32) -> Expr {
+    match e {
+        Expr::Var(v) if v >= MARK => Expr::Var(d.checked_sub(v - MARK + 1).expect("a variable used outside its binder")),
+        Expr::Match(s, arms) => {
+            let arm = |a| match a {
+                Expr::Lambda(k, b) => close(*b, d + k),
+                a => close(a, d),
+            };
+            Expr::Match(bx(close(*s, d)), arms.into_iter().map(arm).collect())
+        }
+        e => kids(e, &mut |x, n| close(x, d + n)),
     }
 }
 
 /// Every variable at a level through `f`.
 fn levels(e: Expr, f: &dyn Fn(u32) -> Expr) -> Expr {
-    use Expr::*;
-    let c = |e: Box<Expr>| bx(levels(*e, f));
-    let cs = |es: Vec<Expr>| es.into_iter().map(|e| levels(e, f)).collect();
     match e {
-        Var(v) if v >= MARK => f(v - MARK),
-        Let(a, b) => Let(c(a), c(b)),
-        Lambda(n, b) => Lambda(n, c(b)),
-        Match(s, arms) => Match(c(s), cs(arms)),
-        If(a, b, x) => If(c(a), c(b), c(x)),
-        Field(a, i) => Field(c(a), i),
-        Tuple(es) => Tuple(cs(es)),
-        Variant(t, i, es) => Variant(t, i, cs(es)),
-        List(t, es) => List(t, cs(es)),
-        Op(o, a, b) => Op(o, c(a), c(b)),
-        Un(o, a) => Un(o, c(a)),
-        Std(s, es) => Std(s, cs(es)),
-        Call(h, es) => Call(h, cs(es)),
-        Lookup(t, k) => Lookup(t, c(k)),
-        Filter(a, b) => Filter(c(a), c(b)),
-        Map(a, b) => Map(c(a), c(b)),
-        Join(a, b, x) => Join(c(a), c(b), c(x)),
-        Group(a, b, x) => Group(c(a), c(b), c(x)),
-        Sort(a, b, ds) => Sort(c(a), c(b), ds),
-        Take(a, b) => Take(c(a), c(b)),
-        Insert(t, a) => Insert(t, c(a)),
-        Update(t, a, b) => Update(t, c(a), c(b)),
-        Delete(t, a) => Delete(t, c(a)),
-        Refuse(a) => Refuse(c(a)),
-        Seq(es) => Seq(cs(es)),
-        e => e,
+        Expr::Var(v) if v >= MARK => f(v - MARK),
+        e => kids(e, &mut |x, _| levels(x, f)),
     }
 }
 
-/// The standard functions as methods, by name (`len` and `concat` each
-/// name two, told apart by receiver and arity).
-const STD: [(Std, &str); 35] = {
-    use Std::*;
-    [
-        (Trim, "trim"),
-        (IsEmpty, "is_empty"),
-        (Concat, "concat"),
-        (Lower, "lower"),
-        (IsAlnum, "is_alnum"),
-        (Chars, "chars"),
-        (TextLen, "len"),
-        (StartsWith, "starts_with"),
-        (SplitOnce, "split_once"),
-        (TextOfInt, "to_text"),
-        (Hex, "hex"),
-        (Min, "min"),
-        (Max, "max"),
-        (Clamp, "clamp"),
-        (Abs, "abs"),
-        (Fnv1a64, "fnv1a64"),
-        (Sha256, "sha256"),
-        (IdOfText, "id_of_text"),
-        (TextOfId, "text_of_id"),
-        (NilId, "nil_id"),
-        (Utf8, "utf8"),
-        (First, "first"),
-        (Last, "last"),
-        (Len, "len"),
-        (Contains, "contains"),
-        (Reverse, "reverse"),
-        (ListConcat, "concat"),
-        (Insert, "insert"),
-        (RemoveAt, "remove_at"),
-        (Move, "move_at"),
-        (Slice, "slice"),
-        (IsSome, "is_some"),
-        (UnwrapOr, "unwrap_or"),
-        (Unwrap, "unwrap"),
-        (Sum, "sum"),
-    ]
-};
+/// The standard functions as methods, by name, in `Std`'s order (`len`
+/// and `concat` each name two, told apart by receiver and arity).
+const STD: &str = "trim is_empty concat lower is_alnum chars len starts_with split_once to_text hex min max clamp abs fnv1a64 \
+    sha256 id_of_text text_of_id nil_id utf8 first last len contains reverse concat insert remove_at move_at slice is_some \
+    unwrap_or unwrap sum";
 
-const OPS: [(Op, &str, u8); 13] = {
-    use Op::*;
-    [
-        (Or, "or", 1),
-        (And, "and", 2),
-        (Eq, "==", 4),
-        (Ne, "!=", 4),
-        (Lt, "<", 4),
-        (Le, "<=", 4),
-        (Gt, ">", 4),
-        (Ge, ">=", 4),
-        (Add, "+", 5),
-        (Sub, "-", 5),
-        (Mul, "*", 6),
-        (Div, "/", 6),
-        (Mod, "%", 6),
-    ]
-};
+/// The operators, in `Op`'s order, and each one's precedence.
+const OPS: &str = "+ - * / % == != < <= > >= and or";
+const LEVEL: [u8; 13] = [5, 5, 6, 6, 6, 4, 4, 4, 4, 4, 4, 2, 1];
 
-const KEYWORDS: &[&str] = &[
-    "schema", "table", "volatile", "key", "refs", "default", "index", "unique", "type", "where", "mutator", "query", "scope", "guard", "helper",
-    "live", "let", "if", "else", "match", "refuse", "ctx", "not", "and", "or", "desc", "asc", "true", "false", "none", "some", "lit", "nil_id", "_",
-];
+const KEYWORDS: &str = "schema table volatile key refs default index unique type where mutator query scope guard helper live let \
+    if else match refuse ctx not and or desc asc true false none some lit nil_id";
+
+/// The `i`th of an enum the codec reads by its variant's index.
+fn nth<X: Node>(i: usize) -> X {
+    X::from_bytes(&[i as u8]).unwrap()
+}
+
+/// An operator's spelling and precedence.
+fn op(o: Op) -> (&'static str, u8) {
+    let i = o.to_bytes()[0] as usize;
+    (OPS.split(' ').nth(i).unwrap(), LEVEL[i])
+}
+
+fn keyword(n: &str) -> bool {
+    KEYWORDS.split_whitespace().any(|k| k == n)
+}
 
 /// A type's canonical spelling, which is also a declaration's name.
 pub fn spell(t: &Ty) -> String {
@@ -399,6 +339,7 @@ enum Kind {
 
 /// The module being compiled: its tokens, schema, declarations (written
 /// and automatic) and functions, built on first use so callees come first.
+#[derive(Default)]
 struct M {
     toks: Vec<Tok>,
     schema: Schema,
@@ -425,6 +366,16 @@ struct P<'m> {
 }
 
 impl M {
+    /// Over a schema and declarations already made.
+    fn of(schema: &Schema, decls: &[(String, Decl)]) -> M {
+        M {
+            schema: schema.clone(),
+            decls: decls.iter().cloned().collect(),
+            written: decls.iter().map(|d| d.0.clone()).collect(),
+            ..M::default()
+        }
+    }
+
     fn err(&self, i: usize, what: impl std::fmt::Display) -> Refusal {
         Refusal(format!("line {}: {what}", self.toks[i.min(self.toks.len() - 1)].line))
     }
@@ -536,7 +487,7 @@ impl<'m> P<'m> {
 
     fn name(&mut self) -> R<String> {
         match self.tok().clone() {
-            T::Id(n) if !KEYWORDS.contains(&n.as_str()) || n == "_" => {
+            T::Id(n) if !keyword(&n) => {
                 self.i += 1;
                 Ok(n)
             }
@@ -674,11 +625,11 @@ impl<'m> P<'m> {
     }
 
     /// `trim`, `len 1..=80 "words"`, `v => v >= 0`.
-    fn rule(&mut self) -> R<Refine> {
+    fn rule(&mut self, ty: &Ty) -> R<Refine> {
         let rule = match self.tok().clone() {
             T::Id(n) if matches!(self.peek(1), T::P("=>")) => {
                 self.i += 2;
-                self.scope.push((n, Ty::Int));
+                self.scope.push((n, ty.clone()));
                 let e = self.expr();
                 self.scope.pop();
                 Rule::Refine(close(e?, 1))
@@ -895,12 +846,12 @@ impl<'m> P<'m> {
         }
         let mut a = self.binary(level + 1)?;
         while !self.ends() {
-            let Some(&(op, _, _)) = OPS.iter().find(|(_, s, l)| *l == level && self.is(s)) else {
+            let Some(i) = (0..13).find(|&i| LEVEL[i] == level && self.is(OPS.split(' ').nth(i).unwrap())) else {
                 break;
             };
             self.i += 1;
             let b = self.binary(level + 1)?;
-            a = Expr::Op(op, bx(a), bx(b));
+            a = Expr::Op(nth(i), bx(a), bx(b));
             if level == 4 {
                 break;
             }
@@ -1018,12 +969,13 @@ impl<'m> P<'m> {
                 _ => {
                     let args = p.rest()?;
                     let s = p.types().structure(t);
-                    let f = STD
-                        .iter()
-                        .filter(|(f, n)| *n == name && (*f != Std::TextLen || s == Ty::Bytes) && (*f != Std::Len || s != Ty::Bytes))
-                        .find(|(f, _)| *f != Std::Concat || args.is_empty())
+                    let f = (STD.split_whitespace().enumerate())
+                        .filter(|(_, n)| *n == name)
+                        .map(|(i, _)| nth::<Std>(i))
+                        .filter(|f| (*f != Std::TextLen || s == Ty::Bytes) && (*f != Std::Len || s != Ty::Bytes))
+                        .find(|f| *f != Std::Concat || args.is_empty())
                         .ok_or_else(|| p.err(format!("no method {name}")))?;
-                    return Ok(Expr::Std(f.0, [*e].into_iter().chain(args).collect()));
+                    return Ok(Expr::Std(f, [*e].into_iter().chain(args).collect()));
                 }
             })
         })?;
@@ -1352,13 +1304,7 @@ impl<'m> P<'m> {
 pub fn build(src: &str) -> R<Domain> {
     let mut m = M {
         toks: lex(src)?,
-        schema: Schema::default(),
-        decls: BTreeMap::new(),
-        written: BTreeSet::new(),
-        fns: BTreeMap::new(),
-        built: BTreeMap::new(),
-        lib: Lib::default(),
-        rows: None,
+        ..M::default()
     };
     // Items, found by their keyword at the top level.
     let (mut schema, mut types, mut depth) = (None, vec![], 0);
@@ -1460,9 +1406,9 @@ pub fn build(src: &str) -> R<Domain> {
         let ty = p.ty()?;
         let mut refine = vec![];
         if p.eat("where") {
-            refine.push(p.rule()?);
+            refine.push(p.rule(&ty)?);
             while p.eat(",") {
-                refine.push(p.rule()?);
+                refine.push(p.rule(&ty)?);
             }
         }
         m.decls.insert(n, Decl { ty, refine });
@@ -1508,16 +1454,8 @@ pub type Fragment = (Expr, Ty, Vec<(String, Decl)>);
 /// them its own binders, which begin at `depth`. What it stores is
 /// declared through `declare`.
 pub fn fragment(src: &str, schema: &Schema, decls: &[(String, Decl)], vars: &[(&str, Expr, Ty)], depth: u32) -> R<Fragment> {
-    let mut m = M {
-        toks: lex(src)?,
-        schema: schema.clone(),
-        decls: decls.iter().cloned().collect(),
-        written: decls.iter().map(|d| d.0.clone()).collect(),
-        fns: BTreeMap::new(),
-        built: BTreeMap::new(),
-        lib: Lib::default(),
-        rows: None,
-    };
+    let mut m = M::of(schema, decls);
+    m.toks = lex(src)?;
     let mut p = P::new(&mut m, 0);
     p.decls = decls.iter().cloned().collect();
     p.scope = vars.iter().map(|v| (v.0.to_string(), v.2.clone())).collect();
@@ -1596,7 +1534,8 @@ impl Pr<'_> {
             _ => "x".into(),
         };
         let taken = |n: &str| {
-            KEYWORDS.contains(&n)
+            keyword(n)
+                || n == "_"
                 || self.scope.iter().any(|s| s.0 == n)
                 || self.m.schema.table(n).is_some()
                 || self.names.values().any(|f| f.split('.').next() == Some(n))
@@ -1826,7 +1765,7 @@ impl Pr<'_> {
                 _ => format!("List<{}>[{}]", spell_in(t, self.rows), self.all(es)?),
             },
             Op(o, a, b) => {
-                let &(_, s, l) = OPS.iter().find(|x| x.0 == *o).unwrap();
+                let (s, l) = op(*o);
                 wrap(format!("{} {s} {}", self.ex(a, if l == 4 { 5 } else { l })?, self.ex(b, l + 1)?), l)
             }
             Un(crate::ir::Un::Not, a) => wrap(format!("not {}", self.ex(a, 3)?), 3),
@@ -1834,7 +1773,7 @@ impl Pr<'_> {
             Un(_, a) => wrap(format!("-{}", self.ex(a, 7)?), 7),
             Std(crate::ir::Std::NilId, _) => "nil_id()".into(),
             Std(f, es) => {
-                let name = STD.iter().find(|s| s.0 == *f).unwrap().1;
+                let name = STD.split_whitespace().nth(f.to_bytes()[0] as usize).unwrap();
                 format!("{}.{name}({})", self.ex(&es[0], 8)?, self.all(&es[1..])?)
             }
             Call(h, es) => {
@@ -2084,15 +2023,5 @@ pub fn print_function(m: &Module, lib: &Lib, name: &str) -> R<String> {
 
 /// The module's rows, as the text names them.
 fn rows_of(m: &Module) -> R<Vec<(String, Ty)>> {
-    let mut x = M {
-        toks: vec![],
-        schema: m.schema.clone(),
-        decls: m.types.iter().cloned().collect(),
-        written: m.types.iter().map(|t| t.0.clone()).collect(),
-        fns: BTreeMap::new(),
-        built: BTreeMap::new(),
-        lib: Lib::default(),
-        rows: None,
-    };
-    x.rows()
+    M::of(&m.schema, &m.types).rows()
 }
