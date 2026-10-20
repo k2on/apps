@@ -20,7 +20,7 @@ use ark::schema::{Schema, Table};
 use ark::ty::Ty;
 use demo::*;
 use support::json::{array, hexed, object, quoted, schema as jschema};
-use support::vectors::{falsify, vector};
+use support::vectors::{ark_text, falsify, vector};
 
 /// Checks each function in turn, each callable by the ones after it, then
 /// the module they make: whether it verifies, and if not why.
@@ -60,6 +60,7 @@ fn parts(sch: &Schema, fs: &[(&str, Function)], claim: Option<bool>) -> Vec<(&'s
     vec![
         ("schema", jschema(sch)),
         ("functions", array(functions)),
+        ("ark", ark_text(sch, &fs.iter().map(|(n, f)| (*n, f)).collect::<Vec<_>>())),
         ("verifies", claim.unwrap_or(v.is_ok()).to_string()),
         ("why", v.err().filter(|_| claim.is_none()).map_or("null".into(), |w| quoted(&w))),
     ]

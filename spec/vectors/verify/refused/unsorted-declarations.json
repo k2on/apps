@@ -1,6 +1,7 @@
 {
   "schema": [{"columns":[{"decl":"Id<playlist>","default":null,"name":"id","ty":{"t":"bytes"}},{"decl":"Text","default":null,"name":"name","ty":{"t":"bytes"}},{"decl":"Text","default":null,"name":"user_id","ty":{"t":"bytes"}}],"indexes":[{"columns":["user_id","name"],"unique":true}],"key":{"$int":"1"},"name":"playlist","refs":[],"space":"durable"},{"columns":[{"decl":"Id<playlist>","default":null,"name":"playlist_id","ty":{"t":"bytes"}},{"decl":"Text","default":null,"name":"track_id","ty":{"t":"bytes"}},{"decl":"Int","default":null,"name":"pos","ty":{"t":"int"}}],"indexes":[{"columns":["playlist_id","pos"],"unique":true}],"key":{"$int":"2"},"name":"item","refs":[{"column":"playlist_id","table":"playlist"}],"space":"durable"}],
   "functions": [{"bytes":"014e616d650000055465787400000103000104016120706c61796c697374206e656564732061206e616d65000000000149643c706c61796c6973743e0000010101800000000000001000000000000300001b0000","hash":"f8228e1607935e5cc7158ea9769418e5bc03a959592322783018466c7739853a","name":"f"}],
+  "ark": null,
   "verifies": false,
   "why": "f: the declarations are not sorted, each once"
 }

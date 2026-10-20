@@ -34,8 +34,9 @@ fn sessions_do_things() {
 
 /// Every generated module — plain IR with no declarations, a `Bool` built
 /// as a variant, rows as positional tuples — printed as ArkLang builds to
-/// itself and prints the same again (§1.15: `build(print(m)) == m` for
-/// every module, not only those the builders write). Falsified by printing
+/// itself, with the names the printer gave its binders, and prints the
+/// same again (§1.15: `build(print(m)) == m` for every module, not only
+/// those written in text). Falsified by printing
 /// a `Bool` built as a variant as `true`: the rebuilt function held a
 /// literal, and the module was another.
 #[test]

@@ -174,10 +174,11 @@ in
     oldModules = lib.mkOption {
       type = lib.types.listOf lib.types.path;
       default = [ ];
-      example = lib.literalExpression ''[ "''${harken-previous}/harken/domain/harken.ark" ]'';
+      example = lib.literalExpression ''[ "''${harken-previous}/harken/domain" ]'';
       description = ''
-        Module files this server is to hold as ones it has run before
-        (what `harken-domain` writes, `harken_server::hosted`): each one's
+        Modules this server is to hold as ones it has run before — a
+        domain's directory of ArkLang, a file of it, or a module file an
+        older release checked in (`harken_server::hosted`): each one's
         function bodies kept, so an intent a client built with it authors
         is sequenced though this server never started with it. Without it
         such an intent is held: no body crosses the wire, and the device

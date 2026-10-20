@@ -42,7 +42,7 @@ use ark::view::{query, splice, Patch, View};
 use demo::*;
 use support::counting::Counting;
 use support::json::{array, change as jchange, hexed, int as jint, object, quoted, schema as jschema, store as jstore, val};
-use support::vectors::{falsify, vector};
+use support::vectors::{ark_text, falsify, vector};
 
 // * Rows and changes
 
@@ -785,6 +785,7 @@ fn run(name: &str, c: &Case) -> Vec<(&'static str, String)> {
         ("query", quoted(name)),
         ("function_hash", quoted(&h.hex())),
         ("function_bytes", hexed(&c.f.to_bytes())),
+        ("ark", ark_text(&c.schema, &[(name, &c.f)])),
         ("schema", jschema(&c.schema)),
         ("input", val(&cx, &input_ty, &input)),
         ("ctx", object(&[("session", quoted(&c.ctx.session)), ("user", quoted(&c.ctx.actor))])),

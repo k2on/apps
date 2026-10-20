@@ -1,7 +1,8 @@
-//! §1.15 ArkLang: the reader, the printer's layout, and the lowering's
-//! words. The demo (`tests/demo.rs`, plain IR, no names) printed builds to
-//! itself; harken's whole module is `harken/domain/tests/text.rs`'s, and
-//! the builders' demo is `rust/ark-dev/tests/vectors.rs`'s.
+//! §1.15 ArkLang: the reader, the printer's layout, the lowering's words,
+//! names, sugar and directories. The demo (`tests/demo.rs`, plain IR, no
+//! names) printed builds to itself; harken's whole domain is
+//! `harken/domain/tests/text.rs`'s, and the text demo
+//! `rust/ark-dev/tests/vectors.rs`'s.
 
 #[path = "demo.rs"]
 mod demo;

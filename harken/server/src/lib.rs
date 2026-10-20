@@ -121,9 +121,10 @@ pub struct Config {
     /// The log, the kept listening sessions, the sign-in sessions and the
     /// scanner's replica.
     pub data: PathBuf,
-    /// A module file to host instead of harken's own ([`hosted::write`]).
+    /// A module to host instead of harken's own: a domain's directory, an
+    /// ArkLang file or a module file ([`hosted::Hosted::read`]).
     pub module: Option<PathBuf>,
-    /// Module files whose functions this server is to hold though it never
+    /// Modules whose functions this server is to hold though it never
     /// started with them (`HARKEN_OLD_MODULES`, comma-separated paths; what
     /// `services.harken.oldModules` sets): their bodies go in the content
     /// store, so an intent a client built with one is sequenced through it
@@ -198,8 +199,8 @@ impl Config {
     ///
     /// ```text
     /// HARKEN_DATA                   where the state lives (default: the temp dir)
-    /// HARKEN_MODULE                 a module file to host instead of harken's own
-    /// HARKEN_OLD_MODULES            module files to hold as run before, comma-separated
+    /// HARKEN_MODULE                 a module to host instead of harken's own: a domain's directory, an ArkLang file or a module file
+    /// HARKEN_OLD_MODULES            modules to hold as run before, comma-separated, read the same ways
     /// HARKEN_PUBLIC_URL             where a browser reaches this server
     /// HARKEN_DEV_AUTH=1             anyone is whoever they say
     /// HARKEN_OIDC_ISSUER, HARKEN_OIDC_CLIENT_ID, HARKEN_OIDC_CLIENT_SECRET_FILE

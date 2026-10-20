@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ark::author::Node;
+use ark::ir::Node;
 use ark::log::{EntryId, Seq};
 use ark::module::{Lib, Module};
 use ark::peer::Ctx;

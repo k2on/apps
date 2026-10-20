@@ -3,16 +3,16 @@
 A self-hosted music system: a library a server scans from a directory,
 playlists, one listening session per account across every device, and the
 speakers in the house as devices in it. All of it runs on ArkDB at spec v5
-(`docs/plan-v5.md`): one log, one domain written once in Rust with
-`#[ark::*]` and run by the one interpreter on the server, the desktop and
-the browser, and every query a view a client keeps up to date by the rows
+(`docs/plan-v5.md`): one log, one domain written once in ArkLang and run
+by the one interpreter on the server, the desktop and the browser, and every query a view a client keeps up to date by the rows
 a change touched.
 
 ```
-domain/    the domain, written with the Rust builders (src/); harken.ark, the
-           module file harken-domain writes, and domain.ark, the same module as
-           ArkLang (spec/AUTHORING.md), which builds to it; listening.rs, the listening
-           session as volatile tables (never the log) and the plays (the log)
+domain/    the domain, in ArkLang (spec/AUTHORING.md): schema.ark, types.ark,
+           keys.ark, library.ark, browse.ark, playlists.ark; listening.ark,
+           queue.ark, devices.ark and groups.ark, the listening session as
+           volatile tables (never the log); plays.ark (the log). host.rs is
+           the Rust each app includes beside its generated bindings
 server/    ark-server with harken's own parts: the scanner, the Home Assistant
            bridge, sign-in, /media, the web build, the admin page's listener;
            the NixOS module (server/README.md)
@@ -57,21 +57,21 @@ Four decisions that each show on screen:
   sentence, and each client shows it against the change it refused.
 
 Every query is a query over the relational subset of the language
-(`spec/AUTHORING.md`; `domain/domain.ark` prints them all): `library`, `albums`, `composers` and the
+(`spec/AUTHORING.md`; `domain/*.ark` is them all): `library`, `albums`, `composers` and the
 rest say what they read and how it joins, so a client holds any of them as
 a view (`ark_client::Client::watch`) that a change moves by the rows it
 touched (`docs/plan-v5.md` §1.10); the desktop's lists are views. The
 domain's tests hold it to what v4's was: the read model, the listening
 session transition for transition, every query maintained against a fresh
 evaluation, and convergence over a simulated fleet (`domain/tests/`).
-`harken/domain/harken.ark` is the module file — the binding map and every
-function's bytes — that a server's `HARKEN_MODULE` and
-`HARKEN_OLD_MODULES` read, and `checks.harken-domain` fails while it
-differs from what the source writes; `domain/domain.ark` is it printed,
-held to it by `domain/tests/text.rs`. When `domain/src` changes:
+The `.ark` files are the source of truth: the server and the client
+generate their bindings from them in `build.rs` and build the module from
+them; a server's `HARKEN_MODULE` may name another domain's directory (or a
+module file an older release checked in). `domain/tests/text.rs` holds
+every file to what the printer writes of it, comments aside, and
+`domain/tests/port.rs` every function to its pin. To check the directory:
 
-    cd rust && cargo run -p harken-domain -- ../harken/domain/harken.ark
-    cargo run -p ark-dev --bin arkc -- print ../harken/domain/harken.ark > ../harken/domain/domain.ark
+    cd rust && cargo run -p ark-dev --bin arkc -- check ../harken/domain
 
 ## The listening session
 
@@ -184,9 +184,9 @@ Everything is `nix`, from the repository root:
     nix build .#harken-web         # the browser demo, as a static directory (Pages)
     nix build .#harken-web-server  # the browser client harken-server serves
     nix build .#ark-admin          # the admin page the server's admin listener serves
-    nix build .#harken-domain      # harken.ark, as the source writes it, verified by arkc
-    nix flake check                # fmt, clippy and every Rust test; harken.ark
-                                   # is what the domain writes and it verifies;
+    nix build .#harken-domain      # the domain's directory, built and checked by arkc
+    nix flake check                # fmt, clippy and every Rust test; the domain
+                                   # builds and checks;
                                    # the vectors and traces; the NixOS module
 
 `nixosModules.default` is `services.harken` (`server/README.md` has its

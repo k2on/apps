@@ -1,6 +1,7 @@
 {
   "schema": [{"columns":[{"decl":"Id<playlist>","default":null,"name":"id","ty":{"t":"bytes"}},{"decl":"Text","default":null,"name":"name","ty":{"t":"bytes"}},{"decl":"Text","default":null,"name":"user_id","ty":{"t":"bytes"}}],"indexes":[{"columns":["user_id","name"],"unique":true}],"key":{"$int":"1"},"name":"playlist","refs":[],"space":"durable"},{"columns":[{"decl":"Id<playlist>","default":null,"name":"playlist_id","ty":{"t":"bytes"}},{"decl":"Text","default":null,"name":"track_id","ty":{"t":"bytes"}},{"decl":"Int","default":null,"name":"pos","ty":{"t":"int"}}],"indexes":[{"columns":["playlist_id","pos"],"unique":true}],"key":{"$int":"2"},"name":"item","refs":[{"column":"playlist_id","table":"playlist"}],"space":"durable"}],
   "functions": [{"bytes":"014c6f6f70000003010001054c6f6f70000000000001547265650000040100010102055472656500000000000000000300001b0000","hash":"5f8e6f0dba5f561272b247e15f3b9a86711b05553848605b6f788b4db0d636a4","name":"f"}],
+  "ark": null,
   "verifies": false,
   "why": "f: Loop contains itself outside a list or a sum"
 }

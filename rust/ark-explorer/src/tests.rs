@@ -2,15 +2,15 @@
 //! cell edit and a row delete become and which writer they reach, what a
 //! cell's or a field's text reads back as, how a table sorts and lights what
 //! changed, what a call becomes, and how the keys walk it — over a module of
-//! two tables written with the Rust builders (§1.15).
+//! two tables written in ArkLang (§1.15).
 
 use std::sync::OnceLock;
 
-use ark::author::Kind as FnKind;
-use ark::author::{assemble, if_, refuse_, seq, unit, Def1, Domain, Fun, Id, Input, Int, Node, Row, Schema, Sum, Table, Text};
+use ark::gen::{Id, Node};
 use ark::log::EntryId;
 use ark::peer::Ctx;
 use ark::store::{Change, Store};
+use ark::Domain;
 use iced::keyboard::{key::Named, Key, Modifiers};
 
 use crate::data::{crud_of, CrudVerbs, NoLog, Source, Ticket, Writer};
@@ -19,134 +19,73 @@ use crate::form::{self, Callable, Field, Form, Kind};
 use crate::model::{Called, Explorer, Grid, Msg, Outcome, Screen, FADE_MS, MAX_CHARS, MIN_CHARS};
 use crate::value::{self, parse_cell, text_of as cell_text, Ty, Value};
 
-#[derive(Schema)]
-pub struct People {
-    pub team: Table<Team>,
-    pub user: Table<User>,
-}
+/// A user table with its CRUD exposed, a team table with none, one query,
+/// and two mutations of the module's own on a second router.
+const PEOPLE: &str = r#"
+(schema (table team (name Text key) (size Int))
+  (table user (id (id user) key) (name Text) (team Text (refs team)) (admin Bool) (email (option Text))))
+(type UserKey (record (id (id user))))
+(type OfTeam (record (team Text)))
+(type NewTeam
+  (record (name (where Text (trim) (non-empty) "a team needs a name" (len 0 12)))
+    (size (where Int (fn (n) (and (>= n 1) (<= n 10))) "between 1 and 10"))))
+(type Level (sum (Low) (High)))
+(type Kick (record (user (id user)) (why (option Text)) (tags (where (list Text) (non-empty))) (level Level) (loud Bool)))
+(mutator people.insert_user ((input (row user))) (insert user input))
+(mutator people.update_user ((input (row user))) (update user input.id (fn (old) input)))
+(mutator people.put_user ((input (row user)))
+  (if (some? (get user input.id)) (update user input.id (fn (old) input)) (insert user input)))
+(mutator people.delete_user ((input UserKey)) (delete user input.id))
+(query people.members ((input OfTeam)) (list (row user)) (sort (filter user (fn (u) (== u.team input.team))) (fn (u) u.name)))
+(mutator teams.make_team ((input NewTeam)) (insert team (record (name input.name) (size input.size))))
+(mutator teams.kick ((input Kick)) (if (none? (get user input.user)) (refuse "no such user")) (delete user input.user))
+"#;
 
-#[derive(Row, Node, Clone, Debug, PartialEq)]
+#[derive(Node, Clone, Debug, PartialEq)]
 pub struct Team {
-    #[ark(key)]
-    pub name: Text,
-    pub size: Int,
+    pub name: String,
+    pub size: i64,
 }
 
-#[derive(Row, Node, Clone, Debug, PartialEq)]
+#[derive(Node, Clone, Debug, PartialEq)]
 pub struct User {
-    #[ark(key)]
     pub id: Id<User>,
-    pub name: Text,
-    #[ark(refs = Team)]
-    pub team: Text,
+    pub name: String,
+    pub team: String,
     pub admin: bool,
-    pub email: Option<Text>,
+    pub email: Option<String>,
 }
 
-#[derive(Input, Node, Clone, Debug, PartialEq)]
+#[derive(Node, Clone, Debug, PartialEq)]
 pub struct UserKey {
     pub id: Id<User>,
 }
 
-#[derive(Input, Node, Clone, Debug, PartialEq)]
-pub struct OfTeam {
-    pub team: Text,
-}
-
-#[derive(Input, Node, Clone, Debug, PartialEq)]
+#[derive(Node, Clone, Debug, PartialEq)]
 pub struct NewTeam {
-    #[ark(trim, non_empty, why = "a team needs a name", len = "..=12")]
-    pub name: Text,
-    #[ark(range = "1..=10", why = "between 1 and 10")]
-    pub size: Int,
+    pub name: String,
+    pub size: i64,
 }
 
-#[derive(Sum, Node, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Node, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Level {
     Low,
     High,
 }
 
 /// A mutation over every kind of field a form draws.
-#[derive(Input, Node, Clone, Debug, PartialEq)]
+#[derive(Node, Clone, Debug, PartialEq)]
 pub struct Kick {
     pub user: Id<User>,
-    pub why: Option<Text>,
-    #[ark(non_empty)]
-    pub tags: Vec<Text>,
+    pub why: Option<String>,
+    pub tags: Vec<String>,
     pub level: Level,
     pub loud: bool,
 }
 
-pub static INSERT_USER: Def1<User, ()> = Def1 {
-    name: "people.insert_user",
-    kind: FnKind::Mutator,
-    body: |input| People::db().user.insert(input).s(),
-};
-
-pub static UPDATE_USER: Def1<User, ()> = Def1 {
-    name: "people.update_user",
-    kind: FnKind::Mutator,
-    body: |input| People::db().user.update(input.f().id, |_u| input.clone()).s(),
-};
-
-pub static PUT_USER: Def1<User, ()> = Def1 {
-    name: "people.put_user",
-    kind: FnKind::Mutator,
-    body: |input| {
-        let db = People::db();
-        if_(
-            db.user.get(input.f().id).is_some(),
-            db.user.update(input.f().id, |_u| input.clone()),
-            db.user.insert(&input),
-        )
-    },
-};
-
-pub static DELETE_USER: Def1<UserKey, ()> = Def1 {
-    name: "people.delete_user",
-    kind: FnKind::Mutator,
-    body: |input| People::db().user.delete(input.f().id).s(),
-};
-
-pub static MEMBERS: Def1<OfTeam, Vec<User>> = Def1 {
-    name: "people.members",
-    kind: FnKind::Query,
-    body: |input| People::db().user.filter(|u| u.f().team.eq(input.f().team)).sort(|u| u.f().name),
-};
-
-pub static MAKE_TEAM: Def1<NewTeam, ()> = Def1 {
-    name: "teams.make_team",
-    kind: FnKind::Mutator,
-    body: |input| {
-        People::db()
-            .team
-            .insert(TeamEx {
-                name: input.f().name,
-                size: input.f().size,
-            })
-            .s()
-    },
-};
-
-pub static KICK: Def1<Kick, ()> = Def1 {
-    name: "teams.kick",
-    kind: FnKind::Mutator,
-    body: |input| {
-        let db = People::db();
-        let none = if_(db.user.get(input.f().user).is_none(), refuse_("no such user"), unit());
-        seq([none], db.user.delete(input.f().user).s())
-    },
-};
-
-/// A user table with its CRUD exposed, a team table with none, one query,
-/// and two mutations of the module's own on a second router.
 fn domain() -> &'static Domain {
     static D: OnceLock<Domain> = OnceLock::new();
-    D.get_or_init(|| {
-        let fns: [&'static dyn Fun; 7] = [&INSERT_USER, &UPDATE_USER, &PUT_USER, &DELETE_USER, &MEMBERS, &MAKE_TEAM, &KICK];
-        assemble(People::schema(), &fns).unwrap_or_else(|r| panic!("{r}"))
-    })
+    D.get_or_init(|| ark::sexp::build(PEOPLE).unwrap_or_else(|r| panic!("{r}")))
 }
 
 fn id(k: u8) -> Id<User> {

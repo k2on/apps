@@ -18,35 +18,37 @@
     (if (some? (get item playlist_id track_id))
       ()
       (let
-        ((x
+        ((last
            (first
              (take
-               (sort (filter item (fn (i) (== i.playlist_id playlist_id))) (fn (i) (desc i.pos)))
+               (sort (filter item (fn (item) (== item.playlist_id playlist_id)))
+                 (fn (item) (desc item.pos)))
                1))))
         (insert item
-          (record (playlist_id playlist_id) (track_id track_id) (pos (+ (?? x.pos 0) 1))))))
+          (record (playlist_id playlist_id) (track_id track_id) (pos (+ (?? last.pos 0) 1))))))
     (refuse "playlist_id: no such playlist")))
 
 (mutator demo.create_playlist
   ((name Name))
-  (if (== (len (filter playlist (fn (p) (and (== p.user_id ctx.user) (== p.name name))))) 0)
+  (if
+    (== (len (filter playlist (fn (mine) (and (== mine.user_id ctx.user) (== mine.name name))))) 0)
     (insert playlist (record (id (new-id playlist)) (name name) (user_id ctx.user)))))
 
 (query demo.items
   ((playlist_id (id playlist)))
   (list (row item))
-  (sort (filter item (fn (i) (== i.playlist_id playlist_id))) (fn (i) i.pos)))
+  (sort (filter item (fn (item) (== item.playlist_id playlist_id))) (fn (item) item.pos)))
 
 (mutator demo.remove_from_playlist
-  ((playlist_id (id playlist)) (text Text))
-  (delete item playlist_id text))
+  ((playlist_id (id playlist)) (track_id Text))
+  (delete item playlist_id track_id))
 
 (mutator demo.rename_playlist
   ((playlist_id (id playlist)) (name Name))
   (if (some? (get playlist playlist_id))
-    (update playlist playlist_id (fn (p) (record (id p.id) (name name) (user_id p.user_id))))
+    (update playlist playlist_id (fn (old) (record (id old.id) (name name) (user_id old.user_id))))
     (refuse "no such playlist")))
 
 (scope demo.top_two
-  ((demo_row DemoRow))
-  (match demo_row (Playlist (playlist2) true) (Item (item2) (<= item2.pos 2))))
+  ((row DemoRow))
+  (match row (Playlist (playlist) true) (Item (item) (<= item.pos 2))))

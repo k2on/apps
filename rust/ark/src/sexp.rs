@@ -1,39 +1,45 @@
-//! §1.15 ArkLang, the common text form of a module: S-expressions.
+//! §1.15 ArkLang, the text a domain is written in: S-expressions.
 //!
 //! **One reader rule**, `(head args…)`. Atoms are symbols, integers,
 //! strings `"…"` (`\"` and `\\` their only escapes) and bytes `0x…`; `;`
 //! comments run to the end of a line. A symbol may hold `.`: `input.title`
 //! is a field path when `input` is bound, else a declared name
 //! (`playlists.items`, `Clock.Paused`). [`read`] reads forms; [`layout`]
-//! prints one on a line when it ends by column 100, else its head on the
-//! first line and each argument on its own, two spaces further in.
+//! lays one out: on one line when it ends by column 100, else its head and
+//! its first argument (an atom, or one that fits) on the first line and
+//! each other argument on its own, two spaces further in.
 //!
-//! [`build`] lowers a file through the checker to a module and its
-//! functions, callees first; [`print`] writes one back — its schema, its
-//! declarations, its functions by name, a blank line apart. So
-//! `build(print(m)) == m` for every module and `print(build(t)) == t` for
-//! text as the printer writes it. `spec/AUTHORING.md` §1 is the grammar.
+//! [`build_dir`] reads a domain's directory — every `.ark` under it, all
+//! forms first, so neither order nor file means anything, a name declared
+//! twice refused with both places — and [`build_files`] lowers the forms
+//! through the checker to a module and its functions, callees first;
+//! [`load`] takes a directory, a file of text or a module file. [`print`]
+//! writes a module back — its schema, its declarations, its functions by
+//! name, a blank line apart ([`forms`], each by name). So `build(print(m))
+//! == m` for every module and `print(build(t)) == t` for text as the
+//! printer lays it out, its comments aside ([`uncommented`]).
+//! `spec/AUTHORING.md` is the grammar.
 //!
-//! What the bytes leave out the printer names: a binder from its type (a
-//! row by its table's initials, `playlist_id`, `n`) or its variant's field,
-//! a field by its declaration's names or its table's columns, a tuple's by
+//! A function keeps its binders' names (`Function::names`) and the printer
+//! writes them; without them it names a binder from its type (a row by its
+//! table's initials, `playlist_id`, `n`) or its variant's field. A field
+//! is named by its declaration or its table's columns, a tuple's by
 //! position (`pair.0`). A `none` and a `(record …)` take the type their
 //! place wants — a function's result, a branch's, a field's, an argument's,
-//! a row's — and `(as T …)` gives a `none`, `some` or `list` a type no
-//! place does. Variables are levels until a function is built
-//! ([`crate::author::close`]).
+//! a row's, a `map`'s element — and `(as T …)` gives a `none`, `some`,
+//! `list` or `record` a type no place does. `(?? o.f d)` and `(?. o f)` are
+//! the matches through an option they stand for.
 
 use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::mem::take;
 
-use crate::author::{close, levels, Domain, MARK};
 use crate::check::{type_of, Env, Types};
 use crate::codec::{bytes_enc, int_enc, Reader};
 use crate::hash::{hex, unhex, FnHash};
 use crate::interp::walk;
 use crate::ir::{CtxField, Decl, Effect, Expr, Function, Node, Refine, Rule, Std as StdFn, Un as UnOp};
-use crate::module::{Lib, Module, SPEC};
+use crate::module::{Domain, Lib, Module, SPEC};
 use crate::schema::{Column, Index, Ref, Schema, Space, Table};
 use crate::store::Dir;
 use crate::ty::Ty;
@@ -196,6 +202,30 @@ fn lay(x: &Sx, col: usize, tail: usize) -> String {
     out + ")"
 }
 
+/// `text` without its comments — each `;` outside a string to the end of
+/// its line — and the lines they leave blank, its forms a blank line apart:
+/// what [`print`] writes of a file it builds, when the file is laid out as
+/// the printer lays it out.
+pub fn uncommented(text: &str) -> String {
+    let mut out = String::new();
+    for line in text.lines() {
+        let (mut kept, mut quoted, mut prev) = (String::new(), false, ' ');
+        for c in line.chars() {
+            if c == ';' && !quoted {
+                break;
+            }
+            quoted ^= c == '"' && prev != '\\';
+            (prev, _) = (c, kept.push(c));
+        }
+        match kept.trim_end() {
+            "" if !out.is_empty() && !out.ends_with("\n\n") => out.push('\n'),
+            "" => {}
+            l => out += &format!("{l}\n"),
+        }
+    }
+    out.trim_end().to_string() + "\n"
+}
+
 /// `(head args…)` with a symbol for its head.
 pub fn form(x: &Sx) -> Option<(&str, &[Sx])> {
     match &x.k {
@@ -316,7 +346,8 @@ fn table_of<'a>(rows: &'a [(Table, Ty)], t: &Ty) -> Option<&'a Table> {
 }
 
 /// What `(some x)` and `(list x …)` declare by: `x`'s type, its
-/// refinements on top dropped and an `Id<t>` kept, as a builder's Rust is.
+/// refinements on top dropped and an `Id<t>` kept (the spelling every
+/// module's `Option<T>` and lists have had, which their hashes cover).
 fn infer(types: &Types, t: &Ty) -> Ty {
     match t {
         Ty::Named(n) if !n.starts_with("Id<") && n != "Text" => match types.decl(n) {
@@ -373,10 +404,10 @@ impl Lo {
         Types::new(&self.decls.clone().into_iter().collect::<Vec<_>>())
     }
 
-    /// The type and effect of `e` (levels or indices) with the scope bound.
+    /// The type and effect of `e` with the scope bound.
     fn type_of(&self, e: &Expr) -> R<(Ty, Effect)> {
         let stack: Vec<Ty> = self.scope.iter().map(|s| s.1.clone()).collect();
-        self.type_at(&stack, &close(e.clone(), stack.len() as u32))
+        self.type_at(&stack, e)
     }
     fn ty_of(&self, e: &Expr, at: At) -> R<Ty> {
         self.type_of(e).at(at).map(|t| t.0)
@@ -456,7 +487,7 @@ impl Lo {
             .map_or_else(|| fail(at, format!("no table {t}")), Ok)
     }
 
-    /// A type's name as the builders spell a declaration: `Option<Item>`.
+    /// A type's name as a declaration spells it: `Option<Item>`.
     fn spell(&mut self, t: &Ty) -> String {
         let row = self.rows().into_iter().find(|r| r.1 == *t);
         let mut all = |ts: Vec<Ty>| ts.iter().map(|t| self.spell(t)).collect::<Vec<_>>().join(", ");
@@ -616,7 +647,7 @@ impl Lo {
                             self.scope = vec![(names(ps)?.concat(), ty.clone())];
                             let e = self.ex(body, None);
                             (self.scope, self.binders) = saved;
-                            Rule::Refine(close(e?, 1))
+                            Rule::Refine(e?)
                         }
                         _ => return fail(r.at, "a rule: (utf8) (trim) (non-empty) (len …) (fn (x) …), its words after it"),
                     };
@@ -738,7 +769,7 @@ impl Lo {
             _ => (Ty::unit(), rest),
         };
         let ret = self.store(ret);
-        let body = close(self.body(body, Some(&ret), x.at)?, self.scope.len() as u32);
+        let body = self.body(body, Some(&ret), x.at)?;
         let mut types = take(&mut self.callees);
         take(&mut self.stored).iter().for_each(|t| self.declare(t, &mut types));
         let params: Vec<Ty> = self.scope.iter().map(|p| p.1.clone()).collect();
@@ -766,7 +797,7 @@ impl Lo {
         Ok(if es.len() == 1 { es.pop().unwrap() } else { Expr::Seq(es) })
     }
 
-    /// `f` with `names` bound at the next levels to `tys`.
+    /// `f` with `names` bound, innermost last, to `tys`.
     fn under<X>(&mut self, names: Vec<String>, tys: Vec<Ty>, f: impl FnOnce(&mut Self) -> R<X>) -> R<X> {
         let depth = self.scope.len();
         self.binders.extend(names.iter().cloned());
@@ -823,7 +854,7 @@ impl Lo {
         };
         let segs: Vec<&str> = n.split('.').collect();
         if let Some(l) = self.scope.iter().rposition(|s| s.0 == segs[0]) {
-            return self.path(Expr::Var(MARK + l as u32), &segs[1..], x.at);
+            return self.path(Expr::Var((self.scope.len() - 1 - l) as u32), &segs[1..], x.at);
         }
         Ok(match n {
             "true" | "false" => Expr::Lit(Ty::bool(), vec![(n == "true") as u8]),
@@ -867,11 +898,11 @@ impl Lo {
                     let [v, bs, body @ ..] = items(arm)? else {
                         return fail(arm.at, "(V (x …) body …) expected");
                     };
-                    let (ns, k) = (names(bs)?, fields.len() as u32);
+                    let ns = names(bs)?;
                     if flat(v) != label || ns.len() != fields.len() {
                         return fail(arm.at, format!("({label} ({} names) …) is due", fields.len()));
                     }
-                    arms.push(Lambda(k, bx(self.under(ns, fields, |me| me.body(body, want, arm.at))?)));
+                    arms.push(self.under(ns, fields, |me| me.body(body, want, arm.at))?);
                 }
                 Match(bx(s), arms)
             }
@@ -965,7 +996,7 @@ impl Lo {
                 let (Lambda(_, b), stack) = (&by, self.scope.iter().map(|s| s.1.clone()).chain([x.clone()]).collect::<Vec<_>>()) else {
                     unreachable!()
                 };
-                let k = self.type_at(&stack, &close((**b).clone(), stack.len() as u32)).at(at)?.0;
+                let k = self.type_at(&stack, b).at(at)?.0;
                 Group(bx(g), bx(by), bx(self.lam(&a[2], vec![k, Ty::list(x)], None)?))
             }
             "sort" => {
@@ -1068,7 +1099,7 @@ impl Lo {
             };
             let top = self.binders.len();
             let (mut some, ft) = self.under(vec![String::new()], vec![inner], |me| {
-                let v = me.path(Expr::Var(MARK + me.scope.len() as u32 - 1), &fs[i..], at)?;
+                let v = me.path(Expr::Var(0), &fs[i..], at)?;
                 let t = me.ty_of(&v, at)?;
                 Ok((v, t))
             })?;
@@ -1084,7 +1115,7 @@ impl Lo {
                 }
             };
             self.binders.push(String::new());
-            return Ok(Some(Expr::Match(bx(e), vec![none, Expr::Lambda(1, bx(some))])));
+            return Ok(Some(Expr::Match(bx(e), vec![none, some])));
         }
         match h {
             "??" => Ok(None),
@@ -1699,37 +1730,6 @@ pub fn build_files(files: &[(String, String)]) -> R<Domain> {
         lib: lo.lib,
         bodies,
     })
-}
-
-/// A fragment's expression, its type, and the declarations it makes.
-pub type Fragment = (Expr, Ty, Vec<(String, Decl)>);
-
-/// One form as an expression in a builder's function (§1.15): `vars` its
-/// free names, by level, with their types; the levels after them its own
-/// binders, which begin at `depth`.
-pub fn fragment(src: &str, schema: &Schema, decls: &[(String, Decl)], vars: &[(&str, Expr, Ty)], depth: u32) -> R<Fragment> {
-    let [x] = &read(src)?[..] else {
-        return Err(Refusal::new("a fragment is one form"));
-    };
-    let scope = vars.iter().map(|v| (v.0.to_string(), v.2.clone())).collect();
-    let mut lo = Lo {
-        schema: schema.clone(),
-        decls: decls.iter().cloned().collect(),
-        scope,
-        ..Lo::default()
-    };
-    let e = lo.ex(x, None)?;
-    let (t, k) = (lo.type_of(&e)?.0, vars.len() as u32);
-    let e = levels(e, &|l| {
-        if l < k {
-            vars[l as usize].1.clone()
-        } else {
-            Expr::Var(MARK + depth + l - k)
-        }
-    });
-    let mut d = BTreeMap::new();
-    take(&mut lo.stored).iter().for_each(|t| lo.declare(t, &mut d));
-    Ok((e, t, d.into_iter().collect()))
 }
 
 /// A module's printing context: its declarations, its columns' too.

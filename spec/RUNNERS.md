@@ -124,7 +124,8 @@ reaches every runtime through its traces (§ trace).
 
 `demo.json`: `{ark, hash, module}`, beside `demo.ark`, the file `ark`
 names: the demo (`rust/ark-dev/src/demo.ark`, its four mutators, its
-query and its scope) as ArkLang (`AUTHORING.md` §1). `module` is the hex
+query and its scope) in ArkLang (`AUTHORING.md`), the text it is written
+in, its binders' names its own (§1.15). `module` is the hex
 of the module file, `(Module, [body])` encoded (`Node`), the bodies in
 the order of their hashes, and `hash` the module's hash.
 **Do and compare**: read and lower `demo.ark` — its schema, its
@@ -133,3 +134,8 @@ bodies; its file's bytes must be `module` and its hash `hash`; that module
 printed must be `demo.ark` byte for byte. A runtime without a printer
 runs the first half and says it skipped the second. `text/falsify/` holds
 the demo with one `pos` stepped by two, which must fail.
+
+The `ark` field of an `eval/`, `verify/` or `views/` vector is its module
+as ArkLang, printed from its functions — informative: the bytes beside it
+are normative and a runner may ignore the text. It is `null` where the
+functions do not check (`verify/refused/`), which nothing can print.

@@ -4,30 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use ark::sexp::{forms, layout, read, Sx, K};
-
-/// `text` without its comments: each `;` to the end of its line (outside a
-/// string), lines left blank dropped, forms a blank line apart.
-fn uncommented(text: &str) -> String {
-    let mut out = String::new();
-    for line in text.lines() {
-        let (mut kept, mut quoted, mut prev) = (String::new(), false, ' ');
-        for c in line.chars() {
-            if c == ';' && !quoted {
-                break;
-            }
-            quoted ^= c == '"' && prev != '\\';
-            prev = c;
-            kept.push(c);
-        }
-        match kept.trim_end() {
-            "" if !out.is_empty() && !out.ends_with("\n\n") => out.push('\n'),
-            "" => {}
-            l => out += &format!("{l}\n"),
-        }
-    }
-    out.trim_end().to_string() + "\n"
-}
+use ark::sexp::{forms, layout, read, uncommented, Sx, K};
 
 /// The name a top-level form declares: a table's, a type's, a function's.
 fn declared(x: &Sx) -> String {

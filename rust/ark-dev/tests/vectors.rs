@@ -13,7 +13,6 @@ use ark::log::EntryId;
 use ark::peer::{Input, Output};
 use ark::schema::Space;
 use ark_client::Act;
-use ark_dev::demo::{domain, room};
 use ark_dev::fuzz::session;
 use ark_dev::trace::{record, replay};
 use ark_dev::vectors::{bytes_of, fleet, fleet_script, json_of, on_disk, op_json, sessions, vector};
@@ -258,29 +257,17 @@ fn run_text(v: &Value, ark: &str) -> Result<(), String> {
     same.then_some(()).ok_or("the text is not the module".into())
 }
 
-/// `text/`: the demo (`ark_dev::demo::domain`, written with the builders)
-/// as ArkLang, `rust/ark-dev/src/demo.ark`: printed from the builders'
-/// module it is that file, and built it is that module byte for byte;
-/// beside it, its module file and hash. The room, printed, builds to
-/// itself. The falsified one, a position stepped by two, does not pass.
-/// Falsified by printing a sort's `desc` as `asc`: the printed demo built
-/// to another `demo.add_to_playlist`.
+/// `text/`: the demo, `rust/ark-dev/src/demo.ark`, the text it is written
+/// in — built, it prints as itself — beside its module file and hash; the
+/// room, `room.ark`, prints as itself, its comments aside. The falsified
+/// one, a position stepped by two, does not pass. Falsified by printing a
+/// sort's `desc` as `asc`: the demo printed was not its text.
 #[test]
 fn text() {
-    let src = include_str!("../src/demo.ark");
-    for d in [domain(), room()] {
-        let fns: Vec<Function> = d.bodies.values().map(|b| Function::from_bytes(b).unwrap()).collect();
-        let printed = ark::sexp::print(&d.module, &fns).unwrap();
-        let built = ark::sexp::build(&printed).unwrap_or_else(|r| panic!("{r}\n{printed}"));
-        let unnamed = |d: &ark::Domain| {
-            let mut fs: Vec<Vec<u8>> = d.bodies.values().map(|b| Function::from_bytes(b).unwrap().unnamed().to_bytes()).collect();
-            fs.sort();
-            fs
-        };
-        assert_eq!((&built.module.schema, unnamed(&built)), (&d.module.schema, unnamed(&d)), "{printed}");
-        if d.module.schema.tables[0].name == "playlist" {
-            assert_eq!(printed, src, "rust/ark-dev/src/demo.ark is not the demo printed");
-        }
+    let src = ark_dev::demo::DEMO;
+    for text in [src, ark_dev::demo::ROOM] {
+        let d = ark::sexp::build(text).unwrap();
+        assert_eq!(ark::sexp::print(&d.module, &d.functions()).unwrap(), ark::sexp::uncommented(text));
     }
     let d = ark::sexp::build(src).unwrap();
     let file = (d.module.clone(), d.bodies.values().cloned().collect::<Vec<_>>()).to_bytes();
@@ -289,7 +276,7 @@ fn text() {
     vector("text", "demo.ark", src).unwrap();
     vector("text", "demo.json", &format!("{v:#}\n")).unwrap();
     only("text", &BTreeSet::from(["demo.json".to_string()]));
-    let wrong = src.replacen("(?? x.pos 0) 1)", "(?? x.pos 0) 2)", 1);
+    let wrong = src.replacen("(?? last.pos 0) 1)", "(?? last.pos 0) 2)", 1);
     assert_ne!(wrong, src, "the falsified text is the text");
     let mut f = v.clone();
     f["expect"] = json!("fail");

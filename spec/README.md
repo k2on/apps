@@ -1,16 +1,21 @@
 # The ArkDB specification, version 5
 
-`rust/ark` is the specification: its modules are normative, their doc
-comments are the prose, and a runtime in another language is conformant
-when it agrees with them on the vectors under `vectors/`, which
-`rust/ark/tests` and `rust/ark-dev/tests` write (`ARK_WRITE_VECTORS=1`)
-and otherwise hold to what is on disk; written over an empty `vectors/`
-they are the tree byte for byte, which the flake's `vectors` check holds.
-This file is the index; `RUNNERS.md` says what a runner does with the
-vectors `rust/ark-dev` writes, and `AUTHORING.md` is ArkLang, the common
-text form, and the Rust builders. `docs/plan-v5.md` is the design; where a module and this
-file disagree, the module is right. v5 replaced v4 here (R1); v4's
-specification is in the history, at the commits `kotlin/FROZEN.md` names.
+**The vectors are normative.** A runtime in another language is
+conformant when it agrees with the vectors under `vectors/`. **Rust is the
+reference implementation that writes them**: `rust/ark`'s modules, whose
+doc comments are the prose, and `rust/ark/tests` and `rust/ark-dev/tests`,
+which write the vectors (`ARK_WRITE_VECTORS=1`) and otherwise hold them to
+what is on disk; written over an empty `vectors/` they are the tree byte
+for byte, which the flake's `vectors` check holds. **ArkLang is how they
+are written**: a vector's module is carried as ArkLang text beside its
+bytes (`text/`, and the `ark` field of `eval/`, `verify/` and `views/`),
+the text informative and the bytes normative — a runner may ignore the
+text. This file is the index; `RUNNERS.md` says what a runner does with
+the vectors `rust/ark-dev` writes, and `AUTHORING.md` is ArkLang, the
+language a domain is written in, and the bindings generated from a module.
+`docs/plan-v5.md` is the design; where a module and this file disagree,
+the module is right. v5 replaced v4 here (R1); v4's specification is in
+the history, at the commits `kotlin/FROZEN.md` names.
 
 ## §1 Types and bytes
 
@@ -114,8 +119,8 @@ the module's own.
 | 1.9 | `peer.rs` (the volatile space) | live state: tables marked `Volatile`, a second machine of the same kind over them on the same socket, frames tagged with their `space`; `on_join`, `on_leave` and `on_restore` entries the authority authors; not in the state hash, not journaled |
 | 1.10 | `view.rs` | maintained views: one node per operator of a query's relational spine, each updated from a delta; after every step the answer equals a fresh one — a fresh read is the same nodes hydrated once, the one evaluator of reads (K3a) — and the patches (`Insert`, `Remove`, `Update` at a position) splice the old list into the new |
 | 1.11 | `frames.rs` | the frames, one derived `Sum` of four: `Hello`, `Page` (a peer's intents, or its chain made alone; an authority's log), `Snapshot`, `Verdict` (`Ok`, `Refused`, `Held`). A peer sends pages of its chain; an authority answers with verdicts and its own pages. No frame carries a function's body (K2) |
-| 1.15 | `sexp.rs` | ArkLang, the common text form: S-expressions, one reader rule; `build` lowers a file through the checker to a module, `print` writes a module, `build(print(m)) == m`; the grammar is `AUTHORING.md` §1 |
-| 1.15 | `author.rs`, `rust/ark-macros` (the derives) | the Rust builders: a function a `static` `DefN` whose body builds `Expr`, records and sums by the derives, their names into the module's declarations; `text()` embeds one ArkLang form |
+| 1.15 | `sexp.rs` | ArkLang, the language a domain is written in: S-expressions, one reader rule; `build_dir` reads a domain's directory (every `.ark`, all forms before any name, a name declared twice refused) and lowers it through the checker to a module, `load` a directory, a text or a module file; `print` writes a module, `build(print(m)) == m`, a function's binders' names kept; the grammar is `AUTHORING.md` |
+| 1.15 | `gen.rs` | bindings generated from a module, types only: a struct per row and record, an enum per sum, a stub per function calling it by name; `fits`, whether a loaded module is one bindings may call (`AUTHORING.md` §9) |
 
 The drivers are not the specification but the reference reading of it:
 `rust/ark-client` (a client: storage, the link, views for a UI, the live

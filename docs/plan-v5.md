@@ -435,43 +435,57 @@ that it is a parser; §1.14 says how that is kept small.
 - **The browser.** The iced web build runs the Rust store in wasm today;
   nothing here needs anything wasm lacks. Not verified until D1.
 
-### 1.15 Authoring, revised: ArkLang, builders, phones
+### 1.15 Authoring: the domain is written in ArkLang
 
-Three layers, as SQL has them. **The module** (§1.5): what runtimes load
-and hash; a phone loads the binary module, calls functions by name and
-needs nothing else. **ArkLang** is the *common language*: S-expressions,
-`ark::sexp`. It is what `arkc print` writes from a module, what the
-explorer shows, what the docs and the `text/` vectors use, what anyone in
-any language can hand-write and `arkc build`. One reader rule, `(head
-args…)`, so there is one spelling by construction, the printer is a tree
-walk, and a parser in any runtime is small. `build(print(m)) == m` for
-every module; `print(build(t)) == t` for canonical `t`. **Builders** are
-typed, per language, and construct the IR; Rust authoring stays on
-`ark::author` (A2's), whose `text()` embeds one ArkLang form. Whether Rust
-also gets a macro over ArkLang is deferred. Another language's builders
-are held to one rule: its demo emits the module hash Rust's does.
+**The module** (§1.5) is what runtimes load, check, hash and call by name.
+**ArkLang** (`ark::sexp`, `spec/AUTHORING.md`) is the language a domain is
+written in: S-expressions, one reader rule, one spelling. The decisions:
 
-The grammar (`spec/AUTHORING.md` §1 is the reference). Atoms are symbols,
-integers, strings (`\"`, `\\`), `true`/`false`/`none`, bytes `0x…`; `;`
-comments. A dotted symbol whose head is bound is a field path
-(`input.playlist_id`, `ctx.user`), else a declared name. Top level:
-`(schema (table N (COL TY [key]) … (index [unique] COL…)…)…)`, `(type N
-TY)`, and `(mutator|live N ((P TY)…) BODY…)`, `(query|helper|guard N
-((P TY)…) RET BODY…)`, `(scope N ((ROW TY)) BODY)`; a body of several
-forms is a sequence. Types: `Int Text Bytes Bool (id T) (option T) (list
-T) (tuple T…) (record (F T)…) (sum (V (F T)…)…)`, refinements `(where T
-(trim) (len LO HI) (non-empty) … "words")`. Expressions: `let`, `if`,
-`match`, `record`, `list`, `tuple`, `some`/`none`, `??`, `none?`,
-`some?`, the operators, `refuse`, `fn`, the reads and writes by name,
-`ctx.*`, `(new-id T)`, `(has-role r)`, `std.rs`'s names with `-`, and
-`(NAME ARG…)` calls. Printed one line to column 100, else head first and
-each argument on its own line two spaces in; comments are not kept.
+1. **A domain is a directory of `.ark` files** (`ark::sexp::build_dir`).
+   Every `**/*.ark` under it is read in sorted path order, all forms first,
+   then names resolved, so order and layout carry no meaning; files make no
+   namespaces, dotted names do; `(schema …)` forms merge; a name declared
+   twice is refused, both files and lines said.
+2. **The text is the source of truth; the binary module is derived.** No
+   module file is checked in. The server builds its module from
+   `HARKEN_MODULE` — a directory, an ArkLang file, or a module file for the
+   old modules it holds (`ark::sexp::load`) — and serves it by hash as
+   before; the flake's `harken-domain` is the directory, built and checked.
+3. **`arkc`** is a small CLI over library calls: `check MODULE…`, `print
+   MODULE [-o DIR]` (a file per dotted prefix, `schema.ark`, `types.ark`),
+   `compat OLD NEW`, `build MODULE -o FILE`.
+4. **Bindings are generated from the module, types only** (`ark::gen`): a
+   struct per row and record, an enum per sum, an alias per refinement, a
+   stub per function calling it by name through `Call`. An app's `build.rs`
+   writes them to `OUT_DIR` from the domain's directory. At load a module is
+   held to them (`fits`): its schema a prefix-extension of theirs, every
+   type and function they name of their structure, a row grown by appended
+   columns read by its prefix. No function body is ever generated.
+5. **No builders**: `ark::author` and the `Row`/`Input`/`Sum`/`Schema`
+   derives are gone (`Node` stays). harken's domain crate is its directory,
+   its tests, and `host.rs`, the host's Rust each app includes beside its
+   bindings (the session read model; the keys, by the domain's helpers).
+6. **The spec is readable**: `eval/`, `verify/`, `views/` vectors carry
+   their module as ArkLang beside the bytes, the text informative.
 
-**Names are in the module.** A declaration carries its names
-(`Decl::names`): a record's fields, a sum's variants and theirs. So the
-printer never writes `input.3` or `#1`; it names binders from their types
-or variants' fields. Typing is the checker's: a `none` and a `(record …)`
-take the type their place wants, and `(as T e)` gives one where none does.
+**The language.** Top level: `(schema (table …)…)`, `(type N TY)`,
+`(mutator|live N ((P TY)…) BODY…)`, `(query|helper|guard N ((P TY)…) RET
+BODY…)`, `(scope N ((ROW TY)) BODY)`. Expressions: `let`, `if`, `match`,
+`record`, `tuple`, `list`, `some`/`none`, `as`, `(?? o.f d)` and `(?. o f)`
+(the matches through an option they stand for), the operators, `refuse`,
+`fn`, reads and writes by table, `ctx.*`, `new-id`, `has-role`, the
+standard functions, `(NAME ARG…)`. A place types what it wants: a `none`,
+a `(record …)`, a `map`'s element; `(as T e)` where none does.
+
+**Names are in the module**: a declaration keeps its fields and variants
+(A3), a function its binders' names (`Function::names`, in walk order), so
+the printer writes the author's. A name is in a function's hash: renaming a
+local is a new function, as renaming a field is; the body stays De Bruijn,
+and `port.rs` holds every harken function to its pre-A3 pin, names aside.
+**The layout**: one line when a form ends by column 100, its closing `)`s
+counted; else head and first argument (an atom, or one that fits) on the
+first line, the rest one per line two spaces in. `print(build(t)) == t`
+for every file of `harken/domain`, comments aside.
 
 ---
 

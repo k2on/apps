@@ -17,7 +17,7 @@
 //! is shown is the authority's own state, a snapshot per request, and what
 //! it writes the server authors as itself.
 
-use ark::author::Node;
+use ark::gen::Node;
 use ark::log::Seq;
 use ark::store::Change;
 

@@ -29,7 +29,7 @@ use ark::store::Store;
 use ark::ty::Ty;
 use demo::*;
 use support::json::{array, change, hexed, int as jint, object, quoted, store as jstore, val};
-use support::vectors::{falsify, vector};
+use support::vectors::{ark_text, falsify, vector};
 
 fn entry(user: &str, roles: &[&str], local: i64) -> Ctx {
     Ctx {
@@ -107,6 +107,7 @@ fn steps_vector(f: &Function, name: &str, store: Store, inputs: Vec<Vec<u8>>) ->
         ("function", quoted(name)),
         ("function_hash", quoted(&f.hash().hex())),
         ("function_bytes", hexed(&f.to_bytes())),
+        ("ark", ark_text(&sch, &[(name, f)])),
         ("store_before", before),
         ("ctx", ctx_json(&entry("alice", &[], 1))),
         ("steps", steps),
@@ -127,7 +128,9 @@ fn add_to_playlist_steps() {
     vector("eval", "add-to-playlist.json", &right);
     let mut wrong = add_steps(&add_to_playlist());
     let asc = add_steps(&ascending_add());
-    wrong[5] = asc[5].clone();
+    let steps = |v: &[(&str, String)]| v.iter().position(|p| p.0 == "steps").unwrap();
+    let at = steps(&wrong);
+    wrong[at] = asc[steps(&asc)].clone();
     falsify("eval", "add-reads-pos-ascending.json", &wrong, &right);
 }
 
@@ -187,6 +190,7 @@ fn checks() {
                     ("create_playlist", quoted(&create.hash().hex())),
                 ]),
             ),
+            ("ark", ark_text(&schema(), &[(ADD, &add), (CREATE, &create)])),
             ("store_before", jstore(&schema(), &s)),
             ("ctx", ctx_json(&c)),
             ("cases", format!("[{}]", cases.join("\n,"))),
@@ -264,6 +268,7 @@ fn has_role() {
         "has-role.json",
         &[
             ("function_bytes", hexed(&f.to_bytes())),
+            ("ark", ark_text(&schema(), &[("demo.feature", &f)])),
             ("store_before", jstore(&schema(), &s)),
             ("cases", format!("[{}]", cases.join("\n,"))),
         ],
@@ -337,7 +342,9 @@ fn raw_writes() {
         p.sort_by_key(|x| x.0);
         steps.push(object(&p));
     }
-    vector("eval", "raw-put-row.json", &[("steps", format!("[{}]", steps.join("\n,")))]);
+    let (pp, pi) = (put_row("playlist"), put_row("item"));
+    let ark = ark_text(&sch, &[("raw.put_playlist", &pp), ("raw.put_item", &pi)]);
+    vector("eval", "raw-put-row.json", &[("ark", ark), ("steps", format!("[{}]", steps.join("\n,")))]);
     let before = jstore(&sch, &s);
     let mut key = bytes_enc(&pid(1));
     key.extend(bytes_enc(b"t7"));
@@ -357,7 +364,17 @@ fn raw_writes() {
     vector(
         "eval",
         "raw-delete-row.json",
-        &[("store_before", before), ("steps", format!("[{}]", steps.join("\n,")))],
+        &[
+            (
+                "ark",
+                ark_text(
+                    &sch,
+                    &[("raw.delete_playlist", &delete_row("playlist")), ("raw.delete_item", &delete_row("item"))],
+                ),
+            ),
+            ("store_before", before),
+            ("steps", format!("[{}]", steps.join("\n,"))),
+        ],
     );
 }
 
@@ -460,6 +477,17 @@ fn list_cases(clamp: bool) -> Vec<(&'static str, String)> {
         ("slice-past-the-end", &slice, two(&abcd, 0, 5)),
         ("slice-below-zero", &slice, two(&abcd, -1, 2)),
     ];
+    let ark = ark_text(
+        &sch,
+        &[
+            ("list.concat", &cat),
+            ("list.insert", &insert_),
+            ("list.insert_after", &after),
+            ("list.remove_at", &remove),
+            ("list.move", &mv),
+            ("list.slice", &slice),
+        ],
+    );
     let lib = Lib::default();
     let out = cases.into_iter().map(|(name, f, input)| {
         let mut s = Store::new(sch.clone());
@@ -474,6 +502,7 @@ fn list_cases(clamp: bool) -> Vec<(&'static str, String)> {
     });
     vec![
         ("schema", support::json::schema(&sch)),
+        ("ark", ark),
         ("cases", format!("[{}]", out.collect::<Vec<_>>().join("\n,"))),
     ]
 }

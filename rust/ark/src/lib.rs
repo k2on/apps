@@ -22,7 +22,6 @@ extern crate self as ark;
 /// What a module is assembled into (§1.15).
 pub use module::Domain;
 
-pub mod author;
 pub mod check;
 pub mod codec;
 pub mod frames;

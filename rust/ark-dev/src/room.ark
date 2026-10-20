@@ -1,0 +1,37 @@
+; The room: live state over volatile tables of its own (§1.9). Who is here,
+; which `on_join` and `on_leave` write and `on_restore` keeps; a name a
+; device renames itself by; and a pointer each device moves, which a client
+; relays as ephemeral.
+(schema (table here volatile (session Text key) (name Text) (since Int))
+  (table pointer volatile (session Text key) (x Int)))
+
+; A device as `on_join` and `on_leave` are told of it.
+(type Arrival (record (session Text) (name Text)))
+
+(live room.on_join
+  ((arrival Arrival))
+  (delete here arrival.session)
+  (insert here (record (session arrival.session) (name arrival.name) (since ctx.now))))
+
+(live room.on_leave
+  ((arrival Arrival))
+  (delete pointer arrival.session)
+  (delete here arrival.session))
+
+; After a restart: who was here is kept, every pointer let go.
+(live room.on_restore () (map pointer (fn (it) (delete pointer it.session))) ())
+
+(live room.point
+  ((x Int))
+  (delete pointer ctx.session)
+  (insert pointer (record (session ctx.session) (x x))))
+
+(query room.present () (list (row here)) (filter here (fn (one) (>= one.since 0))))
+
+(live room.rename
+  ((name Text))
+  (if (some? (get here ctx.session))
+    (update here
+      ctx.session
+      (fn (one) (record (session one.session) (name name) (since one.since))))
+    (refuse "not here")))

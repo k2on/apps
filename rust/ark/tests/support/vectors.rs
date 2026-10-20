@@ -33,3 +33,23 @@ pub fn falsify(d: &str, name: &str, wrong: &[(&str, String)], right: &[(&str, St
     parts.push(("expect", "\"fail\"".into()));
     vector(&format!("{d}/falsify"), name, &parts);
 }
+
+/// `fns` over `schema` as ArkLang (§1.15), quoted: a vector's module as
+/// text beside its bytes — informative, the bytes normative, and a runner
+/// may ignore it — or `null` where the functions do not check.
+pub fn ark_text(schema: &ark::schema::Schema, fns: &[(&str, &ark::ir::Function)]) -> String {
+    let mut bound: Vec<(String, ark::hash::FnHash)> = fns.iter().map(|(n, f)| (n.to_string(), f.hash())).collect();
+    bound.sort();
+    bound.dedup_by(|a, b| a.0 == b.0);
+    let mut types: Vec<(String, ark::ir::Decl)> = fns.iter().flat_map(|(_, f)| f.types.clone()).collect();
+    types.sort_by(|a, b| a.0.cmp(&b.0));
+    types.dedup_by(|a, b| a.0 == b.0);
+    let module = ark::module::Module {
+        spec: ark::module::SPEC,
+        schema: schema.clone(),
+        types,
+        bindings: bound,
+    };
+    let all: Vec<ark::ir::Function> = fns.iter().map(|(_, f)| (*f).clone()).collect();
+    ark::sexp::print(&module, &all).map_or("null".into(), |t| super::json::quoted(&t))
+}

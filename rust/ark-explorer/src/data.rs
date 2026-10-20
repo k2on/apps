@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use ark::author::Node;
+use ark::gen::Node;
 use ark::hash::FnHash;
 use ark::ir::{Effect, Expr};
 use ark::log::{Entry, Seq};
