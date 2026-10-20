@@ -15,7 +15,7 @@ use std::sync::Arc;
 use ark5::codec::bytes_enc;
 use ark5::frames::Frame;
 use ark5::hash::FnHash;
-use ark5::log::{Durable, EntryId};
+use ark5::log::{Durable, EntryId, Origin};
 use ark5::peer::{Ctx, Input, Journal, Peer, Procedure, Role};
 use ark5::schema::{Column, Schema, Table};
 use ark5::store::{Change, Read, Store};
@@ -85,7 +85,7 @@ fn a_log_reopened_under_a_wider_schema_keeps_head_chain_and_rows() {
     let mut alice = replica("alice", demo::cas());
     for (f, input) in [
         (CREATE, create_input("Road")),
-        (ADD, pair_input(&EntryId::of("alice-session", 1).draw(0), "t1")),
+        (ADD, pair_input(&EntryId::of(Origin::named("alice-session"), 1).draw(0), "t1")),
     ] {
         let o = alice.step(mutate(f, input, 1));
         let (_, fan) = deliver_up(&mut server, &who("alice"), &o);

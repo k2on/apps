@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use ark5::hash::{hex, unhex};
 use ark5::ir::Node;
-use ark5::log::{Durable, Entry, EntryId, Logged, Snapshot};
+use ark5::log::{Durable, Entry, EntryId, Logged, Origin, Snapshot};
 use ark5::module::Lib;
 use ark5::peer::{Cas, Input, Output, Peer, Role, Who};
 use ark5::schema::{Schema, Space};
@@ -96,11 +96,11 @@ pub fn record(from: &str, c: &Client) -> String {
         .flatten()
         .map(|(act, out, at)| {
             let step = match act {
-                Act::Open(w, f, j) => {
+                Act::Open(w, o, f, j) => {
                     let joining = j.clone().map(|(n, h, c)| hex(&((n, h), c).to_bytes()));
-                    json!({"fork": f.map(|(n, h)| json!([n, h.hex()])), "joining": joining, "t": "open", "who": who(w)})
+                    json!({"fork": f.map(|(n, h)| json!([n, h.hex()])), "joining": joining, "origin": hex(&o.0), "t": "open", "who": who(w)})
                 }
-                Act::SignIn(w) => json!({"t": "sign_in", "who": who(w)}),
+                Act::SignIn(w, o) => json!({"origin": hex(&o.0), "t": "sign_in", "who": who(w)}),
                 Act::Step(s, i) => {
                     let out: Vec<Value> = out.iter().map(output).collect();
                     json!({"after": at.as_ref().map(state), "in": input(i), "out": out, "space": space(*s), "t": "step"})
@@ -130,12 +130,13 @@ impl Player {
         }
     }
 
-    fn fresh(&self, who: &Who, space: Space) -> Option<Peer> {
+    fn fresh(&self, who: &Who, origin: Origin, space: Space) -> Option<Peer> {
         let m = match space {
             Space::Durable => &self.config.log,
             Space::Volatile => &self.config.live.as_ref()?.module,
         };
         let mut p = Peer::new(m.schema.clone(), m.cas.clone(), Role::Replica, who.clone()).in_space(space);
+        p.origin = origin;
         p.device = self
             .config
             .live
@@ -155,8 +156,8 @@ impl Player {
     /// One act; for a step, what the machine says.
     pub fn act(&mut self, a: &Act) -> Vec<Output> {
         match a {
-            Act::Open(w, f, j) => {
-                (self.log, self.live) = (self.fresh(w, Space::Durable), self.fresh(w, Space::Volatile));
+            Act::Open(w, o, f, j) => {
+                (self.log, self.live) = (self.fresh(w, *o, Space::Durable), self.fresh(w, *o, Space::Volatile));
                 if let Some(l) = &mut self.log {
                     if f.is_some() {
                         l.role = ark5_client::alone_at(*f);
@@ -164,11 +165,21 @@ impl Player {
                     l.joining = j.clone();
                 }
             }
-            Act::SignIn(w) => {
+            Act::SignIn(w, o) => {
+                let mut same = true;
                 if let Some(l) = &mut self.log {
-                    (l.me, l.local) = (w.clone(), 0);
+                    same = l.origin == *o;
+                    if !same {
+                        (l.origin, l.local) = (*o, 0);
+                    }
+                    l.joining = l.joining.take().filter(|_| (&l.me.actor, &l.me.roles) == (&w.actor, &w.roles));
+                    l.me = w.clone();
                 }
-                self.live = self.fresh(w, Space::Volatile);
+                let local = self.live.as_ref().filter(|_| same).map_or(0, |x| x.local);
+                self.live = self.fresh(w, *o, Space::Volatile);
+                if let Some(x) = &mut self.live {
+                    x.local = local;
+                }
             }
             Act::Step(s, i) => {
                 let p = match s {
@@ -186,6 +197,10 @@ impl Player {
 
 fn bytes(v: &Value) -> Result<Vec<u8>, String> {
     v.as_str().and_then(unhex).ok_or_else(|| format!("not hex: {v}"))
+}
+
+fn origin_of(v: &Value) -> Result<Origin, String> {
+    Ok(Origin(bytes(v)?.try_into().map_err(|_| "an origin is 16 bytes")?))
 }
 
 fn module_of(v: &Value) -> Result<ark5_client::Module, String> {
@@ -301,9 +316,9 @@ pub fn replay(text: &str) -> Result<usize, String> {
                 } else {
                     Some(<((i64, ark5::hash::EntryHash), Vec<Logged>)>::from_bytes(&bytes(j)?).map_err(|r| r.0)?)
                 };
-                Act::Open(who_of(&s["who"]), fork, joining.map(|((n, h), c)| (n, h, c)))
+                Act::Open(who_of(&s["who"]), origin_of(&s["origin"])?, fork, joining.map(|((n, h), c)| (n, h, c)))
             }
-            "sign_in" => Act::SignIn(who_of(&s["who"])),
+            "sign_in" => Act::SignIn(who_of(&s["who"]), origin_of(&s["origin"])?),
             _ => Act::Step(
                 if s["space"] == "volatile" { Space::Volatile } else { Space::Durable },
                 input_of(&s["in"])?,

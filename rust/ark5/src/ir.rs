@@ -26,7 +26,7 @@ use ark5_macros::Node;
 
 use crate::codec::{put_bytes, put_int, put_list, Reader};
 use crate::hash::{EntryHash, FnHash, ModuleHash, SchemaHash, StateHash, TypeHash};
-use crate::log::EntryId;
+use crate::log::{EntryId, Origin};
 use crate::store::Dir;
 use crate::ty::Ty;
 use crate::Refusal;
@@ -217,7 +217,7 @@ macro_rules! fixed {
         }
     )*};
 }
-fixed!(FnHash: 32, StateHash: 32, ModuleHash: 32, TypeHash: 32, EntryHash: 32, SchemaHash: 32, EntryId: 16);
+fixed!(FnHash: 32, StateHash: 32, ModuleHash: 32, TypeHash: 32, EntryHash: 32, SchemaHash: 32, EntryId: 16, Origin: 16);
 
 // * The language
 

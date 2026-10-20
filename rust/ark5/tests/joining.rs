@@ -13,13 +13,13 @@ mod support {
 }
 
 use ark5::frames::Frame;
-use ark5::log::{Durable, EntryId};
+use ark5::log::{Durable, EntryId, Origin};
 use ark5::peer::{Input, Output};
 use demo::{create_input, pair_input, ADD, CREATE};
 use support::wire::*;
 
 fn road() -> [u8; 16] {
-    EntryId::of("eve-session", 1).draw(0)
+    EntryId::of(Origin::named("eve-session"), 1).draw(0)
 }
 
 /// Alone, a refused intent leaves the next to take its `local`. Falsified
@@ -59,7 +59,7 @@ fn a_chain_with_a_gap_is_taken_whole() {
             }) = Frame::dec(b)
             {
                 logged[1].entry.local = 3;
-                logged[1].entry.id = EntryId::of("eve-session", 3);
+                logged[1].entry.id = EntryId::of(Origin::named("eve-session"), 3);
                 *b = Frame::Join { space, from, hash, logged }.enc();
             }
         }
@@ -120,7 +120,7 @@ fn a_push_below_a_reopened_horizon_is_acknowledged_there() {
         local: 0,
     }));
     if let ark5::peer::Role::Authority { journal } = &mut reopened.role {
-        journal.last.insert("bob-session".into(), 2);
+        journal.pass(Origin::named("bob-session"), "bob", 2);
     }
     let (back, _) = deliver_up(&mut reopened, &who("bob"), &o);
     assert!(matches!(&back[..], [Frame::Ack { seq: 2, .. }]), "{back:?}");

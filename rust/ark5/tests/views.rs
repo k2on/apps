@@ -32,7 +32,7 @@ use ark5::codec::{bytes_enc, put_bytes, put_int, put_option};
 use ark5::hash::FnHash;
 use ark5::interp::{Interp, V};
 use ark5::ir::{CtxField, Decl, Effect, Expr, Function, Node, Op, Std};
-use ark5::log::EntryId;
+use ark5::log::{EntryId, Origin};
 use ark5::module::Lib;
 use ark5::peer::{Ctx, Feed, Input, Journal, Output, Peer, Role, Who};
 use ark5::schema::{Schema, Table};
@@ -1091,7 +1091,7 @@ fn a_view_follows_a_replica_through_a_rebase() {
     );
     let (mut alice, mut bob) = (replica_of("alice"), replica_of("bob"));
     let lib = Lib::default();
-    let pid = EntryId::of("alice-session", 1).draw(0);
+    let pid = EntryId::of(Origin::named("alice-session"), 1).draw(0);
     let queries = [(playlist_with_items(), vec![]), (top_two_by_pos(), bytes_enc(&pid))];
     let mut views: Vec<(FnHash, Vec<u8>, View)> = queries
         .into_iter()
@@ -1314,7 +1314,7 @@ impl Fleet {
     }
 
     fn mutate(&mut self, i: usize, track: &str) {
-        let pid = EntryId::of("peer-0-session", 1).draw(0);
+        let pid = EntryId::of(Origin::named("peer-0-session"), 1).draw(0);
         let o = self.clients[i].step(mutate_input(ADD, pair_input(&pid, track)));
         self.heard(i, o);
     }

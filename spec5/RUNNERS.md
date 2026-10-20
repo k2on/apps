@@ -64,8 +64,8 @@ the session and the client. `steps` holds one step per line, each one of:
 
 | `t` | fields | the runner |
 |---|---|---|
-| `open` | `who` (`{actor, session, roles}`), `fork` (`[seq, hash]` or `null`), `joining` (hex or `null`) | both machines afresh, replicas of their module as `who`, the live one saying `device`; with a `fork`, the log's machine an authority alone since it (§1.7); with `joining`, the chain it had handed over and not had answered, `((seq, hash), [Logged])` encoded |
-| `sign_in` | `who` | the log's machine authors as `who` from `local` 0; the live machine afresh as `who` |
+| `open` | `who` (`{actor, session, roles}`), `origin` (hex, 16 bytes), `fork` (`[seq, hash]` or `null`), `joining` (hex or `null`) | both machines afresh, replicas of their module as `who` from `origin` (§1.6: the bytes the client drew once and keeps), the live one saying `device`; with a `fork`, the log's machine an authority alone since it (§1.7); with `joining`, the chain it had handed over and not had answered, `((seq, hash), [Logged])` encoded |
+| `sign_in` | `who`, `origin` | the log's machine authors as `who`; when `origin` is not the one it had (another actor signed in), from it and from `local` 0; the handed-over chain forgotten when the actor or roles changed; the live machine afresh as `who` from `origin`, its `local` kept when the origin is |
 | `step` | `space` (`durable`, `volatile`), `in`, `out`, `after` | `in` given to that space's machine; what it says must be `out`, and it must stand at `after` |
 
 `in` is `{"t": …}`: `frame` (`bytes`, from upstream), `mutate` (`fn`,

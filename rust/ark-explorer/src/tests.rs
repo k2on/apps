@@ -565,6 +565,7 @@ fn the_admin_wire_reads_back() {
         id: EntryId([7; 16]),
         actor: "authority".into(),
         session: "server-1".into(),
+        origin: Default::default(),
         local: 1,
         roles: vec![],
         func: domain().get("teams.make_team"),

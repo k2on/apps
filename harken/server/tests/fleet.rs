@@ -730,14 +730,12 @@ fn playlist_of(c: &ark5::store::Change) -> Option<[u8; 16]> {
 /// song on it — as nobody. Given the network back, alice signs in on it:
 /// everything it made is alice's on every peer (`user_id` on each row), and
 /// every entry is in the log under alice and the session that sign-in
-/// made. (On v5 a sign-in authors what is pending again under the login:
-/// the entries the log holds are those, with ids of their own, not the ids
-/// the peer answered with signed out.)
+/// made, under the ids the peer answered with signed out (§1.6: an id is
+/// its replica's origin's, whoever signs in).
 ///
 /// Falsified by signing in as bob: the other peer, alice's, does not see
 /// the playlist, and the actor assertion names bob.
 #[test]
-#[ignore = "witness: a sign-in authors pending intents again under the new session, and a row an earlier one drew (a playlist) moves with its entry id, so a later one naming it is refused `not your playlist` (ark5-client `Client::sign_in`)"]
 fn work_done_signed_out_is_the_signers_everywhere() {
     let f = Fleet::new("sign-in-later");
     let mut a = f.peer("a", Some("alice"));
@@ -752,19 +750,13 @@ fn work_done_signed_out_is_the_signers_everywhere() {
     mine.push(add(&mut s, list, m[0]));
     let st = s.status();
     assert!(st.user.is_empty() && st.pending == 3, "{st:?}");
-    // Authored again under the login, they are owed by their new ids.
-    f.lost(mine);
+    // The login's now, under the ids they were made with (§1.6).
+    let _ = mine;
 
     s.proxy.pass();
     let (user, session) = s.sign_in("alice");
     assert_eq!(user, "alice");
     let head = a.status().cursor;
-    for local in 1..=3 {
-        s.owe(
-            ark5::log::EntryId::of(&session, local).0,
-            "authored again at sign-in",
-        );
-    }
     let done = f.converged(&mut [&mut a, &mut s]);
     let theirs: Vec<&Logged> = done
         .entries
@@ -855,8 +847,8 @@ fn the_same_name_twice_is_numbered_in_log_order() {
 /// the sign-in routes why, and says `denied`; it keeps its store, stops
 /// dialling, and goes on authoring — three things, pending. Alice's other
 /// device is another login and is not touched. Alice signs in on it again,
-/// and what was pending is authored again under the new login and
-/// converges.
+/// and what was pending is the new login's, under the ids it was made with,
+/// and converges.
 ///
 /// Then a sign-in into a black hole: signed out and signing in again with
 /// the network black-holed, the answer is a refusal within the peer's
@@ -866,7 +858,6 @@ fn the_same_name_twice_is_numbered_in_log_order() {
 /// Falsified on v5 by the peer not asking why a connection closed before a
 /// word (`ask_why` never called): it never says `denied`, and dials on.
 #[test]
-#[ignore = "witness: a sign-in authors pending intents again under the new session, and a row an earlier one drew (a playlist) moves with its entry id, so a later one naming it is refused `not your playlist` (ark5-client `Client::sign_in`)"]
 fn a_peer_turned_away_keeps_its_work_until_signed_in_again() {
     let f = Fleet::new("turned-away");
     let mut p = f.peer("p", Some("alice"));
@@ -913,22 +904,9 @@ fn a_peer_turned_away_keeps_its_work_until_signed_in_again() {
         "a denied peer does not dial again"
     );
 
-    // Authored again under the new login, they are owed by their new ids.
-    let owed: Vec<Id> = f
-        .accepted()
-        .into_iter()
-        .filter(|(_, who)| who.starts_with("p ") && !who.contains("add_song"))
-        .map(|(i, _)| i)
-        .collect();
-    f.lost(owed);
+    // The new login's, under the ids they were made with (§1.6).
     let (_, new) = p.sign_in("alice");
     assert_ne!(new, old);
-    for local in 1..=3 {
-        p.owe(
-            ark5::log::EntryId::of(&new, local).0,
-            "authored again at sign-in",
-        );
-    }
     let done = f.converged(&mut [&mut p, &mut q]);
     let taken: Vec<_> = done
         .entries
@@ -1248,24 +1226,10 @@ fn the_seeded_fuzz_converges() {
     fuzz(seed, steps);
 }
 
-/// A late sign-in, with what the peer had pending owed by the ids it is
-/// authored again with.
-fn sign_in_late(f: &Fleet, p: &mut PeerProc) -> Result<(), String> {
-    let pending = p.status().pending;
-    let mine: Vec<Id> = f
-        .accepted()
-        .into_iter()
-        .filter(|(_, who)| who.starts_with(&format!("{} ", p.name)))
-        .map(|(i, _)| i)
-        .collect();
-    let (_, session) = p.try_sign_in("alice")?;
-    f.lost(mine);
-    for local in 1..=pending {
-        p.owe(
-            ark5::log::EntryId::of(&session, local).0,
-            "authored again at sign-in",
-        );
-    }
+/// A late sign-in: what the peer had pending stays owed by the ids it was
+/// made with (§1.6).
+fn sign_in_late(_f: &Fleet, p: &mut PeerProc) -> Result<(), String> {
+    p.try_sign_in("alice")?;
     Ok(())
 }
 
@@ -1524,30 +1488,12 @@ fn on_playlist(f: &Fleet, list: Id) -> Vec<Id> {
         .unwrap_or_default()
 }
 
-/// What a peer alone authored, under a session of its own, is authored
-/// again as its login's when it joins (a server adopts a chain from no
-/// other session): let go of before the join…
-fn joining(f: &Fleet, p: &PeerProc) {
-    let mine: Vec<Id> = f
-        .accepted()
-        .into_iter()
-        .filter(|(_, who)| who.starts_with(&format!("{} ", p.name)))
-        .map(|(i, _)| i)
-        .collect();
-    f.lost(mine);
-}
+/// What a peer alone authored is its login's when it joins, under the ids
+/// it was made with (§1.6): nothing is let go of before the join…
+fn joining(_f: &Fleet, _p: &PeerProc) {}
 
-/// …and owed after it by the ids it was authored again with: the login's
-/// session's `local`s, from 1.
-fn joined(p: &mut PeerProc, n: i64) {
-    let session = p.status().session;
-    for local in 1..=n {
-        p.owe(
-            ark5::log::EntryId::of(&session, local).0,
-            "authored again at the join",
-        );
-    }
-}
+/// …and nothing new is owed after it.
+fn joined(_p: &mut PeerProc, _n: i64) {}
 
 /// **14. Alone, then a fresh server.** A peer that never had a server
 /// authors fifty songs, a playlist and ten things on it with no server
@@ -1561,7 +1507,6 @@ fn joined(p: &mut PeerProc, n: i64) {
 /// and not joining (the `join` at open skipped): it stays alone at 61 and
 /// the server ends empty.
 #[test]
-#[ignore = "witness: a sign-in authors pending intents again under the new session, and a row an earlier one drew (a playlist) moves with its entry id, so a later one naming it is refused `not your playlist` (ark5-client `Client::sign_in`)"]
 fn alone_then_a_fresh_server() {
     let f = Fleet::new("alone-fresh");
     let mut p = alone_peer(&f, "p", "alice");

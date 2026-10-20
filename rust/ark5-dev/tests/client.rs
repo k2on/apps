@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use ark5::codec::bytes_enc;
-use ark5::log::EntryId;
+use ark5::log::{EntryId, Origin};
 use ark5::peer::{Ctx, Who};
 use ark5::schema::Space;
 use ark5_client::storage::Stored;
@@ -51,10 +51,11 @@ fn a_reopened_client_keeps_its_pending_intents() {
     assert_eq!(n.hub.log.log.entries.last().map(|l| l.entry.id), Some(id));
 }
 
-/// What was authored before signing in is authored again as the login:
-/// its actor, session and id are the new login's, and the playlist is its
-/// user's. Falsified by `sign_in` leaving the pending entries as they
-/// were: the hub refused them as another session's.
+/// What was authored before signing in is the login's: its actor and
+/// session are the new login's, its id is still its origin's (§1.6) — the
+/// row it drew keeps its id — and the playlist is its user's. Falsified by
+/// `sign_in` re-authoring the pending entries from a new origin whatever
+/// the actor was: the id was another.
 #[test]
 fn a_sign_in_authors_what_was_pending_as_the_login() {
     let anon = Who {
@@ -77,7 +78,7 @@ fn a_sign_in_authors_what_was_pending_as_the_login() {
     let e = &n.hub.log.log.entries[0].entry;
     assert_eq!(
         (e.actor.as_str(), e.session.as_str(), e.id, &e.roles),
-        ("alice", "alice-session", EntryId::of("alice-session", 1), &alice.roles)
+        ("alice", "alice-session", EntryId::of(Origin::named("anon"), 1), &alice.roles)
     );
 }
 
@@ -90,7 +91,7 @@ fn a_view_is_its_patches_and_a_fresh_evaluation() {
     let mut n = net(2);
     n.run(&create("Mix"));
     n.settle().unwrap();
-    let pid = EntryId::of("peer-0-session", 1).draw(0);
+    let pid = EntryId::of(Origin::named("peer-0-session"), 1).draw(0);
     let ctx = Ctx {
         id: EntryId::default(),
         actor: "peer-0".into(),

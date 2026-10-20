@@ -19,10 +19,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use ark5::frames::Frame;
 use ark5::hash::FnHash;
 use ark5::interp::V;
+use ark5::ir::Node;
 use ark5::peer::{Ctx, Who};
 use ark5::schema::Space;
 use ark5::view::{query, splice};
-use ark5_client::{Client, Config, Event, Memory};
+use ark5_client::{Client, Config, Disk, Event, Memory};
 use ark5_server::hub::{Config as HubConfig, ConnId, Deliver, Hub};
 
 /// Knuth's MMIX constants: the whole of the simulation's randomness.
@@ -120,7 +121,10 @@ impl Net {
     pub fn add(&mut self, who: Who, config: Config) -> i64 {
         let i = self.clients.keys().last().map_or(0, |n| n + 1);
         self.logins.insert(who.session.clone(), who.clone());
-        self.clients.insert(i, Client::open(config, who, Box::new(Memory::default()), true));
+        // The origin a device draws once, seeded: its first session's.
+        let mut disk = Memory::default();
+        let _ = disk.put("origin", &ark5::log::Origin::named(&who.session).to_bytes());
+        self.clients.insert(i, Client::open(config, who, Box::new(disk), true));
         self.heal(i);
         i
     }

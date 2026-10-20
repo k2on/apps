@@ -35,7 +35,7 @@ use ark5::codec::{bytes_enc, put_bytes, put_int, put_option};
 use ark5::frames::Frame;
 use ark5::hash::FnHash;
 use ark5::ir::{CtxField, Effect, Expr, Function, Node, Op, Std};
-use ark5::log::{Entry, EntryId, Logged, Seq};
+use ark5::log::{Entry, EntryId, Logged, Origin, Seq};
 use ark5::module::Lib;
 use ark5::peer::{Cas, Ctx, Feed, Input, Journal, Output, Peer, Role, Verdict, Who, PAGE};
 use ark5::schema::{Schema, Space, Table};
@@ -145,9 +145,10 @@ impl Author {
     fn entry(&mut self, name: &str, input: Vec<u8>) -> Entry {
         self.local += 1;
         Entry {
-            id: EntryId::of(&self.who.session, self.local),
+            id: EntryId::of(Origin::named(&self.who.session), self.local),
             actor: self.who.actor.clone(),
             session: self.who.session.clone(),
+            origin: Origin::named(&self.who.session),
             local: self.local,
             roles: vec![],
             func: hash(name),
@@ -171,7 +172,7 @@ impl Author {
 
     /// The playlist its `local`-th entry created.
     fn pid(&self, local: i64) -> [u8; 16] {
-        EntryId::of(&self.who.session, local).draw(0)
+        EntryId::of(Origin::named(&self.who.session), local).draw(0)
     }
 }
 
@@ -332,7 +333,7 @@ fn perf_a_mutate_alone() {
                 commit(&mut a, &mut r, o);
             }
             assert!(r.pending.is_empty());
-            let pid = |j: u64| EntryId::of("me-local", j as i64 + 1).draw(0);
+            let pid = |j: u64| EntryId::of(Origin::named("me-local"), j as i64 + 1).draw(0);
             let (mut total, mut optimistic, mut confirm) = (vec![], vec![], vec![]);
             for i in 0..n {
                 let input = pair_input(&pid(i % playlists), &format!("t{i}"));
@@ -389,7 +390,7 @@ fn perf_a_mutate_alone() {
             input: create_input("P0"),
             now: 0,
         });
-        let pid = EntryId::of("me-local", 1).draw(0);
+        let pid = EntryId::of(Origin::named("me-local"), 1).draw(0);
         let per: Vec<Duration> = (0..n)
             .map(|i| {
                 let input = pair_input(&pid, &format!("t{i}"));

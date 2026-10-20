@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use ark5::codec::{bytes_enc, int_enc, put_bytes, put_int, put_list, Reader};
 use ark5::hash::{hex, unhex};
-use ark5::log::EntryId;
+use ark5::log::{EntryId, Origin};
 use ark5::peer::Who;
 use ark5::ty::Ty;
 use ark5_client::Config;
@@ -117,7 +117,11 @@ fn create(i: i64, name: &str) -> Op {
 }
 
 fn add(i: i64, owner: &str, t: &str) -> Op {
-    Op::Mutate(i, domain().get("demo.add_to_playlist"), pair(&EntryId::of(owner, 1).draw(0), t))
+    Op::Mutate(
+        i,
+        domain().get("demo.add_to_playlist"),
+        pair(&EntryId::of(Origin::named(owner), 1).draw(0), t),
+    )
 }
 
 /// `fleet-seed-7`'s script after its playlist (v4's, move for move).

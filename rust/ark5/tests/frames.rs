@@ -7,15 +7,16 @@ mod demo;
 use ark5::codec::{parse, Reader};
 use ark5::frames::{frame_ty, ty, Frame};
 use ark5::hash::{EntryHash, FnHash, StateHash};
-use ark5::log::{Entry, EntryId, Logged, Record, Snapshot};
+use ark5::log::{Entry, EntryId, Logged, Origin, Record, Snapshot};
 use ark5::schema::Space;
 use ark5::store::Change;
 
 fn every_frame() -> Vec<Frame> {
     let entry = Entry {
-        id: EntryId::of("s", 1),
+        id: EntryId::of(Origin::named("s"), 1),
         actor: "a\0b".into(),
         session: "s".into(),
+        origin: Origin::named("s"),
         local: 1,
         roles: vec!["r0".into(), "r1".into()],
         func: demo::h(demo::ADD),

@@ -43,7 +43,6 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use ark5::ir::Node;
-use ark5::log::EntryId;
 use ark5::peer::{Ctx, Who};
 use ark5::store::{Dir, Read, Scan as Range, Store};
 use ark5_client::link::{Backoff, Link};
@@ -577,7 +576,7 @@ fn known_file(store: &Store, file: &str) -> bool {
 fn would_change(peer: &Peer, name: &str, input: &[u8]) -> bool {
     let me = &peer.client.log.me;
     let ctx = Ctx {
-        id: EntryId::of(&me.session, peer.client.log.local + 1),
+        id: peer.client.log.next_id(),
         actor: me.actor.clone(),
         session: me.session.clone(),
         roles: me.roles.clone(),

@@ -28,7 +28,7 @@ use ark5::codec::{bytes_enc, put_bytes, put_int};
 use ark5::frames::Frame;
 use ark5::hash::{EntryHash, FnHash};
 use ark5::ir::Node;
-use ark5::log::{Entry, EntryId, Logged, Record, Seq, Snapshot};
+use ark5::log::{Entry, EntryId, Logged, Origin, Record, Seq, Snapshot};
 use ark5::module::Lib;
 use ark5::peer::{Cas, Who};
 use ark5::schema::{Schema, Space, Table};
@@ -146,8 +146,13 @@ fn config() -> Config {
     }
 }
 
-fn client(token: &str, disk: Box<dyn Disk>) -> Client {
-    Client::open(config(), dev(token).unwrap(), disk, false)
+/// A client of `token`'s login, its origin seeded by its session.
+fn client(token: &str, mut disk: Box<dyn Disk>) -> Client {
+    let who = dev(token).unwrap();
+    if disk.get("origin").ok().flatten().is_none() {
+        disk.put("origin", &Origin::named(&who.session).to_bytes()).unwrap();
+    }
+    Client::open(config(), who, disk, false)
 }
 
 /// `demo.create_playlist` and `demo.add_to_playlist`, by hash: the domain
@@ -166,7 +171,7 @@ fn create(c: &mut Client, j: u64) {
 
 /// The playlist the session's `local`-th entry made.
 fn pid(session: &str, local: u64) -> [u8; 16] {
-    EntryId::of(session, local as i64).draw(0)
+    EntryId::of(Origin::named(session), local as i64).draw(0)
 }
 
 fn add_input(pl: &[u8; 16], i: u64) -> Vec<u8> {
@@ -474,9 +479,10 @@ fn perf_g_hub_fanout() {
 fn push(hub: &mut Hub, conn: u64, w: &Who, local: &mut i64, func: FnHash, input: Vec<u8>) -> Vec<(u64, Vec<u8>)> {
     *local += 1;
     let entry = Entry {
-        id: EntryId::of(&w.session, *local),
+        id: EntryId::of(Origin::named(&w.session), *local),
         actor: w.actor.clone(),
         session: w.session.clone(),
+        origin: Origin::named(&w.session),
         local: *local,
         roles: vec![],
         func,
@@ -566,9 +572,10 @@ fn chain(store: &mut Store, (mut seq, mut prev): (Seq, EntryHash), rows: std::op
         seq += 1;
         let local = seq;
         let entry = Entry {
-            id: EntryId::of(session, local),
+            id: EntryId::of(Origin::named(session), local),
             actor: "library".into(),
             session: session.into(),
+            origin: Origin::named(session),
             local,
             roles: vec!["library".into()],
             func,

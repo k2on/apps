@@ -29,9 +29,10 @@ fn login(who: &str) -> Login {
 /// same rows, the same pending work, now the signer's, and nothing dropped.
 ///
 /// Falsified by making `signed_in` open a fresh replica rather than call
-/// `sign_in` on this one: the item is gone and the pending count is 0.
-/// v5 authors an intent under its session, so signing in gives the pending
-/// one the signer's id: the old id names nothing after it.
+/// `sign_in` on this one: the item is gone and the pending count is 0. An
+/// intent's id is its replica's origin's (§1.6), so the pending one keeps
+/// its id through the sign-in; falsified by `ark5_client::Client::sign_in`
+/// authoring it again from a new origin: the id moved.
 #[test]
 fn signing_in_moves_the_same_replica_on() {
     let mut p = signed_out();
@@ -63,8 +64,8 @@ fn signing_in_moves_the_same_replica_on() {
     assert_eq!(app.peer.client.pending_len(), 1);
     assert_eq!(pending(&app), ["alice"], "…and the work is hers now");
     let now = app.peer.client.client.log.pending[0].entry.id;
-    assert_eq!(app.peer.client.standing(&now), Standing::Pending, "under the id her session gives it");
-    assert_eq!(app.peer.client.standing(&id), Standing::Unknown, "nobody's id names nothing now");
+    assert_eq!(now, id, "its id kept");
+    assert_eq!(app.peer.client.standing(&id), Standing::Pending);
     assert!(app.note.contains("1 change from before"), "{}", app.note);
 
     // Signing out keeps the replica and goes on as her, offline.

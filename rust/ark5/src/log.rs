@@ -2,7 +2,7 @@
 //! had, the state hash after it and the hash of the chain to it.
 //!
 //! ```text
-//! Entry  { id, actor, session, local, roles, fn, input, now }
+//! Entry  { id, actor, session, origin, local, roles, fn, input, now }
 //! Logged { seq, entry, facts, state, hash }
 //! hash = sha256(prev.hash ‖ enc(seq, entry, facts, state))
 //! ```
@@ -12,12 +12,16 @@
 //! paged from there by an authority that has that hash at that sequence
 //! ([`Log::has`]) and is sent a snapshot by one that does not.
 //!
-//! **Deterministic ids.** An entry's id is `sha256(enc(Bytes session) ‖
-//! enc(Int local))[..16]`, `local` being the session's own count of the
-//! intents it authored, from 1; the `n`-th row id an entry draws is
-//! `sha256(id ‖ enc(Int n))[..16]` ([`EntryId::draw`]). `now` is the only
-//! non-determinism, drawn once at origin and frozen in the entry. Dedupe is
-//! `(session, local)`, which also shows a gap in a session's pushes.
+//! **Deterministic ids.** An entry's id is `sha256(enc(Bytes origin) ‖
+//! enc(Int local))[..16]`: `origin` is sixteen bytes a replica draws once,
+//! at its first open, and keeps — the one other non-determinism beside
+//! `now` — and `local` the replica's own count of the intents it authored,
+//! from 1. The `n`-th row id an entry draws is `sha256(id ‖ enc(Int
+//! n))[..16]` ([`EntryId::draw`]). Neither depends on who is signed in, so
+//! what a device made signed out keeps its ids, and its rows theirs, when
+//! it signs in. Dedupe is `(origin, local)`, which also shows a gap in a
+//! replica's pushes; `actor`, `session` and `roles` are what the authority
+//! stamps from the connection it judged the entry on.
 //!
 //! **Snapshots and the horizon.** A [`Snapshot`] is `(seq, hash, state,
 //! rows in key order)` and a log stands on one ([`Log::base`]); entries at
@@ -47,11 +51,37 @@ fn first16(h: [u8; 32]) -> [u8; 16] {
     h[..16].try_into().unwrap()
 }
 
+/// Where a replica's intents come from: drawn once, kept (§1.6).
+#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Origin(pub [u8; 16]);
+
+impl std::fmt::Debug for Origin {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "Origin({})", crate::hash::hex(&self.0[..6]))
+    }
+}
+
+impl AsRef<[u8]> for Origin {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl Origin {
+    /// The origin named by these bytes, `sha256(bytes)[..16]`: how a seeded
+    /// run (a simulator, a test, an authority's own) has one without
+    /// drawing it.
+    pub fn named(bytes: impl AsRef<[u8]>) -> Origin {
+        Origin(first16(sha256(&[bytes.as_ref()])))
+    }
+}
+
 impl EntryId {
-    /// The id of a session's `local`-th intent.
-    pub fn of(session: &str, local: i64) -> EntryId {
+    /// The id of the `local`-th intent from `origin` (an [`Origin`]; any
+    /// bytes name an id outside the log, as a query's context does).
+    pub fn of(origin: impl AsRef<[u8]>, local: i64) -> EntryId {
         let mut b = vec![];
-        put_bytes(&mut b, session.as_bytes());
+        put_bytes(&mut b, origin.as_ref());
         put_int(&mut b, local);
         EntryId(first16(sha256(&[&b])))
     }
@@ -72,6 +102,7 @@ pub struct Entry {
     pub id: EntryId,
     pub actor: String,
     pub session: String,
+    pub origin: Origin,
     pub local: i64,
     pub roles: Vec<String>,
     pub func: FnHash,
@@ -80,8 +111,8 @@ pub struct Entry {
 }
 
 impl Entry {
-    /// `(Bytes id, Bytes actor, Bytes session, Int local, List Bytes roles,
-    /// Bytes fn, Bytes input, Int now)`, derived.
+    /// `(Bytes id, Bytes actor, Bytes session, Bytes origin, Int local, List
+    /// Bytes roles, Bytes fn, Bytes input, Int now)`, derived.
     pub fn enc(&self, out: &mut Vec<u8>) {
         self.put(out);
     }
@@ -90,10 +121,10 @@ impl Entry {
         Entry::take(r)
     }
 
-    /// Whether the id is the one `(session, local)` names: an id is never
+    /// Whether the id is the one `(origin, local)` names: an id is never
     /// taken on trust.
     pub fn id_checks(&self) -> bool {
-        self.id == EntryId::of(&self.session, self.local)
+        self.id == EntryId::of(self.origin, self.local)
     }
 }
 

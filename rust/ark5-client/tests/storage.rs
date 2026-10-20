@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use ark5::hash::{EntryHash, FnHash, StateHash};
-use ark5::log::{Entry, EntryId, Log, Record, Snapshot};
+use ark5::log::{Entry, EntryId, Log, Origin, Record, Snapshot};
 use ark5::schema::{Schema, Table};
 use ark5::store::{Change, Store};
 use ark5::ty::Ty;
@@ -34,9 +34,10 @@ fn log(n: i64) -> Log {
         };
         s.apply(&c).unwrap();
         let e = Entry {
-            id: EntryId::of("s", k),
+            id: EntryId::of(Origin::named("s"), k),
             actor: "a".into(),
             session: "s".into(),
+            origin: Origin::named("s"),
             local: k,
             roles: vec![],
             func: FnHash::default(),

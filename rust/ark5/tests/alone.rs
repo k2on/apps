@@ -12,14 +12,14 @@ mod support {
 
 use ark5::frames::Frame;
 use ark5::hash::EntryHash;
-use ark5::log::EntryId;
+use ark5::log::{EntryId, Origin};
 use ark5::peer::{Input, Output, Peer, Role};
 use ark5::store::Change;
 use demo::{create_input, pair_input, pos_of, ADD, CREATE};
 use support::wire::*;
 
 fn road() -> [u8; 16] {
-    EntryId::of("eve-session", 1).draw(0)
+    EntryId::of(Origin::named("eve-session"), 1).draw(0)
 }
 
 /// Eve, alone from the start: a playlist and a track, confirmed by herself.
@@ -138,7 +138,7 @@ fn a_server_that_moved_on_sequences_the_chain_anew() {
     let o = bob.step(mutate(CREATE, create_input("Shared"), 1));
     let (_, f) = deliver_up(&mut server, &who("bob"), &o);
     eve.step(down(&f[0]));
-    let shared = EntryId::of("bob-session", 1).draw(0);
+    let shared = EntryId::of(Origin::named("bob-session"), 1).draw(0);
     eve.step(Input::Alone);
     eve.step(mutate(ADD, pair_input(&shared, "t5"), 2));
     assert_eq!(pos_of(&eve.store, &shared, "t5"), Some(1));

@@ -31,18 +31,19 @@
 //! arithmetic ([`Store::hash_beside`]). A view is told every change made,
 //! rebases included, as `Output::Changes`.
 //!
-//! **The authority** judges each pushed intent once — dedupe by `(session,
-//! local)`, a gap in a session's pushes waits for them in order — stamps it
-//! with the actor and roles it judged it under, runs it, and logs it with
-//! its facts. It runs exactly the functions in its content store, which
+//! **The authority** judges each pushed intent once — dedupe by `(origin,
+//! local)`, a gap in a replica's pushes waits for them in order — stamps it
+//! with the actor, session and roles of the connection it judged it on,
+//! runs it, and logs it with its facts. An origin is bound to the actor
+//! whose intents first came from it; another's pushed from it is refused. It runs exactly the functions in its content store, which
 //! are the ones bound in the modules its operator loaded: it never loads a
 //! body it is sent. An intent naming any other is `Held` — the device keeps
 //! it pending and pushes it again on its next connection — and a chain
 //! handed over with one is refused. A held intent keeps its `local`: those
-//! its session pushes after it wait on the authority, in order, and are
+//! pushed after it from its origin wait on the authority, in order, and are
 //! judged when it is — pushed again once the function is loaded, or when
 //! the driver says it loaded functions (`Input::Loaded`), each answer then
-//! sent to the session's connections (`Output::To`).
+//! sent to the connections of the session that last pushed (`Output::To`).
 //!
 //! **A schema grows** (§1.2). Facts and snapshot rows another schema of a
 //! table wrote are read under this one ([`crate::schema::Table::fit`]). A
@@ -88,7 +89,7 @@
 //! `on_join` and `on_leave` are entries the authority authors through
 //! `Mutate`, as the driver sees connections come and go. `resync` is a
 //! `Hello` with a hash the authority lacks, answered with a snapshot. A
-//! volatile authority forgets on restart what each session last pushed, so
+//! volatile authority forgets on restart what each origin last pushed, so
 //! there a push past a gap is taken, and one that comes after it is
 //! refused as overtaken: what was live then is gone.
 
@@ -98,7 +99,7 @@ use std::sync::Arc;
 
 use crate::frames::Frame;
 use crate::hash::{EntryHash, FnHash};
-use crate::log::{Durable, Entry, EntryId, Log, Logged, Record, Seq, Snapshot};
+use crate::log::{Durable, Entry, EntryId, Log, Logged, Origin, Record, Seq, Snapshot};
 use crate::schema::{Schema, Space};
 use crate::store::{Change, Read, Store};
 use crate::Refusal;
@@ -224,16 +225,35 @@ pub enum Verdict {
     Refused(String),
 }
 
-/// What an authority keeps beside its log: every intent it judged and how,
-/// and each session's last `local`; for a device alone, where it forked
-/// from the log it will join again; and, by session, a held intent and
-/// those pushed after it, in order, with who pushed them.
+/// What an authority keeps beside its log: every intent it judged and how;
+/// each origin's last `local` and the actor it is bound to; for a device
+/// alone, where it forked from the log it will join again; and, by origin,
+/// a held intent and those pushed after it, in order, with who pushed them.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Journal {
     pub fork: Option<(Seq, EntryHash)>,
     pub verdicts: BTreeMap<EntryId, Verdict>,
-    pub last: BTreeMap<String, i64>,
-    pub waiting: BTreeMap<String, Vec<(Who, Entry)>>,
+    pub last: BTreeMap<Origin, (String, i64)>,
+    pub waiting: BTreeMap<Origin, Vec<(Who, Entry)>>,
+}
+
+impl Journal {
+    /// The last `local` judged from `origin`.
+    pub fn last_of(&self, origin: &Origin) -> i64 {
+        self.last.get(origin).map_or(0, |l| l.1)
+    }
+
+    /// `origin`'s last `local` moved up to `local`; bound to `actor` when it
+    /// was bound to nobody.
+    pub fn pass(&mut self, origin: Origin, actor: &str, local: i64) {
+        let l = self.last.entry(origin).or_insert_with(|| (actor.into(), 0));
+        l.1 = l.1.max(local);
+    }
+
+    /// Whether `origin` is bound to an actor other than `actor`.
+    fn others(&self, origin: &Origin, actor: &str) -> bool {
+        self.last.get(origin).is_some_and(|l| l.0 != actor)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -332,7 +352,9 @@ pub struct Peer {
     pub feed: Feed,
     pub me: Who,
     pub space: Space,
-    /// The last `local` this peer's session drew.
+    /// Where this peer's intents come from (§1.6), and the last `local` it
+    /// drew.
+    pub origin: Origin,
     pub local: i64,
     /// Where a confirmed entry's state was not this peer's own.
     pub diverged: Vec<Seq>,
@@ -401,8 +423,11 @@ fn empty_snapshot(store: &Store) -> Snapshot {
 }
 
 impl Peer {
+    /// A peer from empty; its origin named by its session's bytes until
+    /// its driver gives it the one it drew ([`Origin`]).
     pub fn new(schema: Arc<Schema>, cas: Cas, role: Role, me: Who) -> Peer {
         let store = Store::new(schema);
+        let origin = Origin::named(&me.session);
         Peer {
             log: Log::new(empty_snapshot(&store)),
             store,
@@ -412,6 +437,7 @@ impl Peer {
             feed: Feed::Whole,
             me,
             space: Space::Durable,
+            origin,
             local: 0,
             diverged: vec![],
             asked: None,
@@ -463,6 +489,11 @@ impl Peer {
         Ok((out, other))
     }
 
+    /// The id this peer's next intent will have (§1.6).
+    pub fn next_id(&self) -> EntryId {
+        EntryId::of(self.origin, self.local + 1)
+    }
+
     pub fn is_authority(&self) -> bool {
         matches!(self.role, Role::Authority { .. })
     }
@@ -495,11 +526,11 @@ impl Peer {
             Input::Join => self.join(&mut o),
             Input::Compact(n) => self.compact(n, &mut o),
             Input::Loaded => {
-                let sessions: Vec<String> = match &self.role {
-                    Role::Authority { journal } => journal.waiting.keys().cloned().collect(),
+                let origins: Vec<Origin> = match &self.role {
+                    Role::Authority { journal } => journal.waiting.keys().copied().collect(),
                     Role::Replica => vec![],
                 };
-                sessions.iter().for_each(|s| self.unhold(s, false, &mut o));
+                origins.into_iter().for_each(|x| self.unhold(x, false, &mut o));
             }
             Input::Feed { who, feed } => match feed {
                 Feed::Whole => drop(self.served.remove(&who.session)),
@@ -571,9 +602,10 @@ impl Peer {
     fn mutate(&mut self, func: FnHash, input: Vec<u8>, now: i64, o: &mut Out) {
         let local = self.local + 1;
         let entry = Entry {
-            id: EntryId::of(&self.me.session, local),
+            id: EntryId::of(self.origin, local),
             actor: self.me.actor.clone(),
             session: self.me.session.clone(),
+            origin: self.origin,
             local,
             roles: self.me.roles.clone(),
             func,
@@ -621,8 +653,8 @@ impl Peer {
                 r = Err(Refusal::new("its facts are not what this authority's run of it gives"));
             }
         }
-        let (id, session, local) = (entry.id, entry.session.clone(), entry.local);
-        self.journal().last.insert(session, local);
+        let id = entry.id;
+        self.journal().pass(entry.origin, &entry.actor, entry.local);
         let v = match r {
             Err(why) => Err(why.0),
             Ok(facts) => {
@@ -811,12 +843,12 @@ impl Peer {
             Some(Verdict::Refused(why)) => return o.send(Frame::Reject { space, id, why: why.clone() }),
             None => {}
         }
-        if !entry.id_checks() || entry.session != who.session {
-            let why = "an entry of another session, or an id that is not its own".into();
+        if !entry.id_checks() || j.others(&entry.origin, &who.actor) {
+            let why = "an id that is not its own, or from an origin of another actor".into();
             return o.send(Frame::Reject { space, id, why });
         }
         // A gap: the ones before it come first, pushed again after a Hello.
-        let last = j.last.get(&entry.session).copied().unwrap_or(0);
+        let last = j.last_of(&entry.origin);
         // At or below the last and judged by no verdict here: in the log's
         // space, sequenced below the horizon by a log opened since (a
         // refusal's verdict is journaled); in the volatile, overtaken.
@@ -831,16 +863,17 @@ impl Peer {
                 Space::Volatile => Frame::Reject {
                     space,
                     id,
-                    why: "overtaken by a later one of its session".into(),
+                    why: "overtaken by a later one of its origin".into(),
                 },
             });
         }
-        // Behind a held one of its session: it waits, in order; the held
-        // one pushed again is judged again.
-        if let Some(q) = self.journal().waiting.get_mut(&entry.session) {
+        // Behind a held one of its origin: it waits, in order; the held one
+        // pushed again is judged again.
+        let origin = entry.origin;
+        if let Some(q) = self.journal().waiting.get_mut(&origin) {
             if q[0].1.id == id {
                 q[0].0 = who.clone();
-                return self.unhold(&entry.session, true, o);
+                return self.unhold(origin, true, o);
             }
             if q.last().is_some_and(|(_, e)| e.local + 1 == entry.local) {
                 q.push((who.clone(), entry));
@@ -853,7 +886,7 @@ impl Peer {
         if self.cas.get(&entry.func).is_none() {
             let func = entry.func;
             if space == Space::Durable {
-                self.journal().waiting.insert(entry.session.clone(), vec![(who.clone(), entry)]);
+                self.journal().waiting.insert(origin, vec![(who.clone(), entry)]);
             }
             return o.send(Frame::Held { space, id, func });
         }
@@ -864,20 +897,20 @@ impl Peer {
     /// One intent stamped by who pushed it and sequenced: the answer.
     fn judge(&mut self, who: &Who, mut entry: Entry, o: &mut Out) -> Frame {
         let (id, space) = (entry.id, self.space);
-        (entry.actor, entry.roles) = (who.actor.clone(), who.roles.clone());
+        (entry.actor, entry.session, entry.roles) = (who.actor.clone(), who.session.clone(), who.roles.clone());
         match self.sequence(entry, None, o) {
             Ok(seq) => Frame::Ack { space, id, seq, facts: None },
             Err(why) => Frame::Reject { space, id, why },
         }
     }
 
-    /// What waits behind `session`'s held intent, judged in order while
-    /// this authority runs its function: each answer, and the `Held` of one
-    /// it does not, sent back (`pushed`, the held one pushed again) or to
-    /// the session's connections.
-    fn unhold(&mut self, session: &str, pushed: bool, o: &mut Out) {
+    /// What waits behind `origin`'s held intent, judged in order while this
+    /// authority runs its function: each answer, and the `Held` of one it
+    /// does not, sent back (`pushed`, the held one pushed again) or to the
+    /// connections of the session that pushed it.
+    fn unhold(&mut self, origin: Origin, pushed: bool, o: &mut Out) {
         let mut first = true;
-        while let Some((who, e)) = self.journal().waiting.get(session).and_then(|q| q.first().cloned()) {
+        while let Some((who, e)) = self.journal().waiting.get(&origin).and_then(|q| q.first().cloned()) {
             let f = match self.cas.get(&e.func) {
                 None if first && !pushed => return,
                 None => Frame::Held {
@@ -886,10 +919,10 @@ impl Peer {
                     func: e.func,
                 },
                 Some(_) => {
-                    let q = self.journal().waiting.get_mut(session).expect("it waits");
+                    let q = self.journal().waiting.get_mut(&origin).expect("it waits");
                     q.remove(0);
                     if q.is_empty() {
-                        self.journal().waiting.remove(session);
+                        self.journal().waiting.remove(&origin);
                     }
                     self.judge(&who, e, o)
                 }
@@ -898,7 +931,7 @@ impl Peer {
             match pushed {
                 true => o.send(f),
                 false => o.out.push(Output::To {
-                    session: session.into(),
+                    session: who.session.clone(),
                     bytes: f.enc(),
                 }),
             }
@@ -913,18 +946,18 @@ impl Peer {
     fn adopt(&mut self, who: &Who, at: (Seq, EntryHash), chain: Vec<Logged>, o: &mut Out) {
         let fresh = !chain.iter().any(|l| self.journal().verdicts.contains_key(&l.entry.id));
         if !fresh || self.log.head() != at {
-            // A chain is its session's whole history above the fork: a gap
-            // in it is an intent the device refused itself, never to come.
-            // One naming a function this authority does not run is refused,
-            // not held: a chain is handed over once.
+            // A chain is its origin's whole history above the fork: a gap in
+            // it is an intent the device refused itself, never to come. One
+            // naming a function this authority does not run is refused, not
+            // held: a chain is handed over once.
             for l in chain {
-                let last = self.journal().last.entry(l.entry.session.clone()).or_insert(0);
-                if l.entry.session == who.session && l.entry.local > *last + 1 {
-                    *last = l.entry.local - 1;
+                let mine = l.entry.id_checks() && !self.journal().others(&l.entry.origin, &who.actor);
+                if mine && l.entry.local > self.journal().last_of(&l.entry.origin) + 1 {
+                    self.journal().pass(l.entry.origin, &who.actor, l.entry.local - 1);
                 }
                 let judged = self.journal().verdicts.contains_key(&l.entry.id);
                 match self.cas.get(&l.entry.func) {
-                    None if !judged && l.entry.session == who.session && l.entry.id_checks() => {
+                    None if !judged && mine => {
                         let why = format!("no function {}", l.entry.func);
                         self.refuse(&l.entry, why, o)
                     }
@@ -937,8 +970,8 @@ impl Peer {
         let mut done = Out::default();
         for l in &chain {
             let mut e = l.entry.clone();
-            (e.actor, e.roles) = (who.actor.clone(), who.roles.clone());
-            let owned = e.id_checks() && e.session == who.session;
+            (e.actor, e.session, e.roles) = (who.actor.clone(), who.session.clone(), who.roles.clone());
+            let owned = e.id_checks() && !self.journal().others(&e.origin, &who.actor);
             if !owned || self.sequence(e, Some(&l.facts), &mut done).is_err() {
                 (self.store, self.log, self.role) = (store, log, role);
                 let why = match self.cas.get(&l.entry.func) {
@@ -967,8 +1000,7 @@ impl Peer {
     /// An intent refused without being run: its verdict kept, its `local`
     /// passed.
     fn refuse(&mut self, e: &Entry, why: String, o: &mut Out) {
-        let last = self.journal().last.entry(e.session.clone()).or_insert(0);
-        *last = (*last).max(e.local);
+        self.journal().pass(e.origin, &e.actor, e.local);
         self.journal().verdicts.insert(e.id, Verdict::Refused(why.clone()));
         o.send(Frame::Reject {
             space: self.space,
@@ -1025,7 +1057,7 @@ impl Peer {
                     self.pending.remove(i);
                 }
             }
-            if l.entry.session == self.me.session {
+            if l.entry.origin == self.origin {
                 o.out.push(Output::Confirmed(l.entry.id));
             }
             self.asked = None;
@@ -1252,8 +1284,7 @@ impl Peer {
             if let Role::Authority { journal } = &mut self.role {
                 for l in &self.log.entries {
                     journal.verdicts.insert(l.entry.id, Verdict::Seq(l.seq));
-                    let last = journal.last.entry(l.entry.session.clone()).or_insert(0);
-                    *last = (*last).max(l.entry.local);
+                    journal.pass(l.entry.origin, &l.entry.actor, l.entry.local);
                 }
             }
         }

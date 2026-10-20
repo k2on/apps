@@ -12,7 +12,7 @@ use ark5_dev::vectors::fleet;
 /// K1's pin (`rust/ark5/tests/fleet.rs`, now moved here): twenty entries,
 /// this state.
 const HEAD: i64 = 20;
-const HASH: &str = "2f24495f091532deac89459a755d3935c3f06d499b56aa09f62bf8b47e98c01d";
+const HASH: &str = "ff04f56d613ee73dad721e02cb6ebe125fa93fe801b2f1713499038f55475e95";
 
 /// Seed 7 converges to K1's pin through the hub: every client's log is the
 /// hub's, entry for entry and hash for hash, every store is its store,

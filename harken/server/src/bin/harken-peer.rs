@@ -1283,7 +1283,7 @@ impl Headless {
                 match refused {
                     Some(why) if self.client.log.local == before => Answer::refused(why),
                     _ => {
-                        let id = EntryId::of(&self.client.log.me.session, self.client.log.local);
+                        let id = EntryId::of(self.client.log.origin, self.client.log.local);
                         Answer::ok(true).set("id", id_json(&id.0))
                     }
                 }

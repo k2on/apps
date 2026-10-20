@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use ark5::codec::bytes_enc;
 use ark5::frames::Frame;
-use ark5::log::{Entry, EntryId};
+use ark5::log::{Entry, EntryId, Origin};
 use ark5::peer::Who;
 use ark5::schema::Space;
 use ark5_client::link::{Backoff, Dial, Event, Link, Recv, Socket};
@@ -231,9 +231,10 @@ impl Disk for Flaky {
 
 fn push(who: &Who, local: i64, name: &str) -> Vec<u8> {
     let entry = Entry {
-        id: EntryId::of(&who.session, local),
+        id: EntryId::of(Origin::named(&who.session), local),
         actor: who.actor.clone(),
         session: who.session.clone(),
+        origin: Origin::named(&who.session),
         local,
         roles: vec![],
         func: domain().get("demo.create_playlist"),

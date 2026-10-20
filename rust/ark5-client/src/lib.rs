@@ -15,9 +15,17 @@
 //! **The relay** of ephemeral calls is the driver's policy, as §1.9 says:
 //! a call to a function the module names ephemeral goes to the volatile
 //! machine at most once every `every_ms`, coalesced to the newest call per
-//! function; the rest go at once. **Sign-in** gives the client another
-//! login: its pending intents are authored again under the new session,
-//! from that session's first `local`. [`link`] keeps a connection up and
+//! function; the rest go at once.
+//!
+//! **The origin** (§1.6) is sixteen bytes the client draws at its first
+//! open and keeps on its disk (`origin`); every intent's id is its origin's
+//! and its `local`'s, whoever is signed in. **Sign-in** gives the client
+//! another login: its pending intents are the signer's from then on, their
+//! ids and the rows they drew kept. A login of another actor than the one
+//! the client authored as gets an origin of its own, named by the old one
+//! and its session, and the pending intents are authored again from its
+//! first `local` — an authority binds an origin to the actor whose intents
+//! first came from it. [`link`] keeps a connection up and
 //! [`Client::pump`] joins the two; [`auth`] signs in through `ark-auth`.
 //!
 //! Every input either machine is given is recorded, when asked
@@ -34,7 +42,7 @@ use std::sync::Arc;
 use ark5::frames::Frame;
 use ark5::hash::{EntryHash, FnHash};
 use ark5::ir::Node;
-use ark5::log::{Durable, Entry, EntryId, Logged, Seq};
+use ark5::log::{Durable, Entry, EntryId, Logged, Origin, Seq};
 use ark5::module::Lib;
 use ark5::peer::{Cas, Ctx, Input, Journal, Output, Peer, Role, Who};
 use ark5::schema::{Schema, Space};
@@ -79,8 +87,8 @@ pub type Joining = (Seq, EntryHash, Vec<Logged>);
 /// `local`, the live one afresh.
 #[derive(Clone, Debug)]
 pub enum Act {
-    Open(Who, Option<(Seq, EntryHash)>, Option<Joining>),
-    SignIn(Who),
+    Open(Who, Origin, Option<(Seq, EntryHash)>, Option<Joining>),
+    SignIn(Who, Origin),
     Step(Space, Input),
 }
 
@@ -163,8 +171,27 @@ pub fn alone_at(fork: Option<(Seq, EntryHash)>) -> Role {
     }
 }
 
-fn fresh(m: &Module, me: &Who, space: Space) -> Peer {
-    Peer::new(m.schema.clone(), m.cas.clone(), Role::Replica, me.clone()).in_space(space)
+fn fresh(m: &Module, me: &Who, origin: Origin, space: Space) -> Peer {
+    let mut p = Peer::new(m.schema.clone(), m.cas.clone(), Role::Replica, me.clone()).in_space(space);
+    p.origin = origin;
+    p
+}
+
+/// Sixteen bytes no other replica draws: the process's hasher keys (which
+/// the platform seeds), the clock and the process, through sha256.
+pub fn draw_origin() -> Origin {
+    use std::hash::{BuildHasher, Hasher};
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let mut b = nanos.to_be_bytes().to_vec();
+    for _ in 0..2 {
+        let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+        h.write_u128(nanos);
+        b.extend(h.finish().to_be_bytes());
+    }
+    b.extend(std::process::id().to_be_bytes());
+    Origin::named(b)
 }
 
 impl Client {
@@ -181,16 +208,24 @@ impl Client {
             .flatten()
             .and_then(|b| <((Seq, EntryHash), Vec<Logged>)>::from_bytes(&b).ok());
         let joining = joining.map(|((n, h), c)| (n, h, c));
+        let origin = match disk.get("origin").ok().flatten().and_then(|b| Origin::from_bytes(&b).ok()) {
+            Some(o) => o,
+            None => {
+                let o = draw_origin();
+                let _ = disk.put("origin", &o.to_bytes());
+                o
+            }
+        };
         if let Some(r) = &mut record {
-            r.push((Act::Open(me.clone(), fork, joining.clone()), vec![], None));
+            r.push((Act::Open(me.clone(), origin, fork, joining.clone()), vec![], None));
         }
-        let mut log = fresh(&config.log, &me, Space::Durable);
+        let mut log = fresh(&config.log, &me, origin, Space::Durable);
         if fork.is_some() {
             log.role = alone_at(fork);
         }
         log.joining = joining;
         let live = config.live.as_ref().map(|l| {
-            let mut p = fresh(&l.module, &me, Space::Volatile);
+            let mut p = fresh(&l.module, &me, origin, Space::Volatile);
             p.device = l.device.clone();
             p
         });
@@ -399,34 +434,47 @@ impl Client {
         }
     }
 
-    /// Another login: every pending intent authored again under it, from
-    /// its session's first `local`, and the live machine started over.
+    /// Another login: every pending intent the signer's, its id kept — or,
+    /// for another actor than the one this client authored as, authored
+    /// again from a new origin's first `local` — and the live machine
+    /// started over. A chain handed over as another actor is not handed
+    /// over again: its facts are not the signer's, and its intents are
+    /// pushed as the signer's instead.
     pub fn sign_in(&mut self, who: Who) {
+        let was = &self.log.me;
+        let other = !was.actor.is_empty() && was.actor != who.actor;
+        if (&was.actor, &was.roles) != (&who.actor, &who.roles) {
+            self.log.joining = None;
+        }
+        if other {
+            self.log.origin = Origin::named([&self.log.origin.0[..], who.session.as_bytes()].concat());
+            self.log.local = 0;
+            let _ = self.disk.put("origin", &self.log.origin.to_bytes());
+        }
+        let origin = self.log.origin;
         let mut pending: Vec<Entry> = self.log.pending.iter().map(|p| p.entry.clone()).collect();
         for (n, e) in pending.iter_mut().enumerate() {
-            let local = n as i64 + 1;
-            (e.id, e.actor, e.session, e.local, e.roles) = (
-                EntryId::of(&who.session, local),
-                who.actor.clone(),
-                who.session.clone(),
-                local,
-                who.roles.clone(),
-            );
+            if other {
+                (e.origin, e.local) = (origin, n as i64 + 1);
+                e.id = EntryId::of(origin, e.local);
+            }
+            (e.actor, e.session, e.roles) = (who.actor.clone(), who.session.clone(), who.roles.clone());
         }
         if let Some(r) = &mut self.record {
-            r.push((Act::SignIn(who.clone()), vec![], None));
+            r.push((Act::SignIn(who.clone(), origin), vec![], None));
         }
         self.log.me = who.clone();
-        self.log.local = 0;
         if let Some(l) = &self.config.live {
-            let mut p = fresh(&l.module, &who, Space::Volatile);
+            let mut p = fresh(&l.module, &who, origin, Space::Volatile);
             p.device = l.device.clone();
+            // The origin goes on counting in the live space too, unless new.
+            p.local = self.live.as_ref().filter(|_| !other).map_or(0, |x| x.local);
             self.live = Some(p);
         }
         let durable = Durable {
             snapshot: self.log.log.base.clone(),
             chain: self.log.log.entries.clone(),
-            local: pending.len() as i64,
+            local: if other { pending.len() as i64 } else { self.log.local },
             pending,
         };
         self.step(Space::Durable, Input::Open(durable));

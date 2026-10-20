@@ -22,7 +22,7 @@
 //! volatile space is what the hub wrote of it when it last closed
 //! (`live`), and `on_restore` is authored over it.
 //!
-//! **The journal** beside the log keeps what the log cannot: each session's
+//! **The journal** beside the log keeps what the log cannot: each origin's
 //! last `local` and the intents refused, written when either a refusal or
 //! the horizon moves, so that after a restart a push past a refusal is not
 //! taken for a gap, a refused intent pushed again is answered again, and
@@ -35,7 +35,7 @@ use std::sync::Arc;
 use ark5::frames::Frame;
 use ark5::hash::FnHash;
 use ark5::ir::Node;
-use ark5::log::{Durable, EntryId, Snapshot};
+use ark5::log::{Durable, EntryId, Origin, Snapshot};
 use ark5::peer::{Feed, Input, Journal, Output, Peer, Role, Verdict, Who};
 use ark5::schema::Space;
 use ark5_client::{Disk, Module};
@@ -148,20 +148,20 @@ impl Hub {
             .log
             .entries
             .iter()
-            .filter(|l| l.entry.session == config.me.session)
+            .filter(|l| l.entry.origin == log.origin)
             .map(|l| l.entry.local)
             .max()
             .unwrap_or(0);
-        type Kept = (Vec<(String, i64)>, Vec<(EntryId, String)>);
+        type Kept = (Vec<(Origin, (String, i64))>, Vec<(EntryId, String)>);
         if let Some(Ok((last, refused))) = disk.get("journal").ok().flatten().map(|b| Kept::from_bytes(&b)) {
             let j = journal(&mut log);
-            for (s, n) in last {
-                let l = j.last.entry(s).or_insert(0);
-                *l = (*l).max(n);
+            for (o, (actor, n)) in last {
+                j.pass(o, &actor, n);
             }
             j.verdicts.extend(refused.into_iter().map(|(id, why)| (id, Verdict::Refused(why))));
         }
-        log.local = log.local.max(journal(&mut log).last.get(&config.me.session).copied().unwrap_or(0));
+        let origin = log.origin;
+        log.local = log.local.max(journal(&mut log).last_of(&origin));
         let live = config.live.as_ref().map(|l| authority(&l.module, &config.me, Space::Volatile));
         let mut hub = Hub {
             config,
@@ -373,7 +373,7 @@ impl Hub {
         if space == Space::Durable && mark != self.refused {
             self.refused = mark;
             let j = journal(&mut self.log);
-            let last: Vec<(String, i64)> = j.last.clone().into_iter().collect();
+            let last: Vec<(Origin, (String, i64))> = j.last.clone().into_iter().collect();
             let why = |v: &Verdict| match v {
                 Verdict::Refused(w) => Some(w.clone()),
                 Verdict::Seq(_) => None,

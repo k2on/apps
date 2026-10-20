@@ -338,7 +338,7 @@ impl Replica {
 
     pub fn mutate_bytes(&mut self, name: &str, input: Vec<u8>) -> Result<EntryId, String> {
         let f = Replica::func(name)?;
-        let id = EntryId::of(&self.client.log.me.session, self.client.log.local + 1);
+        let id = self.client.log.next_id();
         self.client.mutate(f, input, now_ms());
         self.absorb();
         if let Some(i) = self.rejections.iter().rposition(|(r, _)| *r == id) {
@@ -353,7 +353,7 @@ impl Replica {
     pub fn call(&mut self, name: &str, input: Vec<u8>) -> Result<(), String> {
         let f = Replica::func(name)?;
         let id = match &self.client.live {
-            Some(l) => EntryId::of(&l.me.session, l.local + 1),
+            Some(l) => l.next_id(),
             None => return Err("no listening session here".into()),
         };
         self.client.call(f, input, now_ms());

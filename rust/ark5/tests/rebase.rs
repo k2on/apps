@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use ark5::frames::Frame;
 use ark5::hash::EntryHash;
-use ark5::log::{Durable, EntryId, Logged};
+use ark5::log::{Durable, EntryId, Logged, Origin};
 use ark5::peer::{Cas, Ctx, Input, Output, Peer, Procedure};
 use ark5::store::{Change, Read};
 use demo::{create_input, pair_input, pos_of, ADD, CREATE, REMOVE, RENAME};
@@ -22,11 +22,11 @@ use support::wire::*;
 
 /// The state after the scenario's four entries, on every peer: alice's
 /// playlist "Favorites" with t1, t2 and t9 at 1, 2 and 3.
-const FINAL: &str = "483c666c329e3d348e2445c3edea9e60aba9554cca7fb2b41b3aeffd2328e2af";
+const FINAL: &str = "bb0abc1a5dc02d026eec3528b76324e73966deeb8847ea12409d771f53f1fd4b";
 
 /// The playlist alice's first intent creates: its first draw.
 fn pid() -> [u8; 16] {
-    EntryId::of("alice-session", 1).draw(0)
+    EntryId::of(Origin::named("alice-session"), 1).draw(0)
 }
 
 struct Scenario {

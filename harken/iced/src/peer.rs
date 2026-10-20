@@ -850,12 +850,15 @@ mod tests {
     /// the store is what it was — and each is the query after it. A
     /// sign-in then makes it the signer's (every view is the signer's
     /// afresh, so each is read again), and once an in-process hub has taken
-    /// it all, the lists are the query and the hub's log has the changes —
-    /// all but the one that named a row an earlier pending intent drew,
-    /// whose id moved with its intent's when it was authored again.
+    /// it all, the lists are the query and the hub's log has every change,
+    /// the add naming the playlist made signed out included: an intent's id,
+    /// and so the row it drew, is its origin's and survives the sign-in.
     ///
     /// Falsified by `Peer::join` opening every view afresh after the join (a
-    /// new `who_epoch`): every list was `Reset` and "nothing moved" failed.
+    /// new `who_epoch`): every list was `Reset` and "nothing moved" failed;
+    /// and by `ark5_client::Client::sign_in` authoring the pending intents
+    /// again from a new origin: the log held 4, the add refused "not your
+    /// playlist".
     #[test]
     fn a_window_alone_joins_a_server_in_place() {
         use ark5_server::hub::{Config, Hub};
@@ -914,14 +917,12 @@ mod tests {
         peer.refresh();
         assert_eq!(peer.client.pending_len(), 0);
         assert_eq!(peer.items, peer.library_now());
-        // What v5 does not keep: a row an intent drew has an id derived
-        // from the intent's (§1.6), and re-authoring gives the intent the
-        // signer's id — so the playlist made alone is made again under a
-        // new id, and the item put on it names the old one.
-        assert_eq!(hub.log.log.head().0, 4, "the playlist and the three songs");
-        let refused: Vec<String> = peer.client.take_rejections().into_iter().map(|(_, w)| w).collect();
-        assert_eq!(refused, ["not your playlist"]);
-        assert!(!peer.items[1].on_playlist());
+        // An intent's id is its origin's (§1.6), whoever signs in: the
+        // playlist made alone keeps its id through the sign-in, and the item
+        // put on it names it still.
+        assert_eq!(hub.log.log.head().0, 5, "the playlist, the three songs and the add");
+        assert!(peer.client.take_rejections().is_empty());
+        assert!(peer.items[1].on_playlist());
     }
 
     /// The playlist the library is read against can go — here the server

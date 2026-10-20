@@ -178,7 +178,7 @@ fn fleet_vector(seed: u64, head: i64, hash: StateHash) -> Value {
 fn rebase() {
     let net = fleet(7);
     let (head, hash) = (net.hub.log.log.head().0, net.hub.log.store.state_hash());
-    assert_eq!(hash.hex(), "2f24495f091532deac89459a755d3935c3f06d499b56aa09f62bf8b47e98c01d", "K1's pin");
+    assert_eq!(hash.hex(), "ff04f56d613ee73dad721e02cb6ebe125fa93fe801b2f1713499038f55475e95", "K1's pin");
     let right = fleet_vector(7, head, hash);
     vector("rebase", "fleet-seed-7.json", &format!("{right:#}\n")).unwrap();
     let mut written = BTreeSet::from(["fleet-seed-7.json".to_string()]);
