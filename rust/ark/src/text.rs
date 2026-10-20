@@ -192,17 +192,27 @@ const KEYWORDS: &[&str] = &[
 
 /// A type's canonical spelling, which is also a declaration's name.
 pub fn spell(t: &Ty) -> String {
-    let all = |ts: &[Ty]| ts.iter().map(spell).collect::<Vec<_>>().join(", ");
+    spell_in(t, &[])
+}
+
+/// A type's spelling where a tuple that is a table's row is its row's
+/// name (`PlaylistItem`), as an `Option` of one is declared.
+fn spell_in(t: &Ty, rows: &[(String, Ty)]) -> String {
+    let all = |ts: &[Ty]| ts.iter().map(|t| spell_in(t, rows)).collect::<Vec<_>>().join(", ");
     match t {
         Ty::Int => "Int".into(),
         Ty::Bytes => "Bytes".into(),
         Ty::Named(n) => n.clone(),
-        Ty::List(e) => format!("List<{}>", spell(e)),
-        Ty::Tuple(ts) if ts.len() == 1 => format!("({},)", spell(&ts[0])),
+        Ty::List(e) => format!("List<{}>", spell_in(e, rows)),
+        t if rows.iter().any(|r| r.1 == *t) => rows.iter().find(|r| r.1 == *t).unwrap().0.clone(),
+        Ty::Tuple(ts) if ts.len() == 1 => format!("({},)", all(ts)),
         Ty::Tuple(ts) => format!("({})", all(ts)),
         Ty::Sum(vs) if vs.is_empty() => "Never".into(),
         t if *t == Ty::bool() => "Bool".into(),
-        Ty::Sum(vs) => format!("Sum<{}>", vs.iter().map(|v| spell(&Ty::Tuple(v.clone()))).collect::<Vec<_>>().join(", ")),
+        Ty::Sum(vs) => format!(
+            "Sum<{}>",
+            vs.iter().map(|v| spell_in(&Ty::Tuple(v.clone()), rows)).collect::<Vec<_>>().join(", ")
+        ),
     }
 }
 
@@ -222,7 +232,7 @@ fn camel(s: &str) -> String {
 }
 
 /// The declaration an `Id<t>` or `Option<T>` is without one written.
-fn auto(name: &str, d: &Ty) -> Option<Decl> {
+fn auto(name: &str, d: &Ty, rows: &[(String, Ty)]) -> Option<Decl> {
     let opt = match d {
         Ty::Sum(vs) if d.is_option() => Some(vs[1][0].clone()),
         _ => None,
@@ -235,7 +245,7 @@ fn auto(name: &str, d: &Ty) -> Option<Decl> {
                 why: None,
             }],
         }),
-        Some(t) if name == format!("Option<{}>", spell(&t)) => Some(Decl {
+        Some(t) if name == format!("Option<{}>", spell_in(&t, rows)) => Some(Decl {
             ty: d.clone(),
             refine: vec![],
         }),
@@ -247,7 +257,7 @@ fn auto(name: &str, d: &Ty) -> Option<Decl> {
 /// refinements on top dropped, an `Id<t>` kept — as a builder's Rust type is.
 fn infer(types: &Types, t: &Ty) -> Ty {
     match t {
-        Ty::Named(n) if !n.starts_with("Id<") => match types.decl(n) {
+        Ty::Named(n) if !n.starts_with("Id<") && n != "Text" => match types.decl(n) {
             Some(d) if !d.refine.is_empty() => infer(types, &d.ty),
             _ => t.clone(),
         },
@@ -255,24 +265,19 @@ fn infer(types: &Types, t: &Ty) -> Ty {
     }
 }
 
-/// The table rows of type `t` are of, and its column `name`'s position:
-/// a field's name where its structure is a row's.
-fn column(schema: &Schema, types: &Types, t: &Ty, name: &str) -> Option<u32> {
-    let deep = types.deep(t);
-    schema
-        .tables
-        .iter()
-        .find_map(|tab| {
-            (Ty::Tuple(tab.columns.iter().map(|c| c.ty.clone()).collect()) == deep)
-                .then(|| tab.column(name))
-                .flatten()
-        })
-        .map(|i| i as u32)
+/// The one table whose rows are of type `t` as the checker types them
+/// (`rows`, each table's), if one is.
+fn table_of<'a>(rows: &'a [(Table, Ty)], t: &Ty) -> Option<&'a Table> {
+    let mut it = rows.iter().filter(|r| r.1 == *t);
+    match (it.next(), it.next()) {
+        (Some(r), None) => Some(&r.0),
+        _ => None,
+    }
 }
 
 /// Field `name` of a value of type `t`: a position, a refined field's
-/// declaration (`R.f`), or a row's column.
-fn field(schema: &Schema, types: &Types, t: &Ty, name: &str) -> Option<u32> {
+/// declaration (`R.f`), or the column of the one table rows of `t` are.
+fn field(rows: &[(Table, Ty)], types: &Types, t: &Ty, name: &str) -> Option<u32> {
     if let Ok(i) = name.parse() {
         return Some(i);
     }
@@ -281,7 +286,7 @@ fn field(schema: &Schema, types: &Types, t: &Ty, name: &str) -> Option<u32> {
             return Some(i as u32);
         }
     }
-    column(schema, types, t, name)
+    table_of(rows, t)?.column(name).map(|i| i as u32)
 }
 
 // * Tokens
@@ -402,6 +407,7 @@ struct M {
     fns: BTreeMap<String, (Kind, usize)>,
     built: BTreeMap<String, Option<Function>>,
     lib: Lib,
+    rows: Option<Vec<(String, Ty)>>,
 }
 
 /// A cursor over `m`'s tokens, compiling one function's body or a
@@ -437,6 +443,20 @@ impl M {
             Ty::Sum(vs) => vs.iter().flatten().for_each(|t| self.declare(t, out)),
             _ => {}
         }
+    }
+
+    /// Every table's row type, by its row's name.
+    fn rows(&mut self) -> R<Vec<(String, Ty)>> {
+        if let Some(r) = &self.rows {
+            return Ok(r.clone());
+        }
+        self.rows = Some(vec![]);
+        let mut rows = vec![];
+        for t in self.schema.tables.clone() {
+            rows.push((camel(&t.name), self.row(&t)?));
+        }
+        self.rows = Some(rows.clone());
+        Ok(rows)
     }
 
     /// A table's row: each column as its declared type's spelling reads.
@@ -524,12 +544,23 @@ impl<'m> P<'m> {
         }
     }
 
+    /// Any word, a keyword too: what follows a `.`, a column's name.
+    fn word(&mut self) -> R<String> {
+        match self.tok().clone() {
+            T::Id(n) => {
+                self.i += 1;
+                Ok(n)
+            }
+            t => Err(self.err(format!("a name expected, not {t:?}"))),
+        }
+    }
+
     /// `a.b.c`.
     fn path(&mut self) -> R<String> {
         let mut n = self.name()?;
         while self.is(".") && matches!(self.peek(1), T::Id(_)) {
             self.i += 1;
-            n = format!("{n}.{}", self.name()?);
+            n = format!("{n}.{}", self.word()?);
         }
         Ok(n)
     }
@@ -619,8 +650,8 @@ impl<'m> P<'m> {
                     }
                     _ => arg(self)?,
                 };
-                let name = format!("{n}<{}>", spell(&inner));
-                self.auto(&name, Ty::option(inner));
+                let name = format!("{n}<{}>", spell_in(&inner, &self.m.rows()?));
+                self.auto(&name, Ty::option(inner))?;
                 Ty::Named(name)
             }
             _ if n == "Text" || self.m.written.contains(&n) => Ty::Named(n),
@@ -634,7 +665,10 @@ impl<'m> P<'m> {
     /// A declaration's name: a path, or `Id<t>`, `Option<T>`.
     fn tname(&mut self) -> R<String> {
         match self.tok() {
-            T::Id(n) if n == "Id" || n == "Option" => Ok(spell(&self.ty()?)),
+            T::Id(n) if n == "Id" || n == "Option" => {
+                let t = self.ty()?;
+                Ok(spell_in(&t, &self.m.rows()?))
+            }
             _ => self.path(),
         }
     }
@@ -684,7 +718,7 @@ impl<'m> P<'m> {
     /// declarations settle: they are what its names are typed under.
     fn function(&mut self, kind: Kind) -> R<Function> {
         let start = self.i;
-        let mut decls = BTreeMap::new();
+        let (mut decls, mut tries) = (BTreeMap::new(), 0);
         loop {
             self.i = start;
             self.path()?;
@@ -703,19 +737,24 @@ impl<'m> P<'m> {
             }
             self.callees.clear();
             let body = match self.eat("=") {
-                true => self.inside(true, |p| p.expr())?,
-                false => {
-                    self.want("{")?;
-                    self.block()?
-                }
+                true => self.inside(true, |p| p.expr()),
+                false => self.want("{").and_then(|_| self.block()),
             };
-            let body = close(body, params.len() as u32);
+            // A name typed before a callee's declarations were known may
+            // fail to check: again, under what was learnt.
+            let body = match body {
+                Err(_) if self.decls != decls && tries < 8 => {
+                    (decls, tries) = (self.decls.clone(), tries + 1);
+                    continue;
+                }
+                b => close(b?, params.len() as u32),
+            };
             let mut now = self.callees.clone();
             for t in &self.stored {
                 self.m.declare(t, &mut now);
             }
-            if now != decls {
-                decls = now;
+            if now != decls && tries < 8 {
+                (decls, tries) = (now, tries + 1);
                 continue;
             }
             let types: Vec<_> = decls.into_iter().collect();
@@ -757,6 +796,14 @@ impl<'m> P<'m> {
         Ok(self.type_of_at(&self.decl_list(), &stack, &close(e.clone(), stack.len() as u32))?.0)
     }
 
+    /// Every table, and its row as the checker types it here.
+    fn trows(&self) -> R<Vec<(Table, Ty)>> {
+        let ts = self.m.schema.tables.clone();
+        ts.into_iter()
+            .map(|t| Ok((t.clone(), self.elem(&self.type_of(&Expr::Scan(t.name))?)?)))
+            .collect()
+    }
+
     fn decl_list(&self) -> Vec<(String, Decl)> {
         self.decls.clone().into_iter().collect()
     }
@@ -766,11 +813,12 @@ impl<'m> P<'m> {
     }
 
     /// An `Id<t>` or `Option<T>` declared as it is when none is written.
-    fn auto(&mut self, name: &str, d: Ty) {
+    fn auto(&mut self, name: &str, d: Ty) -> R<()> {
         if !self.m.written.contains(name) {
-            let d = auto(name, &d).unwrap();
+            let d = auto(name, &d, &self.m.rows()?).unwrap();
             self.m.decls.insert(name.into(), d);
         }
+        Ok(())
     }
 
     /// `t`, stored in the function: what it declares, now and after.
@@ -883,14 +931,14 @@ impl<'m> P<'m> {
                     self.i += 1;
                     n.to_string()
                 }
-                _ => self.name()?,
+                _ => self.word()?,
             };
             let t = self.type_of(&e)?;
             e = match self.is("(") {
                 true => self.method(e, &t, &name)?,
                 false => {
                     let types = self.types();
-                    let i = field(&self.m.schema, &types, &t, &name).ok_or_else(|| self.err(format!("no field {name} of {}", spell(&t))))?;
+                    let i = field(&self.trows()?, &types, &t, &name).ok_or_else(|| self.err(format!("no field {name} of {}", spell(&t))))?;
                     Expr::Field(bx(e), i)
                 }
             };
@@ -1049,7 +1097,7 @@ impl<'m> P<'m> {
                 base = Some(p.expr()?);
                 return Ok(());
             }
-            let n = p.name()?;
+            let n = p.word()?;
             let i = tab.column(&n).ok_or_else(|| p.err(format!("no column {n} of {t}")))?;
             p.want(":")?;
             given.insert(i, p.expr()?);
@@ -1153,7 +1201,7 @@ impl<'m> P<'m> {
             "ctx" => {
                 self.i += 1;
                 self.want(".")?;
-                let f = self.name()?;
+                let f = self.word()?;
                 return Ok(Expr::Ctx(match f.as_str() {
                     "user" => CtxField::User,
                     "session" => CtxField::Session,
@@ -1163,7 +1211,7 @@ impl<'m> P<'m> {
                         self.want("(")?;
                         let t = self.name()?;
                         self.want(")")?;
-                        self.auto(&format!("Id<{t}>"), Ty::Bytes);
+                        self.auto(&format!("Id<{t}>"), Ty::Bytes)?;
                         self.store(Ty::Named(format!("Id<{t}>")));
                         CtxField::NewId(t)
                     }
@@ -1192,8 +1240,8 @@ impl<'m> P<'m> {
                     (None, Some(x)) => infer(&self.types(), &self.type_of(x)?),
                     (None, None) => return Err(self.err("none<T> needs its type")),
                 };
-                let name = format!("Option<{}>", spell(&inner));
-                self.auto(&name, Ty::option(inner));
+                let name = format!("Option<{}>", spell_in(&inner, &self.m.rows()?));
+                self.auto(&name, Ty::option(inner))?;
                 return Ok(Expr::Variant(self.store(Ty::Named(name)), i, args));
             }
             "lit" => {
@@ -1217,15 +1265,16 @@ impl<'m> P<'m> {
             }
             _ if upper || n == "Sum" => {
                 let t = self.ty()?;
+                let t = self.store(t);
                 if self.eat("[") {
                     let es = self.list("]", |p| p.expr())?;
                     let Ty::List(e) = t else { return Err(self.err("List<T>[…]")) };
-                    return Ok(Expr::List(self.store(*e), es));
+                    return Ok(Expr::List(*e, es));
                 }
                 self.want("#")?;
                 let i = self.int()?;
                 let args = if self.eat("(") { self.rest()? } else { vec![] };
-                return Ok(Expr::Variant(self.store(t), i as u8, args));
+                return Ok(Expr::Variant(t, i as u8, args));
             }
             _ => {}
         }
@@ -1309,6 +1358,7 @@ pub fn build(src: &str) -> R<Domain> {
         fns: BTreeMap::new(),
         built: BTreeMap::new(),
         lib: Lib::default(),
+        rows: None,
     };
     // Items, found by their keyword at the top level.
     let (mut schema, mut types, mut depth) = (None, vec![], 0);
@@ -1354,19 +1404,20 @@ pub fn build(src: &str) -> R<Domain> {
             let mut keys = 0;
             p.want("{")?;
             while !p.eat("}") {
-                if p.eat("index") {
+                if !matches!(p.peek(1), T::P(":")) && p.eat("index") {
                     let unique = p.eat("unique");
                     p.want("(")?;
                     let cols = p.list(")", |p| {
-                        let n = p.name()?;
+                        let n = p.word()?;
                         t.column(&n).ok_or_else(|| p.err(format!("no column {n}")))
                     })?;
                     t.indexes.push(Index { columns: cols, unique });
                     continue;
                 }
-                let name = p.name()?;
+                let name = p.word()?;
                 p.want(":")?;
-                let decl = spell(&p.ty()?);
+                let ct = p.ty()?;
+                let decl = spell_in(&ct, &p.m.rows()?);
                 if p.eat("key") {
                     if keys != t.columns.len() {
                         return Err(p.err("a key column after one that is not"));
@@ -1400,6 +1451,7 @@ pub fn build(src: &str) -> R<Domain> {
             tables.push(t);
         }
         m.schema.tables = tables;
+        m.rows = None;
     }
     for &i in &types {
         let mut p = P::new(&mut m, i);
@@ -1461,6 +1513,7 @@ pub fn fragment(src: &str, schema: &Schema, decls: &[(String, Decl)], vars: &[(&
         fns: BTreeMap::new(),
         built: BTreeMap::new(),
         lib: Lib::default(),
+        rows: None,
     };
     let mut p = P::new(&mut m, 0);
     p.decls = decls.iter().cloned().collect();
@@ -1484,6 +1537,7 @@ pub fn fragment(src: &str, schema: &Schema, decls: &[(String, Decl)], vars: &[(&
 // * Printing
 
 struct Pr<'a> {
+    rows: &'a [(String, Ty)],
     m: &'a Module,
     lib: &'a Lib,
     names: &'a BTreeMap<FnHash, String>,
@@ -1511,17 +1565,20 @@ impl Pr<'_> {
         Types::new(&self.f.types)
     }
 
+    /// Every table, and its row as the checker types it here.
+    fn trows(&self) -> Vec<(Table, Ty)> {
+        let row = |t: &Table| match self.ty(&Expr::Scan(t.name.clone())) {
+            Ok((Ty::List(r), _)) => *r,
+            _ => Ty::unit(),
+        };
+        self.m.schema.tables.iter().map(|t| (t.clone(), row(t))).collect()
+    }
+
     /// A fresh name for a value of `t`: from its type, unlike any name in
     /// scope, any table, any function's first segment or keyword.
     fn fresh(&self, t: &Ty) -> String {
-        let types = self.types();
-        let row = self
-            .m
-            .schema
-            .tables
-            .iter()
-            .find(|tab| Ty::Tuple(tab.columns.iter().map(|c| c.ty.clone()).collect()) == types.deep(t));
-        let stem = match (t, row) {
+        let rows = self.trows();
+        let stem = match (t, table_of(&rows, t)) {
             (_, Some(tab)) => tab.name.split('_').map(|w| &w[..1]).collect(),
             (Ty::Named(n), _) if n.starts_with("Id<") => format!("{}_id", &n[3..n.len() - 1]),
             (Ty::Named(n), _) if n.starts_with("Option<") => "opt".into(),
@@ -1620,8 +1677,9 @@ impl Pr<'_> {
         if es.len() != tab.columns.len() {
             return self.ex(e, 0);
         }
+        let row = self.trows().into_iter().find(|r| r.0.name == t).map(|r| r.1);
         let base = es.iter().enumerate().find_map(|(i, x)| match x {
-            Expr::Field(b, j) if *j as usize == i => Some((**b).clone()),
+            Expr::Field(b, j) if *j as usize == i && self.ty(b).ok().map(|t| t.0) == row => Some((**b).clone()),
             _ => None,
         });
         let is_base = |i: usize, x: &Expr| matches!((x, &base), (Expr::Field(b, j), Some(c)) if *j as usize == i && **b == *c);
@@ -1672,7 +1730,7 @@ impl Pr<'_> {
                     Ty::Named(n) if n == "Text" => format!("{:?}", r.text()?),
                     Ty::Bytes => format!("x\"{}\"", hex(&r.bytes()?)),
                     t if *t == Ty::bool() => (if b[..] == [1] { "true" } else { "false" }).into(),
-                    t => format!("lit<{}>(x\"{}\")", spell(t), hex(b)),
+                    t => format!("lit<{}>(x\"{}\")", spell_in(t, self.rows), hex(b)),
                 }
             }
             Var(i) => self
@@ -1725,13 +1783,8 @@ impl Pr<'_> {
             }
             Field(x, i) => {
                 let t = self.ty(x)?.0;
-                let deep = types.deep(&t);
-                let row = self
-                    .m
-                    .schema
-                    .tables
-                    .iter()
-                    .find(|tab| Ty::Tuple(tab.columns.iter().map(|c| c.ty.clone()).collect()) == deep);
+                let rows = self.trows();
+                let row = table_of(&rows, &t);
                 let name = match (&t, types.structure(&t)) {
                     (Ty::Named(r), Ty::Tuple(ts)) => match ts.get(*i as usize) {
                         Some(Ty::Named(f)) if f.starts_with(&format!("{r}.")) => Some(f[r.len() + 1..].to_string()),
@@ -1740,27 +1793,27 @@ impl Pr<'_> {
                     _ => None,
                 };
                 let name = name.or_else(|| Some(row?.columns.get(*i as usize)?.name.clone()));
-                let name = name.filter(|n| field(&self.m.schema, &types, &t, n) == Some(*i)).unwrap_or(i.to_string());
+                let name = name.filter(|n| field(&rows, &types, &t, n) == Some(*i)).unwrap_or(i.to_string());
                 format!("{}.{name}", self.ex(x, 8)?)
             }
             Tuple(es) if es.len() == 1 => format!("({},)", self.ex(&es[0], 0)?),
             Tuple(es) => format!("({})", self.all(es)?),
             Variant(t, i, es) => match (t, types.decl(&spell(t))) {
-                (Ty::Named(n), Some(d)) if n.starts_with("Option<") && auto(n, &d.ty).as_ref() == Some(d) => {
+                (Ty::Named(n), Some(d)) if n.starts_with("Option<") && auto(n, &d.ty, self.rows).as_ref() == Some(d) => {
                     let Ty::Sum(vs) = &d.ty else { unreachable!() };
                     let inner = &vs[1][0];
                     match (*i, es.first()) {
                         (1, Some(x)) if infer(&types, &self.ty(x)?.0) == *inner => format!("some({})", self.ex(x, 0)?),
-                        (1, Some(x)) => format!("some<{}>({})", spell(inner), self.ex(x, 0)?),
-                        _ => format!("none<{}>", spell(inner)),
+                        (1, Some(x)) => format!("some<{}>({})", spell_in(inner, self.rows), self.ex(x, 0)?),
+                        _ => format!("none<{}>", spell_in(inner, self.rows)),
                     }
                 }
-                _ if es.is_empty() => format!("{}#{i}", spell(t)),
-                _ => format!("{}#{i}({})", spell(t), self.all(es)?),
+                _ if es.is_empty() => format!("{}#{i}", spell_in(t, self.rows)),
+                _ => format!("{}#{i}({})", spell_in(t, self.rows), self.all(es)?),
             },
             List(t, es) => match es.first() {
                 Some(x) if infer(&types, &self.ty(x)?.0) == *t => format!("[{}]", self.all(es)?),
-                _ => format!("List<{}>[{}]", spell(t), self.all(es)?),
+                _ => format!("List<{}>[{}]", spell_in(t, self.rows), self.all(es)?),
             },
             Op(o, a, b) => {
                 let &(_, s, l) = OPS.iter().find(|x| x.0 == *o).unwrap();
@@ -1891,7 +1944,9 @@ pub fn print(m: &Module, functions: &[Function]) -> R<String> {
         effect: Effect::Pure,
         body: Expr::Seq(vec![]),
     };
+    let rows = rows_of(m)?;
     let mut pr = Pr {
+        rows: &rows,
         m,
         lib: &lib,
         names: &names,
@@ -1929,12 +1984,12 @@ pub fn print(m: &Module, functions: &[Function]) -> R<String> {
             });
         }
     }
-    let shown: Vec<_> = decls.iter().filter(|(n, d)| auto(n, &d.ty).as_ref() != Some(d)).collect();
+    let shown: Vec<_> = decls.iter().filter(|(n, d)| auto(n, &d.ty, &rows).as_ref() != Some(d)).collect();
     if !shown.is_empty() {
         out += "\n";
     }
     for (n, d) in shown {
-        out += &format!("type {n} = {}{}\n", spell(&d.ty), rules(d, &mut pr)?);
+        out += &format!("type {n} = {}{}\n", spell_in(&d.ty, &rows), rules(d, &mut pr)?);
     }
     let mut fns: Vec<(&String, &Function)> = functions.iter().map(|f| (&names[&f.hash()], f)).collect();
     for (n, h) in &m.bindings {
@@ -1945,15 +2000,16 @@ pub fn print(m: &Module, functions: &[Function]) -> R<String> {
     fns.sort_by_key(|x| x.0);
     for (name, f) in fns {
         out += "\n";
-        out += &function(m, &lib, &names, name, f)?;
+        out += &function(m, &lib, &names, &rows, name, f)?;
     }
     Ok(out)
 }
 
 /// One function as text, its kind from its effect: `mutator`, or `live`
 /// when every table it and its callees touch is volatile; `query`; `helper`.
-fn function(m: &Module, lib: &Lib, names: &BTreeMap<FnHash, String>, name: &str, f: &Function) -> R<String> {
+fn function(m: &Module, lib: &Lib, names: &BTreeMap<FnHash, String>, rows: &[(String, Ty)], name: &str, f: &Function) -> R<String> {
     let mut pr = Pr {
+        rows,
         m,
         lib,
         names,
@@ -1968,11 +2024,11 @@ fn function(m: &Module, lib: &Lib, names: &BTreeMap<FnHash, String>, name: &str,
         Effect::Pure => "helper",
     };
     pr.under(&f.params, |p, ns| {
-        let params: Vec<String> = ns.iter().zip(&f.params).map(|(n, t)| format!("{n}: {}", spell(t))).collect();
+        let params: Vec<String> = ns.iter().zip(&f.params).map(|(n, t)| format!("{n}: {}", spell_in(t, p.rows))).collect();
         let ret = if f.ret == Ty::unit() {
             String::new()
         } else {
-            format!(" -> {}", spell(&f.ret))
+            format!(" -> {}", spell_in(&f.ret, p.rows))
         };
         let body = match &f.body {
             Expr::Let(..) | Expr::Seq(_) if !matches!(&f.body, Expr::Seq(es) if es.is_empty()) => format!(" {}", p.block(&f.body)?),
@@ -2013,5 +2069,20 @@ pub fn print_function(m: &Module, lib: &Lib, name: &str) -> R<String> {
     let f = lib
         .get(&m.get(name).ok_or_else(|| Refusal(format!("no function {name}")))?)
         .ok_or_else(|| Refusal::new("not loaded"))?;
-    function(m, lib, &names, name, &f.f)
+    function(m, lib, &names, &rows_of(m)?, name, &f.f)
+}
+
+/// The module's rows, as the text names them.
+fn rows_of(m: &Module) -> R<Vec<(String, Ty)>> {
+    let mut x = M {
+        toks: vec![],
+        schema: m.schema.clone(),
+        decls: m.types.iter().cloned().collect(),
+        written: m.types.iter().map(|t| t.0.clone()).collect(),
+        fns: BTreeMap::new(),
+        built: BTreeMap::new(),
+        lib: Lib::default(),
+        rows: None,
+    };
+    x.rows()
 }
