@@ -290,6 +290,18 @@ impl Gen {
         cols.iter().flat_map(|c| Gen::value(r, *c)).collect()
     }
 
+    /// Every function the module was generated with, bound by a name of
+    /// its kind and place: what `ark::sexp` prints the module as.
+    pub fn bindings(&self) -> Vec<(String, FnHash)> {
+        let kinds = [("m", &self.mutators), ("q", &self.queries)];
+        let each = kinds
+            .into_iter()
+            .flat_map(|(k, fs)| fs.iter().enumerate().map(move |(i, f)| (format!("fuzz.{k}{i:02}"), f.0)));
+        let mut out: Vec<_> = each.chain([("fuzz.scope".to_string(), self.scope)]).collect();
+        out.sort();
+        out
+    }
+
     /// A random mutation for client `i`.
     pub fn mutate(&self, r: &mut Rng, i: i64) -> Op {
         let (f, cols) = &self.mutators[r.below(self.mutators.len() as u64) as usize];

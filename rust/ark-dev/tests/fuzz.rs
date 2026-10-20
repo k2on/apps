@@ -31,3 +31,33 @@ fn sessions_do_things() {
     }
     assert!(entries > 200 && refused > 100, "{entries} entries, {refused} refused");
 }
+
+/// Every generated module — plain IR with no declarations, a `Bool` built
+/// as a variant, rows as positional tuples — printed as ArkLang builds to
+/// itself and prints the same again (§1.15: `build(print(m)) == m` for
+/// every module, not only those the builders write). Falsified by printing
+/// a `Bool` built as a variant as `true`: the rebuilt function held a
+/// literal, and the module was another.
+#[test]
+fn every_generated_module_prints_and_builds_to_itself() {
+    use ark::ir::{Function, Node};
+    for seed in 1..=200 {
+        let g = ark_dev::fuzz::Gen::new(&mut ark_dev::fuzz::Rng(seed));
+        let bindings = g.bindings();
+        let fns: Vec<Function> = bindings
+            .iter()
+            .map(|b| Function::from_bytes(g.module.cas.body(&b.1).unwrap()).unwrap())
+            .collect();
+        let m = ark::module::Module {
+            spec: ark::module::SPEC,
+            schema: (*g.module.schema).clone(),
+            types: vec![],
+            bindings,
+        };
+        let text = ark::sexp::print(&m, &fns).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
+        let d = ark::sexp::build(&text).unwrap_or_else(|e| panic!("seed {seed}: {e}\n{text}"));
+        assert_eq!(d.module, m, "seed {seed}\n{text}");
+        let again: Vec<Function> = d.bodies.values().map(|b| Function::from_bytes(b).unwrap()).collect();
+        assert_eq!(ark::sexp::print(&d.module, &again).unwrap(), text, "seed {seed}");
+    }
+}

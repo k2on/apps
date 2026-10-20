@@ -793,6 +793,22 @@ linked round trip 182.2 µs (was 5,520.1; v4 215.1). Source +186 lines.
 
 ## Landed
 
+**A3** (`8857083`…): ArkLang is S-expressions, `ark::sexp` (reader,
+layout, lowering through the checker, printer): 1,400 source lines against
+600 — over, because printing recovers what the bytes leave out (binder
+names, wanted types, `(as …)`, kinds) and lowering must rebuild the
+builders' declarations byte for byte; `text.rs` (1,811) deleted, `ark` −335.
+**Names are in the module** (`Decl::names`, checked; the derives write
+them): every function declaring a type moved, and `port.rs` holds harken's
+127 to the macros' pins with names set aside. Re-derived: eval/, verify/,
+module/, views/, trace/, protocol/, `fleet-seed-7`'s script; no state hash
+moved; hash/ and `fleet-fuzz-*` held (their functions declare nothing).
+`domain.ark` builds to `harken.ark`, `demo.ark` to the builders' demo, 200
+fuzz modules to themselves; fuzz 1,000 sessions, 2,997 traces replayed.
+Added to the grammar: `volatile`, `refs`, `default`, `as`, `lit`,
+`variant`, `.`, `asc`, `(len LO ..)`, `ctx.roles`. Not verified: `ctx.device`
+(no IR) and a field's `exists` are refused; the explorer's pane undrawn.
+
 **K3a** (`791b3d0`…`17322ae`). **Four frames**: `Hello`, `Page`,
 `Snapshot`, `Verdict { Ok | Refused | Held }`; a peer's page is its
 intents (`Logged::intent`, sequence 0; a push is a page of one) or its
