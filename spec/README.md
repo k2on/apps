@@ -7,8 +7,8 @@ when it agrees with them on the vectors under `vectors/`, which
 and otherwise hold to what is on disk; written over an empty `vectors/`
 they are the tree byte for byte, which the flake's `vectors` check holds.
 This file is the index; `RUNNERS.md` says what a runner does with the
-vectors `rust/ark-dev` writes, and `AUTHORING.md` is the Rust subset the
-macros accept. `docs/plan-v5.md` is the design; where a module and this
+vectors `rust/ark-dev` writes, and `AUTHORING.md` is ArkLang, the common
+text form, and the Rust builders. `docs/plan-v5.md` is the design; where a module and this
 file disagree, the module is right. v5 replaced v4 here (R1); v4's
 specification is in the history, at the commits `kotlin/FROZEN.md` names.
 
@@ -18,7 +18,7 @@ specification is in the history, at the commits `kotlin/FROZEN.md` names.
 |---|---|---|
 | 1.1 | `ty.rs` | the five constructors — `Int`, `Bytes`, `List`, `Tuple`, `Sum` — and `Named`, a declaration's name, through which a type recurs |
 | 1.1 | `codec.rs` | the encoding: canonical, prefix-free, order-preserving; `skip` and the structural `parse` |
-| 1.1 | `ir.rs` (`Decl`, `Refine`, `Rule`) | a declaration: a structure and its refinements — `utf8`, `len n`, `len lo..=hi`, `trim`, `non-empty`, and a `Pure` predicate — each with the words a form shows |
+| 1.1 | `ir.rs` (`Decl`, `Refine`, `Rule`) | a declaration: a structure, its refinements — `utf8`, `len n`, `len lo..=hi`, `trim`, `non-empty`, and a `Pure` predicate — each with the words a form shows, and its names: a record's fields, or a sum's variants each followed by its fields', one to each and distinct (§1.15) |
 | 1.1 | `interp.rs` (`parse`, `check_form`) | the boundary: canonical bytes of the type, every refinement held in order, `trim` normalising before the rules after it, a value refused underneath not held to more; the refusal is the rule's words or the default (`at least 1 character`, `exactly 16 bytes`, `not UTF-8 text`, `must not be empty`, `is not valid`); `check_form` reports every failing field by its path of positions |
 | 1.1 | `hash.rs` | the hash spaces, each its own type |
 | 1.2 | `schema.rs` (`compat`, `Table::fit`), `peer.rs` (`open`) | a schema grows by appending: a row of a table as another schema of it wrote it reads under this one completed (an older one's) or cut to its prefix (a newer one's). A log opened under a prefix-extension of the schema it was written under is checked entry against entry by each hash over its own bytes, never derived again; its rows are widened and the store's digests are the new schema's; what it logs then carries new-schema hashes. A replica whose authority runs another schema takes a confirmed entry's state as it says; one that diverges twice at one entry asks for the snapshot (`Hello` at cursor `-1`) |
@@ -114,7 +114,8 @@ the module's own.
 | 1.9 | `peer.rs` (the volatile space) | live state: tables marked `Volatile`, a second machine of the same kind over them on the same socket, frames tagged with their `space`; `on_join`, `on_leave` and `on_restore` entries the authority authors; not in the state hash, not journaled |
 | 1.10 | `view.rs` | maintained views: one node per operator of a query's relational spine, each updated from a delta; after every step the answer equals a fresh one — a fresh read is the same nodes hydrated once, the one evaluator of reads (K3a) — and the patches (`Insert`, `Remove`, `Update` at a position) splice the old list into the new |
 | 1.11 | `frames.rs` | the frames, one derived `Sum` of four: `Hello`, `Page` (a peer's intents, or its chain made alone; an authority's log), `Snapshot`, `Verdict` (`Ok`, `Refused`, `Held`). A peer sends pages of its chain; an authority answers with verdicts and its own pages. No frame carries a function's body (K2) |
-| 1.12 | `author.rs`, `rust/ark-macros` | authoring: `#[ark::mutator]`, `query`, `helper`, `guard`, `scope`, `live` and `ark::module!` lower restricted Rust to §2's `Expr` through `ark::author`; the subset accepted is `AUTHORING.md`'s, and anything outside it a compile error naming it |
+| 1.15 | `sexp.rs` | ArkLang, the common text form: S-expressions, one reader rule; `build` lowers a file through the checker to a module, `print` writes a module, `build(print(m)) == m`; the grammar is `AUTHORING.md` §1 |
+| 1.15 | `author.rs`, `rust/ark-macros` (the derives) | the Rust builders: a function a `static` `DefN` whose body builds `Expr`, records and sums by the derives, their names into the module's declarations; `text()` embeds one ArkLang form |
 
 The drivers are not the specification but the reference reading of it:
 `rust/ark-client` (a client: storage, the link, views for a UI, the live
@@ -127,16 +128,17 @@ trace recorder and player, the fuzzer, the vector writer, `arkc`).
 Printed in the JSON dialect of `rust/ark/tests/support/json.rs` under a
 type (`{"$int": …}`, `{"$bytes": …}`, `{"$id": …}`, text as itself); a row
 is a tuple, printed as an array in schema order. `RUNNERS.md` gives the
-plainer form of `protocol/`, `trace/` and `rebase/`. Every directory but
+plainer form of `protocol/`, `trace/`, `rebase/` and `text/`. Every directory but
 `hash/` has a `falsify/` vector a conformant runner must fail.
 
 | directory | written by | one vector is | holds | since |
 |---|---|---|---|---|
 | `hash/` | `rust/ark/tests/hash.rs` | a store and its hash under its schema; `leaves-and-digests`, each table's digest and the state hash | §1.1, §1.3 | K1; unmoved by K2 |
-| `eval/` | `rust/ark/tests/eval.rs` | a function's bytes, a store, inputs applied in turn: the changes, the rows, the hash, or the refusal; `checks` and `form-check`, the boundary's verdicts and words; `has-role`; `raw-*`, the authority's writes as functions; `list-ops`, the list editors' edges | §1.1, §4, §5 | L1; unmoved by K2 |
-| `verify/` | `rust/ark/tests/verify.rs` | a module's functions and whether they check; `refused/` one per refusal, with its words; `scoped-ok`, a scope | §3, §6 | L1; unmoved by K2 |
-| `module/` | `rust/ark/tests/module.rs` | the demo module's bytes and hash; `de-bruijn`, two spellings and one hash | §2, §6 | L1; unmoved by K2 |
-| `views/` | `rust/ark/tests/views.rs` | a store, a query and a script of batches: after each, the answer and the patches; `top-two-by-pos`, `group-source`, `playlist-with-items` and the rest of v4's shapes, and the maintained sum's overflow both ways | §1.10, §5 | V1; unmoved by K2 |
-| `protocol/` | `rust/ark-dev/tests/vectors.rs` | one frame of each kind each side writes, in each space it is sent in: its bytes and the same value as JSON under the frame type | §1.11 | D1; K2 renumbered the frames to eight (`Fetch`, `Bodies` and `Push`'s body gone) and re-derived every one carrying an entry; K3a made them four (`Page` for `Push`, `Join`, `Batch`; `Verdict` for `Ack`, `Reject`, `Held`) and re-derived every one |
-| `trace/` | `rust/ark-dev/tests/vectors.rs` | one client's life in one session, step by step: what its two machines were given and said, and where they stood | §1.7, §1.9 | D1; K2 re-derived all (ids from an origin, `open` and `sign_in` carrying it) |
-| `rebase/` | `rust/ark-dev/tests/vectors.rs` | a fleet run by the simulator from a seed (Rust's only: `RUNNERS.md`): `fleet-seed-7`, its script and where the hub stands settled, and the five `fleet-fuzz-seed-N` sessions the fuzzer found a kernel fault with, each where it stands once fixed | §1.6, §1.7 | D1; K2 re-derived all (`fleet-seed-7` `ff04f56d…`) |
+| `eval/` | `rust/ark/tests/eval.rs` | a function's bytes, a store, inputs applied in turn: the changes, the rows, the hash, or the refusal; `checks` and `form-check`, the boundary's verdicts and words; `has-role`; `raw-*`, the authority's writes as functions; `list-ops`, the list editors' edges | §1.1, §4, §5 | L1; unmoved by K2; A3 re-derived the functions' bytes and hashes (a declaration carries its names), every state unmoved |
+| `verify/` | `rust/ark/tests/verify.rs` | a module's functions and whether they check; `refused/` one per refusal, with its words; `scoped-ok`, a scope | §3, §6 | L1; unmoved by K2; A3 re-derived the functions' bytes and hashes |
+| `module/` | `rust/ark/tests/module.rs` | the demo module's bytes and hash; `de-bruijn`, two spellings and one hash | §2, §6 | L1; unmoved by K2; A3 re-derived (the declarations' names) |
+| `views/` | `rust/ark/tests/views.rs` | a store, a query and a script of batches: after each, the answer and the patches; `top-two-by-pos`, `group-source`, `playlist-with-items` and the rest of v4's shapes, and the maintained sum's overflow both ways | §1.10, §5 | V1; unmoved by K2; A3 re-derived the query's bytes and hash, every answer unmoved |
+| `protocol/` | `rust/ark-dev/tests/vectors.rs` | one frame of each kind each side writes, in each space it is sent in: its bytes and the same value as JSON under the frame type | §1.11 | D1; K2 renumbered the frames to eight (`Fetch`, `Bodies` and `Push`'s body gone) and re-derived every one carrying an entry; K3a made them four (`Page` for `Push`, `Join`, `Batch`; `Verdict` for `Ack`, `Reject`, `Held`) and re-derived every one; A3 re-derived those naming a function |
+| `trace/` | `rust/ark-dev/tests/vectors.rs` | one client's life in one session, step by step: what its two machines were given and said, and where they stood | §1.7, §1.9 | D1; K2 re-derived all (ids from an origin, `open` and `sign_in` carrying it); A3 re-derived all (the functions' bytes), every state unmoved |
+| `rebase/` | `rust/ark-dev/tests/vectors.rs` | a fleet run by the simulator from a seed (Rust's only: `RUNNERS.md`): `fleet-seed-7`, its script and where the hub stands settled, and the five `fleet-fuzz-seed-N` sessions the fuzzer found a kernel fault with, each where it stands once fixed | §1.6, §1.7 | D1; K2 re-derived all (`fleet-seed-7` `ff04f56d…`); A3: `fleet-seed-7`'s script names the new hash, its head and state hold; the fuzz sessions' functions declare nothing, so they hold |
+| `text/` | `rust/ark-dev/tests/vectors.rs` | the demo as ArkLang (`demo.ark`, `rust/ark-dev/src/demo.ark`) beside its module file and hash (`RUNNERS.md`) | §1.15 | A3 |

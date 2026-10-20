@@ -15,7 +15,7 @@ fn sym(s: &str) -> K {
 }
 
 /// Every atom, a list, a comment and the two escapes, at their places.
-/// Falsified by reading `\\` as one byte too many: the string differed.
+/// Falsified by keeping an escape's backslash: the string differed.
 #[test]
 fn the_reader_reads_atoms_lists_and_places() {
     let xs = read("; a comment\n(f -5 \"a \\\"b\\\" \\\\\" 0x00ff x.y)  ; more\n()").unwrap();
@@ -76,7 +76,8 @@ fn the_layout_breaks_past_100_columns() {
 
 /// The demo's four mutators, built as plain IR, printed and built again,
 /// are themselves, and printed again the same text. Falsified by printing
-/// a lookup's key columns in reverse: the rebuilt module differed.
+/// a lookup's key columns in reverse: the rebuilt `add_to_playlist` was not
+/// the demo's.
 #[test]
 fn the_demo_printed_builds_to_itself() {
     let m = demo::module(&Lib::default());

@@ -9,8 +9,9 @@ the browser, and every query a view a client keeps up to date by the rows
 a change touched.
 
 ```
-domain/    the domain, in the subset spec/AUTHORING.md accepts (src/); harken.ark,
-           the module file harken-domain writes; listening.rs, the listening
+domain/    the domain, written with the Rust builders (src/); harken.ark, the
+           module file harken-domain writes, and domain.ark, the same module as
+           ArkLang (spec/AUTHORING.md), which builds to it; listening.rs, the listening
            session as volatile tables (never the log) and the plays (the log)
 server/    ark-server with harken's own parts: the scanner, the Home Assistant
            bridge, sign-in, /media, the web build, the admin page's listener;
@@ -55,8 +56,8 @@ Four decisions that each show on screen:
 - **Every refused change says why.** A rejection carries the domain's own
   sentence, and each client shows it against the change it refused.
 
-Every query is a `#[ark::query]` over the relational subset of the
-language (`spec/AUTHORING.md`): `library`, `albums`, `composers` and the
+Every query is a query over the relational subset of the language
+(`spec/AUTHORING.md`; `domain/domain.ark` prints them all): `library`, `albums`, `composers` and the
 rest say what they read and how it joins, so a client holds any of them as
 a view (`ark_client::Client::watch`) that a change moves by the rows it
 touched (`docs/plan-v5.md` §1.10); the desktop's lists are views. The
@@ -66,9 +67,11 @@ evaluation, and convergence over a simulated fleet (`domain/tests/`).
 `harken/domain/harken.ark` is the module file — the binding map and every
 function's bytes — that a server's `HARKEN_MODULE` and
 `HARKEN_OLD_MODULES` read, and `checks.harken-domain` fails while it
-differs from what the source writes. When `domain/src` changes:
+differs from what the source writes; `domain/domain.ark` is it printed,
+held to it by `domain/tests/text.rs`. When `domain/src` changes:
 
     cd rust && cargo run -p harken-domain -- ../harken/domain/harken.ark
+    cargo run -p ark-dev --bin arkc -- print ../harken/domain/harken.ark > ../harken/domain/domain.ark
 
 ## The listening session
 

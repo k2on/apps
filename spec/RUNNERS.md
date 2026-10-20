@@ -1,7 +1,8 @@
 # Running the vectors D1 writes
 
 What a runtime in another language does with each file under
-`vectors/protocol/`, `vectors/trace/` and `vectors/rebase/`: what it
+`vectors/protocol/`, `vectors/trace/`, `vectors/rebase/` and
+`vectors/text/`: what it
 reads, what it does and what it compares. `rust/ark-dev/tests/vectors.rs`
 writes them (`ARK_WRITE_VECTORS=1`) and is the reference reading of this
 file; where the two disagree, the code is right and this file is fixed.
@@ -118,3 +119,17 @@ what it was, and where it stands once fixed. Both are rust-only: to run
 one is to reimplement the simulator's scheduler and the fuzzer's
 generator exactly, which is not a client. What they do to a client
 reaches every runtime through its traces (§ trace).
+
+## text — client
+
+`demo.json`: `{ark, hash, module}`, beside `demo.ark`, the file `ark`
+names: the demo (`rust/ark-dev/src/demo.ark`, its four mutators, its
+query and its scope) as ArkLang (`AUTHORING.md` §1). `module` is the hex
+of the module file, `(Module, [body])` encoded (`Node`), the bodies in
+the order of their hashes, and `hash` the module's hash.
+**Do and compare**: read and lower `demo.ark` — its schema, its
+declarations, every function checked, callees first — to a module and its
+bodies; its file's bytes must be `module` and its hash `hash`; that module
+printed must be `demo.ark` byte for byte. A runtime without a printer
+runs the first half and says it skipped the second. `text/falsify/` holds
+the demo with one `pos` stepped by two, which must fail.

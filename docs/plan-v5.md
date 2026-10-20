@@ -435,47 +435,43 @@ that it is a parser; §1.14 says how that is kept small.
 - **The browser.** The iced web build runs the Rust store in wasm today;
   nothing here needs anything wasm lacks. Not verified until D1.
 
-### 1.15 Authoring, revised: text, builders, phones
+### 1.15 Authoring, revised: ArkLang, builders, phones
 
-Three layers, as SQL has them. **The module** (§1.5) is unchanged: what
-runtimes load and hash. **Ark text** is one canonical spelling of a
-module, `ark::text`: `arkc print` writes it, `arkc build` compiles it,
-the explorer and the docs show it, anyone may write it. One printer, so
-`build(print(m)) == m` for every module and `print(build(t)) == t` for
-canonical text. **Builders** are typed, per language, and construct the
-IR; `text(src, vars)` embeds a fragment, so they cover the idiomatic
-90% and need not grow. Rust is the one required authoring language; a
-phone loads the module and calls functions by name, no bindings
-generated. Another language's builders are held to one rule: its demo
-emits the module hash Rust's does.
+Three layers, as SQL has them. **The module** (§1.5): what runtimes load
+and hash; a phone loads the binary module, calls functions by name and
+needs nothing else. **ArkLang** is the *common language*: S-expressions,
+`ark::sexp`. It is what `arkc print` writes from a module, what the
+explorer shows, what the docs and the `text/` vectors use, what anyone in
+any language can hand-write and `arkc build`. One reader rule, `(head
+args…)`, so there is one spelling by construction, the printer is a tree
+walk, and a parser in any runtime is small. `build(print(m)) == m` for
+every module; `print(build(t)) == t` for canonical `t`. **Builders** are
+typed, per language, and construct the IR; Rust authoring stays on
+`ark::author` (A2's), whose `text()` embeds one ArkLang form. Whether Rust
+also gets a macro over ArkLang is deferred. Another language's builders
+are held to one rule: its demo emits the module hash Rust's does.
 
-The text (`spec/AUTHORING.md` is the grammar): a `schema { table … }`
-block, `type N = T where rule "words", …` declarations, and functions
-`KIND path.name(params) -> R = expr`. Everything is an expression; `let`
-is the only statement; a block's value is its last; no semicolons,
-`return`, loops or mutation. The kind is the effect bound: `mutator` and
-`live` Write, `query` Read, `scope` Pure, `helper` and `guard` the least
-their body has; every function is bound by its name, and a name starting
-`_` is not bound. Tables are bare names, `ctx` a keyword, standard
-functions methods (`xs.len()`), lambdas `x => e`, sort keys `desc e`.
+The grammar (`spec/AUTHORING.md` §1 is the reference). Atoms are symbols,
+integers, strings (`\"`, `\\`), `true`/`false`/`none`, bytes `0x…`; `;`
+comments. A dotted symbol whose head is bound is a field path
+(`input.playlist_id`, `ctx.user`), else a declared name. Top level:
+`(schema (table N (COL TY [key]) … (index [unique] COL…)…)…)`, `(type N
+TY)`, and `(mutator|live N ((P TY)…) BODY…)`, `(query|helper|guard N
+((P TY)…) RET BODY…)`, `(scope N ((ROW TY)) BODY)`; a body of several
+forms is a sequence. Types: `Int Text Bytes Bool (id T) (option T) (list
+T) (tuple T…) (record (F T)…) (sum (V (F T)…)…)`, refinements `(where T
+(trim) (len LO HI) (non-empty) … "words")`. Expressions: `let`, `if`,
+`match`, `record`, `list`, `tuple`, `some`/`none`, `??`, `none?`,
+`some?`, the operators, `refuse`, `fn`, the reads and writes by name,
+`ctx.*`, `(new-id T)`, `(has-role r)`, `std.rs`'s names with `-`, and
+`(NAME ARG…)` calls. Printed one line to column 100, else head first and
+each argument on its own line two spaces in; comments are not kept.
 
-**What the bytes do not hold, the text names canonically.** A module
-keeps no binder names (De Bruijn), no record field names and no variant
-names. So the printer names a binder from its type (`playlist_id`,
-`n`, a row by its table's initials), a row's fields by the schema's
-columns, a refined field by its declaration (`AddSong.title`), and
-anything else by position (`x.2`, `#1(a, b)`); hand-written text may
-use those spellings only. Names in the module itself, as declarations,
-would move harken's and the room's bytes: left for a decision. Where two
-spellings would read alike the printer picks one: the kind by effect,
-`not x.is_some()`, `e.unwrap_or(d)`.
-
-Rust's builders (`ark::author`) reproduce the IR the deleted attribute
-macros built, byte for byte: a function is a `static` `DefN { name, kind,
-body }`, binders are closures (`block`'s `let_` for a body's lets), and
-variables are levels closed to De Bruijn once a function is built; the
-derives (`Row`, `Input`, `Sum`, `Schema`) stay; `text()` is checked where
-it is built.
+**Names are in the module.** A declaration carries its names
+(`Decl::names`): a record's fields, a sum's variants and theirs. So the
+printer never writes `input.3` or `#1`; it names binders from their types
+or variants' fields. Typing is the checker's: a `none` and a `(record …)`
+take the type their place wants, and `(as T e)` gives one where none does.
 
 ---
 

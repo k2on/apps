@@ -13,12 +13,12 @@ as one typed language every peer runs — and harken, the first app on it.
   indexes its modules by section): types and the order-preserving codec,
   the schema and the store, the chained log, the one peer machine, the
   frames, the language (IR, checker, interpreter, standard library,
-  modules), maintained views, and `ark::author`, which the attribute
-  macros of `ark-macros` (`#[ark::mutator]`, `#[ark::query]`, …,
-  `ark::module!`) write a domain through. `ark-dev` is the development
-  tools: the simulator over the real hub and client, the trace recorder
-  and player, the fuzzer (`ark-fuzz`), the vector writer and `arkc`, which
-  verifies module files. Beside them, what every app shares:
+  modules), maintained views, ArkLang (`ark::sexp`, the common text form
+  of a module: S-expressions) and `ark::author`, the Rust builders a
+  domain is written with. `ark-dev` is the development tools: the
+  simulator over the real hub and client, the trace recorder and player,
+  the fuzzer (`ark-fuzz`), the vector writer and `arkc`, which verifies
+  module files and builds and prints ArkLang. Beside them, what every app shares:
   `ark-client` (the client driver: storage, the link, maintained views,
   the live space, signing in later), `ark-server` (the hub on its thread,
   the sync socket, persistence, the admin page's listener, the web
@@ -28,10 +28,10 @@ as one typed language every peer runs — and harken, the first app on it.
 - `spec/` — the conformance vectors `rust/ark` and `rust/ark-dev` write
   and read back, the index of the specification (`spec/README.md`),
   `spec/RUNNERS.md` (what a runtime in another language does with each
-  vector) and `spec/AUTHORING.md`, the Rust subset the macros accept, row
-  by row.
-- `harken/` — the app: `domain/` (written with `#[ark::*]`; `harken.ark`
-  is the module file it writes), `server/`, `iced/` (desktop and browser).
+  vector) and `spec/AUTHORING.md`, ArkLang's grammar and the builders'
+  vocabulary beside it.
+- `harken/` — the app: `domain/` (written with the builders; `harken.ark`
+  is the module file it writes, `domain.ark` the same as ArkLang), `server/`, `iced/` (desktop and browser).
   `harken/README.md` says what each is and how to run them together; the
   browser demo is published at <https://k2on.github.io/apps/harken/>.
 - `kotlin/`, `swift/` — the Kotlin and Swift runtimes, and the phones on

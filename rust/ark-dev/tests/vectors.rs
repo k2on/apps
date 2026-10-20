@@ -263,8 +263,8 @@ fn run_text(v: &Value, ark: &str) -> Result<(), String> {
 /// module it is that file, and built it is that module byte for byte;
 /// beside it, its module file and hash. The room, printed, builds to
 /// itself. The falsified one, a position stepped by two, does not pass.
-/// Falsified by printing a sort's `desc` as `asc`: `demo.ark` was not the
-/// demo printed, and built it was another `demo.items`.
+/// Falsified by printing a sort's `desc` as `asc`: the printed demo built
+/// to another `demo.add_to_playlist`.
 #[test]
 fn text() {
     let src = include_str!("../src/demo.ark");
