@@ -194,7 +194,9 @@ One workflow builds from `main` (`.github/workflows/build.yaml`): it
 publishes `harken-web` at <https://k2on.github.io/apps/harken/>. The
 Android app is frozen at spec v4: no APK is built, and the F-Droid
 repository keeps offering the last one (`kotlin/FROZEN.md` says how to
-build it at its revision).
+build it at its revision). That is the workflow once
+`docs/build-workflow-v5.patch` is applied; until then its APK job fails,
+which does not hold the page back.
 
 ## Running it
 
