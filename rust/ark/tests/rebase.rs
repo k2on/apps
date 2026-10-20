@@ -14,9 +14,10 @@ use std::sync::Arc;
 
 use ark::frames::{Frame, Verdict};
 use ark::hash::EntryHash;
-use ark::log::{Durable, EntryId, Logged, Origin};
+use ark::ir::Node;
+use ark::log::{Durable, EntryId, Logged, Origin, Record};
 use ark::peer::{Cas, Ctx, Input, Output, Peer, Procedure};
-use ark::store::{Change, Read};
+use ark::store::{Change, Read, LOG};
 use demo::{create_input, pair_input, pos_of, ADD, CREATE, REMOVE, RENAME};
 use support::wire::*;
 
@@ -107,7 +108,7 @@ fn scenario() -> Scenario {
     );
     for p in [&server, &alice, &bob] {
         assert_eq!(p.store.state_hash().hex(), FINAL, "three replicas, one hash");
-        assert_eq!(p.log.head(), server.log.head(), "one chain");
+        assert_eq!(p.log().head(), server.log().head(), "one chain");
     }
     Scenario { server, alice, bob, batches }
 }
@@ -133,7 +134,7 @@ fn step_4_the_scenario() {
     // a duplicate delivery changes nothing
     let mut b = bob.clone();
     assert!(b.step(down(&batches[1])).is_empty());
-    assert!(b.log == bob.log && b.store == bob.store);
+    assert!(b.log() == bob.log() && b.store == bob.store);
     // dave's build of add_to_playlist steps by two. Confirmed entries are
     // facts, so it never runs for anyone else's; his own preview is wrong
     // and the authority's answer puts it right, which is not a divergence.
@@ -158,7 +159,7 @@ fn step_4_the_scenario() {
 fn step_1_an_authority_sequences_the_transcript() {
     let s = scenario();
     let mut fresh = authority(demo::cas());
-    for l in &s.server.log.entries {
+    for l in &s.server.log().entries() {
         let (acks, f) = deliver_up(
             &mut fresh,
             &who(&l.entry.actor),
@@ -188,12 +189,12 @@ fn step_2_a_replica_given_the_entries_backwards() {
         matches!(asked[..], [Frame::Hello { cursor: 0, .. }]),
         "one hello, at the first gap: {asked:?}"
     );
-    assert_eq!(r.log.head().0, 1);
+    assert_eq!(r.log().head().0, 1);
     let mut server = s.server.clone();
     for f in sends(&server.step(up(&who("rita"), &asked[0]))) {
         r.step(down(&f));
     }
-    assert_eq!((r.log.head(), r.store.state_hash().hex()), (s.server.log.head(), FINAL.into()));
+    assert_eq!((r.log().head(), r.store.state_hash().hex()), (s.server.log().head(), FINAL.into()));
     assert!(r.diverged.is_empty());
 }
 
@@ -208,7 +209,7 @@ fn step_3_by_facts_alone() {
         r.step(down(f));
     }
     assert_eq!(r.store.state_hash().hex(), FINAL);
-    assert_eq!(r.log, s.server.log);
+    assert_eq!(r.log(), s.server.log());
 }
 
 /// An entry whose state is not what its facts give this peer is a
@@ -238,7 +239,7 @@ fn a_divergence_is_found_at_its_entry_and_healed() {
     for f in sends(&server.step(up(&who("carol"), &hello[0]))) {
         carol.step(down(&f));
     }
-    assert_eq!((carol.log.clone(), carol.store.state_hash().hex()), (s.server.log.clone(), FINAL.into()));
+    assert_eq!((carol.log(), carol.store.state_hash().hex()), (s.server.log(), FINAL.into()));
 }
 
 /// Compaction: the horizon at 2; a hello at 0 is answered with a snapshot a
@@ -248,10 +249,10 @@ fn a_divergence_is_found_at_its_entry_and_healed() {
 #[test]
 fn compaction_and_the_horizon() {
     let mut server = scenario().server;
-    let h2 = server.log.at(2).unwrap().hash;
+    let h2 = server.log().at(2).unwrap().hash;
     let o = server.step(Input::Compact(2));
     assert!(o.iter().all(|x| matches!(x, Output::Persist(_))));
-    assert_eq!(server.log.base.seq, 2);
+    assert_eq!(server.log().base_seq(), 2);
     let hello = |cursor, hash| Frame::Hello {
         space: ark::schema::Space::Durable,
         cursor,
@@ -262,7 +263,7 @@ fn compaction_and_the_horizon() {
     let mut r = replica("x", Cas::default());
     assert!(matches!(at0[..], [Frame::Snapshot { .. }]));
     r.step(down(&at0[0]));
-    assert_eq!((r.log.head(), r.store.state_hash().hex()), (server.log.head(), FINAL.into()));
+    assert_eq!((r.log().head(), r.store.state_hash().hex()), (server.log().head(), FINAL.into()));
     let at2 = sends(&server.step(up(&who("x"), &hello(2, h2))));
     assert!(matches!(&at2[..], [Frame::Page { from: 2, logged, .. }] if logged.iter().map(|l| l.seq).collect::<Vec<_>>() == [3, 4]));
 }
@@ -333,8 +334,11 @@ fn held_until_the_operator_loads_it() {
 }
 
 /// What a peer persisted opens it again: the same log and store, its
-/// pending intents run on top. Falsified by `Durable::from_records` keeping
-/// a record that does not link: the cut journal's stray entry was taken.
+/// pending intents run on top. The writes are applied up to the first
+/// record that does not apply — here a row of the log's table that does
+/// not link — and the store is then made durable whole, without it.
+/// Falsified by `Store::apply_kv` adding a row of the log at any sequence:
+/// the stray entry was taken and the log was not bob's.
 #[test]
 fn a_peer_opens_from_what_it_persisted() {
     let s = scenario();
@@ -349,10 +353,20 @@ fn a_peer_opens_from_what_it_persisted() {
     }
     let mut stray = logged(&s.batches[3]);
     stray.seq = 9;
-    records.push(ark::log::Record::Logged(stray).enc());
-    let base = s.bob.log.base.clone();
-    let mut d = Durable::from_records(base, &records);
-    assert_eq!(d.chain.len(), 4, "the journal stops where it stops linking");
+    let add = Change::Add {
+        table: LOG.into(),
+        row: stray.to_bytes(),
+    };
+    records.push(Record::Writes(vec![add]).enc());
+    let writes = records.iter().map(|b| match Record::dec(b) {
+        Ok(Record::Writes(w)) => w,
+        other => panic!("{other:?}"),
+    });
+    let mut d = Durable {
+        rows: replica("alice", demo::cas()).confirmed_rows(),
+        writes: writes.collect(),
+        ..Durable::default()
+    };
     let pending = s.alice.clone().step(mutate(ADD, pair_input(&pid(), "t5"), 9));
     d.pending = sends(&pending)
         .into_iter()
@@ -362,8 +376,19 @@ fn a_peer_opens_from_what_it_persisted() {
         })
         .collect();
     let mut opened = replica("alice", demo::cas());
-    opened.step(Input::Open(d));
-    assert_eq!(opened.log, s.bob.log);
+    let out = opened.step(Input::Open(d));
+    let folded: Vec<Record> = out
+        .iter()
+        .filter_map(|o| match o {
+            Output::Persist(b) => Some(Record::dec(b).unwrap()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        matches!(&folded[..], [Record::Rows(rows)] if rows.last().is_some_and(|(t, rs)| t == LOG && rs.len() == 5)),
+        "the writes stop where they stop linking, and the store is written whole"
+    );
+    assert_eq!(opened.log(), s.bob.log());
     assert_eq!(opened.confirmed_hash().hex(), FINAL);
     assert_eq!(pos_of(&opened.store, &pid(), "t5"), Some(4));
 }
@@ -493,7 +518,7 @@ fn what_comes_behind_a_held_intent_waits_for_it() {
         matches!(verdicts(&to)[..], [Some(Verdict::Ok { seq: 2 }), Some(Verdict::Ok { seq: 3 })]),
         "{to:?}"
     );
-    assert_eq!(server.log.head().0, 3);
+    assert_eq!(server.log().head().0, 3);
     let (s, _) = deliver_up(&mut server, &who("alice"), &alice.step(Input::Connected));
     assert!(
         matches!(verdicts(&s)[..], [.., Some(Verdict::Ok { seq: 2 }), Some(Verdict::Ok { seq: 3 })]),

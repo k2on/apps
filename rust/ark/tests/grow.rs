@@ -55,10 +55,8 @@ const TAG: FnHash = FnHash([7; 32]);
 
 fn durable(p: &Peer) -> Durable {
     Durable {
-        snapshot: p.log.base.clone(),
-        chain: p.log.entries.clone(),
-        pending: vec![],
-        local: 0,
+        rows: p.confirmed_rows(),
+        ..Durable::default()
     }
 }
 
@@ -91,9 +89,9 @@ fn a_log_reopened_under_a_wider_schema_keeps_head_chain_and_rows() {
         let (_, fan) = deliver_up(&mut server, &who("alice"), &o);
         alice.step(down(&fan[0]));
     }
-    assert_eq!(server.log.head().0, 2);
+    assert_eq!(server.log().head().0, 2);
     let mut wide = wide_authority(durable(&server));
-    assert_eq!(wide.log, server.log, "head and chain kept");
+    assert_eq!(wide.log(), server.log(), "head and chain kept");
     assert_eq!(wide.foreign, Some(2));
     let rows = |p: &Peer, t: &str| p.store.rows(t).map(<[u8]>::to_vec).collect::<Vec<_>>();
     let widened: Vec<Vec<u8>> = rows(&server, "playlist").into_iter().map(|r| [r, vec![0]].concat()).collect();
@@ -126,14 +124,14 @@ fn a_log_reopened_under_a_wider_schema_keeps_head_chain_and_rows() {
 
     alice.step(down(&fan[0]));
     assert!(alice.faith && alice.diverged.is_empty(), "alice is behind, on faith");
-    assert_eq!(alice.log, wide.log);
+    assert_eq!(alice.log(), wide.log());
     assert_eq!(rows(&alice, "playlist"), rows(&server, "playlist"), "she holds the prefix");
 
     let again = wide_authority(durable(&wide));
-    assert_eq!((again.log.clone(), again.store.clone()), (wide.log.clone(), wide.store.clone()));
+    assert_eq!((again.log(), &again.store), (wide.log(), &wide.store));
     wide.step(Input::Compact(3));
     let compacted = wide_authority(durable(&wide));
-    assert_eq!(compacted.log.head(), wide.log.head());
+    assert_eq!(compacted.log().head(), wide.log().head());
     assert_eq!((compacted.store.clone(), compacted.foreign), (wide.store.clone(), None));
 }
 
@@ -168,6 +166,6 @@ fn a_replica_behind_an_appended_table_asks_for_the_snapshot() {
     assert!(up_frames.is_empty(), "settled: {up_frames:?}");
     assert_eq!(alice.diverged, vec![1, 1]);
     assert!(alice.faith && alice.pending.is_empty());
-    assert_eq!(alice.log.head(), server.log.head());
+    assert_eq!(alice.log().head(), server.log().head());
     assert_eq!(alice.store.rows("playlist").count(), 1);
 }

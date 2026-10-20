@@ -491,12 +491,12 @@ fn run(
 /// scanner that cannot catch up still scans, and the procedure keeps the
 /// library right.
 fn catch_up(peer: &mut Peer, hub: &Handle, stop: &AtomicBool) {
-    let head = hub.with(|h| h.log.log.head().0).unwrap_or(0);
+    let head = hub.with(|h| h.log.log().head().0).unwrap_or(0);
     let deadline = Instant::now() + Duration::from_secs(30);
     while !stop.load(Ordering::Relaxed) && Instant::now() < deadline {
         peer.pump();
         let c = &peer.client;
-        if c.linked && c.log.log.head().0 >= head && c.log.pending.is_empty() {
+        if c.linked && c.log.log().head().0 >= head && c.log.pending.is_empty() {
             return;
         }
         std::thread::sleep(Duration::from_millis(5));

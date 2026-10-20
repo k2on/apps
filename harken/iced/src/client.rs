@@ -592,7 +592,7 @@ impl Replica {
 
     /// The head of the confirmed chain.
     pub fn cursor(&self) -> i64 {
-        self.client.log.log.head().0
+        self.client.log.log().head().0
     }
 
     /// The confirmed and pending state's hash: what moves when the store
@@ -626,7 +626,7 @@ impl Replica {
     pub fn live_status(&self) -> Option<LiveStatus> {
         let l = self.client.live.as_ref()?;
         Some(LiveStatus {
-            seq: l.log.head().0,
+            seq: l.log().head().0,
             pending: l.pending.len(),
             synced: self.present(),
         })

@@ -33,7 +33,7 @@ fn eve_alone() -> Peer {
         confirmed.extend(o.into_iter().filter(|x| matches!(x, Output::Confirmed(_))));
     }
     assert_eq!(confirmed.len(), 2, "alone, eve confirms her own intents");
-    assert!(eve.pending.is_empty() && eve.log.head().0 == 2);
+    assert!(eve.pending.is_empty() && eve.log().head().0 == 2);
     assert_eq!(eve.confirmed_hash(), eve.store.state_hash());
     assert_eq!(pos_of(&eve.store, &road(), "t5"), Some(1));
     eve
@@ -64,11 +64,11 @@ fn join(eve: &mut Peer, server: &mut Peer, tamper: impl Fn(&mut Frame)) -> Vec<F
 #[test]
 fn alone_then_adopted() {
     let mut eve = eve_alone();
-    let chain = eve.log.clone();
+    let chain = eve.log().entries();
     let mut server = authority(demo::cas());
     join(&mut eve, &mut server, |_| {});
-    assert_eq!(server.log, chain, "the server's chain is the one she made");
-    assert!(eve.pending.is_empty() && eve.log == chain && eve.store == server.store);
+    assert_eq!(server.log().entries(), chain, "the server's chain is the one she made");
+    assert!(eve.pending.is_empty() && eve.log() == server.log() && eve.store == server.store);
 }
 
 /// A chain whose facts were touched is refused whole: the server's log does
@@ -97,7 +97,7 @@ fn a_chain_whose_facts_differ_is_refused() {
         .collect();
     assert_eq!(rejects.len(), 2, "{back:?}");
     assert!(rejects[0].contains("facts at 2"));
-    assert_eq!(server.log.head(), (0, EntryHash::default()));
+    assert_eq!(server.log().head(), (0, EntryHash::default()));
     assert!(eve.pending.is_empty() && eve.store == server.store);
 }
 
@@ -132,7 +132,7 @@ fn a_chain_naming_a_function_the_server_lacks_is_refused() {
             ..
         }
     )));
-    assert_eq!(server.log.head(), (0, EntryHash::default()));
+    assert_eq!(server.log().head(), (0, EntryHash::default()));
     assert!(eve.pending.is_empty() && eve.store == server.store);
 }
 
@@ -162,10 +162,10 @@ fn a_server_that_moved_on_sequences_the_chain_anew() {
             eve.step(down(&back));
         }
     }
-    assert_eq!(server.log.head().0, 3);
+    assert_eq!(server.log().head().0, 3);
     assert_eq!(pos_of(&server.store, &shared, "t5"), Some(2));
     assert!(eve.pending.is_empty());
-    assert_eq!((eve.log.clone(), eve.store.clone()), (server.log.clone(), server.store.clone()));
+    assert_eq!((eve.log(), eve.store.clone()), (server.log(), server.store.clone()));
 }
 
 /// Going alone with intents pending sequences them; one that refuses then
@@ -178,7 +178,7 @@ fn going_alone_sequences_what_was_pending() {
     eve.step(mutate(ADD, pair_input(&road(), "t5"), 2));
     let o = eve.step(Input::Alone);
     assert_eq!(o.iter().filter(|x| matches!(x, Output::Confirmed(_))).count(), 2);
-    assert_eq!(eve.log.head().0, 2);
+    assert_eq!(eve.log().head().0, 2);
     let o = eve.step(mutate(CREATE, create_input("   "), 3));
     assert!(o
         .iter()

@@ -1241,7 +1241,14 @@ fn confirmed(p: &Peer) -> Store {
 /// The authority's state at `seq`, its later facts undone.
 fn state_at(server: &Peer, seq: i64) -> Store {
     let mut s = server.store.clone();
-    for c in server.log.after(seq).iter().rev().flat_map(|l| l.facts.iter().rev()) {
+    for c in server
+        .log()
+        .after(seq)
+        .collect::<Vec<_>>()
+        .iter()
+        .rev()
+        .flat_map(|l| l.facts.iter().rev())
+    {
         s.apply(&c.inverse()).unwrap();
     }
     s
@@ -1378,7 +1385,7 @@ impl Fleet {
     /// missing.
     fn unions_hold(&self) -> Result<(), String> {
         for c in self.clients.iter().filter(|c| c.feed != Feed::Whole) {
-            let at = c.log.head().0;
+            let at = c.log().head().0;
             if confirmed(c) != union_of(&state_at(&self.server, at), &c.me.actor) {
                 return Err(format!("{} at {at} does not hold its union", c.me.actor));
             }

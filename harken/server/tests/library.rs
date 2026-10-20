@@ -38,7 +38,7 @@ fn songs(server: &Server) -> Vec<(String, String)> {
 }
 
 fn head(server: &Server) -> i64 {
-    server.running.hub.with(|h| h.log.log.head().0).unwrap()
+    server.running.hub.with(|h| h.log.log().head().0).unwrap()
 }
 
 /// Wait until there are `want` songs, then a little longer, so that a

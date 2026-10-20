@@ -196,12 +196,12 @@ impl Net {
     /// One state, one chain, nothing pending, on every peer.
     pub fn converged(&self) -> Result<(), String> {
         for (i, c) in &self.clients {
-            if c.log != self.server.log || c.store != self.server.store || !c.pending.is_empty() {
+            if c.log() != self.server.log() || c.store != self.server.store || !c.pending.is_empty() {
                 return Err(format!(
                     "client {i} at {:?} with {} pending; the server at {:?}",
-                    c.log.head(),
+                    c.log().head(),
                     c.pending.len(),
-                    self.server.log.head()
+                    self.server.log().head()
                 ));
             }
         }

@@ -948,7 +948,7 @@ impl Headless {
                     eprintln!(
                         "harken-peer: linked (epoch {}, cursor {})",
                         self.opens,
-                        self.client.log.log.head().0
+                        self.client.log.log().head().0
                     );
                 }
                 LinkEvent::Frame(b) => {
@@ -1132,7 +1132,7 @@ impl Headless {
     }
 
     fn cursor(&self) -> i64 {
-        self.client.log.log.head().0
+        self.client.log.log().head().0
     }
 
     fn pending(&self) -> usize {
@@ -1359,7 +1359,14 @@ impl Headless {
                 let id = EntryId(id);
                 if self.client.log.pending.iter().any(|p| p.entry.id == id) {
                     Answer::default().set("standing", json!("pending"))
-                } else if self.client.log.log.entries.iter().any(|l| l.entry.id == id) {
+                } else if self
+                    .client
+                    .log
+                    .log()
+                    .entries()
+                    .iter()
+                    .any(|l| l.entry.id == id)
+                {
                     Answer::default().set("standing", json!("confirmed"))
                 } else if let Some(why) = self.rejected.get(&id) {
                     Answer::default()
@@ -1501,7 +1508,7 @@ impl Headless {
                     .client
                     .live
                     .as_ref()
-                    .map_or((0, 0), |l| (l.log.head().0, l.pending.len()));
+                    .map_or((0, 0), |l| (l.log().head().0, l.pending.len()));
                 Answer::default()
                     .set(
                         "value",

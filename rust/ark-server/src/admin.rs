@@ -191,14 +191,14 @@ async fn state(With(ctx): With<Ctx>) -> Response {
         .map(|(t, v)| (t, CrudVerbs { may_author: true, ..v }))
         .collect();
     let read = on_hub(&ctx.hub, move |h| {
-        let head = h.log.log.head().0;
+        let head = h.log.log().head().0;
         let name = |f| match names.get(f) {
             Some(n) => n.clone(),
             None if admin.lib.get(f).is_some_and(|l| l.f.params.is_empty()) => "raw write".into(),
             None => f.to_string(),
         };
-        let at = h.log.log.entries.len().saturating_sub(LINES);
-        let lines = h.log.log.entries[at..]
+        let at = h.log.log().entries().len().saturating_sub(LINES);
+        let lines = h.log.log().entries()[at..]
             .iter()
             .map(|l| Line {
                 seq: Some(l.seq),

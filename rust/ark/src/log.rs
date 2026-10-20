@@ -7,10 +7,19 @@
 //! hash = sha256(prev.hash ‖ enc(seq, entry, facts, state))
 //! ```
 //!
+//! **The log is a table.** Its entries are the rows of the store's `_log`
+//! table ([`crate::store::LOG`]), keyed by sequence, each row a
+//! [`Logged`]'s bytes; the chain is that table's invariant, judged at
+//! every write to it ([`Logged::links`]), and its first row is the one the
+//! log stands on (the horizon, or a snapshot's head), not checked. What a
+//! peer makes durable is writes to that store, the log's table's among
+//! them ([`Record`]), and it opens from the store's rows and the writes
+//! since ([`Durable`]): one format.
+//!
 //! **The chain is the log's identity.** Two peers at one sequence with one
 //! [`EntryHash`] hold one history; a peer that says `(cursor, hash)` is
 //! paged from there by an authority that has that hash at that sequence
-//! ([`Log::has`]) and is sent a snapshot by one that does not.
+//! and is sent a snapshot by one that does not.
 //!
 //! **Deterministic ids.** An entry's id is `sha256(enc(Bytes origin) ‖
 //! enc(Int local))[..16]`: `origin` is sixteen bytes a replica draws once,
@@ -24,8 +33,9 @@
 //! stamps from the connection it judged the entry on.
 //!
 //! **Snapshots and the horizon.** A [`Snapshot`] is `(seq, hash, state,
-//! rows in key order)` and a log stands on one ([`Log::base`]); entries at
-//! or below it are dropped.
+//! rows in key order)`, what an authority sends; a log stands on it as a
+//! first row of its table with no entry ([`Snapshot::base`]). The horizon
+//! is a delete of the rows below it.
 
 use ark_macros::Node;
 
@@ -96,8 +106,9 @@ impl EntryId {
 
 /// An intent, as recorded. `actor` and `roles` are what the authority
 /// judged it under: it stamps them before sequencing (§1.7), and a replay
-/// anywhere reads what the log says.
-#[derive(Clone, Debug, PartialEq, Eq, Node)]
+/// anywhere reads what the log says. The default is no intent, what the
+/// first row of a log standing on a snapshot carries.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Node)]
 pub struct Entry {
     pub id: EntryId,
     pub actor: String,
@@ -196,84 +207,35 @@ impl Snapshot {
     pub fn dec(r: &mut Reader) -> Result<Snapshot, Refusal> {
         Snapshot::take(r)
     }
-}
 
-/// The log: a snapshot, and the chain above it in sequence order.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Log {
-    pub base: Snapshot,
-    pub entries: Vec<Logged>,
-}
-
-impl Log {
-    pub fn new(base: Snapshot) -> Log {
-        Log { base, entries: vec![] }
+    /// The first row of a log standing on this snapshot: its sequence,
+    /// state and hash, and no entry.
+    pub fn base(&self) -> Logged {
+        let mut l = Logged::intent(Entry::default());
+        (l.seq, l.state, l.hash) = (self.seq, self.state, self.hash);
+        l
     }
 
-    /// The last sequence and the chain's hash there.
-    pub fn head(&self) -> (Seq, EntryHash) {
-        self.entries.last().map_or((self.base.seq, self.base.hash), |l| (l.seq, l.hash))
-    }
-
-    pub fn head_state(&self) -> StateHash {
-        self.entries.last().map_or(self.base.state, |l| l.state)
-    }
-
-    pub fn at(&self, seq: Seq) -> Option<&Logged> {
-        let i = seq - self.base.seq - 1;
-        (i >= 0).then(|| self.entries.get(i as usize)).flatten()
-    }
-
-    /// Whether this log has `hash` at `seq`: one history up to there.
-    pub fn has(&self, seq: Seq, hash: &EntryHash) -> bool {
-        if seq == self.base.seq {
-            return self.base.hash == *hash;
-        }
-        self.at(seq).is_some_and(|l| l.hash == *hash)
-    }
-
-    /// The entries after `seq`, which must be at or above the base.
-    pub fn after(&self, seq: Seq) -> &[Logged] {
-        &self.entries[((seq - self.base.seq).max(0) as usize).min(self.entries.len())..]
-    }
-
-    /// Appends an entry with its facts and the state after it; the next
-    /// sequence and the chain's hash are the log's to give.
-    pub fn append(&mut self, entry: Entry, facts: Vec<Change>, state: StateHash) -> &Logged {
-        let (n, prev) = self.head();
-        let hash = Logged::chain(&prev, n + 1, &entry, &facts, &state);
-        self.entries.push(Logged {
-            seq: n + 1,
-            entry,
-            facts,
-            state,
-            hash,
-        });
-        self.entries.last().unwrap()
-    }
-
-    /// Appends a logged entry from elsewhere, which must link onto the head.
-    pub fn push(&mut self, l: Logged) -> Result<(), Refusal> {
-        let (n, prev) = self.head();
-        if l.seq != n + 1 || !l.links(&prev) {
-            return Err(Refusal(format!("entry {} does not link onto {n}", l.seq)));
-        }
-        self.entries.push(l);
-        Ok(())
-    }
-
-    /// Drops every entry above `seq`.
-    pub fn truncate(&mut self, seq: Seq) {
-        self.entries.truncate((seq - self.base.seq).max(0) as usize);
+    /// The store's rows as a log standing on this snapshot holds them: the
+    /// snapshot's, then the log's table with its first row.
+    pub fn kv_rows(&self) -> Rows {
+        let mut rows = self.rows.clone();
+        rows.push((crate::store::LOG.into(), vec![self.base().to_bytes()]));
+        rows
     }
 }
 
-/// What a peer makes durable, one record per `Persist` (§1.7): a logged
-/// entry appended to the chain, or a snapshot the chain now stands on.
+/// A store's rows, by table.
+pub type Rows = Vec<(String, Vec<Vec<u8>>)>;
+
+/// What a peer makes durable, one record per `Persist` (§1.7): writes to
+/// its store, appended — a logged entry is its facts and its row of the
+/// log's table — or the store's rows whole, which every write before them
+/// is folded into.
 #[derive(Clone, Debug, PartialEq, Eq, Node)]
 pub enum Record {
-    Logged(Logged),
-    Snapshot(Snapshot),
+    Writes(Vec<Change>),
+    Rows(Rows),
 }
 
 impl Record {
@@ -286,41 +248,13 @@ impl Record {
     }
 }
 
-/// What a peer is opened from: the snapshot and the chain on it as they
-/// were made durable, its own intents still pending, and the last `local`
-/// its session drew.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// What a peer is opened from: its store's rows as they were last written
+/// whole — the log's table's among them — and the writes since, in order;
+/// its own intents still pending; and the last `local` it drew.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Node)]
 pub struct Durable {
-    pub snapshot: Snapshot,
-    pub chain: Vec<Logged>,
+    pub rows: Rows,
+    pub writes: Vec<Vec<Change>>,
     pub pending: Vec<Entry>,
     pub local: i64,
-}
-
-impl Durable {
-    /// The records, in the order persisted, read back: a snapshot starts
-    /// the chain again; the chain stops at the first record that does not
-    /// read or does not link, which is where a crash cut the journal.
-    pub fn from_records(base: Snapshot, records: &[Vec<u8>]) -> Durable {
-        let mut log = Log::new(base);
-        for b in records {
-            let read = match Record::dec(b) {
-                Ok(Record::Snapshot(s)) => {
-                    log = Log::new(s);
-                    true
-                }
-                Ok(Record::Logged(l)) => log.push(l).is_ok(),
-                Err(_) => false,
-            };
-            if !read {
-                break;
-            }
-        }
-        Durable {
-            snapshot: log.base,
-            chain: log.entries,
-            pending: vec![],
-            local: 0,
-        }
-    }
 }

@@ -471,8 +471,8 @@ pub async fn health(hub: &ark_server::Handle, hosted: &Hosted) -> Option<String>
             let mut text = format!("ok\nconnections {}\n", rooms.values().sum::<usize>());
             text.push_str(&format!(
                 "head {}\nhorizon {}\n",
-                h.log.log.head().0,
-                h.log.log.base.seq
+                h.log.log().head().0,
+                h.log.log().base_seq()
             ));
             text.push_str(&modules);
             for (room, n) in rooms {

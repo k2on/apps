@@ -70,10 +70,10 @@ fn two_clients(a: Box<dyn Dial>, b: Box<dyn Dial>) {
     until(&mut alice, &la, "alice linked", |c, _| c.linked);
     until(&mut bob, &lb, "bob linked", |c, _| c.linked);
     create(&mut alice, &la, "Road");
-    until(&mut bob, &lb, "bob has alice's playlist", |c, _| c.log.log.head().0 == 1);
+    until(&mut bob, &lb, "bob has alice's playlist", |c, _| c.log.log().head().0 == 1);
     until(&mut alice, &la, "alice confirmed", |c, _| c.log.pending.is_empty());
     assert_eq!(alice.log.store, bob.log.store);
-    assert_eq!(bob.log.log.entries[0].entry.actor, "alice");
+    assert_eq!(bob.log.log().entries()[0].entry.actor, "alice");
 }
 
 /// Two clients, each on its own link to the hub in this process, converge.
@@ -181,7 +181,7 @@ fn a_revoked_session_is_closed_and_dials_again() {
     until(&mut alice, &la, "alice closed", |_, ev| ev.iter().any(|e| matches!(e, Event::Closed(_))));
     until(&mut alice, &la, "alice open again", |_, ev| ev.contains(&Event::Open));
     create(&mut bob, &lb, "Mix");
-    until(&mut alice, &la, "alice hears bob", |c, _| c.log.log.head().0 == 1);
+    until(&mut alice, &la, "alice hears bob", |c, _| c.log.log().head().0 == 1);
     assert!(lb.events().iter().all(|e| !matches!(e, Event::Closed(_))), "bob stayed");
 }
 
@@ -198,14 +198,14 @@ fn the_log_survives_a_restart() {
             .0
             .unwrap();
     }
-    let (log, store) = (hub.log.log.clone(), hub.log.store.clone());
+    let store = hub.log.store.clone();
     drop(hub);
     let mut hub = Hub::open(config(), Box::new(Files::new(dir.path()).unwrap()), 0);
-    assert_eq!((&hub.log.log, &hub.log.store), (&log, &store));
+    assert_eq!((hub.log.log(), &hub.log.store), (store.log(), &store));
     hub.author(Space::Durable, domain().get("demo.create_playlist"), bytes_enc(b"c"), 1)
         .0
         .unwrap();
-    assert_eq!(hub.log.log.entries[2].entry.local, 3, "its own count goes on");
+    assert_eq!(hub.log.log().entries()[2].entry.local, 3, "its own count goes on");
 }
 
 /// A disk that refuses whenever `fail` is set.
@@ -369,9 +369,9 @@ async fn a_login_is_the_connection_and_a_sign_out_closes_it() {
         let l = Link::start(Box::new(Socket(url)), token.clone(), fast());
         until(&mut c, &l, "carol linked", |c, _| c.linked);
         create(&mut c, &l, "Carol's");
-        until(&mut c, &l, "confirmed", |c, _| c.log.log.head().0 == 1);
-        assert_eq!(c.log.log.entries[0].entry.session, session);
-        assert_eq!(hub.with(|h| h.log.log.entries[0].entry.actor.clone()).unwrap(), "carol");
+        until(&mut c, &l, "confirmed", |c, _| c.log.log().head().0 == 1);
+        assert_eq!(c.log.log().entries()[0].entry.session, session);
+        assert_eq!(hub.with(|h| h.log.log().entries()[0].entry.actor.clone()).unwrap(), "carol");
         auth.revoke(&token).unwrap();
         until(&mut c, &l, "closed", |_, ev| ev.iter().any(|e| matches!(e, Event::Closed(_))));
     })
@@ -425,5 +425,5 @@ fn the_live_space_is_restored_and_on_restore_authored() {
         "here kept, the pointer let go"
     );
     let l = hub.live.as_ref().unwrap();
-    assert_eq!(l.log.head().0, l.log.base.seq + 1, "on_restore, the one entry since the open");
+    assert_eq!(l.log().head().0, l.log().base_seq() + 1, "on_restore, the one entry since the open");
 }

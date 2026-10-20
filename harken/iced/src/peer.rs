@@ -920,7 +920,7 @@ mod tests {
         // An intent's id is its origin's (§1.6), whoever signs in: the
         // playlist made alone keeps its id through the sign-in, and the item
         // put on it names it still.
-        assert_eq!(hub.log.log.head().0, 5, "the playlist, the three songs and the add");
+        assert_eq!(hub.log.log().head().0, 5, "the playlist, the three songs and the add");
         assert!(peer.client.take_rejections().is_empty());
         assert!(peer.items[1].on_playlist());
     }

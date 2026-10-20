@@ -199,8 +199,8 @@ struct Built {
 }
 
 impl Built {
-    fn logged(&self) -> &[Logged] {
-        &self.a.log.entries
+    fn logged(&self) -> Vec<Logged> {
+        self.a.log().entries()
     }
 }
 
@@ -216,7 +216,7 @@ fn log_named(mut a: Peer, playlists: u64, n: u64, track: impl Fn(u64) -> String)
         let p = author.push(ADD, pair_input(&pids[(i % playlists) as usize], &track(i)));
         a.step(p);
     }
-    assert_eq!(a.log.head().0, (playlists + n) as Seq, "every entry sequenced");
+    assert_eq!(a.log().head().0, (playlists + n) as Seq, "every entry sequenced");
     Built { a, author, pids }
 }
 
@@ -345,7 +345,7 @@ fn perf_a_mutate_alone() {
                 total.push(t2 - t);
             }
             assert!(r.pending.is_empty());
-            assert_eq!(r.log.head(), a.log.head());
+            assert_eq!(r.log().head(), a.log().head());
             line(&format!("add_to_playlist, {shape}: whole"), &total);
             line("  … Replica::mutate (optimistic apply)", &optimistic);
             line("  … local_commit (authority + confirm)", &confirm);
@@ -442,7 +442,7 @@ fn perf_d_initial_sync() {
                 t.elapsed() / page.len() as u32
             })
             .collect();
-        assert_eq!(r.log.head(), b.a.log.head(), "caught up");
+        assert_eq!(r.log().head(), b.a.log().head(), "caught up");
         let total: Duration = per.iter().sum::<Duration>() * PAGE as u32;
         once(
             "receive by facts alone",
@@ -500,7 +500,7 @@ fn perf_d_initial_sync() {
             let reps = 20;
             let t = Instant::now();
             for _ in 0..reps {
-                std::hint::black_box(b.a.log.after(cursor).iter().take(PAGE).cloned().collect::<Vec<_>>());
+                std::hint::black_box(b.a.log().after(cursor).take(PAGE).collect::<Vec<_>>());
             }
             once(&format!("entries_after({cursor}) of {n}"), 1, t.elapsed() / reps, "");
         }
@@ -532,7 +532,7 @@ fn perf_e_rebase() {
             let p = other.push(ADD, pair_input(&base.pids[(i % 10) as usize], &format!("t{}", 900_000 + i)));
             landed.step(p);
         }
-        let landing: Vec<Logged> = landed.log.after(base.a.log.head().0).to_vec();
+        let landing: Vec<Logged> = landed.log().after(base.a.log().head().0).collect();
         assert_eq!(landing.len() as u64, m);
         let page = batch(&landing);
         let singles: Vec<Vec<u8>> = landing.iter().map(|l| batch(std::slice::from_ref(l))).collect();
@@ -540,7 +540,7 @@ fn perf_e_rebase() {
         for f in base.logged().chunks(PAGE).map(batch) {
             caught_up.step(down(f));
         }
-        assert_eq!(caught_up.log.head(), base.a.log.head());
+        assert_eq!(caught_up.log().head(), base.a.log().head());
         for k in [10u64, 100, 400] {
             let mine = |r: &mut Peer| {
                 for i in 0..k {
@@ -560,14 +560,14 @@ fn perf_e_rebase() {
                 r.step(down(f.clone()));
             }
             let each = t.elapsed();
-            assert_eq!((r.pending.len() as u64, r.log.head()), (k, landed.log.head()));
+            assert_eq!((r.pending.len() as u64, r.log().head()), (k, landed.log().head()));
             // One page.
             let mut r = caught_up.clone();
             mine(&mut r);
             let t = Instant::now();
             r.step(down(page.clone()));
             let paged = t.elapsed();
-            assert_eq!((r.pending.len() as u64, r.log.head()), (k, landed.log.head()));
+            assert_eq!((r.pending.len() as u64, r.log().head()), (k, landed.log().head()));
             let row = |label: String, d: Duration| eprintln!("{:<44} {:>7} {:>8.1}µs {:>8.1}ms", label, s, us(d) / m as f64, d.as_secs_f64() * 1e3);
             row(format!("K={k} M={m}: one entry at a time, a pump each"), each);
             na(
@@ -618,7 +618,7 @@ fn perf_e_rebase() {
                 r.step(down(f));
             }
             let dt = t.elapsed();
-            assert!(r.pending.is_empty() && r.log.head() == a.log.head());
+            assert!(r.pending.is_empty() && r.log().head() == a.log().head());
             eprintln!(
                 "{:<44} {:>7} {:>8.1}µs {:>8.1}ms",
                 format!("ack K={k} own pending, one at a time"),
@@ -726,7 +726,7 @@ fn perf_g_authority_and_fanout() {
     note("its counterpart: a Hello at the head with the chain's hash there, answered with nothing");
     for &n in &SIZES {
         let mut b = log(10, n);
-        let (cursor, hash) = b.a.log.head();
+        let (cursor, hash) = b.a.log().head();
         let t = Instant::now();
         let out = b.a.step(up(
             &who("bob", "bob-dev"),
@@ -788,7 +788,7 @@ fn perf_i_partial_fanout() {
         for s in [500u64, 8000] {
             for partial in [true, false] {
                 let mut b = log_named(authority_with(cas.clone()), 10, s, |i| format!("alice:{i}"));
-                let head = b.a.log.head();
+                let head = b.a.log().head();
                 for conn in 0..c {
                     let actor = if conn % 2 == 0 { "alice".to_string() } else { format!("u{conn}") };
                     let w = who(&actor, &format!("c{conn}"));

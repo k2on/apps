@@ -43,7 +43,7 @@ fn ids_are_the_origins_whoever_signs_in() {
         matches!(verdicts(&back)[..], [Some(Verdict::Ok { seq: 1 }), Some(Verdict::Ok { seq: 2 })]),
         "{back:?}"
     );
-    let e = &server.log.entries[0].entry;
+    let e = &server.log().entries()[0].entry;
     assert_eq!((e.id, e.origin, e.local), (EntryId::of(origin, 1), origin, 1));
     assert_eq!(
         (e.actor.as_str(), e.session.as_str()),
@@ -67,5 +67,5 @@ fn ids_are_the_origins_whoever_signs_in() {
         matches!(&verdicts(&bob)[..], [Some(Verdict::Refused { why })] if why.contains("another actor")),
         "{bob:?}"
     );
-    assert_eq!(server.log.head().0, 2);
+    assert_eq!(server.log().head().0, 2);
 }

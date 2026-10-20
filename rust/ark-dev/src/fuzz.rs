@@ -405,7 +405,7 @@ pub fn session(seed: u64, traces: bool) -> Result<(Net, Found), String> {
     }
     net.settle()?;
     check(&net, &g, partial, traces)?;
-    found.entries = net.hub.log.log.head().0 as usize;
+    found.entries = net.hub.log.log().head().0 as usize;
     found.refused = net.refused.len();
     Ok((net, found))
 }
@@ -419,8 +419,15 @@ pub fn check(net: &Net, g: &Gen, partial: bool, traces: bool) -> Result<(), Stri
     net.views_hold()?;
     let hub = &net.hub.log;
     let schema = hub.store.schema_arc().clone();
-    let mut s = Store::from_rows(schema.clone(), &hub.log.base.rows).map_err(|r| r.0)?;
-    for l in &hub.log.entries {
+    let entries = hub.log().entries();
+    let mut s = hub.store.clone();
+    for c in entries.iter().rev().flat_map(|l| l.facts.iter().rev()) {
+        s.apply(&c.inverse()).map_err(|r| format!("the log's facts do not undo: {r}"))?;
+    }
+    if s.state_hash() != hub.log().base().state {
+        return Err("the store at the horizon is not the state the log stands on".into());
+    }
+    for l in &entries {
         let p = g.module.cas.get(&l.entry.func).ok_or("an entry of no function")?;
         let ran = p
             .run(&s, &Ctx::of(&l.entry), &l.entry.input)

@@ -404,14 +404,14 @@ impl Net {
                 if p.feed != ark::peer::Feed::Whole {
                     continue;
                 }
-                let from = p.log.base.seq.max(a.log.base.seq);
-                let chain = p.log.head().0 < from || p.log.after(from) == a.log.after(from);
-                if p.log.head() != a.log.head() || !chain || p.store != a.store || !p.pending.is_empty() {
+                let from = p.log().base_seq().max(a.log().base_seq());
+                let chain = p.log().head().0 < from || p.log().after(from).eq(a.log().after(from));
+                if p.log().head() != a.log().head() || !chain || p.store != a.store || !p.pending.is_empty() {
                     return Err(format!(
                         "client {i} {space:?} at {:?} with {} pending; the server at {:?}",
-                        p.log.head(),
+                        p.log().head(),
                         p.pending.len(),
-                        a.log.head()
+                        a.log().head()
                     ));
                 }
             }

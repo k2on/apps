@@ -104,7 +104,7 @@ pub struct At {
 impl At {
     pub fn of(p: &Peer) -> At {
         At {
-            head: p.log.head(),
+            head: p.log().head(),
             state: p.store.state_hash(),
             pending: p.pending.iter().map(|x| x.entry.id).collect(),
         }
@@ -236,8 +236,8 @@ impl Client {
         };
         let (local, pending) = pending.map(|b| storage::pending(&b)).unwrap_or_default();
         let durable = Durable {
-            snapshot: stored.snapshot.unwrap_or_else(|| log.log.base.clone()),
-            chain: stored.chain,
+            rows: stored.rows.unwrap_or_else(|| log.confirmed_rows()),
+            writes: stored.writes,
             pending,
             local,
         };
@@ -472,8 +472,8 @@ impl Client {
             self.live = Some(p);
         }
         let durable = Durable {
-            snapshot: self.log.log.base.clone(),
-            chain: self.log.log.entries.clone(),
+            rows: self.log.confirmed_rows(),
+            writes: vec![],
             local: if other { pending.len() as i64 } else { self.log.local },
             pending,
         };

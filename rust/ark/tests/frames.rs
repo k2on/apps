@@ -7,9 +7,10 @@ mod demo;
 use ark::codec::{parse, Reader};
 use ark::frames::{frame_ty, ty, Frame, Verdict};
 use ark::hash::{EntryHash, FnHash, StateHash};
+use ark::ir::Node;
 use ark::log::{Entry, EntryId, Logged, Origin, Record, Snapshot};
 use ark::schema::Space;
-use ark::store::Change;
+use ark::store::{Change, LOG};
 
 fn every_frame() -> Vec<Frame> {
     let entry = Entry {
@@ -117,8 +118,15 @@ fn every_frame_is_its_type() {
         assert!(Frame::dec(&longer).is_err() && parse(&t, &longer).is_err());
         assert!(Frame::dec(&b[..b.len() - 1]).is_err());
     }
-    let r = Record::Logged(match &every_frame()[7] {
-        Frame::Page { logged, .. } => logged[0].clone(),
+    let r = Record::Writes(match &every_frame()[7] {
+        Frame::Page { logged, .. } => [
+            logged[0].facts.clone(),
+            vec![Change::Add {
+                table: LOG.into(),
+                row: logged[0].to_bytes(),
+            }],
+        ]
+        .concat(),
         _ => unreachable!(),
     });
     parse(&ty("Record"), &r.enc()).unwrap();

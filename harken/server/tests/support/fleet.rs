@@ -26,7 +26,7 @@ use ark::hash::hex;
 use ark::ir::Node;
 use ark::log::{Logged, Snapshot};
 use ark::peer::Who;
-use ark::store::{Change, Store};
+use ark::store::{Change, Store, LOG};
 use ark_client::{Client, Disk, Files, Memory};
 use harken_server::hosted::Hosted;
 use serde_json::{json, Value};
@@ -116,7 +116,7 @@ impl Log {
     /// The log in `dir` (the server's `HARKEN_DATA/log`), read from a copy;
     /// `None` before anything was written.
     pub fn read(dir: &Path) -> Option<Log> {
-        if !dir.join("chain").exists() && !dir.join("snapshot").exists() {
+        if !dir.join("kv").exists() && !dir.join("writes").exists() {
             return None;
         }
         let copy = tempfile::tempdir().unwrap();
@@ -130,21 +130,33 @@ impl Log {
             .load()
             .unwrap_or_else(|e| panic!("the log on disk is not a log: {e}"));
         let schema = hosted().module.schema.clone();
-        let (base, mut state) = match &stored.snapshot {
-            Some(Snapshot { seq, rows, .. }) => (
-                *seq,
-                Store::from_rows(schema, rows).expect("the snapshot's rows"),
-            ),
-            None => (0, Store::new(schema)),
+        let (log, rows): (Vec<_>, Vec<_>) = stored
+            .rows
+            .unwrap_or_default()
+            .into_iter()
+            .partition(|(t, _)| t == LOG);
+        let mut state = Store::from_rows(schema, &rows).expect("the store's rows");
+        let base = Snapshot {
+            seq: 0,
+            hash: Default::default(),
+            state: state.state_hash(),
+            rows: vec![],
         };
-        for l in &stored.chain {
+        let log: Vec<Vec<u8>> = log.into_iter().flat_map(|(_, rs)| rs).collect();
+        let log = if log.is_empty() {
+            vec![base.base().to_bytes()]
+        } else {
+            log
+        };
+        state.start_log(log).expect("the log's rows are a chain");
+        for (i, w) in stored.writes.iter().enumerate() {
             state
-                .apply_all(&l.facts)
-                .unwrap_or_else(|e| panic!("entry {}'s facts do not apply: {}", l.seq, e.0));
+                .apply_kv_all(w)
+                .unwrap_or_else(|e| panic!("write {i} does not apply: {}", e.0));
         }
         Some(Log {
-            base,
-            entries: stored.chain,
+            base: state.log().base_seq(),
+            entries: state.log().entries(),
             state,
         })
     }
@@ -936,9 +948,9 @@ impl Seeder {
         self.exchange(user);
         let c = &self.clients[user];
         assert!(c.log.pending.is_empty(), "seeding {name}: still pending");
-        let last = c.log.log.entries.last().expect("sequenced");
+        let last = c.log.log().entries().pop().expect("sequenced");
         self.ids.insert(last.entry.id.0);
-        last.facts.clone()
+        last.facts
     }
 
     /// Frames both ways until neither side has anything to say.
@@ -958,7 +970,7 @@ impl Seeder {
     }
 
     pub fn head(&self) -> i64 {
-        self.hub.log.log.head().0
+        self.hub.log.log().head().0
     }
 }
 

@@ -1,153 +1,85 @@
-//! The chain on disk held: what was persisted reads back; a torn tail and
-//! an entry whose hash does not check are cut on open, in the file too; a
-//! snapshot starts the chain again; blobs are written whole.
+//! The store on disk held: what was persisted reads back; a torn tail is
+//! cut on open, in the file too; the rows written whole fold every write
+//! before them; blobs are written whole; a directory of the format before
+//! the log was a table is refused.
 
-use std::sync::Arc;
-
-use ark::hash::{EntryHash, FnHash, StateHash};
-use ark::log::{Entry, EntryId, Log, Origin, Record, Snapshot};
-use ark::schema::{Schema, Table};
-use ark::store::{Change, Store};
-use ark::ty::Ty;
+use ark::log::Record;
+use ark::store::Change;
 use ark_client::storage::Stored;
 use ark_client::{Disk, Files, Memory};
 
-fn store() -> Store {
-    Store::new(Arc::new(Schema {
-        tables: vec![Table::new("t").col("k", "Int", Ty::Int)],
-    }))
+/// The `k`-th write: a row added.
+fn write(k: i64) -> Vec<Change> {
+    vec![Change::Add {
+        table: "t".into(),
+        row: ark::codec::int_enc(k).to_vec(),
+    }]
 }
 
-/// A log of `n` entries, each adding a row, standing on the empty store.
-fn log(n: i64) -> Log {
-    let mut s = store();
-    let mut log = Log::new(Snapshot {
-        seq: 0,
-        hash: EntryHash::default(),
-        state: s.state_hash(),
-        rows: s.snapshot_rows(),
-    });
-    for k in 1..=n {
-        let c = Change::Add {
-            table: "t".into(),
-            row: ark::codec::int_enc(k).to_vec(),
-        };
-        s.apply(&c).unwrap();
-        let e = Entry {
-            id: EntryId::of(Origin::named("s"), k),
-            actor: "a".into(),
-            session: "s".into(),
-            origin: Origin::named("s"),
-            local: k,
-            roles: vec![],
-            func: FnHash::default(),
-            input: vec![],
-            now: k,
-        };
-        log.append(e, vec![c], s.state_hash());
-    }
-    log
-}
-
-fn persist(d: &mut dyn Disk, log: &Log) {
-    for l in &log.entries {
-        d.record(&Record::Logged(l.clone()).enc()).unwrap();
+fn persist(d: &mut dyn Disk, ks: std::ops::Range<i64>) {
+    for k in ks {
+        d.record(&Record::Writes(write(k)).enc()).unwrap();
     }
 }
 
-/// Every entry persisted reads back; a torn tail is cut at the last whole
-/// record, and the file with it, so an append after the open links. Falsified
-/// by `load` not cutting the file: the record appended after the open sat
-/// behind the torn bytes and the second open lost it.
+/// Every write persisted reads back; a torn tail is cut at the last whole
+/// record, and the file with it, so a write after the open is read after
+/// the others. Falsified by `load` not cutting the file: the record
+/// appended after the open sat behind the torn bytes and the second open
+/// lost it.
 #[test]
 fn a_torn_tail_is_cut() {
     let dir = tempfile::tempdir().unwrap();
-    let l = log(3);
     let mut f = Files::new(dir.path()).unwrap();
-    persist(
-        &mut f,
-        &Log {
-            entries: l.entries[..2].to_vec(),
-            ..l.clone()
-        },
-    );
-    assert_eq!(f.load().unwrap().chain, l.entries[..2]);
-    let path = dir.path().join("chain");
+    persist(&mut f, 1..3);
+    let two: Vec<Vec<Change>> = (1..3).map(write).collect();
+    assert_eq!(f.load().unwrap().writes, two);
+    let path = dir.path().join("writes");
     let mut bytes = std::fs::read(&path).unwrap();
     bytes.extend_from_slice(&[0, 0, 0, 200, 1, 2, 3]);
     std::fs::write(&path, &bytes).unwrap();
     let mut f = Files::new(dir.path()).unwrap();
-    assert_eq!(f.load().unwrap().chain, l.entries[..2], "the torn record is not read");
-    f.record(&Record::Logged(l.entries[2].clone()).enc()).unwrap();
+    assert_eq!(f.load().unwrap().writes, two, "the torn record is not read");
+    persist(&mut f, 3..4);
     assert_eq!(
-        Files::new(dir.path()).unwrap().load().unwrap().chain,
-        l.entries,
-        "and what follows it links"
+        Files::new(dir.path()).unwrap().load().unwrap().writes,
+        (1..4).map(write).collect::<Vec<_>>(),
+        "and what follows it is read"
     );
 }
 
-/// A record whose hash does not check against the one before it ends the
-/// chain there, on disk and in memory alike. Falsified by `read` taking any
-/// record that decodes: the tampered entry and the one after were read.
+/// The store's rows written whole are the new start: the writes before
+/// them are gone and those after are read on them. Blobs read back whole.
+/// Falsified by `record` keeping the writes under the rows: the old writes
+/// were read again on rows that already held them.
 #[test]
-fn an_entry_whose_hash_does_not_check_ends_the_chain() {
-    let l = log(3);
-    let mut bad = l.clone();
-    bad.entries[1].state = StateHash([9; 32]);
-    let mut m = Memory::default();
-    persist(&mut m, &bad);
-    assert_eq!(m.load().unwrap().chain, l.entries[..1]);
-    assert_eq!(m.chain.len(), 1, "cut");
-    let dir = tempfile::tempdir().unwrap();
-    let mut f = Files::new(dir.path()).unwrap();
-    persist(&mut f, &bad);
-    assert_eq!(f.load().unwrap().chain, l.entries[..1]);
-    assert_eq!(
-        std::fs::metadata(dir.path().join("chain")).unwrap().len() as usize,
-        Record::Logged(l.entries[0].clone()).enc().len() + 4
-    );
-}
-
-/// A snapshot is the chain's new start: the entries before it are gone and
-/// those after link onto it. Blobs read back whole. Falsified by `record`
-/// keeping the chain under a snapshot: the old entries were read on it and
-/// did not link, and nothing after the snapshot was read.
-#[test]
-fn a_snapshot_starts_the_chain_again() {
-    let l = log(4);
+fn the_rows_fold_every_write_before() {
     for d in [
         &mut Memory::default() as &mut dyn Disk,
         &mut Files::new(tempfile::tempdir().unwrap().keep()).unwrap(),
     ] {
-        persist(
-            d,
-            &Log {
-                entries: l.entries[..2].to_vec(),
-                ..l.clone()
-            },
-        );
-        let at = &l.entries[1];
-        let base = Snapshot {
-            seq: 2,
-            hash: at.hash,
-            state: at.state,
-            rows: vec![],
-        };
-        d.record(&Record::Snapshot(base.clone()).enc()).unwrap();
-        persist(
-            d,
-            &Log {
-                entries: l.entries[2..].to_vec(),
-                ..l.clone()
-            },
-        );
+        persist(d, 1..3);
+        let rows = vec![("t".to_string(), vec![ark::codec::int_enc(1).to_vec()])];
+        d.record(&Record::Rows(rows.clone()).enc()).unwrap();
+        persist(d, 3..5);
         let want = Stored {
-            snapshot: Some(base),
-            chain: l.entries[2..].to_vec(),
+            rows: Some(rows),
+            writes: (3..5).map(write).collect(),
         };
         assert_eq!(d.load().unwrap(), want);
         d.put("pending", b"\x00\x01").unwrap();
         assert_eq!(d.get("pending").unwrap().as_deref(), Some(&b"\x00\x01"[..]));
         assert_eq!(d.get("nothing").unwrap(), None);
     }
+}
+
+/// A directory holding a log of the format before the log was a table
+/// (`snapshot`, `chain`) does not open as an empty one. Falsified by
+/// `load` reading only `kv` and `writes`: it opened empty.
+#[test]
+fn the_format_before_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("chain"), [0, 0, 0, 1, 0]).unwrap();
+    let err = Files::new(dir.path()).unwrap().load().unwrap_err();
+    assert!(err.to_string().contains("before the log was a table"), "{err}");
 }

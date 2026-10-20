@@ -1,24 +1,31 @@
-//! The chain on disk (§1.6, §1.7's `Persist`): what a peer made durable,
-//! read back on open.
+//! The store on disk (§1.6, §1.7's `Persist`): what a peer made durable,
+//! read back on open. The log is a table of the store, so the store's rows
+//! and the writes to it are the one format, the log's and the rows' alike.
 //!
-//! Three things, each its own file in a directory ([`Files`]) or its own
-//! buffer ([`Memory`], for tests and the simulator):
+//! Two things, each its own file in a directory ([`Files`]) or its own
+//! buffer ([`Memory`], for tests and the simulator), and blobs beside them:
 //!
-//! - `snapshot`: the [`Snapshot`] the chain stands on — its rows in key
-//!   order — written whole (to a temporary file, then renamed) when a
-//!   `Persist` carries one, which also empties the chain.
-//! - `chain`: every `Logged` a `Persist` carried, appended, each as a
-//!   four-byte big-endian length and the record's bytes. On open the chain
-//!   is read up to the first record that does not read or whose hash does
-//!   not check against the one before it, and the file is cut there: a
-//!   crash mid-write leaves a torn tail, never a wrong entry.
-//! - named blobs beside them, each written whole or appended to: a hub's
-//!   `journal` and `live` (`ark-server`), written whole; a client's
-//!   `pending` (its own intents not yet confirmed and the last `local` its
-//!   session drew), a journal of records, each a four-byte big-endian
-//!   length and `((Int local, Int gone), List Entry)`: the intents left
-//!   are those before with the first `gone` taken off and these added.
-//!   It is read up to the first record that does not read, as the chain.
+//! - `kv`: the store's rows whole ([`Record::Rows`]), the log's table's
+//!   among them, written (to a temporary file, then renamed) when a
+//!   `Persist` carries them, which also empties `writes`: every write
+//!   before is folded into them.
+//! - `writes`: every [`Record::Writes`] a `Persist` carried, appended, each
+//!   as a four-byte big-endian length and the record's bytes. On open they
+//!   are read up to the first record that does not read, and the file is
+//!   cut there: a crash mid-write leaves a torn tail, never a wrong write.
+//!   Whether each applies — a row of the log's table must link onto the
+//!   one before it — is the peer's to judge as it opens; it writes `kv`
+//!   whole when one does not.
+//! - named blobs, each written whole or appended to: a hub's `journal` and
+//!   `live` (`ark-server`), written whole; a client's `pending` (its own
+//!   intents not yet confirmed and the last `local` its session drew), a
+//!   journal of records, each a four-byte big-endian length and `((Int
+//!   local, Int gone), List Entry)`: the intents left are those before with
+//!   the first `gone` taken off and these added. It is read up to the first
+//!   record that does not read, as `writes` is.
+//!
+//! A directory holding the files of the format before the log was a table
+//! (`snapshot`, `chain`) is refused, never read as empty.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read as _, Write};
@@ -27,13 +34,15 @@ use std::path::PathBuf;
 use std::collections::BTreeMap;
 
 use ark::ir::Node;
-use ark::log::{Entry, Logged, Record, Snapshot};
+use ark::log::{Entry, Record, Rows};
+use ark::store::Change;
 
-/// The chain made durable, read back.
+/// The store made durable, read back: its rows as last written whole, and
+/// the writes since.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Stored {
-    pub snapshot: Option<Snapshot>,
-    pub chain: Vec<Logged>,
+    pub rows: Option<Rows>,
+    pub writes: Vec<Vec<Change>>,
 }
 
 /// Where a peer's durable records go.
@@ -60,67 +69,76 @@ pub fn pending_record(local: i64, gone: usize, new: Vec<Entry>) -> Vec<u8> {
 
 /// The `pending` journal read: the last `local` and the intents left.
 pub fn pending(bytes: &[u8]) -> (i64, Vec<Entry>) {
-    let (mut local, mut left, mut at) = (0, vec![], 0);
-    while let Some(len) = bytes.get(at..at + 4).map(|b| u32::from_be_bytes(b.try_into().unwrap()) as usize) {
-        let Some(Ok(((l, gone), new))) = bytes.get(at + 4..at + 4 + len).map(<((i64, i64), Vec<Entry>)>::from_bytes) else {
-            break;
-        };
+    let (mut local, mut left) = (0, vec![]);
+    for ((l, gone), new) in framed::<((i64, i64), Vec<Entry>)>(bytes).0 {
         left.drain(..(gone.max(0) as usize).min(left.len()));
         left.extend(new);
         local = l;
-        at += 4 + len;
     }
     (local, left)
 }
 
-/// The records of a chain read in order up to the first that does not read
-/// or link; and how many of them that is.
-fn read(snapshot: Option<&[u8]>, records: &[&[u8]]) -> (Stored, usize) {
-    let snapshot = snapshot.and_then(|b| match Record::dec(b) {
-        Ok(Record::Snapshot(x)) => Some(x),
-        _ => None,
-    });
-    let mut s = Stored { snapshot, chain: vec![] };
-    let (mut seq, mut prev) = s.snapshot.as_ref().map_or((0, Default::default()), |x| (x.seq, x.hash));
-    for b in records {
-        match Record::dec(b) {
-            Ok(Record::Logged(l)) if l.seq == seq + 1 && l.links(&prev) => {
-                (seq, prev) = (l.seq, l.hash);
-                s.chain.push(l);
-            }
-            _ => break,
-        }
+/// Length-framed records read up to the first that does not read; and the
+/// bytes they take.
+fn framed<T: Node>(bytes: &[u8]) -> (Vec<T>, usize) {
+    let (mut out, mut at) = (vec![], 0);
+    while let Some(len) = bytes.get(at..at + 4).map(|b| u32::from_be_bytes(b.try_into().unwrap()) as usize) {
+        let Some(Ok(x)) = bytes.get(at + 4..at + 4 + len).map(T::from_bytes) else {
+            break;
+        };
+        out.push(x);
+        at += 4 + len;
     }
-    let n = s.chain.len();
-    (s, n)
+    (out, at)
 }
 
-fn snapshot_of(bytes: &[u8]) -> bool {
+fn frame(bytes: &[u8]) -> Vec<u8> {
+    [&(bytes.len() as u32).to_be_bytes()[..], bytes].concat()
+}
+
+/// The store's rows and the writes after them, read; and the bytes of
+/// `writes` that read.
+fn read(kv: Option<&[u8]>, writes: &[u8]) -> (Stored, usize) {
+    let rows = kv.and_then(|b| match Record::dec(b) {
+        Ok(Record::Rows(r)) => Some(r),
+        _ => None,
+    });
+    let (records, at) = framed::<Record>(writes);
+    let mut s = Stored { rows, writes: vec![] };
+    for r in records {
+        match r {
+            Record::Writes(w) => s.writes.push(w),
+            Record::Rows(_) => break,
+        }
+    }
+    (s, at)
+}
+
+fn rows_of(bytes: &[u8]) -> bool {
     matches!(bytes.first(), Some(1))
 }
 
 /// The records in memory: what a simulated device keeps across a reopen.
 #[derive(Clone, Debug, Default)]
 pub struct Memory {
-    pub snapshot: Option<Vec<u8>>,
-    pub chain: Vec<Vec<u8>>,
+    pub kv: Option<Vec<u8>>,
+    pub writes: Vec<u8>,
     pub blobs: BTreeMap<String, Vec<u8>>,
 }
 
 impl Disk for Memory {
     fn load(&mut self) -> io::Result<Stored> {
-        let records: Vec<&[u8]> = self.chain.iter().map(|b| &b[..]).collect();
-        let (s, n) = read(self.snapshot.as_deref(), &records);
-        self.chain.truncate(n);
+        let (s, at) = read(self.kv.as_deref(), &self.writes);
+        self.writes.truncate(at);
         Ok(s)
     }
 
     fn record(&mut self, bytes: &[u8]) -> io::Result<()> {
-        if snapshot_of(bytes) {
-            self.snapshot = Some(bytes.to_vec());
-            self.chain.clear();
+        if rows_of(bytes) {
+            self.kv = Some(bytes.to_vec());
+            self.writes.clear();
         } else {
-            self.chain.push(bytes.to_vec());
+            self.writes.extend(frame(bytes));
         }
         Ok(())
     }
@@ -140,11 +158,11 @@ impl Disk for Memory {
     }
 }
 
-/// The records in a directory: `snapshot`, `chain`, and a file per blob.
+/// The records in a directory: `kv`, `writes`, and a file per blob.
 #[derive(Debug)]
 pub struct Files {
     dir: PathBuf,
-    chain: Option<File>,
+    writes: Option<File>,
     /// Whether every append is synced before it returns: a server's
     /// acknowledgement follows the write.
     pub sync: bool,
@@ -156,7 +174,7 @@ impl Files {
         fs::create_dir_all(&dir)?;
         Ok(Files {
             dir,
-            chain: None,
+            writes: None,
             sync: false,
         })
     }
@@ -170,10 +188,10 @@ impl Files {
     }
 
     fn opened(&mut self) -> io::Result<&mut File> {
-        if self.chain.is_none() {
-            self.chain = Some(OpenOptions::new().create(true).append(true).open(self.dir.join("chain"))?);
+        if self.writes.is_none() {
+            self.writes = Some(OpenOptions::new().create(true).append(true).open(self.dir.join("writes"))?);
         }
-        Ok(self.chain.as_mut().unwrap())
+        Ok(self.writes.as_mut().unwrap())
     }
 }
 
@@ -191,35 +209,32 @@ fn file(path: PathBuf) -> io::Result<Option<Vec<u8>>> {
 
 impl Disk for Files {
     fn load(&mut self) -> io::Result<Stored> {
-        let chain = file(self.dir.join("chain"))?.unwrap_or_default();
-        let (mut records, mut ends, mut at) = (vec![], vec![0], 0);
-        while let Some(len) = chain.get(at..at + 4).map(|b| u32::from_be_bytes(b.try_into().unwrap()) as usize) {
-            let Some(b) = chain.get(at + 4..at + 4 + len) else { break };
-            records.push(b);
-            at += 4 + len;
-            ends.push(at);
+        let kv = file(self.dir.join("kv"))?;
+        if kv.is_none() && (self.dir.join("snapshot").exists() || self.dir.join("chain").exists()) {
+            let why = "a log of the format before the log was a table (snapshot, chain): not read";
+            return Err(io::Error::other(why));
         }
-        let snapshot = file(self.dir.join("snapshot"))?;
-        let (s, n) = read(snapshot.as_deref(), &records);
-        self.chain = None;
+        let writes = file(self.dir.join("writes"))?.unwrap_or_default();
+        let (s, at) = read(kv.as_deref(), &writes);
+        self.writes = None;
         OpenOptions::new()
             .create(true)
             .write(true)
             .truncate(false)
-            .open(self.dir.join("chain"))?
-            .set_len(ends[n] as u64)?;
+            .open(self.dir.join("writes"))?
+            .set_len(at as u64)?;
         Ok(s)
     }
 
     fn record(&mut self, bytes: &[u8]) -> io::Result<()> {
-        if snapshot_of(bytes) {
-            self.whole("snapshot", bytes)?;
-            self.chain = None;
-            return File::create(self.dir.join("chain"))?.sync_all();
+        if rows_of(bytes) {
+            self.whole("kv", bytes)?;
+            self.writes = None;
+            return File::create(self.dir.join("writes"))?.sync_all();
         }
         let sync = self.sync;
         let f = self.opened()?;
-        f.write_all(&[&(bytes.len() as u32).to_be_bytes()[..], bytes].concat())?;
+        f.write_all(&frame(bytes))?;
         if sync {
             f.sync_data()?;
         }

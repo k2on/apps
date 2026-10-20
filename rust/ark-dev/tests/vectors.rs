@@ -212,14 +212,14 @@ fn fleet_vector(seed: u64, head: i64, hash: StateHash) -> Value {
 #[test]
 fn rebase() {
     let net = fleet(7);
-    let (head, hash) = (net.hub.log.log.head().0, net.hub.log.store.state_hash());
+    let (head, hash) = (net.hub.log.log().head().0, net.hub.log.store.state_hash());
     assert_eq!(hash.hex(), "ff04f56d613ee73dad721e02cb6ebe125fa93fe801b2f1713499038f55475e95", "K1's pin");
     let right = fleet_vector(7, head, hash);
     vector("rebase", "fleet-seed-7.json", &format!("{right:#}\n")).unwrap();
     let mut written = BTreeSet::from(["fleet-seed-7.json".to_string()]);
     for (seed, found) in FOUND {
         let (net, _) = session(seed, true).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
-        let (head, at) = net.hub.log.log.head();
+        let (head, at) = net.hub.log.log().head();
         let v = json!({"found": found, "hash": at.hex(), "head": head, "seed": seed, "state": net.hub.log.store.state_hash().hex()});
         let name = format!("fleet-fuzz-seed-{seed}.json");
         vector("rebase", &name, &format!("{v:#}\n")).unwrap();
@@ -235,11 +235,11 @@ fn rebase() {
         let seed = v["seed"].as_u64().unwrap();
         let ok = if n.starts_with("fleet-seed") {
             let net = fleet(seed);
-            net.hub.log.log.head().0 == v["head"] && net.hub.log.store.state_hash().hex() == v["hash"]
+            net.hub.log.log().head().0 == v["head"] && net.hub.log.store.state_hash().hex() == v["hash"]
         } else {
             let (net, _) = session(seed, false).unwrap();
-            let h: EntryHash = net.hub.log.log.head().1;
-            net.hub.log.log.head().0 == v["head"] && h.hex() == v["hash"]
+            let h: EntryHash = net.hub.log.log().head().1;
+            net.hub.log.log().head().0 == v["head"] && h.hex() == v["hash"]
         };
         assert_eq!(ok, v["expect"] != "fail", "{n}");
     }

@@ -31,7 +31,7 @@ fn an_intent_refused_alone_draws_no_local() {
     eve.step(Input::Alone);
     eve.step(mutate(CREATE, create_input("  "), 1));
     eve.step(mutate(CREATE, create_input("Road"), 2));
-    assert_eq!(eve.log.entries[0].entry.local, 1);
+    assert_eq!(eve.log().entries()[0].entry.local, 1);
 }
 
 /// A chain whose `local`s skip one — an intent eve refused herself as she
@@ -72,7 +72,7 @@ fn a_chain_with_a_gap_is_taken_whole() {
         2,
         "{acks:?}"
     );
-    assert_eq!(server.log.head().0, 3);
+    assert_eq!(server.log().head().0, 3);
 }
 
 /// A `Join` lost on the way: the next connection hands the chain over
@@ -120,12 +120,9 @@ fn a_push_below_a_reopened_horizon_is_acknowledged_there() {
     deliver_up(&mut server, &who("bob"), &o2);
     server.step(Input::Compact(2));
     let mut reopened = authority(demo::cas());
-    let base = server.log.base.clone();
     reopened.step(Input::Open(Durable {
-        snapshot: base,
-        chain: vec![],
-        pending: vec![],
-        local: 0,
+        rows: server.confirmed_rows(),
+        ..Durable::default()
     }));
     if let ark::peer::Role::Authority { journal } = &mut reopened.role {
         journal.pass(Origin::named("bob-session"), "bob", 2);

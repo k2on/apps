@@ -287,7 +287,7 @@ fn the_library_takes_a_removed_track_off_everybodys_playlists() {
     f.net.settle();
     assert_eq!(f.net.refused, [(1, "only the library writes the library".to_string())]);
     assert_eq!(items(&f).len(), 4, "nothing moved");
-    for l in &f.net.server.log.entries {
+    for l in &f.net.server.log().entries() {
         let want: Vec<String> = if l.entry.actor == "peer-0" { vec![LIBRARY.into()] } else { vec![] };
         assert_eq!(l.entry.roles, want, "entry {} by {}", l.seq, l.entry.actor);
     }

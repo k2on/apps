@@ -229,7 +229,7 @@ impl Peer {
 
     /// How far into the log the client has confirmed.
     pub fn cursor(&self) -> i64 {
-        self.client.log.log.head().0
+        self.client.log.log().head().0
     }
 
     /// An intent on the log: its id.

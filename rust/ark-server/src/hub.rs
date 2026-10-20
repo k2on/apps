@@ -136,17 +136,17 @@ impl Hub {
     /// The hub opened from what `disk` holds.
     pub fn open(config: Config, mut disk: Box<dyn Disk>, now: i64) -> Hub {
         let mut log = authority(&config.log, &config.me, Space::Durable);
-        let stored = disk.load().unwrap_or_default();
+        let stored = disk.load().unwrap_or_else(|e| panic!("the log on disk does not read: {e}"));
         let durable = Durable {
-            snapshot: stored.snapshot.unwrap_or_else(|| log.log.base.clone()),
-            chain: stored.chain,
+            rows: stored.rows.unwrap_or_else(|| log.confirmed_rows()),
+            writes: stored.writes,
             pending: vec![],
             local: 0,
         };
         log.step(Input::Open(durable));
         log.local = log
-            .log
-            .entries
+            .log()
+            .entries()
             .iter()
             .filter(|l| l.entry.origin == log.origin)
             .map(|l| l.entry.local)
@@ -179,10 +179,8 @@ impl Hub {
         let kept = hub.disk.get("live").ok().flatten().and_then(|b| Snapshot::from_bytes(&b).ok());
         if let (Some(snapshot), Some(live)) = (kept, &mut hub.live) {
             live.step(Input::Open(Durable {
-                snapshot,
-                chain: vec![],
-                pending: vec![],
-                local: 0,
+                rows: snapshot.kv_rows(),
+                ..Durable::default()
             }));
             if let Some(f) = hub.config.live.as_ref().and_then(|l| l.on_restore) {
                 let _ = hub.author(Space::Volatile, f, vec![], now);
@@ -194,7 +192,7 @@ impl Hub {
     /// Writes the volatile space as it stands, for the next open.
     pub fn close(&mut self) {
         if let Some(live) = &self.live {
-            let (seq, hash) = live.log.head();
+            let (seq, hash) = live.log().head();
             let s = Snapshot {
                 seq,
                 hash,
@@ -368,7 +366,7 @@ impl Hub {
             .values()
             .filter(|v| matches!(v, Verdict::Refused { .. }))
             .count();
-        let mark = (refused, self.log.log.base.seq);
+        let mark = (refused, self.log.log().base_seq());
         if space == Space::Durable && mark != self.refused {
             self.refused = mark;
             let j = journal(&mut self.log);
@@ -390,7 +388,7 @@ impl Hub {
             Space::Durable => (self.config.keep, &mut self.log),
             Space::Volatile => (self.config.live.as_ref().map(|l| l.keep), self.live.as_mut().expect("live")),
         };
-        let (head, base) = (peer.log.head().0, peer.log.base.seq);
+        let (head, base) = (peer.log().head().0, peer.log().base_seq());
         if let Some(k) = keep.filter(|k| head - base > 2 * *k as i64) {
             for o in peer.step(Input::Compact(head - k as i64)) {
                 if let Output::Persist(b) = o {

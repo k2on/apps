@@ -32,7 +32,7 @@ use ark::log::{Entry, EntryId, Logged, Origin, Record, Seq, Snapshot};
 use ark::module::Lib;
 use ark::peer::{Cas, Who};
 use ark::schema::{Schema, Space, Table};
-use ark::store::{Change, Store};
+use ark::store::{Change, Store, LOG};
 use ark::ty::Ty;
 use ark_client::link::{Backoff, Conn, Dial, Link, Recv};
 use ark_client::{Client, Config, Disk, Files, Memory, Module};
@@ -250,7 +250,7 @@ fn perf_b_round_trip() {
                 create(&mut c, j);
             }
             c.pump(&link, vec![], now());
-            pump_until(&mut c, &link, |c| c.log.pending.is_empty() && c.log.log.head().0 >= lists as Seq);
+            pump_until(&mut c, &link, |c| c.log.pending.is_empty() && c.log.log().head().0 >= lists as Seq);
             let ls: Vec<[u8; 16]> = (1..=lists).map(|j| pid(token, j)).collect();
             let (mut whole, mut authoring) = (vec![], vec![]);
             for i in 0..n {
@@ -268,7 +268,7 @@ fn perf_b_round_trip() {
             let mut d = client(token2, Box::new(Memory::default()));
             let mut conn = app.hub.dial(Arc::new(dev)).dial(token2).unwrap();
             d.connected();
-            drive_until(&mut d, &mut conn, |d| d.log.log.head() == c.log.log.head());
+            drive_until(&mut d, &mut conn, |d| d.log.log().head() == c.log.log().head());
             let direct: Vec<Duration> = (0..n)
                 .map(|i| {
                     let t = Instant::now();
@@ -305,18 +305,18 @@ fn perf_b_watcher() {
             create(&mut author, j);
         }
         author.pump(&la, vec![], now());
-        pump_until(&mut author, &la, |c| c.log.pending.is_empty() && c.log.log.head().0 >= 10);
-        let head = author.log.log.head().0;
-        pump_until(&mut watcher, &lb, |c| c.log.log.head().0 >= head);
+        pump_until(&mut author, &la, |c| c.log.pending.is_empty() && c.log.log().head().0 >= 10);
+        let head = author.log.log().head().0;
+        pump_until(&mut watcher, &lb, |c| c.log.log().head().0 >= head);
         let ls: Vec<[u8; 16]> = (1..=10).map(|j| pid(ta, j)).collect();
         let mut per = vec![];
         for i in 0..n {
             add(&mut author, &ls[(i % 10) as usize], i);
             author.pump(&la, vec![], now());
             pump_until(&mut author, &la, |c| c.log.pending.is_empty());
-            let want = author.log.log.head().0;
+            let want = author.log.log().head().0;
             let t = Instant::now();
-            pump_until(&mut watcher, &lb, |c| c.log.log.head().0 >= want);
+            pump_until(&mut watcher, &lb, |c| c.log.log().head().0 >= want);
             let _ = watcher.take_events();
             per.push(t.elapsed());
         }
@@ -360,7 +360,7 @@ fn perf_c_pump_alone() {
                     t.elapsed()
                 })
                 .collect();
-            assert_eq!(c.log.log.head().0 as u64, n + lists);
+            assert_eq!(c.log.log().head().0 as u64, n + lists);
             let st = if dir { "Dir" } else { "Memory" };
             line(&format!("playlists of 10, {st}: mutate"), &per);
             na(&format!("playlists of 10, {st}: pump"), n as usize, "persisted inside mutate's step");
@@ -438,7 +438,7 @@ fn perf_g_hub_fanout() {
             for i in 0..s {
                 push(&mut hub, a, &author, &mut local, ad, add_input(&ls[(i % 10) as usize], i));
             }
-            let (head, hash) = hub.log.log.head();
+            let (head, hash) = hub.log.log().head();
             let hello = Frame::Hello {
                 space: Space::Durable,
                 cursor: head,
@@ -597,12 +597,22 @@ fn record(disk: &mut Files, r: Record) {
     disk.record(&r.enc()).unwrap();
 }
 
+/// A logged entry as the writes a peer makes durable: its facts and its
+/// row of the log's table.
+fn writes(l: Logged) -> Record {
+    let add = Change::Add {
+        table: LOG.into(),
+        row: l.to_bytes(),
+    };
+    Record::Writes([l.facts, vec![add]].concat())
+}
+
 /// A client of a server, caught up: a snapshot of `n` rows at seq `n`,
 /// no chain, nothing pending.
 fn write_client(dir: &Path, n: u64) {
     let st = media_store(&media_schema(true), 0..n);
     let mut f = Files::new(dir).unwrap();
-    record(&mut f, Record::Snapshot(snapshot(&st, n as Seq, EntryHash([0x5a; 32]))));
+    record(&mut f, Record::Rows(snapshot(&st, n as Seq, EntryHash([0x5a; 32])).kv_rows()));
 }
 
 /// A hub's log: a snapshot at the horizon `n - n/10` and a chain of the
@@ -612,9 +622,9 @@ fn write_server(dir: &Path, n: u64) {
     let mut st = media_store(&media_schema(true), 0..horizon);
     let base = EntryHash([0x5a; 32]);
     let mut f = Files::new(dir.join("log")).unwrap();
-    record(&mut f, Record::Snapshot(snapshot(&st, horizon as Seq, base)));
+    record(&mut f, Record::Rows(snapshot(&st, horizon as Seq, base).kv_rows()));
     for l in chain(&mut st, (horizon as Seq, base), horizon..n, "scan") {
-        record(&mut f, Record::Logged(l));
+        record(&mut f, writes(l));
     }
 }
 
@@ -625,7 +635,7 @@ fn write_alone(dir: &Path, n: u64) {
     let mut f = Files::new(dir).unwrap();
     f.put("fork", &(0i64, EntryHash::default()).to_bytes()).unwrap();
     for l in chain(&mut st, (0, EntryHash::default()), 0..n, "alice") {
-        record(&mut f, Record::Logged(l));
+        record(&mut f, writes(l));
     }
 }
 
@@ -744,11 +754,12 @@ fn perf_d_open_child() {
     let t = Instant::now();
     let rows = match kind {
         "store" => {
-            let b = std::fs::read(dir.join("snapshot")).unwrap();
-            let Record::Snapshot(s) = Record::dec(&b).unwrap() else {
-                panic!("a snapshot")
+            let b = std::fs::read(dir.join("kv")).unwrap();
+            let Record::Rows(mut rows) = Record::dec(&b).unwrap() else {
+                panic!("the store's rows")
             };
-            let st = Store::from_rows(Arc::new(media_schema(true)), &s.rows).unwrap();
+            rows.retain(|(t, _)| t != LOG);
+            let st = Store::from_rows(Arc::new(media_schema(true)), &rows).unwrap();
             let r = st.rows("media").count();
             std::mem::forget(st);
             r
@@ -785,11 +796,7 @@ fn perf_d_open_child() {
         t.elapsed()
     };
     let mut split = String::new();
-    let snap = if kind == "server" {
-        dir.join("log/snapshot")
-    } else {
-        dir.join("snapshot")
-    };
+    let snap = if kind == "server" { dir.join("log/kv") } else { dir.join("kv") };
     if snap.exists() {
         let read = time(&mut || {
             let b = std::fs::read(&snap).unwrap();
@@ -801,7 +808,7 @@ fn perf_d_open_child() {
         let path = if kind == "server" { dir.join("log") } else { dir.clone() };
         let mut records = 0;
         let read = time(&mut || {
-            records = Files::new(&path).unwrap().load().unwrap().chain.len();
+            records = Files::new(&path).unwrap().load().unwrap().writes.len();
         });
         if !split.is_empty() {
             split.push_str(", ");

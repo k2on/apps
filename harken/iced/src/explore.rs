@@ -145,11 +145,11 @@ impl LogView for Seen<'_> {
     fn lines(&self) -> Vec<Line> {
         let name = |f: &FnHash| self.names.get(f).cloned().unwrap_or_else(|| f.hex());
         let log = &self.client.client.log;
-        let confirmed = log.log.entries.iter().map(|l| Line {
+        let confirmed = log.log().entries().into_iter().map(|l| Line {
             seq: Some(l.seq),
-            entry: l.entry.clone(),
             function: name(&l.entry.func),
-            facts: Some(l.facts.clone()),
+            entry: l.entry,
+            facts: Some(l.facts),
             standing: "in the log".into(),
         });
         let pending = log.pending.iter().map(|p| Line {

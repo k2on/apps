@@ -166,10 +166,8 @@ fn opened(role: Role, st: &Store) -> Peer {
         rows: st.snapshot_rows(),
     };
     p.step(Input::Open(Durable {
-        snapshot,
-        chain: vec![],
-        pending: vec![],
-        local: 0,
+        rows: snapshot.kv_rows(),
+        ..Durable::default()
     }));
     assert_eq!(p.store, *st, "opened on the library");
     p

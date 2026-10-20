@@ -956,7 +956,7 @@ fn a_scrub_is_relayed_and_never_sequenced() {
     let laptop = w.arrive("laptop", true);
     w.arrive("phone", true);
     w.call("laptop", "start", &start(&queue(), 0, 0, "album/Brandenburg"));
-    let (head, hash) = (w.net.hub.log.log.head(), w.net.hub.log.store.state_hash());
+    let (head, hash) = (w.net.hub.log.log().head(), w.net.hub.log.store.state_hash());
     for ms in [120_000, 130_000, 140_000] {
         w.call("phone", "scrub", &Scrub { at_ms: Some(Ms(ms)) });
     }
@@ -969,7 +969,7 @@ fn a_scrub_is_relayed_and_never_sequenced() {
         "the second and third coalesced"
     );
     assert_eq!(
-        (w.net.hub.log.log.head(), w.net.hub.log.store.state_hash()),
+        (w.net.hub.log.log().head(), w.net.hub.log.store.state_hash()),
         (head, hash),
         "not in the log"
     );
@@ -1137,8 +1137,8 @@ fn a_report_of_a_volume_is_heard_in_order() {
     w.call("media_player.kitchen", "equip", &equip);
     w.call("media_player.kitchen", "report_volume", &ReportVolume { level: 20, muted: true });
     assert_eq!(w.heard(phone).last().map(String::as_str), Some("report_volume"), "the phone hears it");
-    let live = |i: i64| w.net.clients[&i].live.as_ref().unwrap().log.head();
-    assert_eq!(live(phone), w.net.hub.live.as_ref().unwrap().log.head(), "in order: at the hub's head");
+    let live = |i: i64| w.net.clients[&i].live.as_ref().unwrap().log().head();
+    assert_eq!(live(phone), w.net.hub.live.as_ref().unwrap().log().head(), "in order: at the hub's head");
     assert_eq!(live(kitchen), live(phone));
     let d = w.seen_by(phone).device("media_player.kitchen").cloned().unwrap();
     assert_eq!((d.volume, d.muted), (20, true));
@@ -1246,9 +1246,8 @@ impl Wire {
     /// The transitions client `i`'s volatile machine applied, in order.
     fn heard(&self, i: i64) -> Vec<String> {
         let names: BTreeMap<_, _> = domain().module.bindings.iter().map(|(n, h)| (*h, n.clone())).collect();
-        let log = &self.net.clients[&i].live.as_ref().unwrap().log;
-        log.entries
-            .iter()
+        let log = self.net.clients[&i].live.as_ref().unwrap().log().entries();
+        log.iter()
             .map(|l| names[&l.entry.func].trim_start_matches("listening.").to_string())
             .collect()
     }

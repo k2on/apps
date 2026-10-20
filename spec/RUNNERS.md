@@ -81,12 +81,13 @@ the session and the client. `steps` holds one step per line, each one of:
 
 `in` is `{"t": …}`: `frame` (`bytes`, from upstream), `mutate` (`fn`,
 `input`, `now`), `connected`, `alone`, `join`, `compact` (`seq`), `tick`
-(`now`), `persisted` (`seq`), or `open` (`durable`: the hex of `((Snapshot,
-[Logged]), ([Entry], Int))`, what the machine is opened from: the snapshot,
-the chain on it, its pending intents and the last `local`). `out` is the
+(`now`), `persisted` (`seq`), or `open` (`durable`: the hex of `Durable`,
+`(rows, writes, pending, local)`, what the machine is opened from: its
+store's rows as last written whole — the log's table, `_log`, among them —
+the writes since, its pending intents and the last `local`). `out` is the
 list of outputs in order, each `{"t": …}`: `send`, `fanout` (`bytes`),
 `to` (`session`, `bytes`), `changes` (the hex of the `[Change]`),
-`persist` (`bytes`), `refused` (`id`, `why`), `confirmed` (`id`). `after`
+`persist` (`bytes`: a `Record`, writes to the store or its rows whole), `refused` (`id`, `why`), `confirmed` (`id`). `after`
 is `{hash, head, pending, state}`: the head's sequence and entry hash, the
 store's state hash and the pending intents' ids in order.
 

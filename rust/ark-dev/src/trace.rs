@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use ark::hash::{hex, unhex};
 use ark::ir::Node;
-use ark::log::{Durable, Entry, EntryId, Logged, Origin, Snapshot};
+use ark::log::{Durable, EntryId, Logged, Origin};
 use ark::module::Lib;
 use ark::peer::{Cas, Input, Output, Peer, Role, Who};
 use ark::schema::{Schema, Space};
@@ -42,8 +42,6 @@ fn space(s: Space) -> &'static str {
     }
 }
 
-type Kept = ((Snapshot, Vec<Logged>), (Vec<Entry>, i64));
-
 fn input(i: &Input) -> Value {
     match i {
         Input::Frame { bytes, .. } => json!({"t": "frame", "bytes": hex(bytes)}),
@@ -52,10 +50,7 @@ fn input(i: &Input) -> Value {
         Input::Alone => json!({"t": "alone"}),
         Input::Join => json!({"t": "join"}),
         Input::Compact(n) => json!({"t": "compact", "seq": n}),
-        Input::Open(d) => {
-            let k: Kept = ((d.snapshot.clone(), d.chain.clone()), (d.pending.clone(), d.local));
-            json!({"t": "open", "durable": hex(&k.to_bytes())})
-        }
+        Input::Open(d) => json!({"t": "open", "durable": hex(&d.to_bytes())}),
         Input::Tick(n) => json!({"t": "tick", "now": n}),
         Input::Persisted(n) => json!({"t": "persisted", "seq": n}),
         Input::Feed { .. } | Input::Loaded => unreachable!("a client is never told a feed or a load"),
@@ -250,15 +245,7 @@ fn input_of(v: &Value) -> Result<Input, String> {
         "compact" => Input::Compact(n("seq")?),
         "tick" => Input::Tick(n("now")?),
         "persisted" => Input::Persisted(n("seq")?),
-        "open" => {
-            let ((snapshot, chain), (pending, local)) = Kept::from_bytes(&bytes(&v["durable"])?).map_err(|r| r.0)?;
-            Input::Open(Durable {
-                snapshot,
-                chain,
-                pending,
-                local,
-            })
-        }
+        "open" => Input::Open(Durable::from_bytes(&bytes(&v["durable"])?).map_err(|r| r.0)?),
         t => return Err(format!("no input {t}")),
     })
 }

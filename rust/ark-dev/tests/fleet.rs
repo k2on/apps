@@ -25,7 +25,7 @@ fn fleet_seed_7_through_the_hub() {
     net.converged().unwrap();
     assert!(net.refused.is_empty() && net.misread.is_empty(), "{:?}", net.refused);
     assert!(net.dropped > 0 && net.doubled > 0, "the network lost and repeated frames");
-    assert_eq!(net.hub.log.log.head().0, HEAD);
+    assert_eq!(net.hub.log.log().head().0, HEAD);
     assert_eq!(net.hub.log.store.state_hash().hex(), HASH);
 }
 
@@ -41,7 +41,7 @@ fn fleets_of_other_seeds_converge_and_every_client_replays() {
     for seed in 0..=40 {
         let net = fleet(seed);
         net.converged().unwrap_or_else(|e| panic!("seed {seed}: {e}"));
-        assert_eq!((net.hub.log.log.head().0, net.refused.len()), (HEAD, 0), "seed {seed}");
+        assert_eq!((net.hub.log.log().head().0, net.refused.len()), (HEAD, 0), "seed {seed}");
         for (i, c) in &net.clients {
             replay(&record(&format!("fleet-seed-{seed}, client {i}"), c)).unwrap_or_else(|e| panic!("seed {seed} client {i}: {e}"));
             traces += 1;

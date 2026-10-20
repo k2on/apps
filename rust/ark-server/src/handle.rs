@@ -174,7 +174,7 @@ impl Handle {
                 h.log.cas.forget(&f);
             }
             let peer = if space == Space::Durable { Some(&h.log) } else { h.live.as_ref() };
-            let _ = tx.send(r.map(|_| peer.map_or(0, |p| p.log.head().0)));
+            let _ = tx.send(r.map(|_| peer.map_or(0, |p| p.log().head().0)));
             out
         });
         self.tx.send(Cmd::Run(job)).ok()?;

@@ -48,7 +48,7 @@ fn a_reopened_client_keeps_its_pending_intents() {
     assert_eq!(n.clients[&0].log.pending.iter().map(|p| p.entry.id).collect::<Vec<_>>(), vec![id]);
     n.settle().unwrap();
     n.converged().unwrap();
-    assert_eq!(n.hub.log.log.entries.last().map(|l| l.entry.id), Some(id));
+    assert_eq!(n.hub.log.log().entries().last().map(|l| l.entry.id), Some(id));
 }
 
 /// What was authored before signing in is the login's: its actor and
@@ -75,7 +75,7 @@ fn a_sign_in_authors_what_was_pending_as_the_login() {
     n.settle().unwrap();
     n.converged().unwrap();
     assert!(n.refused.is_empty(), "{:?}", n.refused);
-    let e = &n.hub.log.log.entries[0].entry;
+    let e = &n.hub.log.log().entries()[0].entry;
     assert_eq!(
         (e.actor.as_str(), e.session.as_str(), e.id, &e.roles),
         ("alice", "alice-session", EntryId::of(Origin::named("anon"), 1), &alice.roles)
@@ -164,8 +164,8 @@ fn the_room_comes_and_goes_and_the_pointer_is_relayed() {
         .live
         .as_ref()
         .unwrap()
-        .log
-        .entries
+        .log()
+        .entries()
         .iter()
         .filter(|l| l.entry.func == r.get("room.point"))
         .count();

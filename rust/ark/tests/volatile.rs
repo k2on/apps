@@ -185,5 +185,5 @@ fn a_volatile_push_overtaken_is_refused() {
         }
     }
     assert!(live.pending.is_empty(), "both answered");
-    assert_eq!(server.log.head().0, 1, "only the later one taken");
+    assert_eq!(server.log().head().0, 1, "only the later one taken");
 }
