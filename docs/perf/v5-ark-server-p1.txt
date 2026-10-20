@@ -1,0 +1,127 @@
+    Finished `release` profile [optimized] target(s) in 0.21s
+     Running tests/perf.rs (target/release/deps/perf-e0f8de39b333ed4b)
+
+running 11 tests
+test perf_b_round_trip ... 
+== (b) Peer::mutate + pump until confirmed, against the in-process hub
+path                                                   n      total    mean µs   first100    last100     l/f
+   v5: Client::mutate + Client::pump through its Link (frames sent from this thread; the link thread receives);
+   v5: `no link thread` is the same over the in-process Conn, sent and received here
+one playlist, no log file: round trip                500     120.1ms     240.21     190.38     361.54    1.90
+  … Peer::mutate alone                               500      24.7ms      49.35      37.67      67.37    1.79
+  … round trip, no link thread                       500     128.4ms     256.74     330.57     142.53    0.43
+playlists of 10, no log file: round trip             500      97.4ms     194.74     181.22     166.99    0.92
+  … Peer::mutate alone                               500      21.3ms      42.62      34.75      36.17    1.04
+  … round trip, no link thread                       500      76.6ms     153.24     157.56     151.97    0.96
+one playlist, no log file: round trip               2000     338.8ms     169.38     155.01     187.18    1.21
+  … Peer::mutate alone                              2000      71.1ms      35.57      34.99      37.66    1.08
+  … round trip, no link thread                      2000     308.8ms     154.42     166.70     173.25    1.04
+playlists of 10, no log file: round trip            2000     364.3ms     182.15     166.59     161.90    0.97
+  … Peer::mutate alone                              2000      81.9ms      40.97      36.14      38.10    1.05
+  … round trip, no link thread                      2000     336.6ms     168.30     153.92     200.57    1.30
+one playlist, log on disk: round trip                500     256.2ms     512.34     511.39     572.09    1.12
+  … Peer::mutate alone                               500      24.0ms      48.04      50.99      56.77    1.11
+  … round trip, no link thread                       500     419.5ms     839.05     616.38     561.02    0.91
+playlists of 10, log on disk: round trip             500     280.0ms     559.98     602.97     545.02    0.90
+  … Peer::mutate alone                               500      26.4ms      52.77      45.99      54.40    1.18
+  … round trip, no link thread                       500     249.0ms     498.09     523.45     464.53    0.89
+one playlist, log on disk: round trip               2000     974.9ms     487.43     502.56     590.51    1.17
+  … Peer::mutate alone                              2000      85.8ms      42.90      41.74      50.50    1.21
+  … round trip, no link thread                      2000    1089.6ms     544.79     468.51     494.52    1.06
+playlists of 10, log on disk: round trip            2000     979.6ms     489.80     541.85     419.62    0.77
+  … Peer::mutate alone                              2000     104.6ms      52.29      56.35      44.47    0.79
+  … round trip, no link thread                      2000    1147.9ms     573.97     511.25     613.33    1.20
+ok
+test perf_b_watcher ... 
+== (b) a second peer receiving the first's entries as they land
+path                                                   n      total    mean µs   first100    last100     l/f
+watcher, playlists of 10, nothing pending            500       8.2ms      16.49      25.21      14.15    0.56
+watcher, playlists of 10, nothing pending           2000      31.2ms      15.61      15.42      16.53    1.07
+ok
+test perf_c_offline_pending ... 
+== (c) offline: mutate with N pending (one pending page per mutate)
+path                                                   n      total    mean µs   first100    last100     l/f
+   v5: the `pending` journal: a record appended per mutate (its one entry), written whole when it holds twice what is pending
+playlists of 10, Memory: mutate                      500       6.6ms      13.22      17.56      12.53    0.71
+playlists of 10, Dir: mutate (pending 76103 B)       500     146.3ms     292.55     264.61     400.56    1.51
+playlists of 10, Memory: mutate                     2000      29.9ms      14.97      10.90      16.63    1.53
+playlists of 10, Dir: mutate (pending 305796 B)     2000     547.2ms     273.60     270.38     273.30    1.01
+playlists of 10, Memory: mutate                     8000     223.6ms      27.95      11.29      39.37    3.49
+playlists of 10, Dir: mutate (pending 1226660 B)    8000    2492.1ms     311.51     284.08     289.94    1.02
+ok
+test perf_c_pump_alone ... 
+== (c) a peer alone: mutate, then pump (persist), per mutation
+path                                                   n      total    mean µs   first100    last100     l/f
+   v5: Client::alone, then Client::mutate: the record and the `pending` blob are written in the step itself
+playlists of 10, Memory: mutate                      500       8.6ms      17.26      17.22      15.91    0.92
+playlists of 10, Memory: pump                        500            n/a: persisted inside mutate's step
+playlists of 10, Dir: mutate                         500     121.7ms     243.36     242.84     258.90    1.07
+playlists of 10, Dir: pump                           500            n/a: persisted inside mutate's step
+playlists of 10, Memory: mutate                     2000      35.8ms      17.89      13.67      19.49    1.43
+playlists of 10, Memory: pump                       2000            n/a: persisted inside mutate's step
+playlists of 10, Dir: mutate                        2000     541.6ms     270.81     305.81     294.29    0.96
+playlists of 10, Dir: pump                          2000            n/a: persisted inside mutate's step
+playlists of 10, Memory: mutate                     8000     158.0ms      19.75      14.14      21.92    1.55
+playlists of 10, Memory: pump                       8000            n/a: persisted inside mutate's step
+playlists of 10, Dir: mutate                        8000    2309.9ms     288.74     296.21     296.60    1.00
+playlists of 10, Dir: pump                          8000            n/a: persisted inside mutate's step
+ok
+test perf_d_bytes ... 
+== (d) bytes by component (docs/plan-db.md D7.1), harken's schema, media rows
+variant          rows    live MB     rss MB   live B/row    rss B/row    component
+rows            10000        1.6        2.0          168          211     168 the rows
+bare            10000        2.3        3.4          238          360      70 primary map
+secondaries     10000        4.0        5.3          424          557     185 secondaries
+text            10000            n/a: v5 has no text indexes (search scans)
+rows           100000       16.0       17.8          168          187     168 the rows
+bare           100000       22.9       28.0          240          293      72 primary map
+secondaries    100000       40.6       47.4          426          497     186 secondaries
+text           100000            n/a: v5 has no text indexes (search scans)
+
+open         rows    live MB     rss MB   live B/row    rss B/row
+store       10000        4.0        7.0          419          734
+client      10000        5.9        7.4          619          776
+store      100000       40.6       62.8          426          659
+client     100000       58.3       67.2          611          705
+ok
+test perf_d_bytes_child ... ok
+test perf_d_frame ... 
+== (d) a snapshot frame decoded and adopted (docs/plan-db.md D7.4), harken's schema, media rows
+way          rows  frame MB        ms     high MB    held MB    rss MB     high B/row
+tree        10000           n/a: v5 decodes a frame one way
+read        10000       1.6        52        11.0        4.4       6.8           1156
+tree       100000           n/a: v5 decodes a frame one way
+read       100000      15.7       497       106.1       43.3      67.0           1112
+ok
+test perf_d_frame_child ... ok
+test perf_d_open ... 
+== (d) open time and resident memory (docs/plan-db.md D5), harken's schema, media rows
+   v5: harken's media table (key id; indexes file, pos) as a schema of its own; v4's opened harken.ark whole
+what         rows   on disk    open ms    rss MB   base MB   live MB   split (ms)
+store       10000     1.6MB         35      10.9       3.8       4.0   snapshot read 5
+client      10000     1.6MB         40      11.1       3.6       5.9   snapshot read 5
+server      10000     1.8MB         49      15.4       3.8       6.3   snapshot read 4, chain 1000 records read 9
+alone       10000     3.4MB        123      18.7       3.7      10.9   chain 10000 records read 51
+store      100000    15.7MB        377      66.4       3.6      40.6   snapshot read 56
+client     100000    15.7MB        469      70.7       3.6      58.3   snapshot read 68
+server     100000    17.6MB        499     102.6       3.6      63.7   snapshot read 41, chain 10000 records read 100
+alone      100000    34.4MB       1321     132.0       3.6     101.1   chain 100000 records read 504
+store      400000    62.7MB       1574     253.4       3.8     162.7   snapshot read 212
+client     400000    62.7MB       1666     323.8       3.8     233.4   snapshot read 268
+server     400000    70.1MB       2374     351.3       3.8     254.9   snapshot read 282, chain 40000 records read 677
+alone      400000   137.6MB       7115     513.5       3.8     404.9   chain 400000 records read 4652
+ok
+test perf_d_open_child ... ok
+test perf_g_hub_fanout ... 
+== (g) fan-out of one pushed entry to C connections, through Hub::frame (v5 only)
+shape                                                  C   frame µs   per conn
+log of 500; 2853 B per push                           10       23.7       2.37
+log of 8000; 2840 B per push                          10       38.8       3.88
+log of 500; 10557 B per push                          40       27.0       0.68
+log of 8000; 10508 B per push                         40       42.4       1.06
+log of 500; 41373 B per push                         160       30.5       0.19
+log of 8000; 41180 B per push                        160       49.3       0.31
+ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 58.81s
+

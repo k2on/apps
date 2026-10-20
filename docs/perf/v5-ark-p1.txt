@@ -1,0 +1,198 @@
+   Compiling ark5 v0.1.0 (/home/user/apps/rust/ark5)
+    Finished `release` profile [optimized] target(s) in 11.70s
+     Running tests/perf.rs (target/release/deps/perf-acebc0ccd4cf87af)
+
+running 8 tests
+test perf_a_mutate_alone ... 
+== (a) Replica::mutate + local_commit (a peer alone, no storage)
+path                                               n      total    mean µs   first100    last100     l/f
+   v5: whole = replica step(Mutate) + authority step(Push) + replica step(Batch, Ack), frames as bytes;
+   v5: `alone` = one Peer in the authority's role (Input::Alone), step(Mutate): v5's peer alone.
+add_to_playlist, one playlist: whole             500      16.8ms      33.50      35.99      32.49    0.90
+  … Replica::mutate (optimistic apply)           500       4.9ms       9.70       9.82       9.43    0.96
+  … local_commit (authority + confirm)           500      11.9ms      23.80      26.16      23.05    0.88
+  … alone: Peer (authority) step(Mutate)         500       7.2ms      14.43      14.83      15.27    1.03
+add_to_playlist, playlists of 10: whole          500      17.8ms      35.53      29.79      36.26    1.22
+  … Replica::mutate (optimistic apply)           500       6.2ms      12.42       9.05      10.27    1.14
+  … local_commit (authority + confirm)           500      11.6ms      23.11      20.74      25.99    1.25
+  … alone: Peer (authority) step(Mutate)         500       7.2ms      14.35      12.82      16.55    1.29
+add_to_playlist, one playlist: whole            2000      65.8ms      32.92      33.82      33.08    0.98
+  … Replica::mutate (optimistic apply)          2000      19.0ms       9.50       9.15       9.61    1.05
+  … local_commit (authority + confirm)          2000      46.8ms      23.42      24.66      23.47    0.95
+  … alone: Peer (authority) step(Mutate)        2000      28.2ms      14.11      13.97      15.38    1.10
+add_to_playlist, playlists of 10: whole         2000      72.0ms      36.00      29.03      37.36    1.29
+  … Replica::mutate (optimistic apply)          2000      22.0ms      10.98       8.68      11.64    1.34
+  … local_commit (authority + confirm)          2000      50.0ms      25.02      20.35      25.72    1.26
+  … alone: Peer (authority) step(Mutate)        2000      30.7ms      15.37      12.89      15.67    1.22
+add_to_playlist, one playlist: whole            8000     280.8ms      35.10      33.82      36.15    1.07
+  … Replica::mutate (optimistic apply)          8000      82.8ms      10.35      10.29      10.75    1.04
+  … local_commit (authority + confirm)          8000     198.0ms      24.75      23.54      25.40    1.08
+  … alone: Peer (authority) step(Mutate)        8000     122.4ms      15.30      13.33      15.44    1.16
+add_to_playlist, playlists of 10: whole         8000     312.0ms      39.00      28.69      47.85    1.67
+  … Replica::mutate (optimistic apply)          8000      97.6ms      12.20       8.37      15.40    1.84
+  … local_commit (authority + confirm)          8000     214.4ms      26.80      20.32      32.46    1.60
+  … alone: Peer (authority) step(Mutate)        8000     137.7ms      17.21      13.09      17.04    1.30
+
+== (a) Replica::mutate offline (pending grows, nothing confirmed)
+path                                               n      total    mean µs   first100    last100     l/f
+add_to_playlist, one playlist, all pending       500       4.4ms       8.86       9.36       8.46    0.90
+add_to_playlist, one playlist, all pending      2000      20.3ms      10.14       8.58       8.31    0.97
+add_to_playlist, one playlist, all pending      8000      76.7ms       9.59       8.61      12.11    1.41
+ok
+test perf_d_initial_sync ... 
+== (d) initial sync: Replica::receive_batch, pages of BATCH_LIMIT
+path                                               n      total    mean µs   first100    last100     l/f
+   v5: Replica.step(Batch frame of 256): decode, apply facts, check each entry's state hash, link the chain
+receive by intent (native)                       510            n/a: a confirmed entry is applied by its facts (§1.6); no code runs
+receive by intent (interpreted)                  510            n/a: as above
+receive intent + facts, compared                 510            n/a: as above; the facts are checked by the state hash, below
+receive by facts alone                           510       4.2ms       8.33 first page 8.21 µs/entry, last page 8.38 µs/entry; 248.0 B/entry on the wire
+receive by intent (native)                      2010            n/a: a confirmed entry is applied by its facts (§1.6); no code runs
+receive by intent (interpreted)                 2010            n/a: as above
+receive intent + facts, compared                2010            n/a: as above; the facts are checked by the state hash, below
+receive by facts alone                          2010      18.9ms       9.39 first page 8.74 µs/entry, last page 8.97 µs/entry; 249.7 B/entry on the wire
+receive by intent (native)                      8010            n/a: a confirmed entry is applied by its facts (§1.6); no code runs
+receive by intent (interpreted)                 8010            n/a: as above
+receive intent + facts, compared                8010            n/a: as above; the facts are checked by the state hash, below
+receive by facts alone                          8010      77.5ms       9.67 first page 9.40 µs/entry, last page 9.36 µs/entry; 250.0 B/entry on the wire
+
+== (d) initial sync: the server paging a connection from 0 (Hello, Batch, Hello …)
+path                                               n      total    mean µs   first100    last100     l/f
+   v5: one Hello at 0 is answered with every page at once (Peer::serve); there is no Hello per page
+Server: page a fresh connection to the head      510       0.4ms       0.82 2 pages in one step; 126501 B, 248.0 B/entry
+Server: page a fresh connection to the head     2010       1.8ms       0.89 8 pages in one step; 501875 B, 249.7 B/entry
+Server: page a fresh connection to the head     8010       6.2ms       0.77 32 pages in one step; 2002204 B, 250.0 B/entry
+
+== (d) Log::entries_after(cursor, BATCH_LIMIT): one page
+path                                               n      total    mean µs   first100    last100     l/f
+   v5: Log::after(cursor) is a slice; the page is its first PAGE entries cloned
+entries_after(0) of 500                            1       0.1ms      89.94 
+entries_after(250) of 500                          1       0.1ms      84.39 
+entries_after(500) of 500                          1       0.0ms       2.67 
+entries_after(0) of 2000                           1       0.1ms     103.30 
+entries_after(1000) of 2000                        1       0.1ms      90.12 
+entries_after(2000) of 2000                        1       0.0ms       2.88 
+entries_after(0) of 8000                           1       0.1ms      83.46 
+entries_after(4000) of 8000                        1       0.1ms      83.85 
+entries_after(8000) of 8000                        1       0.0ms       2.59 
+ok
+test perf_e_rebase ... 
+== (e) rebase: K pending, M landing, over S confirmed rows
+path                                               n      total    mean µs   first100    last100     l/f
+shape                                              S  per entry   per page
+K=10 M=256: one entry at a time, a pump each     500    102.3µs     26.2ms
+K=10 M=256: one entry at a time, one pump        500            n/a: every confirmed entry rebases as it is applied; no settle to defer
+K=10 M=256: one page                             500     14.9µs      3.8ms
+K=100 M=256: one entry at a time, a pump each     500    934.0µs    239.1ms
+K=100 M=256: one entry at a time, one pump       500            n/a: every confirmed entry rebases as it is applied; no settle to defer
+K=100 M=256: one page                            500     14.9µs      3.8ms
+K=400 M=256: one entry at a time, a pump each     500   3801.6µs    973.2ms
+K=400 M=256: one entry at a time, one pump       500            n/a: every confirmed entry rebases as it is applied; no settle to defer
+K=400 M=256: one page                            500     30.2µs      7.7ms
+  … MemoryStore::clone of the confirmed store     500     72.8µs
+ack K=100 own pending, one at a time             500     26.4µs      2.6ms
+ack K=1000 own pending, one at a time            500    207.5µs    207.5ms
+K=10 M=256: one entry at a time, a pump each    2000    103.9µs     26.6ms
+K=10 M=256: one entry at a time, one pump       2000            n/a: every confirmed entry rebases as it is applied; no settle to defer
+K=10 M=256: one page                            2000     11.2µs      2.9ms
+K=100 M=256: one entry at a time, a pump each    2000   1022.0µs    261.6ms
+K=100 M=256: one entry at a time, one pump      2000            n/a: every confirmed entry rebases as it is applied; no settle to defer
+K=100 M=256: one page                           2000     13.8µs      3.5ms
+K=400 M=256: one entry at a time, a pump each    2000   3661.4µs    937.3ms
+K=400 M=256: one entry at a time, one pump      2000            n/a: every confirmed entry rebases as it is applied; no settle to defer
+K=400 M=256: one page                           2000     32.5µs      8.3ms
+  … MemoryStore::clone of the confirmed store    2000    578.4µs
+ack K=100 own pending, one at a time            2000     50.5µs      5.1ms
+ack K=1000 own pending, one at a time           2000    228.5µs    228.5ms
+K=10 M=256: one entry at a time, a pump each    8000    113.4µs     29.0ms
+K=10 M=256: one entry at a time, one pump       8000            n/a: every confirmed entry rebases as it is applied; no settle to defer
+K=10 M=256: one page                            8000     17.0µs      4.3ms
+K=100 M=256: one entry at a time, a pump each    8000    943.7µs    241.6ms
+K=100 M=256: one entry at a time, one pump      8000            n/a: every confirmed entry rebases as it is applied; no settle to defer
+K=100 M=256: one page                           8000     15.5µs      4.0ms
+K=400 M=256: one entry at a time, a pump each    8000   4104.8µs   1050.8ms
+K=400 M=256: one entry at a time, one pump      8000            n/a: every confirmed entry rebases as it is applied; no settle to defer
+K=400 M=256: one page                           8000     48.8µs     12.5ms
+  … MemoryStore::clone of the confirmed store    8000   3264.2µs
+ack K=100 own pending, one at a time            8000     41.5µs      4.2ms
+ack K=1000 own pending, one at a time           8000    210.0µs    210.0ms
+ok
+test perf_g_authority_and_fanout ... 
+== (g) Authority::sequence_entry
+path                                               n      total    mean µs   first100    last100     l/f
+   v5: Authority.step(Push frame): decode, judge, run, log, encode Ack and the fan-out Batch
+sequence add_to_playlist, one playlist           500       7.8ms      15.56      14.77      15.94    1.08
+sequence add_to_playlist, playlists of 10        500       7.6ms      15.17      14.19      16.10    1.14
+sequence add_to_playlist, one playlist          2000      31.0ms      15.50      14.39      16.23    1.13
+sequence add_to_playlist, playlists of 10       2000      33.1ms      16.54      13.83      18.05    1.31
+sequence add_to_playlist, one playlist          8000     133.2ms      16.65      15.18      15.53    1.02
+sequence add_to_playlist, playlists of 10       8000     148.6ms      18.57      12.90      23.54    1.83
+
+== (g) fan-out of one pushed entry to C connections (Server::recv + encode)
+path                                               n      total    mean µs   first100    last100     l/f
+   v5: recv = Authority.step(Push), the Batch encoded once inside it; encode = that frame copied to each of C connections
+shape                                              C    recv µs  encode µs   per conn
+log of 500; 2698 B per push                       10       16.6        0.3       1.69
+log of 8000; 2688 B per push                      10       19.9        0.3       2.02
+log of 500; 10707 B per push                      40       21.9        0.7       0.57
+log of 8000; 10665 B per push                     40       17.9        0.7       0.46
+log of 500; 42741 B per push                     160       17.0        2.5       0.12
+log of 8000; 42573 B per push                    160       18.0        2.4       0.13
+
+== (g) Log::state_at(head) — what a Verify costs the server
+path                                               n      total    mean µs   first100    last100     l/f
+state_at + state_hash, log of 500                  1            n/a: no Verify frame: every entry carries its state hash and the chain's (§1.6)
+state_at + state_hash, log of 2000                 1            n/a: no Verify frame: every entry carries its state hash and the chain's (§1.6)
+state_at + state_hash, log of 8000                 1            n/a: no Verify frame: every entry carries its state hash and the chain's (§1.6)
+
+== (g) Server::recv(Verify at the head) — the answer, as served
+path                                               n      total    mean µs   first100    last100     l/f
+   v5: its counterpart: a Hello at the head with the chain's hash there, answered with nothing
+Verify at the head, log of 500                     1       0.0ms      40.90 (a Hello at the head)
+Verify at the head, log of 2000                    1       0.0ms       2.32 (a Hello at the head)
+Verify at the head, log of 8000                    1       0.0ms       2.27 (a Hello at the head)
+ok
+test perf_h_frames ... 
+== (h) a Batch of BATCH_LIMIT entries: canon::encode(to_value) and decode
+path                                               n      total    mean µs   first100    last100     l/f
+   v5: Frame::enc / Frame::dec; a v5 Batch always carries its facts (§1.6)
+frame                                        entries      bytes  encode µs  decode µs  enc. allocs  dec. allocs
+Batch, intents only (Whole)                      256            n/a: a Batch always carries facts (§1.6)
+Batch, with facts (ByFacts)                      256      63523       51.0      236.2           14         2567
+Push of one entry                                  1        120       0.24       0.37                         5
+ok
+test perf_i_partial_fanout ... 
+== (i) fan-out of one pushed entry to C partial connections (Server::recv + encode)
+path                                               n      total    mean µs   first100    last100     l/f
+   v5: recv = Authority.step(Push) including each scoped connection's filter, union, hash, chain and encode; encode = the copies routed
+shape                                              C    recv µs  encode µs   per conn per fact/conn
+partial, log of 500; 2415 B per push              10       90.7        0.3       9.10        18.21
+whole, log of 500; 2719 B per push                10       17.6        0.3       1.79            -
+partial, log of 8000; 2410 B per push             10      110.4        0.3      11.07        22.15
+whole, log of 8000; 2710 B per push               10       18.1        0.3       1.84            -
+partial, log of 500; 9573 B per push              40      312.4        0.9       7.83        15.66
+whole, log of 500; 10791 B per push               40       21.6        0.7       0.56            -
+partial, log of 8000; 9554 B per push             40      356.9        0.9       8.94        17.89
+whole, log of 8000; 10753 B per push              40       18.1        0.7       0.47            -
+partial, log of 500; 38205 B per push            160     1267.1        6.0       7.96        15.91
+whole, log of 500; 43077 B per push              160       23.5        2.6       0.16            -
+partial, log of 8000; 38129 B per push           160     1499.7        9.4       9.43        18.86
+whole, log of 8000; 42925 B per push             160       22.1        2.8       0.16            -
+ok
+test perf_ids_below_the_horizon ... 
+== the ids a log keeps (docs/plan-db.md D6), per id and per million
+   v5: Journal.verdicts (EntryId -> Verdict), what an authority keeps per id; no fold
+   100000 ids: verdicts 62.5 B/id; fold n/a (none); lookup 146 ns
+  1000000 ids: verdicts 62.3 B/id; fold n/a (none); lookup 673 ns
+ok
+test perf_rows_handed_out ... 
+== rows handed out: MemoryStore::scan("item")
+path                                               n      total    mean µs   first100    last100     l/f
+   v5: Store::scan("item", Scan::all()): each row's bytes, copied
+scan of 500 rows                                 500       0.0ms       0.04 (per row)
+scan of 2000 rows                               2000       0.1ms       0.04 (per row)
+scan of 8000 rows                               8000       0.6ms       0.07 (per row)
+ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 15.73s
+

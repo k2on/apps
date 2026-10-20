@@ -1,0 +1,144 @@
+    Finished `release` profile [optimized] target(s) in 0.20s
+     Running tests/perf.rs (target/release/deps/perf-deafb059d1c0aa51)
+
+running 10 tests
+test perf_b_round_trip ... 
+== (b) Peer::mutate + pump until confirmed, against the in-process hub
+path                                                   n      total    mean µs   first100    last100     l/f
+perf: module 3 functions, 3 native, 2 tables
+perf: *** DEV AUTH (trusting): a token is a name, nothing is checked. Never anywhere but a laptop. ***
+perf: keeping the log above every session heard within 30 days, and never fewer than 10000 entries
+perf: the log at seq 0, its horizon at 0
+one playlist, no log file: round trip                500      98.8ms     197.69     188.57     228.12    1.21
+  … Peer::mutate alone                               500      30.5ms      60.95      61.75      59.45    0.96
+perf: module 3 functions, 3 native, 2 tables
+perf: *** DEV AUTH (trusting): a token is a name, nothing is checked. Never anywhere but a laptop. ***
+perf: keeping the log above every session heard within 30 days, and never fewer than 10000 entries
+perf: the log at seq 0, its horizon at 0
+playlists of 10, no log file: round trip             500     100.5ms     201.03     187.36     214.08    1.14
+  … Peer::mutate alone                               500      32.7ms      65.34      57.99      67.13    1.16
+perf: module 3 functions, 3 native, 2 tables
+perf: *** DEV AUTH (trusting): a token is a name, nothing is checked. Never anywhere but a laptop. ***
+perf: keeping the log above every session heard within 30 days, and never fewer than 10000 entries
+perf: the log at seq 0, its horizon at 0
+one playlist, no log file: round trip               2000     443.6ms     221.78     203.17     209.00    1.03
+  … Peer::mutate alone                              2000     130.3ms      65.16      61.62      61.33    1.00
+perf: module 3 functions, 3 native, 2 tables
+perf: *** DEV AUTH (trusting): a token is a name, nothing is checked. Never anywhere but a laptop. ***
+perf: keeping the log above every session heard within 30 days, and never fewer than 10000 entries
+perf: the log at seq 0, its horizon at 0
+playlists of 10, no log file: round trip            2000     430.2ms     215.11     166.83     266.18    1.60
+  … Peer::mutate alone                              2000     126.5ms      63.27      56.70      68.46    1.21
+perf: module 3 functions, 3 native, 2 tables
+perf: *** DEV AUTH (trusting): a token is a name, nothing is checked. Never anywhere but a laptop. ***
+perf: keeping the log above every session heard within 30 days, and never fewer than 10000 entries
+perf: the log at seq 0, its horizon at 0
+one playlist, log on disk: round trip                500     261.5ms     522.99     546.59     565.72    1.04
+  … Peer::mutate alone                               500      29.8ms      59.68      58.51      62.61    1.07
+perf: module 3 functions, 3 native, 2 tables
+perf: *** DEV AUTH (trusting): a token is a name, nothing is checked. Never anywhere but a laptop. ***
+perf: keeping the log above every session heard within 30 days, and never fewer than 10000 entries
+perf: the log at seq 0, its horizon at 0
+playlists of 10, log on disk: round trip             500     294.6ms     589.16     622.51     584.37    0.94
+  … Peer::mutate alone                               500      31.4ms      62.70      62.66      61.71    0.98
+perf: module 3 functions, 3 native, 2 tables
+perf: *** DEV AUTH (trusting): a token is a name, nothing is checked. Never anywhere but a laptop. ***
+perf: keeping the log above every session heard within 30 days, and never fewer than 10000 entries
+perf: the log at seq 0, its horizon at 0
+one playlist, log on disk: round trip               2000     913.4ms     456.70     473.85     429.45    0.91
+  … Peer::mutate alone                              2000     118.4ms      59.21      69.33      58.65    0.85
+perf: module 3 functions, 3 native, 2 tables
+perf: *** DEV AUTH (trusting): a token is a name, nothing is checked. Never anywhere but a laptop. ***
+perf: keeping the log above every session heard within 30 days, and never fewer than 10000 entries
+perf: the log at seq 0, its horizon at 0
+playlists of 10, log on disk: round trip            2000    1149.7ms     574.87     938.21     586.69    0.63
+  … Peer::mutate alone                              2000     137.6ms      68.78      59.72      76.00    1.27
+ok
+test perf_b_watcher ... 
+== (b) a second peer receiving the first's entries as they land
+path                                                   n      total    mean µs   first100    last100     l/f
+perf: module 3 functions, 3 native, 2 tables
+perf: *** DEV AUTH (trusting): a token is a name, nothing is checked. Never anywhere but a laptop. ***
+perf: keeping the log above every session heard within 30 days, and never fewer than 10000 entries
+perf: the log at seq 0, its horizon at 0
+watcher, playlists of 10, nothing pending            500      45.2ms      90.49      89.38      86.85    0.97
+perf: module 3 functions, 3 native, 2 tables
+perf: *** DEV AUTH (trusting): a token is a name, nothing is checked. Never anywhere but a laptop. ***
+perf: keeping the log above every session heard within 30 days, and never fewer than 10000 entries
+perf: the log at seq 0, its horizon at 0
+watcher, playlists of 10, nothing pending           2000     172.1ms      86.06      91.55      78.12    0.85
+ok
+test perf_c_offline_pending ... 
+== (c) offline: mutate with N pending (one pending page per mutate)
+path                                                   n      total    mean µs   first100    last100     l/f
+playlists of 10, Memory: mutate                      500      10.4ms      20.75      20.90      21.29    1.02
+playlists of 10, Dir: mutate (pending 94565 B)       500     432.6ms     865.20     840.99     809.12    0.96
+playlists of 10, Memory: mutate                     2000      52.6ms      26.28      31.62      22.02    0.70
+playlists of 10, Dir: mutate (pending 379515 B)     2000    1561.2ms     780.61     976.70     723.83    0.74
+playlists of 10, Memory: mutate                     8000     250.1ms      31.26      20.28      37.50    1.85
+playlists of 10, Dir: mutate (pending 1521315 B)    8000    6648.2ms     831.02     853.91     935.23    1.10
+ok
+test perf_c_pump_alone ... 
+== (c) a peer alone: mutate, then pump (persist), per mutation
+path                                                   n      total    mean µs   first100    last100     l/f
+playlists of 10, Memory: mutate                      500      19.2ms      38.41      36.04      40.46    1.12
+playlists of 10, Memory: pump                        500       3.7ms       7.31       6.18       9.87    1.60
+playlists of 10, Dir: mutate                         500     928.5ms    1856.98    1639.36    2443.25    1.49
+playlists of 10, Dir: pump                           500     442.5ms     885.07     723.29    1307.69    1.81
+playlists of 10, Memory: mutate                     2000      79.0ms      39.51      34.43      43.24    1.26
+playlists of 10, Memory: pump                       2000      14.9ms       7.47       6.76       4.46    0.66
+playlists of 10, Dir: mutate                        2000    5162.0ms    2580.98    2738.83    2282.53    0.83
+playlists of 10, Dir: pump                          2000    2407.9ms    1203.94    1232.77     957.82    0.78
+playlists of 10, Memory: mutate                     8000     393.8ms      49.22      35.07      48.96    1.40
+playlists of 10, Memory: pump                       8000      73.0ms       9.12       4.37       4.27    0.98
+playlists of 10, Dir: mutate                        8000   20346.6ms    2543.32    2731.08    2253.38    0.83
+playlists of 10, Dir: pump                          8000    9254.8ms    1156.84    1133.38     907.70    0.80
+ok
+test perf_d_bytes ... 
+== (d) bytes by component (docs/plan-db.md D7.1), harken's schema, media rows
+variant          rows    live MB     rss MB   live B/row    rss B/row    component
+rows            10000        2.9        0.1          305            8     305 the rows
+bare            10000        4.3        0.1          453           13     148 primary map
+secondaries     10000        7.0        0.1          732            7     278 secondaries
+text            10000        8.0        0.3          834           33     102 text indexes
+rows           100000       29.3       32.2          307          338     307 the rows
+bare           100000       42.6       44.2          447          464     139 primary map
+secondaries    100000       69.3       77.0          726          807     280 secondaries
+text           100000       77.8       84.4          816          885      90 text indexes
+
+open         rows    live MB     rss MB   live B/row    rss B/row
+store       10000        8.0        1.3          839          136
+client      10000        8.6        6.7          902          703
+store      100000       77.8       84.3          816          884
+client     100000       78.4       91.3          822          957
+ok
+test perf_d_bytes_child ... ok
+test perf_d_frame ... 
+== (d) a snapshot frame decoded and adopted (docs/plan-db.md D7.4), harken's schema, media rows
+way          rows  frame MB        ms     high MB    held MB    rss MB     high B/row
+tree        10000       1.5       135        15.2        7.9      13.7           1589
+read        10000       1.5        84         8.6        7.9       2.7            897
+tree       100000      14.9      1438       147.0       77.8     199.1           1542
+read       100000      14.9      1085        80.8       77.8      85.8            847
+ok
+test perf_d_frame_child ... ok
+test perf_d_open ... 
+== (d) open time and resident memory (docs/plan-db.md D5), harken's schema, media rows
+what         rows   on disk    open ms    rss MB   base MB   live MB   split (ms)
+store       10000     1.5MB         80      19.8      18.5       8.0   read 80
+client      10000     1.5MB        113      25.3      18.6       8.6   read 77 (read whole 78), replica open 2, the rest 33
+server      10000     2.0MB        112      28.0      18.6      15.8   read 76, hash 0.0, journal 1000 records 6, state at head 18
+alone       10000     5.7MB        169      25.3      18.6       9.6   read 83 (read whole 86), replica open 2, history 10000 records 80, the rest 1
+store      100000    14.9MB       1063     103.0      18.6      77.8   read 939
+client     100000    14.9MB       1138     109.8      18.5      78.4   read 958 (read whole 919), replica open 2, the rest 218
+server     100000    20.4MB       1335     186.7      18.5     151.1   read 874, hash 0.1, journal 10000 records 64, state at head 202
+alone      100000    57.7MB       1712     109.9      18.6      83.7   read 1079 (read whole 1020), replica open 3, history 100000 records 684, the rest 5
+store      400000    61.0MB       8657     385.3      18.5     313.9   read 4514
+client     400000    61.0MB       5628     392.1      18.5     314.5   read 4505 (read whole 4520), replica open 3, the rest 1104
+server     400000    83.7MB      11442     717.0      18.6     606.2   read 4205, hash 0.1, journal 40000 records 251, state at head 1502
+alone      400000   235.1MB      10348     406.1      18.6     333.8   read 4320 (read whole 4402), replica open 3, history 400000 records 3066, the rest 2877
+ok
+test perf_d_open_child ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 227.09s
+

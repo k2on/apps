@@ -1,0 +1,20 @@
+    Finished `release` profile [optimized] target(s) in 0.14s
+     Running tests/perf.rs (target/release/deps/perf-acebc0ccd4cf87af)
+
+running 1 test
+test perf_views ... 
+== views: one change against a maintained view (View::push), the store already moved
+query                       rows   hydrate ms      push µs     gets     rows
+playlist-with-items         1000         3.32        10.11        0        3
+top-two-by-pos              1000         5.17         4.50        0        0
+group-source                1000         1.47         9.93        0        0
+playlist-with-items         4000        21.33        10.78        0        3
+top-two-by-pos              4000        25.05         4.94        0        0
+group-source                4000        10.02         6.85        0        0
+playlist-with-items        16000        62.27        10.57        0        3
+top-two-by-pos             16000       102.41         4.50        0        0
+group-source               16000        25.39         6.32        0        0
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.99s
+
