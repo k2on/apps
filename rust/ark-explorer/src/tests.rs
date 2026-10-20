@@ -702,8 +702,8 @@ fn a_long_value_never_exceeds_its_column() {
 /// A table sorts by any column — `s` on the cursor's, or a click on a
 /// heading — up, then down, the heading saying which; and what the cursor
 /// edits or deletes is the row drawn under it, sorted. Falsified by
-/// leaving the sort out of `Explorer::rows`: the first row drawn was still
-/// ann, and the edit went to her.
+/// leaving the sort out of `Explorer::rows`: sorted down, the rows were
+/// still ann, bob, cat.
 #[test]
 fn a_table_sorts_by_a_column_and_edits_the_row_drawn() {
     let st = store();
@@ -852,7 +852,8 @@ fn every_query_and_mutation_is_listed_by_router() {
 /// text, an int (a word refused), a bool, an enum, an option (none and
 /// some), a list, a record, an id (pasted with dashes, or refused), bytes, a
 /// sum with fields; and every value's text reads back as itself. Falsified
-/// by splitting a list at every comma: the record inside it was cut in two.
+/// by splitting a list at every comma: the records inside `tags` were cut
+/// in two, and the form did not read.
 #[test]
 fn every_type_reads_from_its_text() {
     let fs = |pairs: &[(&str, Ty)]| Ty::Struct(pairs.iter().map(|(k, t)| (k.to_string(), t.clone())).collect());
