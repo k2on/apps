@@ -807,6 +807,22 @@ linked round trip 182.2 µs (was 5,520.1; v4 215.1). Source +186 lines.
 
 ## Landed
 
+**A4** (`dc97b35`…): **the domain is written in ArkLang; the builders go.**
+`harken/domain` is eleven hand-written files, 1,834 lines of ArkLang (311
+more of comments) against the builders' 3,149 of Rust; all 127 functions
+hold their pre-A3 pins with names set aside (`port.rs`: none moved), and
+every file is its forms printed (`text.rs`). A function keeps its binders'
+names (`Function::names`), so renaming a local is a new hash. Added: `(??
+o.f d)`, `(?. o f)`, `(as (row t) (record …))`, a `map`'s lambda wanting its
+element, the Lisp layout, `build_dir`/`load`, `arkc` (74 lines). `ark::gen`
+(395 lines: the generator about 190, `Id`, `Call`, `fits` and the prefix
+reading the rest) writes types and stubs; both apps generate theirs in
+`build.rs`. Deleted: `ark::author`, four derives, harken's domain Rust:
+`ark` 9,766→9,487, `ark-macros` 453→74, `harken/domain` 3,149→237.
+`sexp.rs` is 1,629 lines, not ≤900: the declarations' spelling holds the
+pins. Every vector family but `hash/` re-derived (hashes: the names field),
+every state and answer held; fuzz 1,000 sessions, 0 failed.
+
 **K3c** (`0918028`…`acf0447`). **A fresh read keeps nothing**: `view.rs`
 defines each operator once (`each`, `order`, `count`, `tally`/`aggregate`,
 `join_key`/`joined`); a view's nodes run them over deltas, a fresh read
