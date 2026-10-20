@@ -264,7 +264,7 @@ fn input_(input: &DeriveInput) -> syn::Result<TokenStream> {
             let (ty, rules) = (&f.ty, rules(&ark(&input.attrs)?));
             let decls = quote! {
                 #guard
-                ::ark::author::decl(#label, <#ty as ::ark::author::Shape>::ty(), vec![#(#rules),*], d);
+                ::ark::author::decl(#label, <#ty as ::ark::author::Shape>::ty(), vec![#(#rules),*], &[], d);
                 <#ty as ::ark::author::Shape>::decls(d);
             };
             let named = quote!(::ark::ty::Ty::Named(#label.into()));
@@ -283,14 +283,15 @@ fn input_(input: &DeriveInput) -> syn::Result<TokenStream> {
             true => tys.push(quote!(<#ty as ::ark::author::Shape>::ty())),
             false => {
                 let n = format!("{label}.{f}");
-                decls.push(quote!(::ark::author::decl(#n, <#ty as ::ark::author::Shape>::ty(), vec![#(#r),*], d);));
+                decls.push(quote!(::ark::author::decl(#n, <#ty as ::ark::author::Shape>::ty(), vec![#(#r),*], &[], d);));
                 tys.push(quote!(::ark::ty::Ty::Named(#n.into())));
             }
         }
     }
+    let names: Vec<String> = fields.iter().map(|f| f.0.to_string()).collect();
     let decls = quote! {
         #guard
-        ::ark::author::decl(#label, ::ark::ty::Ty::Tuple(vec![#(#tys),*]), vec![], d);
+        ::ark::author::decl(#label, ::ark::ty::Ty::Tuple(vec![#(#tys),*]), vec![], &[#(#names),*], d);
         #(#decls)*
     };
     let shape = shape(name, quote!(#name), quote!(::ark::ty::Ty::Named(#label.into())), decls, label);
@@ -309,8 +310,17 @@ fn sum_(input: &DeriveInput) -> syn::Result<TokenStream> {
     };
     let label = name.to_string();
     let ex = format_ident!("{}Ex", name);
-    let (mut vtys, mut decls, mut makes, mut ons, mut arms) = (vec![], vec![], vec![], vec![], vec![]);
+    let (mut vtys, mut decls, mut makes, mut ons, mut arms, mut names) = (vec![], vec![], vec![], vec![], vec![], vec![]);
     for (i, v) in e.variants.iter().enumerate() {
+        // A variant's name, then its fields': a tuple variant's one field
+        // is named as the variant in snake case, several also by position.
+        let one = snake(&v.ident.to_string());
+        names.push(v.ident.to_string());
+        names.extend(v.fields.iter().enumerate().map(|(k, f)| match &f.ident {
+            Some(n) => n.to_string(),
+            None if v.fields.len() == 1 => one.clone(),
+            None => format!("{one}{k}"),
+        }));
         let (i, n) = (i as u8, v.fields.len() as u32);
         let tys: Vec<_> = v.fields.iter().map(|f| &f.ty).collect();
         let exs: Vec<_> = tys
@@ -333,7 +343,7 @@ fn sum_(input: &DeriveInput) -> syn::Result<TokenStream> {
     }
     let decls = quote! {
         if d.contains_key(#label) { return; }
-        ::ark::author::decl(#label, ::ark::ty::Ty::Sum(vec![#(#vtys),*]), vec![], d);
+        ::ark::author::decl(#label, ::ark::ty::Ty::Sum(vec![#(#vtys),*]), vec![], &[#(#names),*], d);
         #(#decls)*
     };
     let shape = shape(name, quote!(#name), quote!(::ark::ty::Ty::Named(#label.into())), decls, label);

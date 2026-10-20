@@ -206,6 +206,7 @@ pub fn decl(ty: Ty, rules: &[(Rule, Option<&str>)]) -> Decl {
                 why: why.map(Into::into),
             })
             .collect(),
+        names: vec![],
     }
 }
 

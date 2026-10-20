@@ -465,11 +465,29 @@ impl Cx<'_> {
                 _ => {}
             }
         }
+        let distinct = |ns: Vec<&String>| ns.iter().enumerate().all(|(i, n)| !n.is_empty() && !ns[..i].contains(n));
+        let named = d.names.is_empty()
+            || match &d.ty {
+                Ty::Tuple(ts) => ts.len() == d.names.len() && distinct(d.names.iter().collect()),
+                Ty::Sum(vs) if vs.iter().map(|v| v.len() + 1).sum::<usize>() == d.names.len() => {
+                    let (mut at, mut variants) = (0, vec![]);
+                    vs.iter().all(|v| {
+                        variants.push(&d.names[at]);
+                        at += v.len() + 1;
+                        distinct(d.names[at - v.len()..at].iter().collect())
+                    }) && distinct(variants)
+                }
+                _ => false,
+            };
+        want(named, || {
+            format!("{n}: its names are not one to each field or variant and its fields, each distinct")
+        })?;
         let s = self.types.structure(&d.ty);
         for (i, r) in d.refine.iter().enumerate() {
             let before = Decl {
                 ty: d.ty.clone(),
                 refine: d.refine[..i].to_vec(),
+                names: vec![],
             };
             let ok = match &r.rule {
                 Rule::Utf8 => s == Ty::Bytes,

@@ -164,6 +164,7 @@ impl<R: Row> Shape for Id<R> {
             Decl {
                 ty: Ty::Bytes,
                 refine: vec![len],
+                names: vec![],
             },
         );
     }
@@ -184,6 +185,7 @@ impl<T: Shape> Shape for Option<T> {
             Decl {
                 ty: Ty::option(T::ty()),
                 refine: vec![],
+                names: vec![],
             },
         );
         T::decls(d)
@@ -229,8 +231,9 @@ pub fn column_ty<T: Shape>() -> (String, Ty, Ty) {
     (T::name(), structure, row)
 }
 
-/// A declaration of a record's fields, or of a refinement of one type.
-pub fn decl(name: &str, ty: Ty, refine: Vec<(Rule, Option<&str>)>, d: &mut Decls) {
+/// A declaration of a record's fields or a sum's variants, by their
+/// names ([`Decl::names`]), or of a refinement of one type.
+pub fn decl(name: &str, ty: Ty, refine: Vec<(Rule, Option<&str>)>, names: &[&str], d: &mut Decls) {
     let refine = refine
         .into_iter()
         .map(|(rule, why)| Refine {
@@ -238,7 +241,8 @@ pub fn decl(name: &str, ty: Ty, refine: Vec<(Rule, Option<&str>)>, d: &mut Decls
             why: why.map(Into::into),
         })
         .collect();
-    d.insert(name.into(), Decl { ty, refine });
+    let names = names.iter().map(|n| n.to_string()).collect();
+    d.insert(name.into(), Decl { ty, refine, names });
 }
 
 /// A refinement of an `Int`: from `lo` to `hi`, both included.

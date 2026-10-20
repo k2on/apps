@@ -184,10 +184,12 @@ fn auto(name: &str, d: &Ty, rows: &[(String, Ty)]) -> Option<Decl> {
                 rule: Rule::Len(16),
                 why: None,
             }],
+            names: vec![],
         }),
         Some(t) if name == format!("Option<{}>", spell_in(&t, rows)) => Some(Decl {
             ty: d.clone(),
             refine: vec![],
+            names: vec![],
         }),
         _ => None,
     }
@@ -1414,7 +1416,7 @@ pub fn build(src: &str) -> R<Domain> {
                 refine.push(p.rule(&ty)?);
             }
         }
-        m.decls.insert(n, Decl { ty, refine });
+        m.decls.insert(n, Decl { ty, refine, names: vec![] });
     }
     // The columns' structures, under every declaration.
     let mut tys = vec![];
@@ -1933,6 +1935,7 @@ pub fn print(m: &Module, functions: &[Function]) -> R<String> {
             decls.entry(c.decl.clone()).or_insert_with(|| Decl {
                 ty: c.ty.clone(),
                 refine: vec![],
+                names: vec![],
             });
         }
     }

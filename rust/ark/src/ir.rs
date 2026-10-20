@@ -372,11 +372,16 @@ pub struct Refine {
     pub why: Option<String>,
 }
 
-/// A declared type: a structure, and the refinements on it.
+/// A declared type: a structure, the refinements on it, and its names —
+/// a record's fields in order, or a sum's variants each followed by its
+/// fields' (`[Paused, at_ms, Playing, at_ms, since]`) — so a printer
+/// names what the bytes otherwise hold by position (§1.15). A tuple or a
+/// sum without names, or any other structure, has none.
 #[derive(Clone, Debug, PartialEq, Eq, Node)]
 pub struct Decl {
     pub ty: Ty,
     pub refine: Vec<Refine>,
+    pub names: Vec<String>,
 }
 
 /// A function: the declarations it names, sorted by name; its parameters,
@@ -404,5 +409,6 @@ pub fn text_decl() -> Decl {
     Decl {
         ty: Ty::Bytes,
         refine: vec![Refine { rule: Rule::Utf8, why: None }],
+        names: vec![],
     }
 }

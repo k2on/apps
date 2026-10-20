@@ -107,7 +107,14 @@ fn the_derive() {
     }
     assert_eq!(Function::from_bytes(&f.to_bytes()), Ok(f.clone()));
     // A Ty's bytes under the declaration `Ty = …`, Named("Ty") recurring.
-    let cx = Types::new(&[("Ty".into(), Decl { ty: t, refine: vec![] })]);
+    let cx = Types::new(&[(
+        "Ty".into(),
+        Decl {
+            ty: t,
+            refine: vec![],
+            names: vec![],
+        },
+    )]);
     let value = Ty::list(Ty::Tuple(vec![Ty::Int, Ty::option(Ty::Bytes)]));
     assert!(decode(&cx, &ty(), &value.to_bytes()).is_ok());
     assert_eq!(parse(&cx, &ty(), &value.to_bytes()).unwrap().bytes(), &value.to_bytes()[..]);

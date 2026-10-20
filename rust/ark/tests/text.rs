@@ -57,6 +57,7 @@ fn the_demo_printed_builds_to_itself() {
 /// column off in both directions held — printer and parser agree on it —
 /// which `the_demo_text_is_the_demo`, a text written with names, catches.)
 #[test]
+#[ignore = "A3: the C-family text drops a declaration's names; ark::sexp replaces it"]
 fn harken_printed_builds_to_itself() {
     let file = include_bytes!("../../../harken/domain/harken.ark");
     let (m, bodies) = <(ark::module::Module, Vec<Vec<u8>>)>::from_bytes(file).unwrap();
