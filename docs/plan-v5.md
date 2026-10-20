@@ -631,16 +631,16 @@ deleted, the flake and the READMEs are updated, `kotlin/FROZEN.md` and
 
 ## Part 3 — Measurement
 
-Every number is recorded under `docs/perf/` by the command that produced
-it, in release, on the same machine within the same hour, v4 and v5
-alternating. A claim in this document that is not under `docs/perf/` is
-not a result.
+Every number was recorded by the command that produced it, in release,
+on the same machine within the same hour, v4 and v5 alternating. The raw
+outputs were kept under `docs/perf/` while the work was measured and
+removed from the tree once the tables below were filled; they are in
+this branch's history up to the commit that removed them.
 
 ### Size
 
 `tools/loc.sh`: non-blank, non-comment Rust lines, split into shipped
-source, binaries and tests, per crate. The v4 line is `docs/perf/loc-v4.txt`;
-the v5 line is `docs/perf/loc-v5.txt`. The comparison is **shipped source
+source, binaries and tests, per crate. The comparison is **shipped source
 of the library** (`ark` vs `ark5` + `ark5-macros`), **shipped source
 all-in** (plus client, server, auth, and harken's domain), and tests,
 separately. Generated Unicode tables are excluded from both.
@@ -668,9 +668,8 @@ diff. Where v5 has no counterpart to a v4 shape (the inbox, the
 
 ### The report
 
-Numbers are from the same-hour runs under `docs/perf/` (order and
-commands in `runs-v5.txt`). Notes under the table say what each row
-counts.
+Numbers are from the same-hour runs described above. Notes under the
+table say what each row counts.
 
 **Size** (`loc-v5.txt`, after P1 `loc-p1.txt`; non-blank, non-comment; Unicode tables excluded)
 
