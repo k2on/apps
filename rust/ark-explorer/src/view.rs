@@ -8,7 +8,7 @@ use iced::widget::scrollable::{Direction, Scrollbar};
 use iced::widget::{button, column, container, mouse_area, row, rule, scrollable, text, text_input, Column, Row, Space};
 use iced::{Alignment, Element, Length, Padding};
 
-use ark::schema::Ty;
+use crate::value::Ty;
 
 use crate::cells::{self, Grid};
 use crate::data::{Source, Writer};
@@ -106,7 +106,7 @@ impl Explorer {
         ];
         let rows = Explorer::tables(src).into_iter().enumerate().fold(Column::new(), |col, (i, t)| {
             let on = i == self.tables_at;
-            let n = src.store.scan(&t).len();
+            let n = Explorer::count(src, &t);
             let cols = Explorer::columns(src, &t).len();
             let exposed = match Explorer::verbs(w, &t) {
                 Some(v) => {
@@ -136,7 +136,7 @@ impl Explorer {
     }
 
     fn view_table<'a>(&'a self, src: &Source<'_>, w: &dyn Writer, t: &str) -> Element<'a, Msg> {
-        let all = src.store.scan(t).len();
+        let all = Explorer::count(src, t);
         let (page, pages) = self.page(all);
         let from = page * PAGE_ROWS;
         // The editor is drawn on the row it edits, found by its key.
@@ -288,7 +288,7 @@ impl Explorer {
             lines = lines.push(text(why.to_string()).size(12).style(style::accent));
         }
         let on_run = keys_here && f.at == slots.len();
-        let verb = if f.kind == ark::ir::FnKind::Query {
+        let verb = if f.kind == form::Kind::Query {
             "run the query"
         } else {
             "author the mutation"
@@ -374,7 +374,7 @@ impl Explorer {
             .into(),
             (Ty::Struct(_), _) => small("fields below"),
             (Ty::Id(table), Some(Input::Text(t))) => {
-                let named = form::parse_id(t).and_then(|id| form::pickables(src.store, table).into_iter().find(|p| p.id == id));
+                let named = form::parse_id(t).and_then(|id| form::pickables(src.store, src.module, table).into_iter().find(|p| p.id == id));
                 let says = match (t.trim().is_empty(), named) {
                     (true, _) => String::new(),
                     (false, Some(p)) => fit::tail(&p.line(), 40),
@@ -554,18 +554,18 @@ impl Explorer {
 
     fn view_console(&self) -> Element<'_, Msg> {
         let answer: Element<'_, Msg> = match &self.answer {
-            None => small("a query by name, its arguments as {\"field\": value} in the vectors' dialect; or a plan, as a module writes one"),
+            None => small("a query by name, its arguments its fields in order, separated by commas, each as a cell writes it"),
             Some(Ok(v)) => text(v.clone()).size(13).into(),
             Some(Err(why)) => text(why.clone()).size(13).style(style::accent).into(),
         };
         column![
             row![
-                text_input("a query's name, or a plan {\"t\":\"plan\", …}", &self.query)
+                text_input("a query's name", &self.query)
                     .on_input(Msg::Query)
                     .on_submit(Msg::Run)
                     .size(13)
                     .width(Length::FillPortion(2)),
-                text_input("arguments, {} for none", &self.args)
+                text_input("arguments: a, b, …", &self.args)
                     .on_input(Msg::Args)
                     .on_submit(Msg::Run)
                     .size(13)
@@ -602,26 +602,6 @@ impl Explorer {
                 i % 2 == 1,
             ));
         }
-        let verifies = log.verifies();
-        if !verifies.is_empty() {
-            out = out.push(small("verify answers"));
-            for (i, v) in verifies.iter().enumerate() {
-                let answer = match v.answer {
-                    Some(true) => "agreed",
-                    Some(false) => "disagreed",
-                    None => "cannot say",
-                };
-                out = out.push(table::row(
-                    row![
-                        table::cell(v.who.clone(), NAME, false, false, false),
-                        table::cell(format!("at {}: {answer}", v.seq), WIDE, false, v.answer == Some(false), true),
-                    ],
-                    false,
-                    true,
-                    i % 2 == 1,
-                ));
-            }
-        }
         out = out.push(rule::horizontal(1));
         out = out.push(row![
             table::heading("Seq", SEQ),
@@ -637,9 +617,9 @@ impl Explorer {
                 Some(f) => f
                     .iter()
                     .map(|c| match c {
-                        ark::store::Change::Add(t, _) => format!("+{t}"),
-                        ark::store::Change::Remove(t, _) => format!("\u{2212}{t}"),
-                        ark::store::Change::Edit(t, _, _) => format!("~{t}"),
+                        ark5::store::Change::Add { table, .. } => format!("+{table}"),
+                        ark5::store::Change::Remove { table, .. } => format!("\u{2212}{table}"),
+                        ark5::store::Change::Edit { table, .. } => format!("~{table}"),
                     })
                     .collect::<Vec<_>>()
                     .join(" "),
@@ -672,7 +652,7 @@ fn value_at<'f>(f: &'f form::Form, path: &[usize]) -> Option<&'f Input> {
         (ty, v) = match (ty, v) {
             (Ty::Option(t), Input::Opt(_, inner)) => (&**t, &**inner),
             (Ty::List(t), Input::List(xs)) => (&**t, xs.get(k)?),
-            (Ty::Struct(fs), Input::Fields(xs)) => (fs.values().nth(k)?, xs.get(k)?),
+            (Ty::Struct(fs), Input::Fields(xs)) => (&fs.get(k)?.1, xs.get(k)?),
             _ => return None,
         };
     }

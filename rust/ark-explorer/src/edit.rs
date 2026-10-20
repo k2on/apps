@@ -2,73 +2,59 @@
 //! decisions, with no window: a cell's text read back as its column's
 //! value, a cell edit or a row delete routed to an exposed CRUD mutation or
 //! to the authority's raw write (`docs/plan-guards.md` D4), and a query run
-//! by name or a plan in the IR's form, read-only.
+//! by name, read-only.
 
-use ark::eval::{Args, EvalFault};
-use ark::ir::FnKind;
-use ark::schema::{Column, Schema, Ty};
-use ark::store::{Change, Row};
-use ark::value::{decode_hex, hex, Value};
+use ark5::module::Module;
+use ark5::schema::Table;
+use ark5::store::Change;
 
 use crate::data::{CrudVerbs, Source, Writer};
+use crate::value::{self, decode, encode, Ty, Value};
 
-/// A cell as it is shown and as its editor starts: text as itself, an id as
-/// `8-4-4-4-12` hex, bytes as hex, `null` for a column that holds nothing —
+/// A cell as it is shown and as its editor starts ([`value::text_of`]),
 /// read back by [`parse_cell`] to the same value.
 pub fn cell_text(v: &Value) -> String {
-    match v {
-        Value::Null => "null".into(),
-        Value::Bool(b) => b.to_string(),
-        Value::Int(n) => n.to_string(),
-        Value::Text(t) => t.to_string(),
-        Value::Bytes(b) => hex(b),
-        Value::Id(id) => {
-            let h = hex(id);
-            format!("{}-{}-{}-{}-{}", &h[0..8], &h[8..12], &h[12..16], &h[16..20], &h[20..32])
-        }
-        other => ark::json::json(other),
-    }
+    value::text_of(v)
 }
 
-/// A cell's text read as a value of its column: a nullable column takes
-/// `null` (or nothing) as `Null`; a text is the text, an enum one of its
-/// variants; an int in decimal; `true` or `false`; an id as 32 hex digits,
-/// dashes anywhere; bytes as hex. The reason, where it is not one.
-pub fn parse_cell(c: &Column, text: &str) -> Result<Value, String> {
+/// A cell's text read as a value of its column's type: an option takes
+/// `null` (or nothing) as none; a text is the text, an enum `#n` or `n`; an
+/// int in decimal; `true` or `false`; an id as 32 hex digits, dashes
+/// anywhere; bytes as hex. The reason, where it is not one.
+pub fn parse_cell(name: &str, ty: &Ty, text: &str) -> Result<Value, String> {
     let t = text.trim();
-    if c.nullable && (t.is_empty() || t == "null") {
-        return Ok(Value::Null);
-    }
-    let bad = |what: &str| Err(format!("{}: {what}", c.name));
-    match &c.ty {
+    let bad = |what: &str| Err(format!("{name}: {what}"));
+    match ty {
+        Ty::Option(_) if t.is_empty() || t == "null" => Ok(Value::Null),
+        Ty::Option(inner) => parse_cell(name, inner, text),
         Ty::Text => Ok(Value::text(text)),
-        Ty::Enum(vs) => match vs.iter().find(|v| v.as_str() == t) {
-            Some(v) => Ok(Value::text(v.clone())),
-            None => bad(&format!("one of {}", vs.join(", "))),
-        },
         Ty::Int => t.parse::<i64>().map(Value::Int).or_else(|_| bad("a whole number")),
         Ty::Bool => match t {
             "true" => Ok(Value::Bool(true)),
             "false" => Ok(Value::Bool(false)),
             _ => bad("true or false"),
         },
-        Ty::Id(_) => match decode_hex(&t.replace('-', "")).and_then(|b| <[u8; 16]>::try_from(b).ok()) {
+        Ty::Id(_) => match crate::form::parse_id(t) {
             Some(id) => Ok(Value::Id(id)),
             None => bad("an id, 32 hex digits"),
         },
-        Ty::Bytes => match decode_hex(t) {
-            Some(b) => Ok(Value::Bytes(b.into())),
+        Ty::Bytes => match ark5::hash::unhex(t) {
+            Some(b) => Ok(Value::Bytes(b)),
             None => bad("hex digits"),
         },
-        other => bad(&format!("a {other:?} is not a column's type")),
+        Ty::Enum(vs) => match t.trim_start_matches('#').parse::<usize>() {
+            Ok(i) if i < vs.len() => Ok(Value::Variant(i as u8, vec![])),
+            _ => bad(&format!("one of {}", vs.join(", "))),
+        },
+        other => bad(&format!("a {} is not edited as text", value::ty_name(other))),
     }
 }
 
 /// Where an edit goes: a mutation of the domain's, authored as the host's
-/// identity, or the authority's raw write.
+/// identity with its input's bytes, or the authority's raw write.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Route {
-    Author { function: String, args: Args },
+    Author { function: String, input: Vec<u8> },
     Raw(Change),
 }
 
@@ -76,7 +62,7 @@ impl Route {
     /// Hand it to the writer.
     pub fn send(self, w: &mut dyn Writer) -> Result<(), String> {
         match self {
-            Route::Author { function, args } => w.author(&function, args).map(|_| ()),
+            Route::Author { function, input } => w.author(&function, input).map(|_| ()),
             Route::Raw(change) => w.raw(change),
         }
     }
@@ -85,8 +71,8 @@ impl Route {
     pub fn describe(&self) -> String {
         match self {
             Route::Author { function, .. } => format!("through {function}"),
-            Route::Raw(Change::Remove(t, _)) => format!("raw: delete_row on {t}"),
-            Route::Raw(c) => format!("raw: put_row on {}", c.table()),
+            Route::Raw(Change::Remove { table, .. }) => format!("raw: delete on {table}"),
+            Route::Raw(c) => format!("raw: put on {}", c.table()),
         }
     }
 }
@@ -101,60 +87,79 @@ pub struct Via<'v> {
     pub force_raw: bool,
 }
 
-/// The verbs exposed for `table`, if the host may author them.
-fn authorable(verbs: Option<&CrudVerbs>) -> Option<&CrudVerbs> {
-    verbs.filter(|v| v.may_author)
+/// The binding `<verb>_<table>` goes by, under whatever router.
+fn bound(module: &Module, verb: &str, table: &str) -> String {
+    let want = format!("{verb}_{table}");
+    module
+        .bindings
+        .iter()
+        .map(|(n, _)| n)
+        .find(|n| n.rsplit('.').next() == Some(&want))
+        .cloned()
+        .unwrap_or(want)
 }
 
-/// A row's columns as a mutation's arguments: what a generated write takes.
-fn as_args(row: &Row) -> Args {
-    row.to_struct()
+fn table<'m>(module: &'m Module, name: &str) -> Result<&'m Table, String> {
+    module.schema.table(name).map(|(_, t)| t).ok_or_else(|| format!("no table {name}"))
 }
 
-/// `docs/plan-guards.md` D4 What setting `column` of `old` to `value` in
-/// `table` becomes: through the table's `update_<t>` when it is exposed and
-/// this host may author it (or `put_<t>` when only that is), unless
-/// `force_raw`; through the authority's raw write otherwise, where the host
-/// has one; and refused, with why, where it has neither. A key column is
-/// not edited: a key is what names the row, and changing it is a delete and
-/// a new row.
-pub fn route_edit(schema: &Schema, via: Via, table: &str, old: &Row, column: &str, value: Value) -> Result<Route, String> {
-    let tbl = schema.lookup_table(table).ok_or_else(|| format!("no table {table}"))?;
-    if tbl.key.iter().any(|k| k == column) {
+/// `docs/plan-guards.md` D4 What setting column `column` of `old` (a row's
+/// bytes) to `value` in `table` becomes: through the table's `update_<t>`
+/// when it is exposed and this host may author it (or `put_<t>` when only
+/// that is), unless `force_raw`; through the authority's raw write
+/// otherwise, where the host has one; and refused, with why, where it has
+/// neither. A key column is not edited: a key is what names the row.
+pub fn route_edit(module: &Module, via: Via, table_name: &str, old: &[u8], column: &str, value: Value) -> Result<Route, String> {
+    let t = table(module, table_name)?;
+    let c = t.column(column).ok_or_else(|| format!("{table_name} has no column {column}"))?;
+    if c < t.key {
         return Err(format!(
-            "{table}.{column} is part of the key, which names the row: delete it and put a new one"
+            "{table_name}.{column} is part of the key, which names the row: delete it and put a new one"
         ));
     }
-    if tbl.column(column).is_none() {
-        return Err(format!("{table} has no column {column}"));
-    }
-    let new = old.clone().with(column, value);
-    match (authorable(via.verbs), via.force_raw) {
+    let row = value::row_ty(&value::types(module), t);
+    let Ty::Struct(fs) = &row else { unreachable!("a row is a record") };
+    let mut vs = match decode(&row, old).map_err(|e| e.0)? {
+        Value::Struct(vs) => vs,
+        _ => unreachable!("a row reads as a record"),
+    };
+    encode(&fs[c].1, &value).map_err(|e| format!("{column}: {e}"))?;
+    vs[c] = value;
+    let new = encode(&row, &Value::Struct(vs))?;
+    match (via.verbs.filter(|v| v.may_author), via.force_raw) {
         (Some(v), false) if v.update => Ok(Route::Author {
-            function: format!("update_{table}"),
-            args: as_args(&new),
+            function: bound(module, "update", table_name),
+            input: new,
         }),
         (Some(v), false) if v.put => Ok(Route::Author {
-            function: format!("put_{table}"),
-            args: as_args(&new),
+            function: bound(module, "put", table_name),
+            input: new,
         }),
-        _ if via.can_raw => Ok(Route::Raw(Change::Edit(table.into(), old.clone(), new))),
-        _ => Err(nowhere(table, "update")),
+        _ if via.can_raw => Ok(Route::Raw(Change::Edit {
+            table: table_name.into(),
+            old: old.to_vec(),
+            new,
+        })),
+        _ => Err(nowhere(table_name, "update")),
     }
 }
 
-/// What deleting `row` from `table` becomes: through `delete_<t>` when it is
-/// exposed and this host may author it, unless `force_raw`; the raw write
-/// otherwise, where there is one; refused where there is neither.
-pub fn route_delete(schema: &Schema, via: Via, table: &str, row: &Row) -> Result<Route, String> {
-    let tbl = schema.lookup_table(table).ok_or_else(|| format!("no table {table}"))?;
-    match (authorable(via.verbs), via.force_raw) {
+/// What deleting `row` (its bytes) from `table` becomes: through
+/// `delete_<t>`, its input the key's columns, when it is exposed and this
+/// host may author it, unless `force_raw`; the raw write otherwise, where
+/// there is one; refused where there is neither.
+pub fn route_delete(module: &Module, via: Via, table_name: &str, row: &[u8]) -> Result<Route, String> {
+    let t = table(module, table_name)?;
+    match (via.verbs.filter(|v| v.may_author), via.force_raw) {
         (Some(v), false) if v.delete => Ok(Route::Author {
-            function: format!("delete_{table}"),
-            args: tbl.key.iter().map(|k| (k.clone(), row.get(k).cloned().unwrap_or(Value::Null))).collect(),
+            function: bound(module, "delete", table_name),
+            input: row[..t.key_len(row).map_err(|e| e.0)?].to_vec(),
         }),
-        _ if via.can_raw => Ok(Route::Raw(Change::Remove(table.into(), row.clone()))),
-        _ => Err(nowhere(table, "delete")),
+        _ if via.can_raw => Ok(Route::Raw(Change::Remove {
+            table: table_name.into(),
+            row: row.to_vec(),
+        })),
+        _ => Err(nowhere(table_name, "delete")),
     }
 }
 
@@ -162,39 +167,52 @@ fn nowhere(table: &str, verb: &str) -> String {
     format!("{table} exposes no {verb} this host may author, and this host is not the authority: nothing here can write it")
 }
 
-/// The console's one input, read: a query by name — `items` — run with
-/// `args`, a struct in the vectors' JSON dialect (`{"playlist_id":
-/// {"$id": "…"}}`, empty for none); or, when it starts with `{`, a plan in
-/// the IR's form, as a module writes one, run with no arguments. Read-only
-/// either way: a query cannot write, and a mutator's name is refused. The
-/// answer, or what stopped it.
-pub fn console(src: &Source, input: &str, args: &str) -> Result<Value, String> {
-    let input = input.trim();
-    if input.starts_with('{') {
-        let v = ark::json::decode(input).map_err(|e| format!("the plan is not JSON of the dialect: {e}"))?;
-        let mut plan = ark::ir::plan_from_value(&v).map_err(|e| format!("not a plan: {e}"))?;
-        ark::eval::complete_order(src.schema, &mut plan);
-        return ark::eval::select_plan(src.store.schema(), &plan, src.store)
-            .map(Value::from)
-            .map_err(|e| fault(&e));
+/// The binding a name means: itself, or the one whose last part it is.
+pub fn binding(module: &Module, name: &str) -> Option<String> {
+    let name = name.trim();
+    let hits: Vec<&String> = module
+        .bindings
+        .iter()
+        .map(|(n, _)| n)
+        .filter(|n| *n == name || n.rsplit('.').next() == Some(name))
+        .collect();
+    match hits[..] {
+        [one] => Some(one.clone()),
+        _ => hits.into_iter().find(|n| *n == name).cloned(),
     }
-    let f = src.module.lookup_function(input).ok_or_else(|| format!("no function {input}"))?;
-    if f.kind != FnKind::Query {
-        return Err(format!("{input} is a {}, and the console runs queries alone", f.kind.name()));
-    }
-    let args = match args.trim() {
-        "" => Args::new(),
-        text => match ark::json::decode(text).map_err(|e| format!("the arguments are not JSON of the dialect: {e}"))? {
-            Value::Struct(m) => *m,
-            other => return Err(format!("the arguments are a struct, not {}", ark::json::json(&other))),
-        },
-    };
-    ark::eval::query_as(src.module, input, &src.ctx, &args, src.store).map_err(|e| fault(&e))
 }
 
-fn fault(e: &EvalFault) -> String {
-    match e {
-        EvalFault::Verdict(r) => format!("refused: {}", ark::protocol::refusal_text(r)),
-        EvalFault::Bug(b) => format!("a bug: {b:?}"),
+/// The console's one input, read: a query by its binding (or the last part
+/// of it) — `playlists` — run with `args`, its input's fields in order
+/// separated by commas, each written as a cell is (`0a1b…` for an id, empty
+/// for none). Read-only: a mutation's name is refused. The answer, or what
+/// stopped it.
+pub fn console(src: &Source, name: &str, args: &str) -> Result<Value, String> {
+    let f = binding(src.module, name).ok_or_else(|| format!("no function {}", name.trim()))?;
+    let c = crate::form::callables(src.module, src.lib)
+        .into_iter()
+        .find(|c| c.name == f)
+        .ok_or_else(|| format!("{f} is neither a query nor a mutation"))?;
+    if c.kind != crate::form::Kind::Query {
+        return Err(format!("{f} is a {}, and the console runs queries alone", c.kind.name()));
     }
+    let parts: Vec<&str> = match args.trim() {
+        "" => vec![],
+        a => a.split(',').collect(),
+    };
+    if parts.len() != c.input.len() {
+        return Err(format!(
+            "{f} takes {} argument{}: {}",
+            c.input.len(),
+            if c.input.len() == 1 { "" } else { "s" },
+            c.input.iter().map(|(n, x)| format!("{n}: {}", value::ty_name(&x.ty))).collect::<Vec<_>>().join(", ")
+        ));
+    }
+    let vs = c
+        .input
+        .iter()
+        .zip(parts)
+        .map(|((n, x), p)| parse_cell(n, &x.ty, p))
+        .collect::<Result<Vec<_>, _>>()?;
+    crate::form::query(src, &c, &Value::Struct(vs))
 }

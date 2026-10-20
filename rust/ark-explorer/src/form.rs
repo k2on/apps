@@ -12,122 +12,153 @@
 //!
 //! [`Writer`]: crate::data::Writer
 
-use ark::eval::{Args, Checked, Ctx};
-use ark::ir::{Check, Field, FnKind, Function, Module};
-use ark::schema::{is_scalar, Schema, Ty};
-use ark::store::Store;
-use ark::value::{decode_hex, hex, Value};
+use ark5::check::Types;
+use ark5::interp::{check_form, Interp};
+use ark5::ir::Effect;
+use ark5::module::{Lib, Module};
+use ark5::store::Store;
+use ark5::ty::Ty as Structure;
 
-use crate::data::Ticket;
+use crate::data::{Source, Ticket};
+use crate::value::{self, decode, encode, Ty, Value};
 
-/// One function a person can call: its router, name, kind and input.
+/// How many hex digits of an id a cell or a picker draws.
+pub const ID_DIGITS: usize = 8;
+
+/// What a callable is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    Query,
+    Mutation,
+}
+
+impl Kind {
+    /// As the list says it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Kind::Mutation => "mutation",
+            Kind::Query => "query",
+        }
+    }
+}
+
+/// One field of a function's input: its type, and its checks as they are
+/// said beside it — the module's refinements, with their messages.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Field {
+    pub ty: Ty,
+    pub checks: Vec<String>,
+}
+
+/// One function a person can call: its router, its binding, its kind, and
+/// its input's fields — `record` when the input is a record of them, else
+/// it is the one field itself (or nothing).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Callable {
     pub router: String,
     pub name: String,
-    pub kind: FnKind,
+    pub kind: Kind,
     pub input: Vec<(String, Field)>,
+    pub record: bool,
+    /// What a query's answer is a list of, and the names its fields go by
+    /// when they are a table's columns.
+    pub returns: Ty,
+    pub columns: Option<Vec<String>>,
 }
 
-/// Every query and mutation of `module`, grouped by router in the order
-/// each router first appears, and in the module's order within one.
-pub fn callables(module: &Module) -> Vec<Callable> {
-    let mut routers: Vec<String> = Vec::new();
-    let callable = |f: &&Function| matches!(f.kind, FnKind::Query | FnKind::Mutator);
-    for f in module.functions.iter().filter(callable) {
-        let r = f.router.clone().unwrap_or_default();
-        if !routers.contains(&r) {
-            routers.push(r);
+impl Callable {
+    /// The input as its bytes, from the fields' values.
+    pub fn input_bytes(&self, v: &Value) -> Result<Vec<u8>, String> {
+        let fs: Vec<(String, Ty)> = self.input.iter().map(|(n, f)| (n.clone(), f.ty.clone())).collect();
+        match (self.record, v) {
+            (true, v) => encode(&Ty::Struct(fs), v),
+            (false, Value::Struct(vs)) if vs.is_empty() => Ok(vec![]),
+            (false, Value::Struct(vs)) => encode(&fs[0].1, &vs[0]),
+            (false, other) => Err(format!("not an input: {}", value::text_of(other))),
+        }
+    }
+}
+
+/// Every query and mutation of `module` — a function that writes, or reads
+/// and answers a list, of the log's tables (§1.9's live transitions are the
+/// volatile machine's, not a form's) — grouped by router in the order each
+/// router first appears, and in binding order within one.
+pub fn callables(module: &Module, lib: &Lib) -> Vec<Callable> {
+    let mut out: Vec<Callable> = Vec::new();
+    for (name, h) in &module.bindings {
+        let Some(f) = lib.get(h) else { continue };
+        let kind = match (f.f.effect, &f.f.ret) {
+            (Effect::Write, _) => Kind::Mutation,
+            (Effect::Read, Structure::List(_)) => Kind::Query,
+            _ => continue,
+        };
+        if crate::data::is_live(module, lib, h) {
+            continue;
+        }
+        let fcx = Types::new(&f.f.types);
+        let (fields, record) = value::fields_of(&fcx, &f.f.params);
+        let labels = value::columns_of(&module.schema, &fields).unwrap_or_else(|| value::labelled(&fields));
+        let input = labels
+            .into_iter()
+            .zip(&fields)
+            .map(|(l, t)| {
+                let field = Field {
+                    ty: value::resolve(&fcx, t),
+                    checks: value::checks_of(&fcx, t),
+                };
+                (l, field)
+            })
+            .collect();
+        let element = match &f.f.ret {
+            Structure::List(t) => (**t).clone(),
+            t => t.clone(),
+        };
+        let columns = value::row_labels(&module.schema, &element, &fcx);
+        let mut returns = value::resolve(&fcx, &element);
+        if let (Ty::Struct(fs), Some(cs)) = (&mut returns, &columns) {
+            for ((n, _), c) in fs.iter_mut().zip(cs) {
+                n.clone_from(c);
+            }
+        }
+        let router = name.rsplit_once('.').map_or("", |(r, _)| r).to_string();
+        out.push(Callable {
+            router,
+            name: name.clone(),
+            kind,
+            input,
+            record,
+            returns,
+            columns,
+        });
+    }
+    let mut routers: Vec<String> = vec![];
+    for c in &out {
+        if !routers.contains(&c.router) {
+            routers.push(c.router.clone());
         }
     }
     routers
         .iter()
-        .flat_map(|r| {
-            module
-                .functions
-                .iter()
-                .filter(callable)
-                .filter(move |f| f.router.as_deref().unwrap_or_default() == r)
-                .map(|f| Callable {
-                    router: r.clone(),
-                    name: f.name.clone(),
-                    kind: f.kind,
-                    input: f.input.clone(),
-                })
-        })
+        .flat_map(|r| out.iter().filter(move |c| &c.router == r).cloned())
         .collect()
+}
+
+/// A field's checks, as they are said beside it.
+pub fn checks_said(f: &Field) -> Vec<String> {
+    f.checks.clone()
 }
 
 /// A kind as the list says it.
-pub fn kind_name(k: FnKind) -> &'static str {
-    match k {
-        FnKind::Mutator => "mutation",
-        FnKind::Query => "query",
-        other => other.name(),
-    }
+pub fn kind_name(k: Kind) -> &'static str {
+    k.name()
 }
 
-/// A type as a person reads it: `text`, `id(playlist)`, `option(int)`,
-/// `list(text)`, `enum(a | b)`, `{a: int, b: text}`.
-pub fn ty_name(t: &Ty) -> String {
-    match t {
-        Ty::Bool => "bool".into(),
-        Ty::Int => "int".into(),
-        Ty::Text => "text".into(),
-        Ty::Bytes => "bytes".into(),
-        Ty::Id(table) => format!("id({table})"),
-        Ty::Enum(vs) => format!("enum({})", vs.join(" | ")),
-        Ty::Option(t) => format!("option({})", ty_name(t)),
-        Ty::List(t) => format!("list({})", ty_name(t)),
-        Ty::Struct(fs) => format!(
-            "{{{}}}",
-            fs.iter().map(|(n, t)| format!("{n}: {}", ty_name(t))).collect::<Vec<_>>().join(", ")
-        ),
-        Ty::Named(n) => n.clone(),
-        Ty::NonEmpty(t) => format!("non_empty_list({})", ty_name(t)),
-        Ty::PerDevice(t) => format!("per_device({})", ty_name(t)),
-        Ty::Ephemeral(t) => format!("ephemeral({})", ty_name(t)),
-        Ty::Sum(vs) => format!(
-            "sum({})",
-            vs.iter()
-                .map(|(v, fs)| format!(
-                    "{v} {{{}}}",
-                    fs.iter().map(|(n, t)| format!("{n}: {}", ty_name(t))).collect::<Vec<_>>().join(", ")
-                ))
-                .collect::<Vec<_>>()
-                .join(" | ")
-        ),
-    }
-}
-
-/// A field's checks, as they are said beside it: `trimmed`, `min 1 char`,
-/// `max 120 chars`, `1 to 10`, `non-empty`, `exists`, and a refinement by its
-/// message. A check with a message of its own says it too, so what a refusal
-/// will read is on screen before it happens.
-pub fn checks_said(f: &Field) -> Vec<String> {
-    let chars = |n: i64| if n == 1 { "char" } else { "chars" };
-    let why = |w: &Option<String>| w.as_ref().map_or(String::new(), |w| format!(" (\u{201c}{w}\u{201d})"));
-    f.checks
-        .iter()
-        .map(|c| match c {
-            Check::Trim => "trimmed".to_string(),
-            Check::MinLen(n, w) => format!("min {n} {}{}", chars(*n), why(w)),
-            Check::MaxLen(n, w) => format!("max {n} {}{}", chars(*n), why(w)),
-            Check::Range(Some(lo), Some(hi), w) => format!("{lo} to {hi}{}", why(w)),
-            Check::Range(Some(lo), None, w) => format!("at least {lo}{}", why(w)),
-            Check::Range(None, Some(hi), w) => format!("at most {hi}{}", why(w)),
-            Check::Range(None, None, w) => format!("any int{}", why(w)),
-            Check::NonEmpty(w) => format!("non-empty{}", why(w)),
-            Check::Exists(w) => format!("must exist{}", why(w)),
-            Check::Refine(_, w) => format!("refined{}", why(w)),
-        })
-        .collect()
-}
+pub use crate::value::ty_name;
 
 /// What one input of a form holds, shaped as its type is: the text of a
 /// text, an int, an id or bytes (read when called, so a half-typed number is
 /// kept as typed); a bool; an enum's variant by its place; an option's
-/// "is there one" beside what it would be; a list's items; a struct's
+/// "is there one" beside what it would be; a list's items; a record's
 /// fields, in its type's order.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Input {
@@ -148,11 +179,10 @@ impl Input {
             Ty::Enum(_) => Input::Choice(0),
             Ty::Option(t) => Input::Opt(false, Box::new(Input::blank(t))),
             Ty::List(_) => Input::List(vec![]),
-            Ty::Struct(fs) => Input::Fields(fs.values().map(Input::blank).collect()),
-            Ty::Int | Ty::Text | Ty::Bytes | Ty::Id(_) => Input::Text(String::new()),
-            // A live state's types are no mutation's input: the explorer
-            // forms the log's procedures, and offers them as text.
-            Ty::Named(_) | Ty::NonEmpty(_) | Ty::Sum(_) | Ty::PerDevice(_) | Ty::Ephemeral(_) => Input::Text(String::new()),
+            Ty::Struct(fs) => Input::Fields(fs.iter().map(|(_, t)| Input::blank(t)).collect()),
+            // A sum with fields is no form's: it is offered as text, and
+            // refused when it is read.
+            Ty::Int | Ty::Text | Ty::Bytes | Ty::Id(_) | Ty::Sum(_) => Input::Text(String::new()),
         }
     }
 
@@ -163,20 +193,16 @@ impl Input {
             (Ty::Option(t), Value::Null) => Input::Opt(false, Box::new(Input::blank(t))),
             (Ty::Option(t), v) => Input::Opt(true, Box::new(Input::of(t, v))),
             (Ty::Bool, Value::Bool(b)) => Input::Bool(*b),
-            (Ty::Enum(vs), Value::Text(t)) => Input::Choice(vs.iter().position(|x| x.as_str() == &**t).unwrap_or(0)),
+            (Ty::Enum(_), Value::Variant(i, _)) => Input::Choice(*i as usize),
             (Ty::List(t), Value::List(xs)) => Input::List(xs.iter().map(|x| Input::of(t, x)).collect()),
-            (Ty::Struct(fs), Value::Struct(m)) => Input::Fields(
-                fs.iter()
-                    .map(|(n, t)| m.get(n).map_or_else(|| Input::blank(t), |x| Input::of(t, x)))
-                    .collect(),
-            ),
+            (Ty::Struct(fs), Value::Struct(xs)) => Input::Fields(fs.iter().zip(xs).map(|((_, t), x)| Input::of(t, x)).collect()),
             (Ty::Int | Ty::Text | Ty::Bytes | Ty::Id(_), v) => Input::Text(crate::edit::cell_text(v)),
             (t, _) => Input::blank(t),
         }
     }
 
     /// The input `path` names below this one of type `ty`, and its type: a
-    /// list's item by its place, a struct's field by its place, an option's
+    /// list's item by its place, a record's field by its place, an option's
     /// inner by `0`.
     pub fn at_mut<'a>(&'a mut self, ty: &'a Ty, path: &[usize]) -> Option<(&'a Ty, &'a mut Input)> {
         let Some((&i, rest)) = path.split_first() else {
@@ -192,7 +218,7 @@ impl Input {
                 _ => None,
             },
             Ty::Struct(fs) => match self {
-                Input::Fields(xs) => xs.get_mut(i)?.at_mut(fs.values().nth(i)?, rest),
+                Input::Fields(xs) => xs.get_mut(i)?.at_mut(&fs.get(i)?.1, rest),
                 _ => None,
             },
             _ => None,
@@ -204,18 +230,9 @@ impl Input {
     pub fn value(&self, ty: &Ty, name: &str) -> Result<Value, String> {
         let bad = |what: &str| Err(format!("{name}: {what}"));
         match (ty, self) {
-            (Ty::Text, Input::Text(t)) => Ok(Value::text(t.as_str())),
-            (Ty::Int, Input::Text(t)) => t.trim().parse::<i64>().map(Value::Int).or_else(|_| bad("a whole number")),
-            (Ty::Id(_), Input::Text(t)) => parse_id(t).map(Value::Id).ok_or(()).or_else(|_| bad("an id, 32 hex digits")),
-            (Ty::Bytes, Input::Text(t)) => match decode_hex(t.trim()) {
-                Some(b) => Ok(Value::Bytes(b.into())),
-                None => bad("hex digits"),
-            },
+            (Ty::Int | Ty::Text | Ty::Bytes | Ty::Id(_), Input::Text(t)) => crate::edit::parse_cell(name, ty, t),
             (Ty::Bool, Input::Bool(b)) => Ok(Value::Bool(*b)),
-            (Ty::Enum(vs), Input::Choice(i)) => match vs.get(*i) {
-                Some(v) => Ok(Value::text(v.clone())),
-                None => bad(&format!("one of {}", vs.join(", "))),
-            },
+            (Ty::Enum(vs), Input::Choice(i)) if *i < vs.len() => Ok(Value::Variant(*i as u8, vec![])),
             (Ty::Option(_), Input::Opt(false, _)) => Ok(Value::Null),
             (Ty::Option(t), Input::Opt(true, inner)) => inner.value(t, name),
             (Ty::List(t), Input::List(xs)) => xs
@@ -223,13 +240,13 @@ impl Input {
                 .enumerate()
                 .map(|(k, x)| x.value(t, &format!("{name}.{}", k + 1)))
                 .collect::<Result<Vec<_>, _>>()
-                .map(Value::list),
+                .map(Value::List),
             (Ty::Struct(fs), Input::Fields(xs)) => fs
                 .iter()
                 .zip(xs)
-                .map(|((n, t), x)| x.value(t, &format!("{name}.{n}")).map(|v| (n.clone(), v)))
-                .collect::<Result<std::collections::BTreeMap<_, _>, _>>()
-                .map(|m| Value::Struct(Box::new(m))),
+                .map(|((n, t), x)| x.value(t, &format!("{name}.{n}")))
+                .collect::<Result<Vec<_>, _>>()
+                .map(Value::Struct),
             (t, _) => bad(&format!("not an input of {}", ty_name(t))),
         }
     }
@@ -238,7 +255,7 @@ impl Input {
 /// An id as text — 32 hex digits, dashes anywhere, as a cell shows one and a
 /// person pastes one.
 pub fn parse_id(text: &str) -> Option<[u8; 16]> {
-    decode_hex(&text.trim().replace('-', "")).and_then(|b| <[u8; 16]>::try_from(b).ok())
+    ark5::hash::unhex(&text.trim().replace('-', "")).and_then(|b| <[u8; 16]>::try_from(b).ok())
 }
 
 /// An id as a cell shows it whole: `8-4-4-4-12`.
@@ -248,7 +265,7 @@ pub fn id_text(id: &[u8; 16]) -> String {
 
 /// One line of a form, as the keyboard walks it and the view draws it: where
 /// its input is, how deep, what it is called, and its type. An option, a
-/// list and a struct are a line each with what is inside them below; an
+/// list and a record are a line each with what is inside them below; an
 /// option of a single value draws that value on its own line.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Slot {
@@ -265,13 +282,14 @@ pub struct Slot {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Form {
     pub function: String,
-    pub kind: FnKind,
+    pub kind: Kind,
     pub fields: Vec<(String, Field)>,
     pub values: Vec<Input>,
     /// The line the cursor is on; one past the last is the run button.
     pub at: usize,
     /// Per field (or `""` for the input as a whole), what is wrong with it:
-    /// its type's reading or its checks', with the module's own messages.
+    /// its type's reading or its refinements', with the module's own
+    /// messages.
     pub messages: Vec<(String, String)>,
 }
 
@@ -287,14 +305,12 @@ impl Form {
         }
     }
 
-    /// The form filled with a call's arguments.
-    pub fn filled(c: &Callable, args: &Args) -> Form {
+    /// The form filled with a call's arguments, a record of its fields.
+    pub fn filled(c: &Callable, args: &Value) -> Form {
         let mut f = Form::new(c);
-        f.values = c
-            .input
-            .iter()
-            .map(|(n, fd)| args.get(n).map_or_else(|| Input::blank(&fd.ty), |v| Input::of(&fd.ty, v)))
-            .collect();
+        if let Value::Struct(vs) = args {
+            f.values = c.input.iter().zip(vs).map(|((_, fd), v)| Input::of(&fd.ty, v)).collect();
+        }
         f
     }
 
@@ -371,58 +387,56 @@ impl Form {
         }
     }
 
-    /// What the form reads as: the arguments of every field that reads as its
-    /// type, and a message for every one that does not.
-    pub fn read(&self) -> (Args, Vec<(String, String)>) {
-        let mut args = Args::new();
+    /// What the form reads as: the record of its fields where every one
+    /// reads as its type, and a message for every one that does not.
+    pub fn read(&self) -> (Option<Value>, Vec<(String, String)>) {
+        let mut vs = Vec::new();
         let mut bad = Vec::new();
         for ((n, f), v) in self.fields.iter().zip(&self.values) {
             match v.value(&f.ty, n) {
-                Ok(v) => {
-                    args.insert(n.clone(), v);
-                }
+                Ok(v) => vs.push(v),
                 Err(why) => bad.push((n.clone(), why)),
             }
         }
-        (args, bad)
+        (bad.is_empty().then_some(Value::Struct(vs)), bad)
     }
 
-    /// Run every check before calling (`spec/AUTHORING.md` §1.3's form
-    /// validator, `ark::eval::check`): each field that reads as its type
-    /// through its own checks, with the module's messages, and the whole
-    /// input's refinements once every field passes. Nothing is written. The
-    /// arguments, when there is nothing to say against them.
-    pub fn validate(&mut self, module: &Module, schema: &Schema, ctx: &Ctx, store: &dyn Store) -> Option<Args> {
-        let (args, mut messages) = self.read();
-        let checked = module.lookup_function(&self.function).map(|f| {
-            let c = ark::hash::closure(module, f);
-            ark::eval::check(schema, &c, ctx, &args, store)
-        });
-        let values = match checked {
-            Some(Ok(Checked { messages: m, values })) => {
-                messages.extend(m);
-                values
+    /// Run every check before calling (§1.1: the form validator is `parse`):
+    /// each field read as its type, then the input's bytes held to its
+    /// refinements by the module's own `check_form`, each failure said with
+    /// the module's message against the field it is in. Nothing is written.
+    /// The input as its fields' values, when there is nothing to say
+    /// against it.
+    pub fn validate(&mut self, c: &Callable, lib: &Lib, module: &Module) -> Option<Value> {
+        let (read, mut messages) = self.read();
+        if let Some(v) = &read {
+            match c.input_bytes(v) {
+                Err(why) => messages.push((String::new(), why)),
+                Ok(bytes) => match module.get(&c.name).and_then(|h| lib.get(&h)) {
+                    None => messages.push((String::new(), format!("the module has no function {}", c.name))),
+                    Some(f) => {
+                        if let Err(fails) = check_form(&f.cx, &Interp::input_ty(&f.f), &bytes) {
+                            for (path, why) in fails {
+                                let field = match (c.record, path.first()) {
+                                    (true, Some(&i)) => self.fields.get(i as usize).map_or(String::new(), |(n, _)| n.clone()),
+                                    (false, _) => self.fields.first().map_or(String::new(), |(n, _)| n.clone()),
+                                    (true, None) => String::new(),
+                                };
+                                messages.push((field, why));
+                            }
+                        }
+                    }
+                },
             }
-            Some(Err(bug)) => {
-                messages.push((String::new(), format!("the checks could not run: {bug:?}")));
-                Args::new()
-            }
-            None => {
-                messages.push((String::new(), format!("the module has no function {}", self.function)));
-                Args::new()
-            }
-        };
-        // Back in the order of the fields, the whole input's last.
+        }
         let order = |n: &str| self.fields.iter().position(|(f, _)| f == n).unwrap_or(usize::MAX);
         messages.sort_by_key(|(n, _)| order(n));
         self.messages = messages;
-        // What the checks normalised (a trim) is what is sent; a field they
-        // did not reach is sent as it reads.
-        self.messages.is_empty().then(|| {
-            let mut out = args;
-            out.extend(values);
-            out
-        })
+        if self.messages.is_empty() {
+            read
+        } else {
+            None
+        }
     }
 
     /// What is wrong with field `name`, if anything.
@@ -463,7 +477,20 @@ fn slots_of(ty: &Ty, v: &Input, path: Vec<usize>, depth: usize, label: String, i
 /// Whether a line of type `ty` is edited in place — a value on its own —
 /// rather than being a heading for what is inside it.
 pub fn is_value(ty: &Ty) -> bool {
-    is_scalar(ty)
+    ty.is_scalar()
+}
+
+/// A query run on the host's store as who the explorer reads as, its input
+/// the record of its fields: its answer, each element read under the
+/// query's element type.
+pub fn query(src: &Source, c: &Callable, input: &Value) -> Result<Value, String> {
+    let h = src.module.get(&c.name).ok_or_else(|| format!("no function {}", c.name))?;
+    let bytes = c.input_bytes(input)?;
+    let rows = ark5::view::query(src.lib, &h, &bytes, &src.ctx, src.store).map_err(|r| format!("refused: {}", r.0))?;
+    rows.iter()
+        .map(|v| decode(&c.returns, &v.to_bytes()).map_err(|e| format!("a bug: {e}")))
+        .collect::<Result<Vec<_>, _>>()
+        .map(Value::List)
 }
 
 /// What a call came to, kept for the session (`docs/plan-guards.md` D4): a
@@ -477,20 +504,22 @@ pub enum Called {
     Refused(String),
 }
 
-/// A call made from the explorer: the function, its arguments, and what it
-/// came to.
+/// A call made from the explorer: the function, its input as its fields'
+/// values, and what it came to.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Call {
     pub function: String,
-    pub kind: FnKind,
-    pub args: Args,
+    pub kind: Kind,
+    pub args: Value,
+    /// What a query's answer is a list of.
+    pub returns: Ty,
     pub called: Called,
 }
 
 impl Call {
-    /// The arguments, as the vectors' dialect writes them.
+    /// The arguments, as a cell writes them.
     pub fn args_text(&self) -> String {
-        ark::json::json(&Value::Struct(Box::new(self.args.clone())))
+        crate::edit::cell_text(&self.args)
     }
 }
 
@@ -507,7 +536,7 @@ pub struct Pickable {
 impl Pickable {
     /// The id as a cell draws it: its first eight hex digits.
     pub fn short(&self) -> String {
-        hex(&self.id)[..crate::cells::ID_DIGITS].to_string()
+        ark5::hash::hex(&self.id)[..ID_DIGITS].to_string()
     }
 
     /// Everything the line says, which is what a filter matches.
@@ -519,24 +548,32 @@ impl Pickable {
     }
 }
 
+/// A table's rows, each its columns' values, in key order.
+pub fn rows_of(store: &Store, module: &Module, table: &str) -> Vec<Vec<Value>> {
+    let Some((_, t)) = module.schema.table(table) else { return vec![] };
+    let cx = value::types(module);
+    let tys: Vec<Ty> = t.columns.iter().map(|c| value::column_ty(&cx, c)).collect();
+    store.rows(table).filter_map(|r| value::decode_all(&tys, r).ok()).collect()
+}
+
 /// Which of a table's columns label its rows in the picker: the first text
-/// column that is not an id or a reference and that tells the rows apart
-/// well — at least half as well as the one that tells them apart best, and
-/// never a column that holds one value on every row (a kind, an owner),
-/// which says nothing about which row it is. The *first* such, not the
-/// best: a file path is different on every row and a title on nearly every
-/// one, and a person reads the title. After it, the next such column that
-/// holds more than one value, if any does.
-pub fn label_columns(store: &dyn Store, table: &str) -> (Option<String>, Option<String>) {
-    let Some(tbl) = store.schema().lookup_table(table) else {
+/// column that is not a reference and that tells the rows apart well — at
+/// least half as well as the one that tells them apart best, and never a
+/// column that holds one value on every row (a kind, an owner), which says
+/// nothing about which row it is. The *first* such, not the best: a file
+/// path is different on every row and a title on nearly every one, and a
+/// person reads the title. After it, the next such column that holds more
+/// than one value, if any does.
+pub fn label_columns(store: &Store, module: &Module, table: &str) -> (Option<usize>, Option<usize>) {
+    let Some((_, tbl)) = module.schema.table(table) else {
         return (None, None);
     };
-    let rows = store.scan(table);
-    let distinct = |c: &str| {
+    let rows = rows_of(store, module, table);
+    let distinct = |c: usize| {
         let mut seen: Vec<&str> = rows
             .iter()
-            .filter_map(|r| match r.get(c) {
-                Some(Value::Text(t)) if !t.trim().is_empty() => Some(&**t),
+            .filter_map(|r| match &r[c] {
+                Value::Text(t) if !t.trim().is_empty() => Some(t.as_str()),
                 _ => None,
             })
             .collect();
@@ -544,11 +581,12 @@ pub fn label_columns(store: &dyn Store, table: &str) -> (Option<String>, Option<
         seen.dedup();
         seen.len()
     };
-    let candidates: Vec<(String, usize)> = tbl
+    let candidates: Vec<(usize, usize)> = tbl
         .columns
         .iter()
-        .filter(|c| c.ty == Ty::Text && !tbl.refs.iter().any(|r| r.column == c.name))
-        .map(|c| (c.name.clone(), distinct(&c.name)))
+        .enumerate()
+        .filter(|(i, c)| c.decl == "Text" && !tbl.refs.iter().any(|r| r.column == *i))
+        .map(|(i, _)| (i, distinct(i)))
         .filter(|(_, n)| *n > 0)
         .collect();
     let best = candidates.iter().map(|(_, n)| *n).max().unwrap_or(0);
@@ -556,39 +594,27 @@ pub fn label_columns(store: &dyn Store, table: &str) -> (Option<String>, Option<
     let Some(first) = candidates.iter().position(|(_, n)| *n >= enough) else {
         return (None, None);
     };
-    let second = candidates
-        .iter()
-        .enumerate()
-        .find(|(i, (_, n))| *i != first && *n > 1)
-        .map(|(_, (c, _))| c.clone());
-    (Some(candidates[first].0.clone()), second)
+    let second = candidates.iter().enumerate().find(|(i, (_, n))| *i != first && *n > 1).map(|(_, (c, _))| *c);
+    (Some(candidates[first].0), second)
 }
 
 /// The rows of `table` an `Id(table)` field can name, labelled, in the
-/// store's order. A row is named by its key, which for such a table is one
-/// id.
-pub fn pickables(store: &dyn Store, table: &str) -> Vec<Pickable> {
-    let Some(tbl) = store.schema().lookup_table(table) else {
-        return vec![];
-    };
-    let (first, second) = label_columns(store, table);
-    let text = |r: &ark::store::Row, c: &Option<String>| match c.as_ref().and_then(|c| r.get(c)) {
-        Some(Value::Text(t)) if !t.trim().is_empty() => Some(t.to_string()),
+/// store's order: a row named by its key, which for such a table is one id.
+pub fn pickables(store: &Store, module: &Module, table: &str) -> Vec<Pickable> {
+    let (first, second) = label_columns(store, module, table);
+    let text = |r: &[Value], c: Option<usize>| match c.map(|c| &r[c]) {
+        Some(Value::Text(t)) if !t.trim().is_empty() => Some(t.clone()),
         _ => None,
     };
-    store
-        .scan(table)
+    rows_of(store, module, table)
         .iter()
         .filter_map(|r| {
-            let id = match tbl.key_of(r).as_slice() {
-                [Value::Id(id)] => *id,
-                _ => return None,
-            };
-            let short = hex(&id)[..crate::cells::ID_DIGITS].to_string();
+            let Some(Value::Id(id)) = r.first() else { return None };
+            let short = ark5::hash::hex(id)[..ID_DIGITS].to_string();
             Some(Pickable {
-                id,
-                label: text(r, &first).unwrap_or(short),
-                secondary: text(r, &second),
+                id: *id,
+                label: text(r, first).unwrap_or(short),
+                secondary: text(r, second),
             })
         })
         .collect()

@@ -3,9 +3,9 @@
 //! wasm and served by the server on its admin listener, or run natively
 //! against one (`ark-admin http://127.0.0.1:8788`).
 //!
-//! What it is shown is one [`State`] per request: the module, the store,
-//! the log's last lines, the connections and the `Verify` answers, decoded
-//! into a store the explorer reads like any other. What it writes it asks
+//! What it is shown is one [`State`] per request: the module and its
+//! functions, the store, the log's last lines and the connections, read
+//! into a store and a library the explorer reads like any other. What it writes it asks
 //! the server to write — a raw write, or a domain mutation through the
 //! CRUD the module exposes — and the server authors it as itself. A
 //! request is answered after the write, and the state is read again.
@@ -18,33 +18,63 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use ark::eval::{Args, Ctx};
-use ark::ir::Module;
-use ark::log::Seq;
-use ark::store::{Change, MemoryStore};
-use ark::value::TableName;
+use std::sync::Arc;
+
+use ark5::author::Node;
+use ark5::log::{EntryId, Seq};
+use ark5::module::{Lib, Module};
+use ark5::peer::Ctx;
+use ark5::store::{Change, Store};
 use iced::widget::{column, container, text};
 use iced::{Element, Length, Subscription, Task};
 
-use crate::data::{Connection, CrudVerbs, Line, LogView, Source, Ticket, Verdict, Verified, Writer};
+use crate::data::{Connection, CrudVerbs, Line, LogView, Source, Ticket, Verdict, Writer};
 use crate::model::{Explorer, Msg, Outcome};
-use crate::wire::{author_body, raw_body, State};
+use crate::wire::{author_body, raw_body, Hello, State};
 
-/// The state as the explorer reads it: the module decoded, the store laid
-/// out under its schema, the rest as it came.
+/// The state as the explorer reads it: the module decoded, its functions
+/// checked into a library, the store laid out under its schema, the rest as
+/// it came.
 pub struct Loaded {
     pub module: Module,
-    pub store: MemoryStore,
+    pub lib: Lib,
+    pub store: Store,
     pub state: State,
 }
 
 impl Loaded {
-    /// A state as the server sent it, read.
+    /// A state as the server sent it, read: every body checked, callees
+    /// before their callers, as a peer loads what it is sent.
     pub fn of(state: State) -> Result<Loaded, String> {
-        let v = ark::canon::decode(&state.module).map_err(|e| format!("the module: {e}"))?;
-        let module = ark::ir::module_from_value(&v).map_err(|e| format!("the module: {e}"))?;
-        let store = MemoryStore::from_value(module.schema.clone(), &state.store);
-        Ok(Loaded { module, store, state })
+        let module = Module::from_bytes(&state.module).map_err(|e| format!("the module: {e}"))?;
+        let lib = Lib::default();
+        let mut left: Vec<&Vec<u8>> = state.bodies.iter().collect();
+        while !left.is_empty() {
+            let before = left.len();
+            left.retain(|b| lib.load(&module.schema, b).is_err());
+            if left.len() == before {
+                return Err(format!("{} function bodies do not check", left.len()));
+            }
+        }
+        ark5::module::verify(&module, &lib).map_err(|e| format!("the module: {e}"))?;
+        let store = Store::from_rows(Arc::new(module.schema.clone()), &state.rows).map_err(|e| format!("the store: {e}"))?;
+        Ok(Loaded { module, lib, store, state })
+    }
+
+    fn source(&self) -> Source<'_> {
+        Source {
+            store: &self.store,
+            module: &self.module,
+            lib: &self.lib,
+            log: self,
+            ctx: Ctx {
+                id: EntryId::default(),
+                actor: self.state.who.clone(),
+                session: "admin".into(),
+                roles: vec![],
+                now: 0,
+            },
+        }
     }
 }
 
@@ -58,16 +88,13 @@ impl LogView for Loaded {
     fn connections(&self) -> Vec<Connection> {
         self.state.connections.clone()
     }
-    fn verifies(&self) -> Vec<Verified> {
-        self.state.verifies.clone()
-    }
 }
 
 /// A write the page asks the server for.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Request {
     Raw(Change),
-    Author(String, Args),
+    Author(String, Vec<u8>),
 }
 
 impl Request {
@@ -83,7 +110,7 @@ impl Request {
 /// The page as a writer: what it is asked for is queued, to be sent once
 /// the explorer is done with the message, and answered later.
 pub struct Outbox {
-    exposed: Vec<(TableName, CrudVerbs)>,
+    exposed: Vec<(String, CrudVerbs)>,
     raw: bool,
     who: String,
     pub queued: Vec<Request>,
@@ -95,12 +122,12 @@ pub struct Outbox {
 }
 
 impl Writer for Outbox {
-    fn exposed(&self) -> Vec<(TableName, CrudVerbs)> {
+    fn exposed(&self) -> Vec<(String, CrudVerbs)> {
         self.exposed.clone()
     }
-    fn author(&mut self, function: &str, args: Args) -> Result<Ticket, String> {
+    fn author(&mut self, function: &str, input: Vec<u8>) -> Result<Ticket, String> {
         let ticket = Ticket((self.next + self.queued.len()).to_string());
-        self.queued.push(Request::Author(function.into(), args));
+        self.queued.push(Request::Author(function.into(), input));
         Ok(ticket)
     }
     fn verdict(&self, ticket: &Ticket) -> Verdict {
@@ -248,7 +275,7 @@ impl Page {
             }
             Message::Loaded(r) => {
                 self.busy = false;
-                match r.and_then(|t| State::from_json(&t)).and_then(Loaded::of) {
+                match r.and_then(|t| State::from_body(&t)).and_then(Loaded::of) {
                     Ok(l) => {
                         self.loaded = Some(l);
                         self.generation += 1;
@@ -271,13 +298,7 @@ impl Page {
             }
             Message::Explorer(msg) => {
                 let Some(l) = &self.loaded else { return Task::none() };
-                let src = Source {
-                    store: &l.store,
-                    schema: &l.module.schema,
-                    module: &l.module,
-                    log: l,
-                    ctx: Ctx::new(l.state.who.clone(), "admin"),
-                };
+                let src = l.source();
                 let mut w = Outbox::of(&l.state, self.sent.len(), &self.answers);
                 // Esc from the top: there is nothing behind the page to go
                 // back to, so the explorer stays.
@@ -299,13 +320,7 @@ impl Page {
     /// it last drew is lit, and fades.
     pub fn observe(&mut self) {
         let Some(l) = &self.loaded else { return };
-        let src = Source {
-            store: &l.store,
-            schema: &l.module.schema,
-            module: &l.module,
-            log: l,
-            ctx: Ctx::new(l.state.who.clone(), "admin"),
-        };
+        let src = l.source();
         self.explorer.observe(&src, self.generation, now_ms());
     }
 
@@ -313,13 +328,7 @@ impl Page {
         let body: Element<'_, Message> = match &self.loaded {
             None => text(self.note.clone()).size(13).into(),
             Some(l) => {
-                let src = Source {
-                    store: &l.store,
-                    schema: &l.module.schema,
-                    module: &l.module,
-                    log: l,
-                    ctx: Ctx::new(l.state.who.clone(), "admin"),
-                };
+                let src = l.source();
                 let w = Outbox::of(&l.state, self.sent.len(), &self.answers);
                 let page = self.explorer.view(&src, &w).map(Message::Explorer);
                 if self.note.is_empty() {
@@ -348,13 +357,8 @@ impl Page {
 
 /// `hello`'s answer: whether the page is open, and where to sign in.
 pub fn hello_of(text: &str) -> Result<(bool, Option<String>), String> {
-    let v = ark::json::decode(text).map_err(|e| e.to_string())?;
-    let open = matches!(v.as_struct().get("open"), Some(ark::value::Value::Bool(true)));
-    let server = match v.as_struct().get("server") {
-        Some(ark::value::Value::Text(s)) => Some(s.to_string()),
-        _ => None,
-    };
-    Ok((open, server))
+    let h: Hello = crate::wire::read(text)?;
+    Ok((h.open, h.server))
 }
 
 /// One request: the body of a success, or the status and body of anything

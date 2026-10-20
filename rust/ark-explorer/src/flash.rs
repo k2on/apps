@@ -17,7 +17,7 @@
 
 use std::collections::BTreeMap;
 
-use ark::value::Value;
+use crate::value::Value;
 
 /// How long a change stays lit, fading all the while.
 pub const FADE_MS: u64 = 2000;

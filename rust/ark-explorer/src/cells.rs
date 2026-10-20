@@ -21,10 +21,8 @@
 //!   An id is drawn as its first eight hex digits — enough to tell rows
 //!   apart, as a short commit hash is — and whole in the detail line.
 
-use ark::store::Row;
-use ark::value::{hex, Value};
-
 use crate::edit::cell_text;
+use crate::value::{Ty, Value};
 
 /// The narrowest a column is, in characters.
 pub const MIN_CHARS: usize = 6;
@@ -39,14 +37,13 @@ pub const SAMPLE: usize = 200;
 pub const CHAR_PX: f32 = 7.5;
 /// The gap after every column: the same gap `arkui`'s table leaves.
 pub const GAP_PX: f32 = arkui::table::SPACING;
-/// How many hex digits of an id a cell draws.
-pub const ID_DIGITS: usize = 8;
+pub use crate::form::ID_DIGITS;
 
 /// A value as one line of a cell: an id short, everything else as the
 /// editor would start it ([`cell_text`]), with its line breaks laid flat.
 pub fn shown(v: &Value) -> String {
     match v {
-        Value::Id(id) => hex(id)[..ID_DIGITS].to_string(),
+        Value::Id(id) => ark5::hash::hex(id)[..ID_DIGITS].to_string(),
         other => cell_text(other).chars().map(|c| if c.is_control() { ' ' } else { c }).collect(),
     }
 }
@@ -87,14 +84,15 @@ pub struct Grid {
 }
 
 impl Grid {
-    /// Rows under `columns`, measured over `sample` (a table measures over
-    /// more rows than the page it draws, so a column does not change width
-    /// from one page to the next). `labels` are what the headings say, when
-    /// they say more than the column's name.
-    pub fn of_rows(columns: &[String], labels: &[String], rows: &[Row], sample: &[Row]) -> Grid {
-        let widths = columns
+    /// Rows under `columns`, each its columns' values in order, measured
+    /// over `sample` (a table measures over more rows than the page it
+    /// draws, so a column does not change width from one page to the next).
+    /// `labels` are what the headings say, when they say more than the
+    /// column's name.
+    pub fn of_rows(columns: &[String], labels: &[String], rows: &[Vec<Value>], sample: &[Vec<Value>]) -> Grid {
+        let widths = labels
             .iter()
-            .zip(labels)
+            .enumerate()
             .map(|(c, l)| width_of(l, sample.iter().filter_map(|r| r.get(c))))
             .collect();
         Grid {
@@ -102,40 +100,38 @@ impl Grid {
             headings: labels.to_vec(),
             rows: rows
                 .iter()
-                .map(|r| columns.iter().map(|c| r.get(c).cloned().unwrap_or(Value::Null)).collect())
+                .map(|r| (0..columns.len()).map(|c| r.get(c).cloned().unwrap_or(Value::Null)).collect())
                 .collect(),
             widths,
         }
     }
 
-    /// A query's answer as a table: a list of structs is a row each under the
-    /// union of their fields, in the order they are first met; a struct is
-    /// one row; anything else is one column, `value`, a row per element of a
-    /// list or one row for a single value.
-    pub fn of_value(v: &Value) -> Grid {
+    /// A query's answer as a table: a list of records is a row each under
+    /// the record's fields, as the query's type names them; anything else is
+    /// one column, `value`, a row per element.
+    pub fn of_value(ty: &Ty, v: &Value) -> Grid {
         let items: Vec<Value> = match v {
             Value::List(xs) => xs.to_vec(),
             other => vec![other.clone()],
         };
-        let structs = !items.is_empty() && items.iter().all(|x| matches!(x, Value::Struct(_)));
-        let (columns, rows): (Vec<String>, Vec<Vec<Value>>) = if structs {
-            let mut columns: Vec<String> = Vec::new();
-            for x in &items {
-                for k in x.as_struct().keys() {
-                    if !columns.contains(k) {
-                        columns.push(k.clone());
-                    }
-                }
-            }
-            let rows = items
-                .iter()
-                .map(|x| columns.iter().map(|c| x.as_struct().get(c).cloned().unwrap_or(Value::Null)).collect())
-                .collect();
-            (columns, rows)
-        } else {
-            (vec!["value".to_string()], items.into_iter().map(|x| vec![x]).collect())
+        let (columns, rows): (Vec<String>, Vec<Vec<Value>>) = match ty {
+            Ty::Struct(fs) => (
+                fs.iter().map(|(n, _)| n.clone()).collect(),
+                items
+                    .into_iter()
+                    .map(|x| match x {
+                        Value::Struct(vs) => vs,
+                        other => vec![other],
+                    })
+                    .collect(),
+            ),
+            _ => (vec!["value".to_string()], items.into_iter().map(|x| vec![x]).collect()),
         };
-        let widths = columns.iter().enumerate().map(|(j, c)| width_of(c, rows.iter().map(|r| &r[j]))).collect();
+        let widths = columns
+            .iter()
+            .enumerate()
+            .map(|(j, c)| width_of(c, rows.iter().filter_map(|r| r.get(j))))
+            .collect();
         Grid {
             headings: columns.clone(),
             columns,

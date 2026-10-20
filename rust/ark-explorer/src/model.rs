@@ -7,16 +7,14 @@ use std::collections::BTreeMap;
 use arkui::vim::{self, Action, Grid, Motion};
 use iced::keyboard::{Key, Modifiers};
 
-use ark::ir::FnKind;
-use ark::schema::Ty;
-use ark::store::Row;
-use ark::value::{TableName, Value};
-
 use crate::cells;
 use crate::data::{CrudVerbs, Source, Writer};
 use crate::edit::{self, Route};
 use crate::flash;
-use crate::form::{self, Call, Called, Form, Picker};
+use crate::form::{self, Call, Called, Form, Kind, Picker};
+use crate::value::{self, Ty, Value};
+
+type TableName = String;
 
 /// How many rows of a table are drawn at once: the page the cursor is on.
 pub const PAGE_ROWS: usize = 50;
@@ -29,9 +27,9 @@ pub enum Screen {
     Tables,
     /// One table's rows, a page at a time.
     Table(TableName),
-    /// A query by name, or a plan, run read-only.
+    /// A query by name, run read-only.
     Console,
-    /// The log: its lines, the connections, the `Verify` answers.
+    /// The log: its lines and the connections.
     Log,
     /// Every query and mutation of the module, by router, and the calls
     /// made this session.
@@ -58,7 +56,8 @@ impl Screen {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Editing {
     pub table: TableName,
-    pub key: Vec<Value>,
+    /// The row's key, its leading bytes.
+    pub key: Vec<u8>,
     pub column: String,
     pub text: String,
 }
@@ -207,9 +206,10 @@ impl Explorer {
         }
     }
 
-    /// The tables the store has, in its schema's order.
+    /// The tables of the store's space, in its schema's order.
     pub fn tables(src: &Source) -> Vec<TableName> {
-        src.store.schema().tables().map(|t| t.name.clone()).collect()
+        let space = src.store.space();
+        src.schema().tables.iter().filter(|t| t.space == space).map(|t| t.name.clone()).collect()
     }
 
     /// The CRUD exposed for `table`, as the writer says it.
@@ -221,17 +221,29 @@ impl Explorer {
     /// is drawn where the store holds it, and one a person's union leaves
     /// out is not.
     pub fn columns(src: &Source, table: &str) -> Vec<String> {
-        src.store
-            .schema()
-            .lookup_table(table)
-            .map(|t| t.columns.iter().map(|c| c.name.clone()).collect())
+        src.schema()
+            .table(table)
+            .map(|(_, t)| t.columns.iter().map(|c| c.name.clone()).collect())
             .unwrap_or_default()
     }
 
-    /// The row under the cursor, on a table's screen.
-    pub fn row_under(&self, src: &Source) -> Option<(TableName, Row)> {
+    /// How many rows a table holds.
+    pub fn count(src: &Source, table: &str) -> usize {
+        src.store.rows(table).count()
+    }
+
+    /// The row under the cursor, on a table's screen: its bytes.
+    pub fn row_under(&self, src: &Source) -> Option<(TableName, Vec<u8>)> {
         let Screen::Table(t) = &self.screen else { return None };
-        src.store.scan(t).into_iter().nth(self.row_at).map(|r| (t.clone(), r))
+        src.store.rows(t).nth(self.row_at).map(|r| (t.clone(), r.to_vec()))
+    }
+
+    /// A row's columns' values.
+    fn values(src: &Source, table: &str, row: &[u8]) -> Vec<Value> {
+        let Some((_, t)) = src.schema().table(table) else { return vec![] };
+        let cx = value::types(src.module);
+        let tys: Vec<Ty> = t.columns.iter().map(|c| value::column_ty(&cx, c)).collect();
+        value::decode_all(&tys, row).unwrap_or_default()
     }
 
     /// Which page of the rows the cursor is on, and how many there are.
@@ -243,12 +255,13 @@ impl Explorer {
     /// as wide as its header and its first [`cells::SAMPLE`] rows.
     pub fn table_grid(&self, src: &Source, table: &str) -> cells::Grid {
         let columns = Explorer::columns(src, table);
-        let key: Vec<String> = src.store.schema().lookup_table(table).map(|t| t.key.clone()).unwrap_or_default();
+        let key = src.schema().table(table).map_or(0, |(_, t)| t.key);
         let labels: Vec<String> = columns
             .iter()
-            .map(|c| if key.contains(c) { format!("{c} \u{b7} key") } else { c.clone() })
+            .enumerate()
+            .map(|(i, c)| if i < key { format!("{c} \u{b7} key") } else { c.clone() })
             .collect();
-        let all = src.store.scan(table);
+        let all = form::rows_of(src.store, src.module, table);
         let (page, _) = self.page(all.len());
         let from = (page * PAGE_ROWS).min(all.len());
         let to = (from + PAGE_ROWS).min(all.len());
@@ -261,7 +274,8 @@ impl Explorer {
     pub fn detail(&self, src: &Source) -> Option<String> {
         let (t, row) = self.row_under(src)?;
         let column = Explorer::columns(src, &t).get(self.column_at)?.clone();
-        Some(format!("{column}: {}", row.get(&column).map(edit::cell_text).unwrap_or_default()))
+        let v = Explorer::values(src, &t, &row).into_iter().nth(self.column_at)?;
+        Some(format!("{column}: {}", edit::cell_text(&v)))
     }
 
     /// What a host says on every tick (`docs/plan-guards.md` D4): the time,
@@ -287,7 +301,7 @@ impl Explorer {
                 let Some(i) = self.calls.iter().rposition(|c| c.function == f) else {
                     return;
                 };
-                if moved && self.calls[i].kind == FnKind::Query {
+                if moved && self.calls[i].kind == Kind::Query {
                     let args = self.calls[i].args.clone();
                     self.calls[i].called = match query(src, &f, &args) {
                         Ok(v) => Called::Answer(v),
@@ -295,7 +309,7 @@ impl Explorer {
                     };
                 }
                 if let Called::Answer(v) = &self.calls[i].called {
-                    let g = cells::Grid::of_value(v);
+                    let g = cells::Grid::of_value(&self.calls[i].returns, v);
                     let k = flash::key_column(&g.rows, g.columns.len());
                     let what = format!("answer {i} {k:?}");
                     if moved || !self.answer_seen.tracks(&what, &g.columns) {
@@ -320,14 +334,12 @@ impl Explorer {
     /// where they were while they fade, and how each drawn row is lit.
     pub fn lit_table(&self, src: &Source, t: &str) -> (cells::Grid, Vec<flash::RowLight>) {
         let grid = self.table_grid(src, t);
-        let all = src.store.scan(t).len();
+        let rows = form::rows_of(src.store, src.module, t);
+        let all = rows.len();
         let (page, pages) = self.page(all);
         let from = (page * PAGE_ROWS).min(all);
-        let tbl = src.store.schema().lookup_table(t);
-        let keys: Vec<flash::Key> = src.store.scan(t)[from..(from + PAGE_ROWS).min(all)]
-            .iter()
-            .map(|r| tbl.map(|tbl| tbl.key_of(r)).unwrap_or_default())
-            .collect();
+        let key = src.schema().table(t).map_or(0, |(_, t)| t.key);
+        let keys: Vec<flash::Key> = rows[from..(from + PAGE_ROWS).min(all)].iter().map(|r| r[..key.min(r.len())].to_vec()).collect();
         flash::light(&grid, &keys, from, page + 1 >= pages, &self.table_seen, self.now)
     }
 
@@ -341,7 +353,11 @@ impl Explorer {
 
     /// Every function a person can call, by router.
     pub fn callables(src: &Source) -> Vec<form::Callable> {
-        form::callables(src.module)
+        form::callables(src.module, src.lib)
+    }
+
+    fn callable(src: &Source, name: &str) -> Option<form::Callable> {
+        Explorer::callables(src).into_iter().find(|c| c.name == name)
     }
 
     /// The form of the function on screen.
@@ -363,8 +379,9 @@ impl Explorer {
 
     /// The last call's answer, as a table, where it was a query's.
     pub fn answer_grid(&self) -> Option<cells::Grid> {
-        match &self.last_call()?.called {
-            Called::Answer(v) => Some(cells::Grid::of_value(v)),
+        let c = self.last_call()?;
+        match &c.called {
+            Called::Answer(v) => Some(cells::Grid::of_value(&c.returns, v)),
             _ => None,
         }
     }
@@ -387,7 +404,7 @@ impl Explorer {
     /// leaves.
     pub fn pick_rows(&self, src: &Source) -> (Vec<form::Pickable>, Vec<usize>) {
         let Some(p) = &self.picker else { return (vec![], vec![]) };
-        let all = form::pickables(src.store, &p.table);
+        let all = form::pickables(src.store, src.module, &p.table);
         let shown = form::filter(&all, &p.filter);
         (all, shown)
     }
@@ -475,7 +492,7 @@ impl Explorer {
             Msg::Query(q) => self.query = q,
             Msg::Args(a) => self.args = a,
             Msg::Run => {
-                self.answer = Some(edit::console(src, &self.query, &self.args).map(|v| ark::json::json(&v)));
+                self.answer = Some(edit::console(src, &self.query, &self.args).map(|v| edit::cell_text(&v)));
             }
             Msg::Close => return Outcome::Close,
             Msg::Function(i) => self.open_function(src, i),
@@ -537,7 +554,9 @@ impl Explorer {
         change(f);
         let n = f.slots().len();
         f.at = f.at.min(n);
-        f.validate(src.module, src.store.schema(), &src.ctx, src.store);
+        if let Some(c) = Explorer::callable(src, &f.function) {
+            f.validate(&c, src.lib, src.module);
+        }
     }
 
     /// The picker, on the id field at `path`: the rows of its table.
@@ -548,7 +567,7 @@ impl Explorer {
         if let Some(i) = f.slots().iter().position(|s| s.path == path) {
             f.at = i;
         }
-        self.note = match form::pickables(src.store, &table).len() {
+        self.note = match form::pickables(src.store, src.module, &table).len() {
             0 => format!("{table} holds no rows here"),
             n => format!(
                 "{n} row{} of {table}: j and k walk, / filters, <Enter> chooses",
@@ -582,31 +601,32 @@ impl Explorer {
     /// then a query run on the host's store, or a mutation authored through
     /// the host's writer as a button would author it.
     fn call(&mut self, src: &Source, w: &mut dyn Writer) {
+        let Some(c) = self.form().and_then(|f| Explorer::callable(src, &f.function)) else { return };
         let Some(f) = self.form_mut() else { return };
-        let Some(args) = f.validate(src.module, src.store.schema(), &src.ctx, src.store) else {
+        let Some(args) = f.validate(&c, src.lib, src.module) else {
             let said: Vec<String> = f.messages.iter().map(|(_, m)| m.clone()).collect();
             self.note = format!("not called: {}", said.join("; "));
             return;
         };
-        let (name, kind) = (f.function.clone(), f.kind);
-        self.run_call(src, w, name, kind, args);
+        self.run_call(src, w, &c, args);
     }
 
-    fn run_call(&mut self, src: &Source, w: &mut dyn Writer, function: String, kind: FnKind, args: ark::eval::Args) {
-        let called = match kind {
-            FnKind::Query => match query(src, &function, &args) {
+    fn run_call(&mut self, src: &Source, w: &mut dyn Writer, c: &form::Callable, args: Value) {
+        let called = match c.kind {
+            Kind::Query => match form::query(src, c, &args) {
                 Ok(v) => Called::Answer(v),
                 Err(why) => Called::Failed(why),
             },
-            _ => match w.author(&function, args.clone()) {
+            Kind::Mutation => match c.input_bytes(&args).and_then(|b| w.author(&c.name, b)) {
                 Ok(t) => Called::Authored(t),
                 Err(why) => Called::Refused(why),
             },
         };
         let call = Call {
-            function,
-            kind,
+            function: c.name.clone(),
+            kind: c.kind,
             args,
+            returns: c.returns.clone(),
             called,
         };
         self.note = format!("{}: {}", call.function, Explorer::outcome(&call, w));
@@ -618,22 +638,21 @@ impl Explorer {
     /// Call recent call `i` again, with the arguments it had.
     fn again(&mut self, src: &Source, w: &mut dyn Writer, i: usize) {
         let Some(c) = self.calls.get(i).cloned() else { return };
-        if let Some(callable) = Explorer::callables(src).into_iter().find(|x| x.name == c.function) {
-            self.forms.insert(c.function.clone(), Form::filled(&callable, &c.args));
-            self.screen = Screen::Call(c.function.clone());
-        }
+        let Some(callable) = Explorer::callable(src, &c.function) else { return };
+        self.forms.insert(c.function.clone(), Form::filled(&callable, &c.args));
+        self.screen = Screen::Call(c.function.clone());
         self.picker = None;
-        self.run_call(src, w, c.function, c.kind, c.args);
+        self.run_call(src, w, &callable, c.args);
     }
 
     /// Put recent call `i`'s arguments back in its form, to change and call.
     fn recall(&mut self, src: &Source, i: usize) {
         let Some(c) = self.calls.get(i).cloned() else { return };
-        let Some(callable) = Explorer::callables(src).into_iter().find(|x| x.name == c.function) else {
+        let Some(callable) = Explorer::callable(src, &c.function) else {
             return;
         };
         let mut f = Form::filled(&callable, &c.args);
-        f.validate(src.module, src.store.schema(), &src.ctx, src.store);
+        f.validate(&callable, src.lib, src.module);
         self.forms.insert(c.function.clone(), f);
         self.picker = None;
         self.in_answer = false;
@@ -826,7 +845,7 @@ impl Explorer {
                     self.column_at = Grid::row(n).step(self.column_at, m).unwrap_or(self.column_at);
                 }
                 _ => {
-                    let n = src.store.scan(t).len();
+                    let n = Explorer::count(src, t);
                     self.row_at = column(n, self.row_at);
                 }
             },
@@ -841,9 +860,22 @@ impl Explorer {
         let Some(column) = Explorer::columns(src, &t).get(self.column_at).cloned() else {
             return;
         };
-        let key = src.store.schema().lookup_table(&t).map(|tbl| tbl.key_of(&row)).unwrap_or_default();
-        let text = row.get(&column).map(edit::cell_text).unwrap_or_default();
+        let Some((_, tbl)) = src.schema().table(&t) else { return };
+        let key = row[..tbl.key_len(&row).unwrap_or(0)].to_vec();
+        let text = Explorer::values(src, &t, &row).get(self.column_at).map(edit::cell_text).unwrap_or_default();
         self.editing = Some(Editing { table: t, key, column, text });
+    }
+
+    /// The edit's text read as its column's value, and the row as it stands
+    /// now: what the edit would change, or why it cannot.
+    fn read_edit(src: &Source, e: &Editing) -> Result<(Vec<u8>, Value, bool), String> {
+        let (_, tbl) = src.schema().table(&e.table).ok_or_else(|| format!("no table {}", e.table))?;
+        let c = tbl.column(&e.column).ok_or_else(|| format!("{} has no column {}", e.table, e.column))?;
+        let ty = value::column_ty(&value::types(src.module), &tbl.columns[c]);
+        let value = edit::parse_cell(&e.column, &ty, &e.text)?;
+        let old = ark5::store::Read::get(src.store, &e.table, &e.key).ok_or_else(|| format!("the row of {} is gone", e.table))?;
+        let same = Explorer::values(src, &e.table, &old).get(c) == Some(&value);
+        Ok((old, value, same))
     }
 
     /// Commit the edit in progress: its text read as the column's value, the
@@ -851,11 +883,8 @@ impl Explorer {
     fn commit(&mut self, src: &Source, w: &mut dyn Writer) {
         let Some(e) = self.editing.take() else { return };
         let outcome = (|| {
-            let tbl = src.store.schema().lookup_table(&e.table).ok_or_else(|| format!("no table {}", e.table))?;
-            let col = tbl.column(&e.column).ok_or_else(|| format!("{} has no column {}", e.table, e.column))?;
-            let value = edit::parse_cell(col, &e.text)?;
-            let old = src.store.get(&e.table, &e.key).ok_or_else(|| format!("the row of {} is gone", e.table))?;
-            if old.get(&e.column) == Some(&value) {
+            let (old, value, same) = Explorer::read_edit(src, &e)?;
+            if same {
                 return Ok("nothing to change".to_string());
             }
             let verbs = Explorer::verbs(w, &e.table);
@@ -864,7 +893,7 @@ impl Explorer {
                 can_raw: w.can_raw(),
                 force_raw: self.raw,
             };
-            let route = edit::route_edit(src.schema, via, &e.table, &old, &e.column, value)?;
+            let route = edit::route_edit(src.module, via, &e.table, &old, &e.column, value)?;
             let said = route.describe();
             route.send(w)?;
             Ok(format!("{}.{} written, {said}", e.table, e.column))
@@ -886,19 +915,12 @@ impl Explorer {
     /// is said, and not left open on a row the cursor has left.
     pub fn end_edit(&mut self, src: &Source, w: &mut dyn Writer) {
         let Some(e) = &self.editing else { return };
-        let read = src
-            .store
-            .schema()
-            .lookup_table(&e.table)
-            .and_then(|t| t.column(&e.column))
-            .map(|c| edit::parse_cell(c, &e.text));
-        let old = src.store.get(&e.table, &e.key);
-        match (read, old) {
-            (Some(Ok(v)), Some(old)) if old.get(&e.column) != Some(&v) => {
+        match Explorer::read_edit(src, e) {
+            Ok((_, _, false)) => {
                 self.commit(src, w);
                 self.editing = None;
             }
-            (Some(Err(why)), _) => {
+            Err(why) if !why.contains("is gone") => {
                 self.note = format!("edit dropped, {why}");
                 self.editing = None;
             }
@@ -910,8 +932,8 @@ impl Explorer {
     /// its key, not by where the cursor is.
     pub fn editing_at(&self, src: &Source) -> Option<usize> {
         let e = self.editing.as_ref()?;
-        let tbl = src.store.schema().lookup_table(&e.table)?;
-        src.store.scan(&e.table).iter().position(|r| tbl.key_of(r) == e.key)
+        let (_, tbl) = src.schema().table(&e.table)?;
+        src.store.rows(&e.table).position(|r| tbl.key_len(r).is_ok_and(|n| r[..n] == e.key[..]))
     }
 
     /// Delete the row under the cursor, routed as an edit is.
@@ -923,7 +945,7 @@ impl Explorer {
             can_raw: w.can_raw(),
             force_raw: self.raw,
         };
-        let outcome = edit::route_delete(src.schema, via, &t, &row).and_then(|route: Route| {
+        let outcome = edit::route_delete(src.module, via, &t, &row).and_then(|route: Route| {
             let said = route.describe();
             route.send(w).map(|()| said)
         });
@@ -934,31 +956,20 @@ impl Explorer {
     }
 }
 
-/// A query by name, run on the host's store as who the explorer reads as —
-/// the console's path, with the arguments a form read.
-fn query(src: &Source, name: &str, args: &ark::eval::Args) -> Result<Value, String> {
-    let f = src.module.lookup_function(name).ok_or_else(|| format!("no function {name}"))?;
-    if f.kind != FnKind::Query {
-        return Err(format!("{name} is a {}, not a query", f.kind.name()));
-    }
-    let c = ark::hash::closure(src.module, f);
-    ark::eval::query_closure(src.store.schema(), &c, &src.ctx, args, src.store).map_err(|e| match e {
-        ark::eval::EvalFault::Verdict(r) => format!("refused: {}", ark::protocol::refusal_text(&r)),
-        ark::eval::EvalFault::Bug(b) => format!("a bug: {b:?}"),
-    })
+/// A query by its binding, run on the host's store as who the explorer
+/// reads as, with the input a form read.
+fn query(src: &Source, name: &str, args: &Value) -> Result<Value, String> {
+    let c = Explorer::callable(src, name).ok_or_else(|| format!("no query {name}"))?;
+    form::query(src, &c, args)
 }
 
-/// A table's rows as the diff takes them: each its key and its columns'
-/// values, in the store's order.
-fn table_rows(src: &Source, t: &str, columns: &[String]) -> Vec<(flash::Key, Vec<Value>)> {
-    let tbl = src.store.schema().lookup_table(t);
-    src.store
-        .scan(t)
-        .iter()
-        .map(|r| {
-            let key = tbl.map(|tbl| tbl.key_of(r)).unwrap_or_default();
-            (key, columns.iter().map(|c| r.get(c).cloned().unwrap_or(Value::Null)).collect())
-        })
+/// A table's rows as the diff takes them: each its key's values and its
+/// columns' values, in the store's order.
+fn table_rows(src: &Source, t: &str, _columns: &[String]) -> Vec<(flash::Key, Vec<Value>)> {
+    let key = src.schema().table(t).map_or(0, |(_, t)| t.key);
+    form::rows_of(src.store, src.module, t)
+        .into_iter()
+        .map(|r| (r[..key.min(r.len())].to_vec(), r))
         .collect()
 }
 
