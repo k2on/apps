@@ -234,6 +234,11 @@ impl Hub {
         self.conns.get(&c).map(|c| &c.who)
     }
 
+    /// Every connection open, and who it is.
+    pub fn connections(&self) -> impl Iterator<Item = (ConnId, &Who)> {
+        self.conns.iter().map(|(c, conn)| (*c, &conn.who))
+    }
+
     /// The connections of a session, to close when it is revoked.
     pub fn of_session(&self, session: &str) -> Vec<ConnId> {
         self.conns.iter().filter(|(_, c)| c.who.session == session).map(|(i, _)| *i).collect()
