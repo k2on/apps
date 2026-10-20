@@ -2,11 +2,12 @@
 //! cell edit and a row delete become and which writer they reach, what a
 //! cell's or a field's text reads back as, how a table sorts and lights what
 //! changed, what a call becomes, and how the keys walk it — over a module of
-//! two tables written with `#[ark::*]` (§1.12).
+//! two tables written with the Rust builders (§1.15).
 
 use std::sync::OnceLock;
 
-use ark::author::{Domain, Id, Input, Int, Node, Row, Schema, Sum, Table, Text};
+use ark::author::Kind as FnKind;
+use ark::author::{assemble, if_, refuse_, seq, unit, Def1, Domain, Fun, Id, Input, Int, Node, Row, Schema, Sum, Table, Text};
 use ark::log::EntryId;
 use ark::peer::Ctx;
 use ark::store::{Change, Store};
@@ -77,61 +78,74 @@ pub struct Kick {
     pub loud: bool,
 }
 
-#[ark::mutator("people.insert_user")]
-pub fn insert_user(db: People, input: User) {
-    db.user.insert(input);
-}
+pub static INSERT_USER: Def1<User, ()> = Def1 {
+    name: "people.insert_user",
+    kind: FnKind::Mutator,
+    body: |input| People::db().user.insert(input).s(),
+};
 
-#[ark::mutator("people.update_user")]
-pub fn update_user(db: People, input: User) {
-    db.user.update(input.id, |_u| input);
-}
+pub static UPDATE_USER: Def1<User, ()> = Def1 {
+    name: "people.update_user",
+    kind: FnKind::Mutator,
+    body: |input| People::db().user.update(input.f().id, |_u| input.clone()).s(),
+};
 
-#[ark::mutator("people.put_user")]
-pub fn put_user(db: People, input: User) {
-    if db.user.get(input.id).is_some() {
-        db.user.update(input.id, |_u| input)
-    } else {
-        db.user.insert(input)
-    }
-}
+pub static PUT_USER: Def1<User, ()> = Def1 {
+    name: "people.put_user",
+    kind: FnKind::Mutator,
+    body: |input| {
+        let db = People::db();
+        if_(
+            db.user.get(input.f().id).is_some(),
+            db.user.update(input.f().id, |_u| input.clone()),
+            db.user.insert(&input),
+        )
+    },
+};
 
-#[ark::mutator("people.delete_user")]
-pub fn delete_user(db: People, input: UserKey) {
-    db.user.delete(input.id);
-}
+pub static DELETE_USER: Def1<UserKey, ()> = Def1 {
+    name: "people.delete_user",
+    kind: FnKind::Mutator,
+    body: |input| People::db().user.delete(input.f().id).s(),
+};
 
-#[ark::query("people.members")]
-pub fn members(db: People, input: OfTeam) -> Vec<User> {
-    db.user.filter(|u| u.team == input.team).sort(|u| u.name)
-}
+pub static MEMBERS: Def1<OfTeam, Vec<User>> = Def1 {
+    name: "people.members",
+    kind: FnKind::Query,
+    body: |input| People::db().user.filter(|u| u.f().team.eq(input.f().team)).sort(|u| u.f().name),
+};
 
-#[ark::mutator("teams.make_team")]
-pub fn make_team(db: People, input: NewTeam) {
-    db.team.insert(Team {
-        name: input.name,
-        size: input.size,
-    });
-}
+pub static MAKE_TEAM: Def1<NewTeam, ()> = Def1 {
+    name: "teams.make_team",
+    kind: FnKind::Mutator,
+    body: |input| {
+        People::db()
+            .team
+            .insert(TeamEx {
+                name: input.f().name,
+                size: input.f().size,
+            })
+            .s()
+    },
+};
 
-#[ark::mutator("teams.kick")]
-pub fn kick(db: People, input: Kick) {
-    if db.user.get(input.user).is_none() {
-        refuse!("no such user");
-    }
-    db.user.delete(input.user);
-}
+pub static KICK: Def1<Kick, ()> = Def1 {
+    name: "teams.kick",
+    kind: FnKind::Mutator,
+    body: |input| {
+        let db = People::db();
+        let none = if_(db.user.get(input.f().user).is_none(), refuse_("no such user"), unit());
+        seq([none], db.user.delete(input.f().user).s())
+    },
+};
 
 /// A user table with its CRUD exposed, a team table with none, one query,
 /// and two mutations of the module's own on a second router.
 fn domain() -> &'static Domain {
     static D: OnceLock<Domain> = OnceLock::new();
     D.get_or_init(|| {
-        ark::module! {
-            schema: People,
-            functions: [insert_user, update_user, put_user, delete_user, members, make_team, kick],
-        }
-        .unwrap_or_else(|r| panic!("{r}"))
+        let fns: [&'static dyn Fun; 7] = [&INSERT_USER, &UPDATE_USER, &PUT_USER, &DELETE_USER, &MEMBERS, &MAKE_TEAM, &KICK];
+        assemble(People::schema(), &fns).unwrap_or_else(|r| panic!("{r}"))
     })
 }
 

@@ -20,7 +20,7 @@ mod common;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use ark::author::{children, Id, Node};
+use ark::author::{Id, Node};
 use ark::ir::Expr;
 use ark::log::EntryId;
 use ark::peer::{Ctx, Who};
@@ -859,8 +859,8 @@ fn touches(name: &str) -> (Vec<String>, Vec<String>) {
     let (mut reads, mut writes) = (vec![], vec![]);
     let mut todo = vec![f.f.body.clone()];
     let mut seen = vec![];
-    while let Some(e) = todo.pop() {
-        match &e {
+    while let Some(body) = todo.pop() {
+        ark::interp::walk(&body, None, &mut |e, _| match e {
             Expr::Scan(t) | Expr::Lookup(t, _) => reads.push(t.clone()),
             Expr::Insert(t, _) | Expr::Delete(t, _) => writes.push(t.clone()),
             Expr::Update(t, ..) => {
@@ -872,8 +872,7 @@ fn touches(name: &str) -> (Vec<String>, Vec<String>) {
                 todo.push(domain().lib.get(h).unwrap().f.body.clone());
             }
             _ => {}
-        }
-        todo.extend(children(&e).into_iter().cloned());
+        });
     }
     (reads, writes)
 }

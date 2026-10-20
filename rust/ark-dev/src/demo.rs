@@ -1,4 +1,4 @@
-//! The demo of `spec/AUTHORING.md` written with `#[ark::*]`: the four
+//! The demo of `spec/AUTHORING.md` written with the Rust builders: the four
 //! mutators of `rust/ark/tests/demo.rs`, byte for byte (so its pinned
 //! states hold), a query of a playlist's items and a scope; and a room of
 //! live state over volatile tables of its own (§1.9): who is here, which
@@ -8,7 +8,7 @@
 
 use std::collections::BTreeSet;
 
-use ark::author::{Id, Input, Int, Node, Row, Schema, Table, Text};
+use ark::author::*;
 use ark_client::{Live, Module};
 
 #[derive(Row)]
@@ -44,78 +44,88 @@ pub struct Name(pub Text);
 #[ark(len = "1..")]
 pub struct TrackId(pub Text);
 
-#[ark::mutator("demo.create_playlist")]
-pub fn create_playlist(ctx: Ctx, db: Demo, name: Name) {
-    if db.playlist.filter(|p| p.user_id == ctx.user && p.name == name).len() == 0 {
-        db.playlist.insert(Playlist {
-            id: ctx.new_id(),
+/// A playlist made, its id the entry's first draw; nothing when the person
+/// has one of that name.
+pub static CREATE_PLAYLIST: Def1<Name, ()> = Def1 {
+    name: "demo.create_playlist",
+    kind: Kind::Mutator,
+    body: |name| {
+        let db = Demo::db();
+        let mine = db.playlist.filter(|p| p.f().user_id.eq(Ctx.user()).and(p.f().name.eq(&name)));
+        let row = PlaylistEx {
+            id: Ctx.new_id::<Playlist>(),
             name,
-            user_id: ctx.user,
+            user_id: Ctx.user(),
+        };
+        if_(mine.len().eq(0), db.playlist.insert(row), unit())
+    },
+};
+
+/// A track put on a playlist, at one past its last `pos`; nothing when it
+/// is on it already.
+pub static ADD_TO_PLAYLIST: Def2<Id<Playlist>, TrackId, ()> = Def2 {
+    name: "demo.add_to_playlist",
+    kind: Kind::Mutator,
+    body: |pid, tid| {
+        let db = Demo::db();
+        let last = db.item.filter(|r| r.f().playlist_id.eq(&pid)).sort(|r| desc(r.f().pos)).take(1).first();
+        let add = let_(last, |last| {
+            let pos = last.map_or(0, |r| r.f().pos) + 1;
+            db.item.insert(ItemEx {
+                playlist_id: pid.clone(),
+                track_id: tid.clone(),
+                pos,
+            })
         });
-    }
-}
+        let on = db.item.get((pid.clone(), tid.clone())).is_some();
+        if_(
+            db.playlist.get(&pid).is_some(),
+            if_(on, unit(), add),
+            refuse("playlist_id: no such playlist"),
+        )
+    },
+};
 
-#[ark::mutator("demo.add_to_playlist")]
-pub fn add_to_playlist(db: Demo, playlist_id: Id<Playlist>, track_id: TrackId) {
-    if db.playlist.get(playlist_id).is_some() {
-        if db.item.get((playlist_id, track_id)).is_some() {
-        } else {
-            let last = db
-                .item
-                .filter(|row| row.playlist_id == playlist_id)
-                .sort(|row| Desc(row.pos))
-                .take(1)
-                .first();
-            db.item.insert(Item {
-                playlist_id,
-                track_id,
-                pos: match last {
-                    None => 0,
-                    Some(row) => row.pos,
-                } + 1,
-            });
-        }
-    } else {
-        refuse!("playlist_id: no such playlist");
-    }
-}
+pub static RENAME_PLAYLIST: Def2<Id<Playlist>, Name, ()> = Def2 {
+    name: "demo.rename_playlist",
+    kind: Kind::Mutator,
+    body: |id, name| {
+        let db = Demo::db();
+        let update = db.playlist.update(&id, |p| PlaylistEx { name, ..p.f() }.into());
+        if_(db.playlist.get(&id).is_some(), update, refuse("no such playlist"))
+    },
+};
 
-#[ark::mutator("demo.rename_playlist")]
-pub fn rename_playlist(db: Demo, id: Id<Playlist>, name: Name) -> Result<(), Refuse> {
-    if db.playlist.get(id).is_some() {
-        db.playlist.update(id, |p| Playlist { name, ..p })
-    } else {
-        refuse!("no such playlist")
-    }
-    Ok(())
-}
-
-#[ark::mutator("demo.remove_from_playlist")]
-pub fn remove_from_playlist(db: Demo, playlist_id: Id<Playlist>, track_id: Text) {
-    db.item.delete((playlist_id, track_id));
-}
+pub static REMOVE_FROM_PLAYLIST: Def2<Id<Playlist>, Text, ()> = Def2 {
+    name: "demo.remove_from_playlist",
+    kind: Kind::Mutator,
+    body: |pid, tid| Demo::db().item.delete((pid, tid)),
+};
 
 /// A playlist's items in order.
-#[ark::query("demo.items")]
-pub fn items(db: Demo, playlist_id: Id<Playlist>) -> Vec<Item> {
-    db.item.filter(|i| i.playlist_id == playlist_id).sort(|i| i.pos)
-}
+pub static ITEMS: Def1<Id<Playlist>, Vec<Item>> = Def1 {
+    name: "demo.items",
+    kind: Kind::Query,
+    body: |pid| Demo::db().item.filter(|i| i.f().playlist_id.eq(&pid)).sort(|i| i.f().pos),
+};
 
 /// Every playlist, and the first two places of each.
-#[ark::scope("demo.top_two")]
-pub fn top_two(row: DemoRow) -> bool {
-    match row {
-        DemoRow::Playlist(p) => true,
-        DemoRow::Item(i) => i.pos <= 2,
-    }
-}
+pub static TOP_TWO: Def1<DemoRow, bool> = Def1 {
+    name: "demo.top_two",
+    kind: Kind::Scope,
+    body: |row| DemoRowEx::match_(&row, |_| bool(true), |i| i.f().pos.le(2)),
+};
 
 pub fn domain() -> ark::Domain {
-    ark::module! {
-        schema: Demo,
-        functions: [create_playlist, add_to_playlist, rename_playlist, remove_from_playlist, items, top_two],
-    }
-    .unwrap_or_else(|r| panic!("the demo: {r}"))
+    let fns: [&'static dyn Fun; 6] = [
+        &CREATE_PLAYLIST,
+        &ADD_TO_PLAYLIST,
+        &RENAME_PLAYLIST,
+        &REMOVE_FROM_PLAYLIST,
+        &ITEMS,
+        &TOP_TWO,
+    ];
+    assemble(Demo::schema(), &fns).unwrap_or_else(|r| panic!("the demo: {r}"))
 }
 
 // * The room
@@ -150,54 +160,70 @@ pub struct Arrival {
     pub name: Text,
 }
 
-#[ark::live("room.on_join")]
-pub fn on_join(ctx: Ctx, db: Room, a: Arrival) {
-    db.here.delete(a.session);
-    db.here.insert(Here {
-        session: a.session,
-        name: a.name,
-        since: ctx.now,
-    });
-}
+pub static ON_JOIN: Def1<Arrival, ()> = Def1 {
+    name: "room.on_join",
+    kind: Kind::Live,
+    body: |a| {
+        let db = Room::db();
+        let here = HereEx {
+            session: a.f().session,
+            name: a.f().name,
+            since: Ctx.now(),
+        };
+        seq([db.here.delete(a.f().session)], db.here.insert(here))
+    },
+};
 
-#[ark::live("room.on_leave")]
-pub fn on_leave(db: Room, a: Arrival) {
-    db.pointer.delete(a.session);
-    db.here.delete(a.session);
-}
+pub static ON_LEAVE: Def1<Arrival, ()> = Def1 {
+    name: "room.on_leave",
+    kind: Kind::Live,
+    body: |a| {
+        let db = Room::db();
+        seq([db.pointer.delete(a.f().session)], db.here.delete(a.f().session))
+    },
+};
 
-#[ark::live("room.rename")]
-pub fn rename(ctx: Ctx, db: Room, name: Text) {
-    if db.here.get(ctx.session).is_some() {
-        db.here.update(ctx.session, |h| Here { name, ..h });
-    } else {
-        refuse!("not here");
-    }
-}
+pub static RENAME: Def1<Text, ()> = Def1 {
+    name: "room.rename",
+    kind: Kind::Live,
+    body: |name| {
+        let db = Room::db();
+        let update = db.here.update(Ctx.session(), |h| HereEx { name, ..h.f() }.into());
+        if_(db.here.get(Ctx.session()).is_some(), update, refuse_("not here"))
+    },
+};
 
-#[ark::live("room.point")]
-pub fn point(ctx: Ctx, db: Room, x: Int) {
-    db.pointer.delete(ctx.session);
-    db.pointer.insert(Pointer { session: ctx.session, x });
-}
+pub static POINT: Def1<Int, ()> = Def1 {
+    name: "room.point",
+    kind: Kind::Live,
+    body: |x| {
+        let db = Room::db();
+        seq(
+            [db.pointer.delete(Ctx.session())],
+            db.pointer.insert(PointerEx { session: Ctx.session(), x }),
+        )
+    },
+};
 
 /// After a restart: who was here is kept, every pointer let go.
-#[ark::live("room.on_restore")]
-pub fn on_restore(db: Room) {
-    db.pointer.map(|p| db.pointer.delete(p.session));
-}
+pub static ON_RESTORE: Def0<()> = Def0 {
+    name: "room.on_restore",
+    kind: Kind::Live,
+    body: || {
+        let db = Room::db();
+        db.pointer.map(|p| db.pointer.delete(p.f().session)).s()
+    },
+};
 
-#[ark::query("room.present")]
-pub fn present(db: Room) -> Vec<Here> {
-    db.here.filter(|h| h.since >= 0)
-}
+pub static PRESENT: Def0<Vec<Here>> = Def0 {
+    name: "room.present",
+    kind: Kind::Query,
+    body: || Room::db().here.filter(|h| h.f().since.ge(0)),
+};
 
 pub fn room() -> ark::Domain {
-    ark::module! {
-        schema: Room,
-        functions: [on_join, on_leave, on_restore, rename, point, present],
-    }
-    .unwrap_or_else(|r| panic!("the room: {r}"))
+    let fns: [&'static dyn Fun; 6] = [&ON_JOIN, &ON_LEAVE, &ON_RESTORE, &RENAME, &POINT, &PRESENT];
+    assemble(Room::schema(), &fns).unwrap_or_else(|r| panic!("the room: {r}"))
 }
 
 /// A domain as a client or a hub holds it.

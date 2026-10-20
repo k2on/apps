@@ -1,9 +1,10 @@
-//! §1.12 What a type is, said by the derives, every field by name.
+//! §1.15 What a type is, said by the derives, every field by name.
 //!
 //! Each writes `ark::author::Shape` (the type, the declarations it names,
-//! the Rust type its expressions are built as) and what the lowering reads
-//! by name: a record's view and setters, a sum's variant indices, arities,
-//! field positions, setters and arm witnesses. `#[ark(..)]` says the rest:
+//! the Rust type its expressions are built as) and what a builder reads by
+//! name: a record's `XEx`, its fields as expressions, read (`x.f()`) and
+//! given (`XEx { .. }.into()`); a sum's `XEx`, its variants made by name in
+//! snake case and matched in order. `#[ark(..)]` says the rest:
 //!
 //! - a refinement, in order: `trim`, `utf8`, `non_empty`, `len = 16`, `len
 //!   = "1..=80"` (also `"1.."`, `"..=80"`); of an `Int`, `min = n`, `max =
@@ -18,7 +19,10 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::{Attribute, Data, DeriveInput, Fields, Ident, Lit, Type};
 
-use crate::lower::no;
+/// What the derives refuse, named.
+fn no(at: impl quote::ToTokens, what: &str) -> syn::Error {
+    syn::Error::new_spanned(at, format!("{what} is not something the ark derives read"))
+}
 
 /// One `#[ark(..)]` item.
 enum Ark {
@@ -143,44 +147,24 @@ fn shape(name: &Ident, base: TokenStream, ty: TokenStream, decls: TokenStream, l
 /// A record's view and setters: what `x.f` and `S { f: .. }` lower to.
 fn record(input: &DeriveInput, fields: &[(Ident, Type, Vec<Ark>)]) -> TokenStream {
     let (name, vis) = (&input.ident, &input.vis);
-    let view = format_ident!("__ArkView_{}", name);
     let (ids, tys): (Vec<_>, Vec<_>) = fields.iter().map(|f| (&f.0, &f.1)).unzip();
     let idx: Vec<u32> = (0..fields.len() as u32).collect();
-    let n = fields.len() as u32;
-    let set = ids.iter().map(|f| format_ident!("__ark_set_{}", f));
     let ex = format_ident!("{}Ex", name);
     let doc = format!("A `{name}` expression's fields, each an expression: what reads one (`x.f()`) and makes one (`{name}Ex {{ .. }}.into()`).");
     quote! {
         #[doc = #doc]
         #[derive(Clone)]
-        #vis struct #ex { #(pub #ids: ::ark::build::Ex<<#tys as ::ark::author::Shape>::Base>),* }
-        impl ::ark::build::Fields for #name {
+        #vis struct #ex { #(pub #ids: ::ark::author::Ex<<#tys as ::ark::author::Shape>::Base>),* }
+        impl ::ark::author::Fields for #name {
             type View = #ex;
             fn view(e: ::ark::ir::Expr) -> #ex {
-                #ex { #(#ids: ::ark::build::field(&e, #idx)),* }
+                #ex { #(#ids: ::ark::author::field(&e, #idx)),* }
             }
         }
-        impl ::std::convert::From<#ex> for ::ark::build::Ex<#name> {
+        impl ::std::convert::From<#ex> for ::ark::author::Ex<#name> {
             fn from(x: #ex) -> Self {
-                ::ark::build::Ex::of(::ark::ir::Expr::Tuple(vec![#(x.#ids.e),*]))
+                ::ark::author::Ex::of(::ark::ir::Expr::Tuple(vec![#(x.#ids.e),*]))
             }
-        }
-        #[doc(hidden)]
-        #[allow(non_camel_case_types)]
-        #vis struct #view { #(pub #ids: ::ark::author::Ex<<#tys as ::ark::author::Shape>::Base>),* }
-        impl ::ark::author::Record for #name {
-            type View = #view;
-            fn view(e: ::ark::ir::Expr) -> #view {
-                #view { #(#ids: ::ark::author::Ex::of(::ark::ir::Expr::Field(Box::new(e.clone()), #idx))),* }
-            }
-        }
-        #[allow(non_upper_case_globals, non_snake_case)]
-        impl #name {
-            #[doc(hidden)]
-            pub const __ark_n: u32 = #n;
-            #(#[doc(hidden)] pub fn #set(e: ::ark::author::Ex<<#tys as ::ark::author::Shape>::Base>) -> (u32, ::ark::ir::Expr) {
-                ::ark::author::set(#idx, e)
-            })*
         }
     }
 }
@@ -324,51 +308,28 @@ fn sum_(input: &DeriveInput) -> syn::Result<TokenStream> {
         return Err(no(name, "a sum that is no enum"));
     };
     let label = name.to_string();
-    let (mut items, mut defs, mut vtys, mut arities, mut decls) = (vec![], vec![], vec![], vec![], vec![]);
+    let ex = format_ident!("{}Ex", name);
+    let (mut vtys, mut decls, mut makes, mut ons, mut arms) = (vec![], vec![], vec![], vec![], vec![]);
     for (i, v) in e.variants.iter().enumerate() {
-        let (vn, i) = (&v.ident, i as u8);
-        let n = v.fields.len() as u32;
-        let arm = format_ident!("__ArkArm_{}_{}", name, vn);
-        let (ci, cn, carm) = (
-            format_ident!("__ark_i_{vn}"),
-            format_ident!("__ark_n_{vn}"),
-            format_ident!("__ark_arm_{vn}"),
-        );
-        let mut ftys = vec![];
-        let mut wits = vec![];
-        for (k, f) in v.fields.iter().enumerate() {
-            let (ty, k32) = (&f.ty, k as u32);
-            let base = quote!(::ark::author::Ex<<#ty as ::ark::author::Shape>::Base>);
-            let fname = f.ident.as_ref().map_or(k.to_string(), |x| x.to_string());
-            let set = format_ident!("__ark_set_{vn}_{fname}");
-            items.push(quote!(#[doc(hidden)] pub fn #set(e: #base) -> (u32, ::ark::ir::Expr) { ::ark::author::set(#k32, e) }));
-            if let Some(id) = &f.ident {
-                let p = format_ident!("__ark_p_{vn}_{id}");
-                items.push(quote!(#[doc(hidden)] pub const #p: u32 = #k32;));
+        let (i, n) = (i as u8, v.fields.len() as u32);
+        let tys: Vec<_> = v.fields.iter().map(|f| &f.ty).collect();
+        let exs: Vec<_> = tys
+            .iter()
+            .map(|t| quote!(::ark::author::Ex<<#t as ::ark::author::Shape>::Base>))
+            .collect();
+        vtys.push(quote!(vec![#(<#tys as ::ark::author::Shape>::ty()),*]));
+        decls.extend(tys.iter().map(|t| quote!(<#t as ::ark::author::Shape>::decls(d);)));
+        let snake = format_ident!("{}", snake(&v.ident.to_string()));
+        let on = format_ident!("on_{}", snake);
+        let args: Vec<_> = (0..tys.len()).map(|k| format_ident!("a{k}")).collect();
+        let ks: Vec<_> = (0..tys.len()).collect();
+        makes.push(quote! {
+            pub fn #snake(#(#args: impl ::std::convert::Into<#exs>),*) -> ::ark::author::Ex<#name> {
+                ::ark::author::variant::<#name>(#i, vec![#(#args.into().e),*])
             }
-            ftys.push(quote!(<#ty as ::ark::author::Shape>::ty()));
-            decls.push(quote!(<#ty as ::ark::author::Shape>::decls(d);));
-            wits.push((f.ident.clone(), base));
-        }
-        let make = wits.iter().map(|(id, _)| {
-            let w = quote!(::ark::author::Ex::of(::ark::ir::Expr::Var(u32::MAX)));
-            id.as_ref().map_or(w.clone(), |id| quote!(#id: #w))
         });
-        let (def, build) = match &v.fields {
-            Fields::Named(_) => {
-                let f = wits.iter().map(|(id, b)| quote!(pub #id: #b));
-                (quote!(#vis struct #arm { #(#f),* }), quote!(#arm { #(#make),* }))
-            }
-            _ => {
-                let f = wits.iter().map(|(_, b)| quote!(pub #b));
-                (quote!(#vis struct #arm(#(#f),*);), quote!(#arm(#(#make),*)))
-            }
-        };
-        items.push(quote!(#[doc(hidden)] pub const #ci: u8 = #i; #[doc(hidden)] pub const #cn: u32 = #n;));
-        items.push(quote!(#[doc(hidden)] pub fn #carm() -> #arm { #build }));
-        arities.push(n);
-        vtys.push(quote!(vec![#(#ftys),*]));
-        defs.push(quote!(#[doc(hidden)] #[allow(non_camel_case_types)] #def));
+        ons.push(quote!(#on: impl FnOnce(#(#exs),*) -> ::ark::author::Ex<R>));
+        arms.push(quote!(::ark::author::arm(#n, |v| #on(#(::ark::author::Ex::of(v[#ks].clone())),*))));
     }
     let decls = quote! {
         if d.contains_key(#label) { return; }
@@ -376,47 +337,17 @@ fn sum_(input: &DeriveInput) -> syn::Result<TokenStream> {
         #(#decls)*
     };
     let shape = shape(name, quote!(#name), quote!(::ark::ty::Ty::Named(#label.into())), decls, label);
-    let ex = format_ident!("{}Ex", name);
-    let (mut makes, mut ons, mut arms) = (vec![], vec![], vec![]);
-    for (i, v) in e.variants.iter().enumerate() {
-        let (i, n) = (i as u8, v.fields.len() as u32);
-        let snake = format_ident!("{}", snake(&v.ident.to_string()));
-        let on = format_ident!("on_{}", snake);
-        let tys: Vec<_> = v
-            .fields
-            .iter()
-            .map(|f| {
-                let t = &f.ty;
-                quote!(::ark::build::Ex<<#t as ::ark::author::Shape>::Base>)
-            })
-            .collect();
-        let args: Vec<_> = (0..v.fields.len()).map(|k| format_ident!("a{k}")).collect();
-        let ks: Vec<_> = (0..v.fields.len()).collect();
-        makes.push(quote! {
-            pub fn #snake(#(#args: impl ::std::convert::Into<#tys>),*) -> ::ark::build::Ex<#name> {
-                ::ark::build::variant::<#name>(#i, vec![#(#args.into().e),*])
-            }
-        });
-        ons.push(quote!(#on: impl FnOnce(#(#tys),*) -> ::ark::build::Ex<R>));
-        arms.push(quote!(::ark::build::arm(#n, |v| #on(#(::ark::build::Ex::of(v[#ks].clone())),*))));
-    }
     let doc = format!("`{name}` expressions: each variant made, by its name in snake case, and a match of every variant in order.");
     Ok(quote! {
+        #shape
         #[doc = #doc]
         #vis struct #ex;
         impl #ex {
             #(#makes)*
-            pub fn match_<R>(s: &::ark::build::Ex<#name>, #(#ons),*) -> ::ark::build::Ex<R> {
-                ::ark::build::match_(s, vec![#(#arms),*])
+            #[allow(clippy::too_many_arguments)]
+            pub fn match_<R>(s: &::ark::author::Ex<#name>, #(#ons),*) -> ::ark::author::Ex<R> {
+                ::ark::author::match_(s, vec![#(#arms),*])
             }
-        }
-        #shape
-        #(#defs)*
-        #[allow(non_upper_case_globals, non_snake_case)]
-        impl #name {
-            #(#items)*
-            #[doc(hidden)]
-            pub fn __ark_arities() -> Vec<u32> { vec![#(#arities),*] }
         }
     })
 }
@@ -442,8 +373,6 @@ pub fn schema(input: DeriveInput) -> TokenStream {
         }
     }
     let ids = fields.iter().map(|f| &f.0);
-    let (ids2, ids3, rows2) = (fields.iter().map(|f| &f.0), fields.iter().map(|f| &f.0), rows.clone());
-    let db = format_ident!("{}Db", name);
     let (vis, sum) = (&input.vis, format_ident!("{}Row", name));
     let variants = rows.iter().map(|r| match r {
         syn::GenericArgument::Type(Type::Path(p)) => p.path.segments.last().unwrap().ident.clone(),
@@ -454,13 +383,9 @@ pub fn schema(input: DeriveInput) -> TokenStream {
         /// order: what a scope is a function of (§1.8).
         #[derive(::ark::author::Sum)]
         #vis enum #sum { #(#variants(#rows)),* }
-        #[doc = "The tables, as expressions are built over them."]
-        #vis struct #db { #(pub #ids2: ::ark::build::Table<#rows2>),* }
         impl #name {
             /// The tables, to build expressions over.
-            pub fn db() -> #db { #db { #(#ids3: ::std::default::Default::default()),* } }
-            #[doc(hidden)]
-            pub fn __ark_open() -> #name { #name { #(#ids: ::std::default::Default::default()),* } }
+            pub fn db() -> #name { #name { #(#ids: ::std::default::Default::default()),* } }
             /// The schema: these tables, in this order.
             pub fn schema() -> ::ark::schema::Schema {
                 ::ark::schema::Schema { tables: vec![#(<#rows as ::ark::author::Row>::table()),*] }

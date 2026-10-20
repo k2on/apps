@@ -1,30 +1,41 @@
-//! §1.12 Authoring: the run-time half of `#[ark::mutator]` and its kin.
+//! §1.15 Authoring in Rust: the builders, and what a Rust type is as a
+//! type of §1.1.
 //!
-//! The macros (`ark-macros`) read a function's restricted Rust and write
-//! Rust that builds its [`Expr`] — this module is what that Rust calls. A
-//! proc-macro crate can export nothing else, and a field is read **by
-//! name** only where its struct is known, which rustc knows and a macro
-//! does not: so every expression is built as an [`Ex<T>`], `T` the Rust
-//! type it is, and `x.f` is `view(x).f` on the struct the derive wrote for
-//! `T` ([`Record`]). rustc resolves the names and the arities; the checker
-//! (`crate::check`) judges the types, refinements included: `T` is a
-//! type's [`Shape::Base`], its refinements dropped, so `Name` and `Text`
-//! are one Rust type and only the checker tells them apart.
+//! [`Shape`] is a Rust type read as a module's type: its `Ty`, the
+//! declarations it names, its name, and its [`Shape::Base`] — the Rust
+//! type an expression of it is built as, its refinements dropped, so
+//! `Name` and `Text` are one Rust type and only the checker tells them
+//! apart. The derives say the rest by name: `Row` a table's row, `Input` a
+//! record or a refinement of one type, `Sum` a sum, `Schema` the tables.
 //!
-//! A variable is a De Bruijn index the macro computes from the binders it
-//! sees; an `Ex` bound to a Rust variable is a *witness* of its type, and
-//! each use is `w.at(i)`. A function is built once ([`build`]) in a
-//! context that gathers the declarations it names — its parameters', its
-//! result's, its literals', its fresh ids', its callees' — which are its
-//! `types` (§1.5); a call names the callee by hash and keeps it, so a
-//! [`Domain`] installs the DAG callees first.
+//! An expression is an [`Ex<T>`]. Its methods take `&self` and copy what
+//! they keep, so an expression is used as often as it is named. A record's
+//! fields are read and given by name through the struct the derive writes
+//! for it (`PlaylistEx`, [`Fields`]); a sum is made and matched through its
+//! unit struct (`ClockEx::paused(at)`, `ClockEx::match_(&c, |at| …, |at,
+//! since| …)`).
+//!
+//! **Binders are closures** — `let_(v, |x| …)`, [`block`]'s `let_`,
+//! `xs.filter(|x| …)`, a match arm — and a variable is its level,
+//! `Var(MARK + level)`, until the function is built and
+//! [`crate::text::close`] turns levels into De Bruijn indices; an arm is
+//! built as a `Lambda` of its fields. So a body written as the attribute
+//! macros' Rust was is their IR, byte for byte.
+//!
+//! A function is a `Def0`…`Def5` in a `static`: its binding's name, its
+//! kind and its body, a plain `fn` of its parameters typed by their
+//! declared types. It is built once, in a context gathering the
+//! declarations it names — its parameters', its result's, its literals',
+//! its fresh ids', its callees' — which are its `types` (§1.5); calling it
+//! names it by hash. [`text`] embeds Ark text where Rust would be awkward.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
-use std::sync::{Arc, OnceLock};
+use std::ops;
+use std::sync::Arc;
 
-pub use ark_macros::{guard, helper, live, module, mutator, query, scope, Input, Node, Row, Schema, Sum};
+pub use ark_macros::{Input, Node, Row, Schema, Sum};
 
 pub use crate::ir::Node;
 
@@ -36,6 +47,7 @@ use crate::module::{Lib, Module, SPEC};
 use crate::peer::Cas;
 use crate::schema::{Schema, Space};
 use crate::store::Dir;
+use crate::text::{close, MARK};
 use crate::ty::Ty;
 use crate::Refusal;
 
@@ -51,14 +63,8 @@ pub trait Shape: 'static {
     fn name() -> String;
 }
 
-/// A struct whose fields are read by name: [`view`] of an expression of it.
-pub trait Record: Shape {
-    type View;
-    fn view(e: Expr) -> Self::View;
-}
-
 /// A table's row struct (`#[derive(Row)]`).
-pub trait Row: Record {
+pub trait Row: Shape {
     const TABLE: &'static str;
     fn table() -> crate::schema::Table;
 }
@@ -199,35 +205,56 @@ impl<T: Shape> Shape for Vec<T> {
     }
 }
 
-macro_rules! tuples {
-    ($(($($t:ident $i:tt),*)),*) => {$(
+macro_rules! shapes {
+    ($(($($t:ident),*)),*) => {$(
         impl<$($t: Shape),*> Shape for ($($t,)*) {
             type Base = ($($t::Base,)*);
             fn ty() -> Ty { Ty::Tuple(vec![$($t::ty()),*]) }
             fn decls(d: &mut Decls) { $($t::decls(d);)* }
             fn name() -> String { format!("({})", [$($t::name()),*].join(", ")) }
         }
-        impl<$($t: Shape),*> Record for ($($t,)*) {
-            type View = ($(Ex<$t>,)*);
-            fn view(e: Expr) -> Self::View { ($(Ex::of(Expr::Field(Box::new(e.clone()), $i)),)*) }
-        }
-        impl<$($t: Shape),*> Tup for ($(Ex<$t>,)*) {
-            type Out = ($($t,)*);
-            fn tup(self) -> Ex<Self::Out> { Ex::of(Expr::Tuple(vec![$(self.$i.e),*])) }
-        }
     )*};
 }
-tuples!((A 0, B 1), (A 0, B 1, C 2), (A 0, B 1, C 2, D 3));
+shapes!((A, B), (A, B, C), (A, B, C, D));
 
-/// A tuple of expressions as an expression of the tuple.
-pub trait Tup {
-    type Out: Shape;
-    fn tup(self) -> Ex<Self::Out>;
+/// A column's type: its declaration's name when it is one, else its
+/// structure — as the checker types a row's columns.
+pub fn column_ty<T: Shape>() -> (String, Ty, Ty) {
+    let mut d = Decls::new();
+    T::decls(&mut d);
+    let cx = Types::new(&d.into_iter().collect::<Vec<_>>());
+    let t = T::ty();
+    let structure = cx.deep(&t);
+    let row = if matches!(t, Ty::Named(_)) { t } else { structure.clone() };
+    (T::name(), structure, row)
 }
 
-pub fn tup<T: Tup>(t: T) -> Ex<T::Out> {
-    t.tup()
+/// A declaration of a record's fields, or of a refinement of one type.
+pub fn decl(name: &str, ty: Ty, refine: Vec<(Rule, Option<&str>)>, d: &mut Decls) {
+    let refine = refine
+        .into_iter()
+        .map(|(rule, why)| Refine {
+            rule,
+            why: why.map(Into::into),
+        })
+        .collect();
+    d.insert(name.into(), Decl { ty, refine });
 }
+
+/// A refinement of an `Int`: from `lo` to `hi`, both included.
+pub fn within(lo: i64, hi: i64) -> Rule {
+    let (Rule::Refine(a), Rule::Refine(b)) = (bound(Op::Ge, lo), bound(Op::Le, hi)) else {
+        unreachable!()
+    };
+    Rule::Refine(Expr::Op(Op::And, Box::new(a), Box::new(b)))
+}
+
+/// A refinement of an `Int`: the value `o` the bound.
+pub fn bound(o: Op, n: i64) -> Rule {
+    Rule::Refine(Expr::Op(o, Box::new(Expr::Var(0)), Box::new(int(n).e)))
+}
+
+// * Expressions
 
 /// An expression built as Rust type `T`.
 pub struct Ex<T> {
@@ -246,48 +273,132 @@ impl<T> Ex<T> {
         Ex { e, t: PhantomData }
     }
 
-    /// The variable `i`, of this witness's type.
-    pub fn at(&self, i: u32) -> Ex<T> {
-        Ex::of(Expr::Var(i))
+    fn b(&self) -> Box<Expr> {
+        Box::new(self.e.clone())
     }
 }
 
-/// A witness of `x`'s type, for a variable bound to it.
-pub fn w<T>(_: &Ex<T>) -> Ex<T> {
-    Ex::of(Expr::Var(u32::MAX))
+impl<T: Shape> Ex<T> {
+    /// This expression as a statement: `()` as it is, a value dropped.
+    pub fn s(&self) -> Ex<()> {
+        match T::ty() == Ty::unit() {
+            true => Ex::of(self.e.clone()),
+            false => Ex::of(Expr::Seq(vec![self.e.clone(), Expr::Seq(vec![])])),
+        }
+    }
 }
 
-/// The witness of an option's payload.
-pub fn some_w<T>(_: &Ex<Option<T>>) -> Ex<T> {
-    Ex::of(Expr::Var(u32::MAX))
+impl<T> From<&Ex<T>> for Ex<T> {
+    fn from(x: &Ex<T>) -> Ex<T> {
+        x.clone()
+    }
+}
+impl From<i64> for Ex<i64> {
+    fn from(n: i64) -> Ex<i64> {
+        int(n)
+    }
+}
+impl From<&str> for Ex<String> {
+    fn from(s: &str) -> Ex<String> {
+        txt(s)
+    }
+}
+impl From<bool> for Ex<bool> {
+    fn from(b: bool) -> Ex<bool> {
+        Ex::of(Expr::Lit(Ty::bool(), vec![b as u8]))
+    }
 }
 
-pub fn view<T: Record>(x: Ex<T>) -> T::View {
-    T::view(x.e)
+/// A record, its fields read and given by name: `PlaylistEx`.
+pub trait Fields: Shape {
+    type View;
+    fn view(e: Expr) -> Self::View;
 }
 
-fn b(e: Ex<impl Sized>) -> Box<Expr> {
-    Box::new(e.e)
+impl<T: Fields> Ex<T> {
+    /// The fields, each an expression.
+    pub fn f(&self) -> T::View {
+        T::view(self.e.clone())
+    }
 }
+
+macro_rules! tuples {
+    ($(($($t:ident $i:tt),*)),*) => {$(
+        impl<$($t: Shape),*> Fields for ($($t,)*) {
+            type View = ($(Ex<$t>,)*);
+            fn view(e: Expr) -> Self::View { ($(Ex::of(Expr::Field(Box::new(e.clone()), $i)),)*) }
+        }
+        impl<$($t: Shape),*> From<($(Ex<$t>,)*)> for Ex<($($t,)*)> {
+            fn from(x: ($(Ex<$t>,)*)) -> Self { Ex::of(Expr::Tuple(vec![$(x.$i.e),*])) }
+        }
+    )*};
+}
+tuples!((A 0, B 1), (A 0, B 1, C 2), (A 0, B 1, C 2, D 3));
 
 // * The context a function is built in
 
 struct Cx {
     decls: Decls,
     calls: Vec<&'static Built>,
-    params: Vec<Ty>,
+    depth: u32,
 }
 
-thread_local!(static CX: RefCell<Vec<Cx>> = const { RefCell::new(vec![]) });
+thread_local! {
+    static CX: RefCell<Vec<Cx>> = const { RefCell::new(vec![]) };
+    static SCHEMA: RefCell<Option<Schema>> = const { RefCell::new(None) };
+}
+
+fn with<X>(f: impl FnOnce(&mut Cx) -> X) -> X {
+    CX.with(|c| f(c.borrow_mut().last_mut().expect("an expression is built inside a function's build")))
+}
 
 /// `T`'s declarations, in the function being built.
 pub fn note<T: Shape>() {
-    CX.with(|c| c.borrow_mut().last_mut().map(|cx| T::decls(&mut cx.decls)));
+    with(|cx| T::decls(&mut cx.decls))
 }
+
+/// `n` variables at the next levels, for `f` to build a body with.
+fn bind<R>(n: u32, f: impl FnOnce(Vec<Expr>) -> Ex<R>) -> Expr {
+    let d = with(|cx| (cx.depth, cx.depth += n).0);
+    let body = f((d..d + n).map(|l| Expr::Var(MARK + l)).collect()).e;
+    with(|cx| cx.depth -= n);
+    body
+}
+
+fn var<T>(v: &[Expr], i: usize) -> Ex<T> {
+    Ex::of(v[i].clone())
+}
+
+fn lam<R>(n: u32, f: impl FnOnce(Vec<Expr>) -> Ex<R>) -> Box<Expr> {
+    Box::new(Expr::Lambda(n, Box::new(bind(n, f))))
+}
+
+/// A match arm binding `n` fields: built as a `Lambda`, closed to its body.
+pub fn arm<R>(n: u32, f: impl FnOnce(Vec<Expr>) -> Ex<R>) -> Expr {
+    *lam(n, f)
+}
+
+/// A match: one arm per variant, in order ([`arm`]).
+pub fn match_<S, R>(s: &Ex<S>, arms: Vec<Expr>) -> Ex<R> {
+    Ex::of(Expr::Match(s.b(), arms))
+}
+
+/// Variant `i` of `S`, its fields in order.
+pub fn variant<S: Shape>(i: u8, fields: Vec<Expr>) -> Ex<S> {
+    note::<S>();
+    Ex::of(Expr::Variant(S::ty(), i, fields))
+}
+
+/// The field `i` of `e`, for a record's view.
+pub fn field<T>(e: &Expr, i: u32) -> Ex<T> {
+    Ex::of(Expr::Field(Box::new(e.clone()), i))
+}
+
+// * Functions
 
 /// What a function is: an entry point, a query, a scope, a live
 /// transition (a mutator over volatile tables, §1.9), or a function the
-/// others call.
+/// others call at the least effect its body has.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Mutator,
@@ -308,27 +419,12 @@ pub struct Built {
     pub calls: Vec<&'static Built>,
 }
 
-/// A parameter of the function being built: its type, and a witness.
-pub fn param<T: Shape>() -> Ex<T::Base> {
-    note::<T>();
-    CX.with(|c| c.borrow_mut().last_mut().expect("in a build").params.push(T::ty()));
-    Ex::of(Expr::Var(u32::MAX))
+/// A function in a `static`, built on first use.
+pub trait Fun: Sync {
+    fn built(&'static self) -> &'static Built;
 }
 
-/// The function `cell` holds, built on first use.
-pub fn once(cell: &'static OnceLock<Built>, f: impl FnOnce() -> Built) -> &'static Built {
-    match cell.get() {
-        Some(b) => b,
-        None => {
-            let b = f();
-            cell.get_or_init(|| b)
-        }
-    }
-}
-
-/// Builds a function whose result is `R`. A function that reaches itself
-/// through its calls is a cycle, which a hash cannot name: refused here.
-pub fn build<R: Shape>(name: &'static str, kind: Kind, body: impl FnOnce() -> Ex<R::Base>) -> Built {
+fn build<R: Shape>(name: &'static str, kind: Kind, params: Vec<Ty>, body: impl FnOnce(Vec<Expr>) -> Ex<R::Base>) -> Built {
     thread_local!(static BUILDING: RefCell<Vec<&'static str>> = const { RefCell::new(vec![]) });
     BUILDING.with(|s| {
         assert!(
@@ -337,17 +433,19 @@ pub fn build<R: Shape>(name: &'static str, kind: Kind, body: impl FnOnce() -> Ex
         );
         s.borrow_mut().push(name)
     });
+    let n = params.len() as u32;
     CX.with(|c| {
         c.borrow_mut().push(Cx {
             decls: Decls::new(),
             calls: vec![],
-            params: vec![],
+            depth: n,
         })
     });
     note::<R>();
-    let body = body().e;
+    let body = body((0..n).map(|l| Expr::Var(MARK + l)).collect());
     let cx = CX.with(|c| c.borrow_mut().pop().unwrap());
     BUILDING.with(|s| s.borrow_mut().pop());
+    let body = close(body.e, n);
     let effect = match kind {
         Kind::Mutator | Kind::Live => Effect::Write,
         Kind::Query => Effect::Read,
@@ -357,7 +455,7 @@ pub fn build<R: Shape>(name: &'static str, kind: Kind, body: impl FnOnce() -> Ex
     let types = cx.decls.into_iter().filter(|(n, _)| n != "Text").collect();
     let f = Function {
         types,
-        params: cx.params,
+        params,
         ret: R::ty(),
         effect,
         body,
@@ -373,37 +471,68 @@ pub fn build<R: Shape>(name: &'static str, kind: Kind, body: impl FnOnce() -> Ex
 
 /// The least effect `e` has: a read, a write, a fresh id, or a callee's.
 fn effect(e: &Expr, calls: &[&Built]) -> Effect {
-    let own = match e {
-        Expr::Scan(_) | Expr::Lookup(..) => Effect::Read,
-        Expr::Insert(..) | Expr::Update(..) | Expr::Delete(..) | Expr::Ctx(CtxField::NewId(_)) => Effect::Write,
-        Expr::Call(h, _) => calls.iter().find(|c| c.hash == *h).map_or(Effect::Pure, |c| c.f.effect),
-        _ => Effect::Pure,
-    };
-    children(e).into_iter().map(|c| effect(c, calls)).fold(own, Effect::max)
-}
-
-/// The expressions directly under `e`.
-pub fn children(e: &Expr) -> Vec<&Expr> {
-    use Expr::*;
-    match e {
-        Lit(..) | Var(_) | Ctx(_) | Scan(_) => vec![],
-        Let(a, b) | Op(_, a, b) | Filter(a, b) | Map(a, b) | Take(a, b) | Sort(a, b, _) | Update(_, a, b) => vec![a, b],
-        If(a, b, c) | Join(a, b, c) | Group(a, b, c) => vec![a, b, c],
-        Match(a, arms) => std::iter::once(&**a).chain(arms).collect(),
-        Field(a, _) | Un(_, a) | Lambda(_, a) | Lookup(_, a) | Insert(_, a) | Delete(_, a) | Refuse(a) => vec![a],
-        Tuple(es) | Variant(_, _, es) | List(_, es) | Std(_, es) | Call(_, es) | Seq(es) => es.iter().collect(),
-    }
-}
-
-/// A call of a built function: its declarations become the caller's.
-pub fn call<R>(f: &'static Built, args: Vec<Expr>) -> Ex<R> {
-    CX.with(|c| {
-        let mut c = c.borrow_mut();
-        let cx = c.last_mut().expect("a call inside a build");
-        cx.decls.extend(f.f.types.iter().cloned());
-        cx.calls.push(f);
+    let mut out = Effect::Pure;
+    crate::interp::walk(e, None, &mut |x, _| {
+        out = out.max(match x {
+            Expr::Scan(_) | Expr::Lookup(..) => Effect::Read,
+            Expr::Insert(..) | Expr::Update(..) | Expr::Delete(..) | Expr::Ctx(CtxField::NewId(_)) => Effect::Write,
+            Expr::Call(h, _) => calls.iter().find(|c| c.hash == *h).map_or(Effect::Pure, |c| c.f.effect),
+            _ => Effect::Pure,
+        })
     });
-    Ex::of(Expr::Call(f.hash, args))
+    out
+}
+
+/// Built functions, by the address of their `static`.
+static BUILT: std::sync::Mutex<BTreeMap<usize, &'static Built>> = std::sync::Mutex::new(BTreeMap::new());
+
+fn cached(key: usize, f: impl FnOnce() -> Built) -> &'static Built {
+    if let Some(b) = BUILT.lock().unwrap().get(&key) {
+        return b;
+    }
+    let b = f();
+    BUILT.lock().unwrap().entry(key).or_insert_with(|| Box::leak(Box::new(b)))
+}
+
+macro_rules! defs {
+    ($($def:ident($($a:ident $x:ident $i:tt),*);)*) => {$(
+        /// A function of this many parameters, typed by their declared
+        /// types (`Name`, not `Text`), in a `static`: its binding's name,
+        /// its kind and its body.
+        pub struct $def<$($a: Shape,)* R: Shape> {
+            pub name: &'static str,
+            pub kind: Kind,
+            pub body: fn($(Ex<$a::Base>),*) -> Ex<R::Base>,
+        }
+        impl<$($a: Shape,)* R: Shape> $def<$($a,)* R> {
+            /// A call of it: its declarations become the caller's.
+            #[allow(clippy::too_many_arguments)]
+            pub fn call(&'static self $(, $x: impl Into<Ex<$a::Base>>)*) -> Ex<R::Base> {
+                let f = self.built();
+                with(|cx| {
+                    cx.decls.extend(f.f.types.iter().cloned());
+                    cx.calls.push(f);
+                });
+                Ex::of(Expr::Call(f.hash, vec![$($x.into().e),*]))
+            }
+        }
+        impl<$($a: Shape,)* R: Shape> Fun for $def<$($a,)* R> {
+            fn built(&'static self) -> &'static Built {
+                cached(self as *const Self as usize, || build::<R>(self.name, self.kind, vec![$($a::ty()),*], |_v| {
+                    $(note::<$a>();)*
+                    (self.body)($(var(&_v, $i)),*)
+                }))
+            }
+        }
+    )*};
+}
+defs! {
+    Def0();
+    Def1(A a 0);
+    Def2(A a 0, B b 1);
+    Def3(A a 0, B b 1, C c 2);
+    Def4(A a 0, B b 1, C c 2, D d 3);
+    Def5(A a 0, B b 1, C c 2, D d 3, E e 4);
 }
 
 // * Values
@@ -412,26 +541,26 @@ pub fn int(n: i64) -> Ex<i64> {
     Ex::of(Expr::Lit(Ty::Int, int_enc(n).to_vec()))
 }
 
-pub fn text(s: &str) -> Ex<String> {
+pub fn bool(b: bool) -> Ex<bool> {
+    b.into()
+}
+
+/// A text literal.
+pub fn txt(s: &str) -> Ex<String> {
     Ex::of(Expr::Lit(Types::text(), bytes_enc(s.as_bytes())))
 }
 
-pub fn bool(v: bool) -> Ex<bool> {
-    Ex::of(Expr::Lit(Ty::bool(), vec![v as u8]))
-}
-
+/// `()`.
 pub fn unit() -> Ex<()> {
     Ex::of(Expr::Seq(vec![]))
 }
 
-pub fn some<T: Shape>(x: Ex<T>) -> Ex<Option<T>> {
-    note::<Option<T>>();
-    Ex::of(Expr::Variant(Option::<T>::ty(), 1, vec![x.e]))
+pub fn some<T: Shape>(x: impl Into<Ex<T>>) -> Ex<Option<T>> {
+    variant(1, vec![x.into().e])
 }
 
 pub fn none<T: Shape>() -> Ex<Option<T>> {
-    note::<Option<T>>();
-    Ex::of(Expr::Variant(Option::<T>::ty(), 0, vec![]))
+    variant(0, vec![])
 }
 
 pub fn list<T: Shape>(xs: Vec<Ex<T>>) -> Ex<Vec<T>> {
@@ -439,117 +568,189 @@ pub fn list<T: Shape>(xs: Vec<Ex<T>>) -> Ex<Vec<T>> {
     Ex::of(Expr::List(T::ty(), xs.into_iter().map(|x| x.e).collect()))
 }
 
-/// Fields given by position, in any order, the rest read from `base`.
-fn ordered(n: u32, mut given: Vec<(u32, Expr)>, base: Option<Expr>) -> Vec<Expr> {
-    given.sort_by_key(|g| g.0);
-    let mut given = given.into_iter().peekable();
-    (0..n)
-        .map(|i| match given.next_if(|g| g.0 == i) {
-            Some((_, e)) => e,
-            None => Expr::Field(Box::new(base.clone().expect("every field given, or a base")), i),
-        })
-        .collect()
+pub fn tup<T>(t: T) -> Ex<T::Out>
+where
+    T: Tup,
+{
+    t.tup()
 }
 
-/// A struct literal: its fields by position, the rest from `..base`.
-pub fn record<S: Shape>(n: u32, given: Vec<(u32, Expr)>, base: Option<Ex<S>>) -> Ex<S> {
-    Ex::of(Expr::Tuple(ordered(n, given, base.map(|b| b.e))))
+/// A tuple of expressions as an expression of the tuple.
+pub trait Tup {
+    type Out;
+    fn tup(self) -> Ex<Self::Out>;
+}
+impl<A: Shape, B: Shape> Tup for (Ex<A>, Ex<B>) {
+    type Out = (A, B);
+    fn tup(self) -> Ex<(A, B)> {
+        self.into()
+    }
+}
+impl<A: Shape, B: Shape, C: Shape> Tup for (Ex<A>, Ex<B>, Ex<C>) {
+    type Out = (A, B, C);
+    fn tup(self) -> Ex<(A, B, C)> {
+        self.into()
+    }
 }
 
-/// Variant `i` of `S`, its fields by position.
-pub fn variant<S: Shape>(i: u8, n: u32, given: Vec<(u32, Expr)>) -> Ex<S> {
-    note::<S>();
-    Ex::of(Expr::Variant(S::ty(), i, ordered(n, given, None)))
+/// `if c { a } else { b }`; with no `else`, `b` is [`unit`].
+pub fn if_<T>(c: impl Into<Ex<bool>>, a: Ex<T>, b: Ex<T>) -> Ex<T> {
+    Ex::of(Expr::If(c.into().b(), a.b(), b.b()))
 }
 
-/// A field's setter's result, for [`record`] and [`variant`].
-pub fn set<T>(i: u32, e: Ex<T>) -> (u32, Expr) {
-    (i, e.e)
+/// `let x = v` in `body`.
+pub fn let_<A, B>(v: impl Into<Ex<A>>, body: impl FnOnce(Ex<A>) -> Ex<B>) -> Ex<B> {
+    let v = v.into();
+    Ex::of(Expr::Let(v.b(), Box::new(bind(1, |x| body(var(&x, 0))))))
 }
 
-pub fn if_<T>(c: Ex<bool>, a: Ex<T>, b: Ex<T>) -> Ex<T> {
-    Ex::of(Expr::If(self::b(c), self::b(a), self::b(b)))
+/// Statements, then the last, whose value the block's is.
+pub fn seq<T>(first: impl IntoIterator<Item = Ex<()>>, last: Ex<T>) -> Ex<T> {
+    let first: Vec<Expr> = first.into_iter().map(|s| s.e).collect();
+    if first.is_empty() {
+        return last;
+    }
+    Ex::of(Expr::Seq(first.into_iter().chain([last.e]).collect()))
 }
 
-pub fn let_<A, B>(v: Ex<A>, body: Ex<B>) -> Ex<B> {
-    Ex::of(Expr::Let(b(v), b(body)))
+/// A block of statements: `let`s, statements whose values are dropped,
+/// and the value of the last, as a body in Rust reads.
+pub struct Block {
+    items: Vec<(bool, Expr)>,
+    lets: u32,
 }
 
-/// Statements, then the last one, whose value the block's is.
-pub fn seq<T>(first: Vec<Expr>, last: Ex<T>) -> Ex<T> {
-    match first.is_empty() {
+impl Block {
+    /// `let x = v` for the rest of the block: `x`.
+    pub fn let_<A>(&mut self, v: impl Into<Ex<A>>) -> Ex<A> {
+        let v = v.into();
+        let d = with(|cx| (cx.depth, cx.depth += 1).0);
+        self.items.push((true, v.e));
+        self.lets += 1;
+        Ex::of(Expr::Var(MARK + d))
+    }
+
+    /// A statement: its value dropped ([`Ex::s`]).
+    pub fn s<T: Shape>(&mut self, x: impl Into<Ex<T>>) {
+        self.items.push((false, x.into().s().e));
+    }
+}
+
+/// `{ let a = …; s; …; last }`: what `f` says in `b`, then its result.
+pub fn block<T>(f: impl FnOnce(&mut Block) -> Ex<T>) -> Ex<T> {
+    let mut b = Block { items: vec![], lets: 0 };
+    let mut out = f(&mut b).e;
+    with(|cx| cx.depth -= b.lets);
+    let seq = |mut first: Vec<Expr>, last: Expr| match first.is_empty() {
         true => last,
-        false => Ex::of(Expr::Seq(first.into_iter().chain([last.e]).collect())),
-    }
-}
-
-/// A statement's expression, its value dropped: `()` as it is, anything
-/// else followed by `()`.
-pub fn stmt<T: Shape>(e: Ex<T>) -> Ex<()> {
-    match T::ty() == Ty::unit() {
-        true => Ex::of(e.e),
-        false => Ex::of(Expr::Seq(vec![e.e, Expr::Seq(vec![])])),
-    }
-}
-
-/// A refinement of an `Int`: from `lo` to `hi`, both included.
-pub fn within(lo: i64, hi: i64) -> Rule {
-    let (Rule::Refine(a), Rule::Refine(b)) = (bound(Op::Ge, lo), bound(Op::Le, hi)) else {
-        unreachable!()
+        false => {
+            first.reverse();
+            first.push(last);
+            Expr::Seq(first)
+        }
     };
-    Rule::Refine(Expr::Op(Op::And, Box::new(a), Box::new(b)))
+    let mut after = vec![];
+    for (is_let, e) in b.items.into_iter().rev() {
+        match is_let {
+            true => out = Expr::Let(Box::new(e), Box::new(seq(std::mem::take(&mut after), out))),
+            false => after.push(e),
+        }
+    }
+    Ex::of(seq(after, out))
 }
 
-/// A refinement of an `Int`: the value `o` the bound.
-pub fn bound(o: Op, n: i64) -> Rule {
-    Rule::Refine(Expr::Op(o, Box::new(Expr::Var(0)), Box::new(int(n).e)))
+/// A refusal, of whatever type its place wants.
+pub fn refuse<T>(why: impl Into<Ex<String>>) -> Ex<T> {
+    Ex::of(Expr::Refuse(why.into().b()))
 }
 
-/// One arm per variant in order: those written, by index, and `wild` for
-/// the rest, given how many fields each binds.
-pub fn match_<S, R>(s: Ex<S>, arities: &[u32], arms: Vec<(u8, Ex<R>)>, wild: Option<&dyn Fn(u32) -> Ex<R>>) -> Ex<R> {
-    let mut arms: BTreeMap<u8, Expr> = arms.into_iter().map(|(i, a)| (i, a.e)).collect();
-    let each = arities
-        .iter()
-        .enumerate()
-        .map(|(i, n)| arms.remove(&(i as u8)).unwrap_or_else(|| wild.expect("every variant matched")(*n).e));
-    Ex::of(Expr::Match(b(s), each.collect()))
+/// [`refuse`] as a statement.
+pub fn refuse_(why: impl Into<Ex<String>>) -> Ex<()> {
+    Ex::of(Expr::Refuse(why.into().b()))
 }
 
-pub fn refuse<T>(why: Ex<String>) -> Ex<T> {
-    Ex::of(Expr::Refuse(b(why)))
+/// `concat` of texts.
+pub fn concat(xs: Vec<Ex<String>>) -> Ex<String> {
+    concat_of(&list(xs))
 }
 
-pub fn arith(o: Op, a: Ex<i64>, c: Ex<i64>) -> Ex<i64> {
-    Ex::of(Expr::Op(o, b(a), b(c)))
+/// `concat` of a list of texts.
+pub fn concat_of(xs: &Ex<Vec<String>>) -> Ex<String> {
+    Ex::of(Expr::Std(Std::Concat, vec![xs.e.clone()]))
 }
 
-pub fn cmp<A, B>(o: Op, a: Ex<A>, c: Ex<B>) -> Ex<bool> {
-    Ex::of(Expr::Op(o, b(a), b(c)))
+pub fn nil_id<R>() -> Ex<Id<R>> {
+    Ex::of(Expr::Std(Std::NilId, vec![]))
 }
 
-pub fn logic(o: Op, a: Ex<bool>, c: Ex<bool>) -> Ex<bool> {
-    Ex::of(Expr::Op(o, b(a), b(c)))
+impl<T> Ex<T> {
+    fn op<U>(&self, o: Op, b: Expr) -> Ex<U> {
+        Ex::of(Expr::Op(o, self.b(), Box::new(b)))
+    }
 }
 
-pub fn not(a: Ex<bool>) -> Ex<bool> {
-    Ex::of(Expr::Un(Un::Not, b(a)))
+/// Comparisons, by the values' bytes.
+#[allow(clippy::should_implement_trait)]
+impl<T> Ex<T> {
+    pub fn eq(&self, b: impl Into<Ex<T>>) -> Ex<bool> {
+        self.op(Op::Eq, b.into().e)
+    }
+    pub fn ne(&self, b: impl Into<Ex<T>>) -> Ex<bool> {
+        self.op(Op::Ne, b.into().e)
+    }
+    pub fn lt(&self, b: impl Into<Ex<T>>) -> Ex<bool> {
+        self.op(Op::Lt, b.into().e)
+    }
+    pub fn le(&self, b: impl Into<Ex<T>>) -> Ex<bool> {
+        self.op(Op::Le, b.into().e)
+    }
+    pub fn gt(&self, b: impl Into<Ex<T>>) -> Ex<bool> {
+        self.op(Op::Gt, b.into().e)
+    }
+    pub fn ge(&self, b: impl Into<Ex<T>>) -> Ex<bool> {
+        self.op(Op::Ge, b.into().e)
+    }
 }
 
-pub fn neg(a: Ex<i64>) -> Ex<i64> {
-    Ex::of(Expr::Un(Un::Neg, b(a)))
+impl Ex<bool> {
+    pub fn and(&self, b: impl Into<Ex<bool>>) -> Ex<bool> {
+        self.op(Op::And, b.into().e)
+    }
+    pub fn or(&self, b: impl Into<Ex<bool>>) -> Ex<bool> {
+        self.op(Op::Or, b.into().e)
+    }
 }
 
-fn std<T>(f: Std, args: Vec<Expr>) -> Ex<T> {
-    Ex::of(Expr::Std(f, args))
+macro_rules! arith {
+    ($($tr:ident $f:ident $op:ident),*) => {$(
+        arith!(@ $tr $f $op, Ex<i64>, Ex<i64>; Ex<i64>, &Ex<i64>; Ex<i64>, i64; &Ex<i64>, Ex<i64>; &Ex<i64>, &Ex<i64>; &Ex<i64>, i64);
+    )*};
+    (@ $tr:ident $f:ident $op:ident, $($a:ty, $b:ty);*) => {$(
+        impl ops::$tr<$b> for $a {
+            type Output = Ex<i64>;
+            fn $f(self, b: $b) -> Ex<i64> { self.op(Op::$op, Ex::<i64>::from(b).e) }
+        }
+    )*};
 }
+arith!(Add add Add, Sub sub Sub, Mul mul Mul, Div div Div, Rem rem Mod);
 
-fn lam<R>(n: u32, body: Ex<R>) -> Box<Expr> {
-    Box::new(Expr::Lambda(n, b(body)))
+impl ops::Not for Ex<bool> {
+    type Output = Ex<bool>;
+    fn not(self) -> Ex<bool> {
+        Ex::of(Expr::Un(Un::Not, self.b()))
+    }
 }
-
-fn wit<T>() -> Ex<T> {
-    Ex::of(Expr::Var(u32::MAX))
+impl ops::Not for &Ex<bool> {
+    type Output = Ex<bool>;
+    fn not(self) -> Ex<bool> {
+        Ex::of(Expr::Un(Un::Not, self.b()))
+    }
+}
+impl ops::Neg for Ex<i64> {
+    type Output = Ex<i64>;
+    fn neg(self) -> Ex<i64> {
+        Ex::of(Expr::Un(Un::Neg, self.b()))
+    }
 }
 
 // * The context
@@ -576,14 +777,39 @@ impl Ctx {
         note::<Id<R>>();
         Ex::of(Expr::Ctx(CtxField::NewId(R::TABLE.into())))
     }
-    pub fn has_role(self, r: Ex<String>) -> Ex<bool> {
+    pub fn has_role(self, r: impl Into<Ex<String>>) -> Ex<bool> {
         self.roles().contains(r)
     }
 }
 
 // * Tables
 
-/// `db.<table>`: a table's rows, and its writes.
+/// A table's key: the tuple of its key columns' values, one or several.
+pub trait Key {
+    fn key(self) -> Expr;
+}
+impl<T> Key for Ex<T> {
+    fn key(self) -> Expr {
+        Expr::Tuple(vec![self.e])
+    }
+}
+impl<T> Key for &Ex<T> {
+    fn key(self) -> Expr {
+        Expr::Tuple(vec![self.e.clone()])
+    }
+}
+impl<A, B> Key for (Ex<A>, Ex<B>) {
+    fn key(self) -> Expr {
+        Expr::Tuple(vec![self.0.e, self.1.e])
+    }
+}
+impl<A, B, C> Key for (Ex<A>, Ex<B>, Ex<C>) {
+    fn key(self) -> Expr {
+        Expr::Tuple(vec![self.0.e, self.1.e, self.2.e])
+    }
+}
+
+/// A table's rows, and its writes.
 pub struct Table<R>(PhantomData<fn() -> R>);
 
 impl<R> Default for Table<R> {
@@ -591,34 +817,53 @@ impl<R> Default for Table<R> {
         Table(PhantomData)
     }
 }
+impl<R> Clone for Table<R> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<R> Copy for Table<R> {}
 
 impl<R: Row> Table<R> {
-    pub fn all(self) -> Ex<Vec<R>> {
+    pub fn all(&self) -> Ex<Vec<R>> {
         Ex::of(Expr::Scan(R::TABLE.into()))
     }
-    /// The row under a key: the tuple of the key columns' values.
-    pub fn get(self, key: Vec<Expr>) -> Ex<Option<R>> {
-        Ex::of(Expr::Lookup(R::TABLE.into(), Box::new(Expr::Tuple(key))))
+    /// The row under a key.
+    pub fn get(&self, key: impl Key) -> Ex<Option<R>> {
+        Ex::of(Expr::Lookup(R::TABLE.into(), Box::new(key.key())))
     }
-    pub fn insert(self, row: Ex<R>) -> Ex<()> {
-        Ex::of(Expr::Insert(R::TABLE.into(), b(row)))
+    pub fn insert(&self, row: impl Into<Ex<R>>) -> Ex<()> {
+        Ex::of(Expr::Insert(R::TABLE.into(), row.into().b()))
     }
-    pub fn update(self, key: Vec<Expr>, f: impl FnOnce(Ex<R>) -> Ex<R>) -> Ex<()> {
-        Ex::of(Expr::Update(R::TABLE.into(), Box::new(Expr::Tuple(key)), lam(1, f(wit()))))
+    pub fn update(&self, key: impl Key, f: impl FnOnce(Ex<R>) -> Ex<R>) -> Ex<()> {
+        Ex::of(Expr::Update(R::TABLE.into(), Box::new(key.key()), lam(1, |v| f(var(&v, 0)))))
     }
-    pub fn delete(self, key: Vec<Expr>) -> Ex<()> {
-        Ex::of(Expr::Delete(R::TABLE.into(), Box::new(Expr::Tuple(key))))
+    pub fn delete(&self, key: impl Key) -> Ex<()> {
+        Ex::of(Expr::Delete(R::TABLE.into(), Box::new(key.key())))
+    }
+    pub fn filter(&self, p: impl FnOnce(Ex<R>) -> Ex<bool>) -> Ex<Vec<R>> {
+        self.all().filter(p)
+    }
+    pub fn map<U>(&self, f: impl FnOnce(Ex<R>) -> Ex<U>) -> Ex<Vec<U>> {
+        self.all().map(f)
+    }
+    pub fn sort<K: Keys>(&self, keys: impl FnOnce(Ex<R>) -> K) -> Ex<Vec<R>> {
+        self.all().sort(keys)
     }
 }
 
-// * The standard library and the relational operators, as methods
+// * The standard library and the relational operators
+
+fn std<T>(f: Std, args: Vec<Expr>) -> Ex<T> {
+    Ex::of(Expr::Std(f, args))
+}
 
 /// Methods that are a standard function of the receiver and the arguments.
 macro_rules! std_methods {
     ($(impl[$($g:tt)*] $recv:ty { $($name:ident($($a:ident: $at:ty),*) -> $r:ty = $f:ident;)* })*) => {$(
         impl<$($g)*> Ex<$recv> {
-            $(pub fn $name(self $(, $a: Ex<$at>)*) -> Ex<$r> {
-                std(Std::$f, vec![self.e $(, $a.e)*])
+            $(pub fn $name(&self $(, $a: impl Into<Ex<$at>>)*) -> Ex<$r> {
+                std(Std::$f, vec![self.e.clone() $(, $a.into().e)*])
             })*
         }
     )*};
@@ -636,6 +881,7 @@ std_methods! {
         split_once(p: String) -> Option<(String, String)> = SplitOnce;
         fnv1a64() -> i64 = Fnv1a64;
         utf8() -> Bytes = Utf8;
+        id_of_text() -> Option<Bytes> = IdOfText;
     }
     impl[] i64 {
         to_text() -> String = TextOfInt;
@@ -674,59 +920,141 @@ std_methods! {
     }
 }
 
-/// `concat` of texts.
-pub fn concat(xs: Ex<Vec<String>>) -> Ex<String> {
-    std(Std::Concat, vec![xs.e])
+/// A sort key and its direction.
+pub struct Dirn(Expr, Dir);
+
+pub fn desc<T>(k: impl Into<Ex<T>>) -> Dirn {
+    Dirn(k.into().e, Dir::Desc)
 }
 
-pub fn nil_id<R>() -> Ex<Id<R>> {
-    std(Std::NilId, vec![])
+pub fn asc<T>(k: impl Into<Ex<T>>) -> Dirn {
+    Dirn(k.into().e, Dir::Asc)
 }
+
+/// A sort's keys: one, ascending or [`desc`]; or a tuple of them.
+pub trait Keys {
+    fn keys(self) -> (Expr, Vec<Dir>);
+}
+/// One sort key.
+pub trait OneKey {
+    fn one(self) -> (Expr, Dir);
+}
+impl OneKey for Dirn {
+    fn one(self) -> (Expr, Dir) {
+        (self.0, self.1)
+    }
+}
+impl<T> OneKey for Ex<T> {
+    fn one(self) -> (Expr, Dir) {
+        (self.e, Dir::Asc)
+    }
+}
+impl<K: OneKey> Keys for K {
+    fn keys(self) -> (Expr, Vec<Dir>) {
+        let (e, d) = self.one();
+        (e, vec![d])
+    }
+}
+macro_rules! keys {
+    ($(($($k:ident $i:tt),*)),*) => {$(
+        impl<$($k: OneKey),*> Keys for ($($k,)*) {
+            fn keys(self) -> (Expr, Vec<Dir>) {
+                let ks = [$(self.$i.one()),*];
+                (Expr::Tuple(ks.iter().map(|k| k.0.clone()).collect()), ks.iter().map(|k| k.1).collect())
+            }
+        }
+    )*};
+}
+keys!((A 0, B 1), (A 0, B 1, C 2), (A 0, B 1, C 2, D 3));
 
 impl<T: Shape> Ex<Vec<T>> {
-    pub fn is_empty(self) -> Ex<bool> {
-        cmp(Op::Eq, self.len(), int(0))
+    /// `len() == 0`.
+    pub fn is_empty(&self) -> Ex<bool> {
+        self.len().eq(int(0))
     }
-    pub fn take(self, n: Ex<i64>) -> Ex<Vec<T>> {
-        Ex::of(Expr::Take(b(self), b(n)))
+    pub fn take(&self, n: impl Into<Ex<i64>>) -> Ex<Vec<T>> {
+        Ex::of(Expr::Take(self.b(), n.into().b()))
     }
-    pub fn filter(self, p: impl FnOnce(Ex<T>) -> Ex<bool>) -> Ex<Vec<T>> {
-        Ex::of(Expr::Filter(b(self), lam(1, p(wit()))))
+    pub fn filter(&self, p: impl FnOnce(Ex<T>) -> Ex<bool>) -> Ex<Vec<T>> {
+        Ex::of(Expr::Filter(self.b(), lam(1, |v| p(var(&v, 0)))))
     }
-    pub fn map<U>(self, f: impl FnOnce(Ex<T>) -> Ex<U>) -> Ex<Vec<U>> {
-        Ex::of(Expr::Map(b(self), lam(1, f(wit()))))
+    pub fn map<U>(&self, f: impl FnOnce(Ex<T>) -> Ex<U>) -> Ex<Vec<U>> {
+        Ex::of(Expr::Map(self.b(), lam(1, |v| f(var(&v, 0)))))
     }
     /// The pairs the condition admits, in this list's order.
-    pub fn join<U>(self, o: Ex<Vec<U>>, on: impl FnOnce(Ex<T>, Ex<U>) -> Ex<bool>) -> Ex<Vec<(T, U)>> {
-        Ex::of(Expr::Join(b(self), b(o), lam(2, on(wit(), wit()))))
+    pub fn join<U>(&self, o: &Ex<Vec<U>>, on: impl FnOnce(Ex<T>, Ex<U>) -> Ex<bool>) -> Ex<Vec<(T, U)>> {
+        Ex::of(Expr::Join(self.b(), o.b(), lam(2, |v| on(var(&v, 0), var(&v, 1)))))
     }
     /// `(key, aggregate)` per key, in key order.
-    pub fn group<K, A>(self, by: impl FnOnce(Ex<T>) -> Ex<K>, agg: impl FnOnce(Ex<K>, Ex<Vec<T>>) -> Ex<A>) -> Ex<Vec<(K, A)>> {
-        Ex::of(Expr::Group(b(self), lam(1, by(wit())), lam(2, agg(wit(), wit()))))
+    pub fn group<K, A>(&self, by: impl FnOnce(Ex<T>) -> Ex<K>, agg: impl FnOnce(Ex<K>, Ex<Vec<T>>) -> Ex<A>) -> Ex<Vec<(K, A)>> {
+        let by = lam(1, |v| by(var(&v, 0)));
+        Ex::of(Expr::Group(self.b(), by, lam(2, |v| agg(var(&v, 0), var(&v, 1)))))
     }
-    /// Stable, by the key (each field of a tuple of keys in its direction).
-    pub fn sort<K>(self, dirs: Vec<Dir>, keys: impl FnOnce(Ex<T>) -> Ex<K>) -> Ex<Vec<T>> {
-        Ex::of(Expr::Sort(b(self), lam(1, keys(wit())), dirs))
+    /// Stable, by the keys, each in its direction.
+    pub fn sort<K: Keys>(&self, keys: impl FnOnce(Ex<T>) -> K) -> Ex<Vec<T>> {
+        let mut dirs = vec![];
+        let l = lam(1, |v| {
+            let (e, d) = keys(var(&v, 0)).keys();
+            dirs = d;
+            Ex::<()>::of(e)
+        });
+        Ex::of(Expr::Sort(self.b(), l, dirs))
     }
 }
 
 impl<T: Shape> Ex<Option<T>> {
-    pub fn is_none(self) -> Ex<bool> {
-        not(self.is_some())
+    pub fn is_none(&self) -> Ex<bool> {
+        !self.is_some()
     }
     /// `match self { None => d, Some(x) => f(x) }`.
-    pub fn map_or<U>(self, d: Ex<U>, f: impl FnOnce(Ex<T>) -> Ex<U>) -> Ex<U> {
-        Ex::of(Expr::Match(b(self), vec![d.e, f(wit()).e]))
+    pub fn map_or<U>(&self, d: impl Into<Ex<U>>, f: impl FnOnce(Ex<T>) -> Ex<U>) -> Ex<U> {
+        let some = arm(1, |v| f(var(&v, 0)));
+        Ex::of(Expr::Match(self.b(), vec![Expr::Lambda(0, d.into().b()), some]))
     }
-    pub fn map<U: Shape>(self, f: impl FnOnce(Ex<T>) -> Ex<U>) -> Ex<Option<U>> {
-        let some = some(f(wit())).e;
-        self.map_or(none::<U>(), |_| Ex::of(some))
+    pub fn map<U: Shape>(&self, f: impl FnOnce(Ex<T>) -> Ex<U>) -> Ex<Option<U>> {
+        self.map_or(none::<U>(), |x| some(f(x)))
     }
     /// The value when the predicate holds of it.
-    pub fn filter(self, p: impl FnOnce(Ex<T>) -> Ex<bool>) -> Ex<Option<T>> {
-        let keep = if_(p(wit()), some(Ex::<T>::of(Expr::Var(0))), none());
-        self.map_or(none(), |_| keep)
+    pub fn filter(&self, p: impl FnOnce(Ex<T>) -> Ex<bool>) -> Ex<Option<T>> {
+        self.map_or(none(), |x| if_(p(x.clone()), some(x), none()))
     }
+}
+
+// * Text inside a builder
+
+/// A value usable in a [`text`] fragment: its expression and type.
+pub trait Var {
+    fn var(&self) -> (Expr, Ty);
+}
+impl<T: Shape> Var for Ex<T> {
+    fn var(&self) -> (Expr, Ty) {
+        (self.e.clone(), T::ty())
+    }
+}
+
+/// An Ark text expression (§1.15) inside a builder: `vars` its free
+/// names, the tables those of the module being assembled. Type-checked
+/// here, as `T`; refused with the text's words otherwise.
+pub fn text<T: Shape>(src: &str, vars: &[(&str, &dyn Var)]) -> Ex<T> {
+    let schema = SCHEMA.with(|s| s.borrow().clone()).unwrap_or_default();
+    let decls: Vec<_> = with(|cx| cx.decls.clone().into_iter().collect());
+    let vs: Vec<(&str, Expr, Ty)> = vars
+        .iter()
+        .map(|(n, v)| {
+            let (e, t) = v.var();
+            (*n, e, t)
+        })
+        .collect();
+    let depth = with(|cx| cx.depth);
+    let (e, t, more) = crate::text::fragment(src, &schema, &decls, &vs, depth).unwrap_or_else(|r| panic!("text({src:?}): {r}"));
+    with(|cx| cx.decls.extend(more));
+    let types = Types::new(&with(|cx| cx.decls.clone().into_iter().collect::<Vec<_>>()));
+    assert!(
+        types.sub(&t, &T::ty()) || types.sub(&T::ty(), &t),
+        "text({src:?}) is {t:?}, not {:?}",
+        T::ty()
+    );
+    Ex::of(e)
 }
 
 // * A module
@@ -779,80 +1107,65 @@ impl Domain {
     ) -> Result<Vec<crate::store::Change>, Refusal> {
         self.lib.procedure(&self.get(name)).expect("an installed function").run(store, ctx, input)
     }
-
-    fn install(&mut self, f: &Built) -> Result<FnHash, Refusal> {
-        for c in &f.calls {
-            self.install(c)?;
-        }
-        if f.kind == Kind::Live {
-            let mut todo = vec![&f.f.body];
-            let mut fns: Vec<&Built> = f.calls.clone();
-            while let Some(c) = fns.pop() {
-                todo.push(&c.f.body);
-                fns.extend(c.calls.iter().copied());
-            }
-            while let Some(e) = todo.pop() {
-                if let Expr::Scan(t) | Expr::Lookup(t, _) | Expr::Insert(t, _) | Expr::Update(t, ..) | Expr::Delete(t, _) = e {
-                    if self.schema.table(t).is_some_and(|(_, t)| t.space != Space::Volatile) {
-                        return Err(Refusal(format!("{}: a live transition touches {t}, which is durable", f.name)));
-                    }
-                }
-                todo.extend(children(e));
-            }
-        }
-        self.bodies.insert(f.hash, f.f.to_bytes());
-        self.lib
-            .install(&self.schema, f.f.clone())
-            .map_err(|r| Refusal(format!("{}: {r}", f.name)))
-    }
 }
 
 /// §1.5 The module of a schema and functions: each checked, its callees
-/// first, bound by its name; the types every one of them declares.
-pub fn assemble(schema: Schema, fns: &[&'static Built]) -> Result<Domain, Refusal> {
-    let mut d = Domain {
-        schema: Arc::new(schema.clone()),
-        module: Module {
-            spec: SPEC,
-            schema,
-            types: vec![],
-            bindings: vec![],
-        },
-        lib: Lib::default(),
-        bodies: BTreeMap::new(),
-    };
-    let (mut bindings, mut types) = (BTreeMap::new(), BTreeMap::new());
-    for f in fns {
-        if bindings.insert(f.name.to_string(), d.install(f)?).is_some() {
-            return Err(Refusal(format!("{} is bound twice", f.name)));
+/// first, every one bound by its name; the types every one declares. A
+/// live function touching a durable table is refused.
+pub fn assemble(schema: Schema, fns: &[&'static dyn Fun]) -> Result<Domain, Refusal> {
+    SCHEMA.with(|s| *s.borrow_mut() = Some(schema.clone()));
+    let mut all: BTreeMap<&str, &'static Built> = BTreeMap::new();
+    let mut todo: Vec<&'static Built> = fns.iter().map(|f| f.built()).collect();
+    while let Some(b) = todo.pop() {
+        if let Some(o) = all.insert(b.name, b) {
+            if o.hash != b.hash {
+                return Err(Refusal(format!("{} is bound twice", b.name)));
+            }
         }
-        types.extend(f.f.types.iter().cloned());
+        todo.extend(b.calls.iter().copied());
     }
-    d.module.bindings = bindings.into_iter().collect();
-    d.module.types = types.into_iter().collect();
-    Ok(d)
-}
-
-/// A column's type: its declaration's name when it is one, else its
-/// structure — as the checker types a row's columns.
-pub fn column_ty<T: Shape>() -> (String, Ty, Ty) {
-    let mut d = Decls::new();
-    T::decls(&mut d);
-    let cx = Types::new(&d.into_iter().collect::<Vec<_>>());
-    let t = T::ty();
-    let structure = cx.deep(&t);
-    let row = if matches!(t, Ty::Named(_)) { t } else { structure.clone() };
-    (T::name(), structure, row)
-}
-
-/// A declaration of a record's fields, or of a refinement of one type.
-pub fn decl(name: &str, ty: Ty, refine: Vec<(Rule, Option<&str>)>, d: &mut Decls) {
-    let refine = refine
-        .into_iter()
-        .map(|(rule, why)| Refine {
-            rule,
-            why: why.map(Into::into),
-        })
-        .collect();
-    d.insert(name.into(), Decl { ty, refine });
+    let lib = Lib::default();
+    let mut bodies = BTreeMap::new();
+    fn install(lib: &Lib, schema: &Schema, bodies: &mut BTreeMap<FnHash, Vec<u8>>, b: &Built) -> Result<(), Refusal> {
+        for c in &b.calls {
+            install(lib, schema, bodies, c)?;
+        }
+        if b.kind == Kind::Live {
+            let mut touched = vec![];
+            let mut fns = vec![b];
+            while let Some(f) = fns.pop() {
+                crate::interp::walk(&f.f.body, None, &mut |e, _| {
+                    if let Expr::Scan(t) | Expr::Lookup(t, _) | Expr::Insert(t, _) | Expr::Update(t, ..) | Expr::Delete(t, _) = e {
+                        touched.push(t.clone())
+                    }
+                });
+                fns.extend(f.calls.iter().copied());
+            }
+            if let Some(t) = touched.iter().find(|t| schema.table(t).is_some_and(|(_, t)| t.space != Space::Volatile)) {
+                return Err(Refusal(format!("{}: a live transition touches {t}, which is durable", b.name)));
+            }
+        }
+        bodies.insert(b.hash, b.f.to_bytes());
+        lib.install(schema, b.f.clone())
+            .map(|_| ())
+            .map_err(|r| Refusal(format!("{}: {r}", b.name)))
+    }
+    let mut types = BTreeMap::new();
+    for b in all.values() {
+        install(&lib, &schema, &mut bodies, b)?;
+        types.extend(b.f.types.iter().cloned());
+    }
+    let bindings = all.iter().map(|(n, b)| (n.to_string(), b.hash)).collect();
+    let module = Module {
+        spec: SPEC,
+        schema: schema.clone(),
+        types: types.into_iter().collect(),
+        bindings,
+    };
+    Ok(Domain {
+        schema: Arc::new(schema),
+        module,
+        lib,
+        bodies,
+    })
 }

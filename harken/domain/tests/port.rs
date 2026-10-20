@@ -1,4 +1,4 @@
-//! The builder port (`harken_domain::built`) held to the pin: every
+//! The builder port (`harken_domain::domain`) held to the pin: every
 //! function at the hash the attribute macros built it at. Falsified by
 //! numbering a playlist "Favorites [1]": `playlists.numbered` and the
 //! three bound functions that reach it were wrong.
@@ -21,7 +21,7 @@ fn every_function_built_is_the_macros() {
         .map(|b| Function::from_bytes(b).unwrap())
         .map(|f| (f.hash().to_string(), f))
         .collect();
-    let d = harken_domain::built::domain();
+    let d = harken_domain::domain();
     let mut wrong = vec![];
     for (n, h) in &d.module.bindings {
         match pinned.get(n.as_str()) {

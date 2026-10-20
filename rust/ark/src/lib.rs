@@ -19,13 +19,10 @@ use ::std::fmt;
 
 extern crate self as ark;
 
-/// The attribute macros and what a module is assembled into, at the
-/// crate's root, so a domain writes `#[ark::mutator]` and `ark::module!`
-/// (§1.12).
-pub use author::{guard, helper, live, module, mutator, query, scope, Domain};
+/// What a module is assembled into (§1.15).
+pub use author::Domain;
 
 pub mod author;
-pub mod build;
 pub mod check;
 pub mod codec;
 pub mod frames;

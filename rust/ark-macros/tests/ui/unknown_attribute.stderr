@@ -1,5 +1,0 @@
-error: `trimmed` is no ark attribute
- --> tests/ui/unknown_attribute.rs:7:11
-  |
-7 |     #[ark(trimmed)]
-  |           ^^^^^^^

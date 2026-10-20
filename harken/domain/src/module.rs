@@ -1,28 +1,82 @@
 //! The module: every function, bound by its path (`library.add_song`),
-//! over the schema; their callees come with them.
+//! over the schema; their callees come with them, bound too.
 
-use ark::author::Domain;
+use ark::author::{assemble, Domain, Fun};
 
 use crate::library::*;
 use crate::listening::*;
 use crate::playlists::*;
 use crate::schema::Harken;
 
-/// harken's module, every function checked.
+/// harken's module, every function checked and bound by its name.
 pub fn domain() -> Domain {
-    ark::module! {
-        schema: Harken,
-        functions: [
-            add_song, describe_work, describe_recording, describe_person, credit_recording, remove_media,
-            library, search, albums, artists, track_details, album, artist, composers, works, work, recordings,
-            credits, recording, work_key, movement_key, recording_key, key_part, playlist_name,
-            create_playlist, add_to_playlist, add_all_to_playlist, remove_from_playlist, playlists, playlists_of,
-            playlist,
-            start, play, pause, seek, skip, jump, transfer, stop, enqueue, remove, move_track, clear_upcoming,
-            started, advance, stalled, report_position, release, equip, set_volume, nudge_volume, set_mute,
-            report_volume, join, unjoin, report_group, set_group_volume, nudge_group_volume, set_group_mute,
-            scrub, on_join, on_leave, on_restore, record_play, last_played, recently_played,
-        ],
-    }
-    .unwrap_or_else(|r| panic!("harken's module: {r}"))
+    let fns: [&'static dyn Fun; 66] = [
+        &ADD_SONG,
+        &DESCRIBE_WORK,
+        &DESCRIBE_RECORDING,
+        &DESCRIBE_PERSON,
+        &CREDIT_RECORDING,
+        &REMOVE_MEDIA,
+        &LIBRARY_LIST,
+        &SEARCH,
+        &ALBUMS,
+        &ARTISTS,
+        &TRACK_DETAILS,
+        &ALBUM,
+        &ARTIST,
+        &COMPOSERS,
+        &WORKS,
+        &WORK,
+        &RECORDINGS,
+        &CREDITS,
+        &RECORDING,
+        &WORK_KEY,
+        &MOVEMENT_KEY,
+        &RECORDING_KEY,
+        &KEY_PART,
+        &PLAYLIST_NAME,
+        &CREATE_PLAYLIST,
+        &ADD_TO_PLAYLIST,
+        &ADD_ALL_TO_PLAYLIST,
+        &REMOVE_FROM_PLAYLIST,
+        &PLAYLISTS,
+        &PLAYLISTS_OF,
+        &PLAYLIST,
+        &START,
+        &PLAY,
+        &PAUSE,
+        &SEEK,
+        &SKIP,
+        &JUMP,
+        &TRANSFER,
+        &STOP,
+        &ENQUEUE,
+        &REMOVE,
+        &MOVE_TRACK,
+        &CLEAR_UPCOMING,
+        &STARTED,
+        &ADVANCE,
+        &STALLED,
+        &REPORT_POSITION,
+        &RELEASE,
+        &EQUIP,
+        &SET_VOLUME,
+        &NUDGE_VOLUME,
+        &SET_MUTE,
+        &REPORT_VOLUME,
+        &JOIN,
+        &UNJOIN,
+        &REPORT_GROUP,
+        &SET_GROUP_VOLUME,
+        &NUDGE_GROUP_VOLUME,
+        &SET_GROUP_MUTE,
+        &SCRUB,
+        &ON_JOIN,
+        &ON_LEAVE,
+        &ON_RESTORE,
+        &RECORD_PLAY,
+        &LAST_PLAYED,
+        &RECENTLY_PLAYED,
+    ];
+    assemble(Harken::schema(), &fns).unwrap_or_else(|r| panic!("harken's module: {r}"))
 }

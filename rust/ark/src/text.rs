@@ -1500,11 +1500,14 @@ pub fn build(src: &str) -> R<Domain> {
     })
 }
 
+/// A fragment's expression, its type, and the declarations it makes.
+pub type Fragment = (Expr, Ty, Vec<(String, Decl)>);
+
 /// A fragment of text as an expression in a builder's function (§1.15):
 /// `vars` its free names, by level, with their types; the levels after
 /// them its own binders, which begin at `depth`. What it stores is
 /// declared through `declare`.
-pub fn fragment(src: &str, schema: &Schema, decls: &[(String, Decl)], vars: &[(&str, Expr, Ty)], depth: u32) -> R<(Expr, Ty, Vec<(String, Decl)>)> {
+pub fn fragment(src: &str, schema: &Schema, decls: &[(String, Decl)], vars: &[(&str, Expr, Ty)], depth: u32) -> R<Fragment> {
     let mut m = M {
         toks: lex(src)?,
         schema: schema.clone(),
@@ -1656,7 +1659,10 @@ impl Pr<'_> {
                 }
                 Ok(())
             }
-            e => Ok(out.push(self.ex(e, 0)?)),
+            e => {
+                out.push(self.ex(e, 0)?);
+                Ok(())
+            }
         }
     }
 
@@ -1907,7 +1913,7 @@ fn rules(d: &Decl, pr: &mut Pr) -> R<String> {
             Rule::Len(n) => format!("len {n}"),
             Rule::LenRange(a, i64::MAX) => format!("len {a}.."),
             Rule::LenRange(a, b) => format!("len {a}..={b}"),
-            Rule::Refine(e) => pr.under(&[d.ty.clone()], |p, n| Ok(format!("{} => {}", n[0], p.ex(e, 0)?)))?,
+            Rule::Refine(e) => pr.under(std::slice::from_ref(&d.ty), |p, n| Ok(format!("{} => {}", n[0], p.ex(e, 0)?)))?,
         };
         out.push(match &r.why {
             Some(w) => format!("{s} {w:?}"),

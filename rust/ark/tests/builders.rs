@@ -7,8 +7,7 @@
 #[path = "demo.rs"]
 mod demo;
 
-use ark::author::{Id, Input, Int, Row, Schema, Table, Text};
-use ark::build::*;
+use ark::author::*;
 
 #[derive(Row)]
 #[ark(unique(user_id, name))]

@@ -1,5 +1,0 @@
-error: a parameter pattern is not in the subset ark lowers (spec/AUTHORING.md)
- --> tests/ui/param_pattern.rs:6:6
-  |
-6 | fn f((a, b): (Int, Int)) -> Int {
-  |      ^^^^^^

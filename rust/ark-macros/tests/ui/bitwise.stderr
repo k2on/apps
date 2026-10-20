@@ -1,5 +1,0 @@
-error: a bitwise operator is not in the subset ark lowers (spec/AUTHORING.md)
- --> tests/ui/bitwise.rs:7:7
-  |
-7 |     a & 1
-  |       ^

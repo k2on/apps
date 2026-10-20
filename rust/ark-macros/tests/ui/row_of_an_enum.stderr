@@ -1,5 +1,0 @@
-error: a row or record that is no struct with named fields is not in the subset ark lowers (spec/AUTHORING.md)
- --> tests/ui/row_of_an_enum.rs:6:10
-  |
-6 | pub enum X {
-  |          ^
