@@ -9,6 +9,7 @@
 //! volatile tables, and the plays; [`keys`] the derived keys on the host;
 //! [`view`] what a screen holds of a library list.
 
+pub mod built;
 pub mod keys;
 pub mod library;
 pub mod listening;

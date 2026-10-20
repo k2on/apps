@@ -43,43 +43,59 @@ pub struct Name(pub Text);
 #[ark(len = "1..")]
 pub struct TrackId(pub Text);
 
-static CREATE: Def1<Name, ()> = Def1::mutator("demo.create_playlist", |name| {
-    let db = Demo::db();
-    let mine = db.playlist.filter(|p| p.f().user_id.eq(Ctx.user()).and(p.f().name.eq(&name)));
-    let row = PlaylistEx {
-        id: Ctx.new_id::<Playlist>(),
-        name,
-        user_id: Ctx.user(),
-    };
-    if_(mine.len().eq(0), db.playlist.insert(row), unit())
-});
+static CREATE: Def1<Name, ()> = Def1 {
+    name: "demo.create_playlist",
+    kind: Kind::Mutator,
+    body: |name| {
+        let db = Demo::db();
+        let mine = db.playlist.filter(|p| p.f().user_id.eq(Ctx.user()).and(p.f().name.eq(&name)));
+        let row = PlaylistEx {
+            id: Ctx.new_id::<Playlist>(),
+            name,
+            user_id: Ctx.user(),
+        };
+        if_(mine.len().eq(0), db.playlist.insert(row), unit())
+    },
+};
 
-static ADD: Def2<Id<Playlist>, TrackId, ()> = Def2::mutator("demo.add_to_playlist", |pid, tid| {
-    let db = Demo::db();
-    let last = db.item.filter(|r| r.f().playlist_id.eq(&pid)).sort(|r| desc(r.f().pos)).take(1).first();
-    let add = let_(last, |last| {
-        let pos = last.map_or(0, |r| r.f().pos) + 1;
-        db.item.insert(ItemEx {
-            playlist_id: pid.clone(),
-            track_id: tid.clone(),
-            pos,
-        })
-    });
-    let on = db.item.get((pid.clone(), tid.clone())).is_some();
-    if_(
-        db.playlist.get(&pid).is_some(),
-        if_(on, unit(), add),
-        refuse("playlist_id: no such playlist"),
-    )
-});
+static ADD: Def2<Id<Playlist>, TrackId, ()> = Def2 {
+    name: "demo.add_to_playlist",
+    kind: Kind::Mutator,
+    body: |pid, tid| {
+        let db = Demo::db();
+        let last = db.item.filter(|r| r.f().playlist_id.eq(&pid)).sort(|r| desc(r.f().pos)).take(1).first();
+        let add = let_(last, |last| {
+            let pos = last.map_or(0, |r| r.f().pos) + 1;
+            db.item.insert(ItemEx {
+                playlist_id: pid.clone(),
+                track_id: tid.clone(),
+                pos,
+            })
+        });
+        let on = db.item.get((pid.clone(), tid.clone())).is_some();
+        if_(
+            db.playlist.get(&pid).is_some(),
+            if_(on, unit(), add),
+            refuse("playlist_id: no such playlist"),
+        )
+    },
+};
 
-static RENAME: Def2<Id<Playlist>, Name, ()> = Def2::mutator("demo.rename_playlist", |id, name| {
-    let db = Demo::db();
-    let update = db.playlist.update(&id, |p| PlaylistEx { name, ..p.f() }.into());
-    if_(db.playlist.get(&id).is_some(), update, refuse("no such playlist"))
-});
+static RENAME: Def2<Id<Playlist>, Name, ()> = Def2 {
+    name: "demo.rename_playlist",
+    kind: Kind::Mutator,
+    body: |id, name| {
+        let db = Demo::db();
+        let update = db.playlist.update(&id, |p| PlaylistEx { name, ..p.f() }.into());
+        if_(db.playlist.get(&id).is_some(), update, refuse("no such playlist"))
+    },
+};
 
-static REMOVE: Def2<Id<Playlist>, Text, ()> = Def2::mutator("demo.remove_from_playlist", |pid, tid| Demo::db().item.delete((pid, tid)));
+static REMOVE: Def2<Id<Playlist>, Text, ()> = Def2 {
+    name: "demo.remove_from_playlist",
+    kind: Kind::Mutator,
+    body: |pid, tid| Demo::db().item.delete((pid, tid)),
+};
 
 #[test]
 fn the_demo_built_is_the_demo() {

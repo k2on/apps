@@ -25,7 +25,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
 use std::ops;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use crate::author::{Decls, Id, Row, Shape};
 use crate::check::Types;
@@ -267,26 +267,28 @@ fn effect(e: &Expr, calls: &[&Built]) -> Effect {
     out
 }
 
+/// Built functions, by the address of their `static`.
+static BUILT: std::sync::Mutex<BTreeMap<usize, &'static Built>> = std::sync::Mutex::new(BTreeMap::new());
+
+fn cached(key: usize, f: impl FnOnce() -> Built) -> &'static Built {
+    if let Some(b) = BUILT.lock().unwrap().get(&key) {
+        return b;
+    }
+    let b = f();
+    *BUILT.lock().unwrap().entry(key).or_insert_with(|| Box::leak(Box::new(b)))
+}
+
 macro_rules! defs {
     ($($def:ident($($a:ident $x:ident $i:tt),*);)*) => {$(
         /// A function of this many parameters, typed by their declared
-        /// types (`Name`, not `Text`), in a `static`.
+        /// types (`Name`, not `Text`), in a `static`: its binding's name,
+        /// its kind and its body.
         pub struct $def<$($a: Shape,)* R: Shape> {
-            name: &'static str,
-            kind: Kind,
-            body: fn($(Ex<$a::Base>),*) -> Ex<R::Base>,
-            cell: OnceLock<Built>,
+            pub name: &'static str,
+            pub kind: Kind,
+            pub body: fn($(Ex<$a::Base>),*) -> Ex<R::Base>,
         }
         impl<$($a: Shape,)* R: Shape> $def<$($a,)* R> {
-            pub const fn new(name: &'static str, kind: Kind, body: fn($(Ex<$a::Base>),*) -> Ex<R::Base>) -> Self {
-                $def { name, kind, body, cell: OnceLock::new() }
-            }
-            pub const fn mutator(name: &'static str, body: fn($(Ex<$a::Base>),*) -> Ex<R::Base>) -> Self { Self::new(name, Kind::Mutator, body) }
-            pub const fn query(name: &'static str, body: fn($(Ex<$a::Base>),*) -> Ex<R::Base>) -> Self { Self::new(name, Kind::Query, body) }
-            pub const fn scope(name: &'static str, body: fn($(Ex<$a::Base>),*) -> Ex<R::Base>) -> Self { Self::new(name, Kind::Scope, body) }
-            pub const fn live(name: &'static str, body: fn($(Ex<$a::Base>),*) -> Ex<R::Base>) -> Self { Self::new(name, Kind::Live, body) }
-            pub const fn helper(name: &'static str, body: fn($(Ex<$a::Base>),*) -> Ex<R::Base>) -> Self { Self::new(name, Kind::Helper, body) }
-
             /// A call of it: its declarations become the caller's.
             #[allow(clippy::too_many_arguments)]
             pub fn call(&'static self $(, $x: impl Into<Ex<$a::Base>>)*) -> Ex<R::Base> {
@@ -300,14 +302,10 @@ macro_rules! defs {
         }
         impl<$($a: Shape,)* R: Shape> Fun for $def<$($a,)* R> {
             fn built(&'static self) -> &'static Built {
-                if let Some(b) = self.cell.get() {
-                    return b;
-                }
-                let b = build::<R>(self.name, self.kind, vec![$($a::ty()),*], |_v| {
+                cached(self as *const Self as usize, || build::<R>(self.name, self.kind, vec![$($a::ty()),*], |_v| {
                     $(note::<$a>();)*
                     (self.body)($(var(&_v, $i)),*)
-                });
-                self.cell.get_or_init(|| b)
+                }))
             }
         }
     )*};
@@ -318,12 +316,17 @@ defs! {
     Def2(A a 0, B b 1);
     Def3(A a 0, B b 1, C c 2);
     Def4(A a 0, B b 1, C c 2, D d 3);
+    Def5(A a 0, B b 1, C c 2, D d 3, E e 4);
 }
 
 // * Values
 
 pub fn int(n: i64) -> Ex<i64> {
     Ex::of(Expr::Lit(Ty::Int, int_enc(n).to_vec()))
+}
+
+pub fn bool(b: bool) -> Ex<bool> {
+    b.into()
 }
 
 /// A text literal.
@@ -394,6 +397,52 @@ pub fn seq<T>(first: impl IntoIterator<Item = Ex<()>>, last: Ex<T>) -> Ex<T> {
     Ex::of(Expr::Seq(first.into_iter().chain([last.e]).collect()))
 }
 
+/// A block of statements: `let`s, statements whose values are dropped,
+/// and the value of the last, as a body in Rust reads.
+pub struct Block {
+    items: Vec<(bool, Expr)>,
+    lets: u32,
+}
+
+impl Block {
+    /// `let x = v` for the rest of the block: `x`.
+    pub fn let_<A>(&mut self, v: impl Into<Ex<A>>) -> Ex<A> {
+        let v = v.into();
+        let d = with(|cx| (cx.depth, cx.depth += 1).0);
+        self.items.push((true, v.e));
+        self.lets += 1;
+        Ex::of(Expr::Var(MARK + d))
+    }
+
+    /// A statement: its value dropped ([`Ex::s`]).
+    pub fn s<T: Shape>(&mut self, x: impl Into<Ex<T>>) {
+        self.items.push((false, x.into().s().e));
+    }
+}
+
+/// `{ let a = …; s; …; last }`: what `f` says in `b`, then its result.
+pub fn block<T>(f: impl FnOnce(&mut Block) -> Ex<T>) -> Ex<T> {
+    let mut b = Block { items: vec![], lets: 0 };
+    let mut out = f(&mut b).e;
+    with(|cx| cx.depth -= b.lets);
+    let seq = |mut first: Vec<Expr>, last: Expr| match first.is_empty() {
+        true => last,
+        false => {
+            first.reverse();
+            first.push(last);
+            Expr::Seq(first)
+        }
+    };
+    let mut after = vec![];
+    for (is_let, e) in b.items.into_iter().rev() {
+        match is_let {
+            true => out = Expr::Let(Box::new(e), Box::new(seq(std::mem::take(&mut after), out))),
+            false => after.push(e),
+        }
+    }
+    Ex::of(seq(after, out))
+}
+
 /// A refusal, of whatever type its place wants.
 pub fn refuse<T>(why: impl Into<Ex<String>>) -> Ex<T> {
     Ex::of(Expr::Refuse(why.into().b()))
@@ -406,7 +455,12 @@ pub fn refuse_(why: impl Into<Ex<String>>) -> Ex<()> {
 
 /// `concat` of texts.
 pub fn concat(xs: Vec<Ex<String>>) -> Ex<String> {
-    Ex::of(Expr::Std(Std::Concat, vec![list(xs).e]))
+    concat_of(&list(xs))
+}
+
+/// `concat` of a list of texts.
+pub fn concat_of(xs: &Ex<Vec<String>>) -> Ex<String> {
+    Ex::of(Expr::Std(Std::Concat, vec![xs.e.clone()]))
 }
 
 pub fn nil_id<R>() -> Ex<Id<R>> {
