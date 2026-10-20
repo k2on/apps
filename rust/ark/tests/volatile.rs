@@ -15,7 +15,7 @@ mod support {
 use std::sync::Arc;
 
 use ark::codec::bytes_enc;
-use ark::frames::Frame;
+use ark::frames::{Frame, Verdict};
 use ark::ir::{CtxField, Effect, Expr, Node};
 use ark::peer::{Cas, Input, Journal, Output, Peer, Role};
 use ark::schema::{Schema, Space, Table};
@@ -90,18 +90,18 @@ fn a_volatile_intent_is_its_own_space_end_to_end() {
         log.step(down(&fanouts(&o)[0]));
     }
     let o = log.step(mutate(demo::CREATE, demo::create_input("Mix"), 1));
-    assert!(sends(&o).iter().all(|f| matches!(f, Frame::Push { space: Space::Durable, .. })));
+    assert!(sends(&o).iter().all(|f| matches!(f, Frame::Page { space: Space::Durable, .. })));
     let o = live.step(waving("phone"));
     assert!(
-        matches!(&sends(&o)[..], [Frame::Push { space: Space::Volatile, entry, .. }] if entry.id == log.pending[0].entry.id),
+        matches!(&sends(&o)[..], [Frame::Page { space: Space::Volatile, logged, .. }] if logged[0].entry.id == log.pending[0].entry.id),
         "one id, two spaces"
     );
     let (s, f) = deliver_up(&mut server, &who("alice"), &o);
     assert!(matches!(
         &s[..],
-        [Frame::Ack {
+        [Frame::Verdict {
             space: Space::Volatile,
-            seq: 1,
+            verdict: Verdict::Ok { seq: 1 },
             ..
         }]
     ));
@@ -165,7 +165,7 @@ fn a_restarted_authority_resyncs_and_takes_the_gap() {
     );
     let o = live.step(waving("laptop"));
     let (s, f) = deliver_up(&mut fresh, &who("alice"), &o);
-    assert!(matches!(&s[..], [Frame::Ack { seq: 1, .. }]), "{s:?}");
+    assert!(matches!(&verdicts(&s)[..], [Some(Verdict::Ok { seq: 1 })]), "{s:?}");
     live.step(down(&f[0]));
     assert!(live.pending.is_empty() && live.store == fresh.store);
 }

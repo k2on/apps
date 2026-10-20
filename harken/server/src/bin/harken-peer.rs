@@ -955,7 +955,7 @@ impl Headless {
                     self.quiet_open = false;
                     self.denied = None;
                     if let Ok(
-                        Frame::Batch {
+                        Frame::Page {
                             space: Space::Volatile,
                             ..
                         }

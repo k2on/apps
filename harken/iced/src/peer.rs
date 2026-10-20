@@ -793,7 +793,7 @@ fn patch_details(rows: &mut Vec<TrackDetail>, map: &mut HashMap<Id, TrackDetail>
 mod tests {
     use super::*;
     use crate::tests::{alone, signed_in, song};
-    use ark::frames::Frame;
+    use ark::frames::{Frame, Verdict};
     use ark::peer::Who;
     use ark::schema::Space;
     use harken_domain::playlists::AddToPlaylist;
@@ -953,10 +953,10 @@ mod tests {
         peer.source = Source::Album("Suites".into());
         peer.open_page();
 
-        let reject = Frame::Reject {
+        let reject = Frame::Verdict {
             space: Space::Durable,
             id: made,
-            why: "no".into(),
+            verdict: Verdict::Refused { why: "no".into() },
         };
         peer.client.receive(reject.enc());
         peer.refresh();

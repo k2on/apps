@@ -32,11 +32,11 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use ark::frames::Frame;
+use ark::frames::{Frame, Verdict};
 use ark::hash::FnHash;
 use ark::ir::Node;
 use ark::log::{Durable, EntryId, Origin, Snapshot};
-use ark::peer::{Feed, Input, Journal, Output, Peer, Role, Verdict, Who};
+use ark::peer::{Feed, Input, Journal, Output, Peer, Role, Who};
 use ark::schema::Space;
 use ark_client::{Disk, Module};
 
@@ -158,7 +158,7 @@ impl Hub {
             for (o, (actor, n)) in last {
                 j.pass(o, &actor, n);
             }
-            j.verdicts.extend(refused.into_iter().map(|(id, why)| (id, Verdict::Refused(why))));
+            j.verdicts.extend(refused.into_iter().map(|(id, why)| (id, Verdict::Refused { why })));
         }
         let origin = log.origin;
         log.local = log.local.max(journal(&mut log).last_of(&origin));
@@ -253,8 +253,7 @@ impl Hub {
                 conn.hello[ix(*space)] = true;
                 (*space, device.clone())
             }
-            Frame::Push { space, .. } | Frame::Join { space, .. } => (*space, None),
-            _ => (Space::Durable, None),
+            f => (f.space(), None),
         };
         let from = Some(conn.who.clone());
         let mut out = vec![];
@@ -367,7 +366,7 @@ impl Hub {
         let refused = journal(&mut self.log)
             .verdicts
             .values()
-            .filter(|v| matches!(v, Verdict::Refused(_)))
+            .filter(|v| matches!(v, Verdict::Refused { .. }))
             .count();
         let mark = (refused, self.log.log.base.seq);
         if space == Space::Durable && mark != self.refused {
@@ -375,8 +374,8 @@ impl Hub {
             let j = journal(&mut self.log);
             let last: Vec<(Origin, (String, i64))> = j.last.clone().into_iter().collect();
             let why = |v: &Verdict| match v {
-                Verdict::Refused(w) => Some(w.clone()),
-                Verdict::Seq(_) => None,
+                Verdict::Refused { why } => Some(why.clone()),
+                _ => None,
             };
             let refused: Vec<(EntryId, String)> = j.verdicts.iter().filter_map(|(id, v)| Some((*id, why(v)?))).collect();
             if let Err(e) = self.disk.put("journal", &(last, refused).to_bytes()) {

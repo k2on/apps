@@ -6,7 +6,7 @@
 use std::collections::BTreeSet;
 
 use ark::codec::Reader;
-use ark::frames::{frame_ty, Frame};
+use ark::frames::{frame_ty, Frame, Verdict};
 use ark::hash::{hex, EntryHash, FnHash, StateHash};
 use ark::log::EntryId;
 use ark::peer::{Input, Output};
@@ -27,10 +27,16 @@ fn space(s: Space) -> &'static str {
     ["durable", "volatile"][s as usize]
 }
 
-/// A frame's name: who writes it, its kind, its space.
+/// A frame's name: who writes it, its kind, its space. A client's page is
+/// its intents or, sequenced, a chain it made alone; a verdict is named by
+/// its own kind.
 fn name(f: &Frame, client: bool) -> String {
-    let d = format!("{f:?}");
-    let kind = d.split([' ', '{', '(']).next().unwrap().to_lowercase();
+    let word = |d: String| d.split([' ', '{', '(']).next().unwrap().to_lowercase();
+    let kind = match f {
+        Frame::Page { logged, .. } if client && logged.first().is_some_and(|l| l.seq > 0) => "chain".into(),
+        Frame::Verdict { verdict, .. } => format!("verdict-{}", word(format!("{verdict:?}"))),
+        _ => word(format!("{f:?}")),
+    };
     format!("{}-{kind}-{}", if client { "client" } else { "server" }, space(f.space()))
 }
 
@@ -78,19 +84,21 @@ fn protocol() {
     let id = EntryId::of("s", 1);
     for (n, f) in [
         (
-            "server-held-durable",
-            Frame::Held {
+            "server-verdict-held-durable",
+            Frame::Verdict {
                 space: Space::Durable,
                 id,
-                func: FnHash([3; 32]),
+                verdict: Verdict::Held { func: FnHash([3; 32]) },
             },
         ),
         (
-            "server-reject-durable",
-            Frame::Reject {
+            "server-verdict-refused-durable",
+            Frame::Verdict {
                 space: Space::Durable,
                 id,
-                why: "a playlist needs a name".into(),
+                verdict: Verdict::Refused {
+                    why: "a playlist needs a name".into(),
+                },
             },
         ),
     ] {
@@ -109,18 +117,23 @@ fn protocol() {
     only("protocol", &written);
     for name in [
         "client-hello-volatile",
-        "server-ack-volatile",
-        "server-batch-volatile",
-        "client-join-durable",
+        "client-page-durable",
+        "client-chain-durable",
+        "server-verdict-ok-volatile",
+        "server-page-volatile",
+        "server-snapshot-durable",
     ] {
         assert!(written.contains(&format!("{name}.json")), "{name}");
     }
-    let (_, ack) = on_disk("protocol").into_iter().find(|(n, _)| n == "server-ack-durable.json").unwrap();
+    let (_, ack) = on_disk("protocol")
+        .into_iter()
+        .find(|(n, _)| n == "server-verdict-ok-durable.json")
+        .unwrap();
     let mut wrong: Value = serde_json::from_str(&ack).unwrap();
     let b = wrong["bytes"].as_str().unwrap().to_string();
     wrong["bytes"] = json!(format!("{}{}", &b[..b.len() - 2], if b.ends_with('0') { "1" } else { "0" }));
     wrong["expect"] = json!("fail");
-    vector("protocol/falsify", "server-ack-durable.json", &format!("{wrong:#}\n")).unwrap();
+    vector("protocol/falsify", "server-verdict-ok-durable.json", &format!("{wrong:#}\n")).unwrap();
     for (n, text) in on_disk("protocol/falsify") {
         assert!(run_protocol(&serde_json::from_str(&text).unwrap()).is_err(), "{n} passed");
     }

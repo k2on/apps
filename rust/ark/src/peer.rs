@@ -71,8 +71,8 @@
 //! **Going alone and joining.** `Alone` makes a replica an authority over
 //! its own log from where it is (the fork), sequencing its pending intents
 //! and every one after. `Join` hands the chain above the fork to a server
-//! and turns back into a replica, the chain its pending intents: a server
-//! still at the fork adopts the chain whole when its own run of every
+//! as a page of it (§1.11) and turns back into a replica, the chain its
+//! pending intents: a server whose head the chain links onto adopts the chain whole when its own run of every
 //! entry gives the entry's facts, and refuses every entry of it when one
 //! does not; a server that moved on sequences them anew as pushes, a gap
 //! in the chain's `local`s being one the device refused itself, and the
@@ -97,14 +97,14 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
-use crate::frames::Frame;
+use crate::frames::{Frame, Verdict};
 use crate::hash::{EntryHash, FnHash};
 use crate::log::{Durable, Entry, EntryId, Log, Logged, Origin, Record, Seq, Snapshot};
 use crate::schema::{Schema, Space};
 use crate::store::{Change, Read, Store};
 use crate::Refusal;
 
-/// How many logged entries a `Batch` carries at most.
+/// How many logged entries a `Page` carries at most.
 pub const PAGE: usize = 256;
 
 /// What a function knows of the intent it runs for: all frozen in the
@@ -217,12 +217,6 @@ pub struct Who {
 pub struct Pending {
     pub entry: Entry,
     pub changes: Vec<Change>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Verdict {
-    Seq(Seq),
-    Refused(String),
 }
 
 /// What an authority keeps beside its log: every intent it judged and how;
@@ -628,10 +622,7 @@ impl Peer {
             Err(why) => o.out.push(Output::Refused { id, why: why.0 }),
             Ok(changes) => {
                 self.local = local;
-                o.send(Frame::Push {
-                    space: self.space,
-                    entry: entry.clone(),
-                });
+                o.send(Frame::push(self.space, [entry.clone()]));
                 self.pending.push(Pending { entry, changes });
             }
         }
@@ -665,7 +656,7 @@ impl Peer {
                 let l = self.log.append(entry, facts, state).clone();
                 o.persist(Record::Logged(l.clone()));
                 o.out.push(Output::Fanout(
-                    Frame::Batch {
+                    Frame::Page {
                         space: self.space,
                         from: l.seq - 1,
                         logged: vec![l.clone()],
@@ -676,7 +667,7 @@ impl Peer {
                 Ok(l.seq)
             }
         };
-        let verdict = v.clone().map_or_else(Verdict::Refused, Verdict::Seq);
+        let verdict = v.clone().map_or_else(|why| Verdict::Refused { why }, |seq| Verdict::Ok { seq });
         self.journal().verdicts.insert(id, verdict);
         v
     }
@@ -691,18 +682,18 @@ impl Peer {
         match (f, self.is_authority(), from) {
             (Frame::Hello { cursor, hash, .. }, true, _) if scoped.is_some() => self.serve_scoped(&scoped.unwrap(), cursor, hash, o),
             (Frame::Hello { cursor, hash, .. }, true, _) => self.serve(cursor, hash, o),
-            (Frame::Push { entry, .. }, true, Some(who)) => self.push(&who, entry, o),
-            (Frame::Join { from, hash, logged, .. }, true, Some(who)) => self.adopt(&who, (from, hash), logged, o),
-            (Frame::Batch { logged, .. }, false, _) => self.confirm(logged, o),
+            // A chain sequenced alone, handed over; or intents, each a push.
+            (Frame::Page { from, logged, .. }, true, Some(who)) if logged.first().is_some_and(|l| l.seq > 0) => self.adopt(&who, from, logged, o),
+            (Frame::Page { logged, .. }, true, Some(who)) => logged.into_iter().for_each(|l| self.push(&who, l.entry, o)),
+            (Frame::Page { logged, .. }, false, _) => self.confirm(logged, o),
             (Frame::Snapshot { snapshot, .. }, false, _) => self.reset(snapshot, o),
-            (Frame::Ack { id, seq, .. }, false, _) => {
+            (Frame::Verdict { id, verdict, .. }, false, _) => match verdict {
                 // At or below where this peer stands, an intent still pending
                 // here is in the state it holds (a snapshot carried it).
-                if seq <= self.log.head().0 && self.settle(&id, o) {
-                    o.out.push(Output::Confirmed(id));
-                }
-            }
-            (Frame::Reject { id, why, .. }, false, _) if self.settle(&id, o) => o.out.push(Output::Refused { id, why }),
+                Verdict::Ok { seq } if seq <= self.log.head().0 && self.settle(&id, o) => o.out.push(Output::Confirmed(id)),
+                Verdict::Refused { why } if self.settle(&id, o) => o.out.push(Output::Refused { id, why }),
+                _ => {}
+            },
             _ => {}
         }
     }
@@ -726,7 +717,7 @@ impl Peer {
             return o.send(Frame::Snapshot { space: self.space, snapshot });
         }
         for page in self.log.after(cursor).chunks(PAGE) {
-            o.send(Frame::Batch {
+            o.send(Frame::Page {
                 space: self.space,
                 from: page[0].seq - 1,
                 logged: page.to_vec(),
@@ -817,7 +808,7 @@ impl Peer {
                 state,
                 hash,
             }];
-            let bytes = Frame::Batch {
+            let bytes = Frame::Page {
                 space: self.space,
                 from: at,
                 logged,
@@ -830,21 +821,16 @@ impl Peer {
     fn push(&mut self, who: &Who, entry: Entry, o: &mut Out) {
         let (id, space) = (entry.id, self.space);
         let j = self.journal();
-        match j.verdicts.get(&id) {
-            Some(Verdict::Seq(seq)) => {
-                return o.send(Frame::Ack {
-                    space,
-                    id,
-                    seq: *seq,
-                    facts: None,
-                })
-            }
-            Some(Verdict::Refused(why)) => return o.send(Frame::Reject { space, id, why: why.clone() }),
-            None => {}
+        if let Some(verdict) = j.verdicts.get(&id).cloned() {
+            return o.send(Frame::Verdict { space, id, verdict });
         }
         if !entry.id_checks() || j.others(&entry.origin, &who.actor) {
             let why = "an id that is not its own, or from an origin of another actor".into();
-            return o.send(Frame::Reject { space, id, why });
+            return o.send(Frame::Verdict {
+                space,
+                id,
+                verdict: Verdict::Refused { why },
+            });
         }
         // A gap: the ones before it come first, pushed again after a Hello.
         let last = j.last_of(&entry.origin);
@@ -852,19 +838,13 @@ impl Peer {
         // space, sequenced below the horizon by a log opened since (a
         // refusal's verdict is journaled); in the volatile, overtaken.
         if entry.local <= last {
-            return o.send(match space {
-                Space::Durable => Frame::Ack {
-                    space,
-                    id,
-                    seq: self.log.base.seq,
-                    facts: None,
-                },
-                Space::Volatile => Frame::Reject {
-                    space,
-                    id,
+            let verdict = match space {
+                Space::Durable => Verdict::Ok { seq: self.log.base.seq },
+                Space::Volatile => Verdict::Refused {
                     why: "overtaken by a later one of its origin".into(),
                 },
-            });
+            };
+            return o.send(Frame::Verdict { space, id, verdict });
         }
         // Behind a held one of its origin: it waits, in order; the held one
         // pushed again is judged again.
@@ -887,7 +867,11 @@ impl Peer {
             if space == Space::Durable {
                 self.journal().waiting.insert(origin, vec![(who.clone(), entry)]);
             }
-            return o.send(Frame::Held { space, id, func });
+            return o.send(Frame::Verdict {
+                space,
+                id,
+                verdict: Verdict::Held { func },
+            });
         }
         let f = self.judge(who, entry, o);
         o.send(f);
@@ -897,10 +881,11 @@ impl Peer {
     fn judge(&mut self, who: &Who, mut entry: Entry, o: &mut Out) -> Frame {
         let (id, space) = (entry.id, self.space);
         (entry.actor, entry.session, entry.roles) = (who.actor.clone(), who.session.clone(), who.roles.clone());
-        match self.sequence(entry, None, o) {
-            Ok(seq) => Frame::Ack { space, id, seq, facts: None },
-            Err(why) => Frame::Reject { space, id, why },
-        }
+        let verdict = match self.sequence(entry, None, o) {
+            Ok(seq) => Verdict::Ok { seq },
+            Err(why) => Verdict::Refused { why },
+        };
+        Frame::Verdict { space, id, verdict }
     }
 
     /// What waits behind `origin`'s held intent, judged in order while this
@@ -912,10 +897,10 @@ impl Peer {
         while let Some((who, e)) = self.journal().waiting.get(&origin).and_then(|q| q.first().cloned()) {
             let f = match self.cas.get(&e.func) {
                 None if first && !pushed => return,
-                None => Frame::Held {
+                None => Frame::Verdict {
                     space: self.space,
                     id: e.id,
-                    func: e.func,
+                    verdict: Verdict::Held { func: e.func },
                 },
                 Some(_) => {
                     let q = self.journal().waiting.get_mut(&origin).expect("it waits");
@@ -926,7 +911,13 @@ impl Peer {
                     self.judge(&who, e, o)
                 }
             };
-            let held = matches!(f, Frame::Held { .. });
+            let held = matches!(
+                f,
+                Frame::Verdict {
+                    verdict: Verdict::Held { .. },
+                    ..
+                }
+            );
             match pushed {
                 true => o.send(f),
                 false => o.out.push(Output::To {
@@ -941,10 +932,12 @@ impl Peer {
         }
     }
 
-    /// A chain made alone, handed over from `at`.
-    fn adopt(&mut self, who: &Who, at: (Seq, EntryHash), chain: Vec<Logged>, o: &mut Out) {
+    /// A chain made alone, handed over from its fork at `at`: adopted when
+    /// it links onto this log's head.
+    fn adopt(&mut self, who: &Who, at: Seq, chain: Vec<Logged>, o: &mut Out) {
         let fresh = !chain.iter().any(|l| self.journal().verdicts.contains_key(&l.entry.id));
-        if !fresh || self.log.head() != at {
+        let (n, h) = self.log.head();
+        if !fresh || n != at || !chain[0].links(&h) {
             // A chain is its origin's whole history above the fork: a gap in
             // it is an intent the device refused itself, never to come. One
             // naming a function this authority does not run is refused, not
@@ -985,13 +978,11 @@ impl Peer {
         }
         o.told.extend(done.told);
         o.out.extend(done.out);
-        let (n, _) = at;
         for (k, l) in chain.iter().enumerate() {
-            o.send(Frame::Ack {
+            o.send(Frame::Verdict {
                 space: self.space,
                 id: l.entry.id,
-                seq: n + 1 + k as Seq,
-                facts: None,
+                verdict: Verdict::Ok { seq: n + 1 + k as Seq },
             });
         }
     }
@@ -1000,11 +991,11 @@ impl Peer {
     /// passed.
     fn refuse(&mut self, e: &Entry, why: String, o: &mut Out) {
         self.journal().pass(e.origin, &e.actor, e.local);
-        self.journal().verdicts.insert(e.id, Verdict::Refused(why.clone()));
-        o.send(Frame::Reject {
+        self.journal().verdicts.insert(e.id, Verdict::Refused { why: why.clone() });
+        o.send(Frame::Verdict {
             space: self.space,
             id: e.id,
-            why,
+            verdict: Verdict::Refused { why },
         });
     }
 
@@ -1132,11 +1123,8 @@ impl Peer {
     }
 
     fn repush(&mut self, o: &mut Out) {
-        for p in &self.pending {
-            o.send(Frame::Push {
-                space: self.space,
-                entry: p.entry.clone(),
-            });
+        for page in self.pending.chunks(PAGE) {
+            o.send(Frame::push(self.space, page.iter().map(|p| p.entry.clone())));
         }
     }
 
@@ -1150,13 +1138,12 @@ impl Peer {
         self.ask(o);
         match self.joining.take() {
             Some(j) if self.pending.first().map(|p| p.entry.id) == j.2.first().map(|l| l.entry.id) => {
-                let (from, hash, logged) = j.clone();
+                let (from, _, logged) = j.clone();
                 let all = self.pending.clone();
                 self.pending.retain(|p| !logged.iter().any(|l| l.entry.id == p.entry.id));
-                o.send(Frame::Join {
+                o.send(Frame::Page {
                     space: self.space,
                     from,
-                    hash,
                     logged,
                 });
                 self.repush(o);
@@ -1205,10 +1192,9 @@ impl Peer {
             device: self.device.clone(),
         });
         self.joining = Some((at, hash, chain.clone()));
-        o.send(Frame::Join {
+        o.send(Frame::Page {
             space: self.space,
             from: at,
-            hash,
             logged: chain,
         });
     }
@@ -1282,7 +1268,7 @@ impl Peer {
             (self.store, self.log) = (store, log);
             if let Role::Authority { journal } = &mut self.role {
                 for l in &self.log.entries {
-                    journal.verdicts.insert(l.entry.id, Verdict::Seq(l.seq));
+                    journal.verdicts.insert(l.entry.id, Verdict::Ok { seq: l.seq });
                     journal.pass(l.entry.origin, &l.entry.actor, l.entry.local);
                 }
             }

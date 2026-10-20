@@ -148,6 +148,19 @@ impl Logged {
         EntryHash(sha256(&[&prev.0, &b]))
     }
 
+    /// An intent not yet sequenced, as a peer pages it (§1.11): at
+    /// sequence 0, with no facts and zero hashes.
+    pub fn intent(entry: Entry) -> Logged {
+        let (state, hash) = Default::default();
+        Logged {
+            seq: 0,
+            entry,
+            facts: vec![],
+            state,
+            hash,
+        }
+    }
+
     /// Whether this links onto `prev`.
     pub fn links(&self, prev: &EntryHash) -> bool {
         self.hash == Logged::chain(prev, self.seq, &self.entry, &self.facts, &self.state)

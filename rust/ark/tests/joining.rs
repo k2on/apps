@@ -12,7 +12,7 @@ mod support {
     pub mod wire;
 }
 
-use ark::frames::Frame;
+use ark::frames::{Frame, Verdict};
 use ark::log::{Durable, EntryId, Origin};
 use ark::peer::{Input, Output};
 use demo::{create_input, pair_input, ADD, CREATE};
@@ -51,21 +51,27 @@ fn a_chain_with_a_gap_is_taken_whole() {
     let mut o = eve.step(Input::Join);
     for f in &mut o {
         if let Output::Send(b) = f {
-            if let Ok(Frame::Join {
-                space,
-                from,
-                hash,
-                mut logged,
-            }) = Frame::dec(b)
-            {
+            if let Ok(Frame::Page { space, from, mut logged }) = Frame::dec(b) {
                 logged[1].entry.local = 3;
                 logged[1].entry.id = EntryId::of(Origin::named("eve-session"), 3);
-                *b = Frame::Join { space, from, hash, logged }.enc();
+                *b = Frame::Page { space, from, logged }.enc();
             }
         }
     }
     let (acks, _) = deliver_up(&mut server, &who("eve"), &o);
-    assert_eq!(acks.iter().filter(|f| matches!(f, Frame::Ack { .. })).count(), 2, "{acks:?}");
+    assert_eq!(
+        acks.iter()
+            .filter(|f| matches!(
+                f,
+                Frame::Verdict {
+                    verdict: Verdict::Ok { .. },
+                    ..
+                }
+            ))
+            .count(),
+        2,
+        "{acks:?}"
+    );
     assert_eq!(server.log.head().0, 3);
 }
 
@@ -83,7 +89,7 @@ fn a_lost_join_is_handed_over_again() {
     let o = eve.step(Input::Connected);
     let f = sends(&o);
     assert!(
-        matches!(&f[..], [Frame::Hello { .. }, Frame::Join { logged, .. }, Frame::Push { entry, .. }] if logged.len() == 1 && entry.local == 2),
+        matches!(&f[..], [Frame::Hello { .. }, Frame::Page { logged, .. }, Frame::Page { logged: pushed, .. }] if logged.len() == 1 && logged[0].seq == 1 && pushed[0].seq == 0 && pushed[0].entry.local == 2),
         "{f:?}"
     );
     let mut server = authority(demo::cas());
@@ -94,7 +100,9 @@ fn a_lost_join_is_handed_over_again() {
     assert!(eve.pending.is_empty() && eve.store == server.store);
     let again = sends(&eve.step(Input::Connected));
     assert!(
-        !again.iter().any(|f| matches!(f, Frame::Join { .. })),
+        !again
+            .iter()
+            .any(|f| matches!(f, Frame::Page { logged, .. } if logged.iter().any(|l| l.seq > 0))),
         "answered, it is not handed over again"
     );
 }
@@ -123,5 +131,5 @@ fn a_push_below_a_reopened_horizon_is_acknowledged_there() {
         journal.pass(Origin::named("bob-session"), "bob", 2);
     }
     let (back, _) = deliver_up(&mut reopened, &who("bob"), &o);
-    assert!(matches!(&back[..], [Frame::Ack { seq: 2, .. }]), "{back:?}");
+    assert!(matches!(&verdicts(&back)[..], [Some(Verdict::Ok { seq: 2 })]), "{back:?}");
 }

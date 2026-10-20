@@ -1,27 +1,34 @@
-//! §1.11 The frames: one `Sum` type, encoded by §1.1.
+//! §1.11 The frames: one `Sum` type, encoded by §1.1. **The protocol is
+//! pages of a chain**: a peer sends pages of its chain; an authority
+//! answers with verdicts and its own pages.
 //!
 //! ```text
-//! Client: Hello { space, cursor, hash: Option<EntryHash>, device: Option<Bytes> }
-//!         Push  { space, entry }
-//! Server: Ack   { space, id, seq, facts: Option<[Change]> }
-//!         Reject{ space, id, why } | Held { space, id, fn }  -- Held: a function it does not run
-//!         Batch { space, from, logged: [Logged] }
-//!         Snapshot { space, seq, hash, state, rows }
-//! Client: Join  { space, from, hash, logged: [Logged] } -- a chain made alone, handed over
+//! Hello   { space, cursor, hash: Option<EntryHash>, device: Option<Bytes> }
+//! Page    { space, from, logged: [Logged] }
+//! Snapshot{ space, snapshot }
+//! Verdict { space, id, verdict: Ok { seq } | Refused { why } | Held { fn } }
 //! ```
+//!
+//! An authority's `Page` is its log from `from`, sequenced. A peer's `Page`
+//! is one of two things, told by its entries: a chain it sequenced alone
+//! from its fork at `from` (each entry at its sequence, hashed — what a
+//! join hands over), or its intents not yet sequenced, each at sequence 0
+//! with no facts and zero hashes ([`Logged::intent`]) — a push being a page
+//! of one. A `Verdict` answers one intent: sequenced at `seq`, refused, or
+//! `Held` — a function the authority does not run.
 //!
 //! **No body crosses the wire.** An authority runs exactly the functions
 //! bound in the modules its operator loaded; `Held` says an intent names
 //! one it does not run, and the intent stays pending on the device, pushed
 //! again on its next connection. Nothing a client sends is ever loaded.
 //!
-//! The variants are numbered in that order, `Join` last. Every frame about
-//! one space's log names it, so two machines share a connection (§1.9): a
-//! verdict's id is `(session, local)`'s, and each space counts its own.
-//! `device` is what a device says it is, the bytes the authority authors
-//! its `on_join` from (the driver's to read). The type, the
-//! encoder and the decoder are `#[derive(Node)]`'s (§1.4), and
-//! `tests/frames.rs` holds every frame's bytes to [`frame_ty`].
+//! The variants are numbered in that order. Every frame names its space, so
+//! two machines share a connection (§1.9): a verdict's id is `(origin,
+//! local)`'s, and each space counts its own. `device` is what a device says
+//! it is, the bytes the authority authors its `on_join` from (the driver's
+//! to read). The type, the encoder and the decoder are `#[derive(Node)]`'s
+//! (§1.4), and `tests/frames.rs` holds every frame's bytes to
+//! [`frame_ty`].
 
 use ark_macros::Node;
 
@@ -41,27 +48,7 @@ pub enum Frame {
         hash: Option<EntryHash>,
         device: Option<Vec<u8>>,
     },
-    Push {
-        space: Space,
-        entry: Entry,
-    },
-    Ack {
-        space: Space,
-        id: EntryId,
-        seq: Seq,
-        facts: Option<Vec<Change>>,
-    },
-    Reject {
-        space: Space,
-        id: EntryId,
-        why: String,
-    },
-    Held {
-        space: Space,
-        id: EntryId,
-        func: FnHash,
-    },
-    Batch {
+    Page {
         space: Space,
         from: Seq,
         logged: Vec<Logged>,
@@ -70,12 +57,20 @@ pub enum Frame {
         space: Space,
         snapshot: Snapshot,
     },
-    Join {
+    Verdict {
         space: Space,
-        from: Seq,
-        hash: EntryHash,
-        logged: Vec<Logged>,
+        id: EntryId,
+        verdict: Verdict,
     },
+}
+
+/// An authority's answer to one intent; what its journal keeps of each it
+/// judged (never `Held`, which is not a judgment).
+#[derive(Clone, Debug, PartialEq, Eq, Node)]
+pub enum Verdict {
+    Ok { seq: Seq },
+    Refused { why: String },
+    Held { func: FnHash },
 }
 
 /// The types, by name, as the derive writes them.
@@ -87,6 +82,7 @@ pub fn ty(name: &str) -> Ty {
         "Logged" => Logged::ty(),
         "Snapshot" => Snapshot::ty(),
         "Record" => Record::ty(),
+        "Verdict" => Verdict::ty(),
         "Frame" => Frame::ty(),
         _ => panic!("no frame type {name}"),
     }
@@ -100,9 +96,14 @@ impl Frame {
     /// The space whose log the frame is about.
     pub fn space(&self) -> Space {
         match self {
-            Frame::Hello { space, .. } | Frame::Push { space, .. } | Frame::Ack { space, .. } | Frame::Reject { space, .. } => *space,
-            Frame::Held { space, .. } | Frame::Batch { space, .. } | Frame::Snapshot { space, .. } | Frame::Join { space, .. } => *space,
+            Frame::Hello { space, .. } | Frame::Page { space, .. } | Frame::Snapshot { space, .. } | Frame::Verdict { space, .. } => *space,
         }
+    }
+
+    /// A peer's intents, not yet sequenced, as a page.
+    pub fn push(space: Space, entries: impl IntoIterator<Item = Entry>) -> Frame {
+        let logged = entries.into_iter().map(Logged::intent).collect();
+        Frame::Page { space, from: 0, logged }
     }
 
     pub fn enc(&self) -> Vec<u8> {

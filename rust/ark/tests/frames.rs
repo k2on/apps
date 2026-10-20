@@ -5,7 +5,7 @@
 mod demo;
 
 use ark::codec::{parse, Reader};
-use ark::frames::{frame_ty, ty, Frame};
+use ark::frames::{frame_ty, ty, Frame, Verdict};
 use ark::hash::{EntryHash, FnHash, StateHash};
 use ark::log::{Entry, EntryId, Logged, Origin, Record, Snapshot};
 use ark::schema::Space;
@@ -65,42 +65,31 @@ fn every_frame() -> Vec<Frame> {
             hash: Some(EntryHash([0xFF; 32])),
             device: Some(b"phone\0".to_vec()),
         },
-        Frame::Push {
-            space: Space::Volatile,
-            entry: entry.clone(),
-        },
-        Frame::Push {
-            space: Space::Durable,
-            entry,
-        },
-        Frame::Ack {
+        Frame::push(Space::Volatile, [entry.clone()]),
+        Frame::push(Space::Durable, [entry.clone(), entry]),
+        Frame::Verdict {
             space: Space::Durable,
             id,
-            seq: 3,
-            facts: None,
+            verdict: Verdict::Ok { seq: 3 },
         },
-        Frame::Ack {
+        Frame::Verdict {
             space: Space::Volatile,
             id,
-            seq: 3,
-            facts: Some(facts),
+            verdict: Verdict::Refused {
+                why: "a playlist needs a name".into(),
+            },
         },
-        Frame::Reject {
+        Frame::Verdict {
             space: Space::Durable,
             id,
-            why: "a playlist needs a name".into(),
+            verdict: Verdict::Held { func: FnHash([3; 32]) },
         },
-        Frame::Held {
-            space: Space::Durable,
-            id,
-            func: FnHash([3; 32]),
-        },
-        Frame::Batch {
+        Frame::Page {
             space: Space::Durable,
             from: 2,
             logged: vec![l.clone(), l.clone()],
         },
-        Frame::Batch {
+        Frame::Page {
             space: Space::Durable,
             from: 0,
             logged: vec![],
@@ -108,12 +97,6 @@ fn every_frame() -> Vec<Frame> {
         Frame::Snapshot {
             space: Space::Durable,
             snapshot,
-        },
-        Frame::Join {
-            space: Space::Durable,
-            from: 0,
-            hash: EntryHash::default(),
-            logged: vec![l],
         },
     ]
 }
@@ -134,12 +117,27 @@ fn every_frame_is_its_type() {
         assert!(Frame::dec(&longer).is_err() && parse(&t, &longer).is_err());
         assert!(Frame::dec(&b[..b.len() - 1]).is_err());
     }
-    let r = Record::Logged(match &every_frame()[8] {
-        Frame::Batch { logged, .. } => logged[0].clone(),
+    let r = Record::Logged(match &every_frame()[7] {
+        Frame::Page { logged, .. } => logged[0].clone(),
         _ => unreachable!(),
     });
     parse(&ty("Record"), &r.enc()).unwrap();
     assert_eq!(Record::dec(&r.enc()), Ok(r));
-    let mut rd = Reader::new(&[8]);
-    assert!(rd.variant(8).is_err(), "there are eight frames");
+    let mut rd = Reader::new(&[4]);
+    assert!(rd.variant(4).is_err(), "there are four frames");
+}
+
+/// A push is a page of intents: each at sequence 0 with no facts and zero
+/// hashes, its bytes those of `Logged::intent`, so the protocol carries
+/// one shape of entry. Falsified by `Frame::push` keeping the entry's
+/// `local` as its sequence: the page's first entry was at sequence 1.
+#[test]
+fn a_push_is_a_page_of_intents() {
+    let f = every_frame().remove(3);
+    let Frame::Page { from, logged, .. } = &f else { panic!("{f:?}") };
+    assert_eq!(*from, 0);
+    assert!(logged
+        .iter()
+        .all(|l| l.seq == 0 && l.facts.is_empty() && l == &Logged::intent(l.entry.clone())));
+    assert_eq!(logged.len(), 2);
 }

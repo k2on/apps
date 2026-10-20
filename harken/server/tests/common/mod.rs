@@ -174,7 +174,7 @@ impl Peer {
                     LinkEvent::Open => self.heard = false,
                     LinkEvent::Frame(b) => {
                         if let Ok(
-                            Frame::Batch {
+                            Frame::Page {
                                 space: Space::Volatile,
                                 ..
                             }

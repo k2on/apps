@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ark::codec::bytes_enc;
-use ark::frames::Frame;
+use ark::frames::{Frame, Verdict};
 use ark::log::{Entry, EntryId, Origin};
 use ark::peer::Who;
 use ark::schema::Space;
@@ -241,11 +241,7 @@ fn push(who: &Who, local: i64, name: &str) -> Vec<u8> {
         input: bytes_enc(name.as_bytes()),
         now: 1,
     };
-    Frame::Push {
-        space: Space::Durable,
-        entry,
-    }
-    .enc()
+    Frame::push(Space::Durable, [entry]).enc()
 }
 
 /// An acknowledgement follows the write: while the disk refuses, nothing a
@@ -263,7 +259,19 @@ fn nothing_is_delivered_before_it_is_written() {
     fail.store(false, Ordering::Relaxed);
     let out = hub.flushed();
     let frames: Vec<Frame> = out.iter().map(|(_, b)| Frame::dec(b).unwrap()).collect();
-    assert!(matches!(&frames[..], [Frame::Batch { .. }, Frame::Ack { seq: 1, .. }]), "{frames:?}");
+    assert!(
+        matches!(
+            &frames[..],
+            [
+                Frame::Page { .. },
+                Frame::Verdict {
+                    verdict: Verdict::Ok { seq: 1 },
+                    ..
+                }
+            ]
+        ),
+        "{frames:?}"
+    );
     assert!(hub.failure.is_none());
 }
 
@@ -277,13 +285,32 @@ fn the_journal_keeps_a_refusal_across_a_restart() {
     let alice = dev("alice@laptop").unwrap();
     let mut hub = Hub::open(config(), Box::new(Memory::default()), 0);
     let c = hub.connect(alice.clone());
-    let refused = |out: &[(u64, Vec<u8>)]| out.iter().any(|(_, b)| matches!(Frame::dec(b), Ok(Frame::Reject { .. })));
+    let refused = |out: &[(u64, Vec<u8>)]| {
+        out.iter().any(|(_, b)| {
+            matches!(
+                Frame::dec(b),
+                Ok(Frame::Verdict {
+                    verdict: Verdict::Refused { .. },
+                    ..
+                })
+            )
+        })
+    };
     assert!(refused(&hub.frame(c, push(&alice, 1, " "), 1)), "a playlist needs a name");
     let disk = std::mem::replace(&mut hub.disk, Box::new(Memory::default()));
     let mut hub = Hub::open(config(), disk, 0);
     let c = hub.connect(alice.clone());
     let out = hub.frame(c, push(&alice, 2, "Road"), 1);
-    assert!(out.iter().any(|(_, b)| matches!(Frame::dec(b), Ok(Frame::Ack { seq: 1, .. }))), "taken");
+    assert!(
+        out.iter().any(|(_, b)| matches!(
+            Frame::dec(b),
+            Ok(Frame::Verdict {
+                verdict: Verdict::Ok { seq: 1 },
+                ..
+            })
+        )),
+        "taken"
+    );
     assert!(refused(&hub.frame(c, push(&alice, 1, " "), 1)), "refused again");
 }
 

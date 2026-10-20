@@ -12,7 +12,7 @@ mod support {
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use ark::frames::Frame;
+use ark::frames::{Frame, Verdict};
 use ark::hash::EntryHash;
 use ark::log::{Durable, EntryId, Logged, Origin};
 use ark::peer::{Cas, Ctx, Input, Output, Peer, Procedure};
@@ -73,9 +73,9 @@ fn scenario() -> Scenario {
     assert_eq!(alice.confirmed_hash(), bob.confirmed_hash());
     // alice comes back: hello, and her intent pushed again
     let o = alice.step(Input::Connected);
-    assert!(matches!(sends(&o)[..], [Frame::Hello { cursor: 3, .. }, Frame::Push { .. }]));
+    assert!(matches!(sends(&o)[..], [Frame::Hello { cursor: 3, .. }, Frame::Page { .. }]));
     let (s, f) = deliver_up(&mut server, &who("alice"), &o);
-    assert!(matches!(s[..], [Frame::Ack { seq: 4, .. }]), "{s:?}");
+    assert!(matches!(verdicts(&s)[..], [Some(Verdict::Ok { seq: 4 })]), "{s:?}");
     let l4 = logged(&f[0]);
     assert!(
         matches!(&l4.facts[..], [Change::Add { row, .. }] if demo::item_of(row).2 == 3),
@@ -162,15 +162,9 @@ fn step_1_an_authority_sequences_the_transcript() {
         let (acks, f) = deliver_up(
             &mut fresh,
             &who(&l.entry.actor),
-            &[Output::Send(
-                Frame::Push {
-                    space: ark::schema::Space::Durable,
-                    entry: l.entry.clone(),
-                }
-                .enc(),
-            )],
+            &[Output::Send(Frame::push(ark::schema::Space::Durable, [l.entry.clone()]).enc())],
         );
-        assert!(matches!(acks[..], [Frame::Ack { seq, .. }] if seq == l.seq));
+        assert!(matches!(verdicts(&acks)[..], [Some(Verdict::Ok { seq })] if seq == l.seq));
         assert_eq!(&logged(&f[0]), l, "entry {}: its facts, state and hash", l.seq);
     }
     assert_eq!(fresh.store, s.server.store);
@@ -232,7 +226,7 @@ fn a_divergence_is_found_at_its_entry_and_healed() {
     l2.hash = Logged::chain(&l1.hash, 2, &l2.entry, &l2.facts, &l2.state);
     let mut carol = replica("carol", demo::cas());
     carol.step(down(&s.batches[0]));
-    let o = carol.step(down(&Frame::Batch {
+    let o = carol.step(down(&Frame::Page {
         space: ark::schema::Space::Durable,
         from: 1,
         logged: vec![l2],
@@ -270,7 +264,7 @@ fn compaction_and_the_horizon() {
     r.step(down(&at0[0]));
     assert_eq!((r.log.head(), r.store.state_hash().hex()), (server.log.head(), FINAL.into()));
     let at2 = sends(&server.step(up(&who("x"), &hello(2, h2))));
-    assert!(matches!(&at2[..], [Frame::Batch { from: 2, logged, .. }] if logged.iter().map(|l| l.seq).collect::<Vec<_>>() == [3, 4]));
+    assert!(matches!(&at2[..], [Frame::Page { from: 2, logged, .. }] if logged.iter().map(|l| l.seq).collect::<Vec<_>>() == [3, 4]));
 }
 
 /// Every change kind rebases: bob renames the playlist and removes a track
@@ -321,14 +315,20 @@ fn held_until_the_operator_loads_it() {
     deliver_up(&mut server, &who("alice"), &o);
     let o = alice.step(mutate(ADD, pair_input(&pid(), "t1"), 2));
     let (s, f) = deliver_up(&mut server, &who("alice"), &o);
-    assert!(matches!(s[..], [Frame::Held { .. }]) && f.is_empty(), "{s:?}");
+    assert!(matches!(verdicts(&s)[..], [Some(Verdict::Held { .. })]) && f.is_empty(), "{s:?}");
     assert!(sends(&alice.step(down(&s[0]))).is_empty(), "a held intent sends nothing");
     assert_eq!(alice.pending.len(), 2, "…and stays pending");
     let (s, _) = deliver_up(&mut server, &who("alice"), &alice.step(Input::Connected));
-    assert!(matches!(s[..], [.., Frame::Ack { seq: 1, .. }, Frame::Held { .. }]), "held again: {s:?}");
+    assert!(
+        matches!(verdicts(&s)[..], [.., Some(Verdict::Ok { seq: 1 }), Some(Verdict::Held { .. })]),
+        "held again: {s:?}"
+    );
     server.cas.add_body(demo::body(ADD));
     let (s, f) = deliver_up(&mut server, &who("alice"), &alice.step(Input::Connected));
-    assert!(matches!(s[..], [.., Frame::Ack { seq: 1, .. }, Frame::Ack { seq: 2, .. }]), "{s:?}");
+    assert!(
+        matches!(verdicts(&s)[..], [.., Some(Verdict::Ok { seq: 1 }), Some(Verdict::Ok { seq: 2 })]),
+        "{s:?}"
+    );
     assert_eq!(f.len(), 1);
 }
 
@@ -357,7 +357,7 @@ fn a_peer_opens_from_what_it_persisted() {
     d.pending = sends(&pending)
         .into_iter()
         .map(|f| match f {
-            Frame::Push { entry, .. } => entry,
+            Frame::Page { mut logged, .. } => logged.remove(0).entry,
             _ => unreachable!(),
         })
         .collect();
@@ -385,9 +385,12 @@ fn a_sessions_pushes_are_judged_in_order() {
             alice.step(down(&b));
         }
     }
-    assert!(matches!(answers[..], [Frame::Ack { seq: 1, .. }]), "the add waits: {answers:?}");
+    assert!(
+        matches!(verdicts(&answers)[..], [Some(Verdict::Ok { seq: 1 })]),
+        "the add waits: {answers:?}"
+    );
     let (s, f) = deliver_up(&mut server, &who("alice"), &alice.step(Input::Connected));
-    assert!(matches!(s[..], [Frame::Ack { seq: 2, .. }]), "{s:?}");
+    assert!(matches!(verdicts(&s)[..], [Some(Verdict::Ok { seq: 2 })]), "{s:?}");
     alice.step(down(&f[0]));
     assert!(alice.pending.is_empty() && alice.store == server.store);
 }
@@ -432,7 +435,7 @@ fn a_page_rebases_once() {
         bob.step(down(&f[0]));
         page.push(logged(&f[0]));
     }
-    let batch = |logged: Vec<Logged>| Frame::Batch {
+    let batch = |logged: Vec<Logged>| Frame::Page {
         space: ark::schema::Space::Durable,
         from: 1,
         logged,
@@ -468,13 +471,13 @@ fn what_comes_behind_a_held_intent_waits_for_it() {
     deliver_up(&mut server, &who("alice"), &o);
     let o = alice.step(mutate(ADD, pair_input(&pid(), "t1"), 2));
     let (s, _) = deliver_up(&mut server, &who("alice"), &o);
-    assert!(matches!(s[..], [Frame::Held { .. }]), "{s:?}");
+    assert!(matches!(verdicts(&s)[..], [Some(Verdict::Held { .. })]), "{s:?}");
     let o = alice.step(mutate(CREATE, create_input("Sea"), 3));
     let (s, f) = deliver_up(&mut server, &who("alice"), &o);
     assert!(s.is_empty() && f.is_empty(), "it waits: {s:?}");
     let (s, _) = deliver_up(&mut server, &who("alice"), &alice.step(Input::Connected));
     assert!(
-        matches!(s[..], [.., Frame::Ack { seq: 1, .. }, Frame::Held { .. }]),
+        matches!(verdicts(&s)[..], [.., Some(Verdict::Ok { seq: 1 }), Some(Verdict::Held { .. })]),
         "held again, the third waits: {s:?}"
     );
     server.cas.add_body(demo::body(ADD));
@@ -486,8 +489,14 @@ fn what_comes_behind_a_held_intent_waits_for_it() {
             _ => None,
         })
         .collect();
-    assert!(matches!(to[..], [Frame::Ack { seq: 2, .. }, Frame::Ack { seq: 3, .. }]), "{to:?}");
+    assert!(
+        matches!(verdicts(&to)[..], [Some(Verdict::Ok { seq: 2 }), Some(Verdict::Ok { seq: 3 })]),
+        "{to:?}"
+    );
     assert_eq!(server.log.head().0, 3);
     let (s, _) = deliver_up(&mut server, &who("alice"), &alice.step(Input::Connected));
-    assert!(matches!(s[..], [.., Frame::Ack { seq: 2, .. }, Frame::Ack { seq: 3, .. }]), "{s:?}");
+    assert!(
+        matches!(verdicts(&s)[..], [.., Some(Verdict::Ok { seq: 2 }), Some(Verdict::Ok { seq: 3 })]),
+        "{s:?}"
+    );
 }

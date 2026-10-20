@@ -3,7 +3,7 @@
 
 #![allow(dead_code)]
 
-use ark::frames::Frame;
+use ark::frames::{Frame, Verdict};
 use ark::log::Logged;
 use ark::peer::{Cas, Input, Journal, Output, Peer, Role, Who};
 use ark::store::Change;
@@ -37,6 +37,15 @@ fn frames(outs: &[Output], fanout: bool) -> Vec<Frame> {
 
 pub fn sends(outs: &[Output]) -> Vec<Frame> {
     frames(outs, false)
+}
+
+/// Each frame's verdict, `None` for a frame that is no verdict.
+pub fn verdicts(fs: &[Frame]) -> Vec<Option<Verdict>> {
+    let v = |f: &Frame| match f {
+        Frame::Verdict { verdict, .. } => Some(verdict.clone()),
+        _ => None,
+    };
+    fs.iter().map(v).collect()
 }
 
 pub fn fanouts(outs: &[Output]) -> Vec<Frame> {
@@ -73,10 +82,10 @@ pub fn mutate(name: &str, input: Vec<u8>, now: i64) -> Input {
     }
 }
 
-/// The one entry a batch carries.
+/// The one entry a page carries.
 pub fn logged(f: &Frame) -> Logged {
     match f {
-        Frame::Batch { logged, .. } if logged.len() == 1 => logged[0].clone(),
+        Frame::Page { logged, .. } if logged.len() == 1 => logged[0].clone(),
         other => panic!("not a batch of one: {other:?}"),
     }
 }

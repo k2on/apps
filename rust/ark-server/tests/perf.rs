@@ -489,10 +489,7 @@ fn push(hub: &mut Hub, conn: u64, w: &Who, local: &mut i64, func: FnHash, input:
         input,
         now: *local,
     };
-    let f = Frame::Push {
-        space: Space::Durable,
-        entry,
-    };
+    let f = Frame::push(Space::Durable, [entry]);
     hub.frame(conn, f.enc(), 0)
 }
 

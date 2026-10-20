@@ -1,5 +1,5 @@
 {
-  "bytes": "0201d0152e895b86daf3e5412a5a87a25d0a0000800000000000000600",
+  "bytes": "0301d0152e895b86daf3e5412a5a87a25d0a0000008000000000000006",
   "frame": {
     "fields": [
       {
@@ -7,13 +7,14 @@
         "variant": 1
       },
       "d0152e895b86daf3e5412a5a87a25d0a",
-      6,
       {
-        "fields": [],
+        "fields": [
+          6
+        ],
         "variant": 0
       }
     ],
-    "variant": 2
+    "variant": 3
   },
-  "name": "server-ack-volatile"
+  "name": "server-verdict-ok-volatile"
 }

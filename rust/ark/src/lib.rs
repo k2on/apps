@@ -43,7 +43,7 @@ pub mod view;
 
 /// Why something was not done, as a sentence: a parse that failed, a write
 /// a constraint refused, an intent its function refused. What a form shows
-/// and what a `Reject` frame carries.
+/// and what a refused `Verdict` carries.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Refusal(pub String);
 

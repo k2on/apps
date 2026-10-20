@@ -34,15 +34,26 @@ runner needs neither module to replay one.
 `frame` the same value as JSON read under the frame type `frame_ty()` —
 an `Int` a number, `Bytes` hex, a list or a tuple an array, a sum
 `{"variant": i, "fields": [...]}` — and `name` who writes it, its kind
-and, for a frame of a space's log, its space (`client-hello-volatile`).
+and its space (`client-hello-volatile`).
 **Do and compare**: `frame` written under the frame type is `bytes`;
 `bytes` decodes to a frame that encodes to `bytes`; `bytes` read under the
-frame type is `frame`. Every kind is here, each in each space a session
-sent it in; `Held` and a `Reject` are built by hand from an entry, since
-no session sends them. No frame carries a function's body: an authority
-runs only the functions its operator loaded, and `Held` tells a device
-its intent names another, to keep pending and push again on its next
-connection.
+frame type is `frame`.
+
+There are four frames, and one idea: a peer sends pages of its chain; an
+authority answers with verdicts and its own pages. `Hello { space, cursor,
+hash, device }`; `Page { space, from, logged }`; `Snapshot { space,
+snapshot }`; `Verdict { space, id, verdict }`, the verdict `Ok { seq }`,
+`Refused { why }` or `Held { fn }`. Every page carries `Logged` entries, so
+these vectors pin the log's own shape. An authority's page (`server-page`)
+is its log from `from`. A client's page is its intents not yet sequenced
+(`client-page`: each entry at sequence 0, no facts, zero state and hash —
+a push is a page of one) or a chain it sequenced alone, handed over from
+its fork at `from` (`client-chain`: each entry at its sequence, hashed).
+Every kind is here, each in each space a session sent it in; a refused
+and a held verdict are built by hand from an entry, since no session
+sends them. No frame carries a function's body: an authority runs only
+the functions its operator loaded, and `Held` tells a device its intent
+names another, to keep pending and push again on its next connection.
 
 ## trace — client
 

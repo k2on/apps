@@ -32,12 +32,12 @@ use std::cell::Cell;
 use std::time::{Duration, Instant};
 
 use ark::codec::{bytes_enc, put_bytes, put_int, put_option};
-use ark::frames::Frame;
+use ark::frames::{Frame, Verdict};
 use ark::hash::FnHash;
 use ark::ir::{CtxField, Effect, Expr, Function, Node, Op, Std};
 use ark::log::{Entry, EntryId, Logged, Origin, Seq};
 use ark::module::Lib;
-use ark::peer::{Cas, Ctx, Feed, Input, Journal, Output, Peer, Role, Verdict, Who, PAGE};
+use ark::peer::{Cas, Ctx, Feed, Input, Journal, Output, Peer, Role, Who, PAGE};
 use ark::schema::{Schema, Space, Table};
 use ark::store::{Change, Dir, Read, Scan, Store};
 use ark::ty::Ty;
@@ -157,17 +157,11 @@ impl Author {
         }
     }
 
-    /// The `Push` frame of the next entry, as a connection verified as
-    /// this author delivers it.
+    /// The push of the next entry, as a connection verified as this
+    /// author delivers it.
     fn push(&mut self, name: &str, input: Vec<u8>) -> Input {
         let entry = self.entry(name, input);
-        up(
-            &self.who,
-            Frame::Push {
-                space: Space::Durable,
-                entry,
-            },
-        )
+        up(&self.who, Frame::push(Space::Durable, [entry]))
     }
 
     /// The playlist its `local`-th entry created.
@@ -188,7 +182,7 @@ fn down(bytes: Vec<u8>) -> Input {
 }
 
 fn batch(logged: &[Logged]) -> Vec<u8> {
-    Frame::Batch {
+    Frame::Page {
         space: Space::Durable,
         from: logged[0].seq - 1,
         logged: logged.to_vec(),
@@ -846,7 +840,7 @@ fn perf_i_partial_fanout() {
                     .iter()
                     .filter_map(|o| match o {
                         Output::To { bytes, .. } => match Frame::dec(bytes) {
-                            Ok(Frame::Batch { logged, .. }) => Some(logged.iter().map(|l| l.facts.len()).sum::<usize>()),
+                            Ok(Frame::Page { logged, .. }) => Some(logged.iter().map(|l| l.facts.len()).sum::<usize>()),
                             _ => None,
                         },
                         _ => None,
@@ -899,7 +893,7 @@ fn perf_h_frames() {
     let logged = b.logged();
     let page = &logged[logged.len() - PAGE..];
     na("Batch, intents only (Whole)", PAGE, "a Batch always carries facts (§1.6)");
-    let f = Frame::Batch {
+    let f = Frame::Page {
         space: Space::Durable,
         from: page[0].seq - 1,
         logged: page.to_vec(),
@@ -928,10 +922,7 @@ fn perf_h_frames() {
         enc_a,
         dec_a
     );
-    let p = Frame::Push {
-        space: Space::Durable,
-        entry: page[0].entry.clone(),
-    };
+    let p = Frame::push(Space::Durable, [page[0].entry.clone()]);
     let reps = 2000;
     let t = Instant::now();
     let mut bytes = vec![];
@@ -991,7 +982,7 @@ fn perf_ids_below_the_horizon() {
         let before = live_bytes();
         let mut j = Journal::default();
         for (i, id) in ids.iter().enumerate() {
-            j.verdicts.insert(*id, Verdict::Seq(i as Seq + 1));
+            j.verdicts.insert(*id, Verdict::Ok { seq: i as Seq + 1 });
         }
         let whole = live_bytes() - before;
         let probes = 100_000.min(n as usize);

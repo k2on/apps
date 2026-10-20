@@ -1,6 +1,6 @@
 //! Nobody has to sign in, and signing in later keeps everything; and every
 //! change this window makes can say what became of it.
-use ark::frames::Frame;
+use ark::frames::{Frame, Verdict};
 use ark::schema::Space;
 use ark_auth::{Account, Login};
 
@@ -97,10 +97,12 @@ fn a_refusal_names_what_was_refused() {
     assert_eq!(edit.what, "put Air on Favorites");
     assert_eq!(app.peer.client.standing(&edit.id), Standing::Pending);
 
-    let reject = Frame::Reject {
+    let reject = Frame::Verdict {
         space: Space::Durable,
         id: edit.id,
-        why: "not your playlist".into(),
+        verdict: Verdict::Refused {
+            why: "not your playlist".into(),
+        },
     };
     app.peer.client.receive(reject.enc());
     let _ = app.update(Message::Wake);

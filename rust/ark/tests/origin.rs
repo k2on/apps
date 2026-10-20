@@ -10,7 +10,7 @@ mod support {
     pub mod wire;
 }
 
-use ark::frames::Frame;
+use ark::frames::{Frame, Verdict};
 use ark::log::{EntryId, Origin};
 use ark::peer::{Peer, Role, Who};
 use demo::{create_input, pair_input, ADD, CREATE};
@@ -39,7 +39,10 @@ fn ids_are_the_origins_whoever_signs_in() {
     for f in &pushes {
         back.extend(sends(&server.step(up(&who("alice"), f))));
     }
-    assert!(matches!(back[..], [Frame::Ack { seq: 1, .. }, Frame::Ack { seq: 2, .. }]), "{back:?}");
+    assert!(
+        matches!(verdicts(&back)[..], [Some(Verdict::Ok { seq: 1 }), Some(Verdict::Ok { seq: 2 })]),
+        "{back:?}"
+    );
     let e = &server.log.entries[0].entry;
     assert_eq!((e.id, e.origin, e.local), (EntryId::of(origin, 1), origin, 1));
     assert_eq!(
@@ -53,15 +56,15 @@ fn ids_are_the_origins_whoever_signs_in() {
         "the add named the playlist by its drawn id"
     );
     let again = sends(&server.step(up(&who("alice"), &pushes[1])));
-    assert!(matches!(again[..], [Frame::Ack { seq: 2, .. }]), "{again:?}");
+    assert!(matches!(verdicts(&again)[..], [Some(Verdict::Ok { seq: 2 })]), "{again:?}");
     let mut third = pushes[1].clone();
-    if let Frame::Push { entry, .. } = &mut third {
-        entry.local = 3;
-        entry.id = EntryId::of(origin, 3);
+    if let Frame::Page { logged, .. } = &mut third {
+        logged[0].entry.local = 3;
+        logged[0].entry.id = EntryId::of(origin, 3);
     }
     let bob = sends(&server.step(up(&who("bob"), &third)));
     assert!(
-        matches!(&bob[..], [Frame::Reject { why, .. }] if why.contains("another actor")),
+        matches!(&verdicts(&bob)[..], [Some(Verdict::Refused { why })] if why.contains("another actor")),
         "{bob:?}"
     );
     assert_eq!(server.log.head().0, 2);

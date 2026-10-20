@@ -1059,7 +1059,7 @@ fn a_black_holed_socket_is_closed_by_the_keepalive() {
 /// Whether a payload the peer sent is a frame of this kind (its first
 /// message on a connection is its token, which is no frame).
 fn is_push(b: &[u8]) -> bool {
-    matches!(Frame::dec(b), Ok(Frame::Push { .. }))
+    matches!(Frame::dec(b), Ok(Frame::Page { logged, .. }) if logged.first().is_some_and(|l| l.seq == 0))
 }
 
 fn is_hello(b: &[u8]) -> bool {
@@ -1073,7 +1073,7 @@ fn is_hello(b: &[u8]) -> bool {
 /// alice's connections, the peer is still linked on the same connection,
 /// and it converges.
 ///
-/// Falsified by sending, in place of the replay, that `Push` as a new
+/// Falsified by sending, in place of the replay, that push as a new
 /// intent of the same session at the next `local`, its id made to match
 /// (`Proxy::inject`): the server sequenced it as "Once (1)", and the
 /// peer's own next intent, at that `local`, was answered as it — no "After
@@ -1094,7 +1094,7 @@ fn a_replayed_push_or_hello_changes_nothing() {
         .expect("a push was sent");
     let msg = Frame::dec(&frame).unwrap();
     assert!(
-        matches!(&msg, Frame::Push { entry, .. } if entry.id.0 == once),
+        matches!(&msg, Frame::Page { logged, .. } if logged[0].entry.id.0 == once),
         "{msg:?}"
     );
     assert!(p.proxy.replay_where(is_push));

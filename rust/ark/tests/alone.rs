@@ -10,7 +10,7 @@ mod support {
     pub mod wire;
 }
 
-use ark::frames::Frame;
+use ark::frames::{Frame, Verdict};
 use ark::hash::EntryHash;
 use ark::log::{EntryId, Origin};
 use ark::peer::{Input, Output, Peer, Role};
@@ -79,7 +79,7 @@ fn a_chain_whose_facts_differ_is_refused() {
     let mut eve = eve_alone();
     let mut server = authority(demo::cas());
     let back = join(&mut eve, &mut server, |f| {
-        if let Frame::Join { logged, .. } = f {
+        if let Frame::Page { logged, .. } = f {
             if let Change::Add { row, .. } = &mut logged[1].facts[0] {
                 *row = demo::item_row(&road(), "t5", 99);
             }
@@ -88,7 +88,10 @@ fn a_chain_whose_facts_differ_is_refused() {
     let rejects: Vec<String> = back
         .iter()
         .filter_map(|f| match f {
-            Frame::Reject { why, .. } => Some(why.clone()),
+            Frame::Verdict {
+                verdict: Verdict::Refused { why },
+                ..
+            } => Some(why.clone()),
             _ => None,
         })
         .collect();
@@ -113,13 +116,22 @@ fn a_chain_naming_a_function_the_server_lacks_is_refused() {
     let rejects: Vec<&String> = back
         .iter()
         .filter_map(|f| match f {
-            Frame::Reject { why, .. } => Some(why),
+            Frame::Verdict {
+                verdict: Verdict::Refused { why },
+                ..
+            } => Some(why),
             _ => None,
         })
         .collect();
     assert_eq!(rejects.len(), 2, "{back:?}");
     assert!(rejects[0].contains("not one this authority runs"), "{rejects:?}");
-    assert!(!back.iter().any(|f| matches!(f, Frame::Held { .. })));
+    assert!(!back.iter().any(|f| matches!(
+        f,
+        Frame::Verdict {
+            verdict: Verdict::Held { .. },
+            ..
+        }
+    )));
     assert_eq!(server.log.head(), (0, EntryHash::default()));
     assert!(eve.pending.is_empty() && eve.store == server.store);
 }
