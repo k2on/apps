@@ -150,6 +150,9 @@ pub struct Client {
     frames: Vec<Vec<u8>>,
     events: Vec<Event>,
     saved: (i64, Vec<EntryId>),
+    /// How much the `pending` journal holds, in entries and records; `None`
+    /// until it is written whole, as it is first after an open.
+    journal: Option<usize>,
     joined: bool,
 }
 
@@ -196,7 +199,7 @@ impl Client {
             Ok(s) => (s, None),
             Err(e) => (Default::default(), Some(e.to_string())),
         };
-        let (local, pending) = pending.and_then(|b| <(i64, Vec<Entry>)>::from_bytes(&b).ok()).unwrap_or_default();
+        let (local, pending) = pending.map(|b| storage::pending(&b)).unwrap_or_default();
         let durable = Durable {
             snapshot: stored.snapshot.unwrap_or_else(|| log.log.base.clone()),
             chain: stored.chain,
@@ -218,6 +221,7 @@ impl Client {
             frames: vec![],
             events: vec![],
             saved: (0, vec![]),
+            journal: None,
             joined: false,
         };
         c.joined = c.log.joining.is_some();
@@ -273,10 +277,37 @@ impl Client {
         }
         let now = (self.log.local, self.log.pending.iter().map(|p| p.entry.id).collect());
         if space == Space::Durable && now != self.saved {
-            let entries: Vec<Entry> = self.log.pending.iter().map(|p| p.entry.clone()).collect();
-            self.blob("pending", &(self.log.local, entries).to_bytes());
-            self.saved = now;
+            self.save_pending(now);
         }
+    }
+
+    /// The pending intents made durable as a change to what was saved: one
+    /// record appended — the `local`, how many left the front, the intents
+    /// new at the back — so a mutate writes its one entry; written whole
+    /// when the journal holds more than twice what is pending.
+    fn save_pending(&mut self, now: (i64, Vec<EntryId>)) {
+        let (was, ids) = (&self.saved.1, &now.1);
+        let gone = (0..=was.len()).find(|d| ids.starts_with(&was[*d..])).unwrap_or(was.len());
+        let kept = was.len() - gone;
+        let held = self.journal.map(|j| j + ids.len() - kept + 1);
+        let (record, whole) = match held {
+            Some(j) if j <= 2 * (ids.len() + 1) + 64 => {
+                let new: Vec<Entry> = self.log.pending[kept..].iter().map(|p| p.entry.clone()).collect();
+                self.journal = Some(j);
+                (storage::pending_record(now.0, gone, new), false)
+            }
+            _ => {
+                let all: Vec<Entry> = self.log.pending.iter().map(|p| p.entry.clone()).collect();
+                self.journal = Some(ids.len() + 1);
+                (storage::pending_record(now.0, 0, all), true)
+            }
+        };
+        let wrote = if whole { self.disk.put("pending", &record) } else { self.disk.append("pending", &record) };
+        if let Err(e) = wrote {
+            self.disk_error = Some(e.to_string());
+            self.journal = None;
+        }
+        self.saved = now;
     }
 
     fn changed(&mut self, space: Space, cs: &[Change]) {

@@ -12,9 +12,13 @@
 //!   is read up to the first record that does not read or whose hash does
 //!   not check against the one before it, and the file is cut there: a
 //!   crash mid-write leaves a torn tail, never a wrong entry.
-//! - named blobs beside them, each written whole: a client's `pending`
-//!   (its own intents not yet confirmed and the last `local` its session
-//!   drew, `(Int, List Entry)`); a hub's `journal` and `live` (`ark5-server`).
+//! - named blobs beside them, each written whole or appended to: a hub's
+//!   `journal` and `live` (`ark5-server`), written whole; a client's
+//!   `pending` (its own intents not yet confirmed and the last `local` its
+//!   session drew), a journal of records, each a four-byte big-endian
+//!   length and `((Int local, Int gone), List Entry)`: the intents left
+//!   are those before with the first `gone` taken off and these added.
+//!   It is read up to the first record that does not read, as the chain.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read as _, Write};
@@ -22,7 +26,8 @@ use std::path::PathBuf;
 
 use std::collections::BTreeMap;
 
-use ark5::log::{Logged, Record, Snapshot};
+use ark5::ir::Node;
+use ark5::log::{Entry, Logged, Record, Snapshot};
 
 /// The chain made durable, read back.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -37,7 +42,35 @@ pub trait Disk: Send {
     /// One `Persist`: a record's bytes.
     fn record(&mut self, bytes: &[u8]) -> io::Result<()>;
     fn put(&mut self, name: &str, bytes: &[u8]) -> io::Result<()>;
+    /// Bytes added at the end of a blob; by default, the blob read and
+    /// written whole.
+    fn append(&mut self, name: &str, bytes: &[u8]) -> io::Result<()> {
+        let mut b = self.get(name)?.unwrap_or_default();
+        b.extend_from_slice(bytes);
+        self.put(name, &b)
+    }
     fn get(&mut self, name: &str) -> io::Result<Option<Vec<u8>>>;
+}
+
+/// One record of the `pending` journal.
+pub fn pending_record(local: i64, gone: usize, new: Vec<Entry>) -> Vec<u8> {
+    let b = ((local, gone as i64), new).to_bytes();
+    [&(b.len() as u32).to_be_bytes()[..], &b].concat()
+}
+
+/// The `pending` journal read: the last `local` and the intents left.
+pub fn pending(bytes: &[u8]) -> (i64, Vec<Entry>) {
+    let (mut local, mut left, mut at) = (0, vec![], 0);
+    while let Some(len) = bytes.get(at..at + 4).map(|b| u32::from_be_bytes(b.try_into().unwrap()) as usize) {
+        let Some(Ok(((l, gone), new))) = bytes.get(at + 4..at + 4 + len).map(<((i64, i64), Vec<Entry>)>::from_bytes) else {
+            break;
+        };
+        left.drain(..(gone.max(0) as usize).min(left.len()));
+        left.extend(new);
+        local = l;
+        at += 4 + len;
+    }
+    (local, left)
 }
 
 /// The records of a chain read in order up to the first that does not read
@@ -94,6 +127,11 @@ impl Disk for Memory {
 
     fn put(&mut self, name: &str, bytes: &[u8]) -> io::Result<()> {
         self.blobs.insert(name.into(), bytes.to_vec());
+        Ok(())
+    }
+
+    fn append(&mut self, name: &str, bytes: &[u8]) -> io::Result<()> {
+        self.blobs.entry(name.into()).or_default().extend_from_slice(bytes);
         Ok(())
     }
 
@@ -190,6 +228,13 @@ impl Disk for Files {
 
     fn put(&mut self, name: &str, bytes: &[u8]) -> io::Result<()> {
         self.whole(name, bytes)
+    }
+
+    /// Synced before it returns, as a blob written whole is.
+    fn append(&mut self, name: &str, bytes: &[u8]) -> io::Result<()> {
+        let mut f = OpenOptions::new().create(true).append(true).open(self.dir.join(name))?;
+        f.write_all(bytes)?;
+        f.sync_data()
     }
 
     fn get(&mut self, name: &str) -> io::Result<Option<Vec<u8>>> {

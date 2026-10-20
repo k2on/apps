@@ -5,11 +5,16 @@
 //! devices come and go as `on_join` and `on_leave`, and a pointer is
 //! relayed coalesced.
 
+use std::io;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+
 use ark5::codec::bytes_enc;
 use ark5::log::EntryId;
 use ark5::peer::{Ctx, Who};
 use ark5::schema::Space;
-use ark5_client::Config;
+use ark5_client::storage::Stored;
+use ark5_client::{Client, Config, Disk, Memory};
 use ark5_dev::demo::{arrival, domain, live, module, room};
 use ark5_dev::sim::{who, Net, Op};
 use ark5_server::hub::{Config as HubConfig, Live as HubLive};
@@ -170,4 +175,61 @@ fn the_room_comes_and_goes_and_the_pointer_is_relayed() {
     n.views_hold().unwrap();
     assert_eq!(n.clients[&1].rows(0).unwrap().len(), 1, "the phone has gone");
     assert!(n.refused.is_empty(), "{:?}", n.refused);
+}
+
+/// A memory disk that counts the bytes written to it.
+struct Tally(Memory, Arc<AtomicUsize>);
+
+impl Disk for Tally {
+    fn load(&mut self) -> io::Result<Stored> {
+        self.0.load()
+    }
+    fn record(&mut self, b: &[u8]) -> io::Result<()> {
+        self.1.fetch_add(b.len(), Ordering::Relaxed);
+        self.0.record(b)
+    }
+    fn put(&mut self, n: &str, b: &[u8]) -> io::Result<()> {
+        self.1.fetch_add(b.len(), Ordering::Relaxed);
+        self.0.put(n, b)
+    }
+    fn append(&mut self, n: &str, b: &[u8]) -> io::Result<()> {
+        self.1.fetch_add(b.len(), Ordering::Relaxed);
+        self.0.append(n, b)
+    }
+    fn get(&mut self, n: &str) -> io::Result<Option<Vec<u8>>> {
+        self.0.get(n)
+    }
+}
+
+/// A mutate offline writes its own intent, not every one pending: at
+/// 8,000 pending the next costs the disk under 512 bytes (its entry, one
+/// journal record), and what was written reads back on a reopen as the
+/// same 8,001 pending intents in order; the reopen writes the journal
+/// whole once, and the next mutate is one record again. Falsified by
+/// writing the `pending` blob whole on every change, as before: the
+/// 8,001st mutate wrote 871,554 bytes.
+#[test]
+fn a_mutate_writes_one_pending_record() {
+    let written = Arc::new(AtomicUsize::new(0));
+    let mut c = Client::open(demo(), who(0), Box::new(Tally(Memory::default(), written.clone())), false);
+    let create = domain().get("demo.create_playlist");
+    let mut last = 0;
+    for i in 0..=8000 {
+        let before = written.load(Ordering::Relaxed);
+        c.mutate(create, bytes_enc(format!("List {i}").as_bytes()), i);
+        last = written.load(Ordering::Relaxed) - before;
+    }
+    assert_eq!(c.log.pending.len(), 8001);
+    assert!(last < 512, "the 8,001st mutate wrote {last} bytes");
+    let ids: Vec<EntryId> = c.log.pending.iter().map(|p| p.entry.id).collect();
+    let mut c = c.reopen();
+    assert_eq!(c.log.pending.iter().map(|p| p.entry.id).collect::<Vec<_>>(), ids);
+    let before = written.load(Ordering::Relaxed);
+    c.mutate(create, bytes_enc(b"One more"), 9000);
+    assert!(written.load(Ordering::Relaxed) - before < 512);
+    let mut c = c.reopen();
+    assert_eq!(c.log.pending.len(), 8002);
+    assert_eq!(c.log.pending[8001].entry.local, 8002);
+    c.mutate(create, bytes_enc(b"And one"), 9001);
+    assert_eq!(c.log.pending.last().unwrap().entry.local, 8003, "the session's local read back");
 }

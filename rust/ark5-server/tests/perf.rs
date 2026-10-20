@@ -371,7 +371,7 @@ fn perf_c_pump_alone() {
 #[ignore]
 fn perf_c_offline_pending() {
     header("(c) offline: mutate with N pending (one pending page per mutate)");
-    note("the `pending` blob holds every pending entry and is rewritten whole on each mutate");
+    note("the `pending` journal: a record appended per mutate (its one entry), written whole when it holds twice what is pending");
     for n in [500u64, 2000, 8000] {
         for dir in [false, true] {
             let tmp = tempfile::tempdir().unwrap();
