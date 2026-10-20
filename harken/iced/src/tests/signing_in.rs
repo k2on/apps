@@ -1,19 +1,23 @@
 //! Nobody has to sign in, and signing in later keeps everything; and every
 //! change this window makes can say what became of it.
+use ark5::frames::Frame;
+use ark5::schema::Space;
 use ark_auth::{Account, Login};
-use ark_client::ark::protocol::ServerMsg;
-use ark_client::{Options, Standing};
 
-use super::{peer, song};
+use super::{signed_in, signed_out, song};
+use crate::client::Standing;
 use crate::places::Pane;
 use crate::{App, Message};
 
+/// A login holding the library's role, as the scanner's account does: the
+/// songs these windows made are theirs to make.
 fn login(who: &str) -> Login {
     Login {
         token: format!("token-{who}"),
         session: format!("session-{who}"),
         user: Account {
             id: who.into(),
+            roles: vec![harken_domain5::schema::LIBRARY.into()],
             ..Account::default()
         },
         expires_ms: 0,
@@ -26,30 +30,41 @@ fn login(who: &str) -> Login {
 ///
 /// Falsified by making `signed_in` open a fresh replica rather than call
 /// `sign_in` on this one: the item is gone and the pending count is 0.
+/// v5 authors an intent under its session, so signing in gives the pending
+/// one the signer's id: the old id names nothing after it.
 #[test]
 fn signing_in_moves_the_same_replica_on() {
-    let mut p = peer(Options::signed_out());
+    let mut p = signed_out();
     assert!(p.client.is_signed_out());
     let id = p
         .client
-        .mutate("add_song", song("Air", "Bach", "Suites", "music/air.mp3"))
+        .mutate("add_song", &song("Air", "Bach", "Suites", "music/air.mp3"))
         .expect("a window holding the library role takes a song signed out");
     p.refresh();
     let mut app = App::with_peer(p, "http://127.0.0.1:9".into(), None);
     assert_eq!(app.peer.items.len(), 1, "what was done signed out is on screen");
     assert_eq!(app.peer.client.standing(&id), Standing::Pending);
-    assert!(app.peer.client.replica().pending.iter().all(|e| e.actor.is_empty()), "authored as nobody");
+    let pending = |app: &App| {
+        app.peer
+            .client
+            .client
+            .log
+            .pending
+            .iter()
+            .map(|p| p.entry.actor.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(pending(&app), [""], "authored as nobody");
 
     let _ = app.update(Message::SignedIn(Ok(login("alice"))));
     assert!(!app.peer.client.is_signed_out());
     assert_eq!(app.login.as_ref().map(|l| l.user.id.as_str()), Some("alice"));
     assert_eq!(app.peer.items.len(), 1, "the same replica, not a new one");
     assert_eq!(app.peer.client.pending_len(), 1);
-    assert!(
-        app.peer.client.replica().pending.iter().all(|e| e.actor == "alice"),
-        "…and the work is hers now"
-    );
-    assert_eq!(app.peer.client.standing(&id), Standing::Pending, "the id `mutate` gave still names it");
+    assert_eq!(pending(&app), ["alice"], "…and the work is hers now");
+    let now = app.peer.client.client.log.pending[0].entry.id;
+    assert_eq!(app.peer.client.standing(&now), Standing::Pending, "under the id her session gives it");
+    assert_eq!(app.peer.client.standing(&id), Standing::Unknown, "nobody's id names nothing now");
     assert!(app.note.contains("1 change from before"), "{}", app.note);
 
     // Signing out keeps the replica and goes on as her, offline.
@@ -66,8 +81,8 @@ fn signing_in_moves_the_same_replica_on() {
 /// change" and the first assertion fails.
 #[test]
 fn a_refusal_names_what_was_refused() {
-    let mut p = peer(Options::dev("alice"));
-    p.client.mutate("add_song", song("Air", "Bach", "Suites", "music/air.mp3")).unwrap();
+    let mut p = signed_in("alice");
+    p.client.mutate("add_song", &song("Air", "Bach", "Suites", "music/air.mp3")).unwrap();
     p.refresh();
     p.ensure_playlist();
     let mut app = App::with_peer(p, "http://127.0.0.1:9".into(), Some(login("alice")));
@@ -81,10 +96,12 @@ fn a_refusal_names_what_was_refused() {
     assert_eq!(edit.what, "put Air on Favorites");
     assert_eq!(app.peer.client.standing(&edit.id), Standing::Pending);
 
-    app.peer.client.recv(ServerMsg::Reject {
+    let reject = Frame::Reject {
+        space: Space::Durable,
         id: edit.id,
-        reason: "not your playlist".into(),
-    });
+        why: "not your playlist".into(),
+    };
+    app.peer.client.receive(reject.enc());
     let _ = app.update(Message::Wake);
     assert_eq!(app.note, "the server refused to put Air on Favorites: not your playlist");
     assert_eq!(
@@ -108,18 +125,16 @@ fn a_refusal_names_what_was_refused() {
 /// `QUIET_MS` to 1 (the deadline is not a second out) and to 1500 (likewise).
 #[test]
 fn the_default_playlist_waits_for_the_log() {
-    use ark_client::autos::monotonic_ms;
-    use ark_client::link::{BoxTransport, Event, Queues};
-    let mut app = App::with_peer(peer(Options::dev("alice")), "http://127.0.0.1:9".into(), Some(login("alice")));
-    let q = Queues::default();
-    let socket = q.clone();
-    app.peer
-        .client
-        .connect_with("queues", Box::new(move |_: &str| Box::new(socket.clone()) as BoxTransport));
+    use super::Queues;
+    use crate::client::{monotonic_ms, Event};
+    let mut app = App::with_peer(signed_in("alice"), "http://127.0.0.1:9".into(), Some(login("alice")));
+    let made: std::sync::Arc<std::sync::Mutex<Vec<Queues>>> = Default::default();
+    app.peer.client.connect_with("ws://queues", Queues::dialer(made.clone()));
     let _ = app.update(Message::Due);
     assert!(app.peer.playlists().is_empty(), "nothing is made before anything is heard");
     let opened = monotonic_ms();
-    q.push(Event::Opened);
+    let q = made.lock().unwrap()[0].clone();
+    q.push(Event::Open);
     let _ = app.update(Message::Wake);
     let at = app.quiet.expect("the open set the quiet deadline");
     assert!((opened + 1_000..opened + 1_100).contains(&at), "a second out: {} ms", at - opened);

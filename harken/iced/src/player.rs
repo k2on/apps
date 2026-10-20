@@ -12,7 +12,7 @@
 //! ALSA) plus an HTTP reader to feed them — worth doing when the desktop
 //! client has a media store to stream from, which it does not yet.
 
-use ark_client::Id;
+use crate::rows::Id;
 
 /// What the platform's media controller asked for, if anything.
 ///
@@ -68,7 +68,7 @@ pub struct Track {
 #[cfg(target_arch = "wasm32")]
 mod imp {
     use super::{Remote, Track};
-    use ark_client::Id;
+    use crate::rows::Id;
     use wasm_bindgen::prelude::*;
     use wasm_bindgen::JsCast;
     use web_sys::HtmlAudioElement;

@@ -8,8 +8,8 @@
 //!
 //! - **the sync socket** rings the window's [`Bell`] when it opens, closes
 //!   or brings a frame — the log, an ack, the listening session's frames —
-//!   through [`ark_client::Peer::set_waker`] ([`waker`]);
-//! - **a deadline** the peer or the window asked for — the redial after a
+//!   through [`crate::client::Replica::set_waker`] ([`waker`]);
+//! - **a deadline** the replica or the window asked for — the redial after a
 //!   close, the second of quiet before a default playlist — is one timer,
 //!   `arkui::wake::at`, keyed by the deadline;
 //! - **in a browser, the page**: the back button and a followed fragment
@@ -26,7 +26,7 @@ use arkui::wake::Bell;
 
 /// The peer's wake: ring the bell, from the socket's reader thread natively
 /// and from the `WebSocket`'s callbacks in a browser.
-pub fn waker(bell: &Bell) -> ark_client::Wake {
+pub fn waker(bell: &Bell) -> crate::client::Wake {
     let bell = bell.clone();
     #[cfg(not(target_arch = "wasm32"))]
     {

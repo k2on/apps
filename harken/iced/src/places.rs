@@ -5,7 +5,7 @@ use arkui::glyphs;
 use arkui::route::{join, split, Route};
 use arkui::vim;
 
-use ark_client::Id;
+use crate::rows::Id;
 
 /// What the page is showing, which is what the sidebar picks.
 ///

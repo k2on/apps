@@ -1,9 +1,10 @@
 //! This device's end of the account's listening session: a reconciler.
 //!
-//! The session is the domain's live state (`harken_domain::listening`),
-//! held by the server, one per account, on the sync socket — what
-//! [`ark_client::Peer::live`] hands back is the server's confirmed state
-//! with this device's own calls replayed on top. **The state is the
+//! The session is the domain's live state (`harken_domain5::listening`):
+//! three volatile tables the server's second machine holds (§1.9), one
+//! session per account, on the sync socket — what [`crate::client::Replica::listening`]
+//! reads is the server's confirmed state with this device's own calls
+//! previewed on top. **The state is the
 //! instruction**: nothing here is told what to do. Every button on every
 //! device is a transition ([`Remote::call`]); the device the session names
 //! as its output reads the session and makes its player agree
@@ -18,13 +19,15 @@
 //! right about where it is, and every bar should draw what is heard. There
 //! is no heartbeat: a playing clock carries the server's time it started
 //! from, so every device counts the position for itself
-//! ([`Remote::position_ms`], against [`ark_client::Peer::server_now`]).
+//! ([`Remote::position_ms`], against [`crate::client::Replica::server_now`] — this
+//! device's own clock: an entry carries the clock of whoever authored it).
 //! The player is sent where the session is only when it is the *session*
 //! that moved — a seek, a skip, a hand-off — which is told apart from the
 //! player drifting by whether the clock is still the one it last saw.
 //!
 //! **A device unlinked is its own session.** While the socket is down, or
-//! before the server's snapshot has come on a new one, the player is this
+//! before this device stands in the session on a new one (its `on_join`
+//! has landed), the player is this
 //! device's alone and nothing is called — a call made then would be said on
 //! the next connection, long after it meant anything. Coming back, the
 //! decided rule: if the session is sounding somewhere else, this device's
@@ -33,8 +36,9 @@
 //! becomes the session — a `start`, which hands it the sound.
 //!
 //! **A device is a login.** `ark-auth` says a session is "one login on one
-//! device", so the device id is the login's session id: what a `hello`
-//! declares with an empty id, and what the session's `devices` key it by.
+//! device", so the device id is the login's session id: what a volatile
+//! `Hello` declares with an empty id, which the server fills in, and what
+//! the session's devices key it by.
 //!
 //! **The desktop has no audio device** (`Player::AUDIBLE` is false), so it
 //! declares itself one that cannot play: it is never the output, and every
@@ -53,11 +57,12 @@
 //! whichever is first ([`read::counts_after`]). Offline it is pending like
 //! any intent and reaches the server with the device.
 
-use ark_client::ark::live::state::DeviceDecl;
-use ark_client::{Id, Peer};
-use harken_domain::listening::read::{self, STATE};
+use crate::client::Replica as Peer;
+use crate::rows::Id;
+use harken_domain5::listening::read;
 // What the rest of this program asks *this* module about.
-pub use harken_domain::listening::read::{input, Active, Clock, Device, Kind, Listening, Output, Track};
+pub use harken_domain5::listening::read::{Kind, Listening};
+pub use harken_domain5::listening::{Active, Clock, Output, Present as Device, Track};
 
 /// How far the player may be from where the session counts it before one
 /// is put right — the bound every output is held to, the bridge's speakers
@@ -121,13 +126,13 @@ pub struct Remote {
     name: String,
     /// The connection whose snapshot this device has met: below the peer's
     /// epoch, it is still its own session.
-    met: i64,
+    met: u64,
     /// The player was playing while this device was its own session.
     alone_playing: bool,
     /// The hand-off `started` has been said for: the track it was loaded on.
-    started_for: Option<(usize, Id)>,
+    started_for: Option<(i64, Id)>,
     /// The track end `advance` has been said for.
-    advanced_for: Option<(usize, Id)>,
+    advanced_for: Option<(i64, Id)>,
     /// Every load of a track is a play; this one's number, and the last
     /// number counted.
     play: u64,
@@ -140,16 +145,21 @@ pub struct Remote {
     /// The track and the clock the player was last reconciled against: a
     /// difference with the clock still this one is the player's, and the
     /// session is told; with another, the session moved, and the player is.
-    seen: Option<(usize, Id, Clock)>,
+    seen: Option<(i64, Id, Clock)>,
     /// When this device last said where its player is, by its own clock.
     reported: Option<f64>,
     stats: Stats,
 }
 
-/// The device this build declares at `hello`: its login's session (an empty
-/// id), a computer, and whether it can make a sound at all.
-pub fn device() -> DeviceDecl {
-    DeviceDecl::new("", Kind::Computer.name(), device_name(), crate::Player::AUDIBLE)
+/// The device this build declares at its volatile `Hello`: its login's
+/// session (an empty id), a computer, and whether it can make a sound at all.
+pub fn device() -> Vec<u8> {
+    crate::client::device(crate::Player::AUDIBLE, &device_name())
+}
+
+/// A track's id, as the queue carries it.
+pub fn track_id(t: &Track) -> Id {
+    t.id.0
 }
 
 impl Remote {
@@ -194,15 +204,13 @@ impl Remote {
     /// server's snapshot met on this connection. `None` is this device being
     /// its own session.
     pub fn session(&self, peer: &Peer) -> Option<Listening> {
-        if !self.joined(peer) {
-            return None;
-        }
-        peer.live(STATE).and_then(|v| Listening::from_value(&v))
+        self.joined(peer).then(|| peer.listening())
     }
 
-    /// Whether this device is part of the session now.
+    /// Whether this device is part of the session now: linked, as the login
+    /// it was opened for, and standing in it.
     pub fn joined(&self, peer: &Peer) -> bool {
-        peer.linked() && self.me == peer.ctx().session && peer.live_status(STATE).is_some_and(|s| s.synced)
+        peer.linked() && self.me == peer.me().session && peer.present()
     }
 
     /// Whether this device is the one making the sound.
@@ -230,15 +238,9 @@ impl Remote {
     /// Call a transition of the session. A refusal — the preview's, here —
     /// is said back and counted; the server's arrive later
     /// ([`Remote::refusals`]).
-    pub fn call(&mut self, peer: &mut Peer, transition: &str, input: ark_client::Args) -> Result<(), String> {
+    pub fn call(&mut self, peer: &mut Peer, transition: &str, input: Vec<u8>) -> Result<(), String> {
         self.stats.calls += 1;
-        let throttled = transition == "scrub";
-        let called = match throttled {
-            true => peer.call_throttled(STATE, transition, input),
-            false => peer.call(STATE, transition, input),
-        };
-        called.map(|_| ()).map_err(|e| {
-            let why = e.to_string();
+        peer.call(transition, input).map_err(|why| {
             self.stats.refused += 1;
             self.stats.last_refusal = Some(format!("{transition}: {why}"));
             why
@@ -247,7 +249,7 @@ impl Remote {
 
     /// What the server refused of this device's calls since the last ask.
     pub fn refusals(&mut self, peer: &mut Peer) -> Vec<String> {
-        let out: Vec<String> = peer.take_live_refusals().into_iter().map(|r| r.reason).collect();
+        let out = peer.take_live_refusals();
         if let Some(last) = out.last() {
             self.stats.refused += out.len() as u64;
             self.stats.last_refusal = Some(last.clone());
@@ -352,9 +354,9 @@ impl Remote {
         // the track was until this device says it has started, so the track
         // is loaded where it stopped on the device that had it.
         let want = a.position(now);
-        if sound.loaded() != Some(track.id) || *queue != a.queue {
+        if sound.loaded() != Some(track_id(&track)) || *queue != a.queue {
             *queue = a.queue.clone();
-            if sound.loaded() != Some(track.id) {
+            if sound.loaded() != Some(track_id(&track)) {
                 sound.load(&track, want, a.clock.playing());
                 self.play += 1;
                 self.advanced_for = None;
@@ -363,8 +365,8 @@ impl Remote {
         }
         // The hand-off has landed when the track is loaded: said once.
         let moving = matches!(&a.output, Output::Device { moving: true, .. });
-        if moving && self.started_for != Some((a.at, track.id)) {
-            self.started_for = Some((a.at, track.id));
+        if moving && self.started_for != Some((a.at, track_id(&track))) {
+            self.started_for = Some((a.at, track_id(&track)));
             let _ = self.call(peer, "started", input::at(sound.position_ms()));
             return;
         }
@@ -375,8 +377,8 @@ impl Remote {
         // sitting at its end — the last track of the queue — is reconciled
         // like any other: played again from the start if somebody presses
         // play.
-        if sound.ended() && a.clock.playing() && self.advanced_for != Some((a.at, track.id)) {
-            self.advanced_for = Some((a.at, track.id));
+        if sound.ended() && a.clock.playing() && self.advanced_for != Some((a.at, track_id(&track))) {
+            self.advanced_for = Some((a.at, track_id(&track)));
             let _ = self.call(peer, "advance", input::advance(a.at));
             return;
         }
@@ -411,8 +413,8 @@ impl Remote {
         // told (`report_position`), at most once a second, against that
         // clock. Waiting on the network, neither: it is standing still for
         // the stream, and will say so if it comes out of it behind.
-        let moved = self.seen != Some((a.at, track.id, a.clock));
-        self.seen = Some((a.at, track.id, a.clock));
+        let moved = self.seen != Some((a.at, track_id(&track), a.clock));
+        self.seen = Some((a.at, track_id(&track), a.clock));
         let off = sound.position_ms() - want;
         if off.abs() > SYNC_MS && !sound.buffering() {
             match (moved, a.clock, sound.playing()) {
@@ -429,8 +431,7 @@ impl Remote {
         // A play, once it has played long enough, once.
         if a.clock.playing() && self.counted != self.play && sound.position_ms() >= read::counts_after(track.duration_ms) {
             self.counted = self.play;
-            let args = input::record_play(&track, &a.from);
-            match peer.mutate("record_play", args) {
+            match peer.mutate("record_play", &input::record_play(&track, &a.from)) {
                 Ok(_) => self.stats.plays += 1,
                 Err(e) => self.stats.last_refusal = Some(format!("record_play: {e}")),
             }
@@ -451,12 +452,155 @@ fn device_name() -> String {
     }
 }
 
+/// Each transition's input, as its bytes: the domain's own input types.
+pub mod input {
+    use ark5::author::{Id, Node};
+    use harken_domain5::listening::*;
+
+    /// A transition that takes nothing.
+    pub fn none() -> Vec<u8> {
+        ().to_bytes()
+    }
+
+    pub fn start(queue: &[Track], at: usize, position: i64, from: &str) -> Vec<u8> {
+        Start {
+            at: at as i64,
+            from: from.into(),
+            position,
+            queue: Queue(queue.to_vec()),
+        }
+        .to_bytes()
+    }
+
+    pub fn seek(ms: i64) -> Vec<u8> {
+        Seek { ms }.to_bytes()
+    }
+
+    pub fn skip(by: i64) -> Vec<u8> {
+        Skip { by }.to_bytes()
+    }
+
+    pub fn jump(index: usize) -> Vec<u8> {
+        Jump { index: index as i64 }.to_bytes()
+    }
+
+    pub fn remove(index: usize) -> Vec<u8> {
+        Remove { index: index as i64 }.to_bytes()
+    }
+
+    pub fn move_track(from: usize, to: usize) -> Vec<u8> {
+        Move {
+            from: from as i64,
+            to: to as i64,
+        }
+        .to_bytes()
+    }
+
+    pub fn enqueue(tracks: &[Track], next: bool) -> Vec<u8> {
+        Enqueue {
+            next,
+            tracks: Queue(tracks.to_vec()),
+        }
+        .to_bytes()
+    }
+
+    pub fn transfer(to: &str) -> Vec<u8> {
+        Transfer { to: to.into() }.to_bytes()
+    }
+
+    pub fn at(at_ms: i64) -> Vec<u8> {
+        At { at_ms }.to_bytes()
+    }
+
+    pub fn advance(from_track: i64) -> Vec<u8> {
+        Advance { from_track }.to_bytes()
+    }
+
+    pub fn report_position(at_ms: i64, since: i64) -> Vec<u8> {
+        Report { at_ms, since }.to_bytes()
+    }
+
+    pub fn equip(can_volume: bool, family: Option<&str>, volume: i64, muted: bool) -> Vec<u8> {
+        Equip {
+            can_volume,
+            family: family.map(|f| Family(f.into())),
+            muted,
+            volume,
+        }
+        .to_bytes()
+    }
+
+    pub fn set_volume(device: &str, level: i64) -> Vec<u8> {
+        SetVolume {
+            device: device.into(),
+            level,
+        }
+        .to_bytes()
+    }
+
+    pub fn nudge_volume(device: &str, delta: i64) -> Vec<u8> {
+        NudgeVolume {
+            delta,
+            device: device.into(),
+        }
+        .to_bytes()
+    }
+
+    pub fn set_mute(device: &str, muted: bool) -> Vec<u8> {
+        SetMute {
+            device: device.into(),
+            muted,
+        }
+        .to_bytes()
+    }
+
+    pub fn report_volume(level: i64, muted: bool) -> Vec<u8> {
+        ReportVolume { level, muted }.to_bytes()
+    }
+
+    pub fn member(device: &str) -> Vec<u8> {
+        Member { device: device.into() }.to_bytes()
+    }
+
+    pub fn set_group_volume(level: i64) -> Vec<u8> {
+        GroupVolume { level }.to_bytes()
+    }
+
+    pub fn nudge_group_volume(delta: i64) -> Vec<u8> {
+        GroupNudge { delta }.to_bytes()
+    }
+
+    pub fn set_group_mute(muted: bool) -> Vec<u8> {
+        GroupMute { muted }.to_bytes()
+    }
+
+    pub fn scrub(at_ms: Option<i64>) -> Vec<u8> {
+        Scrub { at_ms: at_ms.map(Ms) }.to_bytes()
+    }
+
+    /// `record_play`'s input: the track as the session carried it.
+    pub fn record_play(track: &Track, from: &str) -> RecordPlay {
+        RecordPlay {
+            track: Id::new(track.id.0),
+            title: track.title.clone(),
+            creator: track.creator.clone(),
+            album: track.album.clone(),
+            duration_ms: track.duration_ms.max(0),
+            file: track.file.clone(),
+            from: from.into(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
-    use ark_client::ark::live::state::{Desk, Runner, Said, Who};
-    use ark_client::ark::protocol::{ClientMsg, ServerMsg};
-    use ark_client::{Domain, Options};
+    use ark5::author::{Id as Key, Node};
+    use ark5::peer::Who;
+    use ark5_server::hub::{Config, ConnId, Hub, Live};
+    use harken_domain5::listening::Device as Said;
 
     /// A player that does what it is told, and a clock it is told about.
     #[derive(Default)]
@@ -484,7 +628,7 @@ mod tests {
             self.ended
         }
         fn load(&mut self, track: &Track, position_ms: i64, playing: bool) {
-            self.loaded = Some((track.id, position_ms));
+            self.loaded = Some((track_id(track), position_ms));
             self.at_ms = position_ms;
             self.playing = playing;
             self.ended = false;
@@ -514,7 +658,7 @@ mod tests {
         let mut id = [0u8; 16];
         id[15] = n;
         Track {
-            id,
+            id: Key::new(id),
             title: t.into(),
             creator: "Bach".into(),
             album: "Water Music".into(),
@@ -527,91 +671,91 @@ mod tests {
         vec![track("a", 1), track("b", 2)]
     }
 
-    /// A server in this test — the engine's own sans-io desk — and the
-    /// devices on it: each a real `Peer`, its frames carried by hand.
+    /// A server in this test — the hub (`ark5-server`), sans-io, holding
+    /// the session in its volatile machine — and the devices on it: each a
+    /// real replica, its frames carried by hand.
     struct Net {
-        desk: Desk,
-        peers: Vec<(Peer, i64)>,
-        now: i64,
-    }
-
-    fn runner() -> Runner {
-        let m = harken_domain::module();
-        let mut r = Runner::of_module(m.build());
-        r.hold(m.lives());
-        r
+        hub: Hub,
+        peers: Vec<(Peer, Who, ConnId)>,
     }
 
     impl Net {
         fn new() -> Net {
+            let d = crate::client::domain();
+            let m = ark5_client::Module {
+                schema: d.schema.clone(),
+                cas: d.cas(),
+                lib: d.lib.clone(),
+            };
+            let mut c = Config::new(m.clone());
+            let get = |n: &str| Some(d.get(&format!("listening.{n}")));
+            c.live = Some(Live {
+                module: m,
+                on_join: get("on_join"),
+                on_leave: get("on_leave"),
+                on_restore: get("on_restore"),
+                // What the device says it is, its user and its id the login's.
+                device: Arc::new(|who: &Who, said: &[u8]| {
+                    let d = Said::from_bytes(said).ok()?;
+                    let (user, id) = (who.actor.clone(), who.session.clone());
+                    Some(Said { user, id, ..d }.to_bytes())
+                }),
+                keep: 64,
+            });
             Net {
-                desk: Desk::new(runner()),
+                hub: Hub::open(c, Box::new(ark5_client::Memory::default()), crate::client::now_ms()),
                 peers: vec![],
-                now: ark_client::autos::now_ms(),
             }
         }
 
         /// A device of alice's, linked: `can_play` as its build can.
         fn device(&mut self, session: &str, can_play: bool) -> usize {
-            let opts = Options::server("alice", session, Some("t".into())).with_device(DeviceDecl::new("", "computer", session, can_play));
-            let mut p = Peer::open_memory(Domain::new(&harken_domain::module()), opts).unwrap();
-            let conn = self.peers.len() as i64 + 1;
-            p.connected();
-            self.peers.push((p, conn));
+            let who = Who {
+                actor: "alice".into(),
+                session: session.into(),
+                roles: vec![],
+            };
+            let said = crate::client::device(can_play, session);
+            let p = Peer::memory_as(who.clone(), Some("t"), said);
+            self.peers.push((p, who, 0));
             let k = self.peers.len() - 1;
-            self.carry();
+            self.relink(k);
             k
         }
 
         fn drop_link(&mut self, k: usize) {
-            let (p, c) = &mut self.peers[k];
-            p.disconnected();
-            let out = self.desk.part(*c, self.now);
+            let (p, _, c) = &mut self.peers[k];
+            p.client.disconnected();
+            let out = self.hub.disconnect(*c, crate::client::now_ms());
             self.deliver(out);
         }
 
         fn relink(&mut self, k: usize) {
-            self.peers[k].0.connected();
+            let c = self.hub.connect(self.peers[k].1.clone());
+            self.peers[k].2 = c;
+            self.peers[k].0.opened();
             self.carry();
         }
 
-        fn deliver(&mut self, out: ark_client::ark::live::state::Out) {
-            for (c, said) in out {
-                if let Some((p, _)) = self.peers.iter_mut().find(|(_, pc)| *pc == c) {
-                    if p.linked() {
-                        p.recv(match said {
-                            Said::Applied(a) => ServerMsg::Applied(a),
-                            Said::Refused(r) => ServerMsg::Refused(r),
-                            Said::Snapshot(s) => ServerMsg::LiveSnapshot(s),
-                        });
-                    }
+        fn deliver(&mut self, out: Vec<(ConnId, Vec<u8>)>) {
+            for (c, b) in out {
+                if let Some((p, _, _)) = self.peers.iter_mut().find(|(p, _, pc)| *pc == c && p.linked()) {
+                    p.receive(b);
                 }
             }
         }
 
         /// What every linked peer has to say, said, until nobody has more.
         fn carry(&mut self) {
-            for _ in 0..8 {
+            for _ in 0..16 {
                 let mut out = vec![];
-                for (p, c) in self.peers.iter_mut() {
+                for (p, _, c) in self.peers.iter_mut() {
                     if !p.linked() {
                         continue;
                     }
-                    for m in p.take_outgoing() {
-                        match m {
-                            ClientMsg::Hello { device: Some(d), .. } => out.extend(self.desk.hello(
-                                *c,
-                                Who {
-                                    user: p.ctx().user.clone(),
-                                    session: p.ctx().session.clone(),
-                                    roles: Default::default(),
-                                },
-                                d,
-                                self.now,
-                            )),
-                            ClientMsg::Call(call) => out.extend(self.desk.call(*c, call, self.now)),
-                            _ => {}
-                        }
+                    p.client.tick(crate::client::now_ms() + 1_000);
+                    for f in p.client.take_frames() {
+                        out.extend(self.hub.frame(*c, f, crate::client::now_ms()));
                     }
                 }
                 if out.is_empty() {
@@ -647,7 +791,7 @@ mod tests {
         rb.call(net.peer(b), "start", input::start(&queue(), 0, 0, "album/Water Music")).unwrap();
         net.carry();
         rb.reconcile(net.peer(b), &mut sb, &mut qb, 0, "", 0.0);
-        assert_eq!(sb.loaded(), Some(queue()[0].id), "the browser loaded what it pressed");
+        assert_eq!(sb.loaded(), Some(track_id(&queue()[0])), "the browser loaded what it pressed");
         assert!(sb.playing);
         assert_eq!(qb, queue(), "and holds the session's queue as its own");
 
@@ -682,7 +826,7 @@ mod tests {
         rl.reconcile(net.peer(l), &mut sl, &mut ql, 0, "", 3.0);
         net.carry();
         assert!(!sb.playing, "the browser lost the sound and is silent");
-        assert!(sl.playing && sl.loaded() == Some(queue()[0].id));
+        assert!(sl.playing && sl.loaded() == Some(track_id(&queue()[0])));
         let s = rl.session(net.peer(l)).unwrap();
         assert!(s.outputs("laptop") && !s.moving_to("laptop"), "the laptop said it had started");
     }
@@ -731,7 +875,7 @@ mod tests {
             "standing where it was, not counting a sound nobody hears"
         );
         rl.reconcile(net.peer(l), &mut sl, &mut ql, 0, "", 2.0);
-        assert_eq!(sl.loaded, Some((queue()[0].id, handed)), "loaded where the track stopped");
+        assert_eq!(sl.loaded, Some((track_id(&queue()[0]), handed)), "loaded where the track stopped");
         net.carry();
         let s = rl.session(net.peer(l)).unwrap();
         assert!(s.outputs("laptop") && !s.moving_to("laptop"));
@@ -778,7 +922,6 @@ mod tests {
 
         // A second on the clock, and the element has played none of it.
         std::thread::sleep(std::time::Duration::from_millis(1_000));
-        net.now = ark_client::autos::now_ms();
         rb.reconcile(net.peer(b), &mut sb, &mut qb, 0, "", 1_000.0);
         assert_eq!(sb.at_ms, loaded, "not sent ahead to where the clock counts");
         net.carry();
@@ -796,7 +939,6 @@ mod tests {
 
         // A seek on the desktop is the session moving: the element goes.
         rd.call(net.peer(d), "seek", input::seek(100_000)).unwrap();
-        net.now = ark_client::autos::now_ms();
         net.carry();
         rb.reconcile(net.peer(b), &mut sb, &mut qb, 0, "", 3_000.0);
         assert!((sb.at_ms - 100_000).abs() <= SYNC_MS, "sought where the session is: {}", sb.at_ms);
@@ -827,7 +969,7 @@ mod tests {
         net.carry();
         rb.reconcile(net.peer(b), &mut sb, &mut qb, 0, "", 2.0);
         assert_eq!(rb.session(net.peer(b)).unwrap().session.unwrap().at, 1, "one track on");
-        assert_eq!(sb.loaded(), Some(queue()[1].id));
+        assert_eq!(sb.loaded(), Some(track_id(&queue()[1])));
         assert!(sb.playing);
 
         sb.ended = true;
@@ -888,9 +1030,9 @@ mod tests {
         assert_eq!(rd.stats().plays, 0, "a remote control records nothing");
         // Unlinked, the play is an intent like any other: pending, said
         // when the device next reaches the server.
-        let recent = net.peer(b).query("recently_played", &ark_client::Args::new()).unwrap();
-        assert_eq!(recent.as_list().len(), 1, "the play is in this device's view of the log at once");
-        assert_eq!(recent.as_list()[0].field("from"), ark_client::Value::text("album/Water Music"));
+        let recent: Vec<harken_domain5::schema::Play> = net.peer(b).query("recently_played", &()).unwrap();
+        assert_eq!(recent.len(), 1, "the play is in this device's view of the log at once");
+        assert_eq!(recent[0].from, "album/Water Music");
     }
 
     /// The decided rule for coming back, the first way: something is

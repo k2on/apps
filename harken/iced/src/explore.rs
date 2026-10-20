@@ -1,5 +1,5 @@
 //! `E` — the explorer, over this device's own replica (`docs/plan-guards.md`
-//! D4): every table the replica holds, the log as a client knows it, a
+//! D4): every table the replica holds, the log as this device knows it, a
 //! read-only query console, and every query and mutation of the module,
 //! callable from a form. `ark_explorer` draws it and decides what an edit or
 //! a call becomes; this file is what it is handed.
@@ -8,21 +8,21 @@
 //! person exactly as a button authors them, and never raw: a client has no
 //! raw writer, connected or alone, so what it does here is pushed and judged
 //! like any other work. A cell edit goes through the CRUD the domain exposes
-//! and harken declares `crud` on no table, so the table browser is read-only
-//! here and says so; the raw switch is not drawn. A mutation called from its
-//! form is authored like any other, and its standing — pending, in the log,
-//! refused — is what [`ark_client::Peer::standing`] says of its id.
+//! and harken binds none, so the table browser is read-only here and says
+//! so; the raw switch is not drawn. A mutation called from its form is
+//! authored like any other, and its standing — pending, in the log, refused
+//! — is what [`Replica::standing`] says of its id.
 
 use std::collections::BTreeMap;
 
-use ark_client::ark::hash::FnHash;
-use ark_client::ark::store::Change;
-use ark_client::ark::value::hex;
-use ark_client::{Args, Standing};
-use ark_explorer::{Connection, CrudVerbs, Explorer, Line, LogView, Source, Ticket, Verdict, Verified, Writer};
+use ark5::hash::FnHash;
+use ark5::log::EntryId;
+use ark5::store::{Change, Store};
+use ark_explorer::{Connection, CrudVerbs, Explorer, Line, LogView, Source, Ticket, Verdict, Writer};
 
 use iced::{Point, Size};
 
+use crate::client::{domain, Replica, Standing};
 use crate::{App, Edit, Message};
 
 /// The explorer while it is open, and what it needs that does not move:
@@ -34,14 +34,14 @@ pub struct Explore {
 }
 
 impl Explore {
-    /// Opened over `client`'s module: every table's CRUD, as the module
-    /// declares it, authorable by this device as whoever is signed in.
-    pub fn open(client: &ark_client::Peer) -> Explore {
-        let module = client.domain().module();
+    /// Opened over harken's module: every table's CRUD, as the module binds
+    /// it, authorable by this device as whoever is signed in.
+    pub fn open() -> Explore {
+        let d = domain();
         Explore {
             ui: Explorer::new(),
-            names: ark_explorer::function_names(module),
-            exposed: ark_explorer::crud_of(module)
+            names: ark_explorer::function_names(&d.module),
+            exposed: ark_explorer::crud_of(&d.module, &d.lib)
                 .into_iter()
                 .map(|(t, v)| (t, CrudVerbs { may_author: true, ..v }))
                 .collect(),
@@ -50,7 +50,7 @@ impl Explore {
 }
 
 /// Who this device writes as, in a word.
-fn who(client: &ark_client::Peer) -> String {
+fn who(client: &Replica) -> String {
     let s = client.status();
     match (s.user.is_empty(), s.alone) {
         (true, _) => "nobody".into(),
@@ -62,11 +62,11 @@ fn who(client: &ark_client::Peer) -> String {
 /// Where an intent the explorer authored stands, by its id: pending until
 /// the authority answers, then in the log or refused with the reason every
 /// replica reaches.
-fn verdict(client: &ark_client::Peer, ticket: &Ticket) -> Verdict {
-    let Some(id) = ark_client::ark::value::decode_hex(&ticket.0).and_then(|b| <[u8; 16]>::try_from(b).ok()) else {
+fn verdict(client: &Replica, ticket: &Ticket) -> Verdict {
+    let Some(id) = ark5::hash::unhex(&ticket.0).and_then(|b| <[u8; 16]>::try_from(b).ok()) else {
         return Verdict::Unknown;
     };
-    match client.standing(&id) {
+    match client.standing(&EntryId(id)) {
         Standing::Pending => Verdict::Pending,
         Standing::Confirmed => Verdict::Logged(None),
         Standing::Rejected(why) => Verdict::Refused(why),
@@ -78,7 +78,7 @@ fn verdict(client: &ark_client::Peer, ticket: &Ticket) -> Verdict {
 /// signed-in person and remembered as any change this window makes; no raw
 /// write.
 struct Writes<'a> {
-    client: &'a mut ark_client::Peer,
+    client: &'a mut Replica,
     edits: &'a mut Vec<Edit>,
     exposed: &'a [(String, CrudVerbs)],
 }
@@ -87,13 +87,13 @@ impl Writer for Writes<'_> {
     fn exposed(&self) -> Vec<(String, CrudVerbs)> {
         self.exposed.to_vec()
     }
-    fn author(&mut self, function: &str, args: Args) -> Result<Ticket, String> {
-        let id = self.client.mutate(function, args).map_err(|e| e.to_string())?;
+    fn author(&mut self, function: &str, input: Vec<u8>) -> Result<Ticket, String> {
+        let id = self.client.mutate_bytes(function, input)?;
         self.edits.push(Edit {
             id,
             what: format!("{function}, from the explorer"),
         });
-        Ok(Ticket(hex(&id)))
+        Ok(Ticket(ark5::hash::hex(&id.0)))
     }
     fn verdict(&self, ticket: &Ticket) -> Verdict {
         verdict(self.client, ticket)
@@ -108,7 +108,7 @@ impl Writer for Writes<'_> {
 
 /// The same, to draw with: nothing is written while drawing.
 struct Shown<'a> {
-    client: &'a ark_client::Peer,
+    client: &'a Replica,
     exposed: &'a [(String, CrudVerbs)],
 }
 
@@ -116,7 +116,7 @@ impl Writer for Shown<'_> {
     fn exposed(&self) -> Vec<(String, CrudVerbs)> {
         self.exposed.to_vec()
     }
-    fn author(&mut self, _function: &str, _args: Args) -> Result<Ticket, String> {
+    fn author(&mut self, _function: &str, _input: Vec<u8>) -> Result<Ticket, String> {
         Err("drawing writes nothing".into())
     }
     fn verdict(&self, ticket: &Ticket) -> Verdict {
@@ -130,11 +130,11 @@ impl Writer for Shown<'_> {
     }
 }
 
-/// The log as a client knows it: a client keeps no log, so its own pending
-/// intents (none of them in the log yet), where it is, how it is linked,
-/// and its `Verify` answers.
+/// The log as this device knows it: the chain it has confirmed since its
+/// snapshot, each entry with its facts, then its own pending intents (none
+/// of them in the log yet); and where it is and how it is linked.
 struct Seen<'a> {
-    client: &'a ark_client::Peer,
+    client: &'a Replica,
     names: &'a BTreeMap<FnHash, String>,
 }
 
@@ -143,44 +143,32 @@ impl LogView for Seen<'_> {
         self.client.cursor()
     }
     fn lines(&self) -> Vec<Line> {
-        let r = self.client.replica();
-        r.pending
-            .iter()
-            .map(|e| Line {
-                seq: None,
-                entry: e.clone(),
-                function: self.names.get(&e.fn_hash).cloned().unwrap_or_else(|| hex(&e.fn_hash)),
-                facts: r.recorded.get(&e.id).cloned(),
-                standing: "pending".into(),
-            })
-            .collect()
+        let name = |f: &FnHash| self.names.get(f).cloned().unwrap_or_else(|| f.hex());
+        let log = &self.client.client.log;
+        let confirmed = log.log.entries.iter().map(|l| Line {
+            seq: Some(l.seq),
+            entry: l.entry.clone(),
+            function: name(&l.entry.func),
+            facts: Some(l.facts.clone()),
+            standing: "in the log".into(),
+        });
+        let pending = log.pending.iter().map(|p| Line {
+            seq: None,
+            entry: p.entry.clone(),
+            function: name(&p.entry.func),
+            facts: Some(p.changes.clone()),
+            standing: "pending".into(),
+        });
+        confirmed.chain(pending).collect()
     }
     fn connections(&self) -> Vec<Connection> {
         let s = self.client.status();
-        let refused = self.client.replica().rejections.len();
         vec![Connection {
             who: format!("this device \u{b7} {}", who(self.client)),
             cursor: s.cursor,
             pending: Some(s.pending),
-            note: format!("{} \u{b7} {refused} refused", s.link),
+            note: s.link,
         }]
-    }
-    fn verifies(&self) -> Vec<Verified> {
-        let me = "this device".to_string();
-        self.client
-            .agreed()
-            .iter()
-            .map(|(n, ok)| Verified {
-                who: me.clone(),
-                seq: *n,
-                answer: Some(*ok),
-            })
-            .chain(self.client.unknown().iter().map(|n| Verified {
-                who: me.clone(),
-                seq: *n,
-                answer: None,
-            }))
-            .collect()
     }
 }
 
@@ -194,7 +182,7 @@ impl App {
                 self.explore(ark_explorer::Msg::Blur);
                 self.explore = None;
             }
-            false => self.explore = Some(Explore::open(&self.peer.client)),
+            false => self.explore = Some(Explore::open()),
         }
         self.dock.keys = true;
         self.dock.dragging = false;
@@ -207,15 +195,14 @@ impl App {
     pub fn explore(&mut self, msg: ark_explorer::Msg) {
         let Some(x) = self.explore.as_mut() else { return };
         let client = &mut self.peer.client;
-        let store = client.store().clone();
-        let schema = client.schema().clone();
-        let domain = client.domain().clone();
-        let ctx = client.ctx().clone();
+        let store: Store = client.client.log.store.clone();
+        let ctx = client.ctx();
         let log = Owned::of(client, &x.names);
+        let d = domain();
         let src = Source {
             store: &store,
-            schema: &schema,
-            module: domain.module(),
+            module: &d.module,
+            lib: &d.lib,
             log: &log,
             ctx,
         };
@@ -235,7 +222,7 @@ impl App {
     /// is lit fades — on the window's clock while anything is
     /// (`App::clock`), and on no clock once nothing is.
     pub fn observe_explorer(&mut self) {
-        self.observe_explorer_at(ark_client::autos::monotonic_ms());
+        self.observe_explorer_at(crate::client::monotonic_ms());
     }
 
     /// [`App::observe_explorer`] at a given monotonic millisecond.
@@ -243,12 +230,13 @@ impl App {
         let Some(x) = self.explore.as_mut() else { return };
         let client = &self.peer.client;
         let log = Seen { client, names: &x.names };
+        let d = domain();
         let src = Source {
-            store: client.store(),
-            schema: client.schema(),
-            module: client.domain().module(),
+            store: &client.client.log.store,
+            module: &d.module,
+            lib: &d.lib,
             log: &log,
-            ctx: client.ctx().clone(),
+            ctx: client.ctx(),
         };
         x.ui.observe(&src, self.peer.store_gen, now);
     }
@@ -258,12 +246,13 @@ impl App {
         let x = self.explore.as_ref()?;
         let client = &self.peer.client;
         let log = Seen { client, names: &x.names };
+        let d = domain();
         let src = Source {
-            store: client.store(),
-            schema: client.schema(),
-            module: client.domain().module(),
+            store: &client.client.log.store,
+            module: &d.module,
+            lib: &d.lib,
             log: &log,
-            ctx: client.ctx().clone(),
+            ctx: client.ctx(),
         };
         let shown = Shown { client, exposed: &x.exposed };
         // The source is the client's own, borrowed for the frame: what the
@@ -277,17 +266,15 @@ struct Owned {
     head: i64,
     lines: Vec<Line>,
     connections: Vec<Connection>,
-    verifies: Vec<Verified>,
 }
 
 impl Owned {
-    fn of(client: &ark_client::Peer, names: &BTreeMap<FnHash, String>) -> Owned {
+    fn of(client: &Replica, names: &BTreeMap<FnHash, String>) -> Owned {
         let seen = Seen { client, names };
         Owned {
             head: seen.head(),
             lines: seen.lines(),
             connections: seen.connections(),
-            verifies: seen.verifies(),
         }
     }
 }
@@ -301,9 +288,6 @@ impl LogView for Owned {
     }
     fn connections(&self) -> Vec<Connection> {
         self.connections.clone()
-    }
-    fn verifies(&self) -> Vec<Verified> {
-        self.verifies.clone()
     }
 }
 

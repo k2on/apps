@@ -53,7 +53,7 @@ fn the_awkward_characters_in_a_filename_are_escaped() {
 /// fails at 522px, where 2 cards need 280px in 215.
 #[test]
 fn the_cards_fit_the_page_beside_the_sidebar() {
-    let mut app = App::with_peer(super::peer(ark_client::Options::alone("me")), String::new(), None);
+    let mut app = App::with_peer(super::alone("me"), String::new(), None);
     for width in 320..=4000 {
         app.window = Size::new(width as f32, 600.0);
         let n = app.columns() as f32;

@@ -721,7 +721,7 @@ impl App {
             let joining = p.client.status().joining;
             let link = match (&self.login, p.client.linked()) {
                 (None, _) => "not signed in",
-                (Some(_), true) if joining > 0 => "joining",
+                (Some(_), true) if joining => "joining",
                 (Some(_), true) => "online",
                 (Some(_), false) => "offline",
             };
@@ -767,7 +767,7 @@ impl App {
         let stats = l.stats();
         let client = &self.peer.client;
         let status = client.status();
-        let live = client.live_status(harken_domain::listening::read::STATE);
+        let live = client.live_status();
         let session = self.session.as_ref();
         let yes = |b: bool| if b { "yes" } else { "no" };
         let mut rows: Vec<(String, String)> = vec![
@@ -792,13 +792,6 @@ impl App {
                 match live {
                     Some(s) => format!("{} \u{b7} {} \u{b7} {}", s.seq, s.pending, yes(s.synced)),
                     None => "no instance".into(),
-                },
-            ),
-            (
-                "server offset".into(),
-                match client.server_offset() {
-                    Some(ms) => format!("{ms:+} ms"),
-                    None => "not heard yet".into(),
                 },
             ),
             ("part of the session".into(), yes(l.joined(client)).into()),
@@ -871,7 +864,12 @@ impl App {
         for d in devices {
             rows.push((
                 format!("  {}", d.name),
-                format!("{} \u{b7} {} \u{b7} can play {}", d.id, d.kind.name(), yes(d.can_play)),
+                format!(
+                    "{} \u{b7} {} \u{b7} can play {}",
+                    d.id,
+                    listening::Kind::parse(&d.kind).name(),
+                    yes(d.can_play)
+                ),
             ));
             rows.push((
                 String::new(),
@@ -921,10 +919,10 @@ impl App {
         // or refused and why — the sentence every replica reaches.
         for e in self.edits.iter().rev().take(12) {
             let standing = match self.peer.client.standing(&e.id) {
-                ark_client::Standing::Pending => "pending".to_string(),
-                ark_client::Standing::Confirmed => "in the log".to_string(),
-                ark_client::Standing::Rejected(why) => format!("refused: {why}"),
-                ark_client::Standing::Unknown => "unknown".to_string(),
+                crate::client::Standing::Pending => "pending".to_string(),
+                crate::client::Standing::Confirmed => "in the log".to_string(),
+                crate::client::Standing::Rejected(why) => format!("refused: {why}"),
+                crate::client::Standing::Unknown => "unknown".to_string(),
             };
             rows.push((format!("  {}", fit::tail(&e.what, 34)), standing));
         }

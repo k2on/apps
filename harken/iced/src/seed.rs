@@ -5,9 +5,10 @@
 //! talks to a real server. The library there is whatever the scanner found.
 //!
 //! Everything goes in through the domain's own mutations — the demo runs the
-//! same procedures as every other peer, and seeding it any other way would be
-//! showing something the engine did not do. They are applied to one store
-//! directly rather than one entry at a time through a peer (see [`seeded`]),
+//! same functions as every other peer, by the one interpreter, and seeding
+//! it any other way would be showing something the engine did not do. Their
+//! changes are applied to one store directly rather than one entry at a time
+//! through a peer (see [`seeded`]),
 //! which is the difference between a demo that opens and one that spends its
 //! first ten seconds cloning its own library.
 //!
@@ -26,11 +27,18 @@
 
 use std::collections::BTreeMap;
 
-use ark_client::ark::eval::Ctx;
-use ark_client::ark::store::MemoryStore;
-use ark_client::storage::{Memory, ReplicaFile, Storage};
-use ark_client::{args, Args, Autos, Domain, Id, Options, Value};
-use harken_domain::keys;
+use ark5::author::Node;
+use ark5::log::{EntryId, Record, Snapshot};
+use ark5::peer::Ctx;
+use ark5::store::Store;
+use ark5_client::{Disk, Memory};
+use harken_domain5::keys;
+use harken_domain5::library::{AddSong, CreditRecording, DescribePerson, DescribeRecording, DescribeWork, Library, LibraryEntry};
+use harken_domain5::playlists::{AddToPlaylist, CreatePlaylist};
+
+use crate::client::{domain, Replica};
+use crate::peer::key;
+use crate::rows::Id;
 
 /// One row of the tables below.
 ///
@@ -4243,35 +4251,35 @@ fn work_of(catalogue: &str) -> Option<&'static WorkSeed> {
     WORKS.iter().find(|w| w.catalogue == catalogue)
 }
 
-/// The domain's procedures, applied in turn to one store — the store a peer
-/// alone then opens as its confirmed state.
+/// The demo's library, made by running each mutation once over one store.
 ///
-/// **Not through `Peer::mutate`, and that is a measured choice.** A peer
-/// alone sequences each intent through its own authority and writes its
-/// whole replica after every one, and each step copies the store: seeding
-/// four hundred tracks that way is quadratic, about forty seconds of one core
-/// in a debug build and several in a browser. Here each procedure runs once,
-/// natively, over one store, with the autos a peer would have drawn (seeded,
-/// so the demo is the same library every load) — the same code the log would
-/// have replayed, and none of the copying.
+/// A peer alone sequences each intent through its own authority and writes
+/// its chain after every one: seeding four hundred tracks that way is a log
+/// of four hundred entries every load. Here each mutation runs once, by the
+/// interpreter, over one store, with the entry a peer would have authored
+/// (numbered from one, so the demo is the same library every load) — the
+/// same changes the log would have recorded, and no log.
 struct Seeder {
-    domain: Domain,
-    store: MemoryStore,
+    store: Store,
     ctx: Ctx,
-    autos: Autos,
+    local: i64,
 }
 
 impl Seeder {
-    fn new(domain: Domain) -> Seeder {
-        let store = MemoryStore::empty(domain.module().schema.clone());
+    fn new() -> Seeder {
         Seeder {
-            domain,
-            store,
+            store: Store::new(domain().schema.clone()),
             // The demo authors its own library, as a server's scanner does,
             // so it holds the role the library's guard asks
             // (`docs/plan-guards.md` D1).
-            ctx: Ctx::new(DEMO, LOCAL).with_roles([harken_domain::schema::LIBRARY]),
-            autos: Autos::seeded(1),
+            ctx: Ctx {
+                id: EntryId::of(LOCAL, 0),
+                actor: DEMO.into(),
+                session: LOCAL.into(),
+                roles: vec![harken_domain5::schema::LIBRARY.into()],
+                now: 1_700_000_000_000,
+            },
+            local: 0,
         }
     }
 
@@ -4279,36 +4287,41 @@ impl Seeder {
     /// repository — an argument that moved, a key computed two different ways
     /// — and every one of those presents on the page as something silently
     /// absent, so it is an assertion rather than a `let _`.
-    fn mutate(&mut self, what: &str, name: &str, a: Args) {
-        let (hash, _) = self.domain.mutator(name).unwrap_or_else(|e| panic!("the demo authors {name}: {e}"));
-        let procedure = self.domain.natives()[hash].clone();
-        let autos = self.autos.draw(procedure.function());
-        let done = procedure.apply(&self.ctx, &autos, &a, &mut self.store);
-        assert!(matches!(done, Ok(Ok(_))), "the demo could not author {what}: {done:?}");
+    fn mutate(&mut self, what: &str, name: &str, input: &impl Node) {
+        self.local += 1;
+        self.ctx.id = EntryId::of(LOCAL, self.local);
+        self.ctx.now += 1;
+        let b = crate::client::binding(name).unwrap_or_else(|| panic!("the demo authors {name}"));
+        let changes = domain()
+            .run(&self.store, &self.ctx, &b, &input.to_bytes())
+            .unwrap_or_else(|r| panic!("the demo could not author {what}: {r}"));
+        self.store.apply_all(&changes).unwrap_or_else(|r| panic!("{what}: the store refused {r}"));
     }
 
-    fn query(&self, name: &str, a: Args) -> Value {
-        let (hash, _) = self.domain.query(name).unwrap_or_else(|e| panic!("the demo reads {name}: {e}"));
-        self.domain.natives()[hash]
-            .query(&self.ctx, &a, &self.store)
-            .unwrap_or_else(|e| panic!("the demo reads {name}: {e:?}"))
+    fn query<T: Node>(&self, name: &str, input: &impl Node) -> T {
+        let b = crate::client::binding(name).unwrap_or_else(|| panic!("the demo reads {name}"));
+        let bytes = domain()
+            .ask(&self.store, &self.ctx, &b, &input.to_bytes())
+            .unwrap_or_else(|r| panic!("the demo reads {name}: {r}"));
+        T::from_bytes(&bytes).unwrap_or_else(|r| panic!("{name}: {r}"))
     }
 
     /// Which playlist is called `name`.
     fn playlist(&self, name: &str) -> Option<Id> {
-        crate::rows::list(&self.query("playlists", args([])), crate::rows::Playlist::from_value)
+        self.query::<Vec<harken_domain5::schema::Playlist>>("playlists", &())
             .into_iter()
             .find(|p| p.name == name)
-            .map(|p| p.id)
+            .map(|p| p.id.0)
     }
 
     /// The library's ids by title.
     fn ids(&self, titles: &[&str]) -> Vec<Id> {
-        let items = crate::rows::list(
-            &self.query("library", args([("playlist_id", Value::Id([0; 16]))])),
-            harken_domain::view::Item::from_value,
-        );
-        titles.iter().filter_map(|t| items.iter().find(|i| i.title == *t)).map(|i| i.id).collect()
+        let items: Vec<LibraryEntry> = self.query("library", &Library { playlist_id: key([0; 16]) });
+        titles
+            .iter()
+            .filter_map(|t| items.iter().find(|i| i.title == *t))
+            .map(|i| i.id.0)
+            .collect()
     }
 }
 
@@ -4318,8 +4331,19 @@ const LOCAL: &str = "local";
 
 /// The demo's replica: every seeded row, as the confirmed state of a peer that
 /// is its own authority.
-pub fn seeded(domain: Domain) -> ark_client::Peer {
-    seeded_times(domain, 1)
+pub fn seeded() -> Replica {
+    open(seeded_disk(1))
+}
+
+/// The demo's replica opened from its records: its own authority, as the
+/// library's identity.
+pub fn open(disk: Memory) -> Replica {
+    let mut peer = Replica::open(Box::new(disk), None, crate::listening::device());
+    // The demo's identity is the library's, as its seed was
+    // (`docs/plan-guards.md` D1).
+    peer.set_roles([harken_domain5::schema::LIBRARY]);
+    peer.alone();
+    peer
 }
 
 /// The demo's library `copies` times over, for measuring how a list's cost
@@ -4327,9 +4351,15 @@ pub fn seeded(domain: Domain) -> ark_client::Peer {
 /// albums, works, recordings and files (the names carry ` (k)`), so every
 /// list is `copies` times as long, and the playlists are the first copy's.
 /// `1` is the demo.
-pub fn seeded_times(domain: Domain, copies: usize) -> ark_client::Peer {
-    let mut seed = Seeder::new(domain.clone());
-    let t = |s: &str| Value::text(s);
+#[cfg(test)]
+pub fn seeded_times(copies: usize) -> Replica {
+    open(seeded_disk(copies))
+}
+
+/// The records of [`seeded_times`]: a snapshot of the seeded store, and
+/// who it is.
+pub fn seeded_disk(copies: usize) -> Memory {
+    let mut seed = Seeder::new();
     let copy = |k: usize, s: &str| match k {
         0 => s.to_string(),
         k => format!("{s} ({k})"),
@@ -4341,24 +4371,21 @@ pub fn seeded_times(domain: Domain, copies: usize) -> ark_client::Peer {
     // arrives.
     for k in 0..copies {
         for c in COMPOSERS {
-            seed.mutate(
-                c.name,
-                "describe_person",
-                args([
-                    ("name", t(&copy(k, c.name))),
-                    ("sort_name", t(&copy(k, c.sort_name))),
-                    ("born", Value::Int(c.born)),
-                    ("died", Value::Int(c.died)),
-                    ("art", t(&art_of("artist", c.name))),
-                ]),
-            );
+            let person = DescribePerson {
+                name: copy(k, c.name),
+                sort_name: copy(k, c.sort_name),
+                born: c.born,
+                died: c.died,
+                art: art_of("artist", c.name),
+            };
+            seed.mutate(c.name, "describe_person", &person);
         }
     }
 
     // Which recordings exist falls out of the tracks rather than being a table
     // of its own: a recording is one work as played by one set of people, so
     // collecting the pairs while authoring is the same answer `add_song`
-    // reaches, computed from the same helpers (`harken_domain::keys`).
+    // reaches, computed from the same helpers (`harken_domain5::keys`).
     let mut takes: BTreeMap<String, (&'static str, &'static str)> = BTreeMap::new();
     let mut work_ids: BTreeMap<(usize, &'static str), String> = BTreeMap::new();
     for k in 0..copies {
@@ -4382,36 +4409,33 @@ pub fn seeded_times(domain: Domain, copies: usize) -> ark_client::Peer {
             let album = copy(k, s.album);
             let composer = copy(k, s.composer);
             let work_title = work.map_or(album.clone(), |w| w.title.to_string());
-            seed.mutate(
-                s.title,
-                "add_song",
-                args([
-                    ("title", t(&copy(k, s.title))),
-                    ("artist", t(&composer)),
-                    ("album", t(&album)),
-                    ("duration_ms", Value::Int(s.ms)),
-                    ("file", t(&copy(k, s.file))),
-                    ("track", Value::Int(s.track)),
-                    ("part", t(s.part)),
-                    ("catalogue", t(s.catalogue)),
-                    // Just who played it. The terms it was given on are
-                    // `recording.licence`, set below, and the album page draws
-                    // the two together.
-                    ("performer", t(s.performer)),
-                    ("bpm", Value::Int(s.bpm)),
-                    // The pictures, carried by the entry that names the album
-                    // and the composer rather than authored separately:
-                    // `add_song` reads the repeats as one row.
-                    ("album_art", t(&art_of("album", s.album))),
-                    ("artist_art", t(&art_of("artist", s.composer))),
-                    // No boxed sets here, and the movement number is the track
-                    // number — said out loud rather than left to the rule
-                    // about entries written before the column existed.
-                    ("disc", Value::Int(1)),
-                    ("work_title", t(&work_title)),
-                    ("movement_no", Value::Int(s.track)),
-                ]),
-            );
+            let song = AddSong {
+                title: copy(k, s.title),
+                artist: composer.clone(),
+                album: album.clone(),
+                duration_ms: s.ms,
+                file: copy(k, s.file),
+                track: s.track,
+                part: s.part.into(),
+                catalogue: s.catalogue.into(),
+                // Just who played it. The terms it was given on are
+                // `recording.licence`, set below, and the album page draws
+                // the two together.
+                performer: s.performer.into(),
+                bpm: s.bpm,
+                // The pictures, carried by the entry that names the album
+                // and the composer rather than authored separately:
+                // `add_song` reads the repeats as one row.
+                album_art: art_of("album", s.album),
+                artist_art: art_of("artist", s.composer),
+                // No boxed sets here, and the movement number is the track
+                // number — said out loud rather than left to the rule about
+                // entries written before the column existed.
+                disc: 1,
+                work_title: work_title.clone(),
+                movement_no: s.track,
+            };
+            seed.mutate(s.title, "add_song", &song);
             // The same helpers `add_song` used, so the key cannot be a second
             // opinion: if it ever were, `describe_recording` refuses an id it
             // does not have and `mutate` says so on the first run.
@@ -4432,19 +4456,15 @@ pub fn seeded_times(domain: Domain, copies: usize) -> ark_client::Peer {
             // error — `WORKS` may know about music the demo dropped — but
             // `describe_work` would refuse it, rightly.
             let Some(id) = work_ids.get(&(k, w.catalogue)) else { continue };
-            seed.mutate(
-                w.title,
-                "describe_work",
-                args([
-                    ("id", t(id)),
-                    ("opus", t("")),
-                    ("key_sig", t(w.key_sig)),
-                    ("form", t(w.form)),
-                    ("period", t(w.period)),
-                    ("composed", Value::Int(w.composed)),
-                    ("art", t("")),
-                ]),
-            );
+            let work = DescribeWork {
+                id: id.clone(),
+                key_sig: w.key_sig.into(),
+                form: w.form.into(),
+                period: w.period.into(),
+                composed: w.composed,
+                ..DescribeWork::default()
+            };
+            seed.mutate(w.title, "describe_work", &work);
         }
     }
 
@@ -4452,31 +4472,22 @@ pub fn seeded_times(domain: Domain, copies: usize) -> ark_client::Peer {
     // people with their roles.
     for (id, (performer, licence)) in &takes {
         if !licence.is_empty() {
-            seed.mutate(
-                licence,
-                "describe_recording",
-                args([
-                    ("id", t(id)),
-                    ("recorded", Value::Int(0)),
-                    ("venue", t("")),
-                    ("label", t("")),
-                    ("licence", t(licence)),
-                    ("art", t("")),
-                ]),
-            );
+            let recording = DescribeRecording {
+                id: id.clone(),
+                licence: licence.to_string(),
+                ..DescribeRecording::default()
+            };
+            seed.mutate(licence, "describe_recording", &recording);
         }
         for c in CREDITS.iter().filter(|c| c.performer == *performer) {
-            seed.mutate(
-                c.name,
-                "credit_recording",
-                args([
-                    ("recording_id", t(id)),
-                    ("person_name", t(c.name)),
-                    ("role", t(c.role)),
-                    ("instrument", t(c.instrument)),
-                    ("pos", Value::Int(c.pos)),
-                ]),
-            );
+            let credit = CreditRecording {
+                recording_id: id.clone(),
+                person_name: c.name.into(),
+                role: c.role.into(),
+                instrument: c.instrument.into(),
+                pos: c.pos,
+            };
+            seed.mutate(c.name, "credit_recording", &credit);
         }
     }
 
@@ -4499,33 +4510,28 @@ pub fn seeded_times(domain: Domain, copies: usize) -> ark_client::Peer {
         ("Water Music", &["Alla Hornpipe", "Bourrée", "Sarabande", "Gigue"]),
     ];
     for (name, titles) in SETS {
-        seed.mutate(name, "create_playlist", args([("name", t(name))]));
+        seed.mutate(name, "create_playlist", &CreatePlaylist { name: name.to_string() });
         let list = seed.playlist(name).expect("the playlist just made");
         for id in seed.ids(titles) {
-            seed.mutate(
-                name,
-                "add_to_playlist",
-                args([("playlist_id", Value::Id(list)), ("media_id", Value::Id(id))]),
-            );
+            let a = AddToPlaylist {
+                playlist_id: key(list),
+                media_id: key(id),
+            };
+            seed.mutate(name, "add_to_playlist", &a);
         }
     }
 
-    // The store, as a peer alone keeps it: the confirmed state at the start of
-    // an empty log, which its own authority takes as its snapshot.
-    let file = ReplicaFile {
-        fork: Default::default(),
-        cursor: 0,
-        confirmed: seed.store,
-        pending: vec![],
-        user: DEMO.into(),
-        session: LOCAL.into(),
-        partial: None,
+    // The store, as a peer alone keeps it: a snapshot at the start of an
+    // empty chain, which its own authority stands on.
+    let snapshot = Snapshot {
+        seq: 0,
+        hash: Default::default(),
+        state: seed.store.state_hash(),
+        rows: seed.store.snapshot_rows(),
     };
-    let mut disk = Memory::new();
-    disk.save(ReplicaFile::KEY, &file.encode()).expect("memory takes it");
-    let mut peer = ark_client::Peer::open(domain, Box::new(disk), Options::alone(DEMO)).expect("a peer alone opens its seed");
-    // The demo's identity is the library's, as its seed was
-    // (`docs/plan-guards.md` D1).
-    peer.set_roles([harken_domain::schema::LIBRARY]);
-    peer
+    let mut disk = Memory::default();
+    disk.record(&Record::Snapshot(snapshot).enc()).expect("memory takes it");
+    disk.put("who", &(DEMO.to_string(), LOCAL.to_string()).to_bytes())
+        .expect("memory takes it");
+    disk
 }

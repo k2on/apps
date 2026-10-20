@@ -1,8 +1,9 @@
 //! The harken library, in iced — on the desktop and in a browser.
 //!
 //! One client among several: the phones are the others. They all run the
-//! same domain — this one links `harken_domain`'s procedures natively — and
-//! none of them contains a line of domain logic.
+//! same domain — `harken_domain5`'s module, its functions run by ArkDB v5's
+//! interpreter (`docs/plan-v5.md` §1.4) — and none of them contains a line
+//! of domain logic.
 //!
 //!   the server:  harken-server
 //!   the desktop: harken-iced --server http://127.0.0.1:8787 --user alice
@@ -25,6 +26,7 @@
 //! here is harken's: its places, its panes, its messages, its screens.
 
 mod auth;
+mod client;
 mod explore;
 mod listening;
 mod palette;
@@ -44,8 +46,8 @@ mod tests;
 
 use std::time::Duration;
 
+use ark5::log::EntryId;
 use ark_auth::Login;
-use ark_client::{args, Domain, Id, Value};
 use arkui::cards::Shelf;
 use arkui::context::{Context, Layer};
 use arkui::glyphs;
@@ -56,9 +58,13 @@ use arkui::route::Router;
 use arkui::vim;
 use iced::{Point, Size, Subscription, Task};
 
-use peer::Peer;
+#[cfg(not(feature = "demo"))]
+use client::Replica;
+use harken_domain5::playlists::{AddToPlaylist, CreatePlaylist, RemoveFromPlaylist};
+use peer::{key, Peer};
 use places::{Focus, Pane, Place, Source};
 use player::{Player, Track};
+use rows::Id;
 // The tab's title and the platform's media controller are the browser's, the
 // way the `<audio>` element is; the desktop build has neither.
 #[cfg(target_arch = "wasm32")]
@@ -73,10 +79,10 @@ use player::Remote;
 /// what this exists to stop: the browser resolves it against the page, drops
 /// the `/media/` prefix, and a server with a single-page fallback answers
 /// `index.html` and a 200 — "the media resource was not suitable". The rule is
-/// the domain's (`harken_domain::listening::url`), because three things join
+/// the domain's (`harken_domain5::listening::url`), because three things join
 /// it: this, the phone, and a speaker with no client at all.
 fn media_url(server: &str, file: &str) -> String {
-    harken_domain::listening::url(server, file)
+    harken_domain5::listening::url(server, file)
 }
 
 /// Who played it and on what terms, as one line. Two facts on two rows —
@@ -174,7 +180,7 @@ pub enum Message {
     PickDevice(String),
     CloseDevices,
     /// A volume slider dragged, 0 to 100: the bar's, or a picker row's.
-    /// Sent to the session at most every [`ark_client::THROTTLE_MS`], and
+    /// Sent to the session at most every [`client::THROTTLE_MS`], and
     /// the last value always.
     Volume(Level, f32),
     /// …and let go: whatever the throttle held goes now.
@@ -299,7 +305,7 @@ impl listening::Sound for Sounding<'_> {
     fn load(&mut self, track: &listening::Track, position_ms: i64, playing: bool) {
         self.player.play(
             Track {
-                id: track.id,
+                id: track.id.0,
                 title: track.title.clone(),
                 creator: track.creator.clone(),
                 album: track.album.clone(),
@@ -334,7 +340,7 @@ impl listening::Sound for Sounding<'_> {
 /// This device's own clock, in milliseconds: how long its player has sat
 /// paused while asked to play.
 fn clock_ms() -> f64 {
-    ark_client::autos::monotonic_ms() as f64
+    client::monotonic_ms() as f64
 }
 
 /// One row of the device picker: a device standing in the session, the
@@ -379,7 +385,7 @@ impl PickerRow {
 /// written down with what it was, and `standing` follows each.
 #[derive(Debug, Clone)]
 pub struct Edit {
-    pub id: Id,
+    pub id: EntryId,
     /// What it was, as a person would say it: "put Air on Favorites".
     pub what: String,
 }
@@ -562,7 +568,7 @@ impl App {
     /// reloads to its seed is a demo that cannot be broken.
     #[cfg(feature = "demo")]
     pub fn demo() -> App {
-        let peer = Peer::open(seed::seeded(Domain::new(&harken_domain::module())));
+        let peer = Peer::open(seed::seeded());
         let mut app = App::with_peer(peer, String::new(), None);
         app.note = "a demo — nothing here leaves your browser".into();
         app
@@ -573,11 +579,10 @@ impl App {
     /// here as local history until "connect" hands it to a server.
     #[cfg(not(feature = "demo"))]
     fn alone(user: Option<String>) -> App {
-        let domain = Domain::new(&harken_domain::module());
-        let (client, note) = match auth::open_alone(domain.clone()) {
+        let (client, note) = match auth::open_alone() {
             Ok(c) => (c, "alone \u{2014} what you do is kept on this device until you connect".to_string()),
             Err(e) => (
-                ark_client::Peer::open_memory(domain, ark_client::Options::alone_as_nobody()).expect("a peer in memory opens"),
+                App::alone_in_memory(),
                 format!("the saved library would not open ({e}) \u{2014} working in memory"),
             ),
         };
@@ -589,6 +594,15 @@ impl App {
         app.connect = auth::DEFAULT_SERVER.into();
         app.note = note;
         app
+    }
+
+    /// A replica in memory, alone, as nobody: what a window works on while
+    /// the saved one will not open, or before a page knows its server.
+    #[cfg(not(feature = "demo"))]
+    fn alone_in_memory() -> Replica {
+        let mut r = Replica::memory(client::nobody(), None);
+        r.alone();
+        r
     }
 
     /// "Connect": the replica this window has been using alone joins the
@@ -603,10 +617,7 @@ impl App {
             self.note = "which server? type its address".into();
             return Task::none();
         }
-        if let Err(e) = self.peer.join(&ark_auth::socket_url(&server), None) {
-            self.note = format!("could not connect to {server}: {e}");
-            return Task::none();
-        }
+        self.peer.join(&ark_auth::socket_url(&server));
         if let Err(e) = auth::remember_joined(&server) {
             self.note = format!("connected, but this device will not remember it: {e}");
         }
@@ -665,9 +676,7 @@ impl App {
                 // harken server is one fetch of its `/healthz` away. Until it
                 // answers the window is alone in memory, writing nothing.
                 auth::Start::Ask(origin) => {
-                    let peer = ark_client::Peer::open_memory(Domain::new(&harken_domain::module()), ark_client::Options::alone_as_nobody())
-                        .expect("a peer in memory opens");
-                    let mut app = App::with_peer(Peer::open(peer), String::new(), None);
+                    let mut app = App::with_peer(Peer::open(App::alone_in_memory()), String::new(), None);
                     app.user = user;
                     app.note = format!("looking for a server at {origin}\u{2026}");
                     let probe = auth::answers(format!("{origin}/healthz"));
@@ -684,25 +693,23 @@ impl App {
     fn open_server(server: String, user: Option<String>) -> (App, Task<Message>) {
         {
             let login = auth::logins().recall(&server);
-            let domain = Domain::new(&harken_domain::module());
-            let (client, note) = match auth::open(domain.clone(), &server, auth::options(login.as_ref())) {
+            let (client, note) = match auth::open(&server, login.as_ref()) {
                 Ok(c) => (c, String::new()),
-                // A replica that will not open — written by another build,
-                // or damaged — is not a reason to show nothing. This window
-                // works in memory and says so.
-                Err(e) => (
-                    ark_client::Peer::open_memory(domain, auth::options(login.as_ref())).expect("a peer in memory opens"),
-                    format!("the saved library would not open ({e}) — working in memory"),
-                ),
+                // A replica that will not open is not a reason to show
+                // nothing. This window works in memory and says so.
+                Err(e) => {
+                    let mut c = Replica::memory(client::nobody(), None);
+                    if let Some(l) = &login {
+                        c.sign_in(auth::who_of(l), l.token.clone());
+                    }
+                    (c, format!("the saved library would not open ({e}) — working in memory"))
+                }
             };
+            // The roles the remembered login was signed in with, which every
+            // intent carries: a library write is then refused on this device
+            // as the server would (`docs/plan-guards.md` D1), and shown as
+            // any refusal is — `auth::open` gave the replica the login's.
             let mut peer = Peer::open(client);
-            // The roles the remembered login was signed in with, which the
-            // author's `Ctx` carries: a library write is then refused on this
-            // device as the server would (`docs/plan-guards.md` D1), and
-            // shown as any refusal is.
-            if let Some(l) = &login {
-                peer.client.set_roles(l.user.roles.clone());
-            }
             peer.client.connect(&ark_auth::socket_url(&server));
             // Signed out, the replica is the whole truth there is: its own
             // default playlist is made now. Signed in, not until the log has
@@ -787,27 +794,18 @@ impl App {
         if let Some(logins) = &self.logins {
             logins.remember(&self.server, &login);
         }
-        match self
-            .peer
-            .client
-            .sign_in(login.user.id.clone(), login.session.clone(), Some(login.token.clone()))
-        {
-            Ok(()) => {
-                // The roles the sign-in said this login holds, which the
-                // author's `Ctx` carries (`docs/plan-guards.md` D1).
-                self.peer.client.set_roles(login.user.roles.clone());
-                let pending = self.peer.client.pending_len();
-                self.note = match pending {
-                    0 => format!("signed in as {}", auth::who(&login)),
-                    n => format!(
-                        "signed in as {} — {n} change{} from before going up",
-                        auth::who(&login),
-                        if n == 1 { "" } else { "s" }
-                    ),
-                };
-            }
-            Err(e) => self.note = format!("could not sign in here: {e}"),
-        }
+        // The roles the sign-in said this login holds, which every intent
+        // carries (`docs/plan-guards.md` D1).
+        self.peer.client.sign_in(auth::who_of(&login), login.token.clone());
+        let pending = self.peer.client.pending_len();
+        self.note = match pending {
+            0 => format!("signed in as {}", auth::who(&login)),
+            n => format!(
+                "signed in as {} — {n} change{} from before going up",
+                auth::who(&login),
+                if n == 1 { "" } else { "s" }
+            ),
+        };
         self.offline = false;
         self.peer.refresh();
         // A device is a login, so a new login is a new device — which is what
@@ -846,15 +844,15 @@ impl App {
     /// Author a change, and remember what it was. A refusal here is the
     /// domain's own verdict — a guard, a check — and is said at once; one the
     /// server reaches later is matched back to this by its id.
-    pub fn author(&mut self, what: String, name: &str, a: ark_client::Args) -> bool {
-        match self.peer.client.mutate(name, a) {
+    pub fn author(&mut self, what: String, name: &str, input: &impl ark5::author::Node) -> bool {
+        match self.peer.client.mutate(name, input) {
             Ok(id) => {
                 self.edits.push(Edit { id, what });
                 true
             }
             Err(e) => {
                 self.note = format!("could not {what}: {e}");
-                self.refused.push((what, e.to_string()));
+                self.refused.push((what, e));
                 false
             }
         }
@@ -1184,7 +1182,7 @@ impl App {
     /// device being its own session, its own.
     pub fn queue_rows(&self) -> Vec<(usize, listening::Track)> {
         let (queue, at) = match self.session.as_ref().and_then(|s| s.session.as_ref()) {
-            Some(a) => (a.queue.clone(), a.at),
+            Some(a) => (a.queue.clone(), a.at.max(0) as usize),
             None if self.session.is_none() && self.player.track().is_some() => (self.queue.clone(), self.playing_at()),
             None => return vec![],
         };
@@ -1214,7 +1212,7 @@ impl App {
     fn queued(&self, id: Id) -> Option<listening::Track> {
         let i = self.peer.rows().iter().find(|i| i.id == id)?;
         Some(listening::Track {
-            id: i.id,
+            id: key(i.id),
             title: i.title.clone(),
             creator: i.creator.clone(),
             album: self.peer.detail_of(i.id).album,
@@ -1252,7 +1250,7 @@ impl App {
 
     /// The session's transition for an edit of the queue: what `<Enter>`,
     /// `x`, `J` and `K` in the queue panel call, part of a session.
-    pub fn queue_call(message: &Message) -> Option<(&'static str, ark_client::Args)> {
+    pub fn queue_call(message: &Message) -> Option<(&'static str, Vec<u8>)> {
         Some(match *message {
             Message::QueueJump(i) => ("jump", listening::input::jump(i)),
             Message::QueueRemove(i) => ("remove", listening::input::remove(i)),
@@ -1410,7 +1408,7 @@ impl App {
     /// The transition a volume control calls: to this level, by so much, or
     /// muted the other way. `None` for this device's own player, which is
     /// moved here and not in the session.
-    pub fn volume_call(&self, v: &Volumed, change: Change) -> Option<(&'static str, ark_client::Args)> {
+    pub fn volume_call(&self, v: &Volumed, change: Change) -> Option<(&'static str, Vec<u8>)> {
         use listening::input;
         let muted = self.level_of(v).is_some_and(|(_, m)| m);
         Some(match (v, change) {
@@ -1447,8 +1445,8 @@ impl App {
     /// What the throttle is holding of a dragged slider, sent if its window
     /// has passed — or now, when `force`d by letting go.
     fn release_volume(&mut self, force: bool) {
-        let now = ark_client::autos::monotonic_ms();
-        if !force && now < self.volume_sent + ark_client::THROTTLE_MS {
+        let now = client::monotonic_ms();
+        if !force && now < self.volume_sent + client::THROTTLE_MS {
             return;
         }
         if let Some((level, to)) = self.volume_held.take() {
@@ -1621,7 +1619,7 @@ impl App {
         let Some(id) = self.player.track().map(|t| t.id) else {
             return 0;
         };
-        self.queue.iter().position(|t| t.id == id).unwrap_or(0)
+        self.queue.iter().position(|t| t.id.0 == id).unwrap_or(0)
     }
 
     /// Put this device's player on `at` in the queue: the one place a queued
@@ -1632,7 +1630,7 @@ impl App {
         };
         self.player.play(
             Track {
-                id: track.id,
+                id: track.id.0,
                 title: track.title.clone(),
                 creator: track.creator.clone(),
                 album: track.album.clone(),
@@ -1908,10 +1906,21 @@ impl App {
                         .find(|p| p.id == value)
                         .map(|p| p.name.clone())
                         .unwrap_or_default();
-                    let a = args([("playlist_id", Value::Id(value)), ("media_id", Value::Id(media))]);
                     let done = match on {
-                        true => self.author(format!("put {title} on {list}"), "add_to_playlist", a),
-                        false => self.author(format!("take {title} off {list}"), "remove_from_playlist", a),
+                        true => {
+                            let a = AddToPlaylist {
+                                playlist_id: key(value),
+                                media_id: key(media),
+                            };
+                            self.author(format!("put {title} on {list}"), "add_to_playlist", &a)
+                        }
+                        false => {
+                            let a = RemoveFromPlaylist {
+                                playlist_id: key(value),
+                                media_id: key(media),
+                            };
+                            self.author(format!("take {title} off {list}"), "remove_from_playlist", &a)
+                        }
                     };
                     // Refused at once: the tick the panel shows is not true.
                     if !done {
@@ -1933,11 +1942,7 @@ impl App {
                 // row: its id is chosen inside the mutation, and the refresh
                 // has just spliced it in. The track is not added to it here —
                 // one tap away, on a row that now exists.
-                if self.author(
-                    format!("make the playlist {}", name.trim()),
-                    "create_playlist",
-                    args([("name", Value::text(name))]),
-                ) {
+                if self.author(format!("make the playlist {}", name.trim()), "create_playlist", &CreatePlaylist { name }) {
                     self.peer.refresh();
                     let at = self.ctx.picker.as_ref().map(|p| p.at);
                     let _ = self.open_picker();
@@ -1980,7 +1985,7 @@ impl App {
                     .rows()
                     .iter()
                     .map(|i| listening::Track {
-                        id: i.id,
+                        id: key(i.id),
                         title: i.title.clone(),
                         creator: i.creator.clone(),
                         album: self.peer.detail_of(i.id).album,
@@ -1990,7 +1995,7 @@ impl App {
                         file: i.file.clone(),
                     })
                     .collect();
-                let at = self.queue.iter().position(|t| t.id == id).unwrap_or(0);
+                let at = self.queue.iter().position(|t| t.id.0 == id).unwrap_or(0);
                 return self.press(Press::Start(at));
             }
             Message::OpenQueue if self.queue_panel.is_some() => self.queue_panel = None,
@@ -2112,7 +2117,7 @@ impl App {
     /// which is the only time any of it has anything to do.
     fn react(&mut self) -> Task<Message> {
         let mut tasks = Vec::new();
-        self.due_at(ark_client::autos::monotonic_ms());
+        self.due_at(client::monotonic_ms());
         self.pump();
         // A lock-screen button leaves a note and rings; it goes where every
         // transport button goes.
@@ -2211,10 +2216,7 @@ impl App {
         // The link opened, or something arrived while waiting: the quiet
         // starts again.
         if pumped.opened || (pumped.moved && self.quiet.is_some()) {
-            self.quiet = Some(ark_client::autos::monotonic_ms() + Self::QUIET_MS);
-        }
-        if let Some(note) = pumped.note {
-            self.note = note;
+            self.quiet = Some(client::monotonic_ms() + Self::QUIET_MS);
         }
         if let Some(reason) = pumped.denied {
             // Turned away from the other end — an expired token, a revoked
@@ -2228,15 +2230,15 @@ impl App {
                 login.token.clear();
             }
         }
-        for r in self.peer.client.take_rejections() {
+        for (id, reason) in self.peer.client.take_rejections() {
             let what = self
                 .edits
                 .iter()
-                .find(|e| e.id == r.id)
+                .find(|e| e.id == id)
                 .map(|e| e.what.clone())
                 .unwrap_or_else(|| "a change".into());
-            self.note = format!("the server refused to {what}: {}", r.reason);
-            self.refused.push((what, r.reason));
+            self.note = format!("the server refused to {what}: {reason}");
+            self.refused.push((what, reason));
         }
         self.peer.refresh();
     }
@@ -2264,7 +2266,7 @@ impl App {
         // every call is the timer already running. Two milliseconds late
         // rather than one early, so that it is due when it fires.
         if let Some(at) = self.deadline() {
-            let delay = Duration::from_millis(at.saturating_sub(ark_client::autos::monotonic_ms()) + 2);
+            let delay = Duration::from_millis(at.saturating_sub(client::monotonic_ms()) + 2);
             subs.push(arkui::wake::at(at, delay).map(|()| Message::Due));
         }
         if let Some(every) = self.clock() {

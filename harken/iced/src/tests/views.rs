@@ -1,32 +1,31 @@
 //! Every list the window holds is its query, after every kind of change the
 //! window makes or receives — and a change costs the lists it touches, patch
-//! by patch, and no others (`docs/plan-v4.md` §1.5).
+//! by patch, and no others (`docs/plan-v5.md` §1.10).
 use std::collections::{BTreeSet, HashMap};
 
-use ark_client::{args, Value};
-use harken_domain::view::Item;
+use harken_domain5::library::{AlbumsEntry, ArtistsEntry, ComposersEntry, DescribePerson, LibraryEntry, RemoveMedia, Search};
+use harken_domain5::playlists::{AddToPlaylist, RemoveFromPlaylist};
 
-use crate::peer::{Moved, Peer};
+use crate::peer::{key, Moved, Peer};
 use crate::places::Source;
-use crate::rows::{Album, Artist, Composer, Playlist, TrackDetail};
+use crate::rows::{Album, Artist, Composer, Item, Playlist};
 
 /// Every open list against its query, read once.
 fn check(peer: &Peer, what: &str) {
-    let lib = args([("playlist_id", Value::Id(peer.playlist))]);
-    assert_eq!(peer.items, peer.ask("library", lib, Item::from_value), "library, {what}");
+    assert_eq!(peer.items, peer.library_now(), "library, {what}");
     assert_eq!(
         peer.playlists(),
-        peer.ask("playlists", args([]), Playlist::from_value),
+        peer.ask::<harken_domain5::schema::Playlist, Playlist>("playlists", &()),
         "playlists, {what}"
     );
-    assert_eq!(peer.albums, peer.ask("albums", args([]), Album::from_value), "albums, {what}");
-    assert_eq!(peer.artists, peer.ask("artists", args([]), Artist::from_value), "artists, {what}");
-    assert_eq!(peer.composers, peer.ask("composers", args([]), Composer::from_value), "composers, {what}");
-    let details: HashMap<_, _> = peer
-        .ask("track_details", args([]), TrackDetail::from_value)
-        .into_iter()
-        .map(|t| (t.media_id, t))
-        .collect();
+    assert_eq!(peer.albums, peer.ask::<AlbumsEntry, Album>("albums", &()), "albums, {what}");
+    assert_eq!(peer.artists, peer.ask::<ArtistsEntry, Artist>("artists", &()), "artists, {what}");
+    assert_eq!(
+        peer.composers,
+        peer.ask::<ComposersEntry, Composer>("composers", &()),
+        "composers, {what}"
+    );
+    let details: HashMap<_, _> = peer.track_details().into_iter().map(|t| (t.media_id, t)).collect();
     assert_eq!(peer.details, details, "track_details, {what}");
     let Source::Album(name) = &peer.source else { unreachable!() };
     assert_eq!(peer.shown, peer.album_rows(name), "the album page, {what}");
@@ -55,7 +54,8 @@ fn patched(peer: &Peer) -> BTreeSet<&'static str> {
 ///
 /// Falsified three ways: dropping the `Update` arm of `peer::splice` (the
 /// toggle leaves the old `playlist_pos`, and "library, a toggle" fails);
-/// making `Open::update` answer `Reset` always ("playlists was taken whole");
+/// making `Open::update` read a patched view whole ("library was taken
+/// whole", in v5's port);
 /// and dropping `patch_details`' map insert (track_details, a song added).
 #[test]
 fn every_list_on_screen_is_its_query_after_every_change() {
@@ -65,43 +65,43 @@ fn every_list_on_screen_is_its_query_after_every_change() {
     check(&peer, "opened");
     let favorites = peer.playlist;
     let off = peer.shown.iter().find(|i| !i.on_playlist()).expect("a track not on Favorites").id;
-    let on = |id| args([("playlist_id", Value::Id(favorites)), ("media_id", Value::Id(id))]);
+    let on = AddToPlaylist {
+        playlist_id: key(favorites),
+        media_id: key(off),
+    };
 
-    peer.client.mutate("add_to_playlist", on(off)).unwrap();
+    peer.client.mutate("add_to_playlist", &on).unwrap();
     assert!(peer.refresh());
     check(&peer, "a toggle");
     assert_eq!(patched(&peer), BTreeSet::from(["library", "album"]));
 
-    let t = Value::text;
-    peer.client
-        .mutate(
-            "describe_person",
-            args([
-                ("name", t("George Frideric Handel")),
-                ("sort_name", t("")),
-                ("born", Value::Int(0)),
-                ("died", Value::Int(0)),
-                ("art", t("handel.jpg")),
-            ]),
-        )
-        .unwrap();
+    let person = DescribePerson {
+        name: "George Frideric Handel".into(),
+        art: "handel.jpg".into(),
+        ..DescribePerson::default()
+    };
+    peer.client.mutate("describe_person", &person).unwrap();
     assert!(peer.refresh());
     check(&peer, "a person described");
     assert_eq!(patched(&peer), BTreeSet::from(["artists", "composers"]));
 
     let mut song = super::song("Hornpipe again", "George Frideric Handel", "Water Music", "again.mp3");
-    song.insert("track".into(), Value::Int(30));
-    peer.client.mutate("add_song", song).unwrap();
+    song.track = 30;
+    peer.client.mutate("add_song", &song).unwrap();
     peer.refresh();
     check(&peer, "a song added");
     assert!(peer.shown.iter().any(|i| i.title == "Hornpipe again"), "on the open page");
 
-    peer.client.mutate("remove_from_playlist", on(off)).unwrap();
+    let off_it = RemoveFromPlaylist {
+        playlist_id: key(favorites),
+        media_id: key(off),
+    };
+    peer.client.mutate("remove_from_playlist", &off_it).unwrap();
     peer.refresh();
     check(&peer, "the toggle undone");
 
     let gone = peer.items[3].id;
-    peer.client.mutate("remove_media", args([("id", Value::Id(gone))])).unwrap();
+    peer.client.mutate("remove_media", &RemoveMedia { id: key(gone) }).unwrap();
     peer.refresh();
     check(&peer, "a song removed");
     assert!(!peer.details.contains_key(&gone));
@@ -130,11 +130,11 @@ fn the_search_box_drives_a_view() {
         let _ = app.update(Message::Key(k, Modifiers::empty()));
     };
     let search = |app: &App, needle: &str| {
-        app.peer.ask(
-            "search",
-            args([("playlist_id", Value::Id(app.peer.playlist)), ("needle", Value::text(needle))]),
-            Item::from_value,
-        )
+        let input = Search {
+            playlist_id: key(app.peer.playlist),
+            needle: needle.into(),
+        };
+        app.peer.ask::<LibraryEntry, Item>("search", &input)
     };
     let all = app.peer.rows().len();
     press(&mut app, Key::Character("/".into()));
@@ -159,7 +159,7 @@ fn the_search_box_drives_a_view() {
         .client
         .mutate(
             "add_song",
-            super::song("Hornpipe again", "George Frideric Handel", "", "music/hornpipe.mp3"),
+            &super::song("Hornpipe again", "George Frideric Handel", "", "music/hornpipe.mp3"),
         )
         .unwrap();
     assert!(app.peer.refresh());
