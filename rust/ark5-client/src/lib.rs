@@ -454,6 +454,14 @@ impl Client {
         self.views.get(view)?.view.as_ref().map(View::rows)
     }
 
+    /// A view held no more: no change is pushed into it again, and its
+    /// number is not given to another.
+    pub fn unwatch(&mut self, view: usize) {
+        if let Some(w) = self.views.get_mut(view) {
+            w.view = None;
+        }
+    }
+
     pub fn take_frames(&mut self) -> Vec<Vec<u8>> {
         std::mem::take(&mut self.frames)
     }
