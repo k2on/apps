@@ -671,36 +671,40 @@ Numbers are from the same-hour runs under `docs/perf/` (order and
 commands in `runs-v5.txt`). Notes under the table say what each row
 counts.
 
-**Size** (`loc-v5.txt`; non-blank, non-comment; Unicode tables excluded)
+**Size** (`loc-v5.txt`, after P1 `loc-p1.txt`; non-blank, non-comment; Unicode tables excluded)
 
 | | v4 | v5 | v5 / v4 |
 |---|---:|---:|---:|
-| library source | 25,537 | 6,417 | 0.25 |
-| client + server source | 6,843 | 1,388 | 0.20 |
+| library source | 25,537 | 6,526 | 0.26 |
+| client + server source | 6,843 | 1,465 | 0.21 |
 | harken's domain | 3,711 | 2,583 | 0.70 |
-| all-in source (library, client, server, auth, domain) | 37,501 | 11,798 | 0.31 |
+| all-in source (library, client, server, auth, domain) | 37,501 | 11,984 | 0.32 |
 | dev tooling (sim, trace, fuzz, vectors) | in `ark` | 1,441 | — |
-| tests | 18,916 | 11,012 | 0.58 |
+| tests | 18,916 | 11,257 | 0.60 |
 | concepts a port carries | 5 sub-languages, 2 execution paths, the lifecycle in 5 places | 1 language, 1 path, 1 machine | — |
 
 **Speed** (release, `--test-threads=1`, v4 and v5 alternating)
 
-| shape | v4 | v5 | v5 / v4 |
-|---|---:|---:|---:|
-| a: local mutation, linked (µs, 8,000 entries, playlists of 10) | 28.2 | 37.6 | 1.33 |
-| a: local mutation, alone (µs) | 28.2 | 16.2 | 0.57 |
-| d: initial sync, time (µs / entry, 8,010 entries) | 26.4 | 9.6 | 0.36 |
-| d: initial sync, size (bytes / entry) | 161.7 | 250.0 | 1.55 |
-| e: rebase, one page under 400 pending (µs / entry) | 62.0 | 3,974.9 | 64 |
-| e: rebase, a pump per entry under 400 pending (µs / entry) | 8,498.6 | 3,779.5 | 0.44 |
-| g: fan-out (µs / connection, 160 connections, log of 8,000) | 4.62 | 0.41 | 0.09 |
-| h: decoding a `Batch` of 256 with facts (allocations) | 12,559 | 2,567 | 0.20 |
-| h: decoding a `Batch` of 256 with facts (µs) | 1,091 | 381 | 0.35 |
-| harken `add_song` (µs, library of 8,000) | 326.7 | 31,440 | 96 |
-| harken `add_song`, rows read | 1 | 8,000 | — |
-| views: a change on `playlist-with-items` at 16k (µs) | 11.06 | 16.10 | 1.46 |
-| views: a change on `top-two-by-pos` at 16k (µs) | 77 | 5.6 | 0.07 |
-| storage: live bytes per media row | 726 | 426 | 0.59 |
+| shape | v4 | v5 | v5 / v4 | v5 after P1 | after / v4 |
+|---|---:|---:|---:|---:|---:|
+| a: local mutation, linked (µs, 8,000 entries, playlists of 10) | 28.2 | 37.6 | 1.33 | 39.0 | 1.42 |
+| a: local mutation, alone (µs) | 28.2 | 16.2 | 0.57 | 17.2 | 0.62 |
+| b: linked round trip (µs, 2,000, playlists of 10, no log file) | 192.5 | 5,520.1 | 29 | 182.2 | 0.85 |
+| c: offline mutate at 8,000 pending (µs, Memory) | 30.4 | 1,990.8 | 65 | 28.0 | 0.89 |
+| d: initial sync, time (µs / entry, 8,010 entries) | 26.4 | 9.6 | 0.36 | 9.7 | 0.39 |
+| d: initial sync, size (bytes / entry) | 161.7 | 250.0 | 1.55 | 250.0 | 1.55 |
+| e: rebase, one page under 400 pending (µs / entry) | 62.0 | 3,974.9 | 64 | 48.8 | 0.76 |
+| e: rebase, a pump per entry under 400 pending (µs / entry) | 8,498.6 | 3,779.5 | 0.44 | 4,104.8 | 0.45 |
+| g: fan-out (µs / connection, 160 connections, log of 8,000) | 4.62 | 0.41 | 0.09 | 0.13 | 0.02 |
+| h: decoding a `Batch` of 256 with facts (allocations) | 12,559 | 2,567 | 0.20 | 2,567 | 0.20 |
+| h: decoding a `Batch` of 256 with facts (µs) | 1,091 | 381 | 0.35 | 236 | 0.22 |
+| harken `add_song` (µs, library of 8,000) | 326.7 | 31,440 | 96 | 225.7 | 0.67 |
+| harken `add_song`, rows read | 1 | 8,000 | — | 1 | 1 |
+| harken `add_to_playlist` onto N−1, rows read | 1 | 7,999 | — | 1 | 1 |
+| harken `create_playlist`, the 102nd "Favorites", rows read | 102 | 3,000 | — | 102 | 1 |
+| views: a change on `playlist-with-items` at 16k (µs) | 11.06 | 16.10 | 1.46 | 10.57 | 0.88 |
+| views: a change on `top-two-by-pos` at 16k (µs) | 77 | 5.6 | 0.07 | 4.5 | 0.07 |
+| storage: live bytes per media row | 726 | 426 | 0.59 | 426 | 0.59 |
 
 Notes. *Library source* is `ark` (27,880 less 2,343 Unicode) against
 `ark5` (7,522 less 2,343) plus `ark5-macros` (1,238). *All-in* adds
@@ -715,7 +719,12 @@ is from `v4-views.txt` and `v5-views.txt`; v4's own harness stops at
 100. *g* in v5 is through `Hub::frame`; the machine alone is 0.14. v4's
 inbox, `Verify` and native-path lines print `n/a` in the v5 outputs,
 with why. Not measured: harken's views, scanner and search shapes; the
-storage shapes run over the `media` table alone.
+storage shapes run over the `media` table alone. *v5 after P1* is from
+the `*-p1.txt` outputs and *after / v4* divides it by the v4 run of the
+same hour (`*-rerun2.txt`: a 27.56, b 215.11, c 31.26, d 24.67, e 64.6
+and 9,215.2, g 5.43, h 1,094.7, `add_song` 338.39, views 11.95 and
+68.81); *b* and *c* are `ark5-server`'s; rows read are the counting
+store's (`perf_rows_read_per_mutation`).
 
 **Measured.** Faster in v5: a peer alone mutates in 0.57× v4's time; the
 authority sequences at par (16–17 µs); fan-out costs 0.09× per connection
@@ -732,6 +741,17 @@ rewrites the whole `pending` blob on every change; a linked round trip is
 before sending — 0.17 ms without it. harken's `add_song` is 96× and grows
 with the library: its reads return all 8,000 media rows where v4's
 returned one (`add_to_playlist` onto a playlist of N−1: 7,999 rows, v4 1).
+
+**P1.** The four causes, fixed (`*-p1.txt` against `*-rerun2.txt`). Routing:
+`first` of a routed filter or sort reads through the store with a limit, a
+descending sort over a non-unique index is served with its ties put back in
+key order, and bounds past the equalities narrow the read: `add_song` reads
+1 row (was 8,000) and costs 225.7 µs against v4's 338.4, `add_to_playlist`
+onto N−1 1 row, the 102nd "Favorites" 102 (was 3,000). Rebase: a page undoes
+and re-runs the pending once, 48.8 µs/entry under 400 against v4's 64.6 (was
+3,974.9). Pending: one journal record per mutate, 28.0 µs at 8,000 pending
+(was 1,990.8; v4 31.3). Link: frames go out from the caller's thread, a
+linked round trip 182.2 µs (was 5,520.1; v4 215.1). Source +186 lines.
 
 ## Landed
 
