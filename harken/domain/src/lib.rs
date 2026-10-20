@@ -19,3 +19,12 @@ pub mod schema;
 pub mod view;
 
 pub use module::domain;
+
+/// The domain's directory: every `.ark` file under it is the module
+/// (§1.15).
+pub const DIR: &str = env!("CARGO_MANIFEST_DIR");
+
+/// The module, built from [`DIR`].
+pub fn text() -> ark::Domain {
+    ark::sexp::build_dir(std::path::Path::new(DIR)).unwrap_or_else(|r| panic!("harken's domain: {r}"))
+}

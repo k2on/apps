@@ -1,0 +1,306 @@
+; Groups of speakers: a member follows a leader of its family, Sonos's
+; coordinator model. The group a session plays on is the one its output leads.
+
+; Whether `present` is in the group `leader` leads: the leader, or following
+; it.
+(helper listening.in_group
+  ((present Present) (leader Text))
+  Bool
+  (or (== present.id leader) (== present.follows (some leader))))
+
+; Whether `id` can be joined to the group `leader` leads now: a speaker that is
+; here, can play, of the leader's family, and not the leader.
+(query listening.joinable
+  ((user Text) (leader Text) (id Text))
+  Bool
+  (let
+    ((family
+       (match (get listening_device user leader)
+         (none () (as (option Text) none))
+         (some (entry)
+           (if (none? entry.present.follows) entry.present.family (as (option Text) none))))))
+    (match (get listening_device user id)
+      (none () false)
+      (some (entry)
+        (and
+          (and (and (!= entry.present.id leader) entry.present.can_play)
+            (some? entry.present.family))
+          (== entry.present.family family))))))
+
+; The group `leader` leads, those of it that have a volume.
+(query listening.voiced
+  ((user Text) (leader Text))
+  (list (row listening_device))
+  (filter (listening.devices_of user)
+    (fn (entry) (and (listening.in_group entry.present leader) entry.present.can_volume))))
+
+(query listening.group_tally
+  ((user Text) (leader Text))
+  Tally
+  (let ((voiced (listening.voiced user leader)))
+    (record (n (len voiced)) (sum (sum (map voiced (fn (entry) entry.present.volume)))))))
+
+; The group's volume: the mean of its members', rounded down; 0 for a group
+; with no volume at all.
+(query listening.group_level
+  ((user Text) (leader Text))
+  Int
+  (let ((tally (listening.group_tally user leader))) (/ tally.sum (max tally.n 1))))
+
+; One member's level once the group's moves from `from` to `to`: in
+; proportion, rounded to the nearest, clamped — and from a group at 0, `to`
+; itself.
+(helper listening.scaled
+  ((level Int) (from Int) (to Int))
+  Int
+  (if (== from 0) to (clamp (/ (+ (* (* level to) 2) from) (* (max from 1) 2)) 0 100)))
+
+; The group `leader` leads at the level `to`: every member with a volume moved
+; in proportion and unmuted.
+(live listening.group_at
+  ((user Text) (leader Text) (to Int))
+  (let ((from (listening.group_level user leader)))
+    (map (listening.voiced user leader)
+      (fn (entry)
+        (listening.put_present user
+          entry.device
+          (record (can_play entry.present.can_play)
+            (can_volume entry.present.can_volume)
+            (family entry.present.family)
+            (follows entry.present.follows)
+            (id entry.present.id)
+            (kind entry.present.kind)
+            (muted false)
+            (name entry.present.name)
+            (user entry.present.user)
+            (volume (listening.scaled entry.present.volume from to))))))
+    ()))
+
+; The group `leader` leads, every member with a volume muted or not.
+(live listening.group_muted
+  ((user Text) (leader Text) (muted Bool))
+  (map (listening.voiced user leader)
+    (fn (entry)
+      (listening.put_present user
+        entry.device
+        (record (can_play entry.present.can_play)
+          (can_volume entry.present.can_volume)
+          (family entry.present.family)
+          (follows entry.present.follows)
+          (id entry.present.id)
+          (kind entry.present.kind)
+          (muted muted)
+          (name entry.present.name)
+          (user entry.present.user)
+          (volume entry.present.volume)))))
+  ())
+
+; `id` follows nobody, and nobody follows it.
+(live listening.dissolved
+  ((user Text) (id Text))
+  (map
+    (filter (listening.devices_of user)
+      (fn (entry) (or (== entry.present.id id) (== entry.present.follows (some id)))))
+    (fn (entry)
+      (listening.put_present user
+        entry.device
+        (record (can_play entry.present.can_play)
+          (can_volume entry.present.can_volume)
+          (family entry.present.family)
+          (follows none)
+          (id entry.present.id)
+          (kind entry.present.kind)
+          (muted entry.present.muted)
+          (name entry.present.name)
+          (user entry.present.user)
+          (volume entry.present.volume)))))
+  ())
+
+; `id` follows `leader`; whoever followed `id` follows nobody.
+(live listening.followed
+  ((user Text) (id Text) (leader Text))
+  (map (listening.devices_of user)
+    (fn (entry)
+      (if (== entry.present.id id)
+        (listening.put_present user
+          entry.device
+          (record (can_play entry.present.can_play)
+            (can_volume entry.present.can_volume)
+            (family entry.present.family)
+            (follows (some leader))
+            (id entry.present.id)
+            (kind entry.present.kind)
+            (muted entry.present.muted)
+            (name entry.present.name)
+            (user entry.present.user)
+            (volume entry.present.volume)))
+        (if (== entry.present.follows (some id))
+          (listening.put_present user
+            entry.device
+            (record (can_play entry.present.can_play)
+              (can_volume entry.present.can_volume)
+              (family entry.present.family)
+              (follows none)
+              (id entry.present.id)
+              (kind entry.present.kind)
+              (muted entry.present.muted)
+              (name entry.present.name)
+              (user entry.present.user)
+              (volume entry.present.volume)))))))
+  ())
+
+; The sound handed to `to`: if it was following a leader, it leads that group
+; now, as Sonos makes a member the coordinator when it is picked.
+(live listening.led_by
+  ((user Text) (to Text))
+  (let ((was (?? (. (get listening_device user to) present follows) none)))
+    (map (listening.devices_of user)
+      (fn (entry)
+        (if (== entry.present.id to)
+          (listening.put_present user
+            entry.device
+            (record (can_play entry.present.can_play)
+              (can_volume entry.present.can_volume)
+              (family entry.present.family)
+              (follows none)
+              (id entry.present.id)
+              (kind entry.present.kind)
+              (muted entry.present.muted)
+              (name entry.present.name)
+              (user entry.present.user)
+              (volume entry.present.volume)))
+          (if (and (some? was) (or (== (some entry.present.id) was) (== entry.present.follows was)))
+            (listening.put_present user
+              entry.device
+              (record (can_play entry.present.can_play)
+                (can_volume entry.present.can_volume)
+                (family entry.present.family)
+                (follows (some to))
+                (id entry.present.id)
+                (kind entry.present.kind)
+                (muted entry.present.muted)
+                (name entry.present.name)
+                (user entry.present.user)
+                (volume entry.present.volume)))))))
+    ()))
+
+; The leader `caller`'s word on who follows it: each member that is here and of
+; its family follows it; whoever followed it and is not named, or followed a
+; device that is a member now, follows nobody.
+(live listening.regrouped
+  ((user Text) (caller Text) (members (list Text)))
+  (let ((family (?? (. (get listening_device user caller) present family) none)))
+    (map (listening.devices_of user)
+      (fn (entry)
+        (let
+          ((present entry.present)
+           (joins
+             (and
+               (and
+                 (and (and (contains members present.id) (!= present.id caller)) present.can_play)
+                 (some? family))
+               (== present.family family)))
+           (led_by_a_member
+             (match present.follows (none () false) (some (id) (contains members id))))
+           (follows
+             (if (== present.id caller)
+               (as (option Text) none)
+               (if joins
+                 (some caller)
+                 (if (or (== present.follows (some caller)) led_by_a_member)
+                   (as (option Text) none)
+                   present.follows)))))
+          (listening.put_present user
+            entry.device
+            (record (can_play present.can_play)
+              (can_volume present.can_volume)
+              (family present.family)
+              (follows follows)
+              (id present.id)
+              (kind present.kind)
+              (muted present.muted)
+              (name present.name)
+              (user present.user)
+              (volume present.volume))))))
+    ()))
+
+; Whether the output is a device that is here and something in its group has a
+; volume: what every group transition is guarded by.
+(query listening.group_has_volume
+  ((user Text))
+  Bool
+  (match (listening.output_id (listening.session_of user))
+    (none () false)
+    (some (leader) (> (. (listening.group_tally user leader) n) 0))))
+
+; The output's id: the leader the group transitions move.
+(query listening.leader
+  ((user Text))
+  Text
+  (unwrap (listening.output_id (listening.session_of user))))
+
+; A speaker joins the output's group; whatever followed it follows nobody.
+(live listening.join
+  ((input Member))
+  (let ((leader (listening.output_id (listening.session_of ctx.user))))
+    (if (none? leader) (refuse "nothing is playing to join"))
+    (if
+      (not
+        (match leader
+          (none () false)
+          (some (leader) (listening.joinable ctx.user leader input.device))))
+      (refuse "that device cannot join this one"))
+    (listening.followed ctx.user input.device (unwrap leader))))
+
+; …and leaves whatever group it is in.
+(live listening.unjoin
+  ((input Member))
+  (if
+    (not
+      (match (get listening_device ctx.user input.device)
+        (none () false)
+        (some (entry) (some? entry.present.follows))))
+    (refuse "that device is not in a group"))
+  (let ((present (listening.present_of ctx.user input.device)))
+    (listening.put_present ctx.user
+      input.device
+      (record (can_play present.can_play)
+        (can_volume present.can_volume)
+        (family present.family)
+        (follows none)
+        (id present.id)
+        (kind present.kind)
+        (muted present.muted)
+        (name present.name)
+        (user present.user)
+        (volume present.volume)))))
+
+; A leader's word on who follows it, changed outside harken.
+(live listening.report_group
+  ((input ReportGroup))
+  (if
+    (not
+      (match (get listening_device ctx.user ctx.session)
+        (none () false)
+        (some (entry) (some? entry.present.family))))
+    (refuse "not here, or not a speaker that groups"))
+  (listening.regrouped ctx.user ctx.session input.members))
+
+; The output's group at a level, every member in proportion, unmuted.
+(live listening.set_group_volume
+  ((input GroupVolume))
+  (if (not (listening.group_has_volume ctx.user)) (refuse "nothing playing has a volume"))
+  (listening.group_at ctx.user (listening.leader ctx.user) input.level))
+
+(live listening.nudge_group_volume
+  ((input GroupNudge))
+  (if (not (listening.group_has_volume ctx.user)) (refuse "nothing playing has a volume"))
+  (let ((leader (listening.leader ctx.user)))
+    (listening.group_at ctx.user
+      leader
+      (clamp (+ (listening.group_level ctx.user leader) input.delta) 0 100))))
+
+(live listening.set_group_mute
+  ((input GroupMute))
+  (if (not (listening.group_has_volume ctx.user)) (refuse "nothing playing has a volume"))
+  (listening.group_muted ctx.user (listening.leader ctx.user) input.muted))

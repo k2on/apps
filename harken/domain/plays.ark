@@ -1,0 +1,36 @@
+; The plays worth keeping: in the log, one row per play, so every peer has its
+; listening history.
+
+; A track was played: authored by the device making the sound once it has
+; played long enough to count, dated by its own clock.
+(mutator listening.record_play
+  ((input RecordPlay))
+  (insert play
+    (record (id (new-id play))
+      (user_id ctx.user)
+      (track (text-of-id input.track))
+      (title input.title)
+      (creator input.creator)
+      (album input.album)
+      (duration_ms input.duration_ms)
+      (file input.file)
+      (played_ms ctx.now)
+      (from input.from))))
+
+; The caller's newest play.
+(query listening.last_played
+  ()
+  (list (row play))
+  (take
+    (sort (filter play (fn (play) (== play.user_id ctx.user)))
+      (fn (play) (tuple (desc play.played_ms) (desc play.id))))
+    1))
+
+; The caller's plays, newest first, the last fifty of them.
+(query listening.recently_played
+  ()
+  (list (row play))
+  (take
+    (sort (filter play (fn (play) (== play.user_id ctx.user)))
+      (fn (play) (tuple (desc play.played_ms) (desc play.id))))
+    50))

@@ -1,0 +1,191 @@
+; The library as people browse it: the queries a library screen reads, each
+; everybody's.
+
+; The whole library in the order things were added, each with where it sits
+; on one playlist.
+(query library.library
+  ((input Library))
+  (list LibraryEntry)
+  (map (sort media (fn (media) media.pos))
+    (fn (media) (library.library_entry media (library.playlist_pos input.playlist_id media.id)))))
+
+; The library's rows whose title or creator holds the needle, case folded, in
+; library order.
+(query library.search
+  ((input Search))
+  (list LibraryEntry)
+  (map
+    (sort
+      (filter media
+        (fn (media)
+          (or (library.has media.title input.needle) (library.has media.creator input.needle))))
+      (fn (media) media.pos))
+    (fn (media) (library.library_entry media (library.playlist_pos input.playlist_id media.id)))))
+
+; Every album some song is on, by name, with whoever made its first track (in
+; the song table's order) and how many tracks it has.
+(query library.albums
+  ()
+  (list AlbumsEntry)
+  (map
+    (filter
+      (map album
+        (fn (album)
+          (tuple album
+            (map (filter song (fn (song) (== song.album_name (some album.name))))
+              (fn (song) (?? (. (get media song.media_id) creator) ""))))))
+      (fn (pair) (> (len pair.1) 0)))
+    (fn (pair)
+      (record (art pair.0.art)
+        (creator (?? (first pair.1) ""))
+        (name pair.0.name)
+        (tracks (len pair.1))))))
+
+; Everyone who made something in the library, by name, with the picture
+; `person` has for the name.
+(query library.artists
+  ()
+  (list ArtistsEntry)
+  (map
+    (group media
+      (fn (media) media.creator)
+      (fn (name tracks) (tuple (?? (. (get person name) art) "") name (len tracks))))
+    (fn (pair) pair.1)))
+
+; Every song, with the columns only a song has.
+(query library.track_details
+  ()
+  (list TrackDetailsEntry)
+  (map song
+    (fn (song)
+      (let
+        ((movement (library.movement_of song))
+         (work
+           (match movement
+             (none () (as (option (row work)) none))
+             (some (movement) (get work movement.work_id))))
+         (recording (get recording song.recording_id)))
+        (record (album (?? song.album_name ""))
+          (bpm song.bpm)
+          (catalogue (?? work.catalogue ""))
+          (licence (?? recording.licence ""))
+          (media_id song.media_id)
+          (part (?? movement.part ""))
+          (performer
+            (library.performers
+              (filter credit (fn (credit) (== credit.recording_id song.recording_id)))
+              song.recording_id))
+          (track song.track))))))
+
+; One album's tracks in the order the work goes: part, then track (an untagged
+; one, 0, last in its part), then title, then the key.
+(query library.album
+  ((input AlbumInput))
+  (list LibraryEntry)
+  (map
+    (sort
+      (filter song
+        (fn (song) (and (== song.album_name (some input.name)) (some? (get media song.media_id)))))
+      (fn (song)
+        (tuple (?? (. (library.movement_of song) part) "")
+          (== song.track 0)
+          song.track
+          (?? (. (get media song.media_id) title) ""))))
+    (fn (song)
+      (library.library_entry (unwrap (get media song.media_id))
+        (library.playlist_pos input.playlist_id song.media_id)))))
+
+; One artist's tracks, in library order.
+(query library.artist
+  ((input Artist))
+  (list LibraryEntry)
+  (map (sort (filter media (fn (media) (== media.creator input.name))) (fn (media) media.pos))
+    (fn (media) (library.library_entry media (library.playlist_pos input.playlist_id media.id)))))
+
+; Everyone some work here is by, with how many tracks are movements of their
+; works and how many works.
+(query library.composers
+  ()
+  (list ComposersEntry)
+  (map
+    (filter
+      (map person
+        (fn (person)
+          (tuple person
+            (map (filter work (fn (work) (== work.composer person.name)))
+              (fn (work) (library.work_tracks work.id))))))
+      (fn (pair) (> (len pair.1) 0)))
+    (fn (pair)
+      (record (art pair.0.art)
+        (born pair.0.born)
+        (died pair.0.died)
+        (name pair.0.name)
+        (sort_name (if (is-empty pair.0.sort_name) pair.0.name pair.0.sort_name))
+        (tracks (library.total pair.1))
+        (works (len pair.1))))))
+
+; One composer's works, by catalogue and then title.
+(query library.works
+  ((input Works))
+  (list WorkSummary)
+  (library.summaries
+    (sort (filter work (fn (work) (== work.composer input.composer)))
+      (fn (work) (tuple work.catalogue work.title)))))
+
+; One work by its key: none or one.
+(query library.work
+  ((input WorkInput))
+  (list WorkSummary)
+  (library.summaries (filter work (fn (work) (== work.id input.id)))))
+
+; Every performance of one work: the most complete first, then the oldest,
+; then the key.
+(query library.recordings
+  ((input Recordings))
+  (list RecordingsEntry)
+  (map
+    (sort
+      (map (filter recording (fn (recording) (== recording.work_id (some input.work_id))))
+        (fn (recording)
+          (tuple recording (len (filter song (fn (song) (== song.recording_id recording.id)))))))
+      (fn (pair) (tuple (- pair.1) pair.0.recorded)))
+    (fn (pair)
+      (record (art pair.0.art)
+        (id pair.0.id)
+        (label pair.0.label)
+        (licence pair.0.licence)
+        (performers
+          (library.performers (filter credit (fn (credit) (== credit.recording_id pair.0.id)))
+            pair.0.id))
+        (recorded pair.0.recorded)
+        (tracks pair.1)))))
+
+; Who is on one recording, the roles kept, in billing order: the real credits
+; where there are any.
+(query library.credits
+  ((input Credits))
+  (list CreditsEntry)
+  (let ((credits (filter credit (fn (credit) (== credit.recording_id input.recording_id)))))
+    (map (sort (library.credited credits) (fn (credit) (tuple credit.pos credit.person_name)))
+      (fn (credit)
+        (record (instrument credit.instrument)
+          (name credit.person_name)
+          (pos credit.pos)
+          (role credit.role))))))
+
+; One performance's tracks in the order the work goes: by movement number, a
+; track of no movement after the rest.
+(query library.recording
+  ((input RecordingInput))
+  (list LibraryEntry)
+  (map
+    (sort
+      (filter song
+        (fn (song) (and (== song.recording_id input.id) (some? (get media song.media_id)))))
+      (fn (song)
+        (tuple (none? song.movement_id)
+          (?? (. (library.movement_of song) no) 0)
+          (?? (. (get media song.media_id) title) ""))))
+    (fn (song)
+      (library.library_entry (unwrap (get media song.media_id))
+        (library.playlist_pos input.playlist_id song.media_id)))))

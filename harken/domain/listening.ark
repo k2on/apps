@@ -1,0 +1,334 @@
+; The listening session: one account, one thing playing, however many devices
+; are watching it — live state over volatile tables — and the plays worth
+; keeping, in the log.
+;
+; A person with a phone, a laptop and a browser tab has one listening session.
+; Any of them can change it; exactly one of them is making the sound. The state
+; is the instruction: nothing routes a command to the device making the sound;
+; the output reconciles its player against the session and reports what
+; happens to it (`started`, `advance`, `stalled`, `release`,
+; `report_position`) and nothing else.
+;
+; None of the session is in the log. A transition is a live mutator keyed by
+; the account (`ctx.user`); its first refusals are its guards, in their order.
+; The calling device is `ctx.session`. The four rules: one output
+; (`Active.output` is one value); the output survives its socket (`on_leave`
+; keeps it `Away`, paused; `on_join` gives it back, paused); a command is a
+; state change the output obeys (`pause`, `seek`, `transfer` move nothing but
+; the session); a press that means a sound takes an output that cannot
+; answer, and a device arriving takes nothing.
+
+; * The clock
+
+; How far into the track a clock is at `now`.
+(helper listening.position
+  ((clock Clock) (now Int))
+  Int
+  (match clock (Paused (at_ms) at_ms) (Playing (at_ms since) (max (+ at_ms (- now since)) at_ms))))
+
+; Where the session stands at `now`: its clock's position — except while the
+; sound is on its way to a device (`moving`), when it stands where it was
+; handed over, since nothing is making a sound in between.
+(helper listening.standing
+  ((clock Clock) (output Output) (now Int))
+  Int
+  (let
+    ((moving (match output (Away (id name) false) (Device (id moving) moving) (Nowhere () false)))
+     (handed (match clock (Paused (at_ms) at_ms) (Playing (at_ms since) at_ms))))
+    (if moving handed (listening.position clock now))))
+
+; The session's clock paused where the session stands at `now`.
+(helper listening.halted
+  ((clock Clock) (output Output) (now Int))
+  Clock
+  (Clock.Paused (listening.standing clock output now)))
+
+; The clock at `ms`, playing on from there if it was playing.
+(helper listening.clock_at
+  ((clock Clock) (ms Int) (now Int))
+  Clock
+  (match clock (Paused (at_ms) (Clock.Paused ms)) (Playing (at_ms since) (Clock.Playing ms now))))
+
+; * The session
+
+; Whether the output is a device that is here.
+(helper listening.is_here
+  ((output Output))
+  Bool
+  (match output (Away (id name) false) (Device (id moving) true) (Nowhere () false)))
+
+; Whether something is queued.
+(helper listening.is_active
+  ((session Session))
+  Bool
+  (match session (Active (active) true) (Idle () false)))
+
+; Whether the session has an output that is here to answer.
+(helper listening.reachable
+  ((session Session))
+  Bool
+  (match session (Active (active) (listening.is_here active.output)) (Idle () false)))
+
+; Whether something is making a sound: a clock running on an output that is
+; here.
+(helper listening.sounding
+  ((session Session))
+  Bool
+  (match session
+    (Active (active)
+      (and (listening.is_here active.output)
+        (match active.clock (Paused (at_ms) false) (Playing (at_ms since) true))))
+    (Idle () false)))
+
+; The account's session: its row's, or `Idle`.
+(query listening.session_of
+  ((user Text))
+  Session
+  (?? (. (get listening user) session) (Session.Idle)))
+
+; The account's session, written.
+(live listening.put_session
+  ((user Text) (session Session))
+  (if (some? (get listening user))
+    (update listening user (fn (row) (record (user row.user) (session session))))
+    (insert listening (record (user user) (session session)))))
+
+; Whether the device is here and can make a sound.
+(query listening.can_play
+  ((user Text) (device Text))
+  Bool
+  (?? (. (get listening_device user device) present can_play) false))
+
+; Whether the device is the session's output and here.
+(helper listening.is_output
+  ((session Session) (device Text))
+  Bool
+  (match session
+    (Active (active)
+      (match active.output
+        (Away (id name) false)
+        (Device (id moving) (== id device))
+        (Nowhere () false)))
+    (Idle () false)))
+
+; The sound on this device, which has it.
+(helper listening.here ((device Text)) Output (Output.Device device false))
+
+; The output a press that means a sound leaves: the one there is, where it can
+; answer, or the caller.
+(helper listening.pressed
+  ((output Output) (caller Text))
+  Output
+  (if (listening.is_here output) output (listening.here caller)))
+
+; The output once `device` has come back: given back to it, if it was the one
+; that went.
+(helper listening.returned
+  ((output Output) (device Text))
+  Output
+  (match output
+    (Away (id name) (if (== id device) (listening.here id) output))
+    (Device (id moving) output)
+    (Nowhere () output)))
+
+; How long the track at `at` is; 0 for no track there.
+(helper listening.duration_at
+  ((queue (list Track)) (at Int))
+  Int
+  (if (and (>= at 0) (< at (len queue)))
+    (?? (. (first (slice queue at (+ at 1))) duration_ms) 0)
+    0))
+
+; A session at a new place in its queue, playing from the start of it, on
+; whichever device a press leaves the sound with.
+(helper listening.moved_to
+  ((active Active) (at Int) (caller Text) (now Int))
+  Session
+  (Session.Active
+    (record (at at)
+      (clock (Clock.Playing 0 now))
+      (from active.from)
+      (output (listening.pressed active.output caller))
+      (queue active.queue))))
+
+; Where the track at `at` goes when the one at `from` moves to `to`.
+(helper listening.moved_place
+  ((at Int) (from Int) (to Int))
+  Int
+  (if (== at from)
+    to
+    (if (and (and (< from to) (> at from)) (<= at to))
+      (- at 1)
+      (if (and (and (< to from) (>= at to)) (< at from)) (+ at 1) at))))
+
+; Whether `index` is a place in the session's queue.
+(helper listening.in_queue
+  ((session Session) (index Int))
+  Bool
+  (match session (Active (active) (< index (len active.queue))) (Idle () false)))
+
+; The output, where it is a device that is here: the one a group is led by.
+(helper listening.output_id
+  ((session Session))
+  (option Text)
+  (match session
+    (Active (active)
+      (match active.output (Away (id name) none) (Device (id moving) (some id)) (Nowhere () none)))
+    (Idle () none)))
+
+; The session paused where it stands at `now`, `Idle` kept.
+(helper listening.halt
+  ((session Session) (now Int))
+  Session
+  (match session
+    (Active (active)
+      (Session.Active
+        (record (at active.at)
+          (clock (listening.halted active.clock active.output now))
+          (from active.from)
+          (output active.output)
+          (queue active.queue))))
+    (Idle () (Session.Idle))))
+
+; * The presses
+
+; A track pressed: this queue, from here, at this point, playing. While
+; something is sounding the press goes to the device making it; otherwise the
+; caller takes the sound if it can play.
+(live listening.start
+  ((input Start))
+  (let ((session (listening.session_of ctx.user)))
+    (if (not (< input.at (len input.queue))) (refuse "the track is not in the queue"))
+    (if
+      (not
+        (or (or (listening.sounding session) (listening.reachable session))
+          (listening.can_play ctx.user ctx.session)))
+      (refuse "nothing here can play it"))
+    (let
+      ((stays (or (listening.sounding session) (not (listening.can_play ctx.user ctx.session))))
+       (output
+         (match session
+           (Active (active) (if stays active.output (listening.here ctx.session)))
+           (Idle () (listening.here ctx.session)))))
+      (listening.put_session ctx.user
+        (Session.Active
+          (record (at input.at)
+            (clock (Clock.Playing input.position ctx.now))
+            (from input.from)
+            (output output)
+            (queue input.queue)))))))
+
+; Resume, on the output where it can answer, else on the caller.
+(live listening.play
+  ()
+  (let ((session (listening.session_of ctx.user)))
+    (if (not (listening.is_active session)) (refuse "nothing is queued"))
+    (if (not (or (listening.reachable session) (listening.can_play ctx.user ctx.session)))
+      (refuse "nothing here can play it"))
+    (let
+      ((next
+         (match session
+           (Active (active)
+             (Session.Active
+               (record (at active.at)
+                 (clock
+                   (Clock.Playing (listening.standing active.clock active.output ctx.now) ctx.now))
+                 (from active.from)
+                 (output (listening.pressed active.output ctx.session))
+                 (queue active.queue))))
+           (Idle () (Session.Idle)))))
+      (listening.put_session ctx.user next))))
+
+; Pause, wherever the sound is. Nobody takes anything.
+(live listening.pause
+  ()
+  (let ((session (listening.session_of ctx.user)))
+    (if (not (listening.is_active session)) (refuse "nothing is queued"))
+    (listening.put_session ctx.user (listening.halt session ctx.now))))
+
+; Somewhere else in the track, playing on if it was.
+(live listening.seek
+  ((input Seek))
+  (let ((session (listening.session_of ctx.user)))
+    (if (not (listening.is_active session)) (refuse "nothing is queued"))
+    (let
+      ((next
+         (match session
+           (Active (active)
+             (Session.Active
+               (record (at active.at)
+                 (clock (listening.clock_at active.clock input.ms ctx.now))
+                 (from active.from)
+                 (output active.output)
+                 (queue active.queue))))
+           (Idle () (Session.Idle)))))
+      (listening.put_session ctx.user next))))
+
+; The next track or the one before, from its start; before the first is the
+; first again. A press that means a sound.
+(live listening.skip
+  ((input Skip))
+  (let ((session (listening.session_of ctx.user)))
+    (if (not (listening.is_active session)) (refuse "nothing is queued"))
+    (let
+      ((onward
+         (match session
+           (Active (active) (or (< input.by 0) (< (+ active.at 1) (len active.queue))))
+           (Idle () false))))
+      (if (not onward) (refuse "nothing comes after this"))
+      (if (not (or (listening.reachable session) (listening.can_play ctx.user ctx.session)))
+        (refuse "nothing here can play it"))
+      (let
+        ((next
+           (match session
+             (Active (active)
+               (listening.moved_to active (max (+ active.at input.by) 0) ctx.session ctx.now))
+             (Idle () (Session.Idle)))))
+        (listening.put_session ctx.user next)))))
+
+; A track of the queue, from its start. A press that means a sound.
+(live listening.jump
+  ((input Jump))
+  (let ((session (listening.session_of ctx.user)))
+    (if (not (listening.is_active session)) (refuse "nothing is queued"))
+    (if (not (listening.in_queue session input.index)) (refuse "the track is not in the queue"))
+    (if (not (or (listening.reachable session) (listening.can_play ctx.user ctx.session)))
+      (refuse "nothing here can play it"))
+    (let
+      ((next
+         (match session
+           (Active (active) (listening.moved_to active input.index ctx.session ctx.now))
+           (Idle () (Session.Idle)))))
+      (listening.put_session ctx.user next))))
+
+; Move the sound to a device that is here and can play: `moving` until it says
+; it has started, the clock standing where it stopped meanwhile. Handing it to
+; the device that already has it, settled, changes nothing.
+(live listening.transfer
+  ((input Transfer))
+  (let ((session (listening.session_of ctx.user)))
+    (if (not (listening.is_active session)) (refuse "nothing is playing to move"))
+    (if (not (listening.can_play ctx.user input.to))
+      (refuse "that device is not here, or cannot play"))
+    (listening.led_by ctx.user input.to)
+    (let
+      ((next
+         (match session
+           (Active (active)
+             (let ((settled (== active.output (listening.here input.to))))
+               (Session.Active
+                 (record (at active.at)
+                   (clock
+                     (if settled
+                       active.clock
+                       (listening.clock_at active.clock
+                         (listening.standing active.clock active.output ctx.now)
+                         ctx.now)))
+                   (from active.from)
+                   (output (if settled active.output (Output.Device input.to true)))
+                   (queue active.queue)))))
+           (Idle () (Session.Idle)))))
+      (listening.put_session ctx.user next))))
+
+; Nothing queued, nothing playing, nowhere.
+(live listening.stop () (listening.put_session ctx.user (Session.Idle)))

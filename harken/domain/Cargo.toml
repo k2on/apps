@@ -3,15 +3,11 @@ name = "harken-domain"
 version = "0.1.0"
 workspace = "../../rust"
 edition = "2021"
-description = "harken's domain on ArkDB v5 (docs/plan-v5.md §1.12): the tables, the library, the playlists and the listening session, as #[ark::*] functions."
+description = "harken's domain, written in ArkLang (docs/plan-v5.md §1.15): the directory of .ark files, and its tests."
 
 [lib]
 name = "harken_domain"
 path = "src/lib.rs"
-
-[[bin]]
-name = "harken-domain"
-path = "src/main.rs"
 
 [dependencies]
 ark = { path = "../../rust/ark" }

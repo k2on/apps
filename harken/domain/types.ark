@@ -1,0 +1,296 @@
+; The types: every record a function takes or answers, and the session's
+; state. A refinement (`where`) is checked once, where bytes come in, and its
+; words are what a form shows.
+
+; * The library's inputs
+
+(type AddSong
+  (record (title (where Text (trim) (non-empty) "a song needs a title"))
+    (artist (where Text (trim)))
+    (album (where Text (trim)))
+    (duration_ms Int)
+    (file (where Text (trim)))
+    (track Int)
+    (part (where Text (trim)))
+    (catalogue (where Text (trim)))
+    (performer (where Text (trim)))
+    (bpm Int)
+    (album_art (where Text (trim)))
+    (artist_art (where Text (trim)))
+    (disc Int)
+    (work_title (where Text (trim)))
+    (movement_no Int)))
+
+(type DescribeWork
+  (record (id Text)
+    (opus (where Text (trim)))
+    (key_sig (where Text (trim)))
+    (form (where Text (trim)))
+    (period (where Text (trim)))
+    (composed Int)
+    (art (where Text (trim)))))
+
+(type DescribeRecording
+  (record (id Text)
+    (recorded Int)
+    (venue (where Text (trim)))
+    (label (where Text (trim)))
+    (licence (where Text (trim)))
+    (art (where Text (trim)))))
+
+(type DescribePerson
+  (record (name (where Text (trim) (non-empty) "a person needs a name"))
+    (sort_name (where Text (trim)))
+    (born Int)
+    (died Int)
+    (art (where Text (trim)))))
+
+(type CreditRecording
+  (record (recording_id Text)
+    (person_name (where Text (trim) (non-empty) "a credit needs somebody to credit"))
+    (role (where Text (trim)))
+    (instrument (where Text (trim)))
+    (pos Int)))
+
+(type RemoveMedia (record (id (id media))))
+
+(type Library (record (playlist_id (id playlist))))
+
+(type Search (record (playlist_id (id playlist)) (needle Text)))
+
+(type AlbumInput (record (playlist_id (id playlist)) (name Text)))
+
+(type Artist (record (playlist_id (id playlist)) (name Text)))
+
+(type Works (record (composer Text)))
+
+(type WorkInput (record (id Text)))
+
+(type Recordings (record (work_id Text)))
+
+(type Credits (record (recording_id Text)))
+
+(type RecordingInput (record (playlist_id (id playlist)) (id Text)))
+
+; * What the library's queries answer
+
+; Something playable as a list renders it, and where it sits on the playlist
+; the list was read against, if it is on it.
+(type LibraryEntry
+  (record (added_ms Int)
+    (creator Text)
+    (duration_ms Int)
+    (file Text)
+    (id (id media))
+    (kind Text)
+    (playlist_pos (option Int))
+    (pos Int)
+    (title Text)
+    (user_id Text)))
+
+; A record, as the albums page lists it.
+(type AlbumsEntry (record (art Text) (creator Text) (name Text) (tracks Int)))
+
+; Whoever made something, as the artists page lists them.
+(type ArtistsEntry (record (art Text) (name Text) (tracks Int)))
+
+; What is true of a track as a song.
+(type TrackDetailsEntry
+  (record (album Text)
+    (bpm Int)
+    (catalogue Text)
+    (licence Text)
+    (media_id (id media))
+    (part Text)
+    (performer Text)
+    (track Int)))
+
+; Somebody some work is by, as the composers index lists them.
+(type ComposersEntry
+  (record (art Text) (born Int) (died Int) (name Text) (sort_name Text) (tracks Int) (works Int)))
+
+; A composition, as a composer's page lists them and a work's page heads.
+(type WorkSummary
+  (record (art Text)
+    (catalogue Text)
+    (composer Text)
+    (form Text)
+    (id Text)
+    (period Text)
+    (recordings Int)
+    (title Text)
+    (tracks Int)))
+
+; One performance, as a work's page lists them.
+(type RecordingsEntry
+  (record (art Text)
+    (id Text)
+    (label Text)
+    (licence Text)
+    (performers Text)
+    (recorded Int)
+    (tracks Int)))
+
+; One person on a recording, and what they did on it.
+(type CreditsEntry (record (instrument Text) (name Text) (pos Int) (role Text)))
+
+; * The playlists' inputs
+
+; A playlist's name: trimmed, and something.
+(type CreatePlaylist
+  (record (name (where Text (trim) (non-empty) "a playlist needs a name" (len 0 120)))))
+
+(type AddToPlaylist (record (playlist_id (id playlist)) (media_id (id media))))
+
+(type AddAllToPlaylist (record (playlist_id (id playlist))))
+
+(type RemoveFromPlaylist (record (playlist_id (id playlist)) (media_id (id media))))
+
+(type PlaylistsOf (record (media_id (id media))))
+
+(type PlaylistInput (record (playlist_id (id playlist))))
+
+; * The listening session
+
+; Something queued, or nothing.
+(type Session (sum (Active (active Active)) (Idle)))
+
+; A queue, where in it, whether it is playing, and on which device. `at` is
+; always inside the queue, and the queue is never empty: every transition that
+; could empty it goes `Idle`. `from` is where the queue was taken from, as the
+; client that pressed it names it (`album/Water Music`).
+(type Active (record (at Int) (clock Clock) (from Text) (output Output) (queue (list Track))))
+
+; How far into the track: paused at a point, or playing from a point since a
+; moment of the server's clock.
+(type Clock (sum (Paused (at_ms Int)) (Playing (at_ms Int) (since Int))))
+
+; Which device the sound belongs to: one that has gone and keeps it (its name
+; kept beside its id, for the picker), one that is here (and, until it says it
+; has started, `moving`), or none.
+(type Output (sum (Away (id Text) (name Text)) (Device (id Text) (moving Bool)) (Nowhere)))
+
+; A track, carried rather than looked up: everything needed to play it.
+(type Track
+  (record (album Text) (creator Text) (duration_ms Int) (file Text) (id (id media)) (title Text)))
+
+; A device standing in the session: what it said it is when it came, what it
+; can do, and where its volume (0 to 100) and its group are. `can_volume` is
+; what it said of itself (`equip`); `family`, which speakers it can be joined
+; with, none for anything that is not a speaker that groups; `follows`, the
+; leader whose playback it follows while it is joined to one.
+(type Present
+  (record (can_play Bool)
+    (can_volume Bool)
+    (family (option Text))
+    (follows (option Text))
+    (id Text)
+    (kind Text)
+    (muted Bool)
+    (name Text)
+    (user Text)
+    (volume Int)))
+
+; A device as it introduces itself: what `on_join` and `on_leave` are told.
+(type Device (record (can_play Bool) (id Text) (kind Text) (name Text) (user Text)))
+
+; A group's volumes, counted and added.
+(type Tally (record (n Int) (sum Int)))
+
+; * The listening session's inputs
+
+; A queue to play: never empty.
+(type Queue (where (list Track) (non-empty)))
+
+; Milliseconds from 0.
+(type Ms (where Int (fn (n) (>= n 0))))
+
+; A speaker family's name: at least one character.
+(type Family (where Text (len 1 ..)))
+
+(type Start
+  (record (at (where Int (fn (n) (>= n 0))))
+    (from Text)
+    (position (where Int (fn (n) (>= n 0))))
+    (queue Queue)))
+
+(type Seek (record (ms (where Int (fn (n) (>= n 0))))))
+
+(type Skip
+  (record
+    (by
+      (where Int
+        (fn (n) (and (>= n -1) (<= n 1)))
+        "a skip is one track either way"
+        (fn (n) (!= n 0))
+        "a skip is one track either way"))))
+
+(type Jump (record (index (where Int (fn (n) (>= n 0))))))
+
+(type Transfer (record (to Text)))
+
+(type At (record (at_ms (where Int (fn (n) (>= n 0))))))
+
+(type Report (record (at_ms (where Int (fn (n) (>= n 0)))) (since Int)))
+
+(type Advance (record (from_track Int)))
+
+(type Enqueue (record (next Bool) (tracks Queue)))
+
+(type Remove (record (index (where Int (fn (n) (>= n 0))))))
+
+(type Move (record (from (where Int (fn (n) (>= n 0)))) (to (where Int (fn (n) (>= n 0))))))
+
+(type Scrub (record (at_ms (option Ms))))
+
+(type Equip
+  (record (can_volume Bool)
+    (family (option Family))
+    (muted Bool)
+    (volume (where Int (fn (n) (and (>= n 0) (<= n 100))) "between 0 and 100"))))
+
+(type SetVolume
+  (record (device Text) (level (where Int (fn (n) (and (>= n 0) (<= n 100))) "between 0 and 100"))))
+
+(type NudgeVolume
+  (record
+    (delta
+      (where Int
+        (fn (n) (and (>= n -100) (<= n 100)))
+        "between -100 and 100"
+        (fn (n) (!= n 0))
+        "a nudge moves the volume"))
+    (device Text)))
+
+(type SetMute (record (device Text) (muted Bool)))
+
+(type ReportVolume
+  (record (level (where Int (fn (n) (and (>= n 0) (<= n 100))) "between 0 and 100")) (muted Bool)))
+
+(type Member (record (device Text)))
+
+(type ReportGroup (record (members (list Text))))
+
+(type GroupVolume
+  (record (level (where Int (fn (n) (and (>= n 0) (<= n 100))) "between 0 and 100"))))
+
+(type GroupNudge
+  (record
+    (delta
+      (where Int
+        (fn (n) (and (>= n -100) (<= n 100)))
+        "between -100 and 100"
+        (fn (n) (!= n 0))
+        "a nudge moves the volume"))))
+
+(type GroupMute (record (muted Bool)))
+
+; A track that was played, as the device that made the sound says it.
+(type RecordPlay
+  (record (track (id media))
+    (title Text)
+    (creator Text)
+    (album Text)
+    (duration_ms (where Int (fn (n) (>= n 0))))
+    (file Text)
+    (from Text)))

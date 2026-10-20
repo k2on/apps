@@ -1,12 +1,13 @@
-//! The builder port (`harken_domain::domain`) held to the pin: every
-//! function at the hash the attribute macros built it at, once its
-//! declarations' names (§1.15, which the macros did not keep) are taken
-//! out and its callees named by their pinned hashes. So the names are the
-//! only thing A3 moved. Falsified by numbering a playlist "Favorites [1]":
-//! `playlists.numbered` and the three bound functions that reach it were
-//! wrong; and, once names were kept, by comparing the functions as built:
-//! 108 of 127 were wrong (every one declaring a type: a declaration's
-//! bytes gained its names).
+//! harken's domain, ported by hand to ArkLang (`harken/domain/*.ark`),
+//! held to the pin: every function at the hash the attribute macros built
+//! it at, once its declarations' and its binders' names (§1.15, which the
+//! macros did not keep) are taken out and its callees named by their
+//! pinned hashes. So the names are the only thing A3 and A4 moved.
+//! Falsified by numbering a playlist "Favorites [1]": `playlists.numbered`
+//! and the three bound functions that reach it were wrong; once names were
+//! kept, by comparing the functions as built: 108 of 127 were wrong (every
+//! one declaring a type: a declaration's bytes gained its names); and in
+//! the text, by writing `create_playlist`'s `(?? last.pos 0)` as `(?? last.pos 1)`.
 
 use std::collections::BTreeMap;
 
@@ -68,13 +69,13 @@ fn as_the_macros(f: &Function, old: &BTreeMap<FnHash, FnHash>) -> FnHash {
 }
 
 #[test]
-fn every_function_built_is_the_macros() {
+fn every_function_is_the_macros() {
     let pinned: BTreeMap<&str, &str> = include_str!("fixtures/functions.txt")
         .lines()
         .filter_map(|l| l.split_once(' '))
         .filter(|(n, _)| *n != "module")
         .collect();
-    let d = harken_domain::domain();
+    let d = harken_domain::text();
     let old: BTreeMap<FnHash, FnHash> = d
         .module
         .bindings

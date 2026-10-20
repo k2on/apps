@@ -228,15 +228,13 @@
             ark-fuzz 300 2026 traces $out
           '';
 
-          # The binary that writes harken's module file from the domain crate,
-          # and the file it writes (harken.ark: the binding map and every
-          # body, what the server's HARKEN_MODULE and HARKEN_OLD_MODULES
-          # read), verified by arkc.
-          harken-domain-bin = crate { pname = "harken-domain"; };
-          harken-domain = pkgs.runCommand "harken-domain" { nativeBuildInputs = [ harken-domain-bin ark ]; } ''
+          # harken's domain (harken/domain: a directory of ArkLang, §1.15)
+          # as it is checked in, built and checked by arkc: what the
+          # server's HARKEN_MODULE reads.
+          harken-domain = pkgs.runCommand "harken-domain" { nativeBuildInputs = [ ark ]; } ''
             mkdir -p $out
-            harken-domain $out/harken.ark
-            arkc verify $out/harken.ark
+            cp ${./harken/domain}/*.ark $out/
+            arkc check $out
           '';
 
           # The pinned previous revisions (nix/versions.nix), each its
@@ -252,8 +250,10 @@
               server = input.packages.${system}.harken-server;
               # The module that revision's peers author at, as its tree has
               # it committed: what a fresh server of this build is told it
-              # ran before (`HARKEN_OLD_MODULES`, docs/plan-guards.md D1).
-              module = "${input}/harken/domain/harken.ark";
+              # ran before (`HARKEN_OLD_MODULES`, docs/plan-guards.md D1) —
+              # its module file, where it kept one, else its domain's directory.
+              module = let d = "${input}/harken/domain"; in
+                if builtins.pathExists "${d}/harken.ark" then "${d}/harken.ark" else d;
             })
             (import ./nix/versions.nix);
           # What the fleet reads to find them (harken/server/tests/support/fleet.rs).
@@ -366,13 +366,10 @@
               '';
               installPhase = "touch $out";
             };
-            # harken/domain/harken.ark is what the domain crate writes, and
-            # arkc verifies it: the file a pinned revision's module is read
-            # from (nix/versions.nix), so it must not drift from the source.
+            # harken's domain builds from its text, every function checks and
+            # the module verifies (`arkc check`).
             harken-domain = pkgs.runCommand "check-harken-domain" { nativeBuildInputs = [ ark ]; } ''
-              diff ${harken-domain}/harken.ark ${./harken/domain/harken.ark} \
-                || { echo "harken/domain/harken.ark is not what harken-domain writes: write it again"; exit 1; }
-              arkc verify ${./harken/domain/harken.ark}
+              arkc check ${harken-domain}
               touch $out
             '';
           } // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {

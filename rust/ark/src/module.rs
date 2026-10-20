@@ -169,6 +169,11 @@ impl Domain {
         Ok(self)
     }
 
+    /// Every function the domain holds, decoded.
+    pub fn functions(&self) -> Vec<Function> {
+        self.bodies.values().map(|b| Function::from_bytes(b).expect("a body installed")).collect()
+    }
+
     pub fn get(&self, name: &str) -> FnHash {
         self.module.get(name).unwrap_or_else(|| panic!("no function {name}"))
     }
@@ -201,4 +206,20 @@ impl Domain {
     pub fn run(&self, store: &dyn Read, ctx: &Ctx, name: &str, input: &[u8]) -> Result<Vec<Change>, Refusal> {
         self.lib.procedure(&self.get(name)).expect("an installed function").run(store, ctx, input)
     }
+}
+
+/// §1.2, §1.5 Whether `new` may follow `old`: its schema a prefix-extension
+/// of old's, and every function it binds that `old` did not, checked over
+/// the new schema. How many are new.
+pub fn compat(old: &Module, new: &Domain) -> Result<usize, Refusal> {
+    crate::schema::compat(&old.schema, &new.module.schema)?;
+    let mut n = 0;
+    for (name, h) in new.module.bindings.iter().filter(|b| !old.bindings.iter().any(|o| o.1 == b.1)) {
+        let f = new.lib.get(h).ok_or_else(|| Refusal(format!("{name}: no function {h}")))?;
+        new.lib
+            .install(&new.module.schema, f.f.clone())
+            .map_err(|e| Refusal(format!("{name}: {}", e.0)))?;
+        n += 1;
+    }
+    Ok(n)
 }

@@ -1,93 +1,92 @@
-//! `arkc`: module files (`(Module, [body])` under §1.1's codec, what
-//! `harken-domain` writes and a server's `HARKEN_MODULE` reads), checked.
+//! `arkc`: modules checked, printed and compared (§1.5, §1.15). A module is
+//! a domain's directory of ArkLang, one file of it, or a module file
+//! (`(Module, [body])` under §1.1's codec), each read by `ark::sexp::load`.
 //!
 //! ```text
-//! arkc verify FILE...     every body checked, the module verified (§1.5); its hash
-//! arkc compat OLD NEW     whether NEW may follow OLD: the schema a prefix-extension (§1.2),
-//!                         every function NEW binds and OLD did not checked over NEW's schema
-//! arkc build FILE... -o OUT  ArkLang (§1.15), the files one module, compiled to a module file
-//! arkc print FILE         a module file as ArkLang
+//! arkc check MODULE...            built, every function checked, the module verified; its hash
+//! arkc print MODULE [-o DIR]      as ArkLang: to stdout, or under DIR one file per dotted
+//!                                 prefix, beside schema.ark and types.ark
+//! arkc compat OLD NEW             whether NEW may follow OLD (§1.2's prefix rule, every new
+//!                                 function checked over NEW's schema)
+//! arkc build MODULE -o FILE       the module file
 //! ```
 
-use ark::author::Node;
-use ark::ir::Function;
-use ark::module::{verify, Lib, Module};
-use ark::Refusal;
+use std::collections::BTreeMap;
+use std::path::Path;
 
-/// A module file read: every body installed once what it calls is, and
-/// the module verified.
-fn read(path: &str) -> Result<(Module, Lib), String> {
-    let at = |e: Refusal| format!("{path}: {}", e.0);
-    let bytes = std::fs::read(path).map_err(|e| format!("{path}: {e}"))?;
-    let (m, bodies) = <(Module, Vec<Vec<u8>>)>::from_bytes(&bytes).map_err(at)?;
-    let lib = Lib::default();
-    let mut todo: Vec<Function> = bodies.iter().map(|b| Function::from_bytes(b)).collect::<Result<_, _>>().map_err(at)?;
-    while !todo.is_empty() {
-        let before = todo.len();
-        let mut last = None;
-        for f in std::mem::take(&mut todo) {
-            if let Err(e) = lib.install(&m.schema, f.clone()) {
-                last = Some(e);
-                todo.push(f);
-            }
-        }
-        if todo.len() == before {
-            return Err(at(last.expect("a refusal")));
-        }
-    }
-    verify(&m, &lib).map_err(at)?;
-    Ok((m, lib))
+use ark::sexp::{form, forms, layout, print, Sx, K};
+use ark::Domain;
+
+fn load(p: &str) -> Result<Domain, String> {
+    ark::sexp::load(Path::new(p)).map_err(|r| r.0)
 }
 
-fn run(args: &[String]) -> Result<(), String> {
+/// What a command says, or why it could not.
+fn run(args: &[&str]) -> Result<String, String> {
+    let said = |m: &str, d: &Domain| format!("{m}  {} functions  {}\n", d.bodies.len(), d.module.hash());
     match args {
-        [cmd, files @ ..] if cmd == "verify" && !files.is_empty() => {
-            for f in files {
-                let (m, _) = read(f)?;
-                println!("{f}  {} bindings  {}", m.bindings.len(), m.hash());
+        ["check", ms @ ..] if !ms.is_empty() => ms.iter().map(|m| Ok(said(m, &load(m)?))).collect(),
+        ["print", m] => {
+            let d = load(m)?;
+            print(&d.module, &d.functions()).map_err(|r| r.0)
+        }
+        ["print", m, "-o", dir] => {
+            let d = load(m)?;
+            let (mut files, mut schema) = (
+                BTreeMap::<String, Vec<String>>::new(),
+                vec![Sx {
+                    at: (0, 0),
+                    k: K::Sym("schema".into()),
+                }],
+            );
+            for (name, x) in forms(&d.module, &d.functions()).map_err(|r| r.0)? {
+                let file = match form(&x).map(|f| f.0) {
+                    Some("table") => {
+                        schema.push(x);
+                        continue;
+                    }
+                    Some("type") => "types",
+                    _ => name.rsplit_once('.').map_or("functions", |p| p.0),
+                };
+                files.entry(file.into()).or_default().push(layout(&x, 0));
             }
-            Ok(())
-        }
-        [cmd, old, new] if cmd == "compat" => {
-            let (o, _) = read(old)?;
-            let (n, _) = read(new)?;
-            ark::schema::compat(&o.schema, &n.schema).map_err(|e| format!("{new} may not follow {old}: {}", e.0))?;
-            let fresh = n.bindings.iter().filter(|b| !o.bindings.iter().any(|x| x.1 == b.1)).count();
-            println!("{new} may follow {old}: {fresh} functions new");
-            Ok(())
-        }
-        [cmd, rest @ ..] if cmd == "build" && rest.len() >= 3 && rest[rest.len() - 2] == "-o" => {
-            let (files, out) = (&rest[..rest.len() - 2], &rest[rest.len() - 1]);
-            let mut src = String::new();
-            for f in files {
-                src += &std::fs::read_to_string(f).map_err(|e| format!("{f}: {e}"))?;
-                src += "\n";
+            files.insert(
+                "schema".into(),
+                vec![layout(
+                    &Sx {
+                        at: (0, 0),
+                        k: K::List(schema),
+                    },
+                    0,
+                )],
+            );
+            std::fs::create_dir_all(dir).map_err(|e| format!("{dir}: {e}"))?;
+            for (f, xs) in &files {
+                let path = Path::new(dir).join(format!("{f}.ark"));
+                std::fs::write(&path, xs.join("\n\n") + "\n").map_err(|e| format!("{}: {e}", path.display()))?;
             }
-            let d = ark::sexp::build(&src).map_err(|e| e.0)?;
-            let file = (d.module.clone(), d.bodies.values().cloned().collect::<Vec<_>>());
-            std::fs::write(out, file.to_bytes()).map_err(|e| format!("{out}: {e}"))?;
-            println!("{out}  {} functions  {}", d.bodies.len(), d.module.hash());
-            Ok(())
+            Ok(format!("{dir}: {} files\n", files.len()))
         }
-        [cmd, file] if cmd == "print" => {
-            let bytes = std::fs::read(file).map_err(|e| format!("{file}: {e}"))?;
-            let (m, bodies) = <(Module, Vec<Vec<u8>>)>::from_bytes(&bytes).map_err(|e| format!("{file}: {}", e.0))?;
-            let fns = bodies
-                .iter()
-                .map(|b| Function::from_bytes(b))
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| e.0)?;
-            print!("{}", ark::sexp::print(&m, &fns).map_err(|e| format!("{file}: {}", e.0))?);
-            Ok(())
+        ["compat", old, new] => match ark::module::compat(&load(old)?.module, &load(new)?) {
+            Ok(fresh) => Ok(format!("{new} may follow {old}: {fresh} functions new\n")),
+            Err(r) => Err(format!("{new} may not follow {old}: {}", r.0)),
+        },
+        ["build", m, "-o", out] => {
+            let d = load(m)?;
+            std::fs::write(out, d.to_file()).map_err(|e| format!("{out}: {e}"))?;
+            Ok(said(out, &d))
         }
-        _ => Err("usage: arkc verify FILE... | arkc compat OLD NEW | arkc build FILE... -o OUT | arkc print FILE".into()),
+        _ => Err("usage: arkc check MODULE... | print MODULE [-o DIR] | compat OLD NEW | build MODULE -o FILE".into()),
     }
 }
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if let Err(e) = run(&args) {
-        eprintln!("arkc: {e}");
-        std::process::exit(1);
+    match run(&args.iter().map(String::as_str).collect::<Vec<_>>()) {
+        Ok(said) => print!("{said}"),
+        Err(e) => {
+            eprintln!("arkc: {e}");
+            std::process::exit(1);
+        }
     }
 }

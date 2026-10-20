@@ -57,9 +57,11 @@ fn y(s: &str) -> Sx {
 /// the first line with its first argument when that is an atom or fits
 /// there, and each other argument is on its own two spaces in; a list
 /// with no head (a `let`'s bindings) is one element a line, under the
-/// first. Falsified by measuring the width without the column it starts
-/// at: the nested form stayed on one line; and by breaking every argument
-/// onto its own line: the `if` lost its condition from the first line.
+/// first; a line's width counts the `)`s that close on it. Falsified by
+/// measuring the width without the column it starts at: the nested form
+/// stayed on one line; by breaking every argument onto its own line: the
+/// `if` lost its condition from the first line; and by not counting the
+/// closing `)`s: `(f (g …))` was one line of 101 columns.
 #[test]
 fn the_layout_breaks_past_100_columns() {
     let w = |n: usize| "w".repeat(n);
@@ -82,6 +84,8 @@ fn the_layout_breaks_past_100_columns() {
             w(10)
         )
     );
+    let closed = l(vec![y("f"), l(vec![y("g"), word(93)])]);
+    assert_eq!(layout(&closed, 0), format!("(f\n  (g {}))", w(93)), "its `)` is on its line");
     let binds = l(vec![l(vec![y("a"), word(50)]), l(vec![y("b"), word(50)])]);
     assert_eq!(layout(&binds, 4), format!("((a {})\n     (b {}))", w(50), w(50)));
 }
@@ -227,4 +231,32 @@ fn a_domain_is_a_directory_of_files() {
     let e = ark::sexp::build_dir(&dir).err().unwrap().0;
     assert!(e.starts_with("b/d.ark:1:29: `m` is no variable"), "{e}");
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// A `let`'s tuple that is a row of one table is written as that row's
+/// record, and a `map`'s lambda gives the record its result's element
+/// wants: each the bytes the tuple is, printed as written. Falsified by
+/// printing a `map`'s lambda with no type wanted: the record came back a
+/// tuple, which the lowering then refused; and by printing a `let`'s row
+/// as a tuple: `(as (row t) …)` was not printed.
+#[test]
+fn records_take_the_type_their_place_wants() {
+    let row = "(mutator a ((k Int)) (let ((row (as (row t) (record (id k) (name \"x\") (next none))))) (insert t row)))";
+    let tuple = "(mutator a ((k Int)) (let ((row (tuple k \"x\" (as (option Int) none)))) (insert t row)))";
+    assert_eq!(unnamed(row), unnamed(tuple));
+    let pairs = "(type Pair (record (a Int) (b Text)))\n(query p () (list Pair) (map t (fn (r) (record (a r.id) (b r.name)))))";
+    for src in [row, pairs] {
+        let d = build(&format!("{ROWS}{src}")).unwrap_or_else(|e| panic!("{e}\n{src}"));
+        let fns: Vec<Function> = d.bodies.keys().map(|h| d.lib.get(h).unwrap().f.clone()).collect();
+        let text = print(&d.module, &fns).unwrap();
+        let last = src.lines().last().unwrap();
+        assert!(text.contains(&ark::sexp::layout(&ark::sexp::read(last).unwrap()[0], 0)), "{text}");
+    }
+    let e = build(&format!(
+        "{ROWS}(type Pair (record (a Int) (b Text)))\n(query p () (list Pair) (map t (fn (r) (tuple r.id r.name))))"
+    ))
+    .err()
+    .unwrap()
+    .0;
+    assert!(e.contains("a record is written (record"), "{e}");
 }

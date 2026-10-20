@@ -162,35 +162,42 @@ fn flat(x: &Sx) -> String {
 }
 
 /// A form laid out from column `col`: on one line when it ends by column
-/// 100; else its head, and its first argument when that is an atom or
-/// ends by column 100, on the first line, and each other argument on its
-/// own, two spaces past the form's `(`. A list whose head is no symbol (a
-/// `let`'s bindings) is one element a line, each under the first.
+/// 100, the `)`s that close around it on its line counted; else its head,
+/// and its first argument when that is an atom or ends there too, on the
+/// first line, and each other argument on its own, two spaces past the
+/// form's `(`. A list whose head is no symbol (a `let`'s bindings) is one
+/// element a line, each under the first.
 pub fn layout(x: &Sx, col: usize) -> String {
-    let (K::List(xs), false) = (&x.k, col + flat(x).chars().count() <= 100) else {
+    lay(x, col, 0)
+}
+
+fn lay(x: &Sx, col: usize, tail: usize) -> String {
+    let width = |x: &Sx| flat(x).chars().count();
+    let (K::List(xs), false) = (&x.k, col + width(x) + tail <= 100) else {
         return flat(x);
     };
     let at = |c: usize| format!("\n{}", " ".repeat(c));
+    let last = |i: usize| if i + 1 == xs.len() { tail + 1 } else { 0 };
     let K::Sym(head) = &xs[0].k else {
-        let each: Vec<String> = xs.iter().map(|a| layout(a, col + 1)).collect();
+        let each: Vec<String> = xs.iter().enumerate().map(|(i, a)| lay(a, col + 1, last(i))).collect();
         return format!("({})", each.join(&at(col + 1)));
     };
     let mut out = format!("({head}");
-    let rest = match xs.get(1) {
-        Some(a) if !matches!(a.k, K::List(_)) || col + head.len() + 2 + flat(a).chars().count() <= 100 => {
+    let first = match xs.get(1) {
+        Some(a) if !matches!(a.k, K::List(_)) || col + head.len() + 2 + width(a) + last(1) <= 100 => {
             out += &format!(" {}", flat(a));
-            &xs[2..]
+            2
         }
-        _ => &xs[1..],
+        _ => 1,
     };
-    for a in rest {
-        out += &(at(col + 2) + &layout(a, col + 2));
+    for (i, a) in xs.iter().enumerate().skip(first) {
+        out += &(at(col + 2) + &lay(a, col + 2, last(i)));
     }
     out + ")"
 }
 
 /// `(head args…)` with a symbol for its head.
-fn form(x: &Sx) -> Option<(&str, &[Sx])> {
+pub fn form(x: &Sx) -> Option<(&str, &[Sx])> {
     match &x.k {
         K::List(xs) => match xs.split_first() {
             Some((Sx { k: K::Sym(h), .. }, a)) => Some((h, a)),
@@ -909,6 +916,10 @@ impl Lo {
                 let t = infer(&self.types(), &self.ty_of(first, at)?);
                 List(self.store(t), es)
             }
+            "as" if form(&a[1]).is_some_and(|f| f.0 == "record") => {
+                let t = self.ty(&a[0])?;
+                return self.ex(&a[1], Some(&t));
+            }
             "as" => {
                 let t = self.ty(&a[0])?;
                 let (t, i, el) = (self.store(t.clone()), self.inner(Some(&t)), self.elem(Some(&t)));
@@ -916,7 +927,7 @@ impl Lo {
                     (K::Sym(n), ..) if n == "none" && i.is_some() => Variant(t, 0, vec![]),
                     (_, Some(("some", [v])), _) if i.is_some() => Variant(t, 1, vec![self.ex(v, i.as_ref())?]),
                     (_, Some(("list", es)), Some(el)) => List(el.clone(), es.iter().map(|x| self.ex(x, Some(&el))).collect::<R<_>>()?),
-                    _ => return fail(at, "(as T e) types a none, a (some …) or a (list …) of T"),
+                    _ => return fail(at, "(as T e) types a none, a (some …), a (list …) or a (record …) of T"),
                 }
             }
             "none?" => Un(UnOp::Not, bx(Std(StdFn::IsSome, vec![e(self, 0)?]))),
@@ -936,8 +947,10 @@ impl Lo {
                 Update(t0()?, bx(k), bx(self.lam(&a[a.len() - 1], vec![row.clone()], Some(&row))?))
             }
             "filter" | "map" | "join" => {
-                let ls = a[..a.len() - 1].iter().map(|x| self.ex(x, None)).collect::<R<Vec<_>>>()?;
-                let f = bx(self.lam(&a[a.len() - 1], ls.iter().map(|x| self.list_of(x, at)).collect::<R<_>>()?, None)?);
+                let w = want.filter(|_| h == "filter");
+                let ls = a[..a.len() - 1].iter().map(|x| self.ex(x, w)).collect::<R<Vec<_>>>()?;
+                let each = self.elem(want).filter(|_| h == "map");
+                let f = bx(self.lam(&a[a.len() - 1], ls.iter().map(|x| self.list_of(x, at)).collect::<R<_>>()?, each.as_ref())?);
                 let mut ls = ls.into_iter().map(bx);
                 match h {
                     "filter" => Filter(ls.next().unwrap(), f),
@@ -956,7 +969,7 @@ impl Lo {
                 Group(bx(g), bx(by), bx(self.lam(&a[2], vec![k, Ty::list(x)], None)?))
             }
             "sort" => {
-                let s = e(self, 0)?;
+                let s = self.ex(&a[0], want)?;
                 let x = self.list_of(&s, at)?;
                 let Some(("fn", [ps, kb])) = form(&a[1]) else {
                     return fail(a[1].at, "(fn (x) keys) expected");
@@ -974,7 +987,7 @@ impl Lo {
                 let body = if ks.len() == 1 { ks.pop().unwrap() } else { Tuple(ks) };
                 Sort(bx(s), bx(Lambda(1, bx(body))), dirs)
             }
-            "take" => Take(bx(e(self, 0)?), bx(e(self, 1)?)),
+            "take" => Take(bx(self.ex(&a[0], want)?), bx(e(self, 1)?)),
             "new-id" => {
                 let t = self.auto(format!("Id<{}>", t0()?), id_decl());
                 (self.store(t), Ctx(CtxField::NewId(t0()?))).1
@@ -1237,6 +1250,19 @@ impl Lo {
         Ok(h("fn", [l(ns), body?]))
     }
 
+    /// A `let`'s value: a tuple that is a row of one table as `(as (row t)
+    /// (record …))`.
+    fn bound(&mut self, v: &Expr) -> R<Sx> {
+        let (t, rows) = (self.type_of(v)?.0, self.rows());
+        let mut of = rows
+            .iter()
+            .filter(|r| matches!(v, Expr::Tuple(es) if !es.is_empty()) && self.types().sub(&t, &r.1));
+        match (of.next(), of.next()) {
+            (Some((tab, row)), None) => Ok(h("as", [h("row", [y(&tab.name)]), self.pr(v, Some(row))?])),
+            _ => self.pr(v, None),
+        }
+    }
+
     /// A match on an option that is `(?? P D)` or `(?. S f …)`: its some
     /// arm fields of what it binds, and `?.`'s option the one lowering
     /// makes.
@@ -1320,7 +1346,7 @@ impl Lo {
             Let(..) => {
                 let (mut binds, mut e) = (vec![], e);
                 while let Let(v, b) = e {
-                    let (t, v) = (self.type_of(v)?.0, self.pr(v, None)?);
+                    let (t, v) = (self.type_of(v)?.0, self.bound(v)?);
                     binds.push(h(&self.bind(&t, None), [v]));
                     e = b;
                 }
@@ -1451,7 +1477,10 @@ impl Lo {
                 let x = self.list_of(s, at)?;
                 h(
                     if matches!(e, Filter(..)) { "filter" } else { "map" },
-                    [self.pr(s, None)?, self.plam(f, &[x], None)?],
+                    match e {
+                        Filter(..) => [self.pr(s, want)?, self.plam(f, &[x], None)?],
+                        _ => [self.pr(s, None)?, self.plam(f, &[x], self.elem(want).as_ref())?],
+                    },
                 )
             }
             Join(a, b, on) => {
@@ -1473,7 +1502,7 @@ impl Lo {
                 let (x, Lambda(_, kb)) = (self.list_of(s, at)?, &**keys) else {
                     return Err(Refusal::new("a lambda expected"));
                 };
-                let list = self.pr(s, None)?;
+                let list = self.pr(s, want)?;
                 let v = self.bind(&x, None);
                 let key = |me: &mut Self, k: &Expr, d: &Dir, bare: bool| -> R<Sx> {
                     let k = me.pr(k, None)?;
@@ -1495,7 +1524,7 @@ impl Lo {
                 self.scope.truncate(depth);
                 h("sort", [list, h("fn", [l(vec![y(v)]), body])])
             }
-            Take(s, n) => self.prs("take", &[(**s).clone(), (**n).clone()], &[])?,
+            Take(s, n) => h("take", [self.pr(s, want)?, self.pr(n, None)?]),
             Refuse(m) => self.prs("refuse", std::slice::from_ref(&**m), &[])?,
         };
         self.scope.truncate(depth);
@@ -1567,6 +1596,20 @@ pub fn build_dir(dir: &std::path::Path) -> R<Domain> {
         })
         .collect::<R<Vec<_>>>()?;
     build_files(&files)
+}
+
+/// A module from a path: a domain's directory, a file of ArkLang, or a
+/// module file (§1.5's bytes, which are no UTF-8).
+pub fn load(path: &std::path::Path) -> R<Domain> {
+    if path.is_dir() {
+        return build_dir(path);
+    }
+    let bytes = std::fs::read(path).map_err(|e| Refusal(format!("{}: {e}", path.display())))?;
+    let at = |r: Refusal| Refusal(format!("{}:{}", path.display(), r.0));
+    match String::from_utf8(bytes) {
+        Ok(text) => build(&text).map_err(at),
+        Err(e) => Domain::from_file(e.as_bytes()).map_err(|r| Refusal(format!("{}: {}", path.display(), r.0))),
+    }
 }
 
 /// §1.15 A module from files of text, `(name, text)`: every form read
