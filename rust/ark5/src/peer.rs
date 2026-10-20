@@ -38,7 +38,11 @@
 //! are the ones bound in the modules its operator loaded: it never loads a
 //! body it is sent. An intent naming any other is `Held` — the device keeps
 //! it pending and pushes it again on its next connection — and a chain
-//! handed over with one is refused.
+//! handed over with one is refused. A held intent keeps its `local`: those
+//! its session pushes after it wait on the authority, in order, and are
+//! judged when it is — pushed again once the function is loaded, or when
+//! the driver says it loaded functions (`Input::Loaded`), each answer then
+//! sent to the session's connections (`Output::To`).
 //!
 //! **Partial sync is a view** (§1.8). A connection the driver says is fed
 //! by a scope (`Input::Feed`) is served its union: the rows a `Pure`
@@ -213,13 +217,15 @@ pub enum Verdict {
 }
 
 /// What an authority keeps beside its log: every intent it judged and how,
-/// and each session's last `local`; and, for a device alone, where it
-/// forked from the log it will join again.
+/// and each session's last `local`; for a device alone, where it forked
+/// from the log it will join again; and, by session, a held intent and
+/// those pushed after it, in order, with who pushed them.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Journal {
     pub fork: Option<(Seq, EntryHash)>,
     pub verdicts: BTreeMap<EntryId, Verdict>,
     pub last: BTreeMap<String, i64>,
+    pub waiting: BTreeMap<String, Vec<(Who, Entry)>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -264,6 +270,9 @@ pub enum Input {
     Alone,
     Join,
     Compact(Seq),
+    /// The driver loaded functions into `cas` (an operator's module): what
+    /// waits behind a held intent is judged again.
+    Loaded,
     /// How the connection verified as `who` is fed (an authority's).
     Feed {
         who: Who,
@@ -407,6 +416,13 @@ impl Peer {
             Input::Alone => self.alone(&mut o),
             Input::Join => self.join(&mut o),
             Input::Compact(n) => self.compact(n, &mut o),
+            Input::Loaded => {
+                let sessions: Vec<String> = match &self.role {
+                    Role::Authority { journal } => journal.waiting.keys().cloned().collect(),
+                    Role::Replica => vec![],
+                };
+                sessions.iter().for_each(|s| self.unhold(s, false, &mut o));
+            }
             Input::Feed { who, feed } => match feed {
                 Feed::Whole => drop(self.served.remove(&who.session)),
                 Feed::Scoped(scope) => {
@@ -701,7 +717,7 @@ impl Peer {
         }
     }
 
-    fn push(&mut self, who: &Who, mut entry: Entry, o: &mut Out) {
+    fn push(&mut self, who: &Who, entry: Entry, o: &mut Out) {
         let (id, space) = (entry.id, self.space);
         let j = self.journal();
         match j.verdicts.get(&id) {
@@ -740,17 +756,77 @@ impl Peer {
                 },
             });
         }
+        // Behind a held one of its session: it waits, in order; the held
+        // one pushed again is judged again.
+        if let Some(q) = self.journal().waiting.get_mut(&entry.session) {
+            if q[0].1.id == id {
+                q[0].0 = who.clone();
+                return self.unhold(&entry.session, true, o);
+            }
+            if q.last().is_some_and(|(_, e)| e.local + 1 == entry.local) {
+                q.push((who.clone(), entry));
+            }
+            return;
+        }
         if entry.local != last + 1 && !(space == Space::Volatile && entry.local > last) {
             return;
         }
         if self.cas.get(&entry.func).is_none() {
-            return o.send(Frame::Held { space, id, func: entry.func });
+            let func = entry.func;
+            if space == Space::Durable {
+                self.journal().waiting.insert(entry.session.clone(), vec![(who.clone(), entry)]);
+            }
+            return o.send(Frame::Held { space, id, func });
         }
-        entry.actor = who.actor.clone();
-        entry.roles = who.roles.clone();
+        let f = self.judge(who, entry, o);
+        o.send(f);
+    }
+
+    /// One intent stamped by who pushed it and sequenced: the answer.
+    fn judge(&mut self, who: &Who, mut entry: Entry, o: &mut Out) -> Frame {
+        let (id, space) = (entry.id, self.space);
+        (entry.actor, entry.roles) = (who.actor.clone(), who.roles.clone());
         match self.sequence(entry, None, o) {
-            Ok(seq) => o.send(Frame::Ack { space, id, seq, facts: None }),
-            Err(why) => o.send(Frame::Reject { space, id, why }),
+            Ok(seq) => Frame::Ack { space, id, seq, facts: None },
+            Err(why) => Frame::Reject { space, id, why },
+        }
+    }
+
+    /// What waits behind `session`'s held intent, judged in order while
+    /// this authority runs its function: each answer, and the `Held` of one
+    /// it does not, sent back (`pushed`, the held one pushed again) or to
+    /// the session's connections.
+    fn unhold(&mut self, session: &str, pushed: bool, o: &mut Out) {
+        let mut first = true;
+        while let Some((who, e)) = self.journal().waiting.get(session).and_then(|q| q.first().cloned()) {
+            let f = match self.cas.get(&e.func) {
+                None if first && !pushed => return,
+                None => Frame::Held {
+                    space: self.space,
+                    id: e.id,
+                    func: e.func,
+                },
+                Some(_) => {
+                    let q = self.journal().waiting.get_mut(session).expect("it waits");
+                    q.remove(0);
+                    if q.is_empty() {
+                        self.journal().waiting.remove(session);
+                    }
+                    self.judge(&who, e, o)
+                }
+            };
+            let held = matches!(f, Frame::Held { .. });
+            match pushed {
+                true => o.send(f),
+                false => o.out.push(Output::To {
+                    session: session.into(),
+                    bytes: f.enc(),
+                }),
+            }
+            if held {
+                return;
+            }
+            first = false;
         }
     }
 

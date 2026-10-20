@@ -437,6 +437,10 @@ fn a_clients_raw_write_is_refused() {
         playlists(&server),
         [("Mine".to_string(), "alice".to_string())]
     );
-    assert_eq!((bob.pending(), bob.refused.len()), (1, 0), "held, not refused");
+    assert_eq!(
+        (bob.pending(), bob.refused.len()),
+        (1, 0),
+        "held, not refused"
+    );
     rt.block_on(server.stop());
 }

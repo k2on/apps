@@ -305,6 +305,26 @@ impl Hub {
         (r, self.release(out))
     }
 
+    /// Function bodies the operator loads into the log's authority while it
+    /// runs — a module's, checked by whoever read it — and what waits behind
+    /// an intent held for one of them judged (`Input::Loaded`): how many it
+    /// runs now that it did not.
+    pub fn load(&mut self, bodies: Vec<Vec<u8>>) -> (usize, Vec<Deliver>) {
+        let mut loaded = 0;
+        for _ in 0..bodies.len() {
+            for b in &bodies {
+                let h = FnHash::of(b);
+                if self.log.cas.get(&h).is_none() && self.log.cas.add_body(b.clone()) == h && self.log.cas.get(&h).is_some() {
+                    self.config.log.cas.add_body(b.clone());
+                    loaded += 1;
+                }
+            }
+        }
+        let mut out = vec![];
+        self.step(Space::Durable, None, Input::Loaded, &mut out);
+        (loaded, self.release(out))
+    }
+
     fn mutate(&mut self, space: Space, func: FnHash, input: Vec<u8>, now: i64, out: &mut Vec<Deliver>) -> Result<(), String> {
         let said = self.step(space, None, Input::Mutate { func, input, now }, out);
         said.into_iter()

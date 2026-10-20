@@ -451,3 +451,43 @@ fn a_page_rebases_once() {
     wrong.step(down(&batch(page)));
     assert_eq!(wrong.diverged, vec![4], "the third entry's state is checked");
 }
+
+/// What a session pushes behind a held intent waits on the authority, in
+/// order: held again on a reconnect while the function is unknown, then
+/// judged after it once the operator loads it — told to the session's
+/// connections, and pushed again it is answered back. Falsified by `push`
+/// dropping what comes behind a held one as a gap (no `waiting`): after
+/// the load nothing was answered and the log stayed at 1.
+#[test]
+fn what_comes_behind_a_held_intent_waits_for_it() {
+    let mut lacking = Cas::default().with_loader(demo::loader());
+    lacking.add_body(demo::body(CREATE));
+    let mut server = authority(lacking);
+    let mut alice = replica("alice", demo::cas());
+    let o = alice.step(mutate(CREATE, create_input("Road"), 1));
+    deliver_up(&mut server, &who("alice"), &o);
+    let o = alice.step(mutate(ADD, pair_input(&pid(), "t1"), 2));
+    let (s, _) = deliver_up(&mut server, &who("alice"), &o);
+    assert!(matches!(s[..], [Frame::Held { .. }]), "{s:?}");
+    let o = alice.step(mutate(CREATE, create_input("Sea"), 3));
+    let (s, f) = deliver_up(&mut server, &who("alice"), &o);
+    assert!(s.is_empty() && f.is_empty(), "it waits: {s:?}");
+    let (s, _) = deliver_up(&mut server, &who("alice"), &alice.step(Input::Connected));
+    assert!(
+        matches!(s[..], [.., Frame::Ack { seq: 1, .. }, Frame::Held { .. }]),
+        "held again, the third waits: {s:?}"
+    );
+    server.cas.add_body(demo::body(ADD));
+    let to: Vec<Frame> = server
+        .step(Input::Loaded)
+        .iter()
+        .filter_map(|x| match x {
+            Output::To { session, bytes } if session == "alice-session" => Frame::dec(bytes).ok(),
+            _ => None,
+        })
+        .collect();
+    assert!(matches!(to[..], [Frame::Ack { seq: 2, .. }, Frame::Ack { seq: 3, .. }]), "{to:?}");
+    assert_eq!(server.log.head().0, 3);
+    let (s, _) = deliver_up(&mut server, &who("alice"), &alice.step(Input::Connected));
+    assert!(matches!(s[..], [.., Frame::Ack { seq: 2, .. }, Frame::Ack { seq: 3, .. }]), "{s:?}");
+}

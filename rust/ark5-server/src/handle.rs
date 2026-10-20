@@ -131,6 +131,19 @@ impl Handle {
         rx.recv().ok()
     }
 
+    /// Bodies the operator loads into the log's authority ([`Hub::load`]),
+    /// what it says delivered: how many it runs now that it did not.
+    pub fn load(&self, bodies: Vec<Vec<u8>>) -> Option<usize> {
+        let (tx, rx) = channel();
+        let job: Job = Box::new(move |h| {
+            let (n, out) = h.load(bodies);
+            let _ = tx.send(n);
+            out
+        });
+        self.tx.send(Cmd::Run(job)).ok()?;
+        rx.recv().ok()
+    }
+
     /// An entry the authority of `space` authors itself ([`Hub::author`]),
     /// what it says delivered: the head it was sequenced at, or the refusal.
     /// With `once`, the function is that body (a raw write), runnable for

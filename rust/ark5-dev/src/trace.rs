@@ -58,7 +58,7 @@ fn input(i: &Input) -> Value {
         }
         Input::Tick(n) => json!({"t": "tick", "now": n}),
         Input::Persisted(n) => json!({"t": "persisted", "seq": n}),
-        Input::Feed { .. } => unreachable!("a client is never told a feed"),
+        Input::Feed { .. } | Input::Loaded => unreachable!("a client is never told a feed or a load"),
     }
 }
 

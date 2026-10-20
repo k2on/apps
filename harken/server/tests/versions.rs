@@ -355,49 +355,85 @@ fn hashes(f: &Fleet) -> Vec<ark5::hash::FnHash> {
 
 /// **3. A peer authors at a hash the server never had.** The server runs
 /// harken's module; a peer of the release whose `create_playlist` moved
-/// authors it at its new hash. The server holds it and asks for the body;
-/// the peer sends it, and it is sequenced — no upgrade needed, where v4's
-/// old server refused it as unknown until upgraded. Beside a peer of
-/// harken's own, everyone converges, and the log names both hashes.
-/// Falsified by the peer not sending a body when asked (`--module` not
-/// handed to it, so it authored harken's hash): the log named one hash.
+/// authors it at its new hash. The server does not run it and never takes
+/// a body from a client: it answers `Held`, and the intent stays pending on
+/// the peer while a peer of harken's own goes on beside it. Restarted with
+/// the moved release (harken's held as run before), the server runs that
+/// hash, and the intent, pushed again on the reconnect, is sequenced: the
+/// log names both hashes and everyone converges. v4's old server refused
+/// it as unknown until upgraded; v5's keeps it waiting. Falsified by
+/// restarting the server on harken's module again: `converged` timed out
+/// with the moved intent pending (before K2, a body sent with the push
+/// had it sequenced before any restart).
 #[test]
 fn version_3_a_peer_authors_at_a_hash_the_server_never_had() {
-    let f = Fleet::new("v3-held");
+    let mut f = Fleet::new("v3-held");
+    let old = module_file(f.root.path(), "harken", harken_domain5::domain());
     let next = module_file(f.root.path(), "moved", moved());
     let mut a = f.peer("a", Some("alice"));
     let mut n = peer_on(&f, &next, "next", "alice");
-    let t = Instant::now();
     create(&mut a, "Before");
     create(&mut n, "Ahead");
+    let deadline = Instant::now() + std::time::Duration::from_secs(30);
+    while head(&f) < 1 {
+        assert!(
+            Instant::now() < deadline,
+            "harken's create_playlist is sequenced"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    let moved_hash = moved().get("playlists.create_playlist");
+    assert!(!hashes(&f).contains(&moved_hash), "held, not run");
+    let t = Instant::now();
+    let (next_s, old_s) = (next.display().to_string(), old.display().to_string());
+    f.server.upgrade(vec![
+        ("HARKEN_MODULE", &next_s),
+        ("HARKEN_OLD_MODULES", &old_s),
+    ]);
     f.converged(&mut [&mut a, &mut n]);
     playlist(&mut a, "Ahead");
     let hs = hashes(&f);
-    assert!(
-        hs.contains(&moved().get("playlists.create_playlist")),
-        "the moved hash is in the log"
-    );
+    assert!(hs.contains(&moved_hash), "the moved hash is in the log");
     assert!(hs.contains(&harken_domain5::domain().get("playlists.create_playlist")));
-    measured("v3 a moved hash, held and sent, to converged", t.elapsed());
+    measured(
+        "v3 a moved hash, held, the server restarted, to converged",
+        t.elapsed(),
+    );
 }
 
-/// **3b. What a peer authors behind a held intent lands** — a witness. As
-/// in 3, a peer of the moved release authors `create_playlist` at a hash
-/// the server never had, and then `add_song`. The server holds the first
-/// and asks for its body; the second arrives meanwhile, past what the
-/// session has sequenced, and is dropped as a gap — "pushed again after a
-/// Hello" (`ark5::peer::Peer::push`) — but the peer pushes nothing again
-/// until it reconnects: the first lands with its body, the second stays
-/// pending. Run with `--ignored`: `converged` times out with one pending.
+/// **3b. What a peer authors behind a held intent lands.** As in 3, a peer
+/// of the moved release authors `create_playlist` at a hash the server
+/// does not run, and then `add_song`. The first is held; the second waits
+/// behind it on the server, in order, rather than being dropped as a gap.
+/// The operator loads the moved module into the running server (the admin
+/// page's `/admin/api/load`); the held intent is judged, the one behind it
+/// after it, and the peer converges with no reconnect. Falsified by `push`
+/// dropping what comes behind a held one (no `waiting`): `converged` timed
+/// out with both pending, nothing judged again on the load.
 #[test]
-#[ignore = "witness: an intent pushed behind a held one is dropped as a gap and not pushed again until the link reconnects (ark5 Peer::push)"]
 fn version_3b_what_a_peer_authors_behind_a_held_intent_lands() {
-    let f = Fleet::new("v3b-behind-held");
+    let f = Fleet::with_env(
+        "v3b-behind-held",
+        vec![("HARKEN_ADMIN_BIND", "127.0.0.1:0")],
+    );
     let next = module_file(f.root.path(), "moved", moved());
     let mut n = peer_on(&f, &next, "next", "alice");
     create(&mut n, "Ahead");
     songs(&mut n, "v3b", 1);
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    let moved_hash = moved().get("playlists.create_playlist");
+    assert!(!hashes(&f).contains(&moved_hash), "held, not run");
+    let port = f.server.admin_port.expect("the admin page listens");
+    let file = ark5::hash::hex(&std::fs::read(&next).unwrap());
+    let loaded = ureq::post(&format!("http://127.0.0.1:{port}/admin/api/load"))
+        .send_string(&file)
+        .expect("the module loads")
+        .into_string()
+        .unwrap();
+    assert!(loaded.trim().parse::<usize>().unwrap() >= 1, "{loaded}");
     f.converged(&mut [&mut n]);
+    assert!(hashes(&f).contains(&moved_hash));
 }
 
 /// **7. Module update over a retained log.** A server of harken's module,

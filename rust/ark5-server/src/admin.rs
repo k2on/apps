@@ -10,6 +10,7 @@
 //!        │                       last lines, the connections, the CRUD exposed
 //!        ── /admin/api/raw       a raw write, as the authority
 //!        ── /admin/api/author    a binding of the module, as the authority
+//!        ── /admin/api/load      a module file's functions, loaded into the authority
 //! ```
 //!
 //! Each body is a value of §1.1's codec in hex (`ark_explorer::wire`).
@@ -26,6 +27,14 @@
 //! be the one there — which the authority's content store loads and runs.
 //! Replicas apply its facts like any entry's. Both are answered once the
 //! entry is written, as an acknowledgement is.
+//!
+//! **Loading** is the operator giving the running authority another
+//! module's functions — a newer release's a device authors at, over this
+//! same schema — without a restart: the file (`(Module, [body])`, hex) is
+//! verified whole, its bodies loaded ([`Handle::load`]), and an intent held
+//! for one of them is judged with what waits behind it. It is the only way
+//! a function reaches the content store but the modules the server started
+//! with; nothing a client sends is loaded.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -96,6 +105,7 @@ pub fn router(admin: Admin, hub: Handle, authenticate: Authenticate) -> Router {
         .route("/admin/api/state", get(state))
         .route("/admin/api/raw", post(raw_write))
         .route("/admin/api/author", post(author))
+        .route("/admin/api/load", post(load))
         .route_layer(axum::middleware::from_fn_with_state(ctx.clone(), refused))
         .route("/admin/api/hello", get(hello))
         .route("/", get(|| async { Redirect::to("/admin/") }))
@@ -242,6 +252,49 @@ async fn author(With(ctx): With<Ctx>, body: String) -> Response {
             None => text(StatusCode::BAD_REQUEST, format!("no function {name}")),
         },
         Err(why) => text(StatusCode::BAD_REQUEST, why),
+    }
+}
+
+/// A module file verified over this schema: its bodies, in an order each
+/// installs in.
+pub fn module_bodies(schema: &ark5::schema::Schema, bytes: &[u8]) -> Result<Vec<Vec<u8>>, String> {
+    let (m, mut todo) = <(Module, Vec<Vec<u8>>)>::from_bytes(bytes).map_err(|e| e.0)?;
+    if &m.schema != schema {
+        return Err("a module loaded runs over this schema; another needs a restart".into());
+    }
+    let (lib, mut done) = (Lib::default(), vec![]);
+    while !todo.is_empty() {
+        let before = todo.len();
+        let mut why = String::new();
+        for b in std::mem::take(&mut todo) {
+            match lib.load(schema, &b) {
+                Ok(_) => done.push(b),
+                Err(e) => {
+                    why = e.0;
+                    todo.push(b);
+                }
+            }
+        }
+        if todo.len() == before {
+            return Err(why);
+        }
+    }
+    ark5::module::verify(&m, &lib).map_err(|e| e.0)?;
+    Ok(done)
+}
+
+async fn load(With(ctx): With<Ctx>, body: String) -> Response {
+    let bodies = match ark5::hash::unhex(body.trim())
+        .ok_or("not hex".to_string())
+        .and_then(|b| module_bodies(&ctx.admin.module.schema, &b))
+    {
+        Ok(b) => b,
+        Err(why) => return text(StatusCode::BAD_REQUEST, why),
+    };
+    let hub = ctx.hub.clone();
+    match tokio::task::spawn_blocking(move || hub.load(bodies)).await.ok().flatten() {
+        Some(n) => n.to_string().into_response(),
+        None => text(StatusCode::SERVICE_UNAVAILABLE, "the hub is gone"),
     }
 }
 
