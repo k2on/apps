@@ -16,9 +16,8 @@
 //! trades for a token — and carries the token as a bearer.
 
 use std::collections::BTreeMap;
-use std::time::Duration;
-
 use std::sync::Arc;
+use std::time::Duration;
 
 use ark::author::Node;
 use ark::log::{EntryId, Seq};
@@ -62,18 +61,19 @@ impl Loaded {
     }
 
     fn source(&self) -> Source<'_> {
+        let ctx = Ctx {
+            id: EntryId::default(),
+            actor: self.state.who.clone(),
+            session: "admin".into(),
+            roles: vec![],
+            now: 0,
+        };
         Source {
             store: &self.store,
             module: &self.module,
             lib: &self.lib,
             log: self,
-            ctx: Ctx {
-                id: EntryId::default(),
-                actor: self.state.who.clone(),
-                session: "admin".into(),
-                roles: vec![],
-                now: 0,
-            },
+            ctx,
         }
     }
 }
@@ -157,13 +157,14 @@ impl Outbox {
     /// The writer a state says this page is, `sent` requests in, with the
     /// server's answers to them.
     pub fn of(state: &State, sent: usize, answers: &BTreeMap<usize, Result<String, String>>) -> Outbox {
+        let (exposed, raw, who, answers) = (state.exposed.clone(), state.raw, state.who.clone(), answers.clone());
         Outbox {
-            exposed: state.exposed.clone(),
-            raw: state.raw,
-            who: state.who.clone(),
+            exposed,
+            raw,
+            who,
             queued: vec![],
             next: sent,
-            answers: answers.clone(),
+            answers,
         }
     }
 }
@@ -205,12 +206,13 @@ pub struct Page {
 
 impl Page {
     pub fn new(base: String, token: Option<String>) -> Page {
+        let (base, note) = (base.trim_end_matches('/').to_string(), "reading the server\u{2026}".into());
         Page {
-            base: base.trim_end_matches('/').to_string(),
+            base,
             token,
             loaded: None,
             explorer: Explorer::new(),
-            note: "reading the server\u{2026}".into(),
+            note,
             busy: false,
             sent: vec![],
             answers: BTreeMap::new(),

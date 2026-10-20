@@ -24,7 +24,8 @@ use crate::Account;
 /// A provider this server can send people to and get identities back from.
 #[derive(Clone)]
 pub struct Provider {
-    meta: CoreProviderMetadata,
+    /// Boxed: discovery and the key set are kilobytes, and a `Mode` holds this.
+    meta: Box<CoreProviderMetadata>,
     client_id: String,
     client_secret: String,
     scopes: Vec<String>,
@@ -115,7 +116,7 @@ impl Provider {
         let url = IssuerUrl::new(issuer.to_string()).map_err(|e| format!("the issuer {issuer}: {e}"))?;
         let meta = CoreProviderMetadata::discover(&url, &http()).map_err(|e| format!("discovering {issuer}: {}", said(&e)))?;
         Ok(Provider {
-            meta,
+            meta: Box::new(meta),
             client_id: client_id.into(),
             client_secret: client_secret.into(),
             scopes: scopes.iter().map(|s| s.to_string()).collect(),
@@ -136,7 +137,7 @@ impl Provider {
     /// back to `callback`.
     pub fn authorize_url(&self, challenge: &Challenge, callback: &str) -> Result<String, String> {
         let pkce = PkceCodeChallenge::from_code_verifier_sha256(&PkceCodeVerifier::new(challenge.verifier.clone()));
-        let client = self.client(self.meta.clone(), callback)?;
+        let client = self.client((*self.meta).clone(), callback)?;
         let (state, nonce) = (challenge.state.clone(), challenge.nonce.clone());
         let mut req = client.authorize_url(
             CoreAuthenticationFlow::AuthorizationCode,
@@ -153,7 +154,7 @@ impl Provider {
     pub fn exchange(&self, code: &str, challenge: &Challenge, callback: &str) -> Result<Account, String> {
         let http = http();
         let keys = CoreJsonWebKeySet::fetch(self.meta.jwks_uri(), &http).map_err(|e| format!("the provider's keys: {}", said(&e)))?;
-        let client = self.client(self.meta.clone().set_jwks(keys), callback)?;
+        let client = self.client((*self.meta).clone().set_jwks(keys), callback)?;
         let tokens = (client.exchange_code(AuthorizationCode::new(code.into())))
             .map_err(|e| said(&e))?
             .set_pkce_verifier(PkceCodeVerifier::new(challenge.verifier.clone()))
