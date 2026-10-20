@@ -1,0 +1,17 @@
+2026-10-19T23:34:39Z start v4-ark-rerun.txt: cargo test -p ark --release --test perf -- --ignored --nocapture --test-threads=1 
+2026-10-19T23:35:02Z end   v4-ark-rerun.txt (exit 0)
+2026-10-19T23:35:02Z start v5-ark.txt: cargo test -p ark5 --release --test perf -- --ignored --nocapture --test-threads=1 --skip perf_views
+2026-10-19T23:35:22Z end   v5-ark.txt (exit 0)
+2026-10-19T23:35:22Z start v4-ark-server-rerun.txt: cargo test -p ark-server --release --test perf -- --ignored --nocapture --test-threads=1 
+2026-10-19T23:38:54Z end   v4-ark-server-rerun.txt (exit 0)
+2026-10-19T23:38:54Z start v5-ark-server.txt: cargo test -p ark5-server --release --test perf -- --ignored --nocapture --test-threads=1 
+2026-10-19T23:41:50Z end   v5-ark-server.txt (exit 0)
+2026-10-19T23:41:50Z start v4-harken-domain-rerun.txt: cargo test -p harken-domain --release --test perf -- --ignored --nocapture --test-threads=1 
+2026-10-19T23:43:03Z end   v4-harken-domain-rerun.txt (exit 0)
+2026-10-19T23:43:03Z start v5-harken-domain.txt: cargo test -p harken-domain5 --release --test perf -- --ignored --nocapture --test-threads=1 
+2026-10-19T23:59:17Z end   v5-harken-domain.txt (exit 0)
+2026-10-19T23:59:17Z start v4-views.txt: cargo test -p ark --release --test perf_views -- --ignored --nocapture --test-threads=1 
+2026-10-19T23:59:27Z end   v4-views.txt (exit 0)
+2026-10-19T23:59:27Z start v5-views.txt: cargo test -p ark5 --release --test perf -- --ignored --nocapture --test-threads=1 perf_views --exact
+2026-10-19T23:59:28Z end   v5-views.txt (exit 0)
+2026-10-19T23:59:28Z all done

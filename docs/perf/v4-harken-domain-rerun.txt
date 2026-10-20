@@ -1,0 +1,161 @@
+    Finished `release` profile [optimized] target(s) in 0.14s
+     Running tests/perf.rs (target/release/deps/perf-c47804be065f22f9)
+
+running 9 tests
+test perf_add_song ... 
+== add_song, one per file, into a library growing from 0 (peer alone, engine)
+path                                                   n      total    mean µs   first100    last100     l/f
+add_song: whole                                      500     190.0ms     379.93     513.01     280.41    0.55
+  … Replica::mutate (optimistic)                     500     150.1ms     300.22     400.41     220.29    0.55
+  … local_commit (authority + confirm)               500      39.9ms      79.71     112.60      60.11    0.53
+add_song: whole                                     2000     591.7ms     295.85     273.15     309.66    1.13
+  … Replica::mutate (optimistic)                    2000     459.6ms     229.82     212.42     236.34    1.11
+  … local_commit (authority + confirm)              2000     132.1ms      66.04      60.72      73.32    1.21
+add_song: whole                                     8000    2613.2ms     326.65     278.98     333.16    1.19
+  … Replica::mutate (optimistic)                    8000    1982.2ms     247.77     217.08     246.89    1.14
+  … local_commit (authority + confirm)              8000     631.1ms      78.88      61.90      86.26    1.39
+ok
+test perf_f_views ... 
+== (f) harken's views over 500 songs (seeded in 124.4ms): hydrate, then one change each
+         query    rows    hydrate       toggle  add Bach song
+       library     505     2.12ms       14.5µs         18.2µs
+     playlists       1     0.01ms        0.4µs          0.6µs
+        albums     160     1.38ms        0.3µs         65.7µs
+       artists      51     1.66ms        0.2µs          9.8µs
+     composers       1     1.63ms        0.5µs         33.1µs
+ track_details     505     5.51ms        0.3µs         29.4µs
+         album      14     0.27ms        1.1µs          3.3µs
+        artist     130     1.40ms        9.2µs          9.1µs
+         works      50     1.85ms        0.6µs         28.0µs
+          work       1     0.12ms        0.4µs          1.8µs
+    recordings       3     0.13ms        0.4µs          1.0µs
+       credits       1     0.05ms        0.5µs          0.8µs
+     recording       1     0.09ms        0.6µs          2.0µs
+      playlist      47     0.37ms       10.9µs          1.2µs
+  playlists_of       1     0.04ms        6.0µs          0.7µs
+
+== (f) harken's views over 2000 songs (seeded in 528.2ms): hydrate, then one change each
+         query    rows    hydrate       toggle  add Bach song
+       library    2005    10.78ms       18.5µs         12.9µs
+     playlists       1     0.04ms        0.8µs          0.5µs
+        albums     160     5.15ms        0.4µs        219.6µs
+       artists      51     7.55ms        0.3µs         14.4µs
+     composers       1     4.04ms        0.5µs         52.6µs
+ track_details    2005    25.95ms        0.4µs         41.5µs
+         album      51     1.20ms        1.3µs          4.5µs
+        artist     505     3.34ms       10.7µs         12.6µs
+         works      50     4.97ms        0.6µs         34.6µs
+          work       1     0.21ms        0.4µs          2.9µs
+    recordings       3     0.18ms        0.4µs          1.3µs
+       credits       1     0.05ms        0.5µs          0.8µs
+     recording       4     0.14ms        1.1µs          2.8µs
+      playlist     172     1.41ms       11.6µs          1.7µs
+  playlists_of       1     0.07ms        6.7µs          0.7µs
+ok
+test perf_native_vs_interpreted ... 
+== one apply, native against interpreted
+entry                                                      native    interpreted
+create_playlist, a new name, P=50                          74.1µs         34.9µs
+create_playlist, a taken name, P=50                        53.0µs         44.2µs
+create_playlist, a new name, P=200                         52.5µs         30.8µs
+create_playlist, a taken name, P=200                       62.6µs         41.2µs
+create_playlist, a new name, P=800                         70.8µs         32.8µs
+create_playlist, a taken name, P=800                       65.1µs         42.4µs
+add_song, empty library, short names                      192.3µs        386.1µs
+add_song, empty library, 80-character names               799.2µs        868.9µs
+add_song, empty library, a catalogued work                349.8µs        780.3µs
+ok
+test perf_playlist_name ... 
+== playlist_name among P names (native, harken_domain::playlists)
+name                                           P  µs per call
+a free name                                   10          2.3
+a taken name                                  10         52.4
+a free name                                  100         18.2
+a taken name                                 100       3513.5
+a free name                                 1000        168.0
+a taken name                                1000     285207.9
+ok
+test perf_playlists ... 
+== add_to_playlist over a library of N (peer alone, engine)
+path                                                   n      total    mean µs   first100    last100     l/f
+add_to_playlist, one playlist: whole                 500      25.9ms      51.80      52.17      49.47    0.95
+  … Replica::mutate (optimistic)                     500      18.7ms      37.48      38.68      35.31    0.91
+  … local_commit (authority + confirm)               500       7.2ms      14.31      13.49      14.15    1.05
+add_to_playlist, playlists of 10: whole              500      25.8ms      51.58      48.57      51.64    1.06
+  … Replica::mutate (optimistic)                     500      18.5ms      37.08      34.80      36.92    1.06
+  … local_commit (authority + confirm)               500       7.2ms      14.50      13.76      14.72    1.07
+add_to_playlist, one playlist: whole                2000     104.1ms      52.05      50.37      51.45    1.02
+  … Replica::mutate (optimistic)                    2000      74.8ms      37.41      36.38      37.31    1.03
+  … local_commit (authority + confirm)              2000      29.3ms      14.64      13.99      14.13    1.01
+add_to_playlist, playlists of 10: whole             2000     110.7ms      55.33      47.43      56.01    1.18
+  … Replica::mutate (optimistic)                    2000      78.4ms      39.18      33.45      38.79    1.16
+  … local_commit (authority + confirm)              2000      32.3ms      16.15      13.98      17.22    1.23
+add_to_playlist, one playlist: whole                8000     429.0ms      53.62      50.38      67.27    1.34
+  … Replica::mutate (optimistic)                    8000     307.3ms      38.41      36.43      48.36    1.33
+  … local_commit (authority + confirm)              8000     121.7ms      15.21      13.95      18.92    1.36
+add_to_playlist, playlists of 10: whole             8000     511.4ms      63.92      82.88      65.97    0.80
+  … Replica::mutate (optimistic)                    8000     361.2ms      45.14      58.71      45.94    0.78
+  … local_commit (authority + confirm)              8000     150.2ms      18.78      24.16      20.03    0.83
+
+== create_playlist, one person's P playlists (peer alone, engine)
+path                                                   n      total    mean µs   first100    last100     l/f
+create_playlist, distinct names                       50       3.3ms      66.99      66.99      66.99    1.00
+create_playlist, all "Favorites"                      50      21.5ms     430.28     430.28     430.28    1.00
+create_playlist, distinct names                      200      15.6ms      77.96      72.42      83.50    1.15
+create_playlist, all "Favorites"                     200    1000.1ms    5000.41    1359.70    8641.12    6.36
+create_playlist, distinct names                      800      61.5ms      76.82      63.47      68.69    1.08
+create_playlist, all "Favorites"                     800   59187.7ms   73984.60    1586.77  195625.83  123.29
+ok
+test perf_row_keys ... 
+== what a Row costs
+a media row (9 columns): clone 39 ns / 0.0 allocs; built into its struct 1203 ns / 16.0 allocs
+a playlist_item row (5 columns): clone 24 ns / 0.0 allocs; built into its struct 374 ns / 8.0 allocs
+`media.title` in a plan's expression: 61 ns, 1.0 allocs (the title's 1)
+read                                       N       time       allocs     rows out     rows built
+library (read whole, as hydrate)         500     1.59ms        19499         1000            21%
+  … per entry                                    0.00ms           39                            
+  … scan("media") alone                  500     0.04ms                       500
+add_to_playlist applied (N/3 items)      500     0.10ms          388            8            16%
+library (read whole, as hydrate)        2000     7.19ms        77003         4000            21%
+  … per entry                                    0.00ms           39                            
+  … scan("media") alone                 2000     0.26ms                      2000
+add_to_playlist applied (N/3 items)     2000     0.12ms          388            8            16%
+library (read whole, as hydrate)        8000    56.07ms       307007        16000            21%
+  … per entry                                    0.01ms           38                            
+  … scan("media") alone                 8000     2.01ms                      8000
+add_to_playlist applied (N/3 items)     8000     1.74ms          388            8            16%
+ok
+test perf_rows_read_per_mutation ... 
+== rows a mutation's reads examine (Counting store), by library size
+mutation                                                    N=500       N=8000
+add_song (a new file)                                      15g 1r       15g 1r
+add_to_playlist (an empty playlist)                         7g 0r        7g 0r
+add_to_playlist (a playlist of N-1)                         7g 1r        7g 1r
+create_playlist (alice's second)                            2g 1r        2g 1r
+create_playlist (a 102nd Favorites, of 1,000)             2g 102r      2g 102r
+ok
+test perf_scanner_known_files ... 
+== the scanner's known_file: one probe per file the look names
+  files       one new file, ms        full rescan, ms   the set (before), ms
+    500                 0.0034                   0.26                   0.37
+   2000                 0.0046                   1.32                   0.41
+   8000                 0.0043                   7.70                   2.90
+ok
+test perf_search ... 
+== (g) the text indexes on media.title and media.creator, 8000 rows: 14.66 postings a row; put 9.64µs a row with them, 6.20µs without
+
+== (g) search over 8000 media: a view opened per keystroke
+      needle   answer   examined      hydrate    client scan
+         "a"     8000       8000    33278.5µs       2507.8µs
+        "ar"     8000       8000    34686.8µs       2530.0µs
+       "art"     8000       8000    40400.0µs       1998.1µs
+      "arti"     8000       8000    35603.3µs       1995.0µs
+     "artis"     8000       8000    34921.3µs       1714.9µs
+    "artist"     8000       8000    35554.0µs       1544.0µs
+   "artist "     8000       8000    34267.4µs       1651.7µs
+  "artist 1"     1760       1760     7173.8µs       1578.8µs
+ "artist 12"      160        160      616.5µs       1515.3µs
+ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 72.73s
+

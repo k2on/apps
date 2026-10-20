@@ -1,0 +1,110 @@
+    Finished `release` profile [optimized] target(s) in 0.21s
+     Running tests/perf.rs (target/release/deps/perf-7ba55a602eced6d3)
+
+running 6 tests
+test perf_add_song ... 
+== add_song, one per file, into a library growing from 0 (peer alone, engine)
+path                                                   n      total    mean µs   first100    last100     l/f
+   v5: whole = replica step(Mutate) + authority step(Push) + replica step(Batch, Ack); `alone` = one Peer in the authority's role
+add_song: whole                                      500     817.5ms    1635.10     456.92    2986.58    6.54
+  … Replica::mutate (optimistic)                     500     383.2ms     766.33     202.39    1433.60    7.08
+  … local_commit (authority + confirm)               500     434.4ms     868.76     254.52    1552.97    6.10
+  … alone: Peer (authority) step(Mutate)             500     411.3ms     822.54     220.78    1542.37    6.99
+add_song: whole                                     2000   12421.8ms    6210.90     458.99   13315.23   29.01
+  … Replica::mutate (optimistic)                    2000    6142.4ms    3071.18     200.14    6768.56   33.82
+  … local_commit (authority + confirm)              2000    6279.4ms    3139.72     258.85    6546.66   25.29
+  … alone: Peer (authority) step(Mutate)            2000    6232.0ms    3115.99     221.98    6722.57   30.28
+add_song: whole                                     8000  251522.8ms   31440.35     474.67   77568.42  163.41
+  … Replica::mutate (optimistic)                    8000  125343.2ms   15667.90     206.86   38681.37  186.99
+  … local_commit (authority + confirm)              8000  126179.6ms   15772.45     267.81   38887.05  145.20
+  … alone: Peer (authority) step(Mutate)            8000  126123.8ms   15765.48     230.52   38868.82  168.61
+ok
+test perf_not_ported ... 
+== one apply, native against interpreted
+n/a: v5 has one execution path, the interpreter (§1.12); the interpreted figures are add_song's and create_playlist's above
+
+== (f) harken's views, the scanner's known_file, (g) search
+not measured by M1: Part 3 asks for add_song, playlists, playlist_name, rows examined and allocations; the views shape is rust/ark5/tests/perf.rs's
+ok
+test perf_playlist_name ... 
+== playlist_name among P names (native, harken_domain::playlists)
+   v5: interpreted: Domain::ask("playlists.playlist_name"), the one path
+name                                           P  µs per call
+a free name                                   10          4.5
+a taken name                                  10         55.0
+a free name                                  100         40.9
+a taken name                                 100       4229.8
+a free name                                 1000        322.5
+a taken name                                1000     374306.5
+ok
+test perf_playlists ... 
+== add_to_playlist over a library of N (peer alone, engine)
+path                                                   n      total    mean µs   first100    last100     l/f
+   v5: whole = replica step(Mutate) + authority step(Push) + replica step(Batch, Ack); `alone` = one Peer in the authority's role
+add_to_playlist, one playlist: whole                 500     503.9ms    1007.75     299.40    1720.37    5.75
+  … Replica::mutate (optimistic)                     500     244.9ms     489.75     142.23     850.51    5.98
+  … local_commit (authority + confirm)               500     259.0ms     518.00     157.16     869.85    5.53
+  … alone: Peer (authority) step(Mutate)             500     251.3ms     502.62     154.74     857.05    5.54
+add_to_playlist, playlists of 10: whole              500      35.8ms      71.69      50.18      92.63    1.85
+  … Replica::mutate (optimistic)                     500      12.3ms      24.57      15.41      34.35    2.23
+  … local_commit (authority + confirm)               500      23.6ms      47.12      34.76      58.27    1.68
+  … alone: Peer (authority) step(Mutate)             500      16.7ms      33.45      23.93      44.01    1.84
+add_to_playlist, one playlist: whole                2000    8400.8ms    4200.42     266.77    8651.63   32.43
+  … Replica::mutate (optimistic)                    2000    4150.8ms    2075.38     121.87    4226.11   34.68
+  … local_commit (authority + confirm)              2000    4250.1ms    2125.03     144.91    4425.52   30.54
+  … alone: Peer (authority) step(Mutate)            2000    4196.9ms    2098.46     132.44    4297.93   32.45
+add_to_playlist, playlists of 10: whole             2000     176.5ms      88.26      48.68     120.77    2.48
+  … Replica::mutate (optimistic)                    2000      62.9ms      31.46      13.92      46.50    3.34
+  … local_commit (authority + confirm)              2000     113.6ms      56.80      34.76      74.28    2.14
+  … alone: Peer (authority) step(Mutate)            2000      84.3ms      42.14      20.93      59.01    2.82
+add_to_playlist, one playlist: whole                8000  206042.8ms   25755.35     349.18   44753.54  128.17
+  … Replica::mutate (optimistic)                    8000  102595.9ms   12824.48     160.33   22416.38  139.82
+  … local_commit (authority + confirm)              8000  103446.9ms   12930.86     188.86   22337.16  118.28
+  … alone: Peer (authority) step(Mutate)            8000  102974.5ms   12871.81     177.25   22603.35  127.52
+add_to_playlist, playlists of 10: whole             8000     733.6ms      91.69      53.50     146.62    2.74
+  … Replica::mutate (optimistic)                    8000     272.9ms      34.12      15.11      60.33    3.99
+  … local_commit (authority + confirm)              8000     460.6ms      57.58      38.39      86.29    2.25
+  … alone: Peer (authority) step(Mutate)            8000     353.0ms      44.12      23.41      67.95    2.90
+
+== create_playlist, one person's P playlists (peer alone, engine)
+path                                                   n      total    mean µs   first100    last100     l/f
+   v5: whole, as above
+create_playlist, distinct names                       50      10.9ms     217.09     217.09     217.09    1.00
+create_playlist, all "Favorites"                      50      47.2ms     944.05     944.05     944.05    1.00
+create_playlist, distinct names                      200     142.2ms     711.22     341.04    1081.39    3.17
+create_playlist, all "Favorites"                     200    2353.2ms   11766.11    3033.51   20498.71    6.76
+create_playlist, distinct names                      800    2109.9ms    2637.43     343.99    4913.16   14.28
+create_playlist, all "Favorites"                     800  159561.7ms  199452.14    3029.33  527362.11  174.09
+ok
+test perf_row_keys ... 
+== what a Row costs
+a media row (9 columns): clone 15 ns / 1.0 allocs; built into its struct 292 ns / 6.0 allocs
+a playlist_item row (5 columns): clone 23 ns / 1.0 allocs; built into its struct 182 ns / 3.0 allocs
+`media.title` in a plan's expression: n/a: the interpreter reads a field by its span in the row's bytes; not timed alone
+read                                       N       time       allocs     rows out     rows built
+library (read whole, as hydrate)         500     2.49ms        54055         1000            n/a
+  … per entry                                    0.00ms          108                            
+  … scan("media") alone                  500     0.05ms                       500
+add_to_playlist applied (N/3 items)      500     0.33ms         5995          170            n/a
+library (read whole, as hydrate)        2000    10.93ms       216061         4000            n/a
+  … per entry                                    0.01ms          108                            
+  … scan("media") alone                 2000     0.31ms                      2000
+add_to_playlist applied (N/3 items)     2000     1.19ms        23501          670            n/a
+library (read whole, as hydrate)        8000    46.20ms       864067        16000            n/a
+  … per entry                                    0.01ms          108                            
+  … scan("media") alone                 8000     1.26ms                      8000
+add_to_playlist applied (N/3 items)     8000     6.89ms        93507         2670            n/a
+ok
+test perf_rows_read_per_mutation ... 
+== rows a mutation's reads examine (Counting store), by library size
+   v5: g = Read::get calls, r = rows a scan returned (v5's store examines only what it returns)
+mutation                                                    N=500       N=8000
+add_song (a new file)                                    12g 500r    12g 8000r
+add_to_playlist (an empty playlist)                         4g 0r        4g 0r
+add_to_playlist (a playlist of N-1)                       4g 499r     4g 7999r
+create_playlist (alice's second)                            2g 2r        2g 2r
+create_playlist (a 102nd Favorites, of 1,000)            2g 3000r     2g 3000r
+ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 974.01s
+

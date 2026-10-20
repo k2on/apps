@@ -1,0 +1,33 @@
+    Finished `release` profile [optimized] target(s) in 0.16s
+     Running tests/perf_views.rs (target/release/deps/perf_views-765a2b45db623cd7)
+
+running 2 tests
+test perf_e_rebase_depth ... 
+== (e) rebase at depth 400: K pending, M landing, over S confirmed rows (tests/perf.rs perf_e_rebase, K = 400)
+shape                                              S  per entry   per page
+K=400 M=256: one entry at a time, a pump each     500   8375.9µs   2144.2ms
+K=400 M=256: one entry at a time, one pump       500     60.0µs     15.4ms
+K=400 M=256: one page                            500     55.2µs     14.1ms
+K=400 M=256: one entry at a time, a pump each    2000   7783.1µs   1992.5ms
+K=400 M=256: one entry at a time, one pump      2000     60.1µs     15.4ms
+K=400 M=256: one page                           2000     75.0µs     19.2ms
+K=400 M=256: one entry at a time, a pump each    8000   8498.6µs   2175.6ms
+K=400 M=256: one entry at a time, one pump      8000     64.5µs     16.5ms
+K=400 M=256: one page                           8000     62.0µs     15.9ms
+ok
+test perf_views ... 
+== views: one change against a maintained view (View::push), the store already moved
+query                       rows   hydrate ms      push µs     gets     rows
+playlist-with-items         1000         1.78         8.69        1        5
+top-two-by-pos              1000         1.88         6.77        1        0
+group-source                1000         1.36         4.33        0        0
+playlist-with-items         4000         6.62         9.53        1        5
+top-two-by-pos              4000         7.26        17.36        1        0
+group-source                4000         6.81         4.19        0        0
+playlist-with-items        16000        29.26        11.06        1        5
+top-two-by-pos             16000        35.57        65.72        1        0
+group-source               16000        32.94         4.33        0        0
+ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.37s
+
