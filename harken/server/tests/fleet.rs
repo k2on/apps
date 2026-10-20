@@ -620,10 +620,7 @@ fn a_first_sync_cut_mid_page_resumes_at_its_cursor() {
                         name: format!("List {i}"),
                     },
                 );
-                facts
-                    .iter()
-                    .find_map(playlist_of)
-                    .expect("a playlist row")
+                facts.iter().find_map(playlist_of).expect("a playlist row")
             })
             .collect();
         for i in 0..990 {
@@ -1758,6 +1755,11 @@ fn a_peer_alone_killed_mid_append_reopens_whole() {
 /// start to every intent on the server and the peer converged is printed.
 ///
 /// Falsified on v5 as 14 is: no join at open, and the server ends empty.
+///
+/// A debug build waits ten times [`PATIENCE`] to converge: the join takes
+/// about 10 s in release, as it did before K2 (11 s at `0179f02`), and
+/// about 100 s unoptimised, so in debug this is a convergence test and only
+/// the release number is a measurement.
 #[test]
 fn two_thousand_local_intents_join_timed() {
     let f = Fleet::new("alone-2000");
@@ -1771,7 +1773,8 @@ fn two_thousand_local_intents_join_timed() {
     let t = Instant::now();
     p.start();
     joined(&mut p, 2_000);
-    let done = f.converged(&mut [&mut p]);
+    let patience = PATIENCE * if cfg!(debug_assertions) { 10 } else { 1 };
+    let done = f.converged_within(&mut [&mut p], patience);
     measured(
         "2,000 local intents: start with --server to converged",
         t.elapsed(),

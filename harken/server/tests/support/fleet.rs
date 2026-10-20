@@ -1107,18 +1107,28 @@ impl Fleet {
     /// removal against another peer's, asks
     /// [`Fleet::converged_allowing_refusals`].
     pub fn converged(&self, peers: &mut [&mut PeerProc]) -> Converged {
-        self.converge(peers, false)
+        self.converge(peers, false, PATIENCE)
+    }
+
+    /// [`Fleet::converged`], waiting `patience` rather than [`PATIENCE`].
+    pub fn converged_within(&self, peers: &mut [&mut PeerProc], patience: Duration) -> Converged {
+        self.converge(peers, false, patience)
     }
 
     /// [`Fleet::converged`], where an accepted intent the authority refused
     /// — and said so — is accounted for.
     pub fn converged_allowing_refusals(&self, peers: &mut [&mut PeerProc]) -> Converged {
-        self.converge(peers, true)
+        self.converge(peers, true, PATIENCE)
     }
 
-    fn converge(&self, peers: &mut [&mut PeerProc], refusals: bool) -> Converged {
+    fn converge(
+        &self,
+        peers: &mut [&mut PeerProc],
+        refusals: bool,
+        patience: Duration,
+    ) -> Converged {
         let started = Instant::now();
-        let deadline = started + PATIENCE;
+        let deadline = started + patience;
         let mut last = String::new();
         let (log, head, hash) = loop {
             for p in peers.iter_mut() {
@@ -1158,7 +1168,7 @@ impl Fleet {
                     .map(|p| format!("--- {} ---\n{}", p.name, tail(&p.stderr, 15)))
                     .collect();
                 panic!(
-                    "{}: not converged after {PATIENCE:?}:\n{last}\n--- server ---\n{}\n{}",
+                    "{}: not converged after {patience:?}:\n{last}\n--- server ---\n{}\n{}",
                     self.name,
                     tail(&self.server.log, 20),
                     tails.join("\n")
