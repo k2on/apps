@@ -1,31 +1,34 @@
 //! The store on disk (§1.6, §1.7's `Persist`): what a peer made durable,
 //! read back on open. The log is a table of the store, so the store's rows
-//! and the writes to it are the one format, the log's and the rows' alike.
+//! and the log's rows appended since are the one format; an entry's facts
+//! are in its row, and are on disk once.
 //!
 //! Two things, each its own file in a directory ([`Files`]) or its own
 //! buffer ([`Memory`], for tests and the simulator), and blobs beside them:
 //!
 //! - `kv`: the store's rows whole ([`Record::Rows`]), the log's table's
 //!   among them, written (to a temporary file, then renamed) when a
-//!   `Persist` carries them, which also empties `writes`: every write
-//!   before is folded into them.
-//! - `writes`: every [`Record::Writes`] a `Persist` carried, appended, each
-//!   as a four-byte big-endian length and the record's bytes. On open they
-//!   are read up to the first record that does not read, and the file is
-//!   cut there: a crash mid-write leaves a torn tail, never a wrong write.
-//!   Whether each applies — a row of the log's table must link onto the
-//!   one before it — is the peer's to judge as it opens; it writes `kv`
-//!   whole when one does not.
+//!   `Persist` carries them, which also empties `log`: every entry before
+//!   is folded into them.
+//! - `log`: every [`Record::Logged`] a `Persist` carried — a row of the
+//!   log's table, one logged entry with its facts — appended, each as a
+//!   four-byte big-endian length and the record's bytes. On open they are
+//!   read up to the first record that does not read, and the file is cut
+//!   there: a crash mid-write leaves a torn tail, never a wrong entry. The
+//!   rows of the schema's tables are not journaled: the peer writes them
+//!   again as it opens, from each entry's facts, each entry linking onto
+//!   the one before it, and writes `kv` whole when one does not.
 //! - named blobs, each written whole or appended to: a hub's `journal` and
 //!   `live` (`ark-server`), written whole; a client's `pending` (its own
 //!   intents not yet confirmed and the last `local` its session drew), a
 //!   journal of records, each a four-byte big-endian length and `((Int
 //!   local, Int gone), List Entry)`: the intents left are those before with
 //!   the first `gone` taken off and these added. It is read up to the first
-//!   record that does not read, as `writes` is.
+//!   record that does not read, as `log` is.
 //!
-//! A directory holding the files of the format before the log was a table
-//! (`snapshot`, `chain`) is refused, never read as empty.
+//! A directory holding the files of a format before — the log not yet a
+//! table (`snapshot`, `chain`), or every write journaled (`writes`) — is
+//! refused, never read as empty.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read as _, Write};
@@ -34,15 +37,14 @@ use std::path::PathBuf;
 use std::collections::BTreeMap;
 
 use ark::ir::Node;
-use ark::log::{Entry, Record, Rows};
-use ark::store::Change;
+use ark::log::{Entry, Logged, Record, Rows};
 
 /// The store made durable, read back: its rows as last written whole, and
-/// the writes since.
+/// the log's rows appended since.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Stored {
     pub rows: Option<Rows>,
-    pub writes: Vec<Vec<Change>>,
+    pub logged: Vec<Logged>,
 }
 
 /// Where a peer's durable records go.
@@ -96,18 +98,18 @@ fn frame(bytes: &[u8]) -> Vec<u8> {
     [&(bytes.len() as u32).to_be_bytes()[..], bytes].concat()
 }
 
-/// The store's rows and the writes after them, read; and the bytes of
-/// `writes` that read.
-fn read(kv: Option<&[u8]>, writes: &[u8]) -> (Stored, usize) {
+/// The store's rows and the log's rows after them, read; and the bytes of
+/// `log` that read.
+fn read(kv: Option<&[u8]>, log: &[u8]) -> (Stored, usize) {
     let rows = kv.and_then(|b| match Record::dec(b) {
         Ok(Record::Rows(r)) => Some(r),
         _ => None,
     });
-    let (records, at) = framed::<Record>(writes);
-    let mut s = Stored { rows, writes: vec![] };
+    let (records, at) = framed::<Record>(log);
+    let mut s = Stored { rows, logged: vec![] };
     for r in records {
         match r {
-            Record::Writes(w) => s.writes.push(w),
+            Record::Logged(l) => s.logged.push(l),
             Record::Rows(_) => break,
         }
     }
@@ -122,23 +124,23 @@ fn rows_of(bytes: &[u8]) -> bool {
 #[derive(Clone, Debug, Default)]
 pub struct Memory {
     pub kv: Option<Vec<u8>>,
-    pub writes: Vec<u8>,
+    pub log: Vec<u8>,
     pub blobs: BTreeMap<String, Vec<u8>>,
 }
 
 impl Disk for Memory {
     fn load(&mut self) -> io::Result<Stored> {
-        let (s, at) = read(self.kv.as_deref(), &self.writes);
-        self.writes.truncate(at);
+        let (s, at) = read(self.kv.as_deref(), &self.log);
+        self.log.truncate(at);
         Ok(s)
     }
 
     fn record(&mut self, bytes: &[u8]) -> io::Result<()> {
         if rows_of(bytes) {
             self.kv = Some(bytes.to_vec());
-            self.writes.clear();
+            self.log.clear();
         } else {
-            self.writes.extend(frame(bytes));
+            self.log.extend(frame(bytes));
         }
         Ok(())
     }
@@ -158,11 +160,11 @@ impl Disk for Memory {
     }
 }
 
-/// The records in a directory: `kv`, `writes`, and a file per blob.
+/// The records in a directory: `kv`, `log`, and a file per blob.
 #[derive(Debug)]
 pub struct Files {
     dir: PathBuf,
-    writes: Option<File>,
+    log: Option<File>,
     /// Whether every append is synced before it returns: a server's
     /// acknowledgement follows the write.
     pub sync: bool,
@@ -172,11 +174,7 @@ impl Files {
     pub fn new(dir: impl Into<PathBuf>) -> io::Result<Files> {
         let dir = dir.into();
         fs::create_dir_all(&dir)?;
-        Ok(Files {
-            dir,
-            writes: None,
-            sync: false,
-        })
+        Ok(Files { dir, log: None, sync: false })
     }
 
     fn whole(&self, name: &str, bytes: &[u8]) -> io::Result<()> {
@@ -188,10 +186,10 @@ impl Files {
     }
 
     fn opened(&mut self) -> io::Result<&mut File> {
-        if self.writes.is_none() {
-            self.writes = Some(OpenOptions::new().create(true).append(true).open(self.dir.join("writes"))?);
+        if self.log.is_none() {
+            self.log = Some(OpenOptions::new().create(true).append(true).open(self.dir.join("log"))?);
         }
-        Ok(self.writes.as_mut().unwrap())
+        Ok(self.log.as_mut().unwrap())
     }
 }
 
@@ -214,14 +212,18 @@ impl Disk for Files {
             let why = "a log of the format before the log was a table (snapshot, chain): not read";
             return Err(io::Error::other(why));
         }
-        let writes = file(self.dir.join("writes"))?.unwrap_or_default();
-        let (s, at) = read(kv.as_deref(), &writes);
-        self.writes = None;
+        if self.dir.join("writes").exists() {
+            let why = "a log of the format that journaled every write (writes), not the log's rows alone: not read";
+            return Err(io::Error::other(why));
+        }
+        let log = file(self.dir.join("log"))?.unwrap_or_default();
+        let (s, at) = read(kv.as_deref(), &log);
+        self.log = None;
         OpenOptions::new()
             .create(true)
             .write(true)
             .truncate(false)
-            .open(self.dir.join("writes"))?
+            .open(self.dir.join("log"))?
             .set_len(at as u64)?;
         Ok(s)
     }
@@ -229,8 +231,8 @@ impl Disk for Files {
     fn record(&mut self, bytes: &[u8]) -> io::Result<()> {
         if rows_of(bytes) {
             self.whole("kv", bytes)?;
-            self.writes = None;
-            return File::create(self.dir.join("writes"))?.sync_all();
+            self.log = None;
+            return File::create(self.dir.join("log"))?.sync_all();
         }
         let sync = self.sync;
         let f = self.opened()?;

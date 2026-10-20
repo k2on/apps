@@ -13,8 +13,8 @@
 //! trace player are drivers that feed it and route what it says: `Send`
 //! goes back where the frame came from (a replica's upstream), `Fanout` to
 //! every connection, `Persist` to the disk before anything after it is
-//! sent: writes to the store, whose `_log` table is the log (§1.6), or the
-//! store's rows whole. `from` on a frame is the identity the driver verified for its
+//! sent: a row appended to the store's `_log` table, which is the log
+//! (§1.6) and holds the entry's facts, or the store's rows whole. `from` on a frame is the identity the driver verified for its
 //! connection; an authority judges and stamps by it.
 //!
 //! **Effects are values.** A [`Procedure`] reads the store and returns its
@@ -477,16 +477,14 @@ impl Peer {
         s.kv_rows()
     }
 
-    /// A logged entry made part of the log, and durable as its writes: its
-    /// facts, already applied, and its row of the log's table.
+    /// A logged entry made part of the log, its facts already applied, and
+    /// durable as its row of the log's table alone: the facts are in it.
     /// The entry links onto the head: this peer chained it, or checked it.
-    fn logged(&mut self, l: &Logged, facts: Vec<Change>, o: &mut Out) {
+    fn logged(&mut self, l: &Logged, o: &mut Out) {
         debug_assert!(l.seq == self.log().head().0 + 1 && l.links(&self.log().head().1));
         let row = l.to_bytes();
-        self.store.log_push(l.seq, row.clone());
-        let mut writes = facts;
-        writes.push(Change::Add { table: LOG.into(), row });
-        o.persist(Record::Writes(writes));
+        o.out.push(Output::Persist(Record::logged(&row)));
+        self.store.log_push(l.seq, row);
     }
 
     fn of_rows(&self, rows: &[(String, Vec<Vec<u8>>)]) -> Result<Store, Refusal> {
@@ -696,11 +694,11 @@ impl Peer {
                 let l = Logged {
                     seq: n + 1,
                     entry,
-                    facts: facts.clone(),
+                    facts,
                     state,
                     hash,
                 };
-                self.logged(&l, facts, o);
+                self.logged(&l, o);
                 o.out.push(Output::Fanout(
                     Frame::Page {
                         space: self.space,
@@ -1067,7 +1065,6 @@ impl Peer {
             // Facts of another schema are read under this one, and the
             // state the entry says is taken as it says (§1.2).
             let (facts, other) = fit(&self.store.schema_arc().clone(), &l.facts);
-            let applied = facts.clone();
             let trust = self.faith || other;
             let own = self.pending.first().is_some_and(|p| p.entry.id == l.entry.id);
             if !undone && own && self.pending[0].changes == facts {
@@ -1098,7 +1095,7 @@ impl Peer {
                 o.out.push(Output::Confirmed(l.entry.id));
             }
             self.asked = None;
-            self.logged(&l, applied, o);
+            self.logged(&l, o);
         }
         if undone {
             self.redo_pending(o);
@@ -1264,9 +1261,10 @@ impl Peer {
     /// prefix-extension of the one it was written under (§1.2), or, for a
     /// replica behind its authority, a prefix of it: the store's rows read
     /// under it (completed, or cut to their prefix), the log's table's
-    /// checked as a chain, and the writes since applied in order, each
-    /// record all or none, up to the first that does not apply — the store
-    /// is then made durable whole again, without it. A state is never
+    /// checked as a chain, and the log's rows appended since, in order, each
+    /// linking onto the head and its facts applied, all or none, up to the
+    /// first that does not — the store is then made durable whole again,
+    /// without it. A state is never
     /// derived again here, and the store's digests are this schema's. An
     /// entry whose state is not what its facts give here was logged under
     /// another schema ([`Peer::foreign`]). The pending intents run again on
@@ -1278,11 +1276,11 @@ impl Peer {
         let log = log.into_iter().flat_map(|(_, rs)| rs);
         if let Ok(mut store) = self.fit_rows(&rows).and_then(|(rows, _)| self.on(&rows, log)) {
             let schema = store.schema_arc().clone();
-            let n = d.writes.len();
+            let n = d.logged.len();
             let whole = d
-                .writes
+                .logged
                 .into_iter()
-                .take_while(|w| store.apply_kv_all(&fit(&schema, w).0).is_ok())
+                .take_while(|l| store.append(l, &fit(&schema, &l.facts).0).is_ok())
                 .count()
                 == n;
             if !whole {

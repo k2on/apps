@@ -139,7 +139,7 @@ impl Hub {
         let stored = disk.load().unwrap_or_else(|e| panic!("the log on disk does not read: {e}"));
         let durable = Durable {
             rows: stored.rows.unwrap_or_else(|| log.confirmed_rows()),
-            writes: stored.writes,
+            logged: stored.logged,
             pending: vec![],
             local: 0,
         };

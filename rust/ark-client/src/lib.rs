@@ -237,7 +237,7 @@ impl Client {
         let (local, pending) = pending.map(|b| storage::pending(&b)).unwrap_or_default();
         let durable = Durable {
             rows: stored.rows.unwrap_or_else(|| log.confirmed_rows()),
-            writes: stored.writes,
+            logged: stored.logged,
             pending,
             local,
         };
@@ -473,7 +473,7 @@ impl Client {
         }
         let durable = Durable {
             rows: self.log.confirmed_rows(),
-            writes: vec![],
+            logged: vec![],
             local: if other { pending.len() as i64 } else { self.log.local },
             pending,
         };

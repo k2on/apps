@@ -334,11 +334,15 @@ fn held_until_the_operator_loads_it() {
 }
 
 /// What a peer persisted opens it again: the same log and store, its
-/// pending intents run on top. The writes are applied up to the first
-/// record that does not apply — here a row of the log's table that does
-/// not link — and the store is then made durable whole, without it.
-/// Falsified by `Store::apply_kv` adding a row of the log at any sequence:
-/// the stray entry was taken and the log was not bob's.
+/// pending intents run on top. Each entry is persisted as its row of the
+/// log's table alone (K3c: its facts are in it, and the rows they write
+/// are written again on open, so they are on disk once), and the rows are
+/// appended up to the first that does not link onto the head — here a
+/// stray at sequence 9, with no facts to refuse it — the store then made
+/// durable whole, without it. Falsified by `Store::append` taking a row
+/// at any sequence (the stray was taken, and the store was not written
+/// whole again), and by `Peer::open` not applying an entry's facts (bob's
+/// log over a store without bob's tracks).
 #[test]
 fn a_peer_opens_from_what_it_persisted() {
     let s = scenario();
@@ -352,19 +356,18 @@ fn a_peer_opens_from_what_it_persisted() {
         }
     }
     let mut stray = logged(&s.batches[3]);
-    stray.seq = 9;
-    let add = Change::Add {
-        table: LOG.into(),
-        row: stray.to_bytes(),
-    };
-    records.push(Record::Writes(vec![add]).enc());
-    let writes = records.iter().map(|b| match Record::dec(b) {
-        Ok(Record::Writes(w)) => w,
+    (stray.seq, stray.facts) = (9, vec![]);
+    records.push(Record::Logged(stray).enc());
+    let rows = records.iter().map(|b| match Record::dec(b) {
+        Ok(Record::Logged(l)) => {
+            assert_eq!(b[1..], l.to_bytes(), "a record is its row of the log's table alone");
+            l
+        }
         other => panic!("{other:?}"),
     });
     let mut d = Durable {
         rows: replica("alice", demo::cas()).confirmed_rows(),
-        writes: writes.collect(),
+        logged: rows.collect(),
         ..Durable::default()
     };
     let pending = s.alice.clone().step(mutate(ADD, pair_input(&pid(), "t5"), 9));
@@ -386,7 +389,7 @@ fn a_peer_opens_from_what_it_persisted() {
         .collect();
     assert!(
         matches!(&folded[..], [Record::Rows(rows)] if rows.last().is_some_and(|(t, rs)| t == LOG && rs.len() == 5)),
-        "the writes stop where they stop linking, and the store is written whole"
+        "the rows stop where they stop linking, and the store is written whole"
     );
     assert_eq!(opened.log(), s.bob.log());
     assert_eq!(opened.confirmed_hash().hex(), FINAL);

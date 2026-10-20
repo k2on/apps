@@ -10,7 +10,7 @@ use ark::hash::{EntryHash, FnHash, StateHash};
 use ark::ir::Node;
 use ark::log::{Entry, EntryId, Logged, Origin, Record, Snapshot};
 use ark::schema::Space;
-use ark::store::{Change, LOG};
+use ark::store::Change;
 
 fn every_frame() -> Vec<Frame> {
     let entry = Entry {
@@ -118,17 +118,12 @@ fn every_frame_is_its_type() {
         assert!(Frame::dec(&longer).is_err() && parse(&t, &longer).is_err());
         assert!(Frame::dec(&b[..b.len() - 1]).is_err());
     }
-    let r = Record::Writes(match &every_frame()[7] {
-        Frame::Page { logged, .. } => [
-            logged[0].facts.clone(),
-            vec![Change::Add {
-                table: LOG.into(),
-                row: logged[0].to_bytes(),
-            }],
-        ]
-        .concat(),
+    let l = match &every_frame()[7] {
+        Frame::Page { logged, .. } => logged[0].clone(),
         _ => unreachable!(),
-    });
+    };
+    let r = Record::Logged(l.clone());
+    assert_eq!(Record::logged(&l.to_bytes()), r.enc(), "a logged record is the variant, then the row");
     parse(&ty("Record"), &r.enc()).unwrap();
     assert_eq!(Record::dec(&r.enc()), Ok(r));
     let mut rd = Reader::new(&[4]);

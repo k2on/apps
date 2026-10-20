@@ -597,14 +597,9 @@ fn record(disk: &mut Files, r: Record) {
     disk.record(&r.enc()).unwrap();
 }
 
-/// A logged entry as the writes a peer makes durable: its facts and its
-/// row of the log's table.
+/// A logged entry as a peer makes it durable: its row of the log's table.
 fn writes(l: Logged) -> Record {
-    let add = Change::Add {
-        table: LOG.into(),
-        row: l.to_bytes(),
-    };
-    Record::Writes([l.facts, vec![add]].concat())
+    Record::Logged(l)
 }
 
 /// A client of a server, caught up: a snapshot of `n` rows at seq `n`,
@@ -702,7 +697,11 @@ fn perf_d_open() {
         "{:<8} {:>8} {:>9} {:>10} {:>9} {:>9} {:>9}   split (ms)",
         "what", "rows", "on disk", "open ms", "rss MB", "base MB", "live MB"
     );
-    for n in OPEN_SIZES {
+    // `ARK_OPEN_SIZES=8000,80000` opens other sizes.
+    let sizes: Vec<u64> = std::env::var("ARK_OPEN_SIZES")
+        .map(|s| s.split(',').map(|n| n.parse().expect("a size")).collect())
+        .unwrap_or(OPEN_SIZES.to_vec());
+    for n in sizes {
         for kind in ["store", "client", "server", "alone"] {
             let dir = tempfile::Builder::new().prefix("ark-open-").tempdir_in(&root).unwrap();
             match kind {
@@ -808,7 +807,7 @@ fn perf_d_open_child() {
         let path = if kind == "server" { dir.join("log") } else { dir.clone() };
         let mut records = 0;
         let read = time(&mut || {
-            records = Files::new(&path).unwrap().load().unwrap().writes.len();
+            records = Files::new(&path).unwrap().load().unwrap().logged.len();
         });
         if !split.is_empty() {
             split.push_str(", ");

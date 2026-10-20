@@ -116,7 +116,7 @@ impl Log {
     /// The log in `dir` (the server's `HARKEN_DATA/log`), read from a copy;
     /// `None` before anything was written.
     pub fn read(dir: &Path) -> Option<Log> {
-        if !dir.join("kv").exists() && !dir.join("writes").exists() {
+        if !dir.join("kv").exists() && !dir.join("log").exists() {
             return None;
         }
         let copy = tempfile::tempdir().unwrap();
@@ -149,10 +149,10 @@ impl Log {
             log
         };
         state.start_log(log).expect("the log's rows are a chain");
-        for (i, w) in stored.writes.iter().enumerate() {
+        for l in &stored.logged {
             state
-                .apply_kv_all(w)
-                .unwrap_or_else(|e| panic!("write {i} does not apply: {}", e.0));
+                .append(l, &l.facts)
+                .unwrap_or_else(|e| panic!("entry {} does not apply: {}", l.seq, e.0));
         }
         Some(Log {
             base: state.log().base_seq(),

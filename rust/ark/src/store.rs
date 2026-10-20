@@ -389,6 +389,20 @@ impl Store {
             .try_for_each(|row| self.apply_kv(&Change::Add { table: LOG.into(), row }))
     }
 
+    /// A logged entry appended as its row of the log's table, as a peer
+    /// opens its log (§1.6): the entry must link onto the head, and
+    /// `facts` — its own, as this store's schema reads them — apply, all or
+    /// none.
+    pub fn append(&mut self, l: &Logged, facts: &[Change]) -> Result<(), Refusal> {
+        let (n, h) = self.log().head();
+        if l.seq != n + 1 || !l.links(&h) {
+            return Err(Refusal(format!("{LOG}: entry {} does not link onto the head", l.seq)));
+        }
+        self.apply_all(facts)?;
+        self.log_push(l.seq, l.to_bytes());
+        Ok(())
+    }
+
     /// A row added at the head of the log by a peer that chained it onto
     /// the head, or checked that it links there.
     pub(crate) fn log_push(&mut self, seq: Seq, row: Vec<u8>) {

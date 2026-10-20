@@ -12,9 +12,11 @@
 //! [`Logged`]'s bytes; the chain is that table's invariant, judged at
 //! every write to it ([`Logged::links`]), and its first row is the one the
 //! log stands on (the horizon, or a snapshot's head), not checked. What a
-//! peer makes durable is writes to that store, the log's table's among
-//! them ([`Record`]), and it opens from the store's rows and the writes
-//! since ([`Durable`]): one format.
+//! peer makes durable is the store's rows whole, the log's table's among
+//! them, and the rows appended to the log's table since ([`Record`]): an
+//! entry's facts are in its row, so the rows they write to the schema's
+//! tables are not journaled beside it but written again as a peer opens
+//! ([`Durable`]): one format, each fact on disk once.
 //!
 //! **The chain is the log's identity.** Two peers at one sequence with one
 //! [`EntryHash`] hold one history; a peer that says `(cursor, hash)` is
@@ -228,17 +230,24 @@ impl Snapshot {
 /// A store's rows, by table.
 pub type Rows = Vec<(String, Vec<Vec<u8>>)>;
 
-/// What a peer makes durable, one record per `Persist` (§1.7): writes to
-/// its store, appended — a logged entry is its facts and its row of the
-/// log's table — or the store's rows whole, which every write before them
-/// is folded into.
+/// What a peer makes durable, one record per `Persist` (§1.7): a logged
+/// entry, appended, as its row of the log's table — its facts are in it —
+/// or the store's rows whole, which every entry before them is folded
+/// into.
 #[derive(Clone, Debug, PartialEq, Eq, Node)]
+#[allow(clippy::large_enum_variant)]
 pub enum Record {
-    Writes(Vec<Change>),
+    Logged(Logged),
     Rows(Rows),
 }
 
 impl Record {
+    /// A logged entry's record from its row of the log's table, which is
+    /// the entry's encoding: the variant, then the row as it is.
+    pub fn logged(row: &[u8]) -> Vec<u8> {
+        [&[0][..], row].concat()
+    }
+
     pub fn enc(&self) -> Vec<u8> {
         self.to_bytes()
     }
@@ -249,12 +258,13 @@ impl Record {
 }
 
 /// What a peer is opened from: its store's rows as they were last written
-/// whole — the log's table's among them — and the writes since, in order;
-/// its own intents still pending; and the last `local` it drew.
+/// whole — the log's table's among them — and the rows appended to the
+/// log's table since, in order, whose facts write the rest again; its own
+/// intents still pending; and the last `local` it drew.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Node)]
 pub struct Durable {
     pub rows: Rows,
-    pub writes: Vec<Vec<Change>>,
+    pub logged: Vec<Logged>,
     pub pending: Vec<Entry>,
     pub local: i64,
 }
