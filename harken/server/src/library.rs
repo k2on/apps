@@ -7,11 +7,11 @@
 //! what "add a song" means, and the first time it disagreed with the domain's
 //! procedure the replicas would diverge with nothing to say so.
 //!
-//! So the scanner is an ordinary [`ark_client::Peer`], with its own replica
-//! and its own pending queue on disk, dialling the hub in this process
-//! (`HubHandle::dial`) instead of a socket. It gets acks, it gets the
-//! rebase, and a file it adds fans out to every connected peer without
-//! anyone asking. It signs in like everyone else — the engine holds every
+//! So the scanner is an ordinary [`ark5_client::Client`], with its own
+//! replica and its own pending intents on disk, its link dialling the hub
+//! in this process (`Handle::dial`) instead of a socket. It gets its
+//! confirmations, it gets the rebase, and a file it adds fans out to every
+//! connected peer without anyone asking. It signs in like everyone else — the engine holds every
 //! entry to a session, and "the server wrote it" is not an exemption — as
 //! the account [`ACCOUNT`].
 //!
@@ -42,16 +42,20 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use ark::eval::Args;
-use ark::ir::Auto;
-use ark::store::{Overlay, Store};
-use ark::value::Value;
+use ark5::ir::Node;
+use ark5::log::EntryId;
+use ark5::peer::{Ctx, Who};
+use ark5::store::{Dir, Read, Scan as Range, Store};
+use ark5_client::link::{Backoff, Link};
+use ark5_client::{Client, Event, Files};
+use ark5_server::handle::now;
+use ark5_server::Handle;
 use ark_auth::Login;
-use ark_client::{args, Domain, Options, Peer};
-use ark_server::HubHandle;
+use harken_domain5::library::AddSong;
 use notify::{RecursiveMode, Watcher};
 
 use crate::covers::{self, Covers};
+use crate::hosted::Hosted;
 
 /// What the scanner will look at. Everything else in the directory —
 /// artwork, playlists, the stray `.DS_Store` — is not a track and is skipped
@@ -73,6 +77,9 @@ pub const MUSIC: &str = "music";
 /// nobody added these by hand — and it shows up as the `user_id` on every
 /// scanned row, which is the truth: the library put it there.
 pub const ACCOUNT: &str = "library";
+
+/// The mutation a file is offered as.
+const ADD_SONG: &str = "library.add_song";
 
 /// How long a watched path is left to settle before it is read: a file is
 /// usually still being written when its create arrives, so the tags are not
@@ -159,33 +166,52 @@ impl Scanner {
     /// library of ten thousand files does not hold up anything.
     pub fn start(
         root: PathBuf,
-        domain: Domain,
-        hub: HubHandle,
+        hosted: Hosted,
+        hub: Handle,
         data: PathBuf,
         login: Login,
     ) -> Result<Scanner> {
-        let opts = Options::server(
-            login.user.id.clone(),
-            login.session.clone(),
-            Some(login.token.clone()),
-        );
-        let dir = replica_dir(&data);
-        let mut peer = Peer::open_path(domain, &dir, opts)
-            .map_err(|e| anyhow::anyhow!("the scanner's replica in {}: {e}", dir.display()))?;
         // `docs/plan-auth.md` The scanner is the library, by construction: it
         // holds the library's role whatever else its login holds, and its
-        // `Ctx` carries it. The server grants the account the same role
+        // entries carry it. The server grants the account the same role
         // (`start`), so the device and the authority agree on it — which is
-        // what `is_library` asks, on the device and, of the roles the
-        // server stamps, at the authority (`docs/plan-guards.md` D1).
-        peer.set_roles(
-            login
-                .user
-                .roles
-                .iter()
-                .cloned()
-                .chain([harken_domain::schema::LIBRARY.to_string()]),
+        // what `is_library` asks, on the device and, of the roles the hub
+        // stamps, at the authority.
+        let mut roles = login.user.roles.clone();
+        roles.push(harken_domain5::schema::LIBRARY.to_string());
+        roles.sort();
+        roles.dedup();
+        let who = Who {
+            actor: login.user.id.clone(),
+            session: login.session.clone(),
+            roles,
+        };
+        let dir = replica_dir(&data);
+        let disk = Files::new(&dir)
+            .map_err(|e| anyhow::anyhow!("the scanner's replica in {}: {e}", dir.display()))?;
+        let config = ark5_client::Config {
+            log: hosted.module.clone(),
+            live: None,
+        };
+        let mut client = Client::open(config, who.clone(), Box::new(disk), false);
+        // Each start is a login of its own: what the replica kept pending
+        // is authored again under it, from its session's first `local`,
+        // or the hub would hold the first entry for the ones before it.
+        client.sign_in(who.clone());
+        // In this process, the token is the scanner's and proves its login.
+        let token = login.token.clone();
+        let link = Link::start(
+            Box::new(hub.dial(std::sync::Arc::new(move |t: &str| {
+                (t == token).then(|| who.clone())
+            }))),
+            login.token.clone(),
+            Backoff::default(),
         );
+        let peer = Peer {
+            client,
+            link,
+            hosted,
+        };
         let (tx, rx) = channel();
         let stop = Arc::new(AtomicBool::new(false));
         let counts = Arc::new(Counts::default());
@@ -397,17 +423,37 @@ struct Scan {
     prints: Prints,
 }
 
+/// The scanner's peer: its client, the link to the hub, and the module.
+struct Peer {
+    client: Client,
+    link: Link,
+    hosted: Hosted,
+}
+
+impl Peer {
+    /// What the link said, given to the client, and what it says back:
+    /// a refused entry said out loud.
+    fn pump(&mut self) {
+        let events = self.link.events();
+        self.client.pump(&self.link, events, now());
+        for e in self.client.take_events() {
+            if let Event::Refused { why, .. } = e {
+                eprintln!("harken-server: library: an entry was refused: {why}");
+            }
+        }
+    }
+}
+
 /// The scanner's whole life: a peer, and a loop over what it is told to
 /// look at.
 fn run(
     mut scan: Scan,
     mut peer: Peer,
-    hub: HubHandle,
+    hub: Handle,
     rx: Receiver<Nudge>,
     stop: &AtomicBool,
     counts: &Counts,
 ) {
-    peer.connect_with("local", hub.dial());
     catch_up(&mut peer, &hub, stop);
 
     while !stop.load(Ordering::Relaxed) {
@@ -434,31 +480,24 @@ fn run(
         // Whatever that produced, and whatever the log has for us. Not
         // conditional on a nudge: a quiet scanner still has to take the
         // entries other peers wrote.
-        let pumped = peer.pump();
-        if let Some(why) = pumped.denied {
-            eprintln!("harken-server: library: the hub turned the scanner away: {why}");
-        }
-        for r in peer.take_rejections() {
-            eprintln!("harken-server: library: an entry was refused: {}", r.reason);
-        }
+        peer.pump();
     }
-    // Off the hub, with what is pending written down for the next start.
+    // Off the hub, with what is pending written down for the next start (the
+    // client writes its pending intents as they change).
     peer.pump();
-    peer.disconnect();
 }
 
 /// Pump until the replica has what the log had when it started, so that
 /// "already a song" means the library and not an empty replica. Bounded: a
 /// scanner that cannot catch up still scans, and the procedure keeps the
 /// library right.
-fn catch_up(peer: &mut Peer, hub: &HubHandle, stop: &AtomicBool) {
-    let head = hub
-        .read_blocking(|h| h.authority().log.head_seq())
-        .unwrap_or(0);
+fn catch_up(peer: &mut Peer, hub: &Handle, stop: &AtomicBool) {
+    let head = hub.with(|h| h.log.log.head().0).unwrap_or(0);
     let deadline = Instant::now() + Duration::from_secs(30);
     while !stop.load(Ordering::Relaxed) && Instant::now() < deadline {
         peer.pump();
-        if peer.linked() && peer.cursor() >= head && peer.pending_len() == 0 {
+        let c = &peer.client;
+        if c.linked && c.log.log.head().0 >= head && c.log.pending.is_empty() {
             return;
         }
         std::thread::sleep(Duration::from_millis(5));
@@ -512,55 +551,39 @@ fn look(peer: &mut Peer, scan: &mut Scan, nudges: Vec<Nudge>) -> (usize, usize) 
     (authored, read)
 }
 
-/// Whether the library already has a file: asked of the replica's view,
-/// per file, through `media (file)` — one row looked at, where it was the
-/// whole media table read into a set once per look (`docs/plan-perf.md`
-/// R4). The view holds what this look has already authored, so a file
-/// authored a moment ago is known without a set to remember it in.
-fn known_file(peer: &Peer, file: &str) -> bool {
-    let f = Value::text(file);
-    !peer
-        .store()
-        .scan_where_eq("media", &[("file", &f)], &[], &|row| {
-            row.get("file") == Some(&f)
-        })
-        .is_empty()
+/// Whether the library already has a file: asked of the replica's
+/// optimistic store through the `media (file)` index — one row looked at
+/// (`docs/plan-perf.md` R4). The store holds what this look has already
+/// authored, so a file authored a moment ago is known without a set to
+/// remember it in.
+fn known_file(store: &Store, file: &str) -> bool {
+    let schema = store.schema_arc().clone();
+    let Some((_, media)) = schema.table("media") else {
+        return false;
+    };
+    let col = media.columns.iter().position(|c| c.name == "file");
+    let index = media
+        .indexes
+        .iter()
+        .position(|i| Some(i.columns.as_slice()) == col.as_ref().map(std::slice::from_ref));
+    let range = Range::prefix(index, &file.to_string().to_bytes(), Dir::Asc, 1);
+    !store.scan("media", &range).is_empty()
 }
 
 /// Whether an entry would write anything over what the replica holds: the
-/// mutation, applied to a copy that is thrown away. What the procedure does
-/// with an entry saying nothing new is write nothing, so not authoring one
-/// is the same library with one entry fewer in the log.
-fn would_change(peer: &Peer, name: &str, args: &Args) -> bool {
-    let domain = peer.domain();
-    let Ok((h, f)) = domain.mutator(name) else {
-        return true;
+/// mutation run over it, its changes looked at and thrown away. What the
+/// procedure does with an entry saying nothing new is write nothing, so
+/// not authoring one is the same library with one entry fewer in the log.
+fn would_change(peer: &Peer, name: &str, input: &[u8]) -> bool {
+    let me = &peer.client.log.me;
+    let ctx = Ctx {
+        id: EntryId::of(&me.session, peer.client.log.local + 1),
+        actor: me.actor.clone(),
+        session: me.session.clone(),
+        roles: me.roles.clone(),
+        now: now(),
     };
-    let autos: Args = f
-        .autos
-        .iter()
-        .map(|(n, a)| {
-            let v = match a {
-                Auto::NewId(_) => Value::Id([0xff; 16]),
-                Auto::Now => Value::int(0),
-            };
-            (n.clone(), v)
-        })
-        .collect();
-    let store = peer.store();
-    let mut copy = Overlay::new(store);
-    let out = match domain.natives().get(h) {
-        Some(p) => p.apply(peer.ctx(), &autos, args, &mut copy),
-        None => ark::eval::apply_closure(
-            store.schema(),
-            &domain.closures()[h],
-            peer.ctx(),
-            &autos,
-            args,
-            &mut copy,
-        ),
-    };
-    !matches!(out, Ok(Ok(changes)) if changes.is_empty())
+    !matches!(peer.hosted.run(&peer.client.log.store, &ctx, name, input), Ok(changes) if changes.is_empty())
 }
 
 /// Every file under `dir`. A directory that cannot be read is skipped rather
@@ -632,7 +655,7 @@ fn offer(peer: &mut Peer, scan: &mut Scan, covers: &mut Covers, path: &Path) -> 
             artist: was.artist.clone(),
             covers: covers.beside(dir, &was.artist).print(),
         };
-        if *was == now && known_file(peer, &rel) {
+        if *was == now && known_file(&peer.client.log.store, &rel) {
             return Offered::Not;
         }
     }
@@ -656,50 +679,53 @@ fn offer(peer: &mut Peer, scan: &mut Scan, covers: &mut Covers, path: &Path) -> 
             .unwrap_or_default(),
     };
     let artist_art = found.artist.map(|i| i.value()).unwrap_or_default();
-    let call = args([
-        ("title", Value::text(track.title)),
-        ("artist", Value::text(track.artist)),
-        ("album", Value::text(track.album)),
-        ("duration_ms", Value::int(track.duration_ms)),
-        ("file", Value::text(rel.clone())),
-        ("track", Value::int(track.number)),
+    let call = AddSong {
+        title: track.title,
+        artist: track.artist,
+        album: track.album,
+        duration_ms: track.duration_ms,
+        file: rel.clone(),
+        track: track.number,
         // Neither is in a standard tag: a part is a division of a work and a
         // catalogue number is a scholarly index, and no file carries either.
         // Left empty rather than guessed out of the folder names.
-        ("part", Value::text("")),
-        ("catalogue", Value::text("")),
-        ("performer", Value::text(track.performer)),
-        ("bpm", Value::int(track.bpm)),
+        part: String::new(),
+        catalogue: String::new(),
+        performer: track.performer,
+        bpm: track.bpm,
         // The covers found for it, or empty: the procedure reads empty as
         // "this entry has no picture to offer" and leaves whatever is
         // already on the row, so a track with none does not wipe the one its
         // album already has.
-        ("album_art", Value::text(album_art)),
-        ("artist_art", Value::text(artist_art)),
+        album_art,
+        artist_art,
         // No disc, no work, no movement number — none of which a plain tag
         // carries. 0 and empty are "nobody said": the track becomes a
         // recording of its own, which is what a pop track is.
-        ("disc", Value::int(0)),
-        ("work_title", Value::text("")),
-        ("movement_no", Value::int(0)),
-    ]);
-    if !would_change(peer, "add_song", &call) {
+        disc: 0,
+        work_title: String::new(),
+        movement_no: 0,
+    }
+    .to_bytes();
+    if !would_change(peer, ADD_SONG, &call) {
         scan.prints.set(rel, print);
         return Offered::Read;
     }
-    match peer.mutate("add_song", call) {
-        Ok(_) => {
-            scan.prints.set(rel, print);
-            Offered::Authored
-        }
-        Err(e) => {
+    let before = peer.client.log.pending.len();
+    peer.client.mutate(peer.hosted.func(ADD_SONG), call, now());
+    if peer.client.log.pending.len() > before {
+        scan.prints.set(rel, print);
+        return Offered::Authored;
+    }
+    for e in peer.client.take_events() {
+        if let Event::Refused { why, .. } = e {
             eprintln!(
-                "harken-server: library: {} was refused: {e}",
+                "harken-server: library: {} was refused: {why}",
                 path.display()
             );
-            Offered::Read
         }
     }
+    Offered::Read
 }
 
 /// The path as the log should carry it: relative to the media root, with `/`

@@ -3,7 +3,7 @@ name = "harken-server"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "harken's server on ark-server: the log with harken's procedures native, sign-in (ark-auth), a media directory authored as a peer, one listening session per account over live rooms, the house's speakers as devices, and the browser client"
+description = "harken's server on ark5-server: the log and the listening session (harken-domain5) on the hub, sign-in (ark-auth), a media directory authored as a peer, the house's speakers as devices, and the browser client"
 workspace = "../../rust"
 
 [[bin]]
@@ -19,14 +19,14 @@ name = "harken-peer"
 path = "src/bin/harken-peer.rs"
 
 [dependencies]
-ark = { path = "../../rust/ark" }
-# The scanner is an ark-client peer in this process; it dials the hub, never
-# a socket, so it needs no TLS.
-ark-client = { path = "../../rust/ark-client", default-features = false }
-ark-server = { path = "../../rust/ark-server" }
+ark5 = { path = "../../rust/ark5" }
+# The scanner and the house's speakers are clients in this process; they
+# reach the hub through its handle, never a socket.
+ark5-client = { path = "../../rust/ark5-client" }
+ark5-server = { path = "../../rust/ark5-server" }
 # `client` for harken-peer, which signs in the way the desktop does.
 ark-auth = { path = "../../rust/ark-auth", features = ["server", "client"] }
-harken-domain = { path = "../domain" }
+harken-domain5 = { path = "../domain5" }
 anyhow = "1"
 axum = { version = "0.7", features = ["ws"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal"] }

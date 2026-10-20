@@ -63,7 +63,7 @@ fn every_file_carries_the_build_and_no_date() {
         c.web_module = Some(MODULE.into());
     });
     let base = server.url();
-    let tag = format!("\"{}\"", ark_server::web::build_tag(&web, Some(MODULE)));
+    let tag = format!("\"{}\"", ark5_server::web::build_tag(&web, Some(MODULE)));
     for path in ["/", "/pkg/harken_iced_bg.wasm", "/album/Water%20Music"] {
         let a = get(&base, path, &[]);
         assert_eq!(a.status, 200, "{path}");

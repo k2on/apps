@@ -1,51 +1,56 @@
-//! harken's server, on `ark-server`.
+//! harken's server, on `ark5-server`.
 //!
-//! Almost nothing here is about sync, and that is the point: the log, the
-//! socket at `/sync`, `/healthz`, the sign-in routes, `/media` and the web
-//! build's validator are `ark_server`'s and `ark_auth`'s, generic over any
-//! app. What is harken's is the four things only harken has, each a module a
-//! test can reach:
+//! Almost nothing here is about sync, and that is the point: the log and
+//! the listening session's volatile space on the hub, the socket at
+//! `/sync`, `/healthz`, the sign-in routes and the web build's validator
+//! are `ark5_server`'s and `ark_auth`'s, generic over any app; the domain
+//! is `harken_domain5`'s. What is harken's is the things only harken has,
+//! each a module a test can reach:
 //!
 //! - [`library`]: the media directory as a peer — walked, watched, and
-//!   authored as `add_song`;
+//!   authored as `library.add_song`;
+//! - [`covers`]: where a track's cover comes from, and `/media`;
 //! - [`assistant`]: the house's speakers, as devices in each account's
 //!   listening session — which is the domain's live state
-//!   (`harken_domain::listening`), sequenced by the engine, and needs
-//!   nothing of this crate;
+//!   (`harken_domain5::listening`), sequenced by the hub's volatile
+//!   authority, and needs nothing of this crate;
+//! - [`hosted`]: the module the hub runs, harken's own or one from a file;
 //! - and [`start`], which is the wiring: a [`Config`] read from the
 //!   environment (what the NixOS module sets) and the server built from it.
 //!
-//! It signs people in, because the engine holds every entry to who pushed
-//! it and somebody has to say who that is. The server is the only OpenID
+//! It signs people in, because the hub holds every entry to who pushed it
+//! and somebody has to say who that is. The server is the only OpenID
 //! Connect client: it holds the secret, talks to the provider, and hands
 //! each peer a session token of its own — so the desktop, the browser and
 //! the phone all sign in the same way. Without a provider it refuses to
 //! start, unless told it is on a laptop (`HARKEN_DEV_AUTH=1`).
 //!
-//! Nothing here assumes a peer arrived signed in. A client used before
-//! anybody signed in authors as nobody and dials nothing; when somebody
-//! signs in, it re-stamps that work as theirs and pushes it under the new
-//! login — which the engine takes like any other entry. An entry authored
-//! under an *older* login of the same person is taken too: `.auth(..)` hands
-//! the engine `Auth::owns`.
+//! A device is a session (`harken_domain5::listening`): a connection's
+//! volatile `Hello` says what the device is, and the hub authors `on_join`
+//! with it, its user and id the verified login's ([`device`]).
 
 pub mod assistant;
 pub mod covers;
-pub mod grown;
+pub mod hosted;
 pub mod library;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
+use ark5::ir::Node;
+use ark5::peer::Who;
+use ark5_server::hub::{Config as HubConfig, Live};
+use ark5_server::Running;
 use ark_auth::oidc::Provider;
 use ark_auth::server::{Auth, Mode};
 use ark_auth::session::SessionStore;
 use ark_auth::Account;
-use ark_client::Domain;
-use ark_server::Running;
+use harken_domain5::listening::Device;
 
 use assistant::ha;
+use hosted::Hosted;
 use library::Scanner;
 
 /// The phone's URL scheme: a login may always send its code back there.
@@ -67,6 +72,44 @@ pub enum SignIn {
     },
 }
 
+/// How often the sync socket pings, and how many may go unanswered before
+/// a connection is closed. `ark5-server` closes after three unanswered, so
+/// `missed` is read and held to that ([`Config::from_vars`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Keepalive {
+    pub every: Duration,
+    pub missed: u32,
+}
+
+impl Default for Keepalive {
+    fn default() -> Keepalive {
+        Keepalive {
+            every: Duration::from_secs(20),
+            missed: 3,
+        }
+    }
+}
+
+/// How much of the log the server keeps: `entries` above the snapshot the
+/// log stands on (`ark5_server::Config::keep`); a device further behind is
+/// sent the snapshot and rebases onto it. `days` is read and checked, and
+/// kept nothing by: v5's horizon is a count of entries, not a device's
+/// place.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Retention {
+    pub entries: usize,
+    pub days: u64,
+}
+
+impl Default for Retention {
+    fn default() -> Retention {
+        Retention {
+            entries: 10_000,
+            days: 30,
+        }
+    }
+}
+
 /// Everything the server is told, from the environment or a test.
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -75,15 +118,13 @@ pub struct Config {
     /// The log, the kept listening sessions, the sign-in sessions and the
     /// scanner's replica.
     pub data: PathBuf,
-    /// An `.ark` module to host instead of harken's own: functions whose
-    /// hashes this build holds run natively, the rest interpreted.
+    /// A module file to host instead of harken's own ([`hosted::write`]).
     pub module: Option<PathBuf>,
-    /// `.ark` modules this server is to hold as ones it has run before
-    /// (`HARKEN_OLD_MODULES`, comma-separated paths; what
-    /// `services.harken.oldModules` sets): the closures of each kept, so
-    /// an intent a client built with one authors is sequenced through
-    /// them, though this server never started with it
-    /// (`ark_server::Builder::ran_before`, `docs/plan-guards.md` D1).
+    /// Module files whose functions this server is to hold though it never
+    /// started with them (`HARKEN_OLD_MODULES`, comma-separated paths; what
+    /// `services.harken.oldModules` sets): their bodies go in the content
+    /// store, so an intent a client built with one is sequenced through it
+    /// without the client being asked for the body.
     pub old_modules: Vec<PathBuf>,
     /// Where a browser reaches this server — the proxy's address behind one.
     /// The provider sends people back under it, and the page it serves
@@ -103,29 +144,24 @@ pub struct Config {
     pub web_module: Option<String>,
     /// The house, if there is one.
     pub house: Option<ha::Config>,
-    /// How often the sync socket pings, and how many may go unanswered
-    /// before a connection is closed. The engine's default everywhere but a
-    /// test: the process fleet shortens it (`HARKEN_KEEPALIVE_MS`) so a
+    /// How often the sync socket pings. The default everywhere but a test:
+    /// the process fleet shortens it (`HARKEN_KEEPALIVE_MS`) so a
     /// black-holed socket is closed in a second rather than a minute
     /// (`docs/plan-fleet.md` §2, scenario 10).
-    pub keepalive: ark_server::Keepalive,
-    /// How much of the log the server keeps (`ark::retention`,
-    /// `docs/plan-alone.md` §3): everything above the lowest cursor of a
-    /// device heard from within `days` (`HARKEN_RETAIN_DAYS`, 30), and
-    /// never fewer than `entries` below the head (`HARKEN_RETAIN_ENTRIES`,
-    /// 10,000). A device further behind is sent a snapshot and rebases onto
-    /// it; the process fleet shrinks both to watch one be.
-    pub retain: ark_server::Retention,
+    pub keepalive: Keepalive,
+    /// How much of the log the server keeps (`HARKEN_RETAIN_ENTRIES`,
+    /// 10,000; `HARKEN_RETAIN_DAYS`, 30, read and unused: [`Retention`]).
+    pub retain: Retention,
     /// `docs/plan-auth.md` Who holds which role: role → account ids
     /// (`HARKEN_ROLES`, what `services.harken.roles` sets). Asked at every
-    /// `Hello`, so a restart with another configuration grants or revokes
-    /// at once. The scanner's account holds `library` whatever this says.
+    /// connection, so a restart with another configuration grants or
+    /// revokes at once. The scanner's account holds `library` whatever this
+    /// says.
     pub roles: std::collections::BTreeMap<String, Vec<String>>,
     /// `docs/plan-guards.md` D4 Where the admin page listens
     /// (`HARKEN_ADMIN_BIND`, what `services.harken.admin.bind` sets; none
-    /// without it): the explorer over the authority, asking nothing on
-    /// loopback and a login holding `admin` anywhere wider
-    /// (`ark_server::admin`).
+    /// without it): nothing asked on loopback and a login holding `admin`
+    /// anywhere wider (`ark5_server::admin`).
     pub admin_bind: Option<String>,
     /// The admin page's static build (`HARKEN_ADMIN_WEB`): `ark-admin`
     /// compiled to wasm. Without it the admin listener serves its API alone.
@@ -147,8 +183,8 @@ impl Config {
             web: None,
             web_module: None,
             house: None,
-            keepalive: ark_server::Keepalive::default(),
-            retain: ark_server::Retention::default(),
+            keepalive: Keepalive::default(),
+            retain: Retention::default(),
             roles: Default::default(),
             admin_bind: None,
             admin_web: None,
@@ -159,8 +195,8 @@ impl Config {
     ///
     /// ```text
     /// HARKEN_DATA                   where the state lives (default: the temp dir)
-    /// HARKEN_MODULE                 an .ark to host instead of harken's own
-    /// HARKEN_OLD_MODULES            .ark files to hold as run before, comma-separated
+    /// HARKEN_MODULE                 a module file to host instead of harken's own
+    /// HARKEN_OLD_MODULES            module files to hold as run before, comma-separated
     /// HARKEN_PUBLIC_URL             where a browser reaches this server
     /// HARKEN_DEV_AUTH=1             anyone is whoever they say
     /// HARKEN_OIDC_ISSUER, HARKEN_OIDC_CLIENT_ID, HARKEN_OIDC_CLIENT_SECRET_FILE
@@ -173,9 +209,9 @@ impl Config {
     /// HARKEN_BRIDGE_TRACE=1         a line per poll per speaker: what the
     ///                               house said and what the bridge did
     /// HARKEN_KEEPALIVE_MS           the sync socket's ping interval (20000)
-    /// HARKEN_KEEPALIVE_MISSED       pings unanswered before it closes (3)
-    /// HARKEN_RETAIN_DAYS            how long a device's place holds the log (30)
-    /// HARKEN_RETAIN_ENTRIES         entries kept below the head regardless (10000)
+    /// HARKEN_KEEPALIVE_MISSED       pings unanswered before it closes (3, and only 3)
+    /// HARKEN_RETAIN_DAYS            read and checked; kept nothing by
+    /// HARKEN_RETAIN_ENTRIES         entries kept above the snapshot (10000)
     /// HARKEN_ROLES                  who holds which role: `library=alice,bob;admin=alice`
     /// HARKEN_ADMIN_BIND             where the admin page listens (none without it)
     /// HARKEN_ADMIN_WEB              the admin page's build
@@ -210,20 +246,23 @@ impl Config {
             _ => bail!("HARKEN_OIDC_ISSUER, HARKEN_OIDC_CLIENT_ID and HARKEN_OIDC_CLIENT_SECRET_FILE go together; set all three"),
         };
         let house = house(&env)?;
-        let mut keepalive = ark_server::Keepalive::default();
+        let mut keepalive = Keepalive::default();
         if let Some(ms) = env("HARKEN_KEEPALIVE_MS") {
             let ms: u64 = ms.trim().parse().ok().filter(|n| *n > 0).ok_or_else(|| {
                 anyhow!("HARKEN_KEEPALIVE_MS is milliseconds, more than none: {ms}")
             })?;
-            keepalive.every = std::time::Duration::from_millis(ms);
+            keepalive.every = Duration::from_millis(ms);
         }
         if let Some(n) = env("HARKEN_KEEPALIVE_MISSED") {
             keepalive.missed = n
                 .trim()
                 .parse()
                 .map_err(|_| anyhow!("HARKEN_KEEPALIVE_MISSED is a count: {n}"))?;
+            if keepalive.missed != 3 {
+                bail!("HARKEN_KEEPALIVE_MISSED: the sync socket closes after 3 unanswered pings, not {n}");
+            }
         }
-        let mut retain = ark_server::Retention::default();
+        let mut retain = Retention::default();
         if let Some(d) = env("HARKEN_RETAIN_DAYS") {
             retain.days = d
                 .trim()
@@ -236,27 +275,27 @@ impl Config {
                 .parse()
                 .map_err(|_| anyhow!("HARKEN_RETAIN_ENTRIES is a count of entries: {n}"))?;
         }
-        Ok(Config {
-            listen: listen.into(),
-            data: env("HARKEN_DATA")
-                .map_or_else(|| std::env::temp_dir().join("harken-server"), PathBuf::from),
-            module: env("HARKEN_MODULE").map(PathBuf::from),
-            old_modules: env("HARKEN_OLD_MODULES")
-                .unwrap_or_default()
-                .split(',')
-                .map(str::trim)
-                .filter(|p| !p.is_empty())
-                .map(PathBuf::from)
-                .collect(),
-            public_url: env("HARKEN_PUBLIC_URL"),
-            sign_in,
-            redirects: env("HARKEN_REDIRECTS")
+        let list = |k: &str| -> Vec<String> {
+            env(k)
                 .unwrap_or_default()
                 .split(',')
                 .map(str::trim)
                 .filter(|p| !p.is_empty())
                 .map(str::to_string)
+                .collect()
+        };
+        Ok(Config {
+            listen: listen.into(),
+            data: env("HARKEN_DATA")
+                .map_or_else(|| std::env::temp_dir().join("harken-server"), PathBuf::from),
+            module: env("HARKEN_MODULE").map(PathBuf::from),
+            old_modules: list("HARKEN_OLD_MODULES")
+                .into_iter()
+                .map(PathBuf::from)
                 .collect(),
+            public_url: env("HARKEN_PUBLIC_URL"),
+            sign_in,
+            redirects: list("HARKEN_REDIRECTS"),
             media: env("HARKEN_MEDIA").map(PathBuf::from),
             web: env("HARKEN_WEB").map(PathBuf::from),
             web_module: env("HARKEN_WEB_MODULE"),
@@ -383,17 +422,86 @@ pub fn pretty(entity: &str) -> String {
     }
 }
 
-/// The module this server hosts.
-pub fn domain(module: Option<&Path>) -> Result<Domain> {
-    match module {
-        None => Ok(Domain::new(&harken_domain::module())),
-        Some(p) => {
-            let bytes =
-                std::fs::read(p).with_context(|| format!("reading the module {}", p.display()))?;
-            Domain::from_bytes(&bytes, harken_domain::module().procedures())
-                .map(|d| d.with_lives(harken_domain::module().lives()))
-                .map_err(|e| anyhow!("the module {}: {e}", p.display()))
-        }
+/// What the hub authors `on_join` and `on_leave` with: what the device said
+/// it is, its user and its id the verified login's — a device is a session.
+/// What a device says that does not read as a device is no device.
+pub fn device(who: &Who, said: &[u8]) -> Option<Vec<u8>> {
+    let d = Device::from_bytes(said).ok()?;
+    let (user, id) = (who.actor.clone(), who.session.clone());
+    Some(Device { user, id, ..d }.to_bytes())
+}
+
+/// The hub's configuration for `hosted`: the log and the listening
+/// session's volatile space over the one module, `on_join`, `on_leave` and
+/// `on_restore` the domain's, [`device`] reading a device, and `keep`
+/// entries above the log's snapshot.
+pub fn hub_config(hosted: &Hosted, keep: usize) -> HubConfig {
+    let mut c = HubConfig::new(hosted.module.clone());
+    let get = |n: &str| hosted.get(&format!("listening.{n}"));
+    c.live = Some(Live {
+        module: hosted.module.clone(),
+        on_join: get("on_join"),
+        on_leave: get("on_leave"),
+        on_restore: get("on_restore"),
+        device: Arc::new(device),
+        keep: 256,
+    });
+    c.keep = Some(keep);
+    c
+}
+
+/// What `/healthz` says, a line each: `ok`; the connections open; the
+/// log's head and its horizon (the snapshot it stands on); the module it
+/// runs, `current`, and each it holds as run before (`HARKEN_OLD_MODULES`),
+/// by hash; and every account with a connection open, with how many — what
+/// the fleet and the VM test read. Answered in front of `ark5-server`'s own
+/// `/healthz`, which says `ok` alone.
+pub async fn health(hub: &ark5_server::Handle, hosted: &Hosted) -> Option<String> {
+    let hub = hub.clone();
+    let mut modules = format!("module {} current\n", hosted.domain.module.hash());
+    for m in &hosted.held {
+        modules.push_str(&format!("module {m}\n"));
+    }
+    tokio::task::spawn_blocking(move || {
+        hub.with(move |h| {
+            let mut rooms: std::collections::BTreeMap<String, usize> = Default::default();
+            for (_, who) in h.connections() {
+                *rooms.entry(who.actor.clone()).or_default() += 1;
+            }
+            let mut text = format!("ok\nconnections {}\n", rooms.values().sum::<usize>());
+            text.push_str(&format!(
+                "head {}\nhorizon {}\n",
+                h.log.log.head().0,
+                h.log.log.base.seq
+            ));
+            text.push_str(&modules);
+            for (room, n) in rooms {
+                text.push_str(&format!("room {room} peers {n}\n"));
+            }
+            text
+        })
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+async fn healthz(
+    axum::extract::State((hub, hosted)): axum::extract::State<(ark5_server::Handle, Hosted)>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if req.uri().path() != "/healthz" {
+        return next.run(req).await;
+    }
+    match health(&hub, &hosted).await {
+        Some(text) => text.into_response(),
+        None => (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "the hub is gone\n",
+        )
+            .into_response(),
     }
 }
 
@@ -401,14 +509,14 @@ pub fn domain(module: Option<&Path>) -> Result<Domain> {
 pub struct Server {
     pub running: Running,
     pub auth: Arc<Auth>,
-    pub domain: Domain,
+    pub hosted: Hosted,
     pub scanner: Option<Scanner>,
     pub house: Option<ha::Assistant>,
 }
 
 impl Server {
     pub fn url(&self) -> String {
-        self.running.url()
+        format!("http://{}", self.running.addr)
     }
 
     /// Stop the scanner and the bridge, then the listener.
@@ -460,7 +568,18 @@ async fn mode(sign_in: &SignIn) -> Result<Mode> {
 /// Build the server from `config`, listen, and start the scanner and the
 /// bridge beside it.
 pub async fn start(config: Config) -> Result<Server> {
-    let domain = domain(config.module.as_deref())?;
+    let mut hosted = match &config.module {
+        None => Hosted::harken(),
+        Some(p) => Hosted::read(p)?,
+    };
+    for p in &config.old_modules {
+        let n;
+        (hosted, n) = hosted.hold(p)?;
+        eprintln!(
+            "harken-server: holding {} as a module run before ({n} functions)",
+            p.display()
+        );
+    }
     std::fs::create_dir_all(&config.data)
         .with_context(|| format!("creating {}", config.data.display()))?;
     eprintln!("harken-server: data in {}", config.data.display());
@@ -473,14 +592,14 @@ pub async fn start(config: Config) -> Result<Server> {
     // `docs/plan-auth.md` The roles the configuration grants, and the
     // scanner's own `library`, by construction: the scanner is the library,
     // and the role is what the library's mutations are guarded by
-    // (`is_library`, `docs/plan-guards.md` D1). Asked at every `Hello`, and
-    // stamped on every entry that connection pushes.
+    // (`is_library`). Asked at every connection, and stamped on every entry
+    // that connection pushes.
     let roles = config
         .roles
         .iter()
         .map(|(r, a)| (r.clone(), a.clone()))
         .chain([(
-            harken_domain::schema::LIBRARY.to_string(),
+            harken_domain5::schema::LIBRARY.to_string(),
             vec![library::ACCOUNT.to_string()],
         )]);
     let mut auth = Auth::new(sessions, mode(&config.sign_in).await?, &public_url)
@@ -494,7 +613,7 @@ pub async fn start(config: Config) -> Result<Server> {
     // sent one when it names a host. A wildcard bind names none, and the
     // address the page is reached at goes in `HARKEN_REDIRECTS`.
     if let Some(bind) = &config.admin_bind {
-        if !ark_server::admin::is_loopback(bind)
+        if !ark5_server::admin::is_loopback(bind)
             && !bind.starts_with("0.0.0.0:")
             && !bind.starts_with("[::]:")
         {
@@ -503,29 +622,11 @@ pub async fn start(config: Config) -> Result<Server> {
     }
     let auth = Arc::new(auth);
 
-    let mut builder = ark_server::builder(domain.clone())
-        .name("harken-server")
+    let mut builder = ark5_server::builder(hub_config(&hosted, config.retain.entries))
         .data(&config.data)
         .auth(auth.clone())
-        .keepalive(config.keepalive)
-        .retain(config.retain);
-    // No server hook (`docs/plan-guards.md` D3): nothing harken does reaches
-    // outside its log. One would go here, as
-    // `builder.on_committed("add_song", Box::new(|entry, facts| ..))` — told
-    // each durable entry of that function with its facts, on a thread of
-    // its own, for a mail sent or a webhook called; never a row.
-    for p in &config.old_modules {
-        let bytes =
-            std::fs::read(p).with_context(|| format!("reading the old module {}", p.display()))?;
-        let old = Domain::from_bytes(&bytes, vec![])
-            .map_err(|e| anyhow!("the old module {}: {e}", p.display()))?;
-        eprintln!(
-            "harken-server: holding {} as a module run before",
-            p.display()
-        );
-        builder = builder.ran_before(&old);
-    }
-    if config.keepalive != ark_server::Keepalive::default() {
+        .keepalive(config.keepalive.every);
+    if config.keepalive != Keepalive::default() {
         eprintln!(
             "harken-server: the sync socket pings every {}ms and gives up after {} unanswered",
             config.keepalive.every.as_millis(),
@@ -551,33 +652,40 @@ pub async fn start(config: Config) -> Result<Server> {
         );
         builder = builder.merge(covers::routes(dir, &art));
     }
+    // `docs/plan-guards.md` D4 The admin page, where one is asked for.
+    if let Some(bind) = &config.admin_bind {
+        builder = builder.admin(ark5_server::admin::Admin {
+            bind: bind.clone(),
+            page: config.admin_web.clone(),
+            server: Some(public_url.clone()),
+            module: hosted.domain.module.clone(),
+            lib: hosted.domain.lib.clone(),
+        });
+    }
     // Everything the routes above do not match falls through to the page,
     // with the build as its validator: a store path cannot be one, since nix
     // dates every file in it 1970.
     if let Some(dir) = &config.web {
-        builder = builder.web(dir);
-        if let Some(m) = &config.web_module {
-            builder = builder.web_module(m);
-        }
+        builder = builder.web(dir, config.web_module.clone());
     }
-    // `docs/plan-guards.md` D4 The admin page, where one is asked for.
-    if let Some(bind) = &config.admin_bind {
-        builder = builder.admin(ark_server::Admin {
-            bind: bind.clone(),
-            page: config.admin_web.clone(),
-            server: Some(public_url.clone()),
-        });
-    }
-    let app = builder.build()?;
+    let mut app = builder.build()?;
     let hub = app.hub.clone();
+    app.router = app.router.layer(axum::middleware::from_fn_with_state(
+        (hub.clone(), hosted.clone()),
+        healthz,
+    ));
     let running = app.serve(&config.listen).await?;
+    eprintln!("harken-server: listening on http://{}", running.addr);
+    if let Some(a) = running.admin_addr {
+        eprintln!("harken-server: the admin page on http://{a}/admin/");
+    }
 
     // Every `media_player` named becomes a device in every listening
-    // session somebody is in: a participant of the live state, which is how
-    // it is a device rather than a client.
+    // session somebody is in: a connection of its own in that session,
+    // which is how it is a device rather than a client.
     let house = config.house.clone().map(|house| {
         eprintln!("harken-server: the house: {house}");
-        ha::start(house, hub.clone())
+        ha::start(house, hub.clone(), hosted.clone())
     });
 
     // The scanner signs in like everything else, as the account `library`.
@@ -587,13 +695,13 @@ pub async fn start(config: Config) -> Result<Server> {
                 .issue(&Account {
                     id: library::ACCOUNT.into(),
                     name: "Library".into(),
-                    roles: vec![harken_domain::schema::LIBRARY.into()],
+                    roles: vec![harken_domain5::schema::LIBRARY.into()],
                     ..Account::default()
                 })
                 .map_err(|e| anyhow!("signing the scanner in: {e}"))?;
             Some(Scanner::start(
                 dir.clone(),
-                domain.clone(),
+                hosted.clone(),
                 hub.clone(),
                 config.data.clone(),
                 login,
@@ -602,7 +710,9 @@ pub async fn start(config: Config) -> Result<Server> {
         None => None,
     };
 
-    eprintln!("harken-server: one listening session per account, a live state on the sync socket");
+    eprintln!(
+        "harken-server: one listening session per account, a volatile space on the sync socket"
+    );
     match &config.media {
         Some(dir) => eprintln!(
             "harken-server: media from {} (music in music/)",
@@ -623,7 +733,7 @@ pub async fn start(config: Config) -> Result<Server> {
     Ok(Server {
         running,
         auth,
-        domain,
+        hosted,
         scanner,
         house,
     })
@@ -683,14 +793,14 @@ mod tests {
             }
         );
         assert_eq!(c.redirects, ["https://a/", "https://b/"]);
-        assert_eq!(c.keepalive, ark_server::Keepalive::default());
+        assert_eq!(c.keepalive, Keepalive::default());
         assert_eq!(c.public_url(), "https://harken.example.com");
     }
 
-    /// `docs/plan-guards.md` D4 The admin page is there when asked for, and
-    /// not otherwise: a server on a laptop or in a fleet opens no second
-    /// port nobody named. Falsified by reading `HARKEN_ADMIN_WEB` into the
-    /// bind: the bind was the page's directory.
+    /// `docs/plan-guards.md` D4 The admin page's two variables are read as
+    /// the NixOS module sets them, and nothing listens on a port nobody
+    /// named. Falsified by reading `HARKEN_ADMIN_WEB` into the bind: the bind was
+    /// the page's directory.
     #[test]
     fn the_admin_page_is_there_when_asked_for() {
         let dev = ("HARKEN_DEV_AUTH", "1");
@@ -709,31 +819,34 @@ mod tests {
         assert_eq!(c.admin_web, Some(PathBuf::from("/nix/store/x-ark-admin")));
     }
 
-    /// The keepalive a test shortens, and nothing a typo could make of it.
-    /// Falsified by ignoring `HARKEN_KEEPALIVE_MISSED`: the count is 3.
+    /// The keepalive a test shortens, and nothing a typo could make of it;
+    /// a count of unanswered pings other than the hub's three refuses to
+    /// start rather than being ignored. Falsified by reading
+    /// `HARKEN_KEEPALIVE_MISSED` without holding it to 3: a count of 2 started.
     #[test]
-    fn the_keepalive_is_the_engines_unless_told() {
+    fn the_keepalive_is_the_hubs_unless_told() {
         let dev = ("HARKEN_DEV_AUTH", "1");
         let c = Config::from_vars(
             "x:1",
             vars(&[
                 dev,
                 ("HARKEN_KEEPALIVE_MS", "250"),
-                ("HARKEN_KEEPALIVE_MISSED", "2"),
+                ("HARKEN_KEEPALIVE_MISSED", "3"),
             ]),
         )
         .unwrap();
         assert_eq!(
             c.keepalive,
-            ark_server::Keepalive {
+            Keepalive {
                 every: std::time::Duration::from_millis(250),
-                missed: 2
+                missed: 3
             }
         );
         for bad in [
             ("HARKEN_KEEPALIVE_MS", "0"),
             ("HARKEN_KEEPALIVE_MS", "1s"),
             ("HARKEN_KEEPALIVE_MISSED", "-1"),
+            ("HARKEN_KEEPALIVE_MISSED", "2"),
         ] {
             assert!(
                 Config::from_vars("x:1", vars(&[dev, bad])).is_err(),
@@ -773,8 +886,8 @@ mod tests {
         assert!(Config::from_vars("x:1", vars(&[dev, ("HARKEN_ROLES", "=alice")])).is_err());
     }
 
-    /// The two retention constants are `ark::retention`'s unless told,
-    /// and nothing a typo could make of them. Falsified by ignoring
+    /// The two retention constants are the defaults unless told, and
+    /// nothing a typo could make of them. Falsified by ignoring
     /// `HARKEN_RETAIN_ENTRIES`: the count is 10,000.
     #[test]
     fn retention_is_the_engines_unless_told() {
@@ -782,7 +895,7 @@ mod tests {
         let c = Config::from_vars("x:1", vars(&[dev])).unwrap();
         assert_eq!(
             c.retain,
-            ark_server::Retention {
+            Retention {
                 entries: 10_000,
                 days: 30
             }
@@ -798,7 +911,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             c.retain,
-            ark_server::Retention {
+            Retention {
                 entries: 50,
                 days: 0
             }

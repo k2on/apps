@@ -16,8 +16,10 @@
 
 mod common;
 
-use ark::value::Value;
 use common::*;
+use harken_domain5::library::LibraryEntry;
+use harken_domain5::playlists::{AddToPlaylist, CreatePlaylist, PlaylistInput};
+use harken_domain5::schema::{Album, Media, Person, Playlist};
 use harken_server::Server;
 use lofty::config::WriteOptions;
 use lofty::file::{AudioFile, TaggedFileExt};
@@ -27,31 +29,16 @@ use sha2::{Digest, Sha256};
 
 /// `(title, file)` for every song the server's log holds.
 fn songs(server: &Server) -> Vec<(String, String)> {
-    let rows = server
-        .running
-        .hub
-        .read_blocking(|h| h.rows("media"))
-        .unwrap();
-    let mut out: Vec<(String, String)> = rows
-        .iter()
-        .map(|r| {
-            let text = |k: &str| match &r[k] {
-                Value::Text(t) => t.to_string(),
-                other => panic!("{k}: {other:?}"),
-            };
-            (text("title"), text("file"))
-        })
+    let mut out: Vec<(String, String)> = hub_rows::<Media>(server, "media")
+        .into_iter()
+        .map(|m| (m.title, m.file))
         .collect();
     out.sort_by(|a, b| a.1.cmp(&b.1));
     out
 }
 
 fn head(server: &Server) -> i64 {
-    server
-        .running
-        .hub
-        .read_blocking(|h| h.authority().log.head_seq())
-        .unwrap()
+    server.running.hub.with(|h| h.log.log.head().0).unwrap()
 }
 
 /// Wait until there are `want` songs, then a little longer, so that a
@@ -100,30 +87,14 @@ fn a_directory_of_audio_becomes_songs_and_a_rescan_adds_none() {
         found[0].0, "air",
         "an untagged file is its name, and nothing more"
     );
-    let rows = server
-        .running
-        .hub
-        .read_blocking(|h| h.rows("media"))
-        .unwrap();
+    let rows = hub_rows::<Media>(&server, "media");
     let air = rows
         .iter()
-        .find(|r| r["file"] == Value::text("music/Bach/air.wav"))
+        .find(|r| r.file == "music/Bach/air.wav")
         .unwrap();
-    assert_eq!(
-        air["duration_ms"],
-        Value::int(2_000),
-        "the duration is the file's, read"
-    );
-    assert_eq!(
-        air["creator"],
-        Value::text(""),
-        "no artist guessed from the folder"
-    );
-    assert_eq!(
-        air["user_id"],
-        Value::text("library"),
-        "authored as the library, signed in"
-    );
+    assert_eq!(air.duration_ms, 2_000, "the duration is the file's, read");
+    assert_eq!(air.creator, "", "no artist guessed from the folder");
+    assert_eq!(air.user_id, "library", "authored as the library, signed in");
 
     // A file appearing after the scan, without anyone asking for a rescan.
     wav(&music.join("Debussy/clair-de-lune.wav"), 1_000);
@@ -179,7 +150,7 @@ fn a_directory_of_audio_becomes_songs_and_a_rescan_adds_none() {
         .unwrap();
     let again = harken_server::library::Scanner::start(
         media.clone(),
-        domain(),
+        hosted().clone(),
         server.running.hub.clone(),
         dir,
         login,
@@ -258,7 +229,7 @@ fn a_songs_file_is_served_at_the_path_the_log_carries() {
         c.media = Some(media.clone())
     });
     let found = settle(&server, 1);
-    let url = harken_domain::listening::url(&server.url(), &found[0].1);
+    let url = harken_domain5::listening::url(&server.url(), &found[0].1);
     let whole = ureq::get(&url).call().unwrap();
     assert_eq!(whole.status(), 200);
     let res = ureq::get(&url).set("Range", "bytes=0-3").call().unwrap();
@@ -318,15 +289,17 @@ fn picture(path: &std::path::Path, bytes: &[u8]) {
 
 /// A row's `art`, by its table and its name.
 fn art(server: &Server, table: &str, name: &str) -> Option<String> {
-    let table = table.to_string();
-    let rows = server
-        .running
-        .hub
-        .read_blocking(move |h| h.rows(&table))
-        .unwrap();
-    rows.iter()
-        .find(|r| r["name"] == Value::text(name))
-        .map(|r| r["art"].as_text().to_string())
+    match table {
+        "album" => hub_rows::<Album>(server, "album")
+            .into_iter()
+            .find(|r| r.name == name)
+            .map(|r| r.art),
+        "person" => hub_rows::<Person>(server, "person")
+            .into_iter()
+            .find(|r| r.name == name)
+            .map(|r| r.art),
+        other => panic!("no art in {other}"),
+    }
 }
 
 /// The status line's code for a GET of `path` exactly as written: no
@@ -350,7 +323,7 @@ fn raw_status(server: &Server, path: &str) -> u16 {
 }
 
 fn fetch(server: &Server, art: &str) -> (String, Vec<u8>) {
-    let url = harken_domain::listening::url(&server.url(), art);
+    let url = harken_domain5::listening::url(&server.url(), art);
     let res = ureq::get(&url)
         .call()
         .unwrap_or_else(|e| panic!("{url}: {e}"));
@@ -517,44 +490,44 @@ fn a_retagged_file_or_a_new_cover_is_the_same_song_said_again() {
     let server = serve(&rt, &data, |c| c.media = Some(media.clone()));
     settle(&server, 2);
     let id_of = |title: &str| {
-        let rows = server
-            .running
-            .hub
-            .read_blocking(|h| h.rows("media"))
-            .unwrap();
-        rows.iter()
-            .find(|r| r["title"] == Value::text(title))
-            .map(|r| r["id"].clone())
+        hub_rows::<Media>(&server, "media")
+            .into_iter()
+            .find(|r| r.title == title)
+            .map(|r| r.id)
     };
     let glue = id_of("Glue").unwrap();
 
     let mut alice = signed_in(&server, "alice");
     pump_until(&mut [&mut alice], 10, |p| {
-        ark::store::Store::scan(p[0].store(), "media").len() == 2
+        p[0].rows::<Media>("media").len() == 2
     });
-    alice
-        .mutate(
-            "create_playlist",
-            ark_client::args([("name", Value::text("Mine"))]),
-        )
-        .unwrap();
-    let list = alice.query("playlists", &ark_client::args([])).unwrap();
-    let mine = list.as_list()[0].field("id");
-    let on = ark_client::args([("playlist_id", mine.clone()), ("media_id", glue.clone())]);
-    alice.mutate("add_to_playlist", on).unwrap();
-    let titles = |p: &ark_client::Peer| {
-        let rows = p
+    alice.mutate(
+        "playlists.create_playlist",
+        &CreatePlaylist {
+            name: "Mine".into(),
+        },
+    );
+    let list: Vec<Playlist> = alice.query("playlists.playlists", &()).unwrap();
+    let mine = list[0].id.clone();
+    alice.mutate(
+        "playlists.add_to_playlist",
+        &AddToPlaylist {
+            playlist_id: mine.clone(),
+            media_id: glue.clone(),
+        },
+    );
+    let titles = |p: &Peer| {
+        let rows: Vec<LibraryEntry> = p
             .query(
-                "playlist",
-                &ark_client::args([("playlist_id", mine.clone())]),
+                "playlists.playlist",
+                &PlaylistInput {
+                    playlist_id: mine.clone(),
+                },
             )
             .unwrap();
-        rows.as_list()
-            .iter()
-            .map(|r| r.field("title").as_text().to_string())
-            .collect::<Vec<_>>()
+        rows.into_iter().map(|r| r.title).collect::<Vec<_>>()
     };
-    pump_until(&mut [&mut alice], 10, |p| p[0].pending_len() == 0);
+    pump_until(&mut [&mut alice], 10, |p| p[0].pending() == 0);
 
     put(
         root.path(),
@@ -571,7 +544,7 @@ fn a_retagged_file_or_a_new_cover_is_the_same_song_said_again() {
     );
     assert_eq!(songs(&server).len(), 2, "and not a second one");
     pump_until(&mut [&mut alice], 10, |p| {
-        titles(p[0]) == ["Glue (Remastered)"]
+        titles(&*p[0]) == ["Glue (Remastered)"]
     });
 
     assert_eq!(art(&server, "album", "Isles").as_deref(), Some(""));
@@ -605,7 +578,12 @@ fn a_retagged_file_or_a_new_cover_is_the_same_song_said_again() {
 /// Falsified by skipping no file however its print stood: the rescan read
 /// three; by keeping the prints only in memory: the restart read three;
 /// and by refusing to start over an unreadable file of them: the last
-/// start failed.
+/// start failed. On v5: by `known_file` never finding the file in the
+/// replica's `media (file)` index: the rescan read six; by `would_change`
+/// answering yes whatever the run changed: the cover was three entries,
+/// not one; and by opening the scanner's replica without signing it in as
+/// the start's own login: the cover's entry was held at the hub behind a
+/// gap of its new session's `local`s, and the album never had it.
 #[test]
 fn a_rescan_of_nothing_new_reads_nothing() {
     let rt = runtime();
