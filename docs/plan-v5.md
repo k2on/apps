@@ -755,6 +755,27 @@ linked round trip 182.2 µs (was 5,520.1; v4 215.1). Source +186 lines.
 
 ## Landed
 
+**K2** (`3062a3c`…): four rules, each a witness flipped and a kernel test.
+**No body crosses the wire**: an authority runs exactly the functions of
+the modules its operator loaded (at start, or `/admin/api/load` over the
+same schema); `Push` has no body, `Fetch`/`Bodies` are deleted (nothing
+fetched them); `Held` means keep it pending and push again; a joined chain
+naming an unknown function is refused. **A held intent keeps its
+`local`**: those behind it wait on the authority in order and are judged
+when it is (pushed again, or `Input::Loaded`). **A grown schema keeps the
+log**: `open` reads rows and facts under the new schema (`Table::fit`),
+checks the chain by its hashes and never derives a state again; digests
+are the new schema's; `Peer::foreign` marks entries not derived (a `Hello`
+below is served the snapshot); a replica on another schema takes states on
+faith (`Peer::faith`) and asks for the snapshot (cursor -1) on a second
+divergence at one entry. **Ids from an origin**: `EntryId::of(origin,
+local)`, 16 bytes drawn once and kept; sign-in keeps ids; dedupe per
+`(origin, local)`; the authority stamps the connection's actor, session and
+roles and binds an origin to its first actor (another actor's sign-in gets
+a derived origin). Vectors: protocol/ renumbered (eight frames) and
+re-derived; trace/ and rebase/ re-derived (FINAL `bb0abc1a…`, seed-7
+`ff04f56d…`); hash/, eval/, verify/, module/, views/ unchanged.
+
 **D1** (`d223d71`…`1b8384e`): `ark5-client` 680, `ark5-server` 708,
 `ark5-dev` 1,441 (+22 bin) source lines, each within budget; the
 volatile arm in `peer.rs` +79 net, `store.rs` +36 (the still-referenced
