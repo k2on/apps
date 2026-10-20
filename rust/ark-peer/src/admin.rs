@@ -277,7 +277,11 @@ async fn load(With(ctx): With<Ctx>, body: String) -> Response {
         Err(why) => return text(StatusCode::BAD_REQUEST, why),
     };
     let hub = ctx.hub.clone();
-    match tokio::task::spawn_blocking(move || hub.load(bodies)).await.ok().flatten() {
+    match tokio::task::spawn_blocking(move || hub.with(move |p| p.load(bodies)))
+        .await
+        .ok()
+        .flatten()
+    {
         Some(n) => n.to_string().into_response(),
         None => text(StatusCode::SERVICE_UNAVAILABLE, "the hub is gone"),
     }

@@ -233,7 +233,7 @@ fn disk(place: &str) -> Result<Box<dyn ark_peer::Disk>, String> {
     }
     #[cfg(target_arch = "wasm32")]
     {
-        ark_peer::disk::Local::open(&format!("harken:{place}")).map(|d| Box::new(d) as Box<dyn ark_peer::Disk>)
+        Ok(Box::new(ark_peer::disk::Local(format!("harken:{place}"))) as Box<dyn ark_peer::Disk>)
     }
 }
 

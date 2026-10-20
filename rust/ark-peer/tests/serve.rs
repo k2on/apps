@@ -17,7 +17,6 @@ use ark::log::{Entry, EntryId, Origin};
 use ark::peer::Who;
 use ark::schema::Space;
 use ark_dev::demo::domain;
-use ark_peer::disk::Stored;
 use ark_peer::link::{bell, socket, wait, Dial, Event, Pumped};
 use ark_peer::{dev, now_ms, Config, Disk, Files, Handle, Live, Memory, Module, Peer, Server};
 
@@ -213,14 +212,11 @@ fn the_log_survives_a_restart() {
 struct Flaky(Memory, Arc<AtomicBool>);
 
 impl Disk for Flaky {
-    fn load(&mut self) -> io::Result<Stored> {
-        self.0.load()
-    }
-    fn record(&mut self, b: &[u8]) -> io::Result<()> {
-        if self.1.load(Ordering::Relaxed) {
+    fn append(&mut self, n: &str, b: &[u8]) -> io::Result<()> {
+        if self.1.load(Ordering::Relaxed) && n == "log" {
             return Err(io::Error::other("the disk is full"));
         }
-        self.0.record(b)
+        self.0.append(n, b)
     }
     fn put(&mut self, n: &str, b: &[u8]) -> io::Result<()> {
         self.0.put(n, b)

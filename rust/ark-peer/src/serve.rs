@@ -5,9 +5,9 @@
 //! axum ── /sync ───── a socket: its first message the token, then frames ──┐
 //!      ── /healthz                                                          ├─ Handle ── the peer's thread:
 //!      ── /auth/* (ark-auth, when signing in is on)                          │    the log's authority and the
-//!      ── /media  (a directory)                                              │    live one; the log on disk,
-//!      ── /*      (a web build, `web`)                                       │    written before anything
-//!      ── the app's own routes                                              ─┘    said of it is delivered
+//!      ── /*      (a web build, `web`)                                       │    live one; the log on disk,
+//!      ── /media, … (the app's own routes)                                │    written before anything
+//!                                                                          ─┘    said of it is delivered
 //! <admin bind> ── /admin (the admin page, [`crate::admin`], on a listener of its own)
 //! ```
 //!
@@ -43,7 +43,6 @@ use axum::response::Response;
 use axum::routing::get;
 use axum::Router;
 use tokio::sync::oneshot;
-use tower_http::services::ServeDir;
 
 use crate::link::{Closed, Dial, Event, Wake, Wire};
 use crate::{admin, now_ms, web, Config, ConnId, Deliver, Disk, Files, Memory, Peer};
@@ -175,12 +174,6 @@ impl Handle {
         rx.recv().ok()
     }
 
-    /// Bodies the operator loads into the log's authority ([`Peer::load`]):
-    /// how many it runs now that it did not.
-    pub fn load(&self, bodies: Vec<Vec<u8>>) -> Option<usize> {
-        self.with(move |p| p.load(bodies))
-    }
-
     /// An entry the authority of `space` authors itself
     /// ([`Peer::author`]): the head it was sequenced at, or the refusal.
     /// With `once`, the function is that body (a raw write), runnable for
@@ -251,7 +244,7 @@ impl Drop for InProcess {
 /// What a server is made of: its peer's configuration, and where it keeps
 /// its log (in memory without one), how it signs people in (`auth`; or
 /// `authenticate`, the dev reading by default), a web build at `/` and the
-/// file whose change is a rebuild, a media directory, the app's own routes,
+/// file whose change is a rebuild, the app's own routes,
 /// how often it pings, and the admin page ([`crate::admin`]).
 pub struct Server {
     pub config: Config,
@@ -259,7 +252,6 @@ pub struct Server {
     pub authenticate: Authenticate,
     pub auth: Option<Arc<ark_auth::server::Auth>>,
     pub web: Option<(PathBuf, Option<String>)>,
-    pub media: Option<PathBuf>,
     pub routes: Router,
     pub keepalive: Duration,
     pub admin: Option<admin::Admin>,
@@ -289,7 +281,6 @@ impl Server {
             authenticate: Arc::new(dev),
             auth: None,
             web: None,
-            media: None,
             routes: Router::new(),
             keepalive: Duration::from_secs(20),
             admin: None,
@@ -328,9 +319,6 @@ impl Server {
             let h = hub.clone();
             auth.on_revoke(move |_, session| h.revoke(session));
             router = router.merge(ark_auth::server::router(auth));
-        }
-        if let Some(m) = self.media {
-            router = router.nest_service("/media", ServeDir::new(m));
         }
         if let Some((dir, module)) = self.web {
             router = router.merge(web::router(dir, module));

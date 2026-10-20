@@ -924,10 +924,7 @@ fn build(schema: &Schema, n: u64) -> Store {
 struct Nowhere;
 
 impl Disk for Nowhere {
-    fn load(&mut self) -> std::io::Result<ark_peer::disk::Stored> {
-        Ok(Default::default())
-    }
-    fn record(&mut self, _: &[u8]) -> std::io::Result<()> {
+    fn append(&mut self, _: &str, _: &[u8]) -> std::io::Result<()> {
         Ok(())
     }
     fn put(&mut self, _: &str, _: &[u8]) -> std::io::Result<()> {

@@ -15,7 +15,6 @@ use ark::peer::{Ctx, Who};
 use ark::schema::Space;
 use ark_dev::demo::{arrival, domain, live, room};
 use ark_dev::sim::{who, Net, Op};
-use ark_peer::disk::Stored;
 use ark_peer::{Config, Disk, Live, Memory, Module, Peer};
 
 fn demo() -> Config {
@@ -180,13 +179,6 @@ fn the_room_comes_and_goes_and_the_pointer_is_relayed() {
 struct Tally(Memory, Arc<AtomicUsize>);
 
 impl Disk for Tally {
-    fn load(&mut self) -> io::Result<Stored> {
-        self.0.load()
-    }
-    fn record(&mut self, b: &[u8]) -> io::Result<()> {
-        self.1.fetch_add(b.len(), Ordering::Relaxed);
-        self.0.record(b)
-    }
     fn put(&mut self, n: &str, b: &[u8]) -> io::Result<()> {
         self.1.fetch_add(b.len(), Ordering::Relaxed);
         self.0.put(n, b)
