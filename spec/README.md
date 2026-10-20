@@ -66,7 +66,13 @@ checked: `integer overflow`, `division by zero`. `NewId` is the entry's
 `n`-th draw, `n` from 0 in evaluation order. A value is the tree the codec
 reads under the type the checker gave it; two are compared by their
 bytes. `Sort` is stable, by its key's fields each in its direction;
-`Group` is in key order; `Join` in the order of its first list.
+`Group` is in key order; `Join` in the order of its first list. A read —
+`Scan`, `Lookup`, `Filter`, `Map`, `Join`, `Group`, `Sort`, `Take` — is
+not the interpreter's: it is a view hydrated once (`view.rs`, §1.10),
+every row an insert, its lambdas run by the interpreter on the same run
+(its stack, its writes so far, its draws); the read of a filter's
+equalities and a sort's order through the store's indexes is the view's
+too.
 
 ## §5 The standard library
 
@@ -106,7 +112,7 @@ the module's own.
 | 1.7 | `peer.rs` | the one sans-io machine — `Replica` or `Authority { journal }`, alone being an authority with a fork — `step(Input) -> [Output]`: sequencing, dedupe per `(origin, local)`, judging, the rebase (pending lists undone newest-first, the confirmed facts applied, the pending run again, once per page), compaction, going alone and joining (a chain adopted by its facts or refused), a held intent kept pending and what follows it waiting on the authority, `Input::Loaded` judging what was held; a replica applies confirmed entries by their facts |
 | 1.8 | `peer.rs` (`Feed`), `view.rs` | partial sync: a scope is one `Pure` function over the `Sum` of the schema's rows; an authority keeps a view of it per scoped connection (`Input::Feed`) and answers it by `Output::To`, a union holding what its rows reference |
 | 1.9 | `peer.rs` (the volatile space) | live state: tables marked `Volatile`, a second machine of the same kind over them on the same socket, frames tagged with their `space`; `on_join`, `on_leave` and `on_restore` entries the authority authors; not in the state hash, not journaled |
-| 1.10 | `view.rs` | maintained views: one node per operator of a query's relational spine, each updated from a delta; after every step the answer equals a fresh evaluation and the patches (`Insert`, `Remove`, `Update` at a position) splice the old list into the new |
+| 1.10 | `view.rs` | maintained views: one node per operator of a query's relational spine, each updated from a delta; after every step the answer equals a fresh one — a fresh read is the same nodes hydrated once, the one evaluator of reads (K3a) — and the patches (`Insert`, `Remove`, `Update` at a position) splice the old list into the new |
 | 1.11 | `frames.rs` | the frames, one derived `Sum` of four: `Hello`, `Page` (a peer's intents, or its chain made alone; an authority's log), `Snapshot`, `Verdict` (`Ok`, `Refused`, `Held`). A peer sends pages of its chain; an authority answers with verdicts and its own pages. No frame carries a function's body (K2) |
 | 1.12 | `author.rs`, `rust/ark-macros` | authoring: `#[ark::mutator]`, `query`, `helper`, `guard`, `scope`, `live` and `ark::module!` lower restricted Rust to §2's `Expr` through `ark::author`; the subset accepted is `AUTHORING.md`'s, and anything outside it a compile error naming it |
 

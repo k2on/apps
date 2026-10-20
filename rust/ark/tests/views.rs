@@ -736,11 +736,19 @@ fn patch_json(cx: &Types, t: &Ty, p: &Patch) -> String {
     }
 }
 
-/// The contract after one push: the answer is a fresh evaluation's, and
-/// the patches splice the answer before into it.
+/// The contract after one push, now that a fresh read is a view hydrated
+/// (§1.10): hydrating twice gives the same answer — the view's, pushed to
+/// here, is a fresh read's ([`query`], every read in the body hydrated
+/// once) and a view made afresh's — and the patches splice the answer
+/// before into it.
 fn holds((lib, h, input, ctx): (&Lib, &FnHash, &[u8], &Ctx), v: &View, store: &dyn Read, before: &[V], patches: &[Patch]) {
     let fresh = query(lib, h, input, ctx, store).unwrap();
-    assert_eq!(v.rows(), fresh, "the view is a fresh evaluation");
+    assert_eq!(v.rows(), fresh, "the view is a fresh read");
+    assert_eq!(
+        View::new(lib, h, input, ctx.clone(), store).unwrap().rows(),
+        fresh,
+        "and a view made again"
+    );
     assert_eq!(splice(patches, before), fresh, "the patches splice");
 }
 
@@ -813,7 +821,11 @@ fn tracks_case(f: Function, input: Vec<u8>) -> Case {
 /// contract held after every batch, the vector as on disk. Falsified by
 /// the view's `Sort` not complementing a descending field's bytes:
 /// `expression-order-under-a-limit` kept its two works fewest movements
-/// first, and the fresh evaluation disagreed after its first batch.
+/// first, and the fresh evaluation disagreed after its first batch; and,
+/// once a fresh read was a view hydrated (K3a), by a fresh read's `Take`
+/// filling its window from its input's kept output, which a fresh read
+/// does not keep: the fresh read of `expression-order-under-a-limit` was
+/// empty.
 #[test]
 fn vectors() {
     let pid1 = bytes_enc(&pid(1));
