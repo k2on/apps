@@ -218,6 +218,19 @@ impl Table {
         Ok(out)
     }
 
+    /// A row of this table as some schema of it wrote it, read under this
+    /// one: as it is, completed (an older schema's), or its prefix (a newer
+    /// one's); and whether it was another's.
+    pub fn fit(&self, row: &[u8]) -> Result<(Vec<u8>, bool), Refusal> {
+        if self.spans(row).is_ok() {
+            return Ok((row.to_vec(), false));
+        }
+        match self.complete(row) {
+            Ok(r) => Ok((r, true)),
+            Err(_) => Ok((self.prefix(row)?.to_vec(), true)),
+        }
+    }
+
     /// The prefix of a row written under a newer schema that this table's
     /// columns read: what an older runtime holds of it.
     pub fn prefix<'a>(&self, row: &'a [u8]) -> Result<&'a [u8], Refusal> {

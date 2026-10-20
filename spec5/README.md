@@ -16,6 +16,7 @@ where a module and this file disagree, the module is right.
 | 1.1 | `ir.rs` (`Decl`, `Refine`, `Rule`) | a declaration: a structure and its refinements — `utf8`, `len n`, `len lo..=hi`, `trim`, `non-empty`, and a `Pure` predicate — each with the words a form shows |
 | 1.1 | `interp.rs` (`parse`, `check_form`) | the boundary: canonical bytes of the type, every refinement held in order, `trim` normalising before the rules after it, a value refused underneath not held to more; the refusal is the rule's words or the default (`at least 1 character`, `exactly 16 bytes`, `not UTF-8 text`, `must not be empty`, `is not valid`); `check_form` reports every failing field by its path of positions |
 | 1.1 | `hash.rs` | the hash spaces, each its own type |
+| 1.2 | `schema.rs` (`compat`, `Table::fit`), `peer.rs` (`open`) | a schema grows by appending: a row of a table as another schema of it wrote it reads under this one completed (an older one's) or cut to its prefix (a newer one's). A log opened under a prefix-extension of the schema it was written under is checked entry against entry by each hash over its own bytes, never derived again; its rows are widened and the store's digests are the new schema's; what it logs then carries new-schema hashes. A replica whose authority runs another schema takes a confirmed entry's state as it says; one that diverges twice at one entry asks for the snapshot (`Hello` at cursor `-1`) |
 
 `Text = Bytes where utf8` is every function's without being declared.
 Everything else — `Id<t>`, `Name`, `NonEmpty<T>` — is a declaration a

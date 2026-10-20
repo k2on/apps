@@ -44,6 +44,14 @@
 //! the driver says it loaded functions (`Input::Loaded`), each answer then
 //! sent to the session's connections (`Output::To`).
 //!
+//! **A schema grows** (§1.2). Facts and snapshot rows another schema of a
+//! table wrote are read under this one ([`crate::schema::Table::fit`]). A
+//! log opened under a wider schema keeps its chain as recorded, checked by
+//! its hashes, and its store's digests are the wider schema's
+//! ([`Peer::foreign`] marks what it did not derive; a `Hello` below that is
+//! answered with the snapshot). A replica whose authority runs another
+//! schema takes each confirmed state as the entry says ([`Peer::faith`]).
+//!
 //! **Partial sync is a view** (§1.8). A connection the driver says is fed
 //! by a scope (`Input::Feed`) is served its union: the rows a `Pure`
 //! function of a row — `Sum` over the schema's tables in order, each
@@ -337,6 +345,50 @@ pub struct Peer {
     /// The chain a join handed over, until the server has answered any of
     /// it: a connection made before then hands it over again.
     pub joining: Option<(Seq, EntryHash, Vec<Logged>)>,
+    /// The last entry whose state is not this peer's own derivation: one
+    /// logged under another schema (§1.2). An authority answers a `Hello`
+    /// below it with the snapshot at its head.
+    pub foreign: Option<Seq>,
+    /// A replica whose authority runs another schema: the state a
+    /// confirmed entry carries is taken as it says.
+    pub faith: bool,
+}
+
+/// Facts as some schema wrote them, read under `schema`: rows completed or
+/// cut to their prefix, changes to tables it lacks dropped; and whether any
+/// was another schema's.
+fn fit(schema: &Schema, facts: &[Change]) -> (Vec<Change>, bool) {
+    let other = std::cell::Cell::new(false);
+    let row = |t: &crate::schema::Table, r: &Vec<u8>| match t.fit(r) {
+        Ok((r, o)) => {
+            other.set(other.get() | o);
+            r
+        }
+        Err(_) => r.clone(),
+    };
+    let mut out = vec![];
+    for c in facts {
+        let Some((_, t)) = schema.table(c.table()) else {
+            other.set(true);
+            continue;
+        };
+        out.push(match c {
+            Change::Add { table, row: r } => Change::Add {
+                table: table.clone(),
+                row: row(t, r),
+            },
+            Change::Remove { table, row: r } => Change::Remove {
+                table: table.clone(),
+                row: row(t, r),
+            },
+            Change::Edit { table, old, new } => Change::Edit {
+                table: table.clone(),
+                old: row(t, old),
+                new: row(t, new),
+            },
+        });
+    }
+    (out, other.get())
 }
 
 fn empty_snapshot(store: &Store) -> Snapshot {
@@ -366,6 +418,8 @@ impl Peer {
             served: BTreeMap::new(),
             device: None,
             joining: None,
+            foreign: None,
+            faith: false,
         }
     }
 
@@ -383,6 +437,30 @@ impl Peer {
 
     fn of_rows(&self, rows: &[(String, Vec<Vec<u8>>)]) -> Result<Store, Refusal> {
         Store::from_rows_in(self.store.schema_arc().clone(), self.space, rows)
+    }
+
+    /// A snapshot's rows as some schema wrote them, read under this
+    /// peer's (§1.2): each row completed or cut to its prefix, a table this
+    /// schema lacks dropped; and whether they were another schema's (a
+    /// table of this space missing counts).
+    fn fit_rows(&self, rows: &[(String, Vec<Vec<u8>>)]) -> Result<(Vec<(String, Vec<Vec<u8>>)>, bool), Refusal> {
+        let schema = self.store.schema_arc().clone();
+        let mut other = schema.tables.iter().filter(|t| t.space == self.space).count() != rows.len();
+        let mut out = vec![];
+        for (name, rs) in rows {
+            let Some((_, t)) = schema.table(name) else {
+                other = true;
+                continue;
+            };
+            let mut fitted = vec![];
+            for r in rs {
+                let (r, o) = t.fit(r)?;
+                other |= o;
+                fitted.push(r);
+            }
+            out.push((name.clone(), fitted));
+        }
+        Ok((out, other))
     }
 
     pub fn is_authority(&self) -> bool {
@@ -601,10 +679,11 @@ impl Peer {
     /// A `Hello` at `(cursor, hash)`: the pages from there when this log has
     /// that hash there, the snapshot at the head when it does not.
     fn serve(&mut self, cursor: Seq, hash: Option<EntryHash>, o: &mut Out) {
-        let has = match hash {
-            Some(h) => self.log.has(cursor, &h),
-            None => cursor == 0 && self.log.base.seq == 0,
-        };
+        let has = self.foreign.is_none_or(|f| cursor >= f)
+            && match hash {
+                Some(h) => self.log.has(cursor, &h),
+                None => cursor == 0 && self.log.base.seq == 0,
+            };
         if !has {
             let (seq, hash) = self.log.head();
             let snapshot = Snapshot {
@@ -917,22 +996,31 @@ impl Peer {
                 }
                 return self.ask(o);
             }
+            // Facts of another schema are read under this one, and the
+            // state the entry says is taken as it says (§1.2).
+            let (facts, other) = fit(&self.store.schema_arc().clone(), &l.facts);
+            let trust = self.faith || other;
             let own = self.pending.first().is_some_and(|p| p.entry.id == l.entry.id);
-            if !undone && own && self.pending[0].changes == l.facts {
-                if self.store.hash_beside(self.pending[1..].iter().flat_map(|p| &p.changes)) != l.state {
+            if !undone && own && self.pending[0].changes == facts {
+                let same = self.store.hash_beside(self.pending[1..].iter().flat_map(|p| &p.changes)) == l.state;
+                if !same && !trust {
                     return self.diverge(l.seq, o);
                 }
+                self.faith = other || self.faith && !same;
                 self.pending.remove(0);
             } else {
                 if !undone {
                     self.undo_pending(o);
                     undone = true;
                 }
-                if self.store.apply_all(&l.facts).is_err() || self.store.state_hash() != l.state {
+                let applied = self.store.apply_all(&facts).is_ok();
+                let same = applied && self.store.state_hash() == l.state;
+                if !applied || !same && !trust {
                     self.redo_pending(o);
                     return self.diverge(l.seq, o);
                 }
-                o.told.extend(l.facts.iter().cloned());
+                self.faith = other || self.faith && !same;
+                o.told.extend(facts);
                 if let Some(i) = self.pending.iter().position(|p| p.entry.id == l.entry.id) {
                     self.pending.remove(i);
                 }
@@ -963,8 +1051,11 @@ impl Peer {
     }
 
     /// The state an entry says is not this peer's: start again from nothing,
-    /// which the authority answers with what it has.
+    /// which the authority answers with what it has — the snapshot at its
+    /// head (a cursor below every log's) when this entry diverged before,
+    /// as one logged under a schema this one only shares tables with does.
     fn diverge(&mut self, seq: Seq, o: &mut Out) {
+        let cursor = if self.diverged.contains(&seq) { -1 } else { 0 };
         self.diverged.push(seq);
         self.undo_pending(o);
         let fresh = self.blank();
@@ -972,10 +1063,10 @@ impl Peer {
         self.log = Log::new(empty_snapshot(&fresh));
         self.store = fresh;
         self.redo_pending(o);
-        self.asked = Some(0);
+        self.asked = Some(cursor);
         o.send(Frame::Hello {
             space: self.space,
-            cursor: 0,
+            cursor,
             hash: None,
             device: self.device.clone(),
         });
@@ -990,12 +1081,15 @@ impl Peer {
         if (s.seq == n || s.seq < n && self.space == Space::Durable) && self.log.has(s.seq, &s.hash) {
             return;
         }
-        let Ok(new) = self.of_rows(&s.rows) else {
+        let Ok(new) = self.fit_rows(&s.rows).and_then(|(rows, other)| Ok((self.of_rows(&rows)?, other))) else {
             return;
         };
-        if new.state_hash() != s.state {
+        let (new, other) = new;
+        let same = new.state_hash() == s.state;
+        if !same && !other {
             return;
         }
+        (self.faith, self.foreign) = (!same, (!same).then_some(s.seq));
         self.undo_pending(o);
         o.told.extend(self.store.diff(&new));
         self.store = new;
@@ -1096,13 +1190,18 @@ impl Peer {
         let n = n.clamp(self.log.base.seq, journal.fork.map_or(head, |(f, _)| f.min(head)));
         let Some(at) = self.log.at(n) else { return };
         let mut s = self.store.clone();
-        for c in self.log.after(n).iter().rev().flat_map(|l| l.facts.iter().rev()) {
-            s.apply(&c.inverse()).expect("a logged fact undoes");
+        let schema = s.schema_arc().clone();
+        for l in self.log.after(n).iter().rev() {
+            for c in fit(&schema, &l.facts).0.iter().rev() {
+                s.apply(&c.inverse()).expect("a logged fact undoes");
+            }
         }
+        // The state of the rows as this schema holds them: below an entry
+        // logged under another, not the one it says.
         let base = Snapshot {
             seq: n,
             hash: at.hash,
-            state: at.state,
+            state: s.state_hash(),
             rows: s.snapshot_rows(),
         };
         let rest = self.log.after(n).to_vec();
@@ -1113,35 +1212,49 @@ impl Peer {
         self.log = Log { base, entries: rest };
     }
 
-    /// Opens what was made durable: the snapshot, the chain on it as far as
-    /// each entry's facts give its state, and the pending intents run again.
+    /// Opens what was made durable, under this peer's schema, which may be a
+    /// prefix-extension of the one it was written under (§1.2), or, for a
+    /// replica behind its authority, a prefix of it: the snapshot's rows
+    /// read under it (completed, or cut to their prefix); the chain on it
+    /// checked entry against entry by each hash over its own recorded bytes
+    /// and applied by its facts read the same way — a state is never
+    /// derived again here, and the store's digests are this schema's, from
+    /// its rows. An entry whose state is not what its facts give here was
+    /// logged under another schema ([`Peer::foreign`]). The pending intents
+    /// run again on top.
     fn open(&mut self, d: Durable, o: &mut Out) {
-        let Ok(mut store) = self.of_rows(&d.snapshot.rows) else {
-            return;
-        };
-        if store.state_hash() != d.snapshot.state {
-            return;
-        }
-        let mut log = Log::new(d.snapshot);
-        for l in d.chain {
-            if store.apply_all(&l.facts).is_err() {
-                break;
-            }
-            if store.state_hash() != l.state || log.push(l.clone()).is_err() {
-                store
-                    .apply_all(&l.facts.iter().rev().map(Change::inverse).collect::<Vec<_>>())
-                    .expect("its inverse applies");
-                break;
-            }
-        }
         self.undo_pending(o);
-        o.told.extend(self.store.diff(&store));
-        (self.store, self.log) = (store, log);
-        if let Role::Authority { journal } = &mut self.role {
-            for l in &self.log.entries {
-                journal.verdicts.insert(l.entry.id, Verdict::Seq(l.seq));
-                let last = journal.last.entry(l.entry.session.clone()).or_insert(0);
-                *last = (*last).max(l.entry.local);
+        self.pending.clear();
+        let opened = self.fit_rows(&d.snapshot.rows).and_then(|(rows, _)| self.of_rows(&rows));
+        if let Ok(mut store) = opened {
+            let schema = store.schema_arc().clone();
+            let mut foreign = (store.state_hash() != d.snapshot.state).then_some(d.snapshot.seq);
+            let mut log = Log::new(d.snapshot);
+            for l in d.chain {
+                let (facts, _) = fit(&schema, &l.facts);
+                if store.apply_all(&facts).is_err() {
+                    break;
+                }
+                let (seq, derived) = (l.seq, store.state_hash() == l.state);
+                if log.push(l).is_err() {
+                    store
+                        .apply_all(&facts.iter().rev().map(Change::inverse).collect::<Vec<_>>())
+                        .expect("its inverse applies");
+                    break;
+                }
+                if !derived {
+                    foreign = Some(seq);
+                }
+            }
+            (self.foreign, self.faith) = (foreign, foreign.is_some_and(|f| f == log.head().0));
+            o.told.extend(self.store.diff(&store));
+            (self.store, self.log) = (store, log);
+            if let Role::Authority { journal } = &mut self.role {
+                for l in &self.log.entries {
+                    journal.verdicts.insert(l.entry.id, Verdict::Seq(l.seq));
+                    let last = journal.last.entry(l.entry.session.clone()).or_insert(0);
+                    *last = (*last).max(l.entry.local);
+                }
             }
         }
         self.local = self.local.max(d.local);

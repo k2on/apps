@@ -491,17 +491,18 @@ fn version_7_a_module_update_over_a_retained_log() {
     measured("v7 …the last settle", took);
 }
 
-/// **6. A schema grows under a running server** — a witness. The server is
-/// upgraded in place to the release that appended the table `tag`; §1.2
-/// says a row written under the narrower schema is read under the wider
-/// by completing it, and the log should keep its head. It does not: the
-/// hub opens its chain under the new schema, every entry's state hash
-/// covers the schema's hash, so the first entry does not check and the
-/// chain is cut there (`ark5::peer::Peer::open`); `Table::complete` and
-/// `Table::prefix` are not called anywhere. Run with `--ignored`: the head
-/// after the upgrade is 0.
+/// **6. A schema grows under a running server.** The server is upgraded
+/// in place to the release that appended the table `tag`; §1.2 says a log
+/// written under the narrower schema is read under the wider, and it keeps
+/// its head: the hub opens its chain under the new schema checking each
+/// entry by its hash over its own bytes, never deriving its state again,
+/// the rows widened and the store's digests the new schema's
+/// (`ark5::peer::Peer::open`). A peer of the grown release syncs it, sees
+/// the playlist made before, authors under it and settles at the head, its
+/// store hashing as the head says. Falsified by
+/// `open` deriving each entry's state again and cutting the chain where it
+/// differs: the head after the upgrade was 0.
 #[test]
-#[ignore = "witness: a log written under a narrower schema is cut at its first entry when opened under a wider one (ark5 Peer::open: the state hash covers the schema hash; Table::complete is not wired)"]
 fn version_6_a_schema_grows_under_a_running_server() {
     let mut f = Fleet::new("v6-grows");
     let next = module_file(f.root.path(), "grown", grown());
@@ -516,6 +517,21 @@ fn version_6_a_schema_grows_under_a_running_server() {
         before,
         "the log keeps its head under the grown schema"
     );
+    // The fleet reads the log under harken's schema, so `converged` is
+    // asked nothing here: the grown peer is watched instead.
+    let mut g = peer_on(&f, &next, "grown", "alice");
+    create(&mut g, "Grown");
+    let deadline = Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        let (cursor, h, view) = g.hash();
+        if cursor == before + 1 && g.status().pending == 0 && h == view {
+            break;
+        }
+        assert!(Instant::now() < deadline, "the grown peer settles");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    playlist(&mut g, "Mine");
+    assert_eq!(head(&f), before + 1);
 }
 
 // -- a pinned previous revision -----------------------------------------------------
