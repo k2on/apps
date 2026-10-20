@@ -5,6 +5,8 @@
 //! arkc verify FILE...     every body checked, the module verified (§1.5); its hash
 //! arkc compat OLD NEW     whether NEW may follow OLD: the schema a prefix-extension (§1.2),
 //!                         every function NEW binds and OLD did not checked over NEW's schema
+//! arkc build FILE... -o OUT  Ark text (§1.15), the files one module, compiled to a module file
+//! arkc print FILE         a module file as Ark text
 //! ```
 
 use ark::author::Node;
@@ -54,7 +56,31 @@ fn run(args: &[String]) -> Result<(), String> {
             println!("{new} may follow {old}: {fresh} functions new");
             Ok(())
         }
-        _ => Err("usage: arkc verify FILE... | arkc compat OLD NEW".into()),
+        [cmd, rest @ ..] if cmd == "build" && rest.len() >= 3 && rest[rest.len() - 2] == "-o" => {
+            let (files, out) = (&rest[..rest.len() - 2], &rest[rest.len() - 1]);
+            let mut src = String::new();
+            for f in files {
+                src += &std::fs::read_to_string(f).map_err(|e| format!("{f}: {e}"))?;
+                src += "\n";
+            }
+            let d = ark::text::build(&src).map_err(|e| e.0)?;
+            let file = (d.module.clone(), d.bodies.values().cloned().collect::<Vec<_>>());
+            std::fs::write(out, file.to_bytes()).map_err(|e| format!("{out}: {e}"))?;
+            println!("{out}  {} functions  {}", d.bodies.len(), d.module.hash());
+            Ok(())
+        }
+        [cmd, file] if cmd == "print" => {
+            let bytes = std::fs::read(file).map_err(|e| format!("{file}: {e}"))?;
+            let (m, bodies) = <(Module, Vec<Vec<u8>>)>::from_bytes(&bytes).map_err(|e| format!("{file}: {}", e.0))?;
+            let fns = bodies
+                .iter()
+                .map(|b| Function::from_bytes(b))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.0)?;
+            print!("{}", ark::text::print(&m, &fns).map_err(|e| format!("{file}: {}", e.0))?);
+            Ok(())
+        }
+        _ => Err("usage: arkc verify FILE... | arkc compat OLD NEW | arkc build FILE... -o OUT | arkc print FILE".into()),
     }
 }
 
