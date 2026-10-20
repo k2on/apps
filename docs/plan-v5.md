@@ -793,6 +793,19 @@ linked round trip 182.2 µs (was 5,520.1; v4 215.1). Source +186 lines.
 
 ## Landed
 
+**K3c** (`0918028`…`acf0447`). **A fresh read keeps nothing**: `view.rs`
+defines each operator once (`each`, `order`, `count`, `tally`/`aggregate`,
+`join_key`/`joined`); a view's nodes run them over deltas, a fresh read
+over lists in hydration's order — a sorted `Take` orders its window only,
+a keyed `Join` hashes its smaller side once; rows read unchanged.
+`add_song` 25.19G instructions (step 4 24.90G, 1.012×; step 5 28.10G);
+whole, release medians at 500/2,000/8,000: 233/228/247 µs (step 4
+226/232/241); views push at par. **Only the log's rows are journaled**:
+`Record::Logged` (`writes` → `log`; a directory with `writes` refused),
+open appends them (`Store::append`): 620 → 364 bytes per entry, open of
+8,000 entries unchanged. trace/: 88 persist records re-derived. Fuzz
+1,000 sessions, 0 failed, 2,997 traces replayed. Source +93.
+
 **A3** (`8857083`…): ArkLang is S-expressions, `ark::sexp` (reader,
 layout, lowering through the checker, printer): 1,400 source lines against
 600 — over, because printing recovers what the bytes leave out (binder
