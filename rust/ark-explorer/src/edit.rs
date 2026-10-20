@@ -205,7 +205,11 @@ pub fn console(src: &Source, name: &str, args: &str) -> Result<Value, String> {
             "{f} takes {} argument{}: {}",
             c.input.len(),
             if c.input.len() == 1 { "" } else { "s" },
-            c.input.iter().map(|(n, x)| format!("{n}: {}", value::ty_name(&x.ty))).collect::<Vec<_>>().join(", ")
+            c.input
+                .iter()
+                .map(|(n, x)| format!("{n}: {}", value::ty_name(&x.ty)))
+                .collect::<Vec<_>>()
+                .join(", ")
         ));
     }
     let vs = c

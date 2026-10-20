@@ -137,10 +137,7 @@ pub fn callables(module: &Module, lib: &Lib) -> Vec<Callable> {
             routers.push(c.router.clone());
         }
     }
-    routers
-        .iter()
-        .flat_map(|r| out.iter().filter(move |c| &c.router == r).cloned())
-        .collect()
+    routers.iter().flat_map(|r| out.iter().filter(move |c| &c.router == r).cloned()).collect()
 }
 
 /// A field's checks, as they are said beside it.
@@ -594,7 +591,11 @@ pub fn label_columns(store: &Store, module: &Module, table: &str) -> (Option<usi
     let Some(first) = candidates.iter().position(|(_, n)| *n >= enough) else {
         return (None, None);
     };
-    let second = candidates.iter().enumerate().find(|(i, (_, n))| *i != first && *n > 1).map(|(_, (c, _))| *c);
+    let second = candidates
+        .iter()
+        .enumerate()
+        .find(|(i, (_, n))| *i != first && *n > 1)
+        .map(|(_, (c, _))| *c);
     (Some(candidates[first].0), second)
 }
 

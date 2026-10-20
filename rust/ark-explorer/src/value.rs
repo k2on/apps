@@ -186,7 +186,9 @@ pub fn column_ty(cx: &Types, c: &ark5::schema::Column) -> Ty {
 /// When the elements of a list are some table's rows — their fields'
 /// declarations the table's columns', in order — the table's column names.
 pub fn row_labels(schema: &ark5::schema::Schema, element: &Structure, cx: &Types) -> Option<Vec<String>> {
-    let (fields, true) = fields_of(cx, std::slice::from_ref(element)) else { return None };
+    let (fields, true) = fields_of(cx, std::slice::from_ref(element)) else {
+        return None;
+    };
     columns_of(schema, &fields)
 }
 
@@ -298,7 +300,10 @@ pub fn ty_name(t: &Ty) -> String {
         Ty::Id(table) => format!("id({table})"),
         Ty::Option(t) => format!("option({})", ty_name(t)),
         Ty::List(t) => format!("list({})", ty_name(t)),
-        Ty::Struct(fs) => format!("{{{}}}", fs.iter().map(|(n, t)| format!("{n}: {}", ty_name(t))).collect::<Vec<_>>().join(", ")),
+        Ty::Struct(fs) => format!(
+            "{{{}}}",
+            fs.iter().map(|(n, t)| format!("{n}: {}", ty_name(t))).collect::<Vec<_>>().join(", ")
+        ),
         Ty::Enum(vs) => format!("enum({})", vs.join(" | ")),
         Ty::Sum(vs) => format!(
             "sum({})",

@@ -268,7 +268,10 @@ fn the_exposed_crud_is_read_off_the_module() {
     for b in odd.bindings.iter_mut().filter(|(n, _)| n == "people.delete_user") {
         b.1 = make;
     }
-    assert!(!crud_of(&odd, &d.lib)[0].1.delete, "a delete that does not take the key is not the CRUD verb");
+    assert!(
+        !crud_of(&odd, &d.lib)[0].1.delete,
+        "a delete that does not take the key is not the CRUD verb"
+    );
 }
 
 /// A cell edit on a table whose CRUD is exposed goes through its
@@ -319,7 +322,13 @@ fn the_switch_writes_raw_at_the_authority_alone() {
         [Change::Edit { table, old, new }] => {
             assert_eq!(table, "user");
             assert_eq!(User::from_bytes(old).unwrap(), user(1, "ann", "blue"));
-            assert_eq!(User::from_bytes(new).unwrap(), User { admin: true, ..user(1, "ann", "blue") });
+            assert_eq!(
+                User::from_bytes(new).unwrap(),
+                User {
+                    admin: true,
+                    ..user(1, "ann", "blue")
+                }
+            );
         }
         other => panic!("{other:?}"),
     }
@@ -608,11 +617,18 @@ fn the_admin_wire_reads_back() {
     let change = Change::Edit {
         table: "team".into(),
         old: row.clone(),
-        new: Team { name: "blue".into(), size: 9 }.to_bytes(),
+        new: Team {
+            name: "blue".into(),
+            size: 9,
+        }
+        .to_bytes(),
     };
     assert_eq!(raw_from(&raw_body(&change)), Ok(change));
     let k = UserKey { id: id(1) }.to_bytes();
-    assert_eq!(author_from(&author_body("people.delete_user", &k)), Ok(("people.delete_user".to_string(), k)));
+    assert_eq!(
+        author_from(&author_body("people.delete_user", &k)),
+        Ok(("people.delete_user".to_string(), k))
+    );
 }
 
 /// The admin page's host: a state as the server sends it, read into a store
@@ -763,7 +779,10 @@ fn every_query_and_mutation_is_listed_by_router() {
     }
     let members = &all[at("members")];
     assert_eq!(members.kind, Kind::Query);
-    assert_eq!(members.columns.as_deref(), Some(&["id", "name", "team", "admin", "email"].map(String::from)[..]));
+    assert_eq!(
+        members.columns.as_deref(),
+        Some(&["id", "name", "team", "admin", "email"].map(String::from)[..])
+    );
     let kick = &all[at("kick")];
     let said: Vec<String> = kick.input.iter().map(|(n, f)| format!("{n}: {}", form::ty_name(&f.ty))).collect();
     assert_eq!(
@@ -853,7 +872,10 @@ fn every_type_reads_from_its_input() {
     assert_eq!(field(&args, 7), uid(2));
     assert_eq!(field(&args, 8), Value::Bytes(vec![0xbe, 0xef]));
     let bytes = callable.input_bytes(args.as_ref().unwrap()).expect("it encodes");
-    let back = value::decode(&Ty::Struct(callable.input.iter().map(|(n, f)| (n.clone(), f.ty.clone())).collect()), &bytes);
+    let back = value::decode(
+        &Ty::Struct(callable.input.iter().map(|(n, f)| (n.clone(), f.ty.clone())).collect()),
+        &bytes,
+    );
     assert_eq!(back.as_ref().ok(), args.as_ref(), "the bytes read back as the form");
     f.toggle(&p(&[4]));
     f.set_text(&p(&[7]), "not an id".into());
@@ -1004,7 +1026,11 @@ fn a_mutation_call_reaches_the_writer_and_its_verdict_is_said() {
     );
     assert!(w.raws.is_empty(), "a client never writes raw");
     assert!(matches!(&ex.calls.last().unwrap().called, Called::Authored(_)));
-    assert_eq!(Explorer::outcome(ex.calls.last().unwrap(), &w), "authored", "the recorder keeps no verdict");
+    assert_eq!(
+        Explorer::outcome(ex.calls.last().unwrap(), &w),
+        "authored",
+        "the recorder keeps no verdict"
+    );
     for (now, says) in [(true, "refused: kick: not yours to kick"), (false, "refused: the authority says no")] {
         let mut w = Refusing { now };
         let mut ex = Explorer::new();
@@ -1287,12 +1313,13 @@ fn a_change_in_the_store_is_lit_by_key_and_fades() {
     assert!(quiet.iter().all(|l| l.cells.iter().all(|s| *s == 0.0)), "nothing is lit on first sight");
     // bob renamed, dan added above everyone, cat gone.
     let mut moved = st.clone();
-    moved.apply(&Change::Edit {
-        table: "user".into(),
-        old: user(2, "bob", "blue").to_bytes(),
-        new: user(2, "robert", "blue").to_bytes(),
-    })
-    .unwrap();
+    moved
+        .apply(&Change::Edit {
+            table: "user".into(),
+            old: user(2, "bob", "blue").to_bytes(),
+            new: user(2, "robert", "blue").to_bytes(),
+        })
+        .unwrap();
     moved.put("user", user(0, "dan", "red").to_bytes()).unwrap();
     moved.delete("user", &id(3).to_bytes()).unwrap();
     ex.observe(&source(&moved), 1, 500);
@@ -1312,7 +1339,11 @@ fn a_change_in_the_store_is_lit_by_key_and_fades() {
         "the gone row is drawn where it was"
     );
     assert!(lights[0].cells.iter().all(|s| *s == 1.0), "a new row is lit whole: {:?}", lights[0]);
-    assert!(lights[1].cells.iter().all(|s| *s == 0.0), "ann did not change, only moved: {:?}", lights[1]);
+    assert!(
+        lights[1].cells.iter().all(|s| *s == 0.0),
+        "ann did not change, only moved: {:?}",
+        lights[1]
+    );
     assert_eq!(lights[2].gone, 1.0, "cat is drawn as gone");
     assert_eq!(lights[3].cells, [0.0, 1.0, 0.0, 0.0, 0.0], "only robert's name is lit");
     assert!(ex.fading());
@@ -1370,4 +1401,3 @@ fn a_query_answer_is_run_again_and_lit() {
     }
     let _ = ex.view(&source(&moved), &w);
 }
-

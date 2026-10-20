@@ -339,7 +339,10 @@ impl Explorer {
         let (page, pages) = self.page(all);
         let from = (page * PAGE_ROWS).min(all);
         let key = src.schema().table(t).map_or(0, |(_, t)| t.key);
-        let keys: Vec<flash::Key> = rows[from..(from + PAGE_ROWS).min(all)].iter().map(|r| r[..key.min(r.len())].to_vec()).collect();
+        let keys: Vec<flash::Key> = rows[from..(from + PAGE_ROWS).min(all)]
+            .iter()
+            .map(|r| r[..key.min(r.len())].to_vec())
+            .collect();
         flash::light(&grid, &keys, from, page + 1 >= pages, &self.table_seen, self.now)
     }
 
@@ -601,7 +604,9 @@ impl Explorer {
     /// then a query run on the host's store, or a mutation authored through
     /// the host's writer as a button would author it.
     fn call(&mut self, src: &Source, w: &mut dyn Writer) {
-        let Some(c) = self.form().and_then(|f| Explorer::callable(src, &f.function)) else { return };
+        let Some(c) = self.form().and_then(|f| Explorer::callable(src, &f.function)) else {
+            return;
+        };
         let Some(f) = self.form_mut() else { return };
         let Some(args) = f.validate(&c, src.lib, src.module) else {
             let said: Vec<String> = f.messages.iter().map(|(_, m)| m.clone()).collect();
@@ -862,7 +867,10 @@ impl Explorer {
         };
         let Some((_, tbl)) = src.schema().table(&t) else { return };
         let key = row[..tbl.key_len(&row).unwrap_or(0)].to_vec();
-        let text = Explorer::values(src, &t, &row).get(self.column_at).map(edit::cell_text).unwrap_or_default();
+        let text = Explorer::values(src, &t, &row)
+            .get(self.column_at)
+            .map(edit::cell_text)
+            .unwrap_or_default();
         self.editing = Some(Editing { table: t, key, column, text });
     }
 
