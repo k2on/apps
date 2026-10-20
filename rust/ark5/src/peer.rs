@@ -376,6 +376,9 @@ pub struct Peer {
     pub faith: bool,
 }
 
+/// A snapshot's rows, by table.
+type Rows = Vec<(String, Vec<Vec<u8>>)>;
+
 /// Facts as some schema wrote them, read under `schema`: rows completed or
 /// cut to their prefix, changes to tables it lacks dropped; and whether any
 /// was another schema's.
@@ -469,7 +472,7 @@ impl Peer {
     /// peer's (§1.2): each row completed or cut to its prefix, a table this
     /// schema lacks dropped; and whether they were another schema's (a
     /// table of this space missing counts).
-    fn fit_rows(&self, rows: &[(String, Vec<Vec<u8>>)]) -> Result<(Vec<(String, Vec<Vec<u8>>)>, bool), Refusal> {
+    fn fit_rows(&self, rows: &[(String, Vec<Vec<u8>>)]) -> Result<(Rows, bool), Refusal> {
         let schema = self.store.schema_arc().clone();
         let mut other = schema.tables.iter().filter(|t| t.space == self.space).count() != rows.len();
         let mut out = vec![];
@@ -699,11 +702,7 @@ impl Peer {
                     o.out.push(Output::Confirmed(id));
                 }
             }
-            (Frame::Reject { id, why, .. }, false, _) => {
-                if self.settle(&id, o) {
-                    o.out.push(Output::Refused { id, why });
-                }
-            }
+            (Frame::Reject { id, why, .. }, false, _) if self.settle(&id, o) => o.out.push(Output::Refused { id, why }),
             _ => {}
         }
     }
