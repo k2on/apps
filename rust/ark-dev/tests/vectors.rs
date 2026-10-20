@@ -272,19 +272,24 @@ fn text() {
         let fns: Vec<Function> = d.bodies.values().map(|b| Function::from_bytes(b).unwrap()).collect();
         let printed = ark::sexp::print(&d.module, &fns).unwrap();
         let built = ark::sexp::build(&printed).unwrap_or_else(|r| panic!("{r}\n{printed}"));
-        assert_eq!((&built.module, &built.bodies), (&d.module, &d.bodies), "{printed}");
+        let unnamed = |d: &ark::Domain| {
+            let mut fs: Vec<Vec<u8>> = d.bodies.values().map(|b| Function::from_bytes(b).unwrap().unnamed().to_bytes()).collect();
+            fs.sort();
+            fs
+        };
+        assert_eq!((&built.module.schema, unnamed(&built)), (&d.module.schema, unnamed(&d)), "{printed}");
         if d.module.schema.tables[0].name == "playlist" {
             assert_eq!(printed, src, "rust/ark-dev/src/demo.ark is not the demo printed");
         }
     }
-    let d = domain();
+    let d = ark::sexp::build(src).unwrap();
     let file = (d.module.clone(), d.bodies.values().cloned().collect::<Vec<_>>()).to_bytes();
     let v = json!({"ark": "demo.ark", "hash": d.module.hash().to_string(), "module": hex(&file)});
     run_text(&v, src).unwrap();
     vector("text", "demo.ark", src).unwrap();
     vector("text", "demo.json", &format!("{v:#}\n")).unwrap();
     only("text", &BTreeSet::from(["demo.json".to_string()]));
-    let wrong = src.replacen("i.pos)) 1)", "i.pos)) 2)", 1);
+    let wrong = src.replacen("(?? x.pos 0) 1)", "(?? x.pos 0) 2)", 1);
     assert_ne!(wrong, src, "the falsified text is the text");
     let mut f = v.clone();
     f["expect"] = json!("fail");

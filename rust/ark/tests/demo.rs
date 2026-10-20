@@ -141,6 +141,7 @@ pub fn func(types: Vec<(String, Decl)>, params: &[(&str, Ty)], ret: Ty, effect: 
         ret,
         effect,
         body,
+        names: vec![],
     }
 }
 

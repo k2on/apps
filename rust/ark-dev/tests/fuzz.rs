@@ -56,7 +56,10 @@ fn every_generated_module_prints_and_builds_to_itself() {
         };
         let text = ark::sexp::print(&m, &fns).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
         let d = ark::sexp::build(&text).unwrap_or_else(|e| panic!("seed {seed}: {e}\n{text}"));
-        assert_eq!(d.module, m, "seed {seed}\n{text}");
+        let unnamed = |h: &ark::hash::FnHash| d.lib.get(h).unwrap().f.unnamed();
+        let built: Vec<(String, Function)> = d.module.bindings.iter().map(|(n, h)| (n.clone(), unnamed(h))).collect();
+        let was: Vec<(String, Function)> = m.bindings.iter().cloned().zip(&fns).map(|((n, _), f)| (n, f.clone())).collect();
+        assert_eq!((&d.module.schema, built), (&m.schema, was), "seed {seed}\n{text}");
         let again: Vec<Function> = d.bodies.values().map(|b| Function::from_bytes(b).unwrap()).collect();
         assert_eq!(ark::sexp::print(&d.module, &again).unwrap(), text, "seed {seed}");
     }

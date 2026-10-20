@@ -1,6 +1,6 @@
 {
   "schema": [{"columns":[{"decl":"Id<playlist>","default":null,"name":"id","ty":{"t":"bytes"}},{"decl":"Text","default":null,"name":"name","ty":{"t":"bytes"}},{"decl":"Text","default":null,"name":"user_id","ty":{"t":"bytes"}}],"indexes":[{"columns":["user_id","name"],"unique":true}],"key":{"$int":"1"},"name":"playlist","refs":[],"space":"durable"},{"columns":[{"decl":"Id<playlist>","default":null,"name":"playlist_id","ty":{"t":"bytes"}},{"decl":"Text","default":null,"name":"track_id","ty":{"t":"bytes"}},{"decl":"Int","default":null,"name":"pos","ty":{"t":"int"}}],"indexes":[{"columns":["playlist_id","pos"],"unique":true}],"key":{"$int":"2"},"name":"item","refs":[{"column":"playlist_id","table":"playlist"}],"space":"durable"}],
-  "functions": [{"bytes":"0154657874730000020554657874000001040000000001055465787473000000055465787473000000110180000000000000000e800000000000000107040100010000800000000000000100","hash":"f3fc8833c95d8ba87bc134de52dd99653ea9bc978553956daad2a5debfb8398d","name":"f"}],
+  "functions": [{"bytes":"0154657874730000020554657874000001040000000001055465787473000000055465787473000000110180000000000000000e80000000000000010704010001000080000000000000010000","hash":"5236f248673a3fcf77677ffccd6daed18fddd0cebcd0785406bfc7a977d3879c","name":"f"}],
   "verifies": false,
   "why": "f: the body is List(Named(\"Text\")), which is not Named(\"Texts\")"
 }

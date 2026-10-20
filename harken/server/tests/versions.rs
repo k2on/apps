@@ -139,6 +139,7 @@ fn grown() -> Domain {
                 ret: Ty::unit(),
                 effect: ark::ir::Effect::Write,
                 body: Expr::Insert("tag".into(), Box::new(Expr::Var(0))),
+                names: vec![],
             };
             bind(d, "grown.tag_playlist", f)
         },

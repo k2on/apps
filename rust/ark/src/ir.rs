@@ -386,8 +386,13 @@ pub struct Decl {
 
 /// A function: the declarations it names, sorted by name; its parameters,
 /// bound in order (the last is `Var(0)`); what it returns; the most it may
-/// do; its body. A mutator is `(Input) -> ()` at `Write`, a scope `(Row)
-/// -> Bool` at `Pure`, a query `(Input) -> List<T>` at `Read`.
+/// do; its body; and the names its binders were written with, as a
+/// declaration keeps its fields' (§1.15) — its parameters', then each
+/// `Let`'s, arm's and lambda's in the order [`crate::interp::walk`] meets
+/// them, `""` for one the text gave no name — so a printer prints the
+/// author's. None, or too few, and the printer names the rest. A mutator
+/// is `(Input) -> ()` at `Write`, a scope `(Row) -> Bool` at `Pure`, a
+/// query `(Input) -> List<T>` at `Read`.
 #[derive(Clone, Debug, PartialEq, Eq, Node)]
 pub struct Function {
     pub types: Vec<(String, Decl)>,
@@ -395,12 +400,21 @@ pub struct Function {
     pub ret: Ty,
     pub effect: Effect,
     pub body: Expr,
+    pub names: Vec<String>,
 }
 
 impl Function {
     /// `sha256(enc(function))`.
     pub fn hash(&self) -> FnHash {
         FnHash::of(&self.to_bytes())
+    }
+
+    /// The function with its binders' names set aside.
+    pub fn unnamed(&self) -> Function {
+        Function {
+            names: vec![],
+            ..self.clone()
+        }
     }
 }
 

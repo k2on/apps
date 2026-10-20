@@ -162,19 +162,31 @@ fn flat(x: &Sx) -> String {
 }
 
 /// A form laid out from column `col`: on one line when it ends by column
-/// 100, else its head on the first line and each argument on its own,
-/// two spaces past the form's `(`.
+/// 100; else its head, and its first argument when that is an atom or
+/// ends by column 100, on the first line, and each other argument on its
+/// own, two spaces past the form's `(`. A list whose head is no symbol (a
+/// `let`'s bindings) is one element a line, each under the first.
 pub fn layout(x: &Sx, col: usize) -> String {
-    match &x.k {
-        K::List(xs) if !xs.is_empty() && col + flat(x).chars().count() > 100 => {
-            let rest: String = xs[1..]
-                .iter()
-                .map(|a| format!("\n{}{}", " ".repeat(col + 2), layout(a, col + 2)))
-                .collect();
-            format!("({}{rest})", layout(&xs[0], col + 1))
+    let (K::List(xs), false) = (&x.k, col + flat(x).chars().count() <= 100) else {
+        return flat(x);
+    };
+    let at = |c: usize| format!("\n{}", " ".repeat(c));
+    let K::Sym(head) = &xs[0].k else {
+        let each: Vec<String> = xs.iter().map(|a| layout(a, col + 1)).collect();
+        return format!("({})", each.join(&at(col + 1)));
+    };
+    let mut out = format!("({head}");
+    let rest = match xs.get(1) {
+        Some(a) if !matches!(a.k, K::List(_)) || col + head.len() + 2 + flat(a).chars().count() <= 100 => {
+            out += &format!(" {}", flat(a));
+            &xs[2..]
         }
-        _ => flat(x),
+        _ => &xs[1..],
+    };
+    for a in rest {
+        out += &(at(col + 2) + &layout(a, col + 2));
     }
+    out + ")"
 }
 
 /// `(head args…)` with a symbol for its head.
@@ -197,6 +209,13 @@ fn items(x: &Sx) -> R<&[Sx]> {
     match &x.k {
         K::List(xs) => Ok(xs),
         _ => fail(x.at, "a list expected"),
+    }
+}
+/// A field of a path: its name, or a tuple's position.
+fn seg(x: &Sx) -> R<String> {
+    match &x.k {
+        K::Int(i) => Ok(i.to_string()),
+        _ => name(x).map(String::from),
     }
 }
 fn names(x: &Sx) -> R<Vec<String>> {
@@ -334,6 +353,12 @@ struct Lo {
     scope: Vec<(String, Ty)>,
     stored: Vec<Ty>,
     callees: BTreeMap<String, Decl>,
+    /// The function's binders' names: as lowered, or to print (the next
+    /// at `next`).
+    binders: Vec<String>,
+    next: usize,
+    /// The file each function is written in.
+    files: BTreeMap<String, String>,
 }
 
 impl Lo {
@@ -580,9 +605,10 @@ impl Lo {
                             _ => return fail(b.at, "a length's bound is an integer or `..`"),
                         },
                         (Some(("fn", [ps, body])), _) => {
+                            let saved = (take(&mut self.scope), take(&mut self.binders));
                             self.scope = vec![(names(ps)?.concat(), ty.clone())];
                             let e = self.ex(body, None);
-                            self.scope.clear();
+                            (self.scope, self.binders) = saved;
                             Rule::Refine(close(e?, 1))
                         }
                         _ => return fail(r.at, "a rule: (utf8) (trim) (non-empty) (len …) (fn (x) …), its words after it"),
@@ -666,14 +692,21 @@ impl Lo {
             (None, None) => fail(at, format!("no function {n}")),
             (None, Some(x)) => {
                 self.built.insert(n.into(), None);
-                let saved = (take(&mut self.scope), take(&mut self.stored), take(&mut self.callees));
+                let saved = (
+                    take(&mut self.scope),
+                    take(&mut self.stored),
+                    take(&mut self.callees),
+                    take(&mut self.binders),
+                );
                 let f = self.lower(&x);
-                (self.scope, self.stored, self.callees) = saved;
-                let f = f?;
-                if form(&x).unwrap().0 == "live" && volatile(&self.schema, &self.lib, &f.body) == Some(false) {
-                    return fail(x.at, format!("{n}: a live function touches a durable table"));
-                }
-                self.lib.install(&self.schema, f.clone()).at(x.at)?;
+                (self.scope, self.stored, self.callees, self.binders) = saved;
+                let checked = f.and_then(|f| {
+                    if form(&x).unwrap().0 == "live" && volatile(&self.schema, &self.lib, &f.body) == Some(false) {
+                        return fail(x.at, format!("{n}: a live function touches a durable table"));
+                    }
+                    self.lib.install(&self.schema, f.clone()).at(x.at).map(|_| f)
+                });
+                let f = checked.map_err(|r| in_file(self.files.get(n).map_or("", |f| f), r))?;
                 self.built.insert(n.into(), Some(f.clone()));
                 Ok(f)
             }
@@ -690,6 +723,7 @@ impl Lo {
             let (pn, pt) = pair(p)?;
             let t = self.ty(pt).map(|t| self.store(t))?;
             self.scope.push((name(pn)?.into(), t));
+            self.binders.push(name(pn)?.into());
         }
         let (ret, body) = match (k, rest) {
             ("query" | "helper" | "guard", [r, body @ ..]) => (self.ty(r)?, body),
@@ -711,6 +745,7 @@ impl Lo {
             ret,
             effect,
             body,
+            names: take(&mut self.binders),
         })
     }
 
@@ -727,6 +762,7 @@ impl Lo {
     /// `f` with `names` bound at the next levels to `tys`.
     fn under<X>(&mut self, names: Vec<String>, tys: Vec<Ty>, f: impl FnOnce(&mut Self) -> R<X>) -> R<X> {
         let depth = self.scope.len();
+        self.binders.extend(names.iter().cloned());
         self.scope.extend(names.into_iter().zip(tys));
         let r = f(self);
         self.scope.truncate(depth);
@@ -954,8 +990,14 @@ impl Lo {
             },
             "." => {
                 let x = e(self, 0)?;
-                self.path(x, &a[1..].iter().map(name).collect::<R<Vec<_>>>()?, at)?
+                let fs = a[1..].iter().map(seg).collect::<R<Vec<_>>>()?;
+                self.path(x, &fs.iter().map(String::as_str).collect::<Vec<_>>(), at)?
             }
+            "??" | "?." => match (self.optional(h, a, at)?, h) {
+                (Some(e), _) => e,
+                (None, "??") => Std(StdFn::UnwrapOr, vec![e(self, 0)?, e(self, 1)?]),
+                _ => return fail(at, "(?. E f …) reads fields of an option"),
+            },
             s if STD.split(' ').any(|n| n == s) => {
                 let es = a.iter().map(|e| self.ex(e, None)).collect::<R<Vec<_>>>()?;
                 let text = es
@@ -987,6 +1029,54 @@ impl Lo {
                 None => return fail(at, format!("({h} …) is no form, function or variant")),
             },
         })
+    }
+
+    /// `(?? P D)` where the path `P` (`x.a.f`, `(. E a f)`) crosses an
+    /// option, and `(?. E f …)`: `(match O (none () D) (some (v) v.f))`
+    /// and `(match O (none () none) (some (v) (some v.f)))`, `O` the
+    /// path's option. `None` when `??`'s path crosses none: then it is
+    /// the standard function.
+    fn optional(&mut self, h: &str, a: &[Sx], at: At) -> R<Option<Expr>> {
+        let (mut e, fs): (Expr, Vec<String>) = match (h, &a[0].k, form(&a[0])) {
+            ("?.", ..) if a.len() > 1 => (self.ex(&a[0], None)?, a[1..].iter().map(seg).collect::<R<_>>()?),
+            ("??", K::Sym(p), _) if a.len() == 2 && self.scope.iter().any(|s| p.split('.').next() == Some(&s.0)) => {
+                let segs: Vec<String> = p.split('.').map(String::from).collect();
+                (self.ex(&y(&segs[0]), None)?, segs[1..].to_vec())
+            }
+            ("??", _, Some((".", [x, fs @ ..]))) if a.len() == 2 => (self.ex(x, None)?, fs.iter().map(seg).collect::<R<_>>()?),
+            _ => return Ok(None),
+        };
+        let fs: Vec<&str> = fs.iter().map(String::as_str).collect();
+        for (i, f) in fs.iter().enumerate() {
+            let t = self.ty_of(&e, at)?;
+            let Some(inner) = self.inner(Some(&t)) else {
+                e = self.path(e, &[f], at)?;
+                continue;
+            };
+            let top = self.binders.len();
+            let (mut some, ft) = self.under(vec![String::new()], vec![inner], |me| {
+                let v = me.path(Expr::Var(MARK + me.scope.len() as u32 - 1), &fs[i..], at)?;
+                let t = me.ty_of(&v, at)?;
+                Ok((v, t))
+            })?;
+            self.binders.truncate(top);
+            let none = match h {
+                "??" => self.ex(&a[1], Some(&ft))?,
+                _ => {
+                    let t = infer(&self.types(), &ft);
+                    let o = self.option(t);
+                    let o = self.store(o);
+                    some = Expr::Variant(o.clone(), 1, vec![some]);
+                    Expr::Variant(o, 0, vec![])
+                }
+            };
+            self.binders.push(String::new());
+            return Ok(Some(Expr::Match(bx(e), vec![none, Expr::Lambda(1, bx(some))])));
+        }
+        match h {
+            "??" => Ok(None),
+            _ => fail(at, "(?. E f …): E is an option"),
+        }
     }
 
     /// `(let ((x e) …) body …)`: each bound for the rest.
@@ -1033,6 +1123,15 @@ impl Lo {
             .unwrap();
         self.scope.push((n.clone(), t.clone()));
         n
+    }
+
+    /// A binder's name: the function's next, else [`Lo::fresh`]'s; bound.
+    fn bind(&mut self, t: &Ty, prefer: Option<&String>) -> String {
+        self.next += 1;
+        match self.binders.get(self.next - 1).filter(|n| !n.is_empty()).cloned() {
+            Some(n) => (self.scope.push((n.clone(), t.clone())), n).1,
+            None => self.fresh(t, prefer),
+        }
     }
 
     fn pty(&mut self, t: &Ty) -> Sx {
@@ -1132,10 +1231,54 @@ impl Lo {
             return Err(Refusal::new("a lambda expected"));
         };
         let depth = self.scope.len();
-        let ns = tys.iter().map(|t| y(self.fresh(t, None))).collect();
+        let ns = tys.iter().map(|t| y(self.bind(t, None))).collect();
         let body = self.pr(b, want);
         self.scope.truncate(depth);
         Ok(h("fn", [l(ns), body?]))
+    }
+
+    /// A match on an option that is `(?? P D)` or `(?. S f …)`: its some
+    /// arm fields of what it binds, and `?.`'s option the one lowering
+    /// makes.
+    fn sugar(&mut self, s: &Expr, arms: &[Expr]) -> R<Option<Sx>> {
+        use Expr::*;
+        let t = self.type_of(s)?.0;
+        let (Some(inner), [none, some]) = (self.inner(Some(&t)), arms) else {
+            return Ok(None);
+        };
+        let (opt, body) = match (none, some) {
+            (Variant(o, 0, n), Variant(p, 1, b)) if n.is_empty() && o == p && b.len() == 1 => (Some(o), &b[0]),
+            _ => (None, some),
+        };
+        let mut x = body;
+        while let Field(y, _) = x {
+            x = y;
+        }
+        if x == body || *x != Var(0) {
+            return Ok(None);
+        }
+        self.scope.push(("\0".into(), inner));
+        let (ft, path) = (self.type_of(body).map(|t| t.0), self.pr(body, None));
+        self.scope.pop();
+        let (ft, K::Sym(path)) = (ft?, path?.k) else { unreachable!() };
+        let fs: Vec<Sx> = path.split('.').skip(1).map(y).collect();
+        if let Some(o) = opt {
+            let it = infer(&self.types(), &ft);
+            if *o != Ty::Named(format!("Option<{}>", self.spell(&it))) {
+                return Ok(None);
+            }
+            let s = self.pr(s, None)?;
+            self.next += 1;
+            return Ok(Some(h("?.", [s].into_iter().chain(fs))));
+        }
+        let p = match (self.pr(s, None)?, fs) {
+            (Sx { k: K::Sym(v), .. }, fs) => y(format!("{v}.{}", fs.iter().map(flat).collect::<Vec<_>>().join("."))),
+            (x, fs) if form(&x).is_some_and(|f| f.0 == ".") => l(items(&x)?.iter().cloned().chain(fs).collect()),
+            (x, fs) => h(".", [x].into_iter().chain(fs)),
+        };
+        let d = self.pr(none, Some(&ft))?;
+        self.next += 1;
+        Ok(Some(h("??", [p, d])))
     }
 
     fn pkey(&mut self, t: &str, k: &Expr) -> R<Vec<Sx>> {
@@ -1150,6 +1293,11 @@ impl Lo {
 
     fn pr(&mut self, e: &Expr, want: Want) -> R<Sx> {
         use Expr::*;
+        if let Match(s, arms) = e {
+            if let Some(x) = self.sugar(s, arms)? {
+                return Ok(x);
+            }
+        }
         let (depth, at) = (self.scope.len(), (0, 0));
         let out = match e {
             Lit(t, b) => {
@@ -1173,7 +1321,7 @@ impl Lo {
                 let (mut binds, mut e) = (vec![], e);
                 while let Let(v, b) = e {
                     let (t, v) = (self.type_of(v)?.0, self.pr(v, None)?);
-                    binds.push(h(&self.fresh(&t, None), [v]));
+                    binds.push(h(&self.bind(&t, None), [v]));
                     e = b;
                 }
                 h("let", [l(binds)].into_iter().chain(self.forms(e, want)?))
@@ -1199,7 +1347,7 @@ impl Lo {
                 let mut out = vec![y("match"), self.pr(s, None)?];
                 for (((label, fs), arm), ns) in self.labels(&t, vs.len()).into_iter().zip(&vs).zip(arms).zip(fnames) {
                     let label = label.parse().map_or_else(|_| y(&label), |i| sx(K::Int(i)));
-                    let ns = fs.iter().enumerate().map(|(j, f)| y(self.fresh(f, ns.get(j)))).collect();
+                    let ns = fs.iter().enumerate().map(|(j, f)| y(self.bind(f, ns.get(j)))).collect();
                     out.push(l([label, l(ns)].into_iter().chain(self.forms(arm, want)?).collect()));
                     self.scope.truncate(depth);
                 }
@@ -1295,8 +1443,9 @@ impl Lo {
             }
             Update(t, k, f) => {
                 let row = self.row(t, at)?.1;
+                let k = self.pkey(t, k)?;
                 let f = self.plam(f, std::slice::from_ref(&row), Some(&row))?;
-                h("update", [y(t)].into_iter().chain(self.pkey(t, k)?).chain([f]))
+                h("update", [y(t)].into_iter().chain(k).chain([f]))
             }
             Filter(s, f) | Map(s, f) => {
                 let x = self.list_of(s, at)?;
@@ -1316,14 +1465,16 @@ impl Lo {
                 self.scope.push((String::new(), x.clone()));
                 let k = self.type_of(kb).map(|t| t.0);
                 self.scope.pop();
+                let g = self.pr(g, None)?;
                 let (b, a) = (self.plam(by, std::slice::from_ref(&x), None)?, self.plam(agg, &[k?, Ty::list(x)], None)?);
-                h("group", [self.pr(g, None)?, b, a])
+                h("group", [g, b, a])
             }
             Sort(s, keys, dirs) => {
                 let (x, Lambda(_, kb)) = (self.list_of(s, at)?, &**keys) else {
                     return Err(Refusal::new("a lambda expected"));
                 };
-                let v = self.fresh(&x, None);
+                let list = self.pr(s, None)?;
+                let v = self.bind(&x, None);
                 let key = |me: &mut Self, k: &Expr, d: &Dir, bare: bool| -> R<Sx> {
                     let k = me.pr(k, None)?;
                     Ok(if *d == Dir::Desc {
@@ -1342,7 +1493,7 @@ impl Lo {
                     _ => return Err(Refusal::new("sort keys that are no tuple of their directions")),
                 };
                 self.scope.truncate(depth);
-                h("sort", [self.pr(s, None)?, h("fn", [l(vec![y(v)]), body])])
+                h("sort", [list, h("fn", [l(vec![y(v)]), body])])
             }
             Take(s, n) => self.prs("take", &[(**s).clone(), (**n).clone()], &[])?,
             Refuse(m) => self.prs("refuse", std::slice::from_ref(&**m), &[])?,
@@ -1365,7 +1516,8 @@ impl Lo {
             _ => "helper",
         };
         self.scope.clear();
-        let ps = f.params.iter().map(|t| h(&self.fresh(t, None), [self.pty(t)])).collect();
+        (self.binders, self.next) = (f.names.clone(), 0);
+        let ps = f.params.iter().map(|t| h(&self.bind(t, None), [self.pty(t)])).collect();
         let ret = ["query", "helper"].contains(&kind).then(|| self.pty(&f.ret));
         let out = h(kind, [y(n), l(ps)].into_iter().chain(ret).chain(self.forms(&f.body, Some(&f.ret))?));
         self.scope.clear();
@@ -1375,26 +1527,98 @@ impl Lo {
 
 // * The module
 
-/// §1.15 A module from its text: the schema, the declarations, every
-/// function checked (callees first) and bound by its name unless the name
-/// starts with `_`; the module's declarations are its bound functions'.
+/// A refusal said at a place in `file`, unless it is said in one already.
+fn in_file(file: &str, r: Refusal) -> Refusal {
+    match r.0.starts_with(|c: char| c.is_ascii_digit()) && !file.is_empty() {
+        true => Refusal(format!("{file}:{}", r.0)),
+        false => r,
+    }
+}
+
+/// §1.15 A module from one text: [`build_files`] of it alone.
 pub fn build(src: &str) -> R<Domain> {
+    build_files(&[(String::new(), src.to_string())])
+}
+
+/// §1.15 A domain's directory: every `.ark` file under it, at any depth,
+/// in sorted path order, one module ([`build_files`]).
+pub fn build_dir(dir: &std::path::Path) -> R<Domain> {
+    fn walk(d: &std::path::Path, out: &mut Vec<std::path::PathBuf>) -> std::io::Result<()> {
+        for e in std::fs::read_dir(d)? {
+            let p = e?.path();
+            match p.is_dir() {
+                true => walk(&p, out)?,
+                false if p.extension().is_some_and(|x| x == "ark") => out.push(p),
+                false => {}
+            }
+        }
+        Ok(())
+    }
+    let mut paths = vec![];
+    walk(dir, &mut paths).map_err(|e| Refusal(format!("{}: {e}", dir.display())))?;
+    paths.sort();
+    let files = paths
+        .iter()
+        .map(|p| {
+            let n = p.strip_prefix(dir).unwrap_or(p).display().to_string();
+            std::fs::read_to_string(p)
+                .map(|t| (n, t))
+                .map_err(|e| Refusal(format!("{}: {e}", p.display())))
+        })
+        .collect::<R<Vec<_>>>()?;
+    build_files(&files)
+}
+
+/// §1.15 A module from files of text, `(name, text)`: every form read
+/// first, then names resolved, so neither order nor file means anything;
+/// `(schema …)` forms are one schema. The schema, the declarations, every
+/// function checked (callees first) and bound by its name unless the name
+/// starts with `_`; the module's declarations are its bound functions'. A
+/// name — a table's, a type's, a function's — declared twice is refused,
+/// both places said.
+pub fn build_files(files: &[(String, String)]) -> R<Domain> {
     let (mut lo, mut types, mut tables) = (Lo::default(), vec![], vec![]);
-    for x in read(src)? {
-        match form(&x) {
-            Some(("schema", ts)) => tables.extend(ts.iter().cloned()),
-            Some(("type", [n, t])) => types.push((name(n)?.to_string(), t.clone())),
-            Some((k, [n, ..])) if KINDS.iter().any(|w| w.0 == k) && !lo.fns.contains_key(name(n)?) => _ = lo.fns.insert(name(n)?.into(), x.clone()),
-            _ => return fail(x.at, "a schema, a type or a function (each name once) expected"),
+    let mut seen: BTreeMap<String, String> = BTreeMap::new();
+    for (file, src) in files {
+        for x in read(src).map_err(|r| in_file(file, r))? {
+            let mut once = |n: &Sx| -> R<String> {
+                let (n, here) = (name(n)?.to_string(), format!("{file}:{}:{}", x.at.0, x.at.1));
+                match seen.insert(n.clone(), here.clone()) {
+                    Some(was) => Err(Refusal(format!("{n} is declared twice: at {was} and at {here}"))),
+                    None => Ok(n),
+                }
+            };
+            match form(&x) {
+                Some(("schema", ts)) => {
+                    for t in ts {
+                        once(items(t).map_err(|r| in_file(file, r))?.get(1).unwrap_or(t))?;
+                        tables.push((file, t.clone()));
+                    }
+                }
+                Some(("type", [n, t])) => types.push((file, once(n)?, t.clone())),
+                Some((k, [n, ..])) if KINDS.iter().any(|w| w.0 == k) => {
+                    let n = once(n)?;
+                    lo.files.insert(n.clone(), file.clone());
+                    lo.fns.insert(n, x.clone());
+                }
+                _ => {
+                    return Err(in_file(
+                        file,
+                        Refusal(format!("{}:{}: a schema, a type or a function expected", x.at.0, x.at.1)),
+                    ))
+                }
+            }
         }
     }
-    for (n, _) in &types {
+    for (_, n, _) in &types {
         lo.decls.insert(n.clone(), decl(Ty::unit(), vec![]));
     }
-    tables.iter().try_for_each(|t| lo.table(t))?;
+    for (file, t) in &tables {
+        lo.table(t).map_err(|r| in_file(file, r))?;
+    }
     // Twice: a row a declaration names is read under the others.
-    for (n, t) in types.iter().chain(&types) {
-        let d = lo.decl(n, t)?;
+    for (file, n, t) in types.iter().chain(&types) {
+        let d = lo.decl(n, t).map_err(|r| in_file(file, r))?;
         lo.decls.insert(n.clone(), d);
         lo.rows = None;
     }
@@ -1484,10 +1708,19 @@ fn printing(m: &Module, lib: Lib) -> Lo {
     lo
 }
 
-/// §1.15 A module as text: its schema, the declarations no `Id<t>` or
-/// `Option<T>` makes alone, then every function — bound ones by name,
-/// others as `_` and their hash — sorted.
+/// §1.15 A module as text: its schema, then [`forms`]' others, a blank
+/// line apart.
 pub fn print(m: &Module, functions: &[Function]) -> R<String> {
+    let (tables, rest): (Vec<_>, Vec<_>) = forms(m, functions)?.into_iter().partition(|f| form(&f.1).is_some_and(|f| f.0 == "table"));
+    let schema = (!tables.is_empty()).then(|| h("schema", tables.into_iter().map(|t| t.1)));
+    let all: Vec<String> = schema.into_iter().chain(rest.into_iter().map(|f| f.1)).map(|x| layout(&x, 0)).collect();
+    Ok(all.join("\n\n") + "\n")
+}
+
+/// §1.15 A module's forms, each by the name it declares: its tables, the
+/// declarations no `Id<t>` or `Option<T>` makes alone, then every function
+/// — bound ones by name, others as `_` and their hash — sorted.
+pub fn forms(m: &Module, functions: &[Function]) -> R<Vec<(String, Sx)>> {
     let mut lo = printing(m, Lib::default());
     let mut todo: Vec<&Function> = functions.iter().collect();
     while !todo.is_empty() {
@@ -1500,7 +1733,7 @@ pub fn print(m: &Module, functions: &[Function]) -> R<String> {
     for f in functions {
         lo.names.entry(f.hash()).or_insert_with(|| format!("_{}", &f.hash().to_string()[..16]));
     }
-    let (mut out, mut tables) = (vec![], vec![]);
+    let mut out = vec![];
     for t in &m.schema.tables {
         let mut x = vec![y(&t.name)];
         x.extend((t.space == Space::Volatile).then(|| y("volatile")));
@@ -1525,9 +1758,8 @@ pub fn print(m: &Module, functions: &[Function]) -> R<String> {
             )
         };
         x.extend(t.indexes.iter().map(index));
-        tables.push(h("table", x));
+        out.push((t.name.clone(), h("table", x)));
     }
-    out.extend((!tables.is_empty()).then(|| h("schema", tables)));
     let decls = lo.decls.clone();
     let inline = |n: &str| {
         n.rsplit_once('.')
@@ -1535,7 +1767,7 @@ pub fn print(m: &Module, functions: &[Function]) -> R<String> {
     };
     for (n, d) in &decls {
         if !lo.is_auto(n) && !inline(n) {
-            out.push(h("type", [y(n), lo.pdecl(n, d)?]));
+            out.push((n.clone(), h("type", [y(n), lo.pdecl(n, d)?])));
         }
     }
     let mut fns: Vec<(String, &Function)> = functions.iter().map(|f| (lo.names[&f.hash()].clone(), f)).collect();
@@ -1544,9 +1776,10 @@ pub fn print(m: &Module, functions: &[Function]) -> R<String> {
     }
     fns.sort_by(|a, b| a.0.cmp(&b.0));
     for (n, f) in fns {
-        out.push(lo.pfn(&n, f)?);
+        let x = lo.pfn(&n, f)?;
+        out.push((n, x));
     }
-    Ok(out.iter().map(|x| layout(x, 0)).collect::<Vec<_>>().join("\n\n") + "\n")
+    Ok(out)
 }
 
 /// One function of a module as text, for a browser of it: `name` its binding.

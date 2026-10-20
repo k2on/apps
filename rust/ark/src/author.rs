@@ -45,7 +45,6 @@ use crate::codec::{bytes_enc, int_enc, Reader};
 use crate::hash::FnHash;
 use crate::ir::{CtxField, Decl, Effect, Expr, Function, Op, Refine, Rule, Std, Un};
 use crate::module::{Lib, Module, SPEC};
-use crate::peer::Cas;
 use crate::schema::{Schema, Space};
 use crate::store::Dir;
 use crate::ty::Ty;
@@ -530,6 +529,7 @@ fn build<R: Shape>(name: &'static str, kind: Kind, params: Vec<Ty>, body: impl F
         ret: R::ty(),
         effect,
         body,
+        names: vec![],
     };
     Built {
         name,
@@ -1130,55 +1130,7 @@ pub fn text<T: Shape>(src: &str, vars: &[(&str, &dyn Var)]) -> Ex<T> {
 
 // * A module
 
-/// A domain assembled: the schema, the module binding names to hashes,
-/// every function checked into a library, and their bodies.
-pub struct Domain {
-    pub schema: Arc<Schema>,
-    pub module: Module,
-    pub lib: Lib,
-    pub bodies: BTreeMap<FnHash, Vec<u8>>,
-}
-
-impl Domain {
-    pub fn get(&self, name: &str) -> FnHash {
-        self.module.get(name).unwrap_or_else(|| panic!("no function {name}"))
-    }
-
-    /// A content store holding every function, loading what it is sent.
-    pub fn cas(&self) -> Cas {
-        let mut c = Cas::default().with_loader(self.lib.loader(self.schema.clone()));
-        for b in self.bodies.values() {
-            c.add_body(b.clone());
-        }
-        c
-    }
-
-    /// A function's answer over a store: its input parsed under its
-    /// parameters, its body's value — what a query is asked.
-    pub fn ask(&self, store: &dyn crate::store::Read, ctx: &crate::peer::Ctx, name: &str, input: &[u8]) -> Result<Vec<u8>, Refusal> {
-        let f = self.lib.get(&self.get(name)).expect("an installed function");
-        let ty = crate::interp::Interp::input_ty(&f.f);
-        let v = crate::interp::decode(&f.cx, &ty, crate::interp::parse(&f.cx, &ty, input)?.bytes())?;
-        let callee = |h: &FnHash| self.lib.get(h);
-        let mut m = crate::interp::Machine::new(store, ctx, &callee, &f.cx);
-        m.stack = match (v, f.f.params.len()) {
-            (crate::interp::V::Tup(vs), n) if n != 1 => vs,
-            (v, _) => vec![v],
-        };
-        Ok(m.eval(&f.f.body)?.to_bytes())
-    }
-
-    /// A mutator's changes over a store, as the kernel runs it.
-    pub fn run(
-        &self,
-        store: &dyn crate::store::Read,
-        ctx: &crate::peer::Ctx,
-        name: &str,
-        input: &[u8],
-    ) -> Result<Vec<crate::store::Change>, Refusal> {
-        self.lib.procedure(&self.get(name)).expect("an installed function").run(store, ctx, input)
-    }
-}
+pub use crate::module::Domain;
 
 /// §1.5 The module of a schema and functions: each checked, its callees
 /// first, every one bound by its name; the types every one declares. A

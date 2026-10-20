@@ -155,6 +155,7 @@ impl Gen {
                 ret: Ty::unit(),
                 effect: Effect::Write,
                 body,
+                names: vec![],
             };
             let all: Vec<Expr> = (0..n).map(|i| var(0, i)).collect();
             let put = Expr::If(
@@ -246,6 +247,7 @@ impl Gen {
             ret: Ty::bool(),
             effect: Effect::Pure,
             body: Expr::Match(Box::new(Expr::Var(0)), arms),
+            names: vec![],
         };
         let scope = install(scope);
         Gen {
@@ -274,6 +276,7 @@ fn query(cols: &[Col], params: &[Col], body: Expr) -> Function {
         ret: Ty::list(Ty::Tuple(cols.iter().map(|c| ty(*c)).collect())),
         effect: Effect::Read,
         body,
+        names: vec![],
     }
 }
 

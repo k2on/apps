@@ -20,7 +20,7 @@ use ::std::fmt;
 extern crate self as ark;
 
 /// What a module is assembled into (§1.15).
-pub use author::Domain;
+pub use module::Domain;
 
 pub mod author;
 pub mod check;

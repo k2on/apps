@@ -24,10 +24,12 @@ use ark_macros::Node;
 
 use crate::check::{check, Env};
 use crate::hash::{FnHash, ModuleHash};
+use crate::interp::{decode, parse, Machine, V};
 use crate::interp::{Interp, Loaded};
 use crate::ir::{Decl, Function, Node};
-use crate::peer::{Loader, Procedure};
+use crate::peer::{Cas, Ctx, Loader, Procedure};
 use crate::schema::Schema;
+use crate::store::{Change, Read};
 use crate::Refusal;
 
 /// The version of this specification a module is written against.
@@ -115,4 +117,88 @@ pub fn verify(m: &Module, lib: &Lib) -> Result<(), Refusal> {
         }
     }
     Ok(())
+}
+
+/// A domain assembled: the schema, the module binding names to hashes,
+/// every function checked into a library, and their bodies.
+pub struct Domain {
+    pub schema: Arc<Schema>,
+    pub module: Module,
+    pub lib: Lib,
+    pub bodies: BTreeMap<FnHash, Vec<u8>>,
+}
+
+impl Domain {
+    /// The module file: `(Module, [body])` under §1.1's codec.
+    pub fn to_file(&self) -> Vec<u8> {
+        (self.module.clone(), self.bodies.values().cloned().collect::<Vec<_>>()).to_bytes()
+    }
+
+    /// A module file read: every body installed once what it calls is,
+    /// and the module verified (§1.5).
+    pub fn from_file(bytes: &[u8]) -> Result<Domain, Refusal> {
+        let (module, bodies) = <(Module, Vec<Vec<u8>>)>::from_bytes(bytes)?;
+        let d = Domain {
+            schema: Arc::new(module.schema.clone()),
+            module,
+            lib: Lib::default(),
+            bodies: BTreeMap::new(),
+        };
+        d.with(bodies)
+    }
+
+    /// `bodies` installed beside this domain's, each once what it calls is.
+    pub fn with(mut self, bodies: Vec<Vec<u8>>) -> Result<Domain, Refusal> {
+        let mut todo = bodies
+            .into_iter()
+            .map(|b| Ok((Function::from_bytes(&b)?, b)))
+            .collect::<Result<Vec<_>, Refusal>>()?;
+        while !todo.is_empty() {
+            let (before, mut last) = (todo.len(), None);
+            for (f, b) in std::mem::take(&mut todo) {
+                match self.lib.install(&self.schema, f.clone()) {
+                    Ok(h) => _ = self.bodies.insert(h, b),
+                    Err(e) => (last, _) = (Some(e), todo.push((f, b))),
+                }
+            }
+            if todo.len() == before {
+                return Err(last.expect("a refusal"));
+            }
+        }
+        verify(&self.module, &self.lib)?;
+        Ok(self)
+    }
+
+    pub fn get(&self, name: &str) -> FnHash {
+        self.module.get(name).unwrap_or_else(|| panic!("no function {name}"))
+    }
+
+    /// A content store holding every function, loading what it is sent.
+    pub fn cas(&self) -> Cas {
+        let mut c = Cas::default().with_loader(self.lib.loader(self.schema.clone()));
+        for b in self.bodies.values() {
+            c.add_body(b.clone());
+        }
+        c
+    }
+
+    /// A function's answer over a store: its input parsed under its
+    /// parameters, its body's value — what a query is asked.
+    pub fn ask(&self, store: &dyn Read, ctx: &Ctx, name: &str, input: &[u8]) -> Result<Vec<u8>, Refusal> {
+        let f = self.lib.get(&self.get(name)).expect("an installed function");
+        let ty = Interp::input_ty(&f.f);
+        let v = decode(&f.cx, &ty, parse(&f.cx, &ty, input)?.bytes())?;
+        let callee = |h: &FnHash| self.lib.get(h);
+        let mut m = Machine::new(store, ctx, &callee, &f.cx);
+        m.stack = match (v, f.f.params.len()) {
+            (V::Tup(vs), n) if n != 1 => vs,
+            (v, _) => vec![v],
+        };
+        Ok(m.eval(&f.f.body)?.to_bytes())
+    }
+
+    /// A mutator's changes over a store, as the kernel runs it.
+    pub fn run(&self, store: &dyn Read, ctx: &Ctx, name: &str, input: &[u8]) -> Result<Vec<Change>, Refusal> {
+        self.lib.procedure(&self.get(name)).expect("an installed function").run(store, ctx, input)
+    }
 }

@@ -151,6 +151,7 @@ pub fn raw(module: &Module, c: &Change) -> Result<Function, String> {
         ret: Ty::unit(),
         effect: Effect::Write,
         body,
+        names: vec![],
     })
 }
 
