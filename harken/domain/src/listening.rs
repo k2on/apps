@@ -524,15 +524,11 @@ pub static MOVED_TO: Def4<Active, Int, Text, Int, Session> = Def4 {
 pub static MOVED_PLACE: Def3<Int, Int, Int, Int> = Def3 {
     name: "listening.moved_place",
     kind: Kind::Helper,
+    // Ark text: an `else if` chain reads plainer than nested `if_`s.
     body: |i, from, to| {
-        if_(
-            i.eq(&from),
-            to.clone(),
-            if_(
-                from.lt(&to).and(i.gt(&from)).and(i.le(&to)),
-                &i - 1,
-                if_(to.lt(&from).and(i.ge(&to)).and(i.lt(&from)), &i + 1, i.clone()),
-            ),
+        text(
+            "if i == from { to } else if from < to and i > from and i <= to { i - 1 } else if to < from and i >= to and i < from { i + 1 } else { i }",
+            &[("i", &i), ("from", &from), ("to", &to)],
         )
     },
 };
@@ -653,7 +649,13 @@ pub static GROUP_LEVEL: Def2<Text, Text, Int> = Def2 {
 pub static SCALED: Def3<Int, Int, Int, Int> = Def3 {
     name: "listening.scaled",
     kind: Kind::Helper,
-    body: |volume, from, to| if_(from.eq(0), to.clone(), ((&volume * &to * 2 + &from) / (from.max(1) * 2)).clamp(0, 100)),
+    // Ark text: arithmetic reads as arithmetic.
+    body: |volume, from, to| {
+        text(
+            "if from == 0 { to } else { ((volume * to * 2 + from) / (from.max(1) * 2)).clamp(0, 100) }",
+            &[("volume", &volume), ("from", &from), ("to", &to)],
+        )
+    },
 };
 
 /// The group `leader` leads at the level `to`: every member with a volume

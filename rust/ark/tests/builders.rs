@@ -112,3 +112,39 @@ fn the_demo_built_is_the_demo() {
     assert_eq!(d.module, demo::module(&ark::module::Lib::default()));
     ark::module::verify(&d.module, &d.lib).unwrap();
 }
+
+static BY_HAND: Def1<Id<Playlist>, Vec<Item>> = Def1 {
+    name: "fragment.by_hand",
+    kind: Kind::Query,
+    body: |pid| Demo::db().item.filter(|i| i.f().playlist_id.eq(&pid)).sort(|i| desc(i.f().pos)),
+};
+
+static BY_TEXT: Def1<Id<Playlist>, Vec<Item>> = Def1 {
+    name: "fragment.by_text",
+    kind: Kind::Query,
+    body: |pid| text("item.filter(i => i.playlist_id == pid).sort(i => desc i.pos)", &[("pid", &pid)]),
+};
+
+/// `text` inside a builder: a fragment over the builder's variables and
+/// the module's tables is the IR the builders write. Falsified by sorting
+/// the fragment ascending: the bodies differed.
+#[test]
+fn a_fragment_is_what_the_builders_write() {
+    let d = assemble(Demo::schema(), &[&BY_HAND, &BY_TEXT]).unwrap();
+    let body = |n: &str| d.lib.get(&d.get(n)).unwrap().f.body.clone();
+    assert_eq!(body("fragment.by_hand"), body("fragment.by_text"));
+}
+
+static ADDS_TO_AN_ID: Def1<Id<Playlist>, Int> = Def1 {
+    name: "fragment.wrong",
+    kind: Kind::Helper,
+    body: |pid| text("pid + 1", &[("pid", &pid)]),
+};
+
+/// A fragment is checked where it is built, in the checker's words.
+/// Falsified by writing `pid == pid`, which checks: no panic, the test failed.
+#[test]
+#[should_panic(expected = "which is not Int")]
+fn a_fragment_that_does_not_check_is_refused() {
+    let _ = assemble(Demo::schema(), &[&ADDS_TO_AN_ID]);
+}
