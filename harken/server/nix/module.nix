@@ -174,14 +174,15 @@ in
     oldModules = lib.mkOption {
       type = lib.types.listOf lib.types.path;
       default = [ ];
-      example = lib.literalExpression ''[ "''${harken-previous}/harken.module" ]'';
+      example = lib.literalExpression ''[ "''${harken-previous}/harken/domain/harken.ark" ]'';
       description = ''
         Module files this server is to hold as ones it has run before
-        (`harken_server::hosted::write`): each one's function bodies kept, so
-        an intent a client built with it authors is sequenced at once
-        though this server never started with it. Without it such an intent
-        is still sequenced — the server asks the client for the body — but
-        only after a round trip. The server refuses to start holding a
+        (what `harken-domain` writes, `harken_server::hosted`): each one's
+        function bodies kept, so an intent a client built with it authors
+        is sequenced though this server never started with it. Without it
+        such an intent is held: no body crosses the wire, and the device
+        keeps it pending and pushes it again until a server runs that
+        function (`docs/plan-v5.md`, K2). The server refuses to start holding a
         module it may not follow: one whose schema this one's does not
         extend by appending (`docs/plan-v5.md` §1.2). Nothing is remembered
         across restarts: name every module still wanted here.
