@@ -22,13 +22,14 @@
 //! confirmed entry by its facts, checking the state hash the entry carries
 //! against its own: a difference is a divergence, healed from a snapshot.
 //!
-//! **The rebase.** A confirmed entry arriving under pending intents: undo
-//! the pending changes newest-first, apply the facts, re-run the intents
-//! still pending over the new store and record their new changes. When the
-//! entry is the oldest pending intent itself and its facts are what the
-//! preview did, nothing moves: its state is checked beside the rest by the
-//! digests' arithmetic ([`Store::hash_beside`]). A view is told every
-//! change made, rebases included, as `Output::Changes`.
+//! **The rebase.** Confirmed entries arriving under pending intents: undo
+//! the pending changes newest-first, apply each entry's facts and check
+//! its state, then re-run the intents still pending over the new store,
+//! once for the page, and record their new changes. When an entry is the
+//! oldest pending intent itself and its facts are what the preview did,
+//! nothing moves: its state is checked beside the rest by the digests'
+//! arithmetic ([`Store::hash_beside`]). A view is told every change made,
+//! rebases included, as `Output::Changes`.
 //!
 //! **The authority** judges each pushed intent once — dedupe by `(session,
 //! local)`, a gap in a session's pushes waits for them in order, an unknown
@@ -829,8 +830,13 @@ impl Peer {
         }
     }
 
-    /// Confirmed entries, applied by their facts.
+    /// Confirmed entries, applied by their facts: a page is one rebase.
+    /// The pending intents are undone at the first entry that is not the
+    /// oldest of them as previewed, every entry's facts are applied and
+    /// its state and chain checked, and the intents still pending run
+    /// again once, after the page.
     fn confirm(&mut self, ls: Vec<Logged>, o: &mut Out) {
+        let mut undone = false;
         for l in ls {
             let (n, prev) = self.log.head();
             if l.seq <= n {
@@ -838,16 +844,22 @@ impl Peer {
             }
             if l.seq > n + 1 || !l.links(&prev) {
                 // A gap, or another history: say where this peer stands.
+                if undone {
+                    self.redo_pending(o);
+                }
                 return self.ask(o);
             }
             let own = self.pending.first().is_some_and(|p| p.entry.id == l.entry.id);
-            if own && self.pending[0].changes == l.facts {
+            if !undone && own && self.pending[0].changes == l.facts {
                 if self.store.hash_beside(self.pending[1..].iter().flat_map(|p| &p.changes)) != l.state {
                     return self.diverge(l.seq, o);
                 }
                 self.pending.remove(0);
             } else {
-                self.undo_pending(o);
+                if !undone {
+                    self.undo_pending(o);
+                    undone = true;
+                }
                 if self.store.apply_all(&l.facts).is_err() || self.store.state_hash() != l.state {
                     self.redo_pending(o);
                     return self.diverge(l.seq, o);
@@ -856,7 +868,6 @@ impl Peer {
                 if let Some(i) = self.pending.iter().position(|p| p.entry.id == l.entry.id) {
                     self.pending.remove(i);
                 }
-                self.redo_pending(o);
             }
             if l.entry.session == self.me.session {
                 o.out.push(Output::Confirmed(l.entry.id));
@@ -864,6 +875,9 @@ impl Peer {
             self.asked = None;
             o.persist(Record::Logged(l.clone()));
             self.log.push(l).expect("it links");
+        }
+        if undone {
+            self.redo_pending(o);
         }
     }
 

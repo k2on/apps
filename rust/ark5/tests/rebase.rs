@@ -9,11 +9,14 @@ mod support {
     pub mod wire;
 }
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+
 use ark5::frames::Frame;
 use ark5::hash::EntryHash;
 use ark5::log::{Durable, EntryId, Logged};
-use ark5::peer::{Cas, Input, Output, Peer};
-use ark5::store::Change;
+use ark5::peer::{Cas, Ctx, Input, Output, Peer, Procedure};
+use ark5::store::{Change, Read};
 use demo::{create_input, pair_input, pos_of, ADD, CREATE, REMOVE, RENAME};
 use support::wire::*;
 
@@ -384,4 +387,64 @@ fn a_sessions_pushes_are_judged_in_order() {
     assert!(matches!(s[..], [Frame::Ack { seq: 2, .. }]), "{s:?}");
     alice.step(down(&f[0]));
     assert!(alice.pending.is_empty() && alice.store == server.store);
+}
+
+/// A procedure that counts its runs.
+struct Counted(Arc<dyn Procedure>, Arc<AtomicUsize>);
+
+impl Procedure for Counted {
+    fn run(&self, store: &dyn Read, ctx: &Ctx, input: &[u8]) -> Result<Vec<Change>, ark5::Refusal> {
+        self.1.fetch_add(1, Ordering::Relaxed);
+        self.0.run(store, ctx, input)
+    }
+}
+
+/// A page is one rebase: bob's N = 4 entries land on alice in one `Batch`
+/// under her K = 3 pending intents, and her intents run K times — not K
+/// for every entry — while every entry's state is still checked (one with
+/// a wrong state diverges at its own seq) and she is told her changes
+/// undone once, bob's facts, and hers again: 3 + 4 + 3. Her tracks land
+/// after bob's, the confirmed state is bob's. Falsified by undoing and
+/// running the pending intents again per entry, as before: 12 runs.
+#[test]
+fn a_page_rebases_once() {
+    let runs = Arc::new(AtomicUsize::new(0));
+    let mut cas = demo::cas();
+    for n in [CREATE, ADD] {
+        let p = cas.get(&demo::h(n)).unwrap().clone();
+        cas.insert(demo::h(n), Arc::new(Counted(p, runs.clone())));
+    }
+    let (mut server, mut alice, mut bob) = (authority(demo::cas()), replica("alice", cas), replica("bob", demo::cas()));
+    let o = alice.step(mutate(CREATE, create_input("Favorites"), 1));
+    let (_, f) = deliver_up(&mut server, &who("alice"), &o);
+    for p in [&mut alice, &mut bob] {
+        p.step(down(&f[0]));
+    }
+    for t in ["a1", "a2", "a3"] {
+        alice.step(mutate(ADD, pair_input(&pid(), t), 2));
+    }
+    let mut page = vec![];
+    for t in ["b1", "b2", "b3", "b4"] {
+        let (_, f) = deliver_up(&mut server, &who("bob"), &bob.step(mutate(ADD, pair_input(&pid(), t), 3)));
+        bob.step(down(&f[0]));
+        page.push(logged(&f[0]));
+    }
+    let batch = |logged: Vec<Logged>| Frame::Batch {
+        space: ark5::schema::Space::Durable,
+        from: 1,
+        logged,
+    };
+    let mut wrong = alice.clone();
+    runs.store(0, Ordering::Relaxed);
+    let o = alice.step(down(&batch(page.clone())));
+    assert_eq!(runs.load(Ordering::Relaxed), 3, "the pending intents ran once for the page");
+    assert_eq!(changes(&o).len(), 3 + 4 + 3);
+    assert_eq!((alice.pending.len(), alice.confirmed_hash()), (3, bob.confirmed_hash()));
+    assert_eq!(pos_of(&alice.store, &pid(), "a1"), Some(5), "hers after bob's four");
+    let mut l3 = page[2].clone();
+    l3.state = page[1].state;
+    l3.hash = Logged::chain(&page[1].hash, l3.seq, &l3.entry, &l3.facts, &l3.state);
+    page[2] = l3;
+    wrong.step(down(&batch(page)));
+    assert_eq!(wrong.diverged, vec![4], "the third entry's state is checked");
 }
