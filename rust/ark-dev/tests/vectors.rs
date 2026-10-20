@@ -1,4 +1,4 @@
-//! `spec/vectors/{protocol,trace,rebase}/`, written by the vector writer
+//! `spec/vectors/{protocol,trace,rebase,text}/`, written by the vector writer
 //! (`ark_dev::vectors`) and run as `spec/RUNNERS.md` says: each must be
 //! what the writer writes now, nothing else may sit beside them, each
 //! passes its runner, and each `falsify/` one fails it.
@@ -7,11 +7,13 @@ use std::collections::BTreeSet;
 
 use ark::codec::Reader;
 use ark::frames::{frame_ty, Frame, Verdict};
-use ark::hash::{hex, EntryHash, FnHash, StateHash};
+use ark::hash::{hex, unhex, EntryHash, FnHash, StateHash};
+use ark::ir::{Function, Node};
 use ark::log::EntryId;
 use ark::peer::{Input, Output};
 use ark::schema::Space;
 use ark_client::Act;
+use ark_dev::demo::{domain, room};
 use ark_dev::fuzz::session;
 use ark_dev::trace::{record, replay};
 use ark_dev::vectors::{bytes_of, fleet, fleet_script, json_of, on_disk, op_json, sessions, vector};
@@ -242,5 +244,62 @@ fn rebase() {
             net.hub.log.log().head().0 == v["head"] && h.hex() == v["hash"]
         };
         assert_eq!(ok, v["expect"] != "fail", "{n}");
+    }
+}
+
+/// The text runner: `ark` built is the module file `module` (hex) whose
+/// hash is `hash`, and that module printed is `ark` again.
+fn run_text(v: &Value, ark: &str) -> Result<(), String> {
+    let d = ark::sexp::build(ark).map_err(|r| r.0)?;
+    let file = (d.module.clone(), d.bodies.values().cloned().collect::<Vec<_>>()).to_bytes();
+    let fns: Vec<Function> = d.bodies.values().map(|b| Function::from_bytes(b).unwrap()).collect();
+    let printed = ark::sexp::print(&d.module, &fns).map_err(|r| r.0)?;
+    let same = Some(file) == v["module"].as_str().and_then(unhex) && d.module.hash().to_string() == v["hash"] && printed == ark;
+    same.then_some(()).ok_or("the text is not the module".into())
+}
+
+/// `text/`: the demo (`ark_dev::demo::domain`, written with the builders)
+/// as ArkLang, `rust/ark-dev/src/demo.ark`: printed from the builders'
+/// module it is that file, and built it is that module byte for byte;
+/// beside it, its module file and hash. The room, printed, builds to
+/// itself. The falsified one, a position stepped by two, does not pass.
+/// Falsified by printing a sort's `desc` as `asc`: `demo.ark` was not the
+/// demo printed, and built it was another `demo.items`.
+#[test]
+fn text() {
+    let src = include_str!("../src/demo.ark");
+    for d in [domain(), room()] {
+        let fns: Vec<Function> = d.bodies.values().map(|b| Function::from_bytes(b).unwrap()).collect();
+        let printed = ark::sexp::print(&d.module, &fns).unwrap();
+        let built = ark::sexp::build(&printed).unwrap_or_else(|r| panic!("{r}\n{printed}"));
+        assert_eq!((&built.module, &built.bodies), (&d.module, &d.bodies), "{printed}");
+        if d.module.schema.tables[0].name == "playlist" {
+            assert_eq!(printed, src, "rust/ark-dev/src/demo.ark is not the demo printed");
+        }
+    }
+    let d = domain();
+    let file = (d.module.clone(), d.bodies.values().cloned().collect::<Vec<_>>()).to_bytes();
+    let v = json!({"ark": "demo.ark", "hash": d.module.hash().to_string(), "module": hex(&file)});
+    run_text(&v, src).unwrap();
+    vector("text", "demo.ark", src).unwrap();
+    vector("text", "demo.json", &format!("{v:#}\n")).unwrap();
+    only("text", &BTreeSet::from(["demo.json".to_string()]));
+    let wrong = src.replacen("i.pos)) 1)", "i.pos)) 2)", 1);
+    assert_ne!(wrong, src, "the falsified text is the text");
+    let mut f = v.clone();
+    f["expect"] = json!("fail");
+    vector("text/falsify", "demo.ark", &wrong).unwrap();
+    vector("text/falsify", "demo.json", &format!("{f:#}\n")).unwrap();
+    for (d, pass) in [("text", true), ("text/falsify", false)] {
+        for (n, text) in on_disk(d) {
+            let v: Value = serde_json::from_str(&text).unwrap();
+            let ark = std::fs::read_to_string(format!(
+                "{}/../../spec/vectors/{d}/{}",
+                env!("CARGO_MANIFEST_DIR"),
+                v["ark"].as_str().unwrap()
+            ))
+            .unwrap();
+            assert_eq!(run_text(&v, &ark).is_ok(), pass, "{d}/{n}");
+        }
     }
 }

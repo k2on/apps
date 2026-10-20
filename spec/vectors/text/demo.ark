@@ -1,0 +1,67 @@
+(schema
+  (table playlist (id (id playlist) key) (name Text) (user_id Text) (index unique user_id name))
+  (table
+    item
+    (playlist_id (id playlist) key (refs playlist))
+    (track_id Text key)
+    (pos Int)
+    (index unique playlist_id pos)))
+
+(type DemoRow (sum (Playlist (playlist (row playlist))) (Item (item (row item)))))
+
+(type Name (where Text (trim) (non-empty) "a playlist needs a name"))
+
+(type TrackId (where Text (len 1 ..)))
+
+(mutator
+  demo.add_to_playlist
+  ((playlist_id (id playlist)) (track_id TrackId))
+  (if
+    (some? (get playlist playlist_id))
+    (if
+      (some? (get item playlist_id track_id))
+      ()
+      (let
+        ((x
+           (first
+             (take
+               (sort (filter item (fn (i) (== i.playlist_id playlist_id))) (fn (i) (desc i.pos)))
+               1))))
+        (insert
+          item
+          (record
+            (playlist_id playlist_id)
+            (track_id track_id)
+            (pos (+ (match x (none () 0) (some (i) i.pos)) 1))))))
+    (refuse "playlist_id: no such playlist")))
+
+(mutator
+  demo.create_playlist
+  ((name Name))
+  (if
+    (== (len (filter playlist (fn (p) (and (== p.user_id ctx.user) (== p.name name))))) 0)
+    (insert playlist (record (id (new-id playlist)) (name name) (user_id ctx.user)))))
+
+(query
+  demo.items
+  ((playlist_id (id playlist)))
+  (list (row item))
+  (sort (filter item (fn (i) (== i.playlist_id playlist_id))) (fn (i) i.pos)))
+
+(mutator
+  demo.remove_from_playlist
+  ((playlist_id (id playlist)) (text Text))
+  (delete item playlist_id text))
+
+(mutator
+  demo.rename_playlist
+  ((playlist_id (id playlist)) (name Name))
+  (if
+    (some? (get playlist playlist_id))
+    (update playlist playlist_id (fn (p) (record (id p.id) (name name) (user_id p.user_id))))
+    (refuse "no such playlist")))
+
+(scope
+  demo.top_two
+  ((demo_row DemoRow))
+  (match demo_row (Playlist (playlist2) true) (Item (item2) (<= item2.pos 2))))

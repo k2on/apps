@@ -524,10 +524,12 @@ pub static MOVED_TO: Def4<Active, Int, Text, Int, Session> = Def4 {
 pub static MOVED_PLACE: Def3<Int, Int, Int, Int> = Def3 {
     name: "listening.moved_place",
     kind: Kind::Helper,
-    // Ark text: an `else if` chain reads plainer than nested `if_`s.
+    // ArkLang: the three cases read plainer than nested `if_`s.
     body: |i, from, to| {
         text(
-            "if i == from { to } else if from < to and i > from and i <= to { i - 1 } else if to < from and i >= to and i < from { i + 1 } else { i }",
+            "(if (== i from) to
+               (if (and (and (< from to) (> i from)) (<= i to)) (- i 1)
+                 (if (and (and (< to from) (>= i to)) (< i from)) (+ i 1) i)))",
             &[("i", &i), ("from", &from), ("to", &to)],
         )
     },
@@ -649,10 +651,10 @@ pub static GROUP_LEVEL: Def2<Text, Text, Int> = Def2 {
 pub static SCALED: Def3<Int, Int, Int, Int> = Def3 {
     name: "listening.scaled",
     kind: Kind::Helper,
-    // Ark text: arithmetic reads as arithmetic.
+    // ArkLang: the arithmetic in one form.
     body: |volume, from, to| {
         text(
-            "if from == 0 { to } else { ((volume * to * 2 + from) / (from.max(1) * 2)).clamp(0, 100) }",
+            "(if (== from 0) to (clamp (/ (+ (* (* volume to) 2) from) (* (max from 1) 2)) 0 100))",
             &[("volume", &volume), ("from", &from), ("to", &to)],
         )
     },

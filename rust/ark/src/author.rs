@@ -18,7 +18,7 @@
 //! **Binders are closures** — `let_(v, |x| …)`, [`block`]'s `let_`,
 //! `xs.filter(|x| …)`, a match arm — and a variable is its level,
 //! `Var(MARK + level)`, until the function is built and
-//! [`crate::text::close`] turns levels into De Bruijn indices; an arm is
+//! [`close`] turns levels into De Bruijn indices; an arm is
 //! built as a `Lambda` of its fields. So a body written as the attribute
 //! macros' Rust was is their IR, byte for byte.
 //!
@@ -27,7 +27,8 @@
 //! declared types. It is built once, in a context gathering the
 //! declarations it names — its parameters', its result's, its literals',
 //! its fresh ids', its callees' — which are its `types` (§1.5); calling it
-//! names it by hash. [`text`] embeds Ark text where Rust would be awkward.
+//! names it by hash. [`text`] embeds ArkLang (`crate::sexp`) where Rust
+//! would be awkward.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -47,7 +48,6 @@ use crate::module::{Lib, Module, SPEC};
 use crate::peer::Cas;
 use crate::schema::{Schema, Space};
 use crate::store::Dir;
-use crate::text::{close, MARK};
 use crate::ty::Ty;
 use crate::Refusal;
 
@@ -256,6 +256,73 @@ pub fn within(lo: i64, hi: i64) -> Rule {
 /// A refinement of an `Int`: the value `o` the bound.
 pub fn bound(o: Op, n: i64) -> Rule {
     Rule::Refine(Expr::Op(o, Box::new(Expr::Var(0)), Box::new(int(n).e)))
+}
+
+// * Levels, closed
+
+/// A variable at a level, before [`close`].
+pub const MARK: u32 = 1 << 31;
+
+pub(crate) fn bx(e: Expr) -> Box<Expr> {
+    Box::new(e)
+}
+
+/// `e` with each expression directly under it through `f`, told how
+/// many binders `e` puts it under.
+pub fn kids(e: Expr, f: &mut dyn FnMut(Expr, u32) -> Expr) -> Expr {
+    use Expr::*;
+    let mut b = |x: Box<Expr>, n: u32| bx(f(*x, n));
+    match e {
+        Let(v, x) => Let(b(v, 0), b(x, 1)),
+        Lambda(n, x) => Lambda(n, b(x, n)),
+        Field(a, i) => Field(b(a, 0), i),
+        Op(o, x, y) => Op(o, b(x, 0), b(y, 0)),
+        Un(o, a) => Un(o, b(a, 0)),
+        Lookup(t, k) => Lookup(t, b(k, 0)),
+        Filter(x, y) => Filter(b(x, 0), b(y, 0)),
+        Map(x, y) => Map(b(x, 0), b(y, 0)),
+        Sort(x, y, ds) => Sort(b(x, 0), b(y, 0), ds),
+        Take(x, y) => Take(b(x, 0), b(y, 0)),
+        Insert(t, a) => Insert(t, b(a, 0)),
+        Update(t, x, y) => Update(t, b(x, 0), b(y, 0)),
+        Delete(t, a) => Delete(t, b(a, 0)),
+        Refuse(a) => Refuse(b(a, 0)),
+        If(x, y, z) => If(b(x, 0), b(y, 0), b(z, 0)),
+        Join(x, y, z) => Join(b(x, 0), b(y, 0), b(z, 0)),
+        Group(x, y, z) => Group(b(x, 0), b(y, 0), b(z, 0)),
+        Match(x, es) => Match(b(x, 0), es.into_iter().map(|e| f(e, 0)).collect()),
+        Tuple(es) => Tuple(es.into_iter().map(|e| f(e, 0)).collect()),
+        Variant(t, i, es) => Variant(t, i, es.into_iter().map(|e| f(e, 0)).collect()),
+        List(t, es) => List(t, es.into_iter().map(|e| f(e, 0)).collect()),
+        Std(g, es) => Std(g, es.into_iter().map(|e| f(e, 0)).collect()),
+        Call(h, es) => Call(h, es.into_iter().map(|e| f(e, 0)).collect()),
+        Seq(es) => Seq(es.into_iter().map(|e| f(e, 0)).collect()),
+        e => e,
+    }
+}
+
+/// Levels to De Bruijn indices at `d` binders, and every match arm built
+/// as a `Lambda` of its fields back to its body.
+pub fn close(e: Expr, d: u32) -> Expr {
+    match e {
+        Expr::Var(v) if v >= MARK => Expr::Var(d.checked_sub(v - MARK + 1).expect("a variable used outside its binder")),
+        Expr::Match(s, arms) => {
+            let arm = |a| match a {
+                Expr::Lambda(k, b) => close(*b, d + k),
+                a => close(a, d),
+            };
+            Expr::Match(bx(close(*s, d)), arms.into_iter().map(arm).collect())
+        }
+        e => kids(e, &mut |x, n| close(x, d + n)),
+    }
+}
+
+/// Every variable at a level through `f`.
+pub fn levels(e: Expr, f: &dyn Fn(u32) -> Expr) -> Expr {
+    match e {
+        Expr::Var(v) if v >= MARK => f(v - MARK),
+        e => kids(e, &mut |x, _| levels(x, f)),
+    }
 }
 
 // * Expressions
@@ -1036,9 +1103,9 @@ impl<T: Shape> Var for Ex<T> {
     }
 }
 
-/// An Ark text expression (§1.15) inside a builder: `vars` its free
-/// names, the tables those of the module being assembled. Type-checked
-/// here, as `T`; refused with the text's words otherwise.
+/// One ArkLang form (§1.15, [`crate::sexp`]) inside a builder: `vars`
+/// its free names, the tables those of the module being assembled.
+/// Type-checked here, as `T`; refused with the checker's words otherwise.
 pub fn text<T: Shape>(src: &str, vars: &[(&str, &dyn Var)]) -> Ex<T> {
     let schema = SCHEMA.with(|s| s.borrow().clone()).unwrap_or_default();
     let decls: Vec<_> = with(|cx| cx.decls.clone().into_iter().collect());
@@ -1050,7 +1117,7 @@ pub fn text<T: Shape>(src: &str, vars: &[(&str, &dyn Var)]) -> Ex<T> {
         })
         .collect();
     let depth = with(|cx| cx.depth);
-    let (e, t, more) = crate::text::fragment(src, &schema, &decls, &vs, depth).unwrap_or_else(|r| panic!("text({src:?}): {r}"));
+    let (e, t, more) = crate::sexp::fragment(src, &schema, &decls, &vs, depth).unwrap_or_else(|r| panic!("text({src:?}): {r}"));
     with(|cx| cx.decls.extend(more));
     let types = Types::new(&with(|cx| cx.decls.clone().into_iter().collect::<Vec<_>>()));
     assert!(

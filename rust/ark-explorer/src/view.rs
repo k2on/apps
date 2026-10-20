@@ -274,7 +274,10 @@ impl Explorer {
             said.style(if failed { style::accent } else { style::dim }),
         ];
         let form = container(scrollable(lines).style(style::bars)).max_height(300.0);
-        let mut out = column![title, form, run.spacing(10).align_y(Alignment::Center)].spacing(8);
+        // The function as ArkLang, the common text form (§1.15).
+        let source = ark::sexp::print_function(src.module, src.lib, name).unwrap_or_else(|r| r.0);
+        let source = container(scrollable(text(source).size(12).font(iced::Font::MONOSPACE).style(style::dim))).max_height(160.0);
+        let mut out = column![title, source, form, run.spacing(10).align_y(Alignment::Center)].spacing(8);
         if let Some(g) = self.answer_grid() {
             let (r, c) = self.answer_at;
             let detail = g.detail(r, c);

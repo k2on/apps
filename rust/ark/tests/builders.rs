@@ -122,7 +122,12 @@ static BY_HAND: Def1<Id<Playlist>, Vec<Item>> = Def1 {
 static BY_TEXT: Def1<Id<Playlist>, Vec<Item>> = Def1 {
     name: "fragment.by_text",
     kind: Kind::Query,
-    body: |pid| text("item.filter(i => i.playlist_id == pid).sort(i => desc i.pos)", &[("pid", &pid)]),
+    body: |pid| {
+        text(
+            "(sort (filter item (fn (i) (== i.playlist_id pid))) (fn (i) (desc i.pos)))",
+            &[("pid", &pid)],
+        )
+    },
 };
 
 /// `text` inside a builder: a fragment over the builder's variables and
@@ -138,11 +143,11 @@ fn a_fragment_is_what_the_builders_write() {
 static ADDS_TO_AN_ID: Def1<Id<Playlist>, Int> = Def1 {
     name: "fragment.wrong",
     kind: Kind::Helper,
-    body: |pid| text("pid + 1", &[("pid", &pid)]),
+    body: |pid| text("(+ pid 1)", &[("pid", &pid)]),
 };
 
 /// A fragment is checked where it is built, in the checker's words.
-/// Falsified by writing `pid == pid`, which checks: no panic, the test failed.
+/// Falsified by writing `(== pid pid)`, which checks: no panic, the test failed.
 #[test]
 #[should_panic(expected = "which is not Int")]
 fn a_fragment_that_does_not_check_is_refused() {
