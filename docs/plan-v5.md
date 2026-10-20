@@ -623,8 +623,9 @@ numbers. Nothing else.
 After M1's numbers are in and the coordinator has decided: `rust/ark5*`
 becomes `rust/ark*`, `spec5` becomes `spec`, v4's crates and vectors are
 deleted, the flake and the READMEs are updated, `kotlin/FROZEN.md` and
-`swift/FROZEN.md` say what a port now carries. Not started in this plan;
-a later document.
+`swift/FROZEN.md` say what a port now carries.
+
+**Landed** (`8bda5c3`…): see R1 under Landed.
 
 ---
 
@@ -754,6 +755,40 @@ and re-runs the pending once, 48.8 µs/entry under 400 against v4's 64.6 (was
 linked round trip 182.2 µs (was 5,520.1; v4 215.1). Source +186 lines.
 
 ## Landed
+
+**R1** (`8bda5c3`…): v5 has the canonical names and v4 is gone.
+`rust/ark5*` → `rust/ark`, `ark-macros`, `ark-client`, `ark-server`,
+`ark-dev`; `harken/domain5` → `harken/domain` (crate `harken-domain`);
+`spec5` → `spec`; v4's `rust/ark`, `ark-client`, `ark-server`,
+`harken/domain` and `spec` deleted. The attribute macros and `Domain` are
+re-exported at `ark`'s root, since `use ark::author::{self as ark}` would
+now name itself. The join test that timed out in debug is a debug-build
+timing: in release, alternating, start-with-server to converged took
+11.8/10.6/11.3 s before K2 (`0179f02`) and 9.5/10.0/10.2 s after, so K2
+did not slow it (0.88×); a debug build waits ten times `PATIENCE`
+(about 99 s needed). One kernel-adjacent fault found by the renamed
+suite: the server's process exited while the hub's thread was writing
+the volatile space, leaving `log/live.tmp`
+(`a_server_stopped_mid_stream_loses_nothing` failed every run);
+`Running::stop` now waits for `Handle::stop`. `harken-domain` writes the module file `HARKEN_MODULE`
+reads, `(Module, [body])`, as `harken.ark`, committed again; `ark-dev`
+gains `arkc` (`verify`, `compat`), `ark-fuzz … traces DIR` writes a
+corpus and `tests/vectors.rs::trace_corpus` replays `ARK_TRACE_CORPUS`;
+the vectors written over an empty `spec/vectors` are the tree byte for
+byte. The flake: `ark` (with `arkc`, `ark-fuzz`), `vectors` (the
+writer's output), `fuzz`, `trace-corpus`, `harken-domain`, the harken
+packages and `ark-admin`; checks `rust`, `vectors`, `traces`,
+`fuzz-smoke`, `versions`, `harken-domain`, `harken-module`; Kotlin's,
+Swift's and the phone's outputs removed (`kotlin/FROZEN.md`,
+`swift/FROZEN.md`: frozen at v4, last recorded green `a983b3c`); the CI
+change is `docs/build-workflow-v5.patch`, to be applied by hand. The
+flake's toolchain (1.98) found one lint 1.97 does not
+(`result_large_err` in `ark-server::admin`), fixed. Sizes after
+(`docs/perf/loc-r1.txt`): `ark` 7,790 source (5,447 less the Unicode
+tables), `ark-macros` 1,236, `ark-client` 793, `ark-server` 1,031,
+`ark-dev` 1,462 + 86 bin, `harken/domain` 2,583; 36,388 source,
+3,492 bin and 21,126 test lines across every crate. Not verified: the
+browser build drawn on v5; the CI workflow as patched; the phones (frozen).
 
 **K2** (`3062a3c`…): four rules, each a witness flipped and a kernel test.
 **No body crosses the wire**: an authority runs exactly the functions of
