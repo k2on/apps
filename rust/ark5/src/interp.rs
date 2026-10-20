@@ -21,12 +21,13 @@
 
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
+use std::ops::Bound;
 use std::sync::Arc;
 
 use crate::check::Types;
 use crate::codec::{put_bytes, put_int, Reader, Typed};
 use crate::hash::FnHash;
-use crate::ir::{CtxField, Decl, Expr, Function, Op, Rule, Un};
+use crate::ir::{CtxField, Decl, Expr, Function, Op, Rule, Std, Un};
 use crate::peer::{Ctx, Procedure};
 use crate::store::{Change, Dir, Read, Scan};
 use crate::ty::Ty;
@@ -372,6 +373,14 @@ impl<'a> Machine<'a> {
                 return Ok(V::List(xs));
             }
         }
+        // `first` of a routed list reads one row of it.
+        if let Expr::Std(Std::First, es) = e {
+            if let [l @ (Expr::Filter(..) | Expr::Sort(..))] = &es[..] {
+                if let Some(xs) = self.route(l, 1)? {
+                    return Ok(xs.into_iter().next().map_or(V::none(), V::some));
+                }
+            }
+        }
         let unit = V::Tup(vec![]);
         Ok(match e {
             Expr::Lit(t, b) => decode(self.cx, t, b)?,
@@ -633,57 +642,110 @@ fn column(e: &Expr) -> Option<usize> {
     }
 }
 
+/// The comparison `e op row.c` as the row sees it: `row.c flip(op) e`.
+fn flip(o: Op) -> Op {
+    match o {
+        Op::Lt => Op::Gt,
+        Op::Le => Op::Ge,
+        Op::Gt => Op::Lt,
+        Op::Ge => Op::Le,
+        o => o,
+    }
+}
+
+/// The least bytes past every string `p` leads, if any.
+fn after(p: &[u8]) -> Option<Vec<u8>> {
+    match Scan::prefix(None, p, Dir::Asc, 0).hi {
+        Bound::Excluded(h) => Some(h),
+        _ => None,
+    }
+}
+
+/// A read through the key or an index, as `route` chose it.
+struct Path {
+    lead: usize,
+    ranged: bool,
+    index: Option<usize>,
+    cols: Vec<usize>,
+    lo: Vec<u8>,
+    hi: Option<Vec<u8>>,
+    dir: Dir,
+    sorted: bool,
+    /// The sorted columns, when the path gives them descending but ties
+    /// by the key descending too, where the stable sort keeps key order.
+    ties: Option<Vec<usize>>,
+}
+
 impl<'a> Machine<'a> {
-    /// A filter's conjuncts `row.c == e`, `e` not of the row and safe to
-    /// evaluate once, as `(c, bytes of e)`; and whether any conjunct is
-    /// something else. One that refuses is left to the filter, which
-    /// refuses only when a row asks it.
-    fn equalities(&mut self, lam: &Expr) -> (Vec<(usize, Vec<u8>)>, bool) {
-        let Expr::Lambda(1, body) = lam else { return (vec![], true) };
-        let (mut todo, mut eqs, mut rest) = (vec![&**body], vec![], false);
+    /// A filter's conjuncts `row.c == e`, and `row.c < e` (`<=`, `>`,
+    /// `>=`), `e` not of the row and safe to evaluate once, as `(c, bytes
+    /// of e)` and `(c, op, bytes of e)`; and whether any conjunct is other
+    /// than an equality (a bound is one: the filter still checks it). One
+    /// that refuses is left to the filter, which refuses only when a row
+    /// asks it.
+    #[allow(clippy::type_complexity)]
+    fn conjuncts(&mut self, lam: &Expr) -> (Vec<(usize, Vec<u8>)>, Vec<(usize, Op, Vec<u8>)>, bool) {
+        let Expr::Lambda(1, body) = lam else { return (vec![], vec![], true) };
+        let (mut todo, mut eqs, mut bounds, mut rest) = (vec![&**body], vec![], vec![], false);
         while let Some(c) = todo.pop() {
-            let eq = match c {
+            let found = match c {
                 Expr::Op(Op::And, a, b) => {
                     todo.extend([&**b, &**a]);
                     continue;
                 }
-                Expr::Op(Op::Eq, a, b) => [(a, b), (b, a)].into_iter().find_map(|(a, b)| {
-                    let ok = !effectful(b) && free(b).iter().all(|v| v.is_some_and(|v| v > 0));
-                    column(a).filter(|_| ok).map(|c| (c, &**b))
-                }),
+                Expr::Op(o @ (Op::Eq | Op::Lt | Op::Le | Op::Gt | Op::Ge), a, b) => {
+                    [(a, b, *o), (b, a, flip(*o))].into_iter().find_map(|(a, b, o)| {
+                        let ok = !effectful(b) && free(b).iter().all(|v| v.is_some_and(|v| v > 0));
+                        column(a).filter(|_| ok).map(|c| (c, o, &**b))
+                    })
+                }
                 _ => None,
             };
-            let Some((col, x)) = eq.filter(|(c, _)| !eqs.iter().any(|(d, _)| d == c)) else {
+            let fresh = |(c, o, _): &(usize, Op, &Expr)| *o != Op::Eq || !eqs.iter().any(|(d, _)| d == c);
+            let Some((col, o, x)) = found.filter(fresh) else {
                 rest = true;
                 continue;
             };
+            rest |= o != Op::Eq;
             self.stack.push(V::Tup(vec![]));
             let v = self.eval(x);
             self.stack.pop();
-            match v {
-                Ok(v) => eqs.push((col, v.to_bytes())),
-                Err(_) => rest = true,
+            match (v, o) {
+                (Ok(v), Op::Eq) => eqs.push((col, v.to_bytes())),
+                (Ok(v), o) => bounds.push((col, o, v.to_bytes())),
+                (Err(_), _) => rest = true,
             }
         }
-        (eqs, rest)
+        (eqs, bounds, rest)
     }
 
-    /// `Filter(Scan t)`, `Scan t`, a `Sort` of one by its columns, or a
-    /// `Take` of a literal of those, read through the key or an index:
-    /// the longest run of the filter's equalities that leads one, in the
-    /// sort's order when that path gives exactly the stable sort's (ties
-    /// impossible past the sorted columns, or broken by the key as the
-    /// stable sort breaks them), a `Take`'s count pushed to the store when
-    /// the equalities are the whole filter. `None` when nothing serves, or
-    /// this run wrote the table, which it reads through its own changes.
+    /// A `Take` of a literal count, or else the list whole, routed.
     fn routed(&mut self, e: &Expr) -> Result<Option<Vec<V>>, Refusal> {
-        let (e, limit) = match e {
+        match e {
             Expr::Take(l, n) => match &**n {
-                Expr::Lit(Ty::Int, b) => (&**l, decode(self.cx, &Ty::Int, b)?.int().max(0) as usize),
-                _ => return Ok(None),
+                Expr::Lit(Ty::Int, b) => {
+                    let n = decode(self.cx, &Ty::Int, b)?.int().max(0) as usize;
+                    self.route(l, n)
+                }
+                _ => Ok(None),
             },
-            e => (e, usize::MAX),
-        };
+            e => self.route(e, usize::MAX),
+        }
+    }
+
+    /// The first `limit` of `Filter(Scan t)`, `Scan t`, or a `Sort` of one
+    /// by its columns, read through the key or an index: the longest run
+    /// of the filter's equalities that leads one, then its bounds on the
+    /// next column as the range read; in the sort's order when that path
+    /// gives the stable sort's (ties impossible past the sorted columns,
+    /// or broken by the key as the stable sort breaks them — or, read
+    /// descending, broken by the key backwards, which is put right and,
+    /// when the read stopped inside a run of ties, finished by reading
+    /// the rest of that run). The count goes to the store when the
+    /// equalities lead the path and are the whole filter. `None` when
+    /// nothing serves, or this run wrote the table, which it reads through
+    /// its own changes.
+    fn route(&mut self, e: &Expr, limit: usize) -> Result<Option<Vec<V>>, Refusal> {
         let (src, sort) = match e {
             Expr::Sort(l, k, dirs) => (&**l, Some((&**k, dirs))),
             e => (e, None),
@@ -699,7 +761,7 @@ impl<'a> Machine<'a> {
         if self.store.is_none() || self.changes.iter().any(|c| c.table() == table) {
             return Ok(None);
         }
-        let (eqs, rest) = lam.map_or((vec![], false), |p| self.equalities(p));
+        let (eqs, bounds, rest) = lam.map_or((vec![], vec![], false), |p| self.conjuncts(p));
         let order: Option<Vec<(usize, Dir)>> = match sort {
             None => None,
             Some((Expr::Lambda(1, k), dirs)) => {
@@ -719,48 +781,99 @@ impl<'a> Machine<'a> {
         let fixed = |c: &usize| eqs.iter().any(|(d, _)| d == c);
         let key: Vec<usize> = (0..tab.key).collect();
         let loose: Vec<usize> = key.iter().copied().filter(|c| !fixed(c)).collect();
-        let mut paths = vec![(None, key.clone(), tab.key)];
+        // Each path: the index, its columns then the key's, how many lead
+        // a unique one, how many are the index's own.
+        let mut paths = vec![(None, key.clone(), tab.key, 0)];
         for (i, ix) in tab.indexes.iter().enumerate() {
             let n = if ix.unique { ix.columns.len() } else { usize::MAX };
-            paths.push((Some(i), [&ix.columns[..], &key[..]].concat(), n));
+            paths.push((Some(i), [&ix.columns[..], &key[..]].concat(), n, ix.columns.len()));
         }
         let uniques: Vec<Vec<usize>> = paths.iter().filter(|p| p.2 != usize::MAX).map(|p| p.1[..p.2].to_vec()).collect();
-        // The lead, the index, the prefix, the direction, whether in order.
-        type Path = (usize, Option<usize>, Vec<u8>, Dir, bool);
         let mut best: Option<Path> = None;
-        for (index, cols, _) in &paths {
+        for (index, cols, _, width) in &paths {
             let lead = cols.iter().take_while(|c| fixed(c)).count();
             let rest_cols: Vec<usize> = cols[lead..].iter().copied().filter(|c| !fixed(c)).collect();
-            let (dir, sorted) = match &order {
-                None => (Dir::Asc, index.is_none()),
+            let (dir, sorted, ties) = match &order {
+                None => (Dir::Asc, index.is_none() || lead >= *width, None),
                 Some(o) => {
                     let o: Vec<(usize, Dir)> = o.iter().copied().filter(|(c, _)| !fixed(c)).collect();
                     let unique = |n: usize| uniques.iter().any(|u| u.iter().all(|c| fixed(c) || o[..n].iter().any(|(d, _)| d == c)));
                     let n = (0..=o.len()).find(|n| unique(*n)).unwrap_or(o.len());
                     let dir = o.first().map_or(Dir::Asc, |x| x.1);
-                    let served = o[..n].iter().all(|x| x.1 == dir)
-                        && rest_cols.starts_with(&o[..n].iter().map(|x| x.0).collect::<Vec<_>>())
-                        && (unique(n) || (dir == Dir::Asc && rest_cols[n..].starts_with(&loose)));
-                    if !served {
+                    let sorted_cols: Vec<usize> = o[..n].iter().map(|x| x.0).collect();
+                    if !(o[..n].iter().all(|x| x.1 == dir) && rest_cols.starts_with(&sorted_cols)) {
                         continue;
                     }
-                    (dir, true)
+                    let keyed = rest_cols[n..].starts_with(&loose);
+                    match (unique(n), dir, keyed) {
+                        (true, ..) | (false, Dir::Asc, true) => (dir, true, None),
+                        (false, Dir::Desc, true) => (dir, true, Some(sorted_cols)),
+                        _ => continue,
+                    }
                 }
             };
-            if lead == 0 && order.is_none() || best.as_ref().is_some_and(|b| b.0 >= lead) {
+            let next = cols.get(lead).copied().filter(|c| !fixed(c));
+            let ranged = next.is_some_and(|c| bounds.iter().any(|b| b.0 == c));
+            if lead == 0 && !ranged && order.is_none() || best.as_ref().is_some_and(|b| (b.lead, b.ranged) >= (lead, ranged)) {
                 continue;
             }
-            let prefix = cols[..lead]
+            let prefix: Vec<u8> = cols[..lead]
                 .iter()
                 .flat_map(|c| eqs.iter().find(|(d, _)| d == c).unwrap().1.clone())
                 .collect();
-            best = Some((lead, *index, prefix, dir, sorted));
+            let (mut lo, mut hi) = (prefix.clone(), after(&prefix));
+            for (_, o, v) in bounds.iter().filter(|b| Some(b.0) == next) {
+                let at = [&prefix[..], v].concat();
+                let (l, h) = match o {
+                    Op::Ge => (Some(at), None),
+                    Op::Gt => (after(&at), None),
+                    Op::Lt => (None, Some(at)),
+                    _ => (None, after(&at)),
+                };
+                lo = lo.max(l.unwrap_or_default());
+                hi = match (hi, h) {
+                    (Some(a), Some(b)) => Some(a.min(b)),
+                    (a, b) => a.or(b),
+                };
+            }
+            best = Some(Path {
+                lead,
+                ranged,
+                index: *index,
+                cols: cols.clone(),
+                lo,
+                hi,
+                dir,
+                sorted,
+                ties,
+            });
         }
-        let Some((_, index, prefix, dir, sorted)) = best else { return Ok(None) };
+        let Some(p) = best else { return Ok(None) };
         let (row_ty, _) = self.row_ty(table)?;
-        let read = if rest || !sorted { usize::MAX } else { limit };
+        let whole = !rest && eqs.iter().all(|(c, _)| p.cols[..p.lead].contains(c));
+        let read = if whole && p.sorted { limit } else { usize::MAX };
+        let scan = |lo: Vec<u8>, hi: Option<Vec<u8>>, dir: Dir, limit: usize| Scan {
+            index: p.index,
+            lo: Bound::Included(lo),
+            hi: hi.map_or(Bound::Unbounded, Bound::Excluded),
+            dir,
+            limit,
+        };
+        let mut rows = store.scan(table, &scan(p.lo.clone(), p.hi.clone(), p.dir, read));
+        if let (Some(ties), Some(last)) = (&p.ties, rows.last().filter(|_| read != usize::MAX && rows.len() == read)) {
+            // Stopped inside a run of ties, read backwards: the rest of
+            // the run sits below the last row read, in the run's prefix.
+            let spans = tab.spans(last)?;
+            let enc = |cs: &[usize]| -> Vec<u8> { cs.iter().flat_map(|c| last[spans[*c].0..spans[*c].1].to_vec()).collect() };
+            let mut end = p.lead;
+            for _ in ties {
+                end += p.cols[end..].iter().position(|c| !fixed(c)).unwrap() + 1;
+            }
+            let run = enc(&p.cols[..end]);
+            rows.extend(store.scan(table, &scan(run, Some(enc(&p.cols)), Dir::Asc, limit)));
+        }
         let mut out = vec![];
-        for r in store.scan(table, &Scan::prefix(index, &prefix, dir, read)) {
+        for r in rows {
             let v = decode(self.cx, &row_ty, &r)?;
             if let Some(p) = lam {
                 if !self.apply(p, vec![v.clone()])?.truth() {
@@ -769,8 +882,15 @@ impl<'a> Machine<'a> {
             }
             out.push((r, v));
         }
-        if !sorted {
-            out.sort_by(|a, b| a.0[..tab.key_len(&a.0).unwrap()].cmp(&b.0[..tab.key_len(&b.0).unwrap()]));
+        let key_of = |r: &[u8]| r[..tab.key_len(r).unwrap()].to_vec();
+        if let Some(ties) = &p.ties {
+            let tied = |r: &[u8]| -> Vec<Vec<u8>> {
+                let s = tab.spans(r).unwrap();
+                ties.iter().map(|c| r[s[*c].0..s[*c].1].to_vec()).collect()
+            };
+            out.sort_by_cached_key(|(r, _)| (std::cmp::Reverse(tied(r)), key_of(r)));
+        } else if !p.sorted {
+            out.sort_by_cached_key(|(r, _)| key_of(r));
         }
         out.truncate(limit);
         Ok(Some(out.into_iter().map(|x| x.1).collect()))

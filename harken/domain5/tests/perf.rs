@@ -483,6 +483,26 @@ fn perf_rows_read_per_mutation() {
     }
 }
 
+/// What the mutations read is bounded by what they need, as v4's was, at
+/// any library size: `add_song` at most v4's 15 gets and one row (its
+/// `first` of the file's rows and of the media by `pos` descending each one
+/// bounded read), `add_to_playlist` onto a playlist of N-1 one row, the
+/// 102nd "Favorites" the 101 names from "Favorites" up to "Favorites )"
+/// and the last playlist by `pos` — not every playlist. Not ignored: it
+/// pins the routing. Falsified by routing no `first` (add_song read 500
+/// rows at 500) and by reading no bounds on the column past the lead (the
+/// 102nd "Favorites" read 1,001 rows: alice's 1,000 and the last).
+#[test]
+fn reads_are_bounded_by_what_they_need() {
+    for n in [500u64, 8000] {
+        let reads: Vec<_> = read_cases().iter().map(|(_, name, make)| reads_of(n, name, &**make)).collect();
+        let (song, onto, favorites) = (reads[0], reads[2], reads[4]);
+        assert!(song.gets <= 15 && song.rows <= 1, "add_song at {n}: {song:?}");
+        assert!(onto.rows <= 1, "add_to_playlist onto N-1 at {n}: {onto:?}");
+        assert!(favorites.rows <= 102, "the 102nd Favorites at {n}: {favorites:?}");
+    }
+}
+
 // Reads, and what a row costs --------------------------------------------------------
 
 /// `library` read whole (what a hydrate pulls), with the allocations it

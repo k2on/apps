@@ -967,6 +967,110 @@ fn the_interpreter_reads_through_indexes() {
     }
 }
 
+/// A track: `(id, title, creator, pos)`.
+fn track_ty() -> Ty {
+    Ty::Tuple(vec![text_ty(), text_ty(), text_ty(), Ty::Int])
+}
+
+/// A route answers as the interpreter does with no route: each read of
+/// `track` (indexed `(creator, pos)`, not unique, positions tied) asked
+/// once over the table and once over the same rows behind a `Map` no route
+/// reads through — a sort by `pos` descending under a creator and by both
+/// columns descending, cut to every count from 0 to 7, `first` of one,
+/// and filters bounding `pos` and `creator` — the same answer for every
+/// creator; and `first` of a creator's tracks by `pos` descending reads
+/// one row when the greatest is alone, two when it is tied. Falsified
+/// three times: by dropping the read of the rest of a run of ties, and by
+/// not putting a descending run's ties back in key order (each: `take` of
+/// 1 under `c0` gave `t21` where the stable sort gives `t09`); by reading
+/// `1 < pos` as `pos < 1` (the bound not flipped), which read nothing.
+#[test]
+fn a_route_answers_as_the_unrouted_read() {
+    let mut rows: Vec<Change> = (0..30).map(|i| add(track(&format!("t{i:02}"), "x", &format!("c{}", i % 3), (i / 3) % 4))).collect();
+    rows.push(add(track("t99", "x", "c1", 9)));
+    let store = store_of(&tracks(), &rows);
+    let plain = Expr::Lambda(1, Box::new(Expr::Var(0)));
+    fn mine(b: &mut B, src: Expr, more: Option<&dyn Fn(&B) -> Expr>) -> Expr {
+        let on = b.lam(&["t"], |b| {
+            let eq = op(Op::Eq, field(b.v("t"), 2), b.v("c"));
+            more.map_or(eq.clone(), |m| op(Op::And, eq, m(b)))
+        });
+        filter(src, on)
+    }
+    type Body = Box<dyn Fn(&mut B, Expr) -> Expr>;
+    let mut cases: Vec<(String, Ty, Body)> = vec![];
+    for k in 0..=7 {
+        cases.push((
+            format!("a creator's by pos descending, {k}"),
+            track_ty(),
+            Box::new(move |b, src| {
+                let by = b.lam(&["t"], |b| field(b.v("t"), 3));
+                take(sort(mine(b, src, None), by, &[Dir::Desc]), k)
+            }),
+        ));
+        cases.push((
+            format!("all by creator and pos descending, {k}"),
+            track_ty(),
+            Box::new(move |b, src| {
+                let by = b.lam(&["t"], |b| fields(b, "t", &[2, 3]));
+                take(sort(src, by, &[Dir::Desc; 2]), k)
+            }),
+        ));
+    }
+    cases.push((
+        "first of a creator's by pos descending".into(),
+        Ty::option(track_ty()),
+        Box::new(|b, src| {
+            let by = b.lam(&["t"], |b| field(b.v("t"), 3));
+            Expr::List(Ty::option(track_ty()), vec![std(Std::First, vec![sort(mine(b, src, None), by, &[Dir::Desc])])])
+        }),
+    ));
+    cases.push((
+        "first of a creator's".into(),
+        Ty::option(track_ty()),
+        Box::new(|b, src| Expr::List(Ty::option(track_ty()), vec![std(Std::First, vec![mine(b, src, None)])])),
+    ));
+    cases.push((
+        "a creator's with 1 < pos <= 2, by pos descending".into(),
+        track_ty(),
+        Box::new(|b, src| {
+            let within = |b: &B| op(Op::And, op(Op::Lt, int(1), field(b.v("t"), 3)), op(Op::Le, field(b.v("t"), 3), int(2)));
+            let by = b.lam(&["t"], |b| field(b.v("t"), 3));
+            sort(mine(b, src, Some(&within)), by, &[Dir::Desc])
+        }),
+    ));
+    cases.push((
+        "creators after c and up to c2".into(),
+        track_ty(),
+        Box::new(|b, src| {
+            let on = b.lam(&["t"], |b| {
+                let lo = op(Op::Gt, field(b.v("t"), 2), b.v("c"));
+                op(Op::And, lo, op(Op::Ge, text("c2"), field(b.v("t"), 2)))
+            });
+            filter(src, on)
+        }),
+    ));
+    let lib = Lib::default();
+    for (name, ret, body) in &cases {
+        let [routed, unrouted] = [scan("track"), map(scan("track"), plain.clone())]
+            .map(|src| lib.install(&tracks(), query_fn(vec![], &[("c", text_ty())], ret.clone(), |b| body(b, src))).unwrap());
+        for c in ["c", "c0", "c1", "c2", "c9"] {
+            let input = bytes_enc(c.as_bytes());
+            let want = query(&lib, &unrouted, &input, &ctx(), &store).unwrap();
+            assert_eq!(query(&lib, &routed, &input, &ctx(), &store).unwrap(), want, "{name}, {c}");
+        }
+    }
+    let (_, _, first) = &cases[16];
+    let h = lib.install(&tracks(), query_fn(vec![], &[("c", text_ty())], Ty::option(track_ty()), |b| first(b, scan("track")))).unwrap();
+    for (c, rows, id) in [("c1", 1, "t99"), ("c0", 2, "t09")] {
+        let counting = Counting::new(&store);
+        let got = query(&lib, &h, &bytes_enc(c.as_bytes()), &ctx(), &counting).unwrap();
+        assert_eq!(counting.reads().rows, rows, "first of {c}'s");
+        let (1, [V::Tup(t)]) = got[0].variant() else { panic!("{c}: {got:?}") };
+        assert_eq!(t[0], V::Bytes(id.into()), "{c}");
+    }
+}
+
 // * A view told a replica's changes
 
 /// Views over a replica's store, told nothing but its `Output::Changes`,
