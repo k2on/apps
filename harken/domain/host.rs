@@ -45,12 +45,7 @@ fn key(answer: Result<String, String>) -> String {
 /// `library.work_key`: a work's key, from its composer, catalogue number
 /// and title, trimmed as `add_song` trims them.
 pub fn work_key(composer: &str, catalogue: &str, title: &str) -> String {
-    key(library::work_key(
-        domain(),
-        composer.trim(),
-        catalogue.trim(),
-        title.trim(),
-    ))
+    key(library::work_key(domain(), composer.trim(), catalogue.trim(), title.trim()))
 }
 
 /// `library.movement_key`: a movement's key, from its work's and its number.
@@ -130,10 +125,7 @@ impl Active {
     /// Where the session stands at `now`: the domain's `standing`.
     pub fn position(&self, now: i64) -> i64 {
         match (&self.output, &self.clock) {
-            (
-                Output::Device { moving: true, .. },
-                Clock::Playing { at_ms, .. } | Clock::Paused { at_ms },
-            ) => *at_ms,
+            (Output::Device { moving: true, .. }, Clock::Playing { at_ms, .. } | Clock::Paused { at_ms }) => *at_ms,
             (_, clock) => clock.position(now),
         }
     }
@@ -180,11 +172,7 @@ impl Listening {
             .filter(|r| r.user == user)
             .map(|r| (r.device, r.at_ms))
             .collect();
-        Listening {
-            devices,
-            scrub,
-            session,
-        }
+        Listening { devices, scrub, session }
     }
 
     pub fn device(&self, id: &str) -> Option<&Present> {
@@ -221,21 +209,14 @@ impl Listening {
 
     /// Who follows `leader`, in id order.
     pub fn followers(&self, leader: &str) -> Vec<&Present> {
-        let mut out: Vec<&Present> = self
-            .devices
-            .iter()
-            .filter(|d| d.follows.as_deref() == Some(leader))
-            .collect();
+        let mut out: Vec<&Present> = self.devices.iter().filter(|d| d.follows.as_deref() == Some(leader)).collect();
         out.sort_by(|a, b| a.id.cmp(&b.id));
         out
     }
 
     /// The group `leader` leads: it, then whoever follows it.
     pub fn group(&self, leader: &str) -> Vec<&Present> {
-        self.device(leader)
-            .into_iter()
-            .chain(self.followers(leader))
-            .collect()
+        self.device(leader).into_iter().chain(self.followers(leader)).collect()
     }
 
     /// Whether the output is a group.
@@ -246,22 +227,13 @@ impl Listening {
     /// The group's level as the domain reads it; `None` when nothing in it
     /// has a volume.
     pub fn group_volume(&self, leader: &str) -> Option<i64> {
-        let levels: Vec<i64> = self
-            .group(leader)
-            .iter()
-            .filter(|d| d.can_volume)
-            .map(|d| d.volume)
-            .collect();
+        let levels: Vec<i64> = self.group(leader).iter().filter(|d| d.can_volume).map(|d| d.volume).collect();
         (!levels.is_empty()).then(|| levels.iter().sum::<i64>() / levels.len() as i64)
     }
 
     /// Whether every member of `leader`'s group with a volume is muted.
     pub fn group_muted(&self, leader: &str) -> bool {
-        let members: Vec<&Present> = self
-            .group(leader)
-            .into_iter()
-            .filter(|d| d.can_volume)
-            .collect();
+        let members: Vec<&Present> = self.group(leader).into_iter().filter(|d| d.can_volume).collect();
         !members.is_empty() && members.iter().all(|d| d.muted)
     }
 
@@ -273,11 +245,7 @@ impl Listening {
         let Some(d) = self.device(id) else {
             return false;
         };
-        leader.follows.is_none()
-            && d.id != leader.id
-            && d.can_play
-            && d.family.is_some()
-            && d.family == leader.family
+        leader.follows.is_none() && d.id != leader.id && d.can_play && d.family.is_some() && d.family == leader.family
     }
 }
 
@@ -301,9 +269,7 @@ pub fn url(base: &str, file: &str) -> String {
         out.push('/');
         for b in part.bytes() {
             match b {
-                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                    out.push(b as char)
-                }
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
                 _ => out.push_str(&format!("%{b:02X}")),
             }
         }
